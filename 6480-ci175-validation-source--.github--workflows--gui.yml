@@ -1,0 +1,881 @@
+# [OPUS-4.8] sq-2e93 / sq-bu69 — GUI CI lane: build / lint / typecheck / clippy the Tauri 2
+# GUI, now extended to the per-platform build+clippy MATRIX the design record specifies.
+#
+# WHY: the GUI design record (research/gui-design.md §3) calls for a PATH-SCOPED,
+# NON-merge-queue lane modelled on site-e2e.yml / js.yml. It validates the things a dev box
+# without the webview system libraries (webkit2gtk / WebView2 / WKWebView) cannot:
+#   1. the shared framework-agnostic TS client (packages/sparq-client) typechecks,
+#   2. the site still builds AND typechecks (next lint + tsc) consuming that shared package,
+#   3. the Tauri crate (gui/src-tauri) compiles + clippies CLEAN against the real engine, on
+#      EVERY desktop platform the release matrix ships (macOS / Linux x64 + arm64 / Windows).
+#
+# SCOPE: PRs that touch gui/**, packages/sparq-client/**, or this workflow. A Rust-/docs-only
+# PR skips it (no run, so the required `ci-summary / gate` simply never waits on it —
+# cross-workflow `needs:` is impossible, exactly as documented in site-e2e.yml). It is NOT a
+# `merge_group` lane (ci-summary.yml never cross-workflow needs gui.yml). Re-runs on push to
+# main for post-merge cover.
+#
+# GATING vs ADVISORY. The `ci-summary / gate` aggregator polls EVERY check-run on the head
+# commit cross-workflow and excludes ONLY the check names DECLARED in
+# `.github/advisory-registry.json` ([OPUS-5] #3773 — before that, exclusion was inferred from
+# the job NAME matching `\b(advisory|informational)\b`, which silently neutralised real gates
+# in THIS file). A job with no declaration GATES, whatever it is called. So:
+#   * "shared TS client typecheck", "site build + typecheck (consuming @sparq/client)", the
+#     operational-GUI frontend job, "GUI Playwright mocked-IPC lane" and — since #3773 —
+#     "GUI hermetic guards (browserName tripwire + no-sleep-gate)" have no registry entry and
+#     therefore GATE. [OPUS-4.8] This bit gui.yml once (PR #748): a per-platform job that is
+#     not declared advisory is GATING, and a macOS/Windows runner-image/webview flake would
+#     then break the `ci-summary / gate` for EVERY PR.
+#   * the per-platform Tauri "GUI build + clippy (…, advisory)" matrix and the
+#     "GUI tauri-driver e2e (Linux, advisory)" job ARE declared in the registry (and set
+#     `continue-on-error: true`), so a webview/runner-image flake on a platform we have not
+#     yet proven reliably green can never turn `ci-summary` red. The Linux rows (ubuntu-latest
+#     x64 + ubuntu-24.04-arm) build green today; the macOS/Windows rows stay advisory until
+#     proven across the full matrix. [OPUS-4.8] sq-pnnl — the tauri-driver e2e is a REAL
+#     launch+run-a-query assertion (gui/e2e, not the old no-op scaffold), but the headless
+#     WebKitWebDriver + tauri-driver + xvfb webview session is environment-coupled, so it
+#     KEEPS its declaration + `continue-on-error` and is strictly non-gating. Bead sq-var9
+#     deletes the registry entries + `continue-on-error` (and the maintainer adds gui to the
+#     branch-protection required-contexts, a `needs:user` repo-settings action) to PROMOTE
+#     them to a hard gate once reliably green.
+#   * HERMETIC checks (grep/find over checked-in files) must NOT live inside those advisory
+#     jobs: #3773 found the browserName tripwire + no-sleep-gate doing exactly that. They are
+#     now their own gating job; the registry's `gate_script_waiver` fields record the one
+#     remaining, deliberately-diagnostic re-run.
+#
+# Every action below is SHA-pinned (Scorecard Pinned-Dependencies); the lane is
+# least-privilege (contents: read).
+name: gui
+
+on:
+  pull_request:
+    # [FABLE-5] Draft-tier CI: + ready_for_review so the un-draft moment re-runs
+    # this gate-feeding lane (docs/branch-protection.md §Draft-tier CI).
+    types: [opened, synchronize, reopened, ready_for_review]
+    # [OPUS-4.8] The `site build + typecheck` job here consumes `site/` (its static export +
+    # the bundle-wasm-esm script) and `js/` (the @sparq-org/sparq source it bundles), and resolves
+    # workspace deps from the root lockfile — so changes to ANY of those can break it. They were
+    # previously omitted, so a `site/`+lockfile regression (an unresolved `fzstd` in the ESM
+    # bundle) slipped onto `main` undetected and only surfaced on a PR whose `gate` re-scans the
+    # merge ref. List every input the jobs read.
+    paths:
+      - "gui/**"
+      - "packages/sparq-client/**"
+      - "site/**"
+      - "js/**"
+      - "package-lock.json"
+      - ".github/workflows/gui.yml"
+  push:
+    branches: [main]
+    paths:
+      - "gui/**"
+      - "packages/sparq-client/**"
+      - "site/**"
+      - "js/**"
+      - "package-lock.json"
+      - ".github/workflows/gui.yml"
+  # [SONNET-4.6] sq-ymr2e.6 — manual flake probe: run the tauri-driver smoke N times in sequence
+  # to measure consecutive-green rate. Trigger via "Run workflow" in the GitHub Actions UI.
+  # The `probe_runs` input defaults to 20 (the acceptance-criteria bar); the tauri-e2e-probe job
+  # below runs only when this event fires. Use this to gather evidence before promotion.
+  workflow_dispatch:
+    inputs:
+      probe_runs:
+        description: "Number of consecutive smoke runs (flake probe)"
+        required: false
+        default: "20"
+
+# Least-privilege default (Scorecard TokenPermissions): read-only; this lane never writes.
+permissions:
+  contents: read
+
+# One in-flight run per PR/branch; cancel a superseded run (the per-platform Tauri build is
+# expensive — the design calls out cancel-in-progress for exactly this reason).
+concurrency:
+  group: gui-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  shared-client:
+    name: shared TS client typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: packages/sparq-client
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
+      # [OPUS-4.8] sq-jpki.1 — repo-root npm workspaces: packages/sparq-client is a workspace
+      # member and the per-member lock was dropped. `npm install` (run in packages/sparq-client)
+      # resolves the member's deps via the repo-root workspace, installing into the hoisted root
+      # node_modules; the typecheck then runs against that tree. (This lane uses `npm install`,
+      # not `npm ci`, so it is tolerant of a not-yet-regenerated lock — unchanged behaviour.)
+      - name: Install dependencies
+        run: npm install
+
+      - name: Typecheck (@sparq/client)
+        run: npm run typecheck
+
+      - name: Unit tests (@sparq/client)
+        run: npm test
+
+  site-with-shared-client:
+    name: site build + typecheck (consuming @sparq/client)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      # The site's static export hard-fails without the wasm bundle; build it first
+      # (wasm-pack target, then the lean shacl,jsonld bundle the site syncs into public/).
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          # [FABLE-5] CI-economy (2026-07-18 directive 2b): this wasm lane compiles
+          # the same sparq-wasm dependency stack as the other js/pages/gui/site wasm
+          # lanes — ONE shared dependency cache across them keeps demand inside the
+          # 10 GB Actions-cache budget (sq-3sbrr doctrine: save on push-to-main
+          # only, so PR runs are restore-only and never churn the shared budget).
+          shared-key: site-wasm
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
+      # [FABLE-5] PR #3511 review finding 5: redundant second cargo cache REMOVED —
+      # the Swatinem/rust-cache above (shared-key: site-wasm) already caches
+      # ~/.cargo/registry + ~/.cargo/git + target/ across the js/pages/gui/site wasm
+      # lanes, restore-only off main. The former PR-scoped `actions/cache`
+      # (gui-wasm-…-hashFiles(Cargo.lock)) covered the same paths and only churned
+      # the shared 10 GB Actions-cache budget with a duplicate PR-scoped copy.
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --locked
+
+      - name: Build wasm bundle (shacl,jsonld)
+        working-directory: js
+        run: npm run build:wasm
+
+      # [OPUS-4.8] sq-jpki — the @sparq/client hand-written WasmStore mirror is now DELETED:
+      # the package re-exports the wasm-pack GENERATED `Store` surface from the TRACKED copy
+      # `packages/sparq-client/src/generated/sparq_wasm.d.ts`. With the freshly built
+      # js/wasm/sparq_wasm.d.ts now present, assert that tracked copy is BYTE-IDENTICAL to it,
+      # so a binding change that was not re-synced (`npm run sync:wasm-types`) fails CI here
+      # rather than letting the tracked d.ts drift from the engine. (The `shared-client` job
+      # above runs the bare typecheck WITHOUT the artifact, resolving the Store surface from the
+      # tracked copy; this is the only lane that can verify the tracked copy still matches a
+      # fresh build — the design's §4 single-source-of-truth check.) This replaces the obsolete
+      # sq-06gq subset-conformance guard, which checked a mirror that no longer exists.
+      - name: Install @sparq/client dependencies
+        working-directory: packages/sparq-client
+        run: npm install
+
+      - name: "@sparq/client tracked wasm d.ts byte-identical to fresh build"
+        working-directory: packages/sparq-client
+        run: npm run check:wasm-types
+
+      - name: Install site dependencies
+        working-directory: site
+        run: npm install
+
+      - name: Site lint
+        working-directory: site
+        run: npm run lint
+
+      - name: Site typecheck
+        working-directory: site
+        run: npx tsc --noEmit
+
+      - name: Site static export build (consumes @sparq/client)
+        working-directory: site
+        run: npm run build
+
+  # [OPUS-4.8] sq-ixc3.8 / sq-ixc3.9 — the DISTINCT operational GUI frontend (gui/app).
+  #
+  # This is the load-bearing deliverable of the GUI-foundation work: the workbench frontend is a
+  # SEPARATE Next.js app (NOT the marketing site), static-exported for BOTH the Tauri desktop
+  # webview (root-relative) AND a hosted "Try the GUI live" web target (sub-path). It runs the
+  # in-tab WASM engine, so the build embeds the lean shacl,jsonld bundle (built first). GATING
+  # (no `advisory` keyword): it is TS + a static export, fully reproducible on a Linux runner
+  # without any webview system libraries, so a break here is a real regression.
+  gui-app:
+    name: "operational GUI frontend (build + lint + typecheck, both targets)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      # The GUI frontend embeds the in-tab engine, so the wasm bundle must be built first
+      # (the same shacl,jsonld bundle the site syncs).
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          # [FABLE-5] CI-economy (2026-07-18 directive 2b): this wasm lane compiles
+          # the same sparq-wasm dependency stack as the other js/pages/gui/site wasm
+          # lanes — ONE shared dependency cache across them keeps demand inside the
+          # 10 GB Actions-cache budget (sq-3sbrr doctrine: save on push-to-main
+          # only, so PR runs are restore-only and never churn the shared budget).
+          shared-key: site-wasm
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
+      # [FABLE-5] PR #3511 review finding 5: redundant second cargo cache REMOVED —
+      # the Swatinem/rust-cache above (shared-key: site-wasm) already caches
+      # ~/.cargo/registry + ~/.cargo/git + target/ across the js/pages/gui/site wasm
+      # lanes, restore-only off main. The former PR-scoped `actions/cache`
+      # (gui-app-wasm-…-hashFiles(Cargo.lock)) covered the same paths and only churned
+      # the shared 10 GB Actions-cache budget with a duplicate PR-scoped copy.
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --locked
+
+      - name: Build wasm bundle (shacl,jsonld)
+        working-directory: js
+        run: npm run build:wasm
+
+      # [OPUS-4.8] sq-tp1m (#757) — also build the tier-b W-reason bundle (the RDFS / OWL 2 RL
+      # forward-chaining reasoner) so the GUI's Inference tool runs LIVE in the exported artifact.
+      # The GUI's sync-wasm copies it from the crate's pkg/ into public/wasm/reason/; it is
+      # OPTIONAL at build time (sync warn-skips when absent), but building it here makes the hosted
+      # "Try the GUI live" export ship real inference rather than the honest "unavailable" fallback.
+      - name: Build W-reason wasm bundle (RDFS / OWL 2 RL reasoner)
+        working-directory: js
+        run: npm run build:reason-wasm
+
+      # [HAIKU-4.5] sq-9ifq4 — also build the tier-b W-text bundle (the BM25 inverted index +
+      # text: magic predicates) so the GUI's Full-text tool runs LIVE in the exported artifact.
+      # The GUI's sync-wasm copies it from the crate's pkg/ into public/wasm/text/; it is
+      # OPTIONAL at build time (sync warn-skips when absent), but building it here makes the hosted
+      # "Try the GUI live" export ship real full-text search rather than the honest "unavailable"
+      # fallback.
+      - name: Build W-text wasm bundle (BM25 full-text search)
+        working-directory: js
+        run: npm run build:text-wasm
+
+      # [HAIKU-4.5] sq-9ifq4 — also build the tier-b W-rsp bundle (the windowed RSP-QL stream
+      # processor) so the GUI's Streaming tool runs LIVE in the exported artifact. The GUI's
+      # sync-wasm copies it from the crate's pkg/ into public/wasm/rsp/; it is OPTIONAL at build
+      # time (sync warn-skips when absent), but building it here makes the hosted "Try the GUI
+      # live" export ship real streaming SPARQL processing rather than the honest "unavailable"
+      # fallback.
+      - name: Build W-rsp wasm bundle (windowed RSP-QL stream processor)
+        working-directory: js
+        run: npm run build:rsp-wasm
+
+      - name: Install workspace dependencies
+        run: npm install
+
+      - name: GUI frontend lint
+        working-directory: gui/app
+        run: npm run lint
+
+      - name: GUI frontend typecheck
+        working-directory: gui/app
+        run: npm run typecheck
+
+      # (sq-w3dmj) [FABLE-5] — the gui/app node:test unit suite (pure helpers: editor keys +
+      # the global-first Tauri fs plugin resolution). Build-free (on-the-fly TS loader); was
+      # previously never exercised in CI.
+      - name: GUI frontend unit tests
+        working-directory: gui/app
+        run: npm run test:unit
+
+      # The hosted "Try the GUI live" web target (sub-path basePath).
+      - name: GUI frontend static export (web target)
+        working-directory: gui/app
+        run: npm run build:web
+
+      # The Tauri desktop webview target (root-relative). Proves the SAME frontend exports for
+      # both hosts off the single NEXT_PUBLIC_BASE_PATH switch.
+      - name: GUI frontend static export (Tauri target)
+        working-directory: gui/app
+        run: npm run build:tauri
+
+  # [SONNET-4.6] sq-ymr2e.5 — Playwright mocked-IPC deterministic desktop lane.
+  #
+  # Drives the GUI FRONTEND (gui/app/out, the Tauri-target static export) in headless Chromium
+  # with window.__TAURI__ + window.__TAURI_INTERNALS__ stubbed via page.addInitScript.  No Tauri
+  # binary, no display server, no real IPC — fully deterministic.
+  #
+  # GATING TODAY (no `advisory` keyword): unlike the tauri-driver e2e (which needs webkit2gtk + a
+  # headless webview and keeps `advisory` for runner-image reliability), this lane is pure
+  # Playwright + Chromium on ubuntu-latest — reproducible on every Linux CI runner. It was made
+  # gating at creation (sq-ymr2e.5) on the deterministic-lane rationale (retries=0, mocked IPC).
+  #
+  # [OPUS-4.8] sq-ymr2e.12 — GOVERNANCE NOTE: the checked-in gating/probation policy
+  # `.github/E2E-GATING-POLICY.md` (design research/web-gui-test-program.md §6.3) classifies this
+  # lane as a member of the deterministic PROMOTION SET, which is meant to EARN gating on a
+  # probation bar (§3 there) rather than gate from day one. This early promotion pre-dates that
+  # governance and is FLAGGED for the maintainer to ratify (keep gating) or reset to advisory —
+  # see §6 of the policy + tracking issue #1656. This bead does NOT unilaterally demote a green,
+  # deterministic gate; the
+  # lane keeps its current gating status until the maintainer decides. Do not silently flip it.
+  #
+  # PATH SCOPE: gui/** + packages/** (changes to the shared @sparq/client can affect the frontend).
+  # The job is NOT in the `merge_group` event (ci-summary.yml cannot cross-workflow `needs:`); it
+  # participates in the `ci-summary / gate` aggregator (it carries no advisory-registry entry).
+  gui-mock-ipc:
+    name: "GUI Playwright mocked-IPC lane"
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          # [FABLE-5] CI-economy (2026-07-18 directive 2b): this wasm lane compiles
+          # the same sparq-wasm dependency stack as the other js/pages/gui/site wasm
+          # lanes — ONE shared dependency cache across them keeps demand inside the
+          # 10 GB Actions-cache budget (sq-3sbrr doctrine: save on push-to-main
+          # only, so PR runs are restore-only and never churn the shared budget).
+          shared-key: site-wasm
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
+      # [FABLE-5] PR #3511 review finding 5: redundant second cargo cache REMOVED —
+      # the Swatinem/rust-cache above (shared-key: site-wasm) already caches
+      # ~/.cargo/registry + ~/.cargo/git + target/ across the js/pages/gui/site wasm
+      # lanes, restore-only off main. The former PR-scoped `actions/cache`
+      # (gui-mock-ipc-wasm-…-hashFiles(Cargo.lock)) covered the same paths and only
+      # churned the shared 10 GB Actions-cache budget with a duplicate PR-scoped copy.
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --locked
+
+      # The in-tab WASM engine (shacl,jsonld bundle) is required for queries to run in the browser.
+      - name: Build WASM bundle (shacl,jsonld)
+        working-directory: js
+        run: npm run build:wasm
+
+      # The W-reason bundle enables live RDFS / OWL 2 RL inference in the browser — needed for
+      # the inference-toggle journey to reach "ready" rather than "reasoner unavailable".
+      - name: Build W-reason WASM bundle (RDFS / OWL 2 RL reasoner)
+        working-directory: js
+        run: npm run build:reason-wasm
+
+      # [HAIKU-4.5] sq-9ifq4 — also build the tier-b W-text bundle (BM25 full-text search)
+      # for the Full-text tool to run live in the browser.
+      - name: Build W-text WASM bundle (BM25 full-text search)
+        working-directory: js
+        run: npm run build:text-wasm
+
+      # [HAIKU-4.5] sq-9ifq4 — also build the tier-b W-rsp bundle (windowed RSP-QL stream
+      # processor) for the Streaming tool to run live in the browser.
+      - name: Build W-rsp WASM bundle (windowed RSP-QL stream processor)
+        working-directory: js
+        run: npm run build:rsp-wasm
+
+      - name: Install workspace dependencies
+        run: npm install
+
+      # Build the Tauri-target static export (root-relative; the Playwright server serves it).
+      - name: Build GUI frontend static export (Tauri target → gui/app/out/)
+        working-directory: gui/app
+        run: npm run build:tauri
+
+      # Install only the Chromium browser binary (the mock-IPC lane uses only Chromium).
+      - name: Install Playwright Chromium
+        working-directory: gui/e2e-playwright
+        run: npx playwright install --with-deps chromium
+
+      # No-timeout gate: forbids waitForTimeout in specs/ + support/ (determinism doctrine §1.1).
+      - name: Determinism gate — no waitForTimeout
+        working-directory: gui/e2e-playwright
+        run: bash support/no-timeout-gate.sh
+
+      - name: Run Playwright mocked-IPC tests
+        working-directory: gui/e2e-playwright
+        run: npm test
+
+  # [OPUS-5] #3773 — HARD hermetic guards, hoisted OUT of the advisory `tauri-e2e` lane.
+  #
+  # Both checks below are pure grep/find over checked-in source: no webview, no WebKitWebDriver,
+  # no xvfb, no Rust toolchain, no npm install. They therefore share NONE of the environment
+  # coupling that makes `tauri-e2e` legitimately advisory — yet they lived inside it, so
+  # `continue-on-error: true` PLUS the old advisory-NAME exclusion swallowed them twice and
+  # neither could fail anything:
+  #   1. the browserName regression guard (bead sq-t6492 / issue #1740) whose own comment claims
+  #      "this step FAILS if that regression is re-introduced" — it did not;
+  #   2. the gui/e2e no-sleep-gate (forbids `await sleep(` / `await setTimeout(` /
+  #      `waitForTimeout(` in the tauri-driver harness).
+  # This job carries NO entry in `.github/advisory-registry.json`, so `ci-summary / gate` waits
+  # on it. The VERSION-TRIPWIRE half of the drift script (dpkg/WebKitWebDriver version logging)
+  # is diagnostic and stays in `tauri-e2e`, where webkit2gtk is actually installed; the script
+  # exits 0 when those tools are absent, so the regression guard runs cleanly here.
+  gui-hermetic-guards:
+    name: "GUI hermetic guards (browserName tripwire + no-sleep-gate)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      # Issue #1740 regression guard: gui/e2e/run-e2e.mjs must NOT hard-code a browserName
+      # capability (WebKitGTK >= 2.48 hard-rejects a mismatching one, 0-byte driver log).
+      - name: Drift tripwire — browserName regression guard (issue #1740)
+        run: bash scripts/ci/tauri-driver-drift-tripwire.sh
+
+      # Determinism gate — forbids arbitrary time-based waits in the tauri-driver harness.
+      - name: Determinism gate — no arbitrary sleeps (no-sleep-gate)
+        working-directory: gui/e2e
+        run: bash support/no-sleep-gate.sh
+
+  # [OPUS-4.8] sq-bu69 — per-platform Tauri build + clippy matrix.
+  #
+  # ADVISORY (see the header): every matrix row's NAME carries the `advisory` keyword, so the
+  # `ci-summary / gate` aggregator excludes the whole leg, and `continue-on-error: true` keeps
+  # a macOS/Windows webview or runner-image flake from ever turning `ci-summary` red. The
+  # Linux rows build green today (reproduced locally on arm64 with the same clippy/build/test
+  # commands); the macOS/Windows rows are documented-untested in CI this pass — they stay
+  # advisory until proven across the full matrix (bead sq-var9 promotes the leg to a hard
+  # gate then). The TS + site-build jobs above remain GATING.
+  #
+  # Runner labels are the EXACT set proven in release.yml's desktop build matrix
+  # (macos-14 = Apple silicon, macos-15-intel = Intel Mac, ubuntu-latest = x86_64 Linux,
+  # ubuntu-24.04-arm = aarch64 Linux, windows-latest = Windows) so the GUI CI matrix and the
+  # release matrix cannot drift. macOS/Windows ship their webview (WKWebView / WebView2) with
+  # the OS, so only the Linux rows install the webkit2gtk system libraries.
+  tauri-build:
+    name: "GUI build + clippy (${{ matrix.label }}, advisory)"
+    runs-on: ${{ matrix.os }}
+    continue-on-error: true
+    timeout-minutes: 45
+    strategy:
+      # Do not let one platform's failure cancel the others — each row is independent
+      # diagnostic signal while the leg is advisory.
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-14, label: arm64-darwin }
+          - { os: macos-15-intel, label: x64-darwin }
+          - { os: ubuntu-latest, label: x64-linux }
+          - { os: ubuntu-24.04-arm, label: arm64-linux }
+          - { os: windows-latest, label: win-x64 }
+    defaults:
+      run:
+        working-directory: gui/src-tauri
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      # The Tauri webview system libraries (webkit2gtk + GTK/soup/appindicator) are LINUX-ONLY:
+      # macOS (WKWebView) and Windows (WebView2) ship their webview with the OS, so the cargo
+      # build there needs no extra system packages. These are exactly what a typical Linux dev
+      # box lacks, so the full `cargo build` of the GUI crate is validated HERE.
+      - name: Install Tauri system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - name: Rust (preinstalled stable, clippy)
+        # [FABLE-5] CI-economy (2026-07-18 directive): the ubuntu runner image
+        # ships a rustup stable toolchain; the SHA-pinned action's `rustup
+        # toolchain install stable` re-downloads the whole toolchain whenever
+        # the image lags the newest release. Use the preinstalled one —
+        # `rustup default`/`component add` never trigger a toolchain download.
+        run: |
+          rustup default stable
+          rustup component add clippy
+          rustup show active-toolchain
+      - name: Cache cargo (gui crate)
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            gui/src-tauri/target
+          key: gui-tauri-${{ matrix.label }}-${{ hashFiles('gui/src-tauri/Cargo.lock') }}
+
+      # clippy with -D warnings, inheriting the repo's lint bar. Builds against the real
+      # engine path deps (sparq-engine / sparq-core).
+      - name: Clippy (-D warnings)
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Build (debug)
+        run: cargo build
+
+      # The native engine command-layer tests (engine.rs) — they exercise the direct
+      # sparq-engine link and need no display server.
+      - name: Test (engine command layer)
+        run: cargo test
+
+      # [SONNET-4.6] Native HDT import is opt-in. Exercise it independently so its dependency
+      # edge and command-layer tests cannot first fail in the tag-only release workflow.
+      - name: Clippy (hdt, -D warnings)
+        run: cargo clippy --all-targets --features hdt -- -D warnings
+
+      - name: Test (HDT import, native lane)
+        run: cargo test --features hdt
+
+      # [FABLE-5] sq-ixc3.14 — the OPT-IN federation feature state: clippy + the native-lane
+      # federated-SERVICE tests (federation.rs), which join the live workspace snapshot with a
+      # LIVE loopback SPARQL endpoint through the real engine SERVICE client and prove the
+      # strict egress allowlist refuses an un-allowlisted endpoint pre-HTTP (fail-closed).
+      # Loopback-only — no external network. Keeps BOTH feature states green.
+      - name: Clippy (federation, -D warnings)
+        run: cargo clippy --all-targets --features federation -- -D warnings
+
+      - name: Test (federated SERVICE, native lane)
+        run: cargo test --features federation
+
+      # [FABLE-5] sq-ixc3.15 — the OPT-IN odrl feature state: clippy + the native-lane ODRL
+      # policy-tool tests (odrl.rs), which drive the REAL sparq-policy evaluator + sparq-solid
+      # PodStore/odrl-bridge gating: a prohibition flips a previously visible named graph to
+      # hidden, a malformed policy denies everything with a visible reason, and a grant-less
+      # requester sees zero rows (fail-closed). Keeps BOTH feature states green.
+      - name: Clippy (odrl, -D warnings)
+        run: cargo clippy --all-targets --features odrl -- -D warnings
+
+      - name: Test (ODRL policy tool, native lane)
+        run: cargo test --features odrl
+
+      # [SONNET-4.6] Execute the feature-gated bridge tests that compare the native command
+      # serialization with sparq-forms directly; compiling them in the union lane is not enough.
+      - name: Clippy (forms, -D warnings)
+        run: cargo clippy --all-targets --features forms -- -D warnings
+
+      - name: Test (SHACL-derived forms, native lane)
+        run: cargo test --features forms
+
+      # [SONNET-4.6] Compile the exact optional-capability union shipped by release.yml to catch
+      # dependency feature-unification failures before a tag. `custom-protocol` is intentionally
+      # omitted here: unlike the bundle job, this job does not export gui/app/out for Tauri to
+      # embed at compile time. Keep this list in sync with release.yml's "Build Tauri desktop
+      # bundle" command. This lane also preserves the combined native capability coverage on
+      # every release platform.
+      - name: Clippy (release feature union, -D warnings)
+        run: cargo clippy --all-targets --features hdt,federation,odrl,forms -- -D warnings
+
+      # HDT's feature-on path is compile-covered above; the tests executed in this combined
+      # Linux state exercise the federation, ODRL, and forms paths together.
+      - name: Test (desktop release features, native lane)
+        if: runner.os == 'Linux'
+        run: cargo test --features hdt,federation,odrl,forms
+
+  # [SONNET-4.6] sq-ymr2e.6 — SHRUNK tauri-driver smoke: max-3-assertion real-IPC test.
+  #
+  # Shrunk from the multi-step sq-pnnl harness to exactly 3 meaningful assertions:
+  #   [1/3] LAUNCH    — real binary launched + React frontend mounted in the native webview.
+  #   [2/3] IPC LIVE  — native engine signalled "Engine ready" over real IPC.
+  #   [3/3] ROUND-TRIP — SELECT executed through real IPC, returned "Alice", status bar updated.
+  #
+  # Everything beyond these three (EXPLAIN, SHACL, Import) is owned by the deterministic
+  # Playwright mock-IPC lane (gui/e2e-playwright, sq-ymr2e.5). Small surface = small flake budget.
+  #
+  # STABILIZATION (research/web-gui-test-program.md §5.3):
+  #   * tauri-driver PINNED to 2.0.6 (compatible with Tauri 2.11.x on this workspace).
+  #   * WebKitWebDriver: installed from the runner's webkit2gtk-driver apt package (intentionally
+  #     matched to the runner image's webkit2gtk; its version is logged in CI for debugging).
+  #   * xvfb-run --auto-servernum (already present; a virtual display is mandatory on Linux).
+  #   * workers=1: the smoke is a single-process script (no parallelism; inherent).
+  #   * No arbitrary sleeps: all waits use waitForExist / waitUntil with explicit conditions;
+  #     validated by support/no-sleep-gate.sh, which since #3773 runs in the HARD
+  #     `gui-hermetic-guards` job (it used to run here, where it gated nothing). The startup
+  #     port-poll uses a callback-style setTimeout (not an awaited sleep) — gate-safe.
+  #   * Shell-level retry 1: if the first attempt fails (driver start flake, display-server
+  #     race), the step retries once before counting as a failure. Evidence of failure is
+  #     captured as artifacts (screenshot + driver logs) on BOTH attempts.
+  #
+  # ADVISORY — DELIBERATELY KEPT, and now DECLARED. This job has an entry in
+  # `.github/advisory-registry.json` (that declaration, not the name token, is what excludes
+  # it from `ci-summary / gate`); `continue-on-error: true` ensures a driver/webview flake
+  # never turns ci-summary red. Promotion to a hard gate (bead sq-var9) requires 20
+  # consecutive green runs of the flake probe (workflow_dispatch trigger above) and is done by
+  # DELETING the registry entry. [OPUS-5] #3773: only the environment-coupled webview work is
+  # legitimately advisory here — the two hermetic guards were hoisted out.
+  tauri-e2e:
+    name: "GUI tauri-driver e2e (Linux, advisory)"
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Install Tauri system dependencies (+ WebKitWebDriver, xvfb)
+        run: |
+          sudo apt-get update
+          # webkit2gtk-driver provides WebKitWebDriver, the WebDriver server tauri-driver
+          # proxies on Linux. The version is intentionally matched to the runner image's
+          # webkit2gtk (pinned by the runner; see version-check step below).
+          # xvfb gives the headless runner a virtual display for the webview.
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            webkit2gtk-driver \
+            dbus-x11 \
+            xvfb
+
+      # [OPUS-5] #3773 — the REGRESSION-GUARD half of this script is now HARD-gated in the
+      # `gui-hermetic-guards` job above (it needs no webview, so it never belonged in this
+      # environment-coupled advisory lane). It is re-run here ONLY for the VERSION TRIPWIRE:
+      # logging the runner's webkit2gtk + tauri-driver versions, which requires the apt packages
+      # this job installs, so the next runner-image drift is a one-line diagnosis. Diagnostic
+      # only — hence the `gate_script_waiver` on this job in .github/advisory-registry.json.
+      - name: Version tripwire — webkit2gtk + tauri-driver version log (diagnostic)
+        run: bash scripts/ci/tauri-driver-drift-tripwire.sh --tauri-driver-version 2.0.6
+
+      # wasm32 target is needed to build the lean WASM bundle the in-tab REPL runs.
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          # [FABLE-5] CI-economy (2026-07-18 directive 2b): this wasm lane compiles
+          # the same sparq-wasm dependency stack as the other js/pages/gui/site wasm
+          # lanes — ONE shared dependency cache across them keeps demand inside the
+          # 10 GB Actions-cache budget (sq-3sbrr doctrine: save on push-to-main
+          # only, so PR runs are restore-only and never churn the shared budget).
+          shared-key: site-wasm
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
+      # [FABLE-5] PR #3511 review finding 5: the ~/.cargo/registry + ~/.cargo/git
+      # paths were DROPPED from this cache — the Swatinem/rust-cache above (shared-key:
+      # site-wasm) already caches them across the wasm lanes. Only gui/src-tauri/target
+      # is KEPT here: it is the SEPARATE Tauri-native build dir (its own
+      # gui/src-tauri/Cargo.lock, not the workspace target/ rust-cache covers), so
+      # this folds in exactly the one path rust-cache misses without the redundant
+      # PR-scoped registry/git duplicate.
+      - name: Cache cargo (gui e2e — tauri native target only)
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: gui/src-tauri/target
+          key: gui-e2e-${{ runner.os }}-${{ hashFiles('gui/src-tauri/Cargo.lock', 'Cargo.lock') }}
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --locked
+
+      # Build the frontend the Tauri webview embeds. The shell's `cargo build` embeds whatever
+      # is in `gui/app/out` at COMPILE TIME (sq-ixc3.8 repointed `frontendDist` to the DISTINCT
+      # operational frontend, NOT the marketing site), so the frontend MUST be built first. The
+      # export is root-relative (build:tauri sets NEXT_PUBLIC_BASE_PATH='') because a Tauri
+      # webview serves from the custom-protocol root, not a /sparq basePath (gui/README.md).
+      #
+      # The GUI frontend embeds the in-tab engine, so it needs the shacl,jsonld bundle (its
+      # SHACL tool + JSON-LD ingest) — build the full bundle, not the lean one.
+      - name: Build the WASM bundle (shacl,jsonld; the in-tab engine)
+        working-directory: js
+        run: |
+          npm install
+          npm run build:wasm
+
+      - name: Build the GUI frontend static export (root-relative; embedded by the shell)
+        run: |
+          npm install
+          (cd gui/app && npm run build:tauri)
+
+      # Build the desktop shell binary (debug). --features custom-protocol (bead sq-t6492) embeds
+      # + serves the frontendDist static export (gui/app/out, built above) instead of Tauri's
+      # cfg(dev) devUrl (http://localhost:3001) — a plain `cargo build` would make the webview
+      # show "Could not connect to localhost: Connection refused" with no dev server. See
+      # gui/src-tauri/Cargo.toml. `cargo tauri build` sets this automatically; plain cargo must pass it.
+      - name: Build the GUI shell (debug, embeds the frontend via custom-protocol)
+        working-directory: gui/src-tauri
+        run: cargo build --features custom-protocol
+
+      # Pin tauri-driver to 2.0.6 — the version published for Tauri 2.x (workspace uses 2.11.x).
+      # Pinning prevents a crates.io update from silently changing driver behaviour mid-run.
+      - name: Install tauri-driver@2.0.6 (pinned)
+        run: cargo install tauri-driver@2.0.6 --locked
+
+      - name: Install the e2e harness dependencies
+        working-directory: gui/e2e
+        run: npm ci
+
+      # [OPUS-5] #3773 — the no-sleep-gate MOVED to the HARD `gui-hermetic-guards` job above
+      # (it is a pure find+grep over gui/e2e/**; re-running it inside this advisory lane would
+      # gate nothing).
+
+      # [1/3] LAUNCH [2/3] IPC LIVE [3/3] ROUND-TRIP — see run-e2e.mjs for the assertion map.
+      #
+      # Shell-level retry 1: xvfb display-server startup races are the primary source of
+      # first-attempt failures; a single retry keeps the job honest (a pass-on-retry is still
+      # logged as a defect to investigate, per §6.3 quarantine policy) without masking real bugs.
+      # Failure artifacts are written by the harness on both attempts (artifacts/ dir).
+      # Run under dbus-run-session + NO_AT_BRIDGE=1 (bead sq-t6492): WebKitGTK under xvfb reaches
+      # for an AT-SPI accessibility bus that does not exist and can stall webview/session startup
+      # ("org.a11y.Bus was not provided"). A private session bus + disabled AT-SPI bridge clears it.
+      - name: Run the tauri-driver smoke (headless under xvfb + dbus; retry once on failure)
+        id: tauri-smoke
+        working-directory: gui/e2e
+        env:
+          APP_BINARY: ${{ github.workspace }}/gui/src-tauri/target/debug/sparq-gui
+          NO_AT_BRIDGE: "1"
+        run: |
+          # [SONNET-4.6] Give each attempt its own artifacts subdir so a second failure does
+          # not overwrite the first attempt's screenshot/driver-log evidence.
+          ARTIFACTS_DIR="${{ github.workspace }}/gui/e2e/artifacts/attempt-1" \
+            xvfb-run --auto-servernum dbus-run-session -- npm run test:e2e && exit 0
+          echo "[tauri-e2e-ci] first attempt failed; retrying once (xvfb startup flake check)…"
+          ARTIFACTS_DIR="${{ github.workspace }}/gui/e2e/artifacts/attempt-2" \
+            xvfb-run --auto-servernum dbus-run-session -- npm run test:e2e
+
+      # Upload failure artifacts (screenshot + driver log) even if the step above succeeded on
+      # the retry — the artifacts are only written by the harness when an assertion fails, so
+      # uploading unconditionally is safe (the action no-ops when the directory is empty).
+      # Both attempt-1/ and attempt-2/ subdirs are captured by the glob below.
+      - name: Upload failure artifacts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: tauri-e2e-artifacts-${{ github.run_attempt }}
+          path: gui/e2e/artifacts/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # [SONNET-4.6] sq-ymr2e.6 — flake probe: run the smoke N times to gather consecutive-green
+  # evidence. Only triggered by `workflow_dispatch` (the per-PR lane is the `tauri-e2e` job
+  # above). Requires the same build prerequisites — shares the same setup steps.
+  #
+  # Usage: GitHub Actions UI → "Run workflow" → set probe_runs (default 20). The promotion bar
+  # (sq-ymr2e.6 acceptance criteria) is 20 consecutive greens; link the run in the PR body.
+  tauri-e2e-probe:
+    name: "GUI tauri-driver flake probe (Linux, advisory)"
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Install Tauri system dependencies (+ WebKitWebDriver, xvfb)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            webkit2gtk-driver \
+            dbus-x11 \
+            xvfb
+
+      # Drift tripwire + regression guard (bead sq-t6492 / issue #1740): same as tauri-e2e — guards
+      # against the `browserName: "wry"` regression and logs the webkit2gtk + tauri-driver versions.
+      - name: Drift tripwire — browserName regression guard + version log
+        run: bash scripts/ci/tauri-driver-drift-tripwire.sh --tauri-driver-version 2.0.6
+
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          # [FABLE-5] CI-economy (2026-07-18 directive 2b): this wasm lane compiles
+          # the same sparq-wasm dependency stack as the other js/pages/gui/site wasm
+          # lanes — ONE shared dependency cache across them keeps demand inside the
+          # 10 GB Actions-cache budget (sq-3sbrr doctrine: save on push-to-main
+          # only, so PR runs are restore-only and never churn the shared budget).
+          shared-key: site-wasm
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
+      # [FABLE-5] PR #3511 review finding 5: ~/.cargo/registry + ~/.cargo/git DROPPED
+      # (the Swatinem/rust-cache above with shared-key: site-wasm covers them). Only
+      # the SEPARATE Tauri-native gui/src-tauri/target dir is KEPT — the one path
+      # rust-cache misses — dropping the redundant PR-scoped registry/git duplicate.
+      - name: Cache cargo (gui probe — tauri native target only)
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: gui/src-tauri/target
+          key: gui-e2e-probe-${{ runner.os }}-${{ hashFiles('gui/src-tauri/Cargo.lock', 'Cargo.lock') }}
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --locked
+
+      - name: Build the WASM bundle (shacl,jsonld; the in-tab engine)
+        working-directory: js
+        run: |
+          npm install
+          npm run build:wasm
+
+      - name: Build the GUI frontend static export (root-relative)
+        run: |
+          npm install
+          (cd gui/app && npm run build:tauri)
+
+      # --features custom-protocol (bead sq-t6492): embed + serve frontendDist instead of cfg(dev)
+      # devUrl, so the launched binary shows the real UI (not "Connection refused"). See Cargo.toml.
+      - name: Build the GUI shell (debug, embeds the frontend via custom-protocol)
+        working-directory: gui/src-tauri
+        run: cargo build --features custom-protocol
+
+      - name: Install tauri-driver@2.0.6 (pinned)
+        run: cargo install tauri-driver@2.0.6 --locked
+
+      - name: Install the e2e harness dependencies
+        working-directory: gui/e2e
+        run: npm ci
+
+      # Run the smoke N times, counting greens. A pass-on-N/N means the lane is stable.
+      # [SONNET-4.6] Each iteration writes to its own artifacts/probe-run-$i subdir so earlier
+      # failure evidence is not overwritten by later runs; all subdirs are uploaded below.
+      - name: Run flake probe (${{ inputs.probe_runs }} consecutive runs)
+        working-directory: gui/e2e
+        env:
+          APP_BINARY: ${{ github.workspace }}/gui/src-tauri/target/debug/sparq-gui
+          NO_AT_BRIDGE: "1"
+        run: |
+          RUNS=${{ inputs.probe_runs }}
+          GREENS=0
+          FAILS=0
+          for i in $(seq 1 "$RUNS"); do
+            echo "--- probe run $i / $RUNS ---"
+            if ARTIFACTS_DIR="${{ github.workspace }}/gui/e2e/artifacts/probe-run-$i" \
+                xvfb-run --auto-servernum dbus-run-session -- npm run test:e2e; then
+              GREENS=$((GREENS + 1))
+            else
+              FAILS=$((FAILS + 1))
+              echo "FAIL on run $i"
+            fi
+          done
+          echo ""
+          echo "=== FLAKE PROBE RESULT: $GREENS / $RUNS green, $FAILS failures ==="
+          # Exit 0 regardless — the probe is informational; CI captures the count.
+
+      - name: Upload probe failure artifacts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: tauri-e2e-probe-artifacts
+          path: gui/e2e/artifacts/
+          if-no-files-found: ignore
+          retention-days: 14

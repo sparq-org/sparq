@@ -1,0 +1,1232 @@
+﻿2026-09-10T10:41:42.1003552Z Current runner version: '2.337.0'
+2026-09-10T10:41:42.1040323Z ##[group]Runner Image Provisioner
+2026-09-10T10:41:42.1041859Z Hosted Compute Agent
+2026-09-10T10:41:42.1042974Z Version: 20260828.587
+2026-09-10T10:41:42.1044231Z Commit: abac92662cab4cc7352de4f9f9d2e2419aad9c29
+2026-09-10T10:41:42.1045560Z Build Date: 2026-08-28T16:44:25Z
+2026-09-10T10:41:42.1046754Z Worker ID: {09b078b3-5060-4b47-8532-1ab8bf6b17e3}
+2026-09-10T10:41:42.1048197Z Azure Region: eastus
+2026-09-10T10:41:42.1049774Z ##[endgroup]
+2026-09-10T10:41:42.1052824Z ##[group]Operating System
+2026-09-10T10:41:42.1054065Z Ubuntu
+2026-09-10T10:41:42.1055014Z 24.04.5
+2026-09-10T10:41:42.1056147Z LTS
+2026-09-10T10:41:42.1057079Z ##[endgroup]
+2026-09-10T10:41:42.1058173Z ##[group]Runner Image
+2026-09-10T10:41:42.1059656Z Image: ubuntu-24.04
+2026-09-10T10:41:42.1060650Z Version: 20260907.300.1
+2026-09-10T10:41:42.1062994Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260907.300/images/ubuntu/Ubuntu2404-Readme.md
+2026-09-10T10:41:42.1065960Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20260907.300
+2026-09-10T10:41:42.1067904Z ##[endgroup]
+2026-09-10T10:41:42.1070414Z ##[group]GITHUB_TOKEN Permissions
+2026-09-10T10:41:42.1073919Z Contents: read
+2026-09-10T10:41:42.1075043Z Metadata: read
+2026-09-10T10:41:42.1076254Z ##[endgroup]
+2026-09-10T10:41:42.1080331Z Secret source: Actions
+2026-09-10T10:41:42.1082101Z Cache mode: write
+2026-09-10T10:41:42.1083651Z Prepare workflow directory
+2026-09-10T10:41:42.1564131Z Prepare all required actions
+2026-09-10T10:41:42.1636492Z Getting action download info
+2026-09-10T10:41:42.3924250Z Download action repository 'actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0' (SHA:9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0)
+2026-09-10T10:41:42.5269711Z Download action repository 'dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8' (SHA:29eef336d9b2848a0b548edc03f92a220660cdb8)
+2026-09-10T10:41:42.6379483Z Download action repository 'Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32' (SHA:e18b497796c12c097a38f9edb9d0641fb99eee32)
+2026-09-10T10:41:42.8590531Z Download action repository 'actions/setup-node@820762786026740c76f36085b0efc47a31fe5020' (SHA:820762786026740c76f36085b0efc47a31fe5020)
+2026-09-10T10:41:43.1333550Z Complete job name: site build + typecheck (consuming @sparq/client)
+2026-09-10T10:41:43.2274905Z ##[group]Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+2026-09-10T10:41:43.2276535Z with:
+2026-09-10T10:41:43.2277270Z   repository: sparq-org/sparq
+2026-09-10T10:41:43.2285699Z   token: ***
+2026-09-10T10:41:43.2286422Z   ssh-strict: true
+2026-09-10T10:41:43.2287133Z   ssh-user: git
+2026-09-10T10:41:43.2287878Z   persist-credentials: true
+2026-09-10T10:41:43.2288900Z   clean: true
+2026-09-10T10:41:43.2289657Z   sparse-checkout-cone-mode: true
+2026-09-10T10:41:43.2290531Z   fetch-depth: 1
+2026-09-10T10:41:43.2291242Z   fetch-tags: false
+2026-09-10T10:41:43.2291992Z   show-progress: true
+2026-09-10T10:41:43.2292744Z   lfs: false
+2026-09-10T10:41:43.2293471Z   submodules: false
+2026-09-10T10:41:43.2294237Z   set-safe-directory: true
+2026-09-10T10:41:43.2295094Z   allow-unsafe-pr-checkout: false
+2026-09-10T10:41:43.2296299Z ##[endgroup]
+2026-09-10T10:41:43.3473124Z Syncing repository: sparq-org/sparq
+2026-09-10T10:41:43.3475741Z ##[group]Getting Git version info
+2026-09-10T10:41:43.3476989Z Working directory is '/home/runner/work/sparq/sparq'
+2026-09-10T10:41:43.3478928Z [command]/usr/bin/git version
+2026-09-10T10:41:43.3549385Z git version 2.55.0
+2026-09-10T10:41:43.3580480Z ##[endgroup]
+2026-09-10T10:41:43.3591925Z Temporarily overriding HOME='/home/runner/work/_temp/300f1c36-2efe-4605-b77d-f2676efe0dc7' before making global git config changes
+2026-09-10T10:41:43.3595035Z Adding repository directory to the temporary git global config as a safe directory
+2026-09-10T10:41:43.3597947Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/sparq/sparq
+2026-09-10T10:41:43.3655313Z Deleting the contents of '/home/runner/work/sparq/sparq'
+2026-09-10T10:41:43.3659683Z ##[group]Determining repository object format
+2026-09-10T10:41:43.3662070Z ##[endgroup]
+2026-09-10T10:41:43.3663312Z ##[group]Initializing the repository
+2026-09-10T10:41:43.3667175Z [command]/usr/bin/git init /home/runner/work/sparq/sparq
+2026-09-10T10:41:43.3780941Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-09-10T10:41:43.3786229Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-09-10T10:41:43.3788995Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-09-10T10:41:43.3790895Z hint: call:
+2026-09-10T10:41:43.3793319Z hint:
+2026-09-10T10:41:43.3795095Z hint: 	git config --global init.defaultBranch <name>
+2026-09-10T10:41:43.3796659Z hint:
+2026-09-10T10:41:43.3798502Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-09-10T10:41:43.3801708Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-09-10T10:41:43.3804113Z hint:
+2026-09-10T10:41:43.3805480Z hint: 	git branch -m <name>
+2026-09-10T10:41:43.3806993Z hint:
+2026-09-10T10:41:43.3809262Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-09-10T10:41:43.3813037Z Initialized empty Git repository in /home/runner/work/sparq/sparq/.git/
+2026-09-10T10:41:43.3818974Z [command]/usr/bin/git remote add origin https://github.com/sparq-org/sparq
+2026-09-10T10:41:43.3864939Z ##[endgroup]
+2026-09-10T10:41:43.3866247Z ##[group]Disabling automatic garbage collection
+2026-09-10T10:41:43.3870446Z [command]/usr/bin/git config --local gc.auto 0
+2026-09-10T10:41:43.3908064Z ##[endgroup]
+2026-09-10T10:41:43.3910209Z ##[group]Setting up auth
+2026-09-10T10:41:43.3911117Z Removing SSH command configuration
+2026-09-10T10:41:43.3914428Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-09-10T10:41:43.3953490Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-09-10T10:41:43.4323382Z Removing HTTP extra header
+2026-09-10T10:41:43.4329962Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-10T10:41:43.4400297Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-09-10T10:41:43.4622055Z Removing includeIf entries pointing to credentials config files
+2026-09-10T10:41:43.4627041Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-10T10:41:43.4666828Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-09-10T10:41:43.4899937Z [command]/usr/bin/git config --file /home/runner/work/_temp/git-credentials-d1ae6eea-bd9d-4fa2-9c08-ae372131073f.config http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-09-10T10:41:43.4942689Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/sparq/sparq/.git.path /home/runner/work/_temp/git-credentials-d1ae6eea-bd9d-4fa2-9c08-ae372131073f.config
+2026-09-10T10:41:43.4978025Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/sparq/sparq/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-d1ae6eea-bd9d-4fa2-9c08-ae372131073f.config
+2026-09-10T10:41:43.5018109Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-d1ae6eea-bd9d-4fa2-9c08-ae372131073f.config
+2026-09-10T10:41:43.5056944Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-d1ae6eea-bd9d-4fa2-9c08-ae372131073f.config
+2026-09-10T10:41:43.5091245Z ##[endgroup]
+2026-09-10T10:41:43.5092468Z ##[group]Fetching the repository
+2026-09-10T10:41:43.5098928Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +26409755cc774590ef3ada1231ca72dcfd252caa:refs/remotes/pull/6481/merge
+2026-09-10T10:41:46.4304914Z From https://github.com/sparq-org/sparq
+2026-09-10T10:41:46.4305993Z  * [new ref]         26409755cc774590ef3ada1231ca72dcfd252caa -> pull/6481/merge
+2026-09-10T10:41:46.4317083Z ##[endgroup]
+2026-09-10T10:41:46.4318031Z ##[group]Determining the checkout info
+2026-09-10T10:41:46.4319259Z ##[endgroup]
+2026-09-10T10:41:46.4320036Z [command]/usr/bin/git sparse-checkout disable
+2026-09-10T10:41:46.4380035Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-09-10T10:41:46.4420482Z ##[group]Checking out the ref
+2026-09-10T10:41:46.4439803Z [command]/usr/bin/git checkout --progress --force refs/remotes/pull/6481/merge
+2026-09-10T10:41:47.0050081Z Note: switching to 'refs/remotes/pull/6481/merge'.
+2026-09-10T10:41:47.0051115Z 
+2026-09-10T10:41:47.0051906Z You are in 'detached HEAD' state. You can look around, make experimental
+2026-09-10T10:41:47.0053433Z changes and commit them, and you can discard any commits you make in this
+2026-09-10T10:41:47.0054702Z state without impacting any branches by switching back to a branch.
+2026-09-10T10:41:47.0055341Z 
+2026-09-10T10:41:47.0055790Z If you want to create a new branch to retain commits you create, you may
+2026-09-10T10:41:47.0056677Z do so (now or later) by using -c with the switch command. Example:
+2026-09-10T10:41:47.0057149Z 
+2026-09-10T10:41:47.0057351Z   git switch -c <new-branch-name>
+2026-09-10T10:41:47.0057682Z 
+2026-09-10T10:41:47.0057880Z Or undo this operation with:
+2026-09-10T10:41:47.0058172Z 
+2026-09-10T10:41:47.0058333Z   git switch -
+2026-09-10T10:41:47.0058870Z 
+2026-09-10T10:41:47.0059276Z Turn off this advice by setting config variable advice.detachedHead to false
+2026-09-10T10:41:47.0059855Z 
+2026-09-10T10:41:47.0060464Z HEAD is now at 2640975 Merge 17594d4a6534c142cae764772fc42049e898eca3 into 781f667c19a8ebb779cfccb24b05ea432360b025
+2026-09-10T10:41:47.0071435Z ##[endgroup]
+2026-09-10T10:41:47.0124453Z [command]/usr/bin/git log -1 --format=%H
+2026-09-10T10:41:47.0156330Z 26409755cc774590ef3ada1231ca72dcfd252caa
+2026-09-10T10:41:47.0516049Z ##[group]Run dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8
+2026-09-10T10:41:47.0516523Z with:
+2026-09-10T10:41:47.0516746Z   targets: wasm32-unknown-unknown
+2026-09-10T10:41:47.0517024Z   toolchain: stable
+2026-09-10T10:41:47.0517239Z ##[endgroup]
+2026-09-10T10:41:47.0617091Z ##[start-action display=Run : parse toolchain version;id=__dtolnay_rust-toolchain.parse]
+2026-09-10T10:41:47.0664387Z ##[group]Run : parse toolchain version
+2026-09-10T10:41:47.0664826Z [36;1m: parse toolchain version[0m
+2026-09-10T10:41:47.0665120Z [36;1mif [[ -z $toolchain ]]; then[0m
+2026-09-10T10:41:47.0665677Z [36;1m  # GitHub does not enforce `required: true` inputs itself. https://github.com/actions/runner/issues/1070[0m
+2026-09-10T10:41:47.0666260Z [36;1m  echo "'toolchain' is a required input" >&2[0m
+2026-09-10T10:41:47.0666592Z [36;1m  exit 1[0m
+2026-09-10T10:41:47.0666938Z [36;1melif [[ $toolchain =~ ^stable' '[0-9]+' '(year|month|week|day)s?' 'ago$ ]]; then[0m
+2026-09-10T10:41:47.0667401Z [36;1m  if [[ Linux == macOS ]]; then[0m
+2026-09-10T10:41:47.0667944Z [36;1m    echo "toolchain=1.$((($(date -v-$(sed 's/stable \([0-9]*\) \(.\).*/\1\2/' <<< $toolchain) +%s)/60/60/24-16569)/7/6))" >> $GITHUB_OUTPUT[0m
+2026-09-10T10:41:47.0668469Z [36;1m  else[0m
+2026-09-10T10:41:47.0669116Z [36;1m    echo "toolchain=1.$((($(date --date "${toolchain#stable }" +%s)/60/60/24-16569)/7/6))" >> $GITHUB_OUTPUT[0m
+2026-09-10T10:41:47.0669590Z [36;1m  fi[0m
+2026-09-10T10:41:47.0669895Z [36;1melif [[ $toolchain =~ ^stable' 'minus' '[0-9]+' 'releases?$ ]]; then[0m
+2026-09-10T10:41:47.0670440Z [36;1m  echo "toolchain=1.$((($(date +%s)/60/60/24-16569)/7/6-${toolchain//[^0-9]/}))" >> $GITHUB_OUTPUT[0m
+2026-09-10T10:41:47.0670908Z [36;1melif [[ $toolchain =~ ^1\.[0-9]+$ ]]; then[0m
+2026-09-10T10:41:47.0671653Z [36;1m  echo "toolchain=1.$((i=${toolchain#1.}, c=($(date +%s)/60/60/24-16569)/7/6, i+9*i*(10*i<=c)+90*i*(100*i<=c)))" >> $GITHUB_OUTPUT[0m
+2026-09-10T10:41:47.0672160Z [36;1melse[0m
+2026-09-10T10:41:47.0672410Z [36;1m  echo "toolchain=$toolchain" >> $GITHUB_OUTPUT[0m
+2026-09-10T10:41:47.0672710Z [36;1mfi[0m
+2026-09-10T10:41:47.0715597Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-09-10T10:41:47.0715972Z env:
+2026-09-10T10:41:47.0716185Z   toolchain: stable
+2026-09-10T10:41:47.0716406Z ##[endgroup]
+2026-09-10T10:41:47.0836660Z ##[end-action id=__dtolnay_rust-toolchain.parse;outcome=success;conclusion=success;duration_ms=21]
+2026-09-10T10:41:47.0861163Z ##[start-action display=Run : construct rustup command line;id=__dtolnay_rust-toolchain.flags]
+2026-09-10T10:41:47.0889947Z ##[group]Run : construct rustup command line
+2026-09-10T10:41:47.0890332Z [36;1m: construct rustup command line[0m
+2026-09-10T10:41:47.0890806Z [36;1mecho "targets=$(for t in ${targets//,/ }; do echo -n ' --target' $t; done)" >> $GITHUB_OUTPUT[0m
+2026-09-10T10:41:47.0891517Z [36;1mecho "components=$(for c in ${components//,/ }; do echo -n ' --component' $c; done)" >> $GITHUB_OUTPUT[0m
+2026-09-10T10:41:47.0892029Z [36;1mecho "downgrade=" >> $GITHUB_OUTPUT[0m
+2026-09-10T10:41:47.0929963Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-09-10T10:41:47.0930327Z env:
+2026-09-10T10:41:47.0930546Z   targets: wasm32-unknown-unknown
+2026-09-10T10:41:47.0930808Z   components: 
+2026-09-10T10:41:47.0931014Z ##[endgroup]
+2026-09-10T10:41:47.1008105Z ##[end-action id=__dtolnay_rust-toolchain.flags;outcome=success;conclusion=success;duration_ms=14]
+2026-09-10T10:41:47.1012799Z ##[start-action display=Run : set $CARGO_HOME;id=__dtolnay_rust-toolchain.__run]
+2026-09-10T10:41:47.1039967Z ##[group]Run : set $CARGO_HOME
+2026-09-10T10:41:47.1040262Z [36;1m: set $CARGO_HOME[0m
+2026-09-10T10:41:47.1040598Z [36;1mecho CARGO_HOME=${CARGO_HOME:-"$HOME/.cargo"} >> $GITHUB_ENV[0m
+2026-09-10T10:41:47.1078076Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-09-10T10:41:47.1078435Z ##[endgroup]
+2026-09-10T10:41:47.1148423Z ##[end-action id=__dtolnay_rust-toolchain.__run;outcome=success;conclusion=success;duration_ms=13]
+2026-09-10T10:41:47.1151414Z ##[start-action display=Run : install rustup if needed;id=__dtolnay_rust-toolchain.__run_2]
+2026-09-10T10:41:47.1234571Z ##[group]Run : install rustup if needed
+2026-09-10T10:41:47.1234939Z [36;1m: install rustup if needed[0m
+2026-09-10T10:41:47.1235252Z [36;1mif ! command -v rustup &>/dev/null; then[0m
+2026-09-10T10:41:47.1236042Z [36;1m  curl --proto '=https' --tlsv1.2 --retry 10 --retry-connrefused --location --silent --show-error --fail https://sh.rustup.rs | sh -s -- --default-toolchain none -y[0m
+2026-09-10T10:41:47.1236817Z [36;1m  echo "$CARGO_HOME/bin" >> $GITHUB_PATH[0m
+2026-09-10T10:41:47.1237107Z [36;1mfi[0m
+2026-09-10T10:41:47.1277486Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-09-10T10:41:47.1277867Z env:
+2026-09-10T10:41:47.1278082Z   CARGO_HOME: /home/runner/.cargo
+2026-09-10T10:41:47.1278347Z ##[endgroup]
+2026-09-10T10:41:47.1350010Z ##[end-action id=__dtolnay_rust-toolchain.__run_2;outcome=success;conclusion=success;duration_ms=19]
+2026-09-10T10:41:47.1382991Z ##[start-action display=Run : install rustup if needed on windows;id=__dtolnay_rust-toolchain.__run_3]
+2026-09-10T10:41:47.1393492Z ##[end-action id=__dtolnay_rust-toolchain.__run_3;outcome=skipped;conclusion=skipped;duration_ms=0]
+2026-09-10T10:41:47.1399282Z ##[start-action display=rustup toolchain install stable;id=__dtolnay_rust-toolchain.__run_4]
+2026-09-10T10:41:47.1427248Z ##[group]Run rustup toolchain install stable --target wasm32-unknown-unknown --profile minimal --no-self-update
+2026-09-10T10:41:47.1428044Z [36;1mrustup toolchain install stable --target wasm32-unknown-unknown --profile minimal --no-self-update[0m
+2026-09-10T10:41:47.1468975Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-09-10T10:41:47.1469523Z env:
+2026-09-10T10:41:47.1469740Z   CARGO_HOME: /home/runner/.cargo
+2026-09-10T10:41:47.1470015Z   RUSTUP_PERMIT_COPY_RENAME: 1
+2026-09-10T10:41:47.1470275Z ##[endgroup]
+2026-09-10T10:41:47.3117093Z info: syncing channel updates for stable-x86_64-unknown-linux-gnu
+2026-09-10T10:41:47.4139843Z info: latest update on 2026-09-03 for version 1.98.1 (48a229cea 2026-09-01)
+2026-09-10T10:41:47.4280117Z info: downloading component rust-std
+2026-09-10T10:41:48.9974284Z 
+2026-09-10T10:41:49.0059866Z   stable-x86_64-unknown-linux-gnu updated - rustc 1.98.1 (48a229cea 2026-09-01) (from rustc 1.98.1 (48a229cea 2026-09-01))
+2026-09-10T10:41:49.0060470Z 
+2026-09-10T10:41:49.0097827Z ##[end-action id=__dtolnay_rust-toolchain.__run_4;outcome=success;conclusion=success;duration_ms=1869]
+2026-09-10T10:41:49.0104055Z ##[start-action display=Run rustup default stable;id=__dtolnay_rust-toolchain.__run_5]
+2026-09-10T10:41:49.0123460Z ##[group]Run rustup default stable
+2026-09-10T10:41:49.0123754Z [36;1mrustup default stable[0m
+2026-09-10T10:41:49.0160356Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-09-10T10:41:49.0160695Z env:
+2026-09-10T10:41:49.0160898Z   CARGO_HOME: /home/runner/.cargo
+2026-09-10T10:41:49.0161174Z ##[endgroup]
+2026-09-10T10:41:49.0263768Z info: using existing install for stable-x86_64-unknown-linux-gnu
+2026-09-10T10:41:49.0271794Z info: default toolchain set to stable-x86_64-unknown-linux-gnu
+2026-09-10T10:41:49.0272146Z 
+2026-09-10T10:41:49.0354207Z   stable-x86_64-unknown-linux-gnu unchanged - rustc 1.98.1 (48a229cea 2026-09-01)
+2026-09-10T10:41:49.0354868Z 
+2026-09-10T10:41:49.0355533Z info: note that the toolchain '1.97.1-x86_64-unknown-linux-gnu' is currently in use (overridden by '/home/runner/work/sparq/sparq/rust-toolchain.toml')
+2026-09-10T10:41:49.0372290Z ##[end-action id=__dtolnay_rust-toolchain.__run_5;outcome=success;conclusion=success;duration_ms=26]
+2026-09-10T10:41:49.0376916Z ##[start-action display=Run : create cachekey;id=__dtolnay_rust-toolchain.rustc-version]
+2026-09-10T10:41:49.0396278Z ##[group]Run : create cachekey
+2026-09-10T10:41:49.0396569Z [36;1m: create cachekey[0m
+2026-09-10T10:41:49.0397245Z [36;1mDATE=$(rustc +stable --version --verbose | sed -ne 's/^commit-date: \(20[0-9][0-9]\)-\([01][0-9]\)-\([0-3][0-9]\)$/\1\2\3/p')[0m
+2026-09-10T10:41:49.0397952Z [36;1mHASH=$(rustc +stable --version --verbose | sed -ne 's/^commit-hash: //p')[0m
+2026-09-10T10:41:49.0398469Z [36;1mecho "cachekey=$(echo $DATE$HASH | head -c12)" >> $GITHUB_OUTPUT[0m
+2026-09-10T10:41:49.0434530Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-09-10T10:41:49.0434881Z env:
+2026-09-10T10:41:49.0435085Z   CARGO_HOME: /home/runner/.cargo
+2026-09-10T10:41:49.0435338Z ##[endgroup]
+2026-09-10T10:41:49.0815610Z ##[end-action id=__dtolnay_rust-toolchain.rustc-version;outcome=success;conclusion=success;duration_ms=43]
+2026-09-10T10:41:49.0818277Z ##[start-action display=Run : disable incremental compilation;id=__dtolnay_rust-toolchain.__run_6]
+2026-09-10T10:41:49.0837070Z ##[group]Run : disable incremental compilation
+2026-09-10T10:41:49.0837456Z [36;1m: disable incremental compilation[0m
+2026-09-10T10:41:49.0837796Z [36;1mif [ -z "${CARGO_INCREMENTAL+set}" ]; then[0m
+2026-09-10T10:41:49.0838144Z [36;1m  echo CARGO_INCREMENTAL=0 >> $GITHUB_ENV[0m
+2026-09-10T10:41:49.0838428Z [36;1mfi[0m
+2026-09-10T10:41:49.0875072Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-09-10T10:41:49.0875429Z env:
+2026-09-10T10:41:49.0875631Z   CARGO_HOME: /home/runner/.cargo
+2026-09-10T10:41:49.0875886Z ##[endgroup]
+2026-09-10T10:41:49.0941297Z ##[end-action id=__dtolnay_rust-toolchain.__run_6;outcome=success;conclusion=success;duration_ms=12]
+2026-09-10T10:41:49.0943777Z ##[start-action display=Run : enable colors in Cargo output;id=__dtolnay_rust-toolchain.__run_7]
+2026-09-10T10:41:49.0962124Z ##[group]Run : enable colors in Cargo output
+2026-09-10T10:41:49.0962461Z [36;1m: enable colors in Cargo output[0m
+2026-09-10T10:41:49.0962774Z [36;1mif [ -z "${CARGO_TERM_COLOR+set}" ]; then[0m
+2026-09-10T10:41:49.0963300Z [36;1m  echo CARGO_TERM_COLOR=always >> $GITHUB_ENV[0m
+2026-09-10T10:41:49.0963595Z [36;1mfi[0m
+2026-09-10T10:41:49.0998314Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-09-10T10:41:49.0998983Z env:
+2026-09-10T10:41:49.0999190Z   CARGO_HOME: /home/runner/.cargo
+2026-09-10T10:41:49.0999465Z   CARGO_INCREMENTAL: 0
+2026-09-10T10:41:49.0999683Z ##[endgroup]
+2026-09-10T10:41:49.1064018Z ##[end-action id=__dtolnay_rust-toolchain.__run_7;outcome=success;conclusion=success;duration_ms=11]
+2026-09-10T10:41:49.1069348Z ##[start-action display=Run : enable Cargo sparse registry;id=__dtolnay_rust-toolchain.__run_8]
+2026-09-10T10:41:49.1088417Z ##[group]Run : enable Cargo sparse registry
+2026-09-10T10:41:49.1089097Z [36;1m: enable Cargo sparse registry[0m
+2026-09-10T10:41:49.1089468Z [36;1m# implemented in 1.66, stabilized in 1.68, made default in 1.70[0m
+2026-09-10T10:41:49.1090192Z [36;1mif [ -z "${CARGO_REGISTRIES_CRATES_IO_PROTOCOL+set}" -o -f "/home/runner/work/_temp"/.implicit_cargo_registries_crates_io_protocol ]; then[0m
+2026-09-10T10:41:49.1090945Z [36;1m  if rustc +stable --version --verbose | grep -q '^release: 1\.6[89]\.'; then[0m
+2026-09-10T10:41:49.1091549Z [36;1m    touch "/home/runner/work/_temp"/.implicit_cargo_registries_crates_io_protocol || true[0m
+2026-09-10T10:41:49.1092120Z [36;1m    echo CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse >> $GITHUB_ENV[0m
+2026-09-10T10:41:49.1092622Z [36;1m  elif rustc +stable --version --verbose | grep -q '^release: 1\.6[67]\.'; then[0m
+2026-09-10T10:41:49.1093193Z [36;1m    touch "/home/runner/work/_temp"/.implicit_cargo_registries_crates_io_protocol || true[0m
+2026-09-10T10:41:49.1093710Z [36;1m    echo CARGO_REGISTRIES_CRATES_IO_PROTOCOL=git >> $GITHUB_ENV[0m
+2026-09-10T10:41:49.1094197Z [36;1m  fi[0m
+2026-09-10T10:41:49.1094395Z [36;1mfi[0m
+2026-09-10T10:41:49.1130234Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-09-10T10:41:49.1130584Z env:
+2026-09-10T10:41:49.1130805Z   CARGO_HOME: /home/runner/.cargo
+2026-09-10T10:41:49.1131081Z   CARGO_INCREMENTAL: 0
+2026-09-10T10:41:49.1131302Z   CARGO_TERM_COLOR: always
+2026-09-10T10:41:49.1131527Z ##[endgroup]
+2026-09-10T10:41:49.1462505Z ##[end-action id=__dtolnay_rust-toolchain.__run_8;outcome=success;conclusion=success;duration_ms=39]
+2026-09-10T10:41:49.1466789Z ##[start-action display=Run : work around spurious network errors in curl 8.0;id=__dtolnay_rust-toolchain.__run_9]
+2026-09-10T10:41:49.1485648Z ##[group]Run : work around spurious network errors in curl 8.0
+2026-09-10T10:41:49.1486086Z [36;1m: work around spurious network errors in curl 8.0[0m
+2026-09-10T10:41:49.1486642Z [36;1m# https://rust-lang.zulipchat.com/#narrow/stream/246057-t-cargo/topic/timeout.20investigation[0m
+2026-09-10T10:41:49.1487267Z [36;1mif rustc +stable --version --verbose | grep -q '^release: 1\.7[01]\.'; then[0m
+2026-09-10T10:41:49.1487753Z [36;1m  echo CARGO_HTTP_MULTIPLEXING=false >> $GITHUB_ENV[0m
+2026-09-10T10:41:49.1488069Z [36;1mfi[0m
+2026-09-10T10:41:49.1524486Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-09-10T10:41:49.1524842Z env:
+2026-09-10T10:41:49.1525048Z   CARGO_HOME: /home/runner/.cargo
+2026-09-10T10:41:49.1525318Z   CARGO_INCREMENTAL: 0
+2026-09-10T10:41:49.1525539Z   CARGO_TERM_COLOR: always
+2026-09-10T10:41:49.1525764Z ##[endgroup]
+2026-09-10T10:41:49.1722041Z ##[end-action id=__dtolnay_rust-toolchain.__run_9;outcome=success;conclusion=success;duration_ms=25]
+2026-09-10T10:41:49.1726175Z ##[start-action display=Run rustc +stable --version --verbose;id=__dtolnay_rust-toolchain.__run_10]
+2026-09-10T10:41:49.1745018Z ##[group]Run rustc +stable --version --verbose
+2026-09-10T10:41:49.1745367Z [36;1mrustc +stable --version --verbose[0m
+2026-09-10T10:41:49.1781776Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-09-10T10:41:49.1782126Z env:
+2026-09-10T10:41:49.1782331Z   CARGO_HOME: /home/runner/.cargo
+2026-09-10T10:41:49.1782596Z   CARGO_INCREMENTAL: 0
+2026-09-10T10:41:49.1782960Z   CARGO_TERM_COLOR: always
+2026-09-10T10:41:49.1783413Z ##[endgroup]
+2026-09-10T10:41:49.1956705Z rustc 1.98.1 (48a229cea 2026-09-01)
+2026-09-10T10:41:49.1957606Z binary: rustc
+2026-09-10T10:41:49.1958210Z commit-hash: 48a229ceaefd4985c50990b14116b6d856af0985
+2026-09-10T10:41:49.1959305Z commit-date: 2026-09-01
+2026-09-10T10:41:49.1960010Z host: x86_64-unknown-linux-gnu
+2026-09-10T10:41:49.1960808Z release: 1.98.1
+2026-09-10T10:41:49.1980324Z LLVM version: 22.1.8
+2026-09-10T10:41:49.1986815Z ##[end-action id=__dtolnay_rust-toolchain.__run_10;outcome=success;conclusion=success;duration_ms=25]
+2026-09-10T10:41:49.2105235Z ##[group]Run Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32
+2026-09-10T10:41:49.2105659Z with:
+2026-09-10T10:41:49.2105871Z   shared-key: site-wasm
+2026-09-10T10:41:49.2106097Z   save-if: false
+2026-09-10T10:41:49.2106301Z   prefix-key: v0-rust
+2026-09-10T10:41:49.2106533Z   add-job-id-key: true
+2026-09-10T10:41:49.2106779Z   add-rust-environment-hash-key: true
+2026-09-10T10:41:49.2107066Z   cache-targets: true
+2026-09-10T10:41:49.2107280Z   cache-all-crates: false
+2026-09-10T10:41:49.2107521Z   cache-workspace-crates: false
+2026-09-10T10:41:49.2107769Z   cache-provider: github
+2026-09-10T10:41:49.2107989Z   cache-bin: true
+2026-09-10T10:41:49.2108186Z   lookup-only: false
+2026-09-10T10:41:49.2108398Z   cmd-format: {0}
+2026-09-10T10:41:49.2108920Z env:
+2026-09-10T10:41:49.2109134Z   CARGO_HOME: /home/runner/.cargo
+2026-09-10T10:41:49.2109394Z   CARGO_INCREMENTAL: 0
+2026-09-10T10:41:49.2109616Z   CARGO_TERM_COLOR: always
+2026-09-10T10:41:49.2109841Z ##[endgroup]
+2026-09-10T10:41:49.5015441Z (node:2446) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+2026-09-10T10:41:49.5017094Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-09-10T10:41:59.9002894Z ##[group]Cache Configuration
+2026-09-10T10:41:59.9003759Z Cache Provider:
+2026-09-10T10:41:59.9004295Z     github
+2026-09-10T10:41:59.9004905Z Workspaces:
+2026-09-10T10:41:59.9005477Z     /home/runner/work/sparq/sparq
+2026-09-10T10:41:59.9006147Z Cache Paths:
+2026-09-10T10:41:59.9006736Z     /home/runner/.cargo/bin
+2026-09-10T10:41:59.9007335Z     /home/runner/.cargo/.crates.toml
+2026-09-10T10:41:59.9007809Z     /home/runner/.cargo/.crates2.json
+2026-09-10T10:41:59.9008225Z     /home/runner/.cargo/registry
+2026-09-10T10:41:59.9008846Z     /home/runner/.cargo/git
+2026-09-10T10:41:59.9009292Z     /home/runner/work/sparq/sparq/target
+2026-09-10T10:41:59.9009668Z Restore Key:
+2026-09-10T10:41:59.9010324Z     v0-rust-site-wasm-Linux-x64-2d822975
+2026-09-10T10:41:59.9010757Z Cache Key:
+2026-09-10T10:41:59.9011202Z     v0-rust-site-wasm-Linux-x64-2d822975-0c74d5b7
+2026-09-10T10:41:59.9011619Z .. Prefix:
+2026-09-10T10:41:59.9011936Z   - v0-rust-site-wasm-Linux-x64
+2026-09-10T10:41:59.9012333Z .. Environment considered:
+2026-09-10T10:41:59.9012660Z   - Rust Versions:
+2026-09-10T10:41:59.9013065Z     - 1.97.1 x86_64-unknown-linux-gnu 8bab26f4f68e0e26f0bb7960be334d5b520ea452
+2026-09-10T10:41:59.9013754Z     - 1.98.1 x86_64-unknown-linux-gnu 48a229ceaefd4985c50990b14116b6d856af0985
+2026-09-10T10:41:59.9014325Z     - 1.97.1 x86_64-unknown-linux-gnu 8bab26f4f68e0e26f0bb7960be334d5b520ea452
+2026-09-10T10:41:59.9014811Z   - CARGO_HOME
+2026-09-10T10:41:59.9015123Z   - CARGO_INCREMENTAL
+2026-09-10T10:41:59.9015501Z   - CARGO_TERM_COLOR
+2026-09-10T10:41:59.9015874Z .. Lockfiles considered:
+2026-09-10T10:41:59.9016238Z   - /home/runner/work/sparq/sparq/.cargo/config.toml
+2026-09-10T10:41:59.9016694Z   - /home/runner/work/sparq/sparq/Cargo.lock
+2026-09-10T10:41:59.9017176Z   - /home/runner/work/sparq/sparq/crates/sparq-acbench/Cargo.toml
+2026-09-10T10:41:59.9017728Z   - /home/runner/work/sparq/sparq/crates/sparq-algos/Cargo.toml
+2026-09-10T10:41:59.9018279Z   - /home/runner/work/sparq/sparq/crates/sparq-arrow/Cargo.toml
+2026-09-10T10:41:59.9019063Z   - /home/runner/work/sparq/sparq/crates/sparq-bench/Cargo.toml
+2026-09-10T10:41:59.9019987Z   - /home/runner/work/sparq/sparq/crates/sparq-canon/Cargo.toml
+2026-09-10T10:41:59.9020967Z   - /home/runner/work/sparq/sparq/crates/sparq-cli/Cargo.toml
+2026-09-10T10:41:59.9021681Z   - /home/runner/work/sparq/sparq/crates/sparq-conformance-floors/Cargo.toml
+2026-09-10T10:41:59.9022512Z   - /home/runner/work/sparq/sparq/crates/sparq-conformance/Cargo.toml
+2026-09-10T10:41:59.9023049Z   - /home/runner/work/sparq/sparq/crates/sparq-core/Cargo.toml
+2026-09-10T10:41:59.9023575Z   - /home/runner/work/sparq/sparq/crates/sparq-crdt/Cargo.toml
+2026-09-10T10:41:59.9024617Z   - /home/runner/work/sparq/sparq/crates/sparq-difftest/Cargo.toml
+2026-09-10T10:41:59.9025525Z   - /home/runner/work/sparq/sparq/crates/sparq-e2ee-ng/Cargo.toml
+2026-09-10T10:41:59.9026222Z   - /home/runner/work/sparq/sparq/crates/sparq-engine-serialize/Cargo.toml
+2026-09-10T10:41:59.9026809Z   - /home/runner/work/sparq/sparq/crates/sparq-engine-service/Cargo.toml
+2026-09-10T10:41:59.9027524Z   - /home/runner/work/sparq/sparq/crates/sparq-engine/Cargo.toml
+2026-09-10T10:41:59.9028479Z   - /home/runner/work/sparq/sparq/crates/sparq-fedclient/Cargo.toml
+2026-09-10T10:41:59.9039677Z   - /home/runner/work/sparq/sparq/crates/sparq-fedplan-mpc/Cargo.toml
+2026-09-10T10:41:59.9040347Z   - /home/runner/work/sparq/sparq/crates/sparq-fedplan/Cargo.toml
+2026-09-10T10:41:59.9040872Z   - /home/runner/work/sparq/sparq/crates/sparq-forms/Cargo.toml
+2026-09-10T10:41:59.9041364Z   - /home/runner/work/sparq/sparq/crates/sparq-geo/Cargo.toml
+2026-09-10T10:41:59.9041979Z   - /home/runner/work/sparq/sparq/crates/sparq-gpu/Cargo.toml
+2026-09-10T10:41:59.9042451Z   - /home/runner/work/sparq/sparq/crates/sparq-hdt/Cargo.toml
+2026-09-10T10:41:59.9042971Z   - /home/runner/work/sparq/sparq/crates/sparq-http3/Cargo.toml
+2026-09-10T10:41:59.9043483Z   - /home/runner/work/sparq/sparq/crates/sparq-introspect/Cargo.toml
+2026-09-10T10:41:59.9044017Z   - /home/runner/work/sparq/sparq/crates/sparq-jsonld-registry/Cargo.toml
+2026-09-10T10:41:59.9044660Z   - /home/runner/work/sparq/sparq/crates/sparq-jsonld/Cargo.toml
+2026-09-10T10:41:59.9045220Z   - /home/runner/work/sparq/sparq/crates/sparq-kb/Cargo.toml
+2026-09-10T10:41:59.9045973Z   - /home/runner/work/sparq/sparq/crates/sparq-lws-core/Cargo.toml
+2026-09-10T10:41:59.9046543Z   - /home/runner/work/sparq/sparq/crates/sparq-lws-wasm/Cargo.toml
+2026-09-10T10:41:59.9047039Z   - /home/runner/work/sparq/sparq/crates/sparq-mcp/Cargo.toml
+2026-09-10T10:41:59.9047641Z   - /home/runner/work/sparq/sparq/crates/sparq-metamorph/Cargo.toml
+2026-09-10T10:41:59.9048151Z   - /home/runner/work/sparq/sparq/crates/sparq-mpc/Cargo.toml
+2026-09-10T10:41:59.9048910Z   - /home/runner/work/sparq/sparq/crates/sparq-nlq/Cargo.toml
+2026-09-10T10:41:59.9049454Z   - /home/runner/work/sparq/sparq/crates/sparq-parse/Cargo.toml
+2026-09-10T10:41:59.9049968Z   - /home/runner/work/sparq/sparq/crates/sparq-policy/Cargo.toml
+2026-09-10T10:41:59.9050596Z   - /home/runner/work/sparq/sparq/crates/sparq-prov/Cargo.toml
+2026-09-10T10:41:59.9051077Z   - /home/runner/work/sparq/sparq/crates/sparq-py/Cargo.toml
+2026-09-10T10:41:59.9051794Z   - /home/runner/work/sparq/sparq/crates/sparq-reason-diff/Cargo.toml
+2026-09-10T10:41:59.9052351Z   - /home/runner/work/sparq/sparq/crates/sparq-reason-dl/Cargo.toml
+2026-09-10T10:41:59.9052867Z   - /home/runner/work/sparq/sparq/crates/sparq-reason-el/Cargo.toml
+2026-09-10T10:41:59.9053451Z   - /home/runner/work/sparq/sparq/crates/sparq-reason-ql/Cargo.toml
+2026-09-10T10:41:59.9053975Z   - /home/runner/work/sparq/sparq/crates/sparq-reason-wasm/Cargo.toml
+2026-09-10T10:41:59.9054473Z   - /home/runner/work/sparq/sparq/crates/sparq-reason/Cargo.toml
+2026-09-10T10:41:59.9055084Z   - /home/runner/work/sparq/sparq/crates/sparq-rsp-wasm/Cargo.toml
+2026-09-10T10:41:59.9055580Z   - /home/runner/work/sparq/sparq/crates/sparq-rsp/Cargo.toml
+2026-09-10T10:41:59.9056169Z   - /home/runner/work/sparq/sparq/crates/sparq-secprop-vocab/Cargo.toml
+2026-09-10T10:41:59.9056702Z   - /home/runner/work/sparq/sparq/crates/sparq-serve/Cargo.toml
+2026-09-10T10:41:59.9057179Z   - /home/runner/work/sparq/sparq/crates/sparq-server/Cargo.toml
+2026-09-10T10:41:59.9057943Z   - /home/runner/work/sparq/sparq/crates/sparq-shacl-wasm/Cargo.toml
+2026-09-10T10:41:59.9058453Z   - /home/runner/work/sparq/sparq/crates/sparq-shacl/Cargo.toml
+2026-09-10T10:41:59.9059210Z   - /home/runner/work/sparq/sparq/crates/sparq-shaclc/Cargo.toml
+2026-09-10T10:41:59.9059750Z   - /home/runner/work/sparq/sparq/crates/sparq-sim/Cargo.toml
+2026-09-10T10:41:59.9060211Z   - /home/runner/work/sparq/sparq/crates/sparq-solid/Cargo.toml
+2026-09-10T10:41:59.9060772Z   - /home/runner/work/sparq/sparq/crates/sparq-substrate/Cargo.toml
+2026-09-10T10:41:59.9061442Z   - /home/runner/work/sparq/sparq/crates/sparq-terse/Cargo.toml
+2026-09-10T10:41:59.9062005Z   - /home/runner/work/sparq/sparq/crates/sparq-text-wasm/Cargo.toml
+2026-09-10T10:41:59.9062522Z   - /home/runner/work/sparq/sparq/crates/sparq-text/Cargo.toml
+2026-09-10T10:41:59.9062997Z   - /home/runner/work/sparq/sparq/crates/sparq-trust/Cargo.toml
+2026-09-10T10:41:59.9063701Z   - /home/runner/work/sparq/sparq/crates/sparq-vc/Cargo.toml
+2026-09-10T10:41:59.9064291Z   - /home/runner/work/sparq/sparq/crates/sparq-vectors/Cargo.toml
+2026-09-10T10:41:59.9064853Z   - /home/runner/work/sparq/sparq/crates/sparq-wac-oracle/Cargo.toml
+2026-09-10T10:41:59.9065378Z   - /home/runner/work/sparq/sparq/crates/sparq-wasm/Cargo.toml
+2026-09-10T10:41:59.9065883Z   - /home/runner/work/sparq/sparq/crates/sparq-wrapper-gen/Cargo.toml
+2026-09-10T10:41:59.9066488Z   - /home/runner/work/sparq/sparq/crates/sparq-wrapper-integration/Cargo.toml
+2026-09-10T10:41:59.9067101Z   - /home/runner/work/sparq/sparq/crates/sparq-wrapper-shacl/Cargo.toml
+2026-09-10T10:41:59.9067625Z   - /home/runner/work/sparq/sparq/crates/sparq-wrapper/Cargo.toml
+2026-09-10T10:41:59.9068347Z   - /home/runner/work/sparq/sparq/crates/sparq-zk-compose/Cargo.toml
+2026-09-10T10:41:59.9075876Z   - /home/runner/work/sparq/sparq/crates/sparq-zk/Cargo.toml
+2026-09-10T10:41:59.9076490Z   - /home/runner/work/sparq/sparq/rust-toolchain.toml
+2026-09-10T10:41:59.9077380Z ##[endgroup]
+2026-09-10T10:41:59.9077569Z 
+2026-09-10T10:41:59.9077802Z ... Restoring cache ...
+2026-09-10T10:41:59.9775017Z No cache found.
+2026-09-10T10:41:59.9930151Z ##[group]Run actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+2026-09-10T10:41:59.9930570Z with:
+2026-09-10T10:41:59.9930767Z   node-version: 22
+2026-09-10T10:41:59.9930980Z   check-latest: false
+2026-09-10T10:41:59.9933354Z   token: ***
+2026-09-10T10:41:59.9933581Z   package-manager-cache: true
+2026-09-10T10:41:59.9933829Z env:
+2026-09-10T10:41:59.9934023Z   CARGO_HOME: /home/runner/.cargo
+2026-09-10T10:41:59.9934280Z   CARGO_INCREMENTAL: 0
+2026-09-10T10:41:59.9934496Z   CARGO_TERM_COLOR: always
+2026-09-10T10:41:59.9934727Z   CACHE_ON_FAILURE: false
+2026-09-10T10:41:59.9934942Z ##[endgroup]
+2026-09-10T10:42:00.1209798Z Found in cache @ /opt/hostedtoolcache/node/22.23.2/x64
+2026-09-10T10:42:00.1210672Z ##[group]Environment details
+2026-09-10T10:42:00.5303924Z node: v22.23.2
+2026-09-10T10:42:00.5304354Z npm: 10.9.8
+2026-09-10T10:42:00.5304668Z yarn: 1.22.22
+2026-09-10T10:42:00.5305484Z ##[endgroup]
+2026-09-10T10:42:00.5421181Z ##[group]Run cargo install wasm-pack --locked
+2026-09-10T10:42:00.5421597Z [36;1mcargo install wasm-pack --locked[0m
+2026-09-10T10:42:00.5465946Z shell: /usr/bin/bash -e {0}
+2026-09-10T10:42:00.5466201Z env:
+2026-09-10T10:42:00.5466406Z   CARGO_HOME: /home/runner/.cargo
+2026-09-10T10:42:00.5466675Z   CARGO_INCREMENTAL: 0
+2026-09-10T10:42:00.5466900Z   CARGO_TERM_COLOR: always
+2026-09-10T10:42:00.5467128Z   CACHE_ON_FAILURE: false
+2026-09-10T10:42:00.5467348Z ##[endgroup]
+2026-09-10T10:42:00.5933668Z [1m[92m    Updating[0m crates.io index
+2026-09-10T10:42:00.6198238Z [1m[92m Downloading[0m crates ...
+2026-09-10T10:42:00.6583915Z [1m[92m  Downloaded[0m wasm-pack v0.15.0
+2026-09-10T10:42:00.6847903Z [1m[92m  Installing[0m wasm-pack v0.15.0
+2026-09-10T10:42:00.6849724Z [1m[33mwarning[0m: default toolchain implicitly overridden with `1.97.1-x86_64-unknown-linux-gnu` by rustup toolchain file
+2026-09-10T10:42:00.6851210Z   [1m[94m|[0m
+2026-09-10T10:42:00.6852027Z   [1m[94m= [0m[1mhelp[0m: use `cargo +stable install` if you meant to use the stable toolchain
+2026-09-10T10:42:00.6853187Z   [1m[94m= [0m[1mnote[0m: rustup selects the toolchain based on the parent environment and not the environment of the package being installed
+2026-09-10T10:42:00.6894118Z [1m[92m    Updating[0m crates.io index
+2026-09-10T10:42:01.1294822Z [1m[92m    Updating[0m crates.io index
+2026-09-10T10:42:01.2272472Z [1m[92m Downloading[0m crates ...
+2026-09-10T10:42:01.2446875Z [1m[92m  Downloaded[0m anstyle-query v1.1.5
+2026-09-10T10:42:01.2461841Z [1m[92m  Downloaded[0m adler2 v2.0.1
+2026-09-10T10:42:01.2475443Z [1m[92m  Downloaded[0m anstream v1.0.0
+2026-09-10T10:42:01.2498179Z [1m[92m  Downloaded[0m anstyle v1.0.14
+2026-09-10T10:42:01.2513470Z [1m[92m  Downloaded[0m anstyle-parse v1.0.0
+2026-09-10T10:42:01.2529994Z [1m[92m  Downloaded[0m pbkdf2 v0.12.2
+2026-09-10T10:42:01.2543654Z [1m[92m  Downloaded[0m addr2line v0.25.1
+2026-09-10T10:42:01.2564604Z [1m[92m  Downloaded[0m aes v0.8.4
+2026-09-10T10:42:01.2606645Z [1m[92m  Downloaded[0m equivalent v1.0.2
+2026-09-10T10:42:01.2617881Z [1m[92m  Downloaded[0m generic-array v0.14.7
+2026-09-10T10:42:01.2634016Z [1m[92m  Downloaded[0m parking_lot v0.12.5
+2026-09-10T10:42:01.2663582Z [1m[92m  Downloaded[0m idna v1.1.0
+2026-09-10T10:42:01.2703892Z [1m[92m  Downloaded[0m miniz_oxide v0.8.9
+2026-09-10T10:42:01.2730932Z [1m[92m  Downloaded[0m num-traits v0.2.19
+2026-09-10T10:42:01.2762037Z [1m[92m  Downloaded[0m serde_ignored v0.1.14
+2026-09-10T10:42:01.2777706Z [1m[92m  Downloaded[0m siphasher v1.0.3
+2026-09-10T10:42:01.2801717Z [1m[92m  Downloaded[0m sha1 v0.10.6
+2026-09-10T10:42:01.2816818Z [1m[92m  Downloaded[0m rustc-demangle v0.1.27
+2026-09-10T10:42:01.2836271Z [1m[92m  Downloaded[0m pkg-config v0.3.33
+2026-09-10T10:42:01.2853761Z [1m[92m  Downloaded[0m icu_provider v2.2.0
+2026-09-10T10:42:01.2882183Z [1m[92m  Downloaded[0m crc v3.4.0
+2026-09-10T10:42:01.2900037Z [1m[92m  Downloaded[0m toml v0.9.12+spec-1.1.0
+2026-09-10T10:42:01.2960605Z [1m[92m  Downloaded[0m lzma-rs v0.3.0
+2026-09-10T10:42:01.2997962Z [1m[92m  Downloaded[0m zip v2.4.2
+2026-09-10T10:42:01.3047430Z [1m[92m  Downloaded[0m log v0.4.29
+2026-09-10T10:42:01.3073222Z [1m[92m  Downloaded[0m typenum v1.20.0
+2026-09-10T10:42:01.3116794Z [1m[92m  Downloaded[0m backtrace v0.3.76
+2026-09-10T10:42:01.3170056Z [1m[92m  Downloaded[0m getrandom v0.2.17
+2026-09-10T10:42:01.3203086Z [1m[92m  Downloaded[0m memchr v2.8.0
+2026-09-10T10:42:01.3257555Z [1m[92m  Downloaded[0m object v0.37.3
+2026-09-10T10:42:01.3367576Z [1m[92m  Downloaded[0m once_cell v1.21.4
+2026-09-10T10:42:01.3393895Z [1m[92m  Downloaded[0m filetime v0.2.29
+2026-09-10T10:42:01.3410744Z [1m[92m  Downloaded[0m rustix v1.1.4
+2026-09-10T10:42:01.3689733Z [1m[92m  Downloaded[0m socks v0.3.4
+2026-09-10T10:42:01.3702368Z [1m[92m  Downloaded[0m block-buffer v0.10.4
+2026-09-10T10:42:01.3712661Z [1m[92m  Downloaded[0m cipher v0.4.4
+2026-09-10T10:42:01.3727679Z [1m[92m  Downloaded[0m num-conv v0.2.1
+2026-09-10T10:42:01.3735982Z [1m[92m  Downloaded[0m path-clean v1.0.1
+2026-09-10T10:42:01.3746803Z [1m[92m  Downloaded[0m tempfile v3.27.0
+2026-09-10T10:42:01.3772533Z [1m[92m  Downloaded[0m autocfg v1.5.0
+2026-09-10T10:42:01.3791539Z [1m[92m  Downloaded[0m byteorder v1.5.0
+2026-09-10T10:42:01.3806956Z [1m[92m  Downloaded[0m camino v1.2.2
+2026-09-10T10:42:01.3826443Z [1m[92m  Downloaded[0m console v0.16.3
+2026-09-10T10:42:01.3843265Z [1m[92m  Downloaded[0m digest v0.10.7
+2026-09-10T10:42:01.3861424Z [1m[92m  Downloaded[0m iana-time-zone v0.1.65
+2026-09-10T10:42:01.3890006Z [1m[92m  Downloaded[0m rustix v0.38.44
+2026-09-10T10:42:01.4156939Z [1m[92m  Downloaded[0m colorchoice v1.0.5
+2026-09-10T10:42:01.4166725Z [1m[92m  Downloaded[0m cpufeatures v0.2.17
+2026-09-10T10:42:01.4180531Z [1m[92m  Downloaded[0m env_filter v1.0.1
+2026-09-10T10:42:01.4193777Z [1m[92m  Downloaded[0m icu_properties_data v2.2.0
+2026-09-10T10:42:01.4305246Z [1m[92m  Downloaded[0m binary-install v0.4.1
+2026-09-10T10:42:01.4324201Z [1m[92m  Downloaded[0m cargo_metadata v0.23.1
+2026-09-10T10:42:01.4342575Z [1m[92m  Downloaded[0m cfg-if v1.0.4
+2026-09-10T10:42:01.4355140Z [1m[92m  Downloaded[0m glob v0.3.3
+2026-09-10T10:42:01.4369993Z [1m[92m  Downloaded[0m toml_writer v1.1.1+spec-1.1.0
+2026-09-10T10:42:01.4383539Z [1m[92m  Downloaded[0m url v2.5.8
+2026-09-10T10:42:01.4409638Z [1m[92m  Downloaded[0m utf8parse v0.2.2
+2026-09-10T10:42:01.4419538Z [1m[92m  Downloaded[0m version_check v0.9.5
+2026-09-10T10:42:01.4437670Z [1m[92m  Downloaded[0m walkdir v2.5.0
+2026-09-10T10:42:01.4459259Z [1m[92m  Downloaded[0m xattr v1.6.1
+2026-09-10T10:42:01.4479619Z [1m[92m  Downloaded[0m crypto-common v0.1.7
+2026-09-10T10:42:01.4488849Z [1m[92m  Downloaded[0m lock_api v0.4.14
+2026-09-10T10:42:01.4501711Z [1m[92m  Downloaded[0m ring v0.17.14
+2026-09-10T10:42:01.4927771Z [1m[92m  Downloaded[0m siphasher v0.3.11
+2026-09-10T10:42:01.4940494Z [1m[92m  Downloaded[0m utf8_iter v1.0.4
+2026-09-10T10:42:01.4950583Z [1m[92m  Downloaded[0m winnow v0.7.15
+2026-09-10T10:42:01.5050474Z [1m[92m  Downloaded[0m writeable v0.6.3
+2026-09-10T10:42:01.5069746Z [1m[92m  Downloaded[0m zstd-safe v7.2.4
+2026-09-10T10:42:01.5084361Z [1m[92m  Downloaded[0m clap_builder v4.6.0
+2026-09-10T10:42:01.5166160Z [1m[92m  Downloaded[0m clap_lex v1.1.0
+2026-09-10T10:42:01.5167147Z [1m[92m  Downloaded[0m percent-encoding v2.3.2
+2026-09-10T10:42:01.5168379Z [1m[92m  Downloaded[0m toml_parser v1.1.2+spec-1.1.0
+2026-09-10T10:42:01.5194671Z [1m[92m  Downloaded[0m fastrand v2.4.1
+2026-09-10T10:42:01.5209539Z [1m[92m  Downloaded[0m jobserver v0.1.34
+2026-09-10T10:42:01.5231031Z [1m[92m  Downloaded[0m bumpalo v3.20.2
+2026-09-10T10:42:01.5257902Z [1m[92m  Downloaded[0m form_urlencoded v1.2.2
+2026-09-10T10:42:01.5266494Z [1m[92m  Downloaded[0m getrandom v0.4.2
+2026-09-10T10:42:01.5305938Z [1m[92m  Downloaded[0m clap_derive v4.6.1
+2026-09-10T10:42:01.5328534Z [1m[92m  Downloaded[0m simd-adler32 v0.3.9
+2026-09-10T10:42:01.5347895Z [1m[92m  Downloaded[0m zeroize_derive v1.4.3
+2026-09-10T10:42:01.5357486Z [1m[92m  Downloaded[0m is_terminal_polyfill v1.70.2
+2026-09-10T10:42:01.5367719Z [1m[92m  Downloaded[0m itoa v1.0.18
+2026-09-10T10:42:01.5382965Z [1m[92m  Downloaded[0m shell-words v1.1.1
+2026-09-10T10:42:01.5392663Z [1m[92m  Downloaded[0m heck v0.5.0
+2026-09-10T10:42:01.5406142Z [1m[92m  Downloaded[0m powerfmt v0.2.0
+2026-09-10T10:42:01.5417483Z [1m[92m  Downloaded[0m rustls-pki-types v1.14.1
+2026-09-10T10:42:01.5443062Z [1m[92m  Downloaded[0m shlex v1.3.0
+2026-09-10T10:42:01.5455699Z [1m[92m  Downloaded[0m synstructure v0.13.2
+2026-09-10T10:42:01.5465947Z [1m[92m  Downloaded[0m toml_datetime v1.1.1+spec-1.1.0
+2026-09-10T10:42:01.5479007Z [1m[92m  Downloaded[0m inout v0.1.4
+2026-09-10T10:42:01.5490379Z [1m[92m  Downloaded[0m parking_lot_core v0.9.12
+2026-09-10T10:42:01.5511901Z [1m[92m  Downloaded[0m anyhow v1.0.102
+2026-09-10T10:42:01.5553134Z [1m[92m  Downloaded[0m deflate64 v0.1.12
+2026-09-10T10:42:01.5569840Z [1m[92m  Downloaded[0m hex v0.4.3
+2026-09-10T10:42:01.5585853Z [1m[92m  Downloaded[0m strsim v0.11.1
+2026-09-10T10:42:01.5598828Z [1m[92m  Downloaded[0m which v8.0.2
+2026-09-10T10:42:01.5617704Z [1m[92m  Downloaded[0m zmij v1.0.21
+2026-09-10T10:42:01.5636494Z [1m[92m  Downloaded[0m cargo-platform v0.3.3
+2026-09-10T10:42:01.5648990Z [1m[92m  Downloaded[0m constant_time_eq v0.3.1
+2026-09-10T10:42:01.5662619Z [1m[92m  Downloaded[0m dirs-sys-next v0.1.2
+2026-09-10T10:42:01.5672390Z [1m[92m  Downloaded[0m deranged v0.5.8
+2026-09-10T10:42:01.5686466Z [1m[92m  Downloaded[0m dirs-next v2.0.0
+2026-09-10T10:42:01.5697960Z [1m[92m  Downloaded[0m is_executable v0.1.2
+2026-09-10T10:42:01.5710289Z [1m[92m  Downloaded[0m human-panic v2.0.8
+2026-09-10T10:42:01.5723454Z [1m[92m  Downloaded[0m icu_collections v2.2.0
+2026-09-10T10:42:01.5787019Z [1m[92m  Downloaded[0m crc32fast v1.5.0
+2026-09-10T10:42:01.5806125Z [1m[92m  Downloaded[0m fs4 v0.6.6
+2026-09-10T10:42:01.5831342Z [1m[92m  Downloaded[0m hmac v0.12.1
+2026-09-10T10:42:01.5851108Z [1m[92m  Downloaded[0m env_logger v0.11.10
+2026-09-10T10:42:01.5873804Z [1m[92m  Downloaded[0m flate2 v1.1.9
+2026-09-10T10:42:01.5942324Z [1m[92m  Downloaded[0m errno v0.3.14
+2026-09-10T10:42:01.5965730Z [1m[92m  Downloaded[0m potential_utf v0.1.5
+2026-09-10T10:42:01.5982424Z [1m[92m  Downloaded[0m bzip2 v0.5.2
+2026-09-10T10:42:01.6008965Z [1m[92m  Downloaded[0m dialoguer v0.12.0
+2026-09-10T10:42:01.6051046Z [1m[92m  Downloaded[0m find-msvc-tools v0.1.9
+2026-09-10T10:42:01.6067169Z [1m[92m  Downloaded[0m litemap v0.8.2
+2026-09-10T10:42:01.6090563Z [1m[92m  Downloaded[0m rustls-webpki v0.103.13
+2026-09-10T10:42:01.6121717Z [1m[92m  Downloaded[0m same-file v1.0.6
+2026-09-10T10:42:01.6135478Z [1m[92m  Downloaded[0m subtle v2.6.1
+2026-09-10T10:42:01.6147562Z [1m[92m  Downloaded[0m toml v1.1.2+spec-1.1.0
+2026-09-10T10:42:01.6189185Z [1m[92m  Downloaded[0m webpki-roots v0.26.11
+2026-09-10T10:42:01.6201847Z [1m[92m  Downloaded[0m yoke-derive v0.8.2
+2026-09-10T10:42:01.6213532Z [1m[92m  Downloaded[0m bitflags v2.11.1
+2026-09-10T10:42:01.6257349Z [1m[92m  Downloaded[0m crc-catalog v2.5.0
+2026-09-10T10:42:01.6271781Z [1m[92m  Downloaded[0m displaydoc v0.2.5
+2026-09-10T10:42:01.6302933Z [1m[92m  Downloaded[0m getrandom v0.3.4
+2026-09-10T10:42:01.6337743Z [1m[92m  Downloaded[0m icu_normalizer_data v2.2.0
+2026-09-10T10:42:01.6358685Z [1m[92m  Downloaded[0m icu_properties v2.2.0
+2026-09-10T10:42:01.6382929Z [1m[92m  Downloaded[0m clap v4.6.1
+2026-09-10T10:42:01.6482969Z [1m[92m  Downloaded[0m idna_adapter v1.2.2
+2026-09-10T10:42:01.6492377Z [1m[92m  Downloaded[0m icu_normalizer v2.2.0
+2026-09-10T10:42:01.6529747Z [1m[92m  Downloaded[0m cc v1.2.62
+2026-09-10T10:42:01.6559264Z [1m[92m  Downloaded[0m indexmap v2.14.0
+2026-09-10T10:42:01.6602024Z [1m[92m  Downloaded[0m toml_datetime v0.7.5+spec-1.1.0
+2026-09-10T10:42:01.6614751Z [1m[92m  Downloaded[0m hashbrown v0.17.1
+2026-09-10T10:42:01.6668283Z [1m[92m  Downloaded[0m icu_locale_core v2.2.0
+2026-09-10T10:42:01.6740193Z [1m[92m  Downloaded[0m base64 v0.22.1
+2026-09-10T10:42:01.6778619Z [1m[92m  Downloaded[0m chrono v0.4.44
+2026-09-10T10:42:01.6846033Z [1m[92m  Downloaded[0m scopeguard v1.2.0
+2026-09-10T10:42:01.6858047Z [1m[92m  Downloaded[0m serde_spanned v1.1.1
+2026-09-10T10:42:01.6870037Z [1m[92m  Downloaded[0m untrusted v0.9.0
+2026-09-10T10:42:01.6886778Z [1m[92m  Downloaded[0m yoke v0.8.2
+2026-09-10T10:42:01.6905160Z [1m[92m  Downloaded[0m semver v1.0.28
+2026-09-10T10:42:01.6929385Z [1m[92m  Downloaded[0m serde_derive v1.0.228
+2026-09-10T10:42:01.6960207Z [1m[92m  Downloaded[0m time-core v0.1.8
+2026-09-10T10:42:01.6971095Z [1m[92m  Downloaded[0m tinystr v0.8.3
+2026-09-10T10:42:01.6991755Z [1m[92m  Downloaded[0m uuid v1.23.1
+2026-09-10T10:42:01.7021747Z [1m[92m  Downloaded[0m zerofrom v0.1.8
+2026-09-10T10:42:01.7031331Z [1m[92m  Downloaded[0m zerofrom-derive v0.1.7
+2026-09-10T10:42:01.7041465Z [1m[92m  Downloaded[0m zeroize v1.8.2
+2026-09-10T10:42:01.7054568Z [1m[92m  Downloaded[0m zerovec-derive v0.11.3
+2026-09-10T10:42:01.7069838Z [1m[92m  Downloaded[0m smallvec v1.15.1
+2026-09-10T10:42:01.7091204Z [1m[92m  Downloaded[0m stable_deref_trait v1.2.1
+2026-09-10T10:42:01.7099906Z [1m[92m  Downloaded[0m thiserror v2.0.18
+2026-09-10T10:42:01.7166776Z [1m[92m  Downloaded[0m zstd v0.13.3
+2026-09-10T10:42:01.7196859Z [1m[92m  Downloaded[0m quote v1.0.45
+2026-09-10T10:42:01.7224805Z [1m[92m  Downloaded[0m thiserror-impl v2.0.18
+2026-09-10T10:42:01.7239557Z [1m[92m  Downloaded[0m xz2 v0.1.7
+2026-09-10T10:42:01.7256645Z [1m[92m  Downloaded[0m zopfli v0.8.3
+2026-09-10T10:42:01.7281497Z [1m[92m  Downloaded[0m unicode-ident v1.0.24
+2026-09-10T10:42:01.7309075Z [1m[92m  Downloaded[0m serde_core v1.0.228
+2026-09-10T10:42:01.7336899Z [1m[92m  Downloaded[0m tar v0.4.45
+2026-09-10T10:42:01.7365167Z [1m[92m  Downloaded[0m ureq v2.12.1
+2026-09-10T10:42:01.7415476Z [1m[92m  Downloaded[0m zerotrie v0.2.4
+2026-09-10T10:42:01.7455187Z [1m[92m  Downloaded[0m gimli v0.32.3
+2026-09-10T10:42:01.7525606Z [1m[92m  Downloaded[0m proc-macro2 v1.0.106
+2026-09-10T10:42:01.7555857Z [1m[92m  Downloaded[0m serde v1.0.228
+2026-09-10T10:42:01.7592586Z [1m[92m  Downloaded[0m webpki-roots v1.0.7
+2026-09-10T10:42:01.7622965Z [1m[92m  Downloaded[0m zerovec v0.11.6
+2026-09-10T10:42:01.7684049Z [1m[92m  Downloaded[0m serde_json v1.0.149
+2026-09-10T10:42:01.7759233Z [1m[92m  Downloaded[0m bzip2-sys v0.1.13+1.0.8
+2026-09-10T10:42:01.7867704Z [1m[92m  Downloaded[0m winnow v1.0.2
+2026-09-10T10:42:01.7969989Z [1m[92m  Downloaded[0m lzma-sys v0.1.20
+2026-09-10T10:42:01.8306334Z [1m[92m  Downloaded[0m sysinfo v0.38.4
+2026-09-10T10:42:01.8433530Z [1m[92m  Downloaded[0m time v0.3.47
+2026-09-10T10:42:01.8568184Z [1m[92m  Downloaded[0m syn v2.0.117
+2026-09-10T10:42:01.8675694Z [1m[92m  Downloaded[0m unicode-width v0.2.2
+2026-09-10T10:42:01.8730752Z [1m[92m  Downloaded[0m rustls v0.23.40
+2026-09-10T10:42:01.8852261Z [1m[92m  Downloaded[0m libc v0.2.186
+2026-09-10T10:42:01.9255714Z [1m[92m  Downloaded[0m zstd-sys v2.0.16+zstd.1.5.7
+2026-09-10T10:42:01.9429591Z [1m[92m  Downloaded[0m linux-raw-sys v0.4.15
+2026-09-10T10:42:01.9894765Z [1m[92m  Downloaded[0m linux-raw-sys v0.12.1
+2026-09-10T10:42:02.1057388Z [1m[92m   Compiling[0m libc v0.2.186
+2026-09-10T10:42:02.1058900Z [1m[92m   Compiling[0m proc-macro2 v1.0.106
+2026-09-10T10:42:02.1073941Z [1m[92m   Compiling[0m quote v1.0.45
+2026-09-10T10:42:02.1086230Z [1m[92m   Compiling[0m unicode-ident v1.0.24
+2026-09-10T10:42:02.1720501Z [1m[92m   Compiling[0m find-msvc-tools v0.1.9
+2026-09-10T10:42:02.2694116Z [1m[92m   Compiling[0m shlex v1.3.0
+2026-09-10T10:42:02.3791061Z [1m[92m   Compiling[0m cfg-if v1.0.4
+2026-09-10T10:42:02.4085022Z [1m[92m   Compiling[0m serde_core v1.0.228
+2026-09-10T10:42:02.5700293Z [1m[92m   Compiling[0m pkg-config v0.3.33
+2026-09-10T10:42:03.1680267Z [1m[92m   Compiling[0m syn v2.0.117
+2026-09-10T10:42:03.2882971Z [1m[92m   Compiling[0m jobserver v0.1.34
+2026-09-10T10:42:03.3360274Z [1m[92m   Compiling[0m stable_deref_trait v1.2.1
+2026-09-10T10:42:03.3720146Z [1m[92m   Compiling[0m version_check v0.9.5
+2026-09-10T10:42:03.5758826Z [1m[92m   Compiling[0m cc v1.2.62
+2026-09-10T10:42:03.5880548Z [1m[92m   Compiling[0m generic-array v0.14.7
+2026-09-10T10:42:03.6800639Z [1m[92m   Compiling[0m typenum v1.20.0
+2026-09-10T10:42:05.0846435Z [1m[92m   Compiling[0m memchr v2.8.0
+2026-09-10T10:42:05.0907611Z [1m[92m   Compiling[0m litemap v0.8.2
+2026-09-10T10:42:05.2440160Z [1m[92m   Compiling[0m writeable v0.6.3
+2026-09-10T10:42:05.4286657Z [1m[92m   Compiling[0m crypto-common v0.1.7
+2026-09-10T10:42:05.5010419Z [1m[92m   Compiling[0m simd-adler32 v0.3.9
+2026-09-10T10:42:05.6310966Z [1m[92m   Compiling[0m bitflags v2.11.1
+2026-09-10T10:42:05.9731513Z [1m[92m   Compiling[0m subtle v2.6.1
+2026-09-10T10:42:06.0590170Z [1m[92m   Compiling[0m utf8_iter v1.0.4
+2026-09-10T10:42:06.0710201Z [1m[92m   Compiling[0m icu_normalizer_data v2.2.0
+2026-09-10T10:42:06.1450208Z [1m[92m   Compiling[0m smallvec v1.15.1
+2026-09-10T10:42:06.1600470Z [1m[92m   Compiling[0m icu_properties_data v2.2.0
+2026-09-10T10:42:06.2510131Z [1m[92m   Compiling[0m zstd-sys v2.0.16+zstd.1.5.7
+2026-09-10T10:42:06.3290597Z [1m[92m   Compiling[0m ring v0.17.14
+2026-09-10T10:42:06.3938853Z [1m[92m   Compiling[0m crc32fast v1.5.0
+2026-09-10T10:42:06.4420537Z [1m[92m   Compiling[0m adler2 v2.0.1
+2026-09-10T10:42:06.5190241Z [1m[92m   Compiling[0m rustix v1.1.4
+2026-09-10T10:42:06.5335244Z [1m[92m   Compiling[0m log v0.4.29
+2026-09-10T10:42:06.6956977Z [1m[92m   Compiling[0m synstructure v0.13.2
+2026-09-10T10:42:06.8200012Z [1m[92m   Compiling[0m miniz_oxide v0.8.9
+2026-09-10T10:42:08.1870189Z [1m[92m   Compiling[0m zerofrom-derive v0.1.7
+2026-09-10T10:42:08.4506983Z [1m[92m   Compiling[0m yoke-derive v0.8.2
+2026-09-10T10:42:09.1865954Z [1m[92m   Compiling[0m zerofrom v0.1.8
+2026-09-10T10:42:09.2484568Z [1m[92m   Compiling[0m zerovec-derive v0.11.3
+2026-09-10T10:42:09.2812522Z [1m[92m   Compiling[0m yoke v0.8.2
+2026-09-10T10:42:09.3807260Z [1m[92m   Compiling[0m displaydoc v0.2.5
+2026-09-10T10:42:09.7920279Z [1m[92m   Compiling[0m zeroize_derive v1.4.3
+2026-09-10T10:42:10.1940319Z [1m[92m   Compiling[0m zeroize v1.8.2
+2026-09-10T10:42:10.2040263Z [1m[92m   Compiling[0m zerovec v0.11.6
+2026-09-10T10:42:10.3200121Z [1m[92m   Compiling[0m zerotrie v0.2.4
+2026-09-10T10:42:10.7290697Z [1m[92m   Compiling[0m rustls-pki-types v1.14.1
+2026-09-10T10:42:10.8500646Z [1m[92m   Compiling[0m tinystr v0.8.3
+2026-09-10T10:42:11.0020768Z [1m[92m   Compiling[0m icu_locale_core v2.2.0
+2026-09-10T10:42:11.5863265Z [1m[92m   Compiling[0m potential_utf v0.1.5
+2026-09-10T10:42:11.6791560Z [1m[92m   Compiling[0m icu_collections v2.2.0
+2026-09-10T10:42:12.3710874Z [1m[92m   Compiling[0m icu_provider v2.2.0
+2026-09-10T10:42:13.0430774Z [1m[92m   Compiling[0m block-buffer v0.10.4
+2026-09-10T10:42:13.0982981Z [1m[92m   Compiling[0m zmij v1.0.21
+2026-09-10T10:42:13.1876221Z [1m[92m   Compiling[0m getrandom v0.4.2
+2026-09-10T10:42:13.2879563Z [1m[92m   Compiling[0m serde v1.0.228
+2026-09-10T10:42:13.4260258Z [1m[92m   Compiling[0m linux-raw-sys v0.12.1
+2026-09-10T10:42:13.7230809Z [1m[92m   Compiling[0m digest v0.10.7
+2026-09-10T10:42:13.9070329Z [1m[92m   Compiling[0m icu_properties v2.2.0
+2026-09-10T10:42:15.3628231Z [1m[92m   Compiling[0m icu_normalizer v2.2.0
+2026-09-10T10:42:16.1880709Z [1m[92m   Compiling[0m serde_derive v1.0.228
+2026-09-10T10:42:16.7757873Z [1m[92m   Compiling[0m lzma-sys v0.1.20
+2026-09-10T10:42:16.9126571Z [1m[92m   Compiling[0m bzip2-sys v0.1.13+1.0.8
+2026-09-10T10:42:17.0259388Z [1m[92m   Compiling[0m getrandom v0.2.17
+2026-09-10T10:42:17.1830572Z [1m[92m   Compiling[0m untrusted v0.9.0
+2026-09-10T10:42:17.2400487Z [1m[92m   Compiling[0m zstd-safe v7.2.4
+2026-09-10T10:42:17.3175875Z [1m[92m   Compiling[0m serde_json v1.0.149
+2026-09-10T10:42:17.4040447Z [1m[92m   Compiling[0m utf8parse v0.2.2
+2026-09-10T10:42:17.4484484Z [1m[92m   Compiling[0m byteorder v1.5.0
+2026-09-10T10:42:17.6590977Z [1m[92m   Compiling[0m once_cell v1.21.4
+2026-09-10T10:42:17.8355909Z [1m[92m   Compiling[0m thiserror v2.0.18
+2026-09-10T10:42:18.0321798Z [1m[92m   Compiling[0m anstyle-parse v1.0.0
+2026-09-10T10:42:24.8917763Z [1m[92m   Compiling[0m idna_adapter v1.2.2
+2026-09-10T10:42:25.3631743Z [1m[92m   Compiling[0m thiserror-impl v2.0.18
+2026-09-10T10:42:26.4672078Z [1m[92m   Compiling[0m inout v0.1.4
+2026-09-10T10:42:26.5428455Z [1m[92m   Compiling[0m getrandom v0.3.4
+2026-09-10T10:42:26.7040364Z [1m[92m   Compiling[0m is_terminal_polyfill v1.70.2
+2026-09-10T10:42:26.7435795Z [1m[92m   Compiling[0m itoa v1.0.18
+2026-09-10T10:42:26.9331158Z [1m[92m   Compiling[0m autocfg v1.5.0
+2026-09-10T10:42:27.1964367Z [1m[92m   Compiling[0m cpufeatures v0.2.17
+2026-09-10T10:42:27.2175716Z [1m[92m   Compiling[0m crc-catalog v2.5.0
+2026-09-10T10:42:27.2565382Z [1m[92m   Compiling[0m colorchoice v1.0.5
+2026-09-10T10:42:27.3060823Z [1m[92m   Compiling[0m object v0.37.3
+2026-09-10T10:42:27.3960254Z [1m[92m   Compiling[0m rustix v0.38.44
+2026-09-10T10:42:27.5750388Z [1m[92m   Compiling[0m rustls v0.23.40
+2026-09-10T10:42:27.6650100Z [1m[92m   Compiling[0m anstyle-query v1.1.5
+2026-09-10T10:42:27.7075609Z [1m[92m   Compiling[0m percent-encoding v2.3.2
+2026-09-10T10:42:27.8937964Z [1m[92m   Compiling[0m powerfmt v0.2.0
+2026-09-10T10:42:28.0842586Z [1m[92m   Compiling[0m anstyle v1.0.14
+2026-09-10T10:42:28.3190418Z [1m[92m   Compiling[0m anstream v1.0.0
+2026-09-10T10:42:28.8042062Z [1m[92m   Compiling[0m deranged v0.5.8
+2026-09-10T10:42:29.8520184Z [1m[92m   Compiling[0m form_urlencoded v1.2.2
+2026-09-10T10:42:30.0540558Z [1m[92m   Compiling[0m crc v3.4.0
+2026-09-10T10:42:30.0661958Z [1m[92m   Compiling[0m num-traits v0.2.19
+2026-09-10T10:42:30.2135633Z [1m[92m   Compiling[0m cipher v0.4.4
+2026-09-10T10:42:30.4560824Z [1m[92m   Compiling[0m rustls-webpki v0.103.13
+2026-09-10T10:42:32.1350206Z [1m[92m   Compiling[0m idna v1.1.0
+2026-09-10T10:42:32.9630623Z [1m[92m   Compiling[0m flate2 v1.1.9
+2026-09-10T10:42:33.2184455Z [1m[92m   Compiling[0m hmac v0.12.1
+2026-09-10T10:42:33.2910293Z [1m[92m   Compiling[0m webpki-roots v1.0.7
+2026-09-10T10:42:33.3630224Z [1m[92m   Compiling[0m serde_spanned v1.1.1
+2026-09-10T10:42:33.4460670Z [1m[92m   Compiling[0m bumpalo v3.20.2
+2026-09-10T10:42:33.4720850Z [1m[92m   Compiling[0m equivalent v1.0.2
+2026-09-10T10:42:33.5088264Z [1m[92m   Compiling[0m zip v2.4.2
+2026-09-10T10:42:33.5920188Z [1m[92m   Compiling[0m camino v1.2.2
+2026-09-10T10:42:33.6746828Z [1m[92m   Compiling[0m gimli v0.32.3
+2026-09-10T10:42:33.7540391Z [1m[92m   Compiling[0m time-core v0.1.8
+2026-09-10T10:42:33.8567789Z [1m[92m   Compiling[0m anyhow v1.0.102
+2026-09-10T10:42:34.0260235Z [1m[92m   Compiling[0m linux-raw-sys v0.4.15
+2026-09-10T10:42:34.3400332Z [1m[92m   Compiling[0m hashbrown v0.17.1
+2026-09-10T10:42:34.7490103Z [1m[92m   Compiling[0m num-conv v0.2.1
+2026-09-10T10:42:34.8490160Z [1m[92m   Compiling[0m toml_writer v1.1.1+spec-1.1.0
+2026-09-10T10:42:35.0410206Z [1m[92m   Compiling[0m parking_lot_core v0.9.12
+2026-09-10T10:42:35.0920267Z [1m[92m   Compiling[0m indexmap v2.14.0
+2026-09-10T10:42:35.1670568Z [1m[92m   Compiling[0m time v0.3.47
+2026-09-10T10:42:35.9950108Z [1m[92m   Compiling[0m zopfli v0.8.3
+2026-09-10T10:42:37.1028087Z [1m[92m   Compiling[0m addr2line v0.25.1
+2026-09-10T10:42:37.4753182Z [1m[92m   Compiling[0m webpki-roots v0.26.11
+2026-09-10T10:42:37.5086190Z [1m[92m   Compiling[0m pbkdf2 v0.12.2
+2026-09-10T10:42:37.5810121Z [1m[92m   Compiling[0m bzip2 v0.5.2
+2026-09-10T10:42:37.7333028Z [1m[92m   Compiling[0m url v2.5.8
+2026-09-10T10:42:37.8192676Z [1m[92m   Compiling[0m xz2 v0.1.7
+2026-09-10T10:42:38.7737232Z [1m[92m   Compiling[0m aes v0.8.4
+2026-09-10T10:42:40.1290091Z [1m[92m   Compiling[0m lzma-rs v0.3.0
+2026-09-10T10:42:40.9830670Z [1m[92m   Compiling[0m sha1 v0.10.6
+2026-09-10T10:42:41.4401130Z [1m[92m   Compiling[0m socks v0.3.4
+2026-09-10T10:42:41.8760233Z [1m[92m   Compiling[0m xattr v1.6.1
+2026-09-10T10:42:42.4201682Z [1m[92m   Compiling[0m toml_datetime v1.1.1+spec-1.1.0
+2026-09-10T10:42:42.8041097Z [1m[92m   Compiling[0m dirs-sys-next v0.1.2
+2026-09-10T10:42:43.3120720Z [1m[92m   Compiling[0m filetime v0.2.29
+2026-09-10T10:42:43.4700327Z [1m[92m   Compiling[0m rustc-demangle v0.1.27
+2026-09-10T10:42:44.5620942Z [1m[92m   Compiling[0m clap_lex v1.1.0
+2026-09-10T10:42:44.5862985Z [1m[92m   Compiling[0m heck v0.5.0
+2026-09-10T10:42:44.7350269Z [1m[92m   Compiling[0m deflate64 v0.1.12
+2026-09-10T10:42:44.8504436Z [1m[92m   Compiling[0m unicode-width v0.2.2
+2026-09-10T10:42:45.0650810Z [1m[92m   Compiling[0m winnow v1.0.2
+2026-09-10T10:42:45.2860761Z [1m[92m   Compiling[0m constant_time_eq v0.3.1
+2026-09-10T10:42:45.3380624Z [1m[92m   Compiling[0m scopeguard v1.2.0
+2026-09-10T10:42:45.3840557Z [1m[92m   Compiling[0m fastrand v2.4.1
+2026-09-10T10:42:45.4916127Z [1m[92m   Compiling[0m base64 v0.22.1
+2026-09-10T10:42:45.6040459Z [1m[92m   Compiling[0m strsim v0.11.1
+2026-09-10T10:42:45.9760567Z [1m[92m   Compiling[0m clap_builder v4.6.0
+2026-09-10T10:42:46.4335676Z [1m[92m   Compiling[0m ureq v2.12.1
+2026-09-10T10:42:47.5670661Z [1m[92m   Compiling[0m zstd v0.13.3
+2026-09-10T10:42:52.4460394Z [1m[92m   Compiling[0m tempfile v3.27.0
+2026-09-10T10:42:53.3090699Z [1m[92m   Compiling[0m toml_parser v1.1.2+spec-1.1.0
+2026-09-10T10:42:54.7072931Z [1m[92m   Compiling[0m lock_api v0.4.14
+2026-09-10T10:42:54.7820484Z [1m[92m   Compiling[0m console v0.16.3
+2026-09-10T10:42:54.9100235Z [1m[92m   Compiling[0m clap_derive v4.6.1
+2026-09-10T10:42:56.1739723Z [1m[92m   Compiling[0m backtrace v0.3.76
+2026-09-10T10:42:56.6000656Z [1m[92m   Compiling[0m tar v0.4.45
+2026-09-10T10:42:58.9040662Z [1m[92m   Compiling[0m dirs-next v2.0.0
+2026-09-10T10:42:58.9960909Z [1m[92m   Compiling[0m toml v1.1.2+spec-1.1.0
+2026-09-10T10:43:00.4140237Z [1m[92m   Compiling[0m fs4 v0.6.6
+2026-09-10T10:43:01.4862863Z [1m[92m   Compiling[0m uuid v1.23.1
+2026-09-10T10:43:01.5687246Z [1m[92m   Compiling[0m env_filter v1.0.1
+2026-09-10T10:43:01.6240282Z [1m[92m   Compiling[0m sysinfo v0.38.4
+2026-09-10T10:43:01.9270620Z [1m[92m   Compiling[0m semver v1.0.28
+2026-09-10T10:43:01.9542154Z [1m[92m   Compiling[0m toml_datetime v0.7.5+spec-1.1.0
+2026-09-10T10:43:02.2510852Z [1m[92m   Compiling[0m cargo-platform v0.3.3
+2026-09-10T10:43:02.3380102Z [1m[92m   Compiling[0m hex v0.4.3
+2026-09-10T10:43:02.5680336Z [1m[92m   Compiling[0m is_executable v0.1.2
+2026-09-10T10:43:02.5986299Z [1m[92m   Compiling[0m shell-words v1.1.1
+2026-09-10T10:43:02.6290553Z [1m[92m   Compiling[0m siphasher v0.3.11
+2026-09-10T10:43:02.7786599Z [1m[92m   Compiling[0m iana-time-zone v0.1.65
+2026-09-10T10:43:02.7850387Z [1m[92m   Compiling[0m winnow v0.7.15
+2026-09-10T10:43:02.7870243Z [1m[92m   Compiling[0m same-file v1.0.6
+2026-09-10T10:43:02.8820313Z [1m[92m   Compiling[0m chrono v0.4.44
+2026-09-10T10:43:03.2300220Z [1m[92m   Compiling[0m walkdir v2.5.0
+2026-09-10T10:43:03.9468383Z [1m[92m   Compiling[0m binary-install v0.4.1
+2026-09-10T10:43:04.8220212Z [1m[92m   Compiling[0m toml v0.9.12+spec-1.1.0
+2026-09-10T10:43:06.1220071Z [1m[92m   Compiling[0m dialoguer v0.12.0
+2026-09-10T10:43:06.1520325Z [1m[92m   Compiling[0m cargo_metadata v0.23.1
+2026-09-10T10:43:06.9020367Z [1m[92m   Compiling[0m human-panic v2.0.8
+2026-09-10T10:43:07.5301176Z [1m[92m   Compiling[0m env_logger v0.11.10
+2026-09-10T10:43:08.0600495Z [1m[92m   Compiling[0m parking_lot v0.12.5
+2026-09-10T10:43:08.1300411Z [1m[92m   Compiling[0m clap v4.6.1
+2026-09-10T10:43:08.1690865Z [1m[92m   Compiling[0m serde_ignored v0.1.14
+2026-09-10T10:43:08.3430182Z [1m[92m   Compiling[0m which v8.0.2
+2026-09-10T10:43:08.7330306Z [1m[92m   Compiling[0m siphasher v1.0.3
+2026-09-10T10:43:08.8901193Z [1m[92m   Compiling[0m path-clean v1.0.1
+2026-09-10T10:43:08.9998960Z [1m[92m   Compiling[0m glob v0.3.3
+2026-09-10T10:43:09.4830387Z [1m[92m   Compiling[0m wasm-pack v0.15.0
+2026-09-10T10:43:16.6433314Z [1m[92m    Finished[0m `release` profile [optimized] target(s) in 1m 16s
+2026-09-10T10:43:16.6616830Z [1m[92m  Installing[0m /home/runner/.cargo/bin/wasm-pack
+2026-09-10T10:43:16.6633073Z [1m[92m   Installed[0m package `wasm-pack v0.15.0` (executable `wasm-pack`)
+2026-09-10T10:43:16.7637439Z ##[group]Run npm run build:wasm
+2026-09-10T10:43:16.7637779Z [36;1mnpm run build:wasm[0m
+2026-09-10T10:43:16.7674417Z shell: /usr/bin/bash -e {0}
+2026-09-10T10:43:16.7674665Z env:
+2026-09-10T10:43:16.7674865Z   CARGO_HOME: /home/runner/.cargo
+2026-09-10T10:43:16.7675144Z   CARGO_INCREMENTAL: 0
+2026-09-10T10:43:16.7675364Z   CARGO_TERM_COLOR: always
+2026-09-10T10:43:16.7675594Z   CACHE_ON_FAILURE: false
+2026-09-10T10:43:16.7675816Z ##[endgroup]
+2026-09-10T10:43:16.9424676Z 
+2026-09-10T10:43:16.9425418Z > @sparq-org/sparq@0.1.1 build:wasm
+2026-09-10T10:43:16.9428272Z > wasm-pack build ../crates/sparq-wasm --target web --profile release-wasm --features shacl,jsonld,serialize-rdf,scs,canon,explain-json,native-ttl,bytes-ingest,forms --config profile.release-wasm.strip=false && npm run _copy:wasm
+2026-09-10T10:43:16.9430606Z 
+2026-09-10T10:43:21.6556946Z [INFO]: 🎯  Checking for the Wasm target...
+2026-09-10T10:43:21.7157410Z [INFO]: 🌀  Compiling to Wasm...
+2026-09-10T10:43:21.9559005Z [1m[92m   Compiling[0m unicode-ident v1.0.24
+2026-09-10T10:43:21.9560131Z [1m[92m   Compiling[0m proc-macro2 v1.0.106
+2026-09-10T10:43:21.9561461Z [1m[92m   Compiling[0m quote v1.0.45
+2026-09-10T10:43:21.9562146Z [1m[92m   Compiling[0m wasm-bindgen-shared v0.2.122
+2026-09-10T10:43:22.0110392Z [1m[92m   Compiling[0m rustversion v1.0.22
+2026-09-10T10:43:22.1149733Z [1m[92m   Compiling[0m once_cell v1.21.4
+2026-09-10T10:43:22.2760154Z [1m[92m   Compiling[0m bumpalo v3.20.3
+2026-09-10T10:43:22.3130891Z [1m[92m   Compiling[0m cfg-if v1.0.4
+2026-09-10T10:43:22.4720261Z [1m[92m   Compiling[0m zerocopy v0.8.50
+2026-09-10T10:43:22.7070363Z [1m[92m   Compiling[0m wasm-bindgen v0.2.122
+2026-09-10T10:43:22.8102806Z [1m[92m   Compiling[0m syn v2.0.117
+2026-09-10T10:43:22.8438937Z [1m[92m   Compiling[0m getrandom v0.3.4
+2026-09-10T10:43:23.0250326Z [1m[92m   Compiling[0m thiserror v2.0.18
+2026-09-10T10:43:23.2580114Z [1m[92m   Compiling[0m oxilangtag v0.1.6
+2026-09-10T10:43:23.2950537Z [1m[92m   Compiling[0m oxiri v0.2.11
+2026-09-10T10:43:23.5164787Z [1m[92m   Compiling[0m memchr v2.8.2
+2026-09-10T10:43:23.6450726Z [1m[92m   Compiling[0m pin-project-lite v0.2.17
+2026-09-10T10:43:23.6900290Z [1m[92m   Compiling[0m futures-core v0.3.32
+2026-09-10T10:43:23.7693821Z [1m[92m   Compiling[0m futures-task v0.3.32
+2026-09-10T10:43:23.8716718Z [1m[92m   Compiling[0m slab v0.4.12
+2026-09-10T10:43:24.0100461Z [1m[92m   Compiling[0m futures-util v0.3.32
+2026-09-10T10:43:24.1866023Z [1m[92m   Compiling[0m version_check v0.9.5
+2026-09-10T10:43:24.3840353Z [1m[92m   Compiling[0m generic-array v0.14.7
+2026-09-10T10:43:24.4720456Z [1m[92m   Compiling[0m equivalent v1.0.2
+2026-09-10T10:43:24.5070269Z [1m[92m   Compiling[0m foldhash v0.2.0
+2026-09-10T10:43:24.6440354Z [1m[92m   Compiling[0m ryu-js v1.0.2
+2026-09-10T10:43:24.9810478Z [1m[92m   Compiling[0m json-event-parser v0.2.3
+2026-09-10T10:43:25.5330638Z [1m[92m   Compiling[0m allocator-api2 v0.2.21
+2026-09-10T10:43:25.9075647Z [1m[92m   Compiling[0m hashbrown v0.17.1
+2026-09-10T10:43:26.0720939Z [1m[92m   Compiling[0m rustc-hash v2.1.3
+2026-09-10T10:43:26.1330157Z [1m[92m   Compiling[0m typenum v1.20.1
+2026-09-10T10:43:26.6851017Z [1m[92m   Compiling[0m wasm-bindgen-macro-support v0.2.122
+2026-09-10T10:43:26.9247176Z [1m[92m   Compiling[0m ppv-lite86 v0.2.21
+2026-09-10T10:43:27.1320452Z [1m[92m   Compiling[0m peg-runtime v0.8.6
+2026-09-10T10:43:27.2990538Z [1m[92m   Compiling[0m peg-macros v0.8.6
+2026-09-10T10:43:27.8750541Z [1m[92m   Compiling[0m serde_core v1.0.228
+2026-09-10T10:43:27.9260470Z [1m[92m   Compiling[0m thiserror-impl v2.0.18
+2026-09-10T10:43:28.0532260Z [1m[92m   Compiling[0m block-buffer v0.10.4
+2026-09-10T10:43:28.1410500Z [1m[92m   Compiling[0m crypto-common v0.1.7
+2026-09-10T10:43:28.1981482Z [1m[92m   Compiling[0m aho-corasick v1.1.4
+2026-09-10T10:43:28.6460705Z [1m[92m   Compiling[0m peg v0.8.6
+2026-09-10T10:43:28.6757152Z [1m[92m   Compiling[0m sparq-jsonld v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-jsonld)
+2026-09-10T10:43:29.1280150Z [1m[92m   Compiling[0m smallvec v1.15.2
+2026-09-10T10:43:29.3340412Z [1m[92m   Compiling[0m regex-syntax v0.8.11
+2026-09-10T10:43:30.5740563Z [1m[92m   Compiling[0m wasm-bindgen-macro v0.2.122
+2026-09-10T10:43:31.1830663Z [1m[92m   Compiling[0m digest v0.10.7
+2026-09-10T10:43:31.3320344Z [1m[92m   Compiling[0m regex-automata v0.4.14
+2026-09-10T10:43:32.6610736Z [1m[92m   Compiling[0m rand_core v0.9.5
+2026-09-10T10:43:32.8686581Z [1m[92m   Compiling[0m rand_chacha v0.9.0
+2026-09-10T10:43:34.0590244Z [1m[92m   Compiling[0m rand v0.9.4
+2026-09-10T10:43:34.6750456Z [1m[92m   Compiling[0m oxrdf v0.3.3
+2026-09-10T10:43:35.4065258Z [1m[92m   Compiling[0m js-sys v0.3.99
+2026-09-10T10:43:40.6030159Z [1m[92m   Compiling[0m oxttl v0.2.3
+2026-09-10T10:43:40.7450673Z [1m[92m   Compiling[0m oxjsonld v0.2.5
+2026-09-10T10:43:41.3871186Z [1m[92m   Compiling[0m spargebra v0.4.6 (/home/runner/work/sparq/sparq/vendor/spargebra)
+2026-09-10T10:43:43.2642378Z [1m[92m   Compiling[0m sparq-core v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-core)
+2026-09-10T10:43:46.2201281Z [1m[92m   Compiling[0m sparq-engine-serialize v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-engine-serialize)
+2026-09-10T10:43:47.9768431Z [1m[92m   Compiling[0m getrandom v0.2.17
+2026-09-10T10:43:48.2280213Z [1m[92m   Compiling[0m rand_core v0.6.4
+2026-09-10T10:43:48.3830122Z [1m[92m   Compiling[0m rand_chacha v0.3.1
+2026-09-10T10:43:48.4821155Z [1m[92m   Compiling[0m sparq-substrate v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-substrate)
+2026-09-10T10:43:49.0930507Z [1m[92m   Compiling[0m rand v0.8.6
+2026-09-10T10:43:49.7400423Z [1m[92m   Compiling[0m tracing-attributes v0.1.31
+2026-09-10T10:43:50.0820355Z [1m[92m   Compiling[0m oxrdf v0.2.4
+2026-09-10T10:43:50.9300179Z [1m[92m   Compiling[0m tracing-core v0.1.36
+2026-09-10T10:43:51.6787461Z [1m[92m   Compiling[0m serde v1.0.228
+2026-09-10T10:43:51.8460693Z [1m[92m   Compiling[0m either v1.16.0
+2026-09-10T10:43:52.0140732Z [1m[92m   Compiling[0m zmij v1.0.21
+2026-09-10T10:43:52.1340382Z [1m[92m   Compiling[0m itertools v0.14.0
+2026-09-10T10:43:52.2110813Z [1m[92m   Compiling[0m tracing v0.1.44
+2026-09-10T10:43:52.4441260Z [1m[92m   Compiling[0m sparq-engine v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-engine)
+2026-09-10T10:43:52.4980199Z [1m[92m   Compiling[0m regex v1.12.4
+2026-09-10T10:43:53.3280879Z [1m[92m   Compiling[0m sha2 v0.10.9
+2026-09-10T10:43:53.8220889Z [1m[92m   Compiling[0m serde_derive v1.0.228
+2026-09-10T10:43:54.5859565Z [1m[92m   Compiling[0m serde_json v1.0.150
+2026-09-10T10:43:54.6873581Z [1m[92m   Compiling[0m base16ct v0.2.0
+2026-09-10T10:43:54.8241003Z [1m[92m   Compiling[0m rdf-canon v0.15.3
+2026-09-10T10:43:55.4900641Z [1m[92m   Compiling[0m sparq-shacl v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-shacl)
+2026-09-10T10:43:57.8266134Z [1m[92m   Compiling[0m oxttl v0.1.8
+2026-09-10T10:43:57.8269035Z [1m[92m   Compiling[0m itoa v1.0.18
+2026-09-10T10:44:00.1060543Z [1m[92m   Compiling[0m sparq-canon v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-canon)
+2026-09-10T10:44:00.2010475Z [1m[92m   Compiling[0m sparq-forms v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-forms)
+2026-09-10T10:44:09.4661630Z [1m[92m   Compiling[0m sparq-wasm v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-wasm)
+2026-09-10T10:44:12.0400994Z [1m[92m    Finished[0m `release-wasm` profile [optimized] target(s) in 50.30s
+2026-09-10T10:44:12.0583162Z [INFO]: ⬇️  Installing wasm-bindgen...
+2026-09-10T10:44:14.3691405Z [INFO]: Optimizing wasm binaries with `wasm-opt`...
+2026-09-10T10:44:45.4935927Z [INFO]: Optional fields missing from Cargo.toml: 'description', 'repository'. These are not necessary, but recommended
+2026-09-10T10:44:45.4955529Z [INFO]: License key is set in Cargo.toml but no LICENSE file(s) were found; Please add the LICENSE file(s) to your project directory
+2026-09-10T10:44:45.4956800Z [INFO]: ✨   Done in 1m 23s
+2026-09-10T10:44:45.4957379Z [INFO]: 📦   Your wasm pkg is ready to publish at ../crates/sparq-wasm/pkg.
+2026-09-10T10:44:45.6341816Z 
+2026-09-10T10:44:45.6342342Z > @sparq-org/sparq@0.1.1 _copy:wasm
+2026-09-10T10:44:45.6343846Z > rm -rf wasm && mkdir wasm && cp ../crates/sparq-wasm/pkg/sparq_wasm.js ../crates/sparq-wasm/pkg/sparq_wasm.d.ts ../crates/sparq-wasm/pkg/sparq_wasm_bg.wasm ../crates/sparq-wasm/pkg/sparq_wasm_bg.wasm.d.ts wasm/
+2026-09-10T10:44:45.6344832Z 
+2026-09-10T10:44:45.6656472Z ##[group]Run npm install
+2026-09-10T10:44:45.6656762Z [36;1mnpm install[0m
+2026-09-10T10:44:45.6694046Z shell: /usr/bin/bash -e {0}
+2026-09-10T10:44:45.6694297Z env:
+2026-09-10T10:44:45.6694496Z   CARGO_HOME: /home/runner/.cargo
+2026-09-10T10:44:45.6694760Z   CARGO_INCREMENTAL: 0
+2026-09-10T10:44:45.6694995Z   CARGO_TERM_COLOR: always
+2026-09-10T10:44:45.6695231Z   CACHE_ON_FAILURE: false
+2026-09-10T10:44:45.6695456Z ##[endgroup]
+2026-09-10T10:44:47.4211552Z 
+2026-09-10T10:44:47.4212346Z added 10 packages, and audited 12 packages in 2s
+2026-09-10T10:44:47.4212959Z 
+2026-09-10T10:44:47.4217582Z 3 packages are looking for funding
+2026-09-10T10:44:47.4218810Z   run `npm fund` for details
+2026-09-10T10:44:47.4224152Z 
+2026-09-10T10:44:47.4224825Z found 0 vulnerabilities
+2026-09-10T10:44:47.4751057Z ##[group]Run npm run check:wasm-types
+2026-09-10T10:44:47.4751403Z [36;1mnpm run check:wasm-types[0m
+2026-09-10T10:44:47.4788214Z shell: /usr/bin/bash -e {0}
+2026-09-10T10:44:47.4788468Z env:
+2026-09-10T10:44:47.4788964Z   CARGO_HOME: /home/runner/.cargo
+2026-09-10T10:44:47.4789239Z   CARGO_INCREMENTAL: 0
+2026-09-10T10:44:47.4789462Z   CARGO_TERM_COLOR: always
+2026-09-10T10:44:47.4789687Z   CACHE_ON_FAILURE: false
+2026-09-10T10:44:47.4789908Z ##[endgroup]
+2026-09-10T10:44:47.6185052Z 
+2026-09-10T10:44:47.6185497Z > @sparq/client@0.1.0 check:wasm-types
+2026-09-10T10:44:47.6186229Z > node scripts/check-wasm-types.mjs
+2026-09-10T10:44:47.6186482Z 
+2026-09-10T10:44:47.6501202Z [check-wasm-types] OK: src/generated/sparq_wasm.d.ts is byte-identical to the freshly built js/wasm/sparq_wasm.d.ts — the generated Store surface is the single source of truth.
+2026-09-10T10:44:47.6632246Z ##[group]Run npm install
+2026-09-10T10:44:47.6632530Z [36;1mnpm install[0m
+2026-09-10T10:44:47.6669981Z shell: /usr/bin/bash -e {0}
+2026-09-10T10:44:47.6670238Z env:
+2026-09-10T10:44:47.6670442Z   CARGO_HOME: /home/runner/.cargo
+2026-09-10T10:44:47.6670703Z   CARGO_INCREMENTAL: 0
+2026-09-10T10:44:47.6670928Z   CARGO_TERM_COLOR: always
+2026-09-10T10:44:47.6671162Z   CACHE_ON_FAILURE: false
+2026-09-10T10:44:47.6671381Z ##[endgroup]
+2026-09-10T10:45:02.5672070Z 
+2026-09-10T10:45:02.5673043Z added 439 packages, and audited 452 packages in 15s
+2026-09-10T10:45:02.5673363Z 
+2026-09-10T10:45:02.5673594Z 148 packages are looking for funding
+2026-09-10T10:45:02.5674093Z   run `npm fund` for details
+2026-09-10T10:45:02.6136581Z 
+2026-09-10T10:45:02.6137471Z 5 vulnerabilities (2 moderate, 3 high)
+2026-09-10T10:45:02.6138003Z 
+2026-09-10T10:45:02.6138774Z To address issues that do not require attention, run:
+2026-09-10T10:45:02.6139539Z   npm audit fix
+2026-09-10T10:45:02.6139838Z 
+2026-09-10T10:45:02.6140382Z To address all issues (including breaking changes), run:
+2026-09-10T10:45:02.6141173Z   npm audit fix --force
+2026-09-10T10:45:02.6141572Z 
+2026-09-10T10:45:02.6141842Z Run `npm audit` for details.
+2026-09-10T10:45:02.6588070Z ##[group]Run npm run lint
+2026-09-10T10:45:02.6588359Z [36;1mnpm run lint[0m
+2026-09-10T10:45:02.6627014Z shell: /usr/bin/bash -e {0}
+2026-09-10T10:45:02.6627270Z env:
+2026-09-10T10:45:02.6627471Z   CARGO_HOME: /home/runner/.cargo
+2026-09-10T10:45:02.6627741Z   CARGO_INCREMENTAL: 0
+2026-09-10T10:45:02.6627968Z   CARGO_TERM_COLOR: always
+2026-09-10T10:45:02.6628201Z   CACHE_ON_FAILURE: false
+2026-09-10T10:45:02.6628423Z ##[endgroup]
+2026-09-10T10:45:02.7945626Z 
+2026-09-10T10:45:02.7946408Z > sparq-site@0.1.0 lint
+2026-09-10T10:45:02.7946894Z > next lint
+2026-09-10T10:45:02.7947065Z 
+2026-09-10T10:45:02.9562653Z `next lint` is deprecated and will be removed in Next.js 16.
+2026-09-10T10:45:02.9563537Z For new projects, use create-next-app to choose your preferred linter.
+2026-09-10T10:45:02.9564199Z For existing projects, migrate to the ESLint CLI:
+2026-09-10T10:45:02.9564760Z npx @next/codemod@canary next-lint-to-eslint-cli .
+2026-09-10T10:45:02.9565102Z 
+2026-09-10T10:45:07.7660995Z Attention: Next.js now collects completely anonymous telemetry regarding usage.
+2026-09-10T10:45:07.7662521Z This information is used to shape Next.js' roadmap and prioritize features.
+2026-09-10T10:45:07.7664096Z You can learn more, including how to opt-out if you'd not like to participate in this anonymous program, by visiting the following URL:
+2026-09-10T10:45:07.7665248Z https://nextjs.org/telemetry
+2026-09-10T10:45:07.7665581Z 
+2026-09-10T10:45:07.9061434Z ✔ No ESLint warnings or errors
+2026-09-10T10:45:07.9514064Z ##[group]Run npx tsc --noEmit
+2026-09-10T10:45:07.9514372Z [36;1mnpx tsc --noEmit[0m
+2026-09-10T10:45:07.9551012Z shell: /usr/bin/bash -e {0}
+2026-09-10T10:45:07.9551263Z env:
+2026-09-10T10:45:07.9551460Z   CARGO_HOME: /home/runner/.cargo
+2026-09-10T10:45:07.9551719Z   CARGO_INCREMENTAL: 0
+2026-09-10T10:45:07.9551943Z   CARGO_TERM_COLOR: always
+2026-09-10T10:45:07.9552372Z   CACHE_ON_FAILURE: false
+2026-09-10T10:45:07.9552590Z ##[endgroup]
+2026-09-10T10:45:16.0275040Z ##[group]Run npm run build
+2026-09-10T10:45:16.0275344Z [36;1mnpm run build[0m
+2026-09-10T10:45:16.0323429Z shell: /usr/bin/bash -e {0}
+2026-09-10T10:45:16.0323854Z env:
+2026-09-10T10:45:16.0324202Z   CARGO_HOME: /home/runner/.cargo
+2026-09-10T10:45:16.0324506Z   CARGO_INCREMENTAL: 0
+2026-09-10T10:45:16.0324731Z   CARGO_TERM_COLOR: always
+2026-09-10T10:45:16.0324961Z   CACHE_ON_FAILURE: false
+2026-09-10T10:45:16.0325181Z ##[endgroup]
+2026-09-10T10:45:16.1733398Z 
+2026-09-10T10:45:16.1733941Z > sparq-site@0.1.0 prebuild
+2026-09-10T10:45:16.1735450Z > node scripts/sync-wasm.mjs && node scripts/bundle-wasm-esm.mjs && node scripts/sync-benchmarks.mjs && node scripts/sync-zk-catalog.mjs && node scripts/build-papers.mjs && node scripts/build-specs.mjs
+2026-09-10T10:45:16.1736364Z 
+2026-09-10T10:45:16.2138132Z [sync-wasm] copied 3 files → public/wasm/
+2026-09-10T10:45:16.2229710Z [sync-wasm] W-reason bundle not found at /home/runner/work/sparq/sparq/crates/sparq-reason-wasm/pkg; /surface/inference will not
+2026-09-10T10:45:16.2230587Z             run live. Build it:  (cd ../js && npm run build:reason-wasm)
+2026-09-10T10:45:16.2238957Z [sync-wasm] W-rsp bundle not found at /home/runner/work/sparq/sparq/crates/sparq-rsp-wasm/pkg; /surface/streaming-rsp will not
+2026-09-10T10:45:16.2239962Z             run live. Build it:  (cd ../js && npm run build:rsp-wasm)
+2026-09-10T10:45:16.2241363Z [sync-wasm] W-text bundle not found at /home/runner/work/sparq/sparq/crates/sparq-text-wasm/pkg; /surface/full-text will not
+2026-09-10T10:45:16.2242282Z             run live. Build it:  (cd ../js && npm run build:text-wasm)
+2026-09-10T10:45:16.2247628Z [sync-wasm] wrote wasm-manifest.json with 2 entries → public/wasm/
+2026-09-10T10:45:16.2949715Z [bundle-wasm-esm] wrote self-hosted ESM entry → public/wasm/sparq.js
+2026-09-10T10:45:16.3472167Z [sync-benchmarks] origin/benchmark-data not found — keeping committed latest+history, refreshing labels+competitors only.
+2026-09-10T10:45:16.3613731Z [sync-benchmarks] wrote 435 benches (commit 9763305b) + 20-commit history + 429 labels → src/data/benchmarks.generated.json
+2026-09-10T10:45:16.3931205Z [sync-zk-catalog] copied SPARQL→ZK catalog (26 queries; covered 13, partial 6, gaps 7) → src/data/zk-sparql-catalog.generated.json
+2026-09-10T10:45:16.4275328Z [paper-factory] honesty gate passed: 57 evidence records (49 canonical, 8 indicative).
+2026-09-10T10:45:16.4656568Z [paper-evidence] verify passed: 49 canonical records — 10 machine-bound, 39 on the shrink-only allowlist.
+2026-09-10T10:45:16.4711871Z [paper-factory] evidence-binding verify passed: every canonical record is machine-bound or allowlisted.
+2026-09-10T10:45:16.6277070Z 
+2026-09-10T10:45:16.6278031Z no-perf-numbers: 0 finding(s) across 10 scanned file(s).
+2026-09-10T10:45:18.9755312Z check-privacy-claims: OK — scanned 784 file(s); no unqualified ZK/MPC privacy/soundness claim.
+2026-09-10T10:45:18.9759607Z [paper-factory] build-boundary honesty scan passed: 9 paper source(s) + paper-evidence.json scanned by both honesty gates (shared phrase list).
+2026-09-10T10:45:18.9762319Z 
+2026-09-10T10:45:18.9763104Z [paper-factory] WARNING: `typst` not found — emitting placeholder paper artifacts.
+2026-09-10T10:45:18.9763794Z   Install Typst 0.15+ (https://github.com/typst/typst/releases) so real PDFs/HTML build.
+2026-09-10T10:45:18.9764370Z   CI installs it; this fallback is for local dev without Typst only.
+2026-09-10T10:45:18.9764651Z 
+2026-09-10T10:45:19.1413967Z 
+2026-09-10T10:45:19.1415009Z no-perf-numbers: 0 finding(s) across 6 scanned file(s).
+2026-09-10T10:45:21.5557722Z check-privacy-claims: OK — scanned 784 file(s); no unqualified ZK/MPC privacy/soundness claim.
+2026-09-10T10:45:21.5579294Z [spec-factory] honesty scan passed: 6 spec source(s) scanned by both honesty gates (perf-number + privacy-claim).
+2026-09-10T10:45:21.5633728Z 
+2026-09-10T10:45:21.5634821Z [spec-factory] WARNING: `typst` not found — emitting placeholder spec artifacts.
+2026-09-10T10:45:21.5636720Z   Install Typst 0.15+ (https://github.com/typst/typst/releases) so real PDFs/HTML build.
+2026-09-10T10:45:21.5637779Z   CI installs it; this fallback is for local dev without Typst only.
+2026-09-10T10:45:21.5638139Z 
+2026-09-10T10:45:21.5690278Z 
+2026-09-10T10:45:21.5690624Z > sparq-site@0.1.0 build
+2026-09-10T10:45:21.5691068Z > next build
+2026-09-10T10:45:21.5691283Z 
+2026-09-10T10:45:22.4594674Z    ▲ Next.js 15.5.24
+2026-09-10T10:45:22.4596386Z    - Experiments (use with caution):
+2026-09-10T10:45:22.4597344Z      · optimizePackageImports
+2026-09-10T10:45:22.4598120Z 
+2026-09-10T10:45:22.5436127Z    Creating an optimized production build ...
+2026-09-10T10:45:36.5430271Z  ✓ Compiled successfully in 13.8s
+2026-09-10T10:45:36.5489675Z    Linting and checking validity of types ...
+2026-09-10T10:45:45.3772143Z    Collecting page data ...
+2026-09-10T10:45:47.8408059Z    Generating static pages (0/72) ...
+2026-09-10T10:45:49.3977023Z    Generating static pages (18/72) 
+2026-09-10T10:45:49.4919897Z    Generating static pages (36/72) 
+2026-09-10T10:45:49.7480046Z    Generating static pages (54/72) 
+2026-09-10T10:45:49.8435632Z  ✓ Generating static pages (72/72)
+2026-09-10T10:45:50.5941797Z    Finalizing page optimization ...
+2026-09-10T10:45:50.5942934Z    Collecting build traces ...
+2026-09-10T10:45:56.6659553Z    Exporting (0/2) ...
+2026-09-10T10:45:56.9250122Z  ✓ Exporting (2/2)
+2026-09-10T10:45:56.9602334Z 
+2026-09-10T10:45:56.9669646Z Route (app)                                       Size  First Load JS
+2026-09-10T10:45:56.9671345Z ┌ ○ /                                          2.51 kB         117 kB
+2026-09-10T10:45:56.9672833Z ├ ○ /_not-found                                  999 B         104 kB
+2026-09-10T10:45:56.9674211Z ├ ○ /about                                       831 B         107 kB
+2026-09-10T10:45:56.9677911Z ├ ○ /app                                         203 B         106 kB
+2026-09-10T10:45:56.9679410Z ├ ○ /assurance                                   203 B         106 kB
+2026-09-10T10:45:56.9680797Z ├ ○ /assurance/jsonld-conformance                138 B         103 kB
+2026-09-10T10:45:56.9682308Z ├ ○ /assurance/served-conformance                203 B         106 kB
+2026-09-10T10:45:56.9686217Z ├ ○ /benchmarks                                  203 B         106 kB
+2026-09-10T10:45:56.9694396Z ├ ● /benchmarks/[type]                         8.91 kB         124 kB
+2026-09-10T10:45:56.9695279Z ├   ├ /benchmarks/sparql
+2026-09-10T10:45:56.9695968Z ├   ├ /benchmarks/shacl
+2026-09-10T10:45:56.9696584Z ├   ├ /benchmarks/geo
+2026-09-10T10:45:56.9697217Z ├   └ [+11 more paths]
+2026-09-10T10:45:56.9698048Z ├ ○ /capabilities                              7.17 kB         129 kB
+2026-09-10T10:45:56.9699267Z ├ ○ /capabilities/shacl-forms                    138 B         103 kB
+2026-09-10T10:45:56.9700216Z ├ ○ /compare                                     203 B         106 kB
+2026-09-10T10:45:56.9701167Z ├ ○ /deploy                                    3.21 kB         114 kB
+2026-09-10T10:45:56.9702097Z ├ ○ /dogfooding                                  203 B         106 kB
+2026-09-10T10:45:56.9703037Z ├ ○ /download                                  9.68 kB         130 kB
+2026-09-10T10:45:56.9703944Z ├ ○ /examples                                    203 B         106 kB
+2026-09-10T10:45:56.9704848Z ├ ○ /genai-retrieval                             203 B         106 kB
+2026-09-10T10:45:56.9706341Z ├ ○ /gui                                         831 B         107 kB
+2026-09-10T10:45:56.9707935Z ├ ○ /papers                                      203 B         106 kB
+2026-09-10T10:45:56.9709655Z ├ ● /papers/[slug]                               203 B         106 kB
+2026-09-10T10:45:56.9711204Z ├   ├ /papers/filtered-ann
+2026-09-10T10:45:56.9712369Z ├   ├ /papers/solid-acl-conformance
+2026-09-10T10:45:56.9713349Z ├   ├ /papers/odrl-policy-bridge
+2026-09-10T10:45:56.9714007Z ├   └ [+6 more paths]
+2026-09-10T10:45:56.9715090Z ├ ○ /showcase/mpc-100k                         8.05 kB         123 kB
+2026-09-10T10:45:56.9718900Z ├ ○ /showcase/solid-pairs                      10.1 kB         140 kB
+2026-09-10T10:45:56.9720665Z ├ ○ /showcase/verifiable-credentials           11.1 kB         141 kB
+2026-09-10T10:45:56.9722376Z ├ ○ /showcase/zk-car-hire                      20.3 kB         144 kB
+2026-09-10T10:45:56.9724298Z ├ ○ /specs                                       203 B         106 kB
+2026-09-10T10:45:56.9726351Z ├ ● /specs/[slug]                                203 B         106 kB
+2026-09-10T10:45:56.9727490Z ├   ├ /specs/zksparql
+2026-09-10T10:45:56.9728744Z ├   ├ /specs/mpc-sparql
+2026-09-10T10:45:56.9729777Z ├   ├ /specs/proposed-specifications-template
+2026-09-10T10:45:56.9730758Z ├   └ [+3 more paths]
+2026-09-10T10:45:56.9731950Z ├ ● /surface/[slug]                              831 B         107 kB
+2026-09-10T10:45:56.9733147Z ├   ├ /surface/policy
+2026-09-10T10:45:56.9733882Z ├   ├ /surface/cli
+2026-09-10T10:45:56.9734285Z ├   └ /surface/python
+2026-09-10T10:45:56.9734981Z ├ ○ /surface/data-formats                      8.37 kB         129 kB
+2026-09-10T10:45:56.9735900Z ├ ○ /surface/federation                          831 B         107 kB
+2026-09-10T10:45:56.9736722Z ├ ○ /surface/full-text                           831 B         107 kB
+2026-09-10T10:45:56.9737519Z ├ ○ /surface/genai                               831 B         107 kB
+2026-09-10T10:45:56.9738375Z ├ ○ /surface/geosparql                           831 B         107 kB
+2026-09-10T10:45:56.9740251Z ├ ○ /surface/http-server                         831 B         107 kB
+2026-09-10T10:45:56.9741408Z ├ ○ /surface/inference                         6.76 kB         134 kB
+2026-09-10T10:45:56.9742523Z ├ ○ /surface/javascript-wasm                   7.16 kB         125 kB
+2026-09-10T10:45:56.9744038Z ├ ○ /surface/mpc                                 831 B         107 kB
+2026-09-10T10:45:56.9744882Z ├ ○ /surface/shacl                              8.2 kB         138 kB
+2026-09-10T10:45:56.9745475Z ├ ○ /surface/sparql                              203 B         106 kB
+2026-09-10T10:45:56.9746126Z ├ ○ /surface/streaming-rsp                       831 B         107 kB
+2026-09-10T10:45:56.9746749Z ├ ○ /surface/vector                              831 B         107 kB
+2026-09-10T10:45:56.9747321Z ├ ○ /surface/zk                                  831 B         107 kB
+2026-09-10T10:45:56.9748116Z └ ○ /try                                         831 B         107 kB
+2026-09-10T10:45:56.9749017Z + First Load JS shared by all                   103 kB
+2026-09-10T10:45:56.9749883Z   ├ chunks/3131-f1f634b13cba91c6.js            45.7 kB
+2026-09-10T10:45:56.9750796Z   ├ chunks/c7879cf7-ce6cc72fe8fad416.js        54.2 kB
+2026-09-10T10:45:56.9751658Z   └ other shared chunks (total)                2.75 kB
+2026-09-10T10:45:56.9752093Z 
+2026-09-10T10:45:56.9752106Z 
+2026-09-10T10:45:56.9752486Z ○  (Static)  prerendered as static content
+2026-09-10T10:45:56.9753328Z ●  (SSG)     prerendered as static HTML (uses generateStaticParams)
+2026-09-10T10:45:56.9753847Z 
+2026-09-10T10:45:57.0436538Z 
+2026-09-10T10:45:57.0437182Z > sparq-site@0.1.0 postbuild
+2026-09-10T10:45:57.0437766Z > node scripts/check-bundle.mjs
+2026-09-10T10:45:57.0438008Z 
+2026-09-10T10:45:57.1111600Z [check-bundle] wasm-free main-bundle guard (sq-vw3ax.9)
+2026-09-10T10:45:57.1113174Z   basePath (resolved): "/sparq"   images.unoptimized: true
+2026-09-10T10:45:57.1114036Z   heavy modules kept code-split (lazy on expand):
+2026-09-10T10:45:57.1115112Z     - @/components/geosparql-walkthrough → 1 chunk(s)
+2026-09-10T10:45:57.1115968Z     - @/components/text-playground → 2 chunk(s)
+2026-09-10T10:45:57.1116790Z     - @/components/vector-walkthrough → 1 chunk(s)
+2026-09-10T10:45:57.1117613Z     - @/components/genai-walkthrough → 1 chunk(s)
+2026-09-10T10:45:57.1118225Z     - @/components/http-server-walkthrough → 1 chunk(s)
+2026-09-10T10:45:57.1119167Z     - @/components/rsp-playground → 2 chunk(s)
+2026-09-10T10:45:57.1119973Z     - @/components/zk-car-hire → 3 chunk(s)
+2026-09-10T10:45:57.1120698Z     - @/components/mpc-demo → 2 chunk(s)
+2026-09-10T10:45:57.1121947Z     - @/components/home/hero-runner → 4 chunk(s)
+2026-09-10T10:45:57.1122855Z     - @/components/repl-graph-view → 1 chunk(s)
+2026-09-10T10:45:57.1123337Z     - @aztec/bb.js → 5 chunk(s)
+2026-09-10T10:45:57.1123758Z     - @noir-lang/noir_js → 3 chunk(s)
+2026-09-10T10:45:57.1124136Z     - fzstd → 1 chunk(s)
+2026-09-10T10:45:57.1124487Z   guarded route first-load payloads:
+2026-09-10T10:45:57.1124938Z     - /: 7 first-load JS files, 0 heavy
+2026-09-10T10:45:57.1125396Z     - /capabilities: 9 first-load JS files, 0 heavy
+2026-09-10T10:45:57.1125945Z     - /surface/data-formats: 9 first-load JS files, 0 heavy
+2026-09-10T10:45:57.1126464Z   server-only benchmark snapshot: no client chunk embeds it
+2026-09-10T10:45:57.1126741Z 
+2026-09-10T10:45:57.1127830Z [check-bundle] PASS — no engine wasm / ZK prover / demo / lazy-codec chunk in any guarded route's first-load bundle; server-only benchmark snapshot in no client chunk; basePath + images.unoptimized preserved.
+2026-09-10T10:45:57.1321874Z Post job cleanup.
+2026-09-10T10:45:57.2597728Z Post job cleanup.
+2026-09-10T10:45:57.5483770Z (node:11050) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+2026-09-10T10:45:57.5484592Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-09-10T10:45:57.5720888Z Post job cleanup.
+2026-09-10T10:45:57.6643407Z [command]/usr/bin/git version
+2026-09-10T10:45:57.6691733Z git version 2.55.0
+2026-09-10T10:45:57.6734833Z Temporarily overriding HOME='/home/runner/work/_temp/615c2937-6e12-4fdd-b602-f8fbe31672e0' before making global git config changes
+2026-09-10T10:45:57.6736627Z Adding repository directory to the temporary git global config as a safe directory
+2026-09-10T10:45:57.6741632Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/sparq/sparq
+2026-09-10T10:45:57.6775197Z Removing SSH command configuration
+2026-09-10T10:45:57.6782628Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-09-10T10:45:57.6821457Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-09-10T10:45:57.7110959Z Removing HTTP extra header
+2026-09-10T10:45:57.7126855Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-10T10:45:57.7194442Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-09-10T10:45:57.7584991Z Removing includeIf entries pointing to credentials config files
+2026-09-10T10:45:57.7594679Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-10T10:45:57.7627897Z includeif.gitdir:/home/runner/work/sparq/sparq/.git.path
+2026-09-10T10:45:57.7629926Z includeif.gitdir:/home/runner/work/sparq/sparq/.git/worktrees/*.path
+2026-09-10T10:45:57.7631226Z includeif.gitdir:/github/workspace/.git.path
+2026-09-10T10:45:57.7632365Z includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-09-10T10:45:57.7638250Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/sparq/sparq/.git.path
+2026-09-10T10:45:57.7680086Z /home/runner/work/_temp/git-credentials-d1ae6eea-bd9d-4fa2-9c08-ae372131073f.config
+2026-09-10T10:45:57.7693600Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/sparq/sparq/.git.path /home/runner/work/_temp/git-credentials-d1ae6eea-bd9d-4fa2-9c08-ae372131073f.config
+2026-09-10T10:45:57.7749622Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/sparq/sparq/.git/worktrees/*.path
+2026-09-10T10:45:57.7793459Z /home/runner/work/_temp/git-credentials-d1ae6eea-bd9d-4fa2-9c08-ae372131073f.config
+2026-09-10T10:45:57.7808094Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/sparq/sparq/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-d1ae6eea-bd9d-4fa2-9c08-ae372131073f.config
+2026-09-10T10:45:57.7862481Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git.path
+2026-09-10T10:45:57.7895788Z /github/runner_temp/git-credentials-d1ae6eea-bd9d-4fa2-9c08-ae372131073f.config
+2026-09-10T10:45:57.7905007Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-d1ae6eea-bd9d-4fa2-9c08-ae372131073f.config
+2026-09-10T10:45:57.7947277Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-09-10T10:45:57.7979080Z /github/runner_temp/git-credentials-d1ae6eea-bd9d-4fa2-9c08-ae372131073f.config
+2026-09-10T10:45:57.7985843Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-d1ae6eea-bd9d-4fa2-9c08-ae372131073f.config
+2026-09-10T10:45:57.8024773Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-09-10T10:45:57.8263566Z Removing credentials config '/home/runner/work/_temp/git-credentials-d1ae6eea-bd9d-4fa2-9c08-ae372131073f.config'
+2026-09-10T10:45:57.8408480Z Cleaning up orphan processes

@@ -1,0 +1,39 @@
+# job-102837808255.log:3396-3433
+3396: 2026-09-10T10:43:48.0499617Z ##[group]Run python3 scripts/tests/test_js_wasm_pack_install.py
+3397: 2026-09-10T10:43:48.0500030Z [36;1mpython3 scripts/tests/test_js_wasm_pack_install.py[0m
+3398: 2026-09-10T10:43:48.0521378Z shell: /usr/bin/bash -e {0}
+3399: 2026-09-10T10:43:48.0521638Z env:
+3400: 2026-09-10T10:43:48.0521910Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.14/x64
+3401: 2026-09-10T10:43:48.0522326Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib/pkgconfig
+3402: 2026-09-10T10:43:48.0522917Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+3403: 2026-09-10T10:43:48.0523288Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+3404: 2026-09-10T10:43:48.0523659Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+3405: 2026-09-10T10:43:48.0524020Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib
+3406: 2026-09-10T10:43:48.0524346Z ##[endgroup]
+3407: 2026-09-10T10:43:48.1087622Z test_install_precedes_npm_ci (__main__.JsLaneWasmPackInstall.test_install_precedes_npm_ci)
+3408: 2026-09-10T10:43:48.1093518Z (4) `prepare` runs on `npm ci` and needs wasm-pack already on PATH. ... ok
+3409: 2026-09-10T10:43:48.1094657Z test_installs_prebuilt_binary_sha_pinned (__main__.JsLaneWasmPackInstall.test_installs_prebuilt_binary_sha_pinned)
+3410: 2026-09-10T10:43:48.1096622Z (2) The replacement is the SHA-pinned prebuilt-download action. ... ok
+3411: 2026-09-10T10:43:48.1097614Z test_no_cargo_install_wasm_pack (__main__.JsLaneWasmPackInstall.test_no_cargo_install_wasm_pack)
+3412: 2026-09-10T10:43:48.1098849Z (1) The source compile — the actual flake surface — must be gone. ... ok
+3413: 2026-09-10T10:43:48.1099972Z test_npm_ci_before_wasm_pack_is_rejected (__main__.JsLaneWasmPackInstall.test_npm_ci_before_wasm_pack_is_rejected) ... ok
+3414: 2026-09-10T10:43:48.1101380Z test_root_install_inline_and_block_forms (__main__.JsLaneWasmPackInstall.test_root_install_inline_and_block_forms) ... ok
+3415: 2026-09-10T10:43:48.1103560Z test_root_install_missing_or_wrong_command_is_rejected (__main__.JsLaneWasmPackInstall.test_root_install_missing_or_wrong_command_is_rejected) ... ok
+3416: 2026-09-10T10:43:48.1109025Z test_root_install_wrong_or_missing_directory_is_rejected (__main__.JsLaneWasmPackInstall.test_root_install_wrong_or_missing_directory_is_rejected) ... ok
+3417: 2026-09-10T10:43:48.1110583Z test_version_is_pinned_exactly_not_latest (__main__.JsLaneWasmPackInstall.test_version_is_pinned_exactly_not_latest)
+3418: 2026-09-10T10:43:48.1111790Z (3) An exact vX.Y.Z — `latest` re-adds a network lookup to resolve it. ... ok
+3419: 2026-09-10T10:43:48.1112988Z test_both_wasm_lanes_use_the_action (__main__.WasmPackVersionUnified.test_both_wasm_lanes_use_the_action)
+3420: 2026-09-10T10:43:48.1190496Z Anti-vacuity: the two lanes #5771 unified must still be in the sample. ... ok
+3421: 2026-09-10T10:43:48.1191686Z test_every_step_pins_an_exact_version (__main__.WasmPackVersionUnified.test_every_step_pins_an_exact_version)
+3422: 2026-09-10T10:43:48.1255554Z Every wasm-pack step names an exact release — an omitted `version:` takes ... ok
+3423: 2026-09-10T10:43:48.1256880Z test_mutation_dropping_a_lanes_version_is_caught (__main__.WasmPackVersionUnified.test_mutation_dropping_a_lanes_version_is_caught)
+3424: 2026-09-10T10:43:48.1257961Z Deleting one lane's `version:` must NOT leave both assertions green. ... ok
+3425: 2026-09-10T10:43:48.1259120Z test_mutation_version_outside_with_is_not_a_pin (__main__.WasmPackVersionUnified.test_mutation_version_outside_with_is_not_a_pin)
+3426: 2026-09-10T10:43:48.1260273Z A `version:` that the action never receives must not read as a pin. ... ok
+3427: 2026-09-10T10:43:48.1325466Z test_single_version_across_workflows (__main__.WasmPackVersionUnified.test_single_version_across_workflows) ... ok
+3428: 2026-09-10T10:43:48.1326552Z 
+3429: 2026-09-10T10:43:48.1327070Z ----------------------------------------------------------------------
+3430: 2026-09-10T10:43:48.1327748Z Ran 13 tests in 0.024s
+3431: 2026-09-10T10:43:48.1327970Z 
+3432: 2026-09-10T10:43:48.1328091Z OK
+3433: 2026-09-10T10:43:48.1420922Z ##[group]Run python3 scripts/tests/test_ci_selection_alarm.py

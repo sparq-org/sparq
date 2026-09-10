@@ -1,0 +1,59 @@
+# utility.cjs:11-18
+11: const is = require('./is.cjs');
+12: const libvips = require('./libvips.cjs');
+13: const sharp = require('./sharp.cjs');
+14: const pkg = require("../package.json");
+15: 
+16: 
+17: const runtimePlatform = libvips.runtimePlatformArch();
+18: const libvipsVersion = sharp.libvipsVersion();
+# utility.cjs:46-80
+46:   locallyBoundedBicubic: 'lbb',
+47:   /** [Nohalo interpolation](http://eprints.soton.ac.uk/268086/). Prevents acutance but typically reduces performance by a factor of 3. */
+48:   nohalo: 'nohalo',
+49:   /** [VSQBS interpolation](https://github.com/libvips/libvips/blob/master/libvips/resample/vsqbs.cpp#L48). Prevents "staircasing" when enlarging. */
+50:   vertexSplitQuadraticBasisSpline: 'vsqbs'
+51: };
+52: 
+53: /**
+54:  * An Object containing the version numbers of sharp, libvips
+55:  * and (when using prebuilt binaries) its dependencies.
+56:  *
+57:  * @member
+58:  * @example
+59:  * console.log(sharp.versions);
+60:  */
+61: let versions = {
+62:   vips: libvipsVersion.semver
+63: };
+64: /* node:coverage ignore next 15 */
+65: if (!libvipsVersion.isGlobal) {
+66:   if (!libvipsVersion.isWasm) {
+67:     try {
+68:       versions = require(`@img/sharp-${runtimePlatform}/versions`);
+69:     } catch (_) {
+70:       try {
+71:         versions = require(`@img/sharp-libvips-${runtimePlatform}/versions`);
+72:       } catch (_) {}
+73:     }
+74:   } else {
+75:     try {
+76:       versions = require('@img/sharp-wasm32/versions');
+77:     } catch (_) {}
+78:   }
+79: }
+80: versions.sharp = pkg.version;
+# utility.cjs:289-301
+289:  */
+290: module.exports = (Sharp) => {
+291:   Sharp.cache = cache;
+292:   Sharp.concurrency = concurrency;
+293:   Sharp.counters = counters;
+294:   Sharp.simd = simd;
+295:   Sharp.format = format;
+296:   Sharp.interpolators = interpolators;
+297:   Sharp.versions = versions;
+298:   Sharp.queue = queue;
+299:   Sharp.block = block;
+300:   Sharp.unblock = unblock;
+301: };

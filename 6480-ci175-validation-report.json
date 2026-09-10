@@ -1,0 +1,492 @@
+{
+  "task": "PR6481 exact17594 CI/native review verification",
+  "model": "GPT-6 Astra xhigh",
+  "created_utc": "2026-09-10T11:04:47.156760+00:00",
+  "head": "17594d4a6534c142cae764772fc42049e898eca3",
+  "checkout_merge_commit": "26409755cc774590ef3ada1231ca72dcfd252caa",
+  "checkout_base": "781f667c19a8ebb779cfccb24b05ea432360b025",
+  "runs": [
+    {
+      "id": 34467004102,
+      "name": "gui",
+      "event": "pull_request",
+      "head_sha": "17594d4a6534c142cae764772fc42049e898eca3",
+      "run_attempt": 1,
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-09-10T10:37:10Z",
+      "updated_at": "2026-09-10T10:54:41Z"
+    },
+    {
+      "id": 34467004107,
+      "name": "supply-chain",
+      "event": "pull_request",
+      "head_sha": "17594d4a6534c142cae764772fc42049e898eca3",
+      "run_attempt": 1,
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-09-10T10:37:10Z",
+      "updated_at": "2026-09-10T10:38:40Z"
+    },
+    {
+      "id": 34467004155,
+      "name": "docs-quality",
+      "event": "pull_request",
+      "head_sha": "17594d4a6534c142cae764772fc42049e898eca3",
+      "run_attempt": 1,
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-09-10T10:37:11Z",
+      "updated_at": "2026-09-10T10:44:09Z"
+    },
+    {
+      "id": 34467004187,
+      "name": "js",
+      "event": "pull_request",
+      "head_sha": "17594d4a6534c142cae764772fc42049e898eca3",
+      "run_attempt": 1,
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-09-10T10:37:11Z",
+      "updated_at": "2026-09-10T10:45:35Z"
+    },
+    {
+      "id": 34467004259,
+      "name": "ci-summary",
+      "event": "pull_request",
+      "head_sha": "17594d4a6534c142cae764772fc42049e898eca3",
+      "run_attempt": 1,
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-09-10T10:37:11Z",
+      "updated_at": "2026-09-10T10:55:21Z"
+    }
+  ],
+  "native_install": {
+    "run": 34467004187,
+    "job": 102837808254,
+    "node": "22.23.2",
+    "npm": "10.9.8",
+    "next_installed": {
+      "gui/app": "15.5.24",
+      "site": "15.5.24"
+    },
+    "sharp_loaded": "0.35.4",
+    "vips_loaded": "8.18.6",
+    "png_bytes": 91,
+    "png_properties": "Exact script asserts png format,1x1 dimensions,length>8 and PNG signature before success output.",
+    "lock_match": "Loaded sharp.versions.sharp equalled committed packages[node_modules/sharp].version; assertion reached and passed.",
+    "no_drift": "Final git diff --exit-code -- package-lock.json gui/app/package.json site/package.json ran after awaited PNG under bash -e; no diff output, step conclusion success and next build step started.",
+    "log_lines": {
+      "tool_versions": [
+        448,
+        449
+      ],
+      "workspace_resolution": [
+        522,
+        526
+      ],
+      "sharp_vips_png": [
+        528,
+        529
+      ],
+      "no_drift_command": 493,
+      "bash_errexit": 494,
+      "next_step": 530
+    }
+  },
+  "validation": {
+    "docs_inspection": {
+      "run": 34467004155,
+      "job": 102837808255,
+      "tests": 13,
+      "result": "OK",
+      "lines": [
+        3396,
+        3433
+      ]
+    },
+    "supply_advisory": {
+      "run": 34467004107,
+      "job": 102837807815,
+      "tests": 25,
+      "result": "OK",
+      "standalone_drift": "matches lock including1 sharp instance",
+      "lines": [
+        285,
+        335
+      ]
+    },
+    "gui_hard_jobs": [
+      {
+        "id": 102837808267,
+        "name": "GUI hermetic guards (browserName tripwire + no-sleep-gate)",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Set up job",
+            "conclusion": "success"
+          },
+          {
+            "name": "Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0",
+            "conclusion": "success"
+          },
+          {
+            "name": "Drift tripwire \u2014 browserName regression guard (issue",
+            "conclusion": "success"
+          },
+          {
+            "name": "Determinism gate \u2014 no arbitrary sleeps (no-sleep-gate)",
+            "conclusion": "success"
+          },
+          {
+            "name": "Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0",
+            "conclusion": "success"
+          },
+          {
+            "name": "Complete job",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "id": 102837808528,
+        "name": "shared TS client typecheck",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Set up job",
+            "conclusion": "success"
+          },
+          {
+            "name": "Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0",
+            "conclusion": "success"
+          },
+          {
+            "name": "Run actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
+            "conclusion": "success"
+          },
+          {
+            "name": "Install dependencies",
+            "conclusion": "success"
+          },
+          {
+            "name": "Typecheck (@sparq/client)",
+            "conclusion": "success"
+          },
+          {
+            "name": "Unit tests (@sparq/client)",
+            "conclusion": "success"
+          },
+          {
+            "name": "Post Run actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
+            "conclusion": "success"
+          },
+          {
+            "name": "Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0",
+            "conclusion": "success"
+          },
+          {
+            "name": "Complete job",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "id": 102837808576,
+        "name": "site build + typecheck (consuming @sparq/client)",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Set up job",
+            "conclusion": "success"
+          },
+          {
+            "name": "Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0",
+            "conclusion": "success"
+          },
+          {
+            "name": "Run dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8",
+            "conclusion": "success"
+          },
+          {
+            "name": "Run Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32",
+            "conclusion": "success"
+          },
+          {
+            "name": "Run actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
+            "conclusion": "success"
+          },
+          {
+            "name": "Install wasm-pack",
+            "conclusion": "success"
+          },
+          {
+            "name": "Build wasm bundle (shacl,jsonld)",
+            "conclusion": "success"
+          },
+          {
+            "name": "Install @sparq/client dependencies",
+            "conclusion": "success"
+          },
+          {
+            "name": "@sparq/client tracked wasm d.ts byte-identical to fresh build",
+            "conclusion": "success"
+          },
+          {
+            "name": "Install site dependencies",
+            "conclusion": "success"
+          },
+          {
+            "name": "Site lint",
+            "conclusion": "success"
+          },
+          {
+            "name": "Site typecheck",
+            "conclusion": "success"
+          },
+          {
+            "name": "Site static export build (consumes @sparq/client)",
+            "conclusion": "success"
+          },
+          {
+            "name": "Post Run actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
+            "conclusion": "success"
+          },
+          {
+            "name": "Post Run Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32",
+            "conclusion": "success"
+          },
+          {
+            "name": "Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0",
+            "conclusion": "success"
+          },
+          {
+            "name": "Complete job",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "id": 102837808628,
+        "name": "operational GUI frontend (build + lint + typecheck, both targets)",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Set up job",
+            "conclusion": "success"
+          },
+          {
+            "name": "Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0",
+            "conclusion": "success"
+          },
+          {
+            "name": "Run dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8",
+            "conclusion": "success"
+          },
+          {
+            "name": "Run Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32",
+            "conclusion": "success"
+          },
+          {
+            "name": "Run actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
+            "conclusion": "success"
+          },
+          {
+            "name": "Install wasm-pack",
+            "conclusion": "success"
+          },
+          {
+            "name": "Build wasm bundle (shacl,jsonld)",
+            "conclusion": "success"
+          },
+          {
+            "name": "Build W-reason wasm bundle (RDFS / OWL 2 RL reasoner)",
+            "conclusion": "success"
+          },
+          {
+            "name": "Build W-text wasm bundle (BM25 full-text search)",
+            "conclusion": "success"
+          },
+          {
+            "name": "Build W-rsp wasm bundle (windowed RSP-QL stream processor)",
+            "conclusion": "success"
+          },
+          {
+            "name": "Install workspace dependencies",
+            "conclusion": "success"
+          },
+          {
+            "name": "GUI frontend lint",
+            "conclusion": "success"
+          },
+          {
+            "name": "GUI frontend typecheck",
+            "conclusion": "success"
+          },
+          {
+            "name": "GUI frontend unit tests",
+            "conclusion": "success"
+          },
+          {
+            "name": "GUI frontend static export (web target)",
+            "conclusion": "success"
+          },
+          {
+            "name": "GUI frontend static export (Tauri target)",
+            "conclusion": "success"
+          },
+          {
+            "name": "Post Run actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
+            "conclusion": "success"
+          },
+          {
+            "name": "Post Run Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32",
+            "conclusion": "success"
+          },
+          {
+            "name": "Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0",
+            "conclusion": "success"
+          },
+          {
+            "name": "Complete job",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "id": 102837808658,
+        "name": "GUI Playwright mocked-IPC lane",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Set up job",
+            "conclusion": "success"
+          },
+          {
+            "name": "Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0",
+            "conclusion": "success"
+          },
+          {
+            "name": "Run dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8",
+            "conclusion": "success"
+          },
+          {
+            "name": "Run Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32",
+            "conclusion": "success"
+          },
+          {
+            "name": "Run actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
+            "conclusion": "success"
+          },
+          {
+            "name": "Install wasm-pack",
+            "conclusion": "success"
+          },
+          {
+            "name": "Build WASM bundle (shacl,jsonld)",
+            "conclusion": "success"
+          },
+          {
+            "name": "Build W-reason WASM bundle (RDFS / OWL 2 RL reasoner)",
+            "conclusion": "success"
+          },
+          {
+            "name": "Build W-text WASM bundle (BM25 full-text search)",
+            "conclusion": "success"
+          },
+          {
+            "name": "Build W-rsp WASM bundle (windowed RSP-QL stream processor)",
+            "conclusion": "success"
+          },
+          {
+            "name": "Install workspace dependencies",
+            "conclusion": "success"
+          },
+          {
+            "name": "Build GUI frontend static export (Tauri target \u2192 gui/app/out/)",
+            "conclusion": "success"
+          },
+          {
+            "name": "Install Playwright Chromium",
+            "conclusion": "success"
+          },
+          {
+            "name": "Determinism gate \u2014 no waitForTimeout",
+            "conclusion": "success"
+          },
+          {
+            "name": "Run Playwright mocked-IPC tests",
+            "conclusion": "success"
+          },
+          {
+            "name": "Post Run actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
+            "conclusion": "success"
+          },
+          {
+            "name": "Post Run Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32",
+            "conclusion": "success"
+          },
+          {
+            "name": "Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0",
+            "conclusion": "success"
+          },
+          {
+            "name": "Complete job",
+            "conclusion": "success"
+          }
+        ]
+      }
+    ],
+    "frontend_raw_log_observations": {
+      "site": "Lint/typecheck/static export succeeded; Next15.5.24,72 static pages.",
+      "gui": "Lint/typecheck,123 unit tests with0 failures; web andTauri exports succeeded withNext15.5.24.",
+      "playwright_mocked_ipc": "92 passed."
+    },
+    "aggregate": {
+      "run": 34467004259,
+      "check_run": 102837808339,
+      "app_id": 15368,
+      "app_slug": "github-actions",
+      "result": "success",
+      "completed_at": "2026-09-10T10:55:21Z",
+      "gating_total": 65,
+      "gating_ran": 30,
+      "gating_skipped": 35,
+      "advisory_excluded": 15,
+      "interpretation": "Policy-scoped aggregate success, not65 executed jobs or full-workspace proof."
+    }
+  },
+  "copilot_disposition": {
+    "versions_claim": {
+      "thread": "PRRT_kwDOSz3qKM6hCljp",
+      "assessment": "False for exact published sharp0.35.4 and actual Linux run. Public source explicitly assigns and exports versions.sharp; real log prints0.35.4 and assert passes. Suggested external sharp/package.json subpath is not exported by0.35.4.",
+      "recommended_response": "Cite utility.cjs:80/:297 plus job log528-529,retain current code."
+    },
+    "consumer_path_assertion": {
+      "assessment": "Accurate future regression-test gap, not a current missing trigger. Both paths are present. Prior actualOpus0c review explicitly classified this medium-low/nonblocking; original authoring bundle ran one-off path-removal controls, not a committed CI assertion.",
+      "limit": "Current PR also changes workflow/lock, so this run is not an isolated manifest-only event test.",
+      "disposition": "Record as optional retained regression coverage; no source change in this read-only phase."
+    },
+    "next_floor_assertion": {
+      "assessment": "npm ls validates installed dependency resolution and reports version; it is not a permanent anti-downgrade floor. Current manifests ^15.5.24 and installed exact15.5.24 satisfy this patch. A coordinated future manifest+lock downgrade could pass that listing check.",
+      "prior_review_precision": "No explicit Next-floor finding in the two inspected prior Opus results; do not attribute a nonexistent individual approval. Prior review approved this concrete patched graph for CI.",
+      "disposition": "Potential future policy/test strengthening; no current patch defect demonstrated and no new immutable security-floor policy introduced."
+    }
+  },
+  "caveats": [
+    "npm ci still reported18 vulnerabilities (2 moderate,16 high); this inspection did not retrieve audit identities and does not claim all workspace advisories are resolved.",
+    "Current smoke proves this Ubuntu native installation, not every optional platform package or security/exploit coverage.",
+    "vips8.18.6 is observed; the script does not itself enforce a permanent vips floor or selected @img wrapper identity.",
+    "Hard GUI guard/shared-client jobs verified through exact completed step metadata; raw logs were read only for site,GUI frontend andPlaywright jobs.",
+    "All live/remote state remains unchanged; no review resolution, rerun, queue action, local install/build or model call."
+  ],
+  "request_budget": {
+    "initial_core_remaining": 4986,
+    "github_api_logical_requests": 19,
+    "public_source_downloads": 1,
+    "total_logical_read_requests": 20,
+    "retries": 0,
+    "note": "Job-log signed redirects are followed internally by gh;20 counts requested endpoint/download operations, not low-level HTTP hops. No final extra budget request."
+  }
+}

@@ -1,0 +1,52 @@
+# job-102837807815.log:285-335
+285: 2026-09-10T10:37:38.1702357Z ##[group]Run python3 scripts/tests/test_check_npm_advisory_record.py
+286: 2026-09-10T10:37:38.1702901Z [36;1mpython3 scripts/tests/test_check_npm_advisory_record.py[0m
+287: 2026-09-10T10:37:38.1742142Z shell: /usr/bin/bash -e {0}
+288: 2026-09-10T10:37:38.1742423Z ##[endgroup]
+289: 2026-09-10T10:37:38.2324945Z test_failure_report_says_do_not_relax (__main__.EvaluatePure.test_failure_report_says_do_not_relax) ... ok
+290: 2026-09-10T10:37:38.2326310Z test_instance_version_drift_fails (__main__.EvaluatePure.test_instance_version_drift_fails) ... ok
+291: 2026-09-10T10:37:38.2327469Z test_matching_record_passes (__main__.EvaluatePure.test_matching_record_passes) ... ok
+292: 2026-09-10T10:37:38.2328631Z test_new_unrecorded_instance_fails (__main__.EvaluatePure.test_new_unrecorded_instance_fails) ... ok
+293: 2026-09-10T10:37:38.2330146Z test_optional_dependency_pin_is_read_from_the_recorded_field (__main__.EvaluatePure.test_optional_dependency_pin_is_read_from_the_recorded_field)
+294: 2026-09-10T10:37:38.2332296Z `sharp` is an OPTIONAL dep of `next` — a dependencies-only lookup would miss it. ... ok
+295: 2026-09-10T10:37:38.2333597Z test_optional_pin_moved_to_another_field_fails (__main__.EvaluatePure.test_optional_pin_moved_to_another_field_fails)
+296: 2026-09-10T10:37:38.2334954Z Same range under `dependencies` must not satisfy an `optionalDependencies` pin. ... ok
+297: 2026-09-10T10:37:38.2336515Z test_pinning_package_gone_fails (__main__.EvaluatePure.test_pinning_package_gone_fails) ... ok
+298: 2026-09-10T10:37:38.2337782Z test_pinning_package_version_drift_fails (__main__.EvaluatePure.test_pinning_package_version_drift_fails) ... ok
+299: 2026-09-10T10:37:38.2338971Z test_pinning_range_drift_fails (__main__.EvaluatePure.test_pinning_range_drift_fails)
+300: 2026-09-10T10:37:38.2339946Z The crux of the disposition: the pin RELAXING is what unblocks the patch. ... ok
+301: 2026-09-10T10:37:38.2341141Z test_root_override_bump_fails (__main__.EvaluatePure.test_root_override_bump_fails) ... ok
+302: 2026-09-10T10:37:38.2342545Z test_root_override_removed_fails (__main__.EvaluatePure.test_root_override_removed_fails) ... ok
+303: 2026-09-10T10:37:38.2343630Z test_vanished_instance_fails (__main__.EvaluatePure.test_vanished_instance_fails) ... ok
+304: 2026-09-10T10:37:38.2385585Z test_committed_record_matches_committed_lock (__main__.LiveRepo.test_committed_record_matches_committed_lock) ... ok
+305: 2026-09-10T10:37:38.2427595Z test_main_exits_zero_on_the_live_repo (__main__.LiveRepo.test_main_exits_zero_on_the_live_repo) ... ok
+306: 2026-09-10T10:37:38.2429657Z test_record_covers_the_tracked_packages (__main__.LiveRepo.test_record_covers_the_tracked_packages) ... ok
+307: 2026-09-10T10:37:38.2431572Z test_nested_and_workspace_copies_are_instances (__main__.LockInstanceMatching.test_nested_and_workspace_copies_are_instances) ... ok
+308: 2026-09-10T10:37:38.2433461Z test_scoped_package_with_same_suffix_is_not_an_instance (__main__.LockInstanceMatching.test_scoped_package_with_same_suffix_is_not_an_instance)
+309: 2026-09-10T10:37:38.2434939Z `node_modules/@tailwindcss/postcss` is NOT a copy of `postcss`. ... ok
+310: 2026-09-10T10:37:38.2439096Z test_instance_missing_field_is_parse_error (__main__.RecordParsing.test_instance_missing_field_is_parse_error) ... ok
+311: 2026-09-10T10:37:38.2443040Z test_malformed_json_is_parse_error (__main__.RecordParsing.test_malformed_json_is_parse_error) ... ok
+312: 2026-09-10T10:37:38.2446462Z test_missing_fence_is_parse_error (__main__.RecordParsing.test_missing_fence_is_parse_error) ... ok
+313: 2026-09-10T10:37:38.2448675Z test_missing_record_file_is_parse_error (__main__.RecordParsing.test_missing_record_file_is_parse_error) ... ok
+314: 2026-09-10T10:37:38.2452616Z test_missing_sentinels_is_parse_error (__main__.RecordParsing.test_missing_sentinels_is_parse_error) ... ok
+315: 2026-09-10T10:37:38.2456494Z test_roundtrip (__main__.RecordParsing.test_roundtrip) ... ok
+316: 2026-09-10T10:37:38.2457720Z test_unknown_pin_field_is_parse_error (__main__.RecordParsing.test_unknown_pin_field_is_parse_error)
+317: 2026-09-10T10:37:38.2461960Z A typo'd field would otherwise compare None to None and pass vacuously. ... ok
+318: 2026-09-10T10:37:38.2467070Z test_unknown_pin_kind_is_parse_error (__main__.RecordParsing.test_unknown_pin_kind_is_parse_error) ... ok
+319: 2026-09-10T10:37:38.2467974Z 
+320: 2026-09-10T10:37:38.2468180Z npm advisory record matches the lock:
+321: 2026-09-10T10:37:38.2468947Z ----------------------------------------------------------------------
+322: 2026-09-10T10:37:38.2469739Z Ran 25 tests in 0.014s
+323: 2026-09-10T10:37:38.2470140Z 
+324: 2026-09-10T10:37:38.2470504Z OK
+325: 2026-09-10T10:37:38.2482540Z   brace-expansion: 4 instance(s), all recorded
+326: 2026-09-10T10:37:38.2483180Z   postcss: 1 instance(s), all recorded
+327: 2026-09-10T10:37:38.2483704Z   sharp: 1 instance(s), all recorded
+328: 2026-09-10T10:37:38.2590577Z ##[group]Run python3 scripts/check-npm-advisory-record.py
+329: 2026-09-10T10:37:38.2591465Z [36;1mpython3 scripts/check-npm-advisory-record.py[0m
+330: 2026-09-10T10:37:38.2630280Z shell: /usr/bin/bash -e {0}
+331: 2026-09-10T10:37:38.2630539Z ##[endgroup]
+332: 2026-09-10T10:37:38.3043242Z npm advisory record matches the lock:
+333: 2026-09-10T10:37:38.3043820Z   brace-expansion: 4 instance(s), all recorded
+334: 2026-09-10T10:37:38.3044348Z   postcss: 1 instance(s), all recorded
+335: 2026-09-10T10:37:38.3044803Z   sharp: 1 instance(s), all recorded

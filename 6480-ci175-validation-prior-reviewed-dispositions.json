@@ -1,0 +1,41 @@
+{
+  "followup_head": "0c6a780593a9b3381fb158e426519a2a6d8d17f9",
+  "followup_verdict": "approve_for_ci",
+  "path_guard_nonblocking_finding": [
+    {
+      "file": ".github/workflows/js.yml",
+      "line": "44-45 (added `site/package.json`, `gui/app/package.json`) and the `paths:` rationale comment at ~30-33",
+      "severity": "medium-low",
+      "finding": "The two consumer-manifest triggers are the thing that makes the parent's `npm ls next --workspace=... ` / `git diff --exit-code -- ... gui/app/package.json site/package.json` drift guard reachable for manifest-only PRs, yet nothing asserts they stay. The repo already commits workflow-inspection tests (this very file), so their absence here is an asymmetry: a later paths-filter edit would silently disable PR-time coverage for a manifest-only change with no red gate. The unfiltered `push: branches: [main]` leg still catches it post-merge, which is why this is not blocking. The explanatory comment above `paths:` also still enumerates only 'the js package, the npm workspace members + root lockfile/manifest, the wasm crates, this workflow file' and was not updated to name the consumer manifests it now watches.",
+      "suggestion": "Add a one-line assertion to the committed workflow-inspection test that both manifests appear in `pull_request.paths`, and refresh the comment."
+    }
+  ],
+  "native_head": "17594d4a6534c142cae764772fc42049e898eca3",
+  "native_verdict": "approve_delta_for_ci",
+  "native_nonblocking": [
+    {
+      "id": "NB1",
+      "title": "Lock key and hoisting assumed, not proven by a real install",
+      "detail": "The script hardcodes packages['node_modules/sharp'] and resolves require('sharp') from the repo root. If npm ci nests the instance (e.g. node_modules/next/node_modules/sharp), require or the .version read throws. Failure mode is fail-closed (TypeError/MODULE_NOT_FOUND -> nonzero exit -> red step), so it cannot produce a false pass, but the error text would be opaque relative to the intended assertion message. Evidence (single recorded sharp lock instance, top-level-key advisory tooling) makes root hoisting the expected outcome; first real CI run confirms it."
+    },
+    {
+      "id": "NB2",
+      "title": "Native/platform package identity not asserted",
+      "detail": "Only sharp.versions.sharp (the JS wrapper package version) is compared to the lock. The selected @img/sharp-<platform> prebuilt version and sharp.versions.vips are printed but never asserted, so a drifted or substituted platform binary that still loads would pass. Printing full versions preserves diagnosability; consider asserting presence/shape of versions.vips later."
+    },
+    {
+      "id": "NB3",
+      "title": "Weak byte-length bound",
+      "detail": "assert.ok(data.length > 8) is satisfied by the signature check alone plus a few bytes; it is a liveness rather than a content check. Format/dimension/signature assertions carry the real weight."
+    },
+    {
+      "id": "NB4",
+      "title": "Stub-only control coverage",
+      "detail": "Positive/negative controls exercised control flow and exit-code propagation against a stub on Node 24.19.0. No real libvips/ABI execution and no Node 22 native compatibility claim; the packet states this limit explicitly."
+    }
+  ],
+  "prior_result_hashes": {
+    "opus-followup-result.json": "3b10eb36b65fe6dbfd74b2ca9894351f80a8f42a56b947ff5fe4c28373e7e598",
+    "opus-native-smoke-result.json": "30a5165b09b81a637600cf0d4877d2c6fe931d720c6c36f6de5a2167f28da03b"
+  }
+}

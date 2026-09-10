@@ -1,0 +1,1 @@
+{"query": "mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{id isResolved}}}", "variables": {"id": "PRRT_kwDOSz3qKM6hCljp"}}

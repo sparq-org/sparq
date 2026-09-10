@@ -573,6 +573,16 @@ FILES["5183-admission-engine-witness-root-verification.json"] = ROOT / "direct-5
 for evidence_name in ["budget-1056.json", "heartbeat1056-runs.json", "heartbeat1056-review-queue.json", "copilot175-inline-comments.json", "rules-1059.json"]:
     FILES["6480-admission-" + evidence_name] = ROOT / "direct-6480/admission" / evidence_name
 
+# PR6481 final actual CI/source verification and protected queue admission.
+for evidence_name in ['aggregate-excerpts.txt', 'budget.json', 'copilot-current-head.json', 'docs-inspection-excerpts.txt', 'gate-check-run.json', 'gui-build-excerpts.txt', 'gui-playwright-excerpts.txt', 'job-102837807815.log', 'job-102837808254.log', 'job-102837808255.log', 'job-102837808339.log', 'job-102837808576.log', 'job-102837808628.log', 'job-102837808658.log', 'jobs-34467004102.json', 'jobs-34467004107.json', 'jobs-34467004155.json', 'jobs-34467004187.json', 'jobs-34467004259.json', 'js-install-excerpts.txt', 'prior-reviewed-dispositions.json', 'report.json', 'request-inventory.json', 'run-34467004102.json', 'run-34467004107.json', 'run-34467004155.json', 'run-34467004187.json', 'run-34467004259.json', 'sharp-0.35.4-index.cjs', 'sharp-0.35.4-package.json', 'sharp-0.35.4.tgz', 'sharp-public-api-excerpts.txt', 'sharp-source-provenance.json', 'site-build-excerpts.txt', 'source/.github/workflows/gui.yml', 'source/.github/workflows/js.yml', 'source/scripts/tests/test_js_wasm_pack_install.py', 'supply-advisory-excerpts.txt', 'utility.cjs', 'verification-packet.md', 'manifest.json']:
+    FILES["6480-ci175-validation-" + evidence_name.replace("/", "--")] = ROOT / "direct-6480/ci175-validation" / evidence_name
+for evidence_name in ['final175-target-query.json', 'head175-final-ci-verification.json', 'copilot175-reply-input.json', 'pr175-ci-green-body.md', 'pr175-ci-green-input.json', 'resolve-copilot175.py', 'resolve-copilot175-receipt.json', 'resolve-copilot175-input.json', 'enqueue6481.py', 'enqueue6481-precheck.json', 'enqueue6481-input.json', 'enqueue6481-result.json']:
+    FILES["6480-admission-" + evidence_name] = ROOT / "direct-6480/admission" / evidence_name
+
+# PR6481 first merge-group observation and whole-tree identity.
+for evidence_name in ['queue6481-watch-query.json', 'queue6481-first-observation.json', 'mergegroup459-commit.json', 'mergegroup459-first-runs.json', 'mergegroup459-root-verification.json']:
+    FILES["6480-admission-" + evidence_name] = ROOT / "direct-6480/admission" / evidence_name
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout

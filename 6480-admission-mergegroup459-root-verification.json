@@ -1,0 +1,67 @@
+{
+  "at": "2026-09-10T11:12:45.418552+00:00",
+  "mergegroup": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+  "reviewed_pr_head": "17594d4a6534c142cae764772fc42049e898eca3",
+  "identical_whole_tree": "3ccc4164afe1d61e7e79f65f7870b9805c5ed499",
+  "parents": [
+    "781f667c19a8ebb779cfccb24b05ea432360b025"
+  ],
+  "runs": [
+    {
+      "id": 34469862602,
+      "name": "feature-matrix",
+      "event": "merge_group",
+      "status": "queued",
+      "conclusion": null
+    },
+    {
+      "id": 34469862419,
+      "name": "CI",
+      "event": "merge_group",
+      "status": "queued",
+      "conclusion": null
+    },
+    {
+      "id": 34469862201,
+      "name": "routing-self-tests",
+      "event": "merge_group",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 34469862126,
+      "name": "pr-area-label",
+      "event": "merge_group",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 34469862189,
+      "name": "ci-summary",
+      "event": "merge_group",
+      "status": "in_progress",
+      "conclusion": null
+    },
+    {
+      "id": 34469862167,
+      "name": "flow-on-gates",
+      "event": "merge_group",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 34469862219,
+      "name": "vectorized-feature-off",
+      "event": "merge_group",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 34469862220,
+      "name": "docs-quality",
+      "event": "merge_group",
+      "status": "completed",
+      "conclusion": "success"
+    }
+  ]
+}

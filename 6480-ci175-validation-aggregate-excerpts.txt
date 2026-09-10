@@ -1,0 +1,3 @@
+257: 2026-09-10T10:55:19.3725726Z attempt 38: 80 check-run(s), 0 running, all-terminal stable for 2/2 poll(s)
+258: 2026-09-10T10:55:19.3735896Z ### ci-summary: PASSED — all 65 gating check(s) green (or skipped/neutral); 15 advisory check(s) excluded (each DECLARED in .github/advisory-registry.json, or on the exact platform-managed allow-list); set stable.
+259: 2026-09-10T10:55:19.3737749Z selection: 30 of 65 gating check(s) ran, 35 skipped (selection and/or path-filter; selection pre-job succeeded).

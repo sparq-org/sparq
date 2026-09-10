@@ -1,0 +1,37 @@
+{
+  "head": "17594d4a6534c142cae764772fc42049e898eca3",
+  "reviews": [
+    {
+      "author": {
+        "login": "copilot-pull-request-reviewer"
+      },
+      "state": "COMMENTED",
+      "commit": {
+        "oid": "17594d4a6534c142cae764772fc42049e898eca3"
+      },
+      "submittedAt": "2026-09-10T10:52:55Z",
+      "body": "### \ud83d\udfe1 Changes recommended\n\nCI validation contains a critical version-check failure and two missing dependency-safety assertions.\n\n*Once you've addressed the issues Copilot identified, you can request another Copilot review.*\n\n<details>\n<summary>Review details</summary>\n\n### Suppressed comments (2)\n\n**.github/workflows/js.yml:46**\n* These new path filters ensure a change to either frontend manifest runs the root `npm ci`/sharp validation, but the inspection tests never assert their presence. Removing either `site/package.json` or `gui/app/package.json` would bypass this remediation lane while the current tests remain green. Add a structural assertion (with negative controls) for both manifest paths.\n```\n      - \"package.json\"\n      - \"package-lock.json\"\n      - \"site/package.json\"\n      - \"gui/app/package.json\"\n      - \".github/workflows/js.yml\"\n```\n**.github/workflows/js.yml:139**\n* `npm ls next --workspace=site --workspace=gui/app` only checks that a `next` package exists; it succeeds for the vulnerable `15.5.21` as well. Because `npm ci` accepts any internally consistent manifest/lock pair, a future downgrade of both could reintroduce the Next advisories while this gate stays green. Assert the resolved version for each workspace is the patched `15.5.24` (or an explicitly maintained patched floor), rather than only listing the package.\n```\n          npm ls next --workspace=site --workspace=gui/app\n```\n\n- **Files reviewed:** 5/6 changed files\n- **Comments generated:** 1\n- **Review effort level:** Lite\n</details>"
+    }
+  ],
+  "reviewThreads": {
+    "nodes": [
+      {
+        "id": "PRRT_kwDOSz3qKM6hCljp",
+        "isResolved": false,
+        "isOutdated": false,
+        "comments": {
+          "nodes": [
+            {
+              "author": {
+                "login": "copilot-pull-request-reviewer"
+              },
+              "body": "`sharp.versions` exposes the bundled native-library versions (for example `vips`), not the `sharp` package's own version, so this assigns `undefined` and the equality assertion fails on every Linux CI run even when `sharp@0.35.4` is installed. Read the package metadata for the package version (for example `require('sharp/package.json').version`) and keep `sharp.versions` only for the diagnostic output.",
+              "path": ".github/workflows/js.yml",
+              "line": 144
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

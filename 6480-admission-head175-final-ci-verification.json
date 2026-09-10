@@ -1,0 +1,32 @@
+{
+  "at": "2026-09-10T11:07:20.497723+00:00",
+  "head": "17594d4a6534c142cae764772fc42049e898eca3",
+  "all_required_validation_passed": true,
+  "manifest_files_verified": 40,
+  "manifest_sha256": "ac8f0615f81f2e9919f8a7cb5be69a1a266b74f0d81fdb5b87b4edd8d642e3a4",
+  "real_js_install_native_png_and_no_drift_confirmed": true,
+  "native_versions": {
+    "NextBoth": "15.5.24",
+    "sharp": "0.35.4",
+    "vips": "8.18.6",
+    "Node": "22.23.2",
+    "npm": "10.9.8"
+  },
+  "docs13_and_advisory25_confirmed": true,
+  "required_gate": {
+    "id": 102837808339,
+    "app_id": 15368,
+    "conclusion": "success",
+    "selected_ran": 30,
+    "selected_skipped": 35
+  },
+  "copilot_critical_refuted": true,
+  "published_tarball_sri_matches_committed_lock": true,
+  "source_assigns_and_exports_versions_sharp": true,
+  "merge_requires": "fresh target/rules check and all threads resolved",
+  "caveats": [
+    "Actual Ubuntu platform only; no deployment/fullvulnerability-freedom claim.",
+    "npmci reports18 advisories; identities not enumerated in this narrow verification.",
+    "Future trigger-regression assertion was Opus nonblocking. Nextfloor is a separate futurepolicy suggestion, not an individually reviewed Opusfinding."
+  ]
+}

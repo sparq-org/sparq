@@ -1,0 +1,914 @@
+{
+  "started_at": "2026-09-10T11:08:11.364991+00:00",
+  "budget": {
+    "core": {
+      "limit": 5000,
+      "used": 21,
+      "remaining": 4979,
+      "reset": 1789040999
+    },
+    "search": {
+      "limit": 30,
+      "used": 0,
+      "remaining": 30,
+      "reset": 1789038551
+    },
+    "graphql": {
+      "limit": 5000,
+      "used": 0,
+      "remaining": 5000,
+      "reset": 1789042091
+    },
+    "integration_manifest": {
+      "limit": 5000,
+      "used": 0,
+      "remaining": 5000,
+      "reset": 1789042091
+    },
+    "source_import": {
+      "limit": 100,
+      "used": 0,
+      "remaining": 100,
+      "reset": 1789038551
+    },
+    "code_scanning_autofix": {
+      "limit": 10,
+      "used": 0,
+      "remaining": 10,
+      "reset": 1789038551
+    },
+    "actions_runner_registration": {
+      "limit": 10000,
+      "used": 0,
+      "remaining": 10000,
+      "reset": 1789042091
+    },
+    "scim": {
+      "limit": 15000,
+      "used": 0,
+      "remaining": 15000,
+      "reset": 1789042091
+    },
+    "dependency_snapshots": {
+      "limit": 100,
+      "used": 0,
+      "remaining": 100,
+      "reset": 1789038551
+    },
+    "dependency_sbom": {
+      "limit": 100,
+      "used": 0,
+      "remaining": 100,
+      "reset": 1789038551
+    },
+    "audit_log": {
+      "limit": 1750,
+      "used": 0,
+      "remaining": 1750,
+      "reset": 1789042091
+    },
+    "audit_log_streaming": {
+      "limit": 15,
+      "used": 0,
+      "remaining": 15,
+      "reset": 1789042091
+    },
+    "code_search": {
+      "limit": 10,
+      "used": 0,
+      "remaining": 10,
+      "reset": 1789038551
+    },
+    "copilot_usage_records": {
+      "limit": 1750,
+      "used": 0,
+      "remaining": 1750,
+      "reset": 1789042092
+    },
+    "enterprise_token_inventory": {
+      "limit": 1750,
+      "used": 0,
+      "remaining": 1750,
+      "reset": 1789042092
+    }
+  },
+  "pre_reply": {
+    "data": {
+      "rateLimit": {
+        "remaining": 4992,
+        "resetAt": "2026-09-10T11:49:59Z"
+      },
+      "repository": {
+        "defaultBranchRef": {
+          "target": {
+            "oid": "781f667c19a8ebb779cfccb24b05ea432360b025"
+          }
+        },
+        "pullRequest": {
+          "id": "PR_kwDOSz3qKM8AAAABC97cKA",
+          "state": "OPEN",
+          "isDraft": false,
+          "baseRefName": "main",
+          "headRefOid": "17594d4a6534c142cae764772fc42049e898eca3",
+          "body": "> \ud83e\udd16 **SPARQ agent** \u2014 I am @jeswr's agent for the sparq-org/sparq RDF/SPARQL engine. @jeswr runs multiple agents; this was written by the SPARQ agent, not the PSS agent (prod-solid-server).\n\nPatches Next.js to `15.5.24` in both frontend manifests and the root lockfile, and resolves `sharp@0.35.4` under Next's supported optional-dependency range. This addresses the Next.js advisories tracked in #6480 and selects a version outside the affected range reported by sharp advisory [GHSA-f88m-g3jw-g9cj](https://github.com/lovell/sharp/security/advisories/GHSA-f88m-g3jw-g9cj).\n\nThe lock update preserves all eight SWC variants, Linux libc selectors, existing overrides and unrelated dependency floors. Sharp's native packages and the two transitives whose minimum versions it raises are updated with it. The advisory record matches the resolved graph while distinguishing the candidate patch from the still-open default-branch alert; alerts are not dismissed.\n\nThe existing root `npm ci` step checks installed Next resolution for both workspaces, loads sharp, verifies its installed version against the lock and generates a nonempty 1\u00d71 PNG. It prints native-library versions and rejects lockfile or manifest drift. Either consumer manifest now triggers that workflow. Its inspection test recognizes inline and literal-block commands while enforcing the root working directory and wasm-pack ordering.\n\nValidation at `17594d4a6534c142cae764772fc42049e898eca3`:\n\n- Targeted metadata-only resolution with npm 11.17.0; offline regeneration is byte-identical. Changed lock entries match exact published metadata and required dependency constraints.\n- 13 install-posture tests, 25 advisory-record tests, the unchanged record checker and shared command-parser self-test pass. Executed negative controls detect missing/incorrect installs, wrong directory and ordering; removing either manifest trigger loses coverage.\n- The native check passes syntax/YAML checks and negative controls for a missing module, version mismatch, failed encoding, empty output and wrong dimensions. These stub controls do not claim an actual native installation.\n- Independent Claude Opus 5 reviews at extra-high reasoning completed before publication; disposition is recorded in the coordinator's frozen review evidence.\n- Fresh Linux CI remains required for this revision's actual install, native dependencies, builds and tests. The earlier revision's Node 22.23.2/npm 10.9.8 installation and frontend checks passed, but do not validate this new sharp graph. Local preflight still encounters the known macOS Bash 3 `mapfile` limitation; supported CI must pass it.\n\nThis is a version-based security update. It does not establish deployment patching, application exploitability, or the health of a separately installed system libvips. Keep #6480 open until protected merge and automatic alert re-evaluation establish the default-branch result.\n",
+          "mergeable": "MERGEABLE",
+          "mergeStateStatus": "BLOCKED",
+          "mergeQueueEntry": null,
+          "labels": {
+            "nodes": [
+              {
+                "name": "area:js"
+              },
+              {
+                "name": "area:site"
+              },
+              {
+                "name": "area:gui"
+              },
+              {
+                "name": "area:ci"
+              },
+              {
+                "name": "review:unreviewed"
+              }
+            ]
+          },
+          "reviews": {
+            "nodes": [
+              {
+                "author": {
+                  "login": "copilot-pull-request-reviewer"
+                },
+                "state": "COMMENTED",
+                "submittedAt": "2026-09-10T09:36:23Z",
+                "commit": {
+                  "oid": "26d139520f07f1ceacafbacbeb9991de371e2b53"
+                }
+              },
+              {
+                "author": {
+                  "login": "github-actions"
+                },
+                "state": "COMMENTED",
+                "submittedAt": "2026-09-10T09:40:09Z",
+                "commit": {
+                  "oid": "26d139520f07f1ceacafbacbeb9991de371e2b53"
+                }
+              },
+              {
+                "author": {
+                  "login": "copilot-pull-request-reviewer"
+                },
+                "state": "COMMENTED",
+                "submittedAt": "2026-09-10T10:52:55Z",
+                "commit": {
+                  "oid": "17594d4a6534c142cae764772fc42049e898eca3"
+                }
+              }
+            ]
+          },
+          "reviewThreads": {
+            "pageInfo": {
+              "hasNextPage": false
+            },
+            "nodes": [
+              {
+                "id": "PRRT_kwDOSz3qKM6hCljp",
+                "isResolved": false,
+                "isOutdated": false
+              }
+            ]
+          },
+          "commits": {
+            "nodes": [
+              {
+                "commit": {
+                  "oid": "17594d4a6534c142cae764772fc42049e898eca3",
+                  "statusCheckRollup": {
+                    "state": "SUCCESS"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "reply": {
+    "url": "https://api.github.com/repos/sparq-org/sparq/pulls/comments/3978415843",
+    "pull_request_review_id": 5166316712,
+    "id": 3978415843,
+    "node_id": "PRRC_kwDOSz3qKM7tIc7j",
+    "diff_hunk": "@@ -132,7 +134,30 @@ jobs:\n       # published-client SBOM stays clean (runtime tree = {fzstd} only).\n       - name: Install npm dependencies (full workspace, from repo root)\n         working-directory: .\n-        run: npm ci\n+        run: |\n+          npm ci\n+          npm ls next --workspace=site --workspace=gui/app\n+          node <<'NODE'\n+          // [GPT-6 ASTRA] Exercise the installed native dependency, including libvips.\n+          const assert = require('node:assert/strict');\n+          const sharp = require('sharp');\n+          const installed = sharp.versions.sharp;",
+    "path": ".github/workflows/js.yml",
+    "commit_id": "17594d4a6534c142cae764772fc42049e898eca3",
+    "original_commit_id": "17594d4a6534c142cae764772fc42049e898eca3",
+    "user": {
+      "login": "jeswr",
+      "id": 63333554,
+      "node_id": "MDQ6VXNlcjYzMzMzNTU0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/63333554?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/jeswr",
+      "html_url": "https://github.com/jeswr",
+      "followers_url": "https://api.github.com/users/jeswr/followers",
+      "following_url": "https://api.github.com/users/jeswr/following{/other_user}",
+      "gists_url": "https://api.github.com/users/jeswr/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/jeswr/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/jeswr/subscriptions",
+      "organizations_url": "https://api.github.com/users/jeswr/orgs",
+      "repos_url": "https://api.github.com/users/jeswr/repos",
+      "events_url": "https://api.github.com/users/jeswr/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/jeswr/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "body": "> \ud83e\udd16 **SPARQ agent** \u2014 I am @jeswr's agent for the sparq-org/sparq RDF/SPARQL engine. @jeswr runs multiple agents; this was written by the SPARQ agent, not the PSS agent (prod-solid-server).\n\nVerified against the exact reviewed head `17594d4a6534c142cae764772fc42049e898eca3`: [the Linux JS job](https://github.com/sparq-org/sparq/actions/runs/34467004187/job/102837808254) loaded `sharp@0.35.4`, reported libvips `8.18.6`, generated a PNG and passed the trailing lockfile/manifest no-drift check. The version assertion executed successfully.\n\nThe SRI-verified [published sharp 0.35.4 package](https://registry.npmjs.org/sharp/-/sharp-0.35.4.tgz) sets `versions.sharp = pkg.version` in `dist/utility.cjs` and exposes it through `Sharp.versions`. Its export map does not expose `sharp/package.json`, so the suggested replacement is not compatible with this release. The current code uses the supported API; this finding is resolved by the source and actual CI evidence.\n\nFor the two suppressed suggestions: both consumer manifests are present in `pull_request.paths`, and parsed-workflow checks plus executed removal controls verified their coverage. Both committed frontend minima are `^15.5.24`; the lock and actual installed workspace trees resolve `15.5.24`. `npm ls` supplies installed-version evidence, alongside the pinned install and no-drift check. The independent Opus 5 review approved this concrete patched graph and classified the persistent trigger assertion as a nonblocking suggestion. A maintained anti-downgrade floor is a separate future policy suggestion; no individual Opus disposition is claimed for that suggestion. The current paths and declared, locked and installed versions have all been verified.\n",
+    "created_at": "2026-09-10T11:08:14Z",
+    "updated_at": "2026-09-10T11:08:14Z",
+    "html_url": "https://github.com/sparq-org/sparq/pull/6481#discussion_r3978415843",
+    "pull_request_url": "https://api.github.com/repos/sparq-org/sparq/pulls/6481",
+    "_links": {
+      "self": {
+        "href": "https://api.github.com/repos/sparq-org/sparq/pulls/comments/3978415843"
+      },
+      "html": {
+        "href": "https://github.com/sparq-org/sparq/pull/6481#discussion_r3978415843"
+      },
+      "pull_request": {
+        "href": "https://api.github.com/repos/sparq-org/sparq/pulls/6481"
+      }
+    },
+    "reactions": {
+      "url": "https://api.github.com/repos/sparq-org/sparq/pulls/comments/3978415843/reactions",
+      "total_count": 0,
+      "+1": 0,
+      "-1": 0,
+      "laugh": 0,
+      "hooray": 0,
+      "confused": 0,
+      "heart": 0,
+      "rocket": 0,
+      "eyes": 0
+    },
+    "start_line": null,
+    "original_start_line": null,
+    "start_side": null,
+    "line": 144,
+    "original_line": 144,
+    "side": "RIGHT",
+    "in_reply_to_id": 3978298773,
+    "author_association": "MEMBER",
+    "original_position": 21,
+    "position": 21,
+    "subject_type": "line"
+  },
+  "pre_resolve": {
+    "data": {
+      "rateLimit": {
+        "remaining": 4991,
+        "resetAt": "2026-09-10T11:49:59Z"
+      },
+      "repository": {
+        "defaultBranchRef": {
+          "target": {
+            "oid": "781f667c19a8ebb779cfccb24b05ea432360b025"
+          }
+        },
+        "pullRequest": {
+          "id": "PR_kwDOSz3qKM8AAAABC97cKA",
+          "state": "OPEN",
+          "isDraft": false,
+          "baseRefName": "main",
+          "headRefOid": "17594d4a6534c142cae764772fc42049e898eca3",
+          "body": "> \ud83e\udd16 **SPARQ agent** \u2014 I am @jeswr's agent for the sparq-org/sparq RDF/SPARQL engine. @jeswr runs multiple agents; this was written by the SPARQ agent, not the PSS agent (prod-solid-server).\n\nPatches Next.js to `15.5.24` in both frontend manifests and the root lockfile, and resolves `sharp@0.35.4` under Next's supported optional-dependency range. This addresses the Next.js advisories tracked in #6480 and selects a version outside the affected range reported by sharp advisory [GHSA-f88m-g3jw-g9cj](https://github.com/lovell/sharp/security/advisories/GHSA-f88m-g3jw-g9cj).\n\nThe lock update preserves all eight SWC variants, Linux libc selectors, existing overrides and unrelated dependency floors. Sharp's native packages and the two transitives whose minimum versions it raises are updated with it. The advisory record matches the resolved graph while distinguishing the candidate patch from the still-open default-branch alert; alerts are not dismissed.\n\nThe existing root `npm ci` step checks installed Next resolution for both workspaces, loads sharp, verifies its installed version against the lock and generates a nonempty 1\u00d71 PNG. It prints native-library versions and rejects lockfile or manifest drift. Either consumer manifest now triggers that workflow. Its inspection test recognizes inline and literal-block commands while enforcing the root working directory and wasm-pack ordering.\n\nValidation at `17594d4a6534c142cae764772fc42049e898eca3`:\n\n- Targeted metadata-only resolution with npm 11.17.0; offline regeneration is byte-identical. Changed lock entries match exact published metadata and required dependency constraints.\n- 13 install-posture tests, 25 advisory-record tests, the unchanged record checker and shared command-parser self-test pass. Executed negative controls detect missing/incorrect installs, wrong directory and ordering; removing either manifest trigger loses coverage.\n- The native check passes syntax/YAML checks and negative controls for a missing module, version mismatch, failed encoding, empty output and wrong dimensions. These stub controls do not claim an actual native installation.\n- Independent Claude Opus 5 reviews at extra-high reasoning completed before publication; disposition is recorded in the coordinator's frozen review evidence.\n- Fresh Linux CI remains required for this revision's actual install, native dependencies, builds and tests. The earlier revision's Node 22.23.2/npm 10.9.8 installation and frontend checks passed, but do not validate this new sharp graph. Local preflight still encounters the known macOS Bash 3 `mapfile` limitation; supported CI must pass it.\n\nThis is a version-based security update. It does not establish deployment patching, application exploitability, or the health of a separately installed system libvips. Keep #6480 open until protected merge and automatic alert re-evaluation establish the default-branch result.\n",
+          "mergeable": "MERGEABLE",
+          "mergeStateStatus": "BLOCKED",
+          "mergeQueueEntry": null,
+          "labels": {
+            "nodes": [
+              {
+                "name": "area:js"
+              },
+              {
+                "name": "area:site"
+              },
+              {
+                "name": "area:gui"
+              },
+              {
+                "name": "area:ci"
+              },
+              {
+                "name": "review:unreviewed"
+              }
+            ]
+          },
+          "reviews": {
+            "nodes": [
+              {
+                "author": {
+                  "login": "copilot-pull-request-reviewer"
+                },
+                "state": "COMMENTED",
+                "submittedAt": "2026-09-10T09:36:23Z",
+                "commit": {
+                  "oid": "26d139520f07f1ceacafbacbeb9991de371e2b53"
+                }
+              },
+              {
+                "author": {
+                  "login": "github-actions"
+                },
+                "state": "COMMENTED",
+                "submittedAt": "2026-09-10T09:40:09Z",
+                "commit": {
+                  "oid": "26d139520f07f1ceacafbacbeb9991de371e2b53"
+                }
+              },
+              {
+                "author": {
+                  "login": "copilot-pull-request-reviewer"
+                },
+                "state": "COMMENTED",
+                "submittedAt": "2026-09-10T10:52:55Z",
+                "commit": {
+                  "oid": "17594d4a6534c142cae764772fc42049e898eca3"
+                }
+              },
+              {
+                "author": {
+                  "login": "jeswr"
+                },
+                "state": "COMMENTED",
+                "submittedAt": "2026-09-10T11:08:14Z",
+                "commit": {
+                  "oid": "17594d4a6534c142cae764772fc42049e898eca3"
+                }
+              }
+            ]
+          },
+          "reviewThreads": {
+            "pageInfo": {
+              "hasNextPage": false
+            },
+            "nodes": [
+              {
+                "id": "PRRT_kwDOSz3qKM6hCljp",
+                "isResolved": false,
+                "isOutdated": false
+              }
+            ]
+          },
+          "commits": {
+            "nodes": [
+              {
+                "commit": {
+                  "oid": "17594d4a6534c142cae764772fc42049e898eca3",
+                  "statusCheckRollup": {
+                    "state": "SUCCESS"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "resolve": {
+    "data": {
+      "resolveReviewThread": {
+        "thread": {
+          "id": "PRRT_kwDOSz3qKM6hCljp",
+          "isResolved": true
+        }
+      }
+    }
+  },
+  "pre_body": {
+    "data": {
+      "rateLimit": {
+        "remaining": 4989,
+        "resetAt": "2026-09-10T11:49:59Z"
+      },
+      "repository": {
+        "defaultBranchRef": {
+          "target": {
+            "oid": "781f667c19a8ebb779cfccb24b05ea432360b025"
+          }
+        },
+        "pullRequest": {
+          "id": "PR_kwDOSz3qKM8AAAABC97cKA",
+          "state": "OPEN",
+          "isDraft": false,
+          "baseRefName": "main",
+          "headRefOid": "17594d4a6534c142cae764772fc42049e898eca3",
+          "body": "> \ud83e\udd16 **SPARQ agent** \u2014 I am @jeswr's agent for the sparq-org/sparq RDF/SPARQL engine. @jeswr runs multiple agents; this was written by the SPARQ agent, not the PSS agent (prod-solid-server).\n\nPatches Next.js to `15.5.24` in both frontend manifests and the root lockfile, and resolves `sharp@0.35.4` under Next's supported optional-dependency range. This addresses the Next.js advisories tracked in #6480 and selects a version outside the affected range reported by sharp advisory [GHSA-f88m-g3jw-g9cj](https://github.com/lovell/sharp/security/advisories/GHSA-f88m-g3jw-g9cj).\n\nThe lock update preserves all eight SWC variants, Linux libc selectors, existing overrides and unrelated dependency floors. Sharp's native packages and the two transitives whose minimum versions it raises are updated with it. The advisory record matches the resolved graph while distinguishing the candidate patch from the still-open default-branch alert; alerts are not dismissed.\n\nThe existing root `npm ci` step checks installed Next resolution for both workspaces, loads sharp, verifies its installed version against the lock and generates a nonempty 1\u00d71 PNG. It prints native-library versions and rejects lockfile or manifest drift. Either consumer manifest now triggers that workflow. Its inspection test recognizes inline and literal-block commands while enforcing the root working directory and wasm-pack ordering.\n\nValidation at `17594d4a6534c142cae764772fc42049e898eca3`:\n\n- Targeted metadata-only resolution with npm 11.17.0; offline regeneration is byte-identical. Changed lock entries match exact published metadata and required dependency constraints.\n- 13 install-posture tests, 25 advisory-record tests, the unchanged record checker and shared command-parser self-test pass. Executed negative controls detect missing/incorrect installs, wrong directory and ordering; removing either manifest trigger loses coverage.\n- The native check passes syntax/YAML checks and negative controls for a missing module, version mismatch, failed encoding, empty output and wrong dimensions. These stub controls do not claim an actual native installation.\n- Independent Claude Opus 5 reviews at extra-high reasoning completed before publication; disposition is recorded in the coordinator's frozen review evidence.\n- Fresh Linux CI remains required for this revision's actual install, native dependencies, builds and tests. The earlier revision's Node 22.23.2/npm 10.9.8 installation and frontend checks passed, but do not validate this new sharp graph. Local preflight still encounters the known macOS Bash 3 `mapfile` limitation; supported CI must pass it.\n\nThis is a version-based security update. It does not establish deployment patching, application exploitability, or the health of a separately installed system libvips. Keep #6480 open until protected merge and automatic alert re-evaluation establish the default-branch result.\n",
+          "mergeable": "MERGEABLE",
+          "mergeStateStatus": "CLEAN",
+          "mergeQueueEntry": null,
+          "labels": {
+            "nodes": [
+              {
+                "name": "area:js"
+              },
+              {
+                "name": "area:site"
+              },
+              {
+                "name": "area:gui"
+              },
+              {
+                "name": "area:ci"
+              },
+              {
+                "name": "review:unreviewed"
+              }
+            ]
+          },
+          "reviews": {
+            "nodes": [
+              {
+                "author": {
+                  "login": "copilot-pull-request-reviewer"
+                },
+                "state": "COMMENTED",
+                "submittedAt": "2026-09-10T09:36:23Z",
+                "commit": {
+                  "oid": "26d139520f07f1ceacafbacbeb9991de371e2b53"
+                }
+              },
+              {
+                "author": {
+                  "login": "github-actions"
+                },
+                "state": "COMMENTED",
+                "submittedAt": "2026-09-10T09:40:09Z",
+                "commit": {
+                  "oid": "26d139520f07f1ceacafbacbeb9991de371e2b53"
+                }
+              },
+              {
+                "author": {
+                  "login": "copilot-pull-request-reviewer"
+                },
+                "state": "COMMENTED",
+                "submittedAt": "2026-09-10T10:52:55Z",
+                "commit": {
+                  "oid": "17594d4a6534c142cae764772fc42049e898eca3"
+                }
+              },
+              {
+                "author": {
+                  "login": "jeswr"
+                },
+                "state": "COMMENTED",
+                "submittedAt": "2026-09-10T11:08:14Z",
+                "commit": {
+                  "oid": "17594d4a6534c142cae764772fc42049e898eca3"
+                }
+              }
+            ]
+          },
+          "reviewThreads": {
+            "pageInfo": {
+              "hasNextPage": false
+            },
+            "nodes": [
+              {
+                "id": "PRRT_kwDOSz3qKM6hCljp",
+                "isResolved": true,
+                "isOutdated": false
+              }
+            ]
+          },
+          "commits": {
+            "nodes": [
+              {
+                "commit": {
+                  "oid": "17594d4a6534c142cae764772fc42049e898eca3",
+                  "statusCheckRollup": {
+                    "state": "SUCCESS"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "body": {
+    "url": "https://api.github.com/repos/sparq-org/sparq/pulls/6481",
+    "id": 4494122024,
+    "node_id": "PR_kwDOSz3qKM8AAAABC97cKA",
+    "html_url": "https://github.com/sparq-org/sparq/pull/6481",
+    "diff_url": "https://github.com/sparq-org/sparq/pull/6481.diff",
+    "patch_url": "https://github.com/sparq-org/sparq/pull/6481.patch",
+    "issue_url": "https://api.github.com/repos/sparq-org/sparq/issues/6481",
+    "number": 6481,
+    "state": "open",
+    "locked": false,
+    "title": "chore(deps): patch Next.js and sharp across site and GUI",
+    "user": {
+      "login": "jeswr",
+      "id": 63333554,
+      "node_id": "MDQ6VXNlcjYzMzMzNTU0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/63333554?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/jeswr",
+      "html_url": "https://github.com/jeswr",
+      "followers_url": "https://api.github.com/users/jeswr/followers",
+      "following_url": "https://api.github.com/users/jeswr/following{/other_user}",
+      "gists_url": "https://api.github.com/users/jeswr/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/jeswr/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/jeswr/subscriptions",
+      "organizations_url": "https://api.github.com/users/jeswr/orgs",
+      "repos_url": "https://api.github.com/users/jeswr/repos",
+      "events_url": "https://api.github.com/users/jeswr/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/jeswr/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "body": "> \ud83e\udd16 **SPARQ agent** \u2014 I am @jeswr's agent for the sparq-org/sparq RDF/SPARQL engine. @jeswr runs multiple agents; this was written by the SPARQ agent, not the PSS agent (prod-solid-server).\n\nPatches Next.js to `15.5.24` in both frontend manifests and the root lockfile, and resolves `sharp@0.35.4` under Next's supported optional-dependency range. This addresses the Next.js advisories tracked in #6480 and selects a version outside the affected range reported by sharp advisory [GHSA-f88m-g3jw-g9cj](https://github.com/lovell/sharp/security/advisories/GHSA-f88m-g3jw-g9cj).\n\nThe lock update preserves all eight SWC variants, Linux libc selectors, existing overrides and unrelated dependency floors. Sharp's native packages and the two transitives whose minimum versions it raises are updated with it. The advisory record matches the resolved graph and distinguishes the candidate patch from the default-branch alert; no alert is dismissed.\n\nThe root install checks Next resolution for both workspaces, verifies the loaded sharp version against the lock, generates a PNG through the native library and rejects lockfile or manifest drift. Either consumer manifest now triggers the workflow. The inspection test recognizes inline and literal-block installs while enforcing the root working directory and wasm-pack ordering.\n\nValidation at `17594d4a6534c142cae764772fc42049e898eca3`:\n\n- [Linux JS install/build/tests](https://github.com/sparq-org/sparq/actions/runs/34467004187/job/102837808254): Node `22.23.2`, npm `10.9.8`, both workspace Next versions `15.5.24`, loaded sharp `0.35.4`, libvips `8.18.6`, native PNG creation and final no-drift check passed.\n- [Docs quality](https://github.com/sparq-org/sparq/actions/runs/34467004155) and [supply chain](https://github.com/sparq-org/sparq/actions/runs/34467004107): 13 install-posture tests, 25 advisory-record tests and the unchanged drift checker passed.\n- [GUI/frontend checks](https://github.com/sparq-org/sparq/actions/runs/34467004102), site E2E and visual checks passed. [Required aggregate gate](https://github.com/sparq-org/sparq/actions/runs/34467004259) succeeded.\n- Targeted metadata-only lock generation and byte-identical offline regeneration passed; changed entries match exact published metadata and required constraints. Negative controls verify install inspection, trigger coverage and native-smoke failure propagation.\n- Actual independent Claude Opus 5 reviews at extra-high reasoning approved the source and final CI supplement without blocking findings. Copilot's package-version API concern was checked against the exact published source and successful native CI execution.\n\nThis is a version-based security update. It does not establish deployment patching, application exploitability, or the health of a separately installed system libvips. Keep #6480 open until protected merge and automatic alert re-evaluation establish the default-branch result.\n",
+    "created_at": "2026-09-10T09:24:57Z",
+    "updated_at": "2026-09-10T11:08:18Z",
+    "closed_at": null,
+    "merged_at": null,
+    "merge_commit_sha": "26409755cc774590ef3ada1231ca72dcfd252caa",
+    "assignees": [],
+    "requested_reviewers": [],
+    "requested_teams": [],
+    "labels": [
+      {
+        "id": 11548847378,
+        "node_id": "LA_kwDOSz3qKM8AAAACsF1tEg",
+        "url": "https://api.github.com/repos/sparq-org/sparq/labels/area:js",
+        "name": "area:js",
+        "color": "ededed",
+        "default": false,
+        "description": ""
+      },
+      {
+        "id": 11548847629,
+        "node_id": "LA_kwDOSz3qKM8AAAACsF1uDQ",
+        "url": "https://api.github.com/repos/sparq-org/sparq/labels/area:site",
+        "name": "area:site",
+        "color": "ededed",
+        "default": false,
+        "description": ""
+      },
+      {
+        "id": 11551728957,
+        "node_id": "LA_kwDOSz3qKM8AAAACsIllPQ",
+        "url": "https://api.github.com/repos/sparq-org/sparq/labels/area:gui",
+        "name": "area:gui",
+        "color": "1d76db",
+        "default": false,
+        "description": "Work scoped to the gui/ desktop+web app"
+      },
+      {
+        "id": 11555448050,
+        "node_id": "LA_kwDOSz3qKM8AAAACsMIk8g",
+        "url": "https://api.github.com/repos/sparq-org/sparq/labels/area:ci",
+        "name": "area:ci",
+        "color": "ededed",
+        "default": false,
+        "description": "bd migration label"
+      },
+      {
+        "id": 11637449095,
+        "node_id": "LA_kwDOSz3qKM8AAAACtaVhhw",
+        "url": "https://api.github.com/repos/sparq-org/sparq/labels/review:unreviewed",
+        "name": "review:unreviewed",
+        "color": "ededed",
+        "default": false,
+        "description": "Green + mergeable but no head-bound VERDICT \u2014 needs a review (informational; blocks nothing)"
+      }
+    ],
+    "milestone": null,
+    "draft": false,
+    "commits_url": "https://api.github.com/repos/sparq-org/sparq/pulls/6481/commits",
+    "review_comments_url": "https://api.github.com/repos/sparq-org/sparq/pulls/6481/comments",
+    "review_comment_url": "https://api.github.com/repos/sparq-org/sparq/pulls/comments{/number}",
+    "comments_url": "https://api.github.com/repos/sparq-org/sparq/issues/6481/comments",
+    "statuses_url": "https://api.github.com/repos/sparq-org/sparq/statuses/17594d4a6534c142cae764772fc42049e898eca3",
+    "head": {
+      "label": "sparq-org:codex/next-security-patch",
+      "ref": "codex/next-security-patch",
+      "sha": "17594d4a6534c142cae764772fc42049e898eca3",
+      "user": {
+        "login": "sparq-org",
+        "id": 299285910,
+        "node_id": "O_kgDOEda9lg",
+        "avatar_url": "https://avatars.githubusercontent.com/u/299285910?v=4",
+        "gravatar_id": "",
+        "url": "https://api.github.com/users/sparq-org",
+        "html_url": "https://github.com/sparq-org",
+        "followers_url": "https://api.github.com/users/sparq-org/followers",
+        "following_url": "https://api.github.com/users/sparq-org/following{/other_user}",
+        "gists_url": "https://api.github.com/users/sparq-org/gists{/gist_id}",
+        "starred_url": "https://api.github.com/users/sparq-org/starred{/owner}{/repo}",
+        "subscriptions_url": "https://api.github.com/users/sparq-org/subscriptions",
+        "organizations_url": "https://api.github.com/users/sparq-org/orgs",
+        "repos_url": "https://api.github.com/users/sparq-org/repos",
+        "events_url": "https://api.github.com/users/sparq-org/events{/privacy}",
+        "received_events_url": "https://api.github.com/users/sparq-org/received_events",
+        "type": "Organization",
+        "user_view_type": "public",
+        "site_admin": false
+      },
+      "repo": {
+        "id": 1262348840,
+        "node_id": "R_kgDOSz3qKA",
+        "name": "sparq",
+        "full_name": "sparq-org/sparq",
+        "private": false,
+        "owner": {
+          "login": "sparq-org",
+          "id": 299285910,
+          "node_id": "O_kgDOEda9lg",
+          "avatar_url": "https://avatars.githubusercontent.com/u/299285910?v=4",
+          "gravatar_id": "",
+          "url": "https://api.github.com/users/sparq-org",
+          "html_url": "https://github.com/sparq-org",
+          "followers_url": "https://api.github.com/users/sparq-org/followers",
+          "following_url": "https://api.github.com/users/sparq-org/following{/other_user}",
+          "gists_url": "https://api.github.com/users/sparq-org/gists{/gist_id}",
+          "starred_url": "https://api.github.com/users/sparq-org/starred{/owner}{/repo}",
+          "subscriptions_url": "https://api.github.com/users/sparq-org/subscriptions",
+          "organizations_url": "https://api.github.com/users/sparq-org/orgs",
+          "repos_url": "https://api.github.com/users/sparq-org/repos",
+          "events_url": "https://api.github.com/users/sparq-org/events{/privacy}",
+          "received_events_url": "https://api.github.com/users/sparq-org/received_events",
+          "type": "Organization",
+          "user_view_type": "public",
+          "site_admin": false
+        },
+        "html_url": "https://github.com/sparq-org/sparq",
+        "description": "sparq is a lightning-fast RDF triplestore and SPARQL 1.1 / 1.2 engine, written in Rust \u2014 usable as a library, CLI, HTTP server, and from Python and JavaScript/WASM.",
+        "fork": false,
+        "url": "https://api.github.com/repos/sparq-org/sparq",
+        "forks_url": "https://api.github.com/repos/sparq-org/sparq/forks",
+        "keys_url": "https://api.github.com/repos/sparq-org/sparq/keys{/key_id}",
+        "collaborators_url": "https://api.github.com/repos/sparq-org/sparq/collaborators{/collaborator}",
+        "teams_url": "https://api.github.com/repos/sparq-org/sparq/teams",
+        "hooks_url": "https://api.github.com/repos/sparq-org/sparq/hooks",
+        "issue_events_url": "https://api.github.com/repos/sparq-org/sparq/issues/events{/number}",
+        "events_url": "https://api.github.com/repos/sparq-org/sparq/events",
+        "assignees_url": "https://api.github.com/repos/sparq-org/sparq/assignees{/user}",
+        "branches_url": "https://api.github.com/repos/sparq-org/sparq/branches{/branch}",
+        "tags_url": "https://api.github.com/repos/sparq-org/sparq/tags",
+        "blobs_url": "https://api.github.com/repos/sparq-org/sparq/git/blobs{/sha}",
+        "git_tags_url": "https://api.github.com/repos/sparq-org/sparq/git/tags{/sha}",
+        "git_refs_url": "https://api.github.com/repos/sparq-org/sparq/git/refs{/sha}",
+        "trees_url": "https://api.github.com/repos/sparq-org/sparq/git/trees{/sha}",
+        "statuses_url": "https://api.github.com/repos/sparq-org/sparq/statuses/{sha}",
+        "languages_url": "https://api.github.com/repos/sparq-org/sparq/languages",
+        "stargazers_url": "https://api.github.com/repos/sparq-org/sparq/stargazers",
+        "contributors_url": "https://api.github.com/repos/sparq-org/sparq/contributors",
+        "subscribers_url": "https://api.github.com/repos/sparq-org/sparq/subscribers",
+        "subscription_url": "https://api.github.com/repos/sparq-org/sparq/subscription",
+        "commits_url": "https://api.github.com/repos/sparq-org/sparq/commits{/sha}",
+        "git_commits_url": "https://api.github.com/repos/sparq-org/sparq/git/commits{/sha}",
+        "comments_url": "https://api.github.com/repos/sparq-org/sparq/comments{/number}",
+        "issue_comment_url": "https://api.github.com/repos/sparq-org/sparq/issues/comments{/number}",
+        "contents_url": "https://api.github.com/repos/sparq-org/sparq/contents/{+path}",
+        "compare_url": "https://api.github.com/repos/sparq-org/sparq/compare/{base}...{head}",
+        "merges_url": "https://api.github.com/repos/sparq-org/sparq/merges",
+        "archive_url": "https://api.github.com/repos/sparq-org/sparq/{archive_format}{/ref}",
+        "downloads_url": "https://api.github.com/repos/sparq-org/sparq/downloads",
+        "issues_url": "https://api.github.com/repos/sparq-org/sparq/issues{/number}",
+        "pulls_url": "https://api.github.com/repos/sparq-org/sparq/pulls{/number}",
+        "milestones_url": "https://api.github.com/repos/sparq-org/sparq/milestones{/number}",
+        "notifications_url": "https://api.github.com/repos/sparq-org/sparq/notifications{?since,all,participating}",
+        "labels_url": "https://api.github.com/repos/sparq-org/sparq/labels{/name}",
+        "releases_url": "https://api.github.com/repos/sparq-org/sparq/releases{/id}",
+        "deployments_url": "https://api.github.com/repos/sparq-org/sparq/deployments",
+        "created_at": "2026-06-07T22:18:43Z",
+        "updated_at": "2026-09-10T08:45:09Z",
+        "pushed_at": "2026-09-10T10:37:05Z",
+        "git_url": "git://github.com/sparq-org/sparq.git",
+        "ssh_url": "git@github.com:sparq-org/sparq.git",
+        "clone_url": "https://github.com/sparq-org/sparq.git",
+        "svn_url": "https://github.com/sparq-org/sparq",
+        "homepage": "https://sparq-org.github.io/sparq/",
+        "size": 84173,
+        "stargazers_count": 12,
+        "watchers_count": 12,
+        "language": "Rust",
+        "has_issues": true,
+        "has_projects": true,
+        "has_downloads": false,
+        "has_wiki": true,
+        "has_pages": true,
+        "has_discussions": false,
+        "forks_count": 3,
+        "mirror_url": null,
+        "archived": false,
+        "disabled": false,
+        "open_issues_count": 2610,
+        "license": {
+          "key": "mit",
+          "name": "MIT License",
+          "spdx_id": "MIT",
+          "url": "https://api.github.com/licenses/mit",
+          "node_id": "MDc6TGljZW5zZTEz"
+        },
+        "allow_forking": true,
+        "is_template": false,
+        "web_commit_signoff_required": false,
+        "has_pull_requests": true,
+        "pull_request_creation_policy": "all",
+        "topics": [],
+        "visibility": "public",
+        "forks": 3,
+        "open_issues": 2610,
+        "watchers": 12,
+        "default_branch": "main"
+      }
+    },
+    "base": {
+      "label": "sparq-org:main",
+      "ref": "main",
+      "sha": "781f667c19a8ebb779cfccb24b05ea432360b025",
+      "user": {
+        "login": "sparq-org",
+        "id": 299285910,
+        "node_id": "O_kgDOEda9lg",
+        "avatar_url": "https://avatars.githubusercontent.com/u/299285910?v=4",
+        "gravatar_id": "",
+        "url": "https://api.github.com/users/sparq-org",
+        "html_url": "https://github.com/sparq-org",
+        "followers_url": "https://api.github.com/users/sparq-org/followers",
+        "following_url": "https://api.github.com/users/sparq-org/following{/other_user}",
+        "gists_url": "https://api.github.com/users/sparq-org/gists{/gist_id}",
+        "starred_url": "https://api.github.com/users/sparq-org/starred{/owner}{/repo}",
+        "subscriptions_url": "https://api.github.com/users/sparq-org/subscriptions",
+        "organizations_url": "https://api.github.com/users/sparq-org/orgs",
+        "repos_url": "https://api.github.com/users/sparq-org/repos",
+        "events_url": "https://api.github.com/users/sparq-org/events{/privacy}",
+        "received_events_url": "https://api.github.com/users/sparq-org/received_events",
+        "type": "Organization",
+        "user_view_type": "public",
+        "site_admin": false
+      },
+      "repo": {
+        "id": 1262348840,
+        "node_id": "R_kgDOSz3qKA",
+        "name": "sparq",
+        "full_name": "sparq-org/sparq",
+        "private": false,
+        "owner": {
+          "login": "sparq-org",
+          "id": 299285910,
+          "node_id": "O_kgDOEda9lg",
+          "avatar_url": "https://avatars.githubusercontent.com/u/299285910?v=4",
+          "gravatar_id": "",
+          "url": "https://api.github.com/users/sparq-org",
+          "html_url": "https://github.com/sparq-org",
+          "followers_url": "https://api.github.com/users/sparq-org/followers",
+          "following_url": "https://api.github.com/users/sparq-org/following{/other_user}",
+          "gists_url": "https://api.github.com/users/sparq-org/gists{/gist_id}",
+          "starred_url": "https://api.github.com/users/sparq-org/starred{/owner}{/repo}",
+          "subscriptions_url": "https://api.github.com/users/sparq-org/subscriptions",
+          "organizations_url": "https://api.github.com/users/sparq-org/orgs",
+          "repos_url": "https://api.github.com/users/sparq-org/repos",
+          "events_url": "https://api.github.com/users/sparq-org/events{/privacy}",
+          "received_events_url": "https://api.github.com/users/sparq-org/received_events",
+          "type": "Organization",
+          "user_view_type": "public",
+          "site_admin": false
+        },
+        "html_url": "https://github.com/sparq-org/sparq",
+        "description": "sparq is a lightning-fast RDF triplestore and SPARQL 1.1 / 1.2 engine, written in Rust \u2014 usable as a library, CLI, HTTP server, and from Python and JavaScript/WASM.",
+        "fork": false,
+        "url": "https://api.github.com/repos/sparq-org/sparq",
+        "forks_url": "https://api.github.com/repos/sparq-org/sparq/forks",
+        "keys_url": "https://api.github.com/repos/sparq-org/sparq/keys{/key_id}",
+        "collaborators_url": "https://api.github.com/repos/sparq-org/sparq/collaborators{/collaborator}",
+        "teams_url": "https://api.github.com/repos/sparq-org/sparq/teams",
+        "hooks_url": "https://api.github.com/repos/sparq-org/sparq/hooks",
+        "issue_events_url": "https://api.github.com/repos/sparq-org/sparq/issues/events{/number}",
+        "events_url": "https://api.github.com/repos/sparq-org/sparq/events",
+        "assignees_url": "https://api.github.com/repos/sparq-org/sparq/assignees{/user}",
+        "branches_url": "https://api.github.com/repos/sparq-org/sparq/branches{/branch}",
+        "tags_url": "https://api.github.com/repos/sparq-org/sparq/tags",
+        "blobs_url": "https://api.github.com/repos/sparq-org/sparq/git/blobs{/sha}",
+        "git_tags_url": "https://api.github.com/repos/sparq-org/sparq/git/tags{/sha}",
+        "git_refs_url": "https://api.github.com/repos/sparq-org/sparq/git/refs{/sha}",
+        "trees_url": "https://api.github.com/repos/sparq-org/sparq/git/trees{/sha}",
+        "statuses_url": "https://api.github.com/repos/sparq-org/sparq/statuses/{sha}",
+        "languages_url": "https://api.github.com/repos/sparq-org/sparq/languages",
+        "stargazers_url": "https://api.github.com/repos/sparq-org/sparq/stargazers",
+        "contributors_url": "https://api.github.com/repos/sparq-org/sparq/contributors",
+        "subscribers_url": "https://api.github.com/repos/sparq-org/sparq/subscribers",
+        "subscription_url": "https://api.github.com/repos/sparq-org/sparq/subscription",
+        "commits_url": "https://api.github.com/repos/sparq-org/sparq/commits{/sha}",
+        "git_commits_url": "https://api.github.com/repos/sparq-org/sparq/git/commits{/sha}",
+        "comments_url": "https://api.github.com/repos/sparq-org/sparq/comments{/number}",
+        "issue_comment_url": "https://api.github.com/repos/sparq-org/sparq/issues/comments{/number}",
+        "contents_url": "https://api.github.com/repos/sparq-org/sparq/contents/{+path}",
+        "compare_url": "https://api.github.com/repos/sparq-org/sparq/compare/{base}...{head}",
+        "merges_url": "https://api.github.com/repos/sparq-org/sparq/merges",
+        "archive_url": "https://api.github.com/repos/sparq-org/sparq/{archive_format}{/ref}",
+        "downloads_url": "https://api.github.com/repos/sparq-org/sparq/downloads",
+        "issues_url": "https://api.github.com/repos/sparq-org/sparq/issues{/number}",
+        "pulls_url": "https://api.github.com/repos/sparq-org/sparq/pulls{/number}",
+        "milestones_url": "https://api.github.com/repos/sparq-org/sparq/milestones{/number}",
+        "notifications_url": "https://api.github.com/repos/sparq-org/sparq/notifications{?since,all,participating}",
+        "labels_url": "https://api.github.com/repos/sparq-org/sparq/labels{/name}",
+        "releases_url": "https://api.github.com/repos/sparq-org/sparq/releases{/id}",
+        "deployments_url": "https://api.github.com/repos/sparq-org/sparq/deployments",
+        "created_at": "2026-06-07T22:18:43Z",
+        "updated_at": "2026-09-10T08:45:09Z",
+        "pushed_at": "2026-09-10T10:37:05Z",
+        "git_url": "git://github.com/sparq-org/sparq.git",
+        "ssh_url": "git@github.com:sparq-org/sparq.git",
+        "clone_url": "https://github.com/sparq-org/sparq.git",
+        "svn_url": "https://github.com/sparq-org/sparq",
+        "homepage": "https://sparq-org.github.io/sparq/",
+        "size": 84173,
+        "stargazers_count": 12,
+        "watchers_count": 12,
+        "language": "Rust",
+        "has_issues": true,
+        "has_projects": true,
+        "has_downloads": false,
+        "has_wiki": true,
+        "has_pages": true,
+        "has_discussions": false,
+        "forks_count": 3,
+        "mirror_url": null,
+        "archived": false,
+        "disabled": false,
+        "open_issues_count": 2610,
+        "license": {
+          "key": "mit",
+          "name": "MIT License",
+          "spdx_id": "MIT",
+          "url": "https://api.github.com/licenses/mit",
+          "node_id": "MDc6TGljZW5zZTEz"
+        },
+        "allow_forking": true,
+        "is_template": false,
+        "web_commit_signoff_required": false,
+        "has_pull_requests": true,
+        "pull_request_creation_policy": "all",
+        "topics": [],
+        "visibility": "public",
+        "forks": 3,
+        "open_issues": 2610,
+        "watchers": 12,
+        "default_branch": "main"
+      }
+    },
+    "_links": {
+      "self": {
+        "href": "https://api.github.com/repos/sparq-org/sparq/pulls/6481"
+      },
+      "html": {
+        "href": "https://github.com/sparq-org/sparq/pull/6481"
+      },
+      "issue": {
+        "href": "https://api.github.com/repos/sparq-org/sparq/issues/6481"
+      },
+      "comments": {
+        "href": "https://api.github.com/repos/sparq-org/sparq/issues/6481/comments"
+      },
+      "review_comments": {
+        "href": "https://api.github.com/repos/sparq-org/sparq/pulls/6481/comments"
+      },
+      "review_comment": {
+        "href": "https://api.github.com/repos/sparq-org/sparq/pulls/comments{/number}"
+      },
+      "commits": {
+        "href": "https://api.github.com/repos/sparq-org/sparq/pulls/6481/commits"
+      },
+      "statuses": {
+        "href": "https://api.github.com/repos/sparq-org/sparq/statuses/17594d4a6534c142cae764772fc42049e898eca3"
+      }
+    },
+    "author_association": "MEMBER",
+    "auto_merge": null,
+    "assignee": null,
+    "active_lock_reason": null,
+    "merged": false,
+    "mergeable": true,
+    "rebaseable": false,
+    "mergeable_state": "clean",
+    "merged_by": null,
+    "comments": 0,
+    "review_comments": 2,
+    "maintainer_can_modify": false,
+    "commits": 4,
+    "additions": 401,
+    "deletions": 203,
+    "changed_files": 6
+  },
+  "completed_at": "2026-09-10T11:08:19.525667+00:00"
+}

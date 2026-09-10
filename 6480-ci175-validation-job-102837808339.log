@@ -1,0 +1,275 @@
+﻿2026-09-10T10:41:51.2542934Z Current runner version: '2.337.0'
+2026-09-10T10:41:51.2578644Z ##[group]Runner Image Provisioner
+2026-09-10T10:41:51.2580053Z Hosted Compute Agent
+2026-09-10T10:41:51.2581021Z Version: 20260828.587
+2026-09-10T10:41:51.2582115Z Commit: abac92662cab4cc7352de4f9f9d2e2419aad9c29
+2026-09-10T10:41:51.2583726Z Build Date: 2026-08-28T16:44:25Z
+2026-09-10T10:41:51.2584945Z Worker ID: {03c7bae7-d276-4e1d-a109-a39a0dc12fc3}
+2026-09-10T10:41:51.2586244Z Azure Region: eastus
+2026-09-10T10:41:51.2587191Z ##[endgroup]
+2026-09-10T10:41:51.2589939Z ##[group]Operating System
+2026-09-10T10:41:51.2591225Z Ubuntu
+2026-09-10T10:41:51.2592192Z 24.04.5
+2026-09-10T10:41:51.2593189Z LTS
+2026-09-10T10:41:51.2594352Z ##[endgroup]
+2026-09-10T10:41:51.2595229Z ##[group]Runner Image
+2026-09-10T10:41:51.2596277Z Image: ubuntu-24.04
+2026-09-10T10:41:51.2597255Z Version: 20260907.300.1
+2026-09-10T10:41:51.2599441Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260907.300/images/ubuntu/Ubuntu2404-Readme.md
+2026-09-10T10:41:51.2602207Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20260907.300
+2026-09-10T10:41:51.2604388Z ##[endgroup]
+2026-09-10T10:41:51.2606993Z ##[group]GITHUB_TOKEN Permissions
+2026-09-10T10:41:51.2609954Z Actions: write
+2026-09-10T10:41:51.2610868Z Checks: read
+2026-09-10T10:41:51.2611923Z Contents: read
+2026-09-10T10:41:51.2612918Z Metadata: read
+2026-09-10T10:41:51.2614290Z PullRequests: read
+2026-09-10T10:41:51.2615320Z Statuses: read
+2026-09-10T10:41:51.2616328Z ##[endgroup]
+2026-09-10T10:41:51.2619391Z Secret source: Actions
+2026-09-10T10:41:51.2620849Z Cache mode: write
+2026-09-10T10:41:51.2622688Z Prepare workflow directory
+2026-09-10T10:41:51.3104289Z Prepare all required actions
+2026-09-10T10:41:51.3176716Z Getting action download info
+2026-09-10T10:41:51.5234944Z Download action repository 'actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0' (SHA:9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0)
+2026-09-10T10:41:51.7480941Z Complete job name: gate
+2026-09-10T10:41:51.8256597Z ##[group]Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+2026-09-10T10:41:51.8257685Z with:
+2026-09-10T10:41:51.8258152Z   persist-credentials: false
+2026-09-10T10:41:51.8258937Z   sparse-checkout: scripts/ci_summary_gate.py
+.github/advisory-registry.json
+
+2026-09-10T10:41:51.8259752Z   sparse-checkout-cone-mode: false
+2026-09-10T10:41:51.8260312Z   repository: sparq-org/sparq
+2026-09-10T10:41:51.8264518Z   token: ***
+2026-09-10T10:41:51.8264974Z   ssh-strict: true
+2026-09-10T10:41:51.8265515Z   ssh-user: git
+2026-09-10T10:41:51.8265967Z   clean: true
+2026-09-10T10:41:51.8266402Z   fetch-depth: 1
+2026-09-10T10:41:51.8266845Z   fetch-tags: false
+2026-09-10T10:41:51.8267306Z   show-progress: true
+2026-09-10T10:41:51.8267784Z   lfs: false
+2026-09-10T10:41:51.8268220Z   submodules: false
+2026-09-10T10:41:51.8268685Z   set-safe-directory: true
+2026-09-10T10:41:51.8269210Z   allow-unsafe-pr-checkout: false
+2026-09-10T10:41:51.8270035Z ##[endgroup]
+2026-09-10T10:41:51.9298402Z Syncing repository: sparq-org/sparq
+2026-09-10T10:41:51.9300952Z ##[group]Getting Git version info
+2026-09-10T10:41:51.9302044Z Working directory is '/home/runner/work/sparq/sparq'
+2026-09-10T10:41:51.9303980Z [command]/usr/bin/git version
+2026-09-10T10:41:51.9353632Z git version 2.55.0
+2026-09-10T10:41:51.9376214Z ##[endgroup]
+2026-09-10T10:41:51.9387509Z Temporarily overriding HOME='/home/runner/work/_temp/2a04cca6-6362-4fa6-8882-3d044f0a2d2b' before making global git config changes
+2026-09-10T10:41:51.9389903Z Adding repository directory to the temporary git global config as a safe directory
+2026-09-10T10:41:51.9393647Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/sparq/sparq
+2026-09-10T10:41:51.9442952Z Deleting the contents of '/home/runner/work/sparq/sparq'
+2026-09-10T10:41:51.9447125Z ##[group]Determining repository object format
+2026-09-10T10:41:51.9448694Z ##[endgroup]
+2026-09-10T10:41:51.9450323Z ##[group]Initializing the repository
+2026-09-10T10:41:51.9454087Z [command]/usr/bin/git init /home/runner/work/sparq/sparq
+2026-09-10T10:41:51.9567550Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-09-10T10:41:51.9569430Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-09-10T10:41:51.9571058Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-09-10T10:41:51.9572340Z hint: call:
+2026-09-10T10:41:51.9573171Z hint:
+2026-09-10T10:41:51.9574562Z hint: 	git config --global init.defaultBranch <name>
+2026-09-10T10:41:51.9575546Z hint:
+2026-09-10T10:41:51.9576471Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-09-10T10:41:51.9578021Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-09-10T10:41:51.9579262Z hint:
+2026-09-10T10:41:51.9579916Z hint: 	git branch -m <name>
+2026-09-10T10:41:51.9580698Z hint:
+2026-09-10T10:41:51.9581699Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-09-10T10:41:51.9583900Z Initialized empty Git repository in /home/runner/work/sparq/sparq/.git/
+2026-09-10T10:41:51.9587581Z [command]/usr/bin/git remote add origin https://github.com/sparq-org/sparq
+2026-09-10T10:41:51.9635045Z ##[endgroup]
+2026-09-10T10:41:51.9636656Z ##[group]Disabling automatic garbage collection
+2026-09-10T10:41:51.9638102Z [command]/usr/bin/git config --local gc.auto 0
+2026-09-10T10:41:51.9684816Z ##[endgroup]
+2026-09-10T10:41:51.9686044Z ##[group]Setting up auth
+2026-09-10T10:41:51.9686948Z Removing SSH command configuration
+2026-09-10T10:41:51.9688320Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-09-10T10:41:51.9716514Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-09-10T10:41:52.0098498Z Removing HTTP extra header
+2026-09-10T10:41:52.0105899Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-10T10:41:52.0155714Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-09-10T10:41:52.0394783Z Removing includeIf entries pointing to credentials config files
+2026-09-10T10:41:52.0400642Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-10T10:41:52.0439719Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-09-10T10:41:52.0669841Z [command]/usr/bin/git config --file /home/runner/work/_temp/git-credentials-f651bac4-31e4-4247-a941-362d2f017e1f.config http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-09-10T10:41:52.0710725Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/sparq/sparq/.git.path /home/runner/work/_temp/git-credentials-f651bac4-31e4-4247-a941-362d2f017e1f.config
+2026-09-10T10:41:52.0744888Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/sparq/sparq/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-f651bac4-31e4-4247-a941-362d2f017e1f.config
+2026-09-10T10:41:52.0781064Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-f651bac4-31e4-4247-a941-362d2f017e1f.config
+2026-09-10T10:41:52.0818377Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-f651bac4-31e4-4247-a941-362d2f017e1f.config
+2026-09-10T10:41:52.0851994Z ##[endgroup]
+2026-09-10T10:41:52.0852767Z ##[group]Fetching the repository
+2026-09-10T10:41:52.0858483Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --filter=blob:none --depth=1 origin +26409755cc774590ef3ada1231ca72dcfd252caa:refs/remotes/pull/6481/merge
+2026-09-10T10:41:52.7003014Z From https://github.com/sparq-org/sparq
+2026-09-10T10:41:52.7005989Z  * [new ref]         26409755cc774590ef3ada1231ca72dcfd252caa -> pull/6481/merge
+2026-09-10T10:41:52.7010715Z ##[endgroup]
+2026-09-10T10:41:52.7012255Z ##[group]Determining the checkout info
+2026-09-10T10:41:52.7014357Z ##[endgroup]
+2026-09-10T10:41:52.7015998Z ##[group]Setting up sparse checkout
+2026-09-10T10:41:52.7017079Z [command]/usr/bin/git config core.sparseCheckout true
+2026-09-10T10:41:52.7055582Z [command]/usr/bin/git rev-parse --git-path info/sparse-checkout
+2026-09-10T10:41:52.7085447Z .git/info/sparse-checkout
+2026-09-10T10:41:52.7094002Z ##[endgroup]
+2026-09-10T10:41:52.7096504Z ##[group]Checking out the ref
+2026-09-10T10:41:52.7099933Z [command]/usr/bin/git checkout --progress --force refs/remotes/pull/6481/merge
+2026-09-10T10:41:53.1210574Z Note: switching to 'refs/remotes/pull/6481/merge'.
+2026-09-10T10:41:53.1211551Z 
+2026-09-10T10:41:53.1212270Z You are in 'detached HEAD' state. You can look around, make experimental
+2026-09-10T10:41:53.1214375Z changes and commit them, and you can discard any commits you make in this
+2026-09-10T10:41:53.1216557Z state without impacting any branches by switching back to a branch.
+2026-09-10T10:41:53.1218318Z 
+2026-09-10T10:41:53.1219529Z If you want to create a new branch to retain commits you create, you may
+2026-09-10T10:41:53.1222185Z do so (now or later) by using -c with the switch command. Example:
+2026-09-10T10:41:53.1224118Z 
+2026-09-10T10:41:53.1224958Z   git switch -c <new-branch-name>
+2026-09-10T10:41:53.1226150Z 
+2026-09-10T10:41:53.1226965Z Or undo this operation with:
+2026-09-10T10:41:53.1228270Z 
+2026-09-10T10:41:53.1229015Z   git switch -
+2026-09-10T10:41:53.1229937Z 
+2026-09-10T10:41:53.1231310Z Turn off this advice by setting config variable advice.detachedHead to false
+2026-09-10T10:41:53.1233174Z 
+2026-09-10T10:41:53.1235514Z HEAD is now at 2640975 Merge 17594d4a6534c142cae764772fc42049e898eca3 into 781f667c19a8ebb779cfccb24b05ea432360b025
+2026-09-10T10:41:53.1241918Z ##[endgroup]
+2026-09-10T10:41:53.1277301Z [command]/usr/bin/git log -1 --format=%H
+2026-09-10T10:41:53.1307161Z 26409755cc774590ef3ada1231ca72dcfd252caa
+2026-09-10T10:41:53.1317681Z ##[group]Removing auth
+2026-09-10T10:41:53.1320605Z Removing SSH command configuration
+2026-09-10T10:41:53.1322572Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-09-10T10:41:53.1358911Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-09-10T10:41:53.1597823Z Removing HTTP extra header
+2026-09-10T10:41:53.1600957Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-10T10:41:53.1641332Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-09-10T10:41:53.1882311Z Removing includeIf entries pointing to credentials config files
+2026-09-10T10:41:53.1885498Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-10T10:41:53.1921703Z includeif.gitdir:/home/runner/work/sparq/sparq/.git.path
+2026-09-10T10:41:53.1925195Z includeif.gitdir:/home/runner/work/sparq/sparq/.git/worktrees/*.path
+2026-09-10T10:41:53.1927990Z includeif.gitdir:/github/workspace/.git.path
+2026-09-10T10:41:53.1930553Z includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-09-10T10:41:53.1936782Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/sparq/sparq/.git.path
+2026-09-10T10:41:53.1962519Z /home/runner/work/_temp/git-credentials-f651bac4-31e4-4247-a941-362d2f017e1f.config
+2026-09-10T10:41:53.1973444Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/sparq/sparq/.git.path /home/runner/work/_temp/git-credentials-f651bac4-31e4-4247-a941-362d2f017e1f.config
+2026-09-10T10:41:53.2012887Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/sparq/sparq/.git/worktrees/*.path
+2026-09-10T10:41:53.2040458Z /home/runner/work/_temp/git-credentials-f651bac4-31e4-4247-a941-362d2f017e1f.config
+2026-09-10T10:41:53.2049911Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/sparq/sparq/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-f651bac4-31e4-4247-a941-362d2f017e1f.config
+2026-09-10T10:41:53.2085600Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git.path
+2026-09-10T10:41:53.2113096Z /github/runner_temp/git-credentials-f651bac4-31e4-4247-a941-362d2f017e1f.config
+2026-09-10T10:41:53.2126877Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-f651bac4-31e4-4247-a941-362d2f017e1f.config
+2026-09-10T10:41:53.2169973Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-09-10T10:41:53.2197548Z /github/runner_temp/git-credentials-f651bac4-31e4-4247-a941-362d2f017e1f.config
+2026-09-10T10:41:53.2217586Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-f651bac4-31e4-4247-a941-362d2f017e1f.config
+2026-09-10T10:41:53.2261914Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-09-10T10:41:53.2502129Z Removing credentials config '/home/runner/work/_temp/git-credentials-f651bac4-31e4-4247-a941-362d2f017e1f.config'
+2026-09-10T10:41:53.2509961Z ##[endgroup]
+2026-09-10T10:41:53.2781698Z ##[group]Run python3 scripts/ci_summary_gate.py
+2026-09-10T10:41:53.2783170Z [36;1mpython3 scripts/ci_summary_gate.py[0m
+2026-09-10T10:41:53.2826317Z shell: /usr/bin/bash -e {0}
+2026-09-10T10:41:53.2827343Z env:
+2026-09-10T10:41:53.2837267Z   GH_TOKEN: ***
+2026-09-10T10:41:53.2838202Z   REPO: sparq-org/sparq
+2026-09-10T10:41:53.2839283Z   SHA: 17594d4a6534c142cae764772fc42049e898eca3
+2026-09-10T10:41:53.2840432Z   SELF_RUN_ID: 34467004259
+2026-09-10T10:41:53.2841407Z   EVENT_NAME: pull_request
+2026-09-10T10:41:53.2842379Z   PR_DRAFT: false
+2026-09-10T10:41:53.2843453Z   PR_NUMBER: 6481
+2026-09-10T10:41:53.2844327Z ##[endgroup]
+2026-09-10T10:42:00.0288459Z ci-summary: 36 declared-advisory job name(s) loaded from .github/advisory-registry.json; every other check GATES (#3773).
+2026-09-10T10:42:00.0290063Z ci-summary: evaluating tier=full (event=pull_request).
+2026-09-10T10:42:00.0291357Z   workflow-run resolver: ignored 13 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T10:42:00.0292856Z attempt 1: 55 check-run(s), 31 running, all-terminal stable for 0/2 poll(s)
+2026-09-10T10:42:21.5051613Z   workflow-run resolver: ignored 13 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T10:42:21.5052357Z attempt 2: 55 check-run(s), 30 running, all-terminal stable for 0/2 poll(s)
+2026-09-10T10:42:42.8855080Z   workflow-run resolver: ignored 13 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T10:42:42.8855913Z attempt 3: 55 check-run(s), 30 running, all-terminal stable for 0/2 poll(s)
+2026-09-10T10:43:04.6240464Z   workflow-run resolver: ignored 16 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T10:43:04.6241162Z attempt 4: 54 check-run(s), 28 running, all-terminal stable for 0/2 poll(s) (name set changed)
+2026-09-10T10:43:25.9584309Z   workflow-run resolver: ignored 16 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T10:43:25.9584967Z attempt 5: 54 check-run(s), 28 running, all-terminal stable for 0/2 poll(s)
+2026-09-10T10:43:47.3497463Z   workflow-run resolver: ignored 16 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T10:43:47.3498520Z attempt 6: 54 check-run(s), 27 running, all-terminal stable for 0/2 poll(s)
+2026-09-10T10:44:08.6952529Z   workflow-run resolver: ignored 16 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T10:44:08.6953938Z attempt 7: 54 check-run(s), 26 running, all-terminal stable for 0/2 poll(s)
+2026-09-10T10:44:30.7089793Z   workflow-run resolver: ignored 19 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T10:44:52.0679146Z attempt 8: 52 check-run(s), 22 running, all-terminal stable for 0/2 poll(s) (name set changed)
+2026-09-10T10:44:52.0680009Z   workflow-run resolver: ignored 19 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T10:44:52.0680741Z attempt 9: 60 check-run(s), 22 running, all-terminal stable for 0/2 poll(s) (name set changed)
+2026-09-10T10:45:13.5637615Z   workflow-run resolver: ignored 19 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T10:45:13.5638266Z attempt 10: 60 check-run(s), 22 running, all-terminal stable for 0/2 poll(s)
+2026-09-10T10:45:34.8648873Z   workflow-run resolver: ignored 19 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T10:45:34.8649532Z attempt 11: 60 check-run(s), 22 running, all-terminal stable for 0/2 poll(s)
+2026-09-10T10:45:56.6651874Z   workflow-run resolver: ignored 20 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T10:46:18.7289330Z attempt 12: 59 check-run(s), 20 running, all-terminal stable for 0/2 poll(s) (name set changed)
+2026-09-10T10:46:18.7290196Z   workflow-run resolver: ignored 30 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T10:46:18.7290976Z attempt 13: 64 check-run(s), 16 running, all-terminal stable for 0/2 poll(s) (name set changed)
+2026-09-10T10:46:40.1967878Z   workflow-run resolver: ignored 30 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T10:46:40.1971454Z attempt 14: 64 check-run(s), 16 running, all-terminal stable for 0/2 poll(s)
+2026-09-10T10:47:01.5563966Z   workflow-run resolver: ignored 30 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T10:47:01.5564779Z attempt 15: 83 check-run(s), 16 running, all-terminal stable for 0/2 poll(s) (name set changed)
+2026-09-10T10:47:23.0587722Z   workflow-run resolver: ignored 30 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T10:47:23.0588373Z attempt 16: 83 check-run(s), 16 running, all-terminal stable for 0/2 poll(s)
+2026-09-10T10:47:44.5323143Z   workflow-run resolver: ignored 30 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T10:47:44.5324179Z attempt 17: 83 check-run(s), 16 running, all-terminal stable for 0/2 poll(s)
+2026-09-10T10:48:06.4542668Z   workflow-run resolver: ignored 61 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T10:48:06.4543804Z attempt 18: 83 check-run(s), 14 running, all-terminal stable for 0/2 poll(s) (name set changed)
+2026-09-10T10:48:27.8487462Z   workflow-run resolver: ignored 61 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T10:48:27.8488057Z attempt 19: 83 check-run(s), 14 running, all-terminal stable for 0/2 poll(s)
+2026-09-10T10:48:49.5726326Z   workflow-run resolver: ignored 61 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T10:48:49.5726995Z attempt 20: 83 check-run(s), 13 running, all-terminal stable for 0/2 poll(s)
+2026-09-10T10:49:11.0776932Z   workflow-run resolver: ignored 61 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T10:49:11.0777546Z attempt 21: 83 check-run(s), 13 running, all-terminal stable for 0/2 poll(s)
+2026-09-10T10:49:32.4853961Z   workflow-run resolver: ignored 61 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T10:49:32.4854567Z attempt 22: 83 check-run(s), 12 running, all-terminal stable for 0/2 poll(s)
+2026-09-10T10:49:53.9243934Z   workflow-run resolver: ignored 61 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T10:49:53.9244962Z attempt 23: 83 check-run(s), 12 running, all-terminal stable for 0/2 poll(s)
+2026-09-10T10:50:15.5247189Z   workflow-run resolver: ignored 61 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T10:50:15.5247810Z attempt 24: 83 check-run(s), 12 running, all-terminal stable for 0/2 poll(s)
+2026-09-10T10:50:36.9410257Z   workflow-run resolver: ignored 61 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T10:50:36.9411275Z attempt 25: 83 check-run(s), 12 running, all-terminal stable for 0/2 poll(s)
+2026-09-10T10:50:58.3199692Z   workflow-run resolver: ignored 61 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T10:50:58.3200659Z attempt 26: 83 check-run(s), 12 running, all-terminal stable for 0/2 poll(s)
+2026-09-10T10:51:19.8030209Z   workflow-run resolver: ignored 61 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T10:51:19.8031207Z attempt 27: 83 check-run(s), 12 running, all-terminal stable for 0/2 poll(s)
+2026-09-10T10:51:41.4145532Z   workflow-run resolver: ignored 61 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T10:51:41.4146161Z attempt 28: 83 check-run(s), 10 running, all-terminal stable for 0/2 poll(s)
+2026-09-10T10:52:03.4366873Z   workflow-run resolver: ignored 65 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T10:52:03.4367585Z attempt 29: 83 check-run(s), 6 running, all-terminal stable for 0/2 poll(s) (name set changed)
+2026-09-10T10:52:25.2155206Z   workflow-run resolver: ignored 68 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T10:52:25.2156268Z attempt 30: 82 check-run(s), 4 running, all-terminal stable for 0/2 poll(s) (name set changed)
+2026-09-10T10:52:46.7252285Z   workflow-run resolver: ignored 68 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T10:52:46.7252932Z attempt 31: 82 check-run(s), 4 running, all-terminal stable for 0/2 poll(s)
+2026-09-10T10:53:08.6492764Z   workflow-run resolver: ignored 69 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T10:53:08.6494526Z attempt 32: 81 check-run(s), 2 running, all-terminal stable for 0/2 poll(s) (name set changed)
+2026-09-10T10:53:29.9367286Z   workflow-run resolver: ignored 69 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T10:53:29.9368176Z attempt 33: 81 check-run(s), 2 running, all-terminal stable for 0/2 poll(s)
+2026-09-10T10:53:51.4164671Z   workflow-run resolver: ignored 69 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T10:53:51.4165569Z attempt 34: 81 check-run(s), 2 running, all-terminal stable for 0/2 poll(s)
+2026-09-10T10:54:13.4446572Z   workflow-run resolver: ignored 69 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T10:54:13.4447188Z attempt 35: 81 check-run(s), 2 running, all-terminal stable for 0/2 poll(s)
+2026-09-10T10:54:35.0163775Z   workflow-run resolver: ignored 69 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T10:54:35.0165008Z attempt 36: 81 check-run(s), 2 running, all-terminal stable for 0/2 poll(s)
+2026-09-10T10:54:57.0952192Z   workflow-run resolver: ignored 81 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T10:54:57.0954995Z attempt 37: 80 check-run(s), 0 running, all-terminal stable for 1/2 poll(s) (name set changed)
+2026-09-10T10:55:19.3724699Z   workflow-run resolver: ignored 81 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T10:55:19.3725726Z attempt 38: 80 check-run(s), 0 running, all-terminal stable for 2/2 poll(s)
+2026-09-10T10:55:19.3735896Z ### ci-summary: PASSED — all 65 gating check(s) green (or skipped/neutral); 15 advisory check(s) excluded (each DECLARED in .github/advisory-registry.json, or on the exact platform-managed allow-list); set stable.
+2026-09-10T10:55:19.3737749Z selection: 30 of 65 gating check(s) ran, 35 skipped (selection and/or path-filter; selection pre-job succeeded).
+2026-09-10T10:55:19.3935674Z Post job cleanup.
+2026-09-10T10:55:19.4835099Z [command]/usr/bin/git version
+2026-09-10T10:55:19.4882621Z git version 2.55.0
+2026-09-10T10:55:19.4922504Z Temporarily overriding HOME='/home/runner/work/_temp/8317eb84-2b04-4fad-9907-645f3d0e8553' before making global git config changes
+2026-09-10T10:55:19.4924107Z Adding repository directory to the temporary git global config as a safe directory
+2026-09-10T10:55:19.4929890Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/sparq/sparq
+2026-09-10T10:55:19.4968642Z Removing SSH command configuration
+2026-09-10T10:55:19.4976931Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-09-10T10:55:19.5021901Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-09-10T10:55:19.5306354Z Removing HTTP extra header
+2026-09-10T10:55:19.5309908Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-10T10:55:19.5348391Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-09-10T10:55:19.5636210Z Removing includeIf entries pointing to credentials config files
+2026-09-10T10:55:19.5642979Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-10T10:55:19.5700436Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-09-10T10:55:19.6153126Z Cleaning up orphan processes

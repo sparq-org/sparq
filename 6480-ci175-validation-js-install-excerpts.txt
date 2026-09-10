@@ -1,0 +1,65 @@
+# job-102837808254.log:128-134
+128: 2026-09-10T10:37:59.2727624Z Turn off this advice by setting config variable advice.detachedHead to false
+129: 2026-09-10T10:37:59.2728535Z 
+130: 2026-09-10T10:37:59.2729394Z HEAD is now at 2640975 Merge 17594d4a6534c142cae764772fc42049e898eca3 into 781f667c19a8ebb779cfccb24b05ea432360b025
+131: 2026-09-10T10:37:59.2738690Z ##[endgroup]
+132: 2026-09-10T10:37:59.2799063Z [command]/usr/bin/git log -1 --format=%H
+133: 2026-09-10T10:37:59.2832163Z 26409755cc774590ef3ada1231ca72dcfd252caa
+134: 2026-09-10T10:37:59.3191810Z ##[group]Run dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8
+# job-102837808254.log:446-451
+446: 2026-09-10T10:38:12.5666221Z Found in cache @ /opt/hostedtoolcache/node/22.23.2/x64
+447: 2026-09-10T10:38:12.5669409Z ##[group]Environment details
+448: 2026-09-10T10:38:12.9567097Z node: v22.23.2
+449: 2026-09-10T10:38:12.9567528Z npm: 10.9.8
+450: 2026-09-10T10:38:12.9567847Z yarn: 1.22.22
+451: 2026-09-10T10:38:12.9568627Z ##[endgroup]
+# job-102837808254.log:470-494
+470: 2026-09-10T10:38:15.5490280Z ##[group]Run npm ci
+471: 2026-09-10T10:38:15.5490611Z [36;1mnpm ci[0m
+472: 2026-09-10T10:38:15.5490891Z [36;1mnpm ls next --workspace=site --workspace=gui/app[0m
+473: 2026-09-10T10:38:15.5491229Z [36;1mnode <<'NODE'[0m
+474: 2026-09-10T10:38:15.5491599Z [36;1m// [GPT-6 ASTRA] Exercise the installed native dependency, including libvips.[0m
+475: 2026-09-10T10:38:15.5492055Z [36;1mconst assert = require('node:assert/strict');[0m
+476: 2026-09-10T10:38:15.5492386Z [36;1mconst sharp = require('sharp');[0m
+477: 2026-09-10T10:38:15.5492700Z [36;1mconst installed = sharp.versions.sharp;[0m
+478: 2026-09-10T10:38:15.5493840Z [36;1mconst locked = require('./package-lock.json').packages['node_modules/sharp'].version;[0m
+479: 2026-09-10T10:38:15.5494445Z [36;1mconsole.log(JSON.stringify({ sharp: installed, versions: sharp.versions }));[0m
+480: 2026-09-10T10:38:15.5495045Z [36;1massert.equal(installed, locked, 'installed sharp must match the committed lock');[0m
+481: 2026-09-10T10:38:15.5495472Z [36;1m(async () => {[0m
+482: 2026-09-10T10:38:15.5495757Z [36;1m  const { data, info } = await sharp({[0m
+483: 2026-09-10T10:38:15.5496150Z [36;1m    create: { width: 1, height: 1, channels: 4, background: '#000000' }[0m
+484: 2026-09-10T10:38:15.5496574Z [36;1m  }).png().toBuffer({ resolveWithObject: true });[0m
+485: 2026-09-10T10:38:15.5496922Z [36;1m  assert.equal(info.format, 'png');[0m
+486: 2026-09-10T10:38:15.5497228Z [36;1m  assert.equal(info.width, 1);[0m
+487: 2026-09-10T10:38:15.5497508Z [36;1m  assert.equal(info.height, 1);[0m
+488: 2026-09-10T10:38:15.5497866Z [36;1m  assert.ok(data.length > 8, 'generated PNG must be nonempty');[0m
+489: 2026-09-10T10:38:15.5498384Z [36;1m  assert.deepEqual(data.subarray(0, 8), Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));[0m
+490: 2026-09-10T10:38:15.5498894Z [36;1m  console.log(`sharp native PNG smoke: ${data.length} bytes`);[0m
+491: 2026-09-10T10:38:15.5499341Z [36;1m})().catch(error => { console.error(error); process.exitCode = 1; });[0m
+492: 2026-09-10T10:38:15.5499692Z [36;1mNODE[0m
+493: 2026-09-10T10:38:15.5500052Z [36;1mgit diff --exit-code -- package-lock.json gui/app/package.json site/package.json[0m
+494: 2026-09-10T10:38:15.5543446Z shell: /usr/bin/bash -e {0}
+# job-102837808254.log:508-530
+508: 2026-09-10T10:41:31.9750051Z added 1017 packages, and audited 1027 packages in 3m
+509: 2026-09-10T10:41:31.9750497Z 
+510: 2026-09-10T10:41:31.9750777Z 250 packages are looking for funding
+511: 2026-09-10T10:41:31.9751256Z   run `npm fund` for details
+512: 2026-09-10T10:41:32.0528785Z 
+513: 2026-09-10T10:41:32.0529834Z 18 vulnerabilities (2 moderate, 16 high)
+514: 2026-09-10T10:41:32.0530256Z 
+515: 2026-09-10T10:41:32.0530653Z To address issues that do not require attention, run:
+516: 2026-09-10T10:41:32.0531226Z   npm audit fix
+517: 2026-09-10T10:41:32.0531434Z 
+518: 2026-09-10T10:41:32.0531820Z To address all issues (including breaking changes), run:
+519: 2026-09-10T10:41:32.0532419Z   npm audit fix --force
+520: 2026-09-10T10:41:32.0533558Z 
+521: 2026-09-10T10:41:32.0533839Z Run `npm audit` for details.
+522: 2026-09-10T10:41:32.9058045Z sparq-monorepo@0.0.0 /home/runner/work/sparq/sparq
+523: 2026-09-10T10:41:32.9059658Z ├─┬ sparq-gui-app@0.1.0 -> ./gui/app
+524: 2026-09-10T10:41:32.9060867Z │ └── next@15.5.24 overridden
+525: 2026-09-10T10:41:32.9062007Z └─┬ sparq-site@0.1.0 -> ./site
+526: 2026-09-10T10:41:32.9062564Z   └── next@15.5.24 deduped
+527: 2026-09-10T10:41:32.9063071Z 
+528: 2026-09-10T10:41:32.9895799Z {"sharp":"0.35.4","versions":{"aom":"3.15.0","archive":"3.8.9","cairo":"1.18.4","cgif":"0.5.3","exif":"0.6.26","expat":"2.8.3","ffi":"3.8.0","fontconfig":"2.18.3","freetype":"2.14.3","fribidi":"1.0.16","glib":"2.89.4","harfbuzz":"14.3.1","heif":"1.23.2","highway":"1.4.0","imagequant":"2.4.1","lcms":"2.19.1","mozjpeg":"0826579","pango":"1.58.2","pixman":"0.46.4","png":"1.6.58","proxy-libintl":"0.5","rsvg":"2.62.91","tiff":"4.7.2","uhdr":"2.0.2","vips":"8.18.6","webp":"1.6.0","xml2":"2.15.3","zlib-ng":"2.3.3","sharp":"0.35.4"}}
+529: 2026-09-10T10:41:32.9940734Z sharp native PNG smoke: 91 bytes
+530: 2026-09-10T10:41:33.0091340Z ##[group]Run npm run build

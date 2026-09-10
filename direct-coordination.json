@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-10T10:59:52.513328+00:00",
+  "updated_at": "2026-09-10T11:13:46.407842+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -68,8 +68,8 @@
     "agent": "/root/postmerge_ci",
     "actual_model": "GPT-6 Astra",
     "effort": "xhigh",
-    "phase": "All current CI green; verify rawnativeevidence anddispositionCopilot beforequeue",
-    "state": "Normal fastforward26d\u21920c\u219217594 published after actualOpus security andnative-delta approvals. All20oldheadrunscompleted beforepush. ExactnewheadCI/Copilot started; notenqueued ormergeready.",
+    "phase": "Protected merge queue position1; await merge-group andmainvalidation",
+    "state": "Exact17594 independentOpusreviews+actualCIverified. CopilotfalseAPIclaimrepliedwithpublishedsource/runtimeproof; threadresolved. Protectedqueueadmission succeeded withALLGREEN, gateapp15368 unchanged. Not merged yet.",
     "started_at": "2026-09-10T08:47:00Z",
     "base": "781f667c19a8ebb779cfccb24b05ea432360b025",
     "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6480",
@@ -83,12 +83,11 @@
     },
     "readiness": "direct-6480/admission/readiness-root-verification.json",
     "next_actions": [
-      "Observe existing exact17594 runs, especially js34467004187 nativePNG+versions/no-drift, docs34467004155, supply34467004107, gui34467004102 and gate34467004259. Allfullrequiredchecks mustpass; no luckyretry/cancellation.",
-      "Collect existingCopilot34467011356 then inspect actualcurrentheadreviewbody/threads; no duplicate request. ActualOpus reviews of0c/17594completedcollected; do notrelaunch.",
-      "Afterallrequiredchecks/reviewfindingsresolved, revalidateexactPR/head/main/rules/budgetthenprotectedenqueue expectedHeadOid/jumpfalse. No labels/verdictfabrication oradminmerge.",
-      "Keep6480open throughmerge andautomaticDependabotalert32/106/107reevaluation; no dismissal. Update ownexistingcommentforconcreteresults.",
-      "Collect bounded5183Astra enginewitness fromexistingagent. Onefalsepositive automatedcyberflagoccurredbeforeexecution; clarifiedfixedlocalSPARQLtask once, stopifserviceblocksagain. Need actualpinnedOxigraph/exactCIfeatureplan aftersmallwitness; do notweakencanon/comparator.",
-      "Postmerge6478 scheduledfuzz34458064851cancelledwithnonewerreplacement observed; causenotyettriaged, do notclaimfuzzhealthy. Existing5183UPDATE causedmaingatefailure. Preserveotherholds/registryoff/releaseoff/ALLGREEN."
+      "Observeexisting6481mergequeue/MGroup; neverreenqueueorreplayenqueueinputwhileentryexists. Comparegeneratedgrouptreewithreviewed17594andpreserveallliveMGroup/currentreview:passevidence.",
+      "Aftermergeverifyactualmaincommit/treeandrequiredpostmergechecks, thencheckautomaticDependabotalerts32/106/107; keep6480openuntilproven, no dismissals/releases.",
+      "Collect existingAstra boundedofflineOxigraph0.5.9comparison indirc direct-5183/oxigraph-witness. Limits10mincompile/run512MiBnewgrowth,min2GiBfree,jobs1,no network/noCargo-widebuild/no dependencyupdates. Stoponmissingclosure/bound. Original10operationCIseednotyetexecuted.",
+      "Strict5183defaultenginewitnesspassed12casesbothsource-qualifiedrevisions; no6478regressionobservedthere. Needpinnedreferenceandlaterexactseedbeforeanycomparator/generatorpolicychange; preservecanonNO_GO.",
+      "Postmerge6478scheduledfuzz34458064851cancelledwithnonewerreplacementobserved; causaltriagestillpending. UPDATE5183causedmaingatefailure. Preserve6049/6055/registry2305/canon/release/EC2holds andALLGREEN."
     ],
     "head": "17594d4a6534c142cae764772fc42049e898eca3",
     "implementation": {
@@ -143,7 +142,7 @@
     },
     "pr": 6481,
     "url": "https://github.com/sparq-org/sparq/pull/6481",
-    "agent_state": "Astra verifies exact17594 CI rawlogs andsourceAPI, no builds or codechanges",
+    "agent_state": "Astra on isolated boundedofflineOxigraph0.5.9referencebuild andfixedsyntheticquerycases",
     "publication": {
       "at": "2026-09-10T09:27:19.769985+00:00",
       "receipt": "direct-6480/admission/publication-receipt.json",
@@ -260,7 +259,9 @@
         }
       },
       "evidence": "direct-6480/admission/published175-first-runs.json",
-      "required_observation": "Read real Node/npm versions; both Next15.5.24; actual sharp0.35.4+vips>=8.18.6 andsuccessfulPNG; final no-drift; docs13/advisory25+checker; hardfrontend andrequiredgate. Do notinherit26druntimeapproval."
+      "required_observation": "Read real Node/npm versions; both Next15.5.24; actual sharp0.35.4+vips>=8.18.6 andsuccessfulPNG; final no-drift; docs13/advisory25+checker; hardfrontend andrequiredgate. Do notinherit26druntimeapproval.",
+      "state": "All PRrequiredchecks verifiedgreen; protectedmerge-group checks separatelypending",
+      "current_review_threads_resolved": true
     },
     "review_followup": {
       "state": "completed_frozen_root_verified",
@@ -456,7 +457,104 @@
       "copilot_run": 34467011356
     },
     "latest_review_observation": "direct-6480/admission/heartbeat1056-review-queue.json",
-    "latest_ci_observation": "direct-6480/admission/heartbeat1056-runs.json"
+    "latest_ci_observation": "direct-6480/admission/heartbeat1056-runs.json",
+    "ci_validation": {
+      "state": "completed_frozen_root_verified",
+      "directory": "direct-6480/ci175-validation",
+      "manifest_sha256": "ac8f0615f81f2e9919f8a7cb5be69a1a266b74f0d81fdb5b87b4edd8d642e3a4",
+      "root_verification": "direct-6480/admission/head175-final-ci-verification.json",
+      "runtime": "Node22.23.2/npm10.9.8, Next15.5.24both, sharp0.35.4/vips8.18.6, PNG91bytes, finalnodriftpass",
+      "gate_check": 102837808339,
+      "app_id": 15368
+    },
+    "copilot_resolution": {
+      "receipt": "direct-6480/admission/resolve-copilot175-receipt.json",
+      "reply": "https://github.com/sparq-org/sparq/pull/6481#discussion_r3978415843",
+      "thread": "PRRT_kwDOSz3qKM6hCljp",
+      "resolved": true,
+      "qualification": "TriggerpersistentassertionOpusnonblocking; NextfloorfuturepolicywasnotindividualOpusfinding. Currenttruthverified, nofalseapprovalattribution."
+    },
+    "queue": {
+      "at": "2026-09-10T11:09:48.317670+00:00",
+      "entry": {
+        "id": "MQE_lQDOSz3qKM8AAAABC97cKM4AA2w6zgLLeAw",
+        "position": 1,
+        "state": "QUEUED",
+        "headCommit": null
+      },
+      "expected_head": "17594d4a6534c142cae764772fc42049e898eca3",
+      "precheck": "direct-6480/admission/enqueue6481-precheck.json",
+      "result": "direct-6480/admission/enqueue6481-result.json",
+      "policy": "Freshmain78, protections/gate/threads/actualreviews/headvalidated; jumpfalse; no bypass.",
+      "latest_observation": "direct-6480/admission/queue6481-first-observation.json",
+      "latest_state": "AWAITING_CHECKS"
+    },
+    "mergegroup": {
+      "head": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+      "tree": "3ccc4164afe1d61e7e79f65f7870b9805c5ed499",
+      "state": "AWAITING_CHECKS",
+      "position": 1,
+      "root_verification": "direct-6480/admission/mergegroup459-root-verification.json",
+      "first_runs": "direct-6480/admission/mergegroup459-first-runs.json",
+      "runs": [
+        {
+          "id": 34469862602,
+          "name": "feature-matrix",
+          "event": "merge_group",
+          "status": "queued",
+          "conclusion": null
+        },
+        {
+          "id": 34469862419,
+          "name": "CI",
+          "event": "merge_group",
+          "status": "queued",
+          "conclusion": null
+        },
+        {
+          "id": 34469862201,
+          "name": "routing-self-tests",
+          "event": "merge_group",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 34469862126,
+          "name": "pr-area-label",
+          "event": "merge_group",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 34469862189,
+          "name": "ci-summary",
+          "event": "merge_group",
+          "status": "in_progress",
+          "conclusion": null
+        },
+        {
+          "id": 34469862167,
+          "name": "flow-on-gates",
+          "event": "merge_group",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 34469862219,
+          "name": "vectorized-feature-off",
+          "event": "merge_group",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 34469862220,
+          "name": "docs-quality",
+          "event": "merge_group",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    }
   },
   "prs": {
     "4300": {
@@ -875,7 +973,12 @@
       "draft": false,
       "url": "https://github.com/sparq-org/sparq/pull/6481",
       "title": "chore(deps): patch Next.js and sharp across site and GUI",
-      "queue": null,
+      "queue": {
+        "id": "MQE_lQDOSz3qKM8AAAABC97cKM4AA2w6zgLLeAw",
+        "position": 1,
+        "state": "QUEUED",
+        "headCommit": null
+      },
       "gate": "freshCIpending",
       "actual_independent_reviews": "Opus5xhigh0c+17594approvedforCI",
       "copilot_run": 34467011356
@@ -929,30 +1032,29 @@
     }
   },
   "next_actions": [
-    "Observe existing exact17594 runs, especially js34467004187 nativePNG+versions/no-drift, docs34467004155, supply34467004107, gui34467004102 and gate34467004259. Allfullrequiredchecks mustpass; no luckyretry/cancellation.",
-    "Collect existingCopilot34467011356 then inspect actualcurrentheadreviewbody/threads; no duplicate request. ActualOpus reviews of0c/17594completedcollected; do notrelaunch.",
-    "Afterallrequiredchecks/reviewfindingsresolved, revalidateexactPR/head/main/rules/budgetthenprotectedenqueue expectedHeadOid/jumpfalse. No labels/verdictfabrication oradminmerge.",
-    "Keep6480open throughmerge andautomaticDependabotalert32/106/107reevaluation; no dismissal. Update ownexistingcommentforconcreteresults.",
-    "Collect bounded5183Astra enginewitness fromexistingagent. Onefalsepositive automatedcyberflagoccurredbeforeexecution; clarifiedfixedlocalSPARQLtask once, stopifserviceblocksagain. Need actualpinnedOxigraph/exactCIfeatureplan aftersmallwitness; do notweakencanon/comparator.",
-    "Postmerge6478 scheduledfuzz34458064851cancelledwithnonewerreplacement observed; causenotyettriaged, do notclaimfuzzhealthy. Existing5183UPDATE causedmaingatefailure. Preserveotherholds/registryoff/releaseoff/ALLGREEN."
+    "Observeexisting6481mergequeue/MGroup; neverreenqueueorreplayenqueueinputwhileentryexists. Comparegeneratedgrouptreewithreviewed17594andpreserveallliveMGroup/currentreview:passevidence.",
+    "Aftermergeverifyactualmaincommit/treeandrequiredpostmergechecks, thencheckautomaticDependabotalerts32/106/107; keep6480openuntilproven, no dismissals/releases.",
+    "Collect existingAstra boundedofflineOxigraph0.5.9comparison indirc direct-5183/oxigraph-witness. Limits10mincompile/run512MiBnewgrowth,min2GiBfree,jobs1,no network/noCargo-widebuild/no dependencyupdates. Stoponmissingclosure/bound. Original10operationCIseednotyetexecuted.",
+    "Strict5183defaultenginewitnesspassed12casesbothsource-qualifiedrevisions; no6478regressionobservedthere. Needpinnedreferenceandlaterexactseedbeforeanycomparator/generatorpolicychange; preservecanonNO_GO.",
+    "Postmerge6478scheduledfuzz34458064851cancelledwithnonewerreplacementobserved; causaltriagestillpending. UPDATE5183causedmaingatefailure. Preserve6049/6055/registry2305/canon/release/EC2holds andALLGREEN."
   ],
   "followup_lane": {
     "issue": 5183,
     "agent": "/root/postmerge_ci",
-    "state": "engine_witness_completed_root_verified",
+    "state": "bounded_offline_oxigraph_reference_running",
     "base": "781f667c19a8ebb779cfccb24b05ea432360b025",
-    "scope": "firstseed4141222487 deterministic localization readiness; no runtime/build yet; no attribution to6478",
-    "limits": "new output<=64MiB, inspect warm cache only; preserve canonNO_GO holds and strict comparator",
+    "scope": "FixedlocalRDFSPARQLreference0.5.9 Store/update/query reduction+controls; no originalseed/canonicalizer/productionedits",
+    "limits": "\u226410mincompile/run,\u2264512MiBnewgrowth,\u22652GiBfree,jobs1,offlineonly,pinnedrepoLock/vendoredspargebra0.4.6",
     "report": "direct-5183/engine-witness/report.json",
     "manifest_sha256": "88f152695f2fbedb42306daee1d623b10544eda87426d2ff430bd34663366af3",
     "proposed_next": "Defaultfeature publicAPI2operationenginewitness main/parent withwarmrlibs,\u22642min/64MiB, no dependencycompile. Root mustread/verifyreadiness thenauthorize; no exactCIfeatureclaim.",
-    "directory": "direct-5183/engine-witness",
+    "directory": "direct-5183/oxigraph-witness",
     "authorized_limits": "\u22642minlink/run phase,64MiBoutputs,jobs1,noCargo/dependencycompile/network; defaultwarmrlibsonly, noexactCIclaim",
     "dispatch_event": "Initialautomatedcyberflagclearedwithplainlocalconformancescope. Actualtestcompleted; no remainingserviceblock.",
     "root_verification": "direct-5183/admission/engine-witness-root-verification.json",
     "observations": "12actualobservations: main/parentdefaultreduction+controls bothpublicupdatepaths matchspec; noattributionbeyondtestedcase",
     "next_reference_plan": "direct-5183/engine-witness/next-reference-plan.json",
-    "reference_execution": "Planonly; waitforcurrent6481CIverificationhandoffthen authorizeboundedofflineOxigraph512MiB10min jobs1, no broadbenchbuild."
+    "reference_execution": "AuthorizedafterCIhandoff; existingAstraagent owns. Stopandreportmissingdependencies/bounds; no fallbackworkspacebuild."
   },
   "budget": {
     "observed_at": "2026-09-10T10:36:57.270637+00:00",
@@ -1373,18 +1475,15 @@
     "followup": "Narrowtriage-titleCIrule+offendingrowdiagnostic could improveclassifier, but originalgenpartitionrequires separatelyreviewedpolicy. No6468implementation while4246active."
   },
   "latest_monitor": {
-    "at": "2026-09-10T10:22:18.734003+00:00",
-    "evidence": "direct-6480/admission/monitor-followup-response.json",
+    "at": "2026-09-10T11:13:46.407842+00:00",
     "main": "781f667c19a8ebb779cfccb24b05ea432360b025",
-    "queue_entries": [],
-    "graphql_budget": {
-      "remaining": 4998,
-      "resetAt": "2026-09-10T10:48:45Z",
-      "cost": 1
-    },
+    "queue_pr": 6481,
+    "queue_position": 1,
+    "mergegroup": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+    "reviewed_tree_identical": true,
     "registry_actions_enabled": false,
-    "actions_queued": 2,
-    "actions_in_progress": 2
+    "release_authorized": false,
+    "current_work": "BoundedoneAstraagentofflineOxigraphreference; protectedMGexistingCIawaited"
   },
   "registry_pause": {
     "enabled": false,

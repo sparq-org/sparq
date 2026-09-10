@@ -1,0 +1,437 @@
+{
+  "at": "2026-09-10T11:09:47.141703+00:00",
+  "budget": {
+    "core": {
+      "limit": 5000,
+      "used": 22,
+      "remaining": 4978,
+      "reset": 1789040999
+    },
+    "search": {
+      "limit": 30,
+      "used": 0,
+      "remaining": 30,
+      "reset": 1789038644
+    },
+    "graphql": {
+      "limit": 5000,
+      "used": 0,
+      "remaining": 5000,
+      "reset": 1789042184
+    },
+    "integration_manifest": {
+      "limit": 5000,
+      "used": 0,
+      "remaining": 5000,
+      "reset": 1789042184
+    },
+    "source_import": {
+      "limit": 100,
+      "used": 0,
+      "remaining": 100,
+      "reset": 1789038644
+    },
+    "code_scanning_autofix": {
+      "limit": 10,
+      "used": 0,
+      "remaining": 10,
+      "reset": 1789038644
+    },
+    "actions_runner_registration": {
+      "limit": 10000,
+      "used": 0,
+      "remaining": 10000,
+      "reset": 1789042184
+    },
+    "scim": {
+      "limit": 15000,
+      "used": 0,
+      "remaining": 15000,
+      "reset": 1789042184
+    },
+    "dependency_snapshots": {
+      "limit": 100,
+      "used": 0,
+      "remaining": 100,
+      "reset": 1789038644
+    },
+    "dependency_sbom": {
+      "limit": 100,
+      "used": 0,
+      "remaining": 100,
+      "reset": 1789038644
+    },
+    "audit_log": {
+      "limit": 1750,
+      "used": 0,
+      "remaining": 1750,
+      "reset": 1789042184
+    },
+    "audit_log_streaming": {
+      "limit": 15,
+      "used": 0,
+      "remaining": 15,
+      "reset": 1789042184
+    },
+    "code_search": {
+      "limit": 10,
+      "used": 0,
+      "remaining": 10,
+      "reset": 1789038644
+    },
+    "copilot_usage_records": {
+      "limit": 1750,
+      "used": 0,
+      "remaining": 1750,
+      "reset": 1789042184
+    },
+    "enterprise_token_inventory": {
+      "limit": 1750,
+      "used": 0,
+      "remaining": 1750,
+      "reset": 1789042184
+    }
+  },
+  "rules": [
+    {
+      "type": "deletion",
+      "ruleset_source_type": "Repository",
+      "ruleset_source": "sparq-org/sparq",
+      "ruleset_id": 17688455
+    },
+    {
+      "type": "non_fast_forward",
+      "ruleset_source_type": "Repository",
+      "ruleset_source": "sparq-org/sparq",
+      "ruleset_id": 17688455
+    },
+    {
+      "type": "pull_request",
+      "parameters": {
+        "required_approving_review_count": 0,
+        "dismiss_stale_reviews_on_push": false,
+        "required_reviewers": [],
+        "require_code_owner_review": false,
+        "dismissal_restriction": {
+          "enabled": false,
+          "allowed_actors": []
+        },
+        "require_last_push_approval": false,
+        "required_review_thread_resolution": true,
+        "require_extra_approval_for_unattributed_changes": true,
+        "allowed_merge_methods": [
+          "squash"
+        ]
+      },
+      "ruleset_source_type": "Repository",
+      "ruleset_source": "sparq-org/sparq",
+      "ruleset_id": 17688455
+    },
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "strict_required_status_checks_policy": false,
+        "do_not_enforce_on_create": false,
+        "required_status_checks": [
+          {
+            "context": "gate",
+            "integration_id": 15368
+          }
+        ]
+      },
+      "ruleset_source_type": "Repository",
+      "ruleset_source": "sparq-org/sparq",
+      "ruleset_id": 17688455
+    },
+    {
+      "type": "code_quality",
+      "parameters": {
+        "severity": "all"
+      },
+      "ruleset_source_type": "Repository",
+      "ruleset_source": "sparq-org/sparq",
+      "ruleset_id": 17688455
+    },
+    {
+      "type": "copilot_code_review",
+      "parameters": {
+        "review_on_push": true,
+        "review_draft_pull_requests": false
+      },
+      "ruleset_source_type": "Repository",
+      "ruleset_source": "sparq-org/sparq",
+      "ruleset_id": 17688455
+    },
+    {
+      "type": "merge_queue",
+      "parameters": {
+        "merge_method": "SQUASH",
+        "max_entries_to_build": 3,
+        "min_entries_to_merge": 1,
+        "max_entries_to_merge": 8,
+        "min_entries_to_merge_wait_minutes": 5,
+        "grouping_strategy": "ALLGREEN",
+        "check_response_timeout_minutes": 360
+      },
+      "ruleset_source_type": "Repository",
+      "ruleset_source": "sparq-org/sparq",
+      "ruleset_id": 17688455
+    }
+  ],
+  "registry": {
+    "enabled": false,
+    "sha_pinning_required": false
+  },
+  "gate": {
+    "id": 102837808339,
+    "name": "gate",
+    "node_id": "CR_kwDOSz3qKM8AAAAX8Zxs0w",
+    "head_sha": "17594d4a6534c142cae764772fc42049e898eca3",
+    "external_id": "ef24603a-dfa3-552a-bb6d-a381b0f26fb5",
+    "url": "https://api.github.com/repos/sparq-org/sparq/check-runs/102837808339",
+    "html_url": "https://github.com/sparq-org/sparq/actions/runs/34467004259/job/102837808339",
+    "details_url": "https://github.com/sparq-org/sparq/actions/runs/34467004259/job/102837808339",
+    "status": "completed",
+    "conclusion": "success",
+    "started_at": "2026-09-10T10:41:50Z",
+    "completed_at": "2026-09-10T10:55:21Z",
+    "output": {
+      "title": null,
+      "summary": null,
+      "text": null,
+      "annotations_count": 0,
+      "annotations_url": "https://api.github.com/repos/sparq-org/sparq/check-runs/102837808339/annotations"
+    },
+    "check_suite": {
+      "id": 93368196189
+    },
+    "app": {
+      "id": 15368,
+      "client_id": "Iv1.05c79e9ad1f6bdfa",
+      "slug": "github-actions",
+      "node_id": "MDM6QXBwMTUzNjg=",
+      "owner": {
+        "login": "github",
+        "id": 9919,
+        "node_id": "MDEyOk9yZ2FuaXphdGlvbjk5MTk=",
+        "avatar_url": "https://avatars.githubusercontent.com/u/9919?v=4",
+        "gravatar_id": "",
+        "url": "https://api.github.com/users/github",
+        "html_url": "https://github.com/github",
+        "followers_url": "https://api.github.com/users/github/followers",
+        "following_url": "https://api.github.com/users/github/following{/other_user}",
+        "gists_url": "https://api.github.com/users/github/gists{/gist_id}",
+        "starred_url": "https://api.github.com/users/github/starred{/owner}{/repo}",
+        "subscriptions_url": "https://api.github.com/users/github/subscriptions",
+        "organizations_url": "https://api.github.com/users/github/orgs",
+        "repos_url": "https://api.github.com/users/github/repos",
+        "events_url": "https://api.github.com/users/github/events{/privacy}",
+        "received_events_url": "https://api.github.com/users/github/received_events",
+        "type": "Organization",
+        "user_view_type": "public",
+        "site_admin": false
+      },
+      "name": "GitHub Actions",
+      "description": "Automate your workflow from idea to production",
+      "external_url": "https://help.github.com/en/actions",
+      "html_url": "https://github.com/apps/github-actions",
+      "created_at": "2018-07-30T09:30:17Z",
+      "updated_at": "2026-06-18T16:17:48Z",
+      "permissions": {
+        "actions": "write",
+        "administration": "read",
+        "artifact_metadata": "write",
+        "attestations": "write",
+        "checks": "write",
+        "code_quality": "write",
+        "contents": "write",
+        "copilot_requests": "write",
+        "deployments": "write",
+        "discussions": "write",
+        "drives": "write",
+        "issues": "write",
+        "merge_queues": "write",
+        "metadata": "read",
+        "models": "read",
+        "packages": "write",
+        "pages": "write",
+        "pull_requests": "write",
+        "repository_hooks": "write",
+        "repository_projects": "write",
+        "security_events": "write",
+        "statuses": "write",
+        "vulnerability_alerts": "read"
+      },
+      "events": [
+        "branch_protection_rule",
+        "check_run",
+        "check_suite",
+        "create",
+        "delete",
+        "deployment",
+        "deployment_status",
+        "discussion",
+        "discussion_comment",
+        "fork",
+        "gollum",
+        "issues",
+        "issue_comment",
+        "label",
+        "merge_group",
+        "milestone",
+        "page_build",
+        "public",
+        "pull_request",
+        "pull_request_review",
+        "pull_request_review_comment",
+        "push",
+        "registry_package",
+        "release",
+        "repository",
+        "repository_dispatch",
+        "status",
+        "watch",
+        "workflow_dispatch",
+        "workflow_run"
+      ]
+    },
+    "pull_requests": [
+      {
+        "url": "https://api.github.com/repos/sparq-org/sparq/pulls/6481",
+        "id": 4494122024,
+        "number": 6481,
+        "head": {
+          "ref": "codex/next-security-patch",
+          "sha": "17594d4a6534c142cae764772fc42049e898eca3",
+          "repo": {
+            "id": 1262348840,
+            "url": "https://api.github.com/repos/sparq-org/sparq",
+            "name": "sparq"
+          }
+        },
+        "base": {
+          "ref": "main",
+          "sha": "781f667c19a8ebb779cfccb24b05ea432360b025",
+          "repo": {
+            "id": 1262348840,
+            "url": "https://api.github.com/repos/sparq-org/sparq",
+            "name": "sparq"
+          }
+        }
+      }
+    ]
+  },
+  "target": {
+    "data": {
+      "rateLimit": {
+        "remaining": 4988,
+        "resetAt": "2026-09-10T11:49:59Z"
+      },
+      "repository": {
+        "defaultBranchRef": {
+          "target": {
+            "oid": "781f667c19a8ebb779cfccb24b05ea432360b025"
+          }
+        },
+        "pullRequest": {
+          "id": "PR_kwDOSz3qKM8AAAABC97cKA",
+          "state": "OPEN",
+          "isDraft": false,
+          "baseRefName": "main",
+          "headRefOid": "17594d4a6534c142cae764772fc42049e898eca3",
+          "body": "> \ud83e\udd16 **SPARQ agent** \u2014 I am @jeswr's agent for the sparq-org/sparq RDF/SPARQL engine. @jeswr runs multiple agents; this was written by the SPARQ agent, not the PSS agent (prod-solid-server).\n\nPatches Next.js to `15.5.24` in both frontend manifests and the root lockfile, and resolves `sharp@0.35.4` under Next's supported optional-dependency range. This addresses the Next.js advisories tracked in #6480 and selects a version outside the affected range reported by sharp advisory [GHSA-f88m-g3jw-g9cj](https://github.com/lovell/sharp/security/advisories/GHSA-f88m-g3jw-g9cj).\n\nThe lock update preserves all eight SWC variants, Linux libc selectors, existing overrides and unrelated dependency floors. Sharp's native packages and the two transitives whose minimum versions it raises are updated with it. The advisory record matches the resolved graph and distinguishes the candidate patch from the default-branch alert; no alert is dismissed.\n\nThe root install checks Next resolution for both workspaces, verifies the loaded sharp version against the lock, generates a PNG through the native library and rejects lockfile or manifest drift. Either consumer manifest now triggers the workflow. The inspection test recognizes inline and literal-block installs while enforcing the root working directory and wasm-pack ordering.\n\nValidation at `17594d4a6534c142cae764772fc42049e898eca3`:\n\n- [Linux JS install/build/tests](https://github.com/sparq-org/sparq/actions/runs/34467004187/job/102837808254): Node `22.23.2`, npm `10.9.8`, both workspace Next versions `15.5.24`, loaded sharp `0.35.4`, libvips `8.18.6`, native PNG creation and final no-drift check passed.\n- [Docs quality](https://github.com/sparq-org/sparq/actions/runs/34467004155) and [supply chain](https://github.com/sparq-org/sparq/actions/runs/34467004107): 13 install-posture tests, 25 advisory-record tests and the unchanged drift checker passed.\n- [GUI/frontend checks](https://github.com/sparq-org/sparq/actions/runs/34467004102), site E2E and visual checks passed. [Required aggregate gate](https://github.com/sparq-org/sparq/actions/runs/34467004259) succeeded.\n- Targeted metadata-only lock generation and byte-identical offline regeneration passed; changed entries match exact published metadata and required constraints. Negative controls verify install inspection, trigger coverage and native-smoke failure propagation.\n- Actual independent Claude Opus 5 reviews at extra-high reasoning approved the source and final CI supplement without blocking findings. Copilot's package-version API concern was checked against the exact published source and successful native CI execution.\n\nThis is a version-based security update. It does not establish deployment patching, application exploitability, or the health of a separately installed system libvips. Keep #6480 open until protected merge and automatic alert re-evaluation establish the default-branch result.\n",
+          "mergeable": "MERGEABLE",
+          "mergeStateStatus": "CLEAN",
+          "mergeQueueEntry": null,
+          "labels": {
+            "nodes": [
+              {
+                "name": "area:js"
+              },
+              {
+                "name": "area:site"
+              },
+              {
+                "name": "area:gui"
+              },
+              {
+                "name": "area:ci"
+              },
+              {
+                "name": "review:unreviewed"
+              }
+            ]
+          },
+          "reviews": {
+            "nodes": [
+              {
+                "author": {
+                  "login": "copilot-pull-request-reviewer"
+                },
+                "state": "COMMENTED",
+                "submittedAt": "2026-09-10T09:36:23Z",
+                "commit": {
+                  "oid": "26d139520f07f1ceacafbacbeb9991de371e2b53"
+                }
+              },
+              {
+                "author": {
+                  "login": "github-actions"
+                },
+                "state": "COMMENTED",
+                "submittedAt": "2026-09-10T09:40:09Z",
+                "commit": {
+                  "oid": "26d139520f07f1ceacafbacbeb9991de371e2b53"
+                }
+              },
+              {
+                "author": {
+                  "login": "copilot-pull-request-reviewer"
+                },
+                "state": "COMMENTED",
+                "submittedAt": "2026-09-10T10:52:55Z",
+                "commit": {
+                  "oid": "17594d4a6534c142cae764772fc42049e898eca3"
+                }
+              },
+              {
+                "author": {
+                  "login": "jeswr"
+                },
+                "state": "COMMENTED",
+                "submittedAt": "2026-09-10T11:08:14Z",
+                "commit": {
+                  "oid": "17594d4a6534c142cae764772fc42049e898eca3"
+                }
+              }
+            ]
+          },
+          "reviewThreads": {
+            "pageInfo": {
+              "hasNextPage": false
+            },
+            "nodes": [
+              {
+                "id": "PRRT_kwDOSz3qKM6hCljp",
+                "isResolved": true,
+                "isOutdated": false
+              }
+            ]
+          },
+          "commits": {
+            "nodes": [
+              {
+                "commit": {
+                  "oid": "17594d4a6534c142cae764772fc42049e898eca3",
+                  "statusCheckRollup": {
+                    "state": "SUCCESS"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

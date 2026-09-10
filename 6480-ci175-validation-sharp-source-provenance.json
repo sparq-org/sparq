@@ -1,0 +1,27 @@
+{
+  "url": "https://registry.npmjs.org/sharp/-/sharp-0.35.4.tgz",
+  "version": "0.35.4",
+  "archive_sha256": "6ebef10290372c7309d9e22e3ecb9e32ca6a3aa6e07f3d83aa904df8ae4f6a5a",
+  "sri": "sha512-n++8XWcj+jCOr2IOl7h8LbKnGBDY4aPbmprMONBNFdn0ImXqpGVv5zliDs0V9HbmbCQLpbuo2ej9rAoOQTvMDA==",
+  "matches_frozen_registry_metadata": true,
+  "metadata_sha256": "f864ebdb32fff6e553eb2e8f2f1c8a09393aca7d6fad705e815acd37fd83bf71",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    }
+  },
+  "utility_sha256": "0f7a14858dfa8ebd01b2c6c2272297f7a34c4af3d84f0c0b926146c49a2655b1",
+  "proof": [
+    "package/dist/utility.cjs:14 imports its own package.json using a relative internal path.",
+    "package/dist/utility.cjs:80 assigns versions.sharp=pkg.version.",
+    "package/dist/utility.cjs:297 exposes Sharp.versions=versions."
+  ],
+  "execution": "Source bytes read from verified archive only; no extraction-to-install, lifecycle or package execution."
+}
