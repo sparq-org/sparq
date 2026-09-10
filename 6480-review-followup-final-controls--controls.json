@@ -1,0 +1,34 @@
+[
+  {
+    "name": "ignore-cwd",
+    "tests": 1,
+    "failures": 3,
+    "errors": 0,
+    "killed": true,
+    "test": "test_root_install_wrong_or_missing_directory_is_rejected"
+  },
+  {
+    "name": "ignore-order",
+    "tests": 1,
+    "failures": 1,
+    "errors": 0,
+    "killed": true,
+    "test": "test_npm_ci_before_wasm_pack_is_rejected"
+  },
+  {
+    "name": "accept-npm-install",
+    "tests": 1,
+    "failures": 1,
+    "errors": 0,
+    "killed": true,
+    "test": "test_root_install_missing_or_wrong_command_is_rejected"
+  },
+  {
+    "name": "inline-only",
+    "tests": 1,
+    "failures": 1,
+    "errors": 0,
+    "killed": true,
+    "test": "test_root_install_inline_and_block_forms"
+  }
+]

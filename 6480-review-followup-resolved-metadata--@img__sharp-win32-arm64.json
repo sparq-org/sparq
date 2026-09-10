@@ -1,0 +1,88 @@
+{
+  "os": [
+    "win32"
+  ],
+  "_id": "@img/sharp-win32-arm64@0.35.4",
+  "cpu": [
+    "arm64"
+  ],
+  "bugs": {
+    "url": "https://github.com/lovell/sharp/issues"
+  },
+  "dist": {
+    "shasum": "4101b44e3fb97d6f1a73c2a9c6142d491d1aa831",
+    "tarball": "https://registry.npmjs.org/@img/sharp-win32-arm64/-/sharp-win32-arm64-0.35.4.tgz",
+    "fileCount": 8,
+    "integrity": "sha512-iNdlBX9gLVvqe2I3uIJSIKTq6wckP/DYxZtcqxm09x5Gi24DnFBmPAWZmr60ZyYMG0xlzo6goG3670ar+RXvRw==",
+    "signatures": [
+      {
+        "sig": "MEYCIQC8l8pLrSdmI6i6R8doGMEdLLWCtUn8FCsY60qK6C+xTQIhALiqbw54mw0beXTYIbvkR28HdQ7He31gQB9BeEh+yjR4",
+        "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U"
+      },
+      {
+        "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+        "sig": "MEQCIEo0R22e5j7wWMFCTgEEVhDOJ6Qdj/xaLRdTQ6N13l1qAiBZPT75qTZRUtUu02ExBWU698BkxzLsisSP4lHYpuLfaw=="
+      }
+    ],
+    "attestations": {
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@img%2fsharp-win32-arm64@0.35.4",
+      "provenance": {
+        "predicateType": "https://slsa.dev/provenance/v1"
+      }
+    },
+    "unpackedSize": 16722996
+  },
+  "name": "@img/sharp-win32-arm64",
+  "type": "commonjs",
+  "author": {
+    "name": "Lovell Fuller",
+    "email": "npm@lovell.info"
+  },
+  "engines": {
+    "node": ">=20.9.0"
+  },
+  "exports": {
+    "./package": "./package.json",
+    "./versions": "./versions.json",
+    "./sharp.node": "./index.cjs"
+  },
+  "funding": {
+    "url": "https://opencollective.com/libvips"
+  },
+  "gitHead": "7f1a0a22cc285fe180766f4935d50b55af6e8432",
+  "license": "Apache-2.0 AND LGPL-3.0-or-later",
+  "version": "0.35.4",
+  "_npmUser": {
+    "name": "GitHub Actions",
+    "email": "npm-oidc-no-reply@github.com",
+    "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:cc06671c-48a9-41b8-9a8f-912b3bf5d524"
+    }
+  },
+  "homepage": "https://sharp.pixelplumbing.com",
+  "repository": {
+    "url": "git+https://github.com/lovell/sharp.git",
+    "type": "git",
+    "directory": "npm/win32-arm64"
+  },
+  "_npmVersion": "11.17.0",
+  "description": "Prebuilt sharp for use with Windows 64-bit ARM",
+  "directories": {},
+  "maintainers": [
+    {
+      "name": "lovell",
+      "email": "npm@lovell.info"
+    }
+  ],
+  "_nodeVersion": "24.19.0",
+  "publishConfig": {
+    "access": "public"
+  },
+  "_hasShrinkwrap": false,
+  "preferUnplugged": true,
+  "_npmOperationalInternal": {
+    "host": "s3://npm-registry-packages-npm-production",
+    "tmp": "tmp/sharp-win32-arm64_0.35.4_1787737320422_0.8121683662773045"
+  }
+}

@@ -1,0 +1,189 @@
+{
+  "npm_commands": [
+    {
+      "argv": [
+        "/Users/jesght/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+        "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/implementation/tools/npm-11.17.0/bin/npm-cli.js",
+        "update",
+        "sharp",
+        "--package-lock-only",
+        "--ignore-scripts",
+        "--no-audit",
+        "--no-fund"
+      ],
+      "env": {
+        "PATH": "/Users/jesght/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:/usr/bin:/bin:/opt/homebrew/bin",
+        "TMPDIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/review-followup/tmp",
+        "LANG": "en_US.UTF-8",
+        "npm_config_cache": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/review-followup/cache",
+        "npm_config_userconfig": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/review-followup/empty-user.npmrc",
+        "npm_config_globalconfig": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/review-followup/empty-global.npmrc",
+        "npm_config_registry": "https://registry.npmjs.org",
+        "npm_config_fetch_retries": "0",
+        "npm_config_fetch_timeout": "30000",
+        "npm_config_update_notifier": "false",
+        "npm_config_ignore_scripts": "true",
+        "npm_config_audit": "false",
+        "npm_config_fund": "false"
+      },
+      "exit_code": 0,
+      "stop": null,
+      "elapsed_seconds": 5.144857083000001,
+      "initial": {
+        "free_bytes": 4457025536,
+        "allocated_bytes": 32768
+      },
+      "final": {
+        "free_bytes": 4449165312,
+        "allocated_bytes": 6828032
+      },
+      "max_allocated_bytes": 6828032,
+      "min_free_bytes": 4449165312
+    },
+    {
+      "argv": [
+        "/Users/jesght/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+        "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/implementation/tools/npm-11.17.0/bin/npm-cli.js",
+        "update",
+        "sharp",
+        "--package-lock-only",
+        "--ignore-scripts",
+        "--no-audit",
+        "--no-fund",
+        "--offline"
+      ],
+      "env": {
+        "PATH": "/Users/jesght/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:/usr/bin:/bin:/opt/homebrew/bin",
+        "TMPDIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/review-followup/tmp",
+        "LANG": "en_US.UTF-8",
+        "npm_config_cache": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/review-followup/cache",
+        "npm_config_userconfig": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/review-followup/empty-user.npmrc",
+        "npm_config_globalconfig": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/review-followup/empty-global.npmrc",
+        "npm_config_registry": "https://registry.npmjs.org",
+        "npm_config_fetch_retries": "0",
+        "npm_config_fetch_timeout": "30000",
+        "npm_config_update_notifier": "false",
+        "npm_config_ignore_scripts": "true",
+        "npm_config_audit": "false",
+        "npm_config_fund": "false"
+      },
+      "exit_code": 0,
+      "stop": null,
+      "elapsed_seconds": 4.21189775,
+      "initial": {
+        "free_bytes": 4442673152,
+        "allocated_bytes": 7045120
+      },
+      "final": {
+        "free_bytes": 4442435584,
+        "allocated_bytes": 7053312
+      },
+      "max_allocated_bytes": 7053312,
+      "min_free_bytes": 4442435584
+    },
+    {
+      "argv": [
+        "/Users/jesght/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+        "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/implementation/tools/npm-11.17.0/bin/npm-cli.js",
+        "ls",
+        "next",
+        "sharp",
+        "--workspace=site",
+        "--workspace=gui/app",
+        "--package-lock-only",
+        "--json",
+        "--offline"
+      ],
+      "env": {
+        "PATH": "/Users/jesght/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:/usr/bin:/bin:/opt/homebrew/bin",
+        "TMPDIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/review-followup/tmp",
+        "LANG": "en_US.UTF-8",
+        "npm_config_cache": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/review-followup/cache",
+        "npm_config_userconfig": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/review-followup/empty-user.npmrc",
+        "npm_config_globalconfig": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/review-followup/empty-global.npmrc",
+        "npm_config_registry": "https://registry.npmjs.org",
+        "npm_config_fetch_retries": "0",
+        "npm_config_fetch_timeout": "30000",
+        "npm_config_update_notifier": "false",
+        "npm_config_ignore_scripts": "true",
+        "npm_config_audit": "false",
+        "npm_config_fund": "false"
+      },
+      "exit_code": 0,
+      "stop": null,
+      "elapsed_seconds": 2.129476833,
+      "initial": {
+        "free_bytes": 4644442112,
+        "allocated_bytes": 7340032
+      },
+      "final": {
+        "free_bytes": 4643926016,
+        "allocated_bytes": 7364608
+      },
+      "max_allocated_bytes": 7364608,
+      "min_free_bytes": 4643926016
+    }
+  ],
+  "python_commands": [
+    {
+      "argv": [
+        "python3",
+        "-B",
+        "scripts/tests/test_js_wasm_pack_install.py"
+      ],
+      "exit": 0,
+      "output": "wasm-install-final.log"
+    },
+    {
+      "argv": [
+        "python3",
+        "-B",
+        "scripts/tests/test_check_npm_advisory_record.py"
+      ],
+      "exit": 0,
+      "output": "advisory-record-tests.log"
+    },
+    {
+      "argv": [
+        "python3",
+        "-B",
+        "scripts/check-npm-advisory-record.py"
+      ],
+      "exit": 0,
+      "output": "advisory-record-check.log"
+    },
+    {
+      "argv": [
+        "python3",
+        "-B",
+        "scripts/check-advisory-registry.py",
+        "--self-test"
+      ],
+      "exit": 0,
+      "output": "run-parser-selftest.log"
+    },
+    {
+      "argv": [
+        "python3",
+        "-B",
+        "scripts/preflight.py"
+      ],
+      "exit": 1,
+      "output": "preflight.log"
+    }
+  ],
+  "other_checks": [
+    "validate-cache.cjs: exit0;scope-check.cjs: exit0;trigger-controls.rb: exit0;RubyPsychbefore/after: exit0;final-controls/run-controls.py: exit0 with4expectedkilledcontrols;git diff --check: exit0"
+  ],
+  "downloads": [
+    {
+      "url": "https://registry.npmjs.org/sharp/0.35.3",
+      "attempts": 1
+    },
+    {
+      "url": "https://registry.npmjs.org/sharp/0.35.4",
+      "attempts": 1
+    }
+  ],
+  "resource_receipts": "npm per-command monitors in named JSON; no retry/stop fired"
+}

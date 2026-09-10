@@ -1,0 +1,25 @@
+0 verbose cli /Users/jesght/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node /private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/implementation/tools/npm-11.17.0/bin/npm-cli.js
+1 info using npm@11.17.0
+2 info using node@v24.19.0
+3 silly config load:file:/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/implementation/tools/npm-11.17.0/npmrc
+4 silly config load:file:/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6480/.npmrc
+5 silly config load:file:/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/review-followup/empty-user.npmrc
+6 silly config load:file:/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/review-followup/empty-global.npmrc
+7 verbose title npm update sharp
+8 verbose argv "update" "sharp" "--package-lock-only" "--ignore-scripts" "--no-audit" "--no-fund" "--offline"
+9 verbose logfile logs-max:10 dir:/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/review-followup/cache/_logs/2026-09-10T09_53_08_234Z-
+10 verbose logfile /private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/review-followup/cache/_logs/2026-09-10T09_53_08_234Z-debug-0.log
+11 silly logfile done cleaning log files
+12 silly packumentCache heap:4496293888 maxSize:1124073472 maxEntrySize:562036736
+13 silly idealTree buildDeps
+14 silly fetch manifest sharp@^0.34.3 || ^0.35.3
+15 silly packumentCache full:https://registry.npmjs.org/sharp cache-miss
+16 http cache https://registry.npmjs.org/sharp 16ms (cache hit)
+17 silly packumentCache full:https://registry.npmjs.org/sharp set size:1221057 disposed:false
+18 silly placeDep ROOT sharp@0.35.4 KEEP for: next@15.5.24 want: ^0.34.3 || ^0.35.3
+19 verbose cwd /private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6480
+20 verbose os Darwin 25.6.0
+21 verbose node v24.19.0
+22 verbose npm  v11.17.0
+23 verbose exit 0
+24 info ok

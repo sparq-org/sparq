@@ -1,0 +1,4 @@
+npm advisory record matches the lock:
+  brace-expansion: 4 instance(s), all recorded
+  postcss: 1 instance(s), all recorded
+  sharp: 1 instance(s), all recorded

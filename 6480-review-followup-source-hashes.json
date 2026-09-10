@@ -1,0 +1,50 @@
+[
+  {
+    "path": ".github/workflows/docs-quality.yml",
+    "sha256": "8540fb4b537761d09f3816259e5029d81d50cc214b2147c62bebdfe211f2a594"
+  },
+  {
+    "path": ".github/workflows/js.yml",
+    "sha256": "18e3f7d4f04d3f058a1308476f3d49a6ccca86904308a7948ab3cf06a528facf"
+  },
+  {
+    "path": ".github/workflows/supply-chain.yml",
+    "sha256": "19aff7e9956715261b789e3ad3b19e21d7bb2f14496e32ff4cd546e5f671273d"
+  },
+  {
+    "path": "gui/app/package.json",
+    "sha256": "b0e1e4d94d6fe2285e52e2524b2f30e20fe576275f8765f6d062732e40985df4"
+  },
+  {
+    "path": "package-lock.json",
+    "sha256": "46c1fe3759f31b8a63a59c00ecb5e3a4ca213539134cbbd6983698f00cf2fb9c"
+  },
+  {
+    "path": "scripts/check-advisory-registry.py",
+    "sha256": "c480ee0181f0c7efedf2c9642842ec92a40b4807c60a233e57adc0ab5ee34e14"
+  },
+  {
+    "path": "scripts/check-install-action-tool.py",
+    "sha256": "d650691e589dedf694c018e342cdcb7864633d7ec3344460ec3c6ce7c2eb1fcf"
+  },
+  {
+    "path": "scripts/check-npm-advisory-record.py",
+    "sha256": "2ccef22357d13124c3cd6e512c2bb96bb1e305956d1111cbf12c3578ef8c6490"
+  },
+  {
+    "path": "scripts/tests/test_check_npm_advisory_record.py",
+    "sha256": "b157b6d2de909c08fc927c21776ea3f064ef648410e3a18077d280f21f8cd4a6"
+  },
+  {
+    "path": "scripts/tests/test_js_wasm_pack_install.py",
+    "sha256": "fe12f7afd46325298d4179fa831fff79fa92528d51205c3876a0cb61cfa28cc5"
+  },
+  {
+    "path": "site/package.json",
+    "sha256": "60bbea3bc8c3de693274b92882b97173e514eb0f41b7ee8c3870c72235aa887d"
+  },
+  {
+    "path": "supply-chain/npm-advisories.md",
+    "sha256": "9d56b8b38c81bce8e3f94c88d8719202b479ff235f155171a60ba3d0cd84f8d3"
+  }
+]

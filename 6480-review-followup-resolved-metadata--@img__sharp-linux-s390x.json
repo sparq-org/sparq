@@ -1,0 +1,96 @@
+{
+  "os": [
+    "linux"
+  ],
+  "_id": "@img/sharp-linux-s390x@0.35.4",
+  "cpu": [
+    "s390x"
+  ],
+  "bugs": {
+    "url": "https://github.com/lovell/sharp/issues"
+  },
+  "dist": {
+    "shasum": "19dac7501a15c8748bc7a11219fca391e424b6d7",
+    "tarball": "https://registry.npmjs.org/@img/sharp-linux-s390x/-/sharp-linux-s390x-0.35.4.tgz",
+    "fileCount": 5,
+    "integrity": "sha512-RY0JFY8Fd6RonCBtHz+DvadaPkXDSI1AUn6yWL9TipqkZ1vY8w8evqdgyDFnkm4/K1ve1TvZiaePP5oSd4+WVQ==",
+    "signatures": [
+      {
+        "sig": "MEUCIHHvSonmK4RUf61G2UFMR2cuwO1Sfe8UfS7SHhdj07jzAiEA4gbgIOj74ExtSaCTVoXoScN+KtBqnV37Iedrh3w36O8=",
+        "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U"
+      },
+      {
+        "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+        "sig": "MEQCIBIgRqTZBjqFrBeuZJOyAMicZpCa3MrUz3BKDKRtYUm8AiBQ/T0f3Yij5hdgUVfbMLMsILrwQRnHObmtHo8+jeHvwg=="
+      }
+    ],
+    "attestations": {
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@img%2fsharp-linux-s390x@0.35.4",
+      "provenance": {
+        "predicateType": "https://slsa.dev/provenance/v1"
+      }
+    },
+    "unpackedSize": 270844
+  },
+  "libc": [
+    "glibc"
+  ],
+  "name": "@img/sharp-linux-s390x",
+  "type": "commonjs",
+  "author": {
+    "name": "Lovell Fuller",
+    "email": "npm@lovell.info"
+  },
+  "config": {
+    "glibc": ">=2.36"
+  },
+  "engines": {
+    "node": ">=20.9.0"
+  },
+  "exports": {
+    "./package": "./package.json",
+    "./sharp.node": "./index.cjs"
+  },
+  "funding": {
+    "url": "https://opencollective.com/libvips"
+  },
+  "gitHead": "7f1a0a22cc285fe180766f4935d50b55af6e8432",
+  "license": "Apache-2.0",
+  "version": "0.35.4",
+  "_npmUser": {
+    "name": "GitHub Actions",
+    "email": "npm-oidc-no-reply@github.com",
+    "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:82786bcd-1072-4d42-b44e-587bdfc61111"
+    }
+  },
+  "homepage": "https://sharp.pixelplumbing.com",
+  "repository": {
+    "url": "git+https://github.com/lovell/sharp.git",
+    "type": "git",
+    "directory": "npm/linux-s390x"
+  },
+  "_npmVersion": "11.17.0",
+  "description": "Prebuilt sharp for use with Linux (glibc) s390x",
+  "directories": {},
+  "maintainers": [
+    {
+      "name": "lovell",
+      "email": "npm@lovell.info"
+    }
+  ],
+  "_nodeVersion": "24.19.0",
+  "publishConfig": {
+    "access": "public"
+  },
+  "_hasShrinkwrap": false,
+  "preferUnplugged": true,
+  "optionalDependencies": {
+    "@img/sharp-libvips-linux-s390x": "1.3.3"
+  },
+  "_npmOperationalInternal": {
+    "host": "s3://npm-registry-packages-npm-production",
+    "tmp": "tmp/sharp-linux-s390x_0.35.4_1787737228670_0.6113059050560561"
+  }
+}

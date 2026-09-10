@@ -1,0 +1,26 @@
+test_install_precedes_npm_ci (__main__.JsLaneWasmPackInstall)
+(4) `prepare` runs on `npm ci` and needs wasm-pack already on PATH. ... ok
+test_installs_prebuilt_binary_sha_pinned (__main__.JsLaneWasmPackInstall)
+(2) The replacement is the SHA-pinned prebuilt-download action. ... ok
+test_no_cargo_install_wasm_pack (__main__.JsLaneWasmPackInstall)
+(1) The source compile — the actual flake surface — must be gone. ... ok
+test_npm_ci_before_wasm_pack_is_rejected (__main__.JsLaneWasmPackInstall) ... ok
+test_root_install_inline_and_block_forms (__main__.JsLaneWasmPackInstall) ... ok
+test_root_install_missing_or_wrong_command_is_rejected (__main__.JsLaneWasmPackInstall) ... ok
+test_root_install_wrong_or_missing_directory_is_rejected (__main__.JsLaneWasmPackInstall) ... ok
+test_version_is_pinned_exactly_not_latest (__main__.JsLaneWasmPackInstall)
+(3) An exact vX.Y.Z — `latest` re-adds a network lookup to resolve it. ... ok
+test_both_wasm_lanes_use_the_action (__main__.WasmPackVersionUnified)
+Anti-vacuity: the two lanes #5771 unified must still be in the sample. ... ok
+test_every_step_pins_an_exact_version (__main__.WasmPackVersionUnified)
+Every wasm-pack step names an exact release — an omitted `version:` takes ... ok
+test_mutation_dropping_a_lanes_version_is_caught (__main__.WasmPackVersionUnified)
+Deleting one lane's `version:` must NOT leave both assertions green. ... ok
+test_mutation_version_outside_with_is_not_a_pin (__main__.WasmPackVersionUnified)
+A `version:` that the action never receives must not read as a pin. ... ok
+test_single_version_across_workflows (__main__.WasmPackVersionUnified) ... ok
+
+----------------------------------------------------------------------
+Ran 13 tests in 0.639s
+
+OK

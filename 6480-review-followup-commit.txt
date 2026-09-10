@@ -1,0 +1,13 @@
+commit 0c6a780593a9b3381fb158e426519a2a6d8d17f9
+Author:     Jesse Wright <63333554+jeswr@users.noreply.github.com>
+AuthorDate: Thu Sep 10 10:56:50 2026 +0100
+Commit:     Jesse Wright <63333554+jeswr@users.noreply.github.com>
+CommitDate: Thu Sep 10 10:56:50 2026 +0100
+
+    fix(deps): update sharp and align npm CI evidence
+    
+    Resolve sharp0.35.4 and its required native dependencies under Next15.5.24 without changing workspace minimums or overrides. Update the advisory disposition while keeping the default-branch alert status explicit.
+    
+    Inspect inline and literal-block root npm ci commands without losing wasm-pack ordering, and trigger installed-tree verification for either consumer manifest.
+    
+    Co-Authored-By: GPT-6 Astra <noreply@openai.com>

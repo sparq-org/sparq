@@ -1,0 +1,96 @@
+{
+  "os": [
+    "linux"
+  ],
+  "_id": "@img/sharp-linux-riscv64@0.35.4",
+  "cpu": [
+    "riscv64"
+  ],
+  "bugs": {
+    "url": "https://github.com/lovell/sharp/issues"
+  },
+  "dist": {
+    "shasum": "032ca206e713b1179efe0e18d525188c67277730",
+    "tarball": "https://registry.npmjs.org/@img/sharp-linux-riscv64/-/sharp-linux-riscv64-0.35.4.tgz",
+    "fileCount": 5,
+    "integrity": "sha512-cPbNChoRURAWdebDIHSenxRpgEdy7JkPydSnUxRm9VvKD7m0/xVaR/8Fzlu81pk5nHEvHH87UZUA7cTtwnbJSA==",
+    "signatures": [
+      {
+        "sig": "MEYCIQCE8zHHYQCwqMjQgCGzbAireJ7fg5N70V5tD2XO6ED/DQIhAOBF4xdgOCr/dh7UQFdv/oK2oMzXRUkc+coYITfXsbj9",
+        "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U"
+      },
+      {
+        "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+        "sig": "MEYCIQCvXhq8HaqFsTfpBAyKxGunR7R1wLBS1938RRmY1HSY1gIhAJQGMMy4Yi2iz4g6V7k5wm4ra4wgF64w2pn1UMuk5muV"
+      }
+    ],
+    "attestations": {
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@img%2fsharp-linux-riscv64@0.35.4",
+      "provenance": {
+        "predicateType": "https://slsa.dev/provenance/v1"
+      }
+    },
+    "unpackedSize": 221634
+  },
+  "libc": [
+    "glibc"
+  ],
+  "name": "@img/sharp-linux-riscv64",
+  "type": "commonjs",
+  "author": {
+    "name": "Lovell Fuller",
+    "email": "npm@lovell.info"
+  },
+  "config": {
+    "glibc": ">=2.41"
+  },
+  "engines": {
+    "node": ">=20.9.0"
+  },
+  "exports": {
+    "./package": "./package.json",
+    "./sharp.node": "./index.cjs"
+  },
+  "funding": {
+    "url": "https://opencollective.com/libvips"
+  },
+  "gitHead": "7f1a0a22cc285fe180766f4935d50b55af6e8432",
+  "license": "Apache-2.0",
+  "version": "0.35.4",
+  "_npmUser": {
+    "name": "GitHub Actions",
+    "email": "npm-oidc-no-reply@github.com",
+    "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:60e34ff9-9670-43bf-b0f3-a2dd2b42daca"
+    }
+  },
+  "homepage": "https://sharp.pixelplumbing.com",
+  "repository": {
+    "url": "git+https://github.com/lovell/sharp.git",
+    "type": "git",
+    "directory": "npm/linux-riscv64"
+  },
+  "_npmVersion": "11.17.0",
+  "description": "Prebuilt sharp for use with Linux (glibc) RISC-V 64-bit",
+  "directories": {},
+  "maintainers": [
+    {
+      "name": "lovell",
+      "email": "npm@lovell.info"
+    }
+  ],
+  "_nodeVersion": "24.19.0",
+  "publishConfig": {
+    "access": "public"
+  },
+  "_hasShrinkwrap": false,
+  "preferUnplugged": true,
+  "optionalDependencies": {
+    "@img/sharp-libvips-linux-riscv64": "1.3.3"
+  },
+  "_npmOperationalInternal": {
+    "host": "s3://npm-registry-packages-npm-production",
+    "tmp": "tmp/sharp-linux-riscv64_0.35.4_1787737285458_0.6572848560305287"
+  }
+}

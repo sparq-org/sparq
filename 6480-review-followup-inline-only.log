@@ -1,0 +1,15 @@
+test_root_install_inline_and_block_forms (control_inline_only.JsLaneWasmPackInstall) ... 
+======================================================================
+FAIL: test_root_install_inline_and_block_forms (control_inline_only.JsLaneWasmPackInstall) (run='run: |\n          # install first\n          npm ci\n          npm ls next')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6480/scripts/tests/test_js_wasm_pack_install.py", line 248, in test_root_install_inline_and_block_forms
+    self._assert_install_precedes_root_npm_ci(self._install_fixture(run))
+  File "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6480/scripts/tests/test_js_wasm_pack_install.py", line 232, in _assert_install_precedes_root_npm_ci
+    self.assertTrue(npm_ci_at, "js.yml must still run the root `npm ci`")
+AssertionError: [] is not true : js.yml must still run the root `npm ci`
+
+----------------------------------------------------------------------
+Ran 1 test in 0.001s
+
+FAILED (failures=1)

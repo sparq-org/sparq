@@ -1,0 +1,92 @@
+{
+  "os": [
+    "linux"
+  ],
+  "_id": "@img/sharp-libvips-linuxmusl-arm64@1.3.3",
+  "cpu": [
+    "arm64"
+  ],
+  "bugs": {
+    "url": "https://github.com/lovell/sharp-libvips/issues"
+  },
+  "dist": {
+    "shasum": "303dfe2a8e6d1fd279ead559f4d2ccff2545e2a2",
+    "tarball": "https://registry.npmjs.org/@img/sharp-libvips-linuxmusl-arm64/-/sharp-libvips-linuxmusl-arm64-1.3.3.tgz",
+    "fileCount": 6,
+    "integrity": "sha512-Y9kQaLMuNoB0bPYOOdcZMaseNrFpPodIWWMrx+CZyydf2xn68j9WYc6sWWRrDwNkzCQjKYfc68L7jKjGlHMibw==",
+    "signatures": [
+      {
+        "sig": "MEUCIQDrbOlBJDraB+lyvkmVL7Vh+ezsYeXakGmBmtQ1GWANYAIgJs+880lvuGXI2afd9VEGm1RSsLeyRTZAFtXqn5JlJ1w=",
+        "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U"
+      },
+      {
+        "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+        "sig": "MEYCIQCVYq/2g4HZTBJHOjU7UPyoYxl/MxVoyTAk4zOW4nCUfQIhAIdBVtAaxHP6wnGMCZh2cSsQRzyccuOg37PEDTFyEIkh"
+      }
+    ],
+    "attestations": {
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@img%2fsharp-libvips-linuxmusl-arm64@1.3.3",
+      "provenance": {
+        "predicateType": "https://slsa.dev/provenance/v1"
+      }
+    },
+    "unpackedSize": 18659008
+  },
+  "libc": [
+    "musl"
+  ],
+  "name": "@img/sharp-libvips-linuxmusl-arm64",
+  "type": "commonjs",
+  "author": {
+    "name": "Lovell Fuller",
+    "email": "npm@lovell.info"
+  },
+  "config": {
+    "musl": ">=1.2.5"
+  },
+  "exports": {
+    "./lib": "./lib/index.js",
+    "./binary": "./lib/libvips-cpp.so.8.18.6",
+    "./package": "./package.json",
+    "./versions": "./versions.json"
+  },
+  "funding": {
+    "url": "https://opencollective.com/libvips"
+  },
+  "gitHead": "6e5971d333377743163edc3ad9e5d0b897abcbc9",
+  "license": "LGPL-3.0-or-later",
+  "version": "1.3.3",
+  "_npmUser": {
+    "name": "GitHub Actions",
+    "email": "npm-oidc-no-reply@github.com",
+    "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:3d47248f-a0ba-4d09-a38f-f8cb1b084e22"
+    }
+  },
+  "homepage": "https://sharp.pixelplumbing.com",
+  "repository": {
+    "url": "git+https://github.com/lovell/sharp-libvips.git",
+    "type": "git",
+    "directory": "npm/linuxmusl-arm64"
+  },
+  "_npmVersion": "11.17.0",
+  "description": "Prebuilt libvips and dependencies for use with sharp on Linux (musl) 64-bit ARM",
+  "directories": {},
+  "maintainers": [
+    {
+      "name": "lovell",
+      "email": "npm@lovell.info"
+    }
+  ],
+  "_nodeVersion": "24.19.0",
+  "publishConfig": {
+    "access": "public"
+  },
+  "_hasShrinkwrap": false,
+  "preferUnplugged": true,
+  "_npmOperationalInternal": {
+    "host": "s3://npm-registry-packages-npm-production",
+    "tmp": "tmp/sharp-libvips-linuxmusl-arm64_1.3.3_1787733153559_0.945153994077103"
+  }
+}

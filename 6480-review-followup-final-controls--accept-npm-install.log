@@ -1,0 +1,13 @@
+test_root_install_missing_or_wrong_command_is_rejected (control_accept_npm_install.JsLaneWasmPackInstall) ... 
+======================================================================
+FAIL: test_root_install_missing_or_wrong_command_is_rejected (control_accept_npm_install.JsLaneWasmPackInstall) (run='run: npm install')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6480/scripts/tests/test_js_wasm_pack_install.py", line 270, in test_root_install_missing_or_wrong_command_is_rejected
+    self._assert_install_precedes_root_npm_ci(self._install_fixture(run))
+AssertionError: AssertionError not raised
+
+----------------------------------------------------------------------
+Ran 1 test in 0.001s
+
+FAILED (failures=1)

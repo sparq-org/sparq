@@ -1,0 +1,27 @@
+  [PASS] C2-negative: unregistered advisory job: 1 offence(s) (want 1)
+  [PASS] C2-clean: registered advisory job: 0 offence(s) (want 0)
+  [PASS] C2-negative: registry entry missing required field: 1 offence(s) (want 1)
+  [PASS] C3-negative: gate script in advisory job, no waiver: 1 offence(s) (want 1)
+  [PASS] C3-clean: gate script in advisory job, with waiver: 0 offence(s) (want 0)
+  [PASS] non-advisory HARD job with gate script: no offence: 0 offence(s) (want 0)
+  [PASS] informational job: also caught by C2: 1 offence(s) (want 1)
+  [PASS] C3-clean: advisory job runs non-gate script: 0 offence(s) (want 0)
+  [PASS] C3-negative(#3773): SHELL gate in an advisory job, no waiver: 1 offence(s) (want 1)
+  [PASS] C3-negative(#3773): npm ALIAS resolving to a shell gate, no waiver: 1 offence(s) (want 1)
+  [PASS] C3-clean(#3773): a gate path mentioned only in COMMENTS is not an invocation: 0 offence(s) (want 0)
+  [PASS] C4-clean: key equals the live job name: 0 offence(s) (want 0)
+  [PASS] C4-negative: job RENAMED, declaration not updated: 1 offence(s) (want 1)
+  [PASS] C4-negative: job renamed to a DIFFERENT advisory name: 1 offence(s) (want 1)
+  [PASS] C4-negative: STALE entry (job deleted): 1 offence(s) (want 1)
+  [PASS] C4-negative(#3774): identity incomplete (no job_id) is REPORTED: 1 offence(s) (want 1)
+  [PASS] C4-negative(#3774): identity incomplete (no workflow) is REPORTED: 1 offence(s) (want 1)
+  [PASS] C4-negative(#3774): the reviewer's NON-token 3-field entry is REPORTED (C2 never sees it — its key carries no advisory/informational token): 1 offence(s) (want 1)
+  [PASS] C4-negative(#3774): expression-ONLY key has no literal anchor: 1 offence(s) (want 1)
+  [PASS] C4-clean(#3774): a FRAMED expression key is fine: 0 offence(s) (want 0)
+  [PASS] run-extract inline run
+  [PASS] run-extract block scalar
+  [PASS] run-extract comment-only line dropped
+  [PASS] run-extract trailing comment dropped
+  [PASS] run-extract yaml comment outside run ignored
+
+self-test: all cases PASS

@@ -1,0 +1,11 @@
+{
+  "url": "https://github.com/lovell/sharp/security/advisories/GHSA-f88m-g3jw-g9cj",
+  "read_date": "2026-09-10",
+  "retrieval": "web.open, primary upstream advisory",
+  "affected": "<0.35.0",
+  "patched": ">=0.35.0",
+  "upstream_prebuilt_recommendation": "sharp0.35.3 providing libvips8.18.3",
+  "global_libvips": "upstream separately requires8.18.3",
+  "current_page_update": "Adds CVE-2026-69242 on2026-08-14, absent from repository alert32 embedded description",
+  "scope": "untrusted image processing; no application-exposure or exploit claim"
+}

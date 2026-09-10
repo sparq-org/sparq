@@ -1,0 +1,7 @@
+{
+  "parser": "Psych3.1.0",
+  "onlyTwoExpectedPRPathsAdded": true,
+  "allOtherFieldsEqual": true,
+  "pushUnfiltered": true,
+  "noPushFilterChangeNeeded": true
+}

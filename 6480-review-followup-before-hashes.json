@@ -1,0 +1,26 @@
+[
+  {
+    "path": ".github/workflows/js.yml",
+    "sha256": "958b871972bcd02072acd85695d0c6ed7d4ccc99e25d9305bc9d1d27ea4be18f"
+  },
+  {
+    "path": "gui/app/package.json",
+    "sha256": "b0e1e4d94d6fe2285e52e2524b2f30e20fe576275f8765f6d062732e40985df4"
+  },
+  {
+    "path": "package-lock.json",
+    "sha256": "8687c74f94a16e48688e23ed0e012470cd91eb0e3a34d4095dc14f01c6d1fcc3"
+  },
+  {
+    "path": "scripts/tests/test_js_wasm_pack_install.py",
+    "sha256": "d7eb549536b8ea2bd96b17b7684ba10cff04d558c16b8a99cac0c51bbc71de08"
+  },
+  {
+    "path": "site/package.json",
+    "sha256": "60bbea3bc8c3de693274b92882b97173e514eb0f41b7ee8c3870c72235aa887d"
+  },
+  {
+    "path": "supply-chain/npm-advisories.md",
+    "sha256": "259510c93de807f92b3e10997ef116655943b540a270543ad7f06d5a7f8fa52c"
+  }
+]

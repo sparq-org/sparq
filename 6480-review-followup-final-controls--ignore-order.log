@@ -1,0 +1,14 @@
+test_npm_ci_before_wasm_pack_is_rejected (control_ignore_order.JsLaneWasmPackInstall) ... FAIL
+
+======================================================================
+FAIL: test_npm_ci_before_wasm_pack_is_rejected (control_ignore_order.JsLaneWasmPackInstall)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6480/scripts/tests/test_js_wasm_pack_install.py", line 286, in test_npm_ci_before_wasm_pack_is_rejected
+    self._assert_install_precedes_root_npm_ci("\n".join(blocks[1] + blocks[0]))
+AssertionError: AssertionError not raised
+
+----------------------------------------------------------------------
+Ran 1 test in 0.001s
+
+FAILED (failures=1)

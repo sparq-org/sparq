@@ -1,0 +1,29 @@
+test_root_install_wrong_or_missing_directory_is_rejected (control_ignore_cwd.JsLaneWasmPackInstall) ... 
+======================================================================
+FAIL: test_root_install_wrong_or_missing_directory_is_rejected (control_ignore_cwd.JsLaneWasmPackInstall) (replacement='working-directory: js')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6480/scripts/tests/test_js_wasm_pack_install.py", line 260, in test_root_install_wrong_or_missing_directory_is_rejected
+    self._assert_install_precedes_root_npm_ci(text.replace("working-directory: .", replacement))
+AssertionError: AssertionError not raised
+
+======================================================================
+FAIL: test_root_install_wrong_or_missing_directory_is_rejected (control_ignore_cwd.JsLaneWasmPackInstall) (replacement='env:\n          working-directory: .')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6480/scripts/tests/test_js_wasm_pack_install.py", line 260, in test_root_install_wrong_or_missing_directory_is_rejected
+    self._assert_install_precedes_root_npm_ci(text.replace("working-directory: .", replacement))
+AssertionError: AssertionError not raised
+
+======================================================================
+FAIL: test_root_install_wrong_or_missing_directory_is_rejected (control_ignore_cwd.JsLaneWasmPackInstall) (replacement='')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6480/scripts/tests/test_js_wasm_pack_install.py", line 260, in test_root_install_wrong_or_missing_directory_is_rejected
+    self._assert_install_precedes_root_npm_ci(text.replace("working-directory: .", replacement))
+AssertionError: AssertionError not raised
+
+----------------------------------------------------------------------
+Ran 1 test in 0.002s
+
+FAILED (failures=3)

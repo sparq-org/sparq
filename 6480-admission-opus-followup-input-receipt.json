@@ -1,0 +1,8 @@
+{
+  "head": "0c6a780593a9b3381fb158e426519a2a6d8d17f9",
+  "input_bytes": 95456,
+  "input_sha256": "882fc5b1e7adbde3cf5b9975b791709f354e89b8d1d9a836fd8c68b93820932d",
+  "packet_sha256": "75f1b6a9b2998f26e17e14d5bed4a97f096da5ad608a8fdeed19ad81ce9f11a6",
+  "model": "claude-opus-5",
+  "effort": "xhigh"
+}

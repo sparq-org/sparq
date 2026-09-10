@@ -1,0 +1,92 @@
+{
+  "name": "@img/sharp-freebsd-wasm32",
+  "version": "0.35.4",
+  "description": "Prebuilt sharp for use with FreeBSD (WebAssembly)",
+  "author": {
+    "name": "Lovell Fuller",
+    "email": "npm@lovell.info"
+  },
+  "homepage": "https://sharp.pixelplumbing.com",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lovell/sharp.git",
+    "directory": "npm/freebsd-wasm32"
+  },
+  "license": "Apache-2.0",
+  "funding": {
+    "url": "https://opencollective.com/libvips"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "commonjs",
+  "exports": {
+    "./sharp.node": {
+      "import": "./export/sharp.node.mjs",
+      "require": "./export/sharp.node.cjs"
+    },
+    "./package": {
+      "import": "./export/package.mjs",
+      "require": "./export/package.cjs"
+    },
+    "./versions": {
+      "import": "./export/versions.mjs",
+      "require": "./export/versions.cjs"
+    }
+  },
+  "dependencies": {
+    "@img/sharp-wasm32": "0.35.4"
+  },
+  "engines": {
+    "node": ">=20.9.0"
+  },
+  "os": [
+    "freebsd"
+  ],
+  "gitHead": "7f1a0a22cc285fe180766f4935d50b55af6e8432",
+  "_id": "@img/sharp-freebsd-wasm32@0.35.4",
+  "bugs": {
+    "url": "https://github.com/lovell/sharp/issues"
+  },
+  "_nodeVersion": "24.19.0",
+  "_npmVersion": "11.17.0",
+  "dist": {
+    "integrity": "sha512-lIsKw/BU+kjB4eZjxrYrZmwOJYi3Ajrv66iAlBmUPyKc3HpnloevB1g3wxGD9P/5BbQ1brBGl65VRRrCvQDEqA==",
+    "shasum": "ba55fd603c5d1d01a1cb14ffb4d970bc6ced80e1",
+    "tarball": "https://registry.npmjs.org/@img/sharp-freebsd-wasm32/-/sharp-freebsd-wasm32-0.35.4.tgz",
+    "fileCount": 9,
+    "unpackedSize": 12416,
+    "attestations": {
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@img%2fsharp-freebsd-wasm32@0.35.4",
+      "provenance": {
+        "predicateType": "https://slsa.dev/provenance/v1"
+      }
+    },
+    "signatures": [
+      {
+        "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+        "sig": "MEQCIDK+vdHetBy6cY7CzeJGajQPOA+ajsYHxLdYqNleM3LnAiBNXSH4OAxDi4KAXpfCD/29dZoNzI/4dDDP3NOZFy1J0A=="
+      }
+    ]
+  },
+  "_npmUser": {
+    "name": "GitHub Actions",
+    "email": "npm-oidc-no-reply@github.com",
+    "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:58affd93-82b8-4bee-bc1b-95feb36d8c8e"
+    }
+  },
+  "directories": {},
+  "maintainers": [
+    {
+      "name": "lovell",
+      "email": "npm@lovell.info"
+    }
+  ],
+  "_npmOperationalInternal": {
+    "host": "s3://npm-registry-packages-npm-production",
+    "tmp": "tmp/sharp-freebsd-wasm32_0.35.4_1787737140086_0.4768742682829237"
+  },
+  "_hasShrinkwrap": false
+}

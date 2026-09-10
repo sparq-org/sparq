@@ -1,0 +1,40 @@
+{
+  "argv": [
+    "/Users/jesght/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+    "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/implementation/tools/npm-11.17.0/bin/npm-cli.js",
+    "update",
+    "sharp",
+    "--package-lock-only",
+    "--ignore-scripts",
+    "--no-audit",
+    "--no-fund"
+  ],
+  "env": {
+    "PATH": "/Users/jesght/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:/usr/bin:/bin:/opt/homebrew/bin",
+    "TMPDIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/review-followup/tmp",
+    "LANG": "en_US.UTF-8",
+    "npm_config_cache": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/review-followup/cache",
+    "npm_config_userconfig": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/review-followup/empty-user.npmrc",
+    "npm_config_globalconfig": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/review-followup/empty-global.npmrc",
+    "npm_config_registry": "https://registry.npmjs.org",
+    "npm_config_fetch_retries": "0",
+    "npm_config_fetch_timeout": "30000",
+    "npm_config_update_notifier": "false",
+    "npm_config_ignore_scripts": "true",
+    "npm_config_audit": "false",
+    "npm_config_fund": "false"
+  },
+  "exit_code": 0,
+  "stop": null,
+  "elapsed_seconds": 5.144857083000001,
+  "initial": {
+    "free_bytes": 4457025536,
+    "allocated_bytes": 32768
+  },
+  "final": {
+    "free_bytes": 4449165312,
+    "allocated_bytes": 6828032
+  },
+  "max_allocated_bytes": 6828032,
+  "min_free_bytes": 4449165312
+}

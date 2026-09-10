@@ -1,0 +1,14 @@
+{
+  "actual_consumer_coverage": true,
+  "unrelated_path_stays_excluded": true,
+  "controls": [
+    {
+      "removed": "site/package.json",
+      "coverage_lost": true
+    },
+    {
+      "removed": "gui/app/package.json",
+      "coverage_lost": true
+    }
+  ]
+}

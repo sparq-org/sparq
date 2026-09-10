@@ -1,0 +1,9 @@
+{
+  "head": "0c6a780593a9b3381fb158e426519a2a6d8d17f9",
+  "manifest_sha256": "a1772a5d4bd72f879439f280c265cebd26f3d24a7209d6dc2419ae6e5d10b9a2",
+  "verified_files": 716,
+  "packet_sha256": "75f1b6a9b2998f26e17e14d5bed4a97f096da5ad608a8fdeed19ad81ce9f11a6",
+  "clean": true,
+  "git_delta_matches": true,
+  "six_sources_match_git": true
+}
