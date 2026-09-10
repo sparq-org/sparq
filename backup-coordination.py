@@ -450,6 +450,11 @@ for evidence_name in ['actual-budget-final.rs', 'actual-budget.rs', 'binary/actu
 for evidence_name in ["final-validation-root-verification.json", "final-review-public-repo-precheck.json", "opus-final-input.md", "opus-final-input-receipt.json"]:
     FILES["6476-admission-" + evidence_name] = ROOT / "direct-6476/admission" / evidence_name
 
+# Issue6476 publication readiness and current capacity.
+for evidence_name in ['declaration-template.json', 'pr-body.md', 'report.json', 'manifest.json']:
+    FILES["6476-publication-readiness-" + evidence_name.replace("/", "--")] = ROOT / "direct-6476/publication-readiness" / evidence_name
+FILES["6476-admission-pre-publication-capacity.json"] = ROOT / "direct-6476/admission/pre-publication-capacity.json"
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout

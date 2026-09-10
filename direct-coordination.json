@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-10T05:52:18.165681+00:00",
+  "updated_at": "2026-09-10T05:59:43.376269+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -308,7 +308,22 @@
       "started_at": "2026-09-10T05:50:56.532057+00:00",
       "collect_policy": "Collect session32484 once before reading output; verify outer result success and actual modelUsage. Do not relaunch or retry exhausted budget. No source mutation during review."
     },
-    "agent_state": "Same Astra agent doing bounded read-only publication-readiness/feature-off V2 preparation, no builds/source edits/models"
+    "agent_state": "Astra idle; final source/publication packets frozen",
+    "publication_readiness": {
+      "state": "completed_root_hash_verified",
+      "directory": "direct-6476/publication-readiness",
+      "manifest_sha256": "493b8f4635d1251303c8c9b2f74cb956f48d76ab58ce83b7d399c460d7c5b6fb",
+      "plan": "After source review, create draft PR to assign number; add exact per-PR V2 intent declaration with separate review and normal validation, then ready for full CI. No byte-neutrality or perf-pass claim. Draft avoids launching full build twice."
+    },
+    "capacity": {
+      "at": "2026-09-10T05:56:53.873314+00:00",
+      "queued": 1,
+      "in_progress": 1,
+      "repo_self_hosted_runners": 0,
+      "hosted_runner_reserve": "Not established by repository runners endpoint; no release authorization",
+      "registry_actions_enabled": false,
+      "evidence": "direct-6476/admission/pre-publication-capacity.json"
+    }
   },
   "prs": {
     "4300": {

@@ -1,0 +1,19 @@
+{
+  "files": [
+    {
+      "path": "declaration-template.json",
+      "bytes": 330,
+      "sha256": "560dfc858729e3764e7e8b6525e4a79d024903680524cba7e1531b44e70a4b05"
+    },
+    {
+      "path": "pr-body.md",
+      "bytes": 2061,
+      "sha256": "2434ca284e0f26ea38874fe71d6cdfd7720d61d8007a8d1ab59d7390d3c4680d"
+    },
+    {
+      "path": "report.json",
+      "bytes": 6442,
+      "sha256": "210eed5340efe8e77c2d068108638bfc8ad63895e5c84f4c4289ec562151c08d"
+    }
+  ]
+}

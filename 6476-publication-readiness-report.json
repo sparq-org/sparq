@@ -1,0 +1,75 @@
+{
+  "head": "bcba08207b03714a25ad7a2a4774370c7f6f6bfa",
+  "mode": "read-only operational preparation; no builds, source edits or remote actions",
+  "declaration": {
+    "needed": "Reviewed V2 intent declaration for intentional always-compiled restoration; no assertion yet that new wasm bytes differ or size gate passes.",
+    "destination": "bench/feature-off-declarations/<assigned-PR-number>.json",
+    "procedure": "After assigning the real PR number, substitute a numeric pr field and digits filename, review and commit normally. New file must be absent from base. Do not use legacy shared scalar, derived:true, or claim neutrality. Separate wasm_bundle_bytes ratchet remains unchanged.",
+    "source": "bench/feature-off-declarations/README.md:19-54",
+    "template_warning": "Evidence-only placeholder is deliberately not a valid publishable declaration until PR number is assigned."
+  },
+  "normal_route": [
+    "Root finishes independent exact-head review and publishes through ordinary PR events. No manual dispatch or label toggling is required for these source changes.",
+    "Draft checks do not establish full readiness: required full check is gate, while draft uses gate, draft-tier (.github/workflows/ci-summary.yml:256-264). Ready-for-review triggers full successors.",
+    "Bench job explicitly skips draft PRs (bench.yml:196-205). Verify exact-head non-draft required gate and actual execution of relevant underlying jobs, then normal protected merge-group evidence. Do not treat skipped or grouped success alone as test execution."
+  ],
+  "existing_ci": [
+    {
+      "route": "ci.yml build-archive + test shards",
+      "source": "ci.yml:397-559,561-900",
+      "coverage": "Workspace all-target nextest archive with approx-ann,filtered-ann,vec-predicate; selected reverse-dependency test shards execute compiled tests; doctests separately. New nested_budget_tests are ordinary cfg(test) inside exec, so engine unit binary includes them."
+    },
+    {
+      "route": "ci.yml lint",
+      "source": "ci.yml:1339-1396",
+      "coverage": "Workspace all-target clippy default and all-features -D warnings; closes direct-driver local versus actual Cargo/workspace-unification gap. All-features lint is not all-features runtime testing."
+    },
+    {
+      "route": "feature-matrix opt-in group + trusted per-leg reporter",
+      "source": "feature-matrix.yml:789-811; sparq-engine.yml:63-88,147-150,187-210",
+      "coverage": "Existing test:true legs service, service-local, service+service-local, result-cache, params, explain-json cover optional migrated callers. cs-planner, zk, vectorized also test:true. Check per-leg build/test/clippy records/artifacts, not just group aggregate; no new feature was added and no new matrix leg proposed."
+    },
+    {
+      "route": "W3C SPARQL conformance + service-federation-conformance",
+      "source": "ci.yml:1569-1694,2581-2742",
+      "coverage": "Full conformance ratchet and loopback SERVICE / local+HTTP feature paths; authoritative remaining runtime validation."
+    },
+    {
+      "route": "wasm",
+      "source": "ci.yml:983-1338",
+      "coverage": "wasm32 clippy default and multiple exposed features, wasm-deps-guard, wasm-pack Node tests. This does not prove native engine no-parallel entire dependency graph."
+    },
+    {
+      "route": "vectorized-feature-off + run + track benchmarks",
+      "source": "vectorized-feature-off.yml:89,223; bench.yml:296-355",
+      "coverage": "Feature resolution/cfg audit plus base/head wasm equality or reviewed declaration; distinct deterministic perf/wasm-size ratchet. PR bench runs deterministic-only, not query/operator timing suite."
+    },
+    {
+      "route": "coverage + MSRV + unsafe-register",
+      "source": "ci.yml:1444,3087-3782,4474",
+      "coverage": "Supported source-dependent gates remain unchanged; no floor or test-presence weakening."
+    }
+  ],
+  "gaps_and_limits": [
+    "Local 15 actual-module tests, public witness, restore mutants, sibling sealing controls, and forced production two-worker snapshot witness are frozen validation evidence; they do not substitute for full Cargo tests.",
+    "Existing native default/test:true lanes should execute committed nested budget tests; scratch compile-sealing mutants and forced-worker observer remain local evidence, not checked-in CI tests.",
+    "No explicit sparq-engine --no-default-features runtime leg found in the bounded workflow/engine-fragment search. Existing pure-server/geo/core-only legs do not close that gap.",
+    "Current miri.yml targets sparq-core and is scheduled, not an engine budget PR proof. No engine Miri claim.",
+    "PR template requests operator-coverage bench and per-builtin error table. Engine eval_semantics.rs type_error_builtins is included in the engine test suite; ordinary PR bench deterministic-only is not the full operator-coverage measurement. Root must retain this distinction when interpreting CI.",
+    "No current remote checks were read; workflow source proves intended wiring, not future successful execution. No declaration committed or gate result predicted."
+  ],
+  "source_sha256": {
+    "bench/feature-off-declarations/README.md": "e0a46190cd508bbe8d5821cdaec9da2a1d2bd07f8718f00b2a7ad8552cde7d2e",
+    ".github/PULL_REQUEST_TEMPLATE.md": "4f800f40af2c1d0715617c79aa66f82c6ef5cb72596eb9bd062cf619233f7b3b",
+    ".github/workflows/ci.yml": "8c2dd15936888aab25dd70c36d457811ac7ae453758643b9833ee1d2bf10985c",
+    ".github/workflows/ci-summary.yml": "be42f933e62ef681e9f45fc515afee8398bcf9d809d589d8b3c2bb9f9fa79884",
+    ".github/workflows/bench.yml": "135b956886db9016f514924290f987e79649f9ffe91886bc55db7e9435dbf0e0",
+    ".github/workflows/vectorized-feature-off.yml": "6084ce926c8376413df379d70fda9948534a2a87edeb355c61094e61979dcd15",
+    ".github/workflows/feature-matrix.yml": "a4685a6f4b0b4655879176cb7bace120105feeebc533152a7a9fd5e38821dc2d",
+    ".github/workflows/miri.yml": "88870662daf42be929f3f3c02063da853be29062b6bdca2f1c1936297d4a50fc",
+    ".github/feature-matrix.d/sparq-engine.yml": "05c102ce5e653162d5d164f16bd43d24800fd3e0cc4fe45f5c80a989f682d413",
+    ".github/feature-matrix.d/sparq-engine-service.yml": "bce74c9e6715ce8a16d3d75723fabf5e1a9644b8f541f00aaa3963d06cfe19cd",
+    "scripts/ci-bench.sh": "85a12328525acb7099ac37eb46b8701911948ad233e493e99a316d008b87c3b0",
+    "crates/sparq-engine/src/exec.rs": "58cd125b945a3b2f08e99f8edc1a31164e9569422daa9b8d1a72bca66d703407"
+  }
+}
