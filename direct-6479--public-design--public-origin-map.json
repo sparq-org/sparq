@@ -1,0 +1,282 @@
+{
+  "repository": "https://github.com/sparq-org/sparq",
+  "repository_visibility": "public",
+  "visibility_source": "https://api.github.com/repos/sparq-org/sparq",
+  "source_commit": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+  "code_excerpt_count": 20,
+  "setter_calls": [
+    {
+      "repository_path": "crates/sparq-engine/src/lib.rs",
+      "line": 1042
+    },
+    {
+      "repository_path": "crates/sparq-engine/src/lib.rs",
+      "line": 1080
+    },
+    {
+      "repository_path": "crates/sparq-engine/src/lib.rs",
+      "line": 1117
+    },
+    {
+      "repository_path": "crates/sparq-engine/src/lib.rs",
+      "line": 1143
+    },
+    {
+      "repository_path": "crates/sparq-engine/src/lib.rs",
+      "line": 1199
+    },
+    {
+      "repository_path": "crates/sparq-engine/src/lib.rs",
+      "line": 1238
+    },
+    {
+      "repository_path": "crates/sparq-engine/src/explain.rs",
+      "line": 53
+    },
+    {
+      "repository_path": "crates/sparq-engine/src/explain.rs",
+      "line": 81
+    },
+    {
+      "repository_path": "crates/sparq-engine/src/explain_json.rs",
+      "line": 196
+    },
+    {
+      "repository_path": "crates/sparq-engine/src/explain_json.rs",
+      "line": 215
+    },
+    {
+      "repository_path": "crates/sparq-engine/src/cache.rs",
+      "line": 369
+    }
+  ],
+  "code_excerpts": [
+    {
+      "label": "QUERY_BASE storage",
+      "kind": "complete thread_local declaration",
+      "public_url": "https://github.com/sparq-org/sparq/blob/f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464/crates/sparq-engine/src/exec.rs#L15023-L15027",
+      "repository_path": "crates/sparq-engine/src/exec.rs",
+      "commit": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+      "blob_oid": "dc532c380149aee857d2109a1e476cf5d524edb5",
+      "first_line": 15023,
+      "last_line": 15027,
+      "exact_excerpt_sha256": "fe4aa0b3c7c3fb9cbba78f6d2e5138a4d479c622e2518ccd1d8e2f96dc43e3c2"
+    },
+    {
+      "label": "set_query_base",
+      "kind": "complete function",
+      "public_url": "https://github.com/sparq-org/sparq/blob/f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464/crates/sparq-engine/src/exec.rs#L15031-L15033",
+      "repository_path": "crates/sparq-engine/src/exec.rs",
+      "commit": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+      "blob_oid": "dc532c380149aee857d2109a1e476cf5d524edb5",
+      "first_line": 15031,
+      "last_line": 15033,
+      "exact_excerpt_sha256": "24b294d5bd6c3266e992019d887208990ecb63ceaefd978e55202e390160ce68"
+    },
+    {
+      "label": "resolve_iri",
+      "kind": "complete function",
+      "public_url": "https://github.com/sparq-org/sparq/blob/f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464/crates/sparq-engine/src/exec.rs#L15037-L15047",
+      "repository_path": "crates/sparq-engine/src/exec.rs",
+      "commit": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+      "blob_oid": "dc532c380149aee857d2109a1e476cf5d524edb5",
+      "first_line": 15037,
+      "last_line": 15047,
+      "exact_excerpt_sha256": "e79500c2d845a71d92240614e72e43e876727d94e99aaaef20ffab944255fdb2"
+    },
+    {
+      "label": "IRI expression operand then resolution",
+      "kind": "complete match arm",
+      "public_url": "https://github.com/sparq-org/sparq/blob/f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464/crates/sparq-engine/src/exec.rs#L14238-L14246",
+      "repository_path": "crates/sparq-engine/src/exec.rs",
+      "commit": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+      "blob_oid": "dc532c380149aee857d2109a1e476cf5d524edb5",
+      "first_line": 14238,
+      "last_line": 14246,
+      "exact_excerpt_sha256": "8dcab462d451e8a17c7904601ac392f149a22f2772691e9f83ce4410815187f4"
+    },
+    {
+      "label": "query_prepared_with_budget",
+      "kind": "complete BASE setter caller",
+      "public_url": "https://github.com/sparq-org/sparq/blob/f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464/crates/sparq-engine/src/lib.rs#L1032-L1054",
+      "repository_path": "crates/sparq-engine/src/lib.rs",
+      "commit": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+      "blob_oid": "613454a8d0cbfaa4ffa6f0d47d569af97703972d",
+      "first_line": 1032,
+      "last_line": 1054,
+      "exact_excerpt_sha256": "59baadc2233bc081f3ac33da38c6681e4392b37f16d6e2cf02e2271300bfe655"
+    },
+    {
+      "label": "ask_prepared_with_budget",
+      "kind": "complete BASE setter caller",
+      "public_url": "https://github.com/sparq-org/sparq/blob/f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464/crates/sparq-engine/src/lib.rs#L1074-L1086",
+      "repository_path": "crates/sparq-engine/src/lib.rs",
+      "commit": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+      "blob_oid": "613454a8d0cbfaa4ffa6f0d47d569af97703972d",
+      "first_line": 1074,
+      "last_line": 1086,
+      "exact_excerpt_sha256": "beb14ee27d8e5b32ebb753e160e405564c03e54b7079933976cf80ca5478cfc6"
+    },
+    {
+      "label": "query_json_prepared_with_budget",
+      "kind": "complete BASE setter caller",
+      "public_url": "https://github.com/sparq-org/sparq/blob/f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464/crates/sparq-engine/src/lib.rs#L1107-L1125",
+      "repository_path": "crates/sparq-engine/src/lib.rs",
+      "commit": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+      "blob_oid": "613454a8d0cbfaa4ffa6f0d47d569af97703972d",
+      "first_line": 1107,
+      "last_line": 1125,
+      "exact_excerpt_sha256": "06f1a56a528f5d958635c1a2e605984c7b09722d576baf17d7c80fab2fea6bc8"
+    },
+    {
+      "label": "query_json_chunks_with_budget",
+      "kind": "complete BASE setter caller",
+      "public_url": "https://github.com/sparq-org/sparq/blob/f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464/crates/sparq-engine/src/lib.rs#L1136-L1152",
+      "repository_path": "crates/sparq-engine/src/lib.rs",
+      "commit": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+      "blob_oid": "613454a8d0cbfaa4ffa6f0d47d569af97703972d",
+      "first_line": 1136,
+      "last_line": 1152,
+      "exact_excerpt_sha256": "09bf4bc770e791011c0fd9aa31d1b6b739e828c2d9b5d9381ecb3a1bef550ddf"
+    },
+    {
+      "label": "query_json_stream_prepared_with_budget",
+      "kind": "complete BASE setter caller",
+      "public_url": "https://github.com/sparq-org/sparq/blob/f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464/crates/sparq-engine/src/lib.rs#L1188-L1212",
+      "repository_path": "crates/sparq-engine/src/lib.rs",
+      "commit": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+      "blob_oid": "613454a8d0cbfaa4ffa6f0d47d569af97703972d",
+      "first_line": 1188,
+      "last_line": 1212,
+      "exact_excerpt_sha256": "ffaa87818832df830ef41f6da2cac1a1605f62edebcd97c1ddb0726a09cfa83e"
+    },
+    {
+      "label": "count_prepared_with_budget",
+      "kind": "complete BASE setter caller",
+      "public_url": "https://github.com/sparq-org/sparq/blob/f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464/crates/sparq-engine/src/lib.rs#L1232-L1246",
+      "repository_path": "crates/sparq-engine/src/lib.rs",
+      "commit": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+      "blob_oid": "613454a8d0cbfaa4ffa6f0d47d569af97703972d",
+      "first_line": 1232,
+      "last_line": 1246,
+      "exact_excerpt_sha256": "e81469e2180f5e94dc02825ebfef3f113386d7426c22826d43dcdcc1ca6c4336"
+    },
+    {
+      "label": "explain",
+      "kind": "complete BASE setter caller",
+      "public_url": "https://github.com/sparq-org/sparq/blob/f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464/crates/sparq-engine/src/explain.rs#L44-L64",
+      "repository_path": "crates/sparq-engine/src/explain.rs",
+      "commit": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+      "blob_oid": "9ce46fc0b01e3f9af99079d6dd22f9a3d675f9a9",
+      "first_line": 44,
+      "last_line": 64,
+      "exact_excerpt_sha256": "a61e6c04b58cc7b8e157915d87743f156d4192527c9f772488ef66058c3e73e1"
+    },
+    {
+      "label": "explain_analyze_with_budget",
+      "kind": "complete BASE setter caller",
+      "public_url": "https://github.com/sparq-org/sparq/blob/f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464/crates/sparq-engine/src/explain.rs#L73-L115",
+      "repository_path": "crates/sparq-engine/src/explain.rs",
+      "commit": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+      "blob_oid": "9ce46fc0b01e3f9af99079d6dd22f9a3d675f9a9",
+      "first_line": 73,
+      "last_line": 115,
+      "exact_excerpt_sha256": "1a79db7c253f8964d93cb5770b67061c520e9bf41f07e2576e72263cd57624a9"
+    },
+    {
+      "label": "explain_plan",
+      "kind": "complete BASE setter caller",
+      "public_url": "https://github.com/sparq-org/sparq/blob/f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464/crates/sparq-engine/src/explain_json.rs#L191-L199",
+      "repository_path": "crates/sparq-engine/src/explain_json.rs",
+      "commit": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+      "blob_oid": "934cf0bbda1c5bda35a586fbb0b7cfda5fab0949",
+      "first_line": 191,
+      "last_line": 199,
+      "exact_excerpt_sha256": "40c4d0ed15aafa7c2d6251edc76726b672f81f238d9c4d8772ab2bb1abd549e3"
+    },
+    {
+      "label": "explain_plan_analyze_with_budget",
+      "kind": "complete BASE setter caller",
+      "public_url": "https://github.com/sparq-org/sparq/blob/f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464/crates/sparq-engine/src/explain_json.rs#L210-L236",
+      "repository_path": "crates/sparq-engine/src/explain_json.rs",
+      "commit": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+      "blob_oid": "934cf0bbda1c5bda35a586fbb0b7cfda5fab0949",
+      "first_line": 210,
+      "last_line": 236,
+      "exact_excerpt_sha256": "e7317153519e483246defe4f4917b824053d074fe0b2dff445132246c0b772a3"
+    },
+    {
+      "label": "eval",
+      "kind": "complete BASE setter caller",
+      "public_url": "https://github.com/sparq-org/sparq/blob/f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464/crates/sparq-engine/src/cache.rs#L360-L383",
+      "repository_path": "crates/sparq-engine/src/cache.rs",
+      "commit": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+      "blob_oid": "163b4fa1435a02c40f9eacbe529bed3b24d66ca7",
+      "first_line": 360,
+      "last_line": 383,
+      "exact_excerpt_sha256": "8c60c979f25fe1d9b8e0bbedecec8edfb726f7f27802fd77c44a18689155aba8"
+    },
+    {
+      "label": "with_functions",
+      "kind": "complete surrounding public/scope helper",
+      "public_url": "https://github.com/sparq-org/sparq/blob/f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464/crates/sparq-engine/src/lib.rs#L401-L404",
+      "repository_path": "crates/sparq-engine/src/lib.rs",
+      "commit": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+      "blob_oid": "613454a8d0cbfaa4ffa6f0d47d569af97703972d",
+      "first_line": 401,
+      "last_line": 404,
+      "exact_excerpt_sha256": "82b1cc89b77dce30941242d059e6deea65dcd8b051ad89f76817514d82d02823"
+    },
+    {
+      "label": "query_with_functions_and_budget",
+      "kind": "complete surrounding public/scope helper",
+      "public_url": "https://github.com/sparq-org/sparq/blob/f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464/crates/sparq-engine/src/lib.rs#L704-L711",
+      "repository_path": "crates/sparq-engine/src/lib.rs",
+      "commit": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+      "blob_oid": "613454a8d0cbfaa4ffa6f0d47d569af97703972d",
+      "first_line": 704,
+      "last_line": 711,
+      "exact_excerpt_sha256": "26c036657cb1a192ed2fdcc73cb8028c058231f2b8cf2236d773cc14a7515858"
+    },
+    {
+      "label": "query_with_budget",
+      "kind": "complete surrounding public/scope helper",
+      "public_url": "https://github.com/sparq-org/sparq/blob/f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464/crates/sparq-engine/src/lib.rs#L1022-L1024",
+      "repository_path": "crates/sparq-engine/src/lib.rs",
+      "commit": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+      "blob_oid": "613454a8d0cbfaa4ffa6f0d47d569af97703972d",
+      "first_line": 1022,
+      "last_line": 1024,
+      "exact_excerpt_sha256": "46d3dc15138de1ba62577e819ea1e003ee29544e98c8e3c6e1cfe017fe5a9224"
+    },
+    {
+      "label": "view_scope",
+      "kind": "complete surrounding public/scope helper",
+      "public_url": "https://github.com/sparq-org/sparq/blob/f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464/crates/sparq-engine/src/lib.rs#L827-L829",
+      "repository_path": "crates/sparq-engine/src/lib.rs",
+      "commit": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+      "blob_oid": "613454a8d0cbfaa4ffa6f0d47d569af97703972d",
+      "first_line": 827,
+      "last_line": 829,
+      "exact_excerpt_sha256": "f17b228f678453b0647d58b54777aeab297de9ba4195c78ff78e88017eae3afa"
+    },
+    {
+      "label": "with_budget",
+      "kind": "complete surrounding public/scope helper",
+      "public_url": "https://github.com/sparq-org/sparq/blob/f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464/crates/sparq-engine/src/exec.rs#L251-L254",
+      "repository_path": "crates/sparq-engine/src/exec.rs",
+      "commit": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+      "blob_oid": "dc532c380149aee857d2109a1e476cf5d524edb5",
+      "first_line": 251,
+      "last_line": 254,
+      "exact_excerpt_sha256": "f51351b89201eee612337be415c6e05edeef8aedcabd78105f148d03a539dacf"
+    }
+  ],
+  "public_issue": {
+    "url": "https://github.com/sparq-org/sparq/issues/6479",
+    "body_sha256": "66eeeb304b8e9cc554010ad65d3f46f0fd6c9262aeebdb68533b4c804e7339e9",
+    "title_sha256": "b1393c4173b4c5b49a4c74345aa8966c5ff5a32f047b37cf371105846e4fae4b",
+    "origin": "Public GitHub issue API body; copied without local additions"
+  },
+  "request_text": "New generic source-only design questions, no private observations or execution data."
+}

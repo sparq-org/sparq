@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-10T19:33:59.578681+00:00",
+  "updated_at": "2026-09-10T19:41:02.057682+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -91,10 +91,10 @@
     "production_edit_authorized": false,
     "prior_baseline": "direct-3113/delete-memo-baseline",
     "next_actions": [
-      "Collect6479 public-source-only reviewpacket. Rootverifypublicsourcebinding/excludedprivatecategories and seek normaltoolapproval of materially safer payload. Originalreview neverstarted/no session; neverreplay originalexport.",
-      "Watch6486 MG202879e9 CI/matrix/gate; preserveallliveevidence. Aftermerge actualmainproof before6485closure;3113staysopen.",
-      "Watch6487 exact0b4554b mainCI/gate; Copilotrecommendsapproval with0threads. Collectcurrent26test/Linuxprivacy proof afterrelevantjobscomplete, then normalprotectedqueue onfreshhead/base/reviews/gate.",
-      "No mutation/recovery scripts may be replayed. Existing /root/postmerge_ci active6479; no duplicateagents/runs."
+      "Collect actualOpus26543 public-source-only6479designreview. Compare source-design conditions with separatelyretainedlocalwitness, do notclaimreviewervalidatedunseenruntimeevidence. No productionedituntilfreshhunk/base ownership and boundedimplementationreadiness.",
+      "Collect existingAstra6487 currentCI executionproof; allpriorOpus/Copilot reviewsapprove exact0b. Gate/mainCI pending at19:35; normalprotectedqueueonly afterallcurrentrequirements.",
+      "Watch6486MG202879e9: CIpassed, matrix/gatepending; preserveallliveevidence. Aftermerge inspectmainCI/source andcomment+close6485onlyafterproof;3113staysopen.",
+      "Do not replay originalrejected6479export, anypublication/queue/recovery/Copilot scripts, or frozenexecutions. No pendinguserapproval for public-onlyreview; materiallysaferpayload accepted."
     ],
     "controls": {
       "directory": "direct-6485/memo-controls",
@@ -126,7 +126,7 @@
       "root_disposition": "direct-6485/admission/opus-memo-design-root-disposition.json",
       "output_sha256": "c619dd1d92a198c46a7e2b26ca8ab34e08de5612bd6db3920b451263d5891886"
     },
-    "agent_current_task": "6479 strictlypublicsource-only design review packet and lowrisk audit after originalexportrejection",
+    "agent_current_task": "6487 bounded readonly currentCI executionproof; stoppedifrequiredjobsstilllive",
     "implementation_admission": "direct-6485/admission/implementation-admission.json",
     "implementation_readiness": {
       "directory": "direct-6485/implementation-readiness",
@@ -284,7 +284,11 @@
           "in_progress": 1,
           "queued": 5
         }
-      }
+      },
+      "last_status_snapshot": "monitor-20260910-1935",
+      "CI_state": "SUCCESS19:31:43",
+      "feature_matrix_state": "pending at19:35",
+      "gate_state": "pending at19:35"
     }
   },
   "prs": {
@@ -858,7 +862,13 @@
         "docs_quality": 34518125199,
         "fuzz": 34518125730,
         "copilot": 34518133158,
-        "state": "All latest workflows success exceptmainCI + aggregate stillpending; no currentfailure."
+        "state": "All latest workflows success exceptmainCI + aggregate stillpending; no currentfailure.",
+        "proof_task": {
+          "agent": "/root/postmerge_ci",
+          "directory": "direct-6483/ci-execution-proof",
+          "state": "running boundedread-only",
+          "policy": "Onlycompletedrequiredjoblogs, no livejoblogrequests or poll loops; freezeexplicitgapsifpending."
+        }
       },
       "hold": "Required CI/current reviews still pending; no merge admission.",
       "copilot": {
@@ -917,10 +927,10 @@
     }
   },
   "next_actions": [
-    "Collect6479 public-source-only reviewpacket. Rootverifypublicsourcebinding/excludedprivatecategories and seek normaltoolapproval of materially safer payload. Originalreview neverstarted/no session; neverreplay originalexport.",
-    "Watch6486 MG202879e9 CI/matrix/gate; preserveallliveevidence. Aftermerge actualmainproof before6485closure;3113staysopen.",
-    "Watch6487 exact0b4554b mainCI/gate; Copilotrecommendsapproval with0threads. Collectcurrent26test/Linuxprivacy proof afterrelevantjobscomplete, then normalprotectedqueue onfreshhead/base/reviews/gate.",
-    "No mutation/recovery scripts may be replayed. Existing /root/postmerge_ci active6479; no duplicateagents/runs."
+    "Collect actualOpus26543 public-source-only6479designreview. Compare source-design conditions with separatelyretainedlocalwitness, do notclaimreviewervalidatedunseenruntimeevidence. No productionedituntilfreshhunk/base ownership and boundedimplementationreadiness.",
+    "Collect existingAstra6487 currentCI executionproof; allpriorOpus/Copilot reviewsapprove exact0b. Gate/mainCI pending at19:35; normalprotectedqueueonly afterallcurrentrequirements.",
+    "Watch6486MG202879e9: CIpassed, matrix/gatepending; preserveallliveevidence. Aftermerge inspectmainCI/source andcomment+close6485onlyafterproof;3113staysopen.",
+    "Do not replay originalrejected6479export, anypublication/queue/recovery/Copilot scripts, or frozenexecutions. No pendinguserapproval for public-onlyreview; materiallysaferpayload accepted."
   ],
   "followup_lane": {
     "issue": 6480,
@@ -1317,7 +1327,7 @@
       "runtime": "Actualpubliccallback defectconfirmed in3cases atmainf50-equivalent recordedprofile; witnessremainslocal",
       "readiness": {
         "issue": 6479,
-        "state": "witness_confirmed_public_source_review_packet_preparation",
+        "state": "actual_public_source_only_Opus_review_running",
         "agent": "/root/postmerge_ci",
         "model": "gpt-6-astra",
         "effort": "xhigh",
@@ -1343,14 +1353,31 @@
           "pending_commands": false
         },
         "design_review": {
-          "state": "original_payload_rejected_before_process",
-          "session_id": null,
+          "state": "safer_public_source_review_running",
+          "session_id": 26543,
           "original_input": "direct-6479/admission/opus-base-design-input.md",
           "original_input_sha256": "2e9476c6ab61caa4ea6074e69e2fdbf8da8e2ff107b83b932047fc5a3c9266be",
           "rejection": "direct-6479/admission/opus-base-design-rejection.json",
           "public_repository_proof": "direct-6479/admission/public-repository-verification.json",
           "safer_packet_task": "ExistingAstra preparing public-source-only packet in direct-6479/public-design. Excludes all local runtime/provenance/resources/rawlogs/paths; source bound to publicmainf50.",
-          "policy": "No process started; no session to poll. Do not replay original wrapper/payload or export original data via another destination. Inspect materially safer public-only packet before normal toolapproval."
+          "policy": "Collect26543; no duplicate/relaunch. Source-only design assessment, no private runtimeevidence sent. Originalinvocation neverstarted andmustnotbereplayed.",
+          "original_state": "rejected_before_process_started",
+          "kind": "exec_command",
+          "requested_model": "claude-opus-5",
+          "effort": "xhigh",
+          "input": "direct-6479/admission/opus-base-public-design-input.md",
+          "input_sha256": "509bb1ac5f3346b096c08fc554c8f09a2b1cef173fd40b774b21ea7d4d97412c",
+          "output": "direct-6479/admission/opus-base-public-design-review.json",
+          "completion": "direct-6479/admission/opus-base-public-design-completion.json",
+          "public_packet": {
+            "directory": "direct-6479/public-design",
+            "manifest_sha256": "d2d3c8024699959465ec3ca3b924f53675cfbc835987bc8e5035520d63d85c85",
+            "files": 6,
+            "root_verification": "direct-6479/admission/public-design-root-verification.json",
+            "public_excerpts": 20,
+            "bytes": 20860
+          },
+          "approval_resolution": "Normaltoolreview accepted materially smaller strictlypublicsource/issue payload. Localexecutiondata excluded; original rejected47KBinput retainedlocally and NOTused."
         }
       }
     }
@@ -1581,7 +1608,8 @@
         "queued": 5
       }
     },
-    "capacity": "Actualjob inventories showongoingbulk/matrixprogress, nofailure. No demonstratedcapacityincident; no orginventory403retry/cancellation."
+    "capacity": "Actualjob inventories showongoingbulk/matrixprogress, nofailure. No demonstratedcapacityincident; no orginventory403retry/cancellation.",
+    "latest_target_status": "monitor-20260910-1935"
   },
   "registry_pause": {
     "enabled": false,
@@ -4929,7 +4957,13 @@
       "docs_quality": 34518125199,
       "fuzz": 34518125730,
       "copilot": 34518133158,
-      "state": "All latest workflows success exceptmainCI + aggregate stillpending; no currentfailure."
+      "state": "All latest workflows success exceptmainCI + aggregate stillpending; no currentfailure.",
+      "proof_task": {
+        "agent": "/root/postmerge_ci",
+        "directory": "direct-6483/ci-execution-proof",
+        "state": "running boundedread-only",
+        "policy": "Onlycompletedrequiredjoblogs, no livejoblogrequests or poll loops; freezeexplicitgapsifpending."
+      }
     },
     "copilot": {
       "head": "0b4554b924a80432cc1b572bd19f8e58cdbfb4e6",
@@ -4940,7 +4974,7 @@
   },
   "next_ready_audit": {
     "issue": 6479,
-    "state": "witness_confirmed_public_source_review_packet_preparation",
+    "state": "actual_public_source_only_Opus_review_running",
     "agent": "/root/postmerge_ci",
     "model": "gpt-6-astra",
     "effort": "xhigh",
@@ -4966,14 +5000,31 @@
       "pending_commands": false
     },
     "design_review": {
-      "state": "original_payload_rejected_before_process",
-      "session_id": null,
+      "state": "safer_public_source_review_running",
+      "session_id": 26543,
       "original_input": "direct-6479/admission/opus-base-design-input.md",
       "original_input_sha256": "2e9476c6ab61caa4ea6074e69e2fdbf8da8e2ff107b83b932047fc5a3c9266be",
       "rejection": "direct-6479/admission/opus-base-design-rejection.json",
       "public_repository_proof": "direct-6479/admission/public-repository-verification.json",
       "safer_packet_task": "ExistingAstra preparing public-source-only packet in direct-6479/public-design. Excludes all local runtime/provenance/resources/rawlogs/paths; source bound to publicmainf50.",
-      "policy": "No process started; no session to poll. Do not replay original wrapper/payload or export original data via another destination. Inspect materially safer public-only packet before normal toolapproval."
+      "policy": "Collect26543; no duplicate/relaunch. Source-only design assessment, no private runtimeevidence sent. Originalinvocation neverstarted andmustnotbereplayed.",
+      "original_state": "rejected_before_process_started",
+      "kind": "exec_command",
+      "requested_model": "claude-opus-5",
+      "effort": "xhigh",
+      "input": "direct-6479/admission/opus-base-public-design-input.md",
+      "input_sha256": "509bb1ac5f3346b096c08fc554c8f09a2b1cef173fd40b774b21ea7d4d97412c",
+      "output": "direct-6479/admission/opus-base-public-design-review.json",
+      "completion": "direct-6479/admission/opus-base-public-design-completion.json",
+      "public_packet": {
+        "directory": "direct-6479/public-design",
+        "manifest_sha256": "d2d3c8024699959465ec3ca3b924f53675cfbc835987bc8e5035520d63d85c85",
+        "files": 6,
+        "root_verification": "direct-6479/admission/public-design-root-verification.json",
+        "public_excerpts": 20,
+        "bytes": 20860
+      },
+      "approval_resolution": "Normaltoolreview accepted materially smaller strictlypublicsource/issue payload. Localexecutiondata excluded; original rejected47KBinput retainedlocally and NOTused."
     }
   }
 }

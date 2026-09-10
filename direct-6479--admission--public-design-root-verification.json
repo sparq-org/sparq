@@ -1,0 +1,14 @@
+{
+  "at": "2026-09-10T19:38:23.270315+00:00",
+  "public_repository": "https://github.com/sparq-org/sparq",
+  "visibility_proof": "public-repository-verification.json",
+  "source_commit": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+  "verified_verbatim_public_code_excerpts": 20,
+  "public_issue_body_identical": true,
+  "payload_bytes": 20860,
+  "payload_sha256": "509bb1ac5f3346b096c08fc554c8f09a2b1cef173fd40b774b21ea7d4d97412c",
+  "manifest_sha256": "d2d3c8024699959465ec3ca3b924f53675cfbc835987bc8e5035520d63d85c85",
+  "verified_files": 6,
+  "excluded": "All local witness/provenance/commands/logs/resources/toolchain/cache/host/process information. Original rejected packet not used.",
+  "safe_alternative": "Only new generic source-only design request, existing public issue text and verified verbatim public code will be sent. Different minimized data; no original-payload replay or indirect export."
+}

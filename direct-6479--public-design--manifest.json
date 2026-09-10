@@ -1,0 +1,35 @@
+{
+  "file_count": 6,
+  "files": [
+    {
+      "path": "content-audit.json",
+      "bytes": 1093,
+      "sha256": "61c8126347733286d320e045e60ac2193253966c2010946a20d2014021fa103f"
+    },
+    {
+      "path": "payload.md",
+      "bytes": 20860,
+      "sha256": "509bb1ac5f3346b096c08fc554c8f09a2b1cef173fd40b774b21ea7d4d97412c"
+    },
+    {
+      "path": "public-code.md",
+      "bytes": 17073,
+      "sha256": "0466be03f6523ef92137a7c5d7769b6e4a2cd7cf88d2608ce6fbf26b95c33526"
+    },
+    {
+      "path": "public-issue.json",
+      "bytes": 2268,
+      "sha256": "89a82501868d6c53f77432afb3fb380cbedc61992387046c6120026263b47f60"
+    },
+    {
+      "path": "public-origin-map.json",
+      "bytes": 13333,
+      "sha256": "43e666fdac3d1f0403ac3b47b29f26c12750c96e2a2aa333188cd40ce84992ba"
+    },
+    {
+      "path": "request.txt",
+      "bytes": 1236,
+      "sha256": "45244930b70fd7eb1d014faea35fec55c7549b45fff1deab40985decd6cf616a"
+    }
+  ]
+}

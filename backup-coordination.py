@@ -1135,6 +1135,32 @@ FILES['direct-6479--admission--opus-base-design-rejection.json'] = ROOT / 'direc
 FILES['direct-6479--admission--public-repository-verification.json'] = ROOT / 'direct-6479/admission' / 'public-repository-verification.json'
 FILES['direct-6479--admission--public-repository-verification.stderr'] = ROOT / 'direct-6479/admission' / 'public-repository-verification.stderr'
 
+# Accepted strictlypublicsource6479 review26543 and latest1935 CIstatus.
+FILES['direct-6479--public-design--content-audit.json'] = ROOT / 'direct-6479/public-design' / 'content-audit.json'
+FILES['direct-6479--public-design--payload.md'] = ROOT / 'direct-6479/public-design' / 'payload.md'
+FILES['direct-6479--public-design--public-code.md'] = ROOT / 'direct-6479/public-design' / 'public-code.md'
+FILES['direct-6479--public-design--public-issue.json'] = ROOT / 'direct-6479/public-design' / 'public-issue.json'
+FILES['direct-6479--public-design--public-origin-map.json'] = ROOT / 'direct-6479/public-design' / 'public-origin-map.json'
+FILES['direct-6479--public-design--request.txt'] = ROOT / 'direct-6479/public-design' / 'request.txt'
+FILES['direct-6479--public-design--manifest.json'] = ROOT / 'direct-6479/public-design' / 'manifest.json'
+FILES['direct-6479--admission--public-design-root-verification.json'] = ROOT / 'direct-6479/admission' / 'public-design-root-verification.json'
+FILES['direct-6479--admission--opus-base-public-design-input.md'] = ROOT / 'direct-6479/admission' / 'opus-base-public-design-input.md'
+FILES['direct-6479--admission--run-opus-base-public-design.py'] = ROOT / 'direct-6479/admission' / 'run-opus-base-public-design.py'
+FILES['monitor-20260910-1935--pr6487-gate-run.stderr'] = ROOT / 'monitor-20260910-1935' / 'pr6487-gate-run.stderr'
+FILES['monitor-20260910-1935--mg6486-gate-run.json'] = ROOT / 'monitor-20260910-1935' / 'mg6486-gate-run.json'
+FILES['monitor-20260910-1935--query.json'] = ROOT / 'monitor-20260910-1935' / 'query.json'
+FILES['monitor-20260910-1935--mg6486-ci-run.stderr'] = ROOT / 'monitor-20260910-1935' / 'mg6486-ci-run.stderr'
+FILES['monitor-20260910-1935--mg6486-ci-run.json'] = ROOT / 'monitor-20260910-1935' / 'mg6486-ci-run.json'
+FILES['monitor-20260910-1935--pr6487-ci-run.json'] = ROOT / 'monitor-20260910-1935' / 'pr6487-ci-run.json'
+FILES['monitor-20260910-1935--graph.stderr'] = ROOT / 'monitor-20260910-1935' / 'graph.stderr'
+FILES['monitor-20260910-1935--pr6487-ci-run.stderr'] = ROOT / 'monitor-20260910-1935' / 'pr6487-ci-run.stderr'
+FILES['monitor-20260910-1935--mg6486-gate-run.stderr'] = ROOT / 'monitor-20260910-1935' / 'mg6486-gate-run.stderr'
+FILES['monitor-20260910-1935--pr6487-gate-run.json'] = ROOT / 'monitor-20260910-1935' / 'pr6487-gate-run.json'
+FILES['monitor-20260910-1935--graph.json'] = ROOT / 'monitor-20260910-1935' / 'graph.json'
+FILES['monitor-20260910-1935--mg6486-matrix-run.json'] = ROOT / 'monitor-20260910-1935' / 'mg6486-matrix-run.json'
+FILES['monitor-20260910-1935--mg6486-matrix-run.stderr'] = ROOT / 'monitor-20260910-1935' / 'mg6486-matrix-run.stderr'
+FILES['monitor-20260910-1935--receipt.json'] = ROOT / 'monitor-20260910-1935' / 'receipt.json'
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout

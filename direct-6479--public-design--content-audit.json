@@ -1,0 +1,28 @@
+{
+  "payload": "payload.md",
+  "payload_sha256": "509bb1ac5f3346b096c08fc554c8f09a2b1cef173fd40b774b21ea7d4d97412c",
+  "content_classes": [
+    "New generic source-only design request",
+    "Public issue6479 title/body",
+    "Verbatim public Git snippets with public commit/blob/line URLs"
+  ],
+  "complete_setter_callers": 11,
+  "verbatim_public_code_check": true,
+  "forbidden_marker_hits": [],
+  "excluded": [
+    "All local witness results and observations",
+    "Raw execution logs and subprocess commands",
+    "Toolchain, cache and host details",
+    "Native filesystem paths",
+    "Local session/process IDs and timings/resources",
+    "Source-build and compiled-artifact provenance",
+    "Original rejected packet and local witness content",
+    "Unrelated public tests containing filesystem paths"
+  ],
+  "source_extraction": "Public Git objects independently selected; no original review-packet content reused.",
+  "visibility": "Public repository status supplied by the verified public API record.",
+  "model_calls": 0,
+  "code_edits": 0,
+  "builds": 0,
+  "network_mutations": 0
+}
