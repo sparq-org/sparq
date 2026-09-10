@@ -1,0 +1,10 @@
+--- candidate/update_fuzz.rs
++++ mutant/update_fuzz.rs
+@@ -973,6 +973,7 @@
+         return Verdict::Same;
+     }
+     if allow_integer_lexical {
++        return Verdict::AdjudicatedIntegerLexical;
+         if a.len() != b.len() {
+             return Verdict::Differs(format!(
+                 "integer-lexical adjudication refused: raw row counts differ\n{}",

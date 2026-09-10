@@ -1,0 +1,11 @@
+--- candidate/update_fuzz.rs
++++ mutant/update_fuzz.rs
+@@ -852,7 +852,7 @@
+             if let oxrdf::NamedOrBlankNode::BlankNode(b) = &t.subject {
+                 blank_nodes.insert(b.as_str().to_string());
+             }
+-            record_lexical_terms(&t.object, integers, blank_nodes)?;
++            let _ = (&t.object, integers, blank_nodes);
+         }
+         _ => {}
+     }

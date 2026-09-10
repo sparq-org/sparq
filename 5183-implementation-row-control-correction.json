@@ -1,0 +1,8 @@
+{
+  "original_control": "omit-row-guard, v2",
+  "observed": "compiled; test survived with IRI-only duplicate-redistribution pair",
+  "cause": "Without blank nodes, comparable returns vectors directly, so unequal duplicate multiplicities still differ even with the duplicate guard removed. The earlier negative did not exercise canon dedup.",
+  "correction": "Retain that case and add the same equal-total duplicate redistribution with a blank-node subject. This reaches constrained canon set conversion and must be rejected by the row guard.",
+  "production_logic_changed": false,
+  "prior_results_preserved": true
+}

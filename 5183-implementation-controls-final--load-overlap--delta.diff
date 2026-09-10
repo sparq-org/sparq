@@ -1,0 +1,11 @@
+--- candidate/update_fuzz.rs
++++ mutant/update_fuzz.rs
+@@ -268,7 +268,7 @@
+     match rng.below(6) {
+         0 | 1 => format!("<http://ex/o{}>", rng.below(6)),
+         2 | 3 => format!("\"lit{}\"", rng.below(5)),
+-        4 => format!("\"{}\"^^{}", gen_canonical_integer(rng), XSD_INTEGER),
++        4 => format!("\"{}\"^^{}", (gen_canonical_integer(rng) + 20), XSD_INTEGER),
+         _ => format!("\"tag{}\"@en", rng.below(3)),
+     }
+ }

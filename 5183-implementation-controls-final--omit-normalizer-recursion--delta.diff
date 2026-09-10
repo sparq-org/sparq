@@ -1,0 +1,11 @@
+--- candidate/update_fuzz.rs
++++ mutant/update_fuzz.rs
+@@ -819,7 +819,7 @@
+         Term::Triple(inner) => Term::Triple(Box::new(Triple::new(
+             inner.subject.clone(),
+             inner.predicate.clone(),
+-            oxigraph_normalized_term(&inner.object),
++            inner.object.clone(),
+         ))),
+         _ => t.clone(),
+     }

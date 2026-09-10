@@ -1,0 +1,25 @@
+
+running 20 tests
+test update_fuzz::tests::blank_node_compare_is_isomorphism_not_relabelling_blindness ... ok
+test update_fuzz::tests::committed_allowlist_enables_exactly_the_adjudicated_classes ... ok
+test update_fuzz::tests::duplicate_quad_is_caught_despite_canonicalization ... ok
+test update_fuzz::tests::fixed_window_smoke ... ok
+test update_fuzz::tests::generated_integer_domain_is_injective_including_load ... ok
+test update_fuzz::tests::generator_emits_every_v2_family ... ok
+test update_fuzz::tests::generator_is_deterministic ... ok
+test update_fuzz::tests::historical_4141222487_preserves_lexicals_and_fresh_nodes ... ok
+test update_fuzz::tests::injected_divergence_is_caught ... ok
+test update_fuzz::tests::injected_marker_fails_during_actual_lexical_adjudication ... ok
+test update_fuzz::tests::integer_lexical_adjudication_is_narrow ... ok
+test update_fuzz::tests::integer_pools_keep_draw_counts_and_all_spelling_families ... ok
+test update_fuzz::tests::lexical_adjudication_preserves_rows_and_blank_node_structure ... ok
+test update_fuzz::tests::lexical_collisions_across_contexts_and_nested_terms_fail ... ok
+test update_fuzz::tests::load_equals_the_equivalent_insert_data ... ok
+test update_fuzz::tests::nested_noncanonical_terms_remain_exact_in_sparq ... ok
+test update_fuzz::tests::no_nested_blank_nodes_in_triple_terms ... ok
+test update_fuzz::tests::non_canonical_integer_lexicals_are_distinct_terms ... ok
+test update_fuzz::tests::oxigraph_cannot_load_a_local_file ... ok
+test update_fuzz::tests::snapshot_renderers_agree_on_known_dataset ... ok
+
+test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.11s
+

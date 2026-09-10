@@ -1,0 +1,13 @@
+{
+  "head": "787aab5c9e7fb114cbe8f390f6fc572eb2a3cfd1",
+  "parent": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+  "tree": "d3ca5a0f913f89eb9437e34a7d0602c18039e13c",
+  "branch": "codex/update-differential-replay",
+  "clean": true,
+  "changed_paths": [
+    "crates/sparq-bench/src/update_fuzz.rs"
+  ],
+  "commit_message": "test(bench): bound UPDATE lexical adjudication to injective terms\n\nNarrow generated integer values to disjoint lexical pools, including LOAD, while preserving draw counts and operation probabilities. Refuse lossy term/row/blank-node adjudication and retain the exact historical Sparq-only sequence.\n\nCo-Authored-By: GPT-6 Astra <noreply@openai.com>\n\n",
+  "diff_sha256": "f7352f3c20b599ea292239f5baad58ccf388567643e6c614a96b94cb9f8570bc",
+  "source_sha256": "962e5f3e0558d36b48b2f0a970ed3a28b7beeb2aac0bec8e52aed72b5d3c93d3"
+}

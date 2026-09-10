@@ -1,0 +1,30 @@
+{
+  "command_count": 39,
+  "aggregate_monitored_seconds": 300.3063349600001,
+  "maximum_command_seconds": 34.919499083,
+  "minimum_sampled_free_bytes": 4796960768,
+  "maximum_sampled_new_allocated_bytes": 260091904,
+  "initial": {
+    "initial_target_allocated": 777408512,
+    "initial_output_allocated": 53248,
+    "free": 5088391168,
+    "started_utc": "2026-09-10T13:20:18Z",
+    "compiled_seconds": 0
+  },
+  "final": {
+    "free_bytes": 4775161856,
+    "target_allocated": 846344192,
+    "output_allocated": 191619072,
+    "new_allocated": 260554752
+  },
+  "limits": {
+    "new_allocated_bytes": 536870912,
+    "minimum_free_bytes": 2147483648,
+    "compile_test_control_seconds": 1200,
+    "build_seconds_each": 600,
+    "jobs": 1
+  },
+  "all_commands_terminal": true,
+  "any_resource_stop": false,
+  "scope": "Allocated disk bytes, not process heap/RSS. No performance measurements or claims."
+}

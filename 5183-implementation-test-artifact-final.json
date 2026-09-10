@@ -1,0 +1,33 @@
+{
+  "reason": "compiler-artifact",
+  "package_id": "path+file:///private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/implementation/harness/crates/sparq-bench#issue5183-injective-tests@0.0.0",
+  "manifest_path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/implementation/harness/crates/sparq-bench/Cargo.toml",
+  "target": {
+    "kind": [
+      "bin"
+    ],
+    "crate_types": [
+      "bin"
+    ],
+    "name": "issue5183-injective-tests",
+    "src_path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/implementation/harness/crates/sparq-bench/src/main.rs",
+    "edition": "2024",
+    "doc": true,
+    "doctest": false,
+    "test": true
+  },
+  "profile": {
+    "opt_level": "3",
+    "debuginfo": 0,
+    "debug_assertions": false,
+    "overflow_checks": false,
+    "test": true
+  },
+  "features": [],
+  "filenames": [
+    "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/issue5183_injective_tests-dd029590d0327647"
+  ],
+  "executable": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/issue5183_injective_tests-dd029590d0327647",
+  "fresh": false,
+  "export_sha256": "3454f51cadbf79293b84c9965f35373d5c83f7913dbc5a6b30e763952a26d0a1"
+}

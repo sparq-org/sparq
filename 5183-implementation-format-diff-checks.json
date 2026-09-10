@@ -1,0 +1,24 @@
+[
+  {
+    "argv": [
+      "git",
+      "diff",
+      "--check"
+    ],
+    "exit": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  {
+    "argv": [
+      "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/rustfmt",
+      "--edition",
+      "2024",
+      "--check",
+      "crates/sparq-bench/src/update_fuzz.rs"
+    ],
+    "exit": 0,
+    "stdout": "",
+    "stderr": ""
+  }
+]

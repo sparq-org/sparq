@@ -1,0 +1,10 @@
+
+thread 'update_fuzz::tests::generated_integer_domain_is_injective_including_load' (4637720) panicked at /private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/implementation/controls-v2/load-overlap/update_fuzz.rs:1990:37:
+LOAD integer must stay in the canonical pool: 24
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+   1: core::panicking::panic_fmt
+   2: sparq_engine::update::with_load_base::<(), &std::path::Path, issue5183_injective_tests::update_fuzz::tests::generated_integer_domain_is_injective_including_load::{closure#0}>
+   3: issue5183_injective_tests::update_fuzz::tests::generated_integer_domain_is_injective_including_load
+   4: <issue5183_injective_tests::update_fuzz::tests::generated_integer_domain_is_injective_including_load::{closure#0} as core::ops::function::FnOnce<()>>::call_once
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.

@@ -1,0 +1,7 @@
+{
+  "initial_controller": "controls.py",
+  "completed": "pool-overlap build0/test101; killed",
+  "setup_failure": "Second control source-match assertion found zero occurrences because rustfmt kept the LOAD integer arm on one line. No second-control compile or test ran.",
+  "correction": "controls-rest.py matches the actual one-line source and starts at the second control; completed control remains untouched.",
+  "test_or_production_correction": false
+}

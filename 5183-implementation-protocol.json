@@ -1,0 +1,23 @@
+{
+  "author": "GPT-6 Astra xhigh",
+  "head": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+  "scope": "exact single production update_fuzz module including all in-file tests",
+  "limits": {
+    "new_allocated_bytes": 536870912,
+    "minimum_free_bytes": 2147483648,
+    "compile_test_control_seconds": 1200,
+    "build_seconds_each": 600,
+    "jobs": 1
+  },
+  "profile": "Rust1.97.1/macOS aarch64 O3 unwind noLTO codegen16 incremental0 offline Rayon1",
+  "controls": [
+    "pool overlap",
+    "LOAD pool collision",
+    "term-injectivity omission",
+    "nested term-injectivity omission",
+    "duplicate-row guard omission",
+    "normalizer recursion omission",
+    "unconditional lexical acceptance"
+  ],
+  "policy": "Record every failure/correction. No outcome retries, seed search, network, dependency version change, engine/canon/allowlist/workflow mutation."
+}

@@ -1,0 +1,11 @@
+--- candidate/update_fuzz.rs
++++ mutant/update_fuzz.rs
+@@ -250,7 +250,7 @@
+     // spelling while retaining all three prefix families and their probabilities.
+     let offset = rng.below(CANONICAL_INTEGER_VALUES);
+     let style = rng.below(3);
+-    let v = CANONICAL_INTEGER_VALUES + 3 * offset + style;
++    let v = offset;
+     let lexical = match style {
+         0 => format!("0{}", v),
+         1 => format!("+{}", v),

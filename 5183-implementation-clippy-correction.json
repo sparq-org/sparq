@@ -1,0 +1,5 @@
+{
+  "prior": "clippy-tests exit101",
+  "change": "Collapse two nested if regions into equivalent let chains, satisfying three collapsible_if warnings.",
+  "prior_source": "candidate-v3.rs.txt"
+}

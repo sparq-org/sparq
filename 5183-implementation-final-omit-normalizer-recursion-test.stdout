@@ -1,0 +1,11 @@
+
+running 1 test
+test update_fuzz::tests::nested_noncanonical_terms_remain_exact_in_sparq ... FAILED
+
+failures:
+
+failures:
+    update_fuzz::tests::nested_noncanonical_terms_remain_exact_in_sparq
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 19 filtered out; finished in 0.01s
+

@@ -1,0 +1,10 @@
+
+thread 'update_fuzz::tests::injected_marker_fails_during_actual_lexical_adjudication' (4653143) panicked at /private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/implementation/controls-final/blind-adjudication/update_fuzz.rs:2171:77:
+called `Result::unwrap_err()` on an `Ok` value: SeedOutcome { ops: 2, adjudicated_integer_lexical: 8, isomorphism_compares: 1 }
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+   1: core::panicking::panic_fmt
+   2: core::result::unwrap_failed
+   3: issue5183_injective_tests::update_fuzz::tests::injected_marker_fails_during_actual_lexical_adjudication
+   4: <issue5183_injective_tests::update_fuzz::tests::injected_marker_fails_during_actual_lexical_adjudication::{closure#0} as core::ops::function::FnOnce<()>>::call_once
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.

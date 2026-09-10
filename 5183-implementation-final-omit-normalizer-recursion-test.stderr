@@ -1,0 +1,11 @@
+
+thread 'update_fuzz::tests::nested_noncanonical_terms_remain_exact_in_sparq' (4652636) panicked at /private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/implementation/controls-final/omit-normalizer-recursion/update_fuzz.rs:2149:9:
+assertion failed: matches!(compare("sparq", &expected, "reference", &canonical, true),
+    Verdict::AdjudicatedIntegerLexical)
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+   1: core::panicking::panic_fmt
+   2: core::panicking::panic
+   3: issue5183_injective_tests::update_fuzz::tests::nested_noncanonical_terms_remain_exact_in_sparq
+   4: <issue5183_injective_tests::update_fuzz::tests::nested_noncanonical_terms_remain_exact_in_sparq::{closure#0} as core::ops::function::FnOnce<()>>::call_once
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.

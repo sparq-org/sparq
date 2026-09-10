@@ -1,0 +1,79 @@
+[
+  {
+    "name": "pool-overlap",
+    "test": "generated_integer_domain_is_injective_including_load",
+    "build_exit": 0,
+    "test_exit": 101,
+    "killed": true,
+    "test_suffix_unchanged": true,
+    "source_sha256": "4f1a878c18616bbc6064126db107b3bfeddc6d43cc8043886126acddd51e03c0",
+    "binary_sha256": "3fa6a1dca9097c66383ba5ef206be0748a9f03e138f0d63538944a541cde1e13",
+    "failure_assertion": "seed=205: integer normalization is not term-injective: \"4\" and \"04\""
+  },
+  {
+    "name": "load-overlap",
+    "test": "generated_integer_domain_is_injective_including_load",
+    "build_exit": 0,
+    "test_exit": 101,
+    "killed": true,
+    "test_suffix_unchanged": true,
+    "source_sha256": "b4ce389baa8e3bdf454d717d02d538b4f00ca15ee44e8880c1f258c8d1698830",
+    "binary_sha256": "07fa94ed328e04e1d07393cdfede45b7716d537cdc5d54959e1417a79ef10770",
+    "failure_assertion": "LOAD integer must stay in the canonical pool: 24"
+  },
+  {
+    "name": "omit-term-injectivity",
+    "test": "lexical_collisions_across_contexts_and_nested_terms_fail",
+    "build_exit": 0,
+    "test_exit": 101,
+    "killed": true,
+    "test_suffix_unchanged": true,
+    "source_sha256": "8e7c8ace329e8b72e2d54325382999c1b6dd5051c5f4934f449ab753d53650ca",
+    "binary_sha256": "ada6ff4e92f7ee028adc8a361dd70cfe0842c77fcf0ea3697f41eec242323c75",
+    "failure_assertion": "different contexts must not hide a term collision"
+  },
+  {
+    "name": "omit-nested-injectivity",
+    "test": "lexical_collisions_across_contexts_and_nested_terms_fail",
+    "build_exit": 0,
+    "test_exit": 101,
+    "killed": true,
+    "test_suffix_unchanged": true,
+    "source_sha256": "17a3ae9d006ca452a0750c03156ddeeafcfd7a89926a239e049bd1e12ab7b201",
+    "binary_sha256": "3de8c0b2e806c9dd6490c2dc75bff98697323419e2613c6e2ba720b1b81e6342",
+    "failure_assertion": "different contexts must not hide a term collision"
+  },
+  {
+    "name": "omit-row-guard",
+    "test": "lexical_adjudication_preserves_rows_and_blank_node_structure",
+    "build_exit": 0,
+    "test_exit": 101,
+    "killed": true,
+    "test_suffix_unchanged": true,
+    "source_sha256": "2d0af4f6b6140bdd28e8a9d8cdf9c83e64a3264f469eef8f18e6e3a2c3621fb0",
+    "binary_sha256": "400d94fe60db245f59e9457e8a560135e00a4edb1cd027669c0d372f72b68229",
+    "failure_assertion": "equal totals cannot hide duplicate redistribution for _:x"
+  },
+  {
+    "name": "omit-normalizer-recursion",
+    "test": "nested_noncanonical_terms_remain_exact_in_sparq",
+    "build_exit": 0,
+    "test_exit": 101,
+    "killed": true,
+    "test_suffix_unchanged": true,
+    "source_sha256": "b0b8264401881defceeeeedc37de36522716a280e1db0f1dfdad094735730335",
+    "binary_sha256": "1bafe38c3e77565c6884ac722c234a24c04eaae5e12d663663f578a3e6c753be",
+    "failure_assertion": "assertion failed: matches!(compare(\"sparq\", &expected, \"reference\", &canonical, true),\n    Verdict::AdjudicatedIntegerLexical)"
+  },
+  {
+    "name": "blind-adjudication",
+    "test": "injected_marker_fails_during_actual_lexical_adjudication",
+    "build_exit": 0,
+    "test_exit": 101,
+    "killed": true,
+    "test_suffix_unchanged": true,
+    "source_sha256": "dd32a3c5bfa7935e1ccd0f69d45b207cab4d03333608917e66286e53058597f6",
+    "binary_sha256": "be2ea532787d8e76d66be19349a466e43e0c089e7002a6c3a08d7d489e9fc24c",
+    "failure_assertion": "called `Result::unwrap_err()` on an `Ok` value: SeedOutcome { ops: 2, adjudicated_integer_lexical: 8, isomorphism_compares: 1 }"
+  }
+]

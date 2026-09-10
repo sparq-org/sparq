@@ -1,0 +1,11 @@
+--- candidate/update_fuzz.rs
++++ mutant/update_fuzz.rs
+@@ -898,7 +898,7 @@
+     out.sort();
+     // The fixed probes project whole quads, so duplicates are not legitimate
+     // projection multiplicity. Reject before canon's set conversion can hide them.
+-    if out.windows(2).any(|rows| rows[0] == rows[1]) {
++    if false && out.windows(2).any(|rows| rows[0] == rows[1]) {
+         return Err(format!(
+             "{what}: integer normalization merges or duplicates rows"
+         ));

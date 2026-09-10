@@ -1,0 +1,11 @@
+--- candidate/update_fuzz.rs
++++ mutant/update_fuzz.rs
+@@ -836,7 +836,7 @@
+         Term::Literal(l) if l.datatype() == xsd::INTEGER => {
+             if let Ok(value) = l.value().parse::<i64>()
+                 && let Some(previous) = integers.insert(value, l.value().to_string())
+-                && previous != l.value()
++                && false && previous != l.value()
+             {
+                 return Err(format!(
+                     "integer normalization is not term-injective: {previous:?} and {:?}",

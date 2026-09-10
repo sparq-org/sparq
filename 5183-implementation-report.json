@@ -1,0 +1,169 @@
+{
+  "issue": 5183,
+  "author_model": "GPT-6 Astra xhigh",
+  "decision": "review_ready_scoped_candidate; no engine defect fixed or admission claim",
+  "head": "787aab5c9e7fb114cbe8f390f6fc572eb2a3cfd1",
+  "base": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+  "changed_paths": [
+    "crates/sparq-bench/src/update_fuzz.rs"
+  ],
+  "diff_stat": "crates/sparq-bench/src/update_fuzz.rs | 519 +++++++++++++++++++++++++++++++---\n 1 file changed, 478 insertions(+), 41 deletions(-)",
+  "design": {
+    "generator": "Canonical integers remain 0..19, including LOAD. Noncanonical values are 20 + 3*offset + style, giving 60 values (20..79), one spelling each. Both RNG draws and family selection probabilities are unchanged. Nested ground terms reuse the existing canonical generator; actual input is not normalized.",
+    "adjudication": "After unchanged strict Same/error checks, equal raw counts are required. Each parsed side independently records every integer leaf by canonical i64 value and rejects different lexical terms mapping to it, recursively through ground triple objects. Row parse loss/duplicates and unequal distinct blank-node counts fail. Full existing normalized canonical structure equality is still required; counters alone cannot accept a difference.",
+    "finite_grammar": "This correspondence is confined to this generator: BGP/graph operations and isBlank guards, plus complete-quad probes; not a semantic license for arbitrary STR/sameTerm or projection queries.",
+    "historical": "Exact original ten requests retained as a Sparq-only regression. Both public update paths and full quad probes checked every step. Index8 verifies 9 solutions /9 distinct fresh template blank nodes /4 for s2 /both 8 and 008; index9 ADD executed with exact final named graph assertion."
+  },
+  "validation": {
+    "final_tests": {
+      "passed": 20,
+      "failed": 0,
+      "ignored": 0,
+      "filtered": 0,
+      "raw": [
+        "full-suite-final.stdout",
+        "full-suite-final.stderr"
+      ],
+      "existing_windows": "40-seed actual three-way differential, 400-seed operation-family coverage, 200-seed nested-blank-node guard retained; all executed in full suite.",
+      "generated_domain": "400 actual sequences; noncanonical=22, LOAD=239, nested triple snapshots=1455; explicit parsed LOAD canonical-pool/spelling assertion."
+    },
+    "clippy": {
+      "exit": 0,
+      "scope": "unique exact-module test harness with CI-relevant 102-package feature closure; --tests -D warnings, not entire sparq-bench/workspace",
+      "raw": [
+        "clippy-tests-final.stdout",
+        "clippy-tests-final.stderr"
+      ]
+    },
+    "controls": [
+      {
+        "name": "pool-overlap",
+        "test": "generated_integer_domain_is_injective_including_load",
+        "build_exit": 0,
+        "test_exit": 101,
+        "killed": true,
+        "test_suffix_unchanged": true,
+        "source_sha256": "4f1a878c18616bbc6064126db107b3bfeddc6d43cc8043886126acddd51e03c0",
+        "binary_sha256": "3fa6a1dca9097c66383ba5ef206be0748a9f03e138f0d63538944a541cde1e13",
+        "failure_assertion": "seed=205: integer normalization is not term-injective: \"4\" and \"04\""
+      },
+      {
+        "name": "load-overlap",
+        "test": "generated_integer_domain_is_injective_including_load",
+        "build_exit": 0,
+        "test_exit": 101,
+        "killed": true,
+        "test_suffix_unchanged": true,
+        "source_sha256": "b4ce389baa8e3bdf454d717d02d538b4f00ca15ee44e8880c1f258c8d1698830",
+        "binary_sha256": "07fa94ed328e04e1d07393cdfede45b7716d537cdc5d54959e1417a79ef10770",
+        "failure_assertion": "LOAD integer must stay in the canonical pool: 24"
+      },
+      {
+        "name": "omit-term-injectivity",
+        "test": "lexical_collisions_across_contexts_and_nested_terms_fail",
+        "build_exit": 0,
+        "test_exit": 101,
+        "killed": true,
+        "test_suffix_unchanged": true,
+        "source_sha256": "8e7c8ace329e8b72e2d54325382999c1b6dd5051c5f4934f449ab753d53650ca",
+        "binary_sha256": "ada6ff4e92f7ee028adc8a361dd70cfe0842c77fcf0ea3697f41eec242323c75",
+        "failure_assertion": "different contexts must not hide a term collision"
+      },
+      {
+        "name": "omit-nested-injectivity",
+        "test": "lexical_collisions_across_contexts_and_nested_terms_fail",
+        "build_exit": 0,
+        "test_exit": 101,
+        "killed": true,
+        "test_suffix_unchanged": true,
+        "source_sha256": "17a3ae9d006ca452a0750c03156ddeeafcfd7a89926a239e049bd1e12ab7b201",
+        "binary_sha256": "3de8c0b2e806c9dd6490c2dc75bff98697323419e2613c6e2ba720b1b81e6342",
+        "failure_assertion": "different contexts must not hide a term collision"
+      },
+      {
+        "name": "omit-row-guard",
+        "test": "lexical_adjudication_preserves_rows_and_blank_node_structure",
+        "build_exit": 0,
+        "test_exit": 101,
+        "killed": true,
+        "test_suffix_unchanged": true,
+        "source_sha256": "2d0af4f6b6140bdd28e8a9d8cdf9c83e64a3264f469eef8f18e6e3a2c3621fb0",
+        "binary_sha256": "400d94fe60db245f59e9457e8a560135e00a4edb1cd027669c0d372f72b68229",
+        "failure_assertion": "equal totals cannot hide duplicate redistribution for _:x"
+      },
+      {
+        "name": "omit-normalizer-recursion",
+        "test": "nested_noncanonical_terms_remain_exact_in_sparq",
+        "build_exit": 0,
+        "test_exit": 101,
+        "killed": true,
+        "test_suffix_unchanged": true,
+        "source_sha256": "b0b8264401881defceeeeedc37de36522716a280e1db0f1dfdad094735730335",
+        "binary_sha256": "1bafe38c3e77565c6884ac722c234a24c04eaae5e12d663663f578a3e6c753be",
+        "failure_assertion": "assertion failed: matches!(compare(\"sparq\", &expected, \"reference\", &canonical, true),\n    Verdict::AdjudicatedIntegerLexical)"
+      },
+      {
+        "name": "blind-adjudication",
+        "test": "injected_marker_fails_during_actual_lexical_adjudication",
+        "build_exit": 0,
+        "test_exit": 101,
+        "killed": true,
+        "test_suffix_unchanged": true,
+        "source_sha256": "dd32a3c5bfa7935e1ccd0f69d45b207cab4d03333608917e66286e53058597f6",
+        "binary_sha256": "be2ea532787d8e76d66be19349a466e43e0c089e7002a6c3a08d7d489e9fc24c",
+        "failure_assertion": "called `Result::unwrap_err()` on an `Ok` value: SeedOutcome { ops: 2, adjudicated_integer_lexical: 8, isomorphism_compares: 1 }"
+      }
+    ],
+    "preflight": {
+      "exit": 1,
+      "sole_finding": "Bash 3 lacks mapfile in scripts/check-privacy-claims.sh:92. Other applicable delegates and guard-untested pass; no suppression or bypass. Linux CI remains required."
+    },
+    "format_diff": "rustfmt --check on touched file and git diff --check pass",
+    "provenance": [
+      "compiler-provenance.json",
+      "feature-equivalence.json",
+      "test-artifact-final.json",
+      "source-invariants.json",
+      "historical-input-proof.json"
+    ]
+  },
+  "recorded_corrections": [
+    {
+      "phase": "v1",
+      "finding": "LOAD-overlap mutant compiled and survived",
+      "correction": "Added direct parsed-LOAD pool/canonical-spelling assertions and nonzero integer coverage; preserved survivor outputs/source/binary."
+    },
+    {
+      "phase": "v2",
+      "finding": "Removing normalized duplicate-row guard survived IRI-only duplicate redistribution fixture",
+      "correction": "Added otherwise identical blank-node subject case reaching canon set conversion; final mutant now fails the duplicate-redistribution assertion."
+    },
+    {
+      "phase": "clippy",
+      "finding": "Three collapsible_if warnings",
+      "correction": "Equivalent let-chain formatting; final full suite/Clippy/controls rerun on exact committed bytes."
+    },
+    {
+      "phase": "control setup",
+      "finding": "LOAD replacement text did not match rustfmt one-line form; controller assertion stopped before compilation",
+      "correction": "Corrected exact single replacement anchor; retained initial setup record. No sample/outcome search."
+    }
+  ],
+  "proof_limits": [
+    "Not a full sparq-bench/workspace test, full release-fast Linux differential soak, wasm, full lint/doc or protected gate run. These remain normal CI obligations.",
+    "Cargo emitted a read-only global last-use database warning; no network/install or dependency changes occurred and commands succeeded.",
+    "Existing strict Same path and canonicalizer behavior/errors remain byte-identical; this is not a general multiset canonicalizer redesign.",
+    "The new generator removes cross-engine tests of coexisting equivalent-value integer lexical aliases and multiple noncanonical aliases. Explicit Sparq-only tests retain that language coverage.",
+    "Seven other historical CI failures are unresolved. Passing their numeric seeds with a changed generator would not replay the original inputs.",
+    "The independent reference and original-seed reproduction bundles remain immutable; no claim that Oxigraph became lossless or that Sparq engine semantics changed."
+  ],
+  "resources": {
+    "command_count": 39,
+    "aggregate_monitored_seconds": 300.3063349600001,
+    "maximum_command_seconds": 34.919499083,
+    "minimum_sampled_free_bytes": 4796960768,
+    "maximum_sampled_new_allocated_bytes": 260091904,
+    "all_commands_terminal": true
+  },
+  "next_step": "Actual independent Opus review of this scoped patch, then ordinary full repository CI on the proposed head. Keep #5183 open for the other seven historical inputs unless separately resolved."
+}

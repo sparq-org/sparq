@@ -1,0 +1,52 @@
+{
+  "base": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+  "base_source_sha256": "0807388f84792f011b868456269a36bf74e5e463c67dfb71d1be3ad9d35aecf7",
+  "candidate_source_sha256": "962e5f3e0558d36b48b2f0a970ed3a28b7beeb2aac0bec8e52aed72b5d3c93d3",
+  "byte_identical_helpers": {
+    "gen_subject": true,
+    "gen_predicate": true,
+    "gen_object": true,
+    "gen_bnode": true,
+    "gen_graph_iri": true,
+    "gen_slot": true,
+    "gen_quad": true,
+    "gen_insert_quad": true,
+    "push_quad": true,
+    "gen_insert_block": true,
+    "gen_delete_block": true,
+    "gen_where_op": true,
+    "gen_structural": true,
+    "gen_load": true,
+    "gen_op": true,
+    "gen_sequence": true,
+    "nquads_line": true,
+    "sparq_nquads": true,
+    "oxi_nquads": true,
+    "mentions_blank_node": true,
+    "parse_lines": true,
+    "comparable": true,
+    "oxigraph_normalized_term": true,
+    "one_sided": true,
+    "probe_line": true,
+    "sparq_probe": true,
+    "oxi_probe": true,
+    "check_seed": true,
+    "PROBES": true,
+    "allowlist": true,
+    "LOAD_sandbox": true,
+    "fixed_window_smoke": true,
+    "generator_emits_every_v2_family": true
+  },
+  "compare_initial_strict_Same_and_error_path_byte_identical": true,
+  "only_modified_tracked_file": [
+    "crates/sparq-bench/src/update_fuzz.rs"
+  ],
+  "remaining_legacy_test_40_400_200_ranges": [
+    "40",
+    "400",
+    "200",
+    "400",
+    "400"
+  ],
+  "scope_limit": "Some legacy formatting-only reflows in this same module; no external source, dependency, workflow, allowlist or generator branch-probability changes."
+}

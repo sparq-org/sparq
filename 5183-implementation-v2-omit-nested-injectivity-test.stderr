@@ -1,0 +1,9 @@
+
+thread 'update_fuzz::tests::lexical_collisions_across_contexts_and_nested_terms_fail' (4638134) panicked at /private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/implementation/controls-v2/omit-nested-injectivity/update_fuzz.rs:2075:22:
+different contexts must not hide a term collision
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+   1: core::panicking::panic_fmt
+   2: issue5183_injective_tests::update_fuzz::tests::lexical_collisions_across_contexts_and_nested_terms_fail
+   3: <issue5183_injective_tests::update_fuzz::tests::lexical_collisions_across_contexts_and_nested_terms_fail::{closure#0} as core::ops::function::FnOnce<()>>::call_once
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.

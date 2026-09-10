@@ -1,0 +1,2783 @@
+[
+  {
+    "command": "metadata",
+    "seconds": 1.9169999999901766e-06,
+    "aggregate_seconds": 2.3749999999989058e-06,
+    "free_bytes": 5085483008,
+    "target_allocated": 777408512,
+    "output_allocated": 163840,
+    "new_allocated": 163840
+  },
+  {
+    "command": "metadata",
+    "seconds": 0.11393533399999999,
+    "aggregate_seconds": 0.11393612499999999,
+    "free_bytes": 5085474816,
+    "target_allocated": 777408512,
+    "output_allocated": 172032,
+    "new_allocated": 172032
+  },
+  {
+    "command": "metadata",
+    "seconds": 1.180924417,
+    "aggregate_seconds": 1.180926709,
+    "free_bytes": 5090582528,
+    "target_allocated": 777408512,
+    "output_allocated": 172032,
+    "new_allocated": 172032
+  },
+  {
+    "command": "build-tests-1",
+    "seconds": 2.1669999999973655e-06,
+    "aggregate_seconds": 2.267986751,
+    "free_bytes": 5082902528,
+    "target_allocated": 777408512,
+    "output_allocated": 634880,
+    "new_allocated": 634880
+  },
+  {
+    "command": "build-tests-1",
+    "seconds": 0.05633987500000001,
+    "aggregate_seconds": 2.324324667,
+    "free_bytes": 5082898432,
+    "target_allocated": 777408512,
+    "output_allocated": 634880,
+    "new_allocated": 634880
+  },
+  {
+    "command": "build-tests-1",
+    "seconds": 1.108676125,
+    "aggregate_seconds": 3.376662292,
+    "free_bytes": 5082238976,
+    "target_allocated": 777412608,
+    "output_allocated": 933888,
+    "new_allocated": 937984
+  },
+  {
+    "command": "build-tests-1",
+    "seconds": 2.171838208,
+    "aggregate_seconds": 4.439823792,
+    "free_bytes": 5082157056,
+    "target_allocated": 777416704,
+    "output_allocated": 933888,
+    "new_allocated": 942080
+  },
+  {
+    "command": "build-tests-1",
+    "seconds": 3.235812417,
+    "aggregate_seconds": 5.503797458999999,
+    "free_bytes": 5082157056,
+    "target_allocated": 777416704,
+    "output_allocated": 933888,
+    "new_allocated": 942080
+  },
+  {
+    "command": "build-tests-1",
+    "seconds": 4.2965363750000005,
+    "aggregate_seconds": 6.564522959,
+    "free_bytes": 5082103808,
+    "target_allocated": 777416704,
+    "output_allocated": 933888,
+    "new_allocated": 942080
+  },
+  {
+    "command": "build-tests-1",
+    "seconds": 5.382438917,
+    "aggregate_seconds": 7.650424126000001,
+    "free_bytes": 5082513408,
+    "target_allocated": 777416704,
+    "output_allocated": 933888,
+    "new_allocated": 942080
+  },
+  {
+    "command": "build-tests-1",
+    "seconds": 6.443252125,
+    "aggregate_seconds": 8.711240584,
+    "free_bytes": 5082488832,
+    "target_allocated": 777416704,
+    "output_allocated": 933888,
+    "new_allocated": 942080
+  },
+  {
+    "command": "build-tests-1",
+    "seconds": 7.5076508330000005,
+    "aggregate_seconds": 9.775635876,
+    "free_bytes": 5082419200,
+    "target_allocated": 777416704,
+    "output_allocated": 933888,
+    "new_allocated": 942080
+  },
+  {
+    "command": "build-tests-1",
+    "seconds": 8.569098042,
+    "aggregate_seconds": 10.837083459,
+    "free_bytes": 5082398720,
+    "target_allocated": 777416704,
+    "output_allocated": 933888,
+    "new_allocated": 942080
+  },
+  {
+    "command": "build-tests-1",
+    "seconds": 9.632045667,
+    "aggregate_seconds": 11.900030959,
+    "free_bytes": 5082394624,
+    "target_allocated": 777416704,
+    "output_allocated": 933888,
+    "new_allocated": 942080
+  },
+  {
+    "command": "build-tests-1",
+    "seconds": 10.696198208,
+    "aggregate_seconds": 12.964183583999999,
+    "free_bytes": 5082337280,
+    "target_allocated": 777416704,
+    "output_allocated": 933888,
+    "new_allocated": 942080
+  },
+  {
+    "command": "build-tests-1",
+    "seconds": 11.754992292,
+    "aggregate_seconds": 14.022977584,
+    "free_bytes": 5081546752,
+    "target_allocated": 778301440,
+    "output_allocated": 933888,
+    "new_allocated": 1826816
+  },
+  {
+    "command": "build-tests-1",
+    "seconds": 12.818182042,
+    "aggregate_seconds": 15.086167333999999,
+    "free_bytes": 5081120768,
+    "target_allocated": 778682368,
+    "output_allocated": 933888,
+    "new_allocated": 2207744
+  },
+  {
+    "command": "build-tests-1",
+    "seconds": 13.885744958,
+    "aggregate_seconds": 16.153730292,
+    "free_bytes": 5080756224,
+    "target_allocated": 778956800,
+    "output_allocated": 933888,
+    "new_allocated": 2482176
+  },
+  {
+    "command": "build-tests-1",
+    "seconds": 14.959072292,
+    "aggregate_seconds": 17.227057501,
+    "free_bytes": 5080350720,
+    "target_allocated": 779354112,
+    "output_allocated": 933888,
+    "new_allocated": 2879488
+  },
+  {
+    "command": "build-tests-1",
+    "seconds": 16.0216755,
+    "aggregate_seconds": 18.289661251000002,
+    "free_bytes": 5079896064,
+    "target_allocated": 779718656,
+    "output_allocated": 933888,
+    "new_allocated": 3244032
+  },
+  {
+    "command": "build-tests-1",
+    "seconds": 17.090755458,
+    "aggregate_seconds": 19.358740667000003,
+    "free_bytes": 5079494656,
+    "target_allocated": 779988992,
+    "output_allocated": 933888,
+    "new_allocated": 3514368
+  },
+  {
+    "command": "build-tests-1",
+    "seconds": 18.154993667,
+    "aggregate_seconds": 20.422979042,
+    "free_bytes": 5079052288,
+    "target_allocated": 780374016,
+    "output_allocated": 933888,
+    "new_allocated": 3899392
+  },
+  {
+    "command": "build-tests-1",
+    "seconds": 19.218048625,
+    "aggregate_seconds": 21.486035501,
+    "free_bytes": 5078679552,
+    "target_allocated": 780447744,
+    "output_allocated": 937984,
+    "new_allocated": 3977216
+  },
+  {
+    "command": "build-tests-1",
+    "seconds": 20.274328292,
+    "aggregate_seconds": 22.542314001,
+    "free_bytes": 5078315008,
+    "target_allocated": 780447744,
+    "output_allocated": 937984,
+    "new_allocated": 3977216
+  },
+  {
+    "command": "build-tests-1",
+    "seconds": 21.335370375,
+    "aggregate_seconds": 23.603356251,
+    "free_bytes": 5078298624,
+    "target_allocated": 780447744,
+    "output_allocated": 937984,
+    "new_allocated": 3977216
+  },
+  {
+    "command": "build-tests-1",
+    "seconds": 22.397509292,
+    "aggregate_seconds": 24.665495042,
+    "free_bytes": 5078065152,
+    "target_allocated": 780447744,
+    "output_allocated": 937984,
+    "new_allocated": 3977216
+  },
+  {
+    "command": "build-tests-1",
+    "seconds": 23.445313292,
+    "aggregate_seconds": 25.713299001000003,
+    "free_bytes": 5066944512,
+    "target_allocated": 801681408,
+    "output_allocated": 937984,
+    "new_allocated": 25210880
+  },
+  {
+    "command": "full-suite-1",
+    "seconds": 2.165999999997892e-06,
+    "aggregate_seconds": 26.777671583000004,
+    "free_bytes": 5058551808,
+    "target_allocated": 787820544,
+    "output_allocated": 11333632,
+    "new_allocated": 21745664
+  },
+  {
+    "command": "full-suite-1",
+    "seconds": 0.05721375000000001,
+    "aggregate_seconds": 26.834883417000004,
+    "free_bytes": 5058547712,
+    "target_allocated": 787820544,
+    "output_allocated": 11333632,
+    "new_allocated": 21745664
+  },
+  {
+    "command": "full-suite-1",
+    "seconds": 1.1091891660000002,
+    "aggregate_seconds": 27.886862250000004,
+    "free_bytes": 5058310144,
+    "target_allocated": 787820544,
+    "output_allocated": 11350016,
+    "new_allocated": 21762048
+  },
+  {
+    "command": "full-suite-1",
+    "seconds": 2.196401125,
+    "aggregate_seconds": 28.974072542000002,
+    "free_bytes": 5058437120,
+    "target_allocated": 787820544,
+    "output_allocated": 11350016,
+    "new_allocated": 21762048
+  },
+  {
+    "command": "full-suite-1",
+    "seconds": 3.297150083,
+    "aggregate_seconds": 30.074820833000004,
+    "free_bytes": 5058179072,
+    "target_allocated": 787820544,
+    "output_allocated": 11345920,
+    "new_allocated": 21757952
+  },
+  {
+    "command": "full-suite-1",
+    "seconds": 4.374024041,
+    "aggregate_seconds": 31.151695042000004,
+    "free_bytes": 5058105344,
+    "target_allocated": 787820544,
+    "output_allocated": 11345920,
+    "new_allocated": 21757952
+  },
+  {
+    "command": "pool-overlap-build",
+    "seconds": 4.708000000006041e-06,
+    "aggregate_seconds": 32.234762,
+    "free_bytes": 5052620800,
+    "target_allocated": 787820544,
+    "output_allocated": 11464704,
+    "new_allocated": 21876736
+  },
+  {
+    "command": "pool-overlap-build",
+    "seconds": 0.11246383300000001,
+    "aggregate_seconds": 32.347221375000004,
+    "free_bytes": 5052608512,
+    "target_allocated": 787820544,
+    "output_allocated": 11468800,
+    "new_allocated": 21880832
+  },
+  {
+    "command": "pool-overlap-build",
+    "seconds": 1.171167625,
+    "aggregate_seconds": 33.405926542,
+    "free_bytes": 5052358656,
+    "target_allocated": 787820544,
+    "output_allocated": 11476992,
+    "new_allocated": 21889024
+  },
+  {
+    "command": "pool-overlap-build",
+    "seconds": 2.270336875,
+    "aggregate_seconds": 34.505096167000005,
+    "free_bytes": 5051904000,
+    "target_allocated": 787820544,
+    "output_allocated": 11476992,
+    "new_allocated": 21889024
+  },
+  {
+    "command": "pool-overlap-build",
+    "seconds": 3.644002375,
+    "aggregate_seconds": 35.878760459000006,
+    "free_bytes": 5051654144,
+    "target_allocated": 787820544,
+    "output_allocated": 11476992,
+    "new_allocated": 21889024
+  },
+  {
+    "command": "pool-overlap-build",
+    "seconds": 4.7070064170000006,
+    "aggregate_seconds": 36.941764625000005,
+    "free_bytes": 5051654144,
+    "target_allocated": 787820544,
+    "output_allocated": 11476992,
+    "new_allocated": 21889024
+  },
+  {
+    "command": "pool-overlap-build",
+    "seconds": 5.904876000000001,
+    "aggregate_seconds": 38.13963504200001,
+    "free_bytes": 5050060800,
+    "target_allocated": 787820544,
+    "output_allocated": 12959744,
+    "new_allocated": 23371776
+  },
+  {
+    "command": "pool-overlap-build",
+    "seconds": 7.039793708,
+    "aggregate_seconds": 39.274552250000006,
+    "free_bytes": 5049921536,
+    "target_allocated": 787820544,
+    "output_allocated": 13615104,
+    "new_allocated": 24027136
+  },
+  {
+    "command": "pool-overlap-build",
+    "seconds": 8.151760333,
+    "aggregate_seconds": 40.38652029200001,
+    "free_bytes": 5050527744,
+    "target_allocated": 787820544,
+    "output_allocated": 13615104,
+    "new_allocated": 24027136
+  },
+  {
+    "command": "pool-overlap-build",
+    "seconds": 9.220070708,
+    "aggregate_seconds": 41.45482866700001,
+    "free_bytes": 5038571520,
+    "target_allocated": 787820544,
+    "output_allocated": 24895488,
+    "new_allocated": 35307520
+  },
+  {
+    "command": "pool-overlap-test",
+    "seconds": 7.958000000002352e-06,
+    "aggregate_seconds": 42.515064458000005,
+    "free_bytes": 5041876992,
+    "target_allocated": 787820544,
+    "output_allocated": 21868544,
+    "new_allocated": 32280576
+  },
+  {
+    "command": "pool-overlap-test",
+    "seconds": 0.10744529200000003,
+    "aggregate_seconds": 42.622501292,
+    "free_bytes": 5041868800,
+    "target_allocated": 787820544,
+    "output_allocated": 21872640,
+    "new_allocated": 32284672
+  },
+  {
+    "command": "pool-overlap-test",
+    "seconds": 1.161256042,
+    "aggregate_seconds": 43.67631312500001,
+    "free_bytes": 5040640000,
+    "target_allocated": 787820544,
+    "output_allocated": 21884928,
+    "new_allocated": 32296960
+  },
+  {
+    "command": "load-overlap-build",
+    "seconds": 2.9170000000050544e-06,
+    "aggregate_seconds": 44.747584542000006,
+    "free_bytes": 5041389568,
+    "target_allocated": 787820544,
+    "output_allocated": 22003712,
+    "new_allocated": 32415744
+  },
+  {
+    "command": "load-overlap-build",
+    "seconds": 0.099862917,
+    "aggregate_seconds": 44.84744483400001,
+    "free_bytes": 5041180672,
+    "target_allocated": 787820544,
+    "output_allocated": 22003712,
+    "new_allocated": 32415744
+  },
+  {
+    "command": "load-overlap-build",
+    "seconds": 1.15136875,
+    "aggregate_seconds": 45.898951334,
+    "free_bytes": 5041446912,
+    "target_allocated": 787820544,
+    "output_allocated": 22011904,
+    "new_allocated": 32423936
+  },
+  {
+    "command": "load-overlap-build",
+    "seconds": 2.2372942499999997,
+    "aggregate_seconds": 46.98487691700001,
+    "free_bytes": 5037445120,
+    "target_allocated": 787820544,
+    "output_allocated": 22011904,
+    "new_allocated": 32423936
+  },
+  {
+    "command": "load-overlap-build",
+    "seconds": 3.322327209,
+    "aggregate_seconds": 48.069913334000006,
+    "free_bytes": 5037330432,
+    "target_allocated": 787820544,
+    "output_allocated": 22011904,
+    "new_allocated": 32423936
+  },
+  {
+    "command": "load-overlap-build",
+    "seconds": 4.501100917,
+    "aggregate_seconds": 49.248683292,
+    "free_bytes": 5037203456,
+    "target_allocated": 787820544,
+    "output_allocated": 22011904,
+    "new_allocated": 32423936
+  },
+  {
+    "command": "load-overlap-build",
+    "seconds": 5.565798292,
+    "aggregate_seconds": 50.313381709000005,
+    "free_bytes": 5037121536,
+    "target_allocated": 787820544,
+    "output_allocated": 22056960,
+    "new_allocated": 32468992
+  },
+  {
+    "command": "load-overlap-build",
+    "seconds": 6.738419959,
+    "aggregate_seconds": 51.48600333400001,
+    "free_bytes": 5035970560,
+    "target_allocated": 787820544,
+    "output_allocated": 23494656,
+    "new_allocated": 33906688
+  },
+  {
+    "command": "load-overlap-build",
+    "seconds": 7.814730959,
+    "aggregate_seconds": 52.562313334,
+    "free_bytes": 5035040768,
+    "target_allocated": 787820544,
+    "output_allocated": 24150016,
+    "new_allocated": 34562048
+  },
+  {
+    "command": "load-overlap-build",
+    "seconds": 8.876769417,
+    "aggregate_seconds": 53.624351667000006,
+    "free_bytes": 5034143744,
+    "target_allocated": 787820544,
+    "output_allocated": 25042944,
+    "new_allocated": 35454976
+  },
+  {
+    "command": "load-overlap-test",
+    "seconds": 4.000000000004e-06,
+    "aggregate_seconds": 54.683488417,
+    "free_bytes": 5026467840,
+    "target_allocated": 787820544,
+    "output_allocated": 32403456,
+    "new_allocated": 42815488
+  },
+  {
+    "command": "load-overlap-test",
+    "seconds": 0.058038958,
+    "aggregate_seconds": 54.741523708,
+    "free_bytes": 5027082240,
+    "target_allocated": 787820544,
+    "output_allocated": 32407552,
+    "new_allocated": 42819584
+  },
+  {
+    "command": "load-overlap-test",
+    "seconds": 1.110563333,
+    "aggregate_seconds": 55.794049292000004,
+    "free_bytes": 5026848768,
+    "target_allocated": 787820544,
+    "output_allocated": 32419840,
+    "new_allocated": 42831872
+  },
+  {
+    "command": "load-overlap-test",
+    "seconds": 2.203514333,
+    "aggregate_seconds": 56.887000167000004,
+    "free_bytes": 5026721792,
+    "target_allocated": 787820544,
+    "output_allocated": 32411648,
+    "new_allocated": 42823680
+  },
+  {
+    "command": "load-overlap-test",
+    "seconds": 3.293328375,
+    "aggregate_seconds": 57.976813750000005,
+    "free_bytes": 5026672640,
+    "target_allocated": 787820544,
+    "output_allocated": 32415744,
+    "new_allocated": 42827776
+  },
+  {
+    "command": "build-tests-2",
+    "seconds": 3.2910000000024864e-06,
+    "aggregate_seconds": 59.046206791,
+    "free_bytes": 5022269440,
+    "target_allocated": 787820544,
+    "output_allocated": 32518144,
+    "new_allocated": 42930176
+  },
+  {
+    "command": "build-tests-2",
+    "seconds": 0.2207675,
+    "aggregate_seconds": 59.266971833,
+    "free_bytes": 5022339072,
+    "target_allocated": 787820544,
+    "output_allocated": 32518144,
+    "new_allocated": 42930176
+  },
+  {
+    "command": "build-tests-2",
+    "seconds": 1.290733208,
+    "aggregate_seconds": 60.336937916000004,
+    "free_bytes": 5021622272,
+    "target_allocated": 787812352,
+    "output_allocated": 32526336,
+    "new_allocated": 42930176
+  },
+  {
+    "command": "build-tests-2",
+    "seconds": 2.460661875,
+    "aggregate_seconds": 61.506866541,
+    "free_bytes": 5021057024,
+    "target_allocated": 787812352,
+    "output_allocated": 32817152,
+    "new_allocated": 43220992
+  },
+  {
+    "command": "build-tests-2",
+    "seconds": 3.528267583,
+    "aggregate_seconds": 62.574472749,
+    "free_bytes": 5020958720,
+    "target_allocated": 787812352,
+    "output_allocated": 32817152,
+    "new_allocated": 43220992
+  },
+  {
+    "command": "build-tests-2",
+    "seconds": 4.592387415999999,
+    "aggregate_seconds": 63.638591666,
+    "free_bytes": 5021540352,
+    "target_allocated": 787812352,
+    "output_allocated": 32817152,
+    "new_allocated": 43220992
+  },
+  {
+    "command": "build-tests-2",
+    "seconds": 5.657654957999999,
+    "aggregate_seconds": 64.70385899899999,
+    "free_bytes": 5021425664,
+    "target_allocated": 787812352,
+    "output_allocated": 32817152,
+    "new_allocated": 43220992
+  },
+  {
+    "command": "build-tests-2",
+    "seconds": 6.723055,
+    "aggregate_seconds": 65.769259041,
+    "free_bytes": 5021364224,
+    "target_allocated": 787812352,
+    "output_allocated": 32817152,
+    "new_allocated": 43220992
+  },
+  {
+    "command": "build-tests-2",
+    "seconds": 7.788331374999999,
+    "aggregate_seconds": 66.83453558299999,
+    "free_bytes": 5021392896,
+    "target_allocated": 787812352,
+    "output_allocated": 32817152,
+    "new_allocated": 43220992
+  },
+  {
+    "command": "build-tests-2",
+    "seconds": 8.873302375,
+    "aggregate_seconds": 67.91950699899999,
+    "free_bytes": 5021372416,
+    "target_allocated": 787812352,
+    "output_allocated": 32817152,
+    "new_allocated": 43220992
+  },
+  {
+    "command": "build-tests-2",
+    "seconds": 9.936070333,
+    "aggregate_seconds": 68.982274999,
+    "free_bytes": 5021282304,
+    "target_allocated": 787812352,
+    "output_allocated": 32817152,
+    "new_allocated": 43220992
+  },
+  {
+    "command": "build-tests-2",
+    "seconds": 11.014485540999999,
+    "aggregate_seconds": 70.060690458,
+    "free_bytes": 5021327360,
+    "target_allocated": 787812352,
+    "output_allocated": 32817152,
+    "new_allocated": 43220992
+  },
+  {
+    "command": "build-tests-2",
+    "seconds": 12.0814675,
+    "aggregate_seconds": 71.12767320799999,
+    "free_bytes": 5021270016,
+    "target_allocated": 787812352,
+    "output_allocated": 32817152,
+    "new_allocated": 43220992
+  },
+  {
+    "command": "build-tests-2",
+    "seconds": 13.158732624999999,
+    "aggregate_seconds": 72.204937374,
+    "free_bytes": 5021253632,
+    "target_allocated": 787812352,
+    "output_allocated": 32817152,
+    "new_allocated": 43220992
+  },
+  {
+    "command": "build-tests-2",
+    "seconds": 14.297684916,
+    "aggregate_seconds": 73.343889416,
+    "free_bytes": 5019930624,
+    "target_allocated": 788697088,
+    "output_allocated": 32817152,
+    "new_allocated": 44105728
+  },
+  {
+    "command": "build-tests-2",
+    "seconds": 15.365997,
+    "aggregate_seconds": 74.41220224899999,
+    "free_bytes": 5019652096,
+    "target_allocated": 789348352,
+    "output_allocated": 32817152,
+    "new_allocated": 44756992
+  },
+  {
+    "command": "build-tests-2",
+    "seconds": 16.548475125000003,
+    "aggregate_seconds": 75.59467916599999,
+    "free_bytes": 5019045888,
+    "target_allocated": 789737472,
+    "output_allocated": 32817152,
+    "new_allocated": 45146112
+  },
+  {
+    "command": "build-tests-2",
+    "seconds": 17.610502875,
+    "aggregate_seconds": 76.656709041,
+    "free_bytes": 5018468352,
+    "target_allocated": 790118400,
+    "output_allocated": 32817152,
+    "new_allocated": 45527040
+  },
+  {
+    "command": "build-tests-2",
+    "seconds": 18.676690666000002,
+    "aggregate_seconds": 77.72289487399999,
+    "free_bytes": 5018001408,
+    "target_allocated": 790384640,
+    "output_allocated": 32817152,
+    "new_allocated": 45793280
+  },
+  {
+    "command": "build-tests-2",
+    "seconds": 19.740078458000003,
+    "aggregate_seconds": 78.786283208,
+    "free_bytes": 5018009600,
+    "target_allocated": 790671360,
+    "output_allocated": 32817152,
+    "new_allocated": 46080000
+  },
+  {
+    "command": "build-tests-2",
+    "seconds": 20.827182333,
+    "aggregate_seconds": 79.873390041,
+    "free_bytes": 5013262336,
+    "target_allocated": 790843392,
+    "output_allocated": 32817152,
+    "new_allocated": 46252032
+  },
+  {
+    "command": "full-suite-2",
+    "seconds": 3.583000000001446e-06,
+    "aggregate_seconds": 80.996364624,
+    "free_bytes": 4980482048,
+    "target_allocated": 787816448,
+    "output_allocated": 43216896,
+    "new_allocated": 53624832
+  },
+  {
+    "command": "full-suite-2",
+    "seconds": 0.12622387499999999,
+    "aggregate_seconds": 81.122585541,
+    "free_bytes": 4983332864,
+    "target_allocated": 787816448,
+    "output_allocated": 43216896,
+    "new_allocated": 53624832
+  },
+  {
+    "command": "full-suite-2",
+    "seconds": 1.1934495829999998,
+    "aggregate_seconds": 82.189812041,
+    "free_bytes": 4994056192,
+    "target_allocated": 787816448,
+    "output_allocated": 43216896,
+    "new_allocated": 53624832
+  },
+  {
+    "command": "full-suite-2",
+    "seconds": 2.24958875,
+    "aggregate_seconds": 83.245950249,
+    "free_bytes": 4994187264,
+    "target_allocated": 787816448,
+    "output_allocated": 43233280,
+    "new_allocated": 53641216
+  },
+  {
+    "command": "full-suite-2",
+    "seconds": 3.325018542,
+    "aggregate_seconds": 84.321384208,
+    "free_bytes": 4994158592,
+    "target_allocated": 787816448,
+    "output_allocated": 43229184,
+    "new_allocated": 53637120
+  },
+  {
+    "command": "full-suite-2",
+    "seconds": 4.512510750000001,
+    "aggregate_seconds": 85.508872666,
+    "free_bytes": 4993961984,
+    "target_allocated": 787816448,
+    "output_allocated": 43225088,
+    "new_allocated": 53633024
+  },
+  {
+    "command": "v2-pool-overlap-build",
+    "seconds": 2.791999999994521e-06,
+    "aggregate_seconds": 86.57550129100001,
+    "free_bytes": 4991561728,
+    "target_allocated": 787816448,
+    "output_allocated": 43343872,
+    "new_allocated": 53751808
+  },
+  {
+    "command": "v2-pool-overlap-build",
+    "seconds": 0.061439834,
+    "aggregate_seconds": 86.636938833,
+    "free_bytes": 4991508480,
+    "target_allocated": 787816448,
+    "output_allocated": 43347968,
+    "new_allocated": 53755904
+  },
+  {
+    "command": "v2-pool-overlap-build",
+    "seconds": 1.1178735419999999,
+    "aggregate_seconds": 87.6933735,
+    "free_bytes": 4991348736,
+    "target_allocated": 787816448,
+    "output_allocated": 43356160,
+    "new_allocated": 53764096
+  },
+  {
+    "command": "v2-pool-overlap-build",
+    "seconds": 2.182100625,
+    "aggregate_seconds": 88.75760095800001,
+    "free_bytes": 4991025152,
+    "target_allocated": 787816448,
+    "output_allocated": 43356160,
+    "new_allocated": 53764096
+  },
+  {
+    "command": "v2-pool-overlap-build",
+    "seconds": 3.532500084,
+    "aggregate_seconds": 90.108000375,
+    "free_bytes": 4991479808,
+    "target_allocated": 787816448,
+    "output_allocated": 43356160,
+    "new_allocated": 53764096
+  },
+  {
+    "command": "v2-pool-overlap-build",
+    "seconds": 4.593501125,
+    "aggregate_seconds": 91.16900137500001,
+    "free_bytes": 4991131648,
+    "target_allocated": 787816448,
+    "output_allocated": 43356160,
+    "new_allocated": 53764096
+  },
+  {
+    "command": "v2-pool-overlap-build",
+    "seconds": 5.7913955,
+    "aggregate_seconds": 92.36689829100001,
+    "free_bytes": 4989943808,
+    "target_allocated": 787816448,
+    "output_allocated": 44838912,
+    "new_allocated": 55246848
+  },
+  {
+    "command": "v2-pool-overlap-build",
+    "seconds": 6.925959959,
+    "aggregate_seconds": 93.50146058300001,
+    "free_bytes": 4988624896,
+    "target_allocated": 787816448,
+    "output_allocated": 45494272,
+    "new_allocated": 55902208
+  },
+  {
+    "command": "v2-pool-overlap-build",
+    "seconds": 8.027070417,
+    "aggregate_seconds": 94.60257,
+    "free_bytes": 4988919808,
+    "target_allocated": 787816448,
+    "output_allocated": 45494272,
+    "new_allocated": 55902208
+  },
+  {
+    "command": "v2-pool-overlap-build",
+    "seconds": 9.087461874999999,
+    "aggregate_seconds": 95.66296429100001,
+    "free_bytes": 4987838464,
+    "target_allocated": 787816448,
+    "output_allocated": 46387200,
+    "new_allocated": 56795136
+  },
+  {
+    "command": "v2-pool-overlap-build",
+    "seconds": 10.146861958999999,
+    "aggregate_seconds": 96.722362,
+    "free_bytes": 4988129280,
+    "target_allocated": 787816448,
+    "output_allocated": 57233408,
+    "new_allocated": 67641344
+  },
+  {
+    "command": "v2-pool-overlap-test",
+    "seconds": 2.1669999999973655e-06,
+    "aggregate_seconds": 97.80041045799999,
+    "free_bytes": 4980420608,
+    "target_allocated": 787816448,
+    "output_allocated": 53743616,
+    "new_allocated": 64151552
+  },
+  {
+    "command": "v2-pool-overlap-test",
+    "seconds": 0.056976499999999985,
+    "aggregate_seconds": 97.857385208,
+    "free_bytes": 4980408320,
+    "target_allocated": 787816448,
+    "output_allocated": 53743616,
+    "new_allocated": 64151552
+  },
+  {
+    "command": "v2-pool-overlap-test",
+    "seconds": 1.1089440419999999,
+    "aggregate_seconds": 98.90935391599999,
+    "free_bytes": 4979990528,
+    "target_allocated": 787816448,
+    "output_allocated": 53747712,
+    "new_allocated": 64155648
+  },
+  {
+    "command": "v2-load-overlap-build",
+    "seconds": 3.124999999999656e-06,
+    "aggregate_seconds": 99.976600875,
+    "free_bytes": 4979326976,
+    "target_allocated": 787816448,
+    "output_allocated": 53870592,
+    "new_allocated": 64278528
+  },
+  {
+    "command": "v2-load-overlap-build",
+    "seconds": 0.07736362499999999,
+    "aggregate_seconds": 100.053961875,
+    "free_bytes": 4980023296,
+    "target_allocated": 787816448,
+    "output_allocated": 53874688,
+    "new_allocated": 64282624
+  },
+  {
+    "command": "v2-load-overlap-build",
+    "seconds": 1.13645375,
+    "aggregate_seconds": 101.113052166,
+    "free_bytes": 4979138560,
+    "target_allocated": 787816448,
+    "output_allocated": 53882880,
+    "new_allocated": 64290816
+  },
+  {
+    "command": "v2-load-overlap-build",
+    "seconds": 2.205270041,
+    "aggregate_seconds": 102.18186858300001,
+    "free_bytes": 4978655232,
+    "target_allocated": 787816448,
+    "output_allocated": 53882880,
+    "new_allocated": 64290816
+  },
+  {
+    "command": "v2-load-overlap-build",
+    "seconds": 3.3372132079999997,
+    "aggregate_seconds": 103.313812541,
+    "free_bytes": 4978196480,
+    "target_allocated": 787816448,
+    "output_allocated": 53882880,
+    "new_allocated": 64290816
+  },
+  {
+    "command": "v2-load-overlap-build",
+    "seconds": 4.478555916,
+    "aggregate_seconds": 104.4551545,
+    "free_bytes": 4977528832,
+    "target_allocated": 787816448,
+    "output_allocated": 53882880,
+    "new_allocated": 64290816
+  },
+  {
+    "command": "v2-load-overlap-build",
+    "seconds": 5.565247291,
+    "aggregate_seconds": 105.5418485,
+    "free_bytes": 4977192960,
+    "target_allocated": 787816448,
+    "output_allocated": 54206464,
+    "new_allocated": 64614400
+  },
+  {
+    "command": "v2-load-overlap-build",
+    "seconds": 6.699395333,
+    "aggregate_seconds": 106.67599429100001,
+    "free_bytes": 4977987584,
+    "target_allocated": 787816448,
+    "output_allocated": 55365632,
+    "new_allocated": 65773568
+  },
+  {
+    "command": "v2-load-overlap-build",
+    "seconds": 7.799665125000001,
+    "aggregate_seconds": 107.776263666,
+    "free_bytes": 4976783360,
+    "target_allocated": 787816448,
+    "output_allocated": 56020992,
+    "new_allocated": 66428928
+  },
+  {
+    "command": "v2-load-overlap-build",
+    "seconds": 8.908311583,
+    "aggregate_seconds": 108.884917791,
+    "free_bytes": 4975902720,
+    "target_allocated": 787816448,
+    "output_allocated": 56020992,
+    "new_allocated": 66428928
+  },
+  {
+    "command": "v2-load-overlap-build",
+    "seconds": 9.968609208,
+    "aggregate_seconds": 109.945208041,
+    "free_bytes": 4974350336,
+    "target_allocated": 787816448,
+    "output_allocated": 56913920,
+    "new_allocated": 67321856
+  },
+  {
+    "command": "v2-load-overlap-build",
+    "seconds": 11.025990958,
+    "aggregate_seconds": 111.00258925,
+    "free_bytes": 4963069952,
+    "target_allocated": 787816448,
+    "output_allocated": 67760128,
+    "new_allocated": 78168064
+  },
+  {
+    "command": "v2-load-overlap-test",
+    "seconds": 3.209000000004014e-06,
+    "aggregate_seconds": 112.063353792,
+    "free_bytes": 4966150144,
+    "target_allocated": 787816448,
+    "output_allocated": 64270336,
+    "new_allocated": 74678272
+  },
+  {
+    "command": "v2-load-overlap-test",
+    "seconds": 0.059648250000000014,
+    "aggregate_seconds": 112.122999375,
+    "free_bytes": 4966146048,
+    "target_allocated": 787816448,
+    "output_allocated": 64270336,
+    "new_allocated": 74678272
+  },
+  {
+    "command": "v2-omit-term-injectivity-build",
+    "seconds": 3.6250000000070948e-06,
+    "aggregate_seconds": 113.176289084,
+    "free_bytes": 4967788544,
+    "target_allocated": 787816448,
+    "output_allocated": 64393216,
+    "new_allocated": 74801152
+  },
+  {
+    "command": "v2-omit-term-injectivity-build",
+    "seconds": 0.07147858400000001,
+    "aggregate_seconds": 113.24776450099999,
+    "free_bytes": 4967772160,
+    "target_allocated": 787816448,
+    "output_allocated": 64393216,
+    "new_allocated": 74801152
+  },
+  {
+    "command": "v2-omit-term-injectivity-build",
+    "seconds": 1.132242167,
+    "aggregate_seconds": 114.308528376,
+    "free_bytes": 4967526400,
+    "target_allocated": 787816448,
+    "output_allocated": 64401408,
+    "new_allocated": 74809344
+  },
+  {
+    "command": "v2-omit-term-injectivity-build",
+    "seconds": 2.2034154590000004,
+    "aggregate_seconds": 115.379703001,
+    "free_bytes": 4965150720,
+    "target_allocated": 787816448,
+    "output_allocated": 64401408,
+    "new_allocated": 74809344
+  },
+  {
+    "command": "v2-omit-term-injectivity-build",
+    "seconds": 3.2967066669999996,
+    "aggregate_seconds": 116.472993834,
+    "free_bytes": 4964859904,
+    "target_allocated": 787816448,
+    "output_allocated": 64401408,
+    "new_allocated": 74809344
+  },
+  {
+    "command": "v2-omit-term-injectivity-build",
+    "seconds": 4.4192025,
+    "aggregate_seconds": 117.595490251,
+    "free_bytes": 4965871616,
+    "target_allocated": 787816448,
+    "output_allocated": 64401408,
+    "new_allocated": 74809344
+  },
+  {
+    "command": "v2-omit-term-injectivity-build",
+    "seconds": 5.7273710840000005,
+    "aggregate_seconds": 118.903657751,
+    "free_bytes": 4964732928,
+    "target_allocated": 787816448,
+    "output_allocated": 65646592,
+    "new_allocated": 76054528
+  },
+  {
+    "command": "v2-omit-term-injectivity-build",
+    "seconds": 6.9192375,
+    "aggregate_seconds": 120.095525001,
+    "free_bytes": 4963659776,
+    "target_allocated": 787816448,
+    "output_allocated": 66535424,
+    "new_allocated": 76943360
+  },
+  {
+    "command": "v2-omit-term-injectivity-build",
+    "seconds": 7.982138042,
+    "aggregate_seconds": 121.158424459,
+    "free_bytes": 4963602432,
+    "target_allocated": 787816448,
+    "output_allocated": 66535424,
+    "new_allocated": 76943360
+  },
+  {
+    "command": "v2-omit-term-injectivity-build",
+    "seconds": 9.047376959,
+    "aggregate_seconds": 122.223663334,
+    "free_bytes": 4941082624,
+    "target_allocated": 787816448,
+    "output_allocated": 74788864,
+    "new_allocated": 85196800
+  },
+  {
+    "command": "v2-omit-term-injectivity-test",
+    "seconds": 1.0750000000003812e-05,
+    "aggregate_seconds": 123.295047626,
+    "free_bytes": 4955090944,
+    "target_allocated": 787816448,
+    "output_allocated": 74792960,
+    "new_allocated": 85200896
+  },
+  {
+    "command": "v2-omit-term-injectivity-test",
+    "seconds": 0.10946099999999997,
+    "aggregate_seconds": 123.404497584,
+    "free_bytes": 4955062272,
+    "target_allocated": 787816448,
+    "output_allocated": 74797056,
+    "new_allocated": 85204992
+  },
+  {
+    "command": "v2-omit-nested-injectivity-build",
+    "seconds": 9.333999999999731e-06,
+    "aggregate_seconds": 124.459274793,
+    "free_bytes": 4954664960,
+    "target_allocated": 787816448,
+    "output_allocated": 74919936,
+    "new_allocated": 85327872
+  },
+  {
+    "command": "v2-omit-nested-injectivity-build",
+    "seconds": 0.10281479200000002,
+    "aggregate_seconds": 124.56208021,
+    "free_bytes": 4954664960,
+    "target_allocated": 787816448,
+    "output_allocated": 74919936,
+    "new_allocated": 85327872
+  },
+  {
+    "command": "v2-omit-nested-injectivity-build",
+    "seconds": 1.15827675,
+    "aggregate_seconds": 125.617546252,
+    "free_bytes": 4954705920,
+    "target_allocated": 787816448,
+    "output_allocated": 74928128,
+    "new_allocated": 85336064
+  },
+  {
+    "command": "v2-omit-nested-injectivity-build",
+    "seconds": 2.4050707090000003,
+    "aggregate_seconds": 126.864336085,
+    "free_bytes": 4954783744,
+    "target_allocated": 787816448,
+    "output_allocated": 74928128,
+    "new_allocated": 85336064
+  },
+  {
+    "command": "v2-omit-nested-injectivity-build",
+    "seconds": 3.4680332920000003,
+    "aggregate_seconds": 127.92730041800002,
+    "free_bytes": 4954783744,
+    "target_allocated": 787816448,
+    "output_allocated": 74973184,
+    "new_allocated": 85381120
+  },
+  {
+    "command": "v2-omit-nested-injectivity-build",
+    "seconds": 4.6457257499999995,
+    "aggregate_seconds": 129.10499146,
+    "free_bytes": 4953305088,
+    "target_allocated": 787816448,
+    "output_allocated": 76685312,
+    "new_allocated": 87093248
+  },
+  {
+    "command": "v2-omit-nested-injectivity-build",
+    "seconds": 5.714445292,
+    "aggregate_seconds": 130.173710877,
+    "free_bytes": 4952539136,
+    "target_allocated": 787816448,
+    "output_allocated": 77066240,
+    "new_allocated": 87474176
+  },
+  {
+    "command": "v2-omit-nested-injectivity-build",
+    "seconds": 6.778132792,
+    "aggregate_seconds": 131.237398668,
+    "free_bytes": 4951506944,
+    "target_allocated": 787816448,
+    "output_allocated": 88805376,
+    "new_allocated": 99213312
+  },
+  {
+    "command": "v2-omit-nested-injectivity-test",
+    "seconds": 3.4169999999916767e-06,
+    "aggregate_seconds": 132.301451669,
+    "free_bytes": 4944080896,
+    "target_allocated": 787816448,
+    "output_allocated": 85319680,
+    "new_allocated": 95727616
+  },
+  {
+    "command": "v2-omit-nested-injectivity-test",
+    "seconds": 0.059392249999999994,
+    "aggregate_seconds": 132.360840794,
+    "free_bytes": 4944064512,
+    "target_allocated": 787816448,
+    "output_allocated": 85323776,
+    "new_allocated": 95731712
+  },
+  {
+    "command": "v2-omit-row-guard-build",
+    "seconds": 6.415999999995203e-06,
+    "aggregate_seconds": 133.415275293,
+    "free_bytes": 4943810560,
+    "target_allocated": 787816448,
+    "output_allocated": 85442560,
+    "new_allocated": 95850496
+  },
+  {
+    "command": "v2-omit-row-guard-build",
+    "seconds": 0.08502516599999999,
+    "aggregate_seconds": 133.500294085,
+    "free_bytes": 4943798272,
+    "target_allocated": 787816448,
+    "output_allocated": 85442560,
+    "new_allocated": 95850496
+  },
+  {
+    "command": "v2-omit-row-guard-build",
+    "seconds": 1.1446373330000001,
+    "aggregate_seconds": 134.559907668,
+    "free_bytes": 4943663104,
+    "target_allocated": 787816448,
+    "output_allocated": 85450752,
+    "new_allocated": 95858688
+  },
+  {
+    "command": "v2-omit-row-guard-build",
+    "seconds": 2.493264666,
+    "aggregate_seconds": 135.90853408499999,
+    "free_bytes": 4943572992,
+    "target_allocated": 787816448,
+    "output_allocated": 85450752,
+    "new_allocated": 95858688
+  },
+  {
+    "command": "v2-omit-row-guard-build",
+    "seconds": 3.557123791,
+    "aggregate_seconds": 136.97239421,
+    "free_bytes": 4943773696,
+    "target_allocated": 787816448,
+    "output_allocated": 85557248,
+    "new_allocated": 95965184
+  },
+  {
+    "command": "v2-omit-row-guard-build",
+    "seconds": 4.7536985409999994,
+    "aggregate_seconds": 138.168968126,
+    "free_bytes": 4942221312,
+    "target_allocated": 787816448,
+    "output_allocated": 87207936,
+    "new_allocated": 97615872
+  },
+  {
+    "command": "v2-omit-row-guard-build",
+    "seconds": 5.827088208,
+    "aggregate_seconds": 139.242357418,
+    "free_bytes": 4941299712,
+    "target_allocated": 787816448,
+    "output_allocated": 87588864,
+    "new_allocated": 97996800
+  },
+  {
+    "command": "v2-omit-row-guard-build",
+    "seconds": 6.890550583,
+    "aggregate_seconds": 140.30582021,
+    "free_bytes": 4940365824,
+    "target_allocated": 787816448,
+    "output_allocated": 99328000,
+    "new_allocated": 109735936
+  },
+  {
+    "command": "v2-omit-row-guard-test",
+    "seconds": 3.957999999998352e-06,
+    "aggregate_seconds": 141.36757346,
+    "free_bytes": 4932943872,
+    "target_allocated": 787816448,
+    "output_allocated": 95842304,
+    "new_allocated": 106250240
+  },
+  {
+    "command": "v2-omit-row-guard-test",
+    "seconds": 0.06102975000000001,
+    "aggregate_seconds": 141.42859946,
+    "free_bytes": 4932931584,
+    "target_allocated": 787816448,
+    "output_allocated": 95842304,
+    "new_allocated": 106250240
+  },
+  {
+    "command": "build-tests-3",
+    "seconds": 4.166999999999366e-06,
+    "aggregate_seconds": 142.48099633500001,
+    "free_bytes": 4945788928,
+    "target_allocated": 787816448,
+    "output_allocated": 95948800,
+    "new_allocated": 106356736
+  },
+  {
+    "command": "build-tests-3",
+    "seconds": 0.149068792,
+    "aggregate_seconds": 142.63006225200002,
+    "free_bytes": 4945502208,
+    "target_allocated": 787816448,
+    "output_allocated": 95952896,
+    "new_allocated": 106360832
+  },
+  {
+    "command": "build-tests-3",
+    "seconds": 1.2474355419999998,
+    "aggregate_seconds": 143.72842846,
+    "free_bytes": 4942573568,
+    "target_allocated": 787812352,
+    "output_allocated": 95956992,
+    "new_allocated": 106360832
+  },
+  {
+    "command": "build-tests-3",
+    "seconds": 2.3373395,
+    "aggregate_seconds": 144.81833246,
+    "free_bytes": 4945350656,
+    "target_allocated": 787812352,
+    "output_allocated": 96251904,
+    "new_allocated": 106655744
+  },
+  {
+    "command": "build-tests-3",
+    "seconds": 3.4111272919999998,
+    "aggregate_seconds": 145.89212008500002,
+    "free_bytes": 4945272832,
+    "target_allocated": 787812352,
+    "output_allocated": 96251904,
+    "new_allocated": 106655744
+  },
+  {
+    "command": "build-tests-3",
+    "seconds": 4.479393959,
+    "aggregate_seconds": 146.96038679400002,
+    "free_bytes": 4944125952,
+    "target_allocated": 787812352,
+    "output_allocated": 96251904,
+    "new_allocated": 106655744
+  },
+  {
+    "command": "build-tests-3",
+    "seconds": 5.542172875,
+    "aggregate_seconds": 148.023165794,
+    "free_bytes": 4944097280,
+    "target_allocated": 787812352,
+    "output_allocated": 96251904,
+    "new_allocated": 106655744
+  },
+  {
+    "command": "build-tests-3",
+    "seconds": 6.620473417,
+    "aggregate_seconds": 149.101470794,
+    "free_bytes": 4943736832,
+    "target_allocated": 787812352,
+    "output_allocated": 96251904,
+    "new_allocated": 106655744
+  },
+  {
+    "command": "build-tests-3",
+    "seconds": 7.952146709,
+    "aggregate_seconds": 150.43313971,
+    "free_bytes": 4943433728,
+    "target_allocated": 787812352,
+    "output_allocated": 96251904,
+    "new_allocated": 106655744
+  },
+  {
+    "command": "build-tests-3",
+    "seconds": 9.020404625,
+    "aggregate_seconds": 151.50139796000002,
+    "free_bytes": 4943355904,
+    "target_allocated": 787812352,
+    "output_allocated": 96251904,
+    "new_allocated": 106655744
+  },
+  {
+    "command": "build-tests-3",
+    "seconds": 10.102114417,
+    "aggregate_seconds": 152.58310908500002,
+    "free_bytes": 4943020032,
+    "target_allocated": 787812352,
+    "output_allocated": 96251904,
+    "new_allocated": 106655744
+  },
+  {
+    "command": "build-tests-3",
+    "seconds": 11.16697,
+    "aggregate_seconds": 153.647963127,
+    "free_bytes": 4943499264,
+    "target_allocated": 787812352,
+    "output_allocated": 96251904,
+    "new_allocated": 106655744
+  },
+  {
+    "command": "build-tests-3",
+    "seconds": 12.225837209,
+    "aggregate_seconds": 154.706830544,
+    "free_bytes": 4943462400,
+    "target_allocated": 787812352,
+    "output_allocated": 96251904,
+    "new_allocated": 106655744
+  },
+  {
+    "command": "build-tests-3",
+    "seconds": 13.292779584,
+    "aggregate_seconds": 155.773772377,
+    "free_bytes": 4943519744,
+    "target_allocated": 787812352,
+    "output_allocated": 96251904,
+    "new_allocated": 106655744
+  },
+  {
+    "command": "build-tests-3",
+    "seconds": 14.353934083999999,
+    "aggregate_seconds": 156.83492671000002,
+    "free_bytes": 4943495168,
+    "target_allocated": 787812352,
+    "output_allocated": 96251904,
+    "new_allocated": 106655744
+  },
+  {
+    "command": "build-tests-3",
+    "seconds": 15.417507334,
+    "aggregate_seconds": 157.898500044,
+    "free_bytes": 4942442496,
+    "target_allocated": 788697088,
+    "output_allocated": 96251904,
+    "new_allocated": 107540480
+  },
+  {
+    "command": "build-tests-3",
+    "seconds": 16.479934959,
+    "aggregate_seconds": 158.96092746,
+    "free_bytes": 4942020608,
+    "target_allocated": 789352448,
+    "output_allocated": 96251904,
+    "new_allocated": 108195840
+  },
+  {
+    "command": "build-tests-3",
+    "seconds": 17.547459542000002,
+    "aggregate_seconds": 160.02845246,
+    "free_bytes": 4941553664,
+    "target_allocated": 789737472,
+    "output_allocated": 96251904,
+    "new_allocated": 108580864
+  },
+  {
+    "command": "build-tests-3",
+    "seconds": 18.606780209,
+    "aggregate_seconds": 161.08777296,
+    "free_bytes": 4941135872,
+    "target_allocated": 790118400,
+    "output_allocated": 96251904,
+    "new_allocated": 108961792
+  },
+  {
+    "command": "build-tests-3",
+    "seconds": 19.690167417,
+    "aggregate_seconds": 162.17116196,
+    "free_bytes": 4940759040,
+    "target_allocated": 790384640,
+    "output_allocated": 96251904,
+    "new_allocated": 109228032
+  },
+  {
+    "command": "build-tests-3",
+    "seconds": 20.762682292,
+    "aggregate_seconds": 163.24367512700002,
+    "free_bytes": 4940288000,
+    "target_allocated": 790781952,
+    "output_allocated": 96251904,
+    "new_allocated": 109625344
+  },
+  {
+    "command": "build-tests-3",
+    "seconds": 21.831019,
+    "aggregate_seconds": 164.312011794,
+    "free_bytes": 4937236480,
+    "target_allocated": 790847488,
+    "output_allocated": 96251904,
+    "new_allocated": 109690880
+  },
+  {
+    "command": "full-suite-3",
+    "seconds": 5.042000000010649e-06,
+    "aggregate_seconds": 165.370153252,
+    "free_bytes": 4926251008,
+    "target_allocated": 787816448,
+    "output_allocated": 106655744,
+    "new_allocated": 117063680
+  },
+  {
+    "command": "full-suite-3",
+    "seconds": 0.10577054200000001,
+    "aggregate_seconds": 165.47591896,
+    "free_bytes": 4926242816,
+    "target_allocated": 787816448,
+    "output_allocated": 106655744,
+    "new_allocated": 117063680
+  },
+  {
+    "command": "full-suite-3",
+    "seconds": 1.164965208,
+    "aggregate_seconds": 166.535115044,
+    "free_bytes": 4925886464,
+    "target_allocated": 787816448,
+    "output_allocated": 106668032,
+    "new_allocated": 117075968
+  },
+  {
+    "command": "full-suite-3",
+    "seconds": 2.233639583,
+    "aggregate_seconds": 167.603789919,
+    "free_bytes": 4925857792,
+    "target_allocated": 787816448,
+    "output_allocated": 106668032,
+    "new_allocated": 117075968
+  },
+  {
+    "command": "full-suite-3",
+    "seconds": 3.327151,
+    "aggregate_seconds": 168.69730021,
+    "free_bytes": 4924690432,
+    "target_allocated": 787816448,
+    "output_allocated": 106668032,
+    "new_allocated": 117075968
+  },
+  {
+    "command": "clippy-tests",
+    "seconds": 3.915999999992703e-06,
+    "aggregate_seconds": 169.78040650199998,
+    "free_bytes": 4928700416,
+    "target_allocated": 787816448,
+    "output_allocated": 106663936,
+    "new_allocated": 117071872
+  },
+  {
+    "command": "clippy-tests",
+    "seconds": 0.09806512499999999,
+    "aggregate_seconds": 169.87846866899997,
+    "free_bytes": 4928647168,
+    "target_allocated": 787816448,
+    "output_allocated": 106668032,
+    "new_allocated": 117075968
+  },
+  {
+    "command": "clippy-tests",
+    "seconds": 1.177336333,
+    "aggregate_seconds": 170.95773970999997,
+    "free_bytes": 4928659456,
+    "target_allocated": 787816448,
+    "output_allocated": 106668032,
+    "new_allocated": 117075968
+  },
+  {
+    "command": "clippy-tests",
+    "seconds": 2.235775166,
+    "aggregate_seconds": 172.016179127,
+    "free_bytes": 4926562304,
+    "target_allocated": 789733376,
+    "output_allocated": 106672128,
+    "new_allocated": 118996992
+  },
+  {
+    "command": "clippy-tests",
+    "seconds": 3.327672208,
+    "aggregate_seconds": 173.10807654399997,
+    "free_bytes": 4923015168,
+    "target_allocated": 793112576,
+    "output_allocated": 106672128,
+    "new_allocated": 122376192
+  },
+  {
+    "command": "clippy-tests",
+    "seconds": 4.4347885830000005,
+    "aggregate_seconds": 174.21519241899998,
+    "free_bytes": 4922896384,
+    "target_allocated": 793112576,
+    "output_allocated": 106672128,
+    "new_allocated": 122376192
+  },
+  {
+    "command": "clippy-tests",
+    "seconds": 5.513327958,
+    "aggregate_seconds": 175.29373137699997,
+    "free_bytes": 4909301760,
+    "target_allocated": 806645760,
+    "output_allocated": 106672128,
+    "new_allocated": 135909376
+  },
+  {
+    "command": "clippy-tests",
+    "seconds": 6.590825875,
+    "aggregate_seconds": 176.371230127,
+    "free_bytes": 4908384256,
+    "target_allocated": 807337984,
+    "output_allocated": 106672128,
+    "new_allocated": 136601600
+  },
+  {
+    "command": "clippy-tests",
+    "seconds": 7.668849416,
+    "aggregate_seconds": 177.44925366899997,
+    "free_bytes": 4907159552,
+    "target_allocated": 808472576,
+    "output_allocated": 106672128,
+    "new_allocated": 137736192
+  },
+  {
+    "command": "clippy-tests",
+    "seconds": 8.744345375,
+    "aggregate_seconds": 178.52474895999998,
+    "free_bytes": 4905553920,
+    "target_allocated": 809807872,
+    "output_allocated": 106672128,
+    "new_allocated": 139071488
+  },
+  {
+    "command": "clippy-tests",
+    "seconds": 9.821130333,
+    "aggregate_seconds": 179.60153358499997,
+    "free_bytes": 4902924288,
+    "target_allocated": 812224512,
+    "output_allocated": 106672128,
+    "new_allocated": 141488128
+  },
+  {
+    "command": "clippy-tests",
+    "seconds": 10.897194291,
+    "aggregate_seconds": 180.67759750199997,
+    "free_bytes": 4901797888,
+    "target_allocated": 813293568,
+    "output_allocated": 106672128,
+    "new_allocated": 142557184
+  },
+  {
+    "command": "clippy-tests",
+    "seconds": 11.971424291,
+    "aggregate_seconds": 181.75182804399998,
+    "free_bytes": 4901064704,
+    "target_allocated": 813920256,
+    "output_allocated": 106672128,
+    "new_allocated": 143183872
+  },
+  {
+    "command": "clippy-tests",
+    "seconds": 13.192776166,
+    "aggregate_seconds": 182.97318070999998,
+    "free_bytes": 4899901440,
+    "target_allocated": 814968832,
+    "output_allocated": 106672128,
+    "new_allocated": 144232448
+  },
+  {
+    "command": "clippy-tests",
+    "seconds": 14.273891249999998,
+    "aggregate_seconds": 184.05429541899997,
+    "free_bytes": 4897484800,
+    "target_allocated": 817233920,
+    "output_allocated": 106672128,
+    "new_allocated": 146497536
+  },
+  {
+    "command": "clippy-tests",
+    "seconds": 15.368645458,
+    "aggregate_seconds": 185.14904954399998,
+    "free_bytes": 4892864512,
+    "target_allocated": 821600256,
+    "output_allocated": 106672128,
+    "new_allocated": 150863872
+  },
+  {
+    "command": "clippy-tests",
+    "seconds": 16.445198958000002,
+    "aggregate_seconds": 186.22560291899998,
+    "free_bytes": 4891365376,
+    "target_allocated": 822853632,
+    "output_allocated": 106672128,
+    "new_allocated": 152117248
+  },
+  {
+    "command": "clippy-tests",
+    "seconds": 17.548789041,
+    "aggregate_seconds": 187.32919237699997,
+    "free_bytes": 4888743936,
+    "target_allocated": 825466880,
+    "output_allocated": 106672128,
+    "new_allocated": 154730496
+  },
+  {
+    "command": "clippy-tests",
+    "seconds": 18.629938625,
+    "aggregate_seconds": 188.41034195999998,
+    "free_bytes": 4887928832,
+    "target_allocated": 826408960,
+    "output_allocated": 106672128,
+    "new_allocated": 155672576
+  },
+  {
+    "command": "clippy-tests",
+    "seconds": 19.711820875,
+    "aggregate_seconds": 189.49222408499998,
+    "free_bytes": 4884553728,
+    "target_allocated": 829480960,
+    "output_allocated": 106672128,
+    "new_allocated": 158744576
+  },
+  {
+    "command": "clippy-tests",
+    "seconds": 20.798756458,
+    "aggregate_seconds": 190.579159794,
+    "free_bytes": 4883931136,
+    "target_allocated": 830291968,
+    "output_allocated": 106672128,
+    "new_allocated": 159555584
+  },
+  {
+    "command": "clippy-tests",
+    "seconds": 21.881286041,
+    "aggregate_seconds": 191.66169033499997,
+    "free_bytes": 4881305600,
+    "target_allocated": 832729088,
+    "output_allocated": 106672128,
+    "new_allocated": 161992704
+  },
+  {
+    "command": "clippy-tests",
+    "seconds": 22.984181791,
+    "aggregate_seconds": 192.76458520999998,
+    "free_bytes": 4879298560,
+    "target_allocated": 834273280,
+    "output_allocated": 106672128,
+    "new_allocated": 163536896
+  },
+  {
+    "command": "clippy-tests",
+    "seconds": 24.061792458,
+    "aggregate_seconds": 193.84219633499998,
+    "free_bytes": 4878368768,
+    "target_allocated": 834859008,
+    "output_allocated": 106672128,
+    "new_allocated": 164122624
+  },
+  {
+    "command": "clippy-tests",
+    "seconds": 25.140141416000002,
+    "aggregate_seconds": 194.920573669,
+    "free_bytes": 4877660160,
+    "target_allocated": 836624384,
+    "output_allocated": 106672128,
+    "new_allocated": 165888000
+  },
+  {
+    "command": "clippy-tests",
+    "seconds": 26.232562666,
+    "aggregate_seconds": 196.01296629399997,
+    "free_bytes": 4874977280,
+    "target_allocated": 838135808,
+    "output_allocated": 106672128,
+    "new_allocated": 167399424
+  },
+  {
+    "command": "clippy-tests",
+    "seconds": 27.312299375000002,
+    "aggregate_seconds": 197.09270270999997,
+    "free_bytes": 4873220096,
+    "target_allocated": 838832128,
+    "output_allocated": 106672128,
+    "new_allocated": 168095744
+  },
+  {
+    "command": "clippy-tests",
+    "seconds": 28.385039833,
+    "aggregate_seconds": 198.16544370999998,
+    "free_bytes": 4872933376,
+    "target_allocated": 839434240,
+    "output_allocated": 106672128,
+    "new_allocated": 168697856
+  },
+  {
+    "command": "clippy-tests",
+    "seconds": 29.460562833,
+    "aggregate_seconds": 199.24096895999998,
+    "free_bytes": 4869042176,
+    "target_allocated": 843038720,
+    "output_allocated": 106672128,
+    "new_allocated": 172302336
+  },
+  {
+    "command": "clippy-tests",
+    "seconds": 30.575665041,
+    "aggregate_seconds": 200.35607145999998,
+    "free_bytes": 4868124672,
+    "target_allocated": 843882496,
+    "output_allocated": 106672128,
+    "new_allocated": 173146112
+  },
+  {
+    "command": "clippy-tests",
+    "seconds": 31.669553,
+    "aggregate_seconds": 201.44995612699998,
+    "free_bytes": 4867895296,
+    "target_allocated": 845410304,
+    "output_allocated": 106672128,
+    "new_allocated": 174673920
+  },
+  {
+    "command": "clippy-tests",
+    "seconds": 32.754488458000004,
+    "aggregate_seconds": 202.53489658499998,
+    "free_bytes": 4866228224,
+    "target_allocated": 845414400,
+    "output_allocated": 106672128,
+    "new_allocated": 174678016
+  },
+  {
+    "command": "clippy-tests",
+    "seconds": 33.846572583000004,
+    "aggregate_seconds": 203.62697608499997,
+    "free_bytes": 4866887680,
+    "target_allocated": 846352384,
+    "output_allocated": 106676224,
+    "new_allocated": 175620096
+  },
+  {
+    "command": "clippy-tests-final",
+    "seconds": 5.457999999999852e-06,
+    "aggregate_seconds": 204.69990733499998,
+    "free_bytes": 4894523392,
+    "target_allocated": 846352384,
+    "output_allocated": 106795008,
+    "new_allocated": 175738880
+  },
+  {
+    "command": "clippy-tests-final",
+    "seconds": 0.128808291,
+    "aggregate_seconds": 204.82871025199998,
+    "free_bytes": 4894507008,
+    "target_allocated": 846352384,
+    "output_allocated": 106795008,
+    "new_allocated": 175738880
+  },
+  {
+    "command": "clippy-tests-final",
+    "seconds": 1.1984181660000002,
+    "aggregate_seconds": 205.898321335,
+    "free_bytes": 4894584832,
+    "target_allocated": 846352384,
+    "output_allocated": 106795008,
+    "new_allocated": 175738880
+  },
+  {
+    "command": "clippy-tests-final",
+    "seconds": 2.283534708,
+    "aggregate_seconds": 206.98343954299997,
+    "free_bytes": 4894572544,
+    "target_allocated": 846331904,
+    "output_allocated": 106795008,
+    "new_allocated": 175718400
+  },
+  {
+    "command": "clippy-tests-final",
+    "seconds": 3.3921266660000002,
+    "aggregate_seconds": 208.092033043,
+    "free_bytes": 4894363648,
+    "target_allocated": 846331904,
+    "output_allocated": 106799104,
+    "new_allocated": 175722496
+  },
+  {
+    "command": "build-tests-final",
+    "seconds": 4.5000000000045e-06,
+    "aggregate_seconds": 209.18517091900003,
+    "free_bytes": 4893253632,
+    "target_allocated": 846344192,
+    "output_allocated": 106799104,
+    "new_allocated": 175734784
+  },
+  {
+    "command": "build-tests-final",
+    "seconds": 0.075532709,
+    "aggregate_seconds": 209.26069933600002,
+    "free_bytes": 4893224960,
+    "target_allocated": 846344192,
+    "output_allocated": 106799104,
+    "new_allocated": 175734784
+  },
+  {
+    "command": "build-tests-final",
+    "seconds": 1.141443584,
+    "aggregate_seconds": 210.32661300200002,
+    "free_bytes": 4893188096,
+    "target_allocated": 846344192,
+    "output_allocated": 106803200,
+    "new_allocated": 175738880
+  },
+  {
+    "command": "build-tests-final",
+    "seconds": 2.223262709,
+    "aggregate_seconds": 211.40842979400003,
+    "free_bytes": 4892745728,
+    "target_allocated": 846340096,
+    "output_allocated": 107098112,
+    "new_allocated": 176029696
+  },
+  {
+    "command": "build-tests-final",
+    "seconds": 3.2969887090000003,
+    "aggregate_seconds": 212.482155669,
+    "free_bytes": 4892733440,
+    "target_allocated": 846340096,
+    "output_allocated": 107098112,
+    "new_allocated": 176029696
+  },
+  {
+    "command": "build-tests-final",
+    "seconds": 4.3757652920000005,
+    "aggregate_seconds": 213.56093354400002,
+    "free_bytes": 4892663808,
+    "target_allocated": 846340096,
+    "output_allocated": 107098112,
+    "new_allocated": 176029696
+  },
+  {
+    "command": "build-tests-final",
+    "seconds": 5.459005417,
+    "aggregate_seconds": 214.64417262700002,
+    "free_bytes": 4892475392,
+    "target_allocated": 846340096,
+    "output_allocated": 107098112,
+    "new_allocated": 176029696
+  },
+  {
+    "command": "build-tests-final",
+    "seconds": 6.533472125,
+    "aggregate_seconds": 215.71864000200003,
+    "free_bytes": 4892876800,
+    "target_allocated": 846340096,
+    "output_allocated": 107098112,
+    "new_allocated": 176029696
+  },
+  {
+    "command": "build-tests-final",
+    "seconds": 7.605847584,
+    "aggregate_seconds": 216.79101466900002,
+    "free_bytes": 4892848128,
+    "target_allocated": 846340096,
+    "output_allocated": 107098112,
+    "new_allocated": 176029696
+  },
+  {
+    "command": "build-tests-final",
+    "seconds": 8.67690725,
+    "aggregate_seconds": 217.86207671100001,
+    "free_bytes": 4892672000,
+    "target_allocated": 846340096,
+    "output_allocated": 107098112,
+    "new_allocated": 176029696
+  },
+  {
+    "command": "build-tests-final",
+    "seconds": 9.756137334,
+    "aggregate_seconds": 218.941304252,
+    "free_bytes": 4892639232,
+    "target_allocated": 846340096,
+    "output_allocated": 107098112,
+    "new_allocated": 176029696
+  },
+  {
+    "command": "build-tests-final",
+    "seconds": 10.837065708999999,
+    "aggregate_seconds": 220.02223271100002,
+    "free_bytes": 4892598272,
+    "target_allocated": 846340096,
+    "output_allocated": 107098112,
+    "new_allocated": 176029696
+  },
+  {
+    "command": "build-tests-final",
+    "seconds": 11.911999583999998,
+    "aggregate_seconds": 221.09716666900002,
+    "free_bytes": 4892725248,
+    "target_allocated": 846340096,
+    "output_allocated": 107098112,
+    "new_allocated": 176029696
+  },
+  {
+    "command": "build-tests-final",
+    "seconds": 12.987303916999998,
+    "aggregate_seconds": 222.17247108600003,
+    "free_bytes": 4891865088,
+    "target_allocated": 847224832,
+    "output_allocated": 107098112,
+    "new_allocated": 176914432
+  },
+  {
+    "command": "build-tests-final",
+    "seconds": 14.063342666999999,
+    "aggregate_seconds": 223.24850975200002,
+    "free_bytes": 4891181056,
+    "target_allocated": 847880192,
+    "output_allocated": 107098112,
+    "new_allocated": 177569792
+  },
+  {
+    "command": "build-tests-final",
+    "seconds": 15.138952584,
+    "aggregate_seconds": 224.32411987700002,
+    "free_bytes": 4890759168,
+    "target_allocated": 848265216,
+    "output_allocated": 107098112,
+    "new_allocated": 177954816
+  },
+  {
+    "command": "build-tests-final",
+    "seconds": 16.223532291999998,
+    "aggregate_seconds": 225.408699377,
+    "free_bytes": 4890152960,
+    "target_allocated": 848502784,
+    "output_allocated": 107098112,
+    "new_allocated": 178192384
+  },
+  {
+    "command": "build-tests-final",
+    "seconds": 17.290837584,
+    "aggregate_seconds": 226.47600450200002,
+    "free_bytes": 4889751552,
+    "target_allocated": 848789504,
+    "output_allocated": 107098112,
+    "new_allocated": 178479104
+  },
+  {
+    "command": "build-tests-final",
+    "seconds": 18.369759792,
+    "aggregate_seconds": 227.55492700200003,
+    "free_bytes": 4889403392,
+    "target_allocated": 849133568,
+    "output_allocated": 107098112,
+    "new_allocated": 178823168
+  },
+  {
+    "command": "build-tests-final",
+    "seconds": 19.443986416999998,
+    "aggregate_seconds": 228.629153502,
+    "free_bytes": 4889092096,
+    "target_allocated": 849371136,
+    "output_allocated": 107098112,
+    "new_allocated": 179060736
+  },
+  {
+    "command": "full-suite-final",
+    "seconds": 4.165999999999892e-06,
+    "aggregate_seconds": 229.69589633500001,
+    "free_bytes": 4876341248,
+    "target_allocated": 846344192,
+    "output_allocated": 117497856,
+    "new_allocated": 186433536
+  },
+  {
+    "command": "full-suite-final",
+    "seconds": 0.08315845799999999,
+    "aggregate_seconds": 229.779051377,
+    "free_bytes": 4876320768,
+    "target_allocated": 846344192,
+    "output_allocated": 117501952,
+    "new_allocated": 186437632
+  },
+  {
+    "command": "full-suite-final",
+    "seconds": 1.1522626660000002,
+    "aggregate_seconds": 230.848156335,
+    "free_bytes": 4876095488,
+    "target_allocated": 846344192,
+    "output_allocated": 117514240,
+    "new_allocated": 186449920
+  },
+  {
+    "command": "full-suite-final",
+    "seconds": 2.3371757079999997,
+    "aggregate_seconds": 232.033069127,
+    "free_bytes": 4876083200,
+    "target_allocated": 846344192,
+    "output_allocated": 117510144,
+    "new_allocated": 186445824
+  },
+  {
+    "command": "full-suite-final",
+    "seconds": 3.4159881249999997,
+    "aggregate_seconds": 233.111881043,
+    "free_bytes": 4876070912,
+    "target_allocated": 846344192,
+    "output_allocated": 117510144,
+    "new_allocated": 186445824
+  },
+  {
+    "command": "final-pool-overlap-build",
+    "seconds": 5.58400000000292e-06,
+    "aggregate_seconds": 234.19809771,
+    "free_bytes": 4875493376,
+    "target_allocated": 846344192,
+    "output_allocated": 117624832,
+    "new_allocated": 186560512
+  },
+  {
+    "command": "final-pool-overlap-build",
+    "seconds": 0.087953834,
+    "aggregate_seconds": 234.286046418,
+    "free_bytes": 4875481088,
+    "target_allocated": 846344192,
+    "output_allocated": 117628928,
+    "new_allocated": 186564608
+  },
+  {
+    "command": "final-pool-overlap-build",
+    "seconds": 1.1507894589999998,
+    "aggregate_seconds": 235.348882335,
+    "free_bytes": 4875390976,
+    "target_allocated": 846344192,
+    "output_allocated": 117637120,
+    "new_allocated": 186572800
+  },
+  {
+    "command": "final-pool-overlap-build",
+    "seconds": 2.231760334,
+    "aggregate_seconds": 236.42985333500002,
+    "free_bytes": 4875358208,
+    "target_allocated": 846344192,
+    "output_allocated": 117637120,
+    "new_allocated": 186572800
+  },
+  {
+    "command": "final-pool-overlap-build",
+    "seconds": 3.73979575,
+    "aggregate_seconds": 237.93788833500003,
+    "free_bytes": 4875296768,
+    "target_allocated": 846344192,
+    "output_allocated": 117637120,
+    "new_allocated": 186572800
+  },
+  {
+    "command": "final-pool-overlap-build",
+    "seconds": 4.815022750000001,
+    "aggregate_seconds": 239.013116418,
+    "free_bytes": 4875169792,
+    "target_allocated": 846344192,
+    "output_allocated": 117743616,
+    "new_allocated": 186679296
+  },
+  {
+    "command": "final-pool-overlap-build",
+    "seconds": 6.033091125,
+    "aggregate_seconds": 240.23118383500002,
+    "free_bytes": 4873445376,
+    "target_allocated": 846344192,
+    "output_allocated": 119398400,
+    "new_allocated": 188334080
+  },
+  {
+    "command": "final-pool-overlap-build",
+    "seconds": 7.116678417,
+    "aggregate_seconds": 241.31477121,
+    "free_bytes": 4873035776,
+    "target_allocated": 846344192,
+    "output_allocated": 119779328,
+    "new_allocated": 188715008
+  },
+  {
+    "command": "final-pool-overlap-build",
+    "seconds": 8.198270625,
+    "aggregate_seconds": 242.39636396,
+    "free_bytes": 4872093696,
+    "target_allocated": 846344192,
+    "output_allocated": 120672256,
+    "new_allocated": 189607936
+  },
+  {
+    "command": "final-pool-overlap-test",
+    "seconds": 5.583000000003446e-06,
+    "aggregate_seconds": 243.50253883500002,
+    "free_bytes": 4864573440,
+    "target_allocated": 846344192,
+    "output_allocated": 128024576,
+    "new_allocated": 196960256
+  },
+  {
+    "command": "final-pool-overlap-test",
+    "seconds": 0.08979766700000001,
+    "aggregate_seconds": 243.59233121000003,
+    "free_bytes": 4864573440,
+    "target_allocated": 846344192,
+    "output_allocated": 128024576,
+    "new_allocated": 196960256
+  },
+  {
+    "command": "final-pool-overlap-test",
+    "seconds": 1.160100375,
+    "aggregate_seconds": 244.66263550200003,
+    "free_bytes": 4864466944,
+    "target_allocated": 846344192,
+    "output_allocated": 128036864,
+    "new_allocated": 196972544
+  },
+  {
+    "command": "final-load-overlap-build",
+    "seconds": 3.666999999984988e-06,
+    "aggregate_seconds": 245.776591002,
+    "free_bytes": 4864233472,
+    "target_allocated": 846344192,
+    "output_allocated": 128151552,
+    "new_allocated": 197087232
+  },
+  {
+    "command": "final-load-overlap-build",
+    "seconds": 0.081673417,
+    "aggregate_seconds": 245.858261002,
+    "free_bytes": 4864114688,
+    "target_allocated": 846344192,
+    "output_allocated": 128155648,
+    "new_allocated": 197091328
+  },
+  {
+    "command": "final-load-overlap-build",
+    "seconds": 1.151251459,
+    "aggregate_seconds": 246.92783962700003,
+    "free_bytes": 4864081920,
+    "target_allocated": 846344192,
+    "output_allocated": 128163840,
+    "new_allocated": 197099520
+  },
+  {
+    "command": "final-load-overlap-build",
+    "seconds": 2.2439219169999998,
+    "aggregate_seconds": 248.02051116900003,
+    "free_bytes": 4864081920,
+    "target_allocated": 846344192,
+    "output_allocated": 128163840,
+    "new_allocated": 197099520
+  },
+  {
+    "command": "final-load-overlap-build",
+    "seconds": 3.41485725,
+    "aggregate_seconds": 249.191446377,
+    "free_bytes": 4864417792,
+    "target_allocated": 846344192,
+    "output_allocated": 128163840,
+    "new_allocated": 197099520
+  },
+  {
+    "command": "final-load-overlap-build",
+    "seconds": 4.787801,
+    "aggregate_seconds": 250.56438821,
+    "free_bytes": 4862922752,
+    "target_allocated": 846344192,
+    "output_allocated": 129646592,
+    "new_allocated": 198582272
+  },
+  {
+    "command": "final-load-overlap-build",
+    "seconds": 5.880497084000001,
+    "aggregate_seconds": 251.657085085,
+    "free_bytes": 4862029824,
+    "target_allocated": 846344192,
+    "output_allocated": 130301952,
+    "new_allocated": 199237632
+  },
+  {
+    "command": "final-load-overlap-build",
+    "seconds": 6.957808459000001,
+    "aggregate_seconds": 252.734396585,
+    "free_bytes": 4861071360,
+    "target_allocated": 846344192,
+    "output_allocated": 131194880,
+    "new_allocated": 200130560
+  },
+  {
+    "command": "final-load-overlap-test",
+    "seconds": 4.2910000000034865e-06,
+    "aggregate_seconds": 253.811655168,
+    "free_bytes": 4853485568,
+    "target_allocated": 846344192,
+    "output_allocated": 138551296,
+    "new_allocated": 207486976
+  },
+  {
+    "command": "final-load-overlap-test",
+    "seconds": 0.07449920800000001,
+    "aggregate_seconds": 253.886150377,
+    "free_bytes": 4853473280,
+    "target_allocated": 846344192,
+    "output_allocated": 138551296,
+    "new_allocated": 207486976
+  },
+  {
+    "command": "final-omit-term-injectivity-build",
+    "seconds": 1.062499999998634e-05,
+    "aggregate_seconds": 254.95339421,
+    "free_bytes": 4853198848,
+    "target_allocated": 846344192,
+    "output_allocated": 138670080,
+    "new_allocated": 207605760
+  },
+  {
+    "command": "final-omit-term-injectivity-build",
+    "seconds": 0.12071799999999999,
+    "aggregate_seconds": 255.074101335,
+    "free_bytes": 4853190656,
+    "target_allocated": 846344192,
+    "output_allocated": 138674176,
+    "new_allocated": 207609856
+  },
+  {
+    "command": "final-omit-term-injectivity-build",
+    "seconds": 1.1975812080000001,
+    "aggregate_seconds": 256.15096771,
+    "free_bytes": 4853153792,
+    "target_allocated": 846344192,
+    "output_allocated": 138682368,
+    "new_allocated": 207618048
+  },
+  {
+    "command": "final-omit-term-injectivity-build",
+    "seconds": 2.54767375,
+    "aggregate_seconds": 257.501057627,
+    "free_bytes": 4853129216,
+    "target_allocated": 846344192,
+    "output_allocated": 138682368,
+    "new_allocated": 207618048
+  },
+  {
+    "command": "final-omit-term-injectivity-build",
+    "seconds": 3.625835333,
+    "aggregate_seconds": 258.579220335,
+    "free_bytes": 4853313536,
+    "target_allocated": 846344192,
+    "output_allocated": 138788864,
+    "new_allocated": 207724544
+  },
+  {
+    "command": "final-omit-term-injectivity-build",
+    "seconds": 4.85473875,
+    "aggregate_seconds": 259.808122752,
+    "free_bytes": 4851593216,
+    "target_allocated": 846344192,
+    "output_allocated": 140161024,
+    "new_allocated": 209096704
+  },
+  {
+    "command": "final-omit-term-injectivity-build",
+    "seconds": 5.961232,
+    "aggregate_seconds": 260.914616168,
+    "free_bytes": 4850905088,
+    "target_allocated": 846344192,
+    "output_allocated": 140816384,
+    "new_allocated": 209752064
+  },
+  {
+    "command": "final-omit-term-injectivity-build",
+    "seconds": 7.071182125,
+    "aggregate_seconds": 262.024566127,
+    "free_bytes": 4850765824,
+    "target_allocated": 846344192,
+    "output_allocated": 140816384,
+    "new_allocated": 209752064
+  },
+  {
+    "command": "final-omit-term-injectivity-test",
+    "seconds": 4.7499999999978115e-06,
+    "aggregate_seconds": 263.106741501,
+    "free_bytes": 4842360832,
+    "target_allocated": 846344192,
+    "output_allocated": 149073920,
+    "new_allocated": 218009600
+  },
+  {
+    "command": "final-omit-term-injectivity-test",
+    "seconds": 0.13732295800000002,
+    "aggregate_seconds": 263.244059876,
+    "free_bytes": 4842242048,
+    "target_allocated": 846344192,
+    "output_allocated": 149073920,
+    "new_allocated": 218009600
+  },
+  {
+    "command": "final-omit-nested-injectivity-build",
+    "seconds": 6.416000000009081e-06,
+    "aggregate_seconds": 264.324635418,
+    "free_bytes": 4840865792,
+    "target_allocated": 846344192,
+    "output_allocated": 149196800,
+    "new_allocated": 218132480
+  },
+  {
+    "command": "final-omit-nested-injectivity-build",
+    "seconds": 0.10159925,
+    "aggregate_seconds": 264.426228501,
+    "free_bytes": 4840837120,
+    "target_allocated": 846344192,
+    "output_allocated": 149200896,
+    "new_allocated": 218136576
+  },
+  {
+    "command": "final-omit-nested-injectivity-build",
+    "seconds": 1.169619125,
+    "aggregate_seconds": 265.494249126,
+    "free_bytes": 4840800256,
+    "target_allocated": 846344192,
+    "output_allocated": 149209088,
+    "new_allocated": 218144768
+  },
+  {
+    "command": "final-omit-nested-injectivity-build",
+    "seconds": 2.270297541,
+    "aggregate_seconds": 266.594928335,
+    "free_bytes": 4840955904,
+    "target_allocated": 846344192,
+    "output_allocated": 149209088,
+    "new_allocated": 218144768
+  },
+  {
+    "command": "final-omit-nested-injectivity-build",
+    "seconds": 3.4163325,
+    "aggregate_seconds": 267.74096346000005,
+    "free_bytes": 4840931328,
+    "target_allocated": 846344192,
+    "output_allocated": 149254144,
+    "new_allocated": 218189824
+  },
+  {
+    "command": "final-omit-nested-injectivity-build",
+    "seconds": 4.695516,
+    "aggregate_seconds": 269.02014571,
+    "free_bytes": 4839133184,
+    "target_allocated": 846344192,
+    "output_allocated": 150962176,
+    "new_allocated": 219897856
+  },
+  {
+    "command": "final-omit-nested-injectivity-build",
+    "seconds": 5.778897458,
+    "aggregate_seconds": 270.103527126,
+    "free_bytes": 4838723584,
+    "target_allocated": 846344192,
+    "output_allocated": 151343104,
+    "new_allocated": 220278784
+  },
+  {
+    "command": "final-omit-nested-injectivity-build",
+    "seconds": 6.85678575,
+    "aggregate_seconds": 271.181415585,
+    "free_bytes": 4837625856,
+    "target_allocated": 846344192,
+    "output_allocated": 163082240,
+    "new_allocated": 232017920
+  },
+  {
+    "command": "final-omit-nested-injectivity-test",
+    "seconds": 4.083000000001946e-06,
+    "aggregate_seconds": 272.261576834,
+    "free_bytes": 4830191616,
+    "target_allocated": 846344192,
+    "output_allocated": 159596544,
+    "new_allocated": 228532224
+  },
+  {
+    "command": "final-omit-nested-injectivity-test",
+    "seconds": 0.07103295800000001,
+    "aggregate_seconds": 272.332605834,
+    "free_bytes": 4830179328,
+    "target_allocated": 846344192,
+    "output_allocated": 159596544,
+    "new_allocated": 228532224
+  },
+  {
+    "command": "final-omit-row-guard-build",
+    "seconds": 1.3207999999986786e-05,
+    "aggregate_seconds": 273.39882487600005,
+    "free_bytes": 4834119680,
+    "target_allocated": 846344192,
+    "output_allocated": 159719424,
+    "new_allocated": 228655104
+  },
+  {
+    "command": "final-omit-row-guard-build",
+    "seconds": 0.11361095799999998,
+    "aggregate_seconds": 273.51242262600005,
+    "free_bytes": 4834095104,
+    "target_allocated": 846344192,
+    "output_allocated": 159723520,
+    "new_allocated": 228659200
+  },
+  {
+    "command": "final-omit-row-guard-build",
+    "seconds": 1.1822663750000002,
+    "aggregate_seconds": 274.58108054300004,
+    "free_bytes": 4833505280,
+    "target_allocated": 846344192,
+    "output_allocated": 159731712,
+    "new_allocated": 228667392
+  },
+  {
+    "command": "final-omit-row-guard-build",
+    "seconds": 2.5023637080000003,
+    "aggregate_seconds": 275.90117541800004,
+    "free_bytes": 4833505280,
+    "target_allocated": 846344192,
+    "output_allocated": 159731712,
+    "new_allocated": 228667392
+  },
+  {
+    "command": "final-omit-row-guard-build",
+    "seconds": 3.5783083330000003,
+    "aggregate_seconds": 276.977121376,
+    "free_bytes": 4833247232,
+    "target_allocated": 846344192,
+    "output_allocated": 160051200,
+    "new_allocated": 228986880
+  },
+  {
+    "command": "final-omit-row-guard-build",
+    "seconds": 4.822741208,
+    "aggregate_seconds": 278.221553001,
+    "free_bytes": 4831207424,
+    "target_allocated": 846344192,
+    "output_allocated": 161869824,
+    "new_allocated": 230805504
+  },
+  {
+    "command": "final-omit-row-guard-build",
+    "seconds": 5.896689916,
+    "aggregate_seconds": 279.29550200100005,
+    "free_bytes": 4831014912,
+    "target_allocated": 846344192,
+    "output_allocated": 161869824,
+    "new_allocated": 230805504
+  },
+  {
+    "command": "final-omit-row-guard-test",
+    "seconds": 4.834000000009109e-06,
+    "aggregate_seconds": 280.37810691800007,
+    "free_bytes": 4822487040,
+    "target_allocated": 846344192,
+    "output_allocated": 170119168,
+    "new_allocated": 239054848
+  },
+  {
+    "command": "final-omit-row-guard-test",
+    "seconds": 0.077657375,
+    "aggregate_seconds": 280.455759751,
+    "free_bytes": 4822487040,
+    "target_allocated": 846344192,
+    "output_allocated": 170119168,
+    "new_allocated": 239054848
+  },
+  {
+    "command": "final-omit-normalizer-recursion-build",
+    "seconds": 1.2541999999976516e-05,
+    "aggregate_seconds": 281.5234766260001,
+    "free_bytes": 4822441984,
+    "target_allocated": 846344192,
+    "output_allocated": 170242048,
+    "new_allocated": 239177728
+  },
+  {
+    "command": "final-omit-normalizer-recursion-build",
+    "seconds": 0.114503,
+    "aggregate_seconds": 281.6379671680001,
+    "free_bytes": 4822286336,
+    "target_allocated": 846344192,
+    "output_allocated": 170246144,
+    "new_allocated": 239181824
+  },
+  {
+    "command": "final-omit-normalizer-recursion-build",
+    "seconds": 1.196681125,
+    "aggregate_seconds": 282.72014637600006,
+    "free_bytes": 4822224896,
+    "target_allocated": 846344192,
+    "output_allocated": 170254336,
+    "new_allocated": 239190016
+  },
+  {
+    "command": "final-omit-normalizer-recursion-build",
+    "seconds": 2.640920959,
+    "aggregate_seconds": 284.1643853760001,
+    "free_bytes": 4822278144,
+    "target_allocated": 846344192,
+    "output_allocated": 170254336,
+    "new_allocated": 239190016
+  },
+  {
+    "command": "final-omit-normalizer-recursion-build",
+    "seconds": 3.716909875,
+    "aggregate_seconds": 285.24037562600006,
+    "free_bytes": 4822097920,
+    "target_allocated": 846344192,
+    "output_allocated": 170573824,
+    "new_allocated": 239509504
+  },
+  {
+    "command": "final-omit-normalizer-recursion-build",
+    "seconds": 4.969494292,
+    "aggregate_seconds": 286.49295846000007,
+    "free_bytes": 4819804160,
+    "target_allocated": 846344192,
+    "output_allocated": 172396544,
+    "new_allocated": 241332224
+  },
+  {
+    "command": "final-omit-normalizer-recursion-build",
+    "seconds": 6.058477167,
+    "aggregate_seconds": 287.5819419180001,
+    "free_bytes": 4819845120,
+    "target_allocated": 846344192,
+    "output_allocated": 172396544,
+    "new_allocated": 241332224
+  },
+  {
+    "command": "final-omit-normalizer-recursion-build",
+    "seconds": 7.24097475,
+    "aggregate_seconds": 288.7644395010001,
+    "free_bytes": 4818796544,
+    "target_allocated": 846344192,
+    "output_allocated": 173289472,
+    "new_allocated": 242225152
+  },
+  {
+    "command": "final-omit-normalizer-recursion-test",
+    "seconds": 8.415999999983326e-06,
+    "aggregate_seconds": 289.8772947510001,
+    "free_bytes": 4810985472,
+    "target_allocated": 846344192,
+    "output_allocated": 180645888,
+    "new_allocated": 249581568
+  },
+  {
+    "command": "final-omit-normalizer-recursion-test",
+    "seconds": 0.09602775,
+    "aggregate_seconds": 289.9733142920001,
+    "free_bytes": 4810977280,
+    "target_allocated": 846344192,
+    "output_allocated": 180645888,
+    "new_allocated": 249581568
+  },
+  {
+    "command": "final-blind-adjudication-build",
+    "seconds": 1.3792000000012461e-05,
+    "aggregate_seconds": 291.04064216800003,
+    "free_bytes": 4810772480,
+    "target_allocated": 846344192,
+    "output_allocated": 180768768,
+    "new_allocated": 249704448
+  },
+  {
+    "command": "final-blind-adjudication-build",
+    "seconds": 0.10117558299999999,
+    "aggregate_seconds": 291.1418043340001,
+    "free_bytes": 4810719232,
+    "target_allocated": 846344192,
+    "output_allocated": 180772864,
+    "new_allocated": 249708544
+  },
+  {
+    "command": "final-blind-adjudication-build",
+    "seconds": 1.187698333,
+    "aggregate_seconds": 292.22832808400005,
+    "free_bytes": 4810641408,
+    "target_allocated": 846344192,
+    "output_allocated": 180781056,
+    "new_allocated": 249716736
+  },
+  {
+    "command": "final-blind-adjudication-build",
+    "seconds": 2.594871208,
+    "aggregate_seconds": 293.63549970900004,
+    "free_bytes": 4810600448,
+    "target_allocated": 846344192,
+    "output_allocated": 180781056,
+    "new_allocated": 249716736
+  },
+  {
+    "command": "final-blind-adjudication-build",
+    "seconds": 3.671330333,
+    "aggregate_seconds": 294.71196008400005,
+    "free_bytes": 4810444800,
+    "target_allocated": 846344192,
+    "output_allocated": 181252096,
+    "new_allocated": 250187776
+  },
+  {
+    "command": "final-blind-adjudication-build",
+    "seconds": 4.885871583,
+    "aggregate_seconds": 295.92650008400005,
+    "free_bytes": 4808388608,
+    "target_allocated": 846344192,
+    "output_allocated": 182898688,
+    "new_allocated": 251834368
+  },
+  {
+    "command": "final-blind-adjudication-build",
+    "seconds": 5.962656292,
+    "aggregate_seconds": 297.0032847510001,
+    "free_bytes": 4808310784,
+    "target_allocated": 846344192,
+    "output_allocated": 182898688,
+    "new_allocated": 251834368
+  },
+  {
+    "command": "final-blind-adjudication-build",
+    "seconds": 7.0475516250000005,
+    "aggregate_seconds": 298.08818179300005,
+    "free_bytes": 4796960768,
+    "target_allocated": 846344192,
+    "output_allocated": 191152128,
+    "new_allocated": 260087808
+  },
+  {
+    "command": "final-blind-adjudication-test",
+    "seconds": 4.2499999999973115e-06,
+    "aggregate_seconds": 299.1716327100001,
+    "free_bytes": 4799631360,
+    "target_allocated": 846344192,
+    "output_allocated": 191152128,
+    "new_allocated": 260087808
+  },
+  {
+    "command": "final-blind-adjudication-test",
+    "seconds": 0.06856712499999999,
+    "aggregate_seconds": 299.2401960850001,
+    "free_bytes": 4799610880,
+    "target_allocated": 846344192,
+    "output_allocated": 191156224,
+    "new_allocated": 260091904
+  }
+]

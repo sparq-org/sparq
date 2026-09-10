@@ -1,0 +1,88 @@
+{
+  "toolchain": "rustc 1.97.1 (8bab26f4f 2026-07-14)\nbinary: rustc\ncommit-hash: 8bab26f4f68e0e26f0bb7960be334d5b520ea452\ncommit-date: 2026-07-14\nhost: aarch64-apple-darwin\nrelease: 1.97.1\nLLVM version: 22.1.6\n",
+  "final_actual_test_rustc_line": "     Running `CARGO=/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/cargo CARGO_BIN_NAME=issue5183-injective-tests CARGO_CRATE_NAME=issue5183_injective_tests CARGO_MANIFEST_DIR=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/implementation/harness/crates/sparq-bench CARGO_MANIFEST_PATH=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/implementation/harness/crates/sparq-bench/Cargo.toml CARGO_PKG_AUTHORS='' CARGO_PKG_DESCRIPTION='' CARGO_PKG_HOMEPAGE='' CARGO_PKG_LICENSE='' CARGO_PKG_LICENSE_FILE='' CARGO_PKG_NAME=issue5183-injective-tests CARGO_PKG_README='' CARGO_PKG_REPOSITORY='' CARGO_PKG_RUST_VERSION='' CARGO_PKG_VERSION=0.0.0 CARGO_PKG_VERSION_MAJOR=0 CARGO_PKG_VERSION_MINOR=0 CARGO_PKG_VERSION_PATCH=0 CARGO_PKG_VERSION_PRE='' CARGO_PRIMARY_PACKAGE=1 DYLD_FALLBACK_LIBRARY_PATH='/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps:/Users/jesght/lib:/usr/local/lib:/usr/lib' /Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/rustc --crate-name issue5183_injective_tests --edition=2024 src/main.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --emit=dep-info,link -C opt-level=3 -C embed-bitcode=no -C codegen-units=16 --test --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values())' -C metadata=26352942b86a5c4f -C extra-filename=-dd029590d0327647 --out-dir /private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps -C strip=debuginfo -L dependency=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps --extern oxigraph=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/liboxigraph-93faeb99561d9c18.rlib --extern oxrdf=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/liboxrdf-a953fc3282e3d853.rlib --extern serde_json=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libserde_json-dfbc1c86400a124e.rlib --extern sparq_canon=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libsparq_canon-38f96fcabe5b0906.rlib --extern sparq_core=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libsparq_core-ecad7fe38b152a30.rlib --extern sparq_engine=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libsparq_engine-1603d23b1ddfa53f.rlib`",
+  "control_rustc_argv": [
+    "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/rustc",
+    "--crate-name",
+    "issue5183_injective_tests",
+    "--edition=2024",
+    "src/main.rs",
+    "--error-format=json",
+    "--json=diagnostic-rendered-ansi,artifacts,future-incompat",
+    "--emit=dep-info,link",
+    "-C",
+    "opt-level=3",
+    "-C",
+    "embed-bitcode=no",
+    "-C",
+    "codegen-units=16",
+    "--test",
+    "--check-cfg",
+    "cfg(docsrs,test)",
+    "--check-cfg",
+    "cfg(feature, values())",
+    "-C",
+    "metadata=26352942b86a5c4f",
+    "-C",
+    "extra-filename=-dd029590d0327647",
+    "--out-dir",
+    "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps",
+    "-C",
+    "strip=debuginfo",
+    "-L",
+    "dependency=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps",
+    "--extern",
+    "oxigraph=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/liboxigraph-93faeb99561d9c18.rlib",
+    "--extern",
+    "oxrdf=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/liboxrdf-a953fc3282e3d853.rlib",
+    "--extern",
+    "serde_json=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libserde_json-dfbc1c86400a124e.rlib",
+    "--extern",
+    "sparq_canon=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libsparq_canon-38f96fcabe5b0906.rlib",
+    "--extern",
+    "sparq_core=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libsparq_core-ecad7fe38b152a30.rlib",
+    "--extern",
+    "sparq_engine=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libsparq_engine-1603d23b1ddfa53f.rlib"
+  ],
+  "direct_extern_dependencies": [
+    {
+      "name": "oxigraph",
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/liboxigraph-93faeb99561d9c18.rlib",
+      "sha256": "061387827fb57834ef2159ba30869c762136532e7d89c1fedc24225922f8ef78",
+      "bytes": 4080216
+    },
+    {
+      "name": "oxrdf",
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/liboxrdf-a953fc3282e3d853.rlib",
+      "sha256": "491471fab5133fe72a254ceba0e57440914aedf52ba79e1898df16442b65e82a",
+      "bytes": 1921384
+    },
+    {
+      "name": "serde_json",
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libserde_json-dfbc1c86400a124e.rlib",
+      "sha256": "82e04818b4316e664e56972def65b77f697798d13a0746f07fff488acadd9be0",
+      "bytes": 1952816
+    },
+    {
+      "name": "sparq_canon",
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libsparq_canon-38f96fcabe5b0906.rlib",
+      "sha256": "9c8027ebf3e494cecde1a7755289737ef36a407bd9f065f5abe489e973dc7018",
+      "bytes": 674744
+    },
+    {
+      "name": "sparq_core",
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libsparq_core-ecad7fe38b152a30.rlib",
+      "sha256": "a00b383a2789eff25fe29b9d3e7bf9ac905d7b54e7c57ba3e383f1f824fc5581",
+      "bytes": 4397856
+    },
+    {
+      "name": "sparq_engine",
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libsparq_engine-1603d23b1ddfa53f.rlib",
+      "sha256": "562fe4d414372d44511ddcc6b073d8145c8c3c7a738c7e796abaaa2908c8fa7b",
+      "bytes": 5404992
+    }
+  ],
+  "candidate_test_binary_sha256": "3454f51cadbf79293b84c9965f35373d5c83f7913dbc5a6b30e763952a26d0a1",
+  "dependency_feature_equivalence": "feature-equivalence.json: 102 shared packages equal to original executed main closure",
+  "qualification": "Exact module compiled and executed in a unique minimal standalone binary crate. Not a full sparq-bench/workspace build or the Linux CI release-fast profile. Cargo final log identifies dependencies as Fresh at this isolated worktree; no dependencies changed."
+}

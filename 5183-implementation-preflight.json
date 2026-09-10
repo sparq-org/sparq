@@ -1,0 +1,13 @@
+{
+  "argv": [
+    "python3",
+    "scripts/preflight.py",
+    "--root",
+    "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue5183",
+    "--changed-files",
+    "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/implementation/changed-files.txt",
+    "--added-lines",
+    "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/implementation/full.diff"
+  ],
+  "exit": 1
+}

@@ -1,0 +1,9 @@
+
+thread 'update_fuzz::tests::lexical_adjudication_preserves_rows_and_blank_node_structure' (4652171) panicked at /private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/implementation/controls-final/omit-row-guard/update_fuzz.rs:2092:13:
+equal totals cannot hide duplicate redistribution for _:x
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+   1: core::panicking::panic_fmt
+   2: issue5183_injective_tests::update_fuzz::tests::lexical_adjudication_preserves_rows_and_blank_node_structure
+   3: <issue5183_injective_tests::update_fuzz::tests::lexical_adjudication_preserves_rows_and_blank_node_structure::{closure#0} as core::ops::function::FnOnce<()>>::call_once
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
