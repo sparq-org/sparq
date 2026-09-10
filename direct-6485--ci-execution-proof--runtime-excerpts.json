@@ -1,0 +1,428 @@
+[
+  {
+    "log": "clippy-doc.log",
+    "lines": [
+      {
+        "line": 296,
+        "text": "2026-09-10T17:59:44.3677565Z ##[group]Run cargo clippy --workspace --all-targets -- -D warnings"
+      },
+      {
+        "line": 1347,
+        "text": "2026-09-10T18:02:04.8125728Z     Finished `dev` profile [unoptimized + debuginfo] target(s) in 2m 20s"
+      },
+      {
+        "line": 1348,
+        "text": "2026-09-10T18:02:05.1136860Z ##[group]Run cargo clippy --workspace --all-targets --all-features -- -D warnings"
+      },
+      {
+        "line": 1515,
+        "text": "2026-09-10T18:03:36.6669843Z     Finished `dev` profile [unoptimized + debuginfo] target(s) in 1m 31s"
+      },
+      {
+        "line": 1516,
+        "text": "2026-09-10T18:03:36.9927769Z ##[group]Run cargo doc --workspace --no-deps"
+      },
+      {
+        "line": 1527,
+        "text": "2026-09-10T18:03:36.9967370Z   RUSTDOCFLAGS: -D warnings"
+      },
+      {
+        "line": 1685,
+        "text": "2026-09-10T18:04:12.1953641Z  Documenting sparq-core v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-core)"
+      },
+      {
+        "line": 1700,
+        "text": "2026-09-10T18:04:16.3555044Z     Finished `dev` profile [unoptimized + debuginfo] target(s) in 39.32s"
+      },
+      {
+        "line": 1702,
+        "text": "2026-09-10T18:04:16.4008774Z ##[group]Run cargo doc --workspace --no-deps --all-features"
+      },
+      {
+        "line": 1713,
+        "text": "2026-09-10T18:04:16.4047937Z   RUSTDOCFLAGS: -D warnings"
+      },
+      {
+        "line": 1847,
+        "text": "2026-09-10T18:05:04.3170988Z  Documenting sparq-core v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-core)"
+      },
+      {
+        "line": 1851,
+        "text": "2026-09-10T18:05:07.5991473Z     Finished `dev` profile [unoptimized + debuginfo] target(s) in 51.16s"
+      },
+      {
+        "line": 1853,
+        "text": "2026-09-10T18:05:07.6481150Z ##[group]Run cargo clippy --manifest-path bench/dict/Cargo.toml --all-targets -- -D warnings"
+      },
+      {
+        "line": 1923,
+        "text": "2026-09-10T18:05:13.2152941Z     Finished `dev` profile [unoptimized + debuginfo] target(s) in 5.51s"
+      },
+      {
+        "line": 1956,
+        "text": "2026-09-10T18:05:19.5268492Z     Finished `dev` profile [unoptimized + debuginfo] target(s) in 6.27s"
+      }
+    ]
+  },
+  {
+    "log": "docs-quick.log",
+    "lines": [
+      {
+        "line": 591,
+        "text": "2026-09-10T17:58:54.7541370Z ##[group]Run bash scripts/check-privacy-claims.sh"
+      },
+      {
+        "line": 592,
+        "text": "2026-09-10T17:58:54.7541809Z bash scripts/check-privacy-claims.sh"
+      },
+      {
+        "line": 602,
+        "text": "2026-09-10T17:58:57.1826362Z check-privacy-claims: OK \u2014 scanned 784 file(s); no unqualified ZK/MPC privacy/soundness claim."
+      },
+      {
+        "line": 603,
+        "text": "2026-09-10T17:58:57.1872057Z ##[group]Run bash scripts/tests/test_privacy_claims.sh"
+      },
+      {
+        "line": 604,
+        "text": "2026-09-10T17:58:57.1872832Z bash scripts/tests/test_privacy_claims.sh"
+      },
+      {
+        "line": 615,
+        "text": "2026-09-10T17:58:57.5179501Z test_privacy_claims: 32 passed, 0 failed."
+      },
+      {
+        "line": 616,
+        "text": "2026-09-10T17:58:57.5180931Z test_privacy_claims: OK \u2014 both-direction soundness-claim coverage holds."
+      }
+    ]
+  },
+  {
+    "log": "wasm-equality.log",
+    "lines": [
+      {
+        "line": 1865,
+        "text": "2026-09-10T17:59:09.1524112Z   CARGO_TERM_COLOR: always"
+      },
+      {
+        "line": 1866,
+        "text": "2026-09-10T17:59:09.1524361Z   RUST_BACKTRACE: 1"
+      },
+      {
+        "line": 1867,
+        "text": "2026-09-10T17:59:09.1524671Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.14/x64"
+      },
+      {
+        "line": 1868,
+        "text": "2026-09-10T17:59:09.1525140Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib/pkgconfig"
+      },
+      {
+        "line": 1869,
+        "text": "2026-09-10T17:59:09.1525581Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64"
+      },
+      {
+        "line": 1870,
+        "text": "2026-09-10T17:59:09.1525974Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64"
+      },
+      {
+        "line": 1871,
+        "text": "2026-09-10T17:59:09.1526365Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64"
+      },
+      {
+        "line": 1872,
+        "text": "2026-09-10T17:59:09.1526768Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib"
+      },
+      {
+        "line": 1873,
+        "text": "2026-09-10T17:59:09.1527117Z   CARGO_HOME: /home/runner/.cargo"
+      },
+      {
+        "line": 1874,
+        "text": "2026-09-10T17:59:09.1527382Z   CARGO_INCREMENTAL: 0"
+      },
+      {
+        "line": 1875,
+        "text": "2026-09-10T17:59:09.1527617Z   CACHE_ON_FAILURE: false"
+      },
+      {
+        "line": 1876,
+        "text": "2026-09-10T17:59:09.1527846Z ##[endgroup]"
+      },
+      {
+        "line": 1877,
+        "text": "2026-09-10T17:59:09.8557875Z [leg2] feature-OFF wasm DIFFERS from the base tree: base=1562729 head=1562707 bytes, size delta=-22 (-0.001%). Comparison is byte-for-byte, so same-length content changes are also detected."
+      },
+      {
+        "line": 1878,
+        "text": "2026-09-10T17:59:09.8561587Z [leg2] OK \u2014 change DECLARED (mechanism V2): the head tree added bench/feature-off-declarations/['6486.json'] not present in the base tree. The feature-OFF byte change is intentional. Its SIZE is governed by the wasm_bundle_bytes floor ratchet (+/-2% band) in bench.yml, unchanged by this gate."
+      },
+      {
+        "line": 1879,
+        "text": "2026-09-10T17:59:09.8733230Z ##[group]Run python3 scripts/tests/test_vectorized_feature_off.py"
+      },
+      {
+        "line": 1880,
+        "text": "2026-09-10T17:59:09.8733729Z python3 scripts/tests/test_vectorized_feature_off.py"
+      },
+      {
+        "line": 1881,
+        "text": "2026-09-10T17:59:09.8771337Z shell: /usr/bin/bash -e {0}"
+      },
+      {
+        "line": 1882,
+        "text": "2026-09-10T17:59:09.8771608Z env:"
+      },
+      {
+        "line": 1883,
+        "text": "2026-09-10T17:59:09.8771813Z   CARGO_TERM_COLOR: always"
+      }
+    ]
+  },
+  {
+    "log": "bench.log",
+    "lines": [
+      {
+        "line": 872,
+        "text": "2026-09-10T18:02:48.9093016Z wrote bench-results.json (--deterministic-only):"
+      },
+      {
+        "line": 873,
+        "text": "2026-09-10T18:02:48.9102847Z ["
+      },
+      {
+        "line": 874,
+        "text": "2026-09-10T18:02:48.9103156Z   {"
+      },
+      {
+        "line": 875,
+        "text": "2026-09-10T18:02:48.9103509Z     \"name\": \"store_bytes_per_triple\","
+      },
+      {
+        "line": 876,
+        "text": "2026-09-10T18:02:48.9103896Z     \"unit\": \"bytes\","
+      },
+      {
+        "line": 877,
+        "text": "2026-09-10T18:02:48.9104305Z     \"value\": 88.0"
+      },
+      {
+        "line": 878,
+        "text": "2026-09-10T18:02:48.9104715Z   },"
+      },
+      {
+        "line": 879,
+        "text": "2026-09-10T18:02:48.9105008Z   {"
+      },
+      {
+        "line": 880,
+        "text": "2026-09-10T18:02:48.9105324Z     \"name\": \"dict_bytes_per_term\","
+      },
+      {
+        "line": 881,
+        "text": "2026-09-10T18:02:48.9105753Z     \"unit\": \"bytes\","
+      },
+      {
+        "line": 882,
+        "text": "2026-09-10T18:02:48.9106140Z     \"value\": 53.0"
+      },
+      {
+        "line": 883,
+        "text": "2026-09-10T18:02:48.9106590Z   },"
+      },
+      {
+        "line": 884,
+        "text": "2026-09-10T18:02:48.9106976Z   {"
+      },
+      {
+        "line": 885,
+        "text": "2026-09-10T18:02:48.9107444Z     \"name\": \"comp_store_bytes_per_triple\","
+      },
+      {
+        "line": 886,
+        "text": "2026-09-10T18:02:48.9107908Z     \"unit\": \"bytes\","
+      },
+      {
+        "line": 887,
+        "text": "2026-09-10T18:02:48.9108250Z     \"value\": 44.0"
+      },
+      {
+        "line": 888,
+        "text": "2026-09-10T18:02:48.9108562Z   },"
+      },
+      {
+        "line": 889,
+        "text": "2026-09-10T18:02:48.9109109Z   {"
+      },
+      {
+        "line": 890,
+        "text": "2026-09-10T18:02:48.9109364Z     \"name\": \"store_bytes_per_triple_small\","
+      },
+      {
+        "line": 891,
+        "text": "2026-09-10T18:02:48.9109767Z     \"unit\": \"bytes\","
+      },
+      {
+        "line": 892,
+        "text": "2026-09-10T18:02:48.9110123Z     \"value\": 88.0"
+      },
+      {
+        "line": 893,
+        "text": "2026-09-10T18:02:48.9110484Z   },"
+      },
+      {
+        "line": 894,
+        "text": "2026-09-10T18:02:48.9110792Z   {"
+      },
+      {
+        "line": 895,
+        "text": "2026-09-10T18:02:48.9111117Z     \"name\": \"wasm_bundle_bytes\","
+      },
+      {
+        "line": 896,
+        "text": "2026-09-10T18:02:48.9111547Z     \"unit\": \"bytes\","
+      },
+      {
+        "line": 897,
+        "text": "2026-09-10T18:02:48.9111896Z     \"value\": 1562707.0"
+      },
+      {
+        "line": 898,
+        "text": "2026-09-10T18:02:48.9112325Z   }"
+      },
+      {
+        "line": 899,
+        "text": "2026-09-10T18:02:48.9112664Z ]"
+      },
+      {
+        "line": 900,
+        "text": "2026-09-10T18:02:48.9375632Z ##[group]Run python3 scripts/perf-gate.py --self-test"
+      },
+      {
+        "line": 901,
+        "text": "2026-09-10T18:02:48.9376084Z python3 scripts/perf-gate.py --self-test"
+      },
+      {
+        "line": 902,
+        "text": "2026-09-10T18:02:48.9411237Z shell: /usr/bin/bash -e {0}"
+      }
+    ]
+  },
+  {
+    "log": "bench.log",
+    "lines": [
+      {
+        "line": 949,
+        "text": "2026-09-10T18:02:50.1312808Z   CARGO_INCREMENTAL: 0"
+      },
+      {
+        "line": 950,
+        "text": "2026-09-10T18:02:50.1313031Z   CARGO_TERM_COLOR: always"
+      },
+      {
+        "line": 951,
+        "text": "2026-09-10T18:02:50.1313262Z   CACHE_ON_FAILURE: false"
+      },
+      {
+        "line": 952,
+        "text": "2026-09-10T18:02:50.1313484Z   PERF_GATE_ALLOW: "
+      },
+      {
+        "line": 953,
+        "text": "2026-09-10T18:02:50.1313689Z ##[endgroup]"
+      },
+      {
+        "line": 954,
+        "text": "2026-09-10T18:02:50.1668024Z perf-gate: best-of-5 re-measure ARMED for TIMING metric(s) ['parse_ns_per_byte'] (cmd: 'bash scripts/ci-bench.sh --parse-only /tmp/perf-remeasure.json >/dev/null 2>&1 && cat /tmp/perf-remeasure.json')"
+      },
+      {
+        "line": 955,
+        "text": "2026-09-10T18:02:50.1669942Z perf-gate: metric comparison against best-ever FLOOR (smaller is better; DETERMINISTIC byte counts hard-gated, TIMING metrics advisory/non-blocking):"
+      },
+      {
+        "line": 956,
+        "text": "2026-09-10T18:02:50.1671424Z   - comp_store_bytes_per_triple: floor=56 cur=44 -> IMPROVEMENT delta -21.43% (below floor) [ratchet] \u2014 floor may ratchet DOWN"
+      },
+      {
+        "line": 957,
+        "text": "2026-09-10T18:02:50.1672612Z   - dict_bytes_per_term: floor=53 cur=53 -> OK delta +0.00% (<= +2% above floor) [ratchet]"
+      },
+      {
+        "line": 958,
+        "text": "2026-09-10T18:02:50.1673170Z   - fts_bytes_per_doc: SKIP (not in current run)"
+      },
+      {
+        "line": 959,
+        "text": "2026-09-10T18:02:50.1673614Z   - geo_compliance_deficit: SKIP (not in current run)"
+      },
+      {
+        "line": 960,
+        "text": "2026-09-10T18:02:50.1674032Z   - parse_ns_per_byte: SKIP (not in current run)"
+      },
+      {
+        "line": 961,
+        "text": "2026-09-10T18:02:50.1674829Z   - store_bytes_per_triple: floor=92 cur=88 -> IMPROVEMENT delta -4.35% (below floor) [ratchet] \u2014 floor may ratchet DOWN"
+      },
+      {
+        "line": 962,
+        "text": "2026-09-10T18:02:50.1675673Z   - store_bytes_per_triple_small: floor=88 cur=88 -> OK delta +0.00% (<= +2% above floor) [ratchet]"
+      },
+      {
+        "line": 963,
+        "text": "2026-09-10T18:02:50.1676325Z   - vectors_diskann_recall_at10: SKIP (not in current run)"
+      },
+      {
+        "line": 964,
+        "text": "2026-09-10T18:02:50.1676727Z   - vectors_pq_recall_at10: SKIP (not in current run)"
+      },
+      {
+        "line": 965,
+        "text": "2026-09-10T18:02:50.1677495Z   - wasm_bundle_bytes: floor=1.58759e+06 cur=1.56271e+06 -> IMPROVEMENT delta -1.57% (below floor) [ratchet] \u2014 floor may ratchet DOWN"
+      },
+      {
+        "line": 966,
+        "text": "2026-09-10T18:02:50.1678037Z "
+      },
+      {
+        "line": 967,
+        "text": "2026-09-10T18:02:50.1678539Z perf-gate: PASS \u2014 no perf regression above the best-ever floor (deterministic metrics strict; timing metrics advisory)."
+      },
+      {
+        "line": 968,
+        "text": "2026-09-10T18:02:50.1764126Z ##[group]Run set -euo pipefail"
+      }
+    ]
+  },
+  {
+    "log": "archive.log",
+    "lines": [
+      {
+        "line": 2298,
+        "text": "2026-09-10T18:10:56.5057974Z    Doc-tests sparq_core"
+      },
+      {
+        "line": 2299,
+        "text": "2026-09-10T18:10:56.6260197Z "
+      },
+      {
+        "line": 2300,
+        "text": "2026-09-10T18:10:56.6260950Z running 1 test"
+      },
+      {
+        "line": 2301,
+        "text": "2026-09-10T18:10:56.7498909Z test crates/sparq-core/src/lib.rs - (line 18) ... ok"
+      },
+      {
+        "line": 2302,
+        "text": "2026-09-10T18:10:56.7499375Z "
+      },
+      {
+        "line": 2303,
+        "text": "2026-09-10T18:10:56.7499771Z test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s"
+      },
+      {
+        "line": 2304,
+        "text": "2026-09-10T18:10:56.7503888Z "
+      }
+    ]
+  }
+]

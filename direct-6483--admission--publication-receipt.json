@@ -1,0 +1,49 @@
+{
+  "started_at": "2026-09-10T19:03:30.983555+00:00",
+  "budget": {
+    "exit_code": 0,
+    "stderr": ""
+  },
+  "registry": {
+    "exit_code": 0,
+    "stderr": ""
+  },
+  "existing-prs": {
+    "exit_code": 0,
+    "stderr": ""
+  },
+  "existing-refs": {
+    "exit_code": 0,
+    "stderr": ""
+  },
+  "issue": {
+    "exit_code": 0,
+    "stderr": ""
+  },
+  "main": {
+    "exit_code": 0,
+    "stderr": ""
+  },
+  "push_started_at": "2026-09-10T19:03:34.555537+00:00",
+  "push": {
+    "exit_code": 0,
+    "stdout": "",
+    "stderr": "remote: \nremote: Create a pull request for 'codex/update-comparator-raw-duplicates' on GitHub by visiting:        \nremote:      https://github.com/sparq-org/sparq/pull/new/codex/update-comparator-raw-duplicates        \nremote: \nremote: GitHub found 59 vulnerabilities on sparq-org/sparq's default branch (39 high, 20 moderate). To find out more, visit:        \nremote:      https://github.com/sparq-org/sparq/security/dependabot        \nremote: \nTo https://github.com/sparq-org/sparq.git\n * [new branch]          0b4554b924a80432cc1b572bd19f8e58cdbfb4e6 -> codex/update-comparator-raw-duplicates\n"
+  },
+  "published-head": {
+    "exit_code": 0,
+    "stderr": ""
+  },
+  "immediate-issue": {
+    "exit_code": 0,
+    "stderr": ""
+  },
+  "create-pr": {
+    "exit_code": 0,
+    "stderr": ""
+  },
+  "number": 6487,
+  "url": "https://github.com/sparq-org/sparq/pull/6487",
+  "head": "0b4554b924a80432cc1b572bd19f8e58cdbfb4e6",
+  "completed_at": "2026-09-10T19:03:40.321170+00:00"
+}

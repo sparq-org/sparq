@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-10T18:56:10.270304+00:00",
+  "updated_at": "2026-09-10T19:09:20.869441+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -72,7 +72,7 @@
     "agent": "/root/postmerge_ci",
     "model": "gpt-6-astra",
     "effort": "xhigh",
-    "phase": "All current workflows and protectedgate succeeded; existingAstra will collect actualexecution proof after6483freeze before normalqueue.",
+    "phase": "Exact9ac enqueued normally; position1 awaits protected merge-group202879e9 checks. ActualCI execution proof/root fullmerge-tree binding verified.",
     "execution_limits": {
       "max_total_seconds": 600,
       "max_new_allocated_bytes": 268435456,
@@ -85,16 +85,16 @@
       "extra": "At most one matching recorded mmap/dict-spill candidate adaptation; no dependency rebuild.",
       "checks": "Scoped Clippy/touched formatting/diff if warm; CI authority for broad matrix."
     },
-    "state": "pr6486_all_CI_success_actual_execution_proof_pending",
+    "state": "pr6486_queued_awaiting_merge_group",
     "directory": "direct-6485/implementation",
     "admission": "direct-6485/admission/corrected-controls-admission.json",
     "production_edit_authorized": false,
     "prior_baseline": "direct-3113/delete-memo-baseline",
     "next_actions": [
-      "Wait current6486 required CI/matrix; collect actualmemo test/current feature execution proof before queue.",
-      "One aggregate-only recovery after required peers green and fresh head/budget/checks; no current evidence cancellations.",
-      "Collect6483 implementation, verify source/evidence, actual Opus final review before any publication.",
-      "Existing /root/postmerge_ci running6483. Reuse; no duplicate agent/review/test launches. Completed Opus69637 must not be polled or relaunched."
+      "Watch6486 protectedMG202879e9: CI34518035372, matrix34518035145, gate34518034956; preserve liveevidence. Aftermerge verifyreviewedsource/mainCI before comment+close6485;3113staysopen.",
+      "Watch6487 exact0b4554b CI34518125709/matrix34518125641/gate34518125361/Copilot34518133158. Resolve materialreviews/failures; actualnew26test/Linuxprivacy proof before normalqueue. No issue6483closureuntilmain+postproof; track postmerge differentialUPDATE health.",
+      "Collect existingAstra6479 source-only readiness before any witnessexecution or productionedit. No duplicateagents or repeated frozenruns.",
+      "Never replay6486source/aggregate recovery, enqueue6486, publish6483 or eitherCopilot request. All rootexecsessions terminal/collected; no liveOpus."
     ],
     "controls": {
       "directory": "direct-6485/memo-controls",
@@ -126,7 +126,7 @@
       "root_disposition": "direct-6485/admission/opus-memo-design-root-disposition.json",
       "output_sha256": "c619dd1d92a198c46a7e2b26ca8ab34e08de5612bd6db3920b451263d5891886"
     },
-    "agent_current_task": "6486 bounded read-only current CI execution proof",
+    "agent_current_task": "6479 source-only readiness; no builds/production edits",
     "implementation_admission": "direct-6485/admission/implementation-admission.json",
     "implementation_readiness": {
       "directory": "direct-6485/implementation-readiness",
@@ -214,7 +214,14 @@
         "direct-6485/admission/matrix-jobs1844.json"
       ],
       "proof_agent": "/root/postmerge_ci",
-      "proof_directory": "direct-6485/ci-execution-proof"
+      "proof_directory": "direct-6485/ci-execution-proof",
+      "proof": {
+        "directory": "direct-6485/ci-execution-proof",
+        "manifest_sha256": "8709a473980d0a3a863c9cb2f1c06782a629574438f9a74b85cfc1eb8fde5dcd",
+        "files": 57,
+        "root_verification": "direct-6485/admission/ci6486-root-verification.json",
+        "tree_binding": "FullCIcheckout613cad4d tree15664509 equalsreviewed9ac tree; rootverifiedexactfullSHAafteragentabbreviatedidentifier404, no exhaustion."
+      }
     },
     "copilot": {
       "state": "COMMENTED_APPROVAL_RECOMMENDED",
@@ -247,7 +254,18 @@
     "enqueue": {
       "script": "direct-6485/admission/enqueue6486.py",
       "query": "direct-6485/admission/target6486-query.json",
-      "state": "Prepared/parsed, NOTexecuted; requires ci6486-root-verification.json and fresh exacthead/main/reviews/protections/gate."
+      "state": "33702 completed/collected; normalprotectedqueue accepted position1; no replay",
+      "receipt": "direct-6485/admission/enqueue6486-receipt.json"
+    },
+    "merge_group": {
+      "head": "202879e9b4104f4b5ae8d9e8e5206eb2ff454b7f",
+      "position": 1,
+      "state": "AWAITING_CHECKS",
+      "CI": 34518035372,
+      "feature_matrix": 34518035145,
+      "gate": 34518034956,
+      "snapshot": "monitor-20260910-1908/mg6486-runs.json",
+      "policy": "Preserve all live runs; no cancellations/blind reruns. Fresh result required before mainproof/issueclosure."
     }
   },
   "prs": {
@@ -722,7 +740,7 @@
       "issue5183_closed": true
     },
     "6486": {
-      "state": "OPEN_CI_PENDING_SOURCE_RECOVERY_SUCCEEDED",
+      "state": "OPEN_QUEUED",
       "url": "https://github.com/sparq-org/sparq/pull/6486",
       "head": "9ac4a59e96b1c69c8d617fbde9e98fe8c0436fed",
       "branch": "codex/preserve-numeric-memo",
@@ -732,11 +750,24 @@
       "publication": "direct-6485/admission/publish-declaration-ready-receipt.json",
       "merge_admitted": false,
       "CI": {
-        "latest": "direct-6485/admission/pr6486-runs1808.json",
+        "latest": "direct-6485/admission/runs1844.json",
         "CI": 34511329235,
         "feature_matrix": 34511329512,
         "gate": 34511329028,
-        "state": "CoreCI/matrix workflowstatusqueued but prior job snapshots showed progress. Otherlatestworkflows success; gate failed before source recovery."
+        "state": "CI33success6skip/matrix56success; everylatestworkflow exceptci-summary successful; one aggregate-only rerun accepted",
+        "latest_jobs": [
+          "direct-6485/admission/ci-jobs1844.json",
+          "direct-6485/admission/matrix-jobs1844.json"
+        ],
+        "proof_agent": "/root/postmerge_ci",
+        "proof_directory": "direct-6485/ci-execution-proof",
+        "proof": {
+          "directory": "direct-6485/ci-execution-proof",
+          "manifest_sha256": "8709a473980d0a3a863c9cb2f1c06782a629574438f9a74b85cfc1eb8fde5dcd",
+          "files": 57,
+          "root_verification": "direct-6485/admission/ci6486-root-verification.json",
+          "tree_binding": "FullCIcheckout613cad4d tree15664509 equalsreviewed9ac tree; rootverifiedexactfullSHAafteragentabbreviatedidentifier404, no exhaustion."
+        }
       },
       "recovery": {
         "source_run": 34511329019,
@@ -751,7 +782,66 @@
         "reruns_requested": 1,
         "aggregate_rerun_performed": false,
         "policy": "Do not replay recovery; reaggregate only after current required peers actually green, with fresh head/budget/check evidence. No cancellations or gate/floor changes."
+      },
+      "merge_group": {
+        "head": "202879e9b4104f4b5ae8d9e8e5206eb2ff454b7f",
+        "position": 1,
+        "state": "AWAITING_CHECKS",
+        "CI": 34518035372,
+        "feature_matrix": 34518035145,
+        "gate": 34518034956,
+        "snapshot": "monitor-20260910-1908/mg6486-runs.json",
+        "policy": "Preserve all live runs; no cancellations/blind reruns. Fresh result required before mainproof/issueclosure."
+      },
+      "enqueue": {
+        "script": "direct-6485/admission/enqueue6486.py",
+        "query": "direct-6485/admission/target6486-query.json",
+        "state": "33702 completed/collected; normalprotectedqueue accepted position1; no replay",
+        "receipt": "direct-6485/admission/enqueue6486-receipt.json"
       }
+    },
+    "6487": {
+      "issue": 6483,
+      "head": "0b4554b924a80432cc1b572bd19f8e58cdbfb4e6",
+      "state": "OPEN",
+      "isDraft": false,
+      "url": "https://github.com/sparq-org/sparq/pull/6487",
+      "branch": "codex/update-comparator-raw-duplicates",
+      "source_review": {
+        "state": "completed_collected",
+        "kind": "exec_command",
+        "session_id": 67551,
+        "requested_model": "claude-opus-5",
+        "effort": "xhigh",
+        "input": "direct-6483/admission/opus-duplicate-final-input.md",
+        "input_sha256": "7e31173d6815ab8c9e761e1f2fe9b8c522995287f1c9ae0a6f6b961765e90f7e",
+        "output": "direct-6483/admission/opus-duplicate-final-review.json",
+        "completion": "direct-6483/admission/opus-duplicate-final-completion.json",
+        "policy": "67551 completed/collected; never poll or relaunch.",
+        "actual_primary_model": "claude-opus-5",
+        "verdict": "APPROVE_FOR_CI",
+        "output_sha256": "342df78ea491ac2f0d108a8221800f147aac823db25cbad1a4cc98720e1abbd1",
+        "result": "direct-6483/admission/opus-duplicate-final-result.json",
+        "root_disposition": "direct-6483/admission/opus-duplicate-final-root-disposition.json"
+      },
+      "publication": {
+        "receipt": "direct-6483/admission/publication-receipt.json",
+        "body": "direct-6483/admission/pr-ready-body.md",
+        "draft": false,
+        "head": "0b4554b924a80432cc1b572bd19f8e58cdbfb4e6",
+        "copilot_receipt": "direct-6483/admission/copilot-request-receipt.json"
+      },
+      "CI": {
+        "snapshot": "monitor-20260910-1908/pr6487-runs.json",
+        "CI": 34518125709,
+        "feature_matrix": 34518125641,
+        "gate": 34518125361,
+        "docs_quality": 34518125199,
+        "fuzz": 34518125730,
+        "copilot": 34518133158,
+        "state": "Current CI/review pending; no observed failures in first snapshot."
+      },
+      "hold": "Required CI/current reviews still pending; no merge admission."
     }
   },
   "registry": {
@@ -802,9 +892,10 @@
     }
   },
   "next_actions": [
-    "Collect actual Opus67551 final6483review, verify actualmodel/output, addressmaterialfindings before publication.",
-    "Collect existingAstra6486 current CI execution proof; no newagent.",
-    "6486 allworkflows/protectedgate103002616428 successful. Afterproof/currentreviews/head/main/budget validation, execute prepared protectedqueue exact9ac jumpfalse. Never replay either recovery."
+    "Watch6486 protectedMG202879e9: CI34518035372, matrix34518035145, gate34518034956; preserve liveevidence. Aftermerge verifyreviewedsource/mainCI before comment+close6485;3113staysopen.",
+    "Watch6487 exact0b4554b CI34518125709/matrix34518125641/gate34518125361/Copilot34518133158. Resolve materialreviews/failures; actualnew26test/Linuxprivacy proof before normalqueue. No issue6483closureuntilmain+postproof; track postmerge differentialUPDATE health.",
+    "Collect existingAstra6479 source-only readiness before any witnessexecution or productionedit. No duplicateagents or repeated frozenruns.",
+    "Never replay6486source/aggregate recovery, enqueue6486, publish6483 or eitherCopilot request. All rootexecsessions terminal/collected; no liveOpus."
   ],
   "followup_lane": {
     "issue": 6480,
@@ -1082,13 +1173,13 @@
     "6483": {
       "state": "OPEN",
       "runtime_gap_confirmed": true,
-      "implementation": "Exact0b4554b committed;26tests/control/scopedClippy passed. ActualOpus final review running67551. No publication.",
+      "implementation": "Exact0b4554b independentlyapproved and publishedready6487; currentCI/Copilotpending. Keepopenuntilmerged/postmergeproof.",
       "scope": "Raw duplicate-output diagnostic contract; legitimate arbitrary query bags require separate semantics.",
       "coordination": {
         "issue": 6483,
         "agent": "/root/postmerge_ci",
-        "state": "final_Opus_review_running",
-        "directory": "direct-6483/repair-readiness",
+        "state": "pr6487_CI_and_Copilot_pending",
+        "directory": "direct-6483/validation-continuation",
         "production_edits_authorized": false,
         "readiness": {
           "directory": "direct-6483/readiness",
@@ -1158,7 +1249,7 @@
           "pending_commands": false
         },
         "final_review": {
-          "state": "running",
+          "state": "completed_collected",
           "kind": "exec_command",
           "session_id": 67551,
           "requested_model": "claude-opus-5",
@@ -1167,8 +1258,48 @@
           "input_sha256": "7e31173d6815ab8c9e761e1f2fe9b8c522995287f1c9ae0a6f6b961765e90f7e",
           "output": "direct-6483/admission/opus-duplicate-final-review.json",
           "completion": "direct-6483/admission/opus-duplicate-final-completion.json",
-          "policy": "Collect67551; do not duplicate or relaunch."
+          "policy": "67551 completed/collected; never poll or relaunch.",
+          "actual_primary_model": "claude-opus-5",
+          "verdict": "APPROVE_FOR_CI",
+          "output_sha256": "342df78ea491ac2f0d108a8221800f147aac823db25cbad1a4cc98720e1abbd1",
+          "result": "direct-6483/admission/opus-duplicate-final-result.json",
+          "root_disposition": "direct-6483/admission/opus-duplicate-final-root-disposition.json"
+        },
+        "pr": 6487,
+        "url": "https://github.com/sparq-org/sparq/pull/6487",
+        "publication": {
+          "receipt": "direct-6483/admission/publication-receipt.json",
+          "body": "direct-6483/admission/pr-ready-body.md",
+          "draft": false,
+          "head": "0b4554b924a80432cc1b572bd19f8e58cdbfb4e6",
+          "copilot_receipt": "direct-6483/admission/copilot-request-receipt.json"
+        },
+        "CI": {
+          "snapshot": "monitor-20260910-1908/pr6487-runs.json",
+          "CI": 34518125709,
+          "feature_matrix": 34518125641,
+          "gate": 34518125361,
+          "docs_quality": 34518125199,
+          "fuzz": 34518125730,
+          "copilot": 34518133158,
+          "state": "Current CI/review pending; no observed failures in first snapshot."
         }
+      }
+    },
+    "6479": {
+      "state": "OPEN",
+      "title": "Preserve outer BASE IRI after a nested public query",
+      "runtime": "pending; source-only issue",
+      "readiness": {
+        "issue": 6479,
+        "state": "source_only_readiness_running",
+        "agent": "/root/postmerge_ci",
+        "model": "gpt-6-astra",
+        "effort": "xhigh",
+        "directory": "direct-6479/readiness",
+        "target_evidence": "direct-6479/admission/issue-current.json",
+        "source_worktree": "worktrees/issue6483 READONLY engine surface againstmainf50",
+        "scope": "CurrentBASE thread-local callback defect source/caller audit, actualpubliccallback witness protocol, warmdependency/resource availability and narrow repair/test plan. No production edit/build/test/newmodelreview yet."
       }
     }
   },
@@ -1360,55 +1491,26 @@
     "followup": "Narrowtriage-titleCIrule+offendingrowdiagnostic could improveclassifier, but originalgenpartitionrequires separatelyreviewedpolicy. No6468implementation while4246active."
   },
   "latest_monitor": {
-    "at": "2026-09-10T18:26:04.868728+00:00",
+    "at": "2026-09-10T19:07:22.843626+00:00",
     "main": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
-    "state": "6486 awaiting current CI/matrix;6483 bounded implementation running after conditional actual Opus design",
-    "registry_actions_enabled": false,
-    "release_authorized": false,
-    "queue": [],
-    "latest_merges": [
+    "queue": [
       {
-        "number": 6482,
-        "mergedAt": "2026-09-10T15:45:55Z",
-        "mergeCommit": {
-          "oid": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464"
-        }
-      },
-      {
-        "number": 6481,
-        "mergedAt": "2026-09-10T12:12:31Z",
-        "mergeCommit": {
-          "oid": "4595388de9e389f5369d63828fbf90cfc16b62d9"
-        }
-      },
-      {
-        "number": 6478,
-        "mergedAt": "2026-09-10T08:44:34Z",
-        "mergeCommit": {
-          "oid": "781f667c19a8ebb779cfccb24b05ea432360b025"
-        }
-      },
-      {
-        "number": 6477,
-        "mergedAt": "2026-09-10T03:55:26Z",
-        "mergeCommit": {
-          "oid": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5"
-        }
-      },
-      {
-        "number": 6473,
-        "mergedAt": "2026-09-09T20:45:32Z",
-        "mergeCommit": {
-          "oid": "e53464c73f31f7aca800f3867ac054c36408e346"
+        "position": 1,
+        "state": "AWAITING_CHECKS",
+        "headCommit": {
+          "oid": "202879e9b4104f4b5ae8d9e8e5206eb2ff454b7f"
+        },
+        "pullRequest": {
+          "number": 6486,
+          "headRefOid": "9ac4a59e96b1c69c8d617fbde9e98fe8c0436fed"
         }
       }
     ],
-    "workflow_status_counts": {
-      "queued": 2,
-      "in_progress": 2
-    },
-    "workflow_snapshot": "monitor-20260910-1826",
-    "capacity": "Current6486 matrix progressing alongside currentCI and old scheduledCI. Old queuedbatch remains. No demonstrated saturation; no runner-inventory403retry or cancellation."
+    "snapshot": "monitor-20260910-1908",
+    "registry_actions_enabled": false,
+    "registry_evidence": "direct-6483/admission/publication-registry.json",
+    "release_authorized": false,
+    "scope": "Targeted currentqueue/6487 review+workflows; no broad runner inventory or capacity incident claim."
   },
   "registry_pause": {
     "enabled": false,
@@ -4552,9 +4654,9 @@
     "evidence": "direct-3105/admission/latency-alarm-job.log"
   },
   "registry_pause_latest": {
-    "at": "2026-09-10T18:26:04.868728+00:00",
+    "at": "2026-09-10T19:03:30.983555+00:00",
     "enabled": false,
-    "evidence": "monitor-20260910-1826/registry-permissions.json"
+    "evidence": "direct-6483/admission/publication-registry.json"
   },
   "frontier_fallback": {
     "at": "2026-09-10T03:59:18.624949+00:00",
@@ -4652,8 +4754,8 @@
   "next_lane_readiness": {
     "issue": 6483,
     "agent": "/root/postmerge_ci",
-    "state": "final_Opus_review_running",
-    "directory": "direct-6483/repair-readiness",
+    "state": "pr6487_CI_and_Copilot_pending",
+    "directory": "direct-6483/validation-continuation",
     "production_edits_authorized": false,
     "readiness": {
       "directory": "direct-6483/readiness",
@@ -4723,7 +4825,7 @@
       "pending_commands": false
     },
     "final_review": {
-      "state": "running",
+      "state": "completed_collected",
       "kind": "exec_command",
       "session_id": 67551,
       "requested_model": "claude-opus-5",
@@ -4732,7 +4834,42 @@
       "input_sha256": "7e31173d6815ab8c9e761e1f2fe9b8c522995287f1c9ae0a6f6b961765e90f7e",
       "output": "direct-6483/admission/opus-duplicate-final-review.json",
       "completion": "direct-6483/admission/opus-duplicate-final-completion.json",
-      "policy": "Collect67551; do not duplicate or relaunch."
+      "policy": "67551 completed/collected; never poll or relaunch.",
+      "actual_primary_model": "claude-opus-5",
+      "verdict": "APPROVE_FOR_CI",
+      "output_sha256": "342df78ea491ac2f0d108a8221800f147aac823db25cbad1a4cc98720e1abbd1",
+      "result": "direct-6483/admission/opus-duplicate-final-result.json",
+      "root_disposition": "direct-6483/admission/opus-duplicate-final-root-disposition.json"
+    },
+    "pr": 6487,
+    "url": "https://github.com/sparq-org/sparq/pull/6487",
+    "publication": {
+      "receipt": "direct-6483/admission/publication-receipt.json",
+      "body": "direct-6483/admission/pr-ready-body.md",
+      "draft": false,
+      "head": "0b4554b924a80432cc1b572bd19f8e58cdbfb4e6",
+      "copilot_receipt": "direct-6483/admission/copilot-request-receipt.json"
+    },
+    "CI": {
+      "snapshot": "monitor-20260910-1908/pr6487-runs.json",
+      "CI": 34518125709,
+      "feature_matrix": 34518125641,
+      "gate": 34518125361,
+      "docs_quality": 34518125199,
+      "fuzz": 34518125730,
+      "copilot": 34518133158,
+      "state": "Current CI/review pending; no observed failures in first snapshot."
     }
+  },
+  "next_ready_audit": {
+    "issue": 6479,
+    "state": "source_only_readiness_running",
+    "agent": "/root/postmerge_ci",
+    "model": "gpt-6-astra",
+    "effort": "xhigh",
+    "directory": "direct-6479/readiness",
+    "target_evidence": "direct-6479/admission/issue-current.json",
+    "source_worktree": "worktrees/issue6483 READONLY engine surface againstmainf50",
+    "scope": "CurrentBASE thread-local callback defect source/caller audit, actualpubliccallback witness protocol, warmdependency/resource availability and narrow repair/test plan. No production edit/build/test/newmodelreview yet."
   }
 }

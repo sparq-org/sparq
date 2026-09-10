@@ -1,0 +1,56 @@
+{
+  "intent_job_id": 102988177578,
+  "intent_lines": [
+    {
+      "line": 1851,
+      "text": "2026-09-10T17:59:09.1482229Z   echo \"[leg2] SKIP \u2014 no base SHA resolvable for event pull_request; nothing to compare.\" \\"
+    },
+    {
+      "line": 1877,
+      "text": "2026-09-10T17:59:09.8557875Z [leg2] feature-OFF wasm DIFFERS from the base tree: base=1562729 head=1562707 bytes, size delta=-22 (-0.001%). Comparison is byte-for-byte, so same-length content changes are also detected."
+    },
+    {
+      "line": 1878,
+      "text": "2026-09-10T17:59:09.8561587Z [leg2] OK \u2014 change DECLARED (mechanism V2): the head tree added bench/feature-off-declarations/['6486.json'] not present in the base tree. The feature-OFF byte change is intentional. Its SIZE is governed by the wasm_bundle_bytes floor ratchet (+/-2% band) in bench.yml, unchanged by this gate."
+    }
+  ],
+  "feature_resolution_job": 102988175230,
+  "resolution_lines": [
+    {
+      "line": 901,
+      "text": "2026-09-10T18:04:55.7990747Z [leg1] OK \u2014 'vectorized' is absent from all resolved default feature sets (sparq-engine, sparq-wasm, package defaults). Compile-time absence confirmed."
+    }
+  ],
+  "size_job_id": 102986490948,
+  "size_lines": [
+    {
+      "line": 862,
+      "text": "2026-09-10T18:01:56.1482464Z ##[group]Run bash scripts/ci-bench.sh --deterministic-only 200000 bench-results.json"
+    },
+    {
+      "line": 863,
+      "text": "2026-09-10T18:01:56.1483108Z bash scripts/ci-bench.sh --deterministic-only 200000 bench-results.json"
+    },
+    {
+      "line": 872,
+      "text": "2026-09-10T18:02:48.9093016Z wrote bench-results.json (--deterministic-only):"
+    },
+    {
+      "line": 895,
+      "text": "2026-09-10T18:02:48.9111117Z     \"name\": \"wasm_bundle_bytes\","
+    },
+    {
+      "line": 952,
+      "text": "2026-09-10T18:02:50.1313484Z   PERF_GATE_ALLOW: "
+    },
+    {
+      "line": 965,
+      "text": "2026-09-10T18:02:50.1677495Z   - wasm_bundle_bytes: floor=1.58759e+06 cur=1.56271e+06 -> IMPROVEMENT delta -1.57% (below floor) [ratchet] \u2014 floor may ratchet DOWN"
+    },
+    {
+      "line": 967,
+      "text": "2026-09-10T18:02:50.1678539Z perf-gate: PASS \u2014 no perf regression above the best-ever floor (deterministic metrics strict; timing metrics advisory)."
+    }
+  ],
+  "limits": "Self-test fake31/32-byte results later in equality log are negative controls, not actual compiled artifacts. Sizes above are from genuine PR run; no latency measurement."
+}

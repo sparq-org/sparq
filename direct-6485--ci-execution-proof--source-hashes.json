@@ -1,0 +1,57 @@
+[
+  {
+    "path": "crates/sparq-core/src/lib.rs",
+    "sha256": "e332be510f79a0374e3d930127229deeb77e3fa3523e3b9de9d2f5c4f4dfeade",
+    "bytes": 623597
+  },
+  {
+    "path": "crates/sparq-core/Cargo.toml",
+    "sha256": "bacc2b9877e8d12703578b5c28bba1211514b973bb0edd07ad822bf8b125d362",
+    "bytes": 11422
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "sha256": "8c2dd15936888aab25dd70c36d457811ac7ae453758643b9833ee1d2bf10985c",
+    "bytes": 316867
+  },
+  {
+    "path": ".github/workflows/feature-matrix.yml",
+    "sha256": "a4685a6f4b0b4655879176cb7bace120105feeebc533152a7a9fd5e38821dc2d",
+    "bytes": 77840
+  },
+  {
+    "path": ".github/workflows/docs-quality.yml",
+    "sha256": "8540fb4b537761d09f3816259e5029d81d50cc214b2147c62bebdfe211f2a594",
+    "bytes": 113148
+  },
+  {
+    "path": ".github/workflows/bench.yml",
+    "sha256": "135b956886db9016f514924290f987e79649f9ffe91886bc55db7e9435dbf0e0",
+    "bytes": 59075
+  },
+  {
+    "path": ".github/workflows/vectorized-feature-off.yml",
+    "sha256": "6084ce926c8376413df379d70fda9948534a2a87edeb355c61094e61979dcd15",
+    "bytes": 28349
+  },
+  {
+    "path": "scripts/run-feature-matrix-group.py",
+    "sha256": "9e02f873b46ec75c6e2e55f22d37d14387df92161117cc5a849fceb1daa4321f",
+    "bytes": 32705
+  },
+  {
+    "path": "bench/feature-off-declarations/6486.json",
+    "sha256": "19d06f90b054d4a69d839754d7754d3f0aabcfee4da668164a812197f73f1205",
+    "bytes": 286
+  },
+  {
+    "path": "bench/perf-baseline.json",
+    "sha256": "e0f0dd0570961a1e0adf555322d6ee10a52fc35233a4c2879b5d9dbcdfd9a3df",
+    "bytes": 20367
+  },
+  {
+    "path": "bench/feature-off-declarations/README.md",
+    "sha256": "e0a46190cd508bbe8d5821cdaec9da2a1d2bd07f8718f00b2a7ad8552cde7d2e",
+    "bytes": 9460
+  }
+]

@@ -1,0 +1,1520 @@
+﻿2026-09-10T18:20:12.5423504Z Current runner version: '2.337.0'
+2026-09-10T18:20:12.5451177Z ##[group]Runner Image Provisioner
+2026-09-10T18:20:12.5452131Z Hosted Compute Agent
+2026-09-10T18:20:12.5452749Z Version: 20260828.587
+2026-09-10T18:20:12.5453480Z Commit: abac92662cab4cc7352de4f9f9d2e2419aad9c29
+2026-09-10T18:20:12.5454239Z Build Date: 2026-08-28T16:44:25Z
+2026-09-10T18:20:12.5454926Z Worker ID: {c6a105ca-300b-433d-9cf5-dfb3c5f8e716}
+2026-09-10T18:20:12.5455774Z Azure Region: eastus2
+2026-09-10T18:20:12.5456380Z ##[endgroup]
+2026-09-10T18:20:12.5457736Z ##[group]Operating System
+2026-09-10T18:20:12.5458626Z Ubuntu
+2026-09-10T18:20:12.5459162Z 24.04.5
+2026-09-10T18:20:12.5459814Z LTS
+2026-09-10T18:20:12.5460360Z ##[endgroup]
+2026-09-10T18:20:12.5460970Z ##[group]Runner Image
+2026-09-10T18:20:12.5461625Z Image: ubuntu-24.04
+2026-09-10T18:20:12.5462220Z Version: 20260907.300.1
+2026-09-10T18:20:12.5463616Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260907.300/images/ubuntu/Ubuntu2404-Readme.md
+2026-09-10T18:20:12.5465294Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20260907.300
+2026-09-10T18:20:12.5466354Z ##[endgroup]
+2026-09-10T18:20:12.5467606Z ##[group]GITHUB_TOKEN Permissions
+2026-09-10T18:20:12.5469704Z Contents: read
+2026-09-10T18:20:12.5470329Z Metadata: read
+2026-09-10T18:20:12.5471017Z ##[endgroup]
+2026-09-10T18:20:12.5473192Z Secret source: Actions
+2026-09-10T18:20:12.5474296Z Cache mode: write
+2026-09-10T18:20:12.5475034Z Prepare workflow directory
+2026-09-10T18:20:12.5871475Z Prepare all required actions
+2026-09-10T18:20:12.5920274Z Getting action download info
+2026-09-10T18:20:12.8852179Z Download action repository 'actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0' (SHA:9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0)
+2026-09-10T18:20:13.0209591Z Download action repository 'Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32' (SHA:e18b497796c12c097a38f9edb9d0641fb99eee32)
+2026-09-10T18:20:13.3482773Z Download action repository 'actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a' (SHA:043fb46d1a93c77aae656e7c1c64a875d1fc6a0a)
+2026-09-10T18:20:13.6029554Z Complete job name: opt-in group (g36 sparq-core)
+2026-09-10T18:20:13.6947611Z ##[group]Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+2026-09-10T18:20:13.6949803Z with:
+2026-09-10T18:20:13.6950654Z   persist-credentials: false
+2026-09-10T18:20:13.6951720Z   repository: sparq-org/sparq
+2026-09-10T18:20:13.6960349Z   token: ***
+2026-09-10T18:20:13.6961202Z   ssh-strict: true
+2026-09-10T18:20:13.6962088Z   ssh-user: git
+2026-09-10T18:20:13.6962928Z   clean: true
+2026-09-10T18:20:13.6963822Z   sparse-checkout-cone-mode: true
+2026-09-10T18:20:13.6964901Z   fetch-depth: 1
+2026-09-10T18:20:13.6965768Z   fetch-tags: false
+2026-09-10T18:20:13.6966662Z   show-progress: true
+2026-09-10T18:20:13.6967574Z   lfs: false
+2026-09-10T18:20:13.6968528Z   submodules: false
+2026-09-10T18:20:13.6969436Z   set-safe-directory: true
+2026-09-10T18:20:13.6970461Z   allow-unsafe-pr-checkout: false
+2026-09-10T18:20:13.6971880Z env:
+2026-09-10T18:20:13.6972677Z   CARGO_TERM_COLOR: always
+2026-09-10T18:20:13.6973654Z   RUST_BACKTRACE: 1
+2026-09-10T18:20:13.6974603Z   CARGO_INCREMENTAL: 0
+2026-09-10T18:20:13.6975600Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+2026-09-10T18:20:13.6977190Z   CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: -C link-arg=-fuse-ld=lld
+2026-09-10T18:20:13.6978835Z ##[endgroup]
+2026-09-10T18:20:13.8055289Z Syncing repository: sparq-org/sparq
+2026-09-10T18:20:13.8059472Z ##[group]Getting Git version info
+2026-09-10T18:20:13.8061468Z Working directory is '/home/runner/work/sparq/sparq'
+2026-09-10T18:20:13.8064323Z [command]/usr/bin/git version
+2026-09-10T18:20:13.8135073Z git version 2.55.0
+2026-09-10T18:20:13.8157027Z ##[endgroup]
+2026-09-10T18:20:13.8169772Z Temporarily overriding HOME='/home/runner/work/_temp/6430e183-0c13-49d4-b5a7-1dd10f1ec65c' before making global git config changes
+2026-09-10T18:20:13.8174123Z Adding repository directory to the temporary git global config as a safe directory
+2026-09-10T18:20:13.8177907Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/sparq/sparq
+2026-09-10T18:20:13.8233514Z Deleting the contents of '/home/runner/work/sparq/sparq'
+2026-09-10T18:20:13.8237448Z ##[group]Determining repository object format
+2026-09-10T18:20:13.8240127Z ##[endgroup]
+2026-09-10T18:20:13.8242207Z ##[group]Initializing the repository
+2026-09-10T18:20:13.8244164Z [command]/usr/bin/git init /home/runner/work/sparq/sparq
+2026-09-10T18:20:13.8352094Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-09-10T18:20:13.8355634Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-09-10T18:20:13.8359220Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-09-10T18:20:13.8361747Z hint: call:
+2026-09-10T18:20:13.8363000Z hint:
+2026-09-10T18:20:13.8364673Z hint: 	git config --global init.defaultBranch <name>
+2026-09-10T18:20:13.8367141Z hint:
+2026-09-10T18:20:13.8369404Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-09-10T18:20:13.8372503Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-09-10T18:20:13.8374842Z hint:
+2026-09-10T18:20:13.8376174Z hint: 	git branch -m <name>
+2026-09-10T18:20:13.8377979Z hint:
+2026-09-10T18:20:13.8379894Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-09-10T18:20:13.8381822Z Initialized empty Git repository in /home/runner/work/sparq/sparq/.git/
+2026-09-10T18:20:13.8385421Z [command]/usr/bin/git remote add origin https://github.com/sparq-org/sparq
+2026-09-10T18:20:13.8427566Z ##[endgroup]
+2026-09-10T18:20:13.8429948Z ##[group]Disabling automatic garbage collection
+2026-09-10T18:20:13.8431904Z [command]/usr/bin/git config --local gc.auto 0
+2026-09-10T18:20:13.8466405Z ##[endgroup]
+2026-09-10T18:20:13.8469007Z ##[group]Setting up auth
+2026-09-10T18:20:13.8470495Z Removing SSH command configuration
+2026-09-10T18:20:13.8472729Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-09-10T18:20:13.8518653Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-09-10T18:20:13.8909561Z Removing HTTP extra header
+2026-09-10T18:20:13.8916295Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-10T18:20:13.8966305Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-09-10T18:20:13.9210393Z Removing includeIf entries pointing to credentials config files
+2026-09-10T18:20:13.9217080Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-10T18:20:13.9257804Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-09-10T18:20:13.9504282Z [command]/usr/bin/git config --file /home/runner/work/_temp/git-credentials-b333486b-1be0-43c1-abd0-ab1b76469b07.config http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-09-10T18:20:13.9550431Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/sparq/sparq/.git.path /home/runner/work/_temp/git-credentials-b333486b-1be0-43c1-abd0-ab1b76469b07.config
+2026-09-10T18:20:13.9588834Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/sparq/sparq/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-b333486b-1be0-43c1-abd0-ab1b76469b07.config
+2026-09-10T18:20:13.9632615Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-b333486b-1be0-43c1-abd0-ab1b76469b07.config
+2026-09-10T18:20:13.9673407Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-b333486b-1be0-43c1-abd0-ab1b76469b07.config
+2026-09-10T18:20:13.9708129Z ##[endgroup]
+2026-09-10T18:20:13.9709817Z ##[group]Fetching the repository
+2026-09-10T18:20:13.9715361Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +613cad4d82742955394658dbac03483ef3a4cf97:refs/remotes/pull/6486/merge
+2026-09-10T18:20:18.7028925Z From https://github.com/sparq-org/sparq
+2026-09-10T18:20:18.7029609Z  * [new ref]         613cad4d82742955394658dbac03483ef3a4cf97 -> pull/6486/merge
+2026-09-10T18:20:18.7041980Z ##[endgroup]
+2026-09-10T18:20:18.7042717Z ##[group]Determining the checkout info
+2026-09-10T18:20:18.7123921Z ##[endgroup]
+2026-09-10T18:20:18.7124896Z [command]/usr/bin/git sparse-checkout disable
+2026-09-10T18:20:18.7140274Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-09-10T18:20:18.7142814Z ##[group]Checking out the ref
+2026-09-10T18:20:18.7148273Z [command]/usr/bin/git checkout --progress --force refs/remotes/pull/6486/merge
+2026-09-10T18:20:19.2953368Z Note: switching to 'refs/remotes/pull/6486/merge'.
+2026-09-10T18:20:19.2953920Z 
+2026-09-10T18:20:19.2954362Z You are in 'detached HEAD' state. You can look around, make experimental
+2026-09-10T18:20:19.2955181Z changes and commit them, and you can discard any commits you make in this
+2026-09-10T18:20:19.2955762Z state without impacting any branches by switching back to a branch.
+2026-09-10T18:20:19.2956052Z 
+2026-09-10T18:20:19.2956295Z If you want to create a new branch to retain commits you create, you may
+2026-09-10T18:20:19.2956802Z do so (now or later) by using -c with the switch command. Example:
+2026-09-10T18:20:19.2957075Z 
+2026-09-10T18:20:19.2957195Z   git switch -c <new-branch-name>
+2026-09-10T18:20:19.2957402Z 
+2026-09-10T18:20:19.2957517Z Or undo this operation with:
+2026-09-10T18:20:19.2957695Z 
+2026-09-10T18:20:19.2957796Z   git switch -
+2026-09-10T18:20:19.2957967Z 
+2026-09-10T18:20:19.2958199Z Turn off this advice by setting config variable advice.detachedHead to false
+2026-09-10T18:20:19.2958955Z 
+2026-09-10T18:20:19.2960047Z HEAD is now at 613cad4 Merge 9ac4a59e96b1c69c8d617fbde9e98fe8c0436fed into f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464
+2026-09-10T18:20:19.2970067Z ##[endgroup]
+2026-09-10T18:20:19.3022696Z [command]/usr/bin/git log -1 --format=%H
+2026-09-10T18:20:19.3056019Z 613cad4d82742955394658dbac03483ef3a4cf97
+2026-09-10T18:20:19.3069754Z ##[group]Removing auth
+2026-09-10T18:20:19.3070232Z Removing SSH command configuration
+2026-09-10T18:20:19.3070925Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-09-10T18:20:19.3109851Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-09-10T18:20:19.3366086Z Removing HTTP extra header
+2026-09-10T18:20:19.3370170Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-10T18:20:19.3413688Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-09-10T18:20:19.3674305Z Removing includeIf entries pointing to credentials config files
+2026-09-10T18:20:19.3678281Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-10T18:20:19.3712821Z includeif.gitdir:/home/runner/work/sparq/sparq/.git.path
+2026-09-10T18:20:19.3713563Z includeif.gitdir:/home/runner/work/sparq/sparq/.git/worktrees/*.path
+2026-09-10T18:20:19.3714122Z includeif.gitdir:/github/workspace/.git.path
+2026-09-10T18:20:19.3714510Z includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-09-10T18:20:19.3722485Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/sparq/sparq/.git.path
+2026-09-10T18:20:19.3752333Z /home/runner/work/_temp/git-credentials-b333486b-1be0-43c1-abd0-ab1b76469b07.config
+2026-09-10T18:20:19.3762235Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/sparq/sparq/.git.path /home/runner/work/_temp/git-credentials-b333486b-1be0-43c1-abd0-ab1b76469b07.config
+2026-09-10T18:20:19.3823805Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/sparq/sparq/.git/worktrees/*.path
+2026-09-10T18:20:19.3853132Z /home/runner/work/_temp/git-credentials-b333486b-1be0-43c1-abd0-ab1b76469b07.config
+2026-09-10T18:20:19.3861015Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/sparq/sparq/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-b333486b-1be0-43c1-abd0-ab1b76469b07.config
+2026-09-10T18:20:19.3899213Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git.path
+2026-09-10T18:20:19.3930540Z /github/runner_temp/git-credentials-b333486b-1be0-43c1-abd0-ab1b76469b07.config
+2026-09-10T18:20:19.3945123Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-b333486b-1be0-43c1-abd0-ab1b76469b07.config
+2026-09-10T18:20:19.3986409Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-09-10T18:20:19.4028320Z /github/runner_temp/git-credentials-b333486b-1be0-43c1-abd0-ab1b76469b07.config
+2026-09-10T18:20:19.4033826Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-b333486b-1be0-43c1-abd0-ab1b76469b07.config
+2026-09-10T18:20:19.4080614Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-09-10T18:20:19.4360667Z Removing credentials config '/home/runner/work/_temp/git-credentials-b333486b-1be0-43c1-abd0-ab1b76469b07.config'
+2026-09-10T18:20:19.4369887Z ##[endgroup]
+2026-09-10T18:20:19.4582009Z ##[group]Run rustup default stable
+2026-09-10T18:20:19.4582417Z [36;1mrustup default stable[0m
+2026-09-10T18:20:19.4582743Z [36;1mrustup component add clippy[0m
+2026-09-10T18:20:19.4583043Z [36;1mrustup show active-toolchain[0m
+2026-09-10T18:20:19.4626491Z shell: /usr/bin/bash -e {0}
+2026-09-10T18:20:19.4626776Z env:
+2026-09-10T18:20:19.4626996Z   CARGO_TERM_COLOR: always
+2026-09-10T18:20:19.4627252Z   RUST_BACKTRACE: 1
+2026-09-10T18:20:19.4627469Z   CARGO_INCREMENTAL: 0
+2026-09-10T18:20:19.4627727Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+2026-09-10T18:20:19.4628124Z   CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: -C link-arg=-fuse-ld=lld
+2026-09-10T18:20:19.4628840Z ##[endgroup]
+2026-09-10T18:20:19.5103111Z info: using existing install for stable-x86_64-unknown-linux-gnu
+2026-09-10T18:20:19.5166306Z info: default toolchain set to stable-x86_64-unknown-linux-gnu
+2026-09-10T18:20:19.5166758Z 
+2026-09-10T18:20:19.6309500Z   stable-x86_64-unknown-linux-gnu unchanged - rustc 1.98.1 (48a229cea 2026-09-01)
+2026-09-10T18:20:19.6313249Z info: note that the toolchain '1.97.1-x86_64-unknown-linux-gnu' is currently in use (overridden by '/home/runner/work/sparq/sparq/rust-toolchain.toml')
+2026-09-10T18:20:19.6313937Z 
+2026-09-10T18:20:19.6396244Z info: syncing channel updates for 1.97.1-x86_64-unknown-linux-gnu
+2026-09-10T18:20:19.7888613Z info: latest update on 2026-07-16 for version 1.97.1 (8bab26f4f 2026-07-14)
+2026-09-10T18:20:19.7891084Z info: downloading 6 components
+2026-09-10T18:20:29.9239144Z warn: the missing active toolchain `1.97.1-x86_64-unknown-linux-gnu` has been auto-installed
+2026-09-10T18:20:29.9240251Z warn: auto-installation is deprecated for most `rustup` commands
+2026-09-10T18:20:29.9241202Z warn: scripts relying on this behavior in `rustup` may stop working in the future
+2026-09-10T18:20:29.9242201Z warn: to install the active toolchain, use `rustup install` instead
+2026-09-10T18:20:29.9243086Z warn: see <https://github.com/rust-lang/rustup/issues/4836> for more info
+2026-09-10T18:20:29.9688948Z info: component clippy is up to date
+2026-09-10T18:20:29.9968995Z 1.97.1-x86_64-unknown-linux-gnu (overridden by '/home/runner/work/sparq/sparq/rust-toolchain.toml')
+2026-09-10T18:20:30.0111548Z ##[group]Run Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32
+2026-09-10T18:20:30.0111960Z with:
+2026-09-10T18:20:30.0112193Z   shared-key: feature-matrix-sparq-core
+2026-09-10T18:20:30.0112473Z   save-if: false
+2026-09-10T18:20:30.0112689Z   prefix-key: v0-rust
+2026-09-10T18:20:30.0112925Z   add-job-id-key: true
+2026-09-10T18:20:30.0113174Z   add-rust-environment-hash-key: true
+2026-09-10T18:20:30.0113453Z   cache-targets: true
+2026-09-10T18:20:30.0113676Z   cache-all-crates: false
+2026-09-10T18:20:30.0113921Z   cache-workspace-crates: false
+2026-09-10T18:20:30.0114182Z   cache-provider: github
+2026-09-10T18:20:30.0114406Z   cache-bin: true
+2026-09-10T18:20:30.0114617Z   lookup-only: false
+2026-09-10T18:20:30.0114826Z   cmd-format: {0}
+2026-09-10T18:20:30.0115022Z env:
+2026-09-10T18:20:30.0115219Z   CARGO_TERM_COLOR: always
+2026-09-10T18:20:30.0115456Z   RUST_BACKTRACE: 1
+2026-09-10T18:20:30.0115693Z   CARGO_INCREMENTAL: 0
+2026-09-10T18:20:30.0115969Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+2026-09-10T18:20:30.0116373Z   CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: -C link-arg=-fuse-ld=lld
+2026-09-10T18:20:30.0116752Z ##[endgroup]
+2026-09-10T18:20:30.2922149Z (node:2425) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+2026-09-10T18:20:30.2922891Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-09-10T18:20:31.0242142Z ##[group]Cache Configuration
+2026-09-10T18:20:31.0242639Z Cache Provider:
+2026-09-10T18:20:31.0242945Z     github
+2026-09-10T18:20:31.0243226Z Workspaces:
+2026-09-10T18:20:31.0243551Z     /home/runner/work/sparq/sparq
+2026-09-10T18:20:31.0243938Z Cache Paths:
+2026-09-10T18:20:31.0244252Z     /home/runner/.cargo/bin
+2026-09-10T18:20:31.0244644Z     /home/runner/.cargo/.crates.toml
+2026-09-10T18:20:31.0245049Z     /home/runner/.cargo/.crates2.json
+2026-09-10T18:20:31.0245622Z     /home/runner/.cargo/registry
+2026-09-10T18:20:31.0246026Z     /home/runner/.cargo/git
+2026-09-10T18:20:31.0246366Z     /home/runner/work/sparq/sparq/target
+2026-09-10T18:20:31.0246767Z Restore Key:
+2026-09-10T18:20:31.0247217Z     v0-rust-feature-matrix-sparq-core-Linux-x64-cda33e8a
+2026-09-10T18:20:31.0247722Z Cache Key:
+2026-09-10T18:20:31.0248199Z     v0-rust-feature-matrix-sparq-core-Linux-x64-cda33e8a-0c74d5b7
+2026-09-10T18:20:31.0248957Z .. Prefix:
+2026-09-10T18:20:31.0249327Z   - v0-rust-feature-matrix-sparq-core-Linux-x64
+2026-09-10T18:20:31.0249815Z .. Environment considered:
+2026-09-10T18:20:31.0250165Z   - Rust Versions:
+2026-09-10T18:20:31.0250664Z     - 1.97.1 x86_64-unknown-linux-gnu 8bab26f4f68e0e26f0bb7960be334d5b520ea452
+2026-09-10T18:20:31.0251393Z     - 1.98.1 x86_64-unknown-linux-gnu 48a229ceaefd4985c50990b14116b6d856af0985
+2026-09-10T18:20:31.0252104Z     - 1.97.1 x86_64-unknown-linux-gnu 8bab26f4f68e0e26f0bb7960be334d5b520ea452
+2026-09-10T18:20:31.0252657Z   - CARGO_INCREMENTAL
+2026-09-10T18:20:31.0253009Z   - CARGO_PROFILE_DEV_DEBUG
+2026-09-10T18:20:31.0253438Z   - CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS
+2026-09-10T18:20:31.0253883Z   - CARGO_TERM_COLOR
+2026-09-10T18:20:31.0254190Z   - RUST_BACKTRACE
+2026-09-10T18:20:31.0254506Z .. Lockfiles considered:
+2026-09-10T18:20:31.0254903Z   - /home/runner/work/sparq/sparq/.cargo/config.toml
+2026-09-10T18:20:31.0255398Z   - /home/runner/work/sparq/sparq/Cargo.lock
+2026-09-10T18:20:31.0255943Z   - /home/runner/work/sparq/sparq/crates/sparq-acbench/Cargo.toml
+2026-09-10T18:20:31.0256584Z   - /home/runner/work/sparq/sparq/crates/sparq-algos/Cargo.toml
+2026-09-10T18:20:31.0257195Z   - /home/runner/work/sparq/sparq/crates/sparq-arrow/Cargo.toml
+2026-09-10T18:20:31.0257793Z   - /home/runner/work/sparq/sparq/crates/sparq-bench/Cargo.toml
+2026-09-10T18:20:31.0258571Z   - /home/runner/work/sparq/sparq/crates/sparq-canon/Cargo.toml
+2026-09-10T18:20:31.0259175Z   - /home/runner/work/sparq/sparq/crates/sparq-cli/Cargo.toml
+2026-09-10T18:20:31.0260336Z   - /home/runner/work/sparq/sparq/crates/sparq-conformance-floors/Cargo.toml
+2026-09-10T18:20:31.0261346Z   - /home/runner/work/sparq/sparq/crates/sparq-conformance/Cargo.toml
+2026-09-10T18:20:31.0262000Z   - /home/runner/work/sparq/sparq/crates/sparq-core/Cargo.toml
+2026-09-10T18:20:31.0262614Z   - /home/runner/work/sparq/sparq/crates/sparq-crdt/Cargo.toml
+2026-09-10T18:20:31.0263238Z   - /home/runner/work/sparq/sparq/crates/sparq-difftest/Cargo.toml
+2026-09-10T18:20:31.0263891Z   - /home/runner/work/sparq/sparq/crates/sparq-e2ee-ng/Cargo.toml
+2026-09-10T18:20:31.0268710Z   - /home/runner/work/sparq/sparq/crates/sparq-engine-serialize/Cargo.toml
+2026-09-10T18:20:31.0269516Z   - /home/runner/work/sparq/sparq/crates/sparq-engine-service/Cargo.toml
+2026-09-10T18:20:31.0270208Z   - /home/runner/work/sparq/sparq/crates/sparq-engine/Cargo.toml
+2026-09-10T18:20:31.0270894Z   - /home/runner/work/sparq/sparq/crates/sparq-fedclient/Cargo.toml
+2026-09-10T18:20:31.0271588Z   - /home/runner/work/sparq/sparq/crates/sparq-fedplan-mpc/Cargo.toml
+2026-09-10T18:20:31.0272312Z   - /home/runner/work/sparq/sparq/crates/sparq-fedplan/Cargo.toml
+2026-09-10T18:20:31.0272943Z   - /home/runner/work/sparq/sparq/crates/sparq-forms/Cargo.toml
+2026-09-10T18:20:31.0273519Z   - /home/runner/work/sparq/sparq/crates/sparq-geo/Cargo.toml
+2026-09-10T18:20:31.0274118Z   - /home/runner/work/sparq/sparq/crates/sparq-gpu/Cargo.toml
+2026-09-10T18:20:31.0274721Z   - /home/runner/work/sparq/sparq/crates/sparq-hdt/Cargo.toml
+2026-09-10T18:20:31.0275332Z   - /home/runner/work/sparq/sparq/crates/sparq-http3/Cargo.toml
+2026-09-10T18:20:31.0275963Z   - /home/runner/work/sparq/sparq/crates/sparq-introspect/Cargo.toml
+2026-09-10T18:20:31.0276704Z   - /home/runner/work/sparq/sparq/crates/sparq-jsonld-registry/Cargo.toml
+2026-09-10T18:20:31.0277415Z   - /home/runner/work/sparq/sparq/crates/sparq-jsonld/Cargo.toml
+2026-09-10T18:20:31.0278023Z   - /home/runner/work/sparq/sparq/crates/sparq-kb/Cargo.toml
+2026-09-10T18:20:31.0278866Z   - /home/runner/work/sparq/sparq/crates/sparq-lws-core/Cargo.toml
+2026-09-10T18:20:31.0279516Z   - /home/runner/work/sparq/sparq/crates/sparq-lws-wasm/Cargo.toml
+2026-09-10T18:20:31.0280151Z   - /home/runner/work/sparq/sparq/crates/sparq-mcp/Cargo.toml
+2026-09-10T18:20:31.0280762Z   - /home/runner/work/sparq/sparq/crates/sparq-metamorph/Cargo.toml
+2026-09-10T18:20:31.0281390Z   - /home/runner/work/sparq/sparq/crates/sparq-mpc/Cargo.toml
+2026-09-10T18:20:31.0281993Z   - /home/runner/work/sparq/sparq/crates/sparq-nlq/Cargo.toml
+2026-09-10T18:20:31.0282610Z   - /home/runner/work/sparq/sparq/crates/sparq-parse/Cargo.toml
+2026-09-10T18:20:31.0283233Z   - /home/runner/work/sparq/sparq/crates/sparq-policy/Cargo.toml
+2026-09-10T18:20:31.0283967Z   - /home/runner/work/sparq/sparq/crates/sparq-prov/Cargo.toml
+2026-09-10T18:20:31.0284514Z   - /home/runner/work/sparq/sparq/crates/sparq-py/Cargo.toml
+2026-09-10T18:20:31.0285139Z   - /home/runner/work/sparq/sparq/crates/sparq-reason-diff/Cargo.toml
+2026-09-10T18:20:31.0285820Z   - /home/runner/work/sparq/sparq/crates/sparq-reason-dl/Cargo.toml
+2026-09-10T18:20:31.0286496Z   - /home/runner/work/sparq/sparq/crates/sparq-reason-el/Cargo.toml
+2026-09-10T18:20:31.0287217Z   - /home/runner/work/sparq/sparq/crates/sparq-reason-ql/Cargo.toml
+2026-09-10T18:20:31.0287755Z   - /home/runner/work/sparq/sparq/crates/sparq-reason-wasm/Cargo.toml
+2026-09-10T18:20:31.0288210Z   - /home/runner/work/sparq/sparq/crates/sparq-reason/Cargo.toml
+2026-09-10T18:20:31.0288861Z   - /home/runner/work/sparq/sparq/crates/sparq-rsp-wasm/Cargo.toml
+2026-09-10T18:20:31.0289268Z   - /home/runner/work/sparq/sparq/crates/sparq-rsp/Cargo.toml
+2026-09-10T18:20:31.0289677Z   - /home/runner/work/sparq/sparq/crates/sparq-secprop-vocab/Cargo.toml
+2026-09-10T18:20:31.0290101Z   - /home/runner/work/sparq/sparq/crates/sparq-serve/Cargo.toml
+2026-09-10T18:20:31.0290488Z   - /home/runner/work/sparq/sparq/crates/sparq-server/Cargo.toml
+2026-09-10T18:20:31.0290904Z   - /home/runner/work/sparq/sparq/crates/sparq-shacl-wasm/Cargo.toml
+2026-09-10T18:20:31.0291906Z   - /home/runner/work/sparq/sparq/crates/sparq-shacl/Cargo.toml
+2026-09-10T18:20:31.0292754Z   - /home/runner/work/sparq/sparq/crates/sparq-shaclc/Cargo.toml
+2026-09-10T18:20:31.0293396Z   - /home/runner/work/sparq/sparq/crates/sparq-sim/Cargo.toml
+2026-09-10T18:20:31.0293866Z   - /home/runner/work/sparq/sparq/crates/sparq-solid/Cargo.toml
+2026-09-10T18:20:31.0294277Z   - /home/runner/work/sparq/sparq/crates/sparq-substrate/Cargo.toml
+2026-09-10T18:20:31.0294673Z   - /home/runner/work/sparq/sparq/crates/sparq-terse/Cargo.toml
+2026-09-10T18:20:31.0295065Z   - /home/runner/work/sparq/sparq/crates/sparq-text-wasm/Cargo.toml
+2026-09-10T18:20:31.0295459Z   - /home/runner/work/sparq/sparq/crates/sparq-text/Cargo.toml
+2026-09-10T18:20:31.0295840Z   - /home/runner/work/sparq/sparq/crates/sparq-trust/Cargo.toml
+2026-09-10T18:20:31.0296212Z   - /home/runner/work/sparq/sparq/crates/sparq-vc/Cargo.toml
+2026-09-10T18:20:31.0296596Z   - /home/runner/work/sparq/sparq/crates/sparq-vectors/Cargo.toml
+2026-09-10T18:20:31.0297022Z   - /home/runner/work/sparq/sparq/crates/sparq-wac-oracle/Cargo.toml
+2026-09-10T18:20:31.0297434Z   - /home/runner/work/sparq/sparq/crates/sparq-wasm/Cargo.toml
+2026-09-10T18:20:31.0297836Z   - /home/runner/work/sparq/sparq/crates/sparq-wrapper-gen/Cargo.toml
+2026-09-10T18:20:31.0298301Z   - /home/runner/work/sparq/sparq/crates/sparq-wrapper-integration/Cargo.toml
+2026-09-10T18:20:31.0299129Z   - /home/runner/work/sparq/sparq/crates/sparq-wrapper-shacl/Cargo.toml
+2026-09-10T18:20:31.0299556Z   - /home/runner/work/sparq/sparq/crates/sparq-wrapper/Cargo.toml
+2026-09-10T18:20:31.0299962Z   - /home/runner/work/sparq/sparq/crates/sparq-zk-compose/Cargo.toml
+2026-09-10T18:20:31.0300354Z   - /home/runner/work/sparq/sparq/crates/sparq-zk/Cargo.toml
+2026-09-10T18:20:31.0300707Z   - /home/runner/work/sparq/sparq/rust-toolchain.toml
+2026-09-10T18:20:31.0301307Z ##[endgroup]
+2026-09-10T18:20:31.0301432Z 
+2026-09-10T18:20:31.0301542Z ... Restoring cache ...
+2026-09-10T18:20:31.1094680Z Cache hit for: v0-rust-feature-matrix-sparq-core-Linux-x64-cda33e8a-0c74d5b7
+2026-09-10T18:20:32.0894272Z Received 201356168 of 201356168 (100.0%), 206.0 MBs/sec
+2026-09-10T18:20:32.0894685Z Cache Size: ~192 MB (201356168 B)
+2026-09-10T18:20:32.1042171Z [command]/usr/bin/tar -xf /home/runner/work/_temp/2b26e169-a4b8-4d1d-a29c-e770879437ec/cache.tzst -P -C /home/runner/work/sparq/sparq --use-compress-program unzstd
+2026-09-10T18:20:33.2245311Z Cache restored successfully
+2026-09-10T18:20:33.2342620Z Restored from cache key "v0-rust-feature-matrix-sparq-core-Linux-x64-cda33e8a-0c74d5b7" full match: true.
+2026-09-10T18:20:33.2518376Z ##[group]Run set -euo pipefail
+2026-09-10T18:20:33.2519096Z [36;1mset -euo pipefail[0m
+2026-09-10T18:20:33.2519344Z [36;1mn=0[0m
+2026-09-10T18:20:33.2519577Z [36;1muntil cargo fetch --locked; do[0m
+2026-09-10T18:20:33.2519862Z [36;1m  n=$((n+1))[0m
+2026-09-10T18:20:33.2520103Z [36;1m  if [ "$n" -ge 3 ]; then[0m
+2026-09-10T18:20:33.2520537Z [36;1m    echo "::error::cargo fetch failed after $n attempts (registry outage?)" >&2[0m
+2026-09-10T18:20:33.2520985Z [36;1m    exit 1[0m
+2026-09-10T18:20:33.2521205Z [36;1m  fi[0m
+2026-09-10T18:20:33.2521504Z [36;1m  echo "cargo fetch attempt $n failed; retrying in 10s..." >&2[0m
+2026-09-10T18:20:33.2521882Z [36;1m  sleep 10[0m
+2026-09-10T18:20:33.2522102Z [36;1mdone[0m
+2026-09-10T18:20:33.2563315Z shell: /usr/bin/bash -e {0}
+2026-09-10T18:20:33.2563578Z env:
+2026-09-10T18:20:33.2563793Z   CARGO_TERM_COLOR: always
+2026-09-10T18:20:33.2564059Z   RUST_BACKTRACE: 1
+2026-09-10T18:20:33.2564282Z   CARGO_INCREMENTAL: 0
+2026-09-10T18:20:33.2564582Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+2026-09-10T18:20:33.2564979Z   CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: -C link-arg=-fuse-ld=lld
+2026-09-10T18:20:33.2565374Z   CACHE_ON_FAILURE: false
+2026-09-10T18:20:33.2565617Z ##[endgroup]
+2026-09-10T18:20:33.3352741Z [1m[92m    Updating[0m crates.io index
+2026-09-10T18:20:36.7695294Z ##[group]Run python3 scripts/run-feature-matrix-group.py
+2026-09-10T18:20:36.7695933Z [36;1mpython3 scripts/run-feature-matrix-group.py[0m
+2026-09-10T18:20:36.7735572Z shell: /usr/bin/bash -e {0}
+2026-09-10T18:20:36.7735845Z env:
+2026-09-10T18:20:36.7736070Z   CARGO_TERM_COLOR: always
+2026-09-10T18:20:36.7736320Z   RUST_BACKTRACE: 1
+2026-09-10T18:20:36.7736553Z   CARGO_INCREMENTAL: 0
+2026-09-10T18:20:36.7736867Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+2026-09-10T18:20:36.7737279Z   CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: -C link-arg=-fuse-ld=lld
+2026-09-10T18:20:36.7737675Z   CACHE_ON_FAILURE: false
+2026-09-10T18:20:36.7739711Z   GROUP_LEGS: [{"name":"sparq-core (native-ttl)","crate":"sparq-core","features":"native-ttl","test":true},{"name":"sparq-core (iri-fast)","crate":"sparq-core","features":"iri-fast","test":true},{"name":"sparq-core (block-bloom)","crate":"sparq-core","features":"block-bloom","test":true},{"name":"sparq-introspect (numeric-facets — numeric ranges + histograms)","crate":"sparq-introspect","features":"numeric-facets","test":true},{"name":"sparq-introspect (schema-diff — structured schema drift)","crate":"sparq-introspect","features":"schema-diff","test":true}]
+2026-09-10T18:20:36.7741538Z   GROUP_NAME: g36 sparq-core
+2026-09-10T18:20:36.7741817Z   FMG_RESULTS: fmg-results/results.json
+2026-09-10T18:20:36.7742097Z ##[endgroup]
+2026-09-10T18:20:36.8599802Z feature-matrix group g36 sparq-core: 5 leg(s)
+2026-09-10T18:20:36.8600878Z ##[group]opt-in sparq-core (native-ttl)
+2026-09-10T18:20:36.8601271Z + cargo build -p sparq-core --features native-ttl
+2026-09-10T18:20:37.0571003Z [1m[92m   Compiling[0m sparq-core v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-core)
+2026-09-10T18:20:38.6123997Z [1m[92m    Finished[0m `dev` profile [unoptimized + debuginfo] target(s) in 1.72s
+2026-09-10T18:20:38.6306676Z + cargo test -p sparq-core --features native-ttl
+2026-09-10T18:20:38.8324812Z [1m[92m   Compiling[0m sparq-core v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-core)
+2026-09-10T18:20:43.1517288Z [1m[92m    Finished[0m `test` profile [unoptimized + debuginfo] target(s) in 4.49s
+2026-09-10T18:20:43.1606318Z [1m[92m     Running[0m unittests src/lib.rs (target/debug/deps/sparq_core-333a3c5891cb5afa)
+2026-09-10T18:20:43.1622885Z 
+2026-09-10T18:20:43.1623066Z running 179 tests
+2026-09-10T18:20:43.1634645Z test build_timing::tests::pipelined_path_without_inline_consolidate_omits_the_term ... ok
+2026-09-10T18:20:43.1636031Z test build_timing::tests::pipelined_path_labels_occupancy_and_surfaces_consolidate_bucket ... ok
+2026-09-10T18:20:43.1637267Z test build_timing::tests::serial_path_labels_buckets_serial_and_has_no_consolidate_term ... ok
+2026-09-10T18:20:43.1638892Z test compress::byte_attribution::discriminate_h1_h2_h3 ... ignored, spike discriminator: run explicitly with --ignored --nocapture
+2026-09-10T18:20:43.1640806Z test compress::byte_attribution::measure_byte_attribution_across_id_density ... ignored, spike measurement: run explicitly with --ignored --nocapture (allocates ~hundreds of MB)
+2026-09-10T18:20:43.6949846Z test compress::byte_attribution::attribution_total_equals_real_encoded_length ... ok
+2026-09-10T18:20:43.6979626Z test compress::byte_attribution::sweep_block_size_across_id_density ... ignored, spike measurement: run explicitly with --ignored --nocapture (allocates ~hundreds of MB)
+2026-09-10T18:20:43.7520056Z test compress::tests::count_range_equals_materialised_range_len ... ok
+2026-09-10T18:20:43.7626799Z test compress::tests::range_matches_binary_search ... ok
+2026-09-10T18:20:43.7722803Z test compress::tests::roundtrip_decode_all ... ok
+2026-09-10T18:20:43.7738294Z test dict::tests::filtered_rebuild_from_blob_retains_nested_triple_dependencies ... ok
+2026-09-10T18:20:43.7750605Z test dict::tests::filtered_rebuild_moves_arena_records_and_filters_metadata ... ok
+2026-09-10T18:20:43.7780996Z test dict::tests::in_memory_dedup_has_only_the_h2_tag_prefilter ... ok
+2026-09-10T18:20:43.7791562Z test dict::tests::inline_id_of_int_matches_intern_and_respects_boundaries ... ok
+2026-09-10T18:20:43.7809539Z test dict::tests::inline_integer_roundtrip_and_boundaries ... ok
+2026-09-10T18:20:43.7861869Z test dict::tests::intern_partials_rejects_malformed_triple_component ... ok
+2026-09-10T18:20:43.7889321Z test dict::tests::into_blob_roundtrips ... ok
+2026-09-10T18:20:43.7919438Z test dict::tests::iri_prefix_factoring_roundtrips ... ok
+2026-09-10T18:20:43.7920284Z test dict::tests::is_inline_partition_boundaries ... ok
+2026-09-10T18:20:43.7921239Z test dict::tests::lang_dir_suffix_validated_and_paths_agree ... ok
+2026-09-10T18:20:43.7940647Z test dict::tests::merge_remap_translates_triple_term_components ... ok
+2026-09-10T18:20:43.7967804Z test dict::tests::merged_dict_lookup_and_intern_after_build_table ... ok
+2026-09-10T18:20:43.7989507Z test dict::tests::nested_triple_terms_roundtrip ... ok
+2026-09-10T18:20:43.7990445Z test dict::tests::non_canonical_and_out_of_range_do_not_inline ... ok
+2026-09-10T18:20:43.8020542Z test dict::tests::non_integer_terms_get_dictionary_ids_below_inline_base ... ok
+2026-09-10T18:20:43.8031190Z test dict::tests::plain_string_value_only_plain_strings ... ok
+2026-09-10T18:20:43.8032253Z test dict::tests::reconstruct_triple_wrong_kind_component_is_safe_not_panic ... ok
+2026-09-10T18:20:43.8066811Z test dict::tests::sharded_dict_roundtrips_and_preserves_order ... ok
+2026-09-10T18:20:43.8081018Z test dict::tests::triple_terms_intern_structurally_and_roundtrip ... ok
+2026-09-10T18:20:43.8082014Z test dict::tests::triple_terms_survive_blob_compaction ... ok
+2026-09-10T18:20:43.8086882Z test dict::tests::triple_terms_survive_save_open ... ok
+2026-09-10T18:20:43.8100474Z test dir_roundtrip_test::apply_delta_nquads_routes_per_graph ... ok
+2026-09-10T18:20:43.8114396Z test dir_roundtrip_test::compact_keeps_caches_shareable_for_the_next_fork ... ok
+2026-09-10T18:20:43.8143486Z test dir_roundtrip_test::dir_literal_roundtrip ... ok
+2026-09-10T18:20:43.8199331Z test dir_roundtrip_test::language_tag_casing_consistent_across_formats ... ok
+2026-09-10T18:20:43.8200240Z test nt::tests::already_lowercase_language_tag_unchanged ... ok
+2026-09-10T18:20:43.8229779Z test nt::tests::blank_node_subject_cache_no_false_hit_on_prefix_match ... ok
+2026-09-10T18:20:43.8259159Z test nt::tests::case_variant_language_tags_intern_to_same_id ... ok
+2026-09-10T18:20:43.8279801Z test nt::tests::deeply_nested_triple_term_in_nquads_span_returns_clean_error ... ok
+2026-09-10T18:20:43.8289073Z test nt::tests::deeply_nested_triple_term_returns_clean_error_not_stack_overflow ... ok
+2026-09-10T18:20:43.8290029Z test nt::tests::directional_language_tag_lowercases_lang_part_only ... ok
+2026-09-10T18:20:43.8290877Z test nt::tests::escaped_and_multibyte_literal_span_round_trips ... ok
+2026-09-10T18:20:43.8318884Z test nt::tests::language_tag_lowercased_to_match_oxttl ... ok
+2026-09-10T18:20:43.8319656Z test nt::tests::language_tag_terminated_by_multibyte_errors_cleanly ... ok
+2026-09-10T18:20:43.8320498Z test nt::tests::multibyte_spans_at_every_delimiter_round_trip ... ok
+2026-09-10T18:20:43.8321233Z test nt::tests::nested_and_blank_node_triple_terms_parse ... ok
+2026-09-10T18:20:43.8321926Z test nt::tests::nested_triple_term_at_limit_parses ... ok
+2026-09-10T18:20:43.8322688Z test nt::tests::nquads_graph_label_accepts_iri_and_blank_only ... ok
+2026-09-10T18:20:43.8323383Z test nt::tests::nquads_graph_label_rejects_literal ... ok
+2026-09-10T18:20:43.8324032Z test nt::tests::nquads_graph_label_rejects_triple_term ... ok
+2026-09-10T18:20:43.8324666Z test nt::tests::nquads_language_tag_lowercased ... ok
+2026-09-10T18:20:43.8325368Z test nt::tests::oversized_subject_bypasses_cache_parses_correctly ... ok
+2026-09-10T18:20:43.8343079Z test nt::tests::parse_chunk_dict_capacity_is_pure_hint ... ok
+2026-09-10T18:20:43.8378883Z test nt::tests::parse_chunk_rejects_invalid_utf8 ... ok
+2026-09-10T18:20:43.8379657Z test nt::tests::parse_quads_chunk_multibyte_graph_and_terms_round_trip ... ok
+2026-09-10T18:20:43.8408909Z test nt::tests::parse_quads_chunk_rejects_invalid_utf8 ... ok
+2026-09-10T18:20:43.8439355Z test nt::tests::plain_triples_unaffected ... ok
+2026-09-10T18:20:43.8468945Z test nt::tests::shuffled_input_store_matches_grouped ... ok
+2026-09-10T18:20:43.8498880Z test nt::tests::subject_run_cache_hits_produce_correct_ids ... ok
+2026-09-10T18:20:43.8519041Z test nt::tests::triple_term_object_parses_and_interns_structurally ... ok
+2026-09-10T18:20:43.8548952Z test nt::tests::triple_term_only_in_object_position ... ok
+2026-09-10T18:20:43.8549797Z test nt::tests::unterminated_triple_term_errors ... ok
+2026-09-10T18:20:43.8749358Z test store::overlay_deleted_tests::deleted_cache_compressed_base_matches_rebuild ... ok
+2026-09-10T18:20:43.8779236Z test store::overlay_deleted_tests::deleted_cache_graph_snapshot_retains_warm_generation ... ok
+2026-09-10T18:20:43.9252574Z test store::overlay_deleted_tests::deleted_cache_matches_rebuild_after_mixed_deltas ... ok
+2026-09-10T18:20:43.9279617Z test store::overlay_deleted_tests::deleted_projection_feature_off_preserves_main_layout_and_heap ... ok
+2026-09-10T18:20:43.9308959Z test store::tests::build_raw_perms_no_capacity_slack ... ok
+2026-09-10T18:20:43.9550018Z test compress::byte_attribution::attribution_total_exact_at_every_swept_block_size ... ok
+2026-09-10T18:20:43.9589097Z test store::tests::derive_plan_pairs_are_derivable ... ok
+2026-09-10T18:20:44.0449617Z test store::tests::compressed_scans_match_raw ... ok
+2026-09-10T18:20:44.0569597Z test store::tests::from_triples_independent_dedup_removes_all_duplicates ... ok
+2026-09-10T18:20:44.1099657Z test store::tests::derived_perms_match_radix_all_build ... ok
+2026-09-10T18:20:44.1100705Z test store::tests::measure_derived_vs_radix_all_build ... ignored, timing measurement; non-canonical, run explicitly
+2026-09-10T18:20:44.2100006Z test store::tests::from_triples_perms_match_reference_sort ... ok
+2026-09-10T18:20:44.2189551Z test store::tests::overlay_zero_copy_fast_path ... ok
+2026-09-10T18:20:44.5900192Z test store::tests::radix_sort_equiv_comparison_sort ... ok
+2026-09-10T18:20:44.5959211Z test store::tests::scan_perm_selects_named_permutation ... ok
+2026-09-10T18:20:44.5989009Z test strdist::tests::edit_distance_basics ... ok
+2026-09-10T18:20:44.6082526Z test strdist::tests::edit_distance_is_symmetric ... ok
+2026-09-10T18:20:44.6299528Z test strdist::tests::edit_distance_satisfies_triangle_inequality ... ok
+2026-09-10T18:20:44.6300336Z test temporal::tests::cache_cell_matches_per_row_parse ... ok
+2026-09-10T18:20:44.6301215Z test temporal::tests::cmp_t_total_is_kind_first_and_total ... ok
+2026-09-10T18:20:44.6302008Z test temporal::tests::cmp_tl_matches_xpath_and_temporal_cmp ... ok
+2026-09-10T18:20:44.6302899Z test temporal::tests::cmp_tl_total_extends_cmp_tl_without_contradicting_it ... ok
+2026-09-10T18:20:44.6303856Z test temporal::tests::date_and_datetime_are_disjoint_families ... ok
+2026-09-10T18:20:44.6304781Z test temporal::tests::datetime_and_datetimestamp_share_a_family_date_is_disjoint ... ok
+2026-09-10T18:20:44.6305685Z test temporal::tests::equal_instants_across_timezones ... ok
+2026-09-10T18:20:44.6306527Z test temporal::tests::ill_formed_and_foreign_datatypes_are_not_cached ... ok
+2026-09-10T18:20:44.6307388Z test temporal::tests::instant_normalises_timezone_to_utc ... ok
+2026-09-10T18:20:44.6308175Z test temporal::tests::mixed_presence_window_is_indeterminate ... ok
+2026-09-10T18:20:44.6309106Z test temporal::tests::parse_civil_date_epoch_ordering_and_validation ... ok
+2026-09-10T18:20:44.6310025Z test temporal::tests::parse_date_handles_timezone_offset_and_bare_date ... ok
+2026-09-10T18:20:44.6310852Z test temporal::tests::parse_tz_parses_offsets_and_rejects_malformed ... ok
+2026-09-10T18:20:44.6311592Z test temporal::tests::subsecond_precision_preserved ... ok
+2026-09-10T18:20:44.6312451Z test temporal::tests::witness_indeterminate_window_lexical_fallback_was_intransitive ... ok
+2026-09-10T18:20:44.6313280Z test tests::decimal_significant_digits_counts ... ok
+2026-09-10T18:20:44.6402768Z test tests::dict_iter_is_dense_and_complete ... ok
+2026-09-10T18:20:44.6404658Z test tests::estimate_turtle_triples_never_zero_and_monotonic ... ok
+2026-09-10T18:20:44.6446458Z test tests::exact_numeric_lexical_returns_exact_form_or_none ... ok
+2026-09-10T18:20:44.6469440Z test tests::graph_iter_ids_orders_and_overlay ... ok
+2026-09-10T18:20:44.6499600Z test tests::graph_prefix_range_scan_and_cache_coherence ... ok
+2026-09-10T18:20:44.6554214Z test tests::has_high_precision_decimal_flags_only_inexact_decimals ... ok
+2026-09-10T18:20:44.6602351Z test tests::has_high_precision_decimal_memo_fork_compact_isolation ... ok
+2026-09-10T18:20:44.6634255Z test tests::has_high_precision_decimal_memo_invalidates_stored_growth ... ok
+2026-09-10T18:20:44.6689295Z test tests::has_high_precision_decimal_memo_preserves_unchanged_dictionary ... ok
+2026-09-10T18:20:44.6719943Z test tests::has_high_precision_decimal_memo_survives_delta_insert ... ok
+2026-09-10T18:20:44.6750501Z test tests::insert_triple_equivalent_to_text_load ... ok
+2026-09-10T18:20:44.6849473Z test tests::insert_triple_interns_and_is_set_valued ... ok
+2026-09-10T18:20:44.6879184Z test tests::is_integer_datatype_accepts_integer_subtypes_only ... ok
+2026-09-10T18:20:44.6920270Z test tests::is_literal_id_classifies_each_kind ... ok
+2026-09-10T18:20:44.6950594Z test tests::load_and_scan ... ok
+2026-09-10T18:20:44.7589979Z test tests::load_dataset_nquads_public_entry_matches_serial ... ok
+2026-09-10T18:20:44.7609548Z test tests::load_dataset_rejects_unknown_format ... ok
+2026-09-10T18:20:44.7735815Z test store::tests::overlay_scans_match_rebuild ... ok
+2026-09-10T18:20:44.8259345Z test tests::load_dataset_trig_still_serial_and_correct ... ok
+2026-09-10T18:20:44.8319233Z test tests::load_dataset_with_base_resolves_and_preserves_named_graphs ... ok
+2026-09-10T18:20:44.9150027Z test tests::load_reader_parallel_handles_triple_terms ... ok
+2026-09-10T18:20:44.9159515Z test tests::load_dataset_trig_public_entry_matches_serial ... ok
+2026-09-10T18:20:44.9209465Z test tests::load_str_with_base_resolves_relative_iris ... ok
+2026-09-10T18:20:45.0160803Z test tests::merge_partials_sharded_consolidates_triple_terms ... ok
+2026-09-10T18:20:45.0173862Z test tests::named_graph_by_name_scopes_to_one_graph ... ok
+2026-09-10T18:20:45.0218999Z test tests::new_and_default_are_empty_graphs ... ok
+2026-09-10T18:20:45.0220007Z test tests::next_terminator_memchr_matches_scalar ... ok
+2026-09-10T18:20:45.0980968Z test tests::ntriples_parallel_matches_sequential ... ok
+2026-09-10T18:20:45.1015707Z test tests::numeric_cache_alignment_fixes_both_divergences ... ok
+2026-09-10T18:20:45.1043384Z test tests::numeric_cache_hit_matches_shared_parse_xsd_f64_plumbing ... ok
+2026-09-10T18:20:45.1069113Z test tests::numeric_cache_lookup_covers_outlined_storage_variants ... ok
+2026-09-10T18:20:45.1099247Z test tests::numeric_cache_value_datatype_aware_acceptance ... ok
+2026-09-10T18:20:45.1114432Z test tests::numerics_of_borrowed_path_byte_identical_to_owned ... ok
+2026-09-10T18:20:45.2909948Z test tests::overlay_differential_200_batches ... ok
+2026-09-10T18:20:45.3450801Z test tests::load_reader_parallel_short_reads_match_sequential ... ok
+2026-09-10T18:20:45.5919991Z test tests::parallel_trig_matches_serial ... ok
+2026-09-10T18:20:45.5949322Z test tests::parallel_trig_rejects_malformed ... ok
+2026-09-10T18:20:45.6050002Z test tests::parallel_nquads_matches_serial ... ok
+2026-09-10T18:20:45.6540528Z test tests::parallel_turtle_escaped_hash_in_local ... ok
+2026-09-10T18:20:45.7469690Z test tests::parallel_turtle_bnodes_match_serial ... ok
+2026-09-10T18:20:45.7740029Z test tests::parallel_turtle_interspersed_directives_match_serial ... ok
+2026-09-10T18:20:45.8219460Z test tests::parallel_turtle_matches_serial ... ok
+2026-09-10T18:20:45.8279302Z test tests::parallel_turtle_rejects_malformed ... ok
+2026-09-10T18:20:45.9182067Z test tests::parallel_turtle_quoted_triples_match_serial ... ok
+2026-09-10T18:20:46.0491977Z test tests::parallel_turtle_sharded_merge_matches_serial ... ok
+2026-09-10T18:20:46.0559652Z test tests::parse_to_triples_rejects_unknown_format ... ok
+2026-09-10T18:20:46.0589864Z test tests::parse_xsd_f64_shared_acceptance_set ... ok
+2026-09-10T18:20:46.0591026Z test tests::predicate_has_literal_object_iri_only_vs_literal_vs_bnode ... ok
+2026-09-10T18:20:46.0618586Z test tests::predicate_has_literal_object_reflects_overlay_update ... ok
+2026-09-10T18:20:46.1750093Z test tests::presized_turtle_parse_is_hint_only_matches_oxttl_direct ... ok
+2026-09-10T18:20:46.2701430Z test tests::parallel_turtle_terminator_scan_is_linear_not_quadratic ... ok
+2026-09-10T18:20:46.2721812Z test tests::remove_triple_retracts_and_absent_is_noop ... ok
+2026-09-10T18:20:46.2762576Z test tests::turtle_path_rejection_oracle ... ok
+2026-09-10T18:20:46.2807515Z test tests::turtle_rdf12_reification_surface_loads_desugared ... ok
+2026-09-10T18:20:46.2830023Z test ttl::tests::a_keyword_is_rdf_type ... ok
+2026-09-10T18:20:46.2865361Z test ttl::tests::anonymous_blank_node_property_lists ... ok
+2026-09-10T18:20:46.2892679Z test ttl::tests::bad_escape_rejected ... ok
+2026-09-10T18:20:46.2923202Z test ttl::tests::bad_number_rejected ... ok
+2026-09-10T18:20:46.2935299Z test ttl::tests::base_and_relative_iri_resolution ... ok
+2026-09-10T18:20:46.2942477Z test ttl::tests::boolean_literals ... ok
+2026-09-10T18:20:46.2956301Z test ttl::tests::collections ... ok
+2026-09-10T18:20:46.2970478Z test ttl::tests::empty_and_whitespace_documents ... ok
+2026-09-10T18:20:46.2983985Z test ttl::tests::fresh_anon_labels_unique_across_parses ... ok
+2026-09-10T18:20:46.2987327Z test ttl::tests::iriref_with_uchar_escape ... ok
+2026-09-10T18:20:46.3019628Z test ttl::tests::iso_is_not_vacuous ... ok
+2026-09-10T18:20:46.3036976Z test ttl::tests::labeled_blank_nodes_scoped_across_statements ... ok
+2026-09-10T18:20:46.3040301Z test ttl::tests::missing_terminator_rejected ... ok
+2026-09-10T18:20:46.3040904Z test ttl::tests::mixed_directive_forms_and_comments ... ok
+2026-09-10T18:20:46.3077796Z test ttl::tests::numeric_literals_keep_lexical_form_and_datatype ... ok
+2026-09-10T18:20:46.3120261Z test ttl::tests::plain_triples_and_prefixed_names ... ok
+2026-09-10T18:20:46.3140132Z test ttl::tests::pn_local_escapes_and_percent_encoding ... ok
+2026-09-10T18:20:46.3169273Z test ttl::tests::predicate_and_object_lists ... ok
+2026-09-10T18:20:46.3199136Z test ttl::tests::rdf12_reifiers_triple_terms_and_annotations ... ok
+2026-09-10T18:20:46.3229026Z test ttl::tests::relative_iri_with_no_base_rejected ... ok
+2026-09-10T18:20:46.3244071Z test ttl::tests::string_literals_all_quote_forms_and_escapes ... ok
+2026-09-10T18:20:46.3259057Z test ttl::tests::typed_and_lang_literals ... ok
+2026-09-10T18:20:46.3289152Z test ttl::tests::unclosed_bracket_and_paren_rejected ... ok
+2026-09-10T18:20:46.3289581Z test ttl::tests::undeclared_prefix_rejected ... ok
+2026-09-10T18:20:46.3289945Z test ttl::tests::unterminated_iriref_rejected ... ok
+2026-09-10T18:20:46.3290304Z test ttl::tests::unterminated_string_rejected ... ok
+2026-09-10T18:20:46.3290675Z test tests::presizing_is_pure_capacity_hint ... ok
+2026-09-10T18:20:46.8078375Z test compress::byte_attribution::block_size_cannot_flatten_the_scale_growth ... ok
+2026-09-10T18:20:50.8599787Z test compress::byte_attribution::store_bytes_per_triple_falls_monotonically_with_block_size ... ok
+2026-09-10T18:20:50.8600431Z 
+2026-09-10T18:20:50.8600790Z test result: ok. 175 passed; 0 failed; 4 ignored; 0 measured; 0 filtered out; finished in 7.70s
+2026-09-10T18:20:50.8601301Z 
+2026-09-10T18:20:50.8640645Z [1m[92m     Running[0m tests/dict_spill_activation.rs (target/debug/deps/dict_spill_activation-5a6fd52c3565791b)
+2026-09-10T18:20:50.8653905Z 
+2026-09-10T18:20:50.8654142Z running 0 tests
+2026-09-10T18:20:50.8654462Z 
+2026-09-10T18:20:50.8654977Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-09-10T18:20:50.8655561Z 
+2026-09-10T18:20:50.8656732Z [1m[92m     Running[0m tests/fork_differential.rs (target/debug/deps/fork_differential-b3563329b00a9b1c)
+2026-09-10T18:20:50.8674599Z 
+2026-09-10T18:20:50.8674795Z running 3 tests
+2026-09-10T18:20:50.8710650Z test named_graphs_fork_isolated ... ok
+2026-09-10T18:20:50.8799279Z test fork_pending_delta_accounting ... ok
+2026-09-10T18:20:54.5195345Z test fork_chain_matches_flat_rebuild ... ok
+2026-09-10T18:20:54.5195729Z 
+2026-09-10T18:20:54.5196096Z test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.65s
+2026-09-10T18:20:54.5196605Z 
+2026-09-10T18:20:54.5201469Z [1m[92m     Running[0m tests/mmap_corruption_oracle.rs (target/debug/deps/mmap_corruption_oracle-bdc7e5bac3259599)
+2026-09-10T18:20:54.5214269Z 
+2026-09-10T18:20:54.5214427Z running 0 tests
+2026-09-10T18:20:54.5214636Z 
+2026-09-10T18:20:54.5214954Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-09-10T18:20:54.5215319Z 
+2026-09-10T18:20:54.5217727Z [1m[92m     Running[0m tests/parallel_serial_load_differential.rs (target/debug/deps/parallel_serial_load_differential-7dd9c29244f2af38)
+2026-09-10T18:20:54.5227783Z 
+2026-09-10T18:20:54.5227952Z running 4 tests
+2026-09-10T18:20:54.5318051Z test ntriples_edge_documents_match_reference ... ok
+2026-09-10T18:20:54.7760581Z test turtle_load_matches_reference ... ok
+2026-09-10T18:20:54.7932388Z test ntriples_load_matches_reference ... ok
+2026-09-10T18:20:54.9519613Z test ntriples_load_reader_matches_reference ... ok
+2026-09-10T18:20:54.9519934Z 
+2026-09-10T18:20:54.9520196Z test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.43s
+2026-09-10T18:20:54.9520553Z 
+2026-09-10T18:20:54.9531040Z [1m[92m     Running[0m tests/proptest_roundtrip.rs (target/debug/deps/proptest_roundtrip-eca3b94de05be9d0)
+2026-09-10T18:20:54.9546357Z 
+2026-09-10T18:20:54.9546495Z running 17 tests
+2026-09-10T18:20:54.9569173Z test dict_blank_roundtrip_unit ... ok
+2026-09-10T18:20:54.9598939Z test dict_escaped_lit_roundtrip_unit ... ok
+2026-09-10T18:20:54.9619076Z test dict_inline_integer_unit ... ok
+2026-09-10T18:20:55.0459556Z test dict_intern_deterministic ... ok
+2026-09-10T18:20:55.0484555Z test dict_iri_roundtrip_unit ... ok
+2026-09-10T18:20:55.0489278Z test dict_lang_lit_roundtrip_unit ... ok
+2026-09-10T18:20:55.0490033Z test dict_intern_lookup_identity ... ok
+2026-09-10T18:20:55.0490736Z test dict_plain_lit_roundtrip_unit ... ok
+2026-09-10T18:20:55.0709675Z test escape_paths_are_exercised_by_generator ... ok
+2026-09-10T18:20:55.1202968Z test dict_intern_injective ... ok
+2026-09-10T18:20:55.1221320Z test nt_roundtrip_blank_nodes_unit ... ok
+2026-09-10T18:20:55.1249278Z test nt_roundtrip_escaped_literal_unit ... ok
+2026-09-10T18:20:55.1380330Z test dict_lookup_miss_returns_no_id ... ok
+2026-09-10T18:20:55.1389642Z test nt_serialize_fixpoint_unit ... ok
+2026-09-10T18:20:55.7460042Z test nt_parse_serialize_roundtrip ... ok
+2026-09-10T18:20:55.7865101Z test nt_serialize_fixpoint ... ok
+2026-09-10T18:20:56.2782605Z test dict_all_term_kinds_roundtrip ... ok
+2026-09-10T18:20:56.2783007Z 
+2026-09-10T18:20:56.2783352Z test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.32s
+2026-09-10T18:20:56.2783723Z 
+2026-09-10T18:20:56.2791087Z [1m[92m     Running[0m tests/snapshot.rs (target/debug/deps/snapshot-7dbc56d96b24039b)
+2026-09-10T18:20:56.2804869Z 
+2026-09-10T18:20:56.2805059Z running 7 tests
+2026-09-10T18:20:56.2809846Z test snapshot_is_send_sync ... ok
+2026-09-10T18:20:56.2829253Z test base_mutation_after_snapshot_invisible_to_snapshot ... ok
+2026-09-10T18:20:56.2830015Z test snapshot_mutation_invisible_to_base ... ok
+2026-09-10T18:20:56.2830794Z test snapshot_includes_pending_overlay_and_survives_base_compaction ... ok
+2026-09-10T18:20:56.2831587Z test snapshot_sees_point_in_time_triples ... ok
+2026-09-10T18:20:56.2832187Z test snapshot_covers_named_graphs ... ok
+2026-09-10T18:20:56.5685403Z test snapshot_shares_base_indexes_no_duplication ... ok
+2026-09-10T18:20:56.5685789Z 
+2026-09-10T18:20:56.5686203Z test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.29s
+2026-09-10T18:20:56.5693418Z 
+2026-09-10T18:20:56.5699013Z [1m[92m   Doc-tests[0m sparq_core
+2026-09-10T18:20:56.6673837Z 
+2026-09-10T18:20:56.6675267Z running 1 test
+2026-09-10T18:20:56.7838718Z test crates/sparq-core/src/lib.rs - (line 18) ... ok
+2026-09-10T18:20:56.7839602Z 
+2026-09-10T18:20:56.7839977Z test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
+2026-09-10T18:20:56.7840511Z 
+2026-09-10T18:20:56.7959247Z + cargo clippy -p sparq-core --features native-ttl --all-targets -- -D warnings
+2026-09-10T18:20:57.0543064Z [1m[92m    Checking[0m sparq-core v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-core)
+2026-09-10T18:20:59.2188956Z [1m[92m    Finished[0m `dev` profile [unoptimized + debuginfo] target(s) in 2.37s
+2026-09-10T18:20:59.2404779Z ##[endgroup]
+2026-09-10T18:20:59.2406375Z ##[group]opt-in sparq-core (iri-fast)
+2026-09-10T18:20:59.2406749Z + cargo build -p sparq-core --features iri-fast
+2026-09-10T18:20:59.4693948Z [1m[92m   Compiling[0m sparq-core v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-core)
+2026-09-10T18:21:01.0491594Z [1m[92m    Finished[0m `dev` profile [unoptimized + debuginfo] target(s) in 1.78s
+2026-09-10T18:21:01.0684376Z + cargo test -p sparq-core --features iri-fast
+2026-09-10T18:21:01.2793567Z [1m[92m   Compiling[0m sparq-core v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-core)
+2026-09-10T18:21:05.4899454Z [1m[92m    Finished[0m `test` profile [unoptimized + debuginfo] target(s) in 4.39s
+2026-09-10T18:21:05.4989054Z [1m[92m     Running[0m unittests src/lib.rs (target/debug/deps/sparq_core-4b069b100a0333c9)
+2026-09-10T18:21:05.5005293Z 
+2026-09-10T18:21:05.5005735Z running 159 tests
+2026-09-10T18:21:05.5009885Z test build_timing::tests::pipelined_path_labels_occupancy_and_surfaces_consolidate_bucket ... ok
+2026-09-10T18:21:05.5011043Z test build_timing::tests::pipelined_path_without_inline_consolidate_omits_the_term ... ok
+2026-09-10T18:21:05.5012338Z test build_timing::tests::serial_path_labels_buckets_serial_and_has_no_consolidate_term ... ok
+2026-09-10T18:21:05.5013829Z test compress::byte_attribution::discriminate_h1_h2_h3 ... ignored, spike discriminator: run explicitly with --ignored --nocapture
+2026-09-10T18:21:05.5015728Z test compress::byte_attribution::measure_byte_attribution_across_id_density ... ignored, spike measurement: run explicitly with --ignored --nocapture (allocates ~hundreds of MB)
+2026-09-10T18:21:06.0203131Z test compress::byte_attribution::attribution_total_equals_real_encoded_length ... ok
+2026-09-10T18:21:06.0219670Z test compress::byte_attribution::sweep_block_size_across_id_density ... ignored, spike measurement: run explicitly with --ignored --nocapture (allocates ~hundreds of MB)
+2026-09-10T18:21:06.0774498Z test compress::tests::count_range_equals_materialised_range_len ... ok
+2026-09-10T18:21:06.0911012Z test compress::tests::range_matches_binary_search ... ok
+2026-09-10T18:21:06.1001648Z test compress::tests::roundtrip_decode_all ... ok
+2026-09-10T18:21:06.1029486Z test dict::tests::filtered_rebuild_from_blob_retains_nested_triple_dependencies ... ok
+2026-09-10T18:21:06.1032556Z test dict::tests::filtered_rebuild_moves_arena_records_and_filters_metadata ... ok
+2026-09-10T18:21:06.1041929Z test dict::tests::in_memory_dedup_has_only_the_h2_tag_prefilter ... ok
+2026-09-10T18:21:06.1043245Z test dict::tests::inline_id_of_int_matches_intern_and_respects_boundaries ... ok
+2026-09-10T18:21:06.1044105Z test dict::tests::inline_integer_roundtrip_and_boundaries ... ok
+2026-09-10T18:21:06.1069856Z test dict::tests::intern_partials_rejects_malformed_triple_component ... ok
+2026-09-10T18:21:06.1100986Z test dict::tests::into_blob_roundtrips ... ok
+2026-09-10T18:21:06.1110574Z test dict::tests::iri_prefix_factoring_roundtrips ... ok
+2026-09-10T18:21:06.1130991Z test dict::tests::is_inline_partition_boundaries ... ok
+2026-09-10T18:21:06.1159331Z test dict::tests::lang_dir_suffix_validated_and_paths_agree ... ok
+2026-09-10T18:21:06.1199465Z test dict::tests::merge_remap_translates_triple_term_components ... ok
+2026-09-10T18:21:06.1200328Z test dict::tests::merged_dict_lookup_and_intern_after_build_table ... ok
+2026-09-10T18:21:06.1201626Z test dict::tests::nested_triple_terms_roundtrip ... ok
+2026-09-10T18:21:06.1202588Z test dict::tests::non_canonical_and_out_of_range_do_not_inline ... ok
+2026-09-10T18:21:06.1203442Z test dict::tests::non_integer_terms_get_dictionary_ids_below_inline_base ... ok
+2026-09-10T18:21:06.1204277Z test dict::tests::plain_string_value_only_plain_strings ... ok
+2026-09-10T18:21:06.1205233Z test dict::tests::reconstruct_triple_wrong_kind_component_is_safe_not_panic ... ok
+2026-09-10T18:21:06.1248922Z test dict::tests::sharded_dict_roundtrips_and_preserves_order ... ok
+2026-09-10T18:21:06.1278974Z test dict::tests::triple_terms_intern_structurally_and_roundtrip ... ok
+2026-09-10T18:21:06.1338890Z test dict::tests::triple_terms_survive_blob_compaction ... ok
+2026-09-10T18:21:06.1368942Z test dict::tests::triple_terms_survive_save_open ... ok
+2026-09-10T18:21:06.1398961Z test dir_roundtrip_test::apply_delta_nquads_routes_per_graph ... ok
+2026-09-10T18:21:06.1429007Z test dir_roundtrip_test::compact_keeps_caches_shareable_for_the_next_fork ... ok
+2026-09-10T18:21:06.1458915Z test dir_roundtrip_test::dir_literal_roundtrip ... ok
+2026-09-10T18:21:06.1488970Z test dir_roundtrip_test::language_tag_casing_consistent_across_formats ... ok
+2026-09-10T18:21:06.3259813Z test compress::byte_attribution::attribution_total_exact_at_every_swept_block_size ... ok
+2026-09-10T18:21:06.3260924Z test iri::tests::is_valid_iri_matches_oxiri ... ok
+2026-09-10T18:21:06.3288972Z test iri::tests::memo_capacity_is_a_bounded_fifo_ring ... ok
+2026-09-10T18:21:06.3318910Z test iri::tests::memo_fast_path_fires_on_repeat_prefix ... ok
+2026-09-10T18:21:06.3338921Z test iri::tests::prefix_extraction_covers_the_forms ... ok
+2026-09-10T18:21:06.3359338Z test iri::tests::safe_suffix_byte_table_matches_predicate ... ok
+2026-09-10T18:21:06.3378936Z test nt::tests::already_lowercase_language_tag_unchanged ... ok
+2026-09-10T18:21:06.3398944Z test nt::tests::blank_node_subject_cache_no_false_hit_on_prefix_match ... ok
+2026-09-10T18:21:06.3408970Z test nt::tests::case_variant_language_tags_intern_to_same_id ... ok
+2026-09-10T18:21:06.3428983Z test nt::tests::deeply_nested_triple_term_in_nquads_span_returns_clean_error ... ok
+2026-09-10T18:21:06.3429991Z test nt::tests::deeply_nested_triple_term_returns_clean_error_not_stack_overflow ... ok
+2026-09-10T18:21:06.3468931Z test nt::tests::directional_language_tag_lowercases_lang_part_only ... ok
+2026-09-10T18:21:06.3488347Z test nt::tests::escaped_and_multibyte_literal_span_round_trips ... ok
+2026-09-10T18:21:06.3519218Z test nt::tests::language_tag_lowercased_to_match_oxttl ... ok
+2026-09-10T18:21:06.3559011Z test nt::tests::language_tag_terminated_by_multibyte_errors_cleanly ... ok
+2026-09-10T18:21:06.3578966Z test nt::tests::multibyte_spans_at_every_delimiter_round_trip ... ok
+2026-09-10T18:21:06.3608951Z test nt::tests::nested_and_blank_node_triple_terms_parse ... ok
+2026-09-10T18:21:06.3609651Z test nt::tests::nested_triple_term_at_limit_parses ... ok
+2026-09-10T18:21:06.3638986Z test nt::tests::nquads_graph_label_accepts_iri_and_blank_only ... ok
+2026-09-10T18:21:06.3639714Z test nt::tests::nquads_graph_label_rejects_literal ... ok
+2026-09-10T18:21:06.3640411Z test nt::tests::nquads_graph_label_rejects_triple_term ... ok
+2026-09-10T18:21:06.3641064Z test nt::tests::nquads_language_tag_lowercased ... ok
+2026-09-10T18:21:06.3641772Z test nt::tests::oversized_subject_bypasses_cache_parses_correctly ... ok
+2026-09-10T18:21:06.3642541Z test nt::tests::parse_chunk_dict_capacity_is_pure_hint ... ok
+2026-09-10T18:21:06.3668880Z test nt::tests::parse_chunk_rejects_invalid_utf8 ... ok
+2026-09-10T18:21:06.3669519Z test nt::tests::parse_quads_chunk_multibyte_graph_and_terms_round_trip ... ok
+2026-09-10T18:21:06.3670310Z test nt::tests::parse_quads_chunk_rejects_invalid_utf8 ... ok
+2026-09-10T18:21:06.3670934Z test nt::tests::plain_triples_unaffected ... ok
+2026-09-10T18:21:06.3671557Z test nt::tests::shuffled_input_store_matches_grouped ... ok
+2026-09-10T18:21:06.3672248Z test nt::tests::subject_run_cache_hits_produce_correct_ids ... ok
+2026-09-10T18:21:06.3673447Z test nt::tests::triple_term_object_parses_and_interns_structurally ... ok
+2026-09-10T18:21:06.3674286Z test nt::tests::triple_term_only_in_object_position ... ok
+2026-09-10T18:21:06.3674881Z test nt::tests::unterminated_triple_term_errors ... ok
+2026-09-10T18:21:06.3880238Z test store::overlay_deleted_tests::deleted_cache_compressed_base_matches_rebuild ... ok
+2026-09-10T18:21:06.3939439Z test store::overlay_deleted_tests::deleted_cache_graph_snapshot_retains_warm_generation ... ok
+2026-09-10T18:21:06.4318109Z test iri::tests::differential_fuzz_fast_path_equivalent_to_oxiri ... ok
+2026-09-10T18:21:06.4332640Z test store::overlay_deleted_tests::deleted_projection_feature_off_preserves_main_layout_and_heap ... ok
+2026-09-10T18:21:06.4353542Z test store::tests::build_raw_perms_no_capacity_slack ... ok
+2026-09-10T18:21:06.4404716Z test store::overlay_deleted_tests::deleted_cache_matches_rebuild_after_mixed_deltas ... ok
+2026-09-10T18:21:06.4430308Z test store::tests::derive_plan_pairs_are_derivable ... ok
+2026-09-10T18:21:06.5627215Z test store::tests::derived_perms_match_radix_all_build ... ok
+2026-09-10T18:21:06.5681272Z test store::tests::from_triples_independent_dedup_removes_all_duplicates ... ok
+2026-09-10T18:21:06.5909600Z test store::tests::compressed_scans_match_raw ... ok
+2026-09-10T18:21:06.5929525Z test store::tests::measure_derived_vs_radix_all_build ... ignored, timing measurement; non-canonical, run explicitly
+2026-09-10T18:21:06.7289900Z test store::tests::from_triples_perms_match_reference_sort ... ok
+2026-09-10T18:21:06.7339192Z test store::tests::overlay_zero_copy_fast_path ... ok
+2026-09-10T18:21:07.1087290Z test store::tests::radix_sort_equiv_comparison_sort ... ok
+2026-09-10T18:21:07.1103263Z test store::tests::scan_perm_selects_named_permutation ... ok
+2026-09-10T18:21:07.1110073Z test strdist::tests::edit_distance_basics ... ok
+2026-09-10T18:21:07.1268553Z test strdist::tests::edit_distance_is_symmetric ... ok
+2026-09-10T18:21:07.1479429Z test strdist::tests::edit_distance_satisfies_triangle_inequality ... ok
+2026-09-10T18:21:07.1489211Z test temporal::tests::cache_cell_matches_per_row_parse ... ok
+2026-09-10T18:21:07.1490666Z test temporal::tests::cmp_t_total_is_kind_first_and_total ... ok
+2026-09-10T18:21:07.1492166Z test temporal::tests::cmp_tl_matches_xpath_and_temporal_cmp ... ok
+2026-09-10T18:21:07.1495006Z test temporal::tests::cmp_tl_total_extends_cmp_tl_without_contradicting_it ... ok
+2026-09-10T18:21:07.1499325Z test temporal::tests::date_and_datetime_are_disjoint_families ... ok
+2026-09-10T18:21:07.1500710Z test temporal::tests::datetime_and_datetimestamp_share_a_family_date_is_disjoint ... ok
+2026-09-10T18:21:07.1502480Z test temporal::tests::equal_instants_across_timezones ... ok
+2026-09-10T18:21:07.1504151Z test temporal::tests::ill_formed_and_foreign_datatypes_are_not_cached ... ok
+2026-09-10T18:21:07.1505718Z test temporal::tests::instant_normalises_timezone_to_utc ... ok
+2026-09-10T18:21:07.1507178Z test temporal::tests::mixed_presence_window_is_indeterminate ... ok
+2026-09-10T18:21:07.1508758Z test temporal::tests::parse_civil_date_epoch_ordering_and_validation ... ok
+2026-09-10T18:21:07.1513176Z test temporal::tests::parse_date_handles_timezone_offset_and_bare_date ... ok
+2026-09-10T18:21:07.1514269Z test temporal::tests::parse_tz_parses_offsets_and_rejects_malformed ... ok
+2026-09-10T18:21:07.1515247Z test temporal::tests::subsecond_precision_preserved ... ok
+2026-09-10T18:21:07.1516699Z test temporal::tests::witness_indeterminate_window_lexical_fallback_was_intransitive ... ok
+2026-09-10T18:21:07.1518140Z test tests::decimal_significant_digits_counts ... ok
+2026-09-10T18:21:07.1519392Z test tests::dict_iter_is_dense_and_complete ... ok
+2026-09-10T18:21:07.1520451Z test tests::estimate_turtle_triples_never_zero_and_monotonic ... ok
+2026-09-10T18:21:07.1522194Z test tests::exact_numeric_lexical_returns_exact_form_or_none ... ok
+2026-09-10T18:21:07.1523186Z test tests::graph_iter_ids_orders_and_overlay ... ok
+2026-09-10T18:21:07.1562272Z test tests::graph_prefix_range_scan_and_cache_coherence ... ok
+2026-09-10T18:21:07.1638154Z test tests::has_high_precision_decimal_flags_only_inexact_decimals ... ok
+2026-09-10T18:21:07.1659660Z test tests::has_high_precision_decimal_memo_fork_compact_isolation ... ok
+2026-09-10T18:21:07.1672820Z test tests::has_high_precision_decimal_memo_invalidates_stored_growth ... ok
+2026-09-10T18:21:07.1704903Z test tests::has_high_precision_decimal_memo_preserves_unchanged_dictionary ... ok
+2026-09-10T18:21:07.1713375Z test tests::has_high_precision_decimal_memo_survives_delta_insert ... ok
+2026-09-10T18:21:07.1746275Z test tests::insert_triple_equivalent_to_text_load ... ok
+2026-09-10T18:21:07.1788990Z test tests::insert_triple_interns_and_is_set_valued ... ok
+2026-09-10T18:21:07.1819101Z test tests::is_integer_datatype_accepts_integer_subtypes_only ... ok
+2026-09-10T18:21:07.1849014Z test tests::is_literal_id_classifies_each_kind ... ok
+2026-09-10T18:21:07.1849636Z test tests::load_and_scan ... ok
+2026-09-10T18:21:07.2299530Z test store::tests::overlay_scans_match_rebuild ... ok
+2026-09-10T18:21:07.2359181Z test tests::load_dataset_rejects_unknown_format ... ok
+2026-09-10T18:21:07.3266065Z test tests::load_dataset_nquads_public_entry_matches_serial ... ok
+2026-09-10T18:21:07.3339258Z test tests::load_dataset_trig_still_serial_and_correct ... ok
+2026-09-10T18:21:07.3369481Z test tests::load_dataset_with_base_resolves_and_preserves_named_graphs ... ok
+2026-09-10T18:21:07.3979858Z test tests::load_reader_parallel_handles_triple_terms ... ok
+2026-09-10T18:21:07.4190029Z test tests::load_dataset_trig_public_entry_matches_serial ... ok
+2026-09-10T18:21:07.4246162Z test tests::load_str_with_base_resolves_relative_iris ... ok
+2026-09-10T18:21:07.5014981Z test tests::merge_partials_sharded_consolidates_triple_terms ... ok
+2026-09-10T18:21:07.5040854Z test tests::named_graph_by_name_scopes_to_one_graph ... ok
+2026-09-10T18:21:07.5101639Z test tests::new_and_default_are_empty_graphs ... ok
+2026-09-10T18:21:07.5115661Z test tests::next_terminator_memchr_matches_scalar ... ok
+2026-09-10T18:21:07.6014844Z test tests::ntriples_parallel_matches_sequential ... ok
+2026-09-10T18:21:07.6148156Z test tests::numeric_cache_alignment_fixes_both_divergences ... ok
+2026-09-10T18:21:07.6149142Z test tests::numeric_cache_hit_matches_shared_parse_xsd_f64_plumbing ... ok
+2026-09-10T18:21:07.6153957Z test tests::numeric_cache_lookup_covers_outlined_storage_variants ... ok
+2026-09-10T18:21:07.6158049Z test tests::numeric_cache_value_datatype_aware_acceptance ... ok
+2026-09-10T18:21:07.6199048Z test tests::numerics_of_borrowed_path_byte_identical_to_owned ... ok
+2026-09-10T18:21:07.9859614Z test tests::overlay_differential_200_batches ... ok
+2026-09-10T18:21:08.1639945Z test tests::load_reader_parallel_short_reads_match_sequential ... ok
+2026-09-10T18:21:08.5135884Z test tests::parallel_nquads_matches_serial ... ok
+2026-09-10T18:21:08.5159686Z test tests::parallel_trig_rejects_malformed ... ok
+2026-09-10T18:21:08.5568862Z test tests::parallel_trig_matches_serial ... ok
+2026-09-10T18:21:08.6134160Z test tests::parallel_turtle_escaped_hash_in_local ... ok
+2026-09-10T18:21:08.8199864Z test tests::parallel_turtle_interspersed_directives_match_serial ... ok
+2026-09-10T18:21:08.9279837Z test tests::parallel_turtle_bnodes_match_serial ... ok
+2026-09-10T18:21:08.9829716Z test tests::parallel_turtle_matches_serial ... ok
+2026-09-10T18:21:09.0023984Z test tests::parallel_turtle_rejects_malformed ... ok
+2026-09-10T18:21:09.1820006Z test tests::parallel_turtle_quoted_triples_match_serial ... ok
+2026-09-10T18:21:09.3146141Z test tests::parallel_turtle_sharded_merge_matches_serial ... ok
+2026-09-10T18:21:09.3221978Z test tests::parse_to_triples_rejects_unknown_format ... ok
+2026-09-10T18:21:09.3229220Z test tests::parse_xsd_f64_shared_acceptance_set ... ok
+2026-09-10T18:21:09.3269271Z test tests::predicate_has_literal_object_iri_only_vs_literal_vs_bnode ... ok
+2026-09-10T18:21:09.4549908Z test tests::predicate_has_literal_object_reflects_overlay_update ... ok
+2026-09-10T18:21:09.5354968Z test tests::parallel_turtle_terminator_scan_is_linear_not_quadratic ... ok
+2026-09-10T18:21:09.6099839Z test tests::presized_turtle_parse_is_hint_only_matches_oxttl_direct ... ok
+2026-09-10T18:21:09.6110894Z test tests::remove_triple_retracts_and_absent_is_noop ... ok
+2026-09-10T18:21:09.6111935Z test tests::turtle_path_rejection_oracle ... ok
+2026-09-10T18:21:09.6112862Z test tests::turtle_rdf12_reification_surface_loads_desugared ... ok
+2026-09-10T18:21:09.7034439Z test tests::presizing_is_pure_capacity_hint ... ok
+2026-09-10T18:21:09.8045984Z test compress::byte_attribution::block_size_cannot_flatten_the_scale_growth ... ok
+2026-09-10T18:21:13.8553353Z test compress::byte_attribution::store_bytes_per_triple_falls_monotonically_with_block_size ... ok
+2026-09-10T18:21:13.8554024Z 
+2026-09-10T18:21:13.8554428Z test result: ok. 155 passed; 0 failed; 4 ignored; 0 measured; 0 filtered out; finished in 8.35s
+2026-09-10T18:21:13.8554794Z 
+2026-09-10T18:21:13.8594757Z [1m[92m     Running[0m tests/dict_spill_activation.rs (target/debug/deps/dict_spill_activation-e44d4d0bfd956c20)
+2026-09-10T18:21:13.8607771Z 
+2026-09-10T18:21:13.8607906Z running 0 tests
+2026-09-10T18:21:13.8608116Z 
+2026-09-10T18:21:13.8609117Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-09-10T18:21:13.8609706Z 
+2026-09-10T18:21:13.8611498Z [1m[92m     Running[0m tests/fork_differential.rs (target/debug/deps/fork_differential-899df46a67eb6e08)
+2026-09-10T18:21:13.8623345Z 
+2026-09-10T18:21:13.8623477Z running 3 tests
+2026-09-10T18:21:13.8641167Z test named_graphs_fork_isolated ... ok
+2026-09-10T18:21:13.8701077Z test fork_pending_delta_accounting ... ok
+2026-09-10T18:21:17.5692494Z test fork_chain_matches_flat_rebuild ... ok
+2026-09-10T18:21:17.5692792Z 
+2026-09-10T18:21:17.5693066Z test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.71s
+2026-09-10T18:21:17.5693424Z 
+2026-09-10T18:21:17.5698350Z [1m[92m     Running[0m tests/mmap_corruption_oracle.rs (target/debug/deps/mmap_corruption_oracle-454bae3e8bbeea7c)
+2026-09-10T18:21:17.5711296Z 
+2026-09-10T18:21:17.5711495Z running 0 tests
+2026-09-10T18:21:17.5711728Z 
+2026-09-10T18:21:17.5712412Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-09-10T18:21:17.5712992Z 
+2026-09-10T18:21:17.5714479Z [1m[92m     Running[0m tests/parallel_serial_load_differential.rs (target/debug/deps/parallel_serial_load_differential-a218f19e73a4f942)
+2026-09-10T18:21:17.5725805Z 
+2026-09-10T18:21:17.5725955Z running 4 tests
+2026-09-10T18:21:17.5859752Z test ntriples_edge_documents_match_reference ... ok
+2026-09-10T18:21:17.7659761Z test ntriples_load_matches_reference ... ok
+2026-09-10T18:21:17.8201782Z test turtle_load_matches_reference ... ok
+2026-09-10T18:21:18.0485932Z test ntriples_load_reader_matches_reference ... ok
+2026-09-10T18:21:18.0486255Z 
+2026-09-10T18:21:18.0486694Z test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.48s
+2026-09-10T18:21:18.0487132Z 
+2026-09-10T18:21:18.0500506Z [1m[92m     Running[0m tests/proptest_roundtrip.rs (target/debug/deps/proptest_roundtrip-89ec4c00d748bc24)
+2026-09-10T18:21:18.0516441Z 
+2026-09-10T18:21:18.0516697Z running 17 tests
+2026-09-10T18:21:18.0529352Z test dict_blank_roundtrip_unit ... ok
+2026-09-10T18:21:18.0532993Z test dict_escaped_lit_roundtrip_unit ... ok
+2026-09-10T18:21:18.0533723Z test dict_inline_integer_unit ... ok
+2026-09-10T18:21:18.1409704Z test dict_intern_deterministic ... ok
+2026-09-10T18:21:18.1449677Z test dict_iri_roundtrip_unit ... ok
+2026-09-10T18:21:18.1479174Z test dict_lang_lit_roundtrip_unit ... ok
+2026-09-10T18:21:18.1509735Z test dict_intern_lookup_identity ... ok
+2026-09-10T18:21:18.1529131Z test dict_plain_lit_roundtrip_unit ... ok
+2026-09-10T18:21:18.1689901Z test escape_paths_are_exercised_by_generator ... ok
+2026-09-10T18:21:18.2143097Z test dict_intern_injective ... ok
+2026-09-10T18:21:18.2169324Z test nt_roundtrip_blank_nodes_unit ... ok
+2026-09-10T18:21:18.2199619Z test nt_roundtrip_escaped_literal_unit ... ok
+2026-09-10T18:21:18.2354695Z test dict_lookup_miss_returns_no_id ... ok
+2026-09-10T18:21:18.2374599Z test nt_serialize_fixpoint_unit ... ok
+2026-09-10T18:21:18.8349525Z test nt_parse_serialize_roundtrip ... ok
+2026-09-10T18:21:18.9087630Z test nt_serialize_fixpoint ... ok
+2026-09-10T18:21:19.3896467Z test dict_all_term_kinds_roundtrip ... ok
+2026-09-10T18:21:19.3896943Z 
+2026-09-10T18:21:19.3897557Z test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.34s
+2026-09-10T18:21:19.3898092Z 
+2026-09-10T18:21:19.3911415Z [1m[92m     Running[0m tests/snapshot.rs (target/debug/deps/snapshot-3133e801be3dbd3e)
+2026-09-10T18:21:19.3925581Z 
+2026-09-10T18:21:19.3925790Z running 7 tests
+2026-09-10T18:21:19.3933238Z test snapshot_is_send_sync ... ok
+2026-09-10T18:21:19.3939912Z test base_mutation_after_snapshot_invisible_to_snapshot ... ok
+2026-09-10T18:21:19.3940598Z test snapshot_mutation_invisible_to_base ... ok
+2026-09-10T18:21:19.3941482Z test snapshot_includes_pending_overlay_and_survives_base_compaction ... ok
+2026-09-10T18:21:19.3942291Z test snapshot_sees_point_in_time_triples ... ok
+2026-09-10T18:21:19.3948739Z test snapshot_covers_named_graphs ... ok
+2026-09-10T18:21:19.6899828Z test snapshot_shares_base_indexes_no_duplication ... ok
+2026-09-10T18:21:19.6900579Z 
+2026-09-10T18:21:19.6901381Z test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.30s
+2026-09-10T18:21:19.6901945Z 
+2026-09-10T18:21:19.6911253Z [1m[92m   Doc-tests[0m sparq_core
+2026-09-10T18:21:19.7907183Z 
+2026-09-10T18:21:19.7907829Z running 1 test
+2026-09-10T18:21:19.9065462Z test crates/sparq-core/src/lib.rs - (line 18) ... ok
+2026-09-10T18:21:19.9065893Z 
+2026-09-10T18:21:19.9066263Z test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
+2026-09-10T18:21:19.9066811Z 
+2026-09-10T18:21:19.9190487Z + cargo clippy -p sparq-core --features iri-fast --all-targets -- -D warnings
+2026-09-10T18:21:20.1790500Z [1m[92m    Checking[0m sparq-core v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-core)
+2026-09-10T18:21:22.1968923Z [1m[92m    Finished[0m `dev` profile [unoptimized + debuginfo] target(s) in 2.22s
+2026-09-10T18:21:22.2187270Z ##[endgroup]
+2026-09-10T18:21:22.2190308Z ##[group]opt-in sparq-core (block-bloom)
+2026-09-10T18:21:22.2190750Z + cargo build -p sparq-core --features block-bloom
+2026-09-10T18:21:22.4438597Z [1m[92m   Compiling[0m sparq-core v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-core)
+2026-09-10T18:21:23.9610263Z [1m[92m    Finished[0m `dev` profile [unoptimized + debuginfo] target(s) in 1.71s
+2026-09-10T18:21:23.9801392Z + cargo test -p sparq-core --features block-bloom
+2026-09-10T18:21:24.1860570Z [1m[92m   Compiling[0m sparq-core v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-core)
+2026-09-10T18:21:28.3936141Z [1m[92m    Finished[0m `test` profile [unoptimized + debuginfo] target(s) in 4.38s
+2026-09-10T18:21:28.4029163Z [1m[92m     Running[0m unittests src/lib.rs (target/debug/deps/sparq_core-8a6c7e150e9752fa)
+2026-09-10T18:21:28.4046841Z 
+2026-09-10T18:21:28.4047128Z running 160 tests
+2026-09-10T18:21:28.4051393Z test build_timing::tests::pipelined_path_labels_occupancy_and_surfaces_consolidate_bucket ... ok
+2026-09-10T18:21:28.4052293Z test build_timing::tests::pipelined_path_without_inline_consolidate_omits_the_term ... ok
+2026-09-10T18:21:28.4059789Z test build_timing::tests::serial_path_labels_buckets_serial_and_has_no_consolidate_term ... ok
+2026-09-10T18:21:28.4061194Z test compress::byte_attribution::discriminate_h1_h2_h3 ... ignored, spike discriminator: run explicitly with --ignored --nocapture
+2026-09-10T18:21:28.4063109Z test compress::byte_attribution::measure_byte_attribution_across_id_density ... ignored, spike measurement: run explicitly with --ignored --nocapture (allocates ~hundreds of MB)
+2026-09-10T18:21:28.9286657Z test compress::byte_attribution::attribution_total_equals_real_encoded_length ... ok
+2026-09-10T18:21:28.9289917Z test compress::byte_attribution::sweep_block_size_across_id_density ... ignored, spike measurement: run explicitly with --ignored --nocapture (allocates ~hundreds of MB)
+2026-09-10T18:21:28.9670033Z test compress::tests::bloom_decode_all_roundtrips ... ok
+2026-09-10T18:21:28.9869765Z test compress::tests::bloom_inert_for_non_equality_shapes ... ok
+2026-09-10T18:21:29.2229939Z test compress::tests::bloom_latency_baseline_matches_range ... ok
+2026-09-10T18:21:29.2347321Z test compress::byte_attribution::attribution_total_exact_at_every_swept_block_size ... ok
+2026-09-10T18:21:29.2879928Z test compress::tests::bloom_range_equals_binary_search_and_skips_blocks ... ok
+2026-09-10T18:21:29.3519362Z test compress::tests::count_range_equals_materialised_range_len ... ok
+2026-09-10T18:21:29.3529532Z test compress::tests::measure_bloom_selective_scan_latency ... ignored, spike measurement: run explicitly with --ignored --nocapture
+2026-09-10T18:21:29.3559828Z test compress::tests::measure_bloom_skip_and_sizing ... ignored, spike measurement: run explicitly with --ignored --nocapture
+2026-09-10T18:21:29.3608961Z test compress::tests::range_matches_binary_search ... ok
+2026-09-10T18:21:29.3715974Z test compress::tests::roundtrip_decode_all ... ok
+2026-09-10T18:21:29.3739345Z test dict::tests::filtered_rebuild_from_blob_retains_nested_triple_dependencies ... ok
+2026-09-10T18:21:29.3769042Z test dict::tests::filtered_rebuild_moves_arena_records_and_filters_metadata ... ok
+2026-09-10T18:21:29.3799079Z test dict::tests::in_memory_dedup_has_only_the_h2_tag_prefilter ... ok
+2026-09-10T18:21:29.3829049Z test dict::tests::inline_id_of_int_matches_intern_and_respects_boundaries ... ok
+2026-09-10T18:21:29.3830117Z test dict::tests::inline_integer_roundtrip_and_boundaries ... ok
+2026-09-10T18:21:29.3859016Z test dict::tests::intern_partials_rejects_malformed_triple_component ... ok
+2026-09-10T18:21:29.3888861Z test dict::tests::into_blob_roundtrips ... ok
+2026-09-10T18:21:29.3919197Z test dict::tests::iri_prefix_factoring_roundtrips ... ok
+2026-09-10T18:21:29.3920152Z test dict::tests::is_inline_partition_boundaries ... ok
+2026-09-10T18:21:29.3921038Z test dict::tests::lang_dir_suffix_validated_and_paths_agree ... ok
+2026-09-10T18:21:29.3921996Z test dict::tests::merge_remap_translates_triple_term_components ... ok
+2026-09-10T18:21:29.3922971Z test dict::tests::merged_dict_lookup_and_intern_after_build_table ... ok
+2026-09-10T18:21:29.3923885Z test dict::tests::nested_triple_terms_roundtrip ... ok
+2026-09-10T18:21:29.3924743Z test dict::tests::non_canonical_and_out_of_range_do_not_inline ... ok
+2026-09-10T18:21:29.3925744Z test dict::tests::non_integer_terms_get_dictionary_ids_below_inline_base ... ok
+2026-09-10T18:21:29.3926741Z test dict::tests::plain_string_value_only_plain_strings ... ok
+2026-09-10T18:21:29.3927743Z test dict::tests::reconstruct_triple_wrong_kind_component_is_safe_not_panic ... ok
+2026-09-10T18:21:29.3928939Z test dict::tests::sharded_dict_roundtrips_and_preserves_order ... ok
+2026-09-10T18:21:29.3930197Z test dict::tests::triple_terms_intern_structurally_and_roundtrip ... ok
+2026-09-10T18:21:29.3931160Z test dict::tests::triple_terms_survive_blob_compaction ... ok
+2026-09-10T18:21:29.3931996Z test dict::tests::triple_terms_survive_save_open ... ok
+2026-09-10T18:21:29.3932932Z test dir_roundtrip_test::apply_delta_nquads_routes_per_graph ... ok
+2026-09-10T18:21:29.3933966Z test dir_roundtrip_test::compact_keeps_caches_shareable_for_the_next_fork ... ok
+2026-09-10T18:21:29.3934908Z test dir_roundtrip_test::dir_literal_roundtrip ... ok
+2026-09-10T18:21:29.3935828Z test dir_roundtrip_test::language_tag_casing_consistent_across_formats ... ok
+2026-09-10T18:21:29.3936812Z test nt::tests::already_lowercase_language_tag_unchanged ... ok
+2026-09-10T18:21:29.3937780Z test nt::tests::blank_node_subject_cache_no_false_hit_on_prefix_match ... ok
+2026-09-10T18:21:29.3939639Z test nt::tests::case_variant_language_tags_intern_to_same_id ... ok
+2026-09-10T18:21:29.3941176Z test nt::tests::deeply_nested_triple_term_in_nquads_span_returns_clean_error ... ok
+2026-09-10T18:21:29.3942325Z test nt::tests::deeply_nested_triple_term_returns_clean_error_not_stack_overflow ... ok
+2026-09-10T18:21:29.3943612Z test nt::tests::directional_language_tag_lowercases_lang_part_only ... ok
+2026-09-10T18:21:29.3944583Z test nt::tests::escaped_and_multibyte_literal_span_round_trips ... ok
+2026-09-10T18:21:29.3945495Z test nt::tests::language_tag_lowercased_to_match_oxttl ... ok
+2026-09-10T18:21:29.3946419Z test nt::tests::language_tag_terminated_by_multibyte_errors_cleanly ... ok
+2026-09-10T18:21:29.3947398Z test nt::tests::multibyte_spans_at_every_delimiter_round_trip ... ok
+2026-09-10T18:21:29.3948298Z test nt::tests::nested_and_blank_node_triple_terms_parse ... ok
+2026-09-10T18:21:29.3949234Z test nt::tests::nested_triple_term_at_limit_parses ... ok
+2026-09-10T18:21:29.3950090Z test nt::tests::nquads_graph_label_accepts_iri_and_blank_only ... ok
+2026-09-10T18:21:29.3950942Z test nt::tests::nquads_graph_label_rejects_literal ... ok
+2026-09-10T18:21:29.3951778Z test nt::tests::nquads_graph_label_rejects_triple_term ... ok
+2026-09-10T18:21:29.3952599Z test nt::tests::nquads_language_tag_lowercased ... ok
+2026-09-10T18:21:29.3953466Z test nt::tests::oversized_subject_bypasses_cache_parses_correctly ... ok
+2026-09-10T18:21:29.4055315Z test nt::tests::parse_chunk_dict_capacity_is_pure_hint ... ok
+2026-09-10T18:21:29.4056963Z test nt::tests::parse_chunk_rejects_invalid_utf8 ... ok
+2026-09-10T18:21:29.4058028Z test nt::tests::parse_quads_chunk_multibyte_graph_and_terms_round_trip ... ok
+2026-09-10T18:21:29.4059237Z test nt::tests::parse_quads_chunk_rejects_invalid_utf8 ... ok
+2026-09-10T18:21:29.4060088Z test nt::tests::plain_triples_unaffected ... ok
+2026-09-10T18:21:29.4060900Z test nt::tests::shuffled_input_store_matches_grouped ... ok
+2026-09-10T18:21:29.4061801Z test nt::tests::subject_run_cache_hits_produce_correct_ids ... ok
+2026-09-10T18:21:29.4070413Z test nt::tests::triple_term_object_parses_and_interns_structurally ... ok
+2026-09-10T18:21:29.4080985Z test nt::tests::triple_term_only_in_object_position ... ok
+2026-09-10T18:21:29.4090860Z test nt::tests::unterminated_triple_term_errors ... ok
+2026-09-10T18:21:29.4479855Z test store::overlay_deleted_tests::deleted_cache_compressed_base_matches_rebuild ... ok
+2026-09-10T18:21:29.4540568Z test store::overlay_deleted_tests::deleted_cache_graph_snapshot_retains_warm_generation ... ok
+2026-09-10T18:21:29.4984941Z test store::overlay_deleted_tests::deleted_cache_matches_rebuild_after_mixed_deltas ... ok
+2026-09-10T18:21:29.5010810Z test store::overlay_deleted_tests::deleted_projection_feature_off_preserves_main_layout_and_heap ... ok
+2026-09-10T18:21:29.5039090Z test store::tests::build_raw_perms_no_capacity_slack ... ok
+2026-09-10T18:21:29.6219912Z test store::tests::compressed_scans_match_raw ... ok
+2026-09-10T18:21:29.6249033Z test store::tests::derive_plan_pairs_are_derivable ... ok
+2026-09-10T18:21:29.8339664Z test store::tests::derived_perms_match_radix_all_build ... ok
+2026-09-10T18:21:29.8459615Z test store::tests::from_triples_independent_dedup_removes_all_duplicates ... ok
+2026-09-10T18:21:30.0746367Z test store::tests::from_triples_perms_match_reference_sort ... ok
+2026-09-10T18:21:30.0747532Z test store::tests::measure_derived_vs_radix_all_build ... ignored, timing measurement; non-canonical, run explicitly
+2026-09-10T18:21:30.8309777Z test store::tests::overlay_scans_match_rebuild ... ok
+2026-09-10T18:21:30.8569587Z test store::tests::overlay_zero_copy_fast_path ... ok
+2026-09-10T18:21:31.3399691Z test compress::tests::bloom_model_matches_shipped_filter ... ok
+2026-09-10T18:21:31.3429021Z test store::tests::scan_perm_selects_named_permutation ... ok
+2026-09-10T18:21:31.3449277Z test strdist::tests::edit_distance_basics ... ok
+2026-09-10T18:21:31.3549714Z test strdist::tests::edit_distance_is_symmetric ... ok
+2026-09-10T18:21:31.3741760Z test strdist::tests::edit_distance_satisfies_triangle_inequality ... ok
+2026-09-10T18:21:31.3743023Z test temporal::tests::cache_cell_matches_per_row_parse ... ok
+2026-09-10T18:21:31.3789904Z test temporal::tests::cmp_t_total_is_kind_first_and_total ... ok
+2026-09-10T18:21:31.3792528Z test temporal::tests::cmp_tl_matches_xpath_and_temporal_cmp ... ok
+2026-09-10T18:21:31.3793829Z test temporal::tests::cmp_tl_total_extends_cmp_tl_without_contradicting_it ... ok
+2026-09-10T18:21:31.3795071Z test temporal::tests::date_and_datetime_are_disjoint_families ... ok
+2026-09-10T18:21:31.3796345Z test temporal::tests::datetime_and_datetimestamp_share_a_family_date_is_disjoint ... ok
+2026-09-10T18:21:31.3797583Z test temporal::tests::equal_instants_across_timezones ... ok
+2026-09-10T18:21:31.3799048Z test temporal::tests::ill_formed_and_foreign_datatypes_are_not_cached ... ok
+2026-09-10T18:21:31.3800254Z test temporal::tests::instant_normalises_timezone_to_utc ... ok
+2026-09-10T18:21:31.3801379Z test temporal::tests::mixed_presence_window_is_indeterminate ... ok
+2026-09-10T18:21:31.3802590Z test temporal::tests::parse_civil_date_epoch_ordering_and_validation ... ok
+2026-09-10T18:21:31.3803835Z test temporal::tests::parse_date_handles_timezone_offset_and_bare_date ... ok
+2026-09-10T18:21:31.3805074Z test temporal::tests::parse_tz_parses_offsets_and_rejects_malformed ... ok
+2026-09-10T18:21:31.3806229Z test temporal::tests::subsecond_precision_preserved ... ok
+2026-09-10T18:21:31.3807483Z test temporal::tests::witness_indeterminate_window_lexical_fallback_was_intransitive ... ok
+2026-09-10T18:21:31.3808904Z test tests::decimal_significant_digits_counts ... ok
+2026-09-10T18:21:31.3809890Z test tests::dict_iter_is_dense_and_complete ... ok
+2026-09-10T18:21:31.3810956Z test tests::estimate_turtle_triples_never_zero_and_monotonic ... ok
+2026-09-10T18:21:31.3825163Z test tests::exact_numeric_lexical_returns_exact_form_or_none ... ok
+2026-09-10T18:21:31.3842481Z test tests::graph_iter_ids_orders_and_overlay ... ok
+2026-09-10T18:21:31.3879387Z test tests::graph_prefix_range_scan_and_cache_coherence ... ok
+2026-09-10T18:21:31.3917822Z test tests::has_high_precision_decimal_flags_only_inexact_decimals ... ok
+2026-09-10T18:21:31.3959877Z test tests::has_high_precision_decimal_memo_fork_compact_isolation ... ok
+2026-09-10T18:21:31.3989797Z test tests::has_high_precision_decimal_memo_invalidates_stored_growth ... ok
+2026-09-10T18:21:31.4019700Z test tests::has_high_precision_decimal_memo_preserves_unchanged_dictionary ... ok
+2026-09-10T18:21:31.4034916Z test tests::has_high_precision_decimal_memo_survives_delta_insert ... ok
+2026-09-10T18:21:31.4065451Z test tests::insert_triple_equivalent_to_text_load ... ok
+2026-09-10T18:21:31.4091996Z test tests::insert_triple_interns_and_is_set_valued ... ok
+2026-09-10T18:21:31.4109069Z test tests::is_integer_datatype_accepts_integer_subtypes_only ... ok
+2026-09-10T18:21:31.4139202Z test tests::is_literal_id_classifies_each_kind ... ok
+2026-09-10T18:21:31.4168810Z test tests::load_and_scan ... ok
+2026-09-10T18:21:31.4514317Z test store::tests::radix_sort_equiv_comparison_sort ... ok
+2026-09-10T18:21:31.4559677Z test tests::load_dataset_rejects_unknown_format ... ok
+2026-09-10T18:21:31.5359020Z test tests::load_dataset_nquads_public_entry_matches_serial ... ok
+2026-09-10T18:21:31.5460157Z test tests::load_dataset_trig_still_serial_and_correct ... ok
+2026-09-10T18:21:31.5502145Z test tests::load_dataset_with_base_resolves_and_preserves_named_graphs ... ok
+2026-09-10T18:21:31.6131573Z test tests::load_reader_parallel_handles_triple_terms ... ok
+2026-09-10T18:21:31.6330206Z test tests::load_dataset_trig_public_entry_matches_serial ... ok
+2026-09-10T18:21:31.6389365Z test tests::load_str_with_base_resolves_relative_iris ... ok
+2026-09-10T18:21:31.7094703Z test tests::merge_partials_sharded_consolidates_triple_terms ... ok
+2026-09-10T18:21:31.7141731Z test tests::named_graph_by_name_scopes_to_one_graph ... ok
+2026-09-10T18:21:31.7152592Z test tests::new_and_default_are_empty_graphs ... ok
+2026-09-10T18:21:31.7158327Z test tests::next_terminator_memchr_matches_scalar ... ok
+2026-09-10T18:21:31.8069579Z test tests::ntriples_parallel_matches_sequential ... ok
+2026-09-10T18:21:31.8101353Z test tests::numeric_cache_alignment_fixes_both_divergences ... ok
+2026-09-10T18:21:31.8110454Z test tests::numeric_cache_hit_matches_shared_parse_xsd_f64_plumbing ... ok
+2026-09-10T18:21:31.8149481Z test tests::numeric_cache_lookup_covers_outlined_storage_variants ... ok
+2026-09-10T18:21:31.8179370Z test tests::numeric_cache_value_datatype_aware_acceptance ... ok
+2026-09-10T18:21:31.8180158Z test tests::numerics_of_borrowed_path_byte_identical_to_owned ... ok
+2026-09-10T18:21:32.0019651Z test tests::load_reader_parallel_short_reads_match_sequential ... ok
+2026-09-10T18:21:32.0167262Z test tests::overlay_differential_200_batches ... ok
+2026-09-10T18:21:32.2512510Z test tests::parallel_trig_matches_serial ... ok
+2026-09-10T18:21:32.2532003Z test tests::parallel_trig_rejects_malformed ... ok
+2026-09-10T18:21:32.3019582Z test tests::parallel_nquads_matches_serial ... ok
+2026-09-10T18:21:32.3910149Z test tests::parallel_turtle_escaped_hash_in_local ... ok
+2026-09-10T18:21:32.4352965Z test tests::parallel_turtle_bnodes_match_serial ... ok
+2026-09-10T18:21:32.5355052Z test tests::parallel_turtle_matches_serial ... ok
+2026-09-10T18:21:32.5709663Z test compress::byte_attribution::block_size_cannot_flatten_the_scale_growth ... ok
+2026-09-10T18:21:32.5759685Z test tests::parallel_turtle_rejects_malformed ... ok
+2026-09-10T18:21:32.5980507Z test tests::parallel_turtle_interspersed_directives_match_serial ... ok
+2026-09-10T18:21:32.8934529Z test tests::parallel_turtle_sharded_merge_matches_serial ... ok
+2026-09-10T18:21:32.8955783Z test tests::parse_to_triples_rejects_unknown_format ... ok
+2026-09-10T18:21:32.8957124Z test tests::parse_xsd_f64_shared_acceptance_set ... ok
+2026-09-10T18:21:32.8960624Z test tests::predicate_has_literal_object_iri_only_vs_literal_vs_bnode ... ok
+2026-09-10T18:21:32.8966037Z test tests::predicate_has_literal_object_reflects_overlay_update ... ok
+2026-09-10T18:21:32.9492651Z test tests::parallel_turtle_terminator_scan_is_linear_not_quadratic ... ok
+2026-09-10T18:21:32.9671561Z test tests::parallel_turtle_quoted_triples_match_serial ... ok
+2026-09-10T18:21:32.9681529Z test tests::remove_triple_retracts_and_absent_is_noop ... ok
+2026-09-10T18:21:32.9705097Z test tests::turtle_path_rejection_oracle ... ok
+2026-09-10T18:21:32.9716505Z test tests::turtle_rdf12_reification_surface_loads_desugared ... ok
+2026-09-10T18:21:33.0401893Z test tests::presized_turtle_parse_is_hint_only_matches_oxttl_direct ... ok
+2026-09-10T18:21:33.0550214Z test tests::presizing_is_pure_capacity_hint ... ok
+2026-09-10T18:21:37.1290315Z test compress::byte_attribution::store_bytes_per_triple_falls_monotonically_with_block_size ... ok
+2026-09-10T18:21:37.1290966Z 
+2026-09-10T18:21:37.1291341Z test result: ok. 154 passed; 0 failed; 6 ignored; 0 measured; 0 filtered out; finished in 8.72s
+2026-09-10T18:21:37.1291829Z 
+2026-09-10T18:21:37.1318599Z [1m[92m     Running[0m tests/dict_spill_activation.rs (target/debug/deps/dict_spill_activation-2fed00aad37a992f)
+2026-09-10T18:21:37.1332008Z 
+2026-09-10T18:21:37.1332274Z running 0 tests
+2026-09-10T18:21:37.1332554Z 
+2026-09-10T18:21:37.1332973Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-09-10T18:21:37.1333535Z 
+2026-09-10T18:21:37.1335378Z [1m[92m     Running[0m tests/fork_differential.rs (target/debug/deps/fork_differential-d1a9a191f624d709)
+2026-09-10T18:21:37.1346713Z 
+2026-09-10T18:21:37.1346860Z running 3 tests
+2026-09-10T18:21:37.1373816Z test named_graphs_fork_isolated ... ok
+2026-09-10T18:21:37.1424713Z test fork_pending_delta_accounting ... ok
+2026-09-10T18:21:40.8616019Z test fork_chain_matches_flat_rebuild ... ok
+2026-09-10T18:21:40.8616303Z 
+2026-09-10T18:21:40.8616585Z test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.73s
+2026-09-10T18:21:40.8616958Z 
+2026-09-10T18:21:40.8622897Z [1m[92m     Running[0m tests/mmap_corruption_oracle.rs (target/debug/deps/mmap_corruption_oracle-dd1627a4b287552b)
+2026-09-10T18:21:40.8636140Z 
+2026-09-10T18:21:40.8636305Z running 0 tests
+2026-09-10T18:21:40.8636990Z 
+2026-09-10T18:21:40.8637264Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-09-10T18:21:40.8637776Z 
+2026-09-10T18:21:40.8639657Z [1m[92m     Running[0m tests/parallel_serial_load_differential.rs (target/debug/deps/parallel_serial_load_differential-00783076cff46ed6)
+2026-09-10T18:21:40.8650251Z 
+2026-09-10T18:21:40.8650392Z running 4 tests
+2026-09-10T18:21:40.8809598Z test ntriples_edge_documents_match_reference ... ok
+2026-09-10T18:21:41.1243726Z test turtle_load_matches_reference ... ok
+2026-09-10T18:21:41.1360564Z test ntriples_load_matches_reference ... ok
+2026-09-10T18:21:41.2833646Z test ntriples_load_reader_matches_reference ... ok
+2026-09-10T18:21:41.2834069Z 
+2026-09-10T18:21:41.2834408Z test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.42s
+2026-09-10T18:21:41.2834763Z 
+2026-09-10T18:21:41.2843261Z [1m[92m     Running[0m tests/proptest_roundtrip.rs (target/debug/deps/proptest_roundtrip-53a2a7c9a56cc7ef)
+2026-09-10T18:21:41.2859399Z 
+2026-09-10T18:21:41.2859704Z running 17 tests
+2026-09-10T18:21:41.2863845Z test dict_blank_roundtrip_unit ... ok
+2026-09-10T18:21:41.2864402Z test dict_escaped_lit_roundtrip_unit ... ok
+2026-09-10T18:21:41.2889541Z test dict_inline_integer_unit ... ok
+2026-09-10T18:21:41.3857311Z test dict_intern_lookup_identity ... ok
+2026-09-10T18:21:41.3858364Z test dict_intern_deterministic ... ok
+2026-09-10T18:21:41.3859278Z test dict_lang_lit_roundtrip_unit ... ok
+2026-09-10T18:21:41.3859992Z test dict_iri_roundtrip_unit ... ok
+2026-09-10T18:21:41.3869710Z test dict_plain_lit_roundtrip_unit ... ok
+2026-09-10T18:21:41.4089668Z test escape_paths_are_exercised_by_generator ... ok
+2026-09-10T18:21:41.4486481Z test dict_intern_injective ... ok
+2026-09-10T18:21:41.4532586Z test nt_roundtrip_blank_nodes_unit ... ok
+2026-09-10T18:21:41.4546613Z test nt_roundtrip_escaped_literal_unit ... ok
+2026-09-10T18:21:41.4713928Z test dict_lookup_miss_returns_no_id ... ok
+2026-09-10T18:21:41.4739286Z test nt_serialize_fixpoint_unit ... ok
+2026-09-10T18:21:42.0796828Z test nt_parse_serialize_roundtrip ... ok
+2026-09-10T18:21:42.1041475Z test nt_serialize_fixpoint ... ok
+2026-09-10T18:21:42.6367764Z test dict_all_term_kinds_roundtrip ... ok
+2026-09-10T18:21:42.6368045Z 
+2026-09-10T18:21:42.6368325Z test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.35s
+2026-09-10T18:21:42.6369003Z 
+2026-09-10T18:21:42.6376021Z [1m[92m     Running[0m tests/snapshot.rs (target/debug/deps/snapshot-4540fe701022b138)
+2026-09-10T18:21:42.6390848Z 
+2026-09-10T18:21:42.6391029Z running 7 tests
+2026-09-10T18:21:42.6395441Z test snapshot_is_send_sync ... ok
+2026-09-10T18:21:42.6401136Z test snapshot_mutation_invisible_to_base ... ok
+2026-09-10T18:21:42.6419019Z test base_mutation_after_snapshot_invisible_to_snapshot ... ok
+2026-09-10T18:21:42.6420038Z test snapshot_sees_point_in_time_triples ... ok
+2026-09-10T18:21:42.6420892Z test snapshot_includes_pending_overlay_and_survives_base_compaction ... ok
+2026-09-10T18:21:42.6421650Z test snapshot_covers_named_graphs ... ok
+2026-09-10T18:21:42.9175977Z test snapshot_shares_base_indexes_no_duplication ... ok
+2026-09-10T18:21:42.9178716Z 
+2026-09-10T18:21:42.9179283Z test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.28s
+2026-09-10T18:21:42.9179818Z 
+2026-09-10T18:21:42.9185963Z [1m[92m   Doc-tests[0m sparq_core
+2026-09-10T18:21:43.0093661Z 
+2026-09-10T18:21:43.0094274Z running 1 test
+2026-09-10T18:21:43.1274794Z test crates/sparq-core/src/lib.rs - (line 18) ... ok
+2026-09-10T18:21:43.1275199Z 
+2026-09-10T18:21:43.1275597Z test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
+2026-09-10T18:21:43.1276129Z 
+2026-09-10T18:21:43.1397320Z + cargo clippy -p sparq-core --features block-bloom --all-targets -- -D warnings
+2026-09-10T18:21:43.3884908Z [1m[92m    Checking[0m sparq-core v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-core)
+2026-09-10T18:21:45.4343957Z [1m[92m    Finished[0m `dev` profile [unoptimized + debuginfo] target(s) in 2.24s
+2026-09-10T18:21:45.4555012Z ##[endgroup]
+2026-09-10T18:21:45.4557623Z ##[group]opt-in sparq-introspect (numeric-facets — numeric ranges + histograms)
+2026-09-10T18:21:45.4558583Z + cargo build -p sparq-introspect --features numeric-facets
+2026-09-10T18:21:45.6840838Z [1m[92m   Compiling[0m serde_core v1.0.228
+2026-09-10T18:21:45.6841780Z [1m[92m   Compiling[0m zmij v1.0.21
+2026-09-10T18:21:45.6911249Z [1m[92m   Compiling[0m serde v1.0.228
+2026-09-10T18:21:45.6912977Z [1m[92m   Compiling[0m serde_json v1.0.150
+2026-09-10T18:21:45.7970147Z [1m[92m   Compiling[0m serde_derive v1.0.228
+2026-09-10T18:21:45.8719894Z [1m[92m   Compiling[0m itoa v1.0.18
+2026-09-10T18:21:45.9915175Z [1m[92m   Compiling[0m sparq-core v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-core)
+2026-09-10T18:21:48.8041084Z [1m[92m   Compiling[0m sparq-introspect v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-introspect)
+2026-09-10T18:21:49.9070175Z [1m[92m    Finished[0m `dev` profile [unoptimized + debuginfo] target(s) in 4.42s
+2026-09-10T18:21:49.9276867Z + cargo test -p sparq-introspect --features numeric-facets
+2026-09-10T18:21:50.1397943Z [1m[92m   Compiling[0m typenum v1.20.1
+2026-09-10T18:21:50.1429441Z [1m[92m   Compiling[0m const-oid v0.10.2
+2026-09-10T18:21:50.1472775Z [1m[92m   Compiling[0m peg-runtime v0.8.6
+2026-09-10T18:21:50.1500752Z [1m[92m   Compiling[0m aho-corasick v1.1.4
+2026-09-10T18:21:50.2724959Z [1m[92m   Compiling[0m cpufeatures v0.3.0
+2026-09-10T18:21:50.3101151Z [1m[92m   Compiling[0m peg-macros v0.8.6
+2026-09-10T18:21:50.5058668Z [1m[92m   Compiling[0m getrandom v0.4.2
+2026-09-10T18:21:50.6170653Z [1m[92m   Compiling[0m smallvec v1.15.2
+2026-09-10T18:21:50.7730521Z [1m[92m   Compiling[0m sparq-substrate v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-substrate)
+2026-09-10T18:21:51.0860271Z [1m[92m   Compiling[0m hybrid-array v0.4.12
+2026-09-10T18:21:51.0950281Z [1m[92m   Compiling[0m uuid v1.23.4
+2026-09-10T18:21:51.4163226Z [1m[92m   Compiling[0m regex-automata v0.4.14
+2026-09-10T18:21:51.6182475Z [1m[92m   Compiling[0m crypto-common v0.2.2
+2026-09-10T18:21:51.6760173Z [1m[92m   Compiling[0m block-buffer v0.12.1
+2026-09-10T18:21:51.7723224Z [1m[92m   Compiling[0m peg v0.8.6
+2026-09-10T18:21:51.8100473Z [1m[92m   Compiling[0m spargebra v0.4.6 (/home/runner/work/sparq/sparq/vendor/spargebra)
+2026-09-10T18:21:52.3212293Z [1m[92m   Compiling[0m digest v0.11.3
+2026-09-10T18:21:52.4278291Z [1m[92m   Compiling[0m md-5 v0.11.0
+2026-09-10T18:21:52.5480753Z [1m[92m   Compiling[0m sha2 v0.11.0
+2026-09-10T18:21:52.6770600Z [1m[92m   Compiling[0m sha1 v0.11.0
+2026-09-10T18:21:53.3298283Z [1m[92m   Compiling[0m regex v1.12.4
+2026-09-10T18:21:53.9365824Z [1m[92m   Compiling[0m sparq-engine v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-engine)
+2026-09-10T18:21:57.2890142Z [1m[92m   Compiling[0m sparq-introspect v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-introspect)
+2026-09-10T18:21:59.3111355Z [1m[92m    Finished[0m `test` profile [unoptimized + debuginfo] target(s) in 9.35s
+2026-09-10T18:21:59.3225613Z [1m[92m     Running[0m unittests src/lib.rs (target/debug/deps/sparq_introspect-c4219f000dd5090d)
+2026-09-10T18:21:59.3242090Z 
+2026-09-10T18:21:59.3242368Z running 41 tests
+2026-09-10T18:21:59.3245697Z test tests::budget_writer_finish_elision_marker_exact ... ok
+2026-09-10T18:21:59.3247883Z test tests::budget_writer_line_plus2_reserve_exact ... ok
+2026-09-10T18:21:59.3260145Z test tests::characteristic_set_cap_aggregates_tail ... ok
+2026-09-10T18:21:59.3263374Z test tests::characteristic_set_ids_matches_resolved_table ... ok
+2026-09-10T18:21:59.3264452Z test tests::build_superclass_closure_self_loop_guard ... ok
+2026-09-10T18:21:59.3268662Z test tests::characteristic_set_ids_multiplicity_exact ... ok
+2026-09-10T18:21:59.3270447Z test facets::tests::facets_counts_a_filtered_subject_directly ... ok
+2026-09-10T18:21:59.3283594Z test tests::characteristic_sets_exact ... ok
+2026-09-10T18:21:59.3284255Z test tests::class_coverage_and_literal_fraction_exact_arithmetic ... ok
+2026-09-10T18:21:59.3285156Z test tests::class_profiles_instances_and_coverage ... ok
+2026-09-10T18:21:59.3292448Z test tests::domain_range_inference_and_declared ... ok
+2026-09-10T18:21:59.3299279Z test tests::keep_min_sample_distinct_dedup_guard ... ok
+2026-09-10T18:21:59.3299860Z test tests::empty_and_typeless_graphs ... ok
+2026-09-10T18:21:59.3300391Z test tests::keep_min_sample_exact_semantics ... ok
+2026-09-10T18:21:59.3300951Z test tests::join_hints_cap_aggregates_tail ... ok
+2026-09-10T18:21:59.3303878Z test tests::join_hints_cross_class_edges ... ok
+2026-09-10T18:21:59.3306814Z test tests::minimalize_type_set_short_circuit_and_dedup ... ok
+2026-09-10T18:21:59.3315115Z test tests::minimalize_types_chain_and_independence ... ok
+2026-09-10T18:21:59.3316366Z test tests::minimalize_types_keeps_only_the_minimal_class ... ok
+2026-09-10T18:21:59.3324488Z test tests::per_class_samples_distinct_and_bounded ... ok
+2026-09-10T18:21:59.3325457Z test tests::prefix_assigner_compact_split_exact ... ok
+2026-09-10T18:21:59.3326068Z test tests::minimalize_types_tolerates_cycles ... ok
+2026-09-10T18:21:59.3334638Z test tests::schema_summary_for_seeds ... ok
+2026-09-10T18:21:59.3335232Z test tests::per_class_samples_isolate_minority_class ... ok
+2026-09-10T18:21:59.3338913Z test tests::predicate_profiles_kinds_datatypes_and_samples ... ok
+2026-09-10T18:21:59.3340639Z test tests::shacl_empty_graph_is_empty_and_valid ... ok
+2026-09-10T18:21:59.3347970Z test tests::render_object_sample_inline_integer_exact ... ok
+2026-09-10T18:21:59.3349065Z test tests::shacl_maxcount_exact_triples_eq_subjects_guard ... ok
+2026-09-10T18:21:59.3353282Z test tests::sidecar_path_convention ... ok
+2026-09-10T18:21:59.3362167Z test tests::text_summary_mentions_schema_and_respects_budget ... ok
+2026-09-10T18:21:59.3367212Z test tests::shacl_exports_char_sets_as_node_shapes ... ok
+2026-09-10T18:21:59.3373865Z test tests::to_json_is_valid_and_complete ... ok
+2026-09-10T18:21:59.3374623Z test tests::sidecar_from_json_and_error_paths ... ok
+2026-09-10T18:21:59.3380382Z test tests::truncate_chars_exact_boundary ... ok
+2026-09-10T18:21:59.3384850Z test tests::to_text_summary_coverage_pct_and_avg_mult_exact ... ok
+2026-09-10T18:21:59.3390131Z test tests::vocabulary_detection_counts_and_well_known ... ok
+2026-09-10T18:21:59.3396548Z test tests::sidecar_save_load_roundtrip ... ok
+2026-09-10T18:21:59.3404605Z test tests::void_exact_class_and_property_counts ... ok
+2026-09-10T18:21:59.3408985Z test tests::void_export_counts_and_parses ... ok
+2026-09-10T18:21:59.3411919Z test tests::void_with_cs_avg_multiplicity_exact ... ok
+2026-09-10T18:21:59.3419045Z test tests::void_with_cs_superset_and_carries_char_sets ... ok
+2026-09-10T18:21:59.3419449Z 
+2026-09-10T18:21:59.3419866Z test result: ok. 41 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+2026-09-10T18:21:59.3420327Z 
+2026-09-10T18:21:59.3421372Z [1m[92m     Running[0m tests/error_paths_direct.rs (target/debug/deps/error_paths_direct-523f73b44f3b0bb7)
+2026-09-10T18:21:59.3435305Z 
+2026-09-10T18:21:59.3435428Z running 4 tests
+2026-09-10T18:21:59.3442570Z test load_maps_valid_json_with_the_wrong_schema_to_invalid_data ... ok
+2026-09-10T18:21:59.3447317Z test empty_graph_has_no_characteristic_set_ids ... ok
+2026-09-10T18:21:59.3451841Z test schema_summary_for_scopes_to_a_seed_and_honors_tiny_budgets ... ok
+2026-09-10T18:21:59.3459117Z test from_json_rejects_syntax_and_numeric_type_errors ... ok
+2026-09-10T18:21:59.3459452Z 
+2026-09-10T18:21:59.3459696Z test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-09-10T18:21:59.3460259Z 
+2026-09-10T18:21:59.3460669Z [1m[92m     Running[0m tests/facets.rs (target/debug/deps/facets-f5e0d23e34fcf62c)
+2026-09-10T18:21:59.3476096Z 
+2026-09-10T18:21:59.3476260Z running 2 tests
+2026-09-10T18:21:59.3506688Z test exact_whole_class_and_constrained_facets_with_elision ... ok
+2026-09-10T18:21:59.3538312Z test distributions_match_sparql_group_by_on_fixture_and_seeded_graph ... ok
+2026-09-10T18:21:59.3539287Z 
+2026-09-10T18:21:59.3539688Z test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+2026-09-10T18:21:59.3540222Z 
+2026-09-10T18:21:59.3543695Z [1m[92m     Running[0m tests/facets_metamorph.rs (target/debug/deps/facets_metamorph-7ce52fbbfca73d94)
+2026-09-10T18:21:59.3556443Z 
+2026-09-10T18:21:59.3556585Z running 4 tests
+2026-09-10T18:21:59.3928284Z test absent_constraint_fails_closed_to_empty_response ... ok
+2026-09-10T18:21:59.3929494Z test facet_value_predicates_respect_requested_or_graph_predicate_set ... ok
+2026-09-10T18:21:59.5463300Z test adding_a_constraint_never_increases_facet_counts ... ok
+2026-09-10T18:21:59.5972337Z test constraint_order_is_commutative ... ok
+2026-09-10T18:21:59.5972640Z 
+2026-09-10T18:21:59.5973008Z test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.24s
+2026-09-10T18:21:59.5973361Z 
+2026-09-10T18:21:59.5976920Z [1m[92m     Running[0m tests/numeric_facets.rs (target/debug/deps/numeric_facets-d65411ee620c31f4)
+2026-09-10T18:21:59.5992164Z 
+2026-09-10T18:21:59.5992381Z running 4 tests
+2026-09-10T18:21:59.6011678Z test mixed_values_exclude_non_numeric_objects_from_the_summary ... ok
+2026-09-10T18:21:59.6012207Z test constant_numeric_facet_uses_the_closed_final_bucket ... ok
+2026-09-10T18:21:59.6012658Z test non_numeric_only_predicate_has_no_numeric_summary ... ok
+2026-09-10T18:21:59.6013066Z test numeric_range_and_ten_bucket_oracle_are_exact ... ok
+2026-09-10T18:21:59.6013300Z 
+2026-09-10T18:21:59.6013550Z test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-09-10T18:21:59.6013889Z 
+2026-09-10T18:21:59.6018259Z [1m[92m     Running[0m tests/olympics.rs (target/debug/deps/olympics-ea67305613e88931)
+2026-09-10T18:21:59.6032306Z 
+2026-09-10T18:21:59.6032482Z running 1 test
+2026-09-10T18:21:59.6034897Z test olympics_summary_names_the_real_schema ... ok
+2026-09-10T18:21:59.6035149Z 
+2026-09-10T18:21:59.6035401Z test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-09-10T18:21:59.6035759Z 
+2026-09-10T18:21:59.6037731Z [1m[92m     Running[0m tests/schema_diff.rs (target/debug/deps/schema_diff-c738f77ecd52d04c)
+2026-09-10T18:21:59.6049055Z 
+2026-09-10T18:21:59.6049184Z running 0 tests
+2026-09-10T18:21:59.6049469Z 
+2026-09-10T18:21:59.6049770Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-09-10T18:21:59.6050103Z 
+2026-09-10T18:21:59.6052143Z [1m[92m     Running[0m tests/schema_diff_feature_off.rs (target/debug/deps/schema_diff_feature_off-82601fd7facd4178)
+2026-09-10T18:21:59.6062886Z 
+2026-09-10T18:21:59.6063022Z running 1 test
+2026-09-10T18:21:59.6069737Z test schema_diff_module_and_reexports_stay_feature_gated ... ok
+2026-09-10T18:21:59.6070046Z 
+2026-09-10T18:21:59.6070335Z test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-09-10T18:21:59.6070685Z 
+2026-09-10T18:21:59.6072745Z [1m[92m     Running[0m tests/sidecar_persistence.rs (target/debug/deps/sidecar_persistence-c2d3a1d9133f278f)
+2026-09-10T18:21:59.6084797Z 
+2026-09-10T18:21:59.6084942Z running 3 tests
+2026-09-10T18:21:59.6089460Z test sidecar_path_appends_extension_to_the_full_dataset_name ... ok
+2026-09-10T18:21:59.6106459Z test json_round_trip_is_byte_exact_and_malformed_json_is_rejected ... ok
+2026-09-10T18:21:59.6109774Z test file_persistence_round_trips_and_missing_sidecars_error ... ok
+2026-09-10T18:21:59.6110233Z 
+2026-09-10T18:21:59.6110626Z test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-09-10T18:21:59.6110980Z 
+2026-09-10T18:21:59.6113735Z [1m[92m     Running[0m tests/wasm.rs (target/debug/deps/wasm-d012e740bb68bb9a)
+2026-09-10T18:21:59.6124735Z 
+2026-09-10T18:21:59.6124882Z running 0 tests
+2026-09-10T18:21:59.6125082Z 
+2026-09-10T18:21:59.6125778Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-09-10T18:21:59.6126359Z 
+2026-09-10T18:21:59.6127044Z [1m[92m   Doc-tests[0m sparq_introspect
+2026-09-10T18:21:59.7047585Z 
+2026-09-10T18:21:59.7048207Z running 1 test
+2026-09-10T18:21:59.7048983Z test crates/sparq-introspect/src/lib.rs - (line 17) ... ignored
+2026-09-10T18:21:59.7049423Z 
+2026-09-10T18:21:59.7049769Z test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-09-10T18:21:59.7050264Z 
+2026-09-10T18:21:59.7182574Z + cargo clippy -p sparq-introspect --features numeric-facets --all-targets -- -D warnings
+2026-09-10T18:21:59.9818695Z [1m[92m    Checking[0m libc v0.2.186
+2026-09-10T18:21:59.9856624Z [1m[92m    Checking[0m typenum v1.20.1
+2026-09-10T18:21:59.9907378Z [1m[92m    Checking[0m const-oid v0.10.2
+2026-09-10T18:21:59.9910339Z [1m[92m    Checking[0m serde_core v1.0.228
+2026-09-10T18:22:00.0800273Z [1m[92m    Checking[0m aho-corasick v1.1.4
+2026-09-10T18:22:00.8330641Z [1m[92m    Checking[0m peg-runtime v0.8.6
+2026-09-10T18:22:00.8479863Z [1m[92m    Checking[0m getrandom v0.3.4
+2026-09-10T18:22:00.9003500Z [1m[92m    Checking[0m cpufeatures v0.3.0
+2026-09-10T18:22:00.9080373Z [1m[92m    Checking[0m hybrid-array v0.4.12
+2026-09-10T18:22:00.9321873Z [1m[92m    Checking[0m regex-automata v0.4.14
+2026-09-10T18:22:00.9530243Z [1m[92m    Checking[0m rand_core v0.9.5
+2026-09-10T18:22:01.0640101Z [1m[92m    Checking[0m rand_chacha v0.9.0
+2026-09-10T18:22:01.2020184Z [1m[92m    Checking[0m rand v0.9.4
+2026-09-10T18:22:01.4109990Z [1m[92m    Checking[0m crypto-common v0.2.2
+2026-09-10T18:22:01.6559987Z [1m[92m    Checking[0m oxrdf v0.3.3
+2026-09-10T18:22:01.8952333Z [1m[92m    Checking[0m block-buffer v0.12.1
+2026-09-10T18:22:01.9830519Z [1m[92m    Checking[0m peg v0.8.6
+2026-09-10T18:22:01.9887523Z [1m[92m    Checking[0m digest v0.11.3
+2026-09-10T18:22:02.0130917Z [1m[92m    Checking[0m getrandom v0.4.2
+2026-09-10T18:22:02.0890214Z [1m[92m    Checking[0m zmij v1.0.21
+2026-09-10T18:22:02.0970472Z [1m[92m    Checking[0m smallvec v1.15.2
+2026-09-10T18:22:02.1900222Z [1m[92m    Checking[0m oxttl v0.2.3
+2026-09-10T18:22:02.2500393Z [1m[92m    Checking[0m itoa v1.0.18
+2026-09-10T18:22:02.2901108Z [1m[92m    Checking[0m spargebra v0.4.6 (/home/runner/work/sparq/sparq/vendor/spargebra)
+2026-09-10T18:22:02.3394273Z [1m[92m    Checking[0m serde_json v1.0.150
+2026-09-10T18:22:02.6750231Z [1m[92m    Checking[0m regex v1.12.4
+2026-09-10T18:22:02.6883026Z [1m[92m    Checking[0m sparq-core v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-core)
+2026-09-10T18:22:02.9100735Z [1m[92m    Checking[0m serde v1.0.228
+2026-09-10T18:22:03.0090209Z [1m[92m    Checking[0m uuid v1.23.4
+2026-09-10T18:22:03.2260281Z [1m[92m    Checking[0m md-5 v0.11.0
+2026-09-10T18:22:03.3099951Z [1m[92m    Checking[0m sha1 v0.11.0
+2026-09-10T18:22:03.3493168Z [1m[92m    Checking[0m sha2 v0.11.0
+2026-09-10T18:22:03.7911253Z [1m[92m    Checking[0m sparq-substrate v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-substrate)
+2026-09-10T18:22:03.7965310Z [1m[92m    Checking[0m sparq-introspect v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-introspect)
+2026-09-10T18:22:04.0667105Z [1m[92m    Checking[0m sparq-engine v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-engine)
+2026-09-10T18:22:06.7946806Z [1m[92m    Finished[0m `dev` profile [unoptimized + debuginfo] target(s) in 7.02s
+2026-09-10T18:22:06.8177056Z ##[endgroup]
+2026-09-10T18:22:06.8180342Z ##[group]opt-in sparq-introspect (schema-diff — structured schema drift)
+2026-09-10T18:22:06.8182890Z + cargo build -p sparq-introspect --features schema-diff
+2026-09-10T18:22:07.0491288Z [1m[92m   Compiling[0m sparq-introspect v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-introspect)
+2026-09-10T18:22:08.1527276Z [1m[92m    Finished[0m `dev` profile [unoptimized + debuginfo] target(s) in 1.30s
+2026-09-10T18:22:08.1728807Z + cargo test -p sparq-introspect --features schema-diff
+2026-09-10T18:22:08.3862381Z [1m[92m   Compiling[0m sparq-introspect v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-introspect)
+2026-09-10T18:22:10.7064578Z [1m[92m    Finished[0m `test` profile [unoptimized + debuginfo] target(s) in 2.50s
+2026-09-10T18:22:10.7177948Z [1m[92m     Running[0m unittests src/lib.rs (target/debug/deps/sparq_introspect-23d4ba42612f9022)
+2026-09-10T18:22:10.7194974Z 
+2026-09-10T18:22:10.7195389Z running 42 tests
+2026-09-10T18:22:10.7198723Z test diff::tests::categories_are_sorted_by_iri_not_input_order ... ok
+2026-09-10T18:22:10.7199507Z test tests::budget_writer_finish_elision_marker_exact ... ok
+2026-09-10T18:22:10.7207399Z test tests::budget_writer_line_plus2_reserve_exact ... ok
+2026-09-10T18:22:10.7214392Z test tests::build_superclass_closure_self_loop_guard ... ok
+2026-09-10T18:22:10.7224689Z test facets::tests::facets_counts_a_filtered_subject_directly ... ok
+2026-09-10T18:22:10.7225355Z test tests::characteristic_set_cap_aggregates_tail ... ok
+2026-09-10T18:22:10.7226026Z test tests::characteristic_set_ids_matches_resolved_table ... ok
+2026-09-10T18:22:10.7230207Z test tests::characteristic_set_ids_multiplicity_exact ... ok
+2026-09-10T18:22:10.7235511Z test tests::characteristic_sets_exact ... ok
+2026-09-10T18:22:10.7244342Z test tests::class_coverage_and_literal_fraction_exact_arithmetic ... ok
+2026-09-10T18:22:10.7245032Z test tests::class_profiles_instances_and_coverage ... ok
+2026-09-10T18:22:10.7246682Z test tests::empty_and_typeless_graphs ... ok
+2026-09-10T18:22:10.7266897Z test tests::domain_range_inference_and_declared ... ok
+2026-09-10T18:22:10.7269554Z test tests::keep_min_sample_exact_semantics ... ok
+2026-09-10T18:22:10.7270181Z test tests::join_hints_cap_aggregates_tail ... ok
+2026-09-10T18:22:10.7270774Z test tests::keep_min_sample_distinct_dedup_guard ... ok
+2026-09-10T18:22:10.7271354Z test tests::join_hints_cross_class_edges ... ok
+2026-09-10T18:22:10.7271979Z test tests::minimalize_type_set_short_circuit_and_dedup ... ok
+2026-09-10T18:22:10.7272639Z test tests::minimalize_types_chain_and_independence ... ok
+2026-09-10T18:22:10.7273311Z test tests::minimalize_types_keeps_only_the_minimal_class ... ok
+2026-09-10T18:22:10.7273938Z test tests::minimalize_types_tolerates_cycles ... ok
+2026-09-10T18:22:10.7274517Z test tests::per_class_samples_distinct_and_bounded ... ok
+2026-09-10T18:22:10.7276722Z test tests::prefix_assigner_compact_split_exact ... ok
+2026-09-10T18:22:10.7283024Z test tests::predicate_profiles_kinds_datatypes_and_samples ... ok
+2026-09-10T18:22:10.7284632Z test tests::shacl_empty_graph_is_empty_and_valid ... ok
+2026-09-10T18:22:10.7293078Z test tests::per_class_samples_isolate_minority_class ... ok
+2026-09-10T18:22:10.7302227Z test tests::render_object_sample_inline_integer_exact ... ok
+2026-09-10T18:22:10.7303131Z test tests::shacl_maxcount_exact_triples_eq_subjects_guard ... ok
+2026-09-10T18:22:10.7303987Z test tests::shacl_exports_char_sets_as_node_shapes ... ok
+2026-09-10T18:22:10.7304832Z test tests::sidecar_path_convention ... ok
+2026-09-10T18:22:10.7305837Z test tests::schema_summary_for_seeds ... ok
+2026-09-10T18:22:10.7309262Z test tests::sidecar_from_json_and_error_paths ... ok
+2026-09-10T18:22:10.7314902Z test tests::text_summary_mentions_schema_and_respects_budget ... ok
+2026-09-10T18:22:10.7315629Z test tests::truncate_chars_exact_boundary ... ok
+2026-09-10T18:22:10.7322417Z test tests::to_json_is_valid_and_complete ... ok
+2026-09-10T18:22:10.7323111Z test tests::vocabulary_detection_counts_and_well_known ... ok
+2026-09-10T18:22:10.7334854Z test tests::void_exact_class_and_property_counts ... ok
+2026-09-10T18:22:10.7338962Z test tests::sidecar_save_load_roundtrip ... ok
+2026-09-10T18:22:10.7340018Z test tests::void_export_counts_and_parses ... ok
+2026-09-10T18:22:10.7344180Z test tests::to_text_summary_coverage_pct_and_avg_mult_exact ... ok
+2026-09-10T18:22:10.7347024Z test tests::void_with_cs_avg_multiplicity_exact ... ok
+2026-09-10T18:22:10.7352656Z test tests::void_with_cs_superset_and_carries_char_sets ... ok
+2026-09-10T18:22:10.7353049Z 
+2026-09-10T18:22:10.7353843Z test result: ok. 42 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+2026-09-10T18:22:10.7354447Z 
+2026-09-10T18:22:10.7358092Z [1m[92m     Running[0m tests/error_paths_direct.rs (target/debug/deps/error_paths_direct-189351cddcacd46e)
+2026-09-10T18:22:10.7373020Z 
+2026-09-10T18:22:10.7373363Z running 4 tests
+2026-09-10T18:22:10.7382908Z test empty_graph_has_no_characteristic_set_ids ... ok
+2026-09-10T18:22:10.7385672Z test load_maps_valid_json_with_the_wrong_schema_to_invalid_data ... ok
+2026-09-10T18:22:10.7394972Z test from_json_rejects_syntax_and_numeric_type_errors ... ok
+2026-09-10T18:22:10.7399263Z test schema_summary_for_scopes_to_a_seed_and_honors_tiny_budgets ... ok
+2026-09-10T18:22:10.7399771Z 
+2026-09-10T18:22:10.7400144Z test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-09-10T18:22:10.7400497Z 
+2026-09-10T18:22:10.7402251Z [1m[92m     Running[0m tests/facets.rs (target/debug/deps/facets-8aa14104722b3339)
+2026-09-10T18:22:10.7418379Z 
+2026-09-10T18:22:10.7418641Z running 2 tests
+2026-09-10T18:22:10.7438111Z test exact_whole_class_and_constrained_facets_with_elision ... ok
+2026-09-10T18:22:10.7477073Z test distributions_match_sparql_group_by_on_fixture_and_seeded_graph ... ok
+2026-09-10T18:22:10.7477423Z 
+2026-09-10T18:22:10.7477687Z test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+2026-09-10T18:22:10.7478024Z 
+2026-09-10T18:22:10.7483584Z [1m[92m     Running[0m tests/facets_metamorph.rs (target/debug/deps/facets_metamorph-2546a40bbef13dd2)
+2026-09-10T18:22:10.7496545Z 
+2026-09-10T18:22:10.7496677Z running 4 tests
+2026-09-10T18:22:10.7826668Z test facet_value_predicates_respect_requested_or_graph_predicate_set ... ok
+2026-09-10T18:22:10.7935937Z test absent_constraint_fails_closed_to_empty_response ... ok
+2026-09-10T18:22:10.9435237Z test adding_a_constraint_never_increases_facet_counts ... ok
+2026-09-10T18:22:10.9853420Z test constraint_order_is_commutative ... ok
+2026-09-10T18:22:10.9854062Z 
+2026-09-10T18:22:10.9854786Z test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.24s
+2026-09-10T18:22:10.9855532Z 
+2026-09-10T18:22:10.9857616Z [1m[92m     Running[0m tests/numeric_facets.rs (target/debug/deps/numeric_facets-f3fa7cdab0862f68)
+2026-09-10T18:22:10.9871009Z 
+2026-09-10T18:22:10.9871241Z running 0 tests
+2026-09-10T18:22:10.9871487Z 
+2026-09-10T18:22:10.9873576Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-09-10T18:22:10.9874113Z 
+2026-09-10T18:22:10.9874632Z [1m[92m     Running[0m tests/olympics.rs (target/debug/deps/olympics-bd7ec390ea4f28a7)
+2026-09-10T18:22:10.9885753Z 
+2026-09-10T18:22:10.9885985Z running 1 test
+2026-09-10T18:22:10.9888374Z test olympics_summary_names_the_real_schema ... ok
+2026-09-10T18:22:10.9888992Z 
+2026-09-10T18:22:10.9889398Z test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-09-10T18:22:10.9889974Z 
+2026-09-10T18:22:10.9892931Z [1m[92m     Running[0m tests/schema_diff.rs (target/debug/deps/schema_diff-215122e08bd32dca)
+2026-09-10T18:22:10.9902963Z 
+2026-09-10T18:22:10.9903204Z running 2 tests
+2026-09-10T18:22:10.9918546Z test reverse_direction_reports_removals ... ok
+2026-09-10T18:22:10.9922757Z test reports_exact_schema_drift_and_json ... ok
+2026-09-10T18:22:10.9923198Z 
+2026-09-10T18:22:10.9925860Z test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-09-10T18:22:10.9927172Z [1m[92m     Running[0m tests/schema_diff_feature_off.rs (target/debug/deps/schema_diff_feature_off-773d90637b831624)
+2026-09-10T18:22:10.9927818Z 
+2026-09-10T18:22:10.9937609Z 
+2026-09-10T18:22:10.9937778Z running 0 tests
+2026-09-10T18:22:10.9938623Z 
+2026-09-10T18:22:10.9939011Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-09-10T18:22:10.9941232Z [1m[92m     Running[0m tests/sidecar_persistence.rs (target/debug/deps/sidecar_persistence-b3d968a0fb5a3966)
+2026-09-10T18:22:10.9941827Z 
+2026-09-10T18:22:10.9951686Z 
+2026-09-10T18:22:10.9951851Z running 3 tests
+2026-09-10T18:22:10.9955238Z test sidecar_path_appends_extension_to_the_full_dataset_name ... ok
+2026-09-10T18:22:10.9969249Z test json_round_trip_is_byte_exact_and_malformed_json_is_rejected ... ok
+2026-09-10T18:22:10.9972008Z test file_persistence_round_trips_and_missing_sidecars_error ... ok
+2026-09-10T18:22:10.9972460Z 
+2026-09-10T18:22:10.9973117Z test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-09-10T18:22:10.9973681Z 
+2026-09-10T18:22:10.9976205Z [1m[92m     Running[0m tests/wasm.rs (target/debug/deps/wasm-ef80056b3867e8b9)
+2026-09-10T18:22:10.9986040Z 
+2026-09-10T18:22:10.9986179Z running 0 tests
+2026-09-10T18:22:10.9987581Z 
+2026-09-10T18:22:10.9988062Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-09-10T18:22:10.9988994Z [1m[92m   Doc-tests[0m sparq_introspect
+2026-09-10T18:22:10.9989203Z 
+2026-09-10T18:22:11.0878933Z 
+2026-09-10T18:22:11.0879538Z running 1 test
+2026-09-10T18:22:11.0879988Z test crates/sparq-introspect/src/lib.rs - (line 17) ... ignored
+2026-09-10T18:22:11.0880285Z 
+2026-09-10T18:22:11.0880545Z test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-09-10T18:22:11.0880897Z 
+2026-09-10T18:22:11.1009241Z + cargo clippy -p sparq-introspect --features schema-diff --all-targets -- -D warnings
+2026-09-10T18:22:11.3650125Z [1m[92m    Checking[0m sparq-introspect v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-introspect)
+2026-09-10T18:22:12.3930866Z [1m[92m    Finished[0m `dev` profile [unoptimized + debuginfo] target(s) in 1.24s
+2026-09-10T18:22:12.4162839Z ##[endgroup]
+2026-09-10T18:22:12.4165818Z feature-matrix group g36 sparq-core: all 5 leg(s) green
+2026-09-10T18:22:12.4299398Z ##[group]Run actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+2026-09-10T18:22:12.4299829Z with:
+2026-09-10T18:22:12.4300064Z   name: feature-matrix-results-35
+2026-09-10T18:22:12.4300364Z   path: fmg-results/results.json
+2026-09-10T18:22:12.4300635Z   retention-days: 1
+2026-09-10T18:22:12.4300864Z   if-no-files-found: error
+2026-09-10T18:22:12.4301104Z   overwrite: true
+2026-09-10T18:22:12.4301321Z   compression-level: 6
+2026-09-10T18:22:12.4314325Z   include-hidden-files: false
+2026-09-10T18:22:12.4314663Z   archive: true
+2026-09-10T18:22:12.4314887Z env:
+2026-09-10T18:22:12.4315092Z   CARGO_TERM_COLOR: always
+2026-09-10T18:22:12.4315336Z   RUST_BACKTRACE: 1
+2026-09-10T18:22:12.4315567Z   CARGO_INCREMENTAL: 0
+2026-09-10T18:22:12.4315824Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+2026-09-10T18:22:12.4316226Z   CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: -C link-arg=-fuse-ld=lld
+2026-09-10T18:22:12.4316620Z   CACHE_ON_FAILURE: false
+2026-09-10T18:22:12.4316909Z ##[endgroup]
+2026-09-10T18:22:12.5817928Z With the provided path, there will be 1 file uploaded
+2026-09-10T18:22:12.7019148Z Artifact name is valid!
+2026-09-10T18:22:12.7019451Z Root directory input is valid!
+2026-09-10T18:22:12.9216958Z Uploading artifact: feature-matrix-results-35.zip
+2026-09-10T18:22:12.9262381Z Beginning upload of artifact content to blob storage
+2026-09-10T18:22:12.9863188Z Uploaded bytes 338
+2026-09-10T18:22:12.9970921Z Finished uploading artifact content to blob storage!
+2026-09-10T18:22:12.9971871Z SHA256 digest of uploaded artifact is 39979b0c2c2113839ef2af68f57cdaebd7021d6f6ac6813c1c33146b1d77753a
+2026-09-10T18:22:12.9972673Z Finalizing artifact upload
+2026-09-10T18:22:13.2937070Z Artifact feature-matrix-results-35 successfully finalized. Artifact ID 10166874303
+2026-09-10T18:22:13.2938241Z Artifact feature-matrix-results-35 has been successfully uploaded! Final size is 338 bytes. Artifact ID is 10166874303
+2026-09-10T18:22:13.2943065Z Artifact download URL: https://github.com/sparq-org/sparq/actions/runs/34511329512/artifacts/10166874303
+2026-09-10T18:22:13.3157806Z Post job cleanup.
+2026-09-10T18:22:13.6035617Z (node:5618) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+2026-09-10T18:22:13.6037335Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-09-10T18:22:13.6287872Z Post job cleanup.
+2026-09-10T18:22:13.7269178Z [command]/usr/bin/git version
+2026-09-10T18:22:13.7315720Z git version 2.55.0
+2026-09-10T18:22:13.7353945Z Temporarily overriding HOME='/home/runner/work/_temp/74339e85-7f23-4c15-8e6a-4afbbf10cdda' before making global git config changes
+2026-09-10T18:22:13.7355355Z Adding repository directory to the temporary git global config as a safe directory
+2026-09-10T18:22:13.7360906Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/sparq/sparq
+2026-09-10T18:22:13.7398121Z Removing SSH command configuration
+2026-09-10T18:22:13.7405348Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-09-10T18:22:13.7448188Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-09-10T18:22:13.7734732Z Removing HTTP extra header
+2026-09-10T18:22:13.7741464Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-10T18:22:13.7785182Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-09-10T18:22:13.8077572Z Removing includeIf entries pointing to credentials config files
+2026-09-10T18:22:13.8087182Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-10T18:22:13.8139763Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-09-10T18:22:13.8638051Z Cleaning up orphan processes

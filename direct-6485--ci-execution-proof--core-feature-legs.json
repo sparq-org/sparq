@@ -1,0 +1,226 @@
+[
+  {
+    "features": "compact-index",
+    "job_id": 102987207565,
+    "log": "core-g35.log",
+    "build_line": 365,
+    "test_command": "2026-09-10T18:15:03.5525698Z + cargo test -p sparq-core --features compact-index",
+    "clippy_command": "2026-09-10T18:15:21.4144072Z + cargo clippy -p sparq-core --features compact-index --all-targets -- -D warnings",
+    "unit_summary": "2026-09-10T18:15:15.4972728Z test result: ok. 149 passed; 0 failed; 4 ignored; 0 measured; 0 filtered out; finished in 7.77s",
+    "memo_tests": [
+      {
+        "line": 476,
+        "text": "2026-09-10T18:15:09.0678714Z test tests::has_high_precision_decimal_memo_fork_compact_isolation ... ok"
+      },
+      {
+        "line": 477,
+        "text": "2026-09-10T18:15:09.0708619Z test tests::has_high_precision_decimal_memo_invalidates_stored_growth ... ok"
+      },
+      {
+        "line": 478,
+        "text": "2026-09-10T18:15:09.0718744Z test tests::has_high_precision_decimal_memo_preserves_unchanged_dictionary ... ok"
+      },
+      {
+        "line": 479,
+        "text": "2026-09-10T18:15:09.0738669Z test tests::has_high_precision_decimal_memo_survives_delta_insert ... ok"
+      }
+    ]
+  },
+  {
+    "features": "mmap,dict-spill",
+    "job_id": 102987207565,
+    "log": "core-g35.log",
+    "build_line": 609,
+    "test_command": "2026-09-10T18:15:25.8675622Z + cargo test -p sparq-core --features mmap,dict-spill",
+    "clippy_command": "2026-09-10T18:17:07.4496638Z + cargo clippy -p sparq-core --features mmap,dict-spill --all-targets -- -D warnings",
+    "unit_summary": "2026-09-10T18:15:39.9460020Z test result: ok. 226 passed; 0 failed; 4 ignored; 0 measured; 0 filtered out; finished in 8.52s",
+    "memo_tests": [
+      {
+        "line": 773,
+        "text": "2026-09-10T18:15:34.9054594Z test tests::has_high_precision_decimal_memo_fork_compact_isolation ... ok"
+      },
+      {
+        "line": 774,
+        "text": "2026-09-10T18:15:34.9086997Z test tests::has_high_precision_decimal_memo_invalidates_stored_growth ... ok"
+      },
+      {
+        "line": 775,
+        "text": "2026-09-10T18:15:34.9369076Z test tests::has_high_precision_decimal_memo_mapped_wal_precision ... ok"
+      },
+      {
+        "line": 776,
+        "text": "2026-09-10T18:15:34.9370842Z test tests::has_high_precision_decimal_memo_preserves_unchanged_dictionary ... ok"
+      },
+      {
+        "line": 777,
+        "text": "2026-09-10T18:15:34.9387813Z test tests::has_high_precision_decimal_memo_survives_delta_insert ... ok"
+      }
+    ]
+  },
+  {
+    "features": "jsonld",
+    "job_id": 102987207565,
+    "log": "core-g35.log",
+    "build_line": 940,
+    "test_command": "2026-09-10T18:17:12.9059225Z + cargo test -p sparq-core --features jsonld",
+    "clippy_command": "2026-09-10T18:17:31.5160620Z + cargo clippy -p sparq-core --features jsonld --all-targets -- -D warnings",
+    "unit_summary": "2026-09-10T18:17:25.6149648Z test result: ok. 154 passed; 0 failed; 4 ignored; 0 measured; 0 filtered out; finished in 8.11s",
+    "memo_tests": [
+      {
+        "line": 1055,
+        "text": "2026-09-10T18:17:19.2501425Z test tests::has_high_precision_decimal_memo_fork_compact_isolation ... ok"
+      },
+      {
+        "line": 1056,
+        "text": "2026-09-10T18:17:19.2536743Z test tests::has_high_precision_decimal_memo_invalidates_stored_growth ... ok"
+      },
+      {
+        "line": 1057,
+        "text": "2026-09-10T18:17:19.2568927Z test tests::has_high_precision_decimal_memo_preserves_unchanged_dictionary ... ok"
+      },
+      {
+        "line": 1058,
+        "text": "2026-09-10T18:17:19.2604996Z test tests::has_high_precision_decimal_memo_survives_delta_insert ... ok"
+      }
+    ]
+  },
+  {
+    "features": "native-ttl",
+    "job_id": 102987207412,
+    "log": "core-g36.log",
+    "build_line": 364,
+    "test_command": "2026-09-10T18:20:38.6306676Z + cargo test -p sparq-core --features native-ttl",
+    "clippy_command": "2026-09-10T18:20:56.7959247Z + cargo clippy -p sparq-core --features native-ttl --all-targets -- -D warnings",
+    "unit_summary": "2026-09-10T18:20:50.8600790Z test result: ok. 175 passed; 0 failed; 4 ignored; 0 measured; 0 filtered out; finished in 7.70s",
+    "memo_tests": [
+      {
+        "line": 475,
+        "text": "2026-09-10T18:20:44.6602351Z test tests::has_high_precision_decimal_memo_fork_compact_isolation ... ok"
+      },
+      {
+        "line": 476,
+        "text": "2026-09-10T18:20:44.6634255Z test tests::has_high_precision_decimal_memo_invalidates_stored_growth ... ok"
+      },
+      {
+        "line": 477,
+        "text": "2026-09-10T18:20:44.6689295Z test tests::has_high_precision_decimal_memo_preserves_unchanged_dictionary ... ok"
+      },
+      {
+        "line": 478,
+        "text": "2026-09-10T18:20:44.6719943Z test tests::has_high_precision_decimal_memo_survives_delta_insert ... ok"
+      }
+    ]
+  },
+  {
+    "features": "iri-fast",
+    "job_id": 102987207412,
+    "log": "core-g36.log",
+    "build_line": 634,
+    "test_command": "2026-09-10T18:21:01.0684376Z + cargo test -p sparq-core --features iri-fast",
+    "clippy_command": "2026-09-10T18:21:19.9190487Z + cargo clippy -p sparq-core --features iri-fast --all-targets -- -D warnings",
+    "unit_summary": "2026-09-10T18:21:13.8554428Z test result: ok. 155 passed; 0 failed; 4 ignored; 0 measured; 0 filtered out; finished in 8.35s",
+    "memo_tests": [
+      {
+        "line": 751,
+        "text": "2026-09-10T18:21:07.1659660Z test tests::has_high_precision_decimal_memo_fork_compact_isolation ... ok"
+      },
+      {
+        "line": 752,
+        "text": "2026-09-10T18:21:07.1672820Z test tests::has_high_precision_decimal_memo_invalidates_stored_growth ... ok"
+      },
+      {
+        "line": 753,
+        "text": "2026-09-10T18:21:07.1704903Z test tests::has_high_precision_decimal_memo_preserves_unchanged_dictionary ... ok"
+      },
+      {
+        "line": 754,
+        "text": "2026-09-10T18:21:07.1713375Z test tests::has_high_precision_decimal_memo_survives_delta_insert ... ok"
+      }
+    ]
+  },
+  {
+    "features": "block-bloom",
+    "job_id": 102987207412,
+    "log": "core-g36.log",
+    "build_line": 884,
+    "test_command": "2026-09-10T18:21:23.9801392Z + cargo test -p sparq-core --features block-bloom",
+    "clippy_command": "2026-09-10T18:21:43.1397320Z + cargo clippy -p sparq-core --features block-bloom --all-targets -- -D warnings",
+    "unit_summary": "2026-09-10T18:21:37.1291341Z test result: ok. 154 passed; 0 failed; 6 ignored; 0 measured; 0 filtered out; finished in 8.72s",
+    "memo_tests": [
+      {
+        "line": 1002,
+        "text": "2026-09-10T18:21:31.3959877Z test tests::has_high_precision_decimal_memo_fork_compact_isolation ... ok"
+      },
+      {
+        "line": 1003,
+        "text": "2026-09-10T18:21:31.3989797Z test tests::has_high_precision_decimal_memo_invalidates_stored_growth ... ok"
+      },
+      {
+        "line": 1004,
+        "text": "2026-09-10T18:21:31.4019700Z test tests::has_high_precision_decimal_memo_preserves_unchanged_dictionary ... ok"
+      },
+      {
+        "line": 1005,
+        "text": "2026-09-10T18:21:31.4034916Z test tests::has_high_precision_decimal_memo_survives_delta_insert ... ok"
+      }
+    ]
+  },
+  {
+    "features": "spqcprm2,mmap",
+    "job_id": 102987207699,
+    "log": "core-g41.log",
+    "build_line": 366,
+    "test_command": "2026-09-10T18:26:56.8478065Z + cargo test -p sparq-core --features spqcprm2,mmap",
+    "clippy_command": "2026-09-10T18:29:08.2845599Z + cargo clippy -p sparq-core --features spqcprm2,mmap --all-targets -- -D warnings",
+    "unit_summary": "2026-09-10T18:27:08.0443868Z test result: ok. 221 passed; 0 failed; 5 ignored; 0 measured; 0 filtered out; finished in 6.86s",
+    "memo_tests": [
+      {
+        "line": 526,
+        "text": "2026-09-10T18:27:03.5972351Z test tests::has_high_precision_decimal_memo_fork_compact_isolation ... ok"
+      },
+      {
+        "line": 527,
+        "text": "2026-09-10T18:27:03.5978400Z test tests::has_high_precision_decimal_memo_invalidates_stored_growth ... ok"
+      },
+      {
+        "line": 528,
+        "text": "2026-09-10T18:27:03.6046557Z test tests::has_high_precision_decimal_memo_mapped_wal_precision ... ok"
+      },
+      {
+        "line": 529,
+        "text": "2026-09-10T18:27:03.6058029Z test tests::has_high_precision_decimal_memo_preserves_unchanged_dictionary ... ok"
+      },
+      {
+        "line": 530,
+        "text": "2026-09-10T18:27:03.6076142Z test tests::has_high_precision_decimal_memo_survives_delta_insert ... ok"
+      }
+    ]
+  },
+  {
+    "features": "overlay-deleted-projections",
+    "job_id": 102987207699,
+    "log": "core-g41.log",
+    "build_line": 691,
+    "test_command": "2026-09-10T18:29:12.1893964Z + cargo test -p sparq-core --features overlay-deleted-projections",
+    "clippy_command": "2026-09-10T18:29:26.1395362Z + cargo clippy -p sparq-core --features overlay-deleted-projections --all-targets -- -D warnings",
+    "unit_summary": "2026-09-10T18:29:22.0888895Z test result: ok. 154 passed; 0 failed; 4 ignored; 0 measured; 0 filtered out; finished in 6.27s",
+    "memo_tests": [
+      {
+        "line": 807,
+        "text": "2026-09-10T18:29:16.9582048Z test tests::has_high_precision_decimal_memo_fork_compact_isolation ... ok"
+      },
+      {
+        "line": 808,
+        "text": "2026-09-10T18:29:16.9621780Z test tests::has_high_precision_decimal_memo_invalidates_stored_growth ... ok"
+      },
+      {
+        "line": 809,
+        "text": "2026-09-10T18:29:16.9622723Z test tests::has_high_precision_decimal_memo_preserves_unchanged_dictionary ... ok"
+      },
+      {
+        "line": 810,
+        "text": "2026-09-10T18:29:16.9623680Z test tests::has_high_precision_decimal_memo_survives_delta_insert ... ok"
+      }
+    ]
+  }
+]

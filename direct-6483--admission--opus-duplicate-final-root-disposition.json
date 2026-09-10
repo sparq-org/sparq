@@ -1,0 +1,29 @@
+{
+  "at": "2026-09-10T18:59:22.181216+00:00",
+  "state": "completed_collected",
+  "session_id": 67551,
+  "actual_primary_model": "claude-opus-5",
+  "effort": "xhigh",
+  "head": "0b4554b924a80432cc1b572bd19f8e58cdbfb4e6",
+  "verdict": "APPROVE_FOR_CI",
+  "output_sha256": "342df78ea491ac2f0d108a8221800f147aac823db25cbad1a4cc98720e1abbd1",
+  "blocking_findings": [],
+  "publish_for_CI_approved": true,
+  "merge_approved": false,
+  "nonblocking_disposition": [
+    "One compiled guard-removal witness is sufficient; do not claim unexecuted mutant-test kills.",
+    "Delta-overlay scoping not separately runtime-pinned; shared query path/source contract proven, no broader runtime claim.",
+    "Earlier duplicate diagnostic is intentional; machine failure markers unchanged.",
+    "Default graph is implicit in its rendered row; full-quad contract remains accurate, no general bag claim.",
+    "Diagnostic choice follows fixed input order; all production callers sort. Helper itself deterministic for fixed input; no new sorted-input restriction needed.",
+    "Actualmodel marker truthful; casing-only churn unnecessary.",
+    "Exact PROBES string/variable assertion deliberately makes any probe contract change require review.",
+    "Touched formatting evidence remains bound to identicalsource; normal repository formatting/Clippy/privacy gates remain required."
+  ],
+  "CI_and_observation": [
+    "Normal protected ci-summary remains authoritative; do not change its scope or promote an advisory check by editing workflow policy.",
+    "Require actual newtest/fixed_window_smoke Linux execution, workspace build/test/Clippy and Linux privacy proof before queue. Diagnose actual failures; do not bless local Bash3 limitation as a pass.",
+    "Track post-merge differential-update/nightly soak health before making broader production-sensitivity claims. No corpus replay or new randomized soak has been performed in this patch."
+  ],
+  "policy": "67551 complete; no poll/relaunch. Ready publication is authorized after fresh target validation, independent Copilot and CI still required."
+}

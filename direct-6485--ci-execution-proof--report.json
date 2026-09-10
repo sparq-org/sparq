@@ -1,0 +1,80 @@
+{
+  "verdict": "Requested execution evidence established; one remote merged-tree hash read remains unverified after404. No observed source/test gate failure in current successful cohorts.",
+  "pr": 6486,
+  "head": "9ac4a59e96b1c69c8d617fbde9e98fe8c0436fed",
+  "model": "GPT-6 Astra xhigh",
+  "protected_gate": {
+    "run": 34511329028,
+    "attempt": 2,
+    "check_job_id": 103002616428,
+    "app_id": 15368,
+    "conclusion": "success",
+    "completed_at": "2026-09-10T18:47:51Z",
+    "evidence": "root-aggregate-recovery-gate-check.json"
+  },
+  "core_tests": {
+    "new": 4,
+    "existing_insertion": 1,
+    "all_observed_PASS": true,
+    "mmap_WAL": "bulk1 plus mmap,dict-spill and spqcprm2,mmap matrix legs",
+    "evidence": "memo-test-evidence.json"
+  },
+  "feature_matrix": {
+    "core_test_and_clippy_legs": 8,
+    "features": [
+      "compact-index",
+      "mmap,dict-spill",
+      "jsonld",
+      "native-ttl",
+      "iri-fast",
+      "block-bloom",
+      "spqcprm2,mmap",
+      "overlay-deleted-projections"
+    ],
+    "evidence": "core-feature-legs.json",
+    "qualification": "Separate legs plus defaults, not exhaustive powerset; mapped test is cfg(mmap) and absent in nonmmap legs as expected."
+  },
+  "privacy": {
+    "scanned_files": 784,
+    "selftests_passed": 32,
+    "failed": 0,
+    "job": 102985912521
+  },
+  "rustdoc": {
+    "default_and_all_features": true,
+    "cargo_doc_workspace": true,
+    "RUSTDOCFLAGS": "-D warnings",
+    "sparq_core_documenting_seen_twice": true,
+    "job": 102986509738,
+    "gap": null
+  },
+  "wasm": {
+    "actual_base_bytes": 1562729,
+    "actual_head_bytes": 1562707,
+    "actual_delta_bytes": -22,
+    "V2": "6486.json accepted; no byte-neutrality claim",
+    "size_gate": "Benchmarks deterministic-only independently passes best-ever floor with PERF_GATE_ALLOW empty",
+    "floor": 1587594,
+    "latency_proof": false
+  },
+  "source": {
+    "local_head_clean": true,
+    "only_files": [
+      "crates/sparq-core/src/lib.rs",
+      "bench/feature-off-declarations/6486.json"
+    ],
+    "policy_workflows_scalar_floor_changed": false,
+    "CI_merge_checkout": "613cad4d82742955394658dbac03483ef3a4cf97"
+  },
+  "cohorts": "Use ready-for-review run34511329xxx/34511329512, recovered current-head vector34511329019 and aggregateattempt2. Earlier synchronize34511322xxx automatic cancellations and failedattempt1 are not execution substitutes. Successful feature-off artifact job originated before the failed-job-only quick-gate recovery and remained valid same-head evidence.",
+  "read_scope": {
+    "requests": 18,
+    "initial_core_remaining": 4971,
+    "one_error": "404 for abbreviated Git-data commit613cad4; no retry or further requests",
+    "remote_mutations": 0,
+    "builds": 0,
+    "tests_executed_locally": 0
+  },
+  "remaining": "Root may independently verify full CI merge commit tree using exact fullSHA if needed. All named runtime obligations have actual logs; no new execution requested. Full publication/queue decision remains root-owned.",
+  "pending_commands": false
+}

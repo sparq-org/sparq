@@ -1,0 +1,200 @@
+[
+  {
+    "ordinal": 1,
+    "argv": [
+      "/opt/homebrew/bin/gh",
+      "api",
+      "rate_limit"
+    ],
+    "output": "budget.json",
+    "exit": 0,
+    "seconds": 0.6484607920000001
+  },
+  {
+    "ordinal": 2,
+    "argv": [
+      "/opt/homebrew/bin/gh",
+      "api",
+      "repos/sparq-org/sparq/pulls/6486"
+    ],
+    "output": "pr-current.json",
+    "exit": 0,
+    "seconds": 1.250808958
+  },
+  {
+    "ordinal": 3,
+    "argv": [
+      "/opt/homebrew/bin/gh",
+      "api",
+      "repos/sparq-org/sparq/actions/runs/34511328905/jobs?per_page=100"
+    ],
+    "output": "docs-jobs.json",
+    "exit": 0,
+    "seconds": 0.534422417
+  },
+  {
+    "ordinal": 4,
+    "argv": [
+      "/opt/homebrew/bin/gh",
+      "api",
+      "repos/sparq-org/sparq/actions/runs/34511329318/jobs?per_page=100"
+    ],
+    "output": "bench-jobs.json",
+    "exit": 0,
+    "seconds": 0.5605932499999999
+  },
+  {
+    "ordinal": 5,
+    "argv": [
+      "/opt/homebrew/bin/gh",
+      "api",
+      "repos/sparq-org/sparq/actions/runs/34511329019/jobs?per_page=100"
+    ],
+    "output": "vector-jobs.json",
+    "exit": 0,
+    "seconds": 0.633492917
+  },
+  {
+    "ordinal": 6,
+    "argv": [
+      "/opt/homebrew/bin/gh",
+      "api",
+      "repos/sparq-org/sparq/actions/jobs/102990724053/logs"
+    ],
+    "output": "bulk3.log",
+    "exit": 0,
+    "seconds": 1.4453597079999998
+  },
+  {
+    "ordinal": 7,
+    "argv": [
+      "/opt/homebrew/bin/gh",
+      "api",
+      "repos/sparq-org/sparq/actions/jobs/102990724110/logs"
+    ],
+    "output": "bulk1.log",
+    "exit": 0,
+    "seconds": 1.41360625
+  },
+  {
+    "ordinal": 8,
+    "argv": [
+      "/opt/homebrew/bin/gh",
+      "api",
+      "repos/sparq-org/sparq/actions/jobs/102990724545/logs"
+    ],
+    "output": "bulk2.log",
+    "exit": 0,
+    "seconds": 1.402270958
+  },
+  {
+    "ordinal": 9,
+    "argv": [
+      "/opt/homebrew/bin/gh",
+      "api",
+      "repos/sparq-org/sparq/actions/jobs/102987207565/logs"
+    ],
+    "output": "core-g35.log",
+    "exit": 0,
+    "seconds": 1.431090875
+  },
+  {
+    "ordinal": 10,
+    "argv": [
+      "/opt/homebrew/bin/gh",
+      "api",
+      "repos/sparq-org/sparq/actions/jobs/102987207412/logs"
+    ],
+    "output": "core-g36.log",
+    "exit": 0,
+    "seconds": 1.176777334
+  },
+  {
+    "ordinal": 11,
+    "argv": [
+      "/opt/homebrew/bin/gh",
+      "api",
+      "repos/sparq-org/sparq/actions/jobs/102987207699/logs"
+    ],
+    "output": "core-g41.log",
+    "exit": 0,
+    "seconds": 1.334056708
+  },
+  {
+    "ordinal": 12,
+    "argv": [
+      "/opt/homebrew/bin/gh",
+      "api",
+      "repos/sparq-org/sparq/actions/jobs/102985912521/logs"
+    ],
+    "output": "docs-quick.log",
+    "exit": 0,
+    "seconds": 1.40579775
+  },
+  {
+    "ordinal": 13,
+    "argv": [
+      "/opt/homebrew/bin/gh",
+      "api",
+      "repos/sparq-org/sparq/actions/jobs/102986509738/logs"
+    ],
+    "output": "clippy-doc.log",
+    "exit": 0,
+    "seconds": 3.0918065
+  },
+  {
+    "ordinal": 14,
+    "argv": [
+      "/opt/homebrew/bin/gh",
+      "api",
+      "repos/sparq-org/sparq/actions/jobs/102988177578/logs"
+    ],
+    "output": "wasm-equality.log",
+    "exit": 0,
+    "seconds": 1.315979833
+  },
+  {
+    "ordinal": 15,
+    "argv": [
+      "/opt/homebrew/bin/gh",
+      "api",
+      "repos/sparq-org/sparq/actions/jobs/102986490948/logs"
+    ],
+    "output": "bench.log",
+    "exit": 0,
+    "seconds": 1.135681291
+  },
+  {
+    "ordinal": 16,
+    "argv": [
+      "/opt/homebrew/bin/gh",
+      "api",
+      "repos/sparq-org/sparq/actions/jobs/102986612720/logs"
+    ],
+    "output": "archive.log",
+    "exit": 0,
+    "seconds": 1.2271895
+  },
+  {
+    "ordinal": 17,
+    "argv": [
+      "/opt/homebrew/bin/gh",
+      "api",
+      "repos/sparq-org/sparq/actions/jobs/102988175230/logs"
+    ],
+    "output": "vector-quick.log",
+    "exit": 0,
+    "seconds": 1.439953916
+  },
+  {
+    "ordinal": 18,
+    "argv": [
+      "/opt/homebrew/bin/gh",
+      "api",
+      "repos/sparq-org/sparq/git/commits/613cad4"
+    ],
+    "output": "ci-merge-commit.json",
+    "exit": 1,
+    "seconds": 0.702387334
+  }
+]

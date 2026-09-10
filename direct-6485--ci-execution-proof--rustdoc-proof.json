@@ -1,0 +1,46 @@
+{
+  "job_id": 102986509738,
+  "source": "ci.yml1408-1415",
+  "intra_doc_link_warning_enforced": true,
+  "routes": [
+    {
+      "command": "2026-09-10T18:03:36.9928149Z cargo doc --workspace --no-deps",
+      "begin_line": 1516,
+      "finish_line": 1700,
+      "output": [
+        {
+          "line": 1527,
+          "text": "2026-09-10T18:03:36.9967370Z   RUSTDOCFLAGS: -D warnings"
+        },
+        {
+          "line": 1685,
+          "text": "2026-09-10T18:04:12.1953641Z  Documenting sparq-core v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-core)"
+        },
+        {
+          "line": 1700,
+          "text": "2026-09-10T18:04:16.3555044Z     Finished `dev` profile [unoptimized + debuginfo] target(s) in 39.32s"
+        }
+      ]
+    },
+    {
+      "command": "2026-09-10T18:04:16.4009237Z cargo doc --workspace --no-deps --all-features",
+      "begin_line": 1702,
+      "finish_line": 1851,
+      "output": [
+        {
+          "line": 1713,
+          "text": "2026-09-10T18:04:16.4047937Z   RUSTDOCFLAGS: -D warnings"
+        },
+        {
+          "line": 1847,
+          "text": "2026-09-10T18:05:04.3170988Z  Documenting sparq-core v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-core)"
+        },
+        {
+          "line": 1851,
+          "text": "2026-09-10T18:05:07.5991473Z     Finished `dev` profile [unoptimized + debuginfo] target(s) in 51.16s"
+        }
+      ]
+    }
+  ],
+  "not_inferred_from_doctest_job_name": true
+}

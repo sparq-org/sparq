@@ -1,0 +1,12 @@
+{
+  "at": "2026-09-10T19:09:20.869441+00:00",
+  "issue": 6479,
+  "state": "source_only_readiness_running",
+  "agent": "/root/postmerge_ci",
+  "model": "gpt-6-astra",
+  "effort": "xhigh",
+  "directory": "direct-6479/readiness",
+  "target_evidence": "direct-6479/admission/issue-current.json",
+  "source_worktree": "worktrees/issue6483 READONLY engine surface againstmainf50",
+  "scope": "CurrentBASE thread-local callback defect source/caller audit, actualpubliccallback witness protocol, warmdependency/resource availability and narrow repair/test plan. No production edit/build/test/newmodelreview yet."
+}

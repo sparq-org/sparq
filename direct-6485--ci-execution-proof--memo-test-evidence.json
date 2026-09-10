@@ -1,0 +1,40 @@
+{
+  "new_tests": [
+    "has_high_precision_decimal_memo_preserves_unchanged_dictionary",
+    "has_high_precision_decimal_memo_invalidates_stored_growth",
+    "has_high_precision_decimal_memo_fork_compact_isolation",
+    "has_high_precision_decimal_memo_mapped_wal_precision"
+  ],
+  "observations": [
+    {
+      "line": 770,
+      "text": "2026-09-10T18:22:58.6601849Z         PASS [   0.018s] ( 246/3072) sparq-core tests::has_high_precision_decimal_memo_mapped_wal_precision",
+      "log": "bulk1.log",
+      "job_id": 102990724110
+    },
+    {
+      "line": 742,
+      "text": "2026-09-10T18:21:45.1978503Z         PASS [   0.013s] ( 218/2877) sparq-core tests::has_high_precision_decimal_memo_fork_compact_isolation",
+      "log": "bulk2.log",
+      "job_id": 102990724545
+    },
+    {
+      "line": 743,
+      "text": "2026-09-10T18:21:45.2069739Z         PASS [   0.008s] ( 219/2877) sparq-core tests::has_high_precision_decimal_memo_preserves_unchanged_dictionary",
+      "log": "bulk2.log",
+      "job_id": 102990724545
+    },
+    {
+      "line": 727,
+      "text": "2026-09-10T18:16:12.8347821Z         PASS [   0.015s] ( 203/2739) sparq-core tests::has_high_precision_decimal_memo_survives_delta_insert",
+      "log": "bulk3.log",
+      "job_id": 102990724053
+    },
+    {
+      "line": 729,
+      "text": "2026-09-10T18:16:12.8437871Z         PASS [   0.023s] ( 205/2739) sparq-core tests::has_high_precision_decimal_memo_invalidates_stored_growth",
+      "log": "bulk3.log",
+      "job_id": 102990724053
+    }
+  ]
+}

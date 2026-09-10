@@ -1,0 +1,19 @@
+{
+  "at": "2026-09-10T19:01:56.863342+00:00",
+  "head": "9ac4a59e96b1c69c8d617fbde9e98fe8c0436fed",
+  "base": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+  "gate_check_id": 103002616428,
+  "gate_integration_id": 15368,
+  "all_required_validation_passed": true,
+  "CI_proof_directory": "direct-6485/ci-execution-proof",
+  "verified_files": 57,
+  "manifest_sha256": "8709a473980d0a3a863c9cb2f1c06782a629574438f9a74b85cfc1eb8fde5dcd",
+  "checkout_commit": "613cad4d82742955394658dbac03483ef3a4cf97",
+  "checkout_tree": "15664509e583db9141929348c4433cf558c57be4",
+  "reviewed_head_tree": "15664509e583db9141929348c4433cf558c57be4",
+  "byte_identical_trees": true,
+  "source_binding_evidence": "ci-source-merge-commit.json",
+  "identifier_correction": "Agent used abbreviated613cad4 at Git data endpoint, yielding404. Root used fullSHA independently present in checkout log; successful one read after freshhealthybudget. No exhaustedbudget retry.",
+  "required_execution": "Actual4newmemo+existing insertion tests; mappedWALdefault/mappedfeature evidence;8corefeaturelegs;default/allfeaturesrustdoc warningsdeny;Linuxprivacy;separatefeatureoffintent/wasmsizeratchet.",
+  "limits": "No latency,throughput,heapbenefitclaim; mainpostmergeproof stillneededbeforeclosing6485; parent3113 staysopen."
+}

@@ -1,0 +1,1 @@
+{"ordinal": 18, "argv": ["/opt/homebrew/bin/gh", "api", "repos/sparq-org/sparq/git/commits/613cad4"], "output": "ci-merge-commit.json", "exit": 1, "seconds": 0.702387334}

@@ -1,0 +1,21 @@
+{
+  "job_id": 102985912521,
+  "lines": [
+    {
+      "line": 591,
+      "text": "2026-09-10T17:58:54.7541370Z ##[group]Run bash scripts/check-privacy-claims.sh"
+    },
+    {
+      "line": 602,
+      "text": "2026-09-10T17:58:57.1826362Z check-privacy-claims: OK \u2014 scanned 784 file(s); no unqualified ZK/MPC privacy/soundness claim."
+    },
+    {
+      "line": 615,
+      "text": "2026-09-10T17:58:57.5179501Z test_privacy_claims: 32 passed, 0 failed."
+    },
+    {
+      "line": 616,
+      "text": "2026-09-10T17:58:57.5180931Z test_privacy_claims: OK \u2014 both-direction soundness-claim coverage holds."
+    }
+  ]
+}

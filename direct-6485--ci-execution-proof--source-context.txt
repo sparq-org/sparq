@@ -1,0 +1,461 @@
+
+## crates/sparq-core/src/lib.rs:9630-9850
+9630:     }
+9631: 
+9632:     /// [OPUS-4.8] sq-lr2ii — the memoised flag must NOT go stale: inserting an f64-inexact
+9633:     /// decimal via a delta AFTER the flag was computed as `false` must flip it to `true`.
+9634:     #[test]
+9635:     fn has_high_precision_decimal_memo_survives_delta_insert() {
+9636:         let mut g = Graph::load_str("<http://ex/s> <http://ex/p> \"3\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n", "ntriples").unwrap();
+9637:         // Compute (and memoise) the flag as false over the integer-only graph.
+9638:         assert!(!g.has_high_precision_decimal());
+9639:         // Insert a high-precision decimal; the memo must be invalidated + recomputed to true.
+9640:         let s = Term::NamedNode(NamedNode::new_unchecked("http://ex/s"));
+9641:         let p = Term::NamedNode(NamedNode::new_unchecked("http://ex/d"));
+9642:         let o = Term::Literal(Literal::new_typed_literal("2.000000000000000003", xsd::DECIMAL));
+9643:         g.apply_delta(&[[s, p, o]], &[]).unwrap();
+9644:         assert!(g.has_high_precision_decimal(), "delta-inserted inexact decimal must flip the memo");
+9645:     }
+9646: 
+9647:     // [GPT-6 Astra] #6485: observe the memo itself so an unnecessary rescan fails.
+9648:     #[test]
+9649:     fn has_high_precision_decimal_memo_preserves_unchanged_dictionary() {
+9650:         use std::sync::atomic::Ordering::Relaxed;
+9651:         for sparse in [false, true] {
+9652:             let mut g = Graph::load_str(
+9653:                 "@prefix : <urn:> . :s :p 7 . :other :p 8 . :s :exact 1.5 .",
+9654:                 "turtle",
+9655:             )
+9656:             .unwrap();
+9657:             if sparse {
+9658:                 g.numerics = NumData::Sparse(
+9659:                     (1..=g.dict.len() as Id)
+9660:                         .filter_map(|id| g.numerics.lookup(id).map(|value| (id, value)))
+9661:                         .collect(),
+9662:                 );
+9663:             }
+9664:             let triple = |s: &str, value: i32| {
+9665:                 [
+9666:                     Term::NamedNode(NamedNode::new(s).unwrap()),
+9667:                     Term::NamedNode(NamedNode::new("urn:p").unwrap()),
+9668:                     Term::Literal(Literal::from(value)),
+9669:                 ]
+9670:             };
+9671:             let d = g.dict.len();
+9672:             assert!(!g.has_high_precision_decimal());
+9673:             let removed = triple("urn:other", 8);
+9674:             g.apply_delta(&[], std::slice::from_ref(&removed)).unwrap();
+9675:             assert_eq!(g.len(), 2);
+9676:             assert_eq!(
+9677:                 g.high_precision_decimal.load(Relaxed),
+9678:                 1,
+9679:                 "delete, sparse={sparse}"
+9680:             );
+9681:             let absent = triple("urn:s", 8);
+9682:             assert!(absent.iter().all(|term| g.id_of(term).is_some()));
+9683:             g.apply_delta(&[], &[absent]).unwrap();
+9684:             assert_eq!(g.len(), 2);
+9685:             assert_eq!(g.high_precision_decimal.load(Relaxed), 1, "absent delete");
+9686:             g.apply_delta(&[removed], &[]).unwrap();
+9687:             assert_eq!(g.len(), 3);
+9688:             assert_eq!(
+9689:                 g.high_precision_decimal.load(Relaxed),
+9690:                 1,
+9691:                 "known reinsertion"
+9692:             );
+9693:             g.apply_delta(&[], &[]).unwrap();
+9694:             assert_eq!(g.high_precision_decimal.load(Relaxed), 1, "empty delta");
+9695:             let inline = triple("urn:s", 999999);
+9696:             g.apply_delta(std::slice::from_ref(&inline), &[]).unwrap();
+9697:             assert_eq!(g.id_of(&inline[2]), Some(dict::INLINE_BASE + 999999));
+9698:             assert_eq!(g.dict.len(), d);
+9699:             assert_eq!(g.high_precision_decimal.load(Relaxed), 1, "inline integer");
+9700:             assert!(!g.has_high_precision_decimal());
+9701:         }
+9702:     }
+9703: 
+9704:     #[test]
+9705:     fn has_high_precision_decimal_memo_invalidates_stored_growth() {
+9706:         use std::sync::atomic::Ordering::Relaxed;
+9707:         for sparse in [false, true] {
+9708:             let mut g = Graph::load_str("@prefix : <urn:> . :s :p 7 .", "turtle").unwrap();
+9709:             if sparse {
+9710:                 g.numerics = NumData::Sparse(rustc_hash::FxHashMap::default());
+9711:             }
+9712:             assert!(!g.has_high_precision_decimal());
+9713:             for (lexical, datatype, high_precision) in [
+9714:                 ("1.5", xsd::DECIMAL, false),
+9715:                 ("007", xsd::INTEGER, false),
+9716:                 ("2.000000000000000003", xsd::DECIMAL, true),
+9717:             ] {
+9718:                 let d = g.dict.len();
+9719:                 let triple = [
+9720:                     Term::NamedNode(NamedNode::new("urn:s").unwrap()),
+9721:                     Term::NamedNode(NamedNode::new("urn:p").unwrap()),
+9722:                     Term::Literal(Literal::new_typed_literal(lexical, datatype)),
+9723:                 ];
+9724:                 g.apply_delta(std::slice::from_ref(&triple), &[]).unwrap();
+9725:                 assert!(g.dict.len() > d, "{lexical}");
+9726:                 let id = g.id_of(&triple[2]).unwrap();
+9727:                 assert!(g.numeric_value(id).is_some(), "{lexical}");
+9728:                 assert_eq!(g.dict.term(id), triple[2]);
+9729:                 assert_eq!(
+9730:                     g.high_precision_decimal.load(Relaxed),
+9731:                     0,
+9732:                     "growth: {lexical}"
+9733:                 );
+9734:                 assert_eq!(g.has_high_precision_decimal(), high_precision);
+9735:                 if high_precision {
+9736:                     g.apply_delta(&[], &[triple]).unwrap();
+9737:                     assert_eq!(g.high_precision_decimal.load(Relaxed), 2, "sticky found");
+9738:                     assert!(g.has_high_precision_decimal());
+9739:                 }
+9740:             }
+9741:         }
+9742:     }
+9743: 
+9744:     #[test]
+9745:     fn has_high_precision_decimal_memo_fork_compact_isolation() {
+9746:         use std::sync::atomic::Ordering::Relaxed;
+9747:         let mut parent =
+9748:             Graph::load_str("@prefix : <urn:> . :s :p 1.5 . :other :p 7 .", "turtle").unwrap();
+9749:         assert!(!parent.has_high_precision_decimal());
+9750:         let mut child = parent.fork();
+9751:         assert!(matches!(&child.numerics, NumData::Forked { .. }));
+9752:         assert_eq!(child.high_precision_decimal.load(Relaxed), 0);
+9753:         assert!(!child.has_high_precision_decimal());
+9754:         let d = child.dict.len();
+9755:         let removed = [
+9756:             Term::NamedNode(NamedNode::new("urn:other").unwrap()),
+9757:             Term::NamedNode(NamedNode::new("urn:p").unwrap()),
+9758:             Term::Literal(Literal::from(7)),
+9759:         ];
+9760:         child
+9761:             .apply_delta(&[], std::slice::from_ref(&removed))
+9762:             .unwrap();
+9763:         assert_eq!(child.high_precision_decimal.load(Relaxed), 1);
+9764:         assert_eq!(parent.len(), 2);
+9765:         assert_eq!(child.len(), 1);
+9766:         child.compact().unwrap();
+9767:         assert_eq!(child.dict.len(), d);
+9768:         assert_eq!(child.high_precision_decimal.load(Relaxed), 1);
+9769:         assert!(!child.has_high_precision_decimal());
+9770:         child.apply_delta(&[removed], &[]).unwrap();
+9771:         assert_eq!(child.high_precision_decimal.load(Relaxed), 1);
+9772:         let snapshot = child.snapshot();
+9773:         assert!(!snapshot.has_high_precision_decimal());
+9774:         let inexact = [
+9775:             Term::NamedNode(NamedNode::new("urn:s").unwrap()),
+9776:             Term::NamedNode(NamedNode::new("urn:p").unwrap()),
+9777:             Term::Literal(Literal::new_typed_literal(
+9778:                 "2.000000000000000003",
+9779:                 xsd::DECIMAL,
+9780:             )),
+9781:         ];
+9782:         parent
+9783:             .apply_delta(std::slice::from_ref(&inexact), &[])
+9784:             .unwrap();
+9785:         assert!(parent.has_high_precision_decimal());
+9786:         assert!(child.id_of(&inexact[2]).is_none());
+9787:         assert!(!child.has_high_precision_decimal());
+9788:         child
+9789:             .apply_delta(std::slice::from_ref(&inexact), &[])
+9790:             .unwrap();
+9791:         assert_eq!(child.high_precision_decimal.load(Relaxed), 0);
+9792:         assert!(child.has_high_precision_decimal());
+9793:         assert!(snapshot.id_of(&inexact[2]).is_none());
+9794:         assert!(!snapshot.has_high_precision_decimal());
+9795:     }
+9796: 
+9797:     #[cfg(feature = "mmap")]
+9798:     #[test]
+9799:     fn has_high_precision_decimal_memo_mapped_wal_precision() {
+9800:         use std::sync::atomic::Ordering::Relaxed;
+9801:         let dir = std::env::temp_dir().join(format!("sparq_numeric_memo_{}", std::process::id()));
+9802:         Graph::load_str("@prefix : <urn:> . :s :p 1.5 . :other :p 7 .", "turtle")
+9803:             .unwrap()
+9804:             .save(&dir)
+9805:             .unwrap();
+9806:         let mut g = Graph::open(&dir).unwrap();
+9807:         assert!(matches!(&g.numerics, NumData::Mapped(..)));
+9808:         assert!(!g.has_high_precision_decimal());
+9809:         let d = g.dict.len();
+9810:         let removed = [
+9811:             Term::NamedNode(NamedNode::new("urn:other").unwrap()),
+9812:             Term::NamedNode(NamedNode::new("urn:p").unwrap()),
+9813:             Term::Literal(Literal::from(7)),
+9814:         ];
+9815:         g.apply_delta(&[], &[removed]).unwrap();
+9816:         assert_eq!(g.dict.len(), d);
+9817:         assert_eq!(g.high_precision_decimal.load(Relaxed), 1);
+9818:         let inexact = [
+9819:             Term::NamedNode(NamedNode::new("urn:s").unwrap()),
+9820:             Term::NamedNode(NamedNode::new("urn:p").unwrap()),
+9821:             Term::Literal(Literal::new_typed_literal(
+9822:                 "2.000000000000000003",
+9823:                 xsd::DECIMAL,
+9824:             )),
+9825:         ];
+9826:         g.apply_delta(std::slice::from_ref(&inexact), &[]).unwrap();
+9827:         assert_eq!(g.high_precision_decimal.load(Relaxed), 0);
+9828:         assert!(g.numeric_value(g.id_of(&inexact[2]).unwrap()).is_some());
+9829:         drop(g); // Reopen must obtain the new term and numeric cache through WAL replay.
+9830:         let mut reopened = Graph::open(&dir).unwrap();
+9831:         assert_eq!(reopened.high_precision_decimal.load(Relaxed), 0);
+9832:         assert!(reopened.has_high_precision_decimal());
+9833:         reopened.apply_delta(&[], &[inexact]).unwrap();
+9834:         assert_eq!(reopened.high_precision_decimal.load(Relaxed), 2);
+9835:         reopened.compact().unwrap(); // The dictionary retains the now-orphaned decimal.
+9836:         assert!(reopened.has_high_precision_decimal());
+9837:         drop(reopened);
+9838:         let final_graph = Graph::open(&dir).unwrap();
+9839:         assert!(final_graph.has_high_precision_decimal());
+9840:         drop(final_graph);
+9841:         std::fs::remove_dir_all(&dir).unwrap();
+9842:     }
+9843: 
+9844:     /// The full sorted term-triple set of a graph (overlay merged), for state comparison.
+9845:     fn dump_terms(g: &Graph) -> Vec<(String, String, String)> {
+9846:         let scan = g.store.scan(&[None, None, None]);
+9847:         let mut v: Vec<(String, String, String)> = scan
+9848:             .rows
+9849:             .iter()
+9850:             .map(|r| {
+
+## .github/workflows/ci.yml:490-521
+490:       # [OPUS-4.8] sq-x4jy: cargo-nextest is the test runner — each test in its OWN
+491:       # process (a stray abort can't take the whole binary down), a never-executed
+492:       # BINARY reported as a DETERMINISTIC failure, and retries = 2 (now set by
+493:       # .config/nextest.toml [profile.ci], selected on the run side — registry#563
+494:       # item 2) lets a residual transient binary race self-heal. SHA-pinned install
+495:       # action (a pin already vetted elsewhere in this workflow).
+496:       - name: Install cargo-nextest
+497:         uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
+498:         with:
+499:           tool: nextest
+500:       # [OPUS-4.8] Build + ARCHIVE the whole workspace test set once. `--all-targets`
+501:       # mirrors the old `cargo build --workspace --all-targets` (unit + integration +
+502:       # bin test targets), so the archived set == what the un-sharded run built. The
+503:       # .tar.zst is self-contained (binaries + the metadata nextest needs to run them
+504:       # on another runner with `--archive-file`), so the shards never recompile.
+505:       #
+506:       # [OPUS-4.8] The archive runs `--features approx-ann,filtered-ann,vec-predicate`
+507:       # (#363, LOAD-BEARING): sparq-vectors' heavy recall/over-fetch/vec-predicate tests are
+508:       # MODULE-gated (`#![cfg(feature = ...)]`) and MUST run in this sharded lane — without
+509:       # these the gated binaries compile EMPTY and the heavy-hnsw shard's exact filter matches
+510:       # ZERO tests (nextest exit 4). These three are the ONLY opt-in features carried here.
+511:       # GUARD (sq-vya1): the archive carries NO OTHER opt-in features (we deliberately avoid
+512:       # `--all-features` — cross-crate conflicts + heavy/native/network deps would not even
+513:       # resolve; see feature-matrix.yml's SCOPE). Any test behind a DEFAULT-OFF feature OTHER
+514:       # than those three compiles EMPTY here and runs SILENTLY-zero in the shards — its coverage
+515:       # is the JOB OF feature-matrix.yml (per-leg `cargo test -p <crate> --features <set>`,
+516:       # gated by ci-summary). When you add/feature-gate a test: a sparq-vectors recall/vec test
+517:       # rides these archive features; ANYTHING ELSE must be wired into a feature-matrix.yml leg
+518:       # (read that file's GUARD block). Prove a suite is reached: `cargo nextest list -p <crate>
+519:       # --features <set>` must SHOW its test names.
+520:       - name: Build + archive test binaries (nextest archive)
+521:         run: cargo nextest archive --workspace --all-targets --features approx-ann,filtered-ann,vec-predicate --archive-file nextest.tar.zst
+
+## .github/workflows/ci.yml:543-562
+543:       # [OPUS-4.8] Doctests run ONCE here (nextest neither executes nor archives them,
+544:       # and --partition does not apply to them), off the warm archive build for ~12s at
+545:       # ZERO extra build cost — the whole point of build-once (sq-vyxy). Tradeoff (raised
+546:       # in #159 review): the shards `need: build-archive`, so a doctest failure here reds
+547:       # this job and SKIPS the shards, costing the cross-shard "full failure picture" for
+548:       # that run. We accept it deliberately: the only alternatives are (a) a separate
+549:       # doctest job, which re-pays the ~131s workspace build this PR exists to amortise,
+550:       # or (b) `if: always()` on the shards to decouple them, which muddies the gate
+551:       # (shards then must distinguish "build failed, no artifact" from "doctests failed,
+552:       # artifact present"). A doctest failure is rare and itself a hard, independent
+553:       # blocking signal; archive-then-doctest above at least guarantees the artifact
+554:       # exists. Re-open this if doctest flakiness ever makes the masked picture costly.
+555:       # [OPUS-4.8] (#363) SAME feature set as the archive build above so the opt-in
+556:       # sparq-vectors doc examples (the approx-ann/filtered-ann/vec-predicate-gated `///`
+557:       # blocks) are compiled/run here too, not silently dropped.
+558:       - name: Doctests (nextest does not run these; run once, off the warm build)
+559:         run: cargo test --workspace --features approx-ann,filtered-ann,vec-predicate --doc
+560: 
+561:   test:
+562:     # [OPUS-4.8] LOAD-AWARE sharded test matrix (merge-queue-drain speed — @jeswr).
+
+## .github/workflows/ci.yml:1360-1416
+1360:         run: |
+1361:           rustup default stable
+1362:           rustup component add rustfmt clippy
+1363:           rustup show active-toolchain
+1364:       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+1365:         with:
+1366:           # [OPUS-5] sq-h2gz6 + [SONNET-4.6] sq-6vshe.15 lever 2 / sq-aemq7 — CACHE-SAVE
+1367:           # DISCIPLINE: restore always, save on push-to-main only. Rationale + the
+1368:           # seeder argument are on the `build-archive` cache step above (the canonical
+1369:           # note); pinned by scripts/tests/test_mergequeue_cache_posture.py.
+1370:           save-if: ${{ github.ref == 'refs/heads/main' }}
+1371:       # GATES: the whole workspace (sparq-py included) is clippy-clean under -D warnings.
+1372:       # A new warning — from new code or a Rust-stable bump that adds a lint — fails CI.
+1373:       - name: clippy (deny warnings)
+1374:         run: cargo clippy --workspace --all-targets -- -D warnings
+1375:       # [OPUS-4.8] sq-4sbk: clippy -D warnings, WORKSPACE-WIDE, with `--all-features` — the
+1376:       # clippy sibling of the two-state rustdoc gate below. The default-features clippy above
+1377:       # NEVER compiles code inside default-OFF `#[cfg(feature = "…")]` modules (result-cache,
+1378:       # txn, vectorized, service, fedplan, fedclient, odrl-bridge, …), so a clippy lint inside
+1379:       # an opt-in feature module slips the central gate and only surfaces — if at all — via a
+1380:       # feature-matrix.yml leg that happens to enable that exact feature (the legs there clippy
+1381:       # per-crate `-p <crate> --features <set>`). This workspace-wide `--all-features` pass
+1382:       # catches such lints centrally AND the cross-crate feature-unification interactions that a
+1383:       # per-crate `-p` leg structurally cannot see (a default-feature edit that only mis-lints
+1384:       # once the unified all-features build turns another crate's feature on). VERIFIED SOUND on
+1385:       # main before being made gating (sq-4sbk crux check): the workspace has NO `compile_error!`
+1386:       # mutual-exclusion guard and NO `not(feature=…)` *compile-time* assert that breaks under
+1387:       # unification — `cargo clippy --workspace --all-targets --all-features -- -D warnings`
+1388:       # compiles every opt-in crate (sparq-hdt/-gpu/-py/-fedplan-mpc included) and is CLEAN.
+1389:       # The network features (`live`/`embeddings`) only COMPILE reqwest here; no socket is
+1390:       # opened (clippy does not run tests), so they are safe in this lint-only pass. Cost: the
+1391:       # lint job already builds the workspace twice over (default clippy + two rustdoc passes);
+1392:       # this adds only the off-by-default feature code on a warm target dir — a modest increment,
+1393:       # not a second full build (the bulk of the dependency + first-party graph is already
+1394:       # compiled by the default-features clippy above).
+1395:       - name: clippy (deny warnings, workspace — all features)
+1396:         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+1397:       # [OPUS-4.8] sq-8gsv: rustdoc -D warnings, WORKSPACE-WIDE. A broken/private intra-doc
+1398:       # link (e.g. a public item linking to a crate-private const/fn, or an unresolved
+1399:       # `[`Foo`]` that renders as literal text) is a rustdoc warning — NOT a clippy/build
+1400:       # warning — so it slips past every other gate here and mis-renders the published docs.
+1401:       # This was previously scoped to sparq-solid (sq-z1rm) and sparq-mpc (sq-h1w2) only,
+1402:       # because the rest of the workspace carried ~174 pre-existing intra-doc-link warnings
+1403:       # across ~20 crates. sq-8gsv cleared that backlog, so the gate now covers the WHOLE
+1404:       # doc surface: any new public item that links to a private/unresolved one fails CI.
+1405:       # Two feature states cover the feature-gated doc surface (e.g. sparq-solid's
+1406:       # `odrl-bridge`/`count-enforcement` modules, sparq-mpc's `insecure-test-rng`,
+1407:       # sparq-prov's `reason` bridge): default features, then `--all-features`.
+1408:       - name: rustdoc (deny warnings, workspace — default features)
+1409:         run: cargo doc --workspace --no-deps
+1410:         env:
+1411:           RUSTDOCFLAGS: "-D warnings"
+1412:       - name: rustdoc (deny warnings, workspace — all features)
+1413:         run: cargo doc --workspace --no-deps --all-features
+1414:         env:
+1415:           RUSTDOCFLAGS: "-D warnings"
+1416:       # [OPUS-4.8] sq-hqmm: invoke the standalone bench/dict (dict-baseline) selftest from a CI
+
+## .github/workflows/docs-quality.yml:280-300
+280:       # ---- former job: privacy-claims (ZK/MPC honesty gate) ----
+281:       # [OPUS-4.8] HARD gate (bead sq-toze.35 + sq-qhy4): the empirical-honesty mandate
+282:       # in CI form. The v1 ZK verifier is pending external cryptographer sign-off and
+283:       # `sparq-mpc` is honest-majority semi-honest only (SECURITY.md; research/zk-*-audit.md),
+284:       # so NO outward doc / README / SKILL / site-copy / compliance-index string may assert a
+285:       # ZK/MPC privacy-or-soundness property as a SETTLED, achieved fact without the
+286:       # not-yet-sound caveat. The script greps the outward claim surface for forbidden
+287:       # unqualified-claim phrases; a hit fails the build unless the line carries an inline
+288:       # `privacy-claims-allow: <why>` justification marker (the allow-list). Deterministic,
+289:       # no network, grep-only. [OPUS-4.8]
+290:       - name: privacy-claims (ZK/MPC honesty gate) — no unqualified claims
+291:         run: bash scripts/check-privacy-claims.sh
+292:       # [OPUS-4.8] sq-qhy4: both-direction self-tests for the predicate-form soundness
+293:       # coverage — should-FAIL overclaims ("the verifier is sound", "…are COMPLETE and
+294:       # SOUND", "provably sound") must be caught; should-PASS negated/hedged/non-crypto
+295:       # lines (incl. the canonical "SOUND as landed for the … threat model" verdict) must
+296:       # not regress. Hermetic (no git/network) — pins the gate classification. Runs in
+297:       # this same HARD job so a coverage regression also fails the ci-summary gate.
+298:       - name: Self-test the privacy-claims gate (both directions)
+299:         run: bash scripts/tests/test_privacy_claims.sh
+300: 
+
+## .github/workflows/bench.yml:303-319
+303:       # store_bytes_per_triple_small, wasm_bundle_bytes = DETERMINISTIC byte counts; parse_ns_per_byte =
+304:       # TIMING, made noise-robust via best-of-N re-measure — see the Hard gate step below).
+305:       # github-action-benchmark's fail-on-alert is a single GLOBAL switch that would also trip on the noisy
+306:       # wall-clock latencies, so it stays false (alert-comment only, below). This step is the TRUE gate.
+307:       #
+308:       # sq-52e: the gate now compares each metric against its COMMITTED best-ever FLOOR in
+309:       # bench/perf-baseline.json (the source-of-record ratchet, reviewed in diffs like the conformance
+310:       # RATCHET in ci.yml) — NOT the drifting previous point. A sub-threshold creep every commit therefore
+311:       # can no longer slow-drift unbounded past the floor ("boiling frog"): each creep is measured against
+312:       # the FIXED floor and trips once cumulative drift exceeds the band. See scripts/perf-gate.py header.
+313:       #
+314:       # Runs on push-to-main AND on PRs (PRs gate against the same committed floor — pre-merge feedback,
+315:       # zero pollution since the baseline auto-update + benchmark-data push are main-only). DELIBERATE
+316:       # increases (e.g. a wasm bump from a new feature): EITHER edit bench/perf-baseline.json to raise the
+317:       # floor in the reviewed PR, OR set the workflow var PERF_GATE_ALLOW (e.g. 'wasm_bundle_bytes') — the
+318:       # allowed metric passes AND is re-floored to the new value by the auto-ratchet step below.
+319:       - name: Unit-test the hard-gate ratchet logic
+
+## .github/workflows/bench.yml:343-354
+343:       # corpus, no well-known suites — ~sub-second using the binaries already built above) up to K times
+344:       # and keeps the BEST (min) reading, only FAILING if the best of N still exceeds the band. Runner
+345:       # noise only ever inflates a wall-clock reading, so a one-off spike is squeezed out while a real
+346:       # parse regression (slow on EVERY reading) still fails. Mirrors PR #62's coverage re-measure fix.
+347:       - name: Hard gate — perf regression (deterministic strict; timing best-of-N robust)
+348:         env:
+349:           # Deliberate-bump escape hatch: comma-separated metric names allowed to regress THIS run.
+350:           # Leave empty normally; set to e.g. 'wasm_bundle_bytes' on a commit/run that intentionally
+351:           # grows the bundle. The allowed metric passes here AND is re-floored by the auto-ratchet step.
+352:           PERF_GATE_ALLOW: ${{ vars.PERF_GATE_ALLOW }}
+353:         run: |
+354:           python3 scripts/perf-gate.py bench-results.json bench/perf-baseline.json \
+
+## scripts/run-feature-matrix-group.py:1-65
+1: #!/usr/bin/env python3
+2: # [FABLE-5] CI-economy grouping (maintainer directive 2026-07-18): run ONE bin-packed
+3: # GROUP of opt-in feature-matrix legs inside a single runner job, and emit the
+4: # GATE-CRITICAL per-leg check-run for each leg — across a TRUSTED BOUNDARY.
+5: #
+6: # WHY: feature-matrix.yml used to spawn one runner per leg (159 legs = 159 runners,
+7: # each paying checkout + toolchain + cache-restore + dependency compile). The legs are
+8: # now bin-packed by scripts/assemble-feature-matrix.py --grouped; this script is the
+9: # group job's engine. Consecutive legs share the job's warm target dir, so same-crate
+10: # legs recompile only the crate itself, never the dependency stack.
+11: #
+12: # TRUSTED-BOUNDARY SPLIT (PR #3511 review — do NOT recombine the two modes into one
+13: # privileged job, and do NOT run REPORT mode from a PR-checked-out workflow). The
+14: # group job EXECUTES PR-controlled code: cargo build scripts, proc macros, tests and
+15: # clippy lints all run arbitrary code from the PR head (and from the entire
+16: # third-party dependency graph). A `checks: write` token in that job's environment
+17: # lets malicious build-time code forge arbitrary check runs — including duplicate
+18: # gate-critical sibling names, or an attempt at the sole required `ci-summary / gate`
+19: # context. AND a `checks: write` job that CHECKS OUT the PR head and runs THIS
+20: # script (or the assembler) is just as dangerous: the PR could edit the script to
+21: # forge check runs (the pwn-requests pattern). Therefore:
+22: #   * EXECUTION MODE (default; runs in the UNPRIVILEGED group job — contents: read,
+23: #     persist-credentials: false, NO GH_TOKEN): runs the legs and writes the per-leg
+24: #     outcomes to a results JSON file (FMG_RESULTS), which the workflow uploads as
+25: #     an artifact. This mode performs NO GitHub API call and needs NO token.
+26: #   * REPORT MODE (--report; runs in the SEPARATE default-branch-owned reporter
+27: #     workflow feature-matrix-report.yml, triggered by `workflow_run` on
+28: #     feature-matrix's completion. GitHub ALWAYS executes the default-branch copy of
+29: #     that workflow AND of this script — never the PR head's copy — so no PR can edit
+30: #     the reporter to forge check runs. It executes NO PR-controlled build code and
+31: #     holds `checks: write`. It downloads the triggering run's artifacts (by run-id)
+32: #     and validates them HOSTILE-INPUT-STYLE (they crossed the trust boundary — every
+33: #     field is attacker-controlled by construction). The check-run NAME is built HERE
+34: #     as `opt-in <name>`, so no artifact can ever name a non-`opt-in` context.
+35: #     Leg names must resolve against the SELECTED leg set (FMG_VALID_LEGS_FILE — the
+36: #     setup job's selected-matrix artifact; see the COMPLETENESS note). crate/features
+37: #     in the check-run summary are taken from that set, not the artifact. Any schema
+38: #     violation FAILS the reporter job (itself a required, non-advisory check via the
+39: #     head-SHA summary check-run it posts).
+40: #
+41: # HEAD-SHA TRUST (PR #3511 review finding 1): the reporter posts check-runs onto the
+42: # commit named by HEAD_SHA. On a fork PR the head SHA + event metadata read from an
+43: # artifact are attacker-influenced, so the reporter WORKFLOW validates HEAD_SHA byte-
+44: # for-byte against github.event.workflow_run.head_sha (server-supplied, unforgeable)
+45: # BEFORE invoking this script, and passes only the validated value through env. This
+46: # script never interpolates any artifact string into a shell (env indirection only).
+47: #
+48: # COMPLETENESS (PR #3511 review finding 2): FMG_VALID_LEGS_FILE is the setup job's
+49: # SELECTED-matrix artifact (the exact legs this run should have produced), NOT a
+50: # re-run of the default-branch assembler — a PR that adds a new opt-in leg would be
+51: # unknown to the default-branch assembler, so the ground truth must be the run's own
+52: # selected set. That artifact IS PR-influenced (the setup job runs PR-controlled
+53: # assembler code), and that is ACCEPTABLE for the completeness comparison: forging a
+54: # SMALLER selected set only DROPS required per-leg checks, and the UNFORGEABLE coarse
+55: # gate is the group jobs' OWN conclusions (on the PR head, discovered by ci-summary),
+56: # which a dropped/failed leg still reds; forging a LARGER set only manufactures extra
+57: # legs the group jobs never ran, which the exact-match check below flags as MISSING.
+58: # The reporter therefore FAILS CLOSED (posts a failing summary check-run, exits
+59: # nonzero) unless the observed leg-name set matches the selected set EXACTLY — no
+60: # subset, no superset, no duplicates.
+61: #
+62: # NAME CONTRACT (do NOT relax — the same contract the assembler's header pins): the
+63: # check-run NAME for every leg is `opt-in <name>`, BYTE-IDENTICAL to the name the
+64: # per-leg matrix job used to emit (`name: opt-in ${{ matrix.name }}`). The single
+65: # required `ci-summary / gate` aggregator discovers check-runs on the head commit BY

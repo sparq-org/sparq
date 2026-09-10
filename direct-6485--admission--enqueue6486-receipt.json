@@ -1,0 +1,1111 @@
+{
+  "started_at": "2026-09-10T19:02:25.943551+00:00",
+  "budget": {
+    "core": {
+      "limit": 5000,
+      "used": 35,
+      "remaining": 4965,
+      "reset": 1789067268
+    },
+    "search": {
+      "limit": 30,
+      "used": 0,
+      "remaining": 30,
+      "reset": 1789067006
+    },
+    "graphql": {
+      "limit": 5000,
+      "used": 0,
+      "remaining": 5000,
+      "reset": 1789070546
+    },
+    "integration_manifest": {
+      "limit": 5000,
+      "used": 0,
+      "remaining": 5000,
+      "reset": 1789070546
+    },
+    "source_import": {
+      "limit": 100,
+      "used": 0,
+      "remaining": 100,
+      "reset": 1789067006
+    },
+    "code_scanning_autofix": {
+      "limit": 10,
+      "used": 0,
+      "remaining": 10,
+      "reset": 1789067006
+    },
+    "actions_runner_registration": {
+      "limit": 10000,
+      "used": 0,
+      "remaining": 10000,
+      "reset": 1789070546
+    },
+    "scim": {
+      "limit": 15000,
+      "used": 0,
+      "remaining": 15000,
+      "reset": 1789070546
+    },
+    "dependency_snapshots": {
+      "limit": 100,
+      "used": 0,
+      "remaining": 100,
+      "reset": 1789067006
+    },
+    "dependency_sbom": {
+      "limit": 100,
+      "used": 0,
+      "remaining": 100,
+      "reset": 1789067006
+    },
+    "audit_log": {
+      "limit": 1750,
+      "used": 0,
+      "remaining": 1750,
+      "reset": 1789070546
+    },
+    "audit_log_streaming": {
+      "limit": 15,
+      "used": 0,
+      "remaining": 15,
+      "reset": 1789070546
+    },
+    "code_search": {
+      "limit": 10,
+      "used": 0,
+      "remaining": 10,
+      "reset": 1789067006
+    },
+    "copilot_usage_records": {
+      "limit": 1750,
+      "used": 0,
+      "remaining": 1750,
+      "reset": 1789070546
+    },
+    "enterprise_token_inventory": {
+      "limit": 1750,
+      "used": 0,
+      "remaining": 1750,
+      "reset": 1789070546
+    }
+  },
+  "rules": [
+    {
+      "type": "deletion",
+      "ruleset_source_type": "Repository",
+      "ruleset_source": "sparq-org/sparq",
+      "ruleset_id": 17688455
+    },
+    {
+      "type": "non_fast_forward",
+      "ruleset_source_type": "Repository",
+      "ruleset_source": "sparq-org/sparq",
+      "ruleset_id": 17688455
+    },
+    {
+      "type": "pull_request",
+      "parameters": {
+        "required_approving_review_count": 0,
+        "dismiss_stale_reviews_on_push": false,
+        "required_reviewers": [],
+        "require_code_owner_review": false,
+        "dismissal_restriction": {
+          "enabled": false,
+          "allowed_actors": []
+        },
+        "require_last_push_approval": false,
+        "required_review_thread_resolution": true,
+        "require_extra_approval_for_unattributed_changes": true,
+        "allowed_merge_methods": [
+          "squash"
+        ]
+      },
+      "ruleset_source_type": "Repository",
+      "ruleset_source": "sparq-org/sparq",
+      "ruleset_id": 17688455
+    },
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "strict_required_status_checks_policy": false,
+        "do_not_enforce_on_create": false,
+        "required_status_checks": [
+          {
+            "context": "gate",
+            "integration_id": 15368
+          }
+        ]
+      },
+      "ruleset_source_type": "Repository",
+      "ruleset_source": "sparq-org/sparq",
+      "ruleset_id": 17688455
+    },
+    {
+      "type": "code_quality",
+      "parameters": {
+        "severity": "all"
+      },
+      "ruleset_source_type": "Repository",
+      "ruleset_source": "sparq-org/sparq",
+      "ruleset_id": 17688455
+    },
+    {
+      "type": "copilot_code_review",
+      "parameters": {
+        "review_on_push": true,
+        "review_draft_pull_requests": false
+      },
+      "ruleset_source_type": "Repository",
+      "ruleset_source": "sparq-org/sparq",
+      "ruleset_id": 17688455
+    },
+    {
+      "type": "merge_queue",
+      "parameters": {
+        "merge_method": "SQUASH",
+        "max_entries_to_build": 3,
+        "min_entries_to_merge": 1,
+        "max_entries_to_merge": 8,
+        "min_entries_to_merge_wait_minutes": 5,
+        "grouping_strategy": "ALLGREEN",
+        "check_response_timeout_minutes": 360
+      },
+      "ruleset_source_type": "Repository",
+      "ruleset_source": "sparq-org/sparq",
+      "ruleset_id": 17688455
+    }
+  ],
+  "registry": {
+    "enabled": false,
+    "sha_pinning_required": false
+  },
+  "main_runs": [
+    {
+      "id": 34497774423,
+      "name": "CI",
+      "node_id": "WFR_kwLOSz3qKM8AAAAICDpDVw",
+      "head_branch": "main",
+      "head_sha": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+      "path": ".github/workflows/ci.yml",
+      "display_title": "test(bench): preserve term identity in UPDATE differential coverage (\u2026",
+      "run_number": 20782,
+      "event": "push",
+      "status": "completed",
+      "conclusion": "success",
+      "workflow_id": 292405907,
+      "check_suite_id": 93454190974,
+      "check_suite_node_id": "CS_kwDOSz3qKM8AAAAVwk3Jfg",
+      "url": "https://api.github.com/repos/sparq-org/sparq/actions/runs/34497774423",
+      "html_url": "https://github.com/sparq-org/sparq/actions/runs/34497774423",
+      "pull_requests": [],
+      "created_at": "2026-09-10T15:45:57Z",
+      "updated_at": "2026-09-10T16:45:57Z",
+      "actor": {
+        "login": "github-merge-queue[bot]",
+        "id": 118344674,
+        "node_id": "BOT_kgDOBw3L4g",
+        "avatar_url": "https://avatars.githubusercontent.com/u/9919?v=4",
+        "gravatar_id": "",
+        "url": "https://api.github.com/users/github-merge-queue%5Bbot%5D",
+        "html_url": "https://github.com/apps/github-merge-queue",
+        "followers_url": "https://api.github.com/users/github-merge-queue%5Bbot%5D/followers",
+        "following_url": "https://api.github.com/users/github-merge-queue%5Bbot%5D/following{/other_user}",
+        "gists_url": "https://api.github.com/users/github-merge-queue%5Bbot%5D/gists{/gist_id}",
+        "starred_url": "https://api.github.com/users/github-merge-queue%5Bbot%5D/starred{/owner}{/repo}",
+        "subscriptions_url": "https://api.github.com/users/github-merge-queue%5Bbot%5D/subscriptions",
+        "organizations_url": "https://api.github.com/users/github-merge-queue%5Bbot%5D/orgs",
+        "repos_url": "https://api.github.com/users/github-merge-queue%5Bbot%5D/repos",
+        "events_url": "https://api.github.com/users/github-merge-queue%5Bbot%5D/events{/privacy}",
+        "received_events_url": "https://api.github.com/users/github-merge-queue%5Bbot%5D/received_events",
+        "type": "Bot",
+        "user_view_type": "public",
+        "site_admin": false
+      },
+      "run_attempt": 1,
+      "referenced_workflows": [
+        {
+          "path": "sparq-org/sparq/.github/workflows/ci-select.yml@f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+          "sha": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+          "ref": "refs/heads/main"
+        }
+      ],
+      "run_started_at": "2026-09-10T15:45:57Z",
+      "triggering_actor": {
+        "login": "github-merge-queue[bot]",
+        "id": 118344674,
+        "node_id": "BOT_kgDOBw3L4g",
+        "avatar_url": "https://avatars.githubusercontent.com/u/9919?v=4",
+        "gravatar_id": "",
+        "url": "https://api.github.com/users/github-merge-queue%5Bbot%5D",
+        "html_url": "https://github.com/apps/github-merge-queue",
+        "followers_url": "https://api.github.com/users/github-merge-queue%5Bbot%5D/followers",
+        "following_url": "https://api.github.com/users/github-merge-queue%5Bbot%5D/following{/other_user}",
+        "gists_url": "https://api.github.com/users/github-merge-queue%5Bbot%5D/gists{/gist_id}",
+        "starred_url": "https://api.github.com/users/github-merge-queue%5Bbot%5D/starred{/owner}{/repo}",
+        "subscriptions_url": "https://api.github.com/users/github-merge-queue%5Bbot%5D/subscriptions",
+        "organizations_url": "https://api.github.com/users/github-merge-queue%5Bbot%5D/orgs",
+        "repos_url": "https://api.github.com/users/github-merge-queue%5Bbot%5D/repos",
+        "events_url": "https://api.github.com/users/github-merge-queue%5Bbot%5D/events{/privacy}",
+        "received_events_url": "https://api.github.com/users/github-merge-queue%5Bbot%5D/received_events",
+        "type": "Bot",
+        "user_view_type": "public",
+        "site_admin": false
+      },
+      "jobs_url": "https://api.github.com/repos/sparq-org/sparq/actions/runs/34497774423/jobs",
+      "logs_url": "https://api.github.com/repos/sparq-org/sparq/actions/runs/34497774423/logs",
+      "check_suite_url": "https://api.github.com/repos/sparq-org/sparq/check-suites/93454190974",
+      "artifacts_url": "https://api.github.com/repos/sparq-org/sparq/actions/runs/34497774423/artifacts",
+      "cancel_url": "https://api.github.com/repos/sparq-org/sparq/actions/runs/34497774423/cancel",
+      "rerun_url": "https://api.github.com/repos/sparq-org/sparq/actions/runs/34497774423/rerun",
+      "previous_attempt_url": null,
+      "workflow_url": "https://api.github.com/repos/sparq-org/sparq/actions/workflows/292405907",
+      "head_commit": {
+        "id": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+        "tree_id": "b473621d314e035bc79df2f2e7a91b76b6e77275",
+        "message": "test(bench): preserve term identity in UPDATE differential coverage (#6482)\n\n* test(bench): bound UPDATE lexical adjudication to injective terms\n\nNarrow generated integer values to disjoint lexical pools, including LOAD, while preserving draw counts and operation probabilities. Refuse lossy term/row/blank-node adjudication and retain the exact historical Sparq-only sequence.\n\nCo-Authored-By: GPT-6 Astra <noreply@openai.com>\n\n* test(bench): validate lexical adjudication under workspace edition\n\nPreserve original dataset details on lexical adjudication failures, pin integer spelling pools independently, and make the marker test allowlist explicit. Replace Rust 2024 let chains with equivalent Rust 2021 syntax to match sparq-bench.\n\nCo-Authored-By: GPT-6 Astra <noreply@openai.com>\n\n---------\n\nCo-authored-by: GPT-6 Astra <noreply@openai.com>",
+        "timestamp": "2026-09-10T15:20:52Z",
+        "author": {
+          "name": "Jesse Wright",
+          "email": "63333554+jeswr@users.noreply.github.com"
+        },
+        "committer": {
+          "name": "GitHub",
+          "email": "noreply@github.com"
+        }
+      },
+      "repository": {
+        "id": 1262348840,
+        "node_id": "R_kgDOSz3qKA",
+        "name": "sparq",
+        "full_name": "sparq-org/sparq",
+        "private": false,
+        "owner": {
+          "login": "sparq-org",
+          "id": 299285910,
+          "node_id": "O_kgDOEda9lg",
+          "avatar_url": "https://avatars.githubusercontent.com/u/299285910?v=4",
+          "gravatar_id": "",
+          "url": "https://api.github.com/users/sparq-org",
+          "html_url": "https://github.com/sparq-org",
+          "followers_url": "https://api.github.com/users/sparq-org/followers",
+          "following_url": "https://api.github.com/users/sparq-org/following{/other_user}",
+          "gists_url": "https://api.github.com/users/sparq-org/gists{/gist_id}",
+          "starred_url": "https://api.github.com/users/sparq-org/starred{/owner}{/repo}",
+          "subscriptions_url": "https://api.github.com/users/sparq-org/subscriptions",
+          "organizations_url": "https://api.github.com/users/sparq-org/orgs",
+          "repos_url": "https://api.github.com/users/sparq-org/repos",
+          "events_url": "https://api.github.com/users/sparq-org/events{/privacy}",
+          "received_events_url": "https://api.github.com/users/sparq-org/received_events",
+          "type": "Organization",
+          "user_view_type": "public",
+          "site_admin": false
+        },
+        "html_url": "https://github.com/sparq-org/sparq",
+        "description": "sparq is a lightning-fast RDF triplestore and SPARQL 1.1 / 1.2 engine, written in Rust \u2014 usable as a library, CLI, HTTP server, and from Python and JavaScript/WASM.",
+        "fork": false,
+        "url": "https://api.github.com/repos/sparq-org/sparq",
+        "forks_url": "https://api.github.com/repos/sparq-org/sparq/forks",
+        "keys_url": "https://api.github.com/repos/sparq-org/sparq/keys{/key_id}",
+        "collaborators_url": "https://api.github.com/repos/sparq-org/sparq/collaborators{/collaborator}",
+        "teams_url": "https://api.github.com/repos/sparq-org/sparq/teams",
+        "hooks_url": "https://api.github.com/repos/sparq-org/sparq/hooks",
+        "issue_events_url": "https://api.github.com/repos/sparq-org/sparq/issues/events{/number}",
+        "events_url": "https://api.github.com/repos/sparq-org/sparq/events",
+        "assignees_url": "https://api.github.com/repos/sparq-org/sparq/assignees{/user}",
+        "branches_url": "https://api.github.com/repos/sparq-org/sparq/branches{/branch}",
+        "tags_url": "https://api.github.com/repos/sparq-org/sparq/tags",
+        "blobs_url": "https://api.github.com/repos/sparq-org/sparq/git/blobs{/sha}",
+        "git_tags_url": "https://api.github.com/repos/sparq-org/sparq/git/tags{/sha}",
+        "git_refs_url": "https://api.github.com/repos/sparq-org/sparq/git/refs{/sha}",
+        "trees_url": "https://api.github.com/repos/sparq-org/sparq/git/trees{/sha}",
+        "statuses_url": "https://api.github.com/repos/sparq-org/sparq/statuses/{sha}",
+        "languages_url": "https://api.github.com/repos/sparq-org/sparq/languages",
+        "stargazers_url": "https://api.github.com/repos/sparq-org/sparq/stargazers",
+        "contributors_url": "https://api.github.com/repos/sparq-org/sparq/contributors",
+        "subscribers_url": "https://api.github.com/repos/sparq-org/sparq/subscribers",
+        "subscription_url": "https://api.github.com/repos/sparq-org/sparq/subscription",
+        "commits_url": "https://api.github.com/repos/sparq-org/sparq/commits{/sha}",
+        "git_commits_url": "https://api.github.com/repos/sparq-org/sparq/git/commits{/sha}",
+        "comments_url": "https://api.github.com/repos/sparq-org/sparq/comments{/number}",
+        "issue_comment_url": "https://api.github.com/repos/sparq-org/sparq/issues/comments{/number}",
+        "contents_url": "https://api.github.com/repos/sparq-org/sparq/contents/{+path}",
+        "compare_url": "https://api.github.com/repos/sparq-org/sparq/compare/{base}...{head}",
+        "merges_url": "https://api.github.com/repos/sparq-org/sparq/merges",
+        "archive_url": "https://api.github.com/repos/sparq-org/sparq/{archive_format}{/ref}",
+        "downloads_url": "https://api.github.com/repos/sparq-org/sparq/downloads",
+        "issues_url": "https://api.github.com/repos/sparq-org/sparq/issues{/number}",
+        "pulls_url": "https://api.github.com/repos/sparq-org/sparq/pulls{/number}",
+        "milestones_url": "https://api.github.com/repos/sparq-org/sparq/milestones{/number}",
+        "notifications_url": "https://api.github.com/repos/sparq-org/sparq/notifications{?since,all,participating}",
+        "labels_url": "https://api.github.com/repos/sparq-org/sparq/labels{/name}",
+        "releases_url": "https://api.github.com/repos/sparq-org/sparq/releases{/id}",
+        "deployments_url": "https://api.github.com/repos/sparq-org/sparq/deployments"
+      },
+      "head_repository": {
+        "id": 1262348840,
+        "node_id": "R_kgDOSz3qKA",
+        "name": "sparq",
+        "full_name": "sparq-org/sparq",
+        "private": false,
+        "owner": {
+          "login": "sparq-org",
+          "id": 299285910,
+          "node_id": "O_kgDOEda9lg",
+          "avatar_url": "https://avatars.githubusercontent.com/u/299285910?v=4",
+          "gravatar_id": "",
+          "url": "https://api.github.com/users/sparq-org",
+          "html_url": "https://github.com/sparq-org",
+          "followers_url": "https://api.github.com/users/sparq-org/followers",
+          "following_url": "https://api.github.com/users/sparq-org/following{/other_user}",
+          "gists_url": "https://api.github.com/users/sparq-org/gists{/gist_id}",
+          "starred_url": "https://api.github.com/users/sparq-org/starred{/owner}{/repo}",
+          "subscriptions_url": "https://api.github.com/users/sparq-org/subscriptions",
+          "organizations_url": "https://api.github.com/users/sparq-org/orgs",
+          "repos_url": "https://api.github.com/users/sparq-org/repos",
+          "events_url": "https://api.github.com/users/sparq-org/events{/privacy}",
+          "received_events_url": "https://api.github.com/users/sparq-org/received_events",
+          "type": "Organization",
+          "user_view_type": "public",
+          "site_admin": false
+        },
+        "html_url": "https://github.com/sparq-org/sparq",
+        "description": "sparq is a lightning-fast RDF triplestore and SPARQL 1.1 / 1.2 engine, written in Rust \u2014 usable as a library, CLI, HTTP server, and from Python and JavaScript/WASM.",
+        "fork": false,
+        "url": "https://api.github.com/repos/sparq-org/sparq",
+        "forks_url": "https://api.github.com/repos/sparq-org/sparq/forks",
+        "keys_url": "https://api.github.com/repos/sparq-org/sparq/keys{/key_id}",
+        "collaborators_url": "https://api.github.com/repos/sparq-org/sparq/collaborators{/collaborator}",
+        "teams_url": "https://api.github.com/repos/sparq-org/sparq/teams",
+        "hooks_url": "https://api.github.com/repos/sparq-org/sparq/hooks",
+        "issue_events_url": "https://api.github.com/repos/sparq-org/sparq/issues/events{/number}",
+        "events_url": "https://api.github.com/repos/sparq-org/sparq/events",
+        "assignees_url": "https://api.github.com/repos/sparq-org/sparq/assignees{/user}",
+        "branches_url": "https://api.github.com/repos/sparq-org/sparq/branches{/branch}",
+        "tags_url": "https://api.github.com/repos/sparq-org/sparq/tags",
+        "blobs_url": "https://api.github.com/repos/sparq-org/sparq/git/blobs{/sha}",
+        "git_tags_url": "https://api.github.com/repos/sparq-org/sparq/git/tags{/sha}",
+        "git_refs_url": "https://api.github.com/repos/sparq-org/sparq/git/refs{/sha}",
+        "trees_url": "https://api.github.com/repos/sparq-org/sparq/git/trees{/sha}",
+        "statuses_url": "https://api.github.com/repos/sparq-org/sparq/statuses/{sha}",
+        "languages_url": "https://api.github.com/repos/sparq-org/sparq/languages",
+        "stargazers_url": "https://api.github.com/repos/sparq-org/sparq/stargazers",
+        "contributors_url": "https://api.github.com/repos/sparq-org/sparq/contributors",
+        "subscribers_url": "https://api.github.com/repos/sparq-org/sparq/subscribers",
+        "subscription_url": "https://api.github.com/repos/sparq-org/sparq/subscription",
+        "commits_url": "https://api.github.com/repos/sparq-org/sparq/commits{/sha}",
+        "git_commits_url": "https://api.github.com/repos/sparq-org/sparq/git/commits{/sha}",
+        "comments_url": "https://api.github.com/repos/sparq-org/sparq/comments{/number}",
+        "issue_comment_url": "https://api.github.com/repos/sparq-org/sparq/issues/comments{/number}",
+        "contents_url": "https://api.github.com/repos/sparq-org/sparq/contents/{+path}",
+        "compare_url": "https://api.github.com/repos/sparq-org/sparq/compare/{base}...{head}",
+        "merges_url": "https://api.github.com/repos/sparq-org/sparq/merges",
+        "archive_url": "https://api.github.com/repos/sparq-org/sparq/{archive_format}{/ref}",
+        "downloads_url": "https://api.github.com/repos/sparq-org/sparq/downloads",
+        "issues_url": "https://api.github.com/repos/sparq-org/sparq/issues{/number}",
+        "pulls_url": "https://api.github.com/repos/sparq-org/sparq/pulls{/number}",
+        "milestones_url": "https://api.github.com/repos/sparq-org/sparq/milestones{/number}",
+        "notifications_url": "https://api.github.com/repos/sparq-org/sparq/notifications{?since,all,participating}",
+        "labels_url": "https://api.github.com/repos/sparq-org/sparq/labels{/name}",
+        "releases_url": "https://api.github.com/repos/sparq-org/sparq/releases{/id}",
+        "deployments_url": "https://api.github.com/repos/sparq-org/sparq/deployments"
+      }
+    },
+    {
+      "id": 34497774420,
+      "name": "feature-matrix",
+      "node_id": "WFR_kwLOSz3qKM8AAAAICDpDVA",
+      "head_branch": "main",
+      "head_sha": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+      "path": ".github/workflows/feature-matrix.yml",
+      "display_title": "test(bench): preserve term identity in UPDATE differential coverage (\u2026",
+      "run_number": 19829,
+      "event": "push",
+      "status": "completed",
+      "conclusion": "success",
+      "workflow_id": 296642355,
+      "check_suite_id": 93454190963,
+      "check_suite_node_id": "CS_kwDOSz3qKM8AAAAVwk3Jcw",
+      "url": "https://api.github.com/repos/sparq-org/sparq/actions/runs/34497774420",
+      "html_url": "https://github.com/sparq-org/sparq/actions/runs/34497774420",
+      "pull_requests": [],
+      "created_at": "2026-09-10T15:45:57Z",
+      "updated_at": "2026-09-10T16:53:02Z",
+      "actor": {
+        "login": "github-merge-queue[bot]",
+        "id": 118344674,
+        "node_id": "BOT_kgDOBw3L4g",
+        "avatar_url": "https://avatars.githubusercontent.com/u/9919?v=4",
+        "gravatar_id": "",
+        "url": "https://api.github.com/users/github-merge-queue%5Bbot%5D",
+        "html_url": "https://github.com/apps/github-merge-queue",
+        "followers_url": "https://api.github.com/users/github-merge-queue%5Bbot%5D/followers",
+        "following_url": "https://api.github.com/users/github-merge-queue%5Bbot%5D/following{/other_user}",
+        "gists_url": "https://api.github.com/users/github-merge-queue%5Bbot%5D/gists{/gist_id}",
+        "starred_url": "https://api.github.com/users/github-merge-queue%5Bbot%5D/starred{/owner}{/repo}",
+        "subscriptions_url": "https://api.github.com/users/github-merge-queue%5Bbot%5D/subscriptions",
+        "organizations_url": "https://api.github.com/users/github-merge-queue%5Bbot%5D/orgs",
+        "repos_url": "https://api.github.com/users/github-merge-queue%5Bbot%5D/repos",
+        "events_url": "https://api.github.com/users/github-merge-queue%5Bbot%5D/events{/privacy}",
+        "received_events_url": "https://api.github.com/users/github-merge-queue%5Bbot%5D/received_events",
+        "type": "Bot",
+        "user_view_type": "public",
+        "site_admin": false
+      },
+      "run_attempt": 1,
+      "referenced_workflows": [
+        {
+          "path": "sparq-org/sparq/.github/workflows/ci-select.yml@f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+          "sha": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+          "ref": "refs/heads/main"
+        }
+      ],
+      "run_started_at": "2026-09-10T15:45:57Z",
+      "triggering_actor": {
+        "login": "github-merge-queue[bot]",
+        "id": 118344674,
+        "node_id": "BOT_kgDOBw3L4g",
+        "avatar_url": "https://avatars.githubusercontent.com/u/9919?v=4",
+        "gravatar_id": "",
+        "url": "https://api.github.com/users/github-merge-queue%5Bbot%5D",
+        "html_url": "https://github.com/apps/github-merge-queue",
+        "followers_url": "https://api.github.com/users/github-merge-queue%5Bbot%5D/followers",
+        "following_url": "https://api.github.com/users/github-merge-queue%5Bbot%5D/following{/other_user}",
+        "gists_url": "https://api.github.com/users/github-merge-queue%5Bbot%5D/gists{/gist_id}",
+        "starred_url": "https://api.github.com/users/github-merge-queue%5Bbot%5D/starred{/owner}{/repo}",
+        "subscriptions_url": "https://api.github.com/users/github-merge-queue%5Bbot%5D/subscriptions",
+        "organizations_url": "https://api.github.com/users/github-merge-queue%5Bbot%5D/orgs",
+        "repos_url": "https://api.github.com/users/github-merge-queue%5Bbot%5D/repos",
+        "events_url": "https://api.github.com/users/github-merge-queue%5Bbot%5D/events{/privacy}",
+        "received_events_url": "https://api.github.com/users/github-merge-queue%5Bbot%5D/received_events",
+        "type": "Bot",
+        "user_view_type": "public",
+        "site_admin": false
+      },
+      "jobs_url": "https://api.github.com/repos/sparq-org/sparq/actions/runs/34497774420/jobs",
+      "logs_url": "https://api.github.com/repos/sparq-org/sparq/actions/runs/34497774420/logs",
+      "check_suite_url": "https://api.github.com/repos/sparq-org/sparq/check-suites/93454190963",
+      "artifacts_url": "https://api.github.com/repos/sparq-org/sparq/actions/runs/34497774420/artifacts",
+      "cancel_url": "https://api.github.com/repos/sparq-org/sparq/actions/runs/34497774420/cancel",
+      "rerun_url": "https://api.github.com/repos/sparq-org/sparq/actions/runs/34497774420/rerun",
+      "previous_attempt_url": null,
+      "workflow_url": "https://api.github.com/repos/sparq-org/sparq/actions/workflows/296642355",
+      "head_commit": {
+        "id": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+        "tree_id": "b473621d314e035bc79df2f2e7a91b76b6e77275",
+        "message": "test(bench): preserve term identity in UPDATE differential coverage (#6482)\n\n* test(bench): bound UPDATE lexical adjudication to injective terms\n\nNarrow generated integer values to disjoint lexical pools, including LOAD, while preserving draw counts and operation probabilities. Refuse lossy term/row/blank-node adjudication and retain the exact historical Sparq-only sequence.\n\nCo-Authored-By: GPT-6 Astra <noreply@openai.com>\n\n* test(bench): validate lexical adjudication under workspace edition\n\nPreserve original dataset details on lexical adjudication failures, pin integer spelling pools independently, and make the marker test allowlist explicit. Replace Rust 2024 let chains with equivalent Rust 2021 syntax to match sparq-bench.\n\nCo-Authored-By: GPT-6 Astra <noreply@openai.com>\n\n---------\n\nCo-authored-by: GPT-6 Astra <noreply@openai.com>",
+        "timestamp": "2026-09-10T15:20:52Z",
+        "author": {
+          "name": "Jesse Wright",
+          "email": "63333554+jeswr@users.noreply.github.com"
+        },
+        "committer": {
+          "name": "GitHub",
+          "email": "noreply@github.com"
+        }
+      },
+      "repository": {
+        "id": 1262348840,
+        "node_id": "R_kgDOSz3qKA",
+        "name": "sparq",
+        "full_name": "sparq-org/sparq",
+        "private": false,
+        "owner": {
+          "login": "sparq-org",
+          "id": 299285910,
+          "node_id": "O_kgDOEda9lg",
+          "avatar_url": "https://avatars.githubusercontent.com/u/299285910?v=4",
+          "gravatar_id": "",
+          "url": "https://api.github.com/users/sparq-org",
+          "html_url": "https://github.com/sparq-org",
+          "followers_url": "https://api.github.com/users/sparq-org/followers",
+          "following_url": "https://api.github.com/users/sparq-org/following{/other_user}",
+          "gists_url": "https://api.github.com/users/sparq-org/gists{/gist_id}",
+          "starred_url": "https://api.github.com/users/sparq-org/starred{/owner}{/repo}",
+          "subscriptions_url": "https://api.github.com/users/sparq-org/subscriptions",
+          "organizations_url": "https://api.github.com/users/sparq-org/orgs",
+          "repos_url": "https://api.github.com/users/sparq-org/repos",
+          "events_url": "https://api.github.com/users/sparq-org/events{/privacy}",
+          "received_events_url": "https://api.github.com/users/sparq-org/received_events",
+          "type": "Organization",
+          "user_view_type": "public",
+          "site_admin": false
+        },
+        "html_url": "https://github.com/sparq-org/sparq",
+        "description": "sparq is a lightning-fast RDF triplestore and SPARQL 1.1 / 1.2 engine, written in Rust \u2014 usable as a library, CLI, HTTP server, and from Python and JavaScript/WASM.",
+        "fork": false,
+        "url": "https://api.github.com/repos/sparq-org/sparq",
+        "forks_url": "https://api.github.com/repos/sparq-org/sparq/forks",
+        "keys_url": "https://api.github.com/repos/sparq-org/sparq/keys{/key_id}",
+        "collaborators_url": "https://api.github.com/repos/sparq-org/sparq/collaborators{/collaborator}",
+        "teams_url": "https://api.github.com/repos/sparq-org/sparq/teams",
+        "hooks_url": "https://api.github.com/repos/sparq-org/sparq/hooks",
+        "issue_events_url": "https://api.github.com/repos/sparq-org/sparq/issues/events{/number}",
+        "events_url": "https://api.github.com/repos/sparq-org/sparq/events",
+        "assignees_url": "https://api.github.com/repos/sparq-org/sparq/assignees{/user}",
+        "branches_url": "https://api.github.com/repos/sparq-org/sparq/branches{/branch}",
+        "tags_url": "https://api.github.com/repos/sparq-org/sparq/tags",
+        "blobs_url": "https://api.github.com/repos/sparq-org/sparq/git/blobs{/sha}",
+        "git_tags_url": "https://api.github.com/repos/sparq-org/sparq/git/tags{/sha}",
+        "git_refs_url": "https://api.github.com/repos/sparq-org/sparq/git/refs{/sha}",
+        "trees_url": "https://api.github.com/repos/sparq-org/sparq/git/trees{/sha}",
+        "statuses_url": "https://api.github.com/repos/sparq-org/sparq/statuses/{sha}",
+        "languages_url": "https://api.github.com/repos/sparq-org/sparq/languages",
+        "stargazers_url": "https://api.github.com/repos/sparq-org/sparq/stargazers",
+        "contributors_url": "https://api.github.com/repos/sparq-org/sparq/contributors",
+        "subscribers_url": "https://api.github.com/repos/sparq-org/sparq/subscribers",
+        "subscription_url": "https://api.github.com/repos/sparq-org/sparq/subscription",
+        "commits_url": "https://api.github.com/repos/sparq-org/sparq/commits{/sha}",
+        "git_commits_url": "https://api.github.com/repos/sparq-org/sparq/git/commits{/sha}",
+        "comments_url": "https://api.github.com/repos/sparq-org/sparq/comments{/number}",
+        "issue_comment_url": "https://api.github.com/repos/sparq-org/sparq/issues/comments{/number}",
+        "contents_url": "https://api.github.com/repos/sparq-org/sparq/contents/{+path}",
+        "compare_url": "https://api.github.com/repos/sparq-org/sparq/compare/{base}...{head}",
+        "merges_url": "https://api.github.com/repos/sparq-org/sparq/merges",
+        "archive_url": "https://api.github.com/repos/sparq-org/sparq/{archive_format}{/ref}",
+        "downloads_url": "https://api.github.com/repos/sparq-org/sparq/downloads",
+        "issues_url": "https://api.github.com/repos/sparq-org/sparq/issues{/number}",
+        "pulls_url": "https://api.github.com/repos/sparq-org/sparq/pulls{/number}",
+        "milestones_url": "https://api.github.com/repos/sparq-org/sparq/milestones{/number}",
+        "notifications_url": "https://api.github.com/repos/sparq-org/sparq/notifications{?since,all,participating}",
+        "labels_url": "https://api.github.com/repos/sparq-org/sparq/labels{/name}",
+        "releases_url": "https://api.github.com/repos/sparq-org/sparq/releases{/id}",
+        "deployments_url": "https://api.github.com/repos/sparq-org/sparq/deployments"
+      },
+      "head_repository": {
+        "id": 1262348840,
+        "node_id": "R_kgDOSz3qKA",
+        "name": "sparq",
+        "full_name": "sparq-org/sparq",
+        "private": false,
+        "owner": {
+          "login": "sparq-org",
+          "id": 299285910,
+          "node_id": "O_kgDOEda9lg",
+          "avatar_url": "https://avatars.githubusercontent.com/u/299285910?v=4",
+          "gravatar_id": "",
+          "url": "https://api.github.com/users/sparq-org",
+          "html_url": "https://github.com/sparq-org",
+          "followers_url": "https://api.github.com/users/sparq-org/followers",
+          "following_url": "https://api.github.com/users/sparq-org/following{/other_user}",
+          "gists_url": "https://api.github.com/users/sparq-org/gists{/gist_id}",
+          "starred_url": "https://api.github.com/users/sparq-org/starred{/owner}{/repo}",
+          "subscriptions_url": "https://api.github.com/users/sparq-org/subscriptions",
+          "organizations_url": "https://api.github.com/users/sparq-org/orgs",
+          "repos_url": "https://api.github.com/users/sparq-org/repos",
+          "events_url": "https://api.github.com/users/sparq-org/events{/privacy}",
+          "received_events_url": "https://api.github.com/users/sparq-org/received_events",
+          "type": "Organization",
+          "user_view_type": "public",
+          "site_admin": false
+        },
+        "html_url": "https://github.com/sparq-org/sparq",
+        "description": "sparq is a lightning-fast RDF triplestore and SPARQL 1.1 / 1.2 engine, written in Rust \u2014 usable as a library, CLI, HTTP server, and from Python and JavaScript/WASM.",
+        "fork": false,
+        "url": "https://api.github.com/repos/sparq-org/sparq",
+        "forks_url": "https://api.github.com/repos/sparq-org/sparq/forks",
+        "keys_url": "https://api.github.com/repos/sparq-org/sparq/keys{/key_id}",
+        "collaborators_url": "https://api.github.com/repos/sparq-org/sparq/collaborators{/collaborator}",
+        "teams_url": "https://api.github.com/repos/sparq-org/sparq/teams",
+        "hooks_url": "https://api.github.com/repos/sparq-org/sparq/hooks",
+        "issue_events_url": "https://api.github.com/repos/sparq-org/sparq/issues/events{/number}",
+        "events_url": "https://api.github.com/repos/sparq-org/sparq/events",
+        "assignees_url": "https://api.github.com/repos/sparq-org/sparq/assignees{/user}",
+        "branches_url": "https://api.github.com/repos/sparq-org/sparq/branches{/branch}",
+        "tags_url": "https://api.github.com/repos/sparq-org/sparq/tags",
+        "blobs_url": "https://api.github.com/repos/sparq-org/sparq/git/blobs{/sha}",
+        "git_tags_url": "https://api.github.com/repos/sparq-org/sparq/git/tags{/sha}",
+        "git_refs_url": "https://api.github.com/repos/sparq-org/sparq/git/refs{/sha}",
+        "trees_url": "https://api.github.com/repos/sparq-org/sparq/git/trees{/sha}",
+        "statuses_url": "https://api.github.com/repos/sparq-org/sparq/statuses/{sha}",
+        "languages_url": "https://api.github.com/repos/sparq-org/sparq/languages",
+        "stargazers_url": "https://api.github.com/repos/sparq-org/sparq/stargazers",
+        "contributors_url": "https://api.github.com/repos/sparq-org/sparq/contributors",
+        "subscribers_url": "https://api.github.com/repos/sparq-org/sparq/subscribers",
+        "subscription_url": "https://api.github.com/repos/sparq-org/sparq/subscription",
+        "commits_url": "https://api.github.com/repos/sparq-org/sparq/commits{/sha}",
+        "git_commits_url": "https://api.github.com/repos/sparq-org/sparq/git/commits{/sha}",
+        "comments_url": "https://api.github.com/repos/sparq-org/sparq/comments{/number}",
+        "issue_comment_url": "https://api.github.com/repos/sparq-org/sparq/issues/comments{/number}",
+        "contents_url": "https://api.github.com/repos/sparq-org/sparq/contents/{+path}",
+        "compare_url": "https://api.github.com/repos/sparq-org/sparq/compare/{base}...{head}",
+        "merges_url": "https://api.github.com/repos/sparq-org/sparq/merges",
+        "archive_url": "https://api.github.com/repos/sparq-org/sparq/{archive_format}{/ref}",
+        "downloads_url": "https://api.github.com/repos/sparq-org/sparq/downloads",
+        "issues_url": "https://api.github.com/repos/sparq-org/sparq/issues{/number}",
+        "pulls_url": "https://api.github.com/repos/sparq-org/sparq/pulls{/number}",
+        "milestones_url": "https://api.github.com/repos/sparq-org/sparq/milestones{/number}",
+        "notifications_url": "https://api.github.com/repos/sparq-org/sparq/notifications{?since,all,participating}",
+        "labels_url": "https://api.github.com/repos/sparq-org/sparq/labels{/name}",
+        "releases_url": "https://api.github.com/repos/sparq-org/sparq/releases{/id}",
+        "deployments_url": "https://api.github.com/repos/sparq-org/sparq/deployments"
+      }
+    },
+    {
+      "id": 34497774057,
+      "name": "ci-summary",
+      "node_id": "WFR_kwLOSz3qKM8AAAAICDpB6Q",
+      "head_branch": "main",
+      "head_sha": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+      "path": ".github/workflows/ci-summary.yml",
+      "display_title": "test(bench): preserve term identity in UPDATE differential coverage (\u2026",
+      "run_number": 11362,
+      "event": "push",
+      "status": "completed",
+      "conclusion": "success",
+      "workflow_id": 295839727,
+      "check_suite_id": 93454189600,
+      "check_suite_node_id": "CS_kwDOSz3qKM8AAAAVwk3EIA",
+      "url": "https://api.github.com/repos/sparq-org/sparq/actions/runs/34497774057",
+      "html_url": "https://github.com/sparq-org/sparq/actions/runs/34497774057",
+      "pull_requests": [],
+      "created_at": "2026-09-10T15:45:57Z",
+      "updated_at": "2026-09-10T16:55:51Z",
+      "actor": {
+        "login": "github-merge-queue[bot]",
+        "id": 118344674,
+        "node_id": "BOT_kgDOBw3L4g",
+        "avatar_url": "https://avatars.githubusercontent.com/u/9919?v=4",
+        "gravatar_id": "",
+        "url": "https://api.github.com/users/github-merge-queue%5Bbot%5D",
+        "html_url": "https://github.com/apps/github-merge-queue",
+        "followers_url": "https://api.github.com/users/github-merge-queue%5Bbot%5D/followers",
+        "following_url": "https://api.github.com/users/github-merge-queue%5Bbot%5D/following{/other_user}",
+        "gists_url": "https://api.github.com/users/github-merge-queue%5Bbot%5D/gists{/gist_id}",
+        "starred_url": "https://api.github.com/users/github-merge-queue%5Bbot%5D/starred{/owner}{/repo}",
+        "subscriptions_url": "https://api.github.com/users/github-merge-queue%5Bbot%5D/subscriptions",
+        "organizations_url": "https://api.github.com/users/github-merge-queue%5Bbot%5D/orgs",
+        "repos_url": "https://api.github.com/users/github-merge-queue%5Bbot%5D/repos",
+        "events_url": "https://api.github.com/users/github-merge-queue%5Bbot%5D/events{/privacy}",
+        "received_events_url": "https://api.github.com/users/github-merge-queue%5Bbot%5D/received_events",
+        "type": "Bot",
+        "user_view_type": "public",
+        "site_admin": false
+      },
+      "run_attempt": 1,
+      "referenced_workflows": [],
+      "run_started_at": "2026-09-10T15:45:57Z",
+      "triggering_actor": {
+        "login": "github-merge-queue[bot]",
+        "id": 118344674,
+        "node_id": "BOT_kgDOBw3L4g",
+        "avatar_url": "https://avatars.githubusercontent.com/u/9919?v=4",
+        "gravatar_id": "",
+        "url": "https://api.github.com/users/github-merge-queue%5Bbot%5D",
+        "html_url": "https://github.com/apps/github-merge-queue",
+        "followers_url": "https://api.github.com/users/github-merge-queue%5Bbot%5D/followers",
+        "following_url": "https://api.github.com/users/github-merge-queue%5Bbot%5D/following{/other_user}",
+        "gists_url": "https://api.github.com/users/github-merge-queue%5Bbot%5D/gists{/gist_id}",
+        "starred_url": "https://api.github.com/users/github-merge-queue%5Bbot%5D/starred{/owner}{/repo}",
+        "subscriptions_url": "https://api.github.com/users/github-merge-queue%5Bbot%5D/subscriptions",
+        "organizations_url": "https://api.github.com/users/github-merge-queue%5Bbot%5D/orgs",
+        "repos_url": "https://api.github.com/users/github-merge-queue%5Bbot%5D/repos",
+        "events_url": "https://api.github.com/users/github-merge-queue%5Bbot%5D/events{/privacy}",
+        "received_events_url": "https://api.github.com/users/github-merge-queue%5Bbot%5D/received_events",
+        "type": "Bot",
+        "user_view_type": "public",
+        "site_admin": false
+      },
+      "jobs_url": "https://api.github.com/repos/sparq-org/sparq/actions/runs/34497774057/jobs",
+      "logs_url": "https://api.github.com/repos/sparq-org/sparq/actions/runs/34497774057/logs",
+      "check_suite_url": "https://api.github.com/repos/sparq-org/sparq/check-suites/93454189600",
+      "artifacts_url": "https://api.github.com/repos/sparq-org/sparq/actions/runs/34497774057/artifacts",
+      "cancel_url": "https://api.github.com/repos/sparq-org/sparq/actions/runs/34497774057/cancel",
+      "rerun_url": "https://api.github.com/repos/sparq-org/sparq/actions/runs/34497774057/rerun",
+      "previous_attempt_url": null,
+      "workflow_url": "https://api.github.com/repos/sparq-org/sparq/actions/workflows/295839727",
+      "head_commit": {
+        "id": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+        "tree_id": "b473621d314e035bc79df2f2e7a91b76b6e77275",
+        "message": "test(bench): preserve term identity in UPDATE differential coverage (#6482)\n\n* test(bench): bound UPDATE lexical adjudication to injective terms\n\nNarrow generated integer values to disjoint lexical pools, including LOAD, while preserving draw counts and operation probabilities. Refuse lossy term/row/blank-node adjudication and retain the exact historical Sparq-only sequence.\n\nCo-Authored-By: GPT-6 Astra <noreply@openai.com>\n\n* test(bench): validate lexical adjudication under workspace edition\n\nPreserve original dataset details on lexical adjudication failures, pin integer spelling pools independently, and make the marker test allowlist explicit. Replace Rust 2024 let chains with equivalent Rust 2021 syntax to match sparq-bench.\n\nCo-Authored-By: GPT-6 Astra <noreply@openai.com>\n\n---------\n\nCo-authored-by: GPT-6 Astra <noreply@openai.com>",
+        "timestamp": "2026-09-10T15:20:52Z",
+        "author": {
+          "name": "Jesse Wright",
+          "email": "63333554+jeswr@users.noreply.github.com"
+        },
+        "committer": {
+          "name": "GitHub",
+          "email": "noreply@github.com"
+        }
+      },
+      "repository": {
+        "id": 1262348840,
+        "node_id": "R_kgDOSz3qKA",
+        "name": "sparq",
+        "full_name": "sparq-org/sparq",
+        "private": false,
+        "owner": {
+          "login": "sparq-org",
+          "id": 299285910,
+          "node_id": "O_kgDOEda9lg",
+          "avatar_url": "https://avatars.githubusercontent.com/u/299285910?v=4",
+          "gravatar_id": "",
+          "url": "https://api.github.com/users/sparq-org",
+          "html_url": "https://github.com/sparq-org",
+          "followers_url": "https://api.github.com/users/sparq-org/followers",
+          "following_url": "https://api.github.com/users/sparq-org/following{/other_user}",
+          "gists_url": "https://api.github.com/users/sparq-org/gists{/gist_id}",
+          "starred_url": "https://api.github.com/users/sparq-org/starred{/owner}{/repo}",
+          "subscriptions_url": "https://api.github.com/users/sparq-org/subscriptions",
+          "organizations_url": "https://api.github.com/users/sparq-org/orgs",
+          "repos_url": "https://api.github.com/users/sparq-org/repos",
+          "events_url": "https://api.github.com/users/sparq-org/events{/privacy}",
+          "received_events_url": "https://api.github.com/users/sparq-org/received_events",
+          "type": "Organization",
+          "user_view_type": "public",
+          "site_admin": false
+        },
+        "html_url": "https://github.com/sparq-org/sparq",
+        "description": "sparq is a lightning-fast RDF triplestore and SPARQL 1.1 / 1.2 engine, written in Rust \u2014 usable as a library, CLI, HTTP server, and from Python and JavaScript/WASM.",
+        "fork": false,
+        "url": "https://api.github.com/repos/sparq-org/sparq",
+        "forks_url": "https://api.github.com/repos/sparq-org/sparq/forks",
+        "keys_url": "https://api.github.com/repos/sparq-org/sparq/keys{/key_id}",
+        "collaborators_url": "https://api.github.com/repos/sparq-org/sparq/collaborators{/collaborator}",
+        "teams_url": "https://api.github.com/repos/sparq-org/sparq/teams",
+        "hooks_url": "https://api.github.com/repos/sparq-org/sparq/hooks",
+        "issue_events_url": "https://api.github.com/repos/sparq-org/sparq/issues/events{/number}",
+        "events_url": "https://api.github.com/repos/sparq-org/sparq/events",
+        "assignees_url": "https://api.github.com/repos/sparq-org/sparq/assignees{/user}",
+        "branches_url": "https://api.github.com/repos/sparq-org/sparq/branches{/branch}",
+        "tags_url": "https://api.github.com/repos/sparq-org/sparq/tags",
+        "blobs_url": "https://api.github.com/repos/sparq-org/sparq/git/blobs{/sha}",
+        "git_tags_url": "https://api.github.com/repos/sparq-org/sparq/git/tags{/sha}",
+        "git_refs_url": "https://api.github.com/repos/sparq-org/sparq/git/refs{/sha}",
+        "trees_url": "https://api.github.com/repos/sparq-org/sparq/git/trees{/sha}",
+        "statuses_url": "https://api.github.com/repos/sparq-org/sparq/statuses/{sha}",
+        "languages_url": "https://api.github.com/repos/sparq-org/sparq/languages",
+        "stargazers_url": "https://api.github.com/repos/sparq-org/sparq/stargazers",
+        "contributors_url": "https://api.github.com/repos/sparq-org/sparq/contributors",
+        "subscribers_url": "https://api.github.com/repos/sparq-org/sparq/subscribers",
+        "subscription_url": "https://api.github.com/repos/sparq-org/sparq/subscription",
+        "commits_url": "https://api.github.com/repos/sparq-org/sparq/commits{/sha}",
+        "git_commits_url": "https://api.github.com/repos/sparq-org/sparq/git/commits{/sha}",
+        "comments_url": "https://api.github.com/repos/sparq-org/sparq/comments{/number}",
+        "issue_comment_url": "https://api.github.com/repos/sparq-org/sparq/issues/comments{/number}",
+        "contents_url": "https://api.github.com/repos/sparq-org/sparq/contents/{+path}",
+        "compare_url": "https://api.github.com/repos/sparq-org/sparq/compare/{base}...{head}",
+        "merges_url": "https://api.github.com/repos/sparq-org/sparq/merges",
+        "archive_url": "https://api.github.com/repos/sparq-org/sparq/{archive_format}{/ref}",
+        "downloads_url": "https://api.github.com/repos/sparq-org/sparq/downloads",
+        "issues_url": "https://api.github.com/repos/sparq-org/sparq/issues{/number}",
+        "pulls_url": "https://api.github.com/repos/sparq-org/sparq/pulls{/number}",
+        "milestones_url": "https://api.github.com/repos/sparq-org/sparq/milestones{/number}",
+        "notifications_url": "https://api.github.com/repos/sparq-org/sparq/notifications{?since,all,participating}",
+        "labels_url": "https://api.github.com/repos/sparq-org/sparq/labels{/name}",
+        "releases_url": "https://api.github.com/repos/sparq-org/sparq/releases{/id}",
+        "deployments_url": "https://api.github.com/repos/sparq-org/sparq/deployments"
+      },
+      "head_repository": {
+        "id": 1262348840,
+        "node_id": "R_kgDOSz3qKA",
+        "name": "sparq",
+        "full_name": "sparq-org/sparq",
+        "private": false,
+        "owner": {
+          "login": "sparq-org",
+          "id": 299285910,
+          "node_id": "O_kgDOEda9lg",
+          "avatar_url": "https://avatars.githubusercontent.com/u/299285910?v=4",
+          "gravatar_id": "",
+          "url": "https://api.github.com/users/sparq-org",
+          "html_url": "https://github.com/sparq-org",
+          "followers_url": "https://api.github.com/users/sparq-org/followers",
+          "following_url": "https://api.github.com/users/sparq-org/following{/other_user}",
+          "gists_url": "https://api.github.com/users/sparq-org/gists{/gist_id}",
+          "starred_url": "https://api.github.com/users/sparq-org/starred{/owner}{/repo}",
+          "subscriptions_url": "https://api.github.com/users/sparq-org/subscriptions",
+          "organizations_url": "https://api.github.com/users/sparq-org/orgs",
+          "repos_url": "https://api.github.com/users/sparq-org/repos",
+          "events_url": "https://api.github.com/users/sparq-org/events{/privacy}",
+          "received_events_url": "https://api.github.com/users/sparq-org/received_events",
+          "type": "Organization",
+          "user_view_type": "public",
+          "site_admin": false
+        },
+        "html_url": "https://github.com/sparq-org/sparq",
+        "description": "sparq is a lightning-fast RDF triplestore and SPARQL 1.1 / 1.2 engine, written in Rust \u2014 usable as a library, CLI, HTTP server, and from Python and JavaScript/WASM.",
+        "fork": false,
+        "url": "https://api.github.com/repos/sparq-org/sparq",
+        "forks_url": "https://api.github.com/repos/sparq-org/sparq/forks",
+        "keys_url": "https://api.github.com/repos/sparq-org/sparq/keys{/key_id}",
+        "collaborators_url": "https://api.github.com/repos/sparq-org/sparq/collaborators{/collaborator}",
+        "teams_url": "https://api.github.com/repos/sparq-org/sparq/teams",
+        "hooks_url": "https://api.github.com/repos/sparq-org/sparq/hooks",
+        "issue_events_url": "https://api.github.com/repos/sparq-org/sparq/issues/events{/number}",
+        "events_url": "https://api.github.com/repos/sparq-org/sparq/events",
+        "assignees_url": "https://api.github.com/repos/sparq-org/sparq/assignees{/user}",
+        "branches_url": "https://api.github.com/repos/sparq-org/sparq/branches{/branch}",
+        "tags_url": "https://api.github.com/repos/sparq-org/sparq/tags",
+        "blobs_url": "https://api.github.com/repos/sparq-org/sparq/git/blobs{/sha}",
+        "git_tags_url": "https://api.github.com/repos/sparq-org/sparq/git/tags{/sha}",
+        "git_refs_url": "https://api.github.com/repos/sparq-org/sparq/git/refs{/sha}",
+        "trees_url": "https://api.github.com/repos/sparq-org/sparq/git/trees{/sha}",
+        "statuses_url": "https://api.github.com/repos/sparq-org/sparq/statuses/{sha}",
+        "languages_url": "https://api.github.com/repos/sparq-org/sparq/languages",
+        "stargazers_url": "https://api.github.com/repos/sparq-org/sparq/stargazers",
+        "contributors_url": "https://api.github.com/repos/sparq-org/sparq/contributors",
+        "subscribers_url": "https://api.github.com/repos/sparq-org/sparq/subscribers",
+        "subscription_url": "https://api.github.com/repos/sparq-org/sparq/subscription",
+        "commits_url": "https://api.github.com/repos/sparq-org/sparq/commits{/sha}",
+        "git_commits_url": "https://api.github.com/repos/sparq-org/sparq/git/commits{/sha}",
+        "comments_url": "https://api.github.com/repos/sparq-org/sparq/comments{/number}",
+        "issue_comment_url": "https://api.github.com/repos/sparq-org/sparq/issues/comments{/number}",
+        "contents_url": "https://api.github.com/repos/sparq-org/sparq/contents/{+path}",
+        "compare_url": "https://api.github.com/repos/sparq-org/sparq/compare/{base}...{head}",
+        "merges_url": "https://api.github.com/repos/sparq-org/sparq/merges",
+        "archive_url": "https://api.github.com/repos/sparq-org/sparq/{archive_format}{/ref}",
+        "downloads_url": "https://api.github.com/repos/sparq-org/sparq/downloads",
+        "issues_url": "https://api.github.com/repos/sparq-org/sparq/issues{/number}",
+        "pulls_url": "https://api.github.com/repos/sparq-org/sparq/pulls{/number}",
+        "milestones_url": "https://api.github.com/repos/sparq-org/sparq/milestones{/number}",
+        "notifications_url": "https://api.github.com/repos/sparq-org/sparq/notifications{?since,all,participating}",
+        "labels_url": "https://api.github.com/repos/sparq-org/sparq/labels{/name}",
+        "releases_url": "https://api.github.com/repos/sparq-org/sparq/releases{/id}",
+        "deployments_url": "https://api.github.com/repos/sparq-org/sparq/deployments"
+      }
+    }
+  ],
+  "gate": {
+    "id": 103002616428,
+    "name": "gate",
+    "node_id": "CR_kwDOSz3qKM8AAAAX-28ybA",
+    "head_sha": "9ac4a59e96b1c69c8d617fbde9e98fe8c0436fed",
+    "external_id": "55c6a2a6-053f-53a7-88b5-91120769401d",
+    "url": "https://api.github.com/repos/sparq-org/sparq/check-runs/103002616428",
+    "html_url": "https://github.com/sparq-org/sparq/actions/runs/34511329028/job/103002616428",
+    "details_url": "https://github.com/sparq-org/sparq/actions/runs/34511329028/job/103002616428",
+    "status": "completed",
+    "conclusion": "success",
+    "started_at": "2026-09-10T18:46:13Z",
+    "completed_at": "2026-09-10T18:47:51Z",
+    "output": {
+      "title": null,
+      "summary": null,
+      "text": null,
+      "annotations_count": 0,
+      "annotations_url": "https://api.github.com/repos/sparq-org/sparq/check-runs/103002616428/annotations"
+    },
+    "check_suite": {
+      "id": 93492115883
+    },
+    "app": {
+      "id": 15368,
+      "client_id": "Iv1.05c79e9ad1f6bdfa",
+      "slug": "github-actions",
+      "node_id": "MDM6QXBwMTUzNjg=",
+      "owner": {
+        "login": "github",
+        "id": 9919,
+        "node_id": "MDEyOk9yZ2FuaXphdGlvbjk5MTk=",
+        "avatar_url": "https://avatars.githubusercontent.com/u/9919?v=4",
+        "gravatar_id": "",
+        "url": "https://api.github.com/users/github",
+        "html_url": "https://github.com/github",
+        "followers_url": "https://api.github.com/users/github/followers",
+        "following_url": "https://api.github.com/users/github/following{/other_user}",
+        "gists_url": "https://api.github.com/users/github/gists{/gist_id}",
+        "starred_url": "https://api.github.com/users/github/starred{/owner}{/repo}",
+        "subscriptions_url": "https://api.github.com/users/github/subscriptions",
+        "organizations_url": "https://api.github.com/users/github/orgs",
+        "repos_url": "https://api.github.com/users/github/repos",
+        "events_url": "https://api.github.com/users/github/events{/privacy}",
+        "received_events_url": "https://api.github.com/users/github/received_events",
+        "type": "Organization",
+        "user_view_type": "public",
+        "site_admin": false
+      },
+      "name": "GitHub Actions",
+      "description": "Automate your workflow from idea to production",
+      "external_url": "https://help.github.com/en/actions",
+      "html_url": "https://github.com/apps/github-actions",
+      "created_at": "2018-07-30T09:30:17Z",
+      "updated_at": "2026-06-18T16:17:48Z",
+      "permissions": {
+        "actions": "write",
+        "administration": "read",
+        "artifact_metadata": "write",
+        "attestations": "write",
+        "checks": "write",
+        "code_quality": "write",
+        "contents": "write",
+        "copilot_requests": "write",
+        "deployments": "write",
+        "discussions": "write",
+        "drives": "write",
+        "issues": "write",
+        "merge_queues": "write",
+        "metadata": "read",
+        "models": "read",
+        "packages": "write",
+        "pages": "write",
+        "pull_requests": "write",
+        "repository_hooks": "write",
+        "repository_projects": "write",
+        "security_events": "write",
+        "statuses": "write",
+        "vulnerability_alerts": "read"
+      },
+      "events": [
+        "branch_protection_rule",
+        "check_run",
+        "check_suite",
+        "create",
+        "delete",
+        "deployment",
+        "deployment_status",
+        "discussion",
+        "discussion_comment",
+        "fork",
+        "gollum",
+        "issues",
+        "issue_comment",
+        "label",
+        "merge_group",
+        "milestone",
+        "page_build",
+        "public",
+        "pull_request",
+        "pull_request_review",
+        "pull_request_review_comment",
+        "push",
+        "registry_package",
+        "release",
+        "repository",
+        "repository_dispatch",
+        "status",
+        "watch",
+        "workflow_dispatch",
+        "workflow_run"
+      ]
+    },
+    "pull_requests": [
+      {
+        "url": "https://api.github.com/repos/sparq-org/sparq/pulls/6486",
+        "id": 4498484614,
+        "number": 6486,
+        "head": {
+          "ref": "codex/preserve-numeric-memo",
+          "sha": "9ac4a59e96b1c69c8d617fbde9e98fe8c0436fed",
+          "repo": {
+            "id": 1262348840,
+            "url": "https://api.github.com/repos/sparq-org/sparq",
+            "name": "sparq"
+          }
+        },
+        "base": {
+          "ref": "main",
+          "sha": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+          "repo": {
+            "id": 1262348840,
+            "url": "https://api.github.com/repos/sparq-org/sparq",
+            "name": "sparq"
+          }
+        }
+      }
+    ]
+  },
+  "pre_enqueue": {
+    "data": {
+      "rateLimit": {
+        "remaining": 4999,
+        "resetAt": "2026-09-10T20:02:29Z"
+      },
+      "repository": {
+        "defaultBranchRef": {
+          "target": {
+            "oid": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464"
+          }
+        },
+        "pullRequest": {
+          "id": "PR_kwDOSz3qKM8AAAABDCFthg",
+          "state": "OPEN",
+          "isDraft": false,
+          "baseRefName": "main",
+          "baseRefOid": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+          "headRefOid": "9ac4a59e96b1c69c8d617fbde9e98fe8c0436fed",
+          "body": "> \ud83e\udd16 **SPARQ agent** \u2014 I am @jeswr's agent for the sparq-org/sparq RDF/SPARQL engine. @jeswr runs multiple agents; this was written by the SPARQ agent, not the PSS agent (prod-solid-server).\n\nUpdates that leave the dictionary unchanged currently discard the cached numeric-precision verdict. The next numeric-filter safety check then scans the dictionary again. This preserves the memo after deletions, known-term reinsertion and inline-integer insertion, while retaining invalidation when stored terms grow and the existing conservative high-precision verdict.\n\nThe change documents dictionary/cache coherence and covers dense, sparse, forked and mapped graphs, including compaction, snapshot isolation and WAL replay. It addresses #6485. The separate first cold scan in #3113 remains unchanged and that parent issue stays open.\n\nValidation: four focused default tests and five mmap/dict-spill tests passed on the source commit `73769114f081c8455aa21a393d0b992bd1283b67`; four deliberate invalidation defects compiled and failed the expected behavioral assertions. Scoped Clippy with warnings denied and touched formatting passed. These are actual native Rust 2021 module builds using recorded dependencies, not a full workspace/wasm gate. Local preflight stopped at the established Bash 3 `mapfile` limitation; normal Linux CI remains required. No latency, throughput or heap improvement is claimed.\n\nThe final child `9ac4a59e96b1c69c8d617fbde9e98fe8c0436fed` adds only the numbered V2 intent declaration for this always-compiled optimization; the reviewed/tested Rust source is byte-identical. JSON validation, the existing declaration-checker self-tests and diff checks passed. This declares intent, not wasm byte neutrality. The normal feature-off comparison, independent wasm size ratchet, required CI and protected merge process remain unchanged.\n\nImplementation: GPT-6 Astra with extra-high reasoning. Actual independent Claude Opus 5 with extra-high reasoning approved the source and metadata followup at the final head for normal CI, with no blocking findings. The proof covers both dictionary terms and cached numeric presence; the avoided scan performs numeric-cache lookups with conditional term checks. The issue remains open until the fix is on main and relevant post-merge evidence is checked.\n",
+          "mergeable": "MERGEABLE",
+          "mergeStateStatus": "CLEAN",
+          "mergeQueueEntry": null,
+          "labels": {
+            "nodes": [
+              {
+                "name": "area:bench"
+              },
+              {
+                "name": "area:sparq-core"
+              },
+              {
+                "name": "review:unreviewed"
+              }
+            ],
+            "pageInfo": {
+              "hasNextPage": false
+            }
+          },
+          "reviews": {
+            "nodes": [
+              {
+                "author": {
+                  "login": "copilot-pull-request-reviewer"
+                },
+                "state": "COMMENTED",
+                "submittedAt": "2026-09-10T18:00:32Z",
+                "commit": {
+                  "oid": "9ac4a59e96b1c69c8d617fbde9e98fe8c0436fed"
+                }
+              },
+              {
+                "author": {
+                  "login": "github-actions"
+                },
+                "state": "COMMENTED",
+                "submittedAt": "2026-09-10T18:02:53Z",
+                "commit": {
+                  "oid": "9ac4a59e96b1c69c8d617fbde9e98fe8c0436fed"
+                }
+              }
+            ],
+            "pageInfo": {
+              "hasPreviousPage": false
+            }
+          },
+          "reviewThreads": {
+            "pageInfo": {
+              "hasNextPage": false
+            },
+            "nodes": []
+          },
+          "commits": {
+            "nodes": [
+              {
+                "commit": {
+                  "oid": "9ac4a59e96b1c69c8d617fbde9e98fe8c0436fed",
+                  "statusCheckRollup": {
+                    "state": "SUCCESS"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "result": {
+    "data": {
+      "enqueuePullRequest": {
+        "mergeQueueEntry": {
+          "id": "MQE_lQDOSz3qKM8AAAABDCFths4AA2w6zgLM9xQ",
+          "position": 1,
+          "state": "QUEUED",
+          "headCommit": null
+        }
+      }
+    }
+  },
+  "completed_at": "2026-09-10T19:02:31.637070+00:00"
+}

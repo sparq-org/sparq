@@ -1,0 +1,22 @@
+{
+  "pr_head": "9ac4a59e96b1c69c8d617fbde9e98fe8c0436fed",
+  "base": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+  "local_head_tree": "15664509e583db9141929348c4433cf558c57be4",
+  "local_clean": true,
+  "actual_ci_checkout": "613cad4d82742955394658dbac03483ef3a4cf97",
+  "checkout_lines": [
+    {
+      "line": 136,
+      "text": "2026-09-10T18:00:41.6032661Z HEAD is now at 613cad4 Merge 9ac4a59e96b1c69c8d617fbde9e98fe8c0436fed into f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464"
+    },
+    {
+      "line": 138,
+      "text": "2026-09-10T18:00:41.6088725Z [command]/usr/bin/git log -1 --format=%H"
+    },
+    {
+      "line": 139,
+      "text": "2026-09-10T18:00:41.6117638Z 613cad4d82742955394658dbac03483ef3a4cf97"
+    }
+  ],
+  "tree_equality_limit": "Full merged tree hash not independently obtained. Git-data commit read with abbreviated613cad4 returned404, ending reads. Raw logs identify merge9ac intof50; local9acdescendsfromf50. That supports composition applicability but is not a remote merged-tree byte comparison."
+}
