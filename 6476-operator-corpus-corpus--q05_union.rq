@@ -1,0 +1,5 @@
+# UNION: two fixed subjects' names combined (2 rows).
+PREFIX ex: <http://ex/>
+SELECT ?name WHERE {
+  { ex:n1 ex:name ?name } UNION { ex:n2 ex:name ?name }
+}

@@ -1,0 +1,8 @@
+# DISTINCT: the distinct set of cities reached by a fixed subject's followees
+# (collapses duplicates that arise from multiple followees in the same city).
+PREFIX ex: <http://ex/>
+SELECT DISTINCT ?city WHERE {
+  ex:n0 ex:follows ?o .
+  ?o ex:city ?city .
+}
+ORDER BY ?city

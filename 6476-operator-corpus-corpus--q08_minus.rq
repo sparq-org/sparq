@@ -1,0 +1,7 @@
+# MINUS: a fixed candidate set minus the two we explicitly exclude.
+PREFIX ex: <http://ex/>
+SELECT ?s WHERE {
+  VALUES ?s { ex:n20 ex:n21 ex:n22 ex:n23 ex:n24 }
+  ?s a ex:Person .
+  MINUS { VALUES ?s { ex:n22 ex:n24 } }
+}

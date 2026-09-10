@@ -1,0 +1,7 @@
+# Cyclic join: directed triangle over ex:follows (a->b->c->a).
+PREFIX ex: <http://ex/>
+SELECT (COUNT(*) AS ?triangles) WHERE {
+  ?a ex:follows ?b .
+  ?b ex:follows ?c .
+  ?c ex:follows ?a .
+}

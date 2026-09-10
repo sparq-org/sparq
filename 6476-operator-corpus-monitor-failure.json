@@ -1,0 +1,10 @@
+{
+  "wrapper_exit": 1,
+  "wrapper_error": "FileNotFoundError during allocated-size census of disappearing rustc temporary .rcgu.o",
+  "cargo_exit_code": null,
+  "build_log_observation": "Finished release profile target(s) in32.41s, fresh engine and unique harness actual rustc invocations present",
+  "subsequent_process_check": "ps pid/ppid/comm filtered cargo,rustc,operator-corpus-6478-d07: no matches",
+  "monitoring_gap": "Wrapper stopped monitoring before Cargo finished; final resource measurement available; do not claim continuously enforced resource observations for remaining build interval.",
+  "change": "Skip vanished enumeration entries only. No build retry; original runner preserved.",
+  "epoch": 1789023008.711447
+}

@@ -1,0 +1,5 @@
+# Property path negated property set: a fixed subject's objects reached by any
+# predicate EXCEPT ex:follows (i.e. its name/age/city/type attributes).
+PREFIX ex: <http://ex/>
+SELECT ?o WHERE { ex:n80 !(ex:follows) ?o }
+ORDER BY STR(?o)

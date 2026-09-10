@@ -1,0 +1,4 @@
+# Property path sequence: followee's city via ex:follows/ex:city, from a fixed start.
+PREFIX ex: <http://ex/>
+SELECT DISTINCT ?city WHERE { ex:n0 ex:follows/ex:city ?city }
+ORDER BY ?city

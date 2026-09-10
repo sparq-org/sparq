@@ -1,0 +1,17 @@
+LOADED	15993
+RESULT	count	q01_bgp	count_result	1	1	1
+RESULT	count	q02_star3	count_result	1	1	1
+RESULT	count	q03_chain	count_result	16	16	16
+RESULT	count	q04_triangle	count_result	1	1	1
+RESULT	count	q05_union	count_result	2	2	2
+RESULT	count	q06_optional	count_result	2	2	2
+RESULT	count	q07_optional_notbound	count_result	10	10	10
+RESULT	count	q08_minus	count_result	3	3	3
+RESULT	count	q09_filter_numeric	count_result	75	75	75
+RESULT	count	q10_filter_string	count_result	2	2	2
+RESULT	count	q11_filter_in	count_result	3	3	3
+RESULT	count	q12_filter_exists	count_result	3	3	3
+OPERATOR_CORPUS_ERROR: count/q13_bind: error at 2:1: expected one of "$", "'", "'''", "(", "+", "-", ".", ":", "<", "<<", "<<(", "?", "[", "\"", "\"\"\"", "_:", "{", "}", ['0'..='9'], ['A' ..= 'Z' | 'a' ..= 'z' | '\u{00C0}'..='\u{00D6}' | '\u{00D8}'..='\u{00F6}'
+| '\u{00F8}'..='\u{02FF}' | '\u{0370}'..='\u{037D}' | '\u{037F}'..='\u{1FFF}'
+| '\u{200C}'..='\u{200D}' | '\u{2070}'..='\u{218F}' | '\u{2C00}'..='\u{2FEF}'
+| '\u{3001}'..='\u{D7FF}' | '\u{F900}'..='\u{FDCF}' | '\u{FDF0}'..='\u{FFFD}'], [_]

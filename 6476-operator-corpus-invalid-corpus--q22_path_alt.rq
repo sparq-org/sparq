@@ -1,0 +1,4 @@
+# Property path alternative: a fixed subject's name OR age object via (ex:name|ex:age).
+PREFIX ex: <http://ex/>
+SELECT ?o WHERE { ex:n70 (ex:name|ex:age) ?o }
+ORDER BY STR(?o)

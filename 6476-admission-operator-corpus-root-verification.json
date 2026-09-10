@@ -1,0 +1,17 @@
+{
+  "at": "2026-09-10T07:09:53.587083+00:00",
+  "head": "d07ca79f89e3a8945be46b516c3cd2f770ccd618",
+  "manifest_files": 91,
+  "manifest_sha256": "d531738bc8483e6526df7d68b7b844f547ab58c1b768e7b05a75bbc4e29f0b0b",
+  "all_manifest_bytes_hashes_verified": true,
+  "generator_corpus_source_byte_verified": true,
+  "production_source_and_binary_provenance_checked": true,
+  "records_raw_verified": 84,
+  "successful_invocations": 252,
+  "negative_control_exit": 2,
+  "negative_control_prior_records": 12,
+  "build_exit_code": null,
+  "monitor_gap_acknowledged": true,
+  "scope": "Equivalent registered operator corpus/public APIs, not full CLI workflow, timing, allocation or independent semantic oracle",
+  "packet_sha256": "36634ee81a60b37339b2aa69f8cbdeaed2d0cb205516beac94fc540bef04fd7f"
+}

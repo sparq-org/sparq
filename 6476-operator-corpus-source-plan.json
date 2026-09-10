@@ -1,0 +1,42 @@
+{
+  "head": "d07ca79f89e3a8945be46b516c3cd2f770ccd618",
+  "generator_source": "crates/sparq-bench/src/dataset.rs",
+  "generator_sha256": "d39caebec4dad6fe0446812d4dac8bc2ab228abf48f19d3f29823407872a8d77",
+  "corpus_sha256": {
+    "q01_bgp.rq": "435466bc4dd5421435c8e5b433ef59a4b149051838bf158b4db6e8a3a7601e58",
+    "q02_star3.rq": "0bc8ff798bfaa509dea2b434438d25b17a3d82891fad8adbe04a87c786093422",
+    "q03_chain.rq": "5e84418dda44bea1dceba04e3e5874be298e514842bfc1aaf252891bf1dc6bce",
+    "q04_triangle.rq": "e26c177ff353c6ddf906afd5f244a5ff8311d6ba098d6da8923b4f09179f251e",
+    "q05_union.rq": "f5c042643cc056fd5ca4e011cb44743e8716c876cfcf2a80595af40d3b02bf1f",
+    "q06_optional.rq": "e04405f454ec149b608901e7565349b18b577094e36d0e24f05c06786dd6677e",
+    "q07_optional_notbound.rq": "b7e49bbd5315be55709d4d4356e034bd6e69cea831f29bb4cc5cb1449fde87ac",
+    "q08_minus.rq": "7ae9a43e884d426a077e0b3f8c31113291cd7f816fa6db337091267347e4a298",
+    "q09_filter_numeric.rq": "74cf0e7ac5e188ea3702139188cf34e4f49e9e1d0b563ea3dd8fb4a62b543547",
+    "q10_filter_string.rq": "30dfa717e1dbe8d986f958729b2343c2a604e01c516104791cee35b40ef591b9",
+    "q11_filter_in.rq": "9c6776afcf7921edfcf34b4bb26a1186bd2860a54e9e723fbe887bd7a132c109",
+    "q12_filter_exists.rq": "1def9a370e81c1db07980ced94904e25c39d26a10cd1ee55f2aed99825a048d8",
+    "q13_bind.rq": "c9d58d5ce1a2d1237d38cf2382905860f6a9f7770310889df7551c0e926ebfbd",
+    "q14_values.rq": "4a5332a07467d4d3317f3e8d2cec08fff3f4e22a72b2a4650256755a69544c7d",
+    "q15_agg_group_having.rq": "49159b4712c0136064fd9f90a033610edeea41d720e1bbd81882fe49616b60bd",
+    "q16_distinct.rq": "adf1e05537a18995f61b5cff98801571637a03564d09ac13e87a220a392b7a9c",
+    "q17_orderby_limit_offset.rq": "fcad1d5883fdcadf8da3cb96dc4c6b902bd0a1640875956bae65673a0b5a84f8",
+    "q18_path_plus.rq": "413c06f304effeac6727d31107a1e47333bcb09e11d0797184e6db3244f9a33e",
+    "q19_path_star.rq": "f223da47ead383e4a67db7b33a04230027f493aaf6e2f203723c9faece76b4bc",
+    "q20_path_opt.rq": "021b869a4e61d67bbc95a374e7d94549a78fcaf9510522abcbf635ce1ea6ea5f",
+    "q21_path_seq.rq": "e77f6a2c43c0d2a273902cf19b80519671621f4d1271c4abf12cc41fa9cbd6ac",
+    "q22_path_alt.rq": "68e564ce2e3f198c2d0f4eba05ee19d4e8a8d652263d7b7bebebbea2c6248ed1",
+    "q23_path_inverse.rq": "c05f0d33310f9c19773948785fdc73161c5e7ca5424e1fc4a77a30c98dddf598",
+    "q24_path_negated_pset.rq": "1494063893997d71b954671674c242fb8d7bd24f5e986046b9ce5ff3079a58fe",
+    "q25_subquery.rq": "b85bbcc769e6e7cda152f957bd8d8f95a4b719ef068b73873823beaced4c1e14",
+    "q26_ask.rq": "c5cc21326a4ae100fb871c4c786aac33dae34b270c8f7b544d43951d6070ed95",
+    "q27_construct.rq": "c76ff6949d7e3e270b7f82094357a5a860cce93b16721a5204824ae862d6d39e",
+    "q28_describe.rq": "de12ff6caa2e981256c3af6940f0d0540c34c00d3d0b5d718cd75361e7312974"
+  },
+  "engine_source_sha256": {
+    "crates/sparq-engine/src/exec.rs": "2cb27fc03db5e23b4fe373740b35fe2cf1cf1dd472fdc9eb5d873aa52beb9a09",
+    "crates/sparq-engine/src/lib.rs": "074740149d0649b0334d1814ca289feaad54070ca0d90bf5737601f7021a7538"
+  },
+  "new_dependencies": false,
+  "manifest_and_lock": "Copied proven existing public validation pair; renamed only root package. Existing dependency versions and checksums unchanged.",
+  "purpose": "Equivalent registered corpus/API dispatch execution only, not full CLI workflow, no timing/allocation result."
+}

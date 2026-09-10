@@ -1,0 +1,83 @@
+{
+  "head": "d07ca79f89e3a8945be46b516c3cd2f770ccd618",
+  "decision": "REGISTERED_CORPUS_EXECUTION_COMPLETE",
+  "source_clean": true,
+  "scope": "Equivalent2000-entity registered28-query public-API mode corpus; not full CLI benchmark/workflow execution.",
+  "records": 84,
+  "query_invocations": 252,
+  "iterations_each": 3,
+  "modes": [
+    "count",
+    "materialize",
+    "json"
+  ],
+  "same_iteration_returned_size_all84": true,
+  "count_materialize_size_equal_all28": true,
+  "graph_form_returned_triples_equal_all_modes": true,
+  "json_non_graph_records": 26,
+  "graph_records": 6,
+  "dataset": {
+    "entities": 2000,
+    "generated_nt_lines": 16000,
+    "loaded_graph_triples_by_mode": {
+      "count": [
+        15993
+      ],
+      "materialize": [
+        15993
+      ],
+      "json": [
+        15993
+      ]
+    },
+    "bytes": 1000490,
+    "sha256": "7d9987d12b85351aecd471c0f6777b288d6142fb921e0c77c282ebc11edd8e28",
+    "generator_sha256": "d39caebec4dad6fe0446812d4dac8bc2ab228abf48f19d3f29823407872a8d77",
+    "generator": "verbatim crates/sparq-bench/src/dataset.rs::write_nt"
+  },
+  "negative_control": {
+    "query": "q13_bind.rq replaced only in private copy",
+    "exit_code": 2,
+    "prior_success_records": 12,
+    "completion_marker": false,
+    "exact_query_error_association": true
+  },
+  "build": {
+    "fresh_d07_engine_and_unique_harness_compilation": true,
+    "observed_finished_seconds": 32.41,
+    "cargo_exit_code": null,
+    "limitation": "Disk-monitor wrapper failed on a vanished rustc temporary before wait/receipt. Cargo independently completed per actual compiler log; no Cargo exit code recovered and no build repeated. Monitoring gap is preserved in monitor-failure.json."
+  },
+  "resource": {
+    "final_free_bytes": 5647593472,
+    "final_aggregate_growth_bytes": 287457280,
+    "cap_bytes": 536870912,
+    "floor_bytes": 2147483648,
+    "max_observed_execution_growth_bytes": 287424512,
+    "min_observed_execution_free_bytes": 5816741888,
+    "phase_elapsed_seconds_at_summary": 486.20448207855225,
+    "jobs": 1,
+    "rustc_profile": {
+      "CARGO_PROFILE_RELEASE_OPT_LEVEL": "3",
+      "CARGO_PROFILE_RELEASE_DEBUG": "false",
+      "CARGO_PROFILE_RELEASE_LTO": "false",
+      "CARGO_PROFILE_RELEASE_CODEGEN_UNITS": "16",
+      "CARGO_PROFILE_RELEASE_PANIC": "unwind"
+    }
+  },
+  "limitations": [
+    "Return-size stability and cross-count agreement are not an independent semantic answer oracle.",
+    "JSON byte lengths are not solution counts; CONSTRUCT/DESCRIBE return triple counts even in json mode, matching CLI dispatch.",
+    "Default engine features, System allocator and one Rayon worker; CLI dependency-unified feature set and mimalloc were not reproduced.",
+    "No timing, allocation, regression, full-workflow or full-feature conformance claim.",
+    "Missing corpus names are enforced by actual harness; deliberately missing-name mutation was not separately executed.",
+    "Compile resource-monitor observation gap recorded; subsequent runs stayed inside both resource bounds."
+  ],
+  "artifacts": {
+    "results": "results-84.json",
+    "provenance": "binary-provenance.json",
+    "actual_compiler_argv": "compiler-invocations.txt",
+    "dependencies": "engine-dependencies.json",
+    "commands": "generate.json,count.json,materialize.json,json.json,invalid-query.json"
+  }
+}

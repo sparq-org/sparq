@@ -1,0 +1,3 @@
+# Property path inverse `^`: who follows a fixed target (inverse of ex:follows).
+PREFIX ex: <http://ex/>
+SELECT (COUNT(DISTINCT ?follower) AS ?inDegree) WHERE { ex:n0 ^ex:follows ?follower }

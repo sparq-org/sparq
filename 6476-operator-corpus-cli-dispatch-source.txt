@@ -1,0 +1,108 @@
+2199: fn run_query_suite(g: &sparq_core::Graph, dir: &str, iters: usize, mode: &str, json_path: Option<&str>) {
+2200:     let mut entries: Vec<_> = std::fs::read_dir(dir)
+2201:         .unwrap_or_else(|e| {
+2202:             eprintln!("error reading {dir}: {e}");
+2203:             std::process::exit(1);
+2204:         })
+2205:         .filter_map(Result::ok)
+2206:         .map(|e| e.path())
+2207:         .filter(|p| p.extension().map(|x| x == "rq").unwrap_or(false))
+2208:         .collect();
+2209:     entries.sort();
+2210: 
+2211:     let mut results: Vec<SuiteRow> = Vec::with_capacity(entries.len());
+2212:     for path in entries {
+2213:         let name = path.file_stem().unwrap().to_string_lossy().to_string();
+2214:         let sparql = std::fs::read_to_string(&path).unwrap();
+2215:         // [OPUS-4.8] Route the graph-valued forms (CONSTRUCT / DESCRIBE) through the
+2216:         // construct/describe executor — count()/query()/query_json() only handle SELECT/ASK.
+2217:         // This lets the operator-coverage suite (bench/operators/queries) exercise every
+2218:         // SPARQL query form through the same `bench` runner; "rows" = produced triples.
+2219:         let graph_form = sparq_engine::PreparedQuery::parse(&sparql).map(|p| p.is_graph_form()).unwrap_or(false);
+2220:         let mut best = f64::INFINITY;
+2221:         let mut rows = 0;
+2222:         let mut err = None;
+2223:         for _ in 0..iters {
+2224:             let t = Instant::now();
+2225:             let r: Result<usize, String> = if graph_form {
+2226:                 sparq_engine::construct_or_describe(g, &sparql).map(|ts| ts.len())
+2227:             } else {
+2228:                 match mode {
+2229:                     "count" => sparq_engine::count(g, &sparql),
+2230:                     "json" => sparq_engine::query_json(g, &sparql).map(|s| {
+2231:                         let n = s.len();
+2232:                         std::hint::black_box(s);
+2233:                         n
+2234:                     }),
+2235:                     _ => sparq_engine::query(g, &sparql).map(|r| r.len()),
+2236:                 }
+2237:             };
+2238:             match r {
+2239:                 Ok(n) => {
+2240:                     rows = n;
+2241:                     best = best.min(t.elapsed().as_secs_f64() * 1e6);
+2242:                 }
+2243:                 Err(e) => {
+2244:                     err = Some(e);
+2245:                     break;
+2246:                 }
+2247:             }
+2248:         }
+2249:         match &err {
+2250:             None => println!("{name}\t{rows}\t{best:.1}"),
+2251:             Some(e) => println!("{name}\tERROR\t{e}"),
+2252:         }
+2253:         let outcome = match err {
+2254:             None => Ok((rows, best)),
+2255:             Some(e) => Err(e),
+2256:         };
+2257:         results.push(SuiteRow { name, outcome });
+2258:     }
+2259: 
+2260:     if let Some(p) = json_path {
+2261:         let doc = suite_results_json(mode, iters, &results);
+2262:         if let Err(e) = std::fs::write(p, doc) {
+2263:             eprintln!("error writing --json results to {p}: {e}");
+2264:             std::process::exit(1);
+2265:         }
+1440: fn load_quiet(path: &str, format: &str) -> sparq_core::Graph {
+1441:     apply_store_profile(load_quiet_raw(path, format), store_profile_from_env())
+1442: }
+1443: 
+1444: /// [FABLE-5] (sq-7d3dj.32.2.1) The unconditional raw load — format routing + parse + index build,
+1445: /// with NO store-profile applied. Byte-identical to the pre-profile `load_quiet` body, so callers
+1446: /// that manage their own profile decision (e.g. `memstat`, which has an explicit positional) use
+1447: /// this to avoid a double application.
+1448: fn load_quiet_raw(path: &str, format: &str) -> sparq_core::Graph {
+1449:     let die = |e: String| -> ! {
+1450:         eprintln!("error loading {path}: {e}");
+1451:         std::process::exit(1);
+1452:     };
+1453:     // [OPUS-4.8] Reject an unknown format argument up-front (exit 2 = usage error).
+1454:     // sparq-core's `parse_to_triples` treats ANY unrecognised format string as Turtle
+1455:     // (a catch-all `_ => Turtle` arm), so without this guard a typo'd / unsupported
+1456:     // format value would SILENTLY parse the input as Turtle and exit 0 — the opposite
+1457:     // of the "unsupported format → non-zero exit" CLI contract (bug sq-q50l).
+1458:     let ext_routed = path.ends_with(".hdt") || path.ends_with(".hdt.gz");
+1459:     if !is_known_format(format) && !ext_routed {
+1460:         die_unknown_format(format);
+1461:     }
+1462:     // HDT archives — `hdt` as the format argument, or a `.hdt`/`.hdt.gz` file
+1463:     // extension — route through sparq-hdt (gzip is sniffed by magic bytes
+1464:     // there, so a mislabelled extension still loads). Opt-in cargo feature:
+1465:     // the decode stack stays out of the default build (see Cargo.toml).
+1466:     if format == "hdt" || path.ends_with(".hdt") || path.ends_with(".hdt.gz") {
+1467:         #[cfg(feature = "hdt")]
+1468:         return sparq_hdt::load(path).unwrap_or_else(|e| die(e.to_string()));
+1469:         #[cfg(not(feature = "hdt"))]
+1470:         die("HDT support is not compiled into this binary: rebuild with `cargo build -p sparq-cli --features hdt`".to_string());
+1471:     }
+1472:     // N-Triples streams block-by-block (parallel parse, no full decompressed copy in RAM); other
+1473:     // formats need the whole document buffered for the parallel statement-splitter.
+1474:     if matches!(format, "ntriples" | "n-triples") {
+1475:         let reader = open_reader(path).unwrap_or_else(|e| die(e.to_string()));
+1476:         sparq_core::Graph::load_reader_parallel(reader, format).unwrap_or_else(|e| die(e))
+1477:     } else {
+1478:         use std::io::Read;
+1479:         let mut text = String::new();
+1480:         open_reader(path).and_then(|mut r| r.read_to_string(&mut text)).unwrap_or_else(|e| die(e.to_string()));

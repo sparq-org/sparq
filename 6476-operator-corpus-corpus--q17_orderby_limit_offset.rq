@@ -1,0 +1,8 @@
+# ORDER BY (desc age, then subject) with LIMIT + OFFSET — a deterministic top-slice.
+PREFIX ex: <http://ex/>
+SELECT ?s ?age WHERE {
+  ?s ex:age ?age .
+}
+ORDER BY DESC(?age) ?s
+LIMIT 5
+OFFSET 2

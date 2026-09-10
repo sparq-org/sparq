@@ -1,0 +1,7 @@
+# BIND: derive a computed value (age decade) for a fixed subject (1 row).
+PREFIX ex: <http://ex/>
+SELECT ?s ?age ?decade WHERE {
+  ?s ex:age ?age .
+  FILTER(?s = ex:n55)
+  BIND(FLOOR(?age / 10) * 10 AS ?decade)
+}

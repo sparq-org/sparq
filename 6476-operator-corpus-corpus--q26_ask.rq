@@ -1,0 +1,3 @@
+# ASK form: is there a Person at all? (boolean; bench counts the unit row as 1).
+PREFIX ex: <http://ex/>
+ASK { ?s a ex:Person . ?s ex:age ?a . FILTER(?a > 90) }

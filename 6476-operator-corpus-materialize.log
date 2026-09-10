@@ -1,0 +1,30 @@
+LOADED	15993
+RESULT	materialize	q01_bgp	solution_rows	1	1	1
+RESULT	materialize	q02_star3	solution_rows	1	1	1
+RESULT	materialize	q03_chain	solution_rows	16	16	16
+RESULT	materialize	q04_triangle	solution_rows	1	1	1
+RESULT	materialize	q05_union	solution_rows	2	2	2
+RESULT	materialize	q06_optional	solution_rows	2	2	2
+RESULT	materialize	q07_optional_notbound	solution_rows	10	10	10
+RESULT	materialize	q08_minus	solution_rows	3	3	3
+RESULT	materialize	q09_filter_numeric	solution_rows	75	75	75
+RESULT	materialize	q10_filter_string	solution_rows	2	2	2
+RESULT	materialize	q11_filter_in	solution_rows	3	3	3
+RESULT	materialize	q12_filter_exists	solution_rows	3	3	3
+RESULT	materialize	q13_bind	solution_rows	1	1	1
+RESULT	materialize	q14_values	solution_rows	3	3	3
+RESULT	materialize	q15_agg_group_having	solution_rows	3	3	3
+RESULT	materialize	q16_distinct	solution_rows	4	4	4
+RESULT	materialize	q17_orderby_limit_offset	solution_rows	5	5	5
+RESULT	materialize	q18_path_plus	solution_rows	1	1	1
+RESULT	materialize	q19_path_star	solution_rows	1	1	1
+RESULT	materialize	q20_path_opt	solution_rows	5	5	5
+RESULT	materialize	q21_path_seq	solution_rows	4	4	4
+RESULT	materialize	q22_path_alt	solution_rows	2	2	2
+RESULT	materialize	q23_path_inverse	solution_rows	1	1	1
+RESULT	materialize	q24_path_negated_pset	solution_rows	4	4	4
+RESULT	materialize	q25_subquery	solution_rows	3	3	3
+RESULT	materialize	q26_ask	solution_rows	1	1	1
+RESULT	materialize	q27_construct	triples	4	4	4
+RESULT	materialize	q28_describe	triples	16	16	16
+COMPLETED	materialize	28

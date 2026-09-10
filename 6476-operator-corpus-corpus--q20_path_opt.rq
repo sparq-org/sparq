@@ -1,0 +1,5 @@
+# Property path `?` (zero-or-one): the node itself plus its direct followees,
+# from a fixed start (small, deterministic set).
+PREFIX ex: <http://ex/>
+SELECT DISTINCT ?r WHERE { ex:n0 ex:follows? ?r }
+ORDER BY ?r

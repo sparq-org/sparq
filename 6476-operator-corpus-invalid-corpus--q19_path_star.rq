@@ -1,0 +1,4 @@
+# Property path `*` (zero-or-more): reflexive-transitive follows reachability count
+# from a fixed start (includes ex:n0 itself via the zero-length path).
+PREFIX ex: <http://ex/>
+SELECT (COUNT(DISTINCT ?r) AS ?reach) WHERE { ex:n0 ex:follows* ?r }

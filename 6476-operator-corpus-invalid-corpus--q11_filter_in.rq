@@ -1,0 +1,6 @@
+# FILTER IN: subject membership in a fixed enumerated set.
+PREFIX ex: <http://ex/>
+SELECT ?s ?name WHERE {
+  ?s ex:name ?name .
+  FILTER(?s IN (ex:n30, ex:n31, ex:n32))
+}

@@ -1,0 +1,7 @@
+# OPTIONAL (left join): name with optionally-bound age, for two fixed subjects.
+PREFIX ex: <http://ex/>
+SELECT ?s ?name ?age WHERE {
+  VALUES ?s { ex:n3 ex:n4 }
+  ?s ex:name ?name .
+  OPTIONAL { ?s ex:age ?age }
+}

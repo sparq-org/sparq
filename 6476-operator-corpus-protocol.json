@@ -1,0 +1,41 @@
+{
+  "started_epoch": 1789022640.723319,
+  "max_seconds": 900,
+  "target": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+  "prior_evidence": [
+    "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6476/validation",
+    "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6476/followup"
+  ],
+  "original_target_initial_allocated_bytes": 394117120,
+  "current_target_allocated_bytes": 431710208,
+  "prior_evidence_allocated_bytes": 112373760,
+  "initial_new_evidence_allocated_bytes": 1073152,
+  "minimum_free_bytes": 2147483648,
+  "aggregate_growth_limit_bytes": 536870912,
+  "free_initial_bytes": 5164310528,
+  "jobs": 1,
+  "profile_overrides": {
+    "CARGO_PROFILE_RELEASE_OPT_LEVEL": "3",
+    "CARGO_PROFILE_RELEASE_DEBUG": "false",
+    "CARGO_PROFILE_RELEASE_LTO": "false",
+    "CARGO_PROFILE_RELEASE_CODEGEN_UNITS": "16",
+    "CARGO_PROFILE_RELEASE_PANIC": "unwind"
+  },
+  "estimate": "Existing exact default dependencies warm; fresh engine and one tiny harness expected tens ofMiB, not CLI/generator heavy dependency graph. Monitor all target+validation+followup+current output growth from original394117120Bbaseline.",
+  "planned": [
+    "Fresh-build uniquely named standalone harness against d07 path engine using exact frozen lock versions",
+    "Generate NTriples via verbatim dataset::write_nt(2000), streaming load as CLI ntriples branch",
+    "Three separate mode processes,28 registeredqueries,3iterations each; exact record-set validation",
+    "One invalid query in task-private corpus copy must return nonzero with no completion marker"
+  ],
+  "halt": "No dependency downloads, lockfile edits, retries or alternate harness. Stop on resource/resolution failure; preserve exact partial evidence.",
+  "scale": 2000,
+  "queries": 28,
+  "modes": [
+    "count",
+    "materialize",
+    "json"
+  ],
+  "iterations": 3,
+  "record_expectation": 84
+}

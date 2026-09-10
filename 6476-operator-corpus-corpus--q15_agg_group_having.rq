@@ -1,0 +1,14 @@
+# Aggregates COUNT/SUM/AVG/GROUP_CONCAT/SAMPLE with GROUP BY (city) + HAVING.
+# Restricted to a small set of cities so the result is small + stable.
+PREFIX ex: <http://ex/>
+SELECT ?city (COUNT(?s) AS ?n) (SUM(?age) AS ?sumAge) (AVG(?age) AS ?avgAge)
+       (GROUP_CONCAT(?name; SEPARATOR=",") AS ?names) (SAMPLE(?s) AS ?one)
+WHERE {
+  ?s ex:city ?city .
+  ?s ex:age ?age .
+  ?s ex:name ?name .
+  VALUES ?city { ex:c0 ex:c1 ex:c2 }
+}
+GROUP BY ?city
+HAVING (COUNT(?s) > 0)
+ORDER BY ?city

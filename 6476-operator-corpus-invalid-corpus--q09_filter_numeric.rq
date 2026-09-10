@@ -1,0 +1,6 @@
+# FILTER numeric: ages in a narrow band (deterministic: age = 20 + i%80).
+PREFIX ex: <http://ex/>
+SELECT ?s ?age WHERE {
+  ?s ex:age ?age .
+  FILTER(?age >= 97 && ?age <= 99)
+}

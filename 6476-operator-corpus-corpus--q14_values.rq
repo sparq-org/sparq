@@ -1,0 +1,6 @@
+# VALUES: inline data table joined to the graph (names for 3 fixed subjects).
+PREFIX ex: <http://ex/>
+SELECT ?s ?name WHERE {
+  VALUES ?s { ex:n60 ex:n61 ex:n62 }
+  ?s ex:name ?name .
+}

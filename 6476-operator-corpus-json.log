@@ -1,0 +1,30 @@
+LOADED	15993
+RESULT	json	q01_bgp	json_bytes	95	95	95
+RESULT	json	q02_star3	json_bytes	247	247	247
+RESULT	json	q03_chain	json_bytes	2236	2236	2236
+RESULT	json	q04_triangle	json_bytes	156	156	156
+RESULT	json	q05_union	json_bytes	139	139	139
+RESULT	json	q06_optional	json_bytes	417	417	417
+RESULT	json	q07_optional_notbound	json_bytes	498	498	498
+RESULT	json	q08_minus	json_bytes	183	183	183
+RESULT	json	q09_filter_numeric	json_bytes	10440	10440	10440
+RESULT	json	q10_filter_string	json_bytes	227	227	227
+RESULT	json	q11_filter_in	json_bytes	319	319	319
+RESULT	json	q12_filter_exists	json_bytes	183	183	183
+RESULT	json	q13_bind	json_bytes	295	295	295
+RESULT	json	q14_values	json_bytes	319	319	319
+RESULT	json	q15_agg_group_having	json_bytes	1569	1569	1569
+RESULT	json	q16_distinct	json_bytes	244	244	244
+RESULT	json	q17_orderby_limit_offset	json_bytes	749	749	749
+RESULT	json	q18_path_plus	json_bytes	26	26	26
+RESULT	json	q19_path_star	json_bytes	150	150	150
+RESULT	json	q20_path_opt	json_bytes	278	278	278
+RESULT	json	q21_path_seq	json_bytes	244	244	244
+RESULT	json	q22_path_alt	json_bytes	182	182	182
+RESULT	json	q23_path_inverse	json_bytes	153	153	153
+RESULT	json	q24_path_negated_pset	json_bytes	275	275	275
+RESULT	json	q25_subquery	json_bytes	492	492	492
+RESULT	json	q26_ask	json_bytes	26	26	26
+RESULT	json	q27_construct	triples	4	4	4
+RESULT	json	q28_describe	triples	16	16	16
+COMPLETED	json	28

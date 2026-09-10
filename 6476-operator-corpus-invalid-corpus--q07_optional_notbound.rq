@@ -1,0 +1,9 @@
+# Negation via OPTIONAL + !BOUND: of a fixed candidate set, those that do NOT
+# follow ex:n0 (the optional follows-edge is unbound for them).
+PREFIX ex: <http://ex/>
+SELECT ?s WHERE {
+  VALUES ?s { ex:n10 ex:n11 ex:n12 ex:n13 ex:n14 ex:n15 ex:n16 ex:n17 ex:n18 ex:n19 }
+  ?s ex:name ?name .
+  OPTIONAL { ?s ex:follows ex:n0 . BIND(1 AS ?f) }
+  FILTER(!BOUND(?f))
+}

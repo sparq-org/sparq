@@ -1,0 +1,6 @@
+# FILTER string: regex anchor + CONTAINS over the name literal.
+PREFIX ex: <http://ex/>
+SELECT ?s ?name WHERE {
+  ?s ex:name ?name .
+  FILTER(REGEX(?name, "^name1$") || (CONTAINS(?name, "name2") && STRLEN(?name) = 5))
+}

@@ -1,0 +1,845 @@
+{
+  "head": "d07ca79f89e3a8945be46b516c3cd2f770ccd618",
+  "records": [
+    {
+      "query": "q01_bgp",
+      "mode": "count",
+      "unit": "count_result",
+      "iterations": [
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "query": "q02_star3",
+      "mode": "count",
+      "unit": "count_result",
+      "iterations": [
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "query": "q03_chain",
+      "mode": "count",
+      "unit": "count_result",
+      "iterations": [
+        16,
+        16,
+        16
+      ]
+    },
+    {
+      "query": "q04_triangle",
+      "mode": "count",
+      "unit": "count_result",
+      "iterations": [
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "query": "q05_union",
+      "mode": "count",
+      "unit": "count_result",
+      "iterations": [
+        2,
+        2,
+        2
+      ]
+    },
+    {
+      "query": "q06_optional",
+      "mode": "count",
+      "unit": "count_result",
+      "iterations": [
+        2,
+        2,
+        2
+      ]
+    },
+    {
+      "query": "q07_optional_notbound",
+      "mode": "count",
+      "unit": "count_result",
+      "iterations": [
+        10,
+        10,
+        10
+      ]
+    },
+    {
+      "query": "q08_minus",
+      "mode": "count",
+      "unit": "count_result",
+      "iterations": [
+        3,
+        3,
+        3
+      ]
+    },
+    {
+      "query": "q09_filter_numeric",
+      "mode": "count",
+      "unit": "count_result",
+      "iterations": [
+        75,
+        75,
+        75
+      ]
+    },
+    {
+      "query": "q10_filter_string",
+      "mode": "count",
+      "unit": "count_result",
+      "iterations": [
+        2,
+        2,
+        2
+      ]
+    },
+    {
+      "query": "q11_filter_in",
+      "mode": "count",
+      "unit": "count_result",
+      "iterations": [
+        3,
+        3,
+        3
+      ]
+    },
+    {
+      "query": "q12_filter_exists",
+      "mode": "count",
+      "unit": "count_result",
+      "iterations": [
+        3,
+        3,
+        3
+      ]
+    },
+    {
+      "query": "q13_bind",
+      "mode": "count",
+      "unit": "count_result",
+      "iterations": [
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "query": "q14_values",
+      "mode": "count",
+      "unit": "count_result",
+      "iterations": [
+        3,
+        3,
+        3
+      ]
+    },
+    {
+      "query": "q15_agg_group_having",
+      "mode": "count",
+      "unit": "count_result",
+      "iterations": [
+        3,
+        3,
+        3
+      ]
+    },
+    {
+      "query": "q16_distinct",
+      "mode": "count",
+      "unit": "count_result",
+      "iterations": [
+        4,
+        4,
+        4
+      ]
+    },
+    {
+      "query": "q17_orderby_limit_offset",
+      "mode": "count",
+      "unit": "count_result",
+      "iterations": [
+        5,
+        5,
+        5
+      ]
+    },
+    {
+      "query": "q18_path_plus",
+      "mode": "count",
+      "unit": "count_result",
+      "iterations": [
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "query": "q19_path_star",
+      "mode": "count",
+      "unit": "count_result",
+      "iterations": [
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "query": "q20_path_opt",
+      "mode": "count",
+      "unit": "count_result",
+      "iterations": [
+        5,
+        5,
+        5
+      ]
+    },
+    {
+      "query": "q21_path_seq",
+      "mode": "count",
+      "unit": "count_result",
+      "iterations": [
+        4,
+        4,
+        4
+      ]
+    },
+    {
+      "query": "q22_path_alt",
+      "mode": "count",
+      "unit": "count_result",
+      "iterations": [
+        2,
+        2,
+        2
+      ]
+    },
+    {
+      "query": "q23_path_inverse",
+      "mode": "count",
+      "unit": "count_result",
+      "iterations": [
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "query": "q24_path_negated_pset",
+      "mode": "count",
+      "unit": "count_result",
+      "iterations": [
+        4,
+        4,
+        4
+      ]
+    },
+    {
+      "query": "q25_subquery",
+      "mode": "count",
+      "unit": "count_result",
+      "iterations": [
+        3,
+        3,
+        3
+      ]
+    },
+    {
+      "query": "q26_ask",
+      "mode": "count",
+      "unit": "count_result",
+      "iterations": [
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "query": "q27_construct",
+      "mode": "count",
+      "unit": "triples",
+      "iterations": [
+        4,
+        4,
+        4
+      ]
+    },
+    {
+      "query": "q28_describe",
+      "mode": "count",
+      "unit": "triples",
+      "iterations": [
+        16,
+        16,
+        16
+      ]
+    },
+    {
+      "query": "q01_bgp",
+      "mode": "materialize",
+      "unit": "solution_rows",
+      "iterations": [
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "query": "q02_star3",
+      "mode": "materialize",
+      "unit": "solution_rows",
+      "iterations": [
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "query": "q03_chain",
+      "mode": "materialize",
+      "unit": "solution_rows",
+      "iterations": [
+        16,
+        16,
+        16
+      ]
+    },
+    {
+      "query": "q04_triangle",
+      "mode": "materialize",
+      "unit": "solution_rows",
+      "iterations": [
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "query": "q05_union",
+      "mode": "materialize",
+      "unit": "solution_rows",
+      "iterations": [
+        2,
+        2,
+        2
+      ]
+    },
+    {
+      "query": "q06_optional",
+      "mode": "materialize",
+      "unit": "solution_rows",
+      "iterations": [
+        2,
+        2,
+        2
+      ]
+    },
+    {
+      "query": "q07_optional_notbound",
+      "mode": "materialize",
+      "unit": "solution_rows",
+      "iterations": [
+        10,
+        10,
+        10
+      ]
+    },
+    {
+      "query": "q08_minus",
+      "mode": "materialize",
+      "unit": "solution_rows",
+      "iterations": [
+        3,
+        3,
+        3
+      ]
+    },
+    {
+      "query": "q09_filter_numeric",
+      "mode": "materialize",
+      "unit": "solution_rows",
+      "iterations": [
+        75,
+        75,
+        75
+      ]
+    },
+    {
+      "query": "q10_filter_string",
+      "mode": "materialize",
+      "unit": "solution_rows",
+      "iterations": [
+        2,
+        2,
+        2
+      ]
+    },
+    {
+      "query": "q11_filter_in",
+      "mode": "materialize",
+      "unit": "solution_rows",
+      "iterations": [
+        3,
+        3,
+        3
+      ]
+    },
+    {
+      "query": "q12_filter_exists",
+      "mode": "materialize",
+      "unit": "solution_rows",
+      "iterations": [
+        3,
+        3,
+        3
+      ]
+    },
+    {
+      "query": "q13_bind",
+      "mode": "materialize",
+      "unit": "solution_rows",
+      "iterations": [
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "query": "q14_values",
+      "mode": "materialize",
+      "unit": "solution_rows",
+      "iterations": [
+        3,
+        3,
+        3
+      ]
+    },
+    {
+      "query": "q15_agg_group_having",
+      "mode": "materialize",
+      "unit": "solution_rows",
+      "iterations": [
+        3,
+        3,
+        3
+      ]
+    },
+    {
+      "query": "q16_distinct",
+      "mode": "materialize",
+      "unit": "solution_rows",
+      "iterations": [
+        4,
+        4,
+        4
+      ]
+    },
+    {
+      "query": "q17_orderby_limit_offset",
+      "mode": "materialize",
+      "unit": "solution_rows",
+      "iterations": [
+        5,
+        5,
+        5
+      ]
+    },
+    {
+      "query": "q18_path_plus",
+      "mode": "materialize",
+      "unit": "solution_rows",
+      "iterations": [
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "query": "q19_path_star",
+      "mode": "materialize",
+      "unit": "solution_rows",
+      "iterations": [
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "query": "q20_path_opt",
+      "mode": "materialize",
+      "unit": "solution_rows",
+      "iterations": [
+        5,
+        5,
+        5
+      ]
+    },
+    {
+      "query": "q21_path_seq",
+      "mode": "materialize",
+      "unit": "solution_rows",
+      "iterations": [
+        4,
+        4,
+        4
+      ]
+    },
+    {
+      "query": "q22_path_alt",
+      "mode": "materialize",
+      "unit": "solution_rows",
+      "iterations": [
+        2,
+        2,
+        2
+      ]
+    },
+    {
+      "query": "q23_path_inverse",
+      "mode": "materialize",
+      "unit": "solution_rows",
+      "iterations": [
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "query": "q24_path_negated_pset",
+      "mode": "materialize",
+      "unit": "solution_rows",
+      "iterations": [
+        4,
+        4,
+        4
+      ]
+    },
+    {
+      "query": "q25_subquery",
+      "mode": "materialize",
+      "unit": "solution_rows",
+      "iterations": [
+        3,
+        3,
+        3
+      ]
+    },
+    {
+      "query": "q26_ask",
+      "mode": "materialize",
+      "unit": "solution_rows",
+      "iterations": [
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "query": "q27_construct",
+      "mode": "materialize",
+      "unit": "triples",
+      "iterations": [
+        4,
+        4,
+        4
+      ]
+    },
+    {
+      "query": "q28_describe",
+      "mode": "materialize",
+      "unit": "triples",
+      "iterations": [
+        16,
+        16,
+        16
+      ]
+    },
+    {
+      "query": "q01_bgp",
+      "mode": "json",
+      "unit": "json_bytes",
+      "iterations": [
+        95,
+        95,
+        95
+      ]
+    },
+    {
+      "query": "q02_star3",
+      "mode": "json",
+      "unit": "json_bytes",
+      "iterations": [
+        247,
+        247,
+        247
+      ]
+    },
+    {
+      "query": "q03_chain",
+      "mode": "json",
+      "unit": "json_bytes",
+      "iterations": [
+        2236,
+        2236,
+        2236
+      ]
+    },
+    {
+      "query": "q04_triangle",
+      "mode": "json",
+      "unit": "json_bytes",
+      "iterations": [
+        156,
+        156,
+        156
+      ]
+    },
+    {
+      "query": "q05_union",
+      "mode": "json",
+      "unit": "json_bytes",
+      "iterations": [
+        139,
+        139,
+        139
+      ]
+    },
+    {
+      "query": "q06_optional",
+      "mode": "json",
+      "unit": "json_bytes",
+      "iterations": [
+        417,
+        417,
+        417
+      ]
+    },
+    {
+      "query": "q07_optional_notbound",
+      "mode": "json",
+      "unit": "json_bytes",
+      "iterations": [
+        498,
+        498,
+        498
+      ]
+    },
+    {
+      "query": "q08_minus",
+      "mode": "json",
+      "unit": "json_bytes",
+      "iterations": [
+        183,
+        183,
+        183
+      ]
+    },
+    {
+      "query": "q09_filter_numeric",
+      "mode": "json",
+      "unit": "json_bytes",
+      "iterations": [
+        10440,
+        10440,
+        10440
+      ]
+    },
+    {
+      "query": "q10_filter_string",
+      "mode": "json",
+      "unit": "json_bytes",
+      "iterations": [
+        227,
+        227,
+        227
+      ]
+    },
+    {
+      "query": "q11_filter_in",
+      "mode": "json",
+      "unit": "json_bytes",
+      "iterations": [
+        319,
+        319,
+        319
+      ]
+    },
+    {
+      "query": "q12_filter_exists",
+      "mode": "json",
+      "unit": "json_bytes",
+      "iterations": [
+        183,
+        183,
+        183
+      ]
+    },
+    {
+      "query": "q13_bind",
+      "mode": "json",
+      "unit": "json_bytes",
+      "iterations": [
+        295,
+        295,
+        295
+      ]
+    },
+    {
+      "query": "q14_values",
+      "mode": "json",
+      "unit": "json_bytes",
+      "iterations": [
+        319,
+        319,
+        319
+      ]
+    },
+    {
+      "query": "q15_agg_group_having",
+      "mode": "json",
+      "unit": "json_bytes",
+      "iterations": [
+        1569,
+        1569,
+        1569
+      ]
+    },
+    {
+      "query": "q16_distinct",
+      "mode": "json",
+      "unit": "json_bytes",
+      "iterations": [
+        244,
+        244,
+        244
+      ]
+    },
+    {
+      "query": "q17_orderby_limit_offset",
+      "mode": "json",
+      "unit": "json_bytes",
+      "iterations": [
+        749,
+        749,
+        749
+      ]
+    },
+    {
+      "query": "q18_path_plus",
+      "mode": "json",
+      "unit": "json_bytes",
+      "iterations": [
+        26,
+        26,
+        26
+      ]
+    },
+    {
+      "query": "q19_path_star",
+      "mode": "json",
+      "unit": "json_bytes",
+      "iterations": [
+        150,
+        150,
+        150
+      ]
+    },
+    {
+      "query": "q20_path_opt",
+      "mode": "json",
+      "unit": "json_bytes",
+      "iterations": [
+        278,
+        278,
+        278
+      ]
+    },
+    {
+      "query": "q21_path_seq",
+      "mode": "json",
+      "unit": "json_bytes",
+      "iterations": [
+        244,
+        244,
+        244
+      ]
+    },
+    {
+      "query": "q22_path_alt",
+      "mode": "json",
+      "unit": "json_bytes",
+      "iterations": [
+        182,
+        182,
+        182
+      ]
+    },
+    {
+      "query": "q23_path_inverse",
+      "mode": "json",
+      "unit": "json_bytes",
+      "iterations": [
+        153,
+        153,
+        153
+      ]
+    },
+    {
+      "query": "q24_path_negated_pset",
+      "mode": "json",
+      "unit": "json_bytes",
+      "iterations": [
+        275,
+        275,
+        275
+      ]
+    },
+    {
+      "query": "q25_subquery",
+      "mode": "json",
+      "unit": "json_bytes",
+      "iterations": [
+        492,
+        492,
+        492
+      ]
+    },
+    {
+      "query": "q26_ask",
+      "mode": "json",
+      "unit": "json_bytes",
+      "iterations": [
+        26,
+        26,
+        26
+      ]
+    },
+    {
+      "query": "q27_construct",
+      "mode": "json",
+      "unit": "triples",
+      "iterations": [
+        4,
+        4,
+        4
+      ]
+    },
+    {
+      "query": "q28_describe",
+      "mode": "json",
+      "unit": "triples",
+      "iterations": [
+        16,
+        16,
+        16
+      ]
+    }
+  ]
+}

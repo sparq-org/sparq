@@ -1,0 +1,4 @@
+# DESCRIBE form: concise bounded description of two fixed resources
+# (graph-valued result; bench counts produced triples).
+PREFIX ex: <http://ex/>
+DESCRIBE ex:n95 ex:n96

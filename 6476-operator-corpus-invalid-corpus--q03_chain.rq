@@ -1,0 +1,7 @@
+# Chain join: 2-hop follows path from a fixed start node, with the endpoint's name.
+PREFIX ex: <http://ex/>
+SELECT ?b ?c ?cname WHERE {
+  ex:n0 ex:follows ?b .
+  ?b ex:follows ?c .
+  ?c ex:name ?cname .
+}

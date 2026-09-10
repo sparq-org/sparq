@@ -1,0 +1,14 @@
+# Subquery: outer joins each city to an inner aggregate (avg age of its people),
+# restricted to a small city set so the result is small + stable.
+PREFIX ex: <http://ex/>
+SELECT ?city ?avgAge WHERE {
+  VALUES ?city { ex:c0 ex:c1 ex:c2 }
+  {
+    SELECT ?city (AVG(?age) AS ?avgAge) WHERE {
+      ?p ex:city ?city .
+      ?p ex:age ?age .
+    }
+    GROUP BY ?city
+  }
+}
+ORDER BY ?city

@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-10T06:43:55.067814+00:00",
+  "updated_at": "2026-09-10T07:11:18.528290+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -67,8 +67,8 @@
     "agent": "/root/postmerge_ci",
     "actual_model": "GPT-6 Astra",
     "effort": "xhigh",
-    "phase": "PR6478 full CI and Copilot; narrow operator-corpus check running",
-    "state": "Source and follow-up independently approved; normal fast-forward publication completed, ready-for-review and Copilot request verified. No merge approval yet.",
+    "phase": "PR6478 Copilot follow-up: one actual execution-error case and matching skill/README documentation",
+    "state": "d07 full CI jobs verified successful; two Copilot threads plus suppressed README nit being addressed before final review/publication",
     "started_at": "2026-09-10T04:00:00Z",
     "base": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
     "local_branch": "codex/nested-query-budget",
@@ -85,10 +85,10 @@
     "dedupe": "165openPRtitles/branches+issuecrossrefs checked; no matching budget-restoration fix. Not exhaustiveallPRdiff audit.",
     "issue_comment": "https://github.com/sparq-org/sparq/issues/6476#issuecomment-5612755312",
     "next_actions": [
-      "Collect same Astra operator-corpus protocol/results and verify exact84 records/control/source provenance; preserve honest equivalence scope.",
-      "Inspect current-head full CI and actual Copilot review/threads; fix or respond to findings and normal holds.",
-      "After all full gates and operator expectation satisfied, fresh protected queue admission, then main verification and issue6476 link/close.",
-      "Issue6479 remains separate source-only follow-up requiring runtime witness; do not mix into6478."
+      "Collect frozen Copilot delta,rootverify,oneconciseactualOpus review.",
+      "Normalfastforwardpush,replyandresolveallfindingsafterverifiedfix,requestfreshCopilot and inspectnewheadCI.",
+      "Freshprotectedqueueadmissiononlyafterallrequirements; postmergewatchandissue6476link/close.",
+      "6479runtimereproductionremainsseparate; nosecondengineimplementationlane."
     ],
     "resource_event": {
       "at": "2026-09-10T04:06:30.916128+00:00",
@@ -314,7 +314,7 @@
       "result": "direct-6476/admission/opus-final-result.json",
       "receipt": "direct-6476/admission/opus-final-completion.json"
     },
-    "agent_state": "Same Astra implementing/running bounded task-private operator harness; production d07 stays clean",
+    "agent_state": "Same Astra xhigh lane implementing bounded test/docs-only follow-up; no new lane",
     "publication_readiness": {
       "state": "completed_root_hash_verified",
       "directory": "direct-6476/publication-readiness",
@@ -520,6 +520,37 @@
       "scope": "Registered2000-entity28-query corpus,3iterations,count/materialize/json; exact existing generator and CLI publicAPI dispatch semantics reused in small harness.84 query/mode records and failclosedinvalid-querycontrol; no perfclaim.",
       "constraints": "Original aggregate512MiB/2GiBfree, offlinejobs1, warmprofile; no newdeps/sourceedits/GitHub/model/EC2;15minbound;stop if faithful reuse/footprint unavailable.",
       "decision": "Full bench.yml dispatch is supported GitHub-hosted and concurrency-isolated but expands to SCALE200000+unrelated suites and issue/label writes; choose narrow equivalent corpus execution first, not broad dispatch. No dispatch performed."
+    },
+    "operator_corpus": {
+      "state": "completed_frozen_root_verified",
+      "directory": "direct-6476/operator-corpus",
+      "head": "d07ca79f89e3a8945be46b516c3cd2f770ccd618",
+      "manifest_files": 91,
+      "manifest_sha256": "d531738bc8483e6526df7d68b7b844f547ab58c1b768e7b05a75bbc4e29f0b0b",
+      "root_verification": "direct-6476/admission/operator-corpus-root-verification.json",
+      "result": "84query/mode records,252 successfulinvocations,privateinvalid-q13control exits2 withoutcompletion",
+      "limitations": "EquivalentpublicAPI corpus only,not fullCLIworkflow,timings,allocationsorindependentoracle. Cargoexitmissingaftermonitorrace; actualfreshcompilercompletionandbinary/runtimeverified."
+    },
+    "d07_ci": {
+      "at": "2026-09-10T07:11:18.528290+00:00",
+      "state": "completed_job_steps_verified",
+      "evidence": "direct-6476/admission/d07-full-ci-jobs.json",
+      "CI": 34446058088,
+      "feature_matrix": 34446058093,
+      "gate": 34446057897,
+      "gate_job": 102771044199,
+      "note": "Actualbuild/workspaceclippy+rustdoc+5testshards+57matrixjobs+conformance+coverage+wasm+deterministicbenchpassed. Newtest/docsdelta will requirefreshheadCI."
+    },
+    "copilot_followup": {
+      "state": "running",
+      "directory": "direct-6476/copilot-followup",
+      "parent": "d07ca79f89e3a8945be46b516c3cd2f770ccd618",
+      "review_evidence": "direct-6476/admission/heartbeat-0703.json",
+      "requests": [
+        "Preserveparsefailurecaseandaddactualpostbudget-installerrorcase",
+        "skills/sparql-query/SKILL.md nestedshadow/restorationcontract",
+        "crates/sparq-engine/README.md pointerrestorationwording"
+      ]
     }
   },
   "prs": {
@@ -2973,9 +3004,9 @@
     "evidence": "direct-3105/admission/latency-alarm-job.log"
   },
   "registry_pause_latest": {
-    "at": "2026-09-10T05:13:42.699784+00:00",
+    "at": "2026-09-10T07:11:18.528290+00:00",
     "actions_enabled": false,
-    "evidence": "direct-6476/admission/heartbeat-0513.json"
+    "evidence": "direct-6476/admission/heartbeat-0703.json"
   },
   "frontier_fallback": {
     "at": "2026-09-10T03:59:18.624949+00:00",

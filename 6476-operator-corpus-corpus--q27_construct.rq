@@ -1,0 +1,10 @@
+# CONSTRUCT form: reshape a fixed subject's attributes into a new vocabulary
+# (graph-valued result; bench counts produced triples).
+PREFIX ex: <http://ex/>
+PREFIX out: <http://out/>
+CONSTRUCT { ?s out:label ?name ; out:years ?age . }
+WHERE {
+  VALUES ?s { ex:n90 ex:n91 }
+  ?s ex:name ?name .
+  ?s ex:age ?age .
+}

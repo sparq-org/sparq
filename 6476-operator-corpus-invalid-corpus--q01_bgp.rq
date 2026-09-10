@@ -1,0 +1,3 @@
+# BGP / single triple pattern: one concrete subject's name (1 row).
+PREFIX ex: <http://ex/>
+SELECT ?name WHERE { ex:n7 ex:name ?name }

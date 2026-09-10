@@ -1,0 +1,11 @@
+{
+  "head": "d07ca79f89e3a8945be46b516c3cd2f770ccd618",
+  "source_status": "",
+  "epoch": 1789023173.1876,
+  "all_spawned_corpus_commands_reaped": true,
+  "original_build_process_observed_finished_and_no_cargo_rustc_match": true,
+  "frozen_old_bundles_modified": false,
+  "new_source_commit": false,
+  "network_or_remote_actions": false,
+  "scope": "No further build or query work pending."
+}

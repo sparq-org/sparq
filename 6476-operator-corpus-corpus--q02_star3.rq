@@ -1,0 +1,8 @@
+# Star join: three patterns sharing the subject variable (one entity = 1 row).
+PREFIX ex: <http://ex/>
+SELECT ?name ?age ?city WHERE {
+  ?s ex:name ?name .
+  ?s ex:age ?age .
+  ?s ex:city ?city .
+  FILTER(?s = ex:n42)
+}

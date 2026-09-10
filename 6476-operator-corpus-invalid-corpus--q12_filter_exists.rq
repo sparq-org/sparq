@@ -1,0 +1,7 @@
+# FILTER EXISTS: of a fixed candidate set, those that have at least one follows edge.
+PREFIX ex: <http://ex/>
+SELECT ?s WHERE {
+  VALUES ?s { ex:n40 ex:n41 ex:n42 }
+  ?s a ex:Person .
+  FILTER EXISTS { ?s ex:follows ?o }
+}

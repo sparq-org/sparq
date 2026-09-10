@@ -1,0 +1,4 @@
+# Property path `+` (one-or-more): does a fixed start reach ANY person via 1+ follows
+# hops? ASK keeps the transitive closure bounded to a boolean (1 row).
+PREFIX ex: <http://ex/>
+ASK { ex:n0 ex:follows+ ?reachable }

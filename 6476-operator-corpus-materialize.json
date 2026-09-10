@@ -1,0 +1,36 @@
+{
+  "label": "materialize",
+  "command": [
+    "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6476/operator-corpus/binary/operator-corpus",
+    "run",
+    "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6476/operator-corpus/corpus",
+    "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6476/operator-corpus/dataset.nt",
+    "materialize"
+  ],
+  "start_epoch": 1789023019.662824,
+  "seconds": 0.6687369346618652,
+  "exit_code": 0,
+  "stop": null,
+  "before_free_growth": [
+    5842493440,
+    287289344
+  ],
+  "after_free_growth": [
+    5842460672,
+    287293440
+  ],
+  "max_growth_bytes": 287293440,
+  "min_free_bytes": 5842460672,
+  "env": {
+    "CARGO_PROFILE_RELEASE_OPT_LEVEL": "3",
+    "CARGO_PROFILE_RELEASE_DEBUG": "false",
+    "CARGO_PROFILE_RELEASE_LTO": "false",
+    "CARGO_PROFILE_RELEASE_CODEGEN_UNITS": "16",
+    "CARGO_PROFILE_RELEASE_PANIC": "unwind",
+    "CARGO_BUILD_JOBS": "1",
+    "CARGO_INCREMENTAL": "0",
+    "CARGO_NET_OFFLINE": "true",
+    "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+    "RUSTC": "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/rustc"
+  }
+}

@@ -1,0 +1,88 @@
+{
+  "actual_compiler_features": [
+    "default",
+    "digest",
+    "parallel",
+    "regex"
+  ],
+  "linked_dependencies": [
+    {
+      "name": "md5",
+      "file": "libmd5-d957b44d2a717174.rmeta",
+      "bytes": 48717,
+      "sha256": "87f4ea57f252b120bd99c08f425f528459895b96158a804728049c2dff31e8f8"
+    },
+    {
+      "name": "oxiri",
+      "file": "liboxiri-256fcb858fdf74ff.rmeta",
+      "bytes": 307622,
+      "sha256": "af6eca31475bc36818324a7709baafa1e9c0dd44455ab24bcd2543844aeb24ed"
+    },
+    {
+      "name": "oxrdf",
+      "file": "liboxrdf-4ecd756ddd7ab1ec.rmeta",
+      "bytes": 1096505,
+      "sha256": "a9b7858d145ded5dabf76f68f1e36817851b4d536dcda6ca4f65cae775f036e9"
+    },
+    {
+      "name": "rayon",
+      "file": "librayon-fb353b242d14de3d.rmeta",
+      "bytes": 4468288,
+      "sha256": "e7f317505c8339c25cfe913fafb11fa344adbaa9feb298bdc9f63c547781bdc6"
+    },
+    {
+      "name": "regex",
+      "file": "libregex-97e8c9837dd5af91.rmeta",
+      "bytes": 794359,
+      "sha256": "776278e5c65260c28ed0d5702862c2b21d39a5546e10c511a4038fb4dff9e32d"
+    },
+    {
+      "name": "rustc_hash",
+      "file": "librustc_hash-a257f2d86c4c9dc8.rmeta",
+      "bytes": 39228,
+      "sha256": "c2d3331b60b8edcc0eb669f977552882fc408a1b11c2cf1db06d85ea70cf3625"
+    },
+    {
+      "name": "sha1",
+      "file": "libsha1-cae15182d420d048.rmeta",
+      "bytes": 71622,
+      "sha256": "3b85564f081e5173438d85fc7aaaf572d64062c89154722b1b86f5882b25bf61"
+    },
+    {
+      "name": "sha2",
+      "file": "libsha2-778aad56561bbe29.rmeta",
+      "bytes": 837784,
+      "sha256": "ea46778cbd5fd79ba9ce39332e592f53aec20f41de9bca7741a65a01dfe46ea2"
+    },
+    {
+      "name": "smallvec",
+      "file": "libsmallvec-2cf754751a422d03.rmeta",
+      "bytes": 311387,
+      "sha256": "cf54999d3261cd933389d6a8c17f34cbe0be152add56f9ed8de62bef3284d84a"
+    },
+    {
+      "name": "spargebra",
+      "file": "libspargebra-c7342e1390d1d163.rmeta",
+      "bytes": 1176856,
+      "sha256": "f118bddecd075c13e55b8e9bdc903857454f71a465674ee6a87527afe0fc02c2"
+    },
+    {
+      "name": "sparq_core",
+      "file": "libsparq_core-127354fe878a2f23.rmeta",
+      "bytes": 803792,
+      "sha256": "1eaf383b2dc290c837c9b923c5ead8fc2ed6a77b677c8dccc847bbbd697e5c8c"
+    },
+    {
+      "name": "sparq_substrate",
+      "file": "libsparq_substrate-63e040508c2ddd1a.rmeta",
+      "bytes": 403471,
+      "sha256": "ca49dc20dfa1427afeb1a1565f575729c97199a660f8424977cadda86bb1552d"
+    },
+    {
+      "name": "uuid",
+      "file": "libuuid-633b917788174200.rmeta",
+      "bytes": 500303,
+      "sha256": "eda4578269832614369d22f5d22a4ea3c8306d1c8f0c1fa6424d4349be19675d"
+    }
+  ]
+}
