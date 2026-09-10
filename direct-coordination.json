@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-10T02:05:43.745811+00:00",
+  "updated_at": "2026-09-10T02:33:41.201242+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -67,14 +67,14 @@
     "agent": "/root/postmerge_ci",
     "actual_model": "GPT-6 Astra",
     "effort": "xhigh",
-    "phase": "Final actual Opus5 xhigh review running",
+    "phase": "PR6477 held for measured memory regression; bounded-retention fix active",
     "started_at": "2026-09-10T00:31:07.235396+00:00",
     "base": "e53464c73f31f7aca800f3867ac054c36408e346",
     "local_branch": "codex/capped-rhs-reuse",
     "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue3105",
-    "worktree_state": "Clean final19763 exact committed source verified",
+    "worktree_state": "Sameisolatedworktree mayhaveactiveAstra edits; do not reset/clean. Remotehead remains19763 untilrootreviewedpush.",
     "directory": "direct-3105",
-    "state": "Coverage frozen and root verified; unpublished clean candidate; full remote validation pending",
+    "state": "Remote19763 source-approvedforCI but memory-admission NO_GO. review:changes coordinatorhold applied, no merge/cancellation. SameAstra lane fixesretention.",
     "constraints": "Ownisolatedworktreeonly; no sharedbranchswitch. >=6GiBfree throughout, max2buildjobs, CARGO_INCREMENTAL0preferred,20minfirstphase, no fullworkspace/globalinstall/EC2/release/registryenable/remotePRmutation/modelcall. Preserveplanner/blockbind/buildside/bags/budgets/sortmetadata; no eagerunusedRHS/deepclone/newpublicAPI. No timingspeedclaimfromworkcounts.",
     "cache": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target mayreuseasregenerablecacheonly;619frozenevidencefilesoutsideverifiedunchanged,oldincrementalremoved. TopkexperimentremainsSTOPPED.",
     "readiness": "direct-6475/source-admission/perf3105-readiness.json",
@@ -143,9 +143,10 @@
       "decision": "Positiveadvisoryscreen supportscoveragephase; notcanonicalperfproof. No materiallyrejectingheapgrowth in2RHSfixture; more/largerRHSsumretentionunboundedbyfixture. RSSseparatelimit."
     },
     "next_actions": [
-      "Collect existing actual Opus5 xhigh session11803 once completed; verify outer JSON success and actual modelUsage before using verdict. Do not launch duplicate review. Collect read-only preparation agent output.",
-      "If source approved, fresh target/budget/main revalidation, push normal branch and publish accurate partial-scope PR; required authoritative CI, wasm/conformance/perf gates before protected queue.",
-      "Keep registryOFF and holds6049/6055/6095/6475 unchanged; no releases."
+      "Collect existing /root/postmerge_ci bounded-retention handoff; no duplicate lane or oldreviewpoll. Verify frozenmanifest/newcommit/source/controls/matrix; observed memoryscreen mustpass or reassess.",
+      "Review actualcapacityaccounting/ephemeralfallback/guard semantics and honest wasmdeclaration with freshactualOpus5xhigh focusedreview onnewmeaningfuldelta. Do not claim oldtimingsfornewhead.",
+      "Onlyafternewreview/validation, freshrevalidateandappendpushsamePR6477; updatePRbodyandCopilotthread, requestactualrereview ifneeded. Removeownreview:changesholdonlyafterfindingresolved; nofabricatedcanonicalverdict.",
+      "ReadexactcurrentCI/workspace/conformance/coverage/wasm/perfratchets; no localheavyfullgate orfloorraise. Protectedqueueonlyafterallrequiredchecksandthreadsresolved; retainallotherholds."
     ],
     "coverage": {
       "agent": "/root/postmerge_ci",
@@ -166,7 +167,7 @@
       "root_verification": "direct-3105/admission/coverage-root-verification.json"
     },
     "final_review": {
-      "state": "running",
+      "state": "completed_collected",
       "kind": "exec_command",
       "session_id": 11803,
       "head": "19763bfab1dce196a654c899b172e7b24d70bc59",
@@ -176,13 +177,50 @@
       "input_bytes": 112161,
       "input_sha256": "8266714025e14167dd2fad08ac86a02c2d3ce8312dc10370a4bca160d0782683",
       "output": "direct-3105/admission/opus-final-review.json",
-      "collect_policy": "Collect session11803 once complete; no duplicate model call. Prior90599 completed collected."
+      "collect_policy": "11803 completed collected. Do not poll/relaunch. New substantive source/evidence only warrants followup.",
+      "exit_code": 0,
+      "actual_model": "claude-opus-5",
+      "verdict": "approve_for_ci",
+      "result": "direct-3105/admission/opus-final-result.json",
+      "receipt": "direct-3105/admission/opus-final-completion.json",
+      "output_sha256": "50bab4a9794fe62f0452cbc02cea356401b450fa5a99fb0886a789cace3db55d"
     },
     "publication_preparation": {
       "agent": "/root/postmerge_ci",
-      "state": "active_read_only",
+      "state": "completed_read_only",
       "output": "direct-3105/admission/publication-preparation.json",
-      "scope": "Bounded local PR-template/process and CI-wiring report only; no builds, production edits, remote mutations or new lane."
+      "scope": "Bounded local PR-template/process and CI-wiring report only; no builds, production edits, remote mutations or new lane.",
+      "sha256": "439faed48b5e6a2522a8e22dda7e037d9577c9efafcbf653743137298c73f21e"
+    },
+    "final_validation": {
+      "agent": "/root/postmerge_ci",
+      "state": "completed_frozen_root_verified",
+      "started_at": "2026-09-10T02:19:44.322565+00:00",
+      "max_minutes": 20,
+      "directory": "direct-3105/final-validation",
+      "scope": "Exact main/final5and8totalpattern all-RHS/allblock miss requestedpeak matrix; existingzk tests plus recorder boundary witness ifaffordable. No prodchanges/timingclaims/newcommit/network/modelcalls.",
+      "resource": "2jobs incrementalOFF offline stopfree<6509559808",
+      "source_finding": "try_capped existingzk::enabled early return at3989 makes capped RHS unavailable with recorder; reviewer missingcallercontext, not establishedbug. Native tests to pin boundary.",
+      "manifest_files": 108,
+      "manifest_sha256": "8cabd47726442047f2bd05334c6af7557c198e03b0bcfd69cdcaf737470e7668",
+      "root_verification": "direct-3105/admission/final-validation-root-verification.json",
+      "result": "NO_GO:8pattern additional11344095bytes+104.911%requestedpeak; 12samples/repeatedmetrics/raw/binaryhashes/rootverified. ZK20existing+2probe tests pass; main/finaltraceexact."
+    },
+    "pr": 6477,
+    "bounded_retention": {
+      "agent": "/root/postmerge_ci",
+      "actual_model": "GPT-6 Astra",
+      "effort": "xhigh",
+      "state": "active",
+      "started_at": "2026-09-10T02:28:00Z",
+      "max_minutes": 25,
+      "directory": "direct-3105/bounded-retention",
+      "base_head": "19763bfab1dce196a654c899b172e7b24d70bc59",
+      "design": "Private4MiB query-local retainedRHS storageallowance, actualallocatedcapacities includingindexedslots andbindings; failcloseduncachedoversized/nonfittingrows; drop/refundstaleslots before scan. No publicbudget/API/dep/unsafe/planner/hashchange.4MiB isinitialengineeringchoice tovalidate, notnewpolicy orownerapprovalrequirement.",
+      "author_update": "Authorproposesindexedcache+remainingallowance, exactcapacitymetadata/VariableString ownershiproundtrip, rejects spilledRows. Root hasnotyetreviewed implementation.",
+      "additional_file": "bench/feature-off-declarations/6477.json: existing V2 declarationofintentionalalwayscompiledenginechange, no derived/neutralityclaim orfloorchange; includedinfreshOpusreview.",
+      "validation": "Scopeddefault/compact/semijoin+clippy/preflight,meaningfulboundcontrol, same5/8pattern12allocationmatrixafterprotocol;optionalfeasible2patternmiss/firsthitpair. Freezecommit beforehandoff.",
+      "constraints": "2jobs,incrementalOFF,offline,free>=6509559808; max25minfirsthandoff; nofullworkspace/remote/model/release/registry/EC2/cachecleanup. Preserveallfrozenbundles."
     }
   },
   "prs": {
@@ -571,6 +609,28 @@
         "comment": "https://github.com/sparq-org/sparq/pull/6095#issuecomment-5609537658",
         "hold": "review:changes, provenance must be freshly rechecked before any future reconciliation"
       }
+    },
+    "6477": {
+      "state": "OPEN_REVIEW_CHANGES_MEMORY_REGRESSION",
+      "head": "19763bfab1dce196a654c899b172e7b24d70bc59",
+      "branch": "codex/capped-rhs-reuse",
+      "issue": 3105,
+      "isDraft": false,
+      "url": "https://github.com/sparq-org/sparq/pull/6477",
+      "hold": "Coordinatorappliedreview:changes forrealmeasuredmemoryNO_GO; canclearwhenfix independentlyreviewed+verified, notpendingownerapproval.",
+      "hold_comment": "https://github.com/sparq-org/sparq/pull/6477#issuecomment-5611720556",
+      "review": "ActualOpus5xhigh11803approve_for_ci, notmerge. ActualCopilotsamememoryfinding.",
+      "copilot_thread": "PRRT_kwDOSz3qKM6g6CZs",
+      "copilot_comment": "https://github.com/sparq-org/sparq/pull/6477#discussion_r3974906548",
+      "latest_checks": "62success51skip20running17queued3fail on19763. gate+2wasm-equality failures. No cancellation.",
+      "wasm_diagnosis": "Intentionalsemanticdefault-onenginecode: base1560241/head1560595,+354bytes. ExistingV2declarationmissing; autodeclarecorrectlyfailssemanticblanking. Documentintentinnextrevieweddiff; sizefloorunchanged. No metadata-only orneutralityclaim.",
+      "evidence": [
+        "direct-3105/admission/pr-created.json",
+        "direct-3105/admission/pr-held-checks.json",
+        "direct-3105/admission/wasm-equality-job.log",
+        "direct-3105/admission/copilot-threads.json"
+      ],
+      "closure": "Refs3105only; planner/hashbuildhoistingunimplemented, issueOPEN."
     }
   },
   "registry": {

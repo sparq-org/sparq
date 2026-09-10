@@ -1,0 +1,41 @@
+--- frozen-quiescent-harness
++++ 5-and-8-pattern-harness
+@@ -9,10 +9,10 @@
+ fn iri(s: &str) -> Term {
+     NamedNode::new(s).unwrap().into()
+ }
+-fn fixture(overlay: bool) -> Graph {
++fn fixture(overlay: bool, n: usize) -> Graph {
+     let mut ttl = String::new();
+     for i in 0..70_000 {
+-        writeln!(ttl, "<urn:s:{i}> <urn:p> {i} ; <urn:q> {i} ; <urn:r> {i} .").unwrap();
++        for j in 0..n { writeln!(ttl, "<urn:s:{i}> <urn:p{j}> {i} .").unwrap(); }
+     }
+     for i in 0..8192 {
+         writeln!(ttl, "<urn:d:{i}> <urn:dead> <urn:o> .").unwrap();
+@@ -62,8 +62,10 @@
+     let args: Vec<String> = std::env::args().collect();
+     let case = &args[1];
+     let overlay = args[2] == "overlay";
+-    let graph = fixture(overlay);
+-    let pid = graph.dict.lookup(&iri("urn:p"));
++    let n: usize = case.parse().unwrap();
++    assert!(n == 5 || n == 8);
++    let graph = fixture(overlay, n);
++    let pid = graph.dict.lookup(&iri("urn:p0"));
+     let scan = graph.store.scan_sorted(&[None, Some(pid), None], 0);
+     assert_eq!(scan.rows.len(), 70_000);
+     assert_eq!(scan.perm.order().into_iter().find(|&c| c != 1), Some(0));
+@@ -74,11 +76,7 @@
+         .to_string();
+     let threshold = value.split('"').nth(1).unwrap().parse::<usize>().unwrap();
+     drop(scan);
+-    let patterns = if case == "multi" {
+-        "?s <urn:p> ?o . ?s <urn:q> ?o . ?s <urn:r> ?o ."
+-    } else {
+-        "?s <urn:p> ?o . ?s <urn:q> ?o ."
+-    };
++    let patterns: String = (0..n).map(|j| format!("?s <urn:p{j}> ?o . ")).collect();
+     let filter = if case == "first" || case == "second" {
+         format!("?o + 0 = {threshold}")
+     } else if case == "late" {

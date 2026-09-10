@@ -1,0 +1,25 @@
+   Compiling sparq-engine v0.1.1 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue3105/crates/sparq-engine)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 7.04s
+     Running tests/differentials.rs (/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/debug/deps/differentials-5b8110d85254d592)
+
+running 17 tests
+test zk_trace_differential::differential_zk_on_equals_off_10k ... ok
+test zk_trace_operators::ask_disables_count_pushdown_and_captures_input ... ok
+test zk_trace_operators::bgp_chain_join_records_both_sides ... ok
+test zk_trace_operators::bgp_single_pattern_exact_set ... ok
+test zk_trace_operators::distinct_records_boundary_pre_reduction ... ok
+test zk_trace_operators::exists_inner_scans_tagged_and_suppressed ... ok
+test zk_trace_operators::filter_records_obligation_with_verdicts ... ok
+test zk_trace_operators::graph_const_single_boundary_and_tag ... ok
+test zk_trace_operators::graph_var_one_boundary_per_iteration ... ok
+test zk_trace_operators::group_aggregation_records_pre_aggregation_input ... ok
+test zk_trace_operators::limit_disables_early_termination ... ok
+test zk_trace_operators::minus_records_boundary ... ok
+test zk_trace_operators::optional_records_boundary_and_both_sides ... ok
+test zk_trace_operators::property_path_marks_uncaptured ... ok
+test zk_trace_operators::trace_is_deterministic_across_runs ... ok
+test zk_trace_operators::union_records_boundary_and_both_branches ... ok
+test zk_trace_operators::unsatisfiable_pattern_records_empty_set ... ok
+
+test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 5.97s
+

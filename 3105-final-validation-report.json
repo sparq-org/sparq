@@ -1,0 +1,91 @@
+{
+  "author": "GPT-6 Astra xhigh",
+  "head": "19763bfab1dce196a654c899b172e7b24d70bc59",
+  "baseline": "e53464c73f31f7aca800f3867ac054c36408e346",
+  "decision": "NO_GO for performance/memory admission under the predeclared local experiment screen; no correctness failure observed.",
+  "scope": "One bounded exact-final validation phase, no production edits or commit. Test-only temporary insertion restored byte-for-byte; no remote/model operations. Previous evidence unchanged.",
+  "allocation": {
+    "samples": 12,
+    "case_total_patterns": [
+      5,
+      8
+    ],
+    "repetitions": 3,
+    "order_each_case": [
+      "baseline/candidate",
+      "candidate/baseline",
+      "baseline/candidate"
+    ],
+    "subjects": 70000,
+    "auxiliary_unrelated_triples": 8192,
+    "views": [
+      "ordinary base graph"
+    ],
+    "body": "every predicate shares ?s and ?o; all joins match; final arithmetic ?o + 0 < 0 rejects every row",
+    "correctness": "Every sample passes independently generated false ASK oracle and uncapped result check. Separate positive query probe checks 70000 rows and each subject/object correspondence before tracing the residual-false ASK.",
+    "calibration": "All twelve samples passed the unchanged allocator calibration after fixture/oracle, two query warmups and explicit Rayon broadcast barrier. No failed sample or retry.",
+    "summary_file": "summary.json",
+    "peak_growth": {
+      "5": {
+        "baseline": 10811556,
+        "candidate": 15435090,
+        "additional": 4623534,
+        "fraction": 0.427647417263528,
+        "screen_no_go": false
+      },
+      "8": {
+        "baseline": 10813029,
+        "candidate": 22157124,
+        "additional": 11344095,
+        "fraction": 1.0491135277635897,
+        "screen_no_go": true
+      }
+    },
+    "ranges": "Requested allocation counts, reallocations, requested bytes and peak live growth each have identical min/median/max across their three repetitions. Full RSS ranges and all raw samples are retained.",
+    "tradeoff": "Cumulative requested allocation bytes decrease while live peak grows. The 8-pattern case violates BOTH >25% and >8MiB extra-peak criteria. Linear retention growth is enough to fail this screen; superlinear growth is not required.",
+    "timing": "Harness retains its original elapsed-nanos output, but these are allocation-counted runs only. No timing claim or timing comparison is made for 19763.",
+    "memory_limits": "Requested heap counts exclude allocator metadata and transient allocator internals. live_after is process-wide and includes setup. RSS is process high-water including fixture/oracle/warmup, not query heap. Small argv/source-name differences affect process live_after; query peak is baseline-relative."
+  },
+  "actual_path": {
+    "tests": 2,
+    "log": "path-and-zk.log",
+    "source": "probe.rs inserted only within cfg(test) capped_rhs_tests; exact instrumented-exec.rs and original candidate-exec.rs frozen",
+    "five_patterns": "work=[1,3,4,0], twelve RHS steps; four RHS relations reached in each of starts 0,1024,65536; four initial scans, eight cache reuses.",
+    "eight_patterns": "work=[1,3,7,0], twenty-one RHS steps; seven RHS relations reached in each of starts 0,1024,65536; seven initial scans, fourteen cache reuses.",
+    "branches": "Every observed step is merge, requested Some(0), actual s. No bind branch; successful positive joins ensure later relations are not vacuously skipped.",
+    "limits": "Physical instrumentation executed in a native debug cfg(test) build with zk feature present but recorder unarmed for the 5/8 fixtures and normal engine test dependency feature unification. Allocation binaries are uninstrumented default production builds. Source guard is inactive while recorder unarmed; do not present debug work counts as release timing."
+  },
+  "zk": {
+    "assessment": "The review finding omitted the earlier try_capped recorder guard. Its claimed capped-cache recording suppression is unreachable through the public query path while the recorder is armed; no new gate is needed.",
+    "guard": "baseline-zk-guard.rs and candidate-zk-guard.rs are byte-identical: #[cfg(feature=\"zk\")] if crate::zk::enabled() { return Ok(None); } before view/match/capped dispatch. zk.rs module documentation explicitly disables capped shortcuts while recording.",
+    "probe": "2000 seed rows, two shared-variable predicates, residual-false ASK. Unarmed work=[1,2,1,0]; armed work=[0,0,0,0], no capped steps; two complete 2000-triple witness input sets and filter obligation.",
+    "exact_main_final_witness": {
+      "equal": true,
+      "baseline_sha256": "4c512c5daec0c921b726b9cd15ece3c9860b10527059e56bc501492a541e6d9b",
+      "candidate_sha256": "4c512c5daec0c921b726b9cd15ece3c9860b10527059e56bc501492a541e6d9b",
+      "bytes": 1229030
+    },
+    "witness_method": "Identical standalone Rust harness against unmodified main and final, release default+zk, one Rayon worker, same input/query. Full drained ZkTrace Debug bytes compare equal. This is a fixture-specific trace comparison, not cryptographic soundness evidence.",
+    "existing_tests": {
+      "unit": 3,
+      "integration": 17,
+      "integration_includes": "differential_zk_on_equals_off_10k plus exact operator trace tests"
+    },
+    "all_passed": true
+  },
+  "source_and_resources": {
+    "no_new_commit": true,
+    "final_clean": true,
+    "baseline_clean": true,
+    "final_exec_restored": true,
+    "free_bytes_finish": 10944319488,
+    "min_free_limit": 6509559808,
+    "jobs": 2,
+    "incremental": false,
+    "offline_locked": true,
+    "all_commands_completed": true,
+    "finished_utc": "2026-09-10T02:27:18.732853+00:00"
+  },
+  "next_step": "Root engineering reassessment of a bounded RHS retention policy or reduced reuse scope, preserving bags/sort/budget/zk guards. Do not implement an arbitrary cap in this phase. Subsequent candidate requires focused review and the same many-RHS allocation controls before any admission.",
+  "remaining": "Authoritative remote full-workspace/feature/conformance/wasm/performance gates remain separate; their success cannot erase this measured memory tradeoff. No other optional review suggestions were implemented."
+}

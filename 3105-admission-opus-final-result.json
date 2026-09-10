@@ -1,0 +1,72 @@
+{
+  "verdict": "approve_for_ci",
+  "head": "19763bfab1dce196a654c899b172e7b24d70bc59",
+  "findings": [
+    {
+      "severity": "important",
+      "location": "crates/sparq-engine/src/exec.rs \u2014 eval_bgp_binary_capped RHS reuse (~4191-4290) interacting with scan_to_bindings zk hook (~8574 region)",
+      "finding": "Untested feature interaction: scan_to_bindings contains `#[cfg(feature = \"zk\")] if crate::zk::enabled() { ... record_scan_ids(...) }`. Reuse suppresses the repeat scan and therefore also suppresses the per-block `record_scan_ids` side effect that the baseline emitted once per block per non-bind pattern. `reuse_rhs` is gated only on `budget::active()`, not on `zk::enabled()`, so an armed zk recorder now sees fewer scan records for multi-block capped ASK/LIMIT queries. Whether the witness is set-valued (unaffected) or per-invocation (changed) is not determinable from the supplied source, and no zk-feature run is in evidence (tested configs: default, no-default, compact-index, semijoin-bitmap).",
+      "evidence": "Supplied scan_to_bindings source shows the zk recording inside the scan body; frozen report's config list and the four pinned logs contain no `--features zk` run; `let reuse_rhs = !budget::active();` is the only reuse gate in the final diff.",
+      "required_action": "Smallest check: build/run `-p sparq-engine --features zk` for the existing zk trace tests plus one multi-block (>1024 seed rows) capped ASK, and confirm the recorded witness is identical to main; if per-invocation records matter, extend the gate to `!budget::active() && !zk::enabled()`. This is normally covered by the pending authoritative feature-matrix CI."
+    },
+    {
+      "severity": "important",
+      "location": "crates/sparq-engine/src/exec.rs \u2014 `rhs_cache: Vec<Option<(Option<usize>, Bindings)>>` lives for the whole eval_bgp_binary_capped call",
+      "finding": "Retention risk is real and unmeasured beyond two RHS relations. Cached relations are never evicted before function exit, so peak live heap for an unbudgeted capped query becomes result + SUM of every distinct (pattern, requested-sort) RHS materialized, versus baseline result + one RHS. Bind-join selection (`result.rows.len()*8 < prepared[i].est`) only suppresses materialization for patterns much larger than the current block; patterns with two shared variables (bind-join ineligible via `connecting.len() == 1`) always scan, so an N-pattern star/chain with comparable-cardinality patterns retains N relations, most acutely in the third (remainder) block where `result` is also largest. Only `budget::active()` disables reuse, so callers using the plain `query`/`ask` entry points have no ceiling.",
+      "evidence": "Final diff (cache allocated once per call, dropped only at return; no eviction after a pattern's last use). Frozen parent measurement covers max two reached RHS relations: peak requested live growth +143,160 B (+1.3243%) on the two-RHS fixture; report itself states 'Sum of retained per-pattern RHS remains a resource risk outside the measured two-RHS fixture'. Prior review's three-RHS 'executed counterexample' is confirmed non-executed; the loop can also `break` on an empty intermediate before later steps, so the specific counterexample is not established.",
+      "required_action": "Retain as a documented limitation for CI validation. Before any performance/memory admission, run one allocation-counted capped full-miss over a 5\u20138 pattern BGP where every non-seed pattern shares two variables (bind-join ineligible), comparing peak requested live growth main vs candidate; if growth is superlinear in pattern count, add an eviction or a retained-bytes cap."
+    },
+    {
+      "severity": "suggestion",
+      "location": "crates/sparq-engine/src/exec.rs \u2014 capped_rhs_tests::capped_rhs_three_block_miss (cancelled / expired-deadline arms)",
+      "finding": "Non-reuse under an armed budget is pinned by an executed assertion only for `max_rows` (`[1, 3, 3, 0]`). The cancel-armed and deadline-armed arms call `take_work()` without asserting it, and both budgets trip immediately, so the test does not evidence that `budget::active()`'s `on` truly includes `cancel`/`deadline` and therefore disables retention for cancellation-responsive queries.",
+      "evidence": "Final test source: after the cancelled and expired assertions the trailing `take_work();` results are discarded; only the max_rows arm has `assert_eq!(take_work(), [1, 3, 3, 0], \"armed budget must retain original scan behavior\")`.",
+      "required_action": "Smallest check: add one arm with `cancel: Some(Arc::new(AtomicBool::new(false)))` (armed but not tripped, native also `deadline: far future`) over the same three-block miss and assert the scan counter is 3, pinning `on`'s composition rather than trusting it."
+    },
+    {
+      "severity": "suggestion",
+      "location": "crates/sparq-engine/src/exec.rs \u2014 capped_rhs cache key and the 'ignore-requested-sort' control",
+      "finding": "The requested-sort key is load-bearing for output IDENTITY (row order, hence which rows a small LIMIT keeps), not for bag correctness: `sorted_by` is carried truthfully with the cached relation, so merge/hash kernel selection stays sound even if the key were dropped. That is exactly why the mutation control still produced the correct full bag and only failed a path assertion. No executed test pins a multi-block small-LIMIT row sequence, so a future key regression would be caught only by golden/conformance suites.",
+      "evidence": "ignore-requested-sort control log: all bag assertions passed, failure at the r-path equality (exec.rs:21359); merge branch guards on `rhs.sorted_by.as_ref() == Some(jv)`, and the fixtures use LIMIT \u2265 |result| (70001 over 70000, 7 over 6, 10 over \u22643).",
+      "required_action": "Optional hardening: one test whose first block under-fills a small cap (e.g. LIMIT 3 over a >1024-row seed with a selective residual filter) asserting the exact returned row sequence, so cache-key regressions are caught in-crate rather than only by conformance."
+    },
+    {
+      "severity": "suggestion",
+      "location": "crates/sparq-engine/src/exec.rs \u2014 CAPPED_SEED_BLOCK_2 doc comment and capped_rhs comments",
+      "finding": "The revised doc states reuse happens 'when no budget is armed' but omits the two other invariants the reader must preserve: reuse is keyed on the REQUESTED sort (not the actual order) and cached relations live for the whole call. The soundness precondition \u2014 that scan_to_bindings is a pure function of (id_pat, pos_vars, sort_col, filter) under an immutable `&Graph` \u2014 exists only as prose, so a future side-effecting or budget/limit-sensitive change to the scan would silently invalidate the cache.",
+      "evidence": "Final diff comment text vs. cache structure; scan purity was established by root source inspection (scan/scan_with read immutable perms + owned overlay; apply_delta requires &mut; forks share Arc base), not by an executed test.",
+      "required_action": "Extend the `capped_rhs` doc comment to state the purity precondition and the whole-call lifetime explicitly (no code change needed)."
+    }
+  ],
+  "resolved_prior_findings": [
+    "Old RHS retained through the replacement scan: fixed by `*slot = None;` before `*slot = Some((sort, scan()))`. Ownership-state proof executed (catch_unwind sentinel leaves the slot empty; normal replacement still returns the new row) and killed by the retain-old-through-scan mutant (exit 101, 'old RHS remained live through replacement scan').",
+    "Requested-vs-actual sort conflation: final tests record and assert both `requested` and `actual` per step and branch on `store::BUILT` containing Pso, documenting the genuine three-permutation object-order behaviour instead of asserting a false subject-order claim (pinned-default vs pinned-compact logs differ exactly as asserted).",
+    "Prior three-RHS ASK 'executed-path counterexample': withdrawn as non-executed; the underlying sum-of-RHS retention is retained here as an open limitation (finding 2), not as a demonstrated failure.",
+    "Reuse under armed budgets: executed counter assertion `[1, 3, 3, 0]` shows max_rows-armed budgets keep the original per-step scan lifetime; row-ceiling, cancellation and deadline error paths still return their expected errors."
+  ],
+  "validated_reasoning": [
+    "Cache soundness: the cached value is a deterministic function of (prepared[i].id_pat, pos_vars, scan_sort, pfilter(i)) over an immutable `&Graph`; prepared patterns and pat_filters are computed once before the loop, `limit` is None and the semijoin prefilter is None at this call site, so a hit returns a Bindings byte-identical to a fresh scan, including the truthful `sorted_by`. Root's store inspection (immutable Arc perms, overlay read-only in scan_with, apply_delta needs &mut, fork shares base) supports non-mutation during the borrow.",
+    "Kernel refactor is behaviour-preserving: `merge_join`/`hash_join`/`cross_product` now delegate to `_ref` variants; the algorithms already operated over `&left.rows`/`&right.rows`, build/probe side selection and output var ordering are unchanged, so all pre-existing callers are semantically and allocation-wise unchanged (owned wrappers drop their arguments at wrapper exit).",
+    "Budget gating is conservative in the right direction: `reuse_rhs` is captured at entry, so the known baseline `budget::Guard::drop` restoration defect (issue 6476, ACTIVE unconditionally set OFF) cannot turn reuse ON mid-call for a query that entered with an armed budget; and no RHS scan occurs while a nested public budget is installed, since ExtFn/residual-filter evaluation happens after the join chain of a block.",
+    "EXISTS cannot enter the capped path: `filter_scope_ok` returns false for `Exists(_)`, so `is_conjunctive` rejects it \u2014 confirmed by the executed named/view test asserting zero traced steps for the EXISTS variant while the eligible variant reaches a scanned RHS.",
+    "No new toolchain floor: `Option::is_none_or` is already used at exec.rs:2087 on main base e53464c, so the helper's use introduces no MSRV change; the added `thread_local!`/`with_borrow_mut` test code is test-only.",
+    "Panic safety of the new statement: `*slot = None` drops the previous value before `scan()` is invoked; an unwinding scan leaves a valid empty slot, and the following `slot.as_ref().unwrap()` is reached only after the scan returns.",
+    "Scope containment: one file, query-local cache dropped at function return, no public API, dependency, storage, planner, cache-policy or hash-build change; the existing test suffix is untouched (diff hunk shows pure appends)."
+  ],
+  "remaining_validation": [
+    "Authoritative full-workspace CI: clippy + tests across the whole feature matrix (must include `zk`), conformance suite, wasm build and byte-equality (the compact-index BUILT set was exercised only via the native feature flag, not a wasm32 target build), and the canonical performance ratchets.",
+    "Linux preflight rerun (local FAIL is solely Bash 3 lacking `mapfile` in the privacy-claims script; no code implication).",
+    "One `--features zk` focused run over a multi-block capped ASK to close the recording-suppression risk (finding 1).",
+    "One allocation-counted 5\u20138 pattern bind-join-ineligible capped miss to bound sum-of-RHS retention (finding 2).",
+    "If any performance statement is to be attached to head 19763 rather than parent 6e86, re-run the fixed timing/allocation screen on 19763; otherwise keep the attribution explicit."
+  ],
+  "performance_claim_limits": [
+    "All timing and allocation numbers in evidence are for parent 6e86f1d, not head 19763; they must not be restated as head-19763 measurements.",
+    "The drop-before-scan statement has ownership-state proof only (catch_unwind sentinel + mutation control). No timing, allocator-peak or peak-reduction claim is supported for it.",
+    "The parent screen is local advisory: one macOS arm64 host, single thread, default features, 70k seed rows, at most two reached RHS relations, five paired timing repetitions and three allocation repetitions; no cold-process, concurrent, many-RHS or cardinality sweep, and no canonical ratchet.",
+    "Peak requested live growth +143,160 B (+1.3243%) is fixture-specific; it is not an upper bound on retention for larger or more numerous RHS relations.",
+    "Allocator metrics count requested bytes only (no allocator metadata/transient realloc internals); `live_after` is process-wide, and RSS is cumulative process high-water including oracle setup \u2014 candidate after-RSS exceeded baseline in the multi-overlay samples despite modest requested-peak growth, so RSS must not be read as query heap.",
+    "Focused test runs are debug-profile, instrumented (`#[cfg(test)]` observe/step) builds; they evidence path and semantics, not production performance."
+  ],
+  "merge_approved": false
+}

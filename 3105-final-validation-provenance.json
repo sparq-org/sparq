@@ -1,0 +1,102 @@
+{
+  "utc": "2026-09-10T02:25:36.278914+00:00",
+  "free": 11083714560,
+  "commands": [
+    {
+      "name": "rustc",
+      "argv": [
+        "rustc",
+        "-Vv"
+      ],
+      "exit": 0
+    },
+    {
+      "name": "cargo",
+      "argv": [
+        "cargo",
+        "-V"
+      ],
+      "exit": 0
+    },
+    {
+      "name": "host",
+      "argv": [
+        "uname",
+        "-a"
+      ],
+      "exit": 0
+    },
+    {
+      "name": "main-head",
+      "argv": [
+        "git",
+        "rev-parse",
+        "HEAD"
+      ],
+      "exit": 0
+    },
+    {
+      "name": "final-head",
+      "argv": [
+        "git",
+        "rev-parse",
+        "HEAD"
+      ],
+      "exit": 0
+    },
+    {
+      "name": "final-status",
+      "argv": [
+        "git",
+        "status",
+        "--porcelain"
+      ],
+      "exit": 0
+    },
+    {
+      "name": "baseline-features",
+      "argv": [
+        "cargo",
+        "tree",
+        "--locked",
+        "--offline",
+        "--manifest-path",
+        "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/final-validation/baseline/Cargo.toml",
+        "-e",
+        "features"
+      ],
+      "exit": 0
+    },
+    {
+      "name": "candidate-features",
+      "argv": [
+        "cargo",
+        "tree",
+        "--locked",
+        "--offline",
+        "--manifest-path",
+        "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/final-validation/candidate/Cargo.toml",
+        "-e",
+        "features"
+      ],
+      "exit": 0
+    }
+  ],
+  "path-and-zk": {
+    "binary_sha256": "8a9a210a3411b06b7784aee8a2597aa84ea3c155449cf50ca4741298e0bcbded",
+    "bytes": 28496480,
+    "test_source_sha256": "957538732921fd3bbe4d2cec23c5a17e0bdf05b818b1c28a467e0f71f5be4c9e"
+  },
+  "existing-zk-integration": {
+    "binary_sha256": "c3ca886e981fe02e34109fdac2e6ee829e6643c759893f1e94dd915ac32f4db0",
+    "bytes": 24907664,
+    "test_source_sha256": "957538732921fd3bbe4d2cec23c5a17e0bdf05b818b1c28a467e0f71f5be4c9e"
+  },
+  "runtime_sha256": {
+    "baseline": "71f7279359bf982dad1f751fcbc6b42cd68200daebf0de2f417bca1a20d867fd",
+    "candidate": "bea151fe66ee500d0e644c5b414c48bad82863281ed08aa58f75ec1d1829b3b0"
+  },
+  "harness_sha256": "b6e5faeb0830751acdca72fdcecb1b5ff6e15aebedcb7aac177a9aa343a67005",
+  "counting_sha256": "65cd7693a9adb8a4c45f52d939db0b932892ceec4b4806423ee1472c061bc911",
+  "counting_matches_frozen": true
+}

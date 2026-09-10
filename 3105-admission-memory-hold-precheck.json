@@ -1,0 +1,18 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "state": "OPEN",
+        "headRefOid": "19763bfab1dce196a654c899b172e7b24d70bc59",
+        "mergeQueueEntry": null,
+        "labels": {
+          "nodes": [
+            {
+              "name": "area:sparq-engine"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

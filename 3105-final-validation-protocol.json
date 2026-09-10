@@ -1,0 +1,43 @@
+{
+  "declared_utc": "2026-09-10T02:20:27.780731+00:00",
+  "deadline_utc": "2026-09-10T02:38:59Z",
+  "source": {
+    "baseline": "e53464c73f31f7aca800f3867ac054c36408e346",
+    "candidate": "19763bfab1dce196a654c899b172e7b24d70bc59"
+  },
+  "matrix": {
+    "total_patterns": [
+      5,
+      8
+    ],
+    "seeds": 70000,
+    "views": [
+      "base"
+    ],
+    "joins": "all predicates share s and o; every join matches; arithmetic residual o+0<0 rejects all final rows",
+    "allocation_repetitions": 3,
+    "order": "AB, BA, AB per case, A=baseline B=candidate",
+    "warmup": 2,
+    "queries_per_sample": 1,
+    "calibration": "unchanged counting.rs; after fixture/full oracle/two warmups and rayon broadcast barrier"
+  },
+  "metrics": [
+    "requested allocations",
+    "requested bytes",
+    "peak requested live growth",
+    "process-wide live_after",
+    "cumulative process max RSS at setup/before/after"
+  ],
+  "timing_claim": false,
+  "screen": "NO_GO pending engineering reassessment if candidate extra peak >25% AND >8MiB; experiment criterion, not repo policy. All results reported, no tuning/retries.",
+  "path": "test-only actual same fixture probe if affordable; clearly separate instrumented/prod hashes.",
+  "zk": "capture exact unchanged early try_capped guard; existing zk tests and armed/unarmed >1024 seed probe if affordable; no redundant production gate.",
+  "limits": {
+    "seconds": 1200,
+    "min_free": 6509559808,
+    "jobs": 2,
+    "incremental": false,
+    "offline_locked": true,
+    "no_production_changes": true
+  }
+}

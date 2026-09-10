@@ -1,0 +1,209 @@
+{
+  "schema": 1,
+  "prepared_at_utc": "2026-09-10T02:06:28.270008+00:00",
+  "scope": "Bounded read-only local committed-source publication preparation. No builds, GitHub reads/writes, model calls, source changes, or modification of frozen evidence.",
+  "head": "19763bfab1dce196a654c899b172e7b24d70bc59",
+  "parent_with_advisory_local_measurements": "6e86f1d0ba447aa78a50800337a7a379702fa999",
+  "comparison_base": "e53464c73f31f7aca800f3867ac054c36408e346",
+  "worktree_clean": true,
+  "issue_3105": {
+    "requirement_source": "Root task brief and committed call seam; the live issue body was not reread in this local-only task.",
+    "implemented_slice": "Lazily reuse reached, non-bind RHS scan bindings for the same prepared pattern and requested sort across capped seed blocks. Immutable query filters remain fixed; armed budgets retain the original scan lifetime. Drop a stale cache slot before the replacement scan.",
+    "not_implemented": [
+      "Hoisting per-block GOO/planner work",
+      "Hoisting hash-table builds",
+      "General join framework or storage/public API changes"
+    ],
+    "closure_recommendation": "Use Refs #3105, not Closes #3105. Keep the issue open for remaining planner/hash-build reuse unless its scope is explicitly revised.",
+    "source": "crates/sparq-engine/src/exec.rs:4156 (capped driver), :4230 (per-block planning), :4332 (RHS cache helper); line anchors are navigation references, not a substitute for the frozen whole diff."
+  },
+  "suggested_title": "perf(engine): reuse RHS scans across capped seed blocks",
+  "suggested_body": "> Implementation: GPT-6 Astra. Independent review and authoritative CI evidence are recorded separately below.\n\nReuse a reached non-bind RHS relation for the same prepared pattern and requested sort across capped seed blocks. Armed budgets retain the original scan lifetime, and stale sort entries are released before a replacement scan. Per-block planning, bind decisions, and hash builds remain unchanged.\n\nRefs #3105. This completes the scan-reuse slice; planner and hash-build reuse remain open.\n\nValidation at 19763bfab1dce196a654c899b172e7b24d70bc59: seven focused tests pass in each of the default, engine-no-default-features, core compact-index, and semijoin-bitmap configurations; the existing ASK suite reports 21 passed and one existing ignored test. Both compiled changing-sort/lifetime controls fail their intended assertions. Engine library/test clippy passes. The local author preflight retains its known Bash 3 mapfile/privacy-check limitation.\n\nParent 6e86f1d0 has local advisory whole-query timing and allocation measurements. The current head has not been timed. Retaining several reached RHS relations remains a memory tradeoff; these data are not a canonical performance or admission claim.\n\nIndependent exact-head review and full authoritative CI/ratchet results: pending publication and collection. Leave unexecuted template checkboxes unchecked.",
+  "template_requirements": {
+    "source": ".github/PULL_REQUEST_TEMPLATE.md:6-24",
+    "base": [
+      "Workspace build",
+      "Full workspace clippy",
+      "Formatting for touched code",
+      "Tests for affected crates"
+    ],
+    "query_execution_row": [
+      "Full conformance ratchet",
+      "Operator coverage benchmark",
+      "Per-builtin error table"
+    ],
+    "wasm_affected_row": [
+      "Wasm dependency guard",
+      "wasm-pack test --node",
+      "wasm_bundle_bytes metric"
+    ],
+    "not_applicable_from_diff": [
+      "Public API changes",
+      "Dependency changes",
+      "Storage-format changes"
+    ],
+    "warning": "Scoped local tests do not satisfy full-workspace checkboxes. The template clippy example excludes sparq-py; actual ci.yml runs workspace/all-targets and also all-features. Use actual job commands for evidence."
+  },
+  "labels_and_review": {
+    "minimal_area": "area:sparq-engine",
+    "area_source": "scripts/pr-area-labels.py:741 and .github/workflows/pr-area-label.yml; normal router derives the crate partition.",
+    "no_extra_trust_label_required_by_this_diff": true,
+    "do_not_fabricate_or_clear": [
+      "review:pass",
+      "Existing human/bot holds on this or other PRs"
+    ],
+    "review_needs_warning": "Current verdict bridge treats review:needs as a hold. Do not add it as an innocuous waiting label or clear a hold merely because local tests passed.",
+    "public_verdict_contract": {
+      "source": "scripts/verdict-bridge.py:195-216,430-485,620-635; .github/workflows/verdict-bridge.yml:57-70",
+      "requirements": [
+        "An issue comment, not only a PR-review body",
+        "Last nonblank line exactly VERDICT: pass",
+        "Standalone full 40-hex current head",
+        "Author association OWNER, MEMBER, or COLLABORATOR",
+        "Commenter must not be a commit contributor; unreadable contributor evidence fails closed",
+        "Latest eligible immutable created_at evidence wins",
+        "No blocking hold and PR not draft"
+      ],
+      "independent_review": "Actual independent reviewer/model/provenance requirements remain separate from the parser. Model-name prose is not parser authority. Root must check the authenticated actor and contributor set before publishing actual review evidence.",
+      "bridge_path": "Normal comment-triggered reconciliation plus scheduled backstop; no label fabrication or generic dispatch is necessary in this preparation."
+    },
+    "normal_admission": "Root should preserve ordinary review/hold rules, collect current-head full-tier gate, then use normal protected auto-merge/queue flow and fresh merge-group evidence. Local source inspection does not revalidate live branch protection."
+  },
+  "draft_and_selection": {
+    "draft_gate": ".github/workflows/ci-summary.yml:126-149: gate, draft-tier is not the required full gate; ready_for_review and merge_group produce full-tier checks.",
+    "heavy_skips": "bench.yml:196-205 excludes drafts. ci.yml:3243-3244,3497-3498 excludes coverage measurement on drafts and merge_group; aggregate coverage :3730 requires non-draft. Do not wait indefinitely for a draft-skipped measurement.",
+    "full_workspace_distinction": "Build archive and doctests compile/run workspace-wide, but ordinary PR nextest execution is affected reverse-closure selected. Inspect the actual select artifact/filterset before claiming all workspace tests ran.",
+    "existing_full_backstop": "ci-select.yml:174-176 passes --full for ci-full; scripts/ci_select.py:1078-1092 treats push/schedule/manual without PR diff as full. ci-full is an existing explicit full-matrix option for root to choose; it does not undraft a PR or turn PR deterministic benchmarks into the full operator sweep.",
+    "no_label_action_taken": true
+  },
+  "remote_validation_map": [
+    {
+      "workflow": ".github/workflows/ci.yml",
+      "jobs": [
+        "build + archive test binaries (+ doctests once)",
+        "test (load-aware shard <matrix.name>)"
+      ],
+      "source": ":397-559, :561-615, :754 onward",
+      "commands": [
+        "cargo nextest archive --workspace --all-targets --features approx-ann,filtered-ann,vec-predicate --archive-file nextest.tar.zst",
+        "cargo test --workspace --features approx-ann,filtered-ann,vec-predicate --doc"
+      ],
+      "evidence_needed": "Archive success, actual selected shard/filterset results and engine test execution. builtin_error_paths is an engine unit test, not a separate named job; see exec.rs:15849 onward. Selected shards alone do not prove every workspace test executed."
+    },
+    {
+      "workflow": ".github/workflows/ci.yml",
+      "jobs": [
+        "clippy (gate) + fmt (non-blocking)"
+      ],
+      "source": ":1339-1396",
+      "commands": [
+        "cargo clippy --workspace --all-targets -- -D warnings",
+        "cargo clippy --workspace --all-targets --all-features -- -D warnings"
+      ],
+      "evidence_needed": "Both real clippy commands pass. Formatting here is nonblocking; preserve the local touched-code format evidence."
+    },
+    {
+      "workflow": ".github/workflows/ci.yml",
+      "jobs": [
+        "W3C SPARQL conformance (ratchet >= 1229 pass+divergence)"
+      ],
+      "source": ":1569-1686",
+      "commands": [
+        "cargo run --profile release-fast -p sparq-conformance --bin sparq-conformance"
+      ],
+      "evidence_needed": "Affected conformance leg actually runs and its scoreboard/ratchet succeeds. Other SHACL/Geo/inference suites have selection guards; do not claim execution from aggregate success alone."
+    },
+    {
+      "workflow": ".github/workflows/ci.yml",
+      "jobs": [
+        "wasm build (sparq-wasm + sparq-reason-wasm + sparq-rsp-wasm + sparq-text-wasm + sparq-shacl-wasm + sparq-solid)"
+      ],
+      "source": ":983-1005, :1023-1035, :1113-1116, :1184, :1205-1207",
+      "commands": [
+        "Wasm32 builds and wasm-target all-targets clippy",
+        "./scripts/wasm-deps-guard.sh",
+        "wasm-pack test --node"
+      ],
+      "evidence_needed": "Actual affected wasm builds, clippy, dependency guard and Node tests, including selected published feature variants."
+    },
+    {
+      "workflow": ".github/workflows/ci.yml",
+      "jobs": [
+        "coverage ratchet (shard <n>/3)",
+        "coverage engine run (partition <n>/3)",
+        "coverage engine merge + ratchet (per-crate)",
+        "coverage ratchet + test-presence gate (per-crate)"
+      ],
+      "source": ":3192, :3486, :3573, :3707",
+      "evidence_needed": "Non-draft PR coverage data and per-crate floor/test-presence results. Merge-group measurement skips are not equivalent to fresh coverage execution."
+    },
+    {
+      "workflow": ".github/workflows/bench.yml",
+      "jobs": [
+        "run + track benchmarks"
+      ],
+      "source": ":160, :196-205, :285-301, :347-356; scripts/ci-bench.sh:283-322,378-395",
+      "commands": [
+        "bash scripts/ci-bench.sh --deterministic-only 200000 bench-results.json (PR)",
+        "python3 scripts/perf-gate.py bench-results.json bench/perf-baseline.json ..."
+      ],
+      "evidence_needed": "Real non-draft affected-closure execution, deterministic JSON metrics and hard perf-gate result. Includes wasm bundle bytes and deterministic memory/byte metrics; no current-head query timing claim.",
+      "operator_limit": "Ordinary PR runs deterministic-only and exits before the operator suite. Full non-PR benchmark path contains trend-only operator timings with error/skip handling. Benchmark success does not establish operator correctness or this candidate latency. Template operator coverage requirement needs separately identified actual execution.",
+      "merge_group": "This workflow does not run on merge_group; protected-queue handling uses the existing gate policy. Do not change that policy."
+    },
+    {
+      "workflow": ".github/workflows/vectorized-feature-off.yml",
+      "jobs": [
+        "vectorized-feature-off quick-gates (changes + feature-resolution + cfg-audit)",
+        "artifact-exact-equality (wasm bundle feature-OFF)"
+      ],
+      "source": ":26-33, :88-89, :154, :171, :222-223",
+      "evidence_needed": "Actual feature-resolution/cfg proof and paired raw wasm byte comparison. This default-on engine runtime change may legitimately change default wasm bytes. If it fails, inspect exact evidence and use the existing separately reviewed declaration process only if justified. Do not presume metadata-only drift or add a declaration blindly."
+    },
+    {
+      "workflow": ".github/workflows/feature-matrix.yml",
+      "jobs": [
+        "opt-in group (<matrix.group>)",
+        "Per-leg checks emitted by the normal reporter"
+      ],
+      "source": ":461-466, :697-740; .github/feature-matrix.d/sparq-engine.yml:227-230; .github/feature-matrix.d/sparq-core.yml:22-24",
+      "evidence_needed": "Selected matrix plus actual group command/result artifacts and per-leg reports. Engine semijoin-bitmap has test:true. Core compact-index leg targets core, so it does not by itself prove engine tests with compact-index; the executed local engine+core-compact test run is distinct evidence."
+    },
+    {
+      "workflow": ".github/workflows/ci-summary.yml",
+      "jobs": [
+        "gate (full-tier, current PR head)",
+        "gate (fresh merge-group head)"
+      ],
+      "source": "scripts/ci_summary_gate.py and workflow full/draft-tier wiring",
+      "evidence_needed": "Authoritative exact-head full aggregate with actual newest workflow runs/external checks and explicit advisory registry. A green draft-tier check, reporter-only success, or stale prior-head run is insufficient. Local historical branch-protection documentation has outdated build job names; use current workflow bodies and fresh remote protection evidence."
+    }
+  ],
+  "remaining_limits": [
+    "No remote CI or current protection state was read in this task; all job claims are source-based routing/command facts.",
+    "No timing or allocation measurement was performed on 19763; parent data remain advisory and frozen.",
+    "Full workspace/wasm/conformance/performance gates remain pending authoritative collection.",
+    "Root owns exact-head independent review, publication, status/label decisions and protected admission.",
+    "Registry remains paused; existing unrelated review/approval holds are preserved."
+  ],
+  "committed_source_sha256": {
+    ".github/PULL_REQUEST_TEMPLATE.md": "4f800f40af2c1d0715617c79aa66f82c6ef5cb72596eb9bd062cf619233f7b3b",
+    ".github/workflows/ci.yml": "8c2dd15936888aab25dd70c36d457811ac7ae453758643b9833ee1d2bf10985c",
+    ".github/workflows/ci-summary.yml": "be42f933e62ef681e9f45fc515afee8398bcf9d809d589d8b3c2bb9f9fa79884",
+    ".github/workflows/ci-select.yml": "d951f53a79370643e6350b585f2f8310e5061a241d4a9db27a0065d243d14bae",
+    ".github/workflows/bench.yml": "135b956886db9016f514924290f987e79649f9ffe91886bc55db7e9435dbf0e0",
+    ".github/workflows/vectorized-feature-off.yml": "6084ce926c8376413df379d70fda9948534a2a87edeb355c61094e61979dcd15",
+    ".github/workflows/feature-matrix.yml": "a4685a6f4b0b4655879176cb7bace120105feeebc533152a7a9fd5e38821dc2d",
+    ".github/workflows/verdict-bridge.yml": "aeed46c31ab04e0c21fd00a3e6669424003c61f89e2133c17768fb22539d3f28",
+    ".github/workflows/pr-area-label.yml": "929a59651199d633ce5773ec044b0505d0a7d6f098a882f030001806a9e5f2ef",
+    ".github/feature-matrix.d/sparq-engine.yml": "05c102ce5e653162d5d164f16bd43d24800fd3e0cc4fe45f5c80a989f682d413",
+    ".github/feature-matrix.d/sparq-core.yml": "58ca6d0a460976a7a48e502dceeed203e8d8f9292d708a9bdb180dbbcf419e10",
+    "scripts/ci_select.py": "bfa17b2191119b68a4e5b5e4696e959dbe8fe502c6d39dfcf436ef4090559dcc",
+    "scripts/ci_summary_gate.py": "7c6682c108301844ed06feb63f2249af7aca9f54004cbe1e955dd7b4fd0282ef",
+    "scripts/ci-bench.sh": "85a12328525acb7099ac37eb46b8701911948ad233e493e99a316d008b87c3b0",
+    "scripts/verdict-bridge.py": "cb04ee51b3ac2d026318536ec8f146e28c1e08294b9adf37bed09b22afba21d8",
+    "scripts/pr-area-labels.py": "979338f00ab2d4003849e5f4a6202a18fe29b866d610f40069212798700b59e8",
+    "scripts/auto-arm.py": "ea94e413dfc24418e7dcea930eaddfb7392d0d259ac0ecfff8dde72e4e77e6e1",
+    "crates/sparq-engine/src/exec.rs": "bea151fe66ee500d0e644c5b414c48bad82863281ed08aa58f75ec1d1829b3b0"
+  }
+}

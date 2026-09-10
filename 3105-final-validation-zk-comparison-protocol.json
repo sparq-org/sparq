@@ -1,0 +1,8 @@
+{
+  "declared_utc": "2026-09-10T02:24:53.510568+00:00",
+  "seeds": 2000,
+  "same_fixture_as_probe": true,
+  "comparison": "full Debug witness bytes main vs final, single-thread, same input and query; dictionary-id canonical trace order",
+  "source": "unmodified exact production refs; no recorder guard bypass",
+  "no_retry": true
+}

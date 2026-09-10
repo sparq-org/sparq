@@ -1,0 +1,158 @@
+[
+  {
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/final-validation/binary/baseline",
+      "5",
+      "base",
+      "0"
+    ],
+    "exit": 0,
+    "seconds": 1.3460502499999998,
+    "binary_sha256": "43a4824e0fa6e846d5d6e5ab98d372e029f4d9847555e2172dacc7f110c08b41",
+    "order": 0,
+    "free_bytes": 11551207424
+  },
+  {
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/final-validation/binary/candidate",
+      "5",
+      "base",
+      "0"
+    ],
+    "exit": 0,
+    "seconds": 0.8308113750000001,
+    "binary_sha256": "71200dadac440ef47b957b966fa5d152591c1515740ce0364610ddc783c4a80e",
+    "order": 1,
+    "free_bytes": 11550089216
+  },
+  {
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/final-validation/binary/candidate",
+      "5",
+      "base",
+      "1"
+    ],
+    "exit": 0,
+    "seconds": 0.3869286249999999,
+    "binary_sha256": "71200dadac440ef47b957b966fa5d152591c1515740ce0364610ddc783c4a80e",
+    "order": 2,
+    "free_bytes": 11550076928
+  },
+  {
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/final-validation/binary/baseline",
+      "5",
+      "base",
+      "1"
+    ],
+    "exit": 0,
+    "seconds": 0.4115725000000001,
+    "binary_sha256": "43a4824e0fa6e846d5d6e5ab98d372e029f4d9847555e2172dacc7f110c08b41",
+    "order": 3,
+    "free_bytes": 11540983808
+  },
+  {
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/final-validation/binary/baseline",
+      "5",
+      "base",
+      "2"
+    ],
+    "exit": 0,
+    "seconds": 0.44033374999999975,
+    "binary_sha256": "43a4824e0fa6e846d5d6e5ab98d372e029f4d9847555e2172dacc7f110c08b41",
+    "order": 4,
+    "free_bytes": 11540946944
+  },
+  {
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/final-validation/binary/candidate",
+      "5",
+      "base",
+      "2"
+    ],
+    "exit": 0,
+    "seconds": 0.419457333,
+    "binary_sha256": "71200dadac440ef47b957b966fa5d152591c1515740ce0364610ddc783c4a80e",
+    "order": 5,
+    "free_bytes": 11537088512
+  },
+  {
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/final-validation/binary/baseline",
+      "8",
+      "base",
+      "0"
+    ],
+    "exit": 0,
+    "seconds": 0.6671476670000005,
+    "binary_sha256": "43a4824e0fa6e846d5d6e5ab98d372e029f4d9847555e2172dacc7f110c08b41",
+    "order": 6,
+    "free_bytes": 11537002496
+  },
+  {
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/final-validation/binary/candidate",
+      "8",
+      "base",
+      "0"
+    ],
+    "exit": 0,
+    "seconds": 0.6137332089999994,
+    "binary_sha256": "71200dadac440ef47b957b966fa5d152591c1515740ce0364610ddc783c4a80e",
+    "order": 7,
+    "free_bytes": 11536936960
+  },
+  {
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/final-validation/binary/candidate",
+      "8",
+      "base",
+      "1"
+    ],
+    "exit": 0,
+    "seconds": 0.601374291,
+    "binary_sha256": "71200dadac440ef47b957b966fa5d152591c1515740ce0364610ddc783c4a80e",
+    "order": 8,
+    "free_bytes": 11536494592
+  },
+  {
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/final-validation/binary/baseline",
+      "8",
+      "base",
+      "1"
+    ],
+    "exit": 0,
+    "seconds": 0.6290267910000003,
+    "binary_sha256": "43a4824e0fa6e846d5d6e5ab98d372e029f4d9847555e2172dacc7f110c08b41",
+    "order": 9,
+    "free_bytes": 11499229184
+  },
+  {
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/final-validation/binary/baseline",
+      "8",
+      "base",
+      "2"
+    ],
+    "exit": 0,
+    "seconds": 0.6361874589999994,
+    "binary_sha256": "43a4824e0fa6e846d5d6e5ab98d372e029f4d9847555e2172dacc7f110c08b41",
+    "order": 10,
+    "free_bytes": 11499233280
+  },
+  {
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/final-validation/binary/candidate",
+      "8",
+      "base",
+      "2"
+    ],
+    "exit": 0,
+    "seconds": 0.5976369999999998,
+    "binary_sha256": "71200dadac440ef47b957b966fa5d152591c1515740ce0364610ddc783c4a80e",
+    "order": 11,
+    "free_bytes": 11498782720
+  }
+]

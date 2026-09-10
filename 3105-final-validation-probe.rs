@@ -1,0 +1,69 @@
+
+    // [GPT-6 Astra] Temporary validation sidecar; not part of the production commit.
+    #[test]
+    fn final_validation_many_rhs() {
+        for n in [5usize, 8] {
+            let mut ttl = String::new();
+            for i in 0..70_000 {
+                for j in 0..n {
+                    ttl.push_str(&format!("<urn:s:{i}> <urn:p{j}> {i} .\n"));
+                }
+            }
+            for i in 0..8192 {
+                ttl.push_str(&format!("<urn:d:{i}> <urn:dead> <urn:o> .\n"));
+            }
+            let graph = Graph::load_str(&ttl, "turtle").unwrap();
+            let patterns: String = (0..n).map(|j| format!("?s <urn:p{j}> ?o . ")).collect();
+            let positive = crate::query(&graph, &format!("SELECT ?s ?o WHERE {{ {patterns} }}")).unwrap();
+            assert_eq!(positive.rows.len(), 70_000);
+            for row in &positive.rows {
+                let o = row[1].as_ref().unwrap().to_string();
+                let i = o.split('"').nth(1).unwrap().parse::<usize>().unwrap();
+                assert!(i < 70_000);
+                assert_eq!(row[0].as_ref().unwrap().to_string(), format!("<urn:s:{i}>"));
+            }
+            take_work();
+            let (answer, steps) = trace(|| crate::ask(&graph, &format!("ASK {{ {patterns} FILTER(?o + 0 < 0) }}")).unwrap());
+            assert!(!answer);
+            let work = take_work();
+            assert_eq!(work, [1, 3, n-1, 0]);
+            assert_eq!(steps.len(), 3*(n-1));
+            for start in [0usize, 1024, 65536] {
+                let reached: Vec<_> = steps.iter().filter(|s| s.start == start).collect();
+                assert_eq!(reached.len(), n-1);
+                assert!(reached.iter().all(|s| s.kernel != "bind"));
+                let ids: std::collections::BTreeSet<_> = reached.iter().map(|s| s.pattern).collect();
+                assert_eq!(ids.len(), n-1);
+            }
+            println!("patterns={n} work={work:?} steps={steps:?}");
+        }
+    }
+
+    #[cfg(feature = "zk")]
+    #[test]
+    fn final_validation_armed_zk_excludes_cache() {
+        let mut ttl = String::new();
+        for i in 0..2000 {
+            ttl.push_str(&format!("<urn:s:{i}> <urn:p> {i} ; <urn:q> {i} .\n"));
+        }
+        let graph = Graph::load_str(&ttl, "turtle").unwrap();
+        let q = "ASK { ?s <urn:p> ?o . ?s <urn:q> ?o . FILTER(?o + 0 < 0) }";
+        take_work();
+        assert!(!crate::ask(&graph, q).unwrap());
+        let unarmed = take_work();
+        assert_eq!(unarmed, [1,2,1,0]);
+        let guard = crate::zk::install();
+        let (answer, steps) = trace(|| crate::ask(&graph, q).unwrap());
+        let armed = take_work();
+        assert!(!answer);
+        assert_eq!(armed, [0;4]);
+        assert!(steps.is_empty());
+        let witness = crate::zk::take();
+        assert_eq!(witness.patterns.len(), 2);
+        assert!(witness.patterns.iter().all(|p| p.triples.len() == 2000));
+        assert!(witness.first_uncaptured().is_none());
+        assert!(!witness.filters.is_empty());
+        assert!(witness.filters.iter().flat_map(|f| &f.rows).all(|(_,pass)| !pass));
+        println!("unarmed={unarmed:?} armed={armed:?} patterns={} triple_counts={:?} steps={:?}",witness.patterns.len(), witness.patterns.iter().map(|p|p.triples.len()).collect::<Vec<_>>(),witness.steps);
+        drop(guard);
+    }

@@ -1,0 +1,3 @@
+   Compiling sparq-engine v0.1.1 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue3105/crates/sparq-engine)
+   Compiling capped-zk-witness v0.0.0 (/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/final-validation/zk-candidate)
+    Finished `release` profile [optimized] target(s) in 16.92s

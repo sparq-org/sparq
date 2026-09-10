@@ -1,0 +1,10 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.42s
+     Running unittests src/lib.rs (/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/debug/deps/sparq_engine-d95f3e0da8293817)
+
+running 3 tests
+test zk::tests::guard_clears_state ... ok
+test zk::tests::query_records_post_scan_input_sets ... ok
+test zk::tests::trace_is_deterministic_across_runs ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 327 filtered out; finished in 0.00s
+

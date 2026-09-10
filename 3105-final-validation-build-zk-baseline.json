@@ -1,0 +1,24 @@
+{
+  "argv": [
+    "cargo",
+    "build",
+    "--release",
+    "--locked",
+    "--offline",
+    "--manifest-path",
+    "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/final-validation/zk-baseline/Cargo.toml",
+    "--features",
+    "zk"
+  ],
+  "exit": 0,
+  "seconds": 18.315139125,
+  "minimum_free_bytes": 11122708480,
+  "stopped": null,
+  "env": {
+    "CARGO_BUILD_JOBS": "2",
+    "CARGO_INCREMENTAL": "0",
+    "CARGO_NET_OFFLINE": "true",
+    "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+    "RAYON_NUM_THREADS": "1"
+  }
+}

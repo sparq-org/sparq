@@ -1,0 +1,118 @@
+{
+  "at": "2026-09-10T02:20:44.761604+00:00",
+  "head": "19763bfab1dce196a654c899b172e7b24d70bc59",
+  "calls": [
+    {
+      "args": [
+        "git",
+        "rev-parse",
+        "HEAD"
+      ],
+      "exit": 0,
+      "stdout": "19763bfab1dce196a654c899b172e7b24d70bc59\n",
+      "stderr": ""
+    },
+    {
+      "args": [
+        "git",
+        "status",
+        "--porcelain"
+      ],
+      "exit": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "args": [
+        "/opt/homebrew/bin/gh",
+        "api",
+        "rate_limit"
+      ],
+      "exit": 0,
+      "stdout": "{\"resources\":{\"core\":{\"limit\":5000,\"used\":2,\"remaining\":4998,\"reset\":1789009301},\"search\":{\"limit\":30,\"used\":0,\"remaining\":30,\"reset\":1789006905},\"graphql\":{\"limit\":5000,\"used\":0,\"remaining\":5000,\"reset\":1789010445},\"integration_manifest\":{\"limit\":5000,\"used\":0,\"remaining\":5000,\"reset\":1789010445},\"source_import\":{\"limit\":100,\"used\":0,\"remaining\":100,\"reset\":1789006905},\"code_scanning_autofix\":{\"limit\":10,\"used\":0,\"remaining\":10,\"reset\":1789006905},\"actions_runner_registration\":{\"limit\":10000,\"used\":0,\"remaining\":10000,\"reset\":1789010445},\"scim\":{\"limit\":15000,\"used\":0,\"remaining\":15000,\"reset\":1789010445},\"dependency_snapshots\":{\"limit\":100,\"used\":0,\"remaining\":100,\"reset\":1789006905},\"dependency_sbom\":{\"limit\":100,\"used\":0,\"remaining\":100,\"reset\":1789006905},\"audit_log\":{\"limit\":1750,\"used\":0,\"remaining\":1750,\"reset\":1789010445},\"audit_log_streaming\":{\"limit\":15,\"used\":0,\"remaining\":15,\"reset\":1789010445},\"code_search\":{\"limit\":10,\"used\":0,\"remaining\":10,\"reset\":1789006905},\"copilot_usage_records\":{\"limit\":1750,\"used\":0,\"remaining\":1750,\"reset\":1789010445},\"enterprise_token_inventory\":{\"limit\":1750,\"used\":0,\"remaining\":1750,\"reset\":1789010445}},\"rate\":{\"limit\":5000,\"used\":2,\"remaining\":4998,\"reset\":1789009301}}",
+      "stderr": ""
+    },
+    {
+      "args": [
+        "/opt/homebrew/bin/gh",
+        "api",
+        "graphql",
+        "-f",
+        "query=query { rateLimit { remaining resetAt } repository(owner:\"sparq-org\",name:\"sparq\") { defaultBranchRef { target { oid } } issue(number:3105) { state labels(first:40) { nodes { name } } } pullRequests(first:10,headRefName:\"codex/capped-rhs-reuse\",states:[OPEN]) { nodes { number headRefOid url } } } }"
+      ],
+      "exit": 0,
+      "stdout": "{\"data\":{\"rateLimit\":{\"remaining\":4990,\"resetAt\":\"2026-09-10T02:33:59Z\"},\"repository\":{\"defaultBranchRef\":{\"target\":{\"oid\":\"e53464c73f31f7aca800f3867ac054c36408e346\"}},\"issue\":{\"state\":\"OPEN\",\"labels\":{\"nodes\":[{\"name\":\"priority:P3\"},{\"name\":\"role:impl\"},{\"name\":\"status:ready\"},{\"name\":\"area:sparq-engine\"},{\"name\":\"bd-migration\"}]}},\"pullRequests\":{\"nodes\":[]}}}}",
+      "stderr": ""
+    },
+    {
+      "args": [
+        "git",
+        "ls-remote",
+        "--exit-code",
+        "origin",
+        "refs/heads/codex/capped-rhs-reuse"
+      ],
+      "exit": 2,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "args": [
+        "git",
+        "push",
+        "origin",
+        "19763bfab1dce196a654c899b172e7b24d70bc59:refs/heads/codex/capped-rhs-reuse"
+      ],
+      "exit": 0,
+      "stdout": "",
+      "stderr": "remote: \nremote: Create a pull request for 'codex/capped-rhs-reuse' on GitHub by visiting:        \nremote:      https://github.com/sparq-org/sparq/pull/new/codex/capped-rhs-reuse        \nremote: \nremote: GitHub found 63 vulnerabilities on sparq-org/sparq's default branch (2 critical, 41 high, 20 moderate). To find out more, visit:        \nremote:      https://github.com/sparq-org/sparq/security/dependabot        \nremote: \nTo https://github.com/sparq-org/sparq.git\n * [new branch]          19763bfab1dce196a654c899b172e7b24d70bc59 -> codex/capped-rhs-reuse\n"
+    },
+    {
+      "args": [
+        "/opt/homebrew/bin/gh",
+        "api",
+        "graphql",
+        "-f",
+        "query=query { rateLimit { remaining resetAt } repository(owner:\"sparq-org\",name:\"sparq\") { defaultBranchRef { target { oid } } issue(number:3105) { state labels(first:40) { nodes { name } } } pullRequests(first:10,headRefName:\"codex/capped-rhs-reuse\",states:[OPEN]) { nodes { number headRefOid url } } } }"
+      ],
+      "exit": 0,
+      "stdout": "{\"data\":{\"rateLimit\":{\"remaining\":4989,\"resetAt\":\"2026-09-10T02:33:59Z\"},\"repository\":{\"defaultBranchRef\":{\"target\":{\"oid\":\"e53464c73f31f7aca800f3867ac054c36408e346\"}},\"issue\":{\"state\":\"OPEN\",\"labels\":{\"nodes\":[{\"name\":\"priority:P3\"},{\"name\":\"role:impl\"},{\"name\":\"status:ready\"},{\"name\":\"area:sparq-engine\"},{\"name\":\"bd-migration\"}]}},\"pullRequests\":{\"nodes\":[]}}}}",
+      "stderr": ""
+    },
+    {
+      "args": [
+        "/opt/homebrew/bin/gh",
+        "pr",
+        "create",
+        "--repo",
+        "sparq-org/sparq",
+        "--base",
+        "main",
+        "--head",
+        "codex/capped-rhs-reuse",
+        "--title",
+        "perf(engine): reuse RHS scans across capped seed blocks",
+        "--body-file",
+        "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/admission/pr-body.md"
+      ],
+      "exit": 0,
+      "stdout": "https://github.com/sparq-org/sparq/pull/6477\n",
+      "stderr": ""
+    },
+    {
+      "args": [
+        "/opt/homebrew/bin/gh",
+        "pr",
+        "view",
+        "6477",
+        "--repo",
+        "sparq-org/sparq",
+        "--json",
+        "number,url,state,isDraft,headRefOid,headRefName,baseRefName,body,labels,statusCheckRollup"
+      ],
+      "exit": 0,
+      "stdout": "{\"baseRefName\":\"main\",\"body\":\"> \ud83e\udd16 **SPARQ agent** \u2014 I am @jeswr's agent for the sparq-org/sparq RDF/SPARQL engine. @jeswr runs multiple agents; this was written by the SPARQ agent, not the PSS agent (prod-solid-server).\\n\\n## Summary\\n\\nReuse a reached, non-bind RHS scan across capped seed blocks when the prepared pattern and requested sort are unchanged. This avoids rescanning the same relation for ASK and LIMIT queries that continue into later blocks. The cache preserves the actual sort metadata and releases a stale entry before scanning its replacement.\\n\\nQueries with armed resource budgets retain their previous scan lifetime. Per-block planning, bind decisions and hash-table builds remain unchanged. No public API, dependencies or storage format changes.\\n\\nRefs #3105 (`sq-7d3dj.30.18`). This addresses scan reuse; planner and hash-build reuse remain open.\\n\\n## Validation and independent review\\n\\nImplementation: actual GPT-6 Astra, extra-high reasoning. Independent source and soundness review: actual Claude Opus 5, extra-high reasoning, on `19763bfab1dce196a654c899b172e7b24d70bc59`; outcome **approved for CI validation**, with merge admission pending required checks and remaining resource validation.\\n\\nSeven focused tests pass in each of the default, engine-no-default-features, core compact-index and semijoin-bitmap configurations. They cover public ASK/LIMIT results, duplicate multiplicities, changing requested sort, mixed join paths, disconnected joins, named views, overlays and armed budgets. The ASK suite reports 21 passed and one existing ignored timing probe. Engine library/test clippy passes. Two compiled controls fail the intended sort-invalidation and stale-slot-lifetime assertions; the sort control is a work/path check, not a demonstrated wrong-answer case.\\n\\nLocal preflight encounters Bash 3's missing `mapfile` in the existing privacy-claims script. Linux CI must execute that check. Scoped tests do not replace authoritative workspace, conformance, coverage, wasm or performance gates.\\n\\n## Resource limits and remaining checks\\n\\nThe cache retains one current scan per reached non-bind pattern for the capped call. This trades repeated scans for retained memory. A larger-pattern allocation check and ZK-recorder boundary validation are in progress. Existing `try_capped` code declines the optimization while a ZK recorder is armed.\\n\\nLocal advisory timing/allocation evidence was measured on parent `6e86f1d0ba447aa78a50800337a7a379702fa999`, not this final head. No canonical speedup, final-head timing or measured peak reduction is claimed. Required ratchets remain unchanged.\\n\\n## Base gate\\n\\n- [ ] Authoritative workspace build and full workspace clippy.\\n- [x] Touched code matches the surrounding formatting; no workspace reformat.\\n- [ ] Full affected-crate test coverage from CI (scoped local tests passed).\\n\\n## Targeted re-evaluation\\n\\n- [ ] Query execution: conformance ratchet, operator coverage and builtin error cases.\\n- [ ] Wasm builds/tests, dependency guard and bundle-size gate.\\n- [ ] Coverage ratchet and test-presence gate.\\n- [ ] Remaining memory and ZK-recorder checks completed and assessed.\\n\\n## Ratchets and conventions\\n\\n- [x] No conformance, performance or coverage ratchet lowered.\\n- [x] No hard-coded benchmark results added to repository Markdown.\\n- [x] Remaining planner/hash-build work is tracked in #3105.\\n\",\"headRefName\":\"codex/capped-rhs-reuse\",\"headRefOid\":\"19763bfab1dce196a654c899b172e7b24d70bc59\",\"isDraft\":false,\"labels\":[],\"number\":6477,\"state\":\"OPEN\",\"statusCheckRollup\":[],\"url\":\"https://github.com/sparq-org/sparq/pull/6477\"}\n",
+      "stderr": ""
+    }
+  ]
+}

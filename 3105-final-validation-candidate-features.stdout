@@ -1,0 +1,427 @@
+capped-rhs-diagnostic v0.0.0 (/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/final-validation/candidate)
+├── libc feature "default"
+│   ├── libc v0.2.186
+│   └── libc feature "std"
+│       └── libc v0.2.186
+├── oxrdf feature "default"
+│   └── oxrdf v0.3.3
+│       ├── oxilangtag feature "default"
+│       │   ├── oxilangtag v0.1.6
+│       │   └── oxilangtag feature "std"
+│       │       └── oxilangtag v0.1.6
+│       ├── oxiri feature "default"
+│       │   └── oxiri v0.2.11
+│       ├── rand feature "default"
+│       │   ├── rand v0.9.4
+│       │   │   ├── rand_chacha v0.9.0
+│       │   │   │   ├── ppv-lite86 feature "simd"
+│       │   │   │   │   └── ppv-lite86 v0.2.21
+│       │   │   │   │       ├── zerocopy feature "default"
+│       │   │   │   │       │   └── zerocopy v0.8.50
+│       │   │   │   │       └── zerocopy feature "simd"
+│       │   │   │   │           └── zerocopy v0.8.50
+│       │   │   │   └── rand_core feature "default"
+│       │   │   │       └── rand_core v0.9.5
+│       │   │   │           └── getrandom feature "default"
+│       │   │   │               └── getrandom v0.3.4
+│       │   │   │                   ├── libc v0.2.186
+│       │   │   │                   └── cfg-if feature "default"
+│       │   │   │                       └── cfg-if v1.0.4
+│       │   │   └── rand_core v0.9.5 (*)
+│       │   ├── rand feature "os_rng"
+│       │   │   ├── rand v0.9.4 (*)
+│       │   │   └── rand_core feature "os_rng"
+│       │   │       └── rand_core v0.9.5 (*)
+│       │   ├── rand feature "small_rng"
+│       │   │   └── rand v0.9.4 (*)
+│       │   ├── rand feature "std"
+│       │   │   ├── rand v0.9.4 (*)
+│       │   │   ├── rand feature "alloc"
+│       │   │   │   └── rand v0.9.4 (*)
+│       │   │   ├── rand_chacha feature "std"
+│       │   │   │   ├── rand_chacha v0.9.0 (*)
+│       │   │   │   ├── ppv-lite86 feature "std"
+│       │   │   │   │   └── ppv-lite86 v0.2.21 (*)
+│       │   │   │   └── rand_core feature "std"
+│       │   │   │       ├── rand_core v0.9.5 (*)
+│       │   │   │       └── getrandom feature "std"
+│       │   │   │           └── getrandom v0.3.4 (*)
+│       │   │   └── rand_core feature "std" (*)
+│       │   ├── rand feature "std_rng"
+│       │   │   └── rand v0.9.4 (*)
+│       │   └── rand feature "thread_rng"
+│       │       ├── rand v0.9.4 (*)
+│       │       ├── rand feature "os_rng" (*)
+│       │       ├── rand feature "std" (*)
+│       │       └── rand feature "std_rng" (*)
+│       └── thiserror feature "default"
+│           ├── thiserror v2.0.18
+│           │   └── thiserror-impl feature "default"
+│           │       └── thiserror-impl v2.0.18 (proc-macro)
+│           │           ├── proc-macro2 feature "default"
+│           │           │   ├── proc-macro2 v1.0.106
+│           │           │   │   └── unicode-ident feature "default"
+│           │           │   │       └── unicode-ident v1.0.24
+│           │           │   └── proc-macro2 feature "proc-macro"
+│           │           │       └── proc-macro2 v1.0.106 (*)
+│           │           ├── quote feature "default"
+│           │           │   ├── quote v1.0.45
+│           │           │   │   └── proc-macro2 v1.0.106 (*)
+│           │           │   └── quote feature "proc-macro"
+│           │           │       ├── quote v1.0.45 (*)
+│           │           │       └── proc-macro2 feature "proc-macro" (*)
+│           │           └── syn feature "default"
+│           │               ├── syn v2.0.117
+│           │               │   ├── proc-macro2 v1.0.106 (*)
+│           │               │   ├── quote v1.0.45 (*)
+│           │               │   └── unicode-ident feature "default" (*)
+│           │               ├── syn feature "clone-impls"
+│           │               │   └── syn v2.0.117 (*)
+│           │               ├── syn feature "derive"
+│           │               │   └── syn v2.0.117 (*)
+│           │               ├── syn feature "parsing"
+│           │               │   └── syn v2.0.117 (*)
+│           │               ├── syn feature "printing"
+│           │               │   └── syn v2.0.117 (*)
+│           │               └── syn feature "proc-macro"
+│           │                   ├── syn v2.0.117 (*)
+│           │                   ├── proc-macro2 feature "proc-macro" (*)
+│           │                   └── quote feature "proc-macro" (*)
+│           └── thiserror feature "std"
+│               └── thiserror v2.0.18 (*)
+├── oxrdf feature "rdf-12"
+│   └── oxrdf v0.3.3 (*)
+├── rayon feature "default"
+│   └── rayon v1.12.0
+│       ├── either v1.16.0
+│       └── rayon-core feature "default"
+│           └── rayon-core v1.13.0
+│               ├── crossbeam-deque feature "default"
+│               │   ├── crossbeam-deque v0.8.6
+│               │   │   ├── crossbeam-epoch v0.9.20
+│               │   │   │   └── crossbeam-utils v0.8.21
+│               │   │   └── crossbeam-utils v0.8.21
+│               │   └── crossbeam-deque feature "std"
+│               │       ├── crossbeam-deque v0.8.6 (*)
+│               │       ├── crossbeam-epoch feature "std"
+│               │       │   ├── crossbeam-epoch v0.9.20 (*)
+│               │       │   ├── crossbeam-epoch feature "alloc"
+│               │       │   │   └── crossbeam-epoch v0.9.20 (*)
+│               │       │   └── crossbeam-utils feature "std"
+│               │       │       └── crossbeam-utils v0.8.21
+│               │       └── crossbeam-utils feature "std" (*)
+│               └── crossbeam-utils feature "default"
+│                   ├── crossbeam-utils v0.8.21
+│                   └── crossbeam-utils feature "std" (*)
+├── sparq-core feature "default"
+│   ├── sparq-core v0.1.1 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue3105/crates/sparq-core)
+│   │   ├── oxrdf feature "default" (*)
+│   │   ├── oxrdf feature "rdf-12" (*)
+│   │   ├── rayon feature "default" (*)
+│   │   ├── hashbrown feature "default"
+│   │   │   ├── hashbrown v0.17.1
+│   │   │   │   ├── equivalent v1.0.2
+│   │   │   │   ├── foldhash v0.2.0
+│   │   │   │   └── allocator-api2 feature "alloc"
+│   │   │   │       └── allocator-api2 v0.2.21
+│   │   │   ├── hashbrown feature "allocator-api2"
+│   │   │   │   └── hashbrown v0.17.1 (*)
+│   │   │   ├── hashbrown feature "default-hasher"
+│   │   │   │   └── hashbrown v0.17.1 (*)
+│   │   │   ├── hashbrown feature "equivalent"
+│   │   │   │   └── hashbrown v0.17.1 (*)
+│   │   │   ├── hashbrown feature "inline-more"
+│   │   │   │   └── hashbrown v0.17.1 (*)
+│   │   │   └── hashbrown feature "raw-entry"
+│   │   │       └── hashbrown v0.17.1 (*)
+│   │   ├── memchr feature "default"
+│   │   │   ├── memchr v2.8.2
+│   │   │   └── memchr feature "std"
+│   │   │       ├── memchr v2.8.2
+│   │   │       └── memchr feature "alloc"
+│   │   │           └── memchr v2.8.2
+│   │   ├── oxttl feature "default"
+│   │   │   └── oxttl v0.2.3
+│   │   │       ├── oxrdf feature "default" (*)
+│   │   │       ├── oxilangtag feature "default" (*)
+│   │   │       ├── oxiri feature "default" (*)
+│   │   │       ├── thiserror feature "default" (*)
+│   │   │       └── memchr feature "default" (*)
+│   │   ├── oxttl feature "rdf-12"
+│   │   │   ├── oxttl v0.2.3 (*)
+│   │   │   └── oxrdf feature "rdf-12" (*)
+│   │   └── rustc-hash feature "default"
+│   │       ├── rustc-hash v2.1.3
+│   │       └── rustc-hash feature "std"
+│   │           └── rustc-hash v2.1.3
+│   └── sparq-core feature "parallel"
+│       └── sparq-core v0.1.1 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue3105/crates/sparq-core) (*)
+└── sparq-engine feature "default"
+    ├── sparq-engine v0.1.1 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue3105/crates/sparq-engine)
+    │   ├── sparq-core v0.1.1 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue3105/crates/sparq-core) (*)
+    │   ├── oxrdf feature "default" (*)
+    │   ├── oxrdf feature "rdf-12" (*)
+    │   ├── oxiri feature "default" (*)
+    │   ├── rayon feature "default" (*)
+    │   ├── rustc-hash feature "default" (*)
+    │   ├── md-5 feature "default"
+    │   │   ├── md-5 v0.11.0
+    │   │   │   ├── cfg-if feature "default" (*)
+    │   │   │   └── digest feature "default"
+    │   │   │       ├── digest v0.11.3
+    │   │   │       │   ├── block-buffer feature "default"
+    │   │   │       │   │   └── block-buffer v0.12.1
+    │   │   │       │   │       └── hybrid-array feature "default"
+    │   │   │       │   │           └── hybrid-array v0.4.12
+    │   │   │       │   │               ├── typenum feature "const-generics"
+    │   │   │       │   │               │   └── typenum v1.20.1
+    │   │   │       │   │               └── typenum feature "default"
+    │   │   │       │   │                   └── typenum v1.20.1
+    │   │   │       │   ├── const-oid feature "default"
+    │   │   │       │   │   └── const-oid v0.10.2
+    │   │   │       │   └── crypto-common feature "default"
+    │   │   │       │       └── crypto-common v0.2.2
+    │   │   │       │           └── hybrid-array feature "default" (*)
+    │   │   │       └── digest feature "block-api"
+    │   │   │           └── digest v0.11.3 (*)
+    │   │   ├── md-5 feature "alloc"
+    │   │   │   ├── md-5 v0.11.0 (*)
+    │   │   │   └── digest feature "alloc"
+    │   │   │       └── digest v0.11.3 (*)
+    │   │   └── md-5 feature "oid"
+    │   │       ├── md-5 v0.11.0 (*)
+    │   │       └── digest feature "oid"
+    │   │           └── digest v0.11.3 (*)
+    │   ├── regex feature "default"
+    │   │   ├── regex v1.12.4
+    │   │   │   ├── aho-corasick v1.1.4
+    │   │   │   │   └── memchr v2.8.2
+    │   │   │   ├── memchr v2.8.2
+    │   │   │   ├── regex-syntax v0.8.11
+    │   │   │   ├── regex-automata feature "alloc"
+    │   │   │   │   └── regex-automata v0.4.14
+    │   │   │   │       ├── aho-corasick v1.1.4 (*)
+    │   │   │   │       ├── memchr v2.8.2
+    │   │   │   │       └── regex-syntax v0.8.11
+    │   │   │   ├── regex-automata feature "meta"
+    │   │   │   │   ├── regex-automata v0.4.14 (*)
+    │   │   │   │   ├── regex-automata feature "nfa-pikevm"
+    │   │   │   │   │   ├── regex-automata v0.4.14 (*)
+    │   │   │   │   │   └── regex-automata feature "nfa-thompson"
+    │   │   │   │   │       ├── regex-automata v0.4.14 (*)
+    │   │   │   │   │       └── regex-automata feature "alloc" (*)
+    │   │   │   │   └── regex-automata feature "syntax"
+    │   │   │   │       ├── regex-automata v0.4.14 (*)
+    │   │   │   │       └── regex-automata feature "alloc" (*)
+    │   │   │   ├── regex-automata feature "nfa-pikevm" (*)
+    │   │   │   └── regex-automata feature "syntax" (*)
+    │   │   ├── regex feature "perf"
+    │   │   │   ├── regex v1.12.4 (*)
+    │   │   │   ├── regex feature "perf-backtrack"
+    │   │   │   │   ├── regex v1.12.4 (*)
+    │   │   │   │   └── regex-automata feature "nfa-backtrack"
+    │   │   │   │       ├── regex-automata v0.4.14 (*)
+    │   │   │   │       └── regex-automata feature "nfa-thompson" (*)
+    │   │   │   ├── regex feature "perf-cache"
+    │   │   │   │   └── regex v1.12.4 (*)
+    │   │   │   ├── regex feature "perf-dfa"
+    │   │   │   │   ├── regex v1.12.4 (*)
+    │   │   │   │   └── regex-automata feature "hybrid"
+    │   │   │   │       ├── regex-automata v0.4.14 (*)
+    │   │   │   │       ├── regex-automata feature "alloc" (*)
+    │   │   │   │       └── regex-automata feature "nfa-thompson" (*)
+    │   │   │   ├── regex feature "perf-inline"
+    │   │   │   │   ├── regex v1.12.4 (*)
+    │   │   │   │   └── regex-automata feature "perf-inline"
+    │   │   │   │       └── regex-automata v0.4.14 (*)
+    │   │   │   ├── regex feature "perf-literal"
+    │   │   │   │   ├── regex v1.12.4 (*)
+    │   │   │   │   └── regex-automata feature "perf-literal"
+    │   │   │   │       ├── regex-automata v0.4.14 (*)
+    │   │   │   │       ├── regex-automata feature "perf-literal-multisubstring"
+    │   │   │   │       │   └── regex-automata v0.4.14 (*)
+    │   │   │   │       └── regex-automata feature "perf-literal-substring"
+    │   │   │   │           ├── regex-automata v0.4.14 (*)
+    │   │   │   │           └── aho-corasick feature "perf-literal"
+    │   │   │   │               └── aho-corasick v1.1.4 (*)
+    │   │   │   └── regex feature "perf-onepass"
+    │   │   │       ├── regex v1.12.4 (*)
+    │   │   │       └── regex-automata feature "dfa-onepass"
+    │   │   │           ├── regex-automata v0.4.14 (*)
+    │   │   │           └── regex-automata feature "nfa-thompson" (*)
+    │   │   ├── regex feature "std"
+    │   │   │   ├── regex v1.12.4 (*)
+    │   │   │   ├── memchr feature "std" (*)
+    │   │   │   ├── aho-corasick feature "std"
+    │   │   │   │   ├── aho-corasick v1.1.4 (*)
+    │   │   │   │   └── memchr feature "std" (*)
+    │   │   │   ├── regex-automata feature "std"
+    │   │   │   │   ├── regex-automata v0.4.14 (*)
+    │   │   │   │   ├── memchr feature "std" (*)
+    │   │   │   │   ├── aho-corasick feature "std" (*)
+    │   │   │   │   ├── regex-automata feature "alloc" (*)
+    │   │   │   │   └── regex-syntax feature "std"
+    │   │   │   │       └── regex-syntax v0.8.11
+    │   │   │   └── regex-syntax feature "std" (*)
+    │   │   ├── regex feature "unicode"
+    │   │   │   ├── regex v1.12.4 (*)
+    │   │   │   ├── regex feature "unicode-age"
+    │   │   │   │   ├── regex v1.12.4 (*)
+    │   │   │   │   ├── regex-automata feature "unicode-age"
+    │   │   │   │   │   ├── regex-automata v0.4.14 (*)
+    │   │   │   │   │   └── regex-syntax feature "unicode-age"
+    │   │   │   │   │       └── regex-syntax v0.8.11
+    │   │   │   │   └── regex-syntax feature "unicode-age" (*)
+    │   │   │   ├── regex feature "unicode-bool"
+    │   │   │   │   ├── regex v1.12.4 (*)
+    │   │   │   │   ├── regex-automata feature "unicode-bool"
+    │   │   │   │   │   ├── regex-automata v0.4.14 (*)
+    │   │   │   │   │   └── regex-syntax feature "unicode-bool"
+    │   │   │   │   │       └── regex-syntax v0.8.11
+    │   │   │   │   └── regex-syntax feature "unicode-bool" (*)
+    │   │   │   ├── regex feature "unicode-case"
+    │   │   │   │   ├── regex v1.12.4 (*)
+    │   │   │   │   ├── regex-automata feature "unicode-case"
+    │   │   │   │   │   ├── regex-automata v0.4.14 (*)
+    │   │   │   │   │   └── regex-syntax feature "unicode-case"
+    │   │   │   │   │       └── regex-syntax v0.8.11
+    │   │   │   │   └── regex-syntax feature "unicode-case" (*)
+    │   │   │   ├── regex feature "unicode-gencat"
+    │   │   │   │   ├── regex v1.12.4 (*)
+    │   │   │   │   ├── regex-automata feature "unicode-gencat"
+    │   │   │   │   │   ├── regex-automata v0.4.14 (*)
+    │   │   │   │   │   └── regex-syntax feature "unicode-gencat"
+    │   │   │   │   │       └── regex-syntax v0.8.11
+    │   │   │   │   └── regex-syntax feature "unicode-gencat" (*)
+    │   │   │   ├── regex feature "unicode-perl"
+    │   │   │   │   ├── regex v1.12.4 (*)
+    │   │   │   │   ├── regex-automata feature "unicode-perl"
+    │   │   │   │   │   ├── regex-automata v0.4.14 (*)
+    │   │   │   │   │   └── regex-syntax feature "unicode-perl"
+    │   │   │   │   │       └── regex-syntax v0.8.11
+    │   │   │   │   ├── regex-automata feature "unicode-word-boundary"
+    │   │   │   │   │   └── regex-automata v0.4.14 (*)
+    │   │   │   │   └── regex-syntax feature "unicode-perl" (*)
+    │   │   │   ├── regex feature "unicode-script"
+    │   │   │   │   ├── regex v1.12.4 (*)
+    │   │   │   │   ├── regex-automata feature "unicode-script"
+    │   │   │   │   │   ├── regex-automata v0.4.14 (*)
+    │   │   │   │   │   └── regex-syntax feature "unicode-script"
+    │   │   │   │   │       └── regex-syntax v0.8.11
+    │   │   │   │   └── regex-syntax feature "unicode-script" (*)
+    │   │   │   ├── regex feature "unicode-segment"
+    │   │   │   │   ├── regex v1.12.4 (*)
+    │   │   │   │   ├── regex-automata feature "unicode-segment"
+    │   │   │   │   │   ├── regex-automata v0.4.14 (*)
+    │   │   │   │   │   └── regex-syntax feature "unicode-segment"
+    │   │   │   │   │       └── regex-syntax v0.8.11
+    │   │   │   │   └── regex-syntax feature "unicode-segment" (*)
+    │   │   │   ├── regex-automata feature "unicode"
+    │   │   │   │   ├── regex-automata v0.4.14 (*)
+    │   │   │   │   ├── regex-automata feature "unicode-age" (*)
+    │   │   │   │   ├── regex-automata feature "unicode-bool" (*)
+    │   │   │   │   ├── regex-automata feature "unicode-case" (*)
+    │   │   │   │   ├── regex-automata feature "unicode-gencat" (*)
+    │   │   │   │   ├── regex-automata feature "unicode-perl" (*)
+    │   │   │   │   ├── regex-automata feature "unicode-script" (*)
+    │   │   │   │   ├── regex-automata feature "unicode-segment" (*)
+    │   │   │   │   ├── regex-automata feature "unicode-word-boundary" (*)
+    │   │   │   │   └── regex-syntax feature "unicode"
+    │   │   │   │       ├── regex-syntax v0.8.11
+    │   │   │   │       ├── regex-syntax feature "unicode-age" (*)
+    │   │   │   │       ├── regex-syntax feature "unicode-bool" (*)
+    │   │   │   │       ├── regex-syntax feature "unicode-case" (*)
+    │   │   │   │       ├── regex-syntax feature "unicode-gencat" (*)
+    │   │   │   │       ├── regex-syntax feature "unicode-perl" (*)
+    │   │   │   │       ├── regex-syntax feature "unicode-script" (*)
+    │   │   │   │       └── regex-syntax feature "unicode-segment" (*)
+    │   │   │   └── regex-syntax feature "unicode" (*)
+    │   │   └── regex-syntax feature "default"
+    │   │       ├── regex-syntax v0.8.11
+    │   │       ├── regex-syntax feature "std" (*)
+    │   │       └── regex-syntax feature "unicode" (*)
+    │   ├── sha1 feature "default"
+    │   │   ├── sha1 v0.11.0
+    │   │   │   ├── cfg-if feature "default" (*)
+    │   │   │   ├── digest feature "default" (*)
+    │   │   │   └── cpufeatures feature "default"
+    │   │   │       └── cpufeatures v0.3.0
+    │   │   │           └── libc v0.2.186
+    │   │   ├── sha1 feature "alloc"
+    │   │   │   ├── sha1 v0.11.0 (*)
+    │   │   │   └── digest feature "alloc" (*)
+    │   │   └── sha1 feature "oid"
+    │   │       ├── sha1 v0.11.0 (*)
+    │   │       └── digest feature "oid" (*)
+    │   ├── sha2 feature "default"
+    │   │   ├── sha2 v0.11.0
+    │   │   │   ├── cfg-if feature "default" (*)
+    │   │   │   ├── digest feature "default" (*)
+    │   │   │   └── cpufeatures feature "default" (*)
+    │   │   ├── sha2 feature "alloc"
+    │   │   │   ├── sha2 v0.11.0 (*)
+    │   │   │   └── digest feature "alloc" (*)
+    │   │   └── sha2 feature "oid"
+    │   │       ├── sha2 v0.11.0 (*)
+    │   │       └── digest feature "oid" (*)
+    │   ├── smallvec feature "default"
+    │   │   └── smallvec v1.15.2
+    │   ├── spargebra feature "default"
+    │   │   └── spargebra v0.4.6 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue3105/vendor/spargebra)
+    │   │       ├── oxrdf feature "default" (*)
+    │   │       ├── oxilangtag feature "default" (*)
+    │   │       ├── oxiri feature "default" (*)
+    │   │       ├── rand feature "default" (*)
+    │   │       ├── thiserror feature "default" (*)
+    │   │       └── peg feature "default"
+    │   │           ├── peg v0.8.6
+    │   │           │   ├── peg-macros feature "default"
+    │   │           │   │   └── peg-macros v0.8.6 (proc-macro)
+    │   │           │   │       ├── proc-macro2 feature "default" (*)
+    │   │           │   │       ├── quote feature "default" (*)
+    │   │           │   │       └── peg-runtime feature "default"
+    │   │           │   │           └── peg-runtime v0.8.6
+    │   │           │   └── peg-runtime feature "default"
+    │   │           │       └── peg-runtime v0.8.6
+    │   │           └── peg feature "std"
+    │   │               ├── peg v0.8.6 (*)
+    │   │               └── peg-runtime feature "std"
+    │   │                   └── peg-runtime v0.8.6
+    │   ├── spargebra feature "sep-0006"
+    │   │   └── spargebra v0.4.6 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue3105/vendor/spargebra) (*)
+    │   ├── spargebra feature "sparql-12"
+    │   │   ├── spargebra v0.4.6 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue3105/vendor/spargebra) (*)
+    │   │   └── oxrdf feature "rdf-12" (*)
+    │   ├── sparq-substrate feature "compare"
+    │   │   └── sparq-substrate v0.1.1 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue3105/crates/sparq-substrate)
+    │   │       ├── sparq-core v0.1.1 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue3105/crates/sparq-core) (*)
+    │   │       ├── oxrdf feature "default" (*)
+    │   │       ├── oxrdf feature "rdf-12" (*)
+    │   │       ├── hashbrown feature "default" (*)
+    │   │       ├── rustc-hash feature "default" (*)
+    │   │       └── smallvec feature "default" (*)
+    │   ├── sparq-substrate feature "join"
+    │   │   ├── sparq-substrate v0.1.1 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue3105/crates/sparq-substrate) (*)
+    │   │   └── sparq-substrate feature "rows"
+    │   │       └── sparq-substrate v0.1.1 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue3105/crates/sparq-substrate) (*)
+    │   ├── sparq-substrate feature "numeric"
+    │   │   └── sparq-substrate v0.1.1 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue3105/crates/sparq-substrate) (*)
+    │   ├── uuid feature "default"
+    │   │   ├── uuid v1.23.4
+    │   │   │   └── getrandom feature "default"
+    │   │   │       └── getrandom v0.4.2
+    │   │   │           ├── libc v0.2.186
+    │   │   │           └── cfg-if feature "default" (*)
+    │   │   └── uuid feature "std"
+    │   │       └── uuid v1.23.4 (*)
+    │   └── uuid feature "v4"
+    │       ├── uuid v1.23.4 (*)
+    │       └── uuid feature "rng"
+    │           └── uuid v1.23.4 (*)
+    ├── sparq-engine feature "digest"
+    │   └── sparq-engine v0.1.1 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue3105/crates/sparq-engine) (*)
+    ├── sparq-engine feature "parallel"
+    │   ├── sparq-engine v0.1.1 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue3105/crates/sparq-engine) (*)
+    │   └── sparq-core feature "parallel" (*)
+    └── sparq-engine feature "regex"
+        └── sparq-engine v0.1.1 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue3105/crates/sparq-engine) (*)

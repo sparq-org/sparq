@@ -1,0 +1,12 @@
+{
+  "at": "2026-09-10T02:29:39.961769+00:00",
+  "head": "19763bfab1dce196a654c899b172e7b24d70bc59",
+  "files_verified": 108,
+  "bytes_verified": 80744966,
+  "manifest_sha256": "8cabd47726442047f2bd05334c6af7557c198e03b0bcfd69cdcaf737470e7668",
+  "commands_and_raw_samples_verified": 12,
+  "orders": "AB/BA/AB percase",
+  "result": "NO_GO:8patterns additional11344095requestedpeakbytes=104.911%; linearretention sufficient toreject.5patterns additional4623534bytes. No counting-duration timingclaim.",
+  "source": "Frozen candidate-exec.rs and instrumented snapshots preserved; worker restored exact19763 before nextphase.",
+  "zk": "Root read try_capped existingguard and worker fullfixture trace equality/executedprobes; missingcallercontext finding, no redundantgate needed."
+}

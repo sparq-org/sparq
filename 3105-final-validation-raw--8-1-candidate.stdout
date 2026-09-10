@@ -1,0 +1,2 @@
+{"kind":"fixture","query":"ASK { ?s <urn:p0> ?o . ?s <urn:p1> ?o . ?s <urn:p2> ?o . ?s <urn:p3> ?o . ?s <urn:p4> ?o . ?s <urn:p5> ?o . ?s <urn:p6> ?o . ?s <urn:p7> ?o .  FILTER(?o + 0 < 0) }","seed_position":0,"threshold":0,"triples":568192}
+{"case":"8","view":"base","counting":true,"rep":1,"iterations":1,"nanos":22236375,"rows":0,"allocs":70874,"reallocs":1083,"requested_bytes":121330504,"peak_live_growth":22157124,"live_after":52432202,"setup_peak_rss":86114304,"before_peak_rss":100581376,"after_peak_rss":100597760}
