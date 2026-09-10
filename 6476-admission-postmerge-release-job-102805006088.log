@@ -1,0 +1,1145 @@
+﻿2026-09-10T08:44:40.7585211Z Current runner version: '2.337.0'
+2026-09-10T08:44:40.7614957Z ##[group]Runner Image Provisioner
+2026-09-10T08:44:40.7616732Z Hosted Compute Agent
+2026-09-10T08:44:40.7617798Z Version: 20260828.587
+2026-09-10T08:44:40.7618834Z Commit: abac92662cab4cc7352de4f9f9d2e2419aad9c29
+2026-09-10T08:44:40.7620021Z Build Date: 2026-08-28T16:44:25Z
+2026-09-10T08:44:40.7621089Z Worker ID: {657895c2-55a5-4e25-b7e4-c8444df66c7c}
+2026-09-10T08:44:40.7622168Z Azure Region: centralus
+2026-09-10T08:44:40.7623065Z ##[endgroup]
+2026-09-10T08:44:40.7625456Z ##[group]Operating System
+2026-09-10T08:44:40.7626433Z Ubuntu
+2026-09-10T08:44:40.7627518Z 24.04.4
+2026-09-10T08:44:40.7628270Z LTS
+2026-09-10T08:44:40.7629178Z ##[endgroup]
+2026-09-10T08:44:40.7630142Z ##[group]Runner Image
+2026-09-10T08:44:40.7630987Z Image: ubuntu-24.04
+2026-09-10T08:44:40.7631946Z Version: 20260831.293.1
+2026-09-10T08:44:40.7633576Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260831.293/images/ubuntu/Ubuntu2404-Readme.md
+2026-09-10T08:44:40.7635563Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20260831.293
+2026-09-10T08:44:40.7637229Z ##[endgroup]
+2026-09-10T08:44:40.7639119Z ##[group]GITHUB_TOKEN Permissions
+2026-09-10T08:44:40.7641783Z Contents: write
+2026-09-10T08:44:40.7642758Z Metadata: read
+2026-09-10T08:44:40.7643669Z PullRequests: write
+2026-09-10T08:44:40.7644535Z ##[endgroup]
+2026-09-10T08:44:40.7647412Z Secret source: Actions
+2026-09-10T08:44:40.7648918Z Cache mode: write
+2026-09-10T08:44:40.7649932Z Prepare workflow directory
+2026-09-10T08:44:40.8182657Z Prepare all required actions
+2026-09-10T08:44:40.8231755Z Getting action download info
+2026-09-10T08:44:41.0953195Z Download action repository 'actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1' (SHA:bcd2ba49218906704ab6c1aa796996da409d3eb1)
+2026-09-10T08:44:41.5226996Z Download action repository 'actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0' (SHA:9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0)
+2026-09-10T08:44:41.5592929Z Download action repository 'taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68' (SHA:18b1216eba7f8039b0f8d131d5473787f0edce68)
+2026-09-10T08:44:42.1899817Z Complete job name: release-plz / Release-PR (advisory)
+2026-09-10T08:44:42.2883760Z ##[warning]Input 'app-id' has been deprecated with message: Use 'client-id' instead.
+2026-09-10T08:44:42.3124665Z ##[group]Run actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+2026-09-10T08:44:42.3127150Z with:
+2026-09-10T08:44:42.3128420Z   app-id: ***
+2026-09-10T08:44:42.3154001Z   private-key: ***
+2026-09-10T08:44:42.3155260Z   skip-token-revoke: false
+2026-09-10T08:44:42.3157028Z   github-api-url: https://api.github.com
+2026-09-10T08:44:42.3159136Z env:
+2026-09-10T08:44:42.3160362Z   ORCHESTRATOR_APP_ID: ***
+2026-09-10T08:44:42.3161632Z ##[endgroup]
+2026-09-10T08:44:42.4018468Z Inputs 'owner' and 'repositories' are not set. Creating token for this repository (sparq-org/sparq).
+2026-09-10T08:44:42.9610396Z ##[group]Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+2026-09-10T08:44:42.9611420Z with:
+2026-09-10T08:44:42.9612160Z   fetch-depth: 0
+2026-09-10T08:44:42.9612914Z   persist-credentials: false
+2026-09-10T08:44:42.9613707Z   repository: sparq-org/sparq
+2026-09-10T08:44:42.9617146Z   token: ***
+2026-09-10T08:44:42.9617854Z   ssh-strict: true
+2026-09-10T08:44:42.9618524Z   ssh-user: git
+2026-09-10T08:44:42.9619178Z   clean: true
+2026-09-10T08:44:42.9619879Z   sparse-checkout-cone-mode: true
+2026-09-10T08:44:42.9620690Z   fetch-tags: false
+2026-09-10T08:44:42.9621426Z   show-progress: true
+2026-09-10T08:44:42.9622161Z   lfs: false
+2026-09-10T08:44:42.9622875Z   submodules: false
+2026-09-10T08:44:42.9623625Z   set-safe-directory: true
+2026-09-10T08:44:42.9624401Z   allow-unsafe-pr-checkout: false
+2026-09-10T08:44:42.9625178Z env:
+2026-09-10T08:44:42.9625918Z   ORCHESTRATOR_APP_ID: ***
+2026-09-10T08:44:42.9626912Z ##[endgroup]
+2026-09-10T08:44:43.0606115Z Syncing repository: sparq-org/sparq
+2026-09-10T08:44:43.0609228Z ##[group]Getting Git version info
+2026-09-10T08:44:43.0610039Z Working directory is '/home/runner/work/sparq/sparq'
+2026-09-10T08:44:43.0611263Z [command]/usr/bin/git version
+2026-09-10T08:44:43.0660232Z git version 2.55.0
+2026-09-10T08:44:43.0688226Z ##[endgroup]
+2026-09-10T08:44:43.0700809Z Temporarily overriding HOME='/home/runner/work/_temp/40af6475-8c80-4683-b85b-bb505d10f8b5' before making global git config changes
+2026-09-10T08:44:43.0702726Z Adding repository directory to the temporary git global config as a safe directory
+2026-09-10T08:44:43.0717173Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/sparq/sparq
+2026-09-10T08:44:43.0760270Z Deleting the contents of '/home/runner/work/sparq/sparq'
+2026-09-10T08:44:43.0763911Z ##[group]Determining repository object format
+2026-09-10T08:44:43.0765830Z ##[endgroup]
+2026-09-10T08:44:43.0767723Z ##[group]Initializing the repository
+2026-09-10T08:44:43.0789623Z [command]/usr/bin/git init /home/runner/work/sparq/sparq
+2026-09-10T08:44:43.0907612Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-09-10T08:44:43.0909000Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-09-10T08:44:43.0912572Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-09-10T08:44:43.0914201Z hint: call:
+2026-09-10T08:44:43.0915246Z hint:
+2026-09-10T08:44:43.0916686Z hint: 	git config --global init.defaultBranch <name>
+2026-09-10T08:44:43.0918142Z hint:
+2026-09-10T08:44:43.0919473Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-09-10T08:44:43.0921255Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-09-10T08:44:43.0922802Z hint:
+2026-09-10T08:44:43.0923859Z hint: 	git branch -m <name>
+2026-09-10T08:44:43.0924945Z hint:
+2026-09-10T08:44:43.0926179Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-09-10T08:44:43.0928181Z Initialized empty Git repository in /home/runner/work/sparq/sparq/.git/
+2026-09-10T08:44:43.0931288Z [command]/usr/bin/git remote add origin https://github.com/sparq-org/sparq
+2026-09-10T08:44:43.0979415Z ##[endgroup]
+2026-09-10T08:44:43.0981283Z ##[group]Disabling automatic garbage collection
+2026-09-10T08:44:43.0988994Z [command]/usr/bin/git config --local gc.auto 0
+2026-09-10T08:44:43.1025441Z ##[endgroup]
+2026-09-10T08:44:43.1027848Z ##[group]Setting up auth
+2026-09-10T08:44:43.1029066Z Removing SSH command configuration
+2026-09-10T08:44:43.1031620Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-09-10T08:44:43.1074096Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-09-10T08:44:43.1457983Z Removing HTTP extra header
+2026-09-10T08:44:43.1464689Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-10T08:44:43.1503364Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-09-10T08:44:43.1725321Z Removing includeIf entries pointing to credentials config files
+2026-09-10T08:44:43.1729935Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-10T08:44:43.1765177Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-09-10T08:44:43.1993334Z [command]/usr/bin/git config --file /home/runner/work/_temp/git-credentials-2aea6325-d43b-4cc2-95b4-4e6055dde9d1.config http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-09-10T08:44:43.2033923Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/sparq/sparq/.git.path /home/runner/work/_temp/git-credentials-2aea6325-d43b-4cc2-95b4-4e6055dde9d1.config
+2026-09-10T08:44:43.2068775Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/sparq/sparq/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-2aea6325-d43b-4cc2-95b4-4e6055dde9d1.config
+2026-09-10T08:44:43.2109402Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-2aea6325-d43b-4cc2-95b4-4e6055dde9d1.config
+2026-09-10T08:44:43.2149256Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-2aea6325-d43b-4cc2-95b4-4e6055dde9d1.config
+2026-09-10T08:44:43.2184043Z ##[endgroup]
+2026-09-10T08:44:43.2186053Z ##[group]Fetching the repository
+2026-09-10T08:44:43.2190405Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules origin +refs/heads/*:refs/remotes/origin/* +refs/tags/*:refs/tags/*
+2026-09-10T08:44:50.0198501Z From https://github.com/sparq-org/sparq
+2026-09-10T08:44:50.0199774Z  * [new branch]        agent-logs              -> origin/agent-logs
+2026-09-10T08:44:50.0200909Z  * [new branch]        agent/retriage-needs-user -> origin/agent/retriage-needs-user
+2026-09-10T08:44:50.0202274Z  * [new branch]        bd-cutover              -> origin/bd-cutover
+2026-09-10T08:44:50.0203030Z  * [new branch]        beads-context-hook      -> origin/beads-context-hook
+2026-09-10T08:44:50.0203828Z  * [new branch]        beads-resync-647b749    -> origin/beads-resync-647b749
+2026-09-10T08:44:50.0205361Z  * [new branch]        bench/bytes-per-triple-scale-sq-7d3dj32 -> origin/bench/bytes-per-triple-scale-sq-7d3dj32
+2026-09-10T08:44:50.0206352Z  * [new branch]        benchmark-data          -> origin/benchmark-data
+2026-09-10T08:44:50.0207393Z  * [new branch]        cert-asvs-audit         -> origin/cert-asvs-audit
+2026-09-10T08:44:50.0208142Z  * [new branch]        cert-cdmc-audit         -> origin/cert-cdmc-audit
+2026-09-10T08:44:50.0208887Z  * [new branch]        cert-cis-audit          -> origin/cert-cis-audit
+2026-09-10T08:44:50.0209866Z  * [new branch]        cert-cra-audit          -> origin/cert-cra-audit
+2026-09-10T08:44:50.0210961Z  * [new branch]        cert-cryptoreview-audit -> origin/cert-cryptoreview-audit
+2026-09-10T08:44:50.0212015Z  * [new branch]        cert-iso27001-audit     -> origin/cert-iso27001-audit
+2026-09-10T08:44:50.0212811Z  * [new branch]        cert-openssf-audit      -> origin/cert-openssf-audit
+2026-09-10T08:44:50.0213440Z  * [new branch]        cert-privacy-audit      -> origin/cert-privacy-audit
+2026-09-10T08:44:50.0214031Z  * [new branch]        cert-sbom-audit         -> origin/cert-sbom-audit
+2026-09-10T08:44:50.0214586Z  * [new branch]        cert-slsa-audit         -> origin/cert-slsa-audit
+2026-09-10T08:44:50.0215132Z  * [new branch]        cert-ssdf-audit         -> origin/cert-ssdf-audit
+2026-09-10T08:44:50.0215696Z  * [new branch]        charter-maintenance     -> origin/charter-maintenance
+2026-09-10T08:44:50.0216800Z  * [new branch]        chore-beads-resync-jsonld-frame -> origin/chore-beads-resync-jsonld-frame
+2026-09-10T08:44:50.0217607Z  * [new branch]        chore-beads-resync-jun15 -> origin/chore-beads-resync-jun15
+2026-09-10T08:44:50.0218279Z  * [new branch]        chore-beads-resync-sq-hslb -> origin/chore-beads-resync-sq-hslb
+2026-09-10T08:44:50.0218933Z  * [new branch]        chore-charter-crosspoll -> origin/chore-charter-crosspoll
+2026-09-10T08:44:50.0219580Z  * [new branch]        chore-cratesio-name-check -> origin/chore-cratesio-name-check
+2026-09-10T08:44:50.0220233Z  * [new branch]        chore-scorecard-pin-perms -> origin/chore-scorecard-pin-perms
+2026-09-10T08:44:50.0221517Z  * [new branch]        chore-vendor-chartjs    -> origin/chore-vendor-chartjs
+2026-09-10T08:44:50.0223254Z  * [new branch]        chore/sq-uhqah-formalize-codex-ec2 -> origin/chore/sq-uhqah-formalize-codex-ec2
+2026-09-10T08:44:50.0224026Z  * [new branch]        ci-asan-mmap-corpus     -> origin/ci-asan-mmap-corpus
+2026-09-10T08:44:50.0224743Z  * [new branch]        ci-doc-quality          -> origin/ci-doc-quality
+2026-09-10T08:44:50.0226060Z  * [new branch]        ci-fix-flake-x4jy       -> origin/ci-fix-flake-x4jy
+2026-09-10T08:44:50.0227327Z  * [new branch]        ci-pr-gating            -> origin/ci-pr-gating
+2026-09-10T08:44:50.0228460Z  * [new branch]        ci/auto-arm-workflows-permission -> origin/ci/auto-arm-workflows-permission
+2026-09-10T08:44:50.0229605Z  * [new branch]        ci/batch-merge-v2-bisection -> origin/ci/batch-merge-v2-bisection
+2026-09-10T08:44:50.0230805Z  * [new branch]        ci/codeql-nonblocking-retroactive -> origin/ci/codeql-nonblocking-retroactive
+2026-09-10T08:44:50.0232033Z  * [new branch]        ci/pr-freshness-auto-update-branch -> origin/ci/pr-freshness-auto-update-branch
+2026-09-10T08:44:50.0233224Z  * [new branch]        ci/sq-2wo5t-assemble-failure-loud -> origin/ci/sq-2wo5t-assemble-failure-loud
+2026-09-10T08:44:50.0234450Z  * [new branch]        ci/sq-6vshe.20-runner-consolidation -> origin/ci/sq-6vshe.20-runner-consolidation
+2026-09-10T08:44:50.0235674Z  * [new branch]        ci/sq-9crx-free-disk-before-archive -> origin/ci/sq-9crx-free-disk-before-archive
+2026-09-10T08:44:50.0236931Z  * [new branch]        ci/workflow-seam-corpus -> origin/ci/workflow-seam-corpus
+2026-09-10T08:44:50.0238064Z  * [new branch]        codex/acp-empty-matcher-main817 -> origin/codex/acp-empty-matcher-main817
+2026-09-10T08:44:50.0239256Z  * [new branch]        codex/ebs-evac-bench-partitions -> origin/codex/ebs-evac-bench-partitions
+2026-09-10T08:44:50.0240393Z  * [new branch]        codex/ebs-evac-miri-scale -> origin/codex/ebs-evac-miri-scale
+2026-09-10T08:44:50.0241474Z  * [new branch]        codex/ebs-evac-wasm-corpus -> origin/codex/ebs-evac-wasm-corpus
+2026-09-10T08:44:50.0242599Z  * [new branch]        codex/label-override-dispatch -> origin/codex/label-override-dispatch
+2026-09-10T08:44:50.0243822Z  * [new branch]        codex/label-override-review-fix -> origin/codex/label-override-review-fix
+2026-09-10T08:44:50.0245159Z  * [new branch]        codex/miri-capacity-bound-2801 -> origin/codex/miri-capacity-bound-2801
+2026-09-10T08:44:50.0246297Z  * [new branch]        codex/nightly-runner-reserve -> origin/codex/nightly-runner-reserve
+2026-09-10T08:44:50.0248087Z  * [new branch]        codex/sol-impl-opus-review -> origin/codex/sol-impl-opus-review
+2026-09-10T08:44:50.0249186Z  * [new branch]        codex/sparql-bind-join-ranges -> origin/codex/sparql-bind-join-ranges
+2026-09-10T08:44:50.0250420Z  * [new branch]        codex/throughput-slo    -> origin/codex/throughput-slo
+2026-09-10T08:44:50.0251426Z  * [new branch]        cx/19f1i                -> origin/cx/19f1i
+2026-09-10T08:44:50.0252381Z  * [new branch]        cx/r2nor                -> origin/cx/r2nor
+2026-09-10T08:44:50.0253543Z  * [new branch]        dashboard-featured-scaling -> origin/dashboard-featured-scaling
+2026-09-10T08:44:50.0254743Z  * [new branch]        dashboard-metric-labels -> origin/dashboard-metric-labels
+2026-09-10T08:44:50.0256679Z  * [new branch]        dependabot/github_actions/actions/setup-java-6.0.0 -> origin/dependabot/github_actions/actions/setup-java-6.0.0
+2026-09-10T08:44:50.0258626Z  * [new branch]        dependabot/github_actions/errata-ai/vale-action-3.0.0 -> origin/dependabot/github_actions/errata-ai/vale-action-3.0.0
+2026-09-10T08:44:50.0260341Z  * [new branch]        dependabot/npm_and_yarn/fastify-5.12.1 -> origin/dependabot/npm_and_yarn/fastify-5.12.1
+2026-09-10T08:44:50.0261886Z  * [new branch]        dependabot/npm_and_yarn/ip-address-10.4.0 -> origin/dependabot/npm_and_yarn/ip-address-10.4.0
+2026-09-10T08:44:50.0263099Z  * [new branch]        dependabot/npm_and_yarn/js-yaml-4.3.2 -> origin/dependabot/npm_and_yarn/js-yaml-4.3.2
+2026-09-10T08:44:50.0264130Z  * [new branch]        dependabot/npm_and_yarn/multi-5db45a0b5a -> origin/dependabot/npm_and_yarn/multi-5db45a0b5a
+2026-09-10T08:44:50.0265720Z  * [new branch]        dependabot/npm_and_yarn/multi-c073259809 -> origin/dependabot/npm_and_yarn/multi-c073259809
+2026-09-10T08:44:50.0267200Z  * [new branch]        deps-major-migrations   -> origin/deps-major-migrations
+2026-09-10T08:44:50.0268035Z  * [new branch]        design-logo-proposal    -> origin/design-logo-proposal
+2026-09-10T08:44:50.0268664Z  * [new branch]        design-zk-hidden-join   -> origin/design-zk-hidden-join
+2026-09-10T08:44:50.0269294Z  * [new branch]        design-zk-holder-pop    -> origin/design-zk-holder-pop
+2026-09-10T08:44:50.0269909Z  * [new branch]        dict-spill              -> origin/dict-spill
+2026-09-10T08:44:50.0270593Z  * [new branch]        docs-agents-background-dispatch -> origin/docs-agents-background-dispatch
+2026-09-10T08:44:50.0271439Z  * [new branch]        docs-agents-orchestration-discipline -> origin/docs-agents-orchestration-discipline
+2026-09-10T08:44:50.0272196Z  * [new branch]        docs-crate-readmes      -> origin/docs-crate-readmes
+2026-09-10T08:44:50.0272831Z  * [new branch]        docs-deperf-readmes     -> origin/docs-deperf-readmes
+2026-09-10T08:44:50.0273461Z  * [new branch]        docs-include-str        -> origin/docs-include-str
+2026-09-10T08:44:50.0274083Z  * [new branch]        docs-loop-is-backstop   -> origin/docs-loop-is-backstop
+2026-09-10T08:44:50.0274744Z  * [new branch]        docs-no-internals-audit -> origin/docs-no-internals-audit
+2026-09-10T08:44:50.0275433Z  * [new branch]        docs-pages-cutover-runbook -> origin/docs-pages-cutover-runbook
+2026-09-10T08:44:50.0276102Z  * [new branch]        docs-readme-human-focus -> origin/docs-readme-human-focus
+2026-09-10T08:44:50.0277290Z  * [new branch]        docs-top-readme         -> origin/docs-top-readme
+2026-09-10T08:44:50.0278297Z  * [new branch]        docs/capability-based-model-routing -> origin/docs/capability-based-model-routing
+2026-09-10T08:44:50.0279150Z  * [new branch]        fable/gate-unsatisfiable-hold-3758 -> origin/fable/gate-unsatisfiable-hold-3758
+2026-09-10T08:44:50.0280030Z  * [new branch]        fable/vectorized-feature-off-flip-guard -> origin/fable/vectorized-feature-off-flip-guard
+2026-09-10T08:44:50.0280918Z  * [new branch]        feat-competitor-bench-scaffold -> origin/feat-competitor-bench-scaffold
+2026-09-10T08:44:50.0281722Z  * [new branch]        feat-core-rdf12-sharded-builder -> origin/feat-core-rdf12-sharded-builder
+2026-09-10T08:44:50.0282567Z  * [new branch]        feat-dashboard-featured-competitors -> origin/feat-dashboard-featured-competitors
+2026-09-10T08:44:50.0283449Z  * [new branch]        feat-engine-aggregate-empty-semantics -> origin/feat-engine-aggregate-empty-semantics
+2026-09-10T08:44:50.0284340Z  * [new branch]        feat-engine-durable-clear-drop-named -> origin/feat-engine-durable-clear-drop-named
+2026-09-10T08:44:50.0285072Z  * [new branch]        feat-fuzz-harness       -> origin/feat-fuzz-harness
+2026-09-10T08:44:50.0285744Z  * [new branch]        feat-hdt-direct-write-encoder -> origin/feat-hdt-direct-write-encoder
+2026-09-10T08:44:50.0286742Z  * [new branch]        feat-logo-concepts-sq-jnh9 -> origin/feat-logo-concepts-sq-jnh9
+2026-09-10T08:44:50.0287737Z  * [new branch]        feat-mpc-3axis-security-descriptor -> origin/feat-mpc-3axis-security-descriptor
+2026-09-10T08:44:50.0288543Z  * [new branch]        feat-mpc-benchmark-matrix -> origin/feat-mpc-benchmark-matrix
+2026-09-10T08:44:50.0289231Z  * [new branch]        feat-mpc-degree-reduction -> origin/feat-mpc-degree-reduction
+2026-09-10T08:44:50.0289943Z  * [new branch]        feat-mpc-federated-pipeline -> origin/feat-mpc-federated-pipeline
+2026-09-10T08:44:50.0290737Z  * [new branch]        feat-mpc-network-benchmark-tier -> origin/feat-mpc-network-benchmark-tier
+2026-09-10T08:44:50.0291529Z  * [new branch]        feat-mpc-oblivious-join-output -> origin/feat-mpc-oblivious-join-output
+2026-09-10T08:44:50.0292320Z  * [new branch]        feat-mpc-oblivious-shuffle-sort -> origin/feat-mpc-oblivious-shuffle-sort
+2026-09-10T08:44:50.0293063Z  * [new branch]        feat-mpc-secure-threshold -> origin/feat-mpc-secure-threshold
+2026-09-10T08:44:50.0293762Z  * [new branch]        feat-mpc-selection-registry -> origin/feat-mpc-selection-registry
+2026-09-10T08:44:50.0294546Z  * [new branch]        feat-mpc-tampered-share-detection -> origin/feat-mpc-tampered-share-detection
+2026-09-10T08:44:50.0295475Z  * [new branch]        feat-parallel-nquads-loader -> origin/feat-parallel-nquads-loader
+2026-09-10T08:44:50.0296195Z  * [new branch]        feat-persist-named-graphs -> origin/feat-persist-named-graphs
+2026-09-10T08:44:50.0297239Z  * [new branch]        feat-server-atomic-multiop-update -> origin/feat-server-atomic-multiop-update
+2026-09-10T08:44:50.0298012Z  * [new branch]        feat-server-durable-persist -> origin/feat-server-durable-persist
+2026-09-10T08:44:50.0298756Z  * [new branch]        feat-server-sse-subscriptions -> origin/feat-server-sse-subscriptions
+2026-09-10T08:44:50.0299559Z  * [new branch]        feat-server-subscriptions-auth-gate -> origin/feat-server-subscriptions-auth-gate
+2026-09-10T08:44:50.0300305Z  * [new branch]        feat-update-auth-token  -> origin/feat-update-auth-token
+2026-09-10T08:44:50.0301053Z  * [new branch]        feat-vectors-bulk-embedding-import -> origin/feat-vectors-bulk-embedding-import
+2026-09-10T08:44:50.0301875Z  * [new branch]        feat-vectors-graph-fingerprint -> origin/feat-vectors-graph-fingerprint
+2026-09-10T08:44:50.0302623Z  * [new branch]        feat-vectors-live-embeddings -> origin/feat-vectors-live-embeddings
+2026-09-10T08:44:50.0303378Z  * [new branch]        feat-zk-attested-holder-binding -> origin/feat-zk-attested-holder-binding
+2026-09-10T08:44:50.0304133Z  * [new branch]        feat-zk-forge-regression-map -> origin/feat-zk-forge-regression-map
+2026-09-10T08:44:50.0304919Z  * [new branch]        feat-zk-holder-bound-signed-message -> origin/feat-zk-holder-bound-signed-message
+2026-09-10T08:44:50.0305728Z  * [new branch]        feat-zk-holder-pop-forge-suite -> origin/feat-zk-holder-pop-forge-suite
+2026-09-10T08:44:50.0306590Z  * [new branch]        feat-zk-scan-strict-ordering -> origin/feat-zk-scan-strict-ordering
+2026-09-10T08:44:50.0307319Z  * [new branch]        feat-zk-statuslist-privacy -> origin/feat-zk-statuslist-privacy
+2026-09-10T08:44:50.0308019Z  * [new branch]        feat-zk-toolchain-ci-lane -> origin/feat-zk-toolchain-ci-lane
+2026-09-10T08:44:50.0308749Z  * [new branch]        feat-zk-verifier-holder-binding -> origin/feat-zk-verifier-holder-binding
+2026-09-10T08:44:50.0309482Z  * [new branch]        feat-zlibng-flate2-backend -> origin/feat-zlibng-flate2-backend
+2026-09-10T08:44:50.0310196Z  * [new branch]        feat/gui-shacl-tool-sq-ixc3.11 -> origin/feat/gui-shacl-tool-sq-ixc3.11
+2026-09-10T08:44:50.0310982Z  * [new branch]        feat/site-surface-content-scanfirst -> origin/feat/site-surface-content-scanfirst
+2026-09-10T08:44:50.0311752Z  * [new branch]        feat/sq-1rg2q.2-focus-kinds -> origin/feat/sq-1rg2q.2-focus-kinds
+2026-09-10T08:44:50.0312492Z  * [new branch]        feat/sq-3dyje.13-parser-checklist -> origin/feat/sq-3dyje.13-parser-checklist
+2026-09-10T08:44:50.0313523Z  * [new branch]        feat/sq-3dyje.7-fedplan-mutants -> origin/feat/sq-3dyje.7-fedplan-mutants
+2026-09-10T08:44:50.0314273Z  * [new branch]        feat/sq-3dyje.9-metamorph-ci -> origin/feat/sq-3dyje.9-metamorph-ci
+2026-09-10T08:44:50.0314987Z  * [new branch]        feat/sq-3mu76-odrl-decide-wac -> origin/feat/sq-3mu76-odrl-decide-wac
+2026-09-10T08:44:50.0315724Z  * [new branch]        feat/sq-4ssz1-zstd-lazy-import -> origin/feat/sq-4ssz1-zstd-lazy-import
+2026-09-10T08:44:50.0316650Z  * [new branch]        feat/sq-586sh-wasm-policy-probe -> origin/feat/sq-586sh-wasm-policy-probe
+2026-09-10T08:44:50.0317475Z  * [new branch]        feat/sq-6aefu-order-worker-reinstall -> origin/feat/sq-6aefu-order-worker-reinstall
+2026-09-10T08:44:50.0318332Z  * [new branch]        feat/sq-6syab.1-trust-expression-spec -> origin/feat/sq-6syab.1-trust-expression-spec
+2026-09-10T08:44:50.0319106Z  * [new branch]        feat/sq-6tykl.3-sq-6tykl.3-w2 -> origin/feat/sq-6tykl.3-sq-6tykl.3-w2
+2026-09-10T08:44:50.0319808Z  * [new branch]        feat/sq-8ju74-cli-hdt-export -> origin/feat/sq-8ju74-cli-hdt-export
+2026-09-10T08:44:50.0320602Z  * [new branch]        feat/sq-996jn-metamorph-lang-isliteral -> origin/feat/sq-996jn-metamorph-lang-isliteral
+2026-09-10T08:44:50.0321500Z  * [new branch]        feat/sq-9n1q4-sq-9n1q4-w -> origin/feat/sq-9n1q4-sq-9n1q4-w
+2026-09-10T08:44:50.0322183Z  * [new branch]        feat/sq-dkuff-lc-list-operand -> origin/feat/sq-dkuff-lc-list-operand
+2026-09-10T08:44:50.0322967Z  * [new branch]        feat/sq-ev41x-substrate-move-kernels -> origin/feat/sq-ev41x-substrate-move-kernels
+2026-09-10T08:44:50.0323817Z  * [new branch]        feat/sq-fy8ci-restore-single-flight -> origin/feat/sq-fy8ci-restore-single-flight
+2026-09-10T08:44:50.0324576Z  * [new branch]        feat/sq-gg0qq.1-sq-gg0qq.1-w -> origin/feat/sq-gg0qq.1-sq-gg0qq.1-w
+2026-09-10T08:44:50.0325266Z  * [new branch]        feat/sq-gg0qq.2-sq-gg0qq.2-w -> origin/feat/sq-gg0qq.2-sq-gg0qq.2-w
+2026-09-10T08:44:50.0325954Z  * [new branch]        feat/sq-gum8.5-zksparql-pack -> origin/feat/sq-gum8.5-zksparql-pack
+2026-09-10T08:44:50.0326795Z  * [new branch]        feat/sq-hmd7l.42-sq-hmd7l.42-w -> origin/feat/sq-hmd7l.42-sq-hmd7l.42-w
+2026-09-10T08:44:50.0327517Z  * [new branch]        feat/sq-hmd7l.44-sq-hmd7l.44-w -> origin/feat/sq-hmd7l.44-sq-hmd7l.44-w
+2026-09-10T08:44:50.0328259Z  * [new branch]        feat/sq-hq8t5-geo-prepared-cache -> origin/feat/sq-hq8t5-geo-prepared-cache
+2026-09-10T08:44:50.0329052Z  * [new branch]        feat/sq-iaxd-ground-triple-terms -> origin/feat/sq-iaxd-ground-triple-terms
+2026-09-10T08:44:50.0329808Z  * [new branch]        feat/sq-ixc3.14-gui-service-fed -> origin/feat/sq-ixc3.14-gui-service-fed
+2026-09-10T08:44:50.0330526Z  * [new branch]        feat/sq-ixc3.15-sq-ixc3.15-w -> origin/feat/sq-ixc3.15-sq-ixc3.15-w
+2026-09-10T08:44:50.0331199Z  * [new branch]        feat/sq-ixc3.16-sq-ixc3.16-w -> origin/feat/sq-ixc3.16-sq-ixc3.16-w
+2026-09-10T08:44:50.0331901Z  * [new branch]        feat/sq-jk7w7-vec-build-clone -> origin/feat/sq-jk7w7-vec-build-clone
+2026-09-10T08:44:50.0332607Z  * [new branch]        feat/sq-jluc-result-cache -> origin/feat/sq-jluc-result-cache
+2026-09-10T08:44:50.0333418Z  * [new branch]        feat/sq-l3pk7-graph-content-ground-terms -> origin/feat/sq-l3pk7-graph-content-ground-terms
+2026-09-10T08:44:50.0334266Z  * [new branch]        feat/sq-lrtc3.1-odrl-authz-http -> origin/feat/sq-lrtc3.1-odrl-authz-http
+2026-09-10T08:44:50.0335171Z  * [new branch]        feat/sq-lsp7k.1.1-sq-lsp7k.1.1-w -> origin/feat/sq-lsp7k.1.1-sq-lsp7k.1.1-w
+2026-09-10T08:44:50.0335908Z  * [new branch]        feat/sq-lsp7k.10-sq-lsp7k.10-w2 -> origin/feat/sq-lsp7k.10-sq-lsp7k.10-w2
+2026-09-10T08:44:50.0336876Z  * [new branch]        feat/sq-lsp7k.8-sq-lsp7k.8-w2 -> origin/feat/sq-lsp7k.8-sq-lsp7k.8-w2
+2026-09-10T08:44:50.0337677Z  * [new branch]        feat/sq-n9s4d-changestream-retention -> origin/feat/sq-n9s4d-changestream-retention
+2026-09-10T08:44:50.0338509Z  * [new branch]        feat/sq-ove-geographic-axis-order -> origin/feat/sq-ove-geographic-axis-order
+2026-09-10T08:44:50.0339430Z  * [new branch]        feat/sq-oy1f-25-jsonld-expansion -> origin/feat/sq-oy1f-25-jsonld-expansion
+2026-09-10T08:44:50.0340194Z  * [new branch]        feat/sq-oy1f.27-jsonld-compact -> origin/feat/sq-oy1f.27-jsonld-compact
+2026-09-10T08:44:50.0340979Z  * [new branch]        feat/sq-pbz04.4.9-rbox-refutation -> origin/feat/sq-pbz04.4.9-rbox-refutation
+2026-09-10T08:44:50.0341685Z  * [new branch]        feat/sq-qeltv-sq-qeltv-w -> origin/feat/sq-qeltv-sq-qeltv-w
+2026-09-10T08:44:50.0342348Z  * [new branch]        feat/sq-qgkwy.1-site-perf -> origin/feat/sq-qgkwy.1-site-perf
+2026-09-10T08:44:50.0343106Z  * [new branch]        feat/sq-s5kd-per-source-latency-cost -> origin/feat/sq-s5kd-per-source-latency-cost
+2026-09-10T08:44:50.0343857Z  * [new branch]        feat/sq-sqtk2.1-kani-solid -> origin/feat/sq-sqtk2.1-kani-solid
+2026-09-10T08:44:50.0344546Z  * [new branch]        feat/sq-tonhr.3-sq-tonhr.3-w -> origin/feat/sq-tonhr.3-sq-tonhr.3-w
+2026-09-10T08:44:50.0345212Z  * [new branch]        feat/sq-u16eq-sq-u16eq-w -> origin/feat/sq-u16eq-sq-u16eq-w
+2026-09-10T08:44:50.0346021Z  * [new branch]        feat/sq-vw3ax.13-sq-vw3ax.13-w -> origin/feat/sq-vw3ax.13-sq-vw3ax.13-w
+2026-09-10T08:44:50.0346923Z  * [new branch]        feat/sq-xw8zz-adaptive-multisource -> origin/feat/sq-xw8zz-adaptive-multisource
+2026-09-10T08:44:50.0347647Z  * [new branch]        feat/sq-ybgjf-sq-ybgjf-w -> origin/feat/sq-ybgjf-sq-ybgjf-w
+2026-09-10T08:44:50.0348332Z  * [new branch]        feat/sq-zgbso.2-odrl-n3-strata -> origin/feat/sq-zgbso.2-odrl-n3-strata
+2026-09-10T08:44:50.0349071Z  * [new branch]        feat/vectors-bigendian-sq-i7w -> origin/feat/vectors-bigendian-sq-i7w
+2026-09-10T08:44:50.0350232Z  * [new branch]        fix-ci-advisory-gate    -> origin/fix-ci-advisory-gate
+2026-09-10T08:44:50.0351257Z  * [new branch]        fix-cli-hdt-output-wording -> origin/fix-cli-hdt-output-wording
+2026-09-10T08:44:50.0351924Z  * [new branch]        fix-coverage-red        -> origin/fix-coverage-red
+2026-09-10T08:44:50.0352643Z  * [new branch]        fix-hdt-flaky-roundtrip-scratch -> origin/fix-hdt-flaky-roundtrip-scratch
+2026-09-10T08:44:50.0353619Z  * [new branch]        fix-parse-perf-regression -> origin/fix-parse-perf-regression
+2026-09-10T08:44:50.0354377Z  * [new branch]        fix-perfgate-timing-advisory -> origin/fix-perfgate-timing-advisory
+2026-09-10T08:44:50.0355038Z  * [new branch]        fix-py-dirlang          -> origin/fix-py-dirlang
+2026-09-10T08:44:50.0355676Z  * [new branch]        fix-release-container   -> origin/fix-release-container
+2026-09-10T08:44:50.0356329Z  * [new branch]        fix-service-its-dir     -> origin/fix-service-its-dir
+2026-09-10T08:44:50.0357177Z  * [new branch]        fix/3526-shacl-datetime-dedup -> origin/fix/3526-shacl-datetime-dedup
+2026-09-10T08:44:50.0357912Z  * [new branch]        fix/cron-lane-liveness-4328 -> origin/fix/cron-lane-liveness-4328
+2026-09-10T08:44:50.0358756Z  * [new branch]        fix/frontier-headroom-attribution-5119 -> origin/fix/frontier-headroom-attribution-5119
+2026-09-10T08:44:50.0359711Z  * [new branch]        fix/model-attribution-gate-4361 -> origin/fix/model-attribution-gate-4361
+2026-09-10T08:44:50.0361178Z  * [new branch]        fix/park-releases-whole-unit -> origin/fix/park-releases-whole-unit
+2026-09-10T08:44:50.0362087Z  * [new branch]        fix/readiness-visibility-opus5 -> origin/fix/readiness-visibility-opus5
+2026-09-10T08:44:50.0362942Z  * [new branch]        fix/sq-1jemy-recursing-meta-override -> origin/fix/sq-1jemy-recursing-meta-override
+2026-09-10T08:44:50.0363754Z  * [new branch]        fix/sq-3uva3-opacity-test-guard -> origin/fix/sq-3uva3-opacity-test-guard
+2026-09-10T08:44:50.0364527Z  * [new branch]        fix/sq-95q0d-n3-parser-utf8-panic -> origin/fix/sq-95q0d-n3-parser-utf8-panic
+2026-09-10T08:44:50.0365260Z  * [new branch]        fix/sq-l15mi-subgroup-check -> origin/fix/sq-l15mi-subgroup-check
+2026-09-10T08:44:50.0365988Z  * [new branch]        fix/sq-vhhl0-condkey-injectivity -> origin/fix/sq-vhhl0-condkey-injectivity
+2026-09-10T08:44:50.0367013Z  * [new branch]        fix/sq-wh546-gpt        -> origin/fix/sq-wh546-gpt
+2026-09-10T08:44:50.0367696Z  * [new branch]        hardening-oom-loader-bounds -> origin/hardening-oom-loader-bounds
+2026-09-10T08:44:50.0368457Z  * [new branch]        kern/quoted-triple-embed -> origin/kern/quoted-triple-embed
+2026-09-10T08:44:50.0369199Z  * [new branch]        kern/ufo-priors         -> origin/kern/ufo-priors
+2026-09-10T08:44:50.0369795Z  * [new branch]        lint-ci-clippy-gate     -> origin/lint-ci-clippy-gate
+2026-09-10T08:44:50.0370381Z  * [new branch]        main                    -> origin/main
+2026-09-10T08:44:50.0370944Z  * [new branch]        mpc-rs-reconstruct      -> origin/mpc-rs-reconstruct
+2026-09-10T08:44:50.0371530Z  * [new branch]        mpc-wi2-equality        -> origin/mpc-wi2-equality
+2026-09-10T08:44:50.0372133Z  * [new branch]        mpc-wi3-malicious-enum  -> origin/mpc-wi3-malicious-enum
+2026-09-10T08:44:50.0372730Z  * [new branch]        neon-intersect          -> origin/neon-intersect
+2026-09-10T08:44:50.0373366Z  * [new branch]        opus48-sq-leg8n-sparq-terse -> origin/opus48-sq-leg8n-sparq-terse
+2026-09-10T08:44:50.0374251Z  * [new branch]        opus48/sq-2m6zm.1-pkg-ontology -> origin/opus48/sq-2m6zm.1-pkg-ontology
+2026-09-10T08:44:50.0375011Z  * [new branch]        opus48/sq-2m6zm.3-query-pkg-skill -> origin/opus48/sq-2m6zm.3-query-pkg-skill
+2026-09-10T08:44:50.0375729Z  * [new branch]        perf-gate-timing-robust -> origin/perf-gate-timing-robust
+2026-09-10T08:44:50.0376557Z  * [new branch]        perf-hdt-parallel-pfc-decode -> origin/perf-hdt-parallel-pfc-decode
+2026-09-10T08:44:50.0377396Z  * [new branch]        perf/sq-qgkwy.2-gui-assets -> origin/perf/sq-qgkwy.2-gui-assets
+2026-09-10T08:44:50.0378076Z  * [new branch]        plan/next-phase-work-plan -> origin/plan/next-phase-work-plan
+2026-09-10T08:44:50.0378729Z  * [new branch]        proppaths-design        -> origin/proppaths-design
+2026-09-10T08:44:50.0379426Z  * [new branch]        release-plz-2026-06-20T10-40-33Z -> origin/release-plz-2026-06-20T10-40-33Z
+2026-09-10T08:44:50.0380220Z  * [new branch]        release-plz-2026-06-20T10-57-28Z -> origin/release-plz-2026-06-20T10-57-28Z
+2026-09-10T08:44:50.0380968Z  * [new branch]        release-plz-2026-06-20T11-00-06Z -> origin/release-plz-2026-06-20T11-00-06Z
+2026-09-10T08:44:50.0381704Z  * [new branch]        release-plz-2026-06-20T11-16-53Z -> origin/release-plz-2026-06-20T11-16-53Z
+2026-09-10T08:44:50.0382436Z  * [new branch]        release-plz-2026-06-20T11-27-24Z -> origin/release-plz-2026-06-20T11-27-24Z
+2026-09-10T08:44:50.0383175Z  * [new branch]        release-plz-2026-06-20T11-30-06Z -> origin/release-plz-2026-06-20T11-30-06Z
+2026-09-10T08:44:50.0383949Z  * [new branch]        release-plz-2026-06-20T12-31-23Z -> origin/release-plz-2026-06-20T12-31-23Z
+2026-09-10T08:44:50.0384682Z  * [new branch]        release-plz-2026-06-20T12-34-10Z -> origin/release-plz-2026-06-20T12-34-10Z
+2026-09-10T08:44:50.0385428Z  * [new branch]        release-plz-2026-06-20T12-36-47Z -> origin/release-plz-2026-06-20T12-36-47Z
+2026-09-10T08:44:50.0386172Z  * [new branch]        release-plz-2026-06-20T12-47-59Z -> origin/release-plz-2026-06-20T12-47-59Z
+2026-09-10T08:44:50.0387040Z  * [new branch]        release-plz-2026-06-20T12-51-14Z -> origin/release-plz-2026-06-20T12-51-14Z
+2026-09-10T08:44:50.0387789Z  * [new branch]        release-plz-2026-06-20T13-07-01Z -> origin/release-plz-2026-06-20T13-07-01Z
+2026-09-10T08:44:50.0388617Z  * [new branch]        release-plz-2026-06-20T13-33-29Z -> origin/release-plz-2026-06-20T13-33-29Z
+2026-09-10T08:44:50.0389991Z  * [new branch]        release-plz-2026-06-20T13-42-25Z -> origin/release-plz-2026-06-20T13-42-25Z
+2026-09-10T08:44:50.0390796Z  * [new branch]        release-plz-2026-06-20T13-48-07Z -> origin/release-plz-2026-06-20T13-48-07Z
+2026-09-10T08:44:50.0391540Z  * [new branch]        release-plz-2026-06-20T13-52-32Z -> origin/release-plz-2026-06-20T13-52-32Z
+2026-09-10T08:44:50.0392469Z  * [new branch]        release-plz-2026-06-20T13-56-40Z -> origin/release-plz-2026-06-20T13-56-40Z
+2026-09-10T08:44:50.0393241Z  * [new branch]        release-plz-2026-06-20T14-02-27Z -> origin/release-plz-2026-06-20T14-02-27Z
+2026-09-10T08:44:50.0394389Z  * [new branch]        release-plz-2026-06-20T14-06-49Z -> origin/release-plz-2026-06-20T14-06-49Z
+2026-09-10T08:44:50.0395169Z  * [new branch]        release-plz-2026-06-20T14-21-10Z -> origin/release-plz-2026-06-20T14-21-10Z
+2026-09-10T08:44:50.0396119Z  * [new branch]        release-plz-2026-06-20T14-25-21Z -> origin/release-plz-2026-06-20T14-25-21Z
+2026-09-10T08:44:50.0397066Z  * [new branch]        release-plz-2026-06-20T14-35-18Z -> origin/release-plz-2026-06-20T14-35-18Z
+2026-09-10T08:44:50.0397842Z  * [new branch]        release-plz-2026-06-20T14-41-42Z -> origin/release-plz-2026-06-20T14-41-42Z
+2026-09-10T08:44:50.0398618Z  * [new branch]        release-plz-2026-06-20T14-46-29Z -> origin/release-plz-2026-06-20T14-46-29Z
+2026-09-10T08:44:50.0399397Z  * [new branch]        release-plz-2026-06-20T15-11-12Z -> origin/release-plz-2026-06-20T15-11-12Z
+2026-09-10T08:44:50.0400353Z  * [new branch]        release-plz-2026-06-20T15-28-07Z -> origin/release-plz-2026-06-20T15-28-07Z
+2026-09-10T08:44:50.0401140Z  * [new branch]        release-plz-2026-06-20T15-34-42Z -> origin/release-plz-2026-06-20T15-34-42Z
+2026-09-10T08:44:50.0401899Z  * [new branch]        release-plz-2026-06-20T16-05-36Z -> origin/release-plz-2026-06-20T16-05-36Z
+2026-09-10T08:44:50.0403260Z  * [new branch]        release-plz-2026-06-20T16-19-31Z -> origin/release-plz-2026-06-20T16-19-31Z
+2026-09-10T08:44:50.0404425Z  * [new branch]        release-plz-2026-06-20T16-34-21Z -> origin/release-plz-2026-06-20T16-34-21Z
+2026-09-10T08:44:50.0405253Z  * [new branch]        release-plz-2026-06-20T17-07-52Z -> origin/release-plz-2026-06-20T17-07-52Z
+2026-09-10T08:44:50.0405986Z  * [new branch]        release-plz-2026-06-20T22-11-40Z -> origin/release-plz-2026-06-20T22-11-40Z
+2026-09-10T08:44:50.0406868Z  * [new branch]        release-plz-2026-06-20T23-12-40Z -> origin/release-plz-2026-06-20T23-12-40Z
+2026-09-10T08:44:50.0407617Z  * [new branch]        release-plz-2026-06-20T23-15-17Z -> origin/release-plz-2026-06-20T23-15-17Z
+2026-09-10T08:44:50.0408345Z  * [new branch]        release-plz-2026-06-20T23-17-54Z -> origin/release-plz-2026-06-20T23-17-54Z
+2026-09-10T08:44:50.0409083Z  * [new branch]        release-plz-2026-06-20T23-24-08Z -> origin/release-plz-2026-06-20T23-24-08Z
+2026-09-10T08:44:50.0409814Z  * [new branch]        release-plz-2026-06-20T23-26-47Z -> origin/release-plz-2026-06-20T23-26-47Z
+2026-09-10T08:44:50.0410557Z  * [new branch]        release-plz-2026-06-21T00-16-22Z -> origin/release-plz-2026-06-21T00-16-22Z
+2026-09-10T08:44:50.0411397Z  * [new branch]        release-plz-2026-06-21T17-51-06Z -> origin/release-plz-2026-06-21T17-51-06Z
+2026-09-10T08:44:50.0412214Z  * [new branch]        release-plz-2026-07-21T13-37-43Z -> origin/release-plz-2026-07-21T13-37-43Z
+2026-09-10T08:44:50.0412955Z  * [new branch]        release-plz-2026-07-21T13-49-16Z -> origin/release-plz-2026-07-21T13-49-16Z
+2026-09-10T08:44:50.0413690Z  * [new branch]        release-plz-2026-07-21T14-25-15Z -> origin/release-plz-2026-07-21T14-25-15Z
+2026-09-10T08:44:50.0414419Z  * [new branch]        release-plz-2026-07-21T14-30-33Z -> origin/release-plz-2026-07-21T14-30-33Z
+2026-09-10T08:44:50.0415153Z  * [new branch]        release-plz-2026-07-21T15-57-39Z -> origin/release-plz-2026-07-21T15-57-39Z
+2026-09-10T08:44:50.0415881Z  * [new branch]        release-plz-2026-07-21T16-32-39Z -> origin/release-plz-2026-07-21T16-32-39Z
+2026-09-10T08:44:50.0416851Z  * [new branch]        release-plz-2026-07-21T16-46-14Z -> origin/release-plz-2026-07-21T16-46-14Z
+2026-09-10T08:44:50.0417599Z  * [new branch]        release-plz-2026-07-21T17-09-11Z -> origin/release-plz-2026-07-21T17-09-11Z
+2026-09-10T08:44:50.0418333Z  * [new branch]        release-plz-2026-07-21T17-28-31Z -> origin/release-plz-2026-07-21T17-28-31Z
+2026-09-10T08:44:50.0419232Z  * [new branch]        release-plz-2026-07-21T18-16-34Z -> origin/release-plz-2026-07-21T18-16-34Z
+2026-09-10T08:44:50.0419985Z  * [new branch]        release-plz-2026-07-21T19-30-39Z -> origin/release-plz-2026-07-21T19-30-39Z
+2026-09-10T08:44:50.0420726Z  * [new branch]        release-plz-2026-07-21T19-56-35Z -> origin/release-plz-2026-07-21T19-56-35Z
+2026-09-10T08:44:50.0421481Z  * [new branch]        release-plz-2026-07-21T20-16-50Z -> origin/release-plz-2026-07-21T20-16-50Z
+2026-09-10T08:44:50.0422343Z  * [new branch]        release-plz-2026-07-21T20-54-13Z -> origin/release-plz-2026-07-21T20-54-13Z
+2026-09-10T08:44:50.0423747Z  * [new branch]        release-plz-2026-07-22T00-23-46Z -> origin/release-plz-2026-07-22T00-23-46Z
+2026-09-10T08:44:50.0424923Z  * [new branch]        release-plz-2026-07-22T00-58-43Z -> origin/release-plz-2026-07-22T00-58-43Z
+2026-09-10T08:44:50.0425773Z  * [new branch]        release-plz-2026-07-22T01-04-02Z -> origin/release-plz-2026-07-22T01-04-02Z
+2026-09-10T08:44:50.0426886Z  * [new branch]        release-plz-2026-07-22T03-13-42Z -> origin/release-plz-2026-07-22T03-13-42Z
+2026-09-10T08:44:50.0428132Z  * [new branch]        release-plz-2026-07-22T05-39-14Z -> origin/release-plz-2026-07-22T05-39-14Z
+2026-09-10T08:44:50.0429137Z  * [new branch]        release-plz-2026-07-22T09-24-44Z -> origin/release-plz-2026-07-22T09-24-44Z
+2026-09-10T08:44:50.0430051Z  * [new branch]        release-plz-2026-07-22T09-31-00Z -> origin/release-plz-2026-07-22T09-31-00Z
+2026-09-10T08:44:50.0445698Z  * [new branch]        release-plz-2026-07-22T10-44-20Z -> origin/release-plz-2026-07-22T10-44-20Z
+2026-09-10T08:44:50.0447260Z  * [new branch]        release-plz-2026-07-22T23-10-09Z -> origin/release-plz-2026-07-22T23-10-09Z
+2026-09-10T08:44:50.0448107Z  * [new branch]        release-plz-2026-07-23T01-44-03Z -> origin/release-plz-2026-07-23T01-44-03Z
+2026-09-10T08:44:50.0448872Z  * [new branch]        release-plz-2026-07-23T02-35-29Z -> origin/release-plz-2026-07-23T02-35-29Z
+2026-09-10T08:44:50.0449768Z  * [new branch]        release-plz-2026-07-23T03-38-01Z -> origin/release-plz-2026-07-23T03-38-01Z
+2026-09-10T08:44:50.0450523Z  * [new branch]        release-plz-2026-07-23T04-26-07Z -> origin/release-plz-2026-07-23T04-26-07Z
+2026-09-10T08:44:50.0451241Z  * [new branch]        release-plz-2026-07-23T05-36-45Z -> origin/release-plz-2026-07-23T05-36-45Z
+2026-09-10T08:44:50.0452070Z  * [new branch]        release-plz-2026-07-23T07-36-19Z -> origin/release-plz-2026-07-23T07-36-19Z
+2026-09-10T08:44:50.0452798Z  * [new branch]        release-plz-2026-07-23T09-40-24Z -> origin/release-plz-2026-07-23T09-40-24Z
+2026-09-10T08:44:50.0453800Z  * [new branch]        release-plz-2026-07-23T09-46-01Z -> origin/release-plz-2026-07-23T09-46-01Z
+2026-09-10T08:44:50.0454552Z  * [new branch]        release-plz-2026-07-23T10-21-59Z -> origin/release-plz-2026-07-23T10-21-59Z
+2026-09-10T08:44:50.0455268Z  * [new branch]        release-plz-2026-07-23T10-30-33Z -> origin/release-plz-2026-07-23T10-30-33Z
+2026-09-10T08:44:50.0456157Z  * [new branch]        release-plz-2026-07-23T11-58-20Z -> origin/release-plz-2026-07-23T11-58-20Z
+2026-09-10T08:44:50.0457776Z  * [new branch]        release-plz-2026-07-23T12-28-39Z -> origin/release-plz-2026-07-23T12-28-39Z
+2026-09-10T08:44:50.0459179Z  * [new branch]        release-plz-2026-07-23T14-07-41Z -> origin/release-plz-2026-07-23T14-07-41Z
+2026-09-10T08:44:50.0460572Z  * [new branch]        release-plz-2026-07-23T15-23-38Z -> origin/release-plz-2026-07-23T15-23-38Z
+2026-09-10T08:44:50.0461578Z  * [new branch]        release-plz-2026-07-23T16-55-00Z -> origin/release-plz-2026-07-23T16-55-00Z
+2026-09-10T08:44:50.0462759Z  * [new branch]        release-plz-2026-07-23T17-09-19Z -> origin/release-plz-2026-07-23T17-09-19Z
+2026-09-10T08:44:50.0463600Z  * [new branch]        release-plz-2026-07-23T19-04-21Z -> origin/release-plz-2026-07-23T19-04-21Z
+2026-09-10T08:44:50.0464431Z  * [new branch]        release-plz-2026-07-24T10-11-48Z -> origin/release-plz-2026-07-24T10-11-48Z
+2026-09-10T08:44:50.0465364Z  * [new branch]        release-plz-2026-07-24T10-17-20Z -> origin/release-plz-2026-07-24T10-17-20Z
+2026-09-10T08:44:50.0466142Z  * [new branch]        release-plz-2026-07-24T11-05-14Z -> origin/release-plz-2026-07-24T11-05-14Z
+2026-09-10T08:44:50.0467176Z  * [new branch]        release-plz-2026-07-24T22-33-20Z -> origin/release-plz-2026-07-24T22-33-20Z
+2026-09-10T08:44:50.0467929Z  * [new branch]        release-plz-2026-07-24T23-57-18Z -> origin/release-plz-2026-07-24T23-57-18Z
+2026-09-10T08:44:50.0468672Z  * [new branch]        release-plz-2026-07-25T00-49-27Z -> origin/release-plz-2026-07-25T00-49-27Z
+2026-09-10T08:44:50.0469407Z  * [new branch]        release-plz-2026-07-25T01-40-10Z -> origin/release-plz-2026-07-25T01-40-10Z
+2026-09-10T08:44:50.0470149Z  * [new branch]        release-plz-2026-07-25T02-09-59Z -> origin/release-plz-2026-07-25T02-09-59Z
+2026-09-10T08:44:50.0470903Z  * [new branch]        release-plz-2026-07-25T05-37-49Z -> origin/release-plz-2026-07-25T05-37-49Z
+2026-09-10T08:44:50.0471791Z  * [new branch]        release-plz-2026-07-25T06-08-40Z -> origin/release-plz-2026-07-25T06-08-40Z
+2026-09-10T08:44:50.0472802Z  * [new branch]        release-plz-2026-07-25T06-59-38Z -> origin/release-plz-2026-07-25T06-59-38Z
+2026-09-10T08:44:50.0473540Z  * [new branch]        release-plz-2026-07-25T07-09-36Z -> origin/release-plz-2026-07-25T07-09-36Z
+2026-09-10T08:44:50.0474288Z  * [new branch]        release-plz-2026-07-25T07-23-37Z -> origin/release-plz-2026-07-25T07-23-37Z
+2026-09-10T08:44:50.0475019Z  * [new branch]        release-plz-2026-07-25T07-39-17Z -> origin/release-plz-2026-07-25T07-39-17Z
+2026-09-10T08:44:50.0475751Z  * [new branch]        release-plz-2026-07-25T07-45-41Z -> origin/release-plz-2026-07-25T07-45-41Z
+2026-09-10T08:44:50.0476689Z  * [new branch]        release-plz-2026-07-25T07-53-39Z -> origin/release-plz-2026-07-25T07-53-39Z
+2026-09-10T08:44:50.0477554Z  * [new branch]        release-plz-2026-07-25T07-59-07Z -> origin/release-plz-2026-07-25T07-59-07Z
+2026-09-10T08:44:50.0478292Z  * [new branch]        release-plz-2026-07-25T09-38-20Z -> origin/release-plz-2026-07-25T09-38-20Z
+2026-09-10T08:44:50.0479027Z  * [new branch]        release-plz-2026-07-25T09-53-37Z -> origin/release-plz-2026-07-25T09-53-37Z
+2026-09-10T08:44:50.0479760Z  * [new branch]        release-plz-2026-07-25T09-59-23Z -> origin/release-plz-2026-07-25T09-59-23Z
+2026-09-10T08:44:50.0480490Z  * [new branch]        release-plz-2026-07-25T10-16-29Z -> origin/release-plz-2026-07-25T10-16-29Z
+2026-09-10T08:44:50.0481215Z  * [new branch]        release-plz-2026-07-25T10-38-08Z -> origin/release-plz-2026-07-25T10-38-08Z
+2026-09-10T08:44:50.0482187Z  * [new branch]        release-plz-2026-07-25T11-35-46Z -> origin/release-plz-2026-07-25T11-35-46Z
+2026-09-10T08:44:50.0483338Z  * [new branch]        release-plz-2026-07-25T14-05-06Z -> origin/release-plz-2026-07-25T14-05-06Z
+2026-09-10T08:44:50.0484111Z  * [new branch]        release-plz-2026-07-25T14-10-45Z -> origin/release-plz-2026-07-25T14-10-45Z
+2026-09-10T08:44:50.0484860Z  * [new branch]        release-plz-2026-07-26T00-33-01Z -> origin/release-plz-2026-07-26T00-33-01Z
+2026-09-10T08:44:50.0485593Z  * [new branch]        release-plz-2026-07-26T01-01-00Z -> origin/release-plz-2026-07-26T01-01-00Z
+2026-09-10T08:44:50.0486329Z  * [new branch]        release-plz-2026-07-26T01-21-16Z -> origin/release-plz-2026-07-26T01-21-16Z
+2026-09-10T08:44:50.0487383Z  * [new branch]        release-plz-2026-07-26T01-48-43Z -> origin/release-plz-2026-07-26T01-48-43Z
+2026-09-10T08:44:50.0488123Z  * [new branch]        release-plz-2026-07-26T02-26-07Z -> origin/release-plz-2026-07-26T02-26-07Z
+2026-09-10T08:44:50.0488849Z  * [new branch]        release-plz-2026-07-26T02-32-09Z -> origin/release-plz-2026-07-26T02-32-09Z
+2026-09-10T08:44:50.0489588Z  * [new branch]        release-plz-2026-07-26T02-37-39Z -> origin/release-plz-2026-07-26T02-37-39Z
+2026-09-10T08:44:50.0490335Z  * [new branch]        release-plz-2026-07-26T02-49-20Z -> origin/release-plz-2026-07-26T02-49-20Z
+2026-09-10T08:44:50.0491243Z  * [new branch]        release-plz-2026-07-26T02-57-54Z -> origin/release-plz-2026-07-26T02-57-54Z
+2026-09-10T08:44:50.0492019Z  * [new branch]        release-plz-2026-07-26T03-17-46Z -> origin/release-plz-2026-07-26T03-17-46Z
+2026-09-10T08:44:50.0492903Z  * [new branch]        release-plz-2026-07-26T03-41-42Z -> origin/release-plz-2026-07-26T03-41-42Z
+2026-09-10T08:44:50.0493642Z  * [new branch]        release-plz-2026-07-26T03-47-10Z -> origin/release-plz-2026-07-26T03-47-10Z
+2026-09-10T08:44:50.0494388Z  * [new branch]        release-plz-2026-07-26T04-00-20Z -> origin/release-plz-2026-07-26T04-00-20Z
+2026-09-10T08:44:50.0495124Z  * [new branch]        release-plz-2026-07-26T04-05-59Z -> origin/release-plz-2026-07-26T04-05-59Z
+2026-09-10T08:44:50.0496136Z  * [new branch]        release-plz-2026-07-26T04-11-41Z -> origin/release-plz-2026-07-26T04-11-41Z
+2026-09-10T08:44:50.0497315Z  * [new branch]        release-plz-2026-07-26T04-24-14Z -> origin/release-plz-2026-07-26T04-24-14Z
+2026-09-10T08:44:50.0498067Z  * [new branch]        release-plz-2026-07-26T04-29-01Z -> origin/release-plz-2026-07-26T04-29-01Z
+2026-09-10T08:44:50.0499029Z  * [new branch]        release-plz-2026-07-26T04-39-39Z -> origin/release-plz-2026-07-26T04-39-39Z
+2026-09-10T08:44:50.0499763Z  * [new branch]        release-plz-2026-07-26T04-57-53Z -> origin/release-plz-2026-07-26T04-57-53Z
+2026-09-10T08:44:50.0500605Z  * [new branch]        release-plz-2026-07-26T05-06-38Z -> origin/release-plz-2026-07-26T05-06-38Z
+2026-09-10T08:44:50.0501683Z  * [new branch]        release-plz-2026-07-26T05-12-06Z -> origin/release-plz-2026-07-26T05-12-06Z
+2026-09-10T08:44:50.0502436Z  * [new branch]        release-plz-2026-07-26T05-20-19Z -> origin/release-plz-2026-07-26T05-20-19Z
+2026-09-10T08:44:50.0503165Z  * [new branch]        release-plz-2026-07-26T05-53-33Z -> origin/release-plz-2026-07-26T05-53-33Z
+2026-09-10T08:44:50.0503888Z  * [new branch]        release-plz-2026-07-26T06-44-43Z -> origin/release-plz-2026-07-26T06-44-43Z
+2026-09-10T08:44:50.0504632Z  * [new branch]        release-plz-2026-07-26T06-51-37Z -> origin/release-plz-2026-07-26T06-51-37Z
+2026-09-10T08:44:50.0505362Z  * [new branch]        release-plz-2026-07-26T06-57-20Z -> origin/release-plz-2026-07-26T06-57-20Z
+2026-09-10T08:44:50.0506096Z  * [new branch]        release-plz-2026-07-26T07-10-22Z -> origin/release-plz-2026-07-26T07-10-22Z
+2026-09-10T08:44:50.0507123Z  * [new branch]        release-plz-2026-07-26T07-15-46Z -> origin/release-plz-2026-07-26T07-15-46Z
+2026-09-10T08:44:50.0507874Z  * [new branch]        release-plz-2026-07-26T07-21-25Z -> origin/release-plz-2026-07-26T07-21-25Z
+2026-09-10T08:44:50.0508639Z  * [new branch]        release-plz-2026-07-26T07-27-42Z -> origin/release-plz-2026-07-26T07-27-42Z
+2026-09-10T08:44:50.0509519Z  * [new branch]        release-plz-2026-07-26T07-33-56Z -> origin/release-plz-2026-07-26T07-33-56Z
+2026-09-10T08:44:50.0510258Z  * [new branch]        release-plz-2026-07-26T07-42-29Z -> origin/release-plz-2026-07-26T07-42-29Z
+2026-09-10T08:44:50.0510996Z  * [new branch]        release-plz-2026-07-26T07-49-05Z -> origin/release-plz-2026-07-26T07-49-05Z
+2026-09-10T08:44:50.0511730Z  * [new branch]        release-plz-2026-07-26T07-55-05Z -> origin/release-plz-2026-07-26T07-55-05Z
+2026-09-10T08:44:50.0512470Z  * [new branch]        release-plz-2026-07-26T08-22-57Z -> origin/release-plz-2026-07-26T08-22-57Z
+2026-09-10T08:44:50.0513205Z  * [new branch]        release-plz-2026-07-26T08-29-34Z -> origin/release-plz-2026-07-26T08-29-34Z
+2026-09-10T08:44:50.0513934Z  * [new branch]        release-plz-2026-07-26T08-39-27Z -> origin/release-plz-2026-07-26T08-39-27Z
+2026-09-10T08:44:50.0514664Z  * [new branch]        release-plz-2026-07-26T08-47-28Z -> origin/release-plz-2026-07-26T08-47-28Z
+2026-09-10T08:44:50.0515400Z  * [new branch]        release-plz-2026-07-26T08-59-11Z -> origin/release-plz-2026-07-26T08-59-11Z
+2026-09-10T08:44:50.0516128Z  * [new branch]        release-plz-2026-07-26T09-05-30Z -> origin/release-plz-2026-07-26T09-05-30Z
+2026-09-10T08:44:50.0517159Z  * [new branch]        release-plz-2026-07-26T09-13-46Z -> origin/release-plz-2026-07-26T09-13-46Z
+2026-09-10T08:44:50.0517944Z  * [new branch]        release-plz-2026-07-26T09-24-54Z -> origin/release-plz-2026-07-26T09-24-54Z
+2026-09-10T08:44:50.0518679Z  * [new branch]        release-plz-2026-07-26T09-36-32Z -> origin/release-plz-2026-07-26T09-36-32Z
+2026-09-10T08:44:50.0519418Z  * [new branch]        release-plz-2026-07-26T09-56-23Z -> origin/release-plz-2026-07-26T09-56-23Z
+2026-09-10T08:44:50.0520152Z  * [new branch]        release-plz-2026-07-26T10-26-05Z -> origin/release-plz-2026-07-26T10-26-05Z
+2026-09-10T08:44:50.0520883Z  * [new branch]        release-plz-2026-07-26T10-35-12Z -> origin/release-plz-2026-07-26T10-35-12Z
+2026-09-10T08:44:50.0521609Z  * [new branch]        release-plz-2026-07-26T10-44-16Z -> origin/release-plz-2026-07-26T10-44-16Z
+2026-09-10T08:44:50.0522334Z  * [new branch]        release-plz-2026-07-26T10-49-56Z -> origin/release-plz-2026-07-26T10-49-56Z
+2026-09-10T08:44:50.0523057Z  * [new branch]        release-plz-2026-07-26T10-55-48Z -> origin/release-plz-2026-07-26T10-55-48Z
+2026-09-10T08:44:50.0523913Z  * [new branch]        release-plz-2026-07-26T11-01-49Z -> origin/release-plz-2026-07-26T11-01-49Z
+2026-09-10T08:44:50.0524641Z  * [new branch]        release-plz-2026-07-26T11-12-12Z -> origin/release-plz-2026-07-26T11-12-12Z
+2026-09-10T08:44:50.0525359Z  * [new branch]        release-plz-2026-07-26T11-18-00Z -> origin/release-plz-2026-07-26T11-18-00Z
+2026-09-10T08:44:50.0526088Z  * [new branch]        release-plz-2026-07-26T11-29-03Z -> origin/release-plz-2026-07-26T11-29-03Z
+2026-09-10T08:44:50.0526940Z  * [new branch]        release-plz-2026-07-26T12-06-08Z -> origin/release-plz-2026-07-26T12-06-08Z
+2026-09-10T08:44:50.0527658Z  * [new branch]        release-plz-2026-07-26T12-24-02Z -> origin/release-plz-2026-07-26T12-24-02Z
+2026-09-10T08:44:50.0528386Z  * [new branch]        release-plz-2026-07-26T12-30-56Z -> origin/release-plz-2026-07-26T12-30-56Z
+2026-09-10T08:44:50.0529108Z  * [new branch]        release-plz-2026-07-26T13-06-04Z -> origin/release-plz-2026-07-26T13-06-04Z
+2026-09-10T08:44:50.0529842Z  * [new branch]        release-plz-2026-07-26T13-23-14Z -> origin/release-plz-2026-07-26T13-23-14Z
+2026-09-10T08:44:50.0530564Z  * [new branch]        release-plz-2026-07-26T13-38-58Z -> origin/release-plz-2026-07-26T13-38-58Z
+2026-09-10T08:44:50.0531288Z  * [new branch]        release-plz-2026-07-26T13-48-59Z -> origin/release-plz-2026-07-26T13-48-59Z
+2026-09-10T08:44:50.0532016Z  * [new branch]        release-plz-2026-07-26T13-56-14Z -> origin/release-plz-2026-07-26T13-56-14Z
+2026-09-10T08:44:50.0532735Z  * [new branch]        release-plz-2026-07-26T14-12-59Z -> origin/release-plz-2026-07-26T14-12-59Z
+2026-09-10T08:44:50.0533658Z  * [new branch]        release-plz-2026-07-26T14-41-16Z -> origin/release-plz-2026-07-26T14-41-16Z
+2026-09-10T08:44:50.0534398Z  * [new branch]        release-plz-2026-07-26T14-46-24Z -> origin/release-plz-2026-07-26T14-46-24Z
+2026-09-10T08:44:50.0535124Z  * [new branch]        release-plz-2026-07-26T15-19-42Z -> origin/release-plz-2026-07-26T15-19-42Z
+2026-09-10T08:44:50.0535857Z  * [new branch]        release-plz-2026-07-26T15-52-27Z -> origin/release-plz-2026-07-26T15-52-27Z
+2026-09-10T08:44:50.0536693Z  * [new branch]        release-plz-2026-07-26T15-57-55Z -> origin/release-plz-2026-07-26T15-57-55Z
+2026-09-10T08:44:50.0537425Z  * [new branch]        release-plz-2026-07-26T16-08-50Z -> origin/release-plz-2026-07-26T16-08-50Z
+2026-09-10T08:44:50.0538144Z  * [new branch]        release-plz-2026-07-26T16-14-37Z -> origin/release-plz-2026-07-26T16-14-37Z
+2026-09-10T08:44:50.0539023Z  * [new branch]        release-plz-2026-07-26T16-20-53Z -> origin/release-plz-2026-07-26T16-20-53Z
+2026-09-10T08:44:50.0539778Z  * [new branch]        release-plz-2026-07-26T16-40-05Z -> origin/release-plz-2026-07-26T16-40-05Z
+2026-09-10T08:44:50.0540507Z  * [new branch]        release-plz-2026-07-26T16-45-43Z -> origin/release-plz-2026-07-26T16-45-43Z
+2026-09-10T08:44:50.0541377Z  * [new branch]        release-plz-2026-07-26T16-53-25Z -> origin/release-plz-2026-07-26T16-53-25Z
+2026-09-10T08:44:50.0542122Z  * [new branch]        release-plz-2026-07-26T17-22-17Z -> origin/release-plz-2026-07-26T17-22-17Z
+2026-09-10T08:44:50.0542853Z  * [new branch]        release-plz-2026-07-26T17-27-59Z -> origin/release-plz-2026-07-26T17-27-59Z
+2026-09-10T08:44:50.0543570Z  * [new branch]        release-plz-2026-07-26T17-54-09Z -> origin/release-plz-2026-07-26T17-54-09Z
+2026-09-10T08:44:50.0544288Z  * [new branch]        release-plz-2026-07-26T18-00-15Z -> origin/release-plz-2026-07-26T18-00-15Z
+2026-09-10T08:44:50.0545009Z  * [new branch]        release-plz-2026-07-26T18-16-20Z -> origin/release-plz-2026-07-26T18-16-20Z
+2026-09-10T08:44:50.0545721Z  * [new branch]        release-plz-2026-07-26T18-22-06Z -> origin/release-plz-2026-07-26T18-22-06Z
+2026-09-10T08:44:50.0546692Z  * [new branch]        release-plz-2026-07-26T18-35-44Z -> origin/release-plz-2026-07-26T18-35-44Z
+2026-09-10T08:44:50.0547636Z  * [new branch]        release-plz-2026-07-26T19-09-22Z -> origin/release-plz-2026-07-26T19-09-22Z
+2026-09-10T08:44:50.0548559Z  * [new branch]        release-plz-2026-07-26T19-27-58Z -> origin/release-plz-2026-07-26T19-27-58Z
+2026-09-10T08:44:50.0549302Z  * [new branch]        release-plz-2026-07-26T19-34-13Z -> origin/release-plz-2026-07-26T19-34-13Z
+2026-09-10T08:44:50.0550034Z  * [new branch]        release-plz-2026-07-26T19-40-28Z -> origin/release-plz-2026-07-26T19-40-28Z
+2026-09-10T08:44:50.0550760Z  * [new branch]        release-plz-2026-07-26T19-51-04Z -> origin/release-plz-2026-07-26T19-51-04Z
+2026-09-10T08:44:50.0551482Z  * [new branch]        release-plz-2026-07-26T20-07-03Z -> origin/release-plz-2026-07-26T20-07-03Z
+2026-09-10T08:44:50.0552204Z  * [new branch]        release-plz-2026-07-26T20-12-52Z -> origin/release-plz-2026-07-26T20-12-52Z
+2026-09-10T08:44:50.0552928Z  * [new branch]        release-plz-2026-07-26T20-18-40Z -> origin/release-plz-2026-07-26T20-18-40Z
+2026-09-10T08:44:50.0553652Z  * [new branch]        release-plz-2026-07-26T20-29-41Z -> origin/release-plz-2026-07-26T20-29-41Z
+2026-09-10T08:44:50.0554378Z  * [new branch]        release-plz-2026-07-26T20-34-18Z -> origin/release-plz-2026-07-26T20-34-18Z
+2026-09-10T08:44:50.0555103Z  * [new branch]        release-plz-2026-07-26T20-45-42Z -> origin/release-plz-2026-07-26T20-45-42Z
+2026-09-10T08:44:50.0555826Z  * [new branch]        release-plz-2026-07-26T21-02-14Z -> origin/release-plz-2026-07-26T21-02-14Z
+2026-09-10T08:44:50.0556811Z  * [new branch]        release-plz-2026-07-26T21-12-10Z -> origin/release-plz-2026-07-26T21-12-10Z
+2026-09-10T08:44:50.0557570Z  * [new branch]        release-plz-2026-07-26T21-22-38Z -> origin/release-plz-2026-07-26T21-22-38Z
+2026-09-10T08:44:50.0558307Z  * [new branch]        release-plz-2026-07-26T21-28-44Z -> origin/release-plz-2026-07-26T21-28-44Z
+2026-09-10T08:44:50.0559035Z  * [new branch]        release-plz-2026-07-26T21-36-27Z -> origin/release-plz-2026-07-26T21-36-27Z
+2026-09-10T08:44:50.0559773Z  * [new branch]        release-plz-2026-07-26T21-57-24Z -> origin/release-plz-2026-07-26T21-57-24Z
+2026-09-10T08:44:50.0560520Z  * [new branch]        release-plz-2026-07-26T22-29-33Z -> origin/release-plz-2026-07-26T22-29-33Z
+2026-09-10T08:44:50.0561250Z  * [new branch]        release-plz-2026-07-26T22-47-00Z -> origin/release-plz-2026-07-26T22-47-00Z
+2026-09-10T08:44:50.0561975Z  * [new branch]        release-plz-2026-07-26T22-55-10Z -> origin/release-plz-2026-07-26T22-55-10Z
+2026-09-10T08:44:50.0562700Z  * [new branch]        release-plz-2026-07-26T23-07-05Z -> origin/release-plz-2026-07-26T23-07-05Z
+2026-09-10T08:44:50.0563434Z  * [new branch]        release-plz-2026-07-26T23-21-15Z -> origin/release-plz-2026-07-26T23-21-15Z
+2026-09-10T08:44:50.0564162Z  * [new branch]        release-plz-2026-07-27T00-22-16Z -> origin/release-plz-2026-07-27T00-22-16Z
+2026-09-10T08:44:50.0564866Z  * [new branch]        release-plz-2026-07-27T00-27-15Z -> origin/release-plz-2026-07-27T00-27-15Z
+2026-09-10T08:44:50.0565722Z  * [new branch]        release-plz-2026-07-27T00-42-38Z -> origin/release-plz-2026-07-27T00-42-38Z
+2026-09-10T08:44:50.0566596Z  * [new branch]        release-plz-2026-07-27T00-48-29Z -> origin/release-plz-2026-07-27T00-48-29Z
+2026-09-10T08:44:50.0567338Z  * [new branch]        release-plz-2026-07-27T01-14-04Z -> origin/release-plz-2026-07-27T01-14-04Z
+2026-09-10T08:44:50.0568065Z  * [new branch]        release-plz-2026-07-27T01-27-49Z -> origin/release-plz-2026-07-27T01-27-49Z
+2026-09-10T08:44:50.0568785Z  * [new branch]        release-plz-2026-07-27T02-08-14Z -> origin/release-plz-2026-07-27T02-08-14Z
+2026-09-10T08:44:50.0569511Z  * [new branch]        release-plz-2026-07-27T02-19-35Z -> origin/release-plz-2026-07-27T02-19-35Z
+2026-09-10T08:44:50.0570235Z  * [new branch]        release-plz-2026-08-31T23-23-10Z -> origin/release-plz-2026-08-31T23-23-10Z
+2026-09-10T08:44:50.0571023Z  * [new branch]        research-mpc-bounded-property-path -> origin/research-mpc-bounded-property-path
+2026-09-10T08:44:50.0571825Z  * [new branch]        research-mpc-capability-matrix -> origin/research-mpc-capability-matrix
+2026-09-10T08:44:50.0572730Z  * [new branch]        research-mpc-malicious-security -> origin/research-mpc-malicious-security
+2026-09-10T08:44:50.0573491Z  * [new branch]        research-mpc-security-models -> origin/research-mpc-security-models
+2026-09-10T08:44:50.0574203Z  * [new branch]        research-semweb-ac-prior-art -> origin/research-semweb-ac-prior-art
+2026-09-10T08:44:50.0574895Z  * [new branch]        research-sparq-solid-scope -> origin/research-sparq-solid-scope
+2026-09-10T08:44:50.0575682Z  * [new branch]        research-trust-graph-lws-acp-prior-art -> origin/research-trust-graph-lws-acp-prior-art
+2026-09-10T08:44:50.0576731Z  * [new branch]        research-zk-field-native-encoding -> origin/research-zk-field-native-encoding
+2026-09-10T08:44:50.0577561Z  * [new branch]        research-zk-verifier-reaudit -> origin/research-zk-verifier-reaudit
+2026-09-10T08:44:50.0578326Z  * [new branch]        research/crate-region-parallelism -> origin/research/crate-region-parallelism
+2026-09-10T08:44:50.0579145Z  * [new branch]        research/free-cloud-overflow-opus5 -> origin/research/free-cloud-overflow-opus5
+2026-09-10T08:44:50.0579878Z  * [new branch]        research/odrl-trust-graph -> origin/research/odrl-trust-graph
+2026-09-10T08:44:50.0580607Z  * [new branch]        research/trust-graph-capabilities -> origin/research/trust-graph-capabilities
+2026-09-10T08:44:50.0581382Z  * [new branch]        research/trust-graph-rbac-abac -> origin/research/trust-graph-rbac-abac
+2026-09-10T08:44:50.0582148Z  * [new branch]        research/trust-graph-rdf-integrity -> origin/research/trust-graph-rdf-integrity
+2026-09-10T08:44:50.0582838Z  * [new branch]        roborev-backlog         -> origin/roborev-backlog
+2026-09-10T08:44:50.0583398Z  * [new branch]        serve-wave-b            -> origin/serve-wave-b
+2026-09-10T08:44:50.0583987Z  * [new branch]        server-hardening-limits -> origin/server-hardening-limits
+2026-09-10T08:44:50.0584651Z  * [new branch]        server-service-allowlist -> origin/server-service-allowlist
+2026-09-10T08:44:50.0585389Z  * [new branch]        sparq-agent/issue-1346-30183231178-1 -> origin/sparq-agent/issue-1346-30183231178-1
+2026-09-10T08:44:50.0586175Z  * [new branch]        sparq-agent/issue-2312-30180331184-1 -> origin/sparq-agent/issue-2312-30180331184-1
+2026-09-10T08:44:50.0587407Z  * [new branch]        sparq-agent/issue-2381-29545307457-1 -> origin/sparq-agent/issue-2381-29545307457-1
+2026-09-10T08:44:50.0588195Z  * [new branch]        sparq-agent/issue-2428-29572722423-1 -> origin/sparq-agent/issue-2428-29572722423-1
+2026-09-10T08:44:50.0588974Z  * [new branch]        sparq-agent/issue-2429-30409123828-1 -> origin/sparq-agent/issue-2429-30409123828-1
+2026-09-10T08:44:50.0589740Z  * [new branch]        sparq-agent/issue-2430-29572728300-1 -> origin/sparq-agent/issue-2430-29572728300-1
+2026-09-10T08:44:50.0590504Z  * [new branch]        sparq-agent/issue-2440-30488082206-1 -> origin/sparq-agent/issue-2440-30488082206-1
+2026-09-10T08:44:50.0591420Z  * [new branch]        sparq-agent/issue-2442-29575856721-1 -> origin/sparq-agent/issue-2442-29575856721-1
+2026-09-10T08:44:50.0592212Z  * [new branch]        sparq-agent/issue-2458-29578285846-1 -> origin/sparq-agent/issue-2458-29578285846-1
+2026-09-10T08:44:50.0593009Z  * [new branch]        sparq-agent/issue-2463-29586413807-1 -> origin/sparq-agent/issue-2463-29586413807-1
+2026-09-10T08:44:50.0593770Z  * [new branch]        sparq-agent/issue-2478-29626027962-1 -> origin/sparq-agent/issue-2478-29626027962-1
+2026-09-10T08:44:50.0594541Z  * [new branch]        sparq-agent/issue-2484-29582583909-1 -> origin/sparq-agent/issue-2484-29582583909-1
+2026-09-10T08:44:50.0595304Z  * [new branch]        sparq-agent/issue-2502-30727833688-1 -> origin/sparq-agent/issue-2502-30727833688-1
+2026-09-10T08:44:50.0596065Z  * [new branch]        sparq-agent/issue-2502-33916464787-1 -> origin/sparq-agent/issue-2502-33916464787-1
+2026-09-10T08:44:50.0597113Z  * [new branch]        sparq-agent/issue-2511-30209078573-1 -> origin/sparq-agent/issue-2511-30209078573-1
+2026-09-10T08:44:50.0598033Z  * [new branch]        sparq-agent/issue-2536-30595054035-1 -> origin/sparq-agent/issue-2536-30595054035-1
+2026-09-10T08:44:50.0598805Z  * [new branch]        sparq-agent/issue-2536-30712475462-1 -> origin/sparq-agent/issue-2536-30712475462-1
+2026-09-10T08:44:50.0599562Z  * [new branch]        sparq-agent/issue-2536-33452728253-1 -> origin/sparq-agent/issue-2536-33452728253-1
+2026-09-10T08:44:50.0600319Z  * [new branch]        sparq-agent/issue-2547-30596857652-1 -> origin/sparq-agent/issue-2547-30596857652-1
+2026-09-10T08:44:50.0601084Z  * [new branch]        sparq-agent/issue-2547-30727837272-1 -> origin/sparq-agent/issue-2547-30727837272-1
+2026-09-10T08:44:50.0601851Z  * [new branch]        sparq-agent/issue-2547-33514319533-1 -> origin/sparq-agent/issue-2547-33514319533-1
+2026-09-10T08:44:50.0602623Z  * [new branch]        sparq-agent/issue-2548-30218816869-1 -> origin/sparq-agent/issue-2548-30218816869-1
+2026-09-10T08:44:50.0603390Z  * [new branch]        sparq-agent/issue-2560-30212288114-1 -> origin/sparq-agent/issue-2560-30212288114-1
+2026-09-10T08:44:50.0604174Z  * [new branch]        sparq-agent/issue-2562-29627305650-1 -> origin/sparq-agent/issue-2562-29627305650-1
+2026-09-10T08:44:50.0605029Z  * [new branch]        sparq-agent/issue-2567-30215816786-1 -> origin/sparq-agent/issue-2567-30215816786-1
+2026-09-10T08:44:50.0605887Z  * [new branch]        sparq-agent/issue-2568-30221659573-1 -> origin/sparq-agent/issue-2568-30221659573-1
+2026-09-10T08:44:50.0606795Z  * [new branch]        sparq-agent/issue-2584-29669906196-1 -> origin/sparq-agent/issue-2584-29669906196-1
+2026-09-10T08:44:50.0607567Z  * [new branch]        sparq-agent/issue-2592-30212293633-1 -> origin/sparq-agent/issue-2592-30212293633-1
+2026-09-10T08:44:50.0608334Z  * [new branch]        sparq-agent/issue-2595-30216654239-1 -> origin/sparq-agent/issue-2595-30216654239-1
+2026-09-10T08:44:50.0609099Z  * [new branch]        sparq-agent/issue-2595-30298451507-1 -> origin/sparq-agent/issue-2595-30298451507-1
+2026-09-10T08:44:50.0609859Z  * [new branch]        sparq-agent/issue-2601-29676111114-1 -> origin/sparq-agent/issue-2601-29676111114-1
+2026-09-10T08:44:50.0610630Z  * [new branch]        sparq-agent/issue-2615-29669908923-1 -> origin/sparq-agent/issue-2615-29669908923-1
+2026-09-10T08:44:50.0611391Z  * [new branch]        sparq-agent/issue-2627-30221662265-1 -> origin/sparq-agent/issue-2627-30221662265-1
+2026-09-10T08:44:50.0612168Z  * [new branch]        sparq-agent/issue-2641-30184058926-1 -> origin/sparq-agent/issue-2641-30184058926-1
+2026-09-10T08:44:50.0612932Z  * [new branch]        sparq-agent/issue-2651-30194231360-1 -> origin/sparq-agent/issue-2651-30194231360-1
+2026-09-10T08:44:50.0613698Z  * [new branch]        sparq-agent/issue-2651-30317431357-1 -> origin/sparq-agent/issue-2651-30317431357-1
+2026-09-10T08:44:50.0614457Z  * [new branch]        sparq-agent/issue-2659-30289667647-1 -> origin/sparq-agent/issue-2659-30289667647-1
+2026-09-10T08:44:50.0615354Z  * [new branch]        sparq-agent/issue-2659-30356618501-1 -> origin/sparq-agent/issue-2659-30356618501-1
+2026-09-10T08:44:50.0616140Z  * [new branch]        sparq-agent/issue-2659-30424511118-1 -> origin/sparq-agent/issue-2659-30424511118-1
+2026-09-10T08:44:50.0617057Z  * [new branch]        sparq-agent/issue-2679-30185210778-1 -> origin/sparq-agent/issue-2679-30185210778-1
+2026-09-10T08:44:50.0617834Z  * [new branch]        sparq-agent/issue-2681-30212310611-1 -> origin/sparq-agent/issue-2681-30212310611-1
+2026-09-10T08:44:50.0618598Z  * [new branch]        sparq-agent/issue-2700-30189741067-1 -> origin/sparq-agent/issue-2700-30189741067-1
+2026-09-10T08:44:50.0619359Z  * [new branch]        sparq-agent/issue-2700-30380200056-1 -> origin/sparq-agent/issue-2700-30380200056-1
+2026-09-10T08:44:50.0620129Z  * [new branch]        sparq-agent/issue-2700-30453676806-1 -> origin/sparq-agent/issue-2700-30453676806-1
+2026-09-10T08:44:50.0620901Z  * [new branch]        sparq-agent/issue-2702-30760905390-1 -> origin/sparq-agent/issue-2702-30760905390-1
+2026-09-10T08:44:50.0621675Z  * [new branch]        sparq-agent/issue-2703-33443789083-1 -> origin/sparq-agent/issue-2703-33443789083-1
+2026-09-10T08:44:50.0622581Z  * [new branch]        sparq-agent/issue-2704-30330697111-1 -> origin/sparq-agent/issue-2704-30330697111-1
+2026-09-10T08:44:50.0623355Z  * [new branch]        sparq-agent/issue-2713-30185454123-1 -> origin/sparq-agent/issue-2713-30185454123-1
+2026-09-10T08:44:50.0624125Z  * [new branch]        sparq-agent/issue-2744-30387142744-1 -> origin/sparq-agent/issue-2744-30387142744-1
+2026-09-10T08:44:50.0624890Z  * [new branch]        sparq-agent/issue-2744-30727829674-1 -> origin/sparq-agent/issue-2744-30727829674-1
+2026-09-10T08:44:50.0625661Z  * [new branch]        sparq-agent/issue-2744-33451907914-1 -> origin/sparq-agent/issue-2744-33451907914-1
+2026-09-10T08:44:50.0626426Z  * [new branch]        sparq-agent/issue-2746-30407902070-1 -> origin/sparq-agent/issue-2746-30407902070-1
+2026-09-10T08:44:50.0627618Z  * [new branch]        sparq-agent/issue-2746-30754421443-1 -> origin/sparq-agent/issue-2746-30754421443-1
+2026-09-10T08:44:50.0628405Z  * [new branch]        sparq-agent/issue-2746-33579193167-1 -> origin/sparq-agent/issue-2746-33579193167-1
+2026-09-10T08:44:50.0629186Z  * [new branch]        sparq-agent/issue-2768-30192874163-1 -> origin/sparq-agent/issue-2768-30192874163-1
+2026-09-10T08:44:50.0629956Z  * [new branch]        sparq-agent/issue-2781-30189515153-1 -> origin/sparq-agent/issue-2781-30189515153-1
+2026-09-10T08:44:50.0630726Z  * [new branch]        sparq-agent/issue-2789-30655804107-1 -> origin/sparq-agent/issue-2789-30655804107-1
+2026-09-10T08:44:50.0631488Z  * [new branch]        sparq-agent/issue-2790-30215837779-1 -> origin/sparq-agent/issue-2790-30215837779-1
+2026-09-10T08:44:50.0632297Z  * [new branch]        sparq-agent/issue-2800-30199047413-1 -> origin/sparq-agent/issue-2800-30199047413-1
+2026-09-10T08:44:50.0633069Z  * [new branch]        sparq-agent/issue-2830-29722677644-1 -> origin/sparq-agent/issue-2830-29722677644-1
+2026-09-10T08:44:50.0633839Z  * [new branch]        sparq-agent/issue-2844-29672731044-1 -> origin/sparq-agent/issue-2844-29672731044-1
+2026-09-10T08:44:50.0634607Z  * [new branch]        sparq-agent/issue-2852-30618582475-1 -> origin/sparq-agent/issue-2852-30618582475-1
+2026-09-10T08:44:50.0635376Z  * [new branch]        sparq-agent/issue-2857-30849681875-1 -> origin/sparq-agent/issue-2857-30849681875-1
+2026-09-10T08:44:50.0636140Z  * [new branch]        sparq-agent/issue-2864-30278327208-1 -> origin/sparq-agent/issue-2864-30278327208-1
+2026-09-10T08:44:50.0637049Z  * [new branch]        sparq-agent/issue-2865-30608893776-1 -> origin/sparq-agent/issue-2865-30608893776-1
+2026-09-10T08:44:50.0637813Z  * [new branch]        sparq-agent/issue-2889-33448694611-1 -> origin/sparq-agent/issue-2889-33448694611-1
+2026-09-10T08:44:50.0638575Z  * [new branch]        sparq-agent/issue-2892-30508493929-1 -> origin/sparq-agent/issue-2892-30508493929-1
+2026-09-10T08:44:50.0639504Z  * [new branch]        sparq-agent/issue-2892-30683804538-1 -> origin/sparq-agent/issue-2892-30683804538-1
+2026-09-10T08:44:50.0640331Z  * [new branch]        sparq-agent/issue-2892-33475743111-1 -> origin/sparq-agent/issue-2892-33475743111-1
+2026-09-10T08:44:50.0641141Z  * [new branch]        sparq-agent/issue-2896-30851674133-1 -> origin/sparq-agent/issue-2896-30851674133-1
+2026-09-10T08:44:50.0641920Z  * [new branch]        sparq-agent/issue-2905-30588257567-1 -> origin/sparq-agent/issue-2905-30588257567-1
+2026-09-10T08:44:50.0642692Z  * [new branch]        sparq-agent/issue-2905-30693139359-1 -> origin/sparq-agent/issue-2905-30693139359-1
+2026-09-10T08:44:50.0643471Z  * [new branch]        sparq-agent/issue-2927-30421803378-1 -> origin/sparq-agent/issue-2927-30421803378-1
+2026-09-10T08:44:50.0644240Z  * [new branch]        sparq-agent/issue-2930-30336839706-1 -> origin/sparq-agent/issue-2930-30336839706-1
+2026-09-10T08:44:50.0645016Z  * [new branch]        sparq-agent/issue-2933-33599216795-1 -> origin/sparq-agent/issue-2933-33599216795-1
+2026-09-10T08:44:50.0645792Z  * [new branch]        sparq-agent/issue-2938-30297638230-1 -> origin/sparq-agent/issue-2938-30297638230-1
+2026-09-10T08:44:50.0646843Z  * [new branch]        sparq-agent/issue-2939-30219183891-1 -> origin/sparq-agent/issue-2939-30219183891-1
+2026-09-10T08:44:50.0647624Z  * [new branch]        sparq-agent/issue-2940-30221674540-1 -> origin/sparq-agent/issue-2940-30221674540-1
+2026-09-10T08:44:50.0648385Z  * [new branch]        sparq-agent/issue-2949-33645414606-1 -> origin/sparq-agent/issue-2949-33645414606-1
+2026-09-10T08:44:50.0649154Z  * [new branch]        sparq-agent/issue-2987-30409117956-1 -> origin/sparq-agent/issue-2987-30409117956-1
+2026-09-10T08:44:50.0649921Z  * [new branch]        sparq-agent/issue-2987-30659960841-1 -> origin/sparq-agent/issue-2987-30659960841-1
+2026-09-10T08:44:50.0650690Z  * [new branch]        sparq-agent/issue-2987-30709677860-1 -> origin/sparq-agent/issue-2987-30709677860-1
+2026-09-10T08:44:50.0651462Z  * [new branch]        sparq-agent/issue-2990-29703428861-1 -> origin/sparq-agent/issue-2990-29703428861-1
+2026-09-10T08:44:50.0652238Z  * [new branch]        sparq-agent/issue-2991-29679409867-1 -> origin/sparq-agent/issue-2991-29679409867-1
+2026-09-10T08:44:50.0653012Z  * [new branch]        sparq-agent/issue-2993-29683481717-1 -> origin/sparq-agent/issue-2993-29683481717-1
+2026-09-10T08:44:50.0653789Z  * [new branch]        sparq-agent/issue-2994-30423363501-1 -> origin/sparq-agent/issue-2994-30423363501-1
+2026-09-10T08:44:50.0654566Z  * [new branch]        sparq-agent/issue-3005-30597738989-1 -> origin/sparq-agent/issue-3005-30597738989-1
+2026-09-10T08:44:50.0655331Z  * [new branch]        sparq-agent/issue-3014-30202878531-1 -> origin/sparq-agent/issue-3014-30202878531-1
+2026-09-10T08:44:50.0656104Z  * [new branch]        sparq-agent/issue-3015-30185457936-1 -> origin/sparq-agent/issue-3015-30185457936-1
+2026-09-10T08:44:50.0657165Z  * [new branch]        sparq-agent/issue-3015-30749900412-1 -> origin/sparq-agent/issue-3015-30749900412-1
+2026-09-10T08:44:50.0657946Z  * [new branch]        sparq-agent/issue-3015-33472900365-1 -> origin/sparq-agent/issue-3015-33472900365-1
+2026-09-10T08:44:50.0658721Z  * [new branch]        sparq-agent/issue-3018-30215845750-1 -> origin/sparq-agent/issue-3018-30215845750-1
+2026-09-10T08:44:50.0659483Z  * [new branch]        sparq-agent/issue-3018-30298471952-1 -> origin/sparq-agent/issue-3018-30298471952-1
+2026-09-10T08:44:50.0660265Z  * [new branch]        sparq-agent/issue-3027-30193688891-1 -> origin/sparq-agent/issue-3027-30193688891-1
+2026-09-10T08:44:50.0661042Z  * [new branch]        sparq-agent/issue-3034-30184101387-1 -> origin/sparq-agent/issue-3034-30184101387-1
+2026-09-10T08:44:50.0661824Z  * [new branch]        sparq-agent/issue-3039-30404410637-1 -> origin/sparq-agent/issue-3039-30404410637-1
+2026-09-10T08:44:50.0662600Z  * [new branch]        sparq-agent/issue-3046-30725991258-1 -> origin/sparq-agent/issue-3046-30725991258-1
+2026-09-10T08:44:50.0663513Z  * [new branch]        sparq-agent/issue-3046-33468468813-1 -> origin/sparq-agent/issue-3046-33468468813-1
+2026-09-10T08:44:50.0664309Z  * [new branch]        sparq-agent/issue-3053-30752655596-1 -> origin/sparq-agent/issue-3053-30752655596-1
+2026-09-10T08:44:50.0665083Z  * [new branch]        sparq-agent/issue-3053-33571716082-1 -> origin/sparq-agent/issue-3053-33571716082-1
+2026-09-10T08:44:50.0665857Z  * [new branch]        sparq-agent/issue-3053-33707827864-1 -> origin/sparq-agent/issue-3053-33707827864-1
+2026-09-10T08:44:50.0666997Z  * [new branch]        sparq-agent/issue-3054-30762715331-1 -> origin/sparq-agent/issue-3054-30762715331-1
+2026-09-10T08:44:50.0667834Z  * [new branch]        sparq-agent/issue-3054-33639626403-1 -> origin/sparq-agent/issue-3054-33639626403-1
+2026-09-10T08:44:50.0668625Z  * [new branch]        sparq-agent/issue-3057-30619241058-1 -> origin/sparq-agent/issue-3057-30619241058-1
+2026-09-10T08:44:50.0669408Z  * [new branch]        sparq-agent/issue-3057-30678461542-1 -> origin/sparq-agent/issue-3057-30678461542-1
+2026-09-10T08:44:50.0670193Z  * [new branch]        sparq-agent/issue-3057-30749904187-1 -> origin/sparq-agent/issue-3057-30749904187-1
+2026-09-10T08:44:50.0671155Z  * [new branch]        sparq-agent/issue-3069-30227743854-1 -> origin/sparq-agent/issue-3069-30227743854-1
+2026-09-10T08:44:50.0671927Z  * [new branch]        sparq-agent/issue-3070-30205968539-1 -> origin/sparq-agent/issue-3070-30205968539-1
+2026-09-10T08:44:50.0672709Z  * [new branch]        sparq-agent/issue-3072-30602734644-1 -> origin/sparq-agent/issue-3072-30602734644-1
+2026-09-10T08:44:50.0673482Z  * [new branch]        sparq-agent/issue-3072-33400277479-1 -> origin/sparq-agent/issue-3072-33400277479-1
+2026-09-10T08:44:50.0674259Z  * [new branch]        sparq-agent/issue-3073-30603816144-1 -> origin/sparq-agent/issue-3073-30603816144-1
+2026-09-10T08:44:50.0675033Z  * [new branch]        sparq-agent/issue-3073-30749908191-1 -> origin/sparq-agent/issue-3073-30749908191-1
+2026-09-10T08:44:50.0675801Z  * [new branch]        sparq-agent/issue-3079-29707043227-1 -> origin/sparq-agent/issue-3079-29707043227-1
+2026-09-10T08:44:50.0676806Z  * [new branch]        sparq-agent/issue-3081-29673565284-1 -> origin/sparq-agent/issue-3081-29673565284-1
+2026-09-10T08:44:50.0677593Z  * [new branch]        sparq-agent/issue-3087-30346266087-1 -> origin/sparq-agent/issue-3087-30346266087-1
+2026-09-10T08:44:50.0678366Z  * [new branch]        sparq-agent/issue-3119-30675543651-1 -> origin/sparq-agent/issue-3119-30675543651-1
+2026-09-10T08:44:50.0679140Z  * [new branch]        sparq-agent/issue-3127-30331254047-1 -> origin/sparq-agent/issue-3127-30331254047-1
+2026-09-10T08:44:50.0679908Z  * [new branch]        sparq-agent/issue-3146-30758220238-1 -> origin/sparq-agent/issue-3146-30758220238-1
+2026-09-10T08:44:50.0680677Z  * [new branch]        sparq-agent/issue-3151-33750643331-1 -> origin/sparq-agent/issue-3151-33750643331-1
+2026-09-10T08:44:50.0681478Z  * [new branch]        sparq-agent/issue-3175-30614867753-1 -> origin/sparq-agent/issue-3175-30614867753-1
+2026-09-10T08:44:50.0682257Z  * [new branch]        sparq-agent/issue-3176-30432449182-1 -> origin/sparq-agent/issue-3176-30432449182-1
+2026-09-10T08:44:50.0683039Z  * [new branch]        sparq-agent/issue-3181-30240827005-1 -> origin/sparq-agent/issue-3181-30240827005-1
+2026-09-10T08:44:50.0683810Z  * [new branch]        sparq-agent/issue-3187-30218130575-1 -> origin/sparq-agent/issue-3187-30218130575-1
+2026-09-10T08:44:50.0684574Z  * [new branch]        sparq-agent/issue-3189-30221687603-1 -> origin/sparq-agent/issue-3189-30221687603-1
+2026-09-10T08:44:50.0685343Z  * [new branch]        sparq-agent/issue-3195-30183658471-1 -> origin/sparq-agent/issue-3195-30183658471-1
+2026-09-10T08:44:50.0686116Z  * [new branch]        sparq-agent/issue-3196-30212368177-1 -> origin/sparq-agent/issue-3196-30212368177-1
+2026-09-10T08:44:50.0687007Z  * [new branch]        sparq-agent/issue-3201-33830321044-1 -> origin/sparq-agent/issue-3201-33830321044-1
+2026-09-10T08:44:50.0687956Z  * [new branch]        sparq-agent/issue-3207-30218511519-1 -> origin/sparq-agent/issue-3207-30218511519-1
+2026-09-10T08:44:50.0688739Z  * [new branch]        sparq-agent/issue-3213-33711458564-1 -> origin/sparq-agent/issue-3213-33711458564-1
+2026-09-10T08:44:50.0689511Z  * [new branch]        sparq-agent/issue-3214-30684243797-1 -> origin/sparq-agent/issue-3214-30684243797-1
+2026-09-10T08:44:50.0690291Z  * [new branch]        sparq-agent/issue-3216-30184109599-1 -> origin/sparq-agent/issue-3216-30184109599-1
+2026-09-10T08:44:50.0691087Z  * [new branch]        sparq-agent/issue-3221-30409667536-1 -> origin/sparq-agent/issue-3221-30409667536-1
+2026-09-10T08:44:50.0691876Z  * [new branch]        sparq-agent/issue-3232-30183669633-1 -> origin/sparq-agent/issue-3232-30183669633-1
+2026-09-10T08:44:50.0692653Z  * [new branch]        sparq-agent/issue-3235-29684750417-1 -> origin/sparq-agent/issue-3235-29684750417-1
+2026-09-10T08:44:50.0693423Z  * [new branch]        sparq-agent/issue-3239-30183675349-1 -> origin/sparq-agent/issue-3239-30183675349-1
+2026-09-10T08:44:50.0694200Z  * [new branch]        sparq-agent/issue-3241-30206518731-1 -> origin/sparq-agent/issue-3241-30206518731-1
+2026-09-10T08:44:50.0695101Z  * [new branch]        sparq-agent/issue-3244-30443828710-1 -> origin/sparq-agent/issue-3244-30443828710-1
+2026-09-10T08:44:50.0695880Z  * [new branch]        sparq-agent/issue-3249-30618595885-1 -> origin/sparq-agent/issue-3249-30618595885-1
+2026-09-10T08:44:50.0696767Z  * [new branch]        sparq-agent/issue-3252-30184311248-1 -> origin/sparq-agent/issue-3252-30184311248-1
+2026-09-10T08:44:50.0697548Z  * [new branch]        sparq-agent/issue-3252-30316226192-1 -> origin/sparq-agent/issue-3252-30316226192-1
+2026-09-10T08:44:50.0698313Z  * [new branch]        sparq-agent/issue-3252-30382374931-1 -> origin/sparq-agent/issue-3252-30382374931-1
+2026-09-10T08:44:50.0699080Z  * [new branch]        sparq-agent/issue-3275-29688916939-1 -> origin/sparq-agent/issue-3275-29688916939-1
+2026-09-10T08:44:50.0699870Z  * [new branch]        sparq-agent/issue-3275-30747826635-1 -> origin/sparq-agent/issue-3275-30747826635-1
+2026-09-10T08:44:50.0700659Z  * [new branch]        sparq-agent/issue-3275-33567148391-1 -> origin/sparq-agent/issue-3275-33567148391-1
+2026-09-10T08:44:50.0701488Z  * [new branch]        sparq-agent/issue-3281-30676340333-1 -> origin/sparq-agent/issue-3281-30676340333-1
+2026-09-10T08:44:50.0702266Z  * [new branch]        sparq-agent/issue-3286-29688918998-1 -> origin/sparq-agent/issue-3286-29688918998-1
+2026-09-10T08:44:50.0703052Z  * [new branch]        sparq-agent/issue-3290-30619981148-1 -> origin/sparq-agent/issue-3290-30619981148-1
+2026-09-10T08:44:50.0703822Z  * [new branch]        sparq-agent/issue-3290-33460746021-1 -> origin/sparq-agent/issue-3290-33460746021-1
+2026-09-10T08:44:50.0704591Z  * [new branch]        sparq-agent/issue-3296-33788937305-1 -> origin/sparq-agent/issue-3296-33788937305-1
+2026-09-10T08:44:50.0705359Z  * [new branch]        sparq-agent/issue-3297-30215856335-1 -> origin/sparq-agent/issue-3297-30215856335-1
+2026-09-10T08:44:50.0706125Z  * [new branch]        sparq-agent/issue-3297-30320300769-1 -> origin/sparq-agent/issue-3297-30320300769-1
+2026-09-10T08:44:50.0707221Z  * [new branch]        sparq-agent/issue-3315-30227757694-1 -> origin/sparq-agent/issue-3315-30227757694-1
+2026-09-10T08:44:50.0708002Z  * [new branch]        sparq-agent/issue-3320-29691547640-1 -> origin/sparq-agent/issue-3320-29691547640-1
+2026-09-10T08:44:50.0708767Z  * [new branch]        sparq-agent/issue-3321-29693045373-1 -> origin/sparq-agent/issue-3321-29693045373-1
+2026-09-10T08:44:50.0709538Z  * [new branch]        sparq-agent/issue-3342-29679415834-1 -> origin/sparq-agent/issue-3342-29679415834-1
+2026-09-10T08:44:50.0710311Z  * [new branch]        sparq-agent/issue-3342-30853233450-1 -> origin/sparq-agent/issue-3342-30853233450-1
+2026-09-10T08:44:50.0711093Z  * [new branch]        sparq-agent/issue-3343-30183689015-1 -> origin/sparq-agent/issue-3343-30183689015-1
+2026-09-10T08:44:50.0712009Z  * [new branch]        sparq-agent/issue-3349-29626187834-1 -> origin/sparq-agent/issue-3349-29626187834-1
+2026-09-10T08:44:50.0712806Z  * [new branch]        sparq-agent/issue-3350-30821015752-1 -> origin/sparq-agent/issue-3350-30821015752-1
+2026-09-10T08:44:50.0713578Z  * [new branch]        sparq-agent/issue-3351-29675474763-1 -> origin/sparq-agent/issue-3351-29675474763-1
+2026-09-10T08:44:50.0714344Z  * [new branch]        sparq-agent/issue-3387-30183694656-1 -> origin/sparq-agent/issue-3387-30183694656-1
+2026-09-10T08:44:50.0715122Z  * [new branch]        sparq-agent/issue-3387-30298485614-1 -> origin/sparq-agent/issue-3387-30298485614-1
+2026-09-10T08:44:50.0715890Z  * [new branch]        sparq-agent/issue-3409-30219195734-1 -> origin/sparq-agent/issue-3409-30219195734-1
+2026-09-10T08:44:50.0716825Z  * [new branch]        sparq-agent/issue-3490-29983755970-1 -> origin/sparq-agent/issue-3490-29983755970-1
+2026-09-10T08:44:50.0717608Z  * [new branch]        sparq-agent/issue-3494-30182896419-1 -> origin/sparq-agent/issue-3494-30182896419-1
+2026-09-10T08:44:50.0718390Z  * [new branch]        sparq-agent/issue-3498-29859422739-1 -> origin/sparq-agent/issue-3498-29859422739-1
+2026-09-10T08:44:50.0719329Z  * [new branch]        sparq-agent/issue-3517-30284835194-1 -> origin/sparq-agent/issue-3517-30284835194-1
+2026-09-10T08:44:50.0720101Z  * [new branch]        sparq-agent/issue-3532-33403685206-1 -> origin/sparq-agent/issue-3532-33403685206-1
+2026-09-10T08:44:50.0720888Z  * [new branch]        sparq-agent/issue-3699-30381612822-1 -> origin/sparq-agent/issue-3699-30381612822-1
+2026-09-10T08:44:50.0721661Z  * [new branch]        sparq-agent/issue-3702-30369135499-1 -> origin/sparq-agent/issue-3702-30369135499-1
+2026-09-10T08:44:50.0722434Z  * [new branch]        sparq-agent/issue-3713-30627442642-1 -> origin/sparq-agent/issue-3713-30627442642-1
+2026-09-10T08:44:50.0723208Z  * [new branch]        sparq-agent/issue-3786-30625915319-1 -> origin/sparq-agent/issue-3786-30625915319-1
+2026-09-10T08:44:50.0723975Z  * [new branch]        sparq-agent/issue-3796-30199052628-1 -> origin/sparq-agent/issue-3796-30199052628-1
+2026-09-10T08:44:50.0724751Z  * [new branch]        sparq-agent/issue-3806-30180080878-1 -> origin/sparq-agent/issue-3806-30180080878-1
+2026-09-10T08:44:50.0725522Z  * [new branch]        sparq-agent/issue-3812-30423343220-1 -> origin/sparq-agent/issue-3812-30423343220-1
+2026-09-10T08:44:50.0726292Z  * [new branch]        sparq-agent/issue-3814-30627448615-1 -> origin/sparq-agent/issue-3814-30627448615-1
+2026-09-10T08:44:50.0727178Z  * [new branch]        sparq-agent/issue-3817-30823598056-1 -> origin/sparq-agent/issue-3817-30823598056-1
+2026-09-10T08:44:50.0727946Z  * [new branch]        sparq-agent/issue-4518-30257410434-1 -> origin/sparq-agent/issue-4518-30257410434-1
+2026-09-10T08:44:50.0728716Z  * [new branch]        sparq-agent/issue-4542-30631173424-1 -> origin/sparq-agent/issue-4542-30631173424-1
+2026-09-10T08:44:50.0729477Z  * [new branch]        sparq-agent/issue-4542-33464370855-1 -> origin/sparq-agent/issue-4542-33464370855-1
+2026-09-10T08:44:50.0730252Z  * [new branch]        sparq-agent/issue-4567-30633571951-1 -> origin/sparq-agent/issue-4567-30633571951-1
+2026-09-10T08:44:50.0731033Z  * [new branch]        sparq-agent/issue-4567-33468488192-1 -> origin/sparq-agent/issue-4567-33468488192-1
+2026-09-10T08:44:50.0731810Z  * [new branch]        sparq-agent/issue-4582-30483355695-1 -> origin/sparq-agent/issue-4582-30483355695-1
+2026-09-10T08:44:50.0732584Z  * [new branch]        sparq-agent/issue-4586-30826044159-1 -> origin/sparq-agent/issue-4586-30826044159-1
+2026-09-10T08:44:50.0733352Z  * [new branch]        sparq-agent/issue-4615-30642675505-1 -> origin/sparq-agent/issue-4615-30642675505-1
+2026-09-10T08:44:50.0734131Z  * [new branch]        sparq-agent/issue-4619-30649524637-1 -> origin/sparq-agent/issue-4619-30649524637-1
+2026-09-10T08:44:50.0734904Z  * [new branch]        sparq-agent/issue-4677-30670830099-1 -> origin/sparq-agent/issue-4677-30670830099-1
+2026-09-10T08:44:50.0735680Z  * [new branch]        sparq-agent/issue-4677-30766790304-1 -> origin/sparq-agent/issue-4677-30766790304-1
+2026-09-10T08:44:50.0736752Z  * [new branch]        sparq-agent/issue-4677-33684227107-1 -> origin/sparq-agent/issue-4677-33684227107-1
+2026-09-10T08:44:50.0737659Z  * [new branch]        sparq-agent/issue-4802-30654858799-1 -> origin/sparq-agent/issue-4802-30654858799-1
+2026-09-10T08:44:50.0738470Z  * [new branch]        sparq-agent/issue-4820-30828450369-1 -> origin/sparq-agent/issue-4820-30828450369-1
+2026-09-10T08:44:50.0739251Z  * [new branch]        sparq-agent/issue-4820-33744927064-1 -> origin/sparq-agent/issue-4820-33744927064-1
+2026-09-10T08:44:50.0740026Z  * [new branch]        sparq-agent/issue-4877-33495664227-1 -> origin/sparq-agent/issue-4877-33495664227-1
+2026-09-10T08:44:50.0740922Z  * [new branch]        sparq-agent/issue-4877-33685329487-1 -> origin/sparq-agent/issue-4877-33685329487-1
+2026-09-10T08:44:50.0742008Z  * [new branch]        sparq-agent/issue-4878-33582850781-1 -> origin/sparq-agent/issue-4878-33582850781-1
+2026-09-10T08:44:50.0743083Z  * [new branch]        sparq-agent/issue-4878-33721415162-1 -> origin/sparq-agent/issue-4878-33721415162-1
+2026-09-10T08:44:50.0744161Z  * [new branch]        sparq-agent/issue-4879-33770089960-1 -> origin/sparq-agent/issue-4879-33770089960-1
+2026-09-10T08:44:50.0745168Z  * [new branch]        sparq-agent/issue-4964-33796154060-1 -> origin/sparq-agent/issue-4964-33796154060-1
+2026-09-10T08:44:50.0746225Z  * [new branch]        sparq-agent/issue-4970-30439677411-1 -> origin/sparq-agent/issue-4970-30439677411-1
+2026-09-10T08:44:50.0747613Z  * [new branch]        sparq-agent/issue-4985-30664354761-1 -> origin/sparq-agent/issue-4985-30664354761-1
+2026-09-10T08:44:50.0748743Z  * [new branch]        sparq-agent/issue-4985-33550077908-1 -> origin/sparq-agent/issue-4985-33550077908-1
+2026-09-10T08:44:50.0749730Z  * [new branch]        sparq-agent/issue-4997-30666655216-1 -> origin/sparq-agent/issue-4997-30666655216-1
+2026-09-10T08:44:50.0750728Z  * [new branch]        sparq-agent/issue-4997-33500915742-1 -> origin/sparq-agent/issue-4997-33500915742-1
+2026-09-10T08:44:50.0765165Z  * [new branch]        sparq-agent/issue-5004-30668057521-1 -> origin/sparq-agent/issue-5004-30668057521-1
+2026-09-10T08:44:50.0766242Z  * [new branch]        sparq-agent/issue-5019-30673145789-1 -> origin/sparq-agent/issue-5019-30673145789-1
+2026-09-10T08:44:50.0767352Z  * [new branch]        sparq-agent/issue-5019-33503274027-1 -> origin/sparq-agent/issue-5019-33503274027-1
+2026-09-10T08:44:50.0768144Z  * [new branch]        sparq-agent/issue-5127-30691340452-1 -> origin/sparq-agent/issue-5127-30691340452-1
+2026-09-10T08:44:50.0768924Z  * [new branch]        sparq-agent/issue-5133-30696175825-1 -> origin/sparq-agent/issue-5133-30696175825-1
+2026-09-10T08:44:50.0769694Z  * [new branch]        sparq-agent/issue-5133-33422168336-1 -> origin/sparq-agent/issue-5133-33422168336-1
+2026-09-10T08:44:50.0770468Z  * [new branch]        sparq-agent/issue-5138-30697005895-1 -> origin/sparq-agent/issue-5138-30697005895-1
+2026-09-10T08:44:50.0771233Z  * [new branch]        sparq-agent/issue-5138-33470116586-1 -> origin/sparq-agent/issue-5138-33470116586-1
+2026-09-10T08:44:50.0772035Z  * [new branch]        sparq-agent/issue-5139-30700837697-1 -> origin/sparq-agent/issue-5139-30700837697-1
+2026-09-10T08:44:50.0772826Z  * [new branch]        sparq-agent/issue-5139-33478394804-1 -> origin/sparq-agent/issue-5139-33478394804-1
+2026-09-10T08:44:50.0773594Z  * [new branch]        sparq-agent/issue-5140-30703237788-1 -> origin/sparq-agent/issue-5140-30703237788-1
+2026-09-10T08:44:50.0774361Z  * [new branch]        sparq-agent/issue-5140-33488014712-1 -> origin/sparq-agent/issue-5140-33488014712-1
+2026-09-10T08:44:50.0775125Z  * [new branch]        sparq-agent/issue-5148-30710068804-1 -> origin/sparq-agent/issue-5148-30710068804-1
+2026-09-10T08:44:50.0775891Z  * [new branch]        sparq-agent/issue-5148-33398619309-1 -> origin/sparq-agent/issue-5148-33398619309-1
+2026-09-10T08:44:50.0776927Z  * [new branch]        sparq-agent/issue-5149-30711341266-1 -> origin/sparq-agent/issue-5149-30711341266-1
+2026-09-10T08:44:50.0777898Z  * [new branch]        sparq-agent/issue-5155-30713467004-1 -> origin/sparq-agent/issue-5155-30713467004-1
+2026-09-10T08:44:50.0778709Z  * [new branch]        sparq-agent/issue-5155-33523440404-1 -> origin/sparq-agent/issue-5155-33523440404-1
+2026-09-10T08:44:50.0779517Z  * [new branch]        sparq-agent/issue-5160-30714442312-1 -> origin/sparq-agent/issue-5160-30714442312-1
+2026-09-10T08:44:50.0780292Z  * [new branch]        sparq-agent/issue-5160-33497644557-1 -> origin/sparq-agent/issue-5160-33497644557-1
+2026-09-10T08:44:50.0781056Z  * [new branch]        sparq-agent/issue-5162-30715844089-1 -> origin/sparq-agent/issue-5162-30715844089-1
+2026-09-10T08:44:50.0781826Z  * [new branch]        sparq-agent/issue-5164-30717880324-1 -> origin/sparq-agent/issue-5164-30717880324-1
+2026-09-10T08:44:50.0782593Z  * [new branch]        sparq-agent/issue-5164-33544318903-1 -> origin/sparq-agent/issue-5164-33544318903-1
+2026-09-10T08:44:50.0783365Z  * [new branch]        sparq-agent/issue-5166-30720135102-1 -> origin/sparq-agent/issue-5166-30720135102-1
+2026-09-10T08:44:50.0784345Z  * [new branch]        sparq-agent/issue-5166-33506241489-1 -> origin/sparq-agent/issue-5166-33506241489-1
+2026-09-10T08:44:50.0785117Z  * [new branch]        sparq-agent/issue-5213-30720894127-1 -> origin/sparq-agent/issue-5213-30720894127-1
+2026-09-10T08:44:50.0785896Z  * [new branch]        sparq-agent/issue-5213-33577612843-1 -> origin/sparq-agent/issue-5213-33577612843-1
+2026-09-10T08:44:50.0786992Z  * [new branch]        sparq-agent/issue-5214-30722549035-1 -> origin/sparq-agent/issue-5214-30722549035-1
+2026-09-10T08:44:50.0787790Z  * [new branch]        sparq-agent/issue-5214-33598173100-1 -> origin/sparq-agent/issue-5214-33598173100-1
+2026-09-10T08:44:50.0788569Z  * [new branch]        sparq-agent/issue-5215-30723403149-1 -> origin/sparq-agent/issue-5215-30723403149-1
+2026-09-10T08:44:50.0789332Z  * [new branch]        sparq-agent/issue-5215-33664975089-1 -> origin/sparq-agent/issue-5215-33664975089-1
+2026-09-10T08:44:50.0790112Z  * [new branch]        sparq-agent/issue-5221-30725994916-1 -> origin/sparq-agent/issue-5221-30725994916-1
+2026-09-10T08:44:50.0790883Z  * [new branch]        sparq-agent/issue-5231-30728509265-1 -> origin/sparq-agent/issue-5231-30728509265-1
+2026-09-10T08:44:50.0791648Z  * [new branch]        sparq-agent/issue-5231-33547717941-1 -> origin/sparq-agent/issue-5231-33547717941-1
+2026-09-10T08:44:50.0792432Z  * [new branch]        sparq-agent/issue-5235-30746968534-1 -> origin/sparq-agent/issue-5235-30746968534-1
+2026-09-10T08:44:50.0793208Z  * [new branch]        sparq-agent/issue-5235-33688666203-1 -> origin/sparq-agent/issue-5235-33688666203-1
+2026-09-10T08:44:50.0793978Z  * [new branch]        sparq-agent/issue-5237-30747831190-1 -> origin/sparq-agent/issue-5237-30747831190-1
+2026-09-10T08:44:50.0794739Z  * [new branch]        sparq-agent/issue-5237-33525930197-1 -> origin/sparq-agent/issue-5237-33525930197-1
+2026-09-10T08:44:50.0795513Z  * [new branch]        sparq-agent/issue-5237-33796171626-1 -> origin/sparq-agent/issue-5237-33796171626-1
+2026-09-10T08:44:50.0796277Z  * [new branch]        sparq-agent/issue-5242-30749037516-1 -> origin/sparq-agent/issue-5242-30749037516-1
+2026-09-10T08:44:50.0797297Z  * [new branch]        sparq-agent/issue-5243-30750712806-1 -> origin/sparq-agent/issue-5243-30750712806-1
+2026-09-10T08:44:50.0798073Z  * [new branch]        sparq-agent/issue-5243-33560838926-1 -> origin/sparq-agent/issue-5243-33560838926-1
+2026-09-10T08:44:50.0798829Z  * [new branch]        sparq-agent/issue-5250-30753520497-1 -> origin/sparq-agent/issue-5250-30753520497-1
+2026-09-10T08:44:50.0799599Z  * [new branch]        sparq-agent/issue-5250-33530247824-1 -> origin/sparq-agent/issue-5250-33530247824-1
+2026-09-10T08:44:50.0800366Z  * [new branch]        sparq-agent/issue-5281-30756967729-1 -> origin/sparq-agent/issue-5281-30756967729-1
+2026-09-10T08:44:50.0801127Z  * [new branch]        sparq-agent/issue-5281-33707837747-1 -> origin/sparq-agent/issue-5281-33707837747-1
+2026-09-10T08:44:50.0802034Z  * [new branch]        sparq-agent/issue-5304-30757808559-1 -> origin/sparq-agent/issue-5304-30757808559-1
+2026-09-10T08:44:50.0803020Z  * [new branch]        sparq-agent/issue-5305-30758567694-1 -> origin/sparq-agent/issue-5305-30758567694-1
+2026-09-10T08:44:50.0803814Z  * [new branch]        sparq-agent/issue-5305-33532614505-1 -> origin/sparq-agent/issue-5305-33532614505-1
+2026-09-10T08:44:50.0804753Z  * [new branch]        sparq-agent/issue-5336-30762720017-1 -> origin/sparq-agent/issue-5336-30762720017-1
+2026-09-10T08:44:50.0805691Z  * [new branch]        sparq-agent/issue-5336-33681875515-1 -> origin/sparq-agent/issue-5336-33681875515-1
+2026-09-10T08:44:50.0806784Z  * [new branch]        sparq-agent/issue-5342-30763674783-1 -> origin/sparq-agent/issue-5342-30763674783-1
+2026-09-10T08:44:50.0807607Z  * [new branch]        sparq-agent/issue-5352-30764423103-1 -> origin/sparq-agent/issue-5352-30764423103-1
+2026-09-10T08:44:50.0808609Z  * [new branch]        sparq-agent/issue-5352-33693360350-1 -> origin/sparq-agent/issue-5352-33693360350-1
+2026-09-10T08:44:50.0809844Z  * [new branch]        sparq-agent/issue-5367-30765673300-1 -> origin/sparq-agent/issue-5367-30765673300-1
+2026-09-10T08:44:50.0810830Z  * [new branch]        sparq-agent/issue-5371-30769014154-1 -> origin/sparq-agent/issue-5371-30769014154-1
+2026-09-10T08:44:50.0811790Z  * [new branch]        sparq-agent/issue-5371-33536780438-1 -> origin/sparq-agent/issue-5371-33536780438-1
+2026-09-10T08:44:50.0812649Z  * [new branch]        sparq-agent/issue-5425-30769848930-1 -> origin/sparq-agent/issue-5425-30769848930-1
+2026-09-10T08:44:50.0813565Z  * [new branch]        sparq-agent/issue-5425-33584323529-1 -> origin/sparq-agent/issue-5425-33584323529-1
+2026-09-10T08:44:50.0814533Z  * [new branch]        sparq-agent/issue-5426-30770753714-1 -> origin/sparq-agent/issue-5426-30770753714-1
+2026-09-10T08:44:50.0815486Z  * [new branch]        sparq-agent/issue-5426-33734470750-1 -> origin/sparq-agent/issue-5426-33734470750-1
+2026-09-10T08:44:50.0816342Z  * [new branch]        sparq-agent/issue-5462-30773668490-1 -> origin/sparq-agent/issue-5462-30773668490-1
+2026-09-10T08:44:50.0817422Z  * [new branch]        sparq-agent/issue-5462-33541799610-1 -> origin/sparq-agent/issue-5462-33541799610-1
+2026-09-10T08:44:50.0818392Z  * [new branch]        sparq-agent/issue-5514-30686162429-1 -> origin/sparq-agent/issue-5514-30686162429-1
+2026-09-10T08:44:50.0819365Z  * [new branch]        sparq-agent/issue-5546-30694825688-1 -> origin/sparq-agent/issue-5546-30694825688-1
+2026-09-10T08:44:50.0820310Z  * [new branch]        sparq-agent/issue-5574-30778944666-1 -> origin/sparq-agent/issue-5574-30778944666-1
+2026-09-10T08:44:50.0821134Z  * [new branch]        sparq-agent/issue-5574-33564976933-1 -> origin/sparq-agent/issue-5574-33564976933-1
+2026-09-10T08:44:50.0822126Z  * [new branch]        sparq-agent/issue-5575-30780030481-1 -> origin/sparq-agent/issue-5575-30780030481-1
+2026-09-10T08:44:50.0823087Z  * [new branch]        sparq-agent/issue-5579-33802218391-1 -> origin/sparq-agent/issue-5579-33802218391-1
+2026-09-10T08:44:50.0824072Z  * [new branch]        sparq-agent/issue-5654-30781838682-1 -> origin/sparq-agent/issue-5654-30781838682-1
+2026-09-10T08:44:50.0824863Z  * [new branch]        sparq-agent/issue-5654-33567161582-1 -> origin/sparq-agent/issue-5654-33567161582-1
+2026-09-10T08:44:50.0825824Z  * [new branch]        sparq-agent/issue-5654-33706320012-1 -> origin/sparq-agent/issue-5654-33706320012-1
+2026-09-10T08:44:50.0827051Z  * [new branch]        sparq-agent/issue-5668-30746973956-1 -> origin/sparq-agent/issue-5668-30746973956-1
+2026-09-10T08:44:50.0828035Z  * [new branch]        sparq-agent/issue-5686-30756491807-1 -> origin/sparq-agent/issue-5686-30756491807-1
+2026-09-10T08:44:50.0828976Z  * [new branch]        sparq-agent/issue-5690-30782887357-1 -> origin/sparq-agent/issue-5690-30782887357-1
+2026-09-10T08:44:50.0829769Z  * [new branch]        sparq-agent/issue-5691-30783793868-1 -> origin/sparq-agent/issue-5691-30783793868-1
+2026-09-10T08:44:50.0830901Z  * [new branch]        sparq-agent/issue-5692-30784971187-1 -> origin/sparq-agent/issue-5692-30784971187-1
+2026-09-10T08:44:50.0831934Z  * [new branch]        sparq-agent/issue-5692-33587562225-1 -> origin/sparq-agent/issue-5692-33587562225-1
+2026-09-10T08:44:50.0832909Z  * [new branch]        sparq-agent/issue-5701-30785833418-1 -> origin/sparq-agent/issue-5701-30785833418-1
+2026-09-10T08:44:50.0833816Z  * [new branch]        sparq-agent/issue-5701-33575606286-1 -> origin/sparq-agent/issue-5701-33575606286-1
+2026-09-10T08:44:50.0834660Z  * [new branch]        sparq-agent/issue-5701-33799859530-1 -> origin/sparq-agent/issue-5701-33799859530-1
+2026-09-10T08:44:50.0835617Z  * [new branch]        sparq-agent/issue-5742-30787295836-1 -> origin/sparq-agent/issue-5742-30787295836-1
+2026-09-10T08:44:50.0836925Z  * [new branch]        sparq-agent/issue-5742-33696975601-1 -> origin/sparq-agent/issue-5742-33696975601-1
+2026-09-10T08:44:50.0838141Z  * [new branch]        sparq-agent/issue-5772-30790657188-1 -> origin/sparq-agent/issue-5772-30790657188-1
+2026-09-10T08:44:50.0838917Z  * [new branch]        sparq-agent/issue-5772-33579208678-1 -> origin/sparq-agent/issue-5772-33579208678-1
+2026-09-10T08:44:50.0839851Z  * [new branch]        sparq-agent/issue-5772-33713718804-1 -> origin/sparq-agent/issue-5772-33713718804-1
+2026-09-10T08:44:50.0840614Z  * [new branch]        sparq-agent/issue-5776-30791995872-1 -> origin/sparq-agent/issue-5776-30791995872-1
+2026-09-10T08:44:50.0841390Z  * [new branch]        sparq-agent/issue-5776-33595125451-1 -> origin/sparq-agent/issue-5776-33595125451-1
+2026-09-10T08:44:50.0842158Z  * [new branch]        sparq-agent/issue-5777-30794143943-1 -> origin/sparq-agent/issue-5777-30794143943-1
+2026-09-10T08:44:50.0842928Z  * [new branch]        sparq-agent/issue-5777-33633947121-1 -> origin/sparq-agent/issue-5777-33633947121-1
+2026-09-10T08:44:50.0843690Z  * [new branch]        sparq-agent/issue-5799-30796938379-1 -> origin/sparq-agent/issue-5799-30796938379-1
+2026-09-10T08:44:50.0844466Z  * [new branch]        sparq-agent/issue-5799-33600224354-1 -> origin/sparq-agent/issue-5799-33600224354-1
+2026-09-10T08:44:50.0845235Z  * [new branch]        sparq-agent/issue-5802-30803006000-1 -> origin/sparq-agent/issue-5802-30803006000-1
+2026-09-10T08:44:50.0846002Z  * [new branch]        sparq-agent/issue-5802-33756555447-1 -> origin/sparq-agent/issue-5802-33756555447-1
+2026-09-10T08:44:50.0847054Z  * [new branch]        sparq-agent/issue-5804-30804506378-1 -> origin/sparq-agent/issue-5804-30804506378-1
+2026-09-10T08:44:50.0847836Z  * [new branch]        sparq-agent/issue-5804-33721428266-1 -> origin/sparq-agent/issue-5804-33721428266-1
+2026-09-10T08:44:50.0848596Z  * [new branch]        sparq-agent/issue-5823-30806608533-1 -> origin/sparq-agent/issue-5823-30806608533-1
+2026-09-10T08:44:50.0849359Z  * [new branch]        sparq-agent/issue-5843-30810334602-1 -> origin/sparq-agent/issue-5843-30810334602-1
+2026-09-10T08:44:50.0850120Z  * [new branch]        sparq-agent/issue-5843-33610175187-1 -> origin/sparq-agent/issue-5843-33610175187-1
+2026-09-10T08:44:50.0850889Z  * [new branch]        sparq-agent/issue-5843-33802234792-1 -> origin/sparq-agent/issue-5843-33802234792-1
+2026-09-10T08:44:50.0851659Z  * [new branch]        sparq-agent/issue-5849-30811882006-1 -> origin/sparq-agent/issue-5849-30811882006-1
+2026-09-10T08:44:50.0852417Z  * [new branch]        sparq-agent/issue-5851-30813577509-1 -> origin/sparq-agent/issue-5851-30813577509-1
+2026-09-10T08:44:50.0853181Z  * [new branch]        sparq-agent/issue-6026-33415000176-1 -> origin/sparq-agent/issue-6026-33415000176-1
+2026-09-10T08:44:50.0853943Z  * [new branch]        sparq-agent/issue-6026-33874165616-1 -> origin/sparq-agent/issue-6026-33874165616-1
+2026-09-10T08:44:50.0854698Z  * [new branch]        sparq-agent/issue-6048-33455875281-1 -> origin/sparq-agent/issue-6048-33455875281-1
+2026-09-10T08:44:50.0855474Z  * [new branch]        sparq-agent/issue-6048-33690568033-1 -> origin/sparq-agent/issue-6048-33690568033-1
+2026-09-10T08:44:50.0856367Z  * [new branch]        sparq-agent/issue-6060-33622902610-1 -> origin/sparq-agent/issue-6060-33622902610-1
+2026-09-10T08:44:50.0857300Z  * [new branch]        sparq-agent/issue-6068-33458524418-1 -> origin/sparq-agent/issue-6068-33458524418-1
+2026-09-10T08:44:50.0858070Z  * [new branch]        sparq-agent/issue-6068-33670685917-1 -> origin/sparq-agent/issue-6068-33670685917-1
+2026-09-10T08:44:50.0858834Z  * [new branch]        sparq-agent/issue-6071-33813126681-1 -> origin/sparq-agent/issue-6071-33813126681-1
+2026-09-10T08:44:50.0859603Z  * [new branch]        sparq-agent/issue-6078-33625281904-1 -> origin/sparq-agent/issue-6078-33625281904-1
+2026-09-10T08:44:50.0860368Z  * [new branch]        sparq-agent/issue-6087-33715221679-1 -> origin/sparq-agent/issue-6087-33715221679-1
+2026-09-10T08:44:50.0861145Z  * [new branch]        sparq-agent/issue-6088-33716586871-1 -> origin/sparq-agent/issue-6088-33716586871-1
+2026-09-10T08:44:50.0861908Z  * [new branch]        sparq-agent/issue-6096-33770110876-1 -> origin/sparq-agent/issue-6096-33770110876-1
+2026-09-10T08:44:50.0862674Z  * [new branch]        sparq-agent/issue-6110-33809654537-1 -> origin/sparq-agent/issue-6110-33809654537-1
+2026-09-10T08:44:50.0863576Z  * [new branch]        sparq-agent/issue-6121-33813141051-1 -> origin/sparq-agent/issue-6121-33813141051-1
+2026-09-10T08:44:50.0864344Z  * [new branch]        sparq-agent/issue-6123-33816518975-1 -> origin/sparq-agent/issue-6123-33816518975-1
+2026-09-10T08:44:50.0865105Z  * [new branch]        sparq-agent/issue-6132-33818517032-1 -> origin/sparq-agent/issue-6132-33818517032-1
+2026-09-10T08:44:50.0865866Z  * [new branch]        sparq-agent/issue-6144-33525951515-1 -> origin/sparq-agent/issue-6144-33525951515-1
+2026-09-10T08:44:50.0866865Z  * [new branch]        sparq-agent/issue-6158-33824301804-1 -> origin/sparq-agent/issue-6158-33824301804-1
+2026-09-10T08:44:50.0867643Z  * [new branch]        sparq-agent/issue-6160-33833531181-1 -> origin/sparq-agent/issue-6160-33833531181-1
+2026-09-10T08:44:50.0868407Z  * [new branch]        sparq-agent/issue-6222-33878571402-1 -> origin/sparq-agent/issue-6222-33878571402-1
+2026-09-10T08:44:50.0869170Z  * [new branch]        sparq-agent/issue-6226-33879743377-1 -> origin/sparq-agent/issue-6226-33879743377-1
+2026-09-10T08:44:50.0869925Z  * [new branch]        sparq-agent/issue-6240-33880850606-1 -> origin/sparq-agent/issue-6240-33880850606-1
+2026-09-10T08:44:50.0870687Z  * [new branch]        sparq-agent/issue-6269-33884378056-1 -> origin/sparq-agent/issue-6269-33884378056-1
+2026-09-10T08:44:50.0871440Z  * [new branch]        sparq-agent/issue-6273-33885422698-1 -> origin/sparq-agent/issue-6273-33885422698-1
+2026-09-10T08:44:50.0872198Z  * [new branch]        sparq-agent/issue-6292-33891155157-1 -> origin/sparq-agent/issue-6292-33891155157-1
+2026-09-10T08:44:50.0872965Z  * [new branch]        sparq-agent/issue-6293-33895807906-1 -> origin/sparq-agent/issue-6293-33895807906-1
+2026-09-10T08:44:50.0873719Z  * [new branch]        sparq-agent/issue-6298-33897166427-1 -> origin/sparq-agent/issue-6298-33897166427-1
+2026-09-10T08:44:50.0874485Z  * [new branch]        sparq-agent/issue-6302-33901518339-1 -> origin/sparq-agent/issue-6302-33901518339-1
+2026-09-10T08:44:50.0875251Z  * [new branch]        sparq-agent/issue-6316-33911985819-1 -> origin/sparq-agent/issue-6316-33911985819-1
+2026-09-10T08:44:50.0876008Z  * [new branch]        sparq-agent/issue-6317-33913155412-1 -> origin/sparq-agent/issue-6317-33913155412-1
+2026-09-10T08:44:50.0876873Z  * [new branch]        spike-wasm-solid-sq-6xasp-1 -> origin/spike-wasm-solid-sq-6xasp-1
+2026-09-10T08:44:50.0877663Z  * [new branch]        sq-3kd2g.5-zksparql-section7-fragment -> origin/sq-3kd2g.5-zksparql-section7-fragment
+2026-09-10T08:44:50.0878492Z  * [new branch]        sq-4891y-firm-gufo-closure-variance -> origin/sq-4891y-firm-gufo-closure-variance
+2026-09-10T08:44:50.0879310Z  * [new branch]        sq-p6p6-adaptive-replan-local -> origin/sq-p6p6-adaptive-replan-local
+2026-09-10T08:44:50.0880004Z  * [new branch]        sq-vvu9d-zksparql-spec  -> origin/sq-vvu9d-zksparql-spec
+2026-09-10T08:44:50.0880733Z  * [new branch]        test-geo-ogc            -> origin/test-geo-ogc
+2026-09-10T08:44:50.0881324Z  * [new branch]        test/sq-2b7h7-haiku     -> origin/test/sq-2b7h7-haiku
+2026-09-10T08:44:50.0881908Z  * [new branch]        test/sq-5kh4d-haiku     -> origin/test/sq-5kh4d-haiku
+2026-09-10T08:44:50.0882476Z  * [new branch]        test/sq-bvdyd-haiku     -> origin/test/sq-bvdyd-haiku
+2026-09-10T08:44:50.0883036Z  * [new branch]        test/sq-ct7gh-haiku     -> origin/test/sq-ct7gh-haiku
+2026-09-10T08:44:50.0883601Z  * [new branch]        test/sq-dfoik-haiku     -> origin/test/sq-dfoik-haiku
+2026-09-10T08:44:50.0884156Z  * [new branch]        test/sq-kcld6-haiku     -> origin/test/sq-kcld6-haiku
+2026-09-10T08:44:50.0884714Z  * [new branch]        test/sq-pz5rf-haiku     -> origin/test/sq-pz5rf-haiku
+2026-09-10T08:44:50.0885331Z  * [new branch]        worktree-wf_4afacebc-ecd-5 -> origin/worktree-wf_4afacebc-ecd-5
+2026-09-10T08:44:50.0886012Z  * [new branch]        worktree-wf_d732273c-b02-15 -> origin/worktree-wf_d732273c-b02-15
+2026-09-10T08:44:50.0887084Z  * [new branch]        zk-test-bench-design    -> origin/zk-test-bench-design
+2026-09-10T08:44:50.0887605Z  * [new tag]           v0.1.0                  -> v0.1.0
+2026-09-10T08:44:50.0888064Z  * [new tag]           v0.1.0-dev.3            -> v0.1.0-dev.3
+2026-09-10T08:44:50.0888523Z  * [new tag]           v0.1.1                  -> v0.1.1
+2026-09-10T08:44:50.0889982Z [command]/usr/bin/git branch --list --remote origin/main
+2026-09-10T08:44:50.0890484Z   origin/main
+2026-09-10T08:44:50.0891246Z [command]/usr/bin/git rev-parse refs/remotes/origin/main
+2026-09-10T08:44:50.0891696Z 781f667c19a8ebb779cfccb24b05ea432360b025
+2026-09-10T08:44:50.0892729Z ##[endgroup]
+2026-09-10T08:44:50.0893251Z ##[group]Determining the checkout info
+2026-09-10T08:44:50.0893808Z ##[endgroup]
+2026-09-10T08:44:50.0894147Z [command]/usr/bin/git sparse-checkout disable
+2026-09-10T08:44:50.0895091Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-09-10T08:44:50.0896163Z ##[group]Checking out the ref
+2026-09-10T08:44:50.0896831Z [command]/usr/bin/git checkout --progress --force -B main refs/remotes/origin/main
+2026-09-10T08:44:50.6508992Z Switched to a new branch 'main'
+2026-09-10T08:44:50.6516100Z branch 'main' set up to track 'origin/main'.
+2026-09-10T08:44:50.6555511Z ##[endgroup]
+2026-09-10T08:44:50.6607080Z [command]/usr/bin/git log -1 --format=%H
+2026-09-10T08:44:50.6658092Z 781f667c19a8ebb779cfccb24b05ea432360b025
+2026-09-10T08:44:50.6668607Z ##[group]Removing auth
+2026-09-10T08:44:50.6669186Z Removing SSH command configuration
+2026-09-10T08:44:50.6673967Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-09-10T08:44:50.6714785Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-09-10T08:44:50.6965145Z Removing HTTP extra header
+2026-09-10T08:44:50.6969757Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-10T08:44:50.7006739Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-09-10T08:44:50.7238740Z Removing includeIf entries pointing to credentials config files
+2026-09-10T08:44:50.7242134Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-10T08:44:50.7275354Z includeif.gitdir:/home/runner/work/sparq/sparq/.git.path
+2026-09-10T08:44:50.7277245Z includeif.gitdir:/home/runner/work/sparq/sparq/.git/worktrees/*.path
+2026-09-10T08:44:50.7278524Z includeif.gitdir:/github/workspace/.git.path
+2026-09-10T08:44:50.7279570Z includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-09-10T08:44:50.7292839Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/sparq/sparq/.git.path
+2026-09-10T08:44:50.7320603Z /home/runner/work/_temp/git-credentials-2aea6325-d43b-4cc2-95b4-4e6055dde9d1.config
+2026-09-10T08:44:50.7329418Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/sparq/sparq/.git.path /home/runner/work/_temp/git-credentials-2aea6325-d43b-4cc2-95b4-4e6055dde9d1.config
+2026-09-10T08:44:50.7372148Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/sparq/sparq/.git/worktrees/*.path
+2026-09-10T08:44:50.7401906Z /home/runner/work/_temp/git-credentials-2aea6325-d43b-4cc2-95b4-4e6055dde9d1.config
+2026-09-10T08:44:50.7410175Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/sparq/sparq/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-2aea6325-d43b-4cc2-95b4-4e6055dde9d1.config
+2026-09-10T08:44:50.7449836Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git.path
+2026-09-10T08:44:50.7476786Z /github/runner_temp/git-credentials-2aea6325-d43b-4cc2-95b4-4e6055dde9d1.config
+2026-09-10T08:44:50.7484833Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-2aea6325-d43b-4cc2-95b4-4e6055dde9d1.config
+2026-09-10T08:44:50.7520031Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-09-10T08:44:50.7545840Z /github/runner_temp/git-credentials-2aea6325-d43b-4cc2-95b4-4e6055dde9d1.config
+2026-09-10T08:44:50.7554608Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-2aea6325-d43b-4cc2-95b4-4e6055dde9d1.config
+2026-09-10T08:44:50.7589941Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-09-10T08:44:50.7819902Z Removing credentials config '/home/runner/work/_temp/git-credentials-2aea6325-d43b-4cc2-95b4-4e6055dde9d1.config'
+2026-09-10T08:44:50.7827933Z ##[endgroup]
+2026-09-10T08:44:50.7962519Z ##[group]Run rustup default stable
+2026-09-10T08:44:50.7962983Z [36;1mrustup default stable[0m
+2026-09-10T08:44:50.7963353Z [36;1mrustup show active-toolchain[0m
+2026-09-10T08:44:50.8005458Z shell: /usr/bin/bash -e {0}
+2026-09-10T08:44:50.8005799Z env:
+2026-09-10T08:44:50.8006211Z   ORCHESTRATOR_APP_ID: ***
+2026-09-10T08:44:50.8006821Z ##[endgroup]
+2026-09-10T08:44:50.8546019Z info: using existing install for stable-x86_64-unknown-linux-gnu
+2026-09-10T08:44:50.8612836Z info: default toolchain set to stable-x86_64-unknown-linux-gnu
+2026-09-10T08:44:50.8613281Z 
+2026-09-10T08:44:51.0210237Z   stable-x86_64-unknown-linux-gnu unchanged - rustc 1.98.0 (88d9e12ae 2026-08-18)
+2026-09-10T08:44:51.0212047Z info: note that the toolchain '1.97.1-x86_64-unknown-linux-gnu' is currently in use (overridden by '/home/runner/work/sparq/sparq/rust-toolchain.toml')
+2026-09-10T08:44:51.0213207Z 
+2026-09-10T08:44:51.0311642Z info: syncing channel updates for 1.97.1-x86_64-unknown-linux-gnu
+2026-09-10T08:44:51.2773588Z info: latest update on 2026-07-16 for version 1.97.1 (8bab26f4f 2026-07-14)
+2026-09-10T08:44:51.2789844Z info: downloading 6 components
+2026-09-10T08:45:01.0422390Z 1.97.1-x86_64-unknown-linux-gnu (overridden by '/home/runner/work/sparq/sparq/rust-toolchain.toml')
+2026-09-10T08:45:01.0600287Z ##[group]Run taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68
+2026-09-10T08:45:01.0600804Z with:
+2026-09-10T08:45:01.0601143Z   tool: release-plz@0.3.160,cargo-semver-checks@0.48
+2026-09-10T08:45:01.0601558Z   checksum: true
+2026-09-10T08:45:01.0601858Z   fallback: cargo-binstall
+2026-09-10T08:45:01.0602165Z env:
+2026-09-10T08:45:01.0602557Z   ORCHESTRATOR_APP_ID: ***
+2026-09-10T08:45:01.0602874Z ##[endgroup]
+2026-09-10T08:45:01.0689370Z ##[start-action display=Run bail() {;id=__taiki-e_install-action.__run]
+2026-09-10T08:45:01.0717165Z ##[group]Run bail() {
+2026-09-10T08:45:01.0717534Z [36;1mbail() {[0m
+2026-09-10T08:45:01.0717908Z [36;1m  printf '::error::install-action: %s\n' "$*"[0m
+2026-09-10T08:45:01.0718340Z [36;1m  exit 1[0m
+2026-09-10T08:45:01.0718651Z [36;1m}[0m
+2026-09-10T08:45:01.0719145Z [36;1m# If /bin/sh is dash, environment variable containing % is not imported, but is fine[0m
+2026-09-10T08:45:01.0719832Z [36;1m# because it also means that it will not be exposed to subprocess.[0m
+2026-09-10T08:45:01.0720364Z [36;1mif /usr/bin/env | grep -Eq '^BASH_FUNC_'; then[0m
+2026-09-10T08:45:01.0721027Z [36;1m  bail 'bash function injection via BASH_FUNC_ environment variable is not allowed for security reasons'[0m
+2026-09-10T08:45:01.0721615Z [36;1mfi[0m
+2026-09-10T08:45:01.0721930Z [36;1mif ! command -v bash >/dev/null; then[0m
+2026-09-10T08:45:01.0722383Z [36;1m  if grep -Eq '^ID=alpine' /etc/os-release; then[0m
+2026-09-10T08:45:01.0722940Z [36;1m    printf '::group::Install packages required for install-action (bash)\n'[0m
+2026-09-10T08:45:01.0723487Z [36;1m    # NB: sync with apk_install in main.sh[0m
+2026-09-10T08:45:01.0723914Z [36;1m    if command -v sudo >/dev/null; then[0m
+2026-09-10T08:45:01.0724512Z [36;1m      sudo apk --no-cache add bash[0m
+2026-09-10T08:45:01.0724933Z [36;1m    elif command -v doas >/dev/null; then[0m
+2026-09-10T08:45:01.0725350Z [36;1m      doas apk --no-cache add bash[0m
+2026-09-10T08:45:01.0725734Z [36;1m    else[0m
+2026-09-10T08:45:01.0726041Z [36;1m      apk --no-cache add bash[0m
+2026-09-10T08:45:01.0726401Z [36;1m    fi[0m
+2026-09-10T08:45:01.0726880Z [36;1m    printf '::endgroup::\n'[0m
+2026-09-10T08:45:01.0727233Z [36;1m  else[0m
+2026-09-10T08:45:01.0727554Z [36;1m    bail 'this action requires bash'[0m
+2026-09-10T08:45:01.0727924Z [36;1m  fi[0m
+2026-09-10T08:45:01.0728192Z [36;1mfi[0m
+2026-09-10T08:45:01.0728570Z [36;1mbash --noprofile --norc "${GITHUB_ACTION_PATH:?}/main.sh"[0m
+2026-09-10T08:45:01.0731225Z shell: /usr/bin/env -u ENV -u BASH_ENV -u CDPATH -u SHELLOPTS -u BASHOPTS /bin/sh -eu {0}
+2026-09-10T08:45:01.0731753Z env:
+2026-09-10T08:45:01.0732112Z   ORCHESTRATOR_APP_ID: ***
+2026-09-10T08:45:01.0732514Z   INPUT_TOOL: release-plz@0.3.160,cargo-semver-checks@0.48
+2026-09-10T08:45:01.0732957Z   INPUT_CHECKSUM: true
+2026-09-10T08:45:01.0733273Z   INPUT_FALLBACK: cargo-binstall
+2026-09-10T08:45:01.0735835Z   DEFAULT_GITHUB_TOKEN: ***
+2026-09-10T08:45:01.0736356Z   ACTION_USER_AGENT: taiki-e/install-action (18b1216eba7f8039b0f8d131d5473787f0edce68)
+2026-09-10T08:45:01.0737083Z   RUNNER_OS: Linux
+2026-09-10T08:45:01.0737380Z   RUNNER_ARCH: X64
+2026-09-10T08:45:01.0737668Z ##[endgroup]
+2026-09-10T08:45:01.0877429Z info: host platform: x86_64_linux
+2026-09-10T08:45:01.1049171Z info: installing release-plz@0.3.160
+2026-09-10T08:45:01.1257580Z info: downloading https://github.com/release-plz/release-plz/releases/download/release-plz-v0.3.160/release-plz-x86_64-unknown-linux-musl.tar.gz
+2026-09-10T08:45:01.6673611Z info: verifying sha256 checksum for release-plz-x86_64-unknown-linux-musl.tar.gz
+2026-09-10T08:45:02.0312048Z info: release-plz installed at /home/runner/.cargo/bin/release-plz
+2026-09-10T08:45:02.0314835Z + release-plz --version
+2026-09-10T08:45:02.0351812Z release-plz 0.3.160
+2026-09-10T08:45:02.0361395Z 
+2026-09-10T08:45:02.0516248Z info: installing cargo-semver-checks@0.48
+2026-09-10T08:45:02.0699936Z info: downloading https://github.com/obi1kenobi/cargo-semver-checks/releases/download/v0.48.0/cargo-semver-checks-x86_64-unknown-linux-musl.tar.gz
+2026-09-10T08:45:02.5315517Z info: verifying sha256 checksum for cargo-semver-checks-x86_64-unknown-linux-musl.tar.gz
+2026-09-10T08:45:02.6838573Z info: cargo-semver-checks installed at /home/runner/.cargo/bin/cargo-semver-checks
+2026-09-10T08:45:02.6841952Z + cargo-semver-checks semver-checks --version
+2026-09-10T08:45:02.6851460Z cargo-semver-checks 0.48.0
+2026-09-10T08:45:02.6853745Z 
+2026-09-10T08:45:02.6873910Z ##[end-action id=__taiki-e_install-action.__run;outcome=success;conclusion=success;duration_ms=1618]
+2026-09-10T08:45:02.6881322Z ##[start-action display=Run Set-StrictMode -Version Latest;id=__taiki-e_install-action.__run_2]
+2026-09-10T08:45:02.6888046Z ##[end-action id=__taiki-e_install-action.__run_2;outcome=skipped;conclusion=skipped;duration_ms=0]
+2026-09-10T08:45:02.6925103Z ##[group]Run set -uo pipefail
+2026-09-10T08:45:02.6925527Z [36;1mset -uo pipefail[0m
+2026-09-10T08:45:02.6925938Z [36;1mecho "release-plz forge token: ${TOKEN_SOURCE}"[0m
+2026-09-10T08:45:02.6926920Z [36;1m# The commit ident the release-plz/action's git-config sub-action would set for[0m
+2026-09-10T08:45:02.6927638Z [36;1m# GITHUB_TOKEN (release-plz commits the version bump onto the Release-PR branch).[0m
+2026-09-10T08:45:02.6928213Z [36;1mgit config user.name 'github-actions[bot]'[0m
+2026-09-10T08:45:02.6928772Z [36;1mgit config user.email '41898282+github-actions[bot]@users.noreply.github.com'[0m
+2026-09-10T08:45:02.6929443Z [36;1m# Same invocation the pinned action's release-pr branch runs; 2>&1 | tee captures[0m
+2026-09-10T08:45:02.6930102Z [36;1m# BOTH streams (release-plz logs errors to stderr) for the containment step.[0m
+2026-09-10T08:45:02.6930619Z [36;1mrelease-plz release-pr \[0m
+2026-09-10T08:45:02.6931226Z [36;1m  --git-token "${GITHUB_TOKEN}" \[0m
+2026-09-10T08:45:02.6931705Z [36;1m  --repo-url "https://github.com/${GITHUB_REPOSITORY}" \[0m
+2026-09-10T08:45:02.6932224Z [36;1m  -o json 2>&1 | tee /tmp/release-plz-pr.log[0m
+2026-09-10T08:45:02.6932633Z [36;1mexit "${PIPESTATUS[0]}"[0m
+2026-09-10T08:45:02.6969147Z shell: /usr/bin/bash -e {0}
+2026-09-10T08:45:02.6969487Z env:
+2026-09-10T08:45:02.6970013Z   ORCHESTRATOR_APP_ID: ***
+2026-09-10T08:45:02.6972640Z   GITHUB_TOKEN: ***
+2026-09-10T08:45:02.6972993Z   TOKEN_SOURCE: sparq-orchestrator App token
+2026-09-10T08:45:02.6973384Z ##[endgroup]
+2026-09-10T08:45:02.7026388Z release-plz forge token: sparq-orchestrator App token
+2026-09-10T08:45:02.7733447Z [2m2026-09-10T08:45:02.773141Z[0m [32m INFO[0m using release-plz config file release-plz.toml
+2026-09-10T08:45:04.4239393Z [2m2026-09-10T08:45:04.423618Z[0m [32m INFO[0m Latest release of package sparq-core: tag `v0.1.1` (version 0.1.1)
+2026-09-10T08:45:08.5259613Z [2m2026-09-10T08:45:08.525609Z[0m [31mERROR[0m failed to update packages
+2026-09-10T08:45:08.5260625Z 
+2026-09-10T08:45:08.5260897Z Caused by:
+2026-09-10T08:45:08.5261548Z     0: failed to determine next versions
+2026-09-10T08:45:08.5262392Z     1: run cargo package
+2026-09-10T08:45:08.5274361Z     2: cargo package failed: "    Updating crates.io index\n    Updating git repository `https://github.com/jeswr/solid-oidc-verifier`\nwarning: manifest has no documentation, homepage or repository\n  |\n  = note: see https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info\n   Packaging sparq-acbench v0.1.1 (/tmp/release-plz-sparq-core-vKgwKa/worktree/crates/sparq-acbench)\n    Updating crates.io index\n    Packaged 19 files, 374.3KiB (83.7KiB compressed)\n   Packaging sparq-core v0.1.1 (/tmp/release-plz-sparq-core-vKgwKa/worktree/crates/sparq-core)\n    Updating crates.io index\n    Packaged 26 files, 1.5MiB (415.0KiB compressed)\n   Packaging sparq-algos v0.1.1 (/tmp/release-plz-sparq-core-vKgwKa/worktree/crates/sparq-algos)\n    Updating crates.io index\n    Packaged 20 files, 154.5KiB (45.0KiB compressed)\n   Packaging sparq-jsonld v0.1.1 (/tmp/release-plz-sparq-core-vKgwKa/worktree/crates/sparq-jsonld)\n    Updating crates.io index\n    Packaged 31 files, 655.6KiB (158.0KiB compressed)\n   Packaging sparq-engine-serialize v0.1.1 (/tmp/release-plz-sparq-core-vKgwKa/worktree/crates/sparq-engine-serialize)\n    Updating crates.io index\n    Packaged 12 files, 414.7KiB (103.0KiB compressed)\n   Packaging sparq-engine-service v0.1.1 (/tmp/release-plz-sparq-core-vKgwKa/worktree/crates/sparq-engine-service)\n    Updating crates.io index\n    Packaged 8 files, 248.2KiB (62.5KiB compressed)\n   Packaging sparq-introspect v0.1.1 (/tmp/release-plz-sparq-core-vKgwKa/worktree/crates/sparq-introspect)\n    Updating crates.io index\nerror: failed to prepare local package for uploading\n\nCaused by:\n  no matching package named `sparq-engine` found\n  location searched: crates.io index\n  required by package `sparq-introspect v0.1.1 (/tmp/release-plz-sparq-core-vKgwKa/worktree/crates/sparq-introspect)`\n"
+2026-09-10T08:45:08.5288055Z Error: failed to update packages
+2026-09-10T08:45:08.5288293Z 
+2026-09-10T08:45:08.5288424Z Caused by:
+2026-09-10T08:45:08.5288747Z     0: failed to determine next versions
+2026-09-10T08:45:08.5289129Z     1: run cargo package
+2026-09-10T08:45:08.5297615Z     2: cargo package failed: "    Updating crates.io index\n    Updating git repository `https://github.com/jeswr/solid-oidc-verifier`\nwarning: manifest has no documentation, homepage or repository\n  |\n  = note: see https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info\n   Packaging sparq-acbench v0.1.1 (/tmp/release-plz-sparq-core-vKgwKa/worktree/crates/sparq-acbench)\n    Updating crates.io index\n    Packaged 19 files, 374.3KiB (83.7KiB compressed)\n   Packaging sparq-core v0.1.1 (/tmp/release-plz-sparq-core-vKgwKa/worktree/crates/sparq-core)\n    Updating crates.io index\n    Packaged 26 files, 1.5MiB (415.0KiB compressed)\n   Packaging sparq-algos v0.1.1 (/tmp/release-plz-sparq-core-vKgwKa/worktree/crates/sparq-algos)\n    Updating crates.io index\n    Packaged 20 files, 154.5KiB (45.0KiB compressed)\n   Packaging sparq-jsonld v0.1.1 (/tmp/release-plz-sparq-core-vKgwKa/worktree/crates/sparq-jsonld)\n    Updating crates.io index\n    Packaged 31 files, 655.6KiB (158.0KiB compressed)\n   Packaging sparq-engine-serialize v0.1.1 (/tmp/release-plz-sparq-core-vKgwKa/worktree/crates/sparq-engine-serialize)\n    Updating crates.io index\n    Packaged 12 files, 414.7KiB (103.0KiB compressed)\n   Packaging sparq-engine-service v0.1.1 (/tmp/release-plz-sparq-core-vKgwKa/worktree/crates/sparq-engine-service)\n    Updating crates.io index\n    Packaged 8 files, 248.2KiB (62.5KiB compressed)\n   Packaging sparq-introspect v0.1.1 (/tmp/release-plz-sparq-core-vKgwKa/worktree/crates/sparq-introspect)\n    Updating crates.io index\nerror: failed to prepare local package for uploading\n\nCaused by:\n  no matching package named `sparq-engine` found\n  location searched: crates.io index\n  required by package `sparq-introspect v0.1.1 (/tmp/release-plz-sparq-core-vKgwKa/worktree/crates/sparq-introspect)`\n"
+2026-09-10T08:45:08.5308441Z ##[error]Process completed with exit code 1.
+2026-09-10T08:45:08.5347670Z ##[group]Run set -euo pipefail
+2026-09-10T08:45:08.5348132Z [36;1mset -euo pipefail[0m
+2026-09-10T08:45:08.5348485Z [36;1mlog=/tmp/release-plz-pr.log[0m
+2026-09-10T08:45:08.5348902Z [36;1mif [ "${PRIVILEGED_TOKEN}" = "true" ]; then[0m
+2026-09-10T08:45:08.5350684Z [36;1m  echo "::error::release-plz release-pr failed while using a PROVISIONED App/PAT token. That token is not subject to 'Allow GitHub Actions to create and approve pull requests', so the known blocked-setting condition cannot explain this — it is a real failure (check the App is installed on this repo with contents:write + pull_requests:write, or that RELEASE_PLZ_TOKEN is unexpired and carries those permissions). Captured output follows."[0m
+2026-09-10T08:45:08.5352550Z [36;1m  sed 's/^/  | /' "$log" 2>/dev/null || echo "  | (no captured output at $log)"[0m
+2026-09-10T08:45:08.5353029Z [36;1m  exit 1[0m
+2026-09-10T08:45:08.5353322Z [36;1mfi[0m
+2026-09-10T08:45:08.5353647Z [36;1mif [ ! -s "$log" ]; then[0m
+2026-09-10T08:45:08.5354367Z [36;1m  echo "::error::release-plz release-pr failed but left no captured output at $log — cannot classify the failure; treating as a real failure."[0m
+2026-09-10T08:45:08.5355093Z [36;1m  exit 1[0m
+2026-09-10T08:45:08.5355386Z [36;1mfi[0m
+2026-09-10T08:45:08.5355824Z [36;1m# (a) SIGNATURE: a single line must carry all three markers — "Failed to open PR",[0m
+2026-09-10T08:45:08.5356755Z [36;1m# a 403, and the POST /pulls URL for THIS repo. grep -F for the URL (dots literal).[0m
+2026-09-10T08:45:08.5357564Z [36;1mif ! grep "Failed to open PR" "$log" | grep -F "403" | grep -Fq "api.github.com/repos/${GITHUB_REPOSITORY}/pulls"; then[0m
+2026-09-10T08:45:08.5359186Z [36;1m  echo "::error::release-plz release-pr failed, but the captured output does NOT match the known blocked-PR-creation signature (a 'Failed to open PR' line with a 403 on api.github.com/repos/${GITHUB_REPOSITORY}/pulls) — this is a DIFFERENT, real failure (even if a 403 probe would succeed, e.g. rate limiting). Captured output follows."[0m
+2026-09-10T08:45:08.5360547Z [36;1m  sed 's/^/  | /' "$log"[0m
+2026-09-10T08:45:08.5360895Z [36;1m  exit 1[0m
+2026-09-10T08:45:08.5361185Z [36;1mfi[0m
+2026-09-10T08:45:08.5361687Z [36;1mecho "captured output matches the known blocked-PR-creation signature; probing the live call."[0m
+2026-09-10T08:45:08.5362436Z [36;1m# (b) PROBE: the same POST /pulls with this job's token, side-effect-free (head==base).[0m
+2026-09-10T08:45:08.5363073Z [36;1mcode=$(curl -sS -o /tmp/rp-probe.json -w '%{http_code}' -X POST \[0m
+2026-09-10T08:45:08.5363728Z [36;1m  -H "Authorization: ***" \[0m
+2026-09-10T08:45:08.5364154Z [36;1m  -H "Accept: application/vnd.github+json" \[0m
+2026-09-10T08:45:08.5364644Z [36;1m  "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/pulls" \[0m
+2026-09-10T08:45:08.5365506Z [36;1m  -d '{"title":"release-plz 403 probe (never created: head==base is invalid)","head":"main","base":"main"}')[0m
+2026-09-10T08:45:08.5366153Z [36;1mecho "PR-creation probe HTTP status: ${code}"[0m
+2026-09-10T08:45:08.5366801Z [36;1mif [ "${code}" = "403" ]; then[0m
+2026-09-10T08:45:08.5369694Z [36;1m  echo "::warning title=release-plz Release-PR blocked by repo setting::GITHUB_TOKEN cannot create pull requests: the repo/org setting 'Settings → Actions → General → Allow GitHub Actions to create and approve pull requests' is disabled, so the Release-PR was NOT opened (known condition, established by captured-output signature + live probe; tolerated as advisory). Durable fix (needs:user, ANY ONE of the three — the CI side is already wired, no workflow edit needed): enable that repo setting; OR add the ORCHESTRATOR_APP_ID/_PRIVATE_KEY App secrets; OR add a RELEASE_PLZ_TOKEN secret (fine-grained PAT with contents:write + pull_requests:write). This job already prefers a minted App token, then RELEASE_PLZ_TOKEN, over GITHUB_TOKEN, and neither privileged token is subject to that setting."[0m
+2026-09-10T08:45:08.5372571Z [36;1m  exit 0[0m
+2026-09-10T08:45:08.5373020Z [36;1mfi[0m
+2026-09-10T08:45:08.5374187Z [36;1mecho "::error::release-plz release-pr failed with the blocked-PR-creation signature in its output, but the live PR-creation probe returned HTTP ${code} (not 403) — the blocked-setting condition is not reproducible right now, so this is treated as a real failure. Probe response body follows."[0m
+2026-09-10T08:45:08.5375422Z [36;1mcat /tmp/rp-probe.json || true[0m
+2026-09-10T08:45:08.5375785Z [36;1mexit 1[0m
+2026-09-10T08:45:08.5412047Z shell: /usr/bin/bash -e {0}
+2026-09-10T08:45:08.5412379Z env:
+2026-09-10T08:45:08.5412713Z   ORCHESTRATOR_APP_ID: ***
+2026-09-10T08:45:08.5415299Z   GH_TOKEN: ***
+2026-09-10T08:45:08.5415619Z   PRIVILEGED_TOKEN: true
+2026-09-10T08:45:08.5415938Z ##[endgroup]
+2026-09-10T08:45:08.5497635Z ##[error]release-plz release-pr failed while using a PROVISIONED App/PAT token. That token is not subject to 'Allow GitHub Actions to create and approve pull requests', so the known blocked-setting condition cannot explain this — it is a real failure (check the App is installed on this repo with contents:write + pull_requests:write, or that RELEASE_PLZ_TOKEN is unexpired and carries those permissions). Captured output follows.
+2026-09-10T08:45:08.5501053Z   | [2m2026-09-10T08:45:02.773141Z[0m [32m INFO[0m using release-plz config file release-plz.toml
+2026-09-10T08:45:08.5502496Z   | [2m2026-09-10T08:45:04.423618Z[0m [32m INFO[0m Latest release of package sparq-core: tag `v0.1.1` (version 0.1.1)
+2026-09-10T08:45:08.5503690Z   | [2m2026-09-10T08:45:08.525609Z[0m [31mERROR[0m failed to update packages
+2026-09-10T08:45:08.5504159Z   | 
+2026-09-10T08:45:08.5504435Z   | Caused by:
+2026-09-10T08:45:08.5504758Z   |     0: failed to determine next versions
+2026-09-10T08:45:08.5505151Z   |     1: run cargo package
+2026-09-10T08:45:08.5511890Z   |     2: cargo package failed: "    Updating crates.io index\n    Updating git repository `https://github.com/jeswr/solid-oidc-verifier`\nwarning: manifest has no documentation, homepage or repository\n  |\n  = note: see https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info\n   Packaging sparq-acbench v0.1.1 (/tmp/release-plz-sparq-core-vKgwKa/worktree/crates/sparq-acbench)\n    Updating crates.io index\n    Packaged 19 files, 374.3KiB (83.7KiB compressed)\n   Packaging sparq-core v0.1.1 (/tmp/release-plz-sparq-core-vKgwKa/worktree/crates/sparq-core)\n    Updating crates.io index\n    Packaged 26 files, 1.5MiB (415.0KiB compressed)\n   Packaging sparq-algos v0.1.1 (/tmp/release-plz-sparq-core-vKgwKa/worktree/crates/sparq-algos)\n    Updating crates.io index\n    Packaged 20 files, 154.5KiB (45.0KiB compressed)\n   Packaging sparq-jsonld v0.1.1 (/tmp/release-plz-sparq-core-vKgwKa/worktree/crates/sparq-jsonld)\n    Updating crates.io index\n    Packaged 31 files, 655.6KiB (158.0KiB compressed)\n   Packaging sparq-engine-serialize v0.1.1 (/tmp/release-plz-sparq-core-vKgwKa/worktree/crates/sparq-engine-serialize)\n    Updating crates.io index\n    Packaged 12 files, 414.7KiB (103.0KiB compressed)\n   Packaging sparq-engine-service v0.1.1 (/tmp/release-plz-sparq-core-vKgwKa/worktree/crates/sparq-engine-service)\n    Updating crates.io index\n    Packaged 8 files, 248.2KiB (62.5KiB compressed)\n   Packaging sparq-introspect v0.1.1 (/tmp/release-plz-sparq-core-vKgwKa/worktree/crates/sparq-introspect)\n    Updating crates.io index\nerror: failed to prepare local package for uploading\n\nCaused by:\n  no matching package named `sparq-engine` found\n  location searched: crates.io index\n  required by package `sparq-introspect v0.1.1 (/tmp/release-plz-sparq-core-vKgwKa/worktree/crates/sparq-introspect)`\n"
+2026-09-10T08:45:08.5519025Z   | Error: failed to update packages
+2026-09-10T08:45:08.5519374Z   | 
+2026-09-10T08:45:08.5519634Z   | Caused by:
+2026-09-10T08:45:08.5519952Z   |     0: failed to determine next versions
+2026-09-10T08:45:08.5520334Z   |     1: run cargo package
+2026-09-10T08:45:08.5527165Z   |     2: cargo package failed: "    Updating crates.io index\n    Updating git repository `https://github.com/jeswr/solid-oidc-verifier`\nwarning: manifest has no documentation, homepage or repository\n  |\n  = note: see https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info\n   Packaging sparq-acbench v0.1.1 (/tmp/release-plz-sparq-core-vKgwKa/worktree/crates/sparq-acbench)\n    Updating crates.io index\n    Packaged 19 files, 374.3KiB (83.7KiB compressed)\n   Packaging sparq-core v0.1.1 (/tmp/release-plz-sparq-core-vKgwKa/worktree/crates/sparq-core)\n    Updating crates.io index\n    Packaged 26 files, 1.5MiB (415.0KiB compressed)\n   Packaging sparq-algos v0.1.1 (/tmp/release-plz-sparq-core-vKgwKa/worktree/crates/sparq-algos)\n    Updating crates.io index\n    Packaged 20 files, 154.5KiB (45.0KiB compressed)\n   Packaging sparq-jsonld v0.1.1 (/tmp/release-plz-sparq-core-vKgwKa/worktree/crates/sparq-jsonld)\n    Updating crates.io index\n    Packaged 31 files, 655.6KiB (158.0KiB compressed)\n   Packaging sparq-engine-serialize v0.1.1 (/tmp/release-plz-sparq-core-vKgwKa/worktree/crates/sparq-engine-serialize)\n    Updating crates.io index\n    Packaged 12 files, 414.7KiB (103.0KiB compressed)\n   Packaging sparq-engine-service v0.1.1 (/tmp/release-plz-sparq-core-vKgwKa/worktree/crates/sparq-engine-service)\n    Updating crates.io index\n    Packaged 8 files, 248.2KiB (62.5KiB compressed)\n   Packaging sparq-introspect v0.1.1 (/tmp/release-plz-sparq-core-vKgwKa/worktree/crates/sparq-introspect)\n    Updating crates.io index\nerror: failed to prepare local package for uploading\n\nCaused by:\n  no matching package named `sparq-engine` found\n  location searched: crates.io index\n  required by package `sparq-introspect v0.1.1 (/tmp/release-plz-sparq-core-vKgwKa/worktree/crates/sparq-introspect)`\n"
+2026-09-10T08:45:08.5534552Z ##[error]Process completed with exit code 1.
+2026-09-10T08:45:08.5636046Z Post job cleanup.
+2026-09-10T08:45:08.6507192Z [command]/usr/bin/git version
+2026-09-10T08:45:08.6531234Z git version 2.55.0
+2026-09-10T08:45:08.6568829Z Temporarily overriding HOME='/home/runner/work/_temp/08fad3b9-14b2-4e3e-8c48-b759269da231' before making global git config changes
+2026-09-10T08:45:08.6570368Z Adding repository directory to the temporary git global config as a safe directory
+2026-09-10T08:45:08.6575166Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/sparq/sparq
+2026-09-10T08:45:08.6608893Z Removing SSH command configuration
+2026-09-10T08:45:08.6615935Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-09-10T08:45:08.6653758Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-09-10T08:45:08.6905294Z Removing HTTP extra header
+2026-09-10T08:45:08.6911298Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-10T08:45:08.6949806Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-09-10T08:45:08.7215336Z Removing includeIf entries pointing to credentials config files
+2026-09-10T08:45:08.7229169Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-10T08:45:08.7271268Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-09-10T08:45:08.7690511Z ##[warning]Input 'app-id' has been deprecated with message: Use 'client-id' instead.
+2026-09-10T08:45:08.7733475Z Post job cleanup.
+2026-09-10T08:45:09.0555534Z Token revoked
+2026-09-10T08:45:09.0982482Z Cleaning up orphan processes

@@ -1,0 +1,86 @@
+{
+  "read_head": "3c637b228449e9345d8bba31ea2d7d449f8a2b8f",
+  "source_base": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
+  "files": {
+    "package.json": {
+      "sha256": "3e89c829ab61bb7633b8d6cd3030fe44d8e73c45f30d50a57a21937d9d7dd0ef",
+      "bytes": 1002,
+      "unchanged_vs_d41": true
+    },
+    "package-lock.json": {
+      "sha256": "17cb7f69f0b31b635e896e4d8f9565be3ea37e74e1b48a644902a4af0438c366",
+      "bytes": 568361,
+      "unchanged_vs_d41": true
+    },
+    "site/package.json": {
+      "sha256": "cd54a55951d4b745f402a7475e6c3da2e5b227b44a64a49d621c12a73bd232eb",
+      "bytes": 2701,
+      "unchanged_vs_d41": true
+    },
+    "gui/app/package.json": {
+      "sha256": "1b99d2bb9e0374ac67531c0ef86b344b5a3e9045b72a6926e6613bb514104c70",
+      "bytes": 2386,
+      "unchanged_vs_d41": true
+    },
+    "site/next.config.ts": {
+      "sha256": "2c60fa1ea681d4eab3affcfb323bd2960eb102f8cf36ff8997327609a1eb73dc",
+      "bytes": 5570,
+      "unchanged_vs_d41": true
+    },
+    "gui/app/next.config.ts": {
+      "sha256": "9f84fde404be7dc19d7faeb4c98c2353a5fa4c24c87d09067ba6b3252f765599",
+      "bytes": 2930,
+      "unchanged_vs_d41": true
+    },
+    ".github/workflows/gui.yml": {
+      "sha256": "a4c475dd26232b239cb37b5850dc1a3bfb8fc9f41c631cc853af344328457c27",
+      "bytes": 46698,
+      "unchanged_vs_d41": true
+    },
+    ".github/workflows/site-e2e.yml": {
+      "sha256": "e4725b6ecfaf10eff544af99354fdc0a9900a7f4d10c10e7ad1680bbdc2c880f",
+      "bytes": 8340,
+      "unchanged_vs_d41": true
+    },
+    ".github/workflows/site-e2e-foundation.yml": {
+      "sha256": "21ce1c9236d8f198c83a6d3db310a407a8b56b6d3e83e38f17484e10bafc37cf",
+      "bytes": 8443,
+      "unchanged_vs_d41": true
+    },
+    ".github/workflows/site-e2e-hero.yml": {
+      "sha256": "cbc906fe12cd550f01ee08427a55e253a16a5aa06a32c833357b416c62d114a8",
+      "bytes": 6412,
+      "unchanged_vs_d41": true
+    },
+    ".github/workflows/site-visual.yml": {
+      "sha256": "2c079a39b54264a62c4bf87f8c2bd73e6712b28861a07fbbf4f41c2bb8221c80",
+      "bytes": 6749,
+      "unchanged_vs_d41": true
+    },
+    ".github/workflows/pages.yml": {
+      "sha256": "9c61d11c75751b29cd8abec5eccdfe6ccd0e160632e202d50676c0c93039596f",
+      "bytes": 33440,
+      "unchanged_vs_d41": true
+    },
+    ".github/workflows/js.yml": {
+      "sha256": "43ad4e50f95de7488a818ddb16e3ec3ac55f66192f5f750a06597dfe97beeaca",
+      "bytes": 10995,
+      "unchanged_vs_d41": true
+    },
+    "site/playwright.config.ts": {
+      "sha256": "5847ed3ad8b92249598dfa08da6fa50943a43591f58009cadf96295410fc3355",
+      "bytes": 11281,
+      "unchanged_vs_d41": true
+    },
+    "site/scripts/vr.sh": {
+      "sha256": "c299e3fc8dccef58b33264e9994b056808c6040df520b419e6941bd2cda25302",
+      "bytes": 3084,
+      "unchanged_vs_d41": true
+    },
+    "gui/app/scripts/check-wasm-built.mjs": {
+      "sha256": "95c7620e0ad180984f74f159e435b6cb11f2045178806d6450bdbfd48ec98d7c",
+      "bytes": 1082,
+      "unchanged_vs_d41": true
+    }
+  }
+}

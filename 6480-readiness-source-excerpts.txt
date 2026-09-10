@@ -1,0 +1,1035 @@
+SOURCE package.json
+1: {
+2:   "name": "sparq-monorepo",
+3:   "version": "0.0.0",
+4:   "private": true,
+5:   "description": "Repo-root npm workspaces for the sparq JS surfaces (the published @sparq-org/sparq WASM client, the shared @sparq/client, the GitHub-Pages showcase site, the DISTINCT operational GUI frontend, and the Tauri GUI e2e harness). NOT a published package — it exists only to give CI a single root install + lockfile across the workspace members. Deliberately has NO \"type\" field so repo-root CommonJS scripts (scripts/*.js, bench/dashboard/*.js) keep resolving as CJS.",
+6:   "workspaces": [
+7:     "packages/*",
+8:     "js",
+9:     "site",
+10:     "gui/app",
+11:     "gui/e2e",
+12:     "gui/e2e-playwright"
+13:   ],
+14:   "devDependencies": {
+15:     "@solid/acl-check": "^0.4.5",
+16:     "@solidlab/policy-engine": "^0.0.2",
+17:     "n3": "^2.1.1"
+18:   },
+19:   "overrides": {
+20:     "parse-url": "8.1.0",
+21:     "gry": "6.0.0",
+22:     "tmp": "0.2.7",
+23:     "got": "11.8.5",
+24:     "git-up": "7.0.0",
+25:     "next": {
+26:       "postcss": "8.5.15"
+27:     },
+28:     "postcss": "8.5.15"
+29:   }
+30: }
+
+SOURCE site/package.json
+1: {
+2:   "name": "sparq-site",
+3:   "version": "0.1.0",
+4:   "private": true,
+5:   "description": "sparq feature-showcase website — a live-interactive demonstration of the sparq RDF + SPARQL engine, statically exported for GitHub Pages.",
+6:   "type": "module",
+7:   "scripts": {
+8:     "dev": "node scripts/sync-wasm.mjs && node scripts/bundle-wasm-esm.mjs && node scripts/sync-benchmarks.mjs && node scripts/sync-zk-catalog.mjs && node scripts/build-papers.mjs && node scripts/build-specs.mjs && next dev",
+9:     "sync-wasm": "node scripts/sync-wasm.mjs",
+10:     "bundle-wasm-esm": "node scripts/bundle-wasm-esm.mjs",
+11:     "sync-benchmarks": "node scripts/sync-benchmarks.mjs",
+12:     "sync-zk-catalog": "node scripts/sync-zk-catalog.mjs",
+13:     "build-papers": "node scripts/build-papers.mjs",
+14:     "build-specs": "node scripts/build-specs.mjs",
+15:     "prebuild": "node scripts/sync-wasm.mjs && node scripts/bundle-wasm-esm.mjs && node scripts/sync-benchmarks.mjs && node scripts/sync-zk-catalog.mjs && node scripts/build-papers.mjs && node scripts/build-specs.mjs",
+16:     "build": "next build",
+17:     "postbuild": "node scripts/check-bundle.mjs",
+18:     "check:bundle": "node scripts/check-bundle.mjs",
+19:     "build:tauri": "cross-env NEXT_PUBLIC_BASE_PATH= npm run build",
+20:     "start": "npx --yes serve out",
+21:     "lint": "next lint",
+22:     "test:unit": "node --import ./test-support/register-ts.mjs --test test/*.test.mjs",
+23:     "test:e2e": "playwright test",
+24:     "test:e2e:stress": "playwright test --repeat-each=5 --retries=0",
+25:     "test:e2e:grep-gate": "bash e2e/support/no-timeout-gate.sh",
+26:     "vr": "bash scripts/vr.sh",
+27:     "vr:update": "bash scripts/vr.sh --update-snapshots=all",
+28:     "typecheck": "tsc --noEmit"
+29:   },
+30:   "dependencies": {
+31:     "@aztec/bb.js": "5.0.0-nightly.20260324",
+32:     "@noir-lang/noir_js": "1.0.0-beta.21",
+33:     "class-variance-authority": "^0.7.1",
+34:     "clsx": "^2.1.1",
+35:     "cmdk": "^1.1.1",
+36:     "lucide-react": "^0.460.0",
+37:     "next": "^15.5.21",
+38:     "next-themes": "^0.4.6",
+39:     "radix-ui": "^1.5.0",
+40:     "react": "^19.0.0",
+41:     "react-dom": "^19.0.0",
+42:     "sonner": "^2.0.7",
+43:     "tailwind-merge": "^3.6.0"
+44:   },
+45:   "overrides": {
+46:     "postcss": ">=8.5.10"
+47:   },
+48:   "devDependencies": {
+49:     "@axe-core/playwright": "^4.12.1",
+50:     "@eslint/eslintrc": "^3.2.0",
+51:     "@playwright/test": "^1.61.0",
+52:     "@tailwindcss/postcss": "^4.1.0",
+53:     "@types/node": "^26.1.2",
+54:     "@types/react": "^19.0.0",
+55:     "@types/react-dom": "^19.0.0",
+56:     "buffer": "^6.0.3",
+57:     "cross-env": "^10.1.0",
+58:     "esbuild": "^0.25.12",
+59:     "eslint": "^9.18.0",
+60:     "eslint-config-next": "^15.5.19",
+61:     "fzstd": "^0.1.1",
+62:     "seek-bzip": "^2.0.0",
+63:     "tailwindcss": "^4.1.0",
+64:     "tw-animate-css": "^1.4.0",
+65:     "typescript": "^5.7.0"
+66:   }
+67: }
+
+SOURCE gui/app/package.json
+1: {
+2:   "name": "sparq-gui-app",
+3:   "version": "0.1.0",
+4:   "private": true,
+5:   "description": "The sparq operational GUI frontend — a DISTINCT Next.js workbench app (NOT the marketing site) consumed by both the Tauri 2 desktop shell and a static-exported hosted 'Try the GUI live' web target. Reuses the @sparq/client wasm engine client + shared logic; renders its own operational shell (left rail · top bar · IDE tab strip · status bar), never the site's hero/Showcase/Benchmarks/About chrome.",
+6:   "type": "module",
+7:   "scripts": {
+8:     "presync-wasm": "node scripts/check-wasm-built.mjs",
+9:     "sync-wasm": "node scripts/sync-wasm.mjs",
+10:     "predev": "npm run sync-wasm",
+11:     "dev": "next dev -p 3001",
+12:     "prebuild": "npm run sync-wasm",
+13:     "build": "next build",
+14:     "build:tauri": "cross-env NEXT_PUBLIC_BASE_PATH= NEXT_PUBLIC_GUI_TARGET=tauri npm run build && node scripts/strip-legacy-polyfills.mjs",
+15:     "build:web": "cross-env NEXT_PUBLIC_GUI_TARGET=web npm run build",
+16:     "start": "npx --yes serve out",
+17:     "lint": "next lint",
+18:     "typecheck": "tsc --noEmit",
+19:     "test:unit": "node --import ./test-support/register-ts.mjs --test src/lib/editor-keys.test.ts src/lib/federation.test.ts src/lib/odrl.test.ts src/lib/tauri-fs.test.ts src/lib/import-batch.test.ts src/lib/workspace-actions-visibility.test.ts src/lib/rsp-feed.test.ts src/lib/plan-view.test.ts src/lib/query-monitor.test.ts src/lib/proof-view.test.ts src/lib/inferred-facts.test.ts src/lib/form-render-model.test.ts src/lib/forms-bridge.test.ts src/lib/file-decompress.test.ts src/lib/select-result-graph.test.ts scripts/strip-legacy-polyfills.test.mjs"
+20:   },
+21:   "dependencies": {
+22:     "buffer": "^6.0.3",
+23:     "class-variance-authority": "^0.7.1",
+24:     "clsx": "^2.1.1",
+25:     "cmdk": "^1.1.1",
+26:     "fzstd": "^0.1.1",
+27:     "lucide-react": "^0.460.0",
+28:     "next": "^15.5.21",
+29:     "next-themes": "^0.4.6",
+30:     "radix-ui": "^1.5.0",
+31:     "react": "^19.0.0",
+32:     "react-dom": "^19.0.0",
+33:     "seek-bzip": "^2.0.0",
+34:     "tailwind-merge": "^3.6.0"
+35:   },
+36:   "devDependencies": {
+37:     "@eslint/eslintrc": "^3.2.0",
+38:     "@tailwindcss/postcss": "^4.1.0",
+39:     "@types/node": "^26.1.2",
+40:     "@types/react": "^19.0.0",
+41:     "@types/react-dom": "^19.0.0",
+42:     "cross-env": "^10.1.0",
+43:     "eslint": "^9.18.0",
+44:     "eslint-config-next": "^15.5.19",
+45:     "tailwindcss": "^4.1.0",
+46:     "tw-animate-css": "^1.4.0",
+47:     "typescript": "^5.7.0"
+48:   }
+49: }
+
+SOURCE site/next.config.ts
+1: import path from "node:path";
+2: import type { NextConfig } from "next";
+3: 
+4: // [OPUS-4.8] sq-8thu / sq-uj38w — static-export config for GitHub Pages.
+5: // Pages serves this project site at the ROOT of the custom domain https://sparq.jeswr.org/
+6: // (org-migration cutover, sq-uj38w), so the deployed build is ROOT-RELATIVE (basePath '',
+7: // no asset prefix). `output: "export"` writes a fully static `out/` tree (no Node server)
+8: // that the Pages deploy workflow uploads.
+9: //
+10: // [OPUS-4.8] sq-9vw5 — env-switch the base path so the SAME export tree serves multiple hosts:
+11: //
+12: //   * GitHub Pages @ the custom-domain root (production): the Pages workflow builds with
+13: //     `NEXT_PUBLIC_BASE_PATH=''` (see .github/workflows/pages.yml "Build static site"), so
+14: //     basePath/assetPrefix are unset and every asset/route is root-relative (`/_next/...`).
+15: //   * The Tauri 2 desktop webview: serves the frontend from the `tauri://` root (a local
+16: //     `frontendDist`), so EVERY asset must ALSO be ROOT-relative — a `/prefix` 404s there.
+17: //     The GUI's `gui/src-tauri/tauri.conf.json` `beforeBuildCommand` builds the site with
+18: //     `NEXT_PUBLIC_BASE_PATH=''` too, honoured by this same config.
+19: //
+20: // `NEXT_PUBLIC_BASE_PATH` is the single switch — and the `@sparq/client` wasm loader already
+21: // keys its RUNTIME asset URLs off the SAME env var, so the build-time route prefix and the
+22: // runtime wasm-fetch prefix stay in lockstep. Build modes (also in site/README.md):
+23: //   * Pages / Tauri (root): `NEXT_PUBLIC_BASE_PATH='' npm run build` -> basePath '' (root-relative)
+24: //   * Legacy sub-path      : `npm run build` (no env)                -> basePath '/sparq' (fallback)
+25: //
+26: // An UNSET var keeps the historical `/sparq` sub-path as a LEGACY fallback (pre-cutover behaviour,
+27: // no test/caller change); production (Pages + Tauri) always sets an explicit empty string for the
+28: // root-relative export. Next requires basePath to be empty or start with `/` (no trailing slash),
+29: // so we honour only `''` or a `/`-leading value and otherwise fall back to the legacy default.
+30: const rawBasePath = process.env.NEXT_PUBLIC_BASE_PATH;
+31: const basePath =
+32:   rawBasePath === undefined
+33:     ? "/sparq" // unset -> legacy /sparq sub-path fallback (production sets '' for the custom-domain root)
+34:     : rawBasePath === "" || rawBasePath.startsWith("/")
+35:       ? rawBasePath // '' (root-relative: Pages custom domain + Tauri) or an explicit '/prefix'
+36:       : "/sparq"; // a malformed value falls back to the legacy default
+37: 
+38: const nextConfig: NextConfig = {
+39:   output: "export",
+40:   // Only emit basePath/assetPrefix when there IS a prefix. An empty basePath must not be
+41:   // set as `assetPrefix: ""` either — leaving both unset is exactly the root-relative
+42:   // behaviour the Tauri webview needs.
+43:   ...(basePath ? { basePath, assetPrefix: basePath } : {}),
+44:   trailingSlash: true,
+45:   // Static export cannot run the Next.js image optimiser.
+46:   images: { unoptimized: true },
+47:   // [FABLE-5] sq-qgkwy.1 — tree-shake the MONOLITHIC `radix-ui` barrel. The site imports a
+48:   // handful of primitives (Slot, Dialog, Tooltip, …) via `import { X } from "radix-ui"`, but
+49:   // webpack does not shake the package's namespace re-export barrel: the ENTIRE primitive set
+50:   // (Select, Menu, NavigationMenu, ScrollArea, Toast, Slider, Form, Menubar, …) was bundled
+51:   // into a ~170 KB raw commons chunk shipped on almost every route's first load (measured via
+52:   // source-map attribution — see PR). `optimizePackageImports` rewrites the barrel imports to
+53:   // direct per-primitive imports at compile time, so only primitives actually used are bundled.
+54:   // Purely mechanical (same symbols, same behaviour); lucide-react is already on Next's
+55:   // built-in default list, radix-ui (the monolith) is not.
+56:   //
+57:   // [OPUS-5] sq-w728o — this line is a WORKAROUND for a missing upstream default. Getting
+58:   // `radix-ui` onto Next's built-in list is already proposed in vercel/next.js#76065 (open,
+59:   // unreviewed); see research/nextjs-optimize-package-imports-radix-upstream.md for the
+60:   // measured evidence prepared for that thread. DELETE this line once sparq's Next floor
+61:   // ships the default entry — it is then redundant, not load-bearing.
+62:   experimental: { optimizePackageImports: ["radix-ui"] },
+63:   // [FABLE-5] sq-ymr2e.10 — the visual-regression suite (SPARQ_VR=1, set only by scripts/vr.sh
+64:   // inside the pinned Playwright container) screenshots pages served by `next dev`, and the dev
+65:   // indicator badge would otherwise appear in — and destabilise — every baseline. Scoped to the
+66:   // VR run only; normal `next dev` keeps the indicators.
+67:   ...(process.env.SPARQ_VR ? { devIndicators: false as const } : {}),
+68:   // The @sparq-org/sparq wrapper ships ESM with `.js` import specifiers that resolve
+69:   // to `.ts`/`.tsx` sources in dev; mirror solid-pod-manager's webpack alias so the
+70:   // bundler follows them.
+71:   webpack: (config) => {
+72:     config.resolve.extensionAlias = {
+73:       ".js": [".ts", ".tsx", ".js", ".jsx"],
+74:     };
+75:     // [OPUS-4.8] sq-2e93 — resolve the shared framework-agnostic client
+76:     // (`packages/sparq-client`) to its TS source. The package is consumed via a path
+77:     // alias (no repo-root workspaces yet — see research/gui-design.md §3), so the
+78:     // bundler needs this alias to follow the import the same way tsconfig `paths` does.
+79:     config.resolve.alias = {
+80:       ...config.resolve.alias,
+81:       "@sparq/client": path.resolve(
+82:         __dirname,
+83:         "../packages/sparq-client/src/index.ts",
+84:       ),
+85:     };
+86:     return config;
+87:   },
+88: };
+89: 
+90: export default nextConfig;
+
+SOURCE gui/app/next.config.ts
+1: import path from "node:path";
+2: import type { NextConfig } from "next";
+3: 
+4: // [OPUS-4.8] sq-ixc3.8 / sq-ixc3.9 — static-export config for the DISTINCT operational GUI
+5: // frontend (NOT the marketing site). This app builds to a backend-free `out/` tree consumed by
+6: // BOTH targets, selected by NEXT_PUBLIC_BASE_PATH (the same single switch the site + the
+7: // @sparq/client wasm loader already key off, kept in lockstep):
+8: //
+9: //   * Tauri 2 desktop webview ("build:tauri"): serves the frontend from the `tauri://` root, so
+10: //     EVERY asset must be ROOT-relative (a `/prefix` 404s there). `tauri.conf.json`'s
+11: //     `beforeBuildCommand` runs `build:tauri`, which sets NEXT_PUBLIC_BASE_PATH='' → basePath ''.
+12: //   * Hosted "Try the GUI live" web target ("build:web"): served under a sub-path on the same
+13: //     GitHub-Pages-style host. The maintainer picked the URL slot (bead sq-vnd0i, Option B):
+14: //     the live GUI is hosted at the `/app` sub-path (the site's "App" nav destination;
+15: //     "/try" stays the lightweight REPL). This app defaults the web build to `/app`,
+16: //     overridable via the env var.
+17: //
+18: // An UNSET var keeps the web default (`/app`); an explicit empty string selects the
+19: // root-relative (Tauri) export. Next requires basePath to be empty or start with `/` (no
+20: // trailing slash), so we honour only `''` or a `/`-leading value and otherwise fall back.
+21: const rawBasePath = process.env.NEXT_PUBLIC_BASE_PATH;
+22: const basePath =
+23:   rawBasePath === undefined
+24:     ? "/app" // unset → hosted-web default (the live-GUI "/app" sub-path)
+25:     : rawBasePath === "" || rawBasePath.startsWith("/")
+26:       ? rawBasePath // '' (Tauri root-relative) or an explicit '/prefix'
+27:       : "/app";
+28: 
+29: const nextConfig: NextConfig = {
+30:   output: "export",
+31:   // Only emit basePath/assetPrefix when there IS a prefix. An empty basePath must not be set as
+32:   // `assetPrefix: ""` either — leaving both unset is exactly the root-relative behaviour the
+33:   // Tauri webview needs.
+34:   ...(basePath ? { basePath, assetPrefix: basePath } : {}),
+35:   trailingSlash: true,
+36:   // Static export cannot run the Next.js image optimiser.
+37:   images: { unoptimized: true },
+38:   // The @sparq-org/sparq wrapper ships ESM with `.js` import specifiers that resolve to `.ts`/`.tsx`
+39:   // sources; mirror the site's webpack alias so the bundler follows them.
+40:   webpack: (config) => {
+41:     config.resolve.extensionAlias = {
+42:       ".js": [".ts", ".tsx", ".js", ".jsx"],
+43:     };
+44:     // Resolve the shared framework-agnostic client (`packages/sparq-client`) to its TS source —
+45:     // the SAME single-source-of-truth the site consumes, so the GUI is a zero-new-copy consumer
+46:     // of the engine TS surface (research/gui-design.md §4).
+47:     config.resolve.alias = {
+48:       ...config.resolve.alias,
+49:       "@sparq/client": path.resolve(
+50:         __dirname,
+51:         "../../packages/sparq-client/src/index.ts",
+52:       ),
+53:     };
+54:     return config;
+55:   },
+56: };
+57: 
+58: export default nextConfig;
+
+SOURCE .github/workflows/gui.yml
+48: name: gui
+49: 
+50: on:
+51:   pull_request:
+52:     # [FABLE-5] Draft-tier CI: + ready_for_review so the un-draft moment re-runs
+53:     # this gate-feeding lane (docs/branch-protection.md §Draft-tier CI).
+54:     types: [opened, synchronize, reopened, ready_for_review]
+55:     # [OPUS-4.8] The `site build + typecheck` job here consumes `site/` (its static export +
+56:     # the bundle-wasm-esm script) and `js/` (the @sparq-org/sparq source it bundles), and resolves
+57:     # workspace deps from the root lockfile — so changes to ANY of those can break it. They were
+58:     # previously omitted, so a `site/`+lockfile regression (an unresolved `fzstd` in the ESM
+59:     # bundle) slipped onto `main` undetected and only surfaced on a PR whose `gate` re-scans the
+60:     # merge ref. List every input the jobs read.
+61:     paths:
+62:       - "gui/**"
+63:       - "packages/sparq-client/**"
+64:       - "site/**"
+65:       - "js/**"
+66:       - "package-lock.json"
+67:       - ".github/workflows/gui.yml"
+68:   push:
+69:     branches: [main]
+70:     paths:
+71:       - "gui/**"
+72:       - "packages/sparq-client/**"
+73:       - "site/**"
+74:       - "js/**"
+75:       - "package-lock.json"
+76:       - ".github/workflows/gui.yml"
+77:   # [SONNET-4.6] sq-ymr2e.6 — manual flake probe: run the tauri-driver smoke N times in sequence
+78:   # to measure consecutive-green rate. Trigger via "Run workflow" in the GitHub Actions UI.
+79:   # The `probe_runs` input defaults to 20 (the acceptance-criteria bar); the tauri-e2e-probe job
+80:   # below runs only when this event fires. Use this to gather evidence before promotion.
+81:   workflow_dispatch:
+82:     inputs:
+83:       probe_runs:
+84:         description: "Number of consecutive smoke runs (flake probe)"
+85:         required: false
+86:         default: "20"
+87: 
+88: # Least-privilege default (Scorecard TokenPermissions): read-only; this lane never writes.
+89: permissions:
+90:   contents: read
+91: 
+92: # One in-flight run per PR/branch; cancel a superseded run (the per-platform Tauri build is
+93: # expensive — the design calls out cancel-in-progress for exactly this reason).
+94: concurrency:
+95:   group: gui-${{ github.event.pull_request.number || github.ref }}
+96:   cancel-in-progress: true
+99:   shared-client:
+100:     name: shared TS client typecheck
+101:     runs-on: ubuntu-latest
+102:     timeout-minutes: 15
+103:     defaults:
+104:       run:
+105:         working-directory: packages/sparq-client
+106:     steps:
+107:       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+108: 
+109:       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+110:         with:
+111:           node-version: 22
+112: 
+113:       # [OPUS-4.8] sq-jpki.1 — repo-root npm workspaces: packages/sparq-client is a workspace
+114:       # member and the per-member lock was dropped. `npm install` (run in packages/sparq-client)
+115:       # resolves the member's deps via the repo-root workspace, installing into the hoisted root
+116:       # node_modules; the typecheck then runs against that tree. (This lane uses `npm install`,
+117:       # not `npm ci`, so it is tolerant of a not-yet-regenerated lock — unchanged behaviour.)
+118:       - name: Install dependencies
+119:         run: npm install
+120: 
+121:       - name: Typecheck (@sparq/client)
+122:         run: npm run typecheck
+179:         run: npm install
+180: 
+181:       - name: "@sparq/client tracked wasm d.ts byte-identical to fresh build"
+182:         working-directory: packages/sparq-client
+183:         run: npm run check:wasm-types
+184: 
+185:       - name: Install site dependencies
+186:         working-directory: site
+187:         run: npm install
+188: 
+189:       - name: Site lint
+190:         working-directory: site
+191:         run: npm run lint
+192: 
+193:       - name: Site typecheck
+194:         working-directory: site
+195:         run: npx tsc --noEmit
+196: 
+197:       - name: Site static export build (consumes @sparq/client)
+198:         working-directory: site
+199:         run: npm run build
+200: 
+201:   # [OPUS-4.8] sq-ixc3.8 / sq-ixc3.9 — the DISTINCT operational GUI frontend (gui/app).
+202:   #
+203:   # This is the load-bearing deliverable of the GUI-foundation work: the workbench frontend is a
+204:   # SEPARATE Next.js app (NOT the marketing site), static-exported for BOTH the Tauri desktop
+205:   # webview (root-relative) AND a hosted "Try the GUI live" web target (sub-path). It runs the
+269:       # processor) so the GUI's Streaming tool runs LIVE in the exported artifact. The GUI's
+270:       # sync-wasm copies it from the crate's pkg/ into public/wasm/rsp/; it is OPTIONAL at build
+271:       # time (sync warn-skips when absent), but building it here makes the hosted "Try the GUI
+272:       # live" export ship real streaming SPARQL processing rather than the honest "unavailable"
+273:       # fallback.
+274:       - name: Build W-rsp wasm bundle (windowed RSP-QL stream processor)
+275:         working-directory: js
+276:         run: npm run build:rsp-wasm
+277: 
+278:       - name: Install workspace dependencies
+279:         run: npm install
+280: 
+281:       - name: GUI frontend lint
+282:         working-directory: gui/app
+283:         run: npm run lint
+284: 
+285:       - name: GUI frontend typecheck
+286:         working-directory: gui/app
+287:         run: npm run typecheck
+288: 
+289:       # (sq-w3dmj) [FABLE-5] — the gui/app node:test unit suite (pure helpers: editor keys +
+290:       # the global-first Tauri fs plugin resolution). Build-free (on-the-fly TS loader); was
+291:       # previously never exercised in CI.
+292:       - name: GUI frontend unit tests
+293:         working-directory: gui/app
+294:         run: npm run test:unit
+295: 
+296:       # The hosted "Try the GUI live" web target (sub-path basePath).
+297:       - name: GUI frontend static export (web target)
+298:         working-directory: gui/app
+299:         run: npm run build:web
+300: 
+301:       # The Tauri desktop webview target (root-relative). Proves the SAME frontend exports for
+302:       # both hosts off the single NEXT_PUBLIC_BASE_PATH switch.
+303:       - name: GUI frontend static export (Tauri target)
+304:         working-directory: gui/app
+305:         run: npm run build:tauri
+306: 
+388:         run: npm install
+389: 
+390:       # Build the Tauri-target static export (root-relative; the Playwright server serves it).
+391:       - name: Build GUI frontend static export (Tauri target → gui/app/out/)
+392:         working-directory: gui/app
+393:         run: npm run build:tauri
+394: 
+395:       # Install only the Chromium browser binary (the mock-IPC lane uses only Chromium).
+396:       - name: Install Playwright Chromium
+397:         working-directory: gui/e2e-playwright
+398:         run: npx playwright install --with-deps chromium
+399: 
+400:       # No-timeout gate: forbids waitForTimeout in specs/ + support/ (determinism doctrine §1.1).
+401:       - name: Determinism gate — no waitForTimeout
+402:         working-directory: gui/e2e-playwright
+403:         run: bash support/no-timeout-gate.sh
+404: 
+
+SOURCE .github/workflows/site-e2e.yml
+21: # src/generated/specs/<slug>.html (git-ignored). So this lane installs the same pinned Typst
+22: # the paper factory uses (mirroring pages.yml) and runs `npm run build-specs` BEFORE Playwright,
+23: # so the fragment exists on disk for `next dev` to read and the ReSpec rendering is CI-covered.
+24: # (Still no wasm-REPL bundle: neither the ZK smoke nor the specs smoke needs it.)
+25: name: site-e2e
+26: 
+27: on:
+28:   # [OPUS-4.8] sq-5f1s4 — self-guarding path filter: this lane's `npm ci` resolves the
+29:   # `site` workspace member from the REPO-ROOT lockfile + manifest (site/ is an npm
+30:   # workspace member; the per-member lock was dropped — see the install step). A change to
+31:   # the root `package-lock.json`/`package.json` (e.g. a sibling member bumping a hoisted
+32:   # dep, or a lock regeneration) can break `npm ci` here, but the old `site/**`-only filter
+33:   # would NOT re-run the lane to catch it — and BOTH legs here are path-filtered, so there
+34:   # is no unfiltered main-push catch-all either (unlike js.yml). That is the exact
+42:       - "package.json"
+43:       - "package-lock.json"
+44:       - ".github/workflows/site-e2e.yml"
+45:   push:
+49:       - "package.json"
+50:       - "package-lock.json"
+51:       - ".github/workflows/site-e2e.yml"
+52: 
+63:   site-e2e:
+64:     name: lint + unit + zk-prewarm smoke
+65:     runs-on: ubuntu-latest
+66:     timeout-minutes: 20
+73:       # [OPUS-4.8] sq-jpki.1 — repo-root npm workspaces: `site/` is now a workspace member
+74:       # and the per-member `site/package-lock.json` was dropped as redundant. The single
+75:       # lockfile is the repo-root `package-lock.json`, so the setup-node npm cache keys off
+76:       # THAT (the old `site/package-lock.json` path no longer exists). The `npm ci` below runs
+77:       # in `site/` (the job's working-directory) and, finding the workspace root, installs the
+78:       # site member's dependency closure FROM the root lock (it does NOT run sibling members'
+82:         with:
+83:           node-version: 22
+84:           cache: npm
+85:           cache-dependency-path: package-lock.json
+86: 
+87:       # [SONNET-4.6] The unit suite runs the native sparq-policy parity fixture.
+96: 
+97:       - name: Install npm dependencies (from the repo-root workspace lock)
+98:         run: npm ci
+99: 
+100:       - name: Lint
+101:         run: npm run lint
+102: 
+103:       - name: Unit tests (node --test)
+104:         run: npm run test:unit
+105: 
+106:       # Cache the Playwright browser download keyed on the resolved @playwright/test
+107:       # version, so a browser re-download only happens when the version changes.
+108:       - name: Resolve Playwright version
+109:         id: pw
+110:         run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+111: 
+112:       - name: Cache Playwright browsers
+113:         id: pw-cache
+114:         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+118: 
+119:       - name: Install Playwright Chromium (+ OS deps)
+120:         run: npx playwright install --with-deps chromium
+121: 
+122:       # [OPUS-4.8] sq-rvgr2.1 — install the SAME pinned, SHA-256-verified Typst the paper
+123:       # factory uses (mirrors pages.yml's "Install Typst CLI" step) so `npm run build-specs`
+124:       # below renders the REAL ReSpec spec fragments (src/generated/specs/<slug>.html, git-
+125:       # ignored). Without this, e2e/specs-smoke.spec.ts sees only the "not built yet"
+127:       # paths only, so the job's `working-directory: site` default is irrelevant here.
+128:       - name: Install Typst CLI
+129:         run: |
+130:           set -euo pipefail
+145:       # placeholder) and the specs-smoke ReSpec-render assertions exercise the true output.
+146:       - name: Build spec fragments (Typst → src/generated/specs)
+147:         run: npm run build-specs
+148: 
+149:       # [SONNET-4.6] sq-ymr2e.8 — pre-bake paper HTML fragments so e2e/surface-sweep.spec.ts
+152:       # the same paper-evidence.json evidence injection as the PDF build.
+153:       - name: Build paper fragments (Typst → src/generated/papers)
+154:         run: npm run build-papers
+155: 
+156:       - name: ZK prover pre-warm smoke test + site e2e (headless Chromium)
+157:         run: npm run test:e2e
+
+SOURCE .github/workflows/site-e2e-foundation.yml
+14: #   * `determinism-gate` (HARD, no declaration) — the no-waitForTimeout grep gate, ~15 s of
+15: #     pure grep with no npm install and no browser. Its previous home was the advisory job, so
+16: #     a `page.waitForTimeout` under site/e2e/ was mergeable. It gates now.
+17: #   * `a11y-ratchet` (HARD, no declaration) — the axe-core WCAG 2.1 AA scan + the committed
+23: # Promotion of the advisory job = DELETE its registry entry (§4 of that policy).
+24: name: site-e2e-foundation
+25: 
+26: on:
+33:       - "package.json"
+34:       - "package-lock.json"
+35:       - ".github/workflows/site-e2e-foundation.yml"
+36:   push:
+40:       - "package.json"
+41:       - "package-lock.json"
+42:       - ".github/workflows/site-e2e-foundation.yml"
+43: 
+59:   determinism-gate:
+60:     name: site e2e determinism gate (no waitForTimeout calls)
+61:     runs-on: ubuntu-latest
+62:     timeout-minutes: 5
+64:       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+65:       # Invoked directly rather than through `npm run test:e2e:grep-gate` so the gate needs
+66:       # no node_modules at all — the script resolves site/e2e relative to itself.
+67:       - name: Determinism grep gate (zero page.waitForTimeout under site/e2e)
+68:         run: bash site/e2e/support/no-timeout-gate.sh
+69: 
+74:   foundation-smoke:
+75:     name: foundation smoke (advisory)
+76:     runs-on: ubuntu-latest
+77:     timeout-minutes: 15
+83: 
+84:       # Repo-root npm workspaces: `site/` is a member; `npm ci` run FROM site/ installs the site
+85:       # member's closure from the root lock and does NOT trigger sibling members' lifecycle scripts
+86:       # (verified in site-e2e.yml — js/'s wasm `prepare` is not run, so no Rust/wasm toolchain here).
+88:         with:
+89:           node-version: 22
+90:           cache: npm
+91:           cache-dependency-path: package-lock.json
+92: 
+93:       - name: Install npm dependencies (from the repo-root workspace lock)
+94:         run: npm ci
+95: 
+96:       - name: Lint
+97:         run: npm run lint
+98: 
+99:       # [OPUS-5] #3773 — the determinism grep gate MOVED to the HARD `determinism-gate` job
+102:       # Cache the Playwright browser download keyed on the resolved @playwright/test version.
+103:       - name: Resolve Playwright version
+104:         id: pw
+105:         run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+106: 
+107:       - name: Cache Playwright browsers
+108:         id: pw-cache
+109:         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+113: 
+114:       - name: Install Playwright Chromium (+ OS deps)
+115:         run: npx playwright install --with-deps chromium
+116: 
+118:       # deterministic (frozen clock, seeded random, hermetic network, web-first waiters); its
+119:       # anti-flake bar is `npm run test:e2e:stress` (--repeat-each=5 --retries=0), run pre-merge.
+120:       - name: Foundation smoke (headless Chromium)
+121:         continue-on-error: true
+122:         run: npm run test:e2e -- support/foundation.smoke.spec.ts
+123: 
+124:   # [OPUS-4.8] sq-ymr2e.4 / [OPUS-5] #3773 — axe-core WCAG 2.1 AA a11y RATCHET, now its own
+135:   a11y-ratchet:
+136:     name: site a11y ratchet — axe WCAG 2.1 AA (headless Chromium)
+137:     runs-on: ubuntu-latest
+138:     timeout-minutes: 20
+146:         with:
+147:           node-version: 22
+148:           cache: npm
+149:           cache-dependency-path: package-lock.json
+150: 
+151:       - name: Install npm dependencies (from the repo-root workspace lock)
+152:         run: npm ci
+153: 
+154:       - name: Resolve Playwright version
+155:         id: pw
+156:         run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+157: 
+158:       - name: Cache Playwright browsers
+159:         id: pw-cache
+160:         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+164: 
+165:       - name: Install Playwright Chromium (+ OS deps)
+166:         run: npx playwright install --with-deps chromium
+167: 
+168:       # NO continue-on-error: an axe regression is a real failure and now REDs `gate`.
+169:       - name: A11y — axe WCAG 2.1 AA + baseline ratchet (headless Chromium)
+170:         run: npm run test:e2e -- a11y.spec.ts
+
+SOURCE .github/workflows/site-e2e-hero.yml
+6: #
+7: # ADVISORY (continue-on-error: true on both Playwright steps; the whole word `advisory` in the job
+8: # NAME also excludes it from the `ci-summary` aggregator). The heroic run of all five journeys +
+9: # the stress (--repeat-each=5) needs a full wasm build with a warm cache. Making it advisory keeps
+14: #
+15: # SCOPE: path-scoped to site/**, the root lock files (same reasoning as site-e2e.yml — npm ci
+16: # resolves from the root lockfile, so a lockfile bump can break the install), and this workflow.
+17: # A Rust-only or docs-only PR never triggers this lane.
+18: name: site-e2e-hero
+19: 
+20: on:
+27:       - "package.json"
+28:       - "package-lock.json"
+29:       - ".github/workflows/site-e2e-hero.yml"
+30:   push:
+34:       - "package.json"
+35:       - "package-lock.json"
+36:       - ".github/workflows/site-e2e-hero.yml"
+37: 
+48:   site-e2e-hero:
+49:     name: home hero-runner journeys (advisory)
+50:     runs-on: ubuntu-latest
+51:     timeout-minutes: 25
+58:       # Node 22 — npm cache keys off the REPO-ROOT lockfile (site/ is a workspace member;
+59:       # the per-member site/package-lock.json was dropped when workspaces were introduced).
+60:       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+61:         with:
+62:           node-version: 22
+63:           cache: npm
+64:           cache-dependency-path: package-lock.json
+65: 
+66:       - name: Install npm dependencies (from the repo-root workspace lock)
+67:         run: npm ci
+68: 
+69:       # Rust stable + wasm32 target + wasm-pack — needed to build the lean wasm bundle.
+82: 
+83:       - name: Install wasm-pack
+84:         run: cargo install wasm-pack --locked
+85: 
+95:       # Run from js/ (one level above site/) so the relative Cargo.toml path is correct.
+96:       - name: Build lean wasm bundle
+97:         run: cd ../js && npm run build:wasm:lean
+98: 
+99:       # Copy the built bundle into site/public/wasm/ (the path next dev serves it from).
+100:       - name: Sync wasm bundle into site/public/wasm/
+101:         run: npm run sync-wasm
+102: 
+103:       # Cache Playwright browsers keyed on the resolved @playwright/test version.
+104:       - name: Resolve Playwright version
+105:         id: pw
+106:         run: echo "version=$(node -p 'require("@playwright/test/package.json").version')" >> "$GITHUB_OUTPUT"
+112: 
+113:       - name: Install Playwright Chromium (+ OS deps)
+114:         run: npx playwright install --with-deps chromium
+115: 
+122:       # but do not block the PR while wasm/CI flakiness is worked out.
+123:       - name: Home hero-runner E2E journeys
+124:         run: npm run test:e2e -- home-runner.spec.ts
+125:         continue-on-error: true
+126: 
+127:       # Stress run (--repeat-each=5 --retries=0): 25 runs with zero retries prove the suite is
+128:       # deterministic — any flake appears as a failure across 25 iterations. Advisory.
+129:       - name: Home hero-runner stress test (--repeat-each=5 --retries=0)
+130:         run: npm run test:e2e:stress -- home-runner.spec.ts
+131:         continue-on-error: true
+
+SOURCE .github/workflows/site-visual.yml
+4: # Linux-only baselines. The renderer is the DIGEST-PINNED official Playwright container —
+5: # site/scripts/vr.sh wraps `docker run` on that image, so this job, `npm run vr` on a dev box,
+6: # and the baselines themselves all rasterize in the byte-identical environment
+7: # (research/web-gui-test-program.md §4). The wasm build runs on the HOST (normal toolchain +
+19: # SCOPE: path-scoped to site/** + the root workspace lock inputs (same reasoning as
+20: # site-e2e.yml — `npm ci` resolves from the root lockfile) + this workflow. A Rust-/docs-only
+21: # PR never triggers this lane.
+22: name: site-visual
+23: 
+24: on:
+31:       - "package.json"
+32:       - "package-lock.json"
+33:       - ".github/workflows/site-visual.yml"
+34:   push:
+38:       - "package.json"
+39:       - "package-lock.json"
+40:       - ".github/workflows/site-visual.yml"
+41: 
+52:   site-visual:
+53:     name: visual key layouts (container-pinned, advisory)
+54:     runs-on: ubuntu-latest
+55:     timeout-minutes: 35
+64:         with:
+65:           node-version: 22
+66:           cache: npm
+67:           cache-dependency-path: package-lock.json
+68: 
+69:       - name: Install npm dependencies (from the repo-root workspace lock)
+70:         run: npm ci
+71: 
+72:       # Rust stable + wasm32 + wasm-pack: the /try workbench capture waits on the REAL
+87: 
+88:       - name: Install wasm-pack
+89:         run: cargo install wasm-pack --locked
+90: 
+97: 
+98:       - name: Build lean wasm bundle
+99:         run: cd ../js && npm run build:wasm:lean
+100: 
+101:       - name: Sync wasm bundle into site/public/wasm/
+102:         run: npm run sync-wasm
+103: 
+104:       # [OPUS-5] #3773 — the determinism grep gate (whole e2e/ tree, visual specs included) is
+111:       # from the pin). ADVISORY: continue-on-error per §6.3 until the lane earns gating.
+112:       - name: Visual key layouts vs committed baselines (digest-pinned container)
+113:         id: vr
+114:         run: npm run vr
+115:         continue-on-error: true
+116: 
+117:       # Readable failure artifacts: Playwright writes *-actual/*-expected/*-diff PNGs + traces
+118:       # under test-results/ when a comparison fails.
+119:       - name: Upload visual diff artifacts
+120:         if: steps.vr.outcome == 'failure'
+121:         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+122:         with:
+123:           name: visual-regression-diffs
+124:           path: |
+125:             site/test-results/
+130:       # Surface the advisory verdict in the job summary (the job itself stays green — §6.3).
+131:       - name: Advisory verdict
+132:         if: always()
+133:         run: |
+134:           if [ "${{ steps.vr.outcome }}" = "failure" ]; then
+135:             echo "::warning::site-visual (ADVISORY) failed — inspect the visual-regression-diffs artifact. Intentional change? Refresh baselines in this PR: npm run vr:update"
+136:             echo "## site-visual: ADVISORY FAIL — see the visual-regression-diffs artifact" >> "$GITHUB_STEP_SUMMARY"
+137:           else
+
+SOURCE .github/workflows/pages.yml
+59: name: pages
+60: 
+61: on:
+62:   push:
+63:     # [OPUS-4.8] sq-gdhy — rebuild on TWO sources so the paper factory's live numbers
+64:     # stay current. (1) `main`: the site source itself changes (pages, papers, the
+65:     # COMMITTED site/src/data/benchmarks.generated.json). (2) `benchmark-data`: bench.yml
+66:     # pushes a fresh benchmark point THERE (not to main), and the paper/showcase numbers
+67:     # are synced FROM that branch at build time (site/scripts/sync-benchmarks.mjs reads
+68:     # origin/benchmark-data:dev/bench/data.js). Before this, a new benchmark point only
+69:     # reached the published papers on the NEXT unrelated main push — the data-branch
+70:     # change alone did not re-publish. A benchmark-data-triggered run still builds the
+71:     # `main` site source (the benchmark-data branch is an orphan dashboard branch with no
+72:     # site/), so it rebuilds main's site against the freshly-pushed data.
+73:     #
+74:     # NO double-fire: bench.yml writes benchmark-data in TWO separate pushes — (a) the
+75:     # github-action-benchmark data.js push (the one carrying the new numbers; NO [skip ci],
+76:     # so it triggers this rebuild) and (b) the "Seed Pages dashboard" push, whose commit
+77:     # message carries [skip ci] (so it never re-triggers). The `concurrency: pages` group
+78:     # below already serialises any overlapping main+benchmark-data runs into one live deploy.
+79:     branches: [main, benchmark-data]
+80:   workflow_dispatch:
+81: 
+82: # Least-privilege (Scorecard TokenPermissions): read by default; the deploy job
+83: # opts into the Pages/OIDC writes it needs.
+84: permissions:
+85:   contents: read
+86: 
+87: # Never cancel an in-flight Pages deploy; queue instead so a half-uploaded artifact
+88: # can't leave the site broken.
+89: concurrency:
+90:   group: pages
+91:   cancel-in-progress: false
+92: 
+93: jobs:
+94:   build:
+95:     # Gate the publish to the two first-party branches CI writes (PRs build nothing here).
+96:     # [OPUS-4.8] sq-gdhy — `benchmark-data` joins `main` so a fresh benchmark point
+97:     # re-publishes the paper factory; both are CI-written branches, never PR refs.
+98:     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/benchmark-data'
+99:     runs-on: ubuntu-latest
+100:     steps:
+101:       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+196:       # `npm ci` (run in site/) installs the site member's dependency closure FROM the repo-root
+197:       # `package-lock.json` (no per-member lock anymore). It does NOT re-run js/'s wasm `prepare`
+198:       # (a member-dir `npm ci` installs only that member's closure), so the wasm bundle built in
+199:       # the step above is preserved. `npm run build` then runs prebuild (sync js/wasm →
+200:       # site/public/wasm + build papers) and `next build` → out/ with basePath /sparq, exactly as
+201:       # before — the migration changes only WHERE deps resolve from, not the produced out/ tree.
+202:       - name: Build static site
+203:         working-directory: site
+204:         # [OPUS-4.8] sq-uj38w — org-migration Pages cutover (atomic flip). The site now serves at the
+205:         # ROOT of the custom domain https://sparq.jeswr.org/ (custom domain set via site/public/CNAME
+206:         # → out/CNAME below), so the Pages build must emit ROOT-RELATIVE assets (/_next/… not
+207:         # /sparq/_next/…). NEXT_PUBLIC_BASE_PATH='' selects basePath '' in site/next.config.ts (the SAME
+208:         # switch the Tauri build uses). basePath and the custom domain MUST flip together in THIS one
+209:         # deploy — changing only one would break every asset/route URL.
+210:         env:
+211:           NEXT_PUBLIC_BASE_PATH: ""
+212:         run: |
+213:           npm ci
+214:           npm run build   # prebuild copies js/wasm → site/public/wasm + builds papers, then next build → out/ (root-relative, basePath '')
+215: 
+216:       # [OPUS-4.8] sq-vnd0i — build the DISTINCT operational GUI frontend (gui/app) as its hosted
+217:       # "Try the GUI live" web target and OVERLAY it at /app/ on the SAME Pages artifact.
+218:       #
+219:       # The maintainer picked Option B (bead sq-vnd0i): /try stays the lightweight in-browser
+220:       # SPARQL REPL playground (the site's `/try` route, unchanged); the live operational GUI is a
+221:       # SEPARATE destination hosted at https://sparq.jeswr.org/app/ — a sub-path of THIS
+222:       # single GitHub-Actions Pages deploy (the site's "App" nav slot, wired in #1004). This step
+223:       # makes that route real: until now `site/src/app/app/page.tsx` was an honest PLACEHOLDER
+224:       # promising the hosted app "will live here at /app/"; this overlay delivers it.
+225:       #
+226:       # The GUI frontend embeds the in-tab WASM engine, so it consumes the SAME lean
+227:       # `--features shacl,jsonld` bundle already built into `js/wasm/` above; its `prebuild`
+228:       # `sync-wasm` copies that bundle into `gui/app/public/wasm/` before `next build`. `build:web`
+229:       # leaves NEXT_PUBLIC_BASE_PATH unset, so `gui/app/next.config.ts` defaults basePath +
+230:       # assetPrefix to `/app` (every `_next/*` chunk URL is baked as `/app/...`), and
+231:       # the GUI passes the same `/app` prefix to the @sparq/client wasm loader, so the
+232:       # runtime engine fetch is `/app/wasm/...` — exactly where the overlay places it. (Pre-cutover
+233:       # sq-uj38w this sub-path was /sparq/app; the site now serves at the custom-domain ROOT so it
+234:       # collapsed to /app.)
+235:       #
+236:       # `npm install` at the repo root resolves the gui/app workspace member's deps from the
+237:       # repo-root package-lock (mirrors gui.yml's gui-app job); it does NOT touch the wasm bundle.
+238:       - name: Install gui/app workspace dependencies
+239:         run: npm install
+240:       - name: Build the operational GUI frontend (hosted web target)
+241:         working-directory: gui/app
+242:         run: npm run build:web   # presync check + prebuild sync-wasm (js/wasm → public/wasm), then next build → out/ (basePath /app)
+243: 
+
+SOURCE .github/workflows/js.yml
+25: # post-merge cover on every main push (this is the leg #953 fixed — left untouched).
+26: name: js
+27: 
+28: on:
+42:       - "package.json"
+43:       - "package-lock.json"
+44:       - ".github/workflows/js.yml"
+45:   push:
+84:         with:
+85:           node-version: 22
+86: 
+87:       # [FABLE-5] PR #3511 review finding 5: the redundant second cargo cache was
+95: 
+96:       # wasm-pack BEFORE `npm ci`: the package's `prepare` lifecycle (sq-bkag git-pin
+97:       # build) runs on `npm ci` and needs wasm-pack on PATH to compile the wasm engine.
+98:       #
+99:       # [OPUS-5] sq-khm3f: DOWNLOAD the prebuilt release binary — do NOT `cargo install
+116:       # source, which is the thing being removed. Bump deliberately, not implicitly.
+117:       - name: Install wasm-pack
+118:         uses: jetli/wasm-pack-action@0d096b08b4e5a7de8c28de67e11e945404e9eefa # v0.4.0
+119:         with:
+127:       # putting test-only deps there would pollute the runtime SBOM, sq-f04e/#887). A member-
+128:       # scoped `npm ci` (working-directory: js) installs ONLY @sparq-org/sparq's own closure and
+129:       # NOT the root workspace devDeps, so those imports were ERR_MODULE_NOT_FOUND -> red `js`
+130:       # gate. A root install hoists them into the workspace node_modules where the test (and
+132:       # published-client SBOM stays clean (runtime tree = {fzstd} only).
+133:       - name: Install npm dependencies (full workspace, from repo root)
+134:         working-directory: .
+135:         run: npm ci
+136: 
+137:       - name: Build (wasm-pack + tsc)
+138:         run: npm run build
+139: 
+140:       - name: Test (node --test)
+141:         run: npm test
+142: 
+148:       # workspace-linked harness + its devDeps resolve.
+149:       - name: RDF/JS conformance harness (typecheck + N3 parity)
+150:         working-directory: packages/rdfjs-conformance
+151:         run: |
+152:           npm run typecheck
+153:           npm test
+154: 
+158:       # and verify the tarball ships dist/ + the wasm engine. wasm-pack is installed above.
+159:       - name: eye-js compat package (build + test + guardrail)
+160:         working-directory: packages/eyereasoner-compat
+161:         run: |
+162:           npm run build
+163:           npm test
+164:           npm run check:package
+165: 
+166:       # [OPUS-4.8] sq-6xasp.11 (epic sq-6xasp): the @sparq-org/solid-server package — a local-dev
+174:       # exact dry-run tarball file list so neither the allowlist nor the artifact can regress.
+175:       - name: solid-server package (build wasm + node:test + package guardrail)
+176:         working-directory: packages/solid-server
+177:         run: |
+178:           npm run build:lws-wasm
+179:           npm test
+180:           npm run check:package
+181: 
+182:       # Publish guardrail + git-pin verification (sq-bkag): `prepare` wired, the
+184:       # + the `--target nodejs` CommonJS engine in wasm-node/ ([OPUS-5] sq-2hk).
+185:       - name: Package guardrail check
+186:         run: npm run check:package
+187: 
+188:       # Both targets are built from the same crate + feature set (the glue differs,
+190:       # feature-set drift between them visible in the log.
+191:       - name: Report wasm size
+192:         run: ls -l wasm/sparq_wasm_bg.wasm wasm-node/sparq_wasm_bg.wasm
+
+SOURCE site/playwright.config.ts
+17: //
+18: // Run locally:  npx playwright install chromium && npm run test:e2e
+19: import { existsSync } from "node:fs";
+20: 
+26: // policy. The projects are DEFINED only when SPARQ_VR=1 (set by scripts/vr.sh, which wraps
+27: // `docker run` on the pinned image) so a plain `npm run test:e2e` on a dev laptop never runs
+28: // them (and can never mint an accidental macOS/Windows baseline). The guard below refuses a
+29: // bare-host run even with SPARQ_VR=1 unless explicitly overridden — screenshots minted outside
+36: // nightly lane opts them in with SPARQ_NIGHTLY_BROWSERS=1 and selects them with
+37: // `--project firefox --project webkit`. The env gate keeps a plain `npm run test:e2e` (and every
+38: // per-PR lane) byte-identical to before — the projects array is spread with `[]` when unset, so
+39: // the per-PR path is untouched.
+59:     "SPARQ_VR=1 outside the pinned Playwright container (/ms-playwright not found). " +
+60:       "Run the visual suite via `npm run vr` / `npm run vr:update` (scripts/vr.sh), or set " +
+61:       "SPARQ_VR_ALLOW_HOST=1 to bypass (the screenshots will NOT match the committed baselines).",
+62:   );
+118:     {
+119:       name: "chromium",
+120:       // Keep the pinned viewport at the project level too (device presets carry their own).
+121:       use: { ...devices["Desktop Chrome"], viewport: { width: 1280, height: 720 } },
+130:           {
+131:             name: "nightly-a11y",
+132:             use: { ...devices["Desktop Chrome"], viewport: { width: 1280, height: 720 } },
+133:             // Only pick up the nightly specs; the main e2e suite is already run by the
+134:             // chromium project in the same nightly job (npm run test:e2e runs both).
+135:             testMatch: /e2e[\\/]nightly[\\/].*\.spec\.ts/,
+136:           },
+152:           {
+153:             name: "visual-desktop",
+154:             testMatch: SPARQ_NIGHTLY_VR
+155:               ? /e2e[\\/]visual[\\/].*\.spec\.ts/
+159:           {
+160:             name: "visual-mobile",
+161:             testMatch: SPARQ_NIGHTLY_VR
+162:               ? /e2e[\\/]visual[\\/].*\.spec\.ts/
+173:           {
+174:             name: "firefox",
+175:             use: { ...devices["Desktop Firefox"], viewport: { width: 1280, height: 720 } },
+176:             // Exclude both container-only visual and nightly-only a11y specs.
+179:           {
+180:             name: "webkit",
+181:             use: { ...devices["Desktop Safari"], viewport: { width: 1280, height: 720 } },
+182:             // Exclude both container-only visual and nightly-only a11y specs.
+187:   ],
+188:   webServer: {
+189:     // The local Next 15 binary serves the dev route under /sparq; bypass the `dev` npm
+190:     // script (which runs sync-wasm/Typst prebuild steps the ZK route does not need).
+191:     command: `npx next dev -p ${PORT}`,
+192:     url: BASE_URL + "showcase/zk-car-hire/",
+193:     reuseExistingServer: !process.env.CI,
+
+SOURCE site/scripts/vr.sh
+8: # in; bumping @playwright/test means re-pinning this digest AND regenerating the baselines in
+9: # the same PR (`npm run vr:update`).
+10: #
+11: # The IMAGE TAG must match the locked @playwright/test version (the image ships the matching
+13: #
+14: # PREREQS (host): `npm ci` at the repo root (linux-x64 node_modules are reused in-container) and
+15: # the lean wasm bundle synced into site/public/wasm (js: `npm run build:wasm:lean`, then site:
+16: # `npm run sync-wasm`) — the /try workbench capture waits on the real engine-ready state.
+17: #
+18: # Usage:  npm run vr            # compare against the committed baselines
+19: #         npm run vr:update     # regenerate baselines (forces a rewrite of every snapshot)
+20: #         bash scripts/vr.sh [extra playwright args]
+21: set -euo pipefail
+22: 
+23: PLAYWRIGHT_VERSION="1.61.0"
+24: IMAGE="mcr.microsoft.com/playwright:v${PLAYWRIGHT_VERSION}-noble@sha256:57b65fdc9ceabe0ef613124c7bbe2babcf9362c4d85e382fe3b03604e84b428a"
+25: 
+26: SITE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+34:   echo "vr.sh: bump PLAYWRIGHT_VERSION + the image digest in scripts/vr.sh, then regenerate" >&2
+35:   echo "vr.sh: the baselines (npm run vr:update) in the SAME PR." >&2
+36:   exit 1
+37: fi
+40:   echo "vr.sh: site/public/wasm/sparq_wasm_bg.wasm missing — the /try capture needs the engine." >&2
+41:   echo "vr.sh: build it:  (cd ../js && npm run build:wasm:lean) && npm run sync-wasm" >&2
+42:   exit 1
+43: fi
+48: # CI is forwarded so the config's CI-only behaviour (retries/forbidOnly/reporter) matches CI.
+49: exec docker run --rm --init --ipc=host \
+50:   -u "$(id -u):$(id -g)" \
+51:   -e HOME=/tmp \
+
+SOURCE gui/app/scripts/check-wasm-built.mjs
+6: //
+7: //     (cd ../../js && npm ci && npm run build:wasm)
+8: //
+9: // This pre-sync check makes the failure mode explicit and actionable rather than letting the
+15: const here = dirname(fileURLToPath(import.meta.url));
+16: const wasm = join(here, "..", "..", "..", "js", "wasm", "sparq_wasm_bg.wasm");
+17: 
+18: try {
+19:   await access(wasm);
+20: } catch {
+21:   console.error(
+23:       `The GUI frontend embeds the in-tab engine, so build the bundle first:\n` +
+24:       `    (cd ../../js && npm ci && npm run build:wasm)\n`,
+25:   );
+26:   process.exit(1);

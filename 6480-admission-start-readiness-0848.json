@@ -1,0 +1,465 @@
+{
+  "dedupe_version": {
+    "exit_code": 0,
+    "data": {
+      "total_count": 0,
+      "incomplete_results": false,
+      "items": [],
+      "search_type": "lexical"
+    },
+    "stderr": ""
+  },
+  "dedupe_title": {
+    "exit_code": 0,
+    "data": {
+      "total_count": 0,
+      "incomplete_results": false,
+      "items": [],
+      "search_type": "lexical"
+    },
+    "stderr": ""
+  },
+  "avif107": {
+    "exit_code": 0,
+    "data": {
+      "number": 107,
+      "state": "open",
+      "dependency": {
+        "package": {
+          "ecosystem": "npm",
+          "name": "next"
+        },
+        "manifest_path": "package-lock.json",
+        "scope": "runtime",
+        "relationship": "transitive"
+      },
+      "security_advisory": {
+        "ghsa_id": "GHSA-2xp9-vwfh-vxw4",
+        "cve_id": null,
+        "summary": "Next.js: Unauthenticated Remote Code Execution in Image Optimization API when AVIF files are used",
+        "description": "A vulnerability in the underlying `libheif` library used by `sharp` which Next.js uses for image optimization can lead to remote code execution when AVIF files are optimized.\n\nUntil a fix has propagated, optimization of AVIF files is disabled.",
+        "severity": "critical",
+        "identifiers": [
+          {
+            "value": "GHSA-2xp9-vwfh-vxw4",
+            "type": "GHSA"
+          }
+        ],
+        "references": [
+          {
+            "url": "https://github.com/strukturag/libheif/security/advisories/GHSA-g89c-p67h-r497"
+          },
+          {
+            "url": "https://github.com/vercel/next.js/security/advisories/GHSA-2xp9-vwfh-vxw4"
+          },
+          {
+            "url": "https://github.com/vercel/next.js/pull/97875"
+          },
+          {
+            "url": "https://github.com/vercel/next.js/pull/97931"
+          },
+          {
+            "url": "https://github.com/vercel/next.js/commit/3a15b4ac6ac8e70b1a9b18ecc18e8434462899b3"
+          },
+          {
+            "url": "https://github.com/vercel/next.js/commit/409772ec807def20132d251ad48fd8d8ad4c73c2"
+          },
+          {
+            "url": "https://github.com/vercel/next.js/commit/7a5937a8ab20b89d0a961f75eabb11577f5d5998"
+          },
+          {
+            "url": "https://github.com/vercel/next.js/releases/tag/v15.5.24"
+          },
+          {
+            "url": "https://github.com/vercel/next.js/releases/tag/v16.3.3"
+          },
+          {
+            "url": "https://github.com/advisories/GHSA-2xp9-vwfh-vxw4"
+          }
+        ],
+        "published_at": "2026-09-08T21:21:12Z",
+        "updated_at": "2026-09-08T21:21:13Z",
+        "withdrawn_at": null,
+        "vulnerabilities": [
+          {
+            "package": {
+              "ecosystem": "npm",
+              "name": "next"
+            },
+            "severity": "critical",
+            "vulnerable_version_range": ">= 10.0.0, < 15.5.24",
+            "first_patched_version": {
+              "identifier": "15.5.24"
+            }
+          },
+          {
+            "package": {
+              "ecosystem": "npm",
+              "name": "next"
+            },
+            "severity": "critical",
+            "vulnerable_version_range": ">= 16.0.0, < 16.3.3",
+            "first_patched_version": {
+              "identifier": "16.3.3"
+            }
+          }
+        ],
+        "cvss_severities": {
+          "cvss_v3": {
+            "vector_string": null,
+            "score": 0.0
+          },
+          "cvss_v4": {
+            "vector_string": "CVSS:4.0/AV:N/AC:L/AT:P/PR:N/UI:N/VC:H/VI:H/VA:H/SC:H/SI:H/SA:H",
+            "score": 9.5
+          }
+        },
+        "cvss": {
+          "vector_string": null,
+          "score": 0.0
+        },
+        "cwes": [
+          {
+            "cwe_id": "CWE-1395",
+            "name": "Dependency on Vulnerable Third-Party Component"
+          }
+        ],
+        "classification": "general"
+      },
+      "security_vulnerability": {
+        "package": {
+          "ecosystem": "npm",
+          "name": "next"
+        },
+        "severity": "critical",
+        "vulnerable_version_range": ">= 10.0.0, < 15.5.24",
+        "first_patched_version": {
+          "identifier": "15.5.24"
+        }
+      },
+      "url": "https://api.github.com/repos/sparq-org/sparq/dependabot/alerts/107",
+      "html_url": "https://github.com/sparq-org/sparq/security/dependabot/107",
+      "created_at": "2026-09-09T18:36:33Z",
+      "updated_at": "2026-09-09T18:36:33Z",
+      "dismissal_request": null,
+      "assignees": [],
+      "dismissed_at": null,
+      "dismissed_by": null,
+      "dismissed_reason": null,
+      "dismissed_comment": null,
+      "fixed_at": null,
+      "auto_dismissed_at": null
+    },
+    "stderr": ""
+  },
+  "windows106": {
+    "exit_code": 0,
+    "data": {
+      "number": 106,
+      "state": "open",
+      "dependency": {
+        "package": {
+          "ecosystem": "npm",
+          "name": "next"
+        },
+        "manifest_path": "package-lock.json",
+        "scope": "runtime",
+        "relationship": "transitive"
+      },
+      "security_advisory": {
+        "ghsa_id": "GHSA-p293-qw3h-jr36",
+        "cve_id": "CVE-2026-75604",
+        "summary": "Next.js: Unauthenticated Remote Code Execution on windows-hosted servers",
+        "description": "## Impact\n\nA vulnerability in applications using Pages and App router without Cache Component can lead to remote code execution when the server is hosted on machines using a Windows filesystem.\n\n## Workaround\n\nThere is no known workaround for affected windows-hosted applications. You should upgrade immediately if your server is hosted on Windows.",
+        "severity": "critical",
+        "identifiers": [
+          {
+            "value": "GHSA-p293-qw3h-jr36",
+            "type": "GHSA"
+          },
+          {
+            "value": "CVE-2026-75604",
+            "type": "CVE"
+          }
+        ],
+        "references": [
+          {
+            "url": "https://github.com/vercel/next.js/security/advisories/GHSA-p293-qw3h-jr36"
+          },
+          {
+            "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-75604"
+          },
+          {
+            "url": "https://github.com/vercel/next.js/commit/968b9fcb26bdeb8e0a861a9df05361474666d51b"
+          },
+          {
+            "url": "https://github.com/vercel/next.js/commit/b0f3460a92b955d3ca41fccff9a525a2b910fbf3"
+          },
+          {
+            "url": "https://github.com/vercel/next.js/releases/tag/v15.5.24"
+          },
+          {
+            "url": "https://github.com/vercel/next.js/releases/tag/v16.3.3"
+          },
+          {
+            "url": "https://github.com/advisories/GHSA-p293-qw3h-jr36"
+          }
+        ],
+        "published_at": "2026-09-08T20:51:40Z",
+        "updated_at": "2026-09-08T20:51:43Z",
+        "withdrawn_at": null,
+        "vulnerabilities": [
+          {
+            "package": {
+              "ecosystem": "npm",
+              "name": "next"
+            },
+            "severity": "critical",
+            "vulnerable_version_range": ">= 13.4.0, < 15.5.24",
+            "first_patched_version": {
+              "identifier": "15.5.24"
+            }
+          },
+          {
+            "package": {
+              "ecosystem": "npm",
+              "name": "next"
+            },
+            "severity": "critical",
+            "vulnerable_version_range": ">= 16.0.0, < 16.3.3",
+            "first_patched_version": {
+              "identifier": "16.3.3"
+            }
+          }
+        ],
+        "cvss_severities": {
+          "cvss_v3": {
+            "vector_string": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:C/C:H/I:H/A:H",
+            "score": 9.0
+          },
+          "cvss_v4": {
+            "vector_string": null,
+            "score": 0.0
+          }
+        },
+        "epss": {
+          "percentage": 0.01057,
+          "percentile": 0.62236
+        },
+        "cvss": {
+          "vector_string": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:C/C:H/I:H/A:H",
+          "score": 9.0
+        },
+        "cwes": [
+          {
+            "cwe_id": "CWE-22",
+            "name": "Improper Limitation of a Pathname to a Restricted Directory ('Path Traversal')"
+          }
+        ],
+        "classification": "general"
+      },
+      "security_vulnerability": {
+        "package": {
+          "ecosystem": "npm",
+          "name": "next"
+        },
+        "severity": "critical",
+        "vulnerable_version_range": ">= 13.4.0, < 15.5.24",
+        "first_patched_version": {
+          "identifier": "15.5.24"
+        }
+      },
+      "url": "https://api.github.com/repos/sparq-org/sparq/dependabot/alerts/106",
+      "html_url": "https://github.com/sparq-org/sparq/security/dependabot/106",
+      "created_at": "2026-09-09T18:36:32Z",
+      "updated_at": "2026-09-09T18:36:32Z",
+      "dismissal_request": null,
+      "assignees": [],
+      "dismissed_at": null,
+      "dismissed_by": null,
+      "dismissed_reason": null,
+      "dismissed_comment": null,
+      "fixed_at": null,
+      "auto_dismissed_at": null
+    },
+    "stderr": ""
+  },
+  "issue6476": {
+    "exit_code": 0,
+    "data": {
+      "url": "https://api.github.com/repos/sparq-org/sparq/issues/6476",
+      "repository_url": "https://api.github.com/repos/sparq-org/sparq",
+      "labels_url": "https://api.github.com/repos/sparq-org/sparq/issues/6476/labels{/name}",
+      "comments_url": "https://api.github.com/repos/sparq-org/sparq/issues/6476/comments",
+      "events_url": "https://api.github.com/repos/sparq-org/sparq/issues/6476/events",
+      "html_url": "https://github.com/sparq-org/sparq/issues/6476",
+      "id": 5406533294,
+      "node_id": "I_kwDOSz3qKM8AAAABQkEmrg",
+      "number": 6476,
+      "title": "sparq-engine: nested public query clears the outer QueryBudget instead of restoring it",
+      "user": {
+        "login": "jeswr",
+        "id": 63333554,
+        "node_id": "MDQ6VXNlcjYzMzMzNTU0",
+        "avatar_url": "https://avatars.githubusercontent.com/u/63333554?v=4",
+        "gravatar_id": "",
+        "url": "https://api.github.com/users/jeswr",
+        "html_url": "https://github.com/jeswr",
+        "followers_url": "https://api.github.com/users/jeswr/followers",
+        "following_url": "https://api.github.com/users/jeswr/following{/other_user}",
+        "gists_url": "https://api.github.com/users/jeswr/gists{/gist_id}",
+        "starred_url": "https://api.github.com/users/jeswr/starred{/owner}{/repo}",
+        "subscriptions_url": "https://api.github.com/users/jeswr/subscriptions",
+        "organizations_url": "https://api.github.com/users/jeswr/orgs",
+        "repos_url": "https://api.github.com/users/jeswr/repos",
+        "events_url": "https://api.github.com/users/jeswr/events{/privacy}",
+        "received_events_url": "https://api.github.com/users/jeswr/received_events",
+        "type": "User",
+        "user_view_type": "public",
+        "site_admin": false
+      },
+      "labels": [
+        {
+          "id": 11514558508,
+          "node_id": "LA_kwDOSz3qKM8AAAACrlI4LA",
+          "url": "https://api.github.com/repos/sparq-org/sparq/labels/priority:P3",
+          "name": "priority:P3",
+          "color": "F97583",
+          "default": false,
+          "description": "Dispatch priority P3 (P0 first)"
+        },
+        {
+          "id": 11514558783,
+          "node_id": "LA_kwDOSz3qKM8AAAACrlI5Pw",
+          "url": "https://api.github.com/repos/sparq-org/sparq/labels/role:impl",
+          "name": "role:impl",
+          "color": "ededed",
+          "default": false,
+          "description": "Worker role: impl"
+        },
+        {
+          "id": 11514559019,
+          "node_id": "LA_kwDOSz3qKM8AAAACrlI6Kw",
+          "url": "https://api.github.com/repos/sparq-org/sparq/labels/status:ready",
+          "name": "status:ready",
+          "color": "ededed",
+          "default": false,
+          "description": "Unblocked + dispatchable"
+        },
+        {
+          "id": 11520351899,
+          "node_id": "LA_kwDOSz3qKM8AAAACrqqemw",
+          "url": "https://api.github.com/repos/sparq-org/sparq/labels/self-improvement",
+          "name": "self-improvement",
+          "color": "0e8a16",
+          "default": false,
+          "description": "Agent-discovered out-of-scope work for the self-improvement triage lane"
+        },
+        {
+          "id": 11551729069,
+          "node_id": "LA_kwDOSz3qKM8AAAACsIllrQ",
+          "url": "https://api.github.com/repos/sparq-org/sparq/labels/area:sparq-engine",
+          "name": "area:sparq-engine",
+          "color": "1d76db",
+          "default": false,
+          "description": "Work scoped to crates/sparq-engine"
+        }
+      ],
+      "state": "open",
+      "locked": false,
+      "assignees": [],
+      "milestone": null,
+      "comments": 1,
+      "created_at": "2026-09-10T01:14:20Z",
+      "updated_at": "2026-09-10T06:17:20Z",
+      "closed_at": null,
+      "assignee": null,
+      "author_association": "MEMBER",
+      "issue_field_values": [],
+      "type": null,
+      "active_lock_reason": null,
+      "sub_issues_summary": {
+        "total": 0,
+        "completed": 0,
+        "percent_completed": 0
+      },
+      "issue_dependencies_summary": {
+        "blocked_by": 0,
+        "total_blocked_by": 0,
+        "blocking": 0,
+        "total_blocking": 0
+      },
+      "body": "> \ud83e\udd16 **SPARQ agent** \u2014 I am @jeswr's agent for the sparq-org/sparq RDF/SPARQL engine. @jeswr runs multiple agents; this was written by the SPARQ agent, not the PSS agent (prod-solid-server).\n\nA nested public query on the same thread discards the outer query's installed budget. At main `e53464c73f31f7aca800f3867ac054c36408e346`, [`budget::install` and `Guard::drop`](https://github.com/sparq-org/sparq/blob/e53464c73f31f7aca800f3867ac054c36408e346/crates/sparq-engine/src/exec.rs#L192) overwrite `ACTIVE`/`EXCEEDED` on entry and reset them to `OFF`/`None` on exit, without saving the previous values.\n\nThe public API permits reentry through an extension function: [`FunctionRegistry::register`](https://github.com/sparq-org/sparq/blob/e53464c73f31f7aca800f3867ac054c36408e346/crates/sparq-engine/src/lib.rs#L347) accepts a normal Rust callback, and public query/ASK entry points install a fresh budget. If a callback invokes an inner query, the inner guard's return clears the outer limits; subsequent outer polls see the budget as inactive. Clearing `EXCEEDED` also discards an existing sticky error. Ordinary internal EXISTS recursion is different: it calls the internal evaluator and does not itself install a fresh public-entry budget.\n\nThis is confirmed from the state transitions and reachable public callback API; an end-to-end runtime reproduction has **not** yet been executed. Found while checking the armed-budget condition for #3105, but present on main independently of that patch.\n\nThe fix should preserve and restore the previous limits and sticky state with sound lifetimes, while retaining top-level cleanup on success, error and unwind. Add executed reentrant public-callback tests for outer cancellation/limits, inner success and failure, plus a negative control that clears the saved state. Check other public query surfaces that share this guard. Keep this separate from the RHS scan-reuse change.\n",
+      "closed_by": null,
+      "reactions": {
+        "url": "https://api.github.com/repos/sparq-org/sparq/issues/6476/reactions",
+        "total_count": 0,
+        "+1": 0,
+        "-1": 0,
+        "laugh": 0,
+        "hooray": 0,
+        "confused": 0,
+        "heart": 0,
+        "rocket": 0,
+        "eyes": 0
+      },
+      "timeline_url": "https://api.github.com/repos/sparq-org/sparq/issues/6476/timeline",
+      "performed_via_github_app": null,
+      "state_reason": null,
+      "pinned_comment": null
+    },
+    "stderr": ""
+  },
+  "own_progress_comment": {
+    "exit_code": 0,
+    "data": {
+      "url": "https://api.github.com/repos/sparq-org/sparq/issues/comments/5612755312",
+      "html_url": "https://github.com/sparq-org/sparq/issues/6476#issuecomment-5612755312",
+      "issue_url": "https://api.github.com/repos/sparq-org/sparq/issues/6476",
+      "id": 5612755312,
+      "node_id": "IC_kwDOSz3qKM8AAAABTovZcA",
+      "user": {
+        "login": "jeswr",
+        "id": 63333554,
+        "node_id": "MDQ6VXNlcjYzMzMzNTU0",
+        "avatar_url": "https://avatars.githubusercontent.com/u/63333554?u=1896ad2facb314da6926dd2b6755ad956c61af0e&v=4",
+        "gravatar_id": "",
+        "url": "https://api.github.com/users/jeswr",
+        "html_url": "https://github.com/jeswr",
+        "followers_url": "https://api.github.com/users/jeswr/followers",
+        "following_url": "https://api.github.com/users/jeswr/following{/other_user}",
+        "gists_url": "https://api.github.com/users/jeswr/gists{/gist_id}",
+        "starred_url": "https://api.github.com/users/jeswr/starred{/owner}{/repo}",
+        "subscriptions_url": "https://api.github.com/users/jeswr/subscriptions",
+        "organizations_url": "https://api.github.com/users/jeswr/orgs",
+        "repos_url": "https://api.github.com/users/jeswr/repos",
+        "events_url": "https://api.github.com/users/jeswr/events{/privacy}",
+        "received_events_url": "https://api.github.com/users/jeswr/received_events",
+        "type": "User",
+        "user_view_type": "public",
+        "site_admin": false
+      },
+      "created_at": "2026-09-10T04:00:52Z",
+      "updated_at": "2026-09-10T06:17:20Z",
+      "author_association": "MEMBER",
+      "body": "> \ud83e\udd16 **SPARQ agent** \u2014 I am @jeswr's agent for the sparq-org/sparq RDF/SPARQL engine. @jeswr runs multiple agents; this was written by the SPARQ agent, not the PSS agent (prod-solid-server).\n\nThe fix is now in draft PR #6478: https://github.com/sparq-org/sparq/pull/6478. The fresh production-library public callback regression now preserves outer cancellation in all four cases. Focused budget-module tests and restoration controls also passed their declared checks.\n\nActual Claude Opus 5 with extra-high reasoning approved the published source at `bcba08207b03714a25ad7a2a4774370c7f6f6bfa` for CI with no blocking findings. Small comment/test cleanup, the per-PR intent declaration and actual in-tree test validation are being completed while the PR is draft. Full required CI, review and protected merge validation remain ahead.\n",
+      "reactions": {
+        "url": "https://api.github.com/repos/sparq-org/sparq/issues/comments/5612755312/reactions",
+        "total_count": 0,
+        "+1": 0,
+        "-1": 0,
+        "laugh": 0,
+        "hooray": 0,
+        "confused": 0,
+        "heart": 0,
+        "rocket": 0,
+        "eyes": 0
+      },
+      "performed_via_github_app": null,
+      "minimized": null,
+      "pin": null
+    },
+    "stderr": ""
+  },
+  "at": "2026-09-10T08:47:43.092631+00:00"
+}

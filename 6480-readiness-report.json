@@ -1,0 +1,98 @@
+{
+  "author": "GPT-6 Astra",
+  "task": "Read-only implementation readiness for issue6480; reuse completed actual Opus intake",
+  "source_base": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
+  "read_head": "3c637b228449e9345d8bba31ea2d7d449f8a2b8f",
+  "production_source_unchanged": true,
+  "recommendation": {
+    "slice": [
+      "package-lock.json",
+      "site/package.json",
+      "gui/app/package.json"
+    ],
+    "target": "15.5.24 on existing15.5line, conditional on root fresh advisory/registry revalidation",
+    "declared_floors": "Prefer raising both next minimums from^15.5.21 to^15.5.24 alongside the lock so a future clean resolution cannot choose a known affected floor. Lock-only is sufficient for the current resolved alerts but weaker declarative intent.",
+    "proposed_command_from_repo_root": "<verified exact npm11 executable> install next@15.5.24 --workspace=site --workspace=gui/app --save-prefix='^' --package-lock-only --ignore-scripts --no-audit --no-fund",
+    "command_status": "Proposed only; not executed. Record exact Node/npm versions, registry metadata/integrity and full lock diff when authorized.",
+    "preserve": "Root overrides including postcss8.5.15; all Next/static/basepath/webpack configs; React floors and unrelated packages. No eslint-config-next upgrade or npm-version pinning/workflow repair in this slice.",
+    "expected_lock_family": [
+      "next",
+      "@next/env",
+      "all8@next/swc-* binaries; retain fourLinuxlibcselectors"
+    ],
+    "transitives": "Current sharp0.34.5 optional, React/DOM19.2.7, eslint-config-next/plugin15.5.19. Admit only mechanically necessary transitive updates after actual diff review, not a blanketallowlist.",
+    "no_hand_edit": "Do not fabricate integrity hashes or patch lock package fields by hand."
+  },
+  "toolchain": {
+    "repo_ci_node": "Node22 via setup-node; minor and bundlednpm unpinned",
+    "app_node_engines": "No app/root engines or packageManager pin; existing next15.5.21 engines ^18.18.0 || ^19.8.0 || >=20.0.0 and React peers admit19.0.0",
+    "lock_generator": "lockfileVersion3 itself does not identify npm; fourLinuxSWClibcselectors plus cached6133 support npm11-family authorship. Exact original npm11 minor/patch unknown.",
+    "issue6133": "Still open in cached snapshot; npm10.9.2 reportedly stripslibc and flipsfsevents dev, historically reproduced; not rerun here. Keep its broadpinning repair separate.",
+    "local": "No node/npm at checked /opt/homebrew/bin or /usr/local/bin; bundledNode24.19.0 exists, adjacent bundlednpm absent. No installednpm11/Node22 verified; do not substitute bundledNode24 as Node22CIproof."
+  },
+  "layout": {
+    "root_lock_bytes": 568361,
+    "lock_entries": 1126,
+    "next_entries": [
+      {
+        "lockfile": "package-lock.json",
+        "path": "node_modules/next",
+        "version": "15.5.21"
+      }
+    ],
+    "shared_consumers": [
+      "site",
+      "gui/app"
+    ],
+    "swc_optional_entries": 8,
+    "linux_libc_entries": 4
+  },
+  "local_validation_plan": [
+    "Before authorized update, root revalidates freshmain, current advisories and next15.5.24 package engines/peers/dist/integrities. Select and record a compatible exact npm11 version rather than ambientnpm10.",
+    "After targeted package-lock-only update, parse full tracked lock maps: both workspace requirements patched, exactly intended next copies, all8platformSWCversions/integrities, fourLinuxlibc selectors preserved; inspect changedpackage set and root overrides/config hashes.",
+    "Use a fresh task-owned install to establish npm ci reproducibility when resourcebudget permits; compare lock bytes before/after and npm ls next --workspace site --workspace gui/app. Ignore-scripts metadata/install work alone does not prove lifecycle/build validity.",
+    "Diff-scoped authorpreflight and lock JSON checks; site/GUI lint/typecheck/unit + static/devserver tests run through existing supported commands in CI if local prerequisites absent."
+  ],
+  "ci_routes": {
+    "gui.yml": [
+      "Rootlock path triggers PR andmain. Hard sharedclienttypecheck; site build/typecheck; GUI lint/typecheck/unit plus build:web and build:tauri; mocked-IPCPlaywright andhermeticguards. Severaljobs use npm install, so they do not alone establish frozen npm ci reproducibility.",
+      "NativeTauribuild/e2e are advisory; no need dispatch the flakeprobe."
+    ],
+    "site-e2e.yml": [
+      "Rootlock path triggers PR/main. Node22 npm ci fromsite; lint,nodeunit(nativeRustpolicyfixture),spec/paperbuild,Playwrightnextdev smoke."
+    ],
+    "site-e2e-foundation.yml": [
+      "Determinismnoglobaltimeout gate and a11yratchet hard; foundationsmoke advisory."
+    ],
+    "site-e2e-hero.yml": [
+      "Herowasm/devserverjourneys andstress advisory; inspect actualresult, not aggregatepass alone."
+    ],
+    "site-visual.yml": [
+      "PinnedPlaywright1.61.0Linuxcontainer screenshotcomparison advisory; requiresleanwasm+Docker. Investigatechangedbaselines; no blindupdates."
+    ],
+    "pages.yml": [
+      "Pushmain/benchmark-data +manual only, NO PRtrigger. Buildexports deployedpostmerge; guiymlalreadycoversPRstaticexports. Do notdispatchpagesaspremergecheck because it can deploy."
+    ],
+    "js.yml": [
+      "Rootlock PRtrigger exercisesinstall/wasm/package/typechecks; requireswasm-pack andmultiplewasmbundles."
+    ],
+    "aggregation": "Normal required ci-summary and protectedqueue remain; no label/permission/gate changes."
+  },
+  "resources": {
+    "free_observed_bytes": 4860821504,
+    "own_node_modules_present": false,
+    "own_next_output_present": false,
+    "required_js_wasm_present": false,
+    "metadata_phase": "Targeted package-lock-only has no intentionalnode_modules/nativebuild output, but npmmetadata/cache/temp growth unmeasured; a bounded isolatedcache budget must be set by root before execution. Lockfile~0.54MiB itself is small.",
+    "full_local_gates": "Cannot credibly estimate coldinstall+Next+Wasm+Playwright footprint from lock alone:1126entries, optionalnativeSWC/sharp, ZKpackages, browser/container andmissingwasm. Do not promise fullvalidation inside currentdisk; authoritativeLinuxCI preferred.",
+    "no_resource_actions": "No install,build,cache cleanup or broadfilesystemscan performed."
+  },
+  "unresolved": [
+    "Exact supported npm version is not pinned; need verifiednpm11 tool for lowchurngeneration, and Node22CI compatibility proof.",
+    "Current15.5.24publisher metadata/advisory supersession must be freshly checked by root before patch.",
+    "Full runtime exposure remains unassessed; correctedalertmapping107AVIF/106Windows retained fromrootdisposition.",
+    "No scopedinstall,package re-resolution,build,lint,e2e or screenshot executed; allcommands remain plans."
+  ],
+  "remote_reads": 0,
+  "mutations": "Only new untracked readiness evidence; clean source untouched; noGit/bd/GitHub mutation."
+}

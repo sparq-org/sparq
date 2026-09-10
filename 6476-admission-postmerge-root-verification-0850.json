@@ -1,0 +1,30 @@
+{
+  "at": "2026-09-10T08:50:49.132995+00:00",
+  "pr": 6478,
+  "state": "MERGED",
+  "merged_at": "2026-09-10T08:44:34Z",
+  "main": "781f667c19a8ebb779cfccb24b05ea432360b025",
+  "reviewed_head": "3c637b228449e9345d8bba31ea2d7d449f8a2b8f",
+  "exact_tree": "28543809de37b25e7da49d665c08da8bbeca661f",
+  "all_eight_merge_group_runs_passed": [
+    34453440823,
+    34453439232,
+    34453439089,
+    34453439146,
+    34453439165,
+    34453439542,
+    34453439591,
+    34453439261
+  ],
+  "required_gate": {
+    "check_run": 102794200767,
+    "app": 15368,
+    "conclusion": "success"
+  },
+  "main_ci": "running; not yet passed",
+  "postmerge_advisories": {
+    "ring": "Empty REGISTRY_RING_TOKEN; shell guard exits1 before dispatch; expected intentional pause. No dispatch or repair attempted.",
+    "release": "Same cargo package sparq-introspect missing published sparq-engine failure as existing6474; no retry/release authorized."
+  },
+  "issue6476": "closed completed; existing progress comment updated"
+}

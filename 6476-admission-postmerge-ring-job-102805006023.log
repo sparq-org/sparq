@@ -1,0 +1,48 @@
+﻿2026-09-10T08:44:41.5990721Z Current runner version: '2.337.0'
+2026-09-10T08:44:41.6013028Z ##[group]Runner Image Provisioner
+2026-09-10T08:44:41.6013862Z Hosted Compute Agent
+2026-09-10T08:44:41.6014499Z Version: 20260828.587
+2026-09-10T08:44:41.6015140Z Commit: abac92662cab4cc7352de4f9f9d2e2419aad9c29
+2026-09-10T08:44:41.6015843Z Build Date: 2026-08-28T16:44:25Z
+2026-09-10T08:44:41.6016587Z Worker ID: {6165dcff-8ec0-4088-9c46-159ec040d7da}
+2026-09-10T08:44:41.6017811Z Azure Region: westus3
+2026-09-10T08:44:41.6018443Z ##[endgroup]
+2026-09-10T08:44:41.6019917Z ##[group]Operating System
+2026-09-10T08:44:41.6020556Z Ubuntu
+2026-09-10T08:44:41.6021094Z 24.04.5
+2026-09-10T08:44:41.6021585Z LTS
+2026-09-10T08:44:41.6022083Z ##[endgroup]
+2026-09-10T08:44:41.6022648Z ##[group]Runner Image
+2026-09-10T08:44:41.6023223Z Image: ubuntu-24.04
+2026-09-10T08:44:41.6023822Z Version: 20260907.300.1
+2026-09-10T08:44:41.6025003Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260907.300/images/ubuntu/Ubuntu2404-Readme.md
+2026-09-10T08:44:41.6026512Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20260907.300
+2026-09-10T08:44:41.6027998Z ##[endgroup]
+2026-09-10T08:44:41.6029014Z ##[group]GITHUB_TOKEN Permissions
+2026-09-10T08:44:41.6030978Z Metadata: read
+2026-09-10T08:44:41.6031589Z ##[endgroup]
+2026-09-10T08:44:41.6033446Z Secret source: Actions
+2026-09-10T08:44:41.6034727Z Cache mode: write
+2026-09-10T08:44:41.6035397Z Prepare workflow directory
+2026-09-10T08:44:41.6347900Z Prepare all required actions
+2026-09-10T08:44:41.6449079Z Complete job name: ring registry dispatcher
+2026-09-10T08:44:41.7092666Z ##[group]Run set -euo pipefail
+2026-09-10T08:44:41.7093402Z [36;1mset -euo pipefail[0m
+2026-09-10T08:44:41.7094034Z [36;1mif [ -z "${REGISTRY_RING_TOKEN}" ]; then[0m
+2026-09-10T08:44:41.7096181Z [36;1m  echo "::error title=registry ring suppressed::REGISTRY_RING_TOKEN is not configured, so the merged-PR pickup ring was NOT sent. Freed merge-queue/worker capacity will not be picked up until the registry's own ~10-min cron tick. Provision the secret — or delete this job if the ring is no longer wanted."[0m
+2026-09-10T08:44:41.7098505Z [36;1m  {[0m
+2026-09-10T08:44:41.7099333Z [36;1m    echo "### registry ring SUPPRESSED — REGISTRY_RING_TOKEN unset"[0m
+2026-09-10T08:44:41.7100103Z [36;1m    echo[0m
+2026-09-10T08:44:41.7100827Z [36;1m    echo "A merge landed on \`main\` but the pickup ring could not be sent."[0m
+2026-09-10T08:44:41.7101865Z [36;1m    echo "Effect: capacity pickup waits for the next ~10-min registry cron."[0m
+2026-09-10T08:44:41.7102913Z [36;1m  } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"[0m
+2026-09-10T08:44:41.7103577Z [36;1m  exit 1[0m
+2026-09-10T08:44:41.7104144Z [36;1mfi[0m
+2026-09-10T08:44:41.7104981Z [36;1mGH_TOKEN="${REGISTRY_RING_TOKEN}" gh workflow run dispatch.yml -R jeswr/agent-account-registry[0m
+2026-09-10T08:44:41.8125529Z shell: /usr/bin/bash -e {0}
+2026-09-10T08:44:41.8126462Z env:
+2026-09-10T08:44:41.8127391Z   REGISTRY_RING_TOKEN: 
+2026-09-10T08:44:41.8128040Z ##[endgroup]
+2026-09-10T08:44:41.8502543Z ##[error]REGISTRY_RING_TOKEN is not configured, so the merged-PR pickup ring was NOT sent. Freed merge-queue/worker capacity will not be picked up until the registry's own ~10-min cron tick. Provision the secret — or delete this job if the ring is no longer wanted.
+2026-09-10T08:44:41.8517391Z ##[error]Process completed with exit code 1.
+2026-09-10T08:44:41.8679961Z Cleaning up orphan processes

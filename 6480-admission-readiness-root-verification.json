@@ -1,0 +1,25 @@
+{
+  "at": "2026-09-10T08:50:49.132995+00:00",
+  "manifest_sha256": "4ce18e4af16723ddd3f10e84a28198e34b7c9ff3263797a642bd511498a7454b",
+  "all7_evidence_and16_source_hashes_root_verified": true,
+  "source_base": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
+  "new_base": "781f667c19a8ebb779cfccb24b05ea432360b025",
+  "new_base_scope": "only merged reviewed query-budget changes, no frontend source change",
+  "fresh_sources": [
+    "https://github.com/advisories/GHSA-2xp9-vwfh-vxw4",
+    "https://github.com/advisories/GHSA-p293-qw3h-jr36",
+    "https://registry.npmjs.org/next/15.5.24"
+  ],
+  "alerts": {
+    "107": "AVIF open; patched15.5.24",
+    "106": "Windows open; patched15.5.24"
+  },
+  "dedupe": "08:47 two targeted openPR queries returned0",
+  "npm": "latest12.0.2 is not selected; agent must verify exact npm11 package+integrity+Nodeengines before task-local execution",
+  "implementation_authorized": "single isolated metadata-only source lane; no full local coldinstall/build; no GitHub mutation/model call fromchild",
+  "limits": {
+    "min_free_bytes": 2147483648,
+    "max_new_allocated_bytes": 268435456
+  },
+  "validation_boundary": "readiness not install/build proof; actual final patch independentOpus+supportedLinuxCI remains required"
+}

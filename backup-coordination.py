@@ -507,6 +507,14 @@ for evidence_name in ['heartbeat-0757.json', 'head3c-gate-jobs-0758.json', 'head
 for evidence_name in ['heartbeat-0821.json', 'merge-group-jobs-0828.json', 'merge-group-progress-root-verification-0828.json']:
     FILES["6476-admission-" + evidence_name] = ROOT / "direct-6476/admission" / evidence_name
 
+# PR6478 merged and issue6480 implementation admission.
+for evidence_name in ['heartbeat-0843.json', 'merge-group-final-gate-0846.json', 'postmerge-first-state-0846.json', 'postmerge-confirmed-state-0846.json', 'issue6476-merged-comment-input.json', 'issue6476-close-input.json', 'issue6476-close-receipt.json', 'postmerge-ring-job-102805006023.log', 'postmerge-release-job-102805006088.log', 'postmerge-advisory-first-0849.json', 'postmerge-root-verification-0850.json']:
+    FILES['6476-admission-' + evidence_name.replace("/", "--")] = ROOT / 'direct-6476/admission' / evidence_name
+for evidence_name in ['package-metadata-0845.json', 'start-readiness-0848.json', 'readiness-root-verification.json']:
+    FILES['6480-admission-' + evidence_name.replace("/", "--")] = ROOT / 'direct-6480/admission' / evidence_name
+for evidence_name in ['intake-references.json', 'issue6133-cached.json', 'lock-inventory.json', 'package-layout.json', 'report.json', 'source-excerpts.txt', 'source-provenance.json', 'manifest.json']:
+    FILES['6480-readiness-' + evidence_name.replace("/", "--")] = ROOT / 'direct-6480/readiness' / evidence_name
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout

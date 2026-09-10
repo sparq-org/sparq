@@ -1,0 +1,15 @@
+{
+  "tracked_locks": [
+    "bench/wasm-compare/browser/package-lock.json",
+    "crates/sparq-shacl/tests/diff_fuzz/package-lock.json",
+    "package-lock.json"
+  ],
+  "next_entries": [
+    {
+      "lockfile": "package-lock.json",
+      "path": "node_modules/next",
+      "version": "15.5.21"
+    }
+  ],
+  "scope": "All tracked npm lock package maps inspected; no runtime node_modules installed, no untracked/vendored archive audit."
+}

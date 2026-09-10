@@ -1,0 +1,18 @@
+{
+  "critical-next-issue-created.json": {
+    "source": "direct-6476/admission/critical-next-issue-created.json",
+    "sha256": "712263f14526456d92090e6e8e8dd9015b5c6c27baa653c3a494a322b82ae7dd"
+  },
+  "critical-next-root-disposition.json": {
+    "source": "direct-6476/admission/critical-next-root-disposition.json",
+    "sha256": "a50ca5594a109bfc1721f31d0417b688e9e52fa61a0ad213cdfd230a18ac3af4"
+  },
+  "opus-critical-intake-result.json": {
+    "source": "direct-6476/admission/opus-critical-intake-result.json",
+    "sha256": "884be1658fb38bd4b886f6160ce2a4ad9e26738f636f343e6bcc91693d6a2c99"
+  },
+  "critical-next-issue-input.json": {
+    "source": "direct-6476/admission/critical-next-issue-input.json",
+    "sha256": "508bc6bfca5404896adc911b26f41e0a4dc23605fedc04d991aa433a9cc56352"
+  }
+}

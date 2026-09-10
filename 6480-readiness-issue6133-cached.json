@@ -1,0 +1,12 @@
+{
+  "source": "direct-6476/admission/critical-alert-dedupe-source.json",
+  "fresh_remote_revalidation": false,
+  "issue": {
+    "number": 6133,
+    "state": "open",
+    "title": "npm version is unpinned, so `npm install` on npm 10 silently rewrites the npm-11-authored package-lock.json",
+    "body": "> \ud83e\udd16 SPARQ agent \u2014 out-of-scope finding while repairing CI for PR #6056.\n\n**What.** The repo pins no npm version: repo-root `package.json` has neither a `packageManager` nor an `engines.npm` field, and `.github/workflows/*.yml` pin `node-version: 22` (which ships npm 10.9.x) without pinning npm itself. The committed `package-lock.json` on `main`, however, carries `libc` platform-selector arrays on the four `@next/swc-linux-*` optional binaries \u2014 a lockfile field npm only started writing at npm 11.\n\n**Effect.** Any contributor or agent whose npm is 10.x rewrites the lockfile on a plain `npm install`, with no dependency actually changing: the `libc` arrays are stripped from `@next/swc-linux-{arm64,x64}-{gnu,musl}` and `fsevents` gains `\"dev\": true`. Reproduced directly \u2014 restoring `main`'s lockfile and running `npm install` (npm 10.9.2) regenerated the same 13-line diff byte for byte.\n\n**Why it matters.** The churn is not cosmetic:\n1. `package-lock.json` is a trigger path for `js`, `pages`, `site-e2e`, `site-e2e-foundation`, `site-e2e-hero` and `site-visual`. Touching it drags six unrelated heavyweight lanes (including visual-regression) into the required-gate surface of a PR that changes none of what they cover.\n2. Dropping `libc` removes the glibc/musl selector npm >= 11 uses to choose the correct native Next.js SWC binary, so a musl-based install can resolve the wrong one.\n3. It changes the runtime (`--omit=dev`) dependency view that `scripts/gen-js-sbom.sh` derives from the root lock via `scripts/derive-workspace-member-lock.mjs`.\n\nThis is not hypothetical \u2014 it is exactly what landed in PR #6056 commit `046fc565` (\"repair failing CI legs\", whose entire content was this lockfile churn) and had to be reverted.\n\n**Suggested fix.** Add a `packageManager` field to the repo-root `package.json` pinning the npm version that authored the lock, and/or a CI tripwire that fails when `npm install` would modify `package-lock.json`.\n\n> \ud83e\udd16 Discovered by the SPARQ worker while implementing #2703. Out-of-scope for that PR; captured as follow-up.\n<!-- sparq-followup:v1 -->",
+    "updated_at": "2026-09-01T14:03:52Z",
+    "html_url": "https://github.com/sparq-org/sparq/issues/6133"
+  }
+}
