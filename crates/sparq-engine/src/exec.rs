@@ -77,18 +77,23 @@ pub(crate) mod budget {
     /// [GPT-6 Astra] ACTIVE belongs to the innermost live `with_budget` frame.
     /// Each pointer is owned by a QueryBudget borrowed by a still-live frame on
     /// this thread's stack. Private installation/restoration enforces nesting:
-    /// a restored parent's borrow outlives the child. Only the innermost frame
-    /// writes ACTIVE. Snapshots are used only in synchronous parallel work that
-    /// joins before the owning frame returns; dereferences are atomic loads.
+    /// a restored parent's borrow outlives the child. Only `install`/`Guard::drop`
+    /// change ACTIVE's `cancel` pointer; other writers update width/bytes for the
+    /// innermost frame. Private construction and the four synchronous snapshot
+    /// consumers documented on `snapshot` uphold this usage-level invariant:
+    /// their parallel work joins before the owning frame returns, and pointer
+    /// dereferences are atomic loads.
     #[derive(Clone, Copy)]
     struct CancelPtr(NonNull<AtomicBool>);
 
     // SAFETY: `AtomicBool` is `Sync`; moving this shared pointer to a worker is
     // sound because only atomic loads occur while the owning `with_budget` frame
-    // borrows its QueryBudget, including until scoped rayon work joins.
+    // borrows its QueryBudget, including until scoped rayon work joins. This relies
+    // on private construction and the four audited consumers documented on `snapshot`.
     unsafe impl Send for CancelPtr {}
     // SAFETY: `AtomicBool` is `Sync`; all shared access through `CancelPtr` is an
-    // atomic load; the owning `with_budget` frame outlives all worker joins.
+    // atomic load; private construction and the four audited scoped-join consumers
+    // documented on `snapshot` keep the owning `with_budget` frame alive.
     unsafe impl Sync for CancelPtr {}
 
     /// Bytes one id-level binding cell occupies in a materialised `Row`. The
@@ -138,8 +143,7 @@ pub(crate) mod budget {
         /// byte size compared against `max_bytes`. [OPUS-4.8] (sq-s5is)
         #[inline]
         fn bytes(&self, rows: usize) -> usize {
-            rows.saturating_mul(self.byte_width)
-                .saturating_add(self.extra_bytes)
+            rows.saturating_mul(self.byte_width).saturating_add(self.extra_bytes)
         }
 
         /// WHY the limits are hit at `rows`, or `None` when they are not — the pure (no
@@ -161,10 +165,7 @@ pub(crate) mod budget {
                 return Some("max-bytes");
             }
             #[cfg(not(target_arch = "wasm32"))]
-            if self
-                .deadline
-                .is_some_and(|d| std::time::Instant::now() >= d)
-            {
+            if self.deadline.is_some_and(|d| std::time::Instant::now() >= d) {
                 return Some("timeout");
             }
             if let Some(cancel) = self.cancel {
@@ -374,8 +375,7 @@ pub(crate) mod budget {
     pub(crate) fn remaining_timeout() -> Option<std::time::Duration> {
         ACTIVE.with(|a| {
             let lim = a.get();
-            lim.deadline
-                .map(|d| d.saturating_duration_since(std::time::Instant::now()))
+            lim.deadline.map(|d| d.saturating_duration_since(std::time::Instant::now()))
         })
     }
 
@@ -502,9 +502,7 @@ pub(crate) mod budget {
             .checked_div(a.byte_width.max(1))
             .unwrap_or(usize::MAX)
             .saturating_add(1);
-        cap.min(a.max_rows.saturating_add(1))
-            .min(by_bytes)
-            .min(1 << 20)
+        cap.min(a.max_rows.saturating_add(1)).min(by_bytes).min(1 << 20)
     }
 
     // [GPT-6 Astra] Reentrant scopes must restore the complete owning frame.
@@ -671,6 +669,7 @@ pub(crate) mod budget {
                 assert_state(original, None);
                 assert_eq!(check(0), Ok(()));
             });
+            assert_state(OFF, None);
         }
 
         #[test]
@@ -712,6 +711,8 @@ pub(crate) mod budget {
                 let owner = std::thread::current().id();
                 let mut functions = crate::FunctionRegistry::new();
                 functions.register("urn:nested", move |_| {
+                    // Pin this one-row plan to serial callback evaluation: the
+                    // nested call must overwrite the same TLS as the outer query.
                     assert_eq!(std::thread::current().id(), owner);
                     callback_calls.fetch_add(1, Ordering::Relaxed);
                     match inner {
@@ -866,13 +867,22 @@ pub(crate) mod budget {
             let flag = Arc::new(AtomicBool::new(false));
             let budget = QueryBudget::unlimited().with_cancel(Arc::clone(&flag));
             with_budget(&budget, || {
-
-                assert!(!snapshot().hit(0), "false control must not trip the rayon snapshot");
-                assert_eq!(check(0), Ok(()), "false control must not trip the local poll");
+                assert!(
+                    !snapshot().hit(0),
+                    "false control must not trip the rayon snapshot"
+                );
+                assert_eq!(
+                    check(0),
+                    Ok(()),
+                    "false control must not trip the local poll"
+                );
 
                 flag.store(true, Ordering::Relaxed);
                 assert!(snapshot().hit(0), "true flag must trip the rayon snapshot");
-                assert_eq!(check(0), Err("query budget exceeded (cancelled)".to_owned()));
+                assert_eq!(
+                    check(0),
+                    Err("query budget exceeded (cancelled)".to_owned())
+                );
                 assert_eq!(EXCEEDED.with(Cell::get), Some("cancelled"));
             })
         }
@@ -18303,7 +18313,10 @@ mod service_exec_tests {
         };
         budget::with_budget(&b, || {
             let r = budget::remaining_timeout().expect("deadline installed");
-            assert!(r <= Duration::from_secs(10) && r > Duration::from_secs(8), "got {r:?}");
+            assert!(
+                r <= Duration::from_secs(10) && r > Duration::from_secs(8),
+                "got {r:?}"
+            );
             // An expired deadline saturates to ZERO (never panics / underflows).
             let b2 = crate::QueryBudget {
                 deadline: Some(Instant::now() - Duration::from_millis(1)),
@@ -18311,7 +18324,7 @@ mod service_exec_tests {
             };
             budget::with_budget(&b2, || {
                 assert_eq!(budget::remaining_timeout(), Some(Duration::ZERO));
-        })
+            })
         })
     }
 }

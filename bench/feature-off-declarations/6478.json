@@ -1,0 +1,5 @@
+{
+  "pr": 6478,
+  "date": "2026-09-10",
+  "reason": "[GPT-6 Astra] Intentional always-compiled engine change: nested evaluations restore outer query limits and sticky errors through a private scoped budget boundary. This is not a byte-neutrality assertion; the separate wasm size ratchet remains unchanged."
+}
