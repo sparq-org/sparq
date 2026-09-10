@@ -1,0 +1,159 @@
+{
+  "note": "Job metadata is sampled across several requests, not an atomic or organization-wide capacity census. Runner ids and labels indicate assigned/running jobs, not a verified account concurrency limit.",
+  "assigned_running_jobs": [
+    {
+      "run": 34497774423,
+      "job": 102943732041,
+      "name": "coverage engine run (partition 2/3)",
+      "runner_id": 1000078028,
+      "labels": [
+        "ubuntu-latest"
+      ]
+    },
+    {
+      "run": 34497774423,
+      "job": 102943732089,
+      "name": "coverage ratchet (shard 3/3)",
+      "runner_id": 1000078020,
+      "labels": [
+        "ubuntu-latest"
+      ]
+    },
+    {
+      "run": 34497774423,
+      "job": 102943732091,
+      "name": "coverage ratchet (shard 2/3)",
+      "runner_id": 1000078024,
+      "labels": [
+        "ubuntu-latest"
+      ]
+    },
+    {
+      "run": 34497774423,
+      "job": 102943732146,
+      "name": "coverage ratchet (shard 1/3)",
+      "runner_id": 1000078027,
+      "labels": [
+        "ubuntu-latest"
+      ]
+    },
+    {
+      "run": 34497774420,
+      "job": 102945163397,
+      "name": "opt-in group (g19 sparq-vectors)",
+      "runner_id": 1000078015,
+      "labels": [
+        "ubuntu-latest"
+      ]
+    },
+    {
+      "run": 34497774420,
+      "job": 102945163591,
+      "name": "opt-in group (g41 sparq-reason-el)",
+      "runner_id": 1000078026,
+      "labels": [
+        "ubuntu-latest"
+      ]
+    },
+    {
+      "run": 34497774415,
+      "job": 102942277351,
+      "name": "cargo-fuzz (parsers + mmap loader, bounded)",
+      "runner_id": 1000078000,
+      "labels": [
+        "ubuntu-latest"
+      ]
+    },
+    {
+      "run": 34497774057,
+      "job": 102940507965,
+      "name": "gate",
+      "runner_id": 1000077954,
+      "labels": [
+        "ubuntu-latest"
+      ]
+    },
+    {
+      "run": 34453539472,
+      "job": 102869812691,
+      "name": "mutation ratchet (cargo-mutants, advisory) (sparq-engine, 6/24, 360)",
+      "runner_id": 1000077770,
+      "labels": [
+        "ubuntu-latest"
+      ]
+    },
+    {
+      "run": 34453539472,
+      "job": 102923034167,
+      "name": "mutation ratchet (cargo-mutants, advisory) (sparq-engine, 7/24, 360)",
+      "runner_id": 1000077901,
+      "labels": [
+        "ubuntu-latest"
+      ]
+    },
+    {
+      "run": 34453539472,
+      "job": 102926948376,
+      "name": "mutation ratchet (cargo-mutants, advisory) (sparq-engine, 8/24, 360)",
+      "runner_id": 1000077905,
+      "labels": [
+        "ubuntu-latest"
+      ]
+    },
+    {
+      "run": 34453539472,
+      "job": 102928870063,
+      "name": "mutation ratchet (cargo-mutants, advisory) (sparq-engine, 9/24, 360)",
+      "runner_id": 1000077907,
+      "labels": [
+        "ubuntu-latest"
+      ]
+    },
+    {
+      "run": 34453539472,
+      "job": 102928973369,
+      "name": "mutation ratchet (cargo-mutants, advisory) (sparq-engine, 10/24, 360)",
+      "runner_id": 1000077908,
+      "labels": [
+        "ubuntu-latest"
+      ]
+    },
+    {
+      "run": 34453539472,
+      "job": 102930437481,
+      "name": "mutation ratchet (cargo-mutants, advisory) (sparq-engine, 11/24, 360)",
+      "runner_id": 1000077909,
+      "labels": [
+        "ubuntu-latest"
+      ]
+    },
+    {
+      "run": 34453539472,
+      "job": 102934616447,
+      "name": "mutation ratchet (cargo-mutants, advisory) (sparq-engine, 12/24, 360)",
+      "runner_id": 1000077942,
+      "labels": [
+        "ubuntu-latest"
+      ]
+    },
+    {
+      "run": 34453539472,
+      "job": 102935825278,
+      "name": "mutation ratchet (cargo-mutants, advisory) (sparq-engine, 13/24, 360)",
+      "runner_id": 1000077948,
+      "labels": [
+        "ubuntu-latest"
+      ]
+    }
+  ],
+  "distinct_assigned_runner_ids": 16,
+  "old_nightly_job_counts": {
+    "success": 50,
+    "cancelled": 4,
+    "failure": 5,
+    "skipped": 7,
+    "in_progress": 8
+  },
+  "repository_runner_endpoint_total": 0,
+  "organization_runner_endpoint": "403; no retry or alternate credential used"
+}

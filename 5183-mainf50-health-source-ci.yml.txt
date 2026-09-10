@@ -1,0 +1,80 @@
+.github/workflows/ci.yml
+69:   # (keyed on github.run_id) and are NEVER auto-cancelled. Root bug (sq-52su close-note): a
+70:   # scheduled nightly runs on `refs/heads/main`, the SAME ref a push-to-main run uses, so
+71:   # both shared the group `ci-CI-refs/heads/main` and `cancel-in-progress: true` let the
+72:   # next push CANCEL the long-running nightly (the cargo-mutants sweep) after ~5-6 crates —
+73:   # leaving ~20 crates with no mutation signal. Giving schedule/workflow_dispatch a unique
+74:   # per-run group (and cancel-in-progress: false) means push-to-main can no longer cancel
+75:   # them. PR / push / merge_group runs keep the per-ref group + cancel-in-progress so a
+76:   # superseded build still auto-cancels to save CI minutes (unchanged behaviour for them —
+77:   # they resolve to the constant `-shared` suffix).
+78:   # [FABLE-5] label-trigger guard: labeled/unlabeled pull_request events ALSO get a
+79:   # per-run group. A label-flip run entering the shared per-ref group would cancel the
+80:   # in-flight real run on the SAME head SHA (cancellation happens at run level, before
+81:   # job `if:` guards evaluate), leaving cancelled check-runs that RED the ci-summary
+82:   # gate. Isolated, a non-`ci-full` flip is a guarded no-op run and a `ci-full` toggle
+83:   # runs the full matrix WITHOUT killing the superseded selected run mid-flight (both
+84:   # conclude green; the gate aggregates the union). Non-label PR/push/merge_group runs
+85:   # keep the shared group + cancel-in-progress exactly as before.
+86:   group: ci-${{ github.workflow }}-${{ github.ref }}-${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && contains(fromJSON('["labeled","unlabeled"]'), github.event.action))) && github.run_id || 'shared' }}
+87:   cancel-in-progress: ${{ github.event_name != 'schedule' && github.event_name != 'workflow_dispatch' }}
+
+615:     name: test (load-aware shard ${{ matrix.name }})
+616:     # [OPUS-4.8] needs BOTH: build-archive (artifact) AND changes (the path filter). With
+617:     # build-archive `if:`-skipped on a doc-only PR, this job is skipped too (a needed job
+618:     # was skipped) — exactly the intent. Keep the explicit `changes` need + `if:` so the
+619:     # skip is driven by the filter, not an incidental artifact-missing failure.
+620:     # [FABLE-5] sq-fmx4u.3: + `select` for the change-based narrowing below. An
+621:     # empty-affected selection skips build-archive, which skips every shard here
+622:     # via `needs` — no shard ever runs against a missing archive.
+623:     needs: [changes, build-archive, select]
+624:     if: needs.changes.outputs.rust_changed == 'true'
+625:     runs-on: ubuntu-latest
+626:     env:
+627:       # [OPUS-4.8] THE single source of truth for the known-heavy tests. `test(=NAME)`
+628:       # is an EXACT-match nextest filterset atom (the leading `=` avoids substring
+629:       # matches). Add future SLOW-flagged heavies here as `| test(=name)` — the bulk
+630:       # shards (which run `not ( $HEAVY )`) then exclude them automatically.
+631:       HEAVY: "test(=diskann_recall_at_10_vs_brute_force_on_50k) | test(=hnsw_recall_at_10_vs_brute_force_on_50k)"
+632:     strategy:
+633:       fail-fast: false
+634:       matrix:
+635:         include:
+636:           # Dedicated shard for the 108.7s diskann recall test (the long pole).
+637:           # [OPUS-4.8] sq-c76x: rayon_threads=1 makes the recall metric BIT-DETERMINISTIC.
+638:           # The data/query gen + HNSW level-RNG are already seeded, but the HNSW graph is
+639:           # built rayon-PARALLEL inside instant-distance (ann.rs build), so thread
+640:           # scheduling perturbs neighbour selection and HNSW recall varied run-to-run
+641:           # (MEASURED 0.9980<->1.0000 across runs; ~5pt above the 0.95 floor — safe, but
+642:           # not reproducible). Pinning ONE rayon thread removes that scheduling variance
+643:           # (MEASURED: HNSW becomes bit-identical) at ZERO cost here — these are accuracy
+644:           # gates, not throughput benches, and run alone on their shard. DiskANN is already
+645:           # bit-identical (MEASURED 0.9660 every run); pinning it too is harmless + uniform.
+
+4050:     # has the largest generated mutant set in the workspace and a high per-mutant test cost, and
+4051:     # the single 360min job it used to be never finished, which is why it is still unseeded. See
+4052:     # the sparq-engine SUB-SHARDS include block for the sizing rationale.
+4053:     timeout-minutes: ${{ fromJSON(matrix.timeout_minutes || '120') }}
+4054:     continue-on-error: true # advisory while the baseline seeds; remove when promoted to gating
+4055:     strategy:
+4056:       # fail-fast MUST be false: one crate's failure/timeout must NOT cancel the sibling
+4057:       # shards (that would re-create the "only the first few crates measured" bug). max-parallel
+4058:       # bounds concurrent runners so the nightly does not inflate CI cost unboundedly — 51 jobs
+4059:       # (24 whole-crate + 3 sparq-reason shards + 24 sparq-engine shards) once a day, at most 8
+4060:       # runners at a time; wall-clock is non-critical for a nightly and the staggered waves warm
+4061:       # the shared rust-cache for later waves.
+4062:       # [SONNET-4.6] sq-has2g COST NOTE, stated plainly: sub-sharding sparq-engine 1->24 is a
+4063:       # real increase in nightly runner cost — a whole-crate engine sweep is many runner-hours of
+4064:       # SERIAL work, and that work has to happen SOMEWHERE to measure the crate at all. Today's
+4065:       # single job simply burns its entire budget every night and produces nothing usable, which
+4066:       # is strictly worse. Sharding does not create the cost; it makes the run finish, and the
+4067:       # 360min cap bills only the time actually used.
+4068:       # The lever for REDUCING it is shrinking the per-mutant test cost (cargo-mutants -j, or
+4069:       # nextest, or scoping each mutant's test set) — not fewer shards. A `--timeout` shortcut
+4070:       # is NOT acceptable: mutants-gate.py counts Timeout as CAUGHT, so capping per-mutant
+4071:       # runtime would silently reclassify real survivors as kills and understate the ceiling.
+4072:       # If that cost is judged too high, the honest response is to make the sweep cheaper or to
+4073:       # run it less often than nightly — not to keep a job that cannot finish.
+4074:       fail-fast: false
+4075:       max-parallel: 8
+4076:       matrix:

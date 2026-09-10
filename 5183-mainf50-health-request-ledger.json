@@ -1,0 +1,93 @@
+{
+  "logical_requests": 17,
+  "all_get": true,
+  "retries": 0,
+  "stop_after_first_error": "org runner403 in final parallel read batch; no subsequent network request",
+  "requests": [
+    {
+      "output": "01-budget.json",
+      "endpoint": "rate_limit",
+      "gh_exit": 0
+    },
+    {
+      "output": "02-head-runs.json",
+      "endpoint": "repos/sparq-org/sparq/actions/runs?head_sha=f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464&per_page=100",
+      "gh_exit": 0
+    },
+    {
+      "output": "ci-jobs.json",
+      "endpoint": "repos/sparq-org/sparq/actions/runs/34497774423/jobs?per_page=100&filter=latest",
+      "gh_exit": 0
+    },
+    {
+      "output": "matrix-jobs.json",
+      "endpoint": "repos/sparq-org/sparq/actions/runs/34497774420/jobs?per_page=100&filter=latest",
+      "gh_exit": 0
+    },
+    {
+      "output": "fuzz-jobs.json",
+      "endpoint": "repos/sparq-org/sparq/actions/runs/34497774415/jobs?per_page=100&filter=latest",
+      "gh_exit": 0
+    },
+    {
+      "output": "gate-jobs.json",
+      "endpoint": "repos/sparq-org/sparq/actions/runs/34497774057/jobs?per_page=100&filter=latest",
+      "gh_exit": 0
+    },
+    {
+      "output": "batch-jobs.json",
+      "endpoint": "repos/sparq-org/sparq/actions/runs/34497773949/jobs?per_page=100&filter=latest",
+      "gh_exit": 0
+    },
+    {
+      "output": "release-jobs.json",
+      "endpoint": "repos/sparq-org/sparq/actions/runs/34497774161/jobs?per_page=100&filter=latest",
+      "gh_exit": 0
+    },
+    {
+      "output": "batch-failed-job.log",
+      "endpoint": "repos/sparq-org/sparq/actions/jobs/102940507106/logs",
+      "gh_exit": 0
+    },
+    {
+      "output": "release-failed-job.log",
+      "endpoint": "repos/sparq-org/sparq/actions/jobs/102940508737/logs",
+      "gh_exit": 0
+    },
+    {
+      "output": "queued-runs.json",
+      "endpoint": "repos/sparq-org/sparq/actions/runs?status=queued&per_page=100",
+      "gh_exit": 0
+    },
+    {
+      "output": "active-runs.json",
+      "endpoint": "repos/sparq-org/sparq/actions/runs?status=in_progress&per_page=100",
+      "gh_exit": 0
+    },
+    {
+      "output": "older-nightly-jobs.json",
+      "endpoint": "repos/sparq-org/sparq/actions/runs/34453539472/jobs?per_page=100&filter=latest",
+      "gh_exit": 0
+    },
+    {
+      "output": "formal-jobs.json",
+      "endpoint": "repos/sparq-org/sparq/actions/runs/34497773967/jobs?per_page=100&filter=latest",
+      "gh_exit": 0
+    },
+    {
+      "output": "repo-runners.json",
+      "endpoint": "repos/sparq-org/sparq/actions/runners?per_page=100",
+      "gh_exit": 0
+    },
+    {
+      "output": "differential-smoke.log",
+      "endpoint": "repos/sparq-org/sparq/actions/jobs/102942277285/logs",
+      "gh_exit": 0
+    },
+    {
+      "output": "org-runners.json",
+      "endpoint": "orgs/sparq-org/actions/runners?per_page=100",
+      "gh_exit": 1
+    }
+  ]
+}

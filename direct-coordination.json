@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-10T15:55:37.157413+00:00",
+  "updated_at": "2026-09-10T16:28:12.114658+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -92,7 +92,7 @@
       "state": "Updatedexistingowncommentwithqualified7caseclassification andPR6482;issuekeptopen"
     },
     "next_scope": "Merged6482at15:45:55 mainf50b5049; all8MGworkflows success, exactgate15368 verified, reviewedtreeidentical. Watch relevantnewmainCI/matrix/gate/fuzz beforeclosing5183; no current6482queueentry or mutationrequired.",
-    "agent_current_task": "One actualengine diagnosticbuild+onefixedbaselinequery; bounds480s256MiB/jobs1/offline/continuous2GiB, no retry. Collectfrozenreportbeforeanynewwork.",
+    "agent_current_task": "ExistingAstra boundedGitHubfallback frontierselection (~5min,8readsmax), no builds/mutations/models. Preferhigher-impactSPARQLperformance; hashreuseF5-F7held aftersmallbaselineworkwitness.",
     "constraints": "Preserve strict comparison and full normalized structural equality; no reference-input normalization, canon/engine/workflow edits or broad semantic claims; registryOFF/releasesheld",
     "readiness_directory": "direct-5183/original-seed-readiness",
     "execution_directory": "direct-5183/original-seed-execution",
@@ -926,8 +926,8 @@
     }
   },
   "next_actions": [
-    "Watchactualmainf50 CI34497774423/matrix34497774420/gate34497774057/fuzz34497774415;6482alreadymergedall8MGgreen. Preserveevidence; no unnecessaryrerun.",
-    "CollectexistingAstra onebaselinewitness in direct-3105/hash-reuse-fixed-witness, verifyprovenance/counters/bag/limits; no duplicatebuild. ActualOpus33087completedCONDITIONAL; F1-F4sourcecleared, F5-F7remainimplementationhold. Decidecostpolicyorstop beforefeatureimplementation.",
+    "Watchmainf50 CI/matrix/gateandactualUPDATEunitproof; healthauditconfirmsprogress, no retry/canceljustified. Preserveorg403no-retry/scopeslimit.",
+    "CollectexistingAstra boundedfrontierselection direct-frontier-20260910-1625; verifydedupe/source/value beforeimplementation. Hashreusebaseline63filesverified, nofeatureadmission; avoidmorecycleswithoutcredibleF5-F7policy/valuecase.",
     "Afterrelevantpostmergeproof, link6482andclose5183 withqualified8caseclassification; separate6483runtimecoveragegap remainsopen.",
     "RegistryActionsOFF/heartbeatACTIVE/releasesheld. Preserve6049/6055/registry2305/canon/EC2holds,ALLGREENandratefailclosed."
   ],
@@ -1044,13 +1044,11 @@
     "policy": "failclosed onexhaustion; no retriesuntilfirsteligiblepostresetdispatch"
   },
   "actions_backlog": {
-    "before_pr6469": {
-      "queued": 2,
-      "in_progress": 1
-    },
-    "limits": "Point observation from successful REST total_count beforepublication; not currentjob/fleetcapacity or runnerreserve proof.",
-    "recorded_at": "2026-09-09T13:49:56.470777+00:00",
-    "time_scope": "Earlier in this turn beforePRpublication; exactcalltimestamp notseparatelyrecorded."
+    "at": "2026-09-10T16:28:12.114658+00:00",
+    "evidence": "direct-5183/mainf50-health/report.json",
+    "queued_workflows": 4,
+    "in_progress_workflows": 4,
+    "limits": "Workflowqueuedmayhaveactivejobs; nonatomicsame-reposnapshots; hostedquota/orgcapacityunknown."
   },
   "postmerge_observations": {
     "observed_at": "2026-09-08T06:20:14.035146+00:00",
@@ -1373,12 +1371,12 @@
     "followup": "Narrowtriage-titleCIrule+offendingrowdiagnostic could improveclassifier, but originalgenpartitionrequires separatelyreviewedpolicy. No6468implementation while4246active."
   },
   "latest_monitor": {
-    "at": "2026-09-10T15:52:24.719587+00:00",
+    "at": "2026-09-10T16:28:12.114658+00:00",
     "main": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
-    "pr": 6482,
-    "state": "MERGED15:45:55; all8MGworkflows passed; newmainCIpending",
+    "state": "CI22success4running5queued4skipped;matrix16success2running38queued1skipped; UPDATEproofpending",
     "registry_actions_enabled": false,
-    "release_authorized": false
+    "release_authorized": false,
+    "capacity": "Activeprogress; no cancellation/retryjustified; org403unretried."
   },
   "registry_pause": {
     "enabled": false,
@@ -3697,7 +3695,7 @@
   "postmerge_watch": {
     "head": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
     "pr": 6482,
-    "state": "pending",
+    "state": "ordinary_completion_pending",
     "runs": {
       "CI": 34497774423,
       "feature_matrix": 34497774420,
@@ -3705,7 +3703,15 @@
       "fuzz": 34497774415
     },
     "first_snapshot": "direct-5183/admission/mg6482-runs1547.json",
-    "known_advisory_observation": "batch34497773949 failureobserved; priorregistryOFF guard causeknown but thisrunnotyetfreshlogverified. No retries. Release6474held."
+    "known_advisory_observation": "Freshlogconfirmed batchmissingREGISTRY_RING_TOKEN guard; releasecargo-package unpublishedengine matches6474. No newfailurerecoveryauthorized.",
+    "latest_snapshot": "direct-5183/admission/mainf50-runs1615.json",
+    "health_audit": {
+      "directory": "direct-5183/mainf50-health",
+      "manifest_sha256": "ed7750335cdf3abb3ef806a0629c6519df1d3c037bcb221da2eee1a1b58664cd",
+      "files": 37,
+      "root_verification": "direct-5183/admission/mainf50-health-root-verification.json",
+      "assessment": "ActiveCI/matrixprogress, no cancellation/retryjustified. UPDATEunitproofpending; querysmokeisnotUPDATE."
+    }
   },
   "classifier_watch": {
     "issue": 6468,
@@ -4055,7 +4061,7 @@
   },
   "performance_readiness": {
     "issue": 3105,
-    "state": "bounded_baseline_witness_authorized_agent_running",
+    "state": "baseline_confirmed_cache_implementation_held_frontier_reassessment",
     "source_plan": "direct-3105/hash-reuse-source-plan",
     "manifest_sha256": "dbe10cdac941dc52ceb1db2f611d9b672752ec1402037f249aa7f508855c9c49",
     "root_verification": "direct-3105/hash-reuse-source-plan-root-verification.json",
@@ -4077,7 +4083,7 @@
     },
     "decision": "No implementation/build admission. Fixed2048seed/64RHS/limit65query path+memoryaccountingstatic only. Actualqueryandcountsnotrun.",
     "agent": "/root/postmerge_ci",
-    "agent_task": "One actualengine diagnosticbuild+onefixedbaselinequery; bounds480s256MiB/jobs1/offline/continuous2GiB, no retry. Collectfrozenreportbeforeanynewwork.",
+    "agent_task": "ExistingAstra boundedGitHubfallback frontierselection (~5min,8readsmax), no builds/mutations/models. Preferhigher-impactSPARQLperformance; hashreuseF5-F7held aftersmallbaselineworkwitness.",
     "prior_scan_and_hash_readiness": {
       "issue": 3105,
       "at": "2026-09-10T00:28:18.762567+00:00",
@@ -4122,7 +4128,7 @@
     "runtime_witness": {
       "directory": "direct-3105/hash-reuse-fixed-witness",
       "agent": "/root/postmerge_ci",
-      "state": "authorized_running_do_not_duplicate",
+      "state": "completed_frozen_no_pending_commands",
       "admission": "direct-3105/admission/hash-reuse-baseline-admission.json",
       "limits": {
         "seconds": 480,
@@ -4135,8 +4141,13 @@
         "offline": true
       },
       "source": "Currentmainf50 engine identicalto459/cleanfe328; diagnosticcopy only",
-      "implementation_admitted": false
-    }
+      "implementation_admitted": false,
+      "manifest_sha256": "fb7293add6da8ca05d0dc1635f3ff3c7d522d1e495fb5ad1d6ff8eb4184136b3",
+      "files": 63,
+      "root_verification": "direct-3105/admission/hash-reuse-fixed-witness-root-verification.json",
+      "result": "2actual64rowRHStablebuilds,1scan,64rowexactbag; no performancebenefitclaim."
+    },
+    "priority_decision": "Smallverified64rowrebuildsaving doesnotjustifyforcingunresolvedF6/F7retentionpolicy; boundedfrontierselectionbeforefurtherhashcachemodel/buildcycles. Investigationpreserved, no performanceclaim orfeatureadmission."
   },
   "monitoring_followups": {
     "generator_labels": {
@@ -4158,9 +4169,9 @@
     "evidence": "direct-3105/admission/latency-alarm-job.log"
   },
   "registry_pause_latest": {
-    "at": "2026-09-10T15:10:05.636101+00:00",
+    "at": "2026-09-10T16:20:12.847964+00:00",
     "enabled": false,
-    "evidence": "direct-5183/admission/registry-settings1507.json"
+    "evidence": "direct-5183/admission/registry-settings1615.json"
   },
   "frontier_fallback": {
     "at": "2026-09-10T03:59:18.624949+00:00",

@@ -1,0 +1,18 @@
+30: 2026-09-10T15:46:01.7294745Z set -euo pipefail
+31: 2026-09-10T15:46:01.7295504Z if [ -z "${REGISTRY_RING_TOKEN}" ]; then
+32: 2026-09-10T15:46:01.7297837Z   echo "::error title=registry ring suppressed::REGISTRY_RING_TOKEN is not configured, so the merged-PR pickup ring was NOT sent. Freed merge-queue/worker capacity will not be picked up until the registry's own ~10-min cron tick. Provision the secret — or delete this job if the ring is no longer wanted."
+33: 2026-09-10T15:46:01.7300050Z   {
+34: 2026-09-10T15:46:01.7300934Z     echo "### registry ring SUPPRESSED — REGISTRY_RING_TOKEN unset"
+35: 2026-09-10T15:46:01.7301819Z     echo
+36: 2026-09-10T15:46:01.7302577Z     echo "A merge landed on \`main\` but the pickup ring could not be sent."
+37: 2026-09-10T15:46:01.7303795Z     echo "Effect: capacity pickup waits for the next ~10-min registry cron."
+38: 2026-09-10T15:46:01.7305060Z   } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+39: 2026-09-10T15:46:01.7305838Z   exit 1
+40: 2026-09-10T15:46:01.7306416Z fi
+41: 2026-09-10T15:46:01.7307327Z GH_TOKEN="${REGISTRY_RING_TOKEN}" gh workflow run dispatch.yml -R jeswr/agent-account-registry
+42: 2026-09-10T15:46:01.7687633Z shell: /usr/bin/bash -e {0}
+43: 2026-09-10T15:46:01.7688806Z env:
+44: 2026-09-10T15:46:01.7689385Z   REGISTRY_RING_TOKEN: 
+45: 2026-09-10T15:46:01.7690086Z ##[endgroup]
+46: 2026-09-10T15:46:01.8077898Z ##[error]REGISTRY_RING_TOKEN is not configured, so the merged-PR pickup ring was NOT sent. Freed merge-queue/worker capacity will not be picked up until the registry's own ~10-min cron tick. Provision the secret — or delete this job if the ring is no longer wanted.
+47: 2026-09-10T15:46:01.8100998Z ##[error]Process completed with exit code 1.

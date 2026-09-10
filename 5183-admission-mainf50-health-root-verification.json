@@ -1,0 +1,40 @@
+{
+  "at": "2026-09-10T16:28:12.114658+00:00",
+  "head": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+  "manifest_sha256": "ed7750335cdf3abb3ef806a0629c6519df1d3c037bcb221da2eee1a1b58664cd",
+  "files_verified": 37,
+  "assessment": "AWAIT_ORDINARY_COMPLETION; no new hard source failure or proven capacity incident identified",
+  "ci": {
+    "success": 22,
+    "skipped": 4,
+    "in_progress": 4,
+    "queued": 5
+  },
+  "matrix": {
+    "success": 16,
+    "skipped": 1,
+    "queued": 38,
+    "in_progress": 2
+  },
+  "update_postmerge_proof_available": false,
+  "decision": "Awaitordinarycompletion. No retry/cancel/runnercapacityaction; current jobprogress andarchivedependency explainworkflowqueuedlabel.",
+  "capacity_limit": "Hostedquota/saturationnotproven; org403unretried/no scopeschange. Repo selfhostedinventory0 isnot hostedcapacity.",
+  "known_failures": [
+    {
+      "run": 34497773949,
+      "job": 102940507106,
+      "cause": "REGISTRY_RING_TOKEN empty; guard exits1 before dispatch. Expected paused configuration refusal, not new source regression.",
+      "advisory": true,
+      "limit": "Registry globalOFF is root-verified; job prose predicting a next registry cron is inapplicable. Do not provision/enable/dispatch."
+    },
+    {
+      "run": 34497774161,
+      "job": 102940508737,
+      "cause": "cargo package failed preparing sparq-introspect0.1.1: no matching sparq-engine package in crates.io index. Provisioned-token containment retains the real failure. Not a403 or expected release-authorization hold.",
+      "advisory": true,
+      "tracking": "Same packaging class as existing6474, per root/prior verified diagnosis; no new issue search.",
+      "action": "Retain separate packaging issue; release work remains unauthorized. No retry or gate change."
+    }
+  ],
+  "issue5183": "Keepopenuntilactualrelevanttestscomplete; querysmokepassnotUPDATEproof."
+}

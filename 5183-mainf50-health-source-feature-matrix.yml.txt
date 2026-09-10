@@ -1,0 +1,61 @@
+.github/workflows/feature-matrix.yml
+181: permissions:
+182:   contents: read
+183: 
+184: concurrency:
+185:   # [FABLE-5] label-trigger guard: labeled/unlabeled pull_request events get a
+186:   # PER-RUN group — a label-flip run entering the shared per-ref group would cancel
+187:   # the in-flight real run on the SAME head SHA (run-level cancellation precedes job
+188:   # `if:` evaluation), leaving cancelled check-runs that RED the ci-summary gate.
+189:   # All other events keep the shared per-ref group + cancel-in-progress as before.
+190:   group: feature-matrix-${{ github.workflow }}-${{ github.ref }}-${{ (github.event_name == 'pull_request' && contains(fromJSON('["labeled","unlabeled"]'), github.event.action)) && github.run_id || 'shared' }}
+191:   cancel-in-progress: true
+
+697:   opt-in-features:
+698:     needs: [changes, setup]
+699:     # [FABLE-5] sq-fmx4u.3: `legs != '0'` skips this job when enforced selection
+700:     # filtered EVERY leg out (an empty `include` would otherwise be a matrix
+701:     # error, i.e. a false RED). Fail-closed: a missing/empty `legs` output is
+702:     # != '0' => run; and if `setup` itself failed, this job skips via `needs`
+703:     # while the gate REDs on setup's failure.
+704:     if: needs.changes.outputs.rust_changed == 'true' && needs.setup.outputs.legs != '0'
+705:     # [FABLE-5] CI-economy GROUPED LEGS (maintainer directive 2026-07-18). The matrix
+706:     # is ONE ENTRY PER BIN-PACKED GROUP of legs (assembler --grouped; same-crate legs
+707:     # clustered, each group targeting <5 min of warm-cache work) instead of one runner
+708:     # per leg — 159 legs used to mean 159 runners each paying checkout + toolchain +
+709:     # cache-restore + the dependency compile.
+710:     #
+711:     # NAME CONTRACT PRESERVED: the gate-critical `opt-in <name>` check-run for EVERY
+712:     # leg is still emitted, byte-identical (proven against the golden snapshot by
+713:     # scripts/tests/test_feature_matrix_assemble.py) — but NOT from this job. THIS
+714:     # JOB IS DELIBERATELY UNPRIVILEGED (PR #3511 review, critical finding): it
+715:     # executes PR-controlled code — cargo build scripts, proc macros, tests, clippy
+716:     # lints, plus the whole third-party dependency graph's build-time code — so it
+717:     # must NEVER hold a `checks: write` token (malicious build code could forge
+718:     # arbitrary check runs, incl. gate-critical sibling names) nor persisted git
+719:     # credentials. It runs scripts/run-feature-matrix-group.py with NO token in the
+720:     # environment and writes each leg's outcome to a results file, uploaded below as
+721:     # an artifact for the separate, DEFAULT-BRANCH-owned reporter workflow
+722:     # (feature-matrix-report.yml, workflow_run — see finding 1 in this file's header),
+723:     # which executes no PR build code, validates the artifact hostile-input-style, and
+724:     # posts the per-leg check-runs. A failed leg does not stop the group (the old fail-fast: false),
+725:     # and the group job then FAILS LOUDLY naming exactly which legs failed — this
+726:     # job's own conclusion is a required gating signal via `ci-summary / gate`
+727:     # regardless of any check-run posting (sq-fmx4u.4).
+728:     #
+729:     # [OPUS-4.8] sq-ibrze (unchanged): legs are ASSEMBLED from the per-crate fragment
+730:     # files (`.github/feature-matrix.d/<crate>.yml`). To add a leg, edit the relevant
+731:     # crate fragment — do NOT reintroduce a static `include:` list here.
+732:     # [SONNET-4.6] issue #2384: that is a TWO-FILE change, not a one-file change. A
+733:     # leg's `name:` is pinned byte-for-byte by the gate-name golden, so adding /
+734:     # renaming / removing a leg ALSO requires regenerating
+735:     # `scripts/tests/feature-matrix-legnames.golden.txt`. Scope both files (never one)
+736:     # — see `.github/feature-matrix.d/README.md`.
+737:     name: opt-in group (${{ matrix.group }})
+738:     runs-on: ubuntu-latest
+739:     permissions:
+740:       contents: read
+741:     strategy:
+742:       fail-fast: false
+743:       matrix: ${{ fromJSON(needs.setup.outputs.matrix) }}
+744:     steps:

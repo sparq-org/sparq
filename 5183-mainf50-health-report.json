@@ -1,0 +1,141 @@
+{
+  "author_runtime": "GPT-6 Astra xhigh",
+  "frozen_at": "2026-09-10T16:25:52.205001+00:00",
+  "head_sha": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+  "assessment": "AWAIT_ORDINARY_COMPLETION; no new hard source failure or proven capacity incident identified",
+  "progress": {
+    "ci": {
+      "run_id": 34497774423,
+      "event": "push",
+      "head_sha": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+      "attempt": 1,
+      "workflow_status": "queued",
+      "workflow_conclusion": null,
+      "created_at": "2026-09-10T15:45:57Z",
+      "job_counts": {
+        "success": 22,
+        "skipped": 4,
+        "in_progress": 4,
+        "queued": 5
+      }
+    },
+    "matrix": {
+      "run_id": 34497774420,
+      "event": "push",
+      "head_sha": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+      "attempt": 1,
+      "workflow_status": "queued",
+      "workflow_conclusion": null,
+      "created_at": "2026-09-10T15:45:57Z",
+      "job_counts": {
+        "success": 16,
+        "skipped": 1,
+        "queued": 38,
+        "in_progress": 2
+      }
+    },
+    "fuzz": {
+      "run_id": 34497774415,
+      "event": "push",
+      "head_sha": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+      "attempt": 1,
+      "workflow_status": "in_progress",
+      "workflow_conclusion": null,
+      "created_at": "2026-09-10T15:45:57Z",
+      "job_counts": {
+        "success": 2,
+        "in_progress": 1
+      }
+    },
+    "gate": {
+      "run_id": 34497774057,
+      "event": "push",
+      "head_sha": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+      "attempt": 1,
+      "workflow_status": "in_progress",
+      "workflow_conclusion": null,
+      "created_at": "2026-09-10T15:45:57Z",
+      "job_counts": {
+        "in_progress": 1
+      }
+    },
+    "batch": {
+      "run_id": 34497773949,
+      "event": "push",
+      "head_sha": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+      "attempt": 1,
+      "workflow_status": "completed",
+      "workflow_conclusion": "failure",
+      "created_at": "2026-09-10T15:45:57Z",
+      "job_counts": {
+        "failure": 1,
+        "skipped": 1
+      }
+    },
+    "release": {
+      "run_id": 34497774161,
+      "event": "push",
+      "head_sha": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+      "attempt": 1,
+      "workflow_status": "completed",
+      "workflow_conclusion": "failure",
+      "created_at": "2026-09-10T15:45:57Z",
+      "job_counts": {
+        "success": 1,
+        "failure": 1
+      }
+    }
+  },
+  "capacity": {
+    "observed": "CI and matrix have executed many jobs and started more recently. Five CI test shards and38matrix groups are queued with runner_id0; queue elapsed time is not runtime. Coverage started as late as16:18:53Z, showing progress.",
+    "dependencies": "CI build/archive completed16:13:02Z before the test shards were created/eligible. Matrix setup succeeded; groups have completed and two run. Workflow-level QUEUED does not mean the entire workflow is waiting on a concurrency lock.",
+    "backlog_workflows": {
+      "queued": 4,
+      "in_progress": 4
+    },
+    "backlog_limits": "100-per-page snapshots include all matching runs in this repository. Workflow statuses hide active jobs inside QUEUED runs. Snapshots are not atomic; other organization repositories not enumerated.",
+    "older_work": "Scheduled CI34453539472 on d41, created08:08:10Z, has eight active engine mutation shards, matching max-parallel8. Scheduled CI uses a run-id concurrency key distinct from push shared key; it is not holding the same workflow concurrency lock.",
+    "sampled_assigned_running_jobs": 16,
+    "inference": "Shared hosted-runner capacity pressure is plausible; exact account concurrency quota, available hosted slots, and saturation are unproven.",
+    "runner_inventory": "Repository self-hosted inventory returned0. Organization runner inventory403 requires org admin/runners permission or admin:org OAuth scope. No scope change, alternate credential or retry."
+  },
+  "postmerge_5183_proof": {
+    "unit_tests": "Not yet available: the three bulk test shards containing the20module tests are queued. Build/archive success does not prove their execution.",
+    "fixed_differential_smoke": {
+      "job": 102942277285,
+      "conclusion": "success",
+      "actual_log": "Executed fixed fuzz windows with full_mismatch=0/count_mismatch=0; some all-category cases are skipped/adjudicated by existing policy.",
+      "scope": "crates/sparq-bench/src/fuzz.rs query coverage, not update_fuzz.rs UPDATE differential coverage."
+    },
+    "parser_fuzz": "Job102942277351 is in the parser/mmap target loop; not a final pass.",
+    "advancing_UPDATE": "No new UPDATE differential run appears in the25same-head snapshot. No advancing UPDATE or20-test postmerge pass claimed."
+  },
+  "failures": [
+    {
+      "run": 34497773949,
+      "job": 102940507106,
+      "cause": "REGISTRY_RING_TOKEN empty; guard exits1 before dispatch. Expected paused configuration refusal, not new source regression.",
+      "advisory": true,
+      "limit": "Registry globalOFF is root-verified; job prose predicting a next registry cron is inapplicable. Do not provision/enable/dispatch."
+    },
+    {
+      "run": 34497774161,
+      "job": 102940508737,
+      "cause": "cargo package failed preparing sparq-introspect0.1.1: no matching sparq-engine package in crates.io index. Provisioned-token containment retains the real failure. Not a403 or expected release-authorization hold.",
+      "advisory": true,
+      "tracking": "Same packaging class as existing6474, per root/prior verified diagnosis; no new issue search.",
+      "action": "Retain separate packaging issue; release work remains unauthorized. No retry or gate change."
+    }
+  ],
+  "recommendation": "Await ordinary completion. Current progress does not justify cancellation, default retry or capacity mutation. Root owns subsequent observation; this pass creates no monitor.",
+  "limitations": [
+    "Not an all-green postmerge declaration; CI/matrix/gate/parserfuzz incomplete.",
+    "No current gate log, account quota or hosted slot census; exact queue priority unknown.",
+    "Older nightly failed/cancelled jobs counted for backlog only; unrelated causes not audited.",
+    "Source applicability relies on root f50/fe328 tree equality; no fetch."
+  ],
+  "commands_pending": false,
+  "logical_network_requests": 17,
+  "network_error": "Organization runner inventory403; all subsequent work local export only.",
+  "mutations": []
+}

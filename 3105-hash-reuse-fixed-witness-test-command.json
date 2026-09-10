@@ -1,0 +1,16 @@
+{
+  "name": "test",
+  "argv": [
+    "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/hash-reuse-fixed-witness/artifacts/sparq_engine-hash_reuse_fixed_f50",
+    "--exact",
+    "exec::hash_reuse_fixed_witness::fixed_q3136_p2048",
+    "--nocapture",
+    "--test-threads=1"
+  ],
+  "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue5183",
+  "started": "2026-09-10T16:02:34.197367+00:00",
+  "before": {
+    "free_bytes": 11472404480,
+    "allocated_bytes": 10989568
+  }
+}

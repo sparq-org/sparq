@@ -1,0 +1,31 @@
+{
+  "at": "2026-09-10T16:20:12.847964+00:00",
+  "manifest_sha256": "fb7293add6da8ca05d0dc1635f3ff3c7d522d1e495fb5ad1d6ff8eb4184136b3",
+  "files_verified": 63,
+  "raw_stdout_matches_observations": true,
+  "actual_tests": 1,
+  "build_calls": 2,
+  "rhs_rows_per_build": 64,
+  "rhs_scan_closures": 1,
+  "result_bag": "integers0..15 eachfourtimes;64rows",
+  "loop_visits_qualification": "128visits inferredfromactualbuildinputs+unchangedserialbuilderloop; no per-rowinstrumentation insidecachedsubstrate.",
+  "source_main_applicability": "Actualsourcehashes matchcleanfe/local459. Root f50whole-tree==fe proof andonlybenchchange proves sameengine/core/substrate/lock source atmergedf50; localbadobjectdiagnosticnotignored orretried.",
+  "profile_scope": "Rust2021,1.97.1 nativeaarch64,O3,unwind,noLTO,codegen16,defaultengine cfgtest; coredev mmap+dict-spill,notcompact",
+  "observer_limit": "cfgtestobserver/testcopyonly; no candidateorlatency/heapimprovementclaim. Reversiblediagnosticdelta/current32sourcehashes retained.",
+  "resources": {
+    "execution_seconds_limit": 480,
+    "new_allocated_bytes_limit": 268435456,
+    "start_free_floor": 2214592512,
+    "continuous_free_floor": 2147483648,
+    "initial_preexecution": {
+      "free_bytes": 11485974528,
+      "allocated_bytes": 2220032
+    },
+    "sampled_minimum_free_bytes": 11463729152,
+    "sampled_maximum_task_allocated_bytes": 19656704,
+    "sample_interval_seconds": 0.5,
+    "limitation": "Polling can miss shorter allocation peaks; final directory allocation is separately recorded. No workload heap or RSS measurements."
+  },
+  "implementation_admitted": false,
+  "remaining": "F5benefit,F6scanpriority,F7firstblockcost/retention unresolved; no newbuild orreview authorized."
+}

@@ -1,0 +1,66 @@
+.github/workflows/release-plz.yml
+114:     name: release-plz / Release-PR (advisory)
+115:     # Guard against forks: release-plz needs repo write + would open PRs on a fork clone.
+116:     # Mirrors bench-ec2.yml's `github.repository == 'sparq-org/sparq'` guard.
+117:     if: github.repository == 'sparq-org/sparq'
+118:     runs-on: ubuntu-latest
+119:     permissions:
+120:       contents: write       # commit the version bump + changelog onto the Release-PR branch
+121:       pull-requests: write  # open / update the Release-PR
+122:     env:
+123:       # Secrets are not readable from a step `if:` expression — mirror the App id into env so
+124:       # the mint step can be skipped fail-soft when the App is not configured (batch-merge.yml).
+125:       ORCHESTRATOR_APP_ID: ${{ secrets.ORCHESTRATOR_APP_ID }}
+
+160:       # cargo-semver-checks@0.48 — release-plz shells out to it for API-break detection), so the
+161:       # behavior is unchanged; only the invocation is now wrapped and captured. The unchanged
+162:       # `release` job below still uses the pinned release-plz/action (no containment needed there).
+163:       - name: Install release-plz + cargo-semver-checks (pinned)
+164:         uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
+165:         with:
+166:           tool: release-plz@0.3.160,cargo-semver-checks@0.48
+167:       - name: Run release-plz release-pr (output captured for failure classification)
+168:         id: releasepr
+169:         # continue-on-error so the containment step below can classify the failure from the
+170:         # captured log: the KNOWN 403 (Actions PR-creation setting disabled) is tolerated with a
+171:         # ::warning; anything else re-fails the job. See the job-level comment.
+172:         continue-on-error: true
+173:         env:
+174:           # [OPUS-5] sq-iwnnf — the token release-plz uses to open/update the Release-PR:
+175:           # App token || RELEASE_PLZ_TOKEN || GITHUB_TOKEN (see the job-level comment). An
+176:           # unset secret evaluates to the empty string, so `||` selects the first configured one.
+177:           GITHUB_TOKEN: ${{ steps.app-token.outputs.token || secrets.RELEASE_PLZ_TOKEN || secrets.GITHUB_TOKEN }}
+178:           # Which arm won — logged (never the token itself) so a run says why it can/cannot open a PR.
+179:           TOKEN_SOURCE: ${{ steps.app-token.outputs.token != '' && 'sparq-orchestrator App token' || (secrets.RELEASE_PLZ_TOKEN != '' && 'RELEASE_PLZ_TOKEN (PAT)' || 'GITHUB_TOKEN (cannot open PRs while the Actions PR-creation setting is disabled)') }}
+180:         run: |
+181:           set -uo pipefail
+182:           echo "release-plz forge token: ${TOKEN_SOURCE}"
+183:           # The commit ident the release-plz/action's git-config sub-action would set for
+184:           # GITHUB_TOKEN (release-plz commits the version bump onto the Release-PR branch).
+185:           git config user.name 'github-actions[bot]'
+186:           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+187:           # Same invocation the pinned action's release-pr branch runs; 2>&1 | tee captures
+188:           # BOTH streams (release-plz logs errors to stderr) for the containment step.
+189:           release-plz release-pr \
+190:             --git-token "${GITHUB_TOKEN}" \
+191:             --repo-url "https://github.com/${GITHUB_REPOSITORY}" \
+192:             -o json 2>&1 | tee /tmp/release-plz-pr.log
+
+208:       - name: Contain the known 403 (Actions PR-creation setting disabled)
+209:         if: steps.releasepr.outcome == 'failure'
+210:         env:
+211:           # Probe with the SAME token release-plz used, or the probe proves nothing about it.
+212:           GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RELEASE_PLZ_TOKEN || secrets.GITHUB_TOKEN }}
+213:           # [OPUS-5] sq-iwnnf — 'true' iff a privileged (setting-exempt) token was configured.
+214:           # The whole tolerated-403 story is "GITHUB_TOKEN is blocked by a repo setting"; with an
+215:           # App/PAT token that story is false by construction, so the failure must stay loud.
+216:           PRIVILEGED_TOKEN: ${{ (steps.app-token.outputs.token || secrets.RELEASE_PLZ_TOKEN) != '' }}
+217:         run: |
+218:           set -euo pipefail
+219:           log=/tmp/release-plz-pr.log
+220:           if [ "${PRIVILEGED_TOKEN}" = "true" ]; then
+221:             echo "::error::release-plz release-pr failed while using a PROVISIONED App/PAT token. That token is not subject to 'Allow GitHub Actions to create and approve pull requests', so the known blocked-setting condition cannot explain this — it is a real failure (check the App is installed on this repo with contents:write + pull_requests:write, or that RELEASE_PLZ_TOKEN is unexpired and carries those permissions). Captured output follows."
+222:             sed 's/^/  | /' "$log" 2>/dev/null || echo "  | (no captured output at $log)"
+223:             exit 1
+224:           fi
+225:           if [ ! -s "$log" ]; then

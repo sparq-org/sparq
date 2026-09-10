@@ -1,0 +1,119 @@
+{
+  "events": [
+    {
+      "binary": true,
+      "budget_active": false,
+      "estimates": [
+        3136,
+        2048
+      ],
+      "filters": [
+        "2:< 16",
+        null
+      ],
+      "kind": "plan",
+      "patterns": [
+        "?s <http://ex/q> ?o",
+        "?s <http://ex/p> ?o"
+      ],
+      "residual": 0,
+      "seed": 1,
+      "seed_rows": 2048,
+      "seed_sort": "s",
+      "view_empty": false
+    },
+    {
+      "actual": "o",
+      "kernel": "hash",
+      "kind": "step",
+      "pattern": 0,
+      "requested": 2,
+      "scanned": true,
+      "start": 0
+    },
+    {
+      "build_rows": 64,
+      "entries": 64,
+      "key_cols": [
+        [
+          0,
+          0
+        ],
+        [
+          1,
+          1
+        ]
+      ],
+      "kind": "built",
+      "left_rows": 1024,
+      "postings": 64,
+      "probe_rows": 1024,
+      "rhs": true,
+      "right_rows": 64,
+      "tables": 1
+    },
+    {
+      "actual": "o",
+      "kernel": "hash",
+      "kind": "step",
+      "pattern": 0,
+      "requested": 2,
+      "scanned": false,
+      "start": 1024
+    },
+    {
+      "build_rows": 64,
+      "entries": 64,
+      "key_cols": [
+        [
+          0,
+          0
+        ],
+        [
+          1,
+          1
+        ]
+      ],
+      "kind": "built",
+      "left_rows": 1024,
+      "postings": 64,
+      "probe_rows": 1024,
+      "rhs": true,
+      "right_rows": 64,
+      "tables": 1
+    }
+  ],
+  "result": {
+    "bag": {
+      "\"0\"^^<http://www.w3.org/2001/XMLSchema#integer>": 4,
+      "\"1\"^^<http://www.w3.org/2001/XMLSchema#integer>": 4,
+      "\"10\"^^<http://www.w3.org/2001/XMLSchema#integer>": 4,
+      "\"11\"^^<http://www.w3.org/2001/XMLSchema#integer>": 4,
+      "\"12\"^^<http://www.w3.org/2001/XMLSchema#integer>": 4,
+      "\"13\"^^<http://www.w3.org/2001/XMLSchema#integer>": 4,
+      "\"14\"^^<http://www.w3.org/2001/XMLSchema#integer>": 4,
+      "\"15\"^^<http://www.w3.org/2001/XMLSchema#integer>": 4,
+      "\"2\"^^<http://www.w3.org/2001/XMLSchema#integer>": 4,
+      "\"3\"^^<http://www.w3.org/2001/XMLSchema#integer>": 4,
+      "\"4\"^^<http://www.w3.org/2001/XMLSchema#integer>": 4,
+      "\"5\"^^<http://www.w3.org/2001/XMLSchema#integer>": 4,
+      "\"6\"^^<http://www.w3.org/2001/XMLSchema#integer>": 4,
+      "\"7\"^^<http://www.w3.org/2001/XMLSchema#integer>": 4,
+      "\"8\"^^<http://www.w3.org/2001/XMLSchema#integer>": 4,
+      "\"9\"^^<http://www.w3.org/2001/XMLSchema#integer>": 4
+    },
+    "build_calls": 2,
+    "build_input_rows": 128,
+    "rows": 64,
+    "scan_closures": 1,
+    "stored_postings": 128
+  },
+  "derived_from_observed_records": {
+    "build_calls": 2,
+    "total_build_input_rows": 128,
+    "total_table_entries": 128,
+    "total_stored_postings": 128,
+    "rhs_scan_closures": 1
+  },
+  "row_visit_qualification": "The observer records actual build input length and completed table postings. Exactly128 builder-loop row visits follow from the unchanged serial build_table loop; no per-row instrumentation was inserted into cached substrate code."
+}

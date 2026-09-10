@@ -1,0 +1,17 @@
+{
+  "initial_free": 8545226752,
+  "recorded_at": "2026-09-10T15:58:05.935290+00:00",
+  "max_execution_seconds": 480,
+  "max_new_allocated_bytes": 268435456,
+  "start_floor": 2214592512,
+  "continuous_floor": 2147483648,
+  "builds": 1,
+  "filtered_runs": 1,
+  "retries": 0,
+  "no_cargo_dependency_build": true,
+  "no_network": true,
+  "no_timing_or_heap_claim": true,
+  "manifest_dir": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue5183/crates/sparq-engine",
+  "module_tree": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/hash-reuse-fixed-witness/engine",
+  "scope": "Baseline actualengine cfgtest, no hashcache implementation or cache mutant"
+}

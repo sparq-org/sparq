@@ -1,0 +1,59 @@
+{
+  "status": "PRE_REGISTERED_SOURCE_ONLY_NO_RUNTIME",
+  "amends_before_any_execution": true,
+  "query": "PREFIX : <http://ex/> SELECT ?o WHERE { ?s :q ?o . ?s :p ?o . FILTER(?o < 16) } LIMIT 65",
+  "same_p_and_matching_q": {
+    "load": "Graph::load_str synthetic Turtle, ordinary base default graph",
+    "p": "For i=0..2047 add :s{i} :p (i mod16) as canonical xsd:integer. Exactly2048 triples.",
+    "q_matches": "For i=0..63 add :s{i} :q (i mod16). Exactly64 triples.",
+    "distinct_integer_values": 32,
+    "no_duplicates_or_triple_terms": true
+  },
+  "changed_q_fillers": "Replace prior1985 filler triples with3072 distinct :f{j} :q (16+(j mod16)),j=0..3071. No :f subject has :p.",
+  "actual_expected_counts": {
+    "P_estimate": 2048,
+    "Q_estimate": 3136,
+    "seed_index": 1,
+    "seed_name": "P",
+    "Q_filtered_rows": 64,
+    "dataset_triples": 5184,
+    "seed_block_starts": [
+      0,
+      1024
+    ],
+    "seed_block_lengths": [
+      1024,
+      1024
+    ],
+    "RHS_hash_builds": 2,
+    "build_row_visits": 128,
+    "RHS_scan_closures": 1,
+    "results": 64,
+    "projected_multiplicity": "integer0..15 each4"
+  },
+  "why_margin": "Exact base range counts mean previous one-triple margin was sound, but wider1088 margin is predeclared now at reviewer request, before any run. This is not post-failure tuning. It does not replace exact observed estimates/seed assertions.",
+  "actual_feature_gate": {
+    "cfg_scope": "test, not target_arch=wasm32, not engine feature algebra-rewrite, not engine feature zk. No fictitious engine compact-index feature predicate.",
+    "BUILT": "Assert sparq_core::store::BUILT contains all six expected permutations, especially Pso and Pos, before executing fixture. compact-index is a CORE feature; this runtime precondition catches Cargo feature unification. Do not early-return a passing test when absent: mark configuration ineligible/not executed and stop that witness.",
+    "planned_build": "engine default parallel/regex/digest, recorded core dev mmap/dict-spill allowed; actual cfg/BUILT recorded. No installed custom planner/view or recorder; plain base Graph and public query.",
+    "additional_assertions": [
+      "budget::active()==false inside actual query capped entry, not merely outside wrapper",
+      "bgp_uses_binary(patterns)==true, exactlytwo patterns Q thenP",
+      "pfilterQ=objectcol2/<16, pfilterP=None, residualempty",
+      "observedseed1, estimates[3136,2048]",
+      "actualPsorted s, actualQsorted o, requestQSome(2)",
+      "exact two hashsteps/rightbuild,64rows,orderedcols[0,1],tables.len1, one scan"
+    ]
+  },
+  "initial_execution": "Only actual-main baseline query and actual table-build counters; no nonexistent cache negativecontrol at this stage. Candidate-stage invalidation mutant remains deferred.",
+  "same_future_bounds": {
+    "seconds": 480,
+    "new_bytes": 268435456,
+    "jobs": 1,
+    "incremental": false,
+    "offline": true,
+    "start_free": 2214592512,
+    "continuous_free": 2147483648
+  },
+  "not_permission": "No build admitted; stable capacity and warm profile plus root authorization remain required."
+}

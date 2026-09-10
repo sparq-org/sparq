@@ -1,0 +1,198 @@
+{
+  "status": "BASELINE_WITNESS_CONFIRMED; HASH_REUSE_IMPLEMENTATION_HOLD",
+  "author_runtime": "GPT-6 Astra xhigh",
+  "frozen_at": "2026-09-10T16:04:44.703366+00:00",
+  "source": {
+    "head": "fe3284199db0831f353d2ae401b8c69472764904",
+    "clean": true,
+    "unchanged_32_engine_source_hashes": true,
+    "engine_core_substrate_lock_equal_local_main459": true,
+    "local_f50_object_check": {
+      "exit_code": 128,
+      "stderr": "fatal: bad object f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+      "qualification": "No fetch attempted. Root independently reported f50 tree equality to this exact fe328 tree; local reproducible base is459 and cleanfe328."
+    },
+    "free_bytes": 11469721600,
+    "source_edit_scope": "diagnostic copy only",
+    "commands_pending": false
+  },
+  "profile": {
+    "compiler": "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/rustc",
+    "sha256": "210df6794001b73ec3d453878707fa1e0bdcb63c427024a6e6574bbe5615a4da",
+    "version_receipt": "rustc 1.97.1 (8bab26f4f 2026-07-14)\nbinary: rustc\ncommit-hash: 8bab26f4f68e0e26f0bb7960be334d5b520ea452\ncommit-date: 2026-07-14\nhost: aarch64-apple-darwin\nrelease: 1.97.1\nLLVM version: 22.1.6\n",
+    "profile": "Rust2021,1.97.1 nativeaarch64,O3,unwind,noLTO,codegen16,defaultengine cfgtest; coredev mmap+dict-spill,notcompact",
+    "features": [
+      "feature=\"default\"",
+      "feature=\"digest\"",
+      "feature=\"parallel\"",
+      "feature=\"regex\""
+    ]
+  },
+  "binary": {
+    "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/hash-reuse-fixed-witness/artifacts/sparq_engine-hash_reuse_fixed_f50",
+    "bytes": 8721200,
+    "sha256": "9010d888d464c77938bfea2f7bf20a1cff7f5219d0988dd7c5368f2be4f90302"
+  },
+  "protocol": "preregistered Q3136/P2048; one build and one exact filtered test; no retry or query substitution",
+  "executed": {
+    "compile_exit": 0,
+    "compile_seconds": 17.787376542,
+    "test_exit": 0,
+    "test_seconds": 1.0195422080000007,
+    "tests_passed": 1,
+    "tests_filtered": 334,
+    "execution_phase_seconds": 18.951665625,
+    "all_commands_terminal": true
+  },
+  "observed": {
+    "events": [
+      {
+        "binary": true,
+        "budget_active": false,
+        "estimates": [
+          3136,
+          2048
+        ],
+        "filters": [
+          "2:< 16",
+          null
+        ],
+        "kind": "plan",
+        "patterns": [
+          "?s <http://ex/q> ?o",
+          "?s <http://ex/p> ?o"
+        ],
+        "residual": 0,
+        "seed": 1,
+        "seed_rows": 2048,
+        "seed_sort": "s",
+        "view_empty": false
+      },
+      {
+        "actual": "o",
+        "kernel": "hash",
+        "kind": "step",
+        "pattern": 0,
+        "requested": 2,
+        "scanned": true,
+        "start": 0
+      },
+      {
+        "build_rows": 64,
+        "entries": 64,
+        "key_cols": [
+          [
+            0,
+            0
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "kind": "built",
+        "left_rows": 1024,
+        "postings": 64,
+        "probe_rows": 1024,
+        "rhs": true,
+        "right_rows": 64,
+        "tables": 1
+      },
+      {
+        "actual": "o",
+        "kernel": "hash",
+        "kind": "step",
+        "pattern": 0,
+        "requested": 2,
+        "scanned": false,
+        "start": 1024
+      },
+      {
+        "build_rows": 64,
+        "entries": 64,
+        "key_cols": [
+          [
+            0,
+            0
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "kind": "built",
+        "left_rows": 1024,
+        "postings": 64,
+        "probe_rows": 1024,
+        "rhs": true,
+        "right_rows": 64,
+        "tables": 1
+      }
+    ],
+    "result": {
+      "bag": {
+        "\"0\"^^<http://www.w3.org/2001/XMLSchema#integer>": 4,
+        "\"1\"^^<http://www.w3.org/2001/XMLSchema#integer>": 4,
+        "\"10\"^^<http://www.w3.org/2001/XMLSchema#integer>": 4,
+        "\"11\"^^<http://www.w3.org/2001/XMLSchema#integer>": 4,
+        "\"12\"^^<http://www.w3.org/2001/XMLSchema#integer>": 4,
+        "\"13\"^^<http://www.w3.org/2001/XMLSchema#integer>": 4,
+        "\"14\"^^<http://www.w3.org/2001/XMLSchema#integer>": 4,
+        "\"15\"^^<http://www.w3.org/2001/XMLSchema#integer>": 4,
+        "\"2\"^^<http://www.w3.org/2001/XMLSchema#integer>": 4,
+        "\"3\"^^<http://www.w3.org/2001/XMLSchema#integer>": 4,
+        "\"4\"^^<http://www.w3.org/2001/XMLSchema#integer>": 4,
+        "\"5\"^^<http://www.w3.org/2001/XMLSchema#integer>": 4,
+        "\"6\"^^<http://www.w3.org/2001/XMLSchema#integer>": 4,
+        "\"7\"^^<http://www.w3.org/2001/XMLSchema#integer>": 4,
+        "\"8\"^^<http://www.w3.org/2001/XMLSchema#integer>": 4,
+        "\"9\"^^<http://www.w3.org/2001/XMLSchema#integer>": 4
+      },
+      "build_calls": 2,
+      "build_input_rows": 128,
+      "rows": 64,
+      "scan_closures": 1,
+      "stored_postings": 128
+    },
+    "derived_from_observed_records": {
+      "build_calls": 2,
+      "total_build_input_rows": 128,
+      "total_table_entries": 128,
+      "total_stored_postings": 128,
+      "rhs_scan_closures": 1
+    },
+    "row_visit_qualification": "The observer records actual build input length and completed table postings. Exactly128 builder-loop row visits follow from the unchanged serial build_table loop; no per-row instrumentation was inserted into cached substrate code."
+  },
+  "conclusion": "The public capped query scansQ once and builds the identical-shaped64row RHS table twice, with two1024row seed blocks, preserving the exact64row bag. This establishes a nonvacuous baseline target. No hash-reuse candidate or benefit measurement exists.",
+  "observer_noninterference": "Only cfg(test) observation calls and one appended test module. Reversing diagnostic.diff exactly restores current production exec.rs. Observers inspect shared references, lengths, table entries/postings and planner metadata; they do not mutate query data/keys/order/budget state. Logging/assertions add diagnostic overhead, so runtime durations are build/test receipts only.",
+  "resource_limits": {
+    "execution_seconds_limit": 480,
+    "new_allocated_bytes_limit": 268435456,
+    "start_free_floor": 2214592512,
+    "continuous_free_floor": 2147483648,
+    "initial_preexecution": {
+      "free_bytes": 11485974528,
+      "allocated_bytes": 2220032
+    },
+    "sampled_minimum_free_bytes": 11463729152,
+    "sampled_maximum_task_allocated_bytes": 19656704,
+    "sample_interval_seconds": 0.5,
+    "limitation": "Polling can miss shorter allocation peaks; final directory allocation is separately recorded. No workload heap or RSS measurements."
+  },
+  "warnings": [
+    "linker stderr: 2026-09-10 17:02:29.872 xcodebuild[20652:4908703]  DVTFilePathFSEvents: Failed to start fs event stream.\n2026-09-10 17:02:30.640 xcodebuild[20652:4908702] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 \"Input/output error\". Using NSCachesDirectory instead.",
+    "1 warning emitted"
+  ],
+  "remaining_holds": [
+    "F5: bounded per-step benefit ceiling and fanout qualification; this witness shows only one avoidable64row rebuild.",
+    "F6: shared4MiB retained rows/hash metadata capacity, identity, eviction/refund and scan-cache crowdout remain undesigned and unimplemented.",
+    "F7: first-block hit cost and deferred accounting without uncharged retention remain unresolved."
+  ],
+  "scope_limits": [
+    "Only native defaultengine cfg(test), core mmap+dict-spill without compact-index, unlimited budget, two-pattern base graph, single-table hash path was exercised.",
+    "No parallel64table path, armed budget, ZK, named graph, fanout, performance timing, requested allocation, or candidate semantic validation.",
+    "17 direct reused libraries and compiler hashes verified against recorded warm profile; no fresh dependency compilation or all-transitive Cargo freshness proof.",
+    "Current merged f50 object unavailable locally; main applicability additionally relies on root whole-tree equality proof."
+  ],
+  "next_step": "Root may assess the design with this baseline evidence; no follow-on implementation or validation is authorized by this completed witness."
+}

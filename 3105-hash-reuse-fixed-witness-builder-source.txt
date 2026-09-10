@@ -1,0 +1,40 @@
+crates/sparq-substrate/src/join.rs
+283:             }
+284:         }
+285:     }
+286: }
+287: 
+288: /// Builds the serial hash table for a hash join: maps each build-side key to the
+289: /// ascending list of build-row indices sharing it. Returns a [`JoinTable`]
+290: /// (`hashbrown::HashMap<Key, Posting, FxBuildHasher>`) so that the probe path can
+291: /// call `raw_entry().from_hash` with the precomputed [`key_hash`] value.
+292: #[inline]
+293: pub fn build_table(build: &[Row], keys: &JoinKeys) -> JoinTable {
+294:     let mut t = JoinTable::default();
+295:     for (ri, row) in build.iter().enumerate() {
+296:         t.entry(keys.left_key(row)).or_default().push(ri);
+297:     }
+298:     t
+299: }
+300: 
+301: /// Builds the radix-partitioned hash tables for a parallel hash join: `JOIN_PARTS`
+302: /// private maps, each over the build rows whose key-hash falls in that partition.
+303: /// Within a partition rows are scanned in ascending index, so each posting list
+304: /// stays in ascending build-row order — exactly the serial build — and the probe
+305: /// output is byte-identical. Requires the `parallel` feature (the inner rayon
+306: /// import is the caller's; this returns the per-partition maps). Returns
+307: /// `Vec<`[`JoinTable`]`>` so the probe path can use `raw_entry().from_hash`.
+308: #[inline]
+309: pub fn build_partitioned(build: &[Row], keys: &JoinKeys, parts: &[u8]) -> Vec<JoinTable> {
+310:     (0..JOIN_PARTS)
+311:         .map(|p| {
+312:             let mut t = JoinTable::default();
+313:             for (ri, row) in build.iter().enumerate() {
+314:                 if parts[ri] as usize == p {
+315:                     t.entry(keys.left_key(row)).or_default().push(ri);
+316:                 }
+317:             }
+318:             t
+319:         })
+320:         .collect()
+321: }

@@ -1,0 +1,1411 @@
+{
+  "ci": {
+    "run_id": 34497774423,
+    "event": "push",
+    "head_sha": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+    "attempt": 1,
+    "workflow_status": "queued",
+    "workflow_conclusion": null,
+    "created_at": "2026-09-10T15:45:57Z",
+    "job_counts": {
+      "success": 22,
+      "skipped": 4,
+      "in_progress": 4,
+      "queued": 5
+    },
+    "jobs": [
+      {
+        "id": 102940509808,
+        "name": "unsafe-register (count ratchet)",
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-09-10T15:48:34Z",
+        "completed_at": "2026-09-10T15:48:44Z",
+        "runner_id": 1000077970,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102940510435,
+        "name": "detect rust changes",
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-09-10T15:50:56Z",
+        "completed_at": "2026-09-10T15:51:06Z",
+        "runner_id": 1000077982,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102940510620,
+        "name": "select / select (change-based test selection)",
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-09-10T15:50:43Z",
+        "completed_at": "2026-09-10T15:51:13Z",
+        "runner_id": 1000077981,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102940512049,
+        "name": "nightly-gate",
+        "status": "completed",
+        "conclusion": "skipped",
+        "started_at": "2026-09-10T15:45:58Z",
+        "completed_at": "2026-09-10T15:45:58Z",
+        "runner_id": null,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102940512188,
+        "name": "mutation ratchet (cargo-mutants, advisory)",
+        "status": "completed",
+        "conclusion": "skipped",
+        "started_at": "2026-09-10T15:45:58Z",
+        "completed_at": "2026-09-10T15:45:58Z",
+        "runner_id": null,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102940513619,
+        "name": "coverage (nightly, full incl. heavy vectors)",
+        "status": "completed",
+        "conclusion": "skipped",
+        "started_at": "2026-09-10T15:45:58Z",
+        "completed_at": "2026-09-10T15:45:58Z",
+        "runner_id": null,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102942437351,
+        "name": "coverage floors (presence + monotonicity + shard-partition, no compile)",
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-09-10T15:54:29Z",
+        "completed_at": "2026-09-10T15:54:40Z",
+        "runner_id": 1000077989,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102942437374,
+        "name": "MSRV check (Rust 1.88, declared floor)",
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-09-10T15:55:22Z",
+        "completed_at": "2026-09-10T15:57:58Z",
+        "runner_id": 1000077993,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102942437402,
+        "name": "docker image smoke (run + curl /health + query)",
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-09-10T15:51:18Z",
+        "completed_at": "2026-09-10T15:51:50Z",
+        "runner_id": 1000077985,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102942437411,
+        "name": "clippy (gate) + fmt (non-blocking)",
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-09-10T15:56:35Z",
+        "completed_at": "2026-09-10T16:01:00Z",
+        "runner_id": 1000077997,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102942437551,
+        "name": "unsafe report (cargo-geiger, informational)",
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-09-10T15:57:05Z",
+        "completed_at": "2026-09-10T15:57:41Z",
+        "runner_id": 1000077998,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102942482035,
+        "name": "W3C SPARQL conformance (ratchet >= 1229 pass+divergence)",
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-09-10T15:58:07Z",
+        "completed_at": "2026-09-10T16:00:08Z",
+        "runner_id": 1000078001,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102942482071,
+        "name": "W3C SHACL conformance (ratchet \u2014 core >= 98, sparql >= 5; full 1.2 ratchets in-runner)",
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-09-10T15:59:52Z",
+        "completed_at": "2026-09-10T16:00:49Z",
+        "runner_id": 1000078004,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102942482109,
+        "name": "build + archive test binaries (+ doctests once)",
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-09-10T16:03:41Z",
+        "completed_at": "2026-09-10T16:13:02Z",
+        "runner_id": 1000078011,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102942482139,
+        "name": "W3C JSON-LD 1.1 conformance (ratchet \u2014 toRdf >= 413, fromRdf >= 52, compact >= 228, frame >= 92)",
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-09-10T15:59:01Z",
+        "completed_at": "2026-09-10T16:00:59Z",
+        "runner_id": 1000078003,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102942482146,
+        "name": "SolidLab ODRL conformance (ratchet \u2014 pass >= 59)",
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-09-10T15:58:43Z",
+        "completed_at": "2026-09-10T15:59:48Z",
+        "runner_id": 1000078002,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102942482155,
+        "name": "W3C/OGC GeoSPARQL conformance (ratchet \u2014 topology >= 119, query-rewrite >= 38)",
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-09-10T16:02:49Z",
+        "completed_at": "2026-09-10T16:04:22Z",
+        "runner_id": 1000078010,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102942482156,
+        "name": "wasm build (sparq-wasm + sparq-reason-wasm + sparq-rsp-wasm + sparq-text-wasm + sparq-shacl-wasm ...",
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-09-10T16:01:02Z",
+        "completed_at": "2026-09-10T16:06:41Z",
+        "runner_id": 1000078007,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102942482167,
+        "name": "SERVICE-federation harness (in-process loopback smoke + egress scoping)",
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-09-10T16:01:31Z",
+        "completed_at": "2026-09-10T16:03:38Z",
+        "runner_id": 1000078009,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102942482185,
+        "name": "sparq-text BM25 differential oracle (extension ratchet \u2014 assertions >= 18750)",
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-09-10T16:00:11Z",
+        "completed_at": "2026-09-10T16:01:28Z",
+        "runner_id": 1000078005,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102942482219,
+        "name": "sparq-rsp RSP expressivity / SRBench correctness (extension ratchet \u2014 assertions >= 149)",
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-09-10T16:04:25Z",
+        "completed_at": "2026-09-10T16:05:46Z",
+        "runner_id": 1000078012,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102942482308,
+        "name": "Solid WAC/ACP conformance (ratchet \u2014 wac >= 13, acp >= 13)",
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-09-10T16:06:44Z",
+        "completed_at": "2026-09-10T16:08:17Z",
+        "runner_id": 1000078014,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102942482454,
+        "name": "Inference conformance (ratchet >= 1967 pass+divergence)",
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-09-10T16:08:44Z",
+        "completed_at": "2026-09-10T16:13:06Z",
+        "runner_id": 1000078016,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102942483985,
+        "name": "nightly selection backstop (full-matrix guard)",
+        "status": "completed",
+        "conclusion": "skipped",
+        "started_at": "2026-09-10T15:51:13Z",
+        "completed_at": "2026-09-10T15:51:13Z",
+        "runner_id": null,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102943731988,
+        "name": "coverage engine run (partition 3/3)",
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-09-10T16:10:08Z",
+        "completed_at": "2026-09-10T16:13:05Z",
+        "runner_id": 1000078017,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102943732041,
+        "name": "coverage engine run (partition 2/3)",
+        "status": "in_progress",
+        "conclusion": null,
+        "started_at": "2026-09-10T16:18:53Z",
+        "completed_at": null,
+        "runner_id": 1000078028,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": [
+          "Free runner disk before instrumented build"
+        ]
+      },
+      {
+        "id": 102943732058,
+        "name": "coverage engine run (partition 1/3)",
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-09-10T16:11:02Z",
+        "completed_at": "2026-09-10T16:13:50Z",
+        "runner_id": 1000078018,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102943732089,
+        "name": "coverage ratchet (shard 3/3)",
+        "status": "in_progress",
+        "conclusion": null,
+        "started_at": "2026-09-10T16:13:08Z",
+        "completed_at": null,
+        "runner_id": 1000078020,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": [
+          "Measure + enforce per-crate coverage (shard 3, max-remeasure gate)"
+        ]
+      },
+      {
+        "id": 102943732091,
+        "name": "coverage ratchet (shard 2/3)",
+        "status": "in_progress",
+        "conclusion": null,
+        "started_at": "2026-09-10T16:14:37Z",
+        "completed_at": null,
+        "runner_id": 1000078024,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": [
+          "Measure + enforce per-crate coverage (shard 2, max-remeasure gate)"
+        ]
+      },
+      {
+        "id": 102943732146,
+        "name": "coverage ratchet (shard 1/3)",
+        "status": "in_progress",
+        "conclusion": null,
+        "started_at": "2026-09-10T16:18:46Z",
+        "completed_at": null,
+        "runner_id": 1000078027,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": [
+          "Free runner disk before build + instrumented test"
+        ]
+      },
+      {
+        "id": 102950381538,
+        "name": "test (load-aware shard bulk 3/3)",
+        "status": "queued",
+        "conclusion": null,
+        "started_at": "2026-09-10T16:13:03Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102950381633,
+        "name": "test (load-aware shard heavy-hnsw)",
+        "status": "queued",
+        "conclusion": null,
+        "started_at": "2026-09-10T16:13:03Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102950381674,
+        "name": "test (load-aware shard bulk 2/3)",
+        "status": "queued",
+        "conclusion": null,
+        "started_at": "2026-09-10T16:13:03Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102950381696,
+        "name": "test (load-aware shard heavy-diskann)",
+        "status": "queued",
+        "conclusion": null,
+        "started_at": "2026-09-10T16:13:03Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102950381709,
+        "name": "test (load-aware shard bulk 1/3)",
+        "status": "queued",
+        "conclusion": null,
+        "started_at": "2026-09-10T16:13:03Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      }
+    ]
+  },
+  "matrix": {
+    "run_id": 34497774420,
+    "event": "push",
+    "head_sha": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+    "attempt": 1,
+    "workflow_status": "queued",
+    "workflow_conclusion": null,
+    "created_at": "2026-09-10T15:45:57Z",
+    "job_counts": {
+      "success": 16,
+      "skipped": 1,
+      "queued": 38,
+      "in_progress": 2
+    },
+    "jobs": [
+      {
+        "id": 102940510082,
+        "name": "detect rust changes (feature-matrix)",
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-09-10T15:46:33Z",
+        "completed_at": "2026-09-10T15:46:40Z",
+        "runner_id": 1000077962,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102940510370,
+        "name": "select / select (change-based test selection)",
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-09-10T15:48:24Z",
+        "completed_at": "2026-09-10T15:48:52Z",
+        "runner_id": 1000077968,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102940775137,
+        "name": "fedclient dependency-boundary guard",
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-09-10T15:50:24Z",
+        "completed_at": "2026-09-10T15:50:53Z",
+        "runner_id": 1000077980,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102940779774,
+        "name": "pre-merge C1 (feature-gated test execution)",
+        "status": "completed",
+        "conclusion": "skipped",
+        "started_at": "2026-09-10T15:46:41Z",
+        "completed_at": "2026-09-10T15:46:41Z",
+        "runner_id": null,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102941610158,
+        "name": "sparq-server pure-serialiser (--no-default-features)",
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-09-10T15:55:02Z",
+        "completed_at": "2026-09-10T15:57:00Z",
+        "runner_id": 1000077991,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102941610163,
+        "name": "sparq-geo pure-geometry (--no-default-features)",
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-09-10T15:55:01Z",
+        "completed_at": "2026-09-10T15:56:15Z",
+        "runner_id": 1000077992,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102941610168,
+        "name": "feature-matrix check-tier (rest)",
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-09-10T15:54:43Z",
+        "completed_at": "2026-09-10T15:54:59Z",
+        "runner_id": 1000077990,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102941610214,
+        "name": "feature-matrix check-tier (engine)",
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-09-10T15:56:19Z",
+        "completed_at": "2026-09-10T15:56:32Z",
+        "runner_id": 1000077995,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102941610260,
+        "name": "assemble feature matrix",
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-09-10T15:57:44Z",
+        "completed_at": "2026-09-10T15:58:40Z",
+        "runner_id": 1000077999,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102941610301,
+        "name": "sparq-lws-core pure Solid (--no-default-features)",
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-09-10T15:56:18Z",
+        "completed_at": "2026-09-10T15:58:59Z",
+        "runner_id": 1000077996,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102945163266,
+        "name": "opt-in group (g06 sparq-trust)",
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-09-10T16:13:10Z",
+        "completed_at": "2026-09-10T16:14:34Z",
+        "runner_id": 1000078021,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102945163300,
+        "name": "opt-in group (g08 sparq-solid)",
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-09-10T16:13:05Z",
+        "completed_at": "2026-09-10T16:18:44Z",
+        "runner_id": 1000078019,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102945163351,
+        "name": "opt-in group (g03 sparq-wrapper)",
+        "status": "queued",
+        "conclusion": null,
+        "started_at": "2026-09-10T15:58:41Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102945163366,
+        "name": "opt-in group (g02 sparq-core)",
+        "status": "queued",
+        "conclusion": null,
+        "started_at": "2026-09-10T15:58:41Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102945163367,
+        "name": "opt-in group (g01 sparq-core)",
+        "status": "queued",
+        "conclusion": null,
+        "started_at": "2026-09-10T15:58:41Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102945163373,
+        "name": "opt-in group (g13 sparq-server)",
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-09-10T16:01:03Z",
+        "completed_at": "2026-09-10T16:08:40Z",
+        "runner_id": 1000078008,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102945163375,
+        "name": "opt-in group (g04 sparq-cli)",
+        "status": "queued",
+        "conclusion": null,
+        "started_at": "2026-09-10T15:58:41Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102945163377,
+        "name": "opt-in group (g07 sparq-trust)",
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-09-10T16:00:52Z",
+        "completed_at": "2026-09-10T16:02:46Z",
+        "runner_id": 1000078006,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102945163383,
+        "name": "opt-in group (g05 sparq-reason-el)",
+        "status": "queued",
+        "conclusion": null,
+        "started_at": "2026-09-10T15:58:41Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102945163384,
+        "name": "opt-in group (g10 sparq-server)",
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-09-10T16:05:54Z",
+        "completed_at": "2026-09-10T16:13:49Z",
+        "runner_id": 1000078013,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102945163397,
+        "name": "opt-in group (g19 sparq-vectors)",
+        "status": "in_progress",
+        "conclusion": null,
+        "started_at": "2026-09-10T16:08:20Z",
+        "completed_at": null,
+        "runner_id": 1000078015,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": [
+          "Run the group's legs (build -> test -> clippy; results to artifact)"
+        ]
+      },
+      {
+        "id": 102945163402,
+        "name": "opt-in group (g15 sparq-reason)",
+        "status": "queued",
+        "conclusion": null,
+        "started_at": "2026-09-10T15:58:41Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102945163420,
+        "name": "opt-in group (g17 sparq-geo)",
+        "status": "queued",
+        "conclusion": null,
+        "started_at": "2026-09-10T15:58:41Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102945163423,
+        "name": "opt-in group (g14 sparq-reason)",
+        "status": "queued",
+        "conclusion": null,
+        "started_at": "2026-09-10T15:58:41Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102945163425,
+        "name": "opt-in group (g21 sparq-lws-core)",
+        "status": "queued",
+        "conclusion": null,
+        "started_at": "2026-09-10T15:58:41Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102945163428,
+        "name": "opt-in group (g12 sparq-server)",
+        "status": "queued",
+        "conclusion": null,
+        "started_at": "2026-09-10T15:58:41Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102945163439,
+        "name": "opt-in group (g23 sparq-lws-core)",
+        "status": "queued",
+        "conclusion": null,
+        "started_at": "2026-09-10T15:58:41Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102945163440,
+        "name": "opt-in group (g11 sparq-server)",
+        "status": "queued",
+        "conclusion": null,
+        "started_at": "2026-09-10T15:58:41Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102945163453,
+        "name": "opt-in group (g40 sparq-zk)",
+        "status": "queued",
+        "conclusion": null,
+        "started_at": "2026-09-10T15:58:41Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102945163456,
+        "name": "opt-in group (g36 sparq-engine)",
+        "status": "queued",
+        "conclusion": null,
+        "started_at": "2026-09-10T15:58:41Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102945163460,
+        "name": "opt-in group (g09 sparq-server)",
+        "status": "queued",
+        "conclusion": null,
+        "started_at": "2026-09-10T15:58:41Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102945163469,
+        "name": "opt-in group (g28 sparq-engine)",
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-09-10T16:13:52Z",
+        "completed_at": "2026-09-10T16:18:50Z",
+        "runner_id": 1000078022,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102945163470,
+        "name": "opt-in group (g16 sparq-reason)",
+        "status": "queued",
+        "conclusion": null,
+        "started_at": "2026-09-10T15:58:41Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102945163473,
+        "name": "opt-in group (g42 sparq-sim)",
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-09-10T16:13:53Z",
+        "completed_at": "2026-09-10T16:16:16Z",
+        "runner_id": 1000078023,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102945163480,
+        "name": "opt-in group (g22 sparq-lws-core)",
+        "status": "queued",
+        "conclusion": null,
+        "started_at": "2026-09-10T15:58:41Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102945163489,
+        "name": "opt-in group (g29 sparq-engine)",
+        "status": "queued",
+        "conclusion": null,
+        "started_at": "2026-09-10T15:58:41Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102945163517,
+        "name": "opt-in group (g30 sparq-engine)",
+        "status": "queued",
+        "conclusion": null,
+        "started_at": "2026-09-10T15:58:41Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102945163518,
+        "name": "opt-in group (g25 sparq-engine)",
+        "status": "queued",
+        "conclusion": null,
+        "started_at": "2026-09-10T15:58:41Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102945163519,
+        "name": "opt-in group (g18 sparq-mcp)",
+        "status": "queued",
+        "conclusion": null,
+        "started_at": "2026-09-10T15:58:41Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102945163534,
+        "name": "opt-in group (g39 sparq-kb)",
+        "status": "queued",
+        "conclusion": null,
+        "started_at": "2026-09-10T15:58:41Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102945163535,
+        "name": "opt-in group (g32 sparq-engine)",
+        "status": "queued",
+        "conclusion": null,
+        "started_at": "2026-09-10T15:58:41Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102945163566,
+        "name": "opt-in group (g26 sparq-engine)",
+        "status": "queued",
+        "conclusion": null,
+        "started_at": "2026-09-10T15:58:41Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102945163567,
+        "name": "opt-in group (g44 sparq-reason-dl)",
+        "status": "queued",
+        "conclusion": null,
+        "started_at": "2026-09-10T15:58:41Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102945163584,
+        "name": "opt-in group (g35 sparq-engine)",
+        "status": "queued",
+        "conclusion": null,
+        "started_at": "2026-09-10T15:58:41Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102945163588,
+        "name": "opt-in group (g37 sparq-shacl)",
+        "status": "queued",
+        "conclusion": null,
+        "started_at": "2026-09-10T15:58:41Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102945163591,
+        "name": "opt-in group (g41 sparq-reason-el)",
+        "status": "in_progress",
+        "conclusion": null,
+        "started_at": "2026-09-10T16:17:37Z",
+        "completed_at": null,
+        "runner_id": 1000078026,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": [
+          "Run the group's legs (build -> test -> clippy; results to artifact)"
+        ]
+      },
+      {
+        "id": 102945163592,
+        "name": "opt-in group (g24 sparq-lws-core)",
+        "status": "queued",
+        "conclusion": null,
+        "started_at": "2026-09-10T15:58:41Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102945163603,
+        "name": "opt-in group (g47 sparq-introspect)",
+        "status": "queued",
+        "conclusion": null,
+        "started_at": "2026-09-10T15:58:41Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102945163609,
+        "name": "opt-in group (g20 sparq-vectors)",
+        "status": "queued",
+        "conclusion": null,
+        "started_at": "2026-09-10T15:58:41Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102945163615,
+        "name": "opt-in group (g33 sparq-engine)",
+        "status": "queued",
+        "conclusion": null,
+        "started_at": "2026-09-10T15:58:41Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102945163620,
+        "name": "opt-in group (g31 sparq-engine)",
+        "status": "queued",
+        "conclusion": null,
+        "started_at": "2026-09-10T15:58:41Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102945163621,
+        "name": "opt-in group (g27 sparq-engine)",
+        "status": "queued",
+        "conclusion": null,
+        "started_at": "2026-09-10T15:58:41Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102945163624,
+        "name": "opt-in group (g34 sparq-engine)",
+        "status": "queued",
+        "conclusion": null,
+        "started_at": "2026-09-10T15:58:41Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102945163646,
+        "name": "opt-in group (g43 sparq-nlq)",
+        "status": "queued",
+        "conclusion": null,
+        "started_at": "2026-09-10T15:58:41Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102945163684,
+        "name": "opt-in group (g38 sparq-server)",
+        "status": "queued",
+        "conclusion": null,
+        "started_at": "2026-09-10T15:58:41Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102945163705,
+        "name": "opt-in group (g46 sparq-mpc)",
+        "status": "queued",
+        "conclusion": null,
+        "started_at": "2026-09-10T15:58:41Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102945163769,
+        "name": "opt-in group (g45 sparq-reason-ql)",
+        "status": "queued",
+        "conclusion": null,
+        "started_at": "2026-09-10T15:58:41Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      }
+    ]
+  },
+  "fuzz": {
+    "run_id": 34497774415,
+    "event": "push",
+    "head_sha": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+    "attempt": 1,
+    "workflow_status": "in_progress",
+    "workflow_conclusion": null,
+    "created_at": "2026-09-10T15:45:57Z",
+    "job_counts": {
+      "success": 2,
+      "in_progress": 1
+    },
+    "jobs": [
+      {
+        "id": 102940509546,
+        "name": "select / select (change-based test selection)",
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-09-10T15:50:14Z",
+        "completed_at": "2026-09-10T15:50:39Z",
+        "runner_id": 1000077979,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102942277285,
+        "name": "differential smoke (sparq vs Oxigraph, fixed regression windows)",
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-09-10T15:51:28Z",
+        "completed_at": "2026-09-10T15:54:59Z",
+        "runner_id": 1000077986,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102942277351,
+        "name": "cargo-fuzz (parsers + mmap loader, bounded)",
+        "status": "in_progress",
+        "conclusion": null,
+        "started_at": "2026-09-10T15:58:00Z",
+        "completed_at": null,
+        "runner_id": 1000078000,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": [
+          "Run each target (replay or randomized; run all, fail at end if any crashed)"
+        ]
+      }
+    ]
+  },
+  "gate": {
+    "run_id": 34497774057,
+    "event": "push",
+    "head_sha": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+    "attempt": 1,
+    "workflow_status": "in_progress",
+    "workflow_conclusion": null,
+    "created_at": "2026-09-10T15:45:57Z",
+    "job_counts": {
+      "in_progress": 1
+    },
+    "jobs": [
+      {
+        "id": 102940507965,
+        "name": "gate",
+        "status": "in_progress",
+        "conclusion": null,
+        "started_at": "2026-09-10T15:46:02Z",
+        "completed_at": null,
+        "runner_id": 1000077954,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": [
+          "Wait for all other checks, then aggregate"
+        ]
+      }
+    ]
+  },
+  "batch": {
+    "run_id": 34497773949,
+    "event": "push",
+    "head_sha": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+    "attempt": 1,
+    "workflow_status": "completed",
+    "workflow_conclusion": "failure",
+    "created_at": "2026-09-10T15:45:57Z",
+    "job_counts": {
+      "failure": 1,
+      "skipped": 1
+    },
+    "jobs": [
+      {
+        "id": 102940507106,
+        "name": "ring registry dispatcher",
+        "status": "completed",
+        "conclusion": "failure",
+        "started_at": "2026-09-10T15:46:00Z",
+        "completed_at": "2026-09-10T15:46:04Z",
+        "runner_id": 1000077951,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102940509477,
+        "name": "batch overflow into omnibus",
+        "status": "completed",
+        "conclusion": "skipped",
+        "started_at": "2026-09-10T15:45:58Z",
+        "completed_at": "2026-09-10T15:45:57Z",
+        "runner_id": null,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      }
+    ]
+  },
+  "release": {
+    "run_id": 34497774161,
+    "event": "push",
+    "head_sha": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+    "attempt": 1,
+    "workflow_status": "completed",
+    "workflow_conclusion": "failure",
+    "created_at": "2026-09-10T15:45:57Z",
+    "job_counts": {
+      "success": 1,
+      "failure": 1
+    },
+    "jobs": [
+      {
+        "id": 102940508410,
+        "name": "release-plz / tag (handoff to release.yml)",
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-09-10T15:46:15Z",
+        "completed_at": "2026-09-10T15:46:42Z",
+        "runner_id": 1000077959,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      },
+      {
+        "id": 102940508737,
+        "name": "release-plz / Release-PR (advisory)",
+        "status": "completed",
+        "conclusion": "failure",
+        "started_at": "2026-09-10T15:48:47Z",
+        "completed_at": "2026-09-10T15:49:22Z",
+        "runner_id": 1000077972,
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "active_steps": []
+      }
+    ]
+  }
+}

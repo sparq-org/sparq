@@ -1,0 +1,14 @@
+{
+  "head": "fe3284199db0831f353d2ae401b8c69472764904",
+  "clean": true,
+  "unchanged_32_engine_source_hashes": true,
+  "engine_core_substrate_lock_equal_local_main459": true,
+  "local_f50_object_check": {
+    "exit_code": 128,
+    "stderr": "fatal: bad object f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+    "qualification": "No fetch attempted. Root independently reported f50 tree equality to this exact fe328 tree; local reproducible base is459 and cleanfe328."
+  },
+  "free_bytes": 11469721600,
+  "source_edit_scope": "diagnostic copy only",
+  "commands_pending": false
+}

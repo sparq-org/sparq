@@ -1,0 +1,107 @@
+.github/workflows/fuzz.yml
+115: permissions:
+116:   contents: read
+117: 
+118: concurrency:
+119:   # [FABLE-5] label-trigger guard: labeled/unlabeled pull_request events get a
+120:   # PER-RUN group — a label-flip run entering the shared per-ref group would cancel
+121:   # the in-flight real run on the SAME head SHA (run-level cancellation precedes job
+122:   # `if:` evaluation), leaving cancelled check-runs that RED the ci-summary gate.
+123:   # All other events keep the shared per-ref group + cancel-in-progress as before.
+124:   group: fuzz-${{ github.workflow }}-${{ github.ref }}-${{ (github.event_name == 'pull_request' && contains(fromJSON('["labeled","unlabeled"]'), github.event.action)) && github.run_id || 'shared' }}
+125:   cancel-in-progress: true
+
+553:   # [FABLE-5] PR-level differential smoke (bead sq-0iqzw) — the BLOCKING
+554:   # wrong-answer gate. Runs the sparq-bench differential fuzzer (in-process
+555:   # Oxigraph 0.5 oracle, crates/sparq-bench/src/fuzz.rs) over FIXED regression
+556:   # windows:
+557:   #   * seeds 0..2000 'all' — the canonical broad smoke (the honor-system
+558:   #     `fuzz-smoke` entry from scripts/bench/run-all-benchmarks.sh, now enforced);
+559:   #   * seeds 4695..6895 'equality' + 'filter' — the sq-lr2ii known-catch windows
+560:   #     (the sargable-decimal f64-collapse bug reproduces ONLY in these dense
+561:   #     categories; 'all' misses it), so that bug class can never merge silently
+562:   #     again;
+563:   #   * the same 0..2000 window through the mmap / block-compressed / dict-spill
+564:   #     store rebuilds (env-selected read-path differentials).
+565:   # Fixed windows => deterministic, ~a minute of fuzz compute; the nightly
+566:   # ADVANCING-window exploration is differential.yml's job, not this gate's.
+567:   # The job name carries no "advisory"/"informational" token, so `ci-summary /
+568:   # gate` aggregates it as REQUIRED. It reuses this workflow's `select` pre-job:
+569:   # the guard's seed closure is _LANE_SEEDS["differential-smoke"] in
+570:   # scripts/ci_select.py (pinned by scripts/tests/test_ci_select_wiring.py) —
+571:   # sparq-core/sparq-engine (the engine under test) + sparq-bench (the harness/
+572:   # oracle itself). FAIL-CLOSED: empty/missing selection output => the leading
+573:   # `mode != 'selected'` disjunct runs the lane; a selection-skipped job reports
+574:   # `skipped` (= satisfied) to the gate exactly like the fuzz job above.
+575:   differential-smoke:
+576:     name: differential smoke (sparq vs Oxigraph, fixed regression windows)
+577:     needs: select
+578:     # [FABLE-5] label-trigger guard: same first AND-term as the fuzz job above (skip
+579:     # on non-ci-full/fuzz-full label flips; select alone runs); second AND-term is
+580:     # the unchanged fail-closed selection guard.
+581:     if: >-
+582:       (github.event_name != 'pull_request' ||
+583:        !contains(fromJSON('["labeled","unlabeled"]'), github.event.action) ||
+584:        contains(fromJSON('["ci-full","fuzz-full"]'), github.event.label.name)) &&
+585:       (needs.select.outputs.mode != 'selected' ||
+586:        contains(needs.select.outputs.affected, '"sparq-core"') ||
+587:        contains(needs.select.outputs.affected, '"sparq-engine"') ||
+588:        contains(needs.select.outputs.affected, '"sparq-bench"'))
+589:     runs-on: ubuntu-latest
+590:     timeout-minutes: 30
+591:     steps:
+592:       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+593:         with:
+594:           persist-credentials: false
+595:       - name: Rust (preinstalled stable)
+596:         # [FABLE-5] CI-economy (2026-07-18 directive): the ubuntu runner image
+597:         # ships a rustup stable toolchain; the SHA-pinned action's `rustup
+598:         # toolchain install stable` re-downloads the whole toolchain whenever
+599:         # the image lags the newest release. Use the preinstalled one —
+600:         # `rustup default`/`component add` never trigger a toolchain download.
+601:         run: |
+602:           rustup default stable
+603:           rustup show active-toolchain
+604:       - name: Cache cargo + target
+605:         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+606:         with:
+607:           # Share the nightly differential lane's cache key: both build the exact
+608:           # same sparq-bench release-fast binary, and differential.yml's main-scoped
+609:           # nightly save keeps this warm for every PR.
+610:           shared-key: differential-nightly
+611:       # Build distinctly so a compile error is reported separately from a mismatch.
+612:       - name: Build the differential fuzzer
+613:         run: cargo build -p sparq-bench --profile release-fast
+614:       - name: Run the fixed differential regression windows
+615:         run: |
+616:           set -euo pipefail
+617:           b=./target/release-fast/sparq-bench
+618:           # Canonical broad smoke (all categories, deterministic seeds).
+619:           "$b" fuzz 0 2000 all
+620:           # sq-lr2ii known-catch windows (category-dense; 'all' misses this class).
+621:           "$b" fuzz 4695 2200 equality
+622:           "$b" fuzz 4695 2200 filter
+623:           # sq-j80vk: fixed per-category regression windows over the SPARQL 1.1
+624:           # surfaces added to the generator (property paths, aggregates/GROUP BY/
+625:           # HAVING, sub-selects, EXISTS, VALUES, BIND, GRAPH) — plus sq-avd75's
+626:           # `antijoin` (the `OPTIONAL … FILTER(!bound)` idiom, i.e. rewrite (b) of the
+627:           # `algebra-rewrite` pass #1735, which the fuzzer builds ON) — and sq-qcnn.6's
+628:           # `typed` / `strfn` / `ask` / `construct` (the typed-literal columns, the
+629:           # string functions, and the two non-SELECT RESULT FORMS, which are compared
+630:           # by their boolean / canonical triple set rather than by a count). 'all'
+631:           # picks ONE category per seed, so the 2000-seed broad window above leaves
+632:           # each of the 21 categories only ~95 cases — too thin to be a per-PR net for
+633:           # a specific evaluation path. These are deterministic REGRESSION windows, not
+634:           # known-catch ones: no historical bug is pinned to these seeds yet, and if
+635:           # the nightly lane finds one its window gets pinned here the way sq-lr2ii's
+636:           # was. ~2 s per category at release-fast throughput.
+637:           for c in path aggregate subquery exists values bind graph antijoin \
+638:                    typed strfn ask construct; do
+639:             "$b" fuzz 0 10000 "$c"
+640:           done
+641:           # Store-mode read paths over the fixed window: the same seeds re-run with
+642:           # the store rebuilt through mmap / block-compressed / dict-spill (the
+643:           # dict-spill external build is the slowest per seed — smaller window).
+644:           SPARQ_FUZZ_MMAP=1 "$b" fuzz 0 2000 all
+645:           SPARQ_FUZZ_COMPRESS=1 "$b" fuzz 0 2000 all
+646:           SPARQ_FUZZ_DICTSPILL=1 "$b" fuzz 0 500 all

@@ -1,0 +1,87 @@
+{
+  "local_head": "fe3284199db0831f353d2ae401b8c69472764904",
+  "clean": true,
+  "current_main": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+  "main_equivalence": "Root independently verified merged f50 whole tree equals reviewed fe328; read-only source excerpts are from clean fe328. No Git/source mutation.",
+  "sources": [
+    {
+      "path": ".github/workflows/ci.yml",
+      "sha256": "8c2dd15936888aab25dd70c36d457811ac7ae453758643b9833ee1d2bf10985c",
+      "ranges": [
+        [
+          69,
+          87
+        ],
+        [
+          615,
+          645
+        ],
+        [
+          4050,
+          4076
+        ]
+      ],
+      "excerpt": "source-ci.yml.txt"
+    },
+    {
+      "path": ".github/workflows/feature-matrix.yml",
+      "sha256": "a4685a6f4b0b4655879176cb7bace120105feeebc533152a7a9fd5e38821dc2d",
+      "ranges": [
+        [
+          181,
+          191
+        ],
+        [
+          697,
+          744
+        ]
+      ],
+      "excerpt": "source-feature-matrix.yml.txt"
+    },
+    {
+      "path": ".github/workflows/fuzz.yml",
+      "sha256": "5a157d2e4e2592d701555a1d79890efb98d897f16b4f82d75b5b74bbeb664968",
+      "ranges": [
+        [
+          115,
+          125
+        ],
+        [
+          553,
+          646
+        ]
+      ],
+      "excerpt": "source-fuzz.yml.txt"
+    },
+    {
+      "path": ".github/workflows/batch-merge.yml",
+      "sha256": "75c775703e957c182e51433c2609a5723554e2d0f4fda681590537a1bde28515",
+      "ranges": [
+        [
+          132,
+          170
+        ]
+      ],
+      "excerpt": "source-batch-merge.yml.txt"
+    },
+    {
+      "path": ".github/workflows/release-plz.yml",
+      "sha256": "ed87845c99a671f4dcbf7a7ba8e5d8f3f13bea7afe9bfe6d112b2bdfa7adc04f",
+      "ranges": [
+        [
+          114,
+          125
+        ],
+        [
+          160,
+          192
+        ],
+        [
+          208,
+          225
+        ]
+      ],
+      "excerpt": "source-release-plz.yml.txt"
+    }
+  ]
+}

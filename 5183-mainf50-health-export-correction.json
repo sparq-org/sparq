@@ -1,0 +1,4 @@
+{
+  "first_export": "IndexError from source-excerpt end beyond workflow EOF; raw API/log records unaffected.",
+  "correction": "Clamp excerpt endpoint to actual file length; no further network reads, source edits, or executions."
+}
