@@ -1,0 +1,37 @@
+{
+  "at": "2026-09-10T18:45:34.503030+00:00",
+  "agent": "/root/postmerge_ci",
+  "model": "gpt-6-astra",
+  "effort": "xhigh",
+  "scope": "Controller-only correction and bounded continuation; unchanged production source and existing compiled candidate. Preserve immutable stopped evidence.",
+  "controller_fix": "Catch FileNotFoundError narrowly for entries disappearing during allocation census; tolerate only ENOENT in traversal/stat of entries, retain other errors and all free-space/time/growth guards. Document concurrency rationale.",
+  "artifact_directory": "direct-6483/validation-continuation",
+  "execution_limits": {
+    "max_continuation_seconds": 180,
+    "max_combined_allocated_bytes": 201326592,
+    "accounted_roots": [
+      "worktrees/issue6483",
+      "direct-6483/implementation",
+      "direct-6483/validation-continuation"
+    ],
+    "start_free_bytes": 2214592512,
+    "continuous_minimum_free_bytes": 2147483648,
+    "export_reserve_bytes": 8388608,
+    "candidate_builds": 0,
+    "candidate_runs": 1,
+    "control_builds": 1,
+    "control_runs": 1,
+    "clippy": "One scoped warm actual-module Clippy run if available, no dependency rebuild.",
+    "offline": true,
+    "jobs": 1,
+    "incremental": false
+  },
+  "preconditions": [
+    "Verify exact original candidate source and binary hashes before continuation; production source unchanged.",
+    "Original agent commands all terminal, old frozen manifest unchanged.",
+    "Compute aggregate current allocation and reserves before launching."
+  ],
+  "stop_on_unexpected_behavior": true,
+  "publication_authorized": false,
+  "final_exact_source_review_required": true
+}

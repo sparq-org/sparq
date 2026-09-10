@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-10T18:28:52.052509+00:00",
+  "updated_at": "2026-09-10T18:47:33.234422+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -72,7 +72,7 @@
     "agent": "/root/postmerge_ci",
     "model": "gpt-6-astra",
     "effort": "xhigh",
-    "phase": "Reviewed9ac head ready; Copilot recommends approval/no threads; paths-filter recovered on one failed-job rerun; core CI/matrix still pending.",
+    "phase": "All6486 current peerworkflows succeeded; aggregate rerun accepted. Collect actualcoretest/feature/doc proof for queue.",
     "execution_limits": {
       "max_total_seconds": 600,
       "max_new_allocated_bytes": 268435456,
@@ -85,7 +85,7 @@
       "extra": "At most one matching recorded mmap/dict-spill candidate adaptation; no dependency rebuild.",
       "checks": "Scoped Clippy/touched formatting/diff if warm; CI authority for broad matrix."
     },
-    "state": "pr6486_required_CI_pending_source_incident_recovered",
+    "state": "pr6486_aggregate_recovery_pending_after_all_peer_success",
     "directory": "direct-6485/implementation",
     "admission": "direct-6485/admission/corrected-controls-admission.json",
     "production_edit_authorized": false,
@@ -126,7 +126,7 @@
       "root_disposition": "direct-6485/admission/opus-memo-design-root-disposition.json",
       "output_sha256": "c619dd1d92a198c46a7e2b26ca8ab34e08de5612bd6db3920b451263d5891886"
     },
-    "agent_current_task": "6483 scoped comparator implementation + actual contract tests under bounded execution admission.",
+    "agent_current_task": "6483 unchangedcandidate validation continuation with narrow resource-census ENOENT correction",
     "implementation_admission": "direct-6485/admission/implementation-admission.json",
     "implementation_readiness": {
       "directory": "direct-6485/implementation-readiness",
@@ -204,14 +204,14 @@
       "output_sha256": "8fa4f54f0e0dcd1f085050be355ecdd69bad75bd7c9b4683682295dec720bc7b"
     },
     "CI": {
-      "latest": "direct-6485/admission/pr6486-runs1808.json",
+      "latest": "direct-6485/admission/runs1844.json",
       "CI": 34511329235,
       "feature_matrix": 34511329512,
       "gate": 34511329028,
-      "state": "Current coreCI/matrix progressing; all completed jobs success/skipped. No new failure; aggregate recovery waits all relevant peers.",
+      "state": "CI33success6skip/matrix56success; everylatestworkflow exceptci-summary successful; one aggregate-only rerun accepted",
       "latest_jobs": [
-        "direct-6485/admission/ci-jobs1825.json",
-        "direct-6485/admission/matrix-jobs1825.json"
+        "direct-6485/admission/ci-jobs1844.json",
+        "direct-6485/admission/matrix-jobs1844.json"
       ]
     },
     "copilot": {
@@ -232,10 +232,12 @@
       "status": "CompletedSUCCESSattempt2 at18:04:58",
       "verification": "direct-6485/admission/paths-filter-recovery-watch.json",
       "reruns_requested": 1,
-      "aggregate_rerun_performed": false,
+      "aggregate_rerun_performed": true,
       "policy": "Do not replay recovery; reaggregate only after current required peers actually green, with fresh head/budget/check evidence. No cancellations or gate/floor changes.",
       "aggregate_prepared_script": "direct-6485/admission/recover6486-aggregate.py",
-      "aggregate_script_state": "Prepared and parsed only; NOT EXECUTED. Preconditions require latest cohort terminalgreen exceptaggregate and exact9ac target. One-shot receipt guard."
+      "aggregate_script_state": "43375 completed/collected; one aggregate-only job rerun accepted. Do not replay.",
+      "aggregate_receipt": "direct-6485/admission/recover6486-aggregate-receipt.json",
+      "aggregate_rerun_job": 102985912054
     }
   },
   "prs": {
@@ -790,10 +792,9 @@
     }
   },
   "next_actions": [
-    "Wait current6486 required CI/matrix; collect actualmemo test/current feature execution proof before queue.",
-    "One aggregate-only recovery after required peers green and fresh head/budget/checks; no current evidence cancellations.",
-    "Collect6483 implementation, verify source/evidence, actual Opus final review before any publication.",
-    "Existing /root/postmerge_ci running6483. Reuse; no duplicate agent/review/test launches. Completed Opus69637 must not be polled or relaunched."
+    "Collect6483 continuation; preserve prior interrupted evidence and sourceidentity; actual Opus final review before publication.",
+    "Collect actual6486 memo CI test/feature/doc proof via existingAstra after6483 freeze.",
+    "Verify aggregate34511329028 attempt2 result; do not rerun again blindly. Once proof/currentreviews/head/budget/gate15368 clear, normal protected queue exact9ac jumpfalse."
   ],
   "followup_lane": {
     "issue": 6480,
@@ -1071,12 +1072,12 @@
     "6483": {
       "state": "open",
       "runtime_gap_confirmed": true,
-      "implementation": "Astra xhigh implementing scoped repair after conditional actual Opus design; runtime scope control and final review required",
+      "implementation": "Sourcecandidate complete, original validation interrupted by resource census ENOENT; narrowly corrected controller continuation active, no publication",
       "scope": "Raw duplicate-output diagnostic contract; legitimate arbitrary query bags require separate semantics.",
       "coordination": {
         "issue": 6483,
         "agent": "/root/postmerge_ci",
-        "state": "implementation_running_after_conditional_Opus_design",
+        "state": "validation_continuation_running_after_controller_ENOENT",
         "directory": "direct-6483/repair-readiness",
         "production_edits_authorized": true,
         "readiness": {
@@ -1119,6 +1120,18 @@
           "result": "direct-6483/admission/opus-duplicate-design-result.json",
           "root_disposition": "direct-6483/admission/opus-duplicate-design-root-disposition.json",
           "policy": "69637 completed/collected; no poll or relaunch. Final source review remains required."
+        },
+        "implementation_directory": "direct-6483/implementation",
+        "continuation_directory": "direct-6483/validation-continuation",
+        "continuation_admission": "direct-6483/admission/validation-continuation-admission.json",
+        "interrupted_implementation": {
+          "manifest_sha256": "dfa1ff9fa266fe27756028bd148a7fccb77898bf8926c9c52bcd4bd5aaef6157",
+          "files": 40,
+          "root_verification": "direct-6483/admission/implementation-stopped-root-verification.json",
+          "candidate_source_sha256": "ca35e2bd604e8abe5b3004b2987dbb7c377b9fd369c1d2f82b68d164b888caa4",
+          "candidate_build": "pass",
+          "candidate_suite": "interruptedbycontrollerENOENT;4oldpass/zero6new/control/Clippy;noRustassertionfailure",
+          "production_change_for_continuation": false
         }
       }
     }
@@ -4603,7 +4616,7 @@
   "next_lane_readiness": {
     "issue": 6483,
     "agent": "/root/postmerge_ci",
-    "state": "implementation_running_after_conditional_Opus_design",
+    "state": "validation_continuation_running_after_controller_ENOENT",
     "directory": "direct-6483/repair-readiness",
     "production_edits_authorized": true,
     "readiness": {
@@ -4646,6 +4659,18 @@
       "result": "direct-6483/admission/opus-duplicate-design-result.json",
       "root_disposition": "direct-6483/admission/opus-duplicate-design-root-disposition.json",
       "policy": "69637 completed/collected; no poll or relaunch. Final source review remains required."
+    },
+    "implementation_directory": "direct-6483/implementation",
+    "continuation_directory": "direct-6483/validation-continuation",
+    "continuation_admission": "direct-6483/admission/validation-continuation-admission.json",
+    "interrupted_implementation": {
+      "manifest_sha256": "dfa1ff9fa266fe27756028bd148a7fccb77898bf8926c9c52bcd4bd5aaef6157",
+      "files": 40,
+      "root_verification": "direct-6483/admission/implementation-stopped-root-verification.json",
+      "candidate_source_sha256": "ca35e2bd604e8abe5b3004b2987dbb7c377b9fd369c1d2f82b68d164b888caa4",
+      "candidate_build": "pass",
+      "candidate_suite": "interruptedbycontrollerENOENT;4oldpass/zero6new/control/Clippy;noRustassertionfailure",
+      "production_change_for_continuation": false
     }
   }
 }

@@ -1,0 +1,73 @@
+{
+  "total_count": 1,
+  "jobs": [
+    {
+      "id": 102985912054,
+      "run_id": 34511329028,
+      "workflow_name": "ci-summary",
+      "head_branch": "codex/preserve-numeric-memo",
+      "run_url": "https://api.github.com/repos/sparq-org/sparq/actions/runs/34511329028",
+      "run_attempt": 1,
+      "node_id": "CR_kwDOSz3qKM8AAAAX-nBO9g",
+      "head_sha": "9ac4a59e96b1c69c8d617fbde9e98fe8c0436fed",
+      "url": "https://api.github.com/repos/sparq-org/sparq/actions/jobs/102985912054",
+      "html_url": "https://github.com/sparq-org/sparq/actions/runs/34511329028/job/102985912054",
+      "status": "completed",
+      "conclusion": "failure",
+      "created_at": "2026-09-10T17:57:08Z",
+      "started_at": "2026-09-10T17:58:15Z",
+      "completed_at": "2026-09-10T17:58:25Z",
+      "name": "gate",
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 1,
+          "started_at": "2026-09-10T17:58:15Z",
+          "completed_at": "2026-09-10T17:58:16Z"
+        },
+        {
+          "name": "Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 2,
+          "started_at": "2026-09-10T17:58:16Z",
+          "completed_at": "2026-09-10T17:58:18Z"
+        },
+        {
+          "name": "Wait for all other checks, then aggregate",
+          "status": "completed",
+          "conclusion": "failure",
+          "number": 3,
+          "started_at": "2026-09-10T17:58:18Z",
+          "completed_at": "2026-09-10T17:58:23Z"
+        },
+        {
+          "name": "Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 6,
+          "started_at": "2026-09-10T17:58:23Z",
+          "completed_at": "2026-09-10T17:58:24Z"
+        },
+        {
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 7,
+          "started_at": "2026-09-10T17:58:24Z",
+          "completed_at": "2026-09-10T17:58:24Z"
+        }
+      ],
+      "check_run_url": "https://api.github.com/repos/sparq-org/sparq/check-runs/102985912054",
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "runner_id": 1000078170,
+      "runner_name": "GitHub Actions 1000078170",
+      "runner_group_id": 0,
+      "runner_group_name": "GitHub Actions"
+    }
+  ]
+}

@@ -1,0 +1,79 @@
+{
+  "compiler": {
+    "path": "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/rustc",
+    "exists": true,
+    "sha256": "210df6794001b73ec3d453878707fa1e0bdcb63c427024a6e6574bbe5615a4da",
+    "bytes": 412504
+  },
+  "externs": [
+    {
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/liboxigraph-93faeb99561d9c18.rlib",
+      "exists": true,
+      "expected_sha256": "061387827fb57834ef2159ba30869c762136532e7d89c1fedc24225922f8ef78",
+      "bytes": 4080216,
+      "sha256": "061387827fb57834ef2159ba30869c762136532e7d89c1fedc24225922f8ef78",
+      "matches": true
+    },
+    {
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/liboxrdf-a953fc3282e3d853.rlib",
+      "exists": true,
+      "expected_sha256": "491471fab5133fe72a254ceba0e57440914aedf52ba79e1898df16442b65e82a",
+      "bytes": 1921384,
+      "sha256": "491471fab5133fe72a254ceba0e57440914aedf52ba79e1898df16442b65e82a",
+      "matches": true
+    },
+    {
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libserde_json-dfbc1c86400a124e.rlib",
+      "exists": true,
+      "expected_sha256": "82e04818b4316e664e56972def65b77f697798d13a0746f07fff488acadd9be0",
+      "bytes": 1952816,
+      "sha256": "82e04818b4316e664e56972def65b77f697798d13a0746f07fff488acadd9be0",
+      "matches": true
+    },
+    {
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libsparq_canon-38f96fcabe5b0906.rlib",
+      "exists": true,
+      "expected_sha256": "9c8027ebf3e494cecde1a7755289737ef36a407bd9f065f5abe489e973dc7018",
+      "bytes": 674744,
+      "sha256": "9c8027ebf3e494cecde1a7755289737ef36a407bd9f065f5abe489e973dc7018",
+      "matches": true
+    },
+    {
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libsparq_core-ecad7fe38b152a30.rlib",
+      "exists": true,
+      "expected_sha256": "a00b383a2789eff25fe29b9d3e7bf9ac905d7b54e7c57ba3e383f1f824fc5581",
+      "bytes": 4397856,
+      "sha256": "a00b383a2789eff25fe29b9d3e7bf9ac905d7b54e7c57ba3e383f1f824fc5581",
+      "matches": true
+    },
+    {
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libsparq_engine-1603d23b1ddfa53f.rlib",
+      "exists": true,
+      "expected_sha256": "562fe4d414372d44511ddcc6b073d8145c8c3c7a738c7e796abaaa2908c8fa7b",
+      "bytes": 5404992,
+      "sha256": "562fe4d414372d44511ddcc6b073d8145c8c3c7a738c7e796abaaa2908c8fa7b",
+      "matches": true
+    }
+  ],
+  "source_sha256": "ca35e2bd604e8abe5b3004b2987dbb7c377b9fd369c1d2f82b68d164b888caa4",
+  "allowlist_sha256": "2b6821405a540221cadde3df8ca2468cf141d1a907c44d75e881f6feadbdedd2",
+  "environment": {
+    "TMPDIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6483/implementation/tmp",
+    "CARGO_PROFILE_RELEASE_OPT_LEVEL": "3",
+    "CARGO_PROFILE_RELEASE_DEBUG": "false",
+    "CARGO_PROFILE_RELEASE_LTO": "false",
+    "CARGO_PROFILE_RELEASE_CODEGEN_UNITS": "16",
+    "CARGO_PROFILE_RELEASE_PANIC": "unwind",
+    "CARGO_BUILD_JOBS": "1",
+    "CARGO_INCREMENTAL": "0",
+    "CARGO_NET_OFFLINE": "true",
+    "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+    "RUSTC": "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/rustc",
+    "RUST_BACKTRACE": "1",
+    "RAYON_NUM_THREADS": "1",
+    "CARGO_MANIFEST_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6483/implementation/harness/crates/sparq-bench"
+  },
+  "edition": "2021",
+  "profile": "O3/unwind/no-LTO/codegen16",
+  "dependency_builds": 0
+}

@@ -1,0 +1,7 @@
+{
+  "at": "2026-09-10T18:45:34.499390+00:00",
+  "manifest_sha256": "dfa1ff9fa266fe27756028bd148a7fccb77898bf8926c9c52bcd4bd5aaef6157",
+  "verified_files": 40,
+  "source_sha256": "ca35e2bd604e8abe5b3004b2987dbb7c377b9fd369c1d2f82b68d164b888caa4",
+  "result": "Compiled; suite interrupted by census ENOENT; four existing passed, zero new/control/Clippy complete; no assertion failure observed. No success admission."
+}

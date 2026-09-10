@@ -1,0 +1,38 @@
+{
+  "finding": "No source contradiction: unqualified Sparq query reads graph.store; GRAPH iterates named subgraphs. Oxigraph Store::query uses new/default evaluator and QueryDatasetSpecification default is only GraphName::DefaultGraph, with named unrestricted. No union-setting method called by comparator probes. Runtime same-SPO default+two-named control required in sole candidate run.",
+  "prior_compare_tests": "Inspected existing duplicate tests: unequal-count duplicate expectsCOUNTS; distinct-lexical redistribution expectsDiffers; no duplicate-bearing self-Same expectation found in the20existingtests. Full original20 will execute unchanged.",
+  "sources": [
+    {
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6483/crates/sparq-engine/src/lib.rs",
+      "sha256": "074740149d0649b0334d1814ca289feaad54070ca0d90bf5737601f7021a7538"
+    },
+    {
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6483/crates/sparq-engine/src/lib.rs",
+      "sha256": "074740149d0649b0334d1814ca289feaad54070ca0d90bf5737601f7021a7538"
+    },
+    {
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6483/crates/sparq-engine/src/exec.rs",
+      "sha256": "10090299f707dbf4adb4cae6349bd390a06ed2a50645e8c3417bcc3b90fb20af"
+    },
+    {
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6483/crates/sparq-engine/src/exec.rs",
+      "sha256": "10090299f707dbf4adb4cae6349bd390a06ed2a50645e8c3417bcc3b90fb20af"
+    },
+    {
+      "path": "/Users/jesght/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/oxigraph-0.5.9/src/store.rs",
+      "sha256": "076529d63b49107b6d0b0dd690a3891381945bbb0a2e619059cb33a9c0a95e32"
+    },
+    {
+      "path": "/Users/jesght/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/oxigraph-0.5.9/src/store.rs",
+      "sha256": "076529d63b49107b6d0b0dd690a3891381945bbb0a2e619059cb33a9c0a95e32"
+    },
+    {
+      "path": "/Users/jesght/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spareval-0.2.6/src/lib.rs",
+      "sha256": "a470a4300ad10a21035b95cf721549727aaf4a3c5d51de05cd3103b95758f2e9"
+    },
+    {
+      "path": "/Users/jesght/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spareval-0.2.6/src/lib.rs",
+      "sha256": "a470a4300ad10a21035b95cf721549727aaf4a3c5d51de05cd3103b95758f2e9"
+    }
+  ]
+}

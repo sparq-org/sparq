@@ -1,0 +1,7 @@
+
+running 26 tests
+test update_fuzz::tests::blank_node_compare_is_isomorphism_not_relabelling_blindness ... ok
+test update_fuzz::tests::committed_allowlist_enables_exactly_the_adjudicated_classes ... ok
+test update_fuzz::tests::duplicate_quad_is_caught_despite_canonicalization ... ok
+test update_fuzz::tests::fixed_window_smoke ... ok
+test update_fuzz::tests::generated_integer_domain_is_injective_including_load ... 

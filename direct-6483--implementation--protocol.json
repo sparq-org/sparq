@@ -1,0 +1,13 @@
+{
+  "before_execution": true,
+  "candidate": "One actual-module build and full26tests: unchanged20plus6new.",
+  "control": "One compiled guard-removal mutant and exact regression filteredrun expected101 plusSame assertionmessage.",
+  "limits": {
+    "seconds": 300,
+    "allocated": 134217728,
+    "reserve": 8388608,
+    "free": 2147483648,
+    "jobs": 1
+  },
+  "no_dependency_build_or_retry": true
+}

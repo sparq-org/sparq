@@ -1,0 +1,1 @@
+warning: divergence allowlist lists update class "update-not-a-real-class" but update-fuzz has no detector for it — that class stays STRICT

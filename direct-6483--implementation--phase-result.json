@@ -1,0 +1,7 @@
+{
+  "status": "stopped",
+  "reason": "unexpected command result; stop",
+  "seconds": 16.114553792,
+  "commands_terminal": 2,
+  "pending": false
+}

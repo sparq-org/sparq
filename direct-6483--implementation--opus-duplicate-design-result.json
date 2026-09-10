@@ -1,0 +1,45 @@
+{
+  "verdict": "CONDITIONAL",
+  "summary": "The boundary is correctly located and provably closes exactly the demonstrated gap, at O(N) borrowed cost and with no engine/canon/API change. Conditions are test- and evidence-level, not redesign.",
+  "supported_contract_and_references": {
+    "gap_is_real_and_confined_to_strict_Same": "compare() lines 962-975: when ca==cb only raw LENGTHS are compared, so [p,p,q] vs [p,q,q] (relabel=true, canonical_lines dedups at rdf12.rs:950) returns Same. Matches the frozen witness (identical_lexical_redistribution => Same in both allow modes).",
+    "no_other_path_leaks": "ca!=cb & allow=false => Differs (1020). ca!=cb & allow=true => oxigraph_normalized already rejects duplicate rows (903-907) before comparable(). So the Same branch is the only uncovered path.",
+    "no_duplicate_can_stay_hidden_after_the_fix": "Given the preceding a.len()==b.len() check and ca==cb, |set(a)|=|ca|=|cb|=|set(b)| (relabel=true, issuer is injective; relabel=false ca==a verbatim). Hence duplicates on one side imply duplicates on the other; a single-side raw-uniqueness test is already sufficient, and no duplicate-bearing pair can reach Same by any other combination (unequal counts => COUNTS message; unequal sets => Differs).",
+    "caller_uniqueness": "sparq_nquads (716-736) and oxi_nquads (739-757) enumerate per (graph,quad); PROBES (1030-1036) project every component of exactly one triple pattern (?s ?p ?o and GRAPH ?g {?s ?p ?o}), so each solution names one distinct quad. Comment at 714-715 and the 5183-era COUNTS guard already declare duplicates defects.",
+    "cannot_flip_a_green_run_red_without_an_adjacent_failure": "Oxigraph's Store is a set and neither probe projects away a component, so a both-sides duplicate requires a sparq-side duplicate, which already fails the sparq-vs-oxigraph compare at 1276/1300 with COUNTS differ.",
+    "blank_node_symmetry": "Per-side raw-line repetition is invariant under bijective relabelling and never compares labels across engines; automorphic bnodes render distinct raw lines and remain eligible for the unchanged canonicalizer. No weighted/multiset canonicalizer is introduced; rejecting the multiplicity-colored alternative is correct because RDFC-1.0 first-degree hashing is defined over a set and duplicate quads make the issued map ill-defined.",
+    "rdf12": "Duplicate detection is on the rendered line; ground-terms fail-closed (rdf12.rs:409-414), depth bound (474-482) and nested-term Display are untouched."
+  },
+  "material_risks_and_missing_context": [
+    "Reflexivity is weakened: compare(x,x) with a repeated line now returns Differs. This is intended (invalid emission) but must be documented and the existing 20 module tests scanned for any duplicate-bearing self-compare.",
+    "The 'each probe row is one quad' claim depends on the query dataset scoping of BOTH engines. sparq_engine::query and Oxigraph's deprecated Store::query default dataset are NOT in the packet. If either used union-default-graph, probe 0 could legitimately duplicate rows for the same triple present in several graphs. Indirect evidence (the harness is green today) is not a substitute; pin it with a test (below).",
+    "Diagnostic determinism: one_sided(ca,cb) is empty here, and in the witness case BOTH sides repeat; the message must be deterministic (fixed side order, exact repeated line, occurrence count) or tests will be flaky. Do not reuse the 'one side is yielding a duplicate quad' wording.",
+    "Ordering is load-bearing: the new check must stay AFTER the a.len()!=b.len() guard or the existing duplicate_quad_is_caught_despite_canonicalization assertion on 'COUNTS differ' (1774) breaks.",
+    "Silent-scope drift: a future projecting/joining probe would make the guard wrong. Needs a doc note at PROBES plus a cheap shape test.",
+    "mentions_blank_node is a substring test, so a literal containing '_:' routes bnode-free input through canon; the guard must therefore not assume relabel=true implies real blank nodes (it does not)."
+  ],
+  "smallest_safe_implementation": {
+    "file": "crates/sparq-bench/src/update_fuzz.rs only (private helper, docs, tests)",
+    "placement": "compare(), inside `if ca == cb`, after the raw-count guard, before `return Verdict::Same`.",
+    "code_shape": "fn repeated_raw_line(lines:&[String])->Option<(&str,usize)> using a BTreeSet<&str> single pass (no sortedness assumption, no String allocation); check side a then side b; return Verdict::Differs with label, the original repeated line, its count, and both raw totals.",
+    "not_changed": "comparable/canonicalization, mentions_blank_node, oxigraph_normalized, record_lexical_terms, blank-node-count and lexical adjudication paths, all existing error strings and ordering, PROBES semantics, engines, allowlist.",
+    "docs": "State that this private comparator's inputs are complete-quad snapshots or full-quad probe rows, that a repeated raw quad is an invalid emission, and explicitly disclaim any general SPARQL bag-uniqueness policy.",
+    "cost": "O(N log N) comparisons / O(N) borrowed refs in the success branch only; no new threshold, allocation of strings, or engine work."
+  },
+  "required_focused_tests": [
+    "Witness fixation: identical-lexical [p,p,q] vs [p,q,q] on a shared bnode subject => Differs in allow=false AND allow=true, with the repeated original line present in the detail.",
+    "Legitimate-duplicate probe control (the missing-evidence test): build a graph with the SAME triple in the default graph and in a named graph (and in two named graphs); assert sparq_probe and oxi_probe rows for BOTH PROBES are duplicate-free and equal, i.e. compare(...) is Same. This pins non-union default-graph scoping for both engines and is the concrete case that would invalidate the boundary.",
+    "Ordering preservation: one-sided duplicate still reports 'COUNTS differ' (existing test at 1766 must pass unmodified).",
+    "Both-sides identical duplicate vector, bnode-free (relabel=false) => Differs; also with an unsorted input order and with the duplicates non-adjacent (proves the set check, not windows(2)).",
+    "Non-regression of uniqueness/symmetry: duplicate-free symmetric bnode graph vs bijectively renamed/reordered graph remains Same; same S/P/O in two different named graphs remains Same (must NOT trip the guard); duplicated exact quad within one named graph fails.",
+    "Unchanged lexical/error paths: existing 020/021 vs 20/21 adjudication positive, blank-node-count-differs message, unknown datatype/language Differs, nested ground triple-term positive and nested-bnode fail-closed all unchanged.",
+    "PROBES shape guard: assert PROBES var lists are exactly ['s','p','o'] and ['s','p','o','g'] so adding a projecting probe fails a test rather than silently changing the contract."
+  ],
+  "guard_removal_control": "Recompile the candidate module with ONLY the new duplicate guard deleted; the witness-fixation test must fail by observing Verdict::Same (not a compile error). Note: a 'check side a only' mutant is provably equivalent at that program point, so do not claim a mutation test discriminates it; both sides are checked for diagnostics, not for extra detection power.",
+  "cannot_be_claimed": [
+    "No engine wrong-answer bug, no public RDF/SPARQL semantics change, no claim that arbitrary projection/join/UNION result bags must be duplicate-free.",
+    "No seed-replay, full-suite, throughput or resource-benefit claim; the witness is one synthetic structure plus one lexical control in two allow modes.",
+    "No revalidation of the merged 5183 reference-corpus repair, no canonicalization-algorithm correctness claim, no bound change or new failure forgiveness.",
+    "Approval is design-only: new source still requires actual final review, normal CI and the recorded-toolchain module run; all existing protections remain intact."
+  ]
+}

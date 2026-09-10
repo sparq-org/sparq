@@ -1,0 +1,59 @@
+{
+  "at": "2026-09-10T18:33:43.075215+00:00",
+  "author": "GPT-6 Astra xhigh",
+  "status": "STOPPED_VALIDATION_INCOMPLETE; NOT_REVIEW_READY_FOR_ADMISSION",
+  "base": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+  "branch": "codex/update-comparator-raw-duplicates",
+  "worktree_head": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+  "commit_created": false,
+  "changed_paths": [
+    "crates/sparq-bench/src/update_fuzz.rs"
+  ],
+  "diff_stat": "167 additions,0deletions",
+  "source_sha256": "ca35e2bd604e8abe5b3004b2987dbb7c377b9fd369c1d2f82b68d164b888caa4",
+  "implementation": "Private borrowedBTreeSet rawduplicate helper, samebranch guard afterCOUNTS, deterministic sidefirst exactline/count/totals; completequad docs and6newtests. Canonicalization/lexical/error engines unchanged.",
+  "scope_audit": "Bothengine source supports storedefault and separate namedgraphs. ActualsameSPOdefault+2named runtimecontrol compiled butNOTEXECUTED dueearlier interruptedtest. Sourceproof in scope-audit.json and pre-edit-scope-source.txt.",
+  "execution": {
+    "candidate_build_exit": 0,
+    "candidate_build_seconds": 13.667813542000001,
+    "candidate_test_exit": -15,
+    "candidate_test_started_count": 26,
+    "passed_before_interrupt": [
+      "update_fuzz::tests::blank_node_compare_is_isomorphism_not_relabelling_blindness",
+      "update_fuzz::tests::committed_allowlist_enables_exactly_the_adjudicated_classes",
+      "update_fuzz::tests::duplicate_quad_is_caught_despite_canonicalization",
+      "update_fuzz::tests::fixed_window_smoke"
+    ],
+    "active_test_when_interrupted": "generated_integer_domain_is_injective_including_load",
+    "new_tests_executed": 0,
+    "control_builds": 0,
+    "control_runs": 0,
+    "clippy_runs": 0,
+    "phase_seconds": 16.114553792
+  },
+  "failure": {
+    "origin": "task resource-census controller, not Rust assertion",
+    "error": "[Errno 2] No such file or directory: '/private/tmp/sparq-pr6049/.throughput-monitor/direct-6483/implementation/tmp/sparq-update-fuzz-33385-164'",
+    "mechanism": "check() walks task-owned outputs while existing LOAD tests create/delete sandboxdirectories. Entry vanished between rglob enumeration and stat/is_file traversal; FileNotFoundError triggered strict controller SIGTERM. Test Drop removes LOADsandbox during normal operation.",
+    "source_assertion_failure_observed": false,
+    "retry_performed": false
+  },
+  "resources": {
+    "peak_observed_including_new_worktree_bytes": 111558656,
+    "minimum_observed_free_bytes": 13706104832,
+    "allocated_cap": 134217728,
+    "reserved_export_bytes": 8388608,
+    "no_known_cap_exhaustion": true
+  },
+  "completed_mechanical": [
+    "Newtestblock formatted with pinnedrustfmt/config beforecompile",
+    "gitdiff--check passed beforecompile; sourceunchangedsincecompile"
+  ],
+  "uncompleted_obligations": [
+    "Full26module pass includingboth-engine probescope; controlcompile+assertionkill; scopedClippy; finalsourcecommit andactualOpusfinalreview; authoritativeCI."
+  ],
+  "proposed_next_step": "Root may grant resource-controller-only continuation: tolerate FileNotFoundError solely for entries that vanish during allocation enumeration, preserving othererrors/time/growth/free guards; then execute exact existingcandidatebinary fullsuite once, compile/runguard-removal andClippy within remainingboundedbudget. Do not changeproduction toaddress thiscontrollerfailure. No executionautomaticallyscheduled.",
+  "pending_commands": 0,
+  "remote_mutations": 0,
+  "existing_memo_branch_unchanged": true
+}
