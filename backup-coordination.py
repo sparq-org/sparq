@@ -346,6 +346,9 @@ for evidence_name in ['README.md', 'candidate/LICENSE', 'candidate/README.md', '
 for evidence_name in ['completed-pr-revalidation-0013.json', 'remove-completed-worktrees.py', 'completed-worktrees-removed.json', 'tie-candidate-root-verification.json', 'opus-candidate-input.md', 'opus-candidate-input-audit.json', 'live-state-0018.json', 'registry-pause-0018.json', 'rate-budget-0018.json', 'candidate-no-go-comment.md', 'candidate-no-go-comment-url.txt', 'candidate-no-go-readback.json', 'candidate-no-go-comment-verified.json', 'engine-frontier-0023.json', 'core-frontier-0023.json', 'perf-next-shortlist.json']:
     FILES['6475-source-admission-' + evidence_name] = ROOT / 'direct-6475/source-admission' / evidence_name
 
+for evidence_name in ['opus-candidate-review.json', 'opus-candidate-review.stderr.log', 'opus-candidate-result.json', 'opus-candidate-completion.json', 'perf3105-readiness.json', 'perf3105-admission.json', 'perf3105-admission-page2.json', 'completed-topk-cache-reclamation.json']:
+    FILES['6475-source-admission-' + evidence_name] = ROOT / 'direct-6475/source-admission' / evidence_name
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout

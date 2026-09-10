@@ -1,0 +1,41 @@
+{
+  "at": "2026-09-10T00:28:18.762567+00:00",
+  "decision": "Stop complete-outcome/replay repair line; do not run the optional top-only pruning falsification. Keep6475OPEN and6095held. Return singleimplementationlane toSPARQLperformance3105 afterfreshduplication/source/resource checks.",
+  "basis": "Prototype empirically newlyfails4positiveW3Cfixtures; no successful recursivecompletion; top-onlypruning cannotaddressthreepreleafrecursivefailures. Furtherstate-equivalenceproof/refactor is beyond a narrow near-termrepair. No permission/owner-signoff invention; unsolvedtechnicalwork remains tracked.",
+  "review_caveats": [
+    "ReviewerW1 identityextension is not generally a bijection for disjoint issuerdomains: mappinga->b and identityb->bcollides. Therefore its predicted059collapse is not established; reciprocalextensionwouldbe a differentcandidate requiringexact verification.",
+    "Reviewers0033-style nonautomorphiccontrol suggestion is not supported: the supplied033dataset has two identicaldisconnectededges. Useactualsavednonautomorphictie forsuchacontrol.",
+    "No acceptedstandardsclassification/non-RDFC-byteclaim inferred. Budgetacceptancechanges are compatibilityconcerns, not automatically normativeviolations. Thedecisionrests onexecutedregressions/proofgap, nottheseuncertainclaims."
+  ],
+  "actual_review": "claude-opus-5 xhigh; auxiliaryHaikuCLIusage separatelyrecorded",
+  "review_output_sha256": "88e4c3c4174a1b7339d1e0d63bae6a2480b23ffd402fe04f70567fa343067db0",
+  "modelUsage": {
+    "claude-haiku-4-5-20251001": {
+      "inputTokens": 36100,
+      "outputTokens": 20,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 0,
+      "webSearchRequests": 0,
+      "costUSD": 0.0362,
+      "contextWindow": 200000,
+      "maxOutputTokens": 32000,
+      "canonicalModel": "claude-haiku-4-5",
+      "provider": "firstParty"
+    },
+    "claude-opus-5": {
+      "inputTokens": 2,
+      "outputTokens": 31475,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 42567,
+      "webSearchRequests": 0,
+      "costUSD": 1.212555,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 64000,
+      "canonicalModel": "claude-opus-5",
+      "provider": "firstParty"
+    }
+  },
+  "exit_code": 0,
+  "session_id": 65227,
+  "production_change_approved": false
+}

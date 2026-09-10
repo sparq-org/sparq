@@ -1,0 +1,20 @@
+{
+  "issue": 3105,
+  "at": "2026-09-10T00:28:18.762567+00:00",
+  "source": "Boundedread-onlyAstra xhigh report; no execution/measurementclaim",
+  "base": "e53464c73f31f7aca800f3867ac054c36408e346",
+  "current_seam": "crates/sparq-engine/src/exec.rs4156-4297; RHSscan4239inside1024/65536/restblocks. hash_join8628maybuildsmallerside.",
+  "finding": "RepeatedRHSscansstillpresent. Perblockactualrows canchangebindadmission/sort/buildside, so preserveplanner/admission andstartwithlazyunchangedscanreuseonly.",
+  "proposed_witness": "Actualmodule >65536seedrows,two sharedvars topreventbind,residual arithmeticFILTER toavoidtry_count; ASKfalse/LIMITmiss; proposed3baseline vs1reusescan count NOTYETMEASURED. Perblockcacheinvalidatingcontrolmustkillassertion.",
+  "semantic_obligations": [
+    "bags/repeatedvariableconsistency",
+    "truthfulsortmetadata",
+    "block-specificbinddecisions",
+    "residualfilters",
+    "row/budget/cancellation",
+    "no eagerunusedRHS or deepclonecachedrows"
+  ],
+  "history_limit": "Localrefs/history only; issuecrossreferencesempty. NeedliveopenPRcensusbeforemutating.",
+  "no_ec2_required": true,
+  "no_files_or_build_by_agent": true
+}

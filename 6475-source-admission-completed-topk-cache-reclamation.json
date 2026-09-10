@@ -1,0 +1,13 @@
+{
+  "at": "2026-09-10T00:25:00.009640+00:00",
+  "state": "completed top-k experiment remains STOPPED/NO_GO",
+  "free_before": 6390697984,
+  "cache_paths_removed": [
+    "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/target",
+    "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/debug/incremental"
+  ],
+  "protected_evidence_files": 619,
+  "no_active_compiler_or_benchmark": "fresh escalated exact-name pgrep returned1, empty output/stderr",
+  "scope": "Only task-owned completed diagnostic target and incremental cache; retained source, manifests, standalone binaries, results, branch, and reusable build/deps cache.",
+  "free_after": 8149258240
+}
