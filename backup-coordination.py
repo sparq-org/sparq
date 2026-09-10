@@ -530,6 +530,10 @@ for evidence_name in ['commands.json', 'commit.txt', 'delta.diff', 'js-after.yml
 for evidence_name in ['opus-patch-review.json', 'opus-patch-stderr.log', 'opus-patch-completion.json', 'opus-patch-result.json', 'opus-patch-root-disposition.json', 'pr-body-draft.md', 'publication-readiness-0919.json', 'ci-proof-followup-root-verification.json', 'opus-ci-proof-input.md', 'opus-ci-proof-input-receipt.json']:
     FILES["6480-admission-" + evidence_name] = ROOT / "direct-6480/admission" / evidence_name
 
+# Next6480 final review and PR6481 publication.
+for evidence_name in ['opus-ci-proof-review.json', 'opus-ci-proof-stderr.log', 'opus-ci-proof-completion.json', 'opus-ci-proof-result.json', 'opus-ci-proof-root-disposition.json', 'pr-body-final.md', 'pr-create-input.json', 'publish.py', 'publication-receipt.json', 'pr6481-first-state.json', 'issue6480-progress-input.json', 'issue6480-progress-receipt.json']:
+    FILES["6480-admission-" + evidence_name] = ROOT / "direct-6480/admission" / evidence_name
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout

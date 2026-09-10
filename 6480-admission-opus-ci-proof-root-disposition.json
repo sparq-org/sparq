@@ -1,0 +1,10 @@
+{
+  "at": "2026-09-10T09:23:33.677902+00:00",
+  "head": "26d139520f07f1ceacafbacbeb9991de371e2b53",
+  "verdict": "approve_delta_for_ci",
+  "blocking_findings": [],
+  "output_sha256": "5d56e2ebe5402c798f9250d10b9600e5504f80f12488d858ab8fa86e607dff10",
+  "workspace_selectors": "Root verified current package.json explicitly declares site andgui/app; prior full Opus packet supplied rootpackage; delta reviewer only receivedhash. No sourcechange needed.",
+  "version_assertion": "npmci pinnedlock+no-drift establishes expectedversion; root must read actual printed installed Next versions fromCI before admission. No claim npm ls alone enforces patchedminimum.",
+  "other_notes": "No churn for optional naming/log-noise nits. ActualCI npmversion,peererrors,lint/shellcheck where provided and all original runtime/build gates still need inspection."
+}

@@ -1,0 +1,50 @@
+{
+  "at": "2026-09-10T09:26:08.591594+00:00",
+  "comment": {
+    "url": "https://api.github.com/repos/sparq-org/sparq/issues/comments/5616304836",
+    "html_url": "https://github.com/sparq-org/sparq/issues/6480#issuecomment-5616304836",
+    "issue_url": "https://api.github.com/repos/sparq-org/sparq/issues/6480",
+    "id": 5616304836,
+    "node_id": "IC_kwDOSz3qKM8AAAABTsICxA",
+    "user": {
+      "login": "jeswr",
+      "id": 63333554,
+      "node_id": "MDQ6VXNlcjYzMzMzNTU0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/63333554?u=1896ad2facb314da6926dd2b6755ad956c61af0e&v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/jeswr",
+      "html_url": "https://github.com/jeswr",
+      "followers_url": "https://api.github.com/users/jeswr/followers",
+      "following_url": "https://api.github.com/users/jeswr/following{/other_user}",
+      "gists_url": "https://api.github.com/users/jeswr/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/jeswr/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/jeswr/subscriptions",
+      "organizations_url": "https://api.github.com/users/jeswr/orgs",
+      "repos_url": "https://api.github.com/users/jeswr/repos",
+      "events_url": "https://api.github.com/users/jeswr/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/jeswr/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "created_at": "2026-09-10T09:26:08Z",
+    "updated_at": "2026-09-10T09:26:08Z",
+    "author_association": "MEMBER",
+    "body": "> \ud83e\udd16 **SPARQ agent** \u2014 I am @jeswr's agent for the sparq-org/sparq RDF/SPARQL engine. @jeswr runs multiple agents; this was written by the SPARQ agent, not the PSS agent (prod-solid-server).\n\nImplementation is in #6481: https://github.com/sparq-org/sparq/pull/6481, head `26d139520f07f1ceacafbacbeb9991de371e2b53`. It updates the shared Next/env/SWC packages and both workspace minimums to the published patched version, preserving unrelated locks, platform selectors and configuration. The existing CI install now reports installed workspace resolutions and checks lock/manifests cleanliness.\n\nActual Claude Opus 5 with extra-high reasoning reviewed the dependency patch and the CI supplement with no blocking findings. Local metadata-only generation and offline idempotence passed; this does not establish an actual application install or runtime build. Supported CI and Copilot review have been triggered normally and are pending. The issue stays open until protected merge and automatic alert-resolution checks complete.\n",
+    "reactions": {
+      "url": "https://api.github.com/repos/sparq-org/sparq/issues/comments/5616304836/reactions",
+      "total_count": 0,
+      "+1": 0,
+      "-1": 0,
+      "laugh": 0,
+      "hooray": 0,
+      "confused": 0,
+      "heart": 0,
+      "rocket": 0,
+      "eyes": 0
+    },
+    "performed_via_github_app": null,
+    "minimized": null,
+    "pin": null
+  }
+}

@@ -1,0 +1,62 @@
+{
+  "verdict": "approve_delta_for_ci",
+  "reviewed_head": "26d139520f07f1ceacafbacbeb9991de371e2b53",
+  "blocking_findings": [],
+  "nonblocking_findings": [
+    {
+      "id": "NB1",
+      "severity": "low",
+      "title": "`npm ls next` is a presence check, not a version assertion",
+      "detail": "The added command proves that a `next` node resolves for both `site` and `gui/app` in the installed tree and exits non-zero if it is absent, but it does not assert `>=15.5.24`. The resolved version is printed to the log, so it is human-readable but not machine-enforced. Version enforcement is instead carried transitively by (a) the unchanged pinned lockfile that `npm ci` installs from, (b) `npm ci`'s own EUSAGE failure if `package.json` ranges and the lock disagree, and (c) the added `git diff --exit-code` on the lock. That layering is adequate for CI publication; a spec-filtered form (e.g. `npm ls next@^15.5.24`) or a `--json` version assertion would be strictly stronger if the check is ever hardened later. Not a reason to hold this delta."
+    },
+    {
+      "id": "NB2",
+      "severity": "low",
+      "title": "`npm ls` exit-code brittleness can surface as a false red unrelated to Next",
+      "detail": "In npm 7+ `npm ls` exits non-zero on tree validation problems (invalid/unmet peer or extraneous entries), and the blast radius of that validation is not always strictly limited to the positional filter. A pre-existing peer-dep wart anywhere in the workspace tree could therefore turn this step red without any Next regression. The failure mode is loud and diagnosable from the step log, and a red gate is fail-safe rather than fail-open, so this is acceptable for a CI-only supplement; it is worth remembering as the first hypothesis if the step fails on a run that otherwise looks clean."
+    },
+    {
+      "id": "NB3",
+      "severity": "low",
+      "title": "Workspace selectors `site` and `gui/app` are not verifiable from the supplied evidence",
+      "detail": "Both manifests are confirmed present and hashed in the 12-manifest inventory, but root `package.json` is supplied only as a sha256, so I cannot independently confirm it declares these directories in `workspaces` (or that path-form selectors match the declared globs). If a selector does not match, npm errors with 'No workspaces found' and the step goes red on the very first CI run \u2014 a fail-loud misconfiguration that this publication-for-CI run is precisely designed to expose, not a silent pass. Carried into remaining_validation rather than treated as a blocker."
+    },
+    {
+      "id": "NB4",
+      "severity": "informational",
+      "title": "Correctness of the git pathspecs depends on the preserved `working-directory: .`",
+      "detail": "`package-lock.json`, `gui/app/package.json` and `site/package.json` are pathspecs resolved relative to the process cwd. The `js` job's default working directory is `js`, and only the pre-existing `working-directory: .` override on this step keeps all three pathspecs pointing at the intended root-level files. The override is unchanged in the delta, so the check is correct as written, but any future refactor that moves or splits these commands out of this step must carry the override with them or the lock/manifest drift check will silently match nothing."
+    },
+    {
+      "id": "NB5",
+      "severity": "informational",
+      "title": "Step name and log noise are now slightly off-purpose",
+      "detail": "The step is still labelled 'Install npm dependencies (full workspace, from repo root)' although it now also gates on resolution and drift, so a verification failure will present in the UI as an install failure. Additionally, a genuine lockfile drift would dump a full package-lock diff into the log (`--quiet` or `--stat` would be tidier). Both are cosmetic diagnosability nits, not correctness issues."
+    },
+    {
+      "id": "NB6",
+      "severity": "informational",
+      "title": "New shell lines were not linted by actionlint/shellcheck locally",
+      "detail": "The supplement is explicit that neither tool was on PATH and that no install was performed; YAML validity of the before/after was confirmed via Psych 3.1.0. Residual risk is genuinely low here: the block is three literal commands with no globs, no variable expansion, no pipes, and \u2014 importantly \u2014 no `${{ }}` interpolation, so no template-injection surface is added to the run block."
+    },
+    {
+      "id": "NB7",
+      "severity": "informational",
+      "title": "Root `overrides.next.postcss` correctly classified",
+      "detail": "I concur with the corrected inventory: the root `overrides.next` key constrains a transitive postcss under Next and is not a third Next version declaration, so `residual_old_next_dependency_range_found: false` across all 12 tracked manifests is a coherent resolution of the prior optional NB8. Note the scan is over tracked `package.json` files only and does not speak to versions materialized inside the lockfile's transitive graph; that remains covered by the frozen original packet."
+    }
+  ],
+  "remaining_validation": [
+    "The three commands have never been executed: no local `npm ci`, no lifecycle-script run, no wasm-pack/tsc build, no installed Next tree. Linux CI on ubuntu-latest/Node 22 must execute them for the first time.",
+    "Observe the npm version actually used by CI Node 22 (local pinned checks were npm 11 + Node 24, metadata-only). `npm ls` filter and `--workspace` exit-code semantics are the version-sensitive part of this delta.",
+    "Confirm `npm ls next --workspace=site --workspace=gui/app` exits 0, and read the printed versions to confirm both resolve to 15.5.24 or later (NB1: not asserted by the command itself).",
+    "Confirm `git diff --exit-code` on the lock and the two manifests exits 0, i.e. `npm ci` produced no lock or manifest churn.",
+    "Confirm the `site`/`gui/app` workspace selectors resolve rather than erroring 'No workspaces found' (NB3).",
+    "Confirm the downstream `Build (wasm-pack + tsc)` and `Test (node --test)` steps remain green \u2014 this delta must not have shifted the install step's success/failure boundary for any pre-existing tree wart (NB2).",
+    "Run the repo preflight checker under Bash 4+ in CI. The local exit 1 is the known Bash 3 `mapfile` limitation and was correctly not fake-passed; it is not evidence of a passing preflight.",
+    "Run actionlint/shellcheck in CI if the pipeline provides them (NB6).",
+    "Unchanged from the earlier review and not re-litigated here: Windows remediation confidence is version-based only; no exploitation, non-exposure, or broad dependency-audit claim is made or inherited.",
+    "Out of scope of this approval entirely: merge readiness, runtime behavior, and security outcome. This is publication-for-CI only."
+  ],
+  "rationale": "The delta is exactly what the earlier approval of 50c asked to be made explicit, and nothing more. It replaces a single `run: npm ci` scalar with a three-command block in the same step: the install is byte-identical in intent and invocation, `npm ls` adds an installed-tree resolution assertion, and `git diff --exit-code` adds a lock/minima drift gate. Root independently verified that the three reviewed package files are byte-identical and that every other workflow byte is preserved, which I take as given per the review framing; the delta text I was shown is consistent with that claim \u2014 no trigger, permission, concurrency, toolchain, lifecycle, runner, Node-version or `working-directory` field is touched. Fail-fast is sound: GitHub's default Linux shell is `bash -e`, so a failed `npm ci` aborts before the assertions run and cannot produce a misleading verification pass; `-o pipefail` is irrelevant because there are no pipes. The change is read-only after install, adds no network egress beyond the pre-existing `npm ci`, consumes no secrets, and \u2014 materially for a workflow edit \u2014 introduces no `${{ }}` interpolation, so it opens no template-injection surface. The `working-directory: .` override is what makes the git pathspecs resolve against the repo root rather than `js/`, and it is correctly preserved. The revised 12-manifest inventory closes prior optional NB8 with a defensible classification of the root `overrides.next` key as a transitive constraint rather than a Next version declaration. Every finding I have is a low or informational observation about check strength (presence vs. version), check brittleness (`npm ls` exit codes), or evidence I cannot see (root `workspaces` array behind a hash) \u2014 and each of those either fails loud in the very CI run this approval authorizes or is already fenced in remaining_validation. None gates publication. The supplement is also honest about its own boundaries: it claims no execution, no installed-tree result, no remote mutation, and it correctly declines to fake-pass the Bash 3 preflight. Approving the delta for CI on 26d1395, with the explicit understanding that this is not merge, runtime, or security approval, and that Linux CI execution remains the only evidence that these three commands actually pass."
+}
