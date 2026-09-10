@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-10T07:32:44.143660+00:00",
+  "updated_at": "2026-09-10T07:46:25.899386+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -67,7 +67,7 @@
     "agent": "/root/postmerge_ci",
     "actual_model": "GPT-6 Astra",
     "effort": "xhigh",
-    "phase": "PR6478 recovered upstream GitHub diff-service incident; exact3c637b attempt2 full CI running",
+    "phase": "PR6478 normal full CI after verified diff-service recovery; tests/matrix running",
     "state": "Exact3c637b independentlyapproved,published,priorreviewthreadsresolved. Copilotnewcap-combination request publiclydispositioned; normalfailedjobrerunonceafterdiffendpointrecovered, noqueue.",
     "started_at": "2026-09-10T04:00:00Z",
     "base": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
@@ -586,7 +586,7 @@
       "evidence": "direct-6476/admission/copilot-cap-disposition-receipt.json"
     },
     "ci_incident": {
-      "state": "diagnosed_frozen_root_verified_recovery_accepted",
+      "state": "recovery_verified_validation_running",
       "directory": "direct-6476/head3c-ci-incident",
       "manifest_files": 18,
       "manifest_sha256": "bc626ad44d71dd001b683c9e41f0099e4cc37d7bd99762f02bb31ab34ac332a7",
@@ -597,7 +597,47 @@
       "recovery": "OnePOSTrerun-failed-jobseach34449322494CI,34449322415matrix,34449322222supplychain,34449322223gate; freshhead/runattempt1/completedfailureeach,targetfiles10healthy,budgetavailable. Livefuzz/mutationuntouched.",
       "attempt": 2,
       "first_snapshot": "direct-6476/admission/recovery-attempt2-first-runs.json",
-      "no_repeat": "Do not rerun blindly. Inspect currentattempt2results, everyrequiredjobexecution and review state beforeprotectedqueue."
+      "no_repeat": "Do not rerun blindly. Inspect currentattempt2results, everyrequiredjobexecution and review state beforeprotectedqueue.",
+      "latest_verification": "direct-6476/admission/attempt2-recovery-verified-0744.json"
+    },
+    "latest_heartbeat": {
+      "at": "2026-09-10T07:46:25.899386+00:00",
+      "evidence": "direct-6476/admission/heartbeat-0743.json",
+      "head": "3c637b228449e9345d8bba31ea2d7d449f8a2b8f",
+      "required_rollup": "PENDING",
+      "main": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
+      "unresolved_threads": 0,
+      "new_review_findings": false,
+      "CI": {
+        "34449322494": {
+          "successful": 28,
+          "skipped": 5,
+          "in_progress": 5,
+          "queued": 0,
+          "assigned_live_runners": true,
+          "detection_job_id": 102784401572,
+          "detection_success": true
+        },
+        "34449322415": {
+          "successful": 47,
+          "skipped": 0,
+          "in_progress": 10,
+          "queued": 0,
+          "assigned_live_runners": true,
+          "detection_job_id": 102784409752,
+          "detection_success": true
+        },
+        "34449322222": {
+          "successful": 1,
+          "skipped": 0,
+          "in_progress": 0,
+          "queued": 0,
+          "assigned_live_runners": true,
+          "detection_job_id": 102784418896,
+          "detection_success": true
+        }
+      },
+      "next": "Awaitnormalcompletion; nexttickfreshfullgatechecks+protectedqueueifready. No newagent/source/retry."
     }
   },
   "prs": {
@@ -3053,9 +3093,9 @@
     "evidence": "direct-3105/admission/latency-alarm-job.log"
   },
   "registry_pause_latest": {
-    "at": "2026-09-10T07:32:44.143660+00:00",
+    "at": "2026-09-10T07:46:25.899386+00:00",
     "actions_enabled": false,
-    "evidence": "direct-6476/admission/diff-service-health-precheck.json"
+    "evidence": "direct-6476/admission/heartbeat-0743.json"
   },
   "frontier_fallback": {
     "at": "2026-09-10T03:59:18.624949+00:00",

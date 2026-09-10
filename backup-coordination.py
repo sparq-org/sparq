@@ -495,6 +495,10 @@ for evidence_name in ['budget.json', 'diagnostic-excerpts.txt', 'job-10278116817
 for evidence_name in ['opus-critical-intake-review.json', 'opus-critical-intake-stderr.log', 'opus-critical-intake-result.json', 'opus-critical-intake-completion.json', 'critical-next-issue-input.json', 'critical-next-root-disposition.json', 'critical-next-issue-precreate.json', 'critical-next-issue-created.json', 'head3c-first-ci.json', 'copilot-cap-disposition-input.json', 'copilot-cap-disposition-source.json', 'copilot-cap-disposition-receipt.json', 'diff-service-health-precheck.json', 'head3c-ci-incident-root-verification.json', 'recover-diff-service.py', 'diff-service-recovery-receipt.json', 'recovery-attempt2-first-runs.json']:
     FILES["6476-admission-" + evidence_name] = ROOT / "direct-6476/admission" / evidence_name
 
+# PR6478 heartbeat0743 verified recovery and normal running jobs.
+for evidence_name in ['heartbeat-0743.json', 'recovery-attempt2-jobs-0744.json', 'attempt2-recovery-verified-0744.json']:
+    FILES["6476-admission-" + evidence_name] = ROOT / "direct-6476/admission" / evidence_name
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout

@@ -1,0 +1,38 @@
+{
+  "at": "2026-09-10T07:46:25.899386+00:00",
+  "head": "3c637b228449e9345d8bba31ea2d7d449f8a2b8f",
+  "jobs": {
+    "34449322494": {
+      "successful": 28,
+      "skipped": 5,
+      "in_progress": 5,
+      "queued": 0,
+      "assigned_live_runners": true,
+      "detection_job_id": 102784401572,
+      "detection_success": true
+    },
+    "34449322415": {
+      "successful": 47,
+      "skipped": 0,
+      "in_progress": 10,
+      "queued": 0,
+      "assigned_live_runners": true,
+      "detection_job_id": 102784409752,
+      "detection_success": true
+    },
+    "34449322222": {
+      "successful": 1,
+      "skipped": 0,
+      "in_progress": 0,
+      "queued": 0,
+      "assigned_live_runners": true,
+      "detection_job_id": 102784418896,
+      "detection_success": true
+    }
+  },
+  "backlog": {
+    "queued": 1,
+    "in_progress": 3
+  },
+  "decision": "Previousdiffservicefailure recovered. Normaltests/matrixrunning, no failures or unassignedlivejobs. Requiredgatepending; no retries/queueadmissionuntilgreen. WorkflowCIqueuedlabel doesnotindicatestalledjobs."
+}
