@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-10T07:46:25.899386+00:00",
+  "updated_at": "2026-09-10T08:09:14.083001+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -67,8 +67,8 @@
     "agent": "/root/postmerge_ci",
     "actual_model": "GPT-6 Astra",
     "effort": "xhigh",
-    "phase": "PR6478 normal full CI after verified diff-service recovery; tests/matrix running",
-    "state": "Exact3c637b independentlyapproved,published,priorreviewthreadsresolved. Copilotnewcap-combination request publiclydispositioned; normalfailedjobrerunonceafterdiffendpointrecovered, noqueue.",
+    "phase": "PR #6478 admitted to the protected merge queue; merge-group validation running",
+    "state": "All exact-head PR validation passed and source/review requirements were verified. Normal queue admission accepted at position 1. No merge has occurred yet.",
     "started_at": "2026-09-10T04:00:00Z",
     "base": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
     "local_branch": "codex/nested-query-budget",
@@ -85,10 +85,10 @@
     "dedupe": "165openPRtitles/branches+issuecrossrefs checked; no matching budget-restoration fix. Not exhaustiveallPRdiff audit.",
     "issue_comment": "https://github.com/sparq-org/sparq/issues/6476#issuecomment-5612755312",
     "next_actions": [
-      "Inspect attempt2exact3c637bfullCI/matrix/supplychaingate; verifyfailedpathsfilterrecovered and actualheavygatesrun, no skip-onlysuccess.",
-      "Ifgreenandallreviewconditionsmet,freshprotectedqueueadmission expectedHeadOid3c637b,jumpfalse,gate15368ALLGREENunchanged; postmergewatchandlink/close6476.",
-      "Issue6480Nextpatchrecommendedafterthislane; sameAstra xhigh implementation,independentOpusandtargetedwebCI. No broaddependencyupgrade or alertdismissal.",
-      "Issue6479nestedBASEruntimewitnessstillseparate; nosecondengineimplementationlanewhile6478active."
+      "Inspect PR6478 queue and merge-group 781f667c19a8ebb779cfccb24b05ea432360b025. Verify actual required validation jobs, not skipped aggregates, and diagnose any ejection without cancelling live evidence.",
+      "When merged, verify merged source/tree on main and watch main CI; link the resolving PR in issue6476 before closing only once code is on main.",
+      "After current lane completes, prioritize issue6480 narrow Next patch with Astra xhigh and independent Opus review. Revalidate current main, supported npm version, advisory/patch status and dedupe; preserve config/overrides and use protected CI.",
+      "Issue6479 nested BASE runtime witness remains separate; do not mix it into6478."
     ],
     "resource_event": {
       "at": "2026-09-10T04:06:30.916128+00:00",
@@ -314,7 +314,7 @@
       "result": "direct-6476/admission/opus-final-result.json",
       "receipt": "direct-6476/admission/opus-final-completion.json"
     },
-    "agent_state": "Astra idle; allOpusreviews and diagnosticscompleted/collected; no localprocess or sourceworkpending.",
+    "agent_state": "Astra idle; all local reviews, diagnostics and commands completed. No active local implementation or model-review process.",
     "publication_readiness": {
       "state": "completed_root_hash_verified",
       "directory": "direct-6476/publication-readiness",
@@ -586,7 +586,7 @@
       "evidence": "direct-6476/admission/copilot-cap-disposition-receipt.json"
     },
     "ci_incident": {
-      "state": "recovery_verified_validation_running",
+      "state": "recovered_and_all_PR_validation_passed",
       "directory": "direct-6476/head3c-ci-incident",
       "manifest_files": 18,
       "manifest_sha256": "bc626ad44d71dd001b683c9e41f0099e4cc37d7bd99762f02bb31ab34ac332a7",
@@ -601,43 +601,51 @@
       "latest_verification": "direct-6476/admission/attempt2-recovery-verified-0744.json"
     },
     "latest_heartbeat": {
-      "at": "2026-09-10T07:46:25.899386+00:00",
-      "evidence": "direct-6476/admission/heartbeat-0743.json",
+      "at": "2026-09-10T08:09:14.083001+00:00",
+      "phase": "protected queue",
+      "required_PR_rollup": "SUCCESS",
+      "merge_group_rollup": "PENDING",
       "head": "3c637b228449e9345d8bba31ea2d7d449f8a2b8f",
-      "required_rollup": "PENDING",
+      "merge_group_head": "781f667c19a8ebb779cfccb24b05ea432360b025",
       "main": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
       "unresolved_threads": 0,
-      "new_review_findings": false,
-      "CI": {
-        "34449322494": {
-          "successful": 28,
-          "skipped": 5,
-          "in_progress": 5,
-          "queued": 0,
-          "assigned_live_runners": true,
-          "detection_job_id": 102784401572,
-          "detection_success": true
-        },
-        "34449322415": {
-          "successful": 47,
-          "skipped": 0,
-          "in_progress": 10,
-          "queued": 0,
-          "assigned_live_runners": true,
-          "detection_job_id": 102784409752,
-          "detection_success": true
-        },
-        "34449322222": {
-          "successful": 1,
-          "skipped": 0,
-          "in_progress": 0,
-          "queued": 0,
-          "assigned_live_runners": true,
-          "detection_job_id": 102784418896,
-          "detection_success": true
-        }
+      "evidence": "direct-6476/admission/queue-first-state-6478.json"
+    },
+    "final_pr_ci": {
+      "state": "passed_root_verified",
+      "head": "3c637b228449e9345d8bba31ea2d7d449f8a2b8f",
+      "gate_check_id": 102784427107,
+      "integration_id": 15368,
+      "check_counts": {
+        "SUCCESS": 298,
+        "SKIPPED": 8
       },
-      "next": "Awaitnormalcompletion; nexttickfreshfullgatechecks+protectedqueueifready. No newagent/source/retry."
+      "proof": "direct-6476/admission/head3c-final-ci-verification.json",
+      "details": "All five real workspace test shards, workspace clippy/rustdoc, 57 feature-matrix jobs, 190 feature-off jobs, conformance/coverage/wasm/bench gates passed. Expected skipped jobs are nightly or main-only filers. No gate relaxed."
+    },
+    "queue": {
+      "id": "MQE_lQDOSz3qKM8AAAABC8cW7M4AA2w6zgLLBsY",
+      "position": 1,
+      "state": "AWAITING_CHECKS",
+      "head": "781f667c19a8ebb779cfccb24b05ea432360b025",
+      "pr_head": "3c637b228449e9345d8bba31ea2d7d449f8a2b8f",
+      "base": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
+      "observed_at": "2026-09-10T08:07:18.067113+00:00",
+      "receipt": "direct-6476/admission/enqueue-6478-result.json",
+      "precheck": "direct-6476/admission/queue-precheck-0757.json",
+      "initial_state": "direct-6476/admission/queue-first-state-6478.json",
+      "run_ids": {
+        "pr-area-label": 34453440823,
+        "CI": 34453439542,
+        "vectorized-feature-off": 34453439146,
+        "routing-self-tests": 34453439089,
+        "ci-summary": 34453439261,
+        "feature-matrix": 34453439591,
+        "flow-on-gates": 34453439232,
+        "docs-quality": 34453439165
+      },
+      "active": true,
+      "policy": "Preserve every live merge-group run. No force/admin merge, bypass, blind rerun or duplicate enqueue. Gate integration15368 and ALLGREEN unchanged."
     }
   },
   "prs": {
@@ -1100,11 +1108,11 @@
     }
   },
   "next_actions": [
-    "Inspect attempt2exact3c637bfullCI/matrix/supplychaingate; verifyfailedpathsfilterrecovered and actualheavygatesrun, no skip-onlysuccess.",
-    "Ifgreenandallreviewconditionsmet,freshprotectedqueueadmission expectedHeadOid3c637b,jumpfalse,gate15368ALLGREENunchanged; postmergewatchandlink/close6476.",
-    "Issue6480Nextpatchrecommendedafterthislane; sameAstra xhigh implementation,independentOpusandtargetedwebCI. No broaddependencyupgrade or alertdismissal.",
-    "Issue6479nestedBASEruntimewitnessstillseparate; nosecondengineimplementationlanewhile6478active.",
-    "Preserve6049approvalblock,6055ownerhold,6475NO_GOand6095hold;registryActionsOFF,noreleases,noEC2orALLGREENchange."
+    "Inspect PR6478 queue and merge-group 781f667c19a8ebb779cfccb24b05ea432360b025. Verify actual required validation jobs, not skipped aggregates, and diagnose any ejection without cancelling live evidence.",
+    "When merged, verify merged source/tree on main and watch main CI; link the resolving PR in issue6476 before closing only once code is on main.",
+    "After current lane completes, prioritize issue6480 narrow Next patch with Astra xhigh and independent Opus review. Revalidate current main, supported npm version, advisory/patch status and dedupe; preserve config/overrides and use protected CI.",
+    "Issue6479 nested BASE runtime witness remains separate; do not mix it into6478.",
+    "Preserve all pending approvals/holds, registry Actions OFF, no releases/EC2/grouping changes."
   ],
   "followup_lane": {
     "issue": 6462,
@@ -3093,9 +3101,9 @@
     "evidence": "direct-3105/admission/latency-alarm-job.log"
   },
   "registry_pause_latest": {
-    "at": "2026-09-10T07:46:25.899386+00:00",
+    "at": "2026-09-10T08:09:14.083001+00:00",
     "actions_enabled": false,
-    "evidence": "direct-6476/admission/heartbeat-0743.json"
+    "evidence": "direct-6476/admission/heartbeat-0757.json"
   },
   "frontier_fallback": {
     "at": "2026-09-10T03:59:18.624949+00:00",

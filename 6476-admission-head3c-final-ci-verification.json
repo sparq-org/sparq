@@ -1,0 +1,65 @@
+{
+  "at": "2026-09-10T08:06:06.779721+00:00",
+  "head": "3c637b228449e9345d8bba31ea2d7d449f8a2b8f",
+  "all_required_validation_passed": true,
+  "gate_check_id": 102784427107,
+  "gate_integration_id": 15368,
+  "check_counts": {
+    "SUCCESS": 298,
+    "SKIPPED": 8
+  },
+  "jobs": {
+    "34449322494": {
+      "success": 33,
+      "skipped": 6
+    },
+    "34449322415": {
+      "success": 57
+    },
+    "34449322223": {
+      "success": 1
+    },
+    "34449322222": {
+      "success": 1
+    },
+    "34449322102": {
+      "success": 190
+    },
+    "34449322453": {
+      "success": 3
+    },
+    "34449322195": {
+      "success": 2
+    },
+    "34449322157": {
+      "success": 2
+    },
+    "34449322450": {
+      "success": 3,
+      "skipped": 1
+    },
+    "34449322147": {
+      "success": 1
+    }
+  },
+  "workspace_build_clippy_rustdoc_test_steps_verified": true,
+  "feature_matrix_jobs": 57,
+  "feature_off_jobs": 190,
+  "conformance_coverage_wasm_jobs_success": true,
+  "expected_skipped_ci_jobs": [
+    "coverage (nightly, full incl. heavy vectors)",
+    "coverage demoted-lane safety-net (push-to-main)",
+    "heavy-recall demoted-lane safety-net (push-to-main)",
+    "mutation ratchet (cargo-mutants, advisory)",
+    "nightly selection backstop (full-matrix guard)",
+    "nightly-gate"
+  ],
+  "skip_scope": "Only schedule/dispatch nightly jobs and push-to-main failure filers; checked workflow guards. All five real testshards and coverage ratchets ran.",
+  "scope": "Actual exacthead CIjob/step results with allpages; no localfullworkspace rerun or featureOFFbyteidentityclaim",
+  "evidence": [
+    "head3c-gate-jobs-0758.json",
+    "head3c-vectorized-page2-0758.json",
+    "head3c-final-state-0802.json"
+  ],
+  "incident": "Recoveredupstream changed-filefailure viaone normalattempt2; gates executed."
+}

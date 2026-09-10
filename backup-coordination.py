@@ -499,6 +499,10 @@ for evidence_name in ['opus-critical-intake-review.json', 'opus-critical-intake-
 for evidence_name in ['heartbeat-0743.json', 'recovery-attempt2-jobs-0744.json', 'attempt2-recovery-verified-0744.json']:
     FILES["6476-admission-" + evidence_name] = ROOT / "direct-6476/admission" / evidence_name
 
+# PR6478 final exact-head CI verification and protected queue admission.
+for evidence_name in ['heartbeat-0757.json', 'head3c-gate-jobs-0758.json', 'head3c-vectorized-page2-0758.json', 'pr-head3c-ci-green-body.md', 'enqueue-6478.py', 'head3c-final-state-0802.json', 'head3c-final-ci-verification.json', 'queue-rules-0757.json', 'queue-precheck-0757.json', 'enqueue-6478-input.json', 'enqueue-6478-result.json', 'queue-first-state-6478.json']:
+    FILES["6476-admission-" + evidence_name] = ROOT / "direct-6476/admission" / evidence_name
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout

@@ -1,0 +1,1 @@
+{"query": "mutation($input:EnqueuePullRequestInput!){enqueuePullRequest(input:$input){mergeQueueEntry{id position state headCommit{oid}}}}", "variables": {"input": {"pullRequestId": "PR_kwDOSz3qKM8AAAABC8cW7A", "expectedHeadOid": "3c637b228449e9345d8bba31ea2d7d449f8a2b8f", "jump": false}}}
