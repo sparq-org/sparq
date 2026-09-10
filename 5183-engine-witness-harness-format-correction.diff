@@ -1,0 +1,11 @@
+--- witness-first-format-error.rs
++++ witness.rs
+@@ -79,7 +79,7 @@
+     let path = if inplace { "in-place" } else { "rebuild" };
+     let blanks: Vec<_> = blank_nodes.into_iter().collect();
+     println!(
+-        "{{\"case\":{case:?},\"path\":{path:?},\"lexical_terms\":{lexical_terms:?},\"where_rows\":{rows:?},\"blank_nodes\":{blanks:?},\"before\":{before:?},\"after\":{after:?}}"
++        "{{\"case\":{case:?},\"path\":{path:?},\"lexical_terms\":{lexical_terms:?},\"where_rows\":{rows:?},\"blank_nodes\":{blanks:?},\"before\":{before:?},\"after\":{after:?}}}"
+     );
+ }
+ 

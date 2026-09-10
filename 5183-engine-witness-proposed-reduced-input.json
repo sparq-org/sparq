@@ -1,0 +1,29 @@
+{
+  "executed": false,
+  "origin": "Source-derived hypothesis using original operations 4 and 8; not a demonstrated shrink.",
+  "operations": [
+    "INSERT DATA { <http://ex/s2> <http://ex/p1> 8 . <http://ex/s2> <http://ex/p1> \"008\"^^<http://www.w3.org/2001/XMLSchema#integer> . }",
+    "INSERT { ?s <http://ex/p0> _:bt } WHERE { ?s <http://ex/p1> ?o }"
+  ],
+  "observations": [
+    "After INSERT DATA, enumerate raw p1 RDF terms and WHERE solution rows.",
+    "After template INSERT, enumerate raw p0 terms; assert distinct blank-node count and total dataset size, without canonicalization."
+  ],
+  "expected_unverified": {
+    "sparq_rebuild_and_inplace": {
+      "where_rows": 2,
+      "fresh_p0_blank_nodes": 2,
+      "total_quads": 4
+    },
+    "oxigraph": {
+      "where_rows": 1,
+      "fresh_p0_blank_nodes": 1,
+      "total_quads": 2
+    }
+  },
+  "controls": [
+    "Only canonical 8 (or duplicate canonical 8): one input term and one new blank node in every engine.",
+    "Two distinct values 8 and 9: two terms and two fresh blank nodes in every engine.",
+    "Original full fixed seed on both exact sources, no seed search or comparator change."
+  ]
+}

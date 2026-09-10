@@ -1,0 +1,9 @@
+{
+  "elapsed_seconds": 1.603164333,
+  "limit_seconds": 120,
+  "output_limit_bytes": 67108864,
+  "maximum_observed_allocated_bytes": 40960,
+  "free_bytes": 8455917568,
+  "one_process_at_a_time": true,
+  "cargo_or_dependency_compilation": false
+}

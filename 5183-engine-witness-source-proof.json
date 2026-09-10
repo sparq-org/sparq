@@ -1,0 +1,38 @@
+{
+  "main": "781f667c19a8ebb779cfccb24b05ea432360b025",
+  "parent": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
+  "branch": "codex/update-differential-replay",
+  "head": "781f667c19a8ebb779cfccb24b05ea432360b025",
+  "status": "",
+  "scope_unchanged_main_vs_parent": {
+    "crates/sparq-bench/src/update_fuzz.rs": true,
+    "crates/sparq-bench/Cargo.toml": true,
+    "Cargo.lock": true,
+    ".github/workflows/differential-update.yml": true,
+    "crates/sparq-canon": true
+  },
+  "encoder": {
+    "path": "/Users/jesght/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/oxigraph-0.5.9/src/storage/numeric_encoder.rs",
+    "sha256": "92c9dea4be6937174d511a1abe9ab623e5cf6c6fb88e0c5392e47ff2cf439914"
+  },
+  "pins": {
+    "oxigraph": [
+      "0.5.9"
+    ],
+    "oxrdf": [
+      "0.2.4",
+      "0.3.3"
+    ],
+    "oxsdatatypes": [
+      "0.2.2"
+    ],
+    "rdf-canon": [
+      "0.15.3"
+    ],
+    "spargebra": [
+      "0.4.6"
+    ]
+  },
+  "ed66_parent_engine_core_lock_diff": "",
+  "d07_main_engine_diff": "diff --git a/crates/sparq-engine/README.md b/crates/sparq-engine/README.md\nindex abf1ec28c..373c4e395 100644\n--- a/crates/sparq-engine/README.md\n+++ b/crates/sparq-engine/README.md\n@@ -105,7 +105,7 @@ let json = sparq_engine::query_json(&g, \"SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?\n - **Id-level term-identity FILTER fast path** *(opt-in `id-filter-fastpath` feature, OFF by default)* \u2014 a compiled `=`/`!=` over operands a static analysis proves non-literal (subject/predicate-only variables, constant IRIs, and \u2014 via a snapshot-aware predicate-range check \u2014 an object of a constant predicate whose object column has NO literals in the current store snapshot, the SP2Bench `dc:creator`/q08/q12b shape) is decided by dictionary-id (in)equality, and equal ids of ANY kind short-circuit `=` true (canonicalising dict \u2192 sameTerm), skipping the per-row term materialisation. The predicate-range verdict is re-checked against the LIVE graph every evaluation, so an UPDATE inserting a literal object simply declines the next query (never cross-snapshot). Unequal-id literals (numeric-promotion, the `sq-lr2ii` class) and possible type-errors fall through to the exact path. Result-identical (differential vs the exact oracle); off, no new deps.\n - **Characteristic-set anchor-incidence prune** *(opt-in `cs-anchor-incidence` feature, OFF by default)* \u2014 the DISTINCT predicate-projection semijoin (`SELECT DISTINCT ?p WHERE { anchor UNION probe }`, SP2Bench q09) precomputes, per anchor join position, the SET of predicates that relate SOME anchor member, so a candidate predicate absent from that set is pruned by an O(1) membership test instead of a large no-hit clipped block scan. Result-identical (the set only prunes provably-empty existence checks; differential vs the exact scan); conservatively declines on a graph with a pending-update overlay; off, zero code compiles, no new deps.\n - **Lazy top-k string sort key** *(opt-in `topk-lazy-strkey` feature, OFF by default)* \u2014 an `ORDER BY` on a plain `xsd:string` column with a `LIMIT` builds a zero-allocation id-carrying sort key (compared via the literal's zero-copy value bytes) instead of reconstructing + re-allocating the literal value per input row, so a top-k over a large scan pays no key allocation for the rows it discards. Byte-identical output (a full-output differential + W3C ORDER BY conformance); off, zero code compiles, no new deps.\n-- **Audited cancellation pointer boundary** \u2014 the executor keeps its thread-local/rayon budget snapshot `Copy` with a non-owning cancellation pointer; a lifetime-bound guard keeps the caller's `Arc<AtomicBool>` alive through scoped worker joins and clears the pointer on drop. The four `unsafe` sites are listed in the workspace unsafe register.\n+- **Audited cancellation pointer boundary** \u2014 the executor keeps its thread-local/rayon budget snapshot `Copy` with a non-owning cancellation pointer; [GPT-6 Astra] a lifetime-bound guard keeps the caller's `Arc<AtomicBool>` alive through scoped worker joins, restores the previous budget scope on return or unwind, and clears the pointer when the outermost scope exits. The four `unsafe` sites are listed in the workspace unsafe register.\n \n ## \ud83d\udcda Learn more\n \ndiff --git a/crates/sparq-engine/src/exec.rs b/crates/sparq-engine/src/exec.rs\nindex 098414f92..dc532c380 100644\n--- a/crates/sparq-engine/src/exec.rs\n+++ b/crates/sparq-engine/src/exec.rs\n@@ -701,7 +701,7 @@ pub(crate) mod budget {\n             use oxrdf::{Literal, Term};\n             use sparq_core::Graph;\n             use std::sync::atomic::AtomicUsize;\n-            for inner in 0..4 {\n+            for inner in 0..5 {\n                 let graph = Graph::load_str(\"\", \"turtle\").unwrap();\n                 let nested = Graph::load_str(\"\", \"turtle\").unwrap();\n                 let flag = Arc::new(AtomicBool::new(false));\n@@ -733,9 +733,22 @@ pub(crate) mod budget {\n                                 1\n                             );\n                         }\n-                        _ => {\n+                        3 => {\n+                            // Parse rejection occurs before a child budget is installed.\n                             assert!(crate::query(&nested, \"not SPARQL\").is_err());\n                         }\n+                        _ => {\n+                            // [GPT-6 Astra] This valid graph form reaches the error\n+                            // arm inside query_prepared_with_budget's budget scope.\n+                            let sparql = \"CONSTRUCT { ?s ?p ?o } WHERE {}\";\n+                            assert!(crate::PreparedQuery::parse(sparql).unwrap().is_graph_form());\n+                            let outer = ACTIVE.with(Cell::get);\n+                            assert_eq!(\n+                                crate::query(&nested, sparql).unwrap_err(),\n+                                \"only SELECT and ASK queries are supported\"\n+                            );\n+                            assert_state(outer, None);\n+                        }\n                     }\n                     callback_flag.store(true, Ordering::Relaxed);\n                     Ok(Term::Literal(Literal::from(7)))\n"
+}

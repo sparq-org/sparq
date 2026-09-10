@@ -1,0 +1,154 @@
+[
+  {
+    "variant": "parent",
+    "case": "lexical-pair",
+    "path": "rebuild",
+    "lexical_terms": [
+      "\"008\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+      "\"8\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+    ],
+    "where_rows": 2,
+    "fresh_distinct_blank_nodes": 2,
+    "before_quads": 2,
+    "after_quads": 4
+  },
+  {
+    "variant": "parent",
+    "case": "canonical-eight",
+    "path": "rebuild",
+    "lexical_terms": [
+      "\"8\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+    ],
+    "where_rows": 1,
+    "fresh_distinct_blank_nodes": 1,
+    "before_quads": 1,
+    "after_quads": 2
+  },
+  {
+    "variant": "parent",
+    "case": "different-values",
+    "path": "rebuild",
+    "lexical_terms": [
+      "\"8\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+      "\"9\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+    ],
+    "where_rows": 2,
+    "fresh_distinct_blank_nodes": 2,
+    "before_quads": 2,
+    "after_quads": 4
+  },
+  {
+    "variant": "parent",
+    "case": "lexical-pair",
+    "path": "in-place",
+    "lexical_terms": [
+      "\"008\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+      "\"8\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+    ],
+    "where_rows": 2,
+    "fresh_distinct_blank_nodes": 2,
+    "before_quads": 2,
+    "after_quads": 4
+  },
+  {
+    "variant": "parent",
+    "case": "canonical-eight",
+    "path": "in-place",
+    "lexical_terms": [
+      "\"8\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+    ],
+    "where_rows": 1,
+    "fresh_distinct_blank_nodes": 1,
+    "before_quads": 1,
+    "after_quads": 2
+  },
+  {
+    "variant": "parent",
+    "case": "different-values",
+    "path": "in-place",
+    "lexical_terms": [
+      "\"8\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+      "\"9\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+    ],
+    "where_rows": 2,
+    "fresh_distinct_blank_nodes": 2,
+    "before_quads": 2,
+    "after_quads": 4
+  },
+  {
+    "variant": "main",
+    "case": "lexical-pair",
+    "path": "rebuild",
+    "lexical_terms": [
+      "\"008\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+      "\"8\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+    ],
+    "where_rows": 2,
+    "fresh_distinct_blank_nodes": 2,
+    "before_quads": 2,
+    "after_quads": 4
+  },
+  {
+    "variant": "main",
+    "case": "canonical-eight",
+    "path": "rebuild",
+    "lexical_terms": [
+      "\"8\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+    ],
+    "where_rows": 1,
+    "fresh_distinct_blank_nodes": 1,
+    "before_quads": 1,
+    "after_quads": 2
+  },
+  {
+    "variant": "main",
+    "case": "different-values",
+    "path": "rebuild",
+    "lexical_terms": [
+      "\"8\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+      "\"9\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+    ],
+    "where_rows": 2,
+    "fresh_distinct_blank_nodes": 2,
+    "before_quads": 2,
+    "after_quads": 4
+  },
+  {
+    "variant": "main",
+    "case": "lexical-pair",
+    "path": "in-place",
+    "lexical_terms": [
+      "\"008\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+      "\"8\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+    ],
+    "where_rows": 2,
+    "fresh_distinct_blank_nodes": 2,
+    "before_quads": 2,
+    "after_quads": 4
+  },
+  {
+    "variant": "main",
+    "case": "canonical-eight",
+    "path": "in-place",
+    "lexical_terms": [
+      "\"8\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+    ],
+    "where_rows": 1,
+    "fresh_distinct_blank_nodes": 1,
+    "before_quads": 1,
+    "after_quads": 2
+  },
+  {
+    "variant": "main",
+    "case": "different-values",
+    "path": "in-place",
+    "lexical_terms": [
+      "\"8\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+      "\"9\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+    ],
+    "where_rows": 2,
+    "fresh_distinct_blank_nodes": 2,
+    "before_quads": 2,
+    "after_quads": 4
+  }
+]

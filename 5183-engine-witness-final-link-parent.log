@@ -1,0 +1,7 @@
+warning: linker stderr: 2026-09-10 11:41:51.331 xcodebuild[69769:4360293]  DVTFilePathFSEvents: Failed to start fs event stream.
+         2026-09-10 11:41:53.389 xcodebuild[69769:4360290] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: 1 warning emitted
+

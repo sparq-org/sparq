@@ -1,0 +1,7 @@
+{
+  "original_phase_deadline_unix": 1789036925.2970343,
+  "phase_elapsed_seconds": 117.17435359954834,
+  "maximum_observed_allocated_bytes": 11546624,
+  "free_bytes": 8273993728,
+  "first_harness_compile_error_preserved": true
+}

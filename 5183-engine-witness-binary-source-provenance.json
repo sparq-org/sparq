@@ -1,0 +1,44 @@
+{
+  "parent": {
+    "source_commit": "ed66ef0931fa19dd521fac433870c86a78687a30",
+    "compared_commit": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
+    "engine": "libsparq_engine-17d69fdf30aada97.rlib",
+    "core": "libsparq_core-e9ed6f0c10ca33fd.rlib",
+    "equivalence": "Engine/core/lock diff is empty.",
+    "engine_sha256": "2135748c75d5afd1ca3731e6d350c5a06b99caf9376b1388fbd472b08febed9d",
+    "core_sha256": "9c6042a15b38ebfddaaef9b24e53df598201b72ec631310f201378c0b06ff7c2",
+    "binary_sha256": "85bf9b04113307e8361ddfb38eb00ad42fd363de8ad179e973d4c0e7d293a35a",
+    "binary_bytes": 5510096,
+    "engine_features": [
+      "default",
+      "digest",
+      "parallel",
+      "regex"
+    ],
+    "core_features": [
+      "default",
+      "parallel"
+    ]
+  },
+  "main": {
+    "source_commit": "d07ca79f89e3a8945be46b516c3cd2f770ccd618",
+    "compared_commit": "781f667c19a8ebb779cfccb24b05ea432360b025",
+    "engine": "libsparq_engine-d082493c198a3f5b.rlib",
+    "core": "libsparq_core-127354fe878a2f23.rlib",
+    "equivalence": "Engine delta is README and cfg(test) only; saved exact diff. No production difference.",
+    "engine_sha256": "2f17e066de1c77dd975ec2367c6e140175a31710685b05d8aadccd04f3b7b395",
+    "core_sha256": "37e9d27afb0f2c35c565ce403d6f7c238e5ac40595b49cc2949fa50dc27e98be",
+    "binary_sha256": "77a9ca937e28b041df329135a456b0744a3414ef41d9657d2ee10e87203c5dd5",
+    "binary_bytes": 5507872,
+    "engine_features": [
+      "default",
+      "digest",
+      "parallel",
+      "regex"
+    ],
+    "core_features": [
+      "default",
+      "parallel"
+    ]
+  }
+}

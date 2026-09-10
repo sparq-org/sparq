@@ -566,6 +566,13 @@ for evidence_name in ["native-smoke-root-verification.json", "run-opus-native-sm
 for evidence_name in ['opus-native-smoke-review.json', 'opus-native-smoke-stderr.log', 'opus-native-smoke-completion.json', 'opus-native-smoke-result.json', 'opus-native-smoke-root-disposition.json', 'followup-publication-receipt.json', 'published175-first-runs.json', 'published175-first-pr.json']:
     FILES["6480-admission-" + evidence_name] = ROOT / "direct-6480/admission" / evidence_name
 
+# UPDATE5183 actual bounded engine witness and root verification.
+for evidence_name in ['binary-source-provenance.json', 'commands.json', 'final-commands.json', 'final-link-main.log', 'final-link-parent.log', 'final-resource-receipt.json', 'final-run-main.log', 'final-run-parent.log', 'harness-format-correction.diff', 'link-parent.log', 'next-reference-plan.json', 'normative-semantics.json', 'observations.json', 'postlink-dependency-hashes.json', 'prelink-provenance.json', 'proposed-reduced-input.json', 'public-packet.md', 'report.json', 'resource-receipt.json', 'run.py', 'source/main-bench-Cargo.toml', 'source/main-identity.json', 'source/main-update.rs', 'source/parent-bench-Cargo.toml', 'source/parent-identity.json', 'source/parent-update.rs', 'source-proof.json', 'summary.json', 'tmp/xcrun_db', 'toolchain.log', 'witness-first-format-error.rs', 'witness-main', 'witness-parent', 'witness.rs', 'manifest.json']:
+    FILES["5183-engine-witness-" + evidence_name.replace("/", "--")] = ROOT / "direct-5183/engine-witness" / evidence_name
+FILES["5183-admission-engine-witness-root-verification.json"] = ROOT / "direct-5183/admission/engine-witness-root-verification.json"
+for evidence_name in ["budget-1056.json", "heartbeat1056-runs.json", "heartbeat1056-review-queue.json", "copilot175-inline-comments.json", "rules-1059.json"]:
+    FILES["6480-admission-" + evidence_name] = ROOT / "direct-6480/admission" / evidence_name
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout

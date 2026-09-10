@@ -1,0 +1,10 @@
+error: invalid format string: unmatched `}` found
+  --> /private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/engine-witness/witness.rs:82:176
+   |
+82 | ...nks:?},\"before\":{before:?},\"after\":{after:?}}"
+   |                                                    ^ unmatched `}` in format string
+   |
+   = note: if you intended to print `}`, you can escape it using `}}`
+
+error: aborting due to 1 previous error
+

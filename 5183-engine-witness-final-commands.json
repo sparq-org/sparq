@@ -1,0 +1,86 @@
+[
+  {
+    "name": "final-link-parent",
+    "argv": [
+      "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/rustc",
+      "--edition=2021",
+      "--crate-name",
+      "update_witness_parent",
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/engine-witness/witness.rs",
+      "-C",
+      "opt-level=3",
+      "-C",
+      "lto=false",
+      "-C",
+      "codegen-units=16",
+      "-C",
+      "panic=unwind",
+      "-C",
+      "strip=debuginfo",
+      "-L",
+      "dependency=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps",
+      "--extern",
+      "sparq_core=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libsparq_core-e9ed6f0c10ca33fd.rlib",
+      "--extern",
+      "sparq_engine=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libsparq_engine-17d69fdf30aada97.rlib",
+      "-o",
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/engine-witness/witness-parent"
+    ],
+    "exit_code": 0,
+    "elapsed_seconds": 14.235220909118652,
+    "stop_reason": null,
+    "harness_sha256": "9c4061152dfce791bf58ee70838a4c9d3862b12ec120ff1fe1cce67f60ab37e9"
+  },
+  {
+    "name": "final-run-parent",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/engine-witness/witness-parent"
+    ],
+    "exit_code": 0,
+    "elapsed_seconds": 0.9404458999633789,
+    "stop_reason": null,
+    "harness_sha256": "9c4061152dfce791bf58ee70838a4c9d3862b12ec120ff1fe1cce67f60ab37e9"
+  },
+  {
+    "name": "final-link-main",
+    "argv": [
+      "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/rustc",
+      "--edition=2021",
+      "--crate-name",
+      "update_witness_main",
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/engine-witness/witness.rs",
+      "-C",
+      "opt-level=3",
+      "-C",
+      "lto=false",
+      "-C",
+      "codegen-units=16",
+      "-C",
+      "panic=unwind",
+      "-C",
+      "strip=debuginfo",
+      "-L",
+      "dependency=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps",
+      "--extern",
+      "sparq_core=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libsparq_core-127354fe878a2f23.rlib",
+      "--extern",
+      "sparq_engine=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libsparq_engine-d082493c198a3f5b.rlib",
+      "-o",
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/engine-witness/witness-main"
+    ],
+    "exit_code": 0,
+    "elapsed_seconds": 2.125941038131714,
+    "stop_reason": null,
+    "harness_sha256": "9c4061152dfce791bf58ee70838a4c9d3862b12ec120ff1fe1cce67f60ab37e9"
+  },
+  {
+    "name": "final-run-main",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/engine-witness/witness-main"
+    ],
+    "exit_code": 0,
+    "elapsed_seconds": 0.4221169948577881,
+    "stop_reason": null,
+    "harness_sha256": "9c4061152dfce791bf58ee70838a4c9d3862b12ec120ff1fe1cce67f60ab37e9"
+  }
+]

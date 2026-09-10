@@ -1,0 +1,95 @@
+{
+  "task": "Issue5183 fixed local public-API witness",
+  "model": "GPT-6 Astra xhigh",
+  "created_utc": "2026-09-10T10:45:15.651565+00:00",
+  "head": "781f667c19a8ebb779cfccb24b05ea432360b025",
+  "branch": "codex/update-differential-replay",
+  "clean": true,
+  "result": "Both runtime-equivalent default builds pass the prescribed reduction and controls through both public update paths.",
+  "observations": {
+    "total": 12,
+    "per_variant": 6,
+    "lexical_pair": "2 exact lexical terms,2 WHERE rows,2 distinct new blank nodes,2\u21924 total quads.",
+    "canonical_eight": "1 term,row,node;1\u21922 quads.",
+    "eight_and_nine": "2 terms,rows,nodes;2\u21924 quads.",
+    "main_parent_difference_observed": false
+  },
+  "inference": "For this reduced case, Sparq behavior on both revisions matches the repo/spec term-identity and per-solution blank-node contract. No6478 regression is observed in these executed default-feature cases.",
+  "input_precision": "Canonical integer8 is written as an explicit typed literal in this harness, RDF-term-equivalent to the bare8 in captured operation4. Padded008 remains exact. This is a two-operation reduction candidate, not execution of the original10-operation seed.",
+  "provenance": {
+    "parent": {
+      "source_commit": "ed66ef0931fa19dd521fac433870c86a78687a30",
+      "compared_commit": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
+      "engine": "libsparq_engine-17d69fdf30aada97.rlib",
+      "core": "libsparq_core-e9ed6f0c10ca33fd.rlib",
+      "equivalence": "Engine/core/lock diff is empty.",
+      "engine_sha256": "2135748c75d5afd1ca3731e6d350c5a06b99caf9376b1388fbd472b08febed9d",
+      "core_sha256": "9c6042a15b38ebfddaaef9b24e53df598201b72ec631310f201378c0b06ff7c2",
+      "binary_sha256": "85bf9b04113307e8361ddfb38eb00ad42fd363de8ad179e973d4c0e7d293a35a",
+      "binary_bytes": 5510096,
+      "engine_features": [
+        "default",
+        "digest",
+        "parallel",
+        "regex"
+      ],
+      "core_features": [
+        "default",
+        "parallel"
+      ]
+    },
+    "main": {
+      "source_commit": "d07ca79f89e3a8945be46b516c3cd2f770ccd618",
+      "compared_commit": "781f667c19a8ebb779cfccb24b05ea432360b025",
+      "engine": "libsparq_engine-d082493c198a3f5b.rlib",
+      "core": "libsparq_core-127354fe878a2f23.rlib",
+      "equivalence": "Engine delta is README and cfg(test) only; saved exact diff. No production difference.",
+      "engine_sha256": "2f17e066de1c77dd975ec2367c6e140175a31710685b05d8aadccd04f3b7b395",
+      "core_sha256": "37e9d27afb0f2c35c565ce403d6f7c238e5ac40595b49cc2949fa50dc27e98be",
+      "binary_sha256": "77a9ca937e28b041df329135a456b0744a3414ef41d9657d2ee10e87203c5dd5",
+      "binary_bytes": 5507872,
+      "engine_features": [
+        "default",
+        "digest",
+        "parallel",
+        "regex"
+      ],
+      "core_features": [
+        "default",
+        "parallel"
+      ]
+    }
+  },
+  "toolchain": "rustc 1.97.1 (8bab26f4f 2026-07-14)\nbinary: rustc\ncommit-hash: 8bab26f4f68e0e26f0bb7960be334d5b520ea452\ncommit-date: 2026-07-14\nhost: aarch64-apple-darwin\nrelease: 1.97.1\nLLVM version: 22.1.6\n",
+  "profile": {
+    "opt_level": 3,
+    "lto": false,
+    "codegen_units": 16,
+    "panic": "unwind",
+    "rayon_threads": 1,
+    "new_dependency_compilation": false
+  },
+  "first_command_failure": {
+    "kind": "Agent-authored scratch harness format-string syntax error; no linking/query execution occurred.",
+    "raw_log": "link-parent.log",
+    "first_source": "witness-first-format-error.rs",
+    "correction": "One extra escaped closing brace in JSON print format. Original source/log remain intact; successful final source and commands separately recorded.",
+    "not_a_sample_retry": "No query result was rejected/repeated. This was a compile-only scratch syntax correction; original phase deadline retained."
+  },
+  "resources": {
+    "original_phase_deadline_unix": 1789036925.2970343,
+    "phase_elapsed_seconds": 117.17435359954834,
+    "maximum_observed_allocated_bytes": 11546624,
+    "free_bytes": 8273993728,
+    "first_harness_compile_error_preserved": true
+  },
+  "limits": [
+    "Default engine/core feature sets only: no algebra-rewrite/mmap/dict-spill parity with CI claimed.",
+    "No direct Oxigraph runtime or canon execution; no full fixed-seed replay; no claim all8 failures have identical cause.",
+    "Existing compiled libraries reused with source equivalence and hash evidence; no fresh exact-main/parent engine compilation.",
+    "Main core rmeta hash matches prior frozen compiler dependency evidence; its rlib hash was first recorded in readiness and revalidated before/after this run.",
+    "No production/comparator edits, source commit, Cargo invocation, network/model call, remote action, cache cleanup, or6481 change.",
+    "No commands remain pending."
+  ],
+  "smallest_next_step": "Execute the pinned Oxigraph raw-term/count reference described in next-reference-plan.json before deciding any comparator/generator policy correction."
+}

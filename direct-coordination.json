@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-10T10:39:21.807694+00:00",
+  "updated_at": "2026-09-10T10:59:52.513328+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -68,7 +68,7 @@
     "agent": "/root/postmerge_ci",
     "actual_model": "GPT-6 Astra",
     "effort": "xhigh",
-    "phase": "Published follow-up, awaiting fresh required CI and Copilot review",
+    "phase": "All current CI green; verify rawnativeevidence anddispositionCopilot beforequeue",
     "state": "Normal fastforward26d\u21920c\u219217594 published after actualOpus security andnative-delta approvals. All20oldheadrunscompleted beforepush. ExactnewheadCI/Copilot started; notenqueued ormergeready.",
     "started_at": "2026-09-10T08:47:00Z",
     "base": "781f667c19a8ebb779cfccb24b05ea432360b025",
@@ -143,7 +143,7 @@
     },
     "pr": 6481,
     "url": "https://github.com/sparq-org/sparq/pull/6481",
-    "agent_state": "Astra on bounded5183localconformancetest, no6481edits pending",
+    "agent_state": "Astra verifies exact17594 CI rawlogs andsourceAPI, no builds or codechanges",
     "publication": {
       "at": "2026-09-10T09:27:19.769985+00:00",
       "receipt": "direct-6480/admission/publication-receipt.json",
@@ -454,7 +454,9 @@
       "auto_merge": null,
       "draft": false,
       "copilot_run": 34467011356
-    }
+    },
+    "latest_review_observation": "direct-6480/admission/heartbeat1056-review-queue.json",
+    "latest_ci_observation": "direct-6480/admission/heartbeat1056-runs.json"
   },
   "prs": {
     "4300": {
@@ -937,16 +939,20 @@
   "followup_lane": {
     "issue": 5183,
     "agent": "/root/postmerge_ci",
-    "state": "bounded_engine_witness_running",
+    "state": "engine_witness_completed_root_verified",
     "base": "781f667c19a8ebb779cfccb24b05ea432360b025",
     "scope": "firstseed4141222487 deterministic localization readiness; no runtime/build yet; no attribution to6478",
     "limits": "new output<=64MiB, inspect warm cache only; preserve canonNO_GO holds and strict comparator",
-    "report": "direct-5183/readiness/report.json",
-    "manifest_sha256": "aed6368c35484f51ec6ea1fa4fcdeb208aaa6e8b8eed19518d0db5470269dd01",
+    "report": "direct-5183/engine-witness/report.json",
+    "manifest_sha256": "88f152695f2fbedb42306daee1d623b10544eda87426d2ff430bd34663366af3",
     "proposed_next": "Defaultfeature publicAPI2operationenginewitness main/parent withwarmrlibs,\u22642min/64MiB, no dependencycompile. Root mustread/verifyreadiness thenauthorize; no exactCIfeatureclaim.",
     "directory": "direct-5183/engine-witness",
     "authorized_limits": "\u22642minlink/run phase,64MiBoutputs,jobs1,noCargo/dependencycompile/network; defaultwarmrlibsonly, noexactCIclaim",
-    "dispatch_event": "First runtime task failed automatedpossiblecybersecurityflag beforeexecution; onefollowupclarified localfixed-dataSPARQLconformance; if serviceblocksagainstopandreport, no workaround."
+    "dispatch_event": "Initialautomatedcyberflagclearedwithplainlocalconformancescope. Actualtestcompleted; no remainingserviceblock.",
+    "root_verification": "direct-5183/admission/engine-witness-root-verification.json",
+    "observations": "12actualobservations: main/parentdefaultreduction+controls bothpublicupdatepaths matchspec; noattributionbeyondtestedcase",
+    "next_reference_plan": "direct-5183/engine-witness/next-reference-plan.json",
+    "reference_execution": "Planonly; waitforcurrent6481CIverificationhandoffthen authorizeboundedofflineOxigraph512MiB10min jobs1, no broadbenchbuild."
   },
   "budget": {
     "observed_at": "2026-09-10T10:36:57.270637+00:00",

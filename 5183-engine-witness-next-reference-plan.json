@@ -1,0 +1,23 @@
+{
+  "status": "Plan only; no Oxigraph or full-seed execution in this phase.",
+  "next_small_step": {
+    "scope": "Pinned Oxigraph0.5.9 direct public in-memory Store/update/query witness for the same two operations and two controls. Export raw pre/post quads, WHERE row bindings and distinct new blank nodes; no canonicalizer needed to adjudicate counts.",
+    "dependencies": "oxigraph = { version = \"=0.5.9\", default-features = false, features = [\"rdf-12\"] }; use repository Cargo.lock dependency versions and vendored spargebra0.4.6 patch to match CI parser provenance.",
+    "why_no_complete_warm_link": "Authorized target has no Oxigraph rlib. Local Oxigraph0.5.9 source is present; no offline dependency-resolution closure/build-size proof exists yet.",
+    "proposal_for_root": "Authorize one minimal offline task-local reference build with jobs1, same warm O3/unwind/no-LTO/codegen16 profile, separate measured growth receipt and hard limit chosen by root. Propose10min/512MiB aggregate growth and at least2GiB free, stopping on any missing dependency or bound. These are operational limits, not predicted build consumption.",
+    "no_extra_features": "No RocksDB, HTTP-client features, installs, network, workspace/bench-wide build, or dependency version update.",
+    "interpretation": "If raw Oxi outputs1/1 for lexical pair while controls behave1/1 and2/2, the history-dependent reference-cardinality explanation is directly established for the reduced case. A contrary result must be retained and investigated, not retried."
+  },
+  "exact_seed_followup": {
+    "scope": "Minimal dedicated entry point for the unchanged update_fuzz.rs module, calling run(4141222487,1) on each source with all original comparator guards.",
+    "dependency_surface": "Use engine algebra-rewrite, core mmap+dict-spill, canon rdf12-triple-terms, oxrdf matching workspace features, serde_json and pinned Oxigraph0.5.9; inspect actual module closure and preserve vendored spargebra patch. Omit unrelated query-fuzzer/benchmark modules.",
+    "critical_seams": [
+      "Preserve env!(CARGO_MANIFEST_DIR)/repository-relative allowlist lookup with equivalent crate layout and committed allowlist; missing file must not silently alter adjudication.",
+      "Keep generator, LOAD sandbox/document content and reference INSERT substitute untouched.",
+      "Preserve strict rebuild/in-place comparison before Oxi and per-step probes; do not normalize production input or suppress failures.",
+      "Capture actual dependency feature/profile/source hashes; warm diagnostic profile is not identical to CI release-fast thin-LTO/abort profile."
+    ],
+    "execution": "One fixed seed per source, no advancing window/seed hunting. Compare failure step, raw per-engine snapshots and normalized snapshots in a separate observation harness if needed; do not change committed comparator.",
+    "resource_gate": "Requires extra cold canon and feature compilation. Return measured readiness after the small reference build rather than assuming the full path fits its cap."
+  }
+}
