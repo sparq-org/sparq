@@ -1,0 +1,261 @@
+crates/sparq-bench/src/update_fuzz.rs:1025-1091
+1025: // The projection order is N-QUADS ORDER (`?s ?p ?o [?g]`) on purpose: a row rendered
+1026: // by joining its cells is then a well-formed N-Quads line, so probe results go through
+1027: // exactly the same canonical comparison as the dataset snapshots — which is what makes
+1028: // them comparable at all once blank nodes are in play.
+1029: 
+1030: const PROBES: &[(&str, &[&str])] = &[
+1031:     ("SELECT ?s ?p ?o WHERE { ?s ?p ?o }", &["s", "p", "o"]),
+1032:     (
+1033:         "SELECT ?s ?p ?o ?g WHERE { GRAPH ?g { ?s ?p ?o } }",
+1034:         &["s", "p", "o", "g"],
+1035:     ),
+1036: ];
+1037: 
+1038: /// Renders one probe row's cells as an N-Quads line.
+1039: fn probe_line(cells: &[String]) -> String {
+1040:     format!("{} .", cells.join(" "))
+1041: }
+1042: 
+1043: /// The full sorted binding set of a probe through sparq's query path.
+1044: fn sparq_probe(g: &Graph, q: &str) -> Result<Vec<String>, String> {
+1045:     let r = sparq_engine::query(g, q).map_err(|e| format!("sparq probe error: {}", e))?;
+1046:     let mut rows: Vec<String> = r
+1047:         .rows
+1048:         .iter()
+1049:         .map(|row| {
+1050:             probe_line(
+1051:                 &row.iter()
+1052:                     .map(|t| {
+1053:                         t.as_ref()
+1054:                             .map(|t| t.to_string())
+1055:                             .unwrap_or_else(|| "UNDEF".to_string())
+1056:                     })
+1057:                     .collect::<Vec<_>>(),
+1058:             )
+1059:         })
+1060:         .collect();
+1061:     rows.sort();
+1062:     Ok(rows)
+1063: }
+1064: 
+1065: /// The full sorted binding set of a probe through Oxigraph's query path.
+1066: // clippy: the differential oracle pins oxigraph's legacy Store::query semantics
+1067: #[allow(deprecated)]
+1068: fn oxi_probe(store: &Store, q: &str, vars: &[&str]) -> Result<Vec<String>, String> {
+1069:     match store.query(q).map_err(|e| e.to_string())? {
+1070:         oxigraph::sparql::QueryResults::Solutions(s) => {
+1071:             let mut rows = Vec::new();
+1072:             for sol in s {
+1073:                 let sol = sol.map_err(|e| e.to_string())?;
+1074:                 rows.push(probe_line(
+1075:                     &vars
+1076:                         .iter()
+1077:                         .map(|v| {
+1078:                             sol.get(*v)
+1079:                                 .map(|t| t.to_string())
+1080:                                 .unwrap_or_else(|| "UNDEF".to_string())
+1081:                         })
+1082:                         .collect::<Vec<_>>(),
+1083:                 ));
+1084:             }
+1085:             rows.sort();
+1086:             Ok(rows)
+1087:         }
+1088:         _ => Err("probe did not return solutions".to_string()),
+1089:     }
+1090: }
+1091: 
+
+crates/sparq-bench/src/update_fuzz.rs:1150-1323
+1150: /// canonical dataset + both probes after every step. Returns the run's counts, or the
+1151: /// divergence detail (step-localized).
+1152: ///
+1153: /// `inject_divergence_at`: test-only comparator non-vacuity knob — after applying
+1154: /// step `i` to all three engines, a marker quad is inserted into the OXIGRAPH store
+1155: /// only, so the comparator MUST report a divergence at that step (see
+1156: /// `tests::injected_divergence_is_caught`). `None` in production.
+1157: fn check_seed(
+1158:     seed: u64,
+1159:     inject_divergence_at: Option<usize>,
+1160:     allow: &UpdateDivergenceAllowlist,
+1161: ) -> Result<SeedOutcome, String> {
+1162:     let mut rng = Rng::new(seed);
+1163:     let ops = gen_sequence(&mut rng);
+1164:     let sandbox = if ops.iter().any(|o| o.sparq.starts_with("LOAD")) {
+1165:         Some(LoadSandbox::new()?)
+1166:     } else {
+1167:         None
+1168:     };
+1169:     match sandbox.as_ref() {
+1170:         // The allowlisted base is installed for the whole seed: `with_load_base` is a
+1171:         // thread-local guard, and a seed's steps all run on this thread.
+1172:         Some(s) => sparq_engine::with_load_base(s.path(), || {
+1173:             apply_sequence(seed, &ops, Some(s), inject_divergence_at, allow)
+1174:         }),
+1175:         None => apply_sequence(seed, &ops, None, inject_divergence_at, allow),
+1176:     }
+1177: }
+1178: 
+1179: fn apply_sequence(
+1180:     seed: u64,
+1181:     ops: &[Op],
+1182:     sandbox: Option<&LoadSandbox>,
+1183:     inject_divergence_at: Option<usize>,
+1184:     allow: &UpdateDivergenceAllowlist,
+1185: ) -> Result<SeedOutcome, String> {
+1186:     let mut g_rebuild = Graph::new();
+1187:     let mut g_inplace = Graph::new();
+1188:     let store = Store::new().map_err(|e| format!("oxigraph store init: {}", e))?;
+1189:     let mut adjudicated_integer_lexical = 0u64;
+1190:     let mut isomorphism_compares = 0u64;
+1191: 
+1192:     let fail = |step: usize, op: &Op, detail: String| -> String {
+1193:         format!(
+1194:             "step={} of {}\nop: {}\n{}\nrepro: cargo run -p sparq-bench --release -- \
+1195:              update-fuzz --seed-start {} --seed-count 1\n--- full sequence ---\n{}",
+1196:             step,
+1197:             ops.len(),
+1198:             op.sparq,
+1199:             detail,
+1200:             seed,
+1201:             ops.iter()
+1202:                 .enumerate()
+1203:                 .map(|(i, o)| match &o.oxi {
+1204:                     Some(x) if *x != o.sparq =>
+1205:                         format!("[{}] {}\n     (reference engine ran: {})", i, o.sparq, x),
+1206:                     Some(_) => format!("[{}] {}", i, o.sparq),
+1207:                     None => format!("[{}] {}\n     (reference engine ran: nothing)", i, o.sparq),
+1208:                 })
+1209:                 .collect::<Vec<_>>()
+1210:                 .join("\n")
+1211:         )
+1212:     };
+1213: 
+1214:     for (i, op) in ops.iter().enumerate() {
+1215:         // A LOAD's document must exist before the request runs.
+1216:         if let (Some(doc), Some(s)) = (&op.doc, sandbox) {
+1217:             s.write(doc).map_err(|e| fail(i, op, e))?;
+1218:         }
+1219: 
+1220:         // Apply to all three implementations. Every generated op is inside the
+1221:         // supported deterministic subset, so an error from ANY engine is itself a
+1222:         // divergence (strict — there is no unsupported-skip in this harness).
+1223:         g_rebuild = sparq_engine::update(&g_rebuild, &op.sparq)
+1224:             .map_err(|e| fail(i, op, format!("sparq update (rebuild path) error: {}", e)))?;
+1225:         sparq_engine::update_in_place(&mut g_inplace, &op.sparq)
+1226:             .map_err(|e| fail(i, op, format!("sparq update_in_place error: {}", e)))?;
+1227:         if let Some(oxi) = &op.oxi {
+1228:             store
+1229:                 .update(oxi.as_str())
+1230:                 .map_err(|e| fail(i, op, format!("oxigraph update error: {}", e)))?;
+1231:         }
+1232: 
+1233:         if inject_divergence_at == Some(i) {
+1234:             use oxigraph::model::{GraphName, NamedNode, Quad};
+1235:             let n = |s: &str| NamedNode::new(s).expect("valid IRI");
+1236:             let marker = Quad::new(
+1237:                 n("http://ex/injected"),
+1238:                 n("http://ex/injected"),
+1239:                 n("http://ex/injected"),
+1240:                 GraphName::DefaultGraph,
+1241:             );
+1242:             store
+1243:                 .insert(&marker)
+1244:                 .map_err(|e| format!("marker insert failed: {}", e))?;
+1245:         }
+1246: 
+1247:         // (a) Canonical dataset equality. Localizes a divergence to this exact step.
+1248:         // sparq-vs-sparq FIRST and STRICT (no adjudication): the two sparq paths must
+1249:         // agree with each other whatever the reference engine does.
+1250:         let nq_rebuild = sparq_nquads(&g_rebuild);
+1251:         let nq_inplace = sparq_nquads(&g_inplace);
+1252:         let nq_oxi = oxi_nquads(&store).map_err(|e| fail(i, op, e))?;
+1253:         if mentions_blank_node(&nq_rebuild) || mentions_blank_node(&nq_oxi) {
+1254:             isomorphism_compares += 1;
+1255:         }
+1256:         if let Verdict::Differs(detail) = compare(
+1257:             "sparq(rebuild)",
+1258:             &nq_rebuild,
+1259:             "sparq(in-place)",
+1260:             &nq_inplace,
+1261:             false,
+1262:         ) {
+1263:             return Err(fail(
+1264:                 i,
+1265:                 op,
+1266:                 format!(
+1267:                     "canonical dataset differs BETWEEN SPARQ'S OWN UPDATE PATHS\n{}",
+1268:                     detail
+1269:                 ),
+1270:             ));
+1271:         }
+1272:         for (label, nq) in [
+1273:             ("sparq(rebuild)", &nq_rebuild),
+1274:             ("sparq(in-place)", &nq_inplace),
+1275:         ] {
+1276:             match compare(label, nq, "oxigraph", &nq_oxi, allow.integer_lexical) {
+1277:                 Verdict::Same => {}
+1278:                 Verdict::AdjudicatedIntegerLexical => adjudicated_integer_lexical += 1,
+1279:                 Verdict::Differs(detail) => {
+1280:                     return Err(fail(
+1281:                         i,
+1282:                         op,
+1283:                         format!(
+1284:                             "canonical dataset differs ({} vs oxigraph)\n{}",
+1285:                             label, detail
+1286:                         ),
+1287:                     ));
+1288:                 }
+1289:             }
+1290:         }
+1291: 
+1292:         // (b) Probe SELECTs — the query-path view of the updated store, full sorted
+1293:         // binding sets (never counts). Checked for BOTH sparq graphs: the in-place
+1294:         // one reads through the live delta overlay.
+1295:         for (probe, vars) in PROBES {
+1296:             let oxi = oxi_probe(&store, probe, vars)
+1297:                 .map_err(|e| fail(i, op, format!("oxigraph probe error: {}", e)))?;
+1298:             for (label, g) in [("rebuild", &g_rebuild), ("in-place", &g_inplace)] {
+1299:                 let sparq = sparq_probe(g, probe).map_err(|e| fail(i, op, e))?;
+1300:                 match compare("sparq", &sparq, "oxigraph", &oxi, allow.integer_lexical) {
+1301:                     Verdict::Same => {}
+1302:                     Verdict::AdjudicatedIntegerLexical => adjudicated_integer_lexical += 1,
+1303:                     Verdict::Differs(detail) => {
+1304:                         return Err(fail(
+1305:                             i,
+1306:                             op,
+1307:                             format!(
+1308:                                 "probe {:?} binding set differs (sparq {} vs oxigraph)\n{}",
+1309:                                 probe, label, detail
+1310:                             ),
+1311:                         ));
+1312:                     }
+1313:                 }
+1314:             }
+1315:         }
+1316:     }
+1317:     Ok(SeedOutcome {
+1318:         ops: ops.len() as u64,
+1319:         adjudicated_integer_lexical,
+1320:         isomorphism_compares,
+1321:     })
+1322: }
+1323: 
+
+crates/sparq-bench/src/main.rs:21-22
+21: mod neutral;
+22: mod update_fuzz;
+
+crates/sparq-bench/src/main.rs:73-83
+73:     // `sparq-bench update-fuzz --seed-start N --seed-count M` — SPARQL UPDATE
+74:     // differential vs Oxigraph (sq-3dyje.4): random ground-term update sequences
+75:     // through both sparq update paths + Oxigraph, canonical per-step compare.
+76:     if args.get(1).map(String::as_str) == Some("update-fuzz") {
+77:         let seed_start: u64 =
+78:             arg_val(&args, "--seed-start").and_then(|s| s.parse().ok()).unwrap_or(0);
+79:         let count: u64 =
+80:             arg_val(&args, "--seed-count").and_then(|s| s.parse().ok()).unwrap_or(1000);
+81:         update_fuzz::run(seed_start, count);
+82:         return;
+83:     }

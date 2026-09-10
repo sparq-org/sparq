@@ -1,0 +1,26 @@
+{
+  "head": "9ac4a59e96b1c69c8d617fbde9e98fe8c0436fed",
+  "clean": true,
+  "files": [
+    {
+      "path": "crates/sparq-bench/src/update_fuzz.rs",
+      "sha256": "41d8a1e664a3620dc23ec530af9c1908123c43f98131a61f1c9ca2b555d33eaa",
+      "same_as_f50": true
+    },
+    {
+      "path": "crates/sparq-bench/src/main.rs",
+      "sha256": "4c8961875d079c2c33202d5b61559c622c99f404d20b25d088596caf2dcdd6a0",
+      "same_as_f50": true
+    },
+    {
+      "path": "crates/sparq-canon/src/lib.rs",
+      "sha256": "3f701b4635743faeb425c8135c98d36fc4e23564c9db18c2b3aed9c5d94a2b55",
+      "same_as_f50": true
+    },
+    {
+      "path": "crates/sparq-canon/src/rdf12.rs",
+      "sha256": "69c540909a3096f99111f2a7fee714093eddd4501b1f52ae7be7d66854a25685",
+      "same_as_f50": true
+    }
+  ]
+}

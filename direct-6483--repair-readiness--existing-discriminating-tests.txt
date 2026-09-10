@@ -1,0 +1,164 @@
+crates/sparq-bench/src/update_fuzz.rs:1720-1779
+1720:             "its canonical sibling is a different RDF term and must survive: {:?}",
+1721:             after
+1722:         );
+1723:         assert_eq!(after.len(), 3, "exactly one term removed: {:?}", after);
+1724:     }
+1725: 
+1726:     /// sq-hodke (2): the isomorphism-aware compare is REAL, in both directions. Two
+1727:     /// datasets that differ only in blank-node labels must compare Same; one extra
+1728:     /// edge on a blank node must still be caught. Without the second half, the
+1729:     /// canonicalization would be a divergence-swallowing rubber stamp.
+1730:     #[test]
+1731:     fn blank_node_compare_is_isomorphism_not_relabelling_blindness() {
+1732:         let a = vec![
+1733:             "_:fb0 <http://ex/p> <http://ex/o> .".to_string(),
+1734:             "_:fb0 <http://ex/q> _:fb1 <http://ex/g> .".to_string(),
+1735:         ];
+1736:         let relabelled = vec![
+1737:             "_:zzz <http://ex/p> <http://ex/o> .".to_string(),
+1738:             "_:zzz <http://ex/q> _:aaa <http://ex/g> .".to_string(),
+1739:         ];
+1740:         assert!(
+1741:             matches!(compare("a", &a, "b", &relabelled, false), Verdict::Same),
+1742:             "a pure blank-node relabelling is the SAME dataset"
+1743:         );
+1744:         let mut extra = relabelled.clone();
+1745:         extra.push("_:zzz <http://ex/r> <http://ex/o2> .".to_string());
+1746:         extra.sort();
+1747:         assert!(
+1748:             matches!(compare("a", &a, "b", &extra, false), Verdict::Differs(_)),
+1749:             "an extra edge on a blank node is NOT an isomorphism and must fail"
+1750:         );
+1751:         // A different blank-node *shape* with the same edge count must also fail.
+1752:         let reshaped = vec![
+1753:             "_:p <http://ex/p> <http://ex/o> .".to_string(),
+1754:             "_:q <http://ex/q> _:r <http://ex/g> .".to_string(),
+1755:         ];
+1756:         assert!(
+1757:             matches!(compare("a", &a, "b", &reshaped, false), Verdict::Differs(_)),
+1758:             "splitting one blank node into two is NOT an isomorphism and must fail"
+1759:         );
+1760:     }
+1761: 
+1762:     /// A duplicate quad on one side alone survives canonicalization (RDFC-1.0
+1763:     /// deduplicates), so the raw-count guard must catch it. Pins the check that keeps
+1764:     /// v1's duplicate sensitivity alive under the new comparator.
+1765:     #[test]
+1766:     fn duplicate_quad_is_caught_despite_canonicalization() {
+1767:         let a = vec![
+1768:             "_:x <http://ex/p> <http://ex/o> .".to_string(),
+1769:             "_:x <http://ex/p> <http://ex/o> .".to_string(),
+1770:         ];
+1771:         let b = vec!["_:y <http://ex/p> <http://ex/o> .".to_string()];
+1772:         match compare("a", &a, "b", &b, false) {
+1773:             Verdict::Differs(d) => assert!(
+1774:                 d.contains("COUNTS differ"),
+1775:                 "expected the raw-count guard to fire, got:\n{}",
+1776:                 d
+1777:             ),
+1778:             _ => panic!("a duplicated quad on one side must not compare equal"),
+1779:         }
+
+crates/sparq-bench/src/update_fuzz.rs:2105-2205
+2105:             }
+2106:         }
+2107:     }
+2108: 
+2109:     #[test]
+2110:     fn lexical_adjudication_preserves_rows_and_blank_node_structure() {
+2111:         // The blank-node case reaches canon's set conversion; without it the
+2112:         // ordinary vector comparison alone rejects the differing multiplicities.
+2113:         for subject in ["<http://ex/s>", "_:x"] {
+2114:             let p = format!("{subject} <http://ex/p> \"020\"^^{XSD_INTEGER} .");
+2115:             let q = format!("{subject} <http://ex/q> \"021\"^^{XSD_INTEGER} .");
+2116:             let a = vec![p.clone(), p.clone(), q.clone()];
+2117:             let b = vec![
+2118:                 p.replace("020", "20"),
+2119:                 q.replace("021", "21"),
+2120:                 q.replace("021", "21"),
+2121:             ];
+2122:             assert!(
+2123:                 matches!(compare("a", &a, "b", &b, true), Verdict::Differs(_)),
+2124:                 "equal totals cannot hide duplicate redistribution for {subject}"
+2125:             );
+2126:         }
+2127:         let a = vec![
+2128:             format!("_:a <http://ex/p> \"020\"^^{XSD_INTEGER} ."),
+2129:             "_:a <http://ex/q> <http://ex/o> .".into(),
+2130:         ];
+2131:         let good = vec![
+2132:             format!("_:x <http://ex/p> \"20\"^^{XSD_INTEGER} ."),
+2133:             "_:x <http://ex/q> <http://ex/o> .".into(),
+2134:         ];
+2135:         assert!(matches!(
+2136:             compare("a", &a, "b", &good, true),
+2137:             Verdict::AdjudicatedIntegerLexical
+2138:         ));
+2139:         let split = vec![good[0].clone(), "_:y <http://ex/q> <http://ex/o> .".into()];
+2140:         match compare("a", &a, "b", &split, true) {
+2141:             Verdict::Differs(detail) => {
+2142:                 assert!(
+2143:                     detail.contains("blank-node counts differ (1 vs 2)"),
+2144:                     "{detail}"
+2145:                 );
+2146:                 assert!(detail.contains("only in a:"), "{detail}");
+2147:                 assert!(detail.contains("only in b:"), "{detail}");
+2148:                 assert!(
+2149:                     detail.contains("\"020\""),
+2150:                     "original lexical missing: {detail}"
+2151:                 );
+2152:                 assert!(
+2153:                     detail.contains("\"20\""),
+2154:                     "reference lexical missing: {detail}"
+2155:                 );
+2156:             }
+2157:             _ => panic!("different blank-node counts must fail with original dataset details"),
+2158:         }
+2159:         let extra = vec![good[0].clone(), "_:x <http://ex/r> <http://ex/o> .".into()];
+2160:         assert!(
+2161:             matches!(compare("a", &a, "b", &extra, true), Verdict::Differs(_)),
+2162:             "same node/row counts do not license a changed predicate"
+2163:         );
+2164:         for (left, right) in [
+2165:             (
+2166:                 "\"20.0\"^^<http://www.w3.org/2001/XMLSchema#decimal>",
+2167:                 "\"20\"^^<http://www.w3.org/2001/XMLSchema#decimal>",
+2168:             ),
+2169:             ("\"x\"@en", "\"x\"@fr"),
+2170:         ] {
+2171:             let left = vec![format!("<http://ex/s> <http://ex/p> {left} .")];
+2172:             let right = vec![format!("<http://ex/s> <http://ex/p> {right} .")];
+2173:             assert!(matches!(
+2174:                 compare("a", &left, "b", &right, true),
+2175:                 Verdict::Differs(_)
+2176:             ));
+2177:         }
+2178:     }
+2179: 
+2180:     #[test]
+2181:     fn nested_noncanonical_terms_remain_exact_in_sparq() {
+2182:         let expected = vec![format!(
+2183:             "<http://ex/s> <http://ex/p> <<( <http://ex/a> <http://ex/q> <<( <http://ex/b> <http://ex/r> \"020\"^^{XSD_INTEGER} )>> )>> ."
+2184:         )];
+2185:         let op = format!("INSERT DATA {{ {} }}", expected[0]);
+2186:         let rebuilt = sparq_engine::update(&Graph::new(), &op).unwrap();
+2187:         let mut inplace = Graph::new();
+2188:         sparq_engine::update_in_place(&mut inplace, &op).unwrap();
+2189:         for graph in [&rebuilt, &inplace] {
+2190:             assert_eq!(sparq_nquads(graph), expected);
+2191:             assert_eq!(sparq_probe(graph, PROBES[0].0).unwrap(), expected);
+2192:         }
+2193:         let canonical: Vec<_> = expected.iter().map(|s| s.replace("020", "20")).collect();
+2194:         assert!(matches!(
+2195:             compare("sparq", &expected, "reference", &canonical, true),
+2196:             Verdict::AdjudicatedIntegerLexical
+2197:         ));
+2198:         assert!(matches!(
+2199:             compare("sparq", &expected, "other sparq", &canonical, false),
+2200:             Verdict::Differs(_)
+2201:         ));
+2202:     }
+2203: 
+2204:     #[test]
+2205:     fn injected_marker_fails_during_actual_lexical_adjudication() {

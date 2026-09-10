@@ -789,6 +789,38 @@ for evidence_name in ['copilot-budget.json', 'copilot-budget.stderr', 'copilot-e
 for evidence_name in ['execution-budget.json', 'execution-budget.stderr', 'execution-issue.json', 'execution-issue.stderr', 'execution-main.json', 'execution-main.stderr', 'publish-witness.py', 'witness-comment-input.json', 'witness-comment-receipt.json', 'witness-comment.md', 'witness-execution-admission.json', 'witness-root-verification.json']:
     FILES["6483-admission-" + evidence_name] = ROOT / "direct-6483/admission" / evidence_name
 
+# Completed6483 conditional design review and implementation grant; current6486 checks.
+FILES['direct-6483--repair-readiness--all-production-callers.txt'] = ROOT / 'direct-6483/repair-readiness' / 'all-production-callers.txt'
+FILES['direct-6483--repair-readiness--caller-inventory.json'] = ROOT / 'direct-6483/repair-readiness' / 'caller-inventory.json'
+FILES['direct-6483--repair-readiness--canonicalization-apis.txt'] = ROOT / 'direct-6483/repair-readiness' / 'canonicalization-apis.txt'
+FILES['direct-6483--repair-readiness--comparator-and-normalization.txt'] = ROOT / 'direct-6483/repair-readiness' / 'comparator-and-normalization.txt'
+FILES['direct-6483--repair-readiness--existing-discriminating-tests.txt'] = ROOT / 'direct-6483/repair-readiness' / 'existing-discriminating-tests.txt'
+FILES['direct-6483--repair-readiness--report.json'] = ROOT / 'direct-6483/repair-readiness' / 'report.json'
+FILES['direct-6483--repair-readiness--review-packet.md'] = ROOT / 'direct-6483/repair-readiness' / 'review-packet.md'
+FILES['direct-6483--repair-readiness--source-proof.json'] = ROOT / 'direct-6483/repair-readiness' / 'source-proof.json'
+FILES['direct-6483--repair-readiness--witness-observations.json'] = ROOT / 'direct-6483/repair-readiness' / 'witness-observations.json'
+FILES['direct-6483--repair-readiness--manifest.json'] = ROOT / 'direct-6483/repair-readiness' / 'manifest.json'
+FILES['direct-6483--admission--repair-readiness-root-verification.json'] = ROOT / 'direct-6483/admission' / 'repair-readiness-root-verification.json'
+FILES['direct-6483--admission--opus-duplicate-design-input.md'] = ROOT / 'direct-6483/admission' / 'opus-duplicate-design-input.md'
+FILES['direct-6483--admission--run-opus-duplicate-design.py'] = ROOT / 'direct-6483/admission' / 'run-opus-duplicate-design.py'
+FILES['direct-6483--admission--opus-duplicate-design-review.json'] = ROOT / 'direct-6483/admission' / 'opus-duplicate-design-review.json'
+FILES['direct-6483--admission--opus-duplicate-design-completion.json'] = ROOT / 'direct-6483/admission' / 'opus-duplicate-design-completion.json'
+FILES['direct-6483--admission--opus-duplicate-design-result.json'] = ROOT / 'direct-6483/admission' / 'opus-duplicate-design-result.json'
+FILES['direct-6483--admission--opus-duplicate-design-root-disposition.json'] = ROOT / 'direct-6483/admission' / 'opus-duplicate-design-root-disposition.json'
+FILES['direct-6483--admission--implementation-main.json'] = ROOT / 'direct-6483/admission' / 'implementation-main.json'
+FILES['direct-6483--admission--implementation-main.stderr'] = ROOT / 'direct-6483/admission' / 'implementation-main.stderr'
+FILES['direct-6483--admission--implementation-issue.json'] = ROOT / 'direct-6483/admission' / 'implementation-issue.json'
+FILES['direct-6483--admission--implementation-issue.stderr'] = ROOT / 'direct-6483/admission' / 'implementation-issue.stderr'
+FILES['direct-6483--admission--implementation-admission.json'] = ROOT / 'direct-6483/admission' / 'implementation-admission.json'
+FILES['direct-6485--admission--budget1825.json'] = ROOT / 'direct-6485/admission' / 'budget1825.json'
+FILES['direct-6485--admission--budget1825.stderr'] = ROOT / 'direct-6485/admission' / 'budget1825.stderr'
+FILES['direct-6485--admission--pr6486-1825.json'] = ROOT / 'direct-6485/admission' / 'pr6486-1825.json'
+FILES['direct-6485--admission--pr6486-1825.stderr'] = ROOT / 'direct-6485/admission' / 'pr6486-1825.stderr'
+FILES['direct-6485--admission--ci-jobs1825.json'] = ROOT / 'direct-6485/admission' / 'ci-jobs1825.json'
+FILES['direct-6485--admission--ci-jobs1825.stderr'] = ROOT / 'direct-6485/admission' / 'ci-jobs1825.stderr'
+FILES['direct-6485--admission--matrix-jobs1825.json'] = ROOT / 'direct-6485/admission' / 'matrix-jobs1825.json'
+FILES['direct-6485--admission--matrix-jobs1825.stderr'] = ROOT / 'direct-6485/admission' / 'matrix-jobs1825.stderr'
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout

@@ -1,0 +1,9 @@
+{
+  "at": "2026-09-10T18:17:50.977162+00:00",
+  "verified_files": 9,
+  "manifest_sha256": "8eb9c9ddb952abd3ba2f69e3cae961311557b820f27b8b31446379fff616b4c9",
+  "input_sha256": "951da7246ba8992a8823652e73725169456d8f0f7585cf050447ef3063bb6466",
+  "input_bytes": 71735,
+  "source": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+  "production_changes": false
+}

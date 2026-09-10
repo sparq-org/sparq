@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-10T18:15:16.370789+00:00",
+  "updated_at": "2026-09-10T18:24:39.485480+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -91,9 +91,9 @@
     "production_edit_authorized": false,
     "prior_baseline": "direct-3113/delete-memo-baseline",
     "next_actions": [
-      "Wait for relevant6486 CI/matrix completion; obtain actual execution proof of memo tests/currenthead feature legs/doclinks. Otherlatestworkflows already succeeded.",
-      "Once peers are green, fresh exacthead/gate/budget validation permits one aggregate-only recovery. Then normal protected queue if current reviews/holds clear; no bypass/jump.",
-      "Collect Astra6483 source-only repair design, obtain actual Opus soundness review before new code."
+      "Wait current6486 required CI/matrix; collect actualmemo test/current feature execution proof before queue.",
+      "One aggregate-only recovery after required peers green and fresh head/budget/checks; no current evidence cancellations.",
+      "Collect6483 implementation, verify source/evidence, actual Opus final review before any publication."
     ],
     "controls": {
       "directory": "direct-6485/memo-controls",
@@ -125,7 +125,7 @@
       "root_disposition": "direct-6485/admission/opus-memo-design-root-disposition.json",
       "output_sha256": "c619dd1d92a198c46a7e2b26ca8ab34e08de5612bd6db3920b451263d5891886"
     },
-    "agent_current_task": "6483 source-only repair/caller-contract design for independent Opus; no production edits.",
+    "agent_current_task": "6483 scoped comparator implementation + actual contract tests under bounded execution admission.",
     "implementation_admission": "direct-6485/admission/implementation-admission.json",
     "implementation_readiness": {
       "directory": "direct-6485/implementation-readiness",
@@ -207,7 +207,11 @@
       "CI": 34511329235,
       "feature_matrix": 34511329512,
       "gate": 34511329028,
-      "state": "CoreCI/matrix workflowstatusqueued but prior job snapshots showed progress. Otherlatestworkflows success; gate failed before source recovery."
+      "state": "Current coreCI/matrix progressing; all completed jobs success/skipped. No new failure; aggregate recovery waits all relevant peers.",
+      "latest_jobs": [
+        "direct-6485/admission/ci-jobs1825.json",
+        "direct-6485/admission/matrix-jobs1825.json"
+      ]
     },
     "copilot": {
       "state": "COMMENTED_APPROVAL_RECOMMENDED",
@@ -1060,12 +1064,14 @@
     "6483": {
       "state": "open",
       "runtime_gap_confirmed": true,
-      "implementation": {
+      "implementation": "Astra xhigh implementing scoped repair after conditional actual Opus design; runtime scope control and final review required",
+      "scope": "Raw duplicate-output diagnostic contract; legitimate arbitrary query bags require separate semantics.",
+      "coordination": {
         "issue": 6483,
         "agent": "/root/postmerge_ci",
-        "state": "repair_design_source_only_running",
+        "state": "implementation_running_after_conditional_Opus_design",
         "directory": "direct-6483/repair-readiness",
-        "production_edits_authorized": false,
+        "production_edits_authorized": true,
         "readiness": {
           "directory": "direct-6483/readiness",
           "manifest_sha256": "d8c96dfa61b3b93582bb304e5f69490f0d161addf168438238911ad415933866",
@@ -1083,9 +1089,31 @@
           "comparisons": 4,
           "pending_commands": false
         },
-        "public_update": "direct-6483/admission/witness-comment-receipt.json"
-      },
-      "scope": "Raw duplicate-output diagnostic contract; legitimate arbitrary query bags require separate semantics."
+        "public_update": "direct-6483/admission/witness-comment-receipt.json",
+        "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6483",
+        "branch": "codex/update-comparator-raw-duplicates",
+        "implementation_admission": "direct-6483/admission/implementation-admission.json",
+        "repair_design": {
+          "directory": "direct-6483/repair-readiness",
+          "files": 9,
+          "manifest_sha256": "8eb9c9ddb952abd3ba2f69e3cae961311557b820f27b8b31446379fff616b4c9",
+          "root_verification": "direct-6483/admission/repair-readiness-root-verification.json"
+        },
+        "design_review": {
+          "state": "completed_collected",
+          "session_id": 69637,
+          "actual_primary_model": "claude-opus-5",
+          "effort": "xhigh",
+          "verdict": "CONDITIONAL",
+          "output_sha256": "607701af34a0575501ef4528d7008e4b74446f7eb490d65d53d5da72f90cbe99",
+          "input": "direct-6483/admission/opus-duplicate-design-input.md",
+          "input_sha256": "951da7246ba8992a8823652e73725169456d8f0f7585cf050447ef3063bb6466",
+          "output": "direct-6483/admission/opus-duplicate-design-review.json",
+          "result": "direct-6483/admission/opus-duplicate-design-result.json",
+          "root_disposition": "direct-6483/admission/opus-duplicate-design-root-disposition.json",
+          "policy": "69637 completed/collected; no poll or relaunch. Final source review remains required."
+        }
+      }
     }
   },
   "usage_observation": {
@@ -4530,9 +4558,9 @@
   "next_lane_readiness": {
     "issue": 6483,
     "agent": "/root/postmerge_ci",
-    "state": "repair_design_source_only_running",
+    "state": "implementation_running_after_conditional_Opus_design",
     "directory": "direct-6483/repair-readiness",
-    "production_edits_authorized": false,
+    "production_edits_authorized": true,
     "readiness": {
       "directory": "direct-6483/readiness",
       "manifest_sha256": "d8c96dfa61b3b93582bb304e5f69490f0d161addf168438238911ad415933866",
@@ -4550,6 +4578,29 @@
       "comparisons": 4,
       "pending_commands": false
     },
-    "public_update": "direct-6483/admission/witness-comment-receipt.json"
+    "public_update": "direct-6483/admission/witness-comment-receipt.json",
+    "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6483",
+    "branch": "codex/update-comparator-raw-duplicates",
+    "implementation_admission": "direct-6483/admission/implementation-admission.json",
+    "repair_design": {
+      "directory": "direct-6483/repair-readiness",
+      "files": 9,
+      "manifest_sha256": "8eb9c9ddb952abd3ba2f69e3cae961311557b820f27b8b31446379fff616b4c9",
+      "root_verification": "direct-6483/admission/repair-readiness-root-verification.json"
+    },
+    "design_review": {
+      "state": "completed_collected",
+      "session_id": 69637,
+      "actual_primary_model": "claude-opus-5",
+      "effort": "xhigh",
+      "verdict": "CONDITIONAL",
+      "output_sha256": "607701af34a0575501ef4528d7008e4b74446f7eb490d65d53d5da72f90cbe99",
+      "input": "direct-6483/admission/opus-duplicate-design-input.md",
+      "input_sha256": "951da7246ba8992a8823652e73725169456d8f0f7585cf050447ef3063bb6466",
+      "output": "direct-6483/admission/opus-duplicate-design-review.json",
+      "result": "direct-6483/admission/opus-duplicate-design-result.json",
+      "root_disposition": "direct-6483/admission/opus-duplicate-design-root-disposition.json",
+      "policy": "69637 completed/collected; no poll or relaunch. Final source review remains required."
+    }
   }
 }

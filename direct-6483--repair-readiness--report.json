@@ -1,0 +1,57 @@
+{
+  "at": "2026-09-10T18:15:00.429762+00:00",
+  "author": "GPT-6 Astra xhigh",
+  "decision": "GO_FOR_SMALL_SOURCE_REPAIR_DESIGN_REVIEW; NO_IMPLEMENTATION_YET",
+  "witness": "Exact f50 actual module returnsSame for identical-lexical[p,p,q]vs[p,q,q], allowfalse/true; current distinctlexical control Differs inboth. See frozen witness, no newexecution.",
+  "recommended_boundary": {
+    "file": "crates/sparq-bench/src/update_fuzz.rs only, private helper/docs/tests",
+    "placement": "Inside compare ca==cb branch AFTER existing unequal raw-count diagnostic and BEFORE returnVerdict::Same. Detect a repeated raw full-quad line on either side, and fail with original side label/repeated line (and preferably occurrence count).",
+    "mechanism": "Small borrowed BTreeSet<&str> insertion check (existing std type/import), no Bindings/engine/cache/API/canon change. It avoids depending on sorted adjacency for diagnostic fixtures. The current production emitters already render each fullquad canonically via termDisplay and sort.",
+    "why_same_branch_suffices": "If ca!=cb and lexicaladjudicationdisabled, outcomealreadyDiffers. If enabled, unchanged oxigraph_normalized parses and rejects duplicate normalized rows before canonicalization. The demonstrated missing path is only ca==cb returningSame without per-side uniqueness.",
+    "diagnostic_order": "Existing comparable errors and existing COUNTS differ error remain earlier; normalized lexical errors remain untouched. A duplicate diagnostic must include a concrete original repeatedline because one_sided(ca,cb) is empty for equalcanonicalsets.",
+    "complexity": "Additional borrowedset O(NlogN) comparisons/O(N) references in strictsuccess branch. Finite existing fuzz snapshots bound typical input, but no throughput measurement or benefit claim. No new cardinality threshold.",
+    "docs": "Clarify private comparator assumes completequad snapshots/probes and rejects invalid duplicate emissions. Do not claim arbitrary SPARQL resultbags must be unique."
+  },
+  "alternatives_considered": [
+    {
+      "approach": "Use existing issue_dataset_rdf12_ground_terms map, relabelrawquads and retainmultiplicities",
+      "reason_not_selected": "Ground-profile issuer APIs exist, so no new algorithm should be invented. But their contract is datasetcanonicalization; mapping symmetries/automorphisms and multiplicity-colored structures need a separate proof. Reusing one issuedmap is not by itself a demonstrated canonical multiset representation. More machinery than current callers require."
+    },
+    {
+      "approach": "Compare canonicalsetlength with rawlength only",
+      "reason_not_selected": "Would catch setcollapse in blank-node path, but comparable(false) retainsrawlines and does not deduplicate. A direct per-side rawduplicate guard uniformly covers bnode-free strictSame as well."
+    }
+  ],
+  "symmetry_argument": "Per-side repeated identical full-quad detection does not compare blanknode IDs across engines and is invariant under bijective relabeling. Two distinct nodes with symmetric neighborhoods produce different rawlines and remain eligible for the unchanged canonicalizer. Duplicates make the fullquad enumeration invalid; do not search alternate symmetric maps to forgive them. Existing nested-bnode/depth/canonicalization failures remain errors.",
+  "acceptance_tests": [
+    {
+      "name": "original equal-total redistribution",
+      "cases": "Same literal020/021, blanknode subject; requireDiffers bothallowmodes; preserve distinct020/021 vs20/21 controls and useful diagnostics."
+    },
+    {
+      "name": "duplicatecontract boundaries",
+      "cases": "Both sides identicallyduplicate mustfail; one-sidedduplicate oldCOUNTS message preserved; bnode-free equalduplicate input fails; duplicates separated in inputorder still detected."
+    },
+    {
+      "name": "legitimate uniqueness andsymmetry",
+      "cases": "Duplicate-free symmetricbnode graph vs bijective renamed/reordered graph remainsSame; sameSPO in differentnamedgraphs remainsSame; duplicatedexactquad in onegraph fails."
+    },
+    {
+      "name": "unchanged lexical/error paths",
+      "cases": "One-to-one lexicalpositive remainsAdjudicated onlywhenallowed; unknown datatype/language/differentbnode structure remainsDiffers; existing ground nestedtriple positive and nested-bnode failure remainunchanged."
+    }
+  ],
+  "negative_control": "Compile exact candidate module with only newrawduplicate guard removed; the fixed identicallexicalredistribution assertion must fail by observedSame (not compilefailure). No mutationexecuted in thisdesignphase.",
+  "validation_plan": "After sourceapproval, same recordededition2021 minimalactualmodule six-library route. Focused newtests plus existing20module tests and oneguard-removalcontrol; fixed seeds only as alreadycontained in existingmodule suite, no advancing/randomseedsearch. Scope timing/resources under nextgrant.",
+  "unresolved_choices": [
+    "Agree that this private helper enforces completequad uniqueemission, so identicalduplicate vectors are invalid even though their RDFset is equal; sourcecallers supportthis, not apublicRDFsemanticschange.",
+    "Rawlineidentity is sufficient for controlled renderer output; arbitrary alternateNQuadsspellings/whitespace are not currentproductioninputs. Do not silently advertise generictextmultiset comparison.",
+    "Existing canonicalization correctness/issuer issues are separate; no algorithm repair, bound change or newfailureforgiveness proposed."
+  ],
+  "packet_scope": "Complete comparator/normalization helpers andproductioncallers supplied. Canonpublicgroundwrapper,parser,issuer entrypoints,compute andserializers supplied; unchangedN-degree/hash internals omitted because design neitherchangesnorclaimsnewcanonicalalgorithm proof. Full source hashes identify omittedcontext.",
+  "builds": 0,
+  "tests": 0,
+  "network": 0,
+  "production_edits": 0,
+  "pending_commands": 0
+}

@@ -1,0 +1,32 @@
+{
+  "at": "2026-09-10T18:23:30.725809+00:00",
+  "agent": "/root/postmerge_ci",
+  "model": "gpt-6-astra",
+  "effort": "xhigh",
+  "base": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+  "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6483",
+  "branch": "codex/update-comparator-raw-duplicates",
+  "fresh_target_evidence": [
+    "implementation-main.json",
+    "implementation-issue.json",
+    "../../direct-6485/admission/budget1825.json"
+  ],
+  "scope": "One-file private UPDATE comparator raw duplicate guard, docs and meaningful focused contract/regression tests; satisfy actual Opus conditional design review and root disposition. No engine or canonicalizer change.",
+  "before_edit": "Confirm both-engine probe dataset scoping source contract and existing tests; if source contradicts unique complete-quad contract stop. Revalidate local base and worktree.",
+  "execution_limits": {
+    "total_seconds": 300,
+    "max_new_allocated_bytes": 134217728,
+    "start_free_bytes": 2214592512,
+    "continuous_minimum_free_bytes": 2147483648,
+    "export_reserve_bytes": 8388608,
+    "offline": true,
+    "jobs": 1,
+    "incremental": false,
+    "builds": "One candidate actual-module build plus one guard-removal-control build; reuse exact recorded six direct libraries; no dependency rebuild.",
+    "tests": "One full actual-module candidate run with fixed existing seeds/new boundary tests; one filtered guard-removal regression run must compile then fail by Same.",
+    "mechanical": "Scoped Clippy if warm recorded route available, touched-block formatting and diff check; no cold cargo/full workspace build."
+  },
+  "stop_on_unexpected_behavior": true,
+  "publication_authorized": false,
+  "final_independent_review_required": true
+}

@@ -1,0 +1,323 @@
+crates/sparq-bench/src/update_fuzz.rs:703-1024
+703: // ── dataset snapshots ────────────────────────────────────────────────────────────
+704: 
+705: /// Renders one quad as an N-Quads line. Both engines hand out `oxrdf` terms, so this
+706: /// is byte-comparable across them.
+707: fn nquads_line(subject: &str, predicate: &str, object: &str, graph: Option<&str>) -> String {
+708:     match graph {
+709:         Some(g) => format!("{} {} {} {} .", subject, predicate, object, g),
+710:         None => format!("{} {} {} .", subject, predicate, object),
+711:     }
+712: }
+713: 
+714: /// A sparq `Graph` (default graph + named graphs) as SORTED N-Quads lines.
+715: /// Duplicate lines are NOT collapsed — see the raw-count check in [`compare`].
+716: fn sparq_nquads(g: &Graph) -> Vec<String> {
+717:     fn triples_of(g: &Graph, graph: Option<&str>, out: &mut Vec<String>) {
+718:         let scan = g.store.scan(&[None, None, None]);
+719:         for r in scan.rows.iter() {
+720:             let t = scan.to_spo(r);
+721:             out.push(nquads_line(
+722:                 &g.dict.term(t[0]).to_string(),
+723:                 &g.dict.term(t[1]).to_string(),
+724:                 &g.dict.term(t[2]).to_string(),
+725:                 graph,
+726:             ));
+727:         }
+728:     }
+729:     let mut out = Vec::new();
+730:     triples_of(g, None, &mut out);
+731:     for (name, sub) in &g.named {
+732:         triples_of(sub, Some(&name.to_string()), &mut out);
+733:     }
+734:     out.sort();
+735:     out
+736: }
+737: 
+738: /// The Oxigraph store as SORTED N-Quads lines, rendered identically.
+739: fn oxi_nquads(store: &Store) -> Result<Vec<String>, String> {
+740:     use oxigraph::model::GraphName;
+741:     let mut out = Vec::new();
+742:     for q in store.iter() {
+743:         let q = q.map_err(|e| format!("oxigraph iter error: {}", e))?;
+744:         let graph = match &q.graph_name {
+745:             GraphName::DefaultGraph => None,
+746:             g => Some(g.to_string()),
+747:         };
+748:         out.push(nquads_line(
+749:             &q.subject.to_string(),
+750:             &q.predicate.to_string(),
+751:             &q.object.to_string(),
+752:             graph.as_deref(),
+753:         ));
+754:     }
+755:     out.sort();
+756:     Ok(out)
+757: }
+758: 
+759: // ── canonical comparison ─────────────────────────────────────────────────────────
+760: 
+761: /// Whether a snapshot mentions a blank node, i.e. whether sorted N-Quads has stopped
+762: /// being a canonical form and RDFC-1.0 relabelling is required.
+763: ///
+764: /// Deliberately a substring test. It cannot produce a FALSE NEGATIVE — every blank
+765: /// node renders as `_:label` — and a false positive (a literal containing the text
+766: /// `_:`) would only route a blank-node-free snapshot through the canonicalizer, which
+767: /// on such input is just a sort-and-deduplicate. The generator emits no such literal
+768: /// today; the check stays conservative so that if one is ever added, the comparator
+769: /// degrades in the safe direction.
+770: fn mentions_blank_node(lines: &[String]) -> bool {
+771:     lines.iter().any(|l| l.contains("_:"))
+772: }
+773: 
+774: /// Re-parses N-Quads lines back into `oxrdf` quads (the input side of every
+775: /// structural rewrite below).
+776: fn parse_lines(lines: &[String], what: &str) -> Result<Vec<Quad>, String> {
+777:     let doc = {
+778:         let mut s = lines.join("\n");
+779:         s.push('\n');
+780:         s
+781:     };
+782:     sparq_canon::parse_nquads(&doc)
+783:         .map_err(|e| format!("{}: N-Quads re-parse failed ({})", what, e))
+784: }
+785: 
+786: /// The comparable form of one snapshot.
+787: ///
+788: /// With `relabel` false (neither side mentions a blank node) the sorted lines ARE the
+789: /// canonical form and are returned untouched — the strongest, byte-level compare.
+790: /// With it true, both sides are relabelled to their RDFC-1.0 canonical form so the
+791: /// comparison decides RDF ISOMORPHISM. The constrained `*_ground_terms` profile is
+792: /// used deliberately: it is exactly RDFC-1.0 with triple terms as opaque constants and
+793: /// fails closed on a blank node nested inside a triple term, so the non-standard
+794: /// nested-bnode descent is never reachable from this harness.
+795: fn comparable(lines: &[String], relabel: bool, what: &str) -> Result<Vec<String>, String> {
+796:     if !relabel {
+797:         return Ok(lines.to_vec());
+798:     }
+799:     let quads = parse_lines(lines, what)?;
+800:     let canon = sparq_canon::canonicalize_rdf12_ground_terms(&quads)
+801:         .map_err(|e| format!("{}: RDFC-1.0 canonicalization failed ({})", what, e))?;
+802:     let mut out: Vec<String> = canon.lines().map(str::to_string).collect();
+803:     out.sort();
+804:     Ok(out)
+805: }
+806: 
+807: /// Rewrites `t` the way Oxigraph's storage layer does: an `xsd:integer` literal whose
+808: /// value fits the native integer it decodes to is re-rendered in canonical lexical
+809: /// form. Structural, never string surgery — and it descends into triple terms, which
+810: /// Oxigraph's recursive term encoder also normalizes.
+811: fn oxigraph_normalized_term(t: &Term) -> Term {
+812:     match t {
+813:         Term::Literal(l) if l.datatype() == xsd::INTEGER => match l.value().parse::<i64>() {
+814:             Ok(v) if v.to_string() != l.value() => {
+815:                 Term::Literal(Literal::new_typed_literal(v.to_string(), xsd::INTEGER))
+816:             }
+817:             _ => t.clone(),
+818:         },
+819:         Term::Triple(inner) => Term::Triple(Box::new(Triple::new(
+820:             inner.subject.clone(),
+821:             inner.predicate.clone(),
+822:             oxigraph_normalized_term(&inner.object),
+823:         ))),
+824:         _ => t.clone(),
+825:     }
+826: }
+827: 
+828: // [GPT-6 ASTRA] Quad uniqueness alone cannot detect colliding terms at different
+829: // predicates/graphs. Check every integer leaf, including nested triple objects.
+830: fn record_lexical_terms(
+831:     term: &Term,
+832:     integers: &mut BTreeMap<i64, String>,
+833:     blank_nodes: &mut BTreeSet<String>,
+834: ) -> Result<(), String> {
+835:     match term {
+836:         Term::Literal(l) if l.datatype() == xsd::INTEGER => {
+837:             if let Ok(value) = l.value().parse::<i64>() {
+838:                 match integers.insert(value, l.value().to_string()) {
+839:                     Some(previous) if previous != l.value() => {
+840:                         return Err(format!(
+841:                             "integer normalization is not term-injective: {previous:?} and {:?}",
+842:                             l.value()
+843:                         ));
+844:                     }
+845:                     _ => {}
+846:                 }
+847:             }
+848:         }
+849:         Term::BlankNode(b) => {
+850:             blank_nodes.insert(b.as_str().to_string());
+851:         }
+852:         Term::Triple(t) => {
+853:             if let oxrdf::NamedOrBlankNode::BlankNode(b) = &t.subject {
+854:                 blank_nodes.insert(b.as_str().to_string());
+855:             }
+856:             record_lexical_terms(&t.object, integers, blank_nodes)?;
+857:         }
+858:         _ => {}
+859:     }
+860:     Ok(())
+861: }
+862: 
+863: struct NormalizedSnapshot {
+864:     lines: Vec<String>,
+865:     blank_nodes: usize,
+866: }
+867: 
+868: /// Normalizes integer spellings without merging terms or rows.
+869: fn oxigraph_normalized(lines: &[String], what: &str) -> Result<NormalizedSnapshot, String> {
+870:     let quads = parse_lines(lines, what)?;
+871:     if quads.len() != lines.len() {
+872:         return Err(format!("{what}: parsing changed the raw row count"));
+873:     }
+874:     let mut integers = BTreeMap::new();
+875:     let mut blank_nodes = BTreeSet::new();
+876:     for q in &quads {
+877:         record_lexical_terms(&q.object, &mut integers, &mut blank_nodes)?;
+878:         if let oxrdf::NamedOrBlankNode::BlankNode(b) = &q.subject {
+879:             blank_nodes.insert(b.as_str().to_string());
+880:         }
+881:         if let oxrdf::GraphName::BlankNode(b) = &q.graph_name {
+882:             blank_nodes.insert(b.as_str().to_string());
+883:         }
+884:     }
+885:     let mut out: Vec<String> = quads
+886:         .iter()
+887:         .map(|q| {
+888:             let graph = match &q.graph_name {
+889:                 oxrdf::GraphName::DefaultGraph => None,
+890:                 g => Some(g.to_string()),
+891:             };
+892:             nquads_line(
+893:                 &q.subject.to_string(),
+894:                 &q.predicate.to_string(),
+895:                 &oxigraph_normalized_term(&q.object).to_string(),
+896:                 graph.as_deref(),
+897:             )
+898:         })
+899:         .collect();
+900:     out.sort();
+901:     // The fixed probes project whole quads, so duplicates are not legitimate
+902:     // projection multiplicity. Reject before canon's set conversion can hide them.
+903:     if out.windows(2).any(|rows| rows[0] == rows[1]) {
+904:         return Err(format!(
+905:             "{what}: integer normalization merges or duplicates rows"
+906:         ));
+907:     }
+908:     Ok(NormalizedSnapshot {
+909:         lines: out,
+910:         blank_nodes: blank_nodes.len(),
+911:     })
+912: }
+913: 
+914: /// The lines on exactly one side — the human-readable core of a divergence report.
+915: fn one_sided(label_a: &str, a: &[String], label_b: &str, b: &[String]) -> String {
+916:     let bset: std::collections::BTreeSet<&String> = b.iter().collect();
+917:     let aset: std::collections::BTreeSet<&String> = a.iter().collect();
+918:     let mut s = String::new();
+919:     s.push_str(&format!("only in {}:\n", label_a));
+920:     for l in a.iter().filter(|l| !bset.contains(l)) {
+921:         s.push_str(&format!("  {}\n", l));
+922:     }
+923:     s.push_str(&format!("only in {}:\n", label_b));
+924:     for l in b.iter().filter(|l| !aset.contains(l)) {
+925:         s.push_str(&format!("  {}\n", l));
+926:     }
+927:     s
+928: }
+929: 
+930: /// The outcome of comparing two snapshots.
+931: enum Verdict {
+932:     /// Byte-identical, or RDF-isomorphic when blank nodes are in play.
+933:     Same,
+934:     /// Absorbed by the adjudicated `update-oxigraph-integer-lexical-canonicalization`
+935:     /// class: the two datasets agree exactly once Oxigraph's numeric normalization is
+936:     /// re-derived on both sides.
+937:     AdjudicatedIntegerLexical,
+938:     /// A real divergence (the string is the report body).
+939:     Differs(String),
+940: }
+941: 
+942: /// Compares two snapshots under the canonical form the module docs describe.
+943: ///
+944: /// `allow_integer_lexical` is set ONLY for a sparq-vs-Oxigraph compare, and only when
+945: /// the allowlist enables the class. The sparq-vs-sparq compare passes false: both
+946: /// sides are sparq, so any lexical disagreement between them is a real bug.
+947: fn compare(
+948:     label_a: &str,
+949:     a: &[String],
+950:     label_b: &str,
+951:     b: &[String],
+952:     allow_integer_lexical: bool,
+953: ) -> Verdict {
+954:     let relabel = mentions_blank_node(a) || mentions_blank_node(b);
+955:     let (ca, cb) = match (
+956:         comparable(a, relabel, label_a),
+957:         comparable(b, relabel, label_b),
+958:     ) {
+959:         (Ok(ca), Ok(cb)) => (ca, cb),
+960:         (Err(e), _) | (_, Err(e)) => return Verdict::Differs(e),
+961:     };
+962:     if ca == cb {
+963:         // Canonicalization deduplicates, so a duplicate quad on one side alone would
+964:         // survive the compare — check the raw counts to keep that failure visible.
+965:         if a.len() != b.len() {
+966:             return Verdict::Differs(format!(
+967:                 "datasets are isomorphic but the raw quad COUNTS differ \
+968:                  ({} {} vs {} {}) — one side is yielding a duplicate quad",
+969:                 label_a,
+970:                 a.len(),
+971:                 label_b,
+972:                 b.len()
+973:             ));
+974:         }
+975:         return Verdict::Same;
+976:     }
+977:     if allow_integer_lexical {
+978:         if a.len() != b.len() {
+979:             return Verdict::Differs(format!(
+980:                 "integer-lexical adjudication refused: raw row counts differ\n{}",
+981:                 one_sided(label_a, &ca, label_b, &cb)
+982:             ));
+983:         }
+984:         let normalized = (
+985:             oxigraph_normalized(a, label_a),
+986:             oxigraph_normalized(b, label_b),
+987:         );
+988:         match normalized {
+989:             (Ok(na), Ok(nb)) => {
+990:                 if na.blank_nodes != nb.blank_nodes {
+991:                     return Verdict::Differs(format!(
+992:                         "integer-lexical adjudication refused: blank-node counts differ ({} vs {})\n{}",
+993:                         na.blank_nodes,
+994:                         nb.blank_nodes,
+995:                         one_sided(label_a, &ca, label_b, &cb)
+996:                     ));
+997:                 }
+998:                 match (
+999:                     comparable(&na.lines, relabel, label_a),
+1000:                     comparable(&nb.lines, relabel, label_b),
+1001:                 ) {
+1002:                     (Ok(na), Ok(nb)) if na == nb => return Verdict::AdjudicatedIntegerLexical,
+1003:                     (Err(e), _) | (_, Err(e)) => {
+1004:                         return Verdict::Differs(format!(
+1005:                             "integer-lexical adjudication refused: {e}\n{}",
+1006:                             one_sided(label_a, &ca, label_b, &cb)
+1007:                         ));
+1008:                     }
+1009:                     _ => {}
+1010:                 }
+1011:             }
+1012:             (Err(e), _) | (_, Err(e)) => {
+1013:                 return Verdict::Differs(format!(
+1014:                     "integer-lexical adjudication refused: {e}\n{}",
+1015:                     one_sided(label_a, &ca, label_b, &cb)
+1016:                 ));
+1017:             }
+1018:         }
+1019:     }
+1020:     Verdict::Differs(one_sided(label_a, &ca, label_b, &cb))
+1021: }
+1022: 
+1023: // ── probe SELECTs (full binding-set compare, per the oracle-strength rule) ────────
+1024: //

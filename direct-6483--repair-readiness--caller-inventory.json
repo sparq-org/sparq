@@ -1,0 +1,37 @@
+{
+  "visibility": "compare/comparable are private to update_fuzz module; main.rs unrelated compare(scale,iters) is a different function. main.rs update-fuzz arm calls run; run -> check_seed -> apply_sequence.",
+  "production_compare_sites": [
+    {
+      "line": 1256,
+      "purpose": "strict Sparq rebuild vs in-place snapshot",
+      "inputs": "sparq_nquads(Graph), both sorted complete N-Quads vectors",
+      "allow": false
+    },
+    {
+      "line": 1276,
+      "purpose": "both Sparq snapshots vs Oxigraph",
+      "inputs": "sparq_nquads and oxi_nquads(Store::iter), complete quads",
+      "allow": "explicit allow.integer_lexical"
+    },
+    {
+      "line": 1300,
+      "purpose": "both Sparq query paths vs Oxigraph query path",
+      "inputs": "only PROBES entries at1030: SELECT?s?p?o single triple pattern and SELECT?s?p?o?g GRAPH?g single triple pattern",
+      "allow": "explicit allow.integer_lexical"
+    }
+  ],
+  "comparable_call_sites": [
+    {
+      "line": 957,
+      "purpose": "original pair in compare",
+      "count": 2
+    },
+    {
+      "line": 1002,
+      "purpose": "successfully term-injective/unique-row normalized pair in compare",
+      "count": 2
+    }
+  ],
+  "multiplicity_contract": "Each graph snapshot is a set of full quads; both current probes project all components of exactly one triple pattern (including graph for named query). Each output binding identifies one unique quad. Repeated raw emitted full quads are an enumeration defect, even if both compared implementations repeat them. Arbitrary projections, joins, UNION or hidden graph scope can have legitimate duplicate solution mappings and are outside this private comparator contract.",
+  "future_change_condition": "Any additional probe or comparator caller must establish the same full-quad uniqueness condition or use a separate comparator with explicitly appropriate bag semantics. No runtime query-parser/admission framework proposed."
+}

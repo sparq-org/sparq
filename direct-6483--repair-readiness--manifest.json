@@ -1,0 +1,50 @@
+{
+  "file_count": 9,
+  "files": [
+    {
+      "path": "all-production-callers.txt",
+      "bytes": 11819,
+      "sha256": "dcda6521e15638f2800e297d99808de7f2f121981aecc4f067cccc775763a8d4"
+    },
+    {
+      "path": "caller-inventory.json",
+      "bytes": 1943,
+      "sha256": "d5becc44f6434fa16aa1d4070ab3af2db3a8d551ad358951c0d7fe68525c2897"
+    },
+    {
+      "path": "canonicalization-apis.txt",
+      "bytes": 21275,
+      "sha256": "b9b86157dc225331fffa8714de361750ba128ff238b2cd213fef67e58ecb28b9"
+    },
+    {
+      "path": "comparator-and-normalization.txt",
+      "bytes": 14474,
+      "sha256": "1181b21104d63313f173515d0a5d1e61f37e8407de5f5ce8061836f26c3ff1e2"
+    },
+    {
+      "path": "existing-discriminating-tests.txt",
+      "bytes": 8057,
+      "sha256": "ec000295dcadc76bce90c0430e7d3dce8ea5296ad6740ae07c93465678317483"
+    },
+    {
+      "path": "report.json",
+      "bytes": 5943,
+      "sha256": "bd7150e586f114495fa03270be88b25265ff182c13c071806cd9c04baf92974b"
+    },
+    {
+      "path": "review-packet.md",
+      "bytes": 63790,
+      "sha256": "8f43c2b715a212ed0ab25c0b0553ab4cf7569b3da462d400cb3dc1e4a12d632f"
+    },
+    {
+      "path": "source-proof.json",
+      "bytes": 782,
+      "sha256": "289f236514f8cde5a93e0a74ffb485f327c4ff3ac41a85231d86072c9cb062a5"
+    },
+    {
+      "path": "witness-observations.json",
+      "bytes": 2195,
+      "sha256": "af927e6e943b901b3ab45711e6b3a1bb69e46c1c30148e71f216f0996d14e2b2"
+    }
+  ]
+}
