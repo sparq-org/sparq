@@ -522,6 +522,14 @@ for evidence_name in ['implementation-root-verification.json', 'opus-patch-input
     FILES["6480-admission-" + evidence_name] = ROOT / "direct-6480/admission" / evidence_name
 FILES["6476-admission-heartbeat-0909.json"] = ROOT / "direct-6476/admission/heartbeat-0909.json"
 
+# Next6480 reviewed patch, CI proof supplement, and fuzz supersession.
+for evidence_name in ['budget.json', 'cargo-fuzz-102805333946.log', 'cargo-fuzz-annotations.json', 'cargo-fuzz-check.json', 'commands.json', 'fuzz.yml', 'jobs.json', 'log-excerpts.txt', 'merge-fuzz-workflow.diff', 'newer-main-fuzz.json', 'report.json', 'run.json', 'source-excerpts.txt', 'manifest.json']:
+    FILES['6476-postmerge-fuzz-' + evidence_name.replace("/", "--")] = ROOT / 'direct-6476/postmerge-fuzz' / evidence_name
+for evidence_name in ['commands.json', 'commit.txt', 'delta.diff', 'js-after.yml', 'js-before.yml', 'preflight.log', 'public-review-packet.md', 'report.json', 'tracked-package-next-inventory.json', 'validation.json', 'yaml-validation.json', 'manifest.json']:
+    FILES['6480-ci-proof-followup-' + evidence_name.replace("/", "--")] = ROOT / 'direct-6480/ci-proof-followup' / evidence_name
+for evidence_name in ['opus-patch-review.json', 'opus-patch-stderr.log', 'opus-patch-completion.json', 'opus-patch-result.json', 'opus-patch-root-disposition.json', 'pr-body-draft.md', 'publication-readiness-0919.json', 'ci-proof-followup-root-verification.json', 'opus-ci-proof-input.md', 'opus-ci-proof-input-receipt.json']:
+    FILES["6480-admission-" + evidence_name] = ROOT / "direct-6480/admission" / evidence_name
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout

@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-10T09:14:11.264208+00:00",
+  "updated_at": "2026-09-10T09:21:54.195711+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -68,8 +68,8 @@
     "agent": "/root/postmerge_ci",
     "actual_model": "GPT-6 Astra",
     "effort": "xhigh",
-    "phase": "Local Next patch complete; actual independent Opus review running",
-    "state": "Clean committed50c patch passed metadata/scope checks; actual Linux CI remains required. Opus session49118 running, must collect once; child separately diagnoses cancelled main fuzz without retries.",
+    "phase": "Final four-file patch complete; Opus CI supplement review running",
+    "state": "Agent extending existing root npm ci step with installed npm ls and tracked lock/minima diff check. Original implementation packet immutable; final head not yet published.",
     "started_at": "2026-09-10T08:47:00Z",
     "base": "781f667c19a8ebb779cfccb24b05ea432360b025",
     "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6480",
@@ -88,7 +88,7 @@
       "Resolve review findings and publish narrow Next patch through supported CI and protected merge; verify all nested Next copies and required actual installs/builds, then alert107/106 automatic closure only after main.",
       "Keep nested BASE issue6479 separate; no #6049/#6055/release/registry/EC2 or ALLGREEN changes."
     ],
-    "head": "50c09eb2b7563924cccde9305ee51ff62b27af38",
+    "head": "26d139520f07f1ceacafbacbeb9991de371e2b53",
     "implementation": {
       "state": "completed_frozen_root_verified",
       "manifest": "direct-6480/implementation/manifest.json",
@@ -99,7 +99,7 @@
       "ci_boundary": "Only metadata generation/idempotence/virtualresolution, not installedruntime/buildvalidation"
     },
     "review": {
-      "state": "running",
+      "state": "completed_collected",
       "session_id": 49118,
       "kind": "exec_command",
       "model": "claude-opus-5",
@@ -107,7 +107,32 @@
       "input": "direct-6480/admission/opus-patch-input.md",
       "output": "direct-6480/admission/opus-patch-review.json",
       "completion": "direct-6480/admission/opus-patch-completion.json",
-      "collect_policy": "Collect49118 usingwrite_stdin before outputread; then verify actualmodelUsage +successful result; no duplicate model call."
+      "collect_policy": "49118 completed/collected, actual Opus5 primary model verified; no poll/relaunch. Final workflow delta needs supplemental review.",
+      "verdict": "approve_for_ci",
+      "blocking_findings": [],
+      "result": "direct-6480/admission/opus-patch-result.json",
+      "root_disposition": "direct-6480/admission/opus-patch-root-disposition.json",
+      "output_sha256": "545313b88e840e9077e619cd1fa44c92aa379198482eea829eeecf534cec4d45"
+    },
+    "ci_proof_followup": {
+      "agent": "/root/postmerge_ci",
+      "state": "completed_frozen_root_verified",
+      "directory": "direct-6480/ci-proof-followup",
+      "scope": "Only existing js.yml root npmci runblock plus lightweight validation; no trigger/permission/toolchain change",
+      "head": "26d139520f07f1ceacafbacbeb9991de371e2b53",
+      "parent": "50c09eb2b7563924cccde9305ee51ff62b27af38",
+      "manifest_sha256": "34dfafb7cc13649d593d77998608ece98759490050937a414147b1946b21776b",
+      "root_verification": "direct-6480/admission/ci-proof-followup-root-verification.json"
+    },
+    "supplement_review": {
+      "state": "running",
+      "session_id": 19878,
+      "model": "claude-opus-5",
+      "effort": "xhigh",
+      "input": "direct-6480/admission/opus-ci-proof-input.md",
+      "output": "direct-6480/admission/opus-ci-proof-review.json",
+      "completion": "direct-6480/admission/opus-ci-proof-completion.json",
+      "collect_policy": "Collect19878before outputread,verify actual Opus success; no duplicate review."
     }
   },
   "prs": {
@@ -2781,6 +2806,17 @@
         "matrix": "24success1skip3running29queued/57",
         "gate": "running",
         "fuzz": "cancelled; bounded read-only diagnosis by existing agent underway, no rerun"
+      },
+      "fuzz_diagnosis": {
+        "state": "superseded_by_live_scheduled_run",
+        "cancelled_push_run": 34456809602,
+        "same_head": "781f667c19a8ebb779cfccb24b05ea432360b025",
+        "replacement_schedule_run": 34458064851,
+        "replacement_last_status": "in_progress",
+        "evidence": "direct-6476/postmerge-fuzz/report.json",
+        "manifest_sha256": "14cc3910877902523d3a391229dbc1de3e3e03d9dca2c447daeb5a3d1fa398cf",
+        "root_verified": "All13 evidence hashes; GitHub annotation explicitly says shared concurrency supersession; exact newer run ID inference from sole newer same-main run. No source crash/timeout observed; not full randomized completion proof. Corpus save warning means persistence not proven.",
+        "action": "Observe replacement, no retry/cancel/concurrency change."
       }
     }
   },

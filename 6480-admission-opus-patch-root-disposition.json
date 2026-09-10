@@ -1,0 +1,25 @@
+{
+  "at": "2026-09-10T09:17:25.247182+00:00",
+  "reviewed_head": "50c09eb2b7563924cccde9305ee51ff62b27af38",
+  "actual_primary_review_model": "claude-opus-5",
+  "effort": "xhigh",
+  "cli_auxiliary_model": "claude-haiku-4-5-20251001 (26 output tokens in runtime accounting; substantive review Opus5)",
+  "verdict": "approve_for_ci",
+  "blocking_findings": [],
+  "output_sha256": "545313b88e840e9077e619cd1fa44c92aa379198482eea829eeecf534cec4d45",
+  "disposition": "Implement minimal CI evidence supplement for actual npmci installed workspace resolution + postinstall lockcleanliness. Preserve nonexposure/version-only Windows/metadata-only local limits. No unrelated npm pinning or sharp upgrade. Root verified tarball against official metadata SRI; reviewer did not independentlyfetch it. Final supplemental review required on changedhead.",
+  "required_ci": [
+    "Linux Node 22: `npm ci` at repo root (workspace-wide) \u2014 enforces lock integrity/SRI and full-tree resolvability that metadata-only tooling did not establish",
+    "Installed-tree resolution assertion: `npm ls next --workspace=site --workspace=gui/app` reports 15.5.24 in both workspaces (installed, not virtual)",
+    "Lock cleanliness: `git diff --exit-code -- package-lock.json gui/app/package.json site/package.json` after install, to detect CI-npm lock churn",
+    "site: `npm run build` (prebuild sync/bundle scripts + `next build` static export) and `postbuild` / `check:bundle`",
+    "gui/app: `npm run build:web` and `npm run build:tauri` static exports (including `strip-legacy-polyfills`)",
+    "Lint both Next workspaces: `next lint` (site, gui/app)",
+    "Typecheck both Next workspaces: `tsc --noEmit` (site, gui/app)",
+    "Unit tests: site `test:unit` and gui/app `test:unit`",
+    "site Playwright e2e (`test:e2e`, grep gate) and visual-regression run treated as advisory-with-inspection \u2014 no blind snapshot refresh",
+    "Repo privacy/preflight checker on a Bash 4+ runner (the locally skipped `mapfile`-dependent check)",
+    "Post-merge only: confirm GitHub alerts 107 (GHSA-2xp9-vwfh-vxw4) and 106 (GHSA-p293-qw3h-jr36) close automatically; no manual dismissal"
+  ],
+  "toolchain_correction": "Opus assumes CI Node22 bundlednpm10.x; actual CI toolversion must be read from run evidence. Workflow onlypinsNode22, not npm."
+}

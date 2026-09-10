@@ -1,0 +1,74 @@
+[
+  {
+    "argv": [
+      "/opt/homebrew/bin/gh",
+      "api",
+      "rate_limit",
+      "--jq",
+      ".resources.core"
+    ],
+    "exit_code": 0,
+    "evidence": "budget.json",
+    "note": "Budget command completed before context compaction; parsed result preserved."
+  },
+  {
+    "argv": [
+      "/opt/homebrew/bin/gh",
+      "api",
+      "repos/sparq-org/sparq/actions/runs/34456809602"
+    ],
+    "exit_code": 0,
+    "evidence": "run.json",
+    "attempts": 1
+  },
+  {
+    "argv": [
+      "/opt/homebrew/bin/gh",
+      "api",
+      "repos/sparq-org/sparq/actions/runs/34456809602/jobs?per_page=100"
+    ],
+    "exit_code": 0,
+    "evidence": "jobs.json",
+    "attempts": 1
+  },
+  {
+    "argv": [
+      "/opt/homebrew/bin/gh",
+      "api",
+      "repos/sparq-org/sparq/actions/workflows/296090618/runs?branch=main&created=%3E%3D2026-09-10T08%3A44%3A36Z&per_page=20"
+    ],
+    "exit_code": 0,
+    "evidence": "newer-main-fuzz.json",
+    "attempts": 1
+  },
+  {
+    "argv": [
+      "/opt/homebrew/bin/gh",
+      "api",
+      "repos/sparq-org/sparq/actions/jobs/102805333946/logs"
+    ],
+    "exit_code": 0,
+    "evidence": "cargo-fuzz-102805333946.log",
+    "attempts": 1
+  },
+  {
+    "argv": [
+      "/opt/homebrew/bin/gh",
+      "api",
+      "repos/sparq-org/sparq/check-runs/102805333946"
+    ],
+    "exit_code": 0,
+    "evidence": "cargo-fuzz-check.json",
+    "attempts": 1
+  },
+  {
+    "argv": [
+      "/opt/homebrew/bin/gh",
+      "api",
+      "repos/sparq-org/sparq/check-runs/102805333946/annotations?per_page=100"
+    ],
+    "exit_code": 0,
+    "evidence": "cargo-fuzz-annotations.json",
+    "attempts": 1
+  }
+]

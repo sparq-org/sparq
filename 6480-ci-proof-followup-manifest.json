@@ -1,0 +1,59 @@
+{
+  "files": [
+    {
+      "path": "commands.json",
+      "bytes": 1076,
+      "sha256": "a69b377a2ef11a8cd04c27c7ecbdcdf49003550fbcd0e945ea3727543a328710"
+    },
+    {
+      "path": "commit.txt",
+      "bytes": 550,
+      "sha256": "4d54a81e6887250275afca707d7f695eb6b579fd798ec3c0af8c57a4147cda10"
+    },
+    {
+      "path": "delta.diff",
+      "bytes": 641,
+      "sha256": "a02492c856c65b4444ba11a5211319d0eda8ab4d2590a94eb36d02fe2eec264e"
+    },
+    {
+      "path": "js-after.yml",
+      "bytes": 11157,
+      "sha256": "958b871972bcd02072acd85695d0c6ed7d4ccc99e25d9305bc9d1d27ea4be18f"
+    },
+    {
+      "path": "js-before.yml",
+      "bytes": 10995,
+      "sha256": "43ad4e50f95de7488a818ddb16e3ec3ac55f66192f5f750a06597dfe97beeaca"
+    },
+    {
+      "path": "preflight.log",
+      "bytes": 1834,
+      "sha256": "8717a7ef4ed88ecbfd82b9fe6a45b1e6a51d477ac3468a1a54336de9317fe05a"
+    },
+    {
+      "path": "public-review-packet.md",
+      "bytes": 7247,
+      "sha256": "a31c3c6b26725be6aaf13e2a650c8f70696d3d009b108d887048af70e7665118"
+    },
+    {
+      "path": "report.json",
+      "bytes": 2279,
+      "sha256": "084566340975cd8b0566ca48b49a91982bce61cfe0986cfa69b95855edcf7ec0"
+    },
+    {
+      "path": "tracked-package-next-inventory.json",
+      "bytes": 2510,
+      "sha256": "dba1833ff1d9b3521c7ae41826f3d58aa51c8985a9afb5d505840892b0bc69a6"
+    },
+    {
+      "path": "validation.json",
+      "bytes": 1715,
+      "sha256": "e423a82ddd0d8a45ebc8bd51b1b5f23ac6f10e15eede075cb6f2ec65c029700a"
+    },
+    {
+      "path": "yaml-validation.json",
+      "bytes": 120,
+      "sha256": "27b3161ac289beb507e5fd38a571aba6f72ee82f86d7930173d8fbd49b40d073"
+    }
+  ]
+}

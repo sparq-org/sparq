@@ -1,0 +1,91 @@
+{
+  "tracked_package_json_count": 12,
+  "manifests": [
+    {
+      "path": "bench/wasm-compare/browser/package.json",
+      "sha256": "906a29a4fdf23cdef19bfbaaff34d77035a8122c8ed596df8d02ba0d610ae8e4",
+      "next_keys": []
+    },
+    {
+      "path": "crates/sparq-shacl/tests/diff_fuzz/package.json",
+      "sha256": "08eb4db6fd0695e5db6d6eac4832a2483e5f9bb645cc5d7eba3739b1e0002696",
+      "next_keys": []
+    },
+    {
+      "path": "gui/app/package.json",
+      "sha256": "b0e1e4d94d6fe2285e52e2524b2f30e20fe576275f8765f6d062732e40985df4",
+      "next_keys": [
+        {
+          "json_path": [
+            "dependencies",
+            "next"
+          ],
+          "value": "^15.5.24"
+        }
+      ]
+    },
+    {
+      "path": "gui/e2e-playwright/package.json",
+      "sha256": "7b5d148a9d1ad3588b938672bfedd6e97bac13f7e1ac691372591f91b2108c74",
+      "next_keys": []
+    },
+    {
+      "path": "gui/e2e/package.json",
+      "sha256": "03fd55deb03bec9466e8c4c29162bb66a3775d2b0900c0d44aab146591e5bf18",
+      "next_keys": []
+    },
+    {
+      "path": "js/package.json",
+      "sha256": "d3724ed4ca15b407a4f86d2bb375e2cfa01ade235aaae6101455d38fc8220a4b",
+      "next_keys": []
+    },
+    {
+      "path": "package.json",
+      "sha256": "3e89c829ab61bb7633b8d6cd3030fe44d8e73c45f30d50a57a21937d9d7dd0ef",
+      "next_keys": [
+        {
+          "json_path": [
+            "overrides",
+            "next"
+          ],
+          "value": {
+            "postcss": "8.5.15"
+          }
+        }
+      ]
+    },
+    {
+      "path": "packages/eyereasoner-compat/package.json",
+      "sha256": "d1b3ed9aa31fe790d6872f80dbd15e85cdb263cca3270134374a69472013cd91",
+      "next_keys": []
+    },
+    {
+      "path": "packages/rdfjs-conformance/package.json",
+      "sha256": "b0437b14b152959ca8d0641ce075e0c04a2dd5c69023ad1499b4adb78d453ec8",
+      "next_keys": []
+    },
+    {
+      "path": "packages/solid-server/package.json",
+      "sha256": "dd6bbad69119e65d748264a5f4079c7d4650f141a9b0c63bcf1da2663c7eec55",
+      "next_keys": []
+    },
+    {
+      "path": "packages/sparq-client/package.json",
+      "sha256": "3cdfd6c0f64d75e9cb3b21e9b7f6817f54cbc1f65765f9f03ab68a75b8d13599",
+      "next_keys": []
+    },
+    {
+      "path": "site/package.json",
+      "sha256": "60bbea3bc8c3de693274b92882b97173e514eb0f41b7ee8c3870c72235aa887d",
+      "next_keys": [
+        {
+          "json_path": [
+            "dependencies",
+            "next"
+          ],
+          "value": "^15.5.24"
+        }
+      ]
+    }
+  ]
+}

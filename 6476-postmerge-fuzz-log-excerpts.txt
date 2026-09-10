@@ -1,0 +1,16 @@
+cargo-fuzz-102805333946.log:1313: 2026-09-10T08:50:57.8325703Z MODE=fuzz — randomized fuzzing at 120s/target.
+cargo-fuzz-102805333946.log:1314: 2026-09-10T08:50:57.8326931Z ##[group]fuzz canonicalize_nquads (mode=fuzz, args=-max_total_time=120 -rss_limit_mb=2048 -print_final_stats=1)
+cargo-fuzz-102805333946.log:11707: 2026-09-10T08:52:59.2288969Z Done 1435618 runs in 121 second(s)
+cargo-fuzz-102805333946.log:11714: 2026-09-10T08:52:59.4740861Z ##[group]fuzz graph_open (mode=fuzz, args=-max_total_time=120 -rss_limit_mb=2048 -print_final_stats=1)
+cargo-fuzz-102805333946.log:12393: 2026-09-10T08:55:00.8947066Z Done 69409 runs in 121 second(s)
+cargo-fuzz-102805333946.log:12400: 2026-09-10T08:55:00.9846146Z ##[group]fuzz hdt_open (mode=fuzz, args=-max_total_time=120 -rss_limit_mb=2048 -print_final_stats=1)
+cargo-fuzz-102805333946.log:15342: 2026-09-10T08:57:02.3721945Z Done 3855262 runs in 121 second(s)
+cargo-fuzz-102805333946.log:15349: 2026-09-10T08:57:02.5042918Z ##[group]fuzz jsonld_pipeline (mode=fuzz, args=-max_total_time=120 -rss_limit_mb=2048 -print_final_stats=1)
+cargo-fuzz-102805333946.log:26036: 2026-09-10T08:58:58.4674378Z ##[error]The operation was canceled.
+cargo-fuzz-102805333946.log:26054: 2026-09-10T08:58:58.6720453Z [command]/usr/bin/tar --posix -cf cache.tzst --exclude cache.tzst -P -C /home/runner/work/sparq/sparq --files-from manifest.txt --use-compress-program zstdmt
+cargo-fuzz-102805333946.log:26055: 2026-09-10T08:58:58.7930837Z /usr/bin/tar: fuzz/corpus/jsonld_pipeline/3c98624f299563042ddd9cce7e8eeaaf479920f1: File removed before we read it
+cargo-fuzz-102805333946.log:26056: 2026-09-10T08:58:58.8078216Z /usr/bin/tar: fuzz/corpus/jsonld_pipeline: file changed as we read it
+cargo-fuzz-102805333946.log:26057: 2026-09-10T08:58:58.8301631Z ##[warning]Failed to save: "/usr/bin/tar" failed with error: The process '/usr/bin/tar' failed with exit code 1
+cargo-fuzz-102805333946.log:26074: 2026-09-10T08:58:59.1507182Z Terminate orphan process: pid (5854) (cargo-fuzz)
+cargo-fuzz-102805333946.log:26075: 2026-09-10T08:58:59.1544961Z Terminate orphan process: pid (5855) (tee)
+cargo-fuzz-102805333946.log:26076: 2026-09-10T08:58:59.1572038Z Terminate orphan process: pid (5879) (jsonld_pipeline)

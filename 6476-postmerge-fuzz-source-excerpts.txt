@@ -1,0 +1,102 @@
+.github/workflows/fuzz.yml:109:   workflow_dispatch:
+.github/workflows/fuzz.yml:110:   # Daily heavy tier. 04:23 UTC (offset from ci.yml's 03:17 coverage cron so the two
+.github/workflows/fuzz.yml:111:   # heavy nightly lanes do not contend for the same runner window).
+.github/workflows/fuzz.yml:112:   schedule:
+.github/workflows/fuzz.yml:113:     - cron: "23 4 * * *"
+.github/workflows/fuzz.yml:114: 
+.github/workflows/fuzz.yml:115: permissions:
+.github/workflows/fuzz.yml:116:   contents: read
+.github/workflows/fuzz.yml:117: 
+.github/workflows/fuzz.yml:118: concurrency:
+.github/workflows/fuzz.yml:119:   # [FABLE-5] label-trigger guard: labeled/unlabeled pull_request events get a
+.github/workflows/fuzz.yml:120:   # PER-RUN group — a label-flip run entering the shared per-ref group would cancel
+.github/workflows/fuzz.yml:121:   # the in-flight real run on the SAME head SHA (run-level cancellation precedes job
+.github/workflows/fuzz.yml:122:   # `if:` evaluation), leaving cancelled check-runs that RED the ci-summary gate.
+.github/workflows/fuzz.yml:123:   # All other events keep the shared per-ref group + cancel-in-progress as before.
+.github/workflows/fuzz.yml:124:   group: fuzz-${{ github.workflow }}-${{ github.ref }}-${{ (github.event_name == 'pull_request' && contains(fromJSON('["labeled","unlabeled"]'), github.event.action)) && github.run_id || 'shared' }}
+.github/workflows/fuzz.yml:125:   cancel-in-progress: true
+.github/workflows/fuzz.yml:129:   RUST_BACKTRACE: 1
+.github/workflows/fuzz.yml:130:   # Per-target wall-clock budgets by trigger (seconds). Bounded so the lane is fast +
+.github/workflows/fuzz.yml:131:   # non-flaky; libFuzzer's `-max_total_time` caps each target hard.
+.github/workflows/fuzz.yml:132:   SMOKE_SECS: "30"
+.github/workflows/fuzz.yml:133:   MAIN_SECS: "120"
+.github/workflows/fuzz.yml:134:   NIGHTLY_SECS: "600"
+.github/workflows/fuzz.yml:213:     # `file-demoted-fuzz-finding` job below, which builds and executes nothing and is
+.github/workflows/fuzz.yml:214:     # reachable only from a randomized full-form failure (schedule / push-to-main).
+.github/workflows/fuzz.yml:215:     # Previously the write scopes sat here, on every trigger including pull_request,
+.github/workflows/fuzz.yml:216:     # alongside the compile-and-run of PR-authored fuzz targets.
+.github/workflows/fuzz.yml:217:     # Generous ceiling above the worst case (nightly: 4 targets × 600s + build) so a
+.github/workflows/fuzz.yml:218:     # hung target fails with a clear timeout rather than running away.
+.github/workflows/fuzz.yml:219:     timeout-minutes: 60
+.github/workflows/fuzz.yml:220:     # [OPUS-5] PINNED-TOOLCHAIN ESCAPE. The repo root carries a `rust-toolchain.toml`
+.github/workflows/fuzz.yml:221:     # pinning STABLE, and rustup resolves that file (precedence 4) ABOVE the `rustup
+.github/workflows/fuzz.yml:318:       - name: Pick the per-target budget + mode for this trigger
+.github/workflows/fuzz.yml:319:         id: budget
+.github/workflows/fuzz.yml:320:         env:
+.github/workflows/fuzz.yml:321:           FUZZ_FULL_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'fuzz-full') }}
+.github/workflows/fuzz.yml:322:         run: |
+.github/workflows/fuzz.yml:323:           set -euo pipefail
+.github/workflows/fuzz.yml:324:           case "${{ github.event_name }}" in
+.github/workflows/fuzz.yml:325:             schedule)                     secs="$NIGHTLY_SECS"; mode="fuzz" ;;
+.github/workflows/fuzz.yml:326:             # [FABLE-5] sq-6vshe.6: per-PR defaults to deterministic corpus-replay
+.github/workflows/fuzz.yml:327:             # only — the multi-minute randomized pole moves to push + nightly. A
+.github/workflows/fuzz.yml:328:             # `fuzz-full`-labelled PR opts BACK IN to the SMOKE randomized budget so a
+.github/workflows/fuzz.yml:329:             # fuzz-sensitive change can still get per-PR randomized search. (The lane
+.github/workflows/fuzz.yml:330:             # does not trigger on merge_group; the `merge_group` token is kept in this
+.github/workflows/fuzz.yml:331:             # pattern only so a re-added trigger would inherit the replay default.)
+.github/workflows/fuzz.yml:332:             pull_request|merge_group)
+.github/workflows/fuzz.yml:333:               if [ "${FUZZ_FULL_LABEL}" = "true" ]; then
+.github/workflows/fuzz.yml:334:                 secs="$SMOKE_SECS"; mode="fuzz"
+.github/workflows/fuzz.yml:335:               else
+.github/workflows/fuzz.yml:336:                 secs="0"; mode="replay"
+.github/workflows/fuzz.yml:337:               fi
+.github/workflows/fuzz.yml:338:               ;;
+.github/workflows/fuzz.yml:339:             push|workflow_dispatch|*)     secs="$MAIN_SECS"; mode="fuzz" ;;
+.github/workflows/fuzz.yml:340:           esac
+.github/workflows/fuzz.yml:341:           echo "secs=$secs" >> "$GITHUB_OUTPUT"
+.github/workflows/fuzz.yml:342:           echo "mode=$mode" >> "$GITHUB_OUTPUT"
+.github/workflows/fuzz.yml:343:           echo "Per-target fuzz for '${{ github.event_name }}': mode=${mode} budget=${secs}s (fuzz-full label: ${FUZZ_FULL_LABEL})"
+.github/workflows/fuzz.yml:344:       # Build every target ONCE up front so a compile error is reported distinctly
+.github/workflows/fuzz.yml:345:       # from a fuzzing crash, and the per-target runs below reuse the artifacts.
+.github/workflows/fuzz.yml:346:       - name: Build fuzz targets
+.github/workflows/fuzz.yml:347:         working-directory: fuzz
+.github/workflows/fuzz.yml:348:         run: cargo +nightly-2026-06-11 fuzz build --target "$FUZZ_BUILD_TARGET"
+.github/workflows/fuzz.yml:349:       # Runs ALL targets even if an earlier one crashes (each crash is recorded in
+.github/workflows/fuzz.yml:410:             # A nonzero exit (a crash/leak/timeout) is a genuine finding: RECORD it in
+.github/workflows/fuzz.yml:411:             # `status` and keep going so the remaining targets still run, then fail the
+.github/workflows/fuzz.yml:412:             # gate once at the end (`exit "$status"`). Tee to $RUN_LOG so the
+.github/workflows/fuzz.yml:413:             # randomized-run failure path can auto-file the demoted-lane bead. [FABLE-5]
+.github/workflows/fuzz.yml:414:             if ! cargo +nightly-2026-06-11 fuzz run --target "$FUZZ_BUILD_TARGET" "$t" \
+.github/workflows/fuzz.yml:415:                   "corpus/$t" "seeds/$t" -- \
+.github/workflows/fuzz.yml:416:                   "${libfuzzer_args[@]}" 2>&1 | tee -a "$RUN_LOG"; then
+.github/workflows/fuzz.yml:417:               echo "::error::fuzz target '$t' reported a crash/leak/timeout — see the log + the saved reproducer artifact."
+.github/workflows/fuzz.yml:418:               status=1
+.github/workflows/fuzz.yml:419:             fi
+.github/workflows/fuzz.yml:420:             echo "::endgroup::"
+.github/workflows/fuzz.yml:421:           done
+.github/workflows/fuzz.yml:422:           # Fail at the end iff ANY target above crashed (status was set to 1).
+.github/workflows/fuzz.yml:423:           exit "$status"
+.github/workflows/fuzz.yml:424:       # [FABLE-5] sq-0iqzw: persist the grown corpus — `if: always()` because a run
+.github/workflows/fuzz.yml:425:       # that FOUND a crash grew exactly the corpus worth keeping. Saved only from
+.github/workflows/fuzz.yml:426:       # main-scoped runs (push/schedule/dispatch on main): a cache saved on a PR
+.github/workflows/fuzz.yml:427:       # branch is scoped to that branch and unreachable from main or sibling PRs —
+.github/workflows/fuzz.yml:428:       # pure quota churn. PRs still RESTORE main's chain (deeper smoke coverage).
+.github/workflows/fuzz.yml:429:       - name: Save the accumulated fuzz corpus (main-scoped runs)
+.github/workflows/fuzz.yml:430:         if: always() && github.ref == 'refs/heads/main'
+.github/workflows/fuzz.yml:431:         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+.github/workflows/fuzz.yml:432:         with:
+.github/workflows/fuzz.yml:433:           path: fuzz/corpus
+.github/workflows/fuzz.yml:434:           key: fuzz-corpus-v1-${{ github.run_id }}
+.github/workflows/fuzz.yml:435:       # [OPUS-5] sq-c9q4r: hand the captured run log to the separate, elevated-scope
+.github/workflows/fuzz.yml:436:       # `file-demoted-fuzz-finding` job — it runs on its own runner and cannot read this
+.github/workflows/fuzz.yml:437:       # one's $RUNNER_TEMP. Uploaded only on the randomized full-form failure path that
+.github/workflows/fuzz.yml:482:   # PR it is `skipped`, which the gate counts as satisfied.
+.github/workflows/fuzz.yml:483:   file-demoted-fuzz-finding:
+.github/workflows/fuzz.yml:484:     name: file demoted randomized-fuzz finding (P1 bead + issue)
+.github/workflows/fuzz.yml:485:     needs: fuzz
+.github/workflows/fuzz.yml:486:     if: >-
+.github/workflows/fuzz.yml:487:       always() && needs.fuzz.result == 'failure' &&
+.github/workflows/fuzz.yml:488:       (github.event_name == 'schedule' ||
+.github/workflows/fuzz.yml:489:        (github.event_name == 'push' && github.ref == 'refs/heads/main'))
+.github/workflows/fuzz.yml:490:     runs-on: ubuntu-latest
+.github/workflows/fuzz.yml:491:     timeout-minutes: 10

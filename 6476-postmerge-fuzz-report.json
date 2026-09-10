@@ -1,0 +1,100 @@
+{
+  "task": "Read-only postmerge fuzz cancellation diagnosis",
+  "model": "GPT-6 Astra, xhigh",
+  "completed_at": "2026-09-10T09:15:31.862081+00:00",
+  "head": "781f667c19a8ebb779cfccb24b05ea432360b025",
+  "run_id": 34456809602,
+  "attempt": 1,
+  "event": "push",
+  "branch": "main",
+  "conclusion": "cancelled",
+  "finding": "Confirmed native Actions concurrency supersession, not an observed source crash or timeout.",
+  "direct_cause_evidence": {
+    "file": "cargo-fuzz-annotations.json",
+    "message": "Canceling since a higher priority waiting request for fuzz-fuzz-refs/heads/main-shared exists"
+  },
+  "source": {
+    "file": ".github/workflows/fuzz.yml",
+    "concurrency_lines": [
+      118,
+      125
+    ],
+    "evaluated_group": "fuzz-fuzz-refs/heads/main-shared",
+    "cancel_in_progress": true,
+    "schedule_and_main_push_share_group": true,
+    "job_timeout_minutes": 60,
+    "budget_lines": [
+      318,
+      340
+    ],
+    "push_seconds_per_target": 120,
+    "schedule_seconds_per_target": 600,
+    "merge_parent": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
+    "workflow_changed_by_merge": false
+  },
+  "superseding_run": {
+    "id": 34458064851,
+    "head": "781f667c19a8ebb779cfccb24b05ea432360b025",
+    "event": "schedule",
+    "created_at": "2026-09-10T08:58:29Z",
+    "observed_status": "in_progress",
+    "observed_conclusion": null,
+    "attribution": "The sole newer same-main workflow run in the complete two-result bounded listing; same concurrency group and creation 29 seconds before target cancellation. Annotation proves group supersession but does not name the replacement run ID."
+  },
+  "timeline": {
+    "push_created": "2026-09-10T08:44:36Z",
+    "cargo_job_started": "2026-09-10T08:46:14Z",
+    "build_succeeded": "2026-09-10T08:50:57Z",
+    "run_targets_started": "2026-09-10T08:50:57Z",
+    "new_schedule_created": "2026-09-10T08:58:29Z",
+    "target_step_cancelled": "2026-09-10T08:58:58Z",
+    "run_completed": "2026-09-10T08:59:01Z",
+    "job_wall_seconds": 766,
+    "target_step_seconds": 481,
+    "not_a_60_minute_timeout": true
+  },
+  "executed_work": {
+    "selection": "success",
+    "fuzz_build": "success",
+    "differential_smoke": "success; fixed-regression-window step completed in job metadata; its log was not needed/downloaded",
+    "completed_randomized_targets": [
+      {
+        "name": "canonicalize_nquads",
+        "executions": 1435618,
+        "seconds": 121
+      },
+      {
+        "name": "graph_open",
+        "executions": 69409,
+        "seconds": 121
+      },
+      {
+        "name": "hdt_open",
+        "executions": 3855262,
+        "seconds": 121
+      }
+    ],
+    "interrupted_target": "jsonld_pipeline",
+    "remaining_targets": "not established as completed; no full fuzz success claim",
+    "observed_crash_diagnostic": false,
+    "filer_job": "cancelled before runner allocation; zero steps; no filing observed"
+  },
+  "secondary_warning": {
+    "message": "Cache save tar failed because a jsonld_pipeline corpus file disappeared and its directory changed while read.",
+    "lines": [
+      26054,
+      26057
+    ],
+    "effect": "Corpus save step metadata is success but emitted warning; persistence from this run is not established. This followed cancellation and was not the cancellation cause.",
+    "support": "Orphan cargo-fuzz/jsonld_pipeline processes terminated during subsequent cleanup; consistent with save racing cancellation shutdown, not proof of another independent defect."
+  },
+  "recommended_next_action": "Observe the already-running same-head scheduled fuzz run 34458064851 to terminal completion through normal coordination; do not rerun or change concurrency from this evidence alone.",
+  "limits": [
+    "No cancellation actor identity is exposed; actor/triggering_actor identify the original merge trigger, not who cancelled it.",
+    "The schedule cron is 04:23 UTC, but this run was created at 08:58:29 UTC; reason for delayed schedule delivery was not investigated.",
+    "Same-head scheduled supersession is expected from current routing, but its in-progress state does not establish replacement coverage or success.",
+    "No source regression observed before cancellation; incomplete randomized execution cannot establish overall correctness.",
+    "No live runs changed, no retry, dispatch, cancellation, build, issue search or remote mutation.",
+    "Main CI/matrix/aggregate remain owned by root and were not queried in this subtask."
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "observed_before_compaction": true,
+  "core": {
+    "limit": 5000,
+    "remaining": 4977,
+    "reset": 1789033431,
+    "used": 23
+  }
+}

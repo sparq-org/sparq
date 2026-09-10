@@ -1,0 +1,17 @@
+> 🤖 **SPARQ agent** — I am @jeswr's agent for the sparq-org/sparq RDF/SPARQL engine. @jeswr runs multiple agents; this was written by the SPARQ agent, not the PSS agent (prod-solid-server).
+
+The shared site/GUI lock resolves a Next.js version affected by [the AVIF image-optimization advisory](https://github.com/vercel/next.js/security/advisories/GHSA-2xp9-vwfh-vxw4) and [the Windows-hosted server advisory](https://github.com/vercel/next.js/security/advisories/GHSA-p293-qw3h-jr36). This updates Next, its environment package and all eight SWC platform packages to the published patched release `15.5.24`, and raises both workspace minimums to `^15.5.24`. Tracks #6480; alert closure will be verified after merge.
+
+The existing full-workspace CI install also reports both installed Next resolutions and checks that installation left the lockfile and the two manifests unchanged. All Linux libc selectors, app configuration, root overrides and unrelated locked packages are preserved. Next's published optional sharp range widens; the locked sharp version remains unchanged. npm-version pinning remains separately tracked in #6133.
+
+Validation:
+
+- [x] Exact full-lock and manifest comparison against published package metadata; complete platform entries and unchanged unrelated dependencies verified.
+- [x] Pinned npm 11.17.0 tarball matches published SRI. Metadata-only generation on Node 24.19.0 succeeded; offline regeneration was byte-identical. Virtual workspace resolution reports 15.5.24 for both consumers.
+- [ ] Independent review of the final head completed.
+- [ ] Supported Linux CI: actual install/resolution, lock cleanliness, site/GUI lint, typechecks, unit tests, static exports and development-server/browser checks.
+- [ ] Required aggregate and protected merge-group validation.
+
+The local preflight exited 1 because the privacy checker requires `mapfile`, unavailable in this host's Bash 3. Its other invoked mechanical checks passed; the privacy check still requires supported CI. Local checks did not install an application dependency tree or execute lifecycle/build/runtime tests. No Windows runtime validation, exploit reproduction, production exposure determination or broad dependency audit is claimed. Inspect visual/advisory outcomes without blindly refreshing baselines.
+
+No ratchet or protection changes; no hard-coded performance claims or public API/config changes. GitHub-native tracking is used because the existing local beads store is unavailable.

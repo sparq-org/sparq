@@ -1,0 +1,69 @@
+{
+  "files": [
+    {
+      "path": "budget.json",
+      "bytes": 140,
+      "sha256": "84e1e540b0c1cf9f1a47d39e0687789b82bec52f16e5fd19428a769f8bca1171"
+    },
+    {
+      "path": "cargo-fuzz-102805333946.log",
+      "bytes": 3922571,
+      "sha256": "f3c16a29352a5a2d255fc5aec4371f63dac2f9ebe8b59d430fb81252f1b48346"
+    },
+    {
+      "path": "cargo-fuzz-annotations.json",
+      "bytes": 1007,
+      "sha256": "a94976a0b6491b1f6a16d39c93874ee5d50a8b18a4bfad8813693c796ec92b03"
+    },
+    {
+      "path": "cargo-fuzz-check.json",
+      "bytes": 3074,
+      "sha256": "f5fa390dde9c56ab4ae92c8f6905cad6b7921908827787588013fed94dd6cca7"
+    },
+    {
+      "path": "commands.json",
+      "bytes": 1622,
+      "sha256": "02ad34c7ff5d05f47bd277e10c77e94748be264ba1d9bcd9e757777b22e32681"
+    },
+    {
+      "path": "fuzz.yml",
+      "bytes": 41775,
+      "sha256": "5a157d2e4e2592d701555a1d79890efb98d897f16b4f82d75b5b74bbeb664968"
+    },
+    {
+      "path": "jobs.json",
+      "bytes": 8955,
+      "sha256": "22a149cfb1c6049c3d2833f1bc917284ea85a5509a32f0a89de0dbbba1945092"
+    },
+    {
+      "path": "log-excerpts.txt",
+      "bytes": 2238,
+      "sha256": "19d32263dc51dc2279f10414d770dbcc3558adbb66c864870be1f66fddbded68"
+    },
+    {
+      "path": "merge-fuzz-workflow.diff",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "newer-main-fuzz.json",
+      "bytes": 27037,
+      "sha256": "f1c84d77bd034ff31802dd2c7d3b25dfd6d0f05c917f7ad135dc89a976e47506"
+    },
+    {
+      "path": "report.json",
+      "bytes": 4463,
+      "sha256": "6ce3ed3810bdbe669b8c7d7f00166aed4cd04666d0ff97637db46ab36a6f92e7"
+    },
+    {
+      "path": "run.json",
+      "bytes": 13776,
+      "sha256": "e4249894bb100908e4285d7a66e393b488e6f57efaf7fbb02f894faeb269e0e9"
+    },
+    {
+      "path": "source-excerpts.txt",
+      "bytes": 9127,
+      "sha256": "f137c556f614c0d538f6954ff0c5fbd42ff6382c740f330872ea7e1bb803aa82"
+    }
+  ]
+}

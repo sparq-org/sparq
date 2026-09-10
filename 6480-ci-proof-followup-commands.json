@@ -1,0 +1,40 @@
+{
+  "actual_commands": [
+    {
+      "command": "python3 scripts/preflight.py",
+      "exit": 1,
+      "output": "preflight.log"
+    },
+    {
+      "command": "git diff --check",
+      "exit": 0
+    },
+    {
+      "command": "Ruby Psych YAML load before/after; normalize only exact run string; require structural equality",
+      "exit": 0,
+      "output": "yaml-validation.json"
+    },
+    {
+      "command": "Python stdlib scan git ls-files package.json; parse every exact next key; hash all manifests",
+      "exit": 0,
+      "output": "tracked-package-next-inventory.json"
+    },
+    {
+      "command": "git diff --name-only 50c09eb2b7563924cccde9305ee51ff62b27af38 HEAD",
+      "exit": 0,
+      "result": [
+        ".github/workflows/js.yml"
+      ]
+    },
+    {
+      "command": "git status --porcelain",
+      "exit": 0,
+      "result": ""
+    }
+  ],
+  "initial_tool_limits": [
+    "AWS Python PyYAML import missing; used existing Ruby stdlib parser without installing anything.",
+    "actionlint/shellcheck not found on PATH."
+  ],
+  "no_npm_command_executed": true
+}

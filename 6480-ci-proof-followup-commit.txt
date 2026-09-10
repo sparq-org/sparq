@@ -1,0 +1,11 @@
+commit 26d139520f07f1ceacafbacbeb9991de371e2b53
+Author:     Jesse Wright <63333554+jeswr@users.noreply.github.com>
+AuthorDate: Thu Sep 10 10:19:02 2026 +0100
+Commit:     Jesse Wright <63333554+jeswr@users.noreply.github.com>
+CommitDate: Thu Sep 10 10:19:02 2026 +0100
+
+    ci(js): verify installed Next workspace resolution
+    
+    Check the installed Next dependency tree and tracked lock/manifests immediately after the existing root npm ci, preserving its lifecycle and CI configuration.
+    
+    Co-Authored-By: GPT-6 Astra <noreply@openai.com>

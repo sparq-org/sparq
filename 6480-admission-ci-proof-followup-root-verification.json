@@ -1,0 +1,10 @@
+{
+  "at": "2026-09-10T09:21:05.574085+00:00",
+  "head": "26d139520f07f1ceacafbacbeb9991de371e2b53",
+  "parent": "50c09eb2b7563924cccde9305ee51ff62b27af38",
+  "clean": true,
+  "all11_evidence_hashes_verified": true,
+  "only_change": "Exact replacement of existing root npm ci run block by npmci + installed workspace npm ls + tracked lock/minima gitdiff. All other workflow bytes preserved.",
+  "three_reviewed_package_files_byte_identical": true,
+  "scope": "Final4files; no local runtime/install claim. LinuxCI stillrequired."
+}

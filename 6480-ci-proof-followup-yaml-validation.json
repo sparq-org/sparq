@@ -1,0 +1,6 @@
+{
+  "parser": "Ruby Psych",
+  "version": "3.1.0",
+  "exact_step_commands": true,
+  "all_other_fields_unchanged": true
+}

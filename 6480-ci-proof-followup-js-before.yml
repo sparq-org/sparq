@@ -1,0 +1,192 @@
+# [OPUS-4.8] sq-5lof — GATING CI for the npm package (js/) wrapping crates/sparq-wasm.
+# Builds the wasm artifact with wasm-pack, compiles the TypeScript wrapper, runs the
+# node:test suite (incl. the cross-language Solid differential oracle), and checks that
+# `npm pack` stays publishable.
+#
+# THIS GATES (it is NOT informational). The check name is `js` and carries NO
+# `advisory`/`informational` token, so the `ci-summary / gate` aggregator
+# (.github/workflows/ci-summary.yml — it excludes only names matching the whole word
+# only DECLARED names, .github/advisory-registry.json — #3773) treats `js` as a HARD required
+# gate. Gating is correct:
+# this lane caught a real regression (PR #922's undeclared-npm-dep break, surfaced as a
+# red main and fixed in #953 / sq-fvz8). The old "Informational CI" header was stale.
+#
+# WHY a `pull_request` trigger (sq-5lof): js.yml USED to trigger on `push: branches:[main]`
+# ONLY, so the gating `js` check never ran on a PR — it only went green/red AFTER merge to
+# main. That is exactly how #922's regression reached main undetected (no PR-time js
+# validation). The `pull_request` trigger below validates the `js` gate BEFORE merge.
+#
+# SCOPE: PRs that touch the js/wasm/package surfaces (paths below) — a docs-only or pure-
+# Rust-engine PR skips this lane (no run, so the required `ci-summary / gate` simply never
+# waits on it; cross-workflow `needs:` is impossible — see site-e2e.yml / gui.yml). This
+# keeps the heavy wasm-pack + full-workspace install off unrelated PRs. It is NOT a
+# `merge_group` lane (ci-summary.yml never cross-workflow needs js.yml), matching
+# site-e2e.yml / gui.yml. The unfiltered `push: branches:[main]` trigger is KEPT for
+# post-merge cover on every main push (this is the leg #953 fixed — left untouched).
+name: js
+
+on:
+  pull_request:
+    # [FABLE-5] Draft-tier CI: + ready_for_review so the un-draft moment re-runs
+    # this gate-feeding lane (docs/branch-protection.md §Draft-tier CI).
+    types: [opened, synchronize, reopened, ready_for_review]
+    # The surfaces that can affect the js build/test: the js package itself, the npm
+    # workspace members + root lockfile/manifest it installs from (the #953 root install),
+    # every sparq-*-wasm crate the build compiles (sparq-wasm + reason/rsp/shacl/text-wasm),
+    # and this workflow file. A pure-Rust-engine or docs-only PR matches none of these.
+    paths:
+      - "js/**"
+      - "packages/**"
+      - "crates/sparq-wasm/**"
+      - "crates/sparq-*-wasm/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/js.yml"
+  push:
+    branches: [main]
+
+# [OPUS-4.8] Least-privilege default (Scorecard TokenPermissions): this gating
+# build/test job only reads the repo; grant nothing more. Jobs needing writes opt in per-job.
+permissions:
+  contents: read
+
+# [FABLE-5] Draft-tier CI: per-PR concurrency so a superseded push's heavy
+# wasm-pack build stops burning a runner slot (same pattern as docs-quality/gui/
+# site-*). No merge_group trigger exists here, so this can never cancel a
+# merge_group run.
+concurrency:
+  group: js-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  js:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: js
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          # [FABLE-5] CI-economy (2026-07-18 directive 2b): this wasm lane compiles
+          # the same sparq-wasm dependency stack as the other js/pages/gui/site wasm
+          # lanes — ONE shared dependency cache across them keeps demand inside the
+          # 10 GB Actions-cache budget (sq-3sbrr doctrine: save on push-to-main
+          # only, so PR runs are restore-only and never churn the shared budget).
+          shared-key: site-wasm
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
+      # [FABLE-5] PR #3511 review finding 5: the redundant second cargo cache was
+      # REMOVED. The Swatinem/rust-cache above (shared-key: site-wasm) already caches
+      # ~/.cargo/registry + ~/.cargo/git + the workspace target/ across every js/pages/
+      # gui/site wasm lane, restore-only off main. The former `actions/cache` here
+      # covered the SAME paths under a PR-scoped key (js-wasm-…-hashFiles(Cargo.lock)),
+      # so it saved a duplicate, PR-scoped copy on every PR run — churning the shared
+      # 10 GB Actions-cache budget the economy work exists to protect. One shared
+      # dependency cache, not two, is the goal.
+
+      # wasm-pack BEFORE `npm ci`: the package's `prepare` lifecycle (sq-bkag git-pin
+      # build) runs on `npm ci` and needs wasm-pack on PATH to compile the wasm engine.
+      #
+      # [OPUS-5] sq-khm3f: DOWNLOAD the prebuilt release binary — do NOT `cargo install
+      # wasm-pack --locked`. That compiled wasm-pack (and its whole chrono/wasm-bindgen
+      # source tree) from crates.io on EVERY run of this GATING lane, so any transient
+      # crates.io/CDN blip red-gated an unrelated PR: PR #1131 died on `download of
+      # wa/sm/wasm-bindgen failed / curl failed: [16] Error in the HTTP2 framing layer`,
+      # cleared by a plain re-run. Fetching one static musl tarball instead collapses
+      # that network surface from wasm-pack's whole dependency graph to a single file,
+      # and jetli/wasm-pack-action fetches it with @actions/tool-cache, which retries a
+      # failed download — so the one remaining request is itself flake-tolerant. It
+      # installs to ~/.cargo/bin (already on PATH; disjoint from the registry/git paths
+      # the rust-cache step above owns, so the two do not interact). Same action, same
+      # SHA pin, same shape as the `wasm` job in ci.yml already uses for wasm-pack.
+      #
+      # The version is pinned EXACTLY (repo tool-pin doctrine, cf. sq-tool-pin): 0.15.0
+      # is wasm-pack's current release, i.e. what `cargo install wasm-pack` resolved to
+      # here, so this is version-neutral today. `version: latest` would re-add an
+      # unauthenticated api.github.com release lookup — a second rate-limit-flake
+      # source, which is the thing being removed. Bump deliberately, not implicitly.
+      - name: Install wasm-pack
+        uses: jetli/wasm-pack-action@0d096b08b4e5a7de8c28de67e11e945404e9eefa # v0.4.0
+        with:
+          version: v0.15.0
+
+      # [OPUS-4.8] sq-fvz8: install the FULL workspace from the repo ROOT, not just the
+      # `js/` member. The cross-language Solid differential oracle (test/solid-differential
+      # .test.mjs, PR #922) imports n3 / @solid/acl-check / @solidlab/policy-engine / rdflib,
+      # which are declared as ROOT devDependencies (deliberately NOT in js/package.json — the
+      # js-sbom lane derives the published @sparq-org/sparq SBOM from js/package.json's deps, so
+      # putting test-only deps there would pollute the runtime SBOM, sq-f04e/#887). A member-
+      # scoped `npm ci` (working-directory: js) installs ONLY @sparq-org/sparq's own closure and
+      # NOT the root workspace devDeps, so those imports were ERR_MODULE_NOT_FOUND -> red `js`
+      # gate. A root install hoists them into the workspace node_modules where the test (and
+      # the `js`-member build) both resolve them. js/package.json is untouched, so the
+      # published-client SBOM stays clean (runtime tree = {fzstd} only).
+      - name: Install npm dependencies (full workspace, from repo root)
+        working-directory: .
+        run: npm ci
+
+      - name: Build (wasm-pack + tsc)
+        run: npm run build
+
+      - name: Test (node --test)
+        run: npm test
+
+      # [OPUS-4.8] sq-iwhl8 (#1116): the contributable RDF/JS conformance harness
+      # (packages/rdfjs-conformance, a candidate rdfjs/ contribution). Typecheck it and run its
+      # OWN parity suites — they drive the harness against N3.js + @rdfjs/dataset to prove it is
+      # implementation-agnostic. The `js` test step above already runs the harness against
+      # @sparq-org/sparq (js/test/rdfjs-conformance.test.mjs). Run from the repo root so the
+      # workspace-linked harness + its devDeps resolve.
+      - name: RDF/JS conformance harness (typecheck + N3 parity)
+        working-directory: packages/rdfjs-conformance
+        run: |
+          npm run typecheck
+          npm test
+
+      # [FABLE-5] sq-ohnj1 (#1499): the eye-js migration package. Build its wasm bundle
+      # (crates/sparq-reason-wasm) + tsc + the classic-`<script>` IIFE bundle ([OPUS-5]
+      # sq-xqchl.3, esbuild), run the eye-js socrates acceptance + overload/stub + IIFE suite,
+      # and verify the tarball ships dist/ + the wasm engine. wasm-pack is installed above.
+      - name: eye-js compat package (build + test + guardrail)
+        working-directory: packages/eyereasoner-compat
+        run: |
+          npm run build
+          npm test
+          npm run check:package
+
+      # [OPUS-4.8] sq-6xasp.11 (epic sq-6xasp): the @sparq-org/solid-server package — a local-dev
+      # Solid/LDP pod backed by the sparq-lws wasm handler. Build the wasm bundle
+      # (crates/sparq-lws-wasm, matched by the `crates/sparq-*-wasm/**` paths filter above) with
+      # the same wasm-pack installed earlier in this job, then run the package's node:test suite
+      # (http/auth/server/oidc, including the npx spin-up round-trip in server.test.mjs). The wasm
+      # build MUST precede `npm test`: src/index.js statically imports ../wasm/sparq_lws_wasm.js,
+      # so server.test.mjs / oidc.test.mjs (which `import { startSolidServer } from '../src/index.js'`)
+      # fail module resolution without the built wasm/ tree. [GPT-5.6] sq-hcy7c also checks the
+      # exact dry-run tarball file list so neither the allowlist nor the artifact can regress.
+      - name: solid-server package (build wasm + node:test + package guardrail)
+        working-directory: packages/solid-server
+        run: |
+          npm run build:lws-wasm
+          npm test
+          npm run check:package
+
+      # Publish guardrail + git-pin verification (sq-bkag): `prepare` wired, the
+      # `files` allowlist intact, and the packed tarball actually ships dist/ + wasm/
+      # + the `--target nodejs` CommonJS engine in wasm-node/ ([OPUS-5] sq-2hk).
+      - name: Package guardrail check
+        run: npm run check:package
+
+      # Both targets are built from the same crate + feature set (the glue differs,
+      # so the two byte counts are close but not identical) — printing both makes a
+      # feature-set drift between them visible in the log.
+      - name: Report wasm size
+        run: ls -l wasm/sparq_wasm_bg.wasm wasm-node/sparq_wasm_bg.wasm
