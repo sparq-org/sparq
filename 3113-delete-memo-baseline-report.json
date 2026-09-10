@@ -1,0 +1,114 @@
+{
+  "author_runtime": "GPT-6 Astra xhigh",
+  "frozen_at": "2026-09-10T16:52:38.768990+00:00",
+  "status": "PARTIAL_BASELINE_CONFIRMED; TEST_FAILED_AND_STOPPED",
+  "source": {
+    "head": "fe3284199db0831f353d2ae401b8c69472764904",
+    "clean": true,
+    "root_verified_main": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+    "root_tree_equivalence_used": true,
+    "all15core_source_hashes_preserved": true,
+    "production_changes": 0
+  },
+  "readiness": {
+    "basis": "Actual recorded core default/parallel Rust1.97.1 edition2021 O3 lib compiler invocation adapted to --test; sole proptest dev dependency added from actual recorded engine cfg(test) invocation. Matching artifact-stem rlib counterparts of recorded rmeta inputs were hash-pinned; not an assertion that rlib/rmeta bytes match.",
+    "direct_libraries": 7,
+    "dependency_builds": 0,
+    "profile": "native aarch64,O3,panicunwind,LTOoff,codegen16,default+parallel; no mmap/dict-spill/compact-index",
+    "limits": "No fresh Cargo transitive closure build; compiler successfully linked all actual core test module dependencies."
+  },
+  "execution": {
+    "builds": 1,
+    "filtered_test_runs": 1,
+    "compile_exit": 0,
+    "test_exit": 101,
+    "compile_seconds": 12.758512958,
+    "test_seconds": 1.0193458329999991,
+    "aggregate_execution_seconds": 13.854841875,
+    "passed_tests": 0,
+    "failed_tests": 1,
+    "filtered_tests": 150,
+    "retries": 0,
+    "commands_pending": false,
+    "binary": {
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3113/delete-memo-baseline/artifacts/sparq_core-delete_memo_baseline_f50",
+      "bytes": 3757904,
+      "sha256": "1ab036a2f182aba7dceef91c315c669c4eca4e4cb2039665925916171861eb37"
+    }
+  },
+  "observations": [
+    {
+      "case": "initial",
+      "dict_len": 4100,
+      "before": 0,
+      "state": 1,
+      "result": false,
+      "visits": 4100
+    },
+    {
+      "case": "immediate-warm",
+      "dict_len": 4100,
+      "before": 1,
+      "state": 1,
+      "result": false,
+      "visits": 0
+    },
+    {
+      "case": "existing-delete",
+      "dict_len": 4100,
+      "before": 0,
+      "state": 1,
+      "result": false,
+      "visits": 4100
+    },
+    {
+      "case": "known-terms-absent-delete",
+      "dict_len": 4100,
+      "before": 0,
+      "state": 1,
+      "result": false,
+      "visits": 4100
+    },
+    {
+      "case": "known-terms-reinsert",
+      "dict_len": 4100,
+      "before": 0,
+      "state": 1,
+      "result": false,
+      "visits": 4100
+    },
+    {
+      "case": "empty-delta",
+      "dict_len": 4100,
+      "before": 1,
+      "state": 1,
+      "result": false,
+      "visits": 0
+    }
+  ],
+  "established": "The exact actual Graph public mutation/classification path revisits4100dictionary IDs after a real delete, a known-terms absent delete, and a known-terms reinsertion, despite unchanged dictionary size. Immediate warm and both-empty batch observations visit0. Counter is called inside each actually executed cold predicate, not derived from expected size.",
+  "important_qualification": "Initial canonical integers use inline IDs; dictionary IDs are predominantly IRIs. The observed work is the dictionary-ID scan/numeric-cache lookup, not4100decimal parses. No public SPARQL query or result bag was executed.",
+  "failure": "The preregistered new-integer control incorrectly assumed999999would extend dictionary. It is inline-encoded, so the explicit growth assertion failed. This is a fixture/proof limitation, not an observed classifier error. No edits or reruns after failure.",
+  "not_established": [
+    "Later integer classification, exact decimal, new inexact decimal false\u2192true and sticky state2 controls were not reached.",
+    "Existing tests::has_high_precision_decimal_memo_survives_delta_insert remains byte-identical and compiled into cfg(test), but its separate test was filtered out; no new pass claimed.",
+    "Original3113 first cold scan remains unsolved. No candidate, mutation control, latency, heap benefit, full suite, wasm, mmap or concurrent-reader claim."
+  ],
+  "resource": {
+    "start_free": 10849345536,
+    "sampled_min_free": 10830516224,
+    "sampled_max_allocated_task_bytes": 9752576,
+    "final_free": 10859839488,
+    "limits": {
+      "execution_seconds": 480,
+      "new_allocated_bytes": 268435456,
+      "start_floor": 2214592512,
+      "continuous_floor": 2147483648
+    },
+    "sampling_seconds": 0.5,
+    "qualification": "Polling is not a continuous peak-memory measurement; reported durations are execution receipts only."
+  },
+  "warning": "Native linker emitted Xcode filesystem-event/cache-directory warnings; raw warnings retained. Compile exited0.",
+  "observer_noninterference": "Only a cfg(test) per-cold-predicate counter and appended diagnostic module. Reversing diagnostic delta exactly restores production source. No memo policy, dictionary, graph or numeric-comparison mutation introduced by observer.",
+  "next_decision": "Root may retain this repeated-rescan proof and decide whether to authorize completion of the remaining controls with an explicit inline-integer expectation (or non-inline growth control), followed by exact hunk ownership and independent review. No automatic follow-on work or issue closure."
+}

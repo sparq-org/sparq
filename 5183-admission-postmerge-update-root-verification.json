@@ -1,0 +1,9 @@
+{
+  "at": "2026-09-10T17:04:03.051024+00:00",
+  "manifest_sha256": "bcf3e7a13f0d92d96ccf8071c3ec305a956aad07fcd64bb91e1806592338637a",
+  "verified_files": 11,
+  "actual_raw_pass_records": 20,
+  "source_sha256": "41d8a1e664a3620dc23ec530af9c1908123c43f98131a61f1c9ca2b555d33eaa",
+  "main": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+  "all3_scoped_runs_success": true
+}

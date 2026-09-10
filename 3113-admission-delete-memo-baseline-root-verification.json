@@ -1,0 +1,66 @@
+{
+  "at": "2026-09-10T17:07:59.089651+00:00",
+  "manifest_sha256": "5fbf100f532772b3cef94c13d2ce70b08c80c9af7c4371ff21c01b219c117f42",
+  "files": 48,
+  "state": "PARTIAL_BASELINE_TEST_FAILED_FIXTURE_ASSUMPTION",
+  "compile_exit": 0,
+  "test_exit": 101,
+  "observations": [
+    {
+      "case": "initial",
+      "dict_len": 4100,
+      "before": 0,
+      "state": 1,
+      "result": false,
+      "visits": 4100
+    },
+    {
+      "case": "immediate-warm",
+      "dict_len": 4100,
+      "before": 1,
+      "state": 1,
+      "result": false,
+      "visits": 0
+    },
+    {
+      "case": "existing-delete",
+      "dict_len": 4100,
+      "before": 0,
+      "state": 1,
+      "result": false,
+      "visits": 4100
+    },
+    {
+      "case": "known-terms-absent-delete",
+      "dict_len": 4100,
+      "before": 0,
+      "state": 1,
+      "result": false,
+      "visits": 4100
+    },
+    {
+      "case": "known-terms-reinsert",
+      "dict_len": 4100,
+      "before": 0,
+      "state": 1,
+      "result": false,
+      "visits": 4100
+    },
+    {
+      "case": "empty-delta",
+      "dict_len": 4100,
+      "before": 1,
+      "state": 1,
+      "result": false,
+      "visits": 0
+    }
+  ],
+  "qualification": "Initial canonical integers use inline IDs; dictionary IDs are predominantly IRIs. The observed work is the dictionary-ID scan/numeric-cache lookup, not4100decimal parses. No public SPARQL query or result bag was executed.",
+  "unreached": [
+    "Later integer classification, exact decimal, new inexact decimal false\u2192true and sticky state2 controls were not reached.",
+    "Existing tests::has_high_precision_decimal_memo_survives_delta_insert remains byte-identical and compiled into cfg(test), but its separate test was filtered out; no new pass claimed.",
+    "Original3113 first cold scan remains unsolved. No candidate, mutation control, latency, heap benefit, full suite, wasm, mmap or concurrent-reader claim."
+  ],
+  "followup_issue": 6485,
+  "production_change_admitted": false
+}

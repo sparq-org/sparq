@@ -1,0 +1,38 @@
+{
+  "at": "2026-09-10T16:50:18.513286+00:00",
+  "resources": {
+    "free_bytes": 10849345536,
+    "allocated_bytes": 1544192
+  },
+  "head": "fe3284199db0831f353d2ae401b8c69472764904",
+  "clean": true,
+  "compiler_and_7_externs_rehashed": true,
+  "all_15_core_sources_rehashed": true,
+  "selected_environment": {
+    "CARGO": "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/cargo",
+    "CARGO_CRATE_NAME": "sparq_core",
+    "CARGO_MANIFEST_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue5183/crates/sparq-core",
+    "CARGO_MANIFEST_PATH": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue5183/crates/sparq-core/Cargo.toml",
+    "CARGO_PKG_AUTHORS": "",
+    "CARGO_PKG_DESCRIPTION": "Dictionary-encoded RDF triplestore core: six sorted permutation indexes, parallel + streaming loaders, and an out-of-core memory-mapped store",
+    "CARGO_PKG_HOMEPAGE": "https://github.com/sparq-org/sparq",
+    "CARGO_PKG_LICENSE": "MIT",
+    "CARGO_PKG_LICENSE_FILE": "",
+    "CARGO_PKG_NAME": "sparq-core",
+    "CARGO_PKG_README": "README.md",
+    "CARGO_PKG_REPOSITORY": "https://github.com/sparq-org/sparq",
+    "CARGO_PKG_RUST_VERSION": "1.88",
+    "CARGO_PKG_VERSION": "0.1.1",
+    "CARGO_PKG_VERSION_MAJOR": "0",
+    "CARGO_PKG_VERSION_MINOR": "1",
+    "CARGO_PKG_VERSION_PATCH": "1",
+    "CARGO_PKG_VERSION_PRE": "",
+    "DYLD_FALLBACK_LIBRARY_PATH": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps:/Users/jesght/lib:/usr/local/lib:/usr/lib",
+    "CARGO_NET_OFFLINE": "true",
+    "CARGO_INCREMENTAL": "0",
+    "CARGO_BUILD_JOBS": "1",
+    "RAYON_NUM_THREADS": "1",
+    "TMPDIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3113/delete-memo-baseline/tmp",
+    "RUST_BACKTRACE": "0"
+  }
+}

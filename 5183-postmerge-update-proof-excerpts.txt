@@ -1,0 +1,188 @@
+bulk-1.log:11 2026-09-10T16:26:05.5284269Z Ubuntu
+bulk-1.log:18 2026-09-10T16:26:05.5292391Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260907.300/images/ubuntu/Ubuntu2404-Readme.md
+bulk-1.log:430 2026-09-10T16:29:40.2721807Z   case "$SELECT_AFFECTED" in
+bulk-1.log:431 2026-09-10T16:29:40.2722186Z     *"\"$SHARD_CRATE\""*) : ;;  # in the affected closure -> run the shard
+bulk-1.log:432 2026-09-10T16:29:40.2722779Z     *)
+bulk-1.log:433 2026-09-10T16:29:40.2723144Z       echo "shard 'bulk 1/3' SKIPPED by change-based selection:"
+bulk-1.log:434 2026-09-10T16:29:40.2723657Z       echo "  $SHARD_CRATE is not in the affected closure $SELECT_AFFECTED"
+bulk-1.log:435 2026-09-10T16:29:40.2724069Z       exit 0
+bulk-1.log:436 2026-09-10T16:29:40.2724305Z       ;;
+bulk-1.log:437 2026-09-10T16:29:40.2724525Z   esac
+bulk-1.log:438 2026-09-10T16:29:40.2724734Z fi
+bulk-1.log:439 2026-09-10T16:29:40.2725058Z common=(--archive-file nextest.tar.zst --workspace-remap . \
+bulk-1.log:440 2026-09-10T16:29:40.2725521Z         --extract-to . --extract-overwrite --profile ci)
+bulk-1.log:441 2026-09-10T16:29:40.2725881Z if [ -n "" ]; then
+bulk-1.log:442 2026-09-10T16:29:40.2726270Z   # Dedicated heavy shard: intersect HEAVY with this shard's single test so
+bulk-1.log:443 2026-09-10T16:29:40.2726805Z   # the shard's set is provably a SUBSET of HEAVY (belt-and-braces: if the
+bulk-1.log:444 2026-09-10T16:29:40.2727327Z   # test is ever renamed in only one place, the shard runs empty rather than
+bulk-1.log:445 2026-09-10T16:29:40.2727774Z   # silently re-including it in bulk).
+bulk-1.log:446 2026-09-10T16:29:40.2728383Z   args=("${common[@]}" -E '( test(=diskann_recall_at_10_vs_brute_force_on_50k) | test(=hnsw_recall_at_10_vs_brute_force_on_50k) ) & (  )')
+bulk-1.log:447 2026-09-10T16:29:40.2729078Z elif [ "$SELECT_MODE" = "selected" ] && [ -n "$SELECT_FILTERSET" ]; then
+bulk-1.log:448 2026-09-10T16:29:40.2729588Z   # [FABLE-5] sq-fmx4u.3: bulk shard under ENFORCED selection — NARROW
+bulk-1.log:449 2026-09-10T16:29:40.2730084Z   # (never skip) the cross-crate partition to the affected closure
+bulk-1.log:450 2026-09-10T16:29:40.2730574Z   # (design §5.2): intersect the not-heavy set with the package()
+bulk-1.log:451 2026-09-10T16:29:40.2731090Z   # filterset. The count partition applies AFTER filtering, so the three
+bulk-1.log:452 2026-09-10T16:29:40.2731621Z   # bulk shards still partition the narrowed set exactly. A package()
+bulk-1.log:453 2026-09-10T16:29:40.2732129Z   # naming no archived package fails loud (nextest errors), so a stale
+bulk-1.log:454 2026-09-10T16:29:40.2732888Z   # filterset cannot silently select nothing; --no-tests=pass is needed
+bulk-1.log:455 2026-09-10T16:29:40.2733434Z   # because a legitimately-narrowed shard CAN match zero tests (e.g. an
+bulk-1.log:456 2026-09-10T16:29:40.2733959Z   # affected crate whose only tests are heavy/feature-gated) — full and
+bulk-1.log:457 2026-09-10T16:29:40.2734458Z   # shadow runs keep the strict no-tests-is-an-error behaviour.
+bulk-1.log:458 2026-09-10T16:29:40.2734929Z   args=("${common[@]}" --no-tests=pass --partition count:1/3 \
+bulk-1.log:459 2026-09-10T16:29:40.2735358Z         -E "( not ( $HEAVY ) ) & ( $SELECT_FILTERSET )")
+bulk-1.log:460 2026-09-10T16:29:40.2735689Z else
+bulk-1.log:461 2026-09-10T16:29:40.2736209Z   # Bulk shard: everything that is NOT a known-heavy test, count-partitioned.
+bulk-1.log:462 2026-09-10T16:29:40.2737016Z   args=("${common[@]}" --partition count:1/3 -E 'not ( test(=diskann_recall_at_10_vs_brute_force_on_50k) | test(=hnsw_recall_at_10_vs_brute_force_on_50k) )')
+bulk-1.log:463 2026-09-10T16:29:40.2737676Z fi
+bulk-1.log:464 2026-09-10T16:29:40.2737900Z MAX_ATTEMPTS=2
+bulk-1.log:465 2026-09-10T16:29:40.2738150Z attempt=1
+bulk-1.log:466 2026-09-10T16:29:40.2738393Z while true; do
+bulk-1.log:467 2026-09-10T16:29:40.2738888Z   echo "::group::nextest shard 'bulk 1/3' — attempt $attempt/$MAX_ATTEMPTS"
+bulk-1.log:468 2026-09-10T16:29:40.2739450Z   # Capture the exit code EXPLICITLY. `cargo … || rc=$?` is `set -e`-safe (the
+bulk-1.log:469 2026-09-10T16:29:40.2739996Z   # `||` makes the failure non-fatal) AND captures nextest's REAL exit code —
+bulk-1.log:470 2026-09-10T16:29:40.2740539Z   # unlike `if cargo …; then`, where `$?` after the `if` is the `if` statement's
+bulk-1.log:471 2026-09-10T16:29:40.2741082Z   # own status (always 0) and a genuine failure would silently exit 0, wrongly
+bulk-1.log:472 2026-09-10T16:29:40.2741600Z   # passing the gate. `rc` is reset to 0 each attempt before the run.
+bulk-1.log:473 2026-09-10T16:29:40.2741996Z   rc=0
+bulk-1.log:474 2026-09-10T16:29:40.2742250Z   cargo nextest run "${args[@]}" || rc=$?
+bulk-1.log:475 2026-09-10T16:29:40.2742836Z   echo "::endgroup::"
+bulk-1.log:476 2026-09-10T16:29:40.2743123Z   if [ "$rc" -eq 0 ]; then
+bulk-1.log:477 2026-09-10T16:29:40.2743468Z     echo "shard 'bulk 1/3' passed on attempt $attempt"
+bulk-1.log:478 2026-09-10T16:29:40.2743816Z     break
+bulk-1.log:479 2026-09-10T16:29:40.2744039Z   fi
+bulk-1.log:480 2026-09-10T16:29:40.2744298Z   if [ "$attempt" -ge "$MAX_ATTEMPTS" ]; then
+bulk-1.log:481 2026-09-10T16:29:40.2744888Z     echo "::error::shard 'bulk 1/3' failed after $attempt attempt(s) (exit $rc) — genuine failure, not a single transient."
+bulk-1.log:482 2026-09-10T16:29:40.2745440Z     exit "$rc"
+bulk-1.log:591 2026-09-10T16:31:08.7175157Z         PASS [   0.010s] (  79/3070) sparq-bench::bin/sparq-bench update_fuzz::tests::duplicate_quad_is_caught_despite_canonicalization
+bulk-1.log:592 2026-09-10T16:31:08.7377785Z         PASS [   0.022s] (  80/3070) sparq-bench::bin/sparq-bench update_fuzz::tests::injected_divergence_is_caught
+bulk-1.log:593 2026-09-10T16:31:08.7500696Z         PASS [   0.038s] (  81/3070) sparq-bench::bin/sparq-bench update_fuzz::tests::generator_emits_every_v2_family
+bulk-1.log:594 2026-09-10T16:31:08.7556328Z         PASS [   0.018s] (  82/3070) sparq-bench::bin/sparq-bench update_fuzz::tests::integer_pools_keep_draw_counts_and_all_spelling_families
+bulk-1.log:595 2026-09-10T16:31:08.7664080Z         PASS [   0.010s] (  83/3070) sparq-bench::bin/sparq-bench update_fuzz::tests::non_canonical_integer_lexicals_are_distinct_terms
+bulk-1.log:596 2026-09-10T16:31:08.7684233Z         PASS [   0.018s] (  84/3070) sparq-bench::bin/sparq-bench update_fuzz::tests::load_equals_the_equivalent_insert_data
+bulk-1.log:3586 2026-09-10T16:34:06.0454798Z      Summary [ 177.715s] 3070 tests run: 3070 passed (2 slow), 5702 skipped
+bulk-2.log:11 2026-09-10T16:32:06.6528794Z Ubuntu
+bulk-2.log:18 2026-09-10T16:32:06.6532836Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260907.300/images/ubuntu/Ubuntu2404-Readme.md
+bulk-2.log:430 2026-09-10T16:41:01.9829021Z   case "$SELECT_AFFECTED" in
+bulk-2.log:431 2026-09-10T16:41:01.9829299Z     *"\"$SHARD_CRATE\""*) : ;;  # in the affected closure -> run the shard
+bulk-2.log:432 2026-09-10T16:41:01.9829569Z     *)
+bulk-2.log:433 2026-09-10T16:41:01.9829801Z       echo "shard 'bulk 2/3' SKIPPED by change-based selection:"
+bulk-2.log:434 2026-09-10T16:41:01.9830155Z       echo "  $SHARD_CRATE is not in the affected closure $SELECT_AFFECTED"
+bulk-2.log:435 2026-09-10T16:41:01.9830451Z       exit 0
+bulk-2.log:436 2026-09-10T16:41:01.9830621Z       ;;
+bulk-2.log:437 2026-09-10T16:41:01.9830786Z   esac
+bulk-2.log:438 2026-09-10T16:41:01.9830942Z fi
+bulk-2.log:439 2026-09-10T16:41:01.9831177Z common=(--archive-file nextest.tar.zst --workspace-remap . \
+bulk-2.log:440 2026-09-10T16:41:01.9831511Z         --extract-to . --extract-overwrite --profile ci)
+bulk-2.log:441 2026-09-10T16:41:01.9831776Z if [ -n "" ]; then
+bulk-2.log:442 2026-09-10T16:41:01.9832061Z   # Dedicated heavy shard: intersect HEAVY with this shard's single test so
+bulk-2.log:443 2026-09-10T16:41:01.9832441Z   # the shard's set is provably a SUBSET of HEAVY (belt-and-braces: if the
+bulk-2.log:444 2026-09-10T16:41:01.9833052Z   # test is ever renamed in only one place, the shard runs empty rather than
+bulk-2.log:445 2026-09-10T16:41:01.9833378Z   # silently re-including it in bulk).
+bulk-2.log:446 2026-09-10T16:41:01.9833820Z   args=("${common[@]}" -E '( test(=diskann_recall_at_10_vs_brute_force_on_50k) | test(=hnsw_recall_at_10_vs_brute_force_on_50k) ) & (  )')
+bulk-2.log:447 2026-09-10T16:41:01.9834324Z elif [ "$SELECT_MODE" = "selected" ] && [ -n "$SELECT_FILTERSET" ]; then
+bulk-2.log:448 2026-09-10T16:41:01.9834693Z   # [FABLE-5] sq-fmx4u.3: bulk shard under ENFORCED selection — NARROW
+bulk-2.log:449 2026-09-10T16:41:01.9835051Z   # (never skip) the cross-crate partition to the affected closure
+bulk-2.log:450 2026-09-10T16:41:01.9835399Z   # (design §5.2): intersect the not-heavy set with the package()
+bulk-2.log:451 2026-09-10T16:41:01.9835773Z   # filterset. The count partition applies AFTER filtering, so the three
+bulk-2.log:452 2026-09-10T16:41:01.9836142Z   # bulk shards still partition the narrowed set exactly. A package()
+bulk-2.log:453 2026-09-10T16:41:01.9836505Z   # naming no archived package fails loud (nextest errors), so a stale
+bulk-2.log:454 2026-09-10T16:41:01.9836875Z   # filterset cannot silently select nothing; --no-tests=pass is needed
+bulk-2.log:455 2026-09-10T16:41:01.9837258Z   # because a legitimately-narrowed shard CAN match zero tests (e.g. an
+bulk-2.log:456 2026-09-10T16:41:01.9837636Z   # affected crate whose only tests are heavy/feature-gated) — full and
+bulk-2.log:457 2026-09-10T16:41:01.9837990Z   # shadow runs keep the strict no-tests-is-an-error behaviour.
+bulk-2.log:458 2026-09-10T16:41:01.9838330Z   args=("${common[@]}" --no-tests=pass --partition count:2/3 \
+bulk-2.log:459 2026-09-10T16:41:01.9838635Z         -E "( not ( $HEAVY ) ) & ( $SELECT_FILTERSET )")
+bulk-2.log:460 2026-09-10T16:41:01.9838872Z else
+bulk-2.log:461 2026-09-10T16:41:01.9839269Z   # Bulk shard: everything that is NOT a known-heavy test, count-partitioned.
+bulk-2.log:462 2026-09-10T16:41:01.9839848Z   args=("${common[@]}" --partition count:2/3 -E 'not ( test(=diskann_recall_at_10_vs_brute_force_on_50k) | test(=hnsw_recall_at_10_vs_brute_force_on_50k) )')
+bulk-2.log:463 2026-09-10T16:41:01.9840298Z fi
+bulk-2.log:464 2026-09-10T16:41:01.9840460Z MAX_ATTEMPTS=2
+bulk-2.log:465 2026-09-10T16:41:01.9840643Z attempt=1
+bulk-2.log:466 2026-09-10T16:41:01.9840818Z while true; do
+bulk-2.log:467 2026-09-10T16:41:01.9841188Z   echo "::group::nextest shard 'bulk 2/3' — attempt $attempt/$MAX_ATTEMPTS"
+bulk-2.log:468 2026-09-10T16:41:01.9841588Z   # Capture the exit code EXPLICITLY. `cargo … || rc=$?` is `set -e`-safe (the
+bulk-2.log:469 2026-09-10T16:41:01.9841983Z   # `||` makes the failure non-fatal) AND captures nextest's REAL exit code —
+bulk-2.log:470 2026-09-10T16:41:01.9842371Z   # unlike `if cargo …; then`, where `$?` after the `if` is the `if` statement's
+bulk-2.log:471 2026-09-10T16:41:01.9842960Z   # own status (always 0) and a genuine failure would silently exit 0, wrongly
+bulk-2.log:472 2026-09-10T16:41:01.9843340Z   # passing the gate. `rc` is reset to 0 each attempt before the run.
+bulk-2.log:473 2026-09-10T16:41:01.9843622Z   rc=0
+bulk-2.log:474 2026-09-10T16:41:01.9843809Z   cargo nextest run "${args[@]}" || rc=$?
+bulk-2.log:475 2026-09-10T16:41:01.9844041Z   echo "::endgroup::"
+bulk-2.log:476 2026-09-10T16:41:01.9844246Z   if [ "$rc" -eq 0 ]; then
+bulk-2.log:477 2026-09-10T16:41:01.9844502Z     echo "shard 'bulk 2/3' passed on attempt $attempt"
+bulk-2.log:478 2026-09-10T16:41:01.9844757Z     break
+bulk-2.log:479 2026-09-10T16:41:01.9844917Z   fi
+bulk-2.log:480 2026-09-10T16:41:01.9845110Z   if [ "$attempt" -ge "$MAX_ATTEMPTS" ]; then
+bulk-2.log:481 2026-09-10T16:41:01.9845537Z     echo "::error::shard 'bulk 2/3' failed after $attempt attempt(s) (exit $rc) — genuine failure, not a single transient."
+bulk-2.log:482 2026-09-10T16:41:01.9845927Z     exit "$rc"
+bulk-2.log:586 2026-09-10T16:43:30.1754197Z         PASS [   0.009s] (  74/2876) sparq-bench::bin/sparq-bench update_fuzz::tests::blank_node_compare_is_isomorphism_not_relabelling_blindness
+bulk-2.log:587 2026-09-10T16:43:30.9468958Z         PASS [   0.772s] (  75/2876) sparq-bench::bin/sparq-bench update_fuzz::tests::fixed_window_smoke
+bulk-2.log:588 2026-09-10T16:43:30.9594200Z         PASS [   0.013s] (  76/2876) sparq-bench::bin/sparq-bench update_fuzz::tests::generator_is_deterministic
+bulk-2.log:589 2026-09-10T16:43:30.9771411Z         PASS [   0.017s] (  77/2876) sparq-bench::bin/sparq-bench update_fuzz::tests::injected_marker_fails_during_actual_lexical_adjudication
+bulk-2.log:590 2026-09-10T16:43:30.9866013Z         PASS [   0.009s] (  78/2876) sparq-bench::bin/sparq-bench update_fuzz::tests::lexical_adjudication_preserves_rows_and_blank_node_structure
+bulk-2.log:591 2026-09-10T16:43:30.9949182Z         PASS [   0.008s] (  79/2876) sparq-bench::bin/sparq-bench update_fuzz::tests::nested_noncanonical_terms_remain_exact_in_sparq
+bulk-2.log:592 2026-09-10T16:43:31.0070983Z         PASS [   0.012s] (  80/2876) sparq-bench::bin/sparq-bench update_fuzz::tests::oxigraph_cannot_load_a_local_file
+bulk-2.log:3392 2026-09-10T16:45:54.2857184Z      Summary [ 144.608s] 2876 tests run: 2876 passed (1 slow), 5896 skipped
+bulk-3.log:11 2026-09-10T16:21:33.8449934Z Ubuntu
+bulk-3.log:18 2026-09-10T16:21:33.8455920Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260907.300/images/ubuntu/Ubuntu2404-Readme.md
+bulk-3.log:430 2026-09-10T16:28:52.5574841Z   case "$SELECT_AFFECTED" in
+bulk-3.log:431 2026-09-10T16:28:52.5575118Z     *"\"$SHARD_CRATE\""*) : ;;  # in the affected closure -> run the shard
+bulk-3.log:432 2026-09-10T16:28:52.5575395Z     *)
+bulk-3.log:433 2026-09-10T16:28:52.5575629Z       echo "shard 'bulk 3/3' SKIPPED by change-based selection:"
+bulk-3.log:434 2026-09-10T16:28:52.5576009Z       echo "  $SHARD_CRATE is not in the affected closure $SELECT_AFFECTED"
+bulk-3.log:435 2026-09-10T16:28:52.5576313Z       exit 0
+bulk-3.log:436 2026-09-10T16:28:52.5576489Z       ;;
+bulk-3.log:437 2026-09-10T16:28:52.5576650Z   esac
+bulk-3.log:438 2026-09-10T16:28:52.5576809Z fi
+bulk-3.log:439 2026-09-10T16:28:52.5577051Z common=(--archive-file nextest.tar.zst --workspace-remap . \
+bulk-3.log:440 2026-09-10T16:28:52.5577416Z         --extract-to . --extract-overwrite --profile ci)
+bulk-3.log:441 2026-09-10T16:28:52.5577682Z if [ -n "" ]; then
+bulk-3.log:442 2026-09-10T16:28:52.5577975Z   # Dedicated heavy shard: intersect HEAVY with this shard's single test so
+bulk-3.log:443 2026-09-10T16:28:52.5578369Z   # the shard's set is provably a SUBSET of HEAVY (belt-and-braces: if the
+bulk-3.log:444 2026-09-10T16:28:52.5578756Z   # test is ever renamed in only one place, the shard runs empty rather than
+bulk-3.log:445 2026-09-10T16:28:52.5579079Z   # silently re-including it in bulk).
+bulk-3.log:446 2026-09-10T16:28:52.5579527Z   args=("${common[@]}" -E '( test(=diskann_recall_at_10_vs_brute_force_on_50k) | test(=hnsw_recall_at_10_vs_brute_force_on_50k) ) & (  )')
+bulk-3.log:447 2026-09-10T16:28:52.5580036Z elif [ "$SELECT_MODE" = "selected" ] && [ -n "$SELECT_FILTERSET" ]; then
+bulk-3.log:448 2026-09-10T16:28:52.5580556Z   # [FABLE-5] sq-fmx4u.3: bulk shard under ENFORCED selection — NARROW
+bulk-3.log:449 2026-09-10T16:28:52.5580988Z   # (never skip) the cross-crate partition to the affected closure
+bulk-3.log:450 2026-09-10T16:28:52.5581355Z   # (design §5.2): intersect the not-heavy set with the package()
+bulk-3.log:451 2026-09-10T16:28:52.5581741Z   # filterset. The count partition applies AFTER filtering, so the three
+bulk-3.log:452 2026-09-10T16:28:52.5582127Z   # bulk shards still partition the narrowed set exactly. A package()
+bulk-3.log:453 2026-09-10T16:28:52.5582497Z   # naming no archived package fails loud (nextest errors), so a stale
+bulk-3.log:454 2026-09-10T16:28:52.5582875Z   # filterset cannot silently select nothing; --no-tests=pass is needed
+bulk-3.log:455 2026-09-10T16:28:52.5583261Z   # because a legitimately-narrowed shard CAN match zero tests (e.g. an
+bulk-3.log:456 2026-09-10T16:28:52.5583640Z   # affected crate whose only tests are heavy/feature-gated) — full and
+bulk-3.log:457 2026-09-10T16:28:52.5583999Z   # shadow runs keep the strict no-tests-is-an-error behaviour.
+bulk-3.log:458 2026-09-10T16:28:52.5584347Z   args=("${common[@]}" --no-tests=pass --partition count:3/3 \
+bulk-3.log:459 2026-09-10T16:28:52.5584655Z         -E "( not ( $HEAVY ) ) & ( $SELECT_FILTERSET )")
+bulk-3.log:460 2026-09-10T16:28:52.5584896Z else
+bulk-3.log:461 2026-09-10T16:28:52.5585341Z   # Bulk shard: everything that is NOT a known-heavy test, count-partitioned.
+bulk-3.log:462 2026-09-10T16:28:52.5585927Z   args=("${common[@]}" --partition count:3/3 -E 'not ( test(=diskann_recall_at_10_vs_brute_force_on_50k) | test(=hnsw_recall_at_10_vs_brute_force_on_50k) )')
+bulk-3.log:463 2026-09-10T16:28:52.5586378Z fi
+bulk-3.log:464 2026-09-10T16:28:52.5586543Z MAX_ATTEMPTS=2
+bulk-3.log:465 2026-09-10T16:28:52.5586732Z attempt=1
+bulk-3.log:466 2026-09-10T16:28:52.5586906Z while true; do
+bulk-3.log:467 2026-09-10T16:28:52.5587271Z   echo "::group::nextest shard 'bulk 3/3' — attempt $attempt/$MAX_ATTEMPTS"
+bulk-3.log:468 2026-09-10T16:28:52.5587673Z   # Capture the exit code EXPLICITLY. `cargo … || rc=$?` is `set -e`-safe (the
+bulk-3.log:469 2026-09-10T16:28:52.5588073Z   # `||` makes the failure non-fatal) AND captures nextest's REAL exit code —
+bulk-3.log:470 2026-09-10T16:28:52.5588467Z   # unlike `if cargo …; then`, where `$?` after the `if` is the `if` statement's
+bulk-3.log:471 2026-09-10T16:28:52.5588868Z   # own status (always 0) and a genuine failure would silently exit 0, wrongly
+bulk-3.log:472 2026-09-10T16:28:52.5589259Z   # passing the gate. `rc` is reset to 0 each attempt before the run.
+bulk-3.log:473 2026-09-10T16:28:52.5589535Z   rc=0
+bulk-3.log:474 2026-09-10T16:28:52.5589726Z   cargo nextest run "${args[@]}" || rc=$?
+bulk-3.log:475 2026-09-10T16:28:52.5589957Z   echo "::endgroup::"
+bulk-3.log:476 2026-09-10T16:28:52.5590163Z   if [ "$rc" -eq 0 ]; then
+bulk-3.log:477 2026-09-10T16:28:52.5590607Z     echo "shard 'bulk 3/3' passed on attempt $attempt"
+bulk-3.log:478 2026-09-10T16:28:52.5590872Z     break
+bulk-3.log:479 2026-09-10T16:28:52.5591037Z   fi
+bulk-3.log:480 2026-09-10T16:28:52.5591238Z   if [ "$attempt" -ge "$MAX_ATTEMPTS" ]; then
+bulk-3.log:481 2026-09-10T16:28:52.5591665Z     echo "::error::shard 'bulk 3/3' failed after $attempt attempt(s) (exit $rc) — genuine failure, not a single transient."
+bulk-3.log:482 2026-09-10T16:28:52.5592076Z     exit "$rc"
+bulk-3.log:581 2026-09-10T16:31:24.6533394Z         PASS [   0.007s] (  69/2738) sparq-bench::bin/sparq-bench update_fuzz::tests::committed_allowlist_enables_exactly_the_adjudicated_classes
+bulk-3.log:582 2026-09-10T16:31:24.6590340Z         PASS [   0.006s] (  70/2738) sparq-bench::bin/sparq-bench update_fuzz::tests::integer_lexical_adjudication_is_narrow
+bulk-3.log:583 2026-09-10T16:31:24.6670617Z         PASS [   0.007s] (  71/2738) sparq-bench::bin/sparq-bench update_fuzz::tests::lexical_collisions_across_contexts_and_nested_terms_fail
+bulk-3.log:584 2026-09-10T16:31:24.6934567Z         PASS [   0.041s] (  72/2738) sparq-bench::bin/sparq-bench update_fuzz::tests::historical_4141222487_preserves_lexicals_and_fresh_nodes
+bulk-3.log:585 2026-09-10T16:31:24.7025784Z         PASS [   0.008s] (  73/2738) sparq-bench::bin/sparq-bench update_fuzz::tests::snapshot_renderers_agree_on_known_dataset
+bulk-3.log:696 2026-09-10T16:31:27.0333189Z         PASS [   2.385s] ( 184/2738) sparq-bench::bin/sparq-bench update_fuzz::tests::generated_integer_domain_is_injective_including_load
+bulk-3.log:745 2026-09-10T16:31:28.9405239Z         PASS [   4.274s] ( 233/2738) sparq-bench::bin/sparq-bench update_fuzz::tests::no_nested_blank_nodes_in_triple_terms
+bulk-3.log:3253 2026-09-10T16:33:17.2953689Z      Summary [ 114.032s] 2738 tests run: 2738 passed (1 slow), 6034 skipped

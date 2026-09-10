@@ -1,0 +1,16 @@
+{
+  "name": "test",
+  "argv": [
+    "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3113/delete-memo-baseline/artifacts/sparq_core-delete_memo_baseline_f50",
+    "--exact",
+    "delete_memo_baseline::fixed_delete_only_rescans",
+    "--nocapture",
+    "--test-threads=1"
+  ],
+  "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue5183",
+  "started": "2026-09-10T16:50:31.338790+00:00",
+  "before": {
+    "free_bytes": 10834497536,
+    "allocated_bytes": 5337088
+  }
+}

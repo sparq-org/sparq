@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-10T16:49:05.444524+00:00",
+  "updated_at": "2026-09-10T17:07:59.089651+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -10,7 +10,7 @@
     "quiet_when_unchanged": true,
     "verified_at": "2026-09-09T12:15:56.335100+00:00",
     "schedule_reconciliation": "Saved schedule was6hours despite prompt/checkpoint10minutes. Updated existing automation through app tool to original user-requested10minutes; readback verified. No duplicate automation.",
-    "last_file_verify_at": "2026-09-10T15:10:05.636101+00:00",
+    "last_file_verify_at": "2026-09-10T17:07:59.089651+00:00",
     "last_app_view_note": "View succeeded during previous heartbeat; precise time not recorded."
   },
   "constraints": [
@@ -51,8 +51,8 @@
   },
   "live_main": {
     "oid": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
-    "observed_at": "2026-09-10T15:52:24.719587+00:00",
-    "evidence": "direct-5183/admission/queue6482-watch1547.json"
+    "observed_at": "2026-09-10T17:07:59.089651+00:00",
+    "evidence": "direct-5183/admission/close5183-main.json"
   },
   "rules": {
     "required_check": "gate",
@@ -64,343 +64,38 @@
   },
   "admission_policy": "An independent GitHub account is not an extra direct-admission requirement. OWNER/MEMBER/COLLABORATOR noncontributor verdict restrictions govern automated label promotion. Actual independent Opus source review + green required CI + resolved threads permit direct protected queue admission. review:unreviewed is informational; review:needs is a real hold. Never write a fabricated canonical VERDICT:pass as jeswr.",
   "active_lane": {
-    "issue": 5183,
+    "issue": 6485,
+    "parent_issue": 3113,
+    "base": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+    "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6485",
+    "branch": "codex/preserve-numeric-memo",
     "agent": "/root/postmerge_ci",
-    "state": "pr6482_merged_postmerge_validation_pending",
-    "base": "4595388de9e389f5369d63828fbf90cfc16b62d9",
-    "parent": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
-    "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue5183",
-    "branch": "codex/update-differential-replay",
-    "engine_witness": {
-      "directory": "direct-5183/engine-witness",
-      "manifest_sha256": "88f152695f2fbedb42306daee1d623b10544eda87426d2ff430bd34663366af3",
-      "root_verification": "direct-5183/admission/engine-witness-root-verification.json",
-      "scope": "12defaultfeatureobservationsbothsource-qualifiedpreservedrevisions; twooperationreduction+controls; exactCIseednotrun"
-    },
-    "oxigraph_witness": {
-      "directory": "direct-5183/oxigraph-witness",
-      "manifest_sha256": "24936c685da036423ed615743d5cda5eddf9ebfa589bec643ed186f4915967c1",
-      "root_verification": "direct-5183/admission/oxigraph-witness-root-verification.json",
-      "scope": "Actualofflinepinned0.5.9 rdf12only/vendoredspargebra0.4.6, onefixed3casepublicAPIrun; no canon/productionchanges",
-      "result": "Lexicalpair1storedterm/1row/1freshbnode vsSparq2/2/2; controlsagree; collapsehappensbeforecanonicalization",
-      "resource": "193.95s/~72.4MBgrowth/minfree6.28GB, within600s512MiB2GiBlimits; no pendingcommand"
-    },
-    "public_update": {
-      "url": "https://github.com/sparq-org/sparq/issues/5183#issuecomment-5618039976",
-      "receipt": "direct-5183/admission/remaining-original-comment-receipt.json",
-      "body_sha256": "f9ace93afb7a9a5502a5778a27ea083704938260900644d1a6363fa209adf527",
-      "state": "Updatedexistingowncommentwithqualified7caseclassification andPR6482;issuekeptopen"
-    },
-    "next_scope": "Merged6482at15:45:55 mainf50b5049; all8MGworkflows success, exactgate15368 verified, reviewedtreeidentical. Watch relevantnewmainCI/matrix/gate/fuzz beforeclosing5183; no current6482queueentry or mutationrequired.",
-    "agent_current_task": "ExistingAstra one bounded3113 numericmemo baseline; no productionedits. Warmcoreprofile prerequisite;480s256MiB/jobs1/offline/continuous2GiB; no retry. Allformerworkcomplete.",
-    "constraints": "Preserve strict comparison and full normalized structural equality; no reference-input normalization, canon/engine/workflow edits or broad semantic claims; registryOFF/releasesheld",
-    "readiness_directory": "direct-5183/original-seed-readiness",
-    "execution_directory": "direct-5183/original-seed-execution",
-    "readiness_manifest_sha256": "16cffa14191b0ac15e09a0e3577653cd4f95eca8e153ca16e6c18d174a83d3e0",
-    "readiness_root_verification": "direct-5183/admission/original-seed-readiness-root-verification.json",
-    "execution_limits": {
-      "total_seconds": 1200,
-      "per_build_seconds": 600,
-      "per_seed_seconds": 60,
-      "jobs": 1,
-      "offline": true,
-      "max_new_allocated_bytes": 536870912,
-      "min_free_bytes": 2147483648,
-      "seed": 4141222487,
-      "count": 1,
-      "one_build_run_per_revision": true
-    },
-    "execution_result_preliminary": {
-      "status": "complete",
-      "seconds": 361.825017125,
-      "new_allocated_bytes": 300384256,
-      "parent_exit": 1,
-      "main_exit": 1,
-      "operation": "8 of 10"
-    },
-    "worker_interruption": "Earlier service flag occurredaftercompletedlocalphase. Read-only output/freeze followupcompleted;78filesverified. No testsrestarted oroutcomeretry; no remainingserviceblock.",
-    "original_seed_execution": {
-      "directory": "direct-5183/original-seed-execution",
-      "manifest_sha256": "cac93502c4f4edaa79d8ac782ee1d993fb039f3d16eab9c151cc9c5433996389",
-      "files": 78,
-      "root_verification": "direct-5183/admission/original-seed-execution-root-verification.json",
-      "result": "Both exactrevisions reproduce same firstCIseed/index8; strictinternal comparisonpassed before referencefailure. Index9andother7CIseedsnotexecuted. No6478introduction ofthiscase underqualifiedprofile."
-    },
-    "diagnosis_review": {
-      "state": "completed_collected",
-      "kind": "exec_command",
-      "session_id": 14706,
-      "requested_model": "claude-opus-5",
-      "effort": "xhigh",
-      "input": "direct-5183/admission/opus-original-seed-diagnosis-input.md",
-      "input_sha256": "7737f54e6664bfaacc2d6006a51b20e82e0f2730a41771bac39d508ad4aaa23a",
-      "input_bytes": 31164,
-      "output": "direct-5183/admission/opus-original-seed-diagnosis-review.json",
-      "completion": "direct-5183/admission/opus-original-seed-diagnosis-completion.json",
-      "policy": "14706completed/collected; no poll/relaunch. ActualOpusreview designcandidateconditionalonstatichelperaudit, no patchapproved.",
-      "actual_primary_model": "claude-opus-5",
-      "verdict": "SUPPORTED_WITH_QUALIFICATIONS \u2014 the causal account is coherent, internally consistent, and survives an independent re-derivation from the frozen sequence; it is not fully instrumented for this run and rests on prior reduced witnesses for the reference engine's behavior. No engine defect in sparq is indicated; no comparator bug explains the failure.",
-      "result": "direct-5183/admission/opus-original-seed-diagnosis-result.json",
-      "root_disposition": "direct-5183/admission/opus-original-seed-diagnosis-root-disposition.json",
-      "output_sha256": "bf2e0d1329f283bf8ed66e830633eacb6bcf369566e972b6d751e7ea8f560be2"
-    },
-    "phase": "Narrow generator-domain repair and stricter lexical adjudication with historical regression",
-    "design_directory": "direct-5183/comparator-design-readiness",
-    "actual_model": "GPT-6 Astra",
+    "model": "gpt-6-astra",
     "effort": "xhigh",
-    "next_actions": [
-      "Watch6482coreCI34488984319/gate34488983731; matrix/docs/supplypassed. Verifyactualselectedtest/gateproofandcurrenthead/reviews. Address/resolveCopilotwithrecordedreason+6483followup ifevidenceremainsvalid, thennormalprotectedqueueexacthead.",
-      "No newlocalbuildwhile2GiBreserveunavailable. Copilotwitnessnotexecutedafterresourcecollapse; donotretryona fleetingreservegain. Localstorageassessmentonlytask-ownedcompletedartifactswithpreservationproof; no globalcleanup/production/EC2workaround.",
-      "Issue5183all8nowqualifiedsharedreferencecause, keepopenpendinglandedrepair/postmergeproof; donotclaimoriginalinputsnowpassundernewgenerator.",
-      "Hashreuse3105readinesspartial/paused,noimplementationGO. Localenginebuildsrequirefreshresourcefloor; no globalcachedeletes orunreviewedcleanup.",
-      "RetainregistryOFF/ALLGREEN/6049/6055/canon/EC2/releasesholds; quietbounded10minheartbeatwhenCIpending."
-    ],
-    "design_manifest_sha256": "2c25700e565a5d475d31392b23f9a921b2861a119e6d6a54a9b56a045f7fc574",
-    "design_root_verification": "direct-5183/admission/comparator-design-root-verification.json",
-    "implementation_directory": "direct-5183/implementation",
-    "implementation_limits": {
-      "agent": "/root/postmerge_ci",
-      "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue5183",
-      "branch": "codex/update-differential-replay",
-      "base": "4595388de9e389f5369d63828fbf90cfc16b62d9",
-      "max_compile_test_seconds": 1200,
-      "max_each_build_seconds": 600,
-      "max_new_allocated_bytes": 536870912,
-      "min_free_bytes": 2147483648,
+    "phase": "Corrected diagnostic controls and source invariant audit; no production edit",
+    "execution_limits": {
+      "builds": 1,
+      "filtered_runs": 1,
+      "filter": "has_high_precision_decimal_memo",
+      "seconds": 480,
+      "new_allocated_bytes": 268435456,
+      "start_free_floor": 2214592512,
+      "continuous_free_floor": 2147483648,
+      "offline": true,
       "jobs": 1,
-      "offline": true
+      "incremental": false,
+      "no_retry": true
     },
-    "base_preparation": "direct-5183/admission/implementation-base-preparation.json",
-    "implementation_progress": {
-      "at": "2026-09-10T13:53:12.221217+00:00",
-      "source": "frozen208-filebundle_root_verified",
-      "final_validation": "20/20 full scoped tests; scoped Clippy --tests -Dwarnings pass; seven compiled controls all killed; original survivors retained",
-      "limits": "Exact-module minimal harness; LinuxCI remains. HostpreflightonlyknownBash3mapfilefailure.",
-      "edition_qualification": "Earlier20/20compilededition2024minimalharness; actualcrateedition2021. Incompatible new letchains caught beforepush; correctedfollowupnotyetvalidated."
-    },
-    "head": "fe3284199db0831f353d2ae401b8c69472764904",
-    "implementation_manifest_sha256": "76c1012bf2fa7d784006dd70fe075559aebc59ff06addca6550b783d68600421",
-    "implementation_root_verification": "direct-5183/admission/implementation-root-verification.json",
-    "patch_review": {
-      "state": "completed_collected",
-      "session_id": 14761,
-      "expected_model": "claude-opus-5",
-      "effort": "xhigh",
-      "input": "direct-5183/admission/opus-injective-patch-input.md",
-      "input_sha256": "fc0cfecc7db6307058ac294e7527787bad2b0e736d454067d476c46635ea4485",
-      "output": "direct-5183/admission/opus-injective-patch-review.json",
-      "completion": "direct-5183/admission/opus-injective-patch-completion.json",
-      "policy": "Session14761 completed/collected. Do not repoll/relaunch. Hold publication for material edition gap and3smallfollowups; actual delta review on next commit.",
-      "actual_model": "claude-opus-5",
-      "verdict": "APPROVE_SCOPED",
-      "root_disposition": "direct-5183/admission/opus-injective-patch-root-disposition.json",
-      "result": "direct-5183/admission/opus-injective-patch-result.json"
-    },
-    "review_followup": {
-      "state": "completed_committed_root_verified",
-      "directory": "direct-5183/review-followup",
-      "base": "787aab5c9e7fb114cbe8f390f6fc572eb2a3cfd1",
-      "agent": "/root/postmerge_ci",
-      "required": "Edition2021 syntax/harness; retained diagnostics; independently bounded integer pooltests; hermetic testallowlist; full helper excerpts in packet",
-      "budget": "300scompile/test,128MiBgrowth,min2GiBfree,offlinejobs1",
-      "progress": "20/20exactmodule+Clippy underactualedition2021; oldsourcefails2021;4behavioralcontrols+faultpositive terminalwithinbounds. KnownBash3preflightonly; fullCIrequired.",
-      "head": "fe3284199db0831f353d2ae401b8c69472764904",
-      "manifest_files": 116,
-      "manifest_sha256": "46406e3877e873eda569e1fec9199da54584d07874e751ba4195149381bcc0ce",
-      "packet_sha256": "22986274b0f379c1f2a6434bd45a1acc7c7d75aab3a3ab828cb7a375614b8471",
-      "root_verification": "direct-5183/admission/review-followup-root-verification.json"
-    },
-    "remaining_original_readiness": {
-      "directory": "direct-5183/remaining-original-readiness",
-      "manifest_sha256": "a2a2bea574ee24a4ba7db7a85a419be4295fb36190f40bdbbdcf92b5b3b50227",
-      "state": "read_only_complete_root_verified_no_replay",
-      "finding": "Sevenmarkersonly,nooriginaldetail; fixedbinarieshardcodedfirstseed; newdriveronlybuildneeded withunchangedoriginalsources."
-    },
-    "followup_review": {
-      "state": "completed_collected",
-      "session": 79015,
-      "expected_model": "claude-opus-5",
-      "effort": "xhigh",
-      "input": "direct-5183/admission/opus-edition-followup-input.md",
-      "input_sha256": "34ed405dcfee169e22e7cf159389269fe6b452955f68e120ddc66a1804959eb8",
-      "output": "direct-5183/admission/opus-edition-followup-review.json",
-      "completion": "direct-5183/admission/opus-edition-followup-completion.json",
-      "policy": "Session79015completed/collected; do notpoll/relaunch. No blockingfindings; normalCI/Copilot/threadresolution stillrequiredbeforemerge.",
-      "actual_model": "claude-opus-5",
-      "verdict": "APPROVE_FOR_CI",
-      "result": "direct-5183/admission/opus-edition-followup-result.json",
-      "root_disposition": "direct-5183/admission/opus-edition-followup-root-disposition.json",
-      "output_sha256": "0c093d3d42af2abc2834c2e4ccca221ddee802896f1b378e8d536bc50190580a"
-    },
-    "remaining_original_execution": {
-      "state": "completed_frozen_root_verified",
-      "directory": "direct-5183/remaining-original-execution",
-      "agent": "/root/postmerge_ci",
-      "scope": "Two driver-onlybuilds withfrozenoriginal0807388module, parentd41/main781f qualifieddependencies; sevenlistedseeds onceperrevision,14runsmax; edition2021 matchingrealcrate. No generator/source changes.",
-      "limits": "600saggregate,120seachbuild,30seachseed,128MiBnew,min2GiBfree,offlinejobs1,no retries",
-      "qualification": "Reconstructdeterministicallyfromoriginalsource; originalCIcapturedonlymarkersforthese7. Preserveunexpectedsuccesswithoutsecondrun.",
-      "progress": "Twooriginaldriverbuilds+14fixedruns terminal; all7samefailure/sequenceonparent/main; no retries/candidateexecution.14exit1. Two trailingADDrequests unexecuted.",
-      "manifest_files": 114,
-      "manifest_sha256": "1160710b3c56a734f94b1ba72ad21ad4fe25dd6332b5aed39c23e9c7867a5d0d",
-      "packet_sha256": "3653729c481bf70a733e4f88040332c7b26fa67e305cf2e9b775d8fc26787f8e",
-      "root_verification": "direct-5183/admission/remaining-original-execution-root-verification.json"
-    },
-    "pr": 6482,
-    "url": "https://github.com/sparq-org/sparq/pull/6482",
-    "publication": {
-      "state": "completed_collected",
-      "session": 81792,
-      "receipt": "direct-5183/admission/publication-receipt.json",
-      "pr": 6482,
-      "head": "fe3284199db0831f353d2ae401b8c69472764904",
-      "draft": false,
-      "registry_verified_off": true,
-      "copilot": "Requested, session95217completedcollected",
-      "copilot_receipt": "direct-5183/admission/copilot-request-receipt.json"
-    },
-    "ci": {
-      "state": "matrix_docs_supply_success_core_and_gate_running",
-      "evidence": "direct-5183/admission/pr6482-runs1442.json",
-      "CI": 34488984319,
-      "feature_matrix": 34488984325,
-      "aggregate": 34488983731,
-      "docs_quality": 34488983828,
-      "supply_chain": 34488983646,
-      "feature_matrix_conclusion": "success",
-      "docs_quality_conclusion": "success",
-      "supply_chain_conclusion": "success",
-      "CI_status": "in_progress",
-      "aggregate_status": "in_progress"
-    },
-    "remaining_classification_review": {
-      "state": "completed_collected",
-      "session": 58533,
-      "actual_model": "claude-opus-5",
-      "effort": "xhigh",
-      "verdict": "SUPPORTED_WITH_QUALIFICATIONS",
-      "input": "direct-5183/admission/opus-remaining-classification-input.md",
-      "input_sha256": "f1cda72482b4642c0fe364f13ac3379cd8258a7fa48251d7823dd10de5cf0e10",
-      "output": "direct-5183/admission/opus-remaining-classification-review.json",
-      "result": "direct-5183/admission/opus-remaining-classification-result.json",
-      "root_disposition": "direct-5183/admission/opus-remaining-classification-root-disposition.json",
-      "policy": "58533completed/collected; no poll/relaunch. Requestedtimingambiguityresolvedbysourceoriginalcompare893-902/apply1133-1178; noextraexecutionneeded. Newseedabsence notoriginalclosingproof."
-    },
-    "copilot": {
-      "state": "COMMENTED_one_thread_replied_unresolved_pendingCI",
-      "head": "fe3284199db0831f353d2ae401b8c69472764904",
-      "thread": "PRRT_kwDOSz3qKM6hHXbJ",
-      "comment": 3980166727,
-      "reply_url": "https://github.com/sparq-org/sparq/pull/6482#discussion_r3980261208",
-      "reply_receipt": "direct-5183/admission/copilot-duplicate-reply-receipt.json",
-      "source_triage": "direct-5183/copilot-duplicate-triage",
-      "root_disposition": "direct-5183/admission/copilot-duplicate-root-disposition.json",
-      "finding": "Currentdistinctlexicaltestfailureclaim refutedbyfrozen20/20andmutantproof. IdenticallexicalSamepath predatespatch; coverageissue6483. Newruntimewitnessstillunexecuted: reservecollapsedbeforebuild; no confirmedruntimeSameclaim."
-    },
-    "copilot_duplicate_witness": {
-      "state": "resource_stopped_not_executed_frozen_root_verified",
-      "directory": "direct-5183/copilot-duplicate-witness",
-      "agent": "/root/postmerge_ci",
-      "head": "fe3284199db0831f353d2ae401b8c69472764904",
-      "bounds": "Startonly>=2GiB+64MiBfree,continuous2GiBfloor,90s/64MiBmax,1modulecompile+1filteredrun,offlinejobs1; stopnoretryifresourcefail",
-      "source_only_bundle_immutable": true,
-      "reason": "Freshdisk14:44:44=2285400064, changedfromunderfloor. No assumptionstillfree; workerrevalidates.",
-      "manifest_files": 8,
-      "manifest_sha256": "7c254c05982afad3a236a14c45c460c0003fded91e8e0b2b49d80fe6d8dce572",
-      "root_verification": "direct-5183/admission/copilot-duplicate-witness-root-verification.json",
-      "compiler_or_test_started": false,
-      "commands_pending": false,
-      "last_free_bytes": 1178558464,
-      "policy": "Do not retry this witness repeatedly on single fleeting reserve recovery. Reassess sustained free space/task-owned completed storage safely; no broadcleanup/processinspectionfallback. Existinglocalcompilerfloor2GiB preserved."
-    },
-    "ci_admission": {
-      "directory": "direct-5183/ci-admission",
-      "manifest_sha256": "1c02bc6f2ba4e7f4b3feecb23d0299108061768d7a3b6a1c9be4f52aacaf41f1",
-      "files": 36,
-      "root_verification": "direct-5183/admission/ci6482-root-verification.json",
-      "linux_module_tests_passed": 20,
-      "gate_check_id": 102910459274,
-      "gate_app": 15368,
-      "limits": "Selectedtests only; skippedconformance/wasm/optin notrun. No-leglabel-triggerCI excluded fromexecutionproof."
-    },
-    "review_resolution": {
-      "at": "2026-09-10T15:23:30.137890+00:00",
-      "thread": "PRRT_kwDOSz3qKM6hHXbJ",
-      "resolved": true,
-      "receipt": "direct-5183/admission/finish-review6482-receipt.json",
-      "reply": "https://github.com/sparq-org/sparq/pull/6482#discussion_r3980261208",
-      "body_sha256": "05ceae1ec13a6fd827651a418d011353811bffd80af3f3c5b17195394b0f0b1e",
-      "policy": "Completed;do not replay."
-    },
-    "merge_queue": {
-      "at": "2026-09-10T15:23:30.137890+00:00",
-      "position": null,
-      "state": "MERGED",
-      "head": "fe3284199db0831f353d2ae401b8c69472764904",
-      "merge_group": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
-      "reviewed_tree_identical": true,
-      "tree": "b473621d314e035bc79df2f2e7a91b76b6e77275",
-      "receipt": "direct-5183/admission/enqueue6482-receipt.json",
-      "watch_query": "direct-5183/admission/queue6482-watch-query.json",
-      "runs": [
-        {
-          "id": 34495072014,
-          "name": "flow-on-gates",
-          "status": "completed",
-          "conclusion": "success"
-        },
-        {
-          "id": 34495071975,
-          "name": "ci-summary",
-          "status": "in_progress",
-          "conclusion": null
-        },
-        {
-          "id": 34495072126,
-          "name": "pr-area-label",
-          "status": "completed",
-          "conclusion": "success"
-        },
-        {
-          "id": 34495072016,
-          "name": "routing-self-tests",
-          "status": "completed",
-          "conclusion": "success"
-        },
-        {
-          "id": 34495072003,
-          "name": "vectorized-feature-off",
-          "status": "completed",
-          "conclusion": "success"
-        },
-        {
-          "id": 34495071974,
-          "name": "docs-quality",
-          "status": "completed",
-          "conclusion": "success"
-        },
-        {
-          "id": 34495072368,
-          "name": "feature-matrix",
-          "status": "completed",
-          "conclusion": "success"
-        },
-        {
-          "id": 34495072210,
-          "name": "CI",
-          "status": "in_progress",
-          "conclusion": null
-        }
-      ],
-      "policy": "Normalprotectedenqueue exacthead jumpfalse completed;do notreplay/cancelMG. ALLGREENandgate15368 unchanged.",
-      "observed_at": "2026-09-10T15:43:18.143012+00:00"
-    },
-    "merge_result": {
-      "merged_at": "2026-09-10T15:45:55Z",
-      "main": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
-      "root_verification": "direct-5183/admission/merge6482-root-verification.json",
-      "gate_check": 102931321262,
-      "all8mg_success": true
-    }
+    "state": "corrected_controls_and_invariants_running",
+    "directory": "direct-6485/memo-controls",
+    "admission": "direct-6485/admission/corrected-controls-admission.json",
+    "production_edit_authorized": false,
+    "prior_baseline": "direct-3113/delete-memo-baseline",
+    "next_actions": [
+      "Collect corrected controls and invariant proof. Review before authorizing narrow production change.",
+      "Actual Opus5 xhigh independent review and normal protected CI/merge required.",
+      "Do not close parent3113: first cold scan remains separate."
+    ]
   },
   "prs": {
     "4300": {
@@ -828,7 +523,7 @@
       "merge_commit": "4595388de9e389f5369d63828fbf90cfc16b62d9"
     },
     "6482": {
-      "state": "OPEN_CI_IN_PROGRESS",
+      "state": "MERGED_POSTMERGE_VERIFIED",
       "url": "https://github.com/sparq-org/sparq/pull/6482",
       "head": "fe3284199db0831f353d2ae401b8c69472764904",
       "branch": "codex/update-differential-replay",
@@ -846,7 +541,7 @@
         "supply_chain": 34488983646
       },
       "copilot": {
-        "state": "COMMENTED_one_thread_replied_unresolved_pendingCI",
+        "state": "RESOLVED_WITH_EVIDENCE_AND_FOLLOWUP6483",
         "head": "fe3284199db0831f353d2ae401b8c69472764904",
         "thread": "PRRT_kwDOSz3qKM6hHXbJ",
         "comment": 3980166727,
@@ -856,26 +551,22 @@
         "root_disposition": "direct-5183/admission/copilot-duplicate-root-disposition.json",
         "finding": "Currentdistinctlexicaltestfailureclaim refutedbyfrozen20/20andmutantproof. IdenticallexicalSamepath predatespatch; coverageissue6483. Newruntimewitnessstillunexecuted: reservecollapsedbeforebuild; no confirmedruntimeSameclaim."
       },
-      "merge_admitted": false,
+      "merge_admitted": true,
       "issue_autoclose": false,
       "observed_labels": [
         "area:sparq-bench"
       ],
-      "observed_at": "2026-09-10T14:28:07.242996+00:00",
+      "observed_at": "2026-09-10T17:07:59.089651+00:00",
       "latest_ci": {
-        "state": "matrix_docs_supply_success_core_and_gate_running",
-        "evidence": "direct-5183/admission/pr6482-runs1442.json",
-        "CI": 34488984319,
-        "feature_matrix": 34488984325,
-        "aggregate": 34488983731,
-        "docs_quality": 34488983828,
-        "supply_chain": 34488983646,
-        "feature_matrix_conclusion": "success",
-        "docs_quality_conclusion": "success",
-        "supply_chain_conclusion": "success",
-        "CI_status": "in_progress",
-        "aggregate_status": "in_progress"
-      }
+        "state": "success",
+        "postmerge_evidence": "direct-5183/postmerge-update-proof",
+        "actual_UPDATE_tests": 20,
+        "gate": 102940507965,
+        "gate_app": 15368
+      },
+      "merged_at": "2026-09-10T15:45:55Z",
+      "merge_commit": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+      "issue5183_closed": true
     }
   },
   "registry": {
@@ -926,10 +617,9 @@
     }
   },
   "next_actions": [
-    "Watchcurrentmainf50CI34497774423/matrix34497774420/gate34497774057;fuzz34497774415completedSUCCESS. CollectactualUPDATEunitproofbeforeclosing5183, no blindreruns.",
-    "CollectexistingAstra direct-3113/delete-memo-baseline. Verifyprovenance/cold/warm/deletecounts+safetycontrols. No productionchangeuntilrevalidatedownership andactualOpusreview. Original3113firstcoldscan remainsoutofscope; considerlinkedconcreteissueafterconfirmedruntime/dedupe. Hashreuse3105held/preserved.",
-    "Afterrelevantpostmergeproof, link6482andclose5183 withqualified8caseclassification; separate6483runtimecoveragegap remainsopen.",
-    "RegistryActionsOFF/heartbeatACTIVE/releasesheld. Preserve6049/6055/registry2305/canon/EC2holds,ALLGREENandratefailclosed."
+    "Collect existing Astra6485 corrected controls/source invariants; require meaningful safety proof and independent Opus review before production publication. Original3113 first cold scan stays open.",
+    "6482/5183 complete; no repeated CI/log reads or reruns. Separate6483 witness remains unexecuted/open. Hashreuse3105 parked with evidence.",
+    "Registry Actions OFF, heartbeat ACTIVE; preserve ALLGREEN, gate15368, rate fail-closed and all prior approval/canon/EC2/release holds."
   ],
   "followup_lane": {
     "issue": 6480,
@@ -938,7 +628,7 @@
     "postmerge_directory": "direct-6480/postmerge459-validation",
     "manifest_sha256": "34678b4fe632a678c4bd0affc6cc9a19845b8813c6025bf516a7af4ea5ee347d",
     "root_verification": "direct-6480/admission/postmerge459-root-verification.json",
-    "agent": "root observing; existingAstra on5183 remainingoriginal readiness",
+    "agent": "Completed; no active agent on6480.",
     "CI": "completed_success",
     "feature_matrix": "completed_success",
     "aggregate": "completed_success_attempt2",
@@ -1181,6 +871,23 @@
       "closed_at": "2026-09-10T12:48:25Z",
       "PR": 6481,
       "receipt": "direct-6480/admission/close6480-receipt.json"
+    },
+    "5183": {
+      "state": "closed",
+      "resolving_pr": 6482,
+      "closure": {
+        "state": "closed",
+        "closed_at": "2026-09-10T17:06:21Z",
+        "receipt": "direct-5183/admission/close5183-receipt.json",
+        "comment": "https://github.com/sparq-org/sparq/issues/5183#issuecomment-5622475793"
+      }
+    },
+    "6485": {
+      "state": "open",
+      "url": "https://github.com/sparq-org/sparq/issues/6485",
+      "parent": 3113,
+      "implementation": "active_lane",
+      "creation_receipt": "direct-3113/admission/memo-followup-issue-receipt.json"
     }
   },
   "usage_observation": {
@@ -1371,12 +1078,12 @@
     "followup": "Narrowtriage-titleCIrule+offendingrowdiagnostic could improveclassifier, but originalgenpartitionrequires separatelyreviewedpolicy. No6468implementation while4246active."
   },
   "latest_monitor": {
-    "at": "2026-09-10T16:28:12.114658+00:00",
+    "at": "2026-09-10T17:07:59.089651+00:00",
     "main": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
-    "state": "CI22success4running5queued4skipped;matrix16success2running38queued1skipped; UPDATEproofpending",
+    "state": "6482 merged/postmerge verified;5183 closed;6485 active bounded corrected controls",
     "registry_actions_enabled": false,
     "release_authorized": false,
-    "capacity": "Activeprogress; no cancellation/retryjustified; org403unretried."
+    "capacity": "No capacity intervention required. Prior org-runners403 remains unretired."
   },
   "registry_pause": {
     "enabled": false,
@@ -3690,12 +3397,362 @@
       "postmerge_verification": "direct-6480/admission/postmerge459-root-verification.json",
       "closure_receipt": "direct-6480/admission/close6480-receipt.json",
       "public_comment": "https://github.com/sparq-org/sparq/issues/6480#issuecomment-5616304836"
+    },
+    "5183_update_differential": {
+      "issue": 5183,
+      "agent": "/root/postmerge_ci",
+      "state": "merged_postmerge_verified_issue_closed",
+      "base": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+      "parent": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
+      "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue5183",
+      "branch": "codex/update-differential-replay",
+      "engine_witness": {
+        "directory": "direct-5183/engine-witness",
+        "manifest_sha256": "88f152695f2fbedb42306daee1d623b10544eda87426d2ff430bd34663366af3",
+        "root_verification": "direct-5183/admission/engine-witness-root-verification.json",
+        "scope": "12defaultfeatureobservationsbothsource-qualifiedpreservedrevisions; twooperationreduction+controls; exactCIseednotrun"
+      },
+      "oxigraph_witness": {
+        "directory": "direct-5183/oxigraph-witness",
+        "manifest_sha256": "24936c685da036423ed615743d5cda5eddf9ebfa589bec643ed186f4915967c1",
+        "root_verification": "direct-5183/admission/oxigraph-witness-root-verification.json",
+        "scope": "Actualofflinepinned0.5.9 rdf12only/vendoredspargebra0.4.6, onefixed3casepublicAPIrun; no canon/productionchanges",
+        "result": "Lexicalpair1storedterm/1row/1freshbnode vsSparq2/2/2; controlsagree; collapsehappensbeforecanonicalization",
+        "resource": "193.95s/~72.4MBgrowth/minfree6.28GB, within600s512MiB2GiBlimits; no pendingcommand"
+      },
+      "public_update": {
+        "url": "https://github.com/sparq-org/sparq/issues/5183#issuecomment-5618039976",
+        "receipt": "direct-5183/admission/remaining-original-comment-receipt.json",
+        "body_sha256": "f9ace93afb7a9a5502a5778a27ea083704938260900644d1a6363fa209adf527",
+        "state": "Updatedexistingowncommentwithqualified7caseclassification andPR6482;issuekeptopen"
+      },
+      "next_scope": "Complete; no further execution. Separate issue6483 remains open.",
+      "agent_current_task": "Historical lane complete; agent now on6485.",
+      "constraints": "Preserve strict comparison and full normalized structural equality; no reference-input normalization, canon/engine/workflow edits or broad semantic claims; registryOFF/releasesheld",
+      "readiness_directory": "direct-5183/original-seed-readiness",
+      "execution_directory": "direct-5183/original-seed-execution",
+      "readiness_manifest_sha256": "16cffa14191b0ac15e09a0e3577653cd4f95eca8e153ca16e6c18d174a83d3e0",
+      "readiness_root_verification": "direct-5183/admission/original-seed-readiness-root-verification.json",
+      "execution_limits": {
+        "total_seconds": 1200,
+        "per_build_seconds": 600,
+        "per_seed_seconds": 60,
+        "jobs": 1,
+        "offline": true,
+        "max_new_allocated_bytes": 536870912,
+        "min_free_bytes": 2147483648,
+        "seed": 4141222487,
+        "count": 1,
+        "one_build_run_per_revision": true
+      },
+      "execution_result_preliminary": {
+        "status": "complete",
+        "seconds": 361.825017125,
+        "new_allocated_bytes": 300384256,
+        "parent_exit": 1,
+        "main_exit": 1,
+        "operation": "8 of 10"
+      },
+      "worker_interruption": "Earlier service flag occurredaftercompletedlocalphase. Read-only output/freeze followupcompleted;78filesverified. No testsrestarted oroutcomeretry; no remainingserviceblock.",
+      "original_seed_execution": {
+        "directory": "direct-5183/original-seed-execution",
+        "manifest_sha256": "cac93502c4f4edaa79d8ac782ee1d993fb039f3d16eab9c151cc9c5433996389",
+        "files": 78,
+        "root_verification": "direct-5183/admission/original-seed-execution-root-verification.json",
+        "result": "Both exactrevisions reproduce same firstCIseed/index8; strictinternal comparisonpassed before referencefailure. Index9andother7CIseedsnotexecuted. No6478introduction ofthiscase underqualifiedprofile."
+      },
+      "diagnosis_review": {
+        "state": "completed_collected",
+        "kind": "exec_command",
+        "session_id": 14706,
+        "requested_model": "claude-opus-5",
+        "effort": "xhigh",
+        "input": "direct-5183/admission/opus-original-seed-diagnosis-input.md",
+        "input_sha256": "7737f54e6664bfaacc2d6006a51b20e82e0f2730a41771bac39d508ad4aaa23a",
+        "input_bytes": 31164,
+        "output": "direct-5183/admission/opus-original-seed-diagnosis-review.json",
+        "completion": "direct-5183/admission/opus-original-seed-diagnosis-completion.json",
+        "policy": "14706completed/collected; no poll/relaunch. ActualOpusreview designcandidateconditionalonstatichelperaudit, no patchapproved.",
+        "actual_primary_model": "claude-opus-5",
+        "verdict": "SUPPORTED_WITH_QUALIFICATIONS \u2014 the causal account is coherent, internally consistent, and survives an independent re-derivation from the frozen sequence; it is not fully instrumented for this run and rests on prior reduced witnesses for the reference engine's behavior. No engine defect in sparq is indicated; no comparator bug explains the failure.",
+        "result": "direct-5183/admission/opus-original-seed-diagnosis-result.json",
+        "root_disposition": "direct-5183/admission/opus-original-seed-diagnosis-root-disposition.json",
+        "output_sha256": "bf2e0d1329f283bf8ed66e830633eacb6bcf369566e972b6d751e7ea8f560be2"
+      },
+      "phase": "Narrow generator-domain repair and stricter lexical adjudication with historical regression",
+      "design_directory": "direct-5183/comparator-design-readiness",
+      "actual_model": "GPT-6 Astra",
+      "effort": "xhigh",
+      "next_actions": [],
+      "design_manifest_sha256": "2c25700e565a5d475d31392b23f9a921b2861a119e6d6a54a9b56a045f7fc574",
+      "design_root_verification": "direct-5183/admission/comparator-design-root-verification.json",
+      "implementation_directory": "direct-5183/implementation",
+      "implementation_limits": {
+        "agent": "/root/postmerge_ci",
+        "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue5183",
+        "branch": "codex/update-differential-replay",
+        "base": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+        "max_compile_test_seconds": 1200,
+        "max_each_build_seconds": 600,
+        "max_new_allocated_bytes": 536870912,
+        "min_free_bytes": 2147483648,
+        "jobs": 1,
+        "offline": true
+      },
+      "base_preparation": "direct-5183/admission/implementation-base-preparation.json",
+      "implementation_progress": {
+        "at": "2026-09-10T13:53:12.221217+00:00",
+        "source": "frozen208-filebundle_root_verified",
+        "final_validation": "20/20 full scoped tests; scoped Clippy --tests -Dwarnings pass; seven compiled controls all killed; original survivors retained",
+        "limits": "Exact-module minimal harness; LinuxCI remains. HostpreflightonlyknownBash3mapfilefailure.",
+        "edition_qualification": "Earlier20/20compilededition2024minimalharness; actualcrateedition2021. Incompatible new letchains caught beforepush; correctedfollowupnotyetvalidated."
+      },
+      "head": "fe3284199db0831f353d2ae401b8c69472764904",
+      "implementation_manifest_sha256": "76c1012bf2fa7d784006dd70fe075559aebc59ff06addca6550b783d68600421",
+      "implementation_root_verification": "direct-5183/admission/implementation-root-verification.json",
+      "patch_review": {
+        "state": "completed_collected",
+        "session_id": 14761,
+        "expected_model": "claude-opus-5",
+        "effort": "xhigh",
+        "input": "direct-5183/admission/opus-injective-patch-input.md",
+        "input_sha256": "fc0cfecc7db6307058ac294e7527787bad2b0e736d454067d476c46635ea4485",
+        "output": "direct-5183/admission/opus-injective-patch-review.json",
+        "completion": "direct-5183/admission/opus-injective-patch-completion.json",
+        "policy": "Session14761 completed/collected. Do not repoll/relaunch. Hold publication for material edition gap and3smallfollowups; actual delta review on next commit.",
+        "actual_model": "claude-opus-5",
+        "verdict": "APPROVE_SCOPED",
+        "root_disposition": "direct-5183/admission/opus-injective-patch-root-disposition.json",
+        "result": "direct-5183/admission/opus-injective-patch-result.json"
+      },
+      "review_followup": {
+        "state": "completed_committed_root_verified",
+        "directory": "direct-5183/review-followup",
+        "base": "787aab5c9e7fb114cbe8f390f6fc572eb2a3cfd1",
+        "agent": "/root/postmerge_ci",
+        "required": "Edition2021 syntax/harness; retained diagnostics; independently bounded integer pooltests; hermetic testallowlist; full helper excerpts in packet",
+        "budget": "300scompile/test,128MiBgrowth,min2GiBfree,offlinejobs1",
+        "progress": "20/20exactmodule+Clippy underactualedition2021; oldsourcefails2021;4behavioralcontrols+faultpositive terminalwithinbounds. KnownBash3preflightonly; fullCIrequired.",
+        "head": "fe3284199db0831f353d2ae401b8c69472764904",
+        "manifest_files": 116,
+        "manifest_sha256": "46406e3877e873eda569e1fec9199da54584d07874e751ba4195149381bcc0ce",
+        "packet_sha256": "22986274b0f379c1f2a6434bd45a1acc7c7d75aab3a3ab828cb7a375614b8471",
+        "root_verification": "direct-5183/admission/review-followup-root-verification.json"
+      },
+      "remaining_original_readiness": {
+        "directory": "direct-5183/remaining-original-readiness",
+        "manifest_sha256": "a2a2bea574ee24a4ba7db7a85a419be4295fb36190f40bdbbdcf92b5b3b50227",
+        "state": "read_only_complete_root_verified_no_replay",
+        "finding": "Sevenmarkersonly,nooriginaldetail; fixedbinarieshardcodedfirstseed; newdriveronlybuildneeded withunchangedoriginalsources."
+      },
+      "followup_review": {
+        "state": "completed_collected",
+        "session": 79015,
+        "expected_model": "claude-opus-5",
+        "effort": "xhigh",
+        "input": "direct-5183/admission/opus-edition-followup-input.md",
+        "input_sha256": "34ed405dcfee169e22e7cf159389269fe6b452955f68e120ddc66a1804959eb8",
+        "output": "direct-5183/admission/opus-edition-followup-review.json",
+        "completion": "direct-5183/admission/opus-edition-followup-completion.json",
+        "policy": "Session79015completed/collected; do notpoll/relaunch. No blockingfindings; normalCI/Copilot/threadresolution stillrequiredbeforemerge.",
+        "actual_model": "claude-opus-5",
+        "verdict": "APPROVE_FOR_CI",
+        "result": "direct-5183/admission/opus-edition-followup-result.json",
+        "root_disposition": "direct-5183/admission/opus-edition-followup-root-disposition.json",
+        "output_sha256": "0c093d3d42af2abc2834c2e4ccca221ddee802896f1b378e8d536bc50190580a"
+      },
+      "remaining_original_execution": {
+        "state": "completed_frozen_root_verified",
+        "directory": "direct-5183/remaining-original-execution",
+        "agent": "/root/postmerge_ci",
+        "scope": "Two driver-onlybuilds withfrozenoriginal0807388module, parentd41/main781f qualifieddependencies; sevenlistedseeds onceperrevision,14runsmax; edition2021 matchingrealcrate. No generator/source changes.",
+        "limits": "600saggregate,120seachbuild,30seachseed,128MiBnew,min2GiBfree,offlinejobs1,no retries",
+        "qualification": "Reconstructdeterministicallyfromoriginalsource; originalCIcapturedonlymarkersforthese7. Preserveunexpectedsuccesswithoutsecondrun.",
+        "progress": "Twooriginaldriverbuilds+14fixedruns terminal; all7samefailure/sequenceonparent/main; no retries/candidateexecution.14exit1. Two trailingADDrequests unexecuted.",
+        "manifest_files": 114,
+        "manifest_sha256": "1160710b3c56a734f94b1ba72ad21ad4fe25dd6332b5aed39c23e9c7867a5d0d",
+        "packet_sha256": "3653729c481bf70a733e4f88040332c7b26fa67e305cf2e9b775d8fc26787f8e",
+        "root_verification": "direct-5183/admission/remaining-original-execution-root-verification.json"
+      },
+      "pr": 6482,
+      "url": "https://github.com/sparq-org/sparq/pull/6482",
+      "publication": {
+        "state": "completed_collected",
+        "session": 81792,
+        "receipt": "direct-5183/admission/publication-receipt.json",
+        "pr": 6482,
+        "head": "fe3284199db0831f353d2ae401b8c69472764904",
+        "draft": false,
+        "registry_verified_off": true,
+        "copilot": "Requested, session95217completedcollected",
+        "copilot_receipt": "direct-5183/admission/copilot-request-receipt.json"
+      },
+      "ci": {
+        "state": "matrix_docs_supply_success_core_and_gate_running",
+        "evidence": "direct-5183/admission/pr6482-runs1442.json",
+        "CI": 34488984319,
+        "feature_matrix": 34488984325,
+        "aggregate": 34488983731,
+        "docs_quality": 34488983828,
+        "supply_chain": 34488983646,
+        "feature_matrix_conclusion": "success",
+        "docs_quality_conclusion": "success",
+        "supply_chain_conclusion": "success",
+        "CI_status": "in_progress",
+        "aggregate_status": "in_progress"
+      },
+      "remaining_classification_review": {
+        "state": "completed_collected",
+        "session": 58533,
+        "actual_model": "claude-opus-5",
+        "effort": "xhigh",
+        "verdict": "SUPPORTED_WITH_QUALIFICATIONS",
+        "input": "direct-5183/admission/opus-remaining-classification-input.md",
+        "input_sha256": "f1cda72482b4642c0fe364f13ac3379cd8258a7fa48251d7823dd10de5cf0e10",
+        "output": "direct-5183/admission/opus-remaining-classification-review.json",
+        "result": "direct-5183/admission/opus-remaining-classification-result.json",
+        "root_disposition": "direct-5183/admission/opus-remaining-classification-root-disposition.json",
+        "policy": "58533completed/collected; no poll/relaunch. Requestedtimingambiguityresolvedbysourceoriginalcompare893-902/apply1133-1178; noextraexecutionneeded. Newseedabsence notoriginalclosingproof."
+      },
+      "copilot": {
+        "state": "COMMENTED_one_thread_replied_unresolved_pendingCI",
+        "head": "fe3284199db0831f353d2ae401b8c69472764904",
+        "thread": "PRRT_kwDOSz3qKM6hHXbJ",
+        "comment": 3980166727,
+        "reply_url": "https://github.com/sparq-org/sparq/pull/6482#discussion_r3980261208",
+        "reply_receipt": "direct-5183/admission/copilot-duplicate-reply-receipt.json",
+        "source_triage": "direct-5183/copilot-duplicate-triage",
+        "root_disposition": "direct-5183/admission/copilot-duplicate-root-disposition.json",
+        "finding": "Currentdistinctlexicaltestfailureclaim refutedbyfrozen20/20andmutantproof. IdenticallexicalSamepath predatespatch; coverageissue6483. Newruntimewitnessstillunexecuted: reservecollapsedbeforebuild; no confirmedruntimeSameclaim."
+      },
+      "copilot_duplicate_witness": {
+        "state": "resource_stopped_not_executed_frozen_root_verified",
+        "directory": "direct-5183/copilot-duplicate-witness",
+        "agent": "/root/postmerge_ci",
+        "head": "fe3284199db0831f353d2ae401b8c69472764904",
+        "bounds": "Startonly>=2GiB+64MiBfree,continuous2GiBfloor,90s/64MiBmax,1modulecompile+1filteredrun,offlinejobs1; stopnoretryifresourcefail",
+        "source_only_bundle_immutable": true,
+        "reason": "Freshdisk14:44:44=2285400064, changedfromunderfloor. No assumptionstillfree; workerrevalidates.",
+        "manifest_files": 8,
+        "manifest_sha256": "7c254c05982afad3a236a14c45c460c0003fded91e8e0b2b49d80fe6d8dce572",
+        "root_verification": "direct-5183/admission/copilot-duplicate-witness-root-verification.json",
+        "compiler_or_test_started": false,
+        "commands_pending": false,
+        "last_free_bytes": 1178558464,
+        "policy": "Do not retry this witness repeatedly on single fleeting reserve recovery. Reassess sustained free space/task-owned completed storage safely; no broadcleanup/processinspectionfallback. Existinglocalcompilerfloor2GiB preserved."
+      },
+      "ci_admission": {
+        "directory": "direct-5183/ci-admission",
+        "manifest_sha256": "1c02bc6f2ba4e7f4b3feecb23d0299108061768d7a3b6a1c9be4f52aacaf41f1",
+        "files": 36,
+        "root_verification": "direct-5183/admission/ci6482-root-verification.json",
+        "linux_module_tests_passed": 20,
+        "gate_check_id": 102910459274,
+        "gate_app": 15368,
+        "limits": "Selectedtests only; skippedconformance/wasm/optin notrun. No-leglabel-triggerCI excluded fromexecutionproof."
+      },
+      "review_resolution": {
+        "at": "2026-09-10T15:23:30.137890+00:00",
+        "thread": "PRRT_kwDOSz3qKM6hHXbJ",
+        "resolved": true,
+        "receipt": "direct-5183/admission/finish-review6482-receipt.json",
+        "reply": "https://github.com/sparq-org/sparq/pull/6482#discussion_r3980261208",
+        "body_sha256": "05ceae1ec13a6fd827651a418d011353811bffd80af3f3c5b17195394b0f0b1e",
+        "policy": "Completed;do not replay."
+      },
+      "merge_queue": {
+        "at": "2026-09-10T15:23:30.137890+00:00",
+        "position": null,
+        "state": "MERGED",
+        "head": "fe3284199db0831f353d2ae401b8c69472764904",
+        "merge_group": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+        "reviewed_tree_identical": true,
+        "tree": "b473621d314e035bc79df2f2e7a91b76b6e77275",
+        "receipt": "direct-5183/admission/enqueue6482-receipt.json",
+        "watch_query": "direct-5183/admission/queue6482-watch-query.json",
+        "runs": [
+          {
+            "id": 34495072014,
+            "name": "flow-on-gates",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "id": 34495071975,
+            "name": "ci-summary",
+            "status": "in_progress",
+            "conclusion": null
+          },
+          {
+            "id": 34495072126,
+            "name": "pr-area-label",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "id": 34495072016,
+            "name": "routing-self-tests",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "id": 34495072003,
+            "name": "vectorized-feature-off",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "id": 34495071974,
+            "name": "docs-quality",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "id": 34495072368,
+            "name": "feature-matrix",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "id": 34495072210,
+            "name": "CI",
+            "status": "in_progress",
+            "conclusion": null
+          }
+        ],
+        "policy": "Normalprotectedenqueue exacthead jumpfalse completed;do notreplay/cancelMG. ALLGREENandgate15368 unchanged.",
+        "observed_at": "2026-09-10T15:43:18.143012+00:00"
+      },
+      "merge_result": {
+        "merged_at": "2026-09-10T15:45:55Z",
+        "main": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+        "root_verification": "direct-5183/admission/merge6482-root-verification.json",
+        "gate_check": 102931321262,
+        "all8mg_success": true
+      },
+      "postmerge_proof": {
+        "directory": "direct-5183/postmerge-update-proof",
+        "manifest_sha256": "bcf3e7a13f0d92d96ccf8071c3ec305a956aad07fcd64bb91e1806592338637a",
+        "root_verification": "direct-5183/admission/postmerge-update-root-verification.json",
+        "actual_update_tests_passed": 20,
+        "CI": "success",
+        "matrix": "success",
+        "gate": "success",
+        "gate_check": 102940507965,
+        "gate_app": 15368
+      },
+      "closure": {
+        "state": "closed",
+        "closed_at": "2026-09-10T17:06:21Z",
+        "receipt": "direct-5183/admission/close5183-receipt.json",
+        "comment": "https://github.com/sparq-org/sparq/issues/5183#issuecomment-5622475793"
+      }
     }
   },
   "postmerge_watch": {
     "head": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
     "pr": 6482,
-    "state": "CIinprogress/matrixqueued/gateinprogress;fuzzworkflowpassed16:30:32;UPDATEunitproofstillpending",
+    "state": "Complete: CI, matrix, aggregate success; actual20 UPDATE tests passed",
     "runs": {
       "CI": 34497774423,
       "feature_matrix": 34497774420,
@@ -3704,13 +3761,13 @@
     },
     "first_snapshot": "direct-5183/admission/mg6482-runs1547.json",
     "known_advisory_observation": "Freshlogconfirmed batchmissingREGISTRY_RING_TOKEN guard; releasecargo-package unpublishedengine matches6474. No newfailurerecoveryauthorized.",
-    "latest_snapshot": "direct-5183/admission/mainf50-runs1643.json",
+    "latest_snapshot": "direct-5183/postmerge-update-proof/report.json",
     "health_audit": {
       "directory": "direct-5183/mainf50-health",
       "manifest_sha256": "ed7750335cdf3abb3ef806a0629c6519df1d3c037bcb221da2eee1a1b58664cd",
       "files": 37,
       "root_verification": "direct-5183/admission/mainf50-health-root-verification.json",
-      "assessment": "ActiveCI/matrixprogress, no cancellation/retryjustified. UPDATEunitproofpending; querysmokeisnotUPDATE."
+      "assessment": "Core CI/matrix/gate completed success without retries; known batch/release advisory failures preserved."
     }
   },
   "classifier_watch": {
@@ -4082,8 +4139,8 @@
       "verdict": "CONDITIONAL"
     },
     "decision": "No implementation/build admission. Fixed2048seed/64RHS/limit65query path+memoryaccountingstatic only. Actualqueryandcountsnotrun.",
-    "agent": "/root/postmerge_ci",
-    "agent_task": "ExistingAstra one bounded3113 numericmemo baseline; no productionedits. Warmcoreprofile prerequisite;480s256MiB/jobs1/offline/continuous2GiB; no retry. Allformerworkcomplete.",
+    "agent": "No active hash-reuse work",
+    "agent_task": "Parked pending value/cost case; current agent on6485",
     "prior_scan_and_hash_readiness": {
       "issue": 3105,
       "at": "2026-09-10T00:28:18.762567+00:00",
@@ -4148,16 +4205,7 @@
       "result": "2actual64rowRHStablebuilds,1scan,64rowexactbag; no performancebenefitclaim."
     },
     "priority_decision": "Smallverified64rowrebuildsaving doesnotjustifyforcingunresolvedF6/F7retentionpolicy; boundedfrontierselectionbeforefurtherhashcachemodel/buildcycles. Investigationpreserved, no performanceclaim orfeatureadmission.",
-    "next_issue": {
-      "issue": 3113,
-      "frontier": "direct-frontier-20260910-1625",
-      "manifest_sha256": "269e66d801b5e7c2c13521620d412bea6440d9a1dead7e021cb93cc4614f449e",
-      "admission": "direct-3113/admission/frontier-and-baseline-admission.json",
-      "state": "bounded_baseline_authorized_running",
-      "directory": "direct-3113/delete-memo-baseline",
-      "implementation_admitted": false,
-      "scope": "Repeatednumericmemo invalidation afterdelete-only updates; originalfirstcoldscan remainsoutofscope. No benefit/runtimeclaimuntilbaseline."
-    }
+    "next_issue": 6485
   },
   "monitoring_followups": {
     "generator_labels": {
@@ -4272,8 +4320,8 @@
     }
   },
   "local_resource_state": {
-    "at": "2026-09-10T15:23:30.137890+00:00",
-    "free_bytes": 2146680832,
-    "policy": "No newbuild based onfleetingcapacity; sustainedcontinuous2GiBfloor required. 6483witnessnotrun. Sourceonlyworkpermitted; no cleanup."
+    "at": "2026-09-10T17:07:59.089651+00:00",
+    "free_bytes": 10735230976,
+    "policy": "No global cleanup. New bounded builds require their continuous2GiB guard; previous6483 attempt stayed stopped."
   }
 }

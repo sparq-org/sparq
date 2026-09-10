@@ -1,0 +1,70 @@
+{
+  "cases_reached": [
+    {
+      "case": "initial",
+      "dict_len": 4100,
+      "before": 0,
+      "state": 1,
+      "result": false,
+      "visits": 4100
+    },
+    {
+      "case": "immediate-warm",
+      "dict_len": 4100,
+      "before": 1,
+      "state": 1,
+      "result": false,
+      "visits": 0
+    },
+    {
+      "case": "existing-delete",
+      "dict_len": 4100,
+      "before": 0,
+      "state": 1,
+      "result": false,
+      "visits": 4100
+    },
+    {
+      "case": "known-terms-absent-delete",
+      "dict_len": 4100,
+      "before": 0,
+      "state": 1,
+      "result": false,
+      "visits": 4100
+    },
+    {
+      "case": "known-terms-reinsert",
+      "dict_len": 4100,
+      "before": 0,
+      "state": 1,
+      "result": false,
+      "visits": 4100
+    },
+    {
+      "case": "empty-delta",
+      "dict_len": 4100,
+      "before": 1,
+      "state": 1,
+      "result": false,
+      "visits": 0
+    }
+  ],
+  "test_counts": {
+    "passed": 0,
+    "failed": 1,
+    "filtered": 150
+  },
+  "failure": {
+    "line": 11335,
+    "assertion": "graph.dict.len() > d",
+    "phase": "after inserting integer999999, before its classification check",
+    "classification": "Diagnostic fixture assumption failed; inline canonical integer does not grow dictionary."
+  },
+  "unreached": [
+    "new-integer classification",
+    "new-exact-decimal",
+    "new-inexact-decimal",
+    "state2-after-delete",
+    "state2-after-insert"
+  ]
+}

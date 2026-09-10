@@ -1,0 +1,99 @@
+{
+  "files": [
+    {
+      "path": "src/compress.rs",
+      "sha256": "71b4b72c7499b3c8e7b81c2dff753e5911b226d2700da4fc9baebb244b9408dc",
+      "base_sha256": "71b4b72c7499b3c8e7b81c2dff753e5911b226d2700da4fc9baebb244b9408dc",
+      "bytes": 149396
+    },
+    {
+      "path": "src/dict.rs",
+      "sha256": "abb2f7a0c524583eafc1acb175113ab4fd551a336d772f702a13420ef281aeb3",
+      "base_sha256": "abb2f7a0c524583eafc1acb175113ab4fd551a336d772f702a13420ef281aeb3",
+      "bytes": 206496
+    },
+    {
+      "path": "src/dictspill.rs",
+      "sha256": "a57c8da2eb093df1876fa255e83c12a4ae6de2b9995e1ba53663f054e28cf513",
+      "base_sha256": "a57c8da2eb093df1876fa255e83c12a4ae6de2b9995e1ba53663f054e28cf513",
+      "bytes": 76098
+    },
+    {
+      "path": "src/eliasfano.rs",
+      "sha256": "0bf83ea87986b04417e0396fbaba406e5c1112f12caa26d92db0565210e2b3cb",
+      "base_sha256": "0bf83ea87986b04417e0396fbaba406e5c1112f12caa26d92db0565210e2b3cb",
+      "bytes": 37457
+    },
+    {
+      "path": "src/extsort.rs",
+      "sha256": "792673d722e1fec68525505782685743f7bc9d1f499fb8b79065fea58aaf333f",
+      "base_sha256": "792673d722e1fec68525505782685743f7bc9d1f499fb8b79065fea58aaf333f",
+      "bytes": 18765
+    },
+    {
+      "path": "src/iri.rs",
+      "sha256": "bf6e36f447ce51f43a7bf84220bdb8ee4a894662971bd3a82013fa7d5ba1414d",
+      "base_sha256": "bf6e36f447ce51f43a7bf84220bdb8ee4a894662971bd3a82013fa7d5ba1414d",
+      "bytes": 21487
+    },
+    {
+      "path": "src/lib.rs",
+      "sha256": "2c33df7cda96f0a0e6b8c6cd01e21b6b004d90ad3d4c4ae036b5971e5582860e",
+      "base_sha256": "3679c762c28c956df60ee519682420c2800993a3b3674b77ed335bb9acba6a45",
+      "bytes": 618238
+    },
+    {
+      "path": "src/nt.rs",
+      "sha256": "6e120cf3f7ae015a44e345be0f5146ffd5d809a5e09efa666e83d99c6481ae10",
+      "base_sha256": "6e120cf3f7ae015a44e345be0f5146ffd5d809a5e09efa666e83d99c6481ae10",
+      "bytes": 75875
+    },
+    {
+      "path": "src/shared.rs",
+      "sha256": "0cd9243e254cef67c54fb5ae25ed2eac60cd671997168e55d3d27bd828e98ac9",
+      "base_sha256": "0cd9243e254cef67c54fb5ae25ed2eac60cd671997168e55d3d27bd828e98ac9",
+      "bytes": 9199
+    },
+    {
+      "path": "src/store/overlay_deleted_tests.rs",
+      "sha256": "5eaf0fda2377ec4e7df664d749e5466771aa656659ac5153f746a8ed6ec4a688",
+      "base_sha256": "5eaf0fda2377ec4e7df664d749e5466771aa656659ac5153f746a8ed6ec4a688",
+      "bytes": 14664
+    },
+    {
+      "path": "src/store.rs",
+      "sha256": "6c70a6d4f13de468143f19b75972c28b312a8a2110bf95deb502d784f9b9284c",
+      "base_sha256": "6c70a6d4f13de468143f19b75972c28b312a8a2110bf95deb502d784f9b9284c",
+      "bytes": 112315
+    },
+    {
+      "path": "src/strdist.rs",
+      "sha256": "5538ea31c303721b57c3677ba8b087c67a6524754d74e1690de123d8845cd761",
+      "base_sha256": "5538ea31c303721b57c3677ba8b087c67a6524754d74e1690de123d8845cd761",
+      "bytes": 2502
+    },
+    {
+      "path": "src/temporal.rs",
+      "sha256": "edd405793ad97bf0a8a300b08828b1d36b6c5ba48467096425512ad98a76b047",
+      "base_sha256": "edd405793ad97bf0a8a300b08828b1d36b6c5ba48467096425512ad98a76b047",
+      "bytes": 27810
+    },
+    {
+      "path": "src/ttl/tests.rs",
+      "sha256": "231f14796387d1cba773feccbc2518688c8504b28baabb21c28178ddab4a9c33",
+      "base_sha256": "231f14796387d1cba773feccbc2518688c8504b28baabb21c28178ddab4a9c33",
+      "bytes": 13002
+    },
+    {
+      "path": "src/ttl.rs",
+      "sha256": "062892f23e21ef9fe25e8fe3527c134ec0d2b18e89d72789f0cd8b324834f48a",
+      "base_sha256": "062892f23e21ef9fe25e8fe3527c134ec0d2b18e89d72789f0cd8b324834f48a",
+      "bytes": 51747
+    }
+  ],
+  "only_changed": "src/lib.rs",
+  "observer_reversal_equals_original": true,
+  "readme_sha256": "e58635a8842b94ad2474015e3396225b5fb55fd35a420ec6bc10dc8f4ed71d4b",
+  "head": "fe3284199db0831f353d2ae401b8c69472764904",
+  "main_root_equality": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464"
+}

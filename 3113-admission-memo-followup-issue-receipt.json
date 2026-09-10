@@ -1,0 +1,329 @@
+{
+  "started_at": "2026-09-10T16:56:17.302087+00:00",
+  "budget": {
+    "core": {
+      "limit": 5000,
+      "used": 119,
+      "remaining": 4881,
+      "reset": 1789059439
+    },
+    "search": {
+      "limit": 30,
+      "used": 0,
+      "remaining": 30,
+      "reset": 1789059437
+    },
+    "graphql": {
+      "limit": 5000,
+      "used": 0,
+      "remaining": 5000,
+      "reset": 1789062977
+    },
+    "integration_manifest": {
+      "limit": 5000,
+      "used": 0,
+      "remaining": 5000,
+      "reset": 1789062977
+    },
+    "source_import": {
+      "limit": 100,
+      "used": 0,
+      "remaining": 100,
+      "reset": 1789059437
+    },
+    "code_scanning_autofix": {
+      "limit": 10,
+      "used": 0,
+      "remaining": 10,
+      "reset": 1789059437
+    },
+    "actions_runner_registration": {
+      "limit": 10000,
+      "used": 0,
+      "remaining": 10000,
+      "reset": 1789062977
+    },
+    "scim": {
+      "limit": 15000,
+      "used": 0,
+      "remaining": 15000,
+      "reset": 1789062977
+    },
+    "dependency_snapshots": {
+      "limit": 100,
+      "used": 0,
+      "remaining": 100,
+      "reset": 1789059437
+    },
+    "dependency_sbom": {
+      "limit": 100,
+      "used": 0,
+      "remaining": 100,
+      "reset": 1789059437
+    },
+    "audit_log": {
+      "limit": 1750,
+      "used": 0,
+      "remaining": 1750,
+      "reset": 1789062977
+    },
+    "audit_log_streaming": {
+      "limit": 15,
+      "used": 0,
+      "remaining": 15,
+      "reset": 1789062977
+    },
+    "code_search": {
+      "limit": 10,
+      "used": 0,
+      "remaining": 10,
+      "reset": 1789059437
+    },
+    "copilot_usage_records": {
+      "limit": 1750,
+      "used": 0,
+      "remaining": 1750,
+      "reset": 1789062977
+    },
+    "enterprise_token_inventory": {
+      "limit": 1750,
+      "used": 0,
+      "remaining": 1750,
+      "reset": 1789062977
+    }
+  },
+  "dedupe": {
+    "total_count": 0,
+    "incomplete_results": false,
+    "items": [],
+    "search_type": "lexical"
+  },
+  "parent": {
+    "url": "https://api.github.com/repos/sparq-org/sparq/issues/3113",
+    "repository_url": "https://api.github.com/repos/sparq-org/sparq",
+    "labels_url": "https://api.github.com/repos/sparq-org/sparq/issues/3113/labels{/name}",
+    "comments_url": "https://api.github.com/repos/sparq-org/sparq/issues/3113/comments",
+    "events_url": "https://api.github.com/repos/sparq-org/sparq/issues/3113/events",
+    "html_url": "https://github.com/sparq-org/sparq/issues/3113",
+    "id": 4914429731,
+    "node_id": "I_kwDOSz3qKM8AAAABJOw_Iw",
+    "number": 3113,
+    "title": "sq-aghft: perf(engine): avoid one-time O(numeric) scan on first numeric FILTER for graphs with a high-precision decimal (sq-lr2ii follow-up)",
+    "user": {
+      "login": "jeswr",
+      "id": 63333554,
+      "node_id": "MDQ6VXNlcjYzMzMzNTU0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/63333554?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/jeswr",
+      "html_url": "https://github.com/jeswr",
+      "followers_url": "https://api.github.com/users/jeswr/followers",
+      "following_url": "https://api.github.com/users/jeswr/following{/other_user}",
+      "gists_url": "https://api.github.com/users/jeswr/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/jeswr/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/jeswr/subscriptions",
+      "organizations_url": "https://api.github.com/users/jeswr/orgs",
+      "repos_url": "https://api.github.com/users/jeswr/repos",
+      "events_url": "https://api.github.com/users/jeswr/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/jeswr/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "labels": [
+      {
+        "id": 11514558508,
+        "node_id": "LA_kwDOSz3qKM8AAAACrlI4LA",
+        "url": "https://api.github.com/repos/sparq-org/sparq/labels/priority:P3",
+        "name": "priority:P3",
+        "color": "F97583",
+        "default": false,
+        "description": "Dispatch priority P3 (P0 first)"
+      },
+      {
+        "id": 11514558783,
+        "node_id": "LA_kwDOSz3qKM8AAAACrlI5Pw",
+        "url": "https://api.github.com/repos/sparq-org/sparq/labels/role:impl",
+        "name": "role:impl",
+        "color": "ededed",
+        "default": false,
+        "description": "Worker role: impl"
+      },
+      {
+        "id": 11514559019,
+        "node_id": "LA_kwDOSz3qKM8AAAACrlI6Kw",
+        "url": "https://api.github.com/repos/sparq-org/sparq/labels/status:ready",
+        "name": "status:ready",
+        "color": "ededed",
+        "default": false,
+        "description": "Unblocked + dispatchable"
+      },
+      {
+        "id": 11551729069,
+        "node_id": "LA_kwDOSz3qKM8AAAACsIllrQ",
+        "url": "https://api.github.com/repos/sparq-org/sparq/labels/area:sparq-engine",
+        "name": "area:sparq-engine",
+        "color": "1d76db",
+        "default": false,
+        "description": "Work scoped to crates/sparq-engine"
+      },
+      {
+        "id": 11629806657,
+        "node_id": "LA_kwDOSz3qKM8AAAACtTDEQQ",
+        "url": "https://api.github.com/repos/sparq-org/sparq/labels/bd-migration",
+        "name": "bd-migration",
+        "color": "ededed",
+        "default": false,
+        "description": "bd migration label"
+      }
+    ],
+    "state": "open",
+    "locked": false,
+    "assignees": [],
+    "milestone": null,
+    "comments": 0,
+    "created_at": "2026-07-17T20:03:10Z",
+    "updated_at": "2026-07-26T01:51:00Z",
+    "closed_at": null,
+    "assignee": null,
+    "author_association": "MEMBER",
+    "issue_field_values": [],
+    "type": null,
+    "active_lock_reason": null,
+    "sub_issues_summary": {
+      "total": 0,
+      "completed": 0,
+      "percent_completed": 0
+    },
+    "issue_dependencies_summary": {
+      "blocked_by": 0,
+      "total_blocked_by": 0,
+      "blocking": 0,
+      "total_blocking": 0
+    },
+    "body": "\n\n<!-- bd-id:sq-aghft -->\n",
+    "closed_by": null,
+    "reactions": {
+      "url": "https://api.github.com/repos/sparq-org/sparq/issues/3113/reactions",
+      "total_count": 0,
+      "+1": 0,
+      "-1": 0,
+      "laugh": 0,
+      "hooray": 0,
+      "confused": 0,
+      "heart": 0,
+      "rocket": 0,
+      "eyes": 0
+    },
+    "timeline_url": "https://api.github.com/repos/sparq-org/sparq/issues/3113/timeline",
+    "performed_via_github_app": null,
+    "state_reason": null,
+    "pinned_comment": null
+  },
+  "main": {
+    "ref": "refs/heads/main",
+    "node_id": "REF_kwDOSz3qKK9yZWZzL2hlYWRzL21haW4",
+    "url": "https://api.github.com/repos/sparq-org/sparq/git/refs/heads/main",
+    "object": {
+      "sha": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+      "type": "commit",
+      "url": "https://api.github.com/repos/sparq-org/sparq/git/commits/f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464"
+    }
+  },
+  "created": {
+    "url": "https://api.github.com/repos/sparq-org/sparq/issues/6485",
+    "repository_url": "https://api.github.com/repos/sparq-org/sparq",
+    "labels_url": "https://api.github.com/repos/sparq-org/sparq/issues/6485/labels{/name}",
+    "comments_url": "https://api.github.com/repos/sparq-org/sparq/issues/6485/comments",
+    "events_url": "https://api.github.com/repos/sparq-org/sparq/issues/6485/events",
+    "html_url": "https://github.com/sparq-org/sparq/issues/6485",
+    "id": 5415040036,
+    "node_id": "I_kwDOSz3qKM8AAAABQsL0JA",
+    "number": 6485,
+    "title": "Preserve the numeric-safety memo when updates leave the dictionary unchanged",
+    "user": {
+      "login": "jeswr",
+      "id": 63333554,
+      "node_id": "MDQ6VXNlcjYzMzMzNTU0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/63333554?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/jeswr",
+      "html_url": "https://github.com/jeswr",
+      "followers_url": "https://api.github.com/users/jeswr/followers",
+      "following_url": "https://api.github.com/users/jeswr/following{/other_user}",
+      "gists_url": "https://api.github.com/users/jeswr/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/jeswr/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/jeswr/subscriptions",
+      "organizations_url": "https://api.github.com/users/jeswr/orgs",
+      "repos_url": "https://api.github.com/users/jeswr/repos",
+      "events_url": "https://api.github.com/users/jeswr/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/jeswr/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "labels": [
+      {
+        "id": 11555596090,
+        "node_id": "LA_kwDOSz3qKM8AAAACsMRnOg",
+        "url": "https://api.github.com/repos/sparq-org/sparq/labels/area:sparq-core",
+        "name": "area:sparq-core",
+        "color": "ededed",
+        "default": false,
+        "description": "bd migration label"
+      },
+      {
+        "id": 11514558508,
+        "node_id": "LA_kwDOSz3qKM8AAAACrlI4LA",
+        "url": "https://api.github.com/repos/sparq-org/sparq/labels/priority:P3",
+        "name": "priority:P3",
+        "color": "F97583",
+        "default": false,
+        "description": "Dispatch priority P3 (P0 first)"
+      }
+    ],
+    "state": "open",
+    "locked": false,
+    "assignees": [],
+    "milestone": null,
+    "comments": 0,
+    "created_at": "2026-09-10T16:56:20Z",
+    "updated_at": "2026-09-10T16:56:20Z",
+    "closed_at": null,
+    "assignee": null,
+    "author_association": "MEMBER",
+    "issue_field_values": [],
+    "type": null,
+    "active_lock_reason": null,
+    "sub_issues_summary": {
+      "total": 0,
+      "completed": 0,
+      "percent_completed": 0
+    },
+    "issue_dependencies_summary": {
+      "blocked_by": 0,
+      "total_blocked_by": 0,
+      "blocking": 0,
+      "total_blocking": 0
+    },
+    "body": "> \ud83e\udd16 **SPARQ agent** \u2014 I am @jeswr's agent for the sparq-org/sparq RDF/SPARQL engine. @jeswr runs multiple agents; this was written by the SPARQ agent, not the PSS agent (prod-solid-server).\n\nA focused follow-up to #3113: updates that leave dictionary contents unchanged currently discard the cached numeric-safety result. The next numeric FILTER can repeat a dictionary-wide check. The original first-query cold scan in #3113 remains a separate problem.\n\nAt main `f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464`, `Graph::apply_delta_mem` resolves deletions without interning, but resets a proved-safe `high_precision_decimal` memo even when dictionary length is unchanged. `Graph::has_high_precision_decimal` subsequently revisits dictionary IDs; the numeric FILTER sargability path calls this method.\n\nAn instrumented copy of the actual core module recorded:\n\n```json\n{\"dictionary_ids\":4100,\"initial_id_visits\":4100,\"immediate_warm_visits\":0,\"existing_delete_visits\":4100,\"known_terms_absent_delete_visits\":4100,\"known_terms_reinsert_visits\":4100,\"empty_batch_visits\":0,\"dictionary_length_changed\":false}\n```\n\nThese are observed dictionary-ID visits/numeric-cache lookups, mostly over unrelated IRIs, not decimal-parse counts or a latency measurement. The run used the actual native Rust 2021 core test module with the default/parallel profile. Production source was unchanged.\n\nThe diagnostic test did **not** pass overall: a later control wrongly assumed integer `999999` must grow the dictionary, but it receives an inline ID. Execution stopped there without retry. The later exact/inexact decimal and sticky-state controls were not reached; the existing insertion regression was compiled but filtered out. Those gaps must be completed before admitting a fix.\n\nAcceptance:\n\n- Preserve the proved-safe memo for dictionary-preserving updates without changing numeric classification or FILTER semantics. Establish the invariant from actual dictionary mutation paths, rather than assuming length equality alone is sufficient.\n- Invalidate when new terms could introduce an inexact decimal; retain the existing sticky unsafe state and empty-batch behavior.\n- Complete the inline-integer, exact/inexact decimal, known-term and sticky-state controls, including the existing `has_high_precision_decimal_memo_survives_delta_insert` regression. A compiled control restoring unconditional invalidation must fail the work-count regression; skipping required new-term invalidation must fail the safety control.\n- Validate the actual query caller and report any latency/allocation benefit with explicit scope. Obtain independent review and ordinary protected CI before merge.\n\nNo matching open memo-invalidation issue or PR was found in bounded searches. #4354 changes an opt-in numeric-cache representation in a separate builder/test hunk and remains held; #4097 changes substrate numeric promotion. Revalidate these overlaps before editing production code. This follow-up does not resolve #3113's initial cold scan.\n\n<!-- sparq-direct-numeric-memo-preservation-v1 -->\n",
+    "closed_by": null,
+    "reactions": {
+      "url": "https://api.github.com/repos/sparq-org/sparq/issues/6485/reactions",
+      "total_count": 0,
+      "+1": 0,
+      "-1": 0,
+      "laugh": 0,
+      "hooray": 0,
+      "confused": 0,
+      "heart": 0,
+      "rocket": 0,
+      "eyes": 0
+    },
+    "timeline_url": "https://api.github.com/repos/sparq-org/sparq/issues/6485/timeline",
+    "performed_via_github_app": null,
+    "state_reason": null,
+    "pinned_comment": null
+  },
+  "completed_at": "2026-09-10T16:56:20.244869+00:00"
+}

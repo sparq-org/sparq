@@ -1,0 +1,4 @@
+
+thread 'delete_memo_baseline::fixed_delete_only_rescans' (4979994) panicked at /private/tmp/sparq-pr6049/.throughput-monitor/direct-3113/delete-memo-baseline/core/src/lib.rs:11335:9:
+assertion failed: graph.dict.len() > d
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace

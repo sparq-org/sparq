@@ -1,0 +1,85 @@
+crates/sparq-core/src/dict.rs
+30: /// The `u32` id space is partitioned: dictionary ids `[1, INLINE_BASE)` (≈2.1 billion
+31: /// distinct terms — enough for e.g. full-Wikidata's term count without widening to `u64`,
+32: /// which would double the index), inline integers `[INLINE_BASE, INLINE_BASE + 2^30)`, and
+33: /// the engine's local-vocab ids `[INLINE_BASE + 2^30, 2^32)`. `0` is `NO_ID`.
+34: pub const INLINE_BASE: Id = 1 << 31;
+35: /// The largest value encodable inline (the inline range stays 2^30 wide; bigger integers
+36: /// fall back to the dictionary).
+37: const INLINE_MAX: u32 = (1 << 30) - 1;
+38: 
+39: /// [OPUS-4.8] (review 1409) On-disk format marker for the mmap dictionary (`dict-meta.bin`).
+40: /// `INLINE_BASE` partitions the `u32` id space, so persisted RAW ids only mean what they say
+41: /// under the SAME partition the file was written with. A file written before `INLINE_BASE`
+42: /// moved (from `1 << 30` to `1 << 31`) encodes inline integers in `[1<<30, 1<<31)`, which the
+43: /// current code would misread as dictionary ids — silent numeric corruption / panics. The
+44: /// header records the partition so `open_mmap` can REJECT a mismatched/legacy store with a
+45: /// clear rebuild-required error instead of silently misinterpreting its ids.
+46: ///
+47: /// `dict-meta.bin` previously began with `prefixes.len() as u32` (a small count). This magic
+48: /// is chosen to be distinguishable from any plausible legacy prefix count, so the reader can
+49: /// detect header-less legacy files. ("DMV1" — Dict Meta, V1; little-endian.)
+50: // clippy/dead_code: the on-disk meta header is read/written only by the `mmap`/`dict-spill`
+51: // persistence paths, which are cfg'd out of the default feature set.
+52: #[allow(dead_code)]
+53: pub(crate) const DICT_META_MAGIC: u32 = 0x31_56_4D_44; // b"DMV1" little-endian
+54: /// Bump when the on-disk meta layout changes incompatibly.
+55: #[allow(dead_code)]
+56: pub(crate) const DICT_META_VERSION: u32 = 1;
+57: 
+58: /// If a literal `value`/`datatype` is a canonical non-negative `xsd:integer` in
+59: /// range, its inline id. Only the canonical lexical form (no leading zeros / sign)
+60: /// inlines, so `"030"^^integer` stays a distinct dictionary term.
+61: #[inline]
+62: fn try_inline_lit(value: &str, datatype: &str) -> Option<Id> {
+63:     if datatype == xsd::INTEGER.as_str() {
+64:         if let Ok(v) = value.parse::<u32>() {
+65:             if v <= INLINE_MAX && v.to_string() == value {
+66:                 return Some(INLINE_BASE + v);
+67:             }
+68:         }
+69:     }
+70:     None
+71: }
+72: 
+73: /// If `term` is a canonical non-negative `xsd:integer` in range, its inline id.
+74: fn try_inline(term: &Term) -> Option<Id> {
+75:     match term {
+76:         Term::Literal(l) => try_inline_lit(l.value(), l.datatype().as_str()),
+77:         _ => None,
+78:     }
+79: }
+80: 
+
+1491:     pub fn intern_lit(&mut self, value: &str, datatype: &str, lang: Option<&str>) -> Id {
+1492:         if let Some(id) = try_inline_lit(value, datatype) {
+1493:             return id;
+1494:         }
+1495:         let hash = hash_lit(value, datatype, lang);
+1496:         if let Some(id) = self.find_lit(hash, value, datatype, lang) {
+1497:             return id;
+1498:         }
+1499:         let datatype = self.intern_datatype(datatype);
+1500:         self.push(hash, Stored::Lit { value: value.into(), datatype, lang: lang.map(Into::into) })
+1501:     }
+1502: 
+1503:     /// Interns a blank node from its label, returning its id.
+1504:     #[inline]
+1505:     pub fn intern_blank(&mut self, label: &str) -> Id {
+
+1534:     pub fn intern(&mut self, term: &Term) -> Id {
+1535:         match term {
+1536:             Term::NamedNode(n) => self.intern_iri(n.as_str()),
+1537:             Term::Literal(l) => self.intern_lit(l.value(), l.datatype().as_str(), lang_with_dir(l).as_deref()),
+1538:             Term::BlankNode(b) => self.intern_blank(b.as_str()),
+1539:             Term::Triple(t) => {
+1540:                 let s = match t.subject {
+1541:                     oxrdf::NamedOrBlankNode::NamedNode(ref n) => self.intern_iri(n.as_str()),
+1542:                     oxrdf::NamedOrBlankNode::BlankNode(ref b) => self.intern_blank(b.as_str()),
+1543:                 };
+1544:                 let p = self.intern_iri(t.predicate.as_str());
+1545:                 let o = self.intern(&t.object);
+1546:                 self.intern_triple_ids([s, p, o])
+1547:             }
+1548:         }
+1549:     }

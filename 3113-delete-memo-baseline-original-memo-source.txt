@@ -1,0 +1,86 @@
+crates/sparq-core/src/lib.rs
+2726:     /// [OPUS-4.8] (sq-lr2ii) `true` if the graph holds any `xsd:decimal` literal with MORE
+2727:     /// than 15 significant digits — a value the f64 `numerics` cache CANNOT represent exactly,
+2728:     /// so the engine's f64-based sargable FILTER fast path could decide `=`/`<`/`>`/`<=`/`>=`
+2729:     /// WRONGLY for it (e.g. `"1.000000000000000001"^^xsd:decimal` shares the f64 `1.0` with the
+2730:     /// constant `1`, yet is not equal to it). The engine consults this at the sargable-decision
+2731:     /// point to DECLINE that fast path and fall back to the exact general evaluator; a graph
+2732:     /// without any such decimal keeps the fast path (a decimal of `<= 15` significant digits
+2733:     /// round-trips through f64 unambiguously, and a large-integer collision needs a `> 15`-digit
+2734:     /// CONSTANT, which the engine already declines). Integers/float/double are exempt: an
+2735:     /// integer's exactness is the constant-side guard's job and a float/double's value IS its f64.
+2736:     ///
+2737:     /// Memoised (see `high_precision_decimal`): the first call scans the graph's numeric terms
+2738:     /// once (short-circuiting on the first offender); later calls are an atomic load. A delta
+2739:     /// that appends terms resets the memo so it is recomputed over the grown dictionary. This is
+2740:     /// a CONSERVATIVE, graph-wide gate — one offending decimal declines the numeric fast path for
+2741:     /// every comparison on the graph — chosen for safety (correctness is never at risk; only the
+2742:     /// pushdown optimisation is skipped for affected graphs).
+2743:     pub fn has_high_precision_decimal(&self) -> bool {
+2744:         use std::sync::atomic::Ordering::Relaxed;
+2745:         match self.high_precision_decimal.load(Relaxed) {
+2746:             2 => true,
+2747:             1 => false,
+2748:             _ => {
+2749:                 let found = (1..=self.dict.len() as Id)
+2750:                     .any(|id| self.numerics.lookup(id).is_some() && is_high_precision_decimal(&self.dict, id));
+2751:                 self.high_precision_decimal.store(if found { 2 } else { 1 }, Relaxed);
+2752:                 found
+2753:             }
+2754:         }
+2755:     }
+
+2947:     pub fn apply_delta(&mut self, inserts: &[[Term; 3]], deletes: &[[Term; 3]]) -> Result<(), String> {
+2948:         if inserts.is_empty() && deletes.is_empty() {
+2949:             return Ok(());
+2950:         }
+2951:         #[cfg(feature = "mmap")]
+2952:         if let Some(w) = &mut self.wal {
+2953:             w.append_batch(inserts, deletes).map_err(|e| format!("WAL append failed: {e}"))?;
+2954:         }
+2955:         self.apply_delta_mem(inserts, deletes);
+2956:         Ok(())
+2957:     }
+
+3371:     /// the target the WAL replays into on [`open`](Self::open).
+3372:     fn apply_delta_mem(&mut self, inserts: &[[Term; 3]], deletes: &[[Term; 3]]) {
+3373:         // A delete only matters if every term resolves — otherwise the triple cannot be
+3374:         // present, and deleting must NOT intern the (absent) terms.
+3375:         let del_ids: Vec<[Id; 3]> = deletes
+3376:             .iter()
+3377:             .filter_map(|[s, p, o]| Some([self.id_of(s)?, self.id_of(p)?, self.id_of(o)?]))
+3378:             .collect();
+3379:         let old_len = self.dict.len();
+3380:         let ins_ids: Vec<[Id; 3]> = inserts
+3381:             .iter()
+3382:             .map(|[s, p, o]| [self.dict.intern(s), self.dict.intern(p), self.dict.intern(o)])
+3383:             .collect();
+3384:         // Keep the numeric- and temporal-filter caches covering the grown dictionary.
+3385:         self.numerics.extend_for(&self.dict, old_len);
+3386:         self.temporals.extend_for(&self.dict, old_len);
+3387:         // sq-lr2ii: an inserted term may be an f64-inexact decimal. If the sargable-safety
+3388:         // guard was memoised as "no such decimal" (1), reset it to recompute over the grown
+3389:         // dictionary; a "found" (2) verdict is monotonic (terms are never removed) and stays.
+3390:         let _ = self.high_precision_decimal.compare_exchange(
+3391:             1,
+3392:             0,
+3393:             std::sync::atomic::Ordering::Relaxed,
+3394:             std::sync::atomic::Ordering::Relaxed,
+3395:         );
+3396:         self.store.apply_delta(&ins_ids, &del_ids);
+3397:     }
+
+9622:     /// [OPUS-4.8] sq-lr2ii — the memoised flag must NOT go stale: inserting an f64-inexact
+9623:     /// decimal via a delta AFTER the flag was computed as `false` must flip it to `true`.
+9624:     #[test]
+9625:     fn has_high_precision_decimal_memo_survives_delta_insert() {
+9626:         let mut g = Graph::load_str("<http://ex/s> <http://ex/p> \"3\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n", "ntriples").unwrap();
+9627:         // Compute (and memoise) the flag as false over the integer-only graph.
+9628:         assert!(!g.has_high_precision_decimal());
+9629:         // Insert a high-precision decimal; the memo must be invalidated + recomputed to true.
+9630:         let s = Term::NamedNode(NamedNode::new_unchecked("http://ex/s"));
+9631:         let p = Term::NamedNode(NamedNode::new_unchecked("http://ex/d"));
+9632:         let o = Term::Literal(Literal::new_typed_literal("2.000000000000000003", xsd::DECIMAL));
+9633:         g.apply_delta(&[[s, p, o]], &[]).unwrap();
+9634:         assert!(g.has_high_precision_decimal(), "delta-inserted inexact decimal must flip the memo");
+9635:     }

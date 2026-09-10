@@ -1,0 +1,393 @@
+{
+  "created_at": "2026-09-10T16:58:04.661594+00:00",
+  "author_model": "GPT-6 Astra xhigh",
+  "verdict": "POSTMERGE_UPDATE_20_TEST_PROOF_CONFIRMED",
+  "scope": "Read-only exact-main postmerge UPDATE unit/regression-test proof; no new UPDATE differential seeds executed.",
+  "main_head": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+  "update_tests": {
+    "expected": 20,
+    "actual_pass": 20,
+    "missing": [],
+    "unexpected": [],
+    "jobs": [
+      102950381709,
+      102950381674,
+      102950381538
+    ],
+    "historical_exact_regression_pass": true,
+    "lexical_blank_node_fixture_pass": true,
+    "runner": "Ubuntu 24.04 GitHub-hosted; raw logs identify image ubuntu24/20260907.300",
+    "source_matches_frozen_pr": true
+  },
+  "selected_ci_evidence": [
+    {
+      "id": 102942437411,
+      "name": "clippy (gate) + fmt (non-blocking)",
+      "status": "completed",
+      "conclusion": "success",
+      "completed_at": "2026-09-10T16:01:00Z",
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0",
+          "conclusion": "success"
+        },
+        {
+          "name": "Rust (preinstalled stable, rustfmt+clippy)",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32",
+          "conclusion": "success"
+        },
+        {
+          "name": "clippy (deny warnings)",
+          "conclusion": "success"
+        },
+        {
+          "name": "clippy (deny warnings, workspace \u2014 all features)",
+          "conclusion": "success"
+        },
+        {
+          "name": "rustdoc (deny warnings, workspace \u2014 default features)",
+          "conclusion": "success"
+        },
+        {
+          "name": "rustdoc (deny warnings, workspace \u2014 all features)",
+          "conclusion": "success"
+        },
+        {
+          "name": "bench/dict standalone selftest (clippy + invariant checks)",
+          "conclusion": "success"
+        },
+        {
+          "name": "rustfmt (informational)",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Run Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0",
+          "conclusion": "success"
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 102942482109,
+      "name": "build + archive test binaries (+ doctests once)",
+      "status": "completed",
+      "conclusion": "success",
+      "completed_at": "2026-09-10T16:13:02Z",
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0",
+          "conclusion": "success"
+        },
+        {
+          "name": "Free runner disk before build + archive",
+          "conclusion": "success"
+        },
+        {
+          "name": "Rust (preinstalled stable)",
+          "conclusion": "success"
+        },
+        {
+          "name": "Cache cargo + target",
+          "conclusion": "success"
+        },
+        {
+          "name": "Install cargo-nextest",
+          "conclusion": "success"
+        },
+        {
+          "name": "Build + archive test binaries (nextest archive)",
+          "conclusion": "success"
+        },
+        {
+          "name": "Upload nextest archive",
+          "conclusion": "success"
+        },
+        {
+          "name": "Doctests (nextest does not run these; run once, off the warm build)",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Cache cargo + target",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0",
+          "conclusion": "success"
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 102950381538,
+      "name": "test (load-aware shard bulk 3/3)",
+      "status": "completed",
+      "conclusion": "success",
+      "completed_at": "2026-09-10T16:33:19Z",
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0",
+          "conclusion": "success"
+        },
+        {
+          "name": "Free runner disk before download + test",
+          "conclusion": "success"
+        },
+        {
+          "name": "Rust (preinstalled stable)",
+          "conclusion": "success"
+        },
+        {
+          "name": "Install cargo-nextest",
+          "conclusion": "success"
+        },
+        {
+          "name": "Download nextest archive",
+          "conclusion": "success"
+        },
+        {
+          "name": "Test (nextest, shard bulk 3/3)",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0",
+          "conclusion": "success"
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 102950381674,
+      "name": "test (load-aware shard bulk 2/3)",
+      "status": "completed",
+      "conclusion": "success",
+      "completed_at": "2026-09-10T16:45:57Z",
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0",
+          "conclusion": "success"
+        },
+        {
+          "name": "Free runner disk before download + test",
+          "conclusion": "success"
+        },
+        {
+          "name": "Rust (preinstalled stable)",
+          "conclusion": "success"
+        },
+        {
+          "name": "Install cargo-nextest",
+          "conclusion": "success"
+        },
+        {
+          "name": "Download nextest archive",
+          "conclusion": "success"
+        },
+        {
+          "name": "Test (nextest, shard bulk 2/3)",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0",
+          "conclusion": "success"
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 102950381709,
+      "name": "test (load-aware shard bulk 1/3)",
+      "status": "completed",
+      "conclusion": "success",
+      "completed_at": "2026-09-10T16:34:08Z",
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0",
+          "conclusion": "success"
+        },
+        {
+          "name": "Free runner disk before download + test",
+          "conclusion": "success"
+        },
+        {
+          "name": "Rust (preinstalled stable)",
+          "conclusion": "success"
+        },
+        {
+          "name": "Install cargo-nextest",
+          "conclusion": "success"
+        },
+        {
+          "name": "Download nextest archive",
+          "conclusion": "success"
+        },
+        {
+          "name": "Test (nextest, shard bulk 1/3)",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0",
+          "conclusion": "success"
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success"
+        }
+      ]
+    }
+  ],
+  "cached_ci_job_summary": {
+    "source": "direct-5183/admission/mainf50-ci-jobs1652.json",
+    "sha256": "6f6d72a2e5e94c2e08f9e6b843cdf9b2c30b2205f4a49ada8c8bffbe9b54162b",
+    "total": 39,
+    "returned": 39,
+    "conclusions": {
+      "success": 33,
+      "skipped": 6
+    }
+  },
+  "current_runs": [
+    {
+      "id": 34497774423,
+      "name": "CI",
+      "head_sha": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+      "event": "push",
+      "status": "completed",
+      "conclusion": "success",
+      "run_attempt": 1,
+      "created_at": "2026-09-10T15:45:57Z",
+      "updated_at": "2026-09-10T16:45:57Z",
+      "html_url": "https://github.com/sparq-org/sparq/actions/runs/34497774423"
+    },
+    {
+      "id": 34497774420,
+      "name": "feature-matrix",
+      "head_sha": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+      "event": "push",
+      "status": "completed",
+      "conclusion": "success",
+      "run_attempt": 1,
+      "created_at": "2026-09-10T15:45:57Z",
+      "updated_at": "2026-09-10T16:53:02Z",
+      "html_url": "https://github.com/sparq-org/sparq/actions/runs/34497774420"
+    },
+    {
+      "id": 34497774057,
+      "name": "ci-summary",
+      "head_sha": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+      "event": "push",
+      "status": "completed",
+      "conclusion": "success",
+      "run_attempt": 1,
+      "created_at": "2026-09-10T15:45:57Z",
+      "updated_at": "2026-09-10T16:55:51Z",
+      "html_url": "https://github.com/sparq-org/sparq/actions/runs/34497774057"
+    }
+  ],
+  "whole_main_scope": "CI, matrix and aggregate are now completed SUCCESS on exact f50 attempt 1; no claim that every advisory workflow on main succeeded. Previously diagnosed batch/release advisory failures were not reread.",
+  "actual_new_failures_in_scoped_reads": [],
+  "bulk_summaries": [
+    {
+      "job_id": 102950381709,
+      "line": "2026-09-10T16:34:06.0454798Z      Summary [ 177.715s] 3070 tests run: 3070 passed (2 slow), 5702 skipped"
+    },
+    {
+      "job_id": 102950381674,
+      "line": "2026-09-10T16:45:54.2857184Z      Summary [ 144.608s] 2876 tests run: 2876 passed (1 slow), 5896 skipped"
+    },
+    {
+      "job_id": 102950381538,
+      "line": "2026-09-10T16:33:17.2953689Z      Summary [ 114.032s] 2738 tests run: 2738 passed (1 slow), 6034 skipped"
+    }
+  ],
+  "limitations": [
+    "Clippy/archive step success verified from root cached exact-head job metadata; their raw logs were not fetched again.",
+    "No new seed execution or proof for all possible UPDATE programs. No statement that historical reference divergences are engine defects.",
+    "The gate run state was verified, but its check app identity was not freshly queried in this bounded pass.",
+    "No inference that skips in other suites are execution evidence. Bulk logs contain real PASS records for all 20 target tests."
+  ],
+  "reads": {
+    "count": 7,
+    "cap": 12,
+    "initial_core_remaining": 4881,
+    "requests": [
+      {
+        "endpoint": "rate_limit",
+        "file": "01-budget.json"
+      },
+      {
+        "endpoint": "repos/sparq-org/sparq/actions/jobs/102950381538/logs",
+        "file": "bulk-3.log"
+      },
+      {
+        "endpoint": "repos/sparq-org/sparq/actions/jobs/102950381674/logs",
+        "file": "bulk-2.log"
+      },
+      {
+        "endpoint": "repos/sparq-org/sparq/actions/jobs/102950381709/logs",
+        "file": "bulk-1.log"
+      },
+      {
+        "endpoint": "repos/sparq-org/sparq/actions/runs/34497774423",
+        "file": "current-ci.json"
+      },
+      {
+        "endpoint": "repos/sparq-org/sparq/actions/runs/34497774420",
+        "file": "current-matrix.json"
+      },
+      {
+        "endpoint": "repos/sparq-org/sparq/actions/runs/34497774057",
+        "file": "current-gate.json"
+      }
+    ],
+    "all_exit_codes": 0,
+    "retries": 0
+  },
+  "operations": {
+    "remote_writes": 0,
+    "builds": 0,
+    "tests_locally_executed": 0,
+    "source_edits": 0,
+    "pending_commands": 0,
+    "worktree_clean": true
+  },
+  "recommendation": "The requested postmerge UPDATE-test proof is complete. Root may perform its fresh issue/revision checks and decide closure; no retry or capacity intervention is indicated by these successful scoped runs."
+}

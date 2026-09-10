@@ -1,0 +1,70 @@
+{
+  "at": "2026-09-10T16:49:35.917839+00:00",
+  "fixture": "4096 :sN :p N integer triples plus :keep :query1 and :remove :p2; prefixurn:. D is measured actual dictionary length. All initial numeric values exact.",
+  "sequence": [
+    {
+      "case": "initial",
+      "expected_visits": "D",
+      "result": false
+    },
+    {
+      "case": "immediate-warm",
+      "expected_visits": 0,
+      "result": false
+    },
+    {
+      "case": "existing-delete",
+      "expected_visits": "D unchanged",
+      "result": false
+    },
+    {
+      "case": "known-terms-absent-delete",
+      "expected_visits": "D unchanged",
+      "result": false
+    },
+    {
+      "case": "known-terms-reinsert",
+      "expected_visits": "D unchanged",
+      "result": false
+    },
+    {
+      "case": "empty-delta",
+      "expected_visits": 0,
+      "result": false
+    },
+    {
+      "case": "new-integer",
+      "expected_visits": "newD",
+      "result": false
+    },
+    {
+      "case": "new-exact-decimal",
+      "expected_visits": "newD",
+      "result": false
+    },
+    {
+      "case": "new-inexact-decimal",
+      "expected_visits": "numeric offender dictionaryID",
+      "result": true
+    },
+    {
+      "case": "state2-after-delete",
+      "expected_visits": 0,
+      "result": true
+    },
+    {
+      "case": "state2-after-insert",
+      "expected_visits": 0,
+      "result": true
+    }
+  ],
+  "execution": "One actualcore directrustc--test build, one exact filtered test; no retry/correction after compiler launch. No engine/query/latency claim.",
+  "profile": "Rust1.97.1,edition2021,O3,unwind,LTOoff,codegen16,coredefault+parallel only. Adapt recorded actualcore lib invocation; add sole proptest devdependency from executed engine cfgtest invocation.",
+  "limits": {
+    "seconds": 480,
+    "new_allocated_bytes": 268435456,
+    "start_free": 2214592512,
+    "continuous_free": 2147483648
+  },
+  "existing_test": "tests::has_high_precision_decimal_memo_survives_delta_insert remains unchanged and compiles with module; not separately executed in this one-filter grant."
+}

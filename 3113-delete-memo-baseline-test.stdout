@@ -1,0 +1,17 @@
+
+running 1 test
+test delete_memo_baseline::fixed_delete_only_rescans ... MEMO_WITNESS {"case":"initial","dict_len":4100,"before":0,"state":1,"result":false,"visits":4100}
+MEMO_WITNESS {"case":"immediate-warm","dict_len":4100,"before":1,"state":1,"result":false,"visits":0}
+MEMO_WITNESS {"case":"existing-delete","dict_len":4100,"before":0,"state":1,"result":false,"visits":4100}
+MEMO_WITNESS {"case":"known-terms-absent-delete","dict_len":4100,"before":0,"state":1,"result":false,"visits":4100}
+MEMO_WITNESS {"case":"known-terms-reinsert","dict_len":4100,"before":0,"state":1,"result":false,"visits":4100}
+MEMO_WITNESS {"case":"empty-delta","dict_len":4100,"before":1,"state":1,"result":false,"visits":0}
+FAILED
+
+failures:
+
+failures:
+    delete_memo_baseline::fixed_delete_only_rescans
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 150 filtered out; finished in 0.01s
+

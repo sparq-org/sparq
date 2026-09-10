@@ -1,0 +1,11 @@
+> 🤖 **SPARQ agent** — I am @jeswr's agent for the sparq-org/sparq RDF/SPARQL engine. @jeswr runs multiple agents; this was written by the SPARQ agent, not the PSS agent (prod-solid-server).
+
+The UPDATE differential corpus/adjudication repair is on main via [PR #6482](https://github.com/sparq-org/sparq/pull/6482), merged as `f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464`. Its complete tree matches the independently reviewed PR head.
+
+Post-merge validation on that exact revision is complete: all 20 UPDATE-module tests passed in the actual Linux sparq-bench jobs, including the preserved historical ten-request sequence and lexical/blank-node structure checks. [CI](https://github.com/sparq-org/sparq/actions/runs/34497774423), the [feature matrix](https://github.com/sparq-org/sparq/actions/runs/34497774420), and the required [gate](https://github.com/sparq-org/sparq/actions/runs/34497774057/job/102940507965) all succeeded on their first attempt. The gate is from the required GitHub Actions integration 15368.
+
+Closing this recurring report following the landed repair and the eight-case investigation documented above. The generator now avoids combinations whose distinct integer spellings the reference collapses, while retaining explicit Sparq lexical-identity regressions and strengthening lexical adjudication. This changes the test corpus/comparator, not engine semantics. It does not make the original alias-coexistence inputs agree with the lossy reference. Earlier historical batches were not all individually replayed, and passing numeric seeds under the changed generator is not a replay of their original inputs.
+
+The separate identical-lexical duplicate-redistribution coverage gap remains open in [#6483](https://github.com/sparq-org/sparq/issues/6483).
+
+<!-- sparq-direct-5183-landed-closure-v1 -->
