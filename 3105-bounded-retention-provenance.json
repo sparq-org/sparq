@@ -1,0 +1,105 @@
+{
+  "head": "ed66ef0931fa19dd521fac433870c86a78687a30",
+  "base": "e53464c73f31f7aca800f3867ac054c36408e346",
+  "parent": "19763bfab1dce196a654c899b172e7b24d70bc59",
+  "runtime_sha256": "098a3af6a14c483910750ca3b0d032c4f004633222ad0394f948c394aeb16566",
+  "commands": [
+    {
+      "argv": [
+        "rustc",
+        "-Vv"
+      ],
+      "exit": 0
+    },
+    {
+      "argv": [
+        "cargo",
+        "-V"
+      ],
+      "exit": 0
+    },
+    {
+      "argv": [
+        "uname",
+        "-a"
+      ],
+      "exit": 0
+    },
+    {
+      "argv": [
+        "cargo",
+        "tree",
+        "--locked",
+        "--offline",
+        "--manifest-path",
+        "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/bounded-retention/measurement/candidate/Cargo.toml",
+        "-e",
+        "features"
+      ],
+      "exit": 0
+    }
+  ],
+  "binaries": {
+    "final-default": {
+      "sha256": "bf5a78aa94f0dfd95069cf71ab88489da4d583fe926123b49d1210e113e61c37",
+      "bytes": 28242816,
+      "kind": "scoped test; cfg(test) observers"
+    },
+    "final-compact": {
+      "sha256": "280a291c7a166ea7b1a7f65eba1711bb4684560876b9309432c2fa16c3acf639",
+      "bytes": 28243744,
+      "kind": "scoped test; cfg(test) observers"
+    },
+    "final-semijoin": {
+      "sha256": "ce4c7a37e00b494da982ab7f03e286d1f11fb509f117066f5524efc9fe1a3d16",
+      "bytes": 28289120,
+      "kind": "scoped test; cfg(test) observers"
+    },
+    "baseline": {
+      "sha256": "43a4824e0fa6e846d5d6e5ab98d372e029f4d9847555e2172dacc7f110c08b41",
+      "bytes": 5358384,
+      "kind": "unmodified production allocation diagnostic"
+    },
+    "candidate": {
+      "sha256": "2e6ea462f7af0bb424ce5b0276b2c91ec2c8a2505de470f49a3bfeff9c664710",
+      "bytes": 5361616,
+      "kind": "unmodified production allocation diagnostic"
+    },
+    "two-baseline": {
+      "sha256": "3c2b9d1247bab05b9406fa48fc0fac971e3e1fc6aaedd0881038291512750147",
+      "bytes": 5341536,
+      "kind": "unmodified production allocation diagnostic"
+    },
+    "two-candidate": {
+      "sha256": "dd1903243cc2ebe61c14188e1e97b8a8bf70fe449522098d490f53ab2ccf4aaf",
+      "bytes": 5361296,
+      "kind": "unmodified production allocation diagnostic"
+    }
+  },
+  "harnesses": {
+    "baseline": {
+      "src/main.rs": "b6e5faeb0830751acdca72fdcecb1b5ff6e15aebedcb7aac177a9aa343a67005",
+      "src/counting.rs": "65cd7693a9adb8a4c45f52d939db0b932892ceec4b4806423ee1472c061bc911",
+      "Cargo.toml": "dc87fe224e013edc8ae4be15e745e846bece1b4f7cef7fbba113ab27342ed8f5",
+      "Cargo.lock": "2a9682bdd546f59634fd412c474fca14badf6a3bed63c58e44c866351e389cb9"
+    },
+    "candidate": {
+      "src/main.rs": "b6e5faeb0830751acdca72fdcecb1b5ff6e15aebedcb7aac177a9aa343a67005",
+      "src/counting.rs": "65cd7693a9adb8a4c45f52d939db0b932892ceec4b4806423ee1472c061bc911",
+      "Cargo.toml": "9460117f23653079a9d9747255bc3641e9910e1caa18fc05a5a3f0b74e123ff3",
+      "Cargo.lock": "2a9682bdd546f59634fd412c474fca14badf6a3bed63c58e44c866351e389cb9"
+    },
+    "two-baseline": {
+      "src/main.rs": "ff240a481cab58e8f5115086ec03b4f8bd618ef5ca85d9f4518080dc21f00d40",
+      "src/counting.rs": "65cd7693a9adb8a4c45f52d939db0b932892ceec4b4806423ee1472c061bc911",
+      "Cargo.toml": "2006beb6e26ea61d56f1e8b52bcef1b3f8ef8b201832ddbc7a25ecc69ed384a5",
+      "Cargo.lock": "ddea03a37746d6f09106e9d1b4cc34d36c3bfa5e1727b0b712174f76f1bd786f"
+    },
+    "two-candidate": {
+      "src/main.rs": "ff240a481cab58e8f5115086ec03b4f8bd618ef5ca85d9f4518080dc21f00d40",
+      "src/counting.rs": "65cd7693a9adb8a4c45f52d939db0b932892ceec4b4806423ee1472c061bc911",
+      "Cargo.toml": "660dcad61235bb0d9ecf6a6317a5a65b4c305019511005a6cd343399a4953715",
+      "Cargo.lock": "ddea03a37746d6f09106e9d1b4cc34d36c3bfa5e1727b0b712174f76f1bd786f"
+    }
+  }
+}

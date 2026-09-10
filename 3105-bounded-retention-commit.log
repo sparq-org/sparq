@@ -1,0 +1,3 @@
+[codex/capped-rhs-reuse ed66ef093] fix(engine): bound retained capped RHS storage
+ 2 files changed, 283 insertions(+), 34 deletions(-)
+ create mode 100644 bench/feature-off-declarations/6477.json

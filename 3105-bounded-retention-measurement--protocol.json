@@ -1,0 +1,51 @@
+{
+  "declared_utc": "2026-09-10T02:39:29.147860+00:00",
+  "candidate": "ed66ef0931fa19dd521fac433870c86a78687a30",
+  "baseline": "e53464c73f31f7aca800f3867ac054c36408e346",
+  "main_matrix": {
+    "total_patterns": [
+      5,
+      8
+    ],
+    "seed_rows": 70000,
+    "views": [
+      "base"
+    ],
+    "allocation_reps": 3,
+    "order": [
+      "AB",
+      "BA",
+      "AB"
+    ],
+    "same_harness_as": "../../final-validation/baseline/src/main.rs",
+    "unchanged_counting": true,
+    "answer": "all shared-variable joins match; arithmetic residual false; expected ASK false"
+  },
+  "optional_fixed_controls": {
+    "cases": [
+      "first",
+      "miss"
+    ],
+    "total_patterns": 2,
+    "fixture": "original quiescent 3-predicate fixture, original query uses p/q only, 70000 subjects and8192auxiliarytriples",
+    "allocation_reps": 3,
+    "order": [
+      "AB",
+      "BA",
+      "AB"
+    ],
+    "timing": false
+  },
+  "warmup": 2,
+  "calibration": "same frozen allocator, after fixture/oracle/warmups plus rayon broadcast barrier",
+  "decision": "any many-RHS case >25% AND >8MiB additional peak requested live vs main => NO_GO; no canonical or timing claim",
+  "no_retry": true,
+  "no_concurrent_build_during_samples": true,
+  "limits": {
+    "free_floor": 6509559808,
+    "jobs": 2,
+    "incremental": false,
+    "offline_locked": true
+  },
+  "head_pinned_before_samples_utc": "2026-09-10T02:41:23.672461+00:00"
+}

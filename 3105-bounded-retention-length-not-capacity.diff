@@ -1,0 +1,25 @@
+--- candidate
++++ length-not-capacity
+@@ -4363,11 +4363,11 @@
+ fn capped_rhs_storage(rhs: &mut Bindings, allowance: usize) -> Option<usize> {
+     let mut bytes = rhs
+         .rows
+-        .capacity()
++        .len()
+         .checked_mul(std::mem::size_of::<Row>())?
+         .checked_add(
+             rhs.vars
+-                .capacity()
++                .len()
+                 .checked_mul(std::mem::size_of::<Variable>())?,
+         )?;
+     if bytes > allowance || rhs.rows.iter().any(Row::spilled) {
+@@ -4376,7 +4376,7 @@
+     for variable in rhs.vars.iter_mut().chain(rhs.sorted_by.iter_mut()) {
+         let name =
+             std::mem::replace(variable, Variable::new_unchecked(String::new())).into_string();
+-        let capacity = name.capacity();
++        let capacity = name.len();
+         *variable = Variable::new_unchecked(name);
+         bytes = bytes.checked_add(capacity)?;
+         if bytes > allowance {

@@ -1,0 +1,358 @@
+{
+  "many-5": {
+    "baseline": {
+      "allocs": {
+        "min": 70783,
+        "median": 70783,
+        "max": 70783
+      },
+      "reallocs": {
+        "min": 1464,
+        "median": 1464,
+        "max": 1464
+      },
+      "requested_bytes": {
+        "min": 160108511,
+        "median": 160108511,
+        "max": 160108511
+      },
+      "peak_live_growth": {
+        "min": 10811556,
+        "median": 10811556,
+        "max": 10811556
+      },
+      "live_after": {
+        "min": 34089896,
+        "median": 34089896,
+        "max": 34089896
+      },
+      "setup_peak_rss": {
+        "min": 59719680,
+        "median": 59768832,
+        "max": 59785216
+      },
+      "before_peak_rss": {
+        "min": 62930944,
+        "median": 62947328,
+        "max": 62947328
+      },
+      "after_peak_rss": {
+        "min": 62930944,
+        "median": 62947328,
+        "max": 62947328
+      }
+    },
+    "candidate": {
+      "allocs": {
+        "min": 70736,
+        "median": 70736,
+        "max": 70736
+      },
+      "reallocs": {
+        "min": 1272,
+        "median": 1272,
+        "max": 1272
+      },
+      "requested_bytes": {
+        "min": 138852761,
+        "median": 138852761,
+        "max": 138852761
+      },
+      "peak_live_growth": {
+        "min": 13052135,
+        "median": 13052135,
+        "max": 13052135
+      },
+      "live_after": {
+        "min": 34089897,
+        "median": 34089897,
+        "max": 34089897
+      },
+      "setup_peak_rss": {
+        "min": 59604992,
+        "median": 59654144,
+        "max": 59654144
+      },
+      "before_peak_rss": {
+        "min": 62816256,
+        "median": 62865408,
+        "max": 62865408
+      },
+      "after_peak_rss": {
+        "min": 62832640,
+        "median": 62865408,
+        "max": 62881792
+      }
+    },
+    "additional_peak_bytes": 2240579,
+    "additional_peak_fraction": 0.2072392724969468,
+    "screen_no_go": false
+  },
+  "many-8": {
+    "baseline": {
+      "allocs": {
+        "min": 71210,
+        "median": 71210,
+        "max": 71210
+      },
+      "reallocs": {
+        "min": 2427,
+        "median": 2427,
+        "max": 2427
+      },
+      "requested_bytes": {
+        "min": 270124930,
+        "median": 270124930,
+        "max": 270124930
+      },
+      "peak_live_growth": {
+        "min": 10813029,
+        "median": 10813029,
+        "max": 10813029
+      },
+      "live_after": {
+        "min": 52432214,
+        "median": 52432214,
+        "max": 52432214
+      },
+      "setup_peak_rss": {
+        "min": 86114304,
+        "median": 86130688,
+        "max": 86130688
+      },
+      "before_peak_rss": {
+        "min": 89276416,
+        "median": 89292800,
+        "max": 89325568
+      },
+      "after_peak_rss": {
+        "min": 89325568,
+        "median": 89341952,
+        "max": 89374720
+      }
+    },
+    "candidate": {
+      "allocs": {
+        "min": 71163,
+        "median": 71163,
+        "max": 71163
+      },
+      "reallocs": {
+        "min": 2235,
+        "median": 2235,
+        "max": 2235
+      },
+      "requested_bytes": {
+        "min": 248869468,
+        "median": 248869468,
+        "max": 248869468
+      },
+      "peak_live_growth": {
+        "min": 13053896,
+        "median": 13053896,
+        "max": 13053896
+      },
+      "live_after": {
+        "min": 52432215,
+        "median": 52432215,
+        "max": 52432215
+      },
+      "setup_peak_rss": {
+        "min": 85999616,
+        "median": 86016000,
+        "max": 86016000
+      },
+      "before_peak_rss": {
+        "min": 89227264,
+        "median": 89227264,
+        "max": 89243648
+      },
+      "after_peak_rss": {
+        "min": 89260032,
+        "median": 89260032,
+        "max": 89276416
+      }
+    },
+    "additional_peak_bytes": 2240867,
+    "additional_peak_fraction": 0.20723767595555326,
+    "screen_no_go": false
+  },
+  "two-first": {
+    "baseline": {
+      "allocs": {
+        "min": 1242,
+        "median": 1242,
+        "max": 1242
+      },
+      "reallocs": {
+        "min": 200,
+        "median": 200,
+        "max": 200
+      },
+      "requested_bytes": {
+        "min": 21370986,
+        "median": 21370986,
+        "max": 21370986
+      },
+      "peak_live_growth": {
+        "min": 8712554,
+        "median": 8712554,
+        "max": 8712554
+      },
+      "live_after": {
+        "min": 22418977,
+        "median": 22418977,
+        "max": 22418977
+      },
+      "setup_peak_rss": {
+        "min": 38830080,
+        "median": 38862848,
+        "max": 38862848
+      },
+      "before_peak_rss": {
+        "min": 38944768,
+        "median": 38993920,
+        "max": 38993920
+      },
+      "after_peak_rss": {
+        "min": 38977536,
+        "median": 39026688,
+        "max": 39026688
+      }
+    },
+    "candidate": {
+      "allocs": {
+        "min": 1243,
+        "median": 1243,
+        "max": 1243
+      },
+      "reallocs": {
+        "min": 200,
+        "median": 200,
+        "max": 200
+      },
+      "requested_bytes": {
+        "min": 21371178,
+        "median": 21371178,
+        "max": 21371178
+      },
+      "peak_live_growth": {
+        "min": 8712746,
+        "median": 8712746,
+        "max": 8712746
+      },
+      "live_after": {
+        "min": 22418978,
+        "median": 22418978,
+        "max": 22418978
+      },
+      "setup_peak_rss": {
+        "min": 38731776,
+        "median": 38764544,
+        "max": 38879232
+      },
+      "before_peak_rss": {
+        "min": 38879232,
+        "median": 38895616,
+        "max": 39239680
+      },
+      "after_peak_rss": {
+        "min": 38912000,
+        "median": 38944768,
+        "max": 39288832
+      }
+    },
+    "additional_peak_bytes": 192,
+    "additional_peak_fraction": 2.2037166139802405e-05,
+    "screen_no_go": false
+  },
+  "two-miss": {
+    "baseline": {
+      "allocs": {
+        "min": 70347,
+        "median": 70347,
+        "max": 70347
+      },
+      "reallocs": {
+        "min": 497,
+        "median": 497,
+        "max": 497
+      },
+      "requested_bytes": {
+        "min": 50090494,
+        "median": 50090494,
+        "max": 50090494
+      },
+      "peak_live_growth": {
+        "min": 10776989,
+        "median": 10776989,
+        "max": 10776989
+      },
+      "live_after": {
+        "min": 22418968,
+        "median": 22418968,
+        "max": 22418968
+      },
+      "setup_peak_rss": {
+        "min": 38797312,
+        "median": 38797312,
+        "max": 38797312
+      },
+      "before_peak_rss": {
+        "min": 41287680,
+        "median": 41287680,
+        "max": 41287680
+      },
+      "after_peak_rss": {
+        "min": 41320448,
+        "median": 41336832,
+        "max": 41336832
+      }
+    },
+    "candidate": {
+      "allocs": {
+        "min": 70300,
+        "median": 70300,
+        "max": 70300
+      },
+      "reallocs": {
+        "min": 305,
+        "median": 305,
+        "max": 305
+      },
+      "requested_bytes": {
+        "min": 28834456,
+        "median": 28834456,
+        "max": 28834456
+      },
+      "peak_live_growth": {
+        "min": 8712746,
+        "median": 8712746,
+        "max": 8712746
+      },
+      "live_after": {
+        "min": 22418969,
+        "median": 22418969,
+        "max": 22418969
+      },
+      "setup_peak_rss": {
+        "min": 38715392,
+        "median": 38731776,
+        "max": 38731776
+      },
+      "before_peak_rss": {
+        "min": 39845888,
+        "median": 39862272,
+        "max": 39862272
+      },
+      "after_peak_rss": {
+        "min": 39878656,
+        "median": 39911424,
+        "max": 39927808
+      }
+    },
+    "additional_peak_bytes": -2064243,
+    "additional_peak_fraction": -0.19154171912024778,
+    "screen_no_go": false
+  }
+}

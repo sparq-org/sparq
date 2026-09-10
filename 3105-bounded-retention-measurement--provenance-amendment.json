@@ -1,0 +1,7 @@
+{
+  "utc": "2026-09-10T02:43:47.323820+00:00",
+  "measured_samples": 0,
+  "finding": "two-candidate build reported Fresh and yielded identical hash to the different many-pattern harness; copied source mtimes + shared scratch package identity caused wrong artifact reuse",
+  "correction": "unique capped-rhs-two-diagnostic package name in BOTH optional pair manifests/locks; unchanged Rust source/counting module; rebuild pair once before any sample. Preserve prior binary/build log.",
+  "no_measurement_retry": true
+}

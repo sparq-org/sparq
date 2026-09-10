@@ -1,0 +1,15 @@
+{
+  "started_utc": "2026-09-10T02:29:23Z",
+  "phase_max_minutes": 25,
+  "base": "19763bfab1dce196a654c899b172e7b24d70bc59",
+  "allowance_bytes": 4194304,
+  "accounting": "actual Vec capacities, Variable String capacities, sorted_by String; fail closed for spilled rows, allocation overflow/reserve failure or metadata excess",
+  "tests": "existing scoped default/compact/semijoin plus capacity/oversize/many-RHS; compiled ignored-limit control; clippy lib+tests and preflight",
+  "measurement": "if time/resources permit, unchanged 5/8 matrix 12 allocation samples; no timing claims, no retries",
+  "limits": {
+    "free_floor": 6509559808,
+    "jobs": 2,
+    "incremental": false,
+    "offline": true
+  }
+}

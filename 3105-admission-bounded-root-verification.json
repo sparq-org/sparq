@@ -1,0 +1,15 @@
+{
+  "at": "2026-09-10T02:51:02.593820+00:00",
+  "head": "ed66ef0931fa19dd521fac433870c86a78687a30",
+  "clean": true,
+  "files": 162,
+  "bytes": 125002589,
+  "manifest_sha256": "9807d2c72b46c5597ea719a1c00e73100d51a0747ced9bbc7280ab0ebd868ecb",
+  "exact_source_files": [
+    "final-source.rs"
+  ],
+  "measurements": "24commands andrawJSON matches inclbinaryhashes,source/case/rep order ABBAAB, alloracles. Requestedmetricsrepeat3times. Countednanos notlatencyproof.",
+  "result": "All predeclared allocation screens pass; residual about 2.24 million bytes requested-peak increase on5/8patterns is a bounded tradeoff, not memory neutrality.",
+  "freshness": "Observedpre-samplewrongoptionalharnessbinary/Fresh preserved. Bothoptionalpairpackage nameschanged, realbuildlogs andcorrectdistinctbinaries frozen. No sample retried.",
+  "remaining": "Exacthead System timing independentphaseactive. ActualOpusreview and new remoteCI required; ownreview:changeshold remains."
+}

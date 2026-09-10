@@ -1,0 +1,88 @@
+{
+  "author": "GPT-6 Astra xhigh",
+  "head": "ed66ef0931fa19dd521fac433870c86a78687a30",
+  "parent": "19763bfab1dce196a654c899b172e7b24d70bc59",
+  "main_base": "e53464c73f31f7aca800f3867ac054c36408e346",
+  "scope": "Two-file local correction: private retained-RHS allowance plus explicitly authorized V2 intent declaration. No push, PR/label mutation, model call or production deployment. Existing review:changes hold remains.",
+  "decision": "Bounded candidate passes the declared allocation screen and is ready for focused independent review; no timing or merge/admission approval is claimed.",
+  "implementation": {
+    "allowance_bytes": 4194304,
+    "policy": "Private first-fitting query-local retention. No eviction framework, eager scans, planner changes, hash-build hoist, public budget/API, dependency or storage change. Non-fitting and unproved representations retain original per-step lifetime.",
+    "accounting": [
+      "Precheck indexed slot count times Option<CappedRhs> size before reservation; charge actual Vec capacity. Overflow/allocation failure/excess actual capacity declines reuse.",
+      "Charge rows.capacity()*size_of<Row>, vars.capacity()*size_of<Variable>, and actual String capacities for every owned Variable plus sorted_by. Move names out/back through safe public consuming API; no text clone/allocation.",
+      "Current pinned oxrdf 0.3.3 Variable owns only String; full source and Cargo.lock supplied.",
+      "Scan Row is SmallVec<[Id;4]> and scan output has at most3variables; reject any spilled representation rather than estimate its heap.",
+      "Each entry retains its charge; drop/refund stale ownership before replacement. Same requested order preserves actual returned sorted_by."
+    ],
+    "limits": "Allowance bounds requested retained allocation capacities, not allocator metadata, stack state or total query peak. Existing AST/prepared/planner/NDV metadata, seed/result/join allocations and original transient scans remain outside it. No newly introduced unbounded dynamic cache metadata.",
+    "guard_preservation": "Armed QueryBudget disables indexed reuse, including executed untripped cancel/deadline assertions. Existing try_capped zk guard is byte-identical; prior exact main/final recorder evidence remains unchanged."
+  },
+  "tests": {
+    "final_default": 10,
+    "final_compact": 10,
+    "final_semijoin": 10,
+    "all_passed": true,
+    "clippy": "cargo clippy --locked --offline -p sparq-engine --lib --tests -- -D warnings passed",
+    "capacity_charges_observed": "Spare row/vars/text fixture requires exactly7360 requested bytes; the executed length mutant wrongly reports58. One-row replacement fixture charges57 bytes; no-refund mutant leaves4194247 instead of4194304. Actual per-query remaining allowance was not logged; many-RHS scan counts and requested allocation peaks are independently observed.",
+    "many_rhs_work": {
+      "5": [
+        1,
+        3,
+        10,
+        0
+      ],
+      "8": [
+        1,
+        3,
+        19,
+        0
+      ]
+    },
+    "work_meaning": "entries, seed blocks, RHS scan closures, bind calls. Every RHS reached all three starts0/1024/65536 with all-positive joins followed by residual false; fitting first RHS reused, non-fitting RHS rescanned. Positive query checks70000 rows and subject/object correspondence.",
+    "other_cases": "Existing bags, repeated variables, requested/actual sort changes, restricted permutations, disconnected cross, named/view/overlay and EXISTS fallback remain passing. Exact-fit, one-byte-short, oversized spare row buffer, spilled Row and metadata-overflow paths tested.",
+    "format": "rustfmt applied to new helper/test source; unrelated existing formatting restored. git diff --check passed.",
+    "preflight": "Only known Bash3 mapfile/privacy-check failure; other executed author preflight checks passed. Linux validation remains required."
+  },
+  "controls": {
+    "count": 3,
+    "all_executed_and_killed": true,
+    "unbounded": "Expand fixed allowance to64MiB; many-RHS query reverts to all four RHS retained/scanned once, work[1,3,4,0], then the actual work assertion fails. This is a finite enlarged-allowance control, not an unbounded production patch.",
+    "length_not_capacity": "Use lengths in storage accounting; real spare-capacity assertion fails58 versus7360 bytes.",
+    "no_refund": "Omit stale charge refund; replacement-scan panic leaves correct empty ownership but wrong allowance, detected by actual accounting assertion.",
+    "no_compile_failures_or_survivors": true
+  },
+  "measurement": {
+    "samples": 24,
+    "many_pattern_samples": 12,
+    "optional_two_pattern_samples": 12,
+    "all_calibrations_and_oracles_passed": true,
+    "repetitions": 3,
+    "paired_order": "AB/BA/AB per case, one allocation-counted query per sample, two warmups plus barrier then calibration",
+    "summary": "measurement/summary.json contains all min/median/max, requested allocations/bytes/heap and cumulative RSS ranges. Requested metrics are identical across3repetitions.",
+    "many5_peak_delta_bytes": 2240579,
+    "many5_peak_delta_fraction": 0.2072392724969468,
+    "many8_peak_delta_bytes": 2240867,
+    "many8_peak_delta_fraction": 0.20723767595555326,
+    "two_first_peak_delta_bytes": 192,
+    "two_miss_peak_delta_bytes": -2064243,
+    "all_screen_no_go": false,
+    "screen": "Predeclared >25% AND >8MiB extra requested peak; conservative experiment threshold, not repository policy.",
+    "rss": "Cumulative process high-water includes setup/oracle/warmups. Do not equate RSS or process-wide live_after with query heap. Requested metrics exclude allocator metadata/transient realloc internals.",
+    "timing": "Elapsed-nanos fields retained as raw counted-harness output; no timing comparison/claim, no canonical speedup. Extra accounting work and exact-head latency remain unmeasured.",
+    "freshness_incident": "Before any sample, optional two-pattern build falsely reused the many-pattern root binary (identical hash, Fresh). Preserved old manifests/log/binary. Assigned identical distinct scratch package name to BOTH optional pair manifests/locks and rebuilt both once. Rust harness/counting bytes unchanged. This was a build-provenance correction with zero samples, not a sample retry; corrected pair has real compile logs and distinct binary hashes."
+  },
+  "declaration": "bench/feature-off-declarations/6477.json asserts intentional always-compiled bounded capped scan reuse and borrowed joins. No derived:true, byte-neutrality claim, old-head size count, or floor/workflow/scalar change. New head still needs authoritative wasm size validation.",
+  "remaining": "Root focused Opus review, exact-head authoritative full CI/feature/conformance/wasm ratchets, and engineering decision on bounded-cache accounting latency before performance admission. Keep hold until normal reviewed evidence permits action. No additional investigation or production iteration in this phase.",
+  "resources": {
+    "started_utc": "2026-09-10T02:29:23Z",
+    "finished_utc": "2026-09-10T02:49:23.150190+00:00",
+    "free_bytes": 9798377472,
+    "minimum_required": 6509559808,
+    "jobs": 2,
+    "incremental": false,
+    "offline_locked": true,
+    "commands_running": false,
+    "source_clean": true
+  }
+}

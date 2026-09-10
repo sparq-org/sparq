@@ -1,0 +1,47 @@
+{
+  "rustc": {
+    "argv": [
+      "rustc",
+      "-Vv"
+    ],
+    "exit": 0
+  },
+  "cargo": {
+    "argv": [
+      "cargo",
+      "-V"
+    ],
+    "exit": 0
+  },
+  "host": {
+    "argv": [
+      "uname",
+      "-a"
+    ],
+    "exit": 0
+  },
+  "binaries": {
+    "baseline": {
+      "sha256": "f8503acd963497806c74a5e883c1762a17855a456e7673e1f705dfa278d6e563",
+      "bytes": 5333312
+    },
+    "candidate": {
+      "sha256": "5194594e60548730aeb4b4f2cd52ace063850970cd7782ad79991b5642e961cf",
+      "bytes": 5336576
+    }
+  },
+  "harness": {
+    "baseline": {
+      "Cargo.toml": "0be1315165dde319ec3f9ecb8c94084c9fcb090e292b0043b400cb3e2e8fe0df",
+      "Cargo.lock": "0b68ccb1fac3bfc014edb49da87cc0303d83e90916536ec1e880062c307631da",
+      "src/main.rs": "ff240a481cab58e8f5115086ec03b4f8bd618ef5ca85d9f4518080dc21f00d40",
+      "src/counting.rs": "65cd7693a9adb8a4c45f52d939db0b932892ceec4b4806423ee1472c061bc911"
+    },
+    "candidate": {
+      "Cargo.toml": "855d13b59de397e91bc82b911d8e7eb3691bfbf52691e27af5c06c9a0469f360",
+      "Cargo.lock": "0b68ccb1fac3bfc014edb49da87cc0303d83e90916536ec1e880062c307631da",
+      "src/main.rs": "ff240a481cab58e8f5115086ec03b4f8bd618ef5ca85d9f4518080dc21f00d40",
+      "src/counting.rs": "65cd7693a9adb8a4c45f52d939db0b932892ceec4b4806423ee1472c061bc911"
+    }
+  }
+}

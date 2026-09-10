@@ -1,0 +1,262 @@
+[
+  {
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/bounded-timing/binary/baseline",
+      "first",
+      "base",
+      "0"
+    ],
+    "exit": 0,
+    "seconds": 0.808472084,
+    "binary_sha256": "f8503acd963497806c74a5e883c1762a17855a456e7673e1f705dfa278d6e563",
+    "order": 0,
+    "free_bytes": 9571536896
+  },
+  {
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/bounded-timing/binary/candidate",
+      "first",
+      "base",
+      "0"
+    ],
+    "exit": 0,
+    "seconds": 0.6438573329999999,
+    "binary_sha256": "5194594e60548730aeb4b4f2cd52ace063850970cd7782ad79991b5642e961cf",
+    "order": 1,
+    "free_bytes": 9569701888
+  },
+  {
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/bounded-timing/binary/candidate",
+      "first",
+      "base",
+      "1"
+    ],
+    "exit": 0,
+    "seconds": 0.19229245800000005,
+    "binary_sha256": "5194594e60548730aeb4b4f2cd52ace063850970cd7782ad79991b5642e961cf",
+    "order": 2,
+    "free_bytes": 9563803648
+  },
+  {
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/bounded-timing/binary/baseline",
+      "first",
+      "base",
+      "1"
+    ],
+    "exit": 0,
+    "seconds": 0.19705166699999999,
+    "binary_sha256": "f8503acd963497806c74a5e883c1762a17855a456e7673e1f705dfa278d6e563",
+    "order": 3,
+    "free_bytes": 9562468352
+  },
+  {
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/bounded-timing/binary/baseline",
+      "first",
+      "base",
+      "2"
+    ],
+    "exit": 0,
+    "seconds": 0.19736116599999987,
+    "binary_sha256": "f8503acd963497806c74a5e883c1762a17855a456e7673e1f705dfa278d6e563",
+    "order": 4,
+    "free_bytes": 9561251840
+  },
+  {
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/bounded-timing/binary/candidate",
+      "first",
+      "base",
+      "2"
+    ],
+    "exit": 0,
+    "seconds": 0.192309834,
+    "binary_sha256": "5194594e60548730aeb4b4f2cd52ace063850970cd7782ad79991b5642e961cf",
+    "order": 5,
+    "free_bytes": 9559678976
+  },
+  {
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/bounded-timing/binary/candidate",
+      "first",
+      "base",
+      "3"
+    ],
+    "exit": 0,
+    "seconds": 0.19232591700000023,
+    "binary_sha256": "5194594e60548730aeb4b4f2cd52ace063850970cd7782ad79991b5642e961cf",
+    "order": 6,
+    "free_bytes": 9559240704
+  },
+  {
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/bounded-timing/binary/baseline",
+      "first",
+      "base",
+      "3"
+    ],
+    "exit": 0,
+    "seconds": 0.19371279099999983,
+    "binary_sha256": "f8503acd963497806c74a5e883c1762a17855a456e7673e1f705dfa278d6e563",
+    "order": 7,
+    "free_bytes": 9558478848
+  },
+  {
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/bounded-timing/binary/baseline",
+      "first",
+      "base",
+      "4"
+    ],
+    "exit": 0,
+    "seconds": 0.19564616700000004,
+    "binary_sha256": "f8503acd963497806c74a5e883c1762a17855a456e7673e1f705dfa278d6e563",
+    "order": 8,
+    "free_bytes": 9553735680
+  },
+  {
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/bounded-timing/binary/candidate",
+      "first",
+      "base",
+      "4"
+    ],
+    "exit": 0,
+    "seconds": 0.2026041249999997,
+    "binary_sha256": "5194594e60548730aeb4b4f2cd52ace063850970cd7782ad79991b5642e961cf",
+    "order": 9,
+    "free_bytes": 9552908288
+  },
+  {
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/bounded-timing/binary/baseline",
+      "miss",
+      "base",
+      "0"
+    ],
+    "exit": 0,
+    "seconds": 0.27889970900000005,
+    "binary_sha256": "f8503acd963497806c74a5e883c1762a17855a456e7673e1f705dfa278d6e563",
+    "order": 10,
+    "free_bytes": 9551450112
+  },
+  {
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/bounded-timing/binary/candidate",
+      "miss",
+      "base",
+      "0"
+    ],
+    "exit": 0,
+    "seconds": 0.23605362499999982,
+    "binary_sha256": "5194594e60548730aeb4b4f2cd52ace063850970cd7782ad79991b5642e961cf",
+    "order": 11,
+    "free_bytes": 9550168064
+  },
+  {
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/bounded-timing/binary/candidate",
+      "miss",
+      "base",
+      "1"
+    ],
+    "exit": 0,
+    "seconds": 0.23739199999999983,
+    "binary_sha256": "5194594e60548730aeb4b4f2cd52ace063850970cd7782ad79991b5642e961cf",
+    "order": 12,
+    "free_bytes": 9541812224
+  },
+  {
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/bounded-timing/binary/baseline",
+      "miss",
+      "base",
+      "1"
+    ],
+    "exit": 0,
+    "seconds": 0.2521520420000005,
+    "binary_sha256": "f8503acd963497806c74a5e883c1762a17855a456e7673e1f705dfa278d6e563",
+    "order": 13,
+    "free_bytes": 9540493312
+  },
+  {
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/bounded-timing/binary/baseline",
+      "miss",
+      "base",
+      "2"
+    ],
+    "exit": 0,
+    "seconds": 0.24606666700000002,
+    "binary_sha256": "f8503acd963497806c74a5e883c1762a17855a456e7673e1f705dfa278d6e563",
+    "order": 14,
+    "free_bytes": 9539338240
+  },
+  {
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/bounded-timing/binary/candidate",
+      "miss",
+      "base",
+      "2"
+    ],
+    "exit": 0,
+    "seconds": 0.2426631669999999,
+    "binary_sha256": "5194594e60548730aeb4b4f2cd52ace063850970cd7782ad79991b5642e961cf",
+    "order": 15,
+    "free_bytes": 9535967232
+  },
+  {
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/bounded-timing/binary/candidate",
+      "miss",
+      "base",
+      "3"
+    ],
+    "exit": 0,
+    "seconds": 0.24066849999999995,
+    "binary_sha256": "5194594e60548730aeb4b4f2cd52ace063850970cd7782ad79991b5642e961cf",
+    "order": 16,
+    "free_bytes": 9531310080
+  },
+  {
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/bounded-timing/binary/baseline",
+      "miss",
+      "base",
+      "3"
+    ],
+    "exit": 0,
+    "seconds": 0.25157995800000066,
+    "binary_sha256": "f8503acd963497806c74a5e883c1762a17855a456e7673e1f705dfa278d6e563",
+    "order": 17,
+    "free_bytes": 9524731904
+  },
+  {
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/bounded-timing/binary/baseline",
+      "miss",
+      "base",
+      "4"
+    ],
+    "exit": 0,
+    "seconds": 0.252596209,
+    "binary_sha256": "f8503acd963497806c74a5e883c1762a17855a456e7673e1f705dfa278d6e563",
+    "order": 18,
+    "free_bytes": 9518563328
+  },
+  {
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/bounded-timing/binary/candidate",
+      "miss",
+      "base",
+      "4"
+    ],
+    "exit": 0,
+    "seconds": 0.2458970840000001,
+    "binary_sha256": "5194594e60548730aeb4b4f2cd52ace063850970cd7782ad79991b5642e961cf",
+    "order": 19,
+    "free_bytes": 9517301760
+  }
+]

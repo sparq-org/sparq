@@ -1,0 +1,11 @@
+--- candidate
++++ unbounded
+@@ -4331,7 +4331,7 @@
+ // [GPT-6 Astra] Conservative private allowance for retained scan storage, not a
+ // public QueryBudget or a limit on transient join/scan allocations. Keep room below
+ // the diagnostic's extra-heap rejection threshold; do not retain one RHS per pattern.
+-const CAPPED_RHS_STORAGE: usize = 4 * 1024 * 1024;
++const CAPPED_RHS_STORAGE: usize = 64 * 1024 * 1024;
+ // Requested order, immutable scan relation, and its charged allocated storage.
+ type CappedRhs = (Option<usize>, Bindings, usize);
+ 

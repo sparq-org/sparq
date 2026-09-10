@@ -1,0 +1,11 @@
+--- candidate
++++ no-refund
+@@ -4402,7 +4402,7 @@
+         .is_none_or(|(cached_sort, _, _)| *cached_sort != sort)
+     {
+         if let Some(old) = slot.take() {
+-            *remaining += old.2;
++            // Mutant: omit stale storage refund.
+             drop(old); // release stale ownership/accounting before its replacement scan
+         }
+         let mut rhs = scan();

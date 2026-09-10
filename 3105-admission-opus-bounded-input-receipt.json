@@ -1,0 +1,7 @@
+{
+  "at": "2026-09-10T02:52:11.893929+00:00",
+  "head": "ed66ef0931fa19dd521fac433870c86a78687a30",
+  "bytes": 69917,
+  "sha256": "e86fed49a7241e2d905b924fb24c93f818968b8516700d39817d561e1c9e4bb4",
+  "audit": "Repositorydiff/source, pinned dependency publicsource, frozen diagnostics/generatedreports and explicit reviewrequest only; no credentials/transcripts; commoncredentialmarkers absent. Reviewadviceisnotpolicy."
+}

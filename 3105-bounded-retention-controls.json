@@ -1,0 +1,83 @@
+[
+  {
+    "argv": [
+      "cargo",
+      "test",
+      "--locked",
+      "--offline",
+      "-p",
+      "sparq-engine",
+      "--lib",
+      "capped_rhs_many_relations_respect_storage_allowance",
+      "--",
+      "--nocapture",
+      "--test-threads=1"
+    ],
+    "exit": 101,
+    "seconds": 13.216748792,
+    "minimum_free_bytes": 10605215744,
+    "stopped": null,
+    "env": {
+      "CARGO_BUILD_JOBS": "2",
+      "CARGO_INCREMENTAL": "0",
+      "CARGO_NET_OFFLINE": "true",
+      "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+      "RAYON_NUM_THREADS": "1"
+    },
+    "source_sha256": "fb157c502f31228140c930eace64f812c16615bae92667fbea48a8ede706e3e2"
+  },
+  {
+    "argv": [
+      "cargo",
+      "test",
+      "--locked",
+      "--offline",
+      "-p",
+      "sparq-engine",
+      "--lib",
+      "capped_rhs_storage_counts_allocated_capacity",
+      "--",
+      "--nocapture",
+      "--test-threads=1"
+    ],
+    "exit": 101,
+    "seconds": 8.652335292,
+    "minimum_free_bytes": 10607837184,
+    "stopped": null,
+    "env": {
+      "CARGO_BUILD_JOBS": "2",
+      "CARGO_INCREMENTAL": "0",
+      "CARGO_NET_OFFLINE": "true",
+      "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+      "RAYON_NUM_THREADS": "1"
+    },
+    "source_sha256": "98d613350082bd684944d8cb80709d5ac00b616c3d13135a10b35747eaa9972a"
+  },
+  {
+    "argv": [
+      "cargo",
+      "test",
+      "--locked",
+      "--offline",
+      "-p",
+      "sparq-engine",
+      "--lib",
+      "capped_rhs_replacement_releases_old_slot_before_scan",
+      "--",
+      "--nocapture",
+      "--test-threads=1"
+    ],
+    "exit": 101,
+    "seconds": 7.637941124999999,
+    "minimum_free_bytes": 10605649920,
+    "stopped": null,
+    "env": {
+      "CARGO_BUILD_JOBS": "2",
+      "CARGO_INCREMENTAL": "0",
+      "CARGO_NET_OFFLINE": "true",
+      "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+      "RAYON_NUM_THREADS": "1"
+    },
+    "source_sha256": "591c68897d1ac6a49b306b4e27d1eebc27b655f2c3c50c7001632c414a3133a6"
+  }
+]

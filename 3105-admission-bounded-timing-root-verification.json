@@ -1,0 +1,42 @@
+{
+  "at": "2026-09-10T02:55:08.660051+00:00",
+  "head": "ed66ef0931fa19dd521fac433870c86a78687a30",
+  "files_verified": 75,
+  "bytes_verified": 12894185,
+  "manifest_sha256": "c384be7f1e142dc18673cf72cf6cb9074a15d651a5036b211ca4c893fd97da17",
+  "commands_raw_verified": 20,
+  "results": {
+    "first": {
+      "main_median_ns": 1754902.6666666667,
+      "candidate_median_ns": 1791083.3333333333,
+      "candidate_to_main": 1.0206169079082827,
+      "ranges_ns": {
+        "baseline": [
+          1749013.6666666667,
+          1771388.6666666667
+        ],
+        "candidate": [
+          1777708.3333333333,
+          1809722.3333333333
+        ]
+      }
+    },
+    "miss": {
+      "main_median_ns": 12344500.0,
+      "candidate_median_ns": 10557264.0,
+      "candidate_to_main": 0.8552200575154927,
+      "ranges_ns": {
+        "baseline": [
+          12254069.666666666,
+          12459250.0
+        ],
+        "candidate": [
+          10483013.666666666,
+          10738278.0
+        ]
+      }
+    }
+  },
+  "assessment": "Measured local first-hit cost~2.06%andfullmissbenefit~14.48%; allpairedratiosrespectivedirection/rangesdisjoint. Fits declared <=10%firsthitregression and >=10%missbenefitscreen; acceptboundedtradeoffforCI, notuniversalneutrality/canonicalclaim.",
+  "limits": "Systembuildsentinelcountingfalse; noallocationclaimfromthesezero-metricfields. Hostone/macOSarm64/twofixtures5pairs. FullnewheadremoteCIandOpusreviewstillpending."
+}

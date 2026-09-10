@@ -1,0 +1,10 @@
+{
+  "at": "2026-09-10T02:48:36.672572+00:00",
+  "head": "ed66ef0931fa19dd521fac433870c86a78687a30",
+  "root_review": "Read full19763->ed66twofiledelta. Cachevectorcapacity+retainedrowbuffer/varbuffer/textcapacities charged; spilledrowsfailclosed; no deepclone; stalecharge refundedandownershipdroppedbefore scan; uncachedscratch scopedperjoin. Refund+remaining invariant reliesonprivateentry construction; no obviouscorrectnessdefectfound. O(rows)spilledcheck isnew andneeds latencyverification.",
+  "oxrdf": "Pinned0.3.3Variable ownsString; into_string movesownedStringandnew_unchecked reconstructswithoutvalidation/allocation. Temporaryemptyname isnotexternallyobservable; restorebeforecheckedarithmeticreturnsNone.",
+  "dependency_source_sha256": "48447a50fb1da28d20ba61656f9497bfe68de06514a010333ba3ccb2f2eefae3",
+  "declaration": "6477.json explicitlydeclaresalwayscompiledalgorithmchanges; no derived/neutrality claim; separatewasmsizefloorunchanged. PriorCI+354byteswas19763only, notnewed66.",
+  "CI_prior_head": "19763allchecksterminal254success53skip3fail; failuregate+2undeclaredwasmcomparisonruns. No rerun/cancel performed.",
+  "remaining": "Frozenmetrics/commandsmanifestnotyetreceived; no newOpusmodelcall beforefreeze."
+}

@@ -1,0 +1,5 @@
+fix(engine): bound retained capped RHS storage
+
+Limit query-local RHS scan storage to a private 4 MiB allowance using actual buffer and variable-text capacities. Keep non-fitting relations ephemeral, reject unproved spilled-row storage, and refund stale ownership before replacement scans. Add capacity, many-relation and armed-budget controls. Declare the intentional always-compiled engine change without asserting wasm byte neutrality or changing the size ratchet.
+
+Co-Authored-By: GPT-6 Astra <noreply@openai.com>

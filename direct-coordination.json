@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-10T02:33:41.201242+00:00",
+  "updated_at": "2026-09-10T02:56:22.776153+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -67,12 +67,12 @@
     "agent": "/root/postmerge_ci",
     "actual_model": "GPT-6 Astra",
     "effort": "xhigh",
-    "phase": "PR6477 held for measured memory regression; bounded-retention fix active",
+    "phase": "Boundedmemoryfix and exactheadtimings rootverified; actualOpusreview31817running",
     "started_at": "2026-09-10T00:31:07.235396+00:00",
     "base": "e53464c73f31f7aca800f3867ac054c36408e346",
     "local_branch": "codex/capped-rhs-reuse",
     "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue3105",
-    "worktree_state": "Sameisolatedworktree mayhaveactiveAstra edits; do not reset/clean. Remotehead remains19763 untilrootreviewedpush.",
+    "worktree_state": "Rootverifieded66cleancommitted; authorfreezingnonrepoevidence, no newprodchanges.",
     "directory": "direct-3105",
     "state": "Remote19763 source-approvedforCI but memory-admission NO_GO. review:changes coordinatorhold applied, no merge/cancellation. SameAstra lane fixesretention.",
     "constraints": "Ownisolatedworktreeonly; no sharedbranchswitch. >=6GiBfree throughout, max2buildjobs, CARGO_INCREMENTAL0preferred,20minfirstphase, no fullworkspace/globalinstall/EC2/release/registryenable/remotePRmutation/modelcall. Preserveplanner/blockbind/buildside/bags/budgets/sortmetadata; no eagerunusedRHS/deepclone/newpublicAPI. No timingspeedclaimfromworkcounts.",
@@ -84,7 +84,7 @@
     ],
     "dedupe_scope": "165openPRtitles/branches/arealabels allpages; no3105/RHShoistmatch; noissuecrossrefs; not exhaustiveallPRdiff audit. KnownheldotherenginePRs untouched.",
     "review_requirement": "ActualindependentClaudeOpus5 xhigh review ofactualcandidate aftersource/tests/controls frozen, then requiredprotectedvalidation. No productionapprovalyet.",
-    "head": "19763bfab1dce196a654c899b172e7b24d70bc59",
+    "head": "ed66ef0931fa19dd521fac433870c86a78687a30",
     "phase1": {
       "state": "completed_frozen_root_verified",
       "manifest_files": 59,
@@ -143,10 +143,10 @@
       "decision": "Positiveadvisoryscreen supportscoveragephase; notcanonicalperfproof. No materiallyrejectingheapgrowth in2RHSfixture; more/largerRHSsumretentionunboundedbyfixture. RSSseparatelimit."
     },
     "next_actions": [
-      "Collect existing /root/postmerge_ci bounded-retention handoff; no duplicate lane or oldreviewpoll. Verify frozenmanifest/newcommit/source/controls/matrix; observed memoryscreen mustpass or reassess.",
-      "Review actualcapacityaccounting/ephemeralfallback/guard semantics and honest wasmdeclaration with freshactualOpus5xhigh focusedreview onnewmeaningfuldelta. Do not claim oldtimingsfornewhead.",
-      "Onlyafternewreview/validation, freshrevalidateandappendpushsamePR6477; updatePRbodyandCopilotthread, requestactualrereview ifneeded. Removeownreview:changesholdonlyafterfindingresolved; nofabricatedcanonicalverdict.",
-      "ReadexactcurrentCI/workspace/conformance/coverage/wasm/perfratchets; no localheavyfullgate orfloorraise. Protectedqueueonlyafterallrequiredchecksandthreadsresolved; retainallotherholds."
+      "Collect actualOpus31817, verify realmodelUsageandparseverdict. Do notlaunchduplicate. SameAstraagentnowidle, allsource/metricsfrozen.",
+      "If approved, combine exacted66source/memoryreview withrootverifiedtimingtradeoff, freshGitHub/head/main/budgetrevalidation andnormalappendpushsamePR6477. UpdatePRbodyhonestly andreplytoCopilotthread; requestactualnewheadCopilotreview.",
+      "Keepownreview:changesholduntilmemoryfindingresolved byreview/evidence; no newownerpermissionrequired. No fabricatedcanonicalverdict. NewheadmustpassnormalprotectedfullCI/wasm/conformance/coverage/perf gates and allthreadsresolved beforequeue.",
+      "Preserve allotherholds, registryOFF,ALLGREEN,no releases; no cachecleanup orEC2."
     ],
     "coverage": {
       "agent": "/root/postmerge_ci",
@@ -211,7 +211,7 @@
       "agent": "/root/postmerge_ci",
       "actual_model": "GPT-6 Astra",
       "effort": "xhigh",
-      "state": "active",
+      "state": "completed_frozen_root_verified",
       "started_at": "2026-09-10T02:28:00Z",
       "max_minutes": 25,
       "directory": "direct-3105/bounded-retention",
@@ -220,7 +220,39 @@
       "author_update": "Authorproposesindexedcache+remainingallowance, exactcapacitymetadata/VariableString ownershiproundtrip, rejects spilledRows. Root hasnotyetreviewed implementation.",
       "additional_file": "bench/feature-off-declarations/6477.json: existing V2 declarationofintentionalalwayscompiledenginechange, no derived/neutralityclaim orfloorchange; includedinfreshOpusreview.",
       "validation": "Scopeddefault/compact/semijoin+clippy/preflight,meaningfulboundcontrol, same5/8pattern12allocationmatrixafterprotocol;optionalfeasible2patternmiss/firsthitpair. Freezecommit beforehandoff.",
-      "constraints": "2jobs,incrementalOFF,offline,free>=6509559808; max25minfirsthandoff; nofullworkspace/remote/model/release/registry/EC2/cachecleanup. Preserveallfrozenbundles."
+      "constraints": "2jobs,incrementalOFF,offline,free>=6509559808; max25minfirsthandoff; nofullworkspace/remote/model/release/registry/EC2/cachecleanup. Preserveallfrozenbundles.",
+      "head": "ed66ef0931fa19dd521fac433870c86a78687a30",
+      "reported_result": "24allocation samplespass;5/8pattern extra~2240kbytes20.7%,2patternfirst+192bytes,miss-2064243bytes. Rootmanifestverificationpending.",
+      "source_assessment": "direct-3105/admission/bounded-root-source-assessment.json",
+      "freshness_correction": "Optionaltwo-patternharnesssamepackageidentity/oldmtimesproducedFreshcollisionbeforeANYsamples; authorpreservingoriginalevidenceandchangedbothpairpackageidentities, rebuiltbeforeall24samples. Roottoverifyreceipt.",
+      "manifest_files": 162,
+      "manifest_sha256": "9807d2c72b46c5597ea719a1c00e73100d51a0747ced9bbc7280ab0ebd868ecb",
+      "root_verification": "direct-3105/admission/bounded-root-verification.json"
+    },
+    "bounded_timing": {
+      "state": "completed_frozen_root_verified",
+      "agent": "/root/postmerge_ci",
+      "directory": "direct-3105/bounded-timing",
+      "head": "ed66ef0931fa19dd521fac433870c86a78687a30",
+      "manifest_files": 75,
+      "manifest_sha256": "c384be7f1e142dc18673cf72cf6cb9074a15d651a5036b211ca4c893fd97da17",
+      "root_verification": "direct-3105/admission/bounded-timing-root-verification.json",
+      "result": "20Systemsamples: firsthitmedian+2.0617%,fullmiss-14.4780%; bothrangesdisjoint,localadvisorynotuniversalneutrality. Samepredeclaredscreenpasses.",
+      "commands_running": false
+    },
+    "bounded_review": {
+      "state": "running",
+      "kind": "exec_command",
+      "session_id": 31817,
+      "head": "ed66ef0931fa19dd521fac433870c86a78687a30",
+      "actual_model_required": "claude-opus-5",
+      "effort": "xhigh",
+      "input": "direct-3105/admission/opus-bounded-input.md",
+      "input_bytes": 69917,
+      "input_sha256": "e86fed49a7241e2d905b924fb24c93f818968b8516700d39817d561e1c9e4bb4",
+      "output": "direct-3105/admission/opus-bounded-review.json",
+      "collect_policy": "Collect31817oncecomplete; no duplicatecall. Initial90599andfinal11803 completedcollected, no polls.",
+      "packet_limit": "Timingwasrunningwheninputfrozen; nowrootverified positive declaredscreenwithfirsthitcost. Do not claim reviewer saw unfinished timingresults."
     }
   },
   "prs": {
@@ -622,7 +654,7 @@
       "review": "ActualOpus5xhigh11803approve_for_ci, notmerge. ActualCopilotsamememoryfinding.",
       "copilot_thread": "PRRT_kwDOSz3qKM6g6CZs",
       "copilot_comment": "https://github.com/sparq-org/sparq/pull/6477#discussion_r3974906548",
-      "latest_checks": "62success51skip20running17queued3fail on19763. gate+2wasm-equality failures. No cancellation.",
+      "latest_checks": "19763terminal254success53skip3fail; gateand2undeclaredwasm-equalityruns. Newed66unpublished.",
       "wasm_diagnosis": "Intentionalsemanticdefault-onenginecode: base1560241/head1560595,+354bytes. ExistingV2declarationmissing; autodeclarecorrectlyfailssemanticblanking. Documentintentinnextrevieweddiff; sizefloorunchanged. No metadata-only orneutralityclaim.",
       "evidence": [
         "direct-3105/admission/pr-created.json",

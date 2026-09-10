@@ -1,0 +1,37 @@
+{
+  "declared_utc": "2026-09-10T02:50:24.537143+00:00",
+  "minutes": 10,
+  "source": {
+    "baseline": "e53464c73f31f7aca800f3867ac054c36408e346",
+    "candidate": "ed66ef0931fa19dd521fac433870c86a78687a30"
+  },
+  "cases": [
+    "first",
+    "miss"
+  ],
+  "fixture": "unchanged original two-pattern ASK harness:70000subjects with p/q/r,8192auxiliarytriples; query uses p/q both shared s,o; first actual subject-order hit or residual arithmeticfalse",
+  "profile": "release opt-level3 debugfalse ltofalse codegen-units16; System allocator (count-alloc OFF)",
+  "rayon": 1,
+  "warmups": 2,
+  "queries_per_sample": 3,
+  "repetitions": 5,
+  "paired_order": [
+    "AB",
+    "BA",
+    "AB",
+    "BA",
+    "AB"
+  ],
+  "samples": 20,
+  "oracle": "unchanged generated expected ASK result and uncapped oracle outside measurement",
+  "no_tuning_or_retries": true,
+  "advisory_only": true,
+  "build_provenance": "Unique capped-rhs-two-timing package name shared only by identical paired harness, fresh source mtimes, actual cargo -vv compiler commands; source/dependency and artifact hashes recorded. Baseline/candidate engine library artifact identities verified separately.",
+  "limits": {
+    "free_floor": 6509559808,
+    "jobs": 2,
+    "incremental": false,
+    "offline_locked": true,
+    "no_concurrent_build_and_sample": true
+  }
+}
