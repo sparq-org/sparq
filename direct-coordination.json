@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-10T17:13:26.822337+00:00",
+  "updated_at": "2026-09-10T17:17:44.343772+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -72,7 +72,7 @@
     "agent": "/root/postmerge_ci",
     "model": "gpt-6-astra",
     "effort": "xhigh",
-    "phase": "Corrected controls2/2 pass; actual Opus reviewing public-field coherence before production change.",
+    "phase": "Narrow memo optimization and focused regressions after actual Opus conditional design review.",
     "execution_limits": {
       "builds": 1,
       "filtered_runs": 1,
@@ -86,15 +86,15 @@
       "incremental": false,
       "no_retry": true
     },
-    "state": "actual_opus_design_review_running_parallel_source_only_readiness",
-    "directory": "direct-6485/memo-controls",
+    "state": "astra_implementation_running",
+    "directory": "direct-6485/implementation",
     "admission": "direct-6485/admission/corrected-controls-admission.json",
-    "production_edit_authorized": false,
+    "production_edit_authorized": true,
     "prior_baseline": "direct-3113/delete-memo-baseline",
     "next_actions": [
-      "Collect corrected controls and invariant proof. Review before authorizing narrow production change.",
-      "Actual Opus5 xhigh independent review and normal protected CI/merge required.",
-      "Do not close parent3113: first cold scan remains separate."
+      "Collect Astra implementation and complete source proof for id_of F4. Verify bounded tests and behavioral controls.",
+      "Obtain actual Opus5 xhigh review of final patch/evidence before publication.",
+      "Keep parent3113 and separate6483 open; preserve all holds."
     ],
     "controls": {
       "directory": "direct-6485/memo-controls",
@@ -110,7 +110,7 @@
       "files": 2
     },
     "design_review": {
-      "state": "running",
+      "state": "completed_collected",
       "session_id": 92456,
       "kind": "exec_command",
       "requested_model": "claude-opus-5",
@@ -119,9 +119,20 @@
       "input_sha256": "e8348fa975cf6bcbe05f3e8bed09aed21c205ec460d0ef82a32e79ac0a797f49",
       "output": "direct-6485/admission/opus-memo-design-review.json",
       "completion": "direct-6485/admission/opus-memo-design-completion.json",
-      "policy": "Collect92456; do not relaunch. No production edit approved."
+      "policy": "92456 completed/collected. No poll/relaunch. Final patch review still required.",
+      "actual_primary_model": "claude-opus-5",
+      "verdict": "CONDITIONAL",
+      "result": "direct-6485/admission/opus-memo-design-result.json",
+      "root_disposition": "direct-6485/admission/opus-memo-design-root-disposition.json",
+      "output_sha256": "c619dd1d92a198c46a7e2b26ca8ab34e08de5612bd6db3920b451263d5891886"
     },
-    "agent_current_task": "Source-only minimal implementation/test plan and warm-profile readiness; no builds or production edits."
+    "agent_current_task": "Implement/validate/commit locally within grant; root handles final actual Opus review and publication. No commands from former phases remain.",
+    "implementation_admission": "direct-6485/admission/implementation-admission.json",
+    "implementation_readiness": {
+      "directory": "direct-6485/implementation-readiness",
+      "manifest_sha256": "a86fc5c86b63c33a91f43a3d5cffff710a08e0da3a45c14cd1c362a2b76066f4",
+      "verified_files": 6
+    }
   },
   "prs": {
     "4300": {
@@ -643,7 +654,7 @@
     }
   },
   "next_actions": [
-    "Collect existing Astra6485 corrected controls/source invariants; require meaningful safety proof and independent Opus review before production publication. Original3113 first cold scan stays open.",
+    "Collect existing Astra6485 bounded implementation; verify id_of source, focused controls and current head. Actual Opus final patch review before publication. Keep3113 open.",
     "6482/5183 complete; no repeated CI/log reads or reruns. Separate6483 witness remains unexecuted/open. Hashreuse3105 parked with evidence.",
     "Registry Actions OFF, heartbeat ACTIVE; preserve ALLGREEN, gate15368, rate fail-closed and all prior approval/canon/EC2/release holds."
   ],

@@ -1,0 +1,12 @@
+{
+  "at": "2026-09-10T17:15:56.271262+00:00",
+  "actual_primary_model": "claude-opus-5",
+  "effort": "xhigh",
+  "session": 92456,
+  "state": "completed_collected",
+  "output_sha256": "c619dd1d92a198c46a7e2b26ca8ab34e08de5612bd6db3920b451263d5891886",
+  "verdict": "CONDITIONAL",
+  "root_decision": "Authorize narrow implementation after agent confirms id_of is lookup-only; close missing-source F4 with full source in final review. Include field coherence docs and guard invariant, no API redesign. Require final actual Opus review of resulting patch and tests before publication.",
+  "field_caveat": "Review accepts coherent-Graph invariant based on existing documented append-only memo contract; direct field replacement can already break private caches. Document the supported construction path precisely without claiming all externally writable states are safe.",
+  "test_scope": "Meaningful memo preservation, safe invalidation, noncanonical integer, sparse/fork/compact, mapped WAL/new decimal; four named behavioral controls per review. Scope timings as execution receipts only; parent3113 remains open."
+}

@@ -1,0 +1,42 @@
+163: def build_with_retry(crate, features):
+164:     # [OPUS-4.8] sq-hhxc heritage: bounded retry absorbs transient crates.io
+165:     # hiccups during any residual resolution the build performs.
+166:     for attempt in range(1, BUILD_ATTEMPTS + 1):
+167:         rc = run([CARGO, "build", "-p", crate, "--features", features])
+168:         if rc == 0:
+169:             return 0
+170:         if attempt < BUILD_ATTEMPTS:
+171:             print(
+172:                 f"cargo build attempt {attempt} failed; retrying...",
+173:                 file=sys.stderr,
+174:                 flush=True,
+175:             )
+176:     return rc
+177: 
+178: 
+179: def run_leg(leg):
+180:     """Build -> (test) -> clippy, exactly the per-leg matrix step set.
+181:     Returns None on success, else the name of the failing step."""
+182:     crate, features = leg["crate"], leg["features"]
+183:     if build_with_retry(crate, features) != 0:
+184:         return "build"
+185:     if leg["test"]:
+186:         if run([CARGO, "test", "-p", crate, "--features", features]) != 0:
+187:             return "test"
+188:     if (
+189:         run(
+190:             [
+191:                 CARGO,
+192:                 "clippy",
+193:                 "-p",
+194:                 crate,
+195:                 "--features",
+196:                 features,
+197:                 "--all-targets",
+198:                 "--",
+199:                 "-D",
+200:                 "warnings",
+201:             ]
+202:         )
+203:         != 0
+204:     ):

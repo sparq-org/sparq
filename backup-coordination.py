@@ -753,6 +753,12 @@ for evidence_name in ['memo-controls-root-verification.json', 'opus-memo-design-
 for evidence_name in ['budget.json', 'budget.json.stderr', 'in-progress.json', 'in-progress.json.stderr', 'queued.json', 'queued.json.stderr', 'registry-actions.json', 'registry-actions.json.stderr']:
     FILES['monitor-20260910-1712-' + evidence_name] = ROOT / 'monitor-20260910-1712' / evidence_name
 
+# Completed6485 design review and scoped implementation admission.
+for evidence_name in ['artifact-proof.json', 'core-Cargo.toml', 'core-feature-matrix.yml', 'matrix-executor.txt', 'recorded-mmap-lib-invocation.json', 'report.json', 'manifest.json']:
+    FILES["6485-implementation-readiness-" + evidence_name.replace("/", "--")] = ROOT / "direct-6485/implementation-readiness" / evidence_name
+for evidence_name in ['implementation-admission.json', 'opus-memo-design-completion.json', 'opus-memo-design-result.json', 'opus-memo-design-review.json', 'opus-memo-design-root-disposition.json', 'opus-memo-design-stderr.log', 'preimplementation-budget.json', 'preimplementation-budget.json.stderr', 'preimplementation-issue.json', 'preimplementation-issue.json.stderr', 'preimplementation-main.json', 'preimplementation-main.json.stderr', 'preimplementation-pr4097.json', 'preimplementation-pr4097.json.stderr', 'preimplementation-pr4247.json', 'preimplementation-pr4247.json.stderr', 'preimplementation-pr4354.json', 'preimplementation-pr4354.json.stderr']:
+    FILES["6485-admission-" + evidence_name] = ROOT / "direct-6485/admission" / evidence_name
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout

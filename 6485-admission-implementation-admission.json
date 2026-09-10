@@ -1,0 +1,28 @@
+{
+  "at": "2026-09-10T17:17:44.343772+00:00",
+  "agent": "/root/postmerge_ci",
+  "model": "gpt-6-astra",
+  "effort": "xhigh",
+  "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6485",
+  "branch": "codex/preserve-numeric-memo",
+  "base": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+  "fresh_target_validation": "direct-6485/admission/preimplementation-*.json",
+  "scope": "Minimal numeric-memo length guard plus source-coherence docs and meaningful focused tests; production edits after confirming id_of lookup-only. No unrelated API/representation changes.",
+  "F4": "Complete id_of and dictionary lookup chain source proof required before edit; include in final independent review.",
+  "review": "Actual Opus5 xhigh design CONDITIONAL; final actual review required before publication. Completed92456, never relaunch.",
+  "executions": {
+    "max_total_seconds": 600,
+    "max_new_allocated_bytes": 268435456,
+    "start_floor": 2214592512,
+    "continuous_floor": 2147483648,
+    "offline": true,
+    "jobs": 1,
+    "incremental": false,
+    "default": "One candidate and four named behavioral controls",
+    "extra": "At most one matching recorded mmap/dict-spill candidate adaptation; no dependency rebuild.",
+    "checks": "Scoped Clippy/touched formatting/diff if warm; CI authority for broad matrix."
+  },
+  "publication_authorized": false,
+  "stop_on_unexpected_behavior": true,
+  "keep_parent3113_open": true
+}

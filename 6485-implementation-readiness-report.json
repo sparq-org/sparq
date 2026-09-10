@@ -1,0 +1,70 @@
+{
+  "created_at": "2026-09-10T17:14:43.441014+00:00",
+  "author_runtime": "GPT-6 Astra xhigh",
+  "status": "READY_FOR_CONCRETE_SCOPED_GRANT; NO_EXECUTION_AUTHORIZED_OR_ATTEMPTED",
+  "source_head": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+  "smallest_production_delta": "Subject to design review of public dict caveat: condition only existing state1\u21920 compare_exchange in apply_delta_mem on self.dict.len()!=old_len. Keep interning/cache extension/store update/order/state2 unchanged. One production file crates/sparq-core/src/lib.rs.",
+  "smallest_tests": [
+    {
+      "scope": "coherent default graph",
+      "plan": "Keep existing insertion false\u2192true test unchanged. Add bounded memo-state checks around existing-delete/known-absent-delete/reinsert/empty/inline-integer; pin unchanged dictionary length and memo1 retained. Stored exact/inexact decimals grow dictionary and require invalidation; subsequent classification false/true respectively; sticky2 remains2 after deletes."
+    },
+    {
+      "scope": "fork+compact",
+      "plan": "Construct through public load/fork; fork memo starts0 as today, explicitly warm it first. Delete/reinsert without new terms must retain1. Compact fork then assert same term IDs/numeric values, warm memo unchanged, isolated parent snapshot unaffected. Insert new inexact decimal in one fork ->2 while parent remainsfalse. Reuse existing compact_keeps_caches_shareable_for_the_next_fork assertion patterns, not a new cache abstraction."
+    },
+    {
+      "scope": "mmap/dict-spill",
+      "plan": "If local direct-rustc adaptation admitted, run focused memo plus save/open/WAL/compact test against actual recorded feature closure. New cfg(mmap) focused test should create via save/open, warm, apply unchanged-dictionary deletes and appended inexact decimal, then reopen/compact; memo0 after reopening is intended. Existing tests supply builder/WAL semantics; no claim to fix first cold scan."
+    }
+  ],
+  "meaningful_controls": [
+    "Remove the length guard: actual unchanged-D memo-state/cold-visit assertions must fail.",
+    "Suppress all invalidation: existing new inexact decimal false\u2192true test must fail.",
+    "Retain existing state2 behavior and avoid mutation controls that fail compilation instead of behavioral assertions."
+  ],
+  "default_route": {
+    "proof": "memo-controls just executed exact actual-core cfg(test) default+parallel with 7 direct rlibs and 2 tests passed.",
+    "profile": "Rust1.97.1/Rust2021/O3/unwind/LTOoff/codegen16, jobs1/incremental0/offline.",
+    "reuse": "Read frozen compile argv, rehash compiler/externs/source; unique candidate/control outputs outside cache. No Cargo dependency build needed for this proven route."
+  },
+  "mmap_dictspill_route": {
+    "recorded_features": [
+      "default",
+      "dict-spill",
+      "mmap",
+      "parallel"
+    ],
+    "actual_command_found": true,
+    "matching_direct_rlibs_present": true,
+    "direct_rlib_count": 8,
+    "test_dev_dependency_proptest_present": true,
+    "source_all15files_match_recorded781_revision": true,
+    "profile": "Recorded source command has edition2021 opt3 embedbitcode=no codegen16; target profile fingerprint18412561994239103911 matches existing warm diagnostic profile. Unwind/noLTO test overrides must be explicit as in executed default route.",
+    "readiness": "Plausible no-cold-dependency adaptation supported by actual lib command/8 direct rlibs plus known proptest. No existing exact mmap/dict-spill core cfg(test) success was proved in this bounded pass. Stop on first compile/profile failure; do not build missing dependencies."
+  },
+  "ci_reliance": {
+    "leg": "opt-in sparq-core (mmap, dict-spill)",
+    "fragment": ".github/feature-matrix.d/sparq-core.yml:27-30 test:true",
+    "actual_commands": "scripts/run-feature-matrix-group.py:182-203 performs build, cargo test -p sparq-core --features mmap,dict-spill, then clippy --all-targets -D warnings; defaults remain enabled.",
+    "other_leg": "sparq-core (compact-index) also test:true. General fullworkspace/default+wasm/ratchets remain authoritative CI obligations; no workflow changes proposed."
+  },
+  "resource_plan": {
+    "default_evidence": "Prior corrected controls compile ~11.78s, total phase ~13s, sampled output <10MiB. Execution receipts only, not performance predictions.",
+    "proposed_initial_cap": "One default build/test plus calibrated controls in separately granted bounded phase; for extra mmap adaptation at most one build/filter,480s/256MiB,start>=2GiB+64MiB/continuous>=2GiB,jobs1. Stop on missing dependency/profile mismatch. No execution authorized by this report.",
+    "initial_free_bytes": 10726285312,
+    "final_free_bytes": 10726133760
+  },
+  "held_questions": [
+    "Direct public Graph.dict replacement can violate private cache/memo coherence; do not assume globally immutable numeric terms just from equal length. Existing review-context supplement holds precise observable-difference qualification.",
+    "No new public API, accounting policy, feature flags, production patch or tests have been written.",
+    "Parent3113 first cold scan remains out of scope."
+  ],
+  "operations": {
+    "builds": 0,
+    "tests": 0,
+    "network": 0,
+    "production_edits": 0,
+    "pending_commands": 0
+  }
+}

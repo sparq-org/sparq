@@ -1,0 +1,177 @@
+{
+  "compiler": {
+    "compiler": "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/rustc",
+    "sha256": "210df6794001b73ec3d453878707fa1e0bdcb63c427024a6e6574bbe5615a4da",
+    "version_receipt": "rustc 1.97.1 (8bab26f4f 2026-07-14)\nbinary: rustc\ncommit-hash: 8bab26f4f68e0e26f0bb7960be334d5b520ea452\ncommit-date: 2026-07-14\nhost: aarch64-apple-darwin\nrelease: 1.97.1\nLLVM version: 22.1.6\n",
+    "profile": "Actualcore Rust2021/1.97.1 cfgtest adaptation,O3,unwind,noLTO,codegen16,default+parallel",
+    "features": [
+      "default",
+      "parallel"
+    ]
+  },
+  "mmap_lib_direct_rlibs": [
+    {
+      "crate": "hashbrown",
+      "recorded_rmeta_verified": true,
+      "rlib_path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libhashbrown-6eaca190343f9157.rlib",
+      "rlib_exists": true,
+      "rlib_bytes": 1636144,
+      "rlib_sha256": "6aac5ddc22ccd9b73685dc899cdc951130e5fb3094bed9a9ebda1807d56d1f4a"
+    },
+    {
+      "crate": "libc",
+      "recorded_rmeta_verified": true,
+      "rlib_path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/liblibc-d3a9ab32a070ca78.rlib",
+      "rlib_exists": true,
+      "rlib_bytes": 2214928,
+      "rlib_sha256": "9ead2b96ea04a72d78681b24d0275b3f257b1802df53e04c3b52017a0706ba00"
+    },
+    {
+      "crate": "memchr",
+      "recorded_rmeta_verified": true,
+      "rlib_path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libmemchr-f73f6714e13773b7.rlib",
+      "rlib_exists": true,
+      "rlib_bytes": 1225144,
+      "rlib_sha256": "31ffdbd9407dde07285a57dbce8d9ecbcfb575db7f9beba2fafbb70624ac6046"
+    },
+    {
+      "crate": "memmap2",
+      "recorded_rmeta_verified": true,
+      "rlib_path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libmemmap2-1da36dfefebe3146.rlib",
+      "rlib_exists": true,
+      "rlib_bytes": 165304,
+      "rlib_sha256": "2e86757102b42a04914c7f2fcac70dbb84c69b3f00155d82fe6458458db3752e"
+    },
+    {
+      "crate": "oxrdf",
+      "recorded_rmeta_verified": true,
+      "rlib_path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/liboxrdf-a953fc3282e3d853.rlib",
+      "rlib_exists": true,
+      "rlib_bytes": 1921384,
+      "rlib_sha256": "491471fab5133fe72a254ceba0e57440914aedf52ba79e1898df16442b65e82a"
+    },
+    {
+      "crate": "oxttl",
+      "recorded_rmeta_verified": true,
+      "rlib_path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/liboxttl-bf587d09880a3c80.rlib",
+      "rlib_exists": true,
+      "rlib_bytes": 1260416,
+      "rlib_sha256": "c610322ca491aed26d2162080126ed33a8c97245436aa0da8542e0cbe07dd8a7"
+    },
+    {
+      "crate": "rayon",
+      "recorded_rmeta_verified": true,
+      "rlib_path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/librayon-b0b3a31e71d15f32.rlib",
+      "rlib_exists": true,
+      "rlib_bytes": 4519136,
+      "rlib_sha256": "481f142ba17b4bc134155982e55c4104c362c8ee0b9062e80a4248d407870ea6"
+    },
+    {
+      "crate": "rustc_hash",
+      "recorded_rmeta_verified": true,
+      "rlib_path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/librustc_hash-a257f2d86c4c9dc8.rlib",
+      "rlib_exists": true,
+      "rlib_bytes": 40672,
+      "rlib_sha256": "b62e578ef93ab86ace4d00bb0b3c90e02e00fabc1a1fad4bf28e676a4b25e894"
+    }
+  ],
+  "test_proptest": {
+    "crate": "proptest",
+    "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libproptest-fe58022d97b60f4d.rlib",
+    "bytes": 6714896,
+    "sha256": "4d9fdfe72692de8b2580f8d3826dcb80532f0c7d9688174188d28dc4635a6e47"
+  },
+  "source_identity": [
+    {
+      "path": "crates/sparq-core/src/extsort.rs",
+      "current_sha256": "792673d722e1fec68525505782685743f7bc9d1f499fb8b79065fea58aaf333f",
+      "recorded_source_revision_sha256": "792673d722e1fec68525505782685743f7bc9d1f499fb8b79065fea58aaf333f",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-core/src/lib.rs",
+      "current_sha256": "3679c762c28c956df60ee519682420c2800993a3b3674b77ed335bb9acba6a45",
+      "recorded_source_revision_sha256": "3679c762c28c956df60ee519682420c2800993a3b3674b77ed335bb9acba6a45",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-core/src/store.rs",
+      "current_sha256": "6c70a6d4f13de468143f19b75972c28b312a8a2110bf95deb502d784f9b9284c",
+      "recorded_source_revision_sha256": "6c70a6d4f13de468143f19b75972c28b312a8a2110bf95deb502d784f9b9284c",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-core/src/eliasfano.rs",
+      "current_sha256": "0bf83ea87986b04417e0396fbaba406e5c1112f12caa26d92db0565210e2b3cb",
+      "recorded_source_revision_sha256": "0bf83ea87986b04417e0396fbaba406e5c1112f12caa26d92db0565210e2b3cb",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-core/src/temporal.rs",
+      "current_sha256": "edd405793ad97bf0a8a300b08828b1d36b6c5ba48467096425512ad98a76b047",
+      "recorded_source_revision_sha256": "edd405793ad97bf0a8a300b08828b1d36b6c5ba48467096425512ad98a76b047",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-core/src/iri.rs",
+      "current_sha256": "bf6e36f447ce51f43a7bf84220bdb8ee4a894662971bd3a82013fa7d5ba1414d",
+      "recorded_source_revision_sha256": "bf6e36f447ce51f43a7bf84220bdb8ee4a894662971bd3a82013fa7d5ba1414d",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-core/src/strdist.rs",
+      "current_sha256": "5538ea31c303721b57c3677ba8b087c67a6524754d74e1690de123d8845cd761",
+      "recorded_source_revision_sha256": "5538ea31c303721b57c3677ba8b087c67a6524754d74e1690de123d8845cd761",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-core/src/dict.rs",
+      "current_sha256": "abb2f7a0c524583eafc1acb175113ab4fd551a336d772f702a13420ef281aeb3",
+      "recorded_source_revision_sha256": "abb2f7a0c524583eafc1acb175113ab4fd551a336d772f702a13420ef281aeb3",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-core/src/compress.rs",
+      "current_sha256": "71b4b72c7499b3c8e7b81c2dff753e5911b226d2700da4fc9baebb244b9408dc",
+      "recorded_source_revision_sha256": "71b4b72c7499b3c8e7b81c2dff753e5911b226d2700da4fc9baebb244b9408dc",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-core/src/dictspill.rs",
+      "current_sha256": "a57c8da2eb093df1876fa255e83c12a4ae6de2b9995e1ba53663f054e28cf513",
+      "recorded_source_revision_sha256": "a57c8da2eb093df1876fa255e83c12a4ae6de2b9995e1ba53663f054e28cf513",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-core/src/shared.rs",
+      "current_sha256": "0cd9243e254cef67c54fb5ae25ed2eac60cd671997168e55d3d27bd828e98ac9",
+      "recorded_source_revision_sha256": "0cd9243e254cef67c54fb5ae25ed2eac60cd671997168e55d3d27bd828e98ac9",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-core/src/nt.rs",
+      "current_sha256": "6e120cf3f7ae015a44e345be0f5146ffd5d809a5e09efa666e83d99c6481ae10",
+      "recorded_source_revision_sha256": "6e120cf3f7ae015a44e345be0f5146ffd5d809a5e09efa666e83d99c6481ae10",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-core/src/ttl.rs",
+      "current_sha256": "062892f23e21ef9fe25e8fe3527c134ec0d2b18e89d72789f0cd8b324834f48a",
+      "recorded_source_revision_sha256": "062892f23e21ef9fe25e8fe3527c134ec0d2b18e89d72789f0cd8b324834f48a",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-core/src/ttl/tests.rs",
+      "current_sha256": "231f14796387d1cba773feccbc2518688c8504b28baabb21c28178ddab4a9c33",
+      "recorded_source_revision_sha256": "231f14796387d1cba773feccbc2518688c8504b28baabb21c28178ddab4a9c33",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-core/src/store/overlay_deleted_tests.rs",
+      "current_sha256": "5eaf0fda2377ec4e7df664d749e5466771aa656659ac5153f746a8ed6ec4a688",
+      "recorded_source_revision_sha256": "5eaf0fda2377ec4e7df664d749e5466771aa656659ac5153f746a8ed6ec4a688",
+      "equal": true
+    }
+  ],
+  "qualification": "The recorded mmap/dict-spill command is a lib compilation, not a cfg(test) execution. Matching-stem rlibs are present and rehashed; this does not equate their bytes to recorded rmeta. Adding the known proptest dev dependency and --test is a proposed direct-rustc adaptation only, not yet validated under these features."
+}

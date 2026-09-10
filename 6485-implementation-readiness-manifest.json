@@ -1,0 +1,35 @@
+{
+  "files": [
+    {
+      "path": "artifact-proof.json",
+      "bytes": 8497,
+      "sha256": "13a6fd08c4bdefea19e5d4ccbc5614da7a53c37911bf068f7e2cb022da1990c4"
+    },
+    {
+      "path": "core-Cargo.toml",
+      "bytes": 11422,
+      "sha256": "bacc2b9877e8d12703578b5c28bba1211514b973bb0edd07ad822bf8b125d362"
+    },
+    {
+      "path": "core-feature-matrix.yml",
+      "bytes": 3696,
+      "sha256": "58ca6d0a460976a7a48e502dceeed203e8d8f9292d708a9bdb180dbbcf419e10"
+    },
+    {
+      "path": "matrix-executor.txt",
+      "bytes": 1504,
+      "sha256": "e8c0d8eab4d32e23242774bf3674e759d110186a5fa42a65c1c0cedcfb710610"
+    },
+    {
+      "path": "recorded-mmap-lib-invocation.json",
+      "bytes": 5463,
+      "sha256": "18db9ae61dd1a75f9ae07dced29bf442047d5b2e37febda221f3a524bd35b47d"
+    },
+    {
+      "path": "report.json",
+      "bytes": 5276,
+      "sha256": "e308644ceff77a6675273804eb7e3a405d637a6ed60f966a56a94b029a327217"
+    }
+  ],
+  "file_count": 6
+}
