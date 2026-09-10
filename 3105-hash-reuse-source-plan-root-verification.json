@@ -1,0 +1,9 @@
+{
+  "at": "2026-09-10T15:41:38.516516+00:00",
+  "manifest_sha256": "dbe10cdac941dc52ceb1db2f611d9b672752ec1402037f249aa7f508855c9c49",
+  "files_verified": 10,
+  "bytes_verified": 89120,
+  "source_unchanged": true,
+  "runtime_witness_executed": false,
+  "decision": "Staticcandidate forwardedtoactualOpus5xhigh; noimplementation/buildGO; diskbelow2GiB."
+}

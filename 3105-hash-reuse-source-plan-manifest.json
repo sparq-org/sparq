@@ -1,0 +1,56 @@
+{
+  "files": [
+    {
+      "path": "accounting-dependencies.txt",
+      "bytes": 4600,
+      "sha256": "3b25cbbe656214c59b7946cb05ed83100584038da950ec81ab1d5778038e66df"
+    },
+    {
+      "path": "engine-capped.txt",
+      "bytes": 20868,
+      "sha256": "052ebc59b7e0a3de4fb62a2dcdc78b1bfa27b126abfd3c6b0d8d09d8fc8e5a4e"
+    },
+    {
+      "path": "hash-build-probe.txt",
+      "bytes": 15740,
+      "sha256": "89902760f93849cdccd991745cb4ed01b5c1cb9c23a68313af283dca20d73ebf"
+    },
+    {
+      "path": "planner-scan.txt",
+      "bytes": 19754,
+      "sha256": "5690a78b292b899c2eb2224fd04ffead956b3305e74ed6e10797648c626ae0af"
+    },
+    {
+      "path": "provenance.json",
+      "bytes": 2241,
+      "sha256": "200eb3f28fae476899a22fb5c7edf39f29e6d45c19b3c45b8b51a757c19b56b3"
+    },
+    {
+      "path": "public-path-context.txt",
+      "bytes": 9517,
+      "sha256": "f2e1b95d79ac3eb79002779988755463684ee81bf9392c3412e0ee6de9d8feeb"
+    },
+    {
+      "path": "report.json",
+      "bytes": 3441,
+      "sha256": "2cc101720b944fd400ca0096155c7a30ea2af7b786a9f2c490702c237ba07c08"
+    },
+    {
+      "path": "retention-plan.json",
+      "bytes": 5492,
+      "sha256": "9bb1572da2d9fbba83b0f082f2d6c4d902833f950f2588bb7c8633b8585c7b3e"
+    },
+    {
+      "path": "review-packet.md",
+      "bytes": 2878,
+      "sha256": "7e9c94eab25246d7389c6408f1fdd5703c8258066e9bf5c318e9505f986e431f"
+    },
+    {
+      "path": "witness-plan.json",
+      "bytes": 4589,
+      "sha256": "0b0d0be50dab12ab693e2465b9b5a1cdbdf5e982a8525321333bed17657e3097"
+    }
+  ],
+  "file_count": 10,
+  "total_bytes": 89120
+}

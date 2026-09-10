@@ -1,0 +1,113 @@
+SOURCE Cargo.toml; full source SHA256 9f820551d15c1430a25172c831f491fb7fd92231c15f124b2a048b1137d8ce73
+LINES 28-37
+28: [patch.crates-io]
+29: spargebra = { path = "vendor/spargebra" }
+30: 
+31: [workspace.package]
+32: version = "0.1.1"
+33: edition = "2021"
+34: license = "MIT"
+35: # [OPUS-4.8] (sq-qmth) MSRV floor 1.88. Upstream-driven: `geo@0.33.1` (a transitive dep
+36: # of sparq-geo) requires rustc 1.88, and the released oxigraph parser stack
+37: # (oxrdf/oxttl/oxrdfio/spargebra/… 0.2–0.4) requires 1.87. Verified empirically: the
+LINES 65-73
+65: # Fast hashing / maps. These are the NEWEST side of a duplicate pair in Cargo.lock;
+66: # the lagging copies are held by third-party crates. Blockers are surveyed once, in
+67: # `deny.toml` § [bans] (the duplicate-version blocker registry) — read that before
+68: # re-investigating a `multiple-versions` warning.
+69: rustc-hash = "2"
+70: hashbrown = "0.17"
+71: # Inline small rows (avoid a heap allocation per solution row).
+72: smallvec = "1"
+73: # Parallelism.
+SOURCE Cargo.lock; full source SHA256 6d7b6095f5fec01e4ace906d6001687c67d83fedc1e50180891a419c22026152
+LINES 2028-2039
+2028: [[package]]
+2029: name = "hashbrown"
+2030: version = "0.17.1"
+2031: source = "registry+https://github.com/rust-lang/crates.io-index"
+2032: checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
+2033: dependencies = [
+2034:  "allocator-api2",
+2035:  "equivalent",
+2036:  "foldhash 0.2.0",
+2037: ]
+2038: 
+2039: [[package]]
+LINES 4782-4788
+4782: [[package]]
+4783: name = "smallvec"
+4784: version = "1.15.2"
+4785: source = "registry+https://github.com/rust-lang/crates.io-index"
+4786: checksum = "8ed6a63f02c8539c91a8685a86f4099661ba3da017932f6ebbea6de3f0fa7c90"
+4787: 
+4788: [[package]]
+SOURCE dependency:hashbrown-0.17.1/src/map.rs; full source SHA256 b79497ce537ffc5ed4f8f3399434b9216c01e7927fdc434fee190e9e9ce2abb0
+LINES 1999-2010
+1999: 
+2000:     /// Returns the total amount of memory allocated internally by the hash
+2001:     /// set, in bytes.
+2002:     ///
+2003:     /// The returned number is informational only. It is intended to be
+2004:     /// primarily used for memory profiling.
+2005:     #[inline]
+2006:     pub fn allocation_size(&self) -> usize {
+2007:         self.table.allocation_size()
+2008:     }
+2009: }
+2010: 
+SOURCE dependency:hashbrown-0.17.1/src/raw.rs; full source SHA256 0c8ad353ba95817e72b0a8fea48fa2599099ea3def374f254ab6402a9c468d22
+LINES 695-707
+695: 
+696:     /// Returns the total amount of memory allocated internally by the hash
+697:     /// table, in bytes.
+698:     ///
+699:     /// The returned number is informational only. It is intended to be
+700:     /// primarily used for memory profiling.
+701:     #[inline]
+702:     pub(crate) fn allocation_size(&self) -> usize {
+703:         // SAFETY: We use the same `table_layout` that was used to allocate
+704:         // this table.
+705:         unsafe { self.table.allocation_size_or_zero(Self::TABLE_LAYOUT) }
+706:     }
+707: 
+LINES 3169-3181
+3169:     #[inline]
+3170:     unsafe fn allocation_size_or_zero(&self, table_layout: TableLayout) -> usize {
+3171:         if self.is_empty_singleton() {
+3172:             0
+3173:         } else {
+3174:             // SAFETY:
+3175:             // 1. We have checked that our table is allocated.
+3176:             // 2. The caller ensures that `table_layout` matches the [`TableLayout`]
+3177:             // that was used to allocate this table.
+3178:             unsafe { self.allocation_info(table_layout).1.size() }
+3179:         }
+3180:     }
+3181: 
+SOURCE dependency:smallvec-1.15.2/src/lib.rs; full source SHA256 a779bc485235ccb746b680be71d57b707865341209a585b53e63a91c4bda6cae
+LINES 988-1003
+988:     pub fn capacity(&self) -> usize {
+989:         self.triple().2
+990:     }
+991: 
+992:     /// Returns a tuple with (data ptr, len, capacity)
+993:     /// Useful to get all `SmallVec` properties with a single check of the current storage variant.
+994:     #[inline]
+995:     fn triple(&self) -> (ConstNonNull<A::Item>, usize, usize) {
+996:         unsafe {
+997:             if self.spilled() {
+998:                 let (ptr, len) = self.data.heap();
+999:                 (ptr, len, self.capacity)
+1000:             } else {
+1001:                 (self.data.inline(), self.capacity, Self::inline_capacity())
+1002:             }
+1003:         }
+LINES 1022-1028
+1022: 
+1023:     /// Returns `true` if the data has spilled into a separate heap-allocated buffer.
+1024:     #[inline]
+1025:     pub fn spilled(&self) -> bool {
+1026:         self.capacity > Self::inline_capacity()
+1027:     }
+1028: 

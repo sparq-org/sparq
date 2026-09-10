@@ -1,0 +1,41 @@
+{
+  "author": "GPT-6 Astra xhigh",
+  "recorded_utc": "2026-09-10T15:29:04.674171+00:00",
+  "decision": "GO_FOR_ONE_BOUNDED_INSTRUMENTED_WITNESS_ONLY",
+  "implementation_admission": false,
+  "main": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+  "worktree_head": "fe3284199db0831f353d2ae401b8c69472764904",
+  "clean": true,
+  "network_reads_this_phase": 0,
+  "builds_tests_benchmarks_this_phase": 0,
+  "code_changes": 0,
+  "fixed_witness": "PREFIX : <http://ex/> SELECT ?o WHERE { ?s :q ?o . ?s :p ?o . FILTER(?o < 16) } LIMIT 65",
+  "expected_unexecuted": "2actual RHS serial table builds(128row visits),1RHS scan,64result rows; candidate target1build64visits. Independently verify using public query + actual build observer.",
+  "accounting_blocker_resolved_in_source": "Pinned hashbrown0.17.1 JoinTable has safe allocation_size(); add table-vector capacity, spilled Key/Posting capacities and charged inline cache metadata to existing shared4MiB. No length estimate or new public API needed.",
+  "tradeoff": "After-build charge requires an O(buckets) iteration over stored keys/postings, plus extra retained metadata. First-block hits may pay this without reuse; first-fit tables can crowd out later scan reuse. Even passing the work witness cannot establish latency/heap benefit.",
+  "next_step": "When root independently confirms stable reserve/warm exact profile, instrument and run ONLY the proposed current-main public witness first. Stop if parser/actualsort/cardinality/path differs; do not tune until it passes. Actual Opus design/patch review and bounded exact-head timing/heap evidence remain subsequent decisions.",
+  "later_execution_budget_proposal": {
+    "authorization": "Not authorization to execute now.",
+    "initial_execution": "One engine cfg(test) filtered witness; no full workspace or external service. Rust2021, pinned toolchain, offline/locked, jobs1,incremental0, warm existing task cache profile only. Preserve source/feature/compiler provenance.",
+    "hard_time_seconds": 480,
+    "hard_new_allocated_output_bytes": 268435456,
+    "minimum_free_before_start_bytes": 2214592512,
+    "continuous_free_floor_bytes": 2147483648,
+    "stop_conditions": [
+      "No confirmed compatible warm profile",
+      "Missing offline dependencies",
+      "Output growth/time/free limit",
+      "Actual path differs from declared oracle"
+    ],
+    "memory_estimate": "4097 synthetic triples,2048seed rows,64RHS rows and64output rows: runtime fixture is modest; no measured compiler footprint. Existing cfg(test) rebuild may exceed cap if cache is cold; stop rather than widen."
+  },
+  "reserve_observation_bytes": 2016718848,
+  "no_runtime_claim": "All proposed new work counts/accounting design are static deductions; no new query, allocator calibration or compiled control executed.",
+  "source_and_hold_preservation": "issue5183 branch/frozen bundles unchanged. No6483 witness, no GH reads or root-held task changes. Prior openPR dedupe is frozen historical evidence, not a fresh conflict guarantee.",
+  "local_read_limitations": [
+    "A local rg guessed hashbrown src/raw/mod.rs; actual pinned file is src/raw.rs, then read its authoritative body.",
+    "A local rg guessed exec/budget.rs; budget is inline in exec.rs; no conclusion depends on that nonexistent path.",
+    "Two overly broad read outputs were truncated; load-bearing sections were subsequently read in focused spans."
+  ],
+  "pending_commands": false
+}

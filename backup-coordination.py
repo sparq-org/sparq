@@ -694,6 +694,15 @@ for evidence_name in ['archive.log', 'archive.log.excerpts.txt', 'budget.json', 
 for evidence_name in ['ci6482-root-verification.json', 'pr6482-ci-body.md', 'pr6482-ci-body-input.json', 'copilot6482-ci-reply-input.json', 'finish-review6482-receipt.json', 'resolve6482-input.json', 'enqueue6482-receipt.json', 'enqueue6482-input.json', 'queue6482-watch-query.json', 'queue6482-first-observation.json', 'queue6482-first-observation.stderr', 'mg6482-first-commit.json', 'mg6482-first-commit.stderr', 'mg6482-first-runs.json', 'mg6482-first-runs.stderr', 'mg6482-tree-proof.json']:
     FILES["5183-admission-" + evidence_name] = ROOT / "direct-5183/admission" / evidence_name
 
+# Frozen3105 source-only plan and pending actual Opus design review input.
+for evidence_name in ['accounting-dependencies.txt', 'engine-capped.txt', 'hash-build-probe.txt', 'planner-scan.txt', 'provenance.json', 'public-path-context.txt', 'report.json', 'retention-plan.json', 'review-packet.md', 'witness-plan.json', 'manifest.json']:
+    FILES["3105-hash-reuse-source-plan-" + evidence_name.replace("/", "--")] = ROOT / "direct-3105/hash-reuse-source-plan" / evidence_name
+FILES["3105-hash-reuse-source-plan-root-verification.json"] = ROOT / "direct-3105/hash-reuse-source-plan-root-verification.json"
+for evidence_name in ['opus-hashreuse-design-input.md', 'opus-hashreuse-design-input-audit.json', 'run-opus-hashreuse-design.py']:
+    FILES["3105-admission-" + evidence_name] = ROOT / "direct-3105/admission" / evidence_name
+for evidence_name in ['queue6482-watch1539.json', 'queue6482-watch1539.stderr', 'mg6482-runs1539.json', 'mg6482-runs1539.stderr']:
+    FILES["5183-admission-" + evidence_name] = ROOT / "direct-5183/admission" / evidence_name
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout

@@ -1,0 +1,186 @@
+SOURCE crates/sparq-engine/src/lib.rs; full source SHA256 074740149d0649b0334d1814ca289feaad54070ca0d90bf5737601f7021a7538
+LINES 841-874
+841: pub struct PreparedQuery {
+842:     query: Query,
+843: }
+844: 
+845: impl PreparedQuery {
+846:     /// Parses a SPARQL query string into its reusable algebra form.
+847:     ///
+848:     /// With the opt-in `algebra-rewrite` feature ON, the parsed algebra is run
+849:     /// through the result-equivalent pre-execution rewrite pass (`rewrite`
+850:     /// module) here — the single seam every string query entry point
+851:     /// ([`query`], [`ask`], [`count`], the JSON paths) funnels through — so
+852:     /// production benefits without touching the executor. The `From<Query>`
+853:     /// conversion deliberately does NOT rewrite: it takes an already-built
+854:     /// algebra verbatim (the opt-out / test-baseline path). When the feature is
+855:     /// OFF the algebra is stored verbatim and the build is byte-identical.
+856:     pub fn parse(sparql: &str) -> Result<PreparedQuery, String> {
+857:         // Feature-OFF arm is the VERBATIM pre-`algebra-rewrite` expression so the
+858:         // default build's codegen is byte-identical (the `feature_off_exact` wasm
+859:         // gate). Only the feature-ON arm introduces the rewrite call. [OPUS-4.8]
+860:         #[cfg(not(feature = "algebra-rewrite"))]
+861:         {
+862:             Ok(PreparedQuery { query: SparqlParser::new().parse_query(sparql).map_err(|e| e.to_string())? })
+863:         }
+864:         #[cfg(feature = "algebra-rewrite")]
+865:         {
+866:             let query = rewrite::rewrite_query(SparqlParser::new().parse_query(sparql).map_err(|e| e.to_string())?);
+867:             Ok(PreparedQuery { query })
+868:         }
+869:     }
+870: 
+871:     /// The wrapped `spargebra` algebra (e.g. to inspect the query form or dataset
+872:     /// clause before execution).
+873:     pub fn query(&self) -> &Query {
+874:         &self.query
+LINES 1016-1056
+1016: /// Executes a SPARQL query string against a graph, materialising the solutions.
+1017: pub fn query(graph: &Graph, sparql: &str) -> Result<QueryResult, String> {
+1018:     query_with_budget(graph, sparql, &QueryBudget::unlimited())
+1019: }
+1020: 
+1021: /// [`query`] under a cooperative [`QueryBudget`] (deadline / max result rows).
+1022: pub fn query_with_budget(graph: &Graph, sparql: &str, budget: &QueryBudget) -> Result<QueryResult, String> {
+1023:     query_prepared_with_budget(graph, &PreparedQuery::parse(sparql)?, budget)
+1024: }
+1025: 
+1026: /// [`query`] over a [`PreparedQuery`] — no per-execution parse.
+1027: pub fn query_prepared(graph: &Graph, prepared: &PreparedQuery) -> Result<QueryResult, String> {
+1028:     query_prepared_with_budget(graph, prepared, &QueryBudget::unlimited())
+1029: }
+1030: 
+1031: /// [`query_prepared`] under a cooperative [`QueryBudget`] (deadline / max result rows).
+1032: pub fn query_prepared_with_budget(
+1033:     graph: &Graph,
+1034:     prepared: &PreparedQuery,
+1035:     budget: &QueryBudget,
+1036: ) -> Result<QueryResult, String> {
+1037:     let q = &prepared.query;
+1038:     let active = active_dataset(graph, q);
+1039:     let graph = active.as_ref().unwrap_or(graph);
+1040:     let _view_scope = view_scope(&active);
+1041:     exec::budget::with_budget(budget, || {
+1042:         exec::set_query_base(q.base_iri().map(|b| b.as_str()));
+1043:         match q {
+1044:             Query::Select { pattern, .. } => exec::eval_select(graph, pattern),
+1045:             // ASK as a QueryResult: zero variables, and one (empty) row iff the pattern
+1046:             // is satisfiable — the standard "unit row" encoding of a boolean result.
+1047:             Query::Ask { pattern, .. } => Ok(QueryResult {
+1048:                 vars: Vec::new(),
+1049:                 rows: if exec::eval_ask(graph, pattern)? { vec![Vec::new()] } else { Vec::new() },
+1050:             }),
+1051:             _ => Err("only SELECT and ASK queries are supported".into()),
+1052:         }
+1053:     })
+1054: }
+1055: 
+1056: /// Executes an ASK query: `true` iff the pattern has at least one solution.
+SOURCE crates/sparq-engine/Cargo.toml; full source SHA256 ab9734674fb46fcf5ad91415cff14f2552d4bc9e6a5f2994ca2e0905e2b99bc2
+LINES 24-43
+24: [features]
+25: # Forwards sparq-core's parallel index build. Default on for native; the wasm
+26: # crate disables defaults so rayon is never pulled into the bundle.
+27: # `regex` powers SPARQL REGEX/REPLACE; default-on for native, off for wasm (the wasm crate
+28: # disables defaults) so the regex automata don't bloat the browser bundle.
+29: # `digest` powers the SPARQL hash builtins (MD5/SHA1/SHA256/SHA384/SHA512); default-on
+30: # for native, off for wasm (the wasm crate disables defaults) so the hash cores never
+31: # enter the browser bundle.
+32: default = ["parallel", "regex", "digest"]
+33: parallel = ["dep:rayon", "sparq-core/parallel"]
+34: regex = ["dep:regex"]
+35: digest = ["dep:md-5", "dep:sha1", "dep:sha2"]
+36: # Characteristic-set star-join cardinality estimation (Neumann & Moerkotte):
+37: # `cs::CsTable` + `with_cs_table` make the greedy planner consult an injected CS
+38: # table for star joins instead of the per-predicate independence model. OPT-IN and
+39: # OFF by default (the wasm bundle and the default native build carry zero CS code);
+40: # results are identical either way — only join order is affected.
+41: cs-planner = []
+42: # [FABLE-5] (sq-dzbg2) Persistent, explicitly-built planner statistics.  The
+43: # catalog is stored beside a saved/mmap graph and contains deterministic
+SOURCE crates/sparq-engine/src/exec.rs; full source SHA256 10090299f707dbf4adb4cae6349bd390a06ed2a50645e8c3417bcc3b90fb20af
+LINES 2450-2454
+2450: /// `parallel` feature, so these paths compile to the sequential loops).
+2451: #[cfg(feature = "parallel")]
+2452: const PAR_THRESHOLD: usize = 50_000;
+2453: 
+2454: /// Maximum `offset + limit` (row budget) for the bounded-heap ORDER BY path.
+LINES 21691-21768
+21691:             *bag.entry(
+21692:                 row.iter()
+21693:                     .map(|v| v.as_ref().unwrap().to_string())
+21694:                     .collect(),
+21695:             )
+21696:             .or_default() += 1;
+21697:         }
+21698:         bag
+21699:     }
+21700: 
+21701:     #[test]
+21702:     fn capped_rhs_changing_sort_mixed_kernels_preserves_full_bag() {
+21703:         let mut ttl = String::from("@prefix : <http://ex/> .\n");
+21704:         for i in 0..70_000 {
+21705:             // Projection deliberately collapses pairs, making multiplicity observable.
+21706:             ttl.push_str(&format!(":s{i} :p {} ; :q {i} ; :r {i} .\n", i / 2));
+21707:         }
+21708:         ttl.push_str(":extra1 :q 70001 ; :r 70001 . :extra2 :r 70002 .");
+21709:         let graph = Graph::load_str(&ttl, "turtle").unwrap();
+21710:         let query = "PREFIX : <http://ex/> SELECT ?o WHERE { ?s :p ?o . ?s :q ?x . ?s :r ?x . FILTER(?o + 0 >= 0) }";
+21711:         let full = crate::query(&graph, query).unwrap();
+21712:         let (limited, steps) =
+21713:             trace(|| crate::query(&graph, &format!("{query} LIMIT 70001")).unwrap());
+21714:         println!("changing-sort actual steps: {steps:?}");
+21715:         assert_eq!(limited.rows.len(), 70_000);
+21716:         assert_eq!(bag(&limited), bag(&full));
+21717:         let expected: std::collections::BTreeMap<_, _> = (0..35_000)
+21718:             .map(|i| (vec![oxrdf::Literal::from(i).to_string()], 2))
+21719:             .collect();
+21720:         assert_eq!(bag(&limited), expected);
+21721:         let q: Vec<_> = steps
+21722:             .iter()
+21723:             .filter(|s| s.pattern == 1)
+21724:             .map(|s| {
+21725:                 (
+21726:                     s.start,
+21727:                     s.kernel,
+21728:                     s.requested,
+21729:                     s.scanned,
+21730:                     s.actual.as_deref(),
+21731:                 )
+21732:             })
+21733:             .collect();
+21734:         let r: Vec<_> = steps
+21735:             .iter()
+21736:             .filter(|s| s.pattern == 2)
+21737:             .map(|s| (s.start, s.requested, s.scanned, s.actual.as_deref()))
+21738:             .collect();
+21739:         if sparq_core::store::BUILT.contains(&sparq_core::store::Perm::Pso) {
+21740:             assert_eq!(
+21741:                 q,
+21742:                 [
+21743:                     (0, "bind", None, false, None),
+21744:                     (1024, "merge", Some(0), true, Some("s")),
+21745:                     (65536, "bind", None, false, None)
+21746:                 ]
+21747:             );
+21748:             assert_eq!(
+21749:                 r,
+21750:                 [
+21751:                     (0, None, true, Some("s")),
+21752:                     (1024, Some(0), true, Some("s")),
+21753:                     (65536, None, true, Some("s"))
+21754:                 ]
+21755:             );
+21756:         } else {
+21757:             // Three permutations return object order: no false subject-order claim,
+21758:             // and the unchanged None request must reuse the actually unsorted-for-s RHS.
+21759:             assert_eq!(
+21760:                 q,
+21761:                 [
+21762:                     (0, "bind", None, false, None),
+21763:                     (1024, "hash", None, true, Some("x")),
+21764:                     (65536, "bind", None, false, None)
+21765:                 ]
+21766:             );
+21767:             assert_eq!(
+21768:                 r,

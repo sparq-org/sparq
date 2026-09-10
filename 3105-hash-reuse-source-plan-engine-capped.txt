@@ -1,0 +1,395 @@
+SOURCE crates/sparq-engine/src/exec.rs; full source SHA256 10090299f707dbf4adb4cae6349bd390a06ed2a50645e8c3417bcc3b90fb20af
+LINES 3355-3381
+3355:         GraphPattern::Reduced { inner } => eval_modified(graph, local, inner),
+3356:         GraphPattern::Slice { inner, start, length } => {
+3357:             // LIMIT early-termination: a bare LIMIT (no ORDER BY / DISTINCT /
+3358:             // aggregation above it, which all need the full result) can stop after
+3359:             // start+length rows instead of materialising the whole relation — a
+3360:             // single-pattern scan stops mid-scan, and a conjunctive / UNION /
+3361:             // OPTIONAL / Join shape stops at the first seed blocks yielding enough
+3362:             // fully-FILTERed rows (`try_capped`, sq-7d3dj.30.8; ASK evaluates as
+3363:             // LIMIT 1 through here). LIMIT-without-ORDER-BY is order-insensitive so
+3364:             // any rows are valid.
+3365:             if let Some(len) = length {
+3366:                 if let Some(cap) = start.checked_add(*len) {
+3367:                     if let Some(mut b) = try_capped(graph, local, inner, cap)? {
+3368:                         slice_bindings(&mut b, *start, *length);
+3369:                         return Ok(b);
+3370:                     }
+3371:                     // Top-k ORDER BY: when the inner pattern (possibly under Project/Reduced)
+3372:                     // contains an OrderBy and the budget k = offset + limit is within the
+3373:                     // threshold, use bounded selection instead of a full stable sort.
+3374:                     // Result is byte-identical to the full-sort+slice path. [SONNET-4.6] sq-7d3dj.30.2
+3375:                     if cap <= TOP_K_ORDER_BY_THRESHOLD {
+3376:                         if let Some(mut b) = try_topk_orderby(graph, local, inner, cap)? {
+3377:                             slice_bindings(&mut b, *start, *length);
+3378:                             return Ok(b);
+3379:                         }
+3380:                     }
+3381:                 }
+LINES 4289-4346
+4289: fn try_capped(
+4290:     graph: &Graph,
+4291:     local: &mut LocalVocab,
+4292:     inner: &GraphPattern,
+4293:     cap: usize,
+4294: ) -> Result<Option<Bindings>, String> {
+4295:     // zk-trace: early termination would consume only part of each scan range,
+4296:     // recording a TRUNCATED input set — but the completeness witness (the
+4297:     // linear-sweep circuit) must see the whole scan range. Disable the cap
+4298:     // while recording; the full path is result-equivalent (LIMIT is
+4299:     // order-insensitive without ORDER BY).
+4300:     #[cfg(feature = "zk")]
+4301:     if crate::zk::enabled() {
+4302:         return Ok(None);
+4303:     }
+4304:     if view::default_is_empty() {
+4305:         return Ok(None); // empty-default view: the general path short-circuits at the BGP
+4306:     }
+4307:     match inner {
+4308:         GraphPattern::Project { inner, variables } => {
+4309:             Ok(try_capped(graph, local, inner, cap)?.map(|b| project_bindings(b, variables)))
+4310:         }
+4311:         GraphPattern::Reduced { inner } => try_capped(graph, local, inner, cap),
+4312:         p if is_conjunctive(p) => {
+4313:             let mut patterns = Vec::new();
+4314:             let mut filters = Vec::new();
+4315:             flatten_conjunction(p, &mut patterns, &mut filters);
+4316:             if patterns.is_empty() {
+4317:                 return Ok(None); // the unit relation: nothing to cap
+4318:             }
+4319:             if patterns.len() == 1 {
+4320:                 let (pat_filters, residual) = split_sargable(graph, &patterns, &filters);
+4321:                 if residual.is_empty() {
+4322:                     // Single pattern, every FILTER pushed into the scan: stop the
+4323:                     // SCAN itself at `cap` rows (the cheapest capped form).
+4324:                     let (id_pat, pos_vars, unsat) = prepare_pattern(graph, &patterns[0])?;
+4325:                     if unsat {
+4326:                         return Ok(Some(Bindings::unsorted(collect_vars(&patterns), vec![])));
+4327:                     }
+4328:                     let filt = pat_filters[0];
+4329:                     let sort_col = filt.map(|(c, _)| c);
+4330:                     return Ok(Some(scan_to_bindings(
+4331:                         graph,
+4332:                         &id_pat,
+4333:                         &pos_vars,
+4334:                         sort_col,
+4335:                         filt,
+4336:                         Some(cap),
+4337:                         #[cfg(feature = "semijoin-bitmap")]
+4338:                         None,
+4339:                     )));
+4340:                 }
+4341:             }
+4342:             // Multi-pattern (or residual-FILTER) conjunctive shape: the block-driven
+4343:             // capped join chain.
+4344:             eval_bgp_binary_capped(graph, local, &patterns, &filters, cap)
+4345:         }
+4346:         GraphPattern::Union { left, right } => {
+LINES 4435-4740
+4435: 
+4436: /// First seed block of the capped conjunctive chain: small enough that an ASK /
+4437: /// LIMIT-1 hit in the first block costs a fraction of the full join, large enough
+4438: /// to amortise the per-block chain setup.
+4439: const CAPPED_SEED_BLOCK: usize = 1024;
+4440: /// Second-tier block: one escalation before the remainder is processed whole, so a
+4441: /// first-block miss still avoids the full chain when a solution lives within the
+4442: /// first ~64k seed rows. Exactly two escalations bound a NO-solution query to
+4443: /// three blocks; identical non-bind RHS scans may be reused within a private storage
+4444: /// allowance when no budget is armed.
+4445: const CAPPED_SEED_BLOCK_2: usize = 65_536;
+4446: 
+4447: /// Capped conjunctive (BGP + FILTER) evaluation — the ASK / LIMIT-k first-solutions
+4448: /// short-circuit THROUGH JOINS (sq-7d3dj.30.8). Runs the same greedy (GOO) binary
+4449: /// join chain as `eval_bgp_binary`, but drives it from at most three geometrically
+4450: /// growing SLICES of the seed scan (`CAPPED_SEED_BLOCK` rows, then up to
+4451: /// `CAPPED_SEED_BLOCK_2`, then the remainder), applying the residual FILTERs per
+4452: /// block and stopping as soon as `cap` fully-FILTERed rows exist.
+4453: ///
+4454: /// SOUNDNESS. Every chain step is per-seed-row local — a join (bind / merge / hash /
+4455: /// cross) or a row-wise FILTER over a seed subset yields exactly the full result's
+4456: /// rows that originate from that subset — so the blocks are disjoint, their
+4457: /// concatenation over the whole seed IS the full result, and stopping early only
+4458: /// truncates it (the `try_capped` contract). A row counts toward `cap` only after
+4459: /// the WHOLE chain including every residual FILTER, so a first candidate eliminated
+4460: /// by a late FILTER never satisfies the cap. The join ORDER is re-derived per block
+4461: /// from the planner estimates (a block's size can change the bind-join admission),
+4462: /// which affects row order only — the contract is multiset-level and a BGP join is
+4463: /// order-independent.
+4464: ///
+4465: /// Returns `None` (caller falls back to full evaluation) for the shapes the binary
+4466: /// chain does not cover: cyclic (WCOJ / LFTJ) BGPs and quoted-triple (RDF 1.2)
+4467: /// constraint decompositions.
+4468: fn eval_bgp_binary_capped(
+4469:     graph: &Graph,
+4470:     local: &mut LocalVocab,
+4471:     patterns: &[TriplePattern],
+4472:     filters: &[Expression],
+4473:     cap: usize,
+4474: ) -> Result<Option<Bindings>, String> {
+4475:     if !bgp_uses_binary(patterns) {
+4476:         return Ok(None); // cyclic -> LFTJ: no capped variant (v1 boundary)
+4477:     }
+4478:     let (_, constraints) = extract_quoted_constraints(patterns);
+4479:     if !constraints.is_empty() {
+4480:         return Ok(None); // triple-term decomposition: keep the full path
+4481:     }
+4482:     let (pat_filters, residual) = split_sargable(graph, patterns, filters);
+4483:     let pfilter = |i: usize| -> Option<(usize, ScanCmp)> { pat_filters.get(i).copied().flatten() };
+4484:     let prepared = prepare_bgp(graph, patterns)?;
+4485:     if prepared.iter().any(|p| p.unsatisfiable) {
+4486:         return Ok(Some(Bindings::unsorted(collect_vars(patterns), vec![])));
+4487:     }
+4488:     if cap == 0 {
+4489:         // Zero rows requested: an empty partial answer is valid under the contract
+4490:         // (`|result| >= cap` — the caller's slice truncates to nothing either way).
+4491:         return Ok(Some(Bindings::unsorted(collect_vars(patterns), vec![])));
+4492:     }
+4493:     let seed = goo_seed(&prepared);
+4494:     let seed_sort_col = goo_seed_sort(&prepared, seed, pfilter(seed).map(|(c, _)| c));
+4495:     let seed_all = scan_to_bindings(
+4496:         graph,
+4497:         &prepared[seed].id_pat,
+4498:         &prepared[seed].pos_vars,
+4499:         seed_sort_col,
+4500:         pfilter(seed),
+4501:         None,
+4502:         #[cfg(feature = "semijoin-bitmap")]
+4503:         None,
+4504:     );
+4505: 
+4506:     #[cfg(test)]
+4507:     capped_rhs_tests::observe(0);
+4508:     // [GPT-6 Astra] Query-local and lazy: never scan an unreached step. Pattern
+4509:     // filters are immutable here; each slot also keys the requested scan order.
+4510:     // Armed budgets retain the old per-step lifetime and polling: their working-set
+4511:     // estimate does not account for multiple retained RHS relations.
+4512:     let reuse_rhs = !budget::active();
+4513:     let (mut rhs_cache, mut rhs_remaining) = capped_rhs_cache(prepared.len(), reuse_rhs);
+4514:     let mut acc: Option<Bindings> = None;
+4515:     let mut start = 0usize;
+4516:     while start < seed_all.rows.len() {
+4517:         #[cfg(test)]
+4518:         capped_rhs_tests::observe(1);
+4519:         let end = if start == 0 {
+4520:             CAPPED_SEED_BLOCK.min(seed_all.rows.len())
+4521:         } else if start == CAPPED_SEED_BLOCK {
+4522:             CAPPED_SEED_BLOCK_2.min(seed_all.rows.len())
+4523:         } else {
+4524:             seed_all.rows.len()
+4525:         };
+4526:         // One seed slice through the whole chain. A contiguous slice of a sorted
+4527:         // scan stays sorted, so merge-join eligibility is preserved.
+4528:         let mut result = Bindings {
+4529:             vars: seed_all.vars.clone(),
+4530:             rows: seed_all.rows[start..end].to_vec(),
+4531:             sorted_by: seed_all.sorted_by.clone(),
+4532:         };
+4533:         let mut cs_ctx = CsCtx::new(&prepared);
+4534:         let mut done = vec![false; prepared.len()];
+4535:         done[seed] = true;
+4536:         cs_ctx.note_done(seed);
+4537:         let mut cur_card = prepared[seed].est as f64;
+4538:         let mut var_ndv: FxHashMap<Variable, f64> = FxHashMap::default();
+4539:         record_pattern_ndv(graph, &prepared, seed, cur_card, &mut var_ndv, &cs_ctx);
+4540:         for _ in 1..prepared.len() {
+4541:             let (i, new_card, _connected) = goo_pick(graph, &prepared, &done, &var_ndv, cur_card, &cs_ctx);
+4542:             cur_card = new_card;
+4543:             done[i] = true;
+4544:             cs_ctx.note_done(i);
+4545:             // Same step selection as `eval_bgp_binary`: bind-join when the running
+4546:             // block is much smaller than the pattern; else merge / hash / cross.
+4547:             let connecting: Vec<Variable> =
+4548:                 result.vars.iter().filter(|v| prepared[i].var_pos(v).is_some()).cloned().collect();
+4549:             if connecting.len() == 1
+4550:                 && distinct_pattern_vars(&prepared[i].pos_vars)
+4551:                 && result.rows.len().saturating_mul(8) < prepared[i].est
+4552:             {
+4553:                 let jv = &connecting[0];
+4554:                 let rk = result.col(jv).unwrap();
+4555:                 let pp = prepared[i].var_pos(jv).unwrap();
+4556:                 #[cfg(test)]
+4557:                 capped_rhs_tests::observe(3);
+4558:                 #[cfg(test)]
+4559:                 capped_rhs_tests::step(start, i, "bind", None, false, None);
+4560:                 result = bind_join(graph, result, &prepared[i].id_pat, &prepared[i].pos_vars, rk, pp, pfilter(i));
+4561:             } else {
+4562:                 let filt = pfilter(i);
+4563:                 let merge_var = result.sorted_by.clone().filter(|sv| prepared[i].var_pos(sv).is_some());
+4564:                 let scan_sort = filt.map(|(c, _)| c).or_else(|| merge_var.as_ref().map(|jv| prepared[i].var_pos(jv).unwrap()));
+4565:                 let mut uncached = None;
+4566:                 let mut spare_slot = None;
+4567:                 let slot = rhs_cache.get_mut(i).unwrap_or(&mut spare_slot);
+4568:                 #[cfg(test)]
+4569:                 let mut scanned = false;
+4570:                 let rhs = capped_rhs(slot, &mut rhs_remaining, &mut uncached, scan_sort, || {
+4571:                     #[cfg(test)]
+4572:                     {
+4573:                         capped_rhs_tests::observe(2);
+4574:                         scanned = true;
+4575:                     }
+4576:                     scan_to_bindings(
+4577:                         graph,
+4578:                         &prepared[i].id_pat,
+4579:                         &prepared[i].pos_vars,
+4580:                         scan_sort,
+4581:                         filt,
+4582:                         None,
+4583:                         #[cfg(feature = "semijoin-bitmap")]
+4584:                         None,
+4585:                     )
+4586:                 });
+4587:                 let connected = prepared[i].pos_vars.iter().flatten().any(|v| result.vars.contains(v));
+4588:                 if let Some(jv) = merge_var.filter(|jv| rhs.sorted_by.as_ref() == Some(jv)) {
+4589:                     #[cfg(test)]
+4590:                     capped_rhs_tests::step(start, i, "merge", scan_sort, scanned, rhs.sorted_by.as_ref());
+4591:                     result = merge_join_ref(&result, rhs, &jv);
+4592:                 } else if connected {
+4593:                     #[cfg(test)]
+4594:                     capped_rhs_tests::step(start, i, "hash", scan_sort, scanned, rhs.sorted_by.as_ref());
+4595:                     result = hash_join_ref(&result, rhs);
+4596:                 } else {
+4597:                     #[cfg(test)]
+4598:                     capped_rhs_tests::step(start, i, "cross", scan_sort, scanned, rhs.sorted_by.as_ref());
+4599:                     result = cross_product_ref(&result, rhs);
+4600:                 }
+4601:             }
+4602:             record_pattern_ndv(graph, &prepared, i, cur_card, &mut var_ndv, &cs_ctx);
+4603:             if result.rows.is_empty() {
+4604:                 break;
+4605:             }
+4606:         }
+4607:         // Residual FILTERs per block — a row only counts toward the cap once it has
+4608:         // passed EVERY filter (the late-FILTER safety property: a partial solution
+4609:         // never fires the early exit).
+4610:         // [FABLE-5] (sq-1ivw7) Install the snapshot-aware non-literal column set (indexing THIS
+4611:         // block's `result` layout — the BGP variables) so the id fast path fires on capped fused
+4612:         // BGP+FILTER shapes too. Drain-safe as in `eval_flat_conjunctive`.
+4613:         #[cfg(feature = "id-filter-fastpath")]
+4614:         let idfast_cols = {
+4615:             let bgp = GraphPattern::Bgp { patterns: patterns.to_vec() };
+4616:             nonliteral_filter_cols(graph, &bgp, &result)
+4617:         };
+4618:         for f in &residual {
+4619:             if result.rows.is_empty() {
+4620:                 break;
+4621:             }
+4622:             #[cfg(feature = "id-filter-fastpath")]
+4623:             with_idfast_nonlit_cols(idfast_cols.clone(), || apply_filter(graph, local, &mut result, f))?;
+4624:             #[cfg(not(feature = "id-filter-fastpath"))]
+4625:             apply_filter(graph, local, &mut result, f)?;
+4626:         }
+4627:         let merged = match acc.take() {
+4628:             None => result,
+4629:             Some(a) => union_bindings(a, result),
+4630:         };
+4631:         budget::check(merged.rows.len())?;
+4632:         let satisfied = merged.rows.len() >= cap;
+4633:         acc = Some(merged);
+4634:         if satisfied {
+4635:             break;
+4636:         }
+4637:         start = end;
+4638:     }
+4639:     Ok(Some(acc.unwrap_or_else(|| Bindings::unsorted(collect_vars(patterns), vec![]))))
+4640: }
+4641: 
+4642: // [GPT-6 Astra] Conservative private allowance for retained scan storage, not a
+4643: // public QueryBudget or a limit on transient join/scan allocations. Keep room below
+4644: // the diagnostic's extra-heap rejection threshold; do not retain one RHS per pattern.
+4645: const CAPPED_RHS_STORAGE: usize = 4 * 1024 * 1024;
+4646: // Requested order, immutable scan relation, and its charged allocated storage.
+4647: type CappedRhs = (Option<usize>, Bindings, usize);
+4648: 
+4649: fn capped_rhs_cache(len: usize, enabled: bool) -> (Vec<Option<CappedRhs>>, usize) {
+4650:     let mut slots = Vec::new();
+4651:     if !enabled
+4652:         || len
+4653:             .checked_mul(std::mem::size_of::<Option<CappedRhs>>())
+4654:             .is_none_or(|bytes| bytes > CAPPED_RHS_STORAGE)
+4655:         || slots.try_reserve_exact(len).is_err()
+4656:     {
+4657:         return (slots, 0);
+4658:     }
+4659:     let Some(bytes) = slots
+4660:         .capacity()
+4661:         .checked_mul(std::mem::size_of::<Option<CappedRhs>>())
+4662:         .filter(|&bytes| bytes <= CAPPED_RHS_STORAGE)
+4663:     else {
+4664:         return (Vec::new(), 0);
+4665:     };
+4666:     slots.resize_with(len, || None);
+4667:     (slots, CAPPED_RHS_STORAGE - bytes)
+4668: }
+4669: 
+4670: // [GPT-6 Astra] Count capacities, not planner estimates or populated lengths.
+4671: // Scan rows have at most three ids and fit inline; decline an unproved spilled
+4672: // representation. Variable owns a String, whose capacity is exposed by its safe
+4673: // consuming API; move it out and back without cloning or allocating its text.
+4674: fn capped_rhs_storage(rhs: &mut Bindings, allowance: usize) -> Option<usize> {
+4675:     let mut bytes = rhs
+4676:         .rows
+4677:         .capacity()
+4678:         .checked_mul(std::mem::size_of::<Row>())?
+4679:         .checked_add(
+4680:             rhs.vars
+4681:                 .capacity()
+4682:                 .checked_mul(std::mem::size_of::<Variable>())?,
+4683:         )?;
+4684:     if bytes > allowance || rhs.rows.iter().any(Row::spilled) {
+4685:         return None;
+4686:     }
+4687:     for variable in rhs.vars.iter_mut().chain(rhs.sorted_by.iter_mut()) {
+4688:         let name =
+4689:             std::mem::replace(variable, Variable::new_unchecked(String::new())).into_string();
+4690:         let capacity = name.capacity();
+4691:         *variable = Variable::new_unchecked(name);
+4692:         bytes = bytes.checked_add(capacity)?;
+4693:         if bytes > allowance {
+4694:             return None;
+4695:         }
+4696:     }
+4697:     Some(bytes)
+4698: }
+4699: 
+4700: // [GPT-6 Astra] Reuse requires a pure scan of the same immutable prepared pattern,
+4701: // filters and requested order. Actual sorted_by remains the scan's truthful value.
+4702: // Fitting entries live until order replacement/query exit; non-fitting entries live
+4703: // only in the caller's per-step scratch. Allocator metadata is outside this allowance.
+4704: fn capped_rhs<'a>(
+4705:     slot: &'a mut Option<CappedRhs>,
+4706:     remaining: &mut usize,
+4707:     uncached: &'a mut Option<Bindings>,
+4708:     sort: Option<usize>,
+4709:     scan: impl FnOnce() -> Bindings,
+4710: ) -> &'a Bindings {
+4711:     if slot
+4712:         .as_ref()
+4713:         .is_none_or(|(cached_sort, _, _)| *cached_sort != sort)
+4714:     {
+4715:         if let Some(old) = slot.take() {
+4716:             *remaining += old.2;
+4717:             drop(old); // release stale ownership/accounting before its replacement scan
+4718:         }
+4719:         let mut rhs = scan();
+4720:         if let Some(bytes) = capped_rhs_storage(&mut rhs, *remaining) {
+4721:             *remaining -= bytes;
+4722:             *slot = Some((sort, rhs, bytes));
+4723:         } else {
+4724:             *uncached = Some(rhs);
+4725:             return uncached.as_ref().unwrap();
+4726:         }
+4727:     }
+4728:     &slot.as_ref().unwrap().1
+4729: }
+4730: 
+4731: /// Distinct (non-repeated) variable positions of a prepared pattern, or `None` if
+4732: /// a variable repeats (e.g. `?x p ?x`), which would make range counts over-count.
+4733: pub(crate) fn distinct_pattern_vars(pos_vars: &[Option<Variable>; 3]) -> bool {
+4734:     let vars: Vec<&Variable> = pos_vars.iter().flatten().collect();
+4735:     let mut sorted = vars.clone();
+4736:     sorted.sort();
+4737:     sorted.dedup();
+4738:     sorted.len() == vars.len()
+4739: }
+4740: 

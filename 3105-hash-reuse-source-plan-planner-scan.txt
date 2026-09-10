@@ -1,0 +1,392 @@
+SOURCE crates/sparq-engine/src/exec.rs; full source SHA256 10090299f707dbf4adb4cae6349bd390a06ed2a50645e8c3417bcc3b90fb20af
+LINES 6285-6303
+6285: pub(crate) fn is_conjunctive(p: &GraphPattern) -> bool {
+6286:     match p {
+6287:         GraphPattern::Bgp { .. } => true,
+6288:         // A FILTER may only be flattened into the enclosing conjunction when every
+6289:         // variable it mentions is bound INSIDE its own group — otherwise hoisting it
+6290:         // changes scope (`{ :x :p ?v . { FILTER(?v = 1) } }` must see ?v UNBOUND).
+6291:         // EXISTS is conservatively never flattened (it evaluates against the group's
+6292:         // in-scope bindings).
+6293:         GraphPattern::Filter { inner, expr } => {
+6294:             if !is_conjunctive(inner) {
+6295:                 return false;
+6296:             }
+6297:             let mut inner_vars: FxHashSet<Variable> = FxHashSet::default();
+6298:             collect_pattern_vars(inner, &mut inner_vars);
+6299:             filter_scope_ok(expr, &inner_vars)
+6300:         }
+6301:         GraphPattern::Join { left, right } => is_conjunctive(left) && is_conjunctive(right),
+6302:         _ => false,
+6303:     }
+LINES 6345-6358
+6345: pub(crate) fn flatten_conjunction(p: &GraphPattern, patterns: &mut Vec<TriplePattern>, filters: &mut Vec<Expression>) {
+6346:     match p {
+6347:         GraphPattern::Bgp { patterns: tps } => patterns.extend(tps.iter().cloned()),
+6348:         GraphPattern::Join { left, right } => {
+6349:             flatten_conjunction(left, patterns, filters);
+6350:             flatten_conjunction(right, patterns, filters);
+6351:         }
+6352:         GraphPattern::Filter { expr, inner } => {
+6353:             flatten_conjunction(inner, patterns, filters);
+6354:             filters.push(expr.clone());
+6355:         }
+6356:         _ => unreachable!(),
+6357:     }
+6358: }
+LINES 6500-6509
+6500: /// [OPUS-4.8] (sq-lr2ii) A NUMERIC comparison is DECLINED (returns `None`) when the graph
+6501: /// holds an f64-inexact decimal ([`Graph::has_high_precision_decimal`]): the f64 `numerics`
+6502: /// cache the scan probes could then decide `=`/`<`/`>`/`<=`/`>=` wrongly for that value (e.g.
+6503: /// `"1.000000000000000001"^^xsd:decimal` collapses onto the f64 `1.0`), so such comparisons
+6504: /// fall back to the exact general evaluator instead. Temporal pushdown is unaffected, and a
+6505: /// graph with no f64-inexact decimal keeps the numeric fast path.
+6506: fn extract_sargable(graph: &Graph, e: &Expression) -> Option<(Variable, ScanCmp)> {
+6507:     fn lit_num(e: &Expression) -> Option<f64> {
+6508:         match e {
+6509:             Expression::Literal(l) if is_numeric_dt(l) => {
+LINES 6570-6631
+6570:                 return Some((v, num_cmp(op, c)));
+6571:             }
+6572:             continue;
+6573:         }
+6574:         if let Some(t) = lit_temp(konst) {
+6575:             return Some((v, ScanCmp::Temp(op, t)));
+6576:         }
+6577:     }
+6578:     None
+6579: }
+6580: 
+6581: /// The canonical position (0=subject, 1=predicate, 2=object) of a variable in a
+6582: /// triple pattern, if it occurs there.
+6583: fn pattern_var_pos(tp: &TriplePattern, var: &Variable) -> Option<usize> {
+6584:     if matches!(&tp.subject, TermPattern::Variable(v) if v == var) {
+6585:         return Some(0);
+6586:     }
+6587:     if matches!(&tp.predicate, NamedNodePattern::Variable(v) if v == var) {
+6588:         return Some(1);
+6589:     }
+6590:     if matches!(&tp.object, TermPattern::Variable(v) if v == var) {
+6591:         return Some(2);
+6592:     }
+6593:     None
+6594: }
+6595: 
+6596: /// Splits FILTERs into per-pattern sargable numeric predicates (pushed into the
+6597: /// scan of the first pattern that binds the variable) and the residual filters
+6598: /// (applied normally afterwards).
+6599: pub(crate) fn split_sargable(graph: &Graph, patterns: &[TriplePattern], filters: &[Expression]) -> (Vec<Option<(usize, ScanCmp)>>, Vec<Expression>) {
+6600:     // zk-trace: a sargable FILTER pushed into the scan would make the scan
+6601:     // record only the POST-filter rows (the rows that PASSED), losing the
+6602:     // FILTER obligation and under-capturing the input set — the proof must
+6603:     // witness the operand of every filtered row and the rows it excluded.
+6604:     // Keep every filter residual while recording, so it flows through
+6605:     // apply_filter (one FilterObligation) over the FULL unfiltered scan set.
+6606:     // Result-equivalent; only the plan changes (zk module docs).
+6607:     #[cfg(feature = "zk")]
+6608:     if crate::zk::enabled() {
+6609:         return (vec![None; patterns.len()], filters.to_vec());
+6610:     }
+6611:     let mut pat_filters: Vec<Option<(usize, ScanCmp)>> = vec![None; patterns.len()];
+6612:     let mut residual = Vec::new();
+6613:     for f in filters {
+6614:         if let Some((var, cmp)) = extract_sargable(graph, f) {
+6615:             if let Some((i, pos)) = patterns
+6616:                 .iter()
+6617:                 .enumerate()
+6618:                 .find_map(|(i, tp)| pattern_var_pos(tp, &var).filter(|_| pat_filters[i].is_none()).map(|pos| (i, pos)))
+6619:             {
+6620:                 pat_filters[i] = Some((pos, cmp));
+6621:                 continue;
+6622:             }
+6623:         }
+6624:         residual.push(f.clone());
+6625:     }
+6626:     (pat_filters, residual)
+6627: }
+6628: 
+6629: // ---- Spatial FILTER pushdown (sq-mg9) ------------------------------------------
+6630: //
+6631: // Recognise a `geof:` spatial FILTER over an indexed geometry variable and, when a
+LINES 8208-8216
+8208: pub(crate) fn prepare_bgp(graph: &Graph, patterns: &[TriplePattern]) -> Result<Vec<Prepared>, String> {
+8209:     let mut prepared: Vec<Prepared> = Vec::with_capacity(patterns.len());
+8210:     for tp in patterns {
+8211:         let (id_pat, pos_vars, unsat) = prepare_pattern(graph, tp)?;
+8212:         let est = if unsat { 0 } else { graph.store.estimate(&id_pat) };
+8213:         prepared.push(Prepared { id_pat, pos_vars, est, unsatisfiable: unsat });
+8214:     }
+8215:     Ok(prepared)
+8216: }
+LINES 8262-8282
+8262: /// GOO seed choice: the pattern with the smallest single-pattern cardinality.
+8263: pub(crate) fn goo_seed(prepared: &[Prepared]) -> usize {
+8264:     (0..prepared.len()).min_by_key(|&i| prepared[i].est).unwrap()
+8265: }
+8266: 
+8267: /// The seed scan's requested sort column: a pushed-down filter scans in its own
+8268: /// column's order (sequential numeric access); otherwise sort by the first seed
+8269: /// variable shared with another pattern, to enable a merge join.
+8270: pub(crate) fn goo_seed_sort(prepared: &[Prepared], seed: usize, filter_col: Option<usize>) -> Option<usize> {
+8271:     if filter_col.is_some() {
+8272:         return filter_col;
+8273:     }
+8274:     prepared[seed]
+8275:         .pos_vars
+8276:         .iter()
+8277:         .flatten()
+8278:         .find(|v| (0..prepared.len()).any(|j| j != seed && prepared[j].var_pos(v).is_some()))
+8279:         .and_then(|v| prepared[seed].var_pos(v))
+8280: }
+8281: 
+8282: /// The characteristic-set planning context (the opt-in `cs-planner` feature) the
+LINES 8392-8448
+8392: pub(crate) fn goo_pick(
+8393:     graph: &Graph,
+8394:     prepared: &[Prepared],
+8395:     done: &[bool],
+8396:     var_ndv: &FxHashMap<Variable, f64>,
+8397:     cur_card: f64,
+8398:     cs: &CsCtx,
+8399: ) -> (usize, f64, bool) {
+8400:     let mut best: Option<(usize, f64)> = None;
+8401:     for i in 0..prepared.len() {
+8402:         if done[i] {
+8403:             continue;
+8404:         }
+8405:         let cs_score = cs.pick_score(i, cur_card);
+8406:         let mut sel = 1.0f64;
+8407:         let mut shared = cs_score.is_some();
+8408:         for (pos, ov) in prepared[i].pos_vars.iter().enumerate() {
+8409:             if let Some(v) = ov {
+8410:                 // The subject variable of a CS-scored star candidate is already
+8411:                 // accounted for by the conditional star estimate.
+8412:                 if pos == 0 && cs_score.is_some() {
+8413:                     continue;
+8414:                 }
+8415:                 if let Some(&rndv) = var_ndv.get(v) {
+8416:                     shared = true;
+8417:                     let pndv = pattern_var_ndv(graph, &prepared[i].id_pat, pos, prepared[i].est);
+8418:                     sel /= rndv.max(pndv).max(1.0);
+8419:                 }
+8420:             }
+8421:         }
+8422:         if !shared {
+8423:             continue;
+8424:         }
+8425:         let out = match cs_score {
+8426:             Some(star) => star * sel,
+8427:             None => cur_card * prepared[i].est as f64 * sel,
+8428:         };
+8429:         if best.is_none_or(|(_, bc)| out < bc) {
+8430:             best = Some((i, out));
+8431:         }
+8432:     }
+8433:     match best {
+8434:         Some((i, out)) => (i, out.max(0.0), true),
+8435:         None => {
+8436:             // Disconnected: smallest-cardinality remaining (cross product).
+8437:             let i = (0..prepared.len()).filter(|&j| !done[j]).min_by_key(|&j| prepared[j].est).unwrap();
+8438:             (i, cur_card * prepared[i].est as f64, false)
+8439:         }
+8440:     }
+8441: }
+8442: 
+8443: /// Estimated number of distinct values of the variable at canonical position
+8444: /// `pos` in a pattern, from the per-predicate characteristic stats. Falls back to
+8445: /// the pattern's cardinality (an upper bound) when the predicate is unbound or the
+8446: /// other terminal is bound (so the column is effectively keyed).
+8447: fn pattern_var_ndv(graph: &Graph, id_pat: &IdPattern, pos: usize, est: usize) -> f64 {
+8448:     let est = (est as f64).max(1.0);
+LINES 8874-9011
+8874: fn scan_to_bindings(
+8875:     graph: &Graph,
+8876:     id_pat: &IdPattern,
+8877:     pos_vars: &[Option<Variable>; 3],
+8878:     sort_col: Option<usize>,
+8879:     filter: Option<(usize, ScanCmp)>,
+8880:     limit: Option<usize>,
+8881:     // [OPUS-4.8] (sq-gr8mb / §A3) Optional semi-join prefilter: `(canonical position of
+8882:     // the connecting variable, membership filter over the other side's join keys)`. A
+8883:     // scanned row whose key at that position is ABSENT from the filter cannot match the
+8884:     // downstream join, so it is dropped before projection. The filter is membership-exact
+8885:     // (no false positives), so this never changes the RESULT — only fewer rows are kept.
+8886:     // Only present under the opt-in `semijoin-bitmap` feature, so the default build's
+8887:     // signature and per-row path are byte-identical.
+8888:     #[cfg(feature = "semijoin-bitmap")] prefilter: Option<(usize, &crate::semijoin::KeyFilter)>,
+8889: ) -> Bindings {
+8890:     let mut vars: Vec<Variable> = Vec::new();
+8891:     let mut var_positions: Vec<Vec<usize>> = Vec::new();
+8892:     for (pos, v) in pos_vars.iter().enumerate() {
+8893:         if let Some(v) = v {
+8894:             if let Some(idx) = vars.iter().position(|x| x == v) {
+8895:                 var_positions[idx].push(pos);
+8896:             } else {
+8897:                 vars.push(v.clone());
+8898:                 var_positions.push(vec![pos]);
+8899:             }
+8900:         }
+8901:     }
+8902:     let scan = match sort_col {
+8903:         Some(c) => graph.store.scan_sorted(id_pat, c),
+8904:         None => graph.store.scan(id_pat),
+8905:     };
+8906:     // The TRUE sort column is the first unbound canonical column in the chosen
+8907:     // permutation's order — NOT necessarily the requested `sort_col`: with fewer than
+8908:     // six permutations the store may not have the requested order, in which case the
+8909:     // engine must report the real one so merge joins fall back to hash and range-
+8910:     // pruning is skipped (both keyed off the truthful `sorted_by` / `actual_sort`).
+8911:     let actual_sort = scan.perm.order().into_iter().find(|&c| id_pat[c].is_none());
+8912:     let sorted_by = actual_sort.and_then(|c| pos_vars[c].clone());
+8913: 
+8914:     // Range-pruning: when the pushed-down filter is on the scan's ACTUAL sort column and
+8915:     // that column holds inline integers (which sort by value), binary-search to the
+8916:     // passing value range instead of scanning + filtering the whole relation. Safe
+8917:     // only when EVERY value in the column is inline (so no dictionary-encoded
+8918:     // numeric in another datatype, scattered below INLINE_BASE, is skipped).
+8919:     let mut scan_rows: &[[Id; 3]] = scan.rows.as_ref();
+8920:     if let Some((fpos, cmp)) = filter {
+8921:         if actual_sort == Some(fpos) && scan_rows.first().is_some_and(|r| dict::is_inline(scan.to_spo(r)[fpos])) {
+8922:             scan_rows = match inline_pass_values(cmp) {
+8923:                 Some((lo, hi)) => {
+8924:                     let (lo_id, hi_id) = (dict::INLINE_BASE + lo, dict::INLINE_BASE + hi);
+8925:                     let start = scan_rows.partition_point(|r| scan.to_spo(r)[fpos] < lo_id);
+8926:                     let end = scan_rows.partition_point(|r| scan.to_spo(r)[fpos] <= hi_id);
+8927:                     &scan_rows[start..end]
+8928:                 }
+8929:                 None => &[],
+8930:             };
+8931:         }
+8932:     }
+8933: 
+8934:     // Per-row builder: apply the semi-join prefilter (if any) and the pushed-down
+8935:     // filter, then project (with the repeated-variable consistency check); `None`
+8936:     // drops the row.
+8937:     let build_row = |row: &[Id; 3]| -> Option<Row> {
+8938:         let spo = scan.to_spo(row);
+8939:         // [OPUS-4.8] (sq-gr8mb / §A3) Semi-join prefilter: drop a row whose connecting-
+8940:         // variable id is absent from the other side's join-key set — it cannot survive the
+8941:         // downstream join. EXACT membership, so the result is unchanged (only this wasted
+8942:         // row is skipped before projection). Checked first: it is the cheapest reject.
+8943:         #[cfg(feature = "semijoin-bitmap")]
+8944:         if let Some((jpos, kf)) = prefilter {
+8945:             if !kf.contains(spo[jpos]) {
+8946:                 return None;
+8947:             }
+8948:         }
+8949:         if let Some((fpos, cmp)) = filter {
+8950:             if !cmp.test_id(graph, spo[fpos]) {
+8951:                 return None;
+8952:             }
+8953:         }
+8954:         let mut out = Row::with_capacity(vars.len());
+8955:         for positions in &var_positions {
+8956:             let v0 = spo[positions[0]];
+8957:             if positions.iter().any(|&p| spo[p] != v0) {
+8958:                 return None;
+8959:             }
+8960:             out.push(v0);
+8961:         }
+8962:         Some(out)
+8963:     };
+8964: 
+8965:     // zk-trace hook (feature `zk`, armed recorder only): record the matched
+8966:     // triples of this pattern scan — the rows `build_row` keeps, BEFORE
+8967:     // projection (the witness needs whole triples, not just variable columns).
+8968:     // One `enabled()` check per scan; zero per-row cost when disarmed.
+8969:     #[cfg(feature = "zk")]
+8970:     if crate::zk::enabled() {
+8971:         let kept: Vec<[Id; 3]> = scan_rows
+8972:             .iter()
+8973:             .filter(|r| build_row(r).is_some())
+8974:             .map(|r| scan.to_spo(r))
+8975:             .collect();
+8976:         crate::zk::record_scan_ids(graph, id_pat, pos_vars, &kept, false);
+8977:     }
+8978: 
+8979:     // No LIMIT and a large relation: build the rows in parallel (order-preserving).
+8980:     #[cfg(feature = "parallel")]
+8981:     if limit.is_none() && scan_rows.len() >= PAR_THRESHOLD {
+8982:         use rayon::prelude::*;
+8983:         let rows: Vec<Row> = scan_rows.par_iter().filter_map(build_row).collect();
+8984:         return Bindings { vars, rows, sorted_by };
+8985:     }
+8986: 
+8987:     // Reserve only up to the LIMIT so a small LIMIT over a huge scan does not
+8988:     // allocate for the whole relation (the point of early termination).
+8989:     let cap = limit.map_or(scan_rows.len(), |n| n.min(scan_rows.len()));
+8990:     let mut rows: Vec<Row> = Vec::with_capacity(budget::cap_alloc(cap));
+8991:     for (i, row) in scan_rows.iter().enumerate() {
+8992:         // Coarse budget check every 4096 scanned rows.
+8993:         if i & 4095 == 0 && budget::exhausted(rows.len()) {
+8994:             break;
+8995:         }
+8996:         if let Some(out) = build_row(row) {
+8997:             rows.push(out);
+8998:             // LIMIT early-termination: stop scanning once we have enough rows.
+8999:             if let Some(n) = limit {
+9000:                 if rows.len() >= n {
+9001:                     break;
+9002:                 }
+9003:             }
+9004:         }
+9005:     }
+9006:     Bindings { vars, rows, sorted_by }
+9007: }
+9008: 
+9009: fn merge_join(left: Bindings, right: Bindings, jv: &Variable) -> Bindings {
+9010:     merge_join_ref(&left, &right, jv)
+9011: }
+SOURCE crates/sparq-core/src/store.rs; full source SHA256 6c70a6d4f13de468143f19b75972c28b312a8a2110bf95deb502d784f9b9284c
+LINES 27-39
+27: /// The permutations actually built and searched. The full six give every triple
+28: /// pattern a sorted scan in the order any merge join wants. The `compact-index` set
+29: /// {SPO, POS, OSP} still answers EVERY triple pattern from one index (SPO→S*/SP*,
+30: /// POS→P*/PO*, OSP→O*/OS*) at half the memory, at the cost of some merge joins (and
+31: /// some lazy-count fast paths) falling back to hashing / sorting.
+32: // Compact set on wasm ALWAYS (memory-bound target), or on native opt-in via the
+33: // `compact-index` feature (for testing). Keyed on `target_arch` — NOT just a feature —
+34: // so the wasm choice does not leak to the native build via Cargo feature unification.
+35: #[cfg(not(any(target_arch = "wasm32", feature = "compact-index")))]
+36: pub const BUILT: &[Perm] = &[Perm::Spo, Perm::Sop, Perm::Pso, Perm::Pos, Perm::Osp, Perm::Ops];
+37: #[cfg(any(target_arch = "wasm32", feature = "compact-index"))]
+38: pub const BUILT: &[Perm] = &[Perm::Spo, Perm::Pos, Perm::Osp];
+39: 
+LINES 1080-1094
+1080: 
+1081:     /// Returns the contiguous slice of rows (in `perm` order) matching the bound
+1082:     /// prefix of the pattern, together with the chosen permutation.
+1083:     pub fn scan(&self, pattern: &Pattern) -> Scan<'_> {
+1084:         let (perm, lead) = Self::choose(pattern);
+1085:         self.scan_with(pattern, perm, lead)
+1086:     }
+1087: 
+1088:     /// Scans choosing a permutation whose output is sorted by canonical column
+1089:     /// `sort_col` (when possible), for merge joins.
+1090:     pub fn scan_sorted(&self, pattern: &Pattern, sort_col: usize) -> Scan<'_> {
+1091:         let (perm, lead) = Self::choose_sorted(pattern, sort_col);
+1092:         self.scan_with(pattern, perm, lead)
+1093:     }
+1094: 
+LINES 1160-1180
+1160:     }
+1161: 
+1162:     /// Estimated number of matches for a pattern (the range length) — the cardinality
+1163:     /// estimate used by the greedy planner. Cheap for every storage mode: raw modes
+1164:     /// subtract binary-search bounds; the compressed mode counts via the block directory
+1165:     /// decoding at most two boundary blocks (never the whole range).
+1166:     pub fn estimate(&self, pattern: &Pattern) -> usize {
+1167:         let (perm, lead) = Self::choose(pattern);
+1168:         let (lo, hi) = Self::bounds(pattern, perm, lead);
+1169:         let base = self.perms[perm as usize].count_in(lo, hi);
+1170:         match &self.overlay {
+1171:             None => base,
+1172:             Some(ov) => {
+1173:                 let (add, del) = ov.count_correction(perm, lo, hi);
+1174:                 base + add - del
+1175:             }
+1176:         }
+1177:     }
+1178: }
+1179: 
+1180: /// A range of rows in a permutation's column order. Borrowed from the raw index, or

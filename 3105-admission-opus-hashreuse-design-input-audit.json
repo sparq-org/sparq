@@ -1,0 +1,19 @@
+{
+  "at": "2026-09-10T15:41:38.516516+00:00",
+  "source_manifest_sha256": "dbe10cdac941dc52ceb1db2f611d9b672752ec1402037f249aa7f508855c9c49",
+  "input_sha256": "e31f775ee3a322f3a91d9720dd94adead0f20632234bf8cb52c35038357a72af",
+  "input_bytes": 91813,
+  "included_files": [
+    "review-packet.md",
+    "report.json",
+    "witness-plan.json",
+    "retention-plan.json",
+    "provenance.json",
+    "public-path-context.txt",
+    "planner-scan.txt",
+    "engine-capped.txt",
+    "hash-build-probe.txt",
+    "accounting-dependencies.txt"
+  ],
+  "scope": "All10frozenreport/sourcefragmentfiles included. Fragments not wholeworkspace; model must flag materialmissingcontext. Static designreview only."
+}

@@ -1,0 +1,50 @@
+{
+  "status": "STATIC_DERIVATION_NOT_EXECUTED",
+  "query": "PREFIX : <http://ex/> SELECT ?o WHERE { ?s :q ?o . ?s :p ?o . FILTER(?o < 16) } LIMIT 65",
+  "dataset": {
+    "load": "Graph::load_str synthetic Turtle, ordinary base default graph",
+    "p": "For i=0..2047 add :s{i} :p (i mod16) as canonical xsd:integer. Exactly2048 triples.",
+    "q_matches": "For i=0..63 add :s{i} :q (i mod16). Exactly64 triples.",
+    "q_fillers": "For j=0..1984 add distinct :f{j} :q (16+(j mod16)). No :f subject has :p. Exactly1985 triples.",
+    "total_triples": 4097,
+    "distinct_integer_values": 32,
+    "no_duplicates_or_triple_terms": true
+  },
+  "qualification": "Native six-permutation default engine/core; no compact-index, no algebra-rewrite or installed custom planner/statistics, ordinary unlimited QueryBudget, recorder disarmed. Pin actual parsed BGP order/filter assignment in later test; do not silently adjust fixture if it differs.",
+  "static_path": [
+    "query -> query_with_budget(unlimited) -> PreparedQuery::parse -> query_prepared_with_budget -> eval_select -> eval_modified Slice -> try_capped Project/Filter(BGP) -> eval_bgp_binary_capped. No COUNT, DISTINCT, ORDER BY or single-pattern shortcut.",
+    "flatten_conjunction preserves original BGP order. split_sargable assigns ?o<16 to first pattern Q at object column2, before GOO. prepare_bgp ignores filter selectivity: Q estimate2049, P estimate2048. Therefore seed=P(index1), RHS=Q(index0); only one GOO candidate exists each block.",
+    "P has no pushed filter. goo_seed_sort chooses shared subject position0. Native Pso scan actually sorted_by s. Seed has2048 rows; block starts0,1024 with lengths1024,1024.",
+    "Q requested scan_sort Some(2) from its pushed filter, overriding candidate merge subject. Pos scan actually sorted_by o, so merge_var s fails actual-sort equality. Two connecting variables(s,o) prohibit the one-variable bind branch.",
+    "Canonical nonnegative integer column permits range-pruning before projection/reservation; Q contains exactly64 passing rows. Rows/vars/text fit existing4MiB scan allowance. Q scan closure runs once, then exact sort2 relation reused in block2.",
+    "Each left block has1024 rows and right has64. hash_join_ref chooses RHS on both calls by existing smaller-side test(1024>64); build shared key is RHS columns[0,1] for(s,o),64 unique keys. Both build and probe are below50000, so existing serial table/probe paths apply.",
+    "There are exactly64 solutions. LIMIT65 cannot be satisfied after any block, even if all64 matching subjects happen to be in block1; both blocks necessarily execute. This does not rely on dictionary ID ordering or match distribution."
+  ],
+  "expected_bag": {
+    "projected_variable": "o",
+    "terms": "Canonical xsd:integer0..15",
+    "multiplicity_each": 4,
+    "total_rows": 64,
+    "full_mapping_optional": "Each(s_i,i mod16),i=0..63 occurs once; projected bag independently calculated, not derived from production query."
+  },
+  "baseline_work_oracle": {
+    "capped_entries": 1,
+    "seed_blocks": 2,
+    "rhs_scan_closures": 1,
+    "bind_calls": 0,
+    "merge_calls": 0,
+    "rhs_hash_join_calls": 2,
+    "lhs_hash_build_calls": 0,
+    "serial_rhs_table_constructions": 2,
+    "rhs_rows_visited_in_build": 128,
+    "parallel_partitioned_build_calls": 0
+  },
+  "instrumentation_required": "cfg(test) observer around actual engine call to sjoin::build_table/build_partitioned and branch before the call, tied to capped step/pattern/start; log actual build side,row lengths,ordered build key columns,scan_sort/actual sorted_by,tables len. Existing RHS-scan observer alone cannot prove hash work. Assert baseline64+64 build visits with exact bag before implementing reuse.",
+  "later_candidate_oracle": "If reviewed cache is implemented and actual table+scan charge fits: same bag/path/decisions, one64-row serial table construction plus one cache hit. Negative control drops only retained hash preparation before block2, keeps scan cache valid: build count returns2/visits128 and headline1-build assertion fails; bag must remain correct.",
+  "anti_vacuity_limits": [
+    "Not a timing or throughput claim.",
+    "Compact-index may yield a merge instead: this specific work witness must not be generalized to that configuration.",
+    "Does not prove64-partition reuse or arbitrary projection changes; those require separate focused tests before broader admission.",
+    "The earlier70000-row scan witness did not prove RHS-build selection; this fixture deliberately separates prefilter estimate from actual RHS cardinality."
+  ]
+}

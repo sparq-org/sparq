@@ -1,0 +1,63 @@
+{
+  "main": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+  "head": "fe3284199db0831f353d2ae401b8c69472764904",
+  "clean": true,
+  "engine_source_equal_main": [
+    {
+      "path": "crates/sparq-engine/src/exec.rs",
+      "sha256": "10090299f707dbf4adb4cae6349bd390a06ed2a50645e8c3417bcc3b90fb20af",
+      "bytes": 1067149,
+      "equals_exact_main_blob": true
+    },
+    {
+      "path": "crates/sparq-engine/src/lib.rs",
+      "sha256": "074740149d0649b0334d1814ca289feaad54070ca0d90bf5737601f7021a7538",
+      "bytes": 168716,
+      "equals_exact_main_blob": true
+    },
+    {
+      "path": "crates/sparq-engine/Cargo.toml",
+      "sha256": "ab9734674fb46fcf5ad91415cff14f2552d4bc9e6a5f2994ca2e0905e2b99bc2",
+      "bytes": 39603,
+      "equals_exact_main_blob": true
+    },
+    {
+      "path": "crates/sparq-substrate/src/join.rs",
+      "sha256": "cd708a74d9f77a9c4ab2e519a1d6475c4863fb68f909889d2d62d8e1b9cefae5",
+      "bytes": 90654,
+      "equals_exact_main_blob": true
+    },
+    {
+      "path": "crates/sparq-substrate/src/rows.rs",
+      "sha256": "490d760db1825e85a08b7434725ffa0ba5d9c62adaaaa8f537442d7d48f42de0",
+      "bytes": 5927,
+      "equals_exact_main_blob": true
+    },
+    {
+      "path": "crates/sparq-core/src/store.rs",
+      "sha256": "6c70a6d4f13de468143f19b75972c28b312a8a2110bf95deb502d784f9b9284c",
+      "bytes": 112315,
+      "equals_exact_main_blob": true
+    },
+    {
+      "path": "Cargo.toml",
+      "sha256": "9f820551d15c1430a25172c831f491fb7fd92231c15f124b2a048b1137d8ce73",
+      "bytes": 9813,
+      "equals_exact_main_blob": true
+    },
+    {
+      "path": "Cargo.lock",
+      "sha256": "6d7b6095f5fec01e4ace906d6001687c67d83fedc1e50180891a419c22026152",
+      "bytes": 176396,
+      "equals_exact_main_blob": true
+    }
+  ],
+  "prior_partial_report_sha256": "1629c253aadc3e032e94d199d5272eed0e093348778996285bbbc77a84e6c8a3",
+  "prior_retention_report_sha256": "bc2db4b26d113aa2ddf9a60811c77041b861d0e1c574cc539e3a884ba1b67b2e",
+  "skills_used": [
+    "rust-router",
+    "m10-performance",
+    "m02-resource"
+  ],
+  "dependency_sources": "Pinned local registry sources only; hashbrown0.17.1,smallvec1.15.2 identity bound by Cargo.lock and full source SHA in excerpts. No cached dependency edits."
+}

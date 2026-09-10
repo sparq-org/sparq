@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-10T15:23:30.137890+00:00",
+  "updated_at": "2026-09-10T15:43:18.143012+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -92,7 +92,7 @@
       "state": "Updatedexistingowncommentwithqualified7caseclassification andPR6482;issuekeptopen"
     },
     "next_scope": "Watch existing merge group f50b5049; all20 actualLinuxmodule tests andMSRV/Clippy/privacy passed onfe328, realOpusreview complete, Copilotaddressed/resolved, normalqueueposition1. No furtherenqueue/review mutation. Aftermerge verifyrelevantmainCI thenclose5183 withqualifieddiagnosis.",
-    "agent_current_task": "ExistingAstra postmerge_ci performing bounded source-only3105 hashreuse plan, no builds/GHcalls/productionedits; awaitnewfrozenreport. PriorCIaudit complete.",
+    "agent_current_task": "ExistingAstra metadata-only warm-profile readiness for3105 fixedwitness (~3min), no builds/network/sourceedits. ActualOpus5xhigh designreview running execsession33087.",
     "constraints": "Preserve strict comparison and full normalized structural equality; no reference-input normalization, canon/engine/workflow edits or broad semantic claims; registryOFF/releasesheld",
     "readiness_directory": "direct-5183/original-seed-readiness",
     "execution_directory": "direct-5183/original-seed-execution",
@@ -343,38 +343,8 @@
       "watch_query": "direct-5183/admission/queue6482-watch-query.json",
       "runs": [
         {
-          "id": 34495072210,
-          "name": "CI",
-          "status": "queued",
-          "conclusion": null
-        },
-        {
-          "id": 34495072368,
-          "name": "feature-matrix",
-          "status": "queued",
-          "conclusion": null
-        },
-        {
-          "id": 34495072003,
-          "name": "vectorized-feature-off",
-          "status": "in_progress",
-          "conclusion": null
-        },
-        {
-          "id": 34495071974,
-          "name": "docs-quality",
-          "status": "in_progress",
-          "conclusion": null
-        },
-        {
           "id": 34495072014,
           "name": "flow-on-gates",
-          "status": "completed",
-          "conclusion": "success"
-        },
-        {
-          "id": 34495072016,
-          "name": "routing-self-tests",
           "status": "completed",
           "conclusion": "success"
         },
@@ -389,9 +359,40 @@
           "name": "pr-area-label",
           "status": "completed",
           "conclusion": "success"
+        },
+        {
+          "id": 34495072016,
+          "name": "routing-self-tests",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 34495072003,
+          "name": "vectorized-feature-off",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 34495071974,
+          "name": "docs-quality",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 34495072368,
+          "name": "feature-matrix",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 34495072210,
+          "name": "CI",
+          "status": "in_progress",
+          "conclusion": null
         }
       ],
-      "policy": "Normalprotectedenqueue exacthead jumpfalse completed;do notreplay/cancelMG. ALLGREENandgate15368 unchanged."
+      "policy": "Normalprotectedenqueue exacthead jumpfalse completed;do notreplay/cancelMG. ALLGREENandgate15368 unchanged.",
+      "observed_at": "2026-09-10T15:43:18.143012+00:00"
     }
   },
   "prs": {
@@ -919,7 +920,7 @@
   },
   "next_actions": [
     "Watch existing6482 MG f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464 andqueue state; no duplicateenqueue/reruns. CoreCI34495072210, matrix34495072368, aggregate34495071975.",
-    "Collect existingAstra bounded3105 source-plan report and verifyfrozenmanifest. Decide whether later actualOpusdesignreview andboundedwitness aremerited; no productionimplementation/builduntilstablecontinuous2GiBreserve.",
+    "Collect existingOpus33087 withoutrelaunch, andexistingAstra metadata-onlyexecution-readiness. Resolve designfindings beforefixedwitness; preserve480s256MiBofflinejobs1 andstablecontinuous2GiBfloor. No implementation admitted.",
     "After6482 protectedmerge, verifyactualrelevantpostmergeCI thenlink resolvingPRandclose5183; keep separate6483 coveragefollowup open pendingruntimewitness/decision.",
     "RegistryActionsOFF,10minute heartbeat ACTIVE, releasesheld. Preserve6049/6055/registry2305/canon/EC2holds, ALLGREENandratefailclosed."
   ],
@@ -4092,32 +4093,25 @@
   },
   "performance_readiness": {
     "issue": 3105,
-    "at": "2026-09-10T00:28:18.762567+00:00",
-    "source": "Boundedread-onlyAstra xhigh report; no execution/measurementclaim",
-    "base": "e53464c73f31f7aca800f3867ac054c36408e346",
-    "current_seam": "crates/sparq-engine/src/exec.rs4156-4297; RHSscan4239inside1024/65536/restblocks. hash_join8628maybuildsmallerside.",
-    "finding": "RepeatedRHSscansstillpresent. Perblockactualrows canchangebindadmission/sort/buildside, so preserveplanner/admission andstartwithlazyunchangedscanreuseonly.",
-    "proposed_witness": "Actualmodule >65536seedrows,two sharedvars topreventbind,residual arithmeticFILTER toavoidtry_count; ASKfalse/LIMITmiss; proposed3baseline vs1reusescan count NOTYETMEASURED. Perblockcacheinvalidatingcontrolmustkillassertion.",
-    "semantic_obligations": [
-      "bags/repeatedvariableconsistency",
-      "truthfulsortmetadata",
-      "block-specificbinddecisions",
-      "residualfilters",
-      "row/budget/cancellation",
-      "no eagerunusedRHS or deepclonecachedrows"
-    ],
-    "history_limit": "Localrefs/history only; issuecrossreferencesempty. NeedliveopenPRcensusbeforemutating.",
-    "no_ec2_required": true,
-    "no_files_or_build_by_agent": true,
-    "state": "completed; implementationlane3105started",
-    "artifact": "direct-6475/source-admission/perf3105-readiness.json",
-    "hash_reuse_followup": {
-      "state": "paused_readonly_partial",
-      "directory": "direct-3105/hash-reuse-readiness",
-      "manifest_sha256": "ee41ea30e7a967dbb44e3ad39e37edba39a1690a0234fe19841a14a08fa69fe5",
-      "finding": "OnlyalreadychosenRHS-build/hashkeyidentity seamplausible; preserveperblockplanning/ownership/order and4MiBhonestaccounting. No nonvacuouswitnessyet; existing70000scancaseinsufficient.",
-      "no_implementation_go": true
-    }
+    "state": "source_plan_verified_actual_opus_design_review_pending",
+    "source_plan": "direct-3105/hash-reuse-source-plan",
+    "manifest_sha256": "dbe10cdac941dc52ceb1db2f611d9b672752ec1402037f249aa7f508855c9c49",
+    "root_verification": "direct-3105/hash-reuse-source-plan-root-verification.json",
+    "design_review": {
+      "session_id": 33087,
+      "kind": "exec_command",
+      "state": "running_do_not_restart",
+      "model": "claude-opus-5",
+      "effort": "xhigh",
+      "input": "direct-3105/admission/opus-hashreuse-design-input.md",
+      "input_sha256": "e31f775ee3a322f3a91d9720dd94adead0f20632234bf8cb52c35038357a72af",
+      "input_bytes": 91813,
+      "output": "direct-3105/admission/opus-hashreuse-design-review.json",
+      "completion": "direct-3105/admission/opus-hashreuse-design-completion.json"
+    },
+    "decision": "No implementation/build admission. Fixed2048seed/64RHS/limit65query path+memoryaccountingstatic only. Actualqueryandcountsnotrun.",
+    "agent": "/root/postmerge_ci",
+    "agent_task": "metadata-only compatiblewarmprofile readiness; no build/harnessconstruction"
   },
   "monitoring_followups": {
     "generator_labels": {

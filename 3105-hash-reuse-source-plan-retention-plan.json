@@ -1,0 +1,37 @@
+{
+  "decision": "Feasible with existing safe APIs; no new dependency/public storage API required. Proposed only, not implemented.",
+  "existing_allowance_bytes": 4194304,
+  "formula": "slot_vec.capacity()*size_of<Option<NEW CappedRhs>>() + sum(existing retained Bindings charge) + sum(retained hash charge) <=4194304. All arithmetic checked; any overflow/unproved representation declines retention.",
+  "hash_charge": [
+    "tables.capacity()*size_of<sjoin::JoinTable>() for Vec object backing elements; Vec header and fixed key descriptor live in enlarged slot struct, already covered by slot capacity charge.",
+    "For EACH table add table.allocation_size(): pinned hashbrown0.17.1 public safe API delegates to allocation layout size, covering bucket storage/control bytes/alignment requested from allocator. Do not substitute len or capacity*size_of(entry).",
+    "For EACH stored(key,posting), add key.capacity()*size_of<Id>() iff key.spilled(), and posting.capacity()*size_of<usize>() iff posting.spilled(). Inline SmallVec payloads already included in table allocation. Spill capacity, not length, preserves duplicate-key posting growth accounting.",
+    "Use a fixed at-most-three-column build projection descriptor ([usize;3]+len or equivalent); no retained Vec of probe columns/variables or copied JoinKeys. If actual RHS width>3, decline hash retention. Enlarged per-slot type must participate in pre-reservation and actual-capacity checks before allocating slots."
+  ],
+  "scope_of_bound": "Requested retained allocation layout/capacities per invocation only, same as existing policy. Allocator metadata/usable-size rounding, stack, pre-existing AST/prepared/planner/NDV state, seed/result storage, temporary key allocations/parallel tag vector and original transient table construction remain outside. No whole-query peak/RSS/global/nested-budget guarantee.",
+  "identity": [
+    "Invocation-local slot for immutable prepared pattern + immutable pushed filter + fixed graph/view. RHS requested sort already keys scan generation and actual sorted_by remains truthful. Hash tables must be owned WITH the corresponding retained Bindings, never borrowed across replaced/dropped rows.",
+    "Recompute existing per-block GOO/bind/merge/hash decision and exact smaller-side choice first. Reuse only if RHS is currently chosen build side; equality still selects LHS and uses original build. Do not choose an old cached table over a different current strategy.",
+    "Exact ordered RHS build-column projection AND serial-vs64-partition representation must match. Recompute current probe-column mapping, out_vars,probe_only and JoinKeys every invocation; only stored build-key projection is reused. Hash function/partition count are existing monomorphic constants, unchanged.",
+    "Build selected new table through original build_table/build_partitioned path once, then account completed allocation. Publish into cache ONLY when RHS is already retained and combined charge fits. Otherwise probe with original transient table and drop it at the old boundary, no rescans/clones/eviction-policy substitution."
+  ],
+  "invalidation": [
+    "Before RHS scan-sort replacement, detach/drop hash tables AND old rows and refund both charges before invoking new scan; table postings are old row indices.",
+    "Before replacing a hash with a different ordered build key/kind, drop/refund old hash first, preserving scan entry. Never hold two retained generations.",
+    "A bind/merge/LHS-build step cannot use hash cache; a still-valid unused hash can remain charged until later same-identity use/replacement/query exit. No forced strategy change or cross-query cache.",
+    "Disabled slot cache/armed budget/unretained relation means no hash retention or new dynamic cache metadata allocation. Keep source try_capped recorder and view guards unchanged."
+  ],
+  "preservation": [
+    "Native build threshold remains50000 with64partitions; no serial/parallel policy change, tables probed with original key_hash/probe_table and ascending posting indices.",
+    "Existing serial EngineBudget poll per probe row, parallel EngineSnapshot/fold/reduce and final sticky budget check remain at same sites. Skip only redundant pure builds with no existing polling.",
+    "Keep build/probe smaller-side layout and recomputed projection ordering. Serial enumeration stays identical; parallel scheduling remains existing behavior, not a promise of unspecified order stability.",
+    "No substrate public API changes: existing build/probe methods and JoinTable alias suffice. Keep ordinary hash_join_ref callers uncached. Minimal prospective files:exec.rs private cached adapter/slot/accounting plus focused tests, documentation/declaration only if subsequently required by reviewed runtime change."
+  ],
+  "accounting_controls_for_later": [
+    "Create equal-len different-capacity table fixtures; verify charge against allocation_size not len.",
+    "Use Key with3columns and Posting with>2entries to force spills; omitting either spill charge must fail an exact capacity assertion.",
+    "Boundary fit/one-byte-short and multiple table entries jointlyshare4MiB; ignoring table charge must demonstrably exceed reported retained allowance without merely failing compilation.",
+    "Sort/key change drops/refunds table before rebuilding; compiled no-refund/drop control must fail lifetime/accounting assertion.",
+    "No engine snapshot/cancellation/rowbudget checks may be weakened to demonstrate gain."
+  ]
+}
