@@ -1,0 +1,161 @@
+[
+  {
+    "case": "lexical-pair",
+    "oxigraph": {
+      "before_quads": 1,
+      "where_rows": 1,
+      "distinct_blank_nodes": 1,
+      "after_quads": 2,
+      "lexical_terms": [
+        "\"8\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+      ]
+    },
+    "sparq": {
+      "parent/rebuild": {
+        "before_quads": 2,
+        "where_rows": 2,
+        "distinct_blank_nodes": 2,
+        "after_quads": 4,
+        "lexical_terms": [
+          "\"008\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+          "\"8\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+        ]
+      },
+      "parent/in-place": {
+        "before_quads": 2,
+        "where_rows": 2,
+        "distinct_blank_nodes": 2,
+        "after_quads": 4,
+        "lexical_terms": [
+          "\"008\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+          "\"8\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+        ]
+      },
+      "main/rebuild": {
+        "before_quads": 2,
+        "where_rows": 2,
+        "distinct_blank_nodes": 2,
+        "after_quads": 4,
+        "lexical_terms": [
+          "\"008\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+          "\"8\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+        ]
+      },
+      "main/in-place": {
+        "before_quads": 2,
+        "where_rows": 2,
+        "distinct_blank_nodes": 2,
+        "after_quads": 4,
+        "lexical_terms": [
+          "\"008\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+          "\"8\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+        ]
+      }
+    }
+  },
+  {
+    "case": "canonical-eight",
+    "oxigraph": {
+      "before_quads": 1,
+      "where_rows": 1,
+      "distinct_blank_nodes": 1,
+      "after_quads": 2,
+      "lexical_terms": [
+        "\"8\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+      ]
+    },
+    "sparq": {
+      "parent/rebuild": {
+        "before_quads": 1,
+        "where_rows": 1,
+        "distinct_blank_nodes": 1,
+        "after_quads": 2,
+        "lexical_terms": [
+          "\"8\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+        ]
+      },
+      "parent/in-place": {
+        "before_quads": 1,
+        "where_rows": 1,
+        "distinct_blank_nodes": 1,
+        "after_quads": 2,
+        "lexical_terms": [
+          "\"8\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+        ]
+      },
+      "main/rebuild": {
+        "before_quads": 1,
+        "where_rows": 1,
+        "distinct_blank_nodes": 1,
+        "after_quads": 2,
+        "lexical_terms": [
+          "\"8\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+        ]
+      },
+      "main/in-place": {
+        "before_quads": 1,
+        "where_rows": 1,
+        "distinct_blank_nodes": 1,
+        "after_quads": 2,
+        "lexical_terms": [
+          "\"8\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+        ]
+      }
+    }
+  },
+  {
+    "case": "different-values",
+    "oxigraph": {
+      "before_quads": 2,
+      "where_rows": 2,
+      "distinct_blank_nodes": 2,
+      "after_quads": 4,
+      "lexical_terms": [
+        "\"8\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+        "\"9\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+      ]
+    },
+    "sparq": {
+      "parent/rebuild": {
+        "before_quads": 2,
+        "where_rows": 2,
+        "distinct_blank_nodes": 2,
+        "after_quads": 4,
+        "lexical_terms": [
+          "\"8\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+          "\"9\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+        ]
+      },
+      "parent/in-place": {
+        "before_quads": 2,
+        "where_rows": 2,
+        "distinct_blank_nodes": 2,
+        "after_quads": 4,
+        "lexical_terms": [
+          "\"8\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+          "\"9\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+        ]
+      },
+      "main/rebuild": {
+        "before_quads": 2,
+        "where_rows": 2,
+        "distinct_blank_nodes": 2,
+        "after_quads": 4,
+        "lexical_terms": [
+          "\"8\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+          "\"9\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+        ]
+      },
+      "main/in-place": {
+        "before_quads": 2,
+        "where_rows": 2,
+        "distinct_blank_nodes": 2,
+        "after_quads": 4,
+        "lexical_terms": [
+          "\"8\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+          "\"9\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+        ]
+      }
+    }
+  }
+]

@@ -1,0 +1,202 @@
+{
+  "schema_version": 1,
+  "author": "GPT-6 Astra xhigh",
+  "status": "frozen",
+  "files": [
+    {
+      "path": "auxiliary-check-limitations.json",
+      "bytes": 977,
+      "sha256": "96e70e4f5ab2adaf7e51f9c5bf7cfcd9cfa1ac67ac68c61417c47f50488016c4"
+    },
+    {
+      "path": "binary.json",
+      "bytes": 133,
+      "sha256": "282e803698fdf2d19156dfa5fcdd0ad0b3889080309c38c6396255d1666438cd"
+    },
+    {
+      "path": "build.stderr",
+      "bytes": 197810,
+      "sha256": "4221eb32d0096e2d01a18760e90fbd1d649cf2f23837bef90648104a7d597fce"
+    },
+    {
+      "path": "build.stdout",
+      "bytes": 181,
+      "sha256": "a5a338f2461742372ef25ba7b390d6ff95cbe0681ab73c938e0b024ba6e18313"
+    },
+    {
+      "path": "commands.json",
+      "bytes": 2981,
+      "sha256": "cb86ac4a9b2289b5b3ca0cbceb73ee9a04b0e23afc982f56010fbc691b005101"
+    },
+    {
+      "path": "comparison.json",
+      "bytes": 4381,
+      "sha256": "0d0022d0fb9d3369051a45e68e4cb70f0fd36e1c4691d83e369089b71cd646ab"
+    },
+    {
+      "path": "compiler-provenance.json",
+      "bytes": 59375,
+      "sha256": "c7d99adb647c5067a31f01a3e3f839c637a0a3978b2f71026b0aa28832b7e1a0"
+    },
+    {
+      "path": "earlier-engine-binary-source-provenance.json",
+      "bytes": 1586,
+      "sha256": "128c2d55707b5e1471c4b21f988c6f1b150c4a3997bac9c100476d9a5a0b56a3"
+    },
+    {
+      "path": "export.py",
+      "bytes": 10096,
+      "sha256": "edc64b3ea0c30e89720f9c3d5b9faf1eded26f0a57d045d5707b2ec9cecac74b"
+    },
+    {
+      "path": "final-resource.json",
+      "bytes": 148,
+      "sha256": "0eb4f126b6befed9dea5542e362790f0b2083f3e62d4523d20d6973b545aa557"
+    },
+    {
+      "path": "final-source-state.json",
+      "bytes": 248,
+      "sha256": "987f5abddcc0350a797ba58d7bcba5803bc83fe89c47f053a55d9f70556c641c"
+    },
+    {
+      "path": "fixed-cases.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "fixed-cases.stdout",
+      "bytes": 2717,
+      "sha256": "bfc8056e4d3c7e8ded4f79e999e030cb904a2952bfa71ba70ab63ad799114451"
+    },
+    {
+      "path": "harness/Cargo.lock",
+      "bytes": 16186,
+      "sha256": "12174af43de70fc2197ec8d5594b56a5e81a11dc4aefcce36ad608989d887483"
+    },
+    {
+      "path": "harness/Cargo.toml",
+      "bytes": 335,
+      "sha256": "ef90342f1b02e68181e640af3d3782cfcf1556c2dab34221c6cceb2bb218f782"
+    },
+    {
+      "path": "harness/src/main.rs",
+      "bytes": 2804,
+      "sha256": "8a30b422264921a29a56cfc8baf5c62d046b415f9b1263f9a0eee57354d47974"
+    },
+    {
+      "path": "initial-resource.json",
+      "bytes": 161,
+      "sha256": "ace59cb92a3cab9788604f706da3d0bf30f50e2122ed2e1302878e25d6a2c161"
+    },
+    {
+      "path": "issue5183-oxigraph-witness.d",
+      "bytes": 211,
+      "sha256": "1662ece04268e981a02f4ca34fba222c4022e7659ba4f69f5234b548635c2ffa"
+    },
+    {
+      "path": "metadata.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "metadata.stdout",
+      "bytes": 253728,
+      "sha256": "7e31ddca0f4a11f0ed1c7641336fe24f0e59a04d6b265911c9810b63aa5dade6"
+    },
+    {
+      "path": "normative-semantics.json",
+      "bytes": 820,
+      "sha256": "fe09c31b36fdb2ea55f7e406dd80cbebc0bd5dab39f7c3134f5326f9f0c5092e"
+    },
+    {
+      "path": "observations.json",
+      "bytes": 3300,
+      "sha256": "a4aa17d1201daef9bf5595bf9ccd27403595bc51b7079d9e3b79c4dc40f44001"
+    },
+    {
+      "path": "oxigraph-witness",
+      "bytes": 6840432,
+      "sha256": "c1f581d01715b130367300cabdc43f75273bd7027bdd9b9d982ed617da52f292"
+    },
+    {
+      "path": "phase-result.json",
+      "bytes": 124,
+      "sha256": "6f1990f109671837c5906c7eef2250c9866709668498221b931e2d7949e39bbe"
+    },
+    {
+      "path": "preparation.json",
+      "bytes": 30497,
+      "sha256": "2a5c0b3156b6a3d527201741d00062fe441a2d883872eb9528c08368ab593562"
+    },
+    {
+      "path": "protocol.json",
+      "bytes": 1074,
+      "sha256": "5fb80e0f7a21461a825f481b4779ee58ff295bf121ad5f93b76d6d1a7b7805d6"
+    },
+    {
+      "path": "report.json",
+      "bytes": 8194,
+      "sha256": "7e5b38d2b2d0add6e777416c4574dc469ba950a924fce6908361ddc8d28fbff3"
+    },
+    {
+      "path": "repository-Cargo.lock",
+      "bytes": 176396,
+      "sha256": "6d7b6095f5fec01e4ace906d6001687c67d83fedc1e50180891a419c22026152"
+    },
+    {
+      "path": "resolved-proof.json",
+      "bytes": 8320,
+      "sha256": "d197fccb8fe158a25d1d33bcd751d2c1d152589952c0c117fb0205bb6d98ae35"
+    },
+    {
+      "path": "resources.json",
+      "bytes": 16981,
+      "sha256": "494ebb1c3dcad78b912277c7f29e63e111eb8f343488ae91b7d41fde0d51cf57"
+    },
+    {
+      "path": "review-packet.md",
+      "bytes": 16069,
+      "sha256": "871d8143e7665b63e909e3d9f390afdbc2196ac82a690fcdd9e67735c82f3d9e"
+    },
+    {
+      "path": "run-phase.py",
+      "bytes": 5911,
+      "sha256": "c1c3d3adc00a0f0c7c5824d65e894e2e4dbe80f16fc75f00a96bd88b36c2d84b"
+    },
+    {
+      "path": "rustc-version.txt",
+      "bytes": 192,
+      "sha256": "e794146d99fad54562fdcbd4a7c8b22b0240d2b0312ff6d879d67939b3131850"
+    },
+    {
+      "path": "source/oxigraph/Cargo.toml",
+      "bytes": 10186,
+      "sha256": "f86d6cb5c181041f451bdc784197dbd46edcf1016e1154b9fa9e90b3c8a6d075"
+    },
+    {
+      "path": "source/oxigraph/src/storage/numeric_encoder.rs",
+      "bytes": 47678,
+      "sha256": "92c9dea4be6937174d511a1abe9ab623e5cf6c6fb88e0c5392e47ff2cf439914"
+    },
+    {
+      "path": "source/oxigraph/src/store.rs",
+      "bytes": 89264,
+      "sha256": "076529d63b49107b6d0b0dd690a3891381945bbb0a2e619059cb33a9c0a95e32"
+    },
+    {
+      "path": "source/sparq-bench/update_fuzz.rs",
+      "bytes": 78994,
+      "sha256": "0807388f84792f011b868456269a36bf74e5e463c67dfb71d1be3ad9d35aecf7"
+    },
+    {
+      "path": "source/vendor/spargebra/Cargo.toml",
+      "bytes": 9022,
+      "sha256": "57b7559aef48ba9034998dd66ba282f5299acc4c500dbed80e9c0c52bc114e71"
+    },
+    {
+      "path": "source-provenance.json",
+      "bytes": 16326,
+      "sha256": "386d17ff95f885b8be0b2c8bdcc2c5bb9a8beb7bbcce346f01d194a8d51e3acd"
+    }
+  ]
+}

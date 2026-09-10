@@ -1,0 +1,24 @@
+430: @dataclass
+431: class Config:
+432:     """Loop tunables. Prod values mirror the previous inline bash (INTERVAL /
+433:     MIN_POLLS / SETTLE_POLLS / BASE_POLLS == the old 110-attempt cap) plus the
+434:     sq-90cv4 adaptive-extension knobs. Tests inject tiny values."""
+435: 
+436:     self_run_id: str = ""
+437:     interval: int = 20          # seconds between polls (base phase)
+438:     min_polls: int = 3          # startup-race floor: no verdict before 3 polls
+439:     settle_polls: int = 2       # all-terminal must hold this many consecutive polls
+440:     base_polls: int = 110       # base budget: 110 x 20s ~= 37 min (the old hard cap)
+441:     sat_interval: int = 40      # slower poll cadence during the saturation extension
+442:     max_total_polls: int = 155  # absolute cap: 45 extension polls x 40s = +30 min
+443:     # [GPT-5.6] #6299: one-shot reporter-only tail after the ordinary cap. Fifteen
+444:     # normal-cadence polls are about five minutes, including room for the normal
+445:     # two-poll settle, while the job's 80-minute hard timeout remains the outer bound.
+446:     reporter_grace_polls: int = 15
+447:     sat_queue_min: int = 5      # queued workflow-runs in the repo => saturation
+448:     progress_window: int = 15   # polls over which a completed-count rise = progress
+449:     # [OPUS-5] #3781: consecutive polls the UNSATISFIABLE-HOLD state must persist before
+450:     # the gate fails fast on it (see run_gate). Small on purpose — the state is already
+451:     # all-terminal, so the only thing this window buys is tolerance for check-run
+452:     # registration lag; 3 polls x 20s replaces a ~67-minute burn with ~1 minute.
+453:     unsat_confirm_polls: int = 3

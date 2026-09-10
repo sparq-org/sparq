@@ -1,0 +1,424 @@
+{
+  "base": "781f667c19a8ebb779cfccb24b05ea432360b025",
+  "registry_packages": [
+    {
+      "name": "aho-corasick",
+      "version": "1.1.4",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_sha256": "9384d7c725c5c2ebc8adc602081e7cbce8b214693e9e27edef1c40f33e925810"
+    },
+    {
+      "name": "block-buffer",
+      "version": "0.10.4",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_sha256": "c76e4bd298cd6223882238449e31939d75613e82757ca87e249df843decf5f9a"
+    },
+    {
+      "name": "cfg-if",
+      "version": "1.0.4",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_sha256": "281d508beb1fe3927cf03d3f2f8c9a5117b1e4fe97ae21b9026cf318e8c35273"
+    },
+    {
+      "name": "cpufeatures",
+      "version": "0.2.17",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_sha256": "25160ea4dfa195721d352d42827b882a41f18f4c55fff58e5c3878ecae84ca44"
+    },
+    {
+      "name": "crossbeam-utils",
+      "version": "0.8.21",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_sha256": "961aa297754d8fdbae9e23d15bbbcfdcd2b50b2db56becddb84e8cba4f730713"
+    },
+    {
+      "name": "crypto-common",
+      "version": "0.1.7",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_sha256": "303682a6a66fdc98de8a011ac275e18c523f1535ed8de2a291a4fcad91de8348"
+    },
+    {
+      "name": "dashmap",
+      "version": "6.2.1",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_sha256": "e106c81b532f1aa7b98b969afc144003827d9f67b353d5d973d286ae62117273"
+    },
+    {
+      "name": "digest",
+      "version": "0.10.7",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_sha256": "f0cc2fc18c6e7f3533658b9e59d71b55e641e7d8226e5d1b915a5e7c0a1d3f36"
+    },
+    {
+      "name": "generic-array",
+      "version": "0.14.7",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_sha256": "4b5daed75505275d11f4854dd9172f910da61d9856ca2936d95e2e6e0c9040e4"
+    },
+    {
+      "name": "getrandom",
+      "version": "0.3.4",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_sha256": "5fd1d61c342777480822b8f8259a7bd8cbf6c2486a3d389b2d5b235f667a7952"
+    },
+    {
+      "name": "hashbrown",
+      "version": "0.14.5",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_sha256": "c011f10385da722056537329f3fcf8c9b93af742e79e38885c0152a0105fc227"
+    },
+    {
+      "name": "hex",
+      "version": "0.4.3",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_sha256": "85a822957796d1aa30bd28d695fae3dc86ca8832d6879a8f71e323cc4a130174"
+    },
+    {
+      "name": "json-event-parser",
+      "version": "0.2.3",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_sha256": "b15c7c44468f0cb8417772dbd6b5a7ce67a7adf369577a7222d826265cf7a175"
+    },
+    {
+      "name": "libc",
+      "version": "0.2.186",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_sha256": "9a45433b9dc5f1dcd397062608a320c2ab472319e79566ea4646dfff3ca67821"
+    },
+    {
+      "name": "lock_api",
+      "version": "0.4.14",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_sha256": "dd67edbeff9cee46c3ea6411098aeec7363cb4fe865006c8eca321d321332484"
+    },
+    {
+      "name": "md-5",
+      "version": "0.10.6",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_sha256": "d6889f7a35144bad6b21ef85f3a6c19dc39a06dac08d0714a7465e0783e74fb7"
+    },
+    {
+      "name": "memchr",
+      "version": "2.8.2",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_sha256": "0813b6eb1d993f713d55a0a71d06759969b1fbdec4575173884179e7efc4de6c"
+    },
+    {
+      "name": "once_cell",
+      "version": "1.21.4",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_sha256": "87e5b7ee438abdef12e46386e86370f54ad70cabdcf949556b9ef012a9da9587"
+    },
+    {
+      "name": "oxigraph",
+      "version": "0.5.9",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_sha256": "f86d6cb5c181041f451bdc784197dbd46edcf1016e1154b9fa9e90b3c8a6d075"
+    },
+    {
+      "name": "oxilangtag",
+      "version": "0.1.6",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_sha256": "b94691abd6f0017ab9076862eb9d850e01e413844529cd21ecf0723dbbcb82b6"
+    },
+    {
+      "name": "oxiri",
+      "version": "0.2.11",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_sha256": "3f8c783d18d146329aaf34f40bde9ff18ceb2082010de0bf507c066f3036192b"
+    },
+    {
+      "name": "oxjsonld",
+      "version": "0.2.5",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_sha256": "a5036cb5e56c0c65680ad95b1625cedaa650bcdfb6e6b790b701321ae225c8c6"
+    },
+    {
+      "name": "oxrdf",
+      "version": "0.3.3",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_sha256": "fea8b8ce9b776128de77a602fbfd335cf09812e8c44b5b3a097fe3f94ced99a6"
+    },
+    {
+      "name": "oxrdfio",
+      "version": "0.2.5",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_sha256": "a2d323f40a151f9fda9dc2bdd098c03f168fcc9759a27820454e19224c2b8d91"
+    },
+    {
+      "name": "oxrdfxml",
+      "version": "0.2.3",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_sha256": "b02ba95f7138d5a1e4cffdf759e490b3620acee68373f6f18d05346c92d4353a"
+    },
+    {
+      "name": "oxsdatatypes",
+      "version": "0.2.2",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_sha256": "bf53219189b36dda3aaeb437bc7213ed624911d55ca8470edbb8d4183307d917"
+    },
+    {
+      "name": "oxttl",
+      "version": "0.2.3",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_sha256": "dc7334692b1f7bf95d1196492425b7312b960f63d3a95d93f6b08a30f82b7e39"
+    },
+    {
+      "name": "parking_lot_core",
+      "version": "0.9.12",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_sha256": "617b6fd7c1133961c993fd5baa560180d688f6d42f59b73da11fb90089a93ca7"
+    },
+    {
+      "name": "peg",
+      "version": "0.8.6",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_sha256": "118affb038d03d4d78380788fd8956539335b16aea16ff1be41c4762432411bb"
+    },
+    {
+      "name": "peg-macros",
+      "version": "0.8.6",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_sha256": "91249f11208d71ee465275b075e0476059046fea99f2cdca25279f1597f6e8fc"
+    },
+    {
+      "name": "peg-runtime",
+      "version": "0.8.6",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_sha256": "cc69fc43c5312101a3c36011ae697239ef008b8c12bdba014642afc6f6aa5e93"
+    },
+    {
+      "name": "ppv-lite86",
+      "version": "0.2.21",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_sha256": "aa9337145bd03a6e76fd42c2ee5f07c5c23ff6b2eb73cfc35c3070d76c5bacb8"
+    },
+    {
+      "name": "proc-macro2",
+      "version": "1.0.106",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_sha256": "7408af188c9656c1c2a6012f61026df0e2dfc0275e0edf1e01f1d59b3e39c194"
+    },
+    {
+      "name": "quick-xml",
+      "version": "0.37.5",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_sha256": "450ab81e630c82d00ca1791d6c1dbcf507f3de97fa79dee4ff445e85db4d0606"
+    },
+    {
+      "name": "quote",
+      "version": "1.0.45",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_sha256": "baa198cfd5e82e453e6b8d9bd5435b7a79289edf86f276fc578ee726d39cc870"
+    },
+    {
+      "name": "rand",
+      "version": "0.9.4",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_sha256": "9543c929e4d8fc322e530d03dda65c242a3afd00319decdbc1a2f65611db9a2c"
+    },
+    {
+      "name": "rand_chacha",
+      "version": "0.9.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_sha256": "f413a8d1156cb6c7271427e5f406ed65e3056e2422224ad5d13f7d40a0c35803"
+    },
+    {
+      "name": "rand_core",
+      "version": "0.9.5",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_sha256": "e5fe39a2caf72988fae221f41b825ad42ad19dc2a55486d9c7d740a67a2bf599"
+    },
+    {
+      "name": "regex",
+      "version": "1.12.4",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_sha256": "746039e74f5192917d239506562018bcd8c31851b18caf042d7726e5502f090b"
+    },
+    {
+      "name": "regex-automata",
+      "version": "0.4.14",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_sha256": "83e288a27db86536cc16d1b1b82e9c5e89276781340518d234ecc919dde093fc"
+    },
+    {
+      "name": "regex-syntax",
+      "version": "0.8.11",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_sha256": "10c3f14629c0900ac452dd6d55a62aab561bbabbdf5774a802c8d223933cfa3b"
+    },
+    {
+      "name": "rustc-hash",
+      "version": "2.1.3",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_sha256": "7e6727beb038213a2aa02f90cbbfb1d6651a9fda56f241dd95110a0cb287efc9"
+    },
+    {
+      "name": "ryu-js",
+      "version": "1.0.2",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_sha256": "70fc95979c55b69a6c44987953d5859c2a030ed301b6b5ec269437bbe0c61c6c"
+    },
+    {
+      "name": "scopeguard",
+      "version": "1.2.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_sha256": "68899251551903e2e1ba03c927f12e4c19fc8a15e8bd3756610f53f5ec075b48"
+    },
+    {
+      "name": "serde",
+      "version": "1.0.228",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_sha256": "d7fc24e39691a0831eaa0eac677b46ecbae407a40fa816b904759822d10f42e8"
+    },
+    {
+      "name": "serde_core",
+      "version": "1.0.228",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_sha256": "b1c07acb994f88418a0bbb0d393f76c4ca4276d9f4497ca734eb182286169ea8"
+    },
+    {
+      "name": "sha1",
+      "version": "0.10.6",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_sha256": "cbfdd2dcaf34776f686caf30420c0a32a13d032fdd62495a054e65c3b0769132"
+    },
+    {
+      "name": "sha2",
+      "version": "0.10.9",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_sha256": "f5b86209df69360114aaee67a66c3fcd31d8c840b8f34b9ad383aacd63cd15da"
+    },
+    {
+      "name": "siphasher",
+      "version": "1.0.3",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_sha256": "e7b84f7acf4a759417326d28525baa2986f25e4bf8c96b146ed5e375bafb2959"
+    },
+    {
+      "name": "smallvec",
+      "version": "1.15.2",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_sha256": "93c1f8da58bf139f7a3447c6d2a98a9e764d77b96cc44497d7356f1e3c2e8e5a"
+    },
+    {
+      "name": "sparesults",
+      "version": "0.3.3",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_sha256": "2a7993a11eeca6468da516f99f2423860cd6d9c5a3d184152c82fbdc515bde16"
+    },
+    {
+      "name": "spareval",
+      "version": "0.2.6",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_sha256": "eba66401c9c172a736bbcf9fc8f00c5a6fa763cb1757cd341d71e3f9caba5c99"
+    },
+    {
+      "name": "spargebra",
+      "version": "0.4.6",
+      "source": null,
+      "manifest_sha256": "57b7559aef48ba9034998dd66ba282f5299acc4c500dbed80e9c0c52bc114e71"
+    },
+    {
+      "name": "sparopt",
+      "version": "0.3.6",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_sha256": "cacf2e0e1ee25ce8b3dcae57e595185f813fa07746d68b0402d7c87b97668082"
+    },
+    {
+      "name": "syn",
+      "version": "2.0.117",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_sha256": "43affc9aa6ba5823974fb5ffe300e0f94e29a3f39e4da3dbacaab2e5138e82b5"
+    },
+    {
+      "name": "thiserror",
+      "version": "2.0.18",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_sha256": "bc8ab0d1d8f4577fd77547771d96bbb0429cac23d94d9e4f6f4d408ac9e38440"
+    },
+    {
+      "name": "thiserror-impl",
+      "version": "2.0.18",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_sha256": "81bd886e7a10da9cbc42f4130028699f7e0cb6d4c50b62f782fb096056a16010"
+    },
+    {
+      "name": "typenum",
+      "version": "1.20.1",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_sha256": "00785a81eae34b3298dfdde78a6bd96fe3ec000de46edd509bd13b7cab7a9870"
+    },
+    {
+      "name": "unicode-ident",
+      "version": "1.0.24",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_sha256": "0bb9c0e006a21355cb85c7df72e78dd8ba6fffbb7dc3f1e7a4c19af53cd354da"
+    },
+    {
+      "name": "version_check",
+      "version": "0.9.5",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_sha256": "399ea74400a173c02eabe91cb9487d0cf351117857a5d2ebc6231f0efde67681"
+    },
+    {
+      "name": "zerocopy",
+      "version": "0.8.50",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_sha256": "cd12a55187de42f5cb24c9d9051ec345b108f667fad74373d6a011601bbe44ae"
+    }
+  ],
+  "vendored_parser_files": [
+    {
+      "path": "vendor/spargebra/Cargo.toml",
+      "sha256": "57b7559aef48ba9034998dd66ba282f5299acc4c500dbed80e9c0c52bc114e71"
+    },
+    {
+      "path": "vendor/spargebra/README.md",
+      "sha256": "40e37727e5e069e199f8c0ab6eed29a7b2c6508fd056413e38b1e78d26a6dcbb"
+    },
+    {
+      "path": "vendor/spargebra/SPARQ-PATCHES.md",
+      "sha256": "51efedeafd494759cb67100c396b34c8cf7b3ef3d0d9114423d435ed89099b83"
+    },
+    {
+      "path": "vendor/spargebra/src/algebra.rs",
+      "sha256": "81d04fe7678d3f76ffa743db33a41766407131e45015c0fbb0881e79bca3e908"
+    },
+    {
+      "path": "vendor/spargebra/src/lib.rs",
+      "sha256": "e2e0f5ea800382085bda55b4943ca3185f5b82501afb0d56847333bd0e886eef"
+    },
+    {
+      "path": "vendor/spargebra/src/parser.rs",
+      "sha256": "3e0de36a68f31e69235eb56ed65f26fcb8f97a4dee470ddfebd22f60d867af9b"
+    },
+    {
+      "path": "vendor/spargebra/src/query.rs",
+      "sha256": "2898f8381294337f29224b5d016cfcdd34e89c93d66a0c68140b4b3d2bb259b6"
+    },
+    {
+      "path": "vendor/spargebra/src/term.rs",
+      "sha256": "9820ae59d3e51484081836cb56bf3dcc65ce1e9cc963e6484b681f8261aaca66"
+    },
+    {
+      "path": "vendor/spargebra/src/update.rs",
+      "sha256": "2c1928995d0a2c889f653ccc2d6cbb108bfc3f40155c12b486982166e41aa110"
+    },
+    {
+      "path": "vendor/spargebra/tests/custom_aggregate_distinct.rs",
+      "sha256": "21d8fd258250cbe35d3b80071dd1790d98a36706cbc05e08e0b0d20c19203903"
+    },
+    {
+      "path": "vendor/spargebra/tests/recursion_depth.rs",
+      "sha256": "e98aad003d82af4da97b333066d546b429cfaccac8bcb66cc023377da224b4ff"
+    }
+  ],
+  "selected_source_files": {
+    "oxigraph/Cargo.toml": "f86d6cb5c181041f451bdc784197dbd46edcf1016e1154b9fa9e90b3c8a6d075",
+    "oxigraph/src/store.rs": "076529d63b49107b6d0b0dd690a3891381945bbb0a2e619059cb33a9c0a95e32",
+    "oxigraph/src/storage/numeric_encoder.rs": "92c9dea4be6937174d511a1abe9ab623e5cf6c6fb88e0c5392e47ff2cf439914",
+    "sparq-bench/update_fuzz.rs": "0807388f84792f011b868456269a36bf74e5e463c67dfb71d1be3ad9d35aecf7",
+    "vendor/spargebra/Cargo.toml": "57b7559aef48ba9034998dd66ba282f5299acc4c500dbed80e9c0c52bc114e71"
+  }
+}

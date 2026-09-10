@@ -1,0 +1,27 @@
+{
+  "head": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+  "PR_head": "17594d4a6534c142cae764772fc42049e898eca3",
+  "workflow_bytes_match_PR": {
+    "ci.yml": true,
+    "feature-matrix.yml": true,
+    "ci-select.yml": true
+  },
+  "groups": {
+    "MG_CI": "ci-CI-refs/heads/gh-readonly-queue/main/pr-6481-781f667c19a8ebb779cfccb24b05ea432360b025-shared",
+    "MG_matrix": "feature-matrix-feature-matrix-refs/heads/gh-readonly-queue/main/pr-6481-781f667c19a8ebb779cfccb24b05ea432360b025-shared",
+    "older_scheduled_CI": "ci-CI-refs/heads/main-34453539472"
+  },
+  "line_evidence": {
+    "ci_workflow_concurrency": ".github/workflows/ci.yml:67-87",
+    "ci_shards_no_max_parallel": ".github/workflows/ci.yml:623-636",
+    "matrix_workflow_concurrency": ".github/workflows/feature-matrix.yml:184-191",
+    "matrix_needs_and_admission": ".github/workflows/feature-matrix.yml:699-743",
+    "selector_runner": ".github/workflows/ci-select.yml:117",
+    "nightly_mutants_cap8": ".github/workflows/ci.yml:4075",
+    "nightly_mutants_ref_per_crate_group": ".github/workflows/ci.yml:4340-4349",
+    "miri_cap4": ".github/workflows/miri.yml:180",
+    "kani_cap2": ".github/workflows/kani.yml:194",
+    "gate_timeout80": ".github/workflows/ci-summary.yml:272"
+  },
+  "older_CI_matches_MG_workflow": true
+}

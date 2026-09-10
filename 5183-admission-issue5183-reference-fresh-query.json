@@ -1,0 +1,1 @@
+{"query": "query { repository(owner:\"sparq-org\",name:\"sparq\") { issue(number:5183) { number state url title comments(last:30) { nodes { body url } } } } rateLimit { remaining resetAt } }"}

@@ -1,0 +1,1 @@
+{"message":"You must be an org admin or have the runners and runner groups fine-grained permission.","documentation_url":"https://docs.github.com/rest/actions/self-hosted-runners#list-self-hosted-runners-for-an-organization","status":"403"}

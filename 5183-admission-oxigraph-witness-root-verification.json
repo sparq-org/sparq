@@ -1,0 +1,13 @@
+{
+  "at": "2026-09-10T11:35:47.596385+00:00",
+  "manifest_files_verified": 39,
+  "manifest_sha256": "24936c685da036423ed615743d5cda5eddf9ebfa589bec643ed186f4915967c1",
+  "raw_stdout_equals_observations": true,
+  "all_three_cases_checked": true,
+  "lexical_pair_counts": {
+    "Oxigraph": 1,
+    "SparqBothRecordedRevisions": 2
+  },
+  "scope": "Two-operationreduction andcontrols only; exact10operationCIseedstilluntested; no canon/comparator/production changes.",
+  "next": "Preserve originalguards andfeatureprovenance in qualifiedfixed-seedreplay before remediation policy."
+}

@@ -1,0 +1,18 @@
+{
+  "process_inventory": {
+    "command": "ps -axo pid,comm (filtered for cargo/rustc)",
+    "exit": 1,
+    "stderr": "zsh:1: operation not permitted: ps",
+    "disposition": "No retry/alternate process inventory. Own runner enforced serial cargo/jobs1; it completed and no child remains."
+  },
+  "optional_cached_file_integrity_check": {
+    "status": "Not established",
+    "error": "FileNotFoundError: cached aho-corasick-1.1.4/.cargo-checksum.json absent",
+    "disposition": "Stopped optional whole-cache file verification; no fetch/retry. Cargo offline pin equality, selected actual source/manifest hashes and linked artifact hashes preserved; no all-cache source authentication claim."
+  },
+  "first_export_parser": {
+    "status": "Corrected export-only parse",
+    "error": "ValueError --crate-name absent for a build-script command containing RUSTC environment text",
+    "disposition": "Ignore non-rustc lines lacking --crate-name. No rebuild or query rerun."
+  }
+}

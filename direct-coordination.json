@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-10T11:13:46.407842+00:00",
+  "updated_at": "2026-09-10T11:46:57.800440+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -83,9 +83,9 @@
     },
     "readiness": "direct-6480/admission/readiness-root-verification.json",
     "next_actions": [
-      "Observeexisting6481mergequeue/MGroup; neverreenqueueorreplayenqueueinputwhileentryexists. Comparegeneratedgrouptreewithreviewed17594andpreserveallliveMGroup/currentreview:passevidence.",
+      "Watch progressing6481MG459 exact job/gate results; position1 AWAITING_CHECKS. No queue retry, no protected evidence cancellation.",
       "Aftermergeverifyactualmaincommit/treeandrequiredpostmergechecks, thencheckautomaticDependabotalerts32/106/107; keep6480openuntilproven, no dismissals/releases.",
-      "Collect existingAstra boundedofflineOxigraph0.5.9comparison indirc direct-5183/oxigraph-witness. Limits10mincompile/run512MiBnewgrowth,min2GiBfree,jobs1,no network/noCargo-widebuild/no dependencyupdates. Stoponmissingclosure/bound. Original10operationCIseednotyetexecuted.",
+      "Collect existing Astra worker original-seed5183 readiness, independently verify resources/features/allowlist/guards; choose bounded build/run plan. No comparator/engine edits before exact diagnosis and Opus soundness review.",
       "Strict5183defaultenginewitnesspassed12casesbothsource-qualifiedrevisions; no6478regressionobservedthere. Needpinnedreferenceandlaterexactseedbeforeanycomparator/generatorpolicychange; preservecanonNO_GO.",
       "Postmerge6478scheduledfuzz34458064851cancelledwithnonewerreplacementobserved; causaltriagestillpending. UPDATE5183causedmaingatefailure. Preserve6049/6055/registry2305/canon/release/EC2holds andALLGREEN."
     ],
@@ -142,7 +142,7 @@
     },
     "pr": 6481,
     "url": "https://github.com/sparq-org/sparq/pull/6481",
-    "agent_state": "Astra on isolated boundedofflineOxigraph0.5.9referencebuild andfixedsyntheticquerycases",
+    "agent_state": "Existing Astra worker preparing bounded original-seed5183 closure; no build/model/network authorized in readiness phase",
     "publication": {
       "at": "2026-09-10T09:27:19.769985+00:00",
       "receipt": "direct-6480/admission/publication-receipt.json",
@@ -553,7 +553,45 @@
           "status": "completed",
           "conclusion": "success"
         }
-      ]
+      ],
+      "latest_runs": "direct-6480/admission/heartbeat1132-mergegroup-runs.json",
+      "latest_queue": "direct-6480/admission/heartbeat1132-queue.json"
+    },
+    "queue_triage": {
+      "state": "running",
+      "agent": "/root/postmerge_ci",
+      "directory": "direct-6480/mg459-queue-triage",
+      "trigger": "Top-levelCIandfeature-matrixrunsremainqueued >20min; actualjobinventoryshowsrunningandfinishedwork, so notfullyunstarted.",
+      "preliminary": "FourGitHubhostedjobsrunning, otherjobscompletedthrough11:31; repo selfhostedrunners0, orginventory403notretried. Finalsourcebasedcapacity/concurrencyclassificationpending.",
+      "constraints": "\u226425readrequests,no mutations/reruns/cancellations/hostaccess, budgetchecked"
+    },
+    "merge_group_job_triage": {
+      "state": "completed_frozen_root_verified",
+      "directory": "direct-6480/mg459-queue-triage",
+      "manifest_sha256": "0dbc0a230beb4677e8721d4f3e03344385585d93e0071365933039edc6f63d80",
+      "root_verification": "direct-6480/admission/mg459-triage-root-verification.json",
+      "read_requests": 20,
+      "result": "Progressing GitHub-hosted jobs; probable shared capacity contention, no demonstrated concurrency collision; preserve runs"
+    },
+    "latest_merge_group_jobs": {
+      "at": "2026-09-10T11:46:57.800440+00:00",
+      "head": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+      "counts": {
+        "ci": {
+          "success": 22,
+          "skipped": 7,
+          "in_progress": 3,
+          "queued": 1
+        },
+        "matrix": {
+          "success": 28,
+          "skipped": 1,
+          "queued": 26,
+          "in_progress": 2
+        }
+      },
+      "gate": "in_progress",
+      "source_prefix": "direct-6480/admission/heartbeat1148"
     }
   },
   "prs": {
@@ -974,14 +1012,16 @@
       "url": "https://github.com/sparq-org/sparq/pull/6481",
       "title": "chore(deps): patch Next.js and sharp across site and GUI",
       "queue": {
-        "id": "MQE_lQDOSz3qKM8AAAABC97cKM4AA2w6zgLLeAw",
         "position": 1,
-        "state": "QUEUED",
-        "headCommit": null
+        "state": "AWAITING_CHECKS",
+        "headCommit": {
+          "oid": "4595388de9e389f5369d63828fbf90cfc16b62d9"
+        }
       },
-      "gate": "freshCIpending",
+      "gate": "PR17594 passed verified; current MG459 in_progress",
       "actual_independent_reviews": "Opus5xhigh0c+17594approvedforCI",
-      "copilot_run": 34467011356
+      "copilot_run": 34467011356,
+      "last_observed_at": "2026-09-10T11:46:57.800440+00:00"
     }
   },
   "registry": {
@@ -1032,29 +1072,42 @@
     }
   },
   "next_actions": [
-    "Observeexisting6481mergequeue/MGroup; neverreenqueueorreplayenqueueinputwhileentryexists. Comparegeneratedgrouptreewithreviewed17594andpreserveallliveMGroup/currentreview:passevidence.",
+    "Watch progressing6481MG459 exact job/gate results; position1 AWAITING_CHECKS. No queue retry, no protected evidence cancellation.",
     "Aftermergeverifyactualmaincommit/treeandrequiredpostmergechecks, thencheckautomaticDependabotalerts32/106/107; keep6480openuntilproven, no dismissals/releases.",
-    "Collect existingAstra boundedofflineOxigraph0.5.9comparison indirc direct-5183/oxigraph-witness. Limits10mincompile/run512MiBnewgrowth,min2GiBfree,jobs1,no network/noCargo-widebuild/no dependencyupdates. Stoponmissingclosure/bound. Original10operationCIseednotyetexecuted.",
+    "Collect existing Astra worker original-seed5183 readiness, independently verify resources/features/allowlist/guards; choose bounded build/run plan. No comparator/engine edits before exact diagnosis and Opus soundness review.",
     "Strict5183defaultenginewitnesspassed12casesbothsource-qualifiedrevisions; no6478regressionobservedthere. Needpinnedreferenceandlaterexactseedbeforeanycomparator/generatorpolicychange; preservecanonNO_GO.",
     "Postmerge6478scheduledfuzz34458064851cancelledwithnonewerreplacementobserved; causaltriagestillpending. UPDATE5183causedmaingatefailure. Preserve6049/6055/registry2305/canon/release/EC2holds andALLGREEN."
   ],
   "followup_lane": {
     "issue": 5183,
     "agent": "/root/postmerge_ci",
-    "state": "bounded_offline_oxigraph_reference_running",
+    "state": "original_seed_readiness_in_progress",
     "base": "781f667c19a8ebb779cfccb24b05ea432360b025",
-    "scope": "FixedlocalRDFSPARQLreference0.5.9 Store/update/query reduction+controls; no originalseed/canonicalizer/productionedits",
-    "limits": "\u226410mincompile/run,\u2264512MiBnewgrowth,\u22652GiBfree,jobs1,offlineonly,pinnedrepoLock/vendoredspargebra0.4.6",
-    "report": "direct-5183/engine-witness/report.json",
-    "manifest_sha256": "88f152695f2fbedb42306daee1d623b10544eda87426d2ff430bd34663366af3",
-    "proposed_next": "Defaultfeature publicAPI2operationenginewitness main/parent withwarmrlibs,\u22642min/64MiB, no dependencycompile. Root mustread/verifyreadiness thenauthorize; no exactCIfeatureclaim.",
-    "directory": "direct-5183/oxigraph-witness",
-    "authorized_limits": "\u22642minlink/run phase,64MiBoutputs,jobs1,noCargo/dependencycompile/network; defaultwarmrlibsonly, noexactCIclaim",
-    "dispatch_event": "Initialautomatedcyberflagclearedwithplainlocalconformancescope. Actualtestcompleted; no remainingserviceblock.",
-    "root_verification": "direct-5183/admission/engine-witness-root-verification.json",
-    "observations": "12actualobservations: main/parentdefaultreduction+controls bothpublicupdatepaths matchspec; noattributionbeyondtestedcase",
-    "next_reference_plan": "direct-5183/engine-witness/next-reference-plan.json",
-    "reference_execution": "AuthorizedafterCIhandoff; existingAstraagent owns. Stopandreportmissingdependencies/bounds; no fallbackworkspacebuild."
+    "parent": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
+    "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue5183",
+    "branch": "codex/update-differential-replay",
+    "engine_witness": {
+      "directory": "direct-5183/engine-witness",
+      "manifest_sha256": "88f152695f2fbedb42306daee1d623b10544eda87426d2ff430bd34663366af3",
+      "root_verification": "direct-5183/admission/engine-witness-root-verification.json",
+      "scope": "12defaultfeatureobservationsbothsource-qualifiedpreservedrevisions; twooperationreduction+controls; exactCIseednotrun"
+    },
+    "oxigraph_witness": {
+      "directory": "direct-5183/oxigraph-witness",
+      "manifest_sha256": "24936c685da036423ed615743d5cda5eddf9ebfa589bec643ed186f4915967c1",
+      "root_verification": "direct-5183/admission/oxigraph-witness-root-verification.json",
+      "scope": "Actualofflinepinned0.5.9 rdf12only/vendoredspargebra0.4.6, onefixed3casepublicAPIrun; no canon/productionchanges",
+      "result": "Lexicalpair1storedterm/1row/1freshbnode vsSparq2/2/2; controlsagree; collapsehappensbeforecanonicalization",
+      "resource": "193.95s/~72.4MBgrowth/minfree6.28GB, within600s512MiB2GiBlimits; no pendingcommand"
+    },
+    "public_update": {
+      "url": "https://github.com/sparq-org/sparq/issues/5183#issuecomment-5618039976",
+      "receipt": "direct-5183/admission/issue5183-reference-comment-receipt.json"
+    },
+    "next_scope": "Need bounded originalseed4141222487 unchangedupdate_fuzz onbase/parent withCI-relevantfeatures, exactparser/allowlist/LOADsandbox/comparator; firstreturnclosure/resourceplan. No fullbenchbuild/canonweakening orsourceimplementationyet.",
+    "agent_current_task": "Offline minimal unchanged update_fuzz.rs closure/resource readiness for original seed4141222487 on source-qualified parent/main; no build/test/run/network yet",
+    "constraints": "No comparator/generator/engine edit before exactseeddiagnosis andactualindependentreview. No extraEC2/registryenable/releases.",
+    "readiness_directory": "direct-5183/original-seed-readiness"
   },
   "budget": {
     "observed_at": "2026-09-10T10:36:57.270637+00:00",
@@ -3772,9 +3825,9 @@
     "evidence": "direct-3105/admission/latency-alarm-job.log"
   },
   "registry_pause_latest": {
-    "at": "2026-09-10T09:52:26.406334+00:00",
+    "at": "2026-09-10T11:46:57.800440+00:00",
     "enabled": false,
-    "evidence": "direct-6480/admission/heartbeat-0938.json"
+    "evidence": "direct-6480/admission/heartbeat1148-registry.json"
   },
   "frontier_fallback": {
     "at": "2026-09-10T03:59:18.624949+00:00",

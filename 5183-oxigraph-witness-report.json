@@ -1,0 +1,222 @@
+{
+  "author": "GPT-6 Astra xhigh",
+  "status": "COMPLETE_FIXED_REFERENCE_WITNESS",
+  "production_changes": false,
+  "conclusion": "Oxigraph0.5.9 collapses the two same-value integer lexical terms before WHERE evaluation, changing solution cardinality and fresh template blank-node count. Sparq parent/main public witnesses retain both RDF terms. This establishes a reference-cardinality explanation for the reduction independently of canonicalization.",
+  "observed_cases": [
+    {
+      "case": "lexical-pair",
+      "oxigraph": {
+        "before_quads": 1,
+        "where_rows": 1,
+        "distinct_blank_nodes": 1,
+        "after_quads": 2,
+        "lexical_terms": [
+          "\"8\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+        ]
+      },
+      "sparq": {
+        "parent/rebuild": {
+          "before_quads": 2,
+          "where_rows": 2,
+          "distinct_blank_nodes": 2,
+          "after_quads": 4,
+          "lexical_terms": [
+            "\"008\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+            "\"8\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+          ]
+        },
+        "parent/in-place": {
+          "before_quads": 2,
+          "where_rows": 2,
+          "distinct_blank_nodes": 2,
+          "after_quads": 4,
+          "lexical_terms": [
+            "\"008\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+            "\"8\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+          ]
+        },
+        "main/rebuild": {
+          "before_quads": 2,
+          "where_rows": 2,
+          "distinct_blank_nodes": 2,
+          "after_quads": 4,
+          "lexical_terms": [
+            "\"008\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+            "\"8\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+          ]
+        },
+        "main/in-place": {
+          "before_quads": 2,
+          "where_rows": 2,
+          "distinct_blank_nodes": 2,
+          "after_quads": 4,
+          "lexical_terms": [
+            "\"008\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+            "\"8\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+          ]
+        }
+      }
+    },
+    {
+      "case": "canonical-eight",
+      "oxigraph": {
+        "before_quads": 1,
+        "where_rows": 1,
+        "distinct_blank_nodes": 1,
+        "after_quads": 2,
+        "lexical_terms": [
+          "\"8\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+        ]
+      },
+      "sparq": {
+        "parent/rebuild": {
+          "before_quads": 1,
+          "where_rows": 1,
+          "distinct_blank_nodes": 1,
+          "after_quads": 2,
+          "lexical_terms": [
+            "\"8\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+          ]
+        },
+        "parent/in-place": {
+          "before_quads": 1,
+          "where_rows": 1,
+          "distinct_blank_nodes": 1,
+          "after_quads": 2,
+          "lexical_terms": [
+            "\"8\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+          ]
+        },
+        "main/rebuild": {
+          "before_quads": 1,
+          "where_rows": 1,
+          "distinct_blank_nodes": 1,
+          "after_quads": 2,
+          "lexical_terms": [
+            "\"8\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+          ]
+        },
+        "main/in-place": {
+          "before_quads": 1,
+          "where_rows": 1,
+          "distinct_blank_nodes": 1,
+          "after_quads": 2,
+          "lexical_terms": [
+            "\"8\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+          ]
+        }
+      }
+    },
+    {
+      "case": "different-values",
+      "oxigraph": {
+        "before_quads": 2,
+        "where_rows": 2,
+        "distinct_blank_nodes": 2,
+        "after_quads": 4,
+        "lexical_terms": [
+          "\"8\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+          "\"9\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+        ]
+      },
+      "sparq": {
+        "parent/rebuild": {
+          "before_quads": 2,
+          "where_rows": 2,
+          "distinct_blank_nodes": 2,
+          "after_quads": 4,
+          "lexical_terms": [
+            "\"8\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+            "\"9\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+          ]
+        },
+        "parent/in-place": {
+          "before_quads": 2,
+          "where_rows": 2,
+          "distinct_blank_nodes": 2,
+          "after_quads": 4,
+          "lexical_terms": [
+            "\"8\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+            "\"9\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+          ]
+        },
+        "main/rebuild": {
+          "before_quads": 2,
+          "where_rows": 2,
+          "distinct_blank_nodes": 2,
+          "after_quads": 4,
+          "lexical_terms": [
+            "\"8\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+            "\"9\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+          ]
+        },
+        "main/in-place": {
+          "before_quads": 2,
+          "where_rows": 2,
+          "distinct_blank_nodes": 2,
+          "after_quads": 4,
+          "lexical_terms": [
+            "\"8\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+            "\"9\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+          ]
+        }
+      }
+    }
+  ],
+  "source_cause": {
+    "source": "oxigraph0.5.9/src/storage/numeric_encoder.rs",
+    "integer_dispatch_lines": "583-595",
+    "parse_integer_line": 870,
+    "decode_integer_line": 1140,
+    "mechanism": "Valid integer lexical text is parsed into EncodedTerm::IntegerLiteral(value); decoding creates Literal::from(value). Raw Store iteration and SELECT demonstrate one canonical term for 8 plus 008."
+  },
+  "scope": {
+    "operations": 2,
+    "cases": 3,
+    "reference_runs": 1,
+    "retries": 0,
+    "reference_api": [
+      "Store::new",
+      "Store::update",
+      "Store::query",
+      "Store::iter"
+    ],
+    "reference_features": [
+      "rdf-12"
+    ],
+    "disabled": [
+      "default/rocksdb",
+      "http-client"
+    ],
+    "resolved_packages": 62,
+    "production_lock_dependency_drift": [],
+    "patched_parser": "vendored spargebra0.4.6 at repository head781f667c",
+    "canonicalizer_used": false,
+    "controls": "8-only yields1/1/1; 8+9 yields2/2/2, matching both earlier Sparq revisions and both update paths."
+  },
+  "normative_interpretation": "RDF literal term identity includes lexical form; same integer value does not make these two RDF terms identical. INSERT blank nodes are fresh per WHERE solution. Sparq preserves two terms/solutions; the reference stores a smaller graph. This does not yet establish the cause of all eight CI mismatches.",
+  "limits": [
+    "NOT the full ten-operation seed4141222487 CI replay; seven other seeds unexecuted.",
+    "Earlier Sparq witnesses used qualified cached parent/main-equivalent libraries with default engine/core features, not CI feature parity; exact attribution copied unchanged.",
+    "Rust1.97.1/aarch64 macOS/O3/unwind/no-LTO/codegen16 is not Linux CI release-fast thin-LTO/abort.",
+    "Blank-node labels are incidental; compare counts within results, not identifiers across executions.",
+    "No comparator, canonicalizer, generator, production input, engine source, dependency version or gate changed.",
+    "Dependency warnings retained; not a full crate/workspace lint/conformance run.",
+    "No unsupported whole-cache source authentication claim; actual selected source, manifest and artifact hashes retained."
+  ],
+  "resources": {
+    "elapsed_compile_run_seconds": 193.949075291,
+    "maximum_sampled_aggregate_growth_bytes": 72196096,
+    "minimum_sampled_free_bytes": 6275842048,
+    "sample_interval_seconds": 2,
+    "limits": {
+      "seconds": 600,
+      "growth_bytes": 536870912,
+      "free_bytes": 2147483648
+    },
+    "meaning": "Allocated disk bytes; no performance, allocator heap or RSS measurement claim."
+  },
+  "next_small_step": "Separately authorize unchanged update_fuzz exact seed4141222487 on qualified parent/main sources with CI-relevant features, strict rebuild/in-place check, generator/LOAD sandbox, allowlist and comparator preserved. Capture failure step and raw pre-step graphs. Do not normalize production inputs or weaken comparisons based only on this reduction.",
+  "no_commands_pending": true
+}

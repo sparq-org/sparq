@@ -1,0 +1,16 @@
+{
+  "checked_at": "2026-09-10T10:27:59.279509+00:00",
+  "sources": [
+    {
+      "url": "https://www.w3.org/TR/rdf11-concepts/#section-Graph-Literal",
+      "section": "3.3 Literal term equality",
+      "paraphrase": "Literal identity depends on lexical form, datatype and language; equal values can remain distinct terms."
+    },
+    {
+      "url": "https://www.w3.org/TR/sparql11-update/#deleteInsert",
+      "section": "3.1.3 DELETE/INSERT and4.2.3 template instantiation",
+      "paraphrase": "INSERT templates allocate fresh blank nodes for every WHERE solution."
+    }
+  ],
+  "inference": "The proposed two-operation witness should preserve two lexical terms and produce two WHERE solutions/new blank nodes. This expectation does not establish either engine actual behavior; execute separate controlled replay."
+}

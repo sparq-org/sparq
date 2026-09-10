@@ -1,0 +1,95 @@
+[
+  {
+    "case": "lexical-pair",
+    "terms": [
+      "\"8\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+      "\"008\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+    ],
+    "first": "INSERT DATA { <http://ex/s2> <http://ex/p1> \"8\"^^<http://www.w3.org/2001/XMLSchema#integer> . <http://ex/s2> <http://ex/p1> \"008\"^^<http://www.w3.org/2001/XMLSchema#integer> . }",
+    "second": "INSERT { ?s <http://ex/p0> _:bt } WHERE { ?s <http://ex/p1> ?o }",
+    "before": [
+      "<http://ex/s2> <http://ex/p1> \"8\"^^<http://www.w3.org/2001/XMLSchema#integer> ."
+    ],
+    "where_rows": [
+      [
+        "<http://ex/s2>",
+        "\"8\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+      ]
+    ],
+    "after": [
+      "<http://ex/s2> <http://ex/p0> _:da7fb4115dde12fea36166f498af3d0 .",
+      "<http://ex/s2> <http://ex/p1> \"8\"^^<http://www.w3.org/2001/XMLSchema#integer> ."
+    ],
+    "blank_rows": [
+      [
+        "_:da7fb4115dde12fea36166f498af3d0"
+      ]
+    ],
+    "distinct_blank_nodes": 1
+  },
+  {
+    "case": "canonical-eight",
+    "terms": [
+      "\"8\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+    ],
+    "first": "INSERT DATA { <http://ex/s2> <http://ex/p1> \"8\"^^<http://www.w3.org/2001/XMLSchema#integer> . }",
+    "second": "INSERT { ?s <http://ex/p0> _:bt } WHERE { ?s <http://ex/p1> ?o }",
+    "before": [
+      "<http://ex/s2> <http://ex/p1> \"8\"^^<http://www.w3.org/2001/XMLSchema#integer> ."
+    ],
+    "where_rows": [
+      [
+        "<http://ex/s2>",
+        "\"8\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+      ]
+    ],
+    "after": [
+      "<http://ex/s2> <http://ex/p0> _:d49f312c3112a1b2c34e957a85350f1a .",
+      "<http://ex/s2> <http://ex/p1> \"8\"^^<http://www.w3.org/2001/XMLSchema#integer> ."
+    ],
+    "blank_rows": [
+      [
+        "_:d49f312c3112a1b2c34e957a85350f1a"
+      ]
+    ],
+    "distinct_blank_nodes": 1
+  },
+  {
+    "case": "different-values",
+    "terms": [
+      "\"8\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+      "\"9\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+    ],
+    "first": "INSERT DATA { <http://ex/s2> <http://ex/p1> \"8\"^^<http://www.w3.org/2001/XMLSchema#integer> . <http://ex/s2> <http://ex/p1> \"9\"^^<http://www.w3.org/2001/XMLSchema#integer> . }",
+    "second": "INSERT { ?s <http://ex/p0> _:bt } WHERE { ?s <http://ex/p1> ?o }",
+    "before": [
+      "<http://ex/s2> <http://ex/p1> \"8\"^^<http://www.w3.org/2001/XMLSchema#integer> .",
+      "<http://ex/s2> <http://ex/p1> \"9\"^^<http://www.w3.org/2001/XMLSchema#integer> ."
+    ],
+    "where_rows": [
+      [
+        "<http://ex/s2>",
+        "\"8\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+      ],
+      [
+        "<http://ex/s2>",
+        "\"9\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+      ]
+    ],
+    "after": [
+      "<http://ex/s2> <http://ex/p0> _:b53334a95a5d71689e4cf79df3ef129d .",
+      "<http://ex/s2> <http://ex/p0> _:f6d8bf3d6fac0ca8d708ddcf69972e5a .",
+      "<http://ex/s2> <http://ex/p1> \"8\"^^<http://www.w3.org/2001/XMLSchema#integer> .",
+      "<http://ex/s2> <http://ex/p1> \"9\"^^<http://www.w3.org/2001/XMLSchema#integer> ."
+    ],
+    "blank_rows": [
+      [
+        "_:b53334a95a5d71689e4cf79df3ef129d"
+      ],
+      [
+        "_:f6d8bf3d6fac0ca8d708ddcf69972e5a"
+      ]
+    ],
+    "distinct_blank_nodes": 2
+  }
+]

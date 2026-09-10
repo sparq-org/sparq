@@ -1,0 +1,1424 @@
+{
+  "ci": {
+    "total": 33,
+    "states": {
+      "('completed', 'success')": 22,
+      "('completed', 'skipped')": 7,
+      "('in_progress', None)": 2,
+      "('queued', None)": 2
+    },
+    "in_progress": [
+      {
+        "source": "ci",
+        "id": 102851098025,
+        "run_id": 34469862419,
+        "head_sha": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+        "name": "test (load-aware shard bulk 3/3)",
+        "status": "in_progress",
+        "conclusion": null,
+        "created_at": "2026-09-10T11:24:47Z",
+        "started_at": "2026-09-10T11:31:07Z",
+        "completed_at": null,
+        "runner_id": 1000077634,
+        "runner_name": "GitHub Actions 1000077634",
+        "runner_group_name": "GitHub Actions",
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "ci",
+        "id": 102851098048,
+        "run_id": 34469862419,
+        "head_sha": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+        "name": "test (load-aware shard bulk 2/3)",
+        "status": "in_progress",
+        "conclusion": null,
+        "created_at": "2026-09-10T11:24:47Z",
+        "started_at": "2026-09-10T11:31:55Z",
+        "completed_at": null,
+        "runner_id": 1000077635,
+        "runner_name": "GitHub Actions 1000077635",
+        "runner_group_name": "GitHub Actions",
+        "labels": [
+          "ubuntu-latest"
+        ]
+      }
+    ],
+    "queued": [
+      {
+        "source": "ci",
+        "id": 102851098101,
+        "run_id": 34469862419,
+        "head_sha": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+        "name": "test (load-aware shard bulk 1/3)",
+        "status": "queued",
+        "conclusion": null,
+        "created_at": "2026-09-10T11:24:47Z",
+        "started_at": "2026-09-10T11:24:47Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "runner_name": "",
+        "runner_group_name": "",
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "ci",
+        "id": 102851704760,
+        "run_id": 34469862419,
+        "head_sha": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+        "name": "coverage ratchet + test-presence gate (per-crate)",
+        "status": "queued",
+        "conclusion": null,
+        "created_at": "2026-09-10T11:26:58Z",
+        "started_at": "2026-09-10T11:26:58Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "runner_name": "",
+        "runner_group_name": "",
+        "labels": [
+          "ubuntu-latest"
+        ]
+      }
+    ]
+  },
+  "matrix": {
+    "total": 57,
+    "states": {
+      "('completed', 'success')": 22,
+      "('completed', 'skipped')": 1,
+      "('queued', None)": 32,
+      "('in_progress', None)": 2
+    },
+    "in_progress": [
+      {
+        "source": "matrix",
+        "id": 102847502798,
+        "run_id": 34469862602,
+        "head_sha": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+        "name": "opt-in group (g19 sparq-vectors)",
+        "status": "in_progress",
+        "conclusion": null,
+        "created_at": "2026-09-10T11:11:56Z",
+        "started_at": "2026-09-10T11:26:33Z",
+        "completed_at": null,
+        "runner_id": 1000077623,
+        "runner_name": "GitHub Actions 1000077623",
+        "runner_group_name": "GitHub Actions",
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "matrix",
+        "id": 102847502860,
+        "run_id": 34469862602,
+        "head_sha": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+        "name": "opt-in group (g29 sparq-engine)",
+        "status": "in_progress",
+        "conclusion": null,
+        "created_at": "2026-09-10T11:11:56Z",
+        "started_at": "2026-09-10T11:30:30Z",
+        "completed_at": null,
+        "runner_id": 1000077633,
+        "runner_name": "GitHub Actions 1000077633",
+        "runner_group_name": "GitHub Actions",
+        "labels": [
+          "ubuntu-latest"
+        ]
+      }
+    ],
+    "queued": [
+      {
+        "source": "matrix",
+        "id": 102847502742,
+        "run_id": 34469862602,
+        "head_sha": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+        "name": "opt-in group (g06 sparq-trust)",
+        "status": "queued",
+        "conclusion": null,
+        "created_at": "2026-09-10T11:11:56Z",
+        "started_at": "2026-09-10T11:11:56Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "runner_name": "",
+        "runner_group_name": "",
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "matrix",
+        "id": 102847502766,
+        "run_id": 34469862602,
+        "head_sha": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+        "name": "opt-in group (g05 sparq-reason-el)",
+        "status": "queued",
+        "conclusion": null,
+        "created_at": "2026-09-10T11:11:56Z",
+        "started_at": "2026-09-10T11:11:56Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "runner_name": "",
+        "runner_group_name": "",
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "matrix",
+        "id": 102847502800,
+        "run_id": 34469862602,
+        "head_sha": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+        "name": "opt-in group (g02 sparq-core)",
+        "status": "queued",
+        "conclusion": null,
+        "created_at": "2026-09-10T11:11:56Z",
+        "started_at": "2026-09-10T11:11:56Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "runner_name": "",
+        "runner_group_name": "",
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "matrix",
+        "id": 102847502822,
+        "run_id": 34469862602,
+        "head_sha": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+        "name": "opt-in group (g13 sparq-server)",
+        "status": "queued",
+        "conclusion": null,
+        "created_at": "2026-09-10T11:11:56Z",
+        "started_at": "2026-09-10T11:11:56Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "runner_name": "",
+        "runner_group_name": "",
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "matrix",
+        "id": 102847502875,
+        "run_id": 34469862602,
+        "head_sha": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+        "name": "opt-in group (g16 sparq-reason)",
+        "status": "queued",
+        "conclusion": null,
+        "created_at": "2026-09-10T11:11:56Z",
+        "started_at": "2026-09-10T11:11:56Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "runner_name": "",
+        "runner_group_name": "",
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "matrix",
+        "id": 102847502887,
+        "run_id": 34469862602,
+        "head_sha": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+        "name": "opt-in group (g22 sparq-lws-core)",
+        "status": "queued",
+        "conclusion": null,
+        "created_at": "2026-09-10T11:11:56Z",
+        "started_at": "2026-09-10T11:11:56Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "runner_name": "",
+        "runner_group_name": "",
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "matrix",
+        "id": 102847502895,
+        "run_id": 34469862602,
+        "head_sha": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+        "name": "opt-in group (g20 sparq-vectors)",
+        "status": "queued",
+        "conclusion": null,
+        "created_at": "2026-09-10T11:11:56Z",
+        "started_at": "2026-09-10T11:11:56Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "runner_name": "",
+        "runner_group_name": "",
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "matrix",
+        "id": 102847502896,
+        "run_id": 34469862602,
+        "head_sha": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+        "name": "opt-in group (g04 sparq-cli)",
+        "status": "queued",
+        "conclusion": null,
+        "created_at": "2026-09-10T11:11:56Z",
+        "started_at": "2026-09-10T11:11:56Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "runner_name": "",
+        "runner_group_name": "",
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "matrix",
+        "id": 102847502899,
+        "run_id": 34469862602,
+        "head_sha": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+        "name": "opt-in group (g12 sparq-server)",
+        "status": "queued",
+        "conclusion": null,
+        "created_at": "2026-09-10T11:11:56Z",
+        "started_at": "2026-09-10T11:11:56Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "runner_name": "",
+        "runner_group_name": "",
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "matrix",
+        "id": 102847502907,
+        "run_id": 34469862602,
+        "head_sha": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+        "name": "opt-in group (g30 sparq-engine)",
+        "status": "queued",
+        "conclusion": null,
+        "created_at": "2026-09-10T11:11:56Z",
+        "started_at": "2026-09-10T11:11:56Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "runner_name": "",
+        "runner_group_name": "",
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "matrix",
+        "id": 102847502911,
+        "run_id": 34469862602,
+        "head_sha": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+        "name": "opt-in group (g26 sparq-engine)",
+        "status": "queued",
+        "conclusion": null,
+        "created_at": "2026-09-10T11:11:56Z",
+        "started_at": "2026-09-10T11:11:56Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "runner_name": "",
+        "runner_group_name": "",
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "matrix",
+        "id": 102847502916,
+        "run_id": 34469862602,
+        "head_sha": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+        "name": "opt-in group (g17 sparq-geo)",
+        "status": "queued",
+        "conclusion": null,
+        "created_at": "2026-09-10T11:11:56Z",
+        "started_at": "2026-09-10T11:11:56Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "runner_name": "",
+        "runner_group_name": "",
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "matrix",
+        "id": 102847502917,
+        "run_id": 34469862602,
+        "head_sha": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+        "name": "opt-in group (g27 sparq-engine)",
+        "status": "queued",
+        "conclusion": null,
+        "created_at": "2026-09-10T11:11:56Z",
+        "started_at": "2026-09-10T11:11:56Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "runner_name": "",
+        "runner_group_name": "",
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "matrix",
+        "id": 102847502932,
+        "run_id": 34469862602,
+        "head_sha": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+        "name": "opt-in group (g15 sparq-reason)",
+        "status": "queued",
+        "conclusion": null,
+        "created_at": "2026-09-10T11:11:56Z",
+        "started_at": "2026-09-10T11:11:56Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "runner_name": "",
+        "runner_group_name": "",
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "matrix",
+        "id": 102847502949,
+        "run_id": 34469862602,
+        "head_sha": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+        "name": "opt-in group (g32 sparq-engine)",
+        "status": "queued",
+        "conclusion": null,
+        "created_at": "2026-09-10T11:11:56Z",
+        "started_at": "2026-09-10T11:11:56Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "runner_name": "",
+        "runner_group_name": "",
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "matrix",
+        "id": 102847502966,
+        "run_id": 34469862602,
+        "head_sha": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+        "name": "opt-in group (g01 sparq-core)",
+        "status": "queued",
+        "conclusion": null,
+        "created_at": "2026-09-10T11:11:56Z",
+        "started_at": "2026-09-10T11:11:56Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "runner_name": "",
+        "runner_group_name": "",
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "matrix",
+        "id": 102847502985,
+        "run_id": 34469862602,
+        "head_sha": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+        "name": "opt-in group (g33 sparq-engine)",
+        "status": "queued",
+        "conclusion": null,
+        "created_at": "2026-09-10T11:11:56Z",
+        "started_at": "2026-09-10T11:11:56Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "runner_name": "",
+        "runner_group_name": "",
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "matrix",
+        "id": 102847502989,
+        "run_id": 34469862602,
+        "head_sha": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+        "name": "opt-in group (g34 sparq-engine)",
+        "status": "queued",
+        "conclusion": null,
+        "created_at": "2026-09-10T11:11:56Z",
+        "started_at": "2026-09-10T11:11:56Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "runner_name": "",
+        "runner_group_name": "",
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "matrix",
+        "id": 102847502998,
+        "run_id": 34469862602,
+        "head_sha": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+        "name": "opt-in group (g24 sparq-lws-core)",
+        "status": "queued",
+        "conclusion": null,
+        "created_at": "2026-09-10T11:11:56Z",
+        "started_at": "2026-09-10T11:11:56Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "runner_name": "",
+        "runner_group_name": "",
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "matrix",
+        "id": 102847503001,
+        "run_id": 34469862602,
+        "head_sha": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+        "name": "opt-in group (g39 sparq-kb)",
+        "status": "queued",
+        "conclusion": null,
+        "created_at": "2026-09-10T11:11:56Z",
+        "started_at": "2026-09-10T11:11:56Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "runner_name": "",
+        "runner_group_name": "",
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "matrix",
+        "id": 102847503050,
+        "run_id": 34469862602,
+        "head_sha": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+        "name": "opt-in group (g40 sparq-zk)",
+        "status": "queued",
+        "conclusion": null,
+        "created_at": "2026-09-10T11:11:56Z",
+        "started_at": "2026-09-10T11:11:56Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "runner_name": "",
+        "runner_group_name": "",
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "matrix",
+        "id": 102847503058,
+        "run_id": 34469862602,
+        "head_sha": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+        "name": "opt-in group (g44 sparq-reason-dl)",
+        "status": "queued",
+        "conclusion": null,
+        "created_at": "2026-09-10T11:11:56Z",
+        "started_at": "2026-09-10T11:11:56Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "runner_name": "",
+        "runner_group_name": "",
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "matrix",
+        "id": 102847503072,
+        "run_id": 34469862602,
+        "head_sha": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+        "name": "opt-in group (g42 sparq-sim)",
+        "status": "queued",
+        "conclusion": null,
+        "created_at": "2026-09-10T11:11:56Z",
+        "started_at": "2026-09-10T11:11:56Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "runner_name": "",
+        "runner_group_name": "",
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "matrix",
+        "id": 102847503079,
+        "run_id": 34469862602,
+        "head_sha": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+        "name": "opt-in group (g36 sparq-engine)",
+        "status": "queued",
+        "conclusion": null,
+        "created_at": "2026-09-10T11:11:56Z",
+        "started_at": "2026-09-10T11:11:56Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "runner_name": "",
+        "runner_group_name": "",
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "matrix",
+        "id": 102847503083,
+        "run_id": 34469862602,
+        "head_sha": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+        "name": "opt-in group (g43 sparq-nlq)",
+        "status": "queued",
+        "conclusion": null,
+        "created_at": "2026-09-10T11:11:56Z",
+        "started_at": "2026-09-10T11:11:56Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "runner_name": "",
+        "runner_group_name": "",
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "matrix",
+        "id": 102847503084,
+        "run_id": 34469862602,
+        "head_sha": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+        "name": "opt-in group (g38 sparq-server)",
+        "status": "queued",
+        "conclusion": null,
+        "created_at": "2026-09-10T11:11:56Z",
+        "started_at": "2026-09-10T11:11:56Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "runner_name": "",
+        "runner_group_name": "",
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "matrix",
+        "id": 102847503113,
+        "run_id": 34469862602,
+        "head_sha": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+        "name": "opt-in group (g45 sparq-reason-ql)",
+        "status": "queued",
+        "conclusion": null,
+        "created_at": "2026-09-10T11:11:56Z",
+        "started_at": "2026-09-10T11:11:56Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "runner_name": "",
+        "runner_group_name": "",
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "matrix",
+        "id": 102847503139,
+        "run_id": 34469862602,
+        "head_sha": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+        "name": "opt-in group (g35 sparq-engine)",
+        "status": "queued",
+        "conclusion": null,
+        "created_at": "2026-09-10T11:11:56Z",
+        "started_at": "2026-09-10T11:11:56Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "runner_name": "",
+        "runner_group_name": "",
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "matrix",
+        "id": 102847503142,
+        "run_id": 34469862602,
+        "head_sha": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+        "name": "opt-in group (g46 sparq-mpc)",
+        "status": "queued",
+        "conclusion": null,
+        "created_at": "2026-09-10T11:11:56Z",
+        "started_at": "2026-09-10T11:11:56Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "runner_name": "",
+        "runner_group_name": "",
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "matrix",
+        "id": 102847503180,
+        "run_id": 34469862602,
+        "head_sha": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+        "name": "opt-in group (g47 sparq-introspect)",
+        "status": "queued",
+        "conclusion": null,
+        "created_at": "2026-09-10T11:11:56Z",
+        "started_at": "2026-09-10T11:11:56Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "runner_name": "",
+        "runner_group_name": "",
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "matrix",
+        "id": 102847503243,
+        "run_id": 34469862602,
+        "head_sha": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+        "name": "opt-in group (g09 sparq-server)",
+        "status": "queued",
+        "conclusion": null,
+        "created_at": "2026-09-10T11:11:56Z",
+        "started_at": "2026-09-10T11:11:56Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "runner_name": "",
+        "runner_group_name": "",
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "matrix",
+        "id": 102847503302,
+        "run_id": 34469862602,
+        "head_sha": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+        "name": "opt-in group (g41 sparq-reason-el)",
+        "status": "queued",
+        "conclusion": null,
+        "created_at": "2026-09-10T11:11:56Z",
+        "started_at": "2026-09-10T11:11:56Z",
+        "completed_at": null,
+        "runner_id": 0,
+        "runner_name": "",
+        "runner_group_name": "",
+        "labels": [
+          "ubuntu-latest"
+        ]
+      }
+    ]
+  },
+  "older-nightly": {
+    "total": 66,
+    "states": {
+      "('completed', 'success')": 45,
+      "('completed', 'cancelled')": 1,
+      "('completed', 'failure')": 5,
+      "('completed', 'skipped')": 7,
+      "('in_progress', None)": 8
+    },
+    "in_progress": [
+      {
+        "source": "older-nightly",
+        "id": 102813198377,
+        "run_id": 34453539472,
+        "head_sha": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
+        "name": "mutation ratchet (cargo-mutants, advisory) (sparq-zk-compose)",
+        "status": "in_progress",
+        "conclusion": null,
+        "created_at": "2026-09-10T09:12:23Z",
+        "started_at": "2026-09-10T09:13:42Z",
+        "completed_at": null,
+        "runner_id": 1000077399,
+        "runner_name": "GitHub Actions 1000077399",
+        "runner_group_name": "GitHub Actions",
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "older-nightly",
+        "id": 102813582241,
+        "run_id": 34453539472,
+        "head_sha": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
+        "name": "mutation ratchet (cargo-mutants, advisory) (sparq-vectors)",
+        "status": "in_progress",
+        "conclusion": null,
+        "created_at": "2026-09-10T09:13:41Z",
+        "started_at": "2026-09-10T09:14:16Z",
+        "completed_at": null,
+        "runner_id": 1000077401,
+        "runner_name": "GitHub Actions 1000077401",
+        "runner_group_name": "GitHub Actions",
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "older-nightly",
+        "id": 102835232027,
+        "run_id": 34453539472,
+        "head_sha": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
+        "name": "mutation ratchet (cargo-mutants, advisory) (sparq-reason, 1/3)",
+        "status": "in_progress",
+        "conclusion": null,
+        "created_at": "2026-09-10T10:27:58Z",
+        "started_at": "2026-09-10T10:28:01Z",
+        "completed_at": null,
+        "runner_id": 1000077508,
+        "runner_name": "GitHub Actions 1000077508",
+        "runner_group_name": "GitHub Actions",
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "older-nightly",
+        "id": 102840333604,
+        "run_id": 34453539472,
+        "head_sha": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
+        "name": "mutation ratchet (cargo-mutants, advisory) (sparq-engine, 1/24, 360)",
+        "status": "in_progress",
+        "conclusion": null,
+        "created_at": "2026-09-10T10:46:17Z",
+        "started_at": "2026-09-10T10:50:55Z",
+        "completed_at": null,
+        "runner_id": 1000077555,
+        "runner_name": "GitHub Actions 1000077555",
+        "runner_group_name": "GitHub Actions",
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "older-nightly",
+        "id": 102840722778,
+        "run_id": 34453539472,
+        "head_sha": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
+        "name": "mutation ratchet (cargo-mutants, advisory) (sparq-engine, 2/24, 360)",
+        "status": "in_progress",
+        "conclusion": null,
+        "created_at": "2026-09-10T10:47:41Z",
+        "started_at": "2026-09-10T10:51:22Z",
+        "completed_at": null,
+        "runner_id": 1000077556,
+        "runner_name": "GitHub Actions 1000077556",
+        "runner_group_name": "GitHub Actions",
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "older-nightly",
+        "id": 102841554279,
+        "run_id": 34453539472,
+        "head_sha": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
+        "name": "mutation ratchet (cargo-mutants, advisory) (sparq-engine, 3/24, 360)",
+        "status": "in_progress",
+        "conclusion": null,
+        "created_at": "2026-09-10T10:50:40Z",
+        "started_at": "2026-09-10T10:51:33Z",
+        "completed_at": null,
+        "runner_id": 1000077557,
+        "runner_name": "GitHub Actions 1000077557",
+        "runner_group_name": "GitHub Actions",
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "older-nightly",
+        "id": 102843204134,
+        "run_id": 34453539472,
+        "head_sha": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
+        "name": "mutation ratchet (cargo-mutants, advisory) (sparq-engine, 4/24, 360)",
+        "status": "in_progress",
+        "conclusion": null,
+        "created_at": "2026-09-10T10:56:40Z",
+        "started_at": "2026-09-10T10:56:43Z",
+        "completed_at": null,
+        "runner_id": 1000077567,
+        "runner_name": "GitHub Actions 1000077567",
+        "runner_group_name": "GitHub Actions",
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "older-nightly",
+        "id": 102844816958,
+        "run_id": 34453539472,
+        "head_sha": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
+        "name": "mutation ratchet (cargo-mutants, advisory) (sparq-engine, 5/24, 360)",
+        "status": "in_progress",
+        "conclusion": null,
+        "created_at": "2026-09-10T11:02:25Z",
+        "started_at": "2026-09-10T11:02:28Z",
+        "completed_at": null,
+        "runner_id": 1000077568,
+        "runner_name": "GitHub Actions 1000077568",
+        "runner_group_name": "GitHub Actions",
+        "labels": [
+          "ubuntu-latest"
+        ]
+      }
+    ],
+    "queued": []
+  },
+  "kani": {
+    "total": 6,
+    "states": {
+      "('queued', None)": 3,
+      "('in_progress', None)": 2,
+      "('completed', 'success')": 1
+    },
+    "in_progress": [
+      {
+        "source": "kani",
+        "id": 102847324159,
+        "run_id": 34469968617,
+        "head_sha": "781f667c19a8ebb779cfccb24b05ea432360b025",
+        "name": "kani sparq-vectors (.spqv validator) (bounded proofs, informational)",
+        "status": "in_progress",
+        "conclusion": null,
+        "created_at": "2026-09-10T11:11:18Z",
+        "started_at": "2026-09-10T11:11:23Z",
+        "completed_at": null,
+        "runner_id": 1000077590,
+        "runner_name": "GitHub Actions 1000077590",
+        "runner_group_name": "GitHub Actions",
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "kani",
+        "id": 102847324467,
+        "run_id": 34469968617,
+        "head_sha": "781f667c19a8ebb779cfccb24b05ea432360b025",
+        "name": "kani sparq-core (dict mmap validator totality) (bounded proofs, informational)",
+        "status": "in_progress",
+        "conclusion": null,
+        "created_at": "2026-09-10T11:11:18Z",
+        "started_at": "2026-09-10T11:14:07Z",
+        "completed_at": null,
+        "runner_id": 1000077597,
+        "runner_name": "GitHub Actions 1000077597",
+        "runner_group_name": "GitHub Actions",
+        "labels": [
+          "ubuntu-latest"
+        ]
+      }
+    ],
+    "queued": [
+      {
+        "source": "kani",
+        "id": 102847323895,
+        "run_id": 34469968617,
+        "head_sha": "781f667c19a8ebb779cfccb24b05ea432360b025",
+        "name": "kani sparq-substrate (compare ORDER laws) (bounded proofs, informational)",
+        "status": "queued",
+        "conclusion": null,
+        "created_at": "2026-09-10T11:11:18Z",
+        "started_at": "2026-09-10T11:11:18Z",
+        "completed_at": null,
+        "runner_id": null,
+        "runner_name": null,
+        "runner_group_name": null,
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "kani",
+        "id": 102847324180,
+        "run_id": 34469968617,
+        "head_sha": "781f667c19a8ebb779cfccb24b05ea432360b025",
+        "name": "kani sparq-wac-oracle (.acl escalation corpus domain coverage) (bounded proofs, informational)",
+        "status": "queued",
+        "conclusion": null,
+        "created_at": "2026-09-10T11:11:18Z",
+        "started_at": "2026-09-10T11:11:18Z",
+        "completed_at": null,
+        "runner_id": null,
+        "runner_name": null,
+        "runner_group_name": null,
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "kani",
+        "id": 102847324297,
+        "run_id": 34469968617,
+        "head_sha": "781f667c19a8ebb779cfccb24b05ea432360b025",
+        "name": "kani sparq-engine (vectorized reducer kernels) (bounded proofs, informational)",
+        "status": "queued",
+        "conclusion": null,
+        "created_at": "2026-09-10T11:11:18Z",
+        "started_at": "2026-09-10T11:11:18Z",
+        "completed_at": null,
+        "runner_id": null,
+        "runner_name": null,
+        "runner_group_name": null,
+        "labels": [
+          "ubuntu-latest"
+        ]
+      }
+    ]
+  },
+  "miri": {
+    "total": 25,
+    "states": {
+      "('completed', 'success')": 5,
+      "('queued', None)": 16,
+      "('in_progress', None)": 4
+    },
+    "in_progress": [
+      {
+        "source": "miri",
+        "id": 102820703634,
+        "run_id": 34461669507,
+        "head_sha": "781f667c19a8ebb779cfccb24b05ea432360b025",
+        "name": "miri (sparq-core unsafe surface, UB, shard 5/24)",
+        "status": "in_progress",
+        "conclusion": null,
+        "created_at": "2026-09-10T09:37:37Z",
+        "started_at": "2026-09-10T11:21:26Z",
+        "completed_at": null,
+        "runner_id": 1000077615,
+        "runner_name": "GitHub Actions 1000077615",
+        "runner_group_name": "GitHub Actions",
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "miri",
+        "id": 102820703641,
+        "run_id": 34461669507,
+        "head_sha": "781f667c19a8ebb779cfccb24b05ea432360b025",
+        "name": "miri (sparq-core unsafe surface, UB, shard 7/24)",
+        "status": "in_progress",
+        "conclusion": null,
+        "created_at": "2026-09-10T09:37:37Z",
+        "started_at": "2026-09-10T11:27:00Z",
+        "completed_at": null,
+        "runner_id": 1000077626,
+        "runner_name": "GitHub Actions 1000077626",
+        "runner_group_name": "GitHub Actions",
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "miri",
+        "id": 102820703699,
+        "run_id": 34461669507,
+        "head_sha": "781f667c19a8ebb779cfccb24b05ea432360b025",
+        "name": "miri (sparq-core unsafe surface, UB, shard 6/24)",
+        "status": "in_progress",
+        "conclusion": null,
+        "created_at": "2026-09-10T09:37:37Z",
+        "started_at": "2026-09-10T11:26:40Z",
+        "completed_at": null,
+        "runner_id": 1000077624,
+        "runner_name": "GitHub Actions 1000077624",
+        "runner_group_name": "GitHub Actions",
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "miri",
+        "id": 102820703773,
+        "run_id": 34461669507,
+        "head_sha": "781f667c19a8ebb779cfccb24b05ea432360b025",
+        "name": "miri (sparq-core unsafe surface, UB, shard 8/24)",
+        "status": "in_progress",
+        "conclusion": null,
+        "created_at": "2026-09-10T09:37:37Z",
+        "started_at": "2026-09-10T11:28:45Z",
+        "completed_at": null,
+        "runner_id": 1000077630,
+        "runner_name": "GitHub Actions 1000077630",
+        "runner_group_name": "GitHub Actions",
+        "labels": [
+          "ubuntu-latest"
+        ]
+      }
+    ],
+    "queued": [
+      {
+        "source": "miri",
+        "id": 102820703622,
+        "run_id": 34461669507,
+        "head_sha": "781f667c19a8ebb779cfccb24b05ea432360b025",
+        "name": "miri (sparq-core unsafe surface, UB, shard 9/24)",
+        "status": "queued",
+        "conclusion": null,
+        "created_at": "2026-09-10T09:37:37Z",
+        "started_at": "2026-09-10T09:37:37Z",
+        "completed_at": null,
+        "runner_id": null,
+        "runner_name": null,
+        "runner_group_name": null,
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "miri",
+        "id": 102820703679,
+        "run_id": 34461669507,
+        "head_sha": "781f667c19a8ebb779cfccb24b05ea432360b025",
+        "name": "miri (sparq-core unsafe surface, UB, shard 14/24)",
+        "status": "queued",
+        "conclusion": null,
+        "created_at": "2026-09-10T09:37:37Z",
+        "started_at": "2026-09-10T09:37:37Z",
+        "completed_at": null,
+        "runner_id": null,
+        "runner_name": null,
+        "runner_group_name": null,
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "miri",
+        "id": 102820703690,
+        "run_id": 34461669507,
+        "head_sha": "781f667c19a8ebb779cfccb24b05ea432360b025",
+        "name": "miri (sparq-core unsafe surface, UB, shard 11/24)",
+        "status": "queued",
+        "conclusion": null,
+        "created_at": "2026-09-10T09:37:37Z",
+        "started_at": "2026-09-10T09:37:37Z",
+        "completed_at": null,
+        "runner_id": null,
+        "runner_name": null,
+        "runner_group_name": null,
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "miri",
+        "id": 102820703694,
+        "run_id": 34461669507,
+        "head_sha": "781f667c19a8ebb779cfccb24b05ea432360b025",
+        "name": "miri (sparq-core unsafe surface, UB, shard 12/24)",
+        "status": "queued",
+        "conclusion": null,
+        "created_at": "2026-09-10T09:37:37Z",
+        "started_at": "2026-09-10T09:37:37Z",
+        "completed_at": null,
+        "runner_id": null,
+        "runner_name": null,
+        "runner_group_name": null,
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "miri",
+        "id": 102820703703,
+        "run_id": 34461669507,
+        "head_sha": "781f667c19a8ebb779cfccb24b05ea432360b025",
+        "name": "miri (sparq-core unsafe surface, UB, shard 13/24)",
+        "status": "queued",
+        "conclusion": null,
+        "created_at": "2026-09-10T09:37:37Z",
+        "started_at": "2026-09-10T09:37:37Z",
+        "completed_at": null,
+        "runner_id": null,
+        "runner_name": null,
+        "runner_group_name": null,
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "miri",
+        "id": 102820703835,
+        "run_id": 34461669507,
+        "head_sha": "781f667c19a8ebb779cfccb24b05ea432360b025",
+        "name": "miri (sparq-core unsafe surface, UB, shard 10/24)",
+        "status": "queued",
+        "conclusion": null,
+        "created_at": "2026-09-10T09:37:37Z",
+        "started_at": "2026-09-10T09:37:37Z",
+        "completed_at": null,
+        "runner_id": null,
+        "runner_name": null,
+        "runner_group_name": null,
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "miri",
+        "id": 102820705018,
+        "run_id": 34461669507,
+        "head_sha": "781f667c19a8ebb779cfccb24b05ea432360b025",
+        "name": "miri (sparq-core unsafe surface, UB, shard 15/24)",
+        "status": "queued",
+        "conclusion": null,
+        "created_at": "2026-09-10T09:37:37Z",
+        "started_at": "2026-09-10T09:37:37Z",
+        "completed_at": null,
+        "runner_id": null,
+        "runner_name": null,
+        "runner_group_name": null,
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "miri",
+        "id": 102820705026,
+        "run_id": 34461669507,
+        "head_sha": "781f667c19a8ebb779cfccb24b05ea432360b025",
+        "name": "miri (sparq-core unsafe surface, UB, shard 16/24)",
+        "status": "queued",
+        "conclusion": null,
+        "created_at": "2026-09-10T09:37:37Z",
+        "started_at": "2026-09-10T09:37:37Z",
+        "completed_at": null,
+        "runner_id": null,
+        "runner_name": null,
+        "runner_group_name": null,
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "miri",
+        "id": 102820705053,
+        "run_id": 34461669507,
+        "head_sha": "781f667c19a8ebb779cfccb24b05ea432360b025",
+        "name": "miri (sparq-core unsafe surface, UB, shard 17/24)",
+        "status": "queued",
+        "conclusion": null,
+        "created_at": "2026-09-10T09:37:37Z",
+        "started_at": "2026-09-10T09:37:37Z",
+        "completed_at": null,
+        "runner_id": null,
+        "runner_name": null,
+        "runner_group_name": null,
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "miri",
+        "id": 102820705089,
+        "run_id": 34461669507,
+        "head_sha": "781f667c19a8ebb779cfccb24b05ea432360b025",
+        "name": "miri (sparq-core unsafe surface, UB, shard 18/24)",
+        "status": "queued",
+        "conclusion": null,
+        "created_at": "2026-09-10T09:37:37Z",
+        "started_at": "2026-09-10T09:37:37Z",
+        "completed_at": null,
+        "runner_id": null,
+        "runner_name": null,
+        "runner_group_name": null,
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "miri",
+        "id": 102820705096,
+        "run_id": 34461669507,
+        "head_sha": "781f667c19a8ebb779cfccb24b05ea432360b025",
+        "name": "miri (sparq-core unsafe surface, UB, shard 19/24)",
+        "status": "queued",
+        "conclusion": null,
+        "created_at": "2026-09-10T09:37:37Z",
+        "started_at": "2026-09-10T09:37:37Z",
+        "completed_at": null,
+        "runner_id": null,
+        "runner_name": null,
+        "runner_group_name": null,
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "miri",
+        "id": 102820705166,
+        "run_id": 34461669507,
+        "head_sha": "781f667c19a8ebb779cfccb24b05ea432360b025",
+        "name": "miri (sparq-core unsafe surface, UB, shard 21/24)",
+        "status": "queued",
+        "conclusion": null,
+        "created_at": "2026-09-10T09:37:37Z",
+        "started_at": "2026-09-10T09:37:37Z",
+        "completed_at": null,
+        "runner_id": null,
+        "runner_name": null,
+        "runner_group_name": null,
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "miri",
+        "id": 102820705203,
+        "run_id": 34461669507,
+        "head_sha": "781f667c19a8ebb779cfccb24b05ea432360b025",
+        "name": "miri (sparq-core unsafe surface, UB, shard 20/24)",
+        "status": "queued",
+        "conclusion": null,
+        "created_at": "2026-09-10T09:37:37Z",
+        "started_at": "2026-09-10T09:37:37Z",
+        "completed_at": null,
+        "runner_id": null,
+        "runner_name": null,
+        "runner_group_name": null,
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "miri",
+        "id": 102820705254,
+        "run_id": 34461669507,
+        "head_sha": "781f667c19a8ebb779cfccb24b05ea432360b025",
+        "name": "miri (sparq-core unsafe surface, UB, shard 22/24)",
+        "status": "queued",
+        "conclusion": null,
+        "created_at": "2026-09-10T09:37:38Z",
+        "started_at": "2026-09-10T09:37:38Z",
+        "completed_at": null,
+        "runner_id": null,
+        "runner_name": null,
+        "runner_group_name": null,
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "miri",
+        "id": 102820705437,
+        "run_id": 34461669507,
+        "head_sha": "781f667c19a8ebb779cfccb24b05ea432360b025",
+        "name": "miri (sparq-core unsafe surface, UB, shard 24/24)",
+        "status": "queued",
+        "conclusion": null,
+        "created_at": "2026-09-10T09:37:38Z",
+        "started_at": "2026-09-10T09:37:38Z",
+        "completed_at": null,
+        "runner_id": null,
+        "runner_name": null,
+        "runner_group_name": null,
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "source": "miri",
+        "id": 102820705456,
+        "run_id": 34461669507,
+        "head_sha": "781f667c19a8ebb779cfccb24b05ea432360b025",
+        "name": "miri (sparq-core unsafe surface, UB, shard 23/24)",
+        "status": "queued",
+        "conclusion": null,
+        "created_at": "2026-09-10T09:37:38Z",
+        "started_at": "2026-09-10T09:37:38Z",
+        "completed_at": null,
+        "runner_id": null,
+        "runner_name": null,
+        "runner_group_name": null,
+        "labels": [
+          "ubuntu-latest"
+        ]
+      }
+    ]
+  },
+  "batch": {
+    "total": 1,
+    "states": {
+      "('queued', None)": 1
+    },
+    "in_progress": [],
+    "queued": [
+      {
+        "source": "batch",
+        "id": 95962374775,
+        "run_id": 32217747734,
+        "head_sha": "fbbd310326f1f083c33a13deee19f95cb96c55f6",
+        "name": "batch overflow into omnibus",
+        "status": "queued",
+        "conclusion": null,
+        "created_at": "2026-08-19T04:59:46Z",
+        "started_at": "2026-08-19T04:59:46Z",
+        "completed_at": null,
+        "runner_id": null,
+        "runner_name": null,
+        "runner_group_name": null,
+        "labels": [
+          "ubuntu-latest"
+        ]
+      }
+    ]
+  },
+  "retriage": {
+    "total": 1,
+    "states": {
+      "('in_progress', None)": 1
+    },
+    "in_progress": [
+      {
+        "source": "retriage",
+        "id": 102853623072,
+        "run_id": 34471938281,
+        "head_sha": "781f667c19a8ebb779cfccb24b05ea432360b025",
+        "name": "retriage",
+        "status": "in_progress",
+        "conclusion": null,
+        "created_at": "2026-09-10T11:33:42Z",
+        "started_at": "2026-09-10T11:34:26Z",
+        "completed_at": null,
+        "runner_id": 1000077636,
+        "runner_name": "GitHub Actions 1000077636",
+        "runner_group_name": "GitHub Actions",
+        "labels": [
+          "ubuntu-latest"
+        ]
+      }
+    ],
+    "queued": []
+  },
+  "gate": {
+    "total": 1,
+    "states": {
+      "('in_progress', None)": 1
+    },
+    "in_progress": [
+      {
+        "source": "gate",
+        "id": 102846986203,
+        "run_id": 34469862189,
+        "head_sha": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+        "name": "gate",
+        "status": "in_progress",
+        "conclusion": null,
+        "created_at": "2026-09-10T11:10:07Z",
+        "started_at": "2026-09-10T11:10:46Z",
+        "completed_at": null,
+        "runner_id": 1000077577,
+        "runner_name": "GitHub Actions 1000077577",
+        "runner_group_name": "GitHub Actions",
+        "labels": [
+          "ubuntu-latest"
+        ]
+      }
+    ],
+    "queued": []
+  }
+}

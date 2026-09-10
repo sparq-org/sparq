@@ -1,0 +1,34 @@
+{
+  "author": "GPT-6 Astra xhigh",
+  "scope": "Three fixed synthetic cases, no canonicalizer or original ten-operation seed execution",
+  "network": "offline only; no install/download",
+  "profile": {
+    "opt_level": 3,
+    "panic": "unwind",
+    "lto": false,
+    "codegen_units": 16,
+    "incremental": false,
+    "jobs": 1
+  },
+  "features": [
+    "oxigraph/rdf-12"
+  ],
+  "disabled": [
+    "default features",
+    "rocksdb",
+    "http-client"
+  ],
+  "limits": {
+    "compile_run_seconds": 600,
+    "aggregate_growth_bytes": 536870912,
+    "free_floor_bytes": 2147483648
+  },
+  "lock_policy": "Copy committed lock into isolated crate, permit task-root addition/pruning only; every resolved dependency name/version/source/checksum must match repository lock before --locked offline build.",
+  "cases": [
+    "lexical-pair",
+    "canonical-eight",
+    "different-values"
+  ],
+  "interpretation": "Record actual raw results unchanged; fresh blank-node count must match actual reference WHERE solutions; do not assert agreement with Sparq.",
+  "production_changes": false
+}

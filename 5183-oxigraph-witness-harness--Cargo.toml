@@ -1,0 +1,13 @@
+[package]
+name = "issue5183-oxigraph-witness"
+version = "0.0.0"
+edition = "2024"
+
+[workspace]
+resolver = "2"
+
+[dependencies]
+oxigraph = { version = "=0.5.9", default-features = false, features = ["rdf-12"] }
+
+[patch.crates-io]
+spargebra = { path = "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue5183/vendor/spargebra" }

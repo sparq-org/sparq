@@ -1,0 +1,183 @@
+# ci-select — the change-based test-selection pre-job (bead sq-fmx4u.3, epic
+# sq-fmx4u). [FABLE-5]
+#
+# WHAT: one cheap reusable job that computes the AFFECTED CRATE CLOSURE for this
+# revision pair (scripts/ci_select.py — design research/change-based-test-selection.md
+# §3/§4) and exposes it as outputs, so the wide per-crate lanes in ci.yml and the
+# opt-in legs in feature-matrix.yml can be skipped/narrowed when neither their crate
+# nor its transitive dependency closure changed. `needs:` cannot span workflows, so
+# each consuming workflow calls this file as a local reusable workflow (`uses:`) —
+# ONE selector definition, one job instance per calling workflow.
+#
+# OUTPUTS (all produced by scripts/ci_select.py; empty/missing => downstream guards
+# RUN, never skip — design §4.3 fail-closed):
+#   mode      — "selected" | "full" | "shadow". Guards skip ONLY on "selected".
+#   affected  — JSON array of affected workspace-member names. Guards test
+#               membership with contains(affected, '"<crate>"') — the quote
+#               delimiters prevent `sparq-core` matching inside `sparq-core-foo`.
+#   filterset — nextest filterset ("package(a) + package(b)") for NARROWING the
+#               cross-crate bulk shards (they are never skipped, design §5.2).
+#
+# ENFORCE MODE (design §6 — the sq-fmx4u.5 rollout, ENFORCEMENT FLIPPED). [FABLE-5]
+# Enforce is now the DEFAULT: the selector's mode=selected skips are HONORED, so a
+# not-affected crate's wide-lane tests/benchmarks are actually SKIPPED. Two overrides,
+# both fail toward RUNNING MORE:
+#   * ci-full PR label => the selector runs with --full (mode=full, nothing skipped);
+#     the calling workflows react to labeled/unlabeled so toggling re-evaluates.
+#   * CI_SELECT_MODE repo variable == the literal "shadow" => report-only rollback
+#     escape hatch (--shadow: compute + report the would-skip set, skip nothing).
+# Any other CI_SELECT_MODE value (incl. unset / "enforce") enforces. Fail-safe is
+# unaffected — ci_select.py returns mode=full for every §4.1 trigger (shared crate /
+# build file / .github/** / Cargo.lock / selector-self change) and for ANY internal
+# error, so enforce NEVER skips a test for an affected crate or its reverse-dep
+# closure. Safe per bead sq-fmx4u.4: the ruleset requires exactly one check
+# (ci-summary / gate), so a selection-skipped leg reports `skipped` (= satisfied) and
+# can never hang the merge queue. Nightly cron (ci.yml `schedule`) + the ci-full label
+# are the permanent backstops (design §6.1/§6.2).
+#
+# FAIL-CLOSED CONTRACT (design §4.3):
+#   * the selector traps ALL internal errors => mode=full, exit 0 (this job stays
+#     green and the full matrix runs — a selector bug degrades to the status quo);
+#   * if THIS JOB hard-fails anyway (checkout/runner infrastructure), its needs-
+#     dependents in the calling workflow are SKIPPED and the ci-summary gate goes
+#     RED — scripts/ci_summary_gate.py requires every "change-based test selection"
+#     check-run to conclude success before any skipped sibling counts as satisfied;
+#   * an empty/missing output satisfies every guard's `mode != 'selected'` first
+#     disjunct => RUN.
+#
+# The job name below carries the phrase "change-based test selection" — that is the
+# detection contract with scripts/ci_summary_gate.py (SELECT_RE); the wiring test
+# scripts/tests/test_ci_select_wiring.py pins the two together. Do NOT add the words
+# "advisory"/"informational" to any name here (they would un-gate the check).
+#
+# THREE NAME SPELLINGS, ONE LEG IDENTITY. The job name carries the TIER as a
+# suffix marker: bare (full tier), ", draft-tier" (a draft-assembled reduced leg
+# set), or ", no-leg" (a guarded label-flip no-op run that assembled nothing at
+# all — [OPUS-5] #3781, see the job comment). scripts/ci_summary_gate.py strips
+# every marker to one normalized leg identity, so the three spellings are the
+# SAME leg across tiers; only the marker decides what the gate may conclude from
+# the run.
+name: ci-select
+
+on:
+  workflow_call:
+    outputs:
+      mode:
+        description: "selected | full | shadow (skip only on 'selected')"
+        value: ${{ jobs.select.outputs.mode }}
+      affected:
+        description: "JSON array of affected workspace-member names"
+        value: ${{ jobs.select.outputs.affected }}
+      filterset:
+        description: "nextest filterset over the affected members (bulk-shard narrowing)"
+        value: ${{ jobs.select.outputs.filterset }}
+
+permissions:
+  contents: read
+
+jobs:
+  select:
+    # [FABLE-5] Draft-tier CI (docs/branch-protection.md §Draft-tier CI): the job
+    # name APPENDS the ", draft-tier" marker when the calling run was triggered by
+    # a DRAFT pull_request (a reusable workflow sees the caller's event payload;
+    # every non-PR event evaluates the marker empty). The tier thus travels in the
+    # check-run NAME — the same name-as-contract mechanism as the advisory rule —
+    # and scripts/ci_summary_gate.py partitions draft-assembled from full-
+    # assembled selection runs on a head SHA with it: a FULL-tier gate refuses to
+    # conclude success while any draft-tier-marked select INSTANCE lacks its own
+    # later full-tier successor (per-instance because ci.yml, bench.yml,
+    # feature-matrix.yml and fuzz.yml all expose this IDENTICAL check-run name —
+    # one workflow's full-tier select must never release the hold for the
+    # others), so a draft-tier leg set can never admit a non-draft PR to the
+    # merge queue. The stable phrase "change-based test selection" (the SELECT_RE
+    # detection contract) is a prefix of ALL THREE spellings, and none contains the
+    # words "advisory"/"informational".
+    #
+    # [OPUS-5] #3781 — THE ", no-leg" MARKER TAKES PRECEDENCE OVER ", draft-tier".
+    # A `labeled`/`unlabeled` pull_request event whose label is NOT one of
+    # ci-full / bench-full / fuzz-full is a GUARDED NO-OP for every caller: the
+    # #2546 label-trigger guard `if:`s off every root job of ci.yml, bench.yml,
+    # feature-matrix.yml and fuzz.yml, so the run assembles ZERO legs and THIS
+    # unconditional pre-job is its only non-skipped job (measured on sparq #3472:
+    # 8 label-flip runs at 07:28:57, each with exactly one non-skipped job — this
+    # select). Marking such a run ", draft-tier" (which is what happened, because
+    # the review pipeline re-drafts the PR in the same breath as the label flip)
+    # manufactured a hold NOTHING could ever discharge: a full-tier successor is
+    # only produced by a NON-draft payload, so the gate burned all 155 polls and
+    # fail-closed-refused a leg set with zero failing legs. The tier of a run that
+    # assembled no legs is not "draft" — it is NOT EVIDENCE AT ALL, and the gate
+    # ignores such a run entirely (scripts/ci_summary_gate.py NO_LEG_MARKER /
+    # no_leg_run_ids), which leaves the PREVIOUS real run authoritative instead of
+    # letting a vacuous all-skipped run supersede it. CONSERVATIVE BY DESIGN: on a
+    # ci-full/bench-full/fuzz-full flip at least one caller DOES do real work, so
+    # no marker is claimed and the pre-#3781 behaviour stands unchanged (a
+    # bench-full flip therefore still lets ci.yml's no-op run supersede — today's
+    # behaviour, not a regression; the review pipeline never flips those labels).
+    name: select (change-based test selection${{ (github.event_name == 'pull_request' && contains(fromJSON('["labeled","unlabeled"]'), github.event.action) && !contains(fromJSON('["ci-full","bench-full","fuzz-full"]'), github.event.label.name)) && ', no-leg' || (github.event.pull_request.draft == true && ', draft-tier' || '') }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      mode: ${{ steps.sel.outputs.mode }}
+      affected: ${{ steps.sel.outputs.affected }}
+      filterset: ${{ steps.sel.outputs.filterset }}
+    steps:
+      # Full history so the merge-base for the three-dot diff (base...head) is
+      # always resolvable; an unfetchable base fail-closes to mode=full anyway.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Compute the affected crate closure (scripts/ci_select.py)
+        id: sel
+        env:
+          # cargo metadata resolves the registry index; same transient-network
+          # hardening as every other lane (ci.yml header note).
+          CARGO_NET_RETRY: "10"
+          EVENT: ${{ github.event_name }}
+          # pull_request: PR base/head. merge_group: the queue entry's target-tip
+          # base_sha/head_sha (the diff is then the union of queued content — sound
+          # per design §3.1/P8). Exactly one pair is non-empty per event.
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+          # [FABLE-5] sq-fmx4u.5 ENFORCEMENT FLIP: enforce is the DEFAULT now. The
+          # selector's mode=selected skips are HONORED unless CI_SELECT_MODE is set
+          # to the literal "shadow" (the report-only rollback escape hatch below).
+          CI_SELECT_MODE: ${{ vars.CI_SELECT_MODE }}
+          # [FABLE-5] sq-fmx4u.5 ci-full label override (design §6.2): applying the
+          # `ci-full` label to a PR forces the FULL matrix (mode=full, nothing
+          # skipped); removing it re-selects. The calling workflows react to
+          # labeled/unlabeled PR events so a toggle re-runs this pre-job. On non-PR
+          # events there is no pull_request payload, so this evaluates false and the
+          # override is inert (non-PR events already resolve to full by construction).
+          CI_FULL_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'ci-full') }}
+          # [FABLE-5] Draft-tier CI: surfaced in the step summary so a human reading
+          # the run sees which tier this selection was assembled for (the machine
+          # contract is the job NAME marker above).
+          IS_DRAFT_PR: ${{ github.event.pull_request.draft == true }}
+          # [OPUS-5] #3781: the same no-leg condition as the job name above, surfaced
+          # for the human reader. A no-leg run's step summary must NOT claim "Tier:
+          # draft" — it assembled nothing, and saying "draft" is exactly the confusion
+          # that cost a full drain pass to unpick.
+          IS_NO_LEG_RUN: ${{ github.event_name == 'pull_request' && contains(fromJSON('["labeled","unlabeled"]'), github.event.action) && !contains(fromJSON('["ci-full","bench-full","fuzz-full"]'), github.event.label.name) }}
+        run: |
+          set -euo pipefail
+          if [ "${IS_NO_LEG_RUN:-}" = "true" ]; then
+            echo "**Tier: no-leg** — this run was started by a \`${EVENT}\` label flip that the label-trigger guard turns into a NO-OP: every leg is skipped and this selection pre-job is the run's only real job. The ci-summary gate therefore IGNORES this whole run and keeps the previous real run of this workflow authoritative (#3781)." >> "$GITHUB_STEP_SUMMARY"
+          elif [ "${IS_DRAFT_PR:-}" = "true" ]; then
+            echo "**Tier: draft** — draft-tier CI (reduced sibling set; the full matrix re-runs at ready_for_review and its fresh gate supersedes this head's draft-tier results)." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          args=(--event "$EVENT")
+          case "$EVENT" in
+            pull_request|merge_group) args+=(--base "$BASE" --head "$HEAD") ;;
+          esac
+          if [ "$CI_FULL_LABEL" = "true" ]; then
+            # ci-full label: force the full matrix regardless of mode (design §6.2).
+            args+=(--full)
+          elif [ "${CI_SELECT_MODE:-}" = "shadow" ]; then
+            # Report-only rollback escape hatch (design §6.4): set the repo variable
+            # CI_SELECT_MODE=shadow to compute + report the would-skip set while every
+            # job still runs. Any other value (incl. unset / "enforce") => enforce.
+            args+=(--shadow)
+          fi
+          python3 scripts/ci_select.py "${args[@]}"

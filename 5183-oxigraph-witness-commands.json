@@ -1,0 +1,84 @@
+[
+  {
+    "name": "metadata",
+    "argv": [
+      "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/cargo",
+      "metadata",
+      "--offline",
+      "--format-version",
+      "1",
+      "--filter-platform",
+      "aarch64-apple-darwin"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/oxigraph-witness/harness",
+    "env": {
+      "CARGO_PROFILE_RELEASE_OPT_LEVEL": "3",
+      "CARGO_PROFILE_RELEASE_DEBUG": "false",
+      "CARGO_PROFILE_RELEASE_LTO": "false",
+      "CARGO_PROFILE_RELEASE_CODEGEN_UNITS": "16",
+      "CARGO_PROFILE_RELEASE_PANIC": "unwind",
+      "CARGO_BUILD_JOBS": "1",
+      "CARGO_INCREMENTAL": "0",
+      "CARGO_NET_OFFLINE": "true",
+      "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+      "RUSTC": "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/rustc",
+      "RAYON_NUM_THREADS": "1"
+    },
+    "started_utc": "2026-09-10T11:14:25Z",
+    "exit": 0,
+    "elapsed_seconds": 4.1829495
+  },
+  {
+    "name": "build",
+    "argv": [
+      "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/cargo",
+      "build",
+      "--release",
+      "--locked",
+      "--offline",
+      "-j",
+      "1",
+      "-vv"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/oxigraph-witness/harness",
+    "env": {
+      "CARGO_PROFILE_RELEASE_OPT_LEVEL": "3",
+      "CARGO_PROFILE_RELEASE_DEBUG": "false",
+      "CARGO_PROFILE_RELEASE_LTO": "false",
+      "CARGO_PROFILE_RELEASE_CODEGEN_UNITS": "16",
+      "CARGO_PROFILE_RELEASE_PANIC": "unwind",
+      "CARGO_BUILD_JOBS": "1",
+      "CARGO_INCREMENTAL": "0",
+      "CARGO_NET_OFFLINE": "true",
+      "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+      "RUSTC": "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/rustc",
+      "RAYON_NUM_THREADS": "1"
+    },
+    "started_utc": "2026-09-10T11:14:30Z",
+    "exit": 0,
+    "elapsed_seconds": 186.297422625
+  },
+  {
+    "name": "fixed-cases",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/oxigraph-witness/oxigraph-witness"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/oxigraph-witness/harness",
+    "env": {
+      "CARGO_PROFILE_RELEASE_OPT_LEVEL": "3",
+      "CARGO_PROFILE_RELEASE_DEBUG": "false",
+      "CARGO_PROFILE_RELEASE_LTO": "false",
+      "CARGO_PROFILE_RELEASE_CODEGEN_UNITS": "16",
+      "CARGO_PROFILE_RELEASE_PANIC": "unwind",
+      "CARGO_BUILD_JOBS": "1",
+      "CARGO_INCREMENTAL": "0",
+      "CARGO_NET_OFFLINE": "true",
+      "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+      "RUSTC": "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/rustc",
+      "RAYON_NUM_THREADS": "1"
+    },
+    "started_utc": "2026-09-10T11:17:36Z",
+    "exit": 0,
+    "elapsed_seconds": 2.0537173750000193
+  }
+]

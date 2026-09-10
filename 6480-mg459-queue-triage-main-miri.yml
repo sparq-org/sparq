@@ -1,0 +1,293 @@
+# miri — undefined-behaviour lane over sparq-core's pure-Rust `unsafe` surface (bead sq-fo28).
+# [OPUS-4.8] authored while Fable unavailable. [FABLE-5] sq-63ups: SHARDED — see the DEAD-LANE
+# POST-MORTEM below; the single-process form of this lane never produced a verdict.
+#
+# WHY: `sparq-core` is the repo's only crate with `unsafe` (threat-model boundary B5 —
+# `research/threat-model.md`). The closed sq-ky2a corruption sweep + the `fuzz` lane catch
+# slice-bound PANICS / OOM on a hostile on-disk index, but they do NOT detect UNDEFINED
+# BEHAVIOUR — aliasing / pointer-provenance violations / data races. Miri does. This lane
+# interprets the sparq-core test suite under Miri so a regression that introduces UB in the
+# pure-Rust unsafe paths (the parallel dict-build scatter writes in `dict.rs`, the POD↔bytes
+# transmutes, the `from_utf8_unchecked` over in-memory buffers, the `set_len`-after-
+# `MaybeUninit` fill) fails a standing check. NOTE: the dict-spill scatter writes
+# (`dictspill.rs`) are NOT in scope here — that module is `#[cfg(feature = "dict-spill")]`,
+# which pulls in `mmap`, and neither feature is enabled in this lane (see below).
+#
+# DEAD-LANE POST-MORTEM ([FABLE-5] sq-63ups, 2026-07-07): the original single job ran
+# `cargo miri test -p sparq-core` under a 90-minute ceiling. EVERY scheduled run since the
+# lane's first night (2026-06-16 — 22 consecutive nights) was CANCELLED at exactly that
+# ceiling: the lane never produced a verdict, and nothing alarmed on it (conclusion
+# `cancelled`, not `failure`). The 2026-07-07 run's log shows the shape of the failure: the
+# lib binary's 97 tests started at 08:36, 45 had completed by 08:50 (~15 min), then the run
+# produced NO further output for the remaining ~75 minutes — one long-lived Miri interpreter
+# process runs every test serially, and its per-test cost inflates dramatically as the
+# process ages (rayon's global pool + crossbeam-epoch state persist across tests, and Miri's
+# borrow-tracking metadata grows monotonically per allocation). The stall is a property of
+# the SINGLE PROCESS, not of any one test: the test at the stall point
+# (store::tests::build_raw_perms_no_capacity_slack, 400 triples) passes in ~44s in a FRESH
+# Miri process on the work box.
+#
+# THE FIX (this file): process-per-test + sharding, coverage IDENTICAL.
+#   1. `cargo miri nextest run` — nextest executes every test in its OWN process, so each
+#      test gets a fresh interpreter (kills the state-accumulation failure mode at the root)
+#      and the runner's cores actually parallelise interpretation (a single `cargo miri
+#      test` process interprets everything on one core, whatever test-threads says).
+#   2. `--partition count:<k>/24` — twenty-four matrix shards, each a disjoint round-robin slice
+#      of the SAME test list; the union over shards is exactly the old single-run test set
+#      (nextest count-partitioning assigns every test to exactly one shard, and round-robin
+#      spreads the alphabetically-clustered heavy modules across shards).
+#   3. Per-test hard cap (`[profile.default-miri]` slow-timeout in .config/nextest.toml —
+#      the profile nextest selects automatically under Miri, so normal ci.yml nextest runs
+#      are untouched): a test that exceeds the cap is TERMINATED and reported BY NAME.
+#      A pathological test now yields a loud, attributable verdict instead of silently
+#      eating the job ceiling — cancelled-at-ceiling with no verdict is the one outcome
+#      this lane must never repeat.
+#   3b. Timeout-vs-UB verdict classification ([FABLE-5] formal-lanes fix): the ~20 heavy
+#      end-to-end loader tests genuinely exceed the per-test cap under Miri's ~100× slowdown
+#      (a COST problem, tracked by sq-0s15k — cfg(miri)-scale their inputs). `cargo miri
+#      nextest` exits 100 for a TIMEOUT and for a real UB/assertion FAILURE alike, so the raw
+#      exit code made the whole `miri` workflow conclude `failure` every night on pre-existing
+#      cost debt — and the no-verdict alarm (formal-alarm.yml) fired forever, masking whether
+#      Miri found real UB. Fix: nextest emits its machine-readable `libtest-json-plus` events
+#      to a file; scripts/miri_classify_verdict.py splits failures into TIMEOUT (reason ==
+#      "time limit exceeded"; known cost debt, LOUD but non-fatal) vs a GENUINE failure (a real
+#      Miri UB abort / assertion; ALWAYS fatal — the finding this lane exists for). A healthy
+#      night (all completed tests clean, only heavies timing out) now produces a real GREEN UB
+#      verdict; a single genuine UB regression still reds the shard + the workflow + re-fires
+#      the alarm. The UB guarantee is unchanged — only the pre-existing cost debt stops
+#      poisoning the verdict. When sq-0s15k lands there are no timeouts and the classifier is a
+#      transparent pass-through.
+#   4. Doctests: nextest does not run doctests, so the `miri-doctests` job keeps them
+#      covered (`cargo miri test --doc`; sparq-core has one; measured seconds under Miri).
+#      Coverage relative to the old `cargo miri test -p sparq-core` is therefore identical:
+#      same lib/integration test binaries (partitioned exhaustively), same doctests.
+#   Shard count: 24. [GPT-5.6] The original 12-way split was calibrated from a work-box run of shard
+#   1-of-6 (sq-63ups PR), but the first classified nightly run showed that shard 4 still
+#   queued enough heavy tests to hit the 130-minute job backstop before its classifier ran
+#   (sq-hytab). Doubling the round-robin partitions preserves the exact test-set union while
+#   reducing each runner's queue; every shard can reach the classifier before the backstop.
+#   The original calibration found that the test
+#   set is BIMODAL under Miri — most tests are ms..seconds, but ~30% are heavy end-to-end
+#   loader tests at ~50-70 min EACH in a fresh interpreter (the accumulation bug above made
+#   them look infinitely worse in-process, but they are genuinely expensive too). Twenty-four
+#   round-robin shards spread those heavies across smaller queues; run in parallel inside the
+#   shard they bound the wall near max(single heavy) ≈ 50-70+ min, inside the 130-minute ceiling with
+#   the 100-min per-test cap guaranteeing a named verdict either way. The REAL cost fix is
+#   cfg(miri)-scaling the heavy tests' input sizes (standard Miri practice) — a crates/
+#   change tracked by follow-up bead sq-0s15k, after which the shard count can drop again.
+#
+# WHAT MIRI COVERS vs CAN'T (measured — see the PR for sq-fo28):
+#   • COVERED (default features = `parallel`): the pure-Rust unsafe sites reachable WITHOUT
+#     `mmap`/`dict-spill` — the rayon `par_iter_mut` dict-build raw-pointer scatter writes in
+#     `dict.rs` (NOT `dictspill.rs`, which is `#[cfg(feature = "dict-spill")]` and is not
+#     compiled here), the `&[POD]`↔`&[u8]` reinterprets over in-memory Vec/slice,
+#     `str::from_utf8_unchecked` over in-process buffers, and the parallel `MaybeUninit` +
+#     `set_len` remap. These RUN.
+#   • STRUCTURALLY CANNOT RUN under Miri: the 16 mmap-backed sites (every `memmap2::Mmap::map`
+#     / `MmapMut::map_mut` / `madvise`, the libc `sysconf`/`statvfs` FFI in dict-spill, and
+#     every slice reinterpret whose provenance is a live `Mmap`). Miri rejects file-backed
+#     memory mappings outright ("Miri does not support file-backed memory mappings"), so the
+#     `mmap` / `dict-spill` features are NOT enabled here — they would only abort on the first
+#     `Mmap::map`. That mmap B5 surface is covered instead by the DETERMINISTIC
+#     `mmap_corruption_oracle` test (run in ci.yml under `--features mmap,dict-spill`) + the
+#     `fuzz` lane's mmap-loader target + the standalone ASan lane (asan.yml).
+#
+# MIRIFLAGS (documented, load-bearing):
+#   -Zmiri-tree-borrows  : `rayon` pulls in `crossbeam-epoch`, which violates the default
+#                          STACKED-Borrows aliasing model (a known upstream incompatibility —
+#                          the crate is written against the more permissive TREE-Borrows
+#                          aliasing model). Without this flag Miri aborts inside
+#                          crossbeam-epoch's `internal.rs`, NOT in sparq-core code. Tree
+#                          Borrows is the correct aliasing model for this dependency graph
+#                          and still detects real UB in sparq-core's own unsafe. (Verified
+#                          again on the work box: the doctest FAILS under Stacked Borrows in
+#                          crossbeam-epoch and PASSES under Tree Borrows.)
+#   -Zmiri-ignore-leaks  : `rayon`'s global thread pool keeps daemon worker threads alive at
+#                          process exit; Miri otherwise fails the run with "the main thread
+#                          terminated without waiting for all remaining threads". This is a
+#                          thread-pool lifecycle artefact, not a sparq-core leak.
+#   -Zmiri-disable-isolation : a handful of in-memory tests touch the clock / temp paths;
+#                          isolation off lets them run. (No mmap/FS-index test is compiled in
+#                          under the default feature set, so this only unblocks incidental
+#                          host access, never the unsupported mmap path.)
+#
+# TRIGGER (deliberately OFF the per-PR critical path — Miri interprets every instruction, so
+# the suite is ~100× slower than native and is NOT something to pay on every PR):
+#   • schedule (nightly) — the standing UB safety net.
+#   • workflow_dispatch  — on demand.
+# There is intentionally NO `pull_request` / `merge_group` / `push` trigger: this workflow
+# therefore creates NO check-run on a PR head or merge-queue ref, so the required
+# `ci-summary / gate` aggregator (which POLLS sibling check-runs on the head commit) never
+# discovers it and never waits on it — exactly the "nightly safety net, not a per-PR tax"
+# posture of the zk-toolchain / fuzz-nightly lanes. A lane with no verdict for >48h is
+# alarmed by scripts/formal_lane_alarm.py (formal-alarm.yml, [FABLE-5] sq-63ups) — the
+# 22-night silent-cancel streak above is exactly what that alarm exists to catch.
+#
+# Third-party actions are pinned by full commit SHA (supply-chain hardening); the trailing
+# `# vX.Y.Z` comment is what Dependabot follows to bump the pin.
+name: miri
+
+on:
+  workflow_dispatch:
+  # Nightly safety net at 05:11 UTC — offset from ci.yml (03:17), fuzz/zk-toolchain (04:23)
+  # so the heavy nightly lanes do not contend for the same runner window.
+  schedule:
+    - cron: "11 5 * * *"
+
+# Least-privilege: this lane only reads the repo + runs tests.
+permissions:
+  contents: read
+
+concurrency:
+  group: miri-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  # See the header for why each flag is load-bearing. Kept in one place so a future toolchain
+  # bump only edits here.
+  MIRIFLAGS: "-Zmiri-tree-borrows -Zmiri-ignore-leaks -Zmiri-disable-isolation"
+
+jobs:
+  miri:
+    name: miri (sparq-core unsafe surface, UB, shard ${{ matrix.shard }}/24)
+    runs-on: ubuntu-latest
+    # Backstop only: each shard's real ceiling is the 100-min per-test terminate cap in
+    # .config/nextest.toml [profile.default-miri] — a hung/pathological test reds its shard
+    # BY NAME long before this fires. (The old single job hit its ceiling every night and
+    # produced nothing; see the post-mortem in the header.) 130 = the 100-min cap + setup
+    # (checkout/toolchain/sysroot) + the light-test tail, with margin.
+    timeout-minutes: 130
+    strategy:
+      # A pathological test in one shard must not cancel the other shards' verdicts.
+      fail-fast: false
+      # [OPUS-5] issue #6349 — HOSTED-RUNNER RESERVATION. All 24 shards still RUN (the
+      # partition union is byte-identical, so coverage is unchanged); at most 4 of them are
+      # ADMITTED to a hosted runner at a time. Before this cap the lane asked for all 24
+      # runners in one burst, and in the PR-throughput incident that filed #6349 those
+      # long-lived jobs held most of the account's standard-runner admissions while current
+      # PR-head checks sat "waiting for a runner". Offsetting the crons cannot fix that:
+      # a delayed run still overlaps the next lane's window, so the reservation has to be a
+      # PARALLELISM bound, not a schedule one. Nightly wall clock is not on the merge
+      # critical path; PR admission is. Cost of the bound, stated plainly: 24 shards at 4
+      # concurrent = 6 waves, so the worst case is 6 x the 130-minute job backstop (~13 h),
+      # inside the 24 h nightly cycle; each shard keeps its own backstop and its per-test
+      # cap, so no verdict semantics change. The per-workflow and combined miri+kani
+      # ceilings — and the majority of the allowance left for PR / merge-group checks — are
+      # machine-checked by scripts/tests/test_nightly_runner_reservation.py, which reds if
+      # this cap disappears or the combined budget grows past the reservation.
+      max-parallel: 4
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24]
+    # [OPUS-5] PINNED-TOOLCHAIN ESCAPE. The repo root carries a `rust-toolchain.toml`
+    # pinning STABLE. rustup resolves that file (precedence 4) ABOVE the `rustup default
+    # <toolchain>` that `dtolnay/rust-toolchain` performs (precedence 5), so with the pin
+    # in place a plain `cargo`/`rustc` in this job resolves to pinned stable, NOT the
+    # nightly this lane declares. The `cargo +nightly-2026-06-11 miri …` calls below are
+    # precedence 1 and were already immune; this env var (precedence 2) restores the
+    # pre-pin behaviour for everything else in the job — notably the `rustc -vV` that
+    # Swatinem/rust-cache derives its cache key from, which would otherwise silently
+    # re-key the Miri cache onto stable. Keep in sync with the `toolchain:` input below.
+    env:
+      RUSTUP_TOOLCHAIN: nightly-2026-06-11
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      # Miri ships ONLY on nightly. Pin the nightly channel by DATE so the lane is
+      # reproducible and a future nightly regression cannot silently break it; bump the date
+      # deliberately (same pinned dtolnay action + nightly the `fuzz` lane uses). The `miri`
+      # + `rust-src` components are required: `cargo miri` builds a Miri sysroot from source.
+      - name: Install Rust (nightly, pinned) + miri
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # nightly via toolchain input
+        with:
+          toolchain: nightly-2026-06-11
+          components: miri, rust-src
+      # nextest = the process-per-test runner (see THE FIX above). Same pinned installer
+      # action + tool the ci.yml test shards use.
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
+        with:
+          tool: nextest
+      - name: Cache cargo + target
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          # One cache shared by every shard (identical build artifacts — the shards differ
+          # only in which tests they EXECUTE); Swatinem races on save are first-wins + benign.
+          shared-key: miri
+      # Guard the verdict CLASSIFIER before trusting it to judge a ~2-hour shard: a regression
+      # in scripts/miri_classify_verdict.py (e.g. it stops treating a real UB failure as fatal)
+      # would silently turn this UB lane green. Its hermetic self-test reds the shard first if so.
+      - name: Self-test the Miri verdict classifier (timeout-vs-UB logic)
+        run: python3 scripts/miri_classify_verdict.py --self-test
+      # Build the Miri sysroot once up front so a sysroot/toolchain problem is reported
+      # distinctly from a test failure, and the test run below reuses it.
+      - name: Build Miri sysroot
+        run: cargo +nightly-2026-06-11 miri setup
+      # Default features (= `parallel`). The `mmap` / `dict-spill` features are deliberately
+      # NOT enabled: Miri cannot run file-backed memory mappings (see the header). nextest
+      # auto-selects its built-in `default-miri` profile under Miri, which picks up the
+      # per-test terminate cap from .config/nextest.toml. --no-fail-fast: a shard reports
+      # EVERY test's verdict even after a failure (this is a verdict lane, not a smoke lane).
+      #
+      # VERDICT CLASSIFICATION (formal-lanes fix — [FABLE-5]): `cargo miri nextest` exits 100
+      # whether a test TIMED OUT (the ~20 heavy end-to-end loader tests over the per-test cap —
+      # a COST problem tracked by sq-0s15k) or GENUINELY FAILED (a real Miri UB abort / assertion
+      # — the finding this lane exists for). The raw exit code cannot tell those apart, so the
+      # whole `miri` workflow concluded `failure` EVERY night on pre-existing, already-tracked
+      # cost debt and the no-verdict alarm (formal-alarm.yml) fired forever — masking whether
+      # Miri actually found UB. Fix: emit nextest's machine-readable `libtest-json-plus` event
+      # stream to a file (nextest's own non-zero exit is absorbed by `|| true`), then let
+      # scripts/miri_classify_verdict.py decide the shard verdict — it reds the shard the instant
+      # a GENUINE (non-timeout) failure appears (full UB guarantee preserved), but tolerates
+      # timeout-only shards so a healthy night produces a real UB verdict. Every timed-out +
+      # failed test is written to the step summary + annotations, so the cost debt stays LOUD and
+      # under standing pressure (sq-0s15k). When sq-0s15k cfg(miri)-scales the heavy tests there
+      # are no timeouts and the classifier is a transparent pass-through.
+      - name: cargo miri nextest run (shard ${{ matrix.shard }}/24)
+        env:
+          NEXTEST_EXPERIMENTAL_LIBTEST_JSON: "1"
+        run: >-
+          cargo +nightly-2026-06-11 miri nextest run -p sparq-core
+          --partition count:${{ matrix.shard }}/24 --no-fail-fast
+          --message-format libtest-json-plus --message-format-version 0.1
+          > "miri-shard-${{ matrix.shard }}.jsonl" 2> "miri-shard-${{ matrix.shard }}.stderr"
+          || true
+      # Classify: a genuine UB/assertion failure reds the shard (exit 1); timeout-only debt is
+      # tolerated (exit 0). This step's exit code IS the shard verdict, so a real UB regression
+      # still reds the workflow and re-fires the no-verdict alarm.
+      - name: Classify shard verdict (UB failure = fatal, timeout debt = non-fatal)
+        run: |
+          cat "miri-shard-${{ matrix.shard }}.stderr" || true
+          python3 scripts/miri_classify_verdict.py \
+            --shard "${{ matrix.shard }}/24" \
+            --events "miri-shard-${{ matrix.shard }}.jsonl"
+
+  # nextest does not execute doctests; keep them covered so this lane's coverage stays
+  # identical to the original `cargo miri test -p sparq-core` (which ran them last —
+  # or would have, had it ever got there). Seconds-cheap: sparq-core has one doctest.
+  miri-doctests:
+    name: miri doctests (sparq-core)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # [OPUS-5] PINNED-TOOLCHAIN ESCAPE — see the identical note on the `miri` job above.
+    env:
+      RUSTUP_TOOLCHAIN: nightly-2026-06-11
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Install Rust (nightly, pinned) + miri
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # nightly via toolchain input
+        with:
+          toolchain: nightly-2026-06-11
+          components: miri, rust-src
+      - name: Cache cargo + target
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          shared-key: miri
+      - name: Build Miri sysroot
+        run: cargo +nightly-2026-06-11 miri setup
+      - name: cargo miri test --doc
+        run: cargo +nightly-2026-06-11 miri test -p sparq-core --doc

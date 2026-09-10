@@ -1,0 +1,2 @@
+gh: You must be an org admin or have the runners and runner groups fine-grained permission. (HTTP 403)
+gh: This API operation needs the "admin:org" scope. To request it, run:  gh auth refresh -h github.com -s admin:org

@@ -1,0 +1,12 @@
+{
+  "verified_at": "2026-09-10T11:46:57.800440+00:00",
+  "manifest_sha256": "0dbc0a230beb4677e8721d4f3e03344385585d93e0071365933039edc6f63d80",
+  "verified_files": 61,
+  "assertions": [
+    "All61filebytes/digestsverified",
+    "CI33jobs:22success7skip2running2queued; matrix57jobs:22success1skip2running32queued",
+    "Current1148snapshotshows6morematrixsuccessesandthirdCIbulkshardadmitted",
+    "Reportcapacitycontentionisinference;20slotentitlementnotverified"
+  ],
+  "decision": "Preserve progressing live MG459; no cancellation/rerun or workflow mutation."
+}

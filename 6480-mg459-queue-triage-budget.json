@@ -1,0 +1,17 @@
+{
+  "read_command": "/opt/homebrew/bin/gh api rate_limit",
+  "core": {
+    "limit": 5000,
+    "used": 56,
+    "remaining": 4944,
+    "reset": 1789040999
+  },
+  "search": {
+    "remaining": 30
+  },
+  "graphql": {
+    "remaining": 5000
+  },
+  "exit": 0,
+  "note": "Relevant parsed fields from successful first request; no exhausted budget."
+}
