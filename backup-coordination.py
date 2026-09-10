@@ -1070,6 +1070,38 @@ FILES['direct-6479--admission--issue-current.json'] = ROOT / 'direct-6479/admiss
 FILES['direct-6479--admission--issue-current.stderr'] = ROOT / 'direct-6479/admission' / 'issue-current.stderr'
 FILES['direct-6479--admission--readiness-admission.json'] = ROOT / 'direct-6479/admission' / 'readiness-admission.json'
 
+#1921 liveCI/review evidence and6479 bounded publicwitness grant.
+FILES['direct-6479--readiness--base-call-scope.txt'] = ROOT / 'direct-6479/readiness' / 'base-call-scope.txt'
+FILES['direct-6479--readiness--caller-inventory.json'] = ROOT / 'direct-6479/readiness' / 'caller-inventory.json'
+FILES['direct-6479--readiness--issue-snapshot-summary.json'] = ROOT / 'direct-6479/readiness' / 'issue-snapshot-summary.json'
+FILES['direct-6479--readiness--report.json'] = ROOT / 'direct-6479/readiness' / 'report.json'
+FILES['direct-6479--readiness--review-packet.md'] = ROOT / 'direct-6479/readiness' / 'review-packet.md'
+FILES['direct-6479--readiness--source-proof.json'] = ROOT / 'direct-6479/readiness' / 'source-proof.json'
+FILES['direct-6479--readiness--warm-artifacts.json'] = ROOT / 'direct-6479/readiness' / 'warm-artifacts.json'
+FILES['direct-6479--readiness--witness-protocol.json'] = ROOT / 'direct-6479/readiness' / 'witness-protocol.json'
+FILES['direct-6479--readiness--manifest.json'] = ROOT / 'direct-6479/readiness' / 'manifest.json'
+FILES['direct-6479--admission--readiness-root-verification.json'] = ROOT / 'direct-6479/admission' / 'readiness-root-verification.json'
+FILES['direct-6479--admission--witness-admission.json'] = ROOT / 'direct-6479/admission' / 'witness-admission.json'
+FILES['direct-6479--admission--run-opus-base-design.py'] = ROOT / 'direct-6479/admission' / 'run-opus-base-design.py'
+FILES['monitor-20260910-1921--registry-permissions.stderr'] = ROOT / 'monitor-20260910-1921' / 'registry-permissions.stderr'
+FILES['monitor-20260910-1921--mg6486-matrix-jobs.stderr'] = ROOT / 'monitor-20260910-1921' / 'mg6486-matrix-jobs.stderr'
+FILES['monitor-20260910-1921--pr6487-ci-jobs.stderr'] = ROOT / 'monitor-20260910-1921' / 'pr6487-ci-jobs.stderr'
+FILES['monitor-20260910-1921--mg6486-matrix-jobs.json'] = ROOT / 'monitor-20260910-1921' / 'mg6486-matrix-jobs.json'
+FILES['monitor-20260910-1921--mg6486-runs.json'] = ROOT / 'monitor-20260910-1921' / 'mg6486-runs.json'
+FILES['monitor-20260910-1921--query.json'] = ROOT / 'monitor-20260910-1921' / 'query.json'
+FILES['monitor-20260910-1921--graph.stderr'] = ROOT / 'monitor-20260910-1921' / 'graph.stderr'
+FILES['monitor-20260910-1921--budget.json'] = ROOT / 'monitor-20260910-1921' / 'budget.json'
+FILES['monitor-20260910-1921--mg6486-ci-jobs.stderr'] = ROOT / 'monitor-20260910-1921' / 'mg6486-ci-jobs.stderr'
+FILES['monitor-20260910-1921--pr6487-runs.json'] = ROOT / 'monitor-20260910-1921' / 'pr6487-runs.json'
+FILES['monitor-20260910-1921--graph.json'] = ROOT / 'monitor-20260910-1921' / 'graph.json'
+FILES['monitor-20260910-1921--budget.stderr'] = ROOT / 'monitor-20260910-1921' / 'budget.stderr'
+FILES['monitor-20260910-1921--mg6486-runs.stderr'] = ROOT / 'monitor-20260910-1921' / 'mg6486-runs.stderr'
+FILES['monitor-20260910-1921--pr6487-ci-jobs.json'] = ROOT / 'monitor-20260910-1921' / 'pr6487-ci-jobs.json'
+FILES['monitor-20260910-1921--mg6486-ci-jobs.json'] = ROOT / 'monitor-20260910-1921' / 'mg6486-ci-jobs.json'
+FILES['monitor-20260910-1921--registry-permissions.json'] = ROOT / 'monitor-20260910-1921' / 'registry-permissions.json'
+FILES['monitor-20260910-1921--pr6487-runs.stderr'] = ROOT / 'monitor-20260910-1921' / 'pr6487-runs.stderr'
+FILES['monitor-20260910-1921--receipt.json'] = ROOT / 'monitor-20260910-1921' / 'receipt.json'
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout

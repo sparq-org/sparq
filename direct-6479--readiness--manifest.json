@@ -1,0 +1,45 @@
+{
+  "file_count": 8,
+  "files": [
+    {
+      "path": "base-call-scope.txt",
+      "bytes": 31727,
+      "sha256": "b3a75da4dfd40ee8c88e481db0939d0358e16bdf286ac06b956ac3bb5c6286fd"
+    },
+    {
+      "path": "caller-inventory.json",
+      "bytes": 2642,
+      "sha256": "e27010a7d955731e1d1cc51d2ca89cdbbcd8ad7a20598b442504e0ce80ac389c"
+    },
+    {
+      "path": "issue-snapshot-summary.json",
+      "bytes": 471,
+      "sha256": "2e3ec5f07126831fd2326e6a27463efddd6dbf7a869b1aabd92adbc708e6ff07"
+    },
+    {
+      "path": "report.json",
+      "bytes": 3507,
+      "sha256": "ec42d9ed5165a63979814a75ae58f66d28bada7bc69eb00b6c8027d7230f47ae"
+    },
+    {
+      "path": "review-packet.md",
+      "bytes": 38405,
+      "sha256": "3f07e09862ebb6061cbd5b41d952e60c34d736374ce49beb1a3c04b77739043d"
+    },
+    {
+      "path": "source-proof.json",
+      "bytes": 33068,
+      "sha256": "f7c66beb2af058adccf45f4bb403a95fa5257883c1706cd553094dc955285f24"
+    },
+    {
+      "path": "warm-artifacts.json",
+      "bytes": 12102,
+      "sha256": "363645f8a9246338811eaeb69335e599a753658809c81613af4954351f0209f2"
+    },
+    {
+      "path": "witness-protocol.json",
+      "bytes": 2946,
+      "sha256": "3badb864f8cac68026597d785829f6971293091dee6c6af80b2b14130d9aec27"
+    }
+  ]
+}

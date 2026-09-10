@@ -1,0 +1,721 @@
+{
+  "worktree_head": "0b4554b924a80432cc1b572bd19f8e58cdbfb4e6",
+  "known_main": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+  "worktree_clean": true,
+  "engine_core_lock_diff_empty": true,
+  "engine_core_files_equal_recorded781f_build": 113,
+  "recorded_comparison": [
+    {
+      "path": "crates/sparq-core/Cargo.toml",
+      "recorded_sha256": "bacc2b9877e8d12703578b5c28bba1211514b973bb0edd07ad822bf8b125d362",
+      "current_sha256": "bacc2b9877e8d12703578b5c28bba1211514b973bb0edd07ad822bf8b125d362",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-core/README.md",
+      "recorded_sha256": "e58635a8842b94ad2474015e3396225b5fb55fd35a420ec6bc10dc8f4ed71d4b",
+      "current_sha256": "e58635a8842b94ad2474015e3396225b5fb55fd35a420ec6bc10dc8f4ed71d4b",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-core/examples/bench_id_width.rs",
+      "recorded_sha256": "c853aa35152db8ea058beb96b7257e02c0ca9625c3e08d4da90521fe9584148f",
+      "current_sha256": "c853aa35152db8ea058beb96b7257e02c0ca9625c3e08d4da90521fe9584148f",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-core/src/compress.rs",
+      "recorded_sha256": "71b4b72c7499b3c8e7b81c2dff753e5911b226d2700da4fc9baebb244b9408dc",
+      "current_sha256": "71b4b72c7499b3c8e7b81c2dff753e5911b226d2700da4fc9baebb244b9408dc",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-core/src/dict.rs",
+      "recorded_sha256": "abb2f7a0c524583eafc1acb175113ab4fd551a336d772f702a13420ef281aeb3",
+      "current_sha256": "abb2f7a0c524583eafc1acb175113ab4fd551a336d772f702a13420ef281aeb3",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-core/src/dictspill.rs",
+      "recorded_sha256": "a57c8da2eb093df1876fa255e83c12a4ae6de2b9995e1ba53663f054e28cf513",
+      "current_sha256": "a57c8da2eb093df1876fa255e83c12a4ae6de2b9995e1ba53663f054e28cf513",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-core/src/eliasfano.rs",
+      "recorded_sha256": "0bf83ea87986b04417e0396fbaba406e5c1112f12caa26d92db0565210e2b3cb",
+      "current_sha256": "0bf83ea87986b04417e0396fbaba406e5c1112f12caa26d92db0565210e2b3cb",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-core/src/extsort.rs",
+      "recorded_sha256": "792673d722e1fec68525505782685743f7bc9d1f499fb8b79065fea58aaf333f",
+      "current_sha256": "792673d722e1fec68525505782685743f7bc9d1f499fb8b79065fea58aaf333f",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-core/src/iri.rs",
+      "recorded_sha256": "bf6e36f447ce51f43a7bf84220bdb8ee4a894662971bd3a82013fa7d5ba1414d",
+      "current_sha256": "bf6e36f447ce51f43a7bf84220bdb8ee4a894662971bd3a82013fa7d5ba1414d",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-core/src/lib.rs",
+      "recorded_sha256": "3679c762c28c956df60ee519682420c2800993a3b3674b77ed335bb9acba6a45",
+      "current_sha256": "3679c762c28c956df60ee519682420c2800993a3b3674b77ed335bb9acba6a45",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-core/src/nt.rs",
+      "recorded_sha256": "6e120cf3f7ae015a44e345be0f5146ffd5d809a5e09efa666e83d99c6481ae10",
+      "current_sha256": "6e120cf3f7ae015a44e345be0f5146ffd5d809a5e09efa666e83d99c6481ae10",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-core/src/shared.rs",
+      "recorded_sha256": "0cd9243e254cef67c54fb5ae25ed2eac60cd671997168e55d3d27bd828e98ac9",
+      "current_sha256": "0cd9243e254cef67c54fb5ae25ed2eac60cd671997168e55d3d27bd828e98ac9",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-core/src/store/overlay_deleted_tests.rs",
+      "recorded_sha256": "5eaf0fda2377ec4e7df664d749e5466771aa656659ac5153f746a8ed6ec4a688",
+      "current_sha256": "5eaf0fda2377ec4e7df664d749e5466771aa656659ac5153f746a8ed6ec4a688",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-core/src/store.rs",
+      "recorded_sha256": "6c70a6d4f13de468143f19b75972c28b312a8a2110bf95deb502d784f9b9284c",
+      "current_sha256": "6c70a6d4f13de468143f19b75972c28b312a8a2110bf95deb502d784f9b9284c",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-core/src/strdist.rs",
+      "recorded_sha256": "5538ea31c303721b57c3677ba8b087c67a6524754d74e1690de123d8845cd761",
+      "current_sha256": "5538ea31c303721b57c3677ba8b087c67a6524754d74e1690de123d8845cd761",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-core/src/temporal.rs",
+      "recorded_sha256": "edd405793ad97bf0a8a300b08828b1d36b6c5ba48467096425512ad98a76b047",
+      "current_sha256": "edd405793ad97bf0a8a300b08828b1d36b6c5ba48467096425512ad98a76b047",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-core/src/ttl/tests.rs",
+      "recorded_sha256": "231f14796387d1cba773feccbc2518688c8504b28baabb21c28178ddab4a9c33",
+      "current_sha256": "231f14796387d1cba773feccbc2518688c8504b28baabb21c28178ddab4a9c33",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-core/src/ttl.rs",
+      "recorded_sha256": "062892f23e21ef9fe25e8fe3527c134ec0d2b18e89d72789f0cd8b324834f48a",
+      "current_sha256": "062892f23e21ef9fe25e8fe3527c134ec0d2b18e89d72789f0cd8b324834f48a",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-core/tests/dict_spill_activation.rs",
+      "recorded_sha256": "1b9c883778e24abc65345980d0ae68d04fc4154878cf8f30e87b7f7c226956b6",
+      "current_sha256": "1b9c883778e24abc65345980d0ae68d04fc4154878cf8f30e87b7f7c226956b6",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-core/tests/fork_differential.rs",
+      "recorded_sha256": "aecdf2cb5903c9ad2887912b1d114841921fbd716a02fb8d32528af7804e6fd1",
+      "current_sha256": "aecdf2cb5903c9ad2887912b1d114841921fbd716a02fb8d32528af7804e6fd1",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-core/tests/mmap_corruption_oracle.rs",
+      "recorded_sha256": "42f925ef66d96970bfc2a41431ff9f2c81241a70b94a019af31ace74cd598fe4",
+      "current_sha256": "42f925ef66d96970bfc2a41431ff9f2c81241a70b94a019af31ace74cd598fe4",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-core/tests/parallel_serial_load_differential.rs",
+      "recorded_sha256": "259f56fb0644d1bd25ae68c61db02e19104997ef9b58476974931cc9bda38d58",
+      "current_sha256": "259f56fb0644d1bd25ae68c61db02e19104997ef9b58476974931cc9bda38d58",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-core/tests/proptest_roundtrip.rs",
+      "recorded_sha256": "b04743674fa27a2547911784f3c85998b5e8b8312055fe947b49732eba881c4e",
+      "current_sha256": "b04743674fa27a2547911784f3c85998b5e8b8312055fe947b49732eba881c4e",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-core/tests/snapshot.rs",
+      "recorded_sha256": "97f95e517708842a8321122a2359ff43fe7b4623ab43f8efbe3909defeb43a26",
+      "current_sha256": "97f95e517708842a8321122a2359ff43fe7b4623ab43f8efbe3909defeb43a26",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/Cargo.toml",
+      "recorded_sha256": "ab9734674fb46fcf5ad91415cff14f2552d4bc9e6a5f2994ca2e0905e2b99bc2",
+      "current_sha256": "ab9734674fb46fcf5ad91415cff14f2552d4bc9e6a5f2994ca2e0905e2b99bc2",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/README.md",
+      "recorded_sha256": "d6fed81b2322ebf92d803510fdab99b7349ef7feccf2b56b0be6fcd53c36090d",
+      "current_sha256": "d6fed81b2322ebf92d803510fdab99b7349ef7feccf2b56b0be6fcd53c36090d",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/examples/bench_vectorized.rs",
+      "recorded_sha256": "f5abbc264d333d45a75580de30edfdfd57af3b0d226e398ab24d090c123f9311",
+      "current_sha256": "f5abbc264d333d45a75580de30edfdfd57af3b0d226e398ab24d090c123f9311",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/examples/quickstart.rs",
+      "recorded_sha256": "7de40a553d8110f6dc78f4017867357cc045958a96f6c786978c88aef345e311",
+      "current_sha256": "7de40a553d8110f6dc78f4017867357cc045958a96f6c786978c88aef345e311",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/src/aggregate.rs",
+      "recorded_sha256": "65f67628c6b70b73ea1df065e17b6e678aaed7edc921e0b810d20f9dc831ebb8",
+      "current_sha256": "65f67628c6b70b73ea1df065e17b6e678aaed7edc921e0b810d20f9dc831ebb8",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/src/cache.rs",
+      "recorded_sha256": "ce140e15be0ad8f72584dccca0d33eb93acc526756f8cb1a2ec69e872c4da62e",
+      "current_sha256": "ce140e15be0ad8f72584dccca0d33eb93acc526756f8cb1a2ec69e872c4da62e",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/src/chunk.rs",
+      "recorded_sha256": "c03ff870e622b0d7a7219dc13adcc405961ba5e764d3ecdf40b2c3ad6d1e57be",
+      "current_sha256": "c03ff870e622b0d7a7219dc13adcc405961ba5e764d3ecdf40b2c3ad6d1e57be",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/src/chunk_select.rs",
+      "recorded_sha256": "fb70a8f90a72562b2390ce292e561e195c77a2d4c6a39cdce31a857645ba1213",
+      "current_sha256": "fb70a8f90a72562b2390ce292e561e195c77a2d4c6a39cdce31a857645ba1213",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/src/cluster.rs",
+      "recorded_sha256": "57d34b90b0d7f48a8c816b09fb89736da3bf61b51a5d97e6cf1a64be05fd2902",
+      "current_sha256": "57d34b90b0d7f48a8c816b09fb89736da3bf61b51a5d97e6cf1a64be05fd2902",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/src/construct.rs",
+      "recorded_sha256": "8b4c28da9fd8cb0b2d6f22439113ebe5f89b2b42c8938c02a0e6ef6ddbd3f6e5",
+      "current_sha256": "8b4c28da9fd8cb0b2d6f22439113ebe5f89b2b42c8938c02a0e6ef6ddbd3f6e5",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/src/cs.rs",
+      "recorded_sha256": "29dea1151dcda87796bebb0d99a2c627edb28333a3db5fb88867b53436280cf8",
+      "current_sha256": "29dea1151dcda87796bebb0d99a2c627edb28333a3db5fb88867b53436280cf8",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/src/cs_gate.rs",
+      "recorded_sha256": "6a1b8177b204e46872b2027ea90cbcb364db22a13599493da8f0419bc9e61b35",
+      "current_sha256": "6a1b8177b204e46872b2027ea90cbcb364db22a13599493da8f0419bc9e61b35",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/src/dataset.rs",
+      "recorded_sha256": "c9ac7f144c6084a2032662324ff95e39808f2e607aab3cbd4ae6e0f18f4b180d",
+      "current_sha256": "c9ac7f144c6084a2032662324ff95e39808f2e607aab3cbd4ae6e0f18f4b180d",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/src/dp.rs",
+      "recorded_sha256": "fac6df99eed24be26a8c710e1eb844a0584fc8f853ccd3329ce0f57099420fc0",
+      "current_sha256": "fac6df99eed24be26a8c710e1eb844a0584fc8f853ccd3329ce0f57099420fc0",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/src/eqjoin.rs",
+      "recorded_sha256": "a813fe7319d78dac87151fe37b638fddb72537b92d59332a3093927758878630",
+      "current_sha256": "a813fe7319d78dac87151fe37b638fddb72537b92d59332a3093927758878630",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/src/exec.rs",
+      "recorded_sha256": "10090299f707dbf4adb4cae6349bd390a06ed2a50645e8c3417bcc3b90fb20af",
+      "current_sha256": "10090299f707dbf4adb4cae6349bd390a06ed2a50645e8c3417bcc3b90fb20af",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/src/explain.rs",
+      "recorded_sha256": "953c36345e5e54a99b04478a2515b4ea2ba06cdd6ebffe9f376153e1ef0bffd4",
+      "current_sha256": "953c36345e5e54a99b04478a2515b4ea2ba06cdd6ebffe9f376153e1ef0bffd4",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/src/explain_json.rs",
+      "recorded_sha256": "59951ec3db080ec591697398e89586b1d29e5d6377883bfa1a3400efc807470d",
+      "current_sha256": "59951ec3db080ec591697398e89586b1d29e5d6377883bfa1a3400efc807470d",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/src/json.rs",
+      "recorded_sha256": "13765d9f441de9324eddea4a6666131db6375d45b62288c0e1d94bfe803ab414",
+      "current_sha256": "13765d9f441de9324eddea4a6666131db6375d45b62288c0e1d94bfe803ab414",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/src/lib.rs",
+      "recorded_sha256": "074740149d0649b0334d1814ca289feaad54070ca0d90bf5737601f7021a7538",
+      "current_sha256": "074740149d0649b0334d1814ca289feaad54070ca0d90bf5737601f7021a7538",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/src/params.rs",
+      "recorded_sha256": "6242b45304fca518710b1cc19bceef5fd15fbd10c62dfcbd25e0641003860ca1",
+      "current_sha256": "6242b45304fca518710b1cc19bceef5fd15fbd10c62dfcbd25e0641003860ca1",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/src/paths.rs",
+      "recorded_sha256": "b2dcdf264856475dec0822c353cb41f7945638deee8ebf1402fb62fca9eed946",
+      "current_sha256": "b2dcdf264856475dec0822c353cb41f7945638deee8ebf1402fb62fca9eed946",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/src/paths_syntax.rs",
+      "recorded_sha256": "260a6ab7847356bcca9b421e11478182ce991a19de0fc6bc2d1c7d9efe3c7ab9",
+      "current_sha256": "260a6ab7847356bcca9b421e11478182ce991a19de0fc6bc2d1c7d9efe3c7ab9",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/src/reduce.rs",
+      "recorded_sha256": "c332466e24b653d77ecb49ab2434037e2f83676e95d3818583a2416efc3b2950",
+      "current_sha256": "c332466e24b653d77ecb49ab2434037e2f83676e95d3818583a2416efc3b2950",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/src/rewrite.rs",
+      "recorded_sha256": "30a5c8610e5e79e75a1a6e980ee320639c870d6c89a8aaa19d498b224c6b0284",
+      "current_sha256": "30a5c8610e5e79e75a1a6e980ee320639c870d6c89a8aaa19d498b224c6b0284",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/src/semijoin.rs",
+      "recorded_sha256": "66b823e1fccfed9f4670d6068c1644de2abe543f14dd59f7accac0a20ac9bb46",
+      "current_sha256": "66b823e1fccfed9f4670d6068c1644de2abe543f14dd59f7accac0a20ac9bb46",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/src/service_local.rs",
+      "recorded_sha256": "8ac054fc4b965e6dde85248be42e53e304e708749d44ca057476547f670a6011",
+      "current_sha256": "8ac054fc4b965e6dde85248be42e53e304e708749d44ca057476547f670a6011",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/src/solution.rs",
+      "recorded_sha256": "8f6d0f2b5d9e477c2f3a2ddc902ce56734980e72b1ad849b97bc00154dfa5783",
+      "current_sha256": "8f6d0f2b5d9e477c2f3a2ddc902ce56734980e72b1ad849b97bc00154dfa5783",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/src/stats.rs",
+      "recorded_sha256": "154da5aed78b8049ee580e0d5c4a4153cab7a861151141ca1fbd0cbb3f7e9e0a",
+      "current_sha256": "154da5aed78b8049ee580e0d5c4a4153cab7a861151141ca1fbd0cbb3f7e9e0a",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/src/templates.rs",
+      "recorded_sha256": "81754791bbb7fecaa8cb54fdd93987d2b85cd0bd494e7ddf272c960e5e858135",
+      "current_sha256": "81754791bbb7fecaa8cb54fdd93987d2b85cd0bd494e7ddf272c960e5e858135",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/src/txn.rs",
+      "recorded_sha256": "2c25b6d421b0684f12d99f5923b2ce0849ee72f4f428795850d6fd8ad1a235d6",
+      "current_sha256": "2c25b6d421b0684f12d99f5923b2ce0849ee72f4f428795850d6fd8ad1a235d6",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/src/update.rs",
+      "recorded_sha256": "5f638ac92382082e6a65080eb579ee61ce0861d843805a761236b73d81e842fe",
+      "current_sha256": "5f638ac92382082e6a65080eb579ee61ce0861d843805a761236b73d81e842fe",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/src/vec_dispatch.rs",
+      "recorded_sha256": "fc7cb2a6d1be2723661f5ffb88a852dd98be0a2f592d838634e4f151085a026a",
+      "current_sha256": "fc7cb2a6d1be2723661f5ffb88a852dd98be0a2f592d838634e4f151085a026a",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/src/window.rs",
+      "recorded_sha256": "00a7bfe8264f19ba7a481f01f23c98aa568590e7fec7c667282018ceabebb952",
+      "current_sha256": "00a7bfe8264f19ba7a481f01f23c98aa568590e7fec7c667282018ceabebb952",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/src/window_syntax.rs",
+      "recorded_sha256": "06c4eb9e606531b6233fbd36538265ca0d680e1f67a0d39bff464487ccf54485",
+      "current_sha256": "06c4eb9e606531b6233fbd36538265ca0d680e1f67a0d39bff464487ccf54485",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/src/zk.rs",
+      "recorded_sha256": "7567e746cd430bc00ba2c65f4e1def31d3cf7435307612240b589ea79294a44a",
+      "current_sha256": "7567e746cd430bc00ba2c65f4e1def31d3cf7435307612240b589ea79294a44a",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/tests/antijoin_static_decline_differential.rs",
+      "recorded_sha256": "47232522f0cd3f82af3c5413f8f1c029a7c91fe7c23fbc5ec0822b66ec618dc0",
+      "current_sha256": "47232522f0cd3f82af3c5413f8f1c029a7c91fe7c23fbc5ec0822b66ec618dc0",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/tests/ask_early_exit.rs",
+      "recorded_sha256": "a597ee98c7c47ffccc055bc81f3bf947106a7d3cef6ae6571863f7c467b7d05d",
+      "current_sha256": "a597ee98c7c47ffccc055bc81f3bf947106a7d3cef6ae6571863f7c467b7d05d",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/tests/cluster_materialize_differential.rs",
+      "recorded_sha256": "7780539e54c8c0ad98d45053a511d3893de24f56b91b754d3f55d67609bce7a2",
+      "current_sha256": "7780539e54c8c0ad98d45053a511d3893de24f56b91b754d3f55d67609bce7a2",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/tests/coverage_gaps.rs",
+      "recorded_sha256": "730883a656a78ade818bf484ca1d1e8d7a1c8e9e94fea4c66cd19e32eefdc9d5",
+      "current_sha256": "730883a656a78ade818bf484ca1d1e8d7a1c8e9e94fea4c66cd19e32eefdc9d5",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/tests/differentials/chunk_select_tri_mask.rs",
+      "recorded_sha256": "1ae55670352c5f459f735c21715d299e93d6d7dc337e0ab425efdb6348ae7ffb",
+      "current_sha256": "1ae55670352c5f459f735c21715d299e93d6d7dc337e0ab425efdb6348ae7ffb",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/tests/differentials/semijoin_differential.rs",
+      "recorded_sha256": "f11f8fece11f82ace45932596d99185f01903cc83aa6ca18a2eb7da5b8b106f4",
+      "current_sha256": "f11f8fece11f82ace45932596d99185f01903cc83aa6ca18a2eb7da5b8b106f4",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/tests/differentials/vectorized_byte_identity.rs",
+      "recorded_sha256": "0384677c40216837dddfa1c8b53761468f8aa2c9b142007049e83a217dfd4a79",
+      "current_sha256": "0384677c40216837dddfa1c8b53761468f8aa2c9b142007049e83a217dfd4a79",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/tests/differentials/vectorized_exec_differential.rs",
+      "recorded_sha256": "14e82a9197ecce71c324f6b9c685262489f4217d0d5449cfc7baa277390aa121",
+      "current_sha256": "14e82a9197ecce71c324f6b9c685262489f4217d0d5449cfc7baa277390aa121",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/tests/differentials/window_inline_over.rs",
+      "recorded_sha256": "e939f2a224580775e44001a4cb7d879b659c100a97a40ebd67994306763e4d67",
+      "current_sha256": "e939f2a224580775e44001a4cb7d879b659c100a97a40ebd67994306763e4d67",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/tests/differentials/yannakakis_differential.rs",
+      "recorded_sha256": "14954102f809db1950e629c7ebf2d3ba0286862145c89ead52eb05508ea5b4fe",
+      "current_sha256": "14954102f809db1950e629c7ebf2d3ba0286862145c89ead52eb05508ea5b4fe",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/tests/differentials/zk_trace_differential.rs",
+      "recorded_sha256": "17da61ad623516aa652f133319174b0fcd4c3f18d4a81598236523ed8b92003c",
+      "current_sha256": "17da61ad623516aa652f133319174b0fcd4c3f18d4a81598236523ed8b92003c",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/tests/differentials/zk_trace_operators.rs",
+      "recorded_sha256": "ecfecd491d019f4df3714bc5d1d8b41e452de1a92d3c4db0d4c13365da9e6c64",
+      "current_sha256": "ecfecd491d019f4df3714bc5d1d8b41e452de1a92d3c4db0d4c13365da9e6c64",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/tests/differentials.rs",
+      "recorded_sha256": "d83882882ca32039d9d679850351f677e681e7ef14edc88e0ac58542260fb116",
+      "current_sha256": "d83882882ca32039d9d679850351f677e681e7ef14edc88e0ac58542260fb116",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/tests/distinct_pushdown.rs",
+      "recorded_sha256": "f1478c0eeed440eff0b67acef5fb0bcc072acd2c94d73e5d3e9625f691fcc5d2",
+      "current_sha256": "f1478c0eeed440eff0b67acef5fb0bcc072acd2c94d73e5d3e9625f691fcc5d2",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/tests/dp_default.rs",
+      "recorded_sha256": "787cd94e0802fc5f6aad24fc95f17d3480f8adb494dd90374103399b80aa6205",
+      "current_sha256": "787cd94e0802fc5f6aad24fc95f17d3480f8adb494dd90374103399b80aa6205",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/tests/eqjoin_value_join.rs",
+      "recorded_sha256": "b9d7ef8dc9be8ac8733016c8605bfb77da8dee9b75970f3e36ef245a9f84668d",
+      "current_sha256": "b9d7ef8dc9be8ac8733016c8605bfb77da8dee9b75970f3e36ef245a9f84668d",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/tests/eval_semantics.rs",
+      "recorded_sha256": "b69401941ba6642a05cde6ef7f1e9a023e38e50087c9877e74b2d590ad746189",
+      "current_sha256": "b69401941ba6642a05cde6ef7f1e9a023e38e50087c9877e74b2d590ad746189",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/tests/federation_features/mvcc_txn.rs",
+      "recorded_sha256": "ed0025a8b28e25cbe039ae3ed1be8edf02344c1ffe804654303a789caafa80da",
+      "current_sha256": "ed0025a8b28e25cbe039ae3ed1be8edf02344c1ffe804654303a789caafa80da",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/tests/federation_features/result_cache.rs",
+      "recorded_sha256": "415e7494353013ca9354904c58a79aa0624893ee6b945fdbf8c9eb81fd0f12c7",
+      "current_sha256": "415e7494353013ca9354904c58a79aa0624893ee6b945fdbf8c9eb81fd0f12c7",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/tests/federation_features/service_bound_join.rs",
+      "recorded_sha256": "12c69ecdb4e88cd7ffa5f7a235367b2df8dd30460946c5e8643dd9bb7ae9a7cf",
+      "current_sha256": "12c69ecdb4e88cd7ffa5f7a235367b2df8dd30460946c5e8643dd9bb7ae9a7cf",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/tests/federation_features/service_federation.rs",
+      "recorded_sha256": "36ec4b33aaacb65e6654c679a6fb73766cea6c311f2a019f8ab76c13cf67cb82",
+      "current_sha256": "36ec4b33aaacb65e6654c679a6fb73766cea6c311f2a019f8ab76c13cf67cb82",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/tests/federation_features/service_local.rs",
+      "recorded_sha256": "122b266dd23b4542216114f872fba8f0c4f1d7688da461f253be24d84f3f417f",
+      "current_sha256": "122b266dd23b4542216114f872fba8f0c4f1d7688da461f253be24d84f3f417f",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/tests/federation_features/service_stream_bounded.rs",
+      "recorded_sha256": "2067395c8e5e35a452edc933fbd4df6b21d5634161bfcfe646e92d93b820a57a",
+      "current_sha256": "2067395c8e5e35a452edc933fbd4df6b21d5634161bfcfe646e92d93b820a57a",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/tests/federation_features.rs",
+      "recorded_sha256": "70a19a36450cd9d391170ac9aa21b810b8b61a75be44e85ed88533a5470f08d6",
+      "current_sha256": "70a19a36450cd9d391170ac9aa21b810b8b61a75be44e85ed88533a5470f08d6",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/tests/orderby_limit_zero.rs",
+      "recorded_sha256": "5cd82a31fbeba10564891fd531d618c166fe83b0e81db3fd8d2cf5efc5928bac",
+      "current_sha256": "5cd82a31fbeba10564891fd531d618c166fe83b0e81db3fd8d2cf5efc5928bac",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/tests/paths_core.rs",
+      "recorded_sha256": "e2f265209b39c689601ab03d76c05194be47389cfeeb5c6cbe0d03cfef941532",
+      "current_sha256": "e2f265209b39c689601ab03d76c05194be47389cfeeb5c6cbe0d03cfef941532",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/tests/paths_endpoints.rs",
+      "recorded_sha256": "fe479385680462997cd215f1e4616272e339a3c861d0f33c6c4106c0eefd0868",
+      "current_sha256": "fe479385680462997cd215f1e4616272e339a3c861d0f33c6c4106c0eefd0868",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/tests/paths_surface.rs",
+      "recorded_sha256": "2bb768e5de506a6427c9e86ab3ad8de46dfce5f1ab5c85211463273f11afebb9",
+      "current_sha256": "2bb768e5de506a6427c9e86ab3ad8de46dfce5f1ab5c85211463273f11afebb9",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/tests/paths_via.rs",
+      "recorded_sha256": "dd95a50f578db5ab4d549efd1c7d6dcfa059c15827bf2206cb09a795e28b2ad9",
+      "current_sha256": "dd95a50f578db5ab4d549efd1c7d6dcfa059c15827bf2206cb09a795e28b2ad9",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/tests/proptest_eval.proptest-regressions",
+      "recorded_sha256": "722352b17c74b38944567abd75e3de6952359e56576f395ddf222f63aa76389d",
+      "current_sha256": "722352b17c74b38944567abd75e3de6952359e56576f395ddf222f63aa76389d",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/tests/proptest_eval.rs",
+      "recorded_sha256": "d27a4858766ef1ccbf8d78cd28cbeb7474cf2216134a410e8f6d91bf523f0fcd",
+      "current_sha256": "d27a4858766ef1ccbf8d78cd28cbeb7474cf2216134a410e8f6d91bf523f0fcd",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/tests/query_features/dataset_view.rs",
+      "recorded_sha256": "fb2b4a178c60540ca6321dd5be3fa02312e2031dd01e0feb1cb1b74a985379d2",
+      "current_sha256": "fb2b4a178c60540ca6321dd5be3fa02312e2031dd01e0feb1cb1b74a985379d2",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/tests/query_features/dp_planner_differential.rs",
+      "recorded_sha256": "b69dcce36251b721cc364880c808089ae985aed472d189541add2d1128430232",
+      "current_sha256": "b69dcce36251b721cc364880c808089ae985aed472d189541add2d1128430232",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/tests/query_features/parse_recursion_depth.rs",
+      "recorded_sha256": "77dd9bc0e728217e9a528ac4d465bfbb6b2e36f9068b9eb1725520a9bcee6828",
+      "current_sha256": "77dd9bc0e728217e9a528ac4d465bfbb6b2e36f9068b9eb1725520a9bcee6828",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/tests/query_features/prepared.rs",
+      "recorded_sha256": "dfd157c58b52b7d127ddb2529b75a342a11916036229af103bb4d7130b821458",
+      "current_sha256": "dfd157c58b52b7d127ddb2529b75a342a11916036229af103bb4d7130b821458",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/tests/query_features/rdfstar_write.rs",
+      "recorded_sha256": "9bea6d57e08541a24d4af0c2c8a56146e205b5ca91f036083b54b3eaa53f42ed",
+      "current_sha256": "9bea6d57e08541a24d4af0c2c8a56146e205b5ca91f036083b54b3eaa53f42ed",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/tests/query_features.rs",
+      "recorded_sha256": "3867675266b864b3fbabe0fbc464b71c6be22b238c00959821030ad4448d3da0",
+      "current_sha256": "3867675266b864b3fbabe0fbc464b71c6be22b238c00959821030ad4448d3da0",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/tests/rewrite_pass.rs",
+      "recorded_sha256": "f50f2b91652d59f1134e227582e2b0b2bd28ae04609912c82b0ec9ca9093e8e9",
+      "current_sha256": "f50f2b91652d59f1134e227582e2b0b2bd28ae04609912c82b0ec9ca9093e8e9",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/tests/sargable_decimal_precision.rs",
+      "recorded_sha256": "6470c75137665f36cb2d68d73188959c16e062704ef9a57ead2436c01df168f6",
+      "current_sha256": "6470c75137665f36cb2d68d73188959c16e062704ef9a57ead2436c01df168f6",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/tests/sip_join.rs",
+      "recorded_sha256": "6630341a8b7cff9c54436065b9fd9552c30d21bdb42073cc62656912589a5214",
+      "current_sha256": "6630341a8b7cff9c54436065b9fd9552c30d21bdb42073cc62656912589a5214",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/tests/spatial_exact_pushdown.rs",
+      "recorded_sha256": "9ded83f538e832c6a66d065c8ed888f2a1edda672bc7042a0feb364bb681ac5d",
+      "current_sha256": "9ded83f538e832c6a66d065c8ed888f2a1edda672bc7042a0feb364bb681ac5d",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/tests/storage/compressed_build_differential.rs",
+      "recorded_sha256": "d3c5df09fa5caf2fc85355a18df867e5a66180282f6623191535b065011f5f33",
+      "current_sha256": "d3c5df09fa5caf2fc85355a18df867e5a66180282f6623191535b065011f5f33",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/tests/storage/dict_consolidation_differential.rs",
+      "recorded_sha256": "55f66afe669ff7e7ab7a24afd41ab60f681f5d38390f1b373f221937c365cdb7",
+      "current_sha256": "55f66afe669ff7e7ab7a24afd41ab60f681f5d38390f1b373f221937c365cdb7",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/tests/storage/dict_spill_differential.rs",
+      "recorded_sha256": "0af05d290c431222e8dec0c5125dd72a1388a14d1af3e598683571a89a23e06a",
+      "current_sha256": "0af05d290c431222e8dec0c5125dd72a1388a14d1af3e598683571a89a23e06a",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/tests/storage/flat_read_bench.rs",
+      "recorded_sha256": "214c3d066ee0fec534ae3b78c765a450e362dc02eaa14594c94a5dd4a0e4bc63",
+      "current_sha256": "214c3d066ee0fec534ae3b78c765a450e362dc02eaa14594c94a5dd4a0e4bc63",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/tests/storage/fork_generations.rs",
+      "recorded_sha256": "7334c78425a5ffd30744481f00f3803f25a8153c10a251cf4be82b342cc87dac",
+      "current_sha256": "7334c78425a5ffd30744481f00f3803f25a8153c10a251cf4be82b342cc87dac",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/tests/storage/named_graph_durable_clear_drop.rs",
+      "recorded_sha256": "4c19652bd9fab904991aa2757c1a34bd11841b4e282f76d6c9aeeaa676844d1b",
+      "current_sha256": "4c19652bd9fab904991aa2757c1a34bd11841b4e282f76d6c9aeeaa676844d1b",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/tests/storage/named_graph_persistence.rs",
+      "recorded_sha256": "47a564884b9389b60fa450d5936bb892fdae7d4df2a6c6b07d65fa2206c52112",
+      "current_sha256": "47a564884b9389b60fa450d5936bb892fdae7d4df2a6c6b07d65fa2206c52112",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/tests/storage.rs",
+      "recorded_sha256": "cb06de02da601633684cdde3332a902ee138798a75b8609b6e2818ed5e12e473",
+      "current_sha256": "cb06de02da601633684cdde3332a902ee138798a75b8609b6e2818ed5e12e473",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/tests/stream_pipeline_equivalence.rs",
+      "recorded_sha256": "c2ac5eaab185322e7c7930c7a3158ef1846445f5b21b27c86ce726abcac97fc3",
+      "current_sha256": "c2ac5eaab185322e7c7930c7a3158ef1846445f5b21b27c86ce726abcac97fc3",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/tests/theta_antijoin.rs",
+      "recorded_sha256": "8d8ad01645bfd33c9dfdc2abb14ccb95c3da1b252ace3754eac95fbcba5898d1",
+      "current_sha256": "8d8ad01645bfd33c9dfdc2abb14ccb95c3da1b252ace3754eac95fbcba5898d1",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/tests/topk_orderby.rs",
+      "recorded_sha256": "0dc63b1b6627a100116670b8db8677c1aa8d75d92ab4bb1090941cc776ffe379",
+      "current_sha256": "0dc63b1b6627a100116670b8db8677c1aa8d75d92ab4bb1090941cc776ffe379",
+      "equal": true
+    },
+    {
+      "path": "crates/sparq-engine/tests/txn_concurrency.rs",
+      "recorded_sha256": "7bf5173574ea946062718bb82078642c43398c20ed88a1a1e4e5d23c74dda803",
+      "current_sha256": "7bf5173574ea946062718bb82078642c43398c20ed88a1a1e4e5d23c74dda803",
+      "equal": true
+    }
+  ],
+  "selected_sources": [
+    {
+      "path": "crates/sparq-engine/src/lib.rs",
+      "sha256": "074740149d0649b0334d1814ca289feaad54070ca0d90bf5737601f7021a7538"
+    },
+    {
+      "path": "crates/sparq-engine/src/exec.rs",
+      "sha256": "10090299f707dbf4adb4cae6349bd390a06ed2a50645e8c3417bcc3b90fb20af"
+    },
+    {
+      "path": "crates/sparq-engine/src/explain.rs",
+      "sha256": "953c36345e5e54a99b04478a2515b4ea2ba06cdd6ebffe9f376153e1ef0bffd4"
+    },
+    {
+      "path": "crates/sparq-engine/src/explain_json.rs",
+      "sha256": "59951ec3db080ec591697398e89586b1d29e5d6377883bfa1a3400efc807470d"
+    },
+    {
+      "path": "crates/sparq-engine/src/cache.rs",
+      "sha256": "ce140e15be0ad8f72584dccca0d33eb93acc526756f8cb1a2ec69e872c4da62e"
+    },
+    {
+      "path": "crates/sparq-engine/Cargo.toml",
+      "sha256": "ab9734674fb46fcf5ad91415cff14f2552d4bc9e6a5f2994ca2e0905e2b99bc2"
+    },
+    {
+      "path": "Cargo.toml",
+      "sha256": "9f820551d15c1430a25172c831f491fb7fd92231c15f124b2a048b1137d8ce73"
+    },
+    {
+      "path": "rust-toolchain.toml",
+      "sha256": "7f22197dc4df197f236ad2f0d4668814a47a831a6dbd398efcfd1d5f47a43c37"
+    }
+  ]
+}

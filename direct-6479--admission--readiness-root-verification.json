@@ -1,0 +1,9 @@
+{
+  "at": "2026-09-10T19:23:26.574190+00:00",
+  "manifest_sha256": "4523e519a63d260ccc2d261949ac5d8dc948bf9fdebe99cea8409e59efeee395",
+  "verified_files": 8,
+  "packet_sha256": "3f07e09862ebb6061cbd5b41d952e60c34d736374ce49beb1a3c04b77739043d",
+  "main": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+  "runtime": "pending",
+  "source_only": true
+}

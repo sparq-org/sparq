@@ -1,0 +1,629 @@
+
+## crates/sparq-engine/src/lib.rs:327-407
+327: }
+328: 
+329: /// An extension function: concrete RDF terms in, one concrete RDF term out.
+330: ///
+331: /// Arguments arrive fully materialised (computed numerics/booleans as their typed
+332: /// literals). Returning `Err` is a SPARQL *expression* error — the row is filtered
+333: /// by a `FILTER`, left unbound by a `BIND` — never a hard query error, matching how
+334: /// the builtin functions report bad arguments (wrong arity, unparsable lexicals, …).
+335: /// The message itself is discarded, so it only needs to be useful to a human
+336: /// debugging the extension.
+337: pub type ExtFn = std::sync::Arc<dyn Fn(&[Term]) -> Result<Term, String> + Send + Sync>;
+338: 
+339: /// A map from function IRIs to [`ExtFn`]s, consulted by the evaluator for
+340: /// `Function::Custom` IRIs that are not XSD constructor casts (SPARQL 17.6,
+341: /// extensible value testing). Installed per query by [`query_with_functions`] /
+342: /// [`with_functions`]; the registry-free entry points never consult it, so they
+343: /// keep their exact pre-registry behaviour (an unknown custom IRI is a hard
+344: /// "unsupported SPARQL function" error) and hot-path cost.
+345: ///
+346: /// Cloning is cheap (the functions are `Arc`-shared), so a long-lived registry can
+347: /// be built once and reused across queries and threads.
+348: #[derive(Clone, Default)]
+349: pub struct FunctionRegistry {
+350:     map: std::collections::HashMap<String, ExtFn>,
+351: }
+352: 
+353: impl FunctionRegistry {
+354:     pub fn new() -> Self {
+355:         Self::default()
+356:     }
+357: 
+358:     /// Registers `f` under the function IRI (replacing any previous registration).
+359:     pub fn register(
+360:         &mut self,
+361:         iri: impl Into<String>,
+362:         f: impl Fn(&[Term]) -> Result<Term, String> + Send + Sync + 'static,
+363:     ) {
+364:         self.map.insert(iri.into(), std::sync::Arc::new(f));
+365:     }
+366: 
+367:     /// The function registered under `iri`, if any.
+368:     pub fn get(&self, iri: &str) -> Option<&ExtFn> {
+369:         self.map.get(iri)
+370:     }
+371: 
+372:     /// [OPUS-4.8] sq-qfcb: iterates the IRIs of every registered extension function
+373:     /// (unspecified order). Lets a caller advertise EXACTLY the functions actually
+374:     /// installed (e.g. the SPARQL Service Description's `sd:extensionFunction`) without
+375:     /// hand-maintaining a parallel list that could drift from the registry.
+376:     pub fn iris(&self) -> impl Iterator<Item = &str> {
+377:         self.map.keys().map(String::as_str)
+378:     }
+379: 
+380:     pub fn len(&self) -> usize {
+381:         self.map.len()
+382:     }
+383: 
+384:     pub fn is_empty(&self) -> bool {
+385:         self.map.is_empty()
+386:     }
+387: }
+388: 
+389: /// Runs `f` with `fns` installed as the active extension-function registry — the
+390: /// scoped form behind [`query_with_functions`], for callers that need one of the
+391: /// OTHER entry points (`ask`, `query_json_chunks_with_budget`, `construct`, …) to
+392: /// see the registry:
+393: ///
+394: /// ```ignore
+395: /// let chunks = with_functions(&reg, || query_json_chunks_with_budget(&g, q, &budget))?;
+396: /// ```
+397: ///
+398: /// The registry is visible to every query the closure runs on this thread (it is
+399: /// installed thread-locally and propagated into the engine's rayon workers), and
+400: /// uninstalled when the closure returns.
+401: pub fn with_functions<T>(fns: &FunctionRegistry, f: impl FnOnce() -> T) -> T {
+402:     let _guard = exec::functions::install(fns);
+403:     f()
+404: }
+405: 
+406: // ---- Local rows-returning SERVICE handlers (sq-lsp7k.2.2) --------------------
+407: //
+
+## crates/sparq-engine/src/lib.rs:694-711
+694: 
+695: /// [`query`] with an extension-function registry: `Function::Custom` IRIs that are
+696: /// not XSD constructor casts are dispatched to `fns` (SPARQL 17.6). An IRI absent
+697: /// from the registry remains the same hard error the registry-free entry points
+698: /// raise.
+699: pub fn query_with_functions(graph: &Graph, sparql: &str, fns: &FunctionRegistry) -> Result<QueryResult, String> {
+700:     query_with_functions_and_budget(graph, sparql, fns, &QueryBudget::unlimited())
+701: }
+702: 
+703: /// [`query_with_functions`] under a cooperative [`QueryBudget`].
+704: pub fn query_with_functions_and_budget(
+705:     graph: &Graph,
+706:     sparql: &str,
+707:     fns: &FunctionRegistry,
+708:     budget: &QueryBudget,
+709: ) -> Result<QueryResult, String> {
+710:     with_functions(fns, || query_with_budget(graph, sparql, budget))
+711: }
+
+## crates/sparq-engine/src/lib.rs:1016-1125
+1016: /// Executes a SPARQL query string against a graph, materialising the solutions.
+1017: pub fn query(graph: &Graph, sparql: &str) -> Result<QueryResult, String> {
+1018:     query_with_budget(graph, sparql, &QueryBudget::unlimited())
+1019: }
+1020: 
+1021: /// [`query`] under a cooperative [`QueryBudget`] (deadline / max result rows).
+1022: pub fn query_with_budget(graph: &Graph, sparql: &str, budget: &QueryBudget) -> Result<QueryResult, String> {
+1023:     query_prepared_with_budget(graph, &PreparedQuery::parse(sparql)?, budget)
+1024: }
+1025: 
+1026: /// [`query`] over a [`PreparedQuery`] — no per-execution parse.
+1027: pub fn query_prepared(graph: &Graph, prepared: &PreparedQuery) -> Result<QueryResult, String> {
+1028:     query_prepared_with_budget(graph, prepared, &QueryBudget::unlimited())
+1029: }
+1030: 
+1031: /// [`query_prepared`] under a cooperative [`QueryBudget`] (deadline / max result rows).
+1032: pub fn query_prepared_with_budget(
+1033:     graph: &Graph,
+1034:     prepared: &PreparedQuery,
+1035:     budget: &QueryBudget,
+1036: ) -> Result<QueryResult, String> {
+1037:     let q = &prepared.query;
+1038:     let active = active_dataset(graph, q);
+1039:     let graph = active.as_ref().unwrap_or(graph);
+1040:     let _view_scope = view_scope(&active);
+1041:     exec::budget::with_budget(budget, || {
+1042:         exec::set_query_base(q.base_iri().map(|b| b.as_str()));
+1043:         match q {
+1044:             Query::Select { pattern, .. } => exec::eval_select(graph, pattern),
+1045:             // ASK as a QueryResult: zero variables, and one (empty) row iff the pattern
+1046:             // is satisfiable — the standard "unit row" encoding of a boolean result.
+1047:             Query::Ask { pattern, .. } => Ok(QueryResult {
+1048:                 vars: Vec::new(),
+1049:                 rows: if exec::eval_ask(graph, pattern)? { vec![Vec::new()] } else { Vec::new() },
+1050:             }),
+1051:             _ => Err("only SELECT and ASK queries are supported".into()),
+1052:         }
+1053:     })
+1054: }
+1055: 
+1056: /// Executes an ASK query: `true` iff the pattern has at least one solution.
+1057: /// Evaluation early-exits where the engine has a streaming path (the pattern is
+1058: /// evaluated under a `LIMIT 1`).
+1059: pub fn ask(graph: &Graph, sparql: &str) -> Result<bool, String> {
+1060:     ask_with_budget(graph, sparql, &QueryBudget::unlimited())
+1061: }
+1062: 
+1063: /// [`ask`] under a cooperative [`QueryBudget`] (deadline / max result rows).
+1064: pub fn ask_with_budget(graph: &Graph, sparql: &str, budget: &QueryBudget) -> Result<bool, String> {
+1065:     ask_prepared_with_budget(graph, &PreparedQuery::parse(sparql)?, budget)
+1066: }
+1067: 
+1068: /// [`ask`] over a [`PreparedQuery`] — no per-execution parse.
+1069: pub fn ask_prepared(graph: &Graph, prepared: &PreparedQuery) -> Result<bool, String> {
+1070:     ask_prepared_with_budget(graph, prepared, &QueryBudget::unlimited())
+1071: }
+1072: 
+1073: /// [`ask_prepared`] under a cooperative [`QueryBudget`] (deadline / max result rows).
+1074: pub fn ask_prepared_with_budget(graph: &Graph, prepared: &PreparedQuery, budget: &QueryBudget) -> Result<bool, String> {
+1075:     let q = &prepared.query;
+1076:     let active = active_dataset(graph, q);
+1077:     let graph = active.as_ref().unwrap_or(graph);
+1078:     let _view_scope = view_scope(&active);
+1079:     exec::budget::with_budget(budget, || {
+1080:         exec::set_query_base(q.base_iri().map(|b| b.as_str()));
+1081:         match q {
+1082:             Query::Ask { pattern, .. } => exec::eval_ask(graph, pattern),
+1083:             _ => Err("ask() requires an ASK query".into()),
+1084:         }
+1085:     })
+1086: }
+1087: 
+1088: /// Executes a SELECT and serialises it directly to a SPARQL 1.1 JSON results string,
+1089: /// skipping the intermediate `QueryResult` and its per-cell `oxrdf::Term` allocation
+1090: /// (the dictionary case is formatted straight from the stored prefix/suffix). This is
+1091: /// the fast path for the actual end-use — returning results to the CLI / browser.
+1092: pub fn query_json(graph: &Graph, sparql: &str) -> Result<String, String> {
+1093:     query_json_with_budget(graph, sparql, &QueryBudget::unlimited())
+1094: }
+1095: 
+1096: /// [`query_json`] under a cooperative [`QueryBudget`] (deadline / max result rows).
+1097: pub fn query_json_with_budget(graph: &Graph, sparql: &str, budget: &QueryBudget) -> Result<String, String> {
+1098:     query_json_prepared_with_budget(graph, &PreparedQuery::parse(sparql)?, budget)
+1099: }
+1100: 
+1101: /// [`query_json`] over a [`PreparedQuery`] — no per-execution parse.
+1102: pub fn query_json_prepared(graph: &Graph, prepared: &PreparedQuery) -> Result<String, String> {
+1103:     query_json_prepared_with_budget(graph, prepared, &QueryBudget::unlimited())
+1104: }
+1105: 
+1106: /// [`query_json_prepared`] under a cooperative [`QueryBudget`].
+1107: pub fn query_json_prepared_with_budget(
+1108:     graph: &Graph,
+1109:     prepared: &PreparedQuery,
+1110:     budget: &QueryBudget,
+1111: ) -> Result<String, String> {
+1112:     let q = &prepared.query;
+1113:     let active = active_dataset(graph, q);
+1114:     let graph = active.as_ref().unwrap_or(graph);
+1115:     let _view_scope = view_scope(&active);
+1116:     exec::budget::with_budget(budget, || {
+1117:         exec::set_query_base(q.base_iri().map(|b| b.as_str()));
+1118:         match q {
+1119:             Query::Select { pattern, .. } => exec::eval_select_json(graph, pattern),
+1120:             // The SPARQL 1.1 JSON results boolean form.
+1121:             Query::Ask { pattern, .. } => Ok(format!("{{\"head\":{{}},\"boolean\":{}}}", exec::eval_ask(graph, pattern)?)),
+1122:             _ => Err("only SELECT and ASK queries are supported".into()),
+1123:         }
+1124:     })
+1125: }
+
+## crates/sparq-engine/src/lib.rs:1133-1155
+1133: /// **byte-identical** to the single-string result — the server streams these as one
+1134: /// HTTP body instead of concatenating a giant `String` (T16), which removes the
+1135: /// second whole-result copy from peak memory on large SELECTs.
+1136: pub fn query_json_chunks_with_budget(graph: &Graph, sparql: &str, budget: &QueryBudget) -> Result<Vec<String>, String> {
+1137:     let prepared = PreparedQuery::parse(sparql)?;
+1138:     let q = &prepared.query;
+1139:     let active = active_dataset(graph, q);
+1140:     let graph = active.as_ref().unwrap_or(graph);
+1141:     let _view_scope = view_scope(&active);
+1142:     exec::budget::with_budget(budget, || {
+1143:         exec::set_query_base(q.base_iri().map(|b| b.as_str()));
+1144:         match q {
+1145:             Query::Select { pattern, .. } => exec::eval_select_json_chunks(graph, pattern, Some(JSON_CHUNK_BYTES)),
+1146:             Query::Ask { pattern, .. } => {
+1147:                 Ok(vec![format!("{{\"head\":{{}},\"boolean\":{}}}", exec::eval_ask(graph, pattern)?)])
+1148:             }
+1149:             _ => Err("only SELECT and ASK queries are supported".into()),
+1150:         }
+1151:     })
+1152: }
+1153: 
+1154: /// Streams the SPARQL-JSON serialisation of a SELECT (or ASK) result, invoking `sink` for
+1155: /// each serialised chunk **as it is produced** rather than materialising the whole
+
+## crates/sparq-engine/src/lib.rs:1185-1208
+1185: /// re-parsing the query string — the per-request parse is paid exactly once, not twice. The
+1186: /// concatenation of the chunks handed to `sink` is byte-identical to
+1187: /// [`query_json_stream_with_budget`] for the same query and budget.
+1188: pub fn query_json_stream_prepared_with_budget(
+1189:     graph: &Graph,
+1190:     prepared: &PreparedQuery,
+1191:     budget: &QueryBudget,
+1192:     mut sink: impl FnMut(String) -> std::ops::ControlFlow<()>,
+1193: ) -> Result<(), String> {
+1194:     let q = &prepared.query;
+1195:     let active = active_dataset(graph, q);
+1196:     let graph = active.as_ref().unwrap_or(graph);
+1197:     let _view_scope = view_scope(&active);
+1198:     exec::budget::with_budget(budget, || {
+1199:         exec::set_query_base(q.base_iri().map(|b| b.as_str()));
+1200:         match q {
+1201:             Query::Select { pattern, .. } => {
+1202:                 exec::eval_select_json_emit(graph, pattern, Some(JSON_CHUNK_BYTES), &mut sink)
+1203:             }
+1204:             Query::Ask { pattern, .. } => {
+1205:                 let doc = format!("{{\"head\":{{}},\"boolean\":{}}}", exec::eval_ask(graph, pattern)?);
+1206:                 let _ = sink(doc);
+1207:                 Ok(())
+1208:             }
+
+## crates/sparq-engine/src/lib.rs:1210-1249
+1210:         }
+1211:     })
+1212: }
+1213: 
+1214: /// Counts the solutions of a SELECT query *without* materialising the result
+1215: /// terms (the id-level row count equals the solution count). Used to measure
+1216: /// engine compute in isolation from result serialisation.
+1217: pub fn count(graph: &Graph, sparql: &str) -> Result<usize, String> {
+1218:     count_with_budget(graph, sparql, &QueryBudget::unlimited())
+1219: }
+1220: 
+1221: /// [`count`] under a cooperative [`QueryBudget`] (the server's budgeted ASK path).
+1222: pub fn count_with_budget(graph: &Graph, sparql: &str, budget: &QueryBudget) -> Result<usize, String> {
+1223:     count_prepared_with_budget(graph, &PreparedQuery::parse(sparql)?, budget)
+1224: }
+1225: 
+1226: /// [`count`] over a [`PreparedQuery`] — no per-execution parse.
+1227: pub fn count_prepared(graph: &Graph, prepared: &PreparedQuery) -> Result<usize, String> {
+1228:     count_prepared_with_budget(graph, prepared, &QueryBudget::unlimited())
+1229: }
+1230: 
+1231: /// [`count_prepared`] under a cooperative [`QueryBudget`].
+1232: pub fn count_prepared_with_budget(graph: &Graph, prepared: &PreparedQuery, budget: &QueryBudget) -> Result<usize, String> {
+1233:     let q = &prepared.query;
+1234:     let active = active_dataset(graph, q);
+1235:     let graph = active.as_ref().unwrap_or(graph);
+1236:     let _view_scope = view_scope(&active);
+1237:     exec::budget::with_budget(budget, || {
+1238:         exec::set_query_base(q.base_iri().map(|b| b.as_str()));
+1239:         match q {
+1240:             Query::Select { pattern, .. } => exec::count_select(graph, pattern),
+1241:             // An ASK counts its unit row: 1 when satisfiable, 0 otherwise.
+1242:             Query::Ask { pattern, .. } => Ok(usize::from(exec::eval_ask(graph, pattern)?)),
+1243:             _ => Err("only SELECT and ASK queries are supported".into()),
+1244:         }
+1245:     })
+1246: }
+1247: 
+1248: #[derive(Debug)]
+1249: pub struct QueryResult {
+
+## crates/sparq-engine/src/exec.rs:14236-14248
+14236:         // `ENCODE_FOR_URI(123)` to the simple literal "123".
+14237:         F::EncodeForUri => str_lit(&ev(0)?).map(|(s, _)| simple(encode_for_uri(&s))).unwrap_or(Value::Error),
+14238:         F::Iri => match ev(0)? {
+14239:             // An IRI argument passes through unchanged.
+14240:             Value::Term(Term::NamedNode(n)) => Value::Term(Term::NamedNode(n)),
+14241:             v => match str_lit(&v) {
+14242:                 // String literal: absolute IRIs pass; relative ones resolve against BASE.
+14243:                 Some((s, None)) => resolve_iri(&s).map(|n| Value::Term(Term::NamedNode(n))).unwrap_or(Value::Error),
+14244:                 _ => Value::Error,
+14245:             },
+14246:         },
+14247:         // [FABLE-5] (sq-qeltv) The type-test builtins take an RDF TERM: an unbound (or
+14248:         // already-errored) operand is a TYPE ERROR per SPARQL 1.1 §17.2 — so
+
+## crates/sparq-engine/src/exec.rs:14490-14539
+14490:         // XSD constructor casts: xsd:integer(?x), xsd:decimal(?x), … (SPARQL 17.5),
+14491:         // then the installed extension-function registry (SPARQL 17.6; see
+14492:         // `query_with_functions` / `with_functions` in lib.rs). An IRI that is
+14493:         // neither stays the same hard query error as before the registry existed.
+14494:         F::Custom(nn) => {
+14495:             // [OPUS-4.8] (sq-v411r, survey §B2) MULTIPLICITY(): the SPARQL 1.2 algebra's
+14496:             // `multiplicity` device, parsed as the reserved-IRI `Function::Custom` so the
+14497:             // shared enum stays byte-compatible downstream. Inside an aggregate argument it
+14498:             // is the bag cardinality (`xsd:integer`) of the current group member's solution
+14499:             // within its group multiset, so `SUM(?x * MULTIPLICITY())` is the multiset-
+14500:             // weighted sum. The evaluator installs the per-member value before each
+14501:             // `eval_expr`; OUTSIDE an aggregate the context is absent and the call is an
+14502:             // expression error (only meaningful over a multiset). Checked BEFORE the cast /
+14503:             // registry so the reserved IRI can never be shadowed. NOT a W3C-standard
+14504:             // callable builtin — see the README.
+14505:             if nargs == 0 && nn.as_str() == MULTIPLICITY_FN_IRI {
+14506:                 return Ok(match multiplicity::current() {
+14507:                     Some(card) => Value::Num(Num::Int(card as i64)),
+14508:                     None => Value::Error,
+14509:                 });
+14510:             }
+14511:             let mut vals = Vec::with_capacity(nargs);
+14512:             for i in 0..nargs {
+14513:                 vals.push(ev(i)?);
+14514:             }
+14515:             if vals.len() == 1 {
+14516:                 if let Some(out) = eval_cast(nn.as_str(), &vals[0]) {
+14517:                     return Ok(out);
+14518:                 }
+14519:             }
+14520:             if let Some(f) = functions::lookup(nn.as_str()) {
+14521:                 // Arguments are materialised as concrete RDF terms; an unbound or
+14522:                 // errored argument is an expression ERROR (row filtered / BIND
+14523:                 // unbound), exactly like the builtins. The extension returning
+14524:                 // `Err` (wrong arity, bad lexical, …) is the same expression
+14525:                 // error — per-row, never a hard query error.
+14526:                 let mut terms = Vec::with_capacity(vals.len());
+14527:                 for v in &vals {
+14528:                     match value_as_term(v) {
+14529:                         Some(t) => terms.push(t),
+14530:                         None => return Ok(Value::Error),
+14531:                     }
+14532:                 }
+14533:                 return Ok(match f(&terms) {
+14534:                     Ok(t) => Value::Term(t),
+14535:                     Err(_) => Value::Error,
+14536:                 });
+14537:             }
+14538:             return Err(format!("unsupported SPARQL function: Custom({})", nn.as_str()));
+14539:         }
+
+## crates/sparq-engine/src/exec.rs:15023-15048
+15023: thread_local! {
+15024:     /// The query's BASE IRI (when declared), used by IRI()/URI() to resolve relative
+15025:     /// references. Set by the `lib.rs` query entry points after parsing.
+15026:     static QUERY_BASE: std::cell::RefCell<Option<oxiri::Iri<String>>> = const { std::cell::RefCell::new(None) };
+15027: }
+15028: 
+15029: /// Installs the active query's base IRI for expression evaluation (IRI()/URI()
+15030: /// relative-reference resolution). Called by the query entry points; `None` clears it.
+15031: pub(crate) fn set_query_base(base: Option<&str>) {
+15032:     QUERY_BASE.with(|b| *b.borrow_mut() = base.and_then(|s| oxiri::Iri::parse(s.to_string()).ok()));
+15033: }
+15034: 
+15035: /// `IRI(str)`: absolute IRIs pass through; relative references resolve against the
+15036: /// query's BASE (a relative reference without a base is a type error).
+15037: fn resolve_iri(s: &str) -> Option<oxrdf::NamedNode> {
+15038:     if let Ok(abs) = oxiri::Iri::parse(s.to_string()) {
+15039:         return Some(oxrdf::NamedNode::new_unchecked(abs.into_inner()));
+15040:     }
+15041:     QUERY_BASE.with(|b| {
+15042:         b.borrow()
+15043:             .as_ref()
+15044:             .and_then(|base| base.resolve(s).ok())
+15045:             .map(|iri| oxrdf::NamedNode::new_unchecked(iri.into_inner()))
+15046:     })
+15047: }
+15048: 
+
+## crates/sparq-engine/src/explain.rs:39-119
+39: 
+40: /// Renders the query's algebra and the physical plan the engine would choose —
+41: /// join order with cardinality estimates, per-step join strategy, pushed-down
+42: /// filters — WITHOUT executing the query (a planning-only dry run; see the
+43: /// module docs for the one runtime-dependent caveat).
+44: pub fn explain(graph: &Graph, sparql: &str) -> Result<String, String> {
+45:     let q = SparqlParser::new().parse_query(sparql).map_err(|e| e.to_string())?;
+46:     // [OPUS-4.8] (sq-7d3dj.30.1) EXPLAIN the ACTUAL executed plan: apply the same
+47:     // pre-execution algebra rewrite `PreparedQuery::parse` does (feature-gated).
+48:     #[cfg(feature = "algebra-rewrite")]
+49:     let q = crate::rewrite::rewrite_query(q);
+50:     let active = crate::active_dataset(graph, &q);
+51:     let graph = active.as_ref().unwrap_or(graph);
+52:     let _view_scope = crate::view_scope(&active);
+53:     exec::set_query_base(q.base_iri().map(|b| b.as_str()));
+54:     let (form, pattern) = query_form_pattern(&q);
+55:     let mut out = String::new();
+56:     let _ = writeln!(out, "EXPLAIN ({form}) — planning-only dry run; nothing is executed.");
+57:     let _ = writeln!(
+58:         out,
+59:         "Cardinalities are index-range estimates; join strategies marked (predicted) depend on actual row counts at run time."
+60:     );
+61:     let _ = writeln!(out, "Plan:");
+62:     render_pattern(graph, pattern, &mut out, 1)?;
+63:     Ok(out)
+64: }
+65: 
+66: /// [`explain`] + actual execution (SELECT and ASK): appends a per-operator
+67: /// execution trace — output rows and wall time per operator — plus totals.
+68: pub fn explain_analyze(graph: &Graph, sparql: &str) -> Result<String, String> {
+69:     explain_analyze_with_budget(graph, sparql, &QueryBudget::unlimited())
+70: }
+71: 
+72: /// [`explain_analyze`] under a cooperative [`QueryBudget`] (deadline / max rows).
+73: pub fn explain_analyze_with_budget(graph: &Graph, sparql: &str, budget: &QueryBudget) -> Result<String, String> {
+74:     let q = SparqlParser::new().parse_query(sparql).map_err(|e| e.to_string())?;
+75:     // [OPUS-4.8] (sq-7d3dj.30.1) ANALYZE the ACTUAL executed plan (feature-gated rewrite).
+76:     #[cfg(feature = "algebra-rewrite")]
+77:     let q = crate::rewrite::rewrite_query(q);
+78:     let active = crate::active_dataset(graph, &q);
+79:     let graph = active.as_ref().unwrap_or(graph);
+80:     let _view_scope = crate::view_scope(&active);
+81:     exec::set_query_base(q.base_iri().map(|b| b.as_str()));
+82:     let (form, pattern) = query_form_pattern(&q);
+83:     if !matches!(q, Query::Select { .. } | Query::Ask { .. }) {
+84:         return Err("EXPLAIN ANALYZE supports SELECT and ASK queries only (use EXPLAIN for CONSTRUCT/DESCRIBE)".into());
+85:     }
+86: 
+87:     let mut out = String::new();
+88:     let _ = writeln!(out, "EXPLAIN ANALYZE ({form}) — plan below, then the per-operator execution trace.");
+89:     let _ = writeln!(out, "Plan:");
+90:     render_pattern(graph, pattern, &mut out, 1)?;
+91: 
+92:     // Execute under the budget with the operator trace installed.
+93:     exec::budget::with_budget(budget, || {
+94:         let _tguard = exec::trace::install();
+95:         #[cfg(not(target_arch = "wasm32"))]
+96:         let start = std::time::Instant::now();
+97:         let total_rows = match &q {
+98:             Query::Select { pattern, .. } => exec::eval_select(graph, pattern)?.rows.len(),
+99:             Query::Ask { pattern, .. } => usize::from(exec::eval_ask(graph, pattern)?),
+100:             _ => unreachable!(),
+101:         };
+102:         #[cfg(not(target_arch = "wasm32"))]
+103:         let total_nanos = start.elapsed().as_nanos() as u64;
+104:         #[cfg(target_arch = "wasm32")]
+105:         let total_nanos = 0u64;
+106:         let nodes = exec::trace::take();
+107: 
+108:         let _ = writeln!(out, "Execution trace (operator → output rows, wall time):");
+109:         for n in &nodes {
+110:             let _ = writeln!(out, "{}{}  rows={}  time={}", indent(n.depth + 1), n.label, n.rows, fmt_nanos(n.nanos));
+111:         }
+112:         let _ = writeln!(out, "Total: {} result row(s) in {}", total_rows, fmt_nanos(total_nanos));
+113:         Ok(out)
+114:     })
+115: }
+116: 
+117: fn query_form_pattern(q: &Query) -> (&'static str, &GraphPattern) {
+118:     match q {
+119:         Query::Select { pattern, .. } => ("SELECT", pattern),
+
+## crates/sparq-engine/src/explain_json.rs:185-235
+185: /// Builds a planning-only structured plan tree (a dry run — nothing is executed,
+186: /// so every node's `actual` / `nanos` / `q_error` is `None`). Mirrors
+187: /// [`crate::explain`] but returns a typed [`PlanNode`] instead of text.
+188: ///
+189: /// Supports SELECT / ASK / CONSTRUCT / DESCRIBE (every query form, like the text
+190: /// `explain`). Returns `Err` for a malformed query.
+191: pub fn explain_plan(graph: &Graph, sparql: &str) -> Result<PlanNode, String> {
+192:     let q = SparqlParser::new().parse_query(sparql).map_err(|e| e.to_string())?;
+193:     let active = crate::active_dataset(graph, &q);
+194:     let graph = active.as_ref().unwrap_or(graph);
+195:     let _view_scope = crate::view_scope(&active);
+196:     exec::set_query_base(q.base_iri().map(|b| b.as_str()));
+197:     let pattern = query_pattern(&q);
+198:     Ok(plan_from_pattern(graph, pattern))
+199: }
+200: 
+201: /// Builds a structured plan tree AND executes the query (SELECT / ASK only),
+202: /// filling in each node's `actual` output rows, wall `nanos`, and per-operator
+203: /// `q_error`. The ANALYZE analogue of [`explain_plan`]; mirrors
+204: /// [`crate::explain_analyze`] but returns a typed [`PlanNode`].
+205: pub fn explain_plan_analyze(graph: &Graph, sparql: &str) -> Result<PlanNode, String> {
+206:     explain_plan_analyze_with_budget(graph, sparql, &QueryBudget::unlimited())
+207: }
+208: 
+209: /// [`explain_plan_analyze`] under a cooperative [`QueryBudget`] (deadline / max rows).
+210: pub fn explain_plan_analyze_with_budget(graph: &Graph, sparql: &str, budget: &QueryBudget) -> Result<PlanNode, String> {
+211:     let q = SparqlParser::new().parse_query(sparql).map_err(|e| e.to_string())?;
+212:     let active = crate::active_dataset(graph, &q);
+213:     let graph = active.as_ref().unwrap_or(graph);
+214:     let _view_scope = crate::view_scope(&active);
+215:     exec::set_query_base(q.base_iri().map(|b| b.as_str()));
+216:     if !matches!(q, Query::Select { .. } | Query::Ask { .. }) {
+217:         return Err("EXPLAIN ANALYZE supports SELECT and ASK queries only (use explain_plan for CONSTRUCT/DESCRIBE)".into());
+218:     }
+219: 
+220:     // Execute under the budget with the operator trace installed (exactly as the
+221:     // text `explain_analyze` does), then reconstruct the typed tree from the trace.
+222:     exec::budget::with_budget(budget, || {
+223:         let _tguard = exec::trace::install();
+224:         match &q {
+225:             Query::Select { pattern, .. } => {
+226:                 exec::eval_select(graph, pattern)?;
+227:             }
+228:             Query::Ask { pattern, .. } => {
+229:                 exec::eval_ask(graph, pattern)?;
+230:             }
+231:             _ => unreachable!(),
+232:         }
+233:         let nodes = exec::trace::take();
+234:         tree_from_trace(&nodes).ok_or_else(|| "empty execution trace".to_string())
+235:     })
+
+## crates/sparq-engine/src/cache.rs:272-325
+272:         &self,
+273:         graph: &sparq_core::Graph,
+274:         query: &Query,
+275:         version: u64,
+276:         budget: &QueryBudget,
+277:     ) -> Result<Arc<QueryResult>, String> {
+278:         if !is_cacheable(query) || self.capacity == 0 {
+279:             // Evaluate without touching the store; count it as a miss.
+280:             let r = eval(graph, query, budget)?;
+281:             let mut inner = self.inner.lock().expect("result-cache mutex poisoned");
+282:             inner.misses += 1;
+283:             return Ok(Arc::new(r));
+284:         }
+285: 
+286:         let key = Key {
+287:             version,
+288:             query: query.clone(),
+289:         };
+290: 
+291:         // Fast path: a hit at the current version.
+292:         {
+293:             let mut inner = self.inner.lock().expect("result-cache mutex poisoned");
+294:             inner.clock += 1;
+295:             let now = inner.clock;
+296:             if let Some(e) = inner.map.get_mut(&key) {
+297:                 e.last_used = now;
+298:                 let r = Arc::clone(&e.result);
+299:                 inner.hits += 1;
+300:                 return Ok(r);
+301:             }
+302:         }
+303: 
+304:         // Miss: evaluate OUTSIDE the lock so concurrent queries are not serialised.
+305:         let result = Arc::new(eval(graph, query, budget)?);
+306: 
+307:         let mut inner = self.inner.lock().expect("result-cache mutex poisoned");
+308:         inner.misses += 1;
+309:         // Drop any entry from a superseded version (the writer advanced the epoch).
+310:         inner.map.retain(|k, _| k.version == version);
+311:         inner.clock += 1;
+312:         let now = inner.clock;
+313:         // Evict LRU if at capacity (and this is a genuinely new key).
+314:         if inner.map.len() >= self.capacity && !inner.map.contains_key(&key) {
+315:             if let Some(lru) = inner
+316:                 .map
+317:                 .iter()
+318:                 .min_by_key(|(_, e)| e.last_used)
+319:                 .map(|(k, _)| k.clone())
+320:             {
+321:                 inner.map.remove(&lru);
+322:             }
+323:         }
+324:         inner.map.insert(
+325:             key,
+
+## crates/sparq-engine/src/cache.rs:352-385
+352:     pub fn capacity(&self) -> usize {
+353:         self.capacity
+354:     }
+355: }
+356: 
+357: /// Evaluate one SELECT / ASK query to a [`QueryResult`], mirroring
+358: /// [`crate::query_prepared_with_budget`] (the dataset / base / budget wiring) so a
+359: /// cached result is identical to the uncached path.
+360: fn eval(
+361:     graph: &sparq_core::Graph,
+362:     query: &Query,
+363:     budget: &QueryBudget,
+364: ) -> Result<QueryResult, String> {
+365:     let active = crate::active_dataset(graph, query);
+366:     let graph = active.as_ref().unwrap_or(graph);
+367:     let _view_scope = crate::view_scope(&active);
+368:     exec::budget::with_budget(budget, || {
+369:         exec::set_query_base(query.base_iri().map(|b| b.as_str()));
+370:         match query {
+371:             Query::Select { pattern, .. } => exec::eval_select(graph, pattern),
+372:             Query::Ask { pattern, .. } => Ok(QueryResult {
+373:                 vars: Vec::new(),
+374:                 rows: if exec::eval_ask(graph, pattern)? {
+375:                     vec![Vec::new()]
+376:                 } else {
+377:                     Vec::new()
+378:                 },
+379:             }),
+380:             _ => Err("result cache only stores SELECT and ASK queries".into()),
+381:         }
+382:     })
+383: }

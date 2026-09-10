@@ -1,0 +1,45 @@
+{
+  "status": "PREREGISTERED READINESS ONLY; not executed and no harness source written",
+  "public_route": "query_with_functions -> query_with_functions_and_budget -> with_functions -> query_with_budget -> query_prepared_with_budget -> set_query_base -> eval_select -> F::Iri(ev(0)) -> Custom callback -> nested query -> resolve_iri.",
+  "outer": "BASE <https://outer.example/> SELECT (IRI(<urn:base-probe>()) AS ?iri) WHERE {}",
+  "callback": "Assert current thread id equals original caller; increment atomic count; execute selected nested case synchronously; return simple literal \"resource\". Outer IRI operand dependency ensures callback completes before resolve_iri; no reliance on ordering of separate projection expressions.",
+  "finite_cases": [
+    {
+      "name": "no_nested_call",
+      "inner": null,
+      "required_control": "outer result exact https://outer.example/resource, one callback and one row"
+    },
+    {
+      "name": "inner_BASE",
+      "inner": "BASE <https://inner.example/> SELECT (IRI(\"child\") AS ?iri) WHERE {}",
+      "inner_control": "exact https://inner.example/child",
+      "required_after_fix": "https://outer.example/resource",
+      "source_prediction_only": "https://inner.example/resource"
+    },
+    {
+      "name": "inner_no_BASE",
+      "inner": "ASK {}",
+      "inner_control": "one empty unit row",
+      "required_after_fix": "https://outer.example/resource",
+      "source_prediction_only": "outer projection unbound (None), not necessarily a hard query Err"
+    },
+    {
+      "name": "inner_parse_error",
+      "inner": "not a SPARQL query",
+      "inner_control": "Err before base installation",
+      "required_control": "https://outer.example/resource"
+    },
+    {
+      "name": "inner_post_install_error",
+      "inner": "BASE <https://inner.example/> CONSTRUCT { ?s ?p ?o } WHERE {}",
+      "inner_control": "Err only SELECT and ASK queries are supported after base setter",
+      "required_after_fix": "https://outer.example/resource",
+      "source_prediction_only": "https://inner.example/resource"
+    }
+  ],
+  "output": "Record raw QueryResult/variable names/rows/bound NamedNode, child outcomes, exact callback count/thread. Assert only successful-controls and child path; print nested observations without requiring predicted defect so contrary results survive.",
+  "top_level_followup": "After each case, independent public query with explicit BASE must resolve own IRI correctly. A no-BASE standalone IRI should be unbound. These do not prove idle private TLS restored because public setter writes before execution.",
+  "environment": "RAYON_NUM_THREADS=1; one-row empty graph; no services/network/dependencies. Use matching3directlibs, source/compiler/rlib hashes beforelaunch, outputs in fresh direct-6479/witness.",
+  "run_count": "one link, one process containing all5 fixed cases, no seedsearch/retries/production changes",
+  "limits_reference": "warm-artifacts.json"
+}

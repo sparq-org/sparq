@@ -1,0 +1,254 @@
+{
+  "compiler": {
+    "path": "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/rustc",
+    "exists": true,
+    "sha256": "210df6794001b73ec3d453878707fa1e0bdcb63c427024a6e6574bbe5615a4da",
+    "bytes": 412504
+  },
+  "compiler_version_record": "rustc 1.97.1 (8bab26f4f 2026-07-14)\nbinary: rustc\ncommit-hash: 8bab26f4f68e0e26f0bb7960be334d5b520ea452\ncommit-date: 2026-07-14\nhost: aarch64-apple-darwin\nrelease: 1.97.1\nLLVM version: 22.1.6\n",
+  "direct_libraries_rehashed": [
+    {
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/liboxrdf-a953fc3282e3d853.rlib",
+      "exists": true,
+      "expected_sha256": "491471fab5133fe72a254ceba0e57440914aedf52ba79e1898df16442b65e82a",
+      "bytes": 1921384,
+      "sha256": "491471fab5133fe72a254ceba0e57440914aedf52ba79e1898df16442b65e82a",
+      "matches": true
+    },
+    {
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libsparq_core-ecad7fe38b152a30.rlib",
+      "exists": true,
+      "expected_sha256": "a00b383a2789eff25fe29b9d3e7bf9ac905d7b54e7c57ba3e383f1f824fc5581",
+      "bytes": 4397856,
+      "sha256": "a00b383a2789eff25fe29b9d3e7bf9ac905d7b54e7c57ba3e383f1f824fc5581",
+      "matches": true
+    },
+    {
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libsparq_engine-1603d23b1ddfa53f.rlib",
+      "exists": true,
+      "expected_sha256": "562fe4d414372d44511ddcc6b073d8145c8c3c7a738c7e796abaaa2908c8fa7b",
+      "bytes": 5404992,
+      "sha256": "562fe4d414372d44511ddcc6b073d8145c8c3c7a738c7e796abaaa2908c8fa7b",
+      "matches": true
+    }
+  ],
+  "recorded_actual_engine_build": {
+    "crate": "sparq_engine",
+    "actual_rustc_argv": [
+      "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/rustc",
+      "--crate-name",
+      "sparq_engine",
+      "--edition=2021",
+      "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue5183/crates/sparq-engine/src/lib.rs",
+      "--error-format=json",
+      "--json=diagnostic-rendered-ansi,artifacts,future-incompat",
+      "--crate-type",
+      "lib",
+      "--emit=dep-info,metadata,link",
+      "-C",
+      "opt-level=3",
+      "-C",
+      "embed-bitcode=no",
+      "-C",
+      "codegen-units=16",
+      "--warn=unexpected_cfgs",
+      "--check-cfg",
+      "cfg(kani)",
+      "--cfg",
+      "feature=\"algebra-rewrite\"",
+      "--cfg",
+      "feature=\"default\"",
+      "--cfg",
+      "feature=\"digest\"",
+      "--cfg",
+      "feature=\"parallel\"",
+      "--cfg",
+      "feature=\"regex\"",
+      "--check-cfg",
+      "cfg(docsrs,test)",
+      "--check-cfg",
+      "cfg(feature, values(\"algebra-rewrite\", \"antijoin-static-decline\", \"cluster-materialize\", \"cs-anchor-incidence\", \"cs-planner\", \"default\", \"digest\", \"dp-planner\", \"explain-json\", \"id-filter-fastpath\", \"parallel\", \"params\", \"paths\", \"persistent-stats\", \"query-solution\", \"regex\", \"result-cache\", \"semijoin-bitmap\", \"serialize-rdf\", \"service\", \"service-local\", \"spatial-exact-pushdown\", \"spqcprm2\", \"streaming-serialization\", \"templates\", \"topk-lazy-strkey\", \"txn\", \"value-join\", \"vectorized\", \"window-functions\", \"yannakakis\", \"zk\"))",
+      "-C",
+      "metadata=cf192e2b2b25f154",
+      "-C",
+      "extra-filename=-1603d23b1ddfa53f",
+      "--out-dir",
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps",
+      "-C",
+      "strip=debuginfo",
+      "-L",
+      "dependency=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps",
+      "--extern",
+      "md5=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libmd5-d957b44d2a717174.rmeta",
+      "--extern",
+      "oxiri=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/liboxiri-256fcb858fdf74ff.rmeta",
+      "--extern",
+      "oxrdf=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/liboxrdf-a953fc3282e3d853.rmeta",
+      "--extern",
+      "rayon=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/librayon-b0b3a31e71d15f32.rmeta",
+      "--extern",
+      "regex=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libregex-97e8c9837dd5af91.rmeta",
+      "--extern",
+      "rustc_hash=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/librustc_hash-a257f2d86c4c9dc8.rmeta",
+      "--extern",
+      "sha1=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libsha1-cae15182d420d048.rmeta",
+      "--extern",
+      "sha2=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libsha2-778aad56561bbe29.rmeta",
+      "--extern",
+      "smallvec=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libsmallvec-2cf754751a422d03.rmeta",
+      "--extern",
+      "spargebra=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libspargebra-49d83656a442c34f.rmeta",
+      "--extern",
+      "sparq_core=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libsparq_core-ecad7fe38b152a30.rmeta",
+      "--extern",
+      "sparq_substrate=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libsparq_substrate-c14a1be226fab610.rmeta",
+      "--extern",
+      "uuid=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libuuid-633b917788174200.rmeta"
+    ],
+    "extern_artifacts_now_hashed": [
+      {
+        "crate": "md5",
+        "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libmd5-d957b44d2a717174.rmeta",
+        "bytes": 48717,
+        "sha256": "87f4ea57f252b120bd99c08f425f528459895b96158a804728049c2dff31e8f8"
+      },
+      {
+        "crate": "oxiri",
+        "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/liboxiri-256fcb858fdf74ff.rmeta",
+        "bytes": 307622,
+        "sha256": "af6eca31475bc36818324a7709baafa1e9c0dd44455ab24bcd2543844aeb24ed"
+      },
+      {
+        "crate": "oxrdf",
+        "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/liboxrdf-a953fc3282e3d853.rmeta",
+        "bytes": 1115222,
+        "sha256": "82eb36cbafc283e14529c491a15d20bf14deeb6c234590b191213eae5462004d"
+      },
+      {
+        "crate": "rayon",
+        "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/librayon-b0b3a31e71d15f32.rmeta",
+        "bytes": 4468288,
+        "sha256": "26f44f8eca6e8b3240a1d3d85b78dd87f60d3e193195bb65fbc105df19c376b6"
+      },
+      {
+        "crate": "regex",
+        "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libregex-97e8c9837dd5af91.rmeta",
+        "bytes": 794359,
+        "sha256": "776278e5c65260c28ed0d5702862c2b21d39a5546e10c511a4038fb4dff9e32d"
+      },
+      {
+        "crate": "rustc_hash",
+        "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/librustc_hash-a257f2d86c4c9dc8.rmeta",
+        "bytes": 39228,
+        "sha256": "c2d3331b60b8edcc0eb669f977552882fc408a1b11c2cf1db06d85ea70cf3625"
+      },
+      {
+        "crate": "sha1",
+        "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libsha1-cae15182d420d048.rmeta",
+        "bytes": 71622,
+        "sha256": "3b85564f081e5173438d85fc7aaaf572d64062c89154722b1b86f5882b25bf61"
+      },
+      {
+        "crate": "sha2",
+        "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libsha2-778aad56561bbe29.rmeta",
+        "bytes": 837784,
+        "sha256": "ea46778cbd5fd79ba9ce39332e592f53aec20f41de9bca7741a65a01dfe46ea2"
+      },
+      {
+        "crate": "smallvec",
+        "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libsmallvec-2cf754751a422d03.rmeta",
+        "bytes": 311387,
+        "sha256": "cf54999d3261cd933389d6a8c17f34cbe0be152add56f9ed8de62bef3284d84a"
+      },
+      {
+        "crate": "spargebra",
+        "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libspargebra-49d83656a442c34f.rmeta",
+        "bytes": 1177740,
+        "sha256": "5f6257352542cced5d630f79535e5c8a5ea2064c1913c187e573eda5455e9dfa"
+      },
+      {
+        "crate": "sparq_core",
+        "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libsparq_core-ecad7fe38b152a30.rmeta",
+        "bytes": 1561776,
+        "sha256": "d9b82b5ecf6ba47b668d229774e1e786bc67f011659332f4b017f8d20d38b536"
+      },
+      {
+        "crate": "sparq_substrate",
+        "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libsparq_substrate-c14a1be226fab610.rmeta",
+        "bytes": 403930,
+        "sha256": "ea90c39200c365f66550d9a99bf1b904f2f4864c763fa7f41ba0aca1993713eb"
+      },
+      {
+        "crate": "uuid",
+        "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libuuid-633b917788174200.rmeta",
+        "bytes": 500303,
+        "sha256": "eda4578269832614369d22f5d22a4ea3c8306d1c8f0c1fa6424d4349be19675d"
+      }
+    ]
+  },
+  "feature_profile": {
+    "edition": "2021",
+    "native_target": "aarch64-apple-darwin",
+    "recorded_feature_proof_sha256": "9de5da65386c2c87bf6ff20e95294020c881d8e2c30a9f0d938d9ffcd96a3faf",
+    "selected_features": {
+      "oxigraph@0.5.9": [
+        "rdf-12"
+      ],
+      "oxrdf@0.2.4": [
+        "default"
+      ],
+      "oxrdf@0.3.3": [
+        "default",
+        "oxsdatatypes",
+        "rdf-12",
+        "rdfc-10"
+      ],
+      "rdf-canon@0.15.3": [],
+      "spargebra@0.4.6": [
+        "default",
+        "sep-0002",
+        "sep-0006",
+        "sparql-12"
+      ],
+      "sparq-canon@0.1.1": [
+        "default",
+        "parallel",
+        "rdf12-triple-terms"
+      ],
+      "sparq-core@0.1.1": [
+        "default",
+        "dict-spill",
+        "mmap",
+        "parallel"
+      ],
+      "sparq-engine@0.1.1": [
+        "algebra-rewrite",
+        "default",
+        "digest",
+        "parallel",
+        "regex"
+      ],
+      "sparq-substrate@0.1.1": [
+        "compare",
+        "join",
+        "numeric",
+        "rows"
+      ]
+    }
+  },
+  "route": "Three-library public-only scratch harness linked with rustc edition2021; existing libraries O3/unwind/noLTO/codegen16, engine default+algebra-rewrite, core default+mmap+dict-spill. No cfg(test) engine compile or dependency build.",
+  "qualified_source": "Recorded actual781f main build; entire inspected core/engine source inventory equals readonly worktree and f50.",
+  "closure_limit": "Direct3libs verified now; most recent full6-library actual-module link succeeded in6483continuation. Complete future link closure still revalidated at execution; no replacement libraries or downloads if missing.",
+  "old6476_route": "Reuse public callback shape, not old reproduction library: oldreproedition2024/O0 driver and pre-restoration library differ. Proposed newdriveredition2021, source-identical currentmain library chosen above.",
+  "projected_output": "Prior analogous public-only linked binary ~5.51MB; comparable latest whole-module executable10.4MB. Request64MiB total new outputs, not a guaranteed measured footprint.",
+  "proposed_limits": {
+    "phase_seconds": 120,
+    "link_seconds": 60,
+    "test_seconds": 20,
+    "new_allocated_bytes": 67108864,
+    "start_free_bytes": 2214592512,
+    "continuous_free_bytes": 2147483648,
+    "jobs": 1,
+    "dependency_builds": 0
+  }
+}

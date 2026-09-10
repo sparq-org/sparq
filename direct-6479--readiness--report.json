@@ -1,0 +1,30 @@
+{
+  "decision": "GO for one bounded public callback witness when separately authorized; runtime remains pending",
+  "issue": 6479,
+  "model": "GPT-6 Astra xhigh",
+  "source_finding": "11 setter sites assign one TLS Option<Iri<String>>; sole reader resolves relative IRI/URI strings after evaluating its operand. No prior-value restoration exists. Owned BASE state, distinct from fixed QueryBudget guard.",
+  "callers": "caller-inventory.json",
+  "minimal_discriminator": "IRI(<urn:base-probe>()) forces nested callback completion before relative IRI resolution. Compare no nesting, childBASE, childnoBASE, parse error and valid unsupported post-install error. Same-thread/callcount/childresult assertions prevent vacuous witness.",
+  "repair_if_confirmed": {
+    "boundary": "private RAII BASE restorer plus pub(crate) with_query_base(base,FnOnce)->T (or equivalently sealed synchronous scope). Move/take previous owned Option<Iri<String>>, parse new once before install, replaceTLS without holding RefCell borrow across callback; restore previous verbatim in Drop including Err/unwind. No raw CancelPtr or public API required.",
+    "migration": "Replace all11set_query_base sites with same lexical scope; preserve view/budget/function/trace guard drop order. Six lib and cache scopes restore BASE before budget exits; explain functions wrap remainder from current setter including early Err and planning. Cache-hit semantics remain no evaluation/no write.",
+    "tests": "Public witness becomes regression; private state tests3levels/None/Error/unwind/topidle and compile-sealed scope; public nested parseerror vs executionerror, prepared/ask/count/json/stream/explain/cache entrypoint coverage scoped toactual11sites. Guard-removal mutant must breakouterBASE regression.",
+    "docs": "Clarify public query nestedBASE independent scope in matching query skill/docs only once implementation approved; no broad TLS redesign.",
+    "safety": "Private guard cannot escape/reorder through safe outside API; owned Iri has no borrowed cancellation-pointer lifetime issue. Keep guard thread-affine or syntactically sealed; no RefCell borrow live across user code."
+  },
+  "limits": [
+    "No runtime witness, build, test or source mutation in this phase.",
+    "Single-thread witness does not establish BASE propagation/restoration on existing Rayon worker paths. No propagation change proposed here.",
+    "Top-level public followup overwritesTLS and cannot alone prove cleanup; private unit assertion required in candidate stage.",
+    "Construct/update own context surfaces are not claimed fixed; target is exactexisting setter chain and query callback. No new setter found there in scopedsearch.",
+    "Function registry and otherTLS lifetime policies are outofscope; child ordinaryquery does not reinstall function registry."
+  ],
+  "ownership": {
+    "known_active": "6486 modifiescore+declaration,6487 comparator-only; neither modifies proposedengine files. Theirworktrees untouched.",
+    "held_engine_prs": "Known heldengine lanes remain untouched. No fresh openPRpath/hunk census authorized/performed here; rootmustrevalidatecurrentbase and exactengine hunk ownership beforeproduction edit."
+  },
+  "resource_projection": "Existing current-main qualified3libs and compiler rehashed; proposed120s/64MiB one public-only link+oneprocess. No cold engine/test build. Recordedfeatureunification disclosed.",
+  "free_start_bytes": 12426510336,
+  "free_final_bytes": 12426350592,
+  "commands_pending": false
+}

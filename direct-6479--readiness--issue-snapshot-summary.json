@@ -1,0 +1,16 @@
+{
+  "number": 6479,
+  "title": "Preserve outer BASE IRI after a nested public query",
+  "state": "open",
+  "assignees": [],
+  "labels": [
+    "priority:P3",
+    "role:impl",
+    "status:ready",
+    "self-improvement",
+    "area:sparq-engine"
+  ],
+  "source_file": "direct-6479/admission/issue-current.json",
+  "sha256": "b720e1a1394c1215676a694e1bb4f461022feaf4402cb6f61dae2b0814a0a1c4",
+  "freshness": "Root observation19:06, no independent network read in this task"
+}
