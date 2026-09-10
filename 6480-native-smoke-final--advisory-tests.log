@@ -1,0 +1,39 @@
+test_failure_report_says_do_not_relax (__main__.EvaluatePure) ... ok
+test_instance_version_drift_fails (__main__.EvaluatePure) ... ok
+test_matching_record_passes (__main__.EvaluatePure) ... ok
+test_new_unrecorded_instance_fails (__main__.EvaluatePure) ... ok
+test_optional_dependency_pin_is_read_from_the_recorded_field (__main__.EvaluatePure)
+`sharp` is an OPTIONAL dep of `next` — a dependencies-only lookup would miss it. ... ok
+test_optional_pin_moved_to_another_field_fails (__main__.EvaluatePure)
+Same range under `dependencies` must not satisfy an `optionalDependencies` pin. ... ok
+test_pinning_package_gone_fails (__main__.EvaluatePure) ... ok
+test_pinning_package_version_drift_fails (__main__.EvaluatePure) ... ok
+test_pinning_range_drift_fails (__main__.EvaluatePure)
+The crux of the disposition: the pin RELAXING is what unblocks the patch. ... ok
+test_root_override_bump_fails (__main__.EvaluatePure) ... ok
+test_root_override_removed_fails (__main__.EvaluatePure) ... ok
+test_vanished_instance_fails (__main__.EvaluatePure) ... ok
+test_committed_record_matches_committed_lock (__main__.LiveRepo) ... ok
+test_main_exits_zero_on_the_live_repo (__main__.LiveRepo) ... ok
+test_record_covers_the_tracked_packages (__main__.LiveRepo) ... ok
+test_nested_and_workspace_copies_are_instances (__main__.LockInstanceMatching) ... ok
+test_scoped_package_with_same_suffix_is_not_an_instance (__main__.LockInstanceMatching)
+`node_modules/@tailwindcss/postcss` is NOT a copy of `postcss`. ... ok
+test_instance_missing_field_is_parse_error (__main__.RecordParsing) ... ok
+test_malformed_json_is_parse_error (__main__.RecordParsing) ... ok
+test_missing_fence_is_parse_error (__main__.RecordParsing) ... ok
+test_missing_record_file_is_parse_error (__main__.RecordParsing) ... ok
+test_missing_sentinels_is_parse_error (__main__.RecordParsing) ... ok
+test_roundtrip (__main__.RecordParsing) ... ok
+test_unknown_pin_field_is_parse_error (__main__.RecordParsing)
+A typo'd field would otherwise compare None to None and pass vacuously. ... ok
+test_unknown_pin_kind_is_parse_error (__main__.RecordParsing) ... ok
+
+----------------------------------------------------------------------
+Ran 25 tests in 0.038s
+
+OK
+npm advisory record matches the lock:
+  brace-expansion: 4 instance(s), all recorded
+  postcss: 1 instance(s), all recorded
+  sharp: 1 instance(s), all recorded

@@ -1,0 +1,18 @@
+{
+  "name": "@img/sharp-win32-ia32",
+  "version": "0.35.4",
+  "engines": {
+    "node": "^20.9.0"
+  },
+  "description": "Prebuilt sharp for use with Windows x86 (deprecated)",
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "ia32"
+  ],
+  "source_sha256": "522aba31a80905a78b192d45084fa84a4fa2117478d795a03e9dedbd3dbd37e3",
+  "registry_source": "https://registry.npmjs.org/@img%2fsharp-win32-ia32/0.35.4",
+  "lock_exact_engine_version_integrity_match": true,
+  "assessment": "^20.9.0 is the exact published constraint on deprecated Windows x86. It excludes Node22 and24; it is not a generated lock error. Ubuntu Node22 CI does not select this optional win32/ia32 package. No native Windows or installed-tree proof is claimed. No range/selector changed or package removed."
+}

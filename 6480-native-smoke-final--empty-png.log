@@ -1,0 +1,11 @@
+{"sharp":"0.35.4","versions":{"sharp":"0.35.4","vips":"STUB-NOT-NATIVE"}}
+AssertionError [ERR_ASSERTION]: generated PNG must be nonempty
+    at [stdin]:15:10
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5) {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: false,
+  expected: true,
+  operator: '==',
+  diff: 'simple'
+}

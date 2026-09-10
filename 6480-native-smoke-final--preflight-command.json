@@ -1,0 +1,10 @@
+{
+  "argv": [
+    "python3",
+    "scripts/preflight.py",
+    "--base",
+    "HEAD"
+  ],
+  "exit_code": 1,
+  "elapsed_seconds": 1.618108458
+}

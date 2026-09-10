@@ -1,0 +1,162 @@
+[
+  {
+    "name": "syntax",
+    "argv": [
+      "/Users/jesght/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+      "--check",
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/native-smoke-followup/final/smoke.cjs"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6480",
+    "exit_code": 0,
+    "expected_zero": true,
+    "elapsed_seconds": 0.23857345800000002
+  },
+  {
+    "name": "async-rejection",
+    "argv": [
+      "/Users/jesght/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/native-smoke-followup/final/controls/async-rejection",
+    "exit_code": 1,
+    "expected_zero": false,
+    "elapsed_seconds": 0.072485083,
+    "stdin_sha256": "e0b3df3c066a581e29eccf17b8fa023fef2c201a84e324103f2dbfbfd192d12f"
+  },
+  {
+    "name": "empty-png",
+    "argv": [
+      "/Users/jesght/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/native-smoke-followup/final/controls/empty-png",
+    "exit_code": 1,
+    "expected_zero": false,
+    "elapsed_seconds": 0.06369974999999994,
+    "stdin_sha256": "e0b3df3c066a581e29eccf17b8fa023fef2c201a84e324103f2dbfbfd192d12f"
+  },
+  {
+    "name": "lock-mismatch",
+    "argv": [
+      "/Users/jesght/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/native-smoke-followup/final/controls/lock-mismatch",
+    "exit_code": 1,
+    "expected_zero": false,
+    "elapsed_seconds": 0.060508459000000014,
+    "stdin_sha256": "e0b3df3c066a581e29eccf17b8fa023fef2c201a84e324103f2dbfbfd192d12f"
+  },
+  {
+    "name": "missing-module",
+    "argv": [
+      "/Users/jesght/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/native-smoke-followup/final/controls/missing-module",
+    "exit_code": 1,
+    "expected_zero": false,
+    "elapsed_seconds": 0.04584104100000008,
+    "stdin_sha256": "e0b3df3c066a581e29eccf17b8fa023fef2c201a84e324103f2dbfbfd192d12f"
+  },
+  {
+    "name": "positive",
+    "argv": [
+      "/Users/jesght/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/native-smoke-followup/final/controls/positive",
+    "exit_code": 0,
+    "expected_zero": true,
+    "elapsed_seconds": 0.06108391599999996,
+    "stdin_sha256": "e0b3df3c066a581e29eccf17b8fa023fef2c201a84e324103f2dbfbfd192d12f"
+  },
+  {
+    "name": "wrong-dimensions",
+    "argv": [
+      "/Users/jesght/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/native-smoke-followup/final/controls/wrong-dimensions",
+    "exit_code": 1,
+    "expected_zero": false,
+    "elapsed_seconds": 0.06226324999999999,
+    "stdin_sha256": "e0b3df3c066a581e29eccf17b8fa023fef2c201a84e324103f2dbfbfd192d12f"
+  },
+  {
+    "name": "old-package-json-access",
+    "argv": [
+      "/Users/jesght/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/native-smoke-followup/final/controls/positive",
+    "exit_code": 1,
+    "expected_zero": false,
+    "elapsed_seconds": 0.0467535,
+    "stdin_sha256": "1fb6705e625eeb19adf3c7328bd53d5d1c95ec47ad039412da45544875da2d82"
+  },
+  {
+    "name": "inspection-tests",
+    "argv": [
+      "python3",
+      "scripts/tests/test_js_wasm_pack_install.py"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6480",
+    "exit_code": 0,
+    "expected_zero": true,
+    "elapsed_seconds": 0.45743287500000007
+  },
+  {
+    "name": "advisory-tests",
+    "argv": [
+      "python3",
+      "scripts/tests/test_check_npm_advisory_record.py"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6480",
+    "exit_code": 0,
+    "expected_zero": true,
+    "elapsed_seconds": 0.15202166700000008
+  },
+  {
+    "name": "advisory-drift",
+    "argv": [
+      "python3",
+      "scripts/check-npm-advisory-record.py"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6480",
+    "exit_code": 0,
+    "expected_zero": true,
+    "elapsed_seconds": 0.10905266700000005
+  },
+  {
+    "name": "diff-check",
+    "argv": [
+      "git",
+      "diff",
+      "--check"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6480",
+    "exit_code": 0,
+    "expected_zero": true,
+    "elapsed_seconds": 0.0687542080000001
+  },
+  {
+    "name": "bash-syntax",
+    "argv": [
+      "/bin/bash",
+      "-n",
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/native-smoke-followup/final/install-step.sh"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6480",
+    "exit_code": 0,
+    "expected_zero": true,
+    "elapsed_seconds": 0.01725958300000019
+  },
+  {
+    "name": "yaml-scope",
+    "argv": [
+      "/usr/bin/ruby",
+      "-e",
+      "require 'yaml'; a=YAML.load_file(ARGV[0]); b=YAML.load_file(ARGV[1]); sa=a['jobs']['js']['steps']; sb=b['jobs']['js']['steps']; i=sa.index{|s|s['name']=='Install npm dependencies (full workspace, from repo root)'}; raise unless sa[i]['working-directory']=='.' && sb[i]['working-directory']=='.'; raise unless sb[i]['run'].lines.first.strip=='npm ci'; sb[i]['run']=sa[i]['run']; raise unless a==b; puts 'PASS: only selected run scalar changed; cwd, first command and every other parsed field preserved'",
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/native-smoke-followup/workflow-before.yml",
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/native-smoke-followup/final/workflow-after.yml"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6480",
+    "exit_code": 0,
+    "expected_zero": true,
+    "elapsed_seconds": 0.48644966700000003
+  }
+]

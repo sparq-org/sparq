@@ -1,0 +1,158 @@
+[
+  {
+    "name": "syntax",
+    "argv": [
+      "/Users/jesght/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+      "--check",
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/native-smoke-followup/smoke.cjs"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6480",
+    "exit_code": 0,
+    "expected_exit": 0,
+    "elapsed_seconds": 3.3390366659999997,
+    "log": "syntax.log"
+  },
+  {
+    "name": "bash-syntax",
+    "argv": [
+      "/bin/bash",
+      "-n",
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/native-smoke-followup/install-step.sh"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6480",
+    "exit_code": 0,
+    "expected_exit": 0,
+    "elapsed_seconds": 0.01369200000000026,
+    "log": "bash-syntax.log"
+  },
+  {
+    "name": "positive",
+    "argv": [
+      "/Users/jesght/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/native-smoke-followup/controls/positive",
+    "exit_code": 0,
+    "expected_exit": 0,
+    "elapsed_seconds": 0.07082841699999998,
+    "log": "positive.log"
+  },
+  {
+    "name": "async-rejection",
+    "argv": [
+      "/Users/jesght/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/native-smoke-followup/controls/async-rejection",
+    "exit_code": 1,
+    "expected_exit": 1,
+    "elapsed_seconds": 0.06410929200000037,
+    "log": "async-rejection.log"
+  },
+  {
+    "name": "empty-png",
+    "argv": [
+      "/Users/jesght/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/native-smoke-followup/controls/empty-png",
+    "exit_code": 1,
+    "expected_exit": 1,
+    "elapsed_seconds": 0.06343687500000028,
+    "log": "empty-png.log"
+  },
+  {
+    "name": "wrong-dimensions",
+    "argv": [
+      "/Users/jesght/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/native-smoke-followup/controls/wrong-dimensions",
+    "exit_code": 1,
+    "expected_exit": 1,
+    "elapsed_seconds": 0.06169749999999974,
+    "log": "wrong-dimensions.log"
+  },
+  {
+    "name": "lock-mismatch",
+    "argv": [
+      "/Users/jesght/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/native-smoke-followup/controls/lock-mismatch",
+    "exit_code": 1,
+    "expected_exit": 1,
+    "elapsed_seconds": 0.06880979100000006,
+    "log": "lock-mismatch.log"
+  },
+  {
+    "name": "missing-module",
+    "argv": [
+      "/Users/jesght/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/native-smoke-followup/controls/missing-module",
+    "exit_code": 1,
+    "expected_exit": 1,
+    "elapsed_seconds": 0.049382625000000235,
+    "log": "missing-module.log"
+  },
+  {
+    "name": "inspection-tests",
+    "argv": [
+      "python3",
+      "scripts/tests/test_js_wasm_pack_install.py"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6480",
+    "exit_code": 0,
+    "expected_exit": 0,
+    "elapsed_seconds": 0.3998276670000003,
+    "log": "inspection-tests.log"
+  },
+  {
+    "name": "advisory-tests",
+    "argv": [
+      "python3",
+      "scripts/tests/test_check_npm_advisory_record.py"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6480",
+    "exit_code": 0,
+    "expected_exit": 0,
+    "elapsed_seconds": 0.2013475419999997,
+    "log": "advisory-tests.log"
+  },
+  {
+    "name": "advisory-drift",
+    "argv": [
+      "python3",
+      "scripts/check-npm-advisory-record.py"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6480",
+    "exit_code": 0,
+    "expected_exit": 0,
+    "elapsed_seconds": 0.1438254170000004,
+    "log": "advisory-drift.log"
+  },
+  {
+    "name": "diff-check",
+    "argv": [
+      "git",
+      "diff",
+      "--check"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6480",
+    "exit_code": 0,
+    "expected_exit": 0,
+    "elapsed_seconds": 0.07886454199999982,
+    "log": "diff-check.log"
+  },
+  {
+    "name": "yaml-scope",
+    "argv": [
+      "/usr/bin/ruby",
+      "-e",
+      "require 'yaml'; a=YAML.load_file(ARGV[0]); b=YAML.load_file(ARGV[1]); sa=a['jobs']['js']['steps']; sb=b['jobs']['js']['steps']; i=sa.index{|s|s['name']=='Install npm dependencies (full workspace, from repo root)'}; raise unless sa[i]['working-directory']=='.' && sb[i]['working-directory']=='.'; raise unless sb[i]['run'].lines.first.strip=='npm ci'; sb[i]['run']=sa[i]['run']; raise unless a==b; puts 'PASS: only selected run scalar changed; cwd, first command and every other parsed field preserved'",
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/native-smoke-followup/workflow-before.yml",
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/native-smoke-followup/workflow-after.yml"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6480",
+    "exit_code": 0,
+    "expected_exit": 0,
+    "elapsed_seconds": 0.3031340829999998,
+    "log": "yaml-scope.log"
+  }
+]

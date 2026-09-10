@@ -1,0 +1,12 @@
+{"sharp":"0.35.4","versions":{"sharp":"0.35.4","vips":"STUB-NOT-NATIVE"}}
+Error: deliberate async PNG failure
+    at Object.toBuffer (/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/native-smoke-followup/controls/async-rejection/node_modules/sharp/index.cjs:6:11)
+    at [stdin]:12:12
+    at [stdin]:19:3
+    at runScriptInThisContext (node:internal/vm:219:10)
+    at node:internal/process/execution:451:12
+    at [stdin]-wrapper:6:24
+    at runScriptInContext (node:internal/process/execution:449:60)
+    at evalFunction (node:internal/process/execution:283:30)
+    at evalTypeScript (node:internal/process/execution:295:3)
+    at node:internal/main/eval_stdin:51:5

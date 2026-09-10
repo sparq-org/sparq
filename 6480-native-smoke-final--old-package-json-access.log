@@ -1,0 +1,19 @@
+node:internal/modules/cjs/loader:714
+      throw e;
+      ^
+
+Error [ERR_PACKAGE_PATH_NOT_EXPORTED]: Package subpath './package.json' is not defined by "exports" in /private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/native-smoke-followup/final/controls/positive/node_modules/sharp/package.json
+    at exportsNotFound (node:internal/modules/esm/resolve:314:10)
+    at packageExportsResolve (node:internal/modules/esm/resolve:662:9)
+    at resolveExports (node:internal/modules/cjs/loader:707:36)
+    at Module._findPath (node:internal/modules/cjs/loader:774:31)
+    at Module._resolveFilename (node:internal/modules/cjs/loader:1502:27)
+    at wrapResolveFilename (node:internal/modules/cjs/loader:1071:27)
+    at defaultResolveImplForCJSLoading (node:internal/modules/cjs/loader:1095:10)
+    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1122:12)
+    at Module._load (node:internal/modules/cjs/loader:1294:5)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19) {
+  code: 'ERR_PACKAGE_PATH_NOT_EXPORTED'
+}
+
+Node.js v24.19.0

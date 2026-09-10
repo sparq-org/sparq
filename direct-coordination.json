@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-10T10:27:06.151382+00:00",
+  "updated_at": "2026-09-10T10:39:21.807694+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -68,8 +68,8 @@
     "agent": "/root/postmerge_ci",
     "actual_model": "GPT-6 Astra",
     "effort": "xhigh",
-    "phase": "Small native sharp installed validation supplement before publication",
-    "state": "0c6a780 actualOpus approvedforCI. Astraadding bounded optionaldependency/native-smoke guard beforeonefollowuppush; existing published26d unchanged.",
+    "phase": "Published follow-up, awaiting fresh required CI and Copilot review",
+    "state": "Normal fastforward26d\u21920c\u219217594 published after actualOpus security andnative-delta approvals. All20oldheadrunscompleted beforepush. ExactnewheadCI/Copilot started; notenqueued ormergeready.",
     "started_at": "2026-09-10T08:47:00Z",
     "base": "781f667c19a8ebb779cfccb24b05ea432360b025",
     "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6480",
@@ -83,14 +83,14 @@
     },
     "readiness": "direct-6480/admission/readiness-root-verification.json",
     "next_actions": [
-      "Collect existing Astra review-followup packet oncefinished; verify scopedlock/securityrecord/test/triggerchanges and alltests; obtain actual Opus5 xhigh security/finalreview beforeonefollowuppush toPR6481.",
-      "Preserve oldhead26d actualNode22.23.2/npm10.9.8 npmci, Next15.5.24bothworkspaces, no lock/minimachurn andGUIbuildproof; require freshvalidationforfollowuphead.",
-      "Update current6480/6481 trackingwith sharp32expandedremediation aftercandidateproven; #3767 is CLOSED historicalumbrella, notactivecurrenttracking. Recheckalerts32/106/107automaticallyaftermerge, no dismissals.",
-      "HandleCopilotbodyfindingswithsource/testproof; do notre-requestrevieworforgeverdictbeforefollowupsource. RevalidateexactPR/head/main/budget/rules beforemutation; normalprotectedqueue onlyafterreview+requiredCI.",
-      "Aftercurrent6481lane, prioritize deterministic UPDATE5183 firstseed4141222487 replay/localization against mainandparent; existingissuecomment alreadyrecordsnewwindow, no duplicateissue or luckyrerun. Keep6479separatequeued.",
-      "Watch remaininglive sameheadscheduledfuzz34458064851; mainaggregatefailureisUPDATE, not fuzz. Preserveall6049/6055/canon/registry/release/EC2holds andALLGREEN."
+      "Observe existing exact17594 runs, especially js34467004187 nativePNG+versions/no-drift, docs34467004155, supply34467004107, gui34467004102 and gate34467004259. Allfullrequiredchecks mustpass; no luckyretry/cancellation.",
+      "Collect existingCopilot34467011356 then inspect actualcurrentheadreviewbody/threads; no duplicate request. ActualOpus reviews of0c/17594completedcollected; do notrelaunch.",
+      "Afterallrequiredchecks/reviewfindingsresolved, revalidateexactPR/head/main/rules/budgetthenprotectedenqueue expectedHeadOid/jumpfalse. No labels/verdictfabrication oradminmerge.",
+      "Keep6480open throughmerge andautomaticDependabotalert32/106/107reevaluation; no dismissal. Update ownexistingcommentforconcreteresults.",
+      "Collect bounded5183Astra enginewitness fromexistingagent. Onefalsepositive automatedcyberflagoccurredbeforeexecution; clarifiedfixedlocalSPARQLtask once, stopifserviceblocksagain. Need actualpinnedOxigraph/exactCIfeatureplan aftersmallwitness; do notweakencanon/comparator.",
+      "Postmerge6478 scheduledfuzz34458064851cancelledwithnonewerreplacement observed; causenotyettriaged, do notclaimfuzzhealthy. Existing5183UPDATE causedmaingatefailure. Preserveotherholds/registryoff/releaseoff/ALLGREEN."
     ],
-    "head": "26d139520f07f1ceacafbacbeb9991de371e2b53",
+    "head": "17594d4a6534c142cae764772fc42049e898eca3",
     "implementation": {
       "state": "completed_frozen_root_verified",
       "manifest": "direct-6480/implementation/manifest.json",
@@ -143,7 +143,7 @@
     },
     "pr": 6481,
     "url": "https://github.com/sparq-org/sparq/pull/6481",
-    "agent_state": "Astra now on bounded source/replay-readiness for5183; no builds or models authorized there yet",
+    "agent_state": "Astra on bounded5183localconformancetest, no6481edits pending",
     "publication": {
       "at": "2026-09-10T09:27:19.769985+00:00",
       "receipt": "direct-6480/admission/publication-receipt.json",
@@ -155,6 +155,187 @@
       "copilot_run": 34460521825
     },
     "ci": {
+      "observed_at": "2026-09-10T10:39:21.807694+00:00",
+      "head": "17594d4a6534c142cae764772fc42049e898eca3",
+      "runs": {
+        "gui": {
+          "id": 34467004102,
+          "status": "queued",
+          "conclusion": null
+        },
+        "site-e2e": {
+          "id": 34467004125,
+          "status": "in_progress",
+          "conclusion": null
+        },
+        "site-visual": {
+          "id": 34467004029,
+          "status": "in_progress",
+          "conclusion": null
+        },
+        "site-e2e-hero": {
+          "id": 34467004053,
+          "status": "in_progress",
+          "conclusion": null
+        },
+        "supply-chain": {
+          "id": 34467004107,
+          "status": "in_progress",
+          "conclusion": null
+        },
+        "vectorized-feature-off": {
+          "id": 34467004129,
+          "status": "completed",
+          "conclusion": "success"
+        },
+        "js": {
+          "id": 34467004187,
+          "status": "in_progress",
+          "conclusion": null
+        },
+        "Benchmarks": {
+          "id": 34467004461,
+          "status": "queued",
+          "conclusion": null
+        },
+        "fuzz": {
+          "id": 34467004462,
+          "status": "queued",
+          "conclusion": null
+        },
+        "CI": {
+          "id": 34467004591,
+          "status": "queued",
+          "conclusion": null
+        },
+        "feature-matrix": {
+          "id": 34467004558,
+          "status": "queued",
+          "conclusion": null
+        },
+        "pr-area-label": {
+          "id": 34467004301,
+          "status": "queued",
+          "conclusion": null
+        },
+        "ci-summary": {
+          "id": 34467004259,
+          "status": "queued",
+          "conclusion": null
+        },
+        "routing-self-tests": {
+          "id": 34467004292,
+          "status": "queued",
+          "conclusion": null
+        },
+        "flow-on-gates": {
+          "id": 34467004203,
+          "status": "queued",
+          "conclusion": null
+        },
+        "site-e2e-foundation": {
+          "id": 34467004157,
+          "status": "queued",
+          "conclusion": null
+        },
+        "docs-quality": {
+          "id": 34467004155,
+          "status": "queued",
+          "conclusion": null
+        },
+        "pr-title": {
+          "id": 34467005175,
+          "status": "completed",
+          "conclusion": "success"
+        },
+        "formal-verification": {
+          "id": 34467004286,
+          "status": "completed",
+          "conclusion": "success"
+        },
+        "Running Copilot Code Review": {
+          "id": 34467011356,
+          "status": "queued",
+          "conclusion": null
+        }
+      },
+      "evidence": "direct-6480/admission/published175-first-runs.json",
+      "required_observation": "Read real Node/npm versions; both Next15.5.24; actual sharp0.35.4+vips>=8.18.6 andsuccessfulPNG; final no-drift; docs13/advisory25+checker; hardfrontend andrequiredgate. Do notinherit26druntimeapproval."
+    },
+    "review_followup": {
+      "state": "completed_frozen_root_verified",
+      "head": "0c6a780593a9b3381fb158e426519a2a6d8d17f9",
+      "parent": "26d139520f07f1ceacafbacbeb9991de371e2b53",
+      "manifest": "direct-6480/review-followup/manifest.json",
+      "manifest_sha256": "a1772a5d4bd72f879439f280c265cebd26f3d24a7209d6dc2419ae6e5d10b9a2",
+      "root_verification": "direct-6480/admission/review-followup-root-verification.json",
+      "files": 716,
+      "review": {
+        "state": "completed_collected",
+        "session_id": 56259,
+        "model": "claude-opus-5",
+        "effort": "xhigh",
+        "input": "direct-6480/admission/opus-followup-input.md",
+        "output": "direct-6480/admission/opus-followup-review.json",
+        "completion": "direct-6480/admission/opus-followup-completion.json",
+        "collect_policy": "56259completedcollected; no poll/relaunch.",
+        "verdict": "approve_for_ci",
+        "blocking_findings": [],
+        "result": "direct-6480/admission/opus-followup-result.json",
+        "root_disposition": "direct-6480/admission/opus-followup-root-disposition.json",
+        "output_sha256": "a19cb03ec16c95f40892c19f3a6dffe044d069c4e67307e483e4b10e98f67145"
+      }
+    },
+    "ci_first_failures": {
+      "directory": "direct-6480/ci-first-failures",
+      "manifest_sha256": "31dcfe2332e51b9f5db2b41d6eca74542e2b893bc0ebc28835526a5493a84fd5",
+      "all38_hashes_root_verified": true,
+      "docs": "JsLaneWasmPackInstall.test_install_precedes_npm_ci assumes inline scalar; preservesemanticorder guard.",
+      "supply_chain": "25tests2failures: Nextparent/range stale; strictlive-data guardcorrect. Sharpunderlyingalert remainsopen.",
+      "aggregate": "fail-fast on docs, notsourcebuildevidence",
+      "copilot": "Noinline threads; bodyflags sharpmetadata and missingconsumerpaths, both addressedinplannedfollowup"
+    },
+    "current_head_runtime": {
+      "at": "2026-09-10T09:52:26.406334+00:00",
+      "head": "26d139520f07f1ceacafbacbeb9991de371e2b53",
+      "js_job": 102816976635,
+      "node": "22.23.2",
+      "npm": "10.9.8",
+      "actual_root_npmci_and_installed_resolution": "success; log reports Next15.5.24 in bothworkspaces",
+      "lock_and_minima_cleanliness": "git diff --exit-code ran in same root bash-e step; step completed success and advanced to build",
+      "downstream_js_build_and_node_tests": "success",
+      "gui": "11success,1expectedmanualflakeprobe skip; bothfrontendtargetbuilds andsitebuild/typecheck passed",
+      "title": "correctedto chore(deps); normaledited-event run34461973903success",
+      "qualification": "This proves current26d only; planned followupdependency/securityrecord/test/trigger changes must get fresh review+CI.",
+      "log_sha256": "2d04c5bc42095d8a7dc9eb2bb8d421db1f67d9238c3bac7d62c4ebd24a59b76b"
+    },
+    "native_smoke_followup": {
+      "agent": "/root/postmerge_ci",
+      "state": "completed_frozen_root_verified_review_approved",
+      "parent": "0c6a780593a9b3381fb158e426519a2a6d8d17f9",
+      "directory": "direct-6480/native-smoke-followup",
+      "scope": "Only installed sharp/versions/nonemptygeneratedPNG checks inexistingrootnpmci step; no other CIpolicychanges",
+      "review_required": "ActualOpus5 compact delta review after frozenrootverification",
+      "head": "17594d4a6534c142cae764772fc42049e898eca3",
+      "manifest_sha256": "f04adb1beaaa0ce01fbe854508ebc98b2c747307276da3ba41267003e040c948",
+      "root_verification": "direct-6480/admission/native-smoke-root-verification.json",
+      "review": {
+        "state": "completed_collected",
+        "session_id": 79373,
+        "model": "claude-opus-5",
+        "effort": "xhigh",
+        "input": "direct-6480/admission/opus-native-smoke-input.md",
+        "output": "direct-6480/admission/opus-native-smoke-review.json",
+        "completion": "direct-6480/admission/opus-native-smoke-completion.json",
+        "collect_policy": "79373completedcollected, do notpoll/relaunch",
+        "verdict": "approve_delta_for_ci",
+        "blocking_findings": [],
+        "result": "direct-6480/admission/opus-native-smoke-result.json",
+        "root_disposition": "direct-6480/admission/opus-native-smoke-root-disposition.json",
+        "output_sha256": "077c018b0b2e710a5b2be3910501768595ade6ac53de914def46617e6eff93bf"
+      }
+    },
+    "previous_ci": {
       "observed_at": "2026-09-10T09:25:33.946641+00:00",
       "runs": {
         "Running Copilot Code Review": {
@@ -263,60 +444,16 @@
       "all_published_head_runs_completed": true,
       "terminal_observation": "direct-6480/admission/pre-followup-runs.json"
     },
-    "review_followup": {
-      "state": "completed_frozen_root_verified",
-      "head": "0c6a780593a9b3381fb158e426519a2a6d8d17f9",
-      "parent": "26d139520f07f1ceacafbacbeb9991de371e2b53",
-      "manifest": "direct-6480/review-followup/manifest.json",
-      "manifest_sha256": "a1772a5d4bd72f879439f280c265cebd26f3d24a7209d6dc2419ae6e5d10b9a2",
-      "root_verification": "direct-6480/admission/review-followup-root-verification.json",
-      "files": 716,
-      "review": {
-        "state": "completed_collected",
-        "session_id": 56259,
-        "model": "claude-opus-5",
-        "effort": "xhigh",
-        "input": "direct-6480/admission/opus-followup-input.md",
-        "output": "direct-6480/admission/opus-followup-review.json",
-        "completion": "direct-6480/admission/opus-followup-completion.json",
-        "collect_policy": "56259completedcollected; no poll/relaunch.",
-        "verdict": "approve_for_ci",
-        "blocking_findings": [],
-        "result": "direct-6480/admission/opus-followup-result.json",
-        "root_disposition": "direct-6480/admission/opus-followup-root-disposition.json",
-        "output_sha256": "a19cb03ec16c95f40892c19f3a6dffe044d069c4e67307e483e4b10e98f67145"
-      }
-    },
-    "ci_first_failures": {
-      "directory": "direct-6480/ci-first-failures",
-      "manifest_sha256": "31dcfe2332e51b9f5db2b41d6eca74542e2b893bc0ebc28835526a5493a84fd5",
-      "all38_hashes_root_verified": true,
-      "docs": "JsLaneWasmPackInstall.test_install_precedes_npm_ci assumes inline scalar; preservesemanticorder guard.",
-      "supply_chain": "25tests2failures: Nextparent/range stale; strictlive-data guardcorrect. Sharpunderlyingalert remainsopen.",
-      "aggregate": "fail-fast on docs, notsourcebuildevidence",
-      "copilot": "Noinline threads; bodyflags sharpmetadata and missingconsumerpaths, both addressedinplannedfollowup"
-    },
-    "current_head_runtime": {
-      "at": "2026-09-10T09:52:26.406334+00:00",
-      "head": "26d139520f07f1ceacafbacbeb9991de371e2b53",
-      "js_job": 102816976635,
-      "node": "22.23.2",
-      "npm": "10.9.8",
-      "actual_root_npmci_and_installed_resolution": "success; log reports Next15.5.24 in bothworkspaces",
-      "lock_and_minima_cleanliness": "git diff --exit-code ran in same root bash-e step; step completed success and advanced to build",
-      "downstream_js_build_and_node_tests": "success",
-      "gui": "11success,1expectedmanualflakeprobe skip; bothfrontendtargetbuilds andsitebuild/typecheck passed",
-      "title": "correctedto chore(deps); normaledited-event run34461973903success",
-      "qualification": "This proves current26d only; planned followupdependency/securityrecord/test/trigger changes must get fresh review+CI.",
-      "log_sha256": "2d04c5bc42095d8a7dc9eb2bb8d421db1f67d9238c3bac7d62c4ebd24a59b76b"
-    },
-    "native_smoke_followup": {
-      "agent": "/root/postmerge_ci",
-      "state": "implementation_running",
-      "parent": "0c6a780593a9b3381fb158e426519a2a6d8d17f9",
-      "directory": "direct-6480/native-smoke-followup",
-      "scope": "Only installed sharp/versions/nonemptygeneratedPNG checks inexistingrootnpmci step; no other CIpolicychanges",
-      "review_required": "ActualOpus5 compact delta review after frozenrootverification"
+    "followup_publication": {
+      "completed_at": "2026-09-10T10:37:10.927523+00:00",
+      "head": "17594d4a6534c142cae764772fc42049e898eca3",
+      "receipt": "direct-6480/admission/followup-publication-receipt.json",
+      "pr_state": "direct-6480/admission/published175-first-pr.json",
+      "first_runs": "direct-6480/admission/published175-first-runs.json",
+      "issue_comment": "https://github.com/sparq-org/sparq/issues/6480#issuecomment-5616304836",
+      "auto_merge": null,
+      "draft": false,
+      "copilot_run": 34467011356
     }
   },
   "prs": {
@@ -731,16 +868,15 @@
       "postmerge_validation": "CI34435176563,featurematrix34435176570,ci-summary34435176404,fuzz34435176590 allSUCCESS onmergedd41; sourcesbyteverified."
     },
     "6481": {
-      "head": "26d139520f07f1ceacafbacbeb9991de371e2b53",
+      "head": "17594d4a6534c142cae764772fc42049e898eca3",
       "state": "OPEN",
       "draft": false,
-      "auto_merge": null,
-      "issue": 6480,
       "url": "https://github.com/sparq-org/sparq/pull/6481",
-      "review": "actualOpusfull50c+delta26dapprovedforCI; Copilotpending",
-      "ci": "docs/supplychain/aggregatefailed; runtimeJS+GUI pass; titlecorrectionpass",
-      "main_base": "781f667c19a8ebb779cfccb24b05ea432360b025",
-      "title": "chore(deps): patch Next.js across site and GUI"
+      "title": "chore(deps): patch Next.js and sharp across site and GUI",
+      "queue": null,
+      "gate": "freshCIpending",
+      "actual_independent_reviews": "Opus5xhigh0c+17594approvedforCI",
+      "copilot_run": 34467011356
     }
   },
   "registry": {
@@ -791,30 +927,122 @@
     }
   },
   "next_actions": [
-    "Collect existing Astra review-followup packet oncefinished; verify scopedlock/securityrecord/test/triggerchanges and alltests; obtain actual Opus5 xhigh security/finalreview beforeonefollowuppush toPR6481.",
-    "Preserve oldhead26d actualNode22.23.2/npm10.9.8 npmci, Next15.5.24bothworkspaces, no lock/minimachurn andGUIbuildproof; require freshvalidationforfollowuphead.",
-    "Update current6480/6481 trackingwith sharp32expandedremediation aftercandidateproven; #3767 is CLOSED historicalumbrella, notactivecurrenttracking. Recheckalerts32/106/107automaticallyaftermerge, no dismissals.",
-    "HandleCopilotbodyfindingswithsource/testproof; do notre-requestrevieworforgeverdictbeforefollowupsource. RevalidateexactPR/head/main/budget/rules beforemutation; normalprotectedqueue onlyafterreview+requiredCI.",
-    "Aftercurrent6481lane, prioritize deterministic UPDATE5183 firstseed4141222487 replay/localization against mainandparent; existingissuecomment alreadyrecordsnewwindow, no duplicateissue or luckyrerun. Keep6479separatequeued.",
-    "Watch remaininglive sameheadscheduledfuzz34458064851; mainaggregatefailureisUPDATE, not fuzz. Preserveall6049/6055/canon/registry/release/EC2holds andALLGREEN."
+    "Observe existing exact17594 runs, especially js34467004187 nativePNG+versions/no-drift, docs34467004155, supply34467004107, gui34467004102 and gate34467004259. Allfullrequiredchecks mustpass; no luckyretry/cancellation.",
+    "Collect existingCopilot34467011356 then inspect actualcurrentheadreviewbody/threads; no duplicate request. ActualOpus reviews of0c/17594completedcollected; do notrelaunch.",
+    "Afterallrequiredchecks/reviewfindingsresolved, revalidateexactPR/head/main/rules/budgetthenprotectedenqueue expectedHeadOid/jumpfalse. No labels/verdictfabrication oradminmerge.",
+    "Keep6480open throughmerge andautomaticDependabotalert32/106/107reevaluation; no dismissal. Update ownexistingcommentforconcreteresults.",
+    "Collect bounded5183Astra enginewitness fromexistingagent. Onefalsepositive automatedcyberflagoccurredbeforeexecution; clarifiedfixedlocalSPARQLtask once, stopifserviceblocksagain. Need actualpinnedOxigraph/exactCIfeatureplan aftersmallwitness; do notweakencanon/comparator.",
+    "Postmerge6478 scheduledfuzz34458064851cancelledwithnonewerreplacement observed; causenotyettriaged, do notclaimfuzzhealthy. Existing5183UPDATE causedmaingatefailure. Preserveotherholds/registryoff/releaseoff/ALLGREEN."
   ],
   "followup_lane": {
     "issue": 5183,
     "agent": "/root/postmerge_ci",
-    "state": "readiness_completed_runtime_not_started",
+    "state": "bounded_engine_witness_running",
     "base": "781f667c19a8ebb779cfccb24b05ea432360b025",
     "scope": "firstseed4141222487 deterministic localization readiness; no runtime/build yet; no attribution to6478",
     "limits": "new output<=64MiB, inspect warm cache only; preserve canonNO_GO holds and strict comparator",
     "report": "direct-5183/readiness/report.json",
     "manifest_sha256": "aed6368c35484f51ec6ea1fa4fcdeb208aaa6e8b8eed19518d0db5470269dd01",
-    "proposed_next": "Defaultfeature publicAPI2operationenginewitness main/parent withwarmrlibs,\u22642min/64MiB, no dependencycompile. Root mustread/verifyreadiness thenauthorize; no exactCIfeatureclaim."
+    "proposed_next": "Defaultfeature publicAPI2operationenginewitness main/parent withwarmrlibs,\u22642min/64MiB, no dependencycompile. Root mustread/verifyreadiness thenauthorize; no exactCIfeatureclaim.",
+    "directory": "direct-5183/engine-witness",
+    "authorized_limits": "\u22642minlink/run phase,64MiBoutputs,jobs1,noCargo/dependencycompile/network; defaultwarmrlibsonly, noexactCIclaim",
+    "dispatch_event": "First runtime task failed automatedpossiblecybersecurityflag beforeexecution; onefollowupclarified localfixed-dataSPARQLconformance; if serviceblocksagainstopandreport, no workaround."
   },
   "budget": {
-    "remaining": 4994,
-    "observed_at": "2026-09-10T00:16Z (approximate API file collection; not current remaining)",
-    "exhausted": false,
-    "scope": "Core before boundedadmission/commentreads; graphql independentlyavailable. No rate-limiterrors/retries.",
-    "evidence": "direct-6475/source-admission/rate-budget-0018.json"
+    "observed_at": "2026-09-10T10:36:57.270637+00:00",
+    "resources": {
+      "core": {
+        "limit": 5000,
+        "used": 23,
+        "remaining": 4977,
+        "reset": 1789037384
+      },
+      "search": {
+        "limit": 30,
+        "used": 0,
+        "remaining": 30,
+        "reset": 1789036677
+      },
+      "graphql": {
+        "limit": 5000,
+        "used": 0,
+        "remaining": 5000,
+        "reset": 1789040217
+      },
+      "integration_manifest": {
+        "limit": 5000,
+        "used": 0,
+        "remaining": 5000,
+        "reset": 1789040217
+      },
+      "source_import": {
+        "limit": 100,
+        "used": 0,
+        "remaining": 100,
+        "reset": 1789036677
+      },
+      "code_scanning_autofix": {
+        "limit": 10,
+        "used": 0,
+        "remaining": 10,
+        "reset": 1789036677
+      },
+      "actions_runner_registration": {
+        "limit": 10000,
+        "used": 0,
+        "remaining": 10000,
+        "reset": 1789040217
+      },
+      "scim": {
+        "limit": 15000,
+        "used": 0,
+        "remaining": 15000,
+        "reset": 1789040217
+      },
+      "dependency_snapshots": {
+        "limit": 100,
+        "used": 0,
+        "remaining": 100,
+        "reset": 1789036677
+      },
+      "dependency_sbom": {
+        "limit": 100,
+        "used": 0,
+        "remaining": 100,
+        "reset": 1789036677
+      },
+      "audit_log": {
+        "limit": 1750,
+        "used": 0,
+        "remaining": 1750,
+        "reset": 1789040217
+      },
+      "audit_log_streaming": {
+        "limit": 15,
+        "used": 0,
+        "remaining": 15,
+        "reset": 1789040217
+      },
+      "code_search": {
+        "limit": 10,
+        "used": 0,
+        "remaining": 10,
+        "reset": 1789036677
+      },
+      "copilot_usage_records": {
+        "limit": 1750,
+        "used": 0,
+        "remaining": 1750,
+        "reset": 1789040217
+      },
+      "enterprise_token_inventory": {
+        "limit": 1750,
+        "used": 0,
+        "remaining": 1750,
+        "reset": 1789040217
+      }
+    },
+    "policy": "failclosed onexhaustion; no retriesuntilfirsteligiblepostresetdispatch"
   },
   "actions_backlog": {
     "before_pr6469": {

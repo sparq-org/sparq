@@ -1,7 +1,7 @@
 from pathlib import Path
 import datetime,json,subprocess
 R=Path('/private/tmp/sparq-pr6049/.throughput-monitor'); A=R/'direct-6480/admission'; W=R/'worktrees/issue6480'
-HEAD='0c6a780593a9b3381fb158e426519a2a6d8d17f9'; OLD='26d139520f07f1ceacafbacbeb9991de371e2b53'; BASE='781f667c19a8ebb779cfccb24b05ea432360b025'; BRANCH='codex/next-security-patch'
+HEAD='17594d4a6534c142cae764772fc42049e898eca3'; OLD='26d139520f07f1ceacafbacbeb9991de371e2b53'; BASE='781f667c19a8ebb779cfccb24b05ea432360b025'; BRANCH='codex/next-security-patch'
 receipt={'started_at':datetime.datetime.now(datetime.timezone.utc).isoformat()}
 def save(): (A/'followup-publication-receipt.json').write_text(json.dumps(receipt,indent=2)+'\n')
 def command(args):
@@ -20,10 +20,12 @@ try:
  assert not (A/'followup-publication-receipt.json').exists(), 'Inspect existing mutation receipt; never blindly replay'
  budget=api('rate_limit'); assert budget['resources']['core']['remaining']>=40 and budget['resources']['graphql']['remaining']>=10, 'Fail closed: insufficient request reserve'
  receipt['budget']=budget['resources']
- rev=json.loads((A/'opus-followup-result.json').read_text()); assert rev['reviewed_head']==HEAD and rev['verdict']=='approve_for_ci' and not rev['blocking_findings']
- disposition=json.loads((A/'opus-followup-root-disposition.json').read_text()); assert disposition['approved_for_publication'] is True and disposition['head']==HEAD
+ rev=json.loads((A/'opus-followup-result.json').read_text()); assert rev['reviewed_head']=='0c6a780593a9b3381fb158e426519a2a6d8d17f9' and rev['verdict']=='approve_for_ci' and not rev['blocking_findings']
+ disposition=json.loads((A/'opus-followup-root-disposition.json').read_text()); assert disposition['approved_for_publication'] is True and disposition['head']=='0c6a780593a9b3381fb158e426519a2a6d8d17f9'
+ native=json.loads((A/'opus-native-smoke-result.json').read_text()); assert native['reviewed_head']==HEAD and native['verdict']=='approve_delta_for_ci' and not native['blocking_findings']
+ native_disposition=json.loads((A/'opus-native-smoke-root-disposition.json').read_text()); assert native_disposition['head']==HEAD and native_disposition['approved_for_publication'] is True
  assert command(['git','rev-parse','HEAD']).strip()==HEAD and command(['git','branch','--show-current']).strip()==BRANCH
- assert command(['git','rev-parse','HEAD^']).strip()==OLD and not command(['git','status','--porcelain'])
+ assert command(['git','rev-parse','HEAD^']).strip()=='0c6a780593a9b3381fb158e426519a2a6d8d17f9' and not command(['git','status','--porcelain'])
  assert command(['git','diff','--name-only',BASE,HEAD]).splitlines()==['.github/workflows/js.yml','gui/app/package.json','package-lock.json','scripts/tests/test_js_wasm_pack_install.py','site/package.json','supply-chain/npm-advisories.md']
  registry=api('repos/jeswr/agent-account-registry/actions/permissions');assert registry['enabled'] is False;receipt['registry']=registry
  main=api('repos/sparq-org/sparq/git/ref/heads/main');assert main['object']['sha']==BASE;receipt['main']=main

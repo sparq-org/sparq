@@ -1,0 +1,14 @@
+{"sharp":"0.35.4","versions":{"sharp":"0.35.4","vips":"STUB-NOT-NATIVE"}}
+AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+2 !== 1
+
+    at [stdin]:14:10
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5) {
+  generatedMessage: true,
+  code: 'ERR_ASSERTION',
+  actual: 2,
+  expected: 1,
+  operator: 'strictEqual',
+  diff: 'simple'
+}

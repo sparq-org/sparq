@@ -1,0 +1,12 @@
+{
+  "head": "17594d4a6534c142cae764772fc42049e898eca3",
+  "parent": "0c6a780593a9b3381fb158e426519a2a6d8d17f9",
+  "manifest_sha256": "f04adb1beaaa0ce01fbe854508ebc98b2c747307276da3ba41267003e040c948",
+  "verified_files": 77,
+  "packet_sha256": "7ee72282e370b5d1a6690195e336cfa7a8f2f7a63fa34ebfcbc8de28c3754b21",
+  "clean": true,
+  "final_workflow_source_matches_git": true,
+  "exact_delta_matches_git": true,
+  "only_workflow_changed": true,
+  "artifact_selection": "Use final/ evidence. Root initial assertion against intentionally retained initial draft failed before any action; selecting correct final snapshot matches commit."
+}

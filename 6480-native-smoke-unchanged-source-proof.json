@@ -1,0 +1,22 @@
+{
+  "package-lock.json": {
+    "unchanged_from_parent": true,
+    "sha256": "46c1fe3759f31b8a63a59c00ecb5e3a4ca213539134cbbd6983698f00cf2fb9c"
+  },
+  "site/package.json": {
+    "unchanged_from_parent": true,
+    "sha256": "60bbea3bc8c3de693274b92882b97173e514eb0f41b7ee8c3870c72235aa887d"
+  },
+  "gui/app/package.json": {
+    "unchanged_from_parent": true,
+    "sha256": "b0e1e4d94d6fe2285e52e2524b2f30e20fe576275f8765f6d062732e40985df4"
+  },
+  "scripts/tests/test_js_wasm_pack_install.py": {
+    "unchanged_from_parent": true,
+    "sha256": "fe12f7afd46325298d4179fa831fff79fa92528d51205c3876a0cb61cfa28cc5"
+  },
+  "supply-chain/npm-advisories.md": {
+    "unchanged_from_parent": true,
+    "sha256": "9d56b8b38c81bce8e3f94c88d8719202b479ff235f155171a60ba3d0cd84f8d3"
+  }
+}

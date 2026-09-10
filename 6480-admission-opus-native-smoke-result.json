@@ -1,0 +1,34 @@
+{
+  "verdict": "approve_delta_for_ci",
+  "reviewed_head": "17594d4a6534c142cae764772fc42049e898eca3",
+  "blocking_findings": [],
+  "nonblocking_findings": [
+    {
+      "id": "NB1",
+      "title": "Lock key and hoisting assumed, not proven by a real install",
+      "detail": "The script hardcodes packages['node_modules/sharp'] and resolves require('sharp') from the repo root. If npm ci nests the instance (e.g. node_modules/next/node_modules/sharp), require or the .version read throws. Failure mode is fail-closed (TypeError/MODULE_NOT_FOUND -> nonzero exit -> red step), so it cannot produce a false pass, but the error text would be opaque relative to the intended assertion message. Evidence (single recorded sharp lock instance, top-level-key advisory tooling) makes root hoisting the expected outcome; first real CI run confirms it."
+    },
+    {
+      "id": "NB2",
+      "title": "Native/platform package identity not asserted",
+      "detail": "Only sharp.versions.sharp (the JS wrapper package version) is compared to the lock. The selected @img/sharp-<platform> prebuilt version and sharp.versions.vips are printed but never asserted, so a drifted or substituted platform binary that still loads would pass. Printing full versions preserves diagnosability; consider asserting presence/shape of versions.vips later."
+    },
+    {
+      "id": "NB3",
+      "title": "Weak byte-length bound",
+      "detail": "assert.ok(data.length > 8) is satisfied by the signature check alone plus a few bytes; it is a liveness rather than a content check. Format/dimension/signature assertions carry the real weight."
+    },
+    {
+      "id": "NB4",
+      "title": "Stub-only control coverage",
+      "detail": "Positive/negative controls exercised control flow and exit-code propagation against a stub on Node 24.19.0. No real libvips/ABI execution and no Node 22 native compatibility claim; the packet states this limit explicitly."
+    }
+  ],
+  "remaining_validation": [
+    "First Linux CI run on Node 22 at this head: confirm require('sharp') resolves from repo root after npm ci, that packages['node_modules/sharp'] exists in the committed lock, and that the real native PNG smoke logs a byte count and exits 0.",
+    "Confirm the emitted sharp.versions payload includes a real libvips version (non-stub) in the CI log.",
+    "Confirm the trailing git diff --exit-code guard still passes after the smoke step (no file writes expected; sharp output is in-memory only).",
+    "Windows/other arch optional packages remain unexercised by design; @img/sharp-win32-ia32 engines ^20.9.0 is not selected on Ubuntu and is unchanged."
+  ],
+  "rationale": "The delta is confined to one run scalar in the existing root install step; npm ci remains the first command, working-directory: . is unchanged, the Next resolution check and the final tracked-lock/minima no-drift command are preserved, and yaml-scope evidence plus the 13 inspection tests show no other parsed field moved. Shell mechanics are sound: all heredoc lines share the block scalar indentation so the NODE terminator lands at column 0 after YAML dedent; the quoted <<'NODE' delimiter prevents shell expansion of ${data.length} and #-prefixed text; the heredoc redirects only node's stdin, leaving the subsequent git command reading the step script normally; and GitHub's default bash -e makes any nonzero node exit fail the step. Node stdin evaluation is CommonJS (require syntax also satisfies detection), and stdin module paths derive from cwd, so require('sharp') and require('./package-lock.json') resolve against the installed root tree and the committed lock. APIs used are public and stable: sharp.versions.sharp, sharp({create}).png().toBuffer({resolveWithObject:true}) returning {data, info}. Failure propagation is complete in both directions: synchronous require/assert throws terminate nonzero, and the async path is caught with process.exitCode = 1, matching the recorded negative controls (missing module, async rejection, lock mismatch, empty PNG, wrong dimensions all exit 1; positive exits 0; the superseded package.json-access variant correctly fails against the exports-restricted stub). node:assert/strict makes deepEqual strict, and Buffer.subarray returns a Buffer, so the PNG signature comparison is a genuine byte-for-byte check. This closes the stated gap: optional-dependency omission or native load failure now fails CI rather than passing silently, and the script writes nothing, so the no-drift guard is unaffected. No dependency, lock, override, trigger, permission or concurrency change is present, so the previously approved graph is not re-reviewed. Publication for CI only; not a merge, runtime or deployment approval."
+}
