@@ -132,7 +132,10 @@ jobs:
       # published-client SBOM stays clean (runtime tree = {fzstd} only).
       - name: Install npm dependencies (full workspace, from repo root)
         working-directory: .
-        run: npm ci
+        run: |
+          npm ci
+          npm ls next --workspace=site --workspace=gui/app
+          git diff --exit-code -- package-lock.json gui/app/package.json site/package.json
 
       - name: Build (wasm-pack + tsc)
         run: npm run build
