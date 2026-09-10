@@ -1,0 +1,76 @@
+{
+  "head": "0b4554b924a80432cc1b572bd19f8e58cdbfb4e6",
+  "base": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+  "checkout_sha": "573dba455effaa982b60776f9b03e6e324d6cc2f",
+  "checkout_parents": [
+    "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+    "0b4554b924a80432cc1b572bd19f8e58cdbfb4e6"
+  ],
+  "reviewed_tree": "85c1ed31830b08bd5cabb82fd3a2e1a1ef984aa2",
+  "checkout_tree": "85c1ed31830b08bd5cabb82fd3a2e1a1ef984aa2",
+  "whole_tree_equal": true,
+  "full_checkout_from_each_actual_log": {
+    "bulk1-log": [
+      {
+        "sha": "573dba455effaa982b60776f9b03e6e324d6cc2f",
+        "line": 139
+      }
+    ],
+    "bulk2-log": [
+      {
+        "sha": "573dba455effaa982b60776f9b03e6e324d6cc2f",
+        "line": 139
+      }
+    ],
+    "bulk3-log": [
+      {
+        "sha": "573dba455effaa982b60776f9b03e6e324d6cc2f",
+        "line": 139
+      }
+    ],
+    "archive-log": [
+      {
+        "sha": "573dba455effaa982b60776f9b03e6e324d6cc2f",
+        "line": 139
+      }
+    ],
+    "clippy-log": [
+      {
+        "sha": "573dba455effaa982b60776f9b03e6e324d6cc2f",
+        "line": 137
+      }
+    ],
+    "msrv-log": [
+      {
+        "sha": "573dba455effaa982b60776f9b03e6e324d6cc2f",
+        "line": 138
+      }
+    ],
+    "privacy-log": [
+      {
+        "sha": "573dba455effaa982b60776f9b03e6e324d6cc2f",
+        "line": 133
+      }
+    ],
+    "fuzz-log": [
+      {
+        "sha": "573dba455effaa982b60776f9b03e6e324d6cc2f",
+        "line": 137
+      }
+    ],
+    "gate-log": [
+      {
+        "sha": "573dba455effaa982b60776f9b03e6e324d6cc2f",
+        "line": 139
+      }
+    ]
+  },
+  "changed_paths": [
+    "crates/sparq-bench/src/update_fuzz.rs"
+  ],
+  "module_sha256": "ca35e2bd604e8abe5b3004b2987dbb7c377b9fd369c1d2f82b68d164b888caa4",
+  "allowlist_sha256": "2b6821405a540221cadde3df8ca2468cf141d1a907c44d75e881f6feadbdedd2",
+  "allowlist_unchanged": true,
+  "working_tree_status": "",
+  "pr_open_nondraft": true
+}

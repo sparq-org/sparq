@@ -1,0 +1,146 @@
+{
+  "purpose": "PR6487 current Linux CI execution evidence only; no code review or publication authorization",
+  "author": "GPT-6 Astra xhigh",
+  "head": "0b4554b924a80432cc1b572bd19f8e58cdbfb4e6",
+  "result": "READY_FOR_ROOT_CI_ASSESSMENT_WITH_EXPLICIT_SCOPE_LIMITS",
+  "identity": {
+    "head": "0b4554b924a80432cc1b572bd19f8e58cdbfb4e6",
+    "base": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+    "checkout_sha": "573dba455effaa982b60776f9b03e6e324d6cc2f",
+    "checkout_parents": [
+      "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+      "0b4554b924a80432cc1b572bd19f8e58cdbfb4e6"
+    ],
+    "reviewed_tree": "85c1ed31830b08bd5cabb82fd3a2e1a1ef984aa2",
+    "checkout_tree": "85c1ed31830b08bd5cabb82fd3a2e1a1ef984aa2",
+    "whole_tree_equal": true,
+    "full_checkout_from_each_actual_log": {
+      "bulk1-log": [
+        {
+          "sha": "573dba455effaa982b60776f9b03e6e324d6cc2f",
+          "line": 139
+        }
+      ],
+      "bulk2-log": [
+        {
+          "sha": "573dba455effaa982b60776f9b03e6e324d6cc2f",
+          "line": 139
+        }
+      ],
+      "bulk3-log": [
+        {
+          "sha": "573dba455effaa982b60776f9b03e6e324d6cc2f",
+          "line": 139
+        }
+      ],
+      "archive-log": [
+        {
+          "sha": "573dba455effaa982b60776f9b03e6e324d6cc2f",
+          "line": 139
+        }
+      ],
+      "clippy-log": [
+        {
+          "sha": "573dba455effaa982b60776f9b03e6e324d6cc2f",
+          "line": 137
+        }
+      ],
+      "msrv-log": [
+        {
+          "sha": "573dba455effaa982b60776f9b03e6e324d6cc2f",
+          "line": 138
+        }
+      ],
+      "privacy-log": [
+        {
+          "sha": "573dba455effaa982b60776f9b03e6e324d6cc2f",
+          "line": 133
+        }
+      ],
+      "fuzz-log": [
+        {
+          "sha": "573dba455effaa982b60776f9b03e6e324d6cc2f",
+          "line": 137
+        }
+      ],
+      "gate-log": [
+        {
+          "sha": "573dba455effaa982b60776f9b03e6e324d6cc2f",
+          "line": 139
+        }
+      ]
+    },
+    "changed_paths": [
+      "crates/sparq-bench/src/update_fuzz.rs"
+    ],
+    "module_sha256": "ca35e2bd604e8abe5b3004b2987dbb7c377b9fd369c1d2f82b68d164b888caa4",
+    "allowlist_sha256": "2b6821405a540221cadde3df8ca2468cf141d1a907c44d75e881f6feadbdedd2",
+    "allowlist_unchanged": true,
+    "working_tree_status": "",
+    "pr_open_nondraft": true
+  },
+  "module_tests": {
+    "passed": 26,
+    "new_passed": 6,
+    "fixed_window_smoke": "PASS in bulk2 job103014142251 log536",
+    "bulk_job_ids": [
+      103014142138,
+      103014142251,
+      103014142149
+    ],
+    "selected_tests_total": 66,
+    "scope": "Selection affected only sparq-bench (1/68 members); 22 tests each bulk shard. Not an executed full-workspace unit/integration test sweep."
+  },
+  "workspace_compile": "Successful cargo nextest archive --workspace --all-targets --features approx-ann,filtered-ann,vec-predicate, archive artifact10169127229 digest908dc8bb1be24b9c2fea8e051f1acb1fa6e9ccb2a122a73e8747186cb6124eea consumed by all3 shards; workspace doctests also successful. No local archive downloaded.",
+  "clippy": "Successful workspace --all-targets -Dwarnings default and --all-features; exact job103009171977. Workspace rustdoc default/all-features -Dwarnings also successful.",
+  "msrv": "Actual Rust1.88.0 cargo check --workspace --all-targets --exclude sparq-py --exclude sparq-hdt success; sparq-bench checked. Job103009171614.",
+  "formatter": {
+    "whole_workspace_check": "executed, exit 1; nonblocking by existing ci.yml1432-1441",
+    "version": "rustfmt1.9.0-stable (8bab26f4f6 2026-07-14)",
+    "changed_file_diagnostic_occurrences": 0,
+    "changed_file_interpretation": "No formatting diff for the touched file appears in the complete formatter output. This is not reported as a whole-workspace fmt PASS. No new local formatter run.",
+    "supplement": "format-clarification.json: zero basename occurrences in10834 formatter diff headers; exact previously formatted6test body present in current source; no source correction indicated."
+  },
+  "privacy": "Actual Linux bash scripts/check-privacy-claims.sh succeeded over784files; its32 selftests passed. Job103008605738.",
+  "preflight_qualification": "CI executes preflight.py --self-test and test_preflight.py, not the author preflight runner against the actual PR diff. Nested printed FAIL/PASS examples belong to hermetic selftests; they are not actual PR preflight findings. The prior local Bash3 author-preflight limitation is not represented as a full Linux author-preflight execution. Actual delegated privacy gate is separately proven.",
+  "gate": {
+    "id": 103008606158,
+    "app_id": 15368,
+    "head": "0b4554b924a80432cc1b572bd19f8e58cdbfb4e6",
+    "status": "completed",
+    "conclusion": "success",
+    "completed_at": "2026-09-10T19:37:20Z",
+    "run": 34518125361,
+    "tier": "full",
+    "stable_gating_total": 64,
+    "ran": 41,
+    "skipped": 23,
+    "advisory_excluded": 6
+  },
+  "ci": {
+    "completed:success": 22,
+    "completed:skipped": 17
+  },
+  "matrix": {
+    "completed:success": 7,
+    "completed:skipped": 4
+  },
+  "fuzz": "Completed differential smoke job103010284347 runs QUERY fuzz fixed windows; this is distinct from UPDATE fixed_window_smoke proved in bulk. cargo-fuzz randomized parser/mmap leg skipped. No nightly UPDATE soak evidence was requested/fetched.",
+  "remaining_limits": [
+    "Normal nightly differential-update.yml schedule/manual soak not observed on this candidate. No seed replay performed in this task.",
+    "Conformance/wasm CI jobs selected out for bench-only change; their skipped status is not execution proof. Matrix detailed per-leg logs not fetched; job-level metadata only.",
+    "Workspace fmt informational check failed on existing broad formatting debt; no touched-file diagnostic observed.",
+    "Full Linux author-preflight execution on actual diff not present; its selftests and actual privacy delegate are proven.",
+    "Copilot/root model review and queue actions outside this evidence audit."
+  ],
+  "requests": {
+    "count": 20,
+    "cap": 20,
+    "initial_core_remaining": 4986,
+    "errors": 0,
+    "retries": 0,
+    "live_job_logs_requested": 0
+  },
+  "local_tools": "Read-only Git/source parsing and artifact writes only. Initial excerpt script SyntaxError corrected without network reread; saved local-excerpt-correction.json. No builds/tests/formatting/remote mutation.",
+  "commands_pending": false
+}

@@ -1,0 +1,23 @@
+{
+  "conclusion": "No source formatting fix indicated for PR6487. Whole formatter failed, but zero update_fuzz.rs occurrences in its complete raw output, including10834 Diff-in headers. Thus none of its newly changed hunks or inherited hunks was reported.",
+  "raw_clippy_sha256": "c4cacd01edd705968f5d4c282bf3c453b4d26c39c5fdc05d4f7a4fb4c31676e0",
+  "diff_headers": 10834,
+  "changed_file_occurrences": 0,
+  "prior_touched_test_format": "Exact prior formatted six-test body is a byte-for-byte substring of the current frozen module source; prior command exit0, emit stdout only. No repeat execution.",
+  "prior_formatted_output_sha256": "dc4d45a97dc996383cf374d6ef08d16c9594d8f7947307081dc6d7bd3e7c16c4",
+  "current_module_sha256": "ca35e2bd604e8abe5b3004b2987dbb7c377b9fd369c1d2f82b68d164b888caa4",
+  "prior_command": {
+    "argv": [
+      "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/rustfmt",
+      "--edition",
+      "2021",
+      "--config-path",
+      "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6483/rustfmt.toml",
+      "--emit",
+      "stdout"
+    ],
+    "exit": 0,
+    "scope": "Only newly added tests wrapped for formatting; no unchanged source reflow."
+  },
+  "source_scope": "Only update_fuzz.rs differs from base; whole CI tree equals reviewed tree."
+}

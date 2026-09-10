@@ -1,0 +1,1 @@
+{"initial_excerpt_attempt": "Python f-string backslash SyntaxError before execution; no logs or source modified", "correction": "Use concatenation outside f-string; parse existing logs only"}

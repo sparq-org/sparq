@@ -1,0 +1,27 @@
+[
+  {
+    "path": ".github/workflows/ci.yml",
+    "sha256": "8c2dd15936888aab25dd70c36d457811ac7ae453758643b9833ee1d2bf10985c",
+    "blob": "2291a011c578932b6c78cf1eae574bf4ad981002"
+  },
+  {
+    "path": ".github/workflows/docs-quality.yml",
+    "sha256": "8540fb4b537761d09f3816259e5029d81d50cc214b2147c62bebdfe211f2a594",
+    "blob": "de7cdc4d38b3cbb220d669618f8e5bb107987670"
+  },
+  {
+    "path": ".github/workflows/differential-update.yml",
+    "sha256": "6e3e49ecbd494b77f9d8585faf3f39b1f2ab166ac8df0b598ed5f32a01dccbeb",
+    "blob": "42bd99d081ec3a5357fcbec98dc8bb5163af237f"
+  },
+  {
+    "path": "AGENTS-worker-core.md",
+    "sha256": "d3db6fa0ccee33b3dd47c166fe3e1e543c2207ab6de243a6f4bd4e0c380f9d39",
+    "blob": "37097dd0908b06cafcd1fb9b6d2f45fc210a063f"
+  },
+  {
+    "path": "rust-toolchain.toml",
+    "sha256": "7f22197dc4df197f236ad2f0d4668814a47a831a6dbd398efcfd1d5f47a43c37",
+    "blob": "91fd6184cd5390bcd746de0c7a082e47fa7b7b22"
+  }
+]

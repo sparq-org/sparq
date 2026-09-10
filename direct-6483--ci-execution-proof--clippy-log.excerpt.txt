@@ -1,0 +1,22 @@
+107:2026-09-10T19:10:06.6762399Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +573dba455effaa982b60776f9b03e6e324d6cc2f:refs/remotes/pull/6487/merge
+109:2026-09-10T19:10:09.6536120Z  * [new ref]         573dba455effaa982b60776f9b03e6e324d6cc2f -> pull/6487/merge
+134:2026-09-10T19:10:10.2244530Z HEAD is now at 573dba4 Merge 0b4554b924a80432cc1b572bd19f8e58cdbfb4e6 into f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464
+137:2026-09-10T19:10:10.2328568Z 573dba455effaa982b60776f9b03e6e324d6cc2f
+296:2026-09-10T19:10:21.4512166Z ##[group]Run cargo clippy --workspace --all-targets -- -D warnings
+1340:2026-09-10T19:12:25.9223810Z     Checking sparq-bench v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-bench)
+1347:2026-09-10T19:12:43.0463719Z     Finished `dev` profile [unoptimized + debuginfo] target(s) in 2m 21s
+1348:2026-09-10T19:12:43.3327576Z ##[group]Run cargo clippy --workspace --all-targets --all-features -- -D warnings
+1506:2026-09-10T19:13:18.5504095Z     Checking sparq-bench v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-bench)
+1515:2026-09-10T19:14:15.5155973Z     Finished `dev` profile [unoptimized + debuginfo] target(s) in 1m 32s
+1516:2026-09-10T19:14:15.8391219Z ##[group]Run cargo doc --workspace --no-deps
+1527:2026-09-10T19:14:15.8430414Z   RUSTDOCFLAGS: -D warnings
+1700:2026-09-10T19:14:56.1469025Z     Finished `dev` profile [unoptimized + debuginfo] target(s) in 40.27s
+1702:2026-09-10T19:14:56.1977509Z ##[group]Run cargo doc --workspace --no-deps --all-features
+1713:2026-09-10T19:14:56.2016489Z   RUSTDOCFLAGS: -D warnings
+1851:2026-09-10T19:15:49.1092407Z     Finished `dev` profile [unoptimized + debuginfo] target(s) in 52.87s
+1853:2026-09-10T19:15:49.1583957Z ##[group]Run cargo clippy --manifest-path bench/dict/Cargo.toml --all-targets -- -D warnings
+1923:2026-09-10T19:15:55.1891528Z     Finished `dev` profile [unoptimized + debuginfo] target(s) in 5.97s
+1956:2026-09-10T19:16:01.7737542Z     Finished `dev` profile [unoptimized + debuginfo] target(s) in 6.54s
+1959:2026-09-10T19:16:01.7832293Z ##[group]Run cargo fmt --version
+1972:2026-09-10T19:16:01.8421112Z rustfmt 1.9.0-stable (8bab26f4f6 2026-07-14)
+176212:2026-09-10T19:16:11.7882845Z ##[error]Process completed with exit code 1.

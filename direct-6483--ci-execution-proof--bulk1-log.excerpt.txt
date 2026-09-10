@@ -1,0 +1,19 @@
+109:2026-09-10T19:22:40.3953407Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +573dba455effaa982b60776f9b03e6e324d6cc2f:refs/remotes/pull/6487/merge
+111:2026-09-10T19:22:43.9214319Z  * [new ref]         573dba455effaa982b60776f9b03e6e324d6cc2f -> pull/6487/merge
+136:2026-09-10T19:22:44.4856837Z HEAD is now at 573dba4 Merge 0b4554b924a80432cc1b572bd19f8e58cdbfb4e6 into f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464
+138:2026-09-10T19:22:44.4930394Z [command]/usr/bin/git log -1 --format=%H
+139:2026-09-10T19:22:44.4961194Z 573dba455effaa982b60776f9b03e6e324d6cc2f
+384:2026-09-10T19:23:56.1691784Z - nextest-archive (ID: 10169127229, Size: 5262783742, Expected Digest: sha256:908dc8bb1be24b9c2fea8e051f1acb1fa6e9ccb2a122a73e8747186cb6124eea)
+389:2026-09-10T19:32:12.7746348Z SHA256 digest of downloaded artifact is 908dc8bb1be24b9c2fea8e051f1acb1fa6e9ccb2a122a73e8747186cb6124eea
+486:2026-09-10T19:32:12.7916934Z   cargo nextest run "${args[@]}" || rc=$?
+514:2026-09-10T19:32:12.7960043Z   SELECT_FILTERSET: package(sparq-bench)
+524:2026-09-10T19:33:32.2884244Z     Starting 22 tests across 1 binary (44 tests and 730 binaries skipped)
+537:2026-09-10T19:33:32.3684721Z         PASS [   0.010s] (13/22) sparq-bench::bin/sparq-bench update_fuzz::tests::duplicate_quad_is_caught_despite_canonicalization
+538:2026-09-10T19:33:32.3853967Z         PASS [   0.018s] (14/22) sparq-bench::bin/sparq-bench update_fuzz::tests::injected_divergence_is_caught
+539:2026-09-10T19:33:32.4024259Z         PASS [   0.015s] (15/22) sparq-bench::bin/sparq-bench update_fuzz::tests::integer_pools_keep_draw_counts_and_all_spelling_families
+540:2026-09-10T19:33:32.4064155Z         PASS [   0.040s] (16/22) sparq-bench::bin/sparq-bench update_fuzz::tests::generator_emits_every_v2_family
+541:2026-09-10T19:33:32.4183841Z         PASS [   0.014s] (17/22) sparq-bench::bin/sparq-bench update_fuzz::tests::non_canonical_integer_lexicals_are_distinct_terms
+542:2026-09-10T19:33:32.4231500Z         PASS [   0.023s] (18/22) sparq-bench::bin/sparq-bench update_fuzz::tests::load_equals_the_equivalent_insert_data
+543:2026-09-10T19:33:32.4346129Z         PASS [   0.016s] (19/22) sparq-bench::bin/sparq-bench update_fuzz::tests::raw_duplicate_guard_preserves_symmetry_and_graph_identity
+544:2026-09-10T19:33:32.4413021Z         PASS [   0.018s] (20/22) sparq-bench::bin/sparq-bench update_fuzz::tests::raw_duplicate_probe_scope_is_complete_quads_in_both_engines
+548:2026-09-10T19:33:36.4964681Z      Summary [   4.209s] 22 tests run: 22 passed, 44 skipped

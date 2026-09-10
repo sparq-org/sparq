@@ -1,0 +1,755 @@
+﻿2026-09-10T19:10:32.0097183Z Current runner version: '2.337.0'
+2026-09-10T19:10:32.0121061Z ##[group]Runner Image Provisioner
+2026-09-10T19:10:32.0121956Z Hosted Compute Agent
+2026-09-10T19:10:32.0122508Z Version: 20260828.587
+2026-09-10T19:10:32.0123188Z Commit: abac92662cab4cc7352de4f9f9d2e2419aad9c29
+2026-09-10T19:10:32.0123888Z Build Date: 2026-08-28T16:44:25Z
+2026-09-10T19:10:32.0124606Z Worker ID: {718783c1-eda7-46f9-9699-450a760503bd}
+2026-09-10T19:10:32.0125483Z Azure Region: northcentralus
+2026-09-10T19:10:32.0126749Z ##[endgroup]
+2026-09-10T19:10:32.0128218Z ##[group]Operating System
+2026-09-10T19:10:32.0128858Z Ubuntu
+2026-09-10T19:10:32.0129355Z 24.04.5
+2026-09-10T19:10:32.0129841Z LTS
+2026-09-10T19:10:32.0130334Z ##[endgroup]
+2026-09-10T19:10:32.0130876Z ##[group]Runner Image
+2026-09-10T19:10:32.0131486Z Image: ubuntu-24.04
+2026-09-10T19:10:32.0132011Z Version: 20260907.300.1
+2026-09-10T19:10:32.0133224Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260907.300/images/ubuntu/Ubuntu2404-Readme.md
+2026-09-10T19:10:32.0134727Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20260907.300
+2026-09-10T19:10:32.0135730Z ##[endgroup]
+2026-09-10T19:10:32.0137279Z ##[group]GITHUB_TOKEN Permissions
+2026-09-10T19:10:32.0140038Z Contents: read
+2026-09-10T19:10:32.0140670Z Metadata: read
+2026-09-10T19:10:32.0141216Z ##[endgroup]
+2026-09-10T19:10:32.0143220Z Secret source: Actions
+2026-09-10T19:10:32.0144162Z Cache mode: write
+2026-09-10T19:10:32.0145077Z Prepare workflow directory
+2026-09-10T19:10:32.0510745Z Prepare all required actions
+2026-09-10T19:10:32.0561274Z Getting action download info
+2026-09-10T19:10:32.3114678Z Download action repository 'actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0' (SHA:9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0)
+2026-09-10T19:10:32.5040587Z Download action repository 'Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32' (SHA:e18b497796c12c097a38f9edb9d0641fb99eee32)
+2026-09-10T19:10:33.2948733Z Complete job name: differential smoke (sparq vs Oxigraph, fixed regression windows)
+2026-09-10T19:10:33.3657813Z ##[group]Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+2026-09-10T19:10:33.3658946Z with:
+2026-09-10T19:10:33.3659533Z   persist-credentials: false
+2026-09-10T19:10:33.3660202Z   repository: sparq-org/sparq
+2026-09-10T19:10:33.3664978Z   token: ***
+2026-09-10T19:10:33.3665545Z   ssh-strict: true
+2026-09-10T19:10:33.3666267Z   ssh-user: git
+2026-09-10T19:10:33.3666833Z   clean: true
+2026-09-10T19:10:33.3667401Z   sparse-checkout-cone-mode: true
+2026-09-10T19:10:33.3668124Z   fetch-depth: 1
+2026-09-10T19:10:33.3668667Z   fetch-tags: false
+2026-09-10T19:10:33.3669224Z   show-progress: true
+2026-09-10T19:10:33.3669791Z   lfs: false
+2026-09-10T19:10:33.3670331Z   submodules: false
+2026-09-10T19:10:33.3670962Z   set-safe-directory: true
+2026-09-10T19:10:33.3671588Z   allow-unsafe-pr-checkout: false
+2026-09-10T19:10:33.3672447Z env:
+2026-09-10T19:10:33.3673010Z   CARGO_TERM_COLOR: always
+2026-09-10T19:10:33.3673613Z   RUST_BACKTRACE: 1
+2026-09-10T19:10:33.3674365Z   SMOKE_SECS: 30
+2026-09-10T19:10:33.3674903Z   MAIN_SECS: 120
+2026-09-10T19:10:33.3675487Z   NIGHTLY_SECS: 600
+2026-09-10T19:10:33.3676203Z   FUZZ_BUILD_TARGET: x86_64-unknown-linux-gnu
+2026-09-10T19:10:33.3676902Z ##[endgroup]
+2026-09-10T19:10:33.4693175Z Syncing repository: sparq-org/sparq
+2026-09-10T19:10:33.4695285Z ##[group]Getting Git version info
+2026-09-10T19:10:33.4696394Z Working directory is '/home/runner/work/sparq/sparq'
+2026-09-10T19:10:33.4697834Z [command]/usr/bin/git version
+2026-09-10T19:10:33.4922668Z git version 2.55.0
+2026-09-10T19:10:33.4949941Z ##[endgroup]
+2026-09-10T19:10:33.4958543Z Temporarily overriding HOME='/home/runner/work/_temp/c4a76544-c4d6-4bda-93f4-f04340f9cd7c' before making global git config changes
+2026-09-10T19:10:33.4960841Z Adding repository directory to the temporary git global config as a safe directory
+2026-09-10T19:10:33.4963502Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/sparq/sparq
+2026-09-10T19:10:33.5011128Z Deleting the contents of '/home/runner/work/sparq/sparq'
+2026-09-10T19:10:33.5014564Z ##[group]Determining repository object format
+2026-09-10T19:10:33.5016728Z ##[endgroup]
+2026-09-10T19:10:33.5017699Z ##[group]Initializing the repository
+2026-09-10T19:10:33.5021690Z [command]/usr/bin/git init /home/runner/work/sparq/sparq
+2026-09-10T19:10:33.5124000Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-09-10T19:10:33.5125737Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-09-10T19:10:33.5127910Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-09-10T19:10:33.5130061Z hint: call:
+2026-09-10T19:10:33.5130774Z hint:
+2026-09-10T19:10:33.5131623Z hint: 	git config --global init.defaultBranch <name>
+2026-09-10T19:10:33.5132453Z hint:
+2026-09-10T19:10:33.5133312Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-09-10T19:10:33.5134580Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-09-10T19:10:33.5136138Z hint:
+2026-09-10T19:10:33.5137238Z hint: 	git branch -m <name>
+2026-09-10T19:10:33.5138008Z hint:
+2026-09-10T19:10:33.5138970Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-09-10T19:10:33.5140550Z Initialized empty Git repository in /home/runner/work/sparq/sparq/.git/
+2026-09-10T19:10:33.5143193Z [command]/usr/bin/git remote add origin https://github.com/sparq-org/sparq
+2026-09-10T19:10:33.5183231Z ##[endgroup]
+2026-09-10T19:10:33.5187416Z ##[group]Disabling automatic garbage collection
+2026-09-10T19:10:33.5188292Z [command]/usr/bin/git config --local gc.auto 0
+2026-09-10T19:10:33.5217673Z ##[endgroup]
+2026-09-10T19:10:33.5218958Z ##[group]Setting up auth
+2026-09-10T19:10:33.5219675Z Removing SSH command configuration
+2026-09-10T19:10:33.5227617Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-09-10T19:10:33.5262091Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-09-10T19:10:33.5583235Z Removing HTTP extra header
+2026-09-10T19:10:33.5597425Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-10T19:10:33.5623924Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-09-10T19:10:33.5805412Z Removing includeIf entries pointing to credentials config files
+2026-09-10T19:10:33.5810645Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-10T19:10:33.5839421Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-09-10T19:10:33.6022357Z [command]/usr/bin/git config --file /home/runner/work/_temp/git-credentials-4673c17f-f51d-46ac-8df7-4bdbcaaaf484.config http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-09-10T19:10:33.6058288Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/sparq/sparq/.git.path /home/runner/work/_temp/git-credentials-4673c17f-f51d-46ac-8df7-4bdbcaaaf484.config
+2026-09-10T19:10:33.6084981Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/sparq/sparq/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-4673c17f-f51d-46ac-8df7-4bdbcaaaf484.config
+2026-09-10T19:10:33.6125712Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-4673c17f-f51d-46ac-8df7-4bdbcaaaf484.config
+2026-09-10T19:10:33.6154535Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-4673c17f-f51d-46ac-8df7-4bdbcaaaf484.config
+2026-09-10T19:10:33.6179829Z ##[endgroup]
+2026-09-10T19:10:33.6181169Z ##[group]Fetching the repository
+2026-09-10T19:10:33.6186432Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +573dba455effaa982b60776f9b03e6e324d6cc2f:refs/remotes/pull/6487/merge
+2026-09-10T19:10:36.9916282Z From https://github.com/sparq-org/sparq
+2026-09-10T19:10:36.9923381Z  * [new ref]         573dba455effaa982b60776f9b03e6e324d6cc2f -> pull/6487/merge
+2026-09-10T19:10:36.9925766Z ##[endgroup]
+2026-09-10T19:10:36.9926651Z ##[group]Determining the checkout info
+2026-09-10T19:10:36.9927369Z ##[endgroup]
+2026-09-10T19:10:36.9928143Z [command]/usr/bin/git sparse-checkout disable
+2026-09-10T19:10:36.9974815Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-09-10T19:10:37.0001880Z ##[group]Checking out the ref
+2026-09-10T19:10:37.0005519Z [command]/usr/bin/git checkout --progress --force refs/remotes/pull/6487/merge
+2026-09-10T19:10:37.4799378Z Note: switching to 'refs/remotes/pull/6487/merge'.
+2026-09-10T19:10:37.4800550Z 
+2026-09-10T19:10:37.4801155Z You are in 'detached HEAD' state. You can look around, make experimental
+2026-09-10T19:10:37.4802149Z changes and commit them, and you can discard any commits you make in this
+2026-09-10T19:10:37.4803135Z state without impacting any branches by switching back to a branch.
+2026-09-10T19:10:37.4803736Z 
+2026-09-10T19:10:37.4804267Z If you want to create a new branch to retain commits you create, you may
+2026-09-10T19:10:37.4805091Z do so (now or later) by using -c with the switch command. Example:
+2026-09-10T19:10:37.4805666Z 
+2026-09-10T19:10:37.4806339Z   git switch -c <new-branch-name>
+2026-09-10T19:10:37.4806792Z 
+2026-09-10T19:10:37.4807213Z Or undo this operation with:
+2026-09-10T19:10:37.4807571Z 
+2026-09-10T19:10:37.4807916Z   git switch -
+2026-09-10T19:10:37.4809657Z 
+2026-09-10T19:10:37.4809998Z Turn off this advice by setting config variable advice.detachedHead to false
+2026-09-10T19:10:37.4810376Z 
+2026-09-10T19:10:37.4812399Z HEAD is now at 573dba4 Merge 0b4554b924a80432cc1b572bd19f8e58cdbfb4e6 into f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464
+2026-09-10T19:10:37.4814144Z ##[endgroup]
+2026-09-10T19:10:37.4858103Z [command]/usr/bin/git log -1 --format=%H
+2026-09-10T19:10:37.4883437Z 573dba455effaa982b60776f9b03e6e324d6cc2f
+2026-09-10T19:10:37.4891163Z ##[group]Removing auth
+2026-09-10T19:10:37.4891543Z Removing SSH command configuration
+2026-09-10T19:10:37.4894922Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-09-10T19:10:37.4925490Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-09-10T19:10:37.5121906Z Removing HTTP extra header
+2026-09-10T19:10:37.5125193Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-10T19:10:37.5158694Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-09-10T19:10:37.5351414Z Removing includeIf entries pointing to credentials config files
+2026-09-10T19:10:37.5355999Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-10T19:10:37.5381265Z includeif.gitdir:/home/runner/work/sparq/sparq/.git.path
+2026-09-10T19:10:37.5381788Z includeif.gitdir:/home/runner/work/sparq/sparq/.git/worktrees/*.path
+2026-09-10T19:10:37.5382203Z includeif.gitdir:/github/workspace/.git.path
+2026-09-10T19:10:37.5382813Z includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-09-10T19:10:37.5390483Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/sparq/sparq/.git.path
+2026-09-10T19:10:37.5411039Z /home/runner/work/_temp/git-credentials-4673c17f-f51d-46ac-8df7-4bdbcaaaf484.config
+2026-09-10T19:10:37.5419689Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/sparq/sparq/.git.path /home/runner/work/_temp/git-credentials-4673c17f-f51d-46ac-8df7-4bdbcaaaf484.config
+2026-09-10T19:10:37.5454430Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/sparq/sparq/.git/worktrees/*.path
+2026-09-10T19:10:37.5475034Z /home/runner/work/_temp/git-credentials-4673c17f-f51d-46ac-8df7-4bdbcaaaf484.config
+2026-09-10T19:10:37.5481107Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/sparq/sparq/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-4673c17f-f51d-46ac-8df7-4bdbcaaaf484.config
+2026-09-10T19:10:37.5511269Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git.path
+2026-09-10T19:10:37.5533211Z /github/runner_temp/git-credentials-4673c17f-f51d-46ac-8df7-4bdbcaaaf484.config
+2026-09-10T19:10:37.5541015Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-4673c17f-f51d-46ac-8df7-4bdbcaaaf484.config
+2026-09-10T19:10:37.5571539Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-09-10T19:10:37.5591580Z /github/runner_temp/git-credentials-4673c17f-f51d-46ac-8df7-4bdbcaaaf484.config
+2026-09-10T19:10:37.5602597Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-4673c17f-f51d-46ac-8df7-4bdbcaaaf484.config
+2026-09-10T19:10:37.5632230Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-09-10T19:10:37.5826138Z Removing credentials config '/home/runner/work/_temp/git-credentials-4673c17f-f51d-46ac-8df7-4bdbcaaaf484.config'
+2026-09-10T19:10:37.5835321Z ##[endgroup]
+2026-09-10T19:10:37.6020891Z ##[group]Run rustup default stable
+2026-09-10T19:10:37.6021303Z [36;1mrustup default stable[0m
+2026-09-10T19:10:37.6021610Z [36;1mrustup show active-toolchain[0m
+2026-09-10T19:10:37.6051085Z shell: /usr/bin/bash -e {0}
+2026-09-10T19:10:37.6051417Z env:
+2026-09-10T19:10:37.6051667Z   CARGO_TERM_COLOR: always
+2026-09-10T19:10:37.6051969Z   RUST_BACKTRACE: 1
+2026-09-10T19:10:37.6052215Z   SMOKE_SECS: 30
+2026-09-10T19:10:37.6052446Z   MAIN_SECS: 120
+2026-09-10T19:10:37.6052697Z   NIGHTLY_SECS: 600
+2026-09-10T19:10:37.6052974Z   FUZZ_BUILD_TARGET: x86_64-unknown-linux-gnu
+2026-09-10T19:10:37.6053283Z ##[endgroup]
+2026-09-10T19:10:38.1367231Z info: using existing install for stable-x86_64-unknown-linux-gnu
+2026-09-10T19:10:38.1731081Z info: default toolchain set to stable-x86_64-unknown-linux-gnu
+2026-09-10T19:10:38.1731432Z 
+2026-09-10T19:10:38.3009534Z   stable-x86_64-unknown-linux-gnu unchanged - rustc 1.98.1 (48a229cea 2026-09-01)
+2026-09-10T19:10:38.3010007Z 
+2026-09-10T19:10:38.3690807Z info: note that the toolchain '1.97.1-x86_64-unknown-linux-gnu' is currently in use (overridden by '/home/runner/work/sparq/sparq/rust-toolchain.toml')
+2026-09-10T19:10:38.3774273Z info: syncing channel updates for 1.97.1-x86_64-unknown-linux-gnu
+2026-09-10T19:10:39.6057442Z info: latest update on 2026-07-16 for version 1.97.1 (8bab26f4f 2026-07-14)
+2026-09-10T19:10:39.6059379Z info: downloading 6 components
+2026-09-10T19:10:50.2527791Z warn: the missing active toolchain `1.97.1-x86_64-unknown-linux-gnu` has been auto-installed
+2026-09-10T19:10:50.2528416Z warn: auto-installation is deprecated for most `rustup` commands
+2026-09-10T19:10:50.2529045Z warn: scripts relying on this behavior in `rustup` may stop working in the future
+2026-09-10T19:10:50.2529721Z warn: to install the active toolchain, use `rustup install` instead
+2026-09-10T19:10:50.2530400Z warn: see <https://github.com/rust-lang/rustup/issues/4836> for more info
+2026-09-10T19:10:50.2531211Z 1.97.1-x86_64-unknown-linux-gnu (overridden by '/home/runner/work/sparq/sparq/rust-toolchain.toml')
+2026-09-10T19:10:50.2655349Z ##[group]Run Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32
+2026-09-10T19:10:50.2655745Z with:
+2026-09-10T19:10:50.2656239Z   shared-key: differential-nightly
+2026-09-10T19:10:50.2656658Z   prefix-key: v0-rust
+2026-09-10T19:10:50.2656895Z   add-job-id-key: true
+2026-09-10T19:10:50.2657147Z   add-rust-environment-hash-key: true
+2026-09-10T19:10:50.2657434Z   cache-targets: true
+2026-09-10T19:10:50.2657678Z   cache-all-crates: false
+2026-09-10T19:10:50.2657941Z   cache-workspace-crates: false
+2026-09-10T19:10:50.2658206Z   save-if: true
+2026-09-10T19:10:50.2658425Z   cache-provider: github
+2026-09-10T19:10:50.2658658Z   cache-bin: true
+2026-09-10T19:10:50.2658909Z   lookup-only: false
+2026-09-10T19:10:50.2659167Z   cmd-format: {0}
+2026-09-10T19:10:50.2659371Z env:
+2026-09-10T19:10:50.2659564Z   CARGO_TERM_COLOR: always
+2026-09-10T19:10:50.2659796Z   RUST_BACKTRACE: 1
+2026-09-10T19:10:50.2660005Z   SMOKE_SECS: 30
+2026-09-10T19:10:50.2660208Z   MAIN_SECS: 120
+2026-09-10T19:10:50.2660478Z   NIGHTLY_SECS: 600
+2026-09-10T19:10:50.2660726Z   FUZZ_BUILD_TARGET: x86_64-unknown-linux-gnu
+2026-09-10T19:10:50.2661038Z ##[endgroup]
+2026-09-10T19:10:50.5515058Z (node:2376) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+2026-09-10T19:10:50.5516350Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-09-10T19:10:52.8556944Z ##[group]Cache Configuration
+2026-09-10T19:10:52.8557458Z Cache Provider:
+2026-09-10T19:10:52.8557715Z     github
+2026-09-10T19:10:52.8557973Z Workspaces:
+2026-09-10T19:10:52.8558249Z     /home/runner/work/sparq/sparq
+2026-09-10T19:10:52.8558566Z Cache Paths:
+2026-09-10T19:10:52.8558855Z     /home/runner/.cargo/bin
+2026-09-10T19:10:52.8559194Z     /home/runner/.cargo/.crates.toml
+2026-09-10T19:10:52.8559695Z     /home/runner/.cargo/.crates2.json
+2026-09-10T19:10:52.8560087Z     /home/runner/.cargo/registry
+2026-09-10T19:10:52.8560468Z     /home/runner/.cargo/git
+2026-09-10T19:10:52.8560913Z     /home/runner/work/sparq/sparq/target
+2026-09-10T19:10:52.8561263Z Restore Key:
+2026-09-10T19:10:52.8561625Z     v0-rust-differential-nightly-Linux-x64-8c88eddb
+2026-09-10T19:10:52.8562069Z Cache Key:
+2026-09-10T19:10:52.8562433Z     v0-rust-differential-nightly-Linux-x64-8c88eddb-0c74d5b7
+2026-09-10T19:10:52.8563152Z .. Prefix:
+2026-09-10T19:10:52.8563497Z   - v0-rust-differential-nightly-Linux-x64
+2026-09-10T19:10:52.8563935Z .. Environment considered:
+2026-09-10T19:10:52.8564398Z   - Rust Versions:
+2026-09-10T19:10:52.8564880Z     - 1.97.1 x86_64-unknown-linux-gnu 8bab26f4f68e0e26f0bb7960be334d5b520ea452
+2026-09-10T19:10:52.8565543Z     - 1.98.1 x86_64-unknown-linux-gnu 48a229ceaefd4985c50990b14116b6d856af0985
+2026-09-10T19:10:52.8566337Z     - 1.97.1 x86_64-unknown-linux-gnu 8bab26f4f68e0e26f0bb7960be334d5b520ea452
+2026-09-10T19:10:52.8566862Z   - CARGO_INCREMENTAL
+2026-09-10T19:10:52.8567216Z   - CARGO_TERM_COLOR
+2026-09-10T19:10:52.8567567Z   - RUST_BACKTRACE
+2026-09-10T19:10:52.8567965Z .. Lockfiles considered:
+2026-09-10T19:10:52.8568388Z   - /home/runner/work/sparq/sparq/.cargo/config.toml
+2026-09-10T19:10:52.8568870Z   - /home/runner/work/sparq/sparq/Cargo.lock
+2026-09-10T19:10:52.8569460Z   - /home/runner/work/sparq/sparq/crates/sparq-acbench/Cargo.toml
+2026-09-10T19:10:52.8570186Z   - /home/runner/work/sparq/sparq/crates/sparq-algos/Cargo.toml
+2026-09-10T19:10:52.8570685Z   - /home/runner/work/sparq/sparq/crates/sparq-arrow/Cargo.toml
+2026-09-10T19:10:52.8571134Z   - /home/runner/work/sparq/sparq/crates/sparq-bench/Cargo.toml
+2026-09-10T19:10:52.8571548Z   - /home/runner/work/sparq/sparq/crates/sparq-canon/Cargo.toml
+2026-09-10T19:10:52.8571916Z   - /home/runner/work/sparq/sparq/crates/sparq-cli/Cargo.toml
+2026-09-10T19:10:52.8572492Z   - /home/runner/work/sparq/sparq/crates/sparq-conformance-floors/Cargo.toml
+2026-09-10T19:10:52.8573164Z   - /home/runner/work/sparq/sparq/crates/sparq-conformance/Cargo.toml
+2026-09-10T19:10:52.8573972Z   - /home/runner/work/sparq/sparq/crates/sparq-core/Cargo.toml
+2026-09-10T19:10:52.8574361Z   - /home/runner/work/sparq/sparq/crates/sparq-crdt/Cargo.toml
+2026-09-10T19:10:52.8574749Z   - /home/runner/work/sparq/sparq/crates/sparq-difftest/Cargo.toml
+2026-09-10T19:10:52.8575397Z   - /home/runner/work/sparq/sparq/crates/sparq-e2ee-ng/Cargo.toml
+2026-09-10T19:10:52.8576072Z   - /home/runner/work/sparq/sparq/crates/sparq-engine-serialize/Cargo.toml
+2026-09-10T19:10:52.8576604Z   - /home/runner/work/sparq/sparq/crates/sparq-engine-service/Cargo.toml
+2026-09-10T19:10:52.8577092Z   - /home/runner/work/sparq/sparq/crates/sparq-engine/Cargo.toml
+2026-09-10T19:10:52.8577594Z   - /home/runner/work/sparq/sparq/crates/sparq-fedclient/Cargo.toml
+2026-09-10T19:10:52.8578078Z   - /home/runner/work/sparq/sparq/crates/sparq-fedplan-mpc/Cargo.toml
+2026-09-10T19:10:52.8578570Z   - /home/runner/work/sparq/sparq/crates/sparq-fedplan/Cargo.toml
+2026-09-10T19:10:52.8579026Z   - /home/runner/work/sparq/sparq/crates/sparq-forms/Cargo.toml
+2026-09-10T19:10:52.8579484Z   - /home/runner/work/sparq/sparq/crates/sparq-geo/Cargo.toml
+2026-09-10T19:10:52.8579957Z   - /home/runner/work/sparq/sparq/crates/sparq-gpu/Cargo.toml
+2026-09-10T19:10:52.8580407Z   - /home/runner/work/sparq/sparq/crates/sparq-hdt/Cargo.toml
+2026-09-10T19:10:52.8580963Z   - /home/runner/work/sparq/sparq/crates/sparq-http3/Cargo.toml
+2026-09-10T19:10:52.8581512Z   - /home/runner/work/sparq/sparq/crates/sparq-introspect/Cargo.toml
+2026-09-10T19:10:52.8582161Z   - /home/runner/work/sparq/sparq/crates/sparq-jsonld-registry/Cargo.toml
+2026-09-10T19:10:52.8582779Z   - /home/runner/work/sparq/sparq/crates/sparq-jsonld/Cargo.toml
+2026-09-10T19:10:52.8583378Z   - /home/runner/work/sparq/sparq/crates/sparq-kb/Cargo.toml
+2026-09-10T19:10:52.8583936Z   - /home/runner/work/sparq/sparq/crates/sparq-lws-core/Cargo.toml
+2026-09-10T19:10:52.8584536Z   - /home/runner/work/sparq/sparq/crates/sparq-lws-wasm/Cargo.toml
+2026-09-10T19:10:52.8585125Z   - /home/runner/work/sparq/sparq/crates/sparq-mcp/Cargo.toml
+2026-09-10T19:10:52.8585762Z   - /home/runner/work/sparq/sparq/crates/sparq-metamorph/Cargo.toml
+2026-09-10T19:10:52.8586524Z   - /home/runner/work/sparq/sparq/crates/sparq-mpc/Cargo.toml
+2026-09-10T19:10:52.8587159Z   - /home/runner/work/sparq/sparq/crates/sparq-nlq/Cargo.toml
+2026-09-10T19:10:52.8587763Z   - /home/runner/work/sparq/sparq/crates/sparq-parse/Cargo.toml
+2026-09-10T19:10:52.8588411Z   - /home/runner/work/sparq/sparq/crates/sparq-policy/Cargo.toml
+2026-09-10T19:10:52.8589058Z   - /home/runner/work/sparq/sparq/crates/sparq-prov/Cargo.toml
+2026-09-10T19:10:52.8589752Z   - /home/runner/work/sparq/sparq/crates/sparq-py/Cargo.toml
+2026-09-10T19:10:52.8590442Z   - /home/runner/work/sparq/sparq/crates/sparq-reason-diff/Cargo.toml
+2026-09-10T19:10:52.8591101Z   - /home/runner/work/sparq/sparq/crates/sparq-reason-dl/Cargo.toml
+2026-09-10T19:10:52.8591786Z   - /home/runner/work/sparq/sparq/crates/sparq-reason-el/Cargo.toml
+2026-09-10T19:10:52.8592424Z   - /home/runner/work/sparq/sparq/crates/sparq-reason-ql/Cargo.toml
+2026-09-10T19:10:52.8593087Z   - /home/runner/work/sparq/sparq/crates/sparq-reason-wasm/Cargo.toml
+2026-09-10T19:10:52.8594107Z   - /home/runner/work/sparq/sparq/crates/sparq-reason/Cargo.toml
+2026-09-10T19:10:52.8594787Z   - /home/runner/work/sparq/sparq/crates/sparq-rsp-wasm/Cargo.toml
+2026-09-10T19:10:52.8595409Z   - /home/runner/work/sparq/sparq/crates/sparq-rsp/Cargo.toml
+2026-09-10T19:10:52.8596199Z   - /home/runner/work/sparq/sparq/crates/sparq-secprop-vocab/Cargo.toml
+2026-09-10T19:10:52.8596868Z   - /home/runner/work/sparq/sparq/crates/sparq-serve/Cargo.toml
+2026-09-10T19:10:52.8597498Z   - /home/runner/work/sparq/sparq/crates/sparq-server/Cargo.toml
+2026-09-10T19:10:52.8598058Z   - /home/runner/work/sparq/sparq/crates/sparq-shacl-wasm/Cargo.toml
+2026-09-10T19:10:52.8598665Z   - /home/runner/work/sparq/sparq/crates/sparq-shacl/Cargo.toml
+2026-09-10T19:10:52.8599211Z   - /home/runner/work/sparq/sparq/crates/sparq-shaclc/Cargo.toml
+2026-09-10T19:10:52.8599803Z   - /home/runner/work/sparq/sparq/crates/sparq-sim/Cargo.toml
+2026-09-10T19:10:52.8600825Z   - /home/runner/work/sparq/sparq/crates/sparq-solid/Cargo.toml
+2026-09-10T19:10:52.8601408Z   - /home/runner/work/sparq/sparq/crates/sparq-substrate/Cargo.toml
+2026-09-10T19:10:52.8602125Z   - /home/runner/work/sparq/sparq/crates/sparq-terse/Cargo.toml
+2026-09-10T19:10:52.8602702Z   - /home/runner/work/sparq/sparq/crates/sparq-text-wasm/Cargo.toml
+2026-09-10T19:10:52.8603168Z   - /home/runner/work/sparq/sparq/crates/sparq-text/Cargo.toml
+2026-09-10T19:10:52.8603556Z   - /home/runner/work/sparq/sparq/crates/sparq-trust/Cargo.toml
+2026-09-10T19:10:52.8603958Z   - /home/runner/work/sparq/sparq/crates/sparq-vc/Cargo.toml
+2026-09-10T19:10:52.8604362Z   - /home/runner/work/sparq/sparq/crates/sparq-vectors/Cargo.toml
+2026-09-10T19:10:52.8604769Z   - /home/runner/work/sparq/sparq/crates/sparq-wac-oracle/Cargo.toml
+2026-09-10T19:10:52.8605169Z   - /home/runner/work/sparq/sparq/crates/sparq-wasm/Cargo.toml
+2026-09-10T19:10:52.8605568Z   - /home/runner/work/sparq/sparq/crates/sparq-wrapper-gen/Cargo.toml
+2026-09-10T19:10:52.8606254Z   - /home/runner/work/sparq/sparq/crates/sparq-wrapper-integration/Cargo.toml
+2026-09-10T19:10:52.8606723Z   - /home/runner/work/sparq/sparq/crates/sparq-wrapper-shacl/Cargo.toml
+2026-09-10T19:10:52.8607145Z   - /home/runner/work/sparq/sparq/crates/sparq-wrapper/Cargo.toml
+2026-09-10T19:10:52.8607543Z   - /home/runner/work/sparq/sparq/crates/sparq-zk-compose/Cargo.toml
+2026-09-10T19:10:52.8607927Z   - /home/runner/work/sparq/sparq/crates/sparq-zk/Cargo.toml
+2026-09-10T19:10:52.8608279Z   - /home/runner/work/sparq/sparq/rust-toolchain.toml
+2026-09-10T19:10:52.8608888Z ##[endgroup]
+2026-09-10T19:10:52.8609019Z 
+2026-09-10T19:10:52.8609115Z ... Restoring cache ...
+2026-09-10T19:10:52.9983223Z No cache found.
+2026-09-10T19:10:53.0083552Z ##[group]Run cargo build -p sparq-bench --profile release-fast
+2026-09-10T19:10:53.0084035Z [36;1mcargo build -p sparq-bench --profile release-fast[0m
+2026-09-10T19:10:53.0108454Z shell: /usr/bin/bash -e {0}
+2026-09-10T19:10:53.0108734Z env:
+2026-09-10T19:10:53.0108955Z   CARGO_TERM_COLOR: always
+2026-09-10T19:10:53.0109206Z   RUST_BACKTRACE: 1
+2026-09-10T19:10:53.0109422Z   SMOKE_SECS: 30
+2026-09-10T19:10:53.0109650Z   MAIN_SECS: 120
+2026-09-10T19:10:53.0109855Z   NIGHTLY_SECS: 600
+2026-09-10T19:10:53.0110107Z   FUZZ_BUILD_TARGET: x86_64-unknown-linux-gnu
+2026-09-10T19:10:53.0110414Z   CACHE_ON_FAILURE: false
+2026-09-10T19:10:53.0110666Z   CARGO_INCREMENTAL: 0
+2026-09-10T19:10:53.0110895Z ##[endgroup]
+2026-09-10T19:10:53.0954505Z [1m[92m    Updating[0m crates.io index
+2026-09-10T19:10:53.0977142Z [1m[92m    Updating[0m git repository `https://github.com/jeswr/solid-oidc-verifier`
+2026-09-10T19:10:54.8287938Z [1m[92m Downloading[0m crates ...
+2026-09-10T19:10:54.9073717Z [1m[92m  Downloaded[0m base16ct v0.2.0
+2026-09-10T19:10:54.9100347Z [1m[92m  Downloaded[0m hex v0.4.3
+2026-09-10T19:10:54.9133334Z [1m[92m  Downloaded[0m allocator-api2 v0.2.21
+2026-09-10T19:10:54.9154619Z [1m[92m  Downloaded[0m autocfg v1.5.1
+2026-09-10T19:10:54.9168846Z [1m[92m  Downloaded[0m generic-array v0.14.7
+2026-09-10T19:10:54.9181407Z [1m[92m  Downloaded[0m thiserror-impl v2.0.18
+2026-09-10T19:10:54.9194189Z [1m[92m  Downloaded[0m getrandom v0.2.17
+2026-09-10T19:10:54.9220463Z [1m[92m  Downloaded[0m getrandom v0.4.2
+2026-09-10T19:10:54.9259366Z [1m[92m  Downloaded[0m bigdecimal v0.4.10
+2026-09-10T19:10:54.9296127Z [1m[92m  Downloaded[0m aho-corasick v1.1.4
+2026-09-10T19:10:54.9337099Z [1m[92m  Downloaded[0m getrandom v0.3.4
+2026-09-10T19:10:54.9360686Z [1m[92m  Downloaded[0m hashbrown v0.14.5
+2026-09-10T19:10:54.9418961Z [1m[92m  Downloaded[0m foldhash v0.2.0
+2026-09-10T19:10:54.9447519Z [1m[92m  Downloaded[0m hashbrown v0.17.1
+2026-09-10T19:10:54.9480991Z [1m[92m  Downloaded[0m hybrid-array v0.4.12
+2026-09-10T19:10:54.9495159Z [1m[92m  Downloaded[0m itertools v0.14.0
+2026-09-10T19:10:54.9540422Z [1m[92m  Downloaded[0m num-integer v0.1.46
+2026-09-10T19:10:54.9550481Z [1m[92m  Downloaded[0m md-5 v0.10.6
+2026-09-10T19:10:54.9562998Z [1m[92m  Downloaded[0m itoa v1.0.18
+2026-09-10T19:10:54.9572274Z [1m[92m  Downloaded[0m oxrdf v0.2.4
+2026-09-10T19:10:54.9587042Z [1m[92m  Downloaded[0m once_cell v1.21.4
+2026-09-10T19:10:54.9602250Z [1m[92m  Downloaded[0m oxrdf v0.3.3
+2026-09-10T19:10:54.9617144Z [1m[92m  Downloaded[0m rand_chacha v0.3.1
+2026-09-10T19:10:54.9624320Z [1m[92m  Downloaded[0m oxsdatatypes v0.2.2
+2026-09-10T19:10:54.9637327Z [1m[92m  Downloaded[0m pin-project-lite v0.2.17
+2026-09-10T19:10:54.9666491Z [1m[92m  Downloaded[0m oxrdfio v0.2.5
+2026-09-10T19:10:54.9677863Z [1m[92m  Downloaded[0m peg v0.8.6
+2026-09-10T19:10:54.9701618Z [1m[92m  Downloaded[0m peg-runtime v0.8.6
+2026-09-10T19:10:54.9705709Z [1m[92m  Downloaded[0m crypto-common v0.2.2
+2026-09-10T19:10:54.9712811Z [1m[92m  Downloaded[0m memchr v2.8.2
+2026-09-10T19:10:54.9744499Z [1m[92m  Downloaded[0m ppv-lite86 v0.2.21
+2026-09-10T19:10:54.9752199Z [1m[92m  Downloaded[0m libm v0.2.16
+2026-09-10T19:10:54.9811217Z [1m[92m  Downloaded[0m num-bigint v0.4.6
+2026-09-10T19:10:54.9839696Z [1m[92m  Downloaded[0m num-bigint v0.5.1
+2026-09-10T19:10:54.9871893Z [1m[92m  Downloaded[0m scopeguard v1.2.0
+2026-09-10T19:10:54.9878806Z [1m[92m  Downloaded[0m cpufeatures v0.3.0
+2026-09-10T19:10:54.9887377Z [1m[92m  Downloaded[0m rand_chacha v0.9.0
+2026-09-10T19:10:54.9894510Z [1m[92m  Downloaded[0m cfg-if v1.0.4
+2026-09-10T19:10:54.9901223Z [1m[92m  Downloaded[0m cpufeatures v0.2.17
+2026-09-10T19:10:54.9908670Z [1m[92m  Downloaded[0m lock_api v0.4.14
+2026-09-10T19:10:54.9916848Z [1m[92m  Downloaded[0m num-traits v0.2.19
+2026-09-10T19:10:54.9932298Z [1m[92m  Downloaded[0m sha1 v0.10.6
+2026-09-10T19:10:54.9941377Z [1m[92m  Downloaded[0m oxilangtag v0.1.6
+2026-09-10T19:10:54.9950081Z [1m[92m  Downloaded[0m version_check v0.9.5
+2026-09-10T19:10:54.9957038Z [1m[92m  Downloaded[0m digest v0.10.7
+2026-09-10T19:10:54.9967141Z [1m[92m  Downloaded[0m crossbeam-utils v0.8.21
+2026-09-10T19:10:54.9982846Z [1m[92m  Downloaded[0m rand_core v0.9.5
+2026-09-10T19:10:54.9990759Z [1m[92m  Downloaded[0m crypto-common v0.1.7
+2026-09-10T19:10:54.9995800Z [1m[92m  Downloaded[0m equivalent v1.0.2
+2026-09-10T19:10:55.0000955Z [1m[92m  Downloaded[0m oxiri v0.2.11
+2026-09-10T19:10:55.0010805Z [1m[92m  Downloaded[0m rustc-hash v2.1.3
+2026-09-10T19:10:55.0017782Z [1m[92m  Downloaded[0m sha1 v0.11.0
+2026-09-10T19:10:55.0027349Z [1m[92m  Downloaded[0m peg-macros v0.8.6
+2026-09-10T19:10:55.0037955Z [1m[92m  Downloaded[0m serde_core v1.0.228
+2026-09-10T19:10:55.0056654Z [1m[92m  Downloaded[0m block-buffer v0.12.1
+2026-09-10T19:10:55.0064167Z [1m[92m  Downloaded[0m smallvec v1.15.2
+2026-09-10T19:10:55.0074013Z [1m[92m  Downloaded[0m siphasher v1.0.3
+2026-09-10T19:10:55.0081864Z [1m[92m  Downloaded[0m sparesults v0.3.3
+2026-09-10T19:10:55.0094074Z [1m[92m  Downloaded[0m md-5 v0.11.0
+2026-09-10T19:10:55.0106483Z [1m[92m  Downloaded[0m block-buffer v0.10.4
+2026-09-10T19:10:55.0114663Z [1m[92m  Downloaded[0m oxttl v0.1.8
+2026-09-10T19:10:55.0138331Z [1m[92m  Downloaded[0m rand_core v0.6.4
+2026-09-10T19:10:55.0150715Z [1m[92m  Downloaded[0m regex v1.12.4
+2026-09-10T19:10:55.0195613Z [1m[92m  Downloaded[0m sha2 v0.10.9
+2026-09-10T19:10:55.0213409Z [1m[92m  Downloaded[0m crossbeam-epoch v0.9.20
+2026-09-10T19:10:55.0234425Z [1m[92m  Downloaded[0m parking_lot_core v0.9.12
+2026-09-10T19:10:55.0248100Z [1m[92m  Downloaded[0m quote v1.0.45
+2026-09-10T19:10:55.0263471Z [1m[92m  Downloaded[0m sparopt v0.3.6
+2026-09-10T19:10:55.0274069Z [1m[92m  Downloaded[0m zmij v1.0.21
+2026-09-10T19:10:55.0285805Z [1m[92m  Downloaded[0m crossbeam-deque v0.8.6
+2026-09-10T19:10:55.0295333Z [1m[92m  Downloaded[0m dashmap v6.2.1
+2026-09-10T19:10:55.0310001Z [1m[92m  Downloaded[0m either v1.16.0
+2026-09-10T19:10:55.0319506Z [1m[92m  Downloaded[0m json-event-parser v0.2.3
+2026-09-10T19:10:55.0330537Z [1m[92m  Downloaded[0m digest v0.11.3
+2026-09-10T19:10:55.0344035Z [1m[92m  Downloaded[0m oxrdfxml v0.2.3
+2026-09-10T19:10:55.0353567Z [1m[92m  Downloaded[0m thiserror v2.0.18
+2026-09-10T19:10:55.0385065Z [1m[92m  Downloaded[0m tracing-core v0.1.36
+2026-09-10T19:10:55.0402516Z [1m[92m  Downloaded[0m rand v0.8.6
+2026-09-10T19:10:55.0423707Z [1m[92m  Downloaded[0m rayon-core v1.13.0
+2026-09-10T19:10:55.0445338Z [1m[92m  Downloaded[0m sha2 v0.11.0
+2026-09-10T19:10:55.0465352Z [1m[92m  Downloaded[0m tracing-attributes v0.1.31
+2026-09-10T19:10:55.0481397Z [1m[92m  Downloaded[0m const-oid v0.10.2
+2026-09-10T19:10:55.0496918Z [1m[92m  Downloaded[0m memmap2 v0.9.11
+2026-09-10T19:10:55.0507307Z [1m[92m  Downloaded[0m proc-macro2 v1.0.106
+2026-09-10T19:10:55.0524934Z [1m[92m  Downloaded[0m ryu-js v1.0.2
+2026-09-10T19:10:55.0549383Z [1m[92m  Downloaded[0m oxjsonld v0.2.5
+2026-09-10T19:10:55.0562378Z [1m[92m  Downloaded[0m oxttl v0.2.3
+2026-09-10T19:10:55.0578827Z [1m[92m  Downloaded[0m serde v1.0.228
+2026-09-10T19:10:55.0601160Z [1m[92m  Downloaded[0m spareval v0.2.6
+2026-09-10T19:10:55.0616870Z [1m[92m  Downloaded[0m unicode-ident v1.0.24
+2026-09-10T19:10:55.0633543Z [1m[92m  Downloaded[0m rand v0.9.4
+2026-09-10T19:10:55.0657420Z [1m[92m  Downloaded[0m typenum v1.20.1
+2026-09-10T19:10:55.0680997Z [1m[92m  Downloaded[0m oxigraph v0.5.9
+2026-09-10T19:10:55.0713792Z [1m[92m  Downloaded[0m quick-xml v0.37.5
+2026-09-10T19:10:55.0751564Z [1m[92m  Downloaded[0m serde_json v1.0.150
+2026-09-10T19:10:55.0795338Z [1m[92m  Downloaded[0m rayon v1.12.0
+2026-09-10T19:10:55.0849646Z [1m[92m  Downloaded[0m regex-syntax v0.8.11
+2026-09-10T19:10:55.0901989Z [1m[92m  Downloaded[0m zerocopy v0.8.50
+2026-09-10T19:10:55.1026902Z [1m[92m  Downloaded[0m rdf-canon v0.15.3
+2026-09-10T19:10:55.1193161Z [1m[92m  Downloaded[0m syn v2.0.117
+2026-09-10T19:10:55.1261040Z [1m[92m  Downloaded[0m tracing v0.1.44
+2026-09-10T19:10:55.1368267Z [1m[92m  Downloaded[0m libc v0.2.186
+2026-09-10T19:10:55.1593490Z [1m[92m  Downloaded[0m regex-automata v0.4.14
+2026-09-10T19:10:55.1697093Z [1m[92m  Downloaded[0m uuid v1.23.4
+2026-09-10T19:10:55.2486188Z [1m[92m   Compiling[0m cfg-if v1.0.4
+2026-09-10T19:10:55.2487617Z [1m[92m   Compiling[0m libc v0.2.186
+2026-09-10T19:10:55.2514087Z [1m[92m   Compiling[0m typenum v1.20.1
+2026-09-10T19:10:55.2515034Z [1m[92m   Compiling[0m proc-macro2 v1.0.106
+2026-09-10T19:10:55.2846054Z [1m[92m   Compiling[0m quote v1.0.45
+2026-09-10T19:10:55.8487952Z [1m[92m   Compiling[0m unicode-ident v1.0.24
+2026-09-10T19:10:55.8867235Z [1m[92m   Compiling[0m version_check v0.9.5
+2026-09-10T19:10:56.0238798Z [1m[92m   Compiling[0m zerocopy v0.8.50
+2026-09-10T19:10:56.3110824Z [1m[92m   Compiling[0m generic-array v0.14.7
+2026-09-10T19:10:56.9578094Z [1m[92m   Compiling[0m thiserror v2.0.18
+2026-09-10T19:10:57.0838074Z [1m[92m   Compiling[0m syn v2.0.117
+2026-09-10T19:10:57.1587764Z [1m[92m   Compiling[0m crypto-common v0.1.7
+2026-09-10T19:10:57.1977981Z [1m[92m   Compiling[0m block-buffer v0.10.4
+2026-09-10T19:10:57.2328206Z [1m[92m   Compiling[0m getrandom v0.3.4
+2026-09-10T19:10:57.2731349Z [1m[92m   Compiling[0m digest v0.10.7
+2026-09-10T19:10:57.3957792Z [1m[92m   Compiling[0m cpufeatures v0.2.17
+2026-09-10T19:10:57.4297728Z [1m[92m   Compiling[0m oxilangtag v0.1.6
+2026-09-10T19:10:57.4417624Z [1m[92m   Compiling[0m oxiri v0.2.11
+2026-09-10T19:10:57.7667642Z [1m[92m   Compiling[0m memchr v2.8.2
+2026-09-10T19:10:57.8485549Z [1m[92m   Compiling[0m rand_core v0.9.5
+2026-09-10T19:10:58.0217976Z [1m[92m   Compiling[0m sha2 v0.10.9
+2026-09-10T19:10:58.5988579Z [1m[92m   Compiling[0m hex v0.4.3
+2026-09-10T19:10:58.6425138Z [1m[92m   Compiling[0m crossbeam-utils v0.8.21
+2026-09-10T19:10:58.8298055Z [1m[92m   Compiling[0m autocfg v1.5.1
+2026-09-10T19:10:59.1267542Z [1m[92m   Compiling[0m crossbeam-epoch v0.9.20
+2026-09-10T19:10:59.2461474Z [1m[92m   Compiling[0m getrandom v0.2.17
+2026-09-10T19:10:59.3447703Z [1m[92m   Compiling[0m either v1.16.0
+2026-09-10T19:10:59.4299710Z [1m[92m   Compiling[0m rand_core v0.6.4
+2026-09-10T19:10:59.6247617Z [1m[92m   Compiling[0m num-traits v0.2.19
+2026-09-10T19:10:59.7038584Z [1m[92m   Compiling[0m hybrid-array v0.4.12
+2026-09-10T19:10:59.8717063Z [1m[92m   Compiling[0m peg-runtime v0.8.6
+2026-09-10T19:11:00.1028156Z [1m[92m   Compiling[0m ppv-lite86 v0.2.21
+2026-09-10T19:11:00.1117479Z [1m[92m   Compiling[0m once_cell v1.21.4
+2026-09-10T19:11:00.2408168Z [1m[92m   Compiling[0m rayon-core v1.13.0
+2026-09-10T19:11:00.2717643Z [1m[92m   Compiling[0m peg-macros v0.8.6
+2026-09-10T19:11:00.3218196Z [1m[92m   Compiling[0m crossbeam-deque v0.8.6
+2026-09-10T19:11:00.4344940Z [1m[92m   Compiling[0m rand_chacha v0.9.0
+2026-09-10T19:11:00.4848137Z [1m[92m   Compiling[0m rand_chacha v0.3.1
+2026-09-10T19:11:00.8457860Z [1m[92m   Compiling[0m rand v0.9.4
+2026-09-10T19:11:01.3572077Z [1m[92m   Compiling[0m rustc-hash v2.1.3
+2026-09-10T19:11:01.4898690Z [1m[92m   Compiling[0m peg v0.8.6
+2026-09-10T19:11:01.5267858Z [1m[92m   Compiling[0m rand v0.8.6
+2026-09-10T19:11:01.5562566Z [1m[92m   Compiling[0m thiserror-impl v2.0.18
+2026-09-10T19:11:02.1158225Z [1m[92m   Compiling[0m block-buffer v0.12.1
+2026-09-10T19:11:02.2298312Z [1m[92m   Compiling[0m crypto-common v0.2.2
+2026-09-10T19:11:02.2767618Z [1m[92m   Compiling[0m quick-xml v0.37.5
+2026-09-10T19:11:02.5728124Z [1m[92m   Compiling[0m aho-corasick v1.1.4
+2026-09-10T19:11:02.6723179Z [1m[92m   Compiling[0m oxsdatatypes v0.2.2
+2026-09-10T19:11:03.3387795Z [1m[92m   Compiling[0m oxrdf v0.3.3
+2026-09-10T19:11:03.3617989Z [1m[92m   Compiling[0m json-event-parser v0.2.3
+2026-09-10T19:11:03.5948202Z [1m[92m   Compiling[0m smallvec v1.15.2
+2026-09-10T19:11:03.7738435Z [1m[92m   Compiling[0m const-oid v0.10.2
+2026-09-10T19:11:03.7938244Z [1m[92m   Compiling[0m foldhash v0.2.0
+2026-09-10T19:11:03.9104132Z [1m[92m   Compiling[0m allocator-api2 v0.2.21
+2026-09-10T19:11:03.9717893Z [1m[92m   Compiling[0m regex-syntax v0.8.11
+2026-09-10T19:11:04.2567785Z [1m[92m   Compiling[0m equivalent v1.0.2
+2026-09-10T19:11:04.2887750Z [1m[92m   Compiling[0m hashbrown v0.17.1
+2026-09-10T19:11:05.0308462Z [1m[92m   Compiling[0m oxttl v0.2.3
+2026-09-10T19:11:05.6597939Z [1m[92m   Compiling[0m spargebra v0.4.6 (/home/runner/work/sparq/sparq/vendor/spargebra)
+2026-09-10T19:11:07.3198092Z [1m[92m   Compiling[0m regex-automata v0.4.14
+2026-09-10T19:11:07.7699251Z [1m[92m   Compiling[0m digest v0.11.3
+2026-09-10T19:11:07.8977939Z [1m[92m   Compiling[0m oxrdf v0.2.4
+2026-09-10T19:11:07.9917627Z [1m[92m   Compiling[0m num-integer v0.1.46
+2026-09-10T19:11:08.3517876Z [1m[92m   Compiling[0m rayon v1.12.0
+2026-09-10T19:11:10.8234893Z [1m[92m   Compiling[0m tracing-attributes v0.1.31
+2026-09-10T19:11:11.1455089Z [1m[92m   Compiling[0m tracing-core v0.1.36
+2026-09-10T19:11:11.8087889Z [1m[92m   Compiling[0m memmap2 v0.9.11
+2026-09-10T19:11:11.8638304Z [1m[92m   Compiling[0m zmij v1.0.21
+2026-09-10T19:11:11.9830515Z [1m[92m   Compiling[0m serde_core v1.0.228
+2026-09-10T19:11:11.9927478Z [1m[92m   Compiling[0m parking_lot_core v0.9.12
+2026-09-10T19:11:12.1017788Z [1m[92m   Compiling[0m getrandom v0.4.2
+2026-09-10T19:11:12.1267738Z [1m[92m   Compiling[0m pin-project-lite v0.2.17
+2026-09-10T19:11:12.1717512Z [1m[92m   Compiling[0m libm v0.2.16
+2026-09-10T19:11:12.2207515Z [1m[92m   Compiling[0m tracing v0.1.44
+2026-09-10T19:11:12.3749865Z [1m[92m   Compiling[0m sparq-core v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-core)
+2026-09-10T19:11:12.4023383Z [1m[92m   Compiling[0m regex v1.12.4
+2026-09-10T19:11:12.4967720Z [1m[92m   Compiling[0m itertools v0.14.0
+2026-09-10T19:11:13.1267956Z [1m[92m   Compiling[0m bigdecimal v0.4.10
+2026-09-10T19:11:13.2545363Z [1m[92m   Compiling[0m base16ct v0.2.0
+2026-09-10T19:11:13.3928142Z [1m[92m   Compiling[0m scopeguard v1.2.0
+2026-09-10T19:11:13.4397661Z [1m[92m   Compiling[0m ryu-js v1.0.2
+2026-09-10T19:11:13.4517373Z [1m[92m   Compiling[0m cpufeatures v0.3.0
+2026-09-10T19:11:13.4847614Z [1m[92m   Compiling[0m serde_json v1.0.150
+2026-09-10T19:11:13.5657682Z [1m[92m   Compiling[0m lock_api v0.4.14
+2026-09-10T19:11:13.6794419Z [1m[92m   Compiling[0m oxjsonld v0.2.5
+2026-09-10T19:11:14.1627703Z [1m[92m   Compiling[0m rdf-canon v0.15.3
+2026-09-10T19:11:16.7564410Z [1m[92m   Compiling[0m num-bigint v0.4.6
+2026-09-10T19:11:17.0337739Z [1m[92m   Compiling[0m sparopt v0.3.6
+2026-09-10T19:11:17.3767901Z [1m[92m   Compiling[0m oxrdfxml v0.2.3
+2026-09-10T19:11:18.9026595Z [1m[92m   Compiling[0m sparesults v0.3.3
+2026-09-10T19:11:18.9069431Z [1m[92m   Compiling[0m sha1 v0.10.6
+2026-09-10T19:11:19.1087575Z [1m[92m   Compiling[0m md-5 v0.10.6
+2026-09-10T19:11:19.1929158Z [1m[92m   Compiling[0m hashbrown v0.14.5
+2026-09-10T19:11:19.8737982Z [1m[92m   Compiling[0m itoa v1.0.18
+2026-09-10T19:11:20.0217872Z [1m[92m   Compiling[0m dashmap v6.2.1
+2026-09-10T19:11:20.5098408Z [1m[92m   Compiling[0m spareval v0.2.6
+2026-09-10T19:11:21.6467492Z [1m[92m   Compiling[0m oxrdfio v0.2.5
+2026-09-10T19:11:22.2118167Z [1m[92m   Compiling[0m uuid v1.23.4
+2026-09-10T19:11:22.6327740Z [1m[92m   Compiling[0m sparq-substrate v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-substrate)
+2026-09-10T19:11:22.9861896Z [1m[92m   Compiling[0m sha1 v0.11.0
+2026-09-10T19:11:23.2378228Z [1m[92m   Compiling[0m sha2 v0.11.0
+2026-09-10T19:11:23.2734264Z [1m[92m   Compiling[0m oxttl v0.1.8
+2026-09-10T19:11:23.3257968Z [1m[92m   Compiling[0m num-bigint v0.5.1
+2026-09-10T19:11:24.3217223Z [1m[92m   Compiling[0m md-5 v0.11.0
+2026-09-10T19:11:24.4908251Z [1m[92m   Compiling[0m siphasher v1.0.3
+2026-09-10T19:11:24.5088267Z [1m[92m   Compiling[0m sparq-engine v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-engine)
+2026-09-10T19:11:24.6271896Z [1m[92m   Compiling[0m oxigraph v0.5.9
+2026-09-10T19:11:25.7738163Z [1m[92m   Compiling[0m sparq-difftest v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-difftest)
+2026-09-10T19:11:25.8467887Z [1m[92m   Compiling[0m sparq-canon v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-canon)
+2026-09-10T19:11:32.9688894Z [1m[92m   Compiling[0m sparq-bench v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-bench)
+2026-09-10T19:12:12.3489353Z [1m[92m    Finished[0m `release-fast` profile [optimized] target(s) in 1m 19s
+2026-09-10T19:12:12.4776835Z ##[group]Run set -euo pipefail
+2026-09-10T19:12:12.4777203Z [36;1mset -euo pipefail[0m
+2026-09-10T19:12:12.4777480Z [36;1mb=./target/release-fast/sparq-bench[0m
+2026-09-10T19:12:12.4777903Z [36;1m# Canonical broad smoke (all categories, deterministic seeds).[0m
+2026-09-10T19:12:12.4778263Z [36;1m"$b" fuzz 0 2000 all[0m
+2026-09-10T19:12:12.4778619Z [36;1m# sq-lr2ii known-catch windows (category-dense; 'all' misses this class).[0m
+2026-09-10T19:12:12.4779014Z [36;1m"$b" fuzz 4695 2200 equality[0m
+2026-09-10T19:12:12.4779284Z [36;1m"$b" fuzz 4695 2200 filter[0m
+2026-09-10T19:12:12.4779645Z [36;1m# sq-j80vk: fixed per-category regression windows over the SPARQL 1.1[0m
+2026-09-10T19:12:12.4780124Z [36;1m# surfaces added to the generator (property paths, aggregates/GROUP BY/[0m
+2026-09-10T19:12:12.4780600Z [36;1m# HAVING, sub-selects, EXISTS, VALUES, BIND, GRAPH) — plus sq-avd75's[0m
+2026-09-10T19:12:12.4781138Z [36;1m# `antijoin` (the `OPTIONAL … FILTER(!bound)` idiom, i.e. rewrite (b) of the[0m
+2026-09-10T19:12:12.4781648Z [36;1m# `algebra-rewrite` pass #1735, which the fuzzer builds ON) — and sq-qcnn.6's[0m
+2026-09-10T19:12:12.4782125Z [36;1m# `typed` / `strfn` / `ask` / `construct` (the typed-literal columns, the[0m
+2026-09-10T19:12:12.4782586Z [36;1m# string functions, and the two non-SELECT RESULT FORMS, which are compared[0m
+2026-09-10T19:12:12.4783062Z [36;1m# by their boolean / canonical triple set rather than by a count). 'all'[0m
+2026-09-10T19:12:12.4783530Z [36;1m# picks ONE category per seed, so the 2000-seed broad window above leaves[0m
+2026-09-10T19:12:12.4784007Z [36;1m# each of the 21 categories only ~95 cases — too thin to be a per-PR net for[0m
+2026-09-10T19:12:12.4784507Z [36;1m# a specific evaluation path. These are deterministic REGRESSION windows, not[0m
+2026-09-10T19:12:12.4785000Z [36;1m# known-catch ones: no historical bug is pinned to these seeds yet, and if[0m
+2026-09-10T19:12:12.4785616Z [36;1m# the nightly lane finds one its window gets pinned here the way sq-lr2ii's[0m
+2026-09-10T19:12:12.4786270Z [36;1m# was. ~2 s per category at release-fast throughput.[0m
+2026-09-10T19:12:12.4786694Z [36;1mfor c in path aggregate subquery exists values bind graph antijoin \[0m
+2026-09-10T19:12:12.4787079Z [36;1m         typed strfn ask construct; do[0m
+2026-09-10T19:12:12.4787363Z [36;1m  "$b" fuzz 0 10000 "$c"[0m
+2026-09-10T19:12:12.4787606Z [36;1mdone[0m
+2026-09-10T19:12:12.4787927Z [36;1m# Store-mode read paths over the fixed window: the same seeds re-run with[0m
+2026-09-10T19:12:12.4788393Z [36;1m# the store rebuilt through mmap / block-compressed / dict-spill (the[0m
+2026-09-10T19:12:12.4788851Z [36;1m# dict-spill external build is the slowest per seed — smaller window).[0m
+2026-09-10T19:12:12.4789250Z [36;1mSPARQ_FUZZ_MMAP=1 "$b" fuzz 0 2000 all[0m
+2026-09-10T19:12:12.4789568Z [36;1mSPARQ_FUZZ_COMPRESS=1 "$b" fuzz 0 2000 all[0m
+2026-09-10T19:12:12.4789883Z [36;1mSPARQ_FUZZ_DICTSPILL=1 "$b" fuzz 0 500 all[0m
+2026-09-10T19:12:12.4813424Z shell: /usr/bin/bash -e {0}
+2026-09-10T19:12:12.4813705Z env:
+2026-09-10T19:12:12.4813911Z   CARGO_TERM_COLOR: always
+2026-09-10T19:12:12.4814150Z   RUST_BACKTRACE: 1
+2026-09-10T19:12:12.4814360Z   SMOKE_SECS: 30
+2026-09-10T19:12:12.4814564Z   MAIN_SECS: 120
+2026-09-10T19:12:12.4814764Z   NIGHTLY_SECS: 600
+2026-09-10T19:12:12.4815013Z   FUZZ_BUILD_TARGET: x86_64-unknown-linux-gnu
+2026-09-10T19:12:12.4815306Z   CACHE_ON_FAILURE: false
+2026-09-10T19:12:12.4815542Z   CARGO_INCREMENTAL: 0
+2026-09-10T19:12:12.4815769Z ##[endgroup]
+2026-09-10T19:12:12.4875196Z divergence allowlist (/home/runner/work/sparq/sparq/crates/sparq-bench/../../bench/differential-divergences.json): cross-family-eq-type-error=adjudicated (sq-eibog) bnode-iri-inequality=adjudicated (sq-ai2wa)
+2026-09-10T19:12:13.8090871Z fuzz[all] seeds 0..2000 : checked=2000 skipped(unsupported)=0 value_compared=1940 compared(multiset)=1609 compared(order-by)=165 compared(iso)=0 compared(ask)=55 compared(construct)=111 skipped(row-choice)=53 skipped(undecoded)=0 triage(iso)=0 adjudicated(cross-family-eq)=7 adjudicated(bnode-iri)=0 full_mismatch=0 count_mismatch=0
+2026-09-10T19:12:13.8111340Z divergence allowlist (/home/runner/work/sparq/sparq/crates/sparq-bench/../../bench/differential-divergences.json): cross-family-eq-type-error=adjudicated (sq-eibog) bnode-iri-inequality=adjudicated (sq-ai2wa)
+2026-09-10T19:12:15.0634917Z fuzz[equality] seeds 4695..6895 : checked=2200 skipped(unsupported)=0 value_compared=1839 compared(multiset)=1839 compared(order-by)=0 compared(iso)=0 compared(ask)=0 compared(construct)=0 skipped(row-choice)=0 skipped(undecoded)=0 triage(iso)=0 adjudicated(cross-family-eq)=361 adjudicated(bnode-iri)=0 full_mismatch=0 count_mismatch=0
+2026-09-10T19:12:15.0652909Z divergence allowlist (/home/runner/work/sparq/sparq/crates/sparq-bench/../../bench/differential-divergences.json): cross-family-eq-type-error=adjudicated (sq-eibog) bnode-iri-inequality=adjudicated (sq-ai2wa)
+2026-09-10T19:12:16.4333092Z fuzz[filter] seeds 4695..6895 : checked=2200 skipped(unsupported)=0 value_compared=2117 compared(multiset)=2117 compared(order-by)=0 compared(iso)=0 compared(ask)=0 compared(construct)=0 skipped(row-choice)=0 skipped(undecoded)=0 triage(iso)=0 adjudicated(cross-family-eq)=83 adjudicated(bnode-iri)=0 full_mismatch=0 count_mismatch=0
+2026-09-10T19:12:16.4355463Z divergence allowlist (/home/runner/work/sparq/sparq/crates/sparq-bench/../../bench/differential-divergences.json): cross-family-eq-type-error=adjudicated (sq-eibog) bnode-iri-inequality=adjudicated (sq-ai2wa)
+2026-09-10T19:12:25.8747424Z fuzz[path] seeds 0..10000 : checked=10000 skipped(unsupported)=0 value_compared=10000 compared(multiset)=10000 compared(order-by)=0 compared(iso)=0 compared(ask)=0 compared(construct)=0 skipped(row-choice)=0 skipped(undecoded)=0 triage(iso)=0 adjudicated(cross-family-eq)=0 adjudicated(bnode-iri)=0 full_mismatch=0 count_mismatch=0
+2026-09-10T19:12:25.8763895Z divergence allowlist (/home/runner/work/sparq/sparq/crates/sparq-bench/../../bench/differential-divergences.json): cross-family-eq-type-error=adjudicated (sq-eibog) bnode-iri-inequality=adjudicated (sq-ai2wa)
+2026-09-10T19:12:32.7203080Z fuzz[aggregate] seeds 0..10000 : checked=10000 skipped(unsupported)=0 value_compared=10000 compared(multiset)=10000 compared(order-by)=0 compared(iso)=0 compared(ask)=0 compared(construct)=0 skipped(row-choice)=0 skipped(undecoded)=0 triage(iso)=0 adjudicated(cross-family-eq)=0 adjudicated(bnode-iri)=0 full_mismatch=0 count_mismatch=0
+2026-09-10T19:12:32.7221161Z divergence allowlist (/home/runner/work/sparq/sparq/crates/sparq-bench/../../bench/differential-divergences.json): cross-family-eq-type-error=adjudicated (sq-eibog) bnode-iri-inequality=adjudicated (sq-ai2wa)
+2026-09-10T19:12:39.6897647Z fuzz[subquery] seeds 0..10000 : checked=10000 skipped(unsupported)=0 value_compared=10000 compared(multiset)=10000 compared(order-by)=0 compared(iso)=0 compared(ask)=0 compared(construct)=0 skipped(row-choice)=0 skipped(undecoded)=0 triage(iso)=0 adjudicated(cross-family-eq)=0 adjudicated(bnode-iri)=0 full_mismatch=0 count_mismatch=0
+2026-09-10T19:12:39.6913866Z divergence allowlist (/home/runner/work/sparq/sparq/crates/sparq-bench/../../bench/differential-divergences.json): cross-family-eq-type-error=adjudicated (sq-eibog) bnode-iri-inequality=adjudicated (sq-ai2wa)
+2026-09-10T19:12:46.7657323Z fuzz[exists] seeds 0..10000 : checked=10000 skipped(unsupported)=0 value_compared=10000 compared(multiset)=10000 compared(order-by)=0 compared(iso)=0 compared(ask)=0 compared(construct)=0 skipped(row-choice)=0 skipped(undecoded)=0 triage(iso)=0 adjudicated(cross-family-eq)=0 adjudicated(bnode-iri)=0 full_mismatch=0 count_mismatch=0
+2026-09-10T19:12:46.7675350Z divergence allowlist (/home/runner/work/sparq/sparq/crates/sparq-bench/../../bench/differential-divergences.json): cross-family-eq-type-error=adjudicated (sq-eibog) bnode-iri-inequality=adjudicated (sq-ai2wa)
+2026-09-10T19:12:52.5547097Z fuzz[values] seeds 0..10000 : checked=10000 skipped(unsupported)=0 value_compared=10000 compared(multiset)=10000 compared(order-by)=0 compared(iso)=0 compared(ask)=0 compared(construct)=0 skipped(row-choice)=0 skipped(undecoded)=0 triage(iso)=0 adjudicated(cross-family-eq)=0 adjudicated(bnode-iri)=0 full_mismatch=0 count_mismatch=0
+2026-09-10T19:12:52.5565226Z divergence allowlist (/home/runner/work/sparq/sparq/crates/sparq-bench/../../bench/differential-divergences.json): cross-family-eq-type-error=adjudicated (sq-eibog) bnode-iri-inequality=adjudicated (sq-ai2wa)
+2026-09-10T19:12:59.4906454Z fuzz[bind] seeds 0..10000 : checked=10000 skipped(unsupported)=0 value_compared=10000 compared(multiset)=10000 compared(order-by)=0 compared(iso)=0 compared(ask)=0 compared(construct)=0 skipped(row-choice)=0 skipped(undecoded)=0 triage(iso)=0 adjudicated(cross-family-eq)=0 adjudicated(bnode-iri)=0 full_mismatch=0 count_mismatch=0
+2026-09-10T19:12:59.4923623Z divergence allowlist (/home/runner/work/sparq/sparq/crates/sparq-bench/../../bench/differential-divergences.json): cross-family-eq-type-error=adjudicated (sq-eibog) bnode-iri-inequality=adjudicated (sq-ai2wa)
+2026-09-10T19:13:06.1986586Z fuzz[graph] seeds 0..10000 : checked=10000 skipped(unsupported)=0 value_compared=10000 compared(multiset)=10000 compared(order-by)=0 compared(iso)=0 compared(ask)=0 compared(construct)=0 skipped(row-choice)=0 skipped(undecoded)=0 triage(iso)=0 adjudicated(cross-family-eq)=0 adjudicated(bnode-iri)=0 full_mismatch=0 count_mismatch=0
+2026-09-10T19:13:06.2003613Z divergence allowlist (/home/runner/work/sparq/sparq/crates/sparq-bench/../../bench/differential-divergences.json): cross-family-eq-type-error=adjudicated (sq-eibog) bnode-iri-inequality=adjudicated (sq-ai2wa)
+2026-09-10T19:13:12.6674973Z fuzz[antijoin] seeds 0..10000 : checked=10000 skipped(unsupported)=0 value_compared=10000 compared(multiset)=10000 compared(order-by)=0 compared(iso)=0 compared(ask)=0 compared(construct)=0 skipped(row-choice)=0 skipped(undecoded)=0 triage(iso)=0 adjudicated(cross-family-eq)=0 adjudicated(bnode-iri)=0 full_mismatch=0 count_mismatch=0
+2026-09-10T19:13:12.6695816Z divergence allowlist (/home/runner/work/sparq/sparq/crates/sparq-bench/../../bench/differential-divergences.json): cross-family-eq-type-error=adjudicated (sq-eibog) bnode-iri-inequality=adjudicated (sq-ai2wa)
+2026-09-10T19:13:18.5175459Z fuzz[typed] seeds 0..10000 : checked=10000 skipped(unsupported)=0 value_compared=10000 compared(multiset)=10000 compared(order-by)=0 compared(iso)=0 compared(ask)=0 compared(construct)=0 skipped(row-choice)=0 skipped(undecoded)=0 triage(iso)=0 adjudicated(cross-family-eq)=0 adjudicated(bnode-iri)=0 full_mismatch=0 count_mismatch=0
+2026-09-10T19:13:18.5193958Z divergence allowlist (/home/runner/work/sparq/sparq/crates/sparq-bench/../../bench/differential-divergences.json): cross-family-eq-type-error=adjudicated (sq-eibog) bnode-iri-inequality=adjudicated (sq-ai2wa)
+2026-09-10T19:13:25.1814273Z fuzz[strfn] seeds 0..10000 : checked=10000 skipped(unsupported)=0 value_compared=10000 compared(multiset)=10000 compared(order-by)=0 compared(iso)=0 compared(ask)=0 compared(construct)=0 skipped(row-choice)=0 skipped(undecoded)=0 triage(iso)=0 adjudicated(cross-family-eq)=0 adjudicated(bnode-iri)=0 full_mismatch=0 count_mismatch=0
+2026-09-10T19:13:25.1835098Z divergence allowlist (/home/runner/work/sparq/sparq/crates/sparq-bench/../../bench/differential-divergences.json): cross-family-eq-type-error=adjudicated (sq-eibog) bnode-iri-inequality=adjudicated (sq-ai2wa)
+2026-09-10T19:13:30.2078334Z fuzz[ask] seeds 0..10000 : checked=10000 skipped(unsupported)=0 value_compared=10000 compared(multiset)=0 compared(order-by)=0 compared(iso)=0 compared(ask)=10000 compared(construct)=0 skipped(row-choice)=0 skipped(undecoded)=0 triage(iso)=0 adjudicated(cross-family-eq)=0 adjudicated(bnode-iri)=0 full_mismatch=0 count_mismatch=0
+2026-09-10T19:13:30.2098434Z divergence allowlist (/home/runner/work/sparq/sparq/crates/sparq-bench/../../bench/differential-divergences.json): cross-family-eq-type-error=adjudicated (sq-eibog) bnode-iri-inequality=adjudicated (sq-ai2wa)
+2026-09-10T19:13:36.2124382Z fuzz[construct] seeds 0..10000 : checked=10000 skipped(unsupported)=0 value_compared=10000 compared(multiset)=0 compared(order-by)=0 compared(iso)=0 compared(ask)=0 compared(construct)=10000 skipped(row-choice)=0 skipped(undecoded)=0 triage(iso)=0 adjudicated(cross-family-eq)=0 adjudicated(bnode-iri)=0 full_mismatch=0 count_mismatch=0
+2026-09-10T19:13:36.2144875Z divergence allowlist (/home/runner/work/sparq/sparq/crates/sparq-bench/../../bench/differential-divergences.json): cross-family-eq-type-error=adjudicated (sq-eibog) bnode-iri-inequality=adjudicated (sq-ai2wa)
+2026-09-10T19:13:40.2703489Z fuzz[all] seeds 0..2000 : checked=2000 skipped(unsupported)=0 value_compared=1940 compared(multiset)=1609 compared(order-by)=165 compared(iso)=0 compared(ask)=55 compared(construct)=111 skipped(row-choice)=53 skipped(undecoded)=0 triage(iso)=0 adjudicated(cross-family-eq)=7 adjudicated(bnode-iri)=0 full_mismatch=0 count_mismatch=0
+2026-09-10T19:13:40.2721924Z divergence allowlist (/home/runner/work/sparq/sparq/crates/sparq-bench/../../bench/differential-divergences.json): cross-family-eq-type-error=adjudicated (sq-eibog) bnode-iri-inequality=adjudicated (sq-ai2wa)
+2026-09-10T19:13:41.6823780Z fuzz[all] seeds 0..2000 : checked=2000 skipped(unsupported)=0 value_compared=1940 compared(multiset)=1609 compared(order-by)=165 compared(iso)=0 compared(ask)=55 compared(construct)=111 skipped(row-choice)=53 skipped(undecoded)=0 triage(iso)=0 adjudicated(cross-family-eq)=7 adjudicated(bnode-iri)=0 full_mismatch=0 count_mismatch=0
+2026-09-10T19:13:41.6844184Z divergence allowlist (/home/runner/work/sparq/sparq/crates/sparq-bench/../../bench/differential-divergences.json): cross-family-eq-type-error=adjudicated (sq-eibog) bnode-iri-inequality=adjudicated (sq-ai2wa)
+2026-09-10T19:13:44.6277284Z fuzz[all] seeds 0..500 : checked=500 skipped(unsupported)=0 value_compared=494 compared(multiset)=427 compared(order-by)=10 compared(iso)=0 compared(ask)=13 compared(construct)=44 skipped(row-choice)=0 skipped(undecoded)=0 triage(iso)=0 adjudicated(cross-family-eq)=6 adjudicated(bnode-iri)=0 full_mismatch=0 count_mismatch=0
+2026-09-10T19:13:44.6423560Z Post job cleanup.
+2026-09-10T19:13:44.9219762Z ##[group]Cache Configuration
+2026-09-10T19:13:44.9220311Z Cache Provider:
+2026-09-10T19:13:44.9220855Z     github
+2026-09-10T19:13:44.9221260Z Workspaces:
+2026-09-10T19:13:44.9221669Z     /home/runner/work/sparq/sparq
+2026-09-10T19:13:44.9222382Z Cache Paths:
+2026-09-10T19:13:44.9222796Z     /home/runner/.cargo/bin
+2026-09-10T19:13:44.9223370Z     /home/runner/.cargo/.crates.toml
+2026-09-10T19:13:44.9223837Z     /home/runner/.cargo/.crates2.json
+2026-09-10T19:13:44.9224418Z     /home/runner/.cargo/registry
+2026-09-10T19:13:44.9224957Z     /home/runner/.cargo/git
+2026-09-10T19:13:44.9225559Z     /home/runner/work/sparq/sparq/target
+2026-09-10T19:13:44.9226225Z Restore Key:
+2026-09-10T19:13:44.9226729Z     v0-rust-differential-nightly-Linux-x64-8c88eddb
+2026-09-10T19:13:44.9227393Z Cache Key:
+2026-09-10T19:13:44.9227906Z     v0-rust-differential-nightly-Linux-x64-8c88eddb-0c74d5b7
+2026-09-10T19:13:44.9228582Z .. Prefix:
+2026-09-10T19:13:44.9229268Z   - v0-rust-differential-nightly-Linux-x64
+2026-09-10T19:13:44.9229858Z .. Environment considered:
+2026-09-10T19:13:44.9230284Z   - Rust Versions:
+2026-09-10T19:13:44.9231542Z     - 1.97.1 x86_64-unknown-linux-gnu 8bab26f4f68e0e26f0bb7960be334d5b520ea452
+2026-09-10T19:13:44.9232453Z     - 1.98.1 x86_64-unknown-linux-gnu 48a229ceaefd4985c50990b14116b6d856af0985
+2026-09-10T19:13:44.9233054Z     - 1.97.1 x86_64-unknown-linux-gnu 8bab26f4f68e0e26f0bb7960be334d5b520ea452
+2026-09-10T19:13:44.9233554Z   - CARGO_INCREMENTAL
+2026-09-10T19:13:44.9233865Z   - CARGO_TERM_COLOR
+2026-09-10T19:13:44.9234146Z   - RUST_BACKTRACE
+2026-09-10T19:13:44.9234536Z .. Lockfiles considered:
+2026-09-10T19:13:44.9234898Z   - /home/runner/work/sparq/sparq/.cargo/config.toml
+2026-09-10T19:13:44.9235354Z   - /home/runner/work/sparq/sparq/Cargo.lock
+2026-09-10T19:13:44.9236178Z   - /home/runner/work/sparq/sparq/crates/sparq-acbench/Cargo.toml
+2026-09-10T19:13:44.9236696Z   - /home/runner/work/sparq/sparq/crates/sparq-algos/Cargo.toml
+2026-09-10T19:13:44.9237256Z   - /home/runner/work/sparq/sparq/crates/sparq-arrow/Cargo.toml
+2026-09-10T19:13:44.9237709Z   - /home/runner/work/sparq/sparq/crates/sparq-bench/Cargo.toml
+2026-09-10T19:13:44.9238171Z   - /home/runner/work/sparq/sparq/crates/sparq-canon/Cargo.toml
+2026-09-10T19:13:44.9238632Z   - /home/runner/work/sparq/sparq/crates/sparq-cli/Cargo.toml
+2026-09-10T19:13:44.9239126Z   - /home/runner/work/sparq/sparq/crates/sparq-conformance-floors/Cargo.toml
+2026-09-10T19:13:44.9239713Z   - /home/runner/work/sparq/sparq/crates/sparq-conformance/Cargo.toml
+2026-09-10T19:13:44.9240361Z   - /home/runner/work/sparq/sparq/crates/sparq-core/Cargo.toml
+2026-09-10T19:13:44.9240886Z   - /home/runner/work/sparq/sparq/crates/sparq-crdt/Cargo.toml
+2026-09-10T19:13:44.9241366Z   - /home/runner/work/sparq/sparq/crates/sparq-difftest/Cargo.toml
+2026-09-10T19:13:44.9241868Z   - /home/runner/work/sparq/sparq/crates/sparq-e2ee-ng/Cargo.toml
+2026-09-10T19:13:44.9242405Z   - /home/runner/work/sparq/sparq/crates/sparq-engine-serialize/Cargo.toml
+2026-09-10T19:13:44.9242970Z   - /home/runner/work/sparq/sparq/crates/sparq-engine-service/Cargo.toml
+2026-09-10T19:13:44.9243754Z   - /home/runner/work/sparq/sparq/crates/sparq-engine/Cargo.toml
+2026-09-10T19:13:44.9244300Z   - /home/runner/work/sparq/sparq/crates/sparq-fedclient/Cargo.toml
+2026-09-10T19:13:44.9244873Z   - /home/runner/work/sparq/sparq/crates/sparq-fedplan-mpc/Cargo.toml
+2026-09-10T19:13:44.9245604Z   - /home/runner/work/sparq/sparq/crates/sparq-fedplan/Cargo.toml
+2026-09-10T19:13:44.9246226Z   - /home/runner/work/sparq/sparq/crates/sparq-forms/Cargo.toml
+2026-09-10T19:13:44.9246662Z   - /home/runner/work/sparq/sparq/crates/sparq-geo/Cargo.toml
+2026-09-10T19:13:44.9247162Z   - /home/runner/work/sparq/sparq/crates/sparq-gpu/Cargo.toml
+2026-09-10T19:13:44.9247972Z   - /home/runner/work/sparq/sparq/crates/sparq-hdt/Cargo.toml
+2026-09-10T19:13:44.9248447Z   - /home/runner/work/sparq/sparq/crates/sparq-http3/Cargo.toml
+2026-09-10T19:13:44.9249097Z   - /home/runner/work/sparq/sparq/crates/sparq-introspect/Cargo.toml
+2026-09-10T19:13:44.9249625Z   - /home/runner/work/sparq/sparq/crates/sparq-jsonld-registry/Cargo.toml
+2026-09-10T19:13:44.9250177Z   - /home/runner/work/sparq/sparq/crates/sparq-jsonld/Cargo.toml
+2026-09-10T19:13:44.9250644Z   - /home/runner/work/sparq/sparq/crates/sparq-kb/Cargo.toml
+2026-09-10T19:13:44.9251344Z   - /home/runner/work/sparq/sparq/crates/sparq-lws-core/Cargo.toml
+2026-09-10T19:13:44.9251833Z   - /home/runner/work/sparq/sparq/crates/sparq-lws-wasm/Cargo.toml
+2026-09-10T19:13:44.9252348Z   - /home/runner/work/sparq/sparq/crates/sparq-mcp/Cargo.toml
+2026-09-10T19:13:44.9253013Z   - /home/runner/work/sparq/sparq/crates/sparq-metamorph/Cargo.toml
+2026-09-10T19:13:44.9253712Z   - /home/runner/work/sparq/sparq/crates/sparq-mpc/Cargo.toml
+2026-09-10T19:13:44.9254380Z   - /home/runner/work/sparq/sparq/crates/sparq-nlq/Cargo.toml
+2026-09-10T19:13:44.9254940Z   - /home/runner/work/sparq/sparq/crates/sparq-parse/Cargo.toml
+2026-09-10T19:13:44.9255421Z   - /home/runner/work/sparq/sparq/crates/sparq-policy/Cargo.toml
+2026-09-10T19:13:44.9256308Z   - /home/runner/work/sparq/sparq/crates/sparq-prov/Cargo.toml
+2026-09-10T19:13:44.9256956Z   - /home/runner/work/sparq/sparq/crates/sparq-py/Cargo.toml
+2026-09-10T19:13:44.9257465Z   - /home/runner/work/sparq/sparq/crates/sparq-reason-diff/Cargo.toml
+2026-09-10T19:13:44.9258109Z   - /home/runner/work/sparq/sparq/crates/sparq-reason-dl/Cargo.toml
+2026-09-10T19:13:44.9258644Z   - /home/runner/work/sparq/sparq/crates/sparq-reason-el/Cargo.toml
+2026-09-10T19:13:44.9259235Z   - /home/runner/work/sparq/sparq/crates/sparq-reason-ql/Cargo.toml
+2026-09-10T19:13:44.9259816Z   - /home/runner/work/sparq/sparq/crates/sparq-reason-wasm/Cargo.toml
+2026-09-10T19:13:44.9260361Z   - /home/runner/work/sparq/sparq/crates/sparq-reason/Cargo.toml
+2026-09-10T19:13:44.9260942Z   - /home/runner/work/sparq/sparq/crates/sparq-rsp-wasm/Cargo.toml
+2026-09-10T19:13:44.9261521Z   - /home/runner/work/sparq/sparq/crates/sparq-rsp/Cargo.toml
+2026-09-10T19:13:44.9262114Z   - /home/runner/work/sparq/sparq/crates/sparq-secprop-vocab/Cargo.toml
+2026-09-10T19:13:44.9262817Z   - /home/runner/work/sparq/sparq/crates/sparq-serve/Cargo.toml
+2026-09-10T19:13:44.9263672Z   - /home/runner/work/sparq/sparq/crates/sparq-server/Cargo.toml
+2026-09-10T19:13:44.9264323Z   - /home/runner/work/sparq/sparq/crates/sparq-shacl-wasm/Cargo.toml
+2026-09-10T19:13:44.9264804Z   - /home/runner/work/sparq/sparq/crates/sparq-shacl/Cargo.toml
+2026-09-10T19:13:44.9265366Z   - /home/runner/work/sparq/sparq/crates/sparq-shaclc/Cargo.toml
+2026-09-10T19:13:44.9266069Z   - /home/runner/work/sparq/sparq/crates/sparq-sim/Cargo.toml
+2026-09-10T19:13:44.9266594Z   - /home/runner/work/sparq/sparq/crates/sparq-solid/Cargo.toml
+2026-09-10T19:13:44.9267318Z   - /home/runner/work/sparq/sparq/crates/sparq-substrate/Cargo.toml
+2026-09-10T19:13:44.9267976Z   - /home/runner/work/sparq/sparq/crates/sparq-terse/Cargo.toml
+2026-09-10T19:13:44.9268809Z   - /home/runner/work/sparq/sparq/crates/sparq-text-wasm/Cargo.toml
+2026-09-10T19:13:44.9269482Z   - /home/runner/work/sparq/sparq/crates/sparq-text/Cargo.toml
+2026-09-10T19:13:44.9270149Z   - /home/runner/work/sparq/sparq/crates/sparq-trust/Cargo.toml
+2026-09-10T19:13:44.9272439Z   - /home/runner/work/sparq/sparq/crates/sparq-vc/Cargo.toml
+2026-09-10T19:13:44.9273239Z   - /home/runner/work/sparq/sparq/crates/sparq-vectors/Cargo.toml
+2026-09-10T19:13:44.9273760Z   - /home/runner/work/sparq/sparq/crates/sparq-wac-oracle/Cargo.toml
+2026-09-10T19:13:44.9274355Z   - /home/runner/work/sparq/sparq/crates/sparq-wasm/Cargo.toml
+2026-09-10T19:13:44.9275101Z   - /home/runner/work/sparq/sparq/crates/sparq-wrapper-gen/Cargo.toml
+2026-09-10T19:13:44.9276258Z   - /home/runner/work/sparq/sparq/crates/sparq-wrapper-integration/Cargo.toml
+2026-09-10T19:13:44.9277415Z   - /home/runner/work/sparq/sparq/crates/sparq-wrapper-shacl/Cargo.toml
+2026-09-10T19:13:44.9278279Z   - /home/runner/work/sparq/sparq/crates/sparq-wrapper/Cargo.toml
+2026-09-10T19:13:44.9279433Z   - /home/runner/work/sparq/sparq/crates/sparq-zk-compose/Cargo.toml
+2026-09-10T19:13:44.9280130Z   - /home/runner/work/sparq/sparq/crates/sparq-zk/Cargo.toml
+2026-09-10T19:13:44.9280884Z   - /home/runner/work/sparq/sparq/rust-toolchain.toml
+2026-09-10T19:13:44.9281905Z ##[endgroup]
+2026-09-10T19:13:44.9282124Z 
+2026-09-10T19:13:44.9282860Z (node:6604) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+2026-09-10T19:13:44.9283951Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-09-10T19:13:47.8151420Z ... Cleaning /home/runner/work/sparq/sparq/target ...
+2026-09-10T19:13:47.8328898Z ... Cleaning cargo registry (cache-all-crates: false) ...
+2026-09-10T19:13:48.8255005Z ... Cleaning cargo/bin ...
+2026-09-10T19:13:48.8272408Z ... Cleaning cargo git cache ...
+2026-09-10T19:13:48.8283167Z ... Saving cache ...
+2026-09-10T19:13:48.8425299Z [command]/usr/bin/tar --posix -cf cache.tzst --exclude cache.tzst -P -C /home/runner/work/sparq/sparq --files-from manifest.txt --use-compress-program zstdmt
+2026-09-10T19:13:51.1302943Z Sent 7920943 of 209247535 (3.8%), 7.6 MBs/sec
+2026-09-10T19:13:52.0321009Z Sent 209247535 of 209247535 (100.0%), 104.9 MBs/sec
+2026-09-10T19:13:52.2280247Z Post job cleanup.
+2026-09-10T19:13:52.3095659Z [command]/usr/bin/git version
+2026-09-10T19:13:52.3140059Z git version 2.55.0
+2026-09-10T19:13:52.3178575Z Temporarily overriding HOME='/home/runner/work/_temp/a00326fc-c9d0-45ab-bb01-ed6b45bfb27e' before making global git config changes
+2026-09-10T19:13:52.3179809Z Adding repository directory to the temporary git global config as a safe directory
+2026-09-10T19:13:52.3184743Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/sparq/sparq
+2026-09-10T19:13:52.3217248Z Removing SSH command configuration
+2026-09-10T19:13:52.3224609Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-09-10T19:13:52.3258238Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-09-10T19:13:52.3479242Z Removing HTTP extra header
+2026-09-10T19:13:52.3485841Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-10T19:13:52.3518313Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-09-10T19:13:52.3726624Z Removing includeIf entries pointing to credentials config files
+2026-09-10T19:13:52.3740085Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-10T19:13:52.3769753Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-09-10T19:13:52.4189874Z Cleaning up orphan processes

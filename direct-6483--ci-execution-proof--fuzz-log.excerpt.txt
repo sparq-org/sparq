@@ -1,0 +1,46 @@
+551:2026-09-10T19:12:12.4777203Z set -euo pipefail
+552:2026-09-10T19:12:12.4777480Z b=./target/release-fast/sparq-bench
+553:2026-09-10T19:12:12.4777903Z # Canonical broad smoke (all categories, deterministic seeds).
+554:2026-09-10T19:12:12.4778263Z "$b" fuzz 0 2000 all
+555:2026-09-10T19:12:12.4778619Z # sq-lr2ii known-catch windows (category-dense; 'all' misses this class).
+556:2026-09-10T19:12:12.4779014Z "$b" fuzz 4695 2200 equality
+557:2026-09-10T19:12:12.4779284Z "$b" fuzz 4695 2200 filter
+558:2026-09-10T19:12:12.4779645Z # sq-j80vk: fixed per-category regression windows over the SPARQL 1.1
+559:2026-09-10T19:12:12.4780124Z # surfaces added to the generator (property paths, aggregates/GROUP BY/
+560:2026-09-10T19:12:12.4780600Z # HAVING, sub-selects, EXISTS, VALUES, BIND, GRAPH) — plus sq-avd75's
+561:2026-09-10T19:12:12.4781138Z # `antijoin` (the `OPTIONAL … FILTER(!bound)` idiom, i.e. rewrite (b) of the
+562:2026-09-10T19:12:12.4781648Z # `algebra-rewrite` pass #1735, which the fuzzer builds ON) — and sq-qcnn.6's
+563:2026-09-10T19:12:12.4782125Z # `typed` / `strfn` / `ask` / `construct` (the typed-literal columns, the
+564:2026-09-10T19:12:12.4782586Z # string functions, and the two non-SELECT RESULT FORMS, which are compared
+565:2026-09-10T19:12:12.4783062Z # by their boolean / canonical triple set rather than by a count). 'all'
+566:2026-09-10T19:12:12.4783530Z # picks ONE category per seed, so the 2000-seed broad window above leaves
+567:2026-09-10T19:12:12.4784007Z # each of the 21 categories only ~95 cases — too thin to be a per-PR net for
+568:2026-09-10T19:12:12.4784507Z # a specific evaluation path. These are deterministic REGRESSION windows, not
+569:2026-09-10T19:12:12.4785000Z # known-catch ones: no historical bug is pinned to these seeds yet, and if
+570:2026-09-10T19:12:12.4785616Z # the nightly lane finds one its window gets pinned here the way sq-lr2ii's
+571:2026-09-10T19:12:12.4786270Z # was. ~2 s per category at release-fast throughput.
+572:2026-09-10T19:12:12.4786694Z for c in path aggregate subquery exists values bind graph antijoin \
+573:2026-09-10T19:12:12.4787079Z          typed strfn ask construct; do
+574:2026-09-10T19:12:12.4787363Z   "$b" fuzz 0 10000 "$c"
+575:2026-09-10T19:12:12.4787606Z done
+576:2026-09-10T19:12:12.4787927Z # Store-mode read paths over the fixed window: the same seeds re-run with
+577:2026-09-10T19:12:12.4788393Z # the store rebuilt through mmap / block-compressed / dict-spill (the
+578:2026-09-10T19:12:12.4788851Z # dict-spill external build is the slowest per seed — smaller window).
+594:2026-09-10T19:12:13.8090871Z fuzz[all] seeds 0..2000 : checked=2000 skipped(unsupported)=0 value_compared=1940 compared(multiset)=1609 compared(order-by)=165 compared(iso)=0 compared(ask)=55 compared(construct)=111 skipped(row-choice)=53 skipped(undecoded)=0 triage(iso)=0 adjudicated(cross-family-eq)=7 adjudicated(bnode-iri)=0 full_mismatch=0 count_mismatch=0
+596:2026-09-10T19:12:15.0634917Z fuzz[equality] seeds 4695..6895 : checked=2200 skipped(unsupported)=0 value_compared=1839 compared(multiset)=1839 compared(order-by)=0 compared(iso)=0 compared(ask)=0 compared(construct)=0 skipped(row-choice)=0 skipped(undecoded)=0 triage(iso)=0 adjudicated(cross-family-eq)=361 adjudicated(bnode-iri)=0 full_mismatch=0 count_mismatch=0
+598:2026-09-10T19:12:16.4333092Z fuzz[filter] seeds 4695..6895 : checked=2200 skipped(unsupported)=0 value_compared=2117 compared(multiset)=2117 compared(order-by)=0 compared(iso)=0 compared(ask)=0 compared(construct)=0 skipped(row-choice)=0 skipped(undecoded)=0 triage(iso)=0 adjudicated(cross-family-eq)=83 adjudicated(bnode-iri)=0 full_mismatch=0 count_mismatch=0
+600:2026-09-10T19:12:25.8747424Z fuzz[path] seeds 0..10000 : checked=10000 skipped(unsupported)=0 value_compared=10000 compared(multiset)=10000 compared(order-by)=0 compared(iso)=0 compared(ask)=0 compared(construct)=0 skipped(row-choice)=0 skipped(undecoded)=0 triage(iso)=0 adjudicated(cross-family-eq)=0 adjudicated(bnode-iri)=0 full_mismatch=0 count_mismatch=0
+602:2026-09-10T19:12:32.7203080Z fuzz[aggregate] seeds 0..10000 : checked=10000 skipped(unsupported)=0 value_compared=10000 compared(multiset)=10000 compared(order-by)=0 compared(iso)=0 compared(ask)=0 compared(construct)=0 skipped(row-choice)=0 skipped(undecoded)=0 triage(iso)=0 adjudicated(cross-family-eq)=0 adjudicated(bnode-iri)=0 full_mismatch=0 count_mismatch=0
+604:2026-09-10T19:12:39.6897647Z fuzz[subquery] seeds 0..10000 : checked=10000 skipped(unsupported)=0 value_compared=10000 compared(multiset)=10000 compared(order-by)=0 compared(iso)=0 compared(ask)=0 compared(construct)=0 skipped(row-choice)=0 skipped(undecoded)=0 triage(iso)=0 adjudicated(cross-family-eq)=0 adjudicated(bnode-iri)=0 full_mismatch=0 count_mismatch=0
+606:2026-09-10T19:12:46.7657323Z fuzz[exists] seeds 0..10000 : checked=10000 skipped(unsupported)=0 value_compared=10000 compared(multiset)=10000 compared(order-by)=0 compared(iso)=0 compared(ask)=0 compared(construct)=0 skipped(row-choice)=0 skipped(undecoded)=0 triage(iso)=0 adjudicated(cross-family-eq)=0 adjudicated(bnode-iri)=0 full_mismatch=0 count_mismatch=0
+608:2026-09-10T19:12:52.5547097Z fuzz[values] seeds 0..10000 : checked=10000 skipped(unsupported)=0 value_compared=10000 compared(multiset)=10000 compared(order-by)=0 compared(iso)=0 compared(ask)=0 compared(construct)=0 skipped(row-choice)=0 skipped(undecoded)=0 triage(iso)=0 adjudicated(cross-family-eq)=0 adjudicated(bnode-iri)=0 full_mismatch=0 count_mismatch=0
+610:2026-09-10T19:12:59.4906454Z fuzz[bind] seeds 0..10000 : checked=10000 skipped(unsupported)=0 value_compared=10000 compared(multiset)=10000 compared(order-by)=0 compared(iso)=0 compared(ask)=0 compared(construct)=0 skipped(row-choice)=0 skipped(undecoded)=0 triage(iso)=0 adjudicated(cross-family-eq)=0 adjudicated(bnode-iri)=0 full_mismatch=0 count_mismatch=0
+612:2026-09-10T19:13:06.1986586Z fuzz[graph] seeds 0..10000 : checked=10000 skipped(unsupported)=0 value_compared=10000 compared(multiset)=10000 compared(order-by)=0 compared(iso)=0 compared(ask)=0 compared(construct)=0 skipped(row-choice)=0 skipped(undecoded)=0 triage(iso)=0 adjudicated(cross-family-eq)=0 adjudicated(bnode-iri)=0 full_mismatch=0 count_mismatch=0
+614:2026-09-10T19:13:12.6674973Z fuzz[antijoin] seeds 0..10000 : checked=10000 skipped(unsupported)=0 value_compared=10000 compared(multiset)=10000 compared(order-by)=0 compared(iso)=0 compared(ask)=0 compared(construct)=0 skipped(row-choice)=0 skipped(undecoded)=0 triage(iso)=0 adjudicated(cross-family-eq)=0 adjudicated(bnode-iri)=0 full_mismatch=0 count_mismatch=0
+616:2026-09-10T19:13:18.5175459Z fuzz[typed] seeds 0..10000 : checked=10000 skipped(unsupported)=0 value_compared=10000 compared(multiset)=10000 compared(order-by)=0 compared(iso)=0 compared(ask)=0 compared(construct)=0 skipped(row-choice)=0 skipped(undecoded)=0 triage(iso)=0 adjudicated(cross-family-eq)=0 adjudicated(bnode-iri)=0 full_mismatch=0 count_mismatch=0
+618:2026-09-10T19:13:25.1814273Z fuzz[strfn] seeds 0..10000 : checked=10000 skipped(unsupported)=0 value_compared=10000 compared(multiset)=10000 compared(order-by)=0 compared(iso)=0 compared(ask)=0 compared(construct)=0 skipped(row-choice)=0 skipped(undecoded)=0 triage(iso)=0 adjudicated(cross-family-eq)=0 adjudicated(bnode-iri)=0 full_mismatch=0 count_mismatch=0
+620:2026-09-10T19:13:30.2078334Z fuzz[ask] seeds 0..10000 : checked=10000 skipped(unsupported)=0 value_compared=10000 compared(multiset)=0 compared(order-by)=0 compared(iso)=0 compared(ask)=10000 compared(construct)=0 skipped(row-choice)=0 skipped(undecoded)=0 triage(iso)=0 adjudicated(cross-family-eq)=0 adjudicated(bnode-iri)=0 full_mismatch=0 count_mismatch=0
+622:2026-09-10T19:13:36.2124382Z fuzz[construct] seeds 0..10000 : checked=10000 skipped(unsupported)=0 value_compared=10000 compared(multiset)=0 compared(order-by)=0 compared(iso)=0 compared(ask)=0 compared(construct)=10000 skipped(row-choice)=0 skipped(undecoded)=0 triage(iso)=0 adjudicated(cross-family-eq)=0 adjudicated(bnode-iri)=0 full_mismatch=0 count_mismatch=0
+624:2026-09-10T19:13:40.2703489Z fuzz[all] seeds 0..2000 : checked=2000 skipped(unsupported)=0 value_compared=1940 compared(multiset)=1609 compared(order-by)=165 compared(iso)=0 compared(ask)=55 compared(construct)=111 skipped(row-choice)=53 skipped(undecoded)=0 triage(iso)=0 adjudicated(cross-family-eq)=7 adjudicated(bnode-iri)=0 full_mismatch=0 count_mismatch=0
+626:2026-09-10T19:13:41.6823780Z fuzz[all] seeds 0..2000 : checked=2000 skipped(unsupported)=0 value_compared=1940 compared(multiset)=1609 compared(order-by)=165 compared(iso)=0 compared(ask)=55 compared(construct)=111 skipped(row-choice)=53 skipped(undecoded)=0 triage(iso)=0 adjudicated(cross-family-eq)=7 adjudicated(bnode-iri)=0 full_mismatch=0 count_mismatch=0
+628:2026-09-10T19:13:44.6277284Z fuzz[all] seeds 0..500 : checked=500 skipped(unsupported)=0 value_compared=494 compared(multiset)=427 compared(order-by)=10 compared(iso)=0 compared(ask)=13 compared(construct)=44 skipped(row-choice)=0 skipped(undecoded)=0 triage(iso)=0 adjudicated(cross-family-eq)=6 adjudicated(bnode-iri)=0 full_mismatch=0 count_mismatch=0

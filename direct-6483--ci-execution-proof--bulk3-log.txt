@@ -1,0 +1,583 @@
+﻿2026-09-10T19:30:11.5551453Z Current runner version: '2.337.0'
+2026-09-10T19:30:11.5576741Z ##[group]Runner Image Provisioner
+2026-09-10T19:30:11.5578060Z Hosted Compute Agent
+2026-09-10T19:30:11.5578813Z Version: 20260828.587
+2026-09-10T19:30:11.5579574Z Commit: abac92662cab4cc7352de4f9f9d2e2419aad9c29
+2026-09-10T19:30:11.5580373Z Build Date: 2026-08-28T16:44:25Z
+2026-09-10T19:30:11.5581130Z Worker ID: {80d8e2a9-5c9c-4e15-be05-47b886122229}
+2026-09-10T19:30:11.5581866Z Azure Region: eastus
+2026-09-10T19:30:11.5582433Z ##[endgroup]
+2026-09-10T19:30:11.5584026Z ##[group]Operating System
+2026-09-10T19:30:11.5584698Z Ubuntu
+2026-09-10T19:30:11.5585217Z 24.04.5
+2026-09-10T19:30:11.5585870Z LTS
+2026-09-10T19:30:11.5586397Z ##[endgroup]
+2026-09-10T19:30:11.5587053Z ##[group]Runner Image
+2026-09-10T19:30:11.5587933Z Image: ubuntu-24.04
+2026-09-10T19:30:11.5588553Z Version: 20260907.300.1
+2026-09-10T19:30:11.5589978Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260907.300/images/ubuntu/Ubuntu2404-Readme.md
+2026-09-10T19:30:11.5591620Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20260907.300
+2026-09-10T19:30:11.5592677Z ##[endgroup]
+2026-09-10T19:30:11.5593814Z ##[group]GITHUB_TOKEN Permissions
+2026-09-10T19:30:11.5595733Z Contents: read
+2026-09-10T19:30:11.5596438Z Metadata: read
+2026-09-10T19:30:11.5597058Z ##[endgroup]
+2026-09-10T19:30:11.5599557Z Secret source: Actions
+2026-09-10T19:30:11.5600628Z Cache mode: write
+2026-09-10T19:30:11.5601339Z Prepare workflow directory
+2026-09-10T19:30:11.6000169Z Prepare all required actions
+2026-09-10T19:30:11.6052590Z Getting action download info
+2026-09-10T19:30:11.8489478Z Download action repository 'actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0' (SHA:9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0)
+2026-09-10T19:30:11.9652572Z Download action repository 'taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68' (SHA:18b1216eba7f8039b0f8d131d5473787f0edce68)
+2026-09-10T19:30:12.1644529Z Download action repository 'actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c' (SHA:3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c)
+2026-09-10T19:30:12.4531243Z Complete job name: test (load-aware shard bulk 3/3)
+2026-09-10T19:30:12.5294901Z ##[group]Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+2026-09-10T19:30:12.5296098Z with:
+2026-09-10T19:30:12.5296599Z   repository: sparq-org/sparq
+2026-09-10T19:30:12.5301413Z   token: ***
+2026-09-10T19:30:12.5301920Z   ssh-strict: true
+2026-09-10T19:30:12.5302401Z   ssh-user: git
+2026-09-10T19:30:12.5302883Z   persist-credentials: true
+2026-09-10T19:30:12.5303424Z   clean: true
+2026-09-10T19:30:12.5303900Z   sparse-checkout-cone-mode: true
+2026-09-10T19:30:12.5304469Z   fetch-depth: 1
+2026-09-10T19:30:12.5304954Z   fetch-tags: false
+2026-09-10T19:30:12.5305437Z   show-progress: true
+2026-09-10T19:30:12.5305915Z   lfs: false
+2026-09-10T19:30:12.5306371Z   submodules: false
+2026-09-10T19:30:12.5306862Z   set-safe-directory: true
+2026-09-10T19:30:12.5307402Z   allow-unsafe-pr-checkout: false
+2026-09-10T19:30:12.5308507Z env:
+2026-09-10T19:30:12.5308979Z   CARGO_TERM_COLOR: always
+2026-09-10T19:30:12.5309533Z   RUST_BACKTRACE: 1
+2026-09-10T19:30:12.5310057Z   CARGO_NET_RETRY: 10
+2026-09-10T19:30:12.5310549Z   CARGO_INCREMENTAL: 0
+2026-09-10T19:30:12.5311096Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+2026-09-10T19:30:12.5311974Z   CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: -C link-arg=-fuse-ld=lld
+2026-09-10T19:30:12.5313218Z   HEAVY: test(=diskann_recall_at_10_vs_brute_force_on_50k) | test(=hnsw_recall_at_10_vs_brute_force_on_50k)
+2026-09-10T19:30:12.5314213Z ##[endgroup]
+2026-09-10T19:30:12.6436596Z Syncing repository: sparq-org/sparq
+2026-09-10T19:30:12.6439764Z ##[group]Getting Git version info
+2026-09-10T19:30:12.6440942Z Working directory is '/home/runner/work/sparq/sparq'
+2026-09-10T19:30:12.6442643Z [command]/usr/bin/git version
+2026-09-10T19:30:12.6545476Z git version 2.55.0
+2026-09-10T19:30:12.6585400Z ##[endgroup]
+2026-09-10T19:30:12.6602847Z Temporarily overriding HOME='/home/runner/work/_temp/d71616b7-2522-42ad-b485-e42f9a0f1160' before making global git config changes
+2026-09-10T19:30:12.6606181Z Adding repository directory to the temporary git global config as a safe directory
+2026-09-10T19:30:12.6611008Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/sparq/sparq
+2026-09-10T19:30:12.6668176Z Deleting the contents of '/home/runner/work/sparq/sparq'
+2026-09-10T19:30:12.6680434Z ##[group]Determining repository object format
+2026-09-10T19:30:12.6682192Z ##[endgroup]
+2026-09-10T19:30:12.6683438Z ##[group]Initializing the repository
+2026-09-10T19:30:12.6684633Z [command]/usr/bin/git init /home/runner/work/sparq/sparq
+2026-09-10T19:30:12.6862130Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-09-10T19:30:12.6863538Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-09-10T19:30:12.6864629Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-09-10T19:30:12.6865529Z hint: call:
+2026-09-10T19:30:12.6866111Z hint:
+2026-09-10T19:30:12.6867063Z hint: 	git config --global init.defaultBranch <name>
+2026-09-10T19:30:12.6868576Z hint:
+2026-09-10T19:30:12.6869715Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-09-10T19:30:12.6871628Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-09-10T19:30:12.6873141Z hint:
+2026-09-10T19:30:12.6873990Z hint: 	git branch -m <name>
+2026-09-10T19:30:12.6874979Z hint:
+2026-09-10T19:30:12.6875802Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-09-10T19:30:12.6883103Z Initialized empty Git repository in /home/runner/work/sparq/sparq/.git/
+2026-09-10T19:30:12.6895459Z [command]/usr/bin/git remote add origin https://github.com/sparq-org/sparq
+2026-09-10T19:30:12.6967502Z ##[endgroup]
+2026-09-10T19:30:12.6968832Z ##[group]Disabling automatic garbage collection
+2026-09-10T19:30:12.6973227Z [command]/usr/bin/git config --local gc.auto 0
+2026-09-10T19:30:12.7013208Z ##[endgroup]
+2026-09-10T19:30:12.7014931Z ##[group]Setting up auth
+2026-09-10T19:30:12.7016269Z Removing SSH command configuration
+2026-09-10T19:30:12.7019954Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-09-10T19:30:12.7064042Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-09-10T19:30:12.7468151Z Removing HTTP extra header
+2026-09-10T19:30:12.7473785Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-10T19:30:12.7511447Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-09-10T19:30:12.7735864Z Removing includeIf entries pointing to credentials config files
+2026-09-10T19:30:12.7742123Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-10T19:30:12.7778636Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-09-10T19:30:12.8007615Z [command]/usr/bin/git config --file /home/runner/work/_temp/git-credentials-e4008e25-c14e-4f4a-ae7c-fa15b39bb68b.config http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-09-10T19:30:12.8049607Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/sparq/sparq/.git.path /home/runner/work/_temp/git-credentials-e4008e25-c14e-4f4a-ae7c-fa15b39bb68b.config
+2026-09-10T19:30:12.8083673Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/sparq/sparq/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-e4008e25-c14e-4f4a-ae7c-fa15b39bb68b.config
+2026-09-10T19:30:12.8122282Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-e4008e25-c14e-4f4a-ae7c-fa15b39bb68b.config
+2026-09-10T19:30:12.8158217Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-e4008e25-c14e-4f4a-ae7c-fa15b39bb68b.config
+2026-09-10T19:30:12.8190304Z ##[endgroup]
+2026-09-10T19:30:12.8191121Z ##[group]Fetching the repository
+2026-09-10T19:30:12.8196964Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +573dba455effaa982b60776f9b03e6e324d6cc2f:refs/remotes/pull/6487/merge
+2026-09-10T19:30:16.4662313Z From https://github.com/sparq-org/sparq
+2026-09-10T19:30:16.4664180Z  * [new ref]         573dba455effaa982b60776f9b03e6e324d6cc2f -> pull/6487/merge
+2026-09-10T19:30:16.4672006Z ##[endgroup]
+2026-09-10T19:30:16.4673097Z ##[group]Determining the checkout info
+2026-09-10T19:30:16.4674145Z ##[endgroup]
+2026-09-10T19:30:16.4678613Z [command]/usr/bin/git sparse-checkout disable
+2026-09-10T19:30:16.4733440Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-09-10T19:30:16.4767525Z ##[group]Checking out the ref
+2026-09-10T19:30:16.4771705Z [command]/usr/bin/git checkout --progress --force refs/remotes/pull/6487/merge
+2026-09-10T19:30:17.0390403Z Note: switching to 'refs/remotes/pull/6487/merge'.
+2026-09-10T19:30:17.0391300Z 
+2026-09-10T19:30:17.0399234Z You are in 'detached HEAD' state. You can look around, make experimental
+2026-09-10T19:30:17.0400274Z changes and commit them, and you can discard any commits you make in this
+2026-09-10T19:30:17.0401185Z state without impacting any branches by switching back to a branch.
+2026-09-10T19:30:17.0401755Z 
+2026-09-10T19:30:17.0402155Z If you want to create a new branch to retain commits you create, you may
+2026-09-10T19:30:17.0403012Z do so (now or later) by using -c with the switch command. Example:
+2026-09-10T19:30:17.0403519Z 
+2026-09-10T19:30:17.0403739Z   git switch -c <new-branch-name>
+2026-09-10T19:30:17.0404050Z 
+2026-09-10T19:30:17.0404340Z Or undo this operation with:
+2026-09-10T19:30:17.0404658Z 
+2026-09-10T19:30:17.0404848Z   git switch -
+2026-09-10T19:30:17.0405125Z 
+2026-09-10T19:30:17.0405945Z Turn off this advice by setting config variable advice.detachedHead to false
+2026-09-10T19:30:17.0406436Z 
+2026-09-10T19:30:17.0406851Z HEAD is now at 573dba4 Merge 0b4554b924a80432cc1b572bd19f8e58cdbfb4e6 into f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464
+2026-09-10T19:30:17.0412943Z ##[endgroup]
+2026-09-10T19:30:17.0470248Z [command]/usr/bin/git log -1 --format=%H
+2026-09-10T19:30:17.0501031Z 573dba455effaa982b60776f9b03e6e324d6cc2f
+2026-09-10T19:30:17.0716376Z ##[group]Run ./scripts/ci-free-disk.sh
+2026-09-10T19:30:17.0716790Z [36;1m./scripts/ci-free-disk.sh[0m
+2026-09-10T19:30:17.0759757Z shell: /usr/bin/bash -e {0}
+2026-09-10T19:30:17.0760079Z env:
+2026-09-10T19:30:17.0760303Z   CARGO_TERM_COLOR: always
+2026-09-10T19:30:17.0760562Z   RUST_BACKTRACE: 1
+2026-09-10T19:30:17.0760787Z   CARGO_NET_RETRY: 10
+2026-09-10T19:30:17.0761059Z   CARGO_INCREMENTAL: 0
+2026-09-10T19:30:17.0761343Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+2026-09-10T19:30:17.0761763Z   CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: -C link-arg=-fuse-ld=lld
+2026-09-10T19:30:17.0762372Z   HEAVY: test(=diskann_recall_at_10_vs_brute_force_on_50k) | test(=hnsw_recall_at_10_vs_brute_force_on_50k)
+2026-09-10T19:30:17.0762857Z ##[endgroup]
+2026-09-10T19:30:17.0874574Z ##[group]Free runner disk — before
+2026-09-10T19:30:17.0893378Z Filesystem      Size  Used Avail Use% Mounted on
+2026-09-10T19:30:17.0893986Z /dev/root       145G   59G   86G  41% /
+2026-09-10T19:30:17.0895413Z ##[endgroup]
+2026-09-10T19:30:17.0896327Z removing /usr/share/dotnet
+2026-09-10T19:30:21.4058469Z removing /usr/local/lib/android
+2026-09-10T19:30:49.2890537Z removing /usr/local/.ghcup
+2026-09-10T19:30:50.1910251Z removing /opt/hostedtoolcache/CodeQL
+2026-09-10T19:30:53.1612351Z removing /usr/local/share/powershell
+2026-09-10T19:30:53.4817233Z removing /usr/share/swift
+2026-09-10T19:30:53.6137383Z removing /opt/hostedtoolcache (hosted toolcache)
+2026-09-10T19:31:09.9478147Z pruning docker images
+2026-09-10T19:31:15.9091557Z Deleted Images:
+2026-09-10T19:31:15.9092035Z untagged: ghcr.io/github/github-mcp-server:latest
+2026-09-10T19:31:15.9093135Z untagged: ghcr.io/github/github-mcp-server@sha256:46cdbbd810faf6f7aed1745ea04057443f5cb9fcadc15c7308add18cf9a83e33
+2026-09-10T19:31:15.9094444Z deleted: sha256:3e165e25be8d461c06268b9fb30e93cf91f791acf7e3889f41b20f4896357dc0
+2026-09-10T19:31:15.9095396Z deleted: sha256:e6795b1026263703aab7615e3710f9506ec5f018544150b68778c93b75375b85
+2026-09-10T19:31:15.9096409Z deleted: sha256:1e1cabb4a65e50fb84bc4612619b0025e4a1d06d5e38699d1e67e5a8e4f333db
+2026-09-10T19:31:15.9097429Z deleted: sha256:86766d6a6e947f4a599c6e23307470f8f75732fc3d143ec1f3260e4406202bee
+2026-09-10T19:31:15.9098655Z deleted: sha256:2944471a0bbdfb4985f84f8d287edb5cd982d1060589e707a6cb0cbe82cdfe89
+2026-09-10T19:31:15.9099639Z deleted: sha256:5e555e7975e2202f21fb93d460d701a340ade876f3afccb70d702f1dc5ab80db
+2026-09-10T19:31:15.9100731Z deleted: sha256:2a080d78a1c5e3615170178f1c6f4c726340da9d5ff2926cb66e2fd97851da9d
+2026-09-10T19:31:15.9101772Z deleted: sha256:af4a114029fbf94a3cf75c5cfaa5e947019cd6faae4b800c9306ac9079363def
+2026-09-10T19:31:15.9102788Z deleted: sha256:c7b875d3de914680ec64ba55be5865955ec595e7370812894ee68a502e2e8391
+2026-09-10T19:31:15.9103858Z deleted: sha256:85d9b4c1ef131ee259952a35027e942f79626303ab143eff7ef00d55201bd06f
+2026-09-10T19:31:15.9104826Z deleted: sha256:492c6420fd79f4cd4e761bec1e74db6044d45adb5b073a82289af68aa3162e3f
+2026-09-10T19:31:15.9105857Z deleted: sha256:14b282df61c0316a80216cec27e753777da93de1d7e062072ef3b517f984fcf1
+2026-09-10T19:31:15.9106867Z deleted: sha256:fdaace00fc3f072b9060f703047b30a2c14d8bde7dbbf31a396802c032923732
+2026-09-10T19:31:15.9108157Z deleted: sha256:7f73eafc455b691b504d4d3c3f3c7be90e135c1d0ba4988b2cac29579cd6b567
+2026-09-10T19:31:15.9109197Z deleted: sha256:32a12b65383df6b6553c8d59f691675ca1980f8cec9c51cce163c3c8f7665a41
+2026-09-10T19:31:15.9110199Z deleted: sha256:5217b01660b515ac25ea055a8bd04a20790c7d6bd6085374b59b9081283911af
+2026-09-10T19:31:15.9111257Z deleted: sha256:7223ea1323e8c1159ec17f07d35acc27bdd1cc2bc3ed425b44ef21dac9915db0
+2026-09-10T19:31:15.9112153Z untagged: ghcr.io/dependabot/dependabot-updater-core:latest
+2026-09-10T19:31:15.9113283Z untagged: ghcr.io/dependabot/dependabot-updater-core@sha256:2fba19978e4b0b2a9829597be4a15fb1fe19878b241e97a9b4d1317692940c45
+2026-09-10T19:31:15.9114412Z deleted: sha256:5c1f9f1da87f5427dd6e2ec5a1ab97d0748fdbafcf57eb9055a943a414b545d8
+2026-09-10T19:31:15.9115950Z deleted: sha256:a658acc81f7c03694e92f11ffe3716ab1e1828fefcd8c38e16b0baf9e7dd855e
+2026-09-10T19:31:15.9117051Z deleted: sha256:3deacaf32289cd96e22b8c126f3b6798c10b13e95573345a6541e0f2e06dbf1a
+2026-09-10T19:31:15.9118229Z deleted: sha256:6de7bde6a77f7425104bebf13d2245e8c979466b5950850850bb2b59e2a446ef
+2026-09-10T19:31:15.9119244Z deleted: sha256:801974b9383c04d0b062eabda4fa89aea90d7f81014a5132bea9ad5af432e63a
+2026-09-10T19:31:15.9119889Z deleted: sha256:f4f67dbe94c5027b91e62a87b484094ec5edf89c6500d22a5db8fa4eec67175c
+2026-09-10T19:31:15.9120795Z deleted: sha256:ca382568e43dbf58df9081d87644fe890c310ca466d7dc521182e9ffbdc7b114
+2026-09-10T19:31:15.9121603Z deleted: sha256:86729f28930c476a1c6e36572c8868f9e040f26ded9dbf3a95280883a792c9ac
+2026-09-10T19:31:15.9122363Z deleted: sha256:0a693f8c5976fbc1ff090ea7c2a54a5956d68ae24bea0bd7398f66ad8037b0a1
+2026-09-10T19:31:15.9123108Z deleted: sha256:52fd024951e481afa63bd5ef23d13c98812d030e58f07f476d5ee729d5be5a99
+2026-09-10T19:31:15.9124052Z deleted: sha256:d4169ad79fb7d65bbcd18dc7612d3535f417ef5d6b352bdece28ca9bd4f5645e
+2026-09-10T19:31:15.9124971Z deleted: sha256:e1f9b984a3f8762d623f4fbbf0b14bdeb4b68aafb0bdaaa89bc6c374e0ce9265
+2026-09-10T19:31:15.9125971Z deleted: sha256:b9a65b3c65ab22d490085bd0bf5490e2409da8748b406870f2463bdc41cd6795
+2026-09-10T19:31:15.9126718Z untagged: ghcr.io/github/gh-aw-mcpg:latest
+2026-09-10T19:31:15.9127843Z untagged: ghcr.io/github/gh-aw-mcpg@sha256:85b940556a8faa4e1fdbef124bfd75f2c4ebd855a10b88a1c3b6f3e97f6f1a53
+2026-09-10T19:31:15.9129690Z deleted: sha256:5f22df3c4a888854cfd7514774684e882b961e11d319d1f4039684ad541d054c
+2026-09-10T19:31:15.9130866Z deleted: sha256:6c37d32d6b128c746188851ba4212d149ce39981c0b766b2d3c447b8490d7a04
+2026-09-10T19:31:15.9131815Z deleted: sha256:3ca287a3624a33e972668a5d6b7700a8c8dc3041aeadb0fcfe3848f38b2f668a
+2026-09-10T19:31:15.9132689Z deleted: sha256:5c67f508406e6a9bf44788025c431b8006e32ed767e703b025caca793dbfedb1
+2026-09-10T19:31:15.9133469Z deleted: sha256:8dd0a643b90751a901f6982738612594e618ba48ea971098e8d4e7468d9cc450
+2026-09-10T19:31:15.9134421Z deleted: sha256:c48e7d23f5f6b9133896e262a510ef3f4288e11d98705c1f52b8cc19fb7af6f8
+2026-09-10T19:31:15.9135393Z deleted: sha256:09df3d36d3df02c2be99898ac9e632f91e02fb8262d715c6c0e25927ed2e5dd6
+2026-09-10T19:31:15.9136380Z deleted: sha256:6ccd0f9257b0a94f3e50f50a9cdc766408da9d5ded13721abdac5fc34f663f49
+2026-09-10T19:31:15.9137442Z deleted: sha256:4b35d13cdd93533c08ba296080135dfc555c64a3a0a4284ac739b93e53ee63f6
+2026-09-10T19:31:15.9138640Z deleted: sha256:70834cf3bba44803e61e4c9d424992d91e06c34dcbfa92d388fc493c51c26e3a
+2026-09-10T19:31:15.9139632Z deleted: sha256:1a597abbdca4511eb22f2e0b00a5d8b6d6129e7669ed56d751b9d1d611d80bfa
+2026-09-10T19:31:15.9140669Z deleted: sha256:d5c28ed9f7e287d23038493d8b2dbea75a712162b907ec2fab74295d6bbf77fc
+2026-09-10T19:31:15.9141540Z untagged: ghcr.io/github/gh-aw-firewall/api-proxy:latest
+2026-09-10T19:31:15.9142636Z untagged: ghcr.io/github/gh-aw-firewall/api-proxy@sha256:6f95e2234dd9bd6333a8ff28ccea7ecf0204acd4a09108723844dbd2bf6268c5
+2026-09-10T19:31:15.9143899Z deleted: sha256:9d8f8fbebb4891599e5e95a55878c77d12c4c321a715acb61dfbb6560b9a55f7
+2026-09-10T19:31:15.9144826Z deleted: sha256:3f6dbad59a0bd4729965d9c16c261d980e14162bf000dbcafe8ed7db2fedff6a
+2026-09-10T19:31:15.9145816Z deleted: sha256:80b79f0f8bc3d5c3cdf69acd5dce576d05f85a637a80a7c3100757747995da79
+2026-09-10T19:31:15.9146823Z deleted: sha256:a53eb6ed7d6102b7a56089598e8984dccdce769642ab8b7483de9b9ad2f9759b
+2026-09-10T19:31:15.9148012Z deleted: sha256:0f25ce44464c0e2c078afd7b11f2b8858d4723083e360476d0492fed5a43c55e
+2026-09-10T19:31:15.9148892Z deleted: sha256:dc9c32836ca3a5bd64bbd358dddf58538bd478e0b1056d9788811fdefe4760dc
+2026-09-10T19:31:15.9149793Z deleted: sha256:78b6d979c4416462cbea914957db2a0d0ffbbf13ebef0396e96f87f6a04c1c83
+2026-09-10T19:31:15.9150703Z deleted: sha256:dafd7f59462c952a062aee22b121678c09db1270c06099a530ffc0e4f15757d5
+2026-09-10T19:31:15.9151618Z deleted: sha256:34447b7d6e1dbe8676ba1a182208e48cb136db5173a7b4e9db844e8cacfabd01
+2026-09-10T19:31:15.9152844Z deleted: sha256:5da802879903f2d623b671bd10f7b817b6f35c8bec8adaebfd89a117e42f5781
+2026-09-10T19:31:15.9153796Z deleted: sha256:a696aa1bb46d54f27a28325e84b65909a50b909fc457649fbc8301a7aca37895
+2026-09-10T19:31:15.9154752Z deleted: sha256:3d64c014648b8444862bc8607a2495744e9a5ed3b0f900a312000966a0c1b848
+2026-09-10T19:31:15.9155733Z deleted: sha256:3cb5ff4e2dd3664e916daf13ba79b8104cae6c95e940f30b22eba2e1c9700055
+2026-09-10T19:31:15.9156701Z deleted: sha256:67ff5491d21a37e76f730c473545e7d4143c28cf7ee18a80d44fd9e21780b860
+2026-09-10T19:31:15.9157538Z untagged: ghcr.io/github/gh-aw-firewall/agent:latest
+2026-09-10T19:31:15.9158905Z untagged: ghcr.io/github/gh-aw-firewall/agent@sha256:f7df036c86575527b61f3f7df91c4412349a12b2a74988d929eafa2999230c98
+2026-09-10T19:31:15.9160138Z deleted: sha256:bd7acdea59363f831eae4896982d7476af675c9d5c281ebc9b739af5fc72f561
+2026-09-10T19:31:15.9161120Z deleted: sha256:835524e93c1a21bb17de1be07498df8d9871fc242bf9e75d990bdc56575672ef
+2026-09-10T19:31:15.9162044Z deleted: sha256:30707983df40fb4ab43c2cc153cdcfea8188eb564e21860b2df0b8126e02d191
+2026-09-10T19:31:15.9163092Z deleted: sha256:89f02a183f5fcabb96e9ffc11f0af77c566e6a25a0c69835a869897ca6fe5e37
+2026-09-10T19:31:15.9164118Z deleted: sha256:a7fb1fe985b36be7d31d4323c87dca4e179fc6ca3c74b5f687ea91a09487c34c
+2026-09-10T19:31:15.9165123Z deleted: sha256:14310bdf1e1c5dbd600be902d4d3aadbf17b69f5f098cf6a78e63b36ea0fe968
+2026-09-10T19:31:15.9166126Z deleted: sha256:a688db3e7bd99824d7a8d208d1bfbbadfe138f7da289ffaa0be99b340d5f7791
+2026-09-10T19:31:15.9167436Z deleted: sha256:bbd6fa1ee3c6cb08bdedaf327da02cffa2de419399df715530156c65c828dd9d
+2026-09-10T19:31:15.9168587Z deleted: sha256:ae5095c15a582692fe26c98943591c570c8e01ecade1fbc1afbeb91fc5b30083
+2026-09-10T19:31:15.9169450Z deleted: sha256:48607de80178970f04b8070234715afcb462d1ebae0e35d7706e90e363fad8f1
+2026-09-10T19:31:15.9170319Z deleted: sha256:e36cc363bb33bde2cb93c5453d4102143425469dbe4235bceb7838c3f3884087
+2026-09-10T19:31:15.9171229Z deleted: sha256:fe127748fc7c38aca97b5d62ea80f1a94d595b1d507034d16c50fa0edf34a3f9
+2026-09-10T19:31:15.9172128Z deleted: sha256:76b449524758f19bbee8ab573533946790535760522180774a52ff4a9ab3ced6
+2026-09-10T19:31:15.9173065Z deleted: sha256:8704049c6b08fb4b480f629085bdcc79048f5cda6f1fadb0f93699371b34bb0d
+2026-09-10T19:31:15.9174036Z deleted: sha256:b612b26fad33bce77de9e47ebdf2b07b5cbe468fa5860b74c1ff635c9194c74a
+2026-09-10T19:31:15.9175026Z deleted: sha256:328120eca40f8b857f0e1a3cd8f3d8fd9bcd5c2c0f4776647796eb37f24a40d7
+2026-09-10T19:31:15.9175970Z deleted: sha256:9d26eb37d23413f641be146794b1b8ecdd9b1fcd9a8f110842c0038f5f440206
+2026-09-10T19:31:15.9176939Z deleted: sha256:c0359c5b6ede84d4a083d06d35ee77f0b338dfb17423771854d007d89953fb3e
+2026-09-10T19:31:15.9177981Z untagged: ghcr.io/github/gh-aw-firewall/squid:latest
+2026-09-10T19:31:15.9179066Z untagged: ghcr.io/github/gh-aw-firewall/squid@sha256:2ce8df3abf3e9b76e9c0cf5863da41f1ab3f89b20ad14b988806ab89e7bf2cd5
+2026-09-10T19:31:15.9180356Z deleted: sha256:ebc9c9e5ccbd12daa23000ec1af4118fe64bc6ac61a25a39552e86f2941ec108
+2026-09-10T19:31:15.9181375Z deleted: sha256:985778c0df7e26510751d7fca1e46b01ec5cd13716dfb4ebaa293b6e617da6ce
+2026-09-10T19:31:15.9182358Z deleted: sha256:801a15b59b64ce9d2896f9e9f9dab7e99be9e94e56ad8e75df7113dbae5d461b
+2026-09-10T19:31:15.9183431Z deleted: sha256:8b7ce8ae5ead69d566b03fa43c47d34fcd3081bb208ef7c4619b82f54d882c1a
+2026-09-10T19:31:15.9184420Z deleted: sha256:a8913d3fe0eda67eda6a098eedb907e803a207157ddf88c54da79d8ac15ce580
+2026-09-10T19:31:15.9185380Z deleted: sha256:34884abbe92863fce933ed7c39c0e045631af0ed86d5cc0dfbdf9fdca426ce3c
+2026-09-10T19:31:15.9185973Z 
+2026-09-10T19:31:15.9186150Z Total reclaimed space: 1.88GB
+2026-09-10T19:31:15.9411287Z ##[group]Free runner disk — after
+2026-09-10T19:31:15.9425867Z Filesystem      Size  Used Avail Use% Mounted on
+2026-09-10T19:31:15.9426461Z /dev/root       145G   27G  118G  19% /
+2026-09-10T19:31:15.9427632Z ##[endgroup]
+2026-09-10T19:31:15.9492087Z ##[group]Run rustup default stable
+2026-09-10T19:31:15.9492721Z [36;1mrustup default stable[0m
+2026-09-10T19:31:15.9493216Z [36;1mrustup show active-toolchain[0m
+2026-09-10T19:31:15.9538062Z shell: /usr/bin/bash -e {0}
+2026-09-10T19:31:15.9538420Z env:
+2026-09-10T19:31:15.9538725Z   CARGO_TERM_COLOR: always
+2026-09-10T19:31:15.9539028Z   RUST_BACKTRACE: 1
+2026-09-10T19:31:15.9539298Z   CARGO_NET_RETRY: 10
+2026-09-10T19:31:15.9539607Z   CARGO_INCREMENTAL: 0
+2026-09-10T19:31:15.9539945Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+2026-09-10T19:31:15.9540466Z   CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: -C link-arg=-fuse-ld=lld
+2026-09-10T19:31:15.9541276Z   HEAVY: test(=diskann_recall_at_10_vs_brute_force_on_50k) | test(=hnsw_recall_at_10_vs_brute_force_on_50k)
+2026-09-10T19:31:15.9541920Z ##[endgroup]
+2026-09-10T19:31:16.0129501Z info: using existing install for stable-x86_64-unknown-linux-gnu
+2026-09-10T19:31:16.0151613Z info: default toolchain set to stable-x86_64-unknown-linux-gnu
+2026-09-10T19:31:16.0151973Z 
+2026-09-10T19:31:16.1342157Z   stable-x86_64-unknown-linux-gnu unchanged - rustc 1.98.1 (48a229cea 2026-09-01)
+2026-09-10T19:31:16.1342579Z 
+2026-09-10T19:31:16.1361365Z info: note that the toolchain '1.97.1-x86_64-unknown-linux-gnu' is currently in use (overridden by '/home/runner/work/sparq/sparq/rust-toolchain.toml')
+2026-09-10T19:31:16.1468268Z info: syncing channel updates for 1.97.1-x86_64-unknown-linux-gnu
+2026-09-10T19:31:16.2591314Z info: latest update on 2026-07-16 for version 1.97.1 (8bab26f4f 2026-07-14)
+2026-09-10T19:31:16.2594751Z info: downloading 6 components
+2026-09-10T19:31:25.6673906Z warn: the missing active toolchain `1.97.1-x86_64-unknown-linux-gnu` has been auto-installed
+2026-09-10T19:31:25.6674883Z warn: auto-installation is deprecated for most `rustup` commands
+2026-09-10T19:31:25.6675459Z warn: scripts relying on this behavior in `rustup` may stop working in the future
+2026-09-10T19:31:25.6676249Z warn: to install the active toolchain, use `rustup install` instead
+2026-09-10T19:31:25.6677126Z warn: see <https://github.com/rust-lang/rustup/issues/4836> for more info
+2026-09-10T19:31:25.6678402Z 1.97.1-x86_64-unknown-linux-gnu (overridden by '/home/runner/work/sparq/sparq/rust-toolchain.toml')
+2026-09-10T19:31:25.6834395Z ##[group]Run taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68
+2026-09-10T19:31:25.6834828Z with:
+2026-09-10T19:31:25.6835036Z   tool: nextest
+2026-09-10T19:31:25.6835248Z   checksum: true
+2026-09-10T19:31:25.6835471Z   fallback: cargo-binstall
+2026-09-10T19:31:25.6835707Z env:
+2026-09-10T19:31:25.6835909Z   CARGO_TERM_COLOR: always
+2026-09-10T19:31:25.6836167Z   RUST_BACKTRACE: 1
+2026-09-10T19:31:25.6836383Z   CARGO_NET_RETRY: 10
+2026-09-10T19:31:25.6836611Z   CARGO_INCREMENTAL: 0
+2026-09-10T19:31:25.6836863Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+2026-09-10T19:31:25.6837276Z   CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: -C link-arg=-fuse-ld=lld
+2026-09-10T19:31:25.6838181Z   HEAVY: test(=diskann_recall_at_10_vs_brute_force_on_50k) | test(=hnsw_recall_at_10_vs_brute_force_on_50k)
+2026-09-10T19:31:25.6838661Z ##[endgroup]
+2026-09-10T19:31:25.6926684Z ##[start-action display=Run bail() {;id=__taiki-e_install-action.__run]
+2026-09-10T19:31:25.6955945Z ##[group]Run bail() {
+2026-09-10T19:31:25.6956227Z [36;1mbail() {[0m
+2026-09-10T19:31:25.6956516Z [36;1m  printf '::error::install-action: %s\n' "$*"[0m
+2026-09-10T19:31:25.6956856Z [36;1m  exit 1[0m
+2026-09-10T19:31:25.6957067Z [36;1m}[0m
+2026-09-10T19:31:25.6957443Z [36;1m# If /bin/sh is dash, environment variable containing % is not imported, but is fine[0m
+2026-09-10T19:31:25.6958330Z [36;1m# because it also means that it will not be exposed to subprocess.[0m
+2026-09-10T19:31:25.6958773Z [36;1mif /usr/bin/env | grep -Eq '^BASH_FUNC_'; then[0m
+2026-09-10T19:31:25.6959332Z [36;1m  bail 'bash function injection via BASH_FUNC_ environment variable is not allowed for security reasons'[0m
+2026-09-10T19:31:25.6959844Z [36;1mfi[0m
+2026-09-10T19:31:25.6960090Z [36;1mif ! command -v bash >/dev/null; then[0m
+2026-09-10T19:31:25.6960464Z [36;1m  if grep -Eq '^ID=alpine' /etc/os-release; then[0m
+2026-09-10T19:31:25.6960931Z [36;1m    printf '::group::Install packages required for install-action (bash)\n'[0m
+2026-09-10T19:31:25.6961399Z [36;1m    # NB: sync with apk_install in main.sh[0m
+2026-09-10T19:31:25.6961741Z [36;1m    if command -v sudo >/dev/null; then[0m
+2026-09-10T19:31:25.6962071Z [36;1m      sudo apk --no-cache add bash[0m
+2026-09-10T19:31:25.6962406Z [36;1m    elif command -v doas >/dev/null; then[0m
+2026-09-10T19:31:25.6962735Z [36;1m      doas apk --no-cache add bash[0m
+2026-09-10T19:31:25.6987593Z [36;1m    else[0m
+2026-09-10T19:31:25.6988076Z [36;1m      apk --no-cache add bash[0m
+2026-09-10T19:31:25.6988374Z [36;1m    fi[0m
+2026-09-10T19:31:25.6988608Z [36;1m    printf '::endgroup::\n'[0m
+2026-09-10T19:31:25.6988994Z [36;1m  else[0m
+2026-09-10T19:31:25.6989234Z [36;1m    bail 'this action requires bash'[0m
+2026-09-10T19:31:25.6989525Z [36;1m  fi[0m
+2026-09-10T19:31:25.6989725Z [36;1mfi[0m
+2026-09-10T19:31:25.6990025Z [36;1mbash --noprofile --norc "${GITHUB_ACTION_PATH:?}/main.sh"[0m
+2026-09-10T19:31:25.6992900Z shell: /usr/bin/env -u ENV -u BASH_ENV -u CDPATH -u SHELLOPTS -u BASHOPTS /bin/sh -eu {0}
+2026-09-10T19:31:25.6993353Z env:
+2026-09-10T19:31:25.6993570Z   CARGO_TERM_COLOR: always
+2026-09-10T19:31:25.6993824Z   RUST_BACKTRACE: 1
+2026-09-10T19:31:25.6994049Z   CARGO_NET_RETRY: 10
+2026-09-10T19:31:25.6994277Z   CARGO_INCREMENTAL: 0
+2026-09-10T19:31:25.6994530Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+2026-09-10T19:31:25.6995150Z   CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: -C link-arg=-fuse-ld=lld
+2026-09-10T19:31:25.6995749Z   HEAVY: test(=diskann_recall_at_10_vs_brute_force_on_50k) | test(=hnsw_recall_at_10_vs_brute_force_on_50k)
+2026-09-10T19:31:25.6996241Z   INPUT_TOOL: nextest
+2026-09-10T19:31:25.6996480Z   INPUT_CHECKSUM: true
+2026-09-10T19:31:25.6996723Z   INPUT_FALLBACK: cargo-binstall
+2026-09-10T19:31:25.6999605Z   DEFAULT_GITHUB_TOKEN: ***
+2026-09-10T19:31:25.7000027Z   ACTION_USER_AGENT: taiki-e/install-action (18b1216eba7f8039b0f8d131d5473787f0edce68)
+2026-09-10T19:31:25.7000460Z   RUNNER_OS: Linux
+2026-09-10T19:31:25.7000876Z   RUNNER_ARCH: X64
+2026-09-10T19:31:25.7001092Z ##[endgroup]
+2026-09-10T19:31:25.7132262Z info: host platform: x86_64_linux
+2026-09-10T19:31:25.7420789Z info: installing cargo-nextest@latest
+2026-09-10T19:31:25.7629444Z info: downloading https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-0.9.140/cargo-nextest-0.9.140-x86_64-unknown-linux-gnu.tar.gz
+2026-09-10T19:31:25.9604197Z info: verifying sha256 checksum for cargo-nextest-0.9.140-x86_64-unknown-linux-gnu.tar.gz
+2026-09-10T19:31:26.2152899Z info: cargo-nextest installed at /home/runner/.cargo/bin/cargo-nextest
+2026-09-10T19:31:26.2155554Z + cargo-nextest nextest --version
+2026-09-10T19:31:26.2183989Z cargo-nextest 0.9.140 (a9fef2964 2026-07-05)
+2026-09-10T19:31:26.2184467Z release: 0.9.140
+2026-09-10T19:31:26.2184780Z commit-hash: a9fef2964e34f64ed4fceeee7c0c3559ce560920
+2026-09-10T19:31:26.2185168Z commit-date: 2026-07-05
+2026-09-10T19:31:26.2185440Z host: x86_64-unknown-linux-gnu
+2026-09-10T19:31:26.2188541Z 
+2026-09-10T19:31:26.2208704Z ##[end-action id=__taiki-e_install-action.__run;outcome=success;conclusion=success;duration_ms=528]
+2026-09-10T19:31:26.2216148Z ##[start-action display=Run Set-StrictMode -Version Latest;id=__taiki-e_install-action.__run_2]
+2026-09-10T19:31:26.2222103Z ##[end-action id=__taiki-e_install-action.__run_2;outcome=skipped;conclusion=skipped;duration_ms=0]
+2026-09-10T19:31:26.2294124Z ##[group]Run actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+2026-09-10T19:31:26.2294579Z with:
+2026-09-10T19:31:26.2294803Z   name: nextest-archive
+2026-09-10T19:31:26.2295055Z   merge-multiple: false
+2026-09-10T19:31:26.2295308Z   repository: sparq-org/sparq
+2026-09-10T19:31:26.2295564Z   run-id: 34518125709
+2026-09-10T19:31:26.2295799Z   skip-decompress: false
+2026-09-10T19:31:26.2296045Z   digest-mismatch: error
+2026-09-10T19:31:26.2296271Z env:
+2026-09-10T19:31:26.2296473Z   CARGO_TERM_COLOR: always
+2026-09-10T19:31:26.2296715Z   RUST_BACKTRACE: 1
+2026-09-10T19:31:26.2296936Z   CARGO_NET_RETRY: 10
+2026-09-10T19:31:26.2297168Z   CARGO_INCREMENTAL: 0
+2026-09-10T19:31:26.2297430Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+2026-09-10T19:31:26.2298146Z   CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: -C link-arg=-fuse-ld=lld
+2026-09-10T19:31:26.2298790Z   HEAVY: test(=diskann_recall_at_10_vs_brute_force_on_50k) | test(=hnsw_recall_at_10_vs_brute_force_on_50k)
+2026-09-10T19:31:26.2299280Z ##[endgroup]
+2026-09-10T19:31:26.3689311Z Downloading single artifact
+2026-09-10T19:31:26.4584814Z Preparing to download the following artifacts:
+2026-09-10T19:31:26.4586260Z - nextest-archive (ID: 10169127229, Size: 5262783742, Expected Digest: sha256:908dc8bb1be24b9c2fea8e051f1acb1fa6e9ccb2a122a73e8747186cb6124eea)
+2026-09-10T19:31:26.6058465Z Redirecting to blob download url: https://productionresultssa11.blob.core.windows.net/actions-results/ae404fc0-4c4b-4fbb-a112-5b57ad7ee98d/workflow-job-run-2fb90208-83ec-571b-af9f-e9cf7ea4d3d0/artifacts/4b5b8a5fdfcb62a8641f27bd1c4e1c85aa57ec2d341f4b8224da19079a84924d.zip
+2026-09-10T19:31:26.6060155Z Starting download of artifact to: /home/runner/work/sparq/sparq
+2026-09-10T19:31:26.6835197Z (node:2425) [DEP0005] DeprecationWarning: Buffer() is deprecated due to security and usability issues. Please use the Buffer.alloc(), Buffer.allocUnsafe(), or Buffer.from() methods instead.
+2026-09-10T19:31:26.6836910Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-09-10T19:32:16.8832637Z SHA256 digest of downloaded artifact is 908dc8bb1be24b9c2fea8e051f1acb1fa6e9ccb2a122a73e8747186cb6124eea
+2026-09-10T19:32:16.8835360Z Artifact download completed successfully.
+2026-09-10T19:32:16.8835725Z Total of 1 artifact(s) downloaded
+2026-09-10T19:32:16.8842887Z Download artifact has finished successfully
+2026-09-10T19:32:16.9005636Z ##[group]Run set -euo pipefail
+2026-09-10T19:32:16.9006055Z [36;1mset -euo pipefail[0m
+2026-09-10T19:32:16.9006465Z [36;1m# [OPUS-4.8] sq-6vshe.6 (research/ci-structural-speedup.md §7, round 2):[0m
+2026-09-10T19:32:16.9007049Z [36;1m# DEMOTE the two heavy sparq-vectors recall shards (heavy-diskann/heavy-hnsw)[0m
+2026-09-10T19:32:16.9007603Z [36;1m# off the merge_group ref. WHY it is SAFE (per-leg cross-PR-interaction[0m
+2026-09-10T19:32:16.9008590Z [36;1m# analysis): each heavy shard runs exactly ONE deterministic, self-contained,[0m
+2026-09-10T19:32:16.9009168Z [36;1m# single-crate accuracy gate ({diskann,hnsw}_recall_at_10_vs_brute_force_on_50k[0m
+2026-09-10T19:32:16.9009761Z [36;1m# in crates/sparq-vectors/tests/, fixed seeds, `approx-ann` feature). Its[0m
+2026-09-10T19:32:16.9010299Z [36;1m# outcome is a pure function of sparq-vectors' ANN impl + its pinned[0m
+2026-09-10T19:32:16.9010885Z [36;1m# instant-distance dep — NOTHING else in the workspace. A squash-merge group[0m
+2026-09-10T19:32:16.9011477Z [36;1m# re-running it on the combined tree reproduces the identical result each PR[0m
+2026-09-10T19:32:16.9012043Z [36;1m# already gated, so it carries no cross-PR-interaction signal (unlike the bulk[0m
+2026-09-10T19:32:16.9012627Z [36;1m# workspace-unification build+test, which stays). FULL FORM is UNCHANGED: the[0m
+2026-09-10T19:32:16.9013177Z [36;1m# heavy shards still run at PR level AND on push-to-main (both force[0m
+2026-09-10T19:32:16.9013698Z [36;1m# rust_changed=true and neither hits this guard), so the recall floors gate[0m
+2026-09-10T19:32:16.9014227Z [36;1m# every PR + the canonical main build exactly as before. A post-merge[0m
+2026-09-10T19:32:16.9014752Z [36;1m# regression is caught by the push-to-main heavy run (this same job on the[0m
+2026-09-10T19:32:16.9015300Z [36;1m# `push` event) + the dedicated `heavy-recall-demoted-filer` job below, which[0m
+2026-09-10T19:32:16.9015859Z [36;1m# auto-files a P1 bead + GitHub issue if a heavy shard fails on main. This ONLY[0m
+2026-09-10T19:32:16.9016457Z [36;1m# affects the merge_group ref, and reports `success` (exit 0) so the ci-summary gate is[0m
+2026-09-10T19:32:16.9017069Z [36;1m# satisfied (the poller discovers whatever check-runs exist; an absent-by-design[0m
+2026-09-10T19:32:16.9017941Z [36;1m# sub-result never hangs it). Mirrors the selection skip idiom directly below.[0m
+2026-09-10T19:32:16.9018503Z [36;1mif [ "pull_request" = "merge_group" ] && [ -n "$SHARD_FILTER" ]; then[0m
+2026-09-10T19:32:16.9019007Z [36;1m  echo "heavy shard 'bulk 3/3' DEMOTED off merge_group (sq-6vshe.6):"[0m
+2026-09-10T19:32:16.9019545Z [36;1m  echo "  deterministic single-crate recall gate — no cross-PR interaction;"[0m
+2026-09-10T19:32:16.9020098Z [36;1m  echo "  full form runs at PR level + push-to-main. Reporting success."[0m
+2026-09-10T19:32:16.9020502Z [36;1m  exit 0[0m
+2026-09-10T19:32:16.9020718Z [36;1mfi[0m
+2026-09-10T19:32:16.9021057Z [36;1m# [FABLE-5] Draft-tier CI: ALSO demote the heavy recall shards on DRAFT[0m
+2026-09-10T19:32:16.9021602Z [36;1m# pull_request heads (docs/branch-protection.md §Draft-tier CI). Safe for[0m
+2026-09-10T19:32:16.9022133Z [36;1m# the same reason as the merge_group demotion above — deterministic[0m
+2026-09-10T19:32:16.9022665Z [36;1m# single-crate gates — plus the draft-tier invariant: un-drafting fires[0m
+2026-09-10T19:32:16.9023190Z [36;1m# ready_for_review, which re-runs this job at FULL tier on the same head[0m
+2026-09-10T19:32:16.9023704Z [36;1m# SHA, and a draft-tier gate result can never admit a PR to the merge[0m
+2026-09-10T19:32:16.9024205Z [36;1m# queue (scripts/ci_summary_gate.py refuses it). Bulk shards are NEVER[0m
+2026-09-10T19:32:16.9024936Z [36;1m# demoted (SHARD_FILTER is empty there); non-draft PRs and push-to-main[0m
+2026-09-10T19:32:16.9025345Z [36;1m# keep the full form.[0m
+2026-09-10T19:32:16.9025698Z [36;1mif [ "$IS_DRAFT_PR" = "true" ] && [ -n "$SHARD_FILTER" ]; then[0m
+2026-09-10T19:32:16.9026346Z [36;1m  echo "heavy shard 'bulk 3/3' DEMOTED on this DRAFT head (draft-tier CI):"[0m
+2026-09-10T19:32:16.9026905Z [36;1m  echo "  the full form re-runs at ready_for_review + push-to-main; a draft-tier"[0m
+2026-09-10T19:32:16.9027490Z [36;1m  echo "  gate result can never admit a PR to the merge queue. Reporting success."[0m
+2026-09-10T19:32:16.9028184Z [36;1m  exit 0[0m
+2026-09-10T19:32:16.9028398Z [36;1mfi[0m
+2026-09-10T19:32:16.9028746Z [36;1m# [FABLE-5] sq-fmx4u.3 (design §5.2): single-crate shard skip guard.[0m
+2026-09-10T19:32:16.9029284Z [36;1m# FAIL-CLOSED: only the exact mode 'selected' AND a non-empty SHARD_CRATE[0m
+2026-09-10T19:32:16.9029803Z [36;1m# AND a definite non-membership ('"<crate>"' absent from the affected[0m
+2026-09-10T19:32:16.9030316Z [36;1m# JSON — the quote delimiters prevent substring-crate collisions) can[0m
+2026-09-10T19:32:16.9030834Z [36;1m# skip; empty/missing selection outputs always fall through to a run.[0m
+2026-09-10T19:32:16.9031331Z [36;1mif [ "$SELECT_MODE" = "selected" ] && [ -n "$SHARD_CRATE" ]; then[0m
+2026-09-10T19:32:16.9031726Z [36;1m  case "$SELECT_AFFECTED" in[0m
+2026-09-10T19:32:16.9032105Z [36;1m    *"\"$SHARD_CRATE\""*) : ;;  # in the affected closure -> run the shard[0m
+2026-09-10T19:32:16.9032490Z [36;1m    *)[0m
+2026-09-10T19:32:16.9032801Z [36;1m      echo "shard 'bulk 3/3' SKIPPED by change-based selection:"[0m
+2026-09-10T19:32:16.9033288Z [36;1m      echo "  $SHARD_CRATE is not in the affected closure $SELECT_AFFECTED"[0m
+2026-09-10T19:32:16.9033682Z [36;1m      exit 0[0m
+2026-09-10T19:32:16.9033915Z [36;1m      ;;[0m
+2026-09-10T19:32:16.9034128Z [36;1m  esac[0m
+2026-09-10T19:32:16.9034343Z [36;1mfi[0m
+2026-09-10T19:32:16.9034656Z [36;1mcommon=(--archive-file nextest.tar.zst --workspace-remap . \[0m
+2026-09-10T19:32:16.9035126Z [36;1m        --extract-to . --extract-overwrite --profile ci)[0m
+2026-09-10T19:32:16.9035480Z [36;1mif [ -n "" ]; then[0m
+2026-09-10T19:32:16.9035864Z [36;1m  # Dedicated heavy shard: intersect HEAVY with this shard's single test so[0m
+2026-09-10T19:32:16.9036394Z [36;1m  # the shard's set is provably a SUBSET of HEAVY (belt-and-braces: if the[0m
+2026-09-10T19:32:16.9036925Z [36;1m  # test is ever renamed in only one place, the shard runs empty rather than[0m
+2026-09-10T19:32:16.9037383Z [36;1m  # silently re-including it in bulk).[0m
+2026-09-10T19:32:16.9038325Z [36;1m  args=("${common[@]}" -E '( test(=diskann_recall_at_10_vs_brute_force_on_50k) | test(=hnsw_recall_at_10_vs_brute_force_on_50k) ) & (  )')[0m
+2026-09-10T19:32:16.9039032Z [36;1melif [ "$SELECT_MODE" = "selected" ] && [ -n "$SELECT_FILTERSET" ]; then[0m
+2026-09-10T19:32:16.9039538Z [36;1m  # [FABLE-5] sq-fmx4u.3: bulk shard under ENFORCED selection — NARROW[0m
+2026-09-10T19:32:16.9040033Z [36;1m  # (never skip) the cross-crate partition to the affected closure[0m
+2026-09-10T19:32:16.9040517Z [36;1m  # (design §5.2): intersect the not-heavy set with the package()[0m
+2026-09-10T19:32:16.9041021Z [36;1m  # filterset. The count partition applies AFTER filtering, so the three[0m
+2026-09-10T19:32:16.9041533Z [36;1m  # bulk shards still partition the narrowed set exactly. A package()[0m
+2026-09-10T19:32:16.9042031Z [36;1m  # naming no archived package fails loud (nextest errors), so a stale[0m
+2026-09-10T19:32:16.9042552Z [36;1m  # filterset cannot silently select nothing; --no-tests=pass is needed[0m
+2026-09-10T19:32:16.9043078Z [36;1m  # because a legitimately-narrowed shard CAN match zero tests (e.g. an[0m
+2026-09-10T19:32:16.9043589Z [36;1m  # affected crate whose only tests are heavy/feature-gated) — full and[0m
+2026-09-10T19:32:16.9044083Z [36;1m  # shadow runs keep the strict no-tests-is-an-error behaviour.[0m
+2026-09-10T19:32:16.9044720Z [36;1m  args=("${common[@]}" --no-tests=pass --partition count:3/3 \[0m
+2026-09-10T19:32:16.9045147Z [36;1m        -E "( not ( $HEAVY ) ) & ( $SELECT_FILTERSET )")[0m
+2026-09-10T19:32:16.9045485Z [36;1melse[0m
+2026-09-10T19:32:16.9046021Z [36;1m  # Bulk shard: everything that is NOT a known-heavy test, count-partitioned.[0m
+2026-09-10T19:32:16.9046823Z [36;1m  args=("${common[@]}" --partition count:3/3 -E 'not ( test(=diskann_recall_at_10_vs_brute_force_on_50k) | test(=hnsw_recall_at_10_vs_brute_force_on_50k) )')[0m
+2026-09-10T19:32:16.9047472Z [36;1mfi[0m
+2026-09-10T19:32:16.9047943Z [36;1mMAX_ATTEMPTS=2[0m
+2026-09-10T19:32:16.9048243Z [36;1mattempt=1[0m
+2026-09-10T19:32:16.9048478Z [36;1mwhile true; do[0m
+2026-09-10T19:32:16.9048850Z [36;1m  echo "::group::nextest shard 'bulk 3/3' — attempt $attempt/$MAX_ATTEMPTS"[0m
+2026-09-10T19:32:16.9049408Z [36;1m  # Capture the exit code EXPLICITLY. `cargo … || rc=$?` is `set -e`-safe (the[0m
+2026-09-10T19:32:16.9049979Z [36;1m  # `||` makes the failure non-fatal) AND captures nextest's REAL exit code —[0m
+2026-09-10T19:32:16.9050522Z [36;1m  # unlike `if cargo …; then`, where `$?` after the `if` is the `if` statement's[0m
+2026-09-10T19:32:16.9051077Z [36;1m  # own status (always 0) and a genuine failure would silently exit 0, wrongly[0m
+2026-09-10T19:32:16.9051616Z [36;1m  # passing the gate. `rc` is reset to 0 each attempt before the run.[0m
+2026-09-10T19:32:16.9052004Z [36;1m  rc=0[0m
+2026-09-10T19:32:16.9052255Z [36;1m  cargo nextest run "${args[@]}" || rc=$?[0m
+2026-09-10T19:32:16.9052577Z [36;1m  echo "::endgroup::"[0m
+2026-09-10T19:32:16.9052859Z [36;1m  if [ "$rc" -eq 0 ]; then[0m
+2026-09-10T19:32:16.9053215Z [36;1m    echo "shard 'bulk 3/3' passed on attempt $attempt"[0m
+2026-09-10T19:32:16.9053565Z [36;1m    break[0m
+2026-09-10T19:32:16.9053782Z [36;1m  fi[0m
+2026-09-10T19:32:16.9054050Z [36;1m  if [ "$attempt" -ge "$MAX_ATTEMPTS" ]; then[0m
+2026-09-10T19:32:16.9054649Z [36;1m    echo "::error::shard 'bulk 3/3' failed after $attempt attempt(s) (exit $rc) — genuine failure, not a single transient."[0m
+2026-09-10T19:32:16.9055208Z [36;1m    exit "$rc"[0m
+2026-09-10T19:32:16.9055440Z [36;1m  fi[0m
+2026-09-10T19:32:16.9055997Z [36;1m  echo "::warning::shard 'bulk 3/3' attempt $attempt failed (exit $rc) — reclaiming disk and retrying once (sq-c76x transient self-heal)."[0m
+2026-09-10T19:32:16.9056732Z [36;1m  # Reclaim disk again in case the first attempt was a `No space left` race[0m
+2026-09-10T19:32:16.9057293Z [36;1m  # that left partial extraction/diagnostics behind; the script is best-effort.[0m
+2026-09-10T19:32:16.9058031Z [36;1m  ./scripts/ci-free-disk.sh || true[0m
+2026-09-10T19:32:16.9058349Z [36;1m  attempt=$((attempt + 1))[0m
+2026-09-10T19:32:16.9058615Z [36;1mdone[0m
+2026-09-10T19:32:16.9092869Z shell: /usr/bin/bash -e {0}
+2026-09-10T19:32:16.9093135Z env:
+2026-09-10T19:32:16.9093360Z   CARGO_TERM_COLOR: always
+2026-09-10T19:32:16.9093624Z   RUST_BACKTRACE: 1
+2026-09-10T19:32:16.9093853Z   CARGO_NET_RETRY: 10
+2026-09-10T19:32:16.9094084Z   CARGO_INCREMENTAL: 0
+2026-09-10T19:32:16.9094347Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+2026-09-10T19:32:16.9094790Z   CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: -C link-arg=-fuse-ld=lld
+2026-09-10T19:32:16.9095398Z   HEAVY: test(=diskann_recall_at_10_vs_brute_force_on_50k) | test(=hnsw_recall_at_10_vs_brute_force_on_50k)
+2026-09-10T19:32:16.9095894Z   RAYON_NUM_THREADS: 
+2026-09-10T19:32:16.9096126Z   SELECT_MODE: selected
+2026-09-10T19:32:16.9096381Z   SELECT_AFFECTED: ["sparq-bench"]
+2026-09-10T19:32:16.9096678Z   SELECT_FILTERSET: package(sparq-bench)
+2026-09-10T19:32:16.9096965Z   SHARD_CRATE: 
+2026-09-10T19:32:16.9097175Z   SHARD_FILTER: 
+2026-09-10T19:32:16.9097396Z   IS_DRAFT_PR: false
+2026-09-10T19:32:16.9097993Z ##[endgroup]
+2026-09-10T19:32:16.9798987Z ##[group]nextest shard 'bulk 3/3' — attempt 1/2
+2026-09-10T19:32:17.2641789Z [32;1m  Extracting[0m [1m742[0m binaries (including [1m11[0m non-test binaries), [1m1[0m build script output directory, and [1m6[0m linked paths to [1m/home/runner/work/sparq/sparq[0m
+2026-09-10T19:33:37.8824245Z [32;1m   Extracted[0m [1m1207[0m files to [1m/home/runner/work/sparq/sparq[0m in 1m 20.70s
+2026-09-10T19:33:37.9376519Z ────────────
+2026-09-10T19:33:37.9379489Z [32;1m Nextest run[0m ID [1m4f330e00-d022-4356-9193-3b9c2fa3a0d7[0m with nextest profile: [1mci[0m
+2026-09-10T19:33:37.9380577Z [32;1m    Starting[0m [1m22[0m tests across [1m1[0m binary ([1m44[0m tests and [1m730[0m binaries [33;1mskipped[0m)
+2026-09-10T19:33:37.9565579Z [32;1m        PASS[0m [   0.016s] ( 1/22) [35;1msparq-bench::bin/sparq-bench[0m [36mfuzz::tests[0m[36m::[0m[34;1mcommitted_allowlist_enables_exactly_the_adjudicated_classes[0m
+2026-09-10T19:33:37.9597868Z [32;1m        PASS[0m [   0.020s] ( 2/22) [35;1msparq-bench::bin/sparq-bench[0m [36mfuzz::tests[0m[36m::[0m[34;1mduplicate_multiplicity_is_significant[0m
+2026-09-10T19:33:37.9630905Z [32;1m        PASS[0m [   0.007s] ( 3/22) [35;1msparq-bench::bin/sparq-bench[0m [36mfuzz::tests[0m[36m::[0m[34;1mevery_category_has_a_nightly_shard[0m
+2026-09-10T19:33:37.9681016Z [32;1m        PASS[0m [   0.008s] ( 4/22) [35;1msparq-bench::bin/sparq-bench[0m [36mfuzz::tests[0m[36m::[0m[34;1mexact_numeric_equality_beyond_f64[0m
+2026-09-10T19:33:37.9754988Z [32;1m        PASS[0m [   0.007s] ( 5/22) [35;1msparq-bench::bin/sparq-bench[0m [36mfuzz::tests[0m[36m::[0m[34;1morder_by_compares_up_to_within_tie_run_permutation[0m
+2026-09-10T19:33:37.9955126Z [32;1m        PASS[0m [   0.020s] ( 6/22) [35;1msparq-bench::bin/sparq-bench[0m [36mfuzz::tests[0m[36m::[0m[34;1msame_cardinality_wrong_aggregate_value_is_caught[0m
+2026-09-10T19:33:37.9957605Z [32;1m        PASS[0m [   0.032s] ( 7/22) [35;1msparq-bench::bin/sparq-bench[0m [36mfuzz::tests[0m[36m::[0m[34;1minteger_constant_vs_mixed_column[0m
+2026-09-10T19:33:37.9980082Z [32;1m        PASS[0m [   0.057s] ( 8/22) [35;1msparq-bench::bin/sparq-bench[0m [36mfuzz::tests[0m[36m::[0m[34;1mask_is_compared_by_its_boolean_not_a_count[0m
+2026-09-10T19:33:38.0034183Z [32;1m        PASS[0m [   0.007s] ( 9/22) [35;1msparq-bench::bin/sparq-bench[0m [36mneutral::tests[0m[36m::[0m[34;1mfold_derived_integer_is_narrow[0m
+2026-09-10T19:33:38.0049195Z [32;1m        PASS[0m [   0.066s] (10/22) [35;1msparq-bench::bin/sparq-bench[0m [36mfuzz::tests[0m[36m::[0m[34;1ma_limit_window_is_value_compared_only_with_a_total_tiebreaker[0m
+2026-09-10T19:33:38.0074122Z [32;1m        PASS[0m [   0.012s] (11/22) [35;1msparq-bench::bin/sparq-bench[0m [36mfuzz::tests[0m[36m::[0m[34;1msame_family_string_filter_stays_strict[0m
+2026-09-10T19:33:38.0119569Z [32;1m        PASS[0m [   0.008s] (12/22) [35;1msparq-bench::bin/sparq-bench[0m [36mneutral::tests[0m[36m::[0m[34;1mneutral_term_keys_absorb_lexical_form_but_not_value[0m
+2026-09-10T19:33:38.0145201Z [32;1m        PASS[0m [   0.009s] (13/22) [35;1msparq-bench::bin/sparq-bench[0m [36mupdate_fuzz::tests[0m[36m::[0m[34;1mcommitted_allowlist_enables_exactly_the_adjudicated_classes[0m
+2026-09-10T19:33:38.0228494Z [32;1m        PASS[0m [   0.009s] (14/22) [35;1msparq-bench::bin/sparq-bench[0m [36mupdate_fuzz::tests[0m[36m::[0m[34;1minteger_lexical_adjudication_is_narrow[0m
+2026-09-10T19:33:38.0319959Z [32;1m        PASS[0m [   0.007s] (15/22) [35;1msparq-bench::bin/sparq-bench[0m [36mupdate_fuzz::tests[0m[36m::[0m[34;1mlexical_collisions_across_contexts_and_nested_terms_fail[0m
+2026-09-10T19:33:38.0640239Z [32;1m        PASS[0m [   0.052s] (16/22) [35;1msparq-bench::bin/sparq-bench[0m [36mupdate_fuzz::tests[0m[36m::[0m[34;1mhistorical_4141222487_preserves_lexicals_and_fresh_nodes[0m
+2026-09-10T19:33:38.0762171Z [32;1m        PASS[0m [   0.012s] (17/22) [35;1msparq-bench::bin/sparq-bench[0m [36mupdate_fuzz::tests[0m[36m::[0m[34;1mraw_duplicate_guard_preserves_canonicalization_errors[0m
+2026-09-10T19:33:38.0936072Z [32;1m        PASS[0m [   0.017s] (18/22) [35;1msparq-bench::bin/sparq-bench[0m [36mupdate_fuzz::tests[0m[36m::[0m[34;1mraw_duplicate_probe_projection_contract[0m
+2026-09-10T19:33:38.1109815Z [32;1m        PASS[0m [   0.017s] (19/22) [35;1msparq-bench::bin/sparq-bench[0m [36mupdate_fuzz::tests[0m[36m::[0m[34;1msnapshot_renderers_agree_on_known_dataset[0m
+2026-09-10T19:33:38.2146904Z [32;1m        PASS[0m [   0.219s] (20/22) [35;1msparq-bench::bin/sparq-bench[0m [36mfuzz::tests[0m[36m::[0m[34;1mtyped_literal_columns_cover_every_datatype_family[0m
+2026-09-10T19:33:40.7982753Z [32;1m        PASS[0m [   2.790s] (21/22) [35;1msparq-bench::bin/sparq-bench[0m [36mupdate_fuzz::tests[0m[36m::[0m[34;1mgenerated_integer_domain_is_injective_including_load[0m
+2026-09-10T19:33:42.5383364Z [32;1m        PASS[0m [   4.508s] (22/22) [35;1msparq-bench::bin/sparq-bench[0m [36mupdate_fuzz::tests[0m[36m::[0m[34;1mno_nested_blank_nodes_in_triple_terms[0m
+2026-09-10T19:33:42.5384616Z ────────────
+2026-09-10T19:33:42.5385519Z [32;1m     Summary[0m [   4.601s] [1m22[0m tests run: [1m22[0m [32;1mpassed[0m, [1m44[0m [33;1mskipped[0m
+2026-09-10T19:33:42.5456149Z ##[endgroup]
+2026-09-10T19:33:42.5456552Z shard 'bulk 3/3' passed on attempt 1
+2026-09-10T19:33:42.5636873Z Post job cleanup.
+2026-09-10T19:33:42.8223821Z [command]/usr/bin/git version
+2026-09-10T19:33:42.8270555Z git version 2.55.0
+2026-09-10T19:33:42.8313176Z Temporarily overriding HOME='/home/runner/work/_temp/a859cdbe-de3e-4555-9c81-65ddbfb2f0cd' before making global git config changes
+2026-09-10T19:33:42.8315712Z Adding repository directory to the temporary git global config as a safe directory
+2026-09-10T19:33:42.8319723Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/sparq/sparq
+2026-09-10T19:33:42.8355761Z Removing SSH command configuration
+2026-09-10T19:33:42.8364388Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-09-10T19:33:42.8406188Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-09-10T19:33:42.8699480Z Removing HTTP extra header
+2026-09-10T19:33:42.8706401Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-10T19:33:42.8744734Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-09-10T19:33:42.9013541Z Removing includeIf entries pointing to credentials config files
+2026-09-10T19:33:42.9026376Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-10T19:33:42.9064675Z includeif.gitdir:/home/runner/work/sparq/sparq/.git.path
+2026-09-10T19:33:42.9065721Z includeif.gitdir:/home/runner/work/sparq/sparq/.git/worktrees/*.path
+2026-09-10T19:33:42.9066391Z includeif.gitdir:/github/workspace/.git.path
+2026-09-10T19:33:42.9067063Z includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-09-10T19:33:42.9085318Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/sparq/sparq/.git.path
+2026-09-10T19:33:42.9126645Z /home/runner/work/_temp/git-credentials-e4008e25-c14e-4f4a-ae7c-fa15b39bb68b.config
+2026-09-10T19:33:42.9138877Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/sparq/sparq/.git.path /home/runner/work/_temp/git-credentials-e4008e25-c14e-4f4a-ae7c-fa15b39bb68b.config
+2026-09-10T19:33:42.9186364Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/sparq/sparq/.git/worktrees/*.path
+2026-09-10T19:33:42.9229072Z /home/runner/work/_temp/git-credentials-e4008e25-c14e-4f4a-ae7c-fa15b39bb68b.config
+2026-09-10T19:33:42.9241974Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/sparq/sparq/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-e4008e25-c14e-4f4a-ae7c-fa15b39bb68b.config
+2026-09-10T19:33:42.9288036Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git.path
+2026-09-10T19:33:42.9318752Z /github/runner_temp/git-credentials-e4008e25-c14e-4f4a-ae7c-fa15b39bb68b.config
+2026-09-10T19:33:42.9326119Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-e4008e25-c14e-4f4a-ae7c-fa15b39bb68b.config
+2026-09-10T19:33:42.9361154Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-09-10T19:33:42.9387291Z /github/runner_temp/git-credentials-e4008e25-c14e-4f4a-ae7c-fa15b39bb68b.config
+2026-09-10T19:33:42.9395811Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-e4008e25-c14e-4f4a-ae7c-fa15b39bb68b.config
+2026-09-10T19:33:42.9433815Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-09-10T19:33:42.9668297Z Removing credentials config '/home/runner/work/_temp/git-credentials-e4008e25-c14e-4f4a-ae7c-fa15b39bb68b.config'
+2026-09-10T19:33:42.9819033Z Cleaning up orphan processes

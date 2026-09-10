@@ -1,0 +1,9 @@
+108:2026-09-10T19:08:09.6360268Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +573dba455effaa982b60776f9b03e6e324d6cc2f:refs/remotes/pull/6487/merge
+110:2026-09-10T19:08:12.7482971Z  * [new ref]         573dba455effaa982b60776f9b03e6e324d6cc2f -> pull/6487/merge
+135:2026-09-10T19:08:13.3377110Z HEAD is now at 573dba4 Merge 0b4554b924a80432cc1b572bd19f8e58cdbfb4e6 into f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464
+138:2026-09-10T19:08:13.3456136Z 573dba455effaa982b60776f9b03e6e324d6cc2f
+157:2026-09-10T19:08:21.6568959Z   1.88-x86_64-unknown-linux-gnu installed - rustc 1.88.0 (6b00bc388 2025-06-23)
+163:2026-09-10T19:08:21.6759167Z   1.88-x86_64-unknown-linux-gnu unchanged - rustc 1.88.0 (6b00bc388 2025-06-23)
+326:2026-09-10T19:08:24.1388865Z rustc --version -> rustc 1.88.0 (6b00bc388 2025-06-23)
+1282:2026-09-10T19:10:19.0466702Z     Checking sparq-bench v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-bench)
+1289:2026-09-10T19:10:21.9485431Z     Finished `dev` profile [unoptimized + debuginfo] target(s) in 1m 57s

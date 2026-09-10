@@ -1,0 +1,299 @@
+## .github/workflows/ci.yml:500
+500:       # [OPUS-4.8] Build + ARCHIVE the whole workspace test set once. `--all-targets`
+501:       # mirrors the old `cargo build --workspace --all-targets` (unit + integration +
+502:       # bin test targets), so the archived set == what the un-sharded run built. The
+503:       # .tar.zst is self-contained (binaries + the metadata nextest needs to run them
+504:       # on another runner with `--archive-file`), so the shards never recompile.
+505:       #
+506:       # [OPUS-4.8] The archive runs `--features approx-ann,filtered-ann,vec-predicate`
+507:       # (#363, LOAD-BEARING): sparq-vectors' heavy recall/over-fetch/vec-predicate tests are
+508:       # MODULE-gated (`#![cfg(feature = ...)]`) and MUST run in this sharded lane — without
+509:       # these the gated binaries compile EMPTY and the heavy-hnsw shard's exact filter matches
+510:       # ZERO tests (nextest exit 4). These three are the ONLY opt-in features carried here.
+511:       # GUARD (sq-vya1): the archive carries NO OTHER opt-in features (we deliberately avoid
+512:       # `--all-features` — cross-crate conflicts + heavy/native/network deps would not even
+513:       # resolve; see feature-matrix.yml's SCOPE). Any test behind a DEFAULT-OFF feature OTHER
+514:       # than those three compiles EMPTY here and runs SILENTLY-zero in the shards — its coverage
+515:       # is the JOB OF feature-matrix.yml (per-leg `cargo test -p <crate> --features <set>`,
+516:       # gated by ci-summary). When you add/feature-gate a test: a sparq-vectors recall/vec test
+517:       # rides these archive features; ANYTHING ELSE must be wired into a feature-matrix.yml leg
+518:       # (read that file's GUARD block). Prove a suite is reached: `cargo nextest list -p <crate>
+519:       # --features <set>` must SHOW its test names.
+520:       - name: Build + archive test binaries (nextest archive)
+521:         run: cargo nextest archive --workspace --all-targets --features approx-ann,filtered-ann,vec-predicate --archive-file nextest.tar.zst
+522:       # [OPUS-4.8] Upload the archive immediately after the build, BEFORE doctests, so
+523:       # the shards' input artifact is produced even if the doctest step later fails.
+
+## .github/workflows/ci.yml:551
+551:       # (shards then must distinguish "build failed, no artifact" from "doctests failed,
+552:       # artifact present"). A doctest failure is rare and itself a hard, independent
+553:       # blocking signal; archive-then-doctest above at least guarantees the artifact
+554:       # exists. Re-open this if doctest flakiness ever makes the masked picture costly.
+555:       # [OPUS-4.8] (#363) SAME feature set as the archive build above so the opt-in
+556:       # sparq-vectors doc examples (the approx-ann/filtered-ann/vec-predicate-gated `///`
+557:       # blocks) are compiled/run here too, not silently dropped.
+558:       - name: Doctests (nextest does not run these; run once, off the warm build)
+559:         run: cargo test --workspace --features approx-ann,filtered-ann,vec-predicate --doc
+560: 
+
+## .github/workflows/ci.yml:1356
+1356:         # ships a rustup stable toolchain; the SHA-pinned action's `rustup
+1357:         # toolchain install stable` re-downloads the whole toolchain whenever
+1358:         # the image lags the newest release. Use the preinstalled one —
+1359:         # `rustup default`/`component add` never trigger a toolchain download.
+1360:         run: |
+1361:           rustup default stable
+1362:           rustup component add rustfmt clippy
+1363:           rustup show active-toolchain
+1364:       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+1365:         with:
+1366:           # [OPUS-5] sq-h2gz6 + [SONNET-4.6] sq-6vshe.15 lever 2 / sq-aemq7 — CACHE-SAVE
+1367:           # DISCIPLINE: restore always, save on push-to-main only. Rationale + the
+1368:           # seeder argument are on the `build-archive` cache step above (the canonical
+1369:           # note); pinned by scripts/tests/test_mergequeue_cache_posture.py.
+1370:           save-if: ${{ github.ref == 'refs/heads/main' }}
+1371:       # GATES: the whole workspace (sparq-py included) is clippy-clean under -D warnings.
+1372:       # A new warning — from new code or a Rust-stable bump that adds a lint — fails CI.
+1373:       - name: clippy (deny warnings)
+1374:         run: cargo clippy --workspace --all-targets -- -D warnings
+1375:       # [OPUS-4.8] sq-4sbk: clippy -D warnings, WORKSPACE-WIDE, with `--all-features` — the
+1376:       # clippy sibling of the two-state rustdoc gate below. The default-features clippy above
+1377:       # NEVER compiles code inside default-OFF `#[cfg(feature = "…")]` modules (result-cache,
+1378:       # txn, vectorized, service, fedplan, fedclient, odrl-bridge, …), so a clippy lint inside
+1379:       # an opt-in feature module slips the central gate and only surfaces — if at all — via a
+1380:       # feature-matrix.yml leg that happens to enable that exact feature (the legs there clippy
+1381:       # per-crate `-p <crate> --features <set>`). This workspace-wide `--all-features` pass
+1382:       # catches such lints centrally AND the cross-crate feature-unification interactions that a
+1383:       # per-crate `-p` leg structurally cannot see (a default-feature edit that only mis-lints
+1384:       # once the unified all-features build turns another crate's feature on). VERIFIED SOUND on
+1385:       # main before being made gating (sq-4sbk crux check): the workspace has NO `compile_error!`
+1386:       # mutual-exclusion guard and NO `not(feature=…)` *compile-time* assert that breaks under
+1387:       # unification — `cargo clippy --workspace --all-targets --all-features -- -D warnings`
+1388:       # compiles every opt-in crate (sparq-hdt/-gpu/-py/-fedplan-mpc included) and is CLEAN.
+1389:       # The network features (`live`/`embeddings`) only COMPILE reqwest here; no socket is
+1390:       # opened (clippy does not run tests), so they are safe in this lint-only pass. Cost: the
+1391:       # lint job already builds the workspace twice over (default clippy + two rustdoc passes);
+1392:       # this adds only the off-by-default feature code on a warm target dir — a modest increment,
+1393:       # not a second full build (the bulk of the dependency + first-party graph is already
+1394:       # compiled by the default-features clippy above).
+1395:       - name: clippy (deny warnings, workspace — all features)
+1396:         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+1397:       # [OPUS-4.8] sq-8gsv: rustdoc -D warnings, WORKSPACE-WIDE. A broken/private intra-doc
+1398:       # link (e.g. a public item linking to a crate-private const/fn, or an unresolved
+1399:       # `[`Foo`]` that renders as literal text) is a rustdoc warning — NOT a clippy/build
+1400:       # warning — so it slips past every other gate here and mis-renders the published docs.
+1401:       # This was previously scoped to sparq-solid (sq-z1rm) and sparq-mpc (sq-h1w2) only,
+1402:       # because the rest of the workspace carried ~174 pre-existing intra-doc-link warnings
+1403:       # across ~20 crates. sq-8gsv cleared that backlog, so the gate now covers the WHOLE
+1404:       # doc surface: any new public item that links to a private/unresolved one fails CI.
+1405:       # Two feature states cover the feature-gated doc surface (e.g. sparq-solid's
+1406:       # `odrl-bridge`/`count-enforcement` modules, sparq-mpc's `insecure-test-rng`,
+1407:       # sparq-prov's `reason` bridge): default features, then `--all-features`.
+1408:       - name: rustdoc (deny warnings, workspace — default features)
+1409:         run: cargo doc --workspace --no-deps
+1410:         env:
+1411:           RUSTDOCFLAGS: "-D warnings"
+1412:       - name: rustdoc (deny warnings, workspace — all features)
+1413:         run: cargo doc --workspace --no-deps --all-features
+1414:         env:
+1415:           RUSTDOCFLAGS: "-D warnings"
+
+## .github/workflows/ci.yml:1432
+1432:       # Informational until the deferred `cargo fmt --all` reformat lands (see rustfmt.toml).
+1433:       # The formatter VERSION is pinned by rust-toolchain.toml (channel + the `rustfmt`
+1434:       # component), so this check is reproducible in a local checkout even while it is
+1435:       # non-blocking — issue #2360 reported the opposite, a workspace-wide failure on
+1436:       # unchanged files under an ambient rustfmt. Echo the version so any future
+1437:       # disagreement between this log and a contributor's box names its own cause.
+1438:       - name: rustfmt (informational)
+1439:         run: |
+1440:           cargo fmt --version
+1441:           cargo fmt --all --check
+1442:         continue-on-error: true
+
+## .github/workflows/ci.yml:1551
+1551:           if [ -z "$floor" ]; then
+1552:             echo "::error::could not read [workspace.package] rust-version from the root Cargo.toml"
+1553:             exit 1
+1554:           fi
+1555:           echo "declared MSRV floor (root Cargo.toml rust-version) = $floor"
+1556:           for tool in rustc cargo; do
+1557:             ver="$("$tool" --version)" || { echo "::error::$tool --version failed"; exit 1; }
+1558:             echo "$tool --version -> $ver"
+1559:             case "$ver" in
+1560:               "$tool $floor."*|"$tool $floor "*) ;;
+1561:               *)
+1562:                 echo "::error::MSRV gate is NOT on the declared floor $floor — $tool reports '$ver'. This lane must compile ON the floor toolchain or it proves nothing; check the job-level RUSTUP_TOOLCHAIN and the root rust-toolchain.toml pin."
+1563:                 exit 1
+1564:                 ;;
+1565:             esac
+1566:           done
+1567:           cargo check --workspace --all-targets --exclude sparq-py --exclude sparq-hdt
+1568: 
+1569:   conformance:
+1570:     # W3C SPARQL conformance RATCHET (roadmap T13/38). The full 1229-test scope is at
+
+## .github/workflows/docs-quality.yml:145
+145:   pull_request:
+146:     # [FABLE-5] Draft-tier CI: + ready_for_review so the un-draft moment re-runs
+147:     # this gate-feeding lane (docs/branch-protection.md §Draft-tier CI).
+148:     types: [opened, synchronize, reopened, ready_for_review]
+149:   # [OPUS-4.8] Merge queue: docs-quality surfaces checks on PRs (some gating, some
+150:   # advisory/informational which ci-summary excludes), so it must also run on the
+151:   # queue's merge_group ref or the required ci-summary would wait for siblings that
+152:   # never appear there. The concurrency group below uses
+153:   # `github.event.pull_request.number || github.ref`, which falls back to the unique
+154:   # merge_group ref — no cross-event collision.
+155:   merge_group:
+156:   push:
+157:     branches: [main]
+158: 
+159: # Read-only: every job only reads the checked-out tree.
+160: permissions:
+161:   contents: read
+162: 
+163: concurrency:
+164:   group: docs-quality-${{ github.event.pull_request.number || github.ref }}
+165:   cancel-in-progress: true
+166: 
+
+## .github/workflows/docs-quality.yml:280
+280:       # ---- former job: privacy-claims (ZK/MPC honesty gate) ----
+281:       # [OPUS-4.8] HARD gate (bead sq-toze.35 + sq-qhy4): the empirical-honesty mandate
+282:       # in CI form. The v1 ZK verifier is pending external cryptographer sign-off and
+283:       # `sparq-mpc` is honest-majority semi-honest only (SECURITY.md; research/zk-*-audit.md),
+284:       # so NO outward doc / README / SKILL / site-copy / compliance-index string may assert a
+285:       # ZK/MPC privacy-or-soundness property as a SETTLED, achieved fact without the
+286:       # not-yet-sound caveat. The script greps the outward claim surface for forbidden
+287:       # unqualified-claim phrases; a hit fails the build unless the line carries an inline
+288:       # `privacy-claims-allow: <why>` justification marker (the allow-list). Deterministic,
+289:       # no network, grep-only. [OPUS-4.8]
+290:       - name: privacy-claims (ZK/MPC honesty gate) — no unqualified claims
+291:         run: bash scripts/check-privacy-claims.sh
+292:       # [OPUS-4.8] sq-qhy4: both-direction self-tests for the predicate-form soundness
+293:       # coverage — should-FAIL overclaims ("the verifier is sound", "…are COMPLETE and
+294:       # SOUND", "provably sound") must be caught; should-PASS negated/hedged/non-crypto
+295:       # lines (incl. the canonical "SOUND as landed for the … threat model" verdict) must
+296:       # not regress. Hermetic (no git/network) — pins the gate classification. Runs in
+297:       # this same HARD job so a coverage regression also fails the ci-summary gate.
+298:       - name: Self-test the privacy-claims gate (both directions)
+299:         run: bash scripts/tests/test_privacy_claims.sh
+300: 
+
+## .github/workflows/docs-quality.yml:386
+386:       # [OPUS-5] Pre-submit runner (scripts/preflight.py) — the checker that shifts
+387:       # G1/G2/G6 + no-perf-numbers + readme-template + privacy-claims LEFT into the
+388:       # worker's worktree, plus the `guard-untested` check. Two HARD legs, both in
+389:       # this already-GATING job so a regression reds ci-summary:
+390:       #   * --self-test pins the checker's own logic (mirrors readme-template /
+391:       #     coverage-gate / perf-gate above);
+392:       #   * the unittest suite additionally pins that EVERY worker brief still
+393:       #     carries the shared pre-submit block, byte-identical. A brief silently
+394:       #     losing a clause is a repeated failure mode here — a worker reads only
+395:       #     its own brief, so an obligation present in five of six is absent for
+396:       #     the sixth. Deleting the block from one brief reds this leg.
+397:       #
+398:       # Both `run:` values must stay BARE COMMANDS on their own line. Appending
+399:       # `|| true` (or `; true`, or piping) leaves every substring-matching seam
+400:       # test green while the leg can no longer fail — the commonest swallow shape
+401:       # in this repo's verdict corpus. `test_preflight.py::
+402:       # test_neither_leg_is_invoked_with_its_exit_code_discarded` anchors the call
+403:       # with `^\s*<cmd>\s*$` and reds on exactly that edit.
+404:       - name: Self-test the pre-submit runner (pure logic)
+405:         run: python3 scripts/preflight.py --self-test
+406:       - name: preflight — checker tests + worker-brief block consistency — GATING
+407:         run: python3 scripts/tests/test_preflight.py
+408: 
+409:       # ---- inference-conformance report drift (sq-t099c + sq-1d528 / issue #3171) ----
+
+## .github/workflows/differential-update.yml:54
+54: # TRIGGER — NIGHTLY/HEAVY tier ONLY (schedule + workflow_dispatch), like
+55: # differential.yml / shacl-diff-fuzz.yml: this workflow never produces a check-run
+56: # on a PR head commit, so the `ci-summary / gate` aggregator never sees it and the
+57: # per-PR gate is unaffected.
+58: #
+59: # Third-party actions are pinned by full commit SHA (supply-chain hardening); the
+60: # trailing `# vX.Y.Z` comment is what Dependabot follows to bump the pin. Pins
+61: # match differential.yml / fuzz.yml / ci.yml.
+62: name: differential-update
+63: 
+64: on:
+65:   workflow_dispatch:
+66:     inputs:
+67:       seed_start:
+68:         description: "seed window start (default: days-since-epoch x stride — the advancing nightly window; the fixed-window shard ignores it)"
+69:         required: false
+70:         default: ""
+71:       count:
+72:         description: "seeds for the advancing shard (the fixed-window shard keeps 2000)"
+73:         required: false
+74:         default: ""
+75:   # Daily heavy tier. 04:37 UTC — offset from ci.yml coverage (03:17),
+76:   # differential.yml (03:53), fuzz.yml / zk-toolchain.yml (04:23), miri.yml /
+77:   # shacl-diff-fuzz.yml (05:11) per the existing nightly stagger convention.
+78:   schedule:
+79:     - cron: "37 4 * * *"
+80: 
+81: permissions:
+
+## .github/workflows/differential-update.yml:176
+176:         env:
+177:           START: ${{ steps.window.outputs.start }}
+178:           COUNT: ${{ steps.window.outputs.count }}
+179:         run: |
+180:           set -euo pipefail
+181:           # Tee the log: on a divergence it contains the full deterministic repro
+182:           # (MISMATCH seed=N lines + the FIRST FAILING CASE block with the replay
+183:           # command and the whole update sequence). pipefail keeps the exit code.
+184:           ./target/release-fast/sparq-bench update-fuzz --seed-start "$START" --seed-count "$COUNT" 2>&1 \
+185:             | tee "$RUNNER_TEMP/update-fuzz-log.txt"
+186:       # ── failure path: preserve the repro + auto-file the finding ────────────────
+187:       - name: Auto-file the finding (GitHub issue + P1 bug bead, deduped)
+188:         if: failure()
+189:         env:
+190:           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+## AGENTS-worker-core.md:22
+22: 
+23: ## Working on this repo (contributor agents)
+24: 
+25: - Build: `cargo build --workspace`. Test: `cargo test --workspace`.
+26: - Lint is enforcing (CI gates on it): `cargo clippy --workspace --exclude sparq-py --all-targets -- -D warnings` must pass. Run clippy over the **full workspace**, not a single crate.
+27: - `cargo fmt --all --check` is **informational, not a gate** — the deferred one-time workspace reformat means it fails on files your change did not touch. Format only what you touched; never run `cargo fmt --all`. (The formatter version itself is pinned by `rust-toolchain.toml`.)
+28: - The core crates (`sparq-core`, `sparq-engine`) must stay dependency-free of the opt-in capability crates, and the wasm build must not regress — both are enforced in CI.
+29: - **New capabilities are opt-in by default** (a dedicated crate and/or a cargo feature that is OFF by default), so `sparq-core`/`sparq-engine` stay lean and the lean wasm bundle never grows.
+30: - **Frontend optional-code policy (sq-mrrn4):** the same lean-by-default rule for the site/GUI. Any net-new frontend feature that is uncertain-value or rarely used and grows the bundle MUST load through a literal ESM dynamic `import()` taken on the user action that invokes it — `next/dynamic`/`React.lazy` for components, invocation-path `import()` for libraries and codecs (e.g. a compressed-codec decoder fetched only on the first upload of that file type). A feature flag or conditional render does **not** keep a static import out of the initial bundle. Classify every new frontend dependency in the PR as core/shared or optional, and register material optional chunks in `site/scripts/check-bundle.mjs`. Decision rule, exceptions, and the audit procedure: [AGENTS.md](AGENTS.md) and `.claude/skills/frontend-design/SKILL.md`.
+31: - Conformance: the W3C SPARQL, inference, W3C SHACL, OGC GeoSPARQL and Solid WAC + ACP suites must stay green and are each **ratcheted** (the committed floor only goes up).
+32: - **Merge discipline:** the gate for landing any change is *full-workspace clippy + `cargo test` + the conformance/perf ratchets*, all green.
+
+## rust-toolchain.toml:1
+1: # =============================================================================
+2: # PINNED RUST TOOLCHAIN — read this before changing the version.
+3: # =============================================================================
+4: #
+5: # WHY THIS FILE EXISTS
+6: # --------------------
+7: # Until this file landed, NOTHING in sparq pinned a Rust version. Every stable
+8: # lane in `.github/workflows/` resolves its compiler with either
+9: #
+10: #     rustup default stable          (~40 sites, "use the runner image's Rust")
+11: #
+12: # or the SHA-pinned `dtolnay/rust-toolchain` action with no `toolchain:` input
+13: # (which also means "stable"). Both spellings mean "whatever Rust this machine
+14: # happens to carry" — they do NOT mean "a specific compiler". The registry's
+15: # review-fix gate (jeswr/agent-account-registry, `review-fix.yml`, the
+16: # "Ensure a Rust toolchain for the crate-scoped gate" step) inherits the same
+17: # property: it runs `rustup show active-toolchain || rustup default stable`
+18: # and then clippies THIS repository with `-D warnings`.
+19: #
+20: # So two independent consumers linted the same source with `-D warnings` on two
+21: # different compilers, and `-D warnings` turns any lint-set difference into a
+22: # hard build failure on unchanged code.
+23: #
+24: # THE MEASUREMENT (registry issue jeswr/agent-account-registry#664)
+25: # ----------------------------------------------------------------
+26: # `clippy::uninlined_format_args` is warn-by-default on clippy 1.88.0 and is
+27: # allow-by-default on every other version measured. Reproduced directly, on a
+28: # small crate containing the exact shape of `crates/sparq-core/src/nt.rs:411`
+29: # plus a field-access and a two-argument `format!`, `cargo clippy -- -D warnings`:
+30: #

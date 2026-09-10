@@ -1,0 +1,201 @@
+{
+  "expected_from_exact_source": [
+    "raw_duplicate_redistribution_is_rejected",
+    "raw_duplicate_nonadjacent_self_comparison_is_invalid",
+    "raw_duplicate_guard_preserves_symmetry_and_graph_identity",
+    "raw_duplicate_probe_projection_contract",
+    "raw_duplicate_probe_scope_is_complete_quads_in_both_engines",
+    "raw_duplicate_guard_preserves_canonicalization_errors",
+    "fixed_window_smoke",
+    "injected_divergence_is_caught",
+    "generator_is_deterministic",
+    "generator_emits_every_v2_family",
+    "no_nested_blank_nodes_in_triple_terms",
+    "snapshot_renderers_agree_on_known_dataset",
+    "non_canonical_integer_lexicals_are_distinct_terms",
+    "blank_node_compare_is_isomorphism_not_relabelling_blindness",
+    "duplicate_quad_is_caught_despite_canonicalization",
+    "integer_lexical_adjudication_is_narrow",
+    "committed_allowlist_enables_exactly_the_adjudicated_classes",
+    "oxigraph_cannot_load_a_local_file",
+    "load_equals_the_equivalent_insert_data",
+    "generated_integer_domain_is_injective_including_load",
+    "integer_pools_keep_draw_counts_and_all_spelling_families",
+    "lexical_collisions_across_contexts_and_nested_terms_fail",
+    "lexical_adjudication_preserves_rows_and_blank_node_structure",
+    "nested_noncanonical_terms_remain_exact_in_sparq",
+    "injected_marker_fails_during_actual_lexical_adjudication",
+    "historical_4141222487_preserves_lexicals_and_fresh_nodes"
+  ],
+  "expected_count": 26,
+  "observed": [
+    {
+      "name": "duplicate_quad_is_caught_despite_canonicalization",
+      "log": "bulk1-log.txt",
+      "line": 537,
+      "text": "2026-09-10T19:33:32.3684721Z         PASS [   0.010s] (13/22) sparq-bench::bin/sparq-bench update_fuzz::tests::duplicate_quad_is_caught_despite_canonicalization"
+    },
+    {
+      "name": "injected_divergence_is_caught",
+      "log": "bulk1-log.txt",
+      "line": 538,
+      "text": "2026-09-10T19:33:32.3853967Z         PASS [   0.018s] (14/22) sparq-bench::bin/sparq-bench update_fuzz::tests::injected_divergence_is_caught"
+    },
+    {
+      "name": "integer_pools_keep_draw_counts_and_all_spelling_families",
+      "log": "bulk1-log.txt",
+      "line": 539,
+      "text": "2026-09-10T19:33:32.4024259Z         PASS [   0.015s] (15/22) sparq-bench::bin/sparq-bench update_fuzz::tests::integer_pools_keep_draw_counts_and_all_spelling_families"
+    },
+    {
+      "name": "generator_emits_every_v2_family",
+      "log": "bulk1-log.txt",
+      "line": 540,
+      "text": "2026-09-10T19:33:32.4064155Z         PASS [   0.040s] (16/22) sparq-bench::bin/sparq-bench update_fuzz::tests::generator_emits_every_v2_family"
+    },
+    {
+      "name": "non_canonical_integer_lexicals_are_distinct_terms",
+      "log": "bulk1-log.txt",
+      "line": 541,
+      "text": "2026-09-10T19:33:32.4183841Z         PASS [   0.014s] (17/22) sparq-bench::bin/sparq-bench update_fuzz::tests::non_canonical_integer_lexicals_are_distinct_terms"
+    },
+    {
+      "name": "load_equals_the_equivalent_insert_data",
+      "log": "bulk1-log.txt",
+      "line": 542,
+      "text": "2026-09-10T19:33:32.4231500Z         PASS [   0.023s] (18/22) sparq-bench::bin/sparq-bench update_fuzz::tests::load_equals_the_equivalent_insert_data"
+    },
+    {
+      "name": "raw_duplicate_guard_preserves_symmetry_and_graph_identity",
+      "log": "bulk1-log.txt",
+      "line": 543,
+      "text": "2026-09-10T19:33:32.4346129Z         PASS [   0.016s] (19/22) sparq-bench::bin/sparq-bench update_fuzz::tests::raw_duplicate_guard_preserves_symmetry_and_graph_identity"
+    },
+    {
+      "name": "raw_duplicate_probe_scope_is_complete_quads_in_both_engines",
+      "log": "bulk1-log.txt",
+      "line": 544,
+      "text": "2026-09-10T19:33:32.4413021Z         PASS [   0.018s] (20/22) sparq-bench::bin/sparq-bench update_fuzz::tests::raw_duplicate_probe_scope_is_complete_quads_in_both_engines"
+    },
+    {
+      "name": "blank_node_compare_is_isomorphism_not_relabelling_blindness",
+      "log": "bulk2-log.txt",
+      "line": 535,
+      "text": "2026-09-10T19:36:39.4219693Z         PASS [   0.016s] (11/22) sparq-bench::bin/sparq-bench update_fuzz::tests::blank_node_compare_is_isomorphism_not_relabelling_blindness"
+    },
+    {
+      "name": "fixed_window_smoke",
+      "log": "bulk2-log.txt",
+      "line": 536,
+      "text": "2026-09-10T19:36:40.4219790Z         PASS [   1.000s] (12/22) sparq-bench::bin/sparq-bench update_fuzz::tests::fixed_window_smoke"
+    },
+    {
+      "name": "generator_is_deterministic",
+      "log": "bulk2-log.txt",
+      "line": 537,
+      "text": "2026-09-10T19:36:40.4326733Z         PASS [   0.011s] (13/22) sparq-bench::bin/sparq-bench update_fuzz::tests::generator_is_deterministic"
+    },
+    {
+      "name": "injected_marker_fails_during_actual_lexical_adjudication",
+      "log": "bulk2-log.txt",
+      "line": 538,
+      "text": "2026-09-10T19:36:40.4689731Z         PASS [   0.032s] (14/22) sparq-bench::bin/sparq-bench update_fuzz::tests::injected_marker_fails_during_actual_lexical_adjudication"
+    },
+    {
+      "name": "lexical_adjudication_preserves_rows_and_blank_node_structure",
+      "log": "bulk2-log.txt",
+      "line": 539,
+      "text": "2026-09-10T19:36:40.4785328Z         PASS [   0.014s] (15/22) sparq-bench::bin/sparq-bench update_fuzz::tests::lexical_adjudication_preserves_rows_and_blank_node_structure"
+    },
+    {
+      "name": "nested_noncanonical_terms_remain_exact_in_sparq",
+      "log": "bulk2-log.txt",
+      "line": 540,
+      "text": "2026-09-10T19:36:40.4949737Z         PASS [   0.010s] (16/22) sparq-bench::bin/sparq-bench update_fuzz::tests::nested_noncanonical_terms_remain_exact_in_sparq"
+    },
+    {
+      "name": "oxigraph_cannot_load_a_local_file",
+      "log": "bulk2-log.txt",
+      "line": 541,
+      "text": "2026-09-10T19:36:40.5059414Z         PASS [   0.015s] (17/22) sparq-bench::bin/sparq-bench update_fuzz::tests::oxigraph_cannot_load_a_local_file"
+    },
+    {
+      "name": "raw_duplicate_nonadjacent_self_comparison_is_invalid",
+      "log": "bulk2-log.txt",
+      "line": 542,
+      "text": "2026-09-10T19:36:40.5159511Z         PASS [   0.012s] (18/22) sparq-bench::bin/sparq-bench update_fuzz::tests::raw_duplicate_nonadjacent_self_comparison_is_invalid"
+    },
+    {
+      "name": "raw_duplicate_redistribution_is_rejected",
+      "log": "bulk2-log.txt",
+      "line": 543,
+      "text": "2026-09-10T19:36:40.5392333Z         PASS [   0.019s] (19/22) sparq-bench::bin/sparq-bench update_fuzz::tests::raw_duplicate_redistribution_is_rejected"
+    },
+    {
+      "name": "committed_allowlist_enables_exactly_the_adjudicated_classes",
+      "log": "bulk3-log.txt",
+      "line": 537,
+      "text": "2026-09-10T19:33:38.0145201Z         PASS [   0.009s] (13/22) sparq-bench::bin/sparq-bench update_fuzz::tests::committed_allowlist_enables_exactly_the_adjudicated_classes"
+    },
+    {
+      "name": "integer_lexical_adjudication_is_narrow",
+      "log": "bulk3-log.txt",
+      "line": 538,
+      "text": "2026-09-10T19:33:38.0228494Z         PASS [   0.009s] (14/22) sparq-bench::bin/sparq-bench update_fuzz::tests::integer_lexical_adjudication_is_narrow"
+    },
+    {
+      "name": "lexical_collisions_across_contexts_and_nested_terms_fail",
+      "log": "bulk3-log.txt",
+      "line": 539,
+      "text": "2026-09-10T19:33:38.0319959Z         PASS [   0.007s] (15/22) sparq-bench::bin/sparq-bench update_fuzz::tests::lexical_collisions_across_contexts_and_nested_terms_fail"
+    },
+    {
+      "name": "historical_4141222487_preserves_lexicals_and_fresh_nodes",
+      "log": "bulk3-log.txt",
+      "line": 540,
+      "text": "2026-09-10T19:33:38.0640239Z         PASS [   0.052s] (16/22) sparq-bench::bin/sparq-bench update_fuzz::tests::historical_4141222487_preserves_lexicals_and_fresh_nodes"
+    },
+    {
+      "name": "raw_duplicate_guard_preserves_canonicalization_errors",
+      "log": "bulk3-log.txt",
+      "line": 541,
+      "text": "2026-09-10T19:33:38.0762171Z         PASS [   0.012s] (17/22) sparq-bench::bin/sparq-bench update_fuzz::tests::raw_duplicate_guard_preserves_canonicalization_errors"
+    },
+    {
+      "name": "raw_duplicate_probe_projection_contract",
+      "log": "bulk3-log.txt",
+      "line": 542,
+      "text": "2026-09-10T19:33:38.0936072Z         PASS [   0.017s] (18/22) sparq-bench::bin/sparq-bench update_fuzz::tests::raw_duplicate_probe_projection_contract"
+    },
+    {
+      "name": "snapshot_renderers_agree_on_known_dataset",
+      "log": "bulk3-log.txt",
+      "line": 543,
+      "text": "2026-09-10T19:33:38.1109815Z         PASS [   0.017s] (19/22) sparq-bench::bin/sparq-bench update_fuzz::tests::snapshot_renderers_agree_on_known_dataset"
+    },
+    {
+      "name": "generated_integer_domain_is_injective_including_load",
+      "log": "bulk3-log.txt",
+      "line": 545,
+      "text": "2026-09-10T19:33:40.7982753Z         PASS [   2.790s] (21/22) sparq-bench::bin/sparq-bench update_fuzz::tests::generated_integer_domain_is_injective_including_load"
+    },
+    {
+      "name": "no_nested_blank_nodes_in_triple_terms",
+      "log": "bulk3-log.txt",
+      "line": 546,
+      "text": "2026-09-10T19:33:42.5383364Z         PASS [   4.508s] (22/22) sparq-bench::bin/sparq-bench update_fuzz::tests::no_nested_blank_nodes_in_triple_terms"
+    }
+  ],
+  "all26_once": true,
+  "new6": [
+    "raw_duplicate_redistribution_is_rejected",
+    "raw_duplicate_nonadjacent_self_comparison_is_invalid",
+    "raw_duplicate_guard_preserves_symmetry_and_graph_identity",
+    "raw_duplicate_probe_projection_contract",
+    "raw_duplicate_probe_scope_is_complete_quads_in_both_engines",
+    "raw_duplicate_guard_preserves_canonicalization_errors"
+  ],
+  "fixed_window_smoke_pass": true,
+  "total_selected_bulk_passes": 66,
+  "extraction": "Only ANSI SGR removed from original lines; full test names and PASS required. Three distinct successful job logs, no skipped rows counted."
+}

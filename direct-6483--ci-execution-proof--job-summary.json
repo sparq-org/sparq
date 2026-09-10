@@ -1,0 +1,340 @@
+{
+  "ci": {
+    "total": 39,
+    "states": {
+      "completed:success": 22,
+      "completed:skipped": 17
+    },
+    "jobs": [
+      {
+        "id": 103008606973,
+        "name": "unsafe-register (count ratchet)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 103008607220,
+        "name": "select / select (change-based test selection)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 103008607426,
+        "name": "detect rust changes",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 103008608463,
+        "name": "mutation ratchet (cargo-mutants, advisory)",
+        "status": "completed",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 103008608599,
+        "name": "coverage (nightly, full incl. heavy vectors)",
+        "status": "completed",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 103008608630,
+        "name": "nightly-gate",
+        "status": "completed",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 103009171614,
+        "name": "MSRV check (Rust 1.88, declared floor)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 103009171676,
+        "name": "unsafe report (cargo-geiger, informational)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 103009171746,
+        "name": "coverage floors (presence + monotonicity + shard-partition, no compile)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 103009171892,
+        "name": "docker image smoke (run + curl /health + query)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 103009171977,
+        "name": "clippy (gate) + fmt (non-blocking)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 103010136170,
+        "name": "build + archive test binaries (+ doctests once)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 103010137449,
+        "name": "sparq-text BM25 differential oracle (extension ratchet — assertions >= 18750)",
+        "status": "completed",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 103010137674,
+        "name": "sparq-rsp RSP expressivity / SRBench correctness (extension ratchet — assertions >= 149)",
+        "status": "completed",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 103010137699,
+        "name": "W3C SPARQL conformance (ratchet >= 1229 pass+divergence)",
+        "status": "completed",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 103010137798,
+        "name": "W3C SHACL conformance (ratchet — core >= 98, sparql >= 5; full 1.2 ratchets in-runner)",
+        "status": "completed",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 103010137933,
+        "name": "Solid WAC/ACP conformance (ratchet — wac >= 13, acp >= 13)",
+        "status": "completed",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 103010138053,
+        "name": "SERVICE-federation harness (in-process loopback smoke + egress scoping)",
+        "status": "completed",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 103010138132,
+        "name": "Inference conformance (ratchet >= 1967 pass+divergence)",
+        "status": "completed",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 103010138133,
+        "name": "wasm build (sparq-wasm + sparq-reason-wasm + sparq-rsp-wasm + sparq-text-wasm + sparq-shacl-wasm ...",
+        "status": "completed",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 103010138287,
+        "name": "nightly selection backstop (full-matrix guard)",
+        "status": "completed",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 103010138641,
+        "name": "W3C/OGC GeoSPARQL conformance (ratchet — topology >= 119, query-rewrite >= 38)",
+        "status": "completed",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 103010138786,
+        "name": "SolidLab ODRL conformance (ratchet — pass >= 59)",
+        "status": "completed",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 103010138816,
+        "name": "W3C JSON-LD 1.1 conformance (ratchet — toRdf >= 413, fromRdf >= 52, compact >= 228, frame >= 92)",
+        "status": "completed",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 103010304671,
+        "name": "coverage ratchet (shard 2/3)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 103010304684,
+        "name": "coverage engine run (partition 1/3)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 103010304728,
+        "name": "coverage ratchet (shard 3/3)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 103010304750,
+        "name": "coverage engine run (partition 3/3)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 103010304834,
+        "name": "coverage engine run (partition 2/3)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 103010304934,
+        "name": "coverage ratchet (shard 1/3)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 103014142138,
+        "name": "test (load-aware shard bulk 1/3)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 103014142149,
+        "name": "test (load-aware shard bulk 3/3)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 103014142207,
+        "name": "test (load-aware shard heavy-diskann)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 103014142228,
+        "name": "test (load-aware shard heavy-hnsw)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 103014142251,
+        "name": "test (load-aware shard bulk 2/3)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 103014616542,
+        "name": "coverage engine merge + ratchet (per-crate)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 103018599249,
+        "name": "coverage ratchet + test-presence gate (per-crate)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 103018640365,
+        "name": "coverage demoted-lane safety-net (push-to-main)",
+        "status": "completed",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 103019648887,
+        "name": "heavy-recall demoted-lane safety-net (push-to-main)",
+        "status": "completed",
+        "conclusion": "skipped"
+      }
+    ]
+  },
+  "matrix": {
+    "total": 11,
+    "states": {
+      "completed:success": 7,
+      "completed:skipped": 4
+    },
+    "jobs": [
+      {
+        "id": 103008606841,
+        "name": "detect rust changes (feature-matrix)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 103008607195,
+        "name": "select / select (change-based test selection)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 103009928367,
+        "name": "fedclient dependency-boundary guard",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 103009928393,
+        "name": "pre-merge C1 (feature-gated test execution)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 103010217922,
+        "name": "feature-matrix check-tier (rest)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 103010217979,
+        "name": "feature-matrix check-tier (engine)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 103010218071,
+        "name": "assemble feature matrix",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 103010218590,
+        "name": "sparq-geo pure-geometry (--no-default-features)",
+        "status": "completed",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 103010219296,
+        "name": "sparq-server pure-serialiser (--no-default-features)",
+        "status": "completed",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 103010219573,
+        "name": "sparq-lws-core pure Solid (--no-default-features)",
+        "status": "completed",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 103011085545,
+        "name": "opt-in group (${{ matrix.group }})",
+        "status": "completed",
+        "conclusion": "skipped"
+      }
+    ]
+  },
+  "docs": {
+    "total": 2,
+    "states": {
+      "completed:success": 2
+    },
+    "jobs": [
+      {
+        "id": 103008605342,
+        "name": "docs-quality quick-advisory (advisory)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 103008605738,
+        "name": "docs-quality quick-gates",
+        "status": "completed",
+        "conclusion": "success"
+      }
+    ]
+  }
+}

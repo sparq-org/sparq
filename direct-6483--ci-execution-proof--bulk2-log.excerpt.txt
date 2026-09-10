@@ -1,0 +1,20 @@
+109:2026-09-10T19:28:07.4274771Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +573dba455effaa982b60776f9b03e6e324d6cc2f:refs/remotes/pull/6487/merge
+111:2026-09-10T19:28:10.8625189Z  * [new ref]         573dba455effaa982b60776f9b03e6e324d6cc2f -> pull/6487/merge
+136:2026-09-10T19:28:11.4525987Z HEAD is now at 573dba4 Merge 0b4554b924a80432cc1b572bd19f8e58cdbfb4e6 into f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464
+138:2026-09-10T19:28:11.4581790Z [command]/usr/bin/git log -1 --format=%H
+139:2026-09-10T19:28:11.4613770Z 573dba455effaa982b60776f9b03e6e324d6cc2f
+384:2026-09-10T19:29:07.4292506Z - nextest-archive (ID: 10169127229, Size: 5262783742, Expected Digest: sha256:908dc8bb1be24b9c2fea8e051f1acb1fa6e9ccb2a122a73e8747186cb6124eea)
+389:2026-09-10T19:35:19.3668932Z SHA256 digest of downloaded artifact is 908dc8bb1be24b9c2fea8e051f1acb1fa6e9ccb2a122a73e8747186cb6124eea
+486:2026-09-10T19:35:19.3891450Z   cargo nextest run "${args[@]}" || rc=$?
+514:2026-09-10T19:35:19.3937375Z   SELECT_FILTERSET: package(sparq-bench)
+524:2026-09-10T19:36:38.9320479Z     Starting 22 tests across 1 binary (44 tests and 730 binaries skipped)
+535:2026-09-10T19:36:39.4219693Z         PASS [   0.016s] (11/22) sparq-bench::bin/sparq-bench update_fuzz::tests::blank_node_compare_is_isomorphism_not_relabelling_blindness
+536:2026-09-10T19:36:40.4219790Z         PASS [   1.000s] (12/22) sparq-bench::bin/sparq-bench update_fuzz::tests::fixed_window_smoke
+537:2026-09-10T19:36:40.4326733Z         PASS [   0.011s] (13/22) sparq-bench::bin/sparq-bench update_fuzz::tests::generator_is_deterministic
+538:2026-09-10T19:36:40.4689731Z         PASS [   0.032s] (14/22) sparq-bench::bin/sparq-bench update_fuzz::tests::injected_marker_fails_during_actual_lexical_adjudication
+539:2026-09-10T19:36:40.4785328Z         PASS [   0.014s] (15/22) sparq-bench::bin/sparq-bench update_fuzz::tests::lexical_adjudication_preserves_rows_and_blank_node_structure
+540:2026-09-10T19:36:40.4949737Z         PASS [   0.010s] (16/22) sparq-bench::bin/sparq-bench update_fuzz::tests::nested_noncanonical_terms_remain_exact_in_sparq
+541:2026-09-10T19:36:40.5059414Z         PASS [   0.015s] (17/22) sparq-bench::bin/sparq-bench update_fuzz::tests::oxigraph_cannot_load_a_local_file
+542:2026-09-10T19:36:40.5159511Z         PASS [   0.012s] (18/22) sparq-bench::bin/sparq-bench update_fuzz::tests::raw_duplicate_nonadjacent_self_comparison_is_invalid
+543:2026-09-10T19:36:40.5392333Z         PASS [   0.019s] (19/22) sparq-bench::bin/sparq-bench update_fuzz::tests::raw_duplicate_redistribution_is_rejected
+548:2026-09-10T19:36:43.3482372Z      Summary [   4.417s] 22 tests run: 22 passed, 44 skipped

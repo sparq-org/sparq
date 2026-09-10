@@ -1,0 +1,41 @@
+591:2026-09-10T19:06:10.9631069Z ##[group]Run bash scripts/check-privacy-claims.sh
+592:2026-09-10T19:06:10.9631492Z bash scripts/check-privacy-claims.sh
+593:2026-09-10T19:06:10.9667836Z shell: /usr/bin/bash -e {0}
+594:2026-09-10T19:06:10.9668093Z env:
+595:2026-09-10T19:06:10.9668360Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.14/x64
+596:2026-09-10T19:06:10.9668802Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib/pkgconfig
+597:2026-09-10T19:06:10.9669250Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+598:2026-09-10T19:06:10.9669637Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+599:2026-09-10T19:06:10.9670035Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+600:2026-09-10T19:06:10.9670436Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib
+601:2026-09-10T19:06:10.9670755Z ##[endgroup]
+602:2026-09-10T19:06:13.3112650Z check-privacy-claims: OK — scanned 784 file(s); no unqualified ZK/MPC privacy/soundness claim.
+603:2026-09-10T19:06:13.3145057Z ##[group]Run bash scripts/tests/test_privacy_claims.sh
+604:2026-09-10T19:06:13.3145499Z bash scripts/tests/test_privacy_claims.sh
+605:2026-09-10T19:06:13.3180919Z shell: /usr/bin/bash -e {0}
+606:2026-09-10T19:06:13.3181170Z env:
+607:2026-09-10T19:06:13.3181435Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.14/x64
+608:2026-09-10T19:06:13.3181885Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib/pkgconfig
+609:2026-09-10T19:06:13.3182321Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+610:2026-09-10T19:06:13.3182699Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+611:2026-09-10T19:06:13.3183093Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+612:2026-09-10T19:06:13.3184119Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib
+613:2026-09-10T19:06:13.3184451Z ##[endgroup]
+614:2026-09-10T19:06:13.6528525Z 
+615:2026-09-10T19:06:13.6529205Z test_privacy_claims: 32 passed, 0 failed.
+616:2026-09-10T19:06:13.6530509Z test_privacy_claims: OK — both-direction soundness-claim coverage holds.
+747:2026-09-10T19:06:33.0467430Z ##[group]Run python3 scripts/preflight.py --self-test
+748:2026-09-10T19:06:33.0467877Z python3 scripts/preflight.py --self-test
+777:2026-09-10T19:06:33.1395482Z   ok   `#[cfg(test)] mod X;` resolves, a braced `mod X { .. }` does not
+778:2026-09-10T19:06:33.1395951Z   ok   a column-0 comment does not end a python test region
+779:2026-09-10T19:06:33.1396389Z   ok   an unparseable python script contributes no test text
+780:2026-09-10T19:06:33.1396644Z 
+781:2026-09-10T19:06:33.1396810Z preflight --self-test: PASS
+782:2026-09-10T19:06:33.1513427Z ##[group]Run python3 scripts/tests/test_preflight.py
+783:2026-09-10T19:06:33.1514462Z python3 scripts/tests/test_preflight.py
+874:2026-09-10T19:06:34.9349957Z 
+875:2026-09-10T19:06:34.9350371Z ----------------------------------------------------------------------
+876:2026-09-10T19:06:34.9351043Z Ran 81 tests in 1.285s
+877:2026-09-10T19:06:34.9351275Z 
+878:2026-09-10T19:06:34.9351400Z OK
+879:2026-09-10T19:06:34.9351605Z 

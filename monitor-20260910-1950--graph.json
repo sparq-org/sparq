@@ -1,0 +1,47 @@
+{
+  "data": {
+    "rateLimit": {
+      "remaining": 4990,
+      "resetAt": "2026-09-10T20:02:29Z"
+    },
+    "repository": {
+      "defaultBranchRef": {
+        "target": {
+          "oid": "202879e9b4104f4b5ae8d9e8e5206eb2ff454b7f"
+        }
+      },
+      "p6486": {
+        "state": "MERGED",
+        "headRefOid": "9ac4a59e96b1c69c8d617fbde9e98fe8c0436fed",
+        "mergedAt": "2026-09-10T19:46:35Z",
+        "mergeCommit": {
+          "oid": "202879e9b4104f4b5ae8d9e8e5206eb2ff454b7f"
+        },
+        "mergeQueueEntry": null
+      },
+      "p6487": {
+        "state": "OPEN",
+        "isDraft": false,
+        "headRefOid": "0b4554b924a80432cc1b572bd19f8e58cdbfb4e6",
+        "mergeStateStatus": "CLEAN",
+        "mergeQueueEntry": null,
+        "labels": {
+          "nodes": [
+            {
+              "name": "area:sparq-bench"
+            },
+            {
+              "name": "review:unreviewed"
+            }
+          ]
+        },
+        "reviewThreads": {
+          "pageInfo": {
+            "hasNextPage": false
+          },
+          "nodes": []
+        }
+      }
+    }
+  }
+}

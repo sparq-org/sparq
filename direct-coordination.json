@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-10T19:41:02.057682+00:00",
+  "updated_at": "2026-09-10T19:54:16.289590+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -72,7 +72,7 @@
     "agent": "/root/postmerge_ci",
     "model": "gpt-6-astra",
     "effort": "xhigh",
-    "phase": "Exact9ac enqueued normally; position1 awaits protected merge-group202879e9 checks. ActualCI execution proof/root fullmerge-tree binding verified.",
+    "phase": "6486 merged normally at2026-09-10T19:46:35Z; main202879e9 CI/matrix/gate pending. Issue6485 remainsOPEN untilpostmergeproof;3113 remainsOPEN.",
     "execution_limits": {
       "max_total_seconds": 600,
       "max_new_allocated_bytes": 268435456,
@@ -85,16 +85,16 @@
       "extra": "At most one matching recorded mmap/dict-spill candidate adaptation; no dependency rebuild.",
       "checks": "Scoped Clippy/touched formatting/diff if warm; CI authority for broad matrix."
     },
-    "state": "pr6486_queued_awaiting_merge_group",
+    "state": "pr6486_merged_postmain_pending",
     "directory": "direct-6485/implementation",
     "admission": "direct-6485/admission/corrected-controls-admission.json",
     "production_edit_authorized": false,
     "prior_baseline": "direct-3113/delete-memo-baseline",
     "next_actions": [
-      "Collect actualOpus26543 public-source-only6479designreview. Compare source-design conditions with separatelyretainedlocalwitness, do notclaimreviewervalidatedunseenruntimeevidence. No productionedituntilfreshhunk/base ownership and boundedimplementationreadiness.",
-      "Collect existingAstra6487 currentCI executionproof; allpriorOpus/Copilot reviewsapprove exact0b. Gate/mainCI pending at19:35; normalprotectedqueueonly afterallcurrentrequirements.",
-      "Watch6486MG202879e9: CIpassed, matrix/gatepending; preserveallliveevidence. Aftermerge inspectmainCI/source andcomment+close6485onlyafterproof;3113staysopen.",
-      "Do not replay originalrejected6479export, anypublication/queue/recovery/Copilot scripts, or frozenexecutions. No pendinguserapproval for public-onlyreview; materiallysaferpayload accepted."
+      "Collect6479 frozenimplementation-readiness; verifyhashes/source/order/resourceplan andfreshremotehunkownershipbeforeproductionadmission.",
+      "Watchnewmain202879e9 CI34522399163/matrix34522399200/gate34522398851; preservecurrentevidence anddiagnoseactualfailurebeforeanyrerun. Aftergreenbindmainreviewedsource thencomment+close6485;3113remainsopen.",
+      "6487 readyfornormalprotectedenqueueafternewmaingreenandfreshhead/reviews/gate/rules/budget.65fileCIproof rootverified, explicitlimitsretained. No enqueueyet.",
+      "RegistryActionsoff; no releases; keep6049approvalhold andno exhausted-budget retries. Do notreplayanyreceipts/completedreviews."
     ],
     "controls": {
       "directory": "direct-6485/memo-controls",
@@ -126,7 +126,7 @@
       "root_disposition": "direct-6485/admission/opus-memo-design-root-disposition.json",
       "output_sha256": "c619dd1d92a198c46a7e2b26ca8ab34e08de5612bd6db3920b451263d5891886"
     },
-    "agent_current_task": "6487 bounded readonly currentCI executionproof; stoppedifrequiredjobsstilllive",
+    "agent_current_task": "6479 implementation-readiness sourceonly; no productionedit/build/runtime/networkmutation.",
     "implementation_admission": "direct-6485/admission/implementation-admission.json",
     "implementation_readiness": {
       "directory": "direct-6485/implementation-readiness",
@@ -260,7 +260,7 @@
     "merge_group": {
       "head": "202879e9b4104f4b5ae8d9e8e5206eb2ff454b7f",
       "position": 1,
-      "state": "AWAITING_CHECKS; no observed failures, current bulk/matrixjobs active",
+      "state": "AllrequiredMG CI/matrix/gateSUCCESS; protectedmergecompleted",
       "CI": 34518035372,
       "feature_matrix": 34518035145,
       "gate": 34518034956,
@@ -288,7 +288,19 @@
       "last_status_snapshot": "monitor-20260910-1935",
       "CI_state": "SUCCESS19:31:43",
       "feature_matrix_state": "pending at19:35",
-      "gate_state": "pending at19:35"
+      "gate_state": "pending at19:35",
+      "latest_watch": "monitor-20260910-1950/graph.json"
+    },
+    "merge_commit": "202879e9b4104f4b5ae8d9e8e5206eb2ff454b7f",
+    "merged_at": "2026-09-10T19:46:35Z",
+    "postmerge": {
+      "main": "202879e9b4104f4b5ae8d9e8e5206eb2ff454b7f",
+      "CI": 34522399163,
+      "feature_matrix": 34522399200,
+      "gate": 34522398851,
+      "state": "pending",
+      "snapshot": "monitor-20260910-1950/main-runs.json",
+      "issue_close_authorized": false
     }
   },
   "prs": {
@@ -1570,46 +1582,11 @@
     "followup": "Narrowtriage-titleCIrule+offendingrowdiagnostic could improveclassifier, but originalgenpartitionrequires separatelyreviewedpolicy. No6468implementation while4246active."
   },
   "latest_monitor": {
-    "at": "2026-09-10T19:22:02.654034+00:00",
-    "main": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
-    "queue": [
-      {
-        "position": 1,
-        "state": "AWAITING_CHECKS",
-        "headCommit": {
-          "oid": "202879e9b4104f4b5ae8d9e8e5206eb2ff454b7f"
-        },
-        "pullRequest": {
-          "number": 6486,
-          "headRefOid": "9ac4a59e96b1c69c8d617fbde9e98fe8c0436fed"
-        }
-      }
-    ],
-    "snapshot": "monitor-20260910-1921",
-    "registry_actions_enabled": false,
-    "registry_evidence": "monitor-20260910-1921/registry-permissions.json",
-    "release_authorized": false,
-    "job_progress": {
-      "mg6486-ci": {
-        "success": 23,
-        "skipped": 8,
-        "in_progress": 3
-      },
-      "mg6486-matrix": {
-        "success": 29,
-        "skipped": 1,
-        "in_progress": 7,
-        "queued": 19
-      },
-      "pr6487-ci": {
-        "success": 15,
-        "skipped": 15,
-        "in_progress": 1,
-        "queued": 5
-      }
-    },
-    "capacity": "Actualjob inventories showongoingbulk/matrixprogress, nofailure. No demonstratedcapacityincident; no orginventory403retry/cancellation.",
-    "latest_target_status": "monitor-20260910-1935"
+    "directory": "monitor-20260910-1950",
+    "at": "2026-09-10T19:54:16.289590+00:00",
+    "main": "202879e9b4104f4b5ae8d9e8e5206eb2ff454b7f",
+    "rate_budget": "healthy",
+    "state": "6486merged, mainpending;6487PRgreen;6479sourceonlyreadiness"
   },
   "registry_pause": {
     "enabled": false,
@@ -4853,7 +4830,7 @@
   "next_lane_readiness": {
     "issue": 6483,
     "agent": "/root/postmerge_ci",
-    "state": "pr6487_CI_and_Copilot_pending",
+    "state": "pr6487_reviews_and_required_PR_CI_passed_waiting_currentmain",
     "directory": "direct-6483/validation-continuation",
     "production_edits_authorized": false,
     "readiness": {
@@ -4957,12 +4934,19 @@
       "docs_quality": 34518125199,
       "fuzz": 34518125730,
       "copilot": 34518133158,
-      "state": "All latest workflows success exceptmainCI + aggregate stillpending; no currentfailure.",
+      "state": "AllrequiredPRCIpassed;65fileproof rootverified; protectedgate103008606158/app15368 success.",
       "proof_task": {
         "agent": "/root/postmerge_ci",
         "directory": "direct-6483/ci-execution-proof",
-        "state": "running boundedread-only",
+        "state": "completed_collected",
         "policy": "Onlycompletedrequiredjoblogs, no livejoblogrequests or poll loops; freezeexplicitgapsifpending."
+      },
+      "proof": {
+        "directory": "direct-6483/ci-execution-proof",
+        "manifest_sha256": "45e8d8c57be702dfa2fc9210d6f6f5e1590ff300dac3d5ef756fdd1586c1ffe8",
+        "files": 65,
+        "root_verification": "direct-6483/admission/ci6487-root-verification.json",
+        "limits": "Repo-selected bench tests, notwholeworkspaceunit sweep; informationalwholefmt exit1/nochangedfilediagnostic; actualLinuxprivacy passbut authoractualdiffpreflightnotrerun; nightlysoakunobserved."
       }
     },
     "copilot": {
@@ -4970,18 +4954,22 @@
       "state": "COMMENTED_APPROVAL_RECOMMENDED",
       "open_review_threads": 0,
       "evidence": "monitor-20260910-1921/graph.json"
+    },
+    "enqueue": {
+      "state": "not_dispatched",
+      "condition": "Freshhealthycurrentmain202879e9 pluscurrenthead/reviews/protectedgate/protections before normalenqueue."
     }
   },
   "next_ready_audit": {
     "issue": 6479,
-    "state": "actual_public_source_only_Opus_review_running",
+    "state": "6479_source_design_review_complete_implementation_readiness_running",
     "agent": "/root/postmerge_ci",
     "model": "gpt-6-astra",
     "effort": "xhigh",
     "directory": "direct-6479/readiness",
     "target_evidence": "direct-6479/admission/issue-current.json",
     "source_worktree": "worktrees/issue6483 READONLY engine surface againstmainf50",
-    "scope": "CurrentBASE thread-local callback defect source/caller audit, actualpubliccallback witness protocol, warmdependency/resource availability and narrow repair/test plan. No production edit/build/test/newmodelreview yet.",
+    "scope": "ExistingAstra auditsmissingpublicsource contexts, per-sitecleanupordering, sealedclosure/privateRAII test/build/resourceplan; no productionedit/build.",
     "readiness": {
       "directory": "direct-6479/readiness",
       "files": 8,
@@ -5000,14 +4988,14 @@
       "pending_commands": false
     },
     "design_review": {
-      "state": "safer_public_source_review_running",
+      "state": "completed_collected",
       "session_id": 26543,
       "original_input": "direct-6479/admission/opus-base-design-input.md",
       "original_input_sha256": "2e9476c6ab61caa4ea6074e69e2fdbf8da8e2ff107b83b932047fc5a3c9266be",
       "rejection": "direct-6479/admission/opus-base-design-rejection.json",
       "public_repository_proof": "direct-6479/admission/public-repository-verification.json",
       "safer_packet_task": "ExistingAstra preparing public-source-only packet in direct-6479/public-design. Excludes all local runtime/provenance/resources/rawlogs/paths; source bound to publicmainf50.",
-      "policy": "Collect26543; no duplicate/relaunch. Source-only design assessment, no private runtimeevidence sent. Originalinvocation neverstarted andmustnotbereplayed.",
+      "policy": "26543 completedcollected; no poll/relaunch. Originalprivatepayload rejectedandnotexported. Publicsource-onlyreview doesnotvalidateunseenlocalruntime.",
       "original_state": "rejected_before_process_started",
       "kind": "exec_command",
       "requested_model": "claude-opus-5",
@@ -5024,7 +5012,19 @@
         "public_excerpts": 20,
         "bytes": 20860
       },
-      "approval_resolution": "Normaltoolreview accepted materially smaller strictlypublicsource/issue payload. Localexecutiondata excluded; original rejected47KBinput retainedlocally and NOTused."
+      "approval_resolution": "Normaltoolreview accepted materially smaller strictlypublicsource/issue payload. Localexecutiondata excluded; original rejected47KBinput retainedlocally and NOTused.",
+      "actual_primary_model": "claude-opus-5",
+      "verdict": "CONDITIONAL_SOURCE_DESIGN",
+      "output_sha256": "efcbc7fd19fab1d53e7f37d902ceb1593ca07144380b4950cbbad1fd6c677154",
+      "result": "direct-6479/admission/opus-base-public-design-result.json",
+      "root_disposition": "direct-6479/admission/opus-base-public-design-root-disposition.json"
+    },
+    "implementation_readiness": {
+      "directory": "direct-6479/implementation-readiness",
+      "state": "running_sourceonly",
+      "agent": "/root/postmerge_ci",
+      "ordering_correction": "Preserveeachsiteexactorder:7lib/cachebaseinsidebudget; ANALYZEhasviewBASEbudgettrace, so BASEoutlivesbudget/trace. Do notapplyuniversalBASEinnermostassumption.",
+      "production_edits_authorized": false
     }
   }
 }

@@ -1,0 +1,24 @@
+{
+  "at": "2026-09-10T19:53:25.809917+00:00",
+  "head": "0b4554b924a80432cc1b572bd19f8e58cdbfb4e6",
+  "base": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+  "gate_check_id": 103008606158,
+  "gate_integration_id": 15368,
+  "all_required_validation_passed": true,
+  "CI_proof_directory": "direct-6483/ci-execution-proof",
+  "verified_files": 65,
+  "manifest_sha256": "45e8d8c57be702dfa2fc9210d6f6f5e1590ff300dac3d5ef756fdd1586c1ffe8",
+  "checkout_commit": "573dba455effaa982b60776f9b03e6e324d6cc2f",
+  "checkout_tree": "85c1ed31830b08bd5cabb82fd3a2e1a1ef984aa2",
+  "reviewed_head_tree": "85c1ed31830b08bd5cabb82fd3a2e1a1ef984aa2",
+  "byte_identical_trees": true,
+  "source_binding_evidence": "direct-6483/ci-execution-proof/checkout-commit.json",
+  "required_execution": "26 actual UPDATE tests including all6 new and fixed_window_smoke; selected bench test lane; whole-workspace archive/doctests; workspace default/allfeatures Clippy/rustdoc; MSRV; actual Linux privacy and selftests. Repository ci-summary gate15368 fulltier success.",
+  "limits": [
+    "Wholeworkspace fmt executed exit1 informational under existing policy; zero touched-file diagnostics in full raw output, prior formatted newtest block source-identical. Not a wholeworkspace fmt pass.",
+    "Author-preflight actualdiff not rerun onLinux: its CI hermetic selftests are not actualdiff evidence; localBash3mapfile limitation covered specifically by actual Linux privacy delegate.",
+    "Normal repository-selected bench tests executed; fullworkspace unit/integration sweep not selected. ci-summary is authoritative under repo policy; reviewer request for broader suite does not change gate scope.",
+    "No nightly UPDATE soak or new randomseed replay; track aftermerge beforebroader sensitivity claim.",
+    "Main202879e9 postmerge checks pending; no queue action until currentmain healthy."
+  ]
+}

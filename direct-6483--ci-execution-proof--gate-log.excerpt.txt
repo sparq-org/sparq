@@ -1,0 +1,17 @@
+179:2026-09-10T19:05:58.6589141Z ##[endgroup]
+180:2026-09-10T19:06:01.9168324Z ci-summary: 36 declared-advisory job name(s) loaded from .github/advisory-registry.json; every other check GATES (#3773).
+181:2026-09-10T19:06:01.9169189Z ci-summary: evaluating tier=full (event=pull_request).
+182:2026-09-10T19:06:01.9169815Z   workflow-run resolver: ignored 4 check-run(s) from superseded runs/attempts (#3505).
+183:2026-09-10T19:06:01.9170601Z attempt 1: 37 check-run(s), 26 running, all-terminal stable for 0/2 poll(s)
+351:2026-09-10T19:35:53.2602849Z attempt 85: 70 check-run(s), 2 running, all-terminal stable for 0/2 poll(s)
+352:2026-09-10T19:36:14.6642597Z   workflow-run resolver: ignored 31 check-run(s) from superseded runs/attempts (#3505).
+353:2026-09-10T19:36:14.6643212Z attempt 86: 70 check-run(s), 2 running, all-terminal stable for 0/2 poll(s)
+354:2026-09-10T19:36:35.9397067Z   workflow-run resolver: ignored 31 check-run(s) from superseded runs/attempts (#3505).
+355:2026-09-10T19:36:35.9397936Z attempt 87: 70 check-run(s), 2 running, all-terminal stable for 0/2 poll(s)
+356:2026-09-10T19:36:58.2317968Z   workflow-run resolver: ignored 70 check-run(s) from superseded runs/attempts (#3505).
+357:2026-09-10T19:36:58.2318770Z attempt 88: 70 check-run(s), 0 running, all-terminal stable for 1/2 poll(s) (name set changed)
+358:2026-09-10T19:37:19.5584964Z   workflow-run resolver: ignored 70 check-run(s) from superseded runs/attempts (#3505).
+359:2026-09-10T19:37:19.5586311Z attempt 89: 70 check-run(s), 0 running, all-terminal stable for 2/2 poll(s)
+360:2026-09-10T19:37:19.5596285Z ### ci-summary: PASSED — all 64 gating check(s) green (or skipped/neutral); 6 advisory check(s) excluded (each DECLARED in .github/advisory-registry.json, or on the exact platform-managed allow-list); set stable.
+361:2026-09-10T19:37:19.5600676Z selection: 41 of 64 gating check(s) ran, 23 skipped (selection and/or path-filter; selection pre-job succeeded).
+362:2026-09-10T19:37:19.5876174Z Post job cleanup.

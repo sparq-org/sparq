@@ -1,0 +1,20 @@
+109:2026-09-10T19:30:12.8196964Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +573dba455effaa982b60776f9b03e6e324d6cc2f:refs/remotes/pull/6487/merge
+111:2026-09-10T19:30:16.4664180Z  * [new ref]         573dba455effaa982b60776f9b03e6e324d6cc2f -> pull/6487/merge
+136:2026-09-10T19:30:17.0406851Z HEAD is now at 573dba4 Merge 0b4554b924a80432cc1b572bd19f8e58cdbfb4e6 into f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464
+138:2026-09-10T19:30:17.0470248Z [command]/usr/bin/git log -1 --format=%H
+139:2026-09-10T19:30:17.0501031Z 573dba455effaa982b60776f9b03e6e324d6cc2f
+384:2026-09-10T19:31:26.4586260Z - nextest-archive (ID: 10169127229, Size: 5262783742, Expected Digest: sha256:908dc8bb1be24b9c2fea8e051f1acb1fa6e9ccb2a122a73e8747186cb6124eea)
+389:2026-09-10T19:32:16.8832637Z SHA256 digest of downloaded artifact is 908dc8bb1be24b9c2fea8e051f1acb1fa6e9ccb2a122a73e8747186cb6124eea
+486:2026-09-10T19:32:16.9052255Z   cargo nextest run "${args[@]}" || rc=$?
+514:2026-09-10T19:32:16.9096678Z   SELECT_FILTERSET: package(sparq-bench)
+524:2026-09-10T19:33:37.9380577Z     Starting 22 tests across 1 binary (44 tests and 730 binaries skipped)
+537:2026-09-10T19:33:38.0145201Z         PASS [   0.009s] (13/22) sparq-bench::bin/sparq-bench update_fuzz::tests::committed_allowlist_enables_exactly_the_adjudicated_classes
+538:2026-09-10T19:33:38.0228494Z         PASS [   0.009s] (14/22) sparq-bench::bin/sparq-bench update_fuzz::tests::integer_lexical_adjudication_is_narrow
+539:2026-09-10T19:33:38.0319959Z         PASS [   0.007s] (15/22) sparq-bench::bin/sparq-bench update_fuzz::tests::lexical_collisions_across_contexts_and_nested_terms_fail
+540:2026-09-10T19:33:38.0640239Z         PASS [   0.052s] (16/22) sparq-bench::bin/sparq-bench update_fuzz::tests::historical_4141222487_preserves_lexicals_and_fresh_nodes
+541:2026-09-10T19:33:38.0762171Z         PASS [   0.012s] (17/22) sparq-bench::bin/sparq-bench update_fuzz::tests::raw_duplicate_guard_preserves_canonicalization_errors
+542:2026-09-10T19:33:38.0936072Z         PASS [   0.017s] (18/22) sparq-bench::bin/sparq-bench update_fuzz::tests::raw_duplicate_probe_projection_contract
+543:2026-09-10T19:33:38.1109815Z         PASS [   0.017s] (19/22) sparq-bench::bin/sparq-bench update_fuzz::tests::snapshot_renderers_agree_on_known_dataset
+545:2026-09-10T19:33:40.7982753Z         PASS [   2.790s] (21/22) sparq-bench::bin/sparq-bench update_fuzz::tests::generated_integer_domain_is_injective_including_load
+546:2026-09-10T19:33:42.5383364Z         PASS [   4.508s] (22/22) sparq-bench::bin/sparq-bench update_fuzz::tests::no_nested_blank_nodes_in_triple_terms
+548:2026-09-10T19:33:42.5385519Z      Summary [   4.601s] 22 tests run: 22 passed, 44 skipped
