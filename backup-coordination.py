@@ -438,6 +438,8 @@ for evidence_name in ['affected-context.md', 'build-default.json', 'build-defaul
 for evidence_name in ["implementation-draft-root-verification.json", "draft-commit-root-verification.json"]:
     FILES["6476-admission-" + evidence_name] = ROOT / "direct-6476/admission" / evidence_name
 
+FILES["6476-admission-heartbeat-0513.json"] = ROOT / "direct-6476/admission/heartbeat-0513.json"
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout

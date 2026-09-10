@@ -1,0 +1,15 @@
+{
+  "at": "2026-09-10T05:13:42.699784+00:00",
+  "registry_actions": {
+    "enabled": false,
+    "sha_pinning_required": false
+  },
+  "issue": {
+    "number": 6476,
+    "state": "open",
+    "title": "sparq-engine: nested public query clears the outer QueryBudget instead of restoring it",
+    "updated_at": "2026-09-10T04:36:57Z",
+    "html_url": "https://github.com/sparq-org/sparq/issues/6476"
+  },
+  "main": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5"
+}

@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-10T05:12:38.811882+00:00",
+  "updated_at": "2026-09-10T05:15:12.085818+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -67,7 +67,7 @@
     "agent": "/root/postmerge_ci",
     "actual_model": "GPT-6 Astra",
     "effort": "xhigh",
-    "phase": "Draft committed; bounded warm-cache validation planning",
+    "phase": "Bounded warm-profile validation authorized; existing Astra lane",
     "state": "Exact seven-file draft root-verified and committed, not compiled/tested/review-approved. Existing Astra lane assessing matched cache and bounded resource plan.",
     "started_at": "2026-09-10T04:00:00Z",
     "base": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
@@ -102,6 +102,13 @@
         "at": "2026-09-10T05:12:38.811882+00:00",
         "free_bytes": 4287991808,
         "finding": "Original 6509559808B guard was coordinator operational limit, not repo fixed build gate. Repo disk guard thresholds are advisory and disable new wave dispatch; assess bounded continuation of existing lane without broad cleanup."
+      },
+      "bounded_continuation": {
+        "at": "2026-09-10T05:15:12.084319+00:00",
+        "old_floor_bytes": 6509559808,
+        "new_minimum_free_bytes": 2147483648,
+        "maximum_new_allocated_bytes": 536870912,
+        "rationale": "Original floor was coordinator choice. Repo guard thresholds advisory/new-wave backoff. Existing task with ~385MB preserved native cache can proceed only if exact warm reuse and bounded footprint confirmed; no new agent or heavy gate dispatched. Entire task tree measured ~2.66GiB, other host activity not touched."
       }
     },
     "runtime_scope": "Outer query_with_functions_and_budget extension callback optionally invokes public inner ASK, then sets outer cancel flag. Must calibrate no-nesting control to actual cancelled outcome; no inference if no subsequent budget polling. Expand entry-point inventory/design without patching.",
@@ -154,7 +161,7 @@
       "output_sha256": "c2dd7517cbf616c8e265e91d08653e6f9fc7f24c50550990ceacf95e6e6ce4eb"
     },
     "implementation": {
-      "state": "draft_committed_unvalidated",
+      "state": "draft_committed; cache assessment and conditional validation running",
       "agent": "/root/postmerge_ci",
       "actual_model": "GPT-6 Astra",
       "effort": "xhigh",
@@ -162,7 +169,7 @@
       "started_at": "2026-09-10T04:54:38.540163+00:00",
       "scope": "Private restoringGuard/install; scoped with_budget FnOnce seam;14caller scopeequivalence; full Limits+EXCEEDED restore; narrowed rawsnapshot visibility/lifetime comments; QueryBudget behavior docs; calibratedruntime/state/unwind/parallel tests andcontrols.",
       "source_review": "Opus design approvedwithconditions, not implementationapproval. SERVICE savepointstraddling mustbeassessed forsameouterstateafterreturnednestedcall, not prohibitedwithoutcause.",
-      "constraints": "25minfirstphase2jobsincrementalOFF/offline/free>=6509559808B;preferpreservedreleasecache;no cleanup/bd/fullworkspace/localwasmbuild/newdep/publicAPI/ArcTLSrewrite/remoteGitHub/model/EC2/release. Preserve32frozenreproductionfiles.",
+      "constraints": "Existing lane only; exact warm profile must be confirmed before build. One compiler process at a time, jobs1, incrementalOFF/offline; stop free<2GiB OR aggregate task output/target allocated growth>512MiB. No fullworkspace/wasm build, broad cleanup, remote push/model/EC2/release. Keep frozen draft and reproduction immutable.",
       "head": "e0aa233d59321c5a437ced8c072d359b272b6222",
       "manifest_sha256": "bd5db57c5fd83cac7c3998a06b5701bd5da6980d480b263e8428d6c15316ba39",
       "root_verification": "direct-6476/admission/implementation-draft-root-verification.json",
@@ -2625,9 +2632,9 @@
     "evidence": "direct-3105/admission/latency-alarm-job.log"
   },
   "registry_pause_latest": {
-    "at": "2026-09-10T03:59:24.937502+00:00",
+    "at": "2026-09-10T05:13:42.699784+00:00",
     "actions_enabled": false,
-    "evidence": "direct-3105/admission/postmerge-runs-0359.json"
+    "evidence": "direct-6476/admission/heartbeat-0513.json"
   },
   "frontier_fallback": {
     "at": "2026-09-10T03:59:18.624949+00:00",
