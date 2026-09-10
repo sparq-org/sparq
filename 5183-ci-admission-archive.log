@@ -1,0 +1,1808 @@
+﻿2026-09-10T14:28:20.9289910Z Current runner version: '2.337.0'
+2026-09-10T14:28:20.9317702Z ##[group]Runner Image Provisioner
+2026-09-10T14:28:20.9318752Z Hosted Compute Agent
+2026-09-10T14:28:20.9319376Z Version: 20260828.587
+2026-09-10T14:28:20.9320068Z Commit: abac92662cab4cc7352de4f9f9d2e2419aad9c29
+2026-09-10T14:28:20.9321021Z Build Date: 2026-08-28T16:44:25Z
+2026-09-10T14:28:20.9321786Z Worker ID: {0f6435c3-39f7-42bb-9852-d1880c0b831c}
+2026-09-10T14:28:20.9322672Z Azure Region: westus
+2026-09-10T14:28:20.9323713Z ##[endgroup]
+2026-09-10T14:28:20.9325286Z ##[group]Operating System
+2026-09-10T14:28:20.9326048Z Ubuntu
+2026-09-10T14:28:20.9326585Z 24.04.5
+2026-09-10T14:28:20.9327162Z LTS
+2026-09-10T14:28:20.9327698Z ##[endgroup]
+2026-09-10T14:28:20.9328266Z ##[group]Runner Image
+2026-09-10T14:28:20.9328981Z Image: ubuntu-24.04
+2026-09-10T14:28:20.9329546Z Version: 20260907.300.1
+2026-09-10T14:28:20.9330987Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260907.300/images/ubuntu/Ubuntu2404-Readme.md
+2026-09-10T14:28:20.9332578Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20260907.300
+2026-09-10T14:28:20.9333895Z ##[endgroup]
+2026-09-10T14:28:20.9335032Z ##[group]GITHUB_TOKEN Permissions
+2026-09-10T14:28:20.9337123Z Contents: read
+2026-09-10T14:28:20.9337746Z Metadata: read
+2026-09-10T14:28:20.9338378Z ##[endgroup]
+2026-09-10T14:28:20.9340634Z Secret source: Actions
+2026-09-10T14:28:20.9341717Z Cache mode: write
+2026-09-10T14:28:20.9342440Z Prepare workflow directory
+2026-09-10T14:28:20.9818044Z Prepare all required actions
+2026-09-10T14:28:20.9867643Z Getting action download info
+2026-09-10T14:28:21.3740999Z Download action repository 'actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0' (SHA:9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0)
+2026-09-10T14:28:21.4977595Z Download action repository 'Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32' (SHA:e18b497796c12c097a38f9edb9d0641fb99eee32)
+2026-09-10T14:28:22.0620648Z Download action repository 'taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68' (SHA:18b1216eba7f8039b0f8d131d5473787f0edce68)
+2026-09-10T14:28:22.5312394Z Download action repository 'actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a' (SHA:043fb46d1a93c77aae656e7c1c64a875d1fc6a0a)
+2026-09-10T14:28:22.7709860Z Complete job name: build + archive test binaries (+ doctests once)
+2026-09-10T14:28:22.8656072Z ##[group]Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+2026-09-10T14:28:22.8657919Z with:
+2026-09-10T14:28:22.8658798Z   repository: sparq-org/sparq
+2026-09-10T14:28:22.8667278Z   token: ***
+2026-09-10T14:28:22.8668180Z   ssh-strict: true
+2026-09-10T14:28:22.8669077Z   ssh-user: git
+2026-09-10T14:28:22.8670007Z   persist-credentials: true
+2026-09-10T14:28:22.8670996Z   clean: true
+2026-09-10T14:28:22.8671917Z   sparse-checkout-cone-mode: true
+2026-09-10T14:28:22.8673152Z   fetch-depth: 1
+2026-09-10T14:28:22.8674066Z   fetch-tags: false
+2026-09-10T14:28:22.8674988Z   show-progress: true
+2026-09-10T14:28:22.8675942Z   lfs: false
+2026-09-10T14:28:22.8676803Z   submodules: false
+2026-09-10T14:28:22.8677736Z   set-safe-directory: true
+2026-09-10T14:28:22.8678784Z   allow-unsafe-pr-checkout: false
+2026-09-10T14:28:22.8680121Z env:
+2026-09-10T14:28:22.8680968Z   CARGO_TERM_COLOR: always
+2026-09-10T14:28:22.8681966Z   RUST_BACKTRACE: 1
+2026-09-10T14:28:22.8683128Z   CARGO_NET_RETRY: 10
+2026-09-10T14:28:22.8684064Z   CARGO_INCREMENTAL: 0
+2026-09-10T14:28:22.8685099Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+2026-09-10T14:28:22.8686677Z   CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: -C link-arg=-fuse-ld=lld
+2026-09-10T14:28:22.8688180Z ##[endgroup]
+2026-09-10T14:28:22.9745573Z Syncing repository: sparq-org/sparq
+2026-09-10T14:28:22.9749653Z ##[group]Getting Git version info
+2026-09-10T14:28:22.9751812Z Working directory is '/home/runner/work/sparq/sparq'
+2026-09-10T14:28:22.9755289Z [command]/usr/bin/git version
+2026-09-10T14:28:22.9826039Z git version 2.55.0
+2026-09-10T14:28:22.9857294Z ##[endgroup]
+2026-09-10T14:28:22.9869689Z Temporarily overriding HOME='/home/runner/work/_temp/2feac8d5-40e0-4430-bd93-2bfa4c3b3328' before making global git config changes
+2026-09-10T14:28:22.9977947Z Adding repository directory to the temporary git global config as a safe directory
+2026-09-10T14:28:22.9982498Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/sparq/sparq
+2026-09-10T14:28:22.9988641Z Deleting the contents of '/home/runner/work/sparq/sparq'
+2026-09-10T14:28:22.9991993Z ##[group]Determining repository object format
+2026-09-10T14:28:22.9996067Z ##[endgroup]
+2026-09-10T14:28:22.9998689Z ##[group]Initializing the repository
+2026-09-10T14:28:23.0001030Z [command]/usr/bin/git init /home/runner/work/sparq/sparq
+2026-09-10T14:28:23.0097349Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-09-10T14:28:23.0116081Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-09-10T14:28:23.0120240Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-09-10T14:28:23.0123298Z hint: call:
+2026-09-10T14:28:23.0124979Z hint:
+2026-09-10T14:28:23.0126651Z hint: 	git config --global init.defaultBranch <name>
+2026-09-10T14:28:23.0128733Z hint:
+2026-09-10T14:28:23.0130723Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-09-10T14:28:23.0134901Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-09-10T14:28:23.0137581Z hint:
+2026-09-10T14:28:23.0139029Z hint: 	git branch -m <name>
+2026-09-10T14:28:23.0140640Z hint:
+2026-09-10T14:28:23.0142996Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-09-10T14:28:23.0146442Z Initialized empty Git repository in /home/runner/work/sparq/sparq/.git/
+2026-09-10T14:28:23.0151686Z [command]/usr/bin/git remote add origin https://github.com/sparq-org/sparq
+2026-09-10T14:28:23.0197531Z ##[endgroup]
+2026-09-10T14:28:23.0200058Z ##[group]Disabling automatic garbage collection
+2026-09-10T14:28:23.0206550Z [command]/usr/bin/git config --local gc.auto 0
+2026-09-10T14:28:23.0280088Z ##[endgroup]
+2026-09-10T14:28:23.0283712Z ##[group]Setting up auth
+2026-09-10T14:28:23.0288791Z Removing SSH command configuration
+2026-09-10T14:28:23.0292036Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-09-10T14:28:23.0328231Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-09-10T14:28:23.0816494Z Removing HTTP extra header
+2026-09-10T14:28:23.0824657Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-10T14:28:23.0866283Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-09-10T14:28:23.1089482Z Removing includeIf entries pointing to credentials config files
+2026-09-10T14:28:23.1093829Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-10T14:28:23.1130146Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-09-10T14:28:23.1369320Z [command]/usr/bin/git config --file /home/runner/work/_temp/git-credentials-b15a3b4d-db64-4cc5-a906-54eb4d0a47d6.config http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-09-10T14:28:23.1411616Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/sparq/sparq/.git.path /home/runner/work/_temp/git-credentials-b15a3b4d-db64-4cc5-a906-54eb4d0a47d6.config
+2026-09-10T14:28:23.1447947Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/sparq/sparq/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-b15a3b4d-db64-4cc5-a906-54eb4d0a47d6.config
+2026-09-10T14:28:23.1495449Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-b15a3b4d-db64-4cc5-a906-54eb4d0a47d6.config
+2026-09-10T14:28:23.1548390Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-b15a3b4d-db64-4cc5-a906-54eb4d0a47d6.config
+2026-09-10T14:28:23.1600545Z ##[endgroup]
+2026-09-10T14:28:23.1603443Z ##[group]Fetching the repository
+2026-09-10T14:28:23.1608700Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +8ff2bc3ceb54b29a870b3a555b1e11efaf4e182c:refs/remotes/pull/6482/merge
+2026-09-10T14:28:26.6170197Z From https://github.com/sparq-org/sparq
+2026-09-10T14:28:26.6171670Z  * [new ref]         8ff2bc3ceb54b29a870b3a555b1e11efaf4e182c -> pull/6482/merge
+2026-09-10T14:28:26.6175940Z ##[endgroup]
+2026-09-10T14:28:26.6176809Z ##[group]Determining the checkout info
+2026-09-10T14:28:26.6177722Z ##[endgroup]
+2026-09-10T14:28:26.6183339Z [command]/usr/bin/git sparse-checkout disable
+2026-09-10T14:28:26.6241484Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-09-10T14:28:26.6277383Z ##[group]Checking out the ref
+2026-09-10T14:28:26.6281685Z [command]/usr/bin/git checkout --progress --force refs/remotes/pull/6482/merge
+2026-09-10T14:28:27.2045964Z Note: switching to 'refs/remotes/pull/6482/merge'.
+2026-09-10T14:28:27.2046456Z 
+2026-09-10T14:28:27.2046752Z You are in 'detached HEAD' state. You can look around, make experimental
+2026-09-10T14:28:27.2047363Z changes and commit them, and you can discard any commits you make in this
+2026-09-10T14:28:27.2048020Z state without impacting any branches by switching back to a branch.
+2026-09-10T14:28:27.2048403Z 
+2026-09-10T14:28:27.2048689Z If you want to create a new branch to retain commits you create, you may
+2026-09-10T14:28:27.2049255Z do so (now or later) by using -c with the switch command. Example:
+2026-09-10T14:28:27.2049576Z 
+2026-09-10T14:28:27.2049725Z   git switch -c <new-branch-name>
+2026-09-10T14:28:27.2049969Z 
+2026-09-10T14:28:27.2050122Z Or undo this operation with:
+2026-09-10T14:28:27.2050340Z 
+2026-09-10T14:28:27.2050461Z   git switch -
+2026-09-10T14:28:27.2050646Z 
+2026-09-10T14:28:27.2050920Z Turn off this advice by setting config variable advice.detachedHead to false
+2026-09-10T14:28:27.2051378Z 
+2026-09-10T14:28:27.2052145Z HEAD is now at 8ff2bc3 Merge fe3284199db0831f353d2ae401b8c69472764904 into 4595388de9e389f5369d63828fbf90cfc16b62d9
+2026-09-10T14:28:27.2072439Z ##[endgroup]
+2026-09-10T14:28:27.2126565Z [command]/usr/bin/git log -1 --format=%H
+2026-09-10T14:28:27.2157090Z 8ff2bc3ceb54b29a870b3a555b1e11efaf4e182c
+2026-09-10T14:28:27.2387284Z ##[group]Run ./scripts/ci-free-disk.sh
+2026-09-10T14:28:27.2387795Z [36;1m./scripts/ci-free-disk.sh[0m
+2026-09-10T14:28:27.2428338Z shell: /usr/bin/bash -e {0}
+2026-09-10T14:28:27.2428732Z env:
+2026-09-10T14:28:27.2429039Z   CARGO_TERM_COLOR: always
+2026-09-10T14:28:27.2429408Z   RUST_BACKTRACE: 1
+2026-09-10T14:28:27.2429742Z   CARGO_NET_RETRY: 10
+2026-09-10T14:28:27.2430122Z   CARGO_INCREMENTAL: 0
+2026-09-10T14:28:27.2430489Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+2026-09-10T14:28:27.2431065Z   CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: -C link-arg=-fuse-ld=lld
+2026-09-10T14:28:27.2431614Z ##[endgroup]
+2026-09-10T14:28:27.2537203Z ##[group]Free runner disk — before
+2026-09-10T14:28:27.2555785Z Filesystem      Size  Used Avail Use% Mounted on
+2026-09-10T14:28:27.2556513Z /dev/root       145G   59G   86G  41% /
+2026-09-10T14:28:27.2558123Z ##[endgroup]
+2026-09-10T14:28:27.2559172Z removing /usr/share/dotnet
+2026-09-10T14:28:40.2859787Z removing /usr/local/lib/android
+2026-09-10T14:29:56.4350432Z removing /usr/local/.ghcup
+2026-09-10T14:29:57.9091118Z removing /opt/hostedtoolcache/CodeQL
+2026-09-10T14:30:00.7657778Z removing /usr/local/share/powershell
+2026-09-10T14:30:01.0192824Z removing /usr/share/swift
+2026-09-10T14:30:01.3449985Z removing /opt/hostedtoolcache (hosted toolcache)
+2026-09-10T14:30:19.1353488Z pruning docker images
+2026-09-10T14:30:35.7781380Z Deleted Images:
+2026-09-10T14:30:35.7781980Z untagged: ghcr.io/github/gh-aw-firewall/squid:latest
+2026-09-10T14:30:35.7783423Z untagged: ghcr.io/github/gh-aw-firewall/squid@sha256:2ce8df3abf3e9b76e9c0cf5863da41f1ab3f89b20ad14b988806ab89e7bf2cd5
+2026-09-10T14:30:35.7784767Z deleted: sha256:ebc9c9e5ccbd12daa23000ec1af4118fe64bc6ac61a25a39552e86f2941ec108
+2026-09-10T14:30:35.7785849Z deleted: sha256:985778c0df7e26510751d7fca1e46b01ec5cd13716dfb4ebaa293b6e617da6ce
+2026-09-10T14:30:35.7787071Z deleted: sha256:801a15b59b64ce9d2896f9e9f9dab7e99be9e94e56ad8e75df7113dbae5d461b
+2026-09-10T14:30:35.7787895Z deleted: sha256:8b7ce8ae5ead69d566b03fa43c47d34fcd3081bb208ef7c4619b82f54d882c1a
+2026-09-10T14:30:35.7788714Z deleted: sha256:a8913d3fe0eda67eda6a098eedb907e803a207157ddf88c54da79d8ac15ce580
+2026-09-10T14:30:35.7789371Z untagged: ghcr.io/github/github-mcp-server:latest
+2026-09-10T14:30:35.7790205Z untagged: ghcr.io/github/github-mcp-server@sha256:46cdbbd810faf6f7aed1745ea04057443f5cb9fcadc15c7308add18cf9a83e33
+2026-09-10T14:30:35.7791212Z deleted: sha256:3e165e25be8d461c06268b9fb30e93cf91f791acf7e3889f41b20f4896357dc0
+2026-09-10T14:30:35.7791972Z deleted: sha256:e6795b1026263703aab7615e3710f9506ec5f018544150b68778c93b75375b85
+2026-09-10T14:30:35.7793035Z deleted: sha256:1e1cabb4a65e50fb84bc4612619b0025e4a1d06d5e38699d1e67e5a8e4f333db
+2026-09-10T14:30:35.7793823Z deleted: sha256:86766d6a6e947f4a599c6e23307470f8f75732fc3d143ec1f3260e4406202bee
+2026-09-10T14:30:35.7794590Z deleted: sha256:2944471a0bbdfb4985f84f8d287edb5cd982d1060589e707a6cb0cbe82cdfe89
+2026-09-10T14:30:35.7795368Z deleted: sha256:5e555e7975e2202f21fb93d460d701a340ade876f3afccb70d702f1dc5ab80db
+2026-09-10T14:30:35.7795985Z deleted: sha256:2a080d78a1c5e3615170178f1c6f4c726340da9d5ff2926cb66e2fd97851da9d
+2026-09-10T14:30:35.7796587Z deleted: sha256:af4a114029fbf94a3cf75c5cfaa5e947019cd6faae4b800c9306ac9079363def
+2026-09-10T14:30:35.7797186Z deleted: sha256:c7b875d3de914680ec64ba55be5865955ec595e7370812894ee68a502e2e8391
+2026-09-10T14:30:35.7797778Z deleted: sha256:85d9b4c1ef131ee259952a35027e942f79626303ab143eff7ef00d55201bd06f
+2026-09-10T14:30:35.7798380Z deleted: sha256:492c6420fd79f4cd4e761bec1e74db6044d45adb5b073a82289af68aa3162e3f
+2026-09-10T14:30:35.7798973Z deleted: sha256:14b282df61c0316a80216cec27e753777da93de1d7e062072ef3b517f984fcf1
+2026-09-10T14:30:35.7799593Z deleted: sha256:fdaace00fc3f072b9060f703047b30a2c14d8bde7dbbf31a396802c032923732
+2026-09-10T14:30:35.7800338Z deleted: sha256:7f73eafc455b691b504d4d3c3f3c7be90e135c1d0ba4988b2cac29579cd6b567
+2026-09-10T14:30:35.7800944Z deleted: sha256:32a12b65383df6b6553c8d59f691675ca1980f8cec9c51cce163c3c8f7665a41
+2026-09-10T14:30:35.7801804Z deleted: sha256:5217b01660b515ac25ea055a8bd04a20790c7d6bd6085374b59b9081283911af
+2026-09-10T14:30:35.7802411Z deleted: sha256:7223ea1323e8c1159ec17f07d35acc27bdd1cc2bc3ed425b44ef21dac9915db0
+2026-09-10T14:30:35.7826361Z untagged: ghcr.io/dependabot/dependabot-updater-core:latest
+2026-09-10T14:30:35.7827167Z untagged: ghcr.io/dependabot/dependabot-updater-core@sha256:2fba19978e4b0b2a9829597be4a15fb1fe19878b241e97a9b4d1317692940c45
+2026-09-10T14:30:35.7828180Z deleted: sha256:5c1f9f1da87f5427dd6e2ec5a1ab97d0748fdbafcf57eb9055a943a414b545d8
+2026-09-10T14:30:35.7828833Z deleted: sha256:a658acc81f7c03694e92f11ffe3716ab1e1828fefcd8c38e16b0baf9e7dd855e
+2026-09-10T14:30:35.7829445Z deleted: sha256:3deacaf32289cd96e22b8c126f3b6798c10b13e95573345a6541e0f2e06dbf1a
+2026-09-10T14:30:35.7830039Z deleted: sha256:6de7bde6a77f7425104bebf13d2245e8c979466b5950850850bb2b59e2a446ef
+2026-09-10T14:30:35.7830644Z deleted: sha256:801974b9383c04d0b062eabda4fa89aea90d7f81014a5132bea9ad5af432e63a
+2026-09-10T14:30:35.7831249Z deleted: sha256:f4f67dbe94c5027b91e62a87b484094ec5edf89c6500d22a5db8fa4eec67175c
+2026-09-10T14:30:35.7831840Z deleted: sha256:ca382568e43dbf58df9081d87644fe890c310ca466d7dc521182e9ffbdc7b114
+2026-09-10T14:30:35.7832423Z deleted: sha256:86729f28930c476a1c6e36572c8868f9e040f26ded9dbf3a95280883a792c9ac
+2026-09-10T14:30:35.7833300Z deleted: sha256:0a693f8c5976fbc1ff090ea7c2a54a5956d68ae24bea0bd7398f66ad8037b0a1
+2026-09-10T14:30:35.7834150Z deleted: sha256:52fd024951e481afa63bd5ef23d13c98812d030e58f07f476d5ee729d5be5a99
+2026-09-10T14:30:35.7834758Z deleted: sha256:d4169ad79fb7d65bbcd18dc7612d3535f417ef5d6b352bdece28ca9bd4f5645e
+2026-09-10T14:30:35.7835370Z deleted: sha256:e1f9b984a3f8762d623f4fbbf0b14bdeb4b68aafb0bdaaa89bc6c374e0ce9265
+2026-09-10T14:30:35.7835976Z deleted: sha256:b9a65b3c65ab22d490085bd0bf5490e2409da8748b406870f2463bdc41cd6795
+2026-09-10T14:30:35.7836450Z untagged: ghcr.io/github/gh-aw-mcpg:latest
+2026-09-10T14:30:35.7837038Z untagged: ghcr.io/github/gh-aw-mcpg@sha256:85b940556a8faa4e1fdbef124bfd75f2c4ebd855a10b88a1c3b6f3e97f6f1a53
+2026-09-10T14:30:35.7837757Z deleted: sha256:5f22df3c4a888854cfd7514774684e882b961e11d319d1f4039684ad541d054c
+2026-09-10T14:30:35.7838340Z deleted: sha256:6c37d32d6b128c746188851ba4212d149ce39981c0b766b2d3c447b8490d7a04
+2026-09-10T14:30:35.7838929Z deleted: sha256:3ca287a3624a33e972668a5d6b7700a8c8dc3041aeadb0fcfe3848f38b2f668a
+2026-09-10T14:30:35.7839517Z deleted: sha256:5c67f508406e6a9bf44788025c431b8006e32ed767e703b025caca793dbfedb1
+2026-09-10T14:30:35.7840096Z deleted: sha256:8dd0a643b90751a901f6982738612594e618ba48ea971098e8d4e7468d9cc450
+2026-09-10T14:30:35.7840742Z deleted: sha256:c48e7d23f5f6b9133896e262a510ef3f4288e11d98705c1f52b8cc19fb7af6f8
+2026-09-10T14:30:35.7841379Z deleted: sha256:09df3d36d3df02c2be99898ac9e632f91e02fb8262d715c6c0e25927ed2e5dd6
+2026-09-10T14:30:35.7841979Z deleted: sha256:6ccd0f9257b0a94f3e50f50a9cdc766408da9d5ded13721abdac5fc34f663f49
+2026-09-10T14:30:35.7842588Z deleted: sha256:4b35d13cdd93533c08ba296080135dfc555c64a3a0a4284ac739b93e53ee63f6
+2026-09-10T14:30:35.7843413Z deleted: sha256:70834cf3bba44803e61e4c9d424992d91e06c34dcbfa92d388fc493c51c26e3a
+2026-09-10T14:30:35.7844017Z deleted: sha256:1a597abbdca4511eb22f2e0b00a5d8b6d6129e7669ed56d751b9d1d611d80bfa
+2026-09-10T14:30:35.7844617Z deleted: sha256:d5c28ed9f7e287d23038493d8b2dbea75a712162b907ec2fab74295d6bbf77fc
+2026-09-10T14:30:35.7845146Z untagged: ghcr.io/github/gh-aw-firewall/api-proxy:latest
+2026-09-10T14:30:35.7845816Z untagged: ghcr.io/github/gh-aw-firewall/api-proxy@sha256:6f95e2234dd9bd6333a8ff28ccea7ecf0204acd4a09108723844dbd2bf6268c5
+2026-09-10T14:30:35.7846506Z deleted: sha256:9d8f8fbebb4891599e5e95a55878c77d12c4c321a715acb61dfbb6560b9a55f7
+2026-09-10T14:30:35.7847042Z deleted: sha256:3f6dbad59a0bd4729965d9c16c261d980e14162bf000dbcafe8ed7db2fedff6a
+2026-09-10T14:30:35.7847585Z deleted: sha256:80b79f0f8bc3d5c3cdf69acd5dce576d05f85a637a80a7c3100757747995da79
+2026-09-10T14:30:35.7848116Z deleted: sha256:a53eb6ed7d6102b7a56089598e8984dccdce769642ab8b7483de9b9ad2f9759b
+2026-09-10T14:30:35.7848855Z deleted: sha256:0f25ce44464c0e2c078afd7b11f2b8858d4723083e360476d0492fed5a43c55e
+2026-09-10T14:30:35.7849408Z deleted: sha256:dc9c32836ca3a5bd64bbd358dddf58538bd478e0b1056d9788811fdefe4760dc
+2026-09-10T14:30:35.7849939Z deleted: sha256:78b6d979c4416462cbea914957db2a0d0ffbbf13ebef0396e96f87f6a04c1c83
+2026-09-10T14:30:35.7850493Z deleted: sha256:dafd7f59462c952a062aee22b121678c09db1270c06099a530ffc0e4f15757d5
+2026-09-10T14:30:35.7851070Z deleted: sha256:34447b7d6e1dbe8676ba1a182208e48cb136db5173a7b4e9db844e8cacfabd01
+2026-09-10T14:30:35.7851597Z deleted: sha256:5da802879903f2d623b671bd10f7b817b6f35c8bec8adaebfd89a117e42f5781
+2026-09-10T14:30:35.7852122Z deleted: sha256:a696aa1bb46d54f27a28325e84b65909a50b909fc457649fbc8301a7aca37895
+2026-09-10T14:30:35.7852635Z deleted: sha256:3d64c014648b8444862bc8607a2495744e9a5ed3b0f900a312000966a0c1b848
+2026-09-10T14:30:35.7873847Z deleted: sha256:3cb5ff4e2dd3664e916daf13ba79b8104cae6c95e940f30b22eba2e1c9700055
+2026-09-10T14:30:35.7874422Z deleted: sha256:67ff5491d21a37e76f730c473545e7d4143c28cf7ee18a80d44fd9e21780b860
+2026-09-10T14:30:35.7874964Z deleted: sha256:34884abbe92863fce933ed7c39c0e045631af0ed86d5cc0dfbdf9fdca426ce3c
+2026-09-10T14:30:35.7875449Z untagged: ghcr.io/github/gh-aw-firewall/agent:latest
+2026-09-10T14:30:35.7876056Z untagged: ghcr.io/github/gh-aw-firewall/agent@sha256:f7df036c86575527b61f3f7df91c4412349a12b2a74988d929eafa2999230c98
+2026-09-10T14:30:35.7876983Z deleted: sha256:bd7acdea59363f831eae4896982d7476af675c9d5c281ebc9b739af5fc72f561
+2026-09-10T14:30:35.7877533Z deleted: sha256:835524e93c1a21bb17de1be07498df8d9871fc242bf9e75d990bdc56575672ef
+2026-09-10T14:30:35.7878064Z deleted: sha256:30707983df40fb4ab43c2cc153cdcfea8188eb564e21860b2df0b8126e02d191
+2026-09-10T14:30:35.7878944Z deleted: sha256:89f02a183f5fcabb96e9ffc11f0af77c566e6a25a0c69835a869897ca6fe5e37
+2026-09-10T14:30:35.7879486Z deleted: sha256:a7fb1fe985b36be7d31d4323c87dca4e179fc6ca3c74b5f687ea91a09487c34c
+2026-09-10T14:30:35.7880045Z deleted: sha256:14310bdf1e1c5dbd600be902d4d3aadbf17b69f5f098cf6a78e63b36ea0fe968
+2026-09-10T14:30:35.7880593Z deleted: sha256:a688db3e7bd99824d7a8d208d1bfbbadfe138f7da289ffaa0be99b340d5f7791
+2026-09-10T14:30:35.7881136Z deleted: sha256:bbd6fa1ee3c6cb08bdedaf327da02cffa2de419399df715530156c65c828dd9d
+2026-09-10T14:30:35.7881672Z deleted: sha256:ae5095c15a582692fe26c98943591c570c8e01ecade1fbc1afbeb91fc5b30083
+2026-09-10T14:30:35.7882196Z deleted: sha256:48607de80178970f04b8070234715afcb462d1ebae0e35d7706e90e363fad8f1
+2026-09-10T14:30:35.7882720Z deleted: sha256:e36cc363bb33bde2cb93c5453d4102143425469dbe4235bceb7838c3f3884087
+2026-09-10T14:30:35.7883609Z deleted: sha256:fe127748fc7c38aca97b5d62ea80f1a94d595b1d507034d16c50fa0edf34a3f9
+2026-09-10T14:30:35.7884425Z deleted: sha256:76b449524758f19bbee8ab573533946790535760522180774a52ff4a9ab3ced6
+2026-09-10T14:30:35.7885019Z deleted: sha256:8704049c6b08fb4b480f629085bdcc79048f5cda6f1fadb0f93699371b34bb0d
+2026-09-10T14:30:35.7885577Z deleted: sha256:b612b26fad33bce77de9e47ebdf2b07b5cbe468fa5860b74c1ff635c9194c74a
+2026-09-10T14:30:35.7886102Z deleted: sha256:328120eca40f8b857f0e1a3cd8f3d8fd9bcd5c2c0f4776647796eb37f24a40d7
+2026-09-10T14:30:35.7886622Z deleted: sha256:9d26eb37d23413f641be146794b1b8ecdd9b1fcd9a8f110842c0038f5f440206
+2026-09-10T14:30:35.7887130Z deleted: sha256:c0359c5b6ede84d4a083d06d35ee77f0b338dfb17423771854d007d89953fb3e
+2026-09-10T14:30:35.7887441Z 
+2026-09-10T14:30:35.7887546Z Total reclaimed space: 1.88GB
+2026-09-10T14:30:35.8016080Z ##[group]Free runner disk — after
+2026-09-10T14:30:35.8027985Z Filesystem      Size  Used Avail Use% Mounted on
+2026-09-10T14:30:35.8028719Z /dev/root       145G   27G  118G  19% /
+2026-09-10T14:30:35.8029694Z ##[endgroup]
+2026-09-10T14:30:35.8072301Z ##[group]Run rustup default stable
+2026-09-10T14:30:35.8072657Z [36;1mrustup default stable[0m
+2026-09-10T14:30:35.8073335Z [36;1mrustup show active-toolchain[0m
+2026-09-10T14:30:35.8108231Z shell: /usr/bin/bash -e {0}
+2026-09-10T14:30:35.8108520Z env:
+2026-09-10T14:30:35.8108745Z   CARGO_TERM_COLOR: always
+2026-09-10T14:30:35.8109020Z   RUST_BACKTRACE: 1
+2026-09-10T14:30:35.8109266Z   CARGO_NET_RETRY: 10
+2026-09-10T14:30:35.8109521Z   CARGO_INCREMENTAL: 0
+2026-09-10T14:30:35.8109810Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+2026-09-10T14:30:35.8110292Z   CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: -C link-arg=-fuse-ld=lld
+2026-09-10T14:30:35.8110756Z ##[endgroup]
+2026-09-10T14:30:35.9529342Z info: using existing install for stable-x86_64-unknown-linux-gnu
+2026-09-10T14:30:35.9673780Z info: default toolchain set to stable-x86_64-unknown-linux-gnu
+2026-09-10T14:30:35.9674358Z 
+2026-09-10T14:30:36.1133075Z   stable-x86_64-unknown-linux-gnu unchanged - rustc 1.98.1 (48a229cea 2026-09-01)
+2026-09-10T14:30:36.1133612Z 
+2026-09-10T14:30:36.1213989Z info: note that the toolchain '1.97.1-x86_64-unknown-linux-gnu' is currently in use (overridden by '/home/runner/work/sparq/sparq/rust-toolchain.toml')
+2026-09-10T14:30:36.1479341Z info: syncing channel updates for 1.97.1-x86_64-unknown-linux-gnu
+2026-09-10T14:30:36.4116442Z info: latest update on 2026-07-16 for version 1.97.1 (8bab26f4f 2026-07-14)
+2026-09-10T14:30:36.4118999Z info: downloading 6 components
+2026-09-10T14:30:45.7634825Z warn: the missing active toolchain `1.97.1-x86_64-unknown-linux-gnu` has been auto-installed
+2026-09-10T14:30:45.7635967Z warn: auto-installation is deprecated for most `rustup` commands
+2026-09-10T14:30:45.7636942Z warn: scripts relying on this behavior in `rustup` may stop working in the future
+2026-09-10T14:30:45.7637589Z warn: to install the active toolchain, use `rustup install` instead
+2026-09-10T14:30:45.7638226Z warn: see <https://github.com/rust-lang/rustup/issues/4836> for more info
+2026-09-10T14:30:45.7639000Z 1.97.1-x86_64-unknown-linux-gnu (overridden by '/home/runner/work/sparq/sparq/rust-toolchain.toml')
+2026-09-10T14:30:45.7798589Z ##[group]Run Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32
+2026-09-10T14:30:45.7799005Z with:
+2026-09-10T14:30:45.7799209Z   shared-key: test-workspace
+2026-09-10T14:30:45.7799442Z   save-if: false
+2026-09-10T14:30:45.7799644Z   prefix-key: v0-rust
+2026-09-10T14:30:45.7799861Z   add-job-id-key: true
+2026-09-10T14:30:45.7800096Z   add-rust-environment-hash-key: true
+2026-09-10T14:30:45.7800365Z   cache-targets: true
+2026-09-10T14:30:45.7800581Z   cache-all-crates: false
+2026-09-10T14:30:45.7800819Z   cache-workspace-crates: false
+2026-09-10T14:30:45.7801081Z   cache-provider: github
+2026-09-10T14:30:45.7801299Z   cache-bin: true
+2026-09-10T14:30:45.7801510Z   lookup-only: false
+2026-09-10T14:30:45.7801712Z   cmd-format: {0}
+2026-09-10T14:30:45.7801901Z env:
+2026-09-10T14:30:45.7802085Z   CARGO_TERM_COLOR: always
+2026-09-10T14:30:45.7802305Z   RUST_BACKTRACE: 1
+2026-09-10T14:30:45.7802504Z   CARGO_NET_RETRY: 10
+2026-09-10T14:30:45.7802960Z   CARGO_INCREMENTAL: 0
+2026-09-10T14:30:45.7803258Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+2026-09-10T14:30:45.7803651Z   CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: -C link-arg=-fuse-ld=lld
+2026-09-10T14:30:45.7804026Z ##[endgroup]
+2026-09-10T14:30:46.0735023Z (node:2376) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+2026-09-10T14:30:46.0736350Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-09-10T14:30:46.9956297Z ##[group]Cache Configuration
+2026-09-10T14:30:46.9956781Z Cache Provider:
+2026-09-10T14:30:46.9957138Z     github
+2026-09-10T14:30:46.9957480Z Workspaces:
+2026-09-10T14:30:46.9957852Z     /home/runner/work/sparq/sparq
+2026-09-10T14:30:46.9958302Z Cache Paths:
+2026-09-10T14:30:46.9958656Z     /home/runner/.cargo/bin
+2026-09-10T14:30:46.9959096Z     /home/runner/.cargo/.crates.toml
+2026-09-10T14:30:46.9959550Z     /home/runner/.cargo/.crates2.json
+2026-09-10T14:30:46.9960084Z     /home/runner/.cargo/registry
+2026-09-10T14:30:46.9960643Z     /home/runner/.cargo/git
+2026-09-10T14:30:46.9961117Z     /home/runner/work/sparq/sparq/target
+2026-09-10T14:30:46.9961618Z Restore Key:
+2026-09-10T14:30:46.9962077Z     v0-rust-test-workspace-Linux-x64-b9154ba3
+2026-09-10T14:30:46.9962592Z Cache Key:
+2026-09-10T14:30:46.9963506Z     v0-rust-test-workspace-Linux-x64-b9154ba3-0c74d5b7
+2026-09-10T14:30:46.9964160Z .. Prefix:
+2026-09-10T14:30:46.9964588Z   - v0-rust-test-workspace-Linux-x64
+2026-09-10T14:30:46.9965219Z .. Environment considered:
+2026-09-10T14:30:46.9965735Z   - Rust Versions:
+2026-09-10T14:30:46.9966454Z     - 1.97.1 x86_64-unknown-linux-gnu 8bab26f4f68e0e26f0bb7960be334d5b520ea452
+2026-09-10T14:30:46.9967511Z     - 1.98.1 x86_64-unknown-linux-gnu 48a229ceaefd4985c50990b14116b6d856af0985
+2026-09-10T14:30:46.9968379Z     - 1.97.1 x86_64-unknown-linux-gnu 8bab26f4f68e0e26f0bb7960be334d5b520ea452
+2026-09-10T14:30:46.9969050Z   - CARGO_INCREMENTAL
+2026-09-10T14:30:46.9969438Z   - CARGO_NET_RETRY
+2026-09-10T14:30:46.9969833Z   - CARGO_PROFILE_DEV_DEBUG
+2026-09-10T14:30:46.9970320Z   - CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS
+2026-09-10T14:30:46.9970861Z   - CARGO_TERM_COLOR
+2026-09-10T14:30:46.9971170Z   - RUST_BACKTRACE
+2026-09-10T14:30:46.9971423Z .. Lockfiles considered:
+2026-09-10T14:30:46.9971742Z   - /home/runner/work/sparq/sparq/.cargo/config.toml
+2026-09-10T14:30:46.9972134Z   - /home/runner/work/sparq/sparq/Cargo.lock
+2026-09-10T14:30:46.9972563Z   - /home/runner/work/sparq/sparq/crates/sparq-acbench/Cargo.toml
+2026-09-10T14:30:46.9973354Z   - /home/runner/work/sparq/sparq/crates/sparq-algos/Cargo.toml
+2026-09-10T14:30:46.9974188Z   - /home/runner/work/sparq/sparq/crates/sparq-arrow/Cargo.toml
+2026-09-10T14:30:46.9974669Z   - /home/runner/work/sparq/sparq/crates/sparq-bench/Cargo.toml
+2026-09-10T14:30:46.9975141Z   - /home/runner/work/sparq/sparq/crates/sparq-canon/Cargo.toml
+2026-09-10T14:30:46.9975613Z   - /home/runner/work/sparq/sparq/crates/sparq-cli/Cargo.toml
+2026-09-10T14:30:46.9976354Z   - /home/runner/work/sparq/sparq/crates/sparq-conformance-floors/Cargo.toml
+2026-09-10T14:30:46.9976947Z   - /home/runner/work/sparq/sparq/crates/sparq-conformance/Cargo.toml
+2026-09-10T14:30:46.9977581Z   - /home/runner/work/sparq/sparq/crates/sparq-core/Cargo.toml
+2026-09-10T14:30:46.9978009Z   - /home/runner/work/sparq/sparq/crates/sparq-crdt/Cargo.toml
+2026-09-10T14:30:46.9978438Z   - /home/runner/work/sparq/sparq/crates/sparq-difftest/Cargo.toml
+2026-09-10T14:30:46.9978865Z   - /home/runner/work/sparq/sparq/crates/sparq-e2ee-ng/Cargo.toml
+2026-09-10T14:30:46.9979489Z   - /home/runner/work/sparq/sparq/crates/sparq-engine-serialize/Cargo.toml
+2026-09-10T14:30:46.9980002Z   - /home/runner/work/sparq/sparq/crates/sparq-engine-service/Cargo.toml
+2026-09-10T14:30:46.9980472Z   - /home/runner/work/sparq/sparq/crates/sparq-engine/Cargo.toml
+2026-09-10T14:30:46.9980900Z   - /home/runner/work/sparq/sparq/crates/sparq-fedclient/Cargo.toml
+2026-09-10T14:30:46.9981462Z   - /home/runner/work/sparq/sparq/crates/sparq-fedplan-mpc/Cargo.toml
+2026-09-10T14:30:46.9982185Z   - /home/runner/work/sparq/sparq/crates/sparq-fedplan/Cargo.toml
+2026-09-10T14:30:46.9982635Z   - /home/runner/work/sparq/sparq/crates/sparq-forms/Cargo.toml
+2026-09-10T14:30:46.9983297Z   - /home/runner/work/sparq/sparq/crates/sparq-geo/Cargo.toml
+2026-09-10T14:30:46.9983703Z   - /home/runner/work/sparq/sparq/crates/sparq-gpu/Cargo.toml
+2026-09-10T14:30:46.9984095Z   - /home/runner/work/sparq/sparq/crates/sparq-hdt/Cargo.toml
+2026-09-10T14:30:46.9984519Z   - /home/runner/work/sparq/sparq/crates/sparq-http3/Cargo.toml
+2026-09-10T14:30:46.9985083Z   - /home/runner/work/sparq/sparq/crates/sparq-introspect/Cargo.toml
+2026-09-10T14:30:46.9985747Z   - /home/runner/work/sparq/sparq/crates/sparq-jsonld-registry/Cargo.toml
+2026-09-10T14:30:46.9986197Z   - /home/runner/work/sparq/sparq/crates/sparq-jsonld/Cargo.toml
+2026-09-10T14:30:46.9986591Z   - /home/runner/work/sparq/sparq/crates/sparq-kb/Cargo.toml
+2026-09-10T14:30:46.9986995Z   - /home/runner/work/sparq/sparq/crates/sparq-lws-core/Cargo.toml
+2026-09-10T14:30:46.9987523Z   - /home/runner/work/sparq/sparq/crates/sparq-lws-wasm/Cargo.toml
+2026-09-10T14:30:46.9988113Z   - /home/runner/work/sparq/sparq/crates/sparq-mcp/Cargo.toml
+2026-09-10T14:30:46.9988527Z   - /home/runner/work/sparq/sparq/crates/sparq-metamorph/Cargo.toml
+2026-09-10T14:30:46.9989096Z   - /home/runner/work/sparq/sparq/crates/sparq-mpc/Cargo.toml
+2026-09-10T14:30:46.9989478Z   - /home/runner/work/sparq/sparq/crates/sparq-nlq/Cargo.toml
+2026-09-10T14:30:46.9989864Z   - /home/runner/work/sparq/sparq/crates/sparq-parse/Cargo.toml
+2026-09-10T14:30:46.9990270Z   - /home/runner/work/sparq/sparq/crates/sparq-policy/Cargo.toml
+2026-09-10T14:30:46.9990678Z   - /home/runner/work/sparq/sparq/crates/sparq-prov/Cargo.toml
+2026-09-10T14:30:46.9991066Z   - /home/runner/work/sparq/sparq/crates/sparq-py/Cargo.toml
+2026-09-10T14:30:46.9991475Z   - /home/runner/work/sparq/sparq/crates/sparq-reason-diff/Cargo.toml
+2026-09-10T14:30:46.9991915Z   - /home/runner/work/sparq/sparq/crates/sparq-reason-dl/Cargo.toml
+2026-09-10T14:30:46.9992328Z   - /home/runner/work/sparq/sparq/crates/sparq-reason-el/Cargo.toml
+2026-09-10T14:30:46.9992984Z   - /home/runner/work/sparq/sparq/crates/sparq-reason-ql/Cargo.toml
+2026-09-10T14:30:46.9993496Z   - /home/runner/work/sparq/sparq/crates/sparq-reason-wasm/Cargo.toml
+2026-09-10T14:30:46.9994144Z   - /home/runner/work/sparq/sparq/crates/sparq-reason/Cargo.toml
+2026-09-10T14:30:46.9994564Z   - /home/runner/work/sparq/sparq/crates/sparq-rsp-wasm/Cargo.toml
+2026-09-10T14:30:46.9995345Z   - /home/runner/work/sparq/sparq/crates/sparq-rsp/Cargo.toml
+2026-09-10T14:30:46.9995986Z   - /home/runner/work/sparq/sparq/crates/sparq-secprop-vocab/Cargo.toml
+2026-09-10T14:30:46.9996677Z   - /home/runner/work/sparq/sparq/crates/sparq-serve/Cargo.toml
+2026-09-10T14:30:46.9997205Z   - /home/runner/work/sparq/sparq/crates/sparq-server/Cargo.toml
+2026-09-10T14:30:46.9997938Z   - /home/runner/work/sparq/sparq/crates/sparq-shacl-wasm/Cargo.toml
+2026-09-10T14:30:46.9999424Z   - /home/runner/work/sparq/sparq/crates/sparq-shacl/Cargo.toml
+2026-09-10T14:30:47.0000144Z   - /home/runner/work/sparq/sparq/crates/sparq-shaclc/Cargo.toml
+2026-09-10T14:30:47.0000818Z   - /home/runner/work/sparq/sparq/crates/sparq-sim/Cargo.toml
+2026-09-10T14:30:47.0001499Z   - /home/runner/work/sparq/sparq/crates/sparq-solid/Cargo.toml
+2026-09-10T14:30:47.0002267Z   - /home/runner/work/sparq/sparq/crates/sparq-substrate/Cargo.toml
+2026-09-10T14:30:47.0003238Z   - /home/runner/work/sparq/sparq/crates/sparq-terse/Cargo.toml
+2026-09-10T14:30:47.0003811Z   - /home/runner/work/sparq/sparq/crates/sparq-text-wasm/Cargo.toml
+2026-09-10T14:30:47.0004253Z   - /home/runner/work/sparq/sparq/crates/sparq-text/Cargo.toml
+2026-09-10T14:30:47.0004833Z   - /home/runner/work/sparq/sparq/crates/sparq-trust/Cargo.toml
+2026-09-10T14:30:47.0005231Z   - /home/runner/work/sparq/sparq/crates/sparq-vc/Cargo.toml
+2026-09-10T14:30:47.0005660Z   - /home/runner/work/sparq/sparq/crates/sparq-vectors/Cargo.toml
+2026-09-10T14:30:47.0006210Z   - /home/runner/work/sparq/sparq/crates/sparq-wac-oracle/Cargo.toml
+2026-09-10T14:30:47.0006717Z   - /home/runner/work/sparq/sparq/crates/sparq-wasm/Cargo.toml
+2026-09-10T14:30:47.0007451Z   - /home/runner/work/sparq/sparq/crates/sparq-wrapper-gen/Cargo.toml
+2026-09-10T14:30:47.0007926Z   - /home/runner/work/sparq/sparq/crates/sparq-wrapper-integration/Cargo.toml
+2026-09-10T14:30:47.0008561Z   - /home/runner/work/sparq/sparq/crates/sparq-wrapper-shacl/Cargo.toml
+2026-09-10T14:30:47.0008999Z   - /home/runner/work/sparq/sparq/crates/sparq-wrapper/Cargo.toml
+2026-09-10T14:30:47.0009562Z   - /home/runner/work/sparq/sparq/crates/sparq-zk-compose/Cargo.toml
+2026-09-10T14:30:47.0009981Z   - /home/runner/work/sparq/sparq/crates/sparq-zk/Cargo.toml
+2026-09-10T14:30:47.0010345Z   - /home/runner/work/sparq/sparq/rust-toolchain.toml
+2026-09-10T14:30:47.0011045Z ##[endgroup]
+2026-09-10T14:30:47.0011164Z 
+2026-09-10T14:30:47.0011257Z ... Restoring cache ...
+2026-09-10T14:30:47.2508974Z Cache hit for: v0-rust-test-workspace-Linux-x64-b9154ba3-0c74d5b7
+2026-09-10T14:30:48.5505925Z Received 0 of 623397222 (0.0%), 0.0 MBs/sec
+2026-09-10T14:30:49.5517734Z Received 113246208 of 623397222 (18.2%), 53.9 MBs/sec
+2026-09-10T14:30:50.5519161Z Received 222298112 of 623397222 (35.7%), 70.6 MBs/sec
+2026-09-10T14:30:51.5531449Z Received 343932928 of 623397222 (55.2%), 81.9 MBs/sec
+2026-09-10T14:30:52.5531230Z Received 499122176 of 623397222 (80.1%), 95.1 MBs/sec
+2026-09-10T14:30:53.4501918Z Received 623397222 of 623397222 (100.0%), 100.8 MBs/sec
+2026-09-10T14:30:53.4503036Z Cache Size: ~595 MB (623397222 B)
+2026-09-10T14:30:53.4539156Z [command]/usr/bin/tar -xf /home/runner/work/_temp/8bc60ac2-cdd0-4a51-b5fa-3c5e08109ba4/cache.tzst -P -C /home/runner/work/sparq/sparq --use-compress-program unzstd
+2026-09-10T14:30:57.4872144Z Cache restored successfully
+2026-09-10T14:30:57.5188417Z Restored from cache key "v0-rust-test-workspace-Linux-x64-b9154ba3-0c74d5b7" full match: true.
+2026-09-10T14:30:57.5460233Z ##[group]Run taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68
+2026-09-10T14:30:57.5460656Z with:
+2026-09-10T14:30:57.5460851Z   tool: nextest
+2026-09-10T14:30:57.5461047Z   checksum: true
+2026-09-10T14:30:57.5461263Z   fallback: cargo-binstall
+2026-09-10T14:30:57.5461488Z env:
+2026-09-10T14:30:57.5461672Z   CARGO_TERM_COLOR: always
+2026-09-10T14:30:57.5461903Z   RUST_BACKTRACE: 1
+2026-09-10T14:30:57.5462113Z   CARGO_NET_RETRY: 10
+2026-09-10T14:30:57.5462325Z   CARGO_INCREMENTAL: 0
+2026-09-10T14:30:57.5462568Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+2026-09-10T14:30:57.5463319Z   CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: -C link-arg=-fuse-ld=lld
+2026-09-10T14:30:57.5463945Z   CACHE_ON_FAILURE: false
+2026-09-10T14:30:57.5464168Z ##[endgroup]
+2026-09-10T14:30:57.5563259Z ##[start-action display=Run bail() {;id=__taiki-e_install-action.__run]
+2026-09-10T14:30:57.5591561Z ##[group]Run bail() {
+2026-09-10T14:30:57.5591825Z [36;1mbail() {[0m
+2026-09-10T14:30:57.5592128Z [36;1m  printf '::error::install-action: %s\n' "$*"[0m
+2026-09-10T14:30:57.5592444Z [36;1m  exit 1[0m
+2026-09-10T14:30:57.5592635Z [36;1m}[0m
+2026-09-10T14:30:57.5593304Z [36;1m# If /bin/sh is dash, environment variable containing % is not imported, but is fine[0m
+2026-09-10T14:30:57.5593850Z [36;1m# because it also means that it will not be exposed to subprocess.[0m
+2026-09-10T14:30:57.5594271Z [36;1mif /usr/bin/env | grep -Eq '^BASH_FUNC_'; then[0m
+2026-09-10T14:30:57.5594808Z [36;1m  bail 'bash function injection via BASH_FUNC_ environment variable is not allowed for security reasons'[0m
+2026-09-10T14:30:57.5595298Z [36;1mfi[0m
+2026-09-10T14:30:57.5595533Z [36;1mif ! command -v bash >/dev/null; then[0m
+2026-09-10T14:30:57.5595886Z [36;1m  if grep -Eq '^ID=alpine' /etc/os-release; then[0m
+2026-09-10T14:30:57.5596325Z [36;1m    printf '::group::Install packages required for install-action (bash)\n'[0m
+2026-09-10T14:30:57.5596767Z [36;1m    # NB: sync with apk_install in main.sh[0m
+2026-09-10T14:30:57.5597084Z [36;1m    if command -v sudo >/dev/null; then[0m
+2026-09-10T14:30:57.5597390Z [36;1m      sudo apk --no-cache add bash[0m
+2026-09-10T14:30:57.5597704Z [36;1m    elif command -v doas >/dev/null; then[0m
+2026-09-10T14:30:57.5598016Z [36;1m      doas apk --no-cache add bash[0m
+2026-09-10T14:30:57.5598280Z [36;1m    else[0m
+2026-09-10T14:30:57.5598491Z [36;1m      apk --no-cache add bash[0m
+2026-09-10T14:30:57.5598742Z [36;1m    fi[0m
+2026-09-10T14:30:57.5598951Z [36;1m    printf '::endgroup::\n'[0m
+2026-09-10T14:30:57.5599196Z [36;1m  else[0m
+2026-09-10T14:30:57.5599413Z [36;1m    bail 'this action requires bash'[0m
+2026-09-10T14:30:57.5599686Z [36;1m  fi[0m
+2026-09-10T14:30:57.5599871Z [36;1mfi[0m
+2026-09-10T14:30:57.5600140Z [36;1mbash --noprofile --norc "${GITHUB_ACTION_PATH:?}/main.sh"[0m
+2026-09-10T14:30:57.5602494Z shell: /usr/bin/env -u ENV -u BASH_ENV -u CDPATH -u SHELLOPTS -u BASHOPTS /bin/sh -eu {0}
+2026-09-10T14:30:57.5603222Z env:
+2026-09-10T14:30:57.5603424Z   CARGO_TERM_COLOR: always
+2026-09-10T14:30:57.5603657Z   RUST_BACKTRACE: 1
+2026-09-10T14:30:57.5603860Z   CARGO_NET_RETRY: 10
+2026-09-10T14:30:57.5604080Z   CARGO_INCREMENTAL: 0
+2026-09-10T14:30:57.5604320Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+2026-09-10T14:30:57.5604705Z   CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: -C link-arg=-fuse-ld=lld
+2026-09-10T14:30:57.5605085Z   CACHE_ON_FAILURE: false
+2026-09-10T14:30:57.5605311Z   INPUT_TOOL: nextest
+2026-09-10T14:30:57.5605518Z   INPUT_CHECKSUM: true
+2026-09-10T14:30:57.5605742Z   INPUT_FALLBACK: cargo-binstall
+2026-09-10T14:30:57.5608256Z   DEFAULT_GITHUB_TOKEN: ***
+2026-09-10T14:30:57.5608661Z   ACTION_USER_AGENT: taiki-e/install-action (18b1216eba7f8039b0f8d131d5473787f0edce68)
+2026-09-10T14:30:57.5609075Z   RUNNER_OS: Linux
+2026-09-10T14:30:57.5609275Z   RUNNER_ARCH: X64
+2026-09-10T14:30:57.5609475Z ##[endgroup]
+2026-09-10T14:30:58.0126985Z info: host platform: x86_64_linux
+2026-09-10T14:30:58.0611969Z info: installing cargo-nextest@latest
+2026-09-10T14:30:58.0824415Z info: downloading https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-0.9.140/cargo-nextest-0.9.140-x86_64-unknown-linux-gnu.tar.gz
+2026-09-10T14:30:58.5692046Z info: verifying sha256 checksum for cargo-nextest-0.9.140-x86_64-unknown-linux-gnu.tar.gz
+2026-09-10T14:30:58.8321374Z info: cargo-nextest installed at /home/runner/.cargo/bin/cargo-nextest
+2026-09-10T14:30:58.8325046Z + cargo-nextest nextest --version
+2026-09-10T14:30:58.8354410Z cargo-nextest 0.9.140 (a9fef2964 2026-07-05)
+2026-09-10T14:30:58.8354859Z release: 0.9.140
+2026-09-10T14:30:58.8355184Z commit-hash: a9fef2964e34f64ed4fceeee7c0c3559ce560920
+2026-09-10T14:30:58.8355838Z commit-date: 2026-07-05
+2026-09-10T14:30:58.8356125Z host: x86_64-unknown-linux-gnu
+2026-09-10T14:30:58.8358748Z 
+2026-09-10T14:30:58.8377627Z ##[end-action id=__taiki-e_install-action.__run;outcome=success;conclusion=success;duration_ms=1281]
+2026-09-10T14:30:58.8385732Z ##[start-action display=Run Set-StrictMode -Version Latest;id=__taiki-e_install-action.__run_2]
+2026-09-10T14:30:58.8391517Z ##[end-action id=__taiki-e_install-action.__run_2;outcome=skipped;conclusion=skipped;duration_ms=0]
+2026-09-10T14:30:58.8425965Z ##[group]Run cargo nextest archive --workspace --all-targets --features approx-ann,filtered-ann,vec-predicate --archive-file nextest.tar.zst
+2026-09-10T14:30:58.8427078Z [36;1mcargo nextest archive --workspace --all-targets --features approx-ann,filtered-ann,vec-predicate --archive-file nextest.tar.zst[0m
+2026-09-10T14:30:58.8461950Z shell: /usr/bin/bash -e {0}
+2026-09-10T14:30:58.8462245Z env:
+2026-09-10T14:30:58.8462471Z   CARGO_TERM_COLOR: always
+2026-09-10T14:30:58.8463014Z   RUST_BACKTRACE: 1
+2026-09-10T14:30:58.8463386Z   CARGO_NET_RETRY: 10
+2026-09-10T14:30:58.8463715Z   CARGO_INCREMENTAL: 0
+2026-09-10T14:30:58.8464003Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+2026-09-10T14:30:58.8464477Z   CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: -C link-arg=-fuse-ld=lld
+2026-09-10T14:30:58.8464946Z   CACHE_ON_FAILURE: false
+2026-09-10T14:30:58.8465214Z ##[endgroup]
+2026-09-10T14:30:58.9853159Z [1m[92m    Updating[0m crates.io index
+2026-09-10T14:31:01.8996979Z [1m[92m   Compiling[0m sparq-core v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-core)
+2026-09-10T14:31:01.9131380Z [1m[92m   Compiling[0m sparq-jsonld v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-jsonld)
+2026-09-10T14:31:01.9262677Z [1m[92m   Compiling[0m spargebra v0.4.6 (/home/runner/work/sparq/sparq/vendor/spargebra)
+2026-09-10T14:31:01.9515115Z [1m[92m   Compiling[0m sparq-conformance-floors v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-conformance-floors)
+2026-09-10T14:31:02.0213717Z [1m[92m   Compiling[0m sparq-fedclient v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-fedclient)
+2026-09-10T14:31:02.0694690Z [1m[92m   Compiling[0m sparq-kb v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-kb)
+2026-09-10T14:31:02.1264822Z [1m[92m   Compiling[0m sparq-difftest v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-difftest)
+2026-09-10T14:31:02.7101314Z [1m[92m   Compiling[0m sparq-acbench v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-acbench)
+2026-09-10T14:31:04.1784796Z [1m[92m   Compiling[0m sparq-substrate v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-substrate)
+2026-09-10T14:31:04.4925019Z [1m[92m   Compiling[0m sparq-engine-serialize v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-engine-serialize)
+2026-09-10T14:31:05.0844783Z [1m[92m   Compiling[0m sparq-engine-service v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-engine-service)
+2026-09-10T14:31:05.5281916Z [1m[92m   Compiling[0m sparq-engine v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-engine)
+2026-09-10T14:31:05.6084728Z [1m[92m   Compiling[0m sparq-reason v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-reason)
+2026-09-10T14:31:05.9854410Z [1m[92m   Compiling[0m sparq-canon v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-canon)
+2026-09-10T14:31:06.5304779Z [1m[92m   Compiling[0m sparq-introspect v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-introspect)
+2026-09-10T14:31:07.5571219Z [1m[92m   Compiling[0m sparq-sim v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-sim)
+2026-09-10T14:31:08.0048353Z [1m[92m   Compiling[0m sparq-hdt v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-hdt)
+2026-09-10T14:31:08.4124758Z [1m[92m   Compiling[0m sparq-zk v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-zk)
+2026-09-10T14:31:08.7654759Z [1m[92m   Compiling[0m sparq-shacl v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-shacl)
+2026-09-10T14:31:11.1274999Z [1m[92m   Compiling[0m sparq-trust v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-trust)
+2026-09-10T14:31:11.1924636Z [1m[92m   Compiling[0m sparq-serve v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-serve)
+2026-09-10T14:31:11.4454875Z [1m[92m   Compiling[0m sparq-lws-core v0.1.0 (/home/runner/work/sparq/sparq/crates/sparq-lws-core)
+2026-09-10T14:31:11.5544785Z [1m[92m   Compiling[0m sparq-server v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-server)
+2026-09-10T14:31:11.7504605Z [1m[92m   Compiling[0m sparq-vectors v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-vectors)
+2026-09-10T14:31:14.0645307Z [1m[92m   Compiling[0m sparq-solid v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-solid)
+2026-09-10T14:31:15.7924881Z [1m[92m   Compiling[0m sparq-conformance v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-conformance)
+2026-09-10T14:31:16.4484649Z [1m[92m   Compiling[0m sparq-geo v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-geo)
+2026-09-10T14:31:16.9880984Z [1m[92m   Compiling[0m sparq-text v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-text)
+2026-09-10T14:31:18.1635014Z [1m[92m   Compiling[0m sparq-zk-compose v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-zk-compose)
+2026-09-10T14:31:19.0334851Z [1m[92m   Compiling[0m sparq-rsp v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-rsp)
+2026-09-10T14:31:19.9247632Z [1m[92m   Compiling[0m sparq-policy v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-policy)
+2026-09-10T14:31:21.2924877Z [1m[92m   Compiling[0m sparq-mcp v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-mcp)
+2026-09-10T14:31:22.1294840Z [1m[92m   Compiling[0m sparq-nlq v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-nlq)
+2026-09-10T14:31:22.1934886Z [1m[92m   Compiling[0m sparq-reason-el v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-reason-el)
+2026-09-10T14:31:22.8495028Z [1m[92m   Compiling[0m sparq-arrow v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-arrow)
+2026-09-10T14:31:22.8574411Z [1m[92m   Compiling[0m sparq-wrapper v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-wrapper)
+2026-09-10T14:31:22.8902050Z [1m[92m   Compiling[0m sparq-algos v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-algos)
+2026-09-10T14:31:23.0448800Z [1m[92m   Compiling[0m sparq-forms v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-forms)
+2026-09-10T14:31:23.3173699Z [1m[92m   Compiling[0m sparq-reason-ql v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-reason-ql)
+2026-09-10T14:31:23.3914733Z [1m[92m   Compiling[0m sparq-reason-dl v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-reason-dl)
+2026-09-10T14:31:23.8215062Z [1m[92m   Compiling[0m sparq-shaclc v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-shaclc)
+2026-09-10T14:31:24.2035067Z [1m[92m   Compiling[0m sparq-metamorph v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-metamorph)
+2026-09-10T14:31:24.3066781Z [1m[92m   Compiling[0m sparq-mpc v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-mpc)
+2026-09-10T14:31:25.1847740Z [1m[92m   Compiling[0m sparq-terse v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-terse)
+2026-09-10T14:31:25.4891835Z [1m[92m   Compiling[0m sparq-py v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-py)
+2026-09-10T14:31:25.7114735Z [1m[92m   Compiling[0m sparq-vc v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-vc)
+2026-09-10T14:31:25.9289208Z [1m[92m   Compiling[0m sparq-e2ee-ng v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-e2ee-ng)
+2026-09-10T14:31:26.8714539Z [1m[92m   Compiling[0m sparq-gpu v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-gpu)
+2026-09-10T14:31:27.2148778Z [1m[92m   Compiling[0m sparq-wasm v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-wasm)
+2026-09-10T14:31:27.2805045Z [1m[92m   Compiling[0m sparq-prov v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-prov)
+2026-09-10T14:31:27.4174481Z [1m[92m   Compiling[0m sparopt v0.3.6
+2026-09-10T14:31:27.5280282Z [1m[92m   Compiling[0m sparq-jsonld-registry v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-jsonld-registry)
+2026-09-10T14:31:27.5914750Z [1m[92m   Compiling[0m sparq-parse v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-parse)
+2026-09-10T14:31:28.0264368Z [1m[92m   Compiling[0m spareval v0.2.6
+2026-09-10T14:31:28.0855369Z [1m[92m   Compiling[0m sparq-fedplan v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-fedplan)
+2026-09-10T14:31:28.1304756Z [1m[92m   Compiling[0m sparq-rsp-wasm v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-rsp-wasm)
+2026-09-10T14:31:28.5455833Z [1m[92m   Compiling[0m sparq-text-wasm v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-text-wasm)
+2026-09-10T14:31:28.8234945Z [1m[92m   Compiling[0m sparq-wac-oracle v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-wac-oracle)
+2026-09-10T14:31:29.1714872Z [1m[92m   Compiling[0m sparq-reason-wasm v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-reason-wasm)
+2026-09-10T14:31:29.2342277Z [1m[92m   Compiling[0m sparq-shacl-wasm v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-shacl-wasm)
+2026-09-10T14:31:29.3339464Z [1m[92m   Compiling[0m sparq-lws-wasm v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-lws-wasm)
+2026-09-10T14:31:29.5507382Z [1m[92m   Compiling[0m sparq-http3 v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-http3)
+2026-09-10T14:31:29.6122208Z [1m[92m   Compiling[0m sparq-secprop-vocab v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-secprop-vocab)
+2026-09-10T14:31:30.7794496Z [1m[92m   Compiling[0m oxigraph v0.5.9
+2026-09-10T14:31:35.3679074Z [1m[92m   Compiling[0m sparq-bench v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-bench)
+2026-09-10T14:32:55.2616802Z [1m[92m   Compiling[0m sparq-cli v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-cli)
+2026-09-10T14:34:32.0084125Z [1m[92m   Compiling[0m sparq-crdt v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-crdt)
+2026-09-10T14:34:34.0834862Z [1m[92m   Compiling[0m sparq-wrapper-gen v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-wrapper-gen)
+2026-09-10T14:34:34.5318763Z [1m[92m   Compiling[0m sparq-fedplan-mpc v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-fedplan-mpc)
+2026-09-10T14:34:34.5741209Z [1m[92m   Compiling[0m sparq-reason-diff v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-reason-diff)
+2026-09-10T14:34:34.6500746Z [1m[92m   Compiling[0m sparq-wrapper-integration v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-wrapper-integration)
+2026-09-10T14:34:34.7007159Z [1m[92m   Compiling[0m sparq-wrapper-shacl v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-wrapper-shacl)
+2026-09-10T14:34:38.1959666Z [1m[92m    Finished[0m `test` profile [unoptimized + debuginfo] target(s) in 3m 37s
+2026-09-10T14:34:39.6231124Z [32;1m   Archiving[0m [1m742[0m binaries (including [1m11[0m non-test binaries; [1m1[0m non-test binary filtered out), [1m1[0m build script output directory, [1m6[0m linked paths, and [1m1[0m standard library to [1mnextest.tar.zst[0m
+2026-09-10T14:35:51.3161431Z [32;1m    Archived[0m [1m1207[0m files to [1mnextest.tar.zst[0m in 1m 11.70s
+2026-09-10T14:35:51.5358545Z ##[group]Run actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+2026-09-10T14:35:51.5363093Z with:
+2026-09-10T14:35:51.5363596Z   name: nextest-archive
+2026-09-10T14:35:51.5366087Z   path: nextest.tar.zst
+2026-09-10T14:35:51.5368468Z   retention-days: 1
+2026-09-10T14:35:51.5371222Z   if-no-files-found: error
+2026-09-10T14:35:51.5373963Z   compression-level: 0
+2026-09-10T14:35:51.5374519Z   overwrite: false
+2026-09-10T14:35:51.5376944Z   include-hidden-files: false
+2026-09-10T14:35:51.5379316Z   archive: true
+2026-09-10T14:35:51.5381672Z env:
+2026-09-10T14:35:51.5384179Z   CARGO_TERM_COLOR: always
+2026-09-10T14:35:51.5386545Z   RUST_BACKTRACE: 1
+2026-09-10T14:35:51.5387064Z   CARGO_NET_RETRY: 10
+2026-09-10T14:35:51.5389540Z   CARGO_INCREMENTAL: 0
+2026-09-10T14:35:51.5392007Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+2026-09-10T14:35:51.5395193Z   CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: -C link-arg=-fuse-ld=lld
+2026-09-10T14:35:51.5398448Z   CACHE_ON_FAILURE: false
+2026-09-10T14:35:51.5401290Z ##[endgroup]
+2026-09-10T14:35:51.8537584Z With the provided path, there will be 1 file uploaded
+2026-09-10T14:35:51.8543263Z Artifact name is valid!
+2026-09-10T14:35:51.8544048Z Root directory input is valid!
+2026-09-10T14:35:52.2505136Z Uploading artifact: nextest-archive.zip
+2026-09-10T14:35:52.2545819Z Beginning upload of artifact content to blob storage
+2026-09-10T14:35:53.3700333Z Uploaded bytes 8388608
+2026-09-10T14:35:53.3820822Z Uploaded bytes 16777216
+2026-09-10T14:35:53.3938240Z Uploaded bytes 25165824
+2026-09-10T14:35:53.4383185Z Uploaded bytes 33554432
+2026-09-10T14:35:53.6749199Z Uploaded bytes 41943040
+2026-09-10T14:35:53.6931544Z Uploaded bytes 50331648
+2026-09-10T14:35:53.7349899Z Uploaded bytes 58720256
+2026-09-10T14:35:53.7549256Z Uploaded bytes 67108864
+2026-09-10T14:35:53.9950355Z Uploaded bytes 75497472
+2026-09-10T14:35:54.0196242Z Uploaded bytes 83886080
+2026-09-10T14:35:54.0644007Z Uploaded bytes 92274688
+2026-09-10T14:35:54.1238007Z Uploaded bytes 100663296
+2026-09-10T14:35:54.2714563Z Uploaded bytes 109051904
+2026-09-10T14:35:54.3806818Z Uploaded bytes 117440512
+2026-09-10T14:35:54.4035060Z Uploaded bytes 125829120
+2026-09-10T14:35:54.4211652Z Uploaded bytes 134217728
+2026-09-10T14:35:54.5967682Z Uploaded bytes 142606336
+2026-09-10T14:35:54.6982165Z Uploaded bytes 150994944
+2026-09-10T14:35:54.7161899Z Uploaded bytes 159383552
+2026-09-10T14:35:54.7617342Z Uploaded bytes 167772160
+2026-09-10T14:35:54.8802424Z Uploaded bytes 176160768
+2026-09-10T14:35:55.0199530Z Uploaded bytes 184549376
+2026-09-10T14:35:55.0994495Z Uploaded bytes 192937984
+2026-09-10T14:35:55.1724688Z Uploaded bytes 201326592
+2026-09-10T14:35:55.1905681Z Uploaded bytes 209715200
+2026-09-10T14:35:55.3143864Z Uploaded bytes 218103808
+2026-09-10T14:35:55.4810166Z Uploaded bytes 226492416
+2026-09-10T14:35:55.5583175Z Uploaded bytes 234881024
+2026-09-10T14:35:55.6189645Z Uploaded bytes 243269632
+2026-09-10T14:35:55.6980385Z Uploaded bytes 251658240
+2026-09-10T14:35:55.7858340Z Uploaded bytes 260046848
+2026-09-10T14:35:55.9216041Z Uploaded bytes 268435456
+2026-09-10T14:35:55.9428128Z Uploaded bytes 276824064
+2026-09-10T14:35:56.0655149Z Uploaded bytes 285212672
+2026-09-10T14:35:56.1903380Z Uploaded bytes 293601280
+2026-09-10T14:35:56.2446020Z Uploaded bytes 301989888
+2026-09-10T14:35:56.2804888Z Uploaded bytes 310378496
+2026-09-10T14:35:56.3948027Z Uploaded bytes 318767104
+2026-09-10T14:35:56.5941021Z Uploaded bytes 327155712
+2026-09-10T14:35:56.6024913Z Uploaded bytes 335544320
+2026-09-10T14:35:56.6104398Z Uploaded bytes 343932928
+2026-09-10T14:35:56.6826124Z Uploaded bytes 352321536
+2026-09-10T14:35:56.9079319Z Uploaded bytes 360710144
+2026-09-10T14:35:56.9266946Z Uploaded bytes 369098752
+2026-09-10T14:35:56.9878159Z Uploaded bytes 377487360
+2026-09-10T14:35:57.0509868Z Uploaded bytes 385875968
+2026-09-10T14:35:57.1941581Z Uploaded bytes 394264576
+2026-09-10T14:35:57.2074108Z Uploaded bytes 402653184
+2026-09-10T14:35:57.2883137Z Uploaded bytes 411041792
+2026-09-10T14:35:57.3349321Z Uploaded bytes 419430400
+2026-09-10T14:35:57.4937427Z Uploaded bytes 427819008
+2026-09-10T14:35:57.5180238Z Uploaded bytes 436207616
+2026-09-10T14:35:57.6153145Z Uploaded bytes 444596224
+2026-09-10T14:35:57.6966165Z Uploaded bytes 452984832
+2026-09-10T14:35:57.8153614Z Uploaded bytes 461373440
+2026-09-10T14:35:57.8885537Z Uploaded bytes 469762048
+2026-09-10T14:35:57.9937898Z Uploaded bytes 478150656
+2026-09-10T14:35:58.0085949Z Uploaded bytes 486539264
+2026-09-10T14:35:58.1363425Z Uploaded bytes 494927872
+2026-09-10T14:35:58.2670046Z Uploaded bytes 503316480
+2026-09-10T14:35:58.2950084Z Uploaded bytes 511705088
+2026-09-10T14:35:58.3519573Z Uploaded bytes 520093696
+2026-09-10T14:35:58.4327747Z Uploaded bytes 528482304
+2026-09-10T14:35:58.5489499Z Uploaded bytes 536870912
+2026-09-10T14:35:58.5623620Z Uploaded bytes 545259520
+2026-09-10T14:35:58.6608372Z Uploaded bytes 553648128
+2026-09-10T14:35:58.7551149Z Uploaded bytes 562036736
+2026-09-10T14:35:58.8372070Z Uploaded bytes 570425344
+2026-09-10T14:35:58.8449187Z Uploaded bytes 578813952
+2026-09-10T14:35:58.9448967Z Uploaded bytes 587202560
+2026-09-10T14:35:59.0697701Z Uploaded bytes 595591168
+2026-09-10T14:35:59.1888511Z Uploaded bytes 603979776
+2026-09-10T14:35:59.1967968Z Uploaded bytes 612368384
+2026-09-10T14:35:59.3431059Z Uploaded bytes 620756992
+2026-09-10T14:35:59.3624891Z Uploaded bytes 629145600
+2026-09-10T14:35:59.5133581Z Uploaded bytes 637534208
+2026-09-10T14:35:59.5457294Z Uploaded bytes 645922816
+2026-09-10T14:35:59.6730729Z Uploaded bytes 654311424
+2026-09-10T14:35:59.6832651Z Uploaded bytes 662700032
+2026-09-10T14:35:59.8095248Z Uploaded bytes 671088640
+2026-09-10T14:35:59.8383182Z Uploaded bytes 679477248
+2026-09-10T14:36:00.0193606Z Uploaded bytes 687865856
+2026-09-10T14:36:00.0497754Z Uploaded bytes 696254464
+2026-09-10T14:36:00.1520561Z Uploaded bytes 704643072
+2026-09-10T14:36:00.1597423Z Uploaded bytes 713031680
+2026-09-10T14:36:00.3918502Z Uploaded bytes 721420288
+2026-09-10T14:36:00.4023268Z Uploaded bytes 729808896
+2026-09-10T14:36:00.4549178Z Uploaded bytes 738197504
+2026-09-10T14:36:00.5155914Z Uploaded bytes 746586112
+2026-09-10T14:36:00.6950412Z Uploaded bytes 754974720
+2026-09-10T14:36:00.7655878Z Uploaded bytes 763363328
+2026-09-10T14:36:00.7773339Z Uploaded bytes 771751936
+2026-09-10T14:36:00.8884869Z Uploaded bytes 780140544
+2026-09-10T14:36:01.0864912Z Uploaded bytes 788529152
+2026-09-10T14:36:01.0969975Z Uploaded bytes 796917760
+2026-09-10T14:36:01.2068778Z Uploaded bytes 805306368
+2026-09-10T14:36:01.2299700Z Uploaded bytes 813694976
+2026-09-10T14:36:01.4316772Z Uploaded bytes 822083584
+2026-09-10T14:36:01.4517191Z Uploaded bytes 830472192
+2026-09-10T14:36:01.5876854Z Uploaded bytes 838860800
+2026-09-10T14:36:01.6205977Z Uploaded bytes 847249408
+2026-09-10T14:36:01.7346623Z Uploaded bytes 855638016
+2026-09-10T14:36:01.8891106Z Uploaded bytes 864026624
+2026-09-10T14:36:01.9376972Z Uploaded bytes 872415232
+2026-09-10T14:36:01.9546748Z Uploaded bytes 880803840
+2026-09-10T14:36:02.0750962Z Uploaded bytes 889192448
+2026-09-10T14:36:02.2113041Z Uploaded bytes 897581056
+2026-09-10T14:36:02.2188959Z Uploaded bytes 905969664
+2026-09-10T14:36:02.2821973Z Uploaded bytes 914358272
+2026-09-10T14:36:02.3861476Z Uploaded bytes 922746880
+2026-09-10T14:36:02.6066167Z Uploaded bytes 931135488
+2026-09-10T14:36:02.6273345Z Uploaded bytes 939524096
+2026-09-10T14:36:02.6651054Z Uploaded bytes 947912704
+2026-09-10T14:36:02.7559973Z Uploaded bytes 956301312
+2026-09-10T14:36:02.9678731Z Uploaded bytes 964689920
+2026-09-10T14:36:03.0006474Z Uploaded bytes 973078528
+2026-09-10T14:36:03.0163503Z Uploaded bytes 981467136
+2026-09-10T14:36:03.0840280Z Uploaded bytes 989855744
+2026-09-10T14:36:03.3165044Z Uploaded bytes 998244352
+2026-09-10T14:36:03.3586709Z Uploaded bytes 1006632960
+2026-09-10T14:36:03.3753496Z Uploaded bytes 1015021568
+2026-09-10T14:36:03.3850091Z Uploaded bytes 1023410176
+2026-09-10T14:36:03.6884210Z Uploaded bytes 1031798784
+2026-09-10T14:36:03.7528779Z Uploaded bytes 1040187392
+2026-09-10T14:36:03.7699510Z Uploaded bytes 1048576000
+2026-09-10T14:36:03.7806546Z Uploaded bytes 1056964608
+2026-09-10T14:36:04.0853934Z Uploaded bytes 1065353216
+2026-09-10T14:36:04.0998608Z Uploaded bytes 1073741824
+2026-09-10T14:36:04.1005522Z Uploaded bytes 1082130432
+2026-09-10T14:36:04.1703987Z Uploaded bytes 1090519040
+2026-09-10T14:36:04.3762212Z Uploaded bytes 1098907648
+2026-09-10T14:36:04.5108853Z Uploaded bytes 1107296256
+2026-09-10T14:36:04.5184468Z Uploaded bytes 1115684864
+2026-09-10T14:36:04.5717932Z Uploaded bytes 1124073472
+2026-09-10T14:36:04.6472217Z Uploaded bytes 1132462080
+2026-09-10T14:36:04.7987075Z Uploaded bytes 1140850688
+2026-09-10T14:36:04.9263716Z Uploaded bytes 1149239296
+2026-09-10T14:36:04.9432153Z Uploaded bytes 1157627904
+2026-09-10T14:36:04.9805583Z Uploaded bytes 1166016512
+2026-09-10T14:36:05.0869149Z Uploaded bytes 1174405120
+2026-09-10T14:36:05.1979342Z Uploaded bytes 1182793728
+2026-09-10T14:36:05.2746049Z Uploaded bytes 1191182336
+2026-09-10T14:36:05.3824043Z Uploaded bytes 1199570944
+2026-09-10T14:36:05.4244326Z Uploaded bytes 1207959552
+2026-09-10T14:36:05.5478639Z Uploaded bytes 1216348160
+2026-09-10T14:36:05.6318847Z Uploaded bytes 1224736768
+2026-09-10T14:36:05.7253386Z Uploaded bytes 1233125376
+2026-09-10T14:36:05.7330407Z Uploaded bytes 1241513984
+2026-09-10T14:36:05.8735280Z Uploaded bytes 1249902592
+2026-09-10T14:36:05.9089471Z Uploaded bytes 1258291200
+2026-09-10T14:36:06.0313083Z Uploaded bytes 1266679808
+2026-09-10T14:36:06.0765982Z Uploaded bytes 1275068416
+2026-09-10T14:36:06.1580190Z Uploaded bytes 1283457024
+2026-09-10T14:36:06.2935816Z Uploaded bytes 1291845632
+2026-09-10T14:36:06.3656507Z Uploaded bytes 1300234240
+2026-09-10T14:36:06.3906210Z Uploaded bytes 1308622848
+2026-09-10T14:36:06.4528587Z Uploaded bytes 1317011456
+2026-09-10T14:36:06.6265460Z Uploaded bytes 1325400064
+2026-09-10T14:36:06.6868440Z Uploaded bytes 1333788672
+2026-09-10T14:36:06.7016668Z Uploaded bytes 1342177280
+2026-09-10T14:36:06.7511735Z Uploaded bytes 1350565888
+2026-09-10T14:36:06.9670307Z Uploaded bytes 1358954496
+2026-09-10T14:36:06.9977933Z Uploaded bytes 1367343104
+2026-09-10T14:36:07.0723648Z Uploaded bytes 1375731712
+2026-09-10T14:36:07.1046033Z Uploaded bytes 1384120320
+2026-09-10T14:36:07.2676696Z Uploaded bytes 1392508928
+2026-09-10T14:36:07.3144453Z Uploaded bytes 1400897536
+2026-09-10T14:36:07.3786215Z Uploaded bytes 1409286144
+2026-09-10T14:36:07.4232340Z Uploaded bytes 1417674752
+2026-09-10T14:36:07.5785301Z Uploaded bytes 1426063360
+2026-09-10T14:36:07.6260161Z Uploaded bytes 1434451968
+2026-09-10T14:36:07.6527781Z Uploaded bytes 1442840576
+2026-09-10T14:36:07.7289131Z Uploaded bytes 1451229184
+2026-09-10T14:36:07.9252514Z Uploaded bytes 1459617792
+2026-09-10T14:36:07.9361030Z Uploaded bytes 1468006400
+2026-09-10T14:36:07.9500462Z Uploaded bytes 1476395008
+2026-09-10T14:36:08.1004292Z Uploaded bytes 1484783616
+2026-09-10T14:36:08.2878442Z Uploaded bytes 1493172224
+2026-09-10T14:36:08.2971178Z Uploaded bytes 1501560832
+2026-09-10T14:36:08.3563802Z Uploaded bytes 1509949440
+2026-09-10T14:36:08.4364867Z Uploaded bytes 1518338048
+2026-09-10T14:36:08.5712739Z Uploaded bytes 1526726656
+2026-09-10T14:36:08.6204195Z Uploaded bytes 1535115264
+2026-09-10T14:36:08.6299189Z Uploaded bytes 1543503872
+2026-09-10T14:36:08.8016100Z Uploaded bytes 1551892480
+2026-09-10T14:36:08.9248455Z Uploaded bytes 1560281088
+2026-09-10T14:36:08.9321049Z Uploaded bytes 1568669696
+2026-09-10T14:36:08.9841479Z Uploaded bytes 1577058304
+2026-09-10T14:36:09.1901581Z Uploaded bytes 1585446912
+2026-09-10T14:36:09.2667381Z Uploaded bytes 1593835520
+2026-09-10T14:36:09.3000268Z Uploaded bytes 1602224128
+2026-09-10T14:36:09.3130350Z Uploaded bytes 1610612736
+2026-09-10T14:36:09.5497896Z Uploaded bytes 1619001344
+2026-09-10T14:36:09.6016961Z Uploaded bytes 1627389952
+2026-09-10T14:36:09.6236440Z Uploaded bytes 1635778560
+2026-09-10T14:36:09.6985779Z Uploaded bytes 1644167168
+2026-09-10T14:36:09.8513766Z Uploaded bytes 1652555776
+2026-09-10T14:36:09.9236952Z Uploaded bytes 1660944384
+2026-09-10T14:36:10.0285027Z Uploaded bytes 1669332992
+2026-09-10T14:36:10.0360692Z Uploaded bytes 1677721600
+2026-09-10T14:36:10.2459615Z Uploaded bytes 1686110208
+2026-09-10T14:36:10.2817786Z Uploaded bytes 1694498816
+2026-09-10T14:36:10.3888425Z Uploaded bytes 1702887424
+2026-09-10T14:36:10.4742381Z Uploaded bytes 1711276032
+2026-09-10T14:36:10.5790441Z Uploaded bytes 1719664640
+2026-09-10T14:36:10.6281946Z Uploaded bytes 1728053248
+2026-09-10T14:36:10.7597019Z Uploaded bytes 1736441856
+2026-09-10T14:36:10.7820127Z Uploaded bytes 1744830464
+2026-09-10T14:36:10.8799471Z Uploaded bytes 1753219072
+2026-09-10T14:36:10.9211141Z Uploaded bytes 1761607680
+2026-09-10T14:36:11.0734767Z Uploaded bytes 1769996288
+2026-09-10T14:36:11.1019620Z Uploaded bytes 1778384896
+2026-09-10T14:36:11.2156361Z Uploaded bytes 1786773504
+2026-09-10T14:36:11.2663632Z Uploaded bytes 1795162112
+2026-09-10T14:36:11.3655987Z Uploaded bytes 1803550720
+2026-09-10T14:36:11.4440537Z Uploaded bytes 1811939328
+2026-09-10T14:36:11.5798583Z Uploaded bytes 1820327936
+2026-09-10T14:36:11.6101389Z Uploaded bytes 1828716544
+2026-09-10T14:36:11.6958164Z Uploaded bytes 1837105152
+2026-09-10T14:36:11.7408605Z Uploaded bytes 1845493760
+2026-09-10T14:36:11.9000783Z Uploaded bytes 1853882368
+2026-09-10T14:36:11.9184869Z Uploaded bytes 1862270976
+2026-09-10T14:36:12.0245618Z Uploaded bytes 1870659584
+2026-09-10T14:36:12.0753675Z Uploaded bytes 1879048192
+2026-09-10T14:36:12.2189093Z Uploaded bytes 1887436800
+2026-09-10T14:36:12.3148243Z Uploaded bytes 1895825408
+2026-09-10T14:36:12.3403920Z Uploaded bytes 1904214016
+2026-09-10T14:36:12.3915114Z Uploaded bytes 1912602624
+2026-09-10T14:36:12.5959728Z Uploaded bytes 1920991232
+2026-09-10T14:36:12.6964687Z Uploaded bytes 1929379840
+2026-09-10T14:36:12.7234995Z Uploaded bytes 1937768448
+2026-09-10T14:36:12.7307362Z Uploaded bytes 1946157056
+2026-09-10T14:36:12.8768075Z Uploaded bytes 1954545664
+2026-09-10T14:36:12.9983914Z Uploaded bytes 1962934272
+2026-09-10T14:36:13.0316307Z Uploaded bytes 1971322880
+2026-09-10T14:36:13.1432916Z Uploaded bytes 1979711488
+2026-09-10T14:36:13.2373764Z Uploaded bytes 1988100096
+2026-09-10T14:36:13.3841276Z Uploaded bytes 1996488704
+2026-09-10T14:36:13.4071729Z Uploaded bytes 2004877312
+2026-09-10T14:36:13.4300179Z Uploaded bytes 2013265920
+2026-09-10T14:36:13.5967749Z Uploaded bytes 2021654528
+2026-09-10T14:36:13.7131172Z Uploaded bytes 2030043136
+2026-09-10T14:36:13.7521798Z Uploaded bytes 2038431744
+2026-09-10T14:36:13.7655874Z Uploaded bytes 2046820352
+2026-09-10T14:36:13.8857119Z Uploaded bytes 2055208960
+2026-09-10T14:36:14.0149867Z Uploaded bytes 2063597568
+2026-09-10T14:36:14.1008520Z Uploaded bytes 2071986176
+2026-09-10T14:36:14.1133642Z Uploaded bytes 2080374784
+2026-09-10T14:36:14.2438510Z Uploaded bytes 2088763392
+2026-09-10T14:36:14.3444192Z Uploaded bytes 2097152000
+2026-09-10T14:36:14.4163428Z Uploaded bytes 2105540608
+2026-09-10T14:36:14.4480060Z Uploaded bytes 2113929216
+2026-09-10T14:36:14.5556980Z Uploaded bytes 2122317824
+2026-09-10T14:36:14.6351711Z Uploaded bytes 2130706432
+2026-09-10T14:36:14.7233479Z Uploaded bytes 2139095040
+2026-09-10T14:36:14.7721184Z Uploaded bytes 2147483648
+2026-09-10T14:36:14.9372678Z Uploaded bytes 2155872256
+2026-09-10T14:36:15.0084915Z Uploaded bytes 2164260864
+2026-09-10T14:36:15.1206211Z Uploaded bytes 2172649472
+2026-09-10T14:36:15.1492001Z Uploaded bytes 2181038080
+2026-09-10T14:36:15.2314601Z Uploaded bytes 2189426688
+2026-09-10T14:36:15.3770759Z Uploaded bytes 2197815296
+2026-09-10T14:36:15.4617298Z Uploaded bytes 2206203904
+2026-09-10T14:36:15.4763760Z Uploaded bytes 2214592512
+2026-09-10T14:36:15.5280393Z Uploaded bytes 2222981120
+2026-09-10T14:36:15.6533355Z Uploaded bytes 2231369728
+2026-09-10T14:36:15.8019165Z Uploaded bytes 2239758336
+2026-09-10T14:36:15.8282542Z Uploaded bytes 2248146944
+2026-09-10T14:36:15.8466492Z Uploaded bytes 2256535552
+2026-09-10T14:36:15.9281066Z Uploaded bytes 2264924160
+2026-09-10T14:36:16.0959441Z Uploaded bytes 2273312768
+2026-09-10T14:36:16.1301007Z Uploaded bytes 2281701376
+2026-09-10T14:36:16.1413526Z Uploaded bytes 2290089984
+2026-09-10T14:36:16.2091243Z Uploaded bytes 2298478592
+2026-09-10T14:36:16.4241060Z Uploaded bytes 2306867200
+2026-09-10T14:36:16.4557073Z Uploaded bytes 2315255808
+2026-09-10T14:36:16.4727335Z Uploaded bytes 2323644416
+2026-09-10T14:36:16.5081769Z Uploaded bytes 2332033024
+2026-09-10T14:36:16.7727467Z Uploaded bytes 2340421632
+2026-09-10T14:36:16.7931390Z Uploaded bytes 2348810240
+2026-09-10T14:36:16.8366685Z Uploaded bytes 2357198848
+2026-09-10T14:36:16.9224950Z Uploaded bytes 2365587456
+2026-09-10T14:36:17.0637287Z Uploaded bytes 2373976064
+2026-09-10T14:36:17.1191743Z Uploaded bytes 2382364672
+2026-09-10T14:36:17.2331974Z Uploaded bytes 2390753280
+2026-09-10T14:36:17.2687627Z Uploaded bytes 2399141888
+2026-09-10T14:36:17.3599001Z Uploaded bytes 2407530496
+2026-09-10T14:36:17.5330665Z Uploaded bytes 2415919104
+2026-09-10T14:36:17.5404233Z Uploaded bytes 2424307712
+2026-09-10T14:36:17.5682021Z Uploaded bytes 2432696320
+2026-09-10T14:36:17.6511348Z Uploaded bytes 2441084928
+2026-09-10T14:36:17.8224445Z Uploaded bytes 2449473536
+2026-09-10T14:36:17.8974667Z Uploaded bytes 2457862144
+2026-09-10T14:36:17.9124195Z Uploaded bytes 2466250752
+2026-09-10T14:36:17.9836080Z Uploaded bytes 2474639360
+2026-09-10T14:36:18.2238245Z Uploaded bytes 2483027968
+2026-09-10T14:36:18.2313524Z Uploaded bytes 2491416576
+2026-09-10T14:36:18.2480082Z Uploaded bytes 2499805184
+2026-09-10T14:36:18.3993614Z Uploaded bytes 2508193792
+2026-09-10T14:36:18.5409346Z Uploaded bytes 2516582400
+2026-09-10T14:36:18.5483598Z Uploaded bytes 2524971008
+2026-09-10T14:36:18.5556321Z Uploaded bytes 2533359616
+2026-09-10T14:36:18.7283766Z Uploaded bytes 2541748224
+2026-09-10T14:36:18.8541763Z Uploaded bytes 2550136832
+2026-09-10T14:36:18.8716154Z Uploaded bytes 2558525440
+2026-09-10T14:36:18.9682213Z Uploaded bytes 2566914048
+2026-09-10T14:36:19.1009755Z Uploaded bytes 2575302656
+2026-09-10T14:36:19.1679124Z Uploaded bytes 2583691264
+2026-09-10T14:36:19.1755502Z Uploaded bytes 2592079872
+2026-09-10T14:36:19.3490715Z Uploaded bytes 2600468480
+2026-09-10T14:36:19.4728691Z Uploaded bytes 2608857088
+2026-09-10T14:36:19.4823823Z Uploaded bytes 2617245696
+2026-09-10T14:36:19.4923977Z Uploaded bytes 2625634304
+2026-09-10T14:36:19.6722017Z Uploaded bytes 2634022912
+2026-09-10T14:36:19.8007055Z Uploaded bytes 2642411520
+2026-09-10T14:36:19.8173754Z Uploaded bytes 2650800128
+2026-09-10T14:36:19.8257834Z Uploaded bytes 2659188736
+2026-09-10T14:36:20.0300339Z Uploaded bytes 2667577344
+2026-09-10T14:36:20.1699321Z Uploaded bytes 2675965952
+2026-09-10T14:36:20.1899417Z Uploaded bytes 2684354560
+2026-09-10T14:36:20.2264492Z Uploaded bytes 2692743168
+2026-09-10T14:36:20.4027642Z Uploaded bytes 2701131776
+2026-09-10T14:36:20.4577311Z Uploaded bytes 2709520384
+2026-09-10T14:36:20.5189624Z Uploaded bytes 2717908992
+2026-09-10T14:36:20.6037873Z Uploaded bytes 2726297600
+2026-09-10T14:36:20.7465943Z Uploaded bytes 2734686208
+2026-09-10T14:36:20.7766164Z Uploaded bytes 2743074816
+2026-09-10T14:36:20.8071191Z Uploaded bytes 2751463424
+2026-09-10T14:36:20.9736680Z Uploaded bytes 2759852032
+2026-09-10T14:36:21.0499911Z Uploaded bytes 2768240640
+2026-09-10T14:36:21.0899554Z Uploaded bytes 2776629248
+2026-09-10T14:36:21.1411069Z Uploaded bytes 2785017856
+2026-09-10T14:36:21.2835662Z Uploaded bytes 2793406464
+2026-09-10T14:36:21.3346926Z Uploaded bytes 2801795072
+2026-09-10T14:36:21.4100864Z Uploaded bytes 2810183680
+2026-09-10T14:36:21.4493973Z Uploaded bytes 2818572288
+2026-09-10T14:36:21.6868612Z Uploaded bytes 2826960896
+2026-09-10T14:36:21.7004546Z Uploaded bytes 2835349504
+2026-09-10T14:36:21.7611520Z Uploaded bytes 2843738112
+2026-09-10T14:36:21.8393308Z Uploaded bytes 2852126720
+2026-09-10T14:36:22.0450501Z Uploaded bytes 2860515328
+2026-09-10T14:36:22.0689825Z Uploaded bytes 2868903936
+2026-09-10T14:36:22.1320304Z Uploaded bytes 2877292544
+2026-09-10T14:36:22.2105275Z Uploaded bytes 2885681152
+2026-09-10T14:36:22.3622220Z Uploaded bytes 2894069760
+2026-09-10T14:36:22.4348598Z Uploaded bytes 2902458368
+2026-09-10T14:36:22.4597061Z Uploaded bytes 2910846976
+2026-09-10T14:36:22.6308835Z Uploaded bytes 2919235584
+2026-09-10T14:36:22.6454189Z Uploaded bytes 2927624192
+2026-09-10T14:36:22.7579867Z Uploaded bytes 2936012800
+2026-09-10T14:36:22.7768550Z Uploaded bytes 2944401408
+2026-09-10T14:36:22.9480784Z Uploaded bytes 2952790016
+2026-09-10T14:36:23.0496682Z Uploaded bytes 2961178624
+2026-09-10T14:36:23.1069286Z Uploaded bytes 2969567232
+2026-09-10T14:36:23.1534315Z Uploaded bytes 2977955840
+2026-09-10T14:36:23.3248744Z Uploaded bytes 2986344448
+2026-09-10T14:36:23.3513815Z Uploaded bytes 2994733056
+2026-09-10T14:36:23.3995411Z Uploaded bytes 3003121664
+2026-09-10T14:36:23.5041022Z Uploaded bytes 3011510272
+2026-09-10T14:36:23.6600788Z Uploaded bytes 3019898880
+2026-09-10T14:36:23.7298268Z Uploaded bytes 3028287488
+2026-09-10T14:36:23.7593186Z Uploaded bytes 3036676096
+2026-09-10T14:36:23.8295487Z Uploaded bytes 3045064704
+2026-09-10T14:36:24.0025689Z Uploaded bytes 3053453312
+2026-09-10T14:36:24.0303514Z Uploaded bytes 3061841920
+2026-09-10T14:36:24.0430860Z Uploaded bytes 3070230528
+2026-09-10T14:36:24.1738615Z Uploaded bytes 3078619136
+2026-09-10T14:36:24.3073565Z Uploaded bytes 3087007744
+2026-09-10T14:36:24.3149092Z Uploaded bytes 3095396352
+2026-09-10T14:36:24.3279759Z Uploaded bytes 3103784960
+2026-09-10T14:36:24.5740259Z Uploaded bytes 3112173568
+2026-09-10T14:36:24.6059752Z Uploaded bytes 3120562176
+2026-09-10T14:36:24.6211301Z Uploaded bytes 3128950784
+2026-09-10T14:36:24.6871532Z Uploaded bytes 3137339392
+2026-09-10T14:36:24.8833496Z Uploaded bytes 3145728000
+2026-09-10T14:36:24.9163381Z Uploaded bytes 3154116608
+2026-09-10T14:36:24.9354087Z Uploaded bytes 3162505216
+2026-09-10T14:36:25.0777094Z Uploaded bytes 3170893824
+2026-09-10T14:36:25.2156537Z Uploaded bytes 3179282432
+2026-09-10T14:36:25.2291137Z Uploaded bytes 3187671040
+2026-09-10T14:36:25.2446779Z Uploaded bytes 3196059648
+2026-09-10T14:36:25.3513211Z Uploaded bytes 3204448256
+2026-09-10T14:36:25.5010805Z Uploaded bytes 3212836864
+2026-09-10T14:36:25.5514581Z Uploaded bytes 3221225472
+2026-09-10T14:36:25.5613672Z Uploaded bytes 3229614080
+2026-09-10T14:36:25.6602953Z Uploaded bytes 3238002688
+2026-09-10T14:36:25.7823281Z Uploaded bytes 3246391296
+2026-09-10T14:36:25.8489336Z Uploaded bytes 3254779904
+2026-09-10T14:36:25.9669634Z Uploaded bytes 3263168512
+2026-09-10T14:36:25.9821987Z Uploaded bytes 3271557120
+2026-09-10T14:36:26.1517666Z Uploaded bytes 3279945728
+2026-09-10T14:36:26.1926717Z Uploaded bytes 3288334336
+2026-09-10T14:36:26.2727064Z Uploaded bytes 3296722944
+2026-09-10T14:36:26.2803402Z Uploaded bytes 3305111552
+2026-09-10T14:36:26.4613481Z Uploaded bytes 3313500160
+2026-09-10T14:36:26.4957397Z Uploaded bytes 3321888768
+2026-09-10T14:36:26.6018114Z Uploaded bytes 3330277376
+2026-09-10T14:36:26.6306226Z Uploaded bytes 3338665984
+2026-09-10T14:36:26.8558924Z Uploaded bytes 3347054592
+2026-09-10T14:36:26.8713035Z Uploaded bytes 3355443200
+2026-09-10T14:36:26.9185967Z Uploaded bytes 3363831808
+2026-09-10T14:36:26.9521128Z Uploaded bytes 3372220416
+2026-09-10T14:36:27.1588177Z Uploaded bytes 3380609024
+2026-09-10T14:36:27.2274319Z Uploaded bytes 3388997632
+2026-09-10T14:36:27.2524226Z Uploaded bytes 3397386240
+2026-09-10T14:36:27.3319681Z Uploaded bytes 3405774848
+2026-09-10T14:36:27.4585087Z Uploaded bytes 3414163456
+2026-09-10T14:36:27.5538124Z Uploaded bytes 3422552064
+2026-09-10T14:36:27.5643780Z Uploaded bytes 3430940672
+2026-09-10T14:36:27.6626349Z Uploaded bytes 3439329280
+2026-09-10T14:36:27.7453651Z Uploaded bytes 3447717888
+2026-09-10T14:36:27.8618929Z Uploaded bytes 3456106496
+2026-09-10T14:36:27.9059644Z Uploaded bytes 3464495104
+2026-09-10T14:36:28.0053400Z Uploaded bytes 3472883712
+2026-09-10T14:36:28.0570250Z Uploaded bytes 3481272320
+2026-09-10T14:36:28.1857835Z Uploaded bytes 3489660928
+2026-09-10T14:36:28.2165204Z Uploaded bytes 3498049536
+2026-09-10T14:36:28.3032421Z Uploaded bytes 3506438144
+2026-09-10T14:36:28.4264268Z Uploaded bytes 3514826752
+2026-09-10T14:36:28.5375829Z Uploaded bytes 3523215360
+2026-09-10T14:36:28.6243141Z Uploaded bytes 3531603968
+2026-09-10T14:36:28.6373434Z Uploaded bytes 3539992576
+2026-09-10T14:36:28.8298731Z Uploaded bytes 3548381184
+2026-09-10T14:36:28.9128886Z Uploaded bytes 3556769792
+2026-09-10T14:36:28.9481081Z Uploaded bytes 3565158400
+2026-09-10T14:36:29.0606717Z Uploaded bytes 3573547008
+2026-09-10T14:36:29.1463645Z Uploaded bytes 3581935616
+2026-09-10T14:36:29.3296079Z Uploaded bytes 3590324224
+2026-09-10T14:36:29.4060337Z Uploaded bytes 3598712832
+2026-09-10T14:36:29.4247975Z Uploaded bytes 3607101440
+2026-09-10T14:36:29.5186457Z Uploaded bytes 3615490048
+2026-09-10T14:36:29.6700875Z Uploaded bytes 3623878656
+2026-09-10T14:36:29.6782606Z Uploaded bytes 3632267264
+2026-09-10T14:36:29.8120514Z Uploaded bytes 3640655872
+2026-09-10T14:36:29.8306568Z Uploaded bytes 3649044480
+2026-09-10T14:36:30.0082227Z Uploaded bytes 3657433088
+2026-09-10T14:36:30.0270391Z Uploaded bytes 3665821696
+2026-09-10T14:36:30.1150285Z Uploaded bytes 3674210304
+2026-09-10T14:36:30.2083566Z Uploaded bytes 3682598912
+2026-09-10T14:36:30.3627020Z Uploaded bytes 3690987520
+2026-09-10T14:36:30.3734083Z Uploaded bytes 3699376128
+2026-09-10T14:36:30.4250646Z Uploaded bytes 3707764736
+2026-09-10T14:36:30.4872620Z Uploaded bytes 3716153344
+2026-09-10T14:36:30.6607091Z Uploaded bytes 3724541952
+2026-09-10T14:36:30.6752480Z Uploaded bytes 3732930560
+2026-09-10T14:36:30.8117882Z Uploaded bytes 3741319168
+2026-09-10T14:36:30.9147283Z Uploaded bytes 3749707776
+2026-09-10T14:36:30.9777750Z Uploaded bytes 3758096384
+2026-09-10T14:36:31.0707300Z Uploaded bytes 3766484992
+2026-09-10T14:36:31.1443834Z Uploaded bytes 3774873600
+2026-09-10T14:36:31.2219833Z Uploaded bytes 3783262208
+2026-09-10T14:36:31.2925210Z Uploaded bytes 3791650816
+2026-09-10T14:36:31.3867209Z Uploaded bytes 3800039424
+2026-09-10T14:36:31.5159703Z Uploaded bytes 3808428032
+2026-09-10T14:36:31.5354523Z Uploaded bytes 3816816640
+2026-09-10T14:36:31.6104161Z Uploaded bytes 3825205248
+2026-09-10T14:36:31.8061287Z Uploaded bytes 3833593856
+2026-09-10T14:36:31.8910644Z Uploaded bytes 3841982464
+2026-09-10T14:36:31.9161532Z Uploaded bytes 3850371072
+2026-09-10T14:36:31.9234958Z Uploaded bytes 3858759680
+2026-09-10T14:36:32.0884076Z Uploaded bytes 3867148288
+2026-09-10T14:36:32.1863032Z Uploaded bytes 3875536896
+2026-09-10T14:36:32.2081716Z Uploaded bytes 3883925504
+2026-09-10T14:36:32.2183414Z Uploaded bytes 3892314112
+2026-09-10T14:36:32.4967031Z Uploaded bytes 3900702720
+2026-09-10T14:36:32.5169470Z Uploaded bytes 3909091328
+2026-09-10T14:36:32.5609371Z Uploaded bytes 3917479936
+2026-09-10T14:36:32.6317625Z Uploaded bytes 3925868544
+2026-09-10T14:36:32.8255987Z Uploaded bytes 3934257152
+2026-09-10T14:36:32.8662420Z Uploaded bytes 3942645760
+2026-09-10T14:36:32.9017362Z Uploaded bytes 3951034368
+2026-09-10T14:36:32.9653492Z Uploaded bytes 3959422976
+2026-09-10T14:36:33.1879893Z Uploaded bytes 3967811584
+2026-09-10T14:36:33.1983638Z Uploaded bytes 3976200192
+2026-09-10T14:36:33.2038028Z Uploaded bytes 3984588800
+2026-09-10T14:36:33.2839069Z Uploaded bytes 3992977408
+2026-09-10T14:36:33.4880210Z Uploaded bytes 4001366016
+2026-09-10T14:36:33.5213750Z Uploaded bytes 4009754624
+2026-09-10T14:36:33.5384290Z Uploaded bytes 4018143232
+2026-09-10T14:36:33.5979171Z Uploaded bytes 4026531840
+2026-09-10T14:36:33.7821798Z Uploaded bytes 4034920448
+2026-09-10T14:36:33.8326271Z Uploaded bytes 4043309056
+2026-09-10T14:36:33.9464130Z Uploaded bytes 4051697664
+2026-09-10T14:36:33.9869149Z Uploaded bytes 4060086272
+2026-09-10T14:36:34.0900844Z Uploaded bytes 4068474880
+2026-09-10T14:36:34.1301669Z Uploaded bytes 4076863488
+2026-09-10T14:36:34.2347241Z Uploaded bytes 4085252096
+2026-09-10T14:36:34.2731507Z Uploaded bytes 4093640704
+2026-09-10T14:36:34.4162088Z Uploaded bytes 4102029312
+2026-09-10T14:36:34.4293646Z Uploaded bytes 4110417920
+2026-09-10T14:36:34.5287633Z Uploaded bytes 4118806528
+2026-09-10T14:36:34.5801646Z Uploaded bytes 4127195136
+2026-09-10T14:36:34.7283914Z Uploaded bytes 4135583744
+2026-09-10T14:36:34.7642401Z Uploaded bytes 4143972352
+2026-09-10T14:36:34.8475978Z Uploaded bytes 4152360960
+2026-09-10T14:36:34.8951443Z Uploaded bytes 4160749568
+2026-09-10T14:36:35.0372521Z Uploaded bytes 4169138176
+2026-09-10T14:36:35.0597861Z Uploaded bytes 4177526784
+2026-09-10T14:36:35.1754091Z Uploaded bytes 4185915392
+2026-09-10T14:36:35.2459230Z Uploaded bytes 4194304000
+2026-09-10T14:36:35.3707676Z Uploaded bytes 4202692608
+2026-09-10T14:36:35.4103449Z Uploaded bytes 4211081216
+2026-09-10T14:36:35.4846844Z Uploaded bytes 4219469824
+2026-09-10T14:36:35.5260736Z Uploaded bytes 4227858432
+2026-09-10T14:36:35.6848668Z Uploaded bytes 4236247040
+2026-09-10T14:36:35.7313087Z Uploaded bytes 4244635648
+2026-09-10T14:36:35.8291204Z Uploaded bytes 4253024256
+2026-09-10T14:36:35.9116642Z Uploaded bytes 4261412864
+2026-09-10T14:36:36.0086730Z Uploaded bytes 4269801472
+2026-09-10T14:36:36.0216398Z Uploaded bytes 4278190080
+2026-09-10T14:36:36.1184864Z Uploaded bytes 4286578688
+2026-09-10T14:36:36.2563812Z Uploaded bytes 4294967296
+2026-09-10T14:36:36.3175998Z Uploaded bytes 4303355904
+2026-09-10T14:36:36.4069034Z Uploaded bytes 4311744512
+2026-09-10T14:36:36.5385355Z Uploaded bytes 4320133120
+2026-09-10T14:36:36.5534895Z Uploaded bytes 4328521728
+2026-09-10T14:36:36.6767851Z Uploaded bytes 4336910336
+2026-09-10T14:36:36.7690822Z Uploaded bytes 4345298944
+2026-09-10T14:36:36.8574062Z Uploaded bytes 4353687552
+2026-09-10T14:36:36.9281796Z Uploaded bytes 4362076160
+2026-09-10T14:36:36.9598359Z Uploaded bytes 4370464768
+2026-09-10T14:36:37.1459956Z Uploaded bytes 4378853376
+2026-09-10T14:36:37.2024732Z Uploaded bytes 4387241984
+2026-09-10T14:36:37.2287339Z Uploaded bytes 4395630592
+2026-09-10T14:36:37.3654330Z Uploaded bytes 4404019200
+2026-09-10T14:36:37.4462515Z Uploaded bytes 4412407808
+2026-09-10T14:36:37.5450299Z Uploaded bytes 4420796416
+2026-09-10T14:36:37.5785010Z Uploaded bytes 4429185024
+2026-09-10T14:36:37.7391852Z Uploaded bytes 4437573632
+2026-09-10T14:36:37.7467768Z Uploaded bytes 4445962240
+2026-09-10T14:36:37.8720472Z Uploaded bytes 4454350848
+2026-09-10T14:36:37.9548184Z Uploaded bytes 4462739456
+2026-09-10T14:36:38.0421697Z Uploaded bytes 4471128064
+2026-09-10T14:36:38.0553346Z Uploaded bytes 4479516672
+2026-09-10T14:36:38.2109501Z Uploaded bytes 4487905280
+2026-09-10T14:36:38.3450416Z Uploaded bytes 4496293888
+2026-09-10T14:36:38.3565888Z Uploaded bytes 4504682496
+2026-09-10T14:36:38.3758765Z Uploaded bytes 4513071104
+2026-09-10T14:36:38.5728021Z Uploaded bytes 4521459712
+2026-09-10T14:36:38.6404875Z Uploaded bytes 4529848320
+2026-09-10T14:36:38.6482648Z Uploaded bytes 4538236928
+2026-09-10T14:36:38.6759249Z Uploaded bytes 4546625536
+2026-09-10T14:36:38.8720020Z Uploaded bytes 4555014144
+2026-09-10T14:36:38.9350098Z Uploaded bytes 4563402752
+2026-09-10T14:36:38.9876863Z Uploaded bytes 4571791360
+2026-09-10T14:36:39.0478686Z Uploaded bytes 4580179968
+2026-09-10T14:36:39.2224096Z Uploaded bytes 4588568576
+2026-09-10T14:36:39.2798222Z Uploaded bytes 4596957184
+2026-09-10T14:36:39.2964713Z Uploaded bytes 4605345792
+2026-09-10T14:36:39.3831251Z Uploaded bytes 4613734400
+2026-09-10T14:36:39.5314404Z Uploaded bytes 4622123008
+2026-09-10T14:36:39.5738824Z Uploaded bytes 4630511616
+2026-09-10T14:36:39.6400979Z Uploaded bytes 4638900224
+2026-09-10T14:36:39.6884677Z Uploaded bytes 4647288832
+2026-09-10T14:36:39.8344099Z Uploaded bytes 4655677440
+2026-09-10T14:36:39.9158587Z Uploaded bytes 4664066048
+2026-09-10T14:36:39.9273506Z Uploaded bytes 4672454656
+2026-09-10T14:36:40.0429257Z Uploaded bytes 4680843264
+2026-09-10T14:36:40.1607925Z Uploaded bytes 4689231872
+2026-09-10T14:36:40.2388360Z Uploaded bytes 4697620480
+2026-09-10T14:36:40.2689699Z Uploaded bytes 4706009088
+2026-09-10T14:36:40.3562197Z Uploaded bytes 4714397696
+2026-09-10T14:36:40.5704577Z Uploaded bytes 4722786304
+2026-09-10T14:36:40.5999331Z Uploaded bytes 4731174912
+2026-09-10T14:36:40.6512789Z Uploaded bytes 4739563520
+2026-09-10T14:36:40.6696032Z Uploaded bytes 4747952128
+2026-09-10T14:36:40.8859441Z Uploaded bytes 4756340736
+2026-09-10T14:36:40.9265584Z Uploaded bytes 4764729344
+2026-09-10T14:36:40.9435345Z Uploaded bytes 4773117952
+2026-09-10T14:36:41.0275579Z Uploaded bytes 4781506560
+2026-09-10T14:36:41.2007227Z Uploaded bytes 4789895168
+2026-09-10T14:36:41.2207701Z Uploaded bytes 4798283776
+2026-09-10T14:36:41.3682985Z Uploaded bytes 4806672384
+2026-09-10T14:36:41.4935572Z Uploaded bytes 4815060992
+2026-09-10T14:36:41.5118338Z Uploaded bytes 4823449600
+2026-09-10T14:36:41.5896363Z Uploaded bytes 4831838208
+2026-09-10T14:36:41.6631455Z Uploaded bytes 4840226816
+2026-09-10T14:36:41.8379914Z Uploaded bytes 4848615424
+2026-09-10T14:36:41.9249648Z Uploaded bytes 4857004032
+2026-09-10T14:36:41.9654367Z Uploaded bytes 4865392640
+2026-09-10T14:36:42.0029827Z Uploaded bytes 4873781248
+2026-09-10T14:36:42.2225834Z Uploaded bytes 4882169856
+2026-09-10T14:36:42.2363592Z Uploaded bytes 4890558464
+2026-09-10T14:36:42.2671916Z Uploaded bytes 4898947072
+2026-09-10T14:36:42.3851983Z Uploaded bytes 4907335680
+2026-09-10T14:36:42.5354418Z Uploaded bytes 4915724288
+2026-09-10T14:36:42.5511481Z Uploaded bytes 4924112896
+2026-09-10T14:36:42.6662291Z Uploaded bytes 4932501504
+2026-09-10T14:36:42.7156875Z Uploaded bytes 4940890112
+2026-09-10T14:36:42.8547944Z Uploaded bytes 4949278720
+2026-09-10T14:36:42.8789245Z Uploaded bytes 4957667328
+2026-09-10T14:36:42.9682936Z Uploaded bytes 4966055936
+2026-09-10T14:36:42.9939758Z Uploaded bytes 4974444544
+2026-09-10T14:36:43.1818095Z Uploaded bytes 4982833152
+2026-09-10T14:36:43.2210426Z Uploaded bytes 4991221760
+2026-09-10T14:36:43.2714159Z Uploaded bytes 4999610368
+2026-09-10T14:36:43.2828297Z Uploaded bytes 5007998976
+2026-09-10T14:36:43.4873197Z Uploaded bytes 5016387584
+2026-09-10T14:36:43.5819404Z Uploaded bytes 5024776192
+2026-09-10T14:36:43.6077995Z Uploaded bytes 5033164800
+2026-09-10T14:36:43.6349874Z Uploaded bytes 5041553408
+2026-09-10T14:36:43.8610081Z Uploaded bytes 5049942016
+2026-09-10T14:36:43.8893991Z Uploaded bytes 5058330624
+2026-09-10T14:36:43.9350650Z Uploaded bytes 5066719232
+2026-09-10T14:36:44.0177575Z Uploaded bytes 5075107840
+2026-09-10T14:36:44.1474782Z Uploaded bytes 5083496448
+2026-09-10T14:36:44.1728144Z Uploaded bytes 5091885056
+2026-09-10T14:36:44.3930336Z Uploaded bytes 5100273664
+2026-09-10T14:36:44.4536880Z Uploaded bytes 5108662272
+2026-09-10T14:36:44.4678392Z Uploaded bytes 5117050880
+2026-09-10T14:36:44.4783768Z Uploaded bytes 5125439488
+2026-09-10T14:36:44.6687514Z Uploaded bytes 5133828096
+2026-09-10T14:36:44.7871514Z Uploaded bytes 5142216704
+2026-09-10T14:36:44.8014878Z Uploaded bytes 5150605312
+2026-09-10T14:36:44.8733224Z Uploaded bytes 5158993920
+2026-09-10T14:36:45.0274386Z Uploaded bytes 5167382528
+2026-09-10T14:36:45.1082517Z Uploaded bytes 5175771136
+2026-09-10T14:36:45.1554320Z Uploaded bytes 5184159744
+2026-09-10T14:36:45.2044039Z Uploaded bytes 5192548352
+2026-09-10T14:36:45.3973201Z Uploaded bytes 5200936960
+2026-09-10T14:36:45.4046693Z Uploaded bytes 5209325568
+2026-09-10T14:36:45.4380202Z Uploaded bytes 5217714176
+2026-09-10T14:36:45.4982489Z Uploaded bytes 5226102784
+2026-09-10T14:36:45.7505471Z Uploaded bytes 5234491392
+2026-09-10T14:36:45.7673057Z Uploaded bytes 5242880000
+2026-09-10T14:36:45.7708818Z Uploaded bytes 5251268608
+2026-09-10T14:36:45.7941315Z Uploaded bytes 5259657216
+2026-09-10T14:36:45.9369767Z Uploaded bytes 5262734368
+2026-09-10T14:36:46.0284383Z Finished uploading artifact content to blob storage!
+2026-09-10T14:36:46.0288171Z SHA256 digest of uploaded artifact is be0081ef0bd1bfd1afc2eba1e11e28beaaf1d11999d2cd39bbb350b29a905db7
+2026-09-10T14:36:46.0290627Z Finalizing artifact upload
+2026-09-10T14:36:46.4987442Z Artifact nextest-archive successfully finalized. Artifact ID 10157377124
+2026-09-10T14:36:46.4989276Z Artifact nextest-archive has been successfully uploaded! Final size is 5262734368 bytes. Artifact ID is 10157377124
+2026-09-10T14:36:46.4994657Z Artifact download URL: https://github.com/sparq-org/sparq/actions/runs/34488984319/artifacts/10157377124
+2026-09-10T14:36:46.5282270Z ##[group]Run cargo test --workspace --features approx-ann,filtered-ann,vec-predicate --doc
+2026-09-10T14:36:46.5283408Z [36;1mcargo test --workspace --features approx-ann,filtered-ann,vec-predicate --doc[0m
+2026-09-10T14:36:46.5970552Z shell: /usr/bin/bash -e {0}
+2026-09-10T14:36:46.5970961Z env:
+2026-09-10T14:36:46.5971275Z   CARGO_TERM_COLOR: always
+2026-09-10T14:36:46.5971661Z   RUST_BACKTRACE: 1
+2026-09-10T14:36:46.5972006Z   CARGO_NET_RETRY: 10
+2026-09-10T14:36:46.5972368Z   CARGO_INCREMENTAL: 0
+2026-09-10T14:36:46.5973047Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+2026-09-10T14:36:46.5973718Z   CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: -C link-arg=-fuse-ld=lld
+2026-09-10T14:36:46.5974360Z   CACHE_ON_FAILURE: false
+2026-09-10T14:36:46.5974733Z ##[endgroup]
+2026-09-10T14:36:47.6552664Z [1m[33mwarning[0m: doc tests are not supported for crate type(s) `cdylib` in package `sparq-py`
+2026-09-10T14:36:48.1264830Z [1m[92m   Compiling[0m sparq-crdt v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-crdt)
+2026-09-10T14:36:48.1299966Z [1m[92m   Compiling[0m sparq-wrapper-gen v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-wrapper-gen)
+2026-09-10T14:36:48.1305999Z [1m[92m   Compiling[0m sparq-fedplan-mpc v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-fedplan-mpc)
+2026-09-10T14:36:48.1315651Z [1m[92m   Compiling[0m sparq-wrapper-integration v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-wrapper-integration)
+2026-09-10T14:36:48.1604693Z [1m[92m   Compiling[0m sparq-reason-diff v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-reason-diff)
+2026-09-10T14:36:48.1677893Z [1m[92m   Compiling[0m sparq-wrapper-shacl v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-wrapper-shacl)
+2026-09-10T14:36:48.7938304Z [1m[92m    Finished[0m `test` profile [unoptimized + debuginfo] target(s) in 2.09s
+2026-09-10T14:36:48.8281599Z [1m[92m   Doc-tests[0m sparq_acbench
+2026-09-10T14:36:48.8985979Z 
+2026-09-10T14:36:48.8986494Z running 0 tests
+2026-09-10T14:36:48.8986822Z 
+2026-09-10T14:36:48.8987282Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-09-10T14:36:48.8987807Z 
+2026-09-10T14:36:48.9003645Z [1m[92m   Doc-tests[0m sparq_algos
+2026-09-10T14:36:48.9337384Z 
+2026-09-10T14:36:48.9337778Z running 1 test
+2026-09-10T14:36:48.9340984Z test crates/sparq-algos/src/lib.rs - (line 13) ... ignored
+2026-09-10T14:36:48.9341430Z 
+2026-09-10T14:36:48.9341848Z test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-09-10T14:36:48.9342279Z 
+2026-09-10T14:36:48.9356912Z [1m[92m   Doc-tests[0m sparq_arrow
+2026-09-10T14:36:48.9525068Z 
+2026-09-10T14:36:48.9525439Z running 2 tests
+2026-09-10T14:36:48.9526831Z test crates/sparq-arrow/src/lib.rs - (line 24) ... ignored
+2026-09-10T14:36:48.9527545Z test crates/sparq-arrow/src/lib.rs - (line 48) ... ignored
+2026-09-10T14:36:48.9527878Z 
+2026-09-10T14:36:48.9528195Z test result: ok. 0 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-09-10T14:36:48.9528600Z 
+2026-09-10T14:36:48.9539736Z [1m[92m   Doc-tests[0m sparq_canon
+2026-09-10T14:36:48.9917258Z 
+2026-09-10T14:36:48.9917708Z running 2 tests
+2026-09-10T14:36:49.1864485Z test crates/sparq-canon/src/lib.rs - canonicalize_nquads (line 104) ... ok
+2026-09-10T14:36:49.1904759Z test crates/sparq-canon/src/lib.rs - canonicalize (line 292) ... ok
+2026-09-10T14:36:49.1905284Z 
+2026-09-10T14:36:49.1905677Z test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.20s
+2026-09-10T14:36:49.1906248Z 
+2026-09-10T14:36:49.1921132Z [1m[92m   Doc-tests[0m sparq_conformance
+2026-09-10T14:36:49.3142437Z 
+2026-09-10T14:36:49.3143160Z running 0 tests
+2026-09-10T14:36:49.3143457Z 
+2026-09-10T14:36:49.3143805Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-09-10T14:36:49.3144225Z 
+2026-09-10T14:36:49.3162210Z [1m[92m   Doc-tests[0m sparq_conformance_floors
+2026-09-10T14:36:49.3323822Z 
+2026-09-10T14:36:49.3324527Z running 0 tests
+2026-09-10T14:36:49.3324792Z 
+2026-09-10T14:36:49.3325200Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-09-10T14:36:49.3325648Z 
+2026-09-10T14:36:49.3338035Z [1m[92m   Doc-tests[0m sparq_core
+2026-09-10T14:36:49.4743806Z 
+2026-09-10T14:36:49.4744309Z running 1 test
+2026-09-10T14:36:49.6106537Z test crates/sparq-core/src/lib.rs - (line 18) ... ok
+2026-09-10T14:36:49.6106975Z 
+2026-09-10T14:36:49.6107246Z test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.14s
+2026-09-10T14:36:49.6107634Z 
+2026-09-10T14:36:49.6121800Z [1m[92m   Doc-tests[0m sparq_crdt
+2026-09-10T14:36:49.6530194Z 
+2026-09-10T14:36:49.6530539Z running 0 tests
+2026-09-10T14:36:49.6530865Z 
+2026-09-10T14:36:49.6531540Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-09-10T14:36:49.6532665Z 
+2026-09-10T14:36:49.6548087Z [1m[92m   Doc-tests[0m sparq_difftest
+2026-09-10T14:36:49.7089856Z 
+2026-09-10T14:36:49.7090613Z running 1 test
+2026-09-10T14:36:49.7456612Z test crates/sparq-difftest/src/decision.rs - decision::fail_closed_asymmetry (line 161) - compile fail ... ok
+2026-09-10T14:36:49.7457257Z 
+2026-09-10T14:36:49.7457609Z test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+2026-09-10T14:36:49.7458079Z 
+2026-09-10T14:36:49.7466819Z [1m[92m   Doc-tests[0m sparq_e2ee_ng
+2026-09-10T14:36:49.8113449Z 
+2026-09-10T14:36:49.8114218Z running 3 tests
+2026-09-10T14:36:49.9411460Z test crates/sparq-e2ee-ng/src/lib.rs - (line 49) ... ok
+2026-09-10T14:36:49.9700831Z test crates/sparq-e2ee-ng/src/capability.rs - capability::wrap_capability (line 907) ... ok
+2026-09-10T14:36:50.1664080Z test crates/sparq-e2ee-ng/src/object.rs - object (line 49) ... ok
+2026-09-10T14:36:50.1664606Z 
+2026-09-10T14:36:50.1664913Z test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.36s
+2026-09-10T14:36:50.1665315Z 
+2026-09-10T14:36:50.1681553Z [1m[92m   Doc-tests[0m sparq_engine
+2026-09-10T14:36:50.3458743Z 
+2026-09-10T14:36:50.3459251Z running 5 tests
+2026-09-10T14:36:50.3462384Z test crates/sparq-engine/src/dp.rs - dp::with_dp_planner (line 161) ... ignored
+2026-09-10T14:36:50.3464083Z test crates/sparq-engine/src/dp.rs - dp::without_dp_planner (line 181) ... ignored
+2026-09-10T14:36:50.3465164Z test crates/sparq-engine/src/lib.rs - with_functions (line 394) ... ignored
+2026-09-10T14:36:50.3466066Z test crates/sparq-engine/src/lib.rs - with_view (line 758) ... ignored
+2026-09-10T14:36:50.8343589Z test crates/sparq-engine/src/lib.rs - (line 18) ... ok
+2026-09-10T14:36:50.8344174Z 
+2026-09-10T14:36:50.8344716Z test result: ok. 1 passed; 0 failed; 4 ignored; 0 measured; 0 filtered out; finished in 0.49s
+2026-09-10T14:36:50.8345506Z 
+2026-09-10T14:36:50.8363516Z [1m[92m   Doc-tests[0m sparq_engine_serialize
+2026-09-10T14:36:50.8859287Z 
+2026-09-10T14:36:50.8859989Z running 0 tests
+2026-09-10T14:36:50.8860205Z 
+2026-09-10T14:36:50.8860533Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-09-10T14:36:50.8860933Z 
+2026-09-10T14:36:50.8877567Z [1m[92m   Doc-tests[0m sparq_engine_service
+2026-09-10T14:36:50.9321232Z 
+2026-09-10T14:36:50.9321879Z running 4 tests
+2026-09-10T14:36:50.9705232Z test crates/sparq-engine-service/src/service.rs - service::with_service_remote_request_cap (line 528) - compile ... ok
+2026-09-10T14:36:50.9706326Z test crates/sparq-engine-service/src/service.rs - service::with_service_egress_allow (line 1878) - compile ... ok
+2026-09-10T14:36:50.9707598Z test crates/sparq-engine-service/src/service.rs - service::with_service_bound_join_block_size (line 409) - compile ... ok
+2026-09-10T14:36:50.9714705Z test crates/sparq-engine-service/src/service.rs - service::with_service_egress_policy (line 1909) - compile ... ok
+2026-09-10T14:36:50.9715417Z 
+2026-09-10T14:36:50.9716113Z test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+2026-09-10T14:36:50.9716680Z 
+2026-09-10T14:36:50.9733779Z [1m[92m   Doc-tests[0m sparq_fedclient
+2026-09-10T14:36:50.9896668Z 
+2026-09-10T14:36:50.9897253Z running 0 tests
+2026-09-10T14:36:50.9897564Z 
+2026-09-10T14:36:50.9897899Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-09-10T14:36:50.9898345Z 
+2026-09-10T14:36:50.9911350Z [1m[92m   Doc-tests[0m sparq_fedplan
+2026-09-10T14:36:51.0068341Z 
+2026-09-10T14:36:51.0068733Z running 0 tests
+2026-09-10T14:36:51.0069082Z 
+2026-09-10T14:36:51.0069718Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-09-10T14:36:51.0070364Z 
+2026-09-10T14:36:51.0082949Z [1m[92m   Doc-tests[0m sparq_fedplan_mpc
+2026-09-10T14:36:51.0238216Z 
+2026-09-10T14:36:51.0238740Z running 0 tests
+2026-09-10T14:36:51.0238954Z 
+2026-09-10T14:36:51.0239290Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-09-10T14:36:51.0239968Z 
+2026-09-10T14:36:51.0252613Z [1m[92m   Doc-tests[0m sparq_forms
+2026-09-10T14:36:51.1395049Z 
+2026-09-10T14:36:51.1395923Z running 1 test
+2026-09-10T14:36:51.4645725Z test crates/sparq-forms/src/lib.rs - (line 16) ... ok
+2026-09-10T14:36:51.4646274Z 
+2026-09-10T14:36:51.4646807Z test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.33s
+2026-09-10T14:36:51.4647536Z 
+2026-09-10T14:36:51.4662123Z [1m[92m   Doc-tests[0m sparq_geo
+2026-09-10T14:36:51.5732076Z 
+2026-09-10T14:36:51.5737050Z running 3 tests
+2026-09-10T14:36:52.3330825Z test crates/sparq-geo/src/lib.rs - (line 35) ... ok
+2026-09-10T14:36:52.3460816Z test crates/sparq-geo/src/provider.rs - provider (line 6) ... ok
+2026-09-10T14:36:52.3511329Z test crates/sparq-geo/src/registry.rs - registry (line 5) ... ok
+2026-09-10T14:36:52.3511863Z 
+2026-09-10T14:36:52.3512240Z test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.78s
+2026-09-10T14:36:52.3512977Z 
+2026-09-10T14:36:52.3532213Z [1m[92m   Doc-tests[0m sparq_gpu
+2026-09-10T14:36:52.4284327Z 
+2026-09-10T14:36:52.4284971Z running 0 tests
+2026-09-10T14:36:52.4299757Z [1m[92m   Doc-tests[0m sparq_hdt
+2026-09-10T14:36:52.4323990Z 
+2026-09-10T14:36:52.4324471Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-09-10T14:36:52.4325118Z 
+2026-09-10T14:36:52.4727629Z 
+2026-09-10T14:36:52.4728108Z running 1 test
+2026-09-10T14:36:52.5047376Z test crates/sparq-hdt/src/lib.rs - (line 15) - compile ... ok
+2026-09-10T14:36:52.5047881Z 
+2026-09-10T14:36:52.5048276Z test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+2026-09-10T14:36:52.5048825Z 
+2026-09-10T14:36:52.5064287Z [1m[92m   Doc-tests[0m sparq_http3
+2026-09-10T14:36:52.5215533Z 
+2026-09-10T14:36:52.5215796Z running 0 tests
+2026-09-10T14:36:52.5216080Z 
+2026-09-10T14:36:52.5216454Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-09-10T14:36:52.5216907Z 
+2026-09-10T14:36:52.5227740Z [1m[92m   Doc-tests[0m sparq_introspect
+2026-09-10T14:36:52.6024337Z 
+2026-09-10T14:36:52.6024842Z running 1 test
+2026-09-10T14:36:52.6026990Z test crates/sparq-introspect/src/lib.rs - (line 17) ... ignored
+2026-09-10T14:36:52.6027505Z 
+2026-09-10T14:36:52.6027949Z test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-09-10T14:36:52.6028353Z 
+2026-09-10T14:36:52.6045124Z [1m[92m   Doc-tests[0m sparq_jsonld
+2026-09-10T14:36:52.6704544Z 
+2026-09-10T14:36:52.6705019Z running 1 test
+2026-09-10T14:36:52.7444615Z test crates/sparq-jsonld/src/lib.rs - (line 17) ... ok
+2026-09-10T14:36:52.7445060Z 
+2026-09-10T14:36:52.7445485Z test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+2026-09-10T14:36:52.7446084Z 
+2026-09-10T14:36:52.7460054Z [1m[92m   Doc-tests[0m sparq_jsonld_registry
+2026-09-10T14:36:52.7641639Z 
+2026-09-10T14:36:52.7642015Z running 0 tests
+2026-09-10T14:36:52.7642580Z 
+2026-09-10T14:36:52.7643279Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-09-10T14:36:52.7643744Z 
+2026-09-10T14:36:52.7656000Z [1m[92m   Doc-tests[0m sparq_kb
+2026-09-10T14:36:52.7910791Z 
+2026-09-10T14:36:52.7911219Z running 0 tests
+2026-09-10T14:36:52.7911425Z 
+2026-09-10T14:36:52.7911710Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-09-10T14:36:52.7912089Z 
+2026-09-10T14:36:52.7925563Z [1m[92m   Doc-tests[0m sparq_lws_core
+2026-09-10T14:36:53.1858273Z 
+2026-09-10T14:36:53.1859148Z running 0 tests
+2026-09-10T14:36:53.1859535Z 
+2026-09-10T14:36:53.1860214Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-09-10T14:36:53.1861183Z 
+2026-09-10T14:36:53.1885395Z [1m[92m   Doc-tests[0m sparq_lws_wasm
+2026-09-10T14:36:53.2110232Z 
+2026-09-10T14:36:53.2111354Z running 0 tests
+2026-09-10T14:36:53.2111573Z 
+2026-09-10T14:36:53.2111914Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-09-10T14:36:53.2112318Z 
+2026-09-10T14:36:53.2126720Z [1m[92m   Doc-tests[0m sparq_mcp
+2026-09-10T14:36:53.2660255Z 
+2026-09-10T14:36:53.2660757Z running 1 test
+2026-09-10T14:36:53.3007136Z test crates/sparq-mcp/src/lib.rs - (line 22) - compile ... ok
+2026-09-10T14:36:53.3007736Z 
+2026-09-10T14:36:53.3008311Z test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+2026-09-10T14:36:53.3009357Z 
+2026-09-10T14:36:53.3024144Z [1m[92m   Doc-tests[0m sparq_metamorph
+2026-09-10T14:36:53.3691085Z 
+2026-09-10T14:36:53.3691601Z running 0 tests
+2026-09-10T14:36:53.3691823Z 
+2026-09-10T14:36:53.3692137Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-09-10T14:36:53.3692532Z 
+2026-09-10T14:36:53.3711346Z [1m[92m   Doc-tests[0m sparq_mpc
+2026-09-10T14:36:53.4949782Z 
+2026-09-10T14:36:53.4950295Z running 0 tests
+2026-09-10T14:36:53.4950510Z 
+2026-09-10T14:36:53.4950881Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-09-10T14:36:53.4951340Z 
+2026-09-10T14:36:53.4967506Z [1m[92m   Doc-tests[0m sparq_nlq
+2026-09-10T14:36:53.5480678Z 
+2026-09-10T14:36:53.5481352Z running 1 test
+2026-09-10T14:36:53.5843674Z test crates/sparq-nlq/src/lib.rs - (line 24) - compile ... ok
+2026-09-10T14:36:53.5844156Z 
+2026-09-10T14:36:53.5844566Z test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+2026-09-10T14:36:53.5845174Z 
+2026-09-10T14:36:53.5859425Z [1m[92m   Doc-tests[0m sparq_parse
+2026-09-10T14:36:53.6082422Z 
+2026-09-10T14:36:53.6083401Z running 0 tests
+2026-09-10T14:36:53.6083659Z 
+2026-09-10T14:36:53.6084158Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-09-10T14:36:53.6084768Z 
+2026-09-10T14:36:53.6096675Z [1m[92m   Doc-tests[0m sparq_policy
+2026-09-10T14:36:53.6570793Z 
+2026-09-10T14:36:53.6571091Z running 10 tests
+2026-09-10T14:36:54.3828912Z test crates/sparq-policy/src/eval.rs - eval::datetime_status (line 886) ... ok
+2026-09-10T14:36:54.3904132Z test crates/sparq-policy/src/compare.rs - compare::conflict_admissibility (line 174) ... ok
+2026-09-10T14:36:54.3957578Z test crates/sparq-policy/src/compare.rs - compare::contains (line 231) ... ok
+2026-09-10T14:36:54.4171396Z test crates/sparq-policy/src/compare.rs - compare::detect_conflicts (line 111) ... ok
+2026-09-10T14:36:54.8464858Z test crates/sparq-policy/src/eval.rs - eval::evaluate (line 441) ... ok
+2026-09-10T14:36:55.1034399Z test crates/sparq-policy/src/eval.rs - eval::matched_prohibition (line 516) ... ok
+2026-09-10T14:36:55.1512249Z test crates/sparq-policy/src/eval.rs - eval::prohibition_status (line 572) ... ok
+2026-09-10T14:36:55.1563928Z test crates/sparq-policy/src/eval.rs - eval::purpose_status (line 690) ... ok
+2026-09-10T14:36:55.4505173Z test crates/sparq-policy/src/eval.rs - eval::recipient_status (line 788) ... ok
+2026-09-10T14:36:55.5629693Z test crates/sparq-policy/src/eval.rs - eval::spatial_status (line 984) ... ok
+2026-09-10T14:36:55.5630173Z 
+2026-09-10T14:36:55.5630491Z test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.91s
+2026-09-10T14:36:55.5630928Z 
+2026-09-10T14:36:55.5647759Z [1m[92m   Doc-tests[0m sparq_prov
+2026-09-10T14:36:55.5966453Z 
+2026-09-10T14:36:55.5966894Z running 2 tests
+2026-09-10T14:36:56.0234691Z test crates/sparq-prov/src/update.rs - update::derive_update (line 247) ... ok
+2026-09-10T14:36:56.0351954Z test crates/sparq-prov/src/lib.rs - (line 18) ... ok
+2026-09-10T14:36:56.0352472Z 
+2026-09-10T14:36:56.0353224Z test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.44s
+2026-09-10T14:36:56.0353933Z 
+2026-09-10T14:36:56.0369173Z [1m[92m   Doc-tests[0m sparq_reason
+2026-09-10T14:36:56.1482469Z 
+2026-09-10T14:36:56.1483141Z running 5 tests
+2026-09-10T14:36:56.4668525Z test crates/sparq-reason/src/n3/compiled.rs - n3::compiled::intern_facts (line 306) ... ok
+2026-09-10T14:36:56.5041833Z test crates/sparq-reason/src/n3/compiled.rs - n3::compiled::compile (line 268) ... ok
+2026-09-10T14:36:56.5126010Z test crates/sparq-reason/src/n3/compiled.rs - n3::compiled::eval (line 337) ... ok
+2026-09-10T14:36:56.5171033Z test crates/sparq-reason/src/lib.rs - (line 21) ... ok
+2026-09-10T14:36:56.6392660Z test crates/sparq-reason/src/n3/mod.rs - n3::encode_for_uri (line 2178) ... ok
+2026-09-10T14:36:56.6393558Z 
+2026-09-10T14:36:56.6394005Z test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.49s
+2026-09-10T14:36:56.6394960Z 
+2026-09-10T14:36:56.6408313Z [1m[92m   Doc-tests[0m sparq_reason_diff
+2026-09-10T14:36:56.6563292Z 
+2026-09-10T14:36:56.6564049Z running 0 tests
+2026-09-10T14:36:56.6564337Z 
+2026-09-10T14:36:56.6564815Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-09-10T14:36:56.6565471Z 
+2026-09-10T14:36:56.6575753Z [1m[92m   Doc-tests[0m sparq_reason_dl
+2026-09-10T14:36:56.7049572Z 
+2026-09-10T14:36:56.7049954Z running 2 tests
+2026-09-10T14:36:56.8613796Z test crates/sparq-reason-dl/src/render.rs - render::render_to_turtle (line 217) ... ok
+2026-09-10T14:36:56.8698978Z test crates/sparq-reason-dl/src/lib.rs - (line 25) ... ok
+2026-09-10T14:36:56.8699523Z 
+2026-09-10T14:36:56.8700166Z test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.16s
+2026-09-10T14:36:56.8700636Z 
+2026-09-10T14:36:56.8716449Z [1m[92m   Doc-tests[0m sparq_reason_el
+2026-09-10T14:36:56.9062394Z 
+2026-09-10T14:36:56.9063373Z running 2 tests
+2026-09-10T14:36:57.0770722Z test crates/sparq-reason-el/src/lib.rs - Classifier (line 245) ... ok
+2026-09-10T14:36:57.0845381Z test crates/sparq-reason-el/src/lib.rs - (line 22) ... ok
+2026-09-10T14:36:57.0845820Z 
+2026-09-10T14:36:57.0846112Z test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.18s
+2026-09-10T14:36:57.0846477Z 
+2026-09-10T14:36:57.0861634Z [1m[92m   Doc-tests[0m sparq_reason_ql
+2026-09-10T14:36:57.1195254Z 
+2026-09-10T14:36:57.1195924Z running 1 test
+2026-09-10T14:36:57.1867966Z test crates/sparq-reason-ql/src/lib.rs - (line 32) ... ok
+2026-09-10T14:36:57.1868418Z 
+2026-09-10T14:36:57.1868805Z test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+2026-09-10T14:36:57.1869400Z 
+2026-09-10T14:36:57.1883884Z [1m[92m   Doc-tests[0m sparq_reason_wasm
+2026-09-10T14:36:57.2502843Z 
+2026-09-10T14:36:57.2503531Z running 0 tests
+2026-09-10T14:36:57.2503907Z 
+2026-09-10T14:36:57.2504215Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-09-10T14:36:57.2504606Z 
+2026-09-10T14:36:57.2521474Z [1m[92m   Doc-tests[0m sparq_rsp
+2026-09-10T14:36:57.2962161Z 
+2026-09-10T14:36:57.2962604Z running 4 tests
+2026-09-10T14:36:58.0024707Z test crates/sparq-rsp/src/query.rs - query::ContinuousConstruct (line 308) ... ok
+2026-09-10T14:36:58.0809530Z test crates/sparq-rsp/src/lib.rs - (line 25) ... ok
+2026-09-10T14:36:58.0853773Z test crates/sparq-rsp/src/multi.rs - multi::ContinuousMultiQuery (line 154) ... ok
+2026-09-10T14:36:58.0939133Z test crates/sparq-rsp/src/query.rs - query::ContinuousQuery (line 105) ... ok
+2026-09-10T14:36:58.0939657Z 
+2026-09-10T14:36:58.0940031Z test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.80s
+2026-09-10T14:36:58.0940547Z 
+2026-09-10T14:36:58.0956329Z [1m[92m   Doc-tests[0m sparq_rsp_wasm
+2026-09-10T14:36:58.1379842Z 
+2026-09-10T14:36:58.1380362Z running 0 tests
+2026-09-10T14:36:58.1380610Z 
+2026-09-10T14:36:58.1380913Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-09-10T14:36:58.1381307Z 
+2026-09-10T14:36:58.1402564Z [1m[92m   Doc-tests[0m sparq_secprop_vocab
+2026-09-10T14:36:58.1567730Z 
+2026-09-10T14:36:58.1568018Z running 0 tests
+2026-09-10T14:36:58.1568296Z 
+2026-09-10T14:36:58.1568633Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-09-10T14:36:58.1569008Z 
+2026-09-10T14:36:58.1583412Z [1m[92m   Doc-tests[0m sparq_serve
+2026-09-10T14:36:58.1998923Z 
+2026-09-10T14:36:58.1999388Z running 1 test
+2026-09-10T14:36:58.5834654Z test crates/sparq-serve/src/lib.rs - embed (line 66) ... ok
+2026-09-10T14:36:58.5835091Z 
+2026-09-10T14:36:58.5835468Z test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.38s
+2026-09-10T14:36:58.5835993Z 
+2026-09-10T14:36:58.5854071Z [1m[92m   Doc-tests[0m sparq_server
+2026-09-10T14:36:58.6939970Z 
+2026-09-10T14:36:58.6940577Z running 0 tests
+2026-09-10T14:36:58.6940790Z 
+2026-09-10T14:36:58.6941104Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-09-10T14:36:58.6941524Z 
+2026-09-10T14:36:58.6960560Z [1m[92m   Doc-tests[0m sparq_shacl
+2026-09-10T14:36:58.7771748Z 
+2026-09-10T14:36:58.7772259Z running 2 tests
+2026-09-10T14:36:59.0815424Z test crates/sparq-shacl/src/lib.rs - sparql_constraint_executions (line 269) ... ok
+2026-09-10T14:36:59.1954411Z test crates/sparq-shacl/src/lib.rs - (line 26) ... ok
+2026-09-10T14:36:59.1954925Z 
+2026-09-10T14:36:59.1955416Z test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.42s
+2026-09-10T14:36:59.1956149Z 
+2026-09-10T14:36:59.1973723Z [1m[92m   Doc-tests[0m sparq_shacl_wasm
+2026-09-10T14:36:59.2358913Z 
+2026-09-10T14:36:59.2359778Z running 0 tests
+2026-09-10T14:36:59.2360039Z 
+2026-09-10T14:36:59.2360355Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-09-10T14:36:59.2360802Z 
+2026-09-10T14:36:59.2378807Z [1m[92m   Doc-tests[0m sparq_shaclc
+2026-09-10T14:36:59.3356580Z 
+2026-09-10T14:36:59.3357146Z running 0 tests
+2026-09-10T14:36:59.3357371Z 
+2026-09-10T14:36:59.3357678Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-09-10T14:36:59.3358064Z 
+2026-09-10T14:36:59.3376431Z [1m[92m   Doc-tests[0m sparq_sim
+2026-09-10T14:36:59.3654347Z 
+2026-09-10T14:36:59.3654908Z running 3 tests
+2026-09-10T14:36:59.3657670Z test crates/sparq-sim/src/lib.rs - (line 14) ... ignored
+2026-09-10T14:36:59.3658401Z test crates/sparq-sim/src/lib.rs - (line 66) ... ignored
+2026-09-10T14:36:59.3659001Z test crates/sparq-sim/src/lib.rs - (line 83) ... ignored
+2026-09-10T14:36:59.3659267Z 
+2026-09-10T14:36:59.3659557Z test result: ok. 0 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-09-10T14:36:59.3659966Z 
+2026-09-10T14:36:59.3673249Z [1m[92m   Doc-tests[0m sparq_solid
+2026-09-10T14:36:59.4351020Z 
+2026-09-10T14:36:59.4354506Z running 36 tests
+2026-09-10T14:36:59.6614218Z test crates/sparq-solid/src/authindex.rs - authindex::Mode (line 121) ... ok
+2026-09-10T14:36:59.9481906Z test crates/sparq-solid/src/authindex.rs - authindex::Session<'a>::at (line 101) ... ok
+2026-09-10T14:36:59.9827982Z test crates/sparq-solid/src/authindex.rs - authindex::Session (line 55) ... ok
+2026-09-10T14:37:00.0377887Z test crates/sparq-solid/src/authindex.rs - authindex::AuthIndex (line 251) ... ok
+2026-09-10T14:37:00.2220606Z test crates/sparq-solid/src/authindex.rs - authindex::pair_principal (line 173) ... ok
+2026-09-10T14:37:00.4286845Z test crates/sparq-solid/src/authindex.rs - authindex::triple_principal (line 198) ... ok
+2026-09-10T14:37:00.6393841Z test crates/sparq-solid/src/conformance.rs - conformance (line 43) ... ok
+2026-09-10T14:37:00.6566548Z test crates/sparq-solid/src/credentials.rs - credentials::VerifiedCredentials (line 67) ... ok
+2026-09-10T14:37:00.9642644Z test crates/sparq-solid/src/decide.rs - decide::WacDecision (line 166) ... ok
+2026-09-10T14:37:01.1607703Z test crates/sparq-solid/src/decide.rs - decide::is_control_document_name (line 424) ... ok
+2026-09-10T14:37:01.1670927Z test crates/sparq-solid/src/decide.rs - decide::WacDecision::acl_link_header (line 233) ... ok
+2026-09-10T14:37:01.1736904Z test crates/sparq-solid/src/fixture.rs - fixture::acp_fixture (line 325) ... ok
+2026-09-10T14:37:01.2048051Z test crates/sparq-solid/src/fixture.rs - fixture::wac_fixture_sized (line 176) - compile ... ok
+2026-09-10T14:37:01.9544268Z test crates/sparq-solid/src/lib.rs - AUTH_GRAPH (line 120) ... ok
+2026-09-10T14:37:01.9794178Z test crates/sparq-solid/src/lib.rs - PodStore (line 201) ... ok
+2026-09-10T14:37:02.3621655Z test crates/sparq-solid/src/fixture.rs - fixture::wac_fixture (line 160) ... ok
+2026-09-10T14:37:02.6574163Z test crates/sparq-solid/src/lib.rs - PodStore::decide (line 864) ... ok
+2026-09-10T14:37:02.6604057Z test crates/sparq-solid/src/lib.rs - PodStore::decide_create (line 949) ... ok
+2026-09-10T14:37:03.1317587Z test crates/sparq-solid/src/lib.rs - PodStore::materialize_acp_with (line 525) ... ok
+2026-09-10T14:37:03.1924108Z test crates/sparq-solid/src/lib.rs - PodStore::new (line 418) ... ok
+2026-09-10T14:37:03.3423524Z test crates/sparq-solid/src/lib.rs - PodStore::materialize_acp_with_credentials (line 581) ... ok
+2026-09-10T14:37:03.8034429Z test crates/sparq-solid/src/lib.rs - PodStore::resolve_acl (line 1009) ... ok
+2026-09-10T14:37:03.8728347Z test crates/sparq-solid/src/lib.rs - (line 19) ... ok
+2026-09-10T14:37:03.9048076Z test crates/sparq-solid/src/lib.rs - PodStore::query_as (line 1110) ... ok
+2026-09-10T14:37:03.9494401Z test crates/sparq-solid/src/materialize.rs - materialize::MaterializeStats (line 85) - compile ... ok
+2026-09-10T14:37:04.4254068Z test crates/sparq-solid/src/lib.rs - PodStore::update_as (line 1228) ... ok
+2026-09-10T14:37:04.5004143Z test crates/sparq-solid/src/lib.rs - PodStore::wac_allow (line 772) ... ok
+2026-09-10T14:37:04.6635348Z test crates/sparq-solid/src/materialize.rs - materialize::materialize_acp (line 184) ... ok
+2026-09-10T14:37:04.7684310Z test crates/sparq-solid/src/materialize.rs - materialize::materialize_wac (line 129) ... ok
+2026-09-10T14:37:05.0795986Z test crates/sparq-solid/src/rewrite.rs - rewrite::rewrite_for (line 53) ... ok
+2026-09-10T14:37:05.2284299Z test crates/sparq-solid/src/provenance.rs - provenance::AccessProvenance (line 37) ... ok
+2026-09-10T14:37:05.3217395Z test crates/sparq-solid/src/rewrite.rs - rewrite::wrap_for_view (line 108) ... ok
+2026-09-10T14:37:05.4474205Z test crates/sparq-solid/src/rewrite.rs - rewrite::wrap_for_view_opt_in (line 198) ... ok
+2026-09-10T14:37:05.8674686Z test crates/sparq-solid/src/wac_conformance.rs - wac_conformance (line 55) ... ok
+2026-09-10T14:37:05.9114401Z test crates/sparq-solid/src/write_through.rs - write_through::PodStore::delete_acl (line 193) ... ok
+2026-09-10T14:37:05.9714524Z test crates/sparq-solid/src/write_through.rs - write_through::PodStore::put_acl (line 119) ... ok
+2026-09-10T14:37:05.9715668Z 
+2026-09-10T14:37:05.9716352Z test result: ok. 36 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.54s
+2026-09-10T14:37:05.9717020Z 
+2026-09-10T14:37:05.9735543Z [1m[92m   Doc-tests[0m sparq_substrate
+2026-09-10T14:37:06.0158536Z 
+2026-09-10T14:37:06.0159498Z running 1 test
+2026-09-10T14:37:06.0160115Z test crates/sparq-substrate/src/lib.rs - (line 34) ... ignored
+2026-09-10T14:37:06.0160929Z 
+2026-09-10T14:37:06.0161391Z test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-09-10T14:37:06.0162029Z 
+2026-09-10T14:37:06.0178405Z [1m[92m   Doc-tests[0m sparq_terse
+2026-09-10T14:37:06.0470191Z 
+2026-09-10T14:37:06.0471131Z running 2 tests
+2026-09-10T14:37:06.0472991Z test crates/sparq-terse/src/lib.rs - (line 41) ... ignored
+2026-09-10T14:37:06.1564220Z test crates/sparq-terse/src/lib.rs - (line 19) ... ok
+2026-09-10T14:37:06.1564679Z 
+2026-09-10T14:37:06.1565144Z test result: ok. 1 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.11s
+2026-09-10T14:37:06.1565744Z 
+2026-09-10T14:37:06.1580755Z [1m[92m   Doc-tests[0m sparq_text
+2026-09-10T14:37:06.1997050Z 
+2026-09-10T14:37:06.1997405Z running 3 tests
+2026-09-10T14:37:06.4283907Z test crates/sparq-text/src/lib.rs - (line 57) ... ok
+2026-09-10T14:37:06.6624818Z test crates/sparq-text/src/lib.rs - (line 27) ... ok
+2026-09-10T14:37:06.7556044Z test crates/sparq-text/src/rewrite.rs - rewrite (line 4) ... ok
+2026-09-10T14:37:06.7556857Z 
+2026-09-10T14:37:06.7557652Z test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.56s
+2026-09-10T14:37:06.7558551Z 
+2026-09-10T14:37:06.7577914Z [1m[92m   Doc-tests[0m sparq_text_wasm
+2026-09-10T14:37:06.7927085Z 
+2026-09-10T14:37:06.7927622Z running 0 tests
+2026-09-10T14:37:06.7928116Z 
+2026-09-10T14:37:06.7928766Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-09-10T14:37:06.7929826Z 
+2026-09-10T14:37:06.7945158Z [1m[92m   Doc-tests[0m sparq_trust
+2026-09-10T14:37:06.8629278Z 
+2026-09-10T14:37:06.8629778Z running 0 tests
+2026-09-10T14:37:06.8630226Z 
+2026-09-10T14:37:06.8630907Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-09-10T14:37:06.8631534Z 
+2026-09-10T14:37:06.8653581Z [1m[92m   Doc-tests[0m sparq_vc
+2026-09-10T14:37:06.8956916Z 
+2026-09-10T14:37:06.8957610Z running 1 test
+2026-09-10T14:37:07.0913946Z test crates/sparq-vc/src/lib.rs - (line 74) ... ok
+2026-09-10T14:37:07.0914354Z 
+2026-09-10T14:37:07.0914724Z test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.20s
+2026-09-10T14:37:07.0915246Z 
+2026-09-10T14:37:07.0930411Z [1m[92m   Doc-tests[0m sparq_vectors
+2026-09-10T14:37:07.1884103Z 
+2026-09-10T14:37:07.1887921Z running 10 tests
+2026-09-10T14:37:07.1888809Z test crates/sparq-vectors/src/fuse.rs - fuse (line 28) ... ignored
+2026-09-10T14:37:07.2450765Z test crates/sparq-vectors/src/import.rs - import::VectorStore::import_npy (line 366) - compile ... ok
+2026-09-10T14:37:07.7113051Z test crates/sparq-vectors/src/hybrid.rs - hybrid (line 33) ... ok
+2026-09-10T14:37:07.7401950Z test crates/sparq-vectors/src/hybrid.rs - hybrid::HybridConfig (line 627) ... ok
+2026-09-10T14:37:07.7454242Z test crates/sparq-vectors/src/fuse.rs - fuse (line 48) ... ok
+2026-09-10T14:37:07.7860787Z test crates/sparq-vectors/src/store.rs - store::StreamingWriter (line 1353) - compile ... ok
+2026-09-10T14:37:07.8645609Z test crates/sparq-vectors/src/verbalize.rs - verbalize::embed_entities (line 467) - compile ... ok
+2026-09-10T14:37:07.8999111Z test crates/sparq-vectors/src/lib.rs - (line 23) ... ok
+2026-09-10T14:37:08.1495831Z test crates/sparq-vectors/src/verbalize.rs - verbalize (line 25) ... ok
+2026-09-10T14:37:08.2067671Z test crates/sparq-vectors/src/rewrite.rs - rewrite (line 4) ... ok
+2026-09-10T14:37:08.2068373Z 
+2026-09-10T14:37:08.2068941Z test result: ok. 9 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 1.02s
+2026-09-10T14:37:08.2069771Z 
+2026-09-10T14:37:08.2088758Z [1m[92m   Doc-tests[0m sparq_wac_oracle
+2026-09-10T14:37:08.2429118Z 
+2026-09-10T14:37:08.2429686Z running 1 test
+2026-09-10T14:37:08.6548205Z test crates/sparq-wac-oracle/src/lib.rs - (line 37) ... ok
+2026-09-10T14:37:08.6548604Z 
+2026-09-10T14:37:08.6548942Z test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.41s
+2026-09-10T14:37:08.6549405Z 
+2026-09-10T14:37:08.6564663Z [1m[92m   Doc-tests[0m sparq_wasm
+2026-09-10T14:37:08.7339594Z 
+2026-09-10T14:37:08.7340361Z running 0 tests
+2026-09-10T14:37:08.7340715Z 
+2026-09-10T14:37:08.7341515Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-09-10T14:37:08.7342490Z 
+2026-09-10T14:37:08.7359488Z [1m[92m   Doc-tests[0m sparq_wrapper
+2026-09-10T14:37:08.7630147Z 
+2026-09-10T14:37:08.7630653Z running 1 test
+2026-09-10T14:37:08.9078990Z test crates/sparq-wrapper/src/lib.rs - (line 12) ... ok
+2026-09-10T14:37:08.9079321Z 
+2026-09-10T14:37:08.9079593Z test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.14s
+2026-09-10T14:37:08.9079954Z 
+2026-09-10T14:37:08.9094613Z [1m[92m   Doc-tests[0m sparq_wrapper_gen
+2026-09-10T14:37:08.9245162Z 
+2026-09-10T14:37:08.9245775Z running 0 tests
+2026-09-10T14:37:08.9246027Z 
+2026-09-10T14:37:08.9246398Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-09-10T14:37:08.9246855Z 
+2026-09-10T14:37:08.9258997Z [1m[92m   Doc-tests[0m sparq_wrapper_integration
+2026-09-10T14:37:08.9410597Z 
+2026-09-10T14:37:08.9411216Z running 0 tests
+2026-09-10T14:37:08.9411434Z 
+2026-09-10T14:37:08.9411775Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-09-10T14:37:08.9412224Z 
+2026-09-10T14:37:08.9424574Z [1m[92m   Doc-tests[0m sparq_wrapper_shacl
+2026-09-10T14:37:08.9573237Z 
+2026-09-10T14:37:08.9573765Z running 0 tests
+2026-09-10T14:37:08.9574322Z 
+2026-09-10T14:37:08.9574666Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-09-10T14:37:08.9575111Z 
+2026-09-10T14:37:08.9586893Z [1m[92m   Doc-tests[0m sparq_zk
+2026-09-10T14:37:09.0351082Z 
+2026-09-10T14:37:09.0351629Z running 0 tests
+2026-09-10T14:37:09.0351962Z 
+2026-09-10T14:37:09.0352402Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-09-10T14:37:09.0353179Z 
+2026-09-10T14:37:09.0370700Z [1m[92m   Doc-tests[0m sparq_zk_compose
+2026-09-10T14:37:09.2791722Z 
+2026-09-10T14:37:09.2792265Z running 0 tests
+2026-09-10T14:37:09.2792572Z 
+2026-09-10T14:37:09.2793376Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-09-10T14:37:09.2793974Z 
+2026-09-10T14:37:09.3123000Z Post job cleanup.
+2026-09-10T14:37:09.6210527Z (node:18658) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+2026-09-10T14:37:09.6211730Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-09-10T14:37:09.6467657Z Post job cleanup.
+2026-09-10T14:37:09.7383724Z [command]/usr/bin/git version
+2026-09-10T14:37:09.7525150Z git version 2.55.0
+2026-09-10T14:37:09.7579003Z Temporarily overriding HOME='/home/runner/work/_temp/cf9cc53b-5dee-47b0-ac80-db3d2e5c3c88' before making global git config changes
+2026-09-10T14:37:09.7580826Z Adding repository directory to the temporary git global config as a safe directory
+2026-09-10T14:37:09.7588203Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/sparq/sparq
+2026-09-10T14:37:09.7667426Z Removing SSH command configuration
+2026-09-10T14:37:09.7674745Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-09-10T14:37:09.7725345Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-09-10T14:37:09.8319564Z Removing HTTP extra header
+2026-09-10T14:37:09.8327968Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-10T14:37:09.8371358Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-09-10T14:37:09.8620426Z Removing includeIf entries pointing to credentials config files
+2026-09-10T14:37:09.8628742Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-10T14:37:09.8661391Z includeif.gitdir:/home/runner/work/sparq/sparq/.git.path
+2026-09-10T14:37:09.8662091Z includeif.gitdir:/home/runner/work/sparq/sparq/.git/worktrees/*.path
+2026-09-10T14:37:09.8662570Z includeif.gitdir:/github/workspace/.git.path
+2026-09-10T14:37:09.8663298Z includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-09-10T14:37:09.8670833Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/sparq/sparq/.git.path
+2026-09-10T14:37:09.8697711Z /home/runner/work/_temp/git-credentials-b15a3b4d-db64-4cc5-a906-54eb4d0a47d6.config
+2026-09-10T14:37:09.8707765Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/sparq/sparq/.git.path /home/runner/work/_temp/git-credentials-b15a3b4d-db64-4cc5-a906-54eb4d0a47d6.config
+2026-09-10T14:37:09.8746967Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/sparq/sparq/.git/worktrees/*.path
+2026-09-10T14:37:09.8810700Z /home/runner/work/_temp/git-credentials-b15a3b4d-db64-4cc5-a906-54eb4d0a47d6.config
+2026-09-10T14:37:09.8819736Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/sparq/sparq/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-b15a3b4d-db64-4cc5-a906-54eb4d0a47d6.config
+2026-09-10T14:37:09.8855085Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git.path
+2026-09-10T14:37:09.8880533Z /github/runner_temp/git-credentials-b15a3b4d-db64-4cc5-a906-54eb4d0a47d6.config
+2026-09-10T14:37:09.8887773Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-b15a3b4d-db64-4cc5-a906-54eb4d0a47d6.config
+2026-09-10T14:37:09.8922183Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-09-10T14:37:09.8947600Z /github/runner_temp/git-credentials-b15a3b4d-db64-4cc5-a906-54eb4d0a47d6.config
+2026-09-10T14:37:09.8955551Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-b15a3b4d-db64-4cc5-a906-54eb4d0a47d6.config
+2026-09-10T14:37:09.8991237Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-09-10T14:37:09.9221064Z Removing credentials config '/home/runner/work/_temp/git-credentials-b15a3b4d-db64-4cc5-a906-54eb4d0a47d6.config'
+2026-09-10T14:37:09.9432467Z Cleaning up orphan processes

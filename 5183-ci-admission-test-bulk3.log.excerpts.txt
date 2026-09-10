@@ -1,0 +1,57 @@
+--- test-bulk3.log:500-555; ANSI escapes removed; original line numbers ---
+500: 2026-09-10T14:42:41.1373041Z   attempt=$((attempt + 1))
+501: 2026-09-10T14:42:41.1373311Z done
+502: 2026-09-10T14:42:41.1414901Z shell: /usr/bin/bash -e {0}
+503: 2026-09-10T14:42:41.1415172Z env:
+504: 2026-09-10T14:42:41.1415383Z   CARGO_TERM_COLOR: always
+505: 2026-09-10T14:42:41.1415652Z   RUST_BACKTRACE: 1
+506: 2026-09-10T14:42:41.1415871Z   CARGO_NET_RETRY: 10
+507: 2026-09-10T14:42:41.1416086Z   CARGO_INCREMENTAL: 0
+508: 2026-09-10T14:42:41.1416336Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+509: 2026-09-10T14:42:41.1416751Z   CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: -C link-arg=-fuse-ld=lld
+510: 2026-09-10T14:42:41.1417549Z   HEAVY: test(=diskann_recall_at_10_vs_brute_force_on_50k) | test(=hnsw_recall_at_10_vs_brute_force_on_50k)
+511: 2026-09-10T14:42:41.1418277Z   RAYON_NUM_THREADS: 
+512: 2026-09-10T14:42:41.1418638Z   SELECT_MODE: selected
+513: 2026-09-10T14:42:41.1419009Z   SELECT_AFFECTED: ["sparq-bench"]
+514: 2026-09-10T14:42:41.1419303Z   SELECT_FILTERSET: package(sparq-bench)
+515: 2026-09-10T14:42:41.1419627Z   SHARD_CRATE: 
+516: 2026-09-10T14:42:41.1419885Z   SHARD_FILTER: 
+517: 2026-09-10T14:42:41.1420088Z   IS_DRAFT_PR: false
+518: 2026-09-10T14:42:41.1420306Z ##[endgroup]
+519: 2026-09-10T14:42:41.1481346Z ##[group]nextest shard 'bulk 3/3' — attempt 1/2
+520: 2026-09-10T14:42:41.4307421Z   Extracting 742 binaries (including 11 non-test binaries), 1 build script output directory, and 6 linked paths to /home/runner/work/sparq/sparq
+521: 2026-09-10T14:44:02.0558608Z    Extracted 1207 files to /home/runner/work/sparq/sparq in 1m 20.87s
+522: 2026-09-10T14:44:02.1015759Z ────────────
+523: 2026-09-10T14:44:02.1016851Z  Nextest run ID 19397fe0-66da-4600-994b-0094bf73166d with nextest profile: ci
+524: 2026-09-10T14:44:02.1017661Z     Starting 20 tests across 1 binary (40 tests and 730 binaries skipped)
+525: 2026-09-10T14:44:02.1149251Z         PASS [   0.011s] ( 1/20) sparq-bench::bin/sparq-bench fuzz::tests::committed_allowlist_enables_exactly_the_adjudicated_classes
+526: 2026-09-10T14:44:02.1167675Z         PASS [   0.014s] ( 2/20) sparq-bench::bin/sparq-bench fuzz::tests::duplicate_multiplicity_is_significant
+527: 2026-09-10T14:44:02.1229340Z         PASS [   0.008s] ( 3/20) sparq-bench::bin/sparq-bench fuzz::tests::every_category_has_a_nightly_shard
+528: 2026-09-10T14:44:02.1267321Z         PASS [   0.010s] ( 4/20) sparq-bench::bin/sparq-bench fuzz::tests::exact_numeric_equality_beyond_f64
+529: 2026-09-10T14:44:02.1344583Z         PASS [   0.008s] ( 5/20) sparq-bench::bin/sparq-bench fuzz::tests::order_by_compares_up_to_within_tie_run_permutation
+530: 2026-09-10T14:44:02.1415336Z         PASS [   0.019s] ( 6/20) sparq-bench::bin/sparq-bench fuzz::tests::integer_constant_vs_mixed_column
+531: 2026-09-10T14:44:02.1437827Z         PASS [   0.041s] ( 7/20) sparq-bench::bin/sparq-bench fuzz::tests::ask_is_compared_by_its_boolean_not_a_count
+532: 2026-09-10T14:44:02.1510444Z         PASS [   0.049s] ( 8/20) sparq-bench::bin/sparq-bench fuzz::tests::a_limit_window_is_value_compared_only_with_a_total_tiebreaker
+533: 2026-09-10T14:44:02.1527886Z         PASS [   0.011s] ( 9/20) sparq-bench::bin/sparq-bench fuzz::tests::same_family_string_filter_stays_strict
+534: 2026-09-10T14:44:02.1598587Z         PASS [   0.024s] (10/20) sparq-bench::bin/sparq-bench fuzz::tests::same_cardinality_wrong_aggregate_value_is_caught
+535: 2026-09-10T14:44:02.1624180Z         PASS [   0.007s] (11/20) sparq-bench::bin/sparq-bench neutral::tests::neutral_term_keys_absorb_lexical_form_but_not_value
+536: 2026-09-10T14:44:02.1654074Z         PASS [   0.009s] (12/20) sparq-bench::bin/sparq-bench neutral::tests::fold_derived_integer_is_narrow
+537: 2026-09-10T14:44:02.1687246Z         PASS [   0.010s] (13/20) sparq-bench::bin/sparq-bench update_fuzz::tests::committed_allowlist_enables_exactly_the_adjudicated_classes
+538: 2026-09-10T14:44:02.1805008Z         PASS [   0.012s] (14/20) sparq-bench::bin/sparq-bench update_fuzz::tests::integer_lexical_adjudication_is_narrow
+539: 2026-09-10T14:44:02.1905210Z         PASS [   0.008s] (15/20) sparq-bench::bin/sparq-bench update_fuzz::tests::lexical_collisions_across_contexts_and_nested_terms_fail
+540: 2026-09-10T14:44:02.2700236Z         PASS [   0.109s] (16/20) sparq-bench::bin/sparq-bench update_fuzz::tests::historical_4141222487_preserves_lexicals_and_fresh_nodes
+541: 2026-09-10T14:44:02.2806278Z         PASS [   0.011s] (17/20) sparq-bench::bin/sparq-bench update_fuzz::tests::snapshot_renderers_agree_on_known_dataset
+542: 2026-09-10T14:44:02.3575752Z         PASS [   0.214s] (18/20) sparq-bench::bin/sparq-bench fuzz::tests::typed_literal_columns_cover_every_datatype_family
+543: 2026-09-10T14:44:04.5760440Z         PASS [   2.416s] (19/20) sparq-bench::bin/sparq-bench update_fuzz::tests::generated_integer_domain_is_injective_including_load
+544: 2026-09-10T14:44:06.1354907Z         PASS [   3.946s] (20/20) sparq-bench::bin/sparq-bench update_fuzz::tests::no_nested_blank_nodes_in_triple_terms
+545: 2026-09-10T14:44:06.1355950Z ────────────
+546: 2026-09-10T14:44:06.1356703Z      Summary [   4.034s] 20 tests run: 20 passed, 40 skipped
+547: 2026-09-10T14:44:06.1424044Z ##[endgroup]
+548: 2026-09-10T14:44:06.1424448Z shard 'bulk 3/3' passed on attempt 1
+549: 2026-09-10T14:44:06.1578360Z Post job cleanup.
+550: 2026-09-10T14:44:06.3597587Z [command]/usr/bin/git version
+551: 2026-09-10T14:44:06.3652717Z git version 2.55.0
+552: 2026-09-10T14:44:06.3703850Z Temporarily overriding HOME='/home/runner/work/_temp/b400d95b-4313-43e5-ac3e-ca4f7bb49eb8' before making global git config changes
+553: 2026-09-10T14:44:06.3711849Z Adding repository directory to the temporary git global config as a safe directory
+554: 2026-09-10T14:44:06.3717691Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/sparq/sparq
+555: 2026-09-10T14:44:06.3752275Z Removing SSH command configuration

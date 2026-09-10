@@ -1,0 +1,22 @@
+--- gate.log:174-184; ANSI escapes removed; original line numbers ---
+174: 2026-09-10T14:25:47.0257541Z   SHA: fe3284199db0831f353d2ae401b8c69472764904
+175: 2026-09-10T14:25:47.0257889Z   SELF_RUN_ID: 34488983731
+176: 2026-09-10T14:25:47.0258172Z   EVENT_NAME: pull_request
+177: 2026-09-10T14:25:47.0258446Z   PR_DRAFT: false
+178: 2026-09-10T14:25:47.0258697Z   PR_NUMBER: 6482
+179: 2026-09-10T14:25:47.0258939Z ##[endgroup]
+180: 2026-09-10T14:25:48.6344825Z ci-summary: 36 declared-advisory job name(s) loaded from .github/advisory-registry.json; every other check GATES (#3773).
+181: 2026-09-10T14:25:48.6345941Z ci-summary: evaluating tier=full (event=pull_request).
+182: 2026-09-10T14:25:48.6346513Z attempt 1: 36 check-run(s), 33 running, all-terminal stable for 0/2 poll(s)
+183: 2026-09-10T14:26:11.2112456Z   workflow-run resolver: ignored 4 check-run(s) from superseded runs/attempts (#3505).
+184: 2026-09-10T14:26:11.2113218Z attempt 2: 34 check-run(s), 26 running, all-terminal stable for 0/2 poll(s) (name set changed)
+--- gate.log:301-309; ANSI escapes removed; original line numbers ---
+301: 2026-09-10T14:47:20.8883253Z   workflow-run resolver: ignored 70 check-run(s) from superseded runs/attempts (#3505).
+302: 2026-09-10T14:47:20.8884300Z attempt 61: 70 check-run(s), 0 running, all-terminal stable for 1/2 poll(s) (name set changed)
+303: 2026-09-10T14:47:42.2346753Z   workflow-run resolver: ignored 70 check-run(s) from superseded runs/attempts (#3505).
+304: 2026-09-10T14:47:42.2347648Z attempt 62: 70 check-run(s), 0 running, all-terminal stable for 2/2 poll(s)
+305: 2026-09-10T14:47:42.2353419Z ### ci-summary: PASSED — all 64 gating check(s) green (or skipped/neutral); 6 advisory check(s) excluded (each DECLARED in .github/advisory-registry.json, or on the exact platform-managed allow-list); set stable.
+306: 2026-09-10T14:47:42.2356842Z selection: 41 of 64 gating check(s) ran, 23 skipped (selection and/or path-filter; selection pre-job succeeded).
+307: 2026-09-10T14:47:42.2546376Z Post job cleanup.
+308: 2026-09-10T14:47:42.3484766Z [command]/usr/bin/git version
+309: 2026-09-10T14:47:42.3524727Z git version 2.55.0

@@ -1,0 +1,79 @@
+--- docs.log:591-616; ANSI escapes removed; original line numbers ---
+591: 2026-09-10T14:26:50.3650247Z ##[group]Run bash scripts/check-privacy-claims.sh
+592: 2026-09-10T14:26:50.3650668Z bash scripts/check-privacy-claims.sh
+593: 2026-09-10T14:26:50.3686950Z shell: /usr/bin/bash -e {0}
+594: 2026-09-10T14:26:50.3687200Z env:
+595: 2026-09-10T14:26:50.3687461Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.14/x64
+596: 2026-09-10T14:26:50.3687910Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib/pkgconfig
+597: 2026-09-10T14:26:50.3688348Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+598: 2026-09-10T14:26:50.3688737Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+599: 2026-09-10T14:26:50.3689142Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+600: 2026-09-10T14:26:50.3689525Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib
+601: 2026-09-10T14:26:50.3689843Z ##[endgroup]
+602: 2026-09-10T14:26:52.7412292Z check-privacy-claims: OK — scanned 784 file(s); no unqualified ZK/MPC privacy/soundness claim.
+603: 2026-09-10T14:26:52.7459687Z ##[group]Run bash scripts/tests/test_privacy_claims.sh
+604: 2026-09-10T14:26:52.7460426Z bash scripts/tests/test_privacy_claims.sh
+605: 2026-09-10T14:26:52.7500993Z shell: /usr/bin/bash -e {0}
+606: 2026-09-10T14:26:52.7501255Z env:
+607: 2026-09-10T14:26:52.7501565Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.14/x64
+608: 2026-09-10T14:26:52.7502025Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib/pkgconfig
+609: 2026-09-10T14:26:52.7502463Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+610: 2026-09-10T14:26:52.7502849Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+611: 2026-09-10T14:26:52.7503240Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+612: 2026-09-10T14:26:52.7503840Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib
+613: 2026-09-10T14:26:52.7504169Z ##[endgroup]
+614: 2026-09-10T14:26:53.0732722Z 
+615: 2026-09-10T14:26:53.0733537Z test_privacy_claims: 32 passed, 0 failed.
+616: 2026-09-10T14:26:53.0734548Z test_privacy_claims: OK — both-direction soundness-claim coverage holds.
+--- docs.log:747-782; ANSI escapes removed; original line numbers ---
+747: 2026-09-10T14:27:12.1393676Z ##[group]Run python3 scripts/preflight.py --self-test
+748: 2026-09-10T14:27:12.1394109Z python3 scripts/preflight.py --self-test
+749: 2026-09-10T14:27:12.1430383Z shell: /usr/bin/bash -e {0}
+750: 2026-09-10T14:27:12.1430643Z env:
+751: 2026-09-10T14:27:12.1430905Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.14/x64
+752: 2026-09-10T14:27:12.1431542Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib/pkgconfig
+753: 2026-09-10T14:27:12.1431973Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+754: 2026-09-10T14:27:12.1432370Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+755: 2026-09-10T14:27:12.1432762Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+756: 2026-09-10T14:27:12.1433147Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib
+757: 2026-09-10T14:27:12.1433469Z ##[endgroup]
+758: 2026-09-10T14:27:12.2305203Z   ok   rust pub fn validate_* is a guard
+759: 2026-09-10T14:27:12.2305916Z   ok   rust pub fn *_guard is a guard
+760: 2026-09-10T14:27:12.2306537Z   ok   rust pub fn is_*_valid is a guard
+761: 2026-09-10T14:27:12.2307043Z   ok   rust pub(crate) fn check_* is a guard
+762: 2026-09-10T14:27:12.2307570Z   ok   rust PRIVATE fn check_* is NOT a surface
+763: 2026-09-10T14:27:12.2308144Z   ok   rust pub fn with no guard stem is NOT a guard
+764: 2026-09-10T14:27:12.2308717Z   ok   python module-level def validate_* is a guard
+765: 2026-09-10T14:27:12.2309274Z   ok   python NESTED def is NOT a surface
+766: 2026-09-10T14:27:12.2309808Z   ok   a non-src, non-scripts path is out of scope
+767: 2026-09-10T14:27:12.2310334Z   ok   suppression with a reason suppresses
+768: 2026-09-10T14:27:12.2310886Z   ok   suppression WITHOUT a reason does NOT suppress
+769: 2026-09-10T14:27:12.2311480Z   ok   suppression for a DIFFERENT check does not suppress
+770: 2026-09-10T14:27:12.2312016Z   ok   parse_added keeps only + lines
+771: 2026-09-10T14:27:12.2312473Z   ok   parse_added ignores the +++ header
+772: 2026-09-10T14:27:12.2312952Z   ok   e2e: guard with NO test -> 1 finding
+773: 2026-09-10T14:27:12.2313455Z   ok   e2e: guard named by a test -> 0 findings
+774: 2026-09-10T14:27:12.2314017Z   ok   e2e: an unrelated test does NOT satisfy the guard
+775: 2026-09-10T14:27:12.2314653Z   ok   e2e: a separate-file `#[cfg(test)] mod X;` satisfies the guard
+776: 2026-09-10T14:27:12.2315495Z   ok   e2e: a plain `mod X;` does NOT satisfy the guard
+777: 2026-09-10T14:27:12.2316118Z   ok   `#[cfg(test)] mod X;` resolves, a braced `mod X { .. }` does not
+778: 2026-09-10T14:27:12.2316760Z   ok   a column-0 comment does not end a python test region
+779: 2026-09-10T14:27:12.2317392Z   ok   an unparseable python script contributes no test text
+780: 2026-09-10T14:27:12.2317742Z 
+781: 2026-09-10T14:27:12.2317945Z preflight --self-test: PASS
+782: 2026-09-10T14:27:12.2430214Z ##[group]Run python3 scripts/tests/test_preflight.py
+--- docs.log:865-878; ANSI escapes removed; original line numbers ---
+865: 2026-09-10T14:27:13.1753803Z test_both_preflight_legs_are_wired_into_the_workflow (__main__.TheYamlSeamIsGating.test_both_preflight_legs_are_wired_into_the_workflow) ... ok
+866: 2026-09-10T14:27:13.3247510Z test_neither_leg_can_swallow_its_own_failure (__main__.TheYamlSeamIsGating.test_neither_leg_can_swallow_its_own_failure) ... ok
+867: 2026-09-10T14:27:13.4739692Z test_neither_leg_is_conditionally_skipped (__main__.TheYamlSeamIsGating.test_neither_leg_is_conditionally_skipped) ... ok
+868: 2026-09-10T14:27:13.6246390Z test_neither_leg_is_invoked_with_its_exit_code_discarded (__main__.TheYamlSeamIsGating.test_neither_leg_is_invoked_with_its_exit_code_discarded) ... ok
+869: 2026-09-10T14:27:13.7738893Z test_the_hosting_job_name_carries_no_advisory_token (__main__.TheYamlSeamIsGating.test_the_hosting_job_name_carries_no_advisory_token) ... ok
+870: 2026-09-10T14:27:13.7743995Z test_every_worker_brief_carries_the_claim_vs_code_obligation (__main__.WorkerBriefsCarryThePresubmitBlock.test_every_worker_brief_carries_the_claim_vs_code_obligation) ... ok
+871: 2026-09-10T14:27:13.7748023Z test_every_worker_brief_carries_the_mutation_obligation (__main__.WorkerBriefsCarryThePresubmitBlock.test_every_worker_brief_carries_the_mutation_obligation) ... ok
+872: 2026-09-10T14:27:13.7751742Z test_every_worker_brief_names_the_preflight_runner (__main__.WorkerBriefsCarryThePresubmitBlock.test_every_worker_brief_names_the_preflight_runner) ... ok
+873: 2026-09-10T14:27:13.7756881Z test_the_block_is_byte_identical_across_briefs (__main__.WorkerBriefsCarryThePresubmitBlock.test_the_block_is_byte_identical_across_briefs) ... ok
+874: 2026-09-10T14:27:13.7757891Z 
+875: 2026-09-10T14:27:13.7758336Z ----------------------------------------------------------------------
+876: 2026-09-10T14:27:13.7759035Z Ran 81 tests in 1.311s
+877: 2026-09-10T14:27:13.7759276Z 
+878: 2026-09-10T14:27:13.7759409Z OK

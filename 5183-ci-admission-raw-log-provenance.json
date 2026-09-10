@@ -1,0 +1,72 @@
+{
+  "flow.log": {
+    "sha256_uncompressed": "a6d78c12b04cb7ff84fe051f9114302b5a8e1b8c827d22defbb0c3faecabf791",
+    "bytes_uncompressed": 146964,
+    "stored_as": "flow.log",
+    "transport": "one exact GitHub Actions job-log API GET; no retry",
+    "compression": null
+  },
+  "test-bulk1.log": {
+    "sha256_uncompressed": "98e10ea01301ae52f4e0122eb33d03db6eafbb6fc519c8a9f9ce1e0418c01732",
+    "bytes_uncompressed": 54273,
+    "stored_as": "test-bulk1.log",
+    "transport": "one exact GitHub Actions job-log API GET; no retry",
+    "compression": null
+  },
+  "msrv.log": {
+    "sha256_uncompressed": "c30b37ee60a31931bb1bfdb4e0828d29a6669ce50a0664a09d5bfd97fe66078e",
+    "bytes_uncompressed": 104036,
+    "stored_as": "msrv.log",
+    "transport": "one exact GitHub Actions job-log API GET; no retry",
+    "compression": null
+  },
+  "test-bulk3.log": {
+    "sha256_uncompressed": "61473f108e3538158566fa55cc8a721667e68aad069b9b2588df2a7db0500b4b",
+    "bytes_uncompressed": 54271,
+    "stored_as": "test-bulk3.log",
+    "transport": "one exact GitHub Actions job-log API GET; no retry",
+    "compression": null
+  },
+  "test-bulk2.log": {
+    "sha256_uncompressed": "259f41a5894ccb7940211c071fe5a01cdcde3956f5884691355eb51d2ec3701a",
+    "bytes_uncompressed": 54271,
+    "stored_as": "test-bulk2.log",
+    "transport": "one exact GitHub Actions job-log API GET; no retry",
+    "compression": null
+  },
+  "clippy.log": {
+    "sha256_uncompressed": "563dccdfff3874c74b17fb0043f1c1b8ff2cd1a78a009497a8b3892ccfa0bb0b",
+    "bytes_uncompressed": 12887263,
+    "stored_as": "clippy.log.gz",
+    "transport": "one exact GitHub Actions job-log API GET; no retry",
+    "compression": "lossless gzip with verified byte equality"
+  },
+  "later-select.log": {
+    "sha256_uncompressed": "765bec89aae2f11c8f40073f4a9ce9d432aa6775afae4c1797181ad693576137",
+    "bytes_uncompressed": 120808,
+    "stored_as": "later-select.log",
+    "transport": "one exact GitHub Actions job-log API GET; no retry",
+    "compression": null
+  },
+  "docs.log": {
+    "sha256_uncompressed": "86996033f769a6cbd869eebfe2f3dccec33cb037db2ffd9de0b5e543a5d90cd2",
+    "bytes_uncompressed": 584057,
+    "stored_as": "docs.log",
+    "transport": "one exact GitHub Actions job-log API GET; no retry",
+    "compression": null
+  },
+  "archive.log": {
+    "sha256_uncompressed": "e012d53aa9982dd882d7d013916021c515de60001c75dd33389cf3ab32e70ac9",
+    "bytes_uncompressed": 128172,
+    "stored_as": "archive.log",
+    "transport": "one exact GitHub Actions job-log API GET; no retry",
+    "compression": null
+  },
+  "gate.log": {
+    "sha256_uncompressed": "fbcc60406dd7f278eeafeb59cc73c61d865c5534c9cce15a9def544c5e4fe7d2",
+    "bytes_uncompressed": 31041,
+    "stored_as": "gate.log",
+    "transport": "one exact GitHub Actions job-log API GET; no retry",
+    "compression": null
+  }
+}

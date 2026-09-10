@@ -684,6 +684,16 @@ for evidence_name in ['execute.py', 'harness/bench/differential-divergences.json
     FILES["5183-copilot-duplicate-witness-" + evidence_name.replace("/", "--")] = ROOT / "direct-5183/copilot-duplicate-witness" / evidence_name
 FILES["5183-admission-copilot-duplicate-witness-root-verification.json"] = ROOT / "direct-5183/admission/copilot-duplicate-witness-root-verification.json"
 
+# PR6482 completed-workflow watch and prepared admission scripts (not mutation receipts).
+for evidence_name in ['pr6482-runs1507.json', 'pr6482-runs1507.stderr', 'pr6482-review-watch1507.json', 'pr6482-review-watch1507.stderr', 'registry-settings1507.json', 'registry-settings1507.stderr', 'target6482-query.json', 'target6482-1512.json', 'target6482-1512.stderr', 'rules1512.json', 'rules1512.stderr', 'main459-gate1512.json', 'main459-gate1512.stderr', 'finish-review6482.py', 'enqueue6482.py']:
+    FILES["5183-admission-" + evidence_name] = ROOT / "direct-5183/admission" / evidence_name
+
+# PR6482 verified Linux admission, resolved review and protected queue receipts.
+for evidence_name in ['archive.log', 'archive.log.excerpts.txt', 'budget.json', 'cached-run-list-summary.json', 'ci-jobs.json', 'ci-run.json', 'clippy.log.excerpts.txt', 'clippy.log.gz', 'docs-jobs.json', 'docs.log', 'docs.log.excerpts.txt', 'flow-jobs.json', 'flow.log', 'flow.log.excerpts.txt', 'gate-check.json', 'gate-jobs.json', 'gate-run.json', 'gate.log', 'gate.log.excerpts.txt', 'job-selection.json', 'later-ci-jobs.json', 'later-select.log', 'later-select.log.excerpts.txt', 'matrix-jobs.json', 'module-tests.json', 'msrv.log', 'msrv.log.excerpts.txt', 'raw-log-provenance.json', 'report.json', 'review-packet.md', 'test-bulk1.log', 'test-bulk1.log.excerpts.txt', 'test-bulk2.log', 'test-bulk2.log.excerpts.txt', 'test-bulk3.log', 'test-bulk3.log.excerpts.txt', 'manifest.json']:
+    FILES["5183-ci-admission-" + evidence_name.replace("/", "--")] = ROOT / "direct-5183/ci-admission" / evidence_name
+for evidence_name in ['ci6482-root-verification.json', 'pr6482-ci-body.md', 'pr6482-ci-body-input.json', 'copilot6482-ci-reply-input.json', 'finish-review6482-receipt.json', 'resolve6482-input.json', 'enqueue6482-receipt.json', 'enqueue6482-input.json', 'queue6482-watch-query.json', 'queue6482-first-observation.json', 'queue6482-first-observation.stderr', 'mg6482-first-commit.json', 'mg6482-first-commit.stderr', 'mg6482-first-runs.json', 'mg6482-first-runs.stderr', 'mg6482-tree-proof.json']:
+    FILES["5183-admission-" + evidence_name] = ROOT / "direct-5183/admission" / evidence_name
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout

@@ -1,0 +1,26 @@
+--- later-select.log:951-957; ANSI escapes removed; original line numbers ---
+951: 2026-09-10T14:48:17.8069104Z ##[endgroup]
+952: 2026-09-10T14:48:17.8339803Z ##[group]Run set -euo pipefail
+953: 2026-09-10T14:48:17.8340302Z set -euo pipefail
+954: 2026-09-10T14:48:17.8340989Z if [ "${IS_NO_LEG_RUN:-}" = "true" ]; then
+955: 2026-09-10T14:48:17.8342435Z   echo "**Tier: no-leg** — this run was started by a \`${EVENT}\` label flip that the label-trigger guard turns into a NO-OP: every leg is skipped and this selection pre-job is the run's only real job. The ci-summary gate therefore IGNORES this whole run and keeps the previous real run of this workflow authoritative (#3781)." >> "$GITHUB_STEP_SUMMARY"
+956: 2026-09-10T14:48:17.8343801Z elif [ "${IS_DRAFT_PR:-}" = "true" ]; then
+957: 2026-09-10T14:48:17.8344669Z   echo "**Tier: draft** — draft-tier CI (reduced sibling set; the full matrix re-runs at ready_for_review and its fresh gate supersedes this head's draft-tier results)." >> "$GITHUB_STEP_SUMMARY"
+--- later-select.log:973-989; ANSI escapes removed; original line numbers ---
+973: 2026-09-10T14:48:17.8395747Z shell: /usr/bin/bash -e {0}
+974: 2026-09-10T14:48:17.8396089Z env:
+975: 2026-09-10T14:48:17.8396362Z   CARGO_NET_RETRY: 10
+976: 2026-09-10T14:48:17.8396673Z   EVENT: pull_request
+977: 2026-09-10T14:48:17.8396998Z   BASE: 4595388de9e389f5369d63828fbf90cfc16b62d9
+978: 2026-09-10T14:48:17.8397387Z   HEAD: fe3284199db0831f353d2ae401b8c69472764904
+979: 2026-09-10T14:48:17.8397742Z   CI_SELECT_MODE: 
+980: 2026-09-10T14:48:17.8398017Z   CI_FULL_LABEL: false
+981: 2026-09-10T14:48:17.8398299Z   IS_DRAFT_PR: false
+982: 2026-09-10T14:48:17.8398581Z   IS_NO_LEG_RUN: true
+983: 2026-09-10T14:48:17.8398857Z ##[endgroup]
+984: 2026-09-10T14:48:34.7045886Z {
+985: 2026-09-10T14:48:34.7046224Z   "mode": "selected",
+986: 2026-09-10T14:48:34.7046641Z   "reason": "1 of 68 members affected (67 skippable)",
+987: 2026-09-10T14:48:34.7047306Z   "affected": [
+988: 2026-09-10T14:48:34.7047713Z     "sparq-bench"
+989: 2026-09-10T14:48:34.7047996Z   ],

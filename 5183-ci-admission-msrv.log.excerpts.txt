@@ -1,0 +1,45 @@
+--- msrv.log:300-330; ANSI escapes removed; original line numbers ---
+300: 2026-09-10T14:27:53.7304770Z fi
+301: 2026-09-10T14:27:53.7305070Z echo "declared MSRV floor (root Cargo.toml rust-version) = $floor"
+302: 2026-09-10T14:27:53.7305452Z for tool in rustc cargo; do
+303: 2026-09-10T14:27:53.7305840Z   ver="$("$tool" --version)" || { echo "::error::$tool --version failed"; exit 1; }
+304: 2026-09-10T14:27:53.7306263Z   echo "$tool --version -> $ver"
+305: 2026-09-10T14:27:53.7306564Z   case "$ver" in
+306: 2026-09-10T14:27:53.7306817Z     "$tool $floor."*|"$tool $floor "*) ;;
+307: 2026-09-10T14:27:53.7307095Z     *)
+308: 2026-09-10T14:27:53.7307943Z       echo "::error::MSRV gate is NOT on the declared floor $floor — $tool reports '$ver'. This lane must compile ON the floor toolchain or it proves nothing; check the job-level RUSTUP_TOOLCHAIN and the root rust-toolchain.toml pin."
+309: 2026-09-10T14:27:53.7308853Z       exit 1
+310: 2026-09-10T14:27:53.7309057Z       ;;
+311: 2026-09-10T14:27:53.7309252Z   esac
+312: 2026-09-10T14:27:53.7309436Z done
+313: 2026-09-10T14:27:53.7309782Z cargo check --workspace --all-targets --exclude sparq-py --exclude sparq-hdt
+314: 2026-09-10T14:27:53.7347586Z shell: /usr/bin/bash -e {0}
+315: 2026-09-10T14:27:53.7347833Z env:
+316: 2026-09-10T14:27:53.7348027Z   CARGO_TERM_COLOR: always
+317: 2026-09-10T14:27:53.7348268Z   RUST_BACKTRACE: 1
+318: 2026-09-10T14:27:53.7348638Z   CARGO_NET_RETRY: 10
+319: 2026-09-10T14:27:53.7348860Z   CARGO_INCREMENTAL: 0
+320: 2026-09-10T14:27:53.7349105Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+321: 2026-09-10T14:27:53.7349429Z   CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: 
+322: 2026-09-10T14:27:53.7349735Z   RUSTUP_TOOLCHAIN: 1.88
+323: 2026-09-10T14:27:53.7349965Z   CACHE_ON_FAILURE: false
+324: 2026-09-10T14:27:53.7350193Z ##[endgroup]
+325: 2026-09-10T14:27:53.7424901Z declared MSRV floor (root Cargo.toml rust-version) = 1.88
+326: 2026-09-10T14:27:53.7544399Z rustc --version -> rustc 1.88.0 (6b00bc388 2025-06-23)
+327: 2026-09-10T14:27:53.7630982Z cargo --version -> cargo 1.88.0 (873a06493 2025-05-10)
+328: 2026-09-10T14:27:53.8343605Z     Updating crates.io index
+329: 2026-09-10T14:27:53.8619658Z     Updating git repository `https://github.com/jeswr/solid-oidc-verifier`
+330: 2026-09-10T14:27:55.2989400Z  Downloading crates ...
+--- msrv.log:1283-1294; ANSI escapes removed; original line numbers ---
+1283: 2026-09-10T14:29:32.5955257Z     Checking sparq-text-wasm v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-text-wasm)
+1284: 2026-09-10T14:29:32.6094578Z     Checking sparq-wac-oracle v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-wac-oracle)
+1285: 2026-09-10T14:29:32.6184592Z     Checking sparq-shacl-wasm v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-shacl-wasm)
+1286: 2026-09-10T14:29:32.6885422Z     Checking sparq-reason-wasm v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-reason-wasm)
+1287: 2026-09-10T14:29:41.4539242Z     Checking sparq-cli v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-cli)
+1288: 2026-09-10T14:29:52.8594984Z     Checking sparq-bench v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-bench)
+1289: 2026-09-10T14:29:54.2524421Z     Finished `dev` profile [unoptimized + debuginfo] target(s) in 2m 00s
+1290: 2026-09-10T14:29:54.5057996Z Post job cleanup.
+1291: 2026-09-10T14:29:54.7800426Z (node:13965) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+1292: 2026-09-10T14:29:54.7801842Z (Use `node --trace-deprecation ...` to show where the warning was created)
+1293: 2026-09-10T14:29:54.8027441Z Post job cleanup.
+1294: 2026-09-10T14:29:54.8929706Z [command]/usr/bin/git version

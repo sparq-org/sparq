@@ -1,0 +1,113 @@
+--- clippy.log:289-300; ANSI escapes removed; original line numbers ---
+289: 2026-09-10T14:27:58.2793347Z   - /home/runner/work/sparq/sparq/crates/sparq-zk-compose/Cargo.toml
+290: 2026-09-10T14:27:58.2794183Z   - /home/runner/work/sparq/sparq/crates/sparq-zk/Cargo.toml
+291: 2026-09-10T14:27:58.2794865Z   - /home/runner/work/sparq/sparq/rust-toolchain.toml
+292: 2026-09-10T14:27:58.2796105Z ##[endgroup]
+293: 2026-09-10T14:27:58.2796355Z 
+294: 2026-09-10T14:27:58.2796529Z ... Restoring cache ...
+295: 2026-09-10T14:27:58.4935043Z No cache found.
+296: 2026-09-10T14:27:58.5079620Z ##[group]Run cargo clippy --workspace --all-targets -- -D warnings
+297: 2026-09-10T14:27:58.5080153Z cargo clippy --workspace --all-targets -- -D warnings
+298: 2026-09-10T14:27:58.5119005Z shell: /usr/bin/bash -e {0}
+299: 2026-09-10T14:27:58.5119264Z env:
+300: 2026-09-10T14:27:58.5119462Z   CARGO_TERM_COLOR: always
+--- clippy.log:1340-1358; ANSI escapes removed; original line numbers ---
+1340: 2026-09-10T14:30:05.7252374Z     Checking sparq-bench v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-bench)
+1341: 2026-09-10T14:30:15.7079394Z     Checking sparq-crdt v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-crdt)
+1342: 2026-09-10T14:30:17.4403566Z     Checking sparq-wrapper-gen v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-wrapper-gen)
+1343: 2026-09-10T14:30:17.4749551Z     Checking sparq-wrapper-integration v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-wrapper-integration)
+1344: 2026-09-10T14:30:17.4969834Z     Checking sparq-reason-diff v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-reason-diff)
+1345: 2026-09-10T14:30:17.5469356Z     Checking sparq-fedplan-mpc v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-fedplan-mpc)
+1346: 2026-09-10T14:30:17.5910846Z     Checking sparq-wrapper-shacl v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-wrapper-shacl)
+1347: 2026-09-10T14:30:18.6708272Z     Finished `dev` profile [unoptimized + debuginfo] target(s) in 2m 20s
+1348: 2026-09-10T14:30:18.9670956Z ##[group]Run cargo clippy --workspace --all-targets --all-features -- -D warnings
+1349: 2026-09-10T14:30:18.9671591Z cargo clippy --workspace --all-targets --all-features -- -D warnings
+1350: 2026-09-10T14:30:18.9708090Z shell: /usr/bin/bash -e {0}
+1351: 2026-09-10T14:30:18.9708344Z env:
+1352: 2026-09-10T14:30:18.9708542Z   CARGO_TERM_COLOR: always
+1353: 2026-09-10T14:30:18.9708775Z   RUST_BACKTRACE: 1
+1354: 2026-09-10T14:30:18.9708980Z   CARGO_NET_RETRY: 10
+1355: 2026-09-10T14:30:18.9709194Z   CARGO_INCREMENTAL: 0
+1356: 2026-09-10T14:30:18.9709430Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+1357: 2026-09-10T14:30:18.9709900Z   CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: -C link-arg=-fuse-ld=lld
+1358: 2026-09-10T14:30:18.9710284Z   CACHE_ON_FAILURE: false
+--- clippy.log:1508-1528; ANSI escapes removed; original line numbers ---
+1508: 2026-09-10T14:30:56.9002037Z     Checking wgpu-naga-bridge v30.0.0
+1509: 2026-09-10T14:30:56.9639346Z     Checking wgpu-hal v30.0.0
+1510: 2026-09-10T14:30:59.6337126Z     Checking wgpu-core-deps-windows-linux-android v30.0.0
+1511: 2026-09-10T14:30:59.6749075Z     Checking wgpu-core v30.0.0
+1512: 2026-09-10T14:31:04.2218971Z     Checking wgpu v30.0.0
+1513: 2026-09-10T14:31:06.1269256Z     Checking sparq-gpu v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-gpu)
+1514: 2026-09-10T14:31:06.8083823Z     Checking sparq-cli v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-cli)
+1515: 2026-09-10T14:31:52.6393956Z     Finished `dev` profile [unoptimized + debuginfo] target(s) in 1m 33s
+1516: 2026-09-10T14:31:52.9665474Z ##[group]Run cargo doc --workspace --no-deps
+1517: 2026-09-10T14:31:52.9665860Z cargo doc --workspace --no-deps
+1518: 2026-09-10T14:31:52.9703136Z shell: /usr/bin/bash -e {0}
+1519: 2026-09-10T14:31:52.9703392Z env:
+1520: 2026-09-10T14:31:52.9703592Z   CARGO_TERM_COLOR: always
+1521: 2026-09-10T14:31:52.9703819Z   RUST_BACKTRACE: 1
+1522: 2026-09-10T14:31:52.9704020Z   CARGO_NET_RETRY: 10
+1523: 2026-09-10T14:31:52.9704261Z   CARGO_INCREMENTAL: 0
+1524: 2026-09-10T14:31:52.9704499Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+1525: 2026-09-10T14:31:52.9704895Z   CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: -C link-arg=-fuse-ld=lld
+1526: 2026-09-10T14:31:52.9705281Z   CACHE_ON_FAILURE: false
+1527: 2026-09-10T14:31:52.9705514Z   RUSTDOCFLAGS: -D warnings
+1528: 2026-09-10T14:31:52.9705741Z ##[endgroup]
+--- clippy.log:1694-1713; ANSI escapes removed; original line numbers ---
+1694: 2026-09-10T14:32:32.2820268Z  Documenting sparq-jsonld v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-jsonld)
+1695: 2026-09-10T14:32:32.5164234Z  Documenting sparq-secprop-vocab v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-secprop-vocab)
+1696: 2026-09-10T14:32:32.7412857Z  Documenting sparq-wrapper-shacl v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-wrapper-shacl)
+1697: 2026-09-10T14:32:32.9905458Z  Documenting sparq-reason-diff v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-reason-diff)
+1698: 2026-09-10T14:32:33.2496679Z  Documenting sparq-kb v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-kb)
+1699: 2026-09-10T14:32:33.4658976Z  Documenting sparq-wrapper-integration v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-wrapper-integration)
+1700: 2026-09-10T14:32:34.3593436Z     Finished `dev` profile [unoptimized + debuginfo] target(s) in 41.35s
+1701: 2026-09-10T14:32:34.3935505Z    Generated /home/runner/work/sparq/sparq/target/doc/sparq_acbench/index.html and 71 other files
+1702: 2026-09-10T14:32:34.4088230Z ##[group]Run cargo doc --workspace --no-deps --all-features
+1703: 2026-09-10T14:32:34.4088710Z cargo doc --workspace --no-deps --all-features
+1704: 2026-09-10T14:32:34.4123972Z shell: /usr/bin/bash -e {0}
+1705: 2026-09-10T14:32:34.4124232Z env:
+1706: 2026-09-10T14:32:34.4124431Z   CARGO_TERM_COLOR: always
+1707: 2026-09-10T14:32:34.4124662Z   RUST_BACKTRACE: 1
+1708: 2026-09-10T14:32:34.4124861Z   CARGO_NET_RETRY: 10
+1709: 2026-09-10T14:32:34.4125070Z   CARGO_INCREMENTAL: 0
+1710: 2026-09-10T14:32:34.4125308Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+1711: 2026-09-10T14:32:34.4125707Z   CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: -C link-arg=-fuse-ld=lld
+1712: 2026-09-10T14:32:34.4126108Z   CACHE_ON_FAILURE: false
+1713: 2026-09-10T14:32:34.4126344Z   RUSTDOCFLAGS: -D warnings
+--- clippy.log:1843-1863; ANSI escapes removed; original line numbers ---
+1843: 2026-09-10T14:33:24.3025611Z  Documenting sparq-parse v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-parse)
+1844: 2026-09-10T14:33:24.8069097Z  Documenting sparq-acbench v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-acbench)
+1845: 2026-09-10T14:33:25.2620516Z  Documenting sparq-reason-ql v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-reason-ql)
+1846: 2026-09-10T14:33:25.7419343Z  Documenting sparq-crdt v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-crdt)
+1847: 2026-09-10T14:33:26.2205302Z  Documenting sparq-core v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-core)
+1848: 2026-09-10T14:33:26.7458484Z  Documenting sparq-fedplan v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-fedplan)
+1849: 2026-09-10T14:33:27.3414014Z  Documenting sparq-shaclc v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-shaclc)
+1850: 2026-09-10T14:33:27.8293204Z  Documenting sparq-lws-wasm v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-lws-wasm)
+1851: 2026-09-10T14:33:29.8418220Z     Finished `dev` profile [unoptimized + debuginfo] target(s) in 55.39s
+1852: 2026-09-10T14:33:29.8799809Z    Generated /home/runner/work/sparq/sparq/target/doc/sparq_acbench/index.html and 74 other files
+1853: 2026-09-10T14:33:29.8999485Z ##[group]Run cargo clippy --manifest-path bench/dict/Cargo.toml --all-targets -- -D warnings
+1854: 2026-09-10T14:33:29.9000195Z cargo clippy --manifest-path bench/dict/Cargo.toml --all-targets -- -D warnings
+1855: 2026-09-10T14:33:29.9000715Z cargo run --manifest-path bench/dict/Cargo.toml -- selftest
+1856: 2026-09-10T14:33:29.9037205Z shell: /usr/bin/bash -e {0}
+1857: 2026-09-10T14:33:29.9037774Z env:
+1858: 2026-09-10T14:33:29.9037986Z   CARGO_TERM_COLOR: always
+1859: 2026-09-10T14:33:29.9038218Z   RUST_BACKTRACE: 1
+1860: 2026-09-10T14:33:29.9038419Z   CARGO_NET_RETRY: 10
+1861: 2026-09-10T14:33:29.9038632Z   CARGO_INCREMENTAL: 0
+1862: 2026-09-10T14:33:29.9038870Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+1863: 2026-09-10T14:33:29.9039264Z   CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: -C link-arg=-fuse-ld=lld
+--- clippy.log:1917-1930; ANSI escapes removed; original line numbers ---
+1917: 2026-09-10T14:33:34.9926327Z     Checking rand_chacha v0.9.0
+1918: 2026-09-10T14:33:35.0814089Z     Checking rand v0.9.5
+1919: 2026-09-10T14:33:35.3808199Z     Checking oxrdf v0.3.4
+1920: 2026-09-10T14:33:35.7429377Z     Checking oxttl v0.2.4
+1921: 2026-09-10T14:33:36.0730272Z     Checking sparq-core v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-core)
+1922: 2026-09-10T14:33:36.5552756Z     Checking dict-baseline v0.0.0 (/home/runner/work/sparq/sparq/bench/dict)
+1923: 2026-09-10T14:33:36.6505153Z     Finished `dev` profile [unoptimized + debuginfo] target(s) in 6.69s
+1924: 2026-09-10T14:33:36.7232312Z warning: patch `spargebra v0.4.6 (/home/runner/work/sparq/sparq/vendor/spargebra)` was not used in the crate graph
+1925: 2026-09-10T14:33:36.7233807Z help: Check that the patched package version and available features are compatible
+1926: 2026-09-10T14:33:36.7234849Z       with the dependency requirements. If the patch has a different version from
+1927: 2026-09-10T14:33:36.7235761Z       what is locked in the Cargo.lock file, run `cargo update` to use the new
+1928: 2026-09-10T14:33:36.7236646Z       version. This may also occur with an optional dependency that is not enabled.
+1929: 2026-09-10T14:33:36.7503676Z    Compiling libc v0.2.189
+1930: 2026-09-10T14:33:36.7504643Z    Compiling cfg-if v1.0.4

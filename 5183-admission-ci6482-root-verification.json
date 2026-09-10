@@ -1,0 +1,15 @@
+{
+  "at": "2026-09-10T15:20:18.731605+00:00",
+  "head": "fe3284199db0831f353d2ae401b8c69472764904",
+  "manifest_sha256": "1c02bc6f2ba4e7f4b3feecb23d0299108061768d7a3b6a1c9be4f52aacaf41f1",
+  "files_verified": 36,
+  "source_sha256": "41d8a1e664a3620dc23ec530af9c1908123c43f98131a61f1c9ca2b555d33eaa",
+  "all_required_validation_passed": true,
+  "gate_check_id": 102910459274,
+  "copilot_current_test_passed_in_linux_ci": true,
+  "root_checks": "All frozen hashes/sizes verified; current source hash and exact20 test-name set equal20 Linux PASS lines after ANSI SGR removal only. Actualgate15368 atfe328 success. Read mechanical report of realworkspace build/MSRV1.88/Clippy/privacy/selectedflow.",
+  "verification_correction": "Initial direct line equality stopped before proof output because stored observations remove ANSI colors. Full rawlines retained; only ANSI SGR sequences removed in successful comparison. No tests rerun.",
+  "limits": "Selected test scope only; skippedconformance/wasm/optin/runtimeMSRV not claimed. Laterno-legCI is not execution proof. Separate6483runtimewitness unexecuted.",
+  "independent_review": "ActualOpus5xhigh original+fe328followup approvedforCI withallfindingsaddressed; existingCopilot claimaboutcurrentfixture contradicted by realLinuxPASS, identicallexicalpre-existinggaptracked6483.",
+  "merge_decision": "Eligible for review-resolution and freshprotectedqueueprecheck; not alreadymerged."
+}

@@ -1,0 +1,108 @@
+--- archive.log:107-142; ANSI escapes removed; original line numbers ---
+107: 2026-09-10T14:28:23.1600545Z ##[endgroup]
+108: 2026-09-10T14:28:23.1603443Z ##[group]Fetching the repository
+109: 2026-09-10T14:28:23.1608700Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +8ff2bc3ceb54b29a870b3a555b1e11efaf4e182c:refs/remotes/pull/6482/merge
+110: 2026-09-10T14:28:26.6170197Z From https://github.com/sparq-org/sparq
+111: 2026-09-10T14:28:26.6171670Z  * [new ref]         8ff2bc3ceb54b29a870b3a555b1e11efaf4e182c -> pull/6482/merge
+112: 2026-09-10T14:28:26.6175940Z ##[endgroup]
+113: 2026-09-10T14:28:26.6176809Z ##[group]Determining the checkout info
+114: 2026-09-10T14:28:26.6177722Z ##[endgroup]
+115: 2026-09-10T14:28:26.6183339Z [command]/usr/bin/git sparse-checkout disable
+116: 2026-09-10T14:28:26.6241484Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+117: 2026-09-10T14:28:26.6277383Z ##[group]Checking out the ref
+118: 2026-09-10T14:28:26.6281685Z [command]/usr/bin/git checkout --progress --force refs/remotes/pull/6482/merge
+119: 2026-09-10T14:28:27.2045964Z Note: switching to 'refs/remotes/pull/6482/merge'.
+120: 2026-09-10T14:28:27.2046456Z 
+121: 2026-09-10T14:28:27.2046752Z You are in 'detached HEAD' state. You can look around, make experimental
+122: 2026-09-10T14:28:27.2047363Z changes and commit them, and you can discard any commits you make in this
+123: 2026-09-10T14:28:27.2048020Z state without impacting any branches by switching back to a branch.
+124: 2026-09-10T14:28:27.2048403Z 
+125: 2026-09-10T14:28:27.2048689Z If you want to create a new branch to retain commits you create, you may
+126: 2026-09-10T14:28:27.2049255Z do so (now or later) by using -c with the switch command. Example:
+127: 2026-09-10T14:28:27.2049576Z 
+128: 2026-09-10T14:28:27.2049725Z   git switch -c <new-branch-name>
+129: 2026-09-10T14:28:27.2049969Z 
+130: 2026-09-10T14:28:27.2050122Z Or undo this operation with:
+131: 2026-09-10T14:28:27.2050340Z 
+132: 2026-09-10T14:28:27.2050461Z   git switch -
+133: 2026-09-10T14:28:27.2050646Z 
+134: 2026-09-10T14:28:27.2050920Z Turn off this advice by setting config variable advice.detachedHead to false
+135: 2026-09-10T14:28:27.2051378Z 
+136: 2026-09-10T14:28:27.2052145Z HEAD is now at 8ff2bc3 Merge fe3284199db0831f353d2ae401b8c69472764904 into 4595388de9e389f5369d63828fbf90cfc16b62d9
+137: 2026-09-10T14:28:27.2072439Z ##[endgroup]
+138: 2026-09-10T14:28:27.2126565Z [command]/usr/bin/git log -1 --format=%H
+139: 2026-09-10T14:28:27.2157090Z 8ff2bc3ceb54b29a870b3a555b1e11efaf4e182c
+140: 2026-09-10T14:28:27.2387284Z ##[group]Run ./scripts/ci-free-disk.sh
+141: 2026-09-10T14:28:27.2387795Z ./scripts/ci-free-disk.sh
+142: 2026-09-10T14:28:27.2428338Z shell: /usr/bin/bash -e {0}
+--- archive.log:496-526; ANSI escapes removed; original line numbers ---
+496: 2026-09-10T14:30:58.8355838Z commit-date: 2026-07-05
+497: 2026-09-10T14:30:58.8356125Z host: x86_64-unknown-linux-gnu
+498: 2026-09-10T14:30:58.8358748Z 
+499: 2026-09-10T14:30:58.8377627Z ##[end-action id=__taiki-e_install-action.__run;outcome=success;conclusion=success;duration_ms=1281]
+500: 2026-09-10T14:30:58.8385732Z ##[start-action display=Run Set-StrictMode -Version Latest;id=__taiki-e_install-action.__run_2]
+501: 2026-09-10T14:30:58.8391517Z ##[end-action id=__taiki-e_install-action.__run_2;outcome=skipped;conclusion=skipped;duration_ms=0]
+502: 2026-09-10T14:30:58.8425965Z ##[group]Run cargo nextest archive --workspace --all-targets --features approx-ann,filtered-ann,vec-predicate --archive-file nextest.tar.zst
+503: 2026-09-10T14:30:58.8427078Z cargo nextest archive --workspace --all-targets --features approx-ann,filtered-ann,vec-predicate --archive-file nextest.tar.zst
+504: 2026-09-10T14:30:58.8461950Z shell: /usr/bin/bash -e {0}
+505: 2026-09-10T14:30:58.8462245Z env:
+506: 2026-09-10T14:30:58.8462471Z   CARGO_TERM_COLOR: always
+507: 2026-09-10T14:30:58.8463014Z   RUST_BACKTRACE: 1
+508: 2026-09-10T14:30:58.8463386Z   CARGO_NET_RETRY: 10
+509: 2026-09-10T14:30:58.8463715Z   CARGO_INCREMENTAL: 0
+510: 2026-09-10T14:30:58.8464003Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+511: 2026-09-10T14:30:58.8464477Z   CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: -C link-arg=-fuse-ld=lld
+512: 2026-09-10T14:30:58.8464946Z   CACHE_ON_FAILURE: false
+513: 2026-09-10T14:30:58.8465214Z ##[endgroup]
+514: 2026-09-10T14:30:58.9853159Z     Updating crates.io index
+515: 2026-09-10T14:31:01.8996979Z    Compiling sparq-core v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-core)
+516: 2026-09-10T14:31:01.9131380Z    Compiling sparq-jsonld v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-jsonld)
+517: 2026-09-10T14:31:01.9262677Z    Compiling spargebra v0.4.6 (/home/runner/work/sparq/sparq/vendor/spargebra)
+518: 2026-09-10T14:31:01.9515115Z    Compiling sparq-conformance-floors v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-conformance-floors)
+519: 2026-09-10T14:31:02.0213717Z    Compiling sparq-fedclient v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-fedclient)
+520: 2026-09-10T14:31:02.0694690Z    Compiling sparq-kb v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-kb)
+521: 2026-09-10T14:31:02.1264822Z    Compiling sparq-difftest v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-difftest)
+522: 2026-09-10T14:31:02.7101314Z    Compiling sparq-acbench v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-acbench)
+523: 2026-09-10T14:31:04.1784796Z    Compiling sparq-substrate v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-substrate)
+524: 2026-09-10T14:31:04.4925019Z    Compiling sparq-engine-serialize v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-engine-serialize)
+525: 2026-09-10T14:31:05.0844783Z    Compiling sparq-engine-service v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-engine-service)
+526: 2026-09-10T14:31:05.5281916Z    Compiling sparq-engine v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-engine)
+--- archive.log:581-591; ANSI escapes removed; original line numbers ---
+581: 2026-09-10T14:34:32.0084125Z    Compiling sparq-crdt v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-crdt)
+582: 2026-09-10T14:34:34.0834862Z    Compiling sparq-wrapper-gen v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-wrapper-gen)
+583: 2026-09-10T14:34:34.5318763Z    Compiling sparq-fedplan-mpc v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-fedplan-mpc)
+584: 2026-09-10T14:34:34.5741209Z    Compiling sparq-reason-diff v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-reason-diff)
+585: 2026-09-10T14:34:34.6500746Z    Compiling sparq-wrapper-integration v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-wrapper-integration)
+586: 2026-09-10T14:34:34.7007159Z    Compiling sparq-wrapper-shacl v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-wrapper-shacl)
+587: 2026-09-10T14:34:38.1959666Z     Finished `test` profile [unoptimized + debuginfo] target(s) in 3m 37s
+588: 2026-09-10T14:34:39.6231124Z    Archiving 742 binaries (including 11 non-test binaries; 1 non-test binary filtered out), 1 build script output directory, 6 linked paths, and 1 standard library to nextest.tar.zst
+589: 2026-09-10T14:35:51.3161431Z     Archived 1207 files to nextest.tar.zst in 1m 11.70s
+590: 2026-09-10T14:35:51.5358545Z ##[group]Run actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+591: 2026-09-10T14:35:51.5363093Z with:
+--- archive.log:1245-1270; ANSI escapes removed; original line numbers ---
+1245: 2026-09-10T14:36:46.4987442Z Artifact nextest-archive successfully finalized. Artifact ID 10157377124
+1246: 2026-09-10T14:36:46.4989276Z Artifact nextest-archive has been successfully uploaded! Final size is 5262734368 bytes. Artifact ID is 10157377124
+1247: 2026-09-10T14:36:46.4994657Z Artifact download URL: https://github.com/sparq-org/sparq/actions/runs/34488984319/artifacts/10157377124
+1248: 2026-09-10T14:36:46.5282270Z ##[group]Run cargo test --workspace --features approx-ann,filtered-ann,vec-predicate --doc
+1249: 2026-09-10T14:36:46.5283408Z cargo test --workspace --features approx-ann,filtered-ann,vec-predicate --doc
+1250: 2026-09-10T14:36:46.5970552Z shell: /usr/bin/bash -e {0}
+1251: 2026-09-10T14:36:46.5970961Z env:
+1252: 2026-09-10T14:36:46.5971275Z   CARGO_TERM_COLOR: always
+1253: 2026-09-10T14:36:46.5971661Z   RUST_BACKTRACE: 1
+1254: 2026-09-10T14:36:46.5972006Z   CARGO_NET_RETRY: 10
+1255: 2026-09-10T14:36:46.5972368Z   CARGO_INCREMENTAL: 0
+1256: 2026-09-10T14:36:46.5973047Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+1257: 2026-09-10T14:36:46.5973718Z   CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: -C link-arg=-fuse-ld=lld
+1258: 2026-09-10T14:36:46.5974360Z   CACHE_ON_FAILURE: false
+1259: 2026-09-10T14:36:46.5974733Z ##[endgroup]
+1260: 2026-09-10T14:36:47.6552664Z warning: doc tests are not supported for crate type(s) `cdylib` in package `sparq-py`
+1261: 2026-09-10T14:36:48.1264830Z    Compiling sparq-crdt v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-crdt)
+1262: 2026-09-10T14:36:48.1299966Z    Compiling sparq-wrapper-gen v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-wrapper-gen)
+1263: 2026-09-10T14:36:48.1305999Z    Compiling sparq-fedplan-mpc v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-fedplan-mpc)
+1264: 2026-09-10T14:36:48.1315651Z    Compiling sparq-wrapper-integration v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-wrapper-integration)
+1265: 2026-09-10T14:36:48.1604693Z    Compiling sparq-reason-diff v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-reason-diff)
+1266: 2026-09-10T14:36:48.1677893Z    Compiling sparq-wrapper-shacl v0.1.1 (/home/runner/work/sparq/sparq/crates/sparq-wrapper-shacl)
+1267: 2026-09-10T14:36:48.7938304Z     Finished `test` profile [unoptimized + debuginfo] target(s) in 2.09s
+1268: 2026-09-10T14:36:48.8281599Z    Doc-tests sparq_acbench
+1269: 2026-09-10T14:36:48.8985979Z 
+1270: 2026-09-10T14:36:48.8986494Z running 0 tests

@@ -1,0 +1,54 @@
+--- flow.log:985-1018; ANSI escapes removed; original line numbers ---
+985: 2026-09-10T14:25:53.1724414Z   MERGE_HEAD_SHA: 
+986: 2026-09-10T14:25:53.1725246Z   EVENT_NAME: pull_request
+987: 2026-09-10T14:25:53.1726143Z ##[endgroup]
+988: 2026-09-10T14:25:53.6353873Z ##[group]Run python3 scripts/gate-new-crate.py --base "$GATE_BASE_REF"
+989: 2026-09-10T14:25:53.6354426Z python3 scripts/gate-new-crate.py --base "$GATE_BASE_REF"
+990: 2026-09-10T14:25:53.6391796Z shell: /usr/bin/bash -e {0}
+991: 2026-09-10T14:25:53.6392064Z env:
+992: 2026-09-10T14:25:53.6392339Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.14/x64
+993: 2026-09-10T14:25:53.6392794Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib/pkgconfig
+994: 2026-09-10T14:25:53.6393228Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+995: 2026-09-10T14:25:53.6393616Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+996: 2026-09-10T14:25:53.6394031Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+997: 2026-09-10T14:25:53.6394461Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib
+998: 2026-09-10T14:25:53.6394791Z   GATE_BASE_REF: main
+999: 2026-09-10T14:25:53.6395003Z ##[endgroup]
+1000: 2026-09-10T14:25:53.7291430Z G1 new-crate-completeness: PASS — no new crate missing artifacts.
+1001: 2026-09-10T14:25:53.7395256Z ##[group]Run set -euo pipefail
+1002: 2026-09-10T14:25:53.7395616Z set -euo pipefail
+1003: 2026-09-10T14:25:53.7395896Z if [ -f pr-labels.txt ]; then
+1004: 2026-09-10T14:25:53.7396378Z   python3 scripts/gate-api-skill.py --base "$GATE_BASE_REF" --labels-file pr-labels.txt
+1005: 2026-09-10T14:25:53.7396843Z else
+1006: 2026-09-10T14:25:53.7397137Z   python3 scripts/gate-api-skill.py --base "$GATE_BASE_REF"
+1007: 2026-09-10T14:25:53.7397777Z fi
+1008: 2026-09-10T14:25:53.7434793Z shell: /usr/bin/bash -e {0}
+1009: 2026-09-10T14:25:53.7435055Z env:
+1010: 2026-09-10T14:25:53.7435335Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.14/x64
+1011: 2026-09-10T14:25:53.7435801Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib/pkgconfig
+1012: 2026-09-10T14:25:53.7436433Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+1013: 2026-09-10T14:25:53.7436850Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+1014: 2026-09-10T14:25:53.7437281Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+1015: 2026-09-10T14:25:53.7438032Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib
+1016: 2026-09-10T14:25:53.7438368Z   GATE_BASE_REF: main
+1017: 2026-09-10T14:25:53.7438582Z ##[endgroup]
+1018: 2026-09-10T14:25:53.7917180Z G2 public-api→skill: PASS — no public surface changed.
+--- flow.log:1202-1219; ANSI escapes removed; original line numbers ---
+1202: 2026-09-10T14:25:54.3751789Z ##[group]Run set -euo pipefail
+1203: 2026-09-10T14:25:54.3752127Z set -euo pipefail
+1204: 2026-09-10T14:25:54.3752386Z if [ -f pr-labels.txt ]; then
+1205: 2026-09-10T14:25:54.3752896Z   python3 scripts/check-config-documented.py --base "$GATE_BASE_REF" --labels-file pr-labels.txt
+1206: 2026-09-10T14:25:54.3753406Z else
+1207: 2026-09-10T14:25:54.3753746Z   python3 scripts/check-config-documented.py --base "$GATE_BASE_REF"
+1208: 2026-09-10T14:25:54.3754143Z fi
+1209: 2026-09-10T14:25:54.3792276Z shell: /usr/bin/bash -e {0}
+1210: 2026-09-10T14:25:54.3792549Z env:
+1211: 2026-09-10T14:25:54.3792834Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.14/x64
+1212: 2026-09-10T14:25:54.3793286Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib/pkgconfig
+1213: 2026-09-10T14:25:54.3793726Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+1214: 2026-09-10T14:25:54.3794111Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+1215: 2026-09-10T14:25:54.3794559Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+1216: 2026-09-10T14:25:54.3794972Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib
+1217: 2026-09-10T14:25:54.3795303Z   GATE_BASE_REF: main
+1218: 2026-09-10T14:25:54.3795521Z ##[endgroup]
+1219: 2026-09-10T14:25:54.4239381Z G6 new-config/flag→docs: PASS — no undocumented new config knob.

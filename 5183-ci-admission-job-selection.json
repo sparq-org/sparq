@@ -1,0 +1,434 @@
+{
+  "ci-jobs.json": {
+    "total": 39,
+    "conclusions": {
+      "success": 22,
+      "skipped": 17
+    },
+    "jobs": [
+      {
+        "id": 102910462447,
+        "name": "detect rust changes",
+        "conclusion": "success"
+      },
+      {
+        "id": 102910462832,
+        "name": "unsafe-register (count ratchet)",
+        "conclusion": "success"
+      },
+      {
+        "id": 102910463027,
+        "name": "select / select (change-based test selection)",
+        "conclusion": "success"
+      },
+      {
+        "id": 102910464222,
+        "name": "nightly-gate",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 102910464431,
+        "name": "coverage (nightly, full incl. heavy vectors)",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 102910465294,
+        "name": "mutation ratchet (cargo-mutants, advisory)",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 102910710715,
+        "name": "MSRV check (Rust 1.88, declared floor)",
+        "conclusion": "success"
+      },
+      {
+        "id": 102910710733,
+        "name": "unsafe report (cargo-geiger, informational)",
+        "conclusion": "success"
+      },
+      {
+        "id": 102910710734,
+        "name": "docker image smoke (run + curl /health + query)",
+        "conclusion": "success"
+      },
+      {
+        "id": 102910710843,
+        "name": "coverage floors (presence + monotonicity + shard-partition, no compile)",
+        "conclusion": "success"
+      },
+      {
+        "id": 102910710949,
+        "name": "clippy (gate) + fmt (non-blocking)",
+        "conclusion": "success"
+      },
+      {
+        "id": 102911182277,
+        "name": "build + archive test binaries (+ doctests once)",
+        "conclusion": "success"
+      },
+      {
+        "id": 102911183801,
+        "name": "nightly selection backstop (full-matrix guard)",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 102911184104,
+        "name": "W3C SHACL conformance (ratchet — core >= 98, sparql >= 5; full 1.2 ratchets in-runner)",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 102911184264,
+        "name": "Solid WAC/ACP conformance (ratchet — wac >= 13, acp >= 13)",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 102911184400,
+        "name": "sparq-rsp RSP expressivity / SRBench correctness (extension ratchet — assertions >= 149)",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 102911184425,
+        "name": "W3C SPARQL conformance (ratchet >= 1229 pass+divergence)",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 102911184454,
+        "name": "SolidLab ODRL conformance (ratchet — pass >= 59)",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 102911184515,
+        "name": "SERVICE-federation harness (in-process loopback smoke + egress scoping)",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 102911184591,
+        "name": "W3C/OGC GeoSPARQL conformance (ratchet — topology >= 119, query-rewrite >= 38)",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 102911184684,
+        "name": "wasm build (sparq-wasm + sparq-reason-wasm + sparq-rsp-wasm + sparq-text-wasm + sparq-shacl-wasm ...",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 102911184716,
+        "name": "Inference conformance (ratchet >= 1967 pass+divergence)",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 102911184737,
+        "name": "W3C JSON-LD 1.1 conformance (ratchet — toRdf >= 413, fromRdf >= 52, compact >= 228, frame >= 92)",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 102911184997,
+        "name": "sparq-text BM25 differential oracle (extension ratchet — assertions >= 18750)",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 102911463099,
+        "name": "coverage engine run (partition 2/3)",
+        "conclusion": "success"
+      },
+      {
+        "id": 102911463225,
+        "name": "coverage engine run (partition 3/3)",
+        "conclusion": "success"
+      },
+      {
+        "id": 102911463234,
+        "name": "coverage ratchet (shard 2/3)",
+        "conclusion": "success"
+      },
+      {
+        "id": 102911463272,
+        "name": "coverage ratchet (shard 1/3)",
+        "conclusion": "success"
+      },
+      {
+        "id": 102911463350,
+        "name": "coverage ratchet (shard 3/3)",
+        "conclusion": "success"
+      },
+      {
+        "id": 102911463452,
+        "name": "coverage engine run (partition 1/3)",
+        "conclusion": "success"
+      },
+      {
+        "id": 102914379395,
+        "name": "coverage engine merge + ratchet (per-crate)",
+        "conclusion": "success"
+      },
+      {
+        "id": 102914791025,
+        "name": "test (load-aware shard bulk 2/3)",
+        "conclusion": "success"
+      },
+      {
+        "id": 102914791044,
+        "name": "test (load-aware shard heavy-diskann)",
+        "conclusion": "success"
+      },
+      {
+        "id": 102914791050,
+        "name": "test (load-aware shard bulk 3/3)",
+        "conclusion": "success"
+      },
+      {
+        "id": 102914791113,
+        "name": "test (load-aware shard bulk 1/3)",
+        "conclusion": "success"
+      },
+      {
+        "id": 102914791325,
+        "name": "test (load-aware shard heavy-hnsw)",
+        "conclusion": "success"
+      },
+      {
+        "id": 102915169153,
+        "name": "coverage ratchet + test-presence gate (per-crate)",
+        "conclusion": "success"
+      },
+      {
+        "id": 102915206267,
+        "name": "coverage demoted-lane safety-net (push-to-main)",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 102918566082,
+        "name": "heavy-recall demoted-lane safety-net (push-to-main)",
+        "conclusion": "skipped"
+      }
+    ]
+  },
+  "matrix-jobs.json": {
+    "total": 11,
+    "conclusions": {
+      "success": 7,
+      "skipped": 4
+    },
+    "jobs": [
+      {
+        "id": 102910461284,
+        "name": "detect rust changes (feature-matrix)",
+        "conclusion": "success"
+      },
+      {
+        "id": 102910461743,
+        "name": "select / select (change-based test selection)",
+        "conclusion": "success"
+      },
+      {
+        "id": 102910645057,
+        "name": "pre-merge C1 (feature-gated test execution)",
+        "conclusion": "success"
+      },
+      {
+        "id": 102910645101,
+        "name": "fedclient dependency-boundary guard",
+        "conclusion": "success"
+      },
+      {
+        "id": 102910983565,
+        "name": "feature-matrix check-tier (rest)",
+        "conclusion": "success"
+      },
+      {
+        "id": 102910983572,
+        "name": "assemble feature matrix",
+        "conclusion": "success"
+      },
+      {
+        "id": 102910983745,
+        "name": "feature-matrix check-tier (engine)",
+        "conclusion": "success"
+      },
+      {
+        "id": 102910984935,
+        "name": "sparq-server pure-serialiser (--no-default-features)",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 102910985632,
+        "name": "sparq-geo pure-geometry (--no-default-features)",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 102910985939,
+        "name": "sparq-lws-core pure Solid (--no-default-features)",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 102911812764,
+        "name": "opt-in group (${{ matrix.group }})",
+        "conclusion": "skipped"
+      }
+    ]
+  },
+  "later-ci-jobs.json": {
+    "total": 31,
+    "conclusions": {
+      "success": 1,
+      "skipped": 30
+    },
+    "jobs": [
+      {
+        "id": 102918897597,
+        "name": "select / select (change-based test selection, no-leg)",
+        "conclusion": "success"
+      },
+      {
+        "id": 102918898986,
+        "name": "MSRV check (Rust 1.88, declared floor)",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 102918899064,
+        "name": "unsafe-register (count ratchet)",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 102918899170,
+        "name": "clippy (gate) + fmt (non-blocking)",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 102918899335,
+        "name": "detect rust changes",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 102918899429,
+        "name": "coverage (nightly, full incl. heavy vectors)",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 102918899547,
+        "name": "mutation ratchet (cargo-mutants, advisory)",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 102918899644,
+        "name": "coverage floors (presence + monotonicity + shard-partition, no compile)",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 102918900359,
+        "name": "unsafe report (cargo-geiger, informational)",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 102918900373,
+        "name": "docker image smoke (run + curl /health + query)",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 102918937675,
+        "name": "nightly-gate",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 102919120588,
+        "name": "nightly selection backstop (full-matrix guard)",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 102919120646,
+        "name": "W3C/OGC GeoSPARQL conformance (ratchet — topology >= 119, query-rewrite >= 38)",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 102919120786,
+        "name": "W3C SHACL conformance (ratchet — core >= 98, sparql >= 5; full 1.2 ratchets in-runner)",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 102919120858,
+        "name": "build + archive test binaries (+ doctests once)",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 102919120865,
+        "name": "SolidLab ODRL conformance (ratchet — pass >= 59)",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 102919120976,
+        "name": "Solid WAC/ACP conformance (ratchet — wac >= 13, acp >= 13)",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 102919120996,
+        "name": "W3C SPARQL conformance (ratchet >= 1229 pass+divergence)",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 102919121038,
+        "name": "sparq-rsp RSP expressivity / SRBench correctness (extension ratchet — assertions >= 149)",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 102919121151,
+        "name": "Inference conformance (ratchet >= 1967 pass+divergence)",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 102919121201,
+        "name": "sparq-text BM25 differential oracle (extension ratchet — assertions >= 18750)",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 102919121351,
+        "name": "coverage engine run (partition ${{ matrix.part }}/3)",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 102919121488,
+        "name": "W3C JSON-LD 1.1 conformance (ratchet — toRdf >= 413, fromRdf >= 52, compact >= 228, frame >= 92)",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 102919121527,
+        "name": "coverage ratchet (shard ${{ matrix.shard }}/3)",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 102919121576,
+        "name": "SERVICE-federation harness (in-process loopback smoke + egress scoping)",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 102919121578,
+        "name": "wasm build (sparq-wasm + sparq-reason-wasm + sparq-rsp-wasm + sparq-text-wasm + sparq-shacl-wasm ...",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 102919121955,
+        "name": "test (load-aware shard ${{ matrix.name }})",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 102919122035,
+        "name": "coverage engine merge + ratchet (per-crate)",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 102919122596,
+        "name": "heavy-recall demoted-lane safety-net (push-to-main)",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 102919122674,
+        "name": "coverage ratchet + test-presence gate (per-crate)",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 102919124338,
+        "name": "coverage demoted-lane safety-net (push-to-main)",
+        "conclusion": "skipped"
+      }
+    ]
+  }
+}

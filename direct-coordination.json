@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-10T14:50:14.301947+00:00",
+  "updated_at": "2026-09-10T15:23:30.137890+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -10,7 +10,7 @@
     "quiet_when_unchanged": true,
     "verified_at": "2026-09-09T12:15:56.335100+00:00",
     "schedule_reconciliation": "Saved schedule was6hours despite prompt/checkpoint10minutes. Updated existing automation through app tool to original user-requested10minutes; readback verified. No duplicate automation.",
-    "last_file_verify_at": "2026-09-10T12:05:45.117882+00:00",
+    "last_file_verify_at": "2026-09-10T15:10:05.636101+00:00",
     "last_app_view_note": "View succeeded during previous heartbeat; precise time not recorded."
   },
   "constraints": [
@@ -66,7 +66,7 @@
   "active_lane": {
     "issue": 5183,
     "agent": "/root/postmerge_ci",
-    "state": "pr6482_ci_and_copilot_followup",
+    "state": "pr6482_protected_merge_group_awaiting_checks",
     "base": "4595388de9e389f5369d63828fbf90cfc16b62d9",
     "parent": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
     "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue5183",
@@ -91,8 +91,8 @@
       "body_sha256": "f9ace93afb7a9a5502a5778a27ea083704938260900644d1a6363fa209adf527",
       "state": "Updatedexistingowncommentwithqualified7caseclassification andPR6482;issuekeptopen"
     },
-    "next_scope": "Collect actual Opus patch review, resolve any material findings, publish scoped5183 PR for ordinary CI. Keep issue open for seven original unresolved inputs.",
-    "agent_current_task": "ExistingAstra idle; no commands/modelcalls running. Localnewwitnessstoppedbeforerun bydiskfloor; watchremoteCI.",
+    "next_scope": "Watch existing merge group f50b5049; all20 actualLinuxmodule tests andMSRV/Clippy/privacy passed onfe328, realOpusreview complete, Copilotaddressed/resolved, normalqueueposition1. No furtherenqueue/review mutation. Aftermerge verifyrelevantmainCI thenclose5183 withqualifieddiagnosis.",
+    "agent_current_task": "ExistingAstra postmerge_ci performing bounded source-only3105 hashreuse plan, no builds/GHcalls/productionedits; awaitnewfrozenreport. PriorCIaudit complete.",
     "constraints": "Preserve strict comparison and full normalized structural equality; no reference-input normalization, canon/engine/workflow edits or broad semantic claims; registryOFF/releasesheld",
     "readiness_directory": "direct-5183/original-seed-readiness",
     "execution_directory": "direct-5183/original-seed-execution",
@@ -311,6 +311,87 @@
       "commands_pending": false,
       "last_free_bytes": 1178558464,
       "policy": "Do not retry this witness repeatedly on single fleeting reserve recovery. Reassess sustained free space/task-owned completed storage safely; no broadcleanup/processinspectionfallback. Existinglocalcompilerfloor2GiB preserved."
+    },
+    "ci_admission": {
+      "directory": "direct-5183/ci-admission",
+      "manifest_sha256": "1c02bc6f2ba4e7f4b3feecb23d0299108061768d7a3b6a1c9be4f52aacaf41f1",
+      "files": 36,
+      "root_verification": "direct-5183/admission/ci6482-root-verification.json",
+      "linux_module_tests_passed": 20,
+      "gate_check_id": 102910459274,
+      "gate_app": 15368,
+      "limits": "Selectedtests only; skippedconformance/wasm/optin notrun. No-leglabel-triggerCI excluded fromexecutionproof."
+    },
+    "review_resolution": {
+      "at": "2026-09-10T15:23:30.137890+00:00",
+      "thread": "PRRT_kwDOSz3qKM6hHXbJ",
+      "resolved": true,
+      "receipt": "direct-5183/admission/finish-review6482-receipt.json",
+      "reply": "https://github.com/sparq-org/sparq/pull/6482#discussion_r3980261208",
+      "body_sha256": "05ceae1ec13a6fd827651a418d011353811bffd80af3f3c5b17195394b0f0b1e",
+      "policy": "Completed;do not replay."
+    },
+    "merge_queue": {
+      "at": "2026-09-10T15:23:30.137890+00:00",
+      "position": 1,
+      "state": "AWAITING_CHECKS",
+      "head": "fe3284199db0831f353d2ae401b8c69472764904",
+      "merge_group": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+      "reviewed_tree_identical": true,
+      "tree": "b473621d314e035bc79df2f2e7a91b76b6e77275",
+      "receipt": "direct-5183/admission/enqueue6482-receipt.json",
+      "watch_query": "direct-5183/admission/queue6482-watch-query.json",
+      "runs": [
+        {
+          "id": 34495072210,
+          "name": "CI",
+          "status": "queued",
+          "conclusion": null
+        },
+        {
+          "id": 34495072368,
+          "name": "feature-matrix",
+          "status": "queued",
+          "conclusion": null
+        },
+        {
+          "id": 34495072003,
+          "name": "vectorized-feature-off",
+          "status": "in_progress",
+          "conclusion": null
+        },
+        {
+          "id": 34495071974,
+          "name": "docs-quality",
+          "status": "in_progress",
+          "conclusion": null
+        },
+        {
+          "id": 34495072014,
+          "name": "flow-on-gates",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 34495072016,
+          "name": "routing-self-tests",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 34495071975,
+          "name": "ci-summary",
+          "status": "in_progress",
+          "conclusion": null
+        },
+        {
+          "id": 34495072126,
+          "name": "pr-area-label",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ],
+      "policy": "Normalprotectedenqueue exacthead jumpfalse completed;do notreplay/cancelMG. ALLGREENandgate15368 unchanged."
     }
   },
   "prs": {
@@ -837,10 +918,10 @@
     }
   },
   "next_actions": [
-    "Collect existingAstra scoped5183implementation+validation; preservefrozenoldseedharness/artifacts. No duplicateworkers/builds. Resourcebounds1200s512MiB2GiBfree/jobs1/offline; stopratherthanexpand.",
-    "Verify resultingpatch/realtests/negativecontrols, getactualOpus5xhighpatchreviewbeforepublishingPR/requiredCI/protectedmerge. Preserve original10-requestregression; other7historicalcasesneedboundedclassification, notchanged-generatorseedsubstitution.",
-    "Watchmain459broaderCI/matrix/aggregate periodicallyatjoblevel; issue6480closedafterindependentreview+protectedmerge+relevantpostmergeproof+fixedalerts. No all-main-greenclaim.",
-    "RegistryActionsOFF; knownbatchguardfailureexpected,release6474deferred. Preserve6049/6055/registry2305/canon/EC2holds,ALLGREEN,ratefailclosed andprotected evidence."
+    "Watch existing6482 MG f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464 andqueue state; no duplicateenqueue/reruns. CoreCI34495072210, matrix34495072368, aggregate34495071975.",
+    "Collect existingAstra bounded3105 source-plan report and verifyfrozenmanifest. Decide whether later actualOpusdesignreview andboundedwitness aremerited; no productionimplementation/builduntilstablecontinuous2GiBreserve.",
+    "After6482 protectedmerge, verifyactualrelevantpostmergeCI thenlink resolvingPRandclose5183; keep separate6483 coveragefollowup open pendingruntimewitness/decision.",
+    "RegistryActionsOFF,10minute heartbeat ACTIVE, releasesheld. Preserve6049/6055/registry2305/canon/EC2holds, ALLGREENandratefailclosed."
   ],
   "followup_lane": {
     "issue": 6480,
@@ -1284,15 +1365,16 @@
     "followup": "Narrowtriage-titleCIrule+offendingrowdiagnostic could improveclassifier, but originalgenpartitionrequires separatelyreviewedpolicy. No6468implementation while4246active."
   },
   "latest_monitor": {
-    "at": "2026-09-10T11:13:46.407842+00:00",
-    "main": "781f667c19a8ebb779cfccb24b05ea432360b025",
-    "queue_pr": 6481,
+    "at": "2026-09-10T15:23:30.137890+00:00",
+    "main": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+    "queue_pr": 6482,
     "queue_position": 1,
-    "mergegroup": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+    "mergegroup": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
     "reviewed_tree_identical": true,
     "registry_actions_enabled": false,
     "release_authorized": false,
-    "current_work": "BoundedoneAstraagentofflineOxigraphreference; protectedMGexistingCIawaited"
+    "current_work": "Protected6482MG existingchecks; boundedAstra3105 source-readiness",
+    "evidence": "direct-5183/admission/mg6482-first-runs.json"
   },
   "registry_pause": {
     "enabled": false,
@@ -4057,9 +4139,9 @@
     "evidence": "direct-3105/admission/latency-alarm-job.log"
   },
   "registry_pause_latest": {
-    "at": "2026-09-10T14:25:36.963685+00:00",
+    "at": "2026-09-10T15:10:05.636101+00:00",
     "enabled": false,
-    "evidence": "direct-5183/admission/publication-receipt.json registry/prepush proof"
+    "evidence": "direct-5183/admission/registry-settings1507.json"
   },
   "frontier_fallback": {
     "at": "2026-09-10T03:59:18.624949+00:00",
@@ -4150,9 +4232,8 @@
     }
   },
   "local_resource_state": {
-    "at": "2026-09-10T14:50:14.301947+00:00",
-    "free_bytes": 1178558464,
-    "evidence": "direct-5183/copilot-duplicate-witness/report.json",
-    "policy": "Continuous2GiBfloor blockednewwitnessbeforecompile. No compiler/teststarted, no retries/cleanup. RemoteCIcontinues; noagent/modelprocessrunning."
+    "at": "2026-09-10T15:23:30.137890+00:00",
+    "free_bytes": 2146680832,
+    "policy": "No newbuild based onfleetingcapacity; sustainedcontinuous2GiBfloor required. 6483witnessnotrun. Sourceonlyworkpermitted; no cleanup."
   }
 }

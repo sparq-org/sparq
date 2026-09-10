@@ -1,0 +1,97 @@
+--- test-bulk2.log:449-487; ANSI escapes removed; original line numbers ---
+449: 2026-09-10T14:41:43.6814024Z   esac
+450: 2026-09-10T14:41:43.6814239Z fi
+451: 2026-09-10T14:41:43.6814545Z common=(--archive-file nextest.tar.zst --workspace-remap . \
+452: 2026-09-10T14:41:43.6815017Z         --extract-to . --extract-overwrite --profile ci)
+453: 2026-09-10T14:41:43.6815344Z if [ -n "" ]; then
+454: 2026-09-10T14:41:43.6815700Z   # Dedicated heavy shard: intersect HEAVY with this shard's single test so
+455: 2026-09-10T14:41:43.6816174Z   # the shard's set is provably a SUBSET of HEAVY (belt-and-braces: if the
+456: 2026-09-10T14:41:43.6816641Z   # test is ever renamed in only one place, the shard runs empty rather than
+457: 2026-09-10T14:41:43.6817040Z   # silently re-including it in bulk).
+458: 2026-09-10T14:41:43.6817582Z   args=("${common[@]}" -E '( test(=diskann_recall_at_10_vs_brute_force_on_50k) | test(=hnsw_recall_at_10_vs_brute_force_on_50k) ) & (  )')
+459: 2026-09-10T14:41:43.6818191Z elif [ "$SELECT_MODE" = "selected" ] && [ -n "$SELECT_FILTERSET" ]; then
+460: 2026-09-10T14:41:43.6818858Z   # [FABLE-5] sq-fmx4u.3: bulk shard under ENFORCED selection — NARROW
+461: 2026-09-10T14:41:43.6819307Z   # (never skip) the cross-crate partition to the affected closure
+462: 2026-09-10T14:41:43.6819745Z   # (design §5.2): intersect the not-heavy set with the package()
+463: 2026-09-10T14:41:43.6820219Z   # filterset. The count partition applies AFTER filtering, so the three
+464: 2026-09-10T14:41:43.6820698Z   # bulk shards still partition the narrowed set exactly. A package()
+465: 2026-09-10T14:41:43.6821151Z   # naming no archived package fails loud (nextest errors), so a stale
+466: 2026-09-10T14:41:43.6821627Z   # filterset cannot silently select nothing; --no-tests=pass is needed
+467: 2026-09-10T14:41:43.6822108Z   # because a legitimately-narrowed shard CAN match zero tests (e.g. an
+468: 2026-09-10T14:41:43.6822580Z   # affected crate whose only tests are heavy/feature-gated) — full and
+469: 2026-09-10T14:41:43.6823022Z   # shadow runs keep the strict no-tests-is-an-error behaviour.
+470: 2026-09-10T14:41:43.6823545Z   args=("${common[@]}" --no-tests=pass --partition count:2/3 \
+471: 2026-09-10T14:41:43.6823939Z         -E "( not ( $HEAVY ) ) & ( $SELECT_FILTERSET )")
+472: 2026-09-10T14:41:43.6824242Z else
+473: 2026-09-10T14:41:43.6824708Z   # Bulk shard: everything that is NOT a known-heavy test, count-partitioned.
+474: 2026-09-10T14:41:43.6825412Z   args=("${common[@]}" --partition count:2/3 -E 'not ( test(=diskann_recall_at_10_vs_brute_force_on_50k) | test(=hnsw_recall_at_10_vs_brute_force_on_50k) )')
+475: 2026-09-10T14:41:43.6825969Z fi
+476: 2026-09-10T14:41:43.6826180Z MAX_ATTEMPTS=2
+477: 2026-09-10T14:41:43.6826434Z attempt=1
+478: 2026-09-10T14:41:43.6826649Z while true; do
+479: 2026-09-10T14:41:43.6826979Z   echo "::group::nextest shard 'bulk 2/3' — attempt $attempt/$MAX_ATTEMPTS"
+480: 2026-09-10T14:41:43.6827452Z   # Capture the exit code EXPLICITLY. `cargo … || rc=$?` is `set -e`-safe (the
+481: 2026-09-10T14:41:43.6827926Z   # `||` makes the failure non-fatal) AND captures nextest's REAL exit code —
+482: 2026-09-10T14:41:43.6828509Z   # unlike `if cargo …; then`, where `$?` after the `if` is the `if` statement's
+483: 2026-09-10T14:41:43.6829075Z   # own status (always 0) and a genuine failure would silently exit 0, wrongly
+484: 2026-09-10T14:41:43.6829545Z   # passing the gate. `rc` is reset to 0 each attempt before the run.
+485: 2026-09-10T14:41:43.6829893Z   rc=0
+486: 2026-09-10T14:41:43.6830138Z   cargo nextest run "${args[@]}" || rc=$?
+487: 2026-09-10T14:41:43.6830432Z   echo "::endgroup::"
+--- test-bulk2.log:500-555; ANSI escapes removed; original line numbers ---
+500: 2026-09-10T14:41:43.6835430Z   attempt=$((attempt + 1))
+501: 2026-09-10T14:41:43.6835684Z done
+502: 2026-09-10T14:41:43.6858293Z shell: /usr/bin/bash -e {0}
+503: 2026-09-10T14:41:43.6858851Z env:
+504: 2026-09-10T14:41:43.6859088Z   CARGO_TERM_COLOR: always
+505: 2026-09-10T14:41:43.6859352Z   RUST_BACKTRACE: 1
+506: 2026-09-10T14:41:43.6859573Z   CARGO_NET_RETRY: 10
+507: 2026-09-10T14:41:43.6859802Z   CARGO_INCREMENTAL: 0
+508: 2026-09-10T14:41:43.6860059Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+509: 2026-09-10T14:41:43.6860459Z   CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: -C link-arg=-fuse-ld=lld
+510: 2026-09-10T14:41:43.6861005Z   HEAVY: test(=diskann_recall_at_10_vs_brute_force_on_50k) | test(=hnsw_recall_at_10_vs_brute_force_on_50k)
+511: 2026-09-10T14:41:43.6861501Z   RAYON_NUM_THREADS: 
+512: 2026-09-10T14:41:43.6861781Z   SELECT_MODE: selected
+513: 2026-09-10T14:41:43.6862070Z   SELECT_AFFECTED: ["sparq-bench"]
+514: 2026-09-10T14:41:43.6862458Z   SELECT_FILTERSET: package(sparq-bench)
+515: 2026-09-10T14:41:43.6862812Z   SHARD_CRATE: 
+516: 2026-09-10T14:41:43.6863101Z   SHARD_FILTER: 
+517: 2026-09-10T14:41:43.6863319Z   IS_DRAFT_PR: false
+518: 2026-09-10T14:41:43.6863536Z ##[endgroup]
+519: 2026-09-10T14:41:43.6910467Z ##[group]nextest shard 'bulk 2/3' — attempt 1/2
+520: 2026-09-10T14:41:43.8155426Z   Extracting 742 binaries (including 11 non-test binaries), 1 build script output directory, and 6 linked paths to /home/runner/work/sparq/sparq
+521: 2026-09-10T14:44:18.4289924Z    Extracted 1207 files to /home/runner/work/sparq/sparq in 2m 34.56s
+522: 2026-09-10T14:44:18.7550621Z ────────────
+523: 2026-09-10T14:44:18.7552033Z  Nextest run ID 44945efb-e763-4375-b348-4ac762626806 with nextest profile: ci
+524: 2026-09-10T14:44:18.7552912Z     Starting 20 tests across 1 binary (40 tests and 730 binaries skipped)
+525: 2026-09-10T14:44:19.0708755Z         PASS [   0.135s] ( 1/20) sparq-bench::bin/sparq-bench fuzz::tests::cross_family_equality_is_a_type_error
+526: 2026-09-10T14:44:19.0882600Z         PASS [   0.160s] ( 2/20) sparq-bench::bin/sparq-bench fuzz::tests::a_header_only_projection_difference_is_a_mismatch
+527: 2026-09-10T14:44:19.5997668Z         PASS [   0.671s] ( 3/20) sparq-bench::bin/sparq-bench fuzz::tests::antijoin_category_is_the_rewrite_b_trigger
+528: 2026-09-10T14:44:20.0873395Z         PASS [   1.158s] ( 4/20) sparq-bench::bin/sparq-bench fuzz::tests::both_order_shapes_are_value_compared_and_the_subset_shape_has_ties
+529: 2026-09-10T14:44:20.0955091Z         PASS [   0.008s] ( 5/20) sparq-bench::bin/sparq-bench fuzz::tests::non_equality_shapes_keep_strict_differential
+530: 2026-09-10T14:44:20.2227845Z         PASS [   0.623s] ( 6/20) sparq-bench::bin/sparq-bench fuzz::tests::group_concat_is_generated_only_in_order_independent_shapes
+531: 2026-09-10T14:44:20.2321323Z         PASS [   0.134s] ( 7/20) sparq-bench::bin/sparq-bench fuzz::tests::query_form_classifies_every_result_form
+532: 2026-09-10T14:44:20.2366465Z         PASS [   0.013s] ( 8/20) sparq-bench::bin/sparq-bench fuzz::tests::same_family_and_identity_decide
+533: 2026-09-10T14:44:20.2481375Z         PASS [   0.012s] ( 9/20) sparq-bench::bin/sparq-bench fuzz::tests::window_totality_comes_from_the_header_not_the_sliced_rows
+534: 2026-09-10T14:44:20.3036553Z         PASS [   0.055s] (10/20) sparq-bench::bin/sparq-bench neutral::tests::neutral_term_carries_every_kind
+535: 2026-09-10T14:44:20.3175661Z         PASS [   0.013s] (11/20) sparq-bench::bin/sparq-bench update_fuzz::tests::blank_node_compare_is_isomorphism_not_relabelling_blindness
+536: 2026-09-10T14:44:21.5008444Z         PASS [   1.183s] (12/20) sparq-bench::bin/sparq-bench update_fuzz::tests::fixed_window_smoke
+537: 2026-09-10T14:44:21.5112033Z         PASS [   0.010s] (13/20) sparq-bench::bin/sparq-bench update_fuzz::tests::generator_is_deterministic
+538: 2026-09-10T14:44:21.5859774Z         PASS [   0.075s] (14/20) sparq-bench::bin/sparq-bench update_fuzz::tests::injected_marker_fails_during_actual_lexical_adjudication
+539: 2026-09-10T14:44:21.5971878Z         PASS [   0.009s] (15/20) sparq-bench::bin/sparq-bench update_fuzz::tests::lexical_adjudication_preserves_rows_and_blank_node_structure
+540: 2026-09-10T14:44:21.6047858Z         PASS [   0.009s] (16/20) sparq-bench::bin/sparq-bench update_fuzz::tests::nested_noncanonical_terms_remain_exact_in_sparq
+541: 2026-09-10T14:44:21.6137507Z         PASS [   0.009s] (17/20) sparq-bench::bin/sparq-bench update_fuzz::tests::oxigraph_cannot_load_a_local_file
+542: 2026-09-10T14:44:21.7922612Z         PASS [   1.562s] (18/20) sparq-bench::bin/sparq-bench fuzz::tests::typed_columns_agree_by_value_despite_lexical_recanonicalisation
+543: 2026-09-10T14:44:21.9058004Z         PASS [   2.817s] (19/20) sparq-bench::bin/sparq-bench fuzz::tests::every_category_is_value_compared
+544: 2026-09-10T14:44:23.0437478Z         PASS [   3.971s] (20/20) sparq-bench::bin/sparq-bench fuzz::tests::every_category_binds_rows_on_a_healthy_share_of_seeds
+545: 2026-09-10T14:44:23.0438665Z ────────────
+546: 2026-09-10T14:44:23.0439322Z      Summary [   4.292s] 20 tests run: 20 passed, 40 skipped
+547: 2026-09-10T14:44:23.0511926Z ##[endgroup]
+548: 2026-09-10T14:44:23.0512478Z shard 'bulk 2/3' passed on attempt 1
+549: 2026-09-10T14:44:23.0679219Z Post job cleanup.
+550: 2026-09-10T14:44:24.0208040Z [command]/usr/bin/git version
+551: 2026-09-10T14:44:24.0249615Z git version 2.55.0
+552: 2026-09-10T14:44:24.0286392Z Temporarily overriding HOME='/home/runner/work/_temp/f1bf106a-4486-45d6-acc3-aefbaa322020' before making global git config changes
+553: 2026-09-10T14:44:24.0287812Z Adding repository directory to the temporary git global config as a safe directory
+554: 2026-09-10T14:44:24.0289034Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/sparq/sparq
+555: 2026-09-10T14:44:24.0321073Z Removing SSH command configuration

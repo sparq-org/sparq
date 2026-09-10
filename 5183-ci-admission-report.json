@@ -1,0 +1,119 @@
+{
+  "schema": 1,
+  "recorded_at_utc": "2026-09-10T15:17:36.746314+00:00",
+  "author": "GPT-6 Astra xhigh; read-only mechanical CI admission audit",
+  "decision": "CI_EVIDENCE_READY_FOR_ROOT_ADMISSION_DECISION",
+  "pr": 6482,
+  "head": "fe3284199db0831f353d2ae401b8c69472764904",
+  "base": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+  "tested_pull_request_merge": "8ff2bc3ceb54b29a870b3a555b1e11efaf4e182c",
+  "source_clean": true,
+  "changed_paths": [
+    "crates/sparq-bench/src/update_fuzz.rs"
+  ],
+  "request_budget": {
+    "logical_github_reads_including_initial_budget": 20,
+    "budget": {
+      "core_remaining": 4988,
+      "core_limit": 5000,
+      "reset": 1789055804,
+      "before_named_reads": true
+    },
+    "retries": 0,
+    "remote_mutations": 0,
+    "further_reads": 0
+  },
+  "module_tests": {
+    "count": 20,
+    "pass": 20,
+    "proof": "module-tests.json: exact equality between the 20 committed #[test] names and 20 distinct Linux nextest PASS records",
+    "job_ids": [
+      102914791113,
+      102914791025,
+      102914791050
+    ],
+    "per_job_module_counts": [
+      6,
+      7,
+      7
+    ],
+    "filter": "SELECT_FILTERSET: package(sparq-bench); SELECT_MODE selected; non-heavy tests partitioned count:1/3,2/3,3/3",
+    "important": "Each bulk shard has 20 total selected package tests, not 20 UPDATE module tests per shard. UPDATE module total is 20 across the three jobs.",
+    "disputed_fixture": {
+      "test": "lexical_adjudication_preserves_rows_and_blank_node_structure",
+      "job_id": 102914791025,
+      "log": "test-bulk2.log",
+      "line": 539,
+      "raw_line": "2026-09-10T14:44:21.5971878Z         PASS [   0.009s] (15/20) sparq-bench::bin/sparq-bench update_fuzz::tests::lexical_adjudication_preserves_rows_and_blank_node_structure"
+    }
+  },
+  "authoritative_gate": {
+    "run": 34488983731,
+    "job_and_check_id": 102910459274,
+    "name": "gate",
+    "app_id": 15368,
+    "conclusion": "success",
+    "completed_at": "2026-09-10T14:47:44Z",
+    "full_tier": true,
+    "final_summary": "all 64 gating checks green (or skipped/neutral); six declared advisory checks excluded; set stable",
+    "proof": [
+      "gate-check.json",
+      "gate.log:305"
+    ],
+    "url": "https://github.com/sparq-org/sparq/actions/runs/34488983731/job/102910459274"
+  },
+  "linux_build_and_lint": {
+    "ci_run": 34488984319,
+    "archive_job": 102911182277,
+    "archive_command": "cargo nextest archive --workspace --all-targets --features approx-ann,filtered-ann,vec-predicate --archive-file nextest.tar.zst",
+    "archived_binaries": 742,
+    "doctest_command": "cargo test --workspace --features approx-ann,filtered-ann,vec-predicate --doc",
+    "msrv": {
+      "job": 102910710715,
+      "rustc": "1.88.0",
+      "command": "cargo check --workspace --all-targets --exclude sparq-py --exclude sparq-hdt",
+      "result": "success",
+      "meaning": "The actual workspace bench target passed the repo-selected 1.88 compile route; this is not a Rust 1.88 runtime test claim."
+    },
+    "clippy": {
+      "job": 102910710949,
+      "result": "success",
+      "commands": [
+        "cargo clippy --workspace --all-targets -- -D warnings",
+        "cargo clippy --workspace --all-targets --all-features -- -D warnings",
+        "cargo doc --workspace --no-deps",
+        "cargo doc --workspace --no-deps --all-features",
+        "cargo clippy --manifest-path bench/dict/Cargo.toml --all-targets -- -D warnings"
+      ],
+      "fmt": "informational/nonblocking; not claimed clean"
+    }
+  },
+  "privacy_preflight_flow": {
+    "docs_job": 102910460410,
+    "privacy_scan": "actual Linux bash scripts/check-privacy-claims.sh: 784 files scanned, OK",
+    "privacy_selftest": "32 passed, 0 failed",
+    "preflight_selftest": "scripts/preflight.py --self-test PASS; scripts/tests/test_preflight.py 81 tests OK",
+    "flow_job": 102910459571,
+    "actual_diff_gate_results": [
+      "G1 PASS, no new crate missing artifacts (flow.log:1000)",
+      "G2 PASS, no public surface changed (flow.log:1018)",
+      "G6 PASS, no undocumented new config knob (flow.log:1219)"
+    ],
+    "qualification": "The displayed preflight FAIL/PASS fixture text belongs to successful selftests. This audit does not claim a fresh complete local preflight --base invocation. The previously unavailable local Bash3 privacy command is separately covered by the real Linux hard privacy step."
+  },
+  "selected_scopes_and_limits": [
+    "Core CI: 39 jobs, selection and exact statuses in job-selection.json. Workspace all-target binaries were built; package-selected tests executed, not every workspace test.",
+    "Matrix: seven successful check/detect/guard/assembly jobs and four skipped execution jobs. No claim that opt-in runtime matrix legs ran.",
+    "W3C SPARQL and other conformance, wasm build, nightly mutation/coverage lanes were skipped by source selection in CI34488984319. They are not extra executed evidence.",
+    "Later CI34491437751 is the label-trigger no-leg run: IS_NO_LEG_RUN true, one successful selector, 30 skipped jobs. Source/log explicitly says gate ignores that run and retains previous real evidence.",
+    "Identical-lexical duplicate-redistribution witness for separate issue6483 was not built/run due disk floor. Its pre-existing source analysis is separate; the current distinct-lexical regression genuinely passed here.",
+    "No seed replay, new build/test, independent review, approval or remote mutation was performed in this audit. Raw other workflow bodies were not broadly audited.",
+    "Root retains review-thread resolution, review-label reconciliation and protected queue decision; this report establishes CI evidence, not an independent merge approval."
+  ],
+  "terminal": {
+    "all_requested_downloads_completed_exit_zero": true,
+    "pending_commands": false,
+    "source_edits": false,
+    "builds_or_tests_launched_locally": 0
+  }
+}

@@ -1,0 +1,150 @@
+{
+  "source_path": "crates/sparq-bench/src/update_fuzz.rs",
+  "source_sha256": "41d8a1e664a3620dc23ec530af9c1908123c43f98131a61f1c9ca2b555d33eaa",
+  "source_test_count": 20,
+  "observed_unique_pass_count": 20,
+  "missing": [],
+  "unexpected": [],
+  "observations": [
+    {
+      "test": "duplicate_quad_is_caught_despite_canonicalization",
+      "job_id": 102914791113,
+      "log": "test-bulk1.log",
+      "line": 537,
+      "raw_line": "2026-09-10T14:44:41.0241288Z         PASS [   0.012s] (13/20) sparq-bench::bin/sparq-bench update_fuzz::tests::duplicate_quad_is_caught_despite_canonicalization"
+    },
+    {
+      "test": "injected_divergence_is_caught",
+      "job_id": 102914791113,
+      "log": "test-bulk1.log",
+      "line": 538,
+      "raw_line": "2026-09-10T14:44:41.0460247Z         PASS [   0.023s] (14/20) sparq-bench::bin/sparq-bench update_fuzz::tests::injected_divergence_is_caught"
+    },
+    {
+      "test": "generator_emits_every_v2_family",
+      "job_id": 102914791113,
+      "log": "test-bulk1.log",
+      "line": 539,
+      "raw_line": "2026-09-10T14:44:41.0590413Z         PASS [   0.039s] (15/20) sparq-bench::bin/sparq-bench update_fuzz::tests::generator_emits_every_v2_family"
+    },
+    {
+      "test": "integer_pools_keep_draw_counts_and_all_spelling_families",
+      "job_id": 102914791113,
+      "log": "test-bulk1.log",
+      "line": 540,
+      "raw_line": "2026-09-10T14:44:41.0727437Z         PASS [   0.027s] (16/20) sparq-bench::bin/sparq-bench update_fuzz::tests::integer_pools_keep_draw_counts_and_all_spelling_families"
+    },
+    {
+      "test": "load_equals_the_equivalent_insert_data",
+      "job_id": 102914791113,
+      "log": "test-bulk1.log",
+      "line": 541,
+      "raw_line": "2026-09-10T14:44:41.0807628Z         PASS [   0.024s] (17/20) sparq-bench::bin/sparq-bench update_fuzz::tests::load_equals_the_equivalent_insert_data"
+    },
+    {
+      "test": "non_canonical_integer_lexicals_are_distinct_terms",
+      "job_id": 102914791113,
+      "log": "test-bulk1.log",
+      "line": 542,
+      "raw_line": "2026-09-10T14:44:41.0839990Z         PASS [   0.009s] (18/20) sparq-bench::bin/sparq-bench update_fuzz::tests::non_canonical_integer_lexicals_are_distinct_terms"
+    },
+    {
+      "test": "blank_node_compare_is_isomorphism_not_relabelling_blindness",
+      "job_id": 102914791025,
+      "log": "test-bulk2.log",
+      "line": 535,
+      "raw_line": "2026-09-10T14:44:20.3175661Z         PASS [   0.013s] (11/20) sparq-bench::bin/sparq-bench update_fuzz::tests::blank_node_compare_is_isomorphism_not_relabelling_blindness"
+    },
+    {
+      "test": "fixed_window_smoke",
+      "job_id": 102914791025,
+      "log": "test-bulk2.log",
+      "line": 536,
+      "raw_line": "2026-09-10T14:44:21.5008444Z         PASS [   1.183s] (12/20) sparq-bench::bin/sparq-bench update_fuzz::tests::fixed_window_smoke"
+    },
+    {
+      "test": "generator_is_deterministic",
+      "job_id": 102914791025,
+      "log": "test-bulk2.log",
+      "line": 537,
+      "raw_line": "2026-09-10T14:44:21.5112033Z         PASS [   0.010s] (13/20) sparq-bench::bin/sparq-bench update_fuzz::tests::generator_is_deterministic"
+    },
+    {
+      "test": "injected_marker_fails_during_actual_lexical_adjudication",
+      "job_id": 102914791025,
+      "log": "test-bulk2.log",
+      "line": 538,
+      "raw_line": "2026-09-10T14:44:21.5859774Z         PASS [   0.075s] (14/20) sparq-bench::bin/sparq-bench update_fuzz::tests::injected_marker_fails_during_actual_lexical_adjudication"
+    },
+    {
+      "test": "lexical_adjudication_preserves_rows_and_blank_node_structure",
+      "job_id": 102914791025,
+      "log": "test-bulk2.log",
+      "line": 539,
+      "raw_line": "2026-09-10T14:44:21.5971878Z         PASS [   0.009s] (15/20) sparq-bench::bin/sparq-bench update_fuzz::tests::lexical_adjudication_preserves_rows_and_blank_node_structure"
+    },
+    {
+      "test": "nested_noncanonical_terms_remain_exact_in_sparq",
+      "job_id": 102914791025,
+      "log": "test-bulk2.log",
+      "line": 540,
+      "raw_line": "2026-09-10T14:44:21.6047858Z         PASS [   0.009s] (16/20) sparq-bench::bin/sparq-bench update_fuzz::tests::nested_noncanonical_terms_remain_exact_in_sparq"
+    },
+    {
+      "test": "oxigraph_cannot_load_a_local_file",
+      "job_id": 102914791025,
+      "log": "test-bulk2.log",
+      "line": 541,
+      "raw_line": "2026-09-10T14:44:21.6137507Z         PASS [   0.009s] (17/20) sparq-bench::bin/sparq-bench update_fuzz::tests::oxigraph_cannot_load_a_local_file"
+    },
+    {
+      "test": "committed_allowlist_enables_exactly_the_adjudicated_classes",
+      "job_id": 102914791050,
+      "log": "test-bulk3.log",
+      "line": 537,
+      "raw_line": "2026-09-10T14:44:02.1687246Z         PASS [   0.010s] (13/20) sparq-bench::bin/sparq-bench update_fuzz::tests::committed_allowlist_enables_exactly_the_adjudicated_classes"
+    },
+    {
+      "test": "integer_lexical_adjudication_is_narrow",
+      "job_id": 102914791050,
+      "log": "test-bulk3.log",
+      "line": 538,
+      "raw_line": "2026-09-10T14:44:02.1805008Z         PASS [   0.012s] (14/20) sparq-bench::bin/sparq-bench update_fuzz::tests::integer_lexical_adjudication_is_narrow"
+    },
+    {
+      "test": "lexical_collisions_across_contexts_and_nested_terms_fail",
+      "job_id": 102914791050,
+      "log": "test-bulk3.log",
+      "line": 539,
+      "raw_line": "2026-09-10T14:44:02.1905210Z         PASS [   0.008s] (15/20) sparq-bench::bin/sparq-bench update_fuzz::tests::lexical_collisions_across_contexts_and_nested_terms_fail"
+    },
+    {
+      "test": "historical_4141222487_preserves_lexicals_and_fresh_nodes",
+      "job_id": 102914791050,
+      "log": "test-bulk3.log",
+      "line": 540,
+      "raw_line": "2026-09-10T14:44:02.2700236Z         PASS [   0.109s] (16/20) sparq-bench::bin/sparq-bench update_fuzz::tests::historical_4141222487_preserves_lexicals_and_fresh_nodes"
+    },
+    {
+      "test": "snapshot_renderers_agree_on_known_dataset",
+      "job_id": 102914791050,
+      "log": "test-bulk3.log",
+      "line": 541,
+      "raw_line": "2026-09-10T14:44:02.2806278Z         PASS [   0.011s] (17/20) sparq-bench::bin/sparq-bench update_fuzz::tests::snapshot_renderers_agree_on_known_dataset"
+    },
+    {
+      "test": "generated_integer_domain_is_injective_including_load",
+      "job_id": 102914791050,
+      "log": "test-bulk3.log",
+      "line": 543,
+      "raw_line": "2026-09-10T14:44:04.5760440Z         PASS [   2.416s] (19/20) sparq-bench::bin/sparq-bench update_fuzz::tests::generated_integer_domain_is_injective_including_load"
+    },
+    {
+      "test": "no_nested_blank_nodes_in_triple_terms",
+      "job_id": 102914791050,
+      "log": "test-bulk3.log",
+      "line": 544,
+      "raw_line": "2026-09-10T14:44:06.1354907Z         PASS [   3.946s] (20/20) sparq-bench::bin/sparq-bench update_fuzz::tests::no_nested_blank_nodes_in_triple_terms"
+    }
+  ]
+}

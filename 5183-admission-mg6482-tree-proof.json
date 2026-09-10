@@ -1,0 +1,11 @@
+{
+  "at": "2026-09-10T15:22:24.092199+00:00",
+  "head": "fe3284199db0831f353d2ae401b8c69472764904",
+  "merge_group": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+  "reviewed_tree": "b473621d314e035bc79df2f2e7a91b76b6e77275",
+  "merge_group_tree": "b473621d314e035bc79df2f2e7a91b76b6e77275",
+  "whole_tree_identical": true,
+  "parents": [
+    "4595388de9e389f5369d63828fbf90cfc16b62d9"
+  ]
+}
