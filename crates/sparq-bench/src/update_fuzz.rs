@@ -939,7 +939,21 @@ enum Verdict {
     Differs(String),
 }
 
+// [GPT-6 Astra] Borrow raw lines so duplicate detection also works on unsorted
+// diagnostic inputs. O(N log N) comparisons and O(N) borrowed references.
+fn repeated_raw_line(lines: &[String]) -> Option<(&str, usize)> {
+    let mut seen = BTreeSet::new();
+    let repeated = lines.iter().find(|line| !seen.insert(line.as_str()))?;
+    let count = lines.iter().filter(|line| *line == repeated).count();
+    Some((repeated.as_str(), count))
+}
+
 /// Compares two snapshots under the canonical form the module docs describe.
+///
+/// [GPT-6 Astra] Inputs are complete-quad snapshots or the full-quad rows from
+/// `PROBES`. Repeated raw quads are invalid emissions, even on both sides; this
+/// is not a uniqueness policy for arbitrary SPARQL projection/join/UNION bags.
+/// In particular, a duplicate-bearing snapshot does not compare equal to itself.
 ///
 /// `allow_integer_lexical` is set ONLY for a sparq-vs-Oxigraph compare, and only when
 /// the allowlist enables the class. The sparq-vs-sparq compare passes false: both
@@ -971,6 +985,16 @@ fn compare(
                 label_b,
                 b.len()
             ));
+        }
+        for (label, lines) in [(label_a, a), (label_b, b)] {
+            if let Some((line, count)) = repeated_raw_line(lines) {
+                return Verdict::Differs(format!(
+                    "{label}: repeated raw full-quad line occurs {count} times \
+                     (raw totals: {label_a} {}, {label_b} {}):\n  {line}",
+                    a.len(),
+                    b.len()
+                ));
+            }
         }
         return Verdict::Same;
     }
@@ -1026,6 +1050,10 @@ fn compare(
 // by joining its cells is then a well-formed N-Quads line, so probe results go through
 // exactly the same canonical comparison as the dataset snapshots — which is what makes
 // them comparable at all once blank nodes are in play.
+// [GPT-6 Astra] Each probe projects every component of one triple/quad, including
+// the named graph. Adding projection loss, joins or UNION requires reassessing
+// this private comparator's unique-emission contract; ordinary result bags need
+// not be unique. The scope and projection tests below pin these two probes.
 
 const PROBES: &[(&str, &[&str])] = &[
     ("SELECT ?s ?p ?o WHERE { ?s ?p ?o }", &["s", "p", "o"]),
@@ -1474,6 +1502,145 @@ mod tests {
 
     fn allowlist() -> UpdateDivergenceAllowlist {
         UpdateDivergenceAllowlist::load()
+    }
+
+    // [GPT-6 Astra] Equal raw totals must not hide canon's duplicate collapse.
+    #[test]
+    fn raw_duplicate_redistribution_is_rejected() {
+        let p = format!("_:x <http://ex/p> \"020\"^^{XSD_INTEGER} .");
+        let q = format!("_:x <http://ex/q> \"021\"^^{XSD_INTEGER} .");
+        let left = vec![p.clone(), p.clone(), q.clone()];
+        let right = vec![p.clone(), q.clone(), q];
+        for allow in [false, true] {
+            match compare("left", &left, "right", &right, allow) {
+                Verdict::Differs(detail) => assert_eq!(
+                    detail,
+                    format!(
+                        "left: repeated raw full-quad line occurs 2 times \
+                         (raw totals: left 3, right 3):\n  {p}"
+                    )
+                ),
+                Verdict::Same => panic!("equal-total raw duplicate redistribution returned Same"),
+                Verdict::AdjudicatedIntegerLexical => panic!("raw duplicates were adjudicated"),
+            }
+        }
+    }
+
+    #[test]
+    fn raw_duplicate_nonadjacent_self_comparison_is_invalid() {
+        for subject in ["<http://ex/s>", "_:x"] {
+            // The literal also exercises mentions_blank_node's false-positive route.
+            for object in ["<http://ex/o>", "\"contains _: text\""] {
+                let p = format!("{subject} <http://ex/p> {object} .");
+                let q = format!("{subject} <http://ex/q> {object} .");
+                let rows = vec![p.clone(), q, p.clone()];
+                for allow in [false, true] {
+                    match compare("first", &rows, "second", &rows, allow) {
+                        Verdict::Differs(detail) => {
+                            assert!(detail
+                                .starts_with("first: repeated raw full-quad line occurs 2 times"));
+                            assert!(detail.ends_with(&p));
+                        }
+                        _ => panic!("duplicate-bearing snapshot must not compare equal to itself"),
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn raw_duplicate_guard_preserves_symmetry_and_graph_identity() {
+        let left = vec![
+            "_:a <http://ex/p> _:b .".into(),
+            "_:b <http://ex/p> _:a .".into(),
+        ];
+        let right = vec![
+            "_:y <http://ex/p> _:z .".into(),
+            "_:z <http://ex/p> _:y .".into(),
+        ];
+        assert!(matches!(
+            compare("left", &left, "right", &right, false),
+            Verdict::Same
+        ));
+        let rows = vec![
+            "_:s <http://ex/p> <http://ex/o> <http://ex/g1> .".into(),
+            "_:s <http://ex/p> <http://ex/o> <http://ex/g2> .".into(),
+        ];
+        assert!(matches!(
+            compare("left", &rows, "right", &rows, false),
+            Verdict::Same
+        ));
+        let duplicate = vec![rows[0].clone(), rows[0].clone()];
+        assert!(matches!(
+            compare("left", &duplicate, "right", &duplicate, false),
+            Verdict::Differs(_)
+        ));
+    }
+
+    #[test]
+    fn raw_duplicate_probe_projection_contract() {
+        assert_eq!(
+            PROBES,
+            &[
+                ("SELECT ?s ?p ?o WHERE { ?s ?p ?o }", &["s", "p", "o"][..]),
+                (
+                    "SELECT ?s ?p ?o ?g WHERE { GRAPH ?g { ?s ?p ?o } }",
+                    &["s", "p", "o", "g"][..]
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn raw_duplicate_probe_scope_is_complete_quads_in_both_engines() {
+        let triple = "<http://ex/s> <http://ex/p> <http://ex/o>";
+        let update = format!(
+            "INSERT DATA {{ {triple} . GRAPH <http://ex/g1> {{ {triple} }} \
+             GRAPH <http://ex/g2> {{ {triple} }} }}"
+        );
+        let graph = sparq_engine::update(&Graph::new(), &update).unwrap();
+        let store = Store::new().unwrap();
+        store.update(update.as_str()).unwrap();
+        let snapshots = (sparq_nquads(&graph), oxi_nquads(&store).unwrap());
+        assert_eq!(snapshots.0.len(), 3);
+        assert_eq!(snapshots.0, snapshots.1);
+        let expected = [
+            vec![format!("{triple} .")],
+            vec![
+                format!("{triple} <http://ex/g1> ."),
+                format!("{triple} <http://ex/g2> ."),
+            ],
+        ];
+        for ((query, vars), expected) in PROBES.iter().zip(expected) {
+            let sparq = sparq_probe(&graph, query).unwrap();
+            let oxi = oxi_probe(&store, query, vars).unwrap();
+            assert_eq!(sparq, expected, "Sparq scope for {query}");
+            assert_eq!(oxi, expected, "Oxigraph scope for {query}");
+            assert!(matches!(
+                compare("sparq", &sparq, "oxigraph", &oxi, false),
+                Verdict::Same
+            ));
+        }
+    }
+
+    #[test]
+    fn raw_duplicate_guard_preserves_canonicalization_errors() {
+        for line in [
+            "_:x not-an-iri <http://ex/o> .",
+            "_:x <http://ex/p> <<( _:nested <http://ex/q> <http://ex/o> )>> .",
+        ] {
+            let rows = vec![line.to_string(), line.to_string()];
+            match compare("left", &rows, "right", &rows, false) {
+                Verdict::Differs(detail) => {
+                    assert!(
+                        detail.contains("re-parse failed")
+                            || detail.contains("canonicalization failed")
+                    );
+                    assert!(!detail.contains("repeated raw full-quad"));
+                }
+                _ => panic!("existing parse/ground-profile error must stay strict"),
+            }
+        }
     }
 
     /// The per-PR BLOCKING smoke: a fixed seed window through the full three-way
