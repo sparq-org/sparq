@@ -1,0 +1,12 @@
+{
+  "argv": [
+    "rustfmt",
+    "--edition",
+    "2021",
+    "--emit",
+    "stdout"
+  ],
+  "exit": 0,
+  "scope": "only capped_rhs_tests module",
+  "stderr": ""
+}

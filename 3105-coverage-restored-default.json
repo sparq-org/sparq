@@ -1,0 +1,26 @@
+{
+  "argv": [
+    "cargo",
+    "test",
+    "--locked",
+    "--offline",
+    "-p",
+    "sparq-engine",
+    "--lib",
+    "capped_rhs_",
+    "--",
+    "--nocapture",
+    "--test-threads=1"
+  ],
+  "exit": 0,
+  "seconds": 12.229262041,
+  "minimum_free_bytes": 12249141248,
+  "stopped": null,
+  "env": {
+    "CARGO_BUILD_JOBS": "2",
+    "CARGO_INCREMENTAL": "0",
+    "CARGO_NET_OFFLINE": "true",
+    "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+    "RAYON_NUM_THREADS": "1"
+  }
+}

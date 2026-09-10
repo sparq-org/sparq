@@ -1,0 +1,17 @@
+{
+  "argv": [
+    "python3",
+    "scripts/preflight.py"
+  ],
+  "exit": 1,
+  "seconds": 1.0135271670000001,
+  "minimum_free_bytes": 12293619712,
+  "stopped": null,
+  "env": {
+    "CARGO_BUILD_JOBS": "2",
+    "CARGO_INCREMENTAL": "0",
+    "CARGO_NET_OFFLINE": "true",
+    "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+    "RAYON_NUM_THREADS": "1"
+  }
+}

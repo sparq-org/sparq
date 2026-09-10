@@ -1,0 +1,69 @@
+   Compiling sparq-engine v0.1.1 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue3105/crates/sparq-engine)
+error[E0425]: cannot find type `RefCell` in this scope
+     --> crates/sparq-engine/src/exec.rs:21253:23
+      |
+21253 |         static STEPS: RefCell<Option<Vec<Step>>> = const { RefCell::new(None) };
+      |                       ^^^^^^^ not found in this scope
+      |
+help: consider importing this struct
+      |
+21248 +     use std::cell::RefCell;
+      |
+
+error[E0433]: cannot find type `RefCell` in this scope
+     --> crates/sparq-engine/src/exec.rs:21253:60
+      |
+21253 |         static STEPS: RefCell<Option<Vec<Step>>> = const { RefCell::new(None) };
+      |                                                            ^^^^^^^ use of undeclared type `RefCell`
+      |
+help: consider importing this struct
+      |
+21248 +     use std::cell::RefCell;
+      |
+
+warning: unused import: `RefCell`
+     --> crates/sparq-engine/src/exec.rs:14711:27
+      |
+14711 |     use std::cell::{Cell, RefCell};
+      |                           ^^^^^^^
+      |
+      = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+error[E0061]: this function takes 2 arguments but 3 arguments were supplied
+     --> crates/sparq-engine/src/exec.rs:21336:25
+      |
+21336 |         assert_eq!(bag(&crate::query_view(&visible, query, &crate::QueryBudget::default()).unwrap()), bag(&base));
+      |                         ^^^^^^^^^^^^^^^^^                  ------------------------------ unexpected argument #3 of type `&QueryBudget`
+      |
+note: function defined here
+     --> crates/sparq-engine/src/lib.rs:768:8
+      |
+  768 | pub fn query_view(v: &DatasetView, sparql: &str) -> Result<QueryResult, String> {
+      |        ^^^^^^^^^^
+help: remove the extra argument
+      |
+21336 -         assert_eq!(bag(&crate::query_view(&visible, query, &crate::QueryBudget::default()).unwrap()), bag(&base));
+21336 +         assert_eq!(bag(&crate::query_view(&visible, query).unwrap()), bag(&base));
+      |
+
+error[E0061]: this function takes 2 arguments but 3 arguments were supplied
+     --> crates/sparq-engine/src/exec.rs:21338:17
+      |
+21338 |         assert!(crate::query_view(&hidden, query, &crate::QueryBudget::default()).unwrap().rows.is_empty());
+      |                 ^^^^^^^^^^^^^^^^^                 ------------------------------ unexpected argument #3 of type `&QueryBudget`
+      |
+note: function defined here
+     --> crates/sparq-engine/src/lib.rs:768:8
+      |
+  768 | pub fn query_view(v: &DatasetView, sparql: &str) -> Result<QueryResult, String> {
+      |        ^^^^^^^^^^
+help: remove the extra argument
+      |
+21338 -         assert!(crate::query_view(&hidden, query, &crate::QueryBudget::default()).unwrap().rows.is_empty());
+21338 +         assert!(crate::query_view(&hidden, query).unwrap().rows.is_empty());
+      |
+
+Some errors have detailed explanations: E0061, E0425, E0433.
+For more information about an error, try `rustc --explain E0061`.
+warning: `sparq-engine` (lib test) generated 1 warning
+error: could not compile `sparq-engine` (lib test) due to 4 previous errors; 1 warning emitted

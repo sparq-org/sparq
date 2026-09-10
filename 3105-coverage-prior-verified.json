@@ -1,0 +1,17 @@
+[
+  {
+    "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/manifest.json",
+    "sha256": "188a6cffeb664756aec40923d18da3ea905ca217b76f654fcb42e7a863676f48",
+    "verified_files": 59
+  },
+  {
+    "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance/manifest.json",
+    "sha256": "9cd9164058fa95e142633787c30cd9d00a65463e975de28f3b46166503f87bed",
+    "verified_files": 21
+  },
+  {
+    "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/manifest.json",
+    "sha256": "e97fa98a8fcaae33c78db2c40f85881c2f0417d41e177972f82979c02f24d874",
+    "verified_files": 515
+  }
+]

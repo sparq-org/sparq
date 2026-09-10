@@ -1,0 +1,20 @@
+[
+  {
+    "name": "ignore-requested-sort",
+    "test": "capped_rhs_changing_sort_mixed_kernels_preserves_full_bag",
+    "killed_by_executed_assertion": true,
+    "exit": 101,
+    "binary_sha256": "d76cf61ad544c552a16fa95a5d985ef52d4098908415965805c1acf9ce852083",
+    "binary_bytes": 28080608,
+    "interpretation": "Path/invalidation assertion after all full-bag assertions passed, not a demonstrated wrong result."
+  },
+  {
+    "name": "retain-old-through-scan",
+    "test": "capped_rhs_replacement_releases_old_slot_before_scan",
+    "killed_by_executed_assertion": true,
+    "exit": 101,
+    "binary_sha256": "b40d4ff5489a0d85536f0ba952d29ca906a6a4602c6f5c320e760f5372f59223",
+    "binary_bytes": 28080608,
+    "interpretation": "Actual slot remains populated after replacement scan panic; candidate empties it before calling scan."
+  }
+]

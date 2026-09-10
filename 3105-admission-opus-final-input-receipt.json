@@ -1,0 +1,7 @@
+{
+  "at": "2026-09-10T01:59:54.021605+00:00",
+  "head": "19763bfab1dce196a654c899b172e7b24d70bc59",
+  "bytes": 112161,
+  "sha256": "8266714025e14167dd2fad08ac86a02c2d3ce8312dc10370a4bca160d0782683",
+  "audit": "Only repository source, generated bounded test/performance reports, explicit diagnostics, prior source assessment; scanned for common credential markers; no credentials/transcripts included. Model output is advice not policy."
+}

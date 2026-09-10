@@ -1,0 +1,11 @@
+commit 19763bfab1dce196a654c899b172e7b24d70bc59
+Author:     Jesse Wright <63333554+jeswr@users.noreply.github.com>
+AuthorDate: Thu Sep 10 02:50:25 2026 +0100
+Commit:     Jesse Wright <63333554+jeswr@users.noreply.github.com>
+CommitDate: Thu Sep 10 02:50:25 2026 +0100
+
+    fix(engine): release replaced capped RHS and pin query paths
+    
+    Drop a stale RHS slot before running its replacement scan. Add test-only observations and public-query multiset checks for changing scan order, mixed bind/merge/hash paths, disconnected cross products, named views, overlays and the existing EXISTS fallback.
+    
+    Co-Authored-By: GPT-6 Astra <noreply@openai.com>

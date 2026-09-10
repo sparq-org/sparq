@@ -1,0 +1,22 @@
+   Compiling sparq-engine v0.1.1 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue3105/crates/sparq-engine)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 8.22s
+     Running unittests src/lib.rs (/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/debug/deps/sparq_engine-a23c250f81b1b746)
+
+running 1 test
+test exec::capped_rhs_tests::capped_rhs_changing_sort_mixed_kernels_preserves_full_bag ... changing-sort actual steps: [Step { start: 0, pattern: 1, kernel: "bind", requested: None, scanned: false, actual: None }, Step { start: 0, pattern: 2, kernel: "hash", requested: None, scanned: true, actual: Some("s") }, Step { start: 1024, pattern: 1, kernel: "merge", requested: Some(0), scanned: true, actual: Some("s") }, Step { start: 1024, pattern: 2, kernel: "merge", requested: Some(0), scanned: false, actual: Some("s") }, Step { start: 65536, pattern: 1, kernel: "bind", requested: None, scanned: false, actual: None }, Step { start: 65536, pattern: 2, kernel: "hash", requested: None, scanned: false, actual: Some("s") }]
+
+thread 'exec::capped_rhs_tests::capped_rhs_changing_sort_mixed_kernels_preserves_full_bag' (3637326) panicked at crates/sparq-engine/src/exec.rs:21359:13:
+assertion `left == right` failed
+  left: [(0, None, true, Some("s")), (1024, Some(0), false, Some("s")), (65536, None, false, Some("s"))]
+ right: [(0, None, true, Some("s")), (1024, Some(0), true, Some("s")), (65536, None, true, Some("s"))]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    exec::capped_rhs_tests::capped_rhs_changing_sort_mixed_kernels_preserves_full_bag
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 324 filtered out; finished in 2.31s
+
+error: test failed, to rerun pass `-p sparq-engine --lib`

@@ -1,0 +1,11 @@
+{
+  "argv": [
+    "rustfmt",
+    "--edition",
+    "2021",
+    "--emit",
+    "stdout"
+  ],
+  "exit": 0,
+  "scope": "new test module prefix only; existing tests restored byte-identical to6e86"
+}

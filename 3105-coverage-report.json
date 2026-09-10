@@ -1,0 +1,85 @@
+{
+  "head": "19763bfab1dce196a654c899b172e7b24d70bc59",
+  "parent": "6e86f1d0ba447aa78a50800337a7a379702fa999",
+  "main_base": "e53464c73f31f7aca800f3867ac054c36408e346",
+  "author": "Actual GPT-6 Astra xhigh; existing historical attribution preserved; ordinary unsigned local commit, no persistent config or hook changes.",
+  "scope": "One file: crates/sparq-engine/src/exec.rs, +260/-2 from reviewed6e86. One production statement clears stale slot before scan; other changes are cfg(test) instrumentation/tests. Existing test suffix byte-identical; no API/dependency/storage/cache-policy/planner/hash-build change.",
+  "results": {
+    "focused_default": "7 passed",
+    "focused_no_engine_defaults": "7 passed; core dev dependencies still enable parallel/mmap/dict-spill, not a lean wasm run",
+    "focused_compact_index": "7 passed; explicit three-permutation hash/order/reuse expectations",
+    "focused_semijoin_bitmap": "7 passed",
+    "ask_early_exit": "21 passed, 1 existing ignored timing probe",
+    "clippy": "cargo clippy --locked --offline -p sparq-engine --lib --tests -- -D warnings: PASS",
+    "diff_check": "PASS",
+    "preflight": "FAIL solely because Bash3 lacks mapfile in privacy-claims script; no workaround/weakening. Linux preflight required."
+  },
+  "actual_paths": {
+    "six_permutations": "70000-row public SELECT LIMIT70001, projecting35000 integer values twice each; full query bag AND generated exact bag agree. q pattern1: block0 bind, block1024 merge(requestSome0, scanned), block65536 bind. r pattern2: hash(None,scan), merge(Some0,scan), hash(None,scan); actual RHS order s throughout.",
+    "three_permutations": "Same complete oracle and multiplicity pass. q bind/hash/bind; r requestsNone in allthree blocks, actual orderx, scans once then reuses twice. Requested and actual order are not conflated. Explicit branch differs because the built index set lacks PSO.",
+    "disconnected": "Public capped query executes one cross_product_ref RHS step, produces six rows and exact two-value bag with multiplicitythree; full query agrees. Small one-block cross, not a multi-block memory stress.",
+    "named_view_overlay": "Eligible named subquery reaches RHS scan; visible view with empty default retains same bag; hidden view returns zero rows and no RHS steps. Tombstone removes one q row from a fork and eligible count decreases3\u21922. Correlated EXISTS variant returns projected multiplicity2 then1 after deletion.",
+    "exists_boundary": "Initial desired EXISTS engagement assertion failed: is_conjunctive/filter_scope_ok deliberately reject EXISTS. Final test pins zero RHS-cache steps for this fallback and separately exercises eligible named/view/overlay queries. No guard broadened or forced eligibility."
+  },
+  "lifetime": "Rust assignment evaluates replacement RHS before dropping old LHS; old Some((sort,Bindings)) therefore retained rows through scan(). New *slot=None drops old ownership before calling scan. Actual-helper catch_unwind sentinel proves slot empty after replacement scan aborts; normal replacement still yields expected row. This is observable ownership-state proof, not allocator/time measurement, and catches unwind only.",
+  "controls": [
+    {
+      "name": "ignore-requested-sort",
+      "test": "capped_rhs_changing_sort_mixed_kernels_preserves_full_bag",
+      "killed_by_executed_assertion": true,
+      "exit": 101,
+      "binary_sha256": "d5e1b4a21decea1fd2da895975ebd0a83b0825b86b69522f7826b9a99061f077",
+      "binary_bytes": 28091616,
+      "interpretation": "Path/invalidation assertion after all full-bag assertions passed, not a demonstrated wrong result."
+    },
+    {
+      "name": "retain-old-through-scan",
+      "test": "capped_rhs_replacement_releases_old_slot_before_scan",
+      "killed_by_executed_assertion": true,
+      "exit": 101,
+      "binary_sha256": "06a68809c7220d5b83abf8395250df06b23789a44f08d46e7657c9b9f5b504fe",
+      "binary_bytes": 28091616,
+      "interpretation": "Actual slot remains populated after replacement scan panic; candidate empties it before calling scan."
+    }
+  ],
+  "controls_limits": "Requested-sort mutant returns the same full bag on this fixture, then fails actual scanned/requested-path assertion. This is an invalidation/work control, not a demonstrated semantic failure. Lifetime mutant keeps actual old slot populated after sentinel panic. Expected caught panic output is not an unexpected test failure. Initial and final control executions retained; final controls use exact final source plus documented mutation.",
+  "iterations": "First two compile attempts corrected test import placement and query_view arity; third execution exposed genuine existing EXISTS fallback, not production failure. Initial compact run preserved full bag but correctly differed from assumed six-index path; final index-set-specific assertions document actual three-index behavior. All initial logs/source snapshots retained. Old test formatting restored to keep prior source byte-identical.",
+  "measurements": "No new timings or allocation matrix. Prior exact6e86 positive local performance screen and all frozen binaries/artifacts remain unchanged and verified. Do not attribute those timings to this new head or claim a measured peak reduction from slot clear.",
+  "limits": [
+    "No full workspace clippy/tests, wasm build/byte equality, conformance or canonical perf ratchet run here; authoritative CI required before admission.",
+    "No midquery asynchronous cancellation injection; existing cancellation/deadline/rowbudget tests and armed-budget nonreuse checks passed unchanged.",
+    "Sum of retained per-pattern RHS remains a resource risk outside the measured two-RHS fixture. Releasing stale per-slot data only avoids replacement overlap; it is not a retention cap or budget policy change.",
+    "Nested-public-query budget issue6476 remains untouched. No production query policy or guard changes beyond stale slot lifetime.",
+    "No blanket all-features claim: tested default, no engine defaults, core compact-index and semijoin-bitmap configurations only.",
+    "No remote action, model call, registry/release/EC2 operation or further lane started."
+  ],
+  "decision": "Ready for actual focused Opus review and subsequent full validation; no merge, performance-admission or issue-closure claim.",
+  "resource": {
+    "started_utc": "2026-09-10T01:36:22Z",
+    "completed_utc": "2026-09-10T01:52:21.964093+00:00",
+    "free_bytes": 11899613184,
+    "min_observed_command_free_bytes": 12185391104,
+    "floor_bytes": 6509559808,
+    "jobs": 2,
+    "incremental": false,
+    "offline_locked": true,
+    "commands_pending": false
+  },
+  "prior_verified": [
+    {
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/manifest.json",
+      "sha256": "188a6cffeb664756aec40923d18da3ea905ca217b76f654fcb42e7a863676f48",
+      "verified_files": 59
+    },
+    {
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance/manifest.json",
+      "sha256": "9cd9164058fa95e142633787c30cd9d00a65463e975de28f3b46166503f87bed",
+      "verified_files": 21
+    },
+    {
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/manifest.json",
+      "sha256": "e97fa98a8fcaae33c78db2c40f85881c2f0417d41e177972f82979c02f24d874",
+      "verified_files": 515
+    }
+  ]
+}

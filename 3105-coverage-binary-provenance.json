@@ -1,0 +1,131 @@
+{
+  "restored-default": {
+    "sha256": "1005fd96adc7f7be2e2ffaaf54511bf25a79cdcd7e3c60edf137f3d4593c44ce",
+    "bytes": 28091616,
+    "source_sha256": "bea151fe66ee500d0e644c5b414c48bad82863281ed08aa58f75ec1d1829b3b0",
+    "command": {
+      "argv": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "sparq-engine",
+        "--lib",
+        "capped_rhs_",
+        "--",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "exit": 0,
+      "seconds": 12.229262041,
+      "minimum_free_bytes": 12249141248,
+      "stopped": null,
+      "env": {
+        "CARGO_BUILD_JOBS": "2",
+        "CARGO_INCREMENTAL": "0",
+        "CARGO_NET_OFFLINE": "true",
+        "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+        "RAYON_NUM_THREADS": "1"
+      }
+    }
+  },
+  "pinned-compact": {
+    "sha256": "e17705abdcca941a430d4627a06c54517cbbeefc69c840ff1e22e2b65a6b73bd",
+    "bytes": 28092352,
+    "source_sha256": "bea151fe66ee500d0e644c5b414c48bad82863281ed08aa58f75ec1d1829b3b0",
+    "command": {
+      "argv": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "sparq-engine",
+        "--lib",
+        "--features",
+        "sparq-core/compact-index",
+        "capped_rhs_",
+        "--",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "exit": 0,
+      "seconds": 11.202781917,
+      "minimum_free_bytes": 12356558848,
+      "stopped": null,
+      "env": {
+        "CARGO_BUILD_JOBS": "2",
+        "CARGO_INCREMENTAL": "0",
+        "CARGO_NET_OFFLINE": "true",
+        "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+        "RAYON_NUM_THREADS": "1"
+      }
+    }
+  },
+  "pinned-no-default": {
+    "sha256": "dde8728699310ac50f4dd48641c086871df629fe763c0740b5e1cfaf08be520b",
+    "bytes": 18586672,
+    "source_sha256": "bea151fe66ee500d0e644c5b414c48bad82863281ed08aa58f75ec1d1829b3b0",
+    "command": {
+      "argv": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "sparq-engine",
+        "--lib",
+        "--no-default-features",
+        "capped_rhs_",
+        "--",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "exit": 0,
+      "seconds": 9.165746375,
+      "minimum_free_bytes": 12356145152,
+      "stopped": null,
+      "env": {
+        "CARGO_BUILD_JOBS": "2",
+        "CARGO_INCREMENTAL": "0",
+        "CARGO_NET_OFFLINE": "true",
+        "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+        "RAYON_NUM_THREADS": "1"
+      }
+    }
+  },
+  "pinned-semijoin": {
+    "sha256": "d40c537586b7262b914e5b115e7070267445c2017634524b29b3f152660e004d",
+    "bytes": 28121584,
+    "source_sha256": "bea151fe66ee500d0e644c5b414c48bad82863281ed08aa58f75ec1d1829b3b0",
+    "command": {
+      "argv": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "sparq-engine",
+        "--lib",
+        "--features",
+        "semijoin-bitmap",
+        "capped_rhs_",
+        "--",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "exit": 0,
+      "seconds": 10.171957875,
+      "minimum_free_bytes": 12313653248,
+      "stopped": null,
+      "env": {
+        "CARGO_BUILD_JOBS": "2",
+        "CARGO_INCREMENTAL": "0",
+        "CARGO_NET_OFFLINE": "true",
+        "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+        "RAYON_NUM_THREADS": "1"
+      }
+    }
+  }
+}

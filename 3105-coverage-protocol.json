@@ -1,0 +1,20 @@
+{
+  "utc": "2026-09-10T01:37:57.171958+00:00",
+  "base": "6e86f1d0ba447aa78a50800337a7a379702fa999",
+  "scope": [
+    "actual changing-sort/mixed-kernel multiset test",
+    "disconnected capped cross",
+    "named/view/EXISTS/overlay and compact-index feature coverage"
+  ],
+  "limits": {
+    "deadline": "2026-09-10T01:56:22Z",
+    "free_floor": 6509559808,
+    "jobs": 2,
+    "incremental": false,
+    "offline": true
+  },
+  "controls": [
+    "ignore requested-sort invalidation; distinguish path from result failure"
+  ],
+  "production": "Optional slot-release fix deferred unless meaningful lifetime evidence fits"
+}

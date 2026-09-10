@@ -1,0 +1,10 @@
+--- candidate/exec.rs
++++ retain-old-through-scan/exec.rs
+@@ -4340,7 +4340,6 @@
+     {
+         // [GPT-6 Astra] Release the stale relation before materializing its replacement.
+         // No subsequent step can borrow the old requested order from this slot.
+-        *slot = None;
+         *slot = Some((sort, scan()));
+     }
+     &slot.as_ref().unwrap().1

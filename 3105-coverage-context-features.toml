@@ -1,0 +1,24 @@
+# Forwards sparq-core's parallel index build. Default on for native; the wasm
+# crate disables defaults so rayon is never pulled into the bundle.
+# `regex` powers SPARQL REGEX/REPLACE; default-on for native, off for wasm (the wasm crate
+# disables defaults) so the regex automata don't bloat the browser bundle.
+# `digest` powers the SPARQL hash builtins (MD5/SHA1/SHA256/SHA384/SHA512); default-on
+# for native, off for wasm (the wasm crate disables defaults) so the hash cores never
+# enter the browser bundle.
+default = ["parallel", "regex", "digest"]
+parallel = ["dep:rayon", "sparq-core/parallel"]
+regex = ["dep:regex"]
+digest = ["dep:md-5", "dep:sha1", "dep:sha2"]
+# Characteristic-set star-join cardinality estimation (Neumann & Moerkotte):
+# `cs::CsTable` + `with_cs_table` make the greedy planner consult an injected CS
+[dev-dependencies]
+# The dict-consolidation differential test compares the serial, sharded-parallel and
+# external (out-of-core) build paths — the tests need sparq-core's mmap feature even
+# though the library itself doesn't. `dict-spill` adds the spilled-dictionary build's
+# byte-identity differential (tests/dict_spill_differential.rs).
+sparq-core = { path = "../sparq-core", version = "0.1.1", features = ["mmap", "parallel", "dict-spill"] }
+rayon.workspace = true
+# [OPUS-4.8] (sq-7d3dj.30.1) DEV-only re-listing of the ALREADY-present `spargebra` dep so
+# tests/rewrite_pass.rs can parse a query to RAW `spargebra` algebra (the un-rewritten
+# baseline) and feed it through `PreparedQuery::from` — the on-vs-off oracle for the
+# `algebra-rewrite` pass. `spargebra` is already a normal dependency (above), so this adds

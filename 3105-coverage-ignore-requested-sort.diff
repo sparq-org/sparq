@@ -1,0 +1,11 @@
+--- candidate/exec.rs
++++ ignore-requested-sort/exec.rs
+@@ -4336,7 +4336,7 @@
+ ) -> &Bindings {
+     if slot
+         .as_ref()
+-        .is_none_or(|(cached_sort, _)| *cached_sort != sort)
++        .is_none_or(|(cached_sort, _)| { let _ = (cached_sort, sort); false })
+     {
+         // [GPT-6 Astra] Release the stale relation before materializing its replacement.
+         // No subsequent step can borrow the old requested order from this slot.

@@ -1,0 +1,11 @@
+{
+  "at": "2026-09-10T01:59:54.021605+00:00",
+  "head": "19763bfab1dce196a654c899b172e7b24d70bc59",
+  "clean": true,
+  "files_verified": 89,
+  "bytes_verified": 111528420,
+  "manifest_sha256": "a11c8af18d3aafc5f4eec2b62110a34c496f8904d5e51ec3d2786d13b6fa3d15",
+  "source_matches_committed_head": true,
+  "tests_reviewed": "Seven focused tests pass under default, no engine defaults, compact-index, semijoin-bitmap; ASK21pass1existingignored; scoped lib+tests clippy passes. Both executed control failures and original expectation failures preserved.",
+  "limits": "Not full workspace/wasm/conformance/perf ratchets; no new timing on finalhead; previous performance head6e86 only."
+}

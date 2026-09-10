@@ -1,0 +1,615 @@
+[
+  {
+    "file": "ask-early-exit.json",
+    "argv": [
+      "cargo",
+      "test",
+      "--locked",
+      "--offline",
+      "-p",
+      "sparq-engine",
+      "--test",
+      "ask_early_exit",
+      "--",
+      "--nocapture",
+      "--test-threads=1"
+    ],
+    "exit": 0,
+    "seconds": 8.643843917,
+    "minimum_free_bytes": 12185391104,
+    "stopped": null,
+    "env": {
+      "CARGO_BUILD_JOBS": "2",
+      "CARGO_INCREMENTAL": "0",
+      "CARGO_NET_OFFLINE": "true",
+      "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+      "RAYON_NUM_THREADS": "1"
+    }
+  },
+  {
+    "file": "clippy-tests.json",
+    "argv": [
+      "cargo",
+      "clippy",
+      "--locked",
+      "--offline",
+      "-p",
+      "sparq-engine",
+      "--lib",
+      "--tests",
+      "--",
+      "-D",
+      "warnings"
+    ],
+    "exit": 0,
+    "seconds": 11.718936083000001,
+    "minimum_free_bytes": 12549472256,
+    "stopped": null,
+    "env": {
+      "CARGO_BUILD_JOBS": "2",
+      "CARGO_INCREMENTAL": "0",
+      "CARGO_NET_OFFLINE": "true",
+      "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+      "RAYON_NUM_THREADS": "1"
+    }
+  },
+  {
+    "file": "compact-unit.json",
+    "argv": [
+      "cargo",
+      "test",
+      "--locked",
+      "--offline",
+      "-p",
+      "sparq-engine",
+      "--lib",
+      "--features",
+      "sparq-core/compact-index",
+      "capped_rhs_",
+      "--",
+      "--nocapture",
+      "--test-threads=1"
+    ],
+    "exit": 101,
+    "seconds": 18.807701292,
+    "minimum_free_bytes": 12803121152,
+    "stopped": null,
+    "env": {
+      "CARGO_BUILD_JOBS": "2",
+      "CARGO_INCREMENTAL": "0",
+      "CARGO_NET_OFFLINE": "true",
+      "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+      "RAYON_NUM_THREADS": "1"
+    }
+  },
+  {
+    "file": "final-compact.json",
+    "argv": [
+      "cargo",
+      "test",
+      "--locked",
+      "--offline",
+      "-p",
+      "sparq-engine",
+      "--lib",
+      "--features",
+      "sparq-core/compact-index",
+      "capped_rhs_",
+      "--",
+      "--nocapture",
+      "--test-threads=1"
+    ],
+    "exit": 0,
+    "seconds": 11.699747709,
+    "minimum_free_bytes": 12702908416,
+    "stopped": null,
+    "env": {
+      "CARGO_BUILD_JOBS": "2",
+      "CARGO_INCREMENTAL": "0",
+      "CARGO_NET_OFFLINE": "true",
+      "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+      "RAYON_NUM_THREADS": "1"
+    }
+  },
+  {
+    "file": "final-default.json",
+    "argv": [
+      "cargo",
+      "test",
+      "--locked",
+      "--offline",
+      "-p",
+      "sparq-engine",
+      "--lib",
+      "capped_rhs_",
+      "--",
+      "--nocapture",
+      "--test-threads=1"
+    ],
+    "exit": 0,
+    "seconds": 14.242137542,
+    "minimum_free_bytes": 12759388160,
+    "stopped": null,
+    "env": {
+      "CARGO_BUILD_JOBS": "2",
+      "CARGO_INCREMENTAL": "0",
+      "CARGO_NET_OFFLINE": "true",
+      "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+      "RAYON_NUM_THREADS": "1"
+    }
+  },
+  {
+    "file": "final-format.json",
+    "argv": [
+      "rustfmt",
+      "--edition",
+      "2021",
+      "--emit",
+      "stdout"
+    ],
+    "exit": 0,
+    "scope": "new test module prefix only; existing tests restored byte-identical to6e86"
+  },
+  {
+    "file": "final-no-default.json",
+    "argv": [
+      "cargo",
+      "test",
+      "--locked",
+      "--offline",
+      "-p",
+      "sparq-engine",
+      "--lib",
+      "--no-default-features",
+      "capped_rhs_",
+      "--",
+      "--nocapture",
+      "--test-threads=1"
+    ],
+    "exit": 0,
+    "seconds": 9.656791666,
+    "minimum_free_bytes": 12619120640,
+    "stopped": null,
+    "env": {
+      "CARGO_BUILD_JOBS": "2",
+      "CARGO_INCREMENTAL": "0",
+      "CARGO_NET_OFFLINE": "true",
+      "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+      "RAYON_NUM_THREADS": "1"
+    }
+  },
+  {
+    "file": "final-view.json",
+    "argv": [
+      "cargo",
+      "test",
+      "--locked",
+      "--offline",
+      "-p",
+      "sparq-engine",
+      "--lib",
+      "capped_rhs_",
+      "--",
+      "--nocapture",
+      "--test-threads=1"
+    ],
+    "exit": 0,
+    "seconds": 14.22835925,
+    "minimum_free_bytes": 12659838976,
+    "stopped": null,
+    "env": {
+      "CARGO_BUILD_JOBS": "2",
+      "CARGO_INCREMENTAL": "0",
+      "CARGO_NET_OFFLINE": "true",
+      "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+      "RAYON_NUM_THREADS": "1"
+    }
+  },
+  {
+    "file": "first-unit.json",
+    "argv": [
+      "cargo",
+      "test",
+      "--locked",
+      "--offline",
+      "-p",
+      "sparq-engine",
+      "--lib",
+      "capped_rhs_",
+      "--",
+      "--nocapture",
+      "--test-threads=1"
+    ],
+    "exit": 101,
+    "seconds": 8.105967457999999,
+    "minimum_free_bytes": 12310249472,
+    "stopped": null,
+    "env": {
+      "CARGO_BUILD_JOBS": "2",
+      "CARGO_INCREMENTAL": "0",
+      "CARGO_NET_OFFLINE": "true",
+      "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+      "RAYON_NUM_THREADS": "1"
+    }
+  },
+  {
+    "file": "format.json",
+    "argv": [
+      "rustfmt",
+      "--edition",
+      "2021",
+      "--emit",
+      "stdout"
+    ],
+    "exit": 0,
+    "scope": "only capped_rhs_tests module",
+    "stderr": ""
+  },
+  {
+    "file": "fourth-unit.json",
+    "argv": [
+      "cargo",
+      "test",
+      "--locked",
+      "--offline",
+      "-p",
+      "sparq-engine",
+      "--lib",
+      "capped_rhs_",
+      "--",
+      "--nocapture",
+      "--test-threads=1"
+    ],
+    "exit": 0,
+    "seconds": 13.760331125,
+    "minimum_free_bytes": 13001289728,
+    "stopped": null,
+    "env": {
+      "CARGO_BUILD_JOBS": "2",
+      "CARGO_INCREMENTAL": "0",
+      "CARGO_NET_OFFLINE": "true",
+      "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+      "RAYON_NUM_THREADS": "1"
+    }
+  },
+  {
+    "file": "ignore-requested-sort.json",
+    "argv": [
+      "cargo",
+      "test",
+      "--locked",
+      "--offline",
+      "-p",
+      "sparq-engine",
+      "--lib",
+      "capped_rhs_changing_sort_mixed_kernels_preserves_full_bag",
+      "--",
+      "--nocapture",
+      "--test-threads=1"
+    ],
+    "exit": 101,
+    "seconds": 11.69684725,
+    "minimum_free_bytes": 12352868352,
+    "stopped": null,
+    "env": {
+      "CARGO_BUILD_JOBS": "2",
+      "CARGO_INCREMENTAL": "0",
+      "CARGO_NET_OFFLINE": "true",
+      "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+      "RAYON_NUM_THREADS": "1"
+    }
+  },
+  {
+    "file": "pinned-clippy.json",
+    "argv": [
+      "cargo",
+      "clippy",
+      "--locked",
+      "--offline",
+      "-p",
+      "sparq-engine",
+      "--lib",
+      "--tests",
+      "--",
+      "-D",
+      "warnings"
+    ],
+    "exit": 0,
+    "seconds": 5.609546416,
+    "minimum_free_bytes": 12296007680,
+    "stopped": null,
+    "env": {
+      "CARGO_BUILD_JOBS": "2",
+      "CARGO_INCREMENTAL": "0",
+      "CARGO_NET_OFFLINE": "true",
+      "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+      "RAYON_NUM_THREADS": "1"
+    }
+  },
+  {
+    "file": "pinned-compact.json",
+    "argv": [
+      "cargo",
+      "test",
+      "--locked",
+      "--offline",
+      "-p",
+      "sparq-engine",
+      "--lib",
+      "--features",
+      "sparq-core/compact-index",
+      "capped_rhs_",
+      "--",
+      "--nocapture",
+      "--test-threads=1"
+    ],
+    "exit": 0,
+    "seconds": 11.202781917,
+    "minimum_free_bytes": 12356558848,
+    "stopped": null,
+    "env": {
+      "CARGO_BUILD_JOBS": "2",
+      "CARGO_INCREMENTAL": "0",
+      "CARGO_NET_OFFLINE": "true",
+      "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+      "RAYON_NUM_THREADS": "1"
+    }
+  },
+  {
+    "file": "pinned-default.json",
+    "argv": [
+      "cargo",
+      "test",
+      "--locked",
+      "--offline",
+      "-p",
+      "sparq-engine",
+      "--lib",
+      "capped_rhs_",
+      "--",
+      "--nocapture",
+      "--test-threads=1"
+    ],
+    "exit": 0,
+    "seconds": 14.217798499999999,
+    "minimum_free_bytes": 12430544896,
+    "stopped": null,
+    "env": {
+      "CARGO_BUILD_JOBS": "2",
+      "CARGO_INCREMENTAL": "0",
+      "CARGO_NET_OFFLINE": "true",
+      "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+      "RAYON_NUM_THREADS": "1"
+    }
+  },
+  {
+    "file": "pinned-no-default.json",
+    "argv": [
+      "cargo",
+      "test",
+      "--locked",
+      "--offline",
+      "-p",
+      "sparq-engine",
+      "--lib",
+      "--no-default-features",
+      "capped_rhs_",
+      "--",
+      "--nocapture",
+      "--test-threads=1"
+    ],
+    "exit": 0,
+    "seconds": 9.165746375,
+    "minimum_free_bytes": 12356145152,
+    "stopped": null,
+    "env": {
+      "CARGO_BUILD_JOBS": "2",
+      "CARGO_INCREMENTAL": "0",
+      "CARGO_NET_OFFLINE": "true",
+      "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+      "RAYON_NUM_THREADS": "1"
+    }
+  },
+  {
+    "file": "pinned-preflight.json",
+    "argv": [
+      "python3",
+      "scripts/preflight.py"
+    ],
+    "exit": 1,
+    "seconds": 1.0135271670000001,
+    "minimum_free_bytes": 12293619712,
+    "stopped": null,
+    "env": {
+      "CARGO_BUILD_JOBS": "2",
+      "CARGO_INCREMENTAL": "0",
+      "CARGO_NET_OFFLINE": "true",
+      "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+      "RAYON_NUM_THREADS": "1"
+    }
+  },
+  {
+    "file": "pinned-semijoin.json",
+    "argv": [
+      "cargo",
+      "test",
+      "--locked",
+      "--offline",
+      "-p",
+      "sparq-engine",
+      "--lib",
+      "--features",
+      "semijoin-bitmap",
+      "capped_rhs_",
+      "--",
+      "--nocapture",
+      "--test-threads=1"
+    ],
+    "exit": 0,
+    "seconds": 10.171957875,
+    "minimum_free_bytes": 12313653248,
+    "stopped": null,
+    "env": {
+      "CARGO_BUILD_JOBS": "2",
+      "CARGO_INCREMENTAL": "0",
+      "CARGO_NET_OFFLINE": "true",
+      "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+      "RAYON_NUM_THREADS": "1"
+    }
+  },
+  {
+    "file": "preflight.json",
+    "argv": [
+      "python3",
+      "scripts/preflight.py"
+    ],
+    "exit": 1,
+    "seconds": 1.02235475,
+    "minimum_free_bytes": 12548399104,
+    "stopped": null,
+    "env": {
+      "CARGO_BUILD_JOBS": "2",
+      "CARGO_INCREMENTAL": "0",
+      "CARGO_NET_OFFLINE": "true",
+      "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+      "RAYON_NUM_THREADS": "1"
+    }
+  },
+  {
+    "file": "restored-default.json",
+    "argv": [
+      "cargo",
+      "test",
+      "--locked",
+      "--offline",
+      "-p",
+      "sparq-engine",
+      "--lib",
+      "capped_rhs_",
+      "--",
+      "--nocapture",
+      "--test-threads=1"
+    ],
+    "exit": 0,
+    "seconds": 12.229262041,
+    "minimum_free_bytes": 12249141248,
+    "stopped": null,
+    "env": {
+      "CARGO_BUILD_JOBS": "2",
+      "CARGO_INCREMENTAL": "0",
+      "CARGO_NET_OFFLINE": "true",
+      "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+      "RAYON_NUM_THREADS": "1"
+    }
+  },
+  {
+    "file": "retain-old-through-scan.json",
+    "argv": [
+      "cargo",
+      "test",
+      "--locked",
+      "--offline",
+      "-p",
+      "sparq-engine",
+      "--lib",
+      "capped_rhs_replacement_releases_old_slot_before_scan",
+      "--",
+      "--nocapture",
+      "--test-threads=1"
+    ],
+    "exit": 101,
+    "seconds": 7.140651834,
+    "minimum_free_bytes": 12345774080,
+    "stopped": null,
+    "env": {
+      "CARGO_BUILD_JOBS": "2",
+      "CARGO_INCREMENTAL": "0",
+      "CARGO_NET_OFFLINE": "true",
+      "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+      "RAYON_NUM_THREADS": "1"
+    }
+  },
+  {
+    "file": "second-unit.json",
+    "argv": [
+      "cargo",
+      "test",
+      "--locked",
+      "--offline",
+      "-p",
+      "sparq-engine",
+      "--lib",
+      "capped_rhs_",
+      "--",
+      "--nocapture",
+      "--test-threads=1"
+    ],
+    "exit": 101,
+    "seconds": 6.085330999999999,
+    "minimum_free_bytes": 12243218432,
+    "stopped": null,
+    "env": {
+      "CARGO_BUILD_JOBS": "2",
+      "CARGO_INCREMENTAL": "0",
+      "CARGO_NET_OFFLINE": "true",
+      "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+      "RAYON_NUM_THREADS": "1"
+    }
+  },
+  {
+    "file": "semijoin-unit.json",
+    "argv": [
+      "cargo",
+      "test",
+      "--locked",
+      "--offline",
+      "-p",
+      "sparq-engine",
+      "--lib",
+      "--features",
+      "semijoin-bitmap",
+      "capped_rhs_",
+      "--",
+      "--nocapture",
+      "--test-threads=1"
+    ],
+    "exit": 0,
+    "seconds": 12.207776999999998,
+    "minimum_free_bytes": 12571582464,
+    "stopped": null,
+    "env": {
+      "CARGO_BUILD_JOBS": "2",
+      "CARGO_INCREMENTAL": "0",
+      "CARGO_NET_OFFLINE": "true",
+      "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+      "RAYON_NUM_THREADS": "1"
+    }
+  },
+  {
+    "file": "third-unit.json",
+    "argv": [
+      "cargo",
+      "test",
+      "--locked",
+      "--offline",
+      "-p",
+      "sparq-engine",
+      "--lib",
+      "capped_rhs_",
+      "--",
+      "--nocapture",
+      "--test-threads=1"
+    ],
+    "exit": 101,
+    "seconds": 14.749064334,
+    "minimum_free_bytes": 12199116800,
+    "stopped": null,
+    "env": {
+      "CARGO_BUILD_JOBS": "2",
+      "CARGO_INCREMENTAL": "0",
+      "CARGO_NET_OFFLINE": "true",
+      "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+      "RAYON_NUM_THREADS": "1"
+    }
+  }
+]
