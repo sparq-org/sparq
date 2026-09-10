@@ -1,0 +1,11 @@
+ bench/feature-off-declarations/6478.json |   5 +
+ crates/sparq-engine/README.md            |   2 +-
+ crates/sparq-engine/src/cache.rs         |  29 +-
+ crates/sparq-engine/src/construct.rs     |  37 +--
+ crates/sparq-engine/src/exec.rs          | 482 +++++++++++++++++++++++++------
+ crates/sparq-engine/src/explain.rs       |  43 +--
+ crates/sparq-engine/src/explain_json.rs  |  25 +-
+ crates/sparq-engine/src/lib.rs           | 119 ++++----
+ crates/sparq-engine/src/update.rs        |  12 +-
+ skills/sparql-query/SKILL.md             |   8 +
+ 10 files changed, 556 insertions(+), 206 deletions(-)

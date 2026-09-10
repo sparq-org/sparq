@@ -1,0 +1,15 @@
+// Cargo.toml:98-111
+98: [profile.release]
+99: opt-level = 3
+100: lto = "fat"
+101: codegen-units = 1
+102: panic = "abort"
+103: 
+104: # [SONNET-4.6] sq-6vshe.10 — optimized correctness/smoke lanes do not need the
+105: # shipping profile's serial codegen and fat-LTO link tail. This profile is never
+106: # valid for benchmarks, perf ratchets, published measurements, or shipped artifacts.
+107: [profile.release-fast]
+108: inherits = "release"
+109: lto = "thin"
+110: codegen-units = 16
+111: 

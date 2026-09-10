@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-10T10:22:18.734003+00:00",
+  "updated_at": "2026-09-10T10:27:06.151382+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -68,8 +68,8 @@
     "agent": "/root/postmerge_ci",
     "actual_model": "GPT-6 Astra",
     "effort": "xhigh",
-    "phase": "Completed follow-up in actual Opus5 xhigh independent review",
-    "state": "Published head26d unchanged. Local clean0c6a780 fixes docs/supplychain findings, adds consumer triggers, updates sharp0.35.4; root verified frozen source/evidence. Actual Opus5 review running before push and new CI.",
+    "phase": "Small native sharp installed validation supplement before publication",
+    "state": "0c6a780 actualOpus approvedforCI. Astraadding bounded optionaldependency/native-smoke guard beforeonefollowuppush; existing published26d unchanged.",
     "started_at": "2026-09-10T08:47:00Z",
     "base": "781f667c19a8ebb779cfccb24b05ea432360b025",
     "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6480",
@@ -272,14 +272,19 @@
       "root_verification": "direct-6480/admission/review-followup-root-verification.json",
       "files": 716,
       "review": {
-        "state": "running",
+        "state": "completed_collected",
         "session_id": 56259,
         "model": "claude-opus-5",
         "effort": "xhigh",
         "input": "direct-6480/admission/opus-followup-input.md",
         "output": "direct-6480/admission/opus-followup-review.json",
         "completion": "direct-6480/admission/opus-followup-completion.json",
-        "collect_policy": "Collect existing56259 before inspecting review; no duplicate review"
+        "collect_policy": "56259completedcollected; no poll/relaunch.",
+        "verdict": "approve_for_ci",
+        "blocking_findings": [],
+        "result": "direct-6480/admission/opus-followup-result.json",
+        "root_disposition": "direct-6480/admission/opus-followup-root-disposition.json",
+        "output_sha256": "a19cb03ec16c95f40892c19f3a6dffe044d069c4e67307e483e4b10e98f67145"
       }
     },
     "ci_first_failures": {
@@ -304,6 +309,14 @@
       "title": "correctedto chore(deps); normaledited-event run34461973903success",
       "qualification": "This proves current26d only; planned followupdependency/securityrecord/test/trigger changes must get fresh review+CI.",
       "log_sha256": "2d04c5bc42095d8a7dc9eb2bb8d421db1f67d9238c3bac7d62c4ebd24a59b76b"
+    },
+    "native_smoke_followup": {
+      "agent": "/root/postmerge_ci",
+      "state": "implementation_running",
+      "parent": "0c6a780593a9b3381fb158e426519a2a6d8d17f9",
+      "directory": "direct-6480/native-smoke-followup",
+      "scope": "Only installed sharp/versions/nonemptygeneratedPNG checks inexistingrootnpmci step; no other CIpolicychanges",
+      "review_required": "ActualOpus5 compact delta review after frozenrootverification"
     }
   },
   "prs": {
@@ -788,10 +801,13 @@
   "followup_lane": {
     "issue": 5183,
     "agent": "/root/postmerge_ci",
-    "state": "source_replay_readiness_running",
+    "state": "readiness_completed_runtime_not_started",
     "base": "781f667c19a8ebb779cfccb24b05ea432360b025",
     "scope": "firstseed4141222487 deterministic localization readiness; no runtime/build yet; no attribution to6478",
-    "limits": "new output<=64MiB, inspect warm cache only; preserve canonNO_GO holds and strict comparator"
+    "limits": "new output<=64MiB, inspect warm cache only; preserve canonNO_GO holds and strict comparator",
+    "report": "direct-5183/readiness/report.json",
+    "manifest_sha256": "aed6368c35484f51ec6ea1fa4fcdeb208aaa6e8b8eed19518d0db5470269dd01",
+    "proposed_next": "Defaultfeature publicAPI2operationenginewitness main/parent withwarmrlibs,\u22642min/64MiB, no dependencycompile. Root mustread/verifyreadiness thenauthorize; no exactCIfeatureclaim."
   },
   "budget": {
     "remaining": 4994,

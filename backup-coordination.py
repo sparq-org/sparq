@@ -546,6 +546,16 @@ for evidence_name in ['accept-npm-install.log', 'accept-npm-install.py', 'adviso
 for evidence_name in ['review-followup-root-verification.json', 'opus-followup-input.md', 'opus-followup-input-receipt.json', 'run-opus-followup.py', 'pre-followup-pr.json', 'pre-followup-runs.json', 'pre-followup-registry.json', 'main-fuzz-latest.json', 'monitor-followup-query.json', 'monitor-followup-response.json', 'main-fuzz-replacements.json', 'monitor-queued.json', 'monitor-active.json', 'pr-body-sharp-followup.md', 'pr-followup-metadata-input.json', 'issue6480-followup-comment-input.json', 'publish-followup.py']:
     FILES["6480-admission-" + evidence_name] = ROOT / "direct-6480/admission" / evidence_name
 
+# Actual Opus completed sharp follow-up review.
+for evidence_name in ['opus-followup-review.json', 'opus-followup-stderr.log', 'opus-followup-completion.json', 'opus-followup-result.json', 'opus-followup-root-disposition.json']:
+    FILES["6480-admission-" + evidence_name] = ROOT / "direct-6480/admission" / evidence_name
+
+# UPDATE5183 frozen deterministic replay readiness.
+for evidence_name in ['captured-sequence.txt', 'existing-issue5183.json', 'first-case.txt', 'job-102811674711.log', 'main-parent-stat.txt', 'main-parent-update.diff', 'oxigraph-0.5.9-encoding.txt', 'prior-provenance/operator-corpus-binary-provenance.json', 'prior-provenance/reproduction-cached-provenance.json', 'proposed-reduced-input.json', 'readiness-packet.md', 'report.json', 'resource-inventory.json', 'source/.github/workflows/differential-update.yml', 'source/Cargo.lock', 'source/Cargo.toml.txt', 'source/crates/sparq-bench/Cargo.toml', 'source/crates/sparq-bench/src/update_fuzz.rs', 'source/crates__sparq-bench__src__main.rs.txt', 'source/crates__sparq-engine__src__update.rs.txt', 'source-proof.json', 'manifest.json']:
+    FILES["5183-readiness-" + evidence_name.replace("/", "--")] = ROOT / "direct-5183/readiness" / evidence_name
+for evidence_name in ["readiness-root-verification.json", "normative-semantics.json"]:
+    FILES["5183-admission-" + evidence_name] = ROOT / "direct-5183/admission" / evidence_name
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout

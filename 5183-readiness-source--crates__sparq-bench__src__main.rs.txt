@@ -1,0 +1,15 @@
+// crates/sparq-bench/src/main.rs:73-86
+73:     // `sparq-bench update-fuzz --seed-start N --seed-count M` — SPARQL UPDATE
+74:     // differential vs Oxigraph (sq-3dyje.4): random ground-term update sequences
+75:     // through both sparq update paths + Oxigraph, canonical per-step compare.
+76:     if args.get(1).map(String::as_str) == Some("update-fuzz") {
+77:         let seed_start: u64 =
+78:             arg_val(&args, "--seed-start").and_then(|s| s.parse().ok()).unwrap_or(0);
+79:         let count: u64 =
+80:             arg_val(&args, "--seed-count").and_then(|s| s.parse().ok()).unwrap_or(1000);
+81:         update_fuzz::run(seed_start, count);
+82:         return;
+83:     }
+84: 
+85:     // `sparq-bench diff <data.ttl> <query.rq|inline-sparql>` — run ONE hand-crafted
+86:     // (graph, query) through sparq and Oxigraph and print both solution counts.

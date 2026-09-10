@@ -1,0 +1,111 @@
+{
+  "files": [
+    {
+      "path": "captured-sequence.txt",
+      "bytes": 1687,
+      "sha256": "6f9c195e645d87b5850911eace9ef7a4c147a6a47180f3130f2bcb2033ab0dc2"
+    },
+    {
+      "path": "existing-issue5183.json",
+      "bytes": 14662,
+      "sha256": "68eb4de5210d87b2bc387980239c8db3ae45d3b85c21f32d5d9639a0668cbfa9"
+    },
+    {
+      "path": "first-case.txt",
+      "bytes": 3192,
+      "sha256": "b686238bbb40ec723f82aa1ae4f47c6343a56e3f5e777462212aad3fb57b7fac"
+    },
+    {
+      "path": "job-102811674711.log",
+      "bytes": 59905,
+      "sha256": "648510046732f8c41893f56fefe4e776f39a0632181fa25349243b91aad29392"
+    },
+    {
+      "path": "main-parent-stat.txt",
+      "bytes": 600,
+      "sha256": "239970dd667077d267c4d3cb77c4ed2b29294365966065406c53b8dbe0ede522"
+    },
+    {
+      "path": "main-parent-update.diff",
+      "bytes": 1266,
+      "sha256": "e6fba53c122d26366d2b37a8c969722ae29108ca0d504e75e2b81a62086785cc"
+    },
+    {
+      "path": "oxigraph-0.5.9-encoding.txt",
+      "bytes": 2187,
+      "sha256": "a59db0002297b40346d56cebe4d5da945bb725c59e9ea4d4e28662e8ee959c22"
+    },
+    {
+      "path": "prior-provenance/operator-corpus-binary-provenance.json",
+      "bytes": 1200,
+      "sha256": "aae4ab69c9044bb4332b1930f42b92c2e85a10d3f4870dac610eae88c71f2007"
+    },
+    {
+      "path": "prior-provenance/reproduction-cached-provenance.json",
+      "bytes": 9797,
+      "sha256": "3e133b99de23d1b608b9b1e44eb33ed7b36da3bb3fd76a2341d3a60a2d5be4f5"
+    },
+    {
+      "path": "proposed-reduced-input.json",
+      "bytes": 1165,
+      "sha256": "3b76e3243d4b5bfab110ea5db0dc0b187cc0ab97a0a74e2845b96d4370a0e9bf"
+    },
+    {
+      "path": "readiness-packet.md",
+      "bytes": 5478,
+      "sha256": "54ed0fa05a2a9231dc78ce2a199997214f7691336f94179408b16f6de342fda5"
+    },
+    {
+      "path": "report.json",
+      "bytes": 4902,
+      "sha256": "a4caa2d4680d76c3be701011aeafe48c4ec96e852c42fbf61bb7529189a0f242"
+    },
+    {
+      "path": "resource-inventory.json",
+      "bytes": 4630,
+      "sha256": "78e50f5ee9bbd2e4f490d0165d208dacdf02aefbdcd9a41a1ec4511a982a5148"
+    },
+    {
+      "path": "source/.github/workflows/differential-update.yml",
+      "bytes": 12550,
+      "sha256": "6e3e49ecbd494b77f9d8585faf3f39b1f2ab166ac8df0b598ed5f32a01dccbeb"
+    },
+    {
+      "path": "source/Cargo.lock",
+      "bytes": 176396,
+      "sha256": "6d7b6095f5fec01e4ace906d6001687c67d83fedc1e50180891a419c22026152"
+    },
+    {
+      "path": "source/Cargo.toml.txt",
+      "bytes": 492,
+      "sha256": "e80c6dfed40f2f43c3e4a85808e1af1f45edd749d484d64da9f3bc7652465065"
+    },
+    {
+      "path": "source/crates/sparq-bench/Cargo.toml",
+      "bytes": 3636,
+      "sha256": "3d96dbb5d237511d78906f521a6dc859e3dafe2b4c067d17842da525eab0c42a"
+    },
+    {
+      "path": "source/crates/sparq-bench/src/update_fuzz.rs",
+      "bytes": 78994,
+      "sha256": "0807388f84792f011b868456269a36bf74e5e463c67dfb71d1be3ad9d35aecf7"
+    },
+    {
+      "path": "source/crates__sparq-bench__src__main.rs.txt",
+      "bytes": 868,
+      "sha256": "49cf84fd4ba057ec43c70e98f865204c1734c5f1ecf0966789a7d86e3d14b2bd"
+    },
+    {
+      "path": "source/crates__sparq-engine__src__update.rs.txt",
+      "bytes": 8744,
+      "sha256": "1023ba0a1d87c708147877e8baa174a6ef1aadb43e3946e1fe8f1d2fa5e24739"
+    },
+    {
+      "path": "source-proof.json",
+      "bytes": 6271,
+      "sha256": "2bdd2cba1fdafea874487394766d0ae4415a2fcdd265ebfb47a12c9337795248"
+    }
+  ],
+  "source_head": "781f667c19a8ebb779cfccb24b05ea432360b025",
+  "status": ""
+}

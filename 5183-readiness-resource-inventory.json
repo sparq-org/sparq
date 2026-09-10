@@ -1,0 +1,127 @@
+{
+  "free_bytes": 8559353856,
+  "target": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+  "files": [
+    {
+      "path": "release/deps/libsparq_engine-d082493c198a3f5b.rlib",
+      "size_bytes": 5285512,
+      "allocated_bytes": 5287936,
+      "sha256": "2f17e066de1c77dd975ec2367c6e140175a31710685b05d8aadccd04f3b7b395"
+    },
+    {
+      "path": "release/deps/libsparq_engine-bafeb69d8fbb93da.rlib",
+      "size_bytes": 6054696,
+      "allocated_bytes": 6057984,
+      "sha256": "4ec0cb85422071f0bf7d437ffa539dbbf76f4b5301601fa073f2cdf745cfa849"
+    },
+    {
+      "path": "release/deps/libsparq_engine-9e1f57eeb14441e5.rlib",
+      "size_bytes": 5517728,
+      "allocated_bytes": 5521408,
+      "sha256": "15be5b91b66bcd35ab381bf7100a5d3b6a2b3d87e3f57192091ef6205805b6bb"
+    },
+    {
+      "path": "release/deps/libsparq_engine-17d69fdf30aada97.rlib",
+      "size_bytes": 5276032,
+      "allocated_bytes": 5279744,
+      "sha256": "2135748c75d5afd1ca3731e6d350c5a06b99caf9376b1388fbd472b08febed9d"
+    },
+    {
+      "path": "release/deps/libsparq_engine-df68943e9feef6e1.rlib",
+      "size_bytes": 5254472,
+      "allocated_bytes": 5255168,
+      "sha256": "14646062fcc30dea9aa7d2f69e67ae1c2eea9a19cafd686c9d044d5b8f824c03"
+    },
+    {
+      "path": "release/deps/libsparq_engine-58f06b544fabdd91.rlib",
+      "size_bytes": 5523608,
+      "allocated_bytes": 5525504,
+      "sha256": "572dc7eab05864fc4f00e6a870f780ea0b52ce992b2e9b0241bb06ca5cd10b4e"
+    },
+    {
+      "path": "release/deps/libsparq_core-d7334b5f41a84d59.rlib",
+      "size_bytes": 2820424,
+      "allocated_bytes": 2822144,
+      "sha256": "98564604907d907a72fa2a50a91d294f26cfeb78982f4f87eb382f3f3d00e3df"
+    },
+    {
+      "path": "release/deps/libsparq_core-e0ac301aa343ee6c.rlib",
+      "size_bytes": 4395240,
+      "allocated_bytes": 4399104,
+      "sha256": "b2af007d7241a23c9a06476631c48b5c3f459d28ed3fc6114af5c14d1162874d"
+    },
+    {
+      "path": "release/deps/libsparq_core-e9ed6f0c10ca33fd.rlib",
+      "size_bytes": 2820984,
+      "allocated_bytes": 2822144,
+      "sha256": "9c6042a15b38ebfddaaef9b24e53df598201b72ec631310f201378c0b06ff7c2"
+    },
+    {
+      "path": "release/deps/libsparq_core-127354fe878a2f23.rlib",
+      "size_bytes": 2820408,
+      "allocated_bytes": 2822144,
+      "sha256": "37e9d27afb0f2c35c565ce403d6f7c238e5ac40595b49cc2949fa50dc27e98be"
+    }
+  ],
+  "absent": [
+    "release/sparq-bench",
+    "release-fast/sparq-bench",
+    "release/deps/liboxigraph*.rlib",
+    "release/deps/libsparq_canon*.rlib",
+    "release/deps/librdf_canon*.rlib",
+    "release/deps/sparq_bench*.d"
+  ],
+  "engine_fingerprints": [
+    {
+      "path": "release/.fingerprint/sparq-engine-17d69fdf30aada97/lib-sparq_engine.json",
+      "features": "[\"default\", \"digest\", \"parallel\", \"regex\"]",
+      "profile": 18412561994239103911,
+      "rustflags": []
+    },
+    {
+      "path": "release/.fingerprint/sparq-engine-df68943e9feef6e1/lib-sparq_engine.json",
+      "features": "[\"default\", \"digest\", \"parallel\", \"regex\"]",
+      "profile": 18412561994239103911,
+      "rustflags": []
+    },
+    {
+      "path": "release/.fingerprint/sparq-engine-58f06b544fabdd91/lib-sparq_engine.json",
+      "features": "[\"default\", \"digest\", \"parallel\", \"regex\", \"zk\"]",
+      "profile": 18412561994239103911,
+      "rustflags": []
+    },
+    {
+      "path": "release/.fingerprint/sparq-engine-9e1f57eeb14441e5/lib-sparq_engine.json",
+      "features": "[\"default\", \"digest\", \"parallel\", \"regex\", \"zk\"]",
+      "profile": 18412561994239103911,
+      "rustflags": []
+    },
+    {
+      "path": "release/.fingerprint/sparq-engine-bafeb69d8fbb93da/lib-sparq_engine.json",
+      "features": "[\"cs-planner\", \"default\", \"digest\", \"explain-json\", \"parallel\", \"params\", \"regex\", \"result-cache\", \"service-local\", \"vectorized\"]",
+      "profile": 18412561994239103911,
+      "rustflags": []
+    },
+    {
+      "path": "release/.fingerprint/sparq-engine-d082493c198a3f5b/lib-sparq_engine.json",
+      "features": "[\"default\", \"digest\", \"parallel\", \"regex\"]",
+      "profile": 18412561994239103911,
+      "rustflags": []
+    }
+  ],
+  "target_allocated_bytes": 532570112,
+  "toolchain_executable_exists": true,
+  "profile_source": "direct-6476/operator-corpus/report.json",
+  "warm_profile": {
+    "opt_level": 3,
+    "lto": false,
+    "codegen_units": 16,
+    "panic": "unwind",
+    "note": "Exact report fields retained in prior frozen bundle."
+  },
+  "local_source_exists": {
+    "oxigraph-0.5.9": true,
+    "rdf-canon-0.15.3": true,
+    "oxrdf-0.3.3": true
+  }
+}

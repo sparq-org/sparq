@@ -1,0 +1,46 @@
+{
+  "head": "0c6a780593a9b3381fb158e426519a2a6d8d17f9",
+  "approved_for_publication": true,
+  "publication_sequence": "Do not publish0c directly: complete small installed-sharp native validation supplement and review its exact delta first.",
+  "actual_model": "claude-opus-5",
+  "effort": "xhigh",
+  "session_id": 56259,
+  "state": "completed_collected",
+  "review_output_sha256": "a19cb03ec16c95f40892c19f3a6dffe044d069c4e67307e483e4b10e98f67145",
+  "root_dispositions": [
+    {
+      "finding": "Optional sharp/native installed-tree gap",
+      "disposition": "Address now through delegated small root install/native PNG smoke before publication; no lifecycle skip or extra local install."
+    },
+    {
+      "finding": "Strict root cwd/literal YAML and future additional npmci steps",
+      "disposition": "Nonblocking deliberate fail-closed inspection of actual workflow; no current misclassification. Do not broaden parser spec without actual need."
+    },
+    {
+      "finding": "Reuse existing checker run parser",
+      "disposition": "Existing supplied helper has no problematic import-time effect; shared reuse avoids duplicate parser. No speculative helper extraction in dependency fix."
+    },
+    {
+      "finding": "Possible formatter gate",
+      "disposition": "Reviewer conditional, not observed failure. Supported docs CI must pass; no unrequested formatting churn."
+    },
+    {
+      "finding": "Persistent manifest trigger assertion",
+      "disposition": "Exact parsed workflow comparison and executed removal controls verified current coverage; future path changes remain reviewable. No current coverage gap requiring another code change."
+    },
+    {
+      "finding": "Advisory affected-range and wrapper-version precision",
+      "disposition": "Current prose explicitly names dated alert32 then separately links advisory description. npm wrapper version is not represented as runtime libvips verification. Preserve honest candidate/default/deployment boundaries and observe actual runtime vips in new smoke."
+    },
+    {
+      "finding": "win32-ia32 Node^20.9.0 anomaly",
+      "disposition": "Delegate spot-recheck against frozen exact registry metadata; metadata match is not Windows runtime proof."
+    },
+    {
+      "finding": "Install-script removal",
+      "disposition": "Positive metadata observation, no broader security or nonexposure claim."
+    }
+  ],
+  "validation_required": "Fresh exact-head js root npmci, installed version/native PNG smoke, actual Node/npm/vips observations, no lock/minima drift; docs13/record25+checker/supported preflight; hard site/GUI and requiredaggregate. No merge until these are green.",
+  "accounting_note": "Primary substantive review is actualOpus5; CLI also reports18 ancillaryHaiku output tokens. Do not describe whole process accounting as Opus-only."
+}

@@ -1,0 +1,175 @@
+// crates/sparq-engine/src/update.rs:203-222
+203: /// Fresh-blank-node state for ONE solution row: per SPARQL, every blank node in an INSERT
+204: /// template is instantiated FRESH per solution (same label, same row → same fresh node;
+205: /// different rows — and different operations in one request — get DIFFERENT nodes, hence
+206: /// the process-wide counter).
+207: struct FreshBnodes {
+208:     map: FxHashMap<String, Term>,
+209: }
+210: 
+211: static FRESH_BNODE_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+212: 
+213: impl FreshBnodes {
+214:     fn get(&mut self, label: &str) -> Term {
+215:         if let Some(t) = self.map.get(label) {
+216:             return t.clone();
+217:         }
+218:         let n = FRESH_BNODE_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+219:         let t = Term::BlankNode(BlankNode::new_unchecked(format!("fb{n}")));
+220:         self.map.insert(label.to_string(), t.clone());
+221:         t
+222:     }
+// crates/sparq-engine/src/update.rs:288-333
+288: 
+289: /// Evaluates a DELETE/INSERT … WHERE pattern against `active` and instantiates the delete /
+290: /// insert templates per solution as (graph-slot, triple) pairs. Shared by the rebuild
+291: /// (`update`) and delta-overlay (`update_in_place`) paths.
+292: fn instantiate_templates(
+293:     active: &Graph,
+294:     delete: &[GroundQuadPattern],
+295:     insert: &[QuadPattern],
+296:     pattern: &spargebra::algebra::GraphPattern,
+297: ) -> Result<(Vec<SlotTriple>, Vec<SlotTriple>), String> {
+298:     let result = crate::exec::eval_select(active, pattern)?;
+299:     let cols: FxHashMap<Variable, usize> =
+300:         result.vars.iter().enumerate().map(|(i, v)| (v.clone(), i)).collect();
+301:     let mut dels: Vec<SlotTriple> = Vec::new();
+302:     let mut inss: Vec<SlotTriple> = Vec::new();
+303:     for row in &result.rows {
+304:         let get = |v: &Variable| -> Option<Term> { cols.get(v).and_then(|&i| row[i].clone()) };
+305:         for dp in delete {
+306:             let (Some(slot), Some(s), Some(p), Some(o)) = (
+307:                 gnp_subst(&dp.graph_name, &get),
+308:                 gtp_subst(&dp.subject, &get),
+309:                 nnp_subst(&dp.predicate, &get),
+310:                 gtp_subst(&dp.object, &get),
+311:             ) else {
+312:                 continue;
+313:             };
+314:             dels.push((slot, [s, p, o]));
+315:         }
+316:         let mut fresh = FreshBnodes { map: FxHashMap::default() };
+317:         for ip in insert {
+318:             let (Some(slot), Some(s), Some(p), Some(o)) = (
+319:                 gnp_subst(&ip.graph_name, &get),
+320:                 tp_subst(&ip.subject, &get, &mut fresh),
+321:                 nnp_subst(&ip.predicate, &get),
+322:                 tp_subst(&ip.object, &get, &mut fresh),
+323:             ) else {
+324:                 continue;
+325:             };
+326:             inss.push((slot, [s, p, o]));
+327:         }
+328:     }
+329:     Ok((dels, inss))
+330: }
+331: 
+332: // --- LOAD ----------------------------------------------------------------------------------------
+333: 
+// crates/sparq-engine/src/update.rs:488-510
+488:             for (slot, t) in &dels {
+489:                 ds.remove(slot, t);
+490:             }
+491:             for (slot, t) in inss {
+492:                 ds.insert(&slot, t);
+493:             }
+494:         }
+495:     }
+496:     Ok(())
+497: }
+498: 
+499: /// Apply a SPARQL Update string to `graph`, returning the updated graph (named graphs
+500: /// preserved). Errors (leaving the input untouched — it is borrowed) on a parse error or a
+501: /// non-SILENT failing LOAD.
+502: pub fn update(graph: &Graph, sparql: &str) -> Result<Graph, String> {
+503:     let upd = SparqlParser::new().parse_update(sparql).map_err(|e| e.to_string())?;
+504:     apply_update_rebuild(graph, &upd)
+505: }
+506: 
+507: /// The shared rebuild loop over an ALREADY-PARSED `Update` (decode → apply ops →
+508: /// rebuild). Shared by [`update`] and, under the `params` feature, the parameterized
+509: /// prepared-update path so the bound algebra is applied DIRECTLY (no re-serialise /
+510: /// re-parse — a hostile bound value can never re-enter the parser). [OPUS-4.8] (sq-rp3um)
+// crates/sparq-engine/src/update.rs:529-546
+529: #[cfg(feature = "params")]
+530: pub(crate) fn update_in_place_prepared_with_budget(
+531:     graph: &mut Graph,
+532:     upd: &Update,
+533:     budget: &crate::QueryBudget,
+534: ) -> Result<(), String> {
+535:     crate::exec::budget::with_budget(budget, || {
+536:         apply_update_in_place(graph, upd, None)
+537:     })
+538: }
+539: 
+540: // --- the delta-overlay path ------------------------------------------------------------------
+541: 
+542: /// Groups (graph-slot, triple) pairs per graph slot, preserving first-seen slot order.
+543: fn group_by_slot(items: Vec<SlotTriple>) -> Vec<(GraphSlot, Vec<TripleTerms>)> {
+544:     let mut out: Vec<(GraphSlot, Vec<TripleTerms>)> = Vec::new();
+545:     for (slot, t) in items {
+546:         match out.iter_mut().find(|(s, _)| *s == slot) {
+// crates/sparq-engine/src/update.rs:637-663
+637: /// named-graph CLEAR empties the slot via [`Graph::clear_named_durable`] (WAL-logged retraction,
+638: /// slot preserved) and named-graph DROP removes the sub-dir + manifest entry via
+639: /// [`Graph::drop_named_durable`]. Fold the accumulated overlay back into the base periodically
+640: /// with [`Graph::compact`].
+641: pub fn update_in_place(graph: &mut Graph, sparql: &str) -> Result<(), String> {
+642:     update_in_place_with_budget(graph, sparql, &crate::QueryBudget::unlimited())
+643: }
+644: 
+645: /// [OPUS-4.8] (sq-ebii) [`update_in_place`] under a cooperative [`crate::QueryBudget`].
+646: ///
+647: /// The budget is installed thread-locally for the whole update, so a `DELETE/INSERT … WHERE`
+648: /// whose WHERE pattern blows up is bounded EXACTLY as a budgeted query's `SELECT` is: the
+649: /// cross-product allocation is capped up-front (`budget::cap_alloc`) and the evaluation
+650: /// aborts at the deadline / row cap (`"query budget exceeded (timeout|max-rows)"`), instead
+651: /// of running the writer thread to an OOM. The non-WHERE operations (INSERT/DELETE DATA,
+652: /// CLEAR/DROP/CREATE/LOAD) do not consult the budget — they are bounded by their operand
+653: /// size, which the request body-size limit already caps — so an unlimited budget (the
+654: /// default, via [`update_in_place`]) is byte-for-byte the previous behaviour.
+655: pub fn update_in_place_with_budget(
+656:     graph: &mut Graph,
+657:     sparql: &str,
+658:     budget: &crate::QueryBudget,
+659: ) -> Result<(), String> {
+660:     // No effect sink: capture is fully elided, so this is byte-for-byte the previous behaviour.
+661:     update_in_place_core(graph, sparql, budget, None)
+662: }
+663: 
+// crates/sparq-engine/src/update.rs:720-733
+720: /// The shared in-place apply core. When `sink` is `Some`, every operation's RESOLVED effect is
+721: /// recorded into it so a durable mirror can replay the exact committed delta (see
+722: /// [`update_in_place_capturing`]); when `None`, capture is fully elided.
+723: fn update_in_place_core(
+724:     graph: &mut Graph,
+725:     sparql: &str,
+726:     budget: &crate::QueryBudget,
+727:     sink: EffectSink,
+728: ) -> Result<(), String> {
+729:     crate::exec::budget::with_budget(budget, || {
+730:         let upd = SparqlParser::new().parse_update(sparql).map_err(|e| e.to_string())?;
+731:         apply_update_in_place(graph, &upd, sink)
+732:     })
+733: }
+// crates/sparq-engine/src/update.rs:1439-1458
+1439:     /// Blank nodes in an INSERT template are FRESH per solution.
+1440:     #[test]
+1441:     fn insert_template_bnodes_fresh_per_solution() {
+1442:         let g = Graph::load_str("@prefix : <http://ex/> . :a :age 30 . :b :age 25 .", "turtle").unwrap();
+1443:         let g = update(
+1444:             &g,
+1445:             "PREFIX : <http://ex/> INSERT { ?s :note _:n . _:n :label \"x\" } WHERE { ?s :age ?a }",
+1446:         )
+1447:         .unwrap();
+1448:         // 2 solutions × 2 template triples = 4 inserted (distinct bnodes per solution).
+1449:         assert_eq!(count(&g), 2 + 4);
+1450:         // Two DISTINCT bnodes -> two :label triples.
+1451:         assert_eq!(crate::count(&g, "PREFIX : <http://ex/> SELECT * WHERE { ?n :label ?l }").unwrap(), 2);
+1452:     }
+1453: 
+1454:     /// The delta-overlay path (`update_in_place`) must be observationally identical to the
+1455:     /// rebuild path (`update`) across a sequence of every supported operation — and the
+1456:     /// overlay-carrying graph must answer queries identically without compaction.
+1457:     #[test]
+1458:     fn update_in_place_matches_rebuild() {

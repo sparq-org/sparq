@@ -1,0 +1,35 @@
+580:             }
+581:             "http://www.w3.org/2001/XMLSchema#float" => parse_float_str(value),
+582:             "http://www.w3.org/2001/XMLSchema#double" => parse_double_str(value),
+583:             "http://www.w3.org/2001/XMLSchema#integer"
+584:             | "http://www.w3.org/2001/XMLSchema#byte"
+585:             | "http://www.w3.org/2001/XMLSchema#short"
+586:             | "http://www.w3.org/2001/XMLSchema#int"
+587:             | "http://www.w3.org/2001/XMLSchema#long"
+588:             | "http://www.w3.org/2001/XMLSchema#unsignedByte"
+589:             | "http://www.w3.org/2001/XMLSchema#unsignedShort"
+590:             | "http://www.w3.org/2001/XMLSchema#unsignedInt"
+591:             | "http://www.w3.org/2001/XMLSchema#unsignedLong"
+592:             | "http://www.w3.org/2001/XMLSchema#positiveInteger"
+593:             | "http://www.w3.org/2001/XMLSchema#negativeInteger"
+594:             | "http://www.w3.org/2001/XMLSchema#nonPositiveInteger"
+595:             | "http://www.w3.org/2001/XMLSchema#nonNegativeInteger" => parse_integer_str(value),
+596:             "http://www.w3.org/2001/XMLSchema#decimal" => parse_decimal_str(value),
+597:             "http://www.w3.org/2001/XMLSchema#dateTime"
+598:             | "http://www.w3.org/2001/XMLSchema#dateTimeStamp" => parse_date_time_str(value),
+866: pub fn parse_double_str(value: &str) -> Option<EncodedTerm> {
+867:     value.parse().map(EncodedTerm::DoubleLiteral).ok()
+868: }
+869: 
+870: pub fn parse_integer_str(value: &str) -> Option<EncodedTerm> {
+871:     value.parse().map(EncodedTerm::IntegerLiteral).ok()
+872: }
+873: 
+1135:             )
+1136:             .into()),
+1137:             EncodedTerm::BooleanLiteral(value) => Ok(Literal::from(*value).into()),
+1138:             EncodedTerm::FloatLiteral(value) => Ok(Literal::from(*value).into()),
+1139:             EncodedTerm::DoubleLiteral(value) => Ok(Literal::from(*value).into()),
+1140:             EncodedTerm::IntegerLiteral(value) => Ok(Literal::from(*value).into()),
+1141:             EncodedTerm::DecimalLiteral(value) => Ok(Literal::from(*value).into()),
+1142:             EncodedTerm::DateTimeLiteral(value) => Ok(Literal::from(*value).into()),
