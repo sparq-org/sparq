@@ -47,9 +47,10 @@ THE THREE CHECKS
    silently breaking the locked single-version model the group exists to preserve — and
    are published anyway. A mismatch is exactly the "I do not know what would be published"
    condition, so it REFUSES.
-2. **Registry dependency closure.** Every path dependency shipped by a publishable crate
-   must itself be publishable and must carry a registry version requirement. Cargo cannot
-   publish a package that points only at a private workspace member.
+2. **Registry dependency closure.** Every normal/build path dependency, plus every
+   versioned dev-dependency shipped by a publishable crate, must itself be publishable and
+   must carry a registry version requirement. Cargo omits path-only dev-dependencies from
+   the published manifest; those intentionally do not constrain bootstrap order.
 3. **Cadence.** ``now - last_release >= MIN_RELEASE_INTERVAL``, where ``last_release`` is
    the MAXIMUM of two authoritative sources — the newest ``v*`` git tag's creation date
    and the newest crates.io publication timestamp across the publishable crates. Taking
@@ -75,7 +76,7 @@ Every one of these REFUSES (exit 1) rather than publishing:
   release it is being asked to permit);
 * the last release timestamp is in the FUTURE (clock skew / a bad tag date);
 * the workspace manifest cannot be read, or the publishable-crate set cannot be derived;
-* a publishable crate has an unpublished or unversioned workspace dependency;
+* a publishable crate has an unpublished or unversioned shipped workspace dependency;
 * a publishable crate is missing from the version_group.
 
 An unknown NEVER means "go ahead". There is deliberately **no override flag** — a
@@ -165,7 +166,8 @@ class Crate:
     name: str
     version: str
     path: Path
-    # Intra-workspace dependencies on OTHER publishable crates (publish order).
+    # Intra-workspace dependencies shipped to the registry (publish order). This includes
+    # versioned dev-dependencies; Cargo omits path-only dev-dependencies when publishing.
     deps: frozenset[str] = frozenset()
 
 
@@ -196,19 +198,19 @@ def _load_toml(path: Path) -> dict:
 
 
 def _dep_tables(manifest: dict):
-    """Yield every dependency table in a member manifest, including target-specific ones."""
-    for key in ("dependencies", "build-dependencies"):
+    """Yield ``(is_dev, table)`` for all dependency tables, including target-specific."""
+    for key in ("dependencies", "build-dependencies", "dev-dependencies"):
         table = manifest.get(key)
         if isinstance(table, dict):
-            yield table
+            yield key == "dev-dependencies", table
     targets = manifest.get("target")
     if isinstance(targets, dict):
         for cfg in targets.values():
             if isinstance(cfg, dict):
-                for key in ("dependencies", "build-dependencies"):
+                for key in ("dependencies", "build-dependencies", "dev-dependencies"):
                     table = cfg.get(key)
                     if isinstance(table, dict):
-                        yield table
+                        yield key == "dev-dependencies", table
 
 
 def publishable_crates(repo_root: Path) -> list[Crate]:
@@ -275,7 +277,7 @@ def publishable_crates(repo_root: Path) -> list[Crate]:
     crates: list[Crate] = []
     for name, (version, member_dir, manifest) in raw.items():
         deps: set[str] = set()
-        for table in _dep_tables(manifest):
+        for is_dev, table in _dep_tables(manifest):
             for dep_name, spec in table.items():
                 # `package = "x"` renames; the real crate is the `package` value.
                 real = dep_name
@@ -285,13 +287,20 @@ def publishable_crates(repo_root: Path) -> list[Crate]:
                     continue
                 if real not in all_members or real == name:
                     continue
+                requirement = spec.get("version")
+                # Cargo explicitly omits path-only dev-dependencies from a published
+                # package. They remain available to workspace tests but require neither
+                # registry closure nor a position in the first-publish order.
+                if is_dev and (
+                    not isinstance(requirement, str) or not requirement.strip()
+                ):
+                    continue
                 if not all_members[real][3]:
                     raise GuardRefusal(
                         f"{name}: publishable crate depends on unpublished workspace "
                         f"crate {real!r}; publish the dependency or remove the registry "
                         "package from the release set"
                     )
-                requirement = spec.get("version")
                 if not isinstance(requirement, str) or not requirement.strip():
                     raise GuardRefusal(
                         f"{name}: workspace dependency {real!r} has a path but no "

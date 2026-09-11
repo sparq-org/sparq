@@ -22,8 +22,9 @@
 #     the repo-wide SHA-pin convention is deliberately NOT applied here;
 #   * the ONLY thing crossing the boundary is `base64-subjects`, THREADED from a digest-collecting
 #     job's output — never recomputed inside the trusted builder from build artifacts;
-#   * the trusted-builder job holds `id-token: write` (its own signing identity) but NOT
-#     `contents: write` (it is not the uploader — the `release` job is);
+#   * the trusted-builder job holds `id-token: write` (its own signing identity) and the
+#     `contents: write` permission ceiling required by the upstream reusable workflow. Its nested
+#     uploader is still skipped by `upload-assets: false`; the `release` job remains the uploader;
 #   * the digest-collecting job neither builds nor signs;
 #   * and the whole thing is FAIL-CLOSED: `release` `needs:` both provenance jobs, and attaches
 #     both signed bundles to the Release before SHA256SUMS is computed over them.
@@ -271,10 +272,10 @@ def check_trusted_builder(
         bad.append(f"{where} needs `id-token: write` to mint its own signing identity")
     if "read" not in scalar_all(body, "actions"):
         bad.append(f"{where} needs `actions: read` to record the workflow entry point")
-    if "write" in scalar_all(body, "contents"):
+    if "write" not in scalar_all(body, "contents"):
         bad.append(
-            f"{where} must NOT hold `contents: write` — it is not the uploader "
-            "(`upload-assets: false`)"
+            f"{where} needs the upstream reusable workflow's `contents: write` permission "
+            "ceiling even though its uploader is skipped (`upload-assets: false`)"
         )
     if scalar(body, "upload-assets") != "false":
         bad.append(
@@ -782,11 +783,12 @@ MUTATIONS = {
         "base64-subjects: ${{ needs.package.outputs.hashes }}",
         "base64-subjects: ${{ steps.hash.outputs.hashes }}",
     ),
-    # M5 — privilege creep: the trusted builder gains repo write.
-    "trusted builder granted contents: write": _sub(
+    # M5 — removing the upstream reusable workflow's declared permission ceiling makes GitHub
+    # reject the caller at startup, even though upload-assets=false skips the uploader job.
+    "trusted builder permission ceiling reduced below upstream requirement": _sub(
         "release",
-        "contents: read # `upload-assets: false`",
-        "contents: write # `upload-assets: false`",
+        "      contents: write\n    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0",
+        "      contents: read\n    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0",
     ),
     # M6 — the digest hand-off is severed; the builder would attest nothing.
     "build-matrix drops the hashes output": _sub(
