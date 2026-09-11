@@ -1450,6 +1450,22 @@ class TestPublishableDependencyClosure(unittest.TestCase):
                 [crate.name for crate in interval_guard.publish_order(crates)], ["a"]
             )
 
+    def test_empty_dev_dependency_version_refuses(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="sparq-publish-empty-dev-version-") as tmp:
+            root = Path(tmp)
+            self._fixture(root, dependency_publishable=True, dependency_version="")
+            manifest = root / "crates" / "a" / "Cargo.toml"
+            manifest.write_text(
+                manifest.read_text(encoding="utf-8").replace(
+                    "[dependencies]", "[dev-dependencies]"
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                interval_guard.GuardRefusal, "no registry version requirement"
+            ):
+                interval_guard.publishable_crates(root)
+
     def test_versioned_dev_dependency_cycle_refuses(self) -> None:
         with tempfile.TemporaryDirectory(prefix="sparq-publish-dev-cycle-") as tmp:
             root = Path(tmp)

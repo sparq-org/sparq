@@ -291,9 +291,7 @@ def publishable_crates(repo_root: Path) -> list[Crate]:
                 # Cargo explicitly omits path-only dev-dependencies from a published
                 # package. They remain available to workspace tests but require neither
                 # registry closure nor a position in the first-publish order.
-                if is_dev and (
-                    not isinstance(requirement, str) or not requirement.strip()
-                ):
+                if is_dev and "version" not in spec:
                     continue
                 if not all_members[real][3]:
                     raise GuardRefusal(
