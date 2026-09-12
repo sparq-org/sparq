@@ -39,18 +39,7 @@ let json = sparq_engine::query_json(&g, "SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?
 - **SPARQL query** — run [SPARQL 1.1](https://www.w3.org/TR/sparql11-query/) and
   [1.2](https://www.w3.org/TR/sparql12-query/) over your data (conformance tracked by the CI
   ratchets), plus the *non-standard* `MULTIPLICITY()` aggregate extension — see the SKILL.
-- **Path multiplicity and expression correlation** — alternatives and sequences preserve
-  SPARQL bag counts; reachability operators retain endpoint sets. `EXISTS` / `NOT EXISTS`
-  filters can reference bound outer variables used only in inner expressions, with actual
-  RDF term identity retained across the vocabulary boundary. Nullable paths retain
-  constant endpoint seeds, including terms absent from the active graph, while
-  variable endpoints range over graph nodes. Sequence midpoint hints preserve
-  their variable role. Joins fall back from constant substitution when it would
-  change a nullable path's domain. Join-driven substitution is limited to positive
-  BGP/path/join/UNION shapes and locally bound deterministic FILTERs. MINUS,
-  OPTIONAL, binding, subquery, modifier and graph/service boundaries use ordinary
-  evaluation, preserving their variable scopes and domains. These fallbacks can
-  perform more work than the positive substitution path.
+- **Path multiplicity and expression correlation** — alternatives and sequences preserve SPARQL bag counts; reachability operators retain endpoint sets. `EXISTS` / `NOT EXISTS` filters can reference bound outer variables used only in inner expressions, with actual RDF term identity retained across the vocabulary boundary. Nullable paths retain constant endpoint seeds, including terms absent from the active graph, while variable endpoints range over graph nodes. Sequence midpoint hints preserve their variable role. Joins fall back from constant substitution when it would change a nullable path's domain. Join-driven substitution is limited to positive BGP/path/join/UNION shapes and locally bound deterministic FILTERs. MINUS, OPTIONAL, binding, subquery, modifier and graph/service boundaries use ordinary evaluation, preserving their variable scopes and domains. These fallbacks can perform more work than the positive substitution path.
 - **Named graphs** — query across an active dataset with `GRAPH` and `FROM` / `FROM NAMED`.
 - **RDF 1.2 triple terms** — match [triple terms](https://www.w3.org/TR/rdf12-concepts/), including variables inside them.
 - **Materialized full paths** *(opt-in `paths` feature, OFF by default)* — `enumerate_paths` returns intermediate nodes and edges for tied shortest paths, bounded simple paths, or cycles back to their start. Each endpoint is unrestricted, one fixed node, or a graph pattern selecting a candidate set.
@@ -58,24 +47,8 @@ let json = sparq_engine::query_json(&g, "SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?
 - **Custom functions** — register Rust closures under function IRIs (the
   [SPARQL extension mechanism](https://www.w3.org/TR/sparql11-query/#extensionFunctions));
   see [`docs/extension-functions.md`](../../docs/extension-functions.md).
-- **Custom aggregates + window functions** *(opt-in `window-functions` feature, OFF by default)* —
-  register a named user aggregate (`CustomAggregateRegistry`) callable from a real `GROUP BY`, plus a
-  window surface (`ROW_NUMBER`/`RANK`/`DENSE_RANK`, `LAG`/`LEAD`/`NTILE`, windowed
-  `COUNT`/`SUM`/`AVG`/`MIN`/`MAX`, `PARTITION BY` + `ORDER BY`, optional `ROWS`/`RANGE` frame), both
-  programmatic (`window::apply_window`) and via inline `OVER(…)` syntax (`query_over` + reusable
-  `WINDOW w AS (…)`). **NON-STANDARD extension** (SPARQL has no W3C-REC `OVER`): the inline form is a
-  *source rewrite* recognised ONLY on `query_over`, so the standard `query`/`ask`/… surface stays
-  exactly SPARQL 1.1 (see the rustdoc for the inline-deferred cases). Off, build byte-identical, no new deps.
-- **Parameterized prepared queries** *(opt-in `params` feature, OFF by default)* — the canonical
-  mitigation for SPARQL injection (#901). `PreparedQuery::bind(name, oxrdf::Term)` and
-  `PreparedUpdate::bind` substitute a typed value into a free placeholder variable via a pure
-  **algebra rewrite** — *never* string concatenation — so a hostile bound IRI/literal (e.g. one
-  containing `> } INSERT … {` or a `"` break-out) is carried as opaque DATA and cannot alter the
-  query structure. Covers SELECT/ASK/CONSTRUCT/DESCRIBE + UPDATE; fail-closed (rejects an unknown
-  placeholder, a `BIND`/aggregate/`VALUES` output, or a blank node in a predicate/graph slot). Off,
-  zero code compiles, the default build is byte-identical, no new deps. The opt-in `templates` feature
-  layers **named parameterized templates** on top (parse-once, fail-closed typed-JSON binding — behind
-  the server's `/templates` REST + MCP `template_invoke`, sq-lsp7k.10; see [`skills/sparql-query/SKILL.md`](../../skills/sparql-query/SKILL.md)).
+- **Custom aggregates + window functions** *(opt-in `window-functions` feature, OFF by default)* — register a named user aggregate (`CustomAggregateRegistry`) callable from a real `GROUP BY`, plus a window surface (`ROW_NUMBER`/`RANK`/`DENSE_RANK`, `LAG`/`LEAD`/`NTILE`, windowed `COUNT`/`SUM`/`AVG`/`MIN`/`MAX`, `PARTITION BY` + `ORDER BY`, optional `ROWS`/`RANGE` frame), both programmatic (`window::apply_window`) and via inline `OVER(…)` syntax (`query_over` + reusable `WINDOW w AS (…)`). **NON-STANDARD extension** (SPARQL has no W3C-REC `OVER`): the inline form is a *source rewrite* recognised ONLY on `query_over`, so the standard `query`/`ask`/… surface stays exactly SPARQL 1.1 (see the rustdoc for the inline-deferred cases). Off, build byte-identical, no new deps.
+- **Parameterized prepared queries** *(opt-in `params` feature, OFF by default)* — the canonical mitigation for SPARQL injection (#901). `PreparedQuery::bind(name, oxrdf::Term)` and `PreparedUpdate::bind` substitute a typed value into a free placeholder variable via a pure **algebra rewrite** — *never* string concatenation — so a hostile bound IRI/literal (e.g. one containing `> } INSERT … {` or a `"` break-out) is carried as opaque DATA and cannot alter the query structure. Covers SELECT/ASK/CONSTRUCT/DESCRIBE + UPDATE; fail-closed (rejects an unknown placeholder, a `BIND`/aggregate/`VALUES` output, or a blank node in a predicate/graph slot). Off, zero code compiles, the default build is byte-identical, no new deps. The opt-in `templates` feature layers **named parameterized templates** on top (parse-once, fail-closed typed-JSON binding — behind the server's `/templates` REST + MCP `template_invoke`, sq-lsp7k.10; see [`skills/sparql-query/SKILL.md`](../../skills/sparql-query/SKILL.md)).
 - **Materialised-view / query-result cache** *(opt-in `result-cache` feature, OFF by default)* —
   a bounded, version-aware LRU (`cache::ResultCache`) that stores a SELECT/ASK `QueryResult` keyed
   by `(parsed query algebra, caller graph-version)`, replaying it instead of re-executing the same
@@ -126,6 +99,12 @@ let json = sparq_engine::query_json(&g, "SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?
 - **Audited cancellation pointer boundary** — the executor keeps its thread-local/rayon budget snapshot `Copy` with a non-owning cancellation pointer; [GPT-6 Astra] a lifetime-bound guard keeps the caller's `Arc<AtomicBool>` alive through scoped worker joins, restores the previous budget scope on return or unwind, and clears the pointer when the outermost scope exits. The four `unsafe` sites are listed in the workspace unsafe register.
 
 ## 📚 Learn more
+
+[GPT-6] GRAPH evaluation keeps the active dataset catalog separate from the active
+graph. Nested GRAPH patterns therefore resolve constant and variable names from
+the same catalog, preserve empty graphs and graph-name binding multiplicity, and
+respect query-level FROM NAMED selection. This context is borrowed per query;
+entering a named graph does not clone the dataset or install global graph state.
 
 - **How-to** — [`skills/sparql-query/SKILL.md`](../../skills/sparql-query/SKILL.md).
 - **API reference** — [docs.rs/sparq-engine](https://docs.rs/sparq-engine).

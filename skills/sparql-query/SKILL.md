@@ -1191,6 +1191,13 @@ let r = query_view(&v, "SELECT ?s WHERE { GRAPH ?g { ?s ?p ?o } }").unwrap(); //
 
 ## See also
 
+[GPT-6] Nested GRAPH patterns preserve the query's active dataset catalog while
+switching the active graph. Constant and variable graph names can select another
+named graph from that catalog, including an empty graph. FROM NAMED restrictions
+continue to apply at every nesting level; graph-name bindings retain normal join
+compatibility and result multiplicity. The evaluator borrows this catalog in its
+per-query context rather than cloning graphs or using global dataset state.
+
 - `rust-parallel-parsing` / `fused-decompress-parse` — fast/compressed RDF ingest into a `Graph`.
 - `hdt-format` — loading `.hdt` archives into a `Graph` (`sparq-hdt`).
 - `sparq-arrow` — opt-in Apache Arrow columnar import/export between a SELECT `QueryResult`

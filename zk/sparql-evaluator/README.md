@@ -3,11 +3,18 @@
 <!-- [GPT-6] zkp-10.1; this is a bounded research implementation, not an audit. -->
 
 This detached Cargo workspace proves execution of the actual Sparq evaluator on
-one complete, bounded default RDF graph. It is an experimental complement to the
+one complete, bounded RDF dataset. V1 retains the default-graph relation; the
+separate V2 schema adds a complete named-graph catalog, including empty graphs.
+It is an experimental complement to the
 specialized Noir successful-result path. It is **not externally audited** and
 does not establish a general SPARQL conformance, privacy, or soundness claim.
 
 ## Statement and authority
+
+The sections below describe the V1 profile unless explicitly stated otherwise.
+The [V2 dataset API](../../skills/zk-query-proofs/references/exact-datasets-v2.md)
+documents its separate wire schema, N-Quads/catalog commitment and GRAPH plus
+local-snapshot FROM/FROM NAMED behavior. V1 commitment semantics are unchanged.
 
 `ProofContract::SelectedSupport` describes the existing Noir answer-support API.
 The evaluator rejects it: this guest implements `ExactDataset` only. Exactness
@@ -44,8 +51,8 @@ rejects evaluation; it never becomes an empty or truncated successful result.
 
 The journal binds a domain-separated digest of the exact query bytes, request
 version, dialect, contract, authority, policy and challenge. The verifier requires
-an independent expected request and the method ID generated from its own compiled
-guest. It never accepts a method ID from the presentation. Only after cryptographic
+an independent expected request and the method ID of its independently accepted
+guest artifact. It never accepts a method ID from the presentation. Only after cryptographic
 verification and request binding does it atomically consume the application nonce.
 Provide persistent storage through `Nonces`; an in-memory test implementation is
 not replay protection across restarts.
@@ -77,8 +84,8 @@ alternative to published SPARQL 1.1 substitution semantics while broader
 correlation work remains in zkp-10.6. The [W3C discussion](https://github.com/w3c/sparql-query/issues/156)
 describes the relevant errata and proposed alternatives; none is implicitly
 enabled by this profile.
-Nullable path composition is also excluded while absent-constant propagation is
-repaired: nullable subexpressions below other path operators, or at a lowered
+Nullable path composition is also excluded from this bounded profile: nullable
+subexpressions below other path operators, or at a lowered
 sequence's internal endpoint, are rejected. Ordinary root `*`, `+` and `?` over
 non-nullable operands remain admitted. The coverage ledger retains the known
 standard expectation separately from the rejection case.
@@ -90,7 +97,7 @@ standard expectation separately from the rejection case.
 | OPTIONAL, MINUS, COUNT, subquery, ORDER/LIMIT | admitted | combined genuine proof fixture |
 | VALUES, UNION, unbound | admitted | host semantics; holder-declared bag proof fixture |
 | NOT EXISTS, true ASK, arithmetic/error | admitted | host semantics |
-| false ASK, numeric FILTER, VALUES joined with root zero-length paths | admitted | host semantics; genuine false-ASK proof fixture |
+| false ASK, numeric FILTER, VALUES joined with root zero-length paths or MINUS | admitted | host semantics; genuine false-ASK proof fixture |
 | Fixed sequence and alternative paths, positive correlated EXISTS | admitted | combined genuine proof fixture; native conformance cases |
 | Negated property sets, including forward/reverse endpoint multiplicity | admitted | normative native cases and actual guest execution; separate from receipt evidence |
 | Other paths, pure functions and built-in aggregates | admitted by AST | shared evaluator; no complete guest conformance claim |

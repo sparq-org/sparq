@@ -18,12 +18,26 @@ pub fn admit(request: &Request) -> Result<(), Rejected> {
     let query = spargebra::SparqlParser::new()
         .parse_query(&request.query)
         .map_err(|_| Rejected("SPARQL parse rejected"))?;
-    admit_query(&query)
+    admit_query(&query, DatasetProfile::DefaultOnly)
 }
 
-fn admit_query(query: &spargebra::Query) -> Result<(), Rejected> {
-    if query.dataset().is_some() {
-        return Err(Rejected("dataset clauses are not admitted"));
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DatasetProfile {
+    DefaultOnly,
+    NamedCatalog,
+}
+
+pub(crate) fn admit_query(
+    query: &spargebra::Query,
+    profile: DatasetProfile,
+) -> Result<(), Rejected> {
+    if let Some(dataset) = query.dataset() {
+        if profile == DatasetProfile::DefaultOnly {
+            return Err(Rejected("dataset clauses are not admitted"));
+        }
+        if dataset.default.len() + dataset.named.as_ref().map_or(0, Vec::len) > 64 {
+            return Err(Rejected("dataset clause capacity"));
+        }
     }
     let pattern = match query {
         spargebra::Query::Select { pattern, .. } | spargebra::Query::Ask { pattern, .. } => pattern,
@@ -153,6 +167,9 @@ fn admit_query(query: &spargebra::Query) -> Result<(), Rejected> {
                             }
                         }
                     }
+                }
+                GraphPattern::Graph { inner, .. } if profile == DatasetProfile::NamedCatalog => {
+                    pending.push(Visit::Pattern(inner));
                 }
                 GraphPattern::Graph { .. }
                 | GraphPattern::Service { .. }
@@ -301,7 +318,7 @@ fn pattern_term(term: &TermPattern) -> Result<(), Rejected> {
     }
 }
 
-fn term_string(term: &Term) -> Result<String, Rejected> {
+pub(crate) fn term_string(term: &Term) -> Result<String, Rejected> {
     match term {
         Term::NamedNode(_) => {}
         Term::Literal(l) => literal(l)?,
@@ -354,7 +371,7 @@ pub fn evaluate(witness: &Witness) -> Result<Journal, Rejected> {
     };
     let prepared = sparq_engine::PreparedQuery::parse(&request.query)
         .map_err(|_| Rejected("SPARQL parse rejected"))?;
-    admit_query(prepared.query())?;
+    admit_query(prepared.query(), DatasetProfile::DefaultOnly)?;
     let mut dict = Dict::new();
     let mut triples = Vec::new();
     for triple in oxttl::NTriplesParser::new().for_slice(witness.dataset.ntriples.as_bytes()) {
@@ -373,15 +390,30 @@ pub fn evaluate(witness: &Witness) -> Result<Journal, Rejected> {
         ]);
     }
     let graph = Graph::from_parts(dict, triples);
+    let result = execute(&graph, &prepared, request.policy.max_rows)?;
+    Ok(Journal {
+        version: VERSION,
+        request_digest: request_digest(request)?,
+        dataset_commitment: commitment,
+        provenance,
+        result,
+    })
+}
+
+pub(crate) fn execute(
+    graph: &Graph,
+    prepared: &sparq_engine::PreparedQuery,
+    max_rows: u32,
+) -> Result<CanonicalResult, Rejected> {
     let budget = sparq_engine::QueryBudget {
-        max_rows: Some(request.policy.max_rows as usize),
+        max_rows: Some(max_rows as usize),
         // Bound computed terms as well as row counts; this is an estimate, not RSS.
         max_bytes: Some(4 * MAX_DATASET_BYTES as usize),
         ..Default::default()
     };
-    let result = sparq_engine::query_prepared_with_budget(&graph, &prepared, &budget)
+    let result = sparq_engine::query_prepared_with_budget(graph, prepared, &budget)
         .map_err(|_| Rejected("query evaluation or resource budget rejected"))?;
-    if result.rows.len() > request.policy.max_rows as usize {
+    if result.rows.len() > max_rows as usize {
         return Err(Rejected("result row capacity"));
     }
     let result = match prepared.query() {
@@ -412,11 +444,5 @@ pub fn evaluate(witness: &Witness) -> Result<Journal, Rejected> {
         }
         _ => return Err(Rejected("query form rejected")),
     };
-    Ok(Journal {
-        version: VERSION,
-        request_digest: request_digest(request)?,
-        dataset_commitment: commitment,
-        provenance,
-        result,
-    })
+    Ok(result)
 }
