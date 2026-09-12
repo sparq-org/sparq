@@ -214,11 +214,54 @@ fn actual_guest_rejects_bad_anchors_nondeterminism_and_exhausted_capacity() {
             .unwrap()
             .build()
             .unwrap();
+        let error = executor
+            .execute(env, SPARQ_EXACT_GUEST_ELF)
+            .expect_err("rejected relation must not reach Halted(0)");
+        // The pinned SDK reports sys_panic as a remote error. Match our own
+        // relation rejection, not an IPC error, timeout, OOM or unrelated panic.
+        let rejection = format!("{error:#}");
         assert!(
-            executor.execute(env, SPARQ_EXACT_GUEST_ELF).is_err(),
-            "rejected relation must not reach Halted(0)"
+            rejection.contains("Guest panicked:")
+                && rejection.contains("bounded exact-dataset relation rejected"),
+            "expected the guest relation rejection, got: {rejection}"
         );
     }
+}
+
+#[test]
+fn actual_guest_preserves_negated_path_endpoint_multiplicity() {
+    let corpus: serde_json::Value =
+        serde_json::from_str(include_str!("../../fixtures/conformance/cases.json")).unwrap();
+    let executor = ExternalProver::new("real-sparq-nps-semantics", r0vm());
+    let mut executed = 0;
+    for case in corpus["cases"].as_array().unwrap().iter().filter(|case| {
+        case["id"].as_str().unwrap().starts_with("path-negated-") && case["dataset"].is_string()
+    }) {
+        let mut witness = witness(case["query"].as_str().unwrap());
+        witness.dataset.ntriples = case["dataset"].as_str().unwrap().into();
+        witness.request.authority = DatasetAuthority::VerifierAgreed {
+            commitment: dataset_commitment(&witness.dataset, &witness.request.policy).unwrap(),
+        };
+        let env = ExecutorEnv::builder()
+            .session_limit(Some(1 << 24))
+            .write(&witness)
+            .unwrap()
+            .build()
+            .unwrap();
+        let session = executor
+            .execute(env, SPARQ_EXACT_GUEST_ELF)
+            .expect("actual guest NPS execution");
+        let journal: Journal = session.journal.decode().unwrap();
+        bind_journal(&journal, &witness.request).unwrap();
+        let expected: CanonicalResult =
+            serde_json::from_value(case["expected"]["result"].clone()).unwrap();
+        assert_eq!(journal.result, expected, "{}", case["id"]);
+        executed += 1;
+    }
+    assert_eq!(
+        executed, 3,
+        "all discriminating NPS guest cases are required"
+    );
 }
 
 #[test]

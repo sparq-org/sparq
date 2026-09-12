@@ -414,11 +414,14 @@
       "status": "partial_fixture_coverage",
       "spec": "https://www.w3.org/TR/sparql11-query/#propertypaths",
       "positive_cases": [
-        "path-negated-set"
+        "path-negated-set",
+        "path-negated-duplicate-forward",
+        "path-negated-duplicate-reverse",
+        "path-negated-both-orientations"
       ],
       "rejection_cases": [],
       "guest_proof_evidence": "not_asserted",
-      "limits": "Forward negated set only; inverse combinations remain unassessed."
+      "limits": "Duplicate-sensitive forward, reverse and mixed-direction examples retain one endpoint pair per orientation; complete property-path conformance is not established."
     },
     {
       "id": "paths_sequence",

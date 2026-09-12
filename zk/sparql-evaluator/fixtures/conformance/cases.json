@@ -2065,6 +2065,84 @@
         "stage": "admission",
         "error": "nullable path composition is not admitted"
       }
+    },
+    {
+      "id": "path-negated-duplicate-forward",
+      "features": [
+        "paths_negated"
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#defn_evalNPS",
+      "query": "PREFIX ex: <http://ex/> SELECT ?o { ex:a !ex:excluded ?o }",
+      "dataset": "<http://ex/a> <http://ex/p> <http://ex/b> .\n<http://ex/a> <http://ex/q> <http://ex/b> .\n<http://ex/b> <http://ex/r> <http://ex/a> .\n<http://ex/b> <http://ex/s> <http://ex/a> .\n",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Select": {
+            "variables": [
+              "o"
+            ],
+            "order": "Bag",
+            "rows": [
+              [
+                "<http://ex/b>"
+              ]
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "path-negated-duplicate-reverse",
+      "features": [
+        "paths_negated"
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#defn_evalNPS",
+      "query": "PREFIX ex: <http://ex/> SELECT ?o { ex:a ^(!ex:excluded) ?o }",
+      "dataset": "<http://ex/a> <http://ex/p> <http://ex/b> .\n<http://ex/a> <http://ex/q> <http://ex/b> .\n<http://ex/b> <http://ex/r> <http://ex/a> .\n<http://ex/b> <http://ex/s> <http://ex/a> .\n",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Select": {
+            "variables": [
+              "o"
+            ],
+            "order": "Bag",
+            "rows": [
+              [
+                "<http://ex/b>"
+              ]
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "path-negated-both-orientations",
+      "features": [
+        "paths_negated"
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#defn_evalNPS",
+      "query": "PREFIX ex: <http://ex/> SELECT ?o { ex:a !(ex:excluded|^ex:excluded) ?o }",
+      "dataset": "<http://ex/a> <http://ex/p> <http://ex/b> .\n<http://ex/a> <http://ex/q> <http://ex/b> .\n<http://ex/b> <http://ex/r> <http://ex/a> .\n<http://ex/b> <http://ex/s> <http://ex/a> .\n",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Select": {
+            "variables": [
+              "o"
+            ],
+            "order": "Bag",
+            "rows": [
+              [
+                "<http://ex/b>"
+              ],
+              [
+                "<http://ex/b>"
+              ]
+            ]
+          }
+        }
+      }
     }
   ]
 }
