@@ -54,7 +54,7 @@ receipts do not establish those updated semantics.
 
 ## Evidence boundaries
 
-The original 26-case matrix is in
+The original 26 cases plus exact ORDER BY tie/lexical-preservation controls are in
 [`exact_temporal.json`](../../../../crates/sparq-engine/tests/fixtures/exact_temporal.json).
 It checks literal, VALUES, stored dense/compressed data, scan/COUNT, ORDER BY,
 MIN/MAX, dynamic constructors, long SECONDS output and the dateTimeStamp timezone facet. Separately labeled
@@ -77,3 +77,6 @@ pending guest status must not be replaced by historical receipt evidence.
 The [cache follow-up record](../../../../zk/sparql-evaluator/temporal-cache-native-evidence.json)
 pins warm-lookup, comparator and year-zero guard mutations to restored source
 hashes. It remains native evidence; its pending guest/hosted status is explicit.
+
+The cache corpus also uses long fractional suffixes after mmap reopening and
+rejects stored year zero through actual native ASK/FILTER/COUNT evaluation.

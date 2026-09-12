@@ -160,3 +160,18 @@ fn year_zero_is_a_capacity_failure_before_expression_error_handling() {
         );
     }
 }
+
+#[test]
+fn year_zero_stored_filter_cannot_become_false_ask_or_zero_count() {
+    let graph = Graph::load_str("<http://ex/s> <http://ex/p> \"0000-01-01T00:00:00Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> .", "nt").unwrap();
+    for projection in ["ASK", "SELECT (COUNT(*) AS ?n)"] {
+        let query = format!(
+            "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> {projection} {{ ?s ?p ?t FILTER(?t < \"0001-01-01T00:00:00Z\"^^xsd:dateTime) }}"
+        );
+        let error = sparq_engine::query_with_budget(&graph, &query, &bounded()).unwrap_err();
+        assert!(
+            error.contains("query evaluation capacity exceeded (temporal-year)"),
+            "{error}"
+        );
+    }
+}
