@@ -1,0 +1,366 @@
+{
+  "schema_version": 1,
+  "recorded_by": "GPT-6",
+  "publication_ready": false,
+  "evidence_kind": "completed_hosted_campaign",
+  "summary": {
+    "pr_head_sha": "a2f72c4f6341dd53032c55f260b4ee8577ac7c4d",
+    "actual_checkout_sha": "8f1f12f1828c3a350ec04eab51e5166bbd91a485",
+    "run_id": 34723229239,
+    "job_id": 103632744720,
+    "status": "success",
+    "artifact_id": 10307886586,
+    "artifact_zip_sha256": "b5e6d2b577ac928be0b585edba09f19eb24480c16497075f4fff09b3797ccc26",
+    "guest_artifact_sha256": "d90efd1c165c3d3bcb999e15f3325e7a78ee5e236f501239ee017a0b822c8b51",
+    "accepted_image_id": [
+      530510836,
+      519036461,
+      1011539374,
+      887237642,
+      1993427653,
+      2884658098,
+      2641981949,
+      2407006625
+    ],
+    "genuine_receipts": 3,
+    "receipt_hashes_verified": true,
+    "artifact_hash_verified": true,
+    "same_pin_after_campaign": true,
+    "logged_guest_case_counts": {
+      "actual aggregate guest case": 24,
+      "actual builtin guest case": 197,
+      "actual numeric control guest case": 1
+    },
+    "native_test_functions": 26,
+    "host_test_functions": 12,
+    "zero_ignored": true,
+    "actual_guest_and_proof_seconds": 2575.115909588,
+    "source_export_bound": true,
+    "hal_execution_targets_observed": [
+      "risc0_circuit_rv32im::prove::hal::cpu",
+      "risc0_zkp::hal::cpu"
+    ],
+    "actual_guest_case_inventory": {
+      "builtin_rec": 167,
+      "builtin_labeled_capacity_rejections": 2,
+      "exact_temporal_expectations": 28,
+      "temporal_capacity_rejections": 13,
+      "numeric_positive_control": 1,
+      "numeric_capacity_rejections": 21,
+      "aggregate_positive": 12,
+      "aggregate_rejections": 12,
+      "negated_path_cases": 3,
+      "strict_relation_positive_control": 1,
+      "strict_relation_rejections": 21,
+      "artifact_pin_tests": 3
+    }
+  },
+  "source_tree": "f1524ddeac66b8b76ecab3fa6c54d4a369d3874f",
+  "campaign_manifest": {
+    "schema": "sparq-evaluator-campaign-v1",
+    "completed": true,
+    "identity": {
+      "event": "pull_request",
+      "github_sha": "8f1f12f1828c3a350ec04eab51e5166bbd91a485",
+      "checkout_sha": "8f1f12f1828c3a350ec04eab51e5166bbd91a485",
+      "pr_head_sha": "a2f72c4f6341dd53032c55f260b4ee8577ac7c4d",
+      "pr_base_sha": "713025dc0fcdcbdcd070ba4dcbde524be50ba055",
+      "merge_group_head_sha": null,
+      "merge_group_base_sha": null,
+      "run_id": "34723229239",
+      "run_attempt": "1",
+      "repository": "sparq-org/sparq",
+      "pr_number": 6497
+    },
+    "toolchains": {
+      "host_rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)\nbinary: rustc\ncommit-hash: 8bab26f4f68e0e26f0bb7960be334d5b520ea452\ncommit-date: 2026-07-14\nhost: x86_64-unknown-linux-gnu\nrelease: 1.97.1\nLLVM version: 22.1.6",
+      "host_cargo": "cargo 1.97.1 (c980f4866 2026-06-30)",
+      "guest_rustc": "rustc 1.97.0-dev (e638c6cfe 2026-07-15)\nbinary: rustc\ncommit-hash: e638c6cfea1eff5fbbb24a27e60538e3760d21b8\ncommit-date: 2026-07-15\nhost: x86_64-unknown-linux-gnu\nrelease: 1.97.0-dev\nLLVM version: 22.1.6",
+      "r0vm_version": "risc0-r0vm 3.0.6",
+      "r0vm_sha256": "751b9b188d341e8bec5e02060086b7b1dc3f7289e90f726c38589bb6735dd6d7",
+      "guest_rustc_sha256": "288ee1994dd8ec08184686e7a52b779c9b075498ffe73003884fefe60389c351"
+    },
+    "commands": [
+      {
+        "name": "fetch-host-locked-graph",
+        "argv": [
+          "cargo",
+          "fetch",
+          "--locked",
+          "--manifest-path",
+          "zk/sparql-evaluator/Cargo.toml"
+        ],
+        "status": 0,
+        "elapsed_seconds": 2.669075332999995
+      },
+      {
+        "name": "rebuild-host-local-packages",
+        "argv": [
+          "cargo",
+          "clean",
+          "--locked",
+          "--offline",
+          "--manifest-path",
+          "zk/sparql-evaluator/Cargo.toml",
+          "--target-dir",
+          "/home/runner/work/sparq/sparq/zk/sparql-evaluator/target",
+          "-p",
+          "ark-crypto-primitives",
+          "-p",
+          "ark-relations",
+          "-p",
+          "risc0-build",
+          "-p",
+          "risc0-zkos-v1compat",
+          "-p",
+          "risc0-zkvm",
+          "-p",
+          "rzup",
+          "-p",
+          "spargebra",
+          "-p",
+          "sparq-core",
+          "-p",
+          "sparq-engine",
+          "-p",
+          "sparq-proved-evaluator",
+          "-p",
+          "sparq-proved-evaluator-methods",
+          "-p",
+          "sparq-proved-evaluator-model",
+          "-p",
+          "sparq-substrate"
+        ],
+        "status": 0,
+        "elapsed_seconds": 0.11661046799999042
+      },
+      {
+        "name": "fetch-guest-locked-graph",
+        "argv": [
+          "cargo",
+          "fetch",
+          "--locked",
+          "--manifest-path",
+          "zk/sparql-evaluator/methods/guest/Cargo.toml"
+        ],
+        "status": 0,
+        "elapsed_seconds": 0.11175104099999089
+      },
+      {
+        "name": "rebuild-guest-local-packages",
+        "argv": [
+          "cargo",
+          "clean",
+          "--locked",
+          "--offline",
+          "--manifest-path",
+          "zk/sparql-evaluator/methods/guest/Cargo.toml",
+          "--target-dir",
+          "/home/runner/work/sparq/sparq/zk/sparql-evaluator/target/sparq-exact-guest",
+          "--release",
+          "--target",
+          "riscv32im-risc0-zkvm-elf",
+          "-p",
+          "ark-crypto-primitives",
+          "-p",
+          "ark-relations",
+          "-p",
+          "risc0-zkos-v1compat",
+          "-p",
+          "risc0-zkvm",
+          "-p",
+          "spargebra",
+          "-p",
+          "sparq-core",
+          "-p",
+          "sparq-engine",
+          "-p",
+          "sparq-exact-guest",
+          "-p",
+          "sparq-proved-evaluator-model",
+          "-p",
+          "sparq-substrate"
+        ],
+        "status": 0,
+        "elapsed_seconds": 0.11601421999999673
+      },
+      {
+        "name": "export-guest",
+        "argv": [
+          "cargo",
+          "run",
+          "--locked",
+          "--manifest-path",
+          "zk/sparql-evaluator/Cargo.toml",
+          "-p",
+          "sparq-proved-evaluator",
+          "--example",
+          "export_guest",
+          "--",
+          "/home/runner/work/_temp/sparq-exact-evidence/artifact"
+        ],
+        "status": 0,
+        "elapsed_seconds": 169.84355065199998
+      },
+      {
+        "name": "native",
+        "argv": [
+          "cargo",
+          "test",
+          "--locked",
+          "--manifest-path",
+          "zk/sparql-evaluator/Cargo.toml",
+          "-p",
+          "sparq-proved-evaluator-model",
+          "--features",
+          "evaluate"
+        ],
+        "status": 0,
+        "elapsed_seconds": 9.701082445999987
+      },
+      {
+        "name": "actual-guest-and-proofs",
+        "argv": [
+          "cargo",
+          "test",
+          "--locked",
+          "--manifest-path",
+          "zk/sparql-evaluator/Cargo.toml",
+          "-p",
+          "sparq-proved-evaluator",
+          "--",
+          "--nocapture",
+          "--test-threads=1"
+        ],
+        "status": 0,
+        "elapsed_seconds": 2575.115909588
+      },
+      {
+        "name": "lint",
+        "argv": [
+          "cargo",
+          "clippy",
+          "--locked",
+          "--manifest-path",
+          "zk/sparql-evaluator/Cargo.toml",
+          "--workspace",
+          "--all-targets",
+          "--features",
+          "sparq-proved-evaluator-model/evaluate",
+          "--",
+          "-D",
+          "warnings"
+        ],
+        "status": 0,
+        "elapsed_seconds": 25.68791761600005
+      },
+      {
+        "name": "confirm-guest",
+        "argv": [
+          "cargo",
+          "run",
+          "--locked",
+          "--manifest-path",
+          "zk/sparql-evaluator/Cargo.toml",
+          "-p",
+          "sparq-proved-evaluator",
+          "--example",
+          "export_guest",
+          "--",
+          "/home/runner/work/_temp/sparq-exact-evidence/artifact-after"
+        ],
+        "status": 0,
+        "elapsed_seconds": 0.3924235959998441
+      }
+    ],
+    "build_environment": {
+      "CARGO_BUILD_JOBS": "2",
+      "CARGO_INCREMENTAL": "0",
+      "RISC0_BUILD_LOCKED": "1",
+      "RUSTFLAGS": null,
+      "CARGO_ENCODED_RUSTFLAGS": null,
+      "CARGO_PROFILE_RELEASE_DEBUG": null
+    },
+    "diagnostic_filter": "risc0_circuit_rv32im::prove::hal=debug,risc0_zkp::hal=debug",
+    "artifact_pin": {
+      "sha256": [
+        217,
+        14,
+        253,
+        28,
+        22,
+        92,
+        61,
+        59,
+        203,
+        153,
+        158,
+        21,
+        243,
+        50,
+        94,
+        122,
+        120,
+        238,
+        94,
+        35,
+        111,
+        80,
+        18,
+        57,
+        238,
+        1,
+        122,
+        11,
+        130,
+        44,
+        139,
+        81
+      ],
+      "image_id": [
+        530510836,
+        519036461,
+        1011539374,
+        887237642,
+        1993427653,
+        2884658098,
+        2641981949,
+        2407006625
+      ]
+    },
+    "receipts": {
+      "v1-holder-bag": {
+        "sha256": "c5c69c7c2b29f0e5fc7985a625914b95c09c3567242c9c4e400167493e03f78b",
+        "bytes": 585968
+      },
+      "v1-verifier-false-ask": {
+        "sha256": "0735c1e92671edda735d24449ff55093323a5665350137973ea8dceb349ce2f3",
+        "bytes": 585655
+      },
+      "v1-verifier-select": {
+        "sha256": "2588c911e0eff56c2fed41e0efe7729693947750368daa4c54785698fbd0b190",
+        "bytes": 586360
+      }
+    },
+    "hal_execution_targets_observed": [
+      "risc0_circuit_rv32im::prove::hal::cpu",
+      "risc0_zkp::hal::cpu"
+    ],
+    "hal_observation_limit": "Logged execution targets, not hardware inference; unlogged stages are not attributed.",
+    "source_inventory_sha256": "0c5b5f6d23c9043c34251dfa0d00f6c271890d8e5d474b06e4815085391e58a9",
+    "privacy_scope": "Synthetic fixtures; experimental upstream privacy assumptions remain."
+  },
+  "archive_url": "https://github.com/sparq-org/sparq/actions/runs/34723229239/artifacts/10307886586",
+  "checks_url": "https://github.com/sparq-org/sparq/actions/runs/34723229239",
+  "review_and_validation_limits": [
+    "The actual checkout is the recorded PR merge commit, distinct from PR head a2 and base713.",
+    "This immutable artifact covers that source snapshot, not subsequent policy, evidence or implementation revisions.",
+    "The required job executed guest cases and three genuine receipts; native case counts alone are not proof evidence.",
+    "Fresh integrated hosted policy checks and independent reviews remain required before publication readiness.",
+    "CPU execution targets are observed SDK logging, not a claim about every internal proving stage.",
+    "These synthetic fixtures do not establish comprehensive SPARQL coverage, zero privacy leakage or external cryptographic assurance."
+  ],
+  "job_log_sha256": "222a7e82bacf7045e38cdb87081452d41fae068034996e54c88916b794fb3dd8",
+  "campaign_manifest_sha256": "2d941c5a03e1d40599a636d8014be5e64cef07e969e9f6b127fba5b7f2628e1f",
+  "source_inventory_sha256": "0c5b5f6d23c9043c34251dfa0d00f6c271890d8e5d474b06e4815085391e58a9"
+}

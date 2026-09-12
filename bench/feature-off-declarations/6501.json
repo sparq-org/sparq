@@ -1,0 +1,5 @@
+{
+  "pr": 6501,
+  "date": "2026-09-13",
+  "reason": "Intentional shared nested-GRAPH execution correction preserves the complete selected dataset catalog while changing the active graph, including empty graph membership and variable graph-name bindings. This engine correctness change is always compiled in ordinary native/WASM code; the versioned proof protocol remains detached and opt-in. Feature-OFF byte identity or measured performance neutrality is not claimed. Independent hosted wasm_bundle_bytes floors, feature-OFF measurements and runtime gates remain required."
+}

@@ -90,3 +90,9 @@ remain separately counted. The V2 false-ASK fixture retains the named-catalog
 restriction branch and adds an invalid numeric-facet arithmetic discriminator.
 The [evaluator README](../../../zk/sparql-evaluator/README.md) describes pinned
 toolchain execution, receipt evidence and deployment limitations.
+
+[GPT-6] The generated [V2 local campaign record](../../../zk/sparql-evaluator/proof-evidence-v2.json)
+binds completed guest execution and all five real V1/V2 receipt fixtures to one
+exact source and artifact. It records observed CPU targets without attributing
+unlogged stages. This local evidence does not attest to the separately published
+V1 artifact or replace independent review and required hosted gates.

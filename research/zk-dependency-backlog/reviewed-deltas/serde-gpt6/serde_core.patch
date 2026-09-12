@@ -1,0 +1,187 @@
+diff -ruN old/.cargo_vcs_info.json new/.cargo_vcs_info.json
+--- old/.cargo_vcs_info.json	2026-09-12 22:35:17
++++ new/.cargo_vcs_info.json	2026-09-12 22:35:17
+@@ -1,6 +1,6 @@
+ {
+   "git": {
+-    "sha1": "a866b336f14aa57a07f0d0be9f8762746e64ecb4"
++    "sha1": "7fc3b4c30c94f73a96ebd1553f2b090d928fc3a8"
+   },
+   "path_in_vcs": "serde_core"
+ }
+\ No newline at end of file
+diff -ruN old/Cargo.lock new/Cargo.lock
+--- old/Cargo.lock	2026-09-12 22:35:17
++++ new/Cargo.lock	2026-09-12 22:35:17
+@@ -4,18 +4,18 @@
+ 
+ [[package]]
+ name = "proc-macro2"
+-version = "1.0.101"
++version = "1.0.106"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "89ae43fd86e4158d6db51ad8e2b80f313af9cc74f5c0e03ccb87de09998732de"
++checksum = "8fd00f0bb2e90d81d1044c2b32617f68fcb9fa3bb7640c23e9c748e53fb30934"
+ dependencies = [
+  "unicode-ident",
+ ]
+ 
+ [[package]]
+ name = "quote"
+-version = "1.0.40"
++version = "1.0.46"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "1885c039570dc00dcb4ff087a89e185fd56bae234ddc7f056a945bf36467248d"
++checksum = "dfbc457d0c7a0759a614551b11a6409e5951f6c7537be1f1b7682b9ae9230368"
+ dependencies = [
+  "proc-macro2",
+ ]
+@@ -28,7 +28,7 @@
+ 
+ [[package]]
+ name = "serde_core"
+-version = "1.0.228"
++version = "1.0.229"
+ dependencies = [
+  "serde",
+  "serde_derive",
+@@ -36,9 +36,9 @@
+ 
+ [[package]]
+ name = "serde_derive"
+-version = "1.0.228"
++version = "1.0.229"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "d540f220d3187173da220f885ab66608367b6574e925011a9353e4badda91d79"
++checksum = "e7a5d71263a5a7d47b41f6b3f06ba276f10cc18b0931f1799f710578e2309348"
+ dependencies = [
+  "proc-macro2",
+  "quote",
+@@ -47,9 +47,9 @@
+ 
+ [[package]]
+ name = "syn"
+-version = "2.0.106"
++version = "3.0.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "ede7c438028d4436d71104916910f5bb611972c5cfd7f89b8300a8186e6fada6"
++checksum = "f2fac314a64dc9a36e61a9eb4261a5e9bbfbc922b27e518af97bc32b926cf967"
+ dependencies = [
+  "proc-macro2",
+  "quote",
+@@ -58,6 +58,6 @@
+ 
+ [[package]]
+ name = "unicode-ident"
+-version = "1.0.19"
++version = "1.0.24"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "f63a545481291138910575129486daeaf8ac54aee4387fe7906919f7830c7d9d"
++checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
+diff -ruN old/Cargo.toml new/Cargo.toml
+--- old/Cargo.toml	2026-09-12 22:35:17
++++ new/Cargo.toml	2026-09-12 22:35:17
+@@ -13,7 +13,7 @@
+ edition = "2021"
+ rust-version = "1.56"
+ name = "serde_core"
+-version = "1.0.228"
++version = "1.0.229"
+ authors = [
+     "Erick Tryzelaar <erick.tryzelaar@gmail.com>",
+     "David Tolnay <dtolnay@gmail.com>",
+@@ -84,4 +84,4 @@
+ version = "1"
+ 
+ [target."cfg(any())".dependencies.serde_derive]
+-version = "=1.0.228"
++version = "=1.0.229"
+diff -ruN old/Cargo.toml.orig new/Cargo.toml.orig
+--- old/Cargo.toml.orig	2026-09-12 22:35:17
++++ new/Cargo.toml.orig	2026-09-12 22:35:17
+@@ -1,6 +1,6 @@
+ [package]
+ name = "serde_core"
+-version = "1.0.228"
++version = "1.0.229"
+ authors = ["Erick Tryzelaar <erick.tryzelaar@gmail.com>", "David Tolnay <dtolnay@gmail.com>"]
+ build = "build.rs"
+ categories = ["encoding", "no-std", "no-std::no-alloc"]
+@@ -37,7 +37,7 @@
+ # is compatible with exactly one serde release because the generated code
+ # involves nonpublic APIs which are not bound by semver.
+ [target.'cfg(any())'.dependencies]
+-serde_derive = { version = "=1.0.228", path = "../serde_derive" }
++serde_derive = { version = "=1.0.229", path = "../serde_derive" }
+ 
+ 
+ ### FEATURES #################################################################
+diff -ruN old/build.rs new/build.rs
+--- old/build.rs	2026-09-12 22:35:17
++++ new/build.rs	2026-09-12 22:35:17
+@@ -65,15 +65,15 @@
+         }
+     }
+ 
+-    // Current minimum supported version of serde_derive crate is Rust 1.61.
+-    if minor < 61 {
+-        println!("cargo:rustc-cfg=no_serde_derive");
+-    }
+-
+     // Support for core::ffi::CStr and alloc::ffi::CString stabilized in Rust 1.64.
+     // https://blog.rust-lang.org/2022/09/22/Rust-1.64.0.html#c-compatible-ffi-types-in-core-and-alloc
+     if minor < 64 {
+         println!("cargo:rustc-cfg=no_core_cstr");
++    }
++
++    // Current minimum supported version of serde_derive crate is Rust 1.71.
++    if minor < 71 {
++        println!("cargo:rustc-cfg=no_serde_derive");
+     }
+ 
+     // Support for core::num::Saturating and std::num::Saturating stabilized in Rust 1.74
+diff -ruN old/src/de/impls.rs new/src/de/impls.rs
+--- old/src/de/impls.rs	2026-09-12 22:35:17
++++ new/src/de/impls.rs	2026-09-12 22:35:17
+@@ -1047,16 +1047,16 @@
+                     }
+ 
+                     #[inline]
+-                    fn visit_seq<A>(mut self, mut $access: A) -> Result<Self::Value, A::Error>
++                    fn visit_seq<A>(self, mut $access: A) -> Result<Self::Value, A::Error>
+                     where
+                         A: SeqAccess<'de>,
+                     {
+-                        $clear(&mut self.0);
+-                        $reserve(&mut self.0, size_hint::cautious::<T>($access.size_hint()));
++                        $clear(&mut *self.0);
++                        $reserve(&mut *self.0, size_hint::cautious::<T>($access.size_hint()));
+ 
+                         // FIXME: try to overwrite old values here? (Vec, VecDeque, LinkedList)
+                         while let Some(value) = tri!($access.next_element()) {
+-                            $insert(&mut self.0, value);
++                            $insert(&mut *self.0, value);
+                         }
+ 
+                         Ok(())
+diff -ruN old/src/lib.rs new/src/lib.rs
+--- old/src/lib.rs	2026-09-12 22:35:17
++++ new/src/lib.rs	2026-09-12 22:35:17
+@@ -35,7 +35,7 @@
+ ////////////////////////////////////////////////////////////////////////////////
+ 
+ // Serde types in rustdoc of other crates get linked to here.
+-#![doc(html_root_url = "https://docs.rs/serde_core/1.0.228")]
++#![doc(html_root_url = "https://docs.rs/serde_core/1.0.229")]
+ // Support using Serde without the standard library!
+ #![cfg_attr(not(feature = "std"), no_std)]
+ // Show which crate feature enables conditionally compiled APIs in documentation.
+@@ -54,7 +54,7 @@
+     // clippy bug: https://github.com/rust-lang/rust-clippy/issues/7768
+     clippy::semicolon_if_nothing_returned,
+     // not available in our oldest supported compiler
+-    clippy::empty_enum,
++    clippy::empty_enums,
+     clippy::type_repetition_in_bounds, // https://github.com/rust-lang/rust-clippy/issues/8772
+     // integer and float ser/de requires these sorts of casts
+     clippy::cast_possible_truncation,

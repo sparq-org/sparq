@@ -1,0 +1,186 @@
+# Independent dependency backlog proposal review
+
+Reviewer: **GPT-6**, task `/root/vc_suite_design`; proposal author: separate task `/root/zk_result_path`, also GPT-6. This is a review of proposed policy exceptions, **not a source-code audit**. I authored the SDK feature patches, but not these proposal notes; this review does not approve my own patches.
+
+Exact source: `6f7d750ac6c8d8118bdcac6ef6dc0b266c0909b9`. Frozen proposal manifest: `46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9`.
+
+**Disposition: accept the 143 individually listed exact-version entries as tracked backlog exceptions**, subject to the conditions below. Zero entries are presented as completed safe-to-deploy source audits. No policy or audit record was applied.
+
+I verified all 143 registry archives against actual cached bytes and final lock/upstream hashes, all 229 recorded host/guest dependency paths (including edge kinds and target expressions), and their exact resolved features. Final host/guest lock and feature-edge evidence hashes match the frozen proposal. Every entry preserves its version, required criterion, tracking, and removal/renewal conditions.
+
+The screening-derived proposal set is independently reconciled: historical 157 source-screening units minus four removed nodes, eight separately source-reviewed deltas and two pending Serde prerequisite deltas = 143. Historical 144 proposals differ only by removal of `downcast-rs 1.2.1`. The removed units and separate audit work are absent from these proposals. This is not the live cargo-vet residual: the parent separately reports host 176 / guest 109 gaps in the preserved integrated store, which uses different accepted import data. Additional trusted-import provenance reconciliation is required; no blind union, new trust, or closure claim is approved here.
+
+The policy permits deliberate tracked exemptions: `.github/workflows/supply-chain.yml` lines 300–309 explicitly distinguish an audit, trusted imported audit and explicit exemption; the actual frozen vet gate is at line 320. This review accepts visible exact-version review debt under that existing policy. It does not change the safe-to-deploy criterion or treat an exception as fulfillment by source review.
+
+## Conditions for assembly
+
+1. Apply only the exact package/version safe-to-deploy exemptions explicitly accepted here; do not regenerate a blanket missing-coverage exemption set.
+2. Preserve all original root imports, policies, audits and exemptions; these new exceptions are tracked review debt under zkp-10.8.1, not audit records or advisory ignores.
+3. Keep the reviewed proposal manifest, input hashes and per-entry dispositions durably available from the eventual policy change; update proposal-only/pending wording to the actual approval provenance without inventing a source audit.
+4. Re-screen every version change. Remove an old exemption only when that exact requirement is replaced by matching accepted audit evidence, a reviewed upgrade with separately valid coverage, or demonstrated dependency removal.
+5. Require final root/host/guest cargo-vet, fresh hosted advisory and deny integrity/license/source checks, SBOM checks and vendor provenance/feature gates on the assembled store. This review does not claim those combined final gates have run.
+6. For six local patches, keep audit-as-crates-io limited to the registry review obligation and retain independent patch/provenance review; this upstream backlog disposition does not approve my own authored patches.
+7. Keep eight actual Fable source deltas, their baseline chains and conditional Serde prerequisite disposition separate from these exceptions. Do not substitute an exemption for either pending Serde prerequisite source review.
+8. Retain the no_std_strings source finding and unchanged embedded-ELF/kernel-build limitations outside the removed-node inventory. Removing a source node is not a patch to already compiled ELF bytes.
+9. Keep bincode maintenance/VEX handling separate and accurately scoped; no new advisory exception or no-reachability assertion is approved here.
+
+## Findings and practical limits
+
+- Corrected proposal wording is acceptable: missing accepted exact-version coverage does not imply that no scope-specific upstream audit exists. Local patch provenance is separate from registry coverage.
+- Build/proc-macro and utility categories are nonexclusive. Individual notes below preserve runtime parser, memory, FFI, filesystem, compiler and randomness risks. Target-conditioned or `cfg(any())` edges remain resolved-graph coverage units; they are not evidence that code executes on the current host or guest.
+- Highest-priority future source reviews include proof-system/Ark arithmetic and encoding, prover IPC and ELF parsing, runtime byte-layout/FFI/concurrency code, and input/resource-limit behavior. This is audit prioritization, not a new vulnerability finding.
+- The source-node removal does not modify the embedded kernel ELF. The known `no_std_strings` safe-API hazard is not erased by inventory reduction, nor established as a Sparq guest exploit. Both baseline and candidate kernel binary builds retain the documented upstream `Syscall::ProveZkr` E0004 limitation.
+- The observed `block 0.1.6` future-compatibility warning remains a maintenance follow-up; it is not a failed current build or demonstrated vulnerability. The cached advisory snapshot and registry history do not establish current upstream maintenance/advisory status.
+- Passing gates, application proofs or this policy review provide no full crate audit, external cryptographic sign-off, complete zero-knowledge assurance, or runtime/performance guarantee. Fresh combined gates remain the integrator’s responsibility.
+
+## Exact per-entry dispositions
+
+Every row is **ACCEPT_TRACKED_BACKLOG_EXEMPTION**, with the version/checksum/path/removal conditions in `per-entry-dispositions.json`. Each row was assessed for the distinct package surface below; acceptance was not inferred solely from cohort membership.
+
+| Package | Risk focus and disposition |
+| --- | --- |
+| `aho-corasick 1.1.5` | Substring automata underneath the evaluator's regex path; retain matching correctness, allocation and bounded-input review, rather than treating this as build-only code. |
+| `anyhow 1.0.104` | Error representation and conversions run at runtime as well as a compiler-probing build script; ownership/downcast invariants and diagnostic disclosure remain review topics. |
+| `ark-bn254 0.5.0` | Curve parameters and point/scalar operations feed the SDK Groth16 closure; require a matching cryptographic source review to replace this exemption, not a local feature-patch approval. |
+| `ark-crypto-primitives 0.5.0` | The selected snark/sponge/merlin/std surface remains cryptographic code. Optional derivative wiring is separately reviewed; neither that patch nor passing feature builds audits the upstream primitives. |
+| `ark-crypto-primitives-macros 0.5.0` | Macro expansion generates code used by cryptographic primitives; review both build-host execution and emitted algorithm semantics. A procedural-macro label does not reduce cryptographic relevance. |
+| `ark-ec 0.5.0` | Curve/group/pairing operations sit in the verification closure; subgroup checks, arithmetic and encodings remain exact-version source-review backlog. |
+| `ark-ff 0.5.0` | Finite-field implementation feeds proof verification; arithmetic, representation and generated implementation boundaries remain high-priority source-review topics. |
+| `ark-ff-asm 0.5.0` | This crate generates x86-64 finite-field assembly during compilation. Architecture conditions and emitted arithmetic require review even though the current machine is Apple Silicon. |
+| `ark-ff-macros 0.5.0` | Field implementation generation can affect arithmetic correctness; the macro executes on a build host and its generated code is a distinct risk from a passive manifest dependency. |
+| `ark-groth16 0.5.0` | Proof verification algorithms remain an upstream audit gap at this version. The evaluator's Succinct-only admission narrows its public route, but the resolved SDK closure must not be called fully audited. |
+| `ark-poly 0.5.0` | Polynomial/FFT arithmetic forms part of the Ark dependency closure; algorithm and size/overflow assumptions remain review backlog independent of passing application proof fixtures. |
+| `ark-r1cs-std 0.5.0` | Constraint gadgets are present in the all-target resolved closure. Metadata necessity is not a claim that every gadget executes in Sparq's Succinct verification path. |
+| `ark-relations 0.5.1` | Constraint-system semantics remain upstream review backlog. The tracing-subscriber compatibility patch changes instrumentation dependencies, with separate provenance; it does not certify constraint arithmetic. |
+| `ark-serialize 0.5.0` | Cryptographic element encodings and deserialization validation are security-sensitive input boundaries; retain canonicality, subgroup/validation mode and allocation review. |
+| `ark-serialize-derive 0.5.0` | Generated serialization implementations can affect proof element decoding; require review of emitted validation behavior as well as build-host execution. |
+| `ark-snark 0.5.1` | SNARK traits define assumptions used across cryptographic implementations; the small interface scope is not evidence that consumers satisfy those assumptions. |
+| `ark-std 0.5.0` | Compatibility, containers and random utilities underpin Ark code. Keep allocator/randomness/feature behavior in scope, without describing this support crate itself as a whole proof-system audit. |
+| `base64 0.23.1` | Byte/text encoding through SDK configuration serializers; invalid-input behavior and allocation remain relevant even though no cryptographic algorithm is supplied here. |
+| `bitflags 1.3.2` | Flag construction and interpretation are present through platform APIs. Preserve both exact major-version entries and their target paths; the old 1.x Metal path is not guest execution evidence. |
+| `bitflags 2.13.2` | Flag construction and interpretation are present through platform APIs. Preserve both exact major-version entries and their target paths; the old 1.x Metal path is not guest execution evidence. |
+| `blake2 0.10.6` | Hash implementation feeds risc0-zkp; algorithm correctness and implementation behavior remain unaudited by this policy disposition. |
+| `block 0.1.6` | Apple block ABI, captured ownership and callback lifetime are runtime FFI risks on its target path. The observed upstream future-compatibility warning remains a follow-up; compilation success is not FFI audit evidence. |
+| `borsh 1.8.1` | Binary serialization for SDK values is a runtime input/length/encoding boundary, with a separate build script and derive helper. Preserve exact limits and validation obligations in future source review. |
+| `borsh-derive 1.8.1` | Build-host procedural macros generate binary encoders/decoders; emitted length/error behavior is as relevant as macro host execution. |
+| `bytemuck 1.25.2` | Byte casting and layout invariants are runtime memory-safety boundaries in SDK code; safe public APIs and successful compilation do not audit underlying unsafe implementation. |
+| `bytemuck_derive 1.12.1` | Generated trait implementations assert byte-layout properties relied on by unsafe consumers; review the emitted safety preconditions, not only whether the macro compiles. |
+| `bytes 1.12.1` | Reference-counted byte buffers and serialization participate in host SDK framing. Ownership, slicing and allocation behavior remain exact-version memory/input review backlog. |
+| `camino 1.2.5` | UTF-8 path handling supports Cargo build metadata and has a build script; path normalization, error handling and filesystem consumers remain relevant without implying network exposure. |
+| `cargo-platform 0.1.9` | Cargo target-expression parsing influences build selection. Preserve all target conditions in policy inventory and review parser/evaluation correctness rather than dropping non-host targets. |
+| `cc 1.4.5` | Native compiler discovery and invocation run on the build host through target-specific dependencies. Environment, subprocess arguments and toolchain trust remain in scope despite the utility cohort. |
+| `cpufeatures 0.3.1` | Architecture feature detection selects implementations at runtime; retain platform/FFI and instruction-selection review for each target, not an Apple-only inference. |
+| `darling 0.20.11` | Attribute parsing support executes inside derive macros and influences generated code. Both selected versions have distinct consumers and remain separate exact-version review units. |
+| `darling 0.24.1` | Attribute parsing support executes inside derive macros and influences generated code. Both selected versions have distinct consumers and remain separate exact-version review units. |
+| `darling_core 0.20.11` | Macro attribute parsing and diagnostics feed code generation; both versions need their own accepted source coverage. Runtime input handling is not inferred merely from Rust token parsing. |
+| `darling_core 0.24.1` | Macro attribute parsing and diagnostics feed code generation; both versions need their own accepted source coverage. Runtime input handling is not inferred merely from Rust token parsing. |
+| `darling_macro 0.20.11` | Procedural macro code executes in the compiler host; retain both selected versions, generated-code behavior and their separate parent chains. |
+| `darling_macro 0.24.1` | Procedural macro code executes in the compiler host; retain both selected versions, generated-code behavior and their separate parent chains. |
+| `defmt 1.1.1` | Embedded logging support includes build-time generation plus target/runtime formatting. Resolved target presence is not evidence that the evaluator exposes log content through this crate. |
+| `defmt-macros 1.1.1` | Formatting macros and a build script execute during compilation; emitted format metadata and host side effects remain review topics even for target-conditional consumers. |
+| `defmt-parser 1.0.0` | Format-string parsing under the defmt macro chain affects generated code; its utility label must retain compile-time parser risk. |
+| `derive_builder 0.20.2` | Builder macro facade is needed by risc0-build. Generated defaults/setter behavior and the delegated macro chain remain review backlog, not a runtime proof primitive. |
+| `derive_builder_core 0.20.2` | Builder code-generation support consumes syntax and emits implementation code on the build host; preserve its own exact package coverage rather than assuming facade coverage is transitive. |
+| `derive_builder_macro 0.20.2` | Procedural macro expansion supplies SDK build configuration builders; review code generation and host execution separately from the application configuration tests. |
+| `derive_more 2.1.1` | Trait-derive facade selects add/add_assign/debug expansions in the SDK closure; generated arithmetic and diagnostics depend on its implementation crate and are not audited by facade compilation. |
+| `derive_more-impl 2.1.1` | Selected generated trait implementations execute at application runtime after compile-time expansion; review both expansion behavior and compiler-host execution. |
+| `docker-generate 0.1.3` | Dockerfile read/write support is in SDK build tooling; parsing, path/output handling and downstream build invocation are review topics even where the current build avoids Docker. |
+| `dyn-clone 1.0.20` | Trait-object cloning for schema support depends on ownership and allocation invariants; keep memory review rather than equating a small helper with no security relevance. |
+| `elf 0.7.4` | ELF parsing feeds method image construction/validation. Bounds, offsets, allocation and malformed executable handling are a concrete binary-input review surface outside the parser cohort. |
+| `enum-ordinalize 4.4.2` | Enum ordinal conversion facade participates in Ark derives; generated conversion/discriminant validity matters and its derive dependency needs distinct coverage. |
+| `enum-ordinalize-derive 4.4.2` | Macro-generated ordinal conversions can assert enum validity; build-host execution and emitted range/discriminant behavior remain review topics. |
+| `fastrand 2.5.0` | Used on the shown tempfile path for noncryptographic choices. Accepting a backlog entry does not permit treating this RNG as proof blinding, secret-key or cryptographic nonce entropy. |
+| `find-msvc-tools 0.1.12` | Windows registry/COM tool discovery supports native compiler invocation. Preserve its target and build-host boundary even though the local machine does not exercise it. |
+| `foreign-types-macros 0.2.4` | Macros generate foreign-type ownership wrappers through the Metal dependency path; review emitted FFI lifetime/drop contracts and host expansion, not just target gating. |
+| `futures-core 0.3.34` | Future/stream trait contracts occur on the shown JS-target path. Record all-target graph necessity without claiming the guest RISC-V binary executes browser async APIs. |
+| `futures-task 0.3.34` | Task/waker utilities carry lifetime and concurrency assumptions through the JS-target closure; retain those assumptions even when current-target reachability is absent. |
+| `futures-util 0.3.34` | Async combinators and pinning/ownership behavior require source review on their actual target path; the utility category is not a memory-safety determination. |
+| `getrandom 0.4.3` | System entropy acquisition is target-dependent and includes build-time configuration. Review failure paths and actual backend selection; metadata membership alone establishes neither guest nondeterminism nor cryptographic quality. |
+| `hashlink 0.10.0` | Ordered hash containers support YAML parsing; allocation, mutation and ownership invariants remain runtime risk even where inputs originate from local configuration. |
+| `hex-literal 0.4.1` | Compile-time hexadecimal conversion feeds SDK constants; review lexical/length interpretation and generated bytes rather than treating the macro as a cryptographic hash implementation. |
+| `hybrid-array 0.4.15` | Array layout/indexing support feeds hash-buffer code in the evaluator closure; length and representation invariants remain memory review backlog. |
+| `indexmap 1.9.3` | Ordered map behavior and allocation matter to serializers/parsers. Both selected versions remain distinct units; 1.x also has a build script, so neither is purely compile-time metadata. |
+| `indexmap 2.14.2` | Ordered map behavior and allocation matter to serializers/parsers. Both selected versions remain distinct units; 1.x also has a build script, so neither is purely compile-time metadata. |
+| `itertools 0.13.0` | Iterator combinators are consumed by arithmetic/support code; iteration, allocation and edge behavior remain source-review backlog without asserting independent cryptographic assurance. |
+| `jiff 0.2.35` | Date/time and system timezone handling under SDK configuration serializers can depend on host files/environment. Do not conflate this with the separately implemented deterministic SPARQL temporal relation. |
+| `jiff-core 0.1.1` | Low-level datetime primitives and timezone representation underpin Jiff; range/normalization/parser semantics remain source-review backlog in the host configuration closure. |
+| `jiff-static 0.2.35` | Timezone construction macros run in the build host and emit embedded data; review compile-time parser behavior and generated timezone representation. |
+| `jiff-tzdb 0.1.8` | Bundled timezone data requires provenance/version and decoder review. Data presence is not proof that every timezone path executes in the evaluator. |
+| `jiff-tzdb-platform 0.1.3` | Target-dependent timezone bundle selection must retain platform conditions; this backlog disposition does not certify timezone freshness or host-independent behavior. |
+| `js-sys 0.3.105` | JS bindings include the resolved unsafe-eval feature on a wasm target path. Preserve that explicit capability in review scope; do not imply eval is called by the RISC-V guest or the admitted deterministic query API. |
+| `lazy-regex 3.6.1` | Host SDK regex wrapper combines compile-time validation and runtime matching. Resource limits and regex behavior remain relevant despite the static-pattern orientation. |
+| `lazy-regex-proc_macros 3.6.1` | Compile-time regex parsing and emitted initialization execute at build/runtime boundaries; review pattern compilation behavior and host execution separately. |
+| `libc 0.2.189` | Raw operating-system ABI bindings and platform build detection are runtime FFI boundaries. Keep target conditions; a build-script cohort does not make libc build-only. |
+| `linux-raw-sys 0.12.1` | Generated Linux syscall/type constants support rustix. ABI/version correctness matters on Linux even though local checks run on macOS. |
+| `log 0.4.34` | Logging facade can expose diagnostic content through selected consumers. No claim is made that this crate itself logs private witnesses; call-site disclosure remains a separate review obligation. |
+| `memchr 2.8.3` | SIMD byte search under RDF/text parsers has target dispatch and bounds-sensitive implementation. Retain runtime input and memory review despite the utility classification. |
+| `merlin 3.0.0` | Transcript composition supplies challenge/domain-separation behavior. Upstream version-specific source coverage is required before removing this exception; application success tests do not audit transcript security. |
+| `multiversion 0.9.0` | Architecture-specific function selection under text encoding combines generated code with runtime dispatch; preserve target feature contracts and do not infer selected paths from host hardware alone. |
+| `multiversion-macros 0.9.0` | Code generation for architecture variants runs on the build host; review emitted target-feature attributes and dispatch contracts as well as macro execution. |
+| `num-bigint 0.4.8` | Large-integer encoding/arithmetic is used in SDK cryptographic support. Review bounds and algorithm semantics, and do not assume general-purpose bigint operations are constant-time. |
+| `num_enum 0.7.6` | Primitive/enum conversion facade feeds VM platform types; exact discriminant handling and its derive implementation remain review topics. |
+| `num_enum_derive 0.7.6` | Generated enum conversion code can affect VM/platform interpretation; build-host expansion and emitted invalid-value handling require matching source review. |
+| `objc 0.2.7` | Objective-C messaging, ownership and lifetime contracts are target-specific runtime FFI risks through Metal. All-target inventory is retained without claiming execution in the guest. |
+| `portable-atomic 1.15.0` | Atomic operations and architecture fallback logic are runtime synchronization risks with a build script; retain memory-ordering and target behavior in scope. |
+| `portable-atomic-util 0.2.8` | Allocation/reference-counting utilities built on portable atomics have runtime lifetime/synchronization obligations; the build-script category is nonexclusive. |
+| `proc-macro-crate 3.5.0` | Manifest discovery/parsing for macro crate names touches build-host filesystem/environment. Review path resolution and generated names; guest graph membership does not mean guest filesystem access. |
+| `proptest 1.11.0` | The shown ruint path appears in all-target resolution and must remain covered by the current gate. This is not evidence that property generators or shrinking execute in production; any future edge removal must be demonstrated independently. |
+| `prost 0.13.5` | Protocol Buffers encode/decode the ordinary external-prover IPC path. Length, allocation, malformed-message and version handling are important host input boundaries; successful proofs are not a parser audit. |
+| `prost-derive 0.13.5` | Generated protobuf codecs define runtime decoding behavior for SDK IPC. Review emitted bounds/error semantics as well as build-host macro execution. |
+| `rand 0.8.8` | The two versions have different feature/consumer paths. RNG selection, seeding and error handling remain call-site-sensitive; no blanket claim that all consumers use cryptographic generators or that the admitted guest queries use entropy. |
+| `rand 0.9.5` | The two versions have different feature/consumer paths. RNG selection, seeding and error handling remain call-site-sensitive; no blanket claim that all consumers use cryptographic generators or that the admitted guest queries use entropy. |
+| `ref-cast 1.0.27` | Reference reinterpreting APIs rely on layout invariants and generated implementations, alongside a build script. Treat as runtime memory review, not only compiler tooling. |
+| `ref-cast-impl 1.0.27` | Derive expansion establishes layout preconditions for reference casting; review generated invariants and build-host behavior independently of the facade. |
+| `regex 1.13.1` | User query regex handling affects semantic correctness and resource use. Upstream complexity statements do not remove the need to review pattern construction/allocation and application budgets. |
+| `regex-automata 0.4.18` | Automata construction and multiple matching engines under regex have allocation/bounds/semantic review needs; exact selected engines/features are preserved in the inventory. |
+| `risc0-binfmt 3.0.5` | ELF/image parsing, encoding and image identity calculations affect what code a receipt authenticates. Build/source audits and prebuilt method artifact provenance must remain separate. |
+| `risc0-build 3.0.6` | Cargo/toolchain discovery, subprocess/build behavior and artifact generation are trusted build inputs. Removed unused dirs and kernel defaults are separate local patches; this entry covers only the exact upstream audit gap. |
+| `risc0-circuit-keccak 4.0.6` | Circuit definitions and build-time generated kernels influence proof semantics. Source archive review, native downloaded kernel provenance and external r0vm binary trust are separate obligations. |
+| `risc0-circuit-recursion 4.0.5` | Recursive circuit/receipt compression code and source-pinned recursion artifacts are security-critical. Keep reviewed ZIP integrity and actual backend evidence separate from a crate audit or ZK assurance claim. |
+| `risc0-circuit-rv32im 4.0.5` | Instruction/circuit constraints sit in the proof-system trust boundary. Resolved features do not certify every HAL or establish complete upstream soundness/zero-knowledge assurance. |
+| `risc0-core 3.0.2` | Shared proof-system primitives and word/field representations carry cross-crate invariants; upstream source review remains distinct from application relation tests. |
+| `risc0-groth16 3.0.5` | Groth16 receipt parsing/verifying and representation conversion are present in the resolved SDK closure. Succinct-only public admission does not justify deleting all-target review obligations or claiming all receipt modes tested. |
+| `risc0-zkos-v1compat 2.2.3` | The selected library embeds exact unchanged ELF bytes. Manifest edge removal does not remove code already compiled into that ELF or fix its security properties; the identical upstream/candidate binary E0004 limitation remains documented. |
+| `risc0-zkp 3.0.5` | Proof-system core, hashing, field operations and build configuration require specialist source review. Scope-specific upstream audits may exist; this exact accepted cargo-vet criterion remains uncovered. |
+| `risc0-zkvm 3.0.6` | Receipt verification, guest APIs and client/prover selection define trust boundaries. Sparq uses explicit ExternalProver and rejects fake receipts; upstream and local feature-edge changes require separate reviews, and no full cryptographic assurance follows here. |
+| `risc0-zkvm-platform 2.2.3` | Guest syscall/runtime/entropy exports are target-dependent ABI boundaries. Preserve exact features and distinguish tested guest execution from whole-platform or embedded-kernel audit coverage. |
+| `ruint 1.20.0` | Fixed-width integer parsing/arithmetic and serialization feed image/SDK code. Range/overflow/encoding and feature-specific implementations remain backlog; property-test dependencies in metadata are not runtime proof evidence. |
+| `ruint-macro 1.2.1` | Compile-time integer literals generate values used by consumers. Lexical width/overflow handling and emitted constants require review along with build-host execution. |
+| `rustix 1.1.4` | Syscall wrappers and tempfile filesystem operations are runtime ownership/FFI/security boundaries with a build script. Preserve Linux/Unix/Windows paths rather than treating this as build-only code. |
+| `rzup 0.5.2` | The active feature-free discovery surface reads toolchain/configuration state. Install/publish signatures are separated by the reviewed local patch, but installed binary trust, path selection and upstream source coverage remain separate obligations. |
+| `schemars 0.9.0` | Both schema-generation versions run through SDK configuration support. Schema traversal/allocation and generated reference behavior remain backlog; schema generation is not payload validation assurance. |
+| `schemars 1.2.2` | Both schema-generation versions run through SDK configuration support. Schema traversal/allocation and generated reference behavior remain backlog; schema generation is not payload validation assurance. |
+| `serde_json 1.0.151` | Host and guest JSON parsing/serialization bind request/result data. The resolved unbounded_depth feature must stay visible: feature presence alone does not disable recursion checks, and accepting this entry does not waive framing/depth limits at callers. |
+| `serde_spanned 0.6.9` | Source-span wrappers participate in TOML parsing and error reporting; retain indexing/serialization behavior and input provenance in the review scope. |
+| `serde_with 3.23.0` | Custom conversions widen the SDK configuration serialization surface. Exact enabled adapters and dependency paths matter; a derive helper's review does not audit these runtime conversions. |
+| `serde_with_macros 3.23.0` | Macros emit runtime serialization behavior and execute on the build host; generated conversion semantics need separate coverage from serde_with's facade. |
+| `spin 0.9.9` | Selected once-initialization behavior has concurrency/memory-ordering obligations. Low-level synchronization is not certified by no-default-features builds or the absence of an advisory. |
+| `stability 0.2.1` | API stability attribute expansion executes on the compiler host and emits Rust items. It is a build-execution review unit, not passive documentation. |
+| `syn 2.0.119` | Both major versions parse Rust syntax for procedural macros. Retain exact consumer/version paths and parser/resource behavior; code-generation consumers are not covered transitively by a syn audit. |
+| `syn 3.0.5` | Both major versions parse Rust syntax for procedural macros. Retain exact consumer/version paths and parser/resource behavior; code-generation consumers are not covered transitively by a syn audit. |
+| `tempfile 3.27.0` | Host temporary-file creation/removal depends on path, ownership, collision and OS behavior. The real consumer may process sensitive prover artifacts; retain filesystem and noncryptographic naming RNG distinction. |
+| `thiserror 2.0.20` | Error facade/build detection and generated Error implementations are separate surfaces. Diagnostic formatting can propagate application data; no privacy claim follows from this exact-version exception. |
+| `thiserror-impl 2.0.20` | Error derive macro expansion supplies runtime conversions and formatting. Review emitted behavior and compiler-host execution, separately from thiserror facade coverage. |
+| `time 0.3.55` | Parsing/formatting and serde conversions handle SDK configuration temporal data. Range, normalization and allocation behavior remain backlog, distinct from evaluator temporal semantic fixes. |
+| `time-macros 0.2.32` | Compile-time date/time parsing emits constants and format descriptions; review lexical/range behavior and host macro execution. |
+| `tinyvec 1.13.2` | Small-vector allocation/index behavior supports encoding helpers. Upstream claims of safe source do not amount to independent source coverage for this exact version. |
+| `toml 0.8.23` | SDK configuration parsing/writing consumes structured input; preserve parser resource/error behavior and filesystem consumers in the review scope. |
+| `toml_datetime 0.6.11` | Both datetime representations support different TOML generations. Preserve their separate paths and lexical/normalization behavior rather than assuming one version's review covers the other. |
+| `toml_datetime 1.1.1+spec-1.1.0` | Both datetime representations support different TOML generations. Preserve their separate paths and lexical/normalization behavior rather than assuming one version's review covers the other. |
+| `toml_edit 0.22.27` | Two TOML parser/editor versions serve SDK configuration and build-time macro manifest discovery. Runtime input and compiler-host filesystem parsing remain distinct risks. |
+| `toml_edit 0.25.15+spec-1.1.0` | Two TOML parser/editor versions serve SDK configuration and build-time macro manifest discovery. Runtime input and compiler-host filesystem parsing remain distinct risks. |
+| `toml_parser 1.1.3+spec-1.1.0` | The shown proc-macro-crate chain parses manifests on the build host. Parser limits/error behavior matter even when this is not a guest query parser. |
+| `toml_write 0.1.2` | TOML escaping/serialization under SDK config editing affects downstream interpretation; writer-only scope narrows input exposure but does not establish semantic audit coverage. |
+| `uuid 1.26.1` | UUID parsing/generation sits in the engine closure, including target-specific JS/entropy edges. The deterministic guest profile's volatile-function rejection remains a separate contract; metadata presence is not proof of admitted nondeterminism. |
+| `wasm-bindgen 0.2.128` | Wasm/JS boundary code includes runtime ABI and build-time components on its target path. Preserve the target condition instead of assuming RISC-V execution or excluding it from the all-target gate. |
+| `wasm-bindgen-macro 0.2.128` | Macro expansion emits JS/wasm bindings and executes on the build host when selected. Review generated ABI contracts separately from the runtime facade. |
+| `wasm-bindgen-macro-support 0.2.128` | Internal binding generation parses Rust and emits cross-language glue; this support crate belongs to build-code-generation review despite its platform cohort. |
+| `wasm-bindgen-shared 0.2.128` | Shared binding metadata/ABI definitions and a build script must agree with generated/runtime components; exact family versions remain separate source units. |
+| `winnow 0.7.15` | Both parser-combinator versions support distinct TOML/runtime/build chains. Review parser bounds/backtracking/error behavior in those contexts; metadata includes both for a reason. |
+| `winnow 1.0.4` | Both parser-combinator versions support distinct TOML/runtime/build chains. Review parser bounds/backtracking/error behavior in those contexts; metadata includes both for a reason. |
+| `yaml-rust2 0.10.4` | YAML parsing and encoding conversion serve SDK toolchain configuration. Nesting, alias/resource, malformed-input and downstream path interpretation remain review backlog. |
+| `zerocopy 0.8.57` | SIMD/byte-representation helpers are unsafe-sensitive runtime code with build detection. Preserve selected features and exact layout invariants; no safety conclusion follows from its name or successful builds. |
+| `zerocopy-derive 0.8.57` | The recorded path contains cfg(any()), a never-enabled edge in ordinary target evaluation. This remains an all-target resolved-graph coverage unit, not evidence the macro executes; review emitted safety traits if ever enabled and verify any future policy removal. |
+| `zmij 1.0.23` | Floating-point-to-decimal formatting affects serialized JSON values and includes build detection. Runtime rounding/lexical correctness and memory bounds matter despite its build cohort. |
+
+Evidence files: `source/MANIFEST.json`, `input-verification.json`, `verify_inputs.py`, `risk_notes.tsv`, `per-entry-dispositions.json`. Final artifact hashes are in `REVIEW-ARTIFACTS.json`.

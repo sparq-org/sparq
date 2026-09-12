@@ -25,7 +25,12 @@ does not attest the patched source. The independent source review must additiona
 cover the exact delta in `vendor/zk-sdk/UPSTREAM.json` and its patch files. The
 provenance checker verifies file inventories and hashes; synthetic API/feature
 checks exercise the modified dependency configuration. None is a cryptographic
-audit, nor a substitute for a genuine final-artifact guest proof.
+audit, nor a substitute for a genuine final-artifact guest proof. The helper pins
+six SDK package/version entries; detached lock checks require six host and four
+guest path selections. The SDK feature step also executes provenance corruption
+controls and the profiler/kernel feature-edge matrix. Both retained default and
+opted-in feature configurations remain checked; an empty provenance inventory
+cannot erase the upstream audit obligations.
 
 CycloneDX generation includes all features, target-specific dependencies and build
 dependencies for each graph. Generation runs with network disabled after locked

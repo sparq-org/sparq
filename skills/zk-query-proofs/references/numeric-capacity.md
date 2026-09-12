@@ -38,7 +38,7 @@ length and with canceling huge start/length would clip to `"abcd"` and `"a"`;
 supporting these requires checked lexical arithmetic, not independently saturating
 each argument. Their expected strings remain in the capacity corpus for follow-up.
 
-The [21-case capacity corpus](../../../../zk/sparql-evaluator/fixtures/conformance/numeric-capacity.json)
+The [21-case capacity corpus](../../../zk/sparql-evaluator/fixtures/conformance/numeric-capacity.json)
 contains explicit capacity rejections, not W3C conformance successes. Native
 tests exercise scalar/compiled wrappers, stored dense/compressed consumers,
 large parallel thresholds and reentrant state. The model also preserves all 167

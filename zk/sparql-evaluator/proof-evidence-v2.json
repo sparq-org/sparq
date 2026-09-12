@@ -1,0 +1,93 @@
+{
+  "schema": "sparq-evaluator-v2-local-evidence-v1",
+  "source_commit": "048cb4324d06d9bbc24ed96203979b19cfc48838",
+  "completed": true,
+  "publication_ready": false,
+  "scope": "Local execution of the V2 artifact, including all V1 compatibility tests; no hosted or standalone V1 artifact attestation. Experimental backend, not an external cryptographic audit.",
+  "artifact_sha256": "5f9995a5843917638a160b5bac11a8fb5ffab922d9537aa73e71b57f88e04fcf",
+  "image_id": [
+    336382013,
+    952934123,
+    2966512134,
+    1006375153,
+    2018793836,
+    399594071,
+    2844126603,
+    3181350016
+  ],
+  "source_inventory_sha256": "2eb66a024a86d02a7f7c631711cd1f107b414e3bec7db979416adb6c91a1bbb6",
+  "toolchains": {
+    "host_rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)\nbinary: rustc\ncommit-hash: 8bab26f4f68e0e26f0bb7960be334d5b520ea452\ncommit-date: 2026-07-14\nhost: aarch64-apple-darwin\nrelease: 1.97.1\nLLVM version: 22.1.6",
+    "host_cargo": "cargo 1.97.1 (c980f4866 2026-06-30)",
+    "guest_rustc": "rustc 1.97.0-dev (e638c6cfe 2026-07-15)\nbinary: rustc\ncommit-hash: e638c6cfea1eff5fbbb24a27e60538e3760d21b8\ncommit-date: 2026-07-15\nhost: aarch64-apple-darwin\nrelease: 1.97.0-dev\nLLVM version: 22.1.6",
+    "r0vm_version": "risc0-r0vm 3.0.6",
+    "r0vm_sha256": "dce243fc350c17cb6ca34b9b82fb8c3098aa1e3a8da7ef0b98a837cc437c2cff",
+    "guest_rustc_sha256": "0c103b8fff89933298ea4858dc777a52be022204057daf9d21945f6c4fdc62eb"
+  },
+  "receipts": {
+    "v1-holder-bag": {
+      "sha256": "285f5cf997db9347b5c5f6424e2cef747db12813a6f1420acdd23ce2f9e6ead5",
+      "bytes": 585785
+    },
+    "v1-verifier-false-ask": {
+      "sha256": "23cf0a661dcf1e38eacb88ba69f075be0aa7319f285896665f24e2c9fc602529",
+      "bytes": 585497
+    },
+    "v1-verifier-select": {
+      "sha256": "2b087ce248c771a503b6b1027671358ae148fa50c5bdffce7eaa7158e0d3651c",
+      "bytes": 586231
+    },
+    "v2-holder-false-ask": {
+      "sha256": "a0b4d55c9eef2b9e865ddfc36e6b08f208fcac755de017d8eeda2ad1bf1c9ba7",
+      "bytes": 585035
+    },
+    "v2-verifier-catalog": {
+      "sha256": "76459b5d3ea6534256b8fe4e9dbb6ec5a29054ac1ab6dfea597feed00592911d",
+      "bytes": 586573
+    }
+  },
+  "native_test_functions": 43,
+  "host_test_functions": 20,
+  "guest_case_inventories_per_version": {
+    "builtin_rec_derived": 167,
+    "prior_unbounded_capacity_controls_rejected": 2,
+    "aggregate_admitted": 12,
+    "aggregate_profile_rejected": 12,
+    "temporal_rec_derived": 28,
+    "temporal_capacity_rejected": 13,
+    "numeric_capacity_rejected": 21,
+    "numeric_success_control": 1
+  },
+  "hal_execution_targets_observed": [
+    "risc0_circuit_rv32im::prove::hal::cpu",
+    "risc0_zkp::hal::cpu"
+  ],
+  "hal_observation_limit": "Logged execution targets, not hardware inference; unlogged stages are not attributed.",
+  "checks": {
+    "all_commands_exit_zero": true,
+    "source_snapshot_unchanged": true,
+    "exported_artifact_unchanged": true,
+    "strict_relation_error_classification": true,
+    "strict_succinct_and_independent_verification": true,
+    "fake_and_dev_modes_rejected": true,
+    "detached_workspace_clippy": "passed -D warnings"
+  },
+  "run_directory": "/private/tmp/sparq-exact-v2-048cb4324-local-ipc",
+  "campaign_evidence_sha256": "558dcdf399edb57639981d273334624272e42a54d2561424196ec39dae4b9fc5",
+  "execution_command": "python3 scripts/ci_exact_evaluator_evidence.py --local --output /private/tmp/sparq-exact-v2-048cb4324-local-ipc",
+  "prior_failed_attempts": [
+    {
+      "directory": "/private/tmp/sparq-exact-v2-46e83b622",
+      "reason": "Duplicate guest license metadata rejected before artifact build; source corrected at048cb4324."
+    },
+    {
+      "directory": "/private/tmp/sparq-exact-v2-048cb4324",
+      "reason": "Sandbox denied local r0vm IPC with OS EPERM before successful guest execution; same source rerun with authorized IPC access."
+    }
+  ],
+  "remaining_release_requirements": [
+    "Independent source-review dispositions",
+    "Required hosted checks including default-feature and WASM floors",
+    "Repository merge/landing requirements"
+  ]
+}
