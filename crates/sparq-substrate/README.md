@@ -33,7 +33,6 @@ sparq-substrate = { version = "0.1.0", features = ["rows", "numeric", "join", "c
 ```rust,ignore
 // `rows`: the shared id-tuple vocabulary (the engine + reasoners agree on it).
 use sparq_substrate::rows::{Id, Row, Key, Posting, inline_id_of_int, is_inline};
-
 let mut row: Row = Row::new();          // SmallVec<[Id; 4]> — inline up to 4 columns
 row.extend_from_slice(&[1, 2, 3]);
 let int_id: Option<Id> = inline_id_of_int(42); // inline-integer id, no term construction
@@ -64,8 +63,9 @@ let n: Option<Num> = as_numeric(&lit);  // exact xsd:decimal (no f64 rounding)
 - **`join`** — the four id-tuple join kernels over `&[Row]` slices: `merge_join` (sorted),
   `build_table` / `build_partitioned` / `probe_emit` / `probe_gather_indices` / `hash_probe_serial`
   (hash, `JoinTable` type alias backed by `hashbrown::HashMap<Key, Posting, FxBuildHasher>`,
-  single-hash probe + batch-reserve), `bind_combine` (index-nested-loop), `lftj_recurse` over
-  `Trie` / `TrieIter` (WCOJ), plus `compatible` / `merge_rows` / `any_unbound` helpers.
+  single-hash probe + batch-reserve), `bind_combine` (indexed groups) / `bind_combine_rows`
+  (contiguous row slices; appends rows, preserves duplicates and existing output; [GPT-6-ASTRA]),
+  `lftj_recurse` over `Trie` / `TrieIter` (WCOJ), plus `compatible` / `merge_rows` / `any_unbound`.
   `probe_gather_indices` is the M4 batch-emission contract (gather indices, materialise once
   per chunk, sq-pntvh.7). Also `join::delta::DeltaTable` — persistent build-side table with
   insertion-order-deterministic enumeration for the OWL-RL Δ⋈full fixpoint (sq-qonbz.1). Each

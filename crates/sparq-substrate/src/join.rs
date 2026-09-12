@@ -421,10 +421,30 @@ pub fn hash_probe_serial<B: Budget>(
 #[inline]
 pub fn bind_combine(result_rows: &[Row], ris: &[usize], new_vals: &[Id], out: &mut Vec<Row>) {
     for &ri in ris {
-        let mut combined = result_rows[ri].clone();
-        combined.extend(new_vals.iter().copied());
-        out.push(combined);
+        bind_emit(&result_rows[ri], new_vals, out);
     }
+}
+
+/// Appends one combined row per row in a contiguous bind-join group.
+///
+/// Pass the group's row slice and the new-variable values from one scanned match.
+/// Rows are appended in slice order, including duplicates; existing output is kept.
+/// Like [`bind_combine`], this only combines id tuples. The caller owns scanning,
+/// filtering and budget checks. No index vector is needed for the group.
+/// [GPT-6-ASTRA]
+#[inline]
+pub fn bind_combine_rows(result_rows: &[Row], new_vals: &[Id], out: &mut Vec<Row>) {
+    for row in result_rows {
+        bind_emit(row, new_vals, out);
+    }
+}
+
+// [GPT-6-ASTRA] Indexed and contiguous groups share the same row construction.
+#[inline]
+fn bind_emit(row: &Row, new_vals: &[Id], out: &mut Vec<Row>) {
+    let mut combined = row.clone();
+    combined.extend(new_vals.iter().copied());
+    out.push(combined);
 }
 
 // ---- Leapfrog Triejoin (WCOJ) ------------------------------------------------
@@ -1390,6 +1410,30 @@ mod tests {
         // distinct value matched result rows 0 and 2; the scanned triple's new vars are [99].
         bind_combine(&result, &[0, 2], &[99], &mut out);
         assert_eq!(out, vec![row(&[1, 10, 99]), row(&[3, 30, 99])]);
+    }
+
+    // [GPT-6-ASTRA] Exercise empty, interior and full slices, repeated rows, wide
+    // rows and projections, and append-to-existing-output semantics.
+    #[test]
+    fn bind_combine_rows_matches_indexed_groups_and_tuple_concatenation() {
+        let result = vec![row(&[1, 10]), row(&[2, 20, 30, 40]), row(&[2, 20, 30, 40]), row(&[3])];
+        for start in 0..=result.len() {
+            for end in start..=result.len() {
+                for new_vals in [&[][..], &[99][..], &[7, 8, 9][..]] {
+                    let prefix = vec![row(&[42, 43])];
+                    let mut sliced = prefix.clone();
+                    bind_combine_rows(&result[start..end], new_vals, &mut sliced);
+                    let mut indexed = prefix.clone();
+                    let indices: Vec<usize> = (start..end).collect();
+                    bind_combine(&result, &indices, new_vals, &mut indexed);
+                    let expected: Vec<Row> = prefix.into_iter().chain(
+                        result[start..end].iter().map(|r| r.iter().chain(new_vals).copied().collect())
+                    ).collect();
+                    assert_eq!(sliced, expected, "slice {start}..{end}, projection {new_vals:?}");
+                    assert_eq!(indexed, expected, "indexed {start}..{end}, projection {new_vals:?}");
+                }
+            }
+        }
     }
 
     // [OPUS-4.8] sq-qcnn.12 — DIRECT unit tests over the join kernels' descriptor projection,
