@@ -23,6 +23,7 @@
 
 from __future__ import annotations
 
+import collections
 import importlib.util
 import io
 import json
@@ -689,7 +690,10 @@ class TestGrouping(unittest.TestCase):
         self.assertIn("include", obj)
         total = 0
         for g in obj["include"]:
-            self.assertEqual(set(g.keys()), {"group", "cache_crate", "count", "legs"})
+            self.assertEqual(
+                set(g.keys()),
+                {"group", "cache_crate", "cache_save", "count", "legs"})
+            self.assertIsInstance(g["cache_save"], bool)
             inner = json.loads(g["legs"])  # legs is a JSON-encoded STRING (matrix scalar)
             self.assertEqual(len(inner), g["count"])
             total += g["count"]
@@ -731,6 +735,99 @@ class TestGrouping(unittest.TestCase):
         self.assertEqual(len(huge), 1)
         self.assertEqual(huge[0]["count"], 1,
                          "an over-capacity leg must stand alone, never merged")
+
+    # ---- sq-an4by: exactly one deterministic cache SEED per shared-key ----------
+    # The `cache_crate` value keys the rust-cache shared-key, several groups can
+    # carry the same one, and the Actions cache is IMMUTABLE — so at most one of
+    # them may attempt the save or they race for a key only the first writer gets.
+    def test_exactly_one_cache_seed_per_cache_crate(self):
+        groups = self.mod.group_legs(self.legs)
+        savers = collections.Counter(
+            g["cache_crate"] for g in groups if g["cache_save"])
+        keys = {g["cache_crate"] for g in groups}
+        self.assertEqual(set(savers), keys,
+                         "every rust-cache shared-key must have a saver, or that "
+                         "crate's dependency cache is never written on main")
+        for crate, n in savers.items():
+            self.assertEqual(n, 1,
+                             f"{crate} has {n} groups saving the SAME immutable "
+                             "cache key — only the first writer wins and the rest "
+                             "upload a whole target/ just to be rejected")
+
+    def test_cache_seed_is_the_widest_feature_group(self):
+        # The seed must be the group whose build populates the most of that
+        # crate's optional dependency graph — picking a narrow group is how a
+        # feature-specific dep (service -> ureq/serde_json) stays cold forever.
+        for g in self.mod.group_legs(self.legs):
+            if not g["cache_save"]:
+                continue
+            breadth = self.mod._feature_breadth(g)
+            for other in self.mod.group_legs(self.legs):
+                if other["cache_crate"] != g["cache_crate"]:
+                    continue
+                self.assertGreaterEqual(
+                    breadth, self.mod._feature_breadth(other),
+                    f"a NARROWER group seeds the {g['cache_crate']} cache")
+
+    def test_cache_seed_selection_is_deterministic_not_scheduling_noise(self):
+        # Group ORDER must not decide the seed: the whole defect being fixed is a
+        # winner chosen by whichever runner finished first.
+        groups = self.mod.group_legs(self.legs)
+        # Capture the winners as PLAIN STRINGS before reselecting: `reversed()`
+        # copies only the outer list, so the second pick_cache_seeds() rewrites
+        # `cache_save` on these very dicts. Reading the group ids afterwards on
+        # both sides would compare post-mutation state with itself and pass no
+        # matter which group won.
+        seeds = {g["cache_crate"] for g in groups if g["cache_save"]}
+        seed_ids = {g["group"] for g in groups if g["cache_save"]}
+        shuffled = self.mod.pick_cache_seeds(list(reversed(groups)))
+        self.assertEqual(
+            {g["cache_crate"] for g in shuffled if g["cache_save"]}, seeds)
+        self.assertEqual(
+            {g["group"] for g in shuffled if g["cache_save"]}, seed_ids,
+            "the SAME group must seed the cache regardless of ordering")
+
+    def test_cache_seed_tie_break_is_group_identity_not_list_position(self):
+        # The real leg set may have no exact (breadth, weight) tie, so the
+        # order-independence of the FINAL tie-breaker needs a synthetic pair:
+        # same crate, breadth 1 each, identical weight, distinct identities.
+        # A positional index as the tie-breaker hands the key to whichever group
+        # came first in the list — scheduling noise wearing a deterministic coat.
+        legs = [
+            {"name": "alpha", "crate": "c1", "features": "fa", "test": True,
+             "weight": self.mod.GROUP_CAPACITY},
+            {"name": "beta", "crate": "c1", "features": "fb", "test": True,
+             "weight": self.mod.GROUP_CAPACITY},
+        ]
+        groups = self.mod.group_legs(legs)
+        self.assertEqual(len(groups), 2, "each over-full leg gets its own group")
+        self.assertEqual({self.mod._feature_breadth(g) for g in groups}, {1},
+                         "the tie-break only decides once breadth is equal")
+        self.assertEqual(len({g["weight"] for g in groups}), 1,
+                         "the tie-break only decides once weight is equal")
+        # Plain strings, captured BEFORE the reselection mutates these dicts.
+        winner = sorted(g["group"] for g in groups if g["cache_save"])
+        self.assertEqual(len(winner), 1)
+        reselected = self.mod.pick_cache_seeds(list(reversed(groups)))
+        self.assertEqual(
+            sorted(g["group"] for g in reselected if g["cache_save"]), winner,
+            "a tied pair must resolve to the same seed in either order — the "
+            "tie-breaker must be a property of the group, not its list index")
+
+    def test_narrow_group_is_not_the_seed(self):
+        # Synthetic two-group crate: the heavy `service` leg (the extra deps) and
+        # a lightweight leg that must NOT win the key.
+        legs = [
+            {"name": "wide", "crate": "c1", "features": "service,geo,time-travel",
+             "test": True, "weight": self.mod.GROUP_CAPACITY},
+            {"name": "narrow", "crate": "c1", "features": "geo",
+             "test": True, "weight": self.mod.GROUP_CAPACITY},
+        ]
+        groups = self.mod.group_legs(legs)
+        self.assertEqual(len(groups), 2, "each over-full leg gets its own group")
+        seeds = [g for g in groups if g["cache_save"]]
+        self.assertEqual(len(seeds), 1)
+        self.assertEqual([leg["name"] for leg in seeds[0]["legs"]], ["wide"])
 
     def test_same_crate_legs_cluster_before_packing(self):
         # Two crates, each with legs that fit one bin: no group may interleave
@@ -814,6 +911,20 @@ class TestGroupedWorkflowWiring(unittest.TestCase):
 
     def test_assemble_step_uses_grouped_mode(self):
         self.assertIn("assemble-feature-matrix.py --grouped", self.text)
+
+    def test_group_job_cache_save_is_gated_on_the_seed_flag(self):
+        """sq-an4by: same-`cache_crate` groups share ONE immutable cache key, so
+        the save must be gated on the assembler's per-key seed flag as well as on
+        main — otherwise they race and the losers upload a target/ to be 409'd."""
+        caches = [s for s in self.job["steps"]
+                  if "Swatinem/rust-cache" in str(s.get("uses", ""))]
+        self.assertEqual(len(caches), 1, "the group job caches exactly once")
+        with_ = caches[0]["with"]
+        self.assertIn("matrix.cache_crate", str(with_["shared-key"]))
+        self.assertIn("matrix.cache_save", str(with_["save-if"]),
+                      "save-if must consult the cache-seed flag")
+        self.assertIn("refs/heads/main", str(with_["save-if"]),
+                      "PR / merge_group runs must stay restore-only")
 
     def test_group_job_runs_the_group_runner_script(self):
         runs = [s.get("run", "") for s in self.job["steps"]]
