@@ -166,6 +166,44 @@ class AddedLineParsing(unittest.TestCase):
         self.assertNotIn("+ b/scripts/a.py", pf.parse_added(diff)["scripts/a.py"])
 
 
+class Md018IssueReferenceDetection(unittest.TestCase):
+    """Explain the markdownlint failure caused by wrapped issue references."""
+
+    def _findings(self, text: str, path: str = "docs/x.md"):
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td) / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(text)
+            return pf.check_md018_issue_references([path], Path(td))
+
+    def test_column_zero_issue_reference_is_flagged(self) -> None:
+        findings = self._findings("See issue\n#6025 for the failure.\n")
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0].path, "docs/x.md:2")
+        self.assertIn("ATX heading", findings[0].detail)
+
+    def test_issue_reference_later_in_a_line_is_allowed(self) -> None:
+        self.assertEqual(self._findings("See #6025 for the failure.\n"), [])
+
+    def test_fenced_issue_reference_is_code_and_is_allowed(self) -> None:
+        self.assertEqual(self._findings("```text\n#6025\n```\n"), [])
+        self.assertEqual(self._findings("~~~~\n#6025\n~~~~\n"), [])
+
+    def test_non_markdown_files_are_out_of_scope(self) -> None:
+        self.assertEqual(self._findings("#6025\n", "scripts/example.txt"), [])
+
+    def test_main_returns_nonzero_for_the_issue_reference(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "docs").mkdir()
+            (root / "docs/x.md").write_text("#6025 is line-initial.\n")
+            changed = root / "changed.txt"
+            changed.write_text("docs/x.md\n")
+            rc = pf.main(["--root", str(root), "--changed-files", str(changed),
+                          "--only", "md018-issue-reference", "--quiet"])
+            self.assertEqual(rc, 1)
+
+
 class _Tree:
     """A throwaway git tree so check_guard_untested's `git ls-files` has something."""
 

@@ -3,8 +3,8 @@
 ## multi-axis-box.sh — bin-packed multi-axis canonical runner (sq-hmd7l.25)
 
 ONE dedicated quiet box instead of one box per small axis (the cost discipline of
-`research/comparative-benchmarking-everything.md` §4 point 5, design record PR
-#1768): provisions a single `purpose=sparq-bench` c6i.4xlarge, runs the
+`research/comparative-benchmarking-everything.md` §4 point 5, design record PR #1768):
+provisions a single `purpose=sparq-bench` c6i.4xlarge, runs the
 ordered wave-1 axis list (`fts geo hdt update parse`; override/reorder with
 `AXES=`) **strictly serially** — one axis, and therefore one engine, active at a
 time — then the box self-terminates.
