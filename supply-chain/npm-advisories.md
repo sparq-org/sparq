@@ -7,10 +7,11 @@
 # npm graph — advisory disposition (repo-root `package-lock.json`)
 
 > 🤖 SPARQ agent. This records the disposition of the Dependabot **npm** advisories that
-> repeatedly conclude `security_update_not_possible` on this repo, and — unlike a
+> historically concluded `security_update_not_possible` on this repo, and — unlike a
 > `dependabot.yml` `ignore:` entry — it suppresses **nothing**. The alerts stay open, the
 > GitHub-managed `Dependabot` check keeps reporting, and the check below REDs the moment
-> the lock moves off the state recorded here. Tracking issue: **#3767**.
+> the lock moves off the state recorded here. Historical tracking: **#3767** (closed);
+> the current sharp follow-up is tracked by **#6480 / #6481**.
 
 ## Why this file exists (and why not the VEX)
 
@@ -57,7 +58,7 @@ One hoisted instance, and the pin is **ours, not a dependent's**:
 | `node_modules/postcss` | 8.5.15 | root `package.json` `overrides.postcss` = `8.5.15` |
 
 This corrects the reading in #3767, which attributed the block to `next` / `@tailwindcss/postcss`
-pins. Those pins exist (`next@15.5.21` requires `postcss` exactly `8.4.31`;
+pins. Those pins exist (`next@15.5.24` requires `postcss` exactly `8.4.31`;
 `@tailwindcss/postcss@4.3.1` requires exactly `8.5.15`) — but the lock resolves a **single**
 hoisted `postcss@8.5.15` with **no nested copy under `next`**, which is only possible because
 the root `overrides` already force it past `next`'s exact pin. That override was added for
@@ -74,18 +75,28 @@ future bump should reconcile both declarations in one PR.
 
 ### `sharp` — Dependabot alert #32
 
-Same failure class per #3767 (three `security_update_not_possible` runs on 2026-07-22). One
-instance, reached as an **optional** dependency:
+The historical #3767 record reported three `security_update_not_possible` runs on
+2026-07-22. Next's dependency range has since widened; that historical result does not
+establish a current resolver block. One instance is reached as an **optional** dependency:
 
 | lock path | version | pinned by |
 |---|---|---|
-| `node_modules/sharp` | 0.34.5 | `node_modules/next` 15.5.21, `optionalDependencies.sharp` = `^0.34.3` |
+| `node_modules/sharp` | 0.35.4 | `node_modules/next` 15.5.24, `optionalDependencies.sharp` = `^0.34.3 \|\| ^0.35.3` |
 
-**Weaker claim than the two above.** Alert #32's current state and patched version were not
-re-verified when this record was written (no network), and `^0.34.3` is a *minor* range, so
-unlike `brace-expansion` a patched `0.34.x` may well be reachable — this may already be
-resolved. It is recorded so the tripwire fires when the instance moves; do not read its
-presence here as a claim that it is still blocked.
+<!-- [GPT-6 ASTRA] #6481: distinguish the candidate lock from default-branch alert state. -->
+On 2026-09-10, alert #32 was still **open** against the default branch's `sharp@0.34.5`.
+Its affected range is `<0.35.0`. The matching
+[upstream advisory](https://github.com/lovell/sharp/security/advisories/GHSA-f88m-g3jw-g9cj)
+describes vulnerabilities inherited from libvips when processing untrusted images and
+recommends updated prebuilt binaries. This candidate lock selects `sharp@0.35.4`, outside
+that affected range, under Next's existing range. Its published metadata requires
+libvips `>=8.18.6`; the native libvips packages are locked at `1.3.3`.
+
+This is a version-based candidate update, not evidence that the default branch or a
+deployment has been patched. Supported CI must still install and exercise the changed
+packages; globally installed libvips requires separate verification. The alert has not
+been dismissed, and closure awaits post-merge re-evaluation. The tripwire retains this
+entry to detect later lock drift, without asserting application exposure or exploitability.
 
 ## Do NOT add `dependabot.yml` `ignore:` entries
 
@@ -199,13 +210,13 @@ plus `npm ls <package>`.
       "instances": [
         {
           "path": "node_modules/sharp",
-          "version": "0.34.5",
+          "version": "0.35.4",
           "pinned_by": {
             "kind": "package",
             "path": "node_modules/next",
-            "version": "15.5.21",
+            "version": "15.5.24",
             "field": "optionalDependencies",
-            "range": "^0.34.3"
+            "range": "^0.34.3 || ^0.35.3"
           }
         }
       ]

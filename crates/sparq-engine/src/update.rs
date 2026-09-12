@@ -532,8 +532,9 @@ pub(crate) fn update_in_place_prepared_with_budget(
     upd: &Update,
     budget: &crate::QueryBudget,
 ) -> Result<(), String> {
-    let _budget = crate::exec::budget::install(budget);
-    apply_update_in_place(graph, upd, None)
+    crate::exec::budget::with_budget(budget, || {
+        apply_update_in_place(graph, upd, None)
+    })
 }
 
 // --- the delta-overlay path ------------------------------------------------------------------
@@ -725,9 +726,10 @@ fn update_in_place_core(
     budget: &crate::QueryBudget,
     sink: EffectSink,
 ) -> Result<(), String> {
-    let _budget = crate::exec::budget::install(budget);
-    let upd = SparqlParser::new().parse_update(sparql).map_err(|e| e.to_string())?;
-    apply_update_in_place(graph, &upd, sink)
+    crate::exec::budget::with_budget(budget, || {
+        let upd = SparqlParser::new().parse_update(sparql).map_err(|e| e.to_string())?;
+        apply_update_in_place(graph, &upd, sink)
+    })
 }
 
 /// The shared per-operation in-place apply loop over an ALREADY-PARSED `Update`.

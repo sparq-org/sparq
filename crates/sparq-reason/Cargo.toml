@@ -194,10 +194,10 @@ quick-xml = { version = "0.41", default-features = false, optional = true }
 # [FABLE-5] sq-pbz04.1.2 / [SONNET-4.6]: the ordering-parity ORACLE for the
 # `substrate-compare` seam — tests/compare_parity.rs runs a REAL engine `ORDER BY`
 # over the same materialised closure and asserts the reasoner-side sort is
-# byte-identical. `sparq-reason` is publishable (no `publish = false`), so the
-# dev-dep MUST carry a `version` alongside `path` (crates.io cannot resolve
-# path-only dev-deps; same pattern as sparq-cli/nlq/mcp). NO cycle: sparq-engine
-# does not depend on sparq-reason.
+# byte-identical. Keep a `version` alongside `path` so Cargo retains this test-only
+# registry edge in the published manifest; path-only dev-dependencies are instead
+# omitted when packaging. This edge creates no cycle because sparq-engine does not
+# depend on sparq-reason.
 sparq-engine = { path = "../sparq-engine", version = "0.1.1" }
 
 # [FABLE-5] sq-pbz04.1.2: the engine-vs-reasoner ordering-parity test — compiled only with

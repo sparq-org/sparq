@@ -74,19 +74,26 @@ pub(crate) mod budget {
 
     /// Copyable view of a cancellation flag owned by the installed [`QueryBudget`].
     ///
-    /// The [`Guard`] lifetime keeps that budget (and therefore its `Arc<AtomicBool>`)
-    /// alive until the pointer has been cleared from the thread-local state. Rayon
-    /// snapshots are consumed only by scoped parallel iterators that join before the
-    /// guard is dropped. The pointer is dereferenced only for atomic loads.
+    /// [GPT-6 Astra] ACTIVE belongs to the innermost live `with_budget` frame.
+    /// Each pointer is owned by a QueryBudget borrowed by a still-live frame on
+    /// this thread's stack. Private installation/restoration enforces nesting:
+    /// a restored parent's borrow outlives the child. Only `install`/`Guard::drop`
+    /// change ACTIVE's `cancel` pointer; other writers update width/bytes for the
+    /// innermost frame. Private construction and the four synchronous snapshot
+    /// consumers documented on `snapshot` uphold this usage-level invariant:
+    /// their parallel work joins before the owning frame returns, and pointer
+    /// dereferences are atomic loads.
     #[derive(Clone, Copy)]
     struct CancelPtr(NonNull<AtomicBool>);
 
     // SAFETY: `AtomicBool` is `Sync`; moving this shared pointer to a worker is
-    // sound because it is only dereferenced for atomic loads while `Guard` keeps
-    // the owning `Arc` alive, including across scoped rayon work.
+    // sound because only atomic loads occur while the owning `with_budget` frame
+    // borrows its QueryBudget, including until scoped rayon work joins. This relies
+    // on private construction and the four audited consumers documented on `snapshot`.
     unsafe impl Send for CancelPtr {}
     // SAFETY: `AtomicBool` is `Sync`; all shared access through `CancelPtr` is an
-    // atomic load, and `Guard` keeps the allocation alive until worker joins finish.
+    // atomic load; private construction and the four audited scoped-join consumers
+    // documented on `snapshot` keep the owning `with_budget` frame alive.
     unsafe impl Sync for CancelPtr {}
 
     /// Bytes one id-level binding cell occupies in a materialised `Row`. The
@@ -98,7 +105,7 @@ pub(crate) mod budget {
 
     /// The installed limits, flattened for a cheap per-check read.
     #[derive(Clone, Copy)]
-    pub(crate) struct Limits {
+    pub(in crate::exec) struct Limits {
         on: bool,
         #[cfg(not(target_arch = "wasm32"))]
         deadline: Option<std::time::Instant>,
@@ -147,7 +154,7 @@ pub(crate) mod budget {
         /// (sq-qk6ac)
         #[cfg_attr(not(feature = "parallel"), allow(dead_code))]
         #[inline]
-        pub(crate) fn why(&self, rows: usize) -> Option<&'static str> {
+        pub(in crate::exec) fn why(&self, rows: usize) -> Option<&'static str> {
             if !self.on {
                 return None;
             }
@@ -162,8 +169,8 @@ pub(crate) mod budget {
                 return Some("timeout");
             }
             if let Some(cancel) = self.cancel {
-                // SAFETY: `CancelPtr`'s invariant and the lifetime-bound `Guard`
-                // keep the `AtomicBool` alive for this scoped snapshot load.
+                // SAFETY: `CancelPtr`'s nested-frame invariant keeps the owning
+                // QueryBudget alive until this scoped snapshot load finishes.
                 if unsafe { cancel.0.as_ref() }.load(Ordering::Relaxed) {
                     return Some("cancelled");
                 }
@@ -179,7 +186,7 @@ pub(crate) mod budget {
         /// (and `snapshot`); the non-parallel (wasm) build compiles them out.
         #[cfg_attr(not(feature = "parallel"), allow(dead_code))]
         #[inline]
-        pub(crate) fn hit(&self, rows: usize) -> bool {
+        pub(in crate::exec) fn hit(&self, rows: usize) -> bool {
             self.why(rows).is_some()
         }
     }
@@ -189,20 +196,21 @@ pub(crate) mod budget {
         static EXCEEDED: Cell<Option<&'static str>> = const { Cell::new(None) };
     }
 
-    /// Clears the budget when the `*_with_budget` entry point returns (also on
-    /// error/unwind, so a poisoned thread never leaks a stale budget).
-    pub(crate) struct Guard<'a> {
+    // [GPT-6 Astra] Private: callers cannot forget or drop a frame out of order.
+    struct Guard<'a> {
+        previous: Limits,
+        exceeded: Option<&'static str>,
         _budget: std::marker::PhantomData<&'a QueryBudget>,
         _not_send: std::marker::PhantomData<std::rc::Rc<()>>,
     }
     impl Drop for Guard<'_> {
         fn drop(&mut self) {
-            ACTIVE.with(|a| a.set(OFF));
-            EXCEEDED.with(|e| e.set(None));
+            ACTIVE.with(|a| a.set(self.previous));
+            EXCEEDED.with(|e| e.set(self.exceeded));
         }
     }
 
-    pub(crate) fn install(b: &QueryBudget) -> Guard<'_> {
+    fn install(b: &QueryBudget) -> Guard<'_> {
         let cancel = b
             .cancel
             .as_ref()
@@ -214,8 +222,8 @@ pub(crate) mod budget {
             || cancel.is_some();
         #[cfg(target_arch = "wasm32")]
         let on = b.max_rows.is_some() || b.max_bytes.is_some() || cancel.is_some();
-        ACTIVE.with(|a| {
-            a.set(Limits {
+        let previous = ACTIVE.with(|a| {
+            a.replace(Limits {
                 on,
                 #[cfg(not(target_arch = "wasm32"))]
                 deadline: b.deadline,
@@ -226,11 +234,23 @@ pub(crate) mod budget {
                 cancel,
             })
         });
-        EXCEEDED.with(|e| e.set(None));
+        let exceeded = EXCEEDED.with(|e| e.replace(None));
         Guard {
+            previous,
+            exceeded,
             _budget: std::marker::PhantomData,
             _not_send: std::marker::PhantomData,
         }
+    }
+
+    /// [GPT-6 Astra] Runs a child budget, restoring its parent on return or unwind.
+    ///
+    /// Guard never escapes this frame. This enforces LIFO even for reentrant
+    /// callbacks, keeps each borrowed cancellation owner alive, and restores idle
+    /// OFF/None after a top-level call. Aborting panics have no continuation.
+    pub(crate) fn with_budget<T>(b: &QueryBudget, f: impl FnOnce() -> T) -> T {
+        let _guard = install(b);
+        f()
     }
 
     /// [OPUS-4.8] (sq-s5is) Sets the per-row byte width (= `width_in_ids ×
@@ -289,9 +309,15 @@ pub(crate) mod budget {
     }
 
     /// Snapshot of the installed limits, for the rayon-parallel branches.
+    ///
+    /// [GPT-6 Astra] This lifetime-free Copy is trusted only inside exec. It must
+    /// not escape its owning with_budget frame or enter detached work. The four
+    /// consumers are scan SELECT-JSON, bindings SELECT-JSON, parallel hash join,
+    /// and the parallel residual anti-join; all join before returning. A new
+    /// consumer must establish the same owner lifetime and scoped-join invariant.
     #[cfg_attr(not(feature = "parallel"), allow(dead_code))]
     #[inline]
-    pub(crate) fn snapshot() -> Limits {
+    pub(in crate::exec) fn snapshot() -> Limits {
         ACTIVE.with(|a| a.get())
     }
 
@@ -314,10 +340,12 @@ pub(crate) mod budget {
     ///   every 1024 rows and stops early). A blanket "fan out whenever a budget is
     ///   installed" was REJECTED for exactly this reason (roborev 1538 / audit item 6).
     ///
+    /// The returned snapshot has the same owning-frame/scoped-join invariant as
+    /// [`snapshot`]; scan SELECT-JSON is its sole production consumer.
     /// Compiled only for the `parallel` feature — the wasm/serial build never fans out.
     #[cfg(feature = "parallel")]
     #[inline]
-    pub(crate) fn parallel_json_fanout() -> Option<Limits> {
+    pub(in crate::exec) fn parallel_json_fanout() -> Option<Limits> {
         ACTIVE.with(|a| {
             let l = a.get();
             if l.on && (l.max_rows != usize::MAX || l.max_bytes != usize::MAX) {
@@ -383,6 +411,9 @@ pub(crate) mod budget {
     /// here — so the pre-burst snapshot is exactly the current state minus this burst.
     /// A deadline that elapsed during the burst is not masked: the next `exhausted`
     /// re-derives it from the wall clock. [OPUS-4.8] (sq-my8wd.4)
+    /// [GPT-6 Astra] A synchronous nested with_budget may finish between capture
+    /// and restore: it restores this frame verbatim first. Never apply a savepoint
+    /// while a different budget frame is active.
     #[cfg(any(feature = "service", feature = "service-local"))]
     #[inline]
     pub(crate) fn restore_bytes(sp: ByteSavepoint) {
@@ -419,8 +450,8 @@ pub(crate) mod budget {
             return true;
         }
         if let Some(cancel) = a.cancel {
-            // SAFETY: `CancelPtr`'s invariant and the lifetime-bound `Guard` keep
-            // the `AtomicBool` alive until this thread-local pointer is cleared.
+            // SAFETY: `CancelPtr`'s nested-frame invariant keeps this pointer
+            // owned by a live QueryBudget, also when restoring a parent frame.
             // Relaxed is sufficient because cancellation gates control flow only;
             // it never publishes or guards a shared query buffer. If that changes,
             // the load/store pair must become Acquire/Release.
@@ -474,6 +505,272 @@ pub(crate) mod budget {
         cap.min(a.max_rows.saturating_add(1)).min(by_bytes).min(1 << 20)
     }
 
+    // [GPT-6 Astra] Reentrant scopes must restore the complete owning frame.
+    #[cfg(test)]
+    mod nested_budget_tests {
+        use super::*;
+        use std::sync::Arc;
+
+        fn assert_state(want: Limits, sticky: Option<&'static str>) {
+            let got = ACTIVE.with(Cell::get);
+            assert_eq!(got.on, want.on);
+            assert_eq!(got.max_rows, want.max_rows);
+            assert_eq!(got.max_bytes, want.max_bytes);
+            assert_eq!(got.byte_width, want.byte_width);
+            assert_eq!(got.extra_bytes, want.extra_bytes);
+            assert_eq!(got.cancel.map(|p| p.0), want.cancel.map(|p| p.0));
+            #[cfg(not(target_arch = "wasm32"))]
+            assert_eq!(got.deadline, want.deadline);
+            assert_eq!(EXCEEDED.with(Cell::get), sticky);
+        }
+
+        #[test]
+        fn exact_parent_state_survives_three_levels_ok_err_and_unwind() {
+            let outer = QueryBudget {
+                max_rows: Some(7),
+                max_bytes: Some(4096),
+                ..QueryBudget::cancelled_by(Arc::new(AtomicBool::new(false)))
+            };
+            with_budget(&outer, || {
+                set_width(5);
+                add_bytes(37);
+                let parent = snapshot();
+                let child = QueryBudget {
+                    max_rows: Some(2),
+                    max_bytes: Some(128),
+                    ..QueryBudget::unlimited()
+                };
+                let result: Result<(), &str> = with_budget(&child, || {
+                    set_width(2);
+                    add_bytes(11);
+                    let middle = snapshot();
+                    with_budget(&QueryBudget::unlimited(), || {
+                        assert_eq!(check(usize::MAX), Ok(()))
+                    });
+                    assert_state(middle, None);
+                    assert!(check(3).is_err());
+                    Err("child error")
+                });
+                assert_eq!(result, Err("child error"));
+                assert_state(parent, None);
+                let panic = std::panic::catch_unwind(|| {
+                    with_budget(&child, || {
+                        add_bytes(1000);
+                        panic!("controlled child unwind");
+                    })
+                });
+                assert!(panic.is_err());
+                assert_state(parent, None);
+                assert_eq!(check(7), Ok(()));
+                assert!(check(8).is_err());
+            });
+            assert_state(OFF, None);
+            let top_level_panic = std::panic::catch_unwind(|| {
+                with_budget(&outer, || {
+                    set_width(9);
+                    add_bytes(5000);
+                    panic!("controlled top-level unwind");
+                });
+            });
+            assert!(top_level_panic.is_err());
+            assert_state(OFF, None);
+        }
+
+        #[test]
+        fn sticky_parent_errors_survive_clean_and_exhausted_children() {
+            for reason in ["max-rows", "max-bytes"] {
+                let outer = QueryBudget {
+                    max_rows: Some(2),
+                    max_bytes: Some(128),
+                    ..QueryBudget::unlimited()
+                };
+                with_budget(&outer, || {
+                    if reason == "max-rows" {
+                        assert!(check(3).is_err());
+                    } else {
+                        add_bytes(129);
+                    }
+                    let parent = snapshot();
+                    with_budget(&QueryBudget::unlimited(), || {
+                        assert_eq!(check(usize::MAX), Ok(()))
+                    });
+                    assert_state(parent, Some(reason));
+                    with_budget(
+                        &QueryBudget::cancelled_by(Arc::new(AtomicBool::new(true))),
+                        || {
+                            assert_eq!(
+                                check(0),
+                                Err("query budget exceeded (cancelled)".to_owned())
+                            );
+                        },
+                    );
+                    assert_state(parent, Some(reason));
+                    assert_eq!(check(0), Err(format!("query budget exceeded ({})", reason)));
+                });
+                assert_state(OFF, None);
+            }
+        }
+
+        #[test]
+        fn live_parent_cancel_is_distinct_from_child_cancel() {
+            let parent_flag = Arc::new(AtomicBool::new(false));
+            let child_flag = Arc::new(AtomicBool::new(false));
+            let outer = QueryBudget::cancelled_by(Arc::clone(&parent_flag));
+            let child = QueryBudget::cancelled_by(Arc::clone(&child_flag));
+            with_budget(&outer, || {
+                let parent = snapshot();
+                with_budget(&child, || {
+                    parent_flag.store(true, Ordering::Relaxed);
+                    assert_eq!(check(0), Ok(()));
+                    child_flag.store(true, Ordering::Relaxed);
+                    assert!(check(0).is_err());
+                });
+                assert_state(parent, None);
+                assert_eq!(
+                    check(0),
+                    Err("query budget exceeded (cancelled)".to_owned())
+                );
+            });
+            assert_state(OFF, None);
+        }
+
+        #[test]
+        #[cfg(not(target_arch = "wasm32"))]
+        fn expired_parent_deadline_returns_after_unlimited_child_without_sleep() {
+            let parent = QueryBudget {
+                deadline: Some(std::time::Instant::now()),
+                ..QueryBudget::unlimited()
+            };
+            with_budget(&parent, || {
+                with_budget(&QueryBudget::unlimited(), || assert_eq!(check(0), Ok(())));
+                assert_eq!(check(0), Err("query budget exceeded (timeout)".to_owned()));
+            });
+            assert_state(OFF, None);
+        }
+
+        #[test]
+        #[cfg(any(feature = "service", feature = "service-local"))]
+        fn service_savepoint_brackets_a_fully_returned_nested_budget() {
+            let parent = QueryBudget {
+                max_bytes: Some(128),
+                ..QueryBudget::unlimited()
+            };
+            with_budget(&parent, || {
+                set_width(3);
+                add_bytes(19);
+                let original = snapshot();
+                let mark = byte_savepoint();
+                with_budget(&QueryBudget::unlimited(), || {
+                    assert_eq!(check(usize::MAX), Ok(()))
+                });
+                add_bytes(200);
+                assert!(check(0).is_err());
+                restore_bytes(mark);
+                assert_state(original, None);
+                assert_eq!(check(0), Ok(()));
+            });
+            assert_state(OFF, None);
+        }
+
+        #[test]
+        fn snapshots_join_two_workers_before_parent_cancel_owner_returns() {
+            let flag = Arc::new(AtomicBool::new(true));
+            let parent = QueryBudget::cancelled_by(flag);
+            with_budget(&parent, || {
+                let snap = snapshot();
+                let owner = std::thread::current().id();
+                std::thread::scope(|scope| {
+                    let a = scope.spawn(|| (std::thread::current().id(), snap.why(0), check(0)));
+                    let b = scope.spawn(|| (std::thread::current().id(), snap.why(0), check(0)));
+                    let a = a.join().unwrap();
+                    let b = b.join().unwrap();
+                    assert_ne!(a.0, owner);
+                    assert_ne!(b.0, owner);
+                    assert_ne!(a.0, b.0);
+                    assert_eq!(a.1, Some("cancelled"));
+                    assert_eq!(b.1, Some("cancelled"));
+                    assert_eq!(a.2, Ok(()));
+                    assert_eq!(b.2, Ok(()));
+                });
+            });
+            assert_state(OFF, None);
+        }
+
+        #[test]
+        fn public_extension_nested_query_preserves_outer_cancel() {
+            use oxrdf::{Literal, Term};
+            use sparq_core::Graph;
+            use std::sync::atomic::AtomicUsize;
+            for inner in 0..5 {
+                let graph = Graph::load_str("", "turtle").unwrap();
+                let nested = Graph::load_str("", "turtle").unwrap();
+                let flag = Arc::new(AtomicBool::new(false));
+                let calls = Arc::new(AtomicUsize::new(0));
+                let callback_flag = Arc::clone(&flag);
+                let callback_calls = Arc::clone(&calls);
+                let owner = std::thread::current().id();
+                let mut functions = crate::FunctionRegistry::new();
+                functions.register("urn:nested", move |_| {
+                    // Pin this one-row plan to serial callback evaluation: the
+                    // nested call must overwrite the same TLS as the outer query.
+                    assert_eq!(std::thread::current().id(), owner);
+                    callback_calls.fetch_add(1, Ordering::Relaxed);
+                    match inner {
+                        0 => {}
+                        1 => {
+                            assert_eq!(crate::query(&nested, "ASK {}").unwrap().rows.len(), 1);
+                        }
+                        2 => {
+                            let child = QueryBudget {
+                                max_rows: Some(1),
+                                ..QueryBudget::unlimited()
+                            };
+                            assert_eq!(
+                                crate::query_with_budget(&nested, "ASK {}", &child)
+                                    .unwrap()
+                                    .rows
+                                    .len(),
+                                1
+                            );
+                        }
+                        3 => {
+                            // Parse rejection occurs before a child budget is installed.
+                            assert!(crate::query(&nested, "not SPARQL").is_err());
+                        }
+                        _ => {
+                            // [GPT-6 Astra] This valid graph form reaches the error
+                            // arm inside query_prepared_with_budget's budget scope.
+                            let sparql = "CONSTRUCT { ?s ?p ?o } WHERE {}";
+                            assert!(crate::PreparedQuery::parse(sparql).unwrap().is_graph_form());
+                            let outer = ACTIVE.with(Cell::get);
+                            assert_eq!(
+                                crate::query(&nested, sparql).unwrap_err(),
+                                "only SELECT and ASK queries are supported"
+                            );
+                            assert_state(outer, None);
+                        }
+                    }
+                    callback_flag.store(true, Ordering::Relaxed);
+                    Ok(Term::Literal(Literal::from(7)))
+                });
+                let result = crate::query_with_functions_and_budget(
+                    &graph,
+                    "SELECT (<urn:nested>() AS ?value) WHERE {}",
+                    &functions,
+                    &QueryBudget::cancelled_by(flag),
+                );
+                assert_eq!(calls.load(Ordering::Relaxed), 1);
+                assert_eq!(
+                    result.unwrap_err(),
+                    "query budget exceeded (cancelled)",
+                    "inner={}",
+                    inner
+                );
+                assert_eq!(crate::query(&graph, "ASK {}").unwrap().rows.len(), 1);
+            }
+        }
+    }
+
     /// [SONNET-4.6] (sq-qk6ac) Direct tests for `Limits::why` — the pure gate the
     /// rayon-parallel loops poll. Its contract has two load-bearing halves: it agrees
     /// with `Limits::hit`, and its reason string is EXACTLY the one `check` would raise,
@@ -487,27 +784,29 @@ pub(crate) mod budget {
         /// Asserts that under `budget` the snapshot reports `want` at `rows`, that `hit`
         /// agrees, and that the reason is the very string `check` puts in its error.
         fn assert_reason(budget: &QueryBudget, rows: usize, want: &'static str) {
-            let _guard = install(budget);
-            let snap = snapshot();
-            assert_eq!(snap.why(rows), Some(want), "wrong snapshot reason for {}", want);
-            assert!(snap.hit(rows), "hit must agree with why for {}", want);
-            assert_eq!(
-                check(rows),
-                Err(format!("query budget exceeded ({})", want)),
-                "the worker-visible reason must match the on-thread error for {}",
-                want
-            );
+            with_budget(budget, || {
+                let snap = snapshot();
+                assert_eq!(snap.why(rows), Some(want), "wrong snapshot reason for {}", want);
+                assert!(snap.hit(rows), "hit must agree with why for {}", want);
+                assert_eq!(
+                    check(rows),
+                    Err(format!("query budget exceeded ({})", want)),
+                    "the worker-visible reason must match the on-thread error for {}",
+                    want
+                );
+            })
         }
 
         /// `why` and `hit` are one decision, and an unbudgeted snapshot never trips.
         #[test]
         fn unbudgeted_snapshot_has_no_reason() {
             let budget = QueryBudget::unlimited();
-            let _guard = install(&budget);
-            let snap = snapshot();
-            assert_eq!(snap.why(0), None, "an unlimited budget must report no reason");
-            assert_eq!(snap.why(usize::MAX), None, "no row cap ⇒ no reason at any row count");
-            assert!(!snap.hit(usize::MAX), "hit must agree with why");
+            with_budget(&budget, || {
+                let snap = snapshot();
+                assert_eq!(snap.why(0), None, "an unlimited budget must report no reason");
+                assert_eq!(snap.why(usize::MAX), None, "no row cap ⇒ no reason at any row count");
+                assert!(!snap.hit(usize::MAX), "hit must agree with why");
+            })
         }
 
         /// Each limit reports ITS OWN reason, and the string matches `check`'s message.
@@ -538,10 +837,11 @@ pub(crate) mod budget {
         #[test]
         fn a_limit_not_yet_crossed_reports_nothing() {
             let budget = QueryBudget { max_rows: Some(4), ..QueryBudget::unlimited() };
-            let _guard = install(&budget);
-            let snap = snapshot();
-            assert_eq!(snap.why(4), None, "a row count AT the cap is still admitted");
-            assert_eq!(snap.why(5), Some("max-rows"), "one past the cap trips");
+            with_budget(&budget, || {
+                let snap = snapshot();
+                assert_eq!(snap.why(4), None, "a row count AT the cap is still admitted");
+                assert_eq!(snap.why(5), Some("max-rows"), "one past the cap trips");
+            })
         }
 
         /// The crux the parallel verdict loop depends on: a WORKER thread has no budget
@@ -551,19 +851,20 @@ pub(crate) mod budget {
         fn snapshot_is_the_only_signal_a_worker_thread_can_see() {
             let flag = Arc::new(AtomicBool::new(true));
             let budget = QueryBudget::cancelled_by(Arc::clone(&flag));
-            let _guard = install(&budget);
-            let snap = snapshot();
+            with_budget(&budget, || {
+                let snap = snapshot();
 
-            let (worker_poll, worker_reason) = std::thread::scope(|s| {
-                s.spawn(|| (check(0), snap.why(0))).join().expect("worker must not panic")
-            });
-            assert_eq!(worker_poll, Ok(()), "the thread-local budget is invisible to a worker");
-            assert_eq!(
-                worker_reason,
-                Some("cancelled"),
-                "the captured snapshot must carry the cancellation across threads"
-            );
-            assert_eq!(check(0), Err("query budget exceeded (cancelled)".to_owned()));
+                let (worker_poll, worker_reason) = std::thread::scope(|s| {
+                    s.spawn(|| (check(0), snap.why(0))).join().expect("worker must not panic")
+                });
+                assert_eq!(worker_poll, Ok(()), "the thread-local budget is invisible to a worker");
+                assert_eq!(
+                    worker_reason,
+                    Some("cancelled"),
+                    "the captured snapshot must carry the cancellation across threads"
+                );
+                assert_eq!(check(0), Err("query budget exceeded (cancelled)".to_owned()));
+            })
         }
     }
 
@@ -578,15 +879,25 @@ pub(crate) mod budget {
         fn cancel_flag_zero_vs_one_trips_both_poll_paths() {
             let flag = Arc::new(AtomicBool::new(false));
             let budget = QueryBudget::unlimited().with_cancel(Arc::clone(&flag));
-            let _guard = install(&budget);
+            with_budget(&budget, || {
+                assert!(
+                    !snapshot().hit(0),
+                    "false control must not trip the rayon snapshot"
+                );
+                assert_eq!(
+                    check(0),
+                    Ok(()),
+                    "false control must not trip the local poll"
+                );
 
-            assert!(!snapshot().hit(0), "false control must not trip the rayon snapshot");
-            assert_eq!(check(0), Ok(()), "false control must not trip the local poll");
-
-            flag.store(true, Ordering::Relaxed);
-            assert!(snapshot().hit(0), "true flag must trip the rayon snapshot");
-            assert_eq!(check(0), Err("query budget exceeded (cancelled)".to_owned()));
-            assert_eq!(EXCEEDED.with(Cell::get), Some("cancelled"));
+                flag.store(true, Ordering::Relaxed);
+                assert!(snapshot().hit(0), "true flag must trip the rayon snapshot");
+                assert_eq!(
+                    check(0),
+                    Err("query budget exceeded (cancelled)".to_owned())
+                );
+                assert_eq!(EXCEEDED.with(Cell::get), Some("cancelled"));
+            })
         }
 
         #[test]
@@ -4128,8 +4439,9 @@ fn in_scope_vars(p: &GraphPattern) -> Vec<Variable> {
 const CAPPED_SEED_BLOCK: usize = 1024;
 /// Second-tier block: one escalation before the remainder is processed whole, so a
 /// first-block miss still avoids the full chain when a solution lives within the
-/// first ~64k seed rows. Exactly two escalations bound the per-step rhs re-scan
-/// overhead of a NO-solution (ASK false) query at 3x the single-pass scans.
+/// first ~64k seed rows. Exactly two escalations bound a NO-solution query to
+/// three blocks; identical non-bind RHS scans may be reused within a private storage
+/// allowance when no budget is armed.
 const CAPPED_SEED_BLOCK_2: usize = 65_536;
 
 /// Capped conjunctive (BGP + FILTER) evaluation — the ASK / LIMIT-k first-solutions
@@ -4191,9 +4503,19 @@ fn eval_bgp_binary_capped(
         None,
     );
 
+    #[cfg(test)]
+    capped_rhs_tests::observe(0);
+    // [GPT-6 Astra] Query-local and lazy: never scan an unreached step. Pattern
+    // filters are immutable here; each slot also keys the requested scan order.
+    // Armed budgets retain the old per-step lifetime and polling: their working-set
+    // estimate does not account for multiple retained RHS relations.
+    let reuse_rhs = !budget::active();
+    let (mut rhs_cache, mut rhs_remaining) = capped_rhs_cache(prepared.len(), reuse_rhs);
     let mut acc: Option<Bindings> = None;
     let mut start = 0usize;
     while start < seed_all.rows.len() {
+        #[cfg(test)]
+        capped_rhs_tests::observe(1);
         let end = if start == 0 {
             CAPPED_SEED_BLOCK.min(seed_all.rows.len())
         } else if start == CAPPED_SEED_BLOCK {
@@ -4231,28 +4553,50 @@ fn eval_bgp_binary_capped(
                 let jv = &connecting[0];
                 let rk = result.col(jv).unwrap();
                 let pp = prepared[i].var_pos(jv).unwrap();
+                #[cfg(test)]
+                capped_rhs_tests::observe(3);
+                #[cfg(test)]
+                capped_rhs_tests::step(start, i, "bind", None, false, None);
                 result = bind_join(graph, result, &prepared[i].id_pat, &prepared[i].pos_vars, rk, pp, pfilter(i));
             } else {
                 let filt = pfilter(i);
                 let merge_var = result.sorted_by.clone().filter(|sv| prepared[i].var_pos(sv).is_some());
                 let scan_sort = filt.map(|(c, _)| c).or_else(|| merge_var.as_ref().map(|jv| prepared[i].var_pos(jv).unwrap()));
-                let rhs = scan_to_bindings(
-                    graph,
-                    &prepared[i].id_pat,
-                    &prepared[i].pos_vars,
-                    scan_sort,
-                    filt,
-                    None,
-                    #[cfg(feature = "semijoin-bitmap")]
-                    None,
-                );
+                let mut uncached = None;
+                let mut spare_slot = None;
+                let slot = rhs_cache.get_mut(i).unwrap_or(&mut spare_slot);
+                #[cfg(test)]
+                let mut scanned = false;
+                let rhs = capped_rhs(slot, &mut rhs_remaining, &mut uncached, scan_sort, || {
+                    #[cfg(test)]
+                    {
+                        capped_rhs_tests::observe(2);
+                        scanned = true;
+                    }
+                    scan_to_bindings(
+                        graph,
+                        &prepared[i].id_pat,
+                        &prepared[i].pos_vars,
+                        scan_sort,
+                        filt,
+                        None,
+                        #[cfg(feature = "semijoin-bitmap")]
+                        None,
+                    )
+                });
                 let connected = prepared[i].pos_vars.iter().flatten().any(|v| result.vars.contains(v));
                 if let Some(jv) = merge_var.filter(|jv| rhs.sorted_by.as_ref() == Some(jv)) {
-                    result = merge_join(result, rhs, &jv);
+                    #[cfg(test)]
+                    capped_rhs_tests::step(start, i, "merge", scan_sort, scanned, rhs.sorted_by.as_ref());
+                    result = merge_join_ref(&result, rhs, &jv);
                 } else if connected {
-                    result = hash_join(result, rhs);
+                    #[cfg(test)]
+                    capped_rhs_tests::step(start, i, "hash", scan_sort, scanned, rhs.sorted_by.as_ref());
+                    result = hash_join_ref(&result, rhs);
                 } else {
-                    result = cross_product(result, rhs);
+                    #[cfg(test)]
+                    capped_rhs_tests::step(start, i, "cross", scan_sort, scanned, rhs.sorted_by.as_ref());
+                    result = cross_product_ref(&result, rhs);
                 }
             }
             record_pattern_ndv(graph, &prepared, i, cur_card, &mut var_ndv, &cs_ctx);
@@ -4293,6 +4637,95 @@ fn eval_bgp_binary_capped(
         start = end;
     }
     Ok(Some(acc.unwrap_or_else(|| Bindings::unsorted(collect_vars(patterns), vec![]))))
+}
+
+// [GPT-6 Astra] Conservative private allowance for retained scan storage, not a
+// public QueryBudget or a limit on transient join/scan allocations. Keep room below
+// the diagnostic's extra-heap rejection threshold; do not retain one RHS per pattern.
+const CAPPED_RHS_STORAGE: usize = 4 * 1024 * 1024;
+// Requested order, immutable scan relation, and its charged allocated storage.
+type CappedRhs = (Option<usize>, Bindings, usize);
+
+fn capped_rhs_cache(len: usize, enabled: bool) -> (Vec<Option<CappedRhs>>, usize) {
+    let mut slots = Vec::new();
+    if !enabled
+        || len
+            .checked_mul(std::mem::size_of::<Option<CappedRhs>>())
+            .is_none_or(|bytes| bytes > CAPPED_RHS_STORAGE)
+        || slots.try_reserve_exact(len).is_err()
+    {
+        return (slots, 0);
+    }
+    let Some(bytes) = slots
+        .capacity()
+        .checked_mul(std::mem::size_of::<Option<CappedRhs>>())
+        .filter(|&bytes| bytes <= CAPPED_RHS_STORAGE)
+    else {
+        return (Vec::new(), 0);
+    };
+    slots.resize_with(len, || None);
+    (slots, CAPPED_RHS_STORAGE - bytes)
+}
+
+// [GPT-6 Astra] Count capacities, not planner estimates or populated lengths.
+// Scan rows have at most three ids and fit inline; decline an unproved spilled
+// representation. Variable owns a String, whose capacity is exposed by its safe
+// consuming API; move it out and back without cloning or allocating its text.
+fn capped_rhs_storage(rhs: &mut Bindings, allowance: usize) -> Option<usize> {
+    let mut bytes = rhs
+        .rows
+        .capacity()
+        .checked_mul(std::mem::size_of::<Row>())?
+        .checked_add(
+            rhs.vars
+                .capacity()
+                .checked_mul(std::mem::size_of::<Variable>())?,
+        )?;
+    if bytes > allowance || rhs.rows.iter().any(Row::spilled) {
+        return None;
+    }
+    for variable in rhs.vars.iter_mut().chain(rhs.sorted_by.iter_mut()) {
+        let name =
+            std::mem::replace(variable, Variable::new_unchecked(String::new())).into_string();
+        let capacity = name.capacity();
+        *variable = Variable::new_unchecked(name);
+        bytes = bytes.checked_add(capacity)?;
+        if bytes > allowance {
+            return None;
+        }
+    }
+    Some(bytes)
+}
+
+// [GPT-6 Astra] Reuse requires a pure scan of the same immutable prepared pattern,
+// filters and requested order. Actual sorted_by remains the scan's truthful value.
+// Fitting entries live until order replacement/query exit; non-fitting entries live
+// only in the caller's per-step scratch. Allocator metadata is outside this allowance.
+fn capped_rhs<'a>(
+    slot: &'a mut Option<CappedRhs>,
+    remaining: &mut usize,
+    uncached: &'a mut Option<Bindings>,
+    sort: Option<usize>,
+    scan: impl FnOnce() -> Bindings,
+) -> &'a Bindings {
+    if slot
+        .as_ref()
+        .is_none_or(|(cached_sort, _, _)| *cached_sort != sort)
+    {
+        if let Some(old) = slot.take() {
+            *remaining += old.2;
+            drop(old); // release stale ownership/accounting before its replacement scan
+        }
+        let mut rhs = scan();
+        if let Some(bytes) = capped_rhs_storage(&mut rhs, *remaining) {
+            *remaining -= bytes;
+            *slot = Some((sort, rhs, bytes));
+        } else {
+            *uncached = Some(rhs);
+            return uncached.as_ref().unwrap();
+        }
+    }
+    &slot.as_ref().unwrap().1
 }
 
 /// Distinct (non-repeated) variable positions of a prepared pattern, or `None` if
@@ -8574,6 +9007,11 @@ fn scan_to_bindings(
 }
 
 fn merge_join(left: Bindings, right: Bindings, jv: &Variable) -> Bindings {
+    merge_join_ref(&left, &right, jv)
+}
+
+// [GPT-6 Astra] Borrow rows so the capped caller can reuse its RHS without cloning it.
+fn merge_join_ref(left: &Bindings, right: &Bindings, jv: &Variable) -> Bindings {
     let lk = left.col(jv).unwrap();
     let rk = right.col(jv).unwrap();
     let mut out_vars = left.vars.clone();
@@ -8626,6 +9064,11 @@ use sjoin::{any_unbound, compatible, merge_rows};
 use sjoin::{key_hash, JOIN_PARTS};
 
 fn hash_join(left: Bindings, right: Bindings) -> Bindings {
+    hash_join_ref(&left, &right)
+}
+
+// [GPT-6 Astra] Borrow rows so the capped caller can reuse its RHS without cloning it.
+fn hash_join_ref(left: &Bindings, right: &Bindings) -> Bindings {
     // Build the hash table on the smaller side.
     let (build, probe) = if left.rows.len() <= right.rows.len() {
         (left, right)
@@ -9163,6 +9606,11 @@ mod bind_join_run_grouping {
 }
 
 fn cross_product(left: Bindings, right: Bindings) -> Bindings {
+    cross_product_ref(&left, &right)
+}
+
+// [GPT-6 Astra] Borrow rows so the capped caller can reuse its RHS without cloning it.
+fn cross_product_ref(left: &Bindings, right: &Bindings) -> Bindings {
     let mut out_vars = left.vars.clone();
     out_vars.extend(right.vars.iter().cloned());
     let mut rows = Vec::with_capacity(budget::cap_alloc(left.rows.len().saturating_mul(right.rows.len())));
@@ -17338,10 +17786,11 @@ mod service_exec_tests {
         // A cap the ONE discarded remote literal (interned twice) blows, but the SILENT
         // fallback's own working set (one identity row) fits well under.
         let b = crate::QueryBudget { max_bytes: Some(64), ..crate::QueryBudget::unlimited() };
-        let _bg = budget::install(&b);
-        let res = eval_select(&g, &p)
-            .expect("SILENT mid-stream error must roll back the discarded row's byte charge");
-        assert_eq!(res.rows.len(), 1, "SILENT verbatim -> identity -> one (unbound ?o) row");
+        budget::with_budget(&b, || {
+            let res = eval_select(&g, &p)
+                .expect("SILENT mid-stream error must roll back the discarded row's byte charge");
+            assert_eq!(res.rows.len(), 1, "SILENT verbatim -> identity -> one (unbound ?o) row");
+        })
     }
 
     #[test]
@@ -17360,10 +17809,11 @@ mod service_exec_tests {
              { ?s a ex:T . SERVICE SILENT <http://remote/> { ?s ex:p ?o } }",
         );
         let b = crate::QueryBudget { max_bytes: Some(64), ..crate::QueryBudget::unlimited() };
-        let _bg = budget::install(&b);
-        let res = eval_select(&g, &p)
-            .expect("bind-join SILENT mid-stream error must roll back the discarded row's byte charge");
-        assert_eq!(res.rows.len(), 1, "SILENT block failure -> identity -> local ?s=ex:a row survives");
+        budget::with_budget(&b, || {
+            let res = eval_select(&g, &p)
+                .expect("bind-join SILENT mid-stream error must roll back the discarded row's byte charge");
+            assert_eq!(res.rows.len(), 1, "SILENT block failure -> identity -> local ?s=ex:a row survives");
+        })
     }
 
     #[test]
@@ -17874,16 +18324,21 @@ mod service_exec_tests {
             deadline: Some(Instant::now() + Duration::from_secs(10)),
             ..crate::QueryBudget::unlimited()
         };
-        let _g = budget::install(&b);
-        let r = budget::remaining_timeout().expect("deadline installed");
-        assert!(r <= Duration::from_secs(10) && r > Duration::from_secs(8), "got {r:?}");
-        // An expired deadline saturates to ZERO (never panics / underflows).
-        let b2 = crate::QueryBudget {
-            deadline: Some(Instant::now() - Duration::from_millis(1)),
-            ..crate::QueryBudget::unlimited()
-        };
-        let _g2 = budget::install(&b2);
-        assert_eq!(budget::remaining_timeout(), Some(Duration::ZERO));
+        budget::with_budget(&b, || {
+            let r = budget::remaining_timeout().expect("deadline installed");
+            assert!(
+                r <= Duration::from_secs(10) && r > Duration::from_secs(8),
+                "got {r:?}"
+            );
+            // An expired deadline saturates to ZERO (never panics / underflows).
+            let b2 = crate::QueryBudget {
+                deadline: Some(Instant::now() - Duration::from_millis(1)),
+                ..crate::QueryBudget::unlimited()
+            };
+            budget::with_budget(&b2, || {
+                assert_eq!(budget::remaining_timeout(), Some(Duration::ZERO));
+            })
+        })
     }
 }
 
@@ -21175,6 +21630,611 @@ mod order_bindings_worker_reinstall {
             result.len(),
             n,
             "all {n} rows must survive ORDER BY with custom function on parallel dataset"
+        );
+    }
+}
+
+// [GPT-6 Astra] Actual public-query path and physical RHS-work witness for #3105.
+#[cfg(test)]
+mod capped_rhs_tests {
+    use super::*;
+    use std::cell::{Cell, RefCell};
+
+    thread_local! {
+        static WORK: Cell<[usize; 4]> = const { Cell::new([0; 4]) };
+        static STEPS: RefCell<Option<Vec<Step>>> = const { RefCell::new(None) };
+    }
+
+    // [GPT-6 Astra] Observe the actual branch, scan closure and returned metadata.
+    #[derive(Debug, PartialEq, Eq)]
+    struct Step {
+        start: usize,
+        pattern: usize,
+        kernel: &'static str,
+        requested: Option<usize>,
+        scanned: bool,
+        actual: Option<String>,
+    }
+
+    pub(super) fn step(
+        start: usize,
+        pattern: usize,
+        kernel: &'static str,
+        requested: Option<usize>,
+        scanned: bool,
+        actual: Option<&Variable>,
+    ) {
+        STEPS.with_borrow_mut(|steps| {
+            if let Some(steps) = steps {
+                steps.push(Step {
+                    start,
+                    pattern,
+                    kernel,
+                    requested,
+                    scanned,
+                    actual: actual.map(|v| v.as_str().to_owned()),
+                });
+            }
+        });
+    }
+
+    fn trace<T>(f: impl FnOnce() -> T) -> (T, Vec<Step>) {
+        STEPS.with_borrow_mut(|steps| *steps = Some(Vec::new()));
+        let result = f();
+        let steps = STEPS.with_borrow_mut(|steps| steps.take().unwrap());
+        (result, steps)
+    }
+
+    fn bag(result: &crate::QueryResult) -> std::collections::BTreeMap<Vec<String>, usize> {
+        let mut bag = std::collections::BTreeMap::new();
+        for row in &result.rows {
+            *bag.entry(
+                row.iter()
+                    .map(|v| v.as_ref().unwrap().to_string())
+                    .collect(),
+            )
+            .or_default() += 1;
+        }
+        bag
+    }
+
+    #[test]
+    fn capped_rhs_changing_sort_mixed_kernels_preserves_full_bag() {
+        let mut ttl = String::from("@prefix : <http://ex/> .\n");
+        for i in 0..70_000 {
+            // Projection deliberately collapses pairs, making multiplicity observable.
+            ttl.push_str(&format!(":s{i} :p {} ; :q {i} ; :r {i} .\n", i / 2));
+        }
+        ttl.push_str(":extra1 :q 70001 ; :r 70001 . :extra2 :r 70002 .");
+        let graph = Graph::load_str(&ttl, "turtle").unwrap();
+        let query = "PREFIX : <http://ex/> SELECT ?o WHERE { ?s :p ?o . ?s :q ?x . ?s :r ?x . FILTER(?o + 0 >= 0) }";
+        let full = crate::query(&graph, query).unwrap();
+        let (limited, steps) =
+            trace(|| crate::query(&graph, &format!("{query} LIMIT 70001")).unwrap());
+        println!("changing-sort actual steps: {steps:?}");
+        assert_eq!(limited.rows.len(), 70_000);
+        assert_eq!(bag(&limited), bag(&full));
+        let expected: std::collections::BTreeMap<_, _> = (0..35_000)
+            .map(|i| (vec![oxrdf::Literal::from(i).to_string()], 2))
+            .collect();
+        assert_eq!(bag(&limited), expected);
+        let q: Vec<_> = steps
+            .iter()
+            .filter(|s| s.pattern == 1)
+            .map(|s| {
+                (
+                    s.start,
+                    s.kernel,
+                    s.requested,
+                    s.scanned,
+                    s.actual.as_deref(),
+                )
+            })
+            .collect();
+        let r: Vec<_> = steps
+            .iter()
+            .filter(|s| s.pattern == 2)
+            .map(|s| (s.start, s.requested, s.scanned, s.actual.as_deref()))
+            .collect();
+        if sparq_core::store::BUILT.contains(&sparq_core::store::Perm::Pso) {
+            assert_eq!(
+                q,
+                [
+                    (0, "bind", None, false, None),
+                    (1024, "merge", Some(0), true, Some("s")),
+                    (65536, "bind", None, false, None)
+                ]
+            );
+            assert_eq!(
+                r,
+                [
+                    (0, None, true, Some("s")),
+                    (1024, Some(0), true, Some("s")),
+                    (65536, None, true, Some("s"))
+                ]
+            );
+        } else {
+            // Three permutations return object order: no false subject-order claim,
+            // and the unchanged None request must reuse the actually unsorted-for-s RHS.
+            assert_eq!(
+                q,
+                [
+                    (0, "bind", None, false, None),
+                    (1024, "hash", None, true, Some("x")),
+                    (65536, "bind", None, false, None)
+                ]
+            );
+            assert_eq!(
+                r,
+                [
+                    (0, None, true, Some("x")),
+                    (1024, None, false, Some("x")),
+                    (65536, None, false, Some("x"))
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn capped_rhs_replacement_releases_old_slot_before_scan() {
+        let mut initial = Bindings::unsorted(
+            vec![Variable::new("x").unwrap()],
+            vec![Row::from_slice(&[1])],
+        );
+        let bytes = capped_rhs_storage(&mut initial, CAPPED_RHS_STORAGE).unwrap();
+        let mut slot = Some((None, initial, bytes));
+        let mut remaining = CAPPED_RHS_STORAGE - bytes;
+        let mut uncached = None;
+        // A failed replacement leaves the actual slot empty only if old ownership
+        // was released before invoking the scan. This is not a timing/heap estimate.
+        let failed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            capped_rhs(&mut slot, &mut remaining, &mut uncached, Some(0), || {
+                panic!("replacement scan sentinel")
+            });
+        }));
+        assert!(failed.is_err());
+        assert_eq!(
+            remaining, CAPPED_RHS_STORAGE,
+            "stale charge must be refunded before scan"
+        );
+        assert!(
+            slot.is_none(),
+            "old RHS remained live through replacement scan"
+        );
+        let replacement = capped_rhs(&mut slot, &mut remaining, &mut uncached, Some(0), || {
+            Bindings::unsorted(
+                vec![Variable::new("x").unwrap()],
+                vec![Row::from_slice(&[2])],
+            )
+        });
+        assert_eq!(replacement.rows, [Row::from_slice(&[2])]);
+    }
+
+    #[test]
+    fn capped_rhs_disconnected_cross_preserves_multiplicity() {
+        let graph = Graph::load_str(
+            "@prefix : <http://ex/> . :a :p 1 . :b :p 2 . :c :q 3, 4, 5 .",
+            "turtle",
+        )
+        .unwrap();
+        let query =
+            "PREFIX : <http://ex/> SELECT ?s WHERE { ?s :p ?o . ?t :q ?x . FILTER(?o + 0 >= 0) }";
+        let (limited, steps) = trace(|| crate::query(&graph, &format!("{query} LIMIT 7")).unwrap());
+        assert_eq!(bag(&limited), bag(&crate::query(&graph, query).unwrap()));
+        assert_eq!(limited.rows.len(), 6);
+        assert_eq!(bag(&limited).values().copied().collect::<Vec<_>>(), [3, 3]);
+        assert_eq!(steps.len(), 1);
+        assert_eq!(steps[0].kernel, "cross");
+        assert!(steps[0].scanned);
+        println!("disconnected actual steps: {steps:?}");
+    }
+
+    #[test]
+    fn capped_rhs_named_view_overlay_and_residual_exists() {
+        let mut graph = Graph::load_dataset("@prefix : <http://ex/> . :g { :a :p 1, 2 ; :q 1, 2 ; :visible true . :b :p 3 ; :q 3 . }", "trig").unwrap();
+        let query = "PREFIX : <http://ex/> SELECT ?s WHERE { GRAPH :g { SELECT ?s WHERE { ?s :p ?o . ?s :q ?o . FILTER(?o + 0 >= 0 && EXISTS { ?s :visible true }) } LIMIT 10 } }";
+        let (base, steps) = trace(|| crate::query(&graph, query).unwrap());
+        assert_eq!(base.rows.len(), 2);
+        assert_eq!(base.rows[0], base.rows[1]);
+        // EXISTS is deliberately non-conjunctive: prove the existing fallback remains.
+        assert!(
+            steps.is_empty(),
+            "EXISTS must retain the scope-safe fallback"
+        );
+        let eligible = query.replace(" && EXISTS { ?s :visible true }", "");
+        let (eligible_base, eligible_steps) = trace(|| crate::query(&graph, &eligible).unwrap());
+        assert_eq!(eligible_base.rows.len(), 3);
+        assert!(
+            eligible_steps.iter().any(|s| s.scanned),
+            "named subquery must reach capped RHS: {eligible_steps:?}"
+        );
+        let visible = crate::DatasetView {
+            base: &graph,
+            named: std::sync::Arc::new([graph.named[0].0.clone()].into_iter().collect()),
+            default: crate::DefaultGraphMode::Empty,
+        };
+        assert_eq!(
+            bag(&crate::query_view(&visible, query).unwrap()),
+            bag(&base)
+        );
+        let (visible_rows, visible_steps) =
+            trace(|| crate::query_view(&visible, &eligible).unwrap());
+        assert_eq!(bag(&visible_rows), bag(&eligible_base));
+        assert!(visible_steps.iter().any(|s| s.scanned));
+        let hidden = crate::DatasetView {
+            base: &graph,
+            named: std::sync::Arc::new(Default::default()),
+            default: crate::DefaultGraphMode::StoreDefault,
+        };
+        assert!(crate::query_view(&hidden, query).unwrap().rows.is_empty());
+        let (hidden_rows, hidden_steps) = trace(|| crate::query_view(&hidden, &eligible).unwrap());
+        assert!(hidden_rows.rows.is_empty());
+        assert!(
+            hidden_steps.is_empty(),
+            "hidden graph must not enter RHS cache"
+        );
+        let mut fork = graph.named[0].1.fork();
+        fork.apply_delta(
+            &[],
+            &[[
+                oxrdf::NamedNode::new("http://ex/a").unwrap().into(),
+                oxrdf::NamedNode::new("http://ex/q").unwrap().into(),
+                oxrdf::Literal::from(2).into(),
+            ]],
+        )
+        .unwrap();
+        graph.named[0].1 = fork;
+        let (changed, changed_steps) = trace(|| crate::query(&graph, query).unwrap());
+        assert_eq!(changed.rows.len(), 1);
+        assert_eq!(changed.rows[0], base.rows[0]);
+        assert!(changed_steps.is_empty(), "overlay EXISTS retains fallback");
+        let (eligible_overlay, overlay_steps) = trace(|| crate::query(&graph, &eligible).unwrap());
+        assert_eq!(eligible_overlay.rows.len(), 2);
+        assert!(overlay_steps.iter().any(|s| s.scanned));
+        println!("named EXISTS fallback: {steps:?}, {changed_steps:?}; eligible base/overlay: {eligible_steps:?}, {overlay_steps:?}");
+    }
+
+    // [GPT-6 Astra] Capacity accounting must include spare buffers and variable text.
+    #[test]
+    fn capped_rhs_storage_counts_allocated_capacity() {
+        let mut name = String::with_capacity(4096);
+        name.push('x');
+        let mut order = String::with_capacity(2048);
+        order.push('x');
+        let mut vars = Vec::with_capacity(8);
+        let text_bytes = name.capacity() + order.capacity();
+        vars.push(Variable::new(name).unwrap());
+        let mut rows = Vec::with_capacity(32);
+        rows.push(Row::from_slice(&[1]));
+        let expected = rows.capacity() * std::mem::size_of::<Row>()
+            + vars.capacity() * std::mem::size_of::<Variable>()
+            + text_bytes;
+        let mut rhs = Bindings {
+            vars,
+            rows,
+            sorted_by: Some(Variable::new(order).unwrap()),
+        };
+        assert_eq!(capped_rhs_storage(&mut rhs, expected), Some(expected));
+        assert_eq!(capped_rhs_storage(&mut rhs, expected - 1), None);
+        assert_eq!(rhs.vars[0].as_str(), "x");
+        assert_eq!(rhs.sorted_by.as_ref().unwrap().as_str(), "x");
+        assert_eq!(rhs.rows, [Row::from_slice(&[1])]);
+        assert_eq!(
+            capped_rhs_storage(&mut rhs, expected),
+            Some(expected),
+            "rejected accounting must preserve all capacities"
+        );
+        let (slots, remaining) = capped_rhs_cache(3, true);
+        assert_eq!(
+            remaining + slots.capacity() * std::mem::size_of::<Option<CappedRhs>>(),
+            CAPPED_RHS_STORAGE
+        );
+        let too_many = CAPPED_RHS_STORAGE / std::mem::size_of::<Option<CappedRhs>>() + 1;
+        for (len, enabled) in [(too_many, true), (usize::MAX, true), (3, false)] {
+            let (slots, remaining) = capped_rhs_cache(len, enabled);
+            assert_eq!((slots.len(), slots.capacity(), remaining), (0, 0, 0));
+        }
+    }
+
+    #[test]
+    fn capped_rhs_exact_fit_and_nonfitting_lifetime() {
+        let make = || {
+            Bindings::unsorted(
+                vec![Variable::new("x").unwrap()],
+                vec![Row::from_slice(&[1])],
+            )
+        };
+        let bytes = capped_rhs_storage(&mut make(), CAPPED_RHS_STORAGE).unwrap();
+        let mut slot = None;
+        let mut uncached = None;
+        let mut remaining = bytes;
+        let ptr = capped_rhs(&mut slot, &mut remaining, &mut uncached, None, make)
+            .rows
+            .as_ptr();
+        assert_eq!(remaining, 0);
+        assert!(uncached.is_none());
+        assert_eq!(
+            capped_rhs(&mut slot, &mut remaining, &mut uncached, None, || panic!(
+                "fit was rescanned"
+            ))
+            .rows
+            .as_ptr(),
+            ptr
+        );
+        drop(slot.take());
+        remaining = bytes - 1;
+        for _ in 0..2 {
+            let rhs = capped_rhs(&mut slot, &mut remaining, &mut uncached, None, make);
+            assert_eq!(rhs.rows, [Row::from_slice(&[1])]);
+            assert!(slot.is_none(), "non-fitting scan must not survive its step");
+            assert_eq!(remaining, bytes - 1);
+            drop(uncached.take());
+        }
+        let mut oversized = Bindings::unsorted(
+            vec![],
+            Vec::with_capacity(CAPPED_RHS_STORAGE / std::mem::size_of::<Row>() + 1),
+        );
+        assert_eq!(capped_rhs_storage(&mut oversized, CAPPED_RHS_STORAGE), None);
+        let mut spilled = Row::with_capacity(16);
+        spilled.push(1);
+        assert!(spilled.spilled());
+        let mut rhs = Bindings::unsorted(vec![Variable::new("x").unwrap()], vec![spilled]);
+        assert_eq!(capped_rhs_storage(&mut rhs, CAPPED_RHS_STORAGE), None);
+        assert_eq!(rhs.rows[0].as_slice(), [1]);
+    }
+
+    #[test]
+    fn capped_rhs_many_relations_respect_storage_allowance() {
+        for n in [5usize, 8] {
+            let mut ttl = String::new();
+            for i in 0..70_000 {
+                for j in 0..n {
+                    ttl.push_str(&format!("<urn:s:{i}> <urn:p{j}> {i} .\n"));
+                }
+            }
+            for i in 0..8192 {
+                ttl.push_str(&format!("<urn:d:{i}> <urn:dead> <urn:o> .\n"));
+            }
+            let graph = Graph::load_str(&ttl, "turtle").unwrap();
+            let patterns: String = (0..n).map(|j| format!("?s <urn:p{j}> ?o . ")).collect();
+            let positive =
+                crate::query(&graph, &format!("SELECT ?s ?o WHERE {{ {patterns} }}")).unwrap();
+            assert_eq!(positive.rows.len(), 70_000);
+            for row in &positive.rows {
+                let o = row[1].as_ref().unwrap().to_string();
+                let i = o.split('"').nth(1).unwrap().parse::<usize>().unwrap();
+                assert!(i < 70_000);
+                assert_eq!(row[0].as_ref().unwrap().to_string(), format!("<urn:s:{i}>"));
+            }
+            take_work();
+            let (answer, steps) = trace(|| {
+                crate::ask(&graph, &format!("ASK {{ {patterns} FILTER(?o + 0 < 0) }}")).unwrap()
+            });
+            assert!(!answer);
+            let work = take_work();
+            assert_eq!((work[0], work[1], work[3]), (1, 3, 0));
+            assert!(
+                work[2] > n - 1,
+                "non-fitting RHS must be rescanned, not retained without a bound: {work:?}"
+            );
+            assert!(work[2] < 3 * (n - 1), "fitting RHS must still be reused");
+            assert_eq!(steps.len(), 3 * (n - 1));
+            for start in [0usize, 1024, 65536] {
+                let reached: Vec<_> = steps.iter().filter(|s| s.start == start).collect();
+                assert_eq!(reached.len(), n - 1);
+                assert!(reached.iter().all(|s| s.kernel != "bind"));
+                let ids: std::collections::BTreeSet<_> =
+                    reached.iter().map(|s| s.pattern).collect();
+                assert_eq!(ids.len(), n - 1);
+            }
+            println!("patterns={n} work={work:?} steps={steps:?}");
+        }
+    }
+
+    pub(super) fn observe(index: usize) {
+        WORK.with(|cell| {
+            let mut counts = cell.get();
+            counts[index] += 1;
+            cell.set(counts);
+        });
+    }
+
+    fn take_work() -> [usize; 4] {
+        WORK.with(|cell| cell.replace([0; 4]))
+    }
+
+    #[test]
+    fn capped_rhs_three_block_miss() {
+        let mut ttl = String::from("@prefix : <http://ex/> .\n");
+        // More than the second block boundary; two shared variables prohibit bind join.
+        for i in 0..70_000 {
+            ttl.push_str(&format!(":s{i} :p {i} ; :q {} .\n", i + 1));
+        }
+        let graph = Graph::load_str(&ttl, "turtle").unwrap();
+        // Arithmetic keeps this filter residual and defeats the count shortcut.
+        let body = "?s :p ?o . ?s :q ?o . FILTER(?o + 0 >= 0)";
+        take_work();
+        assert!(!crate::ask(&graph, &format!("PREFIX : <http://ex/> ASK {{ {body} }}")).unwrap());
+        let ask_work = take_work();
+        assert_eq!(ask_work, [1, 3, 1, 0]);
+        assert!(
+            crate::query(
+                &graph,
+                &format!("PREFIX : <http://ex/> SELECT * WHERE {{ {body} }} LIMIT 1")
+            )
+            .unwrap()
+            .rows
+            .is_empty()
+        );
+        let limit_work = take_work();
+        assert_eq!(limit_work, [1, 3, 1, 0]);
+        println!(
+            "ASK and LIMIT miss: entries/blocks/RHS scans/bind calls = {ask_work:?}, {limit_work:?}"
+        );
+        // The budget permits the old scan. Its presence must disable retention,
+        // independently of whether it actually trips on this query.
+        let generous = crate::QueryBudget {
+            max_rows: Some(100_000),
+            ..Default::default()
+        };
+        assert!(
+            !crate::ask_with_budget(
+                &graph,
+                &format!("PREFIX : <http://ex/> ASK {{ {body} }}"),
+                &generous
+            )
+            .unwrap()
+        );
+        assert_eq!(
+            take_work(),
+            [1, 3, 3, 0],
+            "armed budget must retain original scan behavior"
+        );
+        // [GPT-6 Astra] Armed but untripped cancellation/deadline must still disable reuse.
+        let live_budgets = [
+            crate::QueryBudget {
+                cancel: Some(std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false))),
+                ..Default::default()
+            },
+            #[cfg(not(target_arch = "wasm32"))]
+            crate::QueryBudget {
+                deadline: Some(std::time::Instant::now() + std::time::Duration::from_secs(300)),
+                ..Default::default()
+            },
+        ];
+        for live in live_budgets {
+            assert!(!crate::ask_with_budget(
+                &graph,
+                &format!("PREFIX : <http://ex/> ASK {{ {body} }}"),
+                &live
+            ).unwrap());
+            assert_eq!(take_work(), [1, 3, 3, 0], "armed but untripped budget must not retain RHS");
+        }
+        let row_limited = crate::QueryBudget {
+            max_rows: Some(10),
+            ..Default::default()
+        };
+        // A nonempty intermediate, unlike the all-miss witness, exercises the row ceiling.
+        let expansion =
+            "PREFIX : <http://ex/> ASK { ?s :p ?o . ?s :q ?other . FILTER(?o + 0 >= 0) }";
+        assert!(
+            crate::ask_with_budget(&graph, expansion, &row_limited)
+                .unwrap_err()
+                .contains("max-rows")
+        );
+        take_work();
+        let cancelled = crate::QueryBudget {
+            cancel: Some(std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
+                true,
+            ))),
+            ..Default::default()
+        };
+        assert!(
+            crate::ask_with_budget(
+                &graph,
+                &format!("PREFIX : <http://ex/> ASK {{ {body} }}"),
+                &cancelled
+            )
+            .unwrap_err()
+            .contains("cancelled")
+        );
+        take_work();
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let expired = crate::QueryBudget {
+                deadline: Some(std::time::Instant::now()),
+                ..Default::default()
+            };
+            assert!(
+                crate::ask_with_budget(
+                    &graph,
+                    &format!("PREFIX : <http://ex/> ASK {{ {body} }}"),
+                    &expired
+                )
+                .is_err()
+            );
+            take_work();
+        }
+    }
+    #[test]
+    fn capped_rhs_keeps_rows_and_actual_order_until_request_changes() {
+        let mut slot = None;
+        let mut remaining = CAPPED_RHS_STORAGE;
+        let mut uncached = None;
+        let variable = Variable::new("x").unwrap();
+        let first = capped_rhs(&mut slot, &mut remaining, &mut uncached, Some(0), || {
+            Bindings {
+                vars: vec![variable.clone()],
+                rows: vec![Row::from_slice(&[1]), Row::from_slice(&[1])],
+                // Requested and actual order need not agree on restricted permutations.
+                sorted_by: None,
+            }
+        });
+        let pointer = first.rows.as_ptr();
+        assert_eq!(first.rows.len(), 2);
+        assert_eq!(first.sorted_by, None);
+        let reused = capped_rhs(&mut slot, &mut remaining, &mut uncached, Some(0), || {
+            panic!("identical scan was repeated")
+        });
+        assert_eq!(
+            reused.rows.as_ptr(),
+            pointer,
+            "reuse must not deep-clone rows"
+        );
+        assert_eq!(
+            reused.rows[0], reused.rows[1],
+            "bag multiplicity is retained"
+        );
+        let changed = capped_rhs(&mut slot, &mut remaining, &mut uncached, Some(2), || {
+            Bindings {
+                vars: vec![variable.clone()],
+                rows: vec![Row::from_slice(&[2])],
+                sorted_by: Some(variable.clone()),
+            }
+        });
+        assert_eq!(changed.rows, vec![Row::from_slice(&[2])]);
+        assert_eq!(changed.sorted_by, Some(variable));
+    }
+
+    #[test]
+    fn capped_rhs_public_bags_repeated_variables_and_first_block_hit() {
+        let graph = Graph::load_str(
+            "@prefix : <http://ex/> . :a :p 1, 2 ; :q 1, 2 . :b :p :b ; :q :b . :c :p :b .",
+            "turtle",
+        )
+        .unwrap();
+        let body = "?s :p ?o . ?s :q ?o . FILTER(?o + 0 >= 0)";
+        let full = crate::query(
+            &graph,
+            &format!("PREFIX : <http://ex/> SELECT ?s WHERE {{ {body} }}"),
+        )
+        .unwrap();
+        take_work();
+        let limited = crate::query(
+            &graph,
+            &format!("PREFIX : <http://ex/> SELECT ?s WHERE {{ {body} }} LIMIT 10"),
+        )
+        .unwrap();
+        assert_eq!(take_work(), [1, 1, 1, 0]);
+        assert_eq!(limited.rows, full.rows);
+        assert_eq!(limited.rows.len(), 2);
+        assert_eq!(
+            limited.rows[0], limited.rows[1],
+            "projection preserves multiplicity"
+        );
+        take_work();
+        assert!(crate::ask(&graph, &format!("PREFIX : <http://ex/> ASK {{ {body} }}")).unwrap());
+        assert_eq!(take_work(), [1, 1, 1, 0]);
+        let repeated = "?s :p ?s . ?s :q ?o . FILTER(?s != <http://ex/missing>)";
+        let result = crate::query(
+            &graph,
+            &format!("PREFIX : <http://ex/> SELECT ?s WHERE {{ {repeated} }} LIMIT 10"),
+        )
+        .unwrap();
+        assert_eq!(
+            result.rows.len(),
+            1,
+            "off-diagonal repeated-variable rows must not survive"
         );
     }
 }

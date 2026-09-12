@@ -1,0 +1,46 @@
+{
+  "pr": 6469,
+  "date": "2026-09-09",
+  "reason": "[GPT-6 Astra] #6469: DERIVED declaration (scripts/feature_off_autodeclare.py). The feature-OFF bundle moved 12 of 1560241 bytes at a size delta of +0, and the drift was proved to carry no compiled code. Specifically: rebuilding the head tree with all 1123 added non-blank line(s) blanked produced a BYTE-IDENTICAL bundle, and rebuilding the base tree with all 10 deleted non-blank line(s) blanked left the base bundle unchanged. Both directions were covered. What moved is line-position metadata (core::panic::Location line numbers shift when lines above them move); no always-compiled code entered or left the default build. Bundle SIZE remains governed separately by the wasm_bundle_bytes ratchet. Derived by Linux CI run 34365605984, job 102513392880, for source commit 6334b338587fe5c635c69a09e134917ec35eaaca against a42a9e89dec485f6a319c47cb3635c59cb5a2270 using the pinned Rust 1.97.1 wasm32-unknown-unknown build; these counts refer to that source commit before this declaration file was added.",
+  "derived": true,
+  "evidence": {
+    "base_bundle_bytes": 1560241,
+    "head_bundle_bytes": 1560241,
+    "size_delta_bytes": 0,
+    "differing_bytes": 12,
+    "closure_files_changed": [
+      ".github/feature-matrix.d/sparq-core.yml",
+      "bench/benchmarks.toml",
+      "bench/overlay-count/README.md",
+      "bench/overlay-count/src/counting.rs",
+      "bench/overlay-count/src/lifecycle.rs",
+      "bench/overlay-count/src/main.rs",
+      "crates/sparq-core/README.md",
+      "crates/sparq-core/src/store.rs",
+      "crates/sparq-core/src/store/overlay_deleted_tests.rs",
+      "scripts/tests/feature-matrix-legnames.golden.txt",
+      "skills/sparql-query/SKILL.md"
+    ],
+    "manifest_files_changed": [
+      "bench/overlay-count/Cargo.lock",
+      "bench/overlay-count/Cargo.toml",
+      "crates/sparq-core/Cargo.toml"
+    ],
+    "files_in_compiled_closure": [
+      "crates/sparq-core/Cargo.toml",
+      "crates/sparq-core/README.md",
+      "crates/sparq-core/src/store.rs",
+      "crates/sparq-core/src/store/overlay_deleted_tests.rs"
+    ],
+    "closure_dirs": [
+      "crates/sparq-core/",
+      "crates/sparq-engine/",
+      "crates/sparq-substrate/",
+      "crates/sparq-wasm/",
+      "vendor/spargebra/"
+    ],
+    "deleted_nonblank_lines": 10,
+    "added_nonblank_lines_blanked": 1123,
+    "neutral_tree_files_mutated": 14
+  }
+}

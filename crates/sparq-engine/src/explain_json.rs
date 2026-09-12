@@ -219,19 +219,20 @@ pub fn explain_plan_analyze_with_budget(graph: &Graph, sparql: &str, budget: &Qu
 
     // Execute under the budget with the operator trace installed (exactly as the
     // text `explain_analyze` does), then reconstruct the typed tree from the trace.
-    let _bguard = exec::budget::install(budget);
-    let _tguard = exec::trace::install();
-    match &q {
-        Query::Select { pattern, .. } => {
-            exec::eval_select(graph, pattern)?;
+    exec::budget::with_budget(budget, || {
+        let _tguard = exec::trace::install();
+        match &q {
+            Query::Select { pattern, .. } => {
+                exec::eval_select(graph, pattern)?;
+            }
+            Query::Ask { pattern, .. } => {
+                exec::eval_ask(graph, pattern)?;
+            }
+            _ => unreachable!(),
         }
-        Query::Ask { pattern, .. } => {
-            exec::eval_ask(graph, pattern)?;
-        }
-        _ => unreachable!(),
-    }
-    let nodes = exec::trace::take();
-    tree_from_trace(&nodes).ok_or_else(|| "empty execution trace".to_string())
+        let nodes = exec::trace::take();
+        tree_from_trace(&nodes).ok_or_else(|| "empty execution trace".to_string())
+    })
 }
 
 /// The query's root graph pattern (independent of form).

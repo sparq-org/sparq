@@ -62,7 +62,12 @@ use store::{Pattern, TripleStore};
 
 /// An immutable, dictionary-encoded RDF graph ready for querying.
 pub struct Graph {
+    /// Term dictionary. [GPT-6 Astra] Direct writes bypass numeric/temporal cache
+    /// and memo maintenance; use [`Self::from_parts`] to rebuild a graph from an
+    /// edited dictionary and its matching ID triples.
     pub dict: Dict,
+    /// Indexes using [`Self::dict`]'s IDs. Direct replacement does not rebuild
+    /// private caches; use [`Self::from_parts`] for a coherent replacement graph.
     pub store: TripleStore,
     /// Parallel to the dictionary: the f64 value of each numeric literal (NaN for
     /// non-numeric terms). Lets the engine evaluate numeric filters / comparisons
@@ -3370,13 +3375,13 @@ impl Graph {
     /// The in-memory half of [`apply_delta`](Self::apply_delta) (no WAL append) — also
     /// the target the WAL replays into on [`open`](Self::open).
     fn apply_delta_mem(&mut self, inserts: &[[Term; 3]], deletes: &[[Term; 3]]) {
+        let old_len = self.dict.len();
         // A delete only matters if every term resolves — otherwise the triple cannot be
         // present, and deleting must NOT intern the (absent) terms.
         let del_ids: Vec<[Id; 3]> = deletes
             .iter()
             .filter_map(|[s, p, o]| Some([self.id_of(s)?, self.id_of(p)?, self.id_of(o)?]))
             .collect();
-        let old_len = self.dict.len();
         let ins_ids: Vec<[Id; 3]> = inserts
             .iter()
             .map(|[s, p, o]| [self.dict.intern(s), self.dict.intern(p), self.dict.intern(o)])
@@ -3387,12 +3392,17 @@ impl Graph {
         // sq-lr2ii: an inserted term may be an f64-inexact decimal. If the sargable-safety
         // guard was memoised as "no such decimal" (1), reset it to recompute over the grown
         // dictionary; a "found" (2) verdict is monotonic (terms are never removed) and stays.
-        let _ = self.high_precision_decimal.compare_exchange(
-            1,
-            0,
-            std::sync::atomic::Ordering::Relaxed,
-            std::sync::atomic::Ordering::Relaxed,
-        );
+        // [GPT-6 Astra] Interning is append-only and extend_for touches only new IDs.
+        // Equal lengths therefore preserve every term/numeric value read by the memo.
+        // Any future path changing existing terms or cached values must invalidate it.
+        if self.dict.len() != old_len {
+            let _ = self.high_precision_decimal.compare_exchange(
+                1,
+                0,
+                std::sync::atomic::Ordering::Relaxed,
+                std::sync::atomic::Ordering::Relaxed,
+            );
+        }
         self.store.apply_delta(&ins_ids, &del_ids);
     }
 
@@ -9632,6 +9642,203 @@ mod tests {
         let o = Term::Literal(Literal::new_typed_literal("2.000000000000000003", xsd::DECIMAL));
         g.apply_delta(&[[s, p, o]], &[]).unwrap();
         assert!(g.has_high_precision_decimal(), "delta-inserted inexact decimal must flip the memo");
+    }
+
+    // [GPT-6 Astra] #6485: observe the memo itself so an unnecessary rescan fails.
+    #[test]
+    fn has_high_precision_decimal_memo_preserves_unchanged_dictionary() {
+        use std::sync::atomic::Ordering::Relaxed;
+        for sparse in [false, true] {
+            let mut g = Graph::load_str(
+                "@prefix : <urn:> . :s :p 7 . :other :p 8 . :s :exact 1.5 .",
+                "turtle",
+            )
+            .unwrap();
+            if sparse {
+                g.numerics = NumData::Sparse(
+                    (1..=g.dict.len() as Id)
+                        .filter_map(|id| g.numerics.lookup(id).map(|value| (id, value)))
+                        .collect(),
+                );
+            }
+            let triple = |s: &str, value: i32| {
+                [
+                    Term::NamedNode(NamedNode::new(s).unwrap()),
+                    Term::NamedNode(NamedNode::new("urn:p").unwrap()),
+                    Term::Literal(Literal::from(value)),
+                ]
+            };
+            let d = g.dict.len();
+            assert!(!g.has_high_precision_decimal());
+            let removed = triple("urn:other", 8);
+            g.apply_delta(&[], std::slice::from_ref(&removed)).unwrap();
+            assert_eq!(g.len(), 2);
+            assert_eq!(
+                g.high_precision_decimal.load(Relaxed),
+                1,
+                "delete, sparse={sparse}"
+            );
+            let absent = triple("urn:s", 8);
+            assert!(absent.iter().all(|term| g.id_of(term).is_some()));
+            g.apply_delta(&[], &[absent]).unwrap();
+            assert_eq!(g.len(), 2);
+            assert_eq!(g.high_precision_decimal.load(Relaxed), 1, "absent delete");
+            g.apply_delta(&[removed], &[]).unwrap();
+            assert_eq!(g.len(), 3);
+            assert_eq!(
+                g.high_precision_decimal.load(Relaxed),
+                1,
+                "known reinsertion"
+            );
+            g.apply_delta(&[], &[]).unwrap();
+            assert_eq!(g.high_precision_decimal.load(Relaxed), 1, "empty delta");
+            let inline = triple("urn:s", 999999);
+            g.apply_delta(std::slice::from_ref(&inline), &[]).unwrap();
+            assert_eq!(g.id_of(&inline[2]), Some(dict::INLINE_BASE + 999999));
+            assert_eq!(g.dict.len(), d);
+            assert_eq!(g.high_precision_decimal.load(Relaxed), 1, "inline integer");
+            assert!(!g.has_high_precision_decimal());
+        }
+    }
+
+    #[test]
+    fn has_high_precision_decimal_memo_invalidates_stored_growth() {
+        use std::sync::atomic::Ordering::Relaxed;
+        for sparse in [false, true] {
+            let mut g = Graph::load_str("@prefix : <urn:> . :s :p 7 .", "turtle").unwrap();
+            if sparse {
+                g.numerics = NumData::Sparse(rustc_hash::FxHashMap::default());
+            }
+            assert!(!g.has_high_precision_decimal());
+            for (lexical, datatype, high_precision) in [
+                ("1.5", xsd::DECIMAL, false),
+                ("007", xsd::INTEGER, false),
+                ("2.000000000000000003", xsd::DECIMAL, true),
+            ] {
+                let d = g.dict.len();
+                let triple = [
+                    Term::NamedNode(NamedNode::new("urn:s").unwrap()),
+                    Term::NamedNode(NamedNode::new("urn:p").unwrap()),
+                    Term::Literal(Literal::new_typed_literal(lexical, datatype)),
+                ];
+                g.apply_delta(std::slice::from_ref(&triple), &[]).unwrap();
+                assert!(g.dict.len() > d, "{lexical}");
+                let id = g.id_of(&triple[2]).unwrap();
+                assert!(g.numeric_value(id).is_some(), "{lexical}");
+                assert_eq!(g.dict.term(id), triple[2]);
+                assert_eq!(
+                    g.high_precision_decimal.load(Relaxed),
+                    0,
+                    "growth: {lexical}"
+                );
+                assert_eq!(g.has_high_precision_decimal(), high_precision);
+                if high_precision {
+                    g.apply_delta(&[], &[triple]).unwrap();
+                    assert_eq!(g.high_precision_decimal.load(Relaxed), 2, "sticky found");
+                    assert!(g.has_high_precision_decimal());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn has_high_precision_decimal_memo_fork_compact_isolation() {
+        use std::sync::atomic::Ordering::Relaxed;
+        let mut parent =
+            Graph::load_str("@prefix : <urn:> . :s :p 1.5 . :other :p 7 .", "turtle").unwrap();
+        assert!(!parent.has_high_precision_decimal());
+        let mut child = parent.fork();
+        assert!(matches!(&child.numerics, NumData::Forked { .. }));
+        assert_eq!(child.high_precision_decimal.load(Relaxed), 0);
+        assert!(!child.has_high_precision_decimal());
+        let d = child.dict.len();
+        let removed = [
+            Term::NamedNode(NamedNode::new("urn:other").unwrap()),
+            Term::NamedNode(NamedNode::new("urn:p").unwrap()),
+            Term::Literal(Literal::from(7)),
+        ];
+        child
+            .apply_delta(&[], std::slice::from_ref(&removed))
+            .unwrap();
+        assert_eq!(child.high_precision_decimal.load(Relaxed), 1);
+        assert_eq!(parent.len(), 2);
+        assert_eq!(child.len(), 1);
+        child.compact().unwrap();
+        assert_eq!(child.dict.len(), d);
+        assert_eq!(child.high_precision_decimal.load(Relaxed), 1);
+        assert!(!child.has_high_precision_decimal());
+        child.apply_delta(&[removed], &[]).unwrap();
+        assert_eq!(child.high_precision_decimal.load(Relaxed), 1);
+        let snapshot = child.snapshot();
+        assert!(!snapshot.has_high_precision_decimal());
+        let inexact = [
+            Term::NamedNode(NamedNode::new("urn:s").unwrap()),
+            Term::NamedNode(NamedNode::new("urn:p").unwrap()),
+            Term::Literal(Literal::new_typed_literal(
+                "2.000000000000000003",
+                xsd::DECIMAL,
+            )),
+        ];
+        parent
+            .apply_delta(std::slice::from_ref(&inexact), &[])
+            .unwrap();
+        assert!(parent.has_high_precision_decimal());
+        assert!(child.id_of(&inexact[2]).is_none());
+        assert!(!child.has_high_precision_decimal());
+        child
+            .apply_delta(std::slice::from_ref(&inexact), &[])
+            .unwrap();
+        assert_eq!(child.high_precision_decimal.load(Relaxed), 0);
+        assert!(child.has_high_precision_decimal());
+        assert!(snapshot.id_of(&inexact[2]).is_none());
+        assert!(!snapshot.has_high_precision_decimal());
+    }
+
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn has_high_precision_decimal_memo_mapped_wal_precision() {
+        use std::sync::atomic::Ordering::Relaxed;
+        let dir = std::env::temp_dir().join(format!("sparq_numeric_memo_{}", std::process::id()));
+        Graph::load_str("@prefix : <urn:> . :s :p 1.5 . :other :p 7 .", "turtle")
+            .unwrap()
+            .save(&dir)
+            .unwrap();
+        let mut g = Graph::open(&dir).unwrap();
+        assert!(matches!(&g.numerics, NumData::Mapped(..)));
+        assert!(!g.has_high_precision_decimal());
+        let d = g.dict.len();
+        let removed = [
+            Term::NamedNode(NamedNode::new("urn:other").unwrap()),
+            Term::NamedNode(NamedNode::new("urn:p").unwrap()),
+            Term::Literal(Literal::from(7)),
+        ];
+        g.apply_delta(&[], &[removed]).unwrap();
+        assert_eq!(g.dict.len(), d);
+        assert_eq!(g.high_precision_decimal.load(Relaxed), 1);
+        let inexact = [
+            Term::NamedNode(NamedNode::new("urn:s").unwrap()),
+            Term::NamedNode(NamedNode::new("urn:p").unwrap()),
+            Term::Literal(Literal::new_typed_literal(
+                "2.000000000000000003",
+                xsd::DECIMAL,
+            )),
+        ];
+        g.apply_delta(std::slice::from_ref(&inexact), &[]).unwrap();
+        assert_eq!(g.high_precision_decimal.load(Relaxed), 0);
+        assert!(g.numeric_value(g.id_of(&inexact[2]).unwrap()).is_some());
+        drop(g); // Reopen must obtain the new term and numeric cache through WAL replay.
+        let mut reopened = Graph::open(&dir).unwrap();
+        assert_eq!(reopened.high_precision_decimal.load(Relaxed), 0);
+        assert!(reopened.has_high_precision_decimal());
+        reopened.apply_delta(&[], &[inexact]).unwrap();
+        assert_eq!(reopened.high_precision_decimal.load(Relaxed), 2);
+        reopened.compact().unwrap(); // The dictionary retains the now-orphaned decimal.
+        assert!(reopened.has_high_precision_decimal());
+        drop(reopened);
+        let final_graph = Graph::open(&dir).unwrap();
+        assert!(final_graph.has_high_precision_decimal());
+        drop(final_graph);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     /// The full sorted term-triple set of a graph (overlay merged), for state comparison.

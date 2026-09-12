@@ -70,3 +70,10 @@
   crate: "sparq-core"
   features: "spqcprm2,mmap"
   test: true
+
+# [GPT-6 Astra] #4246: explicitly exercise the experimental deletion cache;
+# ordinary/core defaults remain feature-off. Includes ownership/invalidation tests.
+- name: "sparq-core (overlay-deleted-projections)"
+  crate: "sparq-core"
+  features: "overlay-deleted-projections"
+  test: true

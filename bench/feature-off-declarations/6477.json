@@ -1,0 +1,5 @@
+{
+  "pr": 6477,
+  "date": "2026-09-10",
+  "reason": "[GPT-6 Astra] Intentional always-compiled engine changes: bounded query-local capped RHS scan reuse and borrowed join inputs. This is not a byte-neutrality assertion; the separate wasm size ratchet remains unchanged."
+}

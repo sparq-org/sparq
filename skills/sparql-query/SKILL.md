@@ -498,6 +498,14 @@ let r = sparq_engine::query_with_budget(&g, "SELECT * WHERE { ?s ?p ?o }", &budg
 // For existence checks prefer ask()/ASK — it streams under an implicit LIMIT 1 (cheapest early exit).
 ```
 
+[GPT-6 Astra] A nested public query from an extension callback uses an independent child
+budget, including an unlimited budget when none is supplied; it temporarily shadows the outer
+budget rather than combining limits. After the child returns, returns an error, or unwinds,
+the outer scope resumes with its complete limits, cancellation handle, byte-accounting state,
+and any previously recorded budget error restored. Its deadline and cancellation are checked
+at the next outer poll. This does not interrupt arbitrary callback work or pool resource limits
+across nested queries; an aborting panic has no continuation.
+
 **Named-graph dataset view** (zero-copy restriction; a non-visible graph is indistinguishable from
 an absent one):
 
@@ -1049,6 +1057,24 @@ let r = query_view(&v, "SELECT ?s WHERE { GRAPH ?g { ?s ?p ?o } }").unwrap(); //
   let r3 = cache.get_or_eval(&graph, &q, version, &QueryBudget::unlimited())?; // miss (fresh)
   # Ok::<(), String>(())
   ```
+- **Experimental deletion projection caching** — [GPT-6 Astra] opt in only on the
+  direct core dependency:
+
+  ```toml
+  sparq-core = { version = "0.1", features = ["overlay-deleted-projections"] }
+  ```
+
+  Cargo unifies this feature for engine queries using that same core package.
+  No engine, CLI or runtime flag is required or added. It is off in default builds,
+  which keep linear deletion counting and no deletion-cache state. The experiment
+  sorts all tombstones on first use of each permutation; actual tombstone changes
+  invalidate projections, and concurrent first readers share a blocking initializer.
+  Each requested vector retains twelve bytes per tombstone plus capacity slack,
+  in addition to the hash set. Every live fork/snapshot copies initialized vectors;
+  retained generations multiply this cost. No cap or eviction is provided. Cold
+  reads and update/read cycles can regress; measure the intended workload using
+  `bench/overlay-count` before choosing this opt-in. No universal crossover or
+  canonical speedup is claimed.
 - **Sharing one `Graph` across server threads** — a `sparq_core::Graph` (and its read-only
   `GraphSnapshot`) is **`Send + Sync`** (guaranteed by a compile-time assertion in `sparq-core`), so
   it can be shared across the async handlers of an axum/actix/tower server directly with
