@@ -137,6 +137,11 @@ def run(cfg, polls, depth=0, tier_ctx=None):
     depth API is unavailable). Returns (exit_code, captured_output). tier_ctx
     (default None) exercises the draft-tier integrity semantics."""
     out = io.StringIO()
+    # [GPT-6] Existing tier tests exercise independent draft/selection rules.
+    # Supply their now-mandatory successful evaluator sibling explicitly here;
+    # TestExactEvaluatorPresence drives raw polls to test absence and bad states.
+    if tier_ctx and tier_ctx.event_name in {"pull_request", "merge_group"}:
+        polls = [p if isinstance(p, Exception) else [*p, R(g.EXACT_EVALUATOR_CHECK)] for p in polls]
     fetch = scripted(polls)
 
     def depth_fn():
@@ -146,6 +151,68 @@ def run(cfg, polls, depth=0, tier_ctx=None):
         code = g.run_gate(cfg, fetch, depth_fn, sleep_fn=lambda s: None,
                           tier_ctx=tier_ctx)
     return code, out.getvalue()
+
+
+class TestExactEvaluatorPresence(unittest.TestCase):
+    """[GPT-6] A missing or skipped proof job must never authorize a merge."""
+
+    def drive(self, polls, event="pull_request", **cfg_options):
+        fetch = scripted(polls)
+        out = io.StringIO()
+        with redirect_stdout(out):
+            code = g.run_gate(
+                tiny_cfg(**cfg_options), fetch, lambda: 0, sleep_fn=lambda _: None,
+                tier_ctx=g.TierContext(run_tier="full", event_name=event),
+            )
+        return code, out.getvalue(), fetch.state["calls"]
+
+    def test_missing_job_and_stable_empty_fail_on_both_merge_events(self):
+        for event in ("pull_request", "merge_group"):
+            for siblings in ([], [GREEN]):
+                with self.subTest(event=event, siblings=siblings):
+                    code, out, calls = self.drive([siblings], event)
+                    self.assertEqual(code, 1, out)
+                    self.assertIn("exact evaluator success is required", out)
+                    self.assertEqual(calls, tiny_cfg().max_total_polls)
+
+    def test_present_success_satisfies_both_merge_events(self):
+        for event in ("pull_request", "merge_group"):
+            code, out, _ = self.drive([[GREEN, R(g.EXACT_EVALUATOR_CHECK)]], event)
+            self.assertEqual(code, 0, out)
+
+    def test_non_success_and_incomplete_cannot_satisfy_requirement(self):
+        for conclusion in ("skipped", "neutral", "cancelled", "failure", "timed_out", None):
+            for status in ("completed", "in_progress"):
+                with self.subTest(conclusion=conclusion, status=status):
+                    code, out, _ = self.drive([[GREEN, R(
+                        g.EXACT_EVALUATOR_CHECK, status=status, conclusion=conclusion)]])
+                    self.assertEqual(code, 1, out)
+
+    def test_late_success_restarts_normal_settle_window(self):
+        code, out, calls = self.drive([
+            [GREEN], [GREEN], [GREEN, R(g.EXACT_EVALUATOR_CHECK)],
+        ])
+        self.assertEqual(code, 0, out)
+        self.assertEqual(calls, 4)
+
+    def test_other_success_or_similar_name_does_not_replace_job(self):
+        code, out, _ = self.drive([[GREEN, R(g.EXACT_EVALUATOR_CHECK + " (old)")]])
+        self.assertEqual(code, 1, out)
+
+    def test_old_success_does_not_mask_unresolved_or_failed_current_sighting(self):
+        for status, conclusion in (("in_progress", None), ("completed", "failure")):
+            code, out, _ = self.drive([[R(g.EXACT_EVALUATOR_CHECK), R(
+                g.EXACT_EVALUATOR_CHECK, status=status, conclusion=conclusion)]])
+            self.assertEqual(code, 1, out)
+
+    def test_missing_job_cannot_borrow_feature_reporter_only_grace(self):
+        code, out, calls = self.drive([[_grp(1)]], reporter_grace_polls=5)
+        self.assertEqual(code, 1, out)
+        self.assertEqual(calls, tiny_cfg().max_total_polls)
+
+    def test_push_keeps_discovered_sibling_semantics(self):
+        code, out, _ = self.drive([[GREEN]], "push")
+        self.assertEqual(code, 0, out)
 
 
 class TestVerdictSemantics(unittest.TestCase):
@@ -1784,7 +1851,8 @@ class TestRateLimitFailClosed(unittest.TestCase):
         self.assertIn("no further polling or recovery", out)
 
     def test_draft_finalization_and_full_hold_do_not_retry_known_limit(self):
-        cases = (("draft", [GREEN], 2), ("full", [R(SELECT_DRAFT)], 4))
+        cases = (("draft", [GREEN, R(g.EXACT_EVALUATOR_CHECK)], 2),
+                 ("full", [R(SELECT_DRAFT), R(g.EXACT_EVALUATOR_CHECK)], 4))
         for tier, rows, expected_polls in cases:
             with self.subTest(tier=tier):
                 fetch = scripted([rows])
@@ -2378,12 +2446,14 @@ class TestNoLegRunExclusion(unittest.TestCase):
         flip = W(102, 7, name="CI", created="2026-07-25T07:28:57Z")
         checks = [
             _check("test shard", run_id=101, rid=1),
+            _check(g.EXACT_EVALUATOR_CHECK, run_id=101, rid=9),
             _check(SELECT_FULL, run_id=101, rid=2),
             _check(SELECT_NO_LEG, run_id=102, rid=4,
                    started="2026-07-25T07:29:23Z"),
         ]
         resolver = self._resolver([checks], [[real, flip]])
         resolver.jobs[101] = [_job("test shard", run_id=101),
+                              _job(g.EXACT_EVALUATOR_CHECK, run_id=101, jid=9),
                               _job(SELECT_FULL, run_id=101, jid=2)]
         code, out = self._drive(
             resolver, tier_ctx=draft_ctx(counting(True), run_tier="full"))
@@ -3230,7 +3300,7 @@ class TestFeatureMatrixReporterPostCapGrace(unittest.TestCase):
         self.assertNotIn("PASSED", out)
 
     def test_cap_recovery_fresh_ordinary_work_or_full_hold_stops_immediately(self):
-        waiting = [_grp("222"), GREEN]
+        waiting = [_grp("222"), GREEN, R(g.EXACT_EVALUATOR_CHECK)]
         cases = (
             ("ordinary work", [*waiting, PENDING], None),
             ("full-tier hold", [*waiting, R(SELECT_DRAFT)],
