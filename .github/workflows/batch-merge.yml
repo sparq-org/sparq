@@ -12,7 +12,8 @@
 # arms the PR — the merge queue picks the strategy. It also closes constituents of MERGED omnibus PRs
 # whose branches now add nothing vs main, closes a FAILED / conflicting / OVER-AGE
 # omnibus (the age bound is the liveness backstop for merge-group failures, which are
-# invisible on the PR head; v1: no bisection — constituents stay individually armed),
+# invisible on the PR head; v1: no bisection — constituents stay individually armed;
+# the v2 bisection design is research/batch-merge-v2-revision-pinning.md, issue #3490),
 # re-arms a young omnibus whose auto-merge arm was dropped by a failed merge group, and
 # deletes stale sparq-omnibus/* branches. NO model calls; the policy is self-tested
 # (gh + git stubbed) before it runs.
