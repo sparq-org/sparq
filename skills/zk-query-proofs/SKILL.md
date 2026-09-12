@@ -367,3 +367,5 @@ the generated gate matrix records dual-leaf and value-only pairs as unsupported.
 
 [GPT-6] [Exact temporal keys and enforced year capacity](references/exact-temporals.md)
 cover the shared evaluator and separate native/actual-guest regression evidence.
+
+[GPT-6] The exact-dataset evaluator applies the [aggregate operand boundary](references/aggregate-profile.md) in both native admission and guest evaluation. Non-COUNT aggregate operands must be constants or variables proven bound by the inner algebra; expression operands and nullable bindings are outside this initial profile. This is a restriction, not complete aggregate conformance.

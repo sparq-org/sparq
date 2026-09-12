@@ -129,6 +129,7 @@ fn admit_query(query: &spargebra::Query) -> Result<(), Rejected> {
                 GraphPattern::Group {
                     inner, aggregates, ..
                 } => {
+                    crate::aggregate_profile::admit(inner, aggregates)?;
                     pending.push(Visit::Pattern(inner));
                     for (_, a) in aggregates {
                         if let AggregateExpression::FunctionCall { name, expr, .. } = a {

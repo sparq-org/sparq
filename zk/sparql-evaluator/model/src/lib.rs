@@ -9,6 +9,8 @@ use sha2::{Digest, Sha256};
 use std::fmt;
 
 #[cfg(feature = "evaluate")]
+mod aggregate_profile;
+#[cfg(feature = "evaluate")]
 mod evaluate;
 #[cfg(feature = "evaluate")]
 pub use evaluate::{admit, evaluate};
