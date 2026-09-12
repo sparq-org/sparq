@@ -17,17 +17,18 @@ fn actual_guest_executes_shared_builtin_edges_and_labeled_capacity_controls() {
         .map(PathBuf::from)
         .expect("real local r0vm executable is required");
     let executor = ExternalProver::new("real-sparq-builtin-edges", r0vm);
-    let dataset = PrivateDataset {
-        ntriples: String::new(),
-        salt: [17; 32],
-    };
     let policy = Policy::default();
-    let authority = DatasetAuthority::VerifierAgreed {
-        commitment: dataset_commitment(&dataset, &policy).unwrap(),
-    };
     let mut rec_cases = 0;
     let mut capacity_controls = 0;
     for case in corpus["cases"].as_array().unwrap() {
+        let dataset = PrivateDataset {
+            ntriples: case
+                .get("dataset_ntriples")
+                .map(|value| value.as_str().expect("dataset_ntriples must be a string"))
+                .unwrap_or_default()
+                .to_owned(),
+            salt: [17; 32],
+        };
         match case["expectation_kind"].as_str().unwrap() {
             "published_recommendation" => rec_cases += 1,
             "implementation_capacity" => capacity_controls += 1,
@@ -39,11 +40,13 @@ fn actual_guest_executes_shared_builtin_edges_and_labeled_capacity_controls() {
                 contract: ProofContract::ExactDataset,
                 dialect: Dialect::SparqSparql11SnapshotV1,
                 query: case["query"].as_str().unwrap().to_owned(),
-                authority: authority.clone(),
+                authority: DatasetAuthority::VerifierAgreed {
+                    commitment: dataset_commitment(&dataset, &policy).unwrap(),
+                },
                 policy: policy.clone(),
                 nonce: [29; 32],
             },
-            dataset: dataset.clone(),
+            dataset,
         };
         eprintln!("actual builtin guest case {}", case["id"]);
         let env = ExecutorEnv::builder()
@@ -67,7 +70,7 @@ fn actual_guest_executes_shared_builtin_edges_and_labeled_capacity_controls() {
             case["id"]
         );
     }
-    assert_eq!(rec_cases, 61, "execute every REC-derived edge expectation");
+    assert_eq!(rec_cases, 137, "execute every REC-derived edge expectation");
     assert_eq!(
         capacity_controls, 2,
         "capacity controls are separate evidence"

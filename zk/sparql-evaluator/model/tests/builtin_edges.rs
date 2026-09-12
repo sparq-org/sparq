@@ -12,13 +12,17 @@ fn shared_builtin_goldens_are_admitted_and_evaluated_by_the_native_model() {
         "../../../../crates/sparq-engine/tests/fixtures/builtin_edges.json"
     ))
     .unwrap();
-    let dataset = PrivateDataset {
-        ntriples: String::new(),
-        salt: [17; 32],
-    };
     let policy = Policy::default();
     let mut failures = Vec::new();
     for case in corpus["cases"].as_array().unwrap() {
+        let dataset = PrivateDataset {
+            ntriples: case
+                .get("dataset_ntriples")
+                .map(|value| value.as_str().expect("dataset_ntriples must be a string"))
+                .unwrap_or_default()
+                .to_owned(),
+            salt: [17; 32],
+        };
         let request = Request {
             version: VERSION,
             contract: ProofContract::ExactDataset,
@@ -31,11 +35,8 @@ fn shared_builtin_goldens_are_admitted_and_evaluated_by_the_native_model() {
             nonce: [29; 32],
         };
         admit(&request).unwrap_or_else(|e| panic!("{}: admission {e:?}", case["id"]));
-        let journal = evaluate(&Witness {
-            request,
-            dataset: dataset.clone(),
-        })
-        .unwrap_or_else(|e| panic!("{}: evaluation {e:?}", case["id"]));
+        let journal = evaluate(&Witness { request, dataset })
+            .unwrap_or_else(|e| panic!("{}: evaluation {e:?}", case["id"]));
         let CanonicalResult::Select { rows, .. } = journal.result else {
             panic!("SELECT expected")
         };
