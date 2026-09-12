@@ -511,7 +511,7 @@ pub enum WitnessSelection {
 /// Prover-side choices that never waive independent verifier checks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ResultOptions {
-    /// Smallest is faster; HideInTwo retains the fixed two-slot disclosure policy.
+    /// Smallest selects the smallest admitted circuit; HideInTwo retains two issuer slots.
     pub credential_capacity: CredentialCapacity,
     /// Joint bounded optimization is the default; FirstSuccess provides a baseline.
     pub witness_selection: WitnessSelection,
