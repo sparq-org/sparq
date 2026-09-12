@@ -1832,5 +1832,76 @@ class TestNonReservingCrossCuttingPartitions(unittest.TestCase):
         self.assertEqual(dumped["resolved"]["ci-fragments"], ["ci"])
 
 
+class TestContentionIsNotHeadroom(unittest.TestCase):
+    """`refusal_attribution` — the quantity sparq#5119 substituted for the one it needed.
+
+    The orchestrator's partition census ranks keys by how many REFUSED CANDIDATES declare them.
+    That is contention. The frontier gain available from relaxing a key is headroom. On the
+    2026-07-29T19:05:57Z live snapshot (1869 open rows, 365 candidates, production call shape)
+    they differed by ~30x: `ci` carried 57 refusals but the realisable frontier gain of the
+    shipped carve-out was ONE row, because 306 of the 363 refusals were held by an in-flight
+    artifact and no width change can recover those.
+    """
+
+    # One occupant, two candidates it blocks, and two candidates that contend only with each
+    # other — so contention and headroom are different numbers on the same board.
+    BOARD = [
+        pr(70, ["area:sparq-core"]),
+        iss(30, READY + ["priority:P1", "area:sparq-core"]),
+        iss(31, READY + ["priority:P2", "area:sparq-core"]),
+        iss(32, READY + ["priority:P0", "area:sparq-hdt"]),
+        iss(33, READY + ["priority:P1", "area:sparq-hdt"]),
+    ]
+
+    def test_occupant_blocked_candidates_are_not_headroom(self):
+        occupant, headroom = ready.refusal_attribution(self.BOARD)
+        self.assertEqual(occupant, [30, 31])
+        self.assertNotIn("sparq-core", headroom,
+                         "a key an in-flight PR is holding offers NO width headroom")
+
+    def test_headroom_names_the_key_this_ticks_own_selection_took(self):
+        _occupant, headroom = ready.refusal_attribution(self.BOARD)
+        self.assertEqual(headroom, {"sparq-hdt": 1})
+
+    def test_the_three_buckets_partition_the_candidate_set(self):
+        occupant, headroom = ready.refusal_attribution(self.BOARD)
+        frontier = ready.compute_ready(self.BOARD, conflict_log=quiet)
+        self.assertEqual(len(frontier) + len(occupant) + sum(headroom.values()),
+                         len(ready.ready_candidates(self.BOARD)))
+
+    def test_a_multi_area_candidate_is_counted_once_not_once_per_key(self):
+        # Counting per declared key inflates headroom — the #5119 error in miniature.
+        board = [iss(40, READY + ["priority:P0", "area:sparq-hdt"]),
+                 iss(41, READY + ["priority:P1", "area:sparq-hdt", "area:sparq-geo"])]
+        self.assertEqual(sum(ready.refusal_attribution(board)[1].values()), 1)
+
+    def test_a_heavily_contended_but_occupied_key_reports_zero_headroom(self):
+        # THE HEADLINE SHAPE: nine candidates want one key, an open PR holds it. Contention 9,
+        # headroom 0. Reading the first as the second is what produced sparq#5119.
+        board = [pr(71, ["area:sparq-core"])] + [
+            iss(50 + i, READY + ["priority:P2", "area:sparq-core"]) for i in range(9)]
+        occupant, headroom = ready.refusal_attribution(board)
+        self.assertEqual(len(occupant), 9)
+        self.assertEqual(headroom, {})
+
+    def test_the_carve_out_is_bounded_by_one_row_per_exempted_partition(self):
+        # WHY the carve-out cannot pay out its contention: the selection loop reserves a selected
+        # row's declared areas IN FULL, exemptions included. Ten `ci` candidates, none occupied,
+        # yield one frontier row and nine units of headroom on `ci`.
+        board = [iss(60 + i, READY + ["priority:P2", "area:ci"]) for i in range(10)]
+        frontier = ready.compute_ready(board, conflict_log=quiet)
+        occupant, headroom = ready.refusal_attribution(board)
+        self.assertEqual(len(frontier), 1, "the exemption is occupancy-side only")
+        self.assertEqual((occupant, headroom), ([], {"ci": 9}))
+
+    def test_diagnose_always_prints_both_causes_including_at_zero(self):
+        # A figure that appears only when it is interesting cannot be trusted when it is absent.
+        source = (SCRIPTS / "ready-issues.py").read_text()
+        self.assertIn("held by an in-flight artifact", source)
+        self.assertIn("refused by this tick's own selection", source)
+        self.assertIn("refusal_attribution(visible, source_links)", source,
+                      "--diagnose must consume the attribution, not just define it")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
