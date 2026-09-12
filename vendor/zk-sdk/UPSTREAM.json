@@ -154,6 +154,90 @@
         }
       ],
       "patch_sha256": "a99a789a3aa91e0d61f8478ef4f7196d9f3b073876abe20144f57536f2137bd8"
+    },
+    {
+      "name": "ark-crypto-primitives",
+      "version": "0.5.0",
+      "source_url": "https://static.crates.io/crates/ark-crypto-primitives/ark-crypto-primitives-0.5.0.crate",
+      "archive_sha256": "1e0c292754729c8a190e50414fd1a37093c786c709899f29c9f7daccecfa855e",
+      "vcs": {
+        "git": {
+          "sha1": "455d599aae0aa81acf1c2faadf37def63a25a291"
+        },
+        "path_in_vcs": "crypto-primitives"
+      },
+      "upstream_files": {
+        ".cargo_vcs_info.json": "ce50693c365fb03e40a64164d5117c2c7af3021f514cfbd164980863bf102ca4",
+        "Cargo.toml": "b93858824a1abcd2b5be404557d9312395b7f6007a44ff3e2b05b2bc8bbf5ae0",
+        "Cargo.toml.orig": "de44221d622e25c8dc8d54b30099bfffb840139e4cdcd571bcf10c13119e1489",
+        "LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+        "LICENSE-MIT": "8f71659370c5268d9a1dc962a46232540e8fca63462586d8efaa95aab492a208",
+        "src/commitment/blake2s/constraints.rs": "5e0fe47f481a65e7801ee593804d453f8f9c68b59f87e30231bd5d80f39d7962",
+        "src/commitment/blake2s/mod.rs": "7fa8f7ddaefcb3cde098d8f9762940afb835dab7b6a1656524658f9a9f51635e",
+        "src/commitment/constraints.rs": "2516a99fc6ce7f98c414530ebd7dc66a75b9baafa034cbabb3b57775dbaf0bd1",
+        "src/commitment/injective_map/constraints.rs": "cfa2319de106425e601538cd64a0ea1d4244daef13baed6372eb2985c3e538a5",
+        "src/commitment/injective_map/mod.rs": "0ad5e44686dfff5d517e2c057e4ed1d78838a0e14ca3591d988d932b9f5126f9",
+        "src/commitment/mod.rs": "832cd518203819e023a50aa41b63ca806ba8fbb489f754e3a719e85f7840e6fb",
+        "src/commitment/pedersen/constraints.rs": "e2970ff0ff0c03f165ba9e761b2a0ff26324ddc9e1c832af31574b204c5f4943",
+        "src/commitment/pedersen/mod.rs": "690ef6d84511bfeb8313370d416cf5899ea1566a6924f4e5794a95f843fa1d41",
+        "src/crh/bowe_hopwood/constraints.rs": "76e98791457cc5d415e6554cdbb07fa33196c034c9f80e01c0df15f333aac4e6",
+        "src/crh/bowe_hopwood/mod.rs": "9f00b673adb60aab5e632376e0abc0da5c4def824cb6ab7eea4e8bd0b41cb708",
+        "src/crh/constraints.rs": "637c3a723e250392cb224b4ada2ecc3add76523798efc4ca1d7103b93e311e16",
+        "src/crh/injective_map/constraints.rs": "4f4d972b0e735fa3fbe852ea26e6f36d1714f617e0d4b6b0c0adff0e6684dafe",
+        "src/crh/injective_map/mod.rs": "f5e9d1ee18bc90ca3e6ec21312d106ba6dd5984323294779eb128a8d4afd8509",
+        "src/crh/mod.rs": "f81cfbc8ecbf4c1823a4df7b2273cd7b657ce7a89d93b7e076a3a57163bd13e0",
+        "src/crh/pedersen/constraints.rs": "1b6999a41f3b66b82e4407f3d23c5283220494e32f81a713b979eb2988eeead2",
+        "src/crh/pedersen/mod.rs": "cde883c0798b9c3b82ad550a9f090017d8305ec4bdf9867452e67454c61c7a87",
+        "src/crh/poseidon/constraints.rs": "ce1ffa2412dffa991919d7d6324ea47c783654a6bc1e6c62425e47f89bd787c6",
+        "src/crh/poseidon/mod.rs": "6cabceb33dd47603f8c020b967f716db5925a193bbca6dc34ff1662fd2f39422",
+        "src/crh/sha256/constraints.rs": "84012d86c81f41e208b201a13d6f620c57ca222c552beaf613d718591188834d",
+        "src/crh/sha256/mod.rs": "2250cb095f2365bd1f9c50e60e2d6811ee871e170ad3a431450cd5073c3872bd",
+        "src/encryption/constraints.rs": "eb3bdfadfcf5d95044e8e004cb49552381c406e0961b88beaae38131b4091d61",
+        "src/encryption/elgamal/constraints.rs": "51af92a30eea390f3da1ccd34e2df0235c4c968b8b798e102b62603534ae760f",
+        "src/encryption/elgamal/mod.rs": "2e5ee95e1d72ff2c4d539025c65cef3c08b2c0030e90ad7ed4e34f21d2aea5bd",
+        "src/encryption/mod.rs": "2155206e9b4dcf0ac9c458814611cd38b397b4166a5804218563f4e73e906a7d",
+        "src/lib.rs": "4b0a1f9452124f5075d346ef45cb108024fb5f2f4f9f7ade2ad2ec6ae9f65563",
+        "src/macros.rs": "c9b6d30ae85db3bf4a24e984e25224e4988c258e0d3408e942c2b544a3e7c710",
+        "src/merkle_tree/constraints.rs": "28642c25329894f89e553e2e983d242040a82333d1a0ea50c75e148beeb6baca",
+        "src/merkle_tree/mod.rs": "26b8a4a2a7a79ec3ef839fc9bab0bfa151e2ad3d19ad3c29bb6d7c84e83c68a2",
+        "src/merkle_tree/tests/constraints.rs": "c4f5605f379709b821945bca9ac307d65685dd4e3a1236cafe1d21b6c8edd3c8",
+        "src/merkle_tree/tests/mod.rs": "95f3ad941368e33ab128f20e7c9fe7ddac99ed9a86922be4bee7ceadc3d0bfb8",
+        "src/merkle_tree/tests/test_utils.rs": "7a60e19871d32a696c59d7f4f659bcc5b9a9054c8d27c8b2b67077cdcf45b74f",
+        "src/prf/blake2s/constraints.rs": "69a96b7ad094b4b202e5dc30cf9ef38adadf942c84127fd844d12e50e2d0d804",
+        "src/prf/blake2s/mod.rs": "8040f49f6ec9680d068f3162a7201394040e794b8629984636cb61b9d9bbfd91",
+        "src/prf/constraints.rs": "972487e67c4c61ac8103e50402254c97be2009eb79edcca0fb8daadd14e7a924",
+        "src/prf/mod.rs": "8496aa270be04afc8629211e3881189bd848d3087fe8a767a1a61a01cc5a8f0f",
+        "src/signature/constraints.rs": "eae5da07c38d53acac3fcd8d8fe54ea175cefc334ed654d52ed7f43184bf97e4",
+        "src/signature/mod.rs": "da75888ba41dd9d3d52c09271e5e30fe6d9fdf5ec6b8da0b33607eaadc3b7fe0",
+        "src/signature/schnorr/constraints.rs": "f1bca88bd47e8292d5f5414844f604dfbac7f591baefe1d5a24760e6aabc05a4",
+        "src/signature/schnorr/mod.rs": "8caa91371b8599fab297bc73d3a268754a2c002eeff4b055f5c11fc27290f529",
+        "src/snark/constraints.rs": "25eb6bc72372185434fac2058552760739c621d4198bd9df97879b8dc697e071",
+        "src/snark/mod.rs": "94bd94572231bf610d9fe740d1d903c495788e5fe8aa498327344cbf9e9023ca",
+        "src/sponge/absorb.rs": "c7a2aae0a4fd0d81edce0fadd857b44eb588c63a0e6356bb76246a40c9298811",
+        "src/sponge/constraints/absorb.rs": "2c70362736ae9700ed3dc5df3b735bb83cb7b6e2440a4cb31e38aae9fa174642",
+        "src/sponge/constraints/mod.rs": "bfcb3acce723fc4d50b3c0b3a4b6810a1a3a625c273f836f73a8d07741ec5b5b",
+        "src/sponge/merlin/mod.rs": "8b1ca951fb9738935bc618f1faa0c16ea6dcb836592d0ccb294761eb5ba26fb3",
+        "src/sponge/mod.rs": "364cde7c44283be520617e1afef981c319e861b237eb239ad562b870e71caaec",
+        "src/sponge/poseidon/constraints.rs": "13688f41274d0439ebc3ea669a186afb0130bf30199d1c509d599b14bbab5f12",
+        "src/sponge/poseidon/grain_lfsr.rs": "2dd53dbe7216a0af2482c858e69fd1fd9ee6d7a8acb72276cf6ad859b8faa4e8",
+        "src/sponge/poseidon/mod.rs": "4e0a366cf555bd09fe1437b14841f757cfbce692d6859f94627dbc74a2c8e2af",
+        "src/sponge/poseidon/tests.rs": "d60d1e2f3092cba7ba304cd3ab5515d0c2cd58752cf4a116f96657a65fc7aa55",
+        "src/sponge/poseidon/traits.rs": "737aaa4cc7ffe3456b6b8adf7c86ac7b8db9e83fe7b6718b4d22040ded94841c",
+        "src/sponge/test.rs": "a82acf8aeea1bdbf49d6e8b3f7eeb72a2d841181a293198c265206361866a914"
+      },
+      "patch_files": [
+        {
+          "path": "Cargo.toml",
+          "upstream_sha256": "b93858824a1abcd2b5be404557d9312395b7f6007a44ff3e2b05b2bc8bbf5ae0",
+          "patched_sha256": "818a595a5b0fef4f29353498d0b7c8345f9cfe770500f5752072e4b232ebe676"
+        },
+        {
+          "path": "src/lib.rs",
+          "upstream_sha256": "4b0a1f9452124f5075d346ef45cb108024fb5f2f4f9f7ade2ad2ec6ae9f65563",
+          "patched_sha256": "f350e79db3591d31f31afc820eb18f284fea2519d194dfe3056b228828d12455"
+        }
+      ],
+      "patch_sha256": "cae350cc1b67427cfb429a4a3ef4fafd57c4b26c809ed9b58bb80a2a3b9354a9"
     }
   ]
 }

@@ -369,5 +369,6 @@ the generated gate matrix records dual-leaf and value-only pairs as unsupported.
 
 [GPT-6] The separate [exact evaluator](../../zk/sparql-evaluator/README.md) uses
 detached workspaces. Its [SDK patch record](../../vendor/zk-sdk/README.md) preserves
-upstream source/license identity and documents discovery-only dependency selection.
+upstream source/license identity and documents discovery-only dependency selection
+and derive-macro feature boundaries, with executable synthetic feature checks.
 Synthetic dependency checks remain separate from actual guest proof evidence.

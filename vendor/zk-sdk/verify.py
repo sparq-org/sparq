@@ -35,9 +35,15 @@ def check() -> None:
     assert rzup["features"]["default"] == ["cli", "install", "publish"]
     assert all("signatures" in rzup["features"][f] for f in ["install", "publish"])
     assert rzup["dependencies"]["rsa"]["optional"] is True
+    primitives = tomllib.loads((ROOT / "ark-crypto-primitives-0.5.0/Cargo.toml").read_text())
+    assert primitives["features"]["default"] == ["std"]
+    assert primitives["dependencies"]["derivative"]["optional"] is True
+    assert all("dep:derivative" in primitives["features"][f]
+               for f in ["crh", "encryption", "signature"])
+    assert all("crh" in primitives["features"][f] for f in ["commitment", "merkle_tree"])
     for relative in ["Cargo.lock", "methods/guest/Cargo.lock"]:
         lock = tomllib.loads((REPO / "zk/sparql-evaluator" / relative).read_text())
-        assert not {p["name"] for p in lock["package"]} & {"rsa", "option-ext", "dirs", "dirs-sys"}
+        assert not {p["name"] for p in lock["package"]} & {"rsa", "option-ext", "dirs", "dirs-sys", "derivative"}
         assert {p["version"] for p in lock["package"] if p["name"] == "risc0-zkvm"} == {"3.0.6"}
         assert {p["version"] for p in lock["package"] if p["name"] == "tracing-subscriber"} == {"0.3.23"}
     print("SDK upstream/patched inventories, hashes, retained feature defaults and detached locks match")
@@ -90,11 +96,61 @@ debug = 0
         subprocess.run(command + ["--features", "rzup/signatures"], env=env, check=True, timeout=600)
 
 
+def feature_matrix(offline: bool) -> None:
+    """Compile every derive-consuming family, including its constraint gadgets."""
+    if not os.environ.get("CARGO_TARGET_DIR"):
+        raise ValueError("Set CARGO_TARGET_DIR to an existing compatible cache for the feature matrix")
+    with tempfile.TemporaryDirectory(prefix="sparq-sdk-features-") as temporary:
+        directory = Path(temporary)
+        (directory / "src").mkdir()
+        (directory / "src/lib.rs").write_text("// [GPT-6] Compile the selected upstream feature surface.\n")
+        (directory / "Cargo.toml").write_text(f'''[package]
+name = "sparq-sdk-feature-matrix"
+version = "0.0.0"
+edition = "2021"
+publish = false
+[workspace]
+[dependencies]
+ark-crypto-primitives = {{ path = {json.dumps(str(ROOT / "ark-crypto-primitives-0.5.0"))}, default-features = false }}
+[patch.crates-io]
+ark-relations = {{ path = {json.dumps(str(ROOT / "ark-relations-0.5.1"))} }}
+[profile.dev]
+debug = 0
+''')
+        shutil.copyfile(REPO / "zk/sparql-evaluator/Cargo.lock", directory / "Cargo.lock")
+        env = os.environ.copy()
+        env["CARGO_INCREMENTAL"] = "0"
+        cases = [[], ["std"], ["std", "snark", "sponge"]]
+        consumers = ["crh", "commitment", "encryption", "merkle_tree", "signature"]
+        cases += [[family] for family in consumers]
+        # Upstream commitment+r1cs already needs prf and std to compile. Keep
+        # that upstream feature limit separate from this derive-dependency patch.
+        cases += [[family, "r1cs", "std", "prf"] for family in consumers]
+        cases += [consumers + ["r1cs", "std", "snark", "sponge", "prf"]]
+        for features in cases:
+            options = ["--manifest-path", str(directory / "Cargo.toml")]
+            if offline:
+                options += ["--offline"]
+            if features:
+                options += ["--features", ",".join(f"ark-crypto-primitives/{f}" for f in features)]
+            print("SDK feature compile:", ",".join(features) or "no features", flush=True)
+            subprocess.run(["cargo", "check", "--lib"] + options, env=env, check=True, timeout=600)
+            metadata = json.loads(subprocess.check_output(
+                ["cargo", "metadata", "--format-version", "1", "--locked"] + options, env=env))
+            active = {node["id"] for node in metadata["resolve"]["nodes"]}
+            has_derivative = any(p["name"] == "derivative" and p["id"] in active
+                                 for p in metadata["packages"])
+            assert has_derivative == any(f in consumers for f in features), features
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--smoke", action="store_true")
+    parser.add_argument("--feature-matrix", action="store_true")
     parser.add_argument("--offline", action="store_true", help="use only cached smoke-test dependencies")
     args = parser.parse_args()
     check()
     if args.smoke:
         smoke(args.offline)
+    if args.feature_matrix:
+        feature_matrix(args.offline)

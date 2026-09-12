@@ -16,6 +16,7 @@ files come from the exact recorded upstream VCS revision, with URL/hash recorded
 | `risc0-build` | Remove `dirs`, which no source in the archive uses. |
 | `rzup` | Make RSA optional behind additive `signatures`, enabled by both existing `install` and `publish` features. Their default selection remains unchanged. Discovery omits key construction/storage; fetching a signed manifest without signature support returns an error. |
 | `ark-relations` | Backport the tracing-subscriber dependency to the compatible maintained API, retaining disabled default features. Rename the empty layer callback to `on_new_span`; constraint arithmetic is unchanged. |
+| `ark-crypto-primitives` | Make `derivative` optional and select it from the existing `crh`, `encryption` and `signature` feature families. `commitment` and `merkle_tree` inherit `crh`. Gate the macro import the same way; algorithms and derives are unchanged. |
 
 The rzup key-taking custom constructor is available with `signatures`; ordinary
 `Rzup::new` and local toolchain discovery retain their API. The real upstream
@@ -29,8 +30,17 @@ defaults and both evaluator lockfiles. With an existing compatible Cargo cache,
 `CARGO_TARGET_DIR=/absolute/cache python3 vendor/zk-sdk/verify.py --smoke` also runs
 synthetic local discovery, constraint tracing/satisfaction, and unchanged upstream
 signature round-trip/tampering checks in discovery and additive key-API modes.
+`--feature-matrix` also compiles the empty/default-equivalent and active
+SNARK/sponge feature selections, each derive-consuming family, their constraint
+gadget combinations and the combined selection. It checks that only selections
+using those families resolve `derivative`. Gadget combinations include `std` and
+`prf`: untouched upstream `commitment,r1cs` without those prerequisites fails to
+compile, independently reproduced against the registry archive. This patch does
+not repair that existing upstream feature-combination limitation.
 The temporary smoke harness uses RSA only
 to test the preserved signature code; it is absent from both evaluator graphs.
+The feature harness similarly resolves `derivative` only for its consumer checks;
+both evaluator graphs omit it with their current SNARK/sponge selection.
 Add `--offline` when all test dependencies are cached; otherwise Cargo can fetch
 public dependencies. The temporary smoke lock is derived from the evaluator lock
 and adds explicitly pinned test dependencies; it is not a proof artifact lock.

@@ -119,8 +119,9 @@ selected by `RISC0_HOME` and requires an explicitly supplied local `r0vm` path.
 It never delegates private inputs to a hosted prover.
 
 [GPT-6] Narrow [SDK dependency patches](../../vendor/zk-sdk/README.md) remove unused
-discovery dependencies and update a tracing API without changing constraint
-arithmetic. Both detached locks retain the SDK pin. The patch record preserves
+discovery dependencies, select derive macros only for the features that use them,
+and update a tracing API without changing constraint arithmetic.
+Both detached locks retain the SDK pin. The patch record preserves
 upstream hashes/licenses and distinguishes synthetic API checks from guest proofs.
 
 The build step uses the pinned SDK's opt-in `cargo_command` build API and its
