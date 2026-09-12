@@ -116,3 +116,29 @@ fn positive_bgp_and_nonnullable_path_substitution_still_fires() {
         );
     }
 }
+
+// [GPT-6] Triple-term variable decomposition is a BGP facility. SIP cannot
+// turn an unsupported variable-carrying path endpoint into a supported constant.
+#[test]
+fn triple_term_path_endpoints_keep_the_cold_evaluator_error() {
+    let graph = Graph::load_str("@prefix ex:<http://ex/> . ex:a ex:p ex:b .", "turtle").unwrap();
+    for path in ["ex:q*", "ex:q?", "ex:q+"] {
+        let text = format!(
+            "PREFIX ex:<http://ex/> SELECT ?x WHERE {{ VALUES ?x {{ex:a}} {{?x ex:p ?m . ?o {path} <<( ?x ex:p ex:b )>> }} }}"
+        );
+        let previous = sip_testing::set_enabled(false);
+        let cold = query(&graph, &text);
+        sip_testing::set_enabled(true);
+        let optimized = query(&graph, &text);
+        sip_testing::set_enabled(previous);
+        assert!(
+            cold.is_err(),
+            "the cold evaluator rejects variables in this path endpoint: {path}"
+        );
+        assert_eq!(
+            optimized.err(),
+            cold.err(),
+            "SIP must preserve rejection: {path}"
+        );
+    }
+}

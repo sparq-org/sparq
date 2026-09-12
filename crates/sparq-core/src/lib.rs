@@ -700,24 +700,23 @@ pub fn parse_xsd_f64(v: &str) -> Option<f64> {
 /// (`split_decimal`-style digit scan + i128 fit); an anti-drift differential test pins this
 /// against `Num::of_literal` over a lexical×datatype matrix in `sparq-substrate`.
 ///
-/// - **integer family** (`is_integer_datatype`): a SCALE-0 decimal lexical (NO exponent)
-///   that fits `i128` — matching `Num::of_literal`, which routes an over-`i64` integer
-///   through `Dec::parse` and accepts scale 0. So `"5"`, `"+3"`, `"007"`, `"5."`, `"5.0"`,
-///   `"5.00"` (all value-5 integers) are well-formed; `"1.5"` (scale 1), `".5"`,
-///   `"1E2"^^xsd:integer`, and a >i128 integer are ill-formed.
+/// - **integer family**: signed digit lexicals satisfying the datatype's facets
+///   and the evaluator's magnitude limit. Decimal points and exponents are rejected.
 /// - **`xsd:decimal`**: `[+-]?digits(.digits)?` (NO exponent) with the mantissa within
-///   `i128`. `"1E2"^^xsd:decimal` / a >i128-mantissa decimal are ill-formed.
+///   `i128`. An exponent is ill-formed; a larger valid mantissa exceeds cache capacity.
 /// - **`xsd:float` / `xsd:double`**: the full XSD `doubleRep` lexical space — exactly
 ///   [`parse_xsd_f64`] (`Some`), which already matches `of_literal`.
 /// - any non-numeric datatype: `false`.
 fn numeric_datatype_wellformed(v: &str, datatype: &str) -> bool {
+    if !numeric_literal_valid(v, datatype) {
+        return false;
+    }
     // Parse `[+-]?digits(.digits)?` (no exponent) into its i128-fit mantissa + written scale
     // — the shared decimal-lexical scan `Num::of_literal`'s integer/decimal paths ride on
     // (`Dec::parse` / `Dec::parse_lexical` in sparq-substrate). `None` = ill-formed (bad char,
     // empty, or mantissa beyond i128). The scale is the NUMBER OF TRAILING FRACTION DIGITS
-    // as WRITTEN — for the scale-0 integer test, trailing zeros do NOT count (`Dec::parse`
-    // normalises them: `"5.0"` is scale-0). So compute the NORMALISED scale (strip trailing
-    // fraction zeros) exactly as `of_literal` sees it.
+    // as WRITTEN, normalized by removing trailing fraction zeros as `Dec::parse` does.
+    // Integer lexicals have already passed the stricter digits-only guard above.
     fn scan_decimal(v: &str) -> Option<u32> {
         let body = v.strip_prefix(['+', '-']).unwrap_or(v);
         let (int, frac) = body.split_once('.').unwrap_or((body, ""));
@@ -732,12 +731,11 @@ fn numeric_datatype_wellformed(v: &str, datatype: &str) -> bool {
             mag = mag.checked_mul(10).and_then(|m| m.checked_add((ch - b'0') as i128))?;
         }
         // Normalised scale: trailing fraction zeros are insignificant (`Dec::parse` drops
-        // them), so `"5.00"` is scale-0, matching `of_literal`'s scale-0 integer acceptance.
+        // them), so `"5.00"` is scale-0, matching `of_literal`'s decimal normalization.
         Some(frac.trim_end_matches('0').len() as u32)
     }
     if is_integer_datatype(datatype) {
-        // scale-0, i128-fit — `Num::of_literal` accepts `"5"`, `"+3"`, `"007"`, `"5."`,
-        // `"5.0"` (all value-5 integers) but NOT `"5.5"` (scale 1) or a >i128 mantissa.
+        // The shared lexical/facet guard already excludes decimal notation.
         return matches!(scan_decimal(v), Some(0));
     }
     if datatype == xsd::DECIMAL.as_str() {
@@ -748,6 +746,54 @@ fn numeric_datatype_wellformed(v: &str, datatype: &str) -> bool {
     (datatype == xsd::FLOAT.as_str() || datatype == xsd::DOUBLE.as_str()) && parse_xsd_f64(v).is_some()
 }
 
+/// Validates numeric lexical forms and integer subtype facets.
+///
+/// [GPT-6] This validates datatype membership, independently of the evaluator's
+/// finite arithmetic capacity. A valid large integer/decimal can be numeric even
+/// when it cannot be represented by the numeric cache or arithmetic value tower.
+/// XML whitespace at either end is collapsed; internal and non-XML whitespace
+/// remains invalid. Unknown datatypes return `false`.
+///
+/// # Examples
+/// ```
+/// use sparq_core::numeric_literal_valid;
+/// assert!(numeric_literal_valid("+007", "http://www.w3.org/2001/XMLSchema#integer"));
+/// assert!(!numeric_literal_valid("1200", "http://www.w3.org/2001/XMLSchema#byte"));
+/// assert!(!numeric_literal_valid("5.0", "http://www.w3.org/2001/XMLSchema#integer"));
+/// ```
+pub fn numeric_literal_valid(value: &str, datatype: &str) -> bool {
+    let value = value.trim_matches([' ', '\t', '\r', '\n']);
+    let body = value.strip_prefix(['+', '-']).unwrap_or(value);
+    if is_integer_datatype(datatype) {
+        if body.is_empty() || !body.bytes().all(|b| b.is_ascii_digit()) {
+            return false;
+        }
+        let zero = body.bytes().all(|b| b == b'0');
+        let negative = value.starts_with('-') && !zero;
+        if datatype == xsd::INTEGER.as_str() { return true; }
+        if datatype == xsd::POSITIVE_INTEGER.as_str() { return !negative && !zero; }
+        if datatype == xsd::NON_NEGATIVE_INTEGER.as_str() { return !negative; }
+        if datatype == xsd::NEGATIVE_INTEGER.as_str() { return negative; }
+        if datatype == xsd::NON_POSITIVE_INTEGER.as_str() { return negative || zero; }
+        let Ok(n) = value.parse::<i128>() else { return false };
+        if datatype == xsd::LONG.as_str() { return i64::try_from(n).is_ok(); }
+        if datatype == xsd::INT.as_str() { return i32::try_from(n).is_ok(); }
+        if datatype == xsd::SHORT.as_str() { return i16::try_from(n).is_ok(); }
+        if datatype == xsd::BYTE.as_str() { return i8::try_from(n).is_ok(); }
+        if datatype == xsd::UNSIGNED_LONG.as_str() { return u64::try_from(n).is_ok(); }
+        if datatype == xsd::UNSIGNED_INT.as_str() { return u32::try_from(n).is_ok(); }
+        if datatype == xsd::UNSIGNED_SHORT.as_str() { return u16::try_from(n).is_ok(); }
+        return datatype == xsd::UNSIGNED_BYTE.as_str() && u8::try_from(n).is_ok();
+    }
+    if datatype == xsd::DECIMAL.as_str() {
+        let (whole, fraction) = body.split_once('.').unwrap_or((body, ""));
+        return !(whole.is_empty() && fraction.is_empty())
+            && whole.bytes().chain(fraction.bytes()).all(|b| b.is_ascii_digit());
+    }
+    (datatype == xsd::FLOAT.as_str() || datatype == xsd::DOUBLE.as_str())
+        && parse_xsd_f64(value).is_some()
+}
+
 /// The DATATYPE-AWARE cached f64 of a numeric literal `(value, datatype)`, or `NaN` (the
 /// cache's not-a-value sentinel) when the lexical is ill-formed FOR its datatype. Trims the
 /// lexical (XSD `collapse` whitespace facet — the same trim `Num::of_literal` /
@@ -756,7 +802,7 @@ fn numeric_datatype_wellformed(v: &str, datatype: &str) -> bool {
 /// (sq-74oy4 / sq-6b1lj)
 #[inline]
 pub(crate) fn cached_numeric_f64(value: &str, datatype: &str) -> f64 {
-    let v = value.trim();
+    let v = value.trim_matches([' ', '\t', '\r', '\n']);
     if numeric_datatype_wellformed(v, datatype) {
         parse_xsd_f64(v).unwrap_or(f64::NAN)
     } else {
@@ -10913,12 +10959,12 @@ mod tests {
         let xd = xsd::DECIMAL.as_str();
         let xdbl = xsd::DOUBLE.as_str();
         let xf = xsd::FLOAT.as_str();
-        // integers: scale-0 (after trailing-zero normalisation), i128-fit, trimmed.
+        // Integer lexicals are signed digits (XSD 1.0 §3.3.13), i128-fit, XML-trimmed.
         assert_eq!(numeric_cache_value("5", xi), Some(5.0));
         assert_eq!(numeric_cache_value(" 5 ", xi), Some(5.0)); // XSD collapse: trimmed
         assert_eq!(numeric_cache_value("+7", xi), Some(7.0));
-        assert_eq!(numeric_cache_value("5.", xi), Some(5.0)); // trailing dot, no fraction
-        assert_eq!(numeric_cache_value("5.0", xi), Some(5.0)); // trailing-zero fraction
+        assert_eq!(numeric_cache_value("5.", xi), None); // decimal notation is not an integer lexical
+        assert_eq!(numeric_cache_value("5.0", xi), None); // zero fractional value does not change the grammar
         assert_eq!(numeric_cache_value("5.5", xi), None); // fraction on an integer
         assert_eq!(numeric_cache_value(".5", xi), None); // no integer part, scale 1
         assert_eq!(numeric_cache_value("1E2", xi), None); // exponent on an integer
