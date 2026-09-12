@@ -140,5 +140,19 @@ shape. Expanded profiles use version two. The verifier derives the member from
 the issuer-slot count, query-derived private-filter count, integer capacity and
 its own status depth, rejecting a version mismatch. The presentation carries no
 prover-supplied key or status-depth override. Member suffix `i64` denotes the
-unsigned integer width in bits, not signed `i64` support. Old proof-byte/key
-compatibility is not assumed: the verifier builds keys from its installed source.
+unsigned integer width in bits, not signed `i64` support. With the pinned
+Noir/bb toolchain, all original version-one members retain the foundation
+circuit, ABI and verification-key bytes. The [compatibility evidence](../../../bench/zk-compose/result_v1_compatibility.json)
+records actual comparisons against the baseline archive. A required toolchain
+test regenerates each legacy key and compares it with those independent baseline
+bytes; compatibility is not inferred from matching gate counts. The generic
+shared relation keeps version-one private values as `u8` throughout, while the
+expanded `u64` tiny profiles retain their pre-cast range guard.
+
+Expanded-member witness executions are distinct from genuine proof checks. The
+toolchain suite additionally proves representative wide, tiny and predicate-free
+version-two members and checks their reconstructed public ABI through verification.
+Exact gate measurements remain circuit-size evidence only. The planner's objective
+still counts authentications and memberships, and the driver still regenerates
+canonical keys during verification; neither a tiny-first search policy nor a
+verification-key cache is provided by this expansion.

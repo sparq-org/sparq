@@ -362,3 +362,9 @@ This input bound is independent of candidate-triple search fuel.
 [GPT-6] Successful-result preparation also checks `MAX_DISCLOSURE_CREDENTIALS`
 before its authentication prepass. Its graph contract is string-canonical only;
 the generated gate matrix records dual-leaf and value-only pairs as unsupported.
+
+[GPT-6] Original successful-result v1 circuit, ABI and verification-key bytes are
+preserved under the pinned toolchain and checked against independent baseline
+keys in the toolchain suite. Expanded v2 tiny and predicate-free profiles have
+representative genuine-proof checks in addition to wrapper execution coverage;
+see the successful-result reference for evidence and scope.

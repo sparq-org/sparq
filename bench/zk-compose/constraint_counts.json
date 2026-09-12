@@ -688,7 +688,7 @@
             "r": 4,
             "f": 2
           },
-          "circuit_size": 69055
+          "circuit_size": 68963
         },
         {
           "member": "result_v1_k2_n16_p3_r4_f0",
@@ -710,11 +710,11 @@
             "r": 4,
             "f": 2
           },
-          "circuit_size": 95867
+          "circuit_size": 95775
         }
       ],
       "min_circuit_size": 32288,
-      "max_circuit_size": 95867,
+      "max_circuit_size": 95775,
       "scaling": [
         {
           "parameter": "f",
@@ -723,9 +723,9 @@
           "from_circuit_size": 32288,
           "to_member": "result_v1_k1_n16_p3_r4_f2",
           "to_value": 2,
-          "to_circuit_size": 69055,
-          "delta_gates": 36767,
-          "ratio": 2.1387,
+          "to_circuit_size": 68963,
+          "delta_gates": 36675,
+          "ratio": 2.1359,
           "held_fixed": {
             "k": 1,
             "n": 16,
@@ -740,9 +740,9 @@
           "from_circuit_size": 59101,
           "to_member": "result_v1_k2_n16_p3_r4_f2",
           "to_value": 2,
-          "to_circuit_size": 95867,
-          "delta_gates": 36766,
-          "ratio": 1.6221,
+          "to_circuit_size": 95775,
+          "delta_gates": 36674,
+          "ratio": 1.6205,
           "held_fixed": {
             "k": 2,
             "n": 16,
@@ -771,12 +771,12 @@
           "parameter": "k",
           "from_member": "result_v1_k1_n16_p3_r4_f2",
           "from_value": 1,
-          "from_circuit_size": 69055,
+          "from_circuit_size": 68963,
           "to_member": "result_v1_k2_n16_p3_r4_f2",
           "to_value": 2,
-          "to_circuit_size": 95867,
+          "to_circuit_size": 95775,
           "delta_gates": 26812,
-          "ratio": 1.3883,
+          "ratio": 1.3888,
           "held_fixed": {
             "n": 16,
             "p": 3,
