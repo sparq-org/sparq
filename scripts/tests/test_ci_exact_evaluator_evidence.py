@@ -26,6 +26,22 @@ class EvidenceGuards(unittest.TestCase):
                     "image_id": list(range(8))}
         (self.artifact / "pin.json").write_text(json.dumps(self.pin))
 
+    def test_each_version_retains_earlier_receipt_gates_and_native_features(self):
+        self.assertEqual(evidence.active_profile(self.root), ("evaluate", evidence.V1_RECEIPTS))
+        modules = self.root / "zk/sparql-evaluator/host/src"
+        modules.mkdir(parents=True)
+        (modules / "v2.rs").touch()
+        self.assertEqual(evidence.active_profile(self.root),
+                         ("evaluate", evidence.V1_RECEIPTS | evidence.V2_RECEIPTS))
+        (modules / "v3.rs").touch()
+        feature, expected = evidence.active_profile(self.root)
+        self.assertEqual(feature, "graph-results")
+        self.assertEqual(expected, evidence.V1_RECEIPTS | evidence.V2_RECEIPTS | evidence.V3_RECEIPTS)
+        self.assertEqual(len(expected), 8)
+        (self.root / "receipts").mkdir()
+        with self.assertRaisesRegex(ValueError, "missing or unexpected"):
+            evidence.receipts(self.root, self.pin, expected)
+
     def test_artifact_bytes_and_pin_are_both_required(self):
         self.assertEqual(evidence.artifact_pin(self.artifact), self.pin)
         (self.artifact / "guest.bin").write_bytes(b"different bytes")

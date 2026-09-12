@@ -14,4 +14,4 @@ serde_json.workspace = true
 sha2.workspace = true
 
 [dev-dependencies]
-sparq-proved-evaluator-model = { path = "../model", features = ["evaluate"] }
+sparq-proved-evaluator-model = { path = "../model", features = ["graph-results"] }

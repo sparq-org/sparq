@@ -28,6 +28,13 @@ pub(crate) enum DatasetProfile {
     DefaultOnly,
     NamedCatalog,
     GraphResults,
+    GraphResultsBlankFree,
+}
+
+impl DatasetProfile {
+    fn graph_results(self) -> bool {
+        matches!(self, Self::GraphResults | Self::GraphResultsBlankFree)
+    }
 }
 
 pub(crate) fn admit_query(
@@ -44,7 +51,7 @@ pub(crate) fn admit_query(
     }
     let pattern = match query {
         spargebra::Query::Select { pattern, .. } | spargebra::Query::Ask { pattern, .. } => pattern,
-        spargebra::Query::Construct { template, pattern, .. } if profile == DatasetProfile::GraphResults => {
+        spargebra::Query::Construct { template, pattern, .. } if profile.graph_results() => {
             if template.len() > 64 { return Err(Rejected("V3 template capacity")); }
             for triple in template {
                 pattern_term(&triple.subject, profile)?;
@@ -52,7 +59,7 @@ pub(crate) fn admit_query(
             }
             pattern
         }
-        spargebra::Query::Describe { pattern, .. } if profile == DatasetProfile::GraphResults => pattern,
+        spargebra::Query::Describe { pattern, .. } if profile.graph_results() => pattern,
         _ => return Err(Rejected("only SELECT and ASK are admitted")),
     };
     enum Visit<'a> {
@@ -211,6 +218,9 @@ pub(crate) fn admit_query(
                     pending.push(Visit::Expression(e))
                 }
                 Expression::Exists(p) => {
+                    if profile == DatasetProfile::GraphResults {
+                        return Err(Rejected("V3 EXISTS blank-node correlation is not admitted"));
+                    }
                     if in_exists {
                         return Err(Rejected("nested EXISTS is not admitted"));
                     }
@@ -327,7 +337,7 @@ fn pattern_term(term: &TermPattern, profile: DatasetProfile) -> Result<(), Rejec
         // The opt-in vendored parser creates these only when lowering a fixed
         // path sequence. Its leading # is forbidden in source blank-node labels.
         // They bind existential intermediates, never RDF blank-node identities.
-        TermPattern::BlankNode(_) if internal_path_node(term) || profile == DatasetProfile::GraphResults => Ok(()),
+        TermPattern::BlankNode(_) if internal_path_node(term) || profile.graph_results() => Ok(()),
         TermPattern::Literal(l) => literal(l),
         _ => Err(Rejected(
             "query blank nodes and triple terms are not admitted",

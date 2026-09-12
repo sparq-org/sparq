@@ -1,4 +1,4 @@
-// [GPT-6] Private source authentication, parsing and SPARQL evaluation are proved.
+// [GPT-6] Private source commitments, parsing and SPARQL evaluation are proved.
 #![no_main]
 
 risc0_zkvm::guest::entry!(main);
@@ -8,7 +8,7 @@ use std::io::Read;
 fn main() {
     use sparq_proved_evaluator_model as model;
     // Preserve the original V1 witness wire form: the request version is its
-    // first word, not a newly inserted wrapper enum. Both versions have bounded
+    // first word, not a newly inserted wrapper enum. All versions have bounded
     // byte input before their typed deserialization and graph construction.
     let mut bytes = Vec::new();
     if risc0_zkvm::guest::env::stdin()
@@ -41,6 +41,16 @@ fn main() {
                 risc0_zkvm::serde::to_vec(&witness).unwrap_or_else(|_| reject()),
             );
             let journal = model::v2::evaluate(&witness).unwrap_or_else(|_| reject());
+            risc0_zkvm::guest::env::commit(&journal);
+        }
+        model::v3::VERSION => {
+            let witness: model::v3::Witness =
+                risc0_zkvm::serde::from_slice(&bytes).unwrap_or_else(|_| reject());
+            canonical_input(
+                &bytes,
+                risc0_zkvm::serde::to_vec(&witness).unwrap_or_else(|_| reject()),
+            );
+            let journal = model::v3::evaluate(&witness).unwrap_or_else(|_| reject());
             risc0_zkvm::guest::env::commit(&journal);
         }
         _ => reject(),

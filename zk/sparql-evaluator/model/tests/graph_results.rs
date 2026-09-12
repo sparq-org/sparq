@@ -319,6 +319,44 @@ fn v2_retains_blank_node_and_graph_form_rejections() {
 }
 
 #[test]
+fn exists_requires_all_source_graphs_blank_free_but_allows_later_template_nodes() {
+    let query = "CONSTRUCT { _:fresh ex:p ?s } WHERE { ?s ex:p ?o FILTER EXISTS { ?s ex:p ?x } }";
+    let source = "<http://ex/a> <http://ex/p> <http://ex/b> .";
+    let input = witness(query, source, &[]);
+    v3::admit(&input.request).unwrap();
+    assert_eq!(
+        graph_text(v3::evaluate(&input).unwrap().result)
+            .lines()
+            .count(),
+        1
+    );
+    for (source, named) in [
+        ("_:a <http://ex/p> <http://ex/b> .", vec![]),
+        ("<http://ex/a> <http://ex/p> _:b .", vec![]),
+        (
+            "<http://ex/a> <http://ex/p> <http://ex/b> .\n_:unselected <http://ex/p> <http://ex/b> <http://ex/g> .",
+            vec!["http://ex/g"],
+        ),
+    ] {
+        let input = witness(query, source, &named);
+        v3::admit(&input.request).unwrap();
+        assert_eq!(
+            v3::evaluate(&input).unwrap_err().0,
+            "V3 EXISTS blank-node correlation is not admitted"
+        );
+    }
+    let input = witness(
+        "ASK { [] ex:p ?o FILTER NOT EXISTS { ex:missing ex:p ?x } }",
+        source,
+        &[],
+    );
+    assert_eq!(
+        v3::evaluate(&input).unwrap().result,
+        v3::CanonicalResult::Ask(true)
+    );
+}
+
+#[test]
 fn existing_positive_goldens_run_through_v3_without_changing_expectations() {
     let corpus: serde_json::Value =
         serde_json::from_str(include_str!("../../fixtures/conformance/cases.json")).unwrap();

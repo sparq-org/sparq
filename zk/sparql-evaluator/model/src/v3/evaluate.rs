@@ -7,6 +7,7 @@ use sparq_engine::{
 };
 
 /// Checks the complete V3 query, including templates and nested expressions.
+/// Actual source blank nodes additionally restrict EXISTS during evaluation.
 ///
 /// # Errors
 /// Rejects unimplemented or nondeterministic operations and excessive query structure.
@@ -14,7 +15,7 @@ pub fn admit(request: &Request) -> Result<(), Rejected> {
     validate_request(request)?;
     let prepared =
         PreparedQuery::parse(&request.query).map_err(|_| Rejected("SPARQL parse rejected"))?;
-    admit_query(prepared.query(), DatasetProfile::GraphResults)
+    admit_query(prepared.query(), DatasetProfile::GraphResultsBlankFree)
 }
 
 /// Executes the exact source and canonicalizes the complete observable result.
@@ -39,8 +40,24 @@ pub fn evaluate(witness: &Witness) -> Result<Journal, Rejected> {
     };
     let prepared =
         PreparedQuery::parse(&request.query).map_err(|_| Rejected("SPARQL parse rejected"))?;
-    admit_query(prepared.query(), DatasetProfile::GraphResults)?;
+    admit_query(prepared.query(), DatasetProfile::GraphResultsBlankFree)?;
     let graph = v2::evaluate::build_dataset(&witness.dataset, &request.policy.dataset, true)?;
+    // [GPT-6] No admitted expression creates a blank term before WHERE finishes:
+    // BNODE/custom calls and triple terms are excluded, query blank nodes are
+    // existential variables, and template nodes are allocated only afterward.
+    // Inspect all source graphs, including unselected named graphs, so captured
+    // blank-node substitution never enters the disputed SPARQL 1.1 EXISTS lane.
+    if std::iter::once(&graph)
+        .chain(graph.named.iter().map(|(_, graph)| graph))
+        .any(|graph| {
+            graph
+                .dict
+                .iter()
+                .any(|(_, term)| matches!(term, sparq_core::dict::TermParts::Blank(_)))
+        })
+    {
+        admit_query(prepared.query(), DatasetProfile::GraphResults)?;
+    }
     let max_rows = request.policy.dataset.max_rows;
     let budget = query_budget(max_rows);
     let canonical = &request.policy.canonicalization;

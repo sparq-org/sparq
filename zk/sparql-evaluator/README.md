@@ -17,8 +17,8 @@ documents its separate wire schema, N-Quads/catalog commitment and GRAPH plus
 local-snapshot FROM/FROM NAMED behavior. V1 commitment semantics are unchanged.
 `coverage.json` inventories V1 only; its named-graph rejections do not describe V2.
 V2 native and actual-guest test definitions are listed in the linked V2 reference.
-The separate [V3 native model](../../skills/zk-query-proofs/references/graph-results-v3.md)
-adds bounded blank-node/graph results; the guest still accepts V1/V2 only.
+The separate [V3 graph-result API](../../skills/zk-query-proofs/references/graph-results-v3.md)
+adds bounded blank-node/graph results; its guest/receipt evidence is separate.
 
 `ProofContract::SelectedSupport` describes the existing Noir answer-support API.
 The evaluator rejects it: this guest implements `ExactDataset` only. Exactness

@@ -1,0 +1,60 @@
+{
+  "schema": 1,
+  "base_checkpoint": "bdc9b59f1bb57b31c4c2481b1327d840072ed269",
+  "scope": "Development native and actual guest execution checks; no genuine V3 receipt or final release-artifact claim",
+  "source_sha256": {
+    "host/src/v3.rs": "50f94493eb2d0150174b49a51086937c30875e517c420fc0df69cc7f4ff65ed3",
+    "host/src/lib.rs": "5680ae7eef010ab513746592ea651338e7ec33d376dd06f4258a0e2a02294b6b",
+    "host/tests/actual_graph_results.rs": "b230312529309a796c4a8351d75819172f2e3d92a3e777da47a5ce1aea26aea8",
+    "host/tests/real_graph_results.rs": "4d9f467f828358165d360cca7ed6564ba0c2d73dbcabcf44ddf031f73b1f6819",
+    "host/tests/support/graph_results.rs": "cddf912184c54eef3dd15e57dd736f3dbabd04247efc2258937520c3b14b6a42",
+    "host/Cargo.toml": "a0c6f745ea6b18622d939fdba0a20c7f6dfb130d93b68ba551c462d75f0dd387",
+    "methods/guest/src/main.rs": "22d74f63b321dc41d5b74a295a225e67cba0f1ce44c8834f487132ad82317f85",
+    "methods/guest/Cargo.toml": "95373169e6c7c0574fd7bdf46d3fe3789ee070ef7a81b67f1777026eebba1b77",
+    "methods/guest/Cargo.lock": "60cdd9f7f8b251bcc3f442ab13064358f2ed808a3e5e0355625872cfab218329",
+    "model/src/evaluate.rs": "ec1e89912c0fadf52bdb9e55ba2fe6a513f812dbe40d91d15591eed358965b3b",
+    "model/src/v3/evaluate.rs": "bb1fc0d2d9a36382e8bcd412864902a3fc7cec8061eaf61ec7264a678ae64eaf",
+    "model/tests/graph_results.rs": "950ffc027df2448fba0010a4779014219c690309236222a9362d6625509af6c0"
+  },
+  "native_model_test_functions": 57,
+  "unchanged_positive_corpus_cases": 82,
+  "new_actual_guest_test_functions": 4,
+  "new_actual_guest_relation_rejections": 25,
+  "new_actual_guest_transport_rejections": 4,
+  "wire_native_tests": 1,
+  "all_host_tests_compile": true,
+  "clippy_all_targets_warnings_denied": "passed",
+  "genuine_v3_receipts": "pending final frozen campaign",
+  "historical_native_guard_evidence": "graph-results-native-checks.json",
+  "source_blank_domain_mutations": [
+    {
+      "guard": "reject-source-blank-correlation",
+      "mutated_source_sha256": "c7fc8924bb46d7665a85473ec53e98cb0fb499947929265225d8c91ca7c196f1",
+      "restored_source_sha256": "bb1fc0d2d9a36382e8bcd412864902a3fc7cec8061eaf61ec7264a678ae64eaf",
+      "exit_code": 101,
+      "assertion_failed": true
+    },
+    {
+      "guard": "inspect-named-blank-domain",
+      "mutated_source_sha256": "5c63705a87d477528b22359d4383a4166035591a5e21f229d4502560ee3d5861",
+      "restored_source_sha256": "bb1fc0d2d9a36382e8bcd412864902a3fc7cec8061eaf61ec7264a678ae64eaf",
+      "exit_code": 101,
+      "assertion_failed": true
+    }
+  ],
+  "receipt_inventory_mutation": {
+    "mutated_source_sha256": "27d15471ea93ccb05b4faf0d010a409371d113b4fd166a44c51cb0cf4731f847",
+    "restored_source_sha256": "56634a69f729d3e95c8b2cd99cbe9a206a9bc8367ce01c695ab8da9d9264e82a",
+    "exit": 1,
+    "assertion_failed": true
+  },
+  "actual_test_executable_sha256": "343bcf691b5d9e6a2b937a1a8c0911c68ba904860242d84106ecd9d2c68be519",
+  "logs": [
+    "/private/tmp/sparq-v3-correlation-native.log",
+    "/private/tmp/sparq-v3-actual-guest-expanded.log",
+    "/private/tmp/sparq-v3-wire-native.log",
+    "/private/tmp/sparq-v3-all-host-compile.log",
+    "/private/tmp/sparq-v3-integrated-clippy.log",
+    "/private/tmp/sparq-v3-receipt-inventory-restored.log"
+  ]
+}

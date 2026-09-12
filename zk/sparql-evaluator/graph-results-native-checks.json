@@ -67,5 +67,6 @@
   "restored_native_test_functions": 56,
   "v3_test_functions": 13,
   "unchanged_positive_corpus_cases_executed_in_v3": 82,
-  "native_log": "/private/tmp/sparq-v3-model-final.log"
+  "native_log": "/private/tmp/sparq-v3-model-final.log",
+  "source_checkpoint": "bdc9b59f1bb57b31c4c2481b1327d840072ed269"
 }

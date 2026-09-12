@@ -45,8 +45,8 @@ They are not guest or proof evidence. The default-off engine feature
 `deterministic-blank-nodes` provides anonymous parser labels and result-local
 template allocation, with native freshness, collision and output-budget tests.
 Source namespaces are checked across the active dataset. Independent result graphs
-still require standardization apart before combination. Actual V3 guest validation
-and receipts remain outside this native model implementation.
+still require standardization apart before combination. V3 guest validation and receipts have separate test entry points; their source
+presence does not establish successful execution.
 
 [GPT-6] Native `dataset_blank_nodes` now exercises read-query RDF merge separation,
 preserved named-graph identity, collision avoidance, repeated-IRI acquisition,
@@ -76,8 +76,10 @@ commitments while yielding the same canonical result.
 `v3::CanonicalResult` returns SELECT variables/order/rows, ASK truth, or canonical
 graph N-Triples. `v3::bind_journal` checks independently expected version, request
 and authority **after receipt verification**; calling it alone verifies no proof.
-The current guest and host proof APIs still admit V1/V2 only. Native V3 results
-must not be presented as a new guest receipt or authenticated credential result.
+The typed host `v3::{prove_with_artifact, verify_with_artifact}` APIs and guest
+version dispatch now define the V3 relation. Guest execution and receipt validation
+remain pending until recorded for the corresponding exported artifact. A native
+result or successful compile alone is not a proof.
 
 ```sh
 cargo test --locked --manifest-path zk/sparql-evaluator/Cargo.toml \
@@ -87,8 +89,29 @@ cargo test --locked --manifest-path zk/sparql-evaluator/Cargo.toml \
 The native tests exercise whole-table identity and relabeling, bag duplicates,
 sequence order, unbound cells, CONSTRUCT freshness/omission, the explicit DESCRIBE
 closure, FROM separation, both authority modes, capacity rejection and unchanged
-V2 exclusions. BNODE(), nondeterminism, SERVICE, complex EXISTS, triple terms and
-blank-node graph names remain rejected.
+V2 exclusions. BNODE(), nondeterminism, SERVICE, triple terms and blank-node graph names remain
+rejected. V3 admits the earlier positive EXISTS/NOT EXISTS profile only when every
+parsed default/named source graph is blank-free; any source blank node rejects
+correlation, including in an unselected named graph. Structural `admit` cannot
+establish that private-source condition; `evaluate` checks it inside the guest.
+Query blank nodes are existential variables, no admitted expression creates blank
+terms, and CONSTRUCT template nodes arise after WHERE evaluation. This avoids
+the disputed SPARQL 1.1 captured-blank substitution semantics described in the
+[EXISTS community report](https://w3c.github.io/sparql-exists/docs/sparql-exists.html);
+this version declines the blank-containing case instead of assigning a practical
+repair to the published Recommendation. V1/V2 retain their prior profile.
+
+## Guest and receipt validation
+
+`host/tests/actual_graph_results.rs` executes SELECT identity/order, query blank
+nodes, FROM separation, CONSTRUCT and DESCRIBE in the actual guest, then checks
+exact relation-panic rejection for capacity, domain and admission failures.
+`real_graph_results.rs` requires three genuine Succinct receipts: a holder-declared
+bag, verifier-agreed CONSTRUCT and holder-declared DESCRIBE. Independent request,
+nonce, authority, policy, journal and cross-version substitutions must reject.
+The campaign helper retains every V1/V2 receipt and requires all three V3 exports,
+with the same independently checked artifact throughout. Use its evidence record
+to determine execution status; these test definitions alone establish no receipt.
 
 Sources: [SPARQL 1.1 CONSTRUCT](https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#construct),
 [DESCRIBE](https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#describe),
