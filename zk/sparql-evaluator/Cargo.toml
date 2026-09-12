@@ -17,6 +17,10 @@ sha2 = "0.10"
 risc0-zkvm = { version = "=3.0.6", default-features = false }
 
 [patch.crates-io]
+# [GPT-6] Exact upstream archives with narrowly recorded dependency/feature patches.
+risc0-build = { path = "../../vendor/zk-sdk/risc0-build-3.0.6" }
+rzup = { path = "../../vendor/zk-sdk/rzup-0.5.2" }
+ark-relations = { path = "../../vendor/zk-sdk/ark-relations-0.5.1" }
 spargebra = { path = "../../vendor/spargebra" }
 
 [profile.dev]

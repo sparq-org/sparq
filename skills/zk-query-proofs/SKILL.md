@@ -364,3 +364,10 @@ This input bound is independent of candidate-triple search fuel.
 [GPT-6] Successful-result preparation also checks `MAX_DISCLOSURE_CREDENTIALS`
 before its authentication prepass. Its graph contract is string-canonical only;
 the generated gate matrix records dual-leaf and value-only pairs as unsupported.
+
+## Exact-evaluator SDK dependencies
+
+[GPT-6] The separate [exact evaluator](../../zk/sparql-evaluator/README.md) uses
+detached workspaces. Its [SDK patch record](../../vendor/zk-sdk/README.md) preserves
+upstream source/license identity and documents discovery-only dependency selection.
+Synthetic dependency checks remain separate from actual guest proof evidence.

@@ -1,0 +1,31 @@
+--- a/ark-relations-0.5.1/Cargo.toml
++++ b/ark-relations-0.5.1/Cargo.toml
+@@ -58,7 +58,8 @@
+ default-features = false
+ 
+ [dependencies.tracing-subscriber]
+-version = "0.2"
++# [GPT-6] Backport the maintained subscriber API without enabling default formatting.
++version = "0.3.23"
+ optional = true
+ default-features = false
+ 
+@@ -75,3 +76,6 @@
+     "tracing-subscriber",
+     "tracing/std",
+ ]
++
++# [GPT-6] Keep this vendored package outside the main workspace.
++[workspace]
+--- a/ark-relations-0.5.1/src/r1cs/trace.rs
++++ b/ark-relations-0.5.1/src/r1cs/trace.rs
+@@ -59,7 +59,8 @@
+ 
+     /// Notifies this layer that a new span was constructed with the given
+     /// `Attributes` and `Id`.
+-    fn new_span(&self, _attrs: &span::Attributes<'_>, _id: &span::Id, _ctx: layer::Context<'_, S>) {
++    // [GPT-6] tracing-subscriber 0.3 renamed this unchanged, empty callback.
++    fn on_new_span(&self, _attrs: &span::Attributes<'_>, _id: &span::Id, _ctx: layer::Context<'_, S>) {
+     }
+ 
+     #[allow(unsafe_code, trivial_casts)]
