@@ -64,6 +64,37 @@
 //! FIRST (before subjects/objects) reproduces HDT's mandated id layout (shared ids
 //! first, then section-local ids), so an HDT id resolves to the same sparq `Id` whether
 //! it is referenced as S or O.
+//!
+//! ## CRC verification stays on — the measured case against a `load_unchecked` (#3517)
+//!
+//! A recurring suggestion is an opt-in entry point that skips CRC verification on the
+//! decode fast path. It was profiled before being built, with
+//! `examples/bench_crc_share.rs` (run it — the numbers belong to the harness and the
+//! host, not to this comment). Three findings, in the order that settles the question:
+//!
+//! 1. **CRC verification is a real but minority cost** — an upper bound in the low
+//!    single-digit-to-ten percent of load wall time on the million-triple bench
+//!    archive, and that bound is generous (it times a CRC32-C pass over the *whole*
+//!    archive, while the decoder's CRC32 bodies exclude the control-info/header text
+//!    and the CRC bytes themselves).
+//! 2. **Almost none of it is sparq's to skip.** sparq computes the CRCs for the two
+//!    triple bitmaps itself (`read_bitmap_words`); the four PFC dictionary sections
+//!    and the two triple sequences are read — and unconditionally verified — by
+//!    upstream `DictSectPFC::read` / `Sequence::read`. The bitmaps are a low-single-
+//!    digit-percent slice of archive bytes, the dictionary the overwhelming majority,
+//!    so a `load_unchecked` confined to this crate saves a fraction of a percent of
+//!    load: noise. Reaching the rest would mean forking two upstream readers — i.e.
+//!    permanently duplicating format parsing that is today byte-identical with
+//!    upstream by construction — for the sole purpose of checking less.
+//! 3. **The cost is table width, not checking.** Both sparq and upstream reach for the
+//!    `crc` crate's default byte-at-a-time `Table<1>`. The identical checksum computed
+//!    with slice-by-16 tables (`Crc<u32, Table<16>>`, same crate, same algorithm, no
+//!    new dependency) runs several times faster, which recovers most of the CRC cost
+//!    with integrity fully intact. Even a *total* skip could not beat that by much.
+//!
+//! So: no `load_unchecked`. The remaining lever is the table width, and because it is
+//! upstream that computes the overwhelming majority of these bytes, it is an upstream
+//! change — tracked in this crate's `UPSTREAM.md`.
 
 #[cfg(feature = "load-filter")]
 use crate::TriplePattern;

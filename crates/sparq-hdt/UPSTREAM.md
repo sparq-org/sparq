@@ -15,6 +15,8 @@ their CURRENT status against `hdt` master / 0.7.x.
 >   item 2.
 > - **`read_nt` stores literal lexical forms N-Triples-ESCAPED (spec says raw) —
 >   DOCUMENTED LIMITATION (sq-qalqs).** See item 3.
+> - **Section CRC32-C is computed with the `crc` crate's byte-at-a-time table —
+>   OPEN, not yet filed upstream (#3517, measured 2026-07-27).** See item 4.
 
 ---
 
@@ -160,3 +162,37 @@ in `tests/roundtrip.rs::hdt_load_matches_ntriples_load`.
 pins the stored dictionary bytes and the exact double-escaped round-trip rendering;
 if a future `hdt` bump fixes `read_nt`, that test goes red — then delete this item
 and tighten the oracle into an exact round-trip equality. Not yet reported upstream.
+
+---
+
+## Item 4 — CRC32-C is computed byte-at-a-time — OPEN, NOT YET REPORTED
+
+<!-- [SONNET-4.6] #3517 -->
+
+**Finding (#3517).** Section CRC verification is a measurable minority slice of an
+HDT load, and the overwhelming majority of the bytes it covers are CRC'd by
+upstream, not by sparq: `DictSectPFC::read` (the four PFC dictionary sections and
+their offset sequences) and `Sequence::read` (the two triple sequences) between them
+account for nearly all of an archive's CRC32-C payload. sparq computes only the two
+triple bitmaps' CRCs itself, in `decode.rs::read_bitmap_words`.
+
+Both sides reach for the [`crc`](https://crates.io/crates/crc) crate's **default
+byte-at-a-time `Table<1>`** implementation. The same crate also offers slice-by-16
+(`Crc<u32, Table<16>>`) — identical algorithm, identical checksum, `const`-constructible
+table, **no new dependency and no `unsafe`** — which computes the same verification
+several times faster. The upstream reader is where that change would pay.
+
+**Why sparq is not doing it locally.** The slice it could reach on its own (the two
+bitmaps) is a small enough fraction of archive bytes that switching it lands in the
+noise, so the crate keeps the default table rather than carry an unevidenced
+micro-optimisation. See `decode.rs`'s module docs for the full measured verdict — the
+same measurement that closed #3517's proposed `load_unchecked` (CRC-skip) variant as
+**not worth building**: skipping verification cannot beat verifying it faster.
+
+**Reproduce:** `cargo run --release -p sparq-hdt --example bench_crc_share` (generate
+the archive first with `--example bench_load`). The harness reports the load wall time,
+the CRC pass, the per-section byte split, and the slice-by-16 comparison; its unit
+tests pin that both table widths produce the same checksum.
+
+**Status:** not yet filed upstream. Would be a small, self-contained PR against
+`KonradHoeffner/hdt` touching the CRC construction sites only.
