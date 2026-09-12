@@ -161,3 +161,26 @@ small datasets. Further regressions cover shared credentials, membership reuse,
 capacity restrictions, admission, exact rows, RDF identity, and forced exhaustion.
 These are structural host tests; they do not measure prover runtime or audit
 cryptographic correctness.
+
+
+## Canonical signed-integer admission
+
+[GPT-6] `planner::signed::SignedDisclosureQuery::parse` separately admits the same
+positive query shape with canonical signed `i64` comparison bounds. Use
+`plan_signed_disclosure[_admitted]` or `optimize_signed_disclosure[_admitted]` with
+that type. The unsigned `DisclosureQuery::parse`, planning functions and proof
+verifier keep their existing nonnegative `u64` semantics.
+
+`canonical_signed_integer` accepts only the exact canonical `xsd:integer` token
+within the signed range: zero is `0`; negatives have one leading minus; no leading
+plus, leading zero, negative zero, whitespace or numeric datatype substitution is
+normalized. Other valid XML Schema spellings are outside this admitted profile.
+The parser rejects noncanonical and out-of-range public bounds. A noncanonical or
+out-of-range private operand cannot satisfy a planned predicate.
+
+The signed query wrapper exposes `kind`, `projection`, unchanged `patterns` and
+`filters` with actual signed bounds. Its internal order-preserving bias is not an
+unsigned query instance available to callers. Both signed search paths apply the
+same RDF identity, backend admission, resource limits and proof-obligation rules;
+original committed graphs, literal spellings and membership references are never
+rewritten. Host selection is not signed-predicate proof verification.

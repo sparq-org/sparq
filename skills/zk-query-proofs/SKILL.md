@@ -97,6 +97,10 @@ PRIVATE planning data; authentication remains required for public triples and
 FILTER operands. See [disclosure planning](references/disclosure-planner.md) for
 the API, bounds, result contract, and limitations. Host planning is not
 cryptographic verification; this surface is not externally audited.
+[GPT-6] `planner::signed::SignedDisclosureQuery` and its signed planning/optimization
+functions separately admit canonical `i64` FILTERs. They preserve committed RDF
+terms and do not extend the existing unsigned proof verifier. See the signed
+admission section in the disclosure-planning reference.
 
 ## Common recipes
 
