@@ -1,7 +1,7 @@
 {
   "schema": "sparq-evaluator-candidate-preparation-v1",
   "base_commit": "a816cf6b0e3bf7ed700f749a08240da3e22a552b",
-  "scope": "Native integration and execution definitions only. Guest compilation/execution and receipts for these current sources remain pending; c52 evidence is historical.",
+  "scope": "Historical native integration and execution-definition snapshot at the recorded base and source hashes. Later completed hosted execution and dependency policy evidence are linked below; these historical measurements and hashes have not been replaced.",
   "publication_ready": false,
   "source_sha256": {
     "crates/sparq-core/src/lib.rs": "8bf52d61b30421c8bfa2e73b7733e86f786ffabff074be720f915bc4df419aeb",
@@ -47,10 +47,8 @@
   "exporter_hermetic_tests": 15,
   "exporter_guard_mutations": 6,
   "pending": [
-    "Current guest compile and full actual execution including strict negative classification",
-    "Current three V1 succinct receipt fixtures with source/artifact export",
     "Independent source review dispositions",
-    "Mandatory hosted feature-OFF/WASM/other ratchets"
+    "Fresh integrated mandatory hosted policy, feature-OFF/WASM and other gates"
   ],
   "default_native_boundary": "Strict numeric capacity defaults false; temporal capacity defaults absent. Shared semantic fixes and conditional guard code remain compiled; hosted floors must measure actual native/WASM bytes.",
   "native_model_clippy": "passed -D warnings all targets; /private/tmp/sparq-v1-model-integration-clippy.log",
@@ -59,7 +57,7 @@
     "host_local_patches": 6,
     "guest_local_patches": 4,
     "explicit_upstream_audit_policies": 6,
-    "existing_root_exemptions_imports_other_policies": "preserved exactly; no new audit or exemption claim",
+    "existing_root_exemptions_imports_other_policies": "Historical preparation state: original root values preserved and no new audit or exemption assembled at that snapshot. Later separately reviewed policy assembly is recorded in the linked dependency validation.",
     "integration_checks": {
       "real_patch_policy_and_provenance": "passed",
       "provenance_regression_functions": 6,
@@ -80,6 +78,13 @@
       "vendor/zk-sdk/UPSTREAM.json": "4c54b0665000d9d6ca5504b9a71e8343685ce1a6d1d8f898157b22f19325ea8b",
       "supply-chain/config.toml": "5fcc3dee4ef39d5163b12c5794229bd8acfc313d2681962891c16622ef8c751e"
     },
-    "guest_execution_and_current_receipts": "pending; historical c52 receipts remain separate"
+    "guest_execution_and_current_receipts": "Pending at this historical preparation snapshot; the later completed campaign is recorded in hosted-a2-evidence.json."
+  },
+  "snapshot_status": "historical_preparation_snapshot",
+  "later_evidence": {
+    "completed_hosted_execution": "hosted-a2-evidence.json",
+    "reviewed_dependency_policy_validation": "../../research/zk-dependency-backlog/validation.json",
+    "dependency_review_provenance": "../../research/zk-dependency-backlog/README.md",
+    "note": "Hosted evidence binds its actual PR head, merge checkout and artifact. It does not retroactively assign current-source validity to this historical source hash map. Publication readiness remains false pending reviews and fresh integrated gates."
   }
 }
