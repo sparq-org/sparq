@@ -128,7 +128,7 @@ fn negation_and_false_ask_evaluate_the_complete_graph() {
             .unwrap()
             .result,
         CanonicalResult::Ask(false),
-        "VALUES must not turn variable path endpoints into constant endpoints"
+        "VALUES must preserve nullable path endpoint roles and MINUS variable domains"
     );
     let (_, rows) = select(
         "SELECT ?s WHERE { ?s <http://ex/score> ?n FILTER NOT EXISTS { ?s <http://ex/blocked> true } }",

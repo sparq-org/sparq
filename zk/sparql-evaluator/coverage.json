@@ -421,7 +421,13 @@
       ],
       "rejection_cases": [],
       "guest_proof_evidence": "not_asserted",
-      "limits": "Duplicate-sensitive forward, reverse and mixed-direction examples retain one endpoint pair per orientation; complete property-path conformance is not established."
+      "limits": "Duplicate-sensitive forward, reverse and mixed-direction examples retain one endpoint pair per orientation; complete property-path conformance is not established.",
+      "differential_observations": {
+        "baseline": "Published SPARQL 1.1 REC existential NPS mapping set and mixed-direction alternative/Union translation; expected forward/reverse/mixed cardinalities 1/1/2.",
+        "pyoxigraph_0_5_11": "Independent reviewer observed 2/2/1 on the discriminating synthetic graph.",
+        "rdflib_7_6": "Independent reviewer observed duplicate forward results and an error for the mixed inverse form.",
+        "interpretation": "Cross-engine agreement is not established; normative expectations are retained rather than rewritten to match an implementation."
+      }
     },
     {
       "id": "paths_sequence",
