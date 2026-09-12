@@ -105,10 +105,38 @@ a wrong answer. The measured verdict lives in **`RESULTS.md`** (the sanctioned n
 
 ## Authoring + validation
 
-- `build_tasks.py` regenerates `tasks.jsonl`.
+- `build_tasks.py` regenerates `tasks.jsonl`. **Every gold answer is PROBED from the live
+  PKG at build time**, not hard-coded — the entity lists and every `gold_count` come from
+  `pkg-query` run over the no-FO arm in `pkg:` domain terms (deliberately not in any FO's
+  vocabulary, so the gold truth is independent of the overlay under test).
 - `validate_tasks.py` proves every task discriminates (each FO arm answers with the
-  expected count; the no-FO arm returns 0) — run from the repo root:
-  `python3 bench/fo-km/validate_tasks.py` (needs the `close` feature).
+  expected gold — a `gold_count`, a per-part count, the per-category values of a
+  dict-shaped `gold_keys`, and — for a row-returning task whose `gold_keys` names entities
+  — those exact ENTITY VALUES, so returning the right *number* of wrong entities fails;
+  the no-FO arm returns 0) — run from the repo root:
+  `python3 bench/fo-km/validate_tasks.py` (needs the `close` feature). Because that
+  needs a cargo build, its gold-check logic is pinned separately by the hermetic
+  `scripts/tests/test_fo_km_gold_check.py` (runs in `docs-quality quick-gates`).
+
+> ⚠️ **THE FIXTURE ROTS IF YOU DON'T REGENERATE IT.** `tasks.jsonl` is a projection of
+> `pkg-instances.ttl`, so it goes stale whenever the PKG grows. The first cut of
+> `build_tasks.py` hard-coded the gold answers as Python literals (11 Findings / 6 Sources /
+> 1255 Tasks); the PKG then grew to 15 Findings / 71 Sources / 1258 Tasks and the committed
+> corpus silently stopped describing the graph the arms query — `validate_tasks.py` reported
+> **24 discrimination failures**. Half of them had been invisible because dict-shaped golds
+> were not value-checked at all — neither the multi-part split (th03) nor the per-category
+> counts behind a single query (cc03's event/artifact, cc05's claim/document/method) — and
+> because an entity-list gold was only row-COUNTED, so any same-cardinality set of wrong
+> entities passed th01/th04/cc01/cc04/th06. All of those are value-checked now, and an
+> unrecognised shape fails. **After any change to
+> the PKG instance data, re-run `build_tasks.py` then `validate_tasks.py`**, and treat a
+> non-zero exit as a stale fixture rather than a broken benchmark.
+
+**Power (pre-registered KILL-A, design §7.1).** The corpus is **16** FO-exercising tasks
+against a pre-registered floor of **≥30**. Every run recorded so far is therefore
+**underpowered by construction**: it may report an *ordering* of the arms, never an
+`recommend_adopt` adoption verdict. Growing the TH/ER/CC strata to ≥30 is design §8 step 2
+and is still outstanding.
 
 ## Metric 3 — LLM ontological-commitment stability (`STABILITY.md`)
 

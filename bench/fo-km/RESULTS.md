@@ -267,3 +267,63 @@ round 2).
 - **All numbers runtime / NON-CANONICAL** (work-box transcripts, list-price
   approximations). Run artifacts are regenerable scratch; the committed artifact is
   this record.
+
+---
+
+## FIXTURE REFRESH — the gold answers above were graded against a STALER PKG (sq-mztg8, 2026-07-26)
+
+> 🤖 **SPARQ agent** [SONNET-4.6]. Append-only integrity note. **No figure above has been
+> altered** — both measurement records stand exactly as recorded. What changed is the
+> fixture underneath them, and that bears on how the numbers may be re-used.
+
+`tasks.jsonl` is a **projection of `pkg-instances.ttl`**, but `build_tasks.py` originally
+hard-coded the gold answers as Python literals. The PKG has since grown, so the committed
+gold answers stopped describing the graph the arms query:
+
+| gold quantity | as committed when the runs above were graded | measured 2026-07-26 |
+|---|---|---|
+| `pkg:Finding` | 11 | 15 |
+| `pkg:Source` | 6 | **71** |
+| `pkg:Technique` | 5 | 5 |
+| `pkg:Task` | 1255 | 1258 |
+| information-artifact union (TH1/ER3) | 22 | 91 |
+| FO top category (ER2/CC3) | 1277 | 1349 |
+
+Run against the current graph, the pre-refresh corpus produced **24 discrimination
+failures** in `validate_tasks.py`. Half the drift had been invisible to validation because
+dict-shaped multi-part golds (th03's truth-bearer / information-bearer split) were never
+count-checked; that gap is now closed.
+
+**What this does and does not invalidate.**
+
+- It does **not** retract the recorded orderings. Within each run the *same* gold answers
+  graded all four arms, so the arm-vs-arm comparison — the only thing either record claims
+  — is internally consistent and stands.
+- It **does** mean the absolute accuracy levels above are **not comparable to any future run**
+  over the refreshed corpus. A future run is a new baseline, not a third point on the same
+  series.
+- The committed record cannot establish *when* the graph outgrew the golds, so it cannot be
+  determined from this repo alone whether either historical run was graded against a graph
+  that still matched its fixture. Treat both as measured against their own snapshot.
+- Gold answers are now **probed from the live PKG** at build time in `pkg:` domain terms
+  (independent of the FO overlay under test), so this specific rot cannot silently recur —
+  but the fixture must be **regenerated whenever the PKG instance data changes**.
+
+**A refresh side-effect the next runner must weigh (NOT silently fixed here).** Two
+enumeration tasks got materially harder, because their gold answer is now a far longer list:
+`th01`'s information-artifact list went 22 → **91** local names, and `th06`'s document list
+6 → **71**. `analyze.py` grades entity-coverage at a default threshold of **1.0** — *every*
+gold local-name must resolve in the answer text — so these two tasks now require an agent to
+enumerate 91 (resp. 71) names verbatim in order to score. That amplifies exactly the
+grader × answer-style interaction the Fable re-run documented above (item 5: the frozen
+grader rewards verbatim row enumeration, while a stronger model summarises). A future run
+should decide **before dispatch** whether to grade these two at a coverage threshold below
+1.0 or to re-scope them to a count question, and pre-register that choice. It was
+deliberately **not** changed here: moving the grading threshold changes what the metric
+means, which is a benchmark-design decision, not a staleness fix.
+
+**Power, restated.** N = 16 remains below the pre-registered **KILL-A** floor of ≥30
+FO-exercising tasks (design §7.1), so neither record above is an adoption verdict, only an
+ordering. The epic's remaining work is unchanged: grow the TH/ER/CC strata to ≥30
+(design §8 step 2), re-run Metric 1 on the refreshed corpus, then Metric 2 on EC2
+(`sq-p5ro8`).
