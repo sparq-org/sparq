@@ -641,6 +641,26 @@ class ChangeClassTests(unittest.TestCase):
         self.assertEqual(sel.affected, [])
         self.assertEqual(sel.change_class, "orchestration-only")
 
+    def test_flow_on_engine_diff_is_orchestration_only(self):
+        # [OPUS-5] #6060: the reactive follow-on engine + its rule table. A PR that
+        # changes nothing but these must NOT queue the Rust matrix; the empty closure
+        # is what makes every Rust lane skip. (Their inertness — no Rust-CI workflow
+        # references them — is pinned separately by
+        # OrchestrationSafeInertnessTests.test_no_orch_safe_script_is_referenced_by_a_rust_ci_workflow.)
+        sel = self._select(["scripts/flow-on.py", "scripts/flow-on-rules.toml"])
+        self.assertEqual(sel.mode, "selected")
+        self.assertEqual(sel.affected, [])
+        self.assertEqual(sel.change_class, "orchestration-only")
+        self.assertIn("skipped-by-class: orchestration-only", sel.reason)
+
+    def test_flow_on_paths_with_a_crate_change_still_narrow(self):
+        # And they never FORCE full either way: alongside a crate change the crate
+        # narrows normally, so the rescue can only ever remove them from the full set.
+        sel = self._select(["scripts/flow-on-rules.toml", "crates/app/src/lib.rs"])
+        self.assertEqual(sel.mode, "selected")
+        self.assertEqual(sel.affected, ["app"])
+        self.assertEqual(sel.change_class, "mixed")
+
     def test_rename_crossing_classes_forces_full(self):
         # git diff --no-renames reports a move as delete+add of BOTH paths. Moving an
         # orchestration script INTO a crate dir surfaces both paths: the crate path is
