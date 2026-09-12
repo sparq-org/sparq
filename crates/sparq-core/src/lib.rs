@@ -11646,8 +11646,8 @@ mod exact_temporal_cache_tests {
     #[test]
     fn exact_cache_is_rebuilt_from_persisted_lexicals() {
         let dir = std::env::temp_dir().join(format!("sparq_exact_cache_{}", std::process::id()));
-        let a = literal("2024-01-01T00:00:00.000000001Z");
-        let b = literal("2024-01-01T00:00:00.000000002Z");
+        let a = literal("2024-01-01T00:00:00.000000000000000000000000000000001Z");
+        let b = literal("2024-01-01T00:00:00.000000000000000000000000000000002Z");
         let graph = Graph::load_str(&format!("<http://ex/s> <http://ex/p> {a} .\n<http://ex/s> <http://ex/p> {b} ."), "nt").unwrap();
         graph.exact_temporal_value(graph.id_of(&a).unwrap()).unwrap();
         graph.save(&dir).unwrap();

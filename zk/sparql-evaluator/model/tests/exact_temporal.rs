@@ -83,5 +83,5 @@ fn temporal_capacity_rejections_are_global_in_the_model() {
             case["id"]
         );
     }
-    assert_eq!(corpus["cases"].as_array().unwrap().len(), 12);
+    assert_eq!(corpus["cases"].as_array().unwrap().len(), 13);
 }

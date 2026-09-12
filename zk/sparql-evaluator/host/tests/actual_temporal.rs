@@ -65,7 +65,7 @@ fn actual_guest_executes_exact_temporal_values_and_capacity_rejections() {
             case["id"]
         );
     }
-    assert_eq!(rec_cases, 26, "execute every exact temporal expectation");
+    assert_eq!(rec_cases, 28, "execute every exact temporal expectation");
     // Positive executions above distinguish an actual relation rejection from a broken executor.
     let rejected: serde_json::Value = serde_json::from_str(include_str!(
         "../../fixtures/conformance/temporal-capacity.json"
@@ -107,5 +107,5 @@ fn actual_guest_executes_exact_temporal_values_and_capacity_rejections() {
             case["id"]
         );
     }
-    assert_eq!(rejected["cases"].as_array().unwrap().len(), 12);
+    assert_eq!(rejected["cases"].as_array().unwrap().len(), 13);
 }

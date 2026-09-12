@@ -154,5 +154,35 @@
     "crates/sparq-engine/tests/fixtures/exact_temporal.json": "109bf0d0442dfd88c3c22ec769e12b9ba84e1a5cb53171d96c3c4d3e542b19d2",
     "zk/sparql-evaluator/fixtures/conformance/temporal-capacity.json": "ca394d226cc2382ef5761cf6d9f624c8d1782395614e2010cd0c65d6143f4071"
   },
-  "core_capacity_expectation_correction": "Year0000 moved from the old malformed-value group into the explicit positive-year capacity rejection group; original26 query expectations unchanged."
+  "core_capacity_expectation_correction": "Year0000 moved from the old malformed-value group into the explicit positive-year capacity rejection group; original26 query expectations unchanged.",
+  "followup_test_checkpoint": {
+    "runtime_source_commit": "d5458d3954a2ae63e0e2dd3224b51d8e7bc4384f",
+    "scope": "Test-only follow-up; earlier mutation and full-suite evidence remains bound to d545 source. The lib.rs change is inside cfg(test). No new guest execution claim.",
+    "source_sha256": {
+      "crates/sparq-core/src/lib.rs": "8bf52d61b30421c8bfa2e73b7733e86f786ffabff074be720f915bc4df419aeb",
+      "crates/sparq-engine/tests/exact_temporal.rs": "7126078274f144f0309ecbf577412d3084000a92f4fcaa871b121c79af1cdf79",
+      "crates/sparq-engine/tests/fixtures/exact_temporal.json": "7c792689ce969842fd89d4458b9c16bd168bdebc8d70ac938ca528ff7998e973",
+      "zk/sparql-evaluator/fixtures/conformance/temporal-capacity.json": "0a0bea138d07480cd10c7c427ab5092b6562af0c70cf5b4e5ce15803f4e5fc7b"
+    },
+    "original_26_fixture_objects_unchanged": true,
+    "rec_derived_temporal_cases": 28,
+    "capacity_rejections": 13,
+    "native_tests": [
+      {
+        "scope": "reopened mmap long-fraction cache",
+        "passed": 1,
+        "log": "/private/tmp/sparq-temporal-cache-long-mmap.log"
+      },
+      {
+        "scope": "engine exact temporal integration including ORDER ties and year-zero stored ASK/COUNT",
+        "passed": 7,
+        "log": "/private/tmp/sparq-temporal-cache-followup-engine.log"
+      },
+      {
+        "scope": "native model temporal and capacity runners",
+        "passed": 2,
+        "log": "/private/tmp/sparq-temporal-cache-followup-model.log"
+      }
+    ]
+  }
 }
