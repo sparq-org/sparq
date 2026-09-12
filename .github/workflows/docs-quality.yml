@@ -88,6 +88,13 @@
 #                       readers cite could not be parsed by the gate guarding it. Runs
 #                       here, not in the Rust-gated inference-conformance job, because the
 #                       drift lands in PRs that never run that job. Deterministic, no build.
+#     • area-totality  — every git-tracked path must attribute to an `area:` partition via
+#                       ci/area-labels.toml (`scripts/pr-area-labels.py --check-totality`;
+#                       issue #5160). It lives in this UNFILTERED lane on purpose: the rest
+#                       of that suite runs in the `paths:`-filtered routing-self-tests.yml,
+#                       which cannot name the paths that break totality — a new repo-root
+#                       config file or a new top-level directory. Deterministic, no network,
+#                       no gh: policy TOML + `git ls-files`.
 #     • ci-scripts     — the CI-helper self-tests + workflow lints bucket (absorbed whole;
 #                       it was already the in-file precedent for step-bucket consolidation).
 #
@@ -634,6 +641,24 @@ jobs:
       # fixtures are pure, and the quarantine fetch runs against an injected gh stub).
       - name: Self-test promote.py (trust-promotion predicate + quarantine fetch)
         run: python3 scripts/promote.py --self-test
+      # [OPUS-5] issue #5160: the `area:` TOTALITY gate, hosted HERE rather than in
+      # routing-self-tests.yml. That lane owns the rest of the attribution suite but is
+      # `paths:`-filtered, and what breaks totality is a path no filter can name in
+      # advance — a new repo-root config file, a new top-level directory. Reported on
+      # #5150, the run that surfaced this: a PR adding only `.jscpd.json` matched no
+      # trigger, the lane never ran, and it merged with the totality assertion already
+      # broken; the red then landed on the NEXT, unrelated PR that happened to touch a
+      # filtered path. quick-gates carries no `paths:` filter, so this runs on EVERY PR
+      # and the offending PR is the one that reds. Hermetic: one TOML parse plus
+      # `git ls-files` — no gh, no network, no PR context, no build, and no new setup
+      # step (nothing here that this job does not already have). GATING (an
+      # unattributed path takes the serializing
+      # `__global__` partition, which defers the whole issue frontier). The wiring is
+      # pinned from the other side by
+      # test_pr_area_labels.py::TestTotalityGateRunsOnEveryPR, and the computation's teeth
+      # by that suite's existing non-vacuity guard, which calls the SAME function.
+      - name: "area-totality (every tracked path attributes to an area:) — GATING"
+        run: python3 scripts/pr-area-labels.py --check-totality
       # [FABLE-5] #3759 / registry#563 item 4: the transient-tolerant gh READ retry
       # helper (scripts/gh_retry.py — bounded, transient-5xx-only, fail-closed
       # read-allow-list so mutations/arm calls can never be wrapped) and the two arm
