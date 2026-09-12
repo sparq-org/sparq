@@ -51,6 +51,14 @@ class GraphCoverage(unittest.TestCase):
                 self.assertIn("--frozen", args)
                 self.assertNotIn("--filter-graph", args)
 
+    def test_deny_uses_one_absolute_policy_for_exactly_three_manifests(self):
+        for manifest in gate.MANIFESTS:
+            self.assertEqual(gate.command("deny-integrity", manifest, self.root), [
+                gate.os.environ.get("CARGO", "cargo"), "deny", "--manifest-path", str(manifest),
+                "--config", str(self.root / "deny.toml"), "--locked", "check",
+                "bans", "sources", "licenses",
+            ])
+
     def test_cyclonedx_cannot_silently_change_the_locked_graph(self):
         def mutate(args, **kwargs):
             manifest = Path(args[args.index("--manifest-path") + 1])
@@ -92,6 +100,9 @@ class GraphCoverage(unittest.TestCase):
         (self.root / "supply-chain").mkdir()
         config = self.root / "supply-chain/config.toml"
         config.write_text("[policy]\n")
+        with self.assertRaisesRegex(ValueError, "explicit upstream audit policy"):
+            gate.patch_policy(self.root)
+        config.write_text("[policy.patched]\naudit-as-crates-io = false\n")
         with self.assertRaisesRegex(ValueError, "explicit upstream audit policy"):
             gate.patch_policy(self.root)
         config.write_text("[policy.patched]\naudit-as-crates-io = true\n")

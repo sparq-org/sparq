@@ -33,6 +33,7 @@
 
 # Canonicalise a single bom-ref / dependsOn string.
 #   path+file:///abs/.../<name>#<version><suffix>  ->  pkg:cargo/<name>@<version><suffix>
+#   path+file:///abs/.../<directory>#<name>@<version><suffix> uses the explicit name.
 # where <suffix> is whatever trails the version (e.g. " bin-target-0"); usually empty.
 def canon_ref:
   if type == "string" and startswith("path+file://") and test("#") then
@@ -128,8 +129,8 @@ def canon_purl:
 # Idempotent + non-destructive: we never overwrite a `supplier` already present (so a future
 # cargo-cyclonedx that populates it wins), and the derivation is a pure function of the raw
 # bom-ref / author, so a second pass is byte-identical. Build-target sub-components (the root
-# component's bin/lib targets) inherit via the fix_component recursion: they are under
-# /crates/sparq-* and so get the first-party supplier, matching their parent.
+# component's bin/lib targets) are classified by the same raw source path and
+# first-party package or underscore target name, matching their parent.
 
 # The crates.io project page for a published crate. Keyed off the component's own `name`
 # field (always present + correct), NOT the bom-ref basename — the registry bom-ref's

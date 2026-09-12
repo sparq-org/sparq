@@ -19,12 +19,12 @@ MANIFESTS = (
 ACTIONS = ("deny-integrity", "deny-advisories", "fetch", "vet", "sbom", "sbom-paths", "patch-policy")
 
 
-def command(action: str, manifest: Path) -> list[str]:
+def command(action: str, manifest: Path, root: Path = ROOT) -> list[str]:
     cargo = os.environ.get("CARGO", "cargo")
     path = str(manifest)
     if action.startswith("deny-"):
         checks = ["advisories"] if action == "deny-advisories" else ["bans", "sources", "licenses"]
-        return [cargo, "deny", "--manifest-path", path, "--config", "deny.toml", "--locked", "check", *checks]
+        return [cargo, "deny", "--manifest-path", path, "--config", str(root / "deny.toml"), "--locked", "check", *checks]
     if action == "fetch":
         return [cargo, "fetch", "--manifest-path", path, "--locked"]
     if action == "vet":
@@ -89,7 +89,7 @@ def run_graphs(action: str, root: Path = ROOT) -> int:
                 # cyclonedx has no --locked switch. Fetch first, disable its network,
                 # and reject any lockfile change rather than publishing a new graph.
                 env["CARGO_NET_OFFLINE"] = "true"
-            result = subprocess.run(command(action, manifest), cwd=root, env=env, check=False)
+            result = subprocess.run(command(action, manifest, root), cwd=root, env=env, check=False)
             if result.returncode != 0:
                 failed = True
             if lock.read_bytes() != before:
