@@ -108,6 +108,9 @@ issuer-signature or credential-status claim.
 [GPT-6] The separately versioned [complete named-dataset API](references/exact-datasets-v2.md)
 adds a committed catalog including empty named graphs, GRAPH and local snapshot
 FROM/FROM NAMED selection. V1 requests and commitments retain their meaning.
+[GPT-6] The [campaign evidence guide](references/evaluator-evidence.md) explains
+exact artifact export, actual receipt evidence and source/HAL provenance.
+
 [GPT-6] The [query-coverage corpus](references/evaluator-conformance.md) separates
 executed host semantics, explicit unsupported features, and guest proof evidence.
 Its opt-in NPS comparison recipe records other engines' observations without

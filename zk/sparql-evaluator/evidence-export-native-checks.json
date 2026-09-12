@@ -1,0 +1,59 @@
+{
+  "schema": "sparq-evidence-export-native-checks-v1",
+  "source_sha256": "bc259af2897751741997e20fcb32029d49172d3d660f035a7f94827637e00ee7",
+  "test_kind": "Hermetic collector rejection tests only; synthetic envelopes are not proofs.",
+  "mutations": [
+    {
+      "guard": "artifact-digest",
+      "mutation": {
+        "replace": "if bytes(pin[\"sha256\"]).hex() != digest(artifact):",
+        "with": "if False:"
+      },
+      "mutated_sha256": "504ffed9aa0538549b0541ef6b9526c2e72694b9f2dc1776ec05475c87979fe5",
+      "assertion_failure_observed": true,
+      "log": "/private/tmp/sparq-evidence-mutant-artifact-digest.log"
+    },
+    {
+      "guard": "receipt-inventory",
+      "mutation": {
+        "replace": "if set(paths) != expected:",
+        "with": "if False:"
+      },
+      "mutated_sha256": "4d3c20766d9e673c1f20f7aa2215a389b598dde0a87bed1cdaf5450fe3e57fb3",
+      "assertion_failure_observed": true,
+      "log": "/private/tmp/sparq-evidence-mutant-receipt-inventory.log"
+    },
+    {
+      "guard": "dirty-source",
+      "mutation": {
+        "replace": "if capture([\"git\", \"status\", \"--porcelain\", \"--untracked-files=no\"], root):",
+        "with": "if False:"
+      },
+      "mutated_sha256": "322c9976323c4292913309c39c29e751f37ddb6f38aa7ada04faec174e250a6c",
+      "assertion_failure_observed": true,
+      "log": "/private/tmp/sparq-evidence-mutant-dirty-source.log"
+    },
+    {
+      "guard": "checkout-binding",
+      "mutation": {
+        "replace": "or sha != checkout:",
+        "with": "or False:"
+      },
+      "mutated_sha256": "d4d538210f4a174492cb02832575a0233f1a9f8cf636b7ea586c51347f8a328f",
+      "assertion_failure_observed": true,
+      "log": "/private/tmp/sparq-evidence-mutant-checkout-binding.log"
+    },
+    {
+      "guard": "hal-observation",
+      "mutation": {
+        "replace": "if not targets:",
+        "with": "if False:"
+      },
+      "mutated_sha256": "e22d9c26686146407cb1fbd47c650c773d5c7f7be520a883efbf1d06d0a35495",
+      "assertion_failure_observed": true,
+      "log": "/private/tmp/sparq-evidence-mutant-hal-observation.log"
+    }
+  ],
+  "source_restored": true,
+  "actual_guest_compilation_execution_receipts": "pending combined source/dependency freeze"
+}

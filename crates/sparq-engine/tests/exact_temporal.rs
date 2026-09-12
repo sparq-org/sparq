@@ -67,7 +67,7 @@ fn bounded() -> sparq_engine::QueryBudget {
 }
 
 #[test]
-fn temporal_capacity_is_a_query_failure_even_when_expression_errors_are_handled() {
+fn check_temporal_is_a_query_failure_even_when_expression_errors_are_handled() {
     let graph = Graph::load_str("", "ntriples").unwrap();
     let expression = "STRDT(CONCAT(\"1000000001\", \"-01-01T00:00:00Z\"), xsd:dateTime)";
     let cast = "xsd:dateTime(CONCAT(\"1000000001\", \"-01-01T00:00:00Z\"))";

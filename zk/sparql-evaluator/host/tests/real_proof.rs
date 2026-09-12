@@ -1,4 +1,7 @@
 // [GPT-6] No ignored tests, mock mode, network prover, or tool-presence skip.
+#[path = "support/evidence.rs"]
+mod evidence;
+
 use risc0_zkvm::{
     Executor, ExecutorEnv, ExternalProver, FakeReceipt, InnerReceipt, Receipt, ReceiptClaim,
     VerifierContext,
@@ -151,6 +154,11 @@ fn real_exact_result_rejects_all_public_binding_tampering_and_replay() {
         receipt_bytes.len(),
         guest.image_id()
     );
+    evidence::record(
+        "v1-verifier-select",
+        &witness.request,
+        &presentation.receipt,
+    );
 }
 
 #[test]
@@ -296,6 +304,7 @@ fn real_holder_declared_bag_preserves_duplicates_unbound_and_provenance() {
         commitment: journal.dataset_commitment,
     };
     assert!(verify(&presentation, &stronger_claim, &mut MemoryNonces::default()).is_err());
+    evidence::record("v1-holder-bag", &witness.request, &presentation.receipt);
 }
 
 #[test]
@@ -312,4 +321,9 @@ fn real_false_ask_proves_absence_from_the_accepted_complete_graph() {
     .unwrap();
     assert_eq!(journal.result, CanonicalResult::Ask(false));
     assert_eq!(journal, evaluate(&witness).unwrap());
+    evidence::record(
+        "v1-verifier-false-ask",
+        &witness.request,
+        &presentation.receipt,
+    );
 }
