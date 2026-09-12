@@ -5,11 +5,11 @@ use std::process::Command;
 
 #[test]
 fn result_compatibility_evidence_and_corruption_controls() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let script = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../bench/zk-compose/scripts/verify_result_evidence.py");
     let output = Command::new("python3")
-        .arg(root.join("bench/zk-compose/scripts/verify_result_evidence.py"))
+        .arg(script)
         .arg("--self-test")
-        .current_dir(&root)
         .output()
         .expect("the repository's host evidence checks require Python 3");
     assert!(
