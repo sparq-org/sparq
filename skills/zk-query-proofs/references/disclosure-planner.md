@@ -184,3 +184,12 @@ unsigned query instance available to callers. Both signed search paths apply the
 same RDF identity, backend admission, resource limits and proof-obligation rules;
 original committed graphs, literal spellings and membership references are never
 rewritten. Host selection is not signed-predicate proof verification.
+
+[GPT-6] The separate Noir `result_signed_integer` core gadget now reconstructs
+the exact canonical signed token from a private order-preserving unsigned value.
+It reuses the existing literal hash and comparison functions, handles the signed
+minimum without signed negation, and uses one fixed capacity for both signs and
+all admitted lexical lengths. Its unit checks cover boundaries, ordering across
+zero, noncanonical spellings and type substitution. This is a tested core gadget;
+no signed successful-result preparation or verification entry point is exposed by
+this checkpoint, and these unit executions are not genuine result proofs.

@@ -368,3 +368,8 @@ preserved under the pinned toolchain and checked against independent baseline
 keys in the toolchain suite. Expanded v2 tiny and predicate-free profiles have
 representative genuine-proof checks in addition to wrapper execution coverage;
 see the successful-result reference for evidence and scope.
+
+[GPT-6] Separate signed-integer planning also has a Noir core gadget that binds
+canonical signed literals without making sign or actual lexical length public.
+It is unit-tested core code, not an exposed signed successful-result proof API;
+see [signed admission](references/disclosure-planner.md#canonical-signed-integer-admission).

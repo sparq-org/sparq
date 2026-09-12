@@ -364,3 +364,4 @@ jobs:
           cd zk/compose
           nargo test --package sparq_zk_compose_core result::
           nargo test --package sparq_zk_compose_core result_integer::
+          nargo test --package sparq_zk_compose_core result_signed_integer::
