@@ -1,4 +1,6 @@
 // [GPT-6] Real V2 dataset receipts and guest rejection tests; no mock/ignored path.
+#[path = "support/evidence.rs"]
+mod evidence;
 use risc0_zkvm::{Executor, ExecutorEnv, ExternalProver};
 use sparq_proved_evaluator::v2::{prove_with_artifact, verify_with_artifact};
 use sparq_proved_evaluator::{AcceptedGuest, Error, Nonces, embedded_artifact, embedded_pin};
@@ -143,6 +145,7 @@ fn real_v2_catalog_and_nested_graph_result_bind_every_public_expectation() {
         )
         .is_err()
     );
+    evidence::record("v2-verifier-catalog", &input.request, &proof.receipt);
 }
 
 #[test]
@@ -160,11 +163,12 @@ fn real_v2_holder_declared_absence_respects_from_named_scope() {
     assert_eq!(journal, evaluate(&input).unwrap());
     assert_eq!(journal.result, CanonicalResult::Ask(false));
     assert_eq!(journal.provenance, Provenance::HolderDeclaredOnly);
-    let mut stronger = input.request;
+    let mut stronger = input.request.clone();
     stronger.authority = DatasetAuthority::VerifierAgreed {
         commitment: journal.dataset_commitment,
     };
     assert!(verify_with_artifact(&proof, &stronger, &mut MemoryNonces::default(), &guest).is_err());
+    evidence::record("v2-holder-false-ask", &input.request, &proof.receipt);
 }
 
 #[test]

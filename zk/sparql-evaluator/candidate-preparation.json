@@ -54,5 +54,34 @@
     "Mandatory hosted feature-OFF/WASM/other ratchets"
   ],
   "default_native_boundary": "Strict numeric capacity defaults false; temporal capacity defaults absent. Shared semantic fixes and conditional guard code remain compiled; hosted floors must measure actual native/WASM bytes.",
-  "native_model_clippy": "passed -D warnings all targets; /private/tmp/sparq-v1-model-integration-clippy.log"
+  "native_model_clippy": "passed -D warnings all targets; /private/tmp/sparq-v1-model-integration-clippy.log",
+  "record_scope": "Inherited V1 preparation is bound to75dbb3bc3050ea3db5a8d80e8bddd9d641d4610e; current dual-version source is described by v2_preparation. Neither record establishes guest execution.",
+  "v2_preparation": {
+    "base_commit": "91a43ac2f512e03bef879245d876a4838845f99c",
+    "source_sha256": {
+      "crates/sparq-engine/src/exec.rs": "8d82714cb050aeb882d240da0122ceb87fc195b679ef8d178c50800c513daf04",
+      "zk/sparql-evaluator/model/src/evaluate.rs": "da68d130a0e6f83bd07b3e17599b4256dbb6bfe9c501c57f16df4b5191bed2db",
+      "zk/sparql-evaluator/model/src/v2.rs": "074451abace23f80e024acf3351dad5780200b7e4f64d2c0caee73557235efaf",
+      "zk/sparql-evaluator/methods/guest/src/main.rs": "d0357947d2e043b6a1cd34836affb482ef147499ba9abbb64a4023e145be762d",
+      "zk/sparql-evaluator/host/tests/real_datasets.rs": "b4fa9b6fab50f9894195fb1657e21c1f61a51b436a1aefd545617e5b8ec15d28",
+      "zk/sparql-evaluator/host/tests/actual_builtin_edges.rs": "50588933a01089899d7a0cc59591e9e7d4e64b527437b221ce41d0e5a9c5c269",
+      "zk/sparql-evaluator/host/tests/actual_temporal.rs": "d10214dd5230d578f37f94b4a01a3b41ca76eeaa3d8c40a3fb4f652ae5169f7d",
+      "zk/sparql-evaluator/host/tests/actual_aggregates.rs": "9236480a81c968fab405b8354385736c35382790fd8194b45e8a0e0aaf6157bd",
+      "zk/sparql-evaluator/host/tests/actual_numeric_capacity.rs": "137b05274312d7dc22da1b3c3607a197bde263dd00303211b43b74611a5137cc",
+      "zk/sparql-evaluator/model/tests/numeric_capacity.rs": "f7fef885172bd8dc6b96467b1126cbf71f54ea81b0640ee42e9aaca62e0c417d"
+    },
+    "native_model_tests": 43,
+    "native_model_log": "/private/tmp/sparq-v2-temporal-numeric-integrated-model.log",
+    "native_model_clippy": "passed -D warnings all targets; /private/tmp/sparq-v2-model-integration-clippy.log",
+    "preflight": "passed scoped integration; /private/tmp/sparq-v2-integrated-preflight.log",
+    "exporter_hermetic_tests": 14,
+    "actual_execution_definitions": "All V1 and V2 builtin/aggregate/temporal/numeric capacity cases; three V1 and two V2 genuine receipts with one common exported program. Execution remains pending.",
+    "publication_ready": false,
+    "pending": [
+      "Final SDK feature-edge integration",
+      "Actual framing compilation and strict negative-error classification",
+      "All V1 and V2 current-artifact guest executions and five genuine receipts",
+      "Independent review dispositions and hosted gates"
+    ]
+  }
 }
