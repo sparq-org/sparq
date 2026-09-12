@@ -57,8 +57,10 @@ SELECT results retain projection order and distinguish unbound cells from empty
 literals. Unordered results use sorted encoded rows with duplicates retained.
 An outer ORDER BY preserves the guest's resulting sequence and tie policy.
 ASK publishes a boolean, including false after evaluation of the scoped dataset.
-The first profile rejects blank-node input/query terms and output values, so it
+The first profile rejects source blank-node input/query terms and output values, so it
 does not claim blank-node result canonicalization or graph-producing support.
+Parser-generated existential intermediates for fixed-length paths are admitted
+under a reserved, deterministic internal namespace and never enter `SELECT *`.
 
 ## Admitted profile and evidence
 

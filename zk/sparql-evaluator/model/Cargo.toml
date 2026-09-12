@@ -15,6 +15,6 @@ serde_json.workspace = true
 sha2.workspace = true
 sparq-engine = { path = "../../../crates/sparq-engine", default-features = false, features = ["regex", "digest"], optional = true }
 sparq-core = { path = "../../../crates/sparq-core", default-features = false, optional = true }
-spargebra = { version = "=0.4.6", features = ["sparql-12", "sep-0006"], optional = true }
+spargebra = { version = "=0.4.6", features = ["sparql-12", "sep-0006", "sparq-deterministic-paths"], optional = true }
 oxrdf = { version = "0.3", features = ["rdf-12"], optional = true }
 oxttl = { version = "0.2", features = ["rdf-12"], optional = true }

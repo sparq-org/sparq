@@ -234,6 +234,10 @@ fn literal(l: &Literal) -> Result<(), Rejected> {
 fn pattern_term(term: &TermPattern) -> Result<(), Rejected> {
     match term {
         TermPattern::NamedNode(_) | TermPattern::Variable(_) => Ok(()),
+        // The opt-in vendored parser creates these only when lowering a fixed
+        // path sequence. Its leading # is forbidden in source blank-node labels.
+        // They bind existential intermediates, never RDF blank-node identities.
+        TermPattern::BlankNode(node) if node.as_str().starts_with("#sparq-path#") => Ok(()),
         TermPattern::Literal(l) => literal(l),
         _ => Err(Rejected(
             "query blank nodes and triple terms are not admitted",

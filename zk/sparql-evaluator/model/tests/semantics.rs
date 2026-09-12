@@ -71,6 +71,36 @@ fn canonical_bag_preserves_duplicate_derivations() {
 }
 
 #[test]
+fn fixed_path_intermediates_are_hidden_and_preserve_join_multiplicity() {
+    let query = "SELECT * WHERE { <http://ex/alice> <http://ex/value>/^<http://ex/value> ?s }";
+    let CanonicalResult::Select {
+        variables,
+        order,
+        rows,
+    } = evaluate(&witness(query)).unwrap().result
+    else {
+        panic!("SELECT");
+    };
+    assert_eq!(variables, vec!["s"]);
+    assert_eq!(order, RowOrder::Bag);
+    assert_eq!(rows, vec![vec![iri("alice")], vec![iri("alice")]]);
+    // Independent sequence intermediates cannot capture one another.
+    let (_, rows) = select(
+        "SELECT ?s WHERE { \
+         <http://ex/alice> <http://ex/value>/^<http://ex/value> ?s . \
+         <http://ex/bob> <http://ex/value>/^<http://ex/value> ?other }",
+    );
+    assert_eq!(rows, vec![vec![iri("alice")], vec![iri("alice")]]);
+    for query in [
+        "SELECT * WHERE { _:source <http://ex/value> ?v }",
+        "SELECT * WHERE { [] <http://ex/value> ?v }",
+        "SELECT * WHERE { _:#sparq-path#0 <http://ex/value> ?v }",
+    ] {
+        assert!(admit(&witness(query).request).is_err());
+    }
+}
+
+#[test]
 fn distinct_removes_duplicates_only_when_requested() {
     let (_, rows) = select("SELECT DISTINCT ?s WHERE { ?s <http://ex/value> ?v }");
     assert_eq!(rows.len(), 3);

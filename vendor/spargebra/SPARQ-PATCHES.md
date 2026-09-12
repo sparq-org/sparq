@@ -346,3 +346,12 @@ detached exact-evaluator guest; it does not implement RAND, UUID or RDF blank-no
 generation. The actual guest proof fixture in `zk/sparql-evaluator/host/tests`
 exercises aggregate aliases and a grouped subquery with this allocator.
 Retiring the vendored tree must preserve equivalent guest portability.
+
+The opt-in `sparq-deterministic-paths` feature also lowers fixed-length path
+intermediates into checked monotonic `#sparq-path#` blank-node patterns, on native
+and guest targets. These are existential query variables, excluded from
+`SELECT *`; they are not generated RDF data. The leading `#` cannot be written
+in a source blank-node label, allowing the exact evaluator to admit only these
+internal patterns while rejecting source blank nodes. Normal parser builds keep
+the upstream allocator. The detached evaluator enables this feature explicitly;
+its internal algebra is for execution, not a portable SPARQL text serialization.
