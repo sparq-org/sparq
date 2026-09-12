@@ -364,3 +364,8 @@ preserved under the pinned toolchain and checked against independent baseline
 keys in the toolchain suite. Expanded v2 tiny and predicate-free profiles have
 representative genuine-proof checks in addition to wrapper execution coverage;
 see the successful-result reference for evidence and scope.
+
+[GPT-6] Default host checks validate the legacy compatibility evidence's source
+hashes and byte lengths. The ZK toolchain lane independently rebuilds the fixed
+foundation keys in addition to checking current keys. Only v1 byte stability is
+promised; unchanged v2 circuit sizes do not establish key compatibility.

@@ -143,15 +143,21 @@ prover-supplied key or status-depth override. Member suffix `i64` denotes the
 unsigned integer width in bits, not signed `i64` support. With the pinned
 Noir/bb toolchain, all original version-one members retain the foundation
 circuit, ABI and verification-key bytes. The [compatibility evidence](../../../bench/zk-compose/result_v1_compatibility.json)
-records actual comparisons against the baseline archive. A required toolchain
-test regenerates each legacy key and compares it with those independent baseline
-bytes; compatibility is not inferred from matching gate counts. The generic
+records actual comparisons against the baseline archive. The required ZK toolchain
+lane, triggered by ZK paths, runs the ignored key test explicitly and compares each
+regenerated legacy key with those baseline bytes. It also independently fetches
+the fixed foundation commit and rebuilds its keys. A default host test checks the
+artifact's inventory, hashes, byte lengths and source identity. Compatibility is
+not inferred from matching gate counts. The generic
 shared relation keeps version-one private values as `u8` throughout, while the
 expanded `u64` tiny profiles retain their pre-cast range guard.
 
 Expanded-member witness executions are distinct from genuine proof checks. The
 toolchain suite additionally proves representative wide, tiny and predicate-free
 version-two members and checks their reconstructed public ABI through verification.
+Only version-one byte stability is promised; the newly introduced version-two keys
+must be derived from the installed source, and stable counts do not establish their
+compatibility across source changes.
 Exact gate measurements remain circuit-size evidence only. The planner's objective
 still counts authentications and memberships, and the driver still regenerates
 canonical keys during verification; neither a tiny-first search policy nor a

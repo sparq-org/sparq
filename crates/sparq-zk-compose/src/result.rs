@@ -1631,6 +1631,9 @@ mod tests {
             "person".into(),
             Term::NamedNode(iri("urn:alice")),
         )])];
+        // [GPT-6] The first case characterizes today's equal-cost tie break:
+        // canonical leaf order visits 100 first. A measured tiny-first optimizer
+        // may legitimately change that expectation; it is not a wire-contract rule.
         for (predicate, value, capacity) in [
             ("?age >= 18", 100, PrivateIntegerCapacity::FullU64),
             ("?age < 100", 42, PrivateIntegerCapacity::TwoDigits),
