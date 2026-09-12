@@ -39,6 +39,10 @@ let json = sparq_engine::query_json(&g, "SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?
 - **SPARQL query** — run [SPARQL 1.1](https://www.w3.org/TR/sparql11-query/) and
   [1.2](https://www.w3.org/TR/sparql12-query/) over your data (conformance tracked by the CI
   ratchets), plus the *non-standard* `MULTIPLICITY()` aggregate extension — see the SKILL.
+- **Path multiplicity and expression correlation** — alternatives and sequences preserve
+  SPARQL bag counts; reachability operators retain endpoint sets. `EXISTS` / `NOT EXISTS`
+  filters can reference bound outer variables used only in inner expressions, with actual
+  RDF term identity retained across the vocabulary boundary.
 - **Named graphs** — query across an active dataset with `GRAPH` and `FROM` / `FROM NAMED`.
 - **RDF 1.2 triple terms** — match [triple terms](https://www.w3.org/TR/rdf12-concepts/), including variables inside them.
 - **Materialized full paths** *(opt-in `paths` feature, OFF by default)* — `enumerate_paths` returns intermediate nodes and edges for tied shortest paths, bounded simple paths, or cycles back to their start. Each endpoint is unrestricted, one fixed node, or a graph pattern selecting a candidate set.

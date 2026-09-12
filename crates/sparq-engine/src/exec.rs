@@ -2542,6 +2542,10 @@ pub struct LocalVocab {
     /// FILTER/comparison over a BIND-computed numeric does not clone + re-parse
     /// the term per row.
     nums: Vec<f64>,
+    /// [GPT-6] Bound outer terms for EXISTS expression substitution. Kept with
+    /// this evaluation's vocabulary, so nested queries and Rayon workers cannot
+    /// inherit another evaluation's bindings through thread-local state.
+    correlation: FxHashMap<Variable, Term>,
 }
 
 impl LocalVocab {
@@ -5070,7 +5074,7 @@ fn eval_graph_named_pref(
         // default (wasm) build is byte-identical.
         #[cfg(feature = "zk")]
         let _zk = crate::zk::graph_scope(gname);
-        let mut sub_local = LocalVocab::default();
+        let mut sub_local = LocalVocab { correlation: local.correlation.clone(), ..LocalVocab::default() };
         let b = eval_graph_pattern(sub, &mut sub_local, inner)?;
         let rows: Vec<Row> = b
             .rows
@@ -7029,7 +7033,7 @@ fn eval_path(
         // diagonal is computable WITHOUT the all-pairs closure: the zero-length
         // operators' diagonal is exactly the node domain, and `p+`'s diagonal is
         // the set of nodes on a directed cycle (SCC size >= 2, or a self-loop).
-        let pairs: FxHashSet<(Id, Id)> = if same_var {
+        let pairs: Vec<(Id, Id)> = if same_var {
             match path {
                 PropertyPathExpression::ZeroOrMore(_) | PropertyPathExpression::ZeroOrOne(_) => {
                     graph_nodes(graph).into_iter().map(|n| (n, n)).collect()
@@ -7037,10 +7041,10 @@ fn eval_path(
                 PropertyPathExpression::OneOrMore(a) => {
                     cyclic_nodes(graph, a)?.into_iter().map(|n| (n, n)).collect()
                 }
-                _ => path_pairs(graph, path, ends)?,
+                _ => path_bag_pairs(graph, path, ends)?,
             }
         } else {
-            path_pairs(graph, path, ends)?
+            path_bag_pairs(graph, path, ends)?
         };
         for (s, o) in pairs {
             if s_bound.is_some_and(|b| s != b) || o_bound.is_some_and(|b| o != b) || (same_var && s != o) {
@@ -7053,9 +7057,13 @@ fn eval_path(
             if o_var.is_some() && !same_var {
                 row.push(o);
             }
-            if seen.insert(row.clone()) {
-                rows.push(row); // property-path solutions are a set (DISTINCT)
+            // [GPT-6] Alternative/sequence paths retain multiset cardinality.
+            // Only top-level nullable quantifiers need to suppress their extra
+            // constant-endpoint identity row below; their pair relation is a set.
+            if zero_len {
+                seen.insert(row.clone());
             }
+            rows.push(row);
         }
     }
     if zero_len {
@@ -7116,6 +7124,140 @@ impl PathEnds {
 /// DELIBERATELY gets only the outer endpoint pushed and the midpoints meet in
 /// the hash join instead.
 const SEQ_MIDPOINT_FANOUT_LIMIT: usize = 1024;
+
+// [GPT-6] SPARQL 1.1 §18.4 defines alternatives as multiset union and
+// sequences as join followed by projection. Reachability operators deliberately
+// retain the set evaluator below, so duplicate routes do not multiply p*/p+.
+fn path_bag_pairs(
+    graph: &Graph,
+    path: &PropertyPathExpression,
+    ends: PathEnds,
+) -> Result<Vec<(Id, Id)>, String> {
+    use PropertyPathExpression as P;
+    budget::check(0)?;
+    match path {
+        P::Reverse(inner) => Ok(path_bag_pairs(graph, inner, ends.swapped())?
+            .into_iter()
+            .map(|(s, o)| (o, s))
+            .collect()),
+        P::Alternative(left, right) => {
+            let mut pairs = path_bag_pairs(graph, left, ends)?;
+            let more = path_bag_pairs(graph, right, ends)?;
+            check_path_growth(pairs.len(), more.len())?;
+            pairs.extend(more);
+            Ok(pairs)
+        }
+        P::Sequence(left, right) => {
+            if let Some(s) = ends.s {
+                let near = path_bag_pairs(
+                    graph,
+                    left,
+                    PathEnds {
+                        s: Some(s),
+                        o: None,
+                    },
+                )?;
+                let mut mids: FxHashMap<Id, usize> = FxHashMap::default();
+                for &(start, mid) in &near {
+                    if start == s {
+                        *mids.entry(mid).or_default() += 1;
+                    }
+                }
+                if mids.len() <= SEQ_MIDPOINT_FANOUT_LIMIT {
+                    let mut pairs = Vec::new();
+                    for (mid, count) in mids {
+                        for (start, o) in path_bag_pairs(
+                            graph,
+                            right,
+                            PathEnds {
+                                s: Some(mid),
+                                o: ends.o,
+                            },
+                        )? {
+                            if start == mid {
+                                check_path_growth(pairs.len(), count)?;
+                                pairs.extend(std::iter::repeat_n((s, o), count));
+                            }
+                        }
+                    }
+                    return Ok(pairs);
+                }
+                join_path_bags(
+                    near,
+                    path_bag_pairs(graph, right, PathEnds { s: None, o: ends.o })?,
+                )
+            } else if let Some(o) = ends.o {
+                let near = path_bag_pairs(
+                    graph,
+                    right,
+                    PathEnds {
+                        s: None,
+                        o: Some(o),
+                    },
+                )?;
+                let mut mids: FxHashMap<Id, usize> = FxHashMap::default();
+                for &(mid, end) in &near {
+                    if end == o {
+                        *mids.entry(mid).or_default() += 1;
+                    }
+                }
+                if mids.len() <= SEQ_MIDPOINT_FANOUT_LIMIT {
+                    let mut pairs = Vec::new();
+                    for (mid, count) in mids {
+                        for (s, end) in path_bag_pairs(
+                            graph,
+                            left,
+                            PathEnds {
+                                s: None,
+                                o: Some(mid),
+                            },
+                        )? {
+                            if end == mid {
+                                check_path_growth(pairs.len(), count)?;
+                                pairs.extend(std::iter::repeat_n((s, o), count));
+                            }
+                        }
+                    }
+                    return Ok(pairs);
+                }
+                join_path_bags(path_bag_pairs(graph, left, PathEnds::NONE)?, near)
+            } else {
+                join_path_bags(
+                    path_bag_pairs(graph, left, PathEnds::NONE)?,
+                    path_bag_pairs(graph, right, PathEnds::NONE)?,
+                )
+            }
+        }
+        _ => {
+            let pairs = path_pairs(graph, path, ends)?;
+            budget::check(pairs.len())?;
+            Ok(pairs.into_iter().collect())
+        }
+    }
+}
+
+fn check_path_growth(current: usize, added: usize) -> Result<(), String> {
+    let total = current
+        .checked_add(added)
+        .ok_or("property path multiplicity overflow")?;
+    budget::check(total)
+}
+
+fn join_path_bags(left: Vec<(Id, Id)>, right: Vec<(Id, Id)>) -> Result<Vec<(Id, Id)>, String> {
+    let mut by_start: FxHashMap<Id, Vec<Id>> = FxHashMap::default();
+    for (mid, end) in right {
+        by_start.entry(mid).or_default().push(end);
+    }
+    let mut pairs = Vec::new();
+    for (start, mid) in left {
+        budget::check(pairs.len())?;
+        if let Some(ends) = by_start.get(&mid) {
+            check_path_growth(pairs.len(), ends.len())?;
+            pairs.extend(ends.iter().map(|&end| (start, end)));
+        }
+    }
+    Ok(pairs)
+}
 
 /// All `(subject, object)` id pairs connected by a property path expression,
 /// narrowed by any bound endpoints (see [`PathEnds`] for the exact contract).
@@ -10654,7 +10796,7 @@ fn values_bindings(graph: &Graph, local: &mut LocalVocab, variables: &[Variable]
 
 fn extend_bindings(graph: &Graph, local: &mut LocalVocab, mut b: Bindings, var: &Variable, expr: &Expression) -> Result<Bindings, String> {
     // Pre-resolve Variable → column index once before the row loop. [OPUS-4.8] sq-7d3dj.4.
-    let compiled = compile_expr(expr, &b);
+    let compiled = compile_expr(expr, &b, local);
     // BIND was fully serial because each row's computed value was interned immediately. Split it
     // (T1.0b): a PARALLEL pass evaluates the expression (read-only) and resolves the value to an
     // id read-only (inline / graph-dict / already-local); only genuinely new terms fall through to
@@ -11706,8 +11848,8 @@ fn order_bindings(
     let compiled_order: Vec<(bool, CompiledExpr)> = exprs
         .iter()
         .map(|oe| match oe {
-            OrderExpression::Asc(e) => (false, compile_expr(e, b)),
-            OrderExpression::Desc(e) => (true, compile_expr(e, b)),
+            OrderExpression::Asc(e) => (false, compile_expr(e, b, local)),
+            OrderExpression::Desc(e) => (true, compile_expr(e, b, local)),
         })
         .collect();
 
@@ -12310,9 +12452,11 @@ fn apply_filter(graph: &Graph, local: &LocalVocab, b: &mut Bindings, expr: &Expr
     // delegation for tie/unknown lanes. Declines (→ scalar path) for anything not provably
     // byte-identical to `apply_filter_scalar`. I5 probe counters updated on each call.
     #[cfg(feature = "vectorized")]
-    if let Some(rows) = columnar_filter(graph, local, b, expr)? {
-        b.rows = rows;
-        return Ok(());
+    if local.correlation.is_empty() {
+        if let Some(rows) = columnar_filter(graph, local, b, expr)? {
+            b.rows = rows;
+            return Ok(());
+        }
     }
     apply_filter_scalar(graph, local, b, expr)
 }
@@ -12768,7 +12912,7 @@ fn with_idfast_nonlit_cols<R>(cols: FxHashSet<usize>, f: impl FnOnce() -> R) -> 
 fn apply_filter_scalar(graph: &Graph, local: &LocalVocab, b: &mut Bindings, expr: &Expression) -> Result<(), String> {
     // Pre-resolve Variable → column index once before the row loop. [OPUS-4.8] sq-7d3dj.4.
     #[cfg_attr(not(feature = "id-filter-fastpath"), allow(unused_mut))]
-    let mut compiled = compile_expr(expr, b);
+    let mut compiled = compile_expr(expr, b, local);
     // [FABLE-5] (sq-7d3dj.30.11) Rewrite eligible `=` nodes into the id-level fast path using the
     // non-literal columns the FILTER dispatch computed for THIS operator (empty for every other
     // caller → no-op). Done ONCE, before the row loop; rayon workers see the rewritten program.
@@ -12897,6 +13041,9 @@ enum Value {
 enum CompiledExpr {
     /// Pre-resolved column: `Some(c)` → `row[c]`; `None` → variable not in scope (always unbound).
     Var(Option<usize>),
+    /// [GPT-6] An outer EXISTS term, including blank nodes and computed literals.
+    Captured(Term),
+    CapturedBound,
     /// `BOUND(?v)`: `Some(c)` → `row[c] != NO_ID`; `None` → always `false`.
     BoundCol(Option<usize>),
     NamedNode(oxrdf::NamedNode),
@@ -13004,6 +13151,8 @@ fn idfast_rewrite(e: &mut CompiledExpr, nonlit_cols: &FxHashSet<usize>) {
         }
         C::IdEqNonLit(..)
         | C::Var(_)
+        | C::Captured(_)
+        | C::CapturedBound
         | C::BoundCol(_)
         | C::NamedNode(_)
         | C::Literal(_)
@@ -13012,43 +13161,49 @@ fn idfast_rewrite(e: &mut CompiledExpr, nonlit_cols: &FxHashSet<usize>) {
 }
 
 /// Walk `e` once, resolving all `Variable`/`Bound` nodes to column indices. [OPUS-4.8] sq-7d3dj.4.
-fn compile_expr(e: &Expression, b: &Bindings) -> CompiledExpr {
+fn compile_expr(e: &Expression, b: &Bindings, local: &LocalVocab) -> CompiledExpr {
     use Expression::*;
     match e {
-        Variable(v) => CompiledExpr::Var(b.col(v)),
+        Variable(v) => match local.correlation.get(v) {
+            Some(Term::NamedNode(n)) => CompiledExpr::NamedNode(n.clone()),
+            Some(Term::Literal(l)) => CompiledExpr::Literal(l.clone()),
+            Some(term) => CompiledExpr::Captured(term.clone()),
+            None => CompiledExpr::Var(b.col(v)),
+        },
+        Bound(v) if local.correlation.contains_key(v) => CompiledExpr::CapturedBound,
         Bound(v) => CompiledExpr::BoundCol(b.col(v)),
         NamedNode(n) => CompiledExpr::NamedNode(n.clone()),
         Literal(l) => CompiledExpr::Literal(l.clone()),
-        And(a, d) => CompiledExpr::And(Box::new(compile_expr(a, b)), Box::new(compile_expr(d, b))),
-        Or(a, d) => CompiledExpr::Or(Box::new(compile_expr(a, b)), Box::new(compile_expr(d, b))),
-        Not(a) => CompiledExpr::Not(Box::new(compile_expr(a, b))),
-        Equal(a, d) => CompiledExpr::Equal(Box::new(compile_expr(a, b)), Box::new(compile_expr(d, b))),
-        SameTerm(a, d) => CompiledExpr::SameTerm(Box::new(compile_expr(a, b)), Box::new(compile_expr(d, b))),
-        Greater(a, d) => CompiledExpr::Greater(Box::new(compile_expr(a, b)), Box::new(compile_expr(d, b))),
+        And(a, d) => CompiledExpr::And(Box::new(compile_expr(a, b, local)), Box::new(compile_expr(d, b, local))),
+        Or(a, d) => CompiledExpr::Or(Box::new(compile_expr(a, b, local)), Box::new(compile_expr(d, b, local))),
+        Not(a) => CompiledExpr::Not(Box::new(compile_expr(a, b, local))),
+        Equal(a, d) => CompiledExpr::Equal(Box::new(compile_expr(a, b, local)), Box::new(compile_expr(d, b, local))),
+        SameTerm(a, d) => CompiledExpr::SameTerm(Box::new(compile_expr(a, b, local)), Box::new(compile_expr(d, b, local))),
+        Greater(a, d) => CompiledExpr::Greater(Box::new(compile_expr(a, b, local)), Box::new(compile_expr(d, b, local))),
         GreaterOrEqual(a, d) => {
-            CompiledExpr::GreaterOrEqual(Box::new(compile_expr(a, b)), Box::new(compile_expr(d, b)))
+            CompiledExpr::GreaterOrEqual(Box::new(compile_expr(a, b, local)), Box::new(compile_expr(d, b, local)))
         }
-        Less(a, d) => CompiledExpr::Less(Box::new(compile_expr(a, b)), Box::new(compile_expr(d, b))),
+        Less(a, d) => CompiledExpr::Less(Box::new(compile_expr(a, b, local)), Box::new(compile_expr(d, b, local))),
         LessOrEqual(a, d) => {
-            CompiledExpr::LessOrEqual(Box::new(compile_expr(a, b)), Box::new(compile_expr(d, b)))
+            CompiledExpr::LessOrEqual(Box::new(compile_expr(a, b, local)), Box::new(compile_expr(d, b, local)))
         }
-        Add(a, d) => CompiledExpr::Add(Box::new(compile_expr(a, b)), Box::new(compile_expr(d, b))),
-        Subtract(a, d) => CompiledExpr::Subtract(Box::new(compile_expr(a, b)), Box::new(compile_expr(d, b))),
-        Multiply(a, d) => CompiledExpr::Multiply(Box::new(compile_expr(a, b)), Box::new(compile_expr(d, b))),
-        Divide(a, d) => CompiledExpr::Divide(Box::new(compile_expr(a, b)), Box::new(compile_expr(d, b))),
-        UnaryPlus(a) => CompiledExpr::UnaryPlus(Box::new(compile_expr(a, b))),
-        UnaryMinus(a) => CompiledExpr::UnaryMinus(Box::new(compile_expr(a, b))),
+        Add(a, d) => CompiledExpr::Add(Box::new(compile_expr(a, b, local)), Box::new(compile_expr(d, b, local))),
+        Subtract(a, d) => CompiledExpr::Subtract(Box::new(compile_expr(a, b, local)), Box::new(compile_expr(d, b, local))),
+        Multiply(a, d) => CompiledExpr::Multiply(Box::new(compile_expr(a, b, local)), Box::new(compile_expr(d, b, local))),
+        Divide(a, d) => CompiledExpr::Divide(Box::new(compile_expr(a, b, local)), Box::new(compile_expr(d, b, local))),
+        UnaryPlus(a) => CompiledExpr::UnaryPlus(Box::new(compile_expr(a, b, local))),
+        UnaryMinus(a) => CompiledExpr::UnaryMinus(Box::new(compile_expr(a, b, local))),
         If(cond, t, f) => CompiledExpr::If(
-            Box::new(compile_expr(cond, b)),
-            Box::new(compile_expr(t, b)),
-            Box::new(compile_expr(f, b)),
+            Box::new(compile_expr(cond, b, local)),
+            Box::new(compile_expr(t, b, local)),
+            Box::new(compile_expr(f, b, local)),
         ),
-        Coalesce(es) => CompiledExpr::Coalesce(es.iter().map(|ce| compile_expr(ce, b)).collect()),
+        Coalesce(es) => CompiledExpr::Coalesce(es.iter().map(|ce| compile_expr(ce, b, local)).collect()),
         In(a, list) => {
-            CompiledExpr::In(Box::new(compile_expr(a, b)), list.iter().map(|ce| compile_expr(ce, b)).collect())
+            CompiledExpr::In(Box::new(compile_expr(a, b, local)), list.iter().map(|ce| compile_expr(ce, b, local)).collect())
         }
         FunctionCall(f, args) => {
-            CompiledExpr::FunctionCall(f.clone(), args.iter().map(|ce| compile_expr(ce, b)).collect())
+            CompiledExpr::FunctionCall(f.clone(), args.iter().map(|ce| compile_expr(ce, b, local)).collect())
         }
         Exists(inner) => CompiledExpr::Exists(inner.clone()),
     }
@@ -13121,6 +13276,7 @@ fn ebv(v: &Value) -> Option<bool> {
 fn eval_expr(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], e: &Expression) -> Result<Value, String> {
     use Expression::*;
     match e {
+        Variable(v) if local.correlation.contains_key(v) => Ok(Value::Term(local.correlation[v].clone())),
         Variable(v) => match b.col(v) {
             // Always return the original term so term identity is preserved
             // (sameTerm, BIND passthrough, STR, etc.). The numeric fast path that
@@ -13175,7 +13331,8 @@ fn eval_expr(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], e: &Ex
             let v = eval_expr(graph, local, b, row, a)?;
             Ok(as_numeric(&v).map(|n| Value::Num(n.neg())).unwrap_or(Value::Error))
         }
-        Bound(v) => Ok(Value::Bool(b.col(v).map(|c| row[c] != NO_ID).unwrap_or(false))),
+        Bound(v) => Ok(Value::Bool(local.correlation.contains_key(v)
+            || b.col(v).map(|c| row[c] != NO_ID).unwrap_or(false))),
         If(cond, t, f) => {
             // A type error in the condition propagates (it does NOT silently select
             // the else branch).
@@ -13255,7 +13412,13 @@ fn eval_exists(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], inne
     eval_exists_inner(graph, local, b, row, inner)
 }
 
-fn eval_exists_inner(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], inner: &GraphPattern) -> Result<bool, String> {
+fn eval_exists_inner(
+    graph: &Graph,
+    local: &LocalVocab,
+    b: &Bindings,
+    row: &[Id],
+    inner: &GraphPattern,
+) -> Result<bool, String> {
     // zk-trace: the inner pattern is re-run per outer row; tag its scans
     // `in_exists` and suppress their steps / filter obligations (EXISTS is
     // outside the stage-1 verifiable fragment — sparq-zk::verify rejects it;
@@ -13263,59 +13426,71 @@ fn eval_exists_inner(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id]
     #[cfg(feature = "zk")]
     let _zk = crate::zk::exists_scope();
 
-    // Uncorrelated EXISTS: no in-scope inner variable is also a BOUND outer column,
-    // so no inner solution can be ruled out by compatibility — existence alone
-    // decides it. `on_in_scope_variable` is spargebra's authoritative in-scope set
-    // (exactly the columns `eval_graph_pattern` would expose), so this never misses a
-    // genuinely-shared variable (which would make an early `true` unsound).
+    // [GPT-6] SPARQL 1.1 §18.6 substitutes every bound outer variable,
+    // including variables used only in FILTER expressions. A separate local
+    // vocabulary preserves actual term identity across graph/local ID spaces.
+    let mut inner_local = LocalVocab {
+        correlation: local.correlation.clone(),
+        ..LocalVocab::default()
+    };
+    for (column, variable) in b.vars.iter().enumerate() {
+        if let Some(term) = term_of(graph, local, row[column]) {
+            inner_local
+                .correlation
+                .entry(variable.clone())
+                .or_insert(term);
+        }
+    }
+
+    // Only shared solution columns require the compatibility scan below.
+    // Expression-only dependencies are already captured in inner_local and
+    // therefore remain valid under the first-solution shortcut.
     let mut correlated = false;
     inner.on_in_scope_variable(|v| {
-        if b.col(v).is_some_and(|oc| row[oc] != NO_ID) {
+        if inner_local.correlation.contains_key(v) {
             correlated = true;
         }
     });
     if !correlated {
         // First-solution stop, reusing the ASK machinery (count pushdown / capped
         // single-pattern scan). zk-trace stays armed inside via the scope above.
-        let sliced = GraphPattern::Slice { inner: Box::new(inner.clone()), start: 0, length: Some(1) };
-        let mut inner_local = LocalVocab::default();
+        let sliced = GraphPattern::Slice {
+            inner: Box::new(inner.clone()),
+            start: 0,
+            length: Some(1),
+        };
         let b1 = eval_modified(graph, &mut inner_local, &sliced)?;
         budget::check(b1.rows.len())?;
         return Ok(!b1.rows.is_empty());
     }
 
-    let mut inner_local = LocalVocab::default();
     let inner_b = eval_graph_pattern(graph, &mut inner_local, inner)?;
     budget::check(inner_b.rows.len())?;
-    // Columns shared between the inner solutions and the (bound part of the) outer row.
-    let shared: Vec<(usize, usize)> = inner_b
+    // [GPT-6] Include inherited captures: a nested EXISTS can refer to a
+    // grandparent variable absent from its immediate parent's solution columns.
+    let shared: Vec<(usize, &Term, Option<Id>)> = inner_b
         .vars
         .iter()
         .enumerate()
-        .filter_map(|(ic, v)| b.col(v).map(|oc| (oc, ic)))
-        .filter(|&(oc, _)| row[oc] != NO_ID)
+        .filter_map(|(ic, v)| {
+            inner_local
+                .correlation
+                .get(v)
+                .map(|term| (ic, term, graph.id_of(term)))
+        })
         .collect();
     Ok(inner_b.rows.iter().any(|irow| {
-        shared
-            .iter()
-            .all(|&(oc, ic)| exists_compatible(graph, local, row[oc], &inner_local, irow[ic]))
+        shared.iter().all(|&(ic, expected, graph_id)| {
+            let actual = irow[ic];
+            actual == NO_ID
+                || if !is_local(actual) {
+                    graph_id == Some(actual)
+                } else {
+                    inner_local.term(actual) == expected
+                }
+        })
     }))
 }
-
-/// Join-compatibility of an outer cell with an inner EXISTS cell, where the two rows
-/// were produced against different local vocabs: unbound inner is compatible; ids in
-/// the shared spaces (graph dictionary / inline integers) compare directly; anything
-/// involving a local id falls back to term equality.
-fn exists_compatible(graph: &Graph, outer_local: &LocalVocab, o: Id, inner_local: &LocalVocab, i: Id) -> bool {
-    if i == NO_ID {
-        return true;
-    }
-    if !is_local(o) && !is_local(i) {
-        return o == i;
-    }
-    term_of(graph, outer_local, o) == term_of(graph, inner_local, i)
-}
-
 
 /// Fast numeric evaluation that never materialises a term: a numeric variable
 /// resolves to its value via the dictionary cache, a numeric literal via one
@@ -13325,6 +13500,7 @@ fn exists_compatible(graph: &Graph, outer_local: &LocalVocab, o: Id, inner_local
 fn eval_numeric(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], e: &Expression) -> Option<f64> {
     use Expression::*;
     match e {
+        Variable(v) if local.correlation.contains_key(v) => None,
         Variable(v) => {
             let c = b.col(v)?;
             let id = row[c];
@@ -13362,6 +13538,7 @@ fn eval_numeric(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], e: 
 fn eval_temporal(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], e: &Expression) -> Option<Temporal> {
     use Expression::*;
     match e {
+        Variable(v) if local.correlation.contains_key(v) => None,
         Variable(v) => {
             let c = b.col(v)?;
             let id = row[c];
@@ -13401,6 +13578,7 @@ fn temporal_of_lit(l: &Literal) -> Option<Temporal> {
 fn eval_exact_lexical(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], e: &Expression) -> Option<String> {
     use Expression::*;
     match e {
+        Variable(v) if local.correlation.contains_key(v) => None,
         Variable(v) => {
             let id = row[b.col(v)?];
             if id == NO_ID {
@@ -13627,6 +13805,7 @@ fn expr_has_arith(e: &Expression) -> bool {
 fn eval_dec(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], e: &Expression) -> Option<Dec> {
     use Expression::*;
     match e {
+        Variable(v) if local.correlation.contains_key(v) => None,
         Variable(v) => {
             let id = row[b.col(v)?];
             if id == NO_ID {
@@ -14745,6 +14924,8 @@ fn eval_compiled(
             Some(c) if row[*c] != NO_ID => Ok(Value::Term(term_of(graph, local, row[*c]).unwrap())),
             _ => Ok(Value::Unbound),
         },
+        Captured(term) => Ok(Value::Term(term.clone())),
+        CapturedBound => Ok(Value::Bool(true)),
         BoundCol(col) => Ok(Value::Bool(col.map(|c| row[c] != NO_ID).unwrap_or(false))),
         NamedNode(n) => Ok(Value::Term(Term::NamedNode(n.clone()))),
         Literal(l) => Ok(Value::Term(Term::Literal(l.clone()))),
@@ -20178,7 +20359,7 @@ mod compiled_expr_tests {
 
     /// `eval_expr` == `eval_compiled` for every row of `b` with expression `e`.
     fn assert_compiled_matches_original(graph: &Graph, local: &LocalVocab, b: &Bindings, e: &Expression) {
-        let compiled = compile_expr(e, b);
+        let compiled = compile_expr(e, b, local);
         for row in &b.rows {
             let expected = eval_expr(graph, local, b, row, e).expect("eval_expr error");
             let got = eval_compiled(graph, local, b, row, &compiled).expect("eval_compiled error");
@@ -20507,6 +20688,15 @@ mod compiled_expr_tests {
         for e in &exprs {
             assert_compiled_matches_original(&g, &local, &b, e);
         }
+        // [GPT-6] Compare all expression lanes with captured outer terms too.
+        // Inner columns deliberately contain different values (and UNBOUND).
+        let mut captured = LocalVocab::default();
+        captured.correlation.insert(va, Term::BlankNode(BlankNode::new_unchecked("outer")));
+        captured.correlation.insert(vb, Term::Literal(Literal::new_typed_literal("9007199254740993", xsd::INTEGER)));
+        captured.correlation.insert(vc, Term::NamedNode(oxrdf::NamedNode::new_unchecked("http://ex/outer")));
+        for e in &exprs {
+            assert_compiled_matches_original(&g, &captured, &b, e);
+        }
     }
 }
 
@@ -20783,7 +20973,7 @@ mod idfast_unit {
         expr: &Expression,
         nonlit_cols: &FxHashSet<usize>,
     ) -> Vec<Option<bool>> {
-        let mut compiled = compile_expr(expr, b);
+        let mut compiled = compile_expr(expr, b, local);
         idfast_rewrite(&mut compiled, nonlit_cols);
         b.rows
             .iter()
@@ -21325,7 +21515,7 @@ mod idfast_unit {
             Box::new(Expression::Variable(var("a"))),
             Box::new(Expression::Variable(var("b"))),
         );
-        let mut compiled = compile_expr(&expr, &b);
+        let mut compiled = compile_expr(&expr, &b, &LocalVocab::default());
         idfast_rewrite(&mut compiled, &cols);
         assert!(
             matches!(compiled, CompiledExpr::IdEqNonLit(..)),
