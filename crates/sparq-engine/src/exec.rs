@@ -508,6 +508,11 @@ pub(crate) mod budget {
         ACTIVE.with(|a| a.get().temporal_year_range.is_some())
     }
 
+    #[inline]
+    pub(in crate::exec) fn temporal_capacity_active() -> bool {
+        ACTIVE.with(|active| active.get().temporal_year_range.is_some())
+    }
+
     /// Returns `true` when a budget is currently installed (even if not yet exhausted).
     /// The columnar path uses this for the I3 fallback rule: when a budget is armed the
     /// seam declines to the scalar path (the scalar debit schedule is not uniform-per-row
@@ -11524,8 +11529,8 @@ fn slice_bindings(b: &mut Bindings, start: usize, length: Option<usize>) {
 /// its CACHED comparison value + id — no term materialised, no per-comparison lexical
 /// re-parse (the q09-class fix: ORDER BY dateTime was re-parsing both lexicals on every
 /// comparison of the sort). Everything else keeps the identity-preserving `Value`.
-enum SortCell {
-    Temp { id: Id },
+enum SortCell<'graph> {
+    Temp { id: Id, key: ExactTemporal<'graph> },
     /// A numeric GRAPH term: the cached f64 for the fast compare PLUS its dictionary id, so
     /// an f64 TIE can be rechecked EXACTLY from the id's exact lexical — distinct integers
     /// beyond 2^53 / high-precision decimals that share one f64 (the numerics cache stores
@@ -11586,7 +11591,7 @@ enum SortCell {
 /// (same lexical kind), never a per-comparison `lit_kind` / `is_numeric_dt` /
 /// `value_str`-allocation re-derivation. [FABLE-5] sq-7d3dj.30.12
 #[inline]
-fn sort_cell_val(v: Value) -> SortCell {
+fn sort_cell_val(v: Value) -> SortCell<'static> {
     let class = v.term_class() as u8;
     // Only the literal class consults the kind rank; skip the (cheap but non-trivial)
     // `lit_kind` dispatch entirely for the non-literal classes.
@@ -11622,17 +11627,12 @@ fn sort_cell_val(v: Value) -> SortCell {
 /// against any other key materialises the term lazily (rare: only mixed-type columns)
 /// and defers to `compare_values` itself.
 #[inline]
-fn cmp_sort_cells(graph: &Graph, local: &LocalVocab, a: &SortCell, c: &SortCell) -> Ordering {
+fn cmp_sort_cells(graph: &Graph, local: &LocalVocab, a: &SortCell<'_>, c: &SortCell<'_>) -> Ordering {
     match (a, c) {
-        (SortCell::Temp { id: ia }, SortCell::Temp { id: ib }) => {
-            // [FABLE-5] sq-wjl8i KIND-FIRST + [SONNET-4.6] sq-2k5py: both now live in the
-            // shared `ExactTemporal::compare_total` — a dateTime never value-compares against a
-            // date (`LiteralKind::DateTime < Date`), and within one kind the timeline order
-            // is TOTAL (instant, then timezone presence). The former lexical fallback for
-            // the indeterminate window is gone: it mixed timeline-decided and
-            // lexical-decided pairs inside one kind, which is intransitive. Ill-formed
-            // temporals never receive a Temp sort cell, so both keys are well-formed.
-            ExactTemporal::compare_total(temporal_of_id(graph, *ia).expect("validated sort key"), temporal_of_id(graph, *ib).expect("validated sort key"))
+        (SortCell::Temp { key: a, .. }, SortCell::Temp { key: b, .. }) => {
+            // [GPT-6] Keys already borrow validated lexicals; no dictionary lookup,
+            // calendar parsing, allocation, or validity assertion occurs here.
+            ExactTemporal::compare_total(*a, *b)
         }
         // Two numeric graph terms: f64 fast compare, with the EXACT tie recheck below.
         (SortCell::Num { f: fa, id: ia }, SortCell::Num { f: fb, id: ib }) => {
@@ -11912,7 +11912,7 @@ fn order_bindings(
         .collect();
 
     // The sort key cell for one compiled ORDER expression of one row. Numeric keys use the
-    // numerics cache; temporal keys borrow and reparse exact lexicals by ID. IRI
+    // numerics cache; temporal keys borrow prevalidated exact cache entries. IRI
     // terms precompute the IRI string once (SortCell::Iri) — eliminating per-comparison
     // term_of materialisation + value_str allocation for IRI ORDER BY columns; other
     // expressions fall back to identity-preserving evaluation. The plain-variable case is
@@ -11927,8 +11927,8 @@ fn order_bindings(
                     // exactly (integers > 2^53 / high-precision decimals sharing one f64).
                     return Ok(SortCell::Num { f: n, id });
                 }
-                if temporal_of_id(graph, id).is_some() {
-                    return Ok(SortCell::Temp { id });
+                if let Some(key) = temporal_of_id(graph, id) {
+                    return Ok(SortCell::Temp { id, key });
                 }
                 // [FABLE-5] sq-7d3dj.30.21 — LAZY STRING-LITERAL key: a plain `xsd:string`
                 // store-literal becomes a zero-allocation `SortCell::StrId(id)` (compared via
@@ -12428,7 +12428,7 @@ mod lazy_strkey_differential {
     }
 
     /// The eager cell the feature-OFF path builds for a term.
-    fn eager(t: &Term) -> SortCell {
+    fn eager(t: &Term) -> SortCell<'static> {
         sort_cell_val(Value::Term(t.clone()))
     }
 
@@ -13644,13 +13644,14 @@ fn temporal_of_lit(l: &Literal) -> Option<ExactTemporal<'_>> {
 /// [GPT-6] Stored temporal values obey the same evaluation domain as constructors.
 fn temporal_of_id(graph: &Graph, id: Id) -> Option<ExactTemporal<'_>> {
     if dict::is_inline(id) { return None; }
-    match graph.dict.term_parts(id) {
-        dict::TermParts::Lit { value, datatype, .. } => {
+    // Capacity checks remain input-based even for malformed/out-of-cache values.
+    // Native unbounded evaluation avoids dictionary/year parsing on the hot path.
+    if budget::temporal_capacity_active() {
+        if let dict::TermParts::Lit { value, datatype, .. } = graph.dict.term_parts(id) {
             budget::check_temporal(value, datatype).ok()?;
-            ExactTemporal::of_lit(value, datatype)
         }
-        _ => None,
     }
+    graph.exact_temporal_value(id)
 }
 
 /// The lexical form of an expression IF it is an exact-valued numeric operand (an
@@ -22602,3 +22603,26 @@ mod capped_rhs_tests {
 #[cfg(test)]
 #[path = "nullable_path_tests.rs"]
 mod nullable_path_tests;
+
+#[cfg(test)]
+mod exact_temporal_sort_cache_tests {
+    // [GPT-6] The comparator consumes prevalidated keys, not dictionary IDs.
+    use super::*;
+
+    #[test]
+    fn temporal_sort_compares_borrowed_keys_without_dictionary_reparsing() {
+        let graph = Graph::load_str("", "nt").unwrap();
+        let local = LocalVocab::default();
+        let a = SortCell::Temp {
+            id: 1,
+            key: ExactTemporal::of_lit("2024-01-01T00:00:00.000000001Z", "http://www.w3.org/2001/XMLSchema#dateTime").unwrap(),
+        };
+        let b = SortCell::Temp {
+            id: 2,
+            key: ExactTemporal::of_lit("2024-01-01T00:00:00.000000002Z", "http://www.w3.org/2001/XMLSchema#dateTime").unwrap(),
+        };
+        assert_eq!(cmp_sort_cells(&graph, &local, &a, &b), Ordering::Less);
+        assert_eq!(cmp_sort_cells(&graph, &local, &b, &a), Ordering::Greater);
+        assert_eq!(cmp_sort_cells(&graph, &local, &a, &a), Ordering::Equal);
+    }
+}

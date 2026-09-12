@@ -107,5 +107,5 @@ fn actual_guest_executes_exact_temporal_values_and_capacity_rejections() {
             case["id"]
         );
     }
-    assert_eq!(rejected["cases"].as_array().unwrap().len(), 8);
+    assert_eq!(rejected["cases"].as_array().unwrap().len(), 12);
 }

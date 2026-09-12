@@ -135,6 +135,28 @@ fn bounded_expression_evaluation_does_not_lose_capacity_on_rayon_workers() {
         panic!("parallel expression capacity must fail the query");
     };
     assert!(error.contains("evaluation capacity exceeded"), "{error}");
-    assert_eq!(sparq_engine::query(&graph, query).unwrap().rows.len(), 50_010,
-        "unlimited native parallel evaluation retains its checked year domain");
+    assert_eq!(
+        sparq_engine::query(&graph, query).unwrap().rows.len(),
+        50_010,
+        "unlimited native parallel evaluation retains its checked year domain"
+    );
+}
+
+#[test]
+fn year_zero_is_a_capacity_failure_before_expression_error_handling() {
+    let graph = Graph::load_str("", "nt").unwrap();
+    for expression in [
+        "\"0000-01-01T00:00:00Z\"^^xsd:dateTime",
+        "STRDT(CONCAT(\"0000\",\"-01-01T00:00:00Z\"),xsd:dateTime)",
+        "xsd:dateTime(CONCAT(\"0000\",\"-01-01T00:00:00Z\"))",
+    ] {
+        let query = format!(
+            "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (COALESCE({expression}, 1) AS ?t) {{}}"
+        );
+        let error = sparq_engine::query_with_budget(&graph, &query, &bounded()).unwrap_err();
+        assert!(
+            error.contains("query evaluation capacity exceeded (temporal-year)"),
+            "{error}"
+        );
+    }
 }
