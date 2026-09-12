@@ -1,5 +1,5 @@
 {
   "pr": 6498,
   "date": "2026-09-12",
-  "reason": "[GPT-6] This additive private-u64 and status-capacity extension is confined to the default-off successful-results capability crate, Noir circuits, tests and evidence; it adds no always-compiled core/engine implementation or dependency. This declaration records the intended scope for the stacked PR, not a measured byte-neutrality assertion or permission for an unexplained feature-OFF change. The independent hosted byte comparison and size ratchet remain required."
+  "reason": "[GPT-6] This additive private-u64 and status-capacity extension is confined to the default-off successful-results capability crate, Noir circuits, tests and evidence; it adds no always-compiled core/engine implementation or dependency. This file satisfies the feature-OFF intent-declaration gate for the stacked PR. It is not a measured byte-neutrality assertion: the independent hosted byte comparison and WASM size ratchet still apply."
 }
