@@ -13393,7 +13393,7 @@ fn eval_expr(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], e: &Ex
         Subtract(a, c) => arith(graph, local, b, row, a, c, ArithOp::Sub),
         Multiply(a, c) => arith(graph, local, b, row, a, c, ArithOp::Mul),
         Divide(a, c) => arith(graph, local, b, row, a, c, ArithOp::Div),
-        UnaryPlus(a) => eval_expr(graph, local, b, row, a),
+        UnaryPlus(a) => Ok(unary_plus(eval_expr(graph, local, b, row, a)?)),
         UnaryMinus(a) => {
             // Typed negation: the result keeps the argument's (promoted) numeric
             // datatype; a non-numeric operand is a type error.
@@ -14186,6 +14186,17 @@ fn as_numeric(v: &Value) -> Option<Num> {
         Value::Num(n) => Some(*n),
         Value::Term(Term::Literal(l)) => Num::of_literal(l),
         _ => None,
+    }
+}
+
+// [GPT-6] XPath numeric-unary-plus returns its numeric operand unchanged.
+// Validate the value space without imposing the arithmetic representation bound.
+fn unary_plus(value: Value) -> Value {
+    match &value {
+        Value::Num(_) => value,
+        Value::Term(Term::Literal(l))
+            if sparq_core::numeric_literal_valid(l.value(), l.datatype().as_str()) => value,
+        _ => Value::Error,
     }
 }
 
@@ -15068,7 +15079,7 @@ fn eval_compiled(
         Subtract(a, c) => arith_compiled(graph, local, b, row, a, c, ArithOp::Sub),
         Multiply(a, c) => arith_compiled(graph, local, b, row, a, c, ArithOp::Mul),
         Divide(a, c) => arith_compiled(graph, local, b, row, a, c, ArithOp::Div),
-        UnaryPlus(a) => eval_compiled(graph, local, b, row, a),
+        UnaryPlus(a) => Ok(unary_plus(eval_compiled(graph, local, b, row, a)?)),
         UnaryMinus(a) => {
             let v = eval_compiled(graph, local, b, row, a)?;
             Ok(as_numeric(&v).map(|n| Value::Num(n.neg())).unwrap_or(Value::Error))
@@ -15152,7 +15163,8 @@ fn eval_cast(target: &str, v: &Value) -> Option<Value> {
     // (language-tagged literals and non-string types are NOT castable as strings).
     let src_str = || match v {
         Value::Term(Term::Literal(l)) if l.language().is_none() && l.datatype() == xsd::STRING => {
-            Some(l.value().trim().to_string())
+            // [GPT-6] XSD whitespace collapse excludes Unicode spaces such as NBSP.
+            Some(l.value().trim_matches([' ', '\t', '\r', '\n']).to_string())
         }
         _ => None,
     };
@@ -15272,6 +15284,7 @@ fn eval_cast(target: &str, v: &Value) -> Option<Value> {
         // fraction digit ("+33.3300" -> "33.33", "0" -> "0.0").
         return Some(
             src_str()
+                .filter(|s| sparq_core::numeric_literal_valid(s, xsd::DECIMAL.as_str()))
                 .and_then(|s| Dec::parse_lexical(&s))
                 .map(|d| typed(dec_trim_min1(d), xsd::DECIMAL))
                 .unwrap_or(Value::Error),

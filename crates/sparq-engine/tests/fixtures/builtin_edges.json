@@ -1702,6 +1702,374 @@
       ],
       "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#func-substr",
       "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "unary-plus-identity-error-byte-constant",
+      "group": "numeric",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((+\"1200\"^^xsd:byte) = \"1200\"^^xsd:byte AS ?v) {  }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "unary-plus-identity-error-byte-values",
+      "group": "numeric",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((+?n) = ?n AS ?v) { VALUES ?n { \"1200\"^^xsd:byte } }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "unary-plus-identity-error-byte-stored",
+      "group": "numeric",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((+?n) = ?n AS ?v) { ?s <http://ex/p> ?n }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \"1200\"^^<http://www.w3.org/2001/XMLSchema#byte> ."
+    },
+    {
+      "id": "unary-plus-identity-error-integer-constant",
+      "group": "numeric",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((+\"5.0\"^^xsd:integer) = \"5.0\"^^xsd:integer AS ?v) {  }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "unary-plus-identity-error-integer-values",
+      "group": "numeric",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((+?n) = ?n AS ?v) { VALUES ?n { \"5.0\"^^xsd:integer } }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "unary-plus-identity-error-integer-stored",
+      "group": "numeric",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((+?n) = ?n AS ?v) { ?s <http://ex/p> ?n }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \"5.0\"^^<http://www.w3.org/2001/XMLSchema#integer> ."
+    },
+    {
+      "id": "unary-plus-identity-error-unsigned-constant",
+      "group": "numeric",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((+\"-1\"^^xsd:unsignedLong) = \"-1\"^^xsd:unsignedLong AS ?v) {  }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "unary-plus-identity-error-unsigned-values",
+      "group": "numeric",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((+?n) = ?n AS ?v) { VALUES ?n { \"-1\"^^xsd:unsignedLong } }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "unary-plus-identity-error-unsigned-stored",
+      "group": "numeric",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((+?n) = ?n AS ?v) { ?s <http://ex/p> ?n }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \"-1\"^^<http://www.w3.org/2001/XMLSchema#unsignedLong> ."
+    },
+    {
+      "id": "unary-plus-identity-error-nbsp-constant",
+      "group": "numeric",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((+\" 5\"^^xsd:integer) = \" 5\"^^xsd:integer AS ?v) {  }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "unary-plus-identity-error-nbsp-values",
+      "group": "numeric",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((+?n) = ?n AS ?v) { VALUES ?n { \" 5\"^^xsd:integer } }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "unary-plus-identity-error-nbsp-stored",
+      "group": "numeric",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((+?n) = ?n AS ?v) { ?s <http://ex/p> ?n }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \" 5\"^^<http://www.w3.org/2001/XMLSchema#integer> ."
+    },
+    {
+      "id": "unary-plus-identity-error-string-constant",
+      "group": "numeric",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((+\"5\"^^xsd:string) = \"5\"^^xsd:string AS ?v) {  }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "unary-plus-identity-error-string-values",
+      "group": "numeric",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((+?n) = ?n AS ?v) { VALUES ?n { \"5\"^^xsd:string } }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "unary-plus-identity-error-string-stored",
+      "group": "numeric",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((+?n) = ?n AS ?v) { ?s <http://ex/p> ?n }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \"5\"^^<http://www.w3.org/2001/XMLSchema#string> ."
+    },
+    {
+      "id": "decimal-cast-whitespace-nbsp-constant",
+      "group": "numeric",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (xsd:decimal(\" 5 \") = 5 AS ?v) {  }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#FunctionMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "decimal-cast-whitespace-unicode-constant",
+      "group": "numeric",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (xsd:decimal(\"é\") = 5 AS ?v) {  }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#FunctionMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "decimal-cast-whitespace-xml-constant",
+      "group": "numeric",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (xsd:decimal(\" \\t5\\r\\n \") = 5 AS ?v) {  }",
+      "expected_rows": [
+        [
+          "\"true\"^^<http://www.w3.org/2001/XMLSchema#boolean>"
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#FunctionMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "decimal-cast-whitespace-nbsp-values",
+      "group": "numeric",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (xsd:decimal(?n) = 5 AS ?v) { VALUES ?n { \" 5 \" } }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#FunctionMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "decimal-cast-whitespace-unicode-values",
+      "group": "numeric",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (xsd:decimal(?n) = 5 AS ?v) { VALUES ?n { \"é\" } }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#FunctionMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "decimal-cast-whitespace-xml-values",
+      "group": "numeric",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (xsd:decimal(?n) = 5 AS ?v) { VALUES ?n { \" \\t5\\r\\n \" } }",
+      "expected_rows": [
+        [
+          "\"true\"^^<http://www.w3.org/2001/XMLSchema#boolean>"
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#FunctionMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "decimal-cast-whitespace-nbsp-stored",
+      "group": "numeric",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (xsd:decimal(?n) = 5 AS ?v) { ?s <http://ex/p> ?n }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#FunctionMapping",
+      "expectation_kind": "published_recommendation",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \" 5 \" ."
+    },
+    {
+      "id": "decimal-cast-whitespace-unicode-stored",
+      "group": "numeric",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (xsd:decimal(?n) = 5 AS ?v) { ?s <http://ex/p> ?n }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#FunctionMapping",
+      "expectation_kind": "published_recommendation",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \"é\" ."
+    },
+    {
+      "id": "decimal-cast-whitespace-xml-stored",
+      "group": "numeric",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (xsd:decimal(?n) = 5 AS ?v) { ?s <http://ex/p> ?n }",
+      "expected_rows": [
+        [
+          "\"true\"^^<http://www.w3.org/2001/XMLSchema#boolean>"
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#FunctionMapping",
+      "expectation_kind": "published_recommendation",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \" \\t5\\r\\n \" ."
+    },
+    {
+      "id": "cast-xml-whitespace-only-integer",
+      "group": "numeric",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (xsd:integer(\" 5 \") AS ?v) {}",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#FunctionMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "cast-xml-whitespace-only-float",
+      "group": "numeric",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (xsd:float(\" 5 \") AS ?v) {}",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#FunctionMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "cast-xml-whitespace-only-double",
+      "group": "numeric",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (xsd:double(\" 5 \") AS ?v) {}",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#FunctionMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "cast-xml-whitespace-only-boolean",
+      "group": "numeric",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (xsd:boolean(\" true \") AS ?v) {}",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#FunctionMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "unary-plus-valid-identity-derived",
+      "group": "numeric",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (sameTerm(+\"+005\"^^xsd:byte, \"+005\"^^xsd:byte) AS ?v) {}",
+      "expected_rows": [
+        [
+          "\"true\"^^<http://www.w3.org/2001/XMLSchema#boolean>"
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "unary-plus-valid-identity-large",
+      "group": "numeric",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (sameTerm(+\"10000000000000000000000000000000000000000000000\"^^xsd:integer, \"10000000000000000000000000000000000000000000000\"^^xsd:integer) AS ?v) {}",
+      "expected_rows": [
+        [
+          "\"true\"^^<http://www.w3.org/2001/XMLSchema#boolean>"
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
     }
   ]
 }

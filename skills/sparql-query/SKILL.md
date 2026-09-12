@@ -230,6 +230,9 @@ A huge valid integer can be numeric while an operation exceeds the existing
 truncate toward zero; out-of-range casts become expression errors (unbound BIND
 or projected cells, excluded FILTER rows). `SUBSTR` requires valid integer or derived
 integer start/length operands, rejecting decimal, float, double and invalid facets.
+This follows SPARQL's declared integer argument signature; the linked XPath
+`substring` function has a wider numeric signature, so this is an explicit
+SPARQL signature interpretation rather than a claim about all XPath calls.
 Its integer arguments clip
 its original one-based interval, so `SUBSTR("abcd", -1, 3)` yields `"a"`.
 Date accessors require typed dateTime operands, and calendar/timezone validation
@@ -240,6 +243,17 @@ the current snapshot's datatype rules; they do not establish complete builtin co
 Numeric integer facets retain XSD 1.1 sign handling (including `+1` and `-0` for
 unsigned types), consistent with RDF 1.1's datatype reference. Temporal parsing
 still uses its documented XSD 1.0 year-zero rule; this is not a uniform XSD version claim.
+
+[GPT-6] Unary plus validates numeric lexical forms and facets before returning its
+operand unchanged, preserving valid derived datatypes and large numeric lexical
+forms. This follows the mapped [XPath unary-plus definition](https://www.w3.org/TR/2007/REC-xpath-functions-20070123/#func-numeric-unary-plus).
+Identity-comparison regressions distinguish this guard from tests that already
+validated operands in later arithmetic. PyOxigraph 0.5.11 also accepts the
+invalid-byte identity example; that interoperability difference does not change
+the numeric-operand golden. String casts collapse only XML whitespace, so NBSP
+does not disappear before integer, decimal, float, double or boolean validation.
+The shared matrix contains regression and positive controls as well as
+guard-discriminating cases; its size is not a count of independently fixed bugs.
 
 **Property paths** (all 8 operators: `/  | ^  *  +  ?` and `!(…)` negated sets) — write them inline:
 

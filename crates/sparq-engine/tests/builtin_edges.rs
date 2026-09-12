@@ -12,17 +12,15 @@ fn deterministic_builtin_edges() {
             Graph::load_str(case["dataset_ntriples"].as_str().unwrap_or(""), "n-triples").unwrap();
         let result = std::panic::catch_unwind(|| sparq_engine::query(&graph, query));
         let actual = match result {
-            Ok(Ok(result)) => serde_json::json!(
-                result
-                    .rows
-                    .into_iter()
-                    .map(|row| {
-                        row.into_iter()
-                            .map(|term| term.map(|term| term.to_string()))
-                            .collect::<Vec<_>>()
-                    })
-                    .collect::<Vec<_>>()
-            ),
+            Ok(Ok(result)) => serde_json::json!(result
+                .rows
+                .into_iter()
+                .map(|row| {
+                    row.into_iter()
+                        .map(|term| term.map(|term| term.to_string()))
+                        .collect::<Vec<_>>()
+                })
+                .collect::<Vec<_>>()),
             Ok(Err(error)) => serde_json::json!({"query_error": error}),
             Err(_) => serde_json::json!({"panic": true}),
         };
@@ -153,6 +151,52 @@ fn stored_arithmetic_validity_agrees_in_dense_and_compressed_graphs() {
                     "{literal} {filtered}, compressed={compressed}"
                 );
             }
+        }
+    }
+}
+
+// [GPT-6] Identity comparison exposes a unary-plus bypass that arithmetic tests miss.
+#[test]
+fn stored_unary_plus_and_cast_errors_agree_across_execution_paths() {
+    for (literal, expression, valid) in [
+        ("\"1200\"^^xsd:byte", "(+?n) = ?n", false),
+        ("\"5.0\"^^xsd:integer", "(+?n) = ?n", false),
+        ("\"-1\"^^xsd:unsignedLong", "(+?n) = ?n", false),
+        ("\"5\"", "(+?n) = ?n", false),
+        ("\"+005\"^^xsd:byte", "sameTerm(+?n, ?n)", true),
+        (
+            "\"10000000000000000000000000000000000000000000000\"^^xsd:integer",
+            "sameTerm(+?n, ?n)",
+            true,
+        ),
+        ("\"\u{a0}5\u{a0}\"", "xsd:decimal(?n) = 5", false),
+        ("\"é\"", "xsd:decimal(?n) = 5", false),
+        ("\" 5 \"", "xsd:decimal(?n) = 5", true),
+    ] {
+        for compressed in [false, true] {
+            let data = format!("@prefix xsd:<http://www.w3.org/2001/XMLSchema#> . <http://ex/s> <http://ex/p> {literal} .");
+            let graph = Graph::load_str(&data, "turtle").unwrap();
+            let graph = if compressed {
+                graph.into_compressed()
+            } else {
+                graph
+            };
+            let prefix = "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#>";
+            let projected = format!("{prefix} SELECT ({expression} AS ?v) {{?s <http://ex/p> ?n}}");
+            let rows = sparq_engine::query(&graph, &projected).unwrap().rows;
+            assert_eq!(rows.len(), 1);
+            assert_eq!(
+                rows[0][0].is_some(),
+                valid,
+                "{projected} {literal}, compressed={compressed}"
+            );
+            let filtered =
+                format!("{prefix} SELECT ?s {{?s <http://ex/p> ?n FILTER({expression})}}");
+            assert_eq!(
+                sparq_engine::query(&graph, &filtered).unwrap().rows.len(),
+                usize::from(valid),
+                "{filtered} {literal}, compressed={compressed}"
+            );
         }
     }
 }
