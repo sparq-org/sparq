@@ -80,7 +80,7 @@ expressions, including subqueries, aggregate operands and EXISTS bodies.
 The SPARQL version identifies query syntax/operators. Numeric datatype facets
 follow [RDF 1.1 / XSD 1.1](https://www.w3.org/TR/2014/REC-rdf11-concepts-20140225/#xsd-datatypes),
 including unsigned `+1` and `-0`. Finite numeric lanes, the `i64` integer-constructor
-boundary and temporal helpers have separately recorded implementation limits.
+boundary and [exact temporal/year capacity](../../skills/zk-query-proofs/references/exact-temporals.md) have explicit limits.
 EXISTS and NOT EXISTS bodies are restricted to BGP, join, UNION and pure FILTER.
 Fixed path sequences lowered to BGP are included; residual path operators,
 nested EXISTS, OPTIONAL/MINUS, binding operators, subqueries and modifiers inside
@@ -106,7 +106,8 @@ standard expectation separately from the rejection case.
 | false ASK, numeric FILTER, VALUES joined with root zero-length paths or MINUS, SUBSTR positions and numeric subtype errors | admitted | host semantics; genuine false-ASK proof fixture |
 | Fixed sequence and alternative paths, positive correlated EXISTS | admitted | combined genuine proof fixture; native conformance cases |
 | Negated property sets, including forward/reverse endpoint multiplicity | admitted | REC-derived expectations checked natively and in actual guest execution; separate from receipt evidence |
-| Other paths, pure functions and built-in aggregates | admitted by AST | shared evaluator; no complete guest conformance claim |
+| Other paths and pure functions | admitted by AST | shared evaluator; no complete guest conformance claim |
+| Built-in aggregates | COUNT; other operands must be bound terms | [restricted aggregate profile](../../skills/zk-query-proofs/references/aggregate-profile.md) |
 | GRAPH, FROM/FROM NAMED, SERVICE, LATERAL | rejected | whole-AST negatives |
 | NOW, RAND, UUID/STRUUID, BNODE, external functions | rejected | nested host and actual guest rejection fixtures |
 | Source blank nodes, triple terms, directional literals | rejected | input/query/output checks |
@@ -132,6 +133,13 @@ Pins: RISC Zero SDK/build/server 3.0.6, guest Rust 1.97.0, host repository Rust
 1.97.1. Both Cargo lockfiles are checked in. The build uses the local toolchain
 selected by `RISC0_HOME` and requires an explicitly supplied local `r0vm` path.
 It never delegates private inputs to a hosted prover.
+
+[GPT-6] Narrow [SDK dependency patches](../../vendor/zk-sdk/README.md) remove unused
+discovery dependencies, select derive macros only for the features that use them,
+and update a tracing API without changing constraint arithmetic.
+Both detached locks retain the SDK pin. The patch record preserves
+upstream hashes/licenses and distinguishes synthetic API checks from guest proofs.
+
 The build step uses the pinned SDK's opt-in `cargo_command` build API and its
 `ProgramBinary`/image-ID primitives. It removes host compiler wrappers only from
 the child, so host Clippy cannot substitute its host sysroot for guest std. The
@@ -188,6 +196,13 @@ adapter does not normalize that metadata or claim complete execution-length hidi
 It therefore makes no settled privacy claim. Include recursion's entire
 cost in benchmarks. The source witness is visible to the local caller and prover
 process. See the [upstream security model](https://dev.risczero.com/api/security-model#zero-knowledge-proving).
+The upstream model targets perfect zero knowledge but explicitly cautions users
+with critical privacy requirements while its mathematical argument is outstanding.
+Its [open advisory](https://github.com/risc0/risc0/security/advisories/GHSA-5xgj-pmjj-gw49)
+continues to list all versions. This is an inherited assurance limitation, not a
+claim of a demonstrated attack on this adapter or of an advisory fix in 3.0.6.
+Published [audit reports](https://github.com/risc0/rz-security/tree/main/audits)
+cover their stated code and commits; they are not a blanket audit of this program.
 
 The workspace is detached: normal engine/native/WASM builds acquire no proof SDK
 dependencies. The target-specific clock and UUID/RAND exclusions apply only to

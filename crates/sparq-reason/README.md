@@ -8,7 +8,7 @@
 
 **Opt-in RDFS / OWL-RL / Notation3 reasoning** for the [sparq](../../README.md) RDF engine.
 
-It forward-chains the deductive closure (RDFS, the OWL 2 RL property/class axioms, or
+[Exact temporal ordering](../../skills/zk-query-proofs/references/exact-temporals.md) serves `substrate-compare`. It forward-chains the closure (RDFS, OWL 2 RL axioms, or
 user-supplied N3 rules — including RDF 1.2 `<< s p o >>` quoted-triple terms in rule
 bodies and heads) over dictionary-encoded triples and **materializes** the entailed
 facts, so querying stays exactly as fast as before. Reasoning runs over integer ids (joins

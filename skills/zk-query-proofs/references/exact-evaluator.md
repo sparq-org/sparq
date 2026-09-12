@@ -34,3 +34,10 @@ FILTER, including fixed sequences lowered to BGP. Nested EXISTS, residual paths,
 OPTIONAL/MINUS, binding operators, subqueries and modifiers inside those bodies
 are rejected pending explicit published-SPARQL-1.1 substitution support. Their
 admission elsewhere is unchanged; these rejections do not count as conformance.
+
+This experimental backend also inherits the upstream [privacy-assurance limitation](https://dev.risczero.com/api/security-model#zero-knowledge-proving):
+the perfect-zero-knowledge target has no written mathematical argument yet, and
+[GHSA-5xgj-pmjj-gw49](https://github.com/risc0/risc0/security/advisories/GHSA-5xgj-pmjj-gw49)
+still lists all versions. Treat application tests, receipt checks and individual
+upstream audits as evidence only for their stated scopes, not a settled privacy
+claim or proof that the advisory is resolved.

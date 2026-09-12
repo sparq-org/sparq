@@ -50,7 +50,7 @@ jobs:
         id: deny
         run: |
           set +e
-          REPORT="$(cargo deny check advisories 2>&1)"
+          REPORT="$(python3 scripts/rust-dependency-graphs.py deny-advisories 2>&1)"
           CODE=$?
           echo "exit_code=$CODE" >> "$GITHUB_OUTPUT"
           {

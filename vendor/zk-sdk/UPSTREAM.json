@@ -1,0 +1,243 @@
+{
+  "prepared_by": "GPT-6",
+  "packages": [
+    {
+      "name": "risc0-build",
+      "version": "3.0.6",
+      "source_url": "https://static.crates.io/crates/risc0-build/risc0-build-3.0.6.crate",
+      "archive_sha256": "bd8216cdd9f573808a94769767480b06ad1e74ae60841c9582fdf51b8e29ba53",
+      "vcs": {
+        "git": {
+          "sha1": "8c215e2f4ccdd935f0517bf05d90f1ae032840a9"
+        },
+        "path_in_vcs": "risc0/build"
+      },
+      "upstream_files": {
+        ".cargo_vcs_info.json": "736fcc6cd525b9f476aa9cca2a8166258c153540c176f2e6ca17d9dd4e53ae6c",
+        "Cargo.lock": "74772f8b0b62d2f1e2c2e54b895865185c58748dc186f45416dbbd9139db8dfd",
+        "Cargo.toml": "058fb5edf7963d7cf0e52cd2b5eedb358af08830cef457877682c93c03c9b7d5",
+        "Cargo.toml.orig": "da92220ebc97fc81a5e59b2143e81021bf6210a1b6d112ce2fe22c27ac394006",
+        "README.md": "562c804e403997db3a87d78e5b02ea5345588127dd4ed10410413b6a47377d9c",
+        "src/config.rs": "fffff2e45c489d103086b36f048c16551e8bc0aaa675e641b6a62269e756435c",
+        "src/docker.rs": "752dc429042ff81d42e61f96474d4bc7457bd55133cd1cf0a57b1f56cba65df7",
+        "src/lib.rs": "30a523d2474299139a0616de729a0b034527bf018aaf3b490e72d900b79b88ea"
+      },
+      "patch_files": [
+        {
+          "path": "Cargo.toml",
+          "upstream_sha256": "058fb5edf7963d7cf0e52cd2b5eedb358af08830cef457877682c93c03c9b7d5",
+          "patched_sha256": "bda771b244a15b01a8d69fe565acc85136c21873307d556b14e5b0b15866c3ad"
+        }
+      ],
+      "patch_sha256": "9f6a9ca8b1cffd26b8ed413a135fccfe20eb66da12a3b6ef92b8ac67835901c7",
+      "additional_files": [
+        {
+          "path": "LICENSE",
+          "source_url": "https://raw.githubusercontent.com/risc0/risc0/8c215e2f4ccdd935f0517bf05d90f1ae032840a9/LICENSE",
+          "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+          "reason": "License text from exact package VCS revision; archive carried Apache headers but omitted standalone license file"
+        }
+      ]
+    },
+    {
+      "name": "rzup",
+      "version": "0.5.2",
+      "source_url": "https://static.crates.io/crates/rzup/rzup-0.5.2.crate",
+      "archive_sha256": "96909a7ea8fdf7e18da727d7facbc43eea8a4f77635e7ec75a69794dede16fb6",
+      "vcs": {
+        "git": {
+          "sha1": "8c215e2f4ccdd935f0517bf05d90f1ae032840a9"
+        },
+        "path_in_vcs": "rzup"
+      },
+      "upstream_files": {
+        ".cargo_vcs_info.json": "419c04158cbfcfbd6efd986208d729b61d555a0cbeae5398fa546e6c40a46c4c",
+        "Cargo.lock": "8281ad0f11bcf268a141bd8d1a4878c63fc45c44f3552879ce9a2ea03144be27",
+        "Cargo.toml": "b0e27ac3f4e4b92da43789cdfea4cebdab624608e87814a5cc8e765ed810ef1e",
+        "Cargo.toml.orig": "92b2fdba3efb3b1d814378a49f8f7cf573ca848965789f2fc9adad772ccd3a05",
+        "README.md": "341b38c63233720d0cf683c14df459df2b175924b1d85d7d43027f1cd4905d38",
+        "install": "5699878af779351ec0f931fa84c3d5e35263279f66bd915af225f530a77341bf",
+        "src/bin/rzup.rs": "bbc14e9d4bbf8d51fd2a435b7253dade6cdf50d3b0da7b22f677f3c3bf6def6f",
+        "src/build.rs": "fc5c72030d14e74869799a756b67511155dd6bb535d9df74adeaa5f989d8b62f",
+        "src/cli/commands.rs": "f5706e102aa9c6e2e64758f3dbdf298c3ebd5b8d11422123b6c1be7f8b5b1ba1",
+        "src/cli/mod.rs": "6b53a999747ea067497950ec1341539dcde3df99d70f7537de151f2b9b43ce3a",
+        "src/cli/ui.rs": "14287be4dc23a076b3f8ae8730861ade4a6b6a5d74cf4b0d5fb7050fdf2fc8de",
+        "src/components.rs": "d9ade8bd9936ac365d92299d6dc3a97c915f3d9e56b208aed136a94590eb1e22",
+        "src/distribution/erroring_http.rs": "f8b58b96064f15c9346942f5a5d41445cb8445e3f4169725921ff466e3a2c92a",
+        "src/distribution/github.rs": "a52de870622ae36e1a003795214e1b017c56a5754b6a9c366b4e2f939be5d0c3",
+        "src/distribution/http.rs": "a4d9725fd2a76f34bc8ee8c8f7a5bbfe7e368789a6e59f5534bf4a2029a3ca87",
+        "src/distribution/mod.rs": "ed0ab7c6405c247bebc4344f58d3eb3b39a40242b2889cb8f79d8ada186e7823",
+        "src/distribution/public_key.pem": "ef3cafeb1e540719b0187b5879359128d289ac2bcfa64f010f7998422960f491",
+        "src/distribution/s3.rs": "f205bb788ec2b0e6610c9f9d995a22ce5a48396f4a8d9f868bf9cdc475cf35d8",
+        "src/distribution/sha2.rs": "c5f0409872ac52d1fd70085ad6dfecafcd9df3ca3b4150fb79fb19c5c3d1128a",
+        "src/distribution/signature.rs": "ab62589273f67a7284abdee476e172cc2a7c9851ba5e766df6fa1867c723fa76",
+        "src/env.rs": "916ca3efb6887b271a236975d2d77fabbbc4b3092eec7fac20123a02048a96be",
+        "src/error.rs": "06e9c43e6270ec377ff2051d276abd073ab127f25e0a215b1c38f31100b8c4a9",
+        "src/events.rs": "2b0ec28619499bd57f30000c2ebd64f172ee2402463f652d179ca791dbc727c9",
+        "src/lib.rs": "c0c8b0c940b512cc771c284d19326e517ef94c86d1dab63bc82b1892abe184b7",
+        "src/paths.rs": "70cf6ee9ef8d889fc0ba512fe8ef66dc693c98bc3aabd5e9f74ed0cf563d9c7a",
+        "src/registry.rs": "319d2beb19eac3c44f22d1d07926b3e4e1dbf7a27d5504d419b5fbbbf447707b",
+        "src/rust-toolchain-build-config.toml": "55e750e0b617c67b6f295272514a44991f1da2987e861be2290f44083d56042e",
+        "src/settings.rs": "2dad62e5227fa96024d8432c6b365c6882977c2fc695caea1b311aa430b802b4"
+      },
+      "patch_files": [
+        {
+          "path": "Cargo.toml",
+          "upstream_sha256": "b0e27ac3f4e4b92da43789cdfea4cebdab624608e87814a5cc8e765ed810ef1e",
+          "patched_sha256": "7edc5c4dc71417aa66c6e02f8bde38fb78dc941c3e65260c7d8ff40cd8816c32"
+        },
+        {
+          "path": "src/distribution/mod.rs",
+          "upstream_sha256": "ed0ab7c6405c247bebc4344f58d3eb3b39a40242b2889cb8f79d8ada186e7823",
+          "patched_sha256": "c82f887a75a24bd6b5b4d1f5a84cef9ee8613eee32f32e8b814903d79a837773"
+        },
+        {
+          "path": "src/distribution/s3.rs",
+          "upstream_sha256": "f205bb788ec2b0e6610c9f9d995a22ce5a48396f4a8d9f868bf9cdc475cf35d8",
+          "patched_sha256": "c1b0b15186bc20dff9848a8183c3e159a17394f7616afd4011b7e0e9fae50967"
+        },
+        {
+          "path": "src/env.rs",
+          "upstream_sha256": "916ca3efb6887b271a236975d2d77fabbbc4b3092eec7fac20123a02048a96be",
+          "patched_sha256": "01445dd04704cff22272be456eba97bdf63ee4ba55ae6c1336e54e12f2f8569c"
+        },
+        {
+          "path": "src/lib.rs",
+          "upstream_sha256": "c0c8b0c940b512cc771c284d19326e517ef94c86d1dab63bc82b1892abe184b7",
+          "patched_sha256": "7e44244c3ceb95230006ec38244b63854685f66592c47415de51cd8a37bc8f0e"
+        }
+      ],
+      "patch_sha256": "139231c6483c94ed28307edef189c2ea1c3aebd94e854dc175435120713b0f6a",
+      "additional_files": [
+        {
+          "path": "LICENSE",
+          "source_url": "https://raw.githubusercontent.com/risc0/risc0/8c215e2f4ccdd935f0517bf05d90f1ae032840a9/LICENSE",
+          "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+          "reason": "License text from exact package VCS revision; archive carried Apache headers but omitted standalone license file"
+        }
+      ]
+    },
+    {
+      "name": "ark-relations",
+      "version": "0.5.1",
+      "source_url": "https://static.crates.io/crates/ark-relations/ark-relations-0.5.1.crate",
+      "archive_sha256": "ec46ddc93e7af44bcab5230937635b06fb5744464dd6a7e7b083e80ebd274384",
+      "vcs": {
+        "git": {
+          "sha1": "b34f11d670c2667de3eda6e33daed8027f35043e"
+        },
+        "path_in_vcs": "relations"
+      },
+      "upstream_files": {
+        ".cargo_vcs_info.json": "e63e77d6bc019b6b36abd5a49c0509e69c7964e682e60a3c8d12cb24af860c4a",
+        "Cargo.toml": "3b6d7a63a6fc48149583d79065f269e6374d34e3ef959896a719570c9f6b3469",
+        "Cargo.toml.orig": "a2a0f0e9c1b1637d83fa67025a8f963209713adc039b100743347a790cff6bf7",
+        "LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+        "LICENSE-MIT": "8f71659370c5268d9a1dc962a46232540e8fca63462586d8efaa95aab492a208",
+        "src/lib.rs": "a15c08f7ccd3a54c96d30600252c0ed0d9532d705dcf1d4fd856bc26df6f9211",
+        "src/r1cs/constraint_system.rs": "44a49ab6366a70dcc60f1b7a67b224e32b3b4b211d42180f1d5cf686f23fff71",
+        "src/r1cs/error.rs": "a5c680f162cffce9e060473c0b78ae5eb3de981dd83d3ca2e485a67b6c0924e3",
+        "src/r1cs/impl_lc.rs": "2e995941280e184469364c66a0178b67a6f36fdaffec07af09a8aaf404c954b3",
+        "src/r1cs/mod.rs": "9ea1937bfcc567aa952e96a9c31cebd53f80f5d8629c0e58ce4047041e5d5a6c",
+        "src/r1cs/trace.rs": "c2d8aaadbcd1fdfa0a5aab22496d2838cf0d8b41b8eb5d4ec315f4d94abb3b93"
+      },
+      "patch_files": [
+        {
+          "path": "Cargo.toml",
+          "upstream_sha256": "3b6d7a63a6fc48149583d79065f269e6374d34e3ef959896a719570c9f6b3469",
+          "patched_sha256": "23cf27a65056df51cbffe3205ff82159b0dd6ff6af3abdad3c1501b97fcd7474"
+        },
+        {
+          "path": "src/r1cs/trace.rs",
+          "upstream_sha256": "c2d8aaadbcd1fdfa0a5aab22496d2838cf0d8b41b8eb5d4ec315f4d94abb3b93",
+          "patched_sha256": "409d63955378487897c47564593898316d13ad3f8faf70a9a026425dc92f4735"
+        }
+      ],
+      "patch_sha256": "a99a789a3aa91e0d61f8478ef4f7196d9f3b073876abe20144f57536f2137bd8"
+    },
+    {
+      "name": "ark-crypto-primitives",
+      "version": "0.5.0",
+      "source_url": "https://static.crates.io/crates/ark-crypto-primitives/ark-crypto-primitives-0.5.0.crate",
+      "archive_sha256": "1e0c292754729c8a190e50414fd1a37093c786c709899f29c9f7daccecfa855e",
+      "vcs": {
+        "git": {
+          "sha1": "455d599aae0aa81acf1c2faadf37def63a25a291"
+        },
+        "path_in_vcs": "crypto-primitives"
+      },
+      "upstream_files": {
+        ".cargo_vcs_info.json": "ce50693c365fb03e40a64164d5117c2c7af3021f514cfbd164980863bf102ca4",
+        "Cargo.toml": "b93858824a1abcd2b5be404557d9312395b7f6007a44ff3e2b05b2bc8bbf5ae0",
+        "Cargo.toml.orig": "de44221d622e25c8dc8d54b30099bfffb840139e4cdcd571bcf10c13119e1489",
+        "LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+        "LICENSE-MIT": "8f71659370c5268d9a1dc962a46232540e8fca63462586d8efaa95aab492a208",
+        "src/commitment/blake2s/constraints.rs": "5e0fe47f481a65e7801ee593804d453f8f9c68b59f87e30231bd5d80f39d7962",
+        "src/commitment/blake2s/mod.rs": "7fa8f7ddaefcb3cde098d8f9762940afb835dab7b6a1656524658f9a9f51635e",
+        "src/commitment/constraints.rs": "2516a99fc6ce7f98c414530ebd7dc66a75b9baafa034cbabb3b57775dbaf0bd1",
+        "src/commitment/injective_map/constraints.rs": "cfa2319de106425e601538cd64a0ea1d4244daef13baed6372eb2985c3e538a5",
+        "src/commitment/injective_map/mod.rs": "0ad5e44686dfff5d517e2c057e4ed1d78838a0e14ca3591d988d932b9f5126f9",
+        "src/commitment/mod.rs": "832cd518203819e023a50aa41b63ca806ba8fbb489f754e3a719e85f7840e6fb",
+        "src/commitment/pedersen/constraints.rs": "e2970ff0ff0c03f165ba9e761b2a0ff26324ddc9e1c832af31574b204c5f4943",
+        "src/commitment/pedersen/mod.rs": "690ef6d84511bfeb8313370d416cf5899ea1566a6924f4e5794a95f843fa1d41",
+        "src/crh/bowe_hopwood/constraints.rs": "76e98791457cc5d415e6554cdbb07fa33196c034c9f80e01c0df15f333aac4e6",
+        "src/crh/bowe_hopwood/mod.rs": "9f00b673adb60aab5e632376e0abc0da5c4def824cb6ab7eea4e8bd0b41cb708",
+        "src/crh/constraints.rs": "637c3a723e250392cb224b4ada2ecc3add76523798efc4ca1d7103b93e311e16",
+        "src/crh/injective_map/constraints.rs": "4f4d972b0e735fa3fbe852ea26e6f36d1714f617e0d4b6b0c0adff0e6684dafe",
+        "src/crh/injective_map/mod.rs": "f5e9d1ee18bc90ca3e6ec21312d106ba6dd5984323294779eb128a8d4afd8509",
+        "src/crh/mod.rs": "f81cfbc8ecbf4c1823a4df7b2273cd7b657ce7a89d93b7e076a3a57163bd13e0",
+        "src/crh/pedersen/constraints.rs": "1b6999a41f3b66b82e4407f3d23c5283220494e32f81a713b979eb2988eeead2",
+        "src/crh/pedersen/mod.rs": "cde883c0798b9c3b82ad550a9f090017d8305ec4bdf9867452e67454c61c7a87",
+        "src/crh/poseidon/constraints.rs": "ce1ffa2412dffa991919d7d6324ea47c783654a6bc1e6c62425e47f89bd787c6",
+        "src/crh/poseidon/mod.rs": "6cabceb33dd47603f8c020b967f716db5925a193bbca6dc34ff1662fd2f39422",
+        "src/crh/sha256/constraints.rs": "84012d86c81f41e208b201a13d6f620c57ca222c552beaf613d718591188834d",
+        "src/crh/sha256/mod.rs": "2250cb095f2365bd1f9c50e60e2d6811ee871e170ad3a431450cd5073c3872bd",
+        "src/encryption/constraints.rs": "eb3bdfadfcf5d95044e8e004cb49552381c406e0961b88beaae38131b4091d61",
+        "src/encryption/elgamal/constraints.rs": "51af92a30eea390f3da1ccd34e2df0235c4c968b8b798e102b62603534ae760f",
+        "src/encryption/elgamal/mod.rs": "2e5ee95e1d72ff2c4d539025c65cef3c08b2c0030e90ad7ed4e34f21d2aea5bd",
+        "src/encryption/mod.rs": "2155206e9b4dcf0ac9c458814611cd38b397b4166a5804218563f4e73e906a7d",
+        "src/lib.rs": "4b0a1f9452124f5075d346ef45cb108024fb5f2f4f9f7ade2ad2ec6ae9f65563",
+        "src/macros.rs": "c9b6d30ae85db3bf4a24e984e25224e4988c258e0d3408e942c2b544a3e7c710",
+        "src/merkle_tree/constraints.rs": "28642c25329894f89e553e2e983d242040a82333d1a0ea50c75e148beeb6baca",
+        "src/merkle_tree/mod.rs": "26b8a4a2a7a79ec3ef839fc9bab0bfa151e2ad3d19ad3c29bb6d7c84e83c68a2",
+        "src/merkle_tree/tests/constraints.rs": "c4f5605f379709b821945bca9ac307d65685dd4e3a1236cafe1d21b6c8edd3c8",
+        "src/merkle_tree/tests/mod.rs": "95f3ad941368e33ab128f20e7c9fe7ddac99ed9a86922be4bee7ceadc3d0bfb8",
+        "src/merkle_tree/tests/test_utils.rs": "7a60e19871d32a696c59d7f4f659bcc5b9a9054c8d27c8b2b67077cdcf45b74f",
+        "src/prf/blake2s/constraints.rs": "69a96b7ad094b4b202e5dc30cf9ef38adadf942c84127fd844d12e50e2d0d804",
+        "src/prf/blake2s/mod.rs": "8040f49f6ec9680d068f3162a7201394040e794b8629984636cb61b9d9bbfd91",
+        "src/prf/constraints.rs": "972487e67c4c61ac8103e50402254c97be2009eb79edcca0fb8daadd14e7a924",
+        "src/prf/mod.rs": "8496aa270be04afc8629211e3881189bd848d3087fe8a767a1a61a01cc5a8f0f",
+        "src/signature/constraints.rs": "eae5da07c38d53acac3fcd8d8fe54ea175cefc334ed654d52ed7f43184bf97e4",
+        "src/signature/mod.rs": "da75888ba41dd9d3d52c09271e5e30fe6d9fdf5ec6b8da0b33607eaadc3b7fe0",
+        "src/signature/schnorr/constraints.rs": "f1bca88bd47e8292d5f5414844f604dfbac7f591baefe1d5a24760e6aabc05a4",
+        "src/signature/schnorr/mod.rs": "8caa91371b8599fab297bc73d3a268754a2c002eeff4b055f5c11fc27290f529",
+        "src/snark/constraints.rs": "25eb6bc72372185434fac2058552760739c621d4198bd9df97879b8dc697e071",
+        "src/snark/mod.rs": "94bd94572231bf610d9fe740d1d903c495788e5fe8aa498327344cbf9e9023ca",
+        "src/sponge/absorb.rs": "c7a2aae0a4fd0d81edce0fadd857b44eb588c63a0e6356bb76246a40c9298811",
+        "src/sponge/constraints/absorb.rs": "2c70362736ae9700ed3dc5df3b735bb83cb7b6e2440a4cb31e38aae9fa174642",
+        "src/sponge/constraints/mod.rs": "bfcb3acce723fc4d50b3c0b3a4b6810a1a3a625c273f836f73a8d07741ec5b5b",
+        "src/sponge/merlin/mod.rs": "8b1ca951fb9738935bc618f1faa0c16ea6dcb836592d0ccb294761eb5ba26fb3",
+        "src/sponge/mod.rs": "364cde7c44283be520617e1afef981c319e861b237eb239ad562b870e71caaec",
+        "src/sponge/poseidon/constraints.rs": "13688f41274d0439ebc3ea669a186afb0130bf30199d1c509d599b14bbab5f12",
+        "src/sponge/poseidon/grain_lfsr.rs": "2dd53dbe7216a0af2482c858e69fd1fd9ee6d7a8acb72276cf6ad859b8faa4e8",
+        "src/sponge/poseidon/mod.rs": "4e0a366cf555bd09fe1437b14841f757cfbce692d6859f94627dbc74a2c8e2af",
+        "src/sponge/poseidon/tests.rs": "d60d1e2f3092cba7ba304cd3ab5515d0c2cd58752cf4a116f96657a65fc7aa55",
+        "src/sponge/poseidon/traits.rs": "737aaa4cc7ffe3456b6b8adf7c86ac7b8db9e83fe7b6718b4d22040ded94841c",
+        "src/sponge/test.rs": "a82acf8aeea1bdbf49d6e8b3f7eeb72a2d841181a293198c265206361866a914"
+      },
+      "patch_files": [
+        {
+          "path": "Cargo.toml",
+          "upstream_sha256": "b93858824a1abcd2b5be404557d9312395b7f6007a44ff3e2b05b2bc8bbf5ae0",
+          "patched_sha256": "818a595a5b0fef4f29353498d0b7c8345f9cfe770500f5752072e4b232ebe676"
+        },
+        {
+          "path": "src/lib.rs",
+          "upstream_sha256": "4b0a1f9452124f5075d346ef45cb108024fb5f2f4f9f7ade2ad2ec6ae9f65563",
+          "patched_sha256": "f350e79db3591d31f31afc820eb18f284fea2519d194dfe3056b228828d12455"
+        }
+      ],
+      "patch_sha256": "cae350cc1b67427cfb429a4a3ef4fafd57c4b26c809ed9b58bb80a2a3b9354a9"
+    }
+  ]
+}

@@ -77,7 +77,7 @@ All entry points take `&Graph` + `&str` and return `Result<_, String>` (parse + 
   unbound), `sol.iter()` over the bound `(VariableRef, &Term)` pairs (unbound cells skipped),
   `&sol[var]` (panicking `Index`), plus `variables()` / `values()` / `len()` / `is_empty()`. Use it
   for ergonomic Rust Oxigraph interop / migration; the underlying `{vars, rows}` layout is unchanged.
-- `pub struct QueryBudget { pub deadline: Option<Instant> /*native only*/, pub max_rows: Option<usize>, pub max_bytes: Option<usize>, pub cancel: Option<Arc<AtomicBool>> }`
+- `pub struct QueryBudget { pub deadline: Option<Instant> /*native only*/, pub max_rows: Option<usize>, pub max_bytes: Option<usize>, pub temporal_year_range: Option<(i64, i64)>, pub cancel: Option<Arc<AtomicBool>> }`
   — `QueryBudget::unlimited()` is the no-op default. `max_rows` caps the working-set ROW count;
   `max_bytes` (`sq-s5is`) is the byte-accounted companion — it prices row WIDTH
   (`rows × vars × size_of::<Id>()`) plus the bytes of query-computed (BIND/aggregate/CONSTRUCT)
@@ -87,6 +87,20 @@ All entry points take `&Graph` + `&str` and return `Result<_, String>` (parse + 
   `query budget exceeded (max-rows|max-bytes)`. `with_cancel(Arc<AtomicBool>)` adds a cross-thread
   cancellation handle; a `Relaxed` store of `true` aborts cooperatively at the next coarse poll with
   `query budget exceeded (cancelled)`. `cancelled_by(flag)` creates an otherwise-unlimited budget.
+
+[GPT-6] `temporal_year_range: Some((minimum, maximum))` imposes an explicit
+inclusive year capacity when date/dateTime values are evaluated or constructed.
+Out-of-range values trigger sticky `query evaluation capacity exceeded (temporal-year)`;
+FILTER/BIND/COALESCE and SERVICE byte rollback cannot absorb this query failure.
+Malformed values retain ordinary SPARQL expression errors. `None` keeps native
+checked-range behavior. Budgeted expression work stays on the calling thread so
+rayon cannot lose this state; nested calls restore their parent's budget. This
+is not a dataset validator: a proof profile must also validate input/query terms.
+
+Temporal comparisons, ORDER BY and MIN/MAX use exact integer-second/borrowed-fraction
+keys rather than the approximate epoch cache. SECONDS preserves all validated
+fractional digits as an xsd:decimal result; this does not expand finite decimal
+arithmetic. See [exact temporal scope](../zk-query-proofs/references/exact-temporals.md).
 
 SELECT/ASK entry points (each has `_prepared`, `_with_budget`, and `_view` variants):
 
@@ -216,6 +230,9 @@ A huge valid integer can be numeric while an operation exceeds the existing
 truncate toward zero; out-of-range casts become expression errors (unbound BIND
 or projected cells, excluded FILTER rows). `SUBSTR` requires valid integer or derived
 integer start/length operands, rejecting decimal, float, double and invalid facets.
+This follows SPARQL's declared integer argument signature; the linked XPath
+`substring` function has a wider numeric signature, so this is an explicit
+SPARQL signature interpretation rather than a claim about all XPath calls.
 Its integer arguments clip
 its original one-based interval, so `SUBSTR("abcd", -1, 3)` yields `"a"`.
 Date accessors require typed dateTime operands, and calendar/timezone validation
@@ -226,6 +243,17 @@ the current snapshot's datatype rules; they do not establish complete builtin co
 Numeric integer facets retain XSD 1.1 sign handling (including `+1` and `-0` for
 unsigned types), consistent with RDF 1.1's datatype reference. Temporal parsing
 still uses its documented XSD 1.0 year-zero rule; this is not a uniform XSD version claim.
+
+[GPT-6] Unary plus validates numeric lexical forms and facets before returning its
+operand unchanged, preserving valid derived datatypes and large numeric lexical
+forms. This follows the mapped [XPath unary-plus definition](https://www.w3.org/TR/2007/REC-xpath-functions-20070123/#func-numeric-unary-plus).
+Identity-comparison regressions distinguish this guard from tests that already
+validated operands in later arithmetic. PyOxigraph 0.5.11 also accepts the
+invalid-byte identity example; that interoperability difference does not change
+the numeric-operand golden. String casts collapse only XML whitespace, so NBSP
+does not disappear before integer, decimal, float, double or boolean validation.
+The shared matrix contains regression and positive controls as well as
+guard-discriminating cases; its size is not a count of independently fixed bugs.
 
 **Property paths** (all 8 operators: `/  | ^  *  +  ?` and `!(…)` negated sets) — write them inline:
 

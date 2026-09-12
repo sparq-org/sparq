@@ -24,7 +24,7 @@ unapproved contradictory pairs), not new issues. Issues 1+2 are unreported
 (closed #81 was an author-retracted misreading, different specifics) — file as new issues.
 
 The final-eleven conformance work surfaced six parser bugs in spargebra 0.4.6
-(fixed in our vendored copy, `vendor/spargebra/SPARQ-PATCHES.md`) and four
+(fixed in our vendored copy, `vendor/spargebra/SPARQ-PATCHES.md`) and five
 defective expected-results files in w3c/rdf-tests (reported as documented
 divergences by `sparq-conformance`). This file holds ready-to-submit PR
 descriptions for oxigraph/oxigraph and issue drafts for w3c/rdf-tests; § D
@@ -34,7 +34,7 @@ sq-tonhr.12) holds two unfiled `oxttl` RDF 1.2 Turtle parser issues** found by
 the Shuttle generate-mode harvest — unlike § A they are NOT fixed on oxigraph
 main, and they affect sparq's default Turtle path. Every item in § A and § B was
 verified against w3c/rdf-tests @ `f25dbc092c654d792974848e81bb519d7328f0e8`;
-sparq's full run is 1225 pass + 4 documented divergences / 0 fail / 0 skip over
+sparq's full run is 1224 pass + 5 documented divergences / 0 fail / 0 skip over
 the 1229-test scope.
 
 ---
