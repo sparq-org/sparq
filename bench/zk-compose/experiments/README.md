@@ -36,13 +36,20 @@ warm-up runs from measurements. Timers cover complete host preparation, the
 inclusive prove API, and the inclusive independent verify API. Proving includes
 compilation, witness execution, proof/key generation and artifact handling;
 verification includes canonical compilation/key derivation, public reconstruction
-and verification. Neither timer isolates the backend. Fixture issuance is measured
-separately. Unavailable compile/witness/backend-only/RSS measurements are null with
-reasons. Other signature suites are explicitly unavailable.
+and verification. Schema version 2 also records actual driver events inside each
+inclusive API span: workspace-lock acquisition, Nargo compilation and witness
+execution, private ACIR copying, backend proof/key generation, independent key
+generation and backend verification. Child spans must not be added to their parent
+timer. Uninstrumented host setup and I/O remain in the inclusive timer. Fixture
+issuance is measured separately; RSS and the internal backend proof/key split
+remain null with reasons. Other signature suites are explicitly unavailable.
 
 A no-warm-up run is not a cold-cache measurement. The report records prior runs in
 the process and completed full warm-ups for that planner; operating-system and
-Nargo dependency caches remain uncontrolled. Rust compilation is outside all
+Nargo dependency caches remain uncontrolled. Compiler-internal cache hits are
+unavailable, even when ACIR bytes repeat. The optional immutable-snapshot event
+reports reuse only after reading and verifying the existing bytes; this successful
+result adapter uses private copies instead of that snapshot API. Rust compilation is outside all
 reported timers. Local output is **NONcanonical**, with source/tree/lock, compiler,
 adapter and prover executable hashes and version output. No cross-system timing
 comparison or calibrated performance claim follows from one local run.
@@ -58,11 +65,18 @@ The first measured run of each planner executes tamper controls for proof bytes,
 released terms, requested query, a changed challenge on both sides, and the
 verifier-owned status snapshot. Every run checks replay rejection. These checks
 are excluded from normal prove/verify timers; backend execution errors cannot count
-as successful rejection controls. Internal stage instrumentation, RSS measurement,
-canonical infrastructure, an exact-dataset adapter, and further signature suites
+as successful rejection controls. A nonzero `bb verify` exit is recorded as
+`rejected` by the driver, without claiming to distinguish invalid proofs from all
+backend failures. Metrics are enabled explicitly with
+`CircuitProver::with_stage_metrics()` and drained with `take_stage_metrics()`;
+collection has no global state and retains at most 4096 events per drain. Overflow
+or collector poisoning prevents a successful measurement record. Concurrent users
+need separate driver instances for per-call attribution. These local diagnostics
+can disclose workload information and do not belong in real presentations.
+RSS measurement, canonical infrastructure, an exact-dataset adapter, and further signature suites
 remain unfinished work.
 
-The committed [local smoke record](local-smoke.json) binds its actual source
+The historical schema-version-1 [local smoke record](local-smoke.json) binds its actual source
 commit and executable hashes. It retains separate public/proof byte counts and
 noncanonical inclusive timings; it is a fixture smoke test, not a statistical
 comparison or publication benchmark. Original binary artifacts remain with the

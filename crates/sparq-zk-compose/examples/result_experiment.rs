@@ -364,9 +364,21 @@ fn run_one(
         )?)
     })?;
     record["work"] = work(prepared.work());
-    let p = stage(record, "prove_api_inclusive", || {
+    let p = driver_stage(record, "prove_api_inclusive", prover, || {
         Ok(prepared.prove(prover, out, "experiment")?)
     })?;
+    require_driver_inventory(
+        record,
+        "prove_api_inclusive",
+        &[
+            "nargo_cache_lock",
+            "nargo_compile",
+            "acir_private_copy",
+            "nargo_cache_lock",
+            "nargo_execute",
+            "bb_prove_and_write_vk",
+        ],
+    )?;
     if p.version != 1 || p.integer_capacity != PrivateIntegerCapacity::TwoDigits {
         return Err("result numeric contract/capacity drift".into());
     }
@@ -374,17 +386,35 @@ fn run_one(
         return Err("empty proof".into());
     }
     let seen = InMemorySeenNonces::new();
-    let verified = stage(record, "verify_api_inclusive", || {
+    let verified = driver_stage(record, "verify_api_inclusive", prover, || {
         Ok(verify_result(
             QUERY, &p, &f.policy, &nonce, &seen, prover, out,
         )?)
     })?;
+    require_driver_inventory(
+        record,
+        "verify_api_inclusive",
+        &[
+            "nargo_cache_lock",
+            "nargo_compile",
+            "acir_private_copy",
+            "bb_write_vk",
+            "bb_verify",
+        ],
+    )?;
     if verified.rows != f.rows || verified.query != QUERY {
         return Err("accepted result/contract drift".into());
     }
-    let replay = rejection(
-        verify_result(QUERY, &p, &f.policy, &nonce, &seen, prover, out),
-        "challenge already consumed",
+    let replay = driver_stage(
+        record,
+        "replay_control_excluded_from_timings",
+        prover,
+        || {
+            rejection(
+                verify_result(QUERY, &p, &f.policy, &nonce, &seen, prover, out),
+                "challenge already consumed",
+            )
+        },
     )?;
     let mut public = serde_json::to_value(&p)?;
     public
@@ -402,11 +432,54 @@ fn run_one(
         "verification_key":{"value":null,"reason":"independently derived by verifier API; not exported"}});
     record["replay_control"] = replay;
     if controls_required {
-        record["tamper_controls"] = stage(record, "tamper_controls_excluded_from_timings", || {
-            controls(&p, f, &nonce, prover, out)
-        })?;
+        record["tamper_controls"] = driver_stage(
+            record,
+            "tamper_controls_excluded_from_timings",
+            prover,
+            || controls(&p, f, &nonce, prover, out),
+        )?;
     }
     record["status"] = json!("success");
+    Ok(())
+}
+
+// [GPT-6] Preserve measurements on failures too. Driver events are nested inside
+// an inclusive API span, so adding the two levels would double count work.
+fn driver_stage<T>(
+    record: &mut Value,
+    name: &str,
+    prover: &CircuitProver,
+    run: impl FnOnce() -> Fallible<T>,
+) -> Fallible<T> {
+    let result = stage(record, name, run);
+    let metrics = prover
+        .take_stage_metrics()
+        .ok_or("driver collection not enabled")?;
+    let complete = metrics.complete;
+    record["stages"][name]["driver"] = serde_json::to_value(metrics)?;
+    let value = result?;
+    if !complete {
+        return Err("driver measurements incomplete; cannot record successful measurement".into());
+    }
+    Ok(value)
+}
+
+fn require_driver_inventory(record: &Value, scope: &str, expected: &[&str]) -> Fallible<()> {
+    let events = record["stages"][scope]["driver"]["events"]
+        .as_array()
+        .ok_or("driver event array missing")?;
+    if events.len() != expected.len()
+        || events.iter().zip(expected).any(|(event, stage)| {
+            event["stage"] != *stage
+                || event["outcome"] != "success"
+                || !event["acir_cache"].is_null()
+                || !event["elapsed_seconds"]
+                    .as_f64()
+                    .is_some_and(|s| s.is_finite() && s >= 0.0)
+        })
+    {
+        return Err("driver stage inventory differs from this fixed adapter".into());
+    }
     Ok(())
 }
 fn read_manifest(path: &Path) -> Fallible<Experiment> {
@@ -434,16 +507,16 @@ fn execute(exp: &Experiment, out: &Path) -> Fallible<bool> {
         return Err("output must be outside the source checkout".into());
     }
     fs::create_dir(out)?; // Refuse overwriting or merging prior measurements.
-    let mut report = json!({"schema_version":1,"canonical":false,"status":"failure","experiment":exp,"source":source,
+    let mut report = json!({"schema_version":2,"canonical":false,"status":"failure","experiment":exp,"source":source,
         "backend":{"name":"barretenberg","target":"noir-recursive","zk_mode_requested":true},
         "signature_suites_unavailable":["BBS+","ECDSA","EdDSA"],
         "cache_contract":{"os_cache":"uncontrolled","nargo_dependency_cache":"uncontrolled","rust_build":"outside timing",
             "warmup_definition":"completed full prepare/prove/verify runs per planner; no OS cold-cache assertion",
+            "nargo_internal_cache_hit":{"value":null,"reason":"Nargo does not expose reliable per-invocation cache-hit telemetry"},
             "nonce_convention":"distinct deterministic test nonce per attempted run; excluded only from semantic equivalence digest and retained in each transcript"},
+        "timing_contract":"driver events are measured child spans of inclusive API timers, not additive extra stages; uninstrumented host I/O/setup remains in inclusive timers",
         "runs":[],"unavailable_stages":{
-            "compile_seconds":{"value":null,"reason":"included in prove/verify APIs"},
-            "witness_seconds":{"value":null,"reason":"included in prove API"},
-            "backend_only_prove_seconds":{"value":null,"reason":"not instrumented separately"},
+            "backend_prove_excluding_key_seconds":{"value":null,"reason":"bb prove --write_vk is measured as one subprocess; internal proof/key split unavailable"},
             "peak_rss_bytes":{"value":null,"reason":"host/subprocess RSS not instrumented"}}});
     let outcome = (|| -> Fallible<()> {
         report["backend"]["nargo"] = tool_identity("nargo", "1.0.0-beta.21", &root)?;
@@ -456,7 +529,7 @@ fn execute(exp: &Experiment, out: &Path) -> Fallible<bool> {
         let contract = json!({"acceptance":exp.contract,"synthetic_inputs":binding});
         let digest = json_hash(&contract)?;
         report["acceptance_contract_blake3"] = json!(digest);
-        let prover = CircuitProver::new(root.join("zk/compose"));
+        let prover = CircuitProver::new(root.join("zk/compose")).with_stage_metrics();
         let mut ordinal = 0u64;
         for &planner in &exp.planners {
             let mut completed_warmups = 0;
@@ -527,6 +600,17 @@ fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn missing_or_failed_driver_events_cannot_be_successful_measurements() {
+        let mut record = json!({"stages":{"verify":{"driver":{"events":[{
+            "stage":"bb_verify","outcome":"success","acir_cache":null,"elapsed_seconds":0.001
+        }]}}}});
+        require_driver_inventory(&record, "verify", &["bb_verify"]).unwrap();
+        record["stages"]["verify"]["driver"]["events"][0]["outcome"] = json!("failed");
+        assert!(require_driver_inventory(&record, "verify", &["bb_verify"]).is_err());
+        record["stages"]["verify"]["driver"]["events"] = json!([]);
+        assert!(require_driver_inventory(&record, "verify", &["bb_verify"]).is_err());
+    }
     #[test]
     fn version_fields_reject_near_matches_and_diagnostic_rescue() {
         let n = "1.0.0-beta.21";

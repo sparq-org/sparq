@@ -23,7 +23,9 @@ integration and remains unaudited. [GPT-6]
 
 [GPT-6] For the opt-in synthetic selected-support measurement adapter, its strict
 experiment manifest, timing boundaries and unavailable stages, see
-[experiment instructions](../../bench/zk-compose/experiments/README.md). Local
+[experiment instructions](../../bench/zk-compose/experiments/README.md). Driver
+measurements are explicitly enabled by `with_stage_metrics()` and drained by
+`take_stage_metrics()`; they remain local diagnostics outside presentations. Local
 measurements are NONcanonical and do not establish external security assurance.
 
 ## Prerequisites

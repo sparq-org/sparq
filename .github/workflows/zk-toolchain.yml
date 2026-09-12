@@ -374,6 +374,7 @@ jobs:
         run: |
           cargo test -p sparq-zk-compose --features successful-results --lib result:: -- --include-ignored --test-threads=1
           cargo test -p sparq-zk-compose --features successful-results --example result_experiment
+          cargo test -p sparq-zk-compose --features successful-results --lib driver::
           cd zk/compose
           nargo test --package sparq_zk_compose_core result::
           nargo test --package sparq_zk_compose_core result_integer::
