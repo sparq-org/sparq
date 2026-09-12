@@ -237,6 +237,25 @@ test("state-B: latest-404 + list-empty — all controls degrade to 'No release y
   await expect(watchLinks.first()).toBeVisible();
   await expect(watchLinks.first()).toHaveAttribute("href", RELEASES_URL);
 
+  // [GPT-6] Registry installation paths remain discoverable independently of GitHub releases.
+  const packages = page.getByRole("region", { name: "Package managers" });
+  await expect(packages).toBeVisible();
+  const registryLinks = [
+    ["sparq-cli on crates.io", "https://crates.io/crates/sparq-cli"],
+    ["Browse the sparq crate family", "https://crates.io/search?q=sparq-"],
+    ["sparq-rdf on PyPI", "https://pypi.org/project/sparq-rdf/"],
+    ["@sparq-org/sparq on npm", "https://www.npmjs.com/package/@sparq-org/sparq"],
+    ["@sparq-org/solid-server on npm", "https://www.npmjs.com/package/@sparq-org/solid-server"],
+    ["@sparq-org/eyereasoner-compat on npm", "https://www.npmjs.com/package/@sparq-org/eyereasoner-compat"],
+  ];
+  for (const [name, href] of registryLinks) {
+    const link = packages.getByRole("link", { name, exact: true });
+    await expect(link).toHaveAttribute("href", href);
+    await expect(link).toHaveAttribute("rel", "noopener noreferrer");
+  }
+  await expect(packages.getByText("python -m pip install sparq-rdf", { exact: true })).toBeVisible();
+  await expect(packages.getByText(/use import sparq in Python/)).toBeVisible();
+
   // No-install closer is present.
   await expect(page.getByRole("link", { name: /Open the workbench/i })).toBeVisible();
 
