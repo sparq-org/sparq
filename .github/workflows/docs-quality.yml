@@ -571,6 +571,13 @@ jobs:
       # self-test in differential.yml).
       - name: Self-test demoted-lane failure filer (id/dedupe/append/log-tail logic)
         run: python3 scripts/ci-file-demoted-lane-failure.py --self-test
+      # [GPT-5] #6317: the differential and metamorph filers previously self-tested only
+      # in schedule/workflow_dispatch lanes, so PR changes could merge before their pure
+      # logic was exercised. Keep their hermetic self-tests in this unconditional HARD job.
+      - name: Self-test differential failure filer (id/dedupe/append/log-tail logic)
+        run: python3 scripts/ci-file-differential-failure.py --self-test
+      - name: Self-test metamorph failure filer (id/dedupe/append/log-tail logic)
+        run: python3 scripts/ci-file-metamorph-failure.py --self-test
       # [OPUS-5] sq-jxeqz / #4559: the bench HARD-ZONE gate's pure logic
       # (scripts/bench_hardzone.py). Its --self-test previously ran ONLY inside bench.yml's
       # "Hard zone" step, which is guarded `github.event_name != 'schedule' && github.ref ==
