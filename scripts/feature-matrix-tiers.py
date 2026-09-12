@@ -29,11 +29,19 @@
 #             CRATE and no written test-reason: override (sq-vya1 guard).
 #             Cargo feature names are crate-local, so both invariants key on
 #             the (crate, feature) PAIR — a test:true leg for feature F in
-#             crate A must never satisfy a sensitive F in crate B.
+#             crate A must never satisfy a sensitive F in crate B; OR
+#         (3) any cargo feature DECLARED in a legged crate's Cargo.toml is
+#             sensitive, is activated by NO leg of that crate, and carries no
+#             written UNLEGGED_SENSITIVE_EXEMPT reason (issue #5138).
+#             Invariants (1)+(2) only ever see (crate, feature) pairs that
+#             already appear in a leg, so a feature with ZERO legs used to be
+#             invisible to the guard rather than sensitive-and-uncovered —
+#             the exact case the guard exists to catch. (3) closes that.
 #   python3 scripts/feature-matrix-tiers.py --report-unlegged
 #       Advisory: features with no leg, against the SCOPE allowlist.
 #
-# Stdlib only (no new Python deps beyond stdlib). Runs under Python 3.10+.
+# Stdlib only (no new Python deps beyond stdlib for the detector; PyYAML for
+# fragment loading, tomllib for invariant (3)). Runs under Python 3.11+.
 
 from __future__ import annotations
 
@@ -43,7 +51,12 @@ import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple
+
+try:
+    import tomllib
+except ImportError:  # pragma: no cover — Python < 3.11
+    tomllib = None  # type: ignore[assignment]
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FRAGMENT_DIR = REPO_ROOT / ".github" / "feature-matrix.d"
@@ -54,6 +67,179 @@ CRATES_DIR = REPO_ROOT / "crates"
 SCOPE_ALLOWLIST: frozenset = frozenset(
     {"zlib-ng", "hdt", "write", "live", "embeddings", "mimalloc"}
 )
+
+# [OPUS-5] issue #5138 — the WRITTEN-REASON escape hatch for enforcement
+# invariant (3) (see cmd_enforce). Keyed on the (crate, feature) PAIR, never the
+# bare feature name, for the same reason invariants (1)+(2) are: cargo feature
+# names are crate-LOCAL (`spqcprm2` is declared by BOTH sparq-engine and
+# sparq-cli, and only sparq-engine has a leg for it).
+#
+# An entry is a REVIEWED statement about where a feature's coverage comes from,
+# and the two kinds of reason below are NOT the same claim:
+#
+#   "executed by <lane>" — the feature IS turned on and its gated tests DO run
+#       in CI, just not from a feature-matrix leg. The named step is the
+#       evidence; if that step goes away, so must this entry.
+#   "KNOWN GAP" — no CI executor was found for it. This RECORDS a gap; it does
+#       not assert coverage. Resolve one by adding a leg (or another executor)
+#       and deleting the entry — never by softening the wording.
+#
+# Seeded by the issue #5138 sweep of every declared feature of every legged
+# crate, so invariant (3) binds immediately on NEWLY-added features rather than
+# after the pre-existing debt is paid down. Adding a pair here is a reviewed
+# change; the gate's whole value is that the list only shrinks.
+UNLEGGED_SENSITIVE_EXEMPT: Dict[Tuple[str, str], str] = {
+    ("sparq-canon", "bridge-lowcopy"): (
+        "KNOWN GAP: sensitive only via `cfg(not(feature = \"bridge-lowcopy\"))` "
+        "in src/lib.rs; no leg and no other executor found by the #5138 sweep."
+    ),
+    ("sparq-canon", "rdf12-triple-terms"): (
+        "KNOWN GAP: tests/rdf12_nquads_token_tracking.rs is "
+        "`#![cfg(feature = \"rdf12-triple-terms\")]`; already recorded as a "
+        "tracked gap in scripts/check-feature-test-execution.allowlist.json."
+    ),
+    ("sparq-cli", "spqcprm2"): (
+        "KNOWN GAP: tests/emit_format_v2.rs is gated on sparq-cli's OWN "
+        "`spqcprm2`. sparq-engine has a `spqcprm2` leg, but feature names are "
+        "crate-local so it covers nothing here."
+    ),
+    ("sparq-conformance", "d-entail"): (
+        "executed by the dedicated `cargo test -p sparq-conformance --features "
+        "d-entail --test d_entail_suite` step in .github/workflows/ci.yml."
+    ),
+    ("sparq-conformance", "dl-direct"): (
+        "executed by the dedicated `cargo test --profile release-fast -p "
+        "sparq-conformance --features dl-direct --test dl_suite` step in ci.yml."
+    ),
+    ("sparq-conformance", "el-suite"): (
+        "executed by the dedicated `cargo test -p sparq-conformance --features "
+        "el-suite,el-suite-par --test el_suite` step in ci.yml."
+    ),
+    ("sparq-conformance", "el-suite-par"): (
+        "executed by the dedicated `cargo test -p sparq-conformance --features "
+        "el-suite,el-suite-par --test el_suite` step in ci.yml."
+    ),
+    ("sparq-conformance", "federation-descriptors"): (
+        "executed by the dedicated `cargo test -p sparq-conformance --features "
+        "federation-descriptors --test sd_gsp_suite` step in ci.yml."
+    ),
+    ("sparq-conformance", "http-protocol"): (
+        "executed by the dedicated `cargo test -p sparq-conformance --features "
+        "http-protocol --test http_protocol_suite` step in ci.yml."
+    ),
+    ("sparq-conformance", "jsonld-suite"): (
+        "executed by the dedicated `cargo test -p sparq-conformance --features "
+        "jsonld-suite --test jsonld_suite` step in ci.yml."
+    ),
+    ("sparq-conformance", "ql-experimental"): (
+        "executed by the dedicated `cargo test -p sparq-conformance --features "
+        "ql-experimental --test ql_experimental_arm` (+ two sibling --test "
+        "targets) step in ci.yml."
+    ),
+    ("sparq-conformance", "rif-core"): (
+        "executed by the dedicated `cargo test -p sparq-conformance --features "
+        "rif-core --test rif_core_suite` step in ci.yml."
+    ),
+    ("sparq-conformance", "rif-wg-core"): (
+        "executed by the dedicated `cargo test -p sparq-conformance --features "
+        "rif-wg-core --test rif_wg_core_suite` step in ci.yml."
+    ),
+    ("sparq-conformance", "service"): (
+        "executed by the dedicated `cargo test -p sparq-conformance --features "
+        "service --test service_eval_suite` step in ci.yml."
+    ),
+    ("sparq-conformance", "service-loopback"): (
+        "executed by the dedicated `cargo test -p sparq-conformance --features "
+        "service-loopback --test service_loopback` step in ci.yml."
+    ),
+    ("sparq-core", "rdfxml"): (
+        "executed by the sparq-core measure() case arm in scripts/coverage.sh "
+        "(`--features mmap,dict-spill,rdfxml`), which runs the crate's tests "
+        "under cargo llvm-cov."
+    ),
+    ("sparq-engine", "cs-anchor-incidence"): (
+        "KNOWN GAP: `cfg(feature = \"cs-anchor-incidence\")` cases in "
+        "tests/distinct_pushdown.rs; no leg and no other executor found."
+    ),
+    ("sparq-engine", "topk-lazy-strkey"): (
+        "KNOWN GAP: `cfg(all(test, feature = \"topk-lazy-strkey\"))` unit tests "
+        "in src/exec.rs; no leg and no other executor found."
+    ),
+    ("sparq-fedclient", "fedclient-adaptive"): (
+        "executed by the sparq-fedclient measure() case arm in "
+        "scripts/coverage.sh (`--features fedclient,fedclient-adaptive`)."
+    ),
+    ("sparq-fedplan", "foldhash-maps"): (
+        "KNOWN GAP: sensitive via `cfg(feature = \"foldhash-maps\")` in "
+        "benches/fedplan.rs; no leg and no other executor found by the #5138 "
+        "sweep."
+    ),
+    ("sparq-kb", "literature-live"): (
+        "live-network by contract: the gated tests open a real API connection, "
+        "and live-network tests are never run in CI. Same policy as "
+        "sparq-nlq/live; recorded in check-feature-test-execution.allowlist.json."
+    ),
+    ("sparq-nlq", "live"): (
+        "live-network by contract: tests/exec_accuracy.rs's gated test is BOTH "
+        "`#[cfg(feature = \"live\")]` and `#[ignore]`d, so no executor can make "
+        "it run. Same policy as sparq-kb/literature-live."
+    ),
+    ("sparq-serve", "backup"): (
+        "KNOWN GAP: sensitive only via `cfg(not(feature = \"backup\"))` in "
+        "src/lib.rs; no leg and no other executor found."
+    ),
+    ("sparq-serve", "result-cache"): (
+        "KNOWN GAP: tests/result_cache.rs is `#![cfg(feature = "
+        "\"result-cache\")]`; already recorded as a tracked gap in "
+        "check-feature-test-execution.allowlist.json."
+    ),
+    ("sparq-server", "backup"): (
+        "KNOWN GAP: tests/backup.rs is `#![cfg(feature = \"backup\")]`; already "
+        "recorded as a tracked gap in "
+        "check-feature-test-execution.allowlist.json."
+    ),
+    ("sparq-server", "n3-patch"): (
+        "KNOWN GAP: `cfg(feature = \"n3-patch\")` cases in tests/gsp_patch.rs; "
+        "no leg and no other executor found."
+    ),
+    ("sparq-server", "shacl"): (
+        "KNOWN GAP: tests/shacl_validate.rs is `#![cfg(feature = \"shacl\")]`; "
+        "already recorded as a tracked gap in "
+        "check-feature-test-execution.allowlist.json. (ci.yml's `--features "
+        "shacl` steps build sparq-wasm/sparq-shacl-wasm, NOT sparq-server.)"
+    ),
+    ("sparq-sim", "lexical"): (
+        "KNOWN GAP: `cfg(feature = \"lexical\")` cases in "
+        "tests/proptest_metric.rs; no leg and no other executor found."
+    ),
+    ("sparq-sim", "tbox"): (
+        "KNOWN GAP: `#[cfg(feature = \"tbox\")]`-adjacent `#[test]` fns in "
+        "src/lib.rs; no leg and no other executor found."
+    ),
+    ("sparq-vectors", "approx-ann"): (
+        "executed by ci.yml's workspace `cargo nextest archive --workspace "
+        "--all-targets --features approx-ann,filtered-ann,vec-predicate` (the "
+        "one feature set that archive carries)."
+    ),
+    ("sparq-vectors", "delta"): (
+        "KNOWN GAP: tests/delta_persist.rs is `#![cfg(feature = \"delta\")]`; "
+        "already recorded as a tracked gap in "
+        "check-feature-test-execution.allowlist.json."
+    ),
+    ("sparq-zk", "commitment-value-only"): (
+        "KNOWN GAP: sensitive only via `cfg(not(feature = "
+        "\"commitment-value-only\"))` in src/commit.rs; no leg and no other "
+        "executor found."
+    ),
+    ("sparq-zk-compose", "commitment-value-only"): (
+        "KNOWN GAP: `cfg(feature = \"commitment-value-only\")` cases in "
+        "tests/bb_gates_matrix.rs; no leg and no other executor found."
+    ),
+    ("sparq-zk-compose", "extended-fragment"): (
+        "KNOWN GAP: `cfg(all(test, feature = \"extended-fragment\"))` unit "
+        "tests in src/build.rs; no leg and no other executor found."
+    ),
+}
 
 # Rust source file extensions we scan.
 _RUST_EXTENSIONS = frozenset({".rs"})
@@ -801,6 +987,164 @@ def cmd_classify(legs: List[dict]) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Declared-feature enumeration (invariant (3))
+# ---------------------------------------------------------------------------
+
+def _features_table(cargo_toml: Path) -> Dict[str, List[str]]:
+    """Return the ``[features]`` table of a Cargo.toml.
+
+    Raises (OSError / tomllib.TOMLDecodeError / RuntimeError) on any failure —
+    invariant (3) is fail-closed, so callers turn an exception into a VIOLATION
+    rather than into "this crate declares no features".
+    """
+    if tomllib is None:  # pragma: no cover — Python < 3.11
+        raise RuntimeError(
+            "tomllib is unavailable; invariant (3) needs Python 3.11+"
+        )
+    with open(cargo_toml, "rb") as fh:
+        data = tomllib.load(fh)
+    table = data.get("features", {})
+    if not isinstance(table, dict):
+        raise RuntimeError(
+            "[features] is not a table in {}".format(cargo_toml)
+        )
+    return table
+
+
+def _feature_closure(
+    enabled: Set[str], table: Dict[str, List[str]]
+) -> Set[str]:
+    """Transitively expand `enabled` through the crate's OWN features table.
+
+    Mirrors cargo's feature unification for the crate under test. Entries of the
+    form ``dep:foo``, ``other-crate/feat`` and ``dep?/feat`` enable something
+    OUTSIDE this crate's feature namespace, so they are not followed: they can
+    never turn on another feature OF THIS crate, which is what invariant (3)
+    asks about. (This is why sparq-lws-core's ``trust-graph = ["dep:sparq-solid",
+    "dep:sparq-trust"]`` does not activate sparq-solid's ``trust-graph``.)
+    """
+    out: Set[str] = set()
+    stack = list(enabled)
+    while stack:
+        feat = stack.pop()
+        if feat in out:
+            continue
+        out.add(feat)
+        implied = table.get(feat) or []
+        if not isinstance(implied, list):
+            continue
+        for item in implied:
+            if not isinstance(item, str):
+                continue
+            if item.startswith("dep:") or "/" in item:
+                continue
+            stack.append(item)
+    return out
+
+
+def _legs_activated_features(
+    crate: str, legs: List[dict], table: Dict[str, List[str]]
+) -> Set[str]:
+    """Features actually turned ON for `crate` by its fragment legs.
+
+    Mirrors the leg runner exactly: scripts/run-feature-matrix-group.py invokes
+    ``cargo {build,test,clippy} -p <crate> --features <list>`` with NO
+    ``--no-default-features``, so a leg activates the crate's DEFAULT features
+    plus its own list plus everything those transitively imply.
+    """
+    enabled: Set[str] = set()
+    if "default" in table:
+        enabled.add("default")
+    for leg in legs:
+        if str(leg.get("crate", "")) != crate:
+            continue
+        enabled.update(_features_from_leg(leg))
+    return _feature_closure(enabled, table)
+
+
+def check_declared_sensitive_features(
+    legs: List[dict],
+    *,
+    exemptions: Optional[Dict[Tuple[str, str], str]] = None,
+) -> List[str]:
+    """Invariant (3): every SENSITIVE declared feature must be leg-activated.
+
+    For each crate named by at least one leg, enumerate the cargo features
+    DECLARED in its Cargo.toml, drop the ones any of that crate's legs activate,
+    and classify what is left. A sensitive leftover is a violation unless the
+    (crate, feature) pair carries a written ``UNLEGGED_SENSITIVE_EXEMPT`` reason.
+
+    This is the invariant that sees features with ZERO legs. Invariants (1)+(2)
+    iterate the legs, so they only ever hand the detector (crate, feature) pairs
+    that ALREADY appear in one: before this check, deleting a crate's only leg
+    for a feature-gated suite made the suite invisible to the guard instead of
+    sensitive-and-uncovered (issue #5138).
+
+    Fail-closed: an unreadable / unparseable Cargo.toml for a legged crate is a
+    VIOLATION, never a silently-empty feature list.
+
+    SCOPE, stated so the gate is not read as promising more than it checks:
+      * Only crates named by a leg are enumerated. A crate with no fragment at
+        all is out of scope here and stays covered by the advisory
+        ``--report-unlegged`` and by structural guard C1
+        (scripts/check-feature-test-execution.py).
+      * "Activated" credits TRANSITIVE activation, so a feature reachable only
+        through another leg's feature satisfies (3). Invariant (2), which keys
+        on a leg's LITERAL feature list, does not see such a feature — (3) asks
+        "is this feature ever compiled ON in CI", not "does it have its own leg".
+    """
+    if exemptions is None:
+        exemptions = UNLEGGED_SENSITIVE_EXEMPT
+
+    violations: List[str] = []
+    crates = sorted(
+        {str(leg.get("crate", "")) for leg in legs if leg.get("crate")}
+    )
+
+    for crate in crates:
+        crate_dir = _crate_dir(crate)
+        cargo_toml = crate_dir / "Cargo.toml"
+        try:
+            table = _features_table(cargo_toml)
+        except Exception as exc:  # noqa: BLE001 — fail-closed by design
+            violations.append(
+                "VIOLATION(3) crate {!r}: cannot read declared cargo features "
+                "from {} ({}). Invariant (3) is fail-closed — a Cargo.toml the "
+                "guard cannot read is a violation, never an empty feature "
+                "list.".format(crate, cargo_toml, exc)
+            )
+            continue
+
+        activated = _legs_activated_features(crate, legs, table)
+        for feature in sorted(table):
+            if feature == "default" or feature in activated:
+                continue
+            clf = classify_leg(crate_dir, [feature])
+            if not clf.sensitive:
+                continue
+            if str(exemptions.get((crate, feature), "")).strip():
+                continue
+            violations.append(
+                "VIOLATION(3) feature {!r} of crate {!r} is declared in "
+                "{}/Cargo.toml and is sensitive (reasons: {}), but NO leg of "
+                "that crate activates it — so no feature-matrix leg ever "
+                "compiles it and the sq-vya1 guard never sees it. Add a leg "
+                "for this (crate, feature) in .github/feature-matrix.d/{}.yml, "
+                "or record a written UNLEGGED_SENSITIVE_EXEMPT reason in "
+                "scripts/feature-matrix-tiers.py naming the executor that does "
+                "run it.".format(
+                    feature,
+                    crate,
+                    crate,
+                    "; ".join(clf.reasons) or clf.error_msg or "unknown",
+                    crate,
+                )
+            )
+
+    return violations
+
+
+# ---------------------------------------------------------------------------
 # Enforce mode
 # ---------------------------------------------------------------------------
 
@@ -817,8 +1161,16 @@ def cmd_enforce(legs: List[dict]) -> int:
         test:true leg FOR THAT CRATE. A sensitive (crate, feature) with no
         test:true leg => VIOLATION (sq-vya1 guard), unless a leg for that
         (crate, feature) carries a written `test-reason:` override.
+    (3) Every cargo feature DECLARED in a legged crate's Cargo.toml that the
+        detector calls sensitive must be ACTIVATED by some leg of that crate
+        => otherwise VIOLATION, unless the (crate, feature) pair carries a
+        written UNLEGGED_SENSITIVE_EXEMPT reason. (1) and (2) iterate the LEGS,
+        so a feature with zero legs never reaches the detector at all; (3)
+        iterates the DECLARED features instead, which is the only way the guard
+        can fire on a suite whose leg was deleted or never written (#5138).
+        See check_declared_sensitive_features for its scope.
 
-    Both invariants key on the (crate, feature) PAIR, never the bare feature
+    All three invariants key on the (crate, feature) PAIR, never the bare feature
     name: cargo feature names are crate-LOCAL, so a `test: true` leg for
     feature F in crate A says nothing about a sensitive F in crate B. Keying
     on the bare name let exactly that cross-crate collision silently satisfy
@@ -886,6 +1238,10 @@ def cmd_enforce(legs: List[dict]) -> int:
             "the leg if the coverage genuinely lives outside `cargo "
             "test`.".format(f, crate)
         )
+
+    # Invariant (3): a DECLARED feature no leg activates is still classified —
+    # the zero-leg blind spot (1)+(2) structurally cannot see (issue #5138).
+    violations.extend(check_declared_sensitive_features(legs))
 
     if violations:
         for v in violations:
@@ -987,8 +1343,10 @@ def main() -> None:
         action="store_true",
         help=(
             "Exit non-zero if any tier:check leg is sensitive (no tier-reason "
-            "override), or if any sensitive (crate, feature) has no test:true "
-            "leg in that crate and no test-reason override (sq-vya1 guard)."
+            "override), if any sensitive (crate, feature) has no test:true "
+            "leg in that crate and no test-reason override (sq-vya1 guard), or "
+            "if a legged crate DECLARES a sensitive feature no leg activates "
+            "and no UNLEGGED_SENSITIVE_EXEMPT reason covers."
         ),
     )
     group.add_argument(
