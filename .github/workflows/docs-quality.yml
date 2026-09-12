@@ -604,10 +604,23 @@ jobs:
       # expectations on main SILENTLY — the KeyError surfaced a day later, out-of-band.
       # Running both hermetic self-tests HERE (stdlib-only, no gh/network: pure label-delta
       # fixtures) reds the offending PR instead of the next cron run.
-      - name: Self-test triage.py + retriage.py (static-triage + retriage-plan fixtures)
+      # [OPUS-5] #5802 + #5425 add scripts/promote.py to that set for a sharper version of the
+      # same reason: promote-on-approval.yml called it a "tested pure core", but `promote.py
+      # --self-test` was wired into NO workflow at all — the suite existed and never ran. It
+      # decides whether third-party content leaves QUARANTINE, so a regression there is a
+      # SECURITY regression, not a labelling one; and one in the promotion predicate, in the
+      # paginated reaction read, or in the quarantine fetch would first be observed as
+      # quarantined issues that silently never promote — a fail-QUIET defect the cron cannot
+      # report on its own. Its own cron now self-tests too, but only the default-branch copy
+      # every 10 minutes, i.e. AFTER the change merged; this PR-time gate reds the offending PR
+      # instead. Hermetic like its neighbours (stdlib only, no gh/network: the reaction fixtures
+      # are pure, and both the reaction read and the quarantine fetch run against injected gh
+      # stubs).
+      - name: Self-test triage.py + retriage.py + promote.py (static-triage + retriage-plan + promotion fixtures)
         run: |
           python3 scripts/triage.py --self-test
           python3 scripts/retriage.py --self-test
+          python3 scripts/promote.py --self-test
       # [OPUS-5] #1135: scripts/triage-area.py is the third member of that triage
       # family — it CLEARS the `needs:area` park triage.py sets. As of #3816 it also
       # runs unattended every half hour (.github/workflows/triage-area.yml), which
@@ -626,14 +639,8 @@ jobs:
         run: |
           python3 scripts/triage-area.py --self-test
           python3 scripts/tests/test_triage_area.py
-      # [OPUS-5] #5425: scripts/promote.py is the fourth member of that family — it decides
-      # whether third-party content leaves QUARANTINE, so a regression here is a security
-      # regression, not a labelling one. Its own cron (promote-on-approval.yml) self-tests only
-      # the default-branch copy every 10 minutes, i.e. after the change has merged; this PR-time
-      # gate reds the offending PR instead. Hermetic (stdlib only, no gh/network: the reaction
-      # fixtures are pure, and the quarantine fetch runs against an injected gh stub).
-      - name: Self-test promote.py (trust-promotion predicate + quarantine fetch)
-        run: python3 scripts/promote.py --self-test
+      # (scripts/promote.py is self-tested with its triage.py/retriage.py family above — #5802
+      # and #5425 each wired it in independently, so it is run once, in that step.)
       # [FABLE-5] #3759 / registry#563 item 4: the transient-tolerant gh READ retry
       # helper (scripts/gh_retry.py — bounded, transient-5xx-only, fail-closed
       # read-allow-list so mutations/arm calls can never be wrapped) and the two arm
