@@ -169,6 +169,23 @@ pub const CONFIDENCE_MEASUREMENT: &str = "https://sparq.dev/ns/pkg#ConfidenceMea
 pub const SOURCE_RELIABILITY_MEASUREMENT: &str =
     "https://sparq.dev/ns/pkg#SourceReliabilityMeasurement";
 
+// --- DQV per-BATCH quality individuals (sq-2489d.5, design §4.5) -----------
+// The run-level quality axis of the literature pipeline: the dimension + the two
+// metrics the pipeline ACTUALLY computes from its `Sidecar`. Same reuse discipline
+// (instances of `dqv:Dimension`/`dqv:Metric`, no net-new predicate); these are what
+// `literature::pipeline::Sidecar::quality_measurements_turtle` emits and what the
+// `batch-quality` canned query selects.
+
+/// `pkg:BatchQualityDimension` — the `dqv:Dimension` of run-level ingestion-batch
+/// quality ("how good was THIS batch"), orthogonal to the per-subject epistemic axes.
+pub const BATCH_QUALITY_DIMENSION: &str = "https://sparq.dev/ns/pkg#BatchQualityDimension";
+/// `pkg:GroundingRateMetric` — the `dqv:Metric` for a batch's citation-grounding rate
+/// (grounded candidates / total candidates), in [`BATCH_QUALITY_DIMENSION`].
+pub const GROUNDING_RATE_METRIC: &str = "https://sparq.dev/ns/pkg#GroundingRateMetric";
+/// `pkg:SourceYieldRateMetric` — the `dqv:Metric` for the fraction of a batch's sources
+/// that yielded ≥1 grounded Finding, in [`BATCH_QUALITY_DIMENSION`].
+pub const SOURCE_YIELD_RATE_METRIC: &str = "https://sparq.dev/ns/pkg#SourceYieldRateMetric";
+
 // --- tier named-graph IRIs (sq-tzars.7) ------------------------------------
 // The named-graph IRIs for the tiered KB emission (`research/research-kb-program.md`
 // decisions 5–6). Tier separation v1 = per-tier Turtle ARTIFACTS, NOT in-store named
@@ -256,6 +273,9 @@ pub const ALL: &[&str] = &[
     EPISTEMIC_BASIS_DIMENSION,
     CONFIDENCE_MEASUREMENT,
     SOURCE_RELIABILITY_MEASUREMENT,
+    BATCH_QUALITY_DIMENSION,
+    GROUNDING_RATE_METRIC,
+    SOURCE_YIELD_RATE_METRIC,
 ];
 
 #[cfg(test)]

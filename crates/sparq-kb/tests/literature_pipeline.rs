@@ -85,6 +85,45 @@ fn emitted_ttl_conforms_to_pkg_and_literature_shapes() {
     );
 }
 
+/// The **batch-quality artifact** (sq-2489d.5, design §4.5) must be loadable alongside
+/// the findings without weakening the write-gate: it parses, it conforms to the SHACL
+/// shapes, and the values it reports are the sidecar's own computed rates — so "how good
+/// was this batch?" is answerable from the graph rather than from a log line.
+#[test]
+fn batch_quality_artifact_parses_and_conforms_to_the_shacl_gate() {
+    let extractor = RecordedExtractor::from_fixture().unwrap();
+    let out = pipeline::run(FIXTURE_OPENALEX_BATCH, &extractor).unwrap();
+    let batch = pipeline::batch_iri("openalex-fixture");
+    let quality = out
+        .sidecar
+        .quality_measurements_turtle(&batch, &out.generated_at_time)
+        .expect("quality artifact emits");
+
+    // It is a real, parseable Turtle document (not a formatted string that happens to
+    // look like one).
+    let triples = parse_turtle(&quality, "https://sparq.dev/ns/pkg/example#")
+        .expect("the batch-quality artifact parses as Turtle");
+    assert!(!triples.is_empty());
+
+    // It passes the same write-gate the findings do — adding run telemetry to the KB
+    // must not introduce a violation.
+    let (conforms, report) = gate(&quality);
+    assert!(
+        conforms,
+        "the batch-quality artifact must conform to pkg.shapes.ttl + \
+         literature.shapes.ttl, but got:\n{report}"
+    );
+
+    // The reported rates are the sidecar's, computed from THIS batch (4 of 6 candidates
+    // grounded on the committed fixture) — not a hard-coded number.
+    assert!((0.0..1.0).contains(&out.sidecar.grounding_rate()));
+    assert!(quality.contains(&format!("dqv:value {:.4}", out.sidecar.grounding_rate())));
+    assert!(quality.contains(&format!("dqv:value {:.4}", out.sidecar.source_yield_rate())));
+    // Both batch metrics are named by their byte-pinned vocabulary IRIs.
+    assert!(quality.contains(sparq_kb::vocab::GROUNDING_RATE_METRIC));
+    assert!(quality.contains(sparq_kb::vocab::SOURCE_YIELD_RATE_METRIC));
+}
+
 #[test]
 fn literature_shapes_catch_a_proven_overclaim_on_the_machine_tier() {
     // The gate must be REAL, not vacuous: inject a machine-attributed Finding that stamps

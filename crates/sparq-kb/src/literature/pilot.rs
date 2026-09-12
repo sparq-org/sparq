@@ -766,6 +766,19 @@ impl PilotRun {
                 &tiered.restricted_public_projection,
             )?;
             w("combined-batch.json", inputs.batch_json)?;
+            // The RUN-level DQV quality measurements (sq-2489d.5, design §4.5): the
+            // batch's grounding + source-yield rates as `dqv:QualityMeasurement` triples,
+            // so "how good was this batch?" is answerable by the `batch-quality` canned
+            // query over the artifact rather than only by reading the metrics record.
+            // Its own artifact, mirroring the tier separation: run telemetry is not graph
+            // content.
+            w(
+                "batch-quality.ttl",
+                &tiered.sidecar.quality_measurements_turtle(
+                    &super::pipeline::batch_iri(&self.cfg.run_id),
+                    &tiered.generated_at_time,
+                )?,
+            )?;
             w(
                 "run-provenance.ttl",
                 &emit_run_provenance(
@@ -1891,10 +1904,18 @@ mod tests {
             "restricted-public-projection.ttl",
             "combined-batch.json",
             "run-provenance.ttl",
+            "batch-quality.ttl",
             "audit-sample.json",
         ] {
             assert!(staging.join(f).exists(), "staging artifact {} missing", f);
         }
+        // The batch-quality artifact carries BOTH run-level DQV metrics, computed on the
+        // run IRI — the queryable half of the §4.5 "how good was this batch?" surface.
+        let quality = std::fs::read_to_string(staging.join("batch-quality.ttl")).unwrap();
+        assert_eq!(quality.matches("a dqv:QualityMeasurement").count(), 2);
+        assert!(quality.contains(crate::vocab::GROUNDING_RATE_METRIC));
+        assert!(quality.contains(crate::vocab::SOURCE_YIELD_RATE_METRIC));
+        assert!(quality.contains(&super::pipeline::batch_iri(&run.cfg.run_id)));
         // The run provenance is PROV-O stamped.
         let prov = std::fs::read_to_string(staging.join("run-provenance.ttl")).unwrap();
         assert!(prov.contains("a prov:Activity"));
