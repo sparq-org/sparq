@@ -481,6 +481,122 @@ impl std::fmt::Display for CommitError {
 
 impl std::error::Error for CommitError {}
 
+/// Why [`execute_txn_with_retry`] gave up without committing.
+#[derive(Debug)]
+pub enum RetryError {
+    /// The closure's SPARQL update failed (parse error or a failing operation). This is
+    /// never retried — retry only applies to a commit-time [`CommitError::Conflict`], not
+    /// to a broken update, which would fail identically on every attempt.
+    Update(String),
+    /// Every attempt hit [`CommitError::Conflict`]; `last` is the most recent one.
+    Exhausted { attempts: u32, last: CommitError },
+}
+
+impl std::fmt::Display for RetryError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RetryError::Update(e) => write!(f, "transaction update failed: {e}"),
+            RetryError::Exhausted { attempts, last } => {
+                write!(f, "transaction commit did not converge after {attempts} attempt(s): {last}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for RetryError {}
+
+/// Runs `f` against a fresh [`WriteTxn`], retrying on [`CommitError::Conflict`] up to
+/// `max_attempts` total tries with a caller-supplied delay between attempts.
+///
+/// `f` applies statements via [`WriteTxn::update`] and must NOT call `commit`/`rollback`
+/// itself — this function owns the transaction lifecycle: on `Ok(())` from `f` it commits;
+/// on a conflict it discards the attempt's working copy and retries against the new
+/// committed state; on `Err` from `f` it rolls back and returns immediately without
+/// retrying (a broken update fails the same way every time).
+///
+/// `backoff(attempt)` is called before every retry (`attempt` is the 1-indexed number of
+/// the attempt about to run, so it is never called before the first) and its return value
+/// is passed to `std::thread::sleep`. Pass [`decorrelated_jitter_backoff`] for production
+/// use, or `|_| std::time::Duration::ZERO` in tests.
+///
+/// Per the job-queue coordination guidance this helper exists for (claim-style updates
+/// against a single-sequenced-writer store): prefer claiming **one row per transaction**
+/// over a batch — conflict detection is per-triple, so disjoint single-row claims from
+/// different callers never conflict with each other, and randomizing candidate order
+/// across callers further reduces repeat collisions on the same hot row.
+///
+/// # Panics
+/// Panics if `max_attempts` is 0 (there must be at least one attempt).
+pub fn execute_txn_with_retry<F>(
+    manager: &TransactionManager,
+    max_attempts: u32,
+    mut backoff: impl FnMut(u32) -> std::time::Duration,
+    mut f: F,
+) -> Result<u64, RetryError>
+where
+    F: FnMut(&mut WriteTxn<'_>) -> Result<(), String>,
+{
+    assert!(max_attempts >= 1, "execute_txn_with_retry: max_attempts must be at least 1");
+    let mut last_conflict = None;
+    for attempt in 1..=max_attempts {
+        if attempt > 1 {
+            std::thread::sleep(backoff(attempt));
+        }
+        let mut txn = manager.begin_write();
+        if let Err(e) = f(&mut txn) {
+            txn.rollback();
+            return Err(RetryError::Update(e));
+        }
+        match txn.commit() {
+            Ok(version) => return Ok(version),
+            Err(conflict @ CommitError::Conflict { .. }) => {
+                last_conflict = Some(conflict);
+            }
+        }
+    }
+    Err(RetryError::Exhausted {
+        attempts: max_attempts,
+        last: last_conflict.expect("loop runs at least once when max_attempts >= 1"),
+    })
+}
+
+/// A dependency-free decorrelated-jitter backoff generator (AWS Architecture Blog's
+/// "Exponential Backoff and Jitter"), for use with [`execute_txn_with_retry`].
+///
+/// Each call returns `min(cap, random_between(base, previous * 3))`, starting from `base`.
+/// Randomness comes from a splitmix64 step seeded from the wall clock and a per-call atomic
+/// counter — not cryptographic, but sufficient to decorrelate concurrent callers' retry
+/// timing, and it keeps the opt-in `txn` feature dependency-free (no `rand` crate).
+pub fn decorrelated_jitter_backoff(
+    base: std::time::Duration,
+    cap: std::time::Duration,
+) -> impl FnMut(u32) -> std::time::Duration {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    fn next_u64() -> u64 {
+        let seed = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(0)
+            ^ COUNTER.fetch_add(1, Ordering::Relaxed).wrapping_mul(0x9E3779B97F4A7C15);
+        // splitmix64 finalizer
+        let mut z = seed.wrapping_add(0x9E3779B97F4A7C15);
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D049BB133111EB);
+        z ^ (z >> 31)
+    }
+
+    let mut previous = base;
+    move |_attempt| {
+        let upper = previous.saturating_mul(3).max(base);
+        let span = upper.saturating_sub(base).as_nanos().max(1) as u64;
+        let jittered = base + std::time::Duration::from_nanos(next_u64() % span);
+        previous = jittered.min(cap);
+        previous
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -521,5 +637,84 @@ mod tests {
         assert_eq!(v, 1);
         let r = m.begin_read();
         assert_eq!(crate::count(&r, "SELECT * WHERE { ?s ?p ?o }").unwrap(), 2);
+    }
+
+    /// Forces a guaranteed write-write conflict against `txn`: `CLEAR DEFAULT` always
+    /// records a slot-level `Default` write key (unlike a duplicate `INSERT DATA`, which
+    /// may resolve to an empty, non-conflicting write set), and a default-graph triple
+    /// insert always conflicts with it (`WriteKey::conflicts`).
+    fn commit_a_conflicting_clear(m: &TransactionManager) {
+        let mut interloper = m.begin_write();
+        interloper.update("CLEAR DEFAULT").unwrap();
+        interloper.commit().unwrap();
+    }
+
+    #[test]
+    fn execute_txn_with_retry_retries_once_then_succeeds() {
+        let m = TransactionManager::new(g("@prefix : <http://ex/> . :a :p :b ."));
+        let mut attempts = 0;
+        let result = execute_txn_with_retry(&m, 3, |_| std::time::Duration::ZERO, |txn| {
+            attempts += 1;
+            if attempts == 1 {
+                // A concurrent writer commits an overlapping change between this
+                // transaction's begin and its own commit, forcing exactly one conflict.
+                commit_a_conflicting_clear(&m);
+            }
+            txn.update("PREFIX : <http://ex/> INSERT DATA { :x :p :y }")
+        });
+        assert_eq!(attempts, 2, "should retry exactly once after the forced conflict");
+        assert!(result.is_ok(), "should converge on the second attempt: {result:?}");
+    }
+
+    #[test]
+    fn execute_txn_with_retry_exhausts_after_max_attempts() {
+        let m = TransactionManager::new(g("@prefix : <http://ex/> . :a :p :b ."));
+        let mut attempts = 0;
+        let result = execute_txn_with_retry(&m, 3, |_| std::time::Duration::ZERO, |txn| {
+            attempts += 1;
+            // Every attempt loses the race, so this can never converge.
+            commit_a_conflicting_clear(&m);
+            txn.update("PREFIX : <http://ex/> INSERT DATA { :x :p :y }")
+        });
+        assert_eq!(attempts, 3);
+        match result {
+            Err(RetryError::Exhausted { attempts: 3, .. }) => {}
+            other => panic!("expected Exhausted after 3 attempts, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn execute_txn_with_retry_does_not_retry_an_update_error() {
+        let m = TransactionManager::new(g("@prefix : <http://ex/> . :a :p :b ."));
+        let mut attempts = 0;
+        let result = execute_txn_with_retry(&m, 5, |_| std::time::Duration::ZERO, |_txn| {
+            attempts += 1;
+            Err("boom".to_string())
+        });
+        assert_eq!(attempts, 1, "an update error must not be retried");
+        match result {
+            Err(RetryError::Update(msg)) => assert_eq!(msg, "boom"),
+            other => panic!("expected Update(\"boom\"), got {other:?}"),
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "max_attempts must be at least 1")]
+    fn execute_txn_with_retry_panics_on_zero_attempts() {
+        let m = TransactionManager::new(g("@prefix : <http://ex/> . :a :p :b ."));
+        let _ = execute_txn_with_retry(&m, 0, |_| std::time::Duration::ZERO, |_| Ok(()));
+    }
+
+    #[test]
+    fn decorrelated_jitter_backoff_stays_within_base_and_cap() {
+        use std::time::Duration;
+        let base = Duration::from_millis(10);
+        let cap = Duration::from_millis(200);
+        let mut backoff = decorrelated_jitter_backoff(base, cap);
+        for attempt in 1..=20u32 {
+            let d = backoff(attempt);
+            assert!(d >= base, "{d:?} below base {base:?}");
+            assert!(d <= cap, "{d:?} above cap {cap:?}");
+        }
     }
 }

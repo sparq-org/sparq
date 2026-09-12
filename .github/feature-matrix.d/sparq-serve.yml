@@ -58,3 +58,25 @@
   crate: "sparq-serve"
   features: "change-sink"
   test: true
+
+# [SONNET-5] (sq-artifact-keeper-topk) `PreparedGraphApplier` — an `ApplyUpdates` strategy
+# over `sparq_engine::PreparedUpdate` (parsed once, bound per submission) instead of raw
+# SPARQL Update text, avoiding `GraphApplier`'s per-commit re-parse for a repeatedly
+# resubmitted template. The whole type and its `tests/prepared_applier.rs` integration
+# suite are behind the default-OFF `params` feature (forwarding to sparq-engine's
+# already-dependency-free `params`), so the default-feature workspace test run compiles
+# `prepared_applier.rs` EMPTY and runs ZERO of its tests — the same silent-skip gap the
+# change-stream/change-sink legs above close, for this surface. No new external
+# dependency. The leg runs `clippy --all-targets -D warnings` with the feature ON plus
+# `cargo test`, which drives the real correctness invariants through the ACTUAL sequenced
+# writer (not a mock): a bound `PreparedUpdate` applies through the same structural-fork +
+# delta-overlay + threshold-compaction path `GraphApplier` uses, and repeated submissions
+# of the same parsed-once template drain a queue across many generations with no
+# duplicate/lost claims.
+# Verified locally: `cargo test -p sparq-serve --features params --test prepared_applier`
+# runs both tests; `clippy --all-targets -D warnings` is clean in the default, params, and
+# all-features states.
+- name: "sparq-serve (params — prepared-update applier)"
+  crate: "sparq-serve"
+  features: "params"
+  test: true
