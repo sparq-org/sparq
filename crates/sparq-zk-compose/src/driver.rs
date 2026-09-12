@@ -16,6 +16,13 @@ use crate::manifest::CircuitId;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+// [GPT-6] Owned, opt-in measurements never enter a presentation or global state.
+mod metrics;
+pub use metrics::{
+    AcirCacheObservation, DriverStage, DriverStageEvent, DriverStageMetrics, DriverStageOutcome,
+};
+use metrics::{Collector, StageTimer};
+
 /// Driver / proving error.
 #[derive(Debug)]
 pub enum DriverError {
@@ -179,6 +186,7 @@ pub struct CircuitProver {
     compose_dir: PathBuf,
     /// bb verifier target (Noir circuits use `noir-recursive`).
     target: String,
+    metrics: Option<Collector>,
 }
 
 impl CircuitProver {
@@ -187,7 +195,49 @@ impl CircuitProver {
         CircuitProver {
             compose_dir: compose_dir.into(),
             target: "noir-recursive".to_string(),
+            metrics: None,
         }
+    }
+
+    /// Enable bounded local driver timings without modifying proof statements.
+    ///
+    /// Disabled by default: no clock or collector is used until opted in.
+    /// A second call replaces the collector and discards its previous events.
+    /// See [`DriverStageMetrics`] for disclosure and concurrent attribution limits.
+    pub fn with_stage_metrics(mut self) -> Self {
+        self.metrics = Some(Collector::default());
+        self
+    }
+
+    /// Drain local measurements, or return None when collection is disabled.
+    ///
+    /// Draining resets retained events and the overflow counter. It does not
+    /// establish an operation boundary when other threads are using this driver.
+    pub fn take_stage_metrics(&self) -> Option<DriverStageMetrics> {
+        self.metrics.as_ref().map(Collector::take)
+    }
+
+    fn timer(&self, stage: DriverStage) -> StageTimer<'_> {
+        StageTimer::start(self.metrics.as_ref(), stage)
+    }
+
+    fn cache_lock(&self) -> Result<NargoCacheLock, DriverError> {
+        let timer = self.timer(DriverStage::NargoCacheLock);
+        let lock = NargoCacheLock::acquire(&self.target_dir())?;
+        timer.finish(DriverStageOutcome::Success, None);
+        Ok(lock)
+    }
+
+    fn run_stage(
+        &self,
+        stage: DriverStage,
+        tool: &str,
+        cmd: &mut Command,
+    ) -> Result<(), DriverError> {
+        let timer = self.timer(stage);
+        run(tool, cmd)?;
+        timer.finish(DriverStageOutcome::Success, None);
+        Ok(())
     }
 
     /// Locate `zk/compose/` relative to this crate (workspace layout).
@@ -227,8 +277,9 @@ impl CircuitProver {
         pkg: &str,
         consume: impl FnOnce(&[u8], &NargoCacheLock) -> Result<T, DriverError>,
     ) -> Result<T, DriverError> {
-        let lock = NargoCacheLock::acquire(&self.target_dir())?;
-        run(
+        let lock = self.cache_lock()?;
+        self.run_stage(
+            DriverStage::NargoCompile,
             "nargo",
             Command::new("nargo")
                 .arg("compile")
@@ -243,12 +294,19 @@ impl CircuitProver {
     // Called while the workspace lock is held. Verify existing cache content;
     // publish a new immutable name atomically so a crash cannot cache half JSON.
     fn snapshot_acir(&self, pkg: &str, bytes: &[u8]) -> Result<PathBuf, DriverError> {
+        let timer = self.timer(DriverStage::AcirSnapshot);
         let root = self.target_dir().join("sparq_acir_cache");
         std::fs::create_dir_all(&root)?;
         let digest = blake3::hash(bytes).to_hex();
         let path = root.join(format!("{pkg}_{digest}.json"));
         match std::fs::read(&path) {
-            Ok(existing) if existing == bytes => return Ok(path),
+            Ok(existing) if existing == bytes => {
+                timer.finish(
+                    DriverStageOutcome::Success,
+                    Some(AcirCacheObservation::ReusedVerifiedSnapshot),
+                );
+                return Ok(path);
+            }
             Ok(_) => {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
@@ -263,13 +321,19 @@ impl CircuitProver {
         let file = temporary.0.join("acir.json");
         std::fs::write(&file, bytes)?;
         std::fs::rename(file, &path)?;
+        timer.finish(
+            DriverStageOutcome::Success,
+            Some(AcirCacheObservation::PublishedSnapshot),
+        );
         Ok(path)
     }
 
     fn compile_into(&self, pkg: &str, job_dir: &Path) -> Result<PathBuf, DriverError> {
         self.with_compiled_bytes(pkg, |bytes, _lock| {
+            let timer = self.timer(DriverStage::AcirPrivateCopy);
             let path = job_dir.join("acir.json");
             std::fs::write(&path, bytes)?;
+            timer.finish(DriverStageOutcome::Success, None);
             Ok(path)
         })
     }
@@ -339,7 +403,7 @@ impl CircuitProver {
     ) -> Result<PathBuf, DriverError> {
         // Execute can implicitly rewrite shared compilation caches too. Hold the
         // same OS lock through input publication, compilation and witness writing.
-        let _cache_lock = NargoCacheLock::acquire(&self.target_dir())?;
+        let _cache_lock = self.cache_lock()?;
         let toml_path = self
             .compose_dir
             .join(pkg)
@@ -366,6 +430,7 @@ impl CircuitProver {
         // stderr). So we delete any stale witness first and treat its absence
         // afterwards as the unsatisfiability signal.
         let _ = std::fs::remove_file(&witness_path);
+        let timer = self.timer(DriverStage::NargoExecute);
         let out = Command::new("nargo")
             .arg("execute")
             .arg(witness_name)
@@ -389,6 +454,7 @@ impl CircuitProver {
                 ),
             });
         }
+        timer.finish(DriverStageOutcome::Success, None);
         Ok(witness_path)
     }
 
@@ -500,7 +566,8 @@ impl CircuitProver {
 
         // `--write_vk` emits proof, public_inputs, AND vk in one pass (bb
         // prove otherwise requires a pre-existing vk).
-        run(
+        self.run_stage(
+            DriverStage::BbProveAndWriteVk,
             "bb",
             Command::new("bb")
                 .arg("prove")
@@ -545,7 +612,8 @@ impl CircuitProver {
         let scratch = ScratchDir::new(work_dir, "vk")?;
         let acir = self.compile_into(pkg, &scratch.0)?;
         let work_dir = &scratch.0;
-        run(
+        self.run_stage(
+            DriverStage::BbWriteVk,
             "bb",
             Command::new("bb")
                 .arg("write_vk")
@@ -581,6 +649,7 @@ impl CircuitProver {
         std::fs::write(&pi_p, public_inputs)?;
         std::fs::write(&vk_p, vk)?;
 
+        let timer = self.timer(DriverStage::BbVerify);
         let out = Command::new("bb")
             .arg("verify")
             .arg("-p")
@@ -596,7 +665,16 @@ impl CircuitProver {
                 tool: "bb".into(),
                 source,
             })?;
-        Ok(out.status.success())
+        let accepted = out.status.success();
+        timer.finish(
+            if accepted {
+                DriverStageOutcome::Success
+            } else {
+                DriverStageOutcome::Rejected
+            },
+            None,
+        );
+        Ok(accepted)
     }
 
     /// Verify artifacts via `bb verify` using the bundled vk + public inputs.
@@ -681,7 +759,7 @@ mod driver_glue_tests {
     #[test]
     fn content_addressed_compile_cache_never_rewrites_returned_snapshots() {
         let root = ScratchDir::new(&std::env::temp_dir(), "compile_cache_test").unwrap();
-        let prover = CircuitProver::new(&root.0);
+        let prover = CircuitProver::new(&root.0).with_stage_metrics();
         let _lock = NargoCacheLock::acquire(&prover.target_dir()).unwrap();
         let first = prover
             .snapshot_acir("member", b"first compiled circuit")
@@ -701,6 +779,46 @@ mod driver_glue_tests {
         assert!(prover
             .snapshot_acir("member", b"first compiled circuit")
             .is_err());
+        let metrics = prover.take_stage_metrics().unwrap();
+        assert!(metrics.complete);
+        assert_eq!(metrics.events.len(), 4);
+        assert_eq!(
+            metrics
+                .events
+                .iter()
+                .map(|e| e.acir_cache)
+                .collect::<Vec<_>>(),
+            vec![
+                Some(AcirCacheObservation::PublishedSnapshot),
+                Some(AcirCacheObservation::PublishedSnapshot),
+                Some(AcirCacheObservation::ReusedVerifiedSnapshot),
+                None,
+            ]
+        );
+        assert_eq!(metrics.events[3].outcome, DriverStageOutcome::Failed);
+    }
+
+    #[test]
+    fn measurements_are_opt_in_and_spawn_errors_remain_failures() {
+        let root = ScratchDir::new(&std::env::temp_dir(), "metrics_test").unwrap();
+        let plain = CircuitProver::new(&root.0);
+        assert!(plain.take_stage_metrics().is_none());
+        let measured = CircuitProver::new(&root.0).with_stage_metrics();
+        let absent = root.0.join("missing-program");
+        assert!(matches!(
+            measured.run_stage(
+                DriverStage::BbProveAndWriteVk,
+                "deliberately absent",
+                &mut Command::new(absent)
+            ),
+            Err(DriverError::Spawn { .. })
+        ));
+        let metrics = measured.take_stage_metrics().unwrap();
+        assert!(metrics.complete);
+        assert_eq!(metrics.events.len(), 1);
+        assert_eq!(metrics.events[0].stage, DriverStage::BbProveAndWriteVk);
+        assert_eq!(metrics.events[0].outcome, DriverStageOutcome::Failed);
+        assert!(metrics.events[0].acir_cache.is_none());
     }
 
     // Run by the parent regression in independent processes. The sentinel must

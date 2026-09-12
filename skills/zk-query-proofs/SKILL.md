@@ -21,6 +21,13 @@ For the isolated BBS+/BLS12-381 and Circom/LegoGroth16 composition experiment, s
 CI runs real proof tests; it provides no Noir linkage, RDF adapter, or credential-status
 integration and remains unaudited. [GPT-6]
 
+[GPT-6] For the opt-in synthetic selected-support measurement adapter, its strict
+experiment manifest, timing boundaries and unavailable stages, see
+[experiment instructions](../../bench/zk-compose/experiments/README.md). Driver
+measurements are explicitly enabled by `with_stage_metrics()` and drained by
+`take_stage_metrics()`; they remain local diagnostics outside presentations. Local
+measurements are NONcanonical and do not establish external security assurance.
+
 ## Prerequisites
 
 - **Noir toolchain on `PATH`** (the only way to prove/verify): `nargo` **1.0.0-beta.21** and Barretenberg `bb` **5.0.0-nightly.20260324** (bb target `noir-recursive`). Other versions may change the bb public-input byte layout the verifier reconstructs against. If `nargo`/`bb` are absent, the structural pre-filter and all host-side helpers still work, but `verify_manifest` / `CircuitProver` cannot.

@@ -1,0 +1,984 @@
+{
+  "schema_version": 1,
+  "recorded_by": "GPT-6",
+  "canonical": false,
+  "measurement_report": {
+    "acceptance_contract_blake3": "a0fd83454528b93be3e84bd820ffdb7096af611387ebf758aa027f131a55c71c",
+    "backend": {
+      "bb": {
+        "binary_blake3": "cff02c1bac4bee1b63f97f56ec45a48e3fbacf00a2678ad340a3b5ec2bad471a",
+        "version_output": "5.0.0-nightly.20260324"
+      },
+      "name": "barretenberg",
+      "nargo": {
+        "binary_blake3": "e586fb093795edd073987721a0ed7946daf974561a90fc4e93f196ebf1fc8b2b",
+        "version_output": "nargo version = 1.0.0-beta.21\nnoirc version = 1.0.0-beta.21+89a0f0faf3a5f1273c8ac4843b7877882437e277\n(git version hash: 89a0f0faf3a5f1273c8ac4843b7877882437e277, is dirty: false)"
+      },
+      "target": "noir-recursive",
+      "zk_mode_requested": true
+    },
+    "cache_contract": {
+      "nargo_dependency_cache": "uncontrolled",
+      "nargo_internal_cache_hit": {
+        "reason": "Nargo does not expose reliable per-invocation cache-hit telemetry",
+        "value": null
+      },
+      "nonce_convention": "distinct deterministic test nonce per attempted run; excluded only from semantic equivalence digest and retained in each transcript",
+      "os_cache": "uncontrolled",
+      "rust_build": "outside timing",
+      "warmup_definition": "completed full prepare/prove/verify runs per planner; no OS cold-cache assertion"
+    },
+    "canonical": false,
+    "experiment": {
+      "contract": {
+        "authority": "synthetic_babyjubjub_issuer_seed_1",
+        "capacity_policy": "k1_or_k2_smallest_p3_r4_n16_tiny_integer_status_d10",
+        "disclosure_regime": "public_query_result_issuer_capacity_private_roots_and_operands",
+        "exact_dataset_scope": "not_applicable_no_completeness_claim",
+        "meaning": "selected_successful_support_unsigned_v1",
+        "query": "SELECT DISTINCT ?name WHERE { ?s <urn:name> ?name . ?s <urn:age> ?age . FILTER(?age >= 18) }",
+        "released_terms": [
+          {
+            "name": "\"Alice\""
+          }
+        ],
+        "signature_suite": "sparq_schnorr_babyjubjub_poseidon2",
+        "status_regime": "verifier_owned_snapshot_epoch_7_hidden_reference"
+      },
+      "fixture": "synthetic_shared_alternative_v1",
+      "measured_runs_per_planner": 1,
+      "planners": [
+        "first_success",
+        "optimize"
+      ],
+      "schema_version": 1,
+      "warmup_runs_per_planner": 0
+    },
+    "fixture_setup_seconds": 0.002406958,
+    "runs": [
+      {
+        "acceptance_contract_blake3": "a0fd83454528b93be3e84bd820ffdb7096af611387ebf758aa027f131a55c71c",
+        "artifacts": {
+          "cryptographic_proof_bytes": 14656,
+          "presentation_blake3": "3c8cdefa153654d41b150a254a5c0ab2e3850aed1537d8c2581f87eefbc69eeb",
+          "presentation_json_bytes": 43547,
+          "proof_blake3": "ad2248b326419983f975825f1f67d92d803ac83368e7e14b88592d98e5559d40",
+          "public_disclosure_blake3": "c54fde183b3122c1b35a9930c073cb05441d8a97985c5a78f22f183ca5db2c24",
+          "public_disclosure_json_bytes": 454,
+          "public_transcript": {
+            "challenge": "0x00000000000000000000000000000000000000000000000000000000000668a1",
+            "issuer_slots": [
+              "653512c1337e44f61829cba7aeb8fabda2f195186f331d9e668aed97dbaa4984",
+              "653512c1337e44f61829cba7aeb8fabda2f195186f331d9e668aed97dbaa4984"
+            ],
+            "query": "SELECT DISTINCT ?name WHERE { ?s <urn:name> ?name . ?s <urn:age> ?age . FILTER(?age >= 18) }",
+            "rows": [
+              {
+                "name": {
+                  "datatype": "http://www.w3.org/2001/XMLSchema#string",
+                  "kind": "literal",
+                  "value": "Alice"
+                }
+              }
+            ],
+            "version": 1
+          },
+          "verification_key": {
+            "reason": "independently derived by verifier API; not exported",
+            "value": null
+          }
+        },
+        "completed_warmups": 0,
+        "ordinal": 1,
+        "planner": "first_success",
+        "prior_runs_in_process": 0,
+        "replay_control": {
+          "reason": "challenge already consumed",
+          "status": "rejected_as_expected"
+        },
+        "role": "measurement",
+        "stages": {
+          "prepare_api": {
+            "error": null,
+            "seconds": 0.004887125,
+            "status": "success"
+          },
+          "prove_api_inclusive": {
+            "driver": {
+              "complete": true,
+              "dropped_events": 0,
+              "events": [
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 0.00113625,
+                  "outcome": "success",
+                  "stage": "nargo_cache_lock"
+                },
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 0.388965792,
+                  "outcome": "success",
+                  "stage": "nargo_compile"
+                },
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 0.001465542,
+                  "outcome": "success",
+                  "stage": "acir_private_copy"
+                },
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 0.001098667,
+                  "outcome": "success",
+                  "stage": "nargo_cache_lock"
+                },
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 0.549033,
+                  "outcome": "success",
+                  "stage": "nargo_execute"
+                },
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 1.522328583,
+                  "outcome": "success",
+                  "stage": "bb_prove_and_write_vk"
+                }
+              ]
+            },
+            "error": null,
+            "seconds": 2.517562375,
+            "status": "success"
+          },
+          "replay_control_excluded_from_timings": {
+            "driver": {
+              "complete": true,
+              "dropped_events": 0,
+              "events": []
+            },
+            "error": null,
+            "seconds": 0.02071275,
+            "status": "success"
+          },
+          "tamper_controls_excluded_from_timings": {
+            "driver": {
+              "complete": true,
+              "dropped_events": 0,
+              "events": [
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 0.0010535,
+                  "outcome": "success",
+                  "stage": "nargo_cache_lock"
+                },
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 0.350520167,
+                  "outcome": "success",
+                  "stage": "nargo_compile"
+                },
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 0.001160834,
+                  "outcome": "success",
+                  "stage": "acir_private_copy"
+                },
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 0.499041333,
+                  "outcome": "success",
+                  "stage": "bb_write_vk"
+                },
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 0.026986667,
+                  "outcome": "rejected",
+                  "stage": "bb_verify"
+                },
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 0.00104975,
+                  "outcome": "success",
+                  "stage": "nargo_cache_lock"
+                },
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 0.359797958,
+                  "outcome": "success",
+                  "stage": "nargo_compile"
+                },
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 0.000988333,
+                  "outcome": "success",
+                  "stage": "acir_private_copy"
+                },
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 0.515524333,
+                  "outcome": "success",
+                  "stage": "bb_write_vk"
+                },
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 0.032308875,
+                  "outcome": "rejected",
+                  "stage": "bb_verify"
+                },
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 0.001127083,
+                  "outcome": "success",
+                  "stage": "nargo_cache_lock"
+                },
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 0.365235125,
+                  "outcome": "success",
+                  "stage": "nargo_compile"
+                },
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 0.001378292,
+                  "outcome": "success",
+                  "stage": "acir_private_copy"
+                },
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 0.505452333,
+                  "outcome": "success",
+                  "stage": "bb_write_vk"
+                },
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 0.022466916,
+                  "outcome": "rejected",
+                  "stage": "bb_verify"
+                },
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 0.000435333,
+                  "outcome": "success",
+                  "stage": "nargo_cache_lock"
+                },
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 0.409741416,
+                  "outcome": "success",
+                  "stage": "nargo_compile"
+                },
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 0.000999625,
+                  "outcome": "success",
+                  "stage": "acir_private_copy"
+                },
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 0.729993291,
+                  "outcome": "success",
+                  "stage": "bb_write_vk"
+                },
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 0.031679084,
+                  "outcome": "rejected",
+                  "stage": "bb_verify"
+                }
+              ]
+            },
+            "error": null,
+            "seconds": 4.011116542,
+            "status": "success"
+          },
+          "verify_api_inclusive": {
+            "driver": {
+              "complete": true,
+              "dropped_events": 0,
+              "events": [
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 0.001161625,
+                  "outcome": "success",
+                  "stage": "nargo_cache_lock"
+                },
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 0.350495958,
+                  "outcome": "success",
+                  "stage": "nargo_compile"
+                },
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 0.001367625,
+                  "outcome": "success",
+                  "stage": "acir_private_copy"
+                },
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 0.491707,
+                  "outcome": "success",
+                  "stage": "bb_write_vk"
+                },
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 0.035847167,
+                  "outcome": "success",
+                  "stage": "bb_verify"
+                }
+              ]
+            },
+            "error": null,
+            "seconds": 0.923431833,
+            "status": "success"
+          }
+        },
+        "status": "success",
+        "tamper_controls": {
+          "accepted_status_snapshot": {
+            "reason": "cryptographic proof rejected",
+            "status": "rejected_as_expected"
+          },
+          "challenge_both_sides": {
+            "reason": "cryptographic proof rejected",
+            "status": "rejected_as_expected"
+          },
+          "proof_bytes": {
+            "reason": "cryptographic proof rejected",
+            "status": "rejected_as_expected"
+          },
+          "released_term": {
+            "reason": "cryptographic proof rejected",
+            "status": "rejected_as_expected"
+          },
+          "requested_query": {
+            "reason": "query differs from relying-party request",
+            "status": "rejected_as_expected"
+          }
+        },
+        "work": {
+          "optimization": null,
+          "private_predicates": 1,
+          "public_predicates": 0,
+          "selected_credentials": 2,
+          "shared_memberships": 2,
+          "signature_checks": 2,
+          "witness_uses": 2
+        }
+      },
+      {
+        "acceptance_contract_blake3": "a0fd83454528b93be3e84bd820ffdb7096af611387ebf758aa027f131a55c71c",
+        "artifacts": {
+          "cryptographic_proof_bytes": 14656,
+          "presentation_blake3": "fed18d6412aff75d489d6d6e8daaa0145ee9e42f47235ee99c3365eeb63b68d3",
+          "presentation_json_bytes": 43582,
+          "proof_blake3": "fb46c8913b949fb7dce7e79b3ca88b3073b2141ceaba564c743d8254e74529f2",
+          "public_disclosure_blake3": "e1b70a9bad0a032dcefa6cac92795d2e58c9cf27ba8626cb43c0d28159a7ee3f",
+          "public_disclosure_json_bytes": 387,
+          "public_transcript": {
+            "challenge": "0x00000000000000000000000000000000000000000000000000000000000668a2",
+            "issuer_slots": [
+              "653512c1337e44f61829cba7aeb8fabda2f195186f331d9e668aed97dbaa4984"
+            ],
+            "query": "SELECT DISTINCT ?name WHERE { ?s <urn:name> ?name . ?s <urn:age> ?age . FILTER(?age >= 18) }",
+            "rows": [
+              {
+                "name": {
+                  "datatype": "http://www.w3.org/2001/XMLSchema#string",
+                  "kind": "literal",
+                  "value": "Alice"
+                }
+              }
+            ],
+            "version": 1
+          },
+          "verification_key": {
+            "reason": "independently derived by verifier API; not exported",
+            "value": null
+          }
+        },
+        "completed_warmups": 0,
+        "ordinal": 2,
+        "planner": "optimize",
+        "prior_runs_in_process": 1,
+        "replay_control": {
+          "reason": "challenge already consumed",
+          "status": "rejected_as_expected"
+        },
+        "role": "measurement",
+        "stages": {
+          "prepare_api": {
+            "error": null,
+            "seconds": 0.004308917,
+            "status": "success"
+          },
+          "prove_api_inclusive": {
+            "driver": {
+              "complete": true,
+              "dropped_events": 0,
+              "events": [
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 0.000896708,
+                  "outcome": "success",
+                  "stage": "nargo_cache_lock"
+                },
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 0.406857708,
+                  "outcome": "success",
+                  "stage": "nargo_compile"
+                },
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 0.000582125,
+                  "outcome": "success",
+                  "stage": "acir_private_copy"
+                },
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 0.000762084,
+                  "outcome": "success",
+                  "stage": "nargo_cache_lock"
+                },
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 0.448625875,
+                  "outcome": "success",
+                  "stage": "nargo_execute"
+                },
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 1.306415708,
+                  "outcome": "success",
+                  "stage": "bb_prove_and_write_vk"
+                }
+              ]
+            },
+            "error": null,
+            "seconds": 2.208664958,
+            "status": "success"
+          },
+          "replay_control_excluded_from_timings": {
+            "driver": {
+              "complete": true,
+              "dropped_events": 0,
+              "events": []
+            },
+            "error": null,
+            "seconds": 0.020458333,
+            "status": "success"
+          },
+          "tamper_controls_excluded_from_timings": {
+            "driver": {
+              "complete": true,
+              "dropped_events": 0,
+              "events": [
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 0.001109958,
+                  "outcome": "success",
+                  "stage": "nargo_cache_lock"
+                },
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 0.332569666,
+                  "outcome": "success",
+                  "stage": "nargo_compile"
+                },
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 0.000896583,
+                  "outcome": "success",
+                  "stage": "acir_private_copy"
+                },
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 0.370661583,
+                  "outcome": "success",
+                  "stage": "bb_write_vk"
+                },
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 0.030262958,
+                  "outcome": "rejected",
+                  "stage": "bb_verify"
+                },
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 0.001085583,
+                  "outcome": "success",
+                  "stage": "nargo_cache_lock"
+                },
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 0.331338,
+                  "outcome": "success",
+                  "stage": "nargo_compile"
+                },
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 0.001480208,
+                  "outcome": "success",
+                  "stage": "acir_private_copy"
+                },
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 0.362880375,
+                  "outcome": "success",
+                  "stage": "bb_write_vk"
+                },
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 0.032186667,
+                  "outcome": "rejected",
+                  "stage": "bb_verify"
+                },
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 0.001084333,
+                  "outcome": "success",
+                  "stage": "nargo_cache_lock"
+                },
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 0.328408958,
+                  "outcome": "success",
+                  "stage": "nargo_compile"
+                },
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 0.000806666,
+                  "outcome": "success",
+                  "stage": "acir_private_copy"
+                },
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 0.365338791,
+                  "outcome": "success",
+                  "stage": "bb_write_vk"
+                },
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 0.034083542,
+                  "outcome": "rejected",
+                  "stage": "bb_verify"
+                },
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 0.001101541,
+                  "outcome": "success",
+                  "stage": "nargo_cache_lock"
+                },
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 0.33310625,
+                  "outcome": "success",
+                  "stage": "nargo_compile"
+                },
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 0.001526416,
+                  "outcome": "success",
+                  "stage": "acir_private_copy"
+                },
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 0.365981625,
+                  "outcome": "success",
+                  "stage": "bb_write_vk"
+                },
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 0.031289083,
+                  "outcome": "rejected",
+                  "stage": "bb_verify"
+                }
+              ]
+            },
+            "error": null,
+            "seconds": 3.084572417,
+            "status": "success"
+          },
+          "verify_api_inclusive": {
+            "driver": {
+              "complete": true,
+              "dropped_events": 0,
+              "events": [
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 0.0010695,
+                  "outcome": "success",
+                  "stage": "nargo_cache_lock"
+                },
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 0.326764333,
+                  "outcome": "success",
+                  "stage": "nargo_compile"
+                },
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 0.000772459,
+                  "outcome": "success",
+                  "stage": "acir_private_copy"
+                },
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 0.376159584,
+                  "outcome": "success",
+                  "stage": "bb_write_vk"
+                },
+                {
+                  "acir_cache": null,
+                  "elapsed_seconds": 0.034956125,
+                  "outcome": "success",
+                  "stage": "bb_verify"
+                }
+              ]
+            },
+            "error": null,
+            "seconds": 0.778423791,
+            "status": "success"
+          }
+        },
+        "status": "success",
+        "tamper_controls": {
+          "accepted_status_snapshot": {
+            "reason": "cryptographic proof rejected",
+            "status": "rejected_as_expected"
+          },
+          "challenge_both_sides": {
+            "reason": "cryptographic proof rejected",
+            "status": "rejected_as_expected"
+          },
+          "proof_bytes": {
+            "reason": "cryptographic proof rejected",
+            "status": "rejected_as_expected"
+          },
+          "released_term": {
+            "reason": "cryptographic proof rejected",
+            "status": "rejected_as_expected"
+          },
+          "requested_query": {
+            "reason": "query differs from relying-party request",
+            "status": "rejected_as_expected"
+          }
+        },
+        "work": {
+          "optimization": "Optimal",
+          "private_predicates": 1,
+          "public_predicates": 0,
+          "selected_credentials": 1,
+          "shared_memberships": 2,
+          "signature_checks": 1,
+          "witness_uses": 2
+        }
+      }
+    ],
+    "schema_version": 2,
+    "signature_suites_unavailable": [
+      "BBS+",
+      "ECDSA",
+      "EdDSA"
+    ],
+    "source": {
+      "adapter_binary_blake3": "5ac2445d31e37d557d449dba423d0a14b3458466d6b90494adff2d97679e65a5",
+      "arch": "aarch64",
+      "available_parallelism": 8,
+      "build_profile": "release_noncanonical",
+      "cargo_lock_blake3": "8c91b7a8f6b0552ca2c677000efe7cc060df1925f87e8997c99416c49fc67f6a",
+      "git_commit": "e20cf2cca736cfb60712c5d1895737d8e416b878",
+      "os": "macos",
+      "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)\nbinary: rustc\ncommit-hash: 8bab26f4f68e0e26f0bb7960be334d5b520ea452\ncommit-date: 2026-07-14\nhost: aarch64-apple-darwin\nrelease: 1.97.1\nLLVM version: 22.1.6",
+      "tree": "2c03e1fa2e634d0b0009eef0beb9d713fb1b7b7c"
+    },
+    "status": "success",
+    "synthetic_input_binding": {
+      "policy": {
+        "issuers": [
+          "653512c1337e44f61829cba7aeb8fabda2f195186f331d9e668aed97dbaa4984"
+        ],
+        "max_version": 7,
+        "min_version": 7,
+        "snapshots": [
+          {
+            "bits": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "status_list": "urn:synthetic:status",
+            "version": 7
+          }
+        ]
+      },
+      "released_terms": [
+        {
+          "name": "\"Alice\""
+        }
+      ],
+      "wallet": [
+        {
+          "canonical_rdf": [
+            "<urn:alice> <urn:name> \"Alice\" .",
+            "<urn:bob> <urn:name> \"Bob\" .",
+            "<urn:carla> <urn:name> \"Carla\" ."
+          ],
+          "commitment": "0x2b2ec48f3994c57f38ea66796af6e800a4f8685c56e3f5d0a52231d5488f5aeb",
+          "issuer": "653512c1337e44f61829cba7aeb8fabda2f195186f331d9e668aed97dbaa4984",
+          "salt": "0x0000000000000000000000000000000000000000000000000000000000000064",
+          "signature": "ab1b34855863de2a33716e7e51be94b590bb3538a0e73a45a82a6afe129fd50cd6bc5c9efb5b6e94726755ca6f1b0eb4c5dc7236e4ef50150e30708c5b552701",
+          "status_index": 0,
+          "status_list": "urn:synthetic:status",
+          "status_version": 7
+        },
+        {
+          "canonical_rdf": [
+            "<urn:alice> <urn:age> \"42\"^^<http://www.w3.org/2001/XMLSchema#integer> .",
+            "<urn:bob> <urn:age> \"12\"^^<http://www.w3.org/2001/XMLSchema#integer> .",
+            "<urn:carla> <urn:age> \"50\"^^<http://www.w3.org/2001/XMLSchema#integer> ."
+          ],
+          "commitment": "0x0f3751914119d9c8e9bca94093547a763cc7ec0683cafce2c39fc1df91e46df1",
+          "issuer": "653512c1337e44f61829cba7aeb8fabda2f195186f331d9e668aed97dbaa4984",
+          "salt": "0x0000000000000000000000000000000000000000000000000000000000000065",
+          "signature": "73947ec67b461b91406e276279f8827ddc2e94efdf00d3ee0b7921e3e338630917d71984f10bba54599a344b03e29a621336102bc6e96b7b78b02c84e28b8f01",
+          "status_index": 1,
+          "status_list": "urn:synthetic:status",
+          "status_version": 7
+        },
+        {
+          "canonical_rdf": [
+            "<urn:alice> <urn:age> \"42\"^^<http://www.w3.org/2001/XMLSchema#integer> .",
+            "<urn:alice> <urn:name> \"Alice\" .",
+            "<urn:bob> <urn:age> \"12\"^^<http://www.w3.org/2001/XMLSchema#integer> .",
+            "<urn:bob> <urn:name> \"Bob\" .",
+            "<urn:carla> <urn:age> \"50\"^^<http://www.w3.org/2001/XMLSchema#integer> .",
+            "<urn:carla> <urn:name> \"Carla\" ."
+          ],
+          "commitment": "0x2200237a567c3eb6a7e9d9bd74986cd3142680e713ecdffeaa21ad50c0ae2b3a",
+          "issuer": "653512c1337e44f61829cba7aeb8fabda2f195186f331d9e668aed97dbaa4984",
+          "salt": "0x0000000000000000000000000000000000000000000000000000000000000066",
+          "signature": "c1317f63e518f01c22a2f60da9b518d2880bdde7db8c544e7b1fc49455ec2000b40f48d938e06400b29a12fe2616fff3f59651802a530e8088aec01844734904",
+          "status_index": 2,
+          "status_list": "urn:synthetic:status",
+          "status_version": 7
+        }
+      ]
+    },
+    "timing_contract": "driver events are measured child spans of inclusive API timers, not additive extra stages; uninstrumented host I/O/setup remains in inclusive timers",
+    "unavailable_stages": {
+      "backend_prove_excluding_key_seconds": {
+        "reason": "bb prove --write_vk is measured as one subprocess; internal proof/key split unavailable",
+        "value": null
+      },
+      "peak_rss_bytes": {
+        "reason": "host/subprocess RSS not instrumented",
+        "value": null
+      }
+    }
+  },
+  "original_report_sha256": "4fb5b1a9869410816ff4e50acf0fdc9a504f8134193f37ddcce52367e6fdc5ab",
+  "execution_checkout": "e20cf2cca736cfb60712c5d1895737d8e416b878",
+  "runtime_source_checkpoint": "c07c3f90fb72f7a86763583cb8eb8b8656ece8a4",
+  "runtime_unchanged_between_checkpoints": true,
+  "build": {
+    "argv": [
+      "cargo",
+      "build",
+      "--locked",
+      "--release",
+      "-p",
+      "sparq-zk-compose",
+      "--features",
+      "successful-results",
+      "--example",
+      "result_experiment"
+    ],
+    "checkout": "e20cf2cca736cfb60712c5d1895737d8e416b878",
+    "target_dir": "/Users/jesght/Documents/ChatGPT/sparq/zk-engine-semantics/target",
+    "profile": "release",
+    "jobs": 1,
+    "incremental": false,
+    "log_sha256": "bfed616f52d5992f6d620f0f3c1cc9b3963c9d3f6d4b8d3202ded8a820225766",
+    "source_recompiled": [
+      "sparq-zk",
+      "sparq-zk-compose"
+    ],
+    "note": "Explicit successful rebuild at the frozen checkout immediately before the run. No claim that general runtime checkout fields are compile-time attestation, and no cold-cache claim."
+  },
+  "preserved_artifacts": [
+    {
+      "path": "report.json",
+      "bytes": 28443,
+      "sha256": "4fb5b1a9869410816ff4e50acf0fdc9a504f8134193f37ddcce52367e6fdc5ab"
+    },
+    {
+      "path": "result_experiment-measured-schema2",
+      "bytes": 1739456,
+      "sha256": "5a8fb8bf47993f9dedcc0649e0fb3a25d1bd6cd7b3fee74215f78dd9e841c05e"
+    },
+    {
+      "path": "run-2/presentation.json",
+      "bytes": 43582,
+      "sha256": "d15d29fb61821875ec1e65dead751dc44820ea7eef8fb6b3c4321e87c80b538f"
+    },
+    {
+      "path": "run-2/public.json",
+      "bytes": 387,
+      "sha256": "91ec2e2f502f249476e3b4c1173586229686530a57bcec334896e2006a2580de"
+    },
+    {
+      "path": "run-2/proof.bin",
+      "bytes": 14656,
+      "sha256": "68bdeab24fd03902992e31ef487840b7c304a1c17a079de4c552732956c14ca4"
+    },
+    {
+      "path": "run-1/presentation.json",
+      "bytes": 43547,
+      "sha256": "d701ab90f667fc440d8c7141b1584df0366f7337e1168bc1518c3f16c791a4c5"
+    },
+    {
+      "path": "run-1/public.json",
+      "bytes": 454,
+      "sha256": "26c294dc73a152d7e557576ba209703bf9ab1a5fe017e8fa06f24805d8ace5ef"
+    },
+    {
+      "path": "run-1/proof.bin",
+      "bytes": 14656,
+      "sha256": "64d8da6172690f52c4d79a2d10768d94d5646f3a1f4a8c459eeb4f39a829e763"
+    }
+  ],
+  "limits": [
+    "Local synthetic smoke only; no calibrated comparative performance inference.",
+    "Two successful proof/verification runs, five expected tamper rejections and replay rejection per planner.",
+    "Nonzero bb verification statuses do not distinguish every backend failure from invalid proof.",
+    "RSS and backend-internal substage timings remain unavailable.",
+    "Nargo execute may include implicit compilation; parent API timings include child events and must not be added to them."
+  ]
+}
