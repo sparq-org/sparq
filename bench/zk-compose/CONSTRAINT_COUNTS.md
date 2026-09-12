@@ -71,18 +71,18 @@ Support for released SELECT DISTINCT mappings: issuer authentication, credential
 | member | parameters | `circuit_size` |
 | --- | --- | --- |
 | `result_v1_k1_n16_p3_r4_f0` | k=1, n=16, p=3, r=4, f=0 | 32,288 |
-| `result_v1_k1_n16_p3_r4_f2` | k=1, n=16, p=3, r=4, f=2 | 69,055 |
+| `result_v1_k1_n16_p3_r4_f2` | k=1, n=16, p=3, r=4, f=2 | 68,963 |
 | `result_v1_k2_n16_p3_r4_f0` | k=2, n=16, p=3, r=4, f=0 | 59,101 |
-| `result_v1_k2_n16_p3_r4_f2` | k=2, n=16, p=3, r=4, f=2 | 95,867 |
+| `result_v1_k2_n16_p3_r4_f2` | k=2, n=16, p=3, r=4, f=2 | 95,775 |
 
 Scaling — pairs differing in exactly one parameter:
 
 | parameter | from | to | held fixed | Δ gates | ratio |
 | --- | --- | --- | --- | --- | --- |
-| `f` | 0 (32,288) | 2 (69,055) | k=1, n=16, p=3, r=4 | +36,767 | 2.1387 |
-| `f` | 0 (59,101) | 2 (95,867) | k=2, n=16, p=3, r=4 | +36,766 | 1.6221 |
+| `f` | 0 (32,288) | 2 (68,963) | k=1, n=16, p=3, r=4 | +36,675 | 2.1359 |
+| `f` | 0 (59,101) | 2 (95,775) | k=2, n=16, p=3, r=4 | +36,674 | 1.6205 |
 | `k` | 1 (32,288) | 2 (59,101) | n=16, p=3, r=4, f=0 | +26,813 | 1.8304 |
-| `k` | 1 (69,055) | 2 (95,867) | n=16, p=3, r=4, f=2 | +26,812 | 1.3883 |
+| `k` | 1 (68,963) | 2 (95,775) | n=16, p=3, r=4, f=2 | +26,812 | 1.3888 |
 
 ## Query-layer circuits (SPARQL algebra fragment)
 

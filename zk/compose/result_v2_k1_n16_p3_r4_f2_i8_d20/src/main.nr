@@ -42,5 +42,5 @@ fn main(
     filter_values: [[u64; F]; R],
 ) {
     let _ = challenge;
-    result_check::<K, F, STATUS_DEPTH, 8, 2>(version, accepted_root, issuer_keys, pattern_count, pattern_vars, pattern_constants, projection, result_count, results, filter_count, filter_vars, filter_ops, filter_bounds, counts, salts, enc, status_lists, status_versions, status_indices, status_roots, status_siblings, policy_indices, policy_siblings, signatures, selected_graphs, selected_leaves, values, selected_types, selected_hashes, filter_values);
+    result_check::<u64, K, F, STATUS_DEPTH, 8, 2>(version, accepted_root, issuer_keys, pattern_count, pattern_vars, pattern_constants, projection, result_count, results, filter_count, filter_vars, filter_ops, filter_bounds, counts, salts, enc, status_lists, status_versions, status_indices, status_roots, status_siblings, policy_indices, policy_siblings, signatures, selected_graphs, selected_leaves, values, selected_types, selected_hashes, filter_values);
 }

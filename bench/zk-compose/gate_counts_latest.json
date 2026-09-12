@@ -119,13 +119,13 @@
       "circuit_size": 59101
     },
     "result_v1_k2_n16_p3_r4_f2": {
-      "circuit_size": 95867
+      "circuit_size": 95775
     },
     "result_v1_k1_n16_p3_r4_f0": {
       "circuit_size": 32288
     },
     "result_v1_k1_n16_p3_r4_f2": {
-      "circuit_size": 69055
+      "circuit_size": 68963
     },
     "result_v2_k1_n16_p3_r4_f0_i0_d17": {
       "circuit_size": 32836
@@ -171,6 +171,5 @@
     }
   },
   "result_members_measured_at": "2026-09-09",
-  "result_members_platform": "darwin arm64",
-  "_comment_zkp_10_3": "[GPT-6] Listed result-capacity and integer members remeasured with the pinned toolchain; scope, source/ACIR hashes and actual values are in bench/zk-compose/result_capacity_gates.json. Other baseline entries retain their earlier provenance; no timing claim."
+  "result_members_platform": "darwin arm64"
 }

@@ -1613,6 +1613,42 @@ mod tests {
         assert!(!line.contains("100"));
     }
 
+    #[test]
+    fn canonical_large_sibling_remains_eligible_or_fails_its_actual_predicate() {
+        // [GPT-6] Keep the valid large-sibling case distinct from lexical rejection.
+        let (_, mut policy, nonce, _) = fixture();
+        let c = credential(
+            vec![
+                triple("urn:alice", "urn:age", integer(100)),
+                triple("urn:alice", "urn:age", integer(42)),
+            ],
+            1,
+            3,
+            "urn:status:people",
+        );
+        policy.trusted_issuers = vec![c.issuer];
+        let rows = vec![BTreeMap::from([(
+            "person".into(),
+            Term::NamedNode(iri("urn:alice")),
+        )])];
+        for (predicate, value, capacity) in [
+            ("?age >= 18", 100, PrivateIntegerCapacity::FullU64),
+            ("?age < 100", 42, PrivateIntegerCapacity::TwoDigits),
+        ] {
+            let query = format!(
+                "SELECT DISTINCT ?person WHERE {{ ?person <urn:age> ?age FILTER({predicate}) }}"
+            );
+            let p =
+                prepare_result(&query, std::slice::from_ref(&c), &rows, &policy, &nonce).unwrap();
+            assert_eq!(p.presentation.integer_capacity, capacity);
+            assert!(p
+                .toml
+                .lines()
+                .any(|line| line.starts_with("filter_values = ")
+                    && line.contains(&value.to_string())));
+        }
+    }
+
     // [GPT-6] Goldens cover value, lexical, type and capacity boundaries independently.
     fn numeric_fixture(
         term: Term,
@@ -2186,6 +2222,82 @@ mod tests {
                     .is_err());
             }
         }
+    }
+
+    #[test]
+    #[ignore = "requires pinned nargo and bb; preserves actual baseline v1 verification keys"]
+    fn result_legacy_v1_keys_match_pinned_foundation_keys() {
+        // [GPT-6] Expected bytes were built from the independent foundation713 archive.
+        pinned_toolchain().unwrap();
+        let expected: Value = serde_json::from_str(include_str!(
+            "../../../bench/zk-compose/result_v1_compatibility.json"
+        ))
+        .unwrap();
+        let driver = CircuitProver::from_crate_root();
+        let dir = std::env::temp_dir().join(format!("sparq_v1_key_compat_{}", std::process::id()));
+        for (package, evidence) in expected["members"].as_object().unwrap() {
+            let key = driver.canonical_package_vk(package, &dir).unwrap();
+            let actual: String = key.iter().map(|byte| format!("{byte:02x}")).collect();
+            assert!(
+                actual == evidence["base"]["verification_key_hex"].as_str().unwrap(),
+                "{package}: canonical verification key differs from the pinned baseline"
+            );
+        }
+        assert_eq!(expected["members"].as_object().unwrap().len(), 4);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires pinned nargo and bb; genuine expanded tiny and predicate-free proofs"]
+    fn result_real_proofs_cover_expanded_tiny_and_predicate_free_public_abis() {
+        // [GPT-6] These are genuine proofs, separately counted from wrapper executions.
+        pinned_toolchain().unwrap();
+        let driver = CircuitProver::from_crate_root();
+        let dir =
+            std::env::temp_dir().join(format!("sparq_result_small_v2_{}", std::process::id()));
+        for (depth, capacity, query, expected_package) in [
+            (
+                17,
+                CredentialCapacity::Smallest,
+                "SELECT DISTINCT ?person WHERE { ?person <urn:age> ?age FILTER(?age >= 18) }",
+                "result_v2_k1_n16_p3_r4_f2_i8_d17",
+            ),
+            (
+                20,
+                CredentialCapacity::HideInTwo,
+                "SELECT DISTINCT ?person WHERE { ?person <urn:age> ?age }",
+                "result_v2_k2_n16_p3_r4_f0_i0_d20",
+            ),
+        ] {
+            let (c, policy, nonce, rows) = numeric_fixture(integer(42), 3, (1 << depth) / 8);
+            let p = prepare_result_with_options(
+                query,
+                &[c],
+                &rows,
+                &policy,
+                &nonce,
+                ResultOptions {
+                    credential_capacity: capacity,
+                    ..ResultOptions::default()
+                },
+            )
+            .unwrap();
+            assert_eq!(p.package, expected_package);
+            assert_eq!(p.presentation.version, 2);
+            let proof = p.prove(&driver, &dir, "small_v2_public_abi").unwrap();
+            let checked = verify_result(
+                query,
+                &proof,
+                &policy,
+                &nonce,
+                &InMemorySeenNonces::default(),
+                &driver,
+                &dir,
+            )
+            .unwrap();
+            assert_eq!(&checked.rows, &rows);
+        }
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     /// Full proofs anchor ABI reconstruction, proof mode, independent policy and request binding.
