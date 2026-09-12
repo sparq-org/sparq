@@ -294,8 +294,8 @@ from `verify_manifest`: only nonempty positive `SELECT DISTINCT` answers, select
 IRIs/literals, and bounded private canonical `xsd:integer` predicates are admitted.
 Public predicates run in the verifier and select the member without numeric
 circuitry. Roots/salts/status indices and intermediate encodings are private;
-issuer slots/capacities/result size remain public. See the crate README's
-“Successful-result contract” section for exact scope. Research-stage, not externally
+issuer slots/capacities/result size remain public. See the [successful-result contract](references/successful-results.md)
+for exact scope. Research-stage, not externally
 audited: no complete-answer, absence, wallet-size or holder-identity guarantee.
 
 [GPT-6] `planner::plan_disclosure_admitted` additionally accepts a predicate

@@ -49,7 +49,7 @@ register distinguishes two trust classes of `unsafe`:
 
 ## Register
 
-**92 `unsafe` sites** across 9 crates (the other crates contain no first-party `unsafe`).
+**93 `unsafe` sites** across 9 crates (the other crates contain no first-party `unsafe`).
 Counts and the file:line list are produced by `scripts/unsafe-gate.py --list` and
 must equal `bench/unsafe-snapshot.json`. Two crates are special allocator cases:
 **`sparq-lws-core`** (sq-gg0qq.2) ships a `forbid(unsafe_code)` lib + bin
@@ -157,12 +157,13 @@ re-derived from `scripts/unsafe-gate.py --list`. [OPUS-5]
 | `src/main.rs:492` | `Mmap::map` | own-for-lifetime | read-only map of a perm file held open for the call. |
 | `src/main.rs:495` | slice reinterpret (read) | page-align; whole `[u32;3]` rows | `n = len/12`; `n==0` handled. CLI utility over a file the operator named. |
 
-### `sparq-zk-compose` — 2 sites (cross-process advisory file lock)
+### `sparq-zk-compose` — 3 sites (cross-process advisory file locks)
 
 | File:line | Kind | Invariant relied on | Why sound / how bounded |
 |---|---|---|---|
 | `src/verifier.rs:967` | `libc::flock(LOCK_EX)` | `fd` is a valid open fd owned by `file` for the call | the `MutexGuard` keeps `file` (hence `fd`) alive; an error fails closed (`return false`). |
 | `src/verifier.rs:975` | `libc::flock(LOCK_UN)` | same valid, locked fd | unlock helper run on every return path so the advisory lock is never leaked (a leak would deadlock the next caller). |
+| `src/driver.rs:119` | `libc::flock(LOCK_EX)` | the private `NargoCacheLock` exclusively owns the valid open file descriptor across the call | [GPT-6] no pointer arguments or descriptor ownership transfer; errors reject, and scope-owned `File` closure releases the lock on return/unwind. Four-process exclusion and real concurrent compilation regressions exercise OS behavior; Miri does not model this external OS lock. |
 
 ### `sparq-bench` — 1 site (peak-RSS measurement; non-shipping bench binary)
 
