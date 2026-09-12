@@ -1,0 +1,292 @@
+--- a/rzup-0.5.2/Cargo.toml
++++ b/rzup-0.5.2/Cargo.toml
+@@ -26,6 +26,8 @@
+ repository = "https://github.com/risc0/risc0/"
+ 
+ [features]
++# [GPT-6] SDK discovery does not construct or use RSA keys.
++signatures = ["dep:rsa"]
+ cli = [
+     "dep:clap",
+     "dep:indicatif",
+@@ -38,6 +40,7 @@
+     "publish",
+ ]
+ install = [
++    "signatures",
+     "dep:flate2",
+     "dep:fs2",
+     "dep:http",
+@@ -47,6 +50,7 @@
+     "dep:tar",
+ ]
+ publish = [
++    "signatures",
+     "dep:aws-config",
+     "dep:aws-credential-types",
+     "dep:aws-sdk-secretsmanager",
+@@ -142,6 +146,7 @@
+ 
+ [dependencies.rsa]
+ version = "0.9"
++optional = true
+ 
+ [dependencies.semver]
+ version = "1.0.23"
+@@ -226,3 +231,6 @@
+ 
+ [dev-dependencies.walkdir]
+ version = "2.5.0"
++
++# [GPT-6] Keep this vendored package outside the main workspace.
++[workspace]
+--- a/rzup-0.5.2/src/distribution/mod.rs
++++ b/rzup-0.5.2/src/distribution/mod.rs
+@@ -13,6 +13,8 @@
+ // limitations under the License.
+ pub mod github;
+ pub mod s3;
++// [GPT-6] Only enabled installation/publication paths need RSA signatures.
++#[cfg(feature = "signatures")]
+ pub mod signature;
+ 
+ #[cfg_attr(
+--- a/rzup-0.5.2/src/distribution/s3.rs
++++ b/rzup-0.5.2/src/distribution/s3.rs
+@@ -13,11 +13,16 @@
+ // limitations under the License.
+ 
+ use crate::components::Component;
++// [GPT-6] Discovery never parses or verifies remote signed manifests.
+ use crate::distribution::{
+-    download_bytes, download_json,
++    download_bytes,
+     sha2::{Sha256Digest, Sha256Writer},
++    DistributionPlatform, ProgressWriter,
++};
++#[cfg(feature = "signatures")]
++use crate::distribution::{
++    download_json,
+     signature::{PublicKey, Signature},
+-    DistributionPlatform, ProgressWriter,
+ };
+ #[cfg(feature = "publish")]
+ use crate::distribution::{signature::PrivateKey, upload_bytes, ProgressReader};
+@@ -74,6 +79,7 @@
+ struct DistributionManifest {
+     releases: BTreeMap<semver::Version, Release>,
+     latest_version: semver::Version,
++    #[cfg(feature = "signatures")]
+     #[serde_as(as = "Option<DisplayFromStr>")]
+     #[serde(skip_serializing_if = "Option::is_none")]
+     signature: Option<Signature>,
+@@ -103,7 +109,7 @@
+         Ok(())
+     }
+ 
+-    #[cfg(not(feature = "install"))]
++    #[cfg(all(feature = "signatures", not(feature = "install")))]
+     fn verify(&mut self, _public_key: &PublicKey) -> Result<()> {
+         Err(RzupError::Other("install feature not enabled".into()))
+     }
+@@ -206,6 +212,7 @@
+         Self { base_urls }
+     }
+ 
++    #[cfg(feature = "signatures")]
+     fn get_distribution_manifest(
+         &self,
+         env: &Environment,
+@@ -221,6 +228,18 @@
+         manifest.verify(env.public_key())?;
+ 
+         Ok(manifest)
++    }
++
++    // [GPT-6] No signature substitute: discovery cannot fetch authenticated manifests.
++    #[cfg(not(feature = "signatures"))]
++    fn get_distribution_manifest(
++        &self,
++        _env: &Environment,
++        _component: &Component,
++    ) -> Result<DistributionManifest> {
++        Err(RzupError::Other(
++            "install or publish feature not enabled".into(),
++        ))
+     }
+ 
+     #[cfg(feature = "publish")]
+--- a/rzup-0.5.2/src/env.rs
++++ b/rzup-0.5.2/src/env.rs
+@@ -11,10 +11,10 @@
+ // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ // See the License for the specific language governing permissions and
+ // limitations under the License.
+-use crate::distribution::{
+-    signature::{PrivateKey, PublicKey},
+-    Platform,
+-};
++// [GPT-6] Preserve full key APIs when install or publish enables signatures.
++#[cfg(feature = "signatures")]
++use crate::distribution::signature::{PrivateKey, PublicKey};
++use crate::distribution::Platform;
+ use crate::error::Result;
+ use crate::{AwsCredentials, RzupError, RzupEvent};
+ 
+@@ -39,7 +39,9 @@
+     platform: Platform,
+     github_token: Option<String>,
+     aws_creds_factory: Box<dyn Fn() -> Option<AwsCredentials> + Send + Sync>,
++    #[cfg(feature = "signatures")]
+     private_key_getter: Box<dyn Fn() -> Result<PrivateKey> + Send + Sync>,
++    #[cfg(feature = "signatures")]
+     public_key: PublicKey,
+ }
+ 
+@@ -138,7 +140,7 @@
+     PrivateKey::new(&key_pem)
+ }
+ 
+-#[cfg(not(feature = "publish"))]
++#[cfg(all(feature = "signatures", not(feature = "publish")))]
+ fn get_private_key() -> Result<PrivateKey> {
+     Err(RzupError::Other("publish feature not enabled".into()))
+ }
+@@ -170,8 +172,11 @@
+         cargo_dir: impl AsRef<Path>,
+         github_token: Option<String>,
+         aws_creds_factory: impl Fn() -> Option<AwsCredentials> + Send + Sync + 'static,
+-        private_key_getter: impl Fn() -> Result<PrivateKey> + Send + Sync + 'static,
+-        public_key: PublicKey,
++        #[cfg(feature = "signatures")] private_key_getter: impl Fn() -> Result<PrivateKey>
++            + Send
++            + Sync
++            + 'static,
++        #[cfg(feature = "signatures")] public_key: PublicKey,
+         platform: Platform,
+         event_handler: impl Fn(RzupEvent) + Send + Sync + 'static,
+     ) -> Result<Self> {
+@@ -191,7 +196,9 @@
+             platform,
+             github_token,
+             aws_creds_factory: Box::new(aws_creds_factory),
++            #[cfg(feature = "signatures")]
+             private_key_getter: Box::new(private_key_getter),
++            #[cfg(feature = "signatures")]
+             public_key,
+         };
+         env.set_event_handler(event_handler);
+@@ -227,7 +234,9 @@
+             .ok();
+ 
+         let aws_creds_factory = || get_aws_creds().ok();
++        #[cfg(feature = "signatures")]
+         let private_key_getter = || get_private_key();
++        #[cfg(feature = "signatures")]
+         let public_key = PublicKey::official();
+ 
+         let env = Self::with_paths_creds_platform_and_event_handler(
+@@ -236,7 +245,9 @@
+             cargo_dir,
+             github_token,
+             aws_creds_factory,
++            #[cfg(feature = "signatures")]
+             private_key_getter,
++            #[cfg(feature = "signatures")]
+             public_key,
+             platform,
+             event_handler,
+@@ -289,10 +300,12 @@
+         (self.aws_creds_factory)()
+     }
+ 
++    #[cfg(feature = "signatures")]
+     pub fn get_private_key(&self) -> Result<PrivateKey> {
+         (self.private_key_getter)()
+     }
+ 
++    #[cfg(feature = "signatures")]
+     pub fn public_key(&self) -> &PublicKey {
+         &self.public_key
+     }
+--- a/rzup-0.5.2/src/lib.rs
++++ b/rzup-0.5.2/src/lib.rs
+@@ -24,12 +24,15 @@
+ mod registry;
+ mod settings;
+ 
+-use std::path::{Path, PathBuf};
+-
+-use self::distribution::{
+-    signature::{PrivateKey, PublicKey},
+-    Platform,
+-};
++#[cfg(feature = "signatures")]
++use std::path::Path;
++use std::path::PathBuf;
++
++// [GPT-6] Preserve full key APIs when install or publish enables signatures.
++#[cfg(feature = "signatures")]
++use self::distribution::signature::{PrivateKey, PublicKey};
++#[cfg(feature = "signatures")]
++use self::distribution::Platform;
+ use self::env::Environment;
+ use self::events::{RzupEvent, TransferKind};
+ use self::paths::Paths;
+@@ -110,6 +113,8 @@
+     /// * `public_key` - The public key used to verify S3 components
+     /// * `platform` - The platform of the system which we are installing artifacts for
+     /// * `event_handler` - Callback for events that provide progress during rzup operations.
++    // [GPT-6] The key-taking API is additive with signature support; discovery uses new().
++    #[cfg(feature = "signatures")]
+     #[allow(clippy::too_many_arguments)]
+     pub fn with_paths_urls_creds_platform_and_event_handler(
+         risc0_dir: impl Into<PathBuf>,
+@@ -118,8 +123,11 @@
+         base_urls: BaseUrls,
+         github_token: Option<String>,
+         aws_creds_factory: impl Fn() -> Option<AwsCredentials> + Send + Sync + 'static,
+-        private_key_getter: impl Fn() -> Result<PrivateKey> + Send + Sync + 'static,
+-        public_key: PublicKey,
++        #[cfg(feature = "signatures")] private_key_getter: impl Fn() -> Result<PrivateKey>
++            + Send
++            + Sync
++            + 'static,
++        #[cfg(feature = "signatures")] public_key: PublicKey,
+         platform: Platform,
+         event_handler: impl Fn(RzupEvent) + Send + Sync + 'static,
+     ) -> Result<Self> {
+@@ -129,7 +137,9 @@
+             cargo_dir,
+             github_token,
+             aws_creds_factory,
++            #[cfg(feature = "signatures")]
+             private_key_getter,
++            #[cfg(feature = "signatures")]
+             public_key,
+             platform,
+             event_handler,
+@@ -874,6 +884,7 @@
+         platform: Platform,
+     ) -> (TempDir, Rzup) {
+         let tmp_dir = TempDir::new().unwrap();
++        #[cfg(feature = "signatures")]
+         let public_key = private_key.public_key();
+         let rzup = Rzup::with_paths_urls_creds_platform_and_event_handler(
+             tmp_dir.path().join(".risc0"),
+@@ -883,6 +894,7 @@
+             github_token,
+             move || aws_creds.clone(),
+             move || Ok(private_key.clone()),
++            #[cfg(feature = "signatures")]
+             public_key,
+             platform,
+             |_| {},
+@@ -920,6 +932,7 @@
+             None, /* github_token */
+             || None,
+             || Err(RzupError::Other("no private key".into())),
++            #[cfg(feature = "signatures")]
+             public_key,
+             Platform::detect().unwrap(),
+             |_| {},

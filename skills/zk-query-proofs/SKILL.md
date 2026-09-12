@@ -369,3 +369,11 @@ the generated gate matrix records dual-leaf and value-only pairs as unsupported.
 cover the shared evaluator and separate native/actual-guest regression evidence.
 
 [GPT-6] The exact-dataset evaluator applies the [aggregate operand boundary](references/aggregate-profile.md) in both native admission and guest evaluation. Non-COUNT aggregate operands must be constants or variables proven bound by the inner algebra; expression operands and nullable bindings are outside this initial profile. This is a restriction, not complete aggregate conformance.
+
+## Exact-evaluator SDK dependencies
+
+[GPT-6] The separate [exact evaluator](../../zk/sparql-evaluator/README.md) uses
+detached workspaces. Its [SDK patch record](../../vendor/zk-sdk/README.md) preserves
+upstream source/license identity and documents discovery-only dependency selection
+and derive-macro feature boundaries, with executable synthetic feature checks.
+Synthetic dependency checks remain separate from actual guest proof evidence.

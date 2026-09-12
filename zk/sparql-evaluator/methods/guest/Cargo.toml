@@ -12,6 +12,9 @@ risc0-zkvm = { version = "=3.0.6", default-features = false, features = ["std"] 
 sparq-proved-evaluator-model = { path = "../../model", features = ["evaluate"] }
 
 [patch.crates-io]
+ark-crypto-primitives = { path = "../../../../vendor/zk-sdk/ark-crypto-primitives-0.5.0" }
+# [GPT-6] Exact upstream archives with narrowly recorded dependency/feature patches.
+ark-relations = { path = "../../../../vendor/zk-sdk/ark-relations-0.5.1" }
 spargebra = { path = "../../../../vendor/spargebra" }
 
 [profile.release]
