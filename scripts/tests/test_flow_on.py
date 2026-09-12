@@ -53,6 +53,9 @@ class RuleLoadingTest(unittest.TestCase):
             # [OPUS-4.8] ZK circuit gate-count follow-on (a PR-description
             # deliverable, present in the rules file) — enforce the contract.
             "new-zk-circuit-gatecount",
+            # [OPUS-5] (#2547) The new-crate follow-ons gate G1 cannot cover:
+            # test methods, a website presence, a guide chapter.
+            "new-crate-followons",
         ):
             self.assertIn(required, ids)
         # [OPUS-4.8] (bead sq-l0a0) The new-crate bench/SKILL follow-on rule was
@@ -99,8 +102,8 @@ class NewCrateTest(unittest.TestCase):
         self.assertNotIn("new-crate-bench-and-skill", {fo.rule_id for fo in fos})
 
     def test_new_crate_alone_yields_no_redundant_follow_on(self):
-        # Even a bare new crate (which G1 would BLOCK at merge) mints no flow-on
-        # follow-on — the redundant rule is gone.
+        # Even a bare new crate (which G1 would BLOCK at merge) mints no
+        # bench/SKILL follow-on — the redundant rule is gone.
         added = ["crates/sparq-foo/Cargo.toml", "crates/sparq-foo/src/lib.rs"]
         fos = self._eval(changed=added, added=added)
         self.assertNotIn("new-crate-bench-and-skill", {fo.rule_id for fo in fos})
@@ -111,6 +114,173 @@ class NewCrateTest(unittest.TestCase):
         added: list[str] = []
         fos = self._eval(changed=changed, added=added)
         self.assertNotIn("new-crate-bench-and-skill", {fo.rule_id for fo in fos})
+        # …and no new-crate follow-on either: the crate is not NEW.
+        self.assertNotIn("new-crate-followons", {fo.rule_id for fo in fos})
+
+
+class NewCrateFollowOnsTest(unittest.TestCase):
+    """[OPUS-5] (#2547) The `new-crate-followons` rule — the reactive half of the
+    new-package checklist, covering the dimensions merge gate G1 cannot decide at
+    merge time: which TEST METHODS apply, a website presence, a guide chapter.
+    G1 keeps sole ownership of README + bench + SKILL, so those must stay absent
+    here (the sq-l0a0 redundancy lesson)."""
+
+    RULE = "new-crate-followons"
+
+    def setUp(self):
+        self.rules = flow_on.load_rules(RULES)
+
+    def _keys(self, changed, added, title="add a crate"):
+        fos = flow_on.evaluate(self.rules, 2547, title, changed, added, [])
+        return {fo.dedup_key for fo in fos if fo.rule_id == self.RULE}
+
+    def test_new_public_crate_mints_test_website_and_guide_follow_ons(self):
+        # `sparq-foo` does not exist on disk, so crate_is_published() fails open
+        # to PUBLISHED — all three dimensions are owed.
+        added = ["crates/sparq-foo/Cargo.toml", "crates/sparq-foo/src/lib.rs"]
+        self.assertEqual(
+            self._keys(added, added),
+            {
+                "crate-test-methods-sparq-foo",
+                "crate-website-sparq-foo",
+                "crate-guide-sparq-foo",
+            },
+        )
+
+    def test_g1_owned_artifacts_are_not_re_minted(self):
+        # No bench / README / SKILL follow-on may appear: G1 already blocked the
+        # merge on those, so re-emitting them is the #245/#246/#264/#265 noise.
+        added = ["crates/sparq-foo/Cargo.toml"]
+        keys = self._keys(added, added)
+        for owned in ("bench", "readme", "skill"):
+            self.assertFalse(
+                [k for k in keys if owned in k.lower()],
+                f"G1-owned artifact {owned!r} re-minted reactively: {keys}",
+            )
+
+    def test_two_new_crates_in_one_pr_mint_follow_ons_for_BOTH(self):
+        # The regression `for_each = "new_crate"` exists to prevent: the shared
+        # {crate} placeholder resolves to ONE crate, so without fan-out the
+        # second crate's follow-ons would silently never be created.
+        added = ["crates/sparq-foo/Cargo.toml", "crates/sparq-bar/Cargo.toml"]
+        keys = self._keys(added, added)
+        for crate in ("sparq-foo", "sparq-bar"):
+            for dim in ("test-methods", "website", "guide"):
+                self.assertIn(f"crate-{dim}-{crate}", keys)
+
+    def test_internal_crate_owes_tests_but_not_website_or_guide(self):
+        # A real `publish = false` crate from the workspace: not a user-facing
+        # surface, so advertising it would be noise — but it still must be
+        # tested, which is why only that template is unconditional.
+        internal = self._an_internal_crate()
+        added = [f"crates/{internal}/Cargo.toml"]
+        self.assertEqual(
+            self._keys(added, added), {f"crate-test-methods-{internal}"}
+        )
+
+    def test_public_split_reads_the_same_field_as_gate_g1(self):
+        internal = self._an_internal_crate()
+        self.assertFalse(flow_on.crate_is_published(internal))
+        # A published workspace crate, and the fail-open unknown-crate case.
+        self.assertTrue(flow_on.crate_is_published("sparq-core"))
+        self.assertTrue(flow_on.crate_is_published("crate-that-does-not-exist"))
+        # An empty crate name is never "public" (no manifest to consult).
+        self.assertFalse(flow_on.crate_is_published(""))
+
+    def test_nested_manifest_does_not_invent_a_phantom_crate(self):
+        # fnmatch's `*` crosses `/`, so `crates/*/Cargo.toml` also matches a
+        # nested manifest (the sq-fyzq7 class of bug). The fan-out re-derives the
+        # crate list with G1's exact-match regex, so nothing is minted.
+        added = ["crates/sparq-foo/vendored/dep/Cargo.toml"]
+        self.assertEqual(self._keys(added, added), set())
+
+    def test_test_methods_follow_on_carries_the_crate_package_area(self):
+        # A no-area issue reserves the readiness engine's serializing __global__
+        # partition; the crate's own area:<crate> key is what keeps it scheduled
+        # against that crate only.
+        added = ["crates/sparq-foo/Cargo.toml"]
+        fos = flow_on.evaluate(self.rules, 2547, "add sparq-foo", added, added, [])
+        tests_fo = next(fo for fo in fos if fo.dedup_key == "crate-test-methods-sparq-foo")
+        self.assertIn("area:sparq-foo", tests_fo.labels)
+        self.assertIn("role:impl", tests_fo.labels)
+        self.assertIn("status:ready", tests_fo.labels)
+
+    def test_website_and_guide_follow_ons_route_to_their_own_roles(self):
+        added = ["crates/sparq-foo/Cargo.toml"]
+        fos = flow_on.evaluate(self.rules, 2547, "add sparq-foo", added, added, [])
+        by_key = {fo.dedup_key: fo for fo in fos}
+        self.assertIn("role:site", by_key["crate-website-sparq-foo"].labels)
+        self.assertIn("role:docs", by_key["crate-guide-sparq-foo"].labels)
+
+    def _an_internal_crate(self) -> str:
+        """A workspace crate that really declares `publish = false`."""
+        for cargo in sorted((REPO_ROOT / "crates").glob("*/Cargo.toml")):
+            if flow_on._gnc.crate_is_stub(cargo.parent.name, []):
+                return cargo.parent.name
+        self.skipTest("no `publish = false` crate in the workspace")
+
+
+class ForEachFanOutTest(unittest.TestCase):
+    """[OPUS-5] (#2547) The `for_each` fan-out primitive itself."""
+
+    def setUp(self):
+        self.rules = flow_on.load_rules(RULES)
+
+    def test_rules_without_for_each_expand_once(self):
+        rule = next(r for r in self.rules if r.id == "new-bench-dashboard-row")
+        self.assertIsNone(rule.for_each)
+        ctx = {"pr": "1", "crate": "sparq-core"}
+        self.assertEqual(
+            flow_on.rule_contexts(rule, ctx, ["crates/a/Cargo.toml"]), [ctx]
+        )
+
+    def test_new_crate_fan_out_rebinds_crate_per_added_crate(self):
+        rule = next(r for r in self.rules if r.id == "new-crate-followons")
+        self.assertEqual(rule.for_each, flow_on.FOR_EACH_NEW_CRATE)
+        ctxs = flow_on.rule_contexts(
+            rule,
+            {"pr": "1", "crate": "whatever"},
+            ["crates/a/Cargo.toml", "crates/b/Cargo.toml", "README.md"],
+        )
+        self.assertEqual([c["crate"] for c in ctxs], ["a", "b"])
+
+    def test_unknown_for_each_mode_is_a_loud_error(self):
+        # Silently treating a typo as "no fan-out" would mint only one crate's
+        # follow-ons — the exact gap this field closes.
+        with tempfile.TemporaryDirectory() as td:
+            bad = Path(td) / "rules.toml"
+            bad.write_text(
+                '[[rule]]\n'
+                'id = "typo"\n'
+                'when_new_paths = ["crates/*/Cargo.toml"]\n'
+                'for_each = "new_crates"\n'
+                '[[rule.create]]\n'
+                'dedup_key = "k-{crate}"\n'
+                'title = "t"\n'
+                'body = "b"\n'
+            )
+            with self.assertRaises(ValueError) as cm:
+                flow_on.load_rules(bad)
+        self.assertIn("for_each", str(cm.exception))
+
+    def test_crate_label_without_fan_out_is_rejected(self):
+        # `area:{crate}` on a rule that cannot bind {crate} would mint the
+        # dangling key `area:`, which triage.py counts as a real area.
+        with tempfile.TemporaryDirectory() as td:
+            bad = Path(td) / "rules.toml"
+            bad.write_text(
+                '[[rule]]\n'
+                'id = "dangling-area"\n'
+                'when_paths = ["crates/**"]\n'
+                '[[rule.create]]\n'
+                'dedup_key = "k"\n'
+                'title = "t"\n'
+                'body = "b"\n'
+                'labels = ["area:{crate}"]\n'
+            )
+            with self.assertRaises(ValueError) as cm:
+                flow_on.load_rules(bad)
+        self.assertIn("{crate}", str(cm.exception))
 
 
 class ChangedSurfaceTest(unittest.TestCase):
@@ -341,6 +511,12 @@ class RoutingLabelsTest(unittest.TestCase):
             # new-zk-circuit-gatecount
             dict(changed=["zk/arith/Nargo.toml"], added=["zk/arith/Nargo.toml"],
                  labels=[], title="zk arith", pub_changed=None),
+            # [OPUS-5] (#2547) new-crate-followons — all three templates, which
+            # between them exercise the per-crate `area:{crate}` expansion and
+            # the role:impl / role:site / role:docs routing.
+            dict(changed=["crates/sparq-foo/Cargo.toml"],
+                 added=["crates/sparq-foo/Cargo.toml"], labels=[],
+                 title="add sparq-foo", pub_changed=None),
         ]
         out = []
         for fx in fixtures:
@@ -449,9 +625,12 @@ class DryRunTest(unittest.TestCase):
         self.assertIn("[dry-run] WOULD create", out)
         self.assertIn("dashboard-row-watdiv", out)
 
-    def test_dry_run_on_new_crate_with_g1_artifacts_is_clean(self):
+    def test_dry_run_on_new_crate_mints_only_the_un_gateable_follow_ons(self):
         # [OPUS-4.8] (bead sq-l0a0) A new-crate PR that ships its G1 artifacts
-        # (bench + README + SKILL) triggers NO redundant flow-on follow-on.
+        # (bench + README + SKILL) triggers NO redundant follow-on for THOSE.
+        # [OPUS-5] (#2547) It does mint the three G1 cannot gate — test methods,
+        # website, guide. Both halves are asserted here so neither can regress
+        # into the other's territory.
         import tempfile
 
         with tempfile.TemporaryDirectory() as td:
@@ -482,6 +661,9 @@ class DryRunTest(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertNotIn("new-crate-bench", out)
         self.assertNotIn("new-crate-skill", out)
+        self.assertIn("crate-test-methods-sparq-foo", out)
+        self.assertIn("crate-website-sparq-foo", out)
+        self.assertIn("crate-guide-sparq-foo", out)
 
     def test_dry_run_no_match_is_clean(self):
         import tempfile

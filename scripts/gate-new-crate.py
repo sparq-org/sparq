@@ -13,6 +13,16 @@
 # That table row and this docstring are the two halves of the same rule — change
 # one and update the other; the divergence is what sq-ncvq.10 exists to prevent.
 #
+# [OPUS-5] (#2547) SCOPE — G1 owns THREE of the five things a new package owes:
+# README, registered bench, SKILL.md. It deliberately does NOT decide which TEST
+# METHODS the crate needs, nor whether it is advertised on the website / covered
+# by the published guide: those depend on the crate's content, or are assembled
+# out-of-band, so they cannot be a merge gate. They are minted after merge by the
+# reactive `new-crate-followons` rule (scripts/flow-on-rules.toml), which reuses
+# `added_crates()` + `crate_is_stub()` from THIS file so the two halves can never
+# disagree about what a "new" or a "public" crate is. If you extend G1's checks,
+# check whether that rule should shed the corresponding follow-on.
+#
 # RULE (G1): when a PR ADDS a new `crates/<x>/Cargo.toml`, fail unless the SAME
 # PR also provides, for that crate:
 #   (a) a registered benchmark — a `[[benchmark]]` entry in bench/benchmarks.toml
