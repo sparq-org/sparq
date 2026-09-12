@@ -239,8 +239,13 @@ impl AcpModel {
     }
 
     /// Is `policy` satisfied for `req`? Every `allOf` matcher matches AND (no `anyOf`, or at
-    /// least one `anyOf` matches) AND no `noneOf` matcher matches.
+    /// least one `anyOf` matches) AND no `noneOf` matcher matches. A positive matcher is required.
     fn policy_satisfied(&self, pol: &Policy, req: &Request) -> bool {
+        // [GPT-6] ACP §6.4: noneOf alone cannot satisfy a policy.
+        // https://solidproject.org/TR/acp#satisfied-policy
+        if pol.all_of.is_empty() && pol.any_of.is_empty() {
+            return false;
+        }
         let all_of_ok = pol
             .all_of
             .iter()
@@ -436,5 +441,61 @@ mod tests {
             m.decide(&req(None, None, RefMode::Read, "https://pod.ex/d1")),
             RefDecision::Deny
         );
+    }
+
+    // [GPT-6] Independent fixtures for ACP §6.4's positive-matcher requirement.
+    fn policy_fixture(conditions: &str) -> String {
+        let acr = "https://pod.ex/d1.acr";
+        format!(
+            r#"<{acr}> <{ACP}resource> <https://pod.ex/d1> <{acr}> .
+<{acr}> <{ACP}accessControl> <{acr}#control> <{acr}> .
+<{acr}#control> <{ACP}apply> <{acr}#policy> <{acr}> .
+<{acr}#policy> <{ACP}allow> <{ACL}Read> <{acr}> .
+<{acr}#public> <{ACP}agent> <{PUBLIC_AGENT}> <{acr}> .
+<https://pod.ex/d1#it> <https://ex.dev/ns#prop> "x" <https://pod.ex/d1> .
+{conditions}"#
+        )
+    }
+
+    #[test]
+    fn policies_without_positive_matchers_never_grant() {
+        let acr = "https://pod.ex/d1.acr";
+        let none_of = format!("<{acr}#policy> <{ACP}noneOf> <{acr}#except> <{acr}> .\n");
+        let nonmatching_exception =
+            format!("{none_of}<{acr}#except> <{ACP}agent> <https://alice.ex/#me> <{acr}> .\n");
+        for conditions in ["", &none_of, &nonmatching_exception] {
+            let model = AcpModel::from_nquads(&policy_fixture(conditions)).unwrap();
+            for agent in [None, Some("https://bob.ex/#me")] {
+                assert_eq!(
+                    model.decide(&req(agent, None, RefMode::Read, "https://pod.ex/d1")),
+                    RefDecision::Deny,
+                    "no positive matcher: {conditions}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn positive_matcher_with_empty_exception_is_satisfied() {
+        let acr = "https://pod.ex/d1.acr";
+        for combinator in ["allOf", "anyOf"] {
+            let positive = format!("<{acr}#policy> <{ACP}{combinator}> <{acr}#public> <{acr}> .\n");
+            let empty_exception =
+                format!("{positive}<{acr}#policy> <{ACP}noneOf> <{acr}#except> <{acr}> .\n");
+            let matching_exception = format!(
+                "{empty_exception}<{acr}#except> <{ACP}agent> <{PUBLIC_AGENT}> <{acr}> .\n"
+            );
+            for (conditions, expected) in [
+                (&positive, RefDecision::Allow),
+                (&empty_exception, RefDecision::Allow),
+                (&matching_exception, RefDecision::Deny),
+            ] {
+                let model = AcpModel::from_nquads(&policy_fixture(conditions)).unwrap();
+                assert_eq!(
+                    model.decide(&req(None, None, RefMode::Read, "https://pod.ex/d1")),
+                    expected
+                );
+            }
+        }
     }
 }

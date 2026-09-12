@@ -39,6 +39,14 @@
 { ?pol acp:anyOf ?m . }  => { ?pol solidx:hasMatcher ?m . ?m solidx:isMatcher true . } .
 { ?pol acp:noneOf ?m . } => { ?m solidx:isMatcher true . } .
 
+# [GPT-6] ACP §6.5 requires at least one attribute. Absent dimensions are
+# unconstrained only for a nonempty matcher; rdf:type alone is not an attribute.
+# Keep this guard shared by positive matchers and noneOf exception accept-sets.
+{ ?m solidx:isMatcher true . ?m acp:agent ?v . }  => { ?m solidx:hasAttribute true . } .
+{ ?m solidx:isMatcher true . ?m acp:client ?v . } => { ?m solidx:hasAttribute true . } .
+{ ?m solidx:isMatcher true . ?m acp:issuer ?v . } => { ?m solidx:hasAttribute true . } .
+{ ?m solidx:isMatcher true . ?m acp:vc ?v . }     => { ?m solidx:hasAttribute true . } .
+
 # ── matcher raw values mapped into principal space (drive candidate generation) ───────
 { ?m solidx:isMatcher true . ?m acp:agent ?a . ?a solidx:isWebId true . }
 => { ?m solidx:agentValP ?a . } .
@@ -70,8 +78,8 @@
 # not credential-gate — the second step is the identity, so the auth view is byte-identical
 # to the pre-acp:vc rule set.
 { ?m solidx:agentValP ?a . } => { ?m solidx:rawAgentP ?a . } .
-# no agent attribute at all -> agent-unconstrained -> accepts the top
-{ ?m solidx:isMatcher true . ?UNSCOPED log:notIncludes { ?m acp:agent ?x . } . }
+# A nonempty matcher with no agent attribute is agent-unconstrained.
+{ ?m solidx:hasAttribute true . ?UNSCOPED log:notIncludes { ?m acp:agent ?x . } . }
 => { ?m solidx:rawAgentP auth:Public . } .
 { ?m solidx:rawAgentP auth:Public . }
 => { ?m solidx:rawAgentP auth:Authenticated . } .
@@ -106,14 +114,14 @@
 => { ?m solidx:acceptsAgentP ?a . } .
 
 { ?m solidx:clientValP ?c . } => { ?m solidx:acceptsClientP ?c . } .
-{ ?m solidx:isMatcher true . ?UNSCOPED log:notIncludes { ?m acp:client ?x . } . }
+{ ?m solidx:hasAttribute true . ?UNSCOPED log:notIncludes { ?m acp:client ?x . } . }
 => { ?m solidx:acceptsClientP auth:AnyClient . } .
 { ?m solidx:acceptsClientP auth:AnyClient . ?c solidx:isCandClient true . }
 => { ?m solidx:acceptsClientP ?c . } .
 
 # [OPUS-4.8] sq-3jtd.6: issuer accept-set, the twin of the client one above.
 { ?m solidx:issuerValP ?i . } => { ?m solidx:acceptsIssuerP ?i . } .
-{ ?m solidx:isMatcher true . ?UNSCOPED log:notIncludes { ?m acp:issuer ?x . } . }
+{ ?m solidx:hasAttribute true . ?UNSCOPED log:notIncludes { ?m acp:issuer ?x . } . }
 => { ?m solidx:acceptsIssuerP auth:AnyIssuer . } .
 { ?m solidx:acceptsIssuerP auth:AnyIssuer . ?i solidx:isCandIssuer true . }
 => { ?m solidx:acceptsIssuerP ?i . } .
