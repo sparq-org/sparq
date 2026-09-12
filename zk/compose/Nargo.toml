@@ -1,5 +1,21 @@
 [workspace]
 members = [
+    # [GPT-6] Wider private integers and complete status-tree capacities.
+    "result_v2_k1_n16_p3_r4_f2_i64_d10",
+    "result_v2_k1_n16_p3_r4_f0_i0_d17",
+    "result_v2_k1_n16_p3_r4_f2_i8_d17",
+    "result_v2_k1_n16_p3_r4_f2_i64_d17",
+    "result_v2_k1_n16_p3_r4_f0_i0_d20",
+    "result_v2_k1_n16_p3_r4_f2_i8_d20",
+    "result_v2_k1_n16_p3_r4_f2_i64_d20",
+    "result_v2_k2_n16_p3_r4_f2_i64_d10",
+    "result_v2_k2_n16_p3_r4_f0_i0_d17",
+    "result_v2_k2_n16_p3_r4_f2_i8_d17",
+    "result_v2_k2_n16_p3_r4_f2_i64_d17",
+    "result_v2_k2_n16_p3_r4_f0_i0_d20",
+    "result_v2_k2_n16_p3_r4_f2_i8_d20",
+    "result_v2_k2_n16_p3_r4_f2_i64_d20",
+
     "compose_core",
     # [GPT-6] Successful-result proofs, separate from complete-scan v1.
     "result_v1_k1_n16_p3_r4_f0",
