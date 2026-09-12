@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""CI EXECUTION-LATENCY alarm — two detected choke modes, one documented gap. 🤖 SPARQ agent.
+"""CI EXECUTION-LATENCY alarm — three detected modes, one documented gap. 🤖 SPARQ agent.
 
 Bead sq-1lc4i. Maintainer-requested (2026-07-28): "setting up alerting for when runners
 are not picked up for crons or delayed for other dispatches on both repos. This is an
 indicator that you are choking on runner availability and is something that we would need
 to manage."
 
-WHAT IS AND IS NOT COVERED. Two modes are detected. The third — queue wait, which is
+WHAT IS AND IS NOT COVERED. Three modes are detected. The fourth — queue wait, which is
 runner availability proper and the maintainer's literal ask — is NOT detected, and that
 gap is documented rather than filled with a check that cannot see it. Read the QUEUE WAIT
 section below the constants before assuming this file covers starvation; it does not.
@@ -18,6 +18,11 @@ section below the constants before assuming this file covers starvation; it does
   M3 EXECUTION OVERRUN     DETECTED. A run that is `in_progress` far past its lane's own
                            measured duration. It consumes capacity while looking perfectly
                            healthy: no red, no alert, no artifact.
+  M4 CADENCE FIDELITY      DETECTED. A lane whose declared `cron:` rate is a fiction on
+                           this repo — it keeps running, keeps going green, and delivers a
+                           small fraction of what it declares, every day. CHRONIC, not an
+                           incident: it reports into the deduped issue and deliberately
+                           does NOT red the run. See the M4 section below.
   QUEUE WAIT               NOT DETECTED — deliberate, documented gap. Zero non-zero queue
                            waits across 44,190 completed runs, and the one event that
                            motivated a detector turned out to be a configured
@@ -90,6 +95,79 @@ is among them.
 
 M3 is keyed on live run STATE, which #4368 does not look at in any scope.
 
+M4 is scoped to EVERY scheduled lane, cron-only included, and is NOT partitioned against
+either of the other two. It does not need to be: M1 and #4368 both ask "is this LANE
+healthy?", and two health verdicts on one lane are the duplicate that matters. M4 asks
+"is this lane's DECLARATION achievable here?" — a property of the workflow file, answered
+identically on a good day and a bad one — and it emits ONE repo-level finding into the
+same deduped issue, never a per-lane issue. So it can share a lane with M1 the way a lint
+shares a file with a test.
+
+=============================================================================
+M4 — WHY THIS IS A DECLARATION DETECTOR AND NOT AN INCIDENT DETECTOR (#4802)
+=============================================================================
+#4802 measured, on 2026-07-28 to ~12:30Z, five sub-hourly lanes that had each produced
+5 scheduled runs since 00:00Z with largest gaps of 193-200 min, every run green, and asked
+for an alarm on "sustained under-delivery" against declared cadence.
+
+RECONCILED against the measurement already recorded in the M1 constants below — the same
+repo, the same lanes, the 24h to 2026-07-28T13:15Z — those numbers are NOT an incident:
+
+    lane                    #4802 (12.5h to 12:30Z)   M1 census (24h to 13:15Z)
+    promote-on-approval                  5                        12
+    verdict-bridge                       5                        12
+    auto-arm                             5                        12
+    rearm-sweeper                        5                        13
+    retriage                             5                        12
+
+5 fires in 12.5h is ~9.6/day against a measured achieved baseline of 12/day, i.e. ratio
+~0.8 — and the MINIMUM ratio across the 24 lanes on that same healthy census was 0.75.
+The #4802 day is inside the healthy band on the only baseline this repo has measured. So
+the incident detector the issue asked for cannot be validated: its "known positive" and
+its "known negative" are the same day, and any per-lane threshold that separates them
+sits above the worst healthy lane and fires on healthy lanes forever. Two candidate
+instruments were worked through and rejected on exactly that:
+
+  * ESTATE-WIDE AGGREGATE RATIO (sum actual / sum expected over all lanes). Tightens the
+    distribution, but the positive is 0.83 and the healthy aggregate implied by the same
+    census is ~1.00, over one observation each. One day per side is not a validation.
+  * CHANGE POINT (the rate INSIDE the #4802 window against the rate over the REST of the
+    same 24h census). 5 fires in the 12.5h since 00:00Z is 0.40/h; the other 7 of that
+    lane's 12 fall in the remaining ~11.5h, i.e. ~0.61/h — a ratio of ~0.66, a real drop.
+    But GitHub's `schedule` delivery is documented best-effort and bursty at sub-day
+    scale, and this file already rejected sub-day prorating for exactly that reason (see
+    the NEW-LANE WINDOW note). There is no measured healthy distribution of this statistic
+    to put a floor inside, and one observation cannot supply one.
+
+What IS separable, cleanly and with the measurement already in hand, is the thing #4802's
+headline actually names: **a lane firing at a small fraction of its DECLARED cadence.**
+On the 24h to 2026-07-28T13:15Z census the achieved/declared fidelity of every measured
+lane fell into two groups with an EMPTY 3x band between them:
+
+    declaration honoured   16 daily lanes 1/1 = 1.00 ; refresh-start-here 3/4 = 0.75
+    -------------------------- nothing at all between 0.25 and 0.75 ----------------
+    declaration a fiction  retriage 12/48 = 0.25 ; batch-merge 12/96 = 0.125 ;
+                           auto-arm 12/144 = 0.083 ; promote-on-approval 12/144 = 0.083 ;
+                           verdict-bridge 12/144 = 0.083 ; rearm-sweeper 13/144 = 0.090
+
+That is the detector this file can honestly ship, and it answers the operational half of
+#4802: this estate's self-maintenance loops (arming, re-arming, promote-on-approval,
+retriage, the merge-group watchdog) are WRITTEN as 10-minute loops and RUN as ~2-hour
+loops, and nothing anywhere says so.
+
+WHAT M4 DOES NOT DO, stated plainly rather than implied: it does not detect a transient
+scheduler degradation. If GitHub halves its delivery for six hours, M4's 24h fidelity
+barely moves and M4 stays quiet. That gap is real and remains open; closing it needs a
+measured healthy distribution of a sub-day statistic, which this repo does not have.
+
+WHY M4 DOES NOT RED THE RUN. M4 is chronic by construction: it is true on a good day, and
+it stays true until a workflow file is edited. Wiring it to `exit 1` would leave this
+hourly lane permanently red, and a permanently-red alarm is a muted alarm — which would
+mute M1 and M3, the two INCIDENT modes that share it. That is the same argument the QUEUE
+WAIT note uses to reject a job-creation-lag detector, applied to this file's own output.
+M4's artifact is the deduped repo-level issue, which is the shape #4802 asked for ("One
+repo-level finding, deduped, is probably right"); exit 1 stays reserved for M1/M3.
+
 =============================================================================
 THRESHOLDS — every one derived from measurement, with the N stated
 =============================================================================
@@ -112,9 +190,9 @@ Usage:
       --now 2026-07-28T12:00:00Z --dry-run            # hermetic (tests)
   ci_execution_latency_alarm.py --self-test           # hermetic fixtures
 
-Exit codes: 0 = clean, 1 = a choke was found (RED by design), 2 = the detector itself is
-broken (fail-loud). Collapsing any pair would make a broken detector indistinguishable
-from a healthy repo.
+Exit codes: 0 = no INCIDENT (an M4 chronic finding may still have been filed), 1 = an
+incident choke was found (RED by design), 2 = the detector itself is broken (fail-loud).
+Collapsing any pair would make a broken detector indistinguishable from a healthy repo.
 
 Stdlib + PyYAML (preinstalled on GitHub-hosted runners) + the `gh` CLI.
 """
@@ -184,6 +262,40 @@ CRON_MIN_EXPECTED = 1
 # mode that has no artifact — a lane that stops entirely goes to 0.00 — and catches a
 # halving of a sub-hourly lane's achieved rate (12 -> 6 of a capped 12 = 0.50).
 CRON_DELIVERY_FLOOR = 0.60
+
+# --- M4: declared-vs-achieved cadence fidelity (#4802) -----------------------------
+# WINDOW: 24h, reusing the same fetched run times as M1. 24h is "several times the period"
+# by a wide margin for every lane M4 admits (the shortest-period lane it can admit declares
+# 13 fires/day), so a single busy hour cannot move it: one lost hour of a `*/10` lane costs
+# 6 of 142 declared fires, 4%.
+# FIXED, and deliberately NOT `--window-hours`. The floor and the admission ceiling below
+# are validated against a 24h census and nothing else; at `--window-hours 6` the same 0.40
+# floor would be judging six-hour delivery, which is exactly the sub-day burstiness the
+# header says M4 must NOT try to see. `run()` therefore does not thread the M1 CLI window
+# into M4 — see the call site.
+M4_WINDOW_HOURS = CRON_WINDOW_HOURS
+# ADMISSION. A lane is only asked the fidelity question if its DECLARED rate exceeds what
+# this repo has been measured to deliver at all — i.e. nominal > the M1 cap of 12/24h.
+# Two reasons, both load-bearing:
+#   1. Below the cap the declaration is not a fiction, so a low ratio means the lane had a
+#      BAD DAY — which is M1's question, on M1's capped denominator. Admitting those lanes
+#      would put M1 and M4 on the same lane answering the same question, which is the
+#      duplicate the #4368 partition exists to prevent.
+#   2. A ratio needs a denominator. The smallest admissible nominal is 13; the achievable
+#      lanes measured on 2026-07-28 declared 1 or 4, where one dropped firing swings the
+#      ratio by 0.25-1.00 and no floor means anything.
+# The admission rule is DERIVED from CRON_MAX_CREDIBLE_FIRINGS_PER_HOUR rather than being
+# its own number, so the two cannot drift apart.
+# FLOOR. VALIDATED against the 24-lane census recorded in the M1 note above, not chosen:
+# the achievable lanes bottomed out at 0.75 and the fictional ones topped out at 0.25, an
+# EMPTY 3x band. 0.40 sits inside it — 1.6x above the highest fictional lane and 1.9x
+# below the lowest honoured one — and is the geometric-ish middle of an interval with no
+# observation in it. It is deliberately set BELOW 0.50: an hourly lane (nominal 24) would
+# land at exactly 0.50 IF the measured ~12/day ceiling held for it, but that ceiling was
+# only measured on lanes declaring far more than 12, so firing on it would be acting on an
+# inference rather than a measurement. `ci-latency-alarm.yml` itself is that lane, and M4
+# is quiet on it by design. That is a KNOWN MISS, recorded here rather than papered over.
+M4_FIDELITY_FLOOR = 0.40
 
 # =============================================================================
 # QUEUE WAIT / RUNNER STARVATION — DELIBERATELY NOT DETECTED. Read this before
@@ -419,6 +531,27 @@ def m1_scope(on: dict) -> tuple[bool, list[str], bool]:
 # ---------------------------------------------------------------------------------
 # detectors — pure functions over already-fetched state
 # ---------------------------------------------------------------------------------
+def sample_truncated(lane: dict, start: dt.datetime) -> bool:
+    """Does this lane's newest-100 run sample fail to reach back to `start`?
+
+    COVERAGE IS WINDOW-RELATIVE, so it cannot be decided once at fetch time and then
+    shared: M1 runs on `--window-hours` and M4 on its own fixed `M4_WINDOW_HOURS`, and a
+    sample that reaches back over one need not reach back over the other. Deciding it once
+    against M1's window let `--window-hours 6` call M4's 24h sample complete when it was
+    not — an UNDERCOUNT, which on M4's ratio manufactures a fiction out of a healthy lane —
+    and, in the other direction, let a window LONGER than 24h mute M4 on a sample that
+    covers M4's window perfectly well. Each detector asks about its own window instead.
+
+    An explicit `truncated` flag on the lane still wins, so a hermetic `--state-file`
+    fixture can express the condition without carrying 100 timestamps.
+    """
+    if lane.get("truncated"):
+        return True
+    times = lane.get("schedule_run_times") or []
+    # A page that came back SHORT is the lane's whole history: complete, however old it is.
+    return len(times) >= 100 and min(times) > start
+
+
 def find_cron_deficits(lanes: list[dict], now: dt.datetime,
                        window_hours: float = CRON_WINDOW_HOURS) -> tuple[list[dict], dict]:
     """M1. `lanes` = [{workflow, crons, cron_only, in_scope, state, schedule_run_times}].
@@ -500,6 +633,86 @@ def find_cron_deficits(lanes: list[dict], now: dt.datetime,
             })
         else:
             bump("delivering")
+    return findings, census
+
+
+def find_cadence_fidelity_gaps(lanes: list[dict], now: dt.datetime,
+                               window_hours: float = M4_WINDOW_HOURS
+                               ) -> tuple[list[dict], dict]:
+    """M4 (#4802). Lanes whose DECLARED cron rate is a fiction on this repo.
+
+    Scope is EVERY scheduled lane, cron-only included — the population #4802 measured is
+    mostly cron-only (`promote-on-approval`, `rearm-sweeper`, `retriage`), which M1
+    structurally cannot see. That is safe because M4 answers a question about the workflow
+    FILE, not about the lane's health, and because it emits AT MOST ONE finding for the
+    whole repo: 13 identical per-lane issues is the shape that gets an alarm muted.
+
+    Denominator is the NOMINAL (uncapped) declaration — the whole point is the distance
+    between what the file says and what arrives. M1's capped expectation is the opposite
+    measurement and neither substitutes for the other.
+    """
+    start = now - dt.timedelta(hours=window_hours)
+    end = now - dt.timedelta(minutes=CRON_GRACE_MINUTES)
+    ceiling = int(CRON_MAX_CREDIBLE_FIRINGS_PER_HOUR * window_hours)
+    census: dict[str, int] = {}
+    divergent: list[dict] = []
+
+    def bump(state: str) -> None:
+        census[state] = census.get(state, 0) + 1
+
+    for lane in lanes:
+        if not lane.get("crons"):
+            bump("not-scheduled")
+            continue
+        if lane.get("state") != "active":
+            bump("disabled")
+            continue
+        # The run sample is the newest 100. If it does not reach back to THIS detector's
+        # window start the count is an UNDERCOUNT, which on this ratio manufactures a
+        # fictional lane out of a healthy one. Fail-safe quiet, and counted so the skip is
+        # visible. Evaluated against M4's own `start`, never M1's — see `sample_truncated`.
+        if sample_truncated(lane, start):
+            bump("sample-truncated")
+            continue
+        created = lane.get("created_at")
+        if created:
+            born = created if isinstance(created, dt.datetime) else _ts(created)
+            if born > start:
+                bump("lane-too-new-for-an-expectation")
+                continue
+        try:
+            nominal = sum(expected_firings(c, start, end) for c in lane["crons"])
+        except CronError:
+            bump("cron-unparseable")
+            continue
+        if nominal <= ceiling:
+            bump("declaration-within-the-measured-ceiling")
+            continue
+        actual = sum(1 for t in lane["schedule_run_times"] if start < t <= end)
+        fidelity = actual / nominal
+        if fidelity < M4_FIDELITY_FLOOR:
+            bump("declaration-unachievable")
+            divergent.append({
+                "workflow": lane["workflow"],
+                "nominal": nominal,
+                "actual": actual,
+                "fidelity": round(fidelity, 3),
+                "crons": lane["crons"],
+            })
+        else:
+            bump("declaration-honoured")
+
+    findings: list[dict] = []
+    if divergent:
+        # ONE finding for the repo. `workflow` is deliberately not a lane: nothing
+        # downstream should be able to read this as a per-lane health verdict.
+        findings.append({
+            "mode": "M4-declared-cadence-unachievable",
+            "workflow": f"(repo-level: {len(divergent)} lane declarations)",
+            "lanes": sorted(divergent, key=lambda d: (d["fidelity"], d["workflow"])),
+            "window_hours": window_hours,
+            "floor": M4_FIDELITY_FLOOR,
+        })
     return findings, census
 
 
@@ -669,20 +882,27 @@ def fetch_lanes(repo: str, workflows_dir: Path, window_hours: float,
                 "in_scope": in_scope, "state": state_by_path.get(rel, "active"),
                 "created_at": created_by_path.get(rel),
                 "schedule_run_times": []}
-        if in_scope and lane["state"] == "active":
+        # Run times are fetched for EVERY active scheduled lane, not just M1's complement:
+        # M4's population is all of them, and the lanes #4802 measured are mostly cron-only
+        # (`promote-on-approval`, `rearm-sweeper`, `retriage`). Narrowing this to `in_scope`
+        # would leave M4 reading `actual = 0` for 20 of the 33 scheduled lanes and calling
+        # every one of them a fiction.
+        if crons and lane["state"] == "active":
             payload = _gh(["api", f"repos/{repo}/actions/workflows/{path.name}/runs"
                                   f"?event=schedule&per_page=100"])
             if not isinstance(payload, dict) or payload.get("workflow_runs") is None:
                 raise AlarmError(f"{path.name}: schedule-run response carries no workflow_runs")
             times = [_ts(r["created_at"]) for r in payload["workflow_runs"]
                      if r.get("created_at")]
+            lane["schedule_run_times"] = times
             # COVERAGE GUARD: the sample is the newest 100 runs. If the OLDEST sampled run
             # is newer than the window start, the count is TRUNCATED and would manufacture
             # a phantom deficit. Treat as indeterminate (fail-safe quiet), never as 0.
-            if times and min(times) > start and len(times) >= 100:
+            # Decided here for M1 ONLY, because `in_scope` is M1's admission and `start`
+            # is M1's `--window-hours`. M4 re-asks `sample_truncated` against its own 24h
+            # window; no truncation flag is written here, or M1's window would decide M4's.
+            if sample_truncated(lane, start):
                 lane["in_scope"] = False
-                lane["truncated"] = True
-            lane["schedule_run_times"] = times
         lanes.append(lane)
     return lanes
 
@@ -713,6 +933,22 @@ def render_issue_body(repo: str, findings: list[dict], census: dict[str, dict],
                     f"**{f['expected']}** in the last {f['window_hours']:g}h "
                     f"(ratio {f['ratio']}, floor {CRON_DELIVERY_FLOOR}); "
                     f"cron `{' | '.join(f['crons'])}`")
+            elif mode.startswith("M4"):
+                lines += [
+                    f"**{len(f['lanes'])} lane(s)** declare a cadence this repo does not "
+                    f"deliver: achieved below {f['floor']} of the DECLARED firing count "
+                    f"over {f['window_hours']:g}h. This is chronic, not an incident — it "
+                    "does not red this run. The declaration is the defect: correct each "
+                    "`cron:` to a rate GitHub actually delivers here, or every loop sized "
+                    "on it is sized on a fiction.",
+                    "",
+                ]
+                for lane in f["lanes"]:
+                    lines.append(
+                        f"- `{lane['workflow']}` declares **{lane['nominal']}** fires/"
+                        f"{f['window_hours']:g}h, achieved **{lane['actual']}** "
+                        f"(fidelity {lane['fidelity']}); "
+                        f"cron `{' | '.join(lane['crons'])}`")
             else:
                 lines.append(
                     f"- `{f['workflow']}` run {f['run_id']} ({f['event']}) has been "
@@ -798,8 +1034,18 @@ def run(args: argparse.Namespace) -> int:
 
     m1, c1 = find_cron_deficits(lanes, now, args.window_hours)
     m3, c3 = find_execution_overruns(live, baselines, now)
-    findings = m1 + m3
-    census = {"M1-cron-firing-deficit": c1, "M3-execution-overrun": c3}
+    # M4 runs on M4_WINDOW_HOURS, NOT on `--window-hours`. Its floor and its admission
+    # ceiling are validated against a 24h census only; handing it a sub-day window would
+    # make it judge the exact short-scale burstiness the header says it must not see, and
+    # a longer one would leave it reading a floor no measurement supports.
+    m4, c4 = find_cadence_fidelity_gaps(lanes, now)
+    # INCIDENT vs CHRONIC. Only the incident modes set the exit code; M4 is true on a good
+    # day and would leave this hourly lane permanently red, muting M1 and M3 with it. See
+    # the M4 section of the header.
+    incidents = m1 + m3
+    findings = incidents + m4
+    census = {"M1-cron-firing-deficit": c1, "M3-execution-overrun": c3,
+              "M4-declared-cadence-unachievable": c4}
 
     print(f"ci-latency census for {repo} at {now:%Y-%m-%dT%H:%M:%SZ} "
           f"({len(lanes)} workflows, {len(live)} live runs):")
@@ -819,7 +1065,11 @@ def run(args: argparse.Namespace) -> int:
         print(body)
     else:
         file_issue(repo, body, len(findings))
-    print(f"::error::{len(findings)} CI execution-latency breach(es) in {repo} — "
+    if not incidents:
+        print("::notice::CI execution latency is within every measured threshold; a "
+              "chronic cadence-fidelity finding (M4) was filed into the deduped issue")
+        return 0
+    print(f"::error::{len(incidents)} CI execution-latency breach(es) in {repo} — "
           "runner pickup, cron delivery, or execution time is outside its measured band")
     return 1
 
@@ -917,6 +1167,11 @@ def _self_test() -> int:  # noqa: C901 - a flat table of named assertions reads 
     check("EXEC_FLOOR_SECONDS is GitHub's 6h hosted-runner job ceiling",
           EXEC_FLOOR_SECONDS == 6 * 60 * 60)
     check("BASELINE_MIN_N is 5", BASELINE_MIN_N == 5)
+    # M4's floor must stay strictly inside the EMPTY band measured on 2026-07-28: the
+    # worst honoured declaration was 0.75, the best fictional one 0.25. Pinned against
+    # those two literals, not against itself.
+    check("M4_FIDELITY_FLOOR is inside the empty 0.25-0.75 band, and below 0.50",
+          0.25 < M4_FIDELITY_FLOOR < 0.50)
 
     # --- cron expansion, canary-validated against hand-computed answers ---
     check("cron */10 over 6h == 36", expected_firings("*/10 * * * *", H6, NOW) == 36)
@@ -1040,6 +1295,90 @@ def _self_test() -> int:  # noqa: C901 - a flat table of named assertions reads 
     check("M1 judges a lane born 25h ago (outside the 24h window)",
           len(f) == 1 and c.get("firing-deficit") == 1)
 
+    # --- M4: declared-vs-achieved cadence fidelity (#4802) ---------------------------
+    # KNOWN POSITIVE. The real cron strings from this repo's workflow files, paired with
+    # the achieved counts MEASURED over the 24h to 2026-07-28T13:15Z and recorded in the
+    # M1 constants note. Nothing here is invented and nothing is computed from
+    # M4_FIDELITY_FLOOR, so the floor cannot rescale the fixture.
+    MEASURED_2026_07_28 = [
+        ("promote-on-approval.yml", "*/10 * * * *", 12),
+        ("rearm-sweeper.yml", "8,18,28,38,48,58 * * * *", 13),
+        ("auto-arm.yml", "4,14,24,34,44,54 * * * *", 12),
+        ("verdict-bridge.yml", "1,11,21,31,41,51 * * * *", 12),
+        ("batch-merge.yml", "7,22,37,52 * * * *", 12),
+        ("retriage.yml", "*/30 * * * *", 12),
+    ]
+    positive = [_lane(workflow=w, crons=(c,), fires=n, now=NOW, spacing_min=30)
+                for w, c, n in MEASURED_2026_07_28]
+    f, c = find_cadence_fidelity_gaps(positive, NOW)
+    check("M4 KNOWN POSITIVE: the six measured 2026-07-28 lanes are all divergent",
+          c.get("declaration-unachievable") == len(MEASURED_2026_07_28))
+    check("M4 emits ONE repo-level finding, not one per lane",
+          len(f) == 1 and len(f[0]["lanes"]) == len(MEASURED_2026_07_28))
+    check("M4's finding subject is the repo, never a single lane",
+          f and f[0]["workflow"].startswith("(repo-level"))
+    check("M4 reports the DECLARED count, not M1's capped expectation",
+          f and f[0]["lanes"][0]["nominal"] > capped_expectation())
+    # KNOWN NEGATIVE. NOT "the same lanes on a healthy day" — the reconciliation in the
+    # header shows those lanes deliver 12/day on a healthy day too, which is exactly why
+    # M4 is a declaration detector. The negative is therefore a lane whose DECLARATION is
+    # achievable, from the same census: ci.yml 1/1 and refresh-start-here 3/4.
+    negative = [_lane(workflow="ci.yml", crons=("17 3 * * *",), fires=1, now=NOW),
+                _lane(workflow="refresh-start-here.yml",
+                      crons=("23 5,11,17,23 * * *",), fires=3, now=NOW)]
+    f, c = find_cadence_fidelity_gaps(negative, NOW)
+    check("M4 KNOWN NEGATIVE: the measured lanes with achievable declarations are silent",
+          not f and c.get("declaration-within-the-measured-ceiling") == 2)
+    # THRESHOLD PINS against LITERALS. `0 * * * *` declares exactly 23 firings inside the
+    # graced 24h window — a number that derives from neither the floor nor the cap.
+    HOURLY = ("0 * * * *",)
+    f, _ = find_cadence_fidelity_gaps([_lane(crons=HOURLY, fires=9, now=NOW)], NOW)
+    check("M4 raises at 9 of a literal 23 (0.391) — pins the floor from BELOW",
+          len(f) == 1 and f[0]["lanes"][0]["nominal"] == 23)
+    f, _ = find_cadence_fidelity_gaps([_lane(crons=HOURLY, fires=10, now=NOW)], NOW)
+    check("M4 is quiet at 10 of a literal 23 (0.435) — pins the floor from ABOVE", not f)
+    # ADMISSION pins, both sides of the measured ceiling of 12 declared firings.
+    f, c = find_cadence_fidelity_gaps(
+        [_lane(crons=("0 0-11 * * *",), fires=0, now=NOW)], NOW)
+    check("M4 does not admit a lane declaring exactly the measured ceiling (12), even "
+          "at zero delivery — that is M1's question on M1's denominator",
+          not f and c.get("declaration-within-the-measured-ceiling") == 1)
+    f, _ = find_cadence_fidelity_gaps(
+        [_lane(crons=("30 0-12 * * *",), fires=0, now=NOW)], NOW)
+    check("M4 admits a lane declaring one MORE than the ceiling (13)",
+          len(f) == 1 and f[0]["lanes"][0]["nominal"] == 13)
+    # Cron-only lanes are M4's population too — three of the five #4802 lanes are cron-only
+    # and M1 structurally cannot see any of them.
+    f, _ = find_cadence_fidelity_gaps(
+        [_lane(workflow="promote-on-approval.yml", cron_only=True, in_scope=False,
+               fires=12, now=NOW)], NOW)
+    check("M4 covers a CRON-ONLY lane (M1 cannot see it at all)", len(f) == 1)
+    # Fail-safe exits, each counted rather than silent.
+    f, c = find_cadence_fidelity_gaps([_lane(state="disabled_manually", fires=0, now=NOW)],
+                                      NOW)
+    check("M4 quiet on a disabled lane", not f and c.get("disabled") == 1)
+    f, c = find_cadence_fidelity_gaps([_lane(crons=("not a cron",), fires=0, now=NOW)], NOW)
+    check("M4 quiet + counted on an unparseable cron",
+          not f and c.get("cron-unparseable") == 1)
+    f, c = find_cadence_fidelity_gaps([_lane(crons=(), fires=0, now=NOW)], NOW)
+    check("M4 skips an unscheduled workflow", not f and c.get("not-scheduled") == 1)
+    truncated = _lane(fires=0, now=NOW)
+    truncated["truncated"] = True
+    f, c = find_cadence_fidelity_gaps([truncated], NOW)
+    check("M4 is fail-safe QUIET on a truncated run sample (an undercount would "
+          "manufacture a fiction out of a healthy lane)",
+          not f and c.get("sample-truncated") == 1)
+    f, c = find_cadence_fidelity_gaps([_lane(fires=0, now=NOW, created_hours_ago=2)], NOW)
+    check("M4 does not judge a lane that did not EXIST for most of the window",
+          not f and c.get("lane-too-new-for-an-expectation") == 1)
+    # ANTI-VACUITY for both mutes above: the identical delivery from an established,
+    # untruncated lane MUST be divergent, or those exits are unconditional switches.
+    f, _ = find_cadence_fidelity_gaps([_lane(fires=0, now=NOW)], NOW)
+    check("M4 still raises on the same delivery from an established, untruncated lane",
+          len(f) == 1)
+    _, c = find_cadence_fidelity_gaps([_lane(crons=HOURLY, fires=10, now=NOW)], NOW)
+    check("M4 emits a census on the all-clear too", c.get("declaration-honoured") == 1)
+
     # --- M3: detection variable is LIVE in_progress age ---
     base = {(".github/workflows/a.yml", "schedule"): {"p90": 3600.0, "n": 50}}
     f, c = find_execution_overruns([_run_obj(age_min=30, now=NOW)], base, NOW)
@@ -1102,6 +1441,18 @@ def _self_test() -> int:  # noqa: C901 - a flat table of named assertions reads 
           body.rstrip().endswith(f"<!-- {KEY_PREFIX}: o/r -->"))
     check("issue body self-identifies as a SPARQ agent", body.startswith("> 🤖"))
     check("issue body prints the census", "Census of every state exit" in body)
+    m4_body = render_issue_body(
+        "o/r",
+        [{"mode": "M4-declared-cadence-unachievable",
+          "workflow": "(repo-level: 1 lane declarations)",
+          "lanes": [{"workflow": "retriage.yml", "nominal": 47, "actual": 12,
+                     "fidelity": 0.255, "crons": ["*/30 * * * *"]}],
+          "window_hours": 24.0, "floor": M4_FIDELITY_FLOOR}],
+        {"M4-declared-cadence-unachievable": {"declaration-unachievable": 1}}, NOW)
+    check("M4 issue body names the lane, its declaration and what arrived",
+          "retriage.yml" in m4_body and "47" in m4_body and "12" in m4_body)
+    check("M4 issue body says it does not red the run",
+          "does not red this run" in m4_body)
 
     # --- exit codes are distinct ---
     check("a bad repo slug is fail-loud exit 2",
