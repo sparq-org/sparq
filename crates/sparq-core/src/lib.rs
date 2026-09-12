@@ -60,6 +60,15 @@ use oxrdf::{Literal, NamedNode, Term};
 use oxttl::{NQuadsParser, NTriplesParser, TriGParser, TurtleParser};
 use store::{Pattern, TripleStore};
 
+// [GPT-6] Semantic cache versions: legacy files may contain values admitted by
+// older lexical/facet/calendar rules. Their layouts still decode, so length is
+// insufficient to establish compatibility. Missing current files are rebuilt
+// in memory by Graph::open; dictionary and permutation files remain unchanged.
+#[cfg(feature = "mmap")]
+const NUMERIC_CACHE_FILE: &str = "numerics-v2.bin";
+#[cfg(feature = "mmap")]
+const TEMPORAL_CACHE_FILE: &str = "temporals-v2.bin";
+
 /// An immutable, dictionary-encoded RDF graph ready for querying.
 pub struct Graph {
     /// Term dictionary. [GPT-6 Astra] Direct writes bypass numeric/temporal cache
@@ -339,7 +348,7 @@ impl NumData {
             #[cfg(feature = "mmap")]
             NumData::Mapped(m, _) => {
                 let n = m.len() / std::mem::size_of::<f64>();
-                // SAFETY: numerics.bin is a whole number of f64; the mmap base is
+                // SAFETY: numerics-v2.bin is a whole number of f64; the mmap base is
                 // page-aligned (>= the 8-byte f64 alignment).
                 unsafe { std::slice::from_raw_parts(m.as_ptr().cast::<f64>(), n) }
             }
@@ -390,14 +399,14 @@ impl NumData {
 
 /// Backing storage for the temporal-value cache, mirroring [`NumData`]: owned dense in
 /// RAM (two parallel columns — a flag byte per term and an f64 instant per term), mmap'd
-/// from `temporals.bin` (out-of-core), or SPARSE (only the temporal literals, the right
+/// from `temporals-v2.bin` (out-of-core), or SPARSE (only the temporal literals, the right
 /// shape for the memory-bound browser store — most terms are not dates).
 enum TempData {
     /// `cells[id-1]` — flag (see [`temp_flag`]; 0 = not temporal) + instant in ONE
     /// 16-byte cell, so a cache probe touches a single cache line (the probes are
     /// random-access from row order; split columns would double the misses).
     Owned(Vec<TempCell>),
-    /// The mmap'd dense cache (`temporals.bin`: `n` little-endian f64 instants then `n`
+    /// The mmap'd dense cache (`temporals-v2.bin`: `n` little-endian f64 instants then `n`
     /// flag bytes), plus a side map for terms APPENDED after open (delta-overlay growth).
     #[cfg(feature = "mmap")]
     Mapped(memmap2::Mmap, rustc_hash::FxHashMap<Id, Temporal>),
@@ -454,7 +463,7 @@ impl TempData {
         }
     }
 
-    /// Number of terms covered by a mapped `temporals.bin` (9 bytes per term).
+    /// Number of terms covered by a mapped `temporals-v2.bin` (9 bytes per term).
     #[cfg(feature = "mmap")]
     #[inline]
     fn mapped_len(m: &memmap2::Mmap) -> usize {
@@ -1809,8 +1818,8 @@ impl Graph {
         // (`dense_numerics`/`dense_temporals`) first — bounding the finalize RSS peak for a
         // SPARSE/FORKED cache (the common non-numeric/non-temporal case).
         let n = self.dict.len();
-        stream_write_numerics(&dir.join("numerics.bin"), n, &self.numerics)?;
-        stream_write_temporals(&dir.join("temporals.bin"), n, &self.temporals)?;
+        stream_write_numerics(&dir.join(NUMERIC_CACHE_FILE), n, &self.numerics)?;
+        stream_write_temporals(&dir.join(TEMPORAL_CACHE_FILE), n, &self.temporals)?;
         self.save_named(dir, false)
     }
 
@@ -1826,8 +1835,8 @@ impl Graph {
         self.dict.save_mmap(dir)?;
         // [OPUS-4.8] (sq-7ph8) Stream the caches block-by-block — see `save` for the rationale.
         let n = self.dict.len();
-        stream_write_numerics(&dir.join("numerics.bin"), n, &self.numerics)?;
-        stream_write_temporals(&dir.join("temporals.bin"), n, &self.temporals)?;
+        stream_write_numerics(&dir.join(NUMERIC_CACHE_FILE), n, &self.numerics)?;
+        stream_write_temporals(&dir.join(TEMPORAL_CACHE_FILE), n, &self.temporals)?;
         // [OPUS-4.8] (sq-3ui0) Named graphs are persisted block-compressed too.
         self.save_named(dir, true)
     }
@@ -1935,9 +1944,10 @@ impl Graph {
     /// Opens a graph saved by [`save`](Self::save) with its permutation indexes AND
     /// numeric-value cache MEMORY-MAPPED (paged in on demand) — so a large out-of-core
     /// dataset opens near-instantly without re-parsing every term, and the cache stays
-    /// off the heap. The dictionary is loaded into RAM; the big indexes stay on disk. If
-    /// `numerics.bin` is absent or stale (a graph saved before this cache existed), the
-    /// cache is recomputed, preserving backward compatibility.
+    /// off the heap. The dictionary is loaded into RAM; the big indexes stay on disk.
+    /// A missing or wrong-sized current cache is recomputed in memory. Legacy
+    /// unversioned caches are ignored because they used older validation rules.
+    /// Saving to a new directory persists current cache files without changing RDF.
     #[cfg(feature = "mmap")]
     pub fn open(dir: &std::path::Path) -> std::io::Result<Graph> {
         // [OPUS-4.8] (review 1593) Finish or roll back any compaction directory swap that a
@@ -1964,7 +1974,7 @@ impl Graph {
                 Dict::open_mmap(dir)?
             }
         };
-        let np = dir.join("numerics.bin");
+        let np = dir.join(NUMERIC_CACHE_FILE);
         let numerics = match std::fs::File::open(&np) {
             Ok(f) if f.metadata()?.len() as usize == dict.len() * std::mem::size_of::<f64>() => {
                 // SAFETY: the file is owned by this graph for its lifetime and not mutated.
@@ -1972,7 +1982,7 @@ impl Graph {
             }
             _ => NumData::Owned(numerics_of(&dict)),
         };
-        let tp = dir.join("temporals.bin");
+        let tp = dir.join(TEMPORAL_CACHE_FILE);
         let temporals = match std::fs::File::open(&tp) {
             Ok(f) if f.metadata()?.len() as usize == dict.len() * 9 => {
                 // SAFETY: the file is owned by this graph for its lifetime and not mutated.
@@ -2298,12 +2308,12 @@ impl Graph {
             let dict_ref = &dict;
             let finalize = scope.spawn(move || -> Result<(), String> {
                 dict_ref.save_mmap(dir).map_err(|e| e.to_string())?;
-                write_numerics(&dir.join("numerics.bin"), &numerics_of(dict_ref)).map_err(|e| e.to_string())?;
+                write_numerics(&dir.join(NUMERIC_CACHE_FILE), &numerics_of(dict_ref)).map_err(|e| e.to_string())?;
                 let (tf, ti) = {
                     let cells = temporals_of(dict_ref);
                     (cells.iter().map(|c| c.flag).collect::<Vec<u8>>(), cells.iter().map(|c| c.instant).collect::<Vec<f64>>())
                 };
-                write_temporals(&dir.join("temporals.bin"), &tf, &ti).map_err(|e| e.to_string())?;
+                write_temporals(&dir.join(TEMPORAL_CACHE_FILE), &tf, &ti).map_err(|e| e.to_string())?;
                 Ok(())
             });
             #[cfg(feature = "parallel")]
@@ -4358,7 +4368,7 @@ fn write_numerics(path: &std::path::Path, nums: &[f64]) -> std::io::Result<()> {
     std::fs::write(path, bytes)
 }
 
-/// [OPUS-4.8] (sq-7ph8) STREAM-writes the dense `numerics.bin` (`n` little-endian f64, the
+/// [OPUS-4.8] (sq-7ph8) STREAM-writes the dense `numerics-v2.bin` (`n` little-endian f64, the
 /// same layout [`write_numerics`] emits and [`Graph::open`] mmaps) DIRECTLY from the cache,
 /// in fixed-size blocks, without first materialising a whole-dictionary dense `Vec<f64>`.
 ///
@@ -4404,7 +4414,7 @@ fn stream_write_numerics(path: &std::path::Path, n: usize, num: &NumData) -> std
     w.flush()
 }
 
-/// [OPUS-4.8] (sq-7ph8) STREAM-writes the dense `temporals.bin` (`n` little-endian f64
+/// [OPUS-4.8] (sq-7ph8) STREAM-writes the dense `temporals-v2.bin` (`n` little-endian f64
 /// instants then `n` flag bytes — the layout [`write_temporals`] emits and
 /// [`TempData::lookup`]/[`Graph::open`] read) DIRECTLY from the cache, without first
 /// materialising the two whole-dictionary dense columns `dense_temporals` builds.
@@ -8330,7 +8340,7 @@ mod tests {
             ));
         }
         nt.push_str("<http://ex/n0> <http://ex/name> \"caf\\u00e9\"@fr .\n");
-        // Temporal literals so the temporals.bin round-trip below has real cells:
+        // Temporal literals so the temporals-v2.bin round-trip below has real cells:
         // zoned + floating dateTimes (sub-second), a date, and an ill-formed dateTime
         // (must stay uncached on both sides).
         nt.push_str("<http://ex/n1> <http://ex/at> \"2024-03-15T13:00:00.25Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> .\n");
@@ -8360,7 +8370,7 @@ mod tests {
 
         // The numeric-value cache must round-trip through its memory-mapped form: every
         // numeric literal resolves to the same f64 (and non-numerics to None) as before.
-        assert!(dir.join("numerics.bin").exists(), "numerics cache not persisted");
+        assert!(dir.join(NUMERIC_CACHE_FILE).exists(), "numerics cache not persisted");
         assert!(matches!(g2.numerics, NumData::Mapped(..)), "numerics not mmap'd on open");
         for v in [0u32, 1, 42, 250, 499] {
             let lit = Term::Literal(Literal::new_typed_literal(v.to_string(), xsd::INTEGER));
@@ -8377,7 +8387,7 @@ mod tests {
         // The temporal-value cache must round-trip through its memory-mapped form too:
         // every cached cell (instant bits, tz presence, family) identical, and
         // non-temporal terms None in both.
-        assert!(dir.join("temporals.bin").exists(), "temporals cache not persisted");
+        assert!(dir.join(TEMPORAL_CACHE_FILE).exists(), "temporals cache not persisted");
         assert!(matches!(g2.temporals, TempData::Mapped(..)), "temporals not mmap'd on open");
         for i in 1..=g.dict.len() as Id {
             match (g.temporal_value(i), g2.temporal_value(i)) {
@@ -8879,7 +8889,7 @@ mod tests {
     /// previously-uncovered `intern_batch`/`consolidate`/`remap_staged`/`ShardWindow`
     /// pipeline. The dataset deliberately mixes inline integers (passthrough), repeated
     /// IRIs (prefix factoring + dedup), language-tagged + datatyped literals, a numeric
-    /// literal (numerics.bin), an xsd:dateTime (temporals.bin), and blank nodes.
+    /// literal (numerics-v2.bin), an xsd:dateTime (temporals-v2.bin), and blank nodes.
     #[cfg(feature = "dict-spill")]
     #[test]
     fn dict_spill_build_byte_identical_to_sharded() {
@@ -8924,7 +8934,7 @@ mod tests {
         // path's — the design's central claim.
         let files = [
             "dict-meta.bin", "dict-terms.bin", "dict-offs.bin",
-            "dict-hash.bin", "dict-hid.bin", "numerics.bin", "temporals.bin",
+            "dict-hash.bin", "dict-hid.bin", NUMERIC_CACHE_FILE, TEMPORAL_CACHE_FILE,
         ];
         for f in files {
             let a = std::fs::read(sharded_dir.join(f))
@@ -10808,7 +10818,7 @@ mod tests {
     }
 
     /// [OPUS-4.8] (sq-7ph8) The streamed numerics/temporals save must write BYTE-IDENTICAL
-    /// `numerics.bin`/`temporals.bin` to the old dense-materialise path — for a DENSE-owned
+    /// `numerics-v2.bin`/`temporals-v2.bin` to the old dense-materialise path — for a DENSE-owned
     /// cache, a SPARSE cache (`into_compressed`), AND a graph carrying temporal literals — so
     /// the bounded-RSS finalize is purely a memory optimisation, never an on-disk format change.
     /// We prove it by comparing the streamed files against a reference dense computation done
@@ -10844,7 +10854,7 @@ mod tests {
                     }
                 }
             }
-            inst.extend_from_slice(&flags); // temporals.bin = instants || flags
+            inst.extend_from_slice(&flags); // temporals-v2.bin = instants || flags
             (num, inst)
         };
 
@@ -10864,17 +10874,17 @@ mod tests {
                     g.save(&dir).unwrap();
                 }
 
-                let got_num = std::fs::read(dir.join("numerics.bin")).unwrap();
-                let got_temp = std::fs::read(dir.join("temporals.bin")).unwrap();
+                let got_num = std::fs::read(dir.join(NUMERIC_CACHE_FILE)).unwrap();
+                let got_temp = std::fs::read(dir.join(TEMPORAL_CACHE_FILE)).unwrap();
                 let n = g.dict.len();
-                assert_eq!(got_num.len(), n * 8, "numerics.bin size (sparse={sparse} compressed={compressed})");
-                assert_eq!(got_temp.len(), n * 9, "temporals.bin size (sparse={sparse} compressed={compressed})");
+                assert_eq!(got_num.len(), n * 8, "numerics-v2.bin size (sparse={sparse} compressed={compressed})");
+                assert_eq!(got_temp.len(), n * 9, "temporals-v2.bin size (sparse={sparse} compressed={compressed})");
                 assert_eq!(got_num, want_num, "streamed numerics != dense (sparse={sparse} compressed={compressed})");
                 assert_eq!(got_temp, want_temp, "streamed temporals != dense (sparse={sparse} compressed={compressed})");
 
                 // And the caches still resolve after a re-open (mmap path).
                 let g2 = Graph::open(&dir).unwrap();
-                // 42 is an xsd:integer, inline-encoded into its id (never in numerics.bin); the
+                // 42 is an xsd:integer, inline-encoded into its id (never in numerics-v2.bin); the
                 // decimals 1.5/2.5 are the cache entries that must round-trip.
                 let nums: Vec<f64> = g2.dict.iter().filter_map(|(id, _)| g2.numeric_value(id)).collect();
                 assert!(nums.contains(&1.5) && nums.contains(&2.5), "numerics survive: {nums:?}");
