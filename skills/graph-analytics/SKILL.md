@@ -1,6 +1,6 @@
 ---
 name: graph-analytics
-description: "Graph analytics over a sparq RDF graph with the opt-in sparq-algos crate: project the graph onto a directed NodeGraph and run PageRank, centrality, k-core decomposition, community detection, and feature-gated directed strongly connected components, acyclicity checks, or topological sorting — all read directly from sparq-core's permutation indexes, deterministic, no model, no network. Use when ranking entities, measuring node cohesion, finding communities, classifying directed cycles, or ordering a DAG; topology-only (edges are predicate-erased and unweighted — filter the source graph for a per-predicate sub-graph)."
+description: "Graph analytics over a sparq RDF graph with the opt-in sparq-algos crate: project the graph onto a directed NodeGraph and run PageRank, centrality, k-core decomposition, community detection, and feature-gated directed strongly connected components, acyclicity checks, or topological sorting — all read directly from sparq-core's permutation indexes, deterministic, no model, no network. Use when ranking entities, measuring node cohesion, finding communities, classifying directed cycles, ordering a DAG, or re-keying scores by dictionary id to rank an id-keyed consumer such as prefix completion; topology-only (edges are predicate-erased and unweighted — filter the source graph for a per-predicate sub-graph)."
 license: MIT
 metadata:
   version: "0.1.0"
@@ -47,6 +47,7 @@ use sparq_algos::{
     weakly_connected_components, label_propagation, LabelPropConfig, num_communities,
     is_acyclic, num_strongly_connected_components, strongly_connected_components,
     topological_sort,
+    pagerank_scores_by_dict_id, scores_by_dict_id, ScoreBudget,
 };
 
 // Project the RDF graph onto a directed node graph.
@@ -79,6 +80,14 @@ let scc   = strongly_connected_components(&g);             // dense component id
 let scc_k = num_strongly_connected_components(&scc);       // number of components
 let dag   = is_acyclic(&g);                                 // false for any directed cycle
 let order = topological_sort(&g)?;                         // canonical DAG order; Err on cycle
+
+// --- Scores re-keyed by dictionary Id, for id-keyed consumers (feature `ranking`) ---
+let scores = scores_by_dict_id(&g, &ranks, ScoreBudget::All);   // FxHashMap<Id, f64>
+let scores = pagerank_scores_by_dict_id(                        // project + rank + re-key
+    &graph, PageRankConfig::default(), ScoreBudget::TopK(10_000),
+);
+// e.g. rank a prefix-completion by entity importance:
+let hits = completion_index.complete("http://ex", 20, Some(&scores));
 ```
 
 ## API surface
@@ -104,6 +113,9 @@ let order = topological_sort(&g)?;                         // canonical DAG orde
 | `num_strongly_connected_components(&labels)` | directed SCC count; requires `topology` |
 | `is_acyclic(&g)` | whether the directed graph has no cycle; requires `topology` |
 | `topological_sort(&g)` | canonical `Result<Vec<usize>, CycleError>`; requires `topology` |
+| `scores_by_dict_id(&g, &scores, ScoreBudget)` | re-keys a node-indexed `&[f64]` by dict `Id`; requires `ranking` |
+| `pagerank_scores_by_dict_id(&graph, PageRankConfig, ScoreBudget)` | project + PageRank + re-key in one call; requires `ranking` |
+| `ScoreBudget::{All, TopK}` | how many entities the resident score map retains |
 
 ## Honest scope / caveats
 
@@ -136,6 +148,17 @@ let order = topological_sort(&g)?;                         // canonical DAG orde
   ties. Enable the default-OFF `topology` feature to compile them.
 - **PageRank** handles dangling (out-degree-0) nodes by redistributing their mass
   uniformly each iteration, so the result is a proper probability distribution.
+- **Score maps are for id-keyed consumers.** Every algorithm returns results indexed by
+  *node index*; `sparq_text::CompletionIndex::complete` and friends want a
+  `FxHashMap<Id, f64>` keyed by sparq-core dictionary id. The default-OFF `ranking` feature
+  supplies that re-keying and nothing else — it adds no dependency and no algorithm.
+  Build the map once per graph generation and reuse it across requests.
+  `ScoreBudget::TopK(k)` bounds the *resident* map only: the ranker still runs over the
+  whole graph, so retained scores are the true global ranks, and entities outside the
+  budget simply score `0.0` at the consumer. Terms that appear only as predicates are not
+  `NodeGraph` nodes and so are never scored — they rank last, not hidden. Non-finite
+  scores are dropped rather than passed on, since a `NaN` would make the consumer's
+  ordering depend on candidate arrival order. [OPUS-5] sq-lsp7k.9.4.
 - **In-memory.** The `NodeGraph` is built from one pass over `Graph::iter_ids` and held in
   RAM (CSR forward + reverse adjacency keyed by dense `u32` node indices); it does not
   reference the source graph after building, except `term()` which needs the dict.
