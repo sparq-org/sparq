@@ -764,7 +764,8 @@ impl Num {
     }
 
     /// The typed numeric value of a literal, or `None` if the literal is not a
-    /// well-formed numeric (an ill-formed numeric operand is a SPARQL type error).
+    /// valid, representable numeric (an invalid operand is a SPARQL type error).
+    /// Valid integer/decimal values beyond the finite mantissa capacity also return `None`.
     /// This is the EXACT engine lexical path: `parse_xsd_f32`/`parse_xsd_f64` (with the
     /// XSD `INF`/`-INF`/`NaN`/exponent spellings) for float/double, and the
     /// scale-preserving [`Dec::parse_lexical`] for decimal.
@@ -775,13 +776,18 @@ impl Num {
             return None;
         }
         let dt = l.datatype();
-        let v = l.value().trim();
+        let v = l.value().trim_matches([' ', '\t', '\r', '\n']);
+        // [GPT-6] Keep lexical and subtype validity aligned with graph caches.
+        // Representation limits below are separate from datatype membership.
+        if !sparq_core::numeric_literal_valid(v, dt.as_str()) {
+            return None;
+        }
         if sparq_core::is_integer_datatype(dt.as_str()) {
             if let Ok(i) = v.parse::<i64>() {
                 return Some(Num::Int(i));
             }
             // Integer beyond i64: exact i128 mantissa if it fits (scale 0 = integer
-            // lexical), else not representable -> double.
+            // lexical); larger magnitudes return None.
             return match Dec::parse(v) {
                 Some(d) if d.scale == 0 => Some(Num::Dec(d)),
                 Some(_) => None, // "1.5"^^xsd:integer is ill-formed
@@ -2052,10 +2058,10 @@ mod tests {
             ("1.5E2", xsd::DOUBLE),
             ("INF", xsd::DOUBLE),
             ("3.0", xsd::FLOAT),
-            // scale-0-after-normalisation integers `of_literal` accepts as `Dec` (mant, scale 0):
-            ("5.", xsd::INTEGER),        // trailing dot, no fraction -> value 5
-            ("5.0", xsd::INTEGER),       // trailing zero fraction -> normalised scale 0
-            ("5.00", xsd::INTEGER),      // ditto
+            // [GPT-6] Both reject decimal notation for an integer datatype.
+            ("5.", xsd::INTEGER),
+            ("5.0", xsd::INTEGER),
+            ("5.00", xsd::INTEGER),
             ("-0", xsd::INTEGER),        // signed zero
             (".5", xsd::DECIMAL),        // empty integer part
             ("5.5", xsd::DECIMAL),       // ordinary decimal

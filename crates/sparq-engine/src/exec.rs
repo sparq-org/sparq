@@ -1658,6 +1658,11 @@ fn subst_pattern(p: &GraphPattern, sub: &FxHashMap<Variable, oxrdf::NamedNode>) 
             patterns: patterns.iter().map(|tp| subst_triple(tp, sub)).collect::<Option<Vec<_>>>()?,
         },
         G::Path { subject, path, object } => {
+            // [GPT-6] Variable-bearing triple terms are decomposed only in
+            // BGPs. Grounding one here would erase the ordinary path error.
+            if matches!(subject, TermPattern::Triple(_)) || matches!(object, TermPattern::Triple(_)) {
+                return None;
+            }
             let substituted = |term: &TermPattern| {
                 matches!(term, TermPattern::Variable(v) if sub.contains_key(v))
             };
@@ -11228,9 +11233,8 @@ fn eval_aggregate(graph: &Graph, local: &LocalVocab, b: &Bindings, members: &[us
                         .map(Value::Num)
                         .unwrap_or(Value::Error))
                 }
-                // MIN/MAX over an all-numeric group return the typed VALUE (promoted,
-                // canonically serialised — "2.0E-1"^^xsd:double); mixed groups keep the
-                // lenient term path.
+                // [GPT-6] MIN/MAX select an input RDF term. Numeric comparisons
+                // must not replace its lexical form or datatype with a new term.
                 AggregateFunction::Min => Ok(minmax_values(vals, Ordering::Less)),
                 AggregateFunction::Max => Ok(minmax_values(vals, Ordering::Greater)),
                 AggregateFunction::GroupConcat { separator } => {
@@ -11310,22 +11314,22 @@ fn sum_values(vals: &[Value], errored: bool) -> Option<Num> {
 }
 
 /// MIN/MAX: an all-numeric group compares by VALUE (exact for int/decimal) and returns
-/// the typed value; any non-numeric member falls back to the lenient total-order term
+/// the selected original operand; any non-numeric member uses the total-order term
 /// comparison (which must order across types for the SPARQL MIN/MAX-over-anything case).
-fn minmax_values(vals: Vec<Value>, keep: Ordering) -> Value {
+fn minmax_values(mut vals: Vec<Value>, keep: Ordering) -> Value {
     if vals.is_empty() {
         return Value::Unbound;
     }
     let nums: Option<Vec<Num>> = vals.iter().map(as_numeric).collect();
     match nums {
         Some(nums) => {
-            let mut best = nums[0];
-            for &n in &nums[1..] {
-                if num_compare(n, best) == Some(keep) {
-                    best = n;
+            let mut best = 0;
+            for (i, &n) in nums.iter().enumerate().skip(1) {
+                if num_compare(n, nums[best]) == Some(keep) {
+                    best = i;
                 }
             }
-            num_canonical_term(best)
+            vals.swap_remove(best)
         }
         None => {
             let cmp = |a: &Value, c: &Value| compare_values(a, c).unwrap_or(Ordering::Equal);
@@ -14388,17 +14392,22 @@ fn eval_function_inner<E: Fn(usize) -> Result<Value, String>>(
                 Some(n) => n as i64,
                 None => return Ok(Value::Error),
             };
-            let chars: Vec<char> = s.chars().collect();
-            let from = (start.max(1) - 1) as usize; // SPARQL SUBSTR is 1-indexed by codepoint
-            let out: String = if nargs >= 3 {
+            // [GPT-6] XPath positions satisfy start <= position < start+length.
+            // Clipping the start before adding length incorrectly extends slices
+            // that start before position one. Widen before addition to avoid overflow.
+            let end = if nargs >= 3 {
                 let len = match as_num(&ev(2)?) {
                     Some(n) => n.max(0.0) as usize,
                     None => return Ok(Value::Error),
                 };
-                chars.iter().skip(from).take(len).collect()
+                i128::from(start) + len as i128
             } else {
-                chars.iter().skip(from).collect()
+                i128::MAX
             };
+            let out = s.chars().enumerate().filter_map(|(i, ch)| {
+                let position = i as i128 + 1;
+                (position >= i128::from(start) && position < end).then_some(ch)
+            }).collect();
             lit_with_lang(out, lang.as_deref())
         }
         // [OPUS-4.8] ENCODE_FOR_URI's operand is a STRING LITERAL, per SPARQL 1.1
@@ -14435,7 +14444,7 @@ fn eval_function_inner<E: Fn(usize) -> Result<Value, String>>(
         F::IsNumeric => match ev(0)? {
             Value::Unbound | Value::Error => Value::Error,
             Value::Num(_) => Value::Bool(true),
-            Value::Term(Term::Literal(l)) => Value::Bool(is_numeric_dt(&l)),
+            Value::Term(Term::Literal(l)) => Value::Bool(sparq_core::numeric_literal_valid(l.value(), l.datatype().as_str())),
             _ => Value::Bool(false),
         },
         // ABS/CEIL/FLOOR/ROUND preserve the argument's numeric DATATYPE
@@ -15086,7 +15095,8 @@ fn eval_cast(target: &str, v: &Value) -> Option<Value> {
     if target == xsd::DATE_TIME.as_str() {
         return Some(match v {
             Value::Term(Term::Literal(l))
-                if l.datatype() == xsd::DATE_TIME || l.datatype() == xsd::DATE_TIME_STAMP =>
+                if (l.datatype() == xsd::DATE_TIME || l.datatype() == xsd::DATE_TIME_STAMP)
+                    && parse_datetime(l.value()).is_some() =>
             {
                 typed(l.value().to_string(), xsd::DATE_TIME)
             }
@@ -15111,10 +15121,19 @@ fn eval_cast(target: &str, v: &Value) -> Option<Value> {
         if let Some(n) = src_num() {
             return Some(match n {
                 Num::Int(i) => Value::Num(Num::Int(i)),
-                Num::Dec(d) => Value::Num(Num::Int((d.mant / 10i128.pow(d.scale)) as i64)),
+                Num::Dec(d) => {
+                    // [GPT-6] An unrepresentable power means |value| < 1, so
+                    // truncation is zero. Reject an out-of-range integer instead
+                    // of wrapping its i128 mantissa through an `as i64` cast.
+                    let integer = 10i128.checked_pow(d.scale).map_or(0, |p| d.mant / p);
+                    i64::try_from(integer).map(|i| Value::Num(Num::Int(i))).unwrap_or(Value::Error)
+                },
                 Num::Float(_) | Num::Double(_) => {
                     let f = n.f64();
-                    if f.is_finite() && f.abs() < 9.2e18 {
+                    // i64::MAX rounds up to 2^63 in f64: use an exclusive
+                    // positive bound and inclusive negative bound.
+                    let lower = i64::MIN as f64;
+                    if (lower..-lower).contains(&f) {
                         Value::Num(Num::Int(f.trunc() as i64))
                     } else {
                         Value::Error
@@ -15380,7 +15399,7 @@ fn datetime_arg_tz(v: &Value) -> Option<String> {
         }
         _ => return None,
     };
-    let s = l.value();
+    let s = l.value().trim_matches([' ', '\t', '\r', '\n']);
     parse_datetime(s)?; // lexical shape check
     let (_, time) = s.split_once('T')?;
     Some(match time.find(['Z', '+', '-']) {
@@ -15528,11 +15547,14 @@ fn encode_for_uri(s: &str) -> String {
 /// form. YEAR…MINUTES return xsd:integer; SECONDS returns xsd:decimal (per SPARQL),
 /// parsed from the lexical so fractional seconds stay exact.
 fn datetime_field(v: &Value, idx: usize) -> Value {
-    let s = match value_str(v) {
-        Some(s) => s,
-        None => return Value::Error,
+    // [GPT-6] Date accessors accept typed dateTime values, not strings or IRIs
+    // whose text happens to look like a timestamp.
+    let s = match v {
+        Value::Term(Term::Literal(l))
+            if l.datatype() == xsd::DATE_TIME || l.datatype() == xsd::DATE_TIME_STAMP => l.value().trim_matches([' ', '\t', '\r', '\n']),
+        _ => return Value::Error,
     };
-    let fields = match parse_datetime(&s) {
+    let fields = match parse_datetime(s) {
         Some(f) => f,
         None => return Value::Error,
     };
@@ -15554,19 +15576,40 @@ fn datetime_field(v: &Value, idx: usize) -> Value {
 /// `[year, month, day, hours, minutes, seconds]`. Timezone is stripped (component accessors are on
 /// the local time per SPARQL); seconds keeps any fractional part.
 fn parse_datetime(s: &str) -> Option<[f64; 6]> {
+    // One validation boundary also serves the graph's temporal cache and
+    // comparison fast paths. Component extraction below preserves local time.
+    let s = s.trim_matches([' ', '\t', '\r', '\n']);
+    Timeline::parse_datetime(s)?;
     let (date, time) = s.split_once('T')?;
     let neg = date.starts_with('-');
     let mut d = date.strip_prefix('-').unwrap_or(date).split('-');
-    let year: f64 = d.next()?.parse().ok()?;
-    let year = if neg { -year } else { year };
-    let month: f64 = d.next()?.parse().ok()?;
-    let day: f64 = d.next()?.parse().ok()?;
+    let year_lex = d.next()?;
+    let year: f64 = year_lex.parse().ok()?;
+    let mut year = if neg { -year } else { year };
+    let mut month: f64 = d.next()?.parse().ok()?;
+    let mut day: f64 = d.next()?.parse().ok()?;
     // Strip the timezone (Z, or +hh:mm / -hh:mm after the seconds — the time part itself has no '-').
     let time = if let Some(i) = time.find(['Z', '+', '-']) { &time[..i] } else { time };
     let mut t = time.split(':');
-    let hours: f64 = t.next()?.parse().ok()?;
+    let mut hours: f64 = t.next()?.parse().ok()?;
     let minutes: f64 = t.next()?.parse().ok()?;
     let seconds: f64 = t.next()?.parse().ok()?;
+    // XPath component extraction uses the value: 24:00 is next-day midnight.
+    // Reuse the shared calendar validator for month length and leap years.
+    if hours == 24.0 {
+        hours = 0.0;
+        day += 1.0;
+        let next_date = format!("{}{}-{:02}-{:02}", if neg { "-" } else { "" }, year_lex, month as u32, day as u32);
+        if sparq_core::temporal::parse_civil_date(&next_date).is_none() {
+            day = 1.0;
+            month += 1.0;
+            if month == 13.0 {
+                month = 1.0;
+                year += 1.0;
+                if year == 0.0 { year = 1.0; } // XSD 1.0 has no year zero.
+            }
+        }
+    }
     Some([year, month, day, hours, minutes, seconds])
 }
 
@@ -19532,7 +19575,7 @@ mod columnar_filter_seam {
 // coverage of paths reachable only from inside the crate: `minus_bindings` (disjoint
 // fast path + fully-bound fast path + the unbound-shared-variable general compatibility
 // scan), `effective_boolean` / `ebv` error arms, aggregate-error propagation via
-// `sum_values(_, errored=true)`, and the `minmax_values` numeric-promotion + mixed-type
+// `sum_values(_, errored=true)`, and the `minmax_values` numeric-selection + mixed-type
 // fallback paths. [OPUS-4.8]
 
 /// Direct unit tests for `minus_bindings` — exercises the fast-path (disjoint
@@ -19799,7 +19842,7 @@ mod sum_values_unit {
     }
 }
 
-/// Direct unit tests for `minmax_values` — numeric promotion path and empty-set path.
+/// Direct unit tests for `minmax_values` — numeric selection path and empty-set path.
 #[cfg(test)]
 mod minmax_values_unit {
     use super::*;
@@ -19821,9 +19864,8 @@ mod minmax_values_unit {
     fn min_over_integers_is_smallest() {
         let vals = vec![Value::Num(Num::Int(5)), Value::Num(Num::Int(2)), Value::Num(Num::Int(8))];
         let min = minmax_values(vals, std::cmp::Ordering::Less);
-        // MIN over an all-integer set is the smallest member (2). `minmax_values` returns
-        // it via `num_canonical_term`, i.e. a `Value::Term` carrying the canonical
-        // xsd:integer literal "2". Assert the EXACT lexical value AND datatype — NOT a
+        // MIN over an all-integer set selects the smallest member (2), preserving
+        // its representation. Assert the EXACT lexical value AND datatype — NOT a
         // substring `contains('2')`, which is vacuous because the xsd:integer datatype
         // IRI (…/2001/XMLSchema#integer) already contains '2' regardless of the value.
         match min {
@@ -19845,8 +19887,8 @@ mod minmax_values_unit {
     fn max_over_integers_is_largest() {
         let vals = vec![Value::Num(Num::Int(5)), Value::Num(Num::Int(2)), Value::Num(Num::Int(8))];
         let max = minmax_values(vals, std::cmp::Ordering::Greater);
-        // MAX over an all-integer set is the largest member (8), returned as a canonical
-        // xsd:integer `Value::Term`. Assert the EXACT lexical value AND datatype — a
+        // MAX over an all-integer set selects the largest member (8), preserving
+        // its representation. Assert the EXACT lexical value AND datatype — a
         // substring `contains('8')` would also pass for wrong values like 18 or 80, so it
         // is not an acceptable check for the `Value::Term` representation.
         match max {

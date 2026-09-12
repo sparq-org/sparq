@@ -205,6 +205,23 @@ sparq_engine::query(&g,
 - **With `GROUP BY`** ⇒ an empty input has **zero groups**, so you get **zero** rows (the
   single-implicit-group rule applies only when no `GROUP BY` is written).
 
+[GPT-6] `MIN` and `MAX` return a selected input term: they preserve lexical forms
+such as `"01"^^xsd:integer` and the selected datatype. Arithmetic aggregates retain
+their existing promotion behavior.
+
+**Builtin value/error boundaries** — `isNumeric` checks lexical grammar and integer
+subtype facets, including `xsd:byte` range, separately from arithmetic capacity.
+A huge valid integer can be numeric while an operation exceeds the existing
+`i64`/`i128` value tower. Integer casts use the existing `i64` output range and
+truncate toward zero; out-of-range casts become expression errors (unbound BIND
+or projected cells, excluded FILTER rows). `SUBSTR` with integer arguments clips
+its original one-based interval, so `SUBSTR("abcd", -1, 3)` yields `"a"`.
+Date accessors require typed dateTime operands, and calendar/timezone validation
+is shared with stored comparison caches. Valid `24:00:00` exposes next-day
+components and hour zero. Ill-typed or malformed Unicode literals
+fail soft. These controls target the published SPARQL 1.1 Recommendation and
+XSD 1.0 lexical rules; they do not establish complete builtin conformance.
+
 **Property paths** (all 8 operators: `/  | ^  *  +  ?` and `!(…)` negated sets) — write them inline:
 
 ```rust
@@ -231,6 +248,9 @@ in its own input; EXISTS, volatile and custom expression calls decline this path
 MINUS, OPTIONAL, VALUES/BIND, subquery projection, grouping, solution modifiers and
 graph/service boundaries also use ordinary evaluation. This preserves local
 variable scopes, MINUS domains and the complete right-side matching relation.
+Path endpoints with triple terms also decline substitution: variable decomposition
+inside triple terms belongs to BGP matching, and optimization must preserve a
+path evaluation error instead of grounding an unsupported endpoint.
 Both ordinary small-side joins and the theta anti-join seed path apply the same
 eligibility rules, and can consequently do more work for complex right operands.
 Eligible positive BGPs and non-nullable paths retain constant-seeded scans.

@@ -1209,8 +1209,7 @@ mod numeric_fast_slow_path_agreement {
         // row; `> 5` excludes it. Fast and slow paths must agree (asserted inside filter_rows).
         for obj in [
             "\"1\"^^xsd:integer",
-            "\"1.\"^^xsd:integer",   // trailing dot, no fraction: of_literal accepts as int 1
-            "\"1.0\"^^xsd:integer",  // trailing-zero fraction: normalised scale 0 -> int 1
+            "\"1.\"^^xsd:decimal", // decimal notation is valid only for its datatype
             "\"1.0\"^^xsd:decimal",
             "\"1.0E0\"^^xsd:double",
             "\"1.0\"^^xsd:float",
@@ -1219,6 +1218,17 @@ mod numeric_fast_slow_path_agreement {
             assert_eq!(filter_rows(obj, "?o = 1"), 1, "{obj} = 1");
             assert_eq!(filter_rows(obj, "?o > 0"), 1, "{obj} > 0");
             assert_eq!(filter_rows(obj, "?o > 5"), 0, "{obj} > 5");
+        }
+    }
+
+    // [GPT-6] XSD 1.0 §3.3.13 requires signed digits even when a decimal
+    // spelling denotes an integral mathematical value.
+    #[test]
+    fn integer_decimal_spellings_fail_on_both_paths() {
+        for obj in ["\"1.\"^^xsd:integer", "\"1.0\"^^xsd:integer"] {
+            for filter in ["?o < 5", "?o = 1", "?o > 0"] {
+                assert_eq!(filter_rows(obj, filter), 0, "{obj}: {filter}");
+            }
         }
     }
 

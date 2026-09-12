@@ -27,6 +27,26 @@ assert_eq!(count, 1);
 # Ok(()) }
 ```
 
+## Literal validation and evaluation caches
+
+[GPT-6] `numeric_literal_valid(value, datatype)` checks numeric lexical forms and
+integer subtype facets after XML whitespace trimming. It is independent of the
+finite arithmetic/cache representation: a valid integer or decimal can exceed
+that representation while remaining a numeric RDF literal. `numeric_cache_value`
+returns no value for malformed lexicals, invalid subtype values, or values outside
+its representation (and for the existing NaN sentinel).
+
+The shared `temporal` parsers validate XSD 1.0 calendar fields, leap days, time
+fields and timezone offsets before creating comparison values. Malformed Unicode
+and unrepresentable timestamps return `None`. RDF ingest still retains ill-typed
+literals; validation controls evaluation and cache eligibility, not RDF acceptance.
+
+**Legacy mmap archives:** archives created before these validation rules can
+contain permissive derived values in `numerics.bin` and `temporals.bin`. Rebuild
+those derived caches before querying such an archive with the new validation
+contract; opening an old same-sized cache does not currently invalidate it.
+This limitation does not apply to fresh RDF loads.
+
 ## ✨ Features
 
 - **RDF parsing & ingest** — load Turtle, N-Triples, N-Quads, and TriG from a `&str` or any
