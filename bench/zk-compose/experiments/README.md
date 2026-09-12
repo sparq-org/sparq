@@ -61,3 +61,9 @@ are excluded from normal prove/verify timers; backend execution errors cannot co
 as successful rejection controls. Internal stage instrumentation, RSS measurement,
 canonical infrastructure, an exact-dataset adapter, and further signature suites
 remain unfinished work.
+
+The committed [local smoke record](local-smoke.json) binds its actual source
+commit and executable hashes. It retains separate public/proof byte counts and
+noncanonical inclusive timings; it is a fixture smoke test, not a statistical
+comparison or publication benchmark. Original binary artifacts remain with the
+run export and are identified by both report hashes and artifact SHA-256 digests.
