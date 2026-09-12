@@ -1,7 +1,7 @@
 {
   "schema": "sparq-evaluator-candidate-preparation-v1",
   "base_commit": "a816cf6b0e3bf7ed700f749a08240da3e22a552b",
-  "scope": "Native integration and execution definitions only. Guest compilation/execution and receipts for these current sources remain pending; c52 evidence is historical.",
+  "scope": "Historical native integration and execution-definition snapshots. Completed V1 hosted execution and V2 local execution are linked separately below; each binds its own actual source and artifact, without replacing these historical hashes.",
   "publication_ready": false,
   "source_sha256": {
     "crates/sparq-core/src/lib.rs": "8bf52d61b30421c8bfa2e73b7733e86f786ffabff074be720f915bc4df419aeb",
@@ -47,10 +47,8 @@
   "exporter_hermetic_tests": 15,
   "exporter_guard_mutations": 6,
   "pending": [
-    "Current guest compile and full actual execution including strict negative classification",
-    "Current three V1 succinct receipt fixtures with source/artifact export",
     "Independent source review dispositions",
-    "Mandatory hosted feature-OFF/WASM/other ratchets"
+    "Fresh integrated mandatory hosted policy, feature-OFF/WASM and other gates"
   ],
   "default_native_boundary": "Strict numeric capacity defaults false; temporal capacity defaults absent. Shared semantic fixes and conditional guard code remain compiled; hosted floors must measure actual native/WASM bytes.",
   "native_model_clippy": "passed -D warnings all targets; /private/tmp/sparq-v1-model-integration-clippy.log",
@@ -80,9 +78,9 @@
       "vendor/zk-sdk/UPSTREAM.json": "4c54b0665000d9d6ca5504b9a71e8343685ce1a6d1d8f898157b22f19325ea8b",
       "supply-chain/config.toml": "5fcc3dee4ef39d5163b12c5794229bd8acfc313d2681962891c16622ef8c751e"
     },
-    "guest_execution_and_current_receipts": "pending; historical c52 receipts remain separate"
+    "guest_execution_and_current_receipts": "Pending at this historical preparation snapshot; the later completed campaign is recorded in hosted-a2-evidence.json."
   },
-  "record_scope": "Inherited V1 preparation is bound to a2f72c4f6341dd53032c55f260b4ee8577ac7c4d; the dual-version source is described by v2_preparation. Neither record establishes guest execution.",
+  "record_scope": "Inherited V1 preparation describes the historical V1 source snapshot; v2_preparation describes the historical dual-version preparation. Completed hosted V1 a2 and local dual-version 048 campaigns are separate artifact-bound evidence records.",
   "v2_preparation": {
     "base_commit": "91a43ac2f512e03bef879245d876a4838845f99c",
     "source_sha256": {
@@ -102,12 +100,19 @@
     "native_model_clippy": "passed -D warnings all targets; /private/tmp/sparq-v2-model-integration-clippy.log",
     "preflight": "passed scoped integration; /private/tmp/sparq-v2-integrated-preflight.log",
     "exporter_hermetic_tests": 15,
-    "actual_execution_definitions": "All V1 and V2 builtin/aggregate/temporal/numeric capacity cases; three V1 and two V2 genuine receipts with one common exported program. Execution remains pending.",
+    "actual_execution_definitions": "Executed all V1 and V2 defined guest cases plus three V1 and two V2 genuine receipts at048cb4324; see proof-evidence-v2.json.",
     "publication_ready": false,
     "pending": [
-      "Actual framing compilation and strict negative-error classification",
-      "All V1 and V2 current-artifact guest executions and five genuine receipts",
       "Independent review dispositions and hosted gates"
     ]
+  },
+  "v2_local_campaign": "proof-evidence-v2.json",
+  "snapshot_status": "historical_preparation_snapshot",
+  "later_evidence": {
+    "completed_hosted_execution": "hosted-a2-evidence.json",
+    "reviewed_dependency_policy_validation": "../../research/zk-dependency-backlog/validation.json",
+    "dependency_review_provenance": "../../research/zk-dependency-backlog/README.md",
+    "note": "Hosted evidence binds its actual PR head, merge checkout and artifact. It does not retroactively assign current-source validity to this historical source hash map. Publication readiness remains false pending reviews and fresh integrated gates.",
+    "completed_local_dual_version_execution": "proof-evidence-v2.json"
   }
 }

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""[GPT-6] Run dependency gates over each independently locked Rust workspace."""
+"""[GPT-6] Run dependency gates over the root, exact evaluator and guest workspaces."""
 from __future__ import annotations
 
 import argparse
@@ -17,6 +17,11 @@ MANIFESTS = (
     Path("zk/sparql-evaluator/methods/guest/Cargo.toml"),
 )
 ACTIONS = ("deny-integrity", "deny-advisories", "fetch", "vet", "sbom", "sbom-paths", "patch-policy")
+SDK_PATCHES = {
+    "ark-crypto-primitives": "0.5.0", "ark-relations": "0.5.1",
+    "risc0-build": "3.0.6", "risc0-zkos-v1compat": "2.2.3",
+    "risc0-zkvm": "3.0.6", "rzup": "0.5.2",
+}
 
 
 def command(action: str, manifest: Path, root: Path = ROOT) -> list[str]:
@@ -40,8 +45,14 @@ def command(action: str, manifest: Path, root: Path = ROOT) -> list[str]:
 def patch_policy(root: Path) -> None:
     """Upstream audits are necessary, but do not attest the modified local bytes."""
     metadata = json.loads((root / "vendor/zk-sdk/UPSTREAM.json").read_text())
+    # Do not let missing/duplicate provenance entries erase upstream obligations.
+    packages = metadata["packages"]
+    if len(packages) != len(SDK_PATCHES) or {
+        p["name"]: p["version"] for p in packages
+    } != SDK_PATCHES:
+        raise ValueError("SDK patch provenance inventory differs from six pinned packages")
     policies = tomllib.loads((root / "supply-chain/config.toml").read_text()).get("policy", {})
-    for package in metadata["packages"]:
+    for package in packages:
         if policies.get(package["name"], {}).get("audit-as-crates-io") is not True:
             raise ValueError(f"vendored {package['name']} lacks explicit upstream audit policy; "
                              "path dependencies must not silently count as audited first-party source")

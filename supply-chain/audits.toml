@@ -1,6 +1,24 @@
 
 # cargo-vet audits file
 
+[[audits.android_system_properties]]
+who = "Claude Fable 5.1 (automated source review; recorded by GPT-6)"
+criteria = "safe-to-deploy"
+delta = "0.1.5 -> 0.1.6"
+notes = "[GPT-6] Recorded actual independent automated source-delta approval by Claude Fable 5.1; recording agent GPT-6 did not impersonate an upstream auditor. Review SHA256 9c977005339864b802d48d0a36000f27520de6bd7eabac590f2d8ab7fdb18a9f; source manifest SHA256 f48a233cb50e735417af3aaf5ff62d8e9fd97e96c594713094845edeb505129c; complete patch SHA256 19c29793e7a7c6bd6b8b06adb59895e96b919275a43d5aaafbc8fc13fc68cf07. Exact source archives and baseline chains are in research/zk-dependency-backlog/reviewed-deltas/eight-fable/source-manifest.json; review text is retained alongside it. Baseline full reviews remain imported, not newly asserted here. This is a delta source review, not a complete package/graph re-audit, cryptographic assurance or guest/proof execution claim. The reviewer inspected source only; archive/export hashes were independently checked by the invoking GPT-6 reviewer. No builds, tests or Miri were run by Fable. Serde prerequisite source reviews are recorded separately for serde_core and serde_derive."
+
+[[audits.arrayvec]]
+who = "Claude Fable 5.1 (automated source review; recorded by GPT-6)"
+criteria = "safe-to-deploy"
+delta = "0.7.6 -> 0.7.8"
+notes = "[GPT-6] Recorded actual independent automated source-delta approval by Claude Fable 5.1; recording agent GPT-6 did not impersonate an upstream auditor. Review SHA256 9c977005339864b802d48d0a36000f27520de6bd7eabac590f2d8ab7fdb18a9f; source manifest SHA256 f48a233cb50e735417af3aaf5ff62d8e9fd97e96c594713094845edeb505129c; complete patch SHA256 a9bdc70908fb303fff455ec12badc6030c5af1170d49df144a2c813f6849cd54. Exact source archives and baseline chains are in research/zk-dependency-backlog/reviewed-deltas/eight-fable/source-manifest.json; review text is retained alongside it. Baseline full reviews remain imported, not newly asserted here. This is a delta source review, not a complete package/graph re-audit, cryptographic assurance or guest/proof execution claim. The reviewer inspected source only; archive/export hashes were independently checked by the invoking GPT-6 reviewer. No builds, tests or Miri were run by Fable. Serde prerequisite source reviews are recorded separately for serde_core and serde_derive."
+
+[[audits.either]]
+who = "Claude Fable 5.1 (automated source review; recorded by GPT-6)"
+criteria = "safe-to-deploy"
+delta = "1.16.0 -> 1.18.0"
+notes = "[GPT-6] Recorded actual independent automated source-delta approval by Claude Fable 5.1; recording agent GPT-6 did not impersonate an upstream auditor. Review SHA256 9c977005339864b802d48d0a36000f27520de6bd7eabac590f2d8ab7fdb18a9f; source manifest SHA256 f48a233cb50e735417af3aaf5ff62d8e9fd97e96c594713094845edeb505129c; complete patch SHA256 ea52a13b8c415fa9dbdfbe90295de083417bd6d408be982aaf7f1272cb908ef4. Exact source archives and baseline chains are in research/zk-dependency-backlog/reviewed-deltas/eight-fable/source-manifest.json; review text is retained alongside it. Baseline full reviews remain imported, not newly asserted here. This is a delta source review, not a complete package/graph re-audit, cryptographic assurance or guest/proof execution claim. The reviewer inspected source only; archive/export hashes were independently checked by the invoking GPT-6 reviewer. No builds, tests or Miri were run by Fable. Serde prerequisite source reviews are recorded separately for serde_core and serde_derive."
+
 [[audits.itertools]]
 who = "GPT-5.6 <noreply@openai.com>"
 criteria = "safe-to-deploy"
@@ -13,8 +31,50 @@ criteria = "safe-to-deploy"
 version = "0.31.3"
 notes = "Full audit of the checksum-matched crates.io package as pulled through object_store's default fs feature on Unix; nix itself is built with default features disabled and no optional nix features. Reviewed Cargo.toml, build.rs, lib.rs/macros, package-wide unsafe and suspicious-behavior call sites, the fcntl/stat/unistd filesystem surfaces, and the socket modules. The build script only declares target cfg aliases; there are no proc macros, generated payloads, hidden initialization, network use, or data exfiltration. Unsafe is ordinary libc syscall, path/buffer, and file-descriptor plumbing; libc, bitflags, cfg-if, and build-only cfg_aliases are already covered by repository policy/imports. [GPT-5.6]"
 
+[[audits.num-integer]]
+who = "Claude Fable 5.1 (automated source review; recorded by GPT-6)"
+criteria = "safe-to-deploy"
+delta = "0.1.46 -> 0.1.47"
+notes = "[GPT-6] Recorded actual independent automated source-delta approval by Claude Fable 5.1; recording agent GPT-6 did not impersonate an upstream auditor. Review SHA256 9c977005339864b802d48d0a36000f27520de6bd7eabac590f2d8ab7fdb18a9f; source manifest SHA256 f48a233cb50e735417af3aaf5ff62d8e9fd97e96c594713094845edeb505129c; complete patch SHA256 2b10d159e5ce80bf220a92836e6fd6129e32fd4d8bdd11c6b78ebdba3b21c1d3. Exact source archives and baseline chains are in research/zk-dependency-backlog/reviewed-deltas/eight-fable/source-manifest.json; review text is retained alongside it. Baseline full reviews remain imported, not newly asserted here. This is a delta source review, not a complete package/graph re-audit, cryptographic assurance or guest/proof execution claim. The reviewer inspected source only; archive/export hashes were independently checked by the invoking GPT-6 reviewer. No builds, tests or Miri were run by Fable. Serde prerequisite source reviews are recorded separately for serde_core and serde_derive."
+
 [[audits.object_store]]
 who = "GPT-5.6 <noreply@openai.com>"
 criteria = "safe-to-deploy"
 delta = "0.13.2 -> 0.14.1"
 notes = "Reviewed the exact crates.io delta end to end (unsafe, build-script, proc-macro, dependency, network, and filesystem surfaces): API/refactor changes to the object-store abstraction; the notable change is a new optional nix dependency for local-filesystem metadata paths (nix itself audited separately). No build.rs additions, no proc-macros, no new network endpoints beyond the existing store backends. [GPT-5.6; entry restored by the orchestrator after the worker's recording step was lost — review evidenced in the worker transcript 2026-07-21]"
+
+[[audits.proc-macro2]]
+who = "Claude Fable 5.1 (automated source review; recorded by GPT-6)"
+criteria = "safe-to-deploy"
+delta = "1.0.106 -> 1.0.107"
+notes = "[GPT-6] Recorded actual independent automated source-delta approval by Claude Fable 5.1; recording agent GPT-6 did not impersonate an upstream auditor. Review SHA256 9c977005339864b802d48d0a36000f27520de6bd7eabac590f2d8ab7fdb18a9f; source manifest SHA256 f48a233cb50e735417af3aaf5ff62d8e9fd97e96c594713094845edeb505129c; complete patch SHA256 2210f56efce3d325fba061e309bcfc6343c493239d7fdb2d59fbda9c1d9435b8. Exact source archives and baseline chains are in research/zk-dependency-backlog/reviewed-deltas/eight-fable/source-manifest.json; review text is retained alongside it. Baseline full reviews remain imported, not newly asserted here. This is a delta source review, not a complete package/graph re-audit, cryptographic assurance or guest/proof execution claim. The reviewer inspected source only; archive/export hashes were independently checked by the invoking GPT-6 reviewer. No builds, tests or Miri were run by Fable. Serde prerequisite source reviews are recorded separately for serde_core and serde_derive."
+
+[[audits.rustversion]]
+who = "Claude Fable 5.1 (automated source review; recorded by GPT-6)"
+criteria = "safe-to-deploy"
+delta = "1.0.22 -> 1.0.23"
+notes = "[GPT-6] Recorded actual independent automated source-delta approval by Claude Fable 5.1; recording agent GPT-6 did not impersonate an upstream auditor. Review SHA256 9c977005339864b802d48d0a36000f27520de6bd7eabac590f2d8ab7fdb18a9f; source manifest SHA256 f48a233cb50e735417af3aaf5ff62d8e9fd97e96c594713094845edeb505129c; complete patch SHA256 8239f0ecd20f25bc7384f331173d341862a3c4219b90531737cffa1be75d1299. Exact source archives and baseline chains are in research/zk-dependency-backlog/reviewed-deltas/eight-fable/source-manifest.json; review text is retained alongside it. Baseline full reviews remain imported, not newly asserted here. This is a delta source review, not a complete package/graph re-audit, cryptographic assurance or guest/proof execution claim. The reviewer inspected source only; archive/export hashes were independently checked by the invoking GPT-6 reviewer. No builds, tests or Miri were run by Fable. Serde prerequisite source reviews are recorded separately for serde_core and serde_derive."
+
+[[audits.serde]]
+who = "Claude Fable 5.1 (automated source review; recorded by GPT-6)"
+criteria = "safe-to-deploy"
+delta = "1.0.228 -> 1.0.229"
+notes = "[GPT-6] Recorded actual independent automated source-delta approval by Claude Fable 5.1; recording agent GPT-6 did not impersonate an upstream auditor. Review SHA256 9c977005339864b802d48d0a36000f27520de6bd7eabac590f2d8ab7fdb18a9f; source manifest SHA256 f48a233cb50e735417af3aaf5ff62d8e9fd97e96c594713094845edeb505129c; complete patch SHA256 80e45cc372bc98f09c460a02100694d74c78325f7f1bb937f7be44fefb3fff90. Exact source archives and baseline chains are in research/zk-dependency-backlog/reviewed-deltas/eight-fable/source-manifest.json; review text is retained alongside it. Baseline full reviews remain imported, not newly asserted here. This is a delta source review, not a complete package/graph re-audit, cryptographic assurance or guest/proof execution claim. The reviewer inspected source only; archive/export hashes were independently checked by the invoking GPT-6 reviewer. No builds, tests or Miri were run by Fable. Serde prerequisite source reviews are recorded separately for serde_core and serde_derive."
+
+[[audits.serde_core]]
+who = "GPT-6 (automated source review; recorded by GPT-6)"
+criteria = "safe-to-deploy"
+delta = "1.0.228 -> 1.0.229"
+notes = "[GPT-6] Recorded actual independent automated source-delta approval by GPT-6; recording agent GPT-6 did not impersonate an upstream auditor. Review SHA256 6e0674d7476ede4b6325a4a9320fe9fd1b9f7ab445103bccc1b9799fc5899d8b; source manifest SHA256 a955a84e030fccaf881e1f4d52a35511333501487ac0e07c45fe9d92bbe38516; complete patch SHA256 efea1423554f85f6fcb30cef4e3907dfc1611cdcfde592e74d96ee61d0589988. Exact source archives and baseline chains are in research/zk-dependency-backlog/reviewed-deltas/serde-gpt6/source-manifest.json; review text is retained alongside it. Baseline full reviews remain imported, not newly asserted here. This is a delta source review, not a complete package/graph re-audit, cryptographic assurance or guest/proof execution claim. GPT-6 independently verified exact archives,126 exported files and25 original baseline records; the same8 focused behavior tests passed on both228 and229. Syn3 and other transitive units retain separate coverage obligations; queued Fable review is not claimed complete."
+
+[[audits.serde_derive]]
+who = "GPT-6 (automated source review; recorded by GPT-6)"
+criteria = "safe-to-deploy"
+delta = "1.0.228 -> 1.0.229"
+notes = "[GPT-6] Recorded actual independent automated source-delta approval by GPT-6; recording agent GPT-6 did not impersonate an upstream auditor. Review SHA256 6e0674d7476ede4b6325a4a9320fe9fd1b9f7ab445103bccc1b9799fc5899d8b; source manifest SHA256 a955a84e030fccaf881e1f4d52a35511333501487ac0e07c45fe9d92bbe38516; complete patch SHA256 c217e6d5fd5b25dc6ab1e9097ec6676a6f504a1f7765e6cbf9f0702f33e234c4. Exact source archives and baseline chains are in research/zk-dependency-backlog/reviewed-deltas/serde-gpt6/source-manifest.json; review text is retained alongside it. Baseline full reviews remain imported, not newly asserted here. This is a delta source review, not a complete package/graph re-audit, cryptographic assurance or guest/proof execution claim. GPT-6 independently verified exact archives,126 exported files and25 original baseline records; the same8 focused behavior tests passed on both228 and229. Syn3 and other transitive units retain separate coverage obligations; queued Fable review is not claimed complete."
+
+[[audits.smallvec]]
+who = "Claude Fable 5.1 (automated source review; recorded by GPT-6)"
+criteria = "safe-to-deploy"
+delta = "1.15.2 -> 1.16.1"
+notes = "[GPT-6] Recorded actual independent automated source-delta approval by Claude Fable 5.1; recording agent GPT-6 did not impersonate an upstream auditor. Review SHA256 9c977005339864b802d48d0a36000f27520de6bd7eabac590f2d8ab7fdb18a9f; source manifest SHA256 f48a233cb50e735417af3aaf5ff62d8e9fd97e96c594713094845edeb505129c; complete patch SHA256 08502e40447fa2ef39a7d2c491c66d384801ace6d11d730a1f35b8dd9842bc00. Exact source archives and baseline chains are in research/zk-dependency-backlog/reviewed-deltas/eight-fable/source-manifest.json; review text is retained alongside it. Baseline full reviews remain imported, not newly asserted here. This is a delta source review, not a complete package/graph re-audit, cryptographic assurance or guest/proof execution claim. The reviewer inspected source only; archive/export hashes were independently checked by the invoking GPT-6 reviewer. No builds, tests or Miri were run by Fable. Serde prerequisite source reviews are recorded separately for serde_core and serde_derive."
