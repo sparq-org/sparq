@@ -302,3 +302,18 @@ _Status: publishable (sq-qonbz.4 [SONNET-4.6]). All four modules implemented and
 neutral vs the pre-move engine baseline (W3C SPARQL conformance floor bit-identical; join/
 numeric/compare micro-benches within noise). Phase-5 reasoner adoption (consuming `join` from
 `sparq-reason` / `sparq-reason-el`) is tracked separately._
+
+### Borrowed numeric operands (GPT-6)
+
+`numeric::Num::of_parts(value, datatype)` is the allocation-free parser shared
+by `Num::of_literal` and the reasoner comparator. Both validate numeric lexical
+syntax, XML whitespace and integer facets before the finite arithmetic tower.
+The core `Graph::exact_numeric_lexical` and engine exact-decimal comparison
+helpers apply the same validity gate before preserving the original lexical.
+This keeps cached, scalar and compiled arithmetic errors aligned; it does not
+expand arithmetic magnitude capacity or change D-entailment's distinct keys.
+
+Numeric unsigned signs follow [XSD 1.1 §3.4.21](https://www.w3.org/TR/xmlschema11-2/#unsignedLong):
+`+1` and `-0` remain valid within range. This matches the datatype reference in
+[RDF 1.1 Concepts §5.1](https://www.w3.org/TR/rdf11-concepts/#xsd-datatypes);
+it does not change the separately bounded temporal representation.

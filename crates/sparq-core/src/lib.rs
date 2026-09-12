@@ -770,6 +770,7 @@ fn numeric_datatype_wellformed(v: &str, datatype: &str) -> bool {
 /// assert!(!numeric_literal_valid("1200", "http://www.w3.org/2001/XMLSchema#byte"));
 /// assert!(!numeric_literal_valid("5.0", "http://www.w3.org/2001/XMLSchema#integer"));
 /// ```
+// Numeric facets retain XSD 1.1 unsigned lexical signs; temporal version rules are separate.
 pub fn numeric_literal_valid(value: &str, datatype: &str) -> bool {
     let value = value.trim_matches([' ', '\t', '\r', '\n']);
     let body = value.strip_prefix(['+', '-']).unwrap_or(value);
@@ -2768,15 +2769,16 @@ impl Graph {
     /// The lexical form of a term id IF it is an exact-valued numeric literal (an
     /// `xsd:integer` subtype or `xsd:decimal` — NOT float/double, whose value IS its f64).
     /// Used to disambiguate comparisons that the f64 fast path collapses (integers > 2^53,
-    /// high-precision decimals); only reached when the f64 values compared equal, so the
-    /// allocation is rare. Inline-integer ids format their value directly.
+    /// high-precision decimals) and to evaluate exact arithmetic comparisons. Invalid
+    /// lexical forms and subtype facets return `None`. Inline integers format directly.
     pub fn exact_numeric_lexical(&self, id: Id) -> Option<String> {
         if dict::is_inline(id) {
             return Some((id - dict::INLINE_BASE).to_string());
         }
         match self.dict.term_parts(id) {
             dict::TermParts::Lit { value, datatype, lang: None }
-                if is_integer_datatype(datatype) || datatype == xsd::DECIMAL.as_str() =>
+                if (is_integer_datatype(datatype) || datatype == xsd::DECIMAL.as_str())
+                    && numeric_literal_valid(value, datatype) =>
             {
                 Some(value.to_string())
             }
