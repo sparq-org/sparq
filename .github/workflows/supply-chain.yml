@@ -335,6 +335,8 @@ jobs:
         run: |
           python3 vendor/zk-sdk/verify.py --smoke
           python3 vendor/zk-sdk/verify.py --feature-matrix
+          python3 vendor/zk-sdk/tests/test_provenance.py
+          python3 vendor/zk-sdk/edge_matrix.py
       - name: cargo-vet check — GATING
         if: steps.changes.outputs.rust_changed == 'true'
         run: python3 scripts/rust-dependency-graphs.py vet

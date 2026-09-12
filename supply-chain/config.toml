@@ -22,27 +22,25 @@ url = "https://raw.githubusercontent.com/mozilla/supply-chain/main/audits.toml"
 [imports.zcash]
 url = "https://raw.githubusercontent.com/zcash/rust-ecosystem/main/supply-chain/audits.toml"
 
-[policy.spargebra]
-audit-as-crates-io = true
-
-
-# [GPT-6] Local SDK patches retain their upstream registry audit obligations.
-[policy.risc0-build]
-audit-as-crates-io = true
-
-[policy.rzup]
+[policy.ark-crypto-primitives]
 audit-as-crates-io = true
 
 [policy.ark-relations]
 audit-as-crates-io = true
 
-[policy.ark-crypto-primitives]
+[policy.risc0-build]
+audit-as-crates-io = true
+
+[policy.risc0-zkos-v1compat]
 audit-as-crates-io = true
 
 [policy.risc0-zkvm]
 audit-as-crates-io = true
 
-[policy.risc0-zkos-v1compat]
+[policy.rzup]
+audit-as-crates-io = true
+
+[policy.spargebra]
 audit-as-crates-io = true
 
 [[exemptions.aead]]

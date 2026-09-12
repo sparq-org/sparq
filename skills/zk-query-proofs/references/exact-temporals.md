@@ -55,11 +55,11 @@ exact. Existing historical receipts do not establish those updated semantics.
 ## Evidence boundaries
 
 The original 26 cases plus exact ORDER BY tie/lexical-preservation controls are in
-[`exact_temporal.json`](../../../../crates/sparq-engine/tests/fixtures/exact_temporal.json).
+[`exact_temporal.json`](../../../crates/sparq-engine/tests/fixtures/exact_temporal.json).
 It checks literal, VALUES, stored dense/compressed data, scan/COUNT, ORDER BY,
 MIN/MAX, dynamic constructors, long SECONDS output and the dateTimeStamp timezone facet. Separately labeled
 capacity rejections live in
-[`temporal-capacity.json`](../../../../zk/sparql-evaluator/fixtures/conformance/temporal-capacity.json).
+[`temporal-capacity.json`](../../../zk/sparql-evaluator/fixtures/conformance/temporal-capacity.json).
 These are authored REC-derived expectations and explicit capacity controls,
 not official W3C test vectors or a complete conformance claim.
 
@@ -70,11 +70,11 @@ proof fixture includes a nanosecond equality discriminator while retaining the
 prior numeric, path-domain, MINUS and SUBSTR branches. New source/host tests are
 not evidence of a new guest execution until a pinned-artifact campaign records it.
 
-The [native checkpoint record](../../../../zk/sparql-evaluator/temporal-native-evidence.json)
+The [native checkpoint record](../../../zk/sparql-evaluator/temporal-native-evidence.json)
 contains source hashes, guard mutations and scoped test results. Its explicit
 pending guest status must not be replaced by historical receipt evidence.
 
-The [cache follow-up record](../../../../zk/sparql-evaluator/temporal-cache-native-evidence.json)
+The [cache follow-up record](../../../zk/sparql-evaluator/temporal-cache-native-evidence.json)
 pins warm-lookup, comparator and year-zero guard mutations to restored source
 hashes. It remains native evidence; its pending guest/hosted status is explicit.
 
