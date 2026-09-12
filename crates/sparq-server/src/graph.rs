@@ -18,8 +18,20 @@
 //!
 //! These are deliberately pure (no async, no HTTP types), like [`crate::results`], so they
 //! are unit-testable and the `server` feature is not required to use them.
+//!
+//! ## Buffered vs streaming ([FABLE-5] sq-0kq6k)
+//!
+//! Each syntax has TWO entry points and exactly ONE implementation:
+//!
+//! * `write_*_to(&[Triple], &mut impl io::Write)` — the primitive. It hands the underlying
+//!   `oxttl` / `oxrdfxml` serialiser (or the N-Triples line loop) the caller's sink directly,
+//!   so the rendered document is never materialised as one `String`. This is what the HTTP
+//!   CONSTRUCT / DESCRIBE path feeds a chunk sink to emit a chunked-transfer response body.
+//! * `triples_to_*(&[Triple]) -> String` — the buffered convenience, implemented BY calling
+//!   the `write_*_to` primitive over an in-memory `Vec<u8>`. Byte-identity between the two is
+//!   therefore structural (one writer, one code path), not a property a test has to police.
 
-use oxrdf::{Triple, TripleRef};
+use oxrdf::Triple;
 
 /// RDF/XML media type (graph syntax) — request body **and** response.
 pub const RDF_XML_MEDIA: &str = "application/rdf+xml";
@@ -50,42 +62,83 @@ pub const COMMON_PREFIXES: &[(&str, &str)] = &[
     ("schema", "https://schema.org/"),
 ];
 
+/// [FABLE-5] sq-0kq6k: Streams an RDF graph as canonical **N-Triples** into `w` — one
+/// `s p o .` line per triple in `oxrdf` Display term syntax, written straight to the sink
+/// with no whole-document `String`. [`triples_to_ntriples`] is this function over a `Vec<u8>`.
+///
+/// The only error a caller can observe is `w`'s: over an in-memory buffer that is impossible,
+/// over the HTTP chunk sink it means the client went away (and serialisation should stop).
+pub fn write_ntriples_to<W: std::io::Write>(triples: &[Triple], w: &mut W) -> std::io::Result<()> {
+    for t in triples {
+        writeln!(w, "{} {} {} .", t.subject, t.predicate, t.object)?;
+    }
+    Ok(())
+}
+
 /// Serialises an RDF graph as canonical **N-Triples**. Identical contract to the engine's
 /// `triples_to_ntriples` (one `s p o .` line per triple, `oxrdf` Display term syntax); kept
 /// here so this module is the single graph-serialisation seam the format dispatch routes
 /// through.
 pub fn triples_to_ntriples(triples: &[Triple]) -> String {
-    use std::fmt::Write;
-    let mut out = String::with_capacity(triples.len() * 64);
-    for t in triples {
-        let _ = writeln!(out, "{} {} {} .", t.subject, t.predicate, t.object);
+    buffer(triples.len() * 64, |w| write_ntriples_to(triples, w))
+}
+
+/// The Turtle serialiser with [`COMMON_PREFIXES`] registered, shared by the streaming and
+/// buffered entry points so both compact the same namespaces.
+///
+/// `with_prefix` only fails on a syntactically invalid prefix IRI; ours are constants and
+/// valid, so the error is unreachable — fall back to the un-prefixed serialiser rather than
+/// panicking if a future edit breaks one.
+fn turtle_serializer() -> oxttl::TurtleSerializer {
+    let mut ser = oxttl::TurtleSerializer::new();
+    for (name, iri) in COMMON_PREFIXES {
+        ser = ser.with_prefix(*name, *iri).unwrap_or_else(|_| oxttl::TurtleSerializer::new());
     }
-    out
+    ser
+}
+
+/// [FABLE-5] sq-0kq6k: Streams an RDF graph as **prefix-compacting Turtle** into `w`.
+/// `oxttl`'s `TurtleSerializer` is already an incremental writer — it holds only the current
+/// subject/predicate grouping state — so handing it the caller's sink emits the `@prefix`
+/// header and early subject blocks before the last triple is rendered, with no whole-document
+/// `String`. [`triples_to_turtle`] is this function over a `Vec<u8>`.
+pub fn write_turtle_to<W: std::io::Write>(triples: &[Triple], w: &mut W) -> std::io::Result<()> {
+    let mut ser = turtle_serializer().for_writer(w);
+    for t in triples {
+        ser.serialize_triple(t.as_ref())?;
+    }
+    ser.finish()?;
+    Ok(())
 }
 
 /// Serialises an RDF graph as **prefix-compacting Turtle**: registers [`COMMON_PREFIXES`] so
 /// IRIs under those namespaces render as `prefix:local`, the rest in full. Output is
 /// guaranteed well-formed Turtle (it goes through `oxttl`'s `TurtleSerializer`).
 pub fn triples_to_turtle(triples: &[Triple]) -> String {
-    let mut ser = oxttl::TurtleSerializer::new();
+    buffer(triples.len() * 64, |w| write_turtle_to(triples, w))
+}
+
+/// [FABLE-5] sq-0kq6k: Streams an RDF graph as **RDF/XML** into `w`. Like the Turtle writer,
+/// `oxrdfxml`'s `RdfXmlSerializer` writes incrementally, so no whole-document `String` is
+/// built. [`triples_to_rdfxml`] is this function over a `Vec<u8>`.
+pub fn write_rdfxml_to<W: std::io::Write>(triples: &[Triple], w: &mut W) -> std::io::Result<()> {
+    let mut ser = oxrdfxml::RdfXmlSerializer::new();
     for (name, iri) in COMMON_PREFIXES {
-        // `with_prefix` only fails on a syntactically invalid prefix IRI; ours are constants
-        // and valid, so the error is unreachable — fall back to the un-prefixed serialiser
-        // rather than panicking if a future edit breaks one.
-        ser = ser.with_prefix(*name, *iri).unwrap_or_else(|_| oxttl::TurtleSerializer::new());
+        ser = ser.with_prefix(*name, *iri).unwrap_or_else(|_| oxrdfxml::RdfXmlSerializer::new());
     }
-    serialize_with(ser.for_writer(Vec::new()), triples, |w, t| w.serialize_triple(t), |w| w.finish())
+    let mut ser = ser.for_writer(w);
+    for t in triples {
+        ser.serialize_triple(t.as_ref())?;
+    }
+    ser.finish()?;
+    Ok(())
 }
 
 /// Serialises an RDF graph as **RDF/XML** (`application/rdf+xml`) with [`COMMON_PREFIXES`]
 /// registered as XML namespaces for readable QNames. Output goes through `oxrdfxml`'s
 /// `RdfXmlSerializer`, so it is guaranteed well-formed RDF/XML.
 pub fn triples_to_rdfxml(triples: &[Triple]) -> String {
-    let mut ser = oxrdfxml::RdfXmlSerializer::new();
-    for (name, iri) in COMMON_PREFIXES {
-        ser = ser.with_prefix(*name, *iri).unwrap_or_else(|_| oxrdfxml::RdfXmlSerializer::new());
-    }
-    serialize_with(ser.for_writer(Vec::new()), triples, |w, t| w.serialize_triple(t), |w| w.finish())
+    buffer(triples.len() * 64, |w| write_rdfxml_to(triples, w))
 }
 
 /// [OPUS-4.8] sq-oy1f.1: Serialises an RDF graph (triple list) as **JSON-LD 1.1**
@@ -115,24 +168,33 @@ pub fn triples_to_jsonld(triples: &[Triple]) -> String {
     write_jsonld(&view, JsonLdForm::Flattened, &default_prefixes())
 }
 
-/// Shared driver for the `oxttl` / `oxrdfxml` writers, which share the
-/// `serialize_triple(TripleRef) -> io::Result<()>` + `finish() -> io::Result<W>` shape.
-/// Writing to an in-memory `Vec<u8>` is infallible, so an `io::Error` here is genuinely
-/// impossible; if one ever surfaced (a serialiser-internal invariant), we fall back to
-/// whatever bytes were written rather than panic in a request handler.
-fn serialize_with<W>(
-    mut writer: W,
-    triples: &[Triple],
-    mut write_one: impl FnMut(&mut W, TripleRef<'_>) -> std::io::Result<()>,
-    finish: impl FnOnce(W) -> std::io::Result<Vec<u8>>,
-) -> String {
-    for t in triples {
-        // An in-memory writer cannot fail; skip-on-error keeps this total without `unwrap`.
-        let _ = write_one(&mut writer, t.as_ref());
-    }
-    let bytes = finish(writer).unwrap_or_default();
-    // The oxigraph writers emit valid UTF-8 (XML/Turtle are UTF-8 here), so this is lossless.
-    String::from_utf8(bytes).unwrap_or_default()
+/// [FABLE-5] sq-0kq6k: Writes the JSON-LD document into `w`, the sink-shaped twin of
+/// [`triples_to_jsonld`] so the graph-format dispatch is uniform.
+///
+/// HONEST CAVEAT: this one does NOT stream. The engine's `write_jsonld` returns a whole
+/// `String` (a JSON-LD document is node-merged, so it cannot be emitted subject-by-subject
+/// the way Turtle can), so the rendered document is still materialised in full before it
+/// reaches `w`. A `text/turtle` / `application/n-triples` / `application/rdf+xml` CONSTRUCT
+/// streams; an `application/ld+json` one does not. Wiring a genuinely incremental JSON-LD
+/// writer is follow-up work.
+#[cfg(feature = "jsonld")]
+pub fn write_jsonld_to<W: std::io::Write>(triples: &[Triple], w: &mut W) -> std::io::Result<()> {
+    w.write_all(triples_to_jsonld(triples).as_bytes())
+}
+
+/// [FABLE-5] sq-0kq6k: Runs one of the `write_*_to` primitives over an in-memory `Vec<u8>`
+/// and returns the rendered document — the single shared implementation of every buffered
+/// `triples_to_*` wrapper, so buffered output is byte-identical to streamed output by
+/// construction.
+///
+/// Writing to a `Vec<u8>` is infallible, so the `io::Error` arm is genuinely unreachable; if
+/// one ever surfaced (a serialiser-internal invariant) we keep whatever bytes were written
+/// rather than panic in a request handler. The oxigraph writers emit valid UTF-8 (Turtle /
+/// RDF/XML are UTF-8 here), so the final conversion is lossless.
+fn buffer(hint: usize, render: impl FnOnce(&mut Vec<u8>) -> std::io::Result<()>) -> String {
+    let mut out = Vec::with_capacity(hint);
+    let _ = render(&mut out);
+    String::from_utf8(out).unwrap_or_default()
 }
 
 /// Parses an **RDF/XML** document into a triple list (the GSP write-body reader for

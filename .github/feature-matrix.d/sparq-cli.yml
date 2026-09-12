@@ -70,6 +70,19 @@
   features: "diff"
   test: true
 
+# [FABLE-5] sq-0kq6k: `streaming-serialization` — `dump … turtle|trig` writes straight to
+# stdout through the engine's streaming writers. Under the feature the BUFFERED turtle/trig
+# match arms in `cmd_dump` are compiled OUT, so this leg is the only thing that builds and
+# clippies the streaming dispatch + `dump_streaming`, and it runs tests/dump_streaming_cli.rs
+# (`#[cfg(feature = "streaming-serialization")]`), which pins streamed output byte-equal to the
+# buffered writers. Without the leg both would be silent gaps.
+# Verified: `cargo test -p sparq-cli --features streaming-serialization -- --list` shows the
+# 8 dump_streaming_cli tests.
+- name: "sparq-cli (streaming-serialization)"
+  crate: "sparq-cli"
+  features: "streaming-serialization"
+  test: true
+
 # [OPUS-5] sq-2ch27 (Phase E6): the OWL 2 EL classifier surface — `--reason el` on `query`,
 # `reason <f> <fmt> el`, and the `classify` subcommand (forwards `sparq-reason-el` WITH its
 # `rbox` feature, i.e. the E1+E2 capability this bead depends on). Same gap as the legs above:

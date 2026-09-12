@@ -1820,6 +1820,21 @@ records_to  = "bench/competitor-results/gsp-<UTC>.json via GSP_JSON_OUT (git-ign
 featured    = false  # external-competitor differential harness, not a dashboard-promoted capability suite
 status      = "ok"  # smoke (sparq loopback) is self-contained; competitor columns are gather-time external cost
 
+# [FABLE-5] sq-0kq6k — streamed-vs-buffered CONSTRUCT/DESCRIBE response measurement
+[[benchmark]]
+id          = "construct-stream"
+name        = "Streamed vs buffered CONSTRUCT/DESCRIBE response bodies (sparq-server, self-differential)"
+category    = "serve"
+measures    = "time-to-first-byte and peak process RSS (VmHWM) for a large CONSTRUCT, streamed (GET, chunked body) vs buffered (HEAD, whole document rendered to one String — the pre-sq-0kq6k code path, used as the control so no feature flag or second binary is needed); one server process per arm because VmHWM is monotonic; HARD agreement gate BEFORE timing (streamed body length == the Content-Length the buffered HEAD advertises, and the N-Triples body carries the exact expected triple count), plus a corrupt-the-body non-vacuity self-check"
+invoke      = "bash bench/construct-stream/run.sh --smoke   # acceptance: gates only, exit 0 = green\n              bash bench/construct-stream/run.sh          # full run\n              CS_FANOUT=8 bash bench/construct-stream/run.sh  # rendered document grown WITHOUT growing the store"
+source      = "bench/construct-stream/{run.sh,README.md}; lineage: bench/gsp (loopback same-box server protocol)"
+dataset     = "none fetched — deterministic bnode-free ASCII N-Triples generated in-driver from CS_SUBJECTS; the CONSTRUCT template fans out by CS_FANOUT"
+quiet_box_sensitive = true
+pinning     = "corpus deterministic by construction (counter form, no seed); both arms hit the SAME binary and the SAME corpus in the same run, so the comparison is self-differential and immune to cross-build drift"
+records_to  = "no results file — the script prints a table and asserts no thresholds; first-read record: bench/construct-stream/README.md (work-box, NON-canonical, no timings transcribed)"
+featured    = false  # self-differential regression/measurement harness, not a dashboard-promoted capability suite
+status      = "ok"  # self-contained: sparq loopback only, no competitor or external dataset
+
 # [FABLE-5] sq-hmd7l.12 — federation harness (FedShop-shaped vs Comunica + Jena SERVICE)
 [[benchmark]]
 id          = "federation-fedshop"
