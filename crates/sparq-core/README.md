@@ -29,23 +29,24 @@ assert_eq!(count, 1);
 
 ## Literal validation and evaluation caches
 
-[GPT-6] `numeric_literal_valid(value, datatype)` checks numeric lexical forms and
-integer subtype facets after XML whitespace trimming. It is independent of the
-finite arithmetic/cache representation: a valid integer or decimal can exceed
-that representation while remaining a numeric RDF literal. `numeric_cache_value`
-returns no value for malformed lexicals, invalid subtype values, or values outside
-its representation (and for the existing NaN sentinel).
+[GPT-6] `numeric_literal_valid(value, datatype)` checks lexical forms and integer
+subtype facets after XML whitespace trimming, independently of finite arithmetic
+capacity. `numeric_cache_value` omits invalid lexicals/facets, values outside its
+representation and the existing NaN sentinel; larger literals can remain valid.
 
-The shared `temporal` parsers validate XSD 1.0 calendar fields, leap days, time
-fields and timezone offsets before creating comparison values. Malformed Unicode
-and unrepresentable timestamps return `None`. RDF ingest still retains ill-typed
-literals; validation controls evaluation and cache eligibility, not RDF acceptance.
+The shared `temporal` parsers validate XSD 1.0 calendar/time fields and offsets.
+Malformed Unicode and unrepresentable timestamps return `None`. RDF ingest retains
+ill-typed literals; validation controls evaluation and cache eligibility.
 
-**Legacy mmap archives:** archives created before these validation rules can
-contain permissive derived values in `numerics.bin` and `temporals.bin`. Rebuild
-those derived caches before querying such an archive with the new validation
-contract; opening an old same-sized cache does not currently invalidate it.
-This limitation does not apply to fresh RDF loads.
+**Legacy mmap archives:** `Graph::open` ignores the old unversioned
+`numerics.bin`/`temporals.bin` and rebuilds caches in memory, preserving all RDF
+terms and triples. All writers use `numerics-v2.bin`/`temporals-v2.bin`; missing or
+wrong-sized current files also trigger rebuilds.
+
+Legacy opens cost a dictionary scan and cache allocation until migrated with
+`Graph::open(old)?.save(new)?`. Current compatible caches remain memory-mapped.
+Versions mark semantic compatibility, not integrity; the trusted-storage contract
+still applies. Details: [data-formats guide](../../skills/data-formats/SKILL.md).
 
 ## ✨ Features
 

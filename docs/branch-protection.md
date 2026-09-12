@@ -187,7 +187,7 @@ directive, under sq-6vshe.6). This is a **decision, not a defect**.
 
 The lanes that DO trigger on `merge_group` today are: `ci-summary.yml` (the gate itself),
 `ci.yml`, `feature-matrix.yml`, `vectorized-feature-off.yml`, `docs-quality.yml`,
-`flow-on-gates.yml`, `routing-self-tests.yml` and `pr-area-label.yml` — plus
+`flow-on-gates.yml`, `routing-self-tests.yml`, `zk-exact-evaluator.yml` and `pr-area-label.yml` — plus
 `codeql.yml`, whose trigger set lists `merge_group` but which is operationally disabled
 per the note above and so produces no check-run there.
 

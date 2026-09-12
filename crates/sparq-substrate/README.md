@@ -2,24 +2,13 @@
 
 **Shared zero-overhead evaluation substrate** for the sparq SPARQL engine and the
 reasoners — an **opt-in**, **leaf** crate (epic sq-qonbz) that depends **only** on
-`sparq-core`, never on `sparq-engine`. It hosts the parts of evaluation that are genuinely
-common to both the query engine and every reasoner: the id-tuple **row/key** vocabulary, the
-XSD **numeric value tower**, the four **join kernels**, and the SPARQL **term total order**.
-Placing them in a leaf crate lets both consumers reach them with **no dependency cycle**, while
-keeping `sparq-core` and the lean wasm bundle untouched.
+`sparq-core`, never on `sparq-engine`. It shares the id-tuple **row/key** vocabulary,
+XSD **numeric tower**, **join kernels** and SPARQL **term order** without dependency
+cycles or default-feature growth in core/WASM consumers.
 
-> **Status (sq-vezew — Phase 4 of the epic).** The SPARQL **term total order** —
-> `compare::compare_terms` (the engine's `compare_values`: error/unbound < blank < IRI <
-> literal < triple, numeric-aware + strict typed/temporal + string fallback + recursive
-> triple-term order) — has now **moved here** from `sparq-engine`, generalised over a tiny
-> `CompareTerm` trait the consumer implements for its term type, so the engine AND a future
-> reasoner share one ordering body **monomorphically** — no `Box<dyn>`. Phase 3 (sq-hknqs)
-> moved the four **join kernels** (behind a generic `JoinKeys` descriptor + a `Budget` hook)
-> and Phase 2 (sq-ev41x) the **numeric value tower** the same way. All are behaviour-neutral
-> code-moves (the W3C SPARQL conformance floor is bit-identical; the join/scan/BGP/sort
-> micro-benches are within noise). The engine's `Value` enum stays engine-resident — it also
-> drives the relational operators — and is surfaced to the ordering algorithm through the
-> trait. See `research/shared-eval-substrate.md` for the extraction plan and perf-neutrality proof.
+Monomorphized consumer traits share these bodies; the engine retains `Value` and relational operators.
+See the [substrate design](../../research/shared-eval-substrate.md) for the boundary
+and extraction evidence.
 
 ## 🚀 Quickstart
 
@@ -46,18 +35,14 @@ let n: Option<Num> = as_numeric(&lit);  // exact xsd:decimal (no f64 rounding)
 
 ## Numeric validity and capacity
 
-[GPT-6] `numeric::Num::of_literal` and `as_numeric` apply the shared
-`sparq_core::numeric_literal_valid` grammar and integer subtype facets before
-parsing an arithmetic value. For example, `"5.0"^^xsd:integer` and
-`"1200"^^xsd:byte` are invalid operands. XML whitespace at the lexical boundaries
-is accepted; non-XML whitespace is not.
+[GPT-6] `numeric::Num::of_literal` and `as_numeric` use the shared
+`sparq_core::numeric_literal_valid` grammar/facets: `"5.0"^^xsd:integer` and
+`"1200"^^xsd:byte` are invalid; boundary whitespace must be XML whitespace.
 
-Datatype membership and arithmetic capacity are distinct. The existing tower uses
-`i64` integers, `i128` decimal mantissas, and binary floats; valid larger integers
-or decimals can return `None` here while `numeric_literal_valid` returns `true`.
-This change does not add arbitrary-precision arithmetic or change the existing
-overflow promotion policy. Shared validation adds a lexical scan when decoding a
-numeric literal; cached values continue to avoid per-row lexical parsing.
+The finite tower uses `i64` integers, `i128` decimal mantissas and binary floats.
+Larger valid literals can return `None` here while validation returns `true`;
+overflow promotion is unchanged. Validation adds a lexical scan on decode;
+cached values avoid per-row parsing. [Numeric guide](../../skills/substrate/SKILL.md).
 
 ## ✨ Features
 
