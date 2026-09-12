@@ -184,7 +184,10 @@ jobs:
     permissions:
       actions: read # read the workflow definition the provenance records as the entry point
       id-token: write # mint the generator's OWN signing identity (never shared with `package`)
-      contents: read # `upload-assets: false` below — the `release` job attaches the file, not this
+      # The upstream reusable workflow declares a nested release-uploader job with
+      # `contents: write`, so GitHub validates this ceiling even when `upload-assets: false`
+      # skips that job. The release job below remains the only job that actually uploads.
+      contents: write
     uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
     with:
       # The ONLY input crossing the isolation boundary: digests, computed by `package`, of the
@@ -847,7 +850,9 @@ jobs:
     permissions:
       actions: read # read the workflow definition the provenance records as the entry point
       id-token: write # mint the generator's OWN signing identity (never shared with a build job)
-      contents: read # not the uploader; the `release` job attaches the bundle
+      # Required as a permission ceiling by the upstream reusable workflow's nested,
+      # skipped uploader job even though `upload-assets: false`; this job does not upload.
+      contents: write
     uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
     with:
       base64-subjects: ${{ needs.artifact-subjects.outputs.hashes }}

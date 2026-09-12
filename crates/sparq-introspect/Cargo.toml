@@ -75,7 +75,11 @@ getrandom = { version = "0.3", features = ["wasm_js"] }
 [dev-dependencies]
 # Round-trips the VoID export to assert it is valid N-Triples (subset of Turtle).
 oxttl.workspace = true
-sparq-engine = { path = "../sparq-engine", version = "0.1.1" }
+# Keep this path-only: Cargo omits unversioned dev-dependencies from the published
+# manifest. Adding a registry version here creates an impossible first-publish cycle
+# (`sparq-engine` has a versioned dev-dependency on `sparq-introspect`) and makes
+# `cargo package -p sparq-introspect` resolve an as-yet unpublished engine from crates.io.
+sparq-engine = { path = "../sparq-engine" }
 
 # [OPUS-4.8] sq-aq5 — headless wasm smoke test (`tests/wasm.rs`), mirroring the shipped
 # wasm bundle crates: exercises the real introspection pipeline (build + to_json +

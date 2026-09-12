@@ -90,8 +90,10 @@ MPC run as a production-grade guarantee anywhere. That stays false until `sq-qhy
 
 Rust versions are locked through `[workspace.package] version` and release-plz's single
 `version_group`. Every shipped workspace path dependency also has an explicit registry
-version. The version PR must update the root version, every path-dependency requirement,
-and `Cargo.lock` together; the release guard refuses an incomplete dependency closure.
+version. Path-only dev-dependencies are the deliberate exception: Cargo omits them from
+published manifests, allowing workspace-only tests without adding a registry edge. The
+version PR must update the root version, every shipped path-dependency requirement, and
+`Cargo.lock` together; the release guard refuses an incomplete dependency closure.
 
 The first-release PR sets these files explicitly to **0.1.1**. This is deliberately not a
 release-plz-generated PR: before the first dependency-first crates.io bootstrap,
@@ -194,6 +196,9 @@ labelled OPT-IN artifact, not silently alongside the `sparq-cli` archives.
 just the top-level product crates. `scripts/release-interval-guard.py` derives the set and
 the dependency-first order directly from the workspace manifests, refuses public-to-private
 path edges, and requires a registry version on every shipped workspace dependency.
+Versioned dev-dependencies are shipped and therefore participate in the derived order.
+The `sparq-introspect` test-only edge back to `sparq-engine` is deliberately path-only;
+publishing it with a version would create an impossible first-release dependency cycle.
 
 Exact bootstrap commands, from the repo root on the tagged **v0.1.1** commit:
 
@@ -220,19 +225,19 @@ cargo publish -p sparq-wrapper
 # against upstream first — it must package + compile cleanly:
 #   cargo publish --dry-run -p sparq-engine
 cargo publish -p sparq-engine
-cargo publish -p sparq-reason
 cargo publish -p sparq-reason-el
 cargo publish -p sparq-vc
 cargo publish -p sparq-arrow
-cargo publish -p sparq-geo
 cargo publish -p sparq-nlq
 cargo publish -p sparq-policy
+cargo publish -p sparq-reason
 cargo publish -p sparq-rsp
 cargo publish -p sparq-serve
 cargo publish -p sparq-shacl
 cargo publish -p sparq-text
 cargo publish -p sparq-zk
 cargo publish -p sparq-forms
+cargo publish -p sparq-geo
 cargo publish -p sparq-trust
 cargo publish -p sparq-vectors
 cargo publish -p sparq-solid
