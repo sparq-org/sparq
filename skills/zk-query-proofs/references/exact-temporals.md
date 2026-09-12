@@ -10,7 +10,11 @@ work in literal length. Trailing fractional zeros do not change the value.
 compressed storage. Engine scalar/compiled comparison, sargable scan/COUNT, ORDER
 BY, MIN/MAX and the reasoner's opt-in `substrate-compare` use this exact key.
 Source literal identity remains unchanged, including the original MIN/MAX term.
-Sorting reparses borrowed temporal keys; no unmeasured performance claim is made.
+The graph lazily memoizes checked temporal seconds, flags and fraction offsets.
+Warm whole-second lookups need no lexical access; fractions borrow dictionary
+slices. ORDER BY cells hold the borrowed keys, avoiding comparator-time parsing.
+Forks, dictionary appends and re-encoding rebuild the memo; persisted cache bytes
+stay compatible. No unmeasured throughput or memory neutrality claim is made.
 The existing `Timeline` floating fraction, `Temporal` f64 epoch/cache files and
 approximate vector representations remain available for their representation
 purposes. Their floating comparisons are not exact value or equality oracles.
@@ -18,8 +22,9 @@ purposes. Their floating comparisons are not exact value or equality oracles.
 The checked shared calendar range, including BCE, remains available natively.
 The proof profile admits positive lexical years **1 through 1,000,000,000** for
 `xsd:date`, `xsd:dateTime` and timezone-bearing `xsd:dateTimeStamp`. Fractions can
-use the remaining bounded input bytes. The existing calendar grammar rejects year
-zero; this is an explicit temporal subset. Query syntax/operators target the
+use the remaining bounded input bytes. Year zero is valid under XSD 1.1 but outside
+this positive-year proof lane: literals, stored data and dynamic construction
+fail the entire proof evaluation instead of yielding an ordinary expression error. Query syntax/operators target the
 published SPARQL 1.1 Recommendation, while numeric facets follow RDF 1.1/XSD 1.1;
 this is not a claim of uniform XSD 1.0 or complete XSD 1.1 datatype support.
 `xsd:time` is outside this date/dateTime comparison family.
@@ -52,7 +57,7 @@ receipts do not establish those updated semantics.
 The original 26-case matrix is in
 [`exact_temporal.json`](../../../../crates/sparq-engine/tests/fixtures/exact_temporal.json).
 It checks literal, VALUES, stored dense/compressed data, scan/COUNT, ORDER BY,
-MIN/MAX, dynamic constructors, long SECONDS output and the dateTimeStamp timezone facet. Eight separately labeled
+MIN/MAX, dynamic constructors, long SECONDS output and the dateTimeStamp timezone facet. Separately labeled
 capacity rejections live in
 [`temporal-capacity.json`](../../../../zk/sparql-evaluator/fixtures/conformance/temporal-capacity.json).
 These are authored REC-derived expectations and explicit capacity controls,
@@ -68,3 +73,7 @@ not evidence of a new guest execution until a pinned-artifact campaign records i
 The [native checkpoint record](../../../../zk/sparql-evaluator/temporal-native-evidence.json)
 contains source hashes, guard mutations and scoped test results. Its explicit
 pending guest status must not be replaced by historical receipt evidence.
+
+The [cache follow-up record](../../../../zk/sparql-evaluator/temporal-cache-native-evidence.json)
+pins warm-lookup, comparator and year-zero guard mutations to restored source
+hashes. It remains native evidence; its pending guest/hosted status is explicit.

@@ -99,7 +99,9 @@ fn explicit_year_capacity_preserves_ordinary_lexical_errors() {
             "{value}"
         );
     }
+    // XSD 1.1 year zero is valid-shaped but outside this positive-year lane.
     for value in [
+        "0000-01-01T00:00:00Z",
         "-0001-01-01T00:00:00Z",
         "1000000001-01-01T00:00:00Z",
         "99999999999999999999999-01-01T00:00:00Z",
@@ -111,7 +113,6 @@ fn explicit_year_capacity_preserves_ordinary_lexical_errors() {
     }
     for value in [
         "not a date",
-        "0000-01-01T00:00:00Z",
         "01234-01-01T00:00:00Z",
     ] {
         assert!(

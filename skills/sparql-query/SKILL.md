@@ -98,7 +98,9 @@ rayon cannot lose this state; nested calls restore their parent's budget. This
 is not a dataset validator: a proof profile must also validate input/query terms.
 
 Temporal comparisons, ORDER BY and MIN/MAX use exact integer-second/borrowed-fraction
-keys rather than the approximate epoch cache. SECONDS preserves all validated
+keys rather than the approximate epoch cache. Graph keys lazily memoize validated
+seconds/flags and borrow fraction slices; ORDER BY retains these keys without
+per-comparison reparsing. Forks and dictionary appends rebuild the in-memory memo. SECONDS preserves all validated
 fractional digits as an xsd:decimal result; this does not expand finite decimal
 arithmetic. See [exact temporal scope](../zk-query-proofs/references/exact-temporals.md).
 
