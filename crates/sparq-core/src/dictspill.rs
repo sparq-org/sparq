@@ -25,7 +25,7 @@
 //!   3. assign    — per shard in order: external sort of the distinct terms by
 //!      min_seq; final id = baseshard + rank (the sharded path's
 //!      assignment). The dictionary files (`dict-terms/offs/hash/hid/
-//!      meta.bin`) plus `numerics.bin`/`temporals.bin` are STREAM-written
+//!      meta.bin`) plus `numerics-v2.bin`/`temporals-v2.bin` are STREAM-written
 //!      in final-id order — never resident.
 //!   4. join      — (seq -> min_seq) ⋈ (min_seq -> final id) -> dense per-shard
 //!      `seq -> final id` remap files (two more small external sorts).
@@ -887,7 +887,7 @@ impl TableBuilder {
 }
 
 /// Phases 2–4: externally dedup + rank the spilled terms, STREAM-write the dictionary
-/// (`dict-meta/terms/offs/hash/hid.bin`) and the `numerics.bin`/`temporals.bin` caches in
+/// (`dict-meta/terms/offs/hash/hid.bin`) and the `numerics-v2.bin`/`temporals-v2.bin` caches in
 /// final-id order, and build the per-shard `seq -> final id` remap files. Returns the
 /// plan for the triple-remap phase.
 pub(crate) fn consolidate(mut st: SpillInterner, dir: &Path, tmp: &Path, cfg: &SpillConfig) -> Result<RemapPlan, String> {
@@ -979,8 +979,8 @@ pub(crate) fn consolidate(mut st: SpillInterner, dir: &Path, tmp: &Path, cfg: &S
     let mut datatypes = TableBuilder::default();
     let mut terms_w = BufWriter::new(std::fs::File::create(dir.join("dict-terms.bin")).map_err(io_err)?);
     let mut offs_w = BufWriter::new(std::fs::File::create(dir.join("dict-offs.bin")).map_err(io_err)?);
-    let mut numer_w = BufWriter::new(std::fs::File::create(dir.join("numerics.bin")).map_err(io_err)?);
-    let mut tempi_w = BufWriter::new(std::fs::File::create(dir.join("temporals.bin")).map_err(io_err)?);
+    let mut numer_w = BufWriter::new(std::fs::File::create(dir.join(crate::NUMERIC_CACHE_FILE)).map_err(io_err)?);
+    let mut tempi_w = BufWriter::new(std::fs::File::create(dir.join(crate::TEMPORAL_CACHE_FILE)).map_err(io_err)?);
     let flags_path = tmp.join("dsp-tflags.bin");
     let mut flags_w = BufWriter::new(std::fs::File::create(&flags_path).map_err(io_err)?);
     // The hash-pair sorter is alive across the WHOLE shard loop, concurrently with each
@@ -1155,7 +1155,7 @@ pub(crate) fn consolidate(mut st: SpillInterner, dir: &Path, tmp: &Path, cfg: &S
     offs_w.flush().map_err(io_err)?;
     numer_w.flush().map_err(io_err)?;
 
-    // temporals.bin layout = all instants then all flags: append the spilled flags.
+    // temporals-v2.bin layout = all instants then all flags: append the spilled flags.
     flags_w.flush().map_err(io_err)?;
     drop(flags_w);
     {

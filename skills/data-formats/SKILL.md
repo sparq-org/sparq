@@ -30,9 +30,15 @@ number; a missing cache value is not a datatype-validity result.
 `parse_tz` reject malformed calendar/timezone values and timestamps outside their
 representation. The same validation controls stored temporal comparison caches.
 Malformed Unicode returns `None` without slicing panics.
-Legacy mmap archives can carry same-sized `numerics.bin`/`temporals.bin` caches
-created under older validation rules. Regenerate those derived caches before
-relying on the new rules; a fresh RDF load computes them with current validation.
+[GPT-6] `Graph::open` ignores legacy `numerics.bin`/`temporals.bin` caches and
+recomputes derived values from the dictionary using current rules. It does not
+rewrite the old cache files or drop ill-typed RDF terms. Current writers use
+`numerics-v2.bin` and `temporals-v2.bin` across ordinary, compressed and external
+builds; absent or wrong-sized current caches are rebuilt in memory. To persist a
+migrated archive, call `Graph::open(old)?.save(new)?` with a separate destination.
+Until saved, legacy opens repeat the dictionary scan and cache allocation.
+Cache versions signal semantic compatibility; they do not authenticate archive
+bytes or change the existing trusted-storage assumption.
 
 ## Quickstart
 
