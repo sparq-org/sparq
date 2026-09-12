@@ -65,6 +65,7 @@ default-features = false
 
 [dependencies.risc0-zkos-v1compat]
 version = "2.2.3"
+default-features = false
 
 [dependencies.risc0-zkp]
 version = "3.0.5"

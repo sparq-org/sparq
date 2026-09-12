@@ -26,10 +26,10 @@
         {
           "path": "Cargo.toml",
           "upstream_sha256": "058fb5edf7963d7cf0e52cd2b5eedb358af08830cef457877682c93c03c9b7d5",
-          "patched_sha256": "bda771b244a15b01a8d69fe565acc85136c21873307d556b14e5b0b15866c3ad"
+          "patched_sha256": "5f0eb0a2cb4a59e81daf37e0667fb61eebaf4de5d20ead59579d80bbc164a761"
         }
       ],
-      "patch_sha256": "1e06886b8aac23efd579d29e6bb8425247076a436a51ce0951d808767d5b1507",
+      "patch_sha256": "eeea666b922435af9ddcb0a5fc8216db15eb788b39b32740b94e967a90055bf4",
       "additional_files": [
         {
           "path": "LICENSE",
@@ -238,6 +238,181 @@
         }
       ],
       "patch_sha256": "cae350cc1b67427cfb429a4a3ef4fafd57c4b26c809ed9b58bb80a2a3b9354a9"
+    },
+    {
+      "name": "risc0-zkvm",
+      "version": "3.0.6",
+      "source_url": "https://static.crates.io/crates/risc0-zkvm/risc0-zkvm-3.0.6.crate",
+      "archive_sha256": "a5d4f24ec767f71a1663a4d24cf9d02b6bfee44c64647cae677227817051007a",
+      "vcs": {
+        "git": {
+          "sha1": "8c215e2f4ccdd935f0517bf05d90f1ae032840a9"
+        },
+        "path_in_vcs": "risc0/zkvm"
+      },
+      "upstream_files": {
+        "Cargo.toml": "18c3e9c28bf5564963b008ca0de7e6ce3efb26bea0a731b58ed9745a5c302b88",
+        "Cargo.lock": "797fdd98e41182bf79b5d4d030606d837bc24925152d1ec6cd724e27d66e57c7",
+        "README.md": "0181ed18cca5ad6212b8f29212d65388c5d94ce5258632b4ae24b961f1d932ee",
+        ".cargo_vcs_info.json": "767243f912a67d5228ffbe75acae84f7e6a36d86f64c38f01e1b82f189d32e00",
+        "Cargo.toml.orig": "fee7a620a49be5a5664f6a59fe6e0ee7c2cf5a273b75a6cec8ec89a70b31a4ed",
+        "tests/keccak.rs": "1737b28844e4251619ea7838c4831ca34a28f5385e46a9a9599cc0bf2b3b328b",
+        "examples/fib.rs": "e1b4f4ea5b4bf0b58c48d8bc8f6336c15aeec731e2ce3ccc97d7691cb1cb537e",
+        "examples/datasheet.rs": "4c449092442110dfad5542fd6c3bc87e989b3c5873e9332658ee0cbe1e880667",
+        "examples/shapella-100.bin": "4ac4863d912b3fbb6ff20ba2258c0bee50e21656a5c84e44c7e9c43b80d9a4bb",
+        "examples/loop.bin": "cc7bdb6579ecf77a6bbaacb886953ac87eb36851609450aec20242395bbe67af",
+        "examples/loop.s": "882f89d11cdba9b2add40f445d38d2fb2b0aa4aff564c08ab8a869ca4d2b21a4",
+        "examples/shapella-30.bin": "1b950360d16965a81c730c194e71a4470e5123a6f81fa3a9371ba32737a4d10a",
+        "examples/recursion.rs": "8b2aa2f09518ca660073cd51c8833d1742931ead649aa2994beab1a32f6e1bb2",
+        "examples/guest_verify.rs": "bbc6c0da4b9d2391494cb31d0246475b217b33b4d959fd4a2725ae27764364b4",
+        "examples/shapella-50.bin": "1e68c5c97614151943a0f1813983f1874ae14b178cd34648ad750631033956c9",
+        "benches/fib.rs": "2f9e9079e0ff359f4dff6c28ecc7816155d0542ba038f8eda200c1d00fd92f1d",
+        "benches/guest_run.rs": "55cd5ab020ffce6e92e10cfe4d7cf678e86d5e515e4cce2fe206418f0882611b",
+        "src/lib.rs": "09a9610d5ecb2d27086c0d7fd55b908a5b4ad62459db53ae61f12d936c024c17",
+        "src/mmr.rs": "7b3579dd2590226a8c73f55099ba254d1a5974e2911e040eb8e407335d26ca0b",
+        "src/receipt.rs": "ec445670befb0fad19bfe46eede73e551de03d9f91fa1fb81c9149dc04912fed",
+        "src/sha.rs": "e2359eecfd395ba191f20084314ae6c1ffa3204b122ad4c504f2f701d3573e1c",
+        "src/host/mod.rs": "cf95acf4322a1dca88c4e5406da3376b5c0e7148a1c70a6a28b995366f548932",
+        "src/host/prove_info.rs": "85f0f8e3fe1e2c3cfe44caead7ba1c42b94e8dac3e10100b41883cecb3bbea31",
+        "src/host/rpc.rs": "9cae8bafc5e1aae20fb5790b0199f5577d1b48715e06e9dd33d34fb161df14ce",
+        "src/receipt/succinct.rs": "8e0165b3210e30e77074763d71d85fd0595e4190b96725182f33665b7df90d60",
+        "src/receipt/merkle.rs": "b3eeb7cc62bba1dfa9ba32a75b905510b4777b9f61004891163d8f43ee8072d6",
+        "src/receipt/segment.rs": "be0e30e38e7bf665db12fa8d3267a987c957b1b30f5b7f2c601c00149bf36416",
+        "src/receipt/groth16.rs": "c2528a3f435d8449f9e58e270afca69c8e5c3ea695b3d075428a40aff4716530",
+        "src/receipt/composite.rs": "ad4e54397353f69851bf7bd80193b248b462dd32581b3fcca953413d80589d0f",
+        "src/guest/memset.s": "381b51e8030234748fb76052af49b3fd8c611e5807fd09ab884ff88a0eba03e2",
+        "src/guest/mod.rs": "96df25db344ad61d16787829fc5269fc1fedeb9dbf9ccfcfa297c83d1da5ee17",
+        "src/guest/memcpy.s": "14912407df84e63f2e3a83e80f97bf685dac47c5c6bca6d4de38763a3a7bdc19",
+        "src/serde/deserializer.rs": "70f4524144eff9b8c72c685b7d6b635a7ca9b15c99dce60e7dc883e8815edc39",
+        "src/serde/err.rs": "b3bef02dfc0b24478b2d3f0e326679fe2a34890b17b5ea37795a0f324fc2e893",
+        "src/serde/mod.rs": "fbb7ba3a0fea7bd04920b8355e4bb5910d24c0f0e5ca69b22bd6eba607eb9259",
+        "src/serde/serializer.rs": "1df8e1efbad4c383083d9fa14b36fd07e7dd72ce14a69231f91b8cbaf588ccb6",
+        "src/claim/maybe_pruned.rs": "9ee2659b78ea172ba7ecb4b7d08aec8bc1ff81136bc762bf5fd7b4f5b4acd53e",
+        "src/claim/merge.rs": "fcf32a18e67290ebbec13a5cdd992ff779cd164428a9cd6f9c49351b6f32d06d",
+        "src/claim/mod.rs": "cc1fae243934339029b3bfc4ca7450091dcc3debb9bcf4f61f55a41580d92c3a",
+        "src/claim/receipt.rs": "7c8dafb73bbf96394ebd1a0e651c4e7bcf7b3a166438444e35615bb397223ba1",
+        "src/claim/work.rs": "fb8dc7cfe66c7024f9feac59ba52330ffd13dd6f10a13c0d743e33b5a7041edd",
+        "src/guest/env/write.rs": "91862022a05e1e46c39026f409cc47b6da91a3647639884ab7c5c58543f43e22",
+        "src/guest/env/batcher.rs": "0dcc585be1f561c3e9f675caffaca169e5c2f72ceeeb6f5cf5dd88e21efb1634",
+        "src/guest/env/mod.rs": "78c4fbe1e2636ab25c16b933c29cdaf4515c49e561a38c4511d9f8bc00e8ca25",
+        "src/guest/env/read.rs": "b60d8673e1907a528bb095c5da3967660c09a89918f94272adbc8113f10387b9",
+        "src/guest/env/verify.rs": "29417f6f65e9419671dace8113644f1621ad8834d41c7bacdb7fed157f88f0c4",
+        "src/host/protos/core.rs": "7598c40f344348b4a7b656ce681ef5bdc48a2e0fb459d2c3aa11b5bb3c85d4ed",
+        "src/host/protos/core.proto": "ca233929186d31e1a811bcfdd745f5dccc29b1a13c3528801f514521e35d1a97",
+        "src/host/protos/base.proto": "e6ac111c8fd97a92cbd5f1398c931c177ae68b4c94fa6fd6704702a521c38d73",
+        "src/host/protos/api.proto": "34b1a76d269e7b72c4595704f40f4e09125e78a56abdd490e4f4a7b87ae86a0a",
+        "src/host/protos/base.rs": "54f80c97651d1f42ef1a297b7d6bd92d8d7f93e64474936d1639b73774c41420",
+        "src/host/protos/mod.rs": "5d0e457bffa09dc59fd68f9860a3d8cb28c24c390a24ab5ae32bb09e4f2cf72c",
+        "src/host/protos/api.rs": "78d3651c0db74bce72388dca5b8857d4833a5cabad34b58b9dcffdc7c6b9f716",
+        "src/host/recursion/mod.rs": "6529689df948a43637cd25eccfd5e8f47574cd9f977f2f56a84380c879f2b408",
+        "src/host/recursion/tests.rs": "a30574ef431d13b917a94142cea355eead50c84845f722c516a4ae4bc8ada5e3",
+        "src/host/server/session.rs": "95b8bdff08e3ddeca3e2eee9c7288d045c0d7a55bfd270247f67c3de7bc177f2",
+        "src/host/server/testutils.rs": "70a5c403327fede5a08992c03e3f2717c48a5e14c265e84269da0d04a8a5fb91",
+        "src/host/server/mod.rs": "e54741461da195fb4ed01a41f1946150f721792eb13f7ba0d8108bf99719a63b",
+        "src/host/api/convert.rs": "165ad0f6343505aa280fa17f589db846b39ea211e4f0fe388131386d7f92f367",
+        "src/host/api/client.rs": "f69c1e4b95e1f6c896b9f5dfe6c71e7a8abd6792ba921effd6d3e2db8961823a",
+        "src/host/api/server.rs": "cb396ae88d2e15c093b0d82b81a72b1f6b2ca35ee5db452124d7d6db097201d0",
+        "src/host/api/mod.rs": "0d2359fc75873dadc8ce18458764f1c6b55252e2e40fd60be97c36a8e292a026",
+        "src/host/api/tests.rs": "7a4d38bdd99a0f58903ccb7d6504c94ec16443692a8ba9d9025bfce10eb0003e",
+        "src/host/client/posix_io.rs": "565e75bffd5bf6855154a5f874712f6fdc2445388c42f130b015a54465cda0bc",
+        "src/host/client/env.rs": "7e0678028670089ba3ef8d34956cf1f58a42f8ba7635bb5a0bc7f13a843bf2c6",
+        "src/host/client/slice_io.rs": "c5abc3537bd2fba01468b2ccecfb51f9aa085d4d576ee941e7cc7861392bed6c",
+        "src/host/client/mod.rs": "68635c446509b992bb167f536d886463d1287b199fb9ee236234f9d35be8ea28",
+        "src/host/client/prove/local.rs": "5efb01509f92208aa0714aa25a35f5a41e6b08f3171976d754ddd18d79f40f4d",
+        "src/host/client/prove/mod.rs": "3d52b1fa00f501b7f203c02e718c03b6a5b90994cdecc57294faf6b8977cbf48",
+        "src/host/client/prove/external.rs": "a5959f2d1737e20dc65b985a1ff2cfec58caccbc5aa7034f3d7e8d9c3f1036e0",
+        "src/host/client/prove/opts.rs": "3638f721c91a7fd40aff6f6ddd10170070f14523f7bcc0a9db35e560cf9a3f80",
+        "src/host/client/prove/bonsai.rs": "cc50829f6200f05301ea436b5b3cd158a701f4935c832fb57cecf9c26bb75d78",
+        "src/host/client/prove/default.rs": "8536578a3c20a1018e425814d81cb92197c04b2caa05908bfda32d477d8b51f1",
+        "src/host/server/testdata/riscv-tests.tgz": "1c90771bada77907ecd201efd8062ee8c7e756083ac9e209d9308dcebad473dc",
+        "src/host/server/prove/keccak.rs": "f32f0d7de9748dfe9883e9d4a7900bb6c06d6af6f1e902c306afc566c236145d",
+        "src/host/server/prove/prover_impl.rs": "2b3e6e61cfaf07d78cb935d5db6a7c0053c3581cfdf1347705b39844e15209a5",
+        "src/host/server/prove/mod.rs": "a3e5fdccbd4719820274c8b466fe7c211941b3fa24979f6eeddf5d1da4a347c9",
+        "src/host/server/prove/union_peak.rs": "1e69239dfa91b7d59fc7d7ba44e91b9c6677a4f2489b18865e36290c35794dc6",
+        "src/host/server/prove/tests.rs": "846aa67d2f3f2e3508efcd087201356dd6558ffff0b95dd67af7759d0c05901d",
+        "src/host/server/prove/dev_mode.rs": "3cb5f53deb21b20ebcd2ec80be1f7fdf92b02190778eea2040c6cf9381d37801",
+        "src/host/server/exec/proto.rs": "150f903e3d575db0fcaaf6a55190ec3c8e42fdeecb80c69b15cd7270db42d77f",
+        "src/host/server/exec/mod.rs": "c952466f17549ad22266ed156f0e9713231f60c64cccbfb3cf982ae36d9cf6b8",
+        "src/host/server/exec/executor.rs": "505b831c3a3a17b33290b732ee150b3b48a25c1876320f7e9e91743045b30794",
+        "src/host/server/exec/profiler.rs": "dee7fa02b3333a702cdc36f7907c2ff0912f07583de430f6180ad8cb9ead90c7",
+        "src/host/server/exec/tests.rs": "c239f6e0a4dcd78622e42346ae4a4017477cbdec7c027d7d4eacc015aebc1014",
+        "src/host/server/exec/gdb.rs": "7b71ecb3935806a2ed36414920a9fb6319295ee536008c50914ea593ef34b96a",
+        "src/host/server/exec/profile.proto": "1a05bc9f7d1383a1114cfb79581e2421ee38553a1ffcf0c11f28e30f9f1aec17",
+        "src/host/server/exec/profiler/inline.rs": "a21122c41bfda79f70d8070b4907c67df0f0055379e093f7f5c1756586fc2ff6",
+        "src/host/server/exec/syscall/random.rs": "bcbbeba21eb835b0351b9a47b99fa31a983310ee723e7ecedd934cb0ce857860",
+        "src/host/server/exec/syscall/panic.rs": "a31a35adc00e772ba17221d794b32e1753cbe440327bb033b9590c068d8e599f",
+        "src/host/server/exec/syscall/posix_io.rs": "214958254374b79b97c3f9435655c87605a03bffab05a75ad5e4f1c222485216",
+        "src/host/server/exec/syscall/fork.rs": "dd9ce270d155ca784fc7e17b3e92e9cbdb76855b1e096f8b03e30c28ee3c6689",
+        "src/host/server/exec/syscall/log.rs": "aeabb224acbbc70d779e26a696f5529bff85b566c0d39ea3097f5bb8c8026f53",
+        "src/host/server/exec/syscall/keccak.rs": "aec5f7d649cad4eb682a01603ca3540cb2055f364704a4e6ce711f3a2bc8d42c",
+        "src/host/server/exec/syscall/verify2.rs": "47f601ee93b7253332e8330637f031ca231b850817a9a059afb90951b35e0fb6",
+        "src/host/server/exec/syscall/pipe.rs": "e1316714afc4706262a7f75443b5c6238ef09ca7bf5777b3519bc83d83938c63",
+        "src/host/server/exec/syscall/slice_io.rs": "c3c2703c8b4aba521ba0991cb6491f4f14165a79c5261d6cb6dd2934c07b98fb",
+        "src/host/server/exec/syscall/mod.rs": "a53eef198e4b17d6483fc0c9a9da1dd61edcdd3bded5baf79d579493918a715b",
+        "src/host/server/exec/syscall/verify.rs": "f5aae950ba17d039c34985cbb1e0fc78ba5bdf44c99c9d169c1f2bada1df7e3b",
+        "src/host/server/exec/syscall/cycle_count.rs": "d9cced1357b4bac4fcb4dbac743101d0194ea1f4a0a4f2e152df6bfb565794ed",
+        "src/host/server/exec/syscall/args.rs": "52e0aaa1e5e3916c9adc0e819980260c88906485c72f7957974c019b1807ca10",
+        "src/host/server/exec/syscall/getenv.rs": "a82973fe088cc2ac38800006aed63fbd3407778d2ee72b0e51fc2207031dcf37",
+        "src/host/recursion/prove/zkr.rs": "34cf5aa281c74830fbdbeb2dcb176a4a00cdd590e73823469e96a07701abe98c",
+        "src/host/recursion/prove/mod.rs": "41e2b6b92349ed28d2d4669e371d2ad1b5617d97b2ad4551d101c10a7560a520"
+      },
+      "patch_files": [
+        {
+          "path": "Cargo.toml",
+          "upstream_sha256": "18c3e9c28bf5564963b008ca0de7e6ce3efb26bea0a731b58ed9745a5c302b88",
+          "patched_sha256": "065d5412e9a0aca47365deaa7984f6aba6b711788c347d11db46bb6cc19b5f93"
+        }
+      ],
+      "additional_files": [
+        {
+          "path": "LICENSE",
+          "source_url": "https://raw.githubusercontent.com/risc0/risc0/8c215e2f4ccdd935f0517bf05d90f1ae032840a9/LICENSE",
+          "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+          "reason": "License text from exact package VCS revision; archive carried Apache headers but omitted standalone license file"
+        }
+      ],
+      "patch_sha256": "0785f09a1dd46f17ee0036f77040844e2f2bca68270faa46fbc59c5868a91216"
+    },
+    {
+      "name": "risc0-zkos-v1compat",
+      "version": "2.2.3",
+      "source_url": "https://static.crates.io/crates/risc0-zkos-v1compat/risc0-zkos-v1compat-2.2.3.crate",
+      "archive_sha256": "b8b0b598ba7946354b10ca5c56e382de801e6c7fce9fccad0396ec436bc5072b",
+      "vcs": {
+        "git": {
+          "sha1": "8c215e2f4ccdd935f0517bf05d90f1ae032840a9"
+        },
+        "path_in_vcs": "risc0/zkos/v1compat"
+      },
+      "upstream_files": {
+        "Cargo.toml": "680879df4cdfd5f90ee5cc67f9327a0986bdfcfd8c31387ad86e96857a78ed30",
+        "Cargo.lock": "e0358b27e1cfb7027b89f4599bbaa86c5bda74f46b880584769eb32fa0b6d976",
+        ".cargo_vcs_info.json": "070172a0aa85c21c7eb1d52edb2cd87196fae5aa2f85b625d9343cdd15ac8a5f",
+        "Cargo.toml.orig": "ab9a842829574ccd57afcf405c9bf2dbd3abe293dc72eeb7b813c88cc27f09fb",
+        "elfs/v1compat.elf": "7ffd942e4e8babd771094f549ad080cfea8ecb2c05c986e275c011f41979d921",
+        "elfs/v1compat.iid": "66687aadf862bd776c8fc18b8e9f8e20089714856ee233b3902a591d0d5f2925",
+        "src/lib.rs": "573e6a1609ba1ce16f192f409ff41322c6be0e3cfd29db7910a6b4491583fb41",
+        "src/main.rs": "b125b19e4c578e025dbb7b5b5bf677fe8e3b9afe9b12703cb8bd2c9374870bcc",
+        "src/kernel.s": "eacb07a3195316990930f0b18d6f4874db4ce0c7192f917d8f37f184e98acb30",
+        "src/bigint_v1compat/modmul_256.blob": "08abd38046590749f57c0014b96c5443ec3f4e9a32de7deedf570c84613dbaf2",
+        "src/bigint_v1compat/mul_256.blob": "a628a3971e90d8fc464c3e069f86b162c072ec5c54c1557f8b117dcbe1c3c6db"
+      },
+      "patch_files": [
+        {
+          "path": "Cargo.toml",
+          "upstream_sha256": "680879df4cdfd5f90ee5cc67f9327a0986bdfcfd8c31387ad86e96857a78ed30",
+          "patched_sha256": "5b96e563adca9317f16607e4ec80881208243c19269e76160a0fb2e1fe247879"
+        }
+      ],
+      "additional_files": [
+        {
+          "path": "LICENSE",
+          "source_url": "https://raw.githubusercontent.com/risc0/risc0/8c215e2f4ccdd935f0517bf05d90f1ae032840a9/LICENSE",
+          "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+          "reason": "License text from exact package VCS revision; archive carried Apache headers but omitted standalone license file"
+        }
+      ],
+      "patch_sha256": "74e8347dab7e4f541c0ec2559b61852085c1c9e441d394e417e41705a8f1a9f2"
     }
   ]
 }

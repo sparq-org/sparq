@@ -37,6 +37,13 @@ def reconstruct(package: dict, directory: Path) -> None:
 
 def check() -> None:
     metadata = json.loads((ROOT / "UPSTREAM.json").read_text())
+    expected_versions = {
+        "risc0-build": "3.0.6", "rzup": "0.5.2", "ark-relations": "0.5.1",
+        "ark-crypto-primitives": "0.5.0", "risc0-zkvm": "3.0.6",
+        "risc0-zkos-v1compat": "2.2.3",
+    }
+    assert len(metadata["packages"]) == len(expected_versions), "complete patch inventory"
+    assert {p["name"]: p["version"] for p in metadata["packages"]} == expected_versions, "complete patch inventory"
     for package in metadata["packages"]:
         name = f"{package['name']}-{package['version']}"
         directory = ROOT / name
@@ -62,10 +69,27 @@ def check() -> None:
     assert all("dep:derivative" in primitives["features"][f]
                for f in ["crh", "encryption", "signature"])
     assert all("crh" in primitives["features"][f] for f in ["commitment", "merkle_tree"])
+    vm = tomllib.loads((ROOT / "risc0-zkvm-3.0.6/Cargo.toml").read_text())
+    kernel = tomllib.loads((ROOT / "risc0-zkos-v1compat-2.2.3/Cargo.toml").read_text())
+    build = tomllib.loads((ROOT / "risc0-build-3.0.6/Cargo.toml").read_text())
+    assert vm["features"]["default"] == ["client", "bonsai"]
+    assert vm["dependencies"]["rrs-lib"]["optional"] is True
+    assert "dep:rrs-lib" in vm["features"]["prove"]
+    assert kernel["features"]["default"] == ["kernel"]
+    assert kernel["features"]["kernel"] == ["dep:include_bytes_aligned", "dep:no_std_strings"]
+    assert kernel["bin"][0]["required-features"] == ["kernel"]
+    assert all(kernel["dependencies"][name]["optional"] is True
+               for name in ["include_bytes_aligned", "no_std_strings"])
+    assert all(p["dependencies"]["risc0-zkos-v1compat"]["default-features"] is False
+               for p in [vm, build])
+    # [GPT-6] New dependency edges must not change kernel instructions or blobs.
+    for package in metadata["packages"]:
+        if package["name"] in {"risc0-zkvm", "risc0-zkos-v1compat"}:
+            assert [p["path"] for p in package["patch_files"]] == ["Cargo.toml"]
     for relative in ["Cargo.lock", "methods/guest/Cargo.lock"]:
         lock = tomllib.loads((REPO / "zk/sparql-evaluator" / relative).read_text())
         # [GPT-6] Registry entries are not evidence that Cargo selected our patch.
-        expected_patches = {"ark-relations", "ark-crypto-primitives"}
+        expected_patches = {"ark-relations", "ark-crypto-primitives", "risc0-zkvm", "risc0-zkos-v1compat"}
         if relative == "Cargo.lock":
             expected_patches |= {"risc0-build", "rzup"}
         for package in metadata["packages"]:
@@ -74,7 +98,10 @@ def check() -> None:
                 assert len(selected) == 1, (relative, package["name"], "patch selection")
                 assert selected[0]["version"] == package["version"]
                 assert "source" not in selected[0] and "checksum" not in selected[0], (relative, package["name"], "registry package selected")
-        assert not {p["name"] for p in lock["package"]} & {"rsa", "option-ext", "dirs", "dirs-sys", "derivative"}
+        assert not {p["name"] for p in lock["package"]} & {
+            "rsa", "option-ext", "dirs", "dirs-sys", "derivative", "rrs-lib",
+            "downcast-rs", "no_std_strings", "include_bytes_aligned",
+        }
         assert {p["version"] for p in lock["package"] if p["name"] == "risc0-zkvm"} == {"3.0.6"}
         assert {p["version"] for p in lock["package"] if p["name"] == "tracing-subscriber"} == {"0.3.23"}
     print("SDK upstream/patched inventories, patch reconstruction, hashes, retained feature defaults and detached patch selections match")
