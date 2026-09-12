@@ -881,24 +881,46 @@ def ensure_label(label: str) -> None:
 
 
 def open_issue_exists(key: str, repo: str) -> bool:
-    # Idempotency: list ALL open selection-alarm issues and EXACT-match the body
-    # marker. We deliberately do NOT pass `--search` — a triage key contains
-    # punctuation (parens/slashes) that gh's search tokeniser handles unreliably,
-    # which could MISS an existing issue and break dedupe (mint a duplicate). The
-    # deduped label keeps the open set tiny, so listing 100 is cheap.
+    """Is an OPEN selection-alarm issue already carrying `key`'s body marker?
+
+    This is design invariant 2 (non-spammy) in one function, and every way it can be
+    wrong is the SAME way: a MISS mints a duplicate of an issue that is already open.
+    So it reads the whole open set and exact-matches the marker.
+
+    NO `--search`: a triage key carries punctuation (parens, slashes) that gh's search
+    tokeniser handles unreliably, so a search query could miss an existing issue.
+
+    `gh api --paginate`, never `gh issue list --limit N`: `--limit` truncates at N and
+    reports nothing when it does, and it truncates NEWEST-first — so the rows it drops
+    are the OLDEST open alarm issues, which is exactly the long-lived set a repeat
+    firing would duplicate. `--paginate` follows the Link headers to exhaustion. The
+    open alarm set is normally well under a page; "normally" is the assumption a stale
+    backstop breaks, and unlike the rest of this script that failure is not loud — it
+    is a quiet extra issue. scripts/tests/test_ci_selection_alarm.py parks the marker
+    on a LATE page and pins the flag in the recorded argv.
+    """
     marker = key_marker(key)
     out = _run(
         [
-            "gh", "issue", "list", "--repo", repo, "--state", "open",
-            "--label", "selection-alarm", "--json", "number,body", "--limit", "100",
+            "gh", "api", "--paginate", "--slurp",
+            f"repos/{repo}/issues?state=open&labels=selection-alarm&per_page=100",
         ],
         check=False,
     )
     try:
-        issues = json.loads(out or "[]")
+        pages = json.loads(out or "[]")
     except json.JSONDecodeError:
         return False
-    return any(marker in (i.get("body") or "") for i in issues)
+    # The REST issues endpoint returns PULL REQUESTS as well as issues (the `gh issue
+    # list` this replaces did not). A PR body is free text, so one that merely QUOTES a
+    # marker would otherwise read as "already filed" and SUPPRESS a real alarm — the
+    # opposite and worse failure. Only issues count. Same flatten-and-filter shape as
+    # scripts/retriage.py's `_flatten_pages`.
+    return any(
+        marker in (i.get("body") or "")
+        for page in pages if isinstance(page, list)
+        for i in page if isinstance(i, dict) and "pull_request" not in i
+    )
 
 
 def create_issue(title: str, body: str, labels: list[str], repo: str) -> str:
