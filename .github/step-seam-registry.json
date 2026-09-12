@@ -1,0 +1,44 @@
+{
+ "_doc": "Step-level safety-seam registry. [OPUS-5] sparq-org/sparq#5371. The repo protects the JOB level (the required `ci-summary / gate` aggregator + .github/advisory-registry.json) and the INSIDE of its Python modules (mutation-checked unit tests). This file covers the seam between them: an individual workflow STEP. Deleting a pre-apply guard step, renaming it, adding `continue-on-error: true` or `if: false` to it, or gutting its `run:` body all leave the job green, the aggregator green and every unit test still passing. Each entry below pins one step by {workflow, job_id, step_name}; scripts/check-step-seams.py asserts it still exists, carries no `continue-on-error`, carries no `if:` beyond the one the entry pins, sits in a job with neither, and still runs every fragment in `must_run`. RETIRING a seam = deleting its entry in the SAME change that removes the step, which is the deliberate reviewable act this file exists to force. `swallow_waivers` is the escape hatch for S4 (the repo-wide sweep that forbids a truthy `continue-on-error` on any gate-classified step): use it only when ONE step is best-effort inside an otherwise-gating job; when a whole lane is allowed to fail, declare the job in .github/advisory-registry.json instead, because a gate allowed to fail IS advisory. Every entry needs {workflow, job_id, step_name, why, owner_issue, registered}. Maintained by scripts/check-step-seams.py, enforced in .github/workflows/docs-quality.yml (quick-gates).",
+
+ "seams": [
+  {
+   "workflow": "triage-area.yml",
+   "job_id": "classify",
+   "step_name": "Self-test the classifier before it writes",
+   "must_run": [
+    "python3 scripts/triage-area.py --self-test",
+    "python3 scripts/tests/test_triage_area.py"
+   ],
+   "why": "#5371's worked example. This step is the ONLY pre-apply guard on a half-hourly cron that mutates LIVE issue labels with `--apply`. The properties it protects (fail-closed on no evidence, never invent a label, no unpark without an area) live in scripts/triage-area.py and are covered by hermetic tests — but the tests only protect anything while this step still runs them. Delete the step, or give it `continue-on-error: true`, and the job stays green, the aggregator stays green, every Python mutant still dies (#4567's reviewer measured 18/18), and the classifier applies unverified `area:` labels to live issues with nothing red anywhere. A wrong `area:` routes a worker at the wrong crate and can put two workers on one conflict partition.",
+   "owner_issue": 5371,
+   "registered": "2026-09-01"
+  },
+  {
+   "workflow": "retriage.yml",
+   "job_id": "retriage",
+   "step_name": "Re-run static triage over status:untriaged issues",
+   "must_run": [
+    "python3 scripts/triage.py --self-test",
+    "python3 scripts/retriage.py --self-test",
+    "--apply"
+   ],
+   "why": "The sibling of the triage-area seam and the same shape, one degree worse: here the two self-tests and the `--apply` write share ONE `run:` block, so dropping a self-test line is a smaller, quieter edit than deleting a step. `must_run` pins all three fragments, and shell comments are stripped before matching, so commenting an invocation out reds too. The `--apply` fragment is pinned for the opposite direction: without it the half-hourly sweep is a permanent silent dry-run, which looks exactly like a lane with nothing to promote.",
+   "owner_issue": 5371,
+   "registered": "2026-09-01"
+  },
+  {
+   "workflow": "docs-quality.yml",
+   "job_id": "quick-gates",
+   "step_name": "Enforce step-level workflow safety seams (S1-S5) — GATING",
+   "must_run": [
+    "python3 scripts/check-step-seams.py"
+   ],
+   "why": "This gate pins its OWN call site, so it cannot be un-wired one level up — the failure mode it exists to catch, applied to itself. Without this entry, deleting the enforce step from docs-quality.yml would silently retire every other seam in this file at once, with nothing red: the aggregator only sees that the quick-gates job passed. `quick-gates` is a hard (non-advisory) job with no job-level `if:` or `continue-on-error`, which S2 also asserts.",
+   "owner_issue": 5371,
+   "registered": "2026-09-01"
+  }
+ ],
+
+ "swallow_waivers": []
+}
