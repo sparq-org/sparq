@@ -5121,7 +5121,7 @@ fn hidden_revocation_unrevoked_verifies_and_index_is_private() {
     let snapshot = hidden_snapshot(false); // index 3 UNSET (active)
     let blinding = fixture_blinding();
     let hidden = prove_hidden_revocation(
-        &prover, &snapshot, FIXTURE_STATUS_INDEX, &blinding, &challenge, "hidden_ok",
+        &prover, &snapshot, FIXTURE_STATUS_INDEX, &blinding, &challenge, "--hidden_ok-v1.2",
     );
 
     // --- INDEX-NOT-DISCLOSED assertion (the privacy goal). ---

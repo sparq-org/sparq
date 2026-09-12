@@ -62,6 +62,13 @@ file permissions on Unix, and are cleaned by their scope owner. Both canonical-k
 generation and verification now allocate independent subdirectories under the
 caller's scratch root, so concurrent calls cannot exchange proof/input/key files.
 Cleanup after abnormal process termination remains best effort.
+All proving and witness entry points accept only ASCII filename labels: letters,
+digits, underscores, hyphens and dots, excluding `.` and `..`. Successful-result
+labels must be nonempty; legacy untagged calls retain their shared names. Dots
+are encoded injectively as `%2E` in internal filenames; literal percent signs are
+not admitted. Names have fixed prefixes before caller labels. Input
+writes reject final-component symlinks on Unix. The caller controls the workspace
+and its parent directories.
 
 [GPT-6] Optional `planner::optimize_disclosure[_admitted]` jointly chooses witnesses
 across fixed released rows, minimizing authentication count and then shared
@@ -96,3 +103,8 @@ including empty or ineligible graphs, via `MAX_DISCLOSURE_CREDENTIALS`.
 signature authentication or graph cloning. The generated commitment-method gate
 matrix lists every result capacity member as string-canonical only; it does not
 inherit dual-leaf compatibility from the legacy lexical-handle dispatch rule.
+
+[GPT-6] The successful-result public ABI sorts variable names lexicographically;
+this is separate from the planner’s first-occurrence variable ordering. FILTER
+bounds retain their complete `u64` public field encoding. Witness TOML represents
+values above `i64::MAX` as decimal strings accepted by Noir.

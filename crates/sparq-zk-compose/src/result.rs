@@ -852,7 +852,7 @@ pub fn prepare_result_with_options(
     }
     let toml = fields
         .iter()
-        .map(|(name, value)| format!("{name} = {value}\n"))
+        .map(|(name, value)| format!("{name} = {}\n", toml_witness_value(value)))
         .collect();
     let work = ResultWork {
         selected_credentials,
@@ -870,6 +870,19 @@ pub fn prepare_result_with_options(
         public_inputs,
         work,
     })
+}
+
+// [GPT-6] TOML integer literals are signed i64; Noir also accepts decimal
+// strings for integer inputs. This witness-only conversion preserves the public
+// field encoding and admits the full u64 FILTER-bound range without truncation.
+fn toml_witness_value(value: &Value) -> Value {
+    match value {
+        Value::Array(values) => Value::Array(values.iter().map(toml_witness_value).collect()),
+        Value::Number(number) if number.as_u64().is_some_and(|n| n > i64::MAX as u64) => {
+            Value::String(number.to_string())
+        }
+        other => other.clone(),
+    }
 }
 
 fn pinned_toolchain() -> Result<(), ResultError> {
@@ -893,7 +906,7 @@ impl PreparedResult {
 
     /// Proves this statement with the pinned ZK backend.
     ///
-    /// Use a unique alphanumeric tag for concurrent jobs. The input and witness
+    /// Use a nonempty ASCII filename label (alphanumerics, `_`, `-`, `.`). The input and witness
     /// files written by the existing driver contain credential secrets.
     ///
     /// # Errors
@@ -905,8 +918,8 @@ impl PreparedResult {
         out_dir: &Path,
         tag: &str,
     ) -> Result<ResultPresentation, ResultError> {
-        if tag.is_empty() || !tag.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') {
-            return Err(reject("proof tag must be nonempty alphanumeric/underscore"));
+        if tag.is_empty() || crate::driver::validate_witness_tag(tag).is_err() {
+            return Err(reject("proof tag must be a nonempty ASCII filename label"));
         }
         pinned_toolchain()?;
         let artifact = prover.prove_private_package(self.package, &self.toml, out_dir, tag)?;
@@ -1598,6 +1611,64 @@ mod tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 
+    #[test]
+    fn full_u64_filter_bounds_preserve_public_fields_at_toml_boundary() {
+        for bound in [i64::MAX as u64, 1u64 << 63, u64::MAX] {
+            let fields = [("filter_bounds", json!([bound, 0]))];
+            let expected = [Fr::from(bound), Fr::from(0u64)]
+                .iter()
+                .flat_map(field_to_be_bytes_32)
+                .collect::<Vec<_>>();
+            assert_eq!(public_bytes(&fields).unwrap(), expected);
+            let rendered = toml_witness_value(&fields[0].1);
+            if bound <= i64::MAX as u64 {
+                assert_eq!(rendered[0], json!(bound));
+            } else {
+                assert_eq!(rendered[0], json!(bound.to_string()));
+            }
+            assert_eq!(rendered[1], json!(0));
+        }
+    }
+
+    #[test]
+    #[ignore = "requires pinned nargo and bb; checks signed-TOML and full-u64 boundaries"]
+    fn result_real_full_u64_filter_bounds() {
+        pinned_toolchain().unwrap();
+        let (credentials, policy, nonce, _) = fixture();
+        let rows = vec![BTreeMap::from([(
+            "person".into(),
+            Term::NamedNode(iri("urn:alice")),
+        )])];
+        let driver = CircuitProver::from_crate_root();
+        let dir = std::env::temp_dir().join(format!("sparq_result_u64_{}", std::process::id()));
+        for bound in [i64::MAX as u64, 1u64 << 63, u64::MAX] {
+            let query = format!(
+                "SELECT DISTINCT ?person WHERE {{ ?person <urn:age> ?age FILTER(?age <= {bound}) }}"
+            );
+            let prepared = prepare_result(&query, &credentials, &rows, &policy, &nonce).unwrap();
+            // Actual Nargo parsing and relation execution at each boundary.
+            let witness = driver
+                .private_package_witness(prepared.package, &prepared.toml, "u64_bound")
+                .unwrap();
+            assert!(witness.path.exists());
+            if bound == u64::MAX {
+                let proof = prepared.prove(&driver, &dir, "u64_max").unwrap();
+                let verified = verify_result(
+                    &query,
+                    &proof,
+                    &policy,
+                    &nonce,
+                    &InMemorySeenNonces::default(),
+                    &driver,
+                    &dir,
+                )
+                .unwrap();
+                assert_eq!(verified.rows, rows);
+            }
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     /// Full proofs anchor ABI reconstruction, proof mode, independent policy and request binding.
     #[test]
     #[ignore = "requires pinned nargo and bb; run explicitly in zk-toolchain lane"]
@@ -1609,7 +1680,11 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let driver = CircuitProver::from_crate_root();
         let p = prepared
-            .prove(&driver, &dir.join("private_proof"), "result_roundtrip")
+            .prove(
+                &driver,
+                &dir.join("private_proof"),
+                "--result_roundtrip-v1.2",
+            )
             .unwrap();
         let seen = InMemorySeenNonces::default();
         let verified = verify_result(

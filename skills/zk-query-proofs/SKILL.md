@@ -308,6 +308,13 @@ wallet/leaf indices and is private preparation, never a verifier trust decision.
 selecting witnesses. Each proof uses an internally unique private witness directory;
 canonical-key generation and verification also isolate concurrent scratch files.
 Caller tags are descriptive and cannot cause private-result input collisions.
+[GPT-6] All witness/proving entry points validate tags before I/O: ASCII letters,
+digits, underscores, hyphens and dots are accepted; `.`/`..`, separators and other
+characters reject. Legacy untagged APIs retain the empty tag; successful-result
+proofs require a nonempty label. Dots are injectively encoded as `%2E` internally
+and every filename has a fixed prefix; literal percent signs reject. Input
+writes reject final-component symlinks on
+Unix. Workspaces and their parent directories must be controlled by the caller.
 
 [GPT-6] Successful-result proofs now select a one- or two-credential circuit
 bucket, so removing a credential also removes its in-circuit signature check.

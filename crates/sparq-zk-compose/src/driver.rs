@@ -52,6 +52,31 @@ impl From<std::io::Error> for DriverError {
     }
 }
 
+// [GPT-6] Tags are filename labels, never paths or subprocess options. Preserve
+// the legacy empty tag and common ASCII punctuation inside a single component.
+pub(crate) fn validate_witness_tag(tag: &str) -> Result<(), DriverError> {
+    if tag == "."
+        || tag == ".."
+        || !tag
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.'))
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "witness tag must be an ASCII alphanumeric/underscore/hyphen/dot label, not a path",
+        )
+        .into());
+    }
+    Ok(())
+}
+
+// [GPT-6] nargo treats a dot in --prover-name as an extension and replaces it.
+// Percent is outside the admitted alphabet, so this encoding is injective while
+// preserving existing labels without dots. Only this internal filename changes.
+fn witness_file_label(tag: &str) -> String {
+    tag.replace('.', "%2E")
+}
+
 /// A produced proof: bb proof bytes, its public-inputs bytes, and the vk.
 #[derive(Debug, Clone)]
 pub struct ProofArtifacts {
@@ -270,8 +295,11 @@ impl CircuitProver {
     /// As [`Self::gen_witness`], but isolates the prover-input toml and the
     /// emitted witness under a unique `tag` so concurrent calls against the same
     /// member don't race on shared file paths. With a non-empty `tag` the input
-    /// is written to `<pkg>/Prover_<tag>.toml` (selected via `nargo
-    /// execute --prover-name`) and the witness to `target/<pkg>_w_<tag>.gz`.
+    /// is written to `<pkg>/Prover_<label>.toml` (selected via `nargo
+    /// execute --prover-name`) and the witness to `target/<pkg>_w_<label>.gz`,
+    /// where the internal label encodes each dot as `%2E` for Nargo compatibility.
+    /// Tags allow ASCII alphanumerics, underscores, hyphens and dots; `.`/`..`
+    /// and path separators reject before I/O. Empty retains the legacy shared name.
     // [OPUS-4.8] tag-isolated witness path so the toolchain tests are safe under
     // default (parallel) `cargo test` — no shared Prover.toml/witness race
     // (roborev codex job 2180).
@@ -291,6 +319,8 @@ impl CircuitProver {
         prover_toml: &str,
         tag: &str,
     ) -> Result<PathBuf, DriverError> {
+        validate_witness_tag(tag)?;
+        let tag = witness_file_label(tag);
         // Empty tag => legacy shared names; non-empty => per-call-unique names.
         let (prover_name, witness_name) = if tag.is_empty() {
             ("Prover".to_string(), format!("{pkg}_w"))
@@ -320,7 +350,8 @@ impl CircuitProver {
         #[cfg(unix)]
         {
             use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
+            // [GPT-6] A caller-selected label must not follow an existing input symlink.
+            options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
         }
         let mut input = options.open(&toml_path)?;
         #[cfg(unix)]
@@ -370,6 +401,8 @@ impl CircuitProver {
         prover_toml: &str,
         tag: &str,
     ) -> Result<PrivateWitness, DriverError> {
+        validate_witness_tag(tag)?;
+        let tag = witness_file_label(tag);
         let scratch = ScratchDir::new(&self.target_dir(), "witness")?;
         let directory = scratch
             .0
@@ -404,6 +437,7 @@ impl CircuitProver {
         out_dir: &Path,
         tag: &str,
     ) -> Result<ProofArtifacts, DriverError> {
+        validate_witness_tag(tag)?;
         let scratch = ScratchDir::new(out_dir, "prove")?;
         let acir = self.compile_into(pkg, &scratch.0)?;
         let witness = self.private_package_witness(pkg, prover_toml, tag)?;
@@ -429,6 +463,7 @@ impl CircuitProver {
     /// so concurrent proves against the same member don't race on the shared
     /// `Prover.toml` / `target/<pkg>_w.gz` (the bb artifacts already land in the
     /// caller's isolated `out_dir`). Use a per-test-unique `tag`.
+    /// The same filename-label rules as [`Self::gen_witness_tagged`] apply.
     // [OPUS-4.8] tag-isolated prove path (roborev codex job 2180).
     pub fn prove_in(
         &self,
@@ -448,6 +483,7 @@ impl CircuitProver {
         out_dir: &Path,
         tag: &str,
     ) -> Result<ProofArtifacts, DriverError> {
+        validate_witness_tag(tag)?;
         let scratch = ScratchDir::new(out_dir, "acir")?;
         let acir = self.compile_into(pkg, &scratch.0)?;
         let witness = self.gen_package_witness(pkg, prover_toml, tag)?;
@@ -921,5 +957,80 @@ mod driver_glue_tests {
         );
 
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    // [GPT-6] Reject caller-controlled path fragments before input publication,
+    // scratch allocation or compilation, including an existing traversal path.
+    #[test]
+    fn unsafe_witness_tags_reject_before_any_artifact_write() {
+        let scratch = ScratchDir::new(&std::env::temp_dir(), "bad_tag").unwrap();
+        let id = CircuitId::FilterInt { d: 1 };
+        let pkg = id.package();
+        std::fs::create_dir_all(scratch.0.join(&pkg).join("Prover_escape")).unwrap();
+        let sentinel = scratch.0.join("sentinel.toml");
+        std::fs::write(&sentinel, "unchanged").unwrap();
+        let out = scratch.0.join("proof_output");
+        let prover = CircuitProver::new(&scratch.0);
+        for tag in [
+            "escape/../../sentinel",
+            "../outside",
+            "/absolute",
+            "a\\b",
+            ".",
+            "..",
+            "a b",
+            "a\nb",
+            "\0",
+            "é",
+            "proof%2Ev1",
+        ] {
+            let assert_invalid = |error: DriverError| {
+                assert!(
+                    matches!(error, DriverError::Io(ref e) if e.kind() == std::io::ErrorKind::InvalidInput),
+                    "tag {tag:?}: {error}"
+                );
+            };
+            assert_invalid(prover.gen_witness_tagged(&id, "secret", tag).unwrap_err());
+            assert_invalid(prover.prove_in(&id, "secret", &out, tag).unwrap_err());
+            #[cfg(feature = "successful-results")]
+            {
+                assert_invalid(
+                    prover
+                        .private_package_witness(&pkg, "secret", tag)
+                        .err()
+                        .unwrap(),
+                );
+                assert_invalid(
+                    prover
+                        .prove_private_package(&pkg, "secret", &out, tag)
+                        .unwrap_err(),
+                );
+            }
+            assert!(!out.exists());
+            assert!(!prover.target_dir().exists());
+            assert_eq!(std::fs::read_to_string(&sentinel).unwrap(), "unchanged");
+        }
+        for tag in ["", "legacy", "Job_1", "proof-v1.2", "--help"] {
+            assert!(validate_witness_tag(tag).is_ok(), "safe tag {tag:?}");
+        }
+        assert_eq!(witness_file_label("proof-v1.2"), "proof-v1%2E2");
+        assert_eq!(witness_file_label("proof-v1_2"), "proof-v1_2");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn tagged_input_symlink_cannot_overwrite_its_target() {
+        let scratch = ScratchDir::new(&std::env::temp_dir(), "symlink_tag").unwrap();
+        let id = CircuitId::FilterInt { d: 1 };
+        let pkg = scratch.0.join(id.package());
+        std::fs::create_dir_all(&pkg).unwrap();
+        let sentinel = scratch.0.join("sentinel.toml");
+        std::fs::write(&sentinel, "unchanged").unwrap();
+        std::os::unix::fs::symlink(&sentinel, pkg.join("Prover_safe.toml")).unwrap();
+        let error = CircuitProver::new(&scratch.0)
+            .gen_witness_tagged(&id, "secret", "safe")
+            .unwrap_err();
+        assert!(matches!(error, DriverError::Io(ref e) if e.raw_os_error() == Some(libc::ELOOP)));
+        assert_eq!(std::fs::read_to_string(sentinel).unwrap(), "unchanged");
     }
 }
