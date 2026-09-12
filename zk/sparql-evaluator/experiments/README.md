@@ -103,3 +103,8 @@ These tests do not generate receipts. The example CLI generates genuine receipts
 its completed report is separate evidence. Arbitrary queries, additional datasets,
 credential suites, internal prover stages and optimization ablations are outside
 this adapter's admitted experiment profile.
+
+The [local smoke record](local-smoke.json) preserves a completed genuine campaign,
+its exact adapter source, independently accepted guest source, explicit build
+command and retained artifact digests. Its debug host profile is intentional
+validation evidence; these observations do not establish release performance.
