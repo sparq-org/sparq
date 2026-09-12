@@ -5898,10 +5898,12 @@ dependencies = [
 name = "sparq-zk-compose"
 version = "0.1.1"
 dependencies = [
+ "blake3",
  "libc",
  "oxrdf 0.3.3",
  "serde",
  "serde_json",
+ "spargebra",
  "sparq-zk",
 ]
 

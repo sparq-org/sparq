@@ -134,7 +134,8 @@ fn revoke_prover_toml_renders_exact_body_for_active_index() {
         version: 1,
         bits: vec![0b0000_0010],
     };
-    let depth = 2u32;
+    // [GPT-6] Cover the entire byte-sized status snapshot; never truncate it.
+    let depth = 3u32;
     let root = merkle_root(&snapshot, depth).expect("root");
     let index = 0u64;
     let witness = merkle_witness(&snapshot, depth, index).expect("witness");

@@ -16,6 +16,11 @@ Zero-knowledge proofs that a SPARQL query result is correct over RDF held in nam
 > **Research-stage / experimental — NOT-yet-sound.** The composition verifier's soundness is the subject of an open audit (sq-qhy4 / sq-9hrn; remediation epic sq-1s2): a passing proof is NOT a guarantee the SPARQL statement holds under an adversarial prover. Read the "Honest scope" section before relying on a guarantee — only `Simple` entailment is proved; circuit members are fixed buckets. The query fragment covers BGP scans, integer FILTER (and the integer-valued `xsd:double` fragment), and a single-prover hidden cross-credential JOIN — the JOIN restricted to credentials sharing ONE issuer-signed revocation slot (sq-cuvmj; see "Honest scope").
 <!-- ANCHOR_END: scaffold-caveat -->
 
+For the isolated BBS+/BLS12-381 and Circom/LegoGroth16 composition experiment, see
+[`zk/native-composition/README.md`](../../zk/native-composition/README.md). Its dedicated
+CI runs real proof tests; it provides no Noir linkage, RDF adapter, or credential-status
+integration and remains unaudited. [GPT-6]
+
 ## Prerequisites
 
 - **Noir toolchain on `PATH`** (the only way to prove/verify): `nargo` **1.0.0-beta.21** and Barretenberg `bb` **5.0.0-nightly.20260324** (bb target `noir-recursive`). Other versions may change the bb public-input byte layout the verifier reconstructs against. If `nargo`/`bb` are absent, the structural pre-filter and all host-side helpers still work, but `verify_manifest` / `CircuitProver` cannot.
@@ -80,8 +85,18 @@ Stage 2 (`sparq-zk-compose`):
 - Manifest model: `manifest::{ProofManifest, ProofInputs::{Scan, FilterInt, FilterF64, FilterSignedInt, FilterDecimal, JoinEq}, SubProof { inputs, proof_hex }, BindingEdge, BindingMode::Challenge { challenge }, CommitmentAttestation, AttestedStatusRef, RevocationStatus, StatusListSnapshot, EntailmentRegime::Simple, FilterOp, CircuitId::{Scan, FilterInt, FilterF64, FilterSignedInt{md}, FilterDecimal{id,fd}, …}, FieldHex}`. `ProofManifest::{to_json, from_json}` round-trip via serde.
 - Dual-leaf value lane (sq-xojl + sq-cfmv + [OPUS-4.8] sq-2ezsx, behind the OFF-by-default `dual-leaf` feature): `CircuitId::FilterValueDl` + `ProofInputs::FilterValueDl { operand_enc, op, bound, datatype_const, expected }` are the integer value-lane FILTER member — it binds the operand to the dual-leaf commitment via two Poseidon2 permutations over the witnessed `VALUE_HOOK` with **NO in-circuit blake3** (the measured gate win, `gate_count_snapshot.json`), and is DIGIT-COUNT-FREE (one member per datatype class; no `ceil(log10(value))` member-selection leak). **Sibling datatype-class members (sq-2ezsx):** `CircuitId::FilterValueDlF64` + `ProofInputs::FilterValueDlF64 { operand_enc, op, b_bits, datatype_const, expected }` (`xsd:double` — the value handle is the IEEE bits, and the member instantiates B4 IN-CIRCUIT by CANONICALISING `-0.0`/`+0.0` and NaN payloads before the bind, since the term is many-to-one on the value) and `CircuitId::FilterValueDlDecimal` + `ProofInputs::FilterValueDlDecimal { operand_enc, op, bound_neg, bound_scaled, datatype_const, expected }` (`xsd:decimal` — value handle = the SIGNED scaled magnitude; B4 is the canonical-SCALE bind, with the scale folded into the public `datatype_const`, so ONE compiled member serves every scale). **`xsd:boolean` lane ([OPUS-5] sq-5xdlk) — NO new circuit member:** `filter_value_dl_int` already takes `datatype_const` as a PUBLIC input and its `u64` comparison domain covers the boolean value hooks `{0 = false, 1 = true}`, so the boolean lane REUSES `CircuitId::FilterValueDl` + `ProofInputs::FilterValueDl` (same wire tag, same compiled artifact, so bb gate counts are unchanged) and is selected purely by that constant — `manifest::boolean_datatype_const() -> FieldHex` (= `blake3(xsd:boolean IRI)`, the constant the host encoder `sparq_zk::dual_leaf_boolean::encode_boolean` folds into the committed leaf, sq-hh7a4). `build::build_filter_value_dl_boolean(&Literal, FilterOp, bound: bool) -> Result<BuiltFilterValueDlBoolean, DualLeafError>` builds the public inputs + the two private field witnesses from a canonical `"true"`/`"false"` literal (fail-closed on the non-canonical XSD-legal `"1"`/`"0"` and on any non-boolean datatype), disclosing the HONEST verdict computed by `build::boolean_verdict(value, op, bound)` — `EQ`/`NE` plus the DEGENERATE XPath orderings `false < true`, which is exactly the integer relation over the hooks. Lane separation is that public `datatype_const` and only that: it is folded into `value_component`, so an `"1"^^xsd:integer` leaf's honest witness rebinds to a DIFFERENT leaf under the boolean constant and fails the member's `assert_eq(leaf, operand_enc)` (and symmetrically) — a BINDING argument resting on Poseidon2 preimage resistance, NOT an audited soundness claim. Same INV-VL downgrade + CR-G8 / sq-qhy4; NOT externally audited; no soundness/privacy claim. **`xsd:dateTime` / `xsd:date` lane ([OPUS-5] sq-wz99x) — ONE new member serving BOTH lanes:** `CircuitId::FilterValueDlDateTime` + `ProofInputs::FilterValueDlDateTime { operand_enc, op, bound_neg, bound_scaled_epoch, datatype_const, expected }` is the `filter_value_dl_datetime` member — structurally `filter_value_dl_decimal` with a SIGNED SCALED EPOCH value handle (milliseconds from `1970-01-01T00:00:00Z` on the XSD proleptic-Gregorian `timeOnTimeline`, lane-fixed `FS = 3`), reusing that member's UNCHANGED signed fixed-point verdict, so it adds no new comparison machinery. `xsd:date` needs NO second Noir function: its hook is the scaled epoch of the date's STARTING instant (midnight UTC) and the lane is selected purely by the PUBLIC constant — `manifest::datetime_datatype_const()` / `manifest::date_datatype_const()` (= `blake3(IRI ‖ "@epochscale=3")`, exactly what the host encoders `sparq_zk::dual_leaf_datetime::{encode_datetime, encode_date}` (sq-we9vs) fold into the committed leaf). That separation is load-bearing here in a way it is not for the boolean lane, because the two hooks COLLIDE numerically (`"1970-01-02Z"` and `"1970-01-02T00:00:00Z"` both hook `86_400_000`): only the constant, folded into `value_component`, makes the two leaves differ — again a BINDING argument under Poseidon2 preimage resistance, NOT an audited soundness claim. `build::{build_filter_value_dl_datetime, build_filter_value_dl_date}(&Literal, FilterOp, bound: &Literal) -> Result<BuiltFilterValueDlDateTime, DualLeafError>` build the public inputs + the three private witnesses (`value_neg` + `value_hook_scaled` + `lexical_component`), putting BOTH operands through the same encoder so the hookable domain — strict XSD-canonical `Z`-timezoned lexicals ONLY; bare / non-`Z`-offset / `24:00:00` / leap-second / non-canonical-year / over-`FS`-fraction / `u64`-overflowing forms are REJECTED fail-closed, a bare operand for the §13.2 order-INDETERMINACY reason rather than as merely unbuilt — is enforced on the FILTER's constant too, and a cross-lane `date`-vs-`dateTime` comparison is structurally inexpressible through the API. The disclosed verdict is COMPUTED by `build::signed_epoch_verdict(...)`, never taken from the caller. Same INV-VL downgrade, and the whole §13 rule set (`research/zk-field-native-encoding.md`) is itself an OPEN external-audit obligation under CR-G8 / sq-qhy4; NOT externally audited; no soundness/privacy claim. `toml::filter_value_dl_prover_toml(...)` / `filter_value_dl_f64_prover_toml(...)` / `filter_value_dl_decimal_prover_toml(...)` / `filter_value_dl_boolean_prover_toml(...)` / `filter_value_dl_datetime_prover_toml(...)` emit each member's `Prover.toml` (their private witnesses are field elements — `value_hook` (+ `value_neg` for decimal/dateTime) + `lexical_component`; the boolean renderer is the integer one with the lane constant PINNED and `bound: bool` mapped to its hook). **`dispatch::resolve_circuit(CommitmentMethod, &CircuitId) -> Result<CircuitId, DispatchError>`** and `dispatch::resolve_circuit_for_scheme(scheme_iri, &CircuitId)` are the **fail-closed `(commitment-method × circuit)` dispatch matrix** (sq-cfmv): they REJECT a value-lane member against a method with no value handle (`string-canonical`), a string-lane/identity member against `value-only`, an identity op routed at the value lane (reject-list (v)), and an unknown method IRI — `DispatchError::{IllegalPair, IdentityOpAtValueLane, UnknownMethod}`, never a silent mis-dispatch or default. **Wiring the resolver into `verify_manifest` (so the verifier reads the recorded `zk:scheme` and gates each sub-proof) is design bead 6 (depends on the host encoding sq-j506) — the resolver is the self-contained, tested component that bead consumes.** The member + matrix carry the #769-accepted INV-VL downgrade (CR-G8 / sq-qhy4); NOT externally audited; no soundness/privacy claim. <!-- privacy-claims-allow: opt-in dual-leaf value lane + fail-closed dispatch matrix; INV-VL downgrade framed as an OPEN audit obligation; resolver enforces structural legality only and asserts no soundness/privacy property; sq-qhy4 / CR-G8 -->
 - Privacy upgrades (opt-in): `issuer::{key_set_root, key_membership_witness, hidden_issuer_prover_toml, HiddenIssuerWitness}`, `holder::{holder_set_root, holder_set_membership_witness, holder_set_prover_toml, HolderSetWitness}` (hidden-holder-SET tier, sq-3c00), and `revocation::{merkle_root, merkle_witness, revoke_prover_toml, MerkleWitness, hidden_ref_witness, revoke_hidden_ref_prover_toml, HiddenRefWitness}`.
+- [GPT-6] Status Merkle roots and witnesses require the entire byte-sized snapshot to fit `2^depth` bits; oversized snapshots return `None` before hashing. Nonempty snapshots therefore require depth at least three. Missing trailing status bits remain revoked padding. This admission also protects legacy accepted-policy anchors and successful-result policies; the result members admit at most 128 bytes per accepted snapshot.
 - **Fully-hidden revocation — status-list IRI + version HIDDEN (sq-kndw, the deferred remainder of sq-6qe; `research/zk-statuslist-hide-iri-version.md` §3 sub-option A):** the THIRD revocation disclosure mode, usable end-to-end. **Issuer:** sign `sig::status_ref_fully_committed_digest(ref_commitment, index_commitment)` via the existing `SecretKey::sign_commitment_with_status`, where `ref_commitment = sig::status_ref_commitment(H(list), version, ref_blinding)` and `index_commitment = sig::status_index_commitment(index, blinding)`; attach `AttestedStatusRef::fully_hidden(&rc, &ic)`. **Holder:** disclose `RevocationStatus::fully_hidden(&rc, &ic)` (`status_list`/`index`/`version` all absent) and attach a `FullyHiddenRevocation` proof of the `revoke_hidden_ref_d10_a4` member — build it with `revocation::hidden_ref_witness(&policy.accepted_entries()?, set_depth, &snapshot, depth, index)` + `revocation::revoke_hidden_ref_prover_toml(..)`, id `build::derive_revoke_hidden_ref_id(depth, set_depth)` (EXACT-match; only `(10, 4)` is compiled). **Relying party:** opt in with `RevocationPolicy::{with_hidden_index_depth, with_accepted_set_depth}` (+ optional `with_min_version` to pin the public epoch floor as a policy constant rather than a rolling window); `verifier::bind_fully_hidden_revocation` derives the accepted-set root + floor from its OWN freshness-curated snapshots, rebuilds the public inputs from them, and `bb verify`s. **Disclosure floor:** nothing holder-identifying — the statement reduces to "some accepted `(list, version)` at or above the RP's public floor has my hidden index unset". Residual disclosures are policy-side: the accepted-set root (the RP's own policy fingerprint), the public `min_version`, and the member depths `(D, A)` via the vk. **⚠️ Re-blinding is mandatory:** `(ref_commitment, index_commitment)` is a stable per-issuance pair, so reusing it across presentations reinstates full linkability — the issuer must re-blind and RE-SIGN per presentation. The verifier enforces single-use of the pair through the same durable `SeenNonces` store as the nonce defence (`FullyHiddenRevocationLinkageReplay`), but that only helps against an HONEST relying party; the real fix is upstream and is the design's residual operational gap. Fail-closed throughout: a fully-hidden reference without its proof is `FullyHiddenRevocationRequired`, a proof without the reference `FullyHiddenRevocationUnbound`, an unenabled policy `FullyHiddenRevocationNotEnabled`, a prover-chosen anchor `FullyHiddenRevocationAnchorMismatch`. The clear-index and committed-index paths are UNCHANGED. Research-grade; NOT externally audited (sq-qhy4) — no soundness/privacy property is asserted as achieved. <!-- privacy-claims-allow: describes the mode's disclosure floor with the re-blinding requirement and the honest limit of its enforcement stated inline; asserts no soundness/privacy property as achieved; NOT externally audited, sq-qhy4 -->
 - Large-registry scaling (sq-8k3h, host-side only): `issuer::{key_set_root_sparse, key_membership_witness_sparse}` and `holder::{holder_set_root_sparse, holder_set_membership_witness_sparse}` build the BIT-IDENTICAL root + authentication path in `O(n·depth)` (no `2^depth` materialisation), so a very large issuer/holder registry commits at any depth. The in-circuit relation is depth-generic and UNCHANGED — these are a drop-in for the dense builders, asserting NO new soundness/privacy property.
+
+<!-- [GPT-6] zkp-3: host planner, never a proof verification shortcut. -->
+The `sparq_zk_compose::planner` API admits strict SELECT DISTINCT / true ASK,
+selects successful per-result witnesses, and derives public disclosure versus
+remaining proof obligations. Its credential/leaf references and metrics are
+PRIVATE planning data; authentication remains required for public triples and
+FILTER operands. See [disclosure planning](references/disclosure-planner.md) for
+the API, bounds, result contract, and limitations. Host planning is not
+cryptographic verification; this surface is not externally audited.
 
 ## Common recipes
 
@@ -267,3 +282,75 @@ let art = prover.prove_in(&CircuitId::RevokeUnset { depth }, &toml, std::path::P
 - `noir-circuit-patterns` / `noir-optimisation` — writing/sizing the Noir circuits this crate drives (`zk/compose/`).
 - `sparql-formal-semantics` — the Pérez–Arenas–Gutiérrez fragment + blank-node scoping the Q6 guard and `verify::recheck` enforce.
 - `mpc-protocols` — the multi-party layer that composes with this single-prover ZK estate.
+
+## Private successful-result experiment
+
+[GPT-6] With `sparq-zk-compose/successful-results`, use
+`result::prepare_result(query, credentials, rows, policy, nonce)`, then
+`PreparedResult::prove(driver, output_dir, unique_tag)`. The relying party calls
+`result::verify_result(expected_query, presentation, policy, nonce, seen, driver,
+work_dir)` with independently chosen request/trust/status/freshness inputs.
+Successful verification returns released mappings. The new contract is separate
+from `verify_manifest`: only nonempty positive `SELECT DISTINCT` answers, selected
+IRIs/literals, and bounded private canonical `xsd:integer` predicates are admitted.
+Public predicates run in the verifier and select the member without numeric
+circuitry. Roots/salts/status indices and intermediate encodings are private;
+issuer slots/capacities/result size remain public. See the [successful-result contract](references/successful-results.md)
+for exact scope. Research-stage, not externally
+audited: no complete-answer, absence, wallet-size or holder-identity guarantee.
+
+[GPT-6] `planner::plan_disclosure_admitted` additionally accepts a predicate
+`Fn(pattern_index, MembershipRef, &Triple) -> bool` that excludes ineligible
+backend candidates while retaining all query checks. It preserves original
+wallet/leaf indices and is private preparation, never a verifier trust decision.
+
+[GPT-6] Result preparation filters issuer/status/backend eligibility before
+selecting witnesses. Each proof uses an internally unique private witness directory;
+canonical-key generation and verification also isolate concurrent scratch files.
+Caller tags are descriptive and cannot cause private-result input collisions.
+[GPT-6] All witness/proving entry points validate tags before I/O: ASCII letters,
+digits, underscores, hyphens and dots are accepted; `.`/`..`, separators and other
+characters reject. Legacy untagged APIs retain the empty tag; successful-result
+proofs require a nonempty label. Dots are injectively encoded as `%2E` internally
+and every filename has a fixed prefix; literal percent signs reject. Input
+writes reject final-component symlinks on
+Unix. Workspaces and their parent directories must be controlled by the caller.
+
+[GPT-6] Successful-result proofs now select a one- or two-credential circuit
+bucket, so removing a credential also removes its in-circuit signature check.
+The default `CredentialCapacity::Smallest` reveals the selected capacity; choose
+`prepare_result_with_options(..., ResultOptions { credential_capacity:
+CredentialCapacity::HideInTwo, ..ResultOptions::default() })` to keep the fixed two-slot policy. The verifier
+checks the bounded issuer-slot shape and derives the member independently.
+
+[GPT-6] Explicit `planner::optimize_disclosure[_admitted]` jointly minimizes
+credential authentication count and then shared membership count for fixed
+released rows. Its bounded report distinguishes `Optimal`, `Infeasible`, and
+`BudgetExhausted`; an exhausted feasible plan never implies optimality. Backend
+admission and credential-capacity limits remain enforced. This is structural host
+selection, not a calibrated speed claim or cryptographic assurance; see
+[disclosure planning](references/disclosure-planner.md).
+
+[GPT-6] `prepare_result` defaults to joint `WitnessSelection::Optimize` with the
+backend's credential bound. Set `ResultOptions.witness_selection` to `FirstSuccess`
+for the baseline, and `max_search_steps` to bound candidate attempts. Inspect
+`PreparedResult::work().optimization`: an exhausted feasible incumbent is usable
+but has no established optimum; exhaustion without a feasible plan returns
+`ResultError::SearchExhausted`. Neither diagnostics nor private attributions enter
+the public presentation, and the independent verifier is unchanged.
+
+[GPT-6] `CircuitProver::compile` returns an immutable content-addressed snapshot
+under the ignored target cache. Driver compile/execute calls share a Unix advisory
+workspace lock, and proof/key jobs consume their own ACIR copies. Concurrent driver
+processes may share a local workspace; do not run external nargo writes or remove
+the cache during those jobs. Unique legacy prover tags remain required for legacy
+witness APIs. Lock failures reject; the existing Unix platform and Rust 1.88
+minimum are preserved.
+
+[GPT-6] Both planner selection paths enforce `MAX_DISCLOSURE_CREDENTIALS` on the
+supplied slice before traversing credentials; empty and ineligible graphs count.
+This input bound is independent of candidate-triple search fuel.
+
+[GPT-6] Successful-result preparation also checks `MAX_DISCLOSURE_CREDENTIALS`
+before its authentication prepass. Its graph contract is string-canonical only;
+the generated gate matrix records dual-leaf and value-only pairs as unsupported.

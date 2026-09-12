@@ -149,7 +149,7 @@
       "note": "Number of distinct conformance suites the central scoreboard registers and ratchets across crates (W3C SPARQL, inference, SHACL core, SHACL-SPARQL, OGC GeoSPARQL, Solid WAC decision parity, Solid ACP decision parity)."
     },
     "memsafety.unsafe_sites_total": {
-      "value": 92,
+      "value": 93,
       "unit": "unsafe-sites",
       "environment": "canonical",
       "kind": "unsafe-count-ratchet-ceiling",
