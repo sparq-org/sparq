@@ -7,7 +7,7 @@
       "type": "application",
       "name": "sparq",
       "bom-ref": "pkg:cargo/sparq",
-      "description": "sparq — SOTA Rust RDF + SPARQL engine. This is the checked-in VEX (Vulnerability Exploitability eXchange) source of truth; the release workflow stamps the released version into a per-release copy attached to the GitHub Release alongside the CycloneDX SBOM."
+      "description": "sparq \u2014 SOTA Rust RDF + SPARQL engine. This is the checked-in VEX (Vulnerability Exploitability eXchange) source of truth; the release workflow stamps the released version into a per-release copy attached to the GitHub Release alongside the CycloneDX SBOM."
     },
     "supplier": {
       "name": "Jesse Wright",
@@ -18,7 +18,7 @@
   },
   "_comment": [
     "[OPUS-4.8] sq-toze.3 (GX-2): VEX justifying the advisories that cargo-deny is configured",
-    "to ignore in deny.toml. KEEP THIS IN SYNC WITH deny.toml [advisories].ignore — each entry",
+    "to ignore in deny.toml. KEEP THIS IN SYNC WITH deny.toml [advisories].ignore \u2014 each entry",
     "here corresponds 1:1 to an ignore there, with the same justification.",
     "[OPUS-5] sq-5ah3p: RUSTSEC-2025-0134 (`rustls-pemfile`) is REMOVED AGAIN, and for the second",
     "time by deletion rather than tolerance. It first left under sq-g2xs when the federation HTTP",
@@ -41,7 +41,8 @@
     "upstream release yet. Both are fixed by the same upgrade (>= 0.41.0).",
     "[GPT-5.6] sq-cx4w2: RUSTSEC-2024-0436 records that paste is unmaintained, not a",
     "vulnerability. parquet 59 reintroduces it for sparq-arrow's default-OFF parquet feature;",
-    "remove the deny ignore and matching VEX statement together when parquet drops paste."
+    "remove the deny ignore and matching VEX statement together when parquet drops paste.",
+    "[GPT-6] Informational maintenance advisories may omit analysis when no exploitability verdict is established; bincode retains its existing maintenance-only exception without a not_affected/code_not_reachable claim."
   ],
   "vulnerabilities": [
     {
@@ -89,15 +90,7 @@
         }
       ],
       "description": "bincode 1.3.3 is permanently unmaintained. This is an informational maintenance-status advisory with no reported vulnerability, CVE, or known exploit.",
-      "detail": "[SONNET-4.6] hdt 0.7.3 pulls bincode 1.3.3 transitively through qwt 0.4.0. No maintained bincode release is available on that dependency path.",
-      "analysis": {
-        "state": "not_affected",
-        "justification": "code_not_reachable",
-        "response": [
-          "will_not_fix"
-        ],
-        "detail": "The advisory concerns maintenance status rather than vulnerable behavior. sparq does not deserialize attacker-controlled bincode data; bincode is an internal qwt serialization dependency below the opt-in HDT surface. Remove this statement and the matching deny.toml ignore together when hdt/qwt replaces bincode."
-      },
+      "detail": "[GPT-6] The existing maintenance-only exception covers bincode 1.3.3 through qwt 0.4.0/hdt 0.7.3 and the detached evaluator host through risc0-zkvm 3.0.6/client. The guest graph omits bincode. Sparq uses ExternalProver, whose ordinary proof response is protobuf; other SDK RPC and prover asset/storage paths use bincode. No general code-unreachability or exploitability verdict is established here. Remove this statement and the matching deny.toml ignore when all affected HDT and SDK paths replace bincode (zkp-10.8.1); see research/zk-dependency-gates.md for scope.",
       "affects": [
         {
           "ref": "pkg:cargo/sparq"
@@ -118,14 +111,14 @@
           "severity": "medium"
         }
       ],
-      "description": "quick-xml before 0.41 takes quadratic time checking a start tag for duplicate attribute names, so an attacker who controls the XML input can cause a denial of service (excessive CPU) with a crafted start tag carrying many attributes. Availability impact only — this is NOT a memory-safety issue and has no known code-execution vector.",
+      "description": "quick-xml before 0.41 takes quadratic time checking a start tag for duplicate attribute names, so an attacker who controls the XML input can cause a denial of service (excessive CPU) with a crafted start tag carrying many attributes. Availability impact only \u2014 this is NOT a memory-safety issue and has no known code-execution vector.",
       "detail": "Two copies of quick-xml were present in the tree. sparq's OWN RDF/XML and SPARQL-Results-XML parse paths (sparq-conformance, sparq-engine `service`, sparq-geo) were bumped 0.40 -> the patched 0.41 and are fixed. The copy this VEX statement covers is the TRANSITIVE quick-xml 0.37.5 pinned by the oxigraph 0.5.x stack (oxrdfxml 0.2.3 / sparesults 0.3.3 / spareval 0.2.6). oxigraph has published no release that moves off quick-xml 0.37, so this transitive copy cannot be upgraded without an upstream oxigraph bump. Tracked in bead sq-iywur; upstream announcement https://github.com/tafia/quick-xml/issues/969.",
       "analysis": {
         "state": "exploitable",
         "response": [
           "can_not_fix"
         ],
-        "detail": "Honest reachability: the vulnerable duplicate-attribute check in quick-xml 0.37.5 IS reachable when oxigraph parses untrusted RDF/XML (oxrdfxml) or SPARQL-Results-XML (sparesults), so this is deliberately NOT marked not_affected. It cannot be fixed at sparq's level — no oxigraph release off quick-xml 0.37 exists yet and oxigraph does not expose the quick-xml version as a feature knob. Mitigation: sparq's own (non-oxigraph) XML parse paths are already on the patched 0.41; operators exposing oxigraph-backed RDF/XML ingest to untrusted input should bound request/body size at the perimeter. Impact is availability-only (quadratic CPU), not memory-unsafety. Remove this statement AND the matching deny.toml [advisories].ignore entry once oxigraph ships a quick-xml >= 0.41 release. Mirrors the deny.toml [advisories].ignore entry (same reason)."
+        "detail": "Honest reachability: the vulnerable duplicate-attribute check in quick-xml 0.37.5 IS reachable when oxigraph parses untrusted RDF/XML (oxrdfxml) or SPARQL-Results-XML (sparesults), so this is deliberately NOT marked not_affected. It cannot be fixed at sparq's level \u2014 no oxigraph release off quick-xml 0.37 exists yet and oxigraph does not expose the quick-xml version as a feature knob. Mitigation: sparq's own (non-oxigraph) XML parse paths are already on the patched 0.41; operators exposing oxigraph-backed RDF/XML ingest to untrusted input should bound request/body size at the perimeter. Impact is availability-only (quadratic CPU), not memory-unsafety. Remove this statement AND the matching deny.toml [advisories].ignore entry once oxigraph ships a quick-xml >= 0.41 release. Mirrors the deny.toml [advisories].ignore entry (same reason)."
       },
       "affects": [
         {
@@ -147,14 +140,14 @@
           "severity": "medium"
         }
       ],
-      "description": "quick-xml before 0.41, when namespace resolution is used (`NsReader`, or a direct `NamespaceResolver::push`), allocates one namespace-binding entry per namespace declaration on a start tag with no upper bound, so an attacker who controls the XML input can exhaust process memory (OOM) with a crafted start tag carrying a very large number of `xmlns:` declarations. Availability impact only — a memory-exhaustion denial of service, NOT a memory-safety (unsound) issue, and with no known code-execution vector.",
+      "description": "quick-xml before 0.41, when namespace resolution is used (`NsReader`, or a direct `NamespaceResolver::push`), allocates one namespace-binding entry per namespace declaration on a start tag with no upper bound, so an attacker who controls the XML input can exhaust process memory (OOM) with a crafted start tag carrying a very large number of `xmlns:` declarations. Availability impact only \u2014 a memory-exhaustion denial of service, NOT a memory-safety (unsound) issue, and with no known code-execution vector.",
       "detail": "Same two-copy situation and same fix as RUSTSEC-2026-0194. sparq's OWN RDF/XML and SPARQL-Results-XML parse paths (sparq-conformance, sparq-engine `service`, sparq-geo) were bumped 0.40 -> the patched 0.41 and are fixed (0.41 caps declarations per element via NamespaceResolver::set_max_declarations_per_element). The copy this VEX statement covers is the TRANSITIVE quick-xml 0.37.5 pinned by the oxigraph 0.5.x stack (oxrdfxml 0.2.3 / sparesults 0.3.3 / spareval 0.2.6). oxigraph has published no release that moves off quick-xml 0.37, so this transitive copy cannot be upgraded without an upstream oxigraph bump. Tracked in bead sq-iywur; upstream announcement https://github.com/tafia/quick-xml/issues/970.",
       "analysis": {
         "state": "exploitable",
         "response": [
           "can_not_fix"
         ],
-        "detail": "Honest reachability: oxigraph's RDF/XML reader (oxrdfxml) performs namespace resolution via quick-xml's NsReader, so the unbounded namespace-declaration allocation in quick-xml 0.37.5 IS reachable when oxigraph parses untrusted RDF/XML — this is deliberately NOT marked not_affected. It cannot be fixed at sparq's level — no oxigraph release off quick-xml 0.37 exists yet and oxigraph does not expose the quick-xml version as a feature knob, nor the new per-element declaration cap. Mitigation: sparq's own (non-oxigraph) XML parse paths are already on the patched 0.41; operators exposing oxigraph-backed RDF/XML ingest to untrusted input should bound request/body size at the perimeter. Impact is availability-only (memory exhaustion / OOM), not memory-unsafety. Remove this statement AND the matching deny.toml [advisories].ignore entry once oxigraph ships a quick-xml >= 0.41 release. Mirrors the deny.toml [advisories].ignore entry (same reason)."
+        "detail": "Honest reachability: oxigraph's RDF/XML reader (oxrdfxml) performs namespace resolution via quick-xml's NsReader, so the unbounded namespace-declaration allocation in quick-xml 0.37.5 IS reachable when oxigraph parses untrusted RDF/XML \u2014 this is deliberately NOT marked not_affected. It cannot be fixed at sparq's level \u2014 no oxigraph release off quick-xml 0.37 exists yet and oxigraph does not expose the quick-xml version as a feature knob, nor the new per-element declaration cap. Mitigation: sparq's own (non-oxigraph) XML parse paths are already on the patched 0.41; operators exposing oxigraph-backed RDF/XML ingest to untrusted input should bound request/body size at the perimeter. Impact is availability-only (memory exhaustion / OOM), not memory-unsafety. Remove this statement AND the matching deny.toml [advisories].ignore entry once oxigraph ships a quick-xml >= 0.41 release. Mirrors the deny.toml [advisories].ignore entry (same reason)."
       },
       "affects": [
         {
