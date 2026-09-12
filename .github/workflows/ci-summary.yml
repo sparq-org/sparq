@@ -47,8 +47,21 @@
 # pending set still REDs immediately (genuine hang), and every verdict — including
 # after an extension — is rendered by the SAME all-terminal gating semantics, so a
 # real failure can never become a pass and the wait can never be infinite. The
-# queue-depth signal needs `actions: read` (read-only) on the token. The deeper fix
-# (moving the waiter OFF the build-runner slot entirely) is a design-record follow-up.
+# queue-depth signal needs `actions: read` (read-only) on the token.
+#
+# SLOTLESS SUCCESSOR, STAGED ALONGSIDE (bead sq-lfmvd). [FABLE-5] The deeper fix —
+# moving the waiter OFF the build-runner slot entirely — now EXISTS as
+# .github/workflows/ci-gate-status.yml: short-lived `workflow_run`-triggered
+# evaluations that run the SAME brain (scripts/ci_summary_gate.py --evaluate, sharing
+# render_verdict verbatim) and publish the verdict as the `ci-gate` COMMIT STATUS.
+# THIS JOB IS STILL THE REQUIRED CHECK. The migration is deliberately STAGED, never
+# an atomic swap: the branch-protection ruleset requires only `gate` today, the
+# status runs in shadow, and dropping this job before the maintainer has moved the
+# ruleset onto the `ci-gate` context would block every merge. See
+# docs/branch-protection.md §Slotless gate evaluation for the three stages and their
+# exit criteria; scripts/tests/test_ci_summary_gate.py::TestSlotlessEvaluationWiring
+# ::test_the_required_check_migration_is_STAGED_not_swapped reds if this job is
+# deleted while the shadow lane is the only evaluator.
 #
 # ADVISORY/INFORMATIONAL checks are NON-GATING — but ONLY WHEN DECLARED (#3773).
 # [OPUS-5] A check-run is excluded from the gating set iff its name is EXPLICITLY
