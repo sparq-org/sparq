@@ -51,7 +51,19 @@ ratcheted, and none of them is declared in the registry):
 |---|---|---|
 | Site determinism grep-gate (zero `page.waitForTimeout` under `site/e2e/`) | `site-e2e-foundation.yml` · `determinism-gate` | pure grep, ~15 s, no npm install and no browser |
 | Axe WCAG 2.1 AA scan + `bench/a11y-baseline.json` ratchet | `site-e2e-foundation.yml` · `a11y-ratchet` | ratchet over axe's own rule output; non-vacuous by construction (the suite's last test injects an unlabelled icon-button and asserts axe catches it) |
-| #1740 `browserName` regression guard + gui/e2e `no-sleep-gate` | `gui.yml` · `gui-hermetic-guards` | find/grep over checked-in source; no webview, no driver, no toolchain |
+| #1740 `browserName` regression guard + gui/e2e `no-sleep-gate` | `gui.yml` · `gui-mock-ipc` (first two steps) | find/grep over checked-in source; no webview, no driver, no toolchain |
+
+> These two guards had a standalone `gui-hermetic-guards` job between #3773 and #5691; that job
+> was checkout + two greps, so its wall-time was ~entirely runner claim, and #5691 folded it into
+> the gating `gui-mock-ipc` lane — chosen because it gates, shares gui.yml's trigger and path
+> filter, and already hosts the analogous hermetic grep for its own harness. Note the guards
+> cover the *sibling* `gui/e2e` tauri-driver harness, which `gui-mock-ipc` does not itself run;
+> they run before its toolchain/node setup, so a violation still reds within seconds. **If
+> `gui-mock-ipc` is ever
+> demoted per §4, hoist the two guards back out into a hermetic gating job — do not give them a
+> `gate_script_waiver`,** or #3773's defect (a hard guard silently riding inside an advisory job)
+> comes straight back. `check-advisory-registry.py` C3 classifies both scripts as gate-classified,
+> so that demotion REDs until it is resolved one way or the other.
 
 **Never promotable** (documented so nobody wires them by accident):
 
