@@ -19,7 +19,15 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
+
+// [OPUS-5] sq-gum8.16 — the derived `canonical-timing` evidence class (paper factory F4).
+import {
+  deriveCanonicalTiming,
+  serializeCanonicalTiming,
+  TIMING_OUT_PATH,
+} from "./sync-canonical-timing.mjs";
+import { auditTimingSources } from "./timing-source-gate.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SITE = resolve(__dirname, "..");
@@ -217,6 +225,135 @@ function runEvidenceBindingVerifier() {
   );
 }
 
+// ---- the derived canonical-timing gate (bead sq-gum8.16, paper factory F4) -----------------
+// [OPUS-5] `paper-evidence.json` above is HAND-MAINTAINED deterministic evidence. Measured
+// wall-clock numbers live in a separate, fully DERIVED file — `src/data/paper-timing.generated
+// .json`, produced by sync-canonical-timing.mjs from the committed canonical envelopes under
+// `bench/canonical-competitor-results/**` and read by `papers/_lib/timing.typ`.
+//
+// This step re-runs that derivation and byte-compares it against the committed file, so the
+// factory can never publish a HAND-EDITED or STALE timing: the file is either exactly what the
+// committed envelopes imply, or the build aborts. It also asserts the class invariant (every
+// record is `environment: "canonical-timing"`) directly, so the property the papers rely on is
+// checked here and not only inside the generator.
+//
+// `prebuild` regenerates the file (the live-update path: a new canonical envelope lands on
+// main → the papers pick it up on the next deploy); this is the verification half.
+//
+// HONEST SCOPE: mechanical value↔envelope provenance only. It does not judge whether a
+// comparison is fair or whether a paper frames it honestly — that is the Stage-5
+// claims↔evidence review (skills/academic-paper/SKILL.md).
+function runCanonicalTimingGate() {
+  let derived;
+  try {
+    derived = deriveCanonicalTiming();
+  } catch (e) {
+    console.error(`\n[paper-factory] CANONICAL-TIMING DERIVATION FAILED: ${e.message}\n`);
+    process.exit(1);
+  }
+  const expected = serializeCanonicalTiming(derived);
+  const current = existsSync(TIMING_OUT_PATH) ? readFileSync(TIMING_OUT_PATH, "utf8") : null;
+  if (current !== expected) {
+    // Distinguish the one non-obvious cause: a checkout without the envelope tree derives
+    // NOTHING, which looks identical to "stale" unless we say so. We still fail — a derivation
+    // that cannot see its sources cannot verify anything, and trusting the committed file in
+    // that state would be the un-fail-closed direction.
+    const envelopeDir = join(REPO_ROOT, "bench", "canonical-competitor-results");
+    const hint = existsSync(envelopeDir)
+      ? "  Run `npm run sync-canonical-timing` and commit the result. A measured number a\n" +
+        "  paper headlines must be exactly what the committed canonical envelopes say.\n"
+      : `  CAUSE: ${envelopeDir} is absent in this checkout, so the derivation produced\n` +
+        "  nothing to compare against. This build needs the full tree (no sparse checkout).\n";
+    console.error(
+      "\n[paper-factory] CANONICAL-TIMING GATE FAILED: src/data/paper-timing.generated.json " +
+        "does not match a fresh derivation.\n" +
+        hint,
+    );
+    process.exit(1);
+  }
+  const bad = Object.entries(derived.records).filter(
+    ([, r]) => r.environment !== "canonical-timing",
+  );
+  if (bad.length) {
+    console.error(
+      "\n[paper-factory] CANONICAL-TIMING GATE FAILED: non-'canonical-timing' record(s) in the " +
+        `derived timing file: ${bad.map(([k]) => k).join(", ")}\n`,
+    );
+    process.exit(1);
+  }
+  const n = Object.keys(derived.records).length;
+  const nEnv = Object.keys(derived.envelopes).length;
+  console.log(
+    `[paper-factory] canonical-timing gate passed: ${n} derived record(s) from ${nEnv} ` +
+      `canonical envelope(s); ${derived.skipped.length} envelope(s) skipped (see \`skipped\`).`,
+  );
+}
+
+// ---- the measured-timing PUBLICATION-BOUNDARY source gate ---------------------------------
+// [OPUS-5] sq-gum8.16 — runCanonicalTimingGate() above proves the DATA is exactly what the
+// committed envelopes imply. This proves the RENDERING PATH: that no paper source reaches a
+// measured value except through the two provenance-rendering accessors.
+//
+// It is a separate gate because Typst cannot enforce it — the lib's parsed dataset and its
+// internal record lookup are importable like any other top-level binding, and a paper can also
+// `json()` the generated file itself. See site/scripts/timing-source-gate.mjs for the rules.
+// FAIL-CLOSED: any bypass aborts the build before an artifact is written.
+function runTimingSourceGate() {
+  const { scanned, problems } = auditTimingSources(PAPERS_DIR);
+  if (problems.length) {
+    console.error(
+      "\n[paper-factory] MEASURED-TIMING SOURCE GATE FAILED:\n  - " +
+        problems.join("\n  - ") +
+        "\n\n  A measured wall-clock number may only reach a page via headline_timing(key) or\n" +
+        "  timing_provenance(key), which always render the machine, aggregate and commit\n" +
+        "  beside it. Route the number through an accessor instead of the raw data.\n",
+    );
+    process.exit(1);
+  }
+  console.log(
+    `[paper-factory] measured-timing source gate passed: ${scanned.length} paper source(s) ` +
+      "reach timings only through the provenance-rendering accessors.",
+  );
+}
+
+// ---- the timing-lib compile self-check ----------------------------------------------------
+// [OPUS-5] sq-gum8.16 — `papers/_lib/timing.typ` is infrastructure that no paper imports yet
+// (the first consumer is a separate bead). Without this, a syntax error in the lib or a shape
+// change in the derived JSON would only surface later, inside whichever paper adopts it first.
+// So on every build we compile a tiny fixture that imports the lib and exercises BOTH
+// accessors, in BOTH export modes, to a temp dir (never into public/). Cheap, and it makes the
+// accessor's contract a build-enforced property rather than an untested promise.
+function runTimingLibSelfCheck(typst) {
+  const fixture = join(PAPERS_DIR, "_lib", "timing-selfcheck.typ");
+  if (!existsSync(fixture)) {
+    console.error(`\n[paper-factory] TIMING SELF-CHECK: fixture missing: ${fixture}\n`);
+    process.exit(1);
+  }
+  const scratch = join(tmpdir(), "sparq-paper-timing-selfcheck");
+  mkdirSync(scratch, { recursive: true });
+  const common = ["--root", SITE, "--input", `data=${readFileSync(EVIDENCE_PATH, "utf8")}`];
+  for (const [label, args] of [
+    ["pdf", [join(scratch, "selfcheck.pdf")]],
+    ["html", [join(scratch, "selfcheck.html"), "--format", "html", "--features", "html"]],
+  ]) {
+    try {
+      execFileSync(typst, ["compile", fixture, ...args, ...common], {
+        stdio: ["ignore", "ignore", "inherit"],
+      });
+    } catch (e) {
+      const code = typeof e.status === "number" ? e.status : 1;
+      console.error(
+        `\n[paper-factory] TIMING SELF-CHECK FAILED (${label} export, exit ${code}).\n` +
+          "  papers/_lib/timing.typ does not compile against the derived\n" +
+          "  src/data/paper-timing.generated.json. Fix the lib (or the derivation shape)\n" +
+          "  before any paper can headline a measured timing.\n",
+      );
+      process.exit(1);
+    }
+  }
+  console.log("[paper-factory] timing-lib self-check passed: timing.typ compiles to PDF + HTML.");
+}
+
 // ---- compile one paper to PDF + HTML ------------------------------------------------------
 function compilePaper(typst, paper, evidenceJson) {
   const typPath = join(PAPERS_DIR, paper.source);
@@ -258,6 +395,14 @@ function main() {
   // so a stale/renamed number aborts the build. Independent of typst (a pure source check).
   runEvidenceBindingVerifier();
 
+  // [OPUS-5] sq-gum8.16 (paper factory F4): the derived MEASURED-timing class. Also a pure
+  // source check (re-derive + byte-compare), so it runs before any compile/placeholder too.
+  runCanonicalTimingGate();
+
+  // [OPUS-5] sq-gum8.16: ...and the matching PUBLICATION-BOUNDARY check — no paper source may
+  // reach a measured value except through the provenance-rendering accessors.
+  runTimingSourceGate();
+
   const typst = resolveTypst();
   const papers = readRegistry();
 
@@ -289,6 +434,9 @@ function main() {
     }
     return;
   }
+
+  // [OPUS-5] sq-gum8.16: prove the measured-timing accessor compiles before the papers do.
+  runTimingLibSelfCheck(typst);
 
   const evidenceJson = readFileSync(EVIDENCE_PATH, "utf8");
   for (const p of papers) compilePaper(typst, p, evidenceJson);

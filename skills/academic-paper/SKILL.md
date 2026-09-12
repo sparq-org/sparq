@@ -106,6 +106,12 @@ Paper-bound numbers live in a **dedicated evidence file, `site/src/data/paper-ev
 - **`benchmarks.generated.json`** — per-commit *timing* on the dev work-box, **all
   `environment: "indicative"`** (folded in by `site/scripts/sync-benchmarks.mjs` from the
   `benchmark-data` branch). It feeds the site's benchmark widgets, **never** a paper headline.
+- **`paper-timing.generated.json`** — MEASURED wall-clock, **all
+  `environment: "canonical-timing"`**, entirely **DERIVED** (never hand-written) by
+  `site/scripts/sync-canonical-timing.mjs` from the committed canonical envelopes under
+  `bench/canonical-competitor-results/**`. An envelope is admitted only if it self-declares
+  `"canonical": true`, so a work-box timing cannot enter the class by construction. Rendered
+  only via `headline_timing()` — see gate 5. [OPUS-5: as-built, bead sq-gum8.16 / F4.]
 
 A paper-evidence record (a `binding` upgrades its `source` from asserted to machine-verified —
 see gate 4):
@@ -131,10 +137,14 @@ see gate 4):
 
 So any non-canonical (work-box / indicative) number can never appear as a paper's headline
 evidence. Indicative and canonical numbers are never in the same table and never feed an
-aggregate. Until the canonical *latency* runner exists (`research/ci-ec2-design.md`, blocked
-on one IAM step), publish **only the deterministic metrics** (conformance counts, recall
-floors, byte-identity / answer-safety invariants, gate/round/byte counts) — those are
-canonical today and are exactly what `paper-evidence.json` holds.
+aggregate. `paper-evidence.json` holds **only the deterministic metrics** (conformance counts,
+recall floors, byte-identity / answer-safety invariants, gate/round/byte counts) — machine-
+independent by construction. A **measured** wall-clock number is a different class with a
+different door (gate 5): it may be cited only from a committed canonical envelope and only
+through `headline_timing()`. There is still no *continuous* canonical latency runner
+(`research/ci-ec2-design.md`, blocked on one IAM step — sq-me8x), so measured numbers come in
+one-off gathered envelopes rather than per-commit; a claim must be scoped to exactly the
+corpus, queries and commit the cited envelope measured.
 
 3. **Coarse phrase/number gate over the paper surface — `check-no-perf-numbers.py` +
    `check-privacy-claims.sh`** (beads sq-mkza / sq-4hga / sq-mraf). Both CI gates also scan
@@ -165,6 +175,46 @@ canonical today and are exactly what `paper-evidence.json` holds.
    `build-papers.mjs`; `--self-test` is the CI gate (a value-DRIFT fixture and a missing-anchor
    fixture each exit non-zero). Like gate 3 it is **MECHANICAL** — value↔source match only; a
    *semantic* overclaim (a true number framed misleadingly) stays the Stage-5 human review.
+5. **Measured-timing derivation gate — `site/scripts/sync-canonical-timing.mjs`** (bead
+   sq-gum8.16, F4). Papers **may** headline a measured wall-clock number, but only under all of:
+   - **Derived, never typed.** The value comes from a committed envelope under
+     `bench/canonical-competitor-results/**`; there is no author-writable timing file.
+     `build-papers.mjs::runCanonicalTimingGate()` re-derives and **byte-compares** against the
+     committed `paper-timing.generated.json`, so a hand-edited or stale timing aborts the build.
+   - **`"canonical": true` or nothing.** The envelope must self-declare it (the dedicated
+     quiet-EC2 protocol). Work-box timings have no path in.
+   - **COUNT BEFORE TIME.** A row is admitted only if that engine's own result count matches the
+     suite's committed `bench/<suite>/expected-rows.tsv`, which the derivation loads
+     **independently of the envelope** — an envelope's own `count_crosscheck.expected` is a
+     self-assertion and cannot bless its own counts. Absent a committed row, agreement is
+     **re-derived** from the per-engine counts (≥2 engines, all equal to the published row); the
+     envelope's `all_agree` flag is not trusted on its own. So a fast-but-WRONG comparator can
+     never have its timing published. Refusals are recorded with their reason in the generated
+     file rather than silently dropped.
+   - **Provenance is unavoidable.** `headline_timing(key)` always renders aggregate + host class
+     + git commit beside the number, and `timing_provenance(key)` gives the full block form
+     (corpus, rows, gather date, envelope path). Typst cannot enforce this on its own — it has
+     no private module bindings, so the lib's parsed dataset and internal lookup would be
+     importable — so the boundary is enforced mechanically by
+     `build-papers.mjs::runTimingSourceGate()` (`site/scripts/timing-source-gate.mjs`): a paper
+     source may import only `headline_timing` / `timing_provenance` / `timing_keys` from the
+     lib, never the whole module, and may not load data from disk *at all* — the rule is on
+     Typst's loader builtins (`json`/`read`/`csv`/…) and on non-literal `#import` paths, not on
+     the file name, because `json("/src/data/paper-" + "timing.generated.json")` spells neither.
+     A loader can also be *manufactured* without naming it (`eval("j" + "son", mode: "code")`, or
+     reached as `std.json(…)`), which no loader-name rule can see, so those reflective constructs
+     are themselves refused in code position — prose/raw `eval(P)` notation stays writable.
+     The two evidence libraries that must load data get one pinned, audited expression each.
+     Unit tests run negative fixtures (raw-data import, internal accessor, wildcard, direct
+     `json()`, concatenated path, aliased loader, reflective `eval`, `std`-qualified loader, raw
+     `read()`, computed `#import`) through that gate and require each to fail. Honest scope: a
+     source-text gate over the compiled paper sources, not a Typst capability sandbox.
+
+   Deliberately **not** provided: any ratio / speed-up helper. A cross-engine ratio is a *claim*
+   needing prose framing (which corpus, which queries, what was excluded), so it belongs in the
+   paper's text under Stage 5, not in a helper that would make it look derived. Only the same-box
+   per-query envelope family is derived today; the HTTP, materialization and HDT families are
+   skipped **with a recorded reason** (see `skipped[]`) rather than guessed at.
 
 ---
 
@@ -213,6 +263,22 @@ The filtered top-k matches the exact-filtered ground truth at recall@10
 #provenance("filtered_ann.recall_at_10_floor")
 ```
 
+For a **measured** wall-clock number, import the separate, stricter lib instead. It reads the
+DERIVED `paper-timing.generated.json` from the Typst project root (no `--input` needed, so it is
+not bounded by the OS argument-size limit) and offers no raw-value accessor — the number cannot
+be shown stripped of its provenance:
+
+```typ
+#import "_lib/timing.typ": headline_timing, timing_provenance
+
+sparq answers SP2Bench q01 in #headline_timing("timing.sp2b.sparq.q01").
+#timing_provenance("timing.sp2b.sparq.q01")
+```
+
+Keys are `timing.<suite>.<engine>.<query>`; `npm run sync-canonical-timing` lists what exists
+and, in `skipped[]`, what was refused and why. A key that is not in the derived file panics the
+compile — check `skipped[]` before assuming a number should be there.
+
 Run the self-check before handing off to review:
 
 - **SIGPLAN-7 rubric** (red/yellow/green, supports judgment not a binary gate): (1) claims
@@ -233,9 +299,12 @@ Run the self-check before handing off to review:
 
 ## Stage 4 — Build: one source → PDF + in-site HTML
 
-`site/scripts/build-papers.mjs` (wired into `prebuild` + `dev`) drives both artifacts for
-every paper in `papers.ts`, injecting the SAME `paper-evidence.json` so they cannot diverge.
-The two compile invocations it runs (paths relative to `site/`, `--root site`):
+`site/scripts/build-papers.mjs` (wired into `prebuild` + `dev`, after
+`sync-canonical-timing.mjs`) drives both artifacts for every paper in `papers.ts`, injecting the
+SAME `paper-evidence.json` so they cannot diverge. Measured timings need no injection — both
+compiles read the same committed `src/data/paper-timing.generated.json` from `--root`, so they
+cannot diverge either. The two compile invocations it runs (paths relative to `site/`,
+`--root site`):
 
 ```bash
 # PDF (the download — static asset under public/papers/, served by the Next.js export):
@@ -262,8 +331,13 @@ expected `--features html` "experimental feature" + page-rule warnings on stderr
 those constructs are **preserved in the PDF**. Author for both: rely on semantic structure
 (headings, tables, paragraphs) for meaning, treat alignment as PDF-only polish. If Typst is
 not on `PATH`, the script emits an honest placeholder fragment and warns (CI installs Typst so
-real artifacts always build). A `benchmark-data`/evidence change re-triggers `next build` and
-both artifacts regenerate. For a venue that rejects Typst→LaTeX, the camera-ready fallback is
+real artifacts always build). When Typst *is* present the build first compiles
+`papers/_lib/timing-selfcheck.typ` (not a registered paper — a fixture) to a temp dir in both
+export modes, so the measured-timing accessor is verified against the real derived data on every
+build. A `benchmark-data`/evidence change — or a **new canonical envelope** landing under
+`bench/canonical-competitor-results/` — re-triggers `next build` and both artifacts
+regenerate, which is what makes a published measured number auto-update. For a venue that
+rejects Typst→LaTeX, the camera-ready fallback is
 Pandoc/LaTeX via Tectonic against `acmart`/`IEEEtran`/`lipics`. **Do not** author the PDF with
 `@react-pdf/renderer` — it duplicates the numbers (breaks single-source).
 
@@ -278,6 +352,12 @@ subagent section-reviewers + one cross-cutting honesty/repro reviewer) **blocks*
 - **Any indicative number in a claim** (the Stage-2 build-time honesty gate —
   `build-papers.mjs` schema-check + the `headline()` compile panic — enforces this
   mechanically; the reviewer also checks no indicative/canonical co-tabulation).
+- **A measured timing whose claim outruns its envelope.** Gate 5 proves the number came from a
+  canonical envelope with a correct row count; it says nothing about *scope*. The reviewer
+  checks the claim names the corpus, the query set and the commit the cited envelope actually
+  measured, does not generalise across suites, and does not quietly omit the queries where the
+  project's own engine lost (the derived data contains those too — cherry-picking them out is a
+  Stage-5 violation no gate can see).
 - **A C-family (ZK/MPC) draft using "secure"/"verifiable"/"private" as a proven property** —
   must be a design goal, with the sq-qhy4 soundness-gap disclaimer present.
 - **Overclaiming / implied generality, weak/unfair baselines, missing ablations, no error

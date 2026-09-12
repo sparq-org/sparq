@@ -192,8 +192,13 @@ def scan_file(path: str) -> list[tuple[int, str, str]]:
 
 # Accessor calls whose (string-key) argument span must be removed before scanning, so a
 # unit-like substring inside a legitimate evidence KEY can never be read as a perf claim.
+# [OPUS-5] sq-gum8.16: `headline_timing` / `timing_provenance` (site/papers/_lib/timing.typ)
+# are the MEASURED-timing accessors, whose values are DERIVED from the committed canonical
+# envelopes (site/src/data/paper-timing.generated.json) and always render with their
+# provenance. They are accessors like the rest, so their key spans are stripped too. Listed
+# BEFORE the shorter names so the alternation matches the full accessor name.
 TYPST_ACCESSOR_CALL_RE = re.compile(
-    r"#(?:headline|ev|provenance)\s*\([^)]*\)", re.I
+    r"#(?:headline_timing|timing_provenance|headline|ev|provenance)\s*\([^)]*\)", re.I
 )
 
 
