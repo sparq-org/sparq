@@ -6,9 +6,11 @@
 > actual code, states the feasibility envelope honestly, and decomposes the work into
 > measurement-gated child beads (`sq-zgbso.1`–`.6`).
 
-**Status:** DESIGN / measurement-first plan. **Epic:** `sq-zgbso` (issue #1582).
-**Gate:** everything past the first bead is blocked on the `sq-zgbso.1` spike verdict —
-no architectural commitment before the numbers exist.
+**Status:** phases 1–3 LANDED; `.4`–`.6` open. **Epic:** `sq-zgbso` (issue #1582).
+**Gate:** everything past the first bead was blocked on the `sq-zgbso.1` spike verdict —
+that spike has since landed and `.2`/`.3` were built on it (§9).
+**Read §9 first** — it reconciles the original plan below with what is actually in the
+tree, and corrects three statements the plan got wrong.
 
 **The ask, condensed (issue #1582):** (1) move ODRL evaluation out of hand-written Rust
 into Notation3 inference rules, the way WAC and ACP evaluation are done; (2) HARD
@@ -223,7 +225,8 @@ sq-zgbso.1 (spike verdict)
 Parallelism audit: the only concurrently-runnable sets are `{.2 (sparq-solid),
 .3 (sparq-reason)}` and `{.5 (sparq-solid), .6 (sparq-reason)}` — one bead per crate,
 zero shared files. `Cargo.toml`/`odrl_bridge.rs` overlaps across phases are strictly
-sequenced by the dep edges. Only `sq-zgbso.1` is dispatchable now, by design.
+sequenced by the dep edges. Only `sq-zgbso.1` was dispatchable when this plan was
+written, by design; `.1`–`.3` have since landed and `.4` is the current frontier (§9).
 
 **Verdict semantics of the spike (`sq-zgbso.1`):** two independent GO/NO-GO calls —
 (i) *ODRL-as-N3*: correctness parity holds and the runtime ratio is acceptable given
@@ -235,7 +238,7 @@ as coherent as WAC/ACP today (option (b) as consolation is then worth a follow-u
 
 ---
 
-## 6. Measurement plan (what will be measured — results do NOT exist yet)
+## 6. Measurement plan (as written in 2026-07; items 1–2 have since been executed — §9)
 
 Stated up front so downstream `verify` is mechanical and nobody invents a number. All
 wall-clock figures are best-of-N on the work box, reported in bead comments + PR bodies
@@ -306,3 +309,123 @@ as **non-canonical** ratios; nothing lands in docs, tests, or `bench/perf-baseli
 - External prior art: SolidLab ODRL-Evaluator (N3 + EYE),
   <https://github.com/SolidLabResearch/ODRL-Evaluator>; ODRL evaluation semantics survey
   in `research/feature-research-odrl-policy.md` §1.2
+
+---
+
+## 9. Reconciliation (2026-07-27) — the landed state, and three corrections
+
+Sections 0–8 are the ORIGINAL 2026-07-06 plan and are preserved as written. This section
+reconciles them with `origin/main` at `d7539cf4`.
+
+**Method + its limit (honesty):** everything below was verified by READING the tree —
+file existence, feature wiring, CI legs, and call sites. **No measurement was re-run in
+this pass**: the reconciliation checkout has no usable Rust toolchain, so nothing was
+built, tested, or timed here. Consequently this section restates NO performance or
+build-size number. The numbers from the executed beads live where the house rules put
+them — the PR/bead bodies of #1601 and #1619, as non-canonical work-box figures — and
+should be read there, not inferred from this doc.
+
+### 9.1 What landed
+
+| Bead | State | Verified evidence in-tree |
+|------|-------|---------------------------|
+| `.1` spike | **LANDED** (#1601) | `crates/sparq-solid/rules/odrl-spike.n3`, `examples/odrl_n3_spike.rs`, `tests/odrl_n3_spike.rs` |
+| `.2` stateless ODRL core as N3 | **LANDED** (#3458, incl. its pre-merge fail-open fixes) | `rules/odrl-{a0,a,b,c,d}.n3`, `odrl_bridge::materialize_odrl_n3`, `tests/odrl_n3_differential.rs`, `tests/odrl_n3_failopen_regression.rs` |
+| `.3` id-level compiled evaluator | **LANDED** (#1619) | `sparq-reason/src/n3/compiled.rs`, `tests/compiled_equivalence.rs`, `examples/compiled_rules_bench.rs`, feature `compiled-rules` + its `.github/feature-matrix.d/sparq-reason.yml` leg |
+| `.4` build-time flip | **OPEN** | no `crates/sparq-solid/build.rs`; `src/materialize.rs` still calls `reason_n3`/`reason_n3_stratified` over assembled TEXT |
+| `.5` ODRL compiled flip | **OPEN** | `materialize_odrl_n3` still runs the text engine (§9.4) |
+| `.6` RDFS-as-compiled-N3 spike | **OPEN** | no RDFS N3 ruleset or spike example under `sparq-reason` |
+
+So **the deliverable named in the issue title — "feasibility design + measured prototype" —
+is done** (#1590 design, #1601 measured spike). What remains open is the *build-time
+compilation* half of the epic: `.4` (the flip that would actually realise the win `.3`
+built the machinery for), then `.5`/`.6`. `.3` shipped an evaluator that, as of this
+commit, **nothing in `sparq-solid` calls** — the compiled path is built and
+equivalence-tested, but is not yet on any production path. That gap is `.4`, and it is
+the single highest-value remaining bead in the epic.
+
+### 9.2 Correction 1 — §3's "Can" list overstates what the N3 path actually supports
+
+§3 scoped the N3-able core as target/assignee/action matching, `and`/`or`/`xone`
+combinators, `odrl:dateTime` windows, and `recipient`/`assignee neq` carve-outs. The
+landed path is materially narrower. Per the `materialize_odrl_n3` rustdoc and the rule
+files, the decision-EQUIVALENT scope is: `odrl:dateTime` **lteq/gteq only**, canonical
+UTC lexical forms only; **`odrl:recipient`** eq/neq (not `assignee`); at most **one**
+`odrl:or`/`odrl:and` per rule, with each constraint node carrying exactly **one** operand
+tuple. **`odrl:xone` is not evaluated at all**: there is no `xone` satisfaction rule in
+any stratum (only `or` in A and `and` in C), the stratum C/D rules explicitly negate it
+(`log:notIncludes { ?r odrl:constraint ?lc . ?lc odrl:xone ?x }`) so a permission carrying
+one yields no grant, a prohibition carrying one is an explicit `Err` refusal, and
+`rules/odrl-a0.n3` additionally marks nodes combining `xone` with `and`/`or` as
+`odrlx:Ambiguous`.
+
+The safety framing also changed, for the better: outside that scope the landed claim is
+not "equivalent" but **"never more permissive"** than the Rust path — unsupported
+constructs on a permission yield no grant, and on a prohibition (where silently dropping
+a deny would widen access) they refuse the whole call. That is the fail-closed direction
+§2.4 asked for, stated more precisely than the plan did.
+
+This narrowing is not a defect; it is what the fail-open review found.
+`tests/odrl_n3_failopen_regression.rs` records two confirmed fail-OPEN defects that the
+review of PR #3458 found by execution in the `.2` path and fixed before merge — a
+multi-operand constraint node satisfied by "some operand" where "every operand" was
+required, and a conflict-refusal guard that was never called. Both granted access the
+Rust path denied. **The lesson for `.4`/`.5`: on this surface a differential corpus is
+necessary but was not sufficient — both defects needed adversarial review to surface.**
+
+### 9.3 Correction 2 — the N3 path depends on the Rust evaluator; it does not replace it
+
+The epic's framing is "move ODRL evaluation out of hand-written Rust into N3". As landed,
+that has not happened and cannot yet: `materialize_odrl_n3` **calls into `sparq-policy`
+on every invocation** — `parse_policy_str` to re-parse the policy into the Rust model,
+and `conflict_admissibility` (via `refuse_unimplementable_conflict`) to decide refusal.
+A policy the Rust evaluator cannot parse is refused by the N3 path too.
+
+This is a deliberate and sound choice — sharing the admissibility verdict is exactly what
+makes the two paths refuse the same policies, and it was one of the two fail-open fixes.
+But it means §4's rejection of option (a) ("two evaluation stacks for one auth view is
+the real maintenance cost") describes the *current* estate: there are now two stacks, and
+the N3 one sits on top of the Rust one rather than displacing it. `crates/sparq-policy`
+is not on a retirement path and should not be treated as one.
+
+### 9.4 Correction 3 — the ODRL N3 path pays the text round trip 5×, not 1× or 3×
+
+§1's cost anatomy was written for WAC (one `reason_n3` call) and ACP (three strata).
+`materialize_odrl_n3` runs **five sequential `reason_n3` calls** (strata A0→A→B→C→D),
+each constructing a **fresh `Dict`** and each re-serializing the previous stratum's whole
+closure back to N3 text via `closure_ids_to_n3` for the next one to re-parse.
+
+This strengthens the §1 items-1–2 case rather than weakening it: the ODRL path is the
+*most* round-trip-heavy consumer in the estate, so it — not WAC — is the workload where a
+compiled id-level evaluator has the most headroom to recover. It also reorders the plan's
+economics: §5 scheduled `.5` (the ODRL compiled flip) as a cheap haiku-tier mechanical
+follow-on to `.4`. Five fresh-`Dict` strata make it the bead with the largest expected
+win, and re-tiering it upward is worth considering when `.4` lands.
+
+### 9.5 Open question for the maintainer — the `sparq-policy` disposition
+
+The epic has no recorded answer to what ultimately happens to `crates/sparq-policy`'s
+hand-written evaluator (`eval.rs` 1 955 + `compare.rs` 620 lines). Three coherent end states,
+and the choice is a maintainer call, not an agent one:
+
+1. **Rust stays the default, N3 stays opt-in and narrower** (the status quo). Honest and
+   safe; permanently two stacks.
+2. **N3 becomes the default once its scope reaches parity**, Rust demoted to the
+   differential oracle. This is what the epic implies, but §9.2 shows the scope gap is
+   wide (xone, all six dateTime operators, multi-operand nodes, `assignee`), and §9.3
+   means the parse + conflict-admissibility core stays Rust regardless.
+3. **Deliberately keep both, permanently**, with the Rust path as the reference oracle —
+   arguably the right answer on an access-control surface, where a second independent
+   implementation is a feature, not debt.
+
+Nothing in the tree commits to any of these. Recording the question is the point;
+answering it should precede any further scope-widening of the N3 rules.
+
+### 9.6 Not re-verified in this pass
+
+- `sq-s5tkx` (§0.6 / §7 — the pre-existing 8-test `--all-features` `odrl_bridge`
+  failure): **not re-checked**, no toolchain. `.github/feature-matrix.d/sparq-solid.yml`
+  still has no `--all-features` leg for the crate (legs are per-feature), so the
+  condition the bead describes would still be invisible to CI.
+- The `.1`/`.3` timing and build-size figures: not re-measured; see the PR bodies.
+- Whether the current test suites are green: not run.
