@@ -1,0 +1,20 @@
+[package]
+name = "sparq-proved-evaluator-model"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+default = []
+evaluate = ["dep:sparq-engine", "dep:sparq-core", "dep:spargebra", "dep:oxrdf", "dep:oxttl"]
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+sparq-engine = { path = "../../../crates/sparq-engine", default-features = false, features = ["regex", "digest"], optional = true }
+sparq-core = { path = "../../../crates/sparq-core", default-features = false, optional = true }
+spargebra = { version = "=0.4.6", features = ["sparql-12", "sep-0006"], optional = true }
+oxrdf = { version = "0.3", features = ["rdf-12"], optional = true }
+oxttl = { version = "0.2", features = ["rdf-12"], optional = true }

@@ -13,6 +13,12 @@ Run conformant SPARQL over an in-memory or out-of-core graph, with `EXPLAIN` / `
 for plan introspection and a hook for registering your own functions. How it plans and executes
 queries is described in the design docs linked below.
 
+<!-- [GPT-6] The detached proof guest does not add an engine dependency. -->
+The opt-in [proved evaluator](../../zk/sparql-evaluator/README.md) builds a restricted
+engine profile for `target_os = "zkvm"`. That target has no ambient NOW/RAND/UUID
+support; the proof wrapper rejects those functions. Ordinary native and WASM
+behavior is unchanged. This experiment is not externally audited.
+
 ## 🚀 Quickstart
 
 ```rust

@@ -2177,7 +2177,7 @@ pub(crate) mod multiplicity {
 // `Copy`) and re-install it around each item exactly like the `functions` / `view`
 // / `spatial` registries above, restoring the previous value on drop (rayon runs
 // some items on the installing thread itself).
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "zkvm")))]
 pub(crate) mod query_now {
     use std::cell::Cell;
 
@@ -3324,7 +3324,8 @@ fn eval_modified(graph: &Graph, local: &mut LocalVocab, p: &GraphPattern) -> Res
     // Pin NOW() for this execution (SPARQL 1.1 §17.4.5.1). Outermost call samples
     // the clock once; the recursive / EXISTS re-entries see it active and keep the
     // outer instant (a Cell read). [FABLE-5] sq-98w7z.1
-    #[cfg(not(target_arch = "wasm32"))]
+    // [GPT-6] A proof guest has no wall clock; its wrapper rejects NOW().
+    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "zkvm")))]
     let _query_now = query_now::scope();
     match p {
         GraphPattern::Project { inner, variables } => {
@@ -14369,16 +14370,16 @@ fn eval_function_inner<E: Fn(usize) -> Result<Value, String>>(
         // NOW(): the execution's pinned instant as xsd:dateTime. RAND(): xsd:double in
         // [0, 1) from a per-thread splitmix64 seeded once from the OS RNG (see
         // `rand_unit`) — both native-only for the same reason as UUID()/STRUUID().
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(all(not(target_arch = "wasm32"), not(target_os = "zkvm")))]
         F::Now => Value::Term(Term::Literal(Literal::new_typed_literal(now_lexical(), xsd::DATE_TIME))),
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(all(not(target_arch = "wasm32"), not(target_os = "zkvm")))]
         F::Rand => Value::Num(Num::Double(rand_unit::next())),
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(all(not(target_arch = "wasm32"), not(target_os = "zkvm")))]
         F::Uuid => Value::Term(Term::NamedNode(oxrdf::NamedNode::new_unchecked(format!(
             "urn:uuid:{}",
             uuid::Uuid::new_v4()
         )))),
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(all(not(target_arch = "wasm32"), not(target_os = "zkvm")))]
         F::StrUuid => simple(uuid::Uuid::new_v4().to_string()),
         // xsd:dateTime accessors — parse the lexical form and return the numeric component.
         F::Year => datetime_field(&ev(0)?, 0),
@@ -15061,7 +15062,7 @@ thread_local! {
 /// scope pinned in `eval_modified`, so every `NOW()` in one execution — across rows,
 /// rayon workers and `EXISTS` re-entry — formats the SAME value (SPARQL 1.1
 /// §17.4.5.1); an un-scoped call falls back to a fresh sample. [FABLE-5] sq-98w7z.1
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "zkvm")))]
 fn now_lexical() -> String {
     let secs = query_now::epoch_secs();
     let days = secs.div_euclid(86400);
@@ -15091,7 +15092,7 @@ fn now_lexical() -> String {
 /// per thread per process), rayon workers get independent streams, and `EXISTS`
 /// re-entry merely draws the next value — there is no layout- or query-dependent
 /// state to leak. Deliberately NOT deterministic or query-constant.
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "zkvm")))]
 mod rand_unit {
     use std::cell::Cell;
 

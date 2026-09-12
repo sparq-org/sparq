@@ -1,0 +1,132 @@
+# Proved Sparq evaluator
+
+<!-- [GPT-6] zkp-10.1; this is a bounded research implementation, not an audit. -->
+
+This detached Cargo workspace proves execution of the actual Sparq evaluator on
+one complete, bounded default RDF graph. It is an experimental complement to the
+specialized Noir successful-result path. It is **not externally audited** and
+does not establish a general SPARQL conformance, privacy, or soundness claim.
+
+## Statement and authority
+
+`ProofContract::SelectedSupport` describes the existing Noir answer-support API.
+The evaluator rejects it: this guest implements `ExactDataset` only. Exactness
+describes computation on the supplied dataset, independently of who chose it.
+
+`DatasetAuthority::VerifierAgreed` requires the verifier's independently accepted
+dataset commitment. The proof checks the complete input against that expectation.
+Accepting a holder-invented commitment without an independent scope agreement does
+not establish source authenticity, wallet completeness, or absence from a wider
+dataset. A relying party must establish that boundary outside this library.
+
+`HolderDeclared` is explicit and returns `Provenance::HolderDeclaredOnly`. It proves
+the computation on the holder's declared input; it provides no issuer signature,
+credential validity/status assurance, or claim that the input contains everything
+the holder possesses. Applications must preserve this provenance distinction.
+Credential and native proof adapters are tracked separately under zkp-10/zkp-12.
+
+The dataset anchor is SHA-256 over a versioned format/domain tag, policy capacities,
+a private 32-byte salt, a length prefix and the exact UTF-8 N-Triples source bytes.
+This is an exact-document commitment, not RDF isomorphism canonicalization.
+Equivalent serializations may have different anchors. Use cryptographic entropy
+for the salt; an all-zero salt is rejected, which alone does not establish entropy.
+The public anchor remains linkable when reused. Dataset length, source bytes and
+salt are absent from the journal; policy capacities and results are public.
+
+## Execution and result binding
+
+The guest checks the anchor, parses every source triple, builds the dictionary
+and indexes, parses the query with the pinned vendored parser, evaluates Sparq,
+and commits its own result. There is no caller-provided result or prebuilt index
+in the witness. Limits cover source bytes, source triple count before deduplication,
+query bytes, admitted AST nodes, and materialized rows/estimated bytes. Exhaustion
+rejects evaluation; it never becomes an empty or truncated successful result.
+
+The journal binds a domain-separated digest of the exact query bytes, request
+version, dialect, contract, authority, policy and challenge. The verifier requires
+an independent expected request and the method ID generated from its own compiled
+guest. It never accepts a method ID from the presentation. Only after cryptographic
+verification and request binding does it atomically consume the application nonce.
+Provide persistent storage through `Nonces`; an in-memory test implementation is
+not replay protection across restarts.
+
+`Policy` contains only resource capacities, checked by the guest. Binding those
+fields does not enforce credential validity, revocation or other status rules.
+
+SELECT results retain projection order and distinguish unbound cells from empty
+literals. Unordered results use sorted encoded rows with duplicates retained.
+An outer ORDER BY preserves the guest's resulting sequence and tie policy.
+ASK publishes a boolean, including false after evaluation of the scoped dataset.
+The first profile rejects blank-node input/query terms and output values, so it
+does not claim blank-node result canonicalization or graph-producing support.
+
+## Admitted profile and evidence
+
+The surface is the versioned `SparqSparql11SnapshotV1` profile, with its implementation
+pinned by the guest image. It is not a claim of complete SPARQL 1.1 or conformance
+to the evolving SPARQL 1.2 draft. `model::admit` visits nested patterns and
+expressions, including subqueries, aggregate operands and EXISTS bodies.
+
+| Family | Admission | Evidence definition |
+| --- | --- | --- |
+| BGP, join, projection, bag SELECT | admitted | host semantics; genuine sequence and bag proof fixtures |
+| DISTINCT | admitted | host semantics |
+| OPTIONAL, MINUS, COUNT, subquery, ORDER/LIMIT | admitted | combined genuine proof fixture |
+| VALUES, UNION, unbound | admitted | host semantics; holder-declared bag proof fixture |
+| NOT EXISTS, true ASK, arithmetic/error | admitted | host semantics |
+| false ASK, numeric FILTER | admitted | host semantics; genuine false-ASK proof fixture |
+| Paths, other pure functions, other built-in aggregates | admitted by AST | shared evaluator; no complete guest conformance claim |
+| GRAPH, FROM/FROM NAMED, SERVICE, LATERAL | rejected | whole-AST negatives |
+| NOW, RAND, UUID/STRUUID, BNODE, external functions | rejected | nested host and actual guest rejection fixtures |
+| Blank nodes, triple terms, directional literals | rejected | input/query/output checks |
+| CONSTRUCT, DESCRIBE, UPDATE | rejected | admission negatives |
+
+Test definitions are distinct from execution evidence: `model/tests/semantics.rs`
+runs native semantic tests; `host/tests/real_proof.rs` generates genuine receipts
+and exercises the actual guest. The dedicated CI workflow runs both. No ignored
+test or missing-tool shortcut counts as a successful proof run. Broader guest
+conformance coverage and remaining features belong to zkp-10.
+
+## Toolchain and use
+
+Pins: RISC Zero SDK/build/server 3.0.6, guest Rust 1.97.0, host repository Rust
+1.97.1. Both Cargo lockfiles are checked in. The build uses the local toolchain
+selected by `RISC0_HOME` and requires an explicitly supplied local `r0vm` path.
+It never delegates private inputs to a hosted prover.
+The build step removes host compiler wrappers in a child process before guest
+cross compilation, so host Clippy cannot substitute its host sysroot for guest std.
+The actual guest build still runs during the lint gate.
+
+```sh
+cargo test --locked --manifest-path zk/sparql-evaluator/Cargo.toml \
+  -p sparq-proved-evaluator-model --features evaluate
+RISC0_BUILD_LOCKED=1 cargo test --locked \
+  --manifest-path zk/sparql-evaluator/Cargo.toml \
+  -p sparq-proved-evaluator -- --nocapture --test-threads=1
+```
+
+For the proof command, set `RISC0_HOME` to the installed guest toolchain directory
+and `RISC0_SERVER_PATH` to the real 3.0.6 server. The workflow demonstrates pinned,
+checksum-verified installation. Library entry points are `prove(witness, r0vm)`
+and `verify(presentation, expected_request, nonce_store)`. The SDK's mock mode is
+disabled, fake receipts are explicitly rejected, and verifier context forbids it.
+
+This backend distributes and accepts only succinct receipts. Composite receipts
+expose intermediate segment/continuation information and are rejected, as are
+mock receipts. RISC Zero's security model describes recursion as hiding raw
+execution length, while noting an outstanding mathematical zero-knowledge argument.
+Standard succinct receipts still expose the outer recursion `control_id`, which
+can distinguish lift/join/resolve profiles and reveal some execution shape. This
+adapter does not normalize that metadata or claim complete execution-length hiding.
+It therefore makes no settled privacy claim. Include recursion's entire
+cost in benchmarks. The source witness is visible to the local caller and prover
+process. See the [upstream security model](https://dev.risczero.com/api/security-model#zero-knowledge-proving).
+
+The workspace is detached: normal engine/native/WASM builds acquire no proof SDK
+dependencies. Engine portability changes only affect `target_os = "zkvm"`, where
+ambient-clock and UUID/RAND support are unavailable. Ordinary native and WASM
+behavior is unchanged.
+
+The vendored parser's zkvm-only synthetic-variable allocator uses a monotonic
+namespace outside SPARQL user-variable syntax instead of requesting randomness
+for hidden aggregate variables. It does not provide query-visible randomness.

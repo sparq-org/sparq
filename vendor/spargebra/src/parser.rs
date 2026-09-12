@@ -9,6 +9,7 @@ use oxiri::{Iri, IriParseError};
 use oxrdf::vocab::{rdf, xsd};
 use peg::parser;
 use peg::str::LineCol;
+#[cfg(not(target_os = "zkvm"))]
 use rand::random;
 #[cfg(feature = "standard-unicode-escaping")]
 use std::borrow::Cow;
@@ -1197,8 +1198,22 @@ fn read_hex_char<const SIZE: usize>(input: &str) -> Result<(char, &str), &'stati
     }
 }
 
+#[cfg(not(target_os = "zkvm"))]
 fn variable() -> Variable {
     Variable::new_unchecked(format!("{:x}", random::<u128>()))
+}
+
+// [GPT-6] zkvm guests have no ambient entropy. Internal aggregate/projection
+// variables use a monotonic namespace forbidden by SPARQL VARNAME syntax, so
+// neither user variables nor different synthetic variables can collide. This
+// function does not generate RDF blank nodes or query-visible random values.
+#[cfg(target_os = "zkvm")]
+fn variable() -> Variable {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    let id = NEXT.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_add(1))
+        .expect("synthetic variable namespace exhausted");
+    Variable::new_unchecked(format!("#sparq-zkvm-var#{id}"))
 }
 
 parser! {

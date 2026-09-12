@@ -5,6 +5,13 @@ description: Run SPARQL 1.1/1.2 queries (SELECT/ASK/CONSTRUCT/DESCRIBE) and UPDA
 
 # sparq SPARQL query surface
 
+<!-- [GPT-6] zkp-10.1: the separate proof guest is not the ordinary query API. -->
+For experimental exact-dataset proofs, use the detached
+[proved evaluator](../../zk/sparql-evaluator/README.md). Its `zkvm` target disables
+ambient clock/entropy functions and its wrapper applies a narrower admission
+profile. It does not change ordinary native or WASM query semantics and is not
+externally audited.
+
 `sparq-engine` is the SPARQL query/update engine over `sparq-core::Graph` (a dictionary-encoded,
 permutation-indexed in-memory RDF store). You load RDF into a `Graph`, then call free functions in
 `sparq_engine` to run SELECT/ASK/CONSTRUCT/DESCRIBE and SPARQL Update. Results come back either as a

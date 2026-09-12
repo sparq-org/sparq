@@ -99,6 +99,12 @@ cryptographic verification; this surface is not externally audited.
 
 ## Common recipes
 
+<!-- [GPT-6] zkp-10.1: separate exact-dataset contract, not a selected-result upgrade. -->
+The opt-in detached [exact evaluator](references/exact-evaluator.md) proves bounded
+default-graph evaluation with explicit verifier-agreed or holder-declared scope.
+It is experimental and not externally audited; its first adapter carries no
+issuer-signature or credential-status claim.
+
 ### 1. Commit a credential graph and attest it as an issuer
 ```rust
 use sparq_zk::commit::commit_triples;

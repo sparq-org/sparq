@@ -1,0 +1,18 @@
+[package]
+name = "sparq-exact-guest"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+risc0-zkvm = { version = "=3.0.6", default-features = false, features = ["std"] }
+sparq-proved-evaluator-model = { path = "../../model", features = ["evaluate"] }
+
+[patch.crates-io]
+spargebra = { path = "../../../../vendor/spargebra" }
+
+[profile.release]
+debug = 0
+lto = "thin"
