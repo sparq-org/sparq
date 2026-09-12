@@ -6,16 +6,14 @@
   <a href="../../LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
 </p>
 
-The [SPARQL 1.1](https://www.w3.org/TR/sparql11-query/) / [1.2](https://www.w3.org/TR/sparql12-query/)
-query engine over [`sparq-core`](../sparq-core) `Graph`s.
+The [SPARQL 1.1](https://www.w3.org/TR/sparql11-query/) / [1.2](https://www.w3.org/TR/sparql12-query/) engine over [`sparq-core`](../sparq-core) `Graph`s.
 
 Query in-memory or out-of-core graphs, inspect plans with `EXPLAIN` / `EXPLAIN ANALYZE`,
 and register custom functions. The design docs below describe execution.
 
 <!-- [GPT-6] The detached proof guest does not add an engine dependency. -->
 The opt-in [proved evaluator](../../zk/sparql-evaluator/README.md) restricts `target_os = "zkvm"`,
-rejecting ambient NOW/RAND/UUID. Native/WASM behavior is unchanged. The experiment is
-not externally audited.
+rejecting ambient NOW/RAND/UUID. Native/WASM behavior is unchanged; the experiment is not externally audited.
 
 ## 🚀 Quickstart
 
@@ -48,6 +46,8 @@ let json = sparq_engine::query_json(&g, "SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?
 - **Named graphs** — query across an active dataset with `GRAPH` and `FROM` / `FROM NAMED`.
   [GPT-6] Nested `GRAPH` borrows the same catalog, preserving empty graphs,
   binding multiplicity and `FROM NAMED` restrictions at every nesting level.
+- **Deterministic blank nodes** *(opt-in `deterministic-blank-nodes`)* — entropy-free
+  parser/template labels, fresh per solution and disjoint from active input; see the SKILL.
 - **RDF 1.2 triple terms** — match [triple terms](https://www.w3.org/TR/rdf12-concepts/), including variables inside them.
 - **Materialized full paths** *(opt-in `paths` feature, OFF by default)* — `enumerate_paths` returns intermediate nodes and edges for tied shortest paths, bounded simple paths, or cycles back to their start. Each endpoint is unrestricted, one fixed node, or a graph pattern selecting a candidate set.
 - **Query plan introspection** — `EXPLAIN` and `EXPLAIN ANALYZE`.

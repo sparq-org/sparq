@@ -1216,6 +1216,22 @@ fn property_path_middle() -> BlankNode {
     BlankNode::new_unchecked(format!("#sparq-path#{id}"))
 }
 
+// [GPT-6] Anonymous query/list/template nodes have no externally meaningful
+// label. The opt-in guest namespace cannot collide with a source blank label.
+#[cfg(not(feature = "sparq-deterministic-blank-nodes"))]
+fn anonymous_blank_node() -> BlankNode {
+    BlankNode::default()
+}
+
+#[cfg(feature = "sparq-deterministic-blank-nodes")]
+fn anonymous_blank_node() -> BlankNode {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    let id = NEXT.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_add(1))
+        .expect("synthetic anonymous-node namespace exhausted");
+    BlankNode::new_unchecked(format!("#sparq-anon#{id}"))
+}
+
 #[cfg(not(target_os = "zkvm"))]
 fn variable() -> Variable {
     Variable::new_unchecked(format!("{:x}", random::<u128>()))
@@ -1839,7 +1855,7 @@ parser! {
             l:BooleanLiteral() { Some(l.into()) } /
             i("UNDEF") { None }
 
-        rule Reifier() -> TermPattern = "~" _ v:VarOrReifierId()? { v.unwrap_or_else(|| BlankNode::default().into()) }
+        rule Reifier() -> TermPattern = "~" _ v:VarOrReifierId()? { v.unwrap_or_else(|| anonymous_blank_node().into()) }
 
         rule VarOrReifierId() -> TermPattern =
             v:Var() { v.into() } /
@@ -2118,7 +2134,7 @@ parser! {
         rule BlankNodePropertyList() -> FocusedTriplePattern<TermPattern> = "[" RecursionGuard() _ po:PropertyListNotEmpty() _ "]" {?
             state.leave_recursion();
             let mut patterns = po.patterns;
-            let mut bnode = TermPattern::from(BlankNode::default());
+            let mut bnode = TermPattern::from(anonymous_blank_node());
             for (p, os) in po.focus {
                 for o in os {
                     add_to_triple_patterns(bnode.clone(), p.clone(), o, &mut patterns)?;
@@ -2137,7 +2153,7 @@ parser! {
         rule BlankNodePropertyListPath() -> FocusedTripleOrPathPattern<TermPattern> = "[" RecursionGuard() _ po:PropertyListPathNotEmpty() _ "]" {?
             state.leave_recursion();
             let mut patterns = po.patterns;
-            let mut bnode = TermPattern::from(BlankNode::default());
+            let mut bnode = TermPattern::from(anonymous_blank_node());
             for (p, os) in po.focus {
                 for o in os {
                     add_to_triple_or_path_patterns(bnode.clone(), p.clone(), o, &mut patterns)?;
@@ -2157,7 +2173,7 @@ parser! {
             let mut patterns: Vec<TriplePattern> = Vec::new();
             let mut current_list_node = TermPattern::from(rdf::NIL.into_owned());
             for objWithPatterns in o.into_iter().rev() {
-                let new_blank_node = TermPattern::from(BlankNode::default());
+                let new_blank_node = TermPattern::from(anonymous_blank_node());
                 patterns.push(TriplePattern::new(new_blank_node.clone(), rdf::FIRST.into_owned(), objWithPatterns.focus.clone()));
                 patterns.push(TriplePattern::new(new_blank_node.clone(), rdf::REST.into_owned(), current_list_node));
                 current_list_node = new_blank_node;
@@ -2177,7 +2193,7 @@ parser! {
             let mut patterns: Vec<TripleOrPathPattern> = Vec::new();
             let mut current_list_node = TermPattern::from(rdf::NIL.into_owned());
             for objWithPatterns in o.into_iter().rev() {
-                let new_blank_node = TermPattern::from(BlankNode::default());
+                let new_blank_node = TermPattern::from(anonymous_blank_node());
                 patterns.push(TriplePattern::new(new_blank_node.clone(), rdf::FIRST.into_owned(), objWithPatterns.focus.clone()).into());
                 patterns.push(TriplePattern::new(new_blank_node.clone(), rdf::REST.into_owned(), current_list_node).into());
                 current_list_node = new_blank_node;
@@ -2225,7 +2241,7 @@ parser! {
                 Ok(output)
             } /
             a:AnnotationBlockPath() _ {?
-                let mut output: FocusedTripleOrPathPattern<TermPattern> = FocusedTripleOrPathPattern::new(BlankNode::default());
+                let mut output: FocusedTripleOrPathPattern<TermPattern> = FocusedTripleOrPathPattern::new(anonymous_blank_node());
                 for (p, os) in a.focus {
                     for o in os {
                         add_to_triple_or_path_patterns(output.focus.clone(), p.clone(), o, &mut output.patterns)?;
@@ -2259,7 +2275,7 @@ parser! {
                 Ok(output)
             } /
             a:AnnotationBlock() _ {?
-                let mut output: FocusedTriplePattern<TermPattern> = FocusedTriplePattern::new(BlankNode::default());
+                let mut output: FocusedTriplePattern<TermPattern> = FocusedTriplePattern::new(anonymous_blank_node());
                 for (p, os) in a.focus {
                     for o in os {
                         add_to_triple_patterns(output.focus.clone(), p.clone(), o, &mut output.patterns)?;
@@ -2287,7 +2303,7 @@ parser! {
             state.leave_recursion();
             #[cfg(feature = "sparql-12")]
             {
-                let r = r.unwrap_or_else(|| BlankNode::default().into());
+                let r = r.unwrap_or_else(|| anonymous_blank_node().into());
                 let mut output = FocusedTriplePattern::new(r.clone());
                 output.patterns.push(TriplePattern {
                         subject: r,
@@ -2743,7 +2759,7 @@ parser! {
                 state.currently_used_bnodes.insert(node.clone());
                 Ok(node)
             }
-        } / ANON() { BlankNode::default() }
+        } / ANON() { anonymous_blank_node() }
 
         rule IRIREF() -> Iri<String> = "<" i:$((!['>'] [_])*) ">" {?
             state.parse_iri(unescape_iriref(i)?).map_err(|_| "IRI parsing failed")

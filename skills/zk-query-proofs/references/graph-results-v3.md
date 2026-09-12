@@ -37,8 +37,12 @@ Size limits separately bound encoding, sorting, issuer maps and per-candidate wo
 
 The native `bounded_canonicalization` tests target standard-output parity,
 relabeling, each capacity, actual HNDQ exhaustion and repeated-neighbour counting.
-They are not guest or proof evidence. Deterministic parser/template allocation,
-graph merge identity, complete V3 APIs and actual guest validation remain pending.
+They are not guest or proof evidence. The default-off engine feature
+`deterministic-blank-nodes` provides anonymous parser labels and result-local
+template allocation, with native freshness, collision and output-budget tests.
+Source namespaces are checked across the active dataset. Independent result graphs
+still require standardization apart before combination. Graph merge identity,
+complete V3 APIs and actual guest validation remain outside this prerequisite.
 
 Sources: [SPARQL 1.1 CONSTRUCT](https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#construct),
 [DESCRIBE](https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#describe),

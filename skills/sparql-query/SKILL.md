@@ -183,6 +183,22 @@ triple/predicate/bucket/byte counts for operational checks.
 
 ## Common recipes
 
+**Deterministic blank nodes** — opt in with the engine's
+`deterministic-blank-nodes` feature for environments without ambient entropy.
+Anonymous query, list and template labels use a reserved parser namespace.
+CONSTRUCT selects a namespace disjoint from every blank node in the active
+input dataset, including unselected named graphs, and creates distinct template
+nodes per solution occurrence. Repeated template labels within one occurrence
+still share a node; duplicate solutions keep their own fresh nodes. The option
+also applies the query row budget to constructed output triples, rejecting an
+excessive result without returning a partial graph. [GPT-6]
+
+The output labels are deterministic and local to a result. Independently created
+results must be standardized apart before combining their blank-node namespaces;
+these labels are not persistent identifiers across query executions. This option
+does not canonicalize the result or enable a new SPARQL proof relation by itself.
+Native controls: `crates/sparq-engine/tests/deterministic_blank_nodes.rs`.
+
 **Aggregates, GROUP BY / HAVING, subqueries** — standard SPARQL 1.1; no special API:
 
 ```rust
