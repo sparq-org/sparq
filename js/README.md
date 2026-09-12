@@ -98,9 +98,14 @@ tarball ships those prebuilt). Add to the consumer's `package.json`:
 ```
 
 A git-pinned install needs the Rust → wasm toolchain on the build machine
-(`rustup target add wasm32-unknown-unknown` + `cargo install wasm-pack`); without
-it `prepare` fails loudly with the install command rather than silently shipping
-an engine-less binding. After install, verify the engine actually landed:
+(`rustup target add wasm32-unknown-unknown` + `cargo install wasm-pack --locked
+--version =0.15.0`); without it `prepare` fails loudly with the install command
+rather than silently shipping an engine-less binding. Name that version rather
+than letting it float: it is the pin CI's gating `js` lane installs, and each
+wasm-pack release bundles its own wasm-bindgen CLI, so an unversioned local
+install builds this bundle with a toolchain no lane exercises. (`=0.15.0` is
+cargo's exact requirement — a bare `0.15.0` means the `^0.15.0` range.) After
+install, verify the engine actually landed:
 
 ```sh
 node -e "import('@sparq-org/sparq').then(m=>m.SparqStore.fromString('<a> <b> <c> .','ntriples')).then(s=>{s.free?.();console.log('ok')})"
