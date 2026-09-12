@@ -172,7 +172,9 @@ impl Dec {
                 match mode {
                     RoundMode::Floor => q,
                     RoundMode::Ceil => q + i128::from(r > 0),
-                    RoundMode::HalfUp => q + i128::from(r * 2 >= p),
+                    // [GPT-6] Compare against the half threshold without doubling
+                    // a remainder near 10^38, which can overflow signed i128.
+                    RoundMode::HalfUp => q + i128::from(r >= p / 2 + p % 2),
                 }
             }
             None => match mode {
@@ -943,6 +945,19 @@ pub fn fmt_xsd_double(v: f64) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn round_large_scale_remainder_does_not_overflow() {
+        for (lexical, expected) in [
+            ("0.99999999999999999999999999999999999999", 1),
+            ("-0.00000000000000000000000000000000000001", 0),
+            ("0.49999999999999999999999999999999999999", 0),
+            ("-0.50000000000000000000000000000000000001", -1),
+        ] {
+            let d = super::Dec::parse_lexical(lexical).unwrap();
+            assert_eq!(d.round_to_int(super::RoundMode::HalfUp).mant, expected);
+        }
+    }
+
     use super::*;
     use oxrdf::vocab::xsd;
     use oxrdf::Literal;

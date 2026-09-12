@@ -48,9 +48,9 @@ nested engine calls use their own budget and restore the parent afterward.
 
 SECONDS returns a validated exact decimal lexical even when its fraction exceeds
 the finite numeric mantissa. This extends accessor output, not decimal arithmetic.
-The separate numeric-capacity follow-up must guard long-decimal consumers before
-this combined profile is frozen for a new guest campaign; existing historical
-receipts do not establish those updated semantics.
+The [numeric-capacity guard](numeric-capacity.md) rejects consumers outside the
+finite numeric lane as whole-query failures. Direct accessor output remains
+exact. Existing historical receipts do not establish those updated semantics.
 
 ## Evidence boundaries
 

@@ -77,7 +77,7 @@ All entry points take `&Graph` + `&str` and return `Result<_, String>` (parse + 
   unbound), `sol.iter()` over the bound `(VariableRef, &Term)` pairs (unbound cells skipped),
   `&sol[var]` (panicking `Index`), plus `variables()` / `values()` / `len()` / `is_empty()`. Use it
   for ergonomic Rust Oxigraph interop / migration; the underlying `{vars, rows}` layout is unchanged.
-- `pub struct QueryBudget { pub deadline: Option<Instant> /*native only*/, pub max_rows: Option<usize>, pub max_bytes: Option<usize>, pub temporal_year_range: Option<(i64, i64)>, pub cancel: Option<Arc<AtomicBool>> }`
+- `pub struct QueryBudget { pub deadline: Option<Instant> /*native only*/, pub max_rows: Option<usize>, pub max_bytes: Option<usize>, pub temporal_year_range: Option<(i64, i64)>, pub strict_numeric_capacity: bool, pub cancel: Option<Arc<AtomicBool>> }`
   — `QueryBudget::unlimited()` is the no-op default. `max_rows` caps the working-set ROW count;
   `max_bytes` (`sq-s5is`) is the byte-accounted companion — it prices row WIDTH
   (`rows × vars × size_of::<Id>()`) plus the bytes of query-computed (BIND/aggregate/CONSTRUCT)
@@ -103,6 +103,14 @@ seconds/flags and borrow fraction slices; ORDER BY retains these keys without
 per-comparison reparsing. Forks and dictionary appends rebuild the in-memory memo. SECONDS preserves all validated
 fractional digits as an xsd:decimal result; this does not expand finite decimal
 arithmetic. See [exact temporal scope](../zk-query-proofs/references/exact-temporals.md).
+
+[GPT-6] `strict_numeric_capacity: true` rejects unsupported numeric consumers as
+a sticky whole-query capacity failure; it is `false` by default. It retains the
+`i64` integer and `i128` decimal lanes, including the existing bounded decimal
+division precision, while refusing overflow fallback to floating point.
+Direct RDF output, valid unary plus, `isNumeric` and `sameTerm` preserve large
+lexicals without asserting arithmetic support. Constrained expression work
+stays on the calling thread. See the [numeric capacity contract](../zk-query-proofs/references/numeric-capacity.md).
 
 SELECT/ASK entry points (each has `_prepared`, `_with_budget`, and `_view` variants):
 

@@ -56,6 +56,9 @@ use std::cmp::Ordering;
 #[path = "eqjoin.rs"]
 mod eqjoin;
 
+#[path = "numeric_capacity.rs"]
+mod numeric_capacity;
+
 // ---- Cooperative query budget (T15 server hardening) -------------------------
 //
 // A thread-local, cooperatively-checked budget installed by the
@@ -125,6 +128,7 @@ pub(crate) mod budget {
         /// estimate on every check.
         extra_bytes: usize,
         temporal_year_range: Option<(i64, i64)>,
+        strict_numeric_capacity: bool,
         cancel: Option<CancelPtr>,
     }
 
@@ -137,6 +141,7 @@ pub(crate) mod budget {
         byte_width: BYTES_PER_ID,
         extra_bytes: 0,
         temporal_year_range: None,
+        strict_numeric_capacity: false,
         cancel: None,
     };
 
@@ -226,9 +231,10 @@ pub(crate) mod budget {
             || b.max_rows.is_some()
             || b.max_bytes.is_some()
             || b.temporal_year_range.is_some()
+            || b.strict_numeric_capacity
             || cancel.is_some();
         #[cfg(target_arch = "wasm32")]
-        let on = b.max_rows.is_some() || b.max_bytes.is_some() || b.temporal_year_range.is_some() || cancel.is_some();
+        let on = b.max_rows.is_some() || b.max_bytes.is_some() || b.temporal_year_range.is_some() || b.strict_numeric_capacity || cancel.is_some();
         let previous = ACTIVE.with(|a| {
             a.replace(Limits {
                 on,
@@ -239,6 +245,7 @@ pub(crate) mod budget {
                 byte_width: BYTES_PER_ID,
                 extra_bytes: 0,
                 temporal_year_range: b.temporal_year_range,
+                strict_numeric_capacity: b.strict_numeric_capacity,
                 cancel,
             })
         });
@@ -505,7 +512,12 @@ pub(crate) mod budget {
 
     #[cfg(feature = "parallel")]
     pub(in crate::exec) fn evaluation_capacity_active() -> bool {
-        ACTIVE.with(|a| a.get().temporal_year_range.is_some())
+        ACTIVE.with(|a| a.get().temporal_year_range.is_some() || a.get().strict_numeric_capacity)
+    }
+
+    #[inline]
+    pub(in crate::exec) fn strict_numeric() -> bool {
+        ACTIVE.with(|a| a.get().strict_numeric_capacity)
     }
 
     #[inline]
@@ -6547,6 +6559,7 @@ fn inline_pass_values(cmp: ScanCmp) -> Option<(u32, u32)> {
 /// fall back to the exact general evaluator instead. Temporal pushdown is unaffected, and a
 /// graph with no f64-inexact decimal keeps the numeric fast path.
 fn extract_sargable<'a>(graph: &Graph, e: &'a Expression) -> Option<(Variable, ScanCmp<'a>)> {
+    if budget::strict_numeric() { return None; }
     fn lit_num(e: &Expression) -> Option<f64> {
         match e {
             Expression::Literal(l) if is_numeric_dt(l) => {
@@ -11297,7 +11310,7 @@ fn eval_aggregate(graph: &Graph, local: &LocalVocab, b: &Bindings, members: &[us
                         return Ok(Value::Num(Num::Int(0))); // AVG({}) = 0 per SPARQL
                     }
                     Ok(sum_values(&vals, errored)
-                        .and_then(|s| s.binop(Num::Int(vals.len() as i64), ArithOp::Div))
+                        .and_then(|s| numeric_capacity::binop(s, Num::Int(vals.len() as i64), ArithOp::Div))
                         .map(Value::Num)
                         .unwrap_or(Value::Error))
                 }
@@ -11376,7 +11389,7 @@ fn sum_values(vals: &[Value], errored: bool) -> Option<Num> {
     }
     let mut acc = Num::Int(0);
     for v in vals {
-        acc = acc.binop(as_numeric(v)?, ArithOp::Add)?;
+        acc = numeric_capacity::binop(acc, as_numeric(v)?, ArithOp::Add)?;
     }
     Some(acc)
 }
@@ -11475,6 +11488,9 @@ fn minmax_temporal(
 
 /// Value comparison of two typed numerics: exact when both are int/decimal, f64 otherwise.
 fn num_compare(a: Num, c: Num) -> Option<Ordering> {
+    if budget::strict_numeric() {
+        return numeric_capacity::comparable(a, c).then(|| a.cmp_relational(c)).flatten();
+    }
     if let (Some(x), Some(y)) = (a.to_dec(), c.to_dec()) {
         if let Some(o) = x.cmp(y) {
             return Some(o);
@@ -11919,6 +11935,9 @@ fn order_bindings(
     // unpacked here so the column lookup and the cache probes happen exactly once per row
     // (column index was pre-resolved above). [OPUS-4.8] sq-7d3dj.4 / [SONNET-4.6] sq-7d3dj.30.2 (Iri).
     let cell_of = |row: &Row, e: &CompiledExpr| -> Result<SortCell, String> {
+        if budget::strict_numeric() {
+            return Ok(sort_cell_val(eval_compiled(graph, local, b, row, e)?));
+        }
         if let CompiledExpr::Var(Some(c)) = e {
             let id = row[*c];
             if id != NO_ID && !is_local(id) {
@@ -12904,7 +12923,7 @@ fn columnar_aggregate(
                                 let sum_i64 = crate::reduce::narrow_sum_to_i64(sum_i128)?;
                                 // integer / integer → Decimal (SPARQL §17.4.4.3).
                                 // Mirrors: sum_values → binop(Div) → value_to_id.
-                                let result = Num::Int(sum_i64).binop(Num::Int(count_i64), ArithOp::Div)?;
+                                let result = numeric_capacity::binop(Num::Int(sum_i64), Num::Int(count_i64), ArithOp::Div)?;
                                 value_to_id(graph, local, &Value::Num(result))
                             }
                         }
@@ -13398,7 +13417,7 @@ fn eval_expr(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], e: &Ex
             // Typed negation: the result keeps the argument's (promoted) numeric
             // datatype; a non-numeric operand is a type error.
             let v = eval_expr(graph, local, b, row, a)?;
-            Ok(as_numeric(&v).map(|n| Value::Num(n.neg())).unwrap_or(Value::Error))
+            Ok(as_numeric(&v).and_then(|n| numeric_capacity::unary(n, Num::neg)).map(Value::Num).unwrap_or(Value::Error))
         }
         Bound(v) => Ok(Value::Bool(local.correlation.contains_key(v)
             || b.col(v).map(|c| row[c] != NO_ID).unwrap_or(false))),
@@ -13910,6 +13929,13 @@ fn eval_dec(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], e: &Exp
 /// turns into "excluded". (Distinct from the lenient total order `compare_values`
 /// used by ORDER BY / MIN / MAX, which must order across every type.)
 fn cmp_expr(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], a: &Expression, c: &Expression, f: impl Fn(Ordering) -> bool) -> Result<Value, String> {
+    if budget::strict_numeric() {
+        let (x, y) = (eval_expr(graph, local, b, row, a)?, eval_expr(graph, local, b, row, c)?);
+        if let (Some(a), Some(b)) = (as_numeric(&x), as_numeric(&y)) {
+            if a.is_nan() || b.is_nan() { return Ok(Value::Bool(false)); }
+        }
+        return Ok(value_compare_strict(&x, &y).map(|o| Value::Bool(f(o))).unwrap_or(Value::Error));
+    }
     // EXACT path: integer/decimal arithmetic (`+ - *`) must not round through f64, which
     // can flip an ordering (`0.1 + 0.2` < `0.3` in f64). Only attempted when arithmetic is
     // present (the common, arithmetic-free comparison keeps the f64 fast path below).
@@ -13954,6 +13980,10 @@ fn cmp_expr(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], a: &Exp
 
 /// SPARQL `=` (and, negated, `!=`). See [`values_equal`].
 fn equal_expr(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], a: &Expression, c: &Expression) -> Result<Value, String> {
+    if budget::strict_numeric() {
+        let (x, y) = (eval_expr(graph, local, b, row, a)?, eval_expr(graph, local, b, row, c)?);
+        return Ok(values_equal(&x, &y).map(Value::Bool).unwrap_or(Value::Error));
+    }
     // EXACT integer/decimal arithmetic equality (see `cmp_expr`) — `0.1 + 0.2 = 0.3`.
     if expr_has_arith(a) || expr_has_arith(c) {
         if let (Some(da), Some(db)) = (eval_dec(graph, local, b, row, a), eval_dec(graph, local, b, row, c)) {
@@ -14026,7 +14056,7 @@ fn lit_kind(v: &Value) -> LitKind<'_> {
             }
             let dt = l.datatype();
             if is_numeric_dt(l) {
-                LitKind::Num(Num::of_literal(l))
+                LitKind::Num(numeric_capacity::operand(l))
             } else if dt == xsd::STRING {
                 LitKind::Str(l.value())
             } else if dt == xsd::BOOLEAN {
@@ -14056,6 +14086,13 @@ fn lit_kind(v: &Value) -> LitKind<'_> {
 /// ill-formed lexicals, cross-family pairs — is a TYPE ERROR (`"a"^^ex:dt != "b"^^ex:other`
 /// filters the row out rather than evaluating to true).
 fn values_equal(x: &Value, y: &Value) -> Option<bool> {
+    if budget::strict_numeric() {
+        // Equality of identical terms may otherwise bypass every numeric consumer.
+        if let (Some(a), Some(b)) = (as_numeric(x), as_numeric(y)) {
+            // NaN is not numerically equal to itself, even with identical RDF terms.
+            return Some(num_compare(a, b) == Some(Ordering::Equal));
+        }
+    }
     if matches!(x, Value::Unbound | Value::Error) || matches!(y, Value::Unbound | Value::Error) {
         return None;
     }
@@ -14174,7 +14211,7 @@ fn or3(x: Option<bool>, y: Option<bool>) -> Value {
 fn arith(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], a: &Expression, c: &Expression, op: ArithOp) -> Result<Value, String> {
     let (x, y) = (eval_expr(graph, local, b, row, a)?, eval_expr(graph, local, b, row, c)?);
     Ok(match (as_numeric(&x), as_numeric(&y)) {
-        (Some(p), Some(q)) => p.binop(q, op).map(Value::Num).unwrap_or(Value::Error),
+        (Some(p), Some(q)) => numeric_capacity::binop(p, q, op).map(Value::Num).unwrap_or(Value::Error),
         _ => Value::Error,
     })
 }
@@ -14185,7 +14222,7 @@ fn arith(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], a: &Expres
 fn as_numeric(v: &Value) -> Option<Num> {
     match v {
         Value::Num(n) => Some(*n),
-        Value::Term(Term::Literal(l)) => Num::of_literal(l),
+        Value::Term(Term::Literal(l)) => numeric_capacity::operand(l),
         _ => None,
     }
 }
@@ -14210,13 +14247,17 @@ fn integer_argument(v: &Value) -> Option<i128> {
                 && sparq_core::is_integer_datatype(l.datatype().as_str())
                 && sparq_core::numeric_literal_valid(l.value(), l.datatype().as_str()) =>
         {
-            l.value().trim_matches([' ', '\t', '\r', '\n']).parse().ok()
+            numeric_capacity::representable(true,
+                l.value().trim_matches([' ', '\t', '\r', '\n']).parse().ok())
         }
         _ => None,
     }
 }
 
 fn as_num(v: &Value) -> Option<f64> {
+    if budget::strict_numeric() && !matches!(v, Value::Bool(_)) {
+        return as_numeric(v).map(Num::f64);
+    }
     match v {
         Value::Num(n) => Some(n.f64()),
         Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
@@ -14331,7 +14372,7 @@ impl CompareTerm for Value {
         // XPath promoted semantics via `num_compare`; this total order refines only
         // their ties. `None` (a lexical beyond the exact tower) keeps the tie.
         match (as_numeric(self), as_numeric(other)) {
-            (Some(a), Some(b)) => Some(a.cmp_total(b)),
+            (Some(a), Some(b)) => numeric_capacity::comparable(a, b).then(|| a.cmp_total(b)),
             _ => None,
         }
     }
@@ -14380,6 +14421,11 @@ impl CompareTerm for Value {
 /// vs a documented extension). Relational `<` / `=` semantics are UNTOUCHED.
 #[inline]
 fn compare_values(x: &Value, y: &Value) -> Option<Ordering> {
+    if budget::strict_numeric() {
+        if let (Some(a), Some(b)) = (as_numeric(x), as_numeric(y)) {
+            return numeric_capacity::comparable(a, b).then(|| a.cmp_total(b));
+        }
+    }
     compare_terms(x, y)
 }
 
@@ -14553,10 +14599,10 @@ fn eval_function_inner<E: Fn(usize) -> Result<Value, String>>(
         },
         // ABS/CEIL/FLOOR/ROUND preserve the argument's numeric DATATYPE
         // (CEIL("2.5"^^xsd:decimal) is "3"^^xsd:decimal, not xsd:integer).
-        F::Abs => as_numeric(&ev(0)?).map(|n| Value::Num(n.abs())).unwrap_or(Value::Error),
-        F::Ceil => as_numeric(&ev(0)?).map(|n| Value::Num(n.ceil())).unwrap_or(Value::Error),
-        F::Floor => as_numeric(&ev(0)?).map(|n| Value::Num(n.floor())).unwrap_or(Value::Error),
-        F::Round => as_numeric(&ev(0)?).map(|n| Value::Num(n.round())).unwrap_or(Value::Error),
+        F::Abs => as_numeric(&ev(0)?).and_then(|n| numeric_capacity::unary(n, Num::abs)).map(Value::Num).unwrap_or(Value::Error),
+        F::Ceil => as_numeric(&ev(0)?).and_then(|n| numeric_capacity::unary(n, Num::ceil)).map(Value::Num).unwrap_or(Value::Error),
+        F::Floor => as_numeric(&ev(0)?).and_then(|n| numeric_capacity::unary(n, Num::floor)).map(Value::Num).unwrap_or(Value::Error),
+        F::Round => as_numeric(&ev(0)?).and_then(|n| numeric_capacity::unary(n, Num::round)).map(Value::Num).unwrap_or(Value::Error),
         // STRDT(lexical, datatypeIRI) -> typed literal. The first argument must be a
         // SIMPLE literal (= xsd:string in RDF 1.1) — lang-tagged / typed input errors.
         F::StrDt => match (str_lit(&ev(0)?), ev(1)?) {
@@ -14865,6 +14911,13 @@ fn cmp_compiled(
     c: &CompiledExpr,
     f: impl Fn(Ordering) -> bool,
 ) -> Result<Value, String> {
+    if budget::strict_numeric() {
+        let (x, y) = (eval_compiled(graph, local, b, row, a)?, eval_compiled(graph, local, b, row, c)?);
+        if let (Some(a), Some(b)) = (as_numeric(&x), as_numeric(&y)) {
+            if a.is_nan() || b.is_nan() { return Ok(Value::Bool(false)); }
+        }
+        return Ok(value_compare_strict(&x, &y).map(|o| Value::Bool(f(o))).unwrap_or(Value::Error));
+    }
     if compiled_expr_has_arith(a) || compiled_expr_has_arith(c) {
         if let (Some(da), Some(db)) =
             (eval_compiled_dec(graph, local, row, a), eval_compiled_dec(graph, local, row, c))
@@ -14950,6 +15003,10 @@ fn equal_compiled(
     a: &CompiledExpr,
     c: &CompiledExpr,
 ) -> Result<Value, String> {
+    if budget::strict_numeric() {
+        let (x, y) = (eval_compiled(graph, local, b, row, a)?, eval_compiled(graph, local, b, row, c)?);
+        return Ok(values_equal(&x, &y).map(Value::Bool).unwrap_or(Value::Error));
+    }
     // [FABLE-5] (sq-7d3dj.30.11) Fast path (b): EQUAL ids of ANY kind are the SAME term (the
     // canonicalising dict gives each term one id), so `=` is `true` — mirroring the `p == q`
     // sameTerm short-circuit `values_equal` takes today, which is safe even for ill-typed
@@ -15016,7 +15073,7 @@ fn arith_compiled(
 ) -> Result<Value, String> {
     let (x, y) = (eval_compiled(graph, local, b, row, a)?, eval_compiled(graph, local, b, row, c)?);
     Ok(match (as_numeric(&x), as_numeric(&y)) {
-        (Some(p), Some(q)) => p.binop(q, op).map(Value::Num).unwrap_or(Value::Error),
+        (Some(p), Some(q)) => numeric_capacity::binop(p, q, op).map(Value::Num).unwrap_or(Value::Error),
         _ => Value::Error,
     })
 }
@@ -15083,7 +15140,7 @@ fn eval_compiled(
         UnaryPlus(a) => Ok(unary_plus(eval_compiled(graph, local, b, row, a)?)),
         UnaryMinus(a) => {
             let v = eval_compiled(graph, local, b, row, a)?;
-            Ok(as_numeric(&v).map(|n| Value::Num(n.neg())).unwrap_or(Value::Error))
+            Ok(as_numeric(&v).and_then(|n| numeric_capacity::unary(n, Num::neg)).map(Value::Num).unwrap_or(Value::Error))
         }
         If(cond, t, f) => match ebv3(&eval_compiled(graph, local, b, row, cond)?) {
             Some(true) => eval_compiled(graph, local, b, row, t),
@@ -15138,7 +15195,8 @@ fn dec_trim_min1(d: Dec) -> String {
         d.scale -= 1;
     }
     if d.scale == 0 {
-        d = Dec { mant: d.mant.saturating_mul(10), scale: 1 };
+        // Adding a lexical fraction digit must not overflow the numeric mantissa.
+        return format!("{}.0", d.mant);
     }
     d.lexical()
 }
@@ -15243,7 +15301,8 @@ fn eval_cast(target: &str, v: &Value) -> Option<Value> {
                     // truncation is zero. Reject an out-of-range integer instead
                     // of wrapping its i128 mantissa through an `as i64` cast.
                     let integer = 10i128.checked_pow(d.scale).map_or(0, |p| d.mant / p);
-                    i64::try_from(integer).map(|i| Value::Num(Num::Int(i))).unwrap_or(Value::Error)
+                    numeric_capacity::representable(true, i64::try_from(integer).ok())
+                        .map(|i| Value::Num(Num::Int(i))).unwrap_or(Value::Error)
                 },
                 Num::Float(_) | Num::Double(_) => {
                     let f = n.f64();
@@ -15253,12 +15312,15 @@ fn eval_cast(target: &str, v: &Value) -> Option<Value> {
                     if (lower..-lower).contains(&f) {
                         Value::Num(Num::Int(f.trunc() as i64))
                     } else {
+                        let _ = numeric_capacity::representable::<()>(f.is_finite(), None);
                         Value::Error
                     }
                 }
             });
         }
-        return Some(src_str().and_then(|s| s.parse::<i64>().ok()).map(|i| Value::Num(Num::Int(i))).unwrap_or(Value::Error));
+        return Some(src_str().and_then(|s| numeric_capacity::representable(
+            sparq_core::numeric_literal_valid(&s, xsd::INTEGER.as_str()), s.parse::<i64>().ok()))
+            .map(|i| Value::Num(Num::Int(i))).unwrap_or(Value::Error));
     }
     if is_dec {
         if let Some(b) = as_bool_val(v) {
@@ -15285,8 +15347,7 @@ fn eval_cast(target: &str, v: &Value) -> Option<Value> {
         // fraction digit ("+33.3300" -> "33.33", "0" -> "0.0").
         return Some(
             src_str()
-                .filter(|s| sparq_core::numeric_literal_valid(s, xsd::DECIMAL.as_str()))
-                .and_then(|s| Dec::parse_lexical(&s))
+                .and_then(|s| numeric_capacity::decimal_cast(&s))
                 .map(|d| typed(dec_trim_min1(d), xsd::DECIMAL))
                 .unwrap_or(Value::Error),
         );
