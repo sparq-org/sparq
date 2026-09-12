@@ -425,8 +425,11 @@
       "differential_observations": {
         "baseline": "Published SPARQL 1.1 REC existential NPS mapping set and mixed-direction alternative/Union translation; expected forward/reverse/mixed cardinalities 1/1/2.",
         "pyoxigraph_0_5_11": "Independent reviewer observed 2/2/1 on the discriminating synthetic graph.",
-        "rdflib_7_6": "Independent reviewer observed duplicate forward results and an error for the mixed inverse form.",
-        "interpretation": "Cross-engine agreement is not established; normative expectations are retained rather than rewritten to match an implementation."
+        "interpretation": "Cross-engine agreement is not established; normative expectations are retained rather than rewritten to match an implementation.",
+        "rdflib_7_6_0": "Independent reviewer observed forward/reverse/mixed cardinalities 2/2/error (InvalidPath) on the same discriminating synthetic graph.",
+        "published_errata": "https://www.w3.org/2013/sparql-errata has no NPS cardinality correction.",
+        "independent_formalization": "Kaminski, Kostylev and Cuenca Grau, ACM TODS 2017, Definition 7.4 explicitly assigns NPS multiplicity one; alternatives retain Union multiplicity.",
+        "authors_manuscript": "https://ora.ox.ac.uk/objects/uuid%3A869c0e3c-dfb2-4942-add2-9c750db168ee/files/m42fb8ab8221ec31ba681249281b8ee9c"
       }
     },
     {
