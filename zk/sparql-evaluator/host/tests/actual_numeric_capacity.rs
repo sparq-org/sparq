@@ -8,15 +8,16 @@ use sparq_proved_evaluator_model::{
 use std::path::PathBuf;
 
 #[test]
-fn actual_guest_executes_exact_temporal_values_and_capacity_rejections() {
-    let corpus: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../../crates/sparq-engine/tests/fixtures/exact_temporal.json"
-    ))
-    .unwrap();
+fn actual_guest_rejects_numeric_capacity_after_a_successful_control() {
+    let corpus = serde_json::json!({"cases": [{
+        "id": "numeric-capacity-positive-control",
+        "query": "SELECT (20 + 22 AS ?x) {}",
+        "expected_rows": [["\"42\"^^<http://www.w3.org/2001/XMLSchema#integer>"]]
+    }]});
     let r0vm = std::env::var_os("RISC0_SERVER_PATH")
         .map(PathBuf::from)
         .expect("real local r0vm executable is required");
-    let executor = ExternalProver::new("real-sparq-builtin-edges", r0vm);
+    let executor = ExternalProver::new("real-sparq-numeric-capacity", r0vm);
     let policy = Policy::default();
     let mut rec_cases = 0;
     for case in corpus["cases"].as_array().unwrap() {
@@ -43,7 +44,7 @@ fn actual_guest_executes_exact_temporal_values_and_capacity_rejections() {
             },
             dataset,
         };
-        eprintln!("actual builtin guest case {}", case["id"]);
+        eprintln!("actual numeric control guest case {}", case["id"]);
         let env = ExecutorEnv::builder()
             .session_limit(Some(1 << 24))
             .write(&input)
@@ -65,10 +66,10 @@ fn actual_guest_executes_exact_temporal_values_and_capacity_rejections() {
             case["id"]
         );
     }
-    assert_eq!(rec_cases, 28, "execute every exact temporal expectation");
+    assert_eq!(rec_cases, 1, "execute the successful arithmetic control");
     // Positive executions above distinguish an actual relation rejection from a broken executor.
     let rejected: serde_json::Value = serde_json::from_str(include_str!(
-        "../../fixtures/conformance/temporal-capacity.json"
+        "../../fixtures/conformance/numeric-capacity.json"
     ))
     .unwrap();
     for case in rejected["cases"].as_array().unwrap() {
@@ -107,23 +108,24 @@ fn actual_guest_executes_exact_temporal_values_and_capacity_rejections() {
             case["id"]
         );
     }
-    assert_eq!(rejected["cases"].as_array().unwrap().len(), 13);
+    assert_eq!(rejected["cases"].as_array().unwrap().len(), 21);
 }
 
 #[test]
-fn actual_v2_guest_executes_exact_temporal_values_and_capacity_rejections() {
+fn actual_v2_guest_rejects_numeric_capacity_after_a_successful_control() {
     use sparq_proved_evaluator_model::v2::{
         Dialect, Journal, Policy, PrivateDataset, Request, VERSION, Witness, bind_journal,
         dataset_commitment,
     };
-    let corpus: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../../crates/sparq-engine/tests/fixtures/exact_temporal.json"
-    ))
-    .unwrap();
+    let corpus = serde_json::json!({"cases": [{
+        "id": "numeric-capacity-positive-control",
+        "query": "SELECT (20 + 22 AS ?x) {}",
+        "expected_rows": [["\"42\"^^<http://www.w3.org/2001/XMLSchema#integer>"]]
+    }]});
     let r0vm = std::env::var_os("RISC0_SERVER_PATH")
         .map(PathBuf::from)
         .expect("real local r0vm executable is required");
-    let executor = ExternalProver::new("real-sparq-builtin-edges", r0vm);
+    let executor = ExternalProver::new("real-sparq-numeric-capacity", r0vm);
     let policy = Policy::default();
     let mut rec_cases = 0;
     for case in corpus["cases"].as_array().unwrap() {
@@ -151,7 +153,7 @@ fn actual_v2_guest_executes_exact_temporal_values_and_capacity_rejections() {
             },
             dataset,
         };
-        eprintln!("actual builtin guest case {}", case["id"]);
+        eprintln!("actual numeric control guest case {}", case["id"]);
         let env = ExecutorEnv::builder()
             .session_limit(Some(1 << 24))
             .write(&input)
@@ -173,10 +175,10 @@ fn actual_v2_guest_executes_exact_temporal_values_and_capacity_rejections() {
             case["id"]
         );
     }
-    assert_eq!(rec_cases, 28, "execute every exact temporal expectation");
+    assert_eq!(rec_cases, 1, "execute the successful arithmetic control");
     // Positive executions above distinguish an actual relation rejection from a broken executor.
     let rejected: serde_json::Value = serde_json::from_str(include_str!(
-        "../../fixtures/conformance/temporal-capacity.json"
+        "../../fixtures/conformance/numeric-capacity.json"
     ))
     .unwrap();
     for case in rejected["cases"].as_array().unwrap() {
@@ -216,5 +218,5 @@ fn actual_v2_guest_executes_exact_temporal_values_and_capacity_rejections() {
             case["id"]
         );
     }
-    assert_eq!(rejected["cases"].as_array().unwrap().len(), 13);
+    assert_eq!(rejected["cases"].as_array().unwrap().len(), 21);
 }

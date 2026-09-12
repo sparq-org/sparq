@@ -148,7 +148,7 @@ fn real_v2_catalog_and_nested_graph_result_bind_every_public_expectation() {
 #[test]
 fn real_v2_holder_declared_absence_respects_from_named_scope() {
     let mut input = witness(
-        "ASK FROM NAMED ex:empty { { GRAPH ex:empty { GRAPH ex:g2 { ?s ex:p ?o } } } UNION { BIND((\"1200\"^^<http://www.w3.org/2001/XMLSchema#byte> + 0) > 5 AS ?invalid) FILTER(?invalid) } }",
+        "ASK FROM NAMED ex:empty { { GRAPH ex:empty { GRAPH ex:g2 { ?s ex:p ?o } } } UNION { BIND((\"1200\"^^<http://www.w3.org/2001/XMLSchema#byte> + 0) > 5 AS ?invalid) FILTER(?invalid) } UNION { FILTER(\"2024-01-01T00:00:00Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> = \"2024-01-01T00:00:00.000000001Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime>) } }",
     );
     input.request.authority = DatasetAuthority::HolderDeclared;
     input.request.nonce = [43; 32];

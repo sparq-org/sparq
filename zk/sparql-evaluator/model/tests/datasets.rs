@@ -220,7 +220,7 @@ fn named_graph_proof_fixture_has_independent_count_expectations() {
     );
     assert_eq!(
         evaluate(&witness(
-            "ASK FROM NAMED ex:empty { { GRAPH ex:empty { GRAPH ex:g2 { ?s ex:p ?o } } } UNION { BIND((\"1200\"^^<http://www.w3.org/2001/XMLSchema#byte> + 0) > 5 AS ?invalid) FILTER(?invalid) } }"
+            "ASK FROM NAMED ex:empty { { GRAPH ex:empty { GRAPH ex:g2 { ?s ex:p ?o } } } UNION { BIND((\"1200\"^^<http://www.w3.org/2001/XMLSchema#byte> + 0) > 5 AS ?invalid) FILTER(?invalid) } UNION { FILTER(\"2024-01-01T00:00:00Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> = \"2024-01-01T00:00:00.000000001Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime>) } }"
         ))
         .unwrap()
         .result,

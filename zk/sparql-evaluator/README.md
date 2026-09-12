@@ -125,6 +125,7 @@ labeled integer-constructor capacity controls remain separate evidence. These
 executions authenticate each case's optional N-Triples source, covering literal,
 VALUES and stored-term arithmetic/error paths. They generate no individual receipts;
 the false-ASK fixture also discriminates SUBSTR positions and invalid numeric facets.
+The aggregate and temporal tests repeat their positive/rejection corpora under both versions.
 The dedicated CI workflow runs every host test. No ignored
 test or missing-tool shortcut counts as a successful proof run. Broader guest
 conformance coverage and remaining features belong to zkp-10.
