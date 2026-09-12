@@ -1,0 +1,15 @@
+{
+ "_doc": "Allowlist for scripts/check-doc-duplication.py (issue #5019; spec: research/docs-site-single-sourcing-anti-drift.md §4). Each entry exempts ONE repeat and must name the exact `files` AND the exact normalised-block `digests` involved, plus a `why`. A finding is suppressed only when every file AND every digest in it is listed, so an entry cannot quietly excuse a second, unrelated duplication between the same two files; the gate prints the digest to paste when it fires. An entry that suppressed nothing FAILS the gate as stale config, so the allowlist cannot outlive the duplication it excused. Do NOT add broad path exclusions — fix the wording, or inject the block (§5/§6), instead. The inline `<!-- doc-duplication-allow: <why> -->` marker is the other, narrower hatch.",
+ "allow": [
+  {
+   "files": [
+    "crates/sparq-vc/README.md",
+    "skills/verifiable-credentials/SKILL.md"
+   ],
+   "digests": [
+    "22f3df9f5ac87d66"
+   ],
+   "why": "The two-line `sparq-vc` path-dependency stanza. Both renderers need the copy-pasteable snippet in place (a crate README is read on GitHub/crates.io/docs.rs, a SKILL.md by an agent), so neither can link to the other. This is exactly the class the BEGIN-INJECT/END-INJECT generator in research/docs-site-single-sourcing-anti-drift.md §5 exists to materialise; allowlisted until that follow-up lands, at which point the region becomes generated and this entry goes stale (which reds the gate, so it will not be forgotten)."
+  }
+ ]
+}
