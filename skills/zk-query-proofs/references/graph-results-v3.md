@@ -44,6 +44,15 @@ Source namespaces are checked across the active dataset. Independent result grap
 still require standardization apart before combination. Graph merge identity,
 complete V3 APIs and actual guest validation remain outside this prerequisite.
 
+[GPT-6] Native `dataset_blank_nodes` now exercises read-query RDF merge separation,
+preserved named-graph identity, collision avoidance, repeated-IRI acquisition,
+dataset views, graph production and recursive triple-term handling. Each distinct
+FROM IRI supplies one snapshot; default-copy nodes are disjoint from preserved
+named graphs. This is an explicit acquisition policy, not a claim that §13.2.3
+requires a particular identity for repeated references. Update USING remains a
+separate execution boundary. These tests do not expand V1/V2 admission or establish
+V3 guest execution.
+
 Sources: [SPARQL 1.1 CONSTRUCT](https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#construct),
 [DESCRIBE](https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#describe),
 [RDFC-1.0](https://www.w3.org/TR/rdf-canon/).

@@ -645,6 +645,15 @@ continue to apply at every nesting level; graph-name bindings retain normal join
 compatibility and result multiplicity. The evaluator borrows this catalog in its
 per-query context rather than cloning graphs or using global dataset state.
 
+[GPT-6] Read-query `FROM` builds an RDF merge: blank nodes are renamed consistently
+within each source graph and kept distinct between source graphs and preserved
+`FROM NAMED` graphs. `GRAPH` alone preserves source dataset identity. Repeated
+`FROM` IRIs use one stored snapshot per distinct IRI; this acquisition policy is
+explicit because [SPARQL 1.1 §13.2.3](https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#specifyingDataset)
+does not prescribe blank-node identity for repeated dataset-clause references.
+The merge applies to SELECT/ASK and graph-producing queries; it does not define
+SPARQL Update `USING` identity behavior.
+
 ## Gotchas / feature flags / prerequisites
 
 - **Errors are `String`** — both SPARQL parse errors and evaluation/type errors. SPARQL is parsed by

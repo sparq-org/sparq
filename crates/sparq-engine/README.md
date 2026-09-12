@@ -12,9 +12,8 @@ Query in-memory or out-of-core graphs, inspect plans with `EXPLAIN` / `EXPLAIN A
 and register custom functions. [Exact temporal comparison and optional year budgets](../../skills/zk-query-proofs/references/exact-temporals.md) preserve fractional precision.
 
 <!-- [GPT-6] The detached proof guest does not add an engine dependency. -->
-The opt-in [proved evaluator](../../zk/sparql-evaluator/README.md) restricts `target_os = "zkvm"`,
-rejecting ambient NOW/RAND/UUID in that target only. The experiment is
-not externally audited.
+The opt-in [proved evaluator](../../zk/sparql-evaluator/README.md) rejects ambient
+NOW/RAND/UUID at `target_os = "zkvm"` only; it is not externally audited.
 
 ## 🚀 Quickstart
 
@@ -45,8 +44,8 @@ let json = sparq_engine::query_json(&g, "SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?
   midnight; `MIN`/`MAX` retain input terms. [Bounded coverage and numeric limits](../../skills/sparql-query/SKILL.md)
   remain explicit; these corrections do not establish complete builtin conformance.
 - **Named graphs** — query across an active dataset with `GRAPH` and `FROM` / `FROM NAMED`.
-  [GPT-6] Nested `GRAPH` borrows the same catalog, preserving empty graphs,
-  binding multiplicity and `FROM NAMED` restrictions at every nesting level.
+  Read-query `FROM` standardizes source blank nodes apart; `GRAPH` preserves identity.
+  [GPT-6] Nested `GRAPH` preserves the catalog, empty graphs, bindings and `FROM NAMED` restrictions.
 - **Deterministic blank nodes** *(opt-in `deterministic-blank-nodes`)* — entropy-free
   parser/template labels, fresh per solution and disjoint from active input; see the SKILL.
 - **RDF 1.2 triple terms** — match [triple terms](https://www.w3.org/TR/rdf12-concepts/), including variables inside them.
