@@ -105,6 +105,8 @@ The opt-in detached [exact evaluator](references/exact-evaluator.md) proves boun
 default-graph evaluation with explicit verifier-agreed or holder-declared scope.
 It is experimental and not externally audited; its first adapter carries no
 issuer-signature or credential-status claim.
+[GPT-6] The [query-coverage corpus](references/evaluator-conformance.md) separates
+executed host semantics, explicit unsupported features, and guest proof evidence.
 
 ### 1. Commit a credential graph and attest it as an issuer
 ```rust
