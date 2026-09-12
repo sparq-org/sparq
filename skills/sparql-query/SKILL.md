@@ -216,6 +216,15 @@ sparq_engine::query(&g,
 Alternatives preserve duplicate solutions: `ex:p|ex:p` contributes each matching
 edge twice. Sequences multiply compatible occurrences; `DISTINCT` removes duplicates
 when requested. Reachability operators (`*`, `+`, `?`) retain endpoint set semantics.
+Nullable paths distinguish concrete RDF terms from variables under the published
+SPARQL 1.1 endpoint rules. For example, on an empty graph, `<urn:x> (ex:p*|ex:p*)
+?o` returns two bindings of `?o` to `<urn:x>`, whereas `?s ex:p* ?o` returns none.
+A sequence's fresh midpoint remains a variable even when the engine knows its
+value. Join and OPTIONAL substitution falls back to ordinary evaluation when
+substituting an endpoint could introduce an invalid zero-length solution; this
+can increase work for small-side joins involving nullable paths. Query row
+budgets also bound repeated constant-seed results.
+
 `FILTER EXISTS` and `FILTER NOT EXISTS` evaluate inner expressions with bound outer
 terms, including variables that occur only inside an inner `FILTER`. This also preserves
 blank-node identity and computed literal values across the inner vocabulary boundary.

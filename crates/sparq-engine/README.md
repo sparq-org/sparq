@@ -42,7 +42,11 @@ let json = sparq_engine::query_json(&g, "SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?
 - **Path multiplicity and expression correlation** — alternatives and sequences preserve
   SPARQL bag counts; reachability operators retain endpoint sets. `EXISTS` / `NOT EXISTS`
   filters can reference bound outer variables used only in inner expressions, with actual
-  RDF term identity retained across the vocabulary boundary.
+  RDF term identity retained across the vocabulary boundary. Nullable paths retain
+  constant endpoint seeds, including terms absent from the active graph, while
+  variable endpoints range over graph nodes. Sequence midpoint hints preserve
+  their variable role. Joins fall back from constant substitution when it would
+  change a nullable path's domain.
 - **Named graphs** — query across an active dataset with `GRAPH` and `FROM` / `FROM NAMED`.
 - **RDF 1.2 triple terms** — match [triple terms](https://www.w3.org/TR/rdf12-concepts/), including variables inside them.
 - **Materialized full paths** *(opt-in `paths` feature, OFF by default)* — `enumerate_paths` returns intermediate nodes and edges for tied shortest paths, bounded simple paths, or cycles back to their start. Each endpoint is unrestricted, one fixed node, or a graph pattern selecting a candidate set.
