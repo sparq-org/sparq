@@ -770,6 +770,938 @@
       ],
       "spec": "https://www.w3.org/TR/2010/REC-xpath-functions-20101214/#func-hours-from-dateTime",
       "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "arithmetic-invalid-byte-add-literal",
+      "group": "numeric-errors",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((\"1200\"^^xsd:byte + 1) > 0 AS ?v) {  }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "arithmetic-invalid-byte-add-values",
+      "group": "numeric-errors",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((?n + 1) > 0 AS ?v) { VALUES ?n { \"1200\"^^xsd:byte } }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "arithmetic-invalid-byte-subtract-literal",
+      "group": "numeric-errors",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((\"1200\"^^xsd:byte - 1) < 1200 AS ?v) {  }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "arithmetic-invalid-byte-subtract-values",
+      "group": "numeric-errors",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((?n - 1) < 1200 AS ?v) { VALUES ?n { \"1200\"^^xsd:byte } }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "arithmetic-invalid-byte-multiply-literal",
+      "group": "numeric-errors",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((\"1200\"^^xsd:byte * 0) = 0 AS ?v) {  }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "arithmetic-invalid-byte-multiply-values",
+      "group": "numeric-errors",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((?n * 0) = 0 AS ?v) { VALUES ?n { \"1200\"^^xsd:byte } }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "arithmetic-invalid-byte-unary-plus-literal",
+      "group": "numeric-errors",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((+\"1200\"^^xsd:byte) > -2 AS ?v) {  }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "arithmetic-invalid-byte-unary-plus-values",
+      "group": "numeric-errors",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((+?n) > -2 AS ?v) { VALUES ?n { \"1200\"^^xsd:byte } }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "arithmetic-invalid-byte-unary-minus-literal",
+      "group": "numeric-errors",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((-\"1200\"^^xsd:byte) < 2 AS ?v) {  }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "arithmetic-invalid-byte-unary-minus-values",
+      "group": "numeric-errors",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((-?n) < 2 AS ?v) { VALUES ?n { \"1200\"^^xsd:byte } }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "arithmetic-invalid-integer-add-literal",
+      "group": "numeric-errors",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((\"5.0\"^^xsd:integer + 1) > 0 AS ?v) {  }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "arithmetic-invalid-integer-add-values",
+      "group": "numeric-errors",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((?n + 1) > 0 AS ?v) { VALUES ?n { \"5.0\"^^xsd:integer } }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "arithmetic-invalid-integer-subtract-literal",
+      "group": "numeric-errors",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((\"5.0\"^^xsd:integer - 1) < 1200 AS ?v) {  }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "arithmetic-invalid-integer-subtract-values",
+      "group": "numeric-errors",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((?n - 1) < 1200 AS ?v) { VALUES ?n { \"5.0\"^^xsd:integer } }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "arithmetic-invalid-integer-multiply-literal",
+      "group": "numeric-errors",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((\"5.0\"^^xsd:integer * 0) = 0 AS ?v) {  }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "arithmetic-invalid-integer-multiply-values",
+      "group": "numeric-errors",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((?n * 0) = 0 AS ?v) { VALUES ?n { \"5.0\"^^xsd:integer } }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "arithmetic-invalid-integer-unary-plus-literal",
+      "group": "numeric-errors",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((+\"5.0\"^^xsd:integer) > -2 AS ?v) {  }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "arithmetic-invalid-integer-unary-plus-values",
+      "group": "numeric-errors",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((+?n) > -2 AS ?v) { VALUES ?n { \"5.0\"^^xsd:integer } }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "arithmetic-invalid-integer-unary-minus-literal",
+      "group": "numeric-errors",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((-\"5.0\"^^xsd:integer) < 2 AS ?v) {  }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "arithmetic-invalid-integer-unary-minus-values",
+      "group": "numeric-errors",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((-?n) < 2 AS ?v) { VALUES ?n { \"5.0\"^^xsd:integer } }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "arithmetic-invalid-unsigned-add-literal",
+      "group": "numeric-errors",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((\"-1\"^^xsd:unsignedLong + 1) > 0 AS ?v) {  }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "arithmetic-invalid-unsigned-add-values",
+      "group": "numeric-errors",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((?n + 1) > 0 AS ?v) { VALUES ?n { \"-1\"^^xsd:unsignedLong } }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "arithmetic-invalid-unsigned-subtract-literal",
+      "group": "numeric-errors",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((\"-1\"^^xsd:unsignedLong - 1) < 1200 AS ?v) {  }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "arithmetic-invalid-unsigned-subtract-values",
+      "group": "numeric-errors",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((?n - 1) < 1200 AS ?v) { VALUES ?n { \"-1\"^^xsd:unsignedLong } }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "arithmetic-invalid-unsigned-multiply-literal",
+      "group": "numeric-errors",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((\"-1\"^^xsd:unsignedLong * 0) = 0 AS ?v) {  }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "arithmetic-invalid-unsigned-multiply-values",
+      "group": "numeric-errors",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((?n * 0) = 0 AS ?v) { VALUES ?n { \"-1\"^^xsd:unsignedLong } }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "arithmetic-invalid-unsigned-unary-plus-literal",
+      "group": "numeric-errors",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((+\"-1\"^^xsd:unsignedLong) > -2 AS ?v) {  }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "arithmetic-invalid-unsigned-unary-plus-values",
+      "group": "numeric-errors",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((+?n) > -2 AS ?v) { VALUES ?n { \"-1\"^^xsd:unsignedLong } }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "arithmetic-invalid-unsigned-unary-minus-literal",
+      "group": "numeric-errors",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((-\"-1\"^^xsd:unsignedLong) < 2 AS ?v) {  }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "arithmetic-invalid-unsigned-unary-minus-values",
+      "group": "numeric-errors",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((-?n) < 2 AS ?v) { VALUES ?n { \"-1\"^^xsd:unsignedLong } }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "arithmetic-invalid-nbsp-add-literal",
+      "group": "numeric-errors",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((\" 5\"^^xsd:integer + 1) > 0 AS ?v) {  }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "arithmetic-invalid-nbsp-add-values",
+      "group": "numeric-errors",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((?n + 1) > 0 AS ?v) { VALUES ?n { \" 5\"^^xsd:integer } }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "arithmetic-invalid-nbsp-subtract-literal",
+      "group": "numeric-errors",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((\" 5\"^^xsd:integer - 1) < 1200 AS ?v) {  }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "arithmetic-invalid-nbsp-subtract-values",
+      "group": "numeric-errors",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((?n - 1) < 1200 AS ?v) { VALUES ?n { \" 5\"^^xsd:integer } }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "arithmetic-invalid-nbsp-multiply-literal",
+      "group": "numeric-errors",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((\" 5\"^^xsd:integer * 0) = 0 AS ?v) {  }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "arithmetic-invalid-nbsp-multiply-values",
+      "group": "numeric-errors",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((?n * 0) = 0 AS ?v) { VALUES ?n { \" 5\"^^xsd:integer } }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "arithmetic-invalid-nbsp-unary-plus-literal",
+      "group": "numeric-errors",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((+\" 5\"^^xsd:integer) > -2 AS ?v) {  }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "arithmetic-invalid-nbsp-unary-plus-values",
+      "group": "numeric-errors",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((+?n) > -2 AS ?v) { VALUES ?n { \" 5\"^^xsd:integer } }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "arithmetic-invalid-nbsp-unary-minus-literal",
+      "group": "numeric-errors",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((-\" 5\"^^xsd:integer) < 2 AS ?v) {  }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "arithmetic-invalid-nbsp-unary-minus-values",
+      "group": "numeric-errors",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((-?n) < 2 AS ?v) { VALUES ?n { \" 5\"^^xsd:integer } }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "arithmetic-invalid-byte-add-stored",
+      "group": "numeric-errors",
+      "query": "SELECT (0 < (?n + 1) AS ?v) { ?s <http://ex/p> ?n }",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \"1200\"^^<http://www.w3.org/2001/XMLSchema#byte> .\n",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "arithmetic-invalid-byte-subtract-stored",
+      "group": "numeric-errors",
+      "query": "SELECT (1200 > (?n - 1) AS ?v) { ?s <http://ex/p> ?n }",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \"1200\"^^<http://www.w3.org/2001/XMLSchema#byte> .\n",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "arithmetic-invalid-byte-multiply-stored",
+      "group": "numeric-errors",
+      "query": "SELECT (0 = (?n * 0) AS ?v) { ?s <http://ex/p> ?n }",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \"1200\"^^<http://www.w3.org/2001/XMLSchema#byte> .\n",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "arithmetic-invalid-byte-unary-plus-stored",
+      "group": "numeric-errors",
+      "query": "SELECT (-2 < (+?n) AS ?v) { ?s <http://ex/p> ?n }",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \"1200\"^^<http://www.w3.org/2001/XMLSchema#byte> .\n",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "arithmetic-invalid-byte-unary-minus-stored",
+      "group": "numeric-errors",
+      "query": "SELECT (2 > (-?n) AS ?v) { ?s <http://ex/p> ?n }",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \"1200\"^^<http://www.w3.org/2001/XMLSchema#byte> .\n",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "arithmetic-invalid-integer-add-stored",
+      "group": "numeric-errors",
+      "query": "SELECT (0 < (?n + 1) AS ?v) { ?s <http://ex/p> ?n }",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \"5.0\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "arithmetic-invalid-integer-subtract-stored",
+      "group": "numeric-errors",
+      "query": "SELECT (1200 > (?n - 1) AS ?v) { ?s <http://ex/p> ?n }",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \"5.0\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "arithmetic-invalid-integer-multiply-stored",
+      "group": "numeric-errors",
+      "query": "SELECT (0 = (?n * 0) AS ?v) { ?s <http://ex/p> ?n }",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \"5.0\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "arithmetic-invalid-integer-unary-plus-stored",
+      "group": "numeric-errors",
+      "query": "SELECT (-2 < (+?n) AS ?v) { ?s <http://ex/p> ?n }",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \"5.0\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "arithmetic-invalid-integer-unary-minus-stored",
+      "group": "numeric-errors",
+      "query": "SELECT (2 > (-?n) AS ?v) { ?s <http://ex/p> ?n }",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \"5.0\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "arithmetic-invalid-unsigned-add-stored",
+      "group": "numeric-errors",
+      "query": "SELECT (0 < (?n + 1) AS ?v) { ?s <http://ex/p> ?n }",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \"-1\"^^<http://www.w3.org/2001/XMLSchema#unsignedLong> .\n",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "arithmetic-invalid-unsigned-subtract-stored",
+      "group": "numeric-errors",
+      "query": "SELECT (1200 > (?n - 1) AS ?v) { ?s <http://ex/p> ?n }",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \"-1\"^^<http://www.w3.org/2001/XMLSchema#unsignedLong> .\n",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "arithmetic-invalid-unsigned-multiply-stored",
+      "group": "numeric-errors",
+      "query": "SELECT (0 = (?n * 0) AS ?v) { ?s <http://ex/p> ?n }",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \"-1\"^^<http://www.w3.org/2001/XMLSchema#unsignedLong> .\n",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "arithmetic-invalid-unsigned-unary-plus-stored",
+      "group": "numeric-errors",
+      "query": "SELECT (-2 < (+?n) AS ?v) { ?s <http://ex/p> ?n }",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \"-1\"^^<http://www.w3.org/2001/XMLSchema#unsignedLong> .\n",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "arithmetic-invalid-unsigned-unary-minus-stored",
+      "group": "numeric-errors",
+      "query": "SELECT (2 > (-?n) AS ?v) { ?s <http://ex/p> ?n }",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \"-1\"^^<http://www.w3.org/2001/XMLSchema#unsignedLong> .\n",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "arithmetic-invalid-nbsp-add-stored",
+      "group": "numeric-errors",
+      "query": "SELECT (0 < (?n + 1) AS ?v) { ?s <http://ex/p> ?n }",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \" 5\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "arithmetic-invalid-nbsp-subtract-stored",
+      "group": "numeric-errors",
+      "query": "SELECT (1200 > (?n - 1) AS ?v) { ?s <http://ex/p> ?n }",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \" 5\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "arithmetic-invalid-nbsp-multiply-stored",
+      "group": "numeric-errors",
+      "query": "SELECT (0 = (?n * 0) AS ?v) { ?s <http://ex/p> ?n }",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \" 5\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "arithmetic-invalid-nbsp-unary-plus-stored",
+      "group": "numeric-errors",
+      "query": "SELECT (-2 < (+?n) AS ?v) { ?s <http://ex/p> ?n }",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \" 5\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "arithmetic-invalid-nbsp-unary-minus-stored",
+      "group": "numeric-errors",
+      "query": "SELECT (2 > (-?n) AS ?v) { ?s <http://ex/p> ?n }",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \" 5\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#OperatorMapping",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "substr-invalid-fraction-start",
+      "group": "string-errors",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (SUBSTR(\"abcd\", 1.5, 2) AS ?v) {}",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#func-substr",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "substr-invalid-fraction-length",
+      "group": "string-errors",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (SUBSTR(\"abcd\", 1, 1.5) AS ?v) {}",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#func-substr",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "substr-invalid-decimal-start",
+      "group": "string-errors",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (SUBSTR(\"abcd\", 1.0, 2) AS ?v) {}",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#func-substr",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "substr-invalid-decimal-length",
+      "group": "string-errors",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (SUBSTR(\"abcd\", 1, 1.0) AS ?v) {}",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#func-substr",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "substr-invalid-double-start",
+      "group": "string-errors",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (SUBSTR(\"abcd\", 1e0, 2) AS ?v) {}",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#func-substr",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "substr-invalid-double-length",
+      "group": "string-errors",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (SUBSTR(\"abcd\", 1, 1e0) AS ?v) {}",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#func-substr",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "substr-invalid-nan-start",
+      "group": "string-errors",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (SUBSTR(\"abcd\", \"NaN\"^^xsd:double, 2) AS ?v) {}",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#func-substr",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "substr-invalid-nan-length",
+      "group": "string-errors",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (SUBSTR(\"abcd\", 1, \"NaN\"^^xsd:double) AS ?v) {}",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#func-substr",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "substr-invalid-infinity-start",
+      "group": "string-errors",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (SUBSTR(\"abcd\", \"INF\"^^xsd:double, 2) AS ?v) {}",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#func-substr",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "substr-invalid-infinity-length",
+      "group": "string-errors",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (SUBSTR(\"abcd\", 1, \"INF\"^^xsd:double) AS ?v) {}",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#func-substr",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "substr-invalid-invalid-facet-start",
+      "group": "string-errors",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (SUBSTR(\"abcd\", \"1200\"^^xsd:byte, 2) AS ?v) {}",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#func-substr",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "substr-invalid-invalid-facet-length",
+      "group": "string-errors",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (SUBSTR(\"abcd\", 1, \"1200\"^^xsd:byte) AS ?v) {}",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#func-substr",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "substr-derived-start",
+      "group": "string",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (SUBSTR(\"abcd\", \"2\"^^xsd:byte, 2) AS ?v) {}",
+      "expected_rows": [
+        [
+          "\"bc\""
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#func-substr",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "substr-derived-length",
+      "group": "string",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (SUBSTR(\"abcd\", 1, \"2\"^^xsd:unsignedByte) AS ?v) {}",
+      "expected_rows": [
+        [
+          "\"ab\""
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#func-substr",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "substr-large-start",
+      "group": "string",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (SUBSTR(\"abcd\", \"18446744073709551615\"^^xsd:unsignedLong, 2) AS ?v) {}",
+      "expected_rows": [
+        [
+          "\"\""
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#func-substr",
+      "expectation_kind": "published_recommendation"
+    },
+    {
+      "id": "substr-large-length",
+      "group": "string",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (SUBSTR(\"abcd\", 1, \"18446744073709551615\"^^xsd:unsignedLong) AS ?v) {}",
+      "expected_rows": [
+        [
+          "\"abcd\""
+        ]
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#func-substr",
+      "expectation_kind": "published_recommendation"
     }
   ]
 }

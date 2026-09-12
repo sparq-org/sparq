@@ -1738,3 +1738,10 @@ gate/threshold outside its range, an all-zero/non-finite/duplicate-id input.
 - `hdt-format`, `fused-decompress-parse`, `rust-parallel-parsing` — getting RDF into the
   `Graph` you then embed.
 - `mpc-protocols`, `noir-circuit-patterns` — unrelated sibling skills in this workspace.
+
+### Temporal year parsing (GPT-6)
+
+The `gYear` epoch lane preserves the four-digit year width, including the sign,
+when constructing the civil-date input. Conversion to epoch seconds is checked;
+invalid lexicals and unrepresentable values return `None`. The shared civil-date
+parser remains strict, and the existing global ordering regression stays intact.

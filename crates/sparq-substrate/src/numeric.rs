@@ -771,36 +771,40 @@ impl Num {
     /// scale-preserving [`Dec::parse_lexical`] for decimal.
     #[inline]
     pub fn of_literal(l: &oxrdf::Literal) -> Option<Num> {
-        use oxrdf::vocab::xsd;
         if l.language().is_some() {
             return None;
         }
-        let dt = l.datatype();
-        let v = l.value().trim_matches([' ', '\t', '\r', '\n']);
-        // [GPT-6] Keep lexical and subtype validity aligned with graph caches.
-        // Representation limits below are separate from datatype membership.
-        if !sparq_core::numeric_literal_valid(v, dt.as_str()) {
+        Self::of_parts(l.value(), l.datatype().as_str())
+    }
+
+    /// Parses borrowed numeric literal parts using the shared datatype and capacity rules.
+    ///
+    /// [GPT-6] Equivalent to [`Self::of_literal`] for a literal without a language tag.
+    /// Returns `None` for invalid lexicals, subtype facet violations, nonnumeric
+    /// datatypes, or values beyond this arithmetic tower's finite representation.
+    #[inline]
+    pub fn of_parts(value: &str, datatype: &str) -> Option<Num> {
+        use oxrdf::vocab::xsd;
+        let v = value.trim_matches([' ', '\t', '\r', '\n']);
+        if !sparq_core::numeric_literal_valid(v, datatype) {
             return None;
         }
-        if sparq_core::is_integer_datatype(dt.as_str()) {
+        if sparq_core::is_integer_datatype(datatype) {
             if let Ok(i) = v.parse::<i64>() {
                 return Some(Num::Int(i));
             }
-            // Integer beyond i64: exact i128 mantissa if it fits (scale 0 = integer
-            // lexical); larger magnitudes return None.
             return match Dec::parse(v) {
                 Some(d) if d.scale == 0 => Some(Num::Dec(d)),
-                Some(_) => None, // "1.5"^^xsd:integer is ill-formed
-                None => None,
+                _ => None,
             };
         }
-        if dt == xsd::DECIMAL {
+        if datatype == xsd::DECIMAL.as_str() {
             return Dec::parse_lexical(v).map(Num::Dec);
         }
-        if dt == xsd::FLOAT {
+        if datatype == xsd::FLOAT.as_str() {
             return parse_xsd_f32(v).map(Num::Float);
         }
-        if dt == xsd::DOUBLE {
+        if datatype == xsd::DOUBLE.as_str() {
             return parse_xsd_f64(v).map(Num::Double);
         }
         None
