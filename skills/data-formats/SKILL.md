@@ -17,6 +17,23 @@ loaders live in `sparq-core`; the binary HDT archive format (including content-s
 > formatter) and JSON-LD (`graph_to_jsonld_pretty`); the N-Triples writer (`triples_to_ntriples`)
 > is always on. See recipe 6.
 
+## Literal validity and cache eligibility
+
+[GPT-6] RDF ingestion preserves ill-typed literals. To check numeric datatype
+membership, call `sparq_core::numeric_literal_valid(value, datatype_iri)`: this
+checks lexical grammar, XML whitespace and integer subtype facets, including the
+range of `xsd:byte` and unsigned integer types. It does not impose the evaluator's
+finite mantissa capacity. `numeric_cache_value` can return `None` for a valid large
+number; a missing cache value is not a datatype-validity result.
+
+`temporal::Timeline::parse_datetime`, `parse_date`, `parse_civil_date` and
+`parse_tz` reject malformed calendar/timezone values and timestamps outside their
+representation. The same validation controls stored temporal comparison caches.
+Malformed Unicode returns `None` without slicing panics.
+Legacy mmap archives can carry same-sized `numerics.bin`/`temporals.bin` caches
+created under older validation rules. Regenerate those derived caches before
+relying on the new rules; a fresh RDF load computes them with current validation.
+
 ## Quickstart
 
 Add the dependency (HDT is a separate, native-only crate):

@@ -44,6 +44,21 @@ let lit = oxrdf::Literal::new_typed_literal("0.1", oxrdf::vocab::xsd::DECIMAL);
 let n: Option<Num> = as_numeric(&lit);  // exact xsd:decimal (no f64 rounding)
 ```
 
+## Numeric validity and capacity
+
+[GPT-6] `numeric::Num::of_literal` and `as_numeric` apply the shared
+`sparq_core::numeric_literal_valid` grammar and integer subtype facets before
+parsing an arithmetic value. For example, `"5.0"^^xsd:integer` and
+`"1200"^^xsd:byte` are invalid operands. XML whitespace at the lexical boundaries
+is accepted; non-XML whitespace is not.
+
+Datatype membership and arithmetic capacity are distinct. The existing tower uses
+`i64` integers, `i128` decimal mantissas, and binary floats; valid larger integers
+or decimals can return `None` here while `numeric_literal_valid` returns `true`.
+This change does not add arbitrary-precision arithmetic or change the existing
+overflow promotion policy. Shared validation adds a lexical scan when decoding a
+numeric literal; cached values continue to avoid per-row lexical parsing.
+
 ## ✨ Features
 
 - **`rows`** — the `SmallVec`-based `Row` (`[Id; 4]`), `Key` (`[Id; 2]`) and `Posting`

@@ -36,6 +36,15 @@ proof-performance result. The separate guest tests remain the source of actual
 proof evidence. The same query/data fixtures can be reused by an explicitly
 selected guest campaign with pinned program identity and genuine receipts.
 
+The shared engine's `tests/fixtures/builtin_edges.json` also runs through native
+model admission/evaluation and `host/tests/actual_builtin_edges.rs`. The latter
+executes the actual guest and compares its journal with the unchanged shared
+expected cells. `published_recommendation` cases and `implementation_capacity`
+controls are counted separately; the existing bounded integer-constructor lane
+does not establish support for arbitrary XSD integer magnitudes. These guest
+executions are distinct from receipts. The genuine false-ASK fixture includes a
+SUBSTR position case alongside its numeric, nullable-path and MINUS branches.
+
 ## Exact result expectations
 
 A SELECT fixture declares its projected variables, `Bag` or `Sequence`, and every
@@ -53,6 +62,24 @@ fixtures often compare values inside ASK so numeric lexical serialization does
 not obscure the property being checked.
 
 ## Coverage boundaries
+
+The negated-property-set examples have a bounded cross-engine disagreement. They
+are original REC-derived expectations, not imported official test vectors.
+The opt-in [reproduction script](../../../zk/sparql-evaluator/scripts/reproduce_nps_differential.py)
+loads the exact committed query/data pairs and reports the observed rows or error
+alongside their existing expected rows. It requires the named Python package at
+the exact version recorded in the script; it never installs dependencies or edits
+the corpus. Run either engine in an environment where that version is installed:
+
+```sh
+python3 zk/sparql-evaluator/scripts/reproduce_nps_differential.py --engine pyoxigraph
+python3 zk/sparql-evaluator/scripts/reproduce_nps_differential.py --engine rdflib
+```
+
+Its JSON is implementation-observation evidence, not a conformance oracle, guest
+execution or cryptographic receipt. An engine exception remains an explicit error
+and never becomes an empty result. The coverage manifest records the exact engine
+versions and the primary REC interpretation behind the retained expectations.
 
 The [SPARQL 1.1 Recommendation](https://www.w3.org/TR/2013/REC-sparql11-query-20130321/)
 is the normative baseline. The manifest separately records query algebra,

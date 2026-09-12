@@ -110,6 +110,8 @@ adds a committed catalog including empty named graphs, GRAPH and local snapshot
 FROM/FROM NAMED selection. V1 requests and commitments retain their meaning.
 [GPT-6] The [query-coverage corpus](references/evaluator-conformance.md) separates
 executed host semantics, explicit unsupported features, and guest proof evidence.
+Its opt-in NPS comparison recipe records other engines' observations without
+installing dependencies or treating their output as a conformance oracle.
 
 ### 1. Commit a credential graph and attest it as an issuer
 ```rust

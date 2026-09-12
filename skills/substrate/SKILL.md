@@ -42,11 +42,18 @@ the fixed-point `Dec` struct (EXACT integer/decimal arithmetic, no f64 rounding)
 tower), and the XSD lexical helpers `split_decimal`, `parse_xsd_f64`, `parse_xsd_f32`,
 `fmt_xsd_double`. `parse_xsd_f64` delegates to `sparq_core::parse_xsd_f64` (sq-9781x) — the
 shared XSD f64 SPELLING body. The `sparq-core` numeric-value cache layers a DATATYPE-AWARE
-gate on top (`sparq_core::numeric_cache_value`, sq-74oy4/sq-6b1lj: integers scale-0, decimals
-no-exponent, i128-fit, trimmed), so a cache-hit ⟺ `Num::of_literal` accepts — a lexical
+gate on top (`sparq_core::numeric_cache_value`: integer digit grammar and subtype
+facets, decimals without exponents, i128-fit, XML-whitespace-trimmed), so a cache-hit ⟺ `Num::of_literal` accepts — a lexical
 ill-formed for its datatype (`"1.5"^^xsd:integer`) misses the cache exactly as `of_literal`
 type-errors it, uniformly on `=`/`<`/`>`. The differential test
 `cache_f64_seam_vs_as_numeric_differential` pins that agreement.
+[GPT-6] `Num::of_literal` and `as_numeric` share the lexical/facet check
+`sparq_core::numeric_literal_valid`. Decimal spellings such as `"5.0"^^xsd:integer`
+and out-of-range subtype values such as `"1200"^^xsd:byte` return `None`.
+A valid integer or decimal beyond the tower's finite mantissa capacity also returns
+`None`; use `numeric_literal_valid` when asking about datatype membership instead
+of arithmetic representability. The existing overflow promotion policy is unchanged.
+
 Pulls `oxrdf` only when enabled. Two ordering methods on `Num`:
 - `Num::cmp_total` — ORDER BY / MIN/MAX total order; NaN totalised FIRST.
 - `Num::cmp_relational` — SPARQL `<`/`>` / D-entailment / RIF numeric equality; NaN → `None`
