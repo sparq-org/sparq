@@ -1,7 +1,7 @@
 {
   "schema": "sparq-evaluator-candidate-preparation-v1",
   "base_commit": "a816cf6b0e3bf7ed700f749a08240da3e22a552b",
-  "scope": "Native integration and execution definitions only. Guest compilation/execution and receipts for these current sources remain pending; c52 evidence is historical.",
+  "scope": "Historical native candidate preparation. Completed local V2-program evidence is recorded in proof-evidence-v2.json; the separately published V1 program requires its own hosted evidence.",
   "publication_ready": false,
   "source_sha256": {
     "crates/sparq-core/src/lib.rs": "8bf52d61b30421c8bfa2e73b7733e86f786ffabff074be720f915bc4df419aeb",
@@ -47,8 +47,7 @@
   "exporter_hermetic_tests": 15,
   "exporter_guard_mutations": 6,
   "pending": [
-    "Current guest compile and full actual execution including strict negative classification",
-    "Current three V1 succinct receipt fixtures with source/artifact export",
+    "Standalone V1 artifact hosted execution (a separate program)",
     "Independent source review dispositions",
     "Mandatory hosted feature-OFF/WASM/other ratchets"
   ],
@@ -102,12 +101,11 @@
     "native_model_clippy": "passed -D warnings all targets; /private/tmp/sparq-v2-model-integration-clippy.log",
     "preflight": "passed scoped integration; /private/tmp/sparq-v2-integrated-preflight.log",
     "exporter_hermetic_tests": 15,
-    "actual_execution_definitions": "All V1 and V2 builtin/aggregate/temporal/numeric capacity cases; three V1 and two V2 genuine receipts with one common exported program. Execution remains pending.",
+    "actual_execution_definitions": "Executed all V1 and V2 defined guest cases plus three V1 and two V2 genuine receipts at048cb4324; see proof-evidence-v2.json.",
     "publication_ready": false,
     "pending": [
-      "Actual framing compilation and strict negative-error classification",
-      "All V1 and V2 current-artifact guest executions and five genuine receipts",
       "Independent review dispositions and hosted gates"
     ]
-  }
+  },
+  "v2_local_campaign": "proof-evidence-v2.json"
 }
