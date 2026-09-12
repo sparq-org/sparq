@@ -1656,10 +1656,21 @@ fn subst_pattern(p: &GraphPattern, sub: &FxHashMap<Variable, oxrdf::NamedNode>) 
         G::Bgp { patterns } => G::Bgp {
             patterns: patterns.iter().map(|tp| subst_triple(tp, sub)).collect::<Option<Vec<_>>>()?,
         },
-        G::Path { subject, path, object } => G::Path {
-            subject: subst_term(subject, sub)?,
-            path: path.clone(),
-            object: subst_term(object, sub)?,
+        G::Path { subject, path, object } => {
+            // [GPT-6] Replacing a variable by a term changes the zero-length
+            // domain. A join hint must not seed VALUES terms outside nodes(G).
+            // Both SIP joins and batched OPTIONAL share this cold fallback.
+            let substituted = |term: &TermPattern| {
+                matches!(term, TermPattern::Variable(v) if sub.contains_key(v))
+            };
+            if path_nullable(path) && (substituted(subject) || substituted(object)) {
+                return None;
+            }
+            G::Path {
+                subject: subst_term(subject, sub)?,
+                path: path.clone(),
+                object: subst_term(object, sub)?,
+            }
         },
         G::Join { left, right } => G::Join {
             left: Box::new(subst_pattern(left, sub)?),
@@ -6979,30 +6990,30 @@ fn eval_path(
     enum End {
         Var(Variable),
         Bound(Id),
-        /// A concrete term ABSENT from the dictionary — unsatisfiable for ordinary
-        /// paths, but still the start of a zero-length solution for `p*` / `p?`.
-        Missing(Term),
     }
-    let resolve = |t: &TermPattern| -> Result<End, String> {
+    let mut resolve = |t: &TermPattern| -> Result<End, String> {
         Ok(match t {
             TermPattern::Variable(v) => End::Var(v.clone()),
             TermPattern::BlankNode(b) => End::Var(bnode_var(b)),
             other => {
                 let term = term_pattern_to_term(other)?;
-                match graph.id_of(&term) {
-                    Some(id) => End::Bound(id),
-                    None => End::Missing(term),
-                }
+                // [GPT-6] Keep absent constants as ordinary local IDs throughout
+                // the recursive relation, so alternatives retain each identity.
+                End::Bound(graph.id_of(&term).unwrap_or_else(|| local.intern(term)))
             }
         })
     };
     let (s_end, o_end) = (resolve(subject)?, resolve(object)?);
-    // Paths that admit the ZERO-LENGTH solution connect every term to itself — even
-    // terms that do not occur in the data (a constant endpoint on an empty graph).
-    let zero_len = matches!(path, PropertyPathExpression::ZeroOrMore(_) | PropertyPathExpression::ZeroOrOne(_));
-
-    let s_var = if let End::Var(v) = &s_end { Some(v.clone()) } else { None };
-    let o_var = if let End::Var(v) = &o_end { Some(v.clone()) } else { None };
+    let s_var = if let End::Var(v) = &s_end {
+        Some(v.clone())
+    } else {
+        None
+    };
+    let o_var = if let End::Var(v) = &o_end {
+        Some(v.clone())
+    } else {
+        None
+    };
     let same_var = matches!((&s_var, &o_var), (Some(a), Some(b)) if a == b);
     let mut vars: Vec<Variable> = Vec::new();
     if let Some(v) = &s_var {
@@ -7013,106 +7024,127 @@ fn eval_path(
             vars.push(v.clone());
         }
     }
-    // A concrete-but-absent endpoint makes the pattern unsatisfiable — unless the
-    // path has a zero-length solution, handled below.
-    if !zero_len && (matches!(s_end, End::Missing(_)) || matches!(o_end, End::Missing(_))) {
-        return Ok(Bindings::unsorted(vars, Vec::new()));
-    }
-    let s_bound = if let End::Bound(id) = &s_end { Some(*id) } else { None };
-    let o_bound = if let End::Bound(id) = &o_end { Some(*id) } else { None };
-
-    let mut rows: Vec<Row> = Vec::new();
-    let mut seen: FxHashSet<Row> = FxHashSet::default();
-    // DefaultGraphMode::Empty (L1 dataset view): no data pairs at top-level graph
-    // scope — exactly the empty-graph evaluation. The zero-length constant
-    // solutions below still apply (`<s> p* <s>` holds even on an empty graph).
-    if !(view::default_is_empty() || matches!(s_end, End::Missing(_)) || matches!(o_end, End::Missing(_))) {
-        let ends = PathEnds { s: s_bound, o: o_bound };
-        // `?x p ?x` (same variable at both ends — necessarily both unbound): only
-        // diagonal pairs survive the filter, and for the recursive operators the
-        // diagonal is computable WITHOUT the all-pairs closure: the zero-length
-        // operators' diagonal is exactly the node domain, and `p+`'s diagonal is
-        // the set of nodes on a directed cycle (SCC size >= 2, or a self-loop).
-        let pairs: Vec<(Id, Id)> = if same_var {
-            match path {
-                PropertyPathExpression::ZeroOrMore(_) | PropertyPathExpression::ZeroOrOne(_) => {
-                    graph_nodes(graph).into_iter().map(|n| (n, n)).collect()
-                }
-                PropertyPathExpression::OneOrMore(a) => {
-                    cyclic_nodes(graph, a)?.into_iter().map(|n| (n, n)).collect()
-                }
-                _ => path_bag_pairs(graph, path, ends)?,
+    let s_bound = if let End::Bound(id) = s_end {
+        Some(id)
+    } else {
+        None
+    };
+    let o_bound = if let End::Bound(id) = o_end {
+        Some(id)
+    } else {
+        None
+    };
+    let ends = PathEnds::terms(s_bound, o_bound);
+    // Use the same recursive rules on an empty active default graph. Its node
+    // domain is empty, but concrete endpoints retain their original local IDs.
+    let empty_graph;
+    let active = if view::default_is_empty() {
+        empty_graph = Graph::new();
+        &empty_graph
+    } else {
+        graph
+    };
+    let pairs: Vec<(Id, Id)> = if same_var {
+        match path {
+            PropertyPathExpression::ZeroOrMore(_) | PropertyPathExpression::ZeroOrOne(_) => {
+                graph_nodes(active).into_iter().map(|n| (n, n)).collect()
             }
-        } else {
-            path_bag_pairs(graph, path, ends)?
-        };
-        for (s, o) in pairs {
-            if s_bound.is_some_and(|b| s != b) || o_bound.is_some_and(|b| o != b) || (same_var && s != o) {
-                continue;
-            }
-            let mut row: Row = SmallVec::new();
-            if s_var.is_some() {
-                row.push(s);
-            }
-            if o_var.is_some() && !same_var {
-                row.push(o);
-            }
-            // [GPT-6] Alternative/sequence paths retain multiset cardinality.
-            // Only top-level nullable quantifiers need to suppress their extra
-            // constant-endpoint identity row below; their pair relation is a set.
-            if zero_len {
-                seen.insert(row.clone());
-            }
-            rows.push(row);
+            PropertyPathExpression::OneOrMore(a) => cyclic_nodes(active, a)?
+                .into_iter()
+                .map(|n| (n, n))
+                .collect(),
+            _ => path_bag_pairs(active, path, ends)?,
         }
-    }
-    if zero_len {
-        // The zero-length solution for a CONSTANT endpoint: `<s> p* ?x` yields
-        // {?x -> <s>} even on the empty graph (interning the absent term locally);
-        // `<s> p* <s>` yields the unit solution. (Variable–variable zero-length
-        // solutions over the graph's nodes come from `path_pairs` above.)
-        let const_id = |e: &End, local: &mut LocalVocab| match e {
-            End::Bound(id) => Some(*id),
-            End::Missing(t) => Some(local.intern(t.clone())),
-            End::Var(_) => None,
-        };
-        let zrow: Option<Row> = match (&s_end, &o_end) {
-            (End::Var(_), End::Var(_)) => None,
-            (s_c, End::Var(_)) => const_id(s_c, local).map(|id| std::iter::once(id).collect()),
-            (End::Var(_), o_c) => const_id(o_c, local).map(|id| std::iter::once(id).collect()),
-            (s_c, o_c) => {
-                let (a, b) = (const_id(s_c, local), const_id(o_c, local));
-                (a == b).then(SmallVec::new)
-            }
-        };
-        if let Some(row) = zrow {
-            if seen.insert(row.clone()) {
-                rows.push(row);
-            }
+    } else {
+        path_bag_pairs(active, path, ends)?
+    };
+    let mut rows = Vec::new();
+    for (s, o) in pairs {
+        if s_bound.is_some_and(|b| s != b)
+            || o_bound.is_some_and(|b| o != b)
+            || (same_var && s != o)
+        {
+            continue;
         }
+        check_path_growth(rows.len(), 1)?;
+        let mut row: Row = SmallVec::new();
+        if s_var.is_some() {
+            row.push(s);
+        }
+        if o_var.is_some() && !same_var {
+            row.push(o);
+        }
+        rows.push(row);
     }
     Ok(Bindings::unsorted(vars, rows))
 }
 
-/// Endpoint constraints pushed down into a path-relation computation (`None` =
-/// that end is unbound). CONTRACT: `path_pairs(graph, path, ends)` returns a
-/// SUBSET of the path's full (start,end) relation that contains EVERY pair
-/// satisfying the bounds. A sub-evaluation is free to IGNORE the hint and
-/// return extra relation pairs (callers always post-filter), but must never
-/// invent pairs outside the relation — so the pushdown is purely an
-/// optimisation and the post-filter in `eval_path` is the correctness backstop.
+/// [GPT-6] Endpoint roles and optional scan hints. A concrete RDF term can
+/// seed a nullable path even outside nodes(G); a variable merely constrained
+/// by an optimization cannot. In particular, sequence midpoints remain
+/// variables. Hints may return supersets, but must never invent relation pairs.
 #[derive(Clone, Copy, Default)]
 struct PathEnds {
     s: Option<Id>,
     o: Option<Id>,
+    s_term: bool,
+    o_term: bool,
 }
 
 impl PathEnds {
-    const NONE: PathEnds = PathEnds { s: None, o: None };
-    /// The constraint seen through `^path` (endpoints exchange roles).
+    const NONE: Self = Self {
+        s: None,
+        o: None,
+        s_term: false,
+        o_term: false,
+    };
+
+    fn terms(s: Option<Id>, o: Option<Id>) -> Self {
+        Self {
+            s,
+            o,
+            s_term: s.is_some(),
+            o_term: o.is_some(),
+        }
+    }
+
+    /// Left side of a sequence: the midpoint is always a fresh variable.
+    fn left(self, midpoint: Option<Id>) -> Self {
+        Self {
+            s: self.s,
+            o: midpoint,
+            s_term: self.s_term,
+            o_term: false,
+        }
+    }
+
+    fn right(self, midpoint: Option<Id>) -> Self {
+        Self {
+            s: midpoint,
+            o: self.o,
+            s_term: false,
+            o_term: self.o_term,
+        }
+    }
+
     #[inline]
-    fn swapped(self) -> PathEnds {
-        PathEnds { s: self.o, o: self.s }
+    fn swapped(self) -> Self {
+        Self {
+            s: self.o,
+            o: self.s,
+            s_term: self.o_term,
+            o_term: self.s_term,
+        }
+    }
+
+    /// Concrete endpoints take precedence over variable hints when selecting
+    /// a traversal seed (SPARQL 1.1 §18.4 term-var versus var-term rules).
+    fn seed(self) -> Option<(Id, Option<Id>, Dir, bool)> {
+        if self.s_term || (!self.o_term && self.s.is_some()) {
+            self.s.map(|s| (s, self.o, Dir::Fwd, self.s_term))
+        } else {
+            self.o.map(|o| (o, self.s, Dir::Rev, self.o_term))
+        }
     }
 }
 
@@ -7149,14 +7181,7 @@ fn path_bag_pairs(
         }
         P::Sequence(left, right) => {
             if let Some(s) = ends.s {
-                let near = path_bag_pairs(
-                    graph,
-                    left,
-                    PathEnds {
-                        s: Some(s),
-                        o: None,
-                    },
-                )?;
+                let near = path_bag_pairs(graph, left, ends.left(None))?;
                 let mut mids: FxHashMap<Id, usize> = FxHashMap::default();
                 for &(start, mid) in &near {
                     if start == s {
@@ -7166,14 +7191,7 @@ fn path_bag_pairs(
                 if mids.len() <= SEQ_MIDPOINT_FANOUT_LIMIT {
                     let mut pairs = Vec::new();
                     for (mid, count) in mids {
-                        for (start, o) in path_bag_pairs(
-                            graph,
-                            right,
-                            PathEnds {
-                                s: Some(mid),
-                                o: ends.o,
-                            },
-                        )? {
+                        for (start, o) in path_bag_pairs(graph, right, ends.right(Some(mid)))? {
                             if start == mid {
                                 check_path_growth(pairs.len(), count)?;
                                 pairs.extend(std::iter::repeat_n((s, o), count));
@@ -7182,19 +7200,9 @@ fn path_bag_pairs(
                     }
                     return Ok(pairs);
                 }
-                join_path_bags(
-                    near,
-                    path_bag_pairs(graph, right, PathEnds { s: None, o: ends.o })?,
-                )
+                join_path_bags(near, path_bag_pairs(graph, right, ends.right(None))?)
             } else if let Some(o) = ends.o {
-                let near = path_bag_pairs(
-                    graph,
-                    right,
-                    PathEnds {
-                        s: None,
-                        o: Some(o),
-                    },
-                )?;
+                let near = path_bag_pairs(graph, right, ends.right(None))?;
                 let mut mids: FxHashMap<Id, usize> = FxHashMap::default();
                 for &(mid, end) in &near {
                     if end == o {
@@ -7204,14 +7212,7 @@ fn path_bag_pairs(
                 if mids.len() <= SEQ_MIDPOINT_FANOUT_LIMIT {
                     let mut pairs = Vec::new();
                     for (mid, count) in mids {
-                        for (s, end) in path_bag_pairs(
-                            graph,
-                            left,
-                            PathEnds {
-                                s: None,
-                                o: Some(mid),
-                            },
-                        )? {
+                        for (s, end) in path_bag_pairs(graph, left, ends.left(Some(mid)))? {
                             if end == mid {
                                 check_path_growth(pairs.len(), count)?;
                                 pairs.extend(std::iter::repeat_n((s, o), count));
@@ -7263,22 +7264,33 @@ fn join_path_bags(left: Vec<(Id, Id)>, right: Vec<(Id, Id)>) -> Result<Vec<(Id, 
 /// narrowed by any bound endpoints (see [`PathEnds`] for the exact contract).
 /// Bound endpoints reach the leaves as range-scan prefixes and turn the
 /// recursive operators into single-source directed traversals.
-fn path_pairs(graph: &Graph, path: &PropertyPathExpression, ends: PathEnds) -> Result<FxHashSet<(Id, Id)>, String> {
+fn path_pairs(
+    graph: &Graph,
+    path: &PropertyPathExpression,
+    ends: PathEnds,
+) -> Result<FxHashSet<(Id, Id)>, String> {
     use PropertyPathExpression as P;
     Ok(match path {
         P::NamedNode(p) => predicate_pairs(graph, p, ends),
-        P::Reverse(a) => path_pairs(graph, a, ends.swapped())?.into_iter().map(|(s, o)| (o, s)).collect(),
+        P::Reverse(a) => path_pairs(graph, a, ends.swapped())?
+            .into_iter()
+            .map(|(s, o)| (o, s))
+            .collect(),
         P::Sequence(a, c) => {
             if let Some(s) = ends.s {
                 // Bound start: evaluate the near hop from `s` only, then push each
                 // reached midpoint into the far hop (which also receives the bound
                 // object, enabling early exit deeper down).
-                let av = path_pairs(graph, a, PathEnds { s: Some(s), o: None })?;
-                let mids: FxHashSet<Id> = av.iter().filter(|&&(x, _)| x == s).map(|&(_, m)| m).collect();
+                let av = path_pairs(graph, a, ends.left(None))?;
+                let mids: FxHashSet<Id> = av
+                    .iter()
+                    .filter(|&&(x, _)| x == s)
+                    .map(|&(_, m)| m)
+                    .collect();
                 if mids.len() <= SEQ_MIDPOINT_FANOUT_LIMIT {
                     let mut out = FxHashSet::default();
                     for &m in &mids {
-                        for (m2, o) in path_pairs(graph, c, PathEnds { s: Some(m), o: ends.o })? {
+                        for (m2, o) in path_pairs(graph, c, ends.right(Some(m)))? {
                             if m2 == m {
                                 out.insert((s, o));
                             }
@@ -7288,17 +7300,21 @@ fn path_pairs(graph: &Graph, path: &PropertyPathExpression, ends: PathEnds) -> R
                 } else {
                     // Fan-out too large for per-midpoint pushes: the far hop gets
                     // only the outer bound endpoint.
-                    join_seq(av, path_pairs(graph, c, PathEnds { s: None, o: ends.o })?)
+                    join_seq(av, path_pairs(graph, c, ends.right(None))?)
                 }
             } else if let Some(o) = ends.o {
                 // Bound object only: mirror image — far hop backwards from `o`,
                 // midpoints pushed into the near hop as bound objects.
-                let cv = path_pairs(graph, c, PathEnds { s: None, o: Some(o) })?;
-                let mids: FxHashSet<Id> = cv.iter().filter(|&&(_, y)| y == o).map(|&(m, _)| m).collect();
+                let cv = path_pairs(graph, c, ends.right(None))?;
+                let mids: FxHashSet<Id> = cv
+                    .iter()
+                    .filter(|&&(_, y)| y == o)
+                    .map(|&(m, _)| m)
+                    .collect();
                 if mids.len() <= SEQ_MIDPOINT_FANOUT_LIMIT {
                     let mut out = FxHashSet::default();
                     for &m in &mids {
-                        for (s, m2) in path_pairs(graph, a, PathEnds { s: None, o: Some(m) })? {
+                        for (s, m2) in path_pairs(graph, a, ends.left(Some(m)))? {
                             if m2 == m {
                                 out.insert((s, o));
                             }
@@ -7309,7 +7325,10 @@ fn path_pairs(graph: &Graph, path: &PropertyPathExpression, ends: PathEnds) -> R
                     join_seq(path_pairs(graph, a, PathEnds::NONE)?, cv)
                 }
             } else {
-                join_seq(path_pairs(graph, a, PathEnds::NONE)?, path_pairs(graph, c, PathEnds::NONE)?)
+                join_seq(
+                    path_pairs(graph, a, PathEnds::NONE)?,
+                    path_pairs(graph, c, PathEnds::NONE)?,
+                )
             }
         }
         // Endpoints push into BOTH branches of an alternative unchanged.
@@ -7318,47 +7337,46 @@ fn path_pairs(graph: &Graph, path: &PropertyPathExpression, ends: PathEnds) -> R
             s.extend(path_pairs(graph, c, ends)?);
             s
         }
-        P::OneOrMore(a) => match (ends.s, ends.o) {
-            (Some(s), _) => directed_reach(graph, a, s, ends.o, Dir::Fwd)?.into_iter().map(|r| (s, r)).collect(),
-            (None, Some(o)) => directed_reach(graph, a, o, None, Dir::Rev)?.into_iter().map(|r| (r, o)).collect(),
-            (None, None) => transitive_closure_pairs(path_pairs(graph, a, PathEnds::NONE)?),
-        },
-        P::ZeroOrMore(a) => match (ends.s, ends.o) {
-            // A bound endpoint needs only ITS reflexive pair, not the whole node
-            // domain (`<s> p* <s>` holds for any term, see the zero-length rules).
-            (Some(s), _) => {
-                let mut c: FxHashSet<(Id, Id)> =
-                    directed_reach(graph, a, s, ends.o, Dir::Fwd)?.into_iter().map(|r| (s, r)).collect();
-                c.insert((s, s));
-                c
-            }
-            (None, Some(o)) => {
-                let mut c: FxHashSet<(Id, Id)> =
-                    directed_reach(graph, a, o, None, Dir::Rev)?.into_iter().map(|r| (r, o)).collect();
-                c.insert((o, o));
-                c
-            }
-            (None, None) => {
-                let mut c = transitive_closure_pairs(path_pairs(graph, a, PathEnds::NONE)?);
-                c.extend(graph_nodes(graph).into_iter().map(|n| (n, n)));
-                c
-            }
-        },
-        P::ZeroOrOne(a) => {
-            let mut s = path_pairs(graph, a, ends)?;
-            match (ends.s, ends.o) {
-                // Bound endpoint: only its own reflexive pair (no full-store node scan).
-                (Some(x), None) | (None, Some(x)) => {
-                    s.insert((x, x));
-                }
-                (Some(x), Some(y)) => {
-                    if x == y {
-                        s.insert((x, x));
+        P::OneOrMore(a) | P::ZeroOrMore(a) => {
+            let reflexive = matches!(path, P::ZeroOrMore(_));
+            if let Some((start, target, dir, is_term)) = ends.seed() {
+                // A variable hint outside nodes(G) cannot become a new ALP
+                // source. Checking the two indexes avoids a full node scan.
+                if !is_term && !is_graph_node(graph, start) {
+                    FxHashSet::default()
+                } else {
+                    let mut reached = directed_reach(graph, a, start, target, dir)?;
+                    if reflexive {
+                        reached.insert(start);
                     }
+                    reached
+                        .into_iter()
+                        .map(|end| match dir {
+                            Dir::Fwd => (start, end),
+                            Dir::Rev => (end, start),
+                        })
+                        .collect()
                 }
-                (None, None) => s.extend(graph_nodes(graph).into_iter().map(|n| (n, n))),
+            } else {
+                let mut pairs = transitive_closure_pairs(path_pairs(graph, a, PathEnds::NONE)?);
+                if reflexive {
+                    pairs.extend(graph_nodes(graph).into_iter().map(|n| (n, n)));
+                }
+                pairs
             }
-            s
+        }
+        P::ZeroOrOne(a) => {
+            let mut pairs = path_pairs(graph, a, ends)?;
+            if let Some((node, target, _, is_term)) = ends.seed() {
+                if target.is_none_or(|target| target == node)
+                    && (is_term || is_graph_node(graph, node))
+                {
+                    pairs.insert((node, node));
+                }
+            } else {
+                pairs.extend(graph_nodes(graph).into_iter().map(|n| (n, n)));
+            }
+            pairs
         }
         P::NegatedPropertySet(props) => negated_property_pairs(graph, props, ends),
     })
@@ -7430,8 +7448,8 @@ fn directed_reach(
             // "may return extra relation pairs" clause.
             None => {
                 let ends = match dir {
-                    Dir::Fwd => PathEnds { s: Some(node), o: None },
-                    Dir::Rev => PathEnds { s: None, o: Some(node) },
+                    Dir::Fwd => PathEnds::terms(Some(node), None),
+                    Dir::Rev => PathEnds::terms(None, Some(node)),
                 };
                 for (s, o) in path_pairs(graph, sub, ends)? {
                     match dir {
@@ -7610,6 +7628,25 @@ fn negated_property_pairs(graph: &Graph, props: &[oxrdf::NamedNode], ends: PathE
         }
     }
     out
+}
+
+// [GPT-6] Structural nullability is a conservative substitution guard; the
+// actual relation still follows endpoint roles and sequence's fresh midpoint.
+fn path_nullable(path: &PropertyPathExpression) -> bool {
+    use PropertyPathExpression as P;
+    match path {
+        P::NamedNode(_) | P::NegatedPropertySet(_) => false,
+        P::ZeroOrMore(_) | P::ZeroOrOne(_) => true,
+        P::Reverse(inner) | P::OneOrMore(inner) => path_nullable(inner),
+        P::Sequence(left, right) => path_nullable(left) && path_nullable(right),
+        P::Alternative(left, right) => path_nullable(left) || path_nullable(right),
+    }
+}
+
+// [GPT-6] Dictionary membership also includes predicate-only terms.
+fn is_graph_node(graph: &Graph, id: Id) -> bool {
+    !graph.store.scan(&[Some(id), None, None]).rows.is_empty()
+        || !graph.store.scan(&[None, None, Some(id)]).rows.is_empty()
 }
 
 /// Every id that appears as a subject or object (the domain of zero-length path matches).
@@ -17813,7 +17850,7 @@ mod path_pushdown_tests {
         let mut rows = 0usize;
         for &s in &starts {
             let t = Instant::now();
-            let r = path_pairs(&g, &plus, PathEnds { s: Some(s), o: None }).unwrap();
+            let r = path_pairs(&g, &plus, PathEnds::terms(Some(s), None)).unwrap();
             times.push(t.elapsed().as_secs_f64());
             rows += r.len();
         }
@@ -17836,18 +17873,18 @@ mod path_pushdown_tests {
         let (a, hit, miss) = (id(0), id(SIZE - 1), id(SIZE)); // same cluster / next cluster
         let t = Instant::now();
         for _ in 0..100 {
-            let _ = path_pairs(&g, &plus, PathEnds { s: Some(a), o: Some(hit) }).unwrap();
+            let _ = path_pairs(&g, &plus, PathEnds::terms(Some(a), Some(hit))).unwrap();
         }
         eprintln!("both-bound (hit, early exit): {:.3?}/iter", t.elapsed() / 100);
         let t = Instant::now();
         for _ in 0..100 {
-            let r = path_pairs(&g, &plus, PathEnds { s: Some(a), o: Some(miss) }).unwrap();
+            let r = path_pairs(&g, &plus, PathEnds::terms(Some(a), Some(miss))).unwrap();
             assert!(!r.iter().any(|&(_, y)| y == miss));
         }
         eprintln!("both-bound (miss, cluster exhausted): {:.3?}/iter", t.elapsed() / 100);
         let t = Instant::now();
         for _ in 0..100 {
-            let _ = path_pairs(&g, &plus, PathEnds { s: None, o: Some(a) }).unwrap();
+            let _ = path_pairs(&g, &plus, PathEnds::terms(None, Some(a))).unwrap();
         }
         eprintln!("bound-object reverse traversal: {:.3?}/iter", t.elapsed() / 100);
     }
@@ -22429,3 +22466,8 @@ mod capped_rhs_tests {
         );
     }
 }
+
+// [GPT-6] Nullable path semantics have an independent bottom-up test oracle.
+#[cfg(test)]
+#[path = "nullable_path_tests.rs"]
+mod nullable_path_tests;
