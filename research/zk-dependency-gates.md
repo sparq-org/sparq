@@ -6,11 +6,18 @@ workspace's cargo-deny, cargo-vet and SBOM run cannot cover them implicitly.
 supply-chain gate and daily advisory watchdog. Changes to nested lockfiles or SDK
 patch provenance trigger the Rust dependency checks.
 
+This inventory covers the root workspace, evaluator workspace and nested guest.
+Other detached tools and examples with their own lockfiles are outside this
+change and remain a separate dependency-coverage follow-up.
+
 Every graph uses the root deny policy. Vet checks use the root audit store and pin
 both its imported attestations (`--locked`) and the Cargo lockfile
 (`--cargo-arg=--locked`). `--frozen` prevents network refresh during verification.
 Missing attestations are failures, not exemptions inferred from successful builds.
 Audit refresh and new audit records remain explicit reviewed policy changes.
+The deny policy path is absolute; callers' current directories cannot select a
+different file. Cargo-deny 0.20.2 accepts `--config` before `check`, as exercised
+by the real three-graph helper smoke. This is version-specific CLI evidence.
 
 Each vendored SDK package must explicitly opt into `audit-as-crates-io` in the vet
 policy. This establishes the upstream registry release's review obligation; it
