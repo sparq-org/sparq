@@ -358,9 +358,12 @@ id 17688455, last updated 2026-07-02):
   `{"context":"gate","integration_id":15368}` — `ci-summary / gate` is the
   sole required check. No individual per-crate matrix legs, no individual
   `opt-in <X>` legs appear in the required list.
-- `merge_queue` uses `grouping_strategy: "ALLGREEN"` and
-  `check_response_timeout_minutes: 60`; the queue blocks only on the required
-  `gate` check, not on absent or skipped siblings.
+- At the 2026-07-03 verification, `merge_queue` used
+  `grouping_strategy: "ALLGREEN"` and `check_response_timeout_minutes: 60`;
+  the queue blocked only on the required `gate` check, not on absent or skipped
+  siblings. #6048 supersedes the grouping premise: `merge_group` is now forced
+  to `mode=full`, which permits `HEADGREEN` to validate the complete combined
+  head once without relying on selected-mode evidence from every prefix.
 - A selection-skipped job (`conclusion=skipped`) from a static-matrix `if:`
   guard **reports a complete check-run** (the `skipped` conclusion is present,
   never "expected but missing"). `ci_summary_gate.py` already treats `skipped`
@@ -382,32 +385,40 @@ id 17688455, last updated 2026-07-02):
 - Three properties make this safe and must not drift; they are pinned by
   `scripts/tests/test_ci_select_wiring.py` (`TestRequiredCheckAnchor`):
   (1) the `ci-summary / gate` job name is exactly `"gate"` (matches the
-  ruleset's `context:"gate"`); (2) that job has no `if:` guard (always runs,
-  so the merge queue always gets a response within the 60-minute timeout
-  window); (3) `ci-summary.yml` triggers on `merge_group` (required for the
-  gate to produce a check-run on queue entries at all).
+  ruleset's `context:"gate"`); (2) that job has no `if:` guard (always scheduled,
+  but completion before the deadline still depends on runner capacity and upstream
+  checks; the live timeout was re-verified as 360 minutes on 2026-09-06);
+  (3) `ci-summary.yml` triggers on `merge_group` (required for the
+  gate to produce a check-run on queue entries at all). Under HEADGREEN a fourth
+  property is load-bearing: (4) the reusable selector adds `--full` for every
+  `merge_group` before either the label override or shadow escape hatch. The
+  structural and mutation checks in `TestWiring` pin that seam.
 
 ## 6. Correctness safeguards
 
-1. **Nightly scheduled FULL run** on `main` (`schedule` event ⇒ `mode=full`).
+1. **Merge-group FULL run**: every `merge_group` event forces `mode=full`.
+   HEADGREEN therefore gates the complete combined tree once; PR-head runs keep
+   selected mode for fast feedback. Removing, inverting, or demoting the override
+   fails the wiring mutation test.
+2. **Nightly scheduled FULL run** on `main` (`schedule` event ⇒ `mode=full`).
    Any nightly failure whose job was selection-skipped in the PRs that landed
    since the last green nightly is *prima facie* a selection bug: auto-file a
    P1 bead/issue with the offending job + suspect PRs.
-2. **`ci-full` label**: applying it forces `mode=full`; the workflow reacts to
+3. **`ci-full` label**: applying it forces `mode=full`; the workflow reacts to
    `labeled`/`unlabeled` so toggling re-evaluates. One auditable override, no
    commit-message magic.
-3. **`workflow_dispatch`** manual full run for ad-hoc verification.
-4. **Shadow-mode rollout**: a flag under which the selector computes and
+4. **`workflow_dispatch`** manual full run for ad-hoc verification.
+5. **Shadow-mode rollout**: a flag under which the selector computes and
    *reports* the would-skip set while every job still runs. Enforce only
    after a shadow window (order of twenty PRs) shows **zero** cases where a
    would-have-been-skipped job failed for a reason attributable to the PR.
    The shadow report is the honest measurement of both soundness and savings.
-5. **Selector self-tests** (bead 1 + bead 2): golden diffs → expected sets —
+6. **Selector self-tests** (bead 1 + bead 2): golden diffs → expected sets —
    leaf change ⇒ exactly that crate; `sparq-core` change ⇒ all members;
    dev-dep and optional-dep edges propagate; every §4.1 trigger class ⇒ full;
    unowned path ⇒ full; internal error ⇒ full; plus a test pinned against the
    real workspace metadata so graph-shape regressions surface in review.
-6. **Transparency**: the per-PR step-summary (§5.1) makes every skip decision
+7. **Transparency**: the per-PR step-summary (§5.1) makes every skip decision
    reviewable where reviewers already look.
 
 **§6 graduation note (bead sq-fmx4u.5, ENFORCEMENT FLIPPED 2026-07-03). [FABLE-5]**
@@ -471,9 +482,14 @@ failed nightly jobs with suspect landed PRs and auto-files a deduplicated issue.
   CodeQL, fuzz, wasm, perf-gate) stay always-run until phase 2 scopes them
   deliberately (bead 6). Minimizes the initial soundness surface where the
   throughput win is smallest.
-- **P8 — selection applies to `merge_group` too**: the queue-entry diff vs
-  the target tip is the union of queued content — conservative by
-  construction, and queue width is where the throughput pain concentrates.
+- **P8 — full combined-head validation on `merge_group`** [GPT-6-ASTRA]:
+  #6048 supersedes queue selection and its ALLGREEN prefix-induction premise.
+  The reusable caller forces `--full` before label/shadow handling, so every
+  selection-controlled leg validates the combined head. Existing event and
+  change-class guards still apply; this does not add otherwise absent legs.
+  After the staged HEADGREEN flip, this establishes the group-head property,
+  not greenness of every intermediate squash commit on `main`. PR-head selection
+  remains enabled; see the [rollout trade-off](../docs/branch-protection.md#other-settings).
 - **P9 — the SAFE list starts empty** and only audit-proven entries join it.
 - **P10 — enforce only after the shadow window** (§6.4); nightly full +
   `ci-full` label remain permanent backstops. *(sq-fmx4u.5, 2026-07-03:
