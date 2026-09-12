@@ -64,8 +64,8 @@ full wallet binding is synthetic experiment metadata, not public proof disclosur
 The first measured run of each planner executes tamper controls for proof bytes,
 released terms, requested query, a changed challenge on both sides, and the
 verifier-owned status snapshot. Every run checks replay rejection. These checks
-are excluded from normal prove/verify timers; backend execution errors cannot count
-as successful rejection controls. A nonzero `bb verify` exit is recorded as
+are excluded from normal prove/verify timers; typed spawn and host-I/O errors
+cannot count as successful rejection controls. A nonzero `bb verify` exit is recorded as
 `rejected` by the driver, without claiming to distinguish invalid proofs from all
 backend failures. Metrics are enabled explicitly with
 `CircuitProver::with_stage_metrics()` and drained with `take_stage_metrics()`;
