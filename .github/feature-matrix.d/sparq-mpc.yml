@@ -22,3 +22,25 @@
   crate: "sparq-mpc"
   features: "insecure-test-rng"
   test: true
+
+# [OPUS-5] sq-dz10l (epic sq-0dksu, Phase 6): the per-protocol security-properties
+# ANNOTATION GRAPH + over-claim guards in sparq-mpc — the sibling of the sparq-zk
+# `secprop-annotations` leg. The `secprop` module (`#[cfg(feature =
+# "secprop-annotations")] pub mod secprop;` in lib.rs) and its 11-test integration
+# suite `tests/secprop_annotations.rs` (`#![cfg(feature = "secprop-annotations")]`)
+# are BOTH behind the default-OFF feature, so ci.yml's default-feature lane compiles
+# them EMPTY and runs ZERO of them — the silent-skip gap this leg closes, and exactly
+# what the structural C1 guard (scripts/check-feature-test-execution.py) reports as
+# UNMAPPED until an executor exists. The feature pulls the optional `oxttl` Turtle
+# parser (already a workspace dep) plus the ZERO-dependency `sparq-secprop-vocab` leaf
+# for the `secx:` IRI constants; the crate declares no `default` feature set, so a
+# default build links neither and compiles `secprop` out.
+#
+# The suite ASSERTS what the annotation graph records (protocol -> assumption/assurance
+# claims and the four over-claim + descriptor-drift guards); it establishes NO
+# soundness or privacy property of the MPC protocols themselves, which remain
+# research-grade, semi-honest-only and NOT externally audited (sq-qhy4).
+- name: "sparq-mpc (secprop-annotations — per-protocol annotation graph + over-claim guards)"
+  crate: "sparq-mpc"
+  features: "secprop-annotations"
+  test: true
