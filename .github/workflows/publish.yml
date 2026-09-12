@@ -46,6 +46,8 @@
 # separately gated by explicit boolean inputs; a tag alone never force-publishes. A Release
 # published directly by a maintainer remains an explicit authorization for the primary npm and
 # PyPI jobs, while the optional npm packages still require their dispatch inputs.
+# [GPT-6] Dispatch at the immutable release tag, never a branch. setup verifies the
+# tag/checkout identity and the versions of every selected registry package first.
 name: publish
 
 on:
@@ -83,6 +85,25 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  setup:
+    name: verify immutable package source
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify immutable release source
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name || github.ref_name }}
+          PUBLISH_NPM: ${{ github.event_name == 'release' || inputs.publish_npm }}
+          PUBLISH_SOLID_SERVER: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_solid_server }}
+          PUBLISH_EYEREASONER_COMPAT: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_eyereasoner_compat }}
+        run: python3 scripts/check-release-source.py --tag "$RELEASE_TAG" --publish
+
   # ---- npm: @sparq-org/sparq via OIDC TRUSTED PUBLISHING (no NPM_TOKEN) ----
   # [OPUS-4.8] sq-v286.11 (maintainer #758): switched from a long-lived NPM_TOKEN to npm's
   # OIDC Trusted Publishing (GA 2025-07-31, github.blog/changelog/2025-07-31). The npm CLI
@@ -100,6 +121,7 @@ jobs:
   # and removes the token — every CI publish thereafter is tokenless. See docs/release.md.
   npm:
     name: npm publish (OIDC trusted publishing)
+    needs: setup
     runs-on: ubuntu-latest
     if: >-
       github.event_name == 'release' ||
@@ -112,6 +134,8 @@ jobs:
         working-directory: js
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
           targets: wasm32-unknown-unknown
@@ -142,6 +166,12 @@ jobs:
         run: npm run check:package
       # `prepack` (build:wasm + build:ts + bundle skills) runs automatically on `npm publish`,
       # producing the same tree `npm pack --dry-run` validates in js.yml.
+      - name: Reverify remote release tag immediately before publish
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name || github.ref_name }}
+        run: >-
+          python3 "$GITHUB_WORKSPACE/scripts/check-release-source.py"
+          --repo-root "$GITHUB_WORKSPACE" --tag "$RELEASE_TAG" --remote-tag origin
       - name: Publish to npm (OIDC trusted publishing + provenance)
         # NO `env: NODE_AUTH_TOKEN` — trusted publishing authenticates via the GitHub Actions
         # OIDC token (id-token: write). The npm CLI detects the OIDC environment and exchanges
@@ -195,6 +225,7 @@ jobs:
   # by design — no static token is stored). See docs/release.md.
   npm-eyereasoner-compat:
     name: npm publish @sparq-org/eyereasoner-compat (OIDC trusted publishing)
+    needs: setup
     runs-on: ubuntu-latest
     if: >-
       github.event_name == 'workflow_dispatch' && inputs.publish_eyereasoner_compat
@@ -206,6 +237,8 @@ jobs:
         working-directory: packages/eyereasoner-compat
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
           targets: wasm32-unknown-unknown
@@ -231,6 +264,12 @@ jobs:
           npm run check:package
       # `prepack` rebuilds the same tree; provenance is emitted by default under trusted
       # publishing (--provenance is belt-and-suspenders). --access public: scoped package.
+      - name: Reverify remote release tag immediately before publish
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name || github.ref_name }}
+        run: >-
+          python3 "$GITHUB_WORKSPACE/scripts/check-release-source.py"
+          --repo-root "$GITHUB_WORKSPACE" --tag "$RELEASE_TAG" --remote-tag origin
       - name: Publish to npm (OIDC trusted publishing + provenance)
         run: npm publish --provenance --access public
       - name: Verify published provenance attestation
@@ -272,6 +311,7 @@ jobs:
   # by design — no static token is stored). See docs/release.md.
   npm-solid-server:
     name: npm publish @sparq-org/solid-server (OIDC trusted publishing)
+    needs: setup
     runs-on: ubuntu-latest
     if: >-
       github.event_name == 'workflow_dispatch' && inputs.publish_solid_server
@@ -283,6 +323,8 @@ jobs:
         working-directory: packages/solid-server
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
           targets: wasm32-unknown-unknown
@@ -306,6 +348,12 @@ jobs:
       # dependencies are resolved by the consumer at install time and are not bundled, so no npm
       # install is needed for a correct tarball. Provenance is emitted by default under trusted
       # publishing (--provenance is belt-and-suspenders). --access public: scoped package.
+      - name: Reverify remote release tag immediately before publish
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name || github.ref_name }}
+        run: >-
+          python3 "$GITHUB_WORKSPACE/scripts/check-release-source.py"
+          --repo-root "$GITHUB_WORKSPACE" --tag "$RELEASE_TAG" --remote-tag origin
       - name: Publish to npm (OIDC trusted publishing + provenance)
         run: npm publish --provenance --access public
       - name: Verify published provenance attestation
@@ -328,6 +376,7 @@ jobs:
   # before/after publishing. crates.io-native provenance stays an OPEN external sub-gap.
   crates:
     name: attest crate packages
+    needs: setup
     runs-on: ubuntu-latest
     if: >-
       github.event_name == 'release' ||
@@ -338,6 +387,8 @@ jobs:
       attestations: write # write the attestation to the repo's attestation store
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
       - name: Rust (preinstalled stable)
         # [FABLE-5] CI-economy (2026-07-18 directive): the ubuntu runner image
         # ships a rustup stable toolchain; the SHA-pinned action's `rustup
@@ -420,6 +471,7 @@ jobs:
   #   API token is stored). The CI is fully wired; that PyPI account step is the only open item.
   pypi-build:
     name: build sparq-rdf wheels (${{ matrix.platform.target }})
+    needs: setup
     if: >-
       github.event_name == 'release' ||
       (github.event_name == 'workflow_dispatch' && inputs.publish_pypi)
@@ -451,6 +503,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
       # maturin-action provisions the Rust toolchain + (on Linux) the manylinux container.
       # `python-release` profile keeps unwinding panics — the plain release profile is
       # panic=abort, which would turn a Rust panic into a hard interpreter abort (pyproject.toml).
@@ -469,6 +523,7 @@ jobs:
 
   pypi-sdist:
     name: build sparq-rdf sdist
+    needs: setup
     if: >-
       github.event_name == 'release' ||
       (github.event_name == 'workflow_dispatch' && inputs.publish_pypi)
@@ -477,6 +532,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
       - name: Build sdist
         uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
@@ -500,6 +557,10 @@ jobs:
       contents: read
       id-token: write # OIDC token PyPI Trusted Publishing exchanges + PEP-740 attestation signing
     steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
       # Collect every wheel + the sdist into one dist/ tree (download-artifact merges patterns).
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -512,6 +573,10 @@ jobs:
       # Publisher, this action mints a short-lived PyPI token via OIDC and (attestations: true,
       # the default) generates + uploads a PEP-740 attestation per file. No static API token.
       # `print-hash` echoes the uploaded digests into the log for audit.
+      - name: Reverify remote release tag immediately before publish
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name || github.ref_name }}
+        run: python3 scripts/check-release-source.py --tag "$RELEASE_TAG" --remote-tag origin
       - name: Publish to PyPI with provenance attestations
         uses: pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247 # v1.14.1
         with:

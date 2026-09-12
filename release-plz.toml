@@ -104,11 +104,12 @@ git_release_enable = false
 #   `crates` job reverts to attest-only over the .crate bytes — "the point of adoption".
 publish = false
 
-# [GPT-5.6] #3399 / first-release bootstrap: crates.io is still empty, but an abandoned
-# `v0.1.0` tag already exists. Use git tags as the version baseline until the first complete
-# registry publish, so release-plz proposes v0.1.1 without moving/reusing that public tag.
-# The post-bootstrap flip is atomic: `git_only = false` together with `publish = true` and
-# the pre-wired crates.io OIDC step in release-plz.yml.
+# [GPT-6] #3399 / recovery bootstrap: crates.io is still empty, and the existing `v0.1.0`
+# and `v0.1.1` tags are incomplete immutable history. Use git tags as the version baseline
+# until the first complete registry publish; the manual cross-ecosystem version PR targets
+# v0.1.2. The post-bootstrap flip is atomic: `git_only = false` together with `publish = true`
+# and the pre-wired crates.io OIDC step in release-plz.yml. Generated Cargo Release-PRs must
+# still be augmented with matching npm manifest + shared-lock versions before merge.
 git_only = true
 
 # --- The locked version_group: the complete crates.io dependency closure -----
