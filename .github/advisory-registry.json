@@ -1,6 +1,13 @@
 {
  "_doc": "Advisory-job registry. [OPUS-5] sparq-org/sparq#3773 made this file LOAD-BEARING: it is the ONLY thing that can make a check-run non-gating. scripts/ci_summary_gate.py excludes a check-run from the `gate` verdict IFF its name is a key here (whole-name, case-insensitive; a ${{ ... }} expression in a key matches its runtime expansion); everything else GATES, whatever it is called. Before #3773 the gate INFERRED advisory status from the job name matching \\b(advisory|informational)\\b, which silently neutralised four real gates. Every entry needs {owner_bead, promotion_criteria, registered, workflow, job_id}: workflow+job_id is the STABLE IDENTITY the declaration binds to, and check-advisory-registry.py C4 fails if that job's current YAML name is not exactly the key — so renaming a job can never silently flip whether it gates (the renamed job GATES, fail-closed, and C4 REDs until the declaration is updated). A job that intentionally runs a gate-classified command (python/shell/node/npm — C3, now language-agnostic) must also carry gate_script_waiver. C2 keeps requiring that any job whose NAME carries an advisory/informational token be declared here or lose the misleading token. Maintained by scripts/check-advisory-registry.py. PROMOTING a lane = deleting its entry.",
  "jobs": {
+  "actionlint (advisory)": {
+   "workflow": "actionlint.yml",
+   "job_id": "actionlint-advisory",
+   "owner_bead": "sparq-org/sparq#6302",
+   "promotion_criteria": "promote after the lane has run successfully across pull-request and merge-group traffic with no unresolved findings or false positives; remove this registry entry so actionlint findings become gating",
+   "registered": "2026-09-04"
+  },
   "review-lane blind-spot alarm": {
    "workflow": "review-alarm.yml",
    "job_id": "alarm",
