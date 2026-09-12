@@ -75,6 +75,7 @@ pub struct ResultCredential {
 /// Supply the verifier's own issuer allow-list and status snapshots. The prover
 /// cannot replace these through the presentation. Versions outside the inclusive
 /// interval are excluded from the accepted set; conflicting snapshots reject.
+/// Each accepted snapshot must fit the circuit's 1024-bit status tree in full.
 #[derive(Debug, Clone)]
 pub struct ResultPolicy {
     /// Issuers the relying party accepts.
@@ -1352,6 +1353,21 @@ mod tests {
         policy.min_version = 8;
         policy.max_version = 9;
         assert!(prepare_result(QUERY, &credentials, &rows, &policy, &nonce).is_err());
+    }
+
+    #[test]
+    fn oversized_status_snapshots_reject_preparation_and_public_statement() {
+        let (credentials, mut policy, nonce, rows) = fixture();
+        let prepared = prepare_result(QUERY, &credentials, &rows, &policy, &nonce).unwrap();
+        assert_eq!(policy.snapshots[0].bits.len(), 128);
+        assert!(public_statement(&prepared.presentation, &policy, &nonce).is_ok());
+        for suffix in [0, 0xFF] {
+            policy.snapshots[0].bits.push(suffix);
+            assert!(policy.entries().is_err());
+            assert!(prepare_result(QUERY, &credentials, &rows, &policy, &nonce).is_err());
+            assert!(public_statement(&prepared.presentation, &policy, &nonce).is_err());
+            policy.snapshots[0].bits.pop();
+        }
     }
 
     #[test]
