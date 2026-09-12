@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "source_commit": "db21481af0e1b1b91c0ff7d458b9c0d5ec40cfae",
+  "source_commit": "bab2e021624204936f48931aef153f0dcf568891",
   "date": "2026-09-12",
   "platform": "macOS arm64",
   "toolchain": {
@@ -8,16 +8,16 @@
     "guest_rust": "1.97.0",
     "host_rust": "1.97.1"
   },
-  "artifact_sha256": "9e62a058b952ba3b256dec7502c1f55d9ceaecdfa8bafab22cff675464ada408",
+  "artifact_sha256": "59b8726900d68f5300e515b8f2fdfdf41712c50e2cb14a660a582cdf8742422d",
   "image_id": [
-    4226903298,
-    1737109912,
-    323086654,
-    132275724,
-    1898706681,
-    4167760866,
-    1885247632,
-    3084952257
+    224670942,
+    2631607430,
+    2163020884,
+    966411787,
+    527482683,
+    2069213101,
+    1867083503,
+    1653638852
   ],
   "receipt_kind": "Succinct",
   "dev_mode_disabled": true,
@@ -33,7 +33,7 @@
   "artifact_admission_tests": 3,
   "artifact_admission_result": "passed",
   "native_evidence": {
-    "normative_positive_cases": 79,
+    "normative_positive_cases": 82,
     "rejection_cases": 34,
     "relation_tests": 16,
     "coverage_metadata_tests": 2,
@@ -49,5 +49,67 @@
   },
   "hosted_ci": "pending publication",
   "cross_platform_reproducibility": "not established",
-  "privacy_limit": "Standard Succinct receipts retain outer recursion control metadata; this is not an external cryptographic audit or complete execution-length hiding claim."
+  "privacy_limit": "Standard Succinct receipts retain outer recursion control metadata; this is not an external cryptographic audit or complete execution-length hiding claim.",
+  "validation_source_commit": "b22e9eb2a0f2890e03b4f2c39875f43ec43d1382",
+  "actual_guest_rejections_class": "SDK Guest panicked plus exact controlled relation-rejection message; IPC/OOM/execution failures are not counted",
+  "actual_guest_positive_semantic_cases": 3,
+  "actual_guest_positive_semantic_cases_result": "passed",
+  "actual_guest_positive_semantic_cases_family": "negated property set forward/reverse/mixed endpoint multiplicity",
+  "publication_ready": false,
+  "publication_boundary": "A subsequently identified ordinary SIP/MINUS substitution defect is undergoing a shared eligibility audit. This artifact remains historical evidence, not a completeness claim for that counterexample.",
+  "historical_campaigns": [
+    {
+      "schema_version": 1,
+      "source_commit": "db21481af0e1b1b91c0ff7d458b9c0d5ec40cfae",
+      "date": "2026-09-12",
+      "platform": "macOS arm64",
+      "toolchain": {
+        "risc0_sdk_server": "3.0.6",
+        "guest_rust": "1.97.0",
+        "host_rust": "1.97.1"
+      },
+      "artifact_sha256": "9e62a058b952ba3b256dec7502c1f55d9ceaecdfa8bafab22cff675464ada408",
+      "image_id": [
+        4226903298,
+        1737109912,
+        323086654,
+        132275724,
+        1898706681,
+        4167760866,
+        1885247632,
+        3084952257
+      ],
+      "receipt_kind": "Succinct",
+      "dev_mode_disabled": true,
+      "genuine_proof_fixtures": [
+        "real_exact_result_rejects_all_public_binding_tampering_and_replay",
+        "real_false_ask_proves_absence_from_the_accepted_complete_graph",
+        "real_holder_declared_bag_preserves_duplicates_unbound_and_provenance"
+      ],
+      "genuine_proof_fixtures_result": "passed",
+      "actual_guest_positive_control": "ASK {}",
+      "actual_guest_rejection_cases": 21,
+      "actual_guest_rejections_result": "passed",
+      "artifact_admission_tests": 3,
+      "artifact_admission_result": "passed",
+      "native_evidence": {
+        "normative_positive_cases": 79,
+        "rejection_cases": 34,
+        "relation_tests": 16,
+        "coverage_metadata_tests": 2,
+        "result": "passed",
+        "is_cryptographic_proof_evidence": false
+      },
+      "gates": {
+        "detached_workspace_clippy": "passed",
+        "privacy_claims": "passed",
+        "no_perf_numbers": "passed",
+        "selector_tests": 6,
+        "selector_result": "passed"
+      },
+      "hosted_ci": "pending publication",
+      "cross_platform_reproducibility": "not established",
+      "privacy_limit": "Standard Succinct receipts retain outer recursion control metadata; this is not an external cryptographic audit or complete execution-length hiding claim."
+    }
+  ]
 }
