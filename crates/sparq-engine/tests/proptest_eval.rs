@@ -8,12 +8,14 @@
 //! # The three property families
 //!
 //! 1. **`eval ≡ naive reference` (`family1_*`).** A random small graph and a random
-//!    query (BGP / OPTIONAL / UNION / FILTER / BIND / DISTINCT / subset projection /
-//!    ORDER BY / LIMIT / OFFSET) are generated; the engine's solution multiset must
-//!    equal an in-test naive nested-loop evaluator's under MULTISET semantics (§2.1
-//!    of the comparison-model record). ORDER BY output is additionally checked for
-//!    sortedness (see family 3); any LIMIT/OFFSET slice without a total order is
-//!    checked as sub-multiset + cardinality (§2.2: which rows survive a slice is
+//!    query (BGP / OPTIONAL / UNION — including one level of Opt/Union NESTING
+//!    under a top-level Opt/Union, issue #2442 — / FILTER / BIND / DISTINCT /
+//!    subset projection / ORDER BY over 1–2 keys / LIMIT / OFFSET) are generated;
+//!    the engine's solution multiset must equal an in-test naive nested-loop
+//!    evaluator's under MULTISET semantics (§2.1 of the comparison-model record).
+//!    ORDER BY output is additionally checked for sortedness (see family 3); any
+//!    LIMIT/OFFSET slice without a total order is checked as sub-multiset +
+//!    cardinality (§2.2: which key-tied rows survive a slice is
 //!    implementation-defined, but HOW MANY survive is not).
 //! 2. **Join-order invariance (`family2_*`).** Permuting the triple patterns of a
 //!    BGP never changes the result multiset — the planner (greedy GOO, or DPccp
@@ -29,7 +31,11 @@
 //!    numerics by value with NaN totalised FIRST (before -INF, equal to itself);
 //!    booleans false < true; langStrings lex-first (tag ties engine-defined,
 //!    unconstrained here — sq-ilweo promoted these arms from "unconstrained").
-//!    Only bnode-label pairs remain deliberately unconstrained.
+//!    Only bnode-label pairs remain deliberately unconstrained. For a two-key
+//!    ORDER BY (#2442) the primary key is checked over the whole sequence and the
+//!    secondary key within each maximal run of identical-RENDERED primary cells —
+//!    such a run is provably a subsequence of one primary tie group, so the check
+//!    is sound without modelling value-equal cross-lexical ties.
 //!
 //! # Oracle independence
 //!
@@ -467,39 +473,52 @@ impl Tp {
     }
 }
 
+/// Recursive body: the generator produces at most ONE level of nesting below a
+/// top-level Opt/Union (issue #2442, the sq-ilweo follow-up) — e.g.
+/// `Opt(Union(BGP, BGP), Opt(BGP, BGP))` — mapping to the SPARQL algebra
+/// LeftJoin/Union combinators evaluated bottom-up.
 #[derive(Clone, Debug)]
 enum Body {
     Bgp(Vec<Tp>),
-    /// base BGP OPTIONAL { right BGP }
-    Opt(Vec<Tp>, Vec<Tp>),
-    /// { left BGP } UNION { right BGP }
-    Union(Vec<Tp>, Vec<Tp>),
+    /// left OPTIONAL { right }  ≡  LeftJoin(left, right, true)
+    Opt(Box<Body>, Box<Body>),
+    /// { left } UNION { right }
+    Union(Box<Body>, Box<Body>),
 }
 
 impl Body {
     fn render(&self) -> String {
-        let bgp = |tps: &[Tp]| tps.iter().map(Tp::render).collect::<Vec<_>>().join(" . ");
         match self {
-            Body::Bgp(tps) => bgp(tps),
-            Body::Opt(l, r) => format!("{} OPTIONAL {{ {} }}", bgp(l), bgp(r)),
-            Body::Union(a, b) => format!("{{ {} }} UNION {{ {} }}", bgp(a), bgp(b)),
+            Body::Bgp(tps) => tps.iter().map(Tp::render).collect::<Vec<_>>().join(" . "),
+            Body::Opt(l, r) => {
+                // A non-BGP left operand is wrapped in an explicit group so the
+                // rendered text unambiguously parses as LeftJoin(left, right).
+                let left = match l.as_ref() {
+                    Body::Bgp(_) => l.render(),
+                    nested => format!("{{ {} }}", nested.render()),
+                };
+                format!("{} OPTIONAL {{ {} }}", left, r.render())
+            }
+            Body::Union(a, b) => format!("{{ {} }} UNION {{ {} }}", a.render(), b.render()),
         }
     }
     /// All variables, sorted.
     fn vars(&self) -> Vec<V> {
-        let mut out = Vec::new();
-        let mut add = |tps: &[Tp]| {
-            for tp in tps {
-                tp.vars(&mut out);
-            }
-        };
-        match self {
-            Body::Bgp(tps) => add(tps),
-            Body::Opt(l, r) | Body::Union(l, r) => {
-                add(l);
-                add(r);
+        fn walk(b: &Body, out: &mut Vec<V>) {
+            match b {
+                Body::Bgp(tps) => {
+                    for tp in tps {
+                        tp.vars(out);
+                    }
+                }
+                Body::Opt(l, r) | Body::Union(l, r) => {
+                    walk(l, out);
+                    walk(r, out);
+                }
             }
         }
+        let mut out = Vec::new();
+        walk(self, &mut out);
         out.sort_unstable();
         out
     }
@@ -572,8 +591,9 @@ struct Q {
     distinct: bool,
     /// Projected variables, sorted, nonempty, ⊆ in-scope vars.
     project: Vec<V>,
-    /// (variable ∈ project, descending?)
-    order: Option<(V, bool)>,
+    /// ORDER BY keys, outermost first: (variable ∈ project, descending?).
+    /// Empty = no ORDER BY; ≤ 2 keys generated, pairwise-distinct vars (#2442).
+    order: Vec<(V, bool)>,
     limit: Option<usize>,
     /// OFFSET j — compared under the §2.2 cardinality-only model (sq-ilweo).
     offset: Option<usize>,
@@ -600,11 +620,14 @@ impl Q {
             s.push_str(&f.render());
         }
         s.push_str(" }");
-        if let Some((v, desc)) = &self.order {
-            if *desc {
-                s.push_str(&format!(" ORDER BY DESC({})", vname(*v)));
-            } else {
-                s.push_str(&format!(" ORDER BY {}", vname(*v)));
+        if !self.order.is_empty() {
+            s.push_str(" ORDER BY");
+            for (v, desc) in &self.order {
+                if *desc {
+                    s.push_str(&format!(" DESC({})", vname(*v)));
+                } else {
+                    s.push_str(&format!(" {}", vname(*v)));
+                }
             }
         }
         if let Some(k) = self.limit {
@@ -678,12 +701,17 @@ fn compatible_merge(l: &Row, r: &Row) -> Option<Row> {
     Some(out)
 }
 
+/// Bottom-up SPARQL algebra evaluation: Opt is LeftJoin(Ω_l, Ω_r, true) — each
+/// left row joins every compatible right row, or survives alone if none is
+/// compatible — and Union is multiset concatenation. Sub-bodies are evaluated
+/// independently (compositional semantics), recursing one level for the nested
+/// bodies of issue #2442.
 fn eval_body(data: &[[T; 3]], body: &Body) -> Vec<Row> {
     match body {
         Body::Bgp(tps) => eval_bgp(data, tps),
         Body::Opt(l, r) => {
-            let left = eval_bgp(data, l);
-            let right = eval_bgp(data, r);
+            let left = eval_body(data, l);
+            let right = eval_body(data, r);
             let mut out = Vec::new();
             for lr in &left {
                 let mut matched = false;
@@ -700,8 +728,8 @@ fn eval_body(data: &[[T; 3]], body: &Body) -> Vec<Row> {
             out
         }
         Body::Union(a, b) => {
-            let mut out = eval_bgp(data, a);
-            out.extend(eval_bgp(data, b));
+            let mut out = eval_body(data, a);
+            out.extend(eval_body(data, b));
             out
         }
     }
@@ -1016,12 +1044,51 @@ fn check_case(data: &[[T; 3]], q: &Q, label: &str, rows: &[Vec<Option<String>>])
             prop_assert!(is_sub_multiset(&en_ms, &or_ms), "sliced rows not a sub-multiset: {}", ctx());
         }
     }
-    if let Some((v, desc)) = &q.order {
+    if let Some((v, desc)) = q.order.first() {
         let col = q.project.iter().position(|p| p == v).expect("order var projected");
         let keys: Vec<Option<T>> = rows.iter().map(|r| r[col].as_deref().map(parse_rendered)).collect();
         if let Err(e) = check_sorted(&keys, *desc, &ctx()) {
             return Err(TestCaseError::fail(e));
         }
+        if let Some((v2, desc2)) = q.order.get(1) {
+            let col2 = q.project.iter().position(|p| p == v2).expect("order var projected");
+            if let Err(e) = check_secondary_within_primary_runs(rows, col, col2, *desc2, &ctx()) {
+                return Err(TestCaseError::fail(e));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Secondary ORDER BY key law (#2442): within each maximal run of rows whose
+/// RENDERED primary cell is identical (unbound cells compare equal to each
+/// other), the secondary-key sequence must satisfy `check_sorted`. Soundness:
+/// identical rendered cells denote the same term, so a contiguous
+/// identical-rendered run is a subsequence of one engine primary-tie group and
+/// the engine must have ordered it by the secondary key. Value-equal ties with
+/// DIFFERENT lexicals ("1"^^xsd:integer vs "1.0"^^xsd:decimal) fall outside the
+/// runs and are deliberately not constrained — no cross-lexical tie modelling.
+fn check_secondary_within_primary_runs(
+    rows: &[Vec<Option<String>>],
+    prim_col: usize,
+    sec_col: usize,
+    sec_desc: bool,
+    ctx: &str,
+) -> Result<(), String> {
+    let mut start = 0;
+    while start < rows.len() {
+        let mut end = start + 1;
+        while end < rows.len() && rows[end][prim_col] == rows[start][prim_col] {
+            end += 1;
+        }
+        if end - start > 1 {
+            let keys: Vec<Option<T>> = rows[start..end]
+                .iter()
+                .map(|r| r[sec_col].as_deref().map(parse_rendered))
+                .collect();
+            check_sorted(&keys, sec_desc, &format!("secondary key, primary-tie run [{}..{}) of {}", start, end, ctx))?;
+        }
+        start = end;
     }
     Ok(())
 }
@@ -1122,22 +1189,38 @@ fn arb_bgp(min: usize, max: usize) -> impl Strategy<Value = Vec<Tp>> {
     proptest::collection::vec(arb_tp(), min..=max)
 }
 
-/// Force at least one variable so the SELECT projection is never empty.
+/// Force at least one variable so the SELECT projection is never empty:
+/// descend to the leftmost BGP and variable-ize its first subject.
 fn ensure_var(mut body: Body) -> Body {
     if body.vars().is_empty() {
-        let fix = |tps: &mut Vec<Tp>| tps[0].s = Pos::Var(0);
-        match &mut body {
-            Body::Bgp(tps) | Body::Opt(tps, _) | Body::Union(tps, _) => fix(tps),
+        fn fix(b: &mut Body) {
+            match b {
+                Body::Bgp(tps) => tps[0].s = Pos::Var(0),
+                Body::Opt(l, _) | Body::Union(l, _) => fix(l),
+            }
         }
+        fix(&mut body);
     }
     body
+}
+
+/// A sub-body under a top-level Opt/Union: a flat BGP (the pre-#2442 shape) or
+/// one more level of Opt/Union over single-pattern BGPs — giving nested shapes
+/// like `A OPTIONAL { B OPTIONAL { C } }` and `{ {A} UNION {B} } OPTIONAL { C }`.
+fn arb_sub_body() -> impl Strategy<Value = Body> {
+    let leaf = |min: usize, max: usize| arb_bgp(min, max).prop_map(Body::Bgp).boxed();
+    prop_oneof![
+        2 => leaf(1, 2),
+        1 => (leaf(1, 1), leaf(1, 1)).prop_map(|(l, r)| Body::Opt(Box::new(l), Box::new(r))),
+        1 => (leaf(1, 1), leaf(1, 1)).prop_map(|(a, b)| Body::Union(Box::new(a), Box::new(b))),
+    ]
 }
 
 fn arb_body() -> impl Strategy<Value = Body> {
     prop_oneof![
         3 => arb_bgp(1, 3).prop_map(Body::Bgp),
-        1 => (arb_bgp(1, 2), arb_bgp(1, 2)).prop_map(|(l, r)| Body::Opt(l, r)),
-        1 => (arb_bgp(1, 2), arb_bgp(1, 2)).prop_map(|(a, b)| Body::Union(a, b)),
+        1 => (arb_sub_body(), arb_sub_body()).prop_map(|(l, r)| Body::Opt(Box::new(l), Box::new(r))),
+        1 => (arb_sub_body(), arb_sub_body()).prop_map(|(a, b)| Body::Union(Box::new(a), Box::new(b))),
     ]
     .prop_map(ensure_var)
 }
@@ -1232,7 +1315,8 @@ struct QSeed {
     filter: Option<ExprSeed>,
     distinct: bool,
     proj_mask: u16,
-    order: Option<(u8, bool)>, // (projected-var seed, desc)
+    /// 1–2 ORDER BY key seeds when present: (projected-var seed, desc).
+    order: Option<Vec<(u8, bool)>>,
     limit: Option<usize>,
     offset: Option<usize>,
 }
@@ -1244,7 +1328,10 @@ fn arb_qseed() -> impl Strategy<Value = QSeed> {
         proptest::option::weighted(0.45, arb_expr_seed()),
         proptest::bool::weighted(0.25),
         any::<u16>(),
-        proptest::option::weighted(0.35, (any::<u8>(), any::<bool>())),
+        proptest::option::weighted(
+            0.35,
+            proptest::collection::vec((any::<u8>(), any::<bool>()), 1..=2),
+        ),
         proptest::option::weighted(0.2, 0usize..=8),
         proptest::option::weighted(0.2, 0usize..=5),
     )
@@ -1287,7 +1374,16 @@ fn build_query(seed: QSeed) -> Q {
     if project.is_empty() {
         project = scope.clone();
     }
-    let order = seed.order.map(|(vs, desc)| (project[vs as usize % project.len()], desc));
+    // Resolve each order-key seed to a projected var, deduping on the var: a
+    // repeated key (`ORDER BY ?x DESC(?x)`) is legal but vacuous — the second
+    // key would never break a tie of the first — so keep distinct vars only.
+    let mut order: Vec<(V, bool)> = Vec::new();
+    for (vs, desc) in seed.order.iter().flatten() {
+        let v = project[*vs as usize % project.len()];
+        if !order.iter().any(|(ov, _)| *ov == v) {
+            order.push((v, *desc));
+        }
+    }
     Q {
         body: seed.body,
         bind,
@@ -1328,10 +1424,17 @@ fn object_pool() -> Vec<T> {
 /// positions may take any term.
 fn instantiate(body: &Body, seed: &[u8]) -> Vec<[T; 3]> {
     let vars = body.vars();
-    let all_tps: Vec<&Tp> = match body {
-        Body::Bgp(tps) => tps.iter().collect(),
-        Body::Opt(l, r) | Body::Union(l, r) => l.iter().chain(r.iter()).collect(),
-    };
+    fn collect_tps<'a>(b: &'a Body, out: &mut Vec<&'a Tp>) {
+        match b {
+            Body::Bgp(tps) => out.extend(tps.iter()),
+            Body::Opt(l, r) | Body::Union(l, r) => {
+                collect_tps(l, out);
+                collect_tps(r, out);
+            }
+        }
+    }
+    let mut all_tps: Vec<&Tp> = Vec::new();
+    collect_tps(body, &mut all_tps);
     let position_class = |v: &V| {
         let mut class = 2u8; // 0 = predicate, 1 = subject, 2 = object-only
         for tp in &all_tps {
@@ -1448,7 +1551,7 @@ proptest! {
             let body = Body::Bgp(patterns);
             let vars = body.vars();
             let filter = fseed.as_ref().map(|f| build_expr(f, &vars));
-            Q { body, bind: None, filter, distinct: false, project: vars, order: None, limit: None, offset: None }
+            Q { body, bind: None, filter, distinct: false, project: vars, order: vec![], limit: None, offset: None }
         };
         let q1 = build(tps);
         let q2 = build(shuffled);
@@ -1562,14 +1665,14 @@ fn oracle_known_answer_optional() {
     ];
     let q = Q {
         body: Body::Opt(
-            vec![Tp { s: Pos::Var(0), p: Pos::Const(p(0)), o: Pos::Var(1) }],
-            vec![Tp { s: Pos::Var(1), p: Pos::Const(p(0)), o: Pos::Var(2) }],
+            Box::new(Body::Bgp(vec![Tp { s: Pos::Var(0), p: Pos::Const(p(0)), o: Pos::Var(1) }])),
+            Box::new(Body::Bgp(vec![Tp { s: Pos::Var(1), p: Pos::Const(p(0)), o: Pos::Var(2) }])),
         ),
         bind: None,
         filter: None,
         distinct: false,
         project: vec![0, 1, 2],
-        order: None,
+        order: vec![],
         limit: None,
         offset: None,
     };
@@ -1599,14 +1702,14 @@ fn oracle_known_answer_union_distinct_filter() {
     ];
     let q = Q {
         body: Body::Union(
-            vec![Tp { s: Pos::Var(0), p: Pos::Const(p(0)), o: Pos::Var(1) }],
-            vec![Tp { s: Pos::Var(0), p: Pos::Const(p(1)), o: Pos::Var(1) }],
+            Box::new(Body::Bgp(vec![Tp { s: Pos::Var(0), p: Pos::Const(p(0)), o: Pos::Var(1) }])),
+            Box::new(Body::Bgp(vec![Tp { s: Pos::Var(0), p: Pos::Const(p(1)), o: Pos::Var(1) }])),
         ),
         bind: None,
         filter: Some(Expr::LtVK(1, 2)),
         distinct: true,
         project: vec![0],
-        order: None,
+        order: vec![],
         limit: None,
         offset: None,
     };
@@ -1639,7 +1742,7 @@ fn oracle_known_answer_bind_forms() {
         filter: None,
         distinct: false,
         project: vec![0, 1, BIND_VAR],
-        order: None,
+        order: vec![],
         limit: None,
         offset: None,
     };
@@ -1685,7 +1788,7 @@ fn oracle_known_answer_computed_double() {
         filter: None,
         distinct: false,
         project: vec![0, 1, BIND_VAR],
-        order: None,
+        order: vec![],
         limit: None,
         offset: None,
     };
@@ -1740,7 +1843,7 @@ fn oracle_known_answer_nan() {
         filter: Some(filter),
         distinct: false,
         project: vec![0],
-        order: None,
+        order: vec![],
         limit: None,
         offset: None,
     };
@@ -1878,6 +1981,129 @@ fn oracle_known_answer_literal_kind_rank_and_lang_order() {
     assert!(check_sorted(&bad, false, "unit").is_err());
 }
 
+/// Nested OPTIONAL (#2442), hand-computed. Data:
+///   s0 p0 s1 ; s1 p1 s2 ; s2 p2 "a" ; s3 p0 s4
+/// Query: SELECT ?v0 ?v1 ?v2 ?v3
+///        WHERE { ?v0 <p0> ?v1 OPTIONAL { ?v1 <p1> ?v2 OPTIONAL { ?v2 <p2> ?v3 } } }
+/// LeftJoin(A, LeftJoin(B, C)): the (s0,s1) row extends through both inner
+/// levels to (s0,s1,s2,"a"); the (s3,s4) row finds no compatible inner row and
+/// survives with ?v2/?v3 unbound.
+#[test]
+fn oracle_known_answer_nested_optional() {
+    let s = |i: usize| T::Iri(SUBJ_IRIS[i].to_string());
+    let p = |i: usize| T::Iri(PRED_IRIS[i].to_string());
+    let data = vec![
+        [s(0), p(0), s(1)],
+        [s(1), p(1), s(2)],
+        [s(2), p(2), T::Str("a".to_string())],
+        [s(3), p(0), s(4)],
+    ];
+    let q = Q {
+        body: Body::Opt(
+            Box::new(Body::Bgp(vec![Tp { s: Pos::Var(0), p: Pos::Const(p(0)), o: Pos::Var(1) }])),
+            Box::new(Body::Opt(
+                Box::new(Body::Bgp(vec![Tp { s: Pos::Var(1), p: Pos::Const(p(1)), o: Pos::Var(2) }])),
+                Box::new(Body::Bgp(vec![Tp { s: Pos::Var(2), p: Pos::Const(p(2)), o: Pos::Var(3) }])),
+            )),
+        ),
+        bind: None,
+        filter: None,
+        distinct: false,
+        project: vec![0, 1, 2, 3],
+        order: vec![],
+        limit: None,
+        offset: None,
+    };
+    let expected = vec![
+        vec![Some(s(0).render()), Some(s(1).render()), Some(s(2).render()), Some(T::Str("a".to_string()).render())],
+        vec![Some(s(3).render()), Some(s(4).render()), None, None],
+    ];
+    assert_eq!(multiset(&oracle_eval(&data, &q)), multiset(&expected), "oracle vs hand-computed");
+    let g = Graph::load_str(&to_ntriples(&data), "ntriples").unwrap();
+    assert_eq!(multiset(&engine_rows(&g, &q.render())), multiset(&expected), "engine vs hand-computed");
+}
+
+/// UNION nested as OPTIONAL's left operand (#2442), hand-computed. Data:
+///   s0 p0 s1 ; s0 p1 s2 ; s1 p2 "a"
+/// Query: SELECT ?v0 ?v1 ?v2
+///        WHERE { { { ?v0 <p0> ?v1 } UNION { ?v0 <p1> ?v1 } } OPTIONAL { ?v1 <p2> ?v2 } }
+/// LeftJoin(Union(A, B), C): the p0 branch row (s0,s1) matches ?v1=s1 in C and
+/// extends to (s0,s1,"a"); the p1 branch row (s0,s2) does not and keeps ?v2 unbound.
+#[test]
+fn oracle_known_answer_union_under_optional() {
+    let s = |i: usize| T::Iri(SUBJ_IRIS[i].to_string());
+    let p = |i: usize| T::Iri(PRED_IRIS[i].to_string());
+    let data = vec![
+        [s(0), p(0), s(1)],
+        [s(0), p(1), s(2)],
+        [s(1), p(2), T::Str("a".to_string())],
+    ];
+    let q = Q {
+        body: Body::Opt(
+            Box::new(Body::Union(
+                Box::new(Body::Bgp(vec![Tp { s: Pos::Var(0), p: Pos::Const(p(0)), o: Pos::Var(1) }])),
+                Box::new(Body::Bgp(vec![Tp { s: Pos::Var(0), p: Pos::Const(p(1)), o: Pos::Var(1) }])),
+            )),
+            Box::new(Body::Bgp(vec![Tp { s: Pos::Var(1), p: Pos::Const(p(2)), o: Pos::Var(2) }])),
+        ),
+        bind: None,
+        filter: None,
+        distinct: false,
+        project: vec![0, 1, 2],
+        order: vec![],
+        limit: None,
+        offset: None,
+    };
+    let expected = vec![
+        vec![Some(s(0).render()), Some(s(1).render()), Some(T::Str("a".to_string()).render())],
+        vec![Some(s(0).render()), Some(s(2).render()), None],
+    ];
+    assert_eq!(multiset(&oracle_eval(&data, &q)), multiset(&expected), "oracle vs hand-computed");
+    let g = Graph::load_str(&to_ntriples(&data), "ntriples").unwrap();
+    assert_eq!(multiset(&engine_rows(&g, &q.render())), multiset(&expected), "engine vs hand-computed");
+}
+
+/// Multi-key ORDER BY (#2442) with a primary-key tie, hand-computed exact
+/// sequence: `ORDER BY ?v1 DESC(?v0)` over { s0 p0 1 ; s1 p0 1 ; s2 p0 0 } —
+/// the combined key is tie-free, so the exact row order is pinned on every
+/// compiled plan path (also exercises the multi-key `Q::render` path).
+#[test]
+fn orderby_multikey_exact_sequence() {
+    let s = |i: usize| T::Iri(SUBJ_IRIS[i].to_string());
+    let p = |i: usize| T::Iri(PRED_IRIS[i].to_string());
+    let data = vec![
+        [s(0), p(0), T::Int(1)],
+        [s(1), p(0), T::Int(1)],
+        [s(2), p(0), T::Int(0)],
+    ];
+    let q = Q {
+        body: Body::Bgp(vec![Tp { s: Pos::Var(0), p: Pos::Const(p(0)), o: Pos::Var(1) }]),
+        bind: None,
+        filter: None,
+        distinct: false,
+        project: vec![0, 1],
+        order: vec![(1, false), (0, true)],
+        limit: None,
+        offset: None,
+    };
+    // ?v1 ascending (0 < 1), then within the ?v1=1 tie ?v0 descending (s1 > s0).
+    let expected = vec![
+        vec![Some(s(2).render()), Some(T::Int(0).render())],
+        vec![Some(s(1).render()), Some(T::Int(1).render())],
+        vec![Some(s(0).render()), Some(T::Int(1).render())],
+    ];
+    let g = Graph::load_str(&to_ntriples(&data), "ntriples").unwrap();
+    for (label, rows) in engine_paths(&g, &q.render()) {
+        assert_eq!(&rows, &expected, "multi-key exact sequence, path {}", label);
+    }
+    // The run-scoped secondary check accepts this ordering and rejects a swap
+    // of the tied rows (the checker itself is non-vacuous on real data).
+    assert!(check_secondary_within_primary_runs(&expected, 1, 0, true, "unit").is_ok());
+    let mut swapped = expected.clone();
+    swapped.swap(1, 2);
+    assert!(check_secondary_within_primary_runs(&swapped, 1, 0, true, "unit").is_err());
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // Generator diversity floor (anti-vacuity: the corpus is not trivially empty)
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1899,20 +2125,32 @@ fn generator_diversity_floor() {
     let (mut nonempty, mut dups, mut unbound_cells, mut multi_row) = (0, 0, 0, 0);
     let (mut bgp, mut opt, mut union, mut filt, mut bind, mut distinct, mut order, mut limit, mut offset) =
         (0, 0, 0, 0, 0, 0, 0, 0, 0);
+    // #2442 nesting/multi-key floors: bodies with a nested Opt/Union operand, and
+    // ORDER BY over ≥ 2 keys.
+    let (mut nested, mut order2) = (0, 0);
     // sq-ilweo widening floors: PlusK binds actually meeting a double in the data
     // (the computed-double path), and graphs actually containing the NaN term.
     let (mut plusk_dbl, mut nan_data) = (0, 0);
     for _ in 0..n {
         let (data, q) = strategy.new_tree(&mut runner).expect("gen").current();
-        match q.body {
+        match &q.body {
             Body::Bgp(_) => bgp += 1,
-            Body::Opt(..) => opt += 1,
-            Body::Union(..) => union += 1,
+            Body::Opt(l, r) | Body::Union(l, r) => {
+                if matches!(q.body, Body::Opt(..)) {
+                    opt += 1;
+                } else {
+                    union += 1;
+                }
+                nested += usize::from(
+                    !matches!(l.as_ref(), Body::Bgp(_)) || !matches!(r.as_ref(), Body::Bgp(_)),
+                );
+            }
         }
         filt += usize::from(q.filter.is_some());
         bind += usize::from(q.bind.is_some());
         distinct += usize::from(q.distinct);
-        order += usize::from(q.order.is_some());
+        order += usize::from(!q.order.is_empty());
+        order2 += usize::from(q.order.len() >= 2);
         limit += usize::from(q.limit.is_some());
         offset += usize::from(q.offset.is_some());
         let has_dbl = data.iter().any(|t| t.iter().any(|x| matches!(x, T::Dbl(..))));
@@ -1926,8 +2164,8 @@ fn generator_diversity_floor() {
         unbound_cells += usize::from(rows.iter().any(|r| r.iter().any(Option::is_none)));
     }
     eprintln!(
-        "diversity: nonempty={}/{} multi_row={} dups={} unbound={} shapes: bgp={} opt={} union={} filter={} bind={} distinct={} order={} limit={} offset={} plusk_dbl={} nan_data={}",
-        nonempty, n, multi_row, dups, unbound_cells, bgp, opt, union, filt, bind, distinct, order, limit, offset, plusk_dbl, nan_data
+        "diversity: nonempty={}/{} multi_row={} dups={} unbound={} shapes: bgp={} opt={} union={} nested={} filter={} bind={} distinct={} order={} order2={} limit={} offset={} plusk_dbl={} nan_data={}",
+        nonempty, n, multi_row, dups, unbound_cells, bgp, opt, union, nested, filt, bind, distinct, order, order2, limit, offset, plusk_dbl, nan_data
     );
     // Conservative floors — deterministic because the seed is fixed.
     assert!(nonempty * 100 >= n * 25, "nonempty results: {}/{}", nonempty, n);
@@ -1943,6 +2181,10 @@ fn generator_diversity_floor() {
     ] {
         assert!(count >= 10, "query shape {} generated only {} times in {}", label, count, n);
     }
+    // The #2442 widenings actually occur in the corpus (lower floors: each is a
+    // sub-case of an already-floored shape).
+    assert!(nested >= 8, "nested Opt/Union bodies generated only {} times in {}", nested, n);
+    assert!(order2 >= 8, "two-key ORDER BY generated only {} times in {}", order2, n);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -2036,6 +2278,31 @@ fn check_sorted_detects_violations() {
     // and value-equal cross-type numerics are a tie, not a violation.
     let tie = vec![Some(T::Dec(10, 1)), Some(T::Int(1))];
     assert!(check_sorted(&tie, false, "unit").is_ok());
+}
+
+#[test]
+fn secondary_run_check_detects_violations() {
+    let row = |prim: Option<i64>, sec: i64| {
+        vec![prim.map(|v| T::Int(v).render()), Some(T::Int(sec).render())]
+    };
+    // an inverted secondary pair inside one primary run must be flagged...
+    let bad = vec![row(Some(1), 2), row(Some(1), 1)];
+    assert!(check_secondary_within_primary_runs(&bad, 0, 1, false, "unit").is_err());
+    // ...but is fine descending.
+    assert!(check_secondary_within_primary_runs(&bad, 0, 1, true, "unit").is_ok());
+    // across DIFFERENT primary cells the secondary is unconstrained.
+    let free = vec![row(Some(1), 2), row(Some(2), 1)];
+    assert!(check_secondary_within_primary_runs(&free, 0, 1, false, "unit").is_ok());
+    // unbound primary cells compare equal to each other and form a run.
+    let ub = vec![row(None, 5), row(None, 3), row(Some(1), 0)];
+    assert!(check_secondary_within_primary_runs(&ub, 0, 1, false, "unit").is_err());
+    // value-equal but lexically-different primaries ("1" int vs "1.0" decimal)
+    // break the run: deliberately unconstrained (no cross-lexical tie modelling).
+    let lex = vec![
+        vec![Some(T::Int(1).render()), Some(T::Int(2).render())],
+        vec![Some(T::Dec(10, 1).render()), Some(T::Int(1).render())],
+    ];
+    assert!(check_secondary_within_primary_runs(&lex, 0, 1, false, "unit").is_ok());
 }
 
 #[test]
