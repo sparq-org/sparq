@@ -2304,6 +2304,13 @@ impl<'a> Validator<'a> {
             },
         };
         let message = validator.message.clone();
+        // [SONNET-4.6] (sq-ou3) The component's `sh:labelTemplate` (SHACL §6.1),
+        // used ONLY as the last-resort message for the results below — after the
+        // shape's `sh:message` and the validator's `sh:message`. It describes the
+        // constraint in the component author's words, so it beats the generic
+        // "does not satisfy constraint component <iri>" fallback. It never
+        // influences whether the constraint fires.
+        let label_template = comp.label_template().map(str::to_string);
         let component_iri = match &comp.node {
             Term::NamedNode(n) => n.as_str().to_string(),
             // A blank-node component has no IRI for sh:sourceConstraintComponent;
@@ -2341,10 +2348,16 @@ impl<'a> Validator<'a> {
                         bindings.push((name.as_str(), term));
                     }
                     if crate::sparql::ask_violates(query, data, &bindings) {
-                        let default_message = match &message {
+                        let default_message = match (&message, &label_template) {
                             // {$param}/{$value}/{$this} substitution from the pre-bound terms.
-                            Some(tpl) => crate::sparql::substitute_bindings(tpl, &bindings),
-                            None => format!(
+                            (Some(tpl), _) => crate::sparql::substitute_bindings(tpl, &bindings),
+                            // [SONNET-4.6] (sq-ou3) No validator message → render
+                            // `sh:labelTemplate` over the SAME pre-bound terms, so a
+                            // label may reference `{$value}` as well as parameters.
+                            (None, Some(label)) => {
+                                crate::sparql::substitute_bindings(label, &bindings)
+                            }
+                            (None, None) => format!(
                                 "Value does not satisfy constraint component <{component_iri}>"
                             ),
                         };
@@ -2371,12 +2384,20 @@ impl<'a> Validator<'a> {
                 for (name, term) in &param_bindings {
                     bindings.push((name.as_str(), term));
                 }
+                // [SONNET-4.6] (sq-ou3) Render the label's PARAMETER placeholders
+                // here (parameters pre-bind via VALUES, so they are not
+                // necessarily projected into the solution rows `select_validate`
+                // sees); any remaining `{?var}` is then substituted per row there.
+                let label = label_template
+                    .as_deref()
+                    .map(|tpl| crate::sparql::substitute_bindings(tpl, &bindings));
                 crate::sparql::select_validate(
                     query,
                     data,
                     focus,
                     &bindings,
                     message.as_deref(),
+                    label.as_deref(),
                     |fields: ComponentResultFields| ValidationResult {
                         focus_node: fields.focus,
                         path: fields.path.or_else(|| shape_path.clone()),
