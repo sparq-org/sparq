@@ -162,7 +162,6 @@ capacity restrictions, admission, exact rows, RDF identity, and forced exhaustio
 These are structural host tests; they do not measure prover runtime or audit
 cryptographic correctness.
 
-
 ## Canonical signed-integer admission
 
 [GPT-6] `planner::signed::SignedDisclosureQuery::parse` separately admits the same
