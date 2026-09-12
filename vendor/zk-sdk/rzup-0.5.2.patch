@@ -1,5 +1,5 @@
---- a/rzup-0.5.2/Cargo.toml
-+++ b/rzup-0.5.2/Cargo.toml
+--- a/Cargo.toml
++++ b/Cargo.toml
 @@ -26,6 +26,8 @@
  repository = "https://github.com/risc0/risc0/"
  
@@ -40,8 +40,8 @@
 +
 +# [GPT-6] Keep this vendored package outside the main workspace.
 +[workspace]
---- a/rzup-0.5.2/src/distribution/mod.rs
-+++ b/rzup-0.5.2/src/distribution/mod.rs
+--- a/src/distribution/mod.rs
++++ b/src/distribution/mod.rs
 @@ -13,6 +13,8 @@
  // limitations under the License.
  pub mod github;
@@ -51,8 +51,8 @@
  pub mod signature;
  
  #[cfg_attr(
---- a/rzup-0.5.2/src/distribution/s3.rs
-+++ b/rzup-0.5.2/src/distribution/s3.rs
+--- a/src/distribution/s3.rs
++++ b/src/distribution/s3.rs
 @@ -13,11 +13,16 @@
  // limitations under the License.
  
@@ -116,8 +116,8 @@
      }
  
      #[cfg(feature = "publish")]
---- a/rzup-0.5.2/src/env.rs
-+++ b/rzup-0.5.2/src/env.rs
+--- a/src/env.rs
++++ b/src/env.rs
 @@ -11,10 +11,10 @@
  // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  // See the License for the specific language governing permissions and
@@ -209,8 +209,8 @@
      pub fn public_key(&self) -> &PublicKey {
          &self.public_key
      }
---- a/rzup-0.5.2/src/lib.rs
-+++ b/rzup-0.5.2/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
 @@ -24,12 +24,15 @@
  mod registry;
  mod settings;

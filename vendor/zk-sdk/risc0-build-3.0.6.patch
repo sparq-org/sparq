@@ -1,5 +1,5 @@
---- a/risc0-build-3.0.6/Cargo.toml
-+++ b/risc0-build-3.0.6/Cargo.toml
+--- a/Cargo.toml
++++ b/Cargo.toml
 @@ -50,8 +50,7 @@
  [dependencies.derive_builder]
  version = "0.20.2"
