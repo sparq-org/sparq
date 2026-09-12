@@ -27,6 +27,7 @@ pub fn admit(request: &Request) -> Result<(), Rejected> {
 pub(crate) enum DatasetProfile {
     DefaultOnly,
     NamedCatalog,
+    GraphResults,
 }
 
 pub(crate) fn admit_query(
@@ -43,6 +44,15 @@ pub(crate) fn admit_query(
     }
     let pattern = match query {
         spargebra::Query::Select { pattern, .. } | spargebra::Query::Ask { pattern, .. } => pattern,
+        spargebra::Query::Construct { template, pattern, .. } if profile == DatasetProfile::GraphResults => {
+            if template.len() > 64 { return Err(Rejected("V3 template capacity")); }
+            for triple in template {
+                pattern_term(&triple.subject, profile)?;
+                pattern_term(&triple.object, profile)?;
+            }
+            pattern
+        }
+        spargebra::Query::Describe { pattern, .. } if profile == DatasetProfile::GraphResults => pattern,
         _ => return Err(Rejected("only SELECT and ASK are admitted")),
     };
     enum Visit<'a> {
@@ -81,8 +91,8 @@ pub(crate) fn admit_query(
                         return Err(Rejected("BGP capacity"));
                     }
                     for p in patterns {
-                        pattern_term(&p.subject)?;
-                        pattern_term(&p.object)?;
+                        pattern_term(&p.subject, profile)?;
+                        pattern_term(&p.object, profile)?;
                     }
                 }
                 GraphPattern::Path {
@@ -90,8 +100,8 @@ pub(crate) fn admit_query(
                     path,
                     object,
                 } => {
-                    pattern_term(subject)?;
-                    pattern_term(object)?;
+                    pattern_term(subject, profile)?;
+                    pattern_term(object, profile)?;
                     // Lowered sequence intermediates must not hide nullable
                     // composition whose absent-constant behavior is unresolved.
                     if path_nullable(path)
@@ -171,7 +181,7 @@ pub(crate) fn admit_query(
                         }
                     }
                 }
-                GraphPattern::Graph { inner, .. } if profile == DatasetProfile::NamedCatalog => {
+                GraphPattern::Graph { inner, .. } if profile != DatasetProfile::DefaultOnly => {
                     pending.push(Visit::Pattern(inner));
                 }
                 GraphPattern::Graph { .. }
@@ -299,7 +309,7 @@ fn path_nullable(path: &PropertyPathExpression) -> bool {
     }
 }
 
-fn literal(l: &Literal) -> Result<(), Rejected> {
+pub(crate) fn literal(l: &Literal) -> Result<(), Rejected> {
     if l.direction().is_some() {
         Err(Rejected("directional literals are not admitted"))
     } else if !sparq_core::temporal::year_within_capacity(
@@ -311,13 +321,13 @@ fn literal(l: &Literal) -> Result<(), Rejected> {
     }
 }
 
-fn pattern_term(term: &TermPattern) -> Result<(), Rejected> {
+fn pattern_term(term: &TermPattern, profile: DatasetProfile) -> Result<(), Rejected> {
     match term {
         TermPattern::NamedNode(_) | TermPattern::Variable(_) => Ok(()),
         // The opt-in vendored parser creates these only when lowering a fixed
         // path sequence. Its leading # is forbidden in source blank-node labels.
         // They bind existential intermediates, never RDF blank-node identities.
-        TermPattern::BlankNode(_) if internal_path_node(term) => Ok(()),
+        TermPattern::BlankNode(_) if internal_path_node(term) || profile == DatasetProfile::GraphResults => Ok(()),
         TermPattern::Literal(l) => literal(l),
         _ => Err(Rejected(
             "query blank nodes and triple terms are not admitted",
@@ -334,7 +344,7 @@ pub(crate) fn term_string(term: &Term) -> Result<String, Rejected> {
     Ok(term.to_string())
 }
 
-fn ordered(mut p: &GraphPattern) -> bool {
+pub(crate) fn ordered(mut p: &GraphPattern) -> bool {
     let mut projected = false;
     loop {
         p = match p {
@@ -412,14 +422,7 @@ pub(crate) fn execute(
     prepared: &sparq_engine::PreparedQuery,
     max_rows: u32,
 ) -> Result<CanonicalResult, Rejected> {
-    let budget = sparq_engine::QueryBudget {
-        max_rows: Some(max_rows as usize),
-        temporal_year_range: Some(TEMPORAL_YEAR_RANGE),
-        strict_numeric_capacity: true,
-        // Bound computed terms as well as row counts; this is an estimate, not RSS.
-        max_bytes: Some(4 * MAX_DATASET_BYTES as usize),
-        ..Default::default()
-    };
+    let budget = query_budget(max_rows);
     let result = sparq_engine::query_prepared_with_budget(graph, prepared, &budget)
         .map_err(|_| Rejected("query evaluation or resource budget rejected"))?;
     if result.rows.len() > max_rows as usize {
@@ -454,4 +457,15 @@ pub(crate) fn execute(
         _ => return Err(Rejected("query form rejected")),
     };
     Ok(result)
+}
+
+pub(crate) fn query_budget(max_rows: u32) -> sparq_engine::QueryBudget {
+    sparq_engine::QueryBudget {
+        max_rows: Some(max_rows as usize),
+        temporal_year_range: Some(TEMPORAL_YEAR_RANGE),
+        strict_numeric_capacity: true,
+        // Bound computed terms as well as row counts; this is an estimate, not RSS.
+        max_bytes: Some(4 * MAX_DATASET_BYTES as usize),
+        ..Default::default()
+    }
 }

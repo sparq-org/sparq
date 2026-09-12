@@ -108,8 +108,9 @@ issuer-signature or credential-status claim.
 [GPT-6] The separately versioned [complete named-dataset API](references/exact-datasets-v2.md)
 adds a committed catalog including empty named graphs, GRAPH and local snapshot
 FROM/FROM NAMED selection. V1 requests and commitments retain their meaning.
-[GPT-6] The [V3 graph-result design](references/graph-results-v3.md) tracks pending
-blank-node and graph-form work; it does not claim V3 guest or receipt evidence.
+[GPT-6] The opt-in [V3 native graph-result model](references/graph-results-v3.md)
+adds blank-node identity, canonical tables and bounded graph forms; guest/receipt
+integration is not yet established.
 [GPT-6] The [campaign evidence guide](references/evaluator-evidence.md) explains
 exact artifact export, actual receipt evidence and source/HAL provenance.
 

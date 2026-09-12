@@ -14,7 +14,7 @@ use sha2::{Digest, Sha256};
 use std::fmt;
 
 #[cfg(feature = "evaluate")]
-mod evaluate;
+pub(crate) mod evaluate;
 #[cfg(feature = "evaluate")]
 pub use evaluate::{admit, evaluate};
 
@@ -113,7 +113,7 @@ pub struct Journal {
     pub result: CanonicalResult,
 }
 
-fn validate_policy(policy: &Policy) -> Result<(), Rejected> {
+pub(crate) fn validate_policy(policy: &Policy) -> Result<(), Rejected> {
     if policy.max_dataset_bytes > MAX_DATASET_BYTES
         || policy.max_triples > MAX_TRIPLES
         || policy.max_rows == 0

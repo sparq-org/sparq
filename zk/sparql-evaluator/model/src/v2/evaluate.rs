@@ -45,7 +45,7 @@ pub fn evaluate(witness: &Witness) -> Result<Journal, Rejected> {
     let prepared = sparq_engine::PreparedQuery::parse(&request.query)
         .map_err(|_| Rejected("SPARQL parse rejected"))?;
     admit_query(prepared.query(), DatasetProfile::NamedCatalog)?;
-    let graph = build_dataset(&witness.dataset, &request.policy)?;
+    let graph = build_dataset(&witness.dataset, &request.policy, false)?;
     let result = execute(&graph, &prepared, request.policy.max_rows)?;
     Ok(Journal {
         version: VERSION,
@@ -56,7 +56,7 @@ pub fn evaluate(witness: &Witness) -> Result<Journal, Rejected> {
     })
 }
 
-fn build_dataset(dataset: &PrivateDataset, policy: &Policy) -> Result<Graph, Rejected> {
+pub(crate) fn build_dataset(dataset: &PrivateDataset, policy: &Policy, blank_nodes: bool) -> Result<Graph, Rejected> {
     let names = canonical_catalog(dataset, policy)?;
     let mut slots = BTreeMap::new();
     let mut builders = Vec::with_capacity(names.len() + 1);
@@ -76,10 +76,14 @@ fn build_dataset(dataset: &PrivateDataset, policy: &Policy) -> Result<Graph, Rej
             return Err(Rejected("V2 source quad capacity"));
         }
         let quad = quad.map_err(|_| Rejected("N-Quads parse rejected"))?;
-        let NamedOrBlankNode::NamedNode(subject) = quad.subject else {
-            return Err(Rejected("dataset blank nodes are not admitted"));
+        let subject: Term = match quad.subject {
+            NamedOrBlankNode::NamedNode(subject) => subject.into(),
+            NamedOrBlankNode::BlankNode(subject) if blank_nodes => subject.into(),
+            _ => return Err(Rejected("dataset blank nodes are not admitted")),
         };
-        term_string(&quad.object)?;
+        if !blank_nodes || !matches!(quad.object, Term::BlankNode(_)) {
+            term_string(&quad.object)?;
+        }
         let slot = match &quad.graph_name {
             GraphName::DefaultGraph => 0,
             GraphName::NamedNode(name) => *slots.get(name.as_str()).ok_or(Rejected(
@@ -91,7 +95,7 @@ fn build_dataset(dataset: &PrivateDataset, policy: &Policy) -> Result<Graph, Rej
         };
         let (dict, triples) = &mut builders[slot];
         triples.push([
-            dict.intern(&Term::NamedNode(subject)),
+            dict.intern(&subject),
             dict.intern(&Term::NamedNode(quad.predicate)),
             dict.intern(&quad.object),
         ]);
