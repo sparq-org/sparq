@@ -364,3 +364,6 @@ This input bound is independent of candidate-triple search fuel.
 [GPT-6] Successful-result preparation also checks `MAX_DISCLOSURE_CREDENTIALS`
 before its authentication prepass. Its graph contract is string-canonical only;
 the generated gate matrix records dual-leaf and value-only pairs as unsupported.
+
+[GPT-6] [Exact temporal keys and enforced year capacity](references/exact-temporals.md)
+cover the shared evaluator and separate native/actual-guest regression evidence.

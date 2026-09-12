@@ -71,7 +71,7 @@ expressions, including subqueries, aggregate operands and EXISTS bodies.
 The SPARQL version identifies query syntax/operators. Numeric datatype facets
 follow [RDF 1.1 / XSD 1.1](https://www.w3.org/TR/2014/REC-rdf11-concepts-20140225/#xsd-datatypes),
 including unsigned `+1` and `-0`. Finite numeric lanes, the `i64` integer-constructor
-boundary and temporal helpers have separately recorded implementation limits.
+boundary and [exact temporal/year capacity](../../skills/zk-query-proofs/references/exact-temporals.md) have explicit limits.
 EXISTS and NOT EXISTS bodies are restricted to BGP, join, UNION and pure FILTER.
 Fixed path sequences lowered to BGP are included; residual path operators,
 nested EXISTS, OPTIONAL/MINUS, binding operators, subqueries and modifiers inside
@@ -179,6 +179,13 @@ adapter does not normalize that metadata or claim complete execution-length hidi
 It therefore makes no settled privacy claim. Include recursion's entire
 cost in benchmarks. The source witness is visible to the local caller and prover
 process. See the [upstream security model](https://dev.risczero.com/api/security-model#zero-knowledge-proving).
+The upstream model targets perfect zero knowledge but explicitly cautions users
+with critical privacy requirements while its mathematical argument is outstanding.
+Its [open advisory](https://github.com/risc0/risc0/security/advisories/GHSA-5xgj-pmjj-gw49)
+continues to list all versions. This is an inherited assurance limitation, not a
+claim of a demonstrated attack on this adapter or of an advisory fix in 3.0.6.
+Published [audit reports](https://github.com/risc0/rz-security/tree/main/audits)
+cover their stated code and commits; they are not a blanket audit of this program.
 
 The workspace is detached: normal engine/native/WASM builds acquire no proof SDK
 dependencies. The target-specific clock and UUID/RAND exclusions apply only to

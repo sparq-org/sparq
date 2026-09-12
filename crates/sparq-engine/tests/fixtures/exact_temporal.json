@@ -1,0 +1,288 @@
+{
+  "authored_by": "GPT-6",
+  "source": "REC-derived dateTime value comparison expectations; positive-year checked calendar domain",
+  "cases": [
+    {
+      "id": "nanosecond-literal",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((\"2024-01-01T00:00:00Z\"^^xsd:dateTime = \"2024-01-01T00:00:00.000000001Z\"^^xsd:dateTime) AS ?eq) ((\"2024-01-01T00:00:00Z\"^^xsd:dateTime < \"2024-01-01T00:00:00.000000001Z\"^^xsd:dateTime) AS ?lt) {}",
+      "expected_rows": [
+        [
+          "\"false\"^^<http://www.w3.org/2001/XMLSchema#boolean>",
+          "\"true\"^^<http://www.w3.org/2001/XMLSchema#boolean>"
+        ]
+      ],
+      "dataset_ntriples": ""
+    },
+    {
+      "id": "nanosecond-values",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((?a = ?b) AS ?eq) ((?a < ?b) AS ?lt) {VALUES (?a ?b) {(\"2024-01-01T00:00:00Z\"^^xsd:dateTime \"2024-01-01T00:00:00.000000001Z\"^^xsd:dateTime)}}",
+      "expected_rows": [
+        [
+          "\"false\"^^<http://www.w3.org/2001/XMLSchema#boolean>",
+          "\"true\"^^<http://www.w3.org/2001/XMLSchema#boolean>"
+        ]
+      ],
+      "dataset_ntriples": ""
+    },
+    {
+      "id": "nanosecond-stored-scan",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ?s {?s <http://ex/p> ?t FILTER(?t < \"2024-01-01T00:00:00.000000001Z\"^^xsd:dateTime)}",
+      "expected_rows": [
+        [
+          "<http://ex/a>"
+        ]
+      ],
+      "dataset_ntriples": "<http://ex/a> <http://ex/p> \"2024-01-01T00:00:00Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> .\n<http://ex/b> <http://ex/p> \"2024-01-01T00:00:00.000000001Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> ."
+    },
+    {
+      "id": "nanosecond-stored-count",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (COUNT(*) AS ?n) {?s <http://ex/p> ?t FILTER(?t < \"2024-01-01T00:00:00.000000001Z\"^^xsd:dateTime)}",
+      "expected_rows": [
+        [
+          "\"1\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+        ]
+      ],
+      "dataset_ntriples": "<http://ex/a> <http://ex/p> \"2024-01-01T00:00:00Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> .\n<http://ex/b> <http://ex/p> \"2024-01-01T00:00:00.000000001Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> ."
+    },
+    {
+      "id": "nanosecond-stored-order",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ?s {?s <http://ex/p> ?t} ORDER BY DESC(?t)",
+      "expected_rows": [
+        [
+          "<http://ex/b>"
+        ],
+        [
+          "<http://ex/a>"
+        ]
+      ],
+      "dataset_ntriples": "<http://ex/a> <http://ex/p> \"2024-01-01T00:00:00Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> .\n<http://ex/b> <http://ex/p> \"2024-01-01T00:00:00.000000001Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> ."
+    },
+    {
+      "id": "nanosecond-stored-minmax",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (MIN(?t) AS ?min) (MAX(?t) AS ?max) {?s <http://ex/p> ?t}",
+      "expected_rows": [
+        [
+          "\"2024-01-01T00:00:00Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime>",
+          "\"2024-01-01T00:00:00.000000001Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime>"
+        ]
+      ],
+      "dataset_ntriples": "<http://ex/a> <http://ex/p> \"2024-01-01T00:00:00Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> .\n<http://ex/b> <http://ex/p> \"2024-01-01T00:00:00.000000001Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> ."
+    },
+    {
+      "id": "round-minute-literal",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((\"2024-01-01T00:00:59.999999999999999999Z\"^^xsd:dateTime = \"2024-01-01T00:01:00Z\"^^xsd:dateTime) AS ?eq) ((\"2024-01-01T00:00:59.999999999999999999Z\"^^xsd:dateTime < \"2024-01-01T00:01:00Z\"^^xsd:dateTime) AS ?lt) {}",
+      "expected_rows": [
+        [
+          "\"false\"^^<http://www.w3.org/2001/XMLSchema#boolean>",
+          "\"true\"^^<http://www.w3.org/2001/XMLSchema#boolean>"
+        ]
+      ],
+      "dataset_ntriples": ""
+    },
+    {
+      "id": "round-minute-values",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((?a = ?b) AS ?eq) ((?a < ?b) AS ?lt) {VALUES (?a ?b) {(\"2024-01-01T00:00:59.999999999999999999Z\"^^xsd:dateTime \"2024-01-01T00:01:00Z\"^^xsd:dateTime)}}",
+      "expected_rows": [
+        [
+          "\"false\"^^<http://www.w3.org/2001/XMLSchema#boolean>",
+          "\"true\"^^<http://www.w3.org/2001/XMLSchema#boolean>"
+        ]
+      ],
+      "dataset_ntriples": ""
+    },
+    {
+      "id": "round-minute-stored-scan",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ?s {?s <http://ex/p> ?t FILTER(?t < \"2024-01-01T00:01:00Z\"^^xsd:dateTime)}",
+      "expected_rows": [
+        [
+          "<http://ex/a>"
+        ]
+      ],
+      "dataset_ntriples": "<http://ex/a> <http://ex/p> \"2024-01-01T00:00:59.999999999999999999Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> .\n<http://ex/b> <http://ex/p> \"2024-01-01T00:01:00Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> ."
+    },
+    {
+      "id": "round-minute-stored-count",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (COUNT(*) AS ?n) {?s <http://ex/p> ?t FILTER(?t < \"2024-01-01T00:01:00Z\"^^xsd:dateTime)}",
+      "expected_rows": [
+        [
+          "\"1\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+        ]
+      ],
+      "dataset_ntriples": "<http://ex/a> <http://ex/p> \"2024-01-01T00:00:59.999999999999999999Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> .\n<http://ex/b> <http://ex/p> \"2024-01-01T00:01:00Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> ."
+    },
+    {
+      "id": "round-minute-stored-order",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ?s {?s <http://ex/p> ?t} ORDER BY DESC(?t)",
+      "expected_rows": [
+        [
+          "<http://ex/b>"
+        ],
+        [
+          "<http://ex/a>"
+        ]
+      ],
+      "dataset_ntriples": "<http://ex/a> <http://ex/p> \"2024-01-01T00:00:59.999999999999999999Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> .\n<http://ex/b> <http://ex/p> \"2024-01-01T00:01:00Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> ."
+    },
+    {
+      "id": "round-minute-stored-minmax",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (MIN(?t) AS ?min) (MAX(?t) AS ?max) {?s <http://ex/p> ?t}",
+      "expected_rows": [
+        [
+          "\"2024-01-01T00:00:59.999999999999999999Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime>",
+          "\"2024-01-01T00:01:00Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime>"
+        ]
+      ],
+      "dataset_ntriples": "<http://ex/a> <http://ex/p> \"2024-01-01T00:00:59.999999999999999999Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> .\n<http://ex/b> <http://ex/p> \"2024-01-01T00:01:00Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> ."
+    },
+    {
+      "id": "large-epoch-literal",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((\"1000000000-01-01T00:00:00Z\"^^xsd:dateTime = \"1000000000-01-01T00:00:01Z\"^^xsd:dateTime) AS ?eq) ((\"1000000000-01-01T00:00:00Z\"^^xsd:dateTime < \"1000000000-01-01T00:00:01Z\"^^xsd:dateTime) AS ?lt) {}",
+      "expected_rows": [
+        [
+          "\"false\"^^<http://www.w3.org/2001/XMLSchema#boolean>",
+          "\"true\"^^<http://www.w3.org/2001/XMLSchema#boolean>"
+        ]
+      ],
+      "dataset_ntriples": ""
+    },
+    {
+      "id": "large-epoch-values",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((?a = ?b) AS ?eq) ((?a < ?b) AS ?lt) {VALUES (?a ?b) {(\"1000000000-01-01T00:00:00Z\"^^xsd:dateTime \"1000000000-01-01T00:00:01Z\"^^xsd:dateTime)}}",
+      "expected_rows": [
+        [
+          "\"false\"^^<http://www.w3.org/2001/XMLSchema#boolean>",
+          "\"true\"^^<http://www.w3.org/2001/XMLSchema#boolean>"
+        ]
+      ],
+      "dataset_ntriples": ""
+    },
+    {
+      "id": "large-epoch-stored-scan",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ?s {?s <http://ex/p> ?t FILTER(?t < \"1000000000-01-01T00:00:01Z\"^^xsd:dateTime)}",
+      "expected_rows": [
+        [
+          "<http://ex/a>"
+        ]
+      ],
+      "dataset_ntriples": "<http://ex/a> <http://ex/p> \"1000000000-01-01T00:00:00Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> .\n<http://ex/b> <http://ex/p> \"1000000000-01-01T00:00:01Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> ."
+    },
+    {
+      "id": "large-epoch-stored-count",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (COUNT(*) AS ?n) {?s <http://ex/p> ?t FILTER(?t < \"1000000000-01-01T00:00:01Z\"^^xsd:dateTime)}",
+      "expected_rows": [
+        [
+          "\"1\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+        ]
+      ],
+      "dataset_ntriples": "<http://ex/a> <http://ex/p> \"1000000000-01-01T00:00:00Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> .\n<http://ex/b> <http://ex/p> \"1000000000-01-01T00:00:01Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> ."
+    },
+    {
+      "id": "large-epoch-stored-order",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ?s {?s <http://ex/p> ?t} ORDER BY DESC(?t)",
+      "expected_rows": [
+        [
+          "<http://ex/b>"
+        ],
+        [
+          "<http://ex/a>"
+        ]
+      ],
+      "dataset_ntriples": "<http://ex/a> <http://ex/p> \"1000000000-01-01T00:00:00Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> .\n<http://ex/b> <http://ex/p> \"1000000000-01-01T00:00:01Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> ."
+    },
+    {
+      "id": "large-epoch-stored-minmax",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (MIN(?t) AS ?min) (MAX(?t) AS ?max) {?s <http://ex/p> ?t}",
+      "expected_rows": [
+        [
+          "\"1000000000-01-01T00:00:00Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime>",
+          "\"1000000000-01-01T00:00:01Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime>"
+        ]
+      ],
+      "dataset_ntriples": "<http://ex/a> <http://ex/p> \"1000000000-01-01T00:00:00Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> .\n<http://ex/b> <http://ex/p> \"1000000000-01-01T00:00:01Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> ."
+    },
+    {
+      "id": "strdt-produced-nanosecond",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((?t = \"2024-01-01T00:00:00Z\"^^xsd:dateTime) AS ?eq) {BIND(STRDT(CONCAT(\"2024-01-01T00:00:00\", \".000000001Z\"), xsd:dateTime) AS ?t)}",
+      "expected_rows": [
+        [
+          "\"false\"^^<http://www.w3.org/2001/XMLSchema#boolean>"
+        ]
+      ],
+      "dataset_ntriples": ""
+    },
+    {
+      "id": "cast-produced-nanosecond",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((?t = \"2024-01-01T00:00:00Z\"^^xsd:dateTime) AS ?eq) {BIND(xsd:dateTime(CONCAT(\"2024-01-01T00:00:00\", \".000000001Z\")) AS ?t)}",
+      "expected_rows": [
+        [
+          "\"false\"^^<http://www.w3.org/2001/XMLSchema#boolean>"
+        ]
+      ],
+      "dataset_ntriples": ""
+    },
+    {
+      "id": "fractional-offset-equality",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((\"2024-01-01T00:00:00.000000001+14:00\"^^xsd:dateTime = \"2023-12-31T10:00:00.000000001Z\"^^xsd:dateTime) AS ?eq) {}",
+      "expected_rows": [
+        [
+          "\"true\"^^<http://www.w3.org/2001/XMLSchema#boolean>"
+        ]
+      ],
+      "dataset_ntriples": ""
+    },
+    {
+      "id": "fractional-mixed-zone-outside",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((\"2024-01-01T00:00:00\"^^xsd:dateTime < \"2024-01-01T14:00:00.00000000000000000001Z\"^^xsd:dateTime) AS ?lt) {}",
+      "expected_rows": [
+        [
+          "\"true\"^^<http://www.w3.org/2001/XMLSchema#boolean>"
+        ]
+      ],
+      "dataset_ntriples": ""
+    },
+    {
+      "id": "fractional-mixed-zone-boundary",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT ((\"2024-01-01T00:00:00\"^^xsd:dateTime < \"2024-01-01T14:00:00Z\"^^xsd:dateTime) AS ?lt) {}",
+      "expected_rows": [
+        [
+          null
+        ]
+      ],
+      "dataset_ntriples": ""
+    },
+    {
+      "id": "seconds-long-fraction-lexical-output",
+      "dataset_ntriples": "",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (SECONDS(\"2024-01-01T00:00:00.00000000000000000000000000000000000000000000001Z\"^^xsd:dateTime) AS ?x) {}",
+      "expected_rows": [
+        [
+          "\"0.00000000000000000000000000000000000000000000001\"^^<http://www.w3.org/2001/XMLSchema#decimal>"
+        ]
+      ]
+    },
+    {
+      "id": "stamp-accessors-require-timezone",
+      "dataset_ntriples": "",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (YEAR(?d) AS ?year) (TZ(?d) AS ?tz) (SECONDS(?d) AS ?seconds) {VALUES ?d {\"2024-01-01T00:00:01.25\"^^xsd:dateTimeStamp}}",
+      "expected_rows": [
+        [
+          null,
+          null,
+          null
+        ]
+      ]
+    },
+    {
+      "id": "stamp-accessors-with-timezone",
+      "dataset_ntriples": "",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (YEAR(?d) AS ?year) (TZ(?d) AS ?tz) (SECONDS(?d) AS ?seconds) {VALUES ?d {\"2024-01-01T00:00:01.25Z\"^^xsd:dateTimeStamp}}",
+      "expected_rows": [
+        [
+          "\"2024\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+          "\"Z\"",
+          "\"1.25\"^^<http://www.w3.org/2001/XMLSchema#decimal>"
+        ]
+      ]
+    }
+  ]
+}

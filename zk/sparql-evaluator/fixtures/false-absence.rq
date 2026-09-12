@@ -17,4 +17,9 @@ ASK {
   { BIND(SUBSTR("abc", 0, 2) AS ?slice) FILTER(?slice != "a") }
   UNION
   { BIND(("1200"^^xsd:byte + 0) > 5 AS ?invalid) FILTER(?invalid) }
+  UNION
+  {
+    FILTER("2024-01-01T00:00:00Z"^^<http://www.w3.org/2001/XMLSchema#dateTime>
+      = "2024-01-01T00:00:00.000000001Z"^^<http://www.w3.org/2001/XMLSchema#dateTime>)
+  }
 }

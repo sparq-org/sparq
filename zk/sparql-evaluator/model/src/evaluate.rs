@@ -8,6 +8,8 @@ use spargebra::algebra::{
 use spargebra::term::{GroundTerm, TermPattern};
 use sparq_core::{Graph, dict::Dict};
 
+const TEMPORAL_YEAR_RANGE: (i64, i64) = (1, 1_000_000_000);
+
 /// Admits an entire query, including nested expressions and subqueries.
 ///
 /// # Errors
@@ -282,6 +284,10 @@ fn path_nullable(path: &PropertyPathExpression) -> bool {
 fn literal(l: &Literal) -> Result<(), Rejected> {
     if l.direction().is_some() {
         Err(Rejected("directional literals are not admitted"))
+    } else if !sparq_core::temporal::year_within_capacity(
+        l.value(), l.datatype().as_str(), TEMPORAL_YEAR_RANGE.0, TEMPORAL_YEAR_RANGE.1,
+    ) {
+        Err(Rejected("temporal year capacity"))
     } else {
         Ok(())
     }
@@ -375,6 +381,7 @@ pub fn evaluate(witness: &Witness) -> Result<Journal, Rejected> {
     let graph = Graph::from_parts(dict, triples);
     let budget = sparq_engine::QueryBudget {
         max_rows: Some(request.policy.max_rows as usize),
+        temporal_year_range: Some(TEMPORAL_YEAR_RANGE),
         // Bound computed terms as well as row counts; this is an estimate, not RSS.
         max_bytes: Some(4 * MAX_DATASET_BYTES as usize),
         ..Default::default()

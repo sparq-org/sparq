@@ -21,10 +21,10 @@
 //! `exact_cmp` f64-collapse recheck exact for integers beyond 2^53 / high-precision
 //! decimals / the mixed exact-vs-double tie — and within the other kinds strict
 //! typed/temporal (`xsd:dateTime`/`xsd:date` by TIMELINE via the shared
-//! `sparq_core::temporal::Timeline`, same-tag language strings and same-other-XSD
+//! `sparq_core::temporal::ExactTimeline`, same-tag language strings and same-other-XSD
 //! lexically), then the lexical fallback); triple terms component-wise
 //! recursively. Every observation hook mirrors the engine's `Value` impl over the SAME
-//! shared machinery (`Timeline`, the substrate `Num`/`Dec` tower, `parse_xsd_f64`), and the
+//! shared machinery (`ExactTimeline`, the substrate `Num`/`Dec` tower, `parse_xsd_f64`), and the
 //! full-multiset parity is pinned against a REAL engine `ORDER BY` over the same
 //! materialised closure by `tests/compare_parity.rs`; the `exact_cmp` collapse-recheck
 //! for distinct integers beyond 2^53 is pinned by the unit test
@@ -55,7 +55,7 @@
 use std::cmp::Ordering;
 
 use sparq_core::dict::{is_inline, split_lang_dir, Dict, Id, TermParts, INLINE_BASE};
-use sparq_core::temporal::Timeline;
+use sparq_core::temporal::{ExactTemporal, ExactTimeline};
 use sparq_substrate::compare::{compare_terms, CompareTerm, LiteralKind, TermClass};
 use sparq_substrate::numeric::{parse_xsd_f64, Num};
 #[cfg(test)]
@@ -141,9 +141,9 @@ impl<'a> IdTerm<'a> {
                 } else if datatype == XSD_BOOLEAN {
                     Kind::Bool(parse_bool(value))
                 } else if datatype == XSD_DATE_TIME || datatype == XSD_DATE_TIME_STAMP {
-                    Kind::DateTime(Timeline::parse_datetime(value))
+                    Kind::DateTime(ExactTemporal::of_lit(value, datatype).map(|value| value.timeline))
                 } else if datatype == XSD_DATE {
-                    Kind::Date(Timeline::parse_date(value))
+                    Kind::Date(ExactTimeline::parse_date(value))
                 } else if datatype.starts_with(XSD_PREFIX) {
                     Kind::OtherXsd(datatype, value)
                 } else {
@@ -166,9 +166,9 @@ enum Kind<'a> {
     /// `xsd:boolean`; `None` = ill-formed lexical.
     Bool(Option<bool>),
     /// `xsd:dateTime` / `xsd:dateTimeStamp` on the timeline; `None` = ill-formed.
-    DateTime(Option<Timeline>),
+    DateTime(Option<ExactTimeline<'a>>),
     /// `xsd:date` on the timeline (midnight); `None` = ill-formed.
-    Date(Option<Timeline>),
+    Date(Option<ExactTimeline<'a>>),
     /// Another XSD datatype (time, gYear, duration, …): (datatype IRI, lexical).
     OtherXsd(&'a str, &'a str),
     /// Language-tagged: (lowercased BCP47 tag, lexical value).
@@ -319,12 +319,12 @@ impl CompareTerm for IdTerm<'_> {
             (Bool(Some(a)), Bool(Some(b))) => Some(a.cmp(&b)),
             // [SONNET-4.6] sq-2k5py: the TOTAL timeline order, mirroring the engine's
             // `CompareTerm::strict_cmp` (which extends `value_compare_strict` the same way).
-            // `Timeline::cmp_tl`'s indeterminate mixed-timezone window would drop the pair to
+            // `ExactTimeline::compare`'s indeterminate mixed-timezone window would drop the pair to
             // `compare_terms`' lexical fallback INSIDE the DateTime/Date kind, which is
             // intransitive; the reasoner has no relational operators, so the total order is
             // the only consumer here.
-            (DateTime(Some(a)), DateTime(Some(b))) => Some(Timeline::cmp_tl_total(a, b)),
-            (Date(Some(a)), Date(Some(b))) => Some(Timeline::cmp_tl_total(a, b)),
+            (DateTime(Some(a)), DateTime(Some(b))) => Some(ExactTimeline::compare_total(a, b)),
+            (Date(Some(a)), Date(Some(b))) => Some(ExactTimeline::compare_total(a, b)),
             // Same language tag (case-insensitive): compare values (the suites' lenient
             // extension the engine applies).
             (Lang(t1, v1), Lang(t2, v2)) if t1 == t2 => Some(v1.cmp(v2)),
@@ -539,6 +539,21 @@ mod tests {
         let u1 = lit(&mut d, "alpha", "http://ex/custom");
         let u2 = lit(&mut d, "beta", "http://ex/custom");
         assert_eq!(compare_ids(&d, u1, u2), Ordering::Less);
+    }
+
+    #[test]
+    fn temporal_fraction_order_preserves_exact_instants() {
+        let mut dictionary = Dict::new();
+        for (left, right) in [
+            ("2024-01-01T00:00:00Z", "2024-01-01T00:00:00.000000001Z"),
+            ("2024-01-01T00:00:59.999999999999999999Z", "2024-01-01T00:01:00Z"),
+            ("1000000000-01-01T00:00:00Z", "1000000000-01-01T00:00:01Z"),
+        ] {
+            let left = lit(&mut dictionary, left, XSD_DATE_TIME);
+            let right = lit(&mut dictionary, right, XSD_DATE_TIME);
+            assert_eq!(compare_ids(&dictionary, left, right), Ordering::Less);
+            assert_eq!(compare_ids(&dictionary, right, left), Ordering::Greater);
+        }
     }
 
     /// Cross-class precedence over real ids: blank < IRI < literal < triple term.
