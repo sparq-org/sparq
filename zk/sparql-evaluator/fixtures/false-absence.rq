@@ -1,0 +1,9 @@
+# [GPT-6] Neither branch has a solution in the committed default.nt graph.
+# A variable endpoint of a zero-length path ranges over subjects and objects,
+# even when VALUES binds it to a predicate-only IRI or an absent IRI.
+PREFIX ex: <http://ex/>
+ASK {
+  { ?s ex:score ?v FILTER(?v > 100) }
+  UNION
+  { VALUES ?s { ex:value ex:missing } ?s ex:value* ?o }
+}

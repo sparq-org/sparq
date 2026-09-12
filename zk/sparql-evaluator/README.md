@@ -90,7 +90,7 @@ standard expectation separately from the rejection case.
 | OPTIONAL, MINUS, COUNT, subquery, ORDER/LIMIT | admitted | combined genuine proof fixture |
 | VALUES, UNION, unbound | admitted | host semantics; holder-declared bag proof fixture |
 | NOT EXISTS, true ASK, arithmetic/error | admitted | host semantics |
-| false ASK, numeric FILTER | admitted | host semantics; genuine false-ASK proof fixture |
+| false ASK, numeric FILTER, VALUES joined with root zero-length paths | admitted | host semantics; genuine false-ASK proof fixture |
 | Fixed sequence and alternative paths, positive correlated EXISTS | admitted | combined genuine proof fixture; native conformance cases |
 | Other paths, pure functions and built-in aggregates | admitted by AST | shared evaluator; no complete guest conformance claim |
 | GRAPH, FROM/FROM NAMED, SERVICE, LATERAL | rejected | whole-AST negatives |

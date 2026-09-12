@@ -123,6 +123,13 @@ fn optional_unbound_is_not_empty_literal() {
 
 #[test]
 fn negation_and_false_ask_evaluate_the_complete_graph() {
+    assert_eq!(
+        evaluate(&witness(include_str!("../../fixtures/false-absence.rq")))
+            .unwrap()
+            .result,
+        CanonicalResult::Ask(false),
+        "VALUES must not turn variable path endpoints into constant endpoints"
+    );
     let (_, rows) = select(
         "SELECT ?s WHERE { ?s <http://ex/score> ?n FILTER NOT EXISTS { ?s <http://ex/blocked> true } }",
     );

@@ -257,9 +257,9 @@ fn real_holder_declared_bag_preserves_duplicates_unbound_and_provenance() {
 
 #[test]
 fn real_false_ask_proves_absence_from_the_accepted_complete_graph() {
-    let mut witness = witness("ASK { ?s <http://ex/score> ?v FILTER(?v > 100) }");
+    let mut witness = witness(include_str!("../../fixtures/false-absence.rq"));
     witness.request.nonce = [31; 32];
-    eprintln!("proving false ASK on the accepted complete graph");
+    eprintln!("proving false ASK with numeric and nullable-path absence");
     let presentation = prove(&witness, &r0vm()).expect("genuine false-ASK proof");
     let journal = verify(
         &presentation,
