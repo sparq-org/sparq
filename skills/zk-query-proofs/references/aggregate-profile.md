@@ -35,3 +35,5 @@ VALUES {1 UNDEF} are concrete excluded cases, not counted as successful conforma
 checking the twelve strict guest relation rejections. These authored tests are
 separate from the native corpus; they establish execution only when the final
 artifact's hosted or local campaign records them, not when this file is added.
+
+The V2 workspace repeats these cases with its own typed request and journal.

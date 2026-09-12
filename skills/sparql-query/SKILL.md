@@ -622,6 +622,13 @@ let v = DatasetView { base: &store, named: visible, default: DefaultGraphMode::S
 let r = query_view(&v, "SELECT ?s WHERE { GRAPH ?g { ?s ?p ?o } }").unwrap(); // only g1 visible
 ```
 
+[GPT-6] Nested `GRAPH` patterns preserve the query's active dataset catalog while
+switching the active graph. Constant and variable graph names can select another
+named graph from that catalog, including an empty graph. `FROM NAMED` restrictions
+continue to apply at every nesting level; graph-name bindings retain normal join
+compatibility and result multiplicity. The evaluator borrows this catalog in its
+per-query context rather than cloning graphs or using global dataset state.
+
 ## Gotchas / feature flags / prerequisites
 
 - **Errors are `String`** — both SPARQL parse errors and evaluation/type errors. SPARQL is parsed by

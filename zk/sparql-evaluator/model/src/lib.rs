@@ -8,6 +8,9 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fmt;
 
+/// Complete default/named dataset relation with a separately versioned schema.
+pub mod v2;
+
 #[cfg(feature = "evaluate")]
 mod aggregate_profile;
 #[cfg(feature = "evaluate")]
@@ -25,6 +28,11 @@ pub const MAX_TRIPLES: u32 = 256;
 pub const MAX_QUERY_BYTES: usize = 8_192;
 /// Maximum materialized rows permitted by the bounded evaluator profile.
 pub const MAX_ROWS: u32 = 4_096;
+/// Byte ceiling for the pinned SDK's V1/V2 witness serialization, including framing.
+///
+/// Source and query strings are packed bytes. The margin bounds graph-catalog
+/// lengths, resource fields, authority, salt, nonce and alignment padding.
+pub const MAX_WITNESS_BYTES: usize = MAX_DATASET_BYTES as usize + MAX_QUERY_BYTES + 4_096;
 
 /// Mathematical statement requested by a relying party.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

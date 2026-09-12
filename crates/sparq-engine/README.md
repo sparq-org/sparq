@@ -22,10 +22,8 @@ not externally audited.
 ```rust
 # fn main() -> Result<(), Box<dyn std::error::Error>> {
 use sparq_core::Graph;
-
 let g = Graph::load_str(
     r#"<http://example.org/alice> a <http://schema.org/Person> ."#, "turtle")?;
-
 let rows = sparq_engine::query(&g, "SELECT ?s WHERE { ?s a <http://schema.org/Person> }")?;
 let json = sparq_engine::query_json(&g, "SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?o }")?;
 # let _ = (rows, json);
@@ -48,6 +46,8 @@ let json = sparq_engine::query_json(&g, "SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?
   midnight; `MIN`/`MAX` retain input terms. [Bounded coverage and numeric limits](../../skills/sparql-query/SKILL.md)
   remain explicit; these corrections do not establish complete builtin conformance.
 - **Named graphs** — query across an active dataset with `GRAPH` and `FROM` / `FROM NAMED`.
+  [GPT-6] Nested `GRAPH` borrows the same catalog, preserving empty graphs,
+  binding multiplicity and `FROM NAMED` restrictions at every nesting level.
 - **RDF 1.2 triple terms** — match [triple terms](https://www.w3.org/TR/rdf12-concepts/), including variables inside them.
 - **Materialized full paths** *(opt-in `paths` feature, OFF by default)* — `enumerate_paths` returns intermediate nodes and edges for tied shortest paths, bounded simple paths, or cycles back to their start. Each endpoint is unrestricted, one fixed node, or a graph pattern selecting a candidate set.
 - **Query plan introspection** — `EXPLAIN` and `EXPLAIN ANALYZE`.

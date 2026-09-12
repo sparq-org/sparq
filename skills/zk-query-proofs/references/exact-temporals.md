@@ -80,3 +80,5 @@ hashes. It remains native evidence; its pending guest/hosted status is explicit.
 
 The cache corpus also uses long fractional suffixes after mmap reopening and
 rejects stored year zero through actual native ASK/FILTER/COUNT evaluation.
+The V2 workspace repeats all 28 temporal cases and 13 capacity rejections in
+its own native and actual-guest tests; shared V1 execution does not stand in for V2.

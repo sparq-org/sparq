@@ -2579,7 +2579,7 @@ fn local_term_bytes(t: &Term) -> usize {
 /// Per-query vocabulary for terms produced during evaluation (BIND, aggregates)
 /// that are not in the graph dictionary.
 #[derive(Default)]
-pub struct LocalVocab {
+pub struct LocalVocab<'dataset> {
     terms: Vec<Term>,
     ids: FxHashMap<Term, Id>,
     /// Parallel to `terms`: the f64 value of each numeric local literal (NaN
@@ -2591,9 +2591,16 @@ pub struct LocalVocab {
     /// this evaluation's vocabulary, so nested queries and Rayon workers cannot
     /// inherit another evaluation's bindings through thread-local state.
     correlation: FxHashMap<Variable, Term>,
+    /// [GPT-6] The active dataset catalog is independent of the active graph.
+    /// Nested GRAPH switches graph dictionaries without losing this borrowed
+    /// catalog; it is scoped to this evaluation, with no cloning or global state.
+    dataset: Option<&'dataset Graph>,
 }
 
-impl LocalVocab {
+impl<'dataset> LocalVocab<'dataset> {
+    fn for_dataset(dataset: &'dataset Graph) -> Self {
+        Self { dataset: Some(dataset), ..Self::default() }
+    }
     /// Interns a term, returning a stable id: equal terms get the same id so
     /// DISTINCT, GROUP BY, joins and equality work on computed values.
     fn intern(&mut self, t: Term) -> Id {
@@ -2694,7 +2701,7 @@ impl Bindings {
 }
 
 pub fn eval_select(graph: &Graph, pattern: &GraphPattern) -> Result<QueryResult, String> {
-    let mut local = LocalVocab::default();
+    let mut local = LocalVocab::for_dataset(graph);
     let bindings = eval_modified(graph, &mut local, pattern)?;
     // Final budget gate: converts a row-capped/timed-out evaluation (including the
     // uninstrumented rayon branches) into the error before the expensive term
@@ -3063,7 +3070,7 @@ pub fn eval_select_json_emit(
         budget::check(0)?; // sticky: the streaming loop may have stopped mid-scan
         return Ok(());
     }
-    let mut local = LocalVocab::default();
+    let mut local = LocalVocab::for_dataset(graph);
     let bindings = eval_modified(graph, &mut local, pattern)?;
     budget::check(bindings.rows.len())?; // final gate (see eval_select)
 
@@ -3211,7 +3218,7 @@ pub fn eval_ask(graph: &Graph, pattern: &GraphPattern) -> Result<bool, String> {
         return Ok(n > 0);
     }
     let sliced = GraphPattern::Slice { inner: Box::new(simplified), start: 0, length: Some(1) };
-    let mut local = LocalVocab::default();
+    let mut local = LocalVocab::for_dataset(graph);
     let b = eval_modified(graph, &mut local, &sliced)?;
     budget::check(b.rows.len())?;
     Ok(!b.rows.is_empty())
@@ -3260,7 +3267,7 @@ pub fn count_select(graph: &Graph, pattern: &GraphPattern) -> Result<usize, Stri
         budget::check(0)?;
         return Ok(n);
     }
-    let mut local = LocalVocab::default();
+    let mut local = LocalVocab::for_dataset(graph);
     let bindings = eval_modified(graph, &mut local, pattern)?;
     budget::check(bindings.rows.len())?; // final gate (see eval_select)
     Ok(bindings.rows.len())
@@ -5124,7 +5131,11 @@ fn eval_graph_named_pref(
         // default (wasm) build is byte-identical.
         #[cfg(feature = "zk")]
         let _zk = crate::zk::graph_scope(gname);
-        let mut sub_local = LocalVocab { correlation: local.correlation.clone(), ..LocalVocab::default() };
+        let mut sub_local = LocalVocab {
+            correlation: local.correlation.clone(),
+            dataset: local.dataset,
+            ..LocalVocab::default()
+        };
         let b = eval_graph_pattern(sub, &mut sub_local, inner)?;
         let rows: Vec<Row> = b
             .rows
@@ -5140,6 +5151,7 @@ fn eval_graph_named_pref(
             .collect();
         Ok(Bindings::unsorted(b.vars, rows))
     }
+    let dataset = local.dataset.unwrap_or(graph);
     match name {
         NamedNodePattern::NamedNode(n) => {
             let target = Term::NamedNode(n.clone());
@@ -5147,7 +5159,7 @@ fn eval_graph_named_pref(
             // branch below: non-visible must be INDISTINGUISHABLE from absent
             // (the L1 view's security property).
             let sub = if view::allows(&target) {
-                graph.named.iter().find(|(t, _)| *t == target).map(|(_, sub)| sub)
+                dataset.named.iter().find(|(t, _)| *t == target).map(|(_, sub)| sub)
             } else {
                 None
             };
@@ -5171,7 +5183,7 @@ fn eval_graph_named_pref(
                     #[cfg(feature = "zk")]
                     let _zk = crate::zk::graph_scope(&target);
                     let empty = Graph::load_str("", "ntriples").map_err(|e| e.to_string())?;
-                    let mut el = LocalVocab::default();
+                    let mut el = LocalVocab { dataset: local.dataset, ..LocalVocab::default() };
                     let mut b = eval_graph_pattern(&empty, &mut el, inner)?;
                     b.rows.clear();
                     Ok(b)
@@ -5258,7 +5270,7 @@ fn eval_graph_named_pref(
                 // The view-visibility (L1) check stays — a non-visible graph is still skipped.
                 Some(pref) => {
                     let mut err: Option<String> = None;
-                    graph.for_named_graphs_with_prefix(pref, |gname, sub| {
+                    dataset.for_named_graphs_with_prefix(pref, |gname, sub| {
                         if err.is_some() || !view::allows(gname) {
                             return;
                         }
@@ -5272,7 +5284,7 @@ fn eval_graph_named_pref(
                 }
                 // Full enumeration (no prefix restriction).
                 None => {
-                    for (gname, sub) in &graph.named {
+                    for (gname, sub) in &dataset.named {
                         if !view::allows(gname) {
                             continue; // not visible under the installed dataset view (L1)
                         }
@@ -13519,6 +13531,7 @@ fn eval_exists_inner(
     // vocabulary preserves actual term identity across graph/local ID spaces.
     let mut inner_local = LocalVocab {
         correlation: local.correlation.clone(),
+        dataset: local.dataset,
         ..LocalVocab::default()
     };
     for (column, variable) in b.vars.iter().enumerate() {

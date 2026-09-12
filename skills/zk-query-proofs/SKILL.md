@@ -105,6 +105,9 @@ The opt-in detached [exact evaluator](references/exact-evaluator.md) proves boun
 default-graph evaluation with explicit verifier-agreed or holder-declared scope.
 It is experimental and not externally audited; its first adapter carries no
 issuer-signature or credential-status claim.
+[GPT-6] The separately versioned [complete named-dataset API](references/exact-datasets-v2.md)
+adds a committed catalog including empty named graphs, GRAPH and local snapshot
+FROM/FROM NAMED selection. V1 requests and commitments retain their meaning.
 [GPT-6] The [campaign evidence guide](references/evaluator-evidence.md) explains
 exact artifact export, actual receipt evidence and source/HAL provenance.
 

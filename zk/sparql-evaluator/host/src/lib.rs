@@ -16,6 +16,9 @@ use sparq_proved_evaluator_model::{
 };
 use std::{fmt, path::Path};
 
+/// Versioned complete default/named dataset proving and verification.
+pub mod v2;
+
 /// Public presentation contains only the cryptographic receipt and its journal.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -155,6 +158,16 @@ fn prove_program(
     validate_request(&witness.request).map_err(|_| Error("invalid proof request"))?;
     dataset_commitment(&witness.dataset, &witness.request.policy)
         .map_err(|_| Error("private input capacity rejected"))?;
+    let presentation = prove_serialized(witness, r0vm, artifact)?;
+    checked_journal(&presentation, &witness.request, image_id)?;
+    Ok(presentation)
+}
+
+fn prove_serialized(
+    witness: &impl Serialize,
+    r0vm: &Path,
+    artifact: &[u8],
+) -> Result<Presentation, Error> {
     let env = ExecutorEnv::builder()
         // Prover-local denial-of-service guard; exhaustion produces no presentation.
         .session_limit(Some(1 << 25))
@@ -173,11 +186,9 @@ fn prove_program(
             &ProverOpts::succinct().with_dev_mode(false),
         )
         .map_err(|_| Error("real local proof failed"))?;
-    let presentation = Presentation {
+    Ok(Presentation {
         receipt: info.receipt,
-    };
-    checked_journal(&presentation, &witness.request, image_id)?;
-    Ok(presentation)
+    })
 }
 
 fn checked_journal(
@@ -186,13 +197,7 @@ fn checked_journal(
     image_id: [u32; 8],
 ) -> Result<Journal, Error> {
     validate_request(expected).map_err(|_| Error("invalid expected request"))?;
-    if !matches!(presentation.receipt.inner, InnerReceipt::Succinct { .. }) {
-        return Err(Error("only succinct receipts are accepted"));
-    }
-    presentation
-        .receipt
-        .verify_with_context(&VerifierContext::default().with_dev_mode(false), image_id)
-        .map_err(|_| Error("proof or program identity rejected"))?;
+    verify_receipt(presentation, image_id)?;
     let journal: Journal = presentation
         .receipt
         .journal
@@ -200,6 +205,17 @@ fn checked_journal(
         .map_err(|_| Error("journal decoding rejected"))?;
     bind_journal(&journal, expected).map_err(|_| Error("independent request binding rejected"))?;
     Ok(journal)
+}
+
+fn verify_receipt(presentation: &Presentation, image_id: [u32; 8]) -> Result<(), Error> {
+    if !matches!(presentation.receipt.inner, InnerReceipt::Succinct { .. }) {
+        return Err(Error("only succinct receipts are accepted"));
+    }
+    presentation
+        .receipt
+        .verify_with_context(&VerifierContext::default().with_dev_mode(false), image_id)
+        .map_err(|_| Error("proof or program identity rejected"))?;
+    Ok(())
 }
 
 /// Verifies the real receipt, expected request, and atomic single-use challenge.
