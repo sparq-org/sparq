@@ -59,14 +59,14 @@ spec value** rather than the oracle's, and is labelled **SPEC-REFERENCE** both a
 in the generated file's header. Read such a row as `noir_XPath == XPath F&O`, not as
 `noir_XPath == sparq`. Keeping it live is the point: these are edges `noir_XPath` has already
 *fixed*, so a regression on one must fail the run — a commented-out assertion cannot fail
-and would verify nothing. Two divergences are recorded today — `SUBSTR` with `start < 1`
-(the engine shifts the window instead of keeping it) and `ROUND` losing the sign of a
-negative zero.
+and would verify nothing. One divergence remains: `ROUND` loses the sign of negative
+zero. [GPT-6] The former `SUBSTR` window divergence is fixed; every substring row now
+requires oracle/reference equality, including starts below one.
 
 Three unit tests hold that arrangement in place: one asserts no assertion is ever emitted
 commented out and that `substring("12345", 0, 3)` and `round_double(-0.5)` in particular
-reach the circuit live; two assert each divergence still reproduces, so the special-casing
-**expires** (goes red) the day the engine is fixed.
+reach the circuit live; one pins substring agreement, and one requires the remaining
+ROUND divergence to reproduce so its special case **expires** when the engine is fixed.
 
 ## Non-vacuity — proved per test function, not once per file
 
@@ -97,8 +97,7 @@ does not cover every test function in the oracle file.
 This is **VERIFICATION, not proof**. Three things are trusted and unproven:
 
 1. **The sparq Rust XSD evaluator.** It is the repo's reference semantics, *not* an audited
-   or proven-correct implementation. Two live divergences from XPath F&O are already
-   recorded above; there may be more that the corpus does not reach.
+   or proven-correct implementation. The live ROUND divergence is recorded above; there may be more that the corpus does not reach.
 2. **The SAMPLE.** Coverage is hand-picked edge cases, not exhaustive. A wrong answer on an
    unsampled input is not caught. (Exhaustive coverage is milestone **M2**, and only for
    unary binary32 ops.)
