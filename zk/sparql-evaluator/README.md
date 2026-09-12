@@ -77,6 +77,10 @@ The surface is the versioned `SparqSparql11SnapshotV1` profile, with its impleme
 pinned by the guest image. It is not a claim of complete SPARQL 1.1 or conformance
 to the evolving SPARQL 1.2 draft. `model::admit` visits nested patterns and
 expressions, including subqueries, aggregate operands and EXISTS bodies.
+The SPARQL version identifies query syntax/operators. Numeric datatype facets
+follow [RDF 1.1 / XSD 1.1](https://www.w3.org/TR/2014/REC-rdf11-concepts-20140225/#xsd-datatypes),
+including unsigned `+1` and `-0`. Finite numeric lanes, the `i64` integer-constructor
+boundary and temporal helpers have separately recorded implementation limits.
 EXISTS and NOT EXISTS bodies are restricted to BGP, join, UNION and pure FILTER.
 Fixed path sequences lowered to BGP are included; residual path operators,
 nested EXISTS, OPTIONAL/MINUS, binding operators, subqueries and modifiers inside
@@ -99,7 +103,7 @@ standard expectation separately from the rejection case.
 | OPTIONAL, MINUS, COUNT, subquery, ORDER/LIMIT | admitted | combined genuine proof fixture |
 | VALUES, UNION, unbound | admitted | host semantics; holder-declared bag proof fixture |
 | NOT EXISTS, true ASK, arithmetic/error | admitted | host semantics |
-| false ASK, numeric FILTER, VALUES joined with root zero-length paths or MINUS, SUBSTR position bounds | admitted | host semantics; genuine false-ASK proof fixture |
+| false ASK, numeric FILTER, VALUES joined with root zero-length paths or MINUS, SUBSTR positions and numeric subtype errors | admitted | host semantics; genuine false-ASK proof fixture |
 | Fixed sequence and alternative paths, positive correlated EXISTS | admitted | combined genuine proof fixture; native conformance cases |
 | Negated property sets, including forward/reverse endpoint multiplicity | admitted | REC-derived expectations checked natively and in actual guest execution; separate from receipt evidence |
 | Other paths, pure functions and built-in aggregates | admitted by AST | shared evaluator; no complete guest conformance claim |
@@ -115,8 +119,10 @@ runs native semantic tests; `host/tests/real_proof.rs` generates genuine receipt
 and exercises the actual guest. `host/tests/actual_builtin_edges.rs` executes the
 shared builtin edge corpus in the actual guest; REC-derived expectations and
 labeled integer-constructor capacity controls remain separate evidence. These
-executions generate no individual receipts; the false-ASK proof also discriminates
-the corrected SUBSTR boundary. The dedicated CI workflow runs every host test. No ignored
+executions authenticate each case's optional N-Triples source, covering literal,
+VALUES and stored-term arithmetic/error paths. They generate no individual receipts;
+the false-ASK fixture also discriminates SUBSTR positions and invalid numeric facets.
+The dedicated CI workflow runs every host test. No ignored
 test or missing-tool shortcut counts as a successful proof run. Broader guest
 conformance coverage and remaining features belong to zkp-10.
 
