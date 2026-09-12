@@ -215,6 +215,13 @@ fn actual_v2_guest_rejects_catalog_omissions_invalid_source_and_cross_version() 
     let mut cross_version = base;
     cross_version.request.version = sparq_proved_evaluator_model::VERSION;
     cases.push(cross_version);
+    let exclusions: serde_json::Value =
+        serde_json::from_str(include_str!("../../fixtures/v2-admission-rejections.json")).unwrap();
+    let excluded_cases = exclusions["cases"].as_array().unwrap();
+    assert_eq!(excluded_cases.len(), 5, "execute every V2 query exclusion");
+    for case in excluded_cases {
+        cases.push(witness(case["query"].as_str().unwrap()));
+    }
     for input in cases {
         let error = execute(&input).expect_err("invalid V2 relation must reject");
         let rejection = format!("{error:#}");

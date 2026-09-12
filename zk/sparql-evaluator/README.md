@@ -15,6 +15,8 @@ The sections below describe the V1 profile unless explicitly stated otherwise.
 The [V2 dataset API](../../skills/zk-query-proofs/references/exact-datasets-v2.md)
 documents its separate wire schema, N-Quads/catalog commitment and GRAPH plus
 local-snapshot FROM/FROM NAMED behavior. V1 commitment semantics are unchanged.
+`coverage.json` inventories V1 only; its named-graph rejections do not describe V2.
+V2 native and actual-guest test definitions are listed in the linked V2 reference.
 
 `ProofContract::SelectedSupport` describes the existing Noir answer-support API.
 The evaluator rejects it: this guest implements `ExactDataset` only. Exactness

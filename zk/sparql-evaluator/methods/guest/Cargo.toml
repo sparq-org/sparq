@@ -2,6 +2,7 @@
 name = "sparq-exact-guest"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
 publish = false
 
 [workspace]

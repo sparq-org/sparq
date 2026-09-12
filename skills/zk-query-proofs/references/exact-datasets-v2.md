@@ -57,6 +57,8 @@ FROM NAMED source contributes an empty named graph in the derived active dataset
 Consequently `FROM NAMED <absent> { GRAPH <absent> {} }` does not establish that
 the input catalog contained that graph. The complete input catalog and the
 query-derived active catalog are distinct objects.
+To test membership in the accepted input catalog, verifiers should omit dataset
+clauses and query GRAPH directly against that input catalog.
 
 V2 supports SELECT and ASK with the shared bounded deterministic profile. SERVICE,
 LATERAL, graph-producing query forms, updates, volatile functions and the existing
@@ -76,5 +78,10 @@ Native contracts and graph semantics are tested in `model/tests/datasets.rs` and
 the V2 model unit tests. The original default-graph conformance goldens also run
 through V2 without changing their expected mappings. These are semantic evidence,
 not cryptographic receipts.
+`model/tests/datasets.rs` and the actual guest negatives share
+`fixtures/v2-admission-rejections.json`; the native test also accepts the exact
+dataset-reference capacity boundary. `host/tests/real_datasets.rs` defines the two
+V2 receipt fixtures, catalog/framing negatives and V1/V2 wire checks. All V1 host
+tests remain required on the changed dual-version guest image.
 The [evaluator README](../../../zk/sparql-evaluator/README.md) describes pinned
 toolchain execution, receipt evidence and deployment limitations.

@@ -42,6 +42,9 @@ let json = sparq_engine::query_json(&g, "SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?
 - **Path multiplicity and expression correlation** — alternatives and sequences preserve SPARQL bag counts; reachability operators retain endpoint sets. `EXISTS` / `NOT EXISTS` filters can reference bound outer variables used only in inner expressions, with actual RDF term identity retained across the vocabulary boundary. Nullable paths retain constant endpoint seeds, including terms absent from the active graph, while variable endpoints range over graph nodes. Sequence midpoint hints preserve their variable role. Joins fall back from constant substitution when it would change a nullable path's domain. Join-driven substitution is limited to positive BGP/path/join/UNION shapes and locally bound deterministic FILTERs. MINUS, OPTIONAL, binding, subquery, modifier and graph/service boundaries use ordinary evaluation, preserving their variable scopes and domains. Path endpoints with triple terms also decline substitution so it cannot erase an unsupported variable-bearing endpoint error. These fallbacks can perform more work than the positive substitution path.
 - **Deterministic builtin boundaries** — `isNumeric` checks lexical validity and integer subtype facets independently of arithmetic capacity. Integer casts truncate toward zero and reject results outside the existing `i64` cast lane; a tiny decimal does not overflow while computing its scale divisor. `SUBSTR` with integer arguments clips the original one-based interval, including starts at or below zero. Date accessors and casts use shared calendar/timezone validation and expose `24:00:00` as next-day midnight. `MIN`/`MAX` select an original input term, preserving its datatype and lexical form. These are bounded SPARQL 1.1 corrections, not a complete builtin-conformance claim; the existing finite numeric tower is unchanged.
 - **Named graphs** — query across an active dataset with `GRAPH` and `FROM` / `FROM NAMED`.
+  [GPT-6] Nested `GRAPH` retains the same dataset catalog, including empty graphs,
+  graph-name binding multiplicity and `FROM NAMED` restrictions. The per-query
+  catalog is borrowed independently of the active graph, without cloning it or global state.
 - **RDF 1.2 triple terms** — match [triple terms](https://www.w3.org/TR/rdf12-concepts/), including variables inside them.
 - **Materialized full paths** *(opt-in `paths` feature, OFF by default)* — `enumerate_paths` returns intermediate nodes and edges for tied shortest paths, bounded simple paths, or cycles back to their start. Each endpoint is unrestricted, one fixed node, or a graph pattern selecting a candidate set.
 - **Query plan introspection** — `EXPLAIN` and `EXPLAIN ANALYZE`.
@@ -100,12 +103,6 @@ let json = sparq_engine::query_json(&g, "SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?
 - **Audited cancellation pointer boundary** — the executor keeps its thread-local/rayon budget snapshot `Copy` with a non-owning cancellation pointer; [GPT-6 Astra] a lifetime-bound guard keeps the caller's `Arc<AtomicBool>` alive through scoped worker joins, restores the previous budget scope on return or unwind, and clears the pointer when the outermost scope exits. The four `unsafe` sites are listed in the workspace unsafe register.
 
 ## 📚 Learn more
-
-[GPT-6] GRAPH evaluation keeps the active dataset catalog separate from the active
-graph. Nested GRAPH patterns therefore resolve constant and variable names from
-the same catalog, preserve empty graphs and graph-name binding multiplicity, and
-respect query-level FROM NAMED selection. This context is borrowed per query;
-entering a named graph does not clone the dataset or install global graph state.
 
 - **How-to** — [`skills/sparql-query/SKILL.md`](../../skills/sparql-query/SKILL.md).
 - **API reference** — [docs.rs/sparq-engine](https://docs.rs/sparq-engine).

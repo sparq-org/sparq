@@ -99,6 +99,10 @@ pub struct Witness {
 }
 
 /// Exact public result bound to a V2 request and complete input dataset.
+///
+/// V1 and V2 currently share a journal field layout. Successful decoding does
+/// not select a relation: after receipt verification, `bind_journal` must check
+/// the version and the separately domain-bound expected request.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Journal {

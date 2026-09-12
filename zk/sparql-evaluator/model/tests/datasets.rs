@@ -227,3 +227,31 @@ fn named_graph_proof_fixture_has_independent_count_expectations() {
         CanonicalResult::Ask(false)
     );
 }
+
+#[test]
+fn v2_admission_enforces_reference_capacity_and_remaining_query_exclusions() {
+    let source: serde_json::Value =
+        serde_json::from_str(include_str!("../../fixtures/v2-admission-rejections.json")).unwrap();
+    let cases = source["cases"].as_array().unwrap();
+    assert_eq!(cases.len(), 5, "all V2 profile exclusions are required");
+    for case in cases {
+        let input = witness(case["query"].as_str().unwrap());
+        assert!(admit(&input.request).is_err(), "{}: admission", case["id"]);
+        assert!(evaluate(&input).is_err(), "{}: evaluation", case["id"]);
+    }
+    let query = format!(
+        "SELECT ?g {} WHERE {{ GRAPH ?g {{}} }}",
+        (0..64)
+            .map(|i| format!("FROM NAMED <http://ex/selected-{i}>"))
+            .collect::<Vec<_>>()
+            .join(" ")
+    );
+    let input = witness(&query);
+    admit(&input.request).unwrap();
+    // The query-derived reference cap is separate from the committed input
+    // catalog cap. These absent sources become empty graphs under this profile.
+    let CanonicalResult::Select { rows, .. } = evaluate(&input).unwrap().result else {
+        panic!("SELECT")
+    };
+    assert_eq!(rows.len(), 64);
+}
