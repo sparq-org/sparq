@@ -3,7 +3,8 @@
 //! [GPT-6] [`ExactTimeline`] and [`ExactTemporal`] preserve integer whole seconds
 //! and every lexical fractional digit. Query/reasoner comparison uses these keys,
 //! including the partial mixed-timezone order and its deterministic total extension.
-//! They borrow the original lexical form and reparse it without allocation.
+//! Direct keys parse without allocation; graph keys memoize validation and borrow
+//! fractional digits from dictionary storage without reparsing on each lookup.
 //!
 //! [`Timeline`] retains the legacy parsed floating fraction; [`Temporal`] retains
 //! the approximate f64 epoch cache used by representation-oriented consumers.
@@ -14,6 +15,7 @@
 use std::cmp::Ordering;
 
 mod exact;
+pub(crate) use exact::CacheCell as ExactCacheCell;
 #[doc(inline)]
 pub use exact::{ExactTemporal, ExactTimeline, year_within_capacity};
 
@@ -29,40 +31,63 @@ pub struct Timeline {
     pub tz: Option<i64>,
 }
 
+// [GPT-6] Validate once without using floating point in the exact-key path.
+struct ParsedDateTime<'a> {
+    secs: i64,
+    whole_second: i64,
+    second_lexical: &'a str,
+    fraction: &'a str,
+    tz: Option<i64>,
+}
+
+#[cfg(test)]
+thread_local! { pub(crate) static EXACT_PARSE_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
+
+fn parse_datetime_parts(s: &str) -> Option<ParsedDateTime<'_>> {
+    #[cfg(test)]
+    EXACT_PARSE_CALLS.with(|calls| calls.set(calls.get() + 1));
+    let s = s.trim_matches([' ', '\t', '\r', '\n']);
+    let (date, rest) = s.split_once('T')?;
+    let (time, tz) = match rest.find(['Z', '+', '-']) {
+        Some(i) => (&rest[..i], Some(parse_tz(&rest[i..])?)),
+        None => (rest, None),
+    };
+    let days = parse_civil_date(date)?;
+    let mut t = time.split(':');
+    let h = two_digits(t.next()?)?;
+    let mi = two_digits(t.next()?)?;
+    let sec_lex = t.next()?;
+    if t.next().is_some() {
+        return None;
+    }
+    let (whole_sec, fraction) = sec_lex.split_once('.').map_or((sec_lex, None), |(a, b)| (a, Some(b)));
+    let whole_sec = two_digits(whole_sec)?;
+    if fraction.is_some_and(|f| f.is_empty() || !f.bytes().all(|b| b.is_ascii_digit())) {
+        return None;
+    }
+    let nonzero_second = whole_sec != 0 || fraction.is_some_and(|f| f.bytes().any(|b| b != b'0'));
+    if h > 24 || mi > 59 || whole_sec > 59 || (h == 24 && (mi != 0 || nonzero_second)) {
+        return None;
+    }
+    let secs = days.checked_mul(86_400)?.checked_add(h * 3600 + mi * 60 + whole_sec)?;
+    secs.checked_sub(tz.unwrap_or(0))?;
+    Some(ParsedDateTime {
+        secs,
+        whole_second: whole_sec,
+        second_lexical: sec_lex,
+        fraction: fraction.unwrap_or(""),
+        tz,
+    })
+}
+
 impl Timeline {
     pub fn parse_datetime(s: &str) -> Option<Timeline> {
-        // [GPT-6] Share lexical/calendar validation with cached comparisons and
-        // engine accessors. Invalid RDF literal lexicals are not dateTime values.
-        let s = s.trim_matches([' ', '\t', '\r', '\n']);
-        let (date, rest) = s.split_once('T')?;
-        let (time, tz) = match rest.find(['Z', '+', '-']) {
-            Some(i) => (&rest[..i], Some(parse_tz(&rest[i..])?)),
-            None => (rest, None),
-        };
-        let days = parse_civil_date(date)?;
-        let mut t = time.split(':');
-        let h = two_digits(t.next()?)?;
-        let mi = two_digits(t.next()?)?;
-        let sec_lex = t.next()?;
-        if t.next().is_some() {
-            return None;
-        }
-        let (whole_sec, fraction) = sec_lex.split_once('.').map_or((sec_lex, None), |(a, b)| (a, Some(b)));
-        let whole_sec = two_digits(whole_sec)?;
-        if fraction.is_some_and(|f| f.is_empty() || !f.bytes().all(|b| b.is_ascii_digit())) {
-            return None;
-        }
-        let sec: f64 = sec_lex.parse().ok()?;
-        let nonzero_second = whole_sec != 0 || fraction.is_some_and(|f| f.bytes().any(|b| b != b'0'));
-        if h > 24 || mi > 59 || whole_sec > 59 || (h == 24 && (mi != 0 || nonzero_second)) {
-            return None;
-        }
-        let secs = days.checked_mul(86_400)?.checked_add(h * 3600 + mi * 60 + whole_sec)?;
-        secs.checked_sub(tz.unwrap_or(0))?;
+        let parsed = parse_datetime_parts(s)?;
+        let second: f64 = parsed.second_lexical.parse().ok()?;
         Some(Timeline {
-            secs,
-            frac: sec - whole_sec as f64,
-            tz,
+            secs: parsed.secs,
+            frac: second - parsed.whole_second as f64,
+            tz: parsed.tz,
         })
     }
 

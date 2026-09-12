@@ -31,10 +31,6 @@ pub fn year_within_capacity(value: &str, datatype: &str, min: i64, max: i64) -> 
     let Ok(year) = year.parse::<i64>() else {
         return false;
     };
-    // Year zero is rejected as malformed by the existing temporal parser.
-    if year == 0 {
-        return true;
-    }
     let year = if negative { -year } else { year };
     (min..=max).contains(&year)
 }
@@ -56,17 +52,11 @@ impl<'a> ExactTimeline<'a> {
     ///
     /// Returns `None` for malformed input or an unsupported calendar magnitude.
     pub fn parse_datetime(value: &'a str) -> Option<Self> {
-        // The legacy parser supplies exact checked *whole* seconds and timezone.
-        // Its floating fraction is intentionally never used by this key.
-        let timeline = Timeline::parse_datetime(value)?;
-        let value = value.trim_matches([' ', '\t', '\r', '\n']);
-        let (_, time) = value.split_once('T')?;
-        let time = time.find(['Z', '+', '-']).map_or(time, |end| &time[..end]);
-        let fraction = time.split_once('.').map_or("", |(_, digits)| digits);
+        let parsed = super::parse_datetime_parts(value)?;
         Some(Self {
-            seconds: i128::from(timeline.secs) - i128::from(timeline.tz.unwrap_or(0)),
-            fraction: fraction.trim_end_matches('0'),
-            has_timezone: timeline.tz.is_some(),
+            seconds: i128::from(parsed.secs) - i128::from(parsed.tz.unwrap_or(0)),
+            fraction: parsed.fraction.trim_end_matches('0'),
+            has_timezone: parsed.tz.is_some(),
         })
     }
 
@@ -168,5 +158,57 @@ impl<'a> ExactTemporal<'a> {
             (TemporalKind::Date, TemporalKind::DateTime) => Ordering::Greater,
             _ => self.timeline.compare_total(other.timeline),
         }
+    }
+}
+
+// [GPT-6] Cache only owned scalar fields and offsets, never self-references.
+// Dictionary re-encoding preserves lexical bytes; appended IDs invalidate the memo.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct CacheCell {
+    seconds: i128,
+    has_timezone: bool,
+    kind: TemporalKind,
+    fraction: Option<(usize, usize)>,
+}
+
+impl CacheCell {
+    pub(crate) fn of_lit(value: &str, datatype: &str) -> Option<Self> {
+        let exact = ExactTemporal::of_lit(value, datatype)?;
+        let fraction = if exact.timeline.fraction.is_empty() {
+            None
+        } else {
+            let start = exact
+                .timeline
+                .fraction
+                .as_ptr()
+                .addr()
+                .checked_sub(value.as_ptr().addr())?;
+            Some((start, exact.timeline.fraction.len()))
+        };
+        Some(Self {
+            seconds: exact.timeline.seconds,
+            has_timezone: exact.timeline.has_timezone,
+            kind: exact.kind,
+            fraction,
+        })
+    }
+
+    pub(crate) fn has_fraction(self) -> bool {
+        self.fraction.is_some()
+    }
+
+    pub(crate) fn borrow(self, lexical: Option<&str>) -> Option<ExactTemporal<'_>> {
+        let fraction = match self.fraction {
+            None => "",
+            Some((start, len)) => lexical?.get(start..start.checked_add(len)?)?,
+        };
+        Some(ExactTemporal {
+            timeline: ExactTimeline {
+                seconds: self.seconds,
+                fraction,
+                has_timezone: self.has_timezone,
+            },
+            kind: self.kind,
+        })
     }
 }

@@ -83,12 +83,12 @@ pub struct Graph {
     /// / ORDER BY without materialising the term and parsing its string each time
     /// — a lightweight, u32-id-preserving stand-in for QLever's inline ValueIds.
     numerics: NumData,
-    /// Parallel to the dictionary: the precomputed comparison key of each
-    /// `xsd:dateTime`/`xsd:dateTimeStamp`/`xsd:date` literal (see
-    /// [`temporal::Temporal`]). The temporal twin of `numerics`: dateTime
-    /// FILTER / ORDER BY / MIN/MAX read the timeline value O(1) from the cache
-    /// instead of materialising the term and re-parsing its lexical per row.
+    /// Approximate persisted epoch values, retained for representation APIs and
+    /// temporal classification. Exact comparison keys live in `exact_temporals`.
     temporals: TempData,
+    /// [GPT-6] Lazy sparse exact keys. Fraction offsets borrow dictionary storage;
+    /// no extra allocation is made for graphs that never query a temporal value.
+    exact_temporals: std::sync::OnceLock<rustc_hash::FxHashMap<Id, temporal::ExactCacheCell>>,
     /// [OPUS-4.8] (sq-lr2ii) Memoised guard against the engine's f64 sargable-FILTER fast
     /// path deciding a comparison wrongly for an f64-INEXACT decimal. `0` = not yet computed,
     /// `1` = known to hold NO such decimal (fast path safe), `2` = holds at least one (the
@@ -459,6 +459,31 @@ impl TempData {
                 } else {
                     extra.get(&id).copied() // appended after open
                 }
+            }
+        }
+    }
+
+    // [GPT-6] Walk only cached IDs for sparse/forked graphs, avoiding a full
+    // dictionary scan when one temporal term appears in otherwise unrelated data.
+    fn for_each_id(&self, visit: &mut impl FnMut(Id)) {
+        match self {
+            TempData::Owned(cells) => {
+                for (index, cell) in cells.iter().enumerate() {
+                    if matches!(cell.flag, 1..=4) { visit(index as Id + 1); }
+                }
+            }
+            TempData::Sparse(cells) => cells.keys().copied().for_each(visit),
+            TempData::Forked { base, extra } => {
+                base.for_each_id(visit);
+                extra.keys().copied().for_each(visit);
+            }
+            #[cfg(feature = "mmap")]
+            TempData::Mapped(bytes, extra) => {
+                let count = Self::mapped_len(bytes);
+                for (index, flag) in bytes[count * 8..].iter().enumerate() {
+                    if matches!(flag, 1..=4) { visit(index as Id + 1); }
+                }
+                extra.keys().copied().for_each(visit);
             }
         }
     }
@@ -1750,6 +1775,7 @@ impl Graph {
             store,
             numerics,
             temporals,
+            exact_temporals: std::sync::OnceLock::new(),
             high_precision_decimal: std::sync::atomic::AtomicU8::new(0),
             named: Vec::new(),
             graph_prefix_index: std::sync::Mutex::new(None),
@@ -1787,6 +1813,7 @@ impl Graph {
             numerics: self.numerics.into_sparse_if_worthwhile(),
             temporals: self.temporals.into_sparse_if_worthwhile(),
             // sq-lr2ii: re-encoding keeps the same values; recompute the guard lazily.
+            exact_temporals: std::sync::OnceLock::new(),
             high_precision_decimal: std::sync::atomic::AtomicU8::new(0),
             named: self.named,
             graph_prefix_index: std::sync::Mutex::new(None),
@@ -2002,6 +2029,7 @@ impl Graph {
             store,
             numerics,
             temporals,
+            exact_temporals: std::sync::OnceLock::new(),
             high_precision_decimal: std::sync::atomic::AtomicU8::new(0),
             named,
             graph_prefix_index: std::sync::Mutex::new(None),
@@ -2766,17 +2794,34 @@ impl Graph {
         self.temporals.lookup(id)
     }
 
-    /// Parses an exact temporal key from the borrowed dictionary lexical form.
+    /// Returns an exact temporal key from a lazily memoized sparse cache.
     ///
-    /// [GPT-6] Preserves fractional digits across dense and compressed dictionaries.
-    /// Returns `None` for foreign datatypes, malformed values or calendar capacity
-    /// exhaustion. Unlike the approximate cache, it performs no floating comparison.
+    /// [GPT-6] The first temporal lookup parses valid temporal dictionary entries.
+    /// Later lookups reuse checked seconds/flags and borrow fractional digits by
+    /// offset. Whole-second values need no dictionary read. The cache is in memory
+    /// only, survives neither a fork nor a dictionary append, and never changes
+    /// source terms or approximate persisted cache files.
     pub fn exact_temporal_value(&self, id: Id) -> Option<temporal::ExactTemporal<'_>> {
-        if dict::is_inline(id) {
+        if id == dict::NO_ID || dict::is_inline(id) || self.temporals.lookup(id).is_none() {
             return None;
         }
+        let cells = self.exact_temporals.get_or_init(|| {
+            let mut cells = rustc_hash::FxHashMap::default();
+            self.temporals.for_each_id(&mut |id| {
+                if let dict::TermParts::Lit { value, datatype, lang: None } = self.dict.term_parts(id) {
+                    if let Some(cell) = temporal::ExactCacheCell::of_lit(value, datatype) {
+                        cells.insert(id, cell);
+                    }
+                }
+            });
+            cells
+        });
+        let cell = *cells.get(&id)?;
+        if !cell.has_fraction() {
+            return cell.borrow(None);
+        }
         match self.dict.term_parts(id) {
-            dict::TermParts::Lit { value, datatype, lang: None } => temporal::ExactTemporal::of_lit(value, datatype),
+            dict::TermParts::Lit { value, .. } => cell.borrow(Some(value)),
             _ => None,
         }
     }
@@ -2844,6 +2889,9 @@ impl Graph {
     /// the six permutation indexes), for benchmarking.
     pub fn heap_bytes(&self) -> usize {
         self.dict.heap_bytes() + self.store.heap_bytes() + self.numerics.heap_bytes() + self.temporals.heap_bytes()
+            + self.exact_temporals.get().map_or(0, |cells| {
+                cells.capacity() * (std::mem::size_of::<Id>() + std::mem::size_of::<temporal::ExactCacheCell>())
+            })
     }
 
     /// Resolves a term to its id, or `None` if the term is absent (so a pattern
@@ -2967,6 +3015,7 @@ impl Graph {
             numerics: self.numerics.fork(),
             temporals: self.temporals.fork(),
             // sq-lr2ii: the fork shares the same values; recompute the guard lazily.
+            exact_temporals: std::sync::OnceLock::new(),
             high_precision_decimal: std::sync::atomic::AtomicU8::new(0),
             named: self.named.iter().map(|(name, g)| (name.clone(), g.fork())).collect(),
             // A fork is a fresh logical copy; rebuild the prefix index lazily on first use.
@@ -3462,6 +3511,9 @@ impl Graph {
         // Keep the numeric- and temporal-filter caches covering the grown dictionary.
         self.numerics.extend_for(&self.dict, old_len);
         self.temporals.extend_for(&self.dict, old_len);
+        if self.dict.len() != old_len {
+            self.exact_temporals.take();
+        }
         // sq-lr2ii: an inserted term may be an f64-inexact decimal. If the sargable-safety
         // guard was memoised as "no such decimal" (1), reset it to recompute over the grown
         // dictionary; a "found" (2) verdict is monotonic (terms are never removed) and stays.
@@ -11533,5 +11585,76 @@ mod dir_roundtrip_test {
         };
         assert!(same_base, "fork after compact must share the folded cache base");
         assert_eq!(f2.numeric_value(id), Some(4.5));
+    }
+}
+
+#[cfg(test)]
+mod exact_temporal_cache_tests {
+    // [GPT-6] Cache reuse and graph lifecycle behavior, including fractional storage.
+    use super::*;
+    use std::cmp::Ordering;
+
+    fn literal(value: &str) -> Term {
+        Term::Literal(oxrdf::Literal::new_typed_literal(value, oxrdf::NamedNode::new_unchecked("http://www.w3.org/2001/XMLSchema#dateTime")))
+    }
+
+    #[test]
+    fn exact_cache_reuses_validation_and_preserves_fractional_precision() {
+        for compressed in [false, true] {
+            let first = "2024-01-01T00:00:00.000000001Z";
+            let later = "2024-01-01T00:00:00.000000002Z";
+            let nt = format!("<http://ex/s> <http://ex/p> {} .\n<http://ex/s> <http://ex/p> {} .", literal(first), literal(later));
+            let graph = Graph::load_str(&nt, "nt").unwrap();
+            let graph = if compressed { graph.into_compressed() } else { graph };
+            let a = graph.id_of(&literal(first)).unwrap();
+            let b = graph.id_of(&literal(later)).unwrap();
+            assert!(graph.exact_temporals.get().is_none());
+            for absent in [dict::NO_ID, dict::INLINE_BASE, Id::MAX] {
+                assert!(graph.exact_temporal_value(absent).is_none());
+            }
+            assert_eq!(graph.exact_temporal_value(a).unwrap().compare(graph.exact_temporal_value(b).unwrap()), Some(Ordering::Less));
+            let parsed = temporal::EXACT_PARSE_CALLS.with(|calls| calls.get());
+            for _ in 0..100 {
+                assert_eq!(graph.exact_temporal_value(a).unwrap().compare(graph.exact_temporal_value(b).unwrap()), Some(Ordering::Less));
+            }
+            assert_eq!(temporal::EXACT_PARSE_CALLS.with(|calls| calls.get()), parsed, "warm lookups must not reparse dates");
+            assert_eq!(graph.exact_temporals.get().unwrap().len(), 2);
+        }
+    }
+
+    #[test]
+    fn exact_cache_tracks_fork_compression_and_dictionary_appends() {
+        let old = literal("2024-01-01T00:00:00Z");
+        let new = literal("2024-01-01T00:00:00.000000001Z");
+        let mut graph = Graph::load_str(&format!("<http://ex/s> <http://ex/p> {old} ."), "nt").unwrap();
+        let id = graph.id_of(&old).unwrap();
+        graph.exact_temporal_value(id).unwrap();
+        let fork = graph.fork();
+        assert!(fork.exact_temporals.get().is_none());
+        assert_eq!(fork.exact_temporal_value(id).unwrap().compare(graph.exact_temporal_value(id).unwrap()), Some(Ordering::Equal));
+        graph.apply_delta(&[[Term::NamedNode(oxrdf::NamedNode::new_unchecked("http://ex/s")), Term::NamedNode(oxrdf::NamedNode::new_unchecked("http://ex/p")), new.clone()]], &[]).unwrap();
+        assert!(graph.exact_temporals.get().is_none());
+        let new_id = graph.id_of(&new).unwrap();
+        assert_eq!(graph.exact_temporal_value(id).unwrap().compare(graph.exact_temporal_value(new_id).unwrap()), Some(Ordering::Less));
+        assert!(fork.id_of(&new).is_none());
+        let compressed = graph.into_compressed();
+        assert!(compressed.exact_temporals.get().is_none());
+        assert_eq!(compressed.exact_temporal_value(id).unwrap().compare(compressed.exact_temporal_value(new_id).unwrap()), Some(Ordering::Less));
+    }
+
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn exact_cache_is_rebuilt_from_persisted_lexicals() {
+        let dir = std::env::temp_dir().join(format!("sparq_exact_cache_{}", std::process::id()));
+        let a = literal("2024-01-01T00:00:00.000000000000000000000000000000001Z");
+        let b = literal("2024-01-01T00:00:00.000000000000000000000000000000002Z");
+        let graph = Graph::load_str(&format!("<http://ex/s> <http://ex/p> {a} .\n<http://ex/s> <http://ex/p> {b} ."), "nt").unwrap();
+        graph.exact_temporal_value(graph.id_of(&a).unwrap()).unwrap();
+        graph.save(&dir).unwrap();
+        let reopened = Graph::open(&dir).unwrap();
+        assert!(reopened.exact_temporals.get().is_none());
+        assert_eq!(reopened.exact_temporal_value(reopened.id_of(&a).unwrap()).unwrap().compare(reopened.exact_temporal_value(reopened.id_of(&b).unwrap()).unwrap()), Some(Ordering::Less));
+        drop(reopened);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

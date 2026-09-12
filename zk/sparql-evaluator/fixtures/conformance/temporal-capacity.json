@@ -41,6 +41,31 @@
       "id": "stored-year",
       "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> ASK {?s ?p ?x FILTER(?x < \"2024-01-01T00:00:00Z\"^^xsd:dateTime)}",
       "dataset_ntriples": "<http://ex/s> <http://ex/p> \"1000000001-01-01T00:00:00Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> .\n"
+    },
+    {
+      "id": "zero-year-literal",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> ASK { FILTER(\"0000-01-01T00:00:00Z\"^^xsd:dateTime < \"0001-01-01T00:00:00Z\"^^xsd:dateTime) }",
+      "dataset_ntriples": ""
+    },
+    {
+      "id": "zero-year-strdt",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> ASK { BIND(STRDT(CONCAT(\"0000\",\"-01-01T00:00:00Z\"),xsd:dateTime) AS ?t) FILTER(?t < \"0001-01-01T00:00:00Z\"^^xsd:dateTime) }",
+      "dataset_ntriples": ""
+    },
+    {
+      "id": "zero-year-cast",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (COALESCE(xsd:dateTime(CONCAT(\"0000\",\"-01-01T00:00:00Z\")),1) AS ?t) {}",
+      "dataset_ntriples": ""
+    },
+    {
+      "id": "zero-year-stored",
+      "query": "ASK { ?s ?p ?t }",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \"0000-01-01T00:00:00Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> ."
+    },
+    {
+      "id": "zero-year-stored-count",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (COUNT(*) AS ?n) { ?s ?p ?t FILTER(?t < \"0001-01-01T00:00:00Z\"^^xsd:dateTime) }",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \"0000-01-01T00:00:00Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> ."
     }
   ]
 }

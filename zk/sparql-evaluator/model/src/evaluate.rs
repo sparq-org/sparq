@@ -415,6 +415,7 @@ pub(crate) fn execute(
     let budget = sparq_engine::QueryBudget {
         max_rows: Some(max_rows as usize),
         temporal_year_range: Some(TEMPORAL_YEAR_RANGE),
+        strict_numeric_capacity: true,
         // Bound computed terms as well as row counts; this is an estimate, not RSS.
         max_bytes: Some(4 * MAX_DATASET_BYTES as usize),
         ..Default::default()

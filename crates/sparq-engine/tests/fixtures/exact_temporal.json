@@ -283,6 +283,40 @@
           "\"1.25\"^^<http://www.w3.org/2001/XMLSchema#decimal>"
         ]
       ]
+    },
+    {
+      "id": "order-equal-instants-retain-lexicals-all",
+      "dataset_ntriples": "<http://ex/b> <http://ex/p> \"2024-01-01T00:00:00.1000Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> .\n<http://ex/a> <http://ex/p> \"2024-01-01T00:00:00.1+00:00\"^^<http://www.w3.org/2001/XMLSchema#dateTime> .\n<http://ex/0> <http://ex/p> \"2024-01-01T00:00:00.1000000000000000000000001Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> .",
+      "query": "SELECT ?s ?t { ?s <http://ex/p> ?t } ORDER BY ?t ?s",
+      "expected_rows": [
+        [
+          "<http://ex/a>",
+          "\"2024-01-01T00:00:00.1+00:00\"^^<http://www.w3.org/2001/XMLSchema#dateTime>"
+        ],
+        [
+          "<http://ex/b>",
+          "\"2024-01-01T00:00:00.1000Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime>"
+        ],
+        [
+          "<http://ex/0>",
+          "\"2024-01-01T00:00:00.1000000000000000000000001Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime>"
+        ]
+      ]
+    },
+    {
+      "id": "order-equal-instants-retain-lexicals-limit",
+      "dataset_ntriples": "<http://ex/b> <http://ex/p> \"2024-01-01T00:00:00.1000Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> .\n<http://ex/a> <http://ex/p> \"2024-01-01T00:00:00.1+00:00\"^^<http://www.w3.org/2001/XMLSchema#dateTime> .\n<http://ex/0> <http://ex/p> \"2024-01-01T00:00:00.1000000000000000000000001Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> .",
+      "query": "SELECT ?s ?t { ?s <http://ex/p> ?t } ORDER BY ?t ?s LIMIT 2",
+      "expected_rows": [
+        [
+          "<http://ex/a>",
+          "\"2024-01-01T00:00:00.1+00:00\"^^<http://www.w3.org/2001/XMLSchema#dateTime>"
+        ],
+        [
+          "<http://ex/b>",
+          "\"2024-01-01T00:00:00.1000Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime>"
+        ]
+      ]
     }
   ]
 }

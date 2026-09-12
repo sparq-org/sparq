@@ -381,3 +381,4 @@ upstream source/license identity and documents discovery-only dependency selecti
 and derive-macro feature boundaries, with executable patch reconstruction,
 explicit lockfile patch-selection checks, and synthetic feature checks.
 Synthetic dependency checks remain separate from actual guest proof evidence.
+[GPT-6] The exact evaluator enables the [numeric capacity guard](references/numeric-capacity.md). Valid values beyond the finite arithmetic lane can be returned directly, but unsupported numeric consumption fails the entire evaluation. Native default budgets leave this option off.

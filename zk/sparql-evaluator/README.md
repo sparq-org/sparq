@@ -79,8 +79,10 @@ to the evolving SPARQL 1.2 draft. `model::admit` visits nested patterns and
 expressions, including subqueries, aggregate operands and EXISTS bodies.
 The SPARQL version identifies query syntax/operators. Numeric datatype facets
 follow [RDF 1.1 / XSD 1.1](https://www.w3.org/TR/2014/REC-rdf11-concepts-20140225/#xsd-datatypes),
-including unsigned `+1` and `-0`. Finite numeric lanes, the `i64` integer-constructor
-boundary and [exact temporal/year capacity](../../skills/zk-query-proofs/references/exact-temporals.md) have explicit limits.
+including unsigned `+1` and `-0`. The [numeric capacity guard](../../skills/zk-query-proofs/references/numeric-capacity.md)
+enforces finite arithmetic limits as whole-query failures, separately from
+lexical validity and direct RDF output. [Exact temporal/year capacity](../../skills/zk-query-proofs/references/exact-temporals.md)
+has its own explicit limits.
 EXISTS and NOT EXISTS bodies are restricted to BGP, join, UNION and pure FILTER.
 Fixed path sequences lowered to BGP are included; residual path operators,
 nested EXISTS, OPTIONAL/MINUS, binding operators, subqueries and modifiers inside

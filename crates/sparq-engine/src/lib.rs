@@ -305,6 +305,11 @@ pub struct QueryBudget {
     /// ordinary expression error. Capacity-constrained expression work stays
     /// on the calling thread; row-only parallel operations may also fall back.
     pub temporal_year_range: Option<(i64, i64)>,
+    /// Rejects numeric representation overflow as a whole-query capacity error.
+    /// False by default. Exact numeric consumers keep the existing i64 integer
+    /// and i128 decimal lanes; they may not silently fall back to floating point.
+    /// Direct RDF output and numeric lexical/type tests remain independent.
+    pub strict_numeric_capacity: bool,
     /// Cross-thread cooperative cancellation flag. The executor observes `true`
     /// at the same coarse polling sites as the other limits and aborts with
     /// `"query budget exceeded (cancelled)"`; cancellation is therefore prompt at
