@@ -131,8 +131,12 @@ jobs:
         run: |
           npm install -g 'npm@^11.5.1'
           npm --version
+      # [OPUS-5] #5776 — prebuilt, SHA-pinned, exactly-versioned wasm-pack (sq-khm3f):
+      # a `cargo install` here recompiles it from crates.io and flakes on a registry blip.
       - name: Install wasm-pack
-        run: cargo install wasm-pack --locked
+        uses: jetli/wasm-pack-action@0d096b08b4e5a7de8c28de67e11e945404e9eefa # v0.4.0
+        with:
+          version: v0.15.0
       - name: Install npm dependencies
         run: npm ci
       # Publish guardrail (sq-bkag): refuse to publish a binding that would ship without its
@@ -218,8 +222,12 @@ jobs:
         run: |
           npm install -g 'npm@^11.5.1'
           npm --version
+      # [OPUS-5] #5776 — prebuilt, SHA-pinned, exactly-versioned wasm-pack (sq-khm3f):
+      # a `cargo install` here recompiles it from crates.io and flakes on a registry blip.
       - name: Install wasm-pack
-        run: cargo install wasm-pack --locked
+        uses: jetli/wasm-pack-action@0d096b08b4e5a7de8c28de67e11e945404e9eefa # v0.4.0
+        with:
+          version: v0.15.0
       # Build tooling only (typescript, @rdfjs/types). --workspaces=false installs just this
       # package's devDeps without pulling the whole monorepo graph; the package has no lockfile.
       - name: Install build dependencies
@@ -295,8 +303,12 @@ jobs:
         run: |
           npm install -g 'npm@^11.5.1'
           npm --version
+      # [OPUS-5] #5776 — prebuilt, SHA-pinned, exactly-versioned wasm-pack (sq-khm3f):
+      # a `cargo install` here recompiles it from crates.io and flakes on a registry blip.
       - name: Install wasm-pack
-        run: cargo install wasm-pack --locked
+        uses: jetli/wasm-pack-action@0d096b08b4e5a7de8c28de67e11e945404e9eefa # v0.4.0
+        with:
+          version: v0.15.0
       # Build the wasm bundle so the `files` allowlist packs a populated wasm/ tree. This package
       # has NO `prepack`/`build` script (unlike @sparq-org/sparq / eyereasoner-compat), so the wasm is
       # NOT rebuilt automatically on `npm publish` — build it explicitly here, before publish.
