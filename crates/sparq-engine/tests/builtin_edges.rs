@@ -5,10 +5,11 @@ use sparq_core::Graph;
 fn deterministic_builtin_edges() {
     let corpus: serde_json::Value =
         serde_json::from_str(include_str!("fixtures/builtin_edges.json")).unwrap();
-    let graph = Graph::load_str("", "turtle").unwrap();
     let mut failures = Vec::new();
     for case in corpus["cases"].as_array().unwrap() {
         let query = case["query"].as_str().unwrap();
+        let graph =
+            Graph::load_str(case["dataset_ntriples"].as_str().unwrap_or(""), "n-triples").unwrap();
         let result = std::panic::catch_unwind(|| sparq_engine::query(&graph, query));
         let actual = match result {
             Ok(Ok(result)) => serde_json::json!(
@@ -85,6 +86,73 @@ fn stored_invalid_literals_fail_soft_in_dense_and_compressed_caches() {
                 usize::from(valid),
                 "{literal}, compressed={compressed}"
             );
+        }
+    }
+}
+
+// [GPT-6] Arithmetic comparisons must validate operands before exact-decimal shortcuts.
+#[test]
+fn stored_arithmetic_validity_agrees_in_dense_and_compressed_graphs() {
+    for (literal, valid) in [
+        ("\"1200\"^^xsd:byte", false),
+        ("\"5.0\"^^xsd:integer", false),
+        ("\"-1\"^^xsd:unsignedLong", false),
+        ("\"\u{a0}5\"^^xsd:integer", false),
+        ("\"é\"^^xsd:integer", false),
+        ("\"127\"^^xsd:byte", true),
+        ("\" 5 \"^^xsd:integer", true),
+        ("\"0.5\"^^xsd:decimal", true),
+    ] {
+        let data = format!(
+            "@prefix xsd: <http://www.w3.org/2001/XMLSchema#> . <http://ex/s> <http://ex/p> {literal} ."
+        );
+        for compressed in [false, true] {
+            let graph = Graph::load_str(&data, "turtle").unwrap();
+            let graph = if compressed {
+                graph.into_compressed()
+            } else {
+                graph
+            };
+            let value_id = graph.iter_ids().next().unwrap()[2];
+            assert_eq!(
+                graph.exact_numeric_lexical(value_id).is_some(),
+                valid,
+                "exact lexical {literal}, compressed={compressed}"
+            );
+            for predicate in [
+                "(?n + 1) > 0",
+                "0 < (?n + 1)",
+                "(?n - 1) < 128",
+                "128 > (?n - 1)",
+                "(?n * 0) = 0",
+                "0 = (?n * 0)",
+                "(+?n) > 0",
+                "0 < (+?n)",
+                "(-?n) < 0",
+                "0 > (-?n)",
+            ] {
+                let body = "?s <http://ex/p> ?n";
+                let projected = format!("SELECT ({predicate} AS ?v) WHERE {{ {body} }}");
+                let result = sparq_engine::query(&graph, &projected).unwrap();
+                assert_eq!(result.rows.len(), 1);
+                assert_eq!(
+                    result.rows[0][0].is_some(),
+                    valid,
+                    "{literal} {projected}, compressed={compressed}"
+                );
+                if valid {
+                    assert_eq!(
+                        result.rows[0][0].as_ref().unwrap().to_string(),
+                        "\"true\"^^<http://www.w3.org/2001/XMLSchema#boolean>"
+                    );
+                }
+                let filtered = format!("SELECT ?s WHERE {{ {body} FILTER({predicate}) }}");
+                assert_eq!(
+                    sparq_engine::query(&graph, &filtered).unwrap().rows.len(),
+                    usize::from(valid),
+                    "{literal} {filtered}, compressed={compressed}"
+                );
+            }
         }
     }
 }

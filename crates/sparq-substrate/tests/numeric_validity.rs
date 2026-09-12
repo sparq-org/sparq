@@ -26,6 +26,15 @@ fn numeric_facets_and_lexicals_agree_across_cache_and_arithmetic() {
         ("4294967296", "unsignedInt", false),
         ("65535", "unsignedShort", true),
         ("65536", "unsignedShort", false),
+        // XSD 1.1 unsigned lexical forms retain + and negative zero.
+        ("+1", "unsignedLong", true),
+        ("-0", "unsignedLong", true),
+        ("+1", "unsignedInt", true),
+        ("-0", "unsignedInt", true),
+        ("+1", "unsignedShort", true),
+        ("-0", "unsignedShort", true),
+        ("+1", "unsignedByte", true),
+        ("-0", "unsignedByte", true),
         ("255", "unsignedByte", true),
         ("256", "unsignedByte", false),
         ("0", "positiveInteger", false),
@@ -60,6 +69,11 @@ fn numeric_facets_and_lexicals_agree_across_cache_and_arithmetic() {
             numeric_cache_value(text, &datatype).is_some(),
             valid,
             "cache {text:?}^^{suffix}"
+        );
+        assert_eq!(
+            Num::of_parts(text, &datatype).is_some(),
+            valid,
+            "borrowed arithmetic {text:?}^^{suffix}"
         );
         assert_eq!(
             Num::of_literal(&Literal::new_typed_literal(

@@ -214,13 +214,18 @@ subtype facets, including `xsd:byte` range, separately from arithmetic capacity.
 A huge valid integer can be numeric while an operation exceeds the existing
 `i64`/`i128` value tower. Integer casts use the existing `i64` output range and
 truncate toward zero; out-of-range casts become expression errors (unbound BIND
-or projected cells, excluded FILTER rows). `SUBSTR` with integer arguments clips
+or projected cells, excluded FILTER rows). `SUBSTR` requires valid integer or derived
+integer start/length operands, rejecting decimal, float, double and invalid facets.
+Its integer arguments clip
 its original one-based interval, so `SUBSTR("abcd", -1, 3)` yields `"a"`.
 Date accessors require typed dateTime operands, and calendar/timezone validation
 is shared with stored comparison caches. Valid `24:00:00` exposes next-day
 components and hour zero. Ill-typed or malformed Unicode literals
 fail soft. These controls target the published SPARQL 1.1 Recommendation and
-XSD 1.0 lexical rules; they do not establish complete builtin conformance.
+the current snapshot's datatype rules; they do not establish complete builtin conformance.
+Numeric integer facets retain XSD 1.1 sign handling (including `+1` and `-0` for
+unsigned types), consistent with RDF 1.1's datatype reference. Temporal parsing
+still uses its documented XSD 1.0 year-zero rule; this is not a uniform XSD version claim.
 
 **Property paths** (all 8 operators: `/  | ^  *  +  ?` and `!(…)` negated sets) — write them inline:
 
@@ -1218,3 +1223,13 @@ let r = query_view(&v, "SELECT ?s WHERE { GRAPH ?g { ?s ?p ?o } }").unwrap(); //
 - `sparql-formal-semantics` — the algebra/semantics reference for the SPARQL fragment.
 - `noir-circuit-patterns` / `verifiable-credentials-zk` / `mpc-protocols` — the ZK/MPC estate built
   on the `zk` trace seam (non-default `zk` feature; consumed by `sparq-zk`).
+
+### Exact arithmetic operand validation (GPT-6)
+
+The exact-decimal shortcuts in interpreted and compiled comparisons validate
+integer/decimal lexical syntax and subtype facets before parsing an operand.
+The same gate covers literal constants, local `VALUES` bindings and graph IDs,
+including compressed graphs. `builtin_edges.json` records bounded REC error
+cases; an optional `dataset_ntriples` field supplies the authenticated data for
+stored-term cases. Invalid numeric RDF terms remain stored but produce expression
+errors; this does not extend the finite arithmetic representation.

@@ -13597,14 +13597,18 @@ fn eval_exact_lexical(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id
     }
 }
 
+// [GPT-6] Every exact lexical shortcut validates the original RDF datatype first.
+fn exact_lexical_of_literal(l: &Literal) -> Option<&str> {
+    let datatype = l.datatype();
+    (l.language().is_none()
+        && (sparq_core::is_integer_datatype(datatype.as_str()) || datatype == xsd::DECIMAL)
+        && sparq_core::numeric_literal_valid(l.value(), datatype.as_str()))
+        .then_some(l.value())
+}
+
 fn exact_lexical_of_term(t: &Term) -> Option<String> {
     match t {
-        Term::Literal(l)
-            if l.language().is_none()
-                && (sparq_core::is_integer_datatype(l.datatype().as_str()) || l.datatype() == xsd::DECIMAL) =>
-        {
-            Some(l.value().to_string())
-        }
+        Term::Literal(l) => exact_lexical_of_literal(l).map(str::to_owned),
         _ => None,
     }
 }
@@ -13676,9 +13680,7 @@ fn eval_compiled_dec(graph: &Graph, local: &LocalVocab, row: &[Id], e: &Compiled
                 Dec::parse(&graph.exact_numeric_lexical(id)?)
             }
         }
-        Literal(l) if sparq_core::is_integer_datatype(l.datatype().as_str()) || l.datatype() == xsd::DECIMAL => {
-            Dec::parse(l.value())
-        }
+        Literal(l) => Dec::parse(exact_lexical_of_literal(l)?),
         Add(a, d) => eval_compiled_dec(graph, local, row, a)?.checked_add(eval_compiled_dec(graph, local, row, d)?),
         Subtract(a, d) => {
             eval_compiled_dec(graph, local, row, a)?.checked_sub(eval_compiled_dec(graph, local, row, d)?)
@@ -13710,17 +13712,7 @@ fn eval_compiled_exact_lexical(graph: &Graph, local: &LocalVocab, row: &[Id], e:
                 graph.exact_numeric_lexical(id)
             }
         }
-        Literal(l) => {
-            // Avoid a `Term` allocation: check directly whether the literal has an exact
-            // integer/decimal lexical form (same condition as `exact_lexical_of_term`).
-            if l.language().is_none()
-                && (sparq_core::is_integer_datatype(l.datatype().as_str()) || l.datatype() == xsd::DECIMAL)
-            {
-                Some(l.value().to_string())
-            } else {
-                None
-            }
-        }
+        Literal(l) => exact_lexical_of_literal(l).map(str::to_owned),
         UnaryPlus(a) => eval_compiled_exact_lexical(graph, local, row, a),
         UnaryMinus(a) => eval_compiled_exact_lexical(graph, local, row, a).map(|s| match s.strip_prefix('-') {
             Some(r) => r.to_string(),
@@ -13811,9 +13803,7 @@ fn eval_dec(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], e: &Exp
                 Dec::parse(&graph.exact_numeric_lexical(id)?)
             }
         }
-        Literal(l) if sparq_core::is_integer_datatype(l.datatype().as_str()) || l.datatype() == xsd::DECIMAL => {
-            Dec::parse(l.value())
-        }
+        Literal(l) => Dec::parse(exact_lexical_of_literal(l)?),
         Add(a, c) => eval_dec(graph, local, b, row, a)?.checked_add(eval_dec(graph, local, b, row, c)?),
         Subtract(a, c) => eval_dec(graph, local, b, row, a)?.checked_sub(eval_dec(graph, local, b, row, c)?),
         Multiply(a, c) => eval_dec(graph, local, b, row, a)?.checked_mul(eval_dec(graph, local, b, row, c)?),
@@ -14112,6 +14102,21 @@ fn as_numeric(v: &Value) -> Option<Num> {
     }
 }
 
+// [GPT-6] SUBSTR's SPARQL signature requires integer operands, not numeric coercion.
+fn integer_argument(v: &Value) -> Option<i128> {
+    match v {
+        Value::Num(Num::Int(n)) => Some(i128::from(*n)),
+        Value::Term(Term::Literal(l))
+            if l.language().is_none()
+                && sparq_core::is_integer_datatype(l.datatype().as_str())
+                && sparq_core::numeric_literal_valid(l.value(), l.datatype().as_str()) =>
+        {
+            l.value().trim_matches([' ', '\t', '\r', '\n']).parse().ok()
+        }
+        _ => None,
+    }
+}
+
 fn as_num(v: &Value) -> Option<f64> {
     match v {
         Value::Num(n) => Some(n.f64()),
@@ -14388,25 +14393,25 @@ fn eval_function_inner<E: Fn(usize) -> Result<Value, String>>(
                 Some(x) => x,
                 None => return Ok(Value::Error),
             };
-            let start = match as_num(&ev(1)?) {
-                Some(n) => n as i64,
+            let start = match integer_argument(&ev(1)?) {
+                Some(n) => n,
                 None => return Ok(Value::Error),
             };
             // [GPT-6] XPath positions satisfy start <= position < start+length.
             // Clipping the start before adding length incorrectly extends slices
             // that start before position one. Widen before addition to avoid overflow.
             let end = if nargs >= 3 {
-                let len = match as_num(&ev(2)?) {
-                    Some(n) => n.max(0.0) as usize,
+                let len = match integer_argument(&ev(2)?) {
+                    Some(n) => n.max(0),
                     None => return Ok(Value::Error),
                 };
-                i128::from(start) + len as i128
+                start.saturating_add(len)
             } else {
                 i128::MAX
             };
-            let out = s.chars().enumerate().filter_map(|(i, ch)| {
+            let out = s.chars().enumerate().take_while(|(i, _)| (*i as i128 + 1) < end).filter_map(|(i, ch)| {
                 let position = i as i128 + 1;
-                (position >= i128::from(start) && position < end).then_some(ch)
+                (position >= start && position < end).then_some(ch)
             }).collect();
             lit_with_lang(out, lang.as_deref())
         }

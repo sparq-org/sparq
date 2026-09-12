@@ -57,7 +57,9 @@ use std::cmp::Ordering;
 use sparq_core::dict::{is_inline, split_lang_dir, Dict, Id, TermParts, INLINE_BASE};
 use sparq_core::temporal::Timeline;
 use sparq_substrate::compare::{compare_terms, CompareTerm, LiteralKind, TermClass};
-use sparq_substrate::numeric::{parse_xsd_f32, parse_xsd_f64, Dec, Num};
+use sparq_substrate::numeric::{parse_xsd_f64, Num};
+#[cfg(test)]
+use sparq_substrate::numeric::Dec;
 
 /// The XSD namespace prefix — the engine's `lit_kind` "other XSD datatype" family test.
 const XSD_PREFIX: &str = "http://www.w3.org/2001/XMLSchema#";
@@ -196,33 +198,10 @@ fn parse_bool(v: &str) -> Option<bool> {
     }
 }
 
-/// `Num::of_literal` over borrowed `(value, datatype)` parts — the identical dispatch and
-/// parsers (substrate `Dec::parse` / `Dec::parse_lexical` / `parse_xsd_f32` /
-/// `parse_xsd_f64`) without materialising an `oxrdf::Literal`. Anti-drift is pinned by a
-/// unit test comparing this against `Num::of_literal` itself over a lexical×datatype matrix.
+/// [GPT-6] Borrowed literal parsing shares the substrate implementation and validity rules.
 #[inline]
 fn num_of_parts(value: &str, datatype: &str) -> Option<Num> {
-    let v = value.trim();
-    if sparq_core::is_integer_datatype(datatype) {
-        if let Ok(i) = v.parse::<i64>() {
-            return Some(Num::Int(i));
-        }
-        // Integer beyond i64: exact i128 mantissa if it fits (scale 0 = integer lexical).
-        return match Dec::parse(v) {
-            Some(d) if d.scale == 0 => Some(Num::Dec(d)),
-            _ => None, // "1.5"^^xsd:integer is ill-formed; overflow is not representable
-        };
-    }
-    if datatype == XSD_DECIMAL {
-        return Dec::parse_lexical(v).map(Num::Dec);
-    }
-    if datatype == XSD_FLOAT {
-        return parse_xsd_f32(v).map(Num::Float);
-    }
-    if datatype == XSD_DOUBLE {
-        return parse_xsd_f64(v).map(Num::Double);
-    }
-    None
+    Num::of_parts(value, datatype)
 }
 
 /// The numeric relational comparison for `strict_cmp` — delegates to
@@ -646,6 +625,14 @@ mod tests {
             ("2.5", XSD_FLOAT),
             ("hello", XSD_STRING), // non-numeric datatype
             ("7", "http://www.w3.org/2001/XMLSchema#byte"), // derived integer type
+            // [GPT-6] Facets and XML-only whitespace must also match the shared parser.
+            ("1200", "http://www.w3.org/2001/XMLSchema#byte"),
+            ("5.0", "http://www.w3.org/2001/XMLSchema#integer"),
+            ("-1", "http://www.w3.org/2001/XMLSchema#unsignedLong"),
+            ("\u{a0}5", "http://www.w3.org/2001/XMLSchema#integer"),
+            ("\u{a0}5", XSD_DECIMAL),
+            ("\u{a0}5", XSD_DOUBLE),
+            ("é", "http://www.w3.org/2001/XMLSchema#integer"),
         ];
         for (v, dt) in cases {
             let l = Literal::new_typed_literal(*v, NamedNode::new_unchecked(*dt));
