@@ -1,0 +1,29 @@
+[package]
+name = "asm-probe"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Standalone crate root (opts out of the parent workspace): this is a bench/codegen-audit
+# artifact only — never part of the `cargo build --workspace` gate, never shipped.
+[workspace]
+
+[dependencies]
+sparq-core = { path = "../../../crates/sparq-core" }
+# `vectorized` is NON-default: the audited chunk kernels only exist under this opt-in
+# feature (sparq-engine/src/lib.rs gates `pub mod chunk` on it).
+sparq-engine = { path = "../../../crates/sparq-engine", features = ["vectorized"] }
+sparq-substrate = { path = "../../../crates/sparq-substrate" }
+
+# Mirror the root workspace's spargebra patch (vendored W3C-conformance parser fixes) so
+# the probe resolves the same dependency graph the shipped release binaries build against.
+[patch.crates-io]
+spargebra = { path = "../../../vendor/spargebra" }
+
+# Mirror the root workspace's canonical release profile EXACTLY (Cargo.toml
+# [profile.release]) so the audited asm is the shipped codegen, not a lookalike.
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
