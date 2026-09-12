@@ -40,7 +40,11 @@ def canon_ref:
     | (sub("^[^#]*#"; "")) as $rest                      # everything after the first '#'
     | ($rest | sub("^(?<v>[^ ]*)"; "")) as $suffix       # trailing suffix after the version token
     | ($rest | sub("^(?<v>[^ ]*).*$"; "\(.v)")) as $version
-    | "pkg:cargo/\($name)@\($version)\($suffix)"
+    # [GPT-6] Cargo includes name@version when the package name differs from
+    # its directory (e.g. evaluator/host). Preserve that explicit identity.
+    | if ($version | test("^[A-Za-z0-9_-]+@[^@]+$")) then
+        "pkg:cargo/\($version)\($suffix)"
+      else "pkg:cargo/\($name)@\($version)\($suffix)" end
   elif type == "string" and startswith("git+") and test("#") then
     # [FABLE-5] sq-gg0qq.2 (GS-6): a GIT dependency (today only jeswr/solid-oidc-verifier).
     # cargo-cyclonedx 0.5.9 emits
@@ -99,6 +103,11 @@ def canon_purl:
 #          supplier.url = the crate's crates.io page (derived from the name). The crate's
 #          own `author` (where present) is carried into `publisher` (the originator who
 #          published it) — distinct from the distributing supplier.
+#   * path+file://<abs>/zk/sparql-evaluator/<member>#<ver>
+#       -> the explicitly named first-party evaluator members; same supplier below.
+#   * path+file://<abs>/vendor/zk-sdk/<name>#<ver>
+#       -> the project supplies modified upstream bytes; UPSTREAM.json and patches
+#          accompany the SBOM and identify the registry base plus exact delta.
 #   * path+file://<abs>/crates/sparq-*#<ver>
 #       -> a FIRST-PARTY workspace crate this project authors and ships. Supplier = the
 #          project, matching the top-level supplier in supply-chain/vex.cdx.json
@@ -135,6 +144,13 @@ def derive_supplier($author):
   (."bom-ref" // "") as $ref
   | if ($ref | startswith("registry+https://github.com/rust-lang/crates.io-index")) then
       {name: "crates.io", url: [cratesio_url]}
+    elif ($ref | test("^path\\+file://.*/vendor/zk-sdk/")) then
+      # [GPT-6] This repository supplies the patched bytes; upstream registry
+      # provenance is recorded separately in the accompanying UPSTREAM.json.
+      {name: "Jesse Wright", url: ["https://github.com/sparq-org/sparq"]}
+    elif (($ref | test("^path\\+file://.*/zk/sparql-evaluator/(host|model|methods|methods/guest)#"))
+          and (.name | test("^sparq[-_](proved[-_]evaluator([-_]model|[-_]methods)?|exact[-_]guest)$"))) then
+      {name: "Jesse Wright", url: ["https://github.com/sparq-org/sparq"]}
     elif ($ref | test("^path\\+file://.*/vendor/")) then
       # vendored [patch.crates-io] upstream crate -> crates.io is the supplier-of-record
       {name: "crates.io", url: [cratesio_url]}

@@ -91,10 +91,13 @@ jobs:
             rust:
               - '**/*.rs'
               - '**/Cargo.toml'
-              - 'Cargo.lock'
+              - '**/Cargo.lock'
               - 'rust-toolchain*'
               - 'deny.toml'
               - 'supply-chain/**'
+              - 'vendor/zk-sdk/**'
+              - 'scripts/rust-dependency-graphs.py'
+              - 'scripts/tests/test_rust_dependency_graphs.py'
               - '.github/workflows/supply-chain.yml'
       - name: Decide rust_changed (safe-by-default off the PR path)
         id: changes
@@ -123,7 +126,7 @@ jobs:
               # SAME `rust` path set as the pull_request dorny filter above (kept in sync by
               # scripts/tests/test_ci_select_wiring.py::TestSupplyChainMergeGroupGate).
               if printf '%s\n' "${changed}" | grep -Eq \
-                '(\.rs$|(^|/)Cargo\.toml$|^Cargo\.lock$|(^|/)rust-toolchain([^/]*)$|^deny\.toml$|^supply-chain/|^\.github/workflows/supply-chain\.yml$)'; then
+                '(\.rs$|(^|/)Cargo\.toml$|(^|/)Cargo\.lock$|(^|/)rust-toolchain([^/]*)$|^deny\.toml$|^supply-chain/|^vendor/zk-sdk/|^scripts/(tests/test_rust_dependency_graphs|rust-dependency-graphs)\.py$|^\.github/workflows/supply-chain\.yml$)'; then
                 rust=true
               else
                 rust=false
@@ -150,6 +153,9 @@ jobs:
       # (tomllib/json on the runner's 3.12); also runs the hermetic self-test so a
       # regression in the check itself is caught. Unconditional: a doc/config PR can
       # touch the checked-in files without changing Rust.
+      - name: Rust dependency graph coverage self-test
+        run: python3 scripts/tests/test_rust_dependency_graphs.py
+
       - name: VEX ↔ deny.toml drift self-test
         run: python3 scripts/tests/test_vex_deny_drift.py
       - name: VEX ↔ deny.toml drift check — GATING
@@ -277,7 +283,7 @@ jobs:
       # [OPUS-4.8] GATING: integrity checks that don't read the RustSec advisory DB.
       - name: cargo-deny check (bans + sources + licenses) — GATING
         if: steps.changes.outputs.rust_changed == 'true'
-        run: cargo deny check bans sources licenses
+        run: python3 scripts/rust-dependency-graphs.py deny-integrity
       # [OPUS-4.8] sq-toze.2 (GX-1): advisories is GATING again. The CVSS-4.0 parse
       # blocker (sq-q8de) that forced `continue-on-error` is RESOLVED — cargo-deny >= 0.19
       # parses CVSS v4.0 advisories, so the freshly-cloned RustSec DB loads and the
@@ -295,7 +301,7 @@ jobs:
       # parse onto `rustls-pki-types`' `PemObject`.
       - name: cargo-deny check (advisories) — GATING
         if: steps.changes.outputs.rust_changed == 'true'
-        run: cargo deny check advisories
+        run: python3 scripts/rust-dependency-graphs.py deny-advisories
 
       # ---- former job: cargo-vet (per-dependency audit attestations) — GATING ----
       # [OPUS-4.8] sq-toze.8 (GX-7): GATING. `cargo vet` verifies every crate in the tree
@@ -308,7 +314,8 @@ jobs:
       # unaudited supply cannot enter silently. Run `cargo vet` locally to reproduce;
       # `cargo vet suggest` lists what to audit to shrink the exemption set.
       #
-      # [OPUS-4.8] `--locked` pins evaluation to the committed Cargo.lock. `--frozen`
+      # [GPT-6] Vet `--locked` pins imported audits; `--cargo-arg=--locked`
+      # independently pins Cargo.lock in each workspace. `--frozen`
       # (requires the cargo cache populated, hence the `cargo fetch --locked` first) keeps
       # the verification deterministic — it does NOT re-resolve the tree — while still
       # FAILING on a genuinely new/unaudited crate (the committed imports.lock won't cover
@@ -316,10 +323,21 @@ jobs:
       # `--frozen`) when updating the checked-in supply-chain/ evidence, not in the gate.
       - name: Populate cargo cache (for --frozen vet)
         if: steps.changes.outputs.rust_changed == 'true'
-        run: cargo fetch --locked
+        run: python3 scripts/rust-dependency-graphs.py fetch
+      - name: SDK vendor provenance and explicit upstream-audit policy — GATING
+        if: steps.changes.outputs.rust_changed == 'true'
+        run: python3 scripts/rust-dependency-graphs.py patch-policy
+      - name: SDK vendor API and feature checks — GATING
+        if: steps.changes.outputs.rust_changed == 'true'
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/target/sdk-patch-checks
+          CARGO_BUILD_JOBS: '2'
+        run: |
+          python3 vendor/zk-sdk/verify.py --smoke
+          python3 vendor/zk-sdk/verify.py --feature-matrix
       - name: cargo-vet check — GATING
         if: steps.changes.outputs.rust_changed == 'true'
-        run: cargo vet --locked --frozen
+        run: python3 scripts/rust-dependency-graphs.py vet
 
       # ---- former jobs: generate CycloneDX SBOM + purl/supplier assertions ----
       # [FABLE-5] sq-6vshe.20: the SBOM is generated + normalized ONCE, unconditionally
@@ -350,7 +368,7 @@ jobs:
         run: |
           set -euo pipefail
           n=0
-          until cargo fetch --locked; do
+          until python3 scripts/rust-dependency-graphs.py fetch; do
             n=$((n+1))
             if [ "$n" -ge 3 ]; then
               echo "::error::cargo fetch failed after $n attempts (registry outage?)" >&2
@@ -360,7 +378,9 @@ jobs:
             sleep 10
           done
       - name: Generate SBOM (CycloneDX 1.5 JSON, whole workspace)
-        # --all emits one SBOM per workspace member + an aggregate; JSON format.
+        # [GPT-6] Explicitly cover root, detached evaluator and nested guest locks.
+        # --all includes transitive dependencies; --all-features and --target all
+        # cover the complete selected graph, including build dependencies.
         # [OPUS-4.8] sq-toze.28 (GS-4 / CDX-3): --spec-version 1.5 (cargo-cyclonedx
         # 0.5.9 defaults to 1.3) so the CI SBOM matches the published 1.5 SBOM/VEX;
         # the 1.5 metadata.lifecycles slot is populated by scripts/sbom-normalize.jq.
@@ -371,7 +391,7 @@ jobs:
         run: |
           set -euo pipefail
           n=0
-          until cargo cyclonedx --all --format json --spec-version 1.5; do
+          until python3 scripts/rust-dependency-graphs.py sbom; do
             n=$((n+1))
             if [ "$n" -ge 3 ]; then
               echo "::error::cargo cyclonedx failed after $n attempts" >&2
@@ -380,6 +400,8 @@ jobs:
             echo "cargo cyclonedx attempt $n failed; retrying in 10s..." >&2
             sleep 10
           done
+      - name: Require an SBOM for every locked workspace member
+        run: python3 scripts/rust-dependency-graphs.py sbom-paths > "$RUNNER_TEMP/rust-sbom-paths"
       - name: Normalize SBOM (strip host-revealing absolute build paths)
         # [OPUS-4.8] sq-toze.30 (GS-6 / F-6): cargo-cyclonedx stamps the absolute build dir
         # into every workspace/path-dependency bom-ref + purl, which would leak the CI
@@ -410,6 +432,8 @@ jobs:
           path: |
             **/*.cdx.json
             !sbom/sparq-js*.cdx.json
+            vendor/zk-sdk/UPSTREAM.json
+            vendor/zk-sdk/*.patch
           if-no-files-found: error
 
       # ---- former job: SBOM purl-canonicality assertion (GS-6/GS-7) — GATING ----
@@ -438,13 +462,13 @@ jobs:
         run: |
           set -euo pipefail
           # cargo-cyclonedx wrote <crate>.cdx.json next to each member's Cargo.toml, so
-          # the freshly-generated SBOMs live under crates/. Scope the assertion to those
+          # the required inventory includes crates/ and both detached workspaces. Scope to those
           # (NOT the committed supply-chain/vex.cdx.json, which is a VEX and carries no
           # component purls). They were normalized above through the SAME transform the
           # publication path uses; assert every purl in the normalized output is canonical.
-          mapfile -d '' -t generated < <(find crates -name '*.cdx.json' -print0)
+          mapfile -d '' -t generated < "$RUNNER_TEMP/rust-sbom-paths"
           if [ "${#generated[@]}" -eq 0 ]; then
-            echo "::error::no generated SBOM found under crates/ — cargo cyclonedx produced nothing"
+            echo "::error::no generated SBOM found in the required workspace inventory"
             exit 1
           fi
           python3 scripts/check-sbom-purl-canonical.py "${generated[@]}"
@@ -465,11 +489,11 @@ jobs:
       - name: SBOM per-component supplier-name assertion over the normalized SBOM — GATING
         run: |
           set -euo pipefail
-          # Same scope as the purl assertion: the generated crates/*.cdx.json (NOT the
+          # Same scope as the purl assertion: every required generated SBOM (NOT the
           # committed VEX), already normalized through the publication-path transform.
-          mapfile -d '' -t generated < <(find crates -name '*.cdx.json' -print0)
+          mapfile -d '' -t generated < "$RUNNER_TEMP/rust-sbom-paths"
           if [ "${#generated[@]}" -eq 0 ]; then
-            echo "::error::no generated SBOM found under crates/ — cargo cyclonedx produced nothing"
+            echo "::error::no generated SBOM found in the required workspace inventory"
             exit 1
           fi
           python3 scripts/check-sbom-supplier.py "${generated[@]}"
