@@ -360,7 +360,7 @@ jobs:
       #
       # The `fetch-depth: 0` checkout above is a PRECONDITION: on a shallow checkout the
       # tag list is not authoritative and the guard refuses rather than guessing.
-      - name: Publish-cadence guard (fail-closed minimum release interval, #1135)
+      - name: "Publish-cadence guard (fail-closed minimum release interval, #1135)"
         run: python3 scripts/release-interval-guard.py --enforce --repo-root .
       # [OPUS-4.8] sq-v286.11 — crates.io TRUSTED-PUBLISHING FLIP (continued). When flipping
       # `publish = true`, release-plz runs `cargo publish` BEFORE tagging and needs a crates.io

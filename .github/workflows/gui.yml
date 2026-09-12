@@ -430,7 +430,7 @@ jobs:
 
       # Issue #1740 regression guard: gui/e2e/run-e2e.mjs must NOT hard-code a browserName
       # capability (WebKitGTK >= 2.48 hard-rejects a mismatching one, 0-byte driver log).
-      - name: Drift tripwire — browserName regression guard (issue #1740)
+      - name: "Drift tripwire — browserName regression guard (issue #1740)"
         run: bash scripts/ci/tauri-driver-drift-tripwire.sh
 
       # Determinism gate — forbids arbitrary time-based waits in the tauri-driver harness.
