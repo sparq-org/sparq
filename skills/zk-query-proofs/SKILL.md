@@ -369,7 +369,10 @@ keys in the toolchain suite. Expanded v2 tiny and predicate-free profiles have
 representative genuine-proof checks in addition to wrapper execution coverage;
 see the successful-result reference for evidence and scope.
 
-[GPT-6] Separate signed-integer planning also has a Noir core gadget that binds
-canonical signed literals without making sign or actual lexical length public.
-It is unit-tested core code, not an exposed signed successful-result proof API;
-see [signed admission](references/disclosure-planner.md#canonical-signed-integer-admission).
+[GPT-6] `result::signed` exposes separately versioned canonical signed-integer
+preparation and verification, with a fixed capacity and no public sign/length
+selector. See the [signed result contract](references/signed-results.md) for its
+API, lexical limits and evidence boundary, and
+[signed admission](references/disclosure-planner.md#canonical-signed-integer-admission)
+for the independent planner. Native/core checks do not constitute genuine signed
+result-proof evidence.

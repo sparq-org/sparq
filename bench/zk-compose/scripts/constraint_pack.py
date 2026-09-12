@@ -105,6 +105,17 @@ TOOL = "bb gates -s ultra_honk"
 FAMILIES: list[dict] = [
     # [GPT-6] Keep the selected-result contract separate from complete-scan members.
     {
+        "key": "result_v3",
+        "pattern": r"result_v3_k(?P<k>\d+)_n(?P<n>\d+)_p(?P<p>\d+)_r(?P<r>\d+)_f(?P<f>\d+)_s(?P<s>\d+)_d(?P<d>\d+)",
+        "params": ["k", "n", "p", "r", "f", "s", "d"],
+        "layer": "result",
+        "role": "Separately versioned support for released SELECT DISTINCT mappings "
+        "with canonical signed i64 predicates (s=64; s=0 has no private predicate) "
+        "and status tree depth d. Sign and exact lexical length have no public "
+        "selector. Preserves issuer authentication and original string-commitment "
+        "binding, without result completeness or holder identity.",
+    },
+    {
         "key": "result_v2",
         "pattern": r"result_v2_k(?P<k>\d+)_n(?P<n>\d+)_p(?P<p>\d+)_r(?P<r>\d+)_f(?P<f>\d+)_i(?P<i>\d+)_d(?P<d>\d+)",
         "params": ["k", "n", "p", "r", "f", "i", "d"],

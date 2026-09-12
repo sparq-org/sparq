@@ -17,6 +17,7 @@
 
 use crate::driver::{CircuitProver, DriverError};
 use crate::manifest::{DisclosedTerm, FieldHex, StatusListSnapshot};
+use crate::planner::signed::{NumericProfile, SignedDisclosureQuery};
 use crate::planner::{
     optimize_disclosure_admitted, plan_disclosure_admitted, DisclosureQuery, MembershipRef,
     OptimizationCompletion, OptimizationLimits, PlannerLimits, QueryKind, QuerySlot,
@@ -49,6 +50,60 @@ const V: usize = 6;
 const F: usize = 2;
 const STATUS_DEPTHS: [u32; 3] = [10, 17, 20];
 const POLICY_DEPTH: u32 = 4;
+
+/// Separately versioned signed-integer successful-result preparation and verification.
+pub mod signed;
+
+// [GPT-6] Only the typed entry point selects the numeric contract. A signed
+// capacity is never added to the legacy presentation's deserialization enum.
+#[derive(Clone, Copy)]
+enum NumericContract {
+    Unsigned(PrivateIntegerCapacity),
+    Signed,
+}
+
+impl NumericContract {
+    fn profile(self) -> NumericProfile {
+        match self {
+            Self::Unsigned(_) => NumericProfile::Unsigned,
+            Self::Signed => NumericProfile::Signed,
+        }
+    }
+
+    fn parse(self, query: &str) -> Result<DisclosureQuery, ResultError> {
+        parse_numeric_query(query, self.profile())
+    }
+
+    fn accepts_version(self, version: u32) -> bool {
+        match self {
+            Self::Unsigned(_) => matches!(version, 1 | 2),
+            Self::Signed => version == signed::VERSION,
+        }
+    }
+
+    fn package(
+        self,
+        credentials: usize,
+        filters: usize,
+        depth: u32,
+    ) -> Result<(&'static str, u32), ResultError> {
+        match self {
+            Self::Unsigned(capacity) => package(credentials, filters, capacity, depth),
+            Self::Signed => signed::package(credentials, filters, depth),
+        }
+    }
+}
+
+fn parse_numeric_query(
+    query: &str,
+    profile: NumericProfile,
+) -> Result<DisclosureQuery, ResultError> {
+    match profile {
+        NumericProfile::Unsigned => DisclosureQuery::parse(query),
+        NumericProfile::Signed => SignedDisclosureQuery::parse(query).map(|q| q.inner),
+    }
+    .map_err(|e| reject(e.to_string()))
+}
 
 /// A private credential and its existing issuer-authenticated status reference.
 ///
@@ -130,6 +185,28 @@ pub struct ResultPresentation {
     pub integer_capacity: PrivateIntegerCapacity,
     /// Barretenberg proof bytes under the explicitly ZK `noir-recursive` target.
     pub proof: Vec<u8>,
+}
+
+// A borrowed view avoids cloning an untrusted presentation before admission.
+// Numeric interpretation is supplied separately by the typed verifier entry point.
+struct PresentationView<'a> {
+    version: u32,
+    query: &'a str,
+    rows: &'a [BTreeMap<String, DisclosedTerm>],
+    challenge: &'a FieldHex,
+    issuer_slots: &'a [String],
+}
+
+impl<'a> From<&'a ResultPresentation> for PresentationView<'a> {
+    fn from(p: &'a ResultPresentation) -> Self {
+        Self {
+            version: p.version,
+            query: &p.query,
+            rows: &p.rows,
+            challenge: &p.challenge,
+            issuer_slots: &p.issuer_slots,
+        }
+    }
 }
 
 /// Private preparation statistics; these do not enter the public presentation.
@@ -370,13 +447,27 @@ fn public_statement(
     policy: &ResultPolicy,
     nonce: &VerifierNonce,
 ) -> Result<PublicStatement, ResultError> {
-    if !matches!(p.version, 1 | 2) || p.challenge != nonce.as_field_hex() {
+    public_statement_for(
+        p.into(),
+        NumericContract::Unsigned(p.integer_capacity),
+        policy,
+        nonce,
+    )
+}
+
+fn public_statement_for(
+    p: PresentationView<'_>,
+    contract: NumericContract,
+    policy: &ResultPolicy,
+    nonce: &VerifierNonce,
+) -> Result<PublicStatement, ResultError> {
+    if !contract.accepts_version(p.version) || p.challenge != &nonce.as_field_hex() {
         return Err(reject("version or challenge mismatch"));
     }
     if p.issuer_slots.is_empty() || p.issuer_slots.len() > MAX_CREDENTIALS {
         return Err(reject("unsupported credential capacity bucket"));
     }
-    let query = DisclosureQuery::parse(&p.query).map_err(|e| reject(e.to_string()))?;
+    let query = contract.parse(p.query)?;
     // Keep ASK out of this first wire contract; no accidental false/absence claim.
     if query.kind != QueryKind::SelectDistinct {
         return Err(reject("only SELECT DISTINCT is supported"));
@@ -396,7 +487,7 @@ fn public_statement(
     }
     let mut rows = Vec::new();
     let mut distinct = BTreeSet::new();
-    for row in &p.rows {
+    for row in p.rows {
         if row.keys().cloned().collect::<BTreeSet<_>>() != expected {
             return Err(reject("released row does not match projection"));
         }
@@ -434,9 +525,18 @@ fn public_statement(
         }
         if expected.contains(&filter.variable) {
             for row in &rows {
-                let value =
-                    crate::planner::canonical_integer(&row[&filter.variable]).ok_or_else(|| {
-                        reject("public FILTER operand is not a canonical nonnegative integer")
+                let value = contract
+                    .profile()
+                    .value(&row[&filter.variable])
+                    .ok_or_else(|| {
+                        reject(match contract {
+                            NumericContract::Unsigned(_) => {
+                                "public FILTER operand is not a canonical nonnegative integer"
+                            }
+                            NumericContract::Signed => {
+                                "public FILTER operand is not a canonical signed integer"
+                            }
+                        })
                     })?;
                 if !crate::planner::integer_comparison(value, filter.op, filter.bound) {
                     return Err(reject("public FILTER is false"));
@@ -446,12 +546,8 @@ fn public_statement(
     }
     let entries = policy.entries()?;
     let status_depth = policy.status_depth()?;
-    let (package, version) = package(
-        p.issuer_slots.len(),
-        hidden_filters.len(),
-        p.integer_capacity,
-        status_depth,
-    )?;
+    let (package, version) =
+        contract.package(p.issuer_slots.len(), hidden_filters.len(), status_depth)?;
     if p.version != version {
         return Err(reject(
             "version does not match independently derived capacity profile",
@@ -460,7 +556,7 @@ fn public_statement(
     let root = accepted_set_root(&entries, POLICY_DEPTH)
         .ok_or_else(|| reject("status policy root unavailable"))?;
     let mut keys = Vec::new();
-    for text in &p.issuer_slots {
+    for text in p.issuer_slots {
         let key = sig::public_key_from_hex(text).ok_or_else(|| reject("malformed issuer key"))?;
         if sig::public_key_to_hex(&key) != *text || !policy.trusted_issuers.contains(&key) {
             return Err(reject("untrusted or noncanonical issuer key"));
@@ -662,12 +758,32 @@ pub fn prepare_result_with_options(
     nonce: &VerifierNonce,
     options: ResultOptions,
 ) -> Result<PreparedResult, ResultError> {
+    prepare_result_numeric(
+        query,
+        credentials,
+        rows,
+        policy,
+        nonce,
+        options,
+        NumericProfile::Unsigned,
+    )
+}
+
+fn prepare_result_numeric(
+    query: &str,
+    credentials: &[ResultCredential],
+    rows: &[BTreeMap<String, Term>],
+    policy: &ResultPolicy,
+    nonce: &VerifierNonce,
+    options: ResultOptions,
+    profile: NumericProfile,
+) -> Result<PreparedResult, ResultError> {
     // [GPT-6] Reject the wallet shape before authentication or graph cloning;
     // empty and ineligible credentials still count toward resource admission.
     if credentials.len() > crate::planner::MAX_DISCLOSURE_CREDENTIALS {
         return Err(reject("input credentials exceed disclosure planning limit"));
     }
-    let parsed = DisclosureQuery::parse(query).map_err(|e| reject(e.to_string()))?;
+    let parsed = parse_numeric_query(query, profile)?;
     let entries = policy.entries()?;
     let status_depth = policy.status_depth()?;
     let eligible: Vec<bool> = credentials
@@ -726,7 +842,7 @@ pub fn prepare_result_with_options(
             if let QuerySlot::Variable(v) = &parsed.patterns[pattern][slot] {
                 if !parsed.projection.contains(v) && parsed.filters.iter().any(|f| &f.variable == v)
                 {
-                    return crate::planner::canonical_integer(term).is_some();
+                    return profile.value(term).is_some();
                 }
             }
             true
@@ -739,22 +855,45 @@ pub fn prepare_result_with_options(
     };
     let (plan, optimization) = match options.witness_selection {
         WitnessSelection::FirstSuccess => (
-            plan_disclosure_admitted(&parsed, &graphs, rows, limits, admit)
-                .map_err(|e| reject(e.to_string()))?,
+            match profile {
+                NumericProfile::Unsigned => {
+                    plan_disclosure_admitted(&parsed, &graphs, rows, limits, admit)
+                }
+                NumericProfile::Signed => crate::planner::signed::plan_signed_disclosure_admitted(
+                    &SignedDisclosureQuery {
+                        inner: parsed.clone(),
+                    },
+                    &graphs,
+                    rows,
+                    limits,
+                    admit,
+                ),
+            }
+            .map_err(|e| reject(e.to_string()))?,
             None,
         ),
         WitnessSelection::Optimize => {
-            let report = optimize_disclosure_admitted(
-                &parsed,
-                &graphs,
-                rows,
-                OptimizationLimits {
-                    planner: limits,
-                    max_pattern_occurrences: P * R,
-                    max_authentications: MAX_CREDENTIALS,
-                },
-                admit,
-            )
+            let optimization_limits = OptimizationLimits {
+                planner: limits,
+                max_pattern_occurrences: P * R,
+                max_authentications: MAX_CREDENTIALS,
+            };
+            let report = match profile {
+                NumericProfile::Unsigned => {
+                    optimize_disclosure_admitted(&parsed, &graphs, rows, optimization_limits, admit)
+                }
+                NumericProfile::Signed => {
+                    crate::planner::signed::optimize_signed_disclosure_admitted(
+                        &SignedDisclosureQuery {
+                            inner: parsed.clone(),
+                        },
+                        &graphs,
+                        rows,
+                        optimization_limits,
+                        admit,
+                    )
+                }
+            }
             .map_err(|e| reject(e.to_string()))?;
             let plan = report.plan.ok_or_else(|| match report.completion {
                 OptimizationCompletion::BudgetExhausted => ResultError::SearchExhausted,
@@ -799,7 +938,8 @@ pub fn prepare_result_with_options(
                         .iter()
                         .any(|filter| &filter.variable == variable);
                 if private_operand
-                    && crate::planner::canonical_integer(term)
+                    && profile
+                        .value(term)
                         .is_some_and(|value| value > SMALL_PRIVATE_INTEGER)
                 {
                     needs_wide = true;
@@ -809,13 +949,21 @@ pub fn prepare_result_with_options(
         }
     }
     let integer_capacity = if hidden_filters != 0
-        && (needs_wide || options.integer_capacity == IntegerCapacityPolicy::HideInU64)
+        && (matches!(profile, NumericProfile::Signed)
+            || needs_wide
+            || options.integer_capacity == IntegerCapacityPolicy::HideInU64)
     {
         PrivateIntegerCapacity::FullU64
     } else {
         PrivateIntegerCapacity::TwoDigits
     };
-    let (_, version) = package(used.len(), hidden_filters, integer_capacity, status_depth)?;
+    let contract = match profile {
+        NumericProfile::Unsigned => NumericContract::Unsigned(integer_capacity),
+        NumericProfile::Signed => NumericContract::Signed,
+    };
+    let (_, version) = contract.package(used.len(), hidden_filters, status_depth)?;
+    // Shared private storage only: the signed wrapper emits its separate wire
+    // type, omitting this unsigned-only capacity field, after proving succeeds.
     let presentation = ResultPresentation {
         version,
         integer_capacity,
@@ -835,7 +983,7 @@ pub fn prepare_result_with_options(
             .collect(),
         proof: Vec::new(),
     };
-    let statement = public_statement(&presentation, policy, nonce)?;
+    let statement = public_statement_for((&presentation).into(), contract, policy, nonce)?;
     let public_inputs = public_bytes(&statement.fields)?;
     let mut fields = statement.fields.clone();
     let zero = field_to_hex(&Fr::from(0u64));
@@ -952,8 +1100,15 @@ pub fn prepare_result_with_options(
         for (f, &index) in statement.hidden_filters.iter().enumerate() {
             let filter = &statement.query.filters[index];
             let term = &bindings[&filter.variable];
-            let value = crate::planner::canonical_integer(term).ok_or_else(|| {
-                reject("private FILTER operand is not a canonical nonnegative integer")
+            let value = profile.value(term).ok_or_else(|| {
+                reject(match profile {
+                    NumericProfile::Unsigned => {
+                        "private FILTER operand is not a canonical nonnegative integer"
+                    }
+                    NumericProfile::Signed => {
+                        "private FILTER operand is not a canonical signed integer"
+                    }
+                })
             })?;
             if integer_capacity == PrivateIntegerCapacity::TwoDigits
                 && value > SMALL_PRIVATE_INTEGER
@@ -1099,7 +1254,27 @@ pub fn verify_result(
         return Err(reject("query differs from relying-party request"));
     }
     let statement = public_statement(presentation, policy, nonce)?;
-    if presentation.proof.is_empty() {
+    verify_statement(
+        expected_query,
+        &presentation.proof,
+        statement,
+        nonce,
+        seen,
+        prover,
+        work_dir,
+    )
+}
+
+fn verify_statement(
+    expected_query: &str,
+    proof: &[u8],
+    statement: PublicStatement,
+    nonce: &VerifierNonce,
+    seen: &dyn SeenNonces,
+    prover: &CircuitProver,
+    work_dir: &Path,
+) -> Result<VerifiedResult, ResultError> {
+    if proof.is_empty() {
         return Err(reject("missing proof"));
     }
     pinned_toolchain()?;
@@ -1108,7 +1283,7 @@ pub fn verify_result(
     }
     let inputs = public_bytes(&statement.fields)?;
     let vk = prover.canonical_package_vk(statement.package, &work_dir.join("canonical"))?;
-    if !prover.verify_with(&presentation.proof, &inputs, &vk, &work_dir.join("verify"))? {
+    if !prover.verify_with(proof, &inputs, &vk, &work_dir.join("verify"))? {
         return Err(reject("cryptographic proof rejected"));
     }
     Ok(VerifiedResult {
@@ -1650,7 +1825,7 @@ mod tests {
     }
 
     // [GPT-6] Goldens cover value, lexical, type and capacity boundaries independently.
-    fn numeric_fixture(
+    pub(super) fn numeric_fixture(
         term: Term,
         index: u64,
         bytes: usize,
@@ -1836,7 +2011,7 @@ mod tests {
         );
     }
 
-    fn alter_input(toml: &str, key: &str, edit: impl FnOnce(&mut Value)) -> String {
+    pub(super) fn alter_input(toml: &str, key: &str, edit: impl FnOnce(&mut Value)) -> String {
         let mut edit = Some(edit);
         toml.lines()
             .map(|line| {

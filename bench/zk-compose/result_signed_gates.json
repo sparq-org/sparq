@@ -1,12 +1,12 @@
 {
   "prepared_by": "GPT-6",
-  "metric": "circuit_size",
-  "tool": "bb gates -s ultra_honk",
-  "timestamp": "2026-09-12T20:44:49.380619+00:00",
-  "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
-  "nargo_version": "nargo version = 1.0.0-beta.21\nnoirc version = 1.0.0-beta.21+89a0f0faf3a5f1273c8ac4843b7877882437e277\n(git version hash: 89a0f0faf3a5f1273c8ac4843b7877882437e277, is dirty: false)",
-  "bb_version": "5.0.0-nightly.20260324",
-  "comparison_base": "713025dc0fcdcbdcd070ba4dcbde524be50ba055",
+  "measured_at": "2026-09-12T20:41:53.316753+00:00",
+  "tool_versions": {
+    "nargo": "nargo version = 1.0.0-beta.21\nnoirc version = 1.0.0-beta.21+89a0f0faf3a5f1273c8ac4843b7877882437e277\n(git version hash: 89a0f0faf3a5f1273c8ac4843b7877882437e277, is dirty: false)",
+    "bb": "5.0.0-nightly.20260324"
+  },
+  "metric": "bb gates ultra_honk circuit_size",
+  "scope": "Actual local circuit-size measurements; no canonical timing or proof verification claim.",
   "source_files": {
     "zk/compose/compose_core/src/derivation.nr": "cd6e9ebd2b77265d8535e26108558dc3e87eb5d7d674f4f9ce0849df3c0cba5d",
     "zk/compose/compose_core/src/entail.nr": "a6793433075b49bc50d535c400e5141d62b74e1ceaf68aa67608dea63c56f25c",
@@ -96,96 +96,66 @@
     "zk/compose/scan_k2_n64_r4/src/main.nr": "473667b4edee0139ea8c055beeb8fa7f1a4b35d1dabb016368c21e90943209e8",
     "zk/compose/scan_k2_n64_r8/src/main.nr": "1b29967beca6e1a7643b0fc95a1a74479d18711a8072966a662c0ad579a63a85"
   },
-  "source_identity": "The source_files hash map identifies the measured Noir bytes; comparison_base names only the historical baseline.",
-  "scope": "Only listed members were remeasured; gate counts are circuit size, not runtime or security evidence. Full-u64 private decimal length is not public.",
   "members": {
-    "result_v1_k1_n16_p3_r4_f0": {
+    "result_v3_k1_n16_p3_r4_f0_s0_d10": {
       "circuit_size": 32288,
-      "acir_bytecode_sha256": "5b6cfbb878699a105cc522738c8aefcc581506472b36f71b836a3d0e4e92dd16"
+      "acir_bytecode_sha256": "3fe3582cc2eee2d21329b70cdee404072912e4bd23d65b353b82e32c74251e5b",
+      "abi_sha256": "8b3a5d07ae362ce21929c069faeb4633818af700f8d22a2f5abc28c4e434cc3e"
     },
-    "result_v1_k1_n16_p3_r4_f2": {
-      "circuit_size": 68963,
-      "acir_bytecode_sha256": "da3113852d560d0d070702c0b10e8ea29887f9d7833fc8b7054cf98ddeed4589"
-    },
-    "result_v1_k2_n16_p3_r4_f0": {
-      "circuit_size": 59101,
-      "acir_bytecode_sha256": "346bd26aef7d4b705dde34670f0ad21cd79ec6c92983814673a821aee010702e"
-    },
-    "result_v1_k2_n16_p3_r4_f2": {
-      "circuit_size": 95775,
-      "acir_bytecode_sha256": "198cd56ca80a2949e1c44f87315d16c71dba8f568298f975cbea87c8a19b5d4d"
-    },
-    "result_v2_k1_n16_p3_r4_f0_i0_d17": {
+    "result_v3_k1_n16_p3_r4_f0_s0_d17": {
       "circuit_size": 32836,
-      "acir_bytecode_sha256": "2179f2c84eb415901df25731d6003a770e440190cc085a1e74fae54537899154"
+      "acir_bytecode_sha256": "4cad4e3992c5f22691d066e8ded720c2c6bbfc5eb44653aee655830821d27ded",
+      "abi_sha256": "c50a847b5f485894df40f4600a0e9f4871c8670e59e8980fb8e18568d105d805"
     },
-    "result_v2_k1_n16_p3_r4_f0_i0_d20": {
+    "result_v3_k1_n16_p3_r4_f0_s0_d20": {
       "circuit_size": 33071,
-      "acir_bytecode_sha256": "eabe4c1578eb0e494a5c52948777c914b18c1f4e87b368444b0980c82695151b"
+      "acir_bytecode_sha256": "1ec503fdf2cbed26f452be78d1c717e093a4b255fdcbb5a4e9a29cb0eb7bf628",
+      "abi_sha256": "150e9434d2bca1a87fa42b5f6529285444cea14246a81f5044aa3834304ec56a"
     },
-    "result_v2_k1_n16_p3_r4_f2_i64_d10": {
-      "circuit_size": 462049,
-      "acir_bytecode_sha256": "457572732890e59403f43d07d383510ddd63195fe963f50792272574042bad24"
+    "result_v3_k1_n16_p3_r4_f2_s64_d10": {
+      "circuit_size": 436341,
+      "acir_bytecode_sha256": "019ed8b3d87cb942cebea8d327a37750ede0c884c4b30946c11438ba67861ac8",
+      "abi_sha256": "5df2e0deef146cc18796671f82a25cf17377f527f5e6882c9536d30db7270d35"
     },
-    "result_v2_k1_n16_p3_r4_f2_i64_d17": {
-      "circuit_size": 462597,
-      "acir_bytecode_sha256": "b6c7cb56f9a879a82d1116eaca22ba976306a01304c3c62412789b3607d107f2"
+    "result_v3_k1_n16_p3_r4_f2_s64_d17": {
+      "circuit_size": 436889,
+      "acir_bytecode_sha256": "8ae33cac019ac7786d0b5c1d58753da5ccf53e6be025337df881dfd6b5c10df1",
+      "abi_sha256": "b155a58247c9028b908fa4e090d655debed727deec342c2a6e732594a272a2c4"
     },
-    "result_v2_k1_n16_p3_r4_f2_i64_d20": {
-      "circuit_size": 462832,
-      "acir_bytecode_sha256": "d894345ebaee45832eb7b47b3772eac50a2bc51b4598b9219eab1a0edcecb272"
+    "result_v3_k1_n16_p3_r4_f2_s64_d20": {
+      "circuit_size": 437124,
+      "acir_bytecode_sha256": "56b750833418b3fedb2e4437cd24e54f0487d13b726d65d638c74f332d79a72e",
+      "abi_sha256": "02d402020de7e94567798f32721c9b18187f12752aaabee2e8b046acbe427945"
     },
-    "result_v2_k1_n16_p3_r4_f2_i8_d17": {
-      "circuit_size": 69619,
-      "acir_bytecode_sha256": "8350284b77c19b73f661c10e616543850d7e0695f27c909c331cc1ce760c6930"
+    "result_v3_k2_n16_p3_r4_f0_s0_d10": {
+      "circuit_size": 59101,
+      "acir_bytecode_sha256": "e8d2ce9f132f19097ad723818a28b86cd09de9940dca85ca7675e0fe2a731254",
+      "abi_sha256": "6485138a22ad11f36be1f76ec2acba137d87fd2b6ffa9bb79f6375ca5990fa47"
     },
-    "result_v2_k1_n16_p3_r4_f2_i8_d20": {
-      "circuit_size": 69854,
-      "acir_bytecode_sha256": "504657c7decacb28206cc352d0bd3e6a7afa01b2fa49bba989a3d032815372a4"
-    },
-    "result_v2_k2_n16_p3_r4_f0_i0_d17": {
+    "result_v3_k2_n16_p3_r4_f0_s0_d17": {
       "circuit_size": 60197,
-      "acir_bytecode_sha256": "dd4a231f1bf0b84de7342d05f1c6dabc5bad2185d527a29d3d20fb1493b74c58"
+      "acir_bytecode_sha256": "d4d2720a2c2d503298615fab302c2aa7497cc2887fd50199056c7e28f39d1052",
+      "abi_sha256": "13643e6bb44e3228fb86cfbd803d7e2e6c3b8db72e09eab90a58b78947202695"
     },
-    "result_v2_k2_n16_p3_r4_f0_i0_d20": {
+    "result_v3_k2_n16_p3_r4_f0_s0_d20": {
       "circuit_size": 60667,
-      "acir_bytecode_sha256": "3b2ddec768d8485a89b2598e83f6dc27df9cdea6963213c2f1e74eb7143a628f"
+      "acir_bytecode_sha256": "272105d1ff103cef5aa23277c4105ddea5fff791e11d14ea8e993359c16995a4",
+      "abi_sha256": "d24039b068c9c509be1af27672b9e6d6527c470efed9ea579c3481badf274274"
     },
-    "result_v2_k2_n16_p3_r4_f2_i64_d10": {
-      "circuit_size": 488858,
-      "acir_bytecode_sha256": "8389e9b07f5750b9e07e06c8072c9718e7dde2af85d6046ae318eedbe6e0dc4c"
+    "result_v3_k2_n16_p3_r4_f2_s64_d10": {
+      "circuit_size": 463150,
+      "acir_bytecode_sha256": "84ff79d763d6de15d8949911064f66995eee46e1f2ce57aab8752bb1f277fc1b",
+      "abi_sha256": "0510b2f600ee883081b8d3d802aab872c5934e8e09f1e2aecb4d4ec5f2d63772"
     },
-    "result_v2_k2_n16_p3_r4_f2_i64_d17": {
-      "circuit_size": 489954,
-      "acir_bytecode_sha256": "270d7273d89ca3f1c8e128153bf38ad98ba72fc7e4b59dd66bf7a8899392a668"
+    "result_v3_k2_n16_p3_r4_f2_s64_d17": {
+      "circuit_size": 464246,
+      "acir_bytecode_sha256": "8d9bf5252675cc64484d93a47d3f6d12c728d35501fd60c6dc5e645d28f5fd5b",
+      "abi_sha256": "16b2f4ea6510dff1e9eb8aca94dc7229aba866555e805dac9bfac6770f316465"
     },
-    "result_v2_k2_n16_p3_r4_f2_i64_d20": {
-      "circuit_size": 490424,
-      "acir_bytecode_sha256": "caac29170d101dfa3c5b7117930fd198fb418639ecda11a499322eec41da5274"
-    },
-    "result_v2_k2_n16_p3_r4_f2_i8_d17": {
-      "circuit_size": 96979,
-      "acir_bytecode_sha256": "665d265b2d740c8e6f6533f1169b600e875bb36ca9d461e3932f41e6c66f6055"
-    },
-    "result_v2_k2_n16_p3_r4_f2_i8_d20": {
-      "circuit_size": 97449,
-      "acir_bytecode_sha256": "1ced99e11f35c1627b8e3b1f6998a4c1b2fea5eeab2b8d2bfda494dc85fa1135"
-    },
-    "filter_int_d1": {
-      "circuit_size": 17416,
-      "acir_bytecode_sha256": "544a1e3a262d3bf456c9068570e9c85f4f4b61dff0d90743844f674938bac5b4"
-    },
-    "filter_int_d2": {
-      "circuit_size": 17416,
-      "acir_bytecode_sha256": "f0c8a52851e7ff832ed453aaf9dab9b688c464fe109c0cd53cb8cee237083315"
-    },
-    "filter_int_d3": {
-      "circuit_size": 17416,
-      "acir_bytecode_sha256": "d54b5f120288aafd8049e1bb7e214bd49781a2fe6b05059e85db06ab04319ea6"
-    },
-    "filter_int_d4": {
-      "circuit_size": 17416,
-      "acir_bytecode_sha256": "3b0ae9bb38ddda3f39d5cf7fdce418728f0273168fc2d27356136fd253054376"
+    "result_v3_k2_n16_p3_r4_f2_s64_d20": {
+      "circuit_size": 464716,
+      "acir_bytecode_sha256": "da361ff730d18d203dcb6de9c26d8d561e9e76b6e0eb393aff0eef7c553414df",
+      "abi_sha256": "786c64a450ba7d7707f330ef3969057e9e4cee793f7ff29f12cd9b61170ae001"
     }
   }
 }

@@ -14,6 +14,13 @@ pub struct SignedInteger {
     biased: u64,
 }
 
+impl SignedInteger {
+    /// Wraps a private biased witness; the relation independently checks its literal binding.
+    pub fn from_biased(biased: u64) -> Self {
+        Self { biased }
+    }
+}
+
 impl ResultInteger for SignedInteger {
     fn check(self, operand: Field, op: u32, bound: u64, bits: u32) {
         assert(bits == 64, "signed integer requires full capacity");
