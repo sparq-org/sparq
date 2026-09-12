@@ -45,6 +45,37 @@ JavaScript/WASM.
 
 ## 🚀 Quickstart
 
+<!-- [GPT-6] Shared with the mdBook install page; keep this block link-portable. -->
+<!-- ANCHOR: release-install -->
+### v0.1.2 release install paths
+
+These are the install commands for the planned `v0.1.2` release. Use them only after
+the tagged release and corresponding registry publications have succeeded; the
+incomplete `v0.1.1` bootstrap is not a complete release. Until then, build from source.
+
+```sh
+# Rust CLI and HTTP server
+cargo install sparq-cli --version 0.1.2
+cargo install sparq-server --version 0.1.2
+
+# Rust libraries (run inside your Cargo project)
+cargo add sparq-core@0.1.2 sparq-engine@0.1.2
+
+# Python: distribution name sparq-rdf, import name sparq
+python -m pip install sparq-rdf==0.1.2
+python -c 'import sparq'
+
+# JavaScript/WASM RDF store
+npm install @sparq-org/sparq@0.1.2
+# Loopback-only Solid/LDP development host (not a production server)
+npm install @sparq-org/solid-server@0.1.2
+# eye-js / eyereasoner migration API backed by sparq's N3 reasoner
+npm install @sparq-org/eyereasoner-compat@0.1.2
+```
+<!-- ANCHOR_END: release-install -->
+
+### Build from source
+
 <!-- sq-im8u: the `quickstart-cli` anchor is single-sourced into
      book/src/getting-started/install.md. Shell only, no links, so it is fully portable across
      the README and mdBook mounts. Keep the ANCHOR markers one-per-line. [OPUS-4.8] -->
@@ -82,7 +113,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 The CLI, HTTP server, Python (`sparq-rdf` on PyPI — `import sparq`), and JS/WASM
 (`@sparq-org/sparq`) mirror the same surface. [GPT-5.6] The separate
 `@sparq-org/solid-server` package hosts the Solid/LDP wasm adapter for loopback-only
-local development. Per-surface how-tos live in the [usage skills](skills/SKILL.md).
+local development; `@sparq-org/eyereasoner-compat` provides an eye-js migration API.
+Per-surface how-tos live in the [usage skills](skills/SKILL.md).
 
 ## ✨ Features
 

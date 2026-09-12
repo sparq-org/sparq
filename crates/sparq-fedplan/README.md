@@ -17,7 +17,7 @@ order. An opt-in `adaptive-replan` feature adds stage-boundary re-planning, and 
 
 ```toml
 [dependencies]
-sparq-fedplan = { version = "0.1.0", features = ["fedplan"] }
+sparq-fedplan = { version = "0.1.2", features = ["fedplan"] }
 oxrdf = { version = "0.3", features = ["rdf-12"] }
 ```
 

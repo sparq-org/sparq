@@ -1,6 +1,6 @@
 {
   "name": "@sparq-org/solid-server",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Local-development Solid/LDP server backed by sparq WebAssembly.",
   "license": "MIT",
   "type": "module",

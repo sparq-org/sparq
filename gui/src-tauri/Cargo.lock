@@ -3311,7 +3311,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-core"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "hashbrown 0.17.1",
  "memchr",
@@ -3324,7 +3324,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-engine"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "md-5",
  "oxiri",
@@ -3345,7 +3345,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-engine-serialize"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "oxrdf",
  "sparq-core",
@@ -3354,7 +3354,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-engine-service"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "oxrdf",
  "quick-xml 0.41.0",
@@ -3367,7 +3367,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-forms"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "getrandom 0.3.4",
  "oxrdf",
@@ -3400,7 +3400,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-hdt"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "bzip2",
  "crc",
@@ -3413,11 +3413,11 @@ dependencies = [
 
 [[package]]
 name = "sparq-jsonld"
-version = "0.1.0"
+version = "0.1.2"
 
 [[package]]
 name = "sparq-policy"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "oxrdf",
  "sparq-core",
@@ -3426,7 +3426,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-reason"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "oxrdf",
  "regex",
@@ -3437,7 +3437,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-shacl"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "oxrdf",
  "oxttl",
@@ -3450,7 +3450,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-solid"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "oxrdf",
  "rustc-hash",
@@ -3463,7 +3463,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-substrate"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "hashbrown 0.17.1",
  "oxrdf",

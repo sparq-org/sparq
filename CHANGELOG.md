@@ -7,17 +7,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-09-20
+
+[GPT-6] Recovery release prepared from the changes after the immutable `v0.1.1`
+source tag. Publication is not implied by this version entry; verify the release
+artifacts and registries using [the release runbook](docs/release.md).
+
+### Added
+
+- Experimental, default-off `sparq-core/overlay-deleted-projections` caches
+  deletion counts by index permutation. Its retained-memory and cold-read tradeoffs
+  are documented in the core README and `bench/overlay-count`; no universal speedup
+  is claimed.
+- The experimental private `sparq-lws-core` server resolves `acl:agentGroup`
+  membership from same-pod group documents. Missing, malformed, off-origin, and
+  non-member groups grant nothing; resolution performs no outbound fetch.
+
+### Changed
+
+- Bind joins reuse contiguous groups only after validating sorted input; capped
+  seed blocks can reuse bounded right-hand scans when no query budget is armed.
+- Core updates preserve the numeric memo when the dictionary is unchanged.
+- Workspace packages and all three public npm packages target `0.1.2`, including
+  `@sparq-org/eyereasoner-compat` (previously `0.1.0`). The private native LWS crate
+  retains its independent version. PyPI `sparq-rdf` derives the workspace version.
+- CI now verifies completed nightly work and reporter identity, reserves heavy
+  runner capacity, and bounds benchmark dashboard publication. Site and GUI
+  dependency patches update Next.js and sharp.
+
+### Fixed
+
+- Nested queries restore the outer budget, cancellation handle, accounting, and
+  sticky error on return or unwind; child budgets remain independent.
+- Predicate statistics serialize in stable predicate-ID order without changing
+  the on-disk format. UPDATE differential tests preserve RDF term identity.
+- Scheduler queue-occupancy tests park both workers and release them safely on
+  assertion panic, preventing the feature-matrix test hang.
+- Release SLSA permissions permit the reusable provenance workflow. The Cargo
+  bootstrap graph excludes the path-only introspection test dependency, while
+  retaining versioned dev-dependencies in dependency-first publish validation.
+- Release and package workflows require matching tag, build commit, and manifest
+  versions. Automatic release-plz version calculation is contained until the first
+  crates.io bootstrap; the manual version PR's tag handoff remains active.
+
 ## [0.1.1] - 2026-08-31
 
-First release: an experimental, from-scratch RDF triplestore and SPARQL engine in Rust
-(dictionary-encoded, six sorted permutation indexes, parallel execution), published as the
-`sparq-*` crate family — `sparq-core` / `sparq-engine` / `sparq-reason` / `sparq-cli` /
-`sparq-server` plus the opt-in capability crates (see `docs/release.md` §4 for the full
-publish set). The API is unstable; SERVICE federation remains unimplemented — see
-`research/roadmap.md`.
+[GPT-6] **Incomplete bootstrap, not a complete release.** The immutable source tag
+points to `1a63aa7c638bd80da55f1811d5fb97e8d014f631`. The features below describe
+that source snapshot, not successful registry or binary publication. As verified on
+2026-09-12, its release workflow failed before starting jobs; no GitHub Release,
+crates.io packages, or PyPI `sparq-rdf` distribution were published. npm
+`@sparq-org/sparq@0.1.1` and `@sparq-org/solid-server@0.1.1` exist without
+`dist.attestations` and cannot be republished to add provenance.
 
-The earlier `v0.1.0` tag was an incomplete CI tag with no final GitHub Release or registry
-publication. It remains in place for auditability; v0.1.1 is the first complete release.
+The earlier `v0.1.0` tag was also incomplete. Both tags remain fixed for auditability;
+post-tag fixes and complete-release recovery belong to `0.1.2`, not this snapshot.
+APIs remain experimental and unstable.
 
 **Crates.io build caveat:** crates.io builds resolve upstream `spargebra` 0.4.6 — the vendored SPARQL-parser conformance fixes (`vendor/spargebra/SPARQ-PATCHES.md`) apply only to git builds until the upstream PRs land.
 
@@ -501,5 +546,6 @@ reproduce):
   single-pattern/FILTER comparisons short-circuit via index range-counting and are excluded
   from the claims above.
 
-[Unreleased]: https://github.com/sparq-org/sparq/compare/v0.1.1...HEAD
-[0.1.1]: https://github.com/sparq-org/sparq/releases/tag/v0.1.1
+[Unreleased]: https://github.com/sparq-org/sparq/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/sparq-org/sparq/compare/v0.1.1...v0.1.2
+[0.1.1]: https://github.com/sparq-org/sparq/tree/v0.1.1
