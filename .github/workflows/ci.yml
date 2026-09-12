@@ -1568,9 +1568,9 @@ jobs:
 
   conformance:
     # W3C SPARQL conformance RATCHET (roadmap T13/38). The full 1229-test scope is at
-    # 1225 pass + 4 documented divergences / 0 fail / 0 skip — 1229/1229. The 4
-    # divergences are expected-results files that are provably wrong against the spec
-    # and their own approved siblings (rendered distinctly in the report with full
+    # 1224 pass + 5 documented divergences / 0 fail / 0 skip — 1229/1229. The 5
+    # divergences are expected-results files that contradict the Recommendation
+    # or their own approved siblings (rendered distinctly in the report with full
     # rationale; rdf-tests issues drafted in docs/upstream-proposals.md). The six
     # former parser-posture failures are fixed in the vendored spargebra
     # (vendor/spargebra/SPARQ-PATCHES.md; upstream PRs drafted). This job GATES: a

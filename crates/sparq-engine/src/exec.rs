@@ -12,7 +12,7 @@ use oxrdf::{BlankNode, Literal, NamedOrBlankNode, Term, Variable};
 use rustc_hash::FxHashMap;
 use sparq_core::dict::{self, Id, NO_ID};
 use sparq_core::store::Pattern as IdPattern;
-use sparq_core::temporal::{Temporal, Timeline};
+use sparq_core::temporal::{ExactTemporal, ExactTimeline, Timeline};
 use sparq_core::Graph;
 // [OPUS-4.8] sq-ev41x (epic sq-qonbz): the id-level numeric value tower (`Num` / `Dec` /
 // `ArithOp` / `RoundMode` and the XSD lexical helpers) now lives in the `sparq-substrate`
@@ -55,6 +55,9 @@ use std::cmp::Ordering;
 #[cfg(feature = "value-join")]
 #[path = "eqjoin.rs"]
 mod eqjoin;
+
+#[path = "numeric_capacity.rs"]
+mod numeric_capacity;
 
 // ---- Cooperative query budget (T15 server hardening) -------------------------
 //
@@ -124,6 +127,8 @@ pub(crate) mod budget {
         /// the row cap also misses. A running high-water sum, added to the working-set
         /// estimate on every check.
         extra_bytes: usize,
+        temporal_year_range: Option<(i64, i64)>,
+        strict_numeric_capacity: bool,
         cancel: Option<CancelPtr>,
     }
 
@@ -135,6 +140,8 @@ pub(crate) mod budget {
         max_bytes: usize::MAX,
         byte_width: BYTES_PER_ID,
         extra_bytes: 0,
+        temporal_year_range: None,
+        strict_numeric_capacity: false,
         cancel: None,
     };
 
@@ -194,12 +201,15 @@ pub(crate) mod budget {
     thread_local! {
         static ACTIVE: Cell<Limits> = const { Cell::new(OFF) };
         static EXCEEDED: Cell<Option<&'static str>> = const { Cell::new(None) };
+        // [GPT-6] Semantic capacity cannot be refunded by a SERVICE byte rollback.
+        static CAPACITY_EXCEEDED: Cell<Option<&'static str>> = const { Cell::new(None) };
     }
 
     // [GPT-6 Astra] Private: callers cannot forget or drop a frame out of order.
     struct Guard<'a> {
         previous: Limits,
         exceeded: Option<&'static str>,
+        capacity_exceeded: Option<&'static str>,
         _budget: std::marker::PhantomData<&'a QueryBudget>,
         _not_send: std::marker::PhantomData<std::rc::Rc<()>>,
     }
@@ -207,6 +217,7 @@ pub(crate) mod budget {
         fn drop(&mut self) {
             ACTIVE.with(|a| a.set(self.previous));
             EXCEEDED.with(|e| e.set(self.exceeded));
+            CAPACITY_EXCEEDED.with(|e| e.set(self.capacity_exceeded));
         }
     }
 
@@ -219,9 +230,11 @@ pub(crate) mod budget {
         let on = b.deadline.is_some()
             || b.max_rows.is_some()
             || b.max_bytes.is_some()
+            || b.temporal_year_range.is_some()
+            || b.strict_numeric_capacity
             || cancel.is_some();
         #[cfg(target_arch = "wasm32")]
-        let on = b.max_rows.is_some() || b.max_bytes.is_some() || cancel.is_some();
+        let on = b.max_rows.is_some() || b.max_bytes.is_some() || b.temporal_year_range.is_some() || b.strict_numeric_capacity || cancel.is_some();
         let previous = ACTIVE.with(|a| {
             a.replace(Limits {
                 on,
@@ -231,13 +244,17 @@ pub(crate) mod budget {
                 max_bytes: b.max_bytes.unwrap_or(usize::MAX),
                 byte_width: BYTES_PER_ID,
                 extra_bytes: 0,
+                temporal_year_range: b.temporal_year_range,
+                strict_numeric_capacity: b.strict_numeric_capacity,
                 cancel,
             })
         });
         let exceeded = EXCEEDED.with(|e| e.replace(None));
+        let capacity_exceeded = CAPACITY_EXCEEDED.with(|e| e.replace(None));
         Guard {
             previous,
             exceeded,
+            capacity_exceeded,
             _budget: std::marker::PhantomData,
             _not_send: std::marker::PhantomData,
         }
@@ -433,7 +450,7 @@ pub(crate) mod budget {
         if !a.on {
             return false;
         }
-        if EXCEEDED.with(|e| e.get()).is_some() {
+        if CAPACITY_EXCEEDED.with(|e| e.get()).is_some() || EXCEEDED.with(|e| e.get()).is_some() {
             return true;
         }
         if rows > a.max_rows {
@@ -466,11 +483,46 @@ pub(crate) mod budget {
     /// Propagates an exhausted budget as the query error.
     #[inline]
     pub(crate) fn check(rows: usize) -> Result<(), String> {
+        if let Some(reason) = CAPACITY_EXCEEDED.with(|e| e.get()) {
+            return Err(format!("query evaluation capacity exceeded ({reason})"));
+        }
         if exhausted(rows) {
             let why = EXCEEDED.with(|e| e.get()).unwrap_or("timeout");
             return Err(format!("query budget exceeded ({why})"));
         }
         Ok(())
+    }
+
+    /// Marks an evaluation-capacity failure independently of expression errors.
+    pub(in crate::exec) fn fail_capacity(reason: &'static str) -> Result<(), String> {
+        CAPACITY_EXCEEDED.with(|e| {
+            if e.get().is_none() { e.set(Some(reason)); }
+        });
+        Err(format!("query evaluation capacity exceeded ({reason})"))
+    }
+
+    pub(in crate::exec) fn check_temporal(value: &str, datatype: &str) -> Result<(), String> {
+        if let Some((min, max)) = ACTIVE.with(|a| a.get().temporal_year_range) {
+            if !sparq_core::temporal::year_within_capacity(value, datatype, min, max) {
+                return fail_capacity("temporal-year");
+            }
+        }
+        Ok(())
+    }
+
+    #[cfg(feature = "parallel")]
+    pub(in crate::exec) fn evaluation_capacity_active() -> bool {
+        ACTIVE.with(|a| a.get().temporal_year_range.is_some() || a.get().strict_numeric_capacity)
+    }
+
+    #[inline]
+    pub(in crate::exec) fn strict_numeric() -> bool {
+        ACTIVE.with(|a| a.get().strict_numeric_capacity)
+    }
+
+    #[inline]
+    pub(in crate::exec) fn temporal_capacity_active() -> bool {
+        ACTIVE.with(|active| active.get().temporal_year_range.is_some())
     }
 
     /// Returns `true` when a budget is currently installed (even if not yet exhausted).
@@ -510,6 +562,29 @@ pub(crate) mod budget {
     mod nested_budget_tests {
         use super::*;
         use std::sync::Arc;
+
+        #[test]
+        fn capacity_failure_is_sticky_and_nested_scopes_restore_it() {
+            let parent = QueryBudget { temporal_year_range: Some((1, 10)), ..QueryBudget::unlimited() };
+            with_budget(&parent, || {
+                assert!(fail_capacity("temporal-year").is_err());
+                with_budget(&QueryBudget::unlimited(), || assert!(check(0).is_ok()));
+                assert_eq!(check(0).unwrap_err(), "query evaluation capacity exceeded (temporal-year)");
+                assert!(exhausted(0));
+            });
+            with_budget(&parent, || assert!(check(0).is_ok()));
+        }
+
+        #[cfg(any(feature = "service", feature = "service-local"))]
+        #[test]
+        fn service_byte_rollback_cannot_refund_evaluation_capacity() {
+            with_budget(&QueryBudget::unlimited(), || {
+                let checkpoint = byte_savepoint();
+                assert!(fail_capacity("temporal-year").is_err());
+                restore_bytes(checkpoint);
+                assert!(check(0).unwrap_err().contains("evaluation capacity exceeded"));
+            });
+        }
 
         fn assert_state(want: Limits, sticky: Option<&'static str>) {
             let got = ACTIVE.with(Cell::get);
@@ -2529,6 +2604,10 @@ impl<'dataset> LocalVocab<'dataset> {
     /// Interns a term, returning a stable id: equal terms get the same id so
     /// DISTINCT, GROUP BY, joins and equality work on computed values.
     fn intern(&mut self, t: Term) -> Id {
+        if let Term::Literal(literal) = &t {
+            // Sticky: interning cannot turn an evaluation-capacity failure into unbound.
+            let _ = budget::check_temporal(literal.value(), literal.datatype().as_str());
+        }
         if let Some(&id) = self.ids.get(&t) {
             return id;
         }
@@ -2646,7 +2725,7 @@ pub fn eval_select(graph: &Graph, pattern: &GraphPattern) -> Result<QueryResult,
         col_of.iter().map(|c| c.and_then(|i| term_of(graph, &local, row[i]))).collect()
     };
     #[cfg(feature = "parallel")]
-    let rows: Vec<Vec<Option<Term>>> = if bindings.rows.len() >= PAR_THRESHOLD {
+    let rows: Vec<Vec<Option<Term>>> = if bindings.rows.len() >= PAR_THRESHOLD && !budget::evaluation_capacity_active() {
         use rayon::prelude::*;
         bindings.rows.par_iter().map(materialise).collect()
     } else {
@@ -2841,7 +2920,7 @@ fn single_pattern_scan_json_emit(
     // the overrun to ~one chunk per worker. A blanket !budget-active → true flip is
     // REJECTED (see `parallel_json_fanout`).
     #[cfg(feature = "parallel")]
-    if scan_rows.len() >= PAR_THRESHOLD {
+    if scan_rows.len() >= PAR_THRESHOLD && !budget::evaluation_capacity_active() {
         if let Some(limits) = budget::parallel_json_fanout() {
             use rayon::prelude::*;
             // One string per chunk (≈ per worker), not per row — avoids one heap
@@ -3040,7 +3119,7 @@ pub fn eval_select_json_emit(
     // mid-serialize and gate the final chunk on `budget::check` — a late-but-complete
     // result is reported as the budget error, never returned as if it were in time.
     #[cfg(feature = "parallel")]
-    if bindings.rows.len() >= PAR_THRESHOLD {
+    if bindings.rows.len() >= PAR_THRESHOLD && !budget::evaluation_capacity_active() {
         use rayon::prelude::*;
         // Limit snapshot the workers re-check at each par-chunk boundary (the installing
         // thread's sticky flag is out of reach inside rayon).
@@ -3135,6 +3214,7 @@ pub fn eval_ask(graph: &Graph, pattern: &GraphPattern) -> Result<bool, String> {
     let simplified = ask_simplify(pattern);
     // Exact-count fast path (a single-pattern BGP answers from the index).
     if let Some(n) = try_count(graph, &simplified) {
+        budget::check(0)?;
         return Ok(n > 0);
     }
     let sliced = GraphPattern::Slice { inner: Box::new(simplified), start: 0, length: Some(1) };
@@ -3184,6 +3264,7 @@ fn ask_simplify(p: &GraphPattern) -> GraphPattern {
 /// evaluates and counts the rows.
 pub fn count_select(graph: &Graph, pattern: &GraphPattern) -> Result<usize, String> {
     if let Some(n) = try_count(graph, pattern) {
+        budget::check(0)?;
         return Ok(n);
     }
     let mut local = LocalVocab::for_dataset(graph);
@@ -4836,9 +4917,8 @@ fn count_single_filtered(
             .rows
             .iter()
             .filter(|row| {
-                graph
-                    .temporal_value(scan.to_spo(row)[pos])
-                    .and_then(|v| Temporal::cmp_t(v, t))
+                temporal_of_id(graph, scan.to_spo(row)[pos])
+                    .and_then(|v| ExactTemporal::compare(v, t))
                     .is_some_and(|o| op.eval(o))
             })
             .count(),
@@ -6417,36 +6497,36 @@ impl CmpOp {
 }
 
 /// A sargable FILTER predicate pushed down into a pattern scan: numeric (via the f64
-/// `numerics` cache) or temporal (via the `temporals` cache — dateTime/date vs a
+/// `numerics` cache) or temporal (via exact borrowed dateTime/date lexicals vs a
 /// temporal constant).
 #[derive(Clone, Copy)]
-pub(crate) enum ScanCmp {
+pub(crate) enum ScanCmp<'a> {
     Num(NumCmp),
     /// `value OP temporal-constant`. A row passes when the comparison is DECIDABLE and
     /// satisfies the operator; an indeterminate (mixed-timezone window), cross-family
     /// (dateTime vs date) or non-temporal operand is a FILTER type error — the row is
     /// excluded, which `false` reproduces exactly. (For `=`, cross-family is "known
     /// different" rather than an error — also excluded, also `false`.)
-    Temp(CmpOp, Temporal),
+    Temp(CmpOp, ExactTemporal<'a>),
 }
 
-impl ScanCmp {
+impl ScanCmp<'_> {
     /// Human-readable comparison for EXPLAIN output, e.g. `> 28`.
     pub(crate) fn render(&self) -> String {
         match *self {
             ScanCmp::Num(c) => c.render(),
-            ScanCmp::Temp(op, t) => format!("{} temporal(instant {})", op.render(), t.instant),
+            ScanCmp::Temp(op, t) => format!("{} exact temporal {:?}", op.render(), t.timeline),
         }
     }
 
     /// Evaluates the pushed-down predicate against one scanned column id, through the
-    /// graph's numeric / temporal value cache — O(1), no term materialised.
+    /// numeric cache or exact borrowed temporal key; no term is materialised.
     #[inline]
     fn test_id(&self, graph: &Graph, id: Id) -> bool {
         match *self {
             ScanCmp::Num(c) => graph.numeric_value(id).is_some_and(|x| c.test(x)),
             ScanCmp::Temp(op, t) => {
-                graph.temporal_value(id).and_then(|v| Temporal::cmp_t(v, t)).is_some_and(|o| op.eval(o))
+                temporal_of_id(graph, id).and_then(|v| ExactTemporal::compare(v, t)).is_some_and(|o| op.eval(o))
             }
         }
     }
@@ -6490,7 +6570,8 @@ fn inline_pass_values(cmp: ScanCmp) -> Option<(u32, u32)> {
 /// `"1.000000000000000001"^^xsd:decimal` collapses onto the f64 `1.0`), so such comparisons
 /// fall back to the exact general evaluator instead. Temporal pushdown is unaffected, and a
 /// graph with no f64-inexact decimal keeps the numeric fast path.
-fn extract_sargable(graph: &Graph, e: &Expression) -> Option<(Variable, ScanCmp)> {
+fn extract_sargable<'a>(graph: &Graph, e: &'a Expression) -> Option<(Variable, ScanCmp<'a>)> {
+    if budget::strict_numeric() { return None; }
     fn lit_num(e: &Expression) -> Option<f64> {
         match e {
             Expression::Literal(l) if is_numeric_dt(l) => {
@@ -6516,7 +6597,7 @@ fn extract_sargable(graph: &Graph, e: &Expression) -> Option<(Variable, ScanCmp)
     // A well-formed dateTime/dateTimeStamp/date constant: its cached-comparable value.
     // (The runtime compare through the cache is bit-identical to the per-row parse, so
     // no precision guard is needed — unlike the f64 numeric threshold above.)
-    fn lit_temp(e: &Expression) -> Option<Temporal> {
+    fn lit_temp(e: &Expression) -> Option<ExactTemporal<'_>> {
         match e {
             Expression::Literal(l) => temporal_of_lit(l),
             _ => None,
@@ -6583,7 +6664,7 @@ fn pattern_var_pos(tp: &TriplePattern, var: &Variable) -> Option<usize> {
 /// Splits FILTERs into per-pattern sargable numeric predicates (pushed into the
 /// scan of the first pattern that binds the variable) and the residual filters
 /// (applied normally afterwards).
-pub(crate) fn split_sargable(graph: &Graph, patterns: &[TriplePattern], filters: &[Expression]) -> (Vec<Option<(usize, ScanCmp)>>, Vec<Expression>) {
+pub(crate) fn split_sargable<'a>(graph: &Graph, patterns: &[TriplePattern], filters: &'a [Expression]) -> (Vec<Option<(usize, ScanCmp<'a>)>>, Vec<Expression>) {
     // zk-trace: a sargable FILTER pushed into the scan would make the scan
     // record only the POST-filter rows (the rows that PASSED), losing the
     // FILTER obligation and under-capturing the input set — the proof must
@@ -9129,7 +9210,7 @@ fn scan_to_bindings(
 
     // No LIMIT and a large relation: build the rows in parallel (order-preserving).
     #[cfg(feature = "parallel")]
-    if limit.is_none() && scan_rows.len() >= PAR_THRESHOLD {
+    if limit.is_none() && scan_rows.len() >= PAR_THRESHOLD && !budget::evaluation_capacity_active() {
         use rayon::prelude::*;
         let rows: Vec<Row> = scan_rows.par_iter().filter_map(build_row).collect();
         return Bindings { vars, rows, sorted_by };
@@ -9257,7 +9338,7 @@ fn hash_join_ref(left: &Bindings, right: &Bindings) -> Bindings {
     // JoinTable = hashbrown::HashMap<Key, Posting, FxBuildHasher>; the type inference here
     // avoids a dependency on rustc_hash::FxHashMap in the type annotation. [SONNET-4.6] sq-7d3dj.19
     #[cfg(feature = "parallel")]
-    let tables = if build.rows.len() >= PAR_THRESHOLD {
+    let tables = if build.rows.len() >= PAR_THRESHOLD && !budget::evaluation_capacity_active() {
         use rayon::prelude::*;
         let parts: Vec<u8> = build
             .rows
@@ -9273,7 +9354,7 @@ fn hash_join_ref(left: &Bindings, right: &Bindings) -> Bindings {
     // The probe is read-only over the (partitioned) table, so for a large probe side build the
     // output in parallel on native.
     #[cfg(feature = "parallel")]
-    if probe.rows.len() >= PAR_THRESHOLD {
+    if probe.rows.len() >= PAR_THRESHOLD && !budget::evaluation_capacity_active() {
         use rayon::prelude::*;
         // Budget snapshot for the workers (the installing thread's thread-local is
         // invisible to them): a worker that hits the limits stops adding to its own
@@ -10241,7 +10322,7 @@ fn try_theta_antijoin(
         // path: today the build truncates to nothing and the caller's operator-exit
         // `budget::check` raises this same message, just after the wasted work.
         #[cfg(feature = "parallel")]
-        if left_b.rows.len() >= PAR_THRESHOLD {
+        if left_b.rows.len() >= PAR_THRESHOLD && !budget::evaluation_capacity_active() {
             use rayon::prelude::*;
             let limits = budget::snapshot();
             let fns = functions::snapshot();
@@ -10814,7 +10895,7 @@ fn extend_bindings(graph: &Graph, local: &mut LocalVocab, mut b: Bindings, var: 
     // Row identity for BNODE(str)'s per-solution scoping (see ROW_SCOPE).
     let scope = b.rows.as_ptr() as usize;
     #[cfg(feature = "parallel")]
-    let resolved: Vec<Result<Id, Term>> = if b.rows.len() >= PAR_THRESHOLD {
+    let resolved: Vec<Result<Id, Term>> = if b.rows.len() >= PAR_THRESHOLD && !budget::evaluation_capacity_active() {
         use rayon::prelude::*;
         let lv: &LocalVocab = local;
         let bref = &b;
@@ -10893,7 +10974,7 @@ fn extend_bindings(graph: &Graph, local: &mut LocalVocab, mut b: Bindings, var: 
 /// variable is never bound (no column) — its key id is then `NO_ID` (unbound) for every row.
 fn build_groups(b: &Bindings, key_cols: &[Option<usize>]) -> (Vec<Key>, Vec<Vec<usize>>) {
     #[cfg(feature = "parallel")]
-    if b.rows.len() >= PAR_THRESHOLD {
+    if b.rows.len() >= PAR_THRESHOLD && !budget::evaluation_capacity_active() {
         use rayon::prelude::*;
         use std::hash::{Hash, Hasher};
         const P: usize = 64;
@@ -11004,7 +11085,7 @@ fn group_aggregate(
     // in the sequential path, one group at a time), interning and pushing each batch's rows
     // before evaluating the next, so only a bounded slice of `Value`s is live.
     #[cfg(feature = "parallel")]
-    let parallel_eval = b.rows.len() >= PAR_THRESHOLD;
+    let parallel_eval = b.rows.len() >= PAR_THRESHOLD && !budget::evaluation_capacity_active();
     #[cfg(not(feature = "parallel"))]
     let parallel_eval = false;
 
@@ -11169,9 +11250,9 @@ fn eval_aggregate(graph: &Graph, local: &LocalVocab, b: &Bindings, members: &[us
             Ok(Value::Num(Num::Int(n as i64)))
         }
         AggregateExpression::FunctionCall { name, expr, distinct } => {
-            // MIN/MAX over an all-temporal column: fold at the ID level through the
-            // temporals cache — no term materialised, no per-comparison lexical
-            // re-parse. Falls through to the general path on any non-temporal member.
+            // MIN/MAX over an all-temporal column: borrow exact lexical keys by ID.
+            // No term is materialised; parsing is linear in the literal length.
+            // Fall through to the general path on any non-temporal member.
             if let AggregateFunction::Min | AggregateFunction::Max = name {
                 let is_min = matches!(name, AggregateFunction::Min);
                 if let Some(v) = minmax_temporal(graph, local, b, members, expr, *distinct, is_min) {
@@ -11241,7 +11322,7 @@ fn eval_aggregate(graph: &Graph, local: &LocalVocab, b: &Bindings, members: &[us
                         return Ok(Value::Num(Num::Int(0))); // AVG({}) = 0 per SPARQL
                     }
                     Ok(sum_values(&vals, errored)
-                        .and_then(|s| s.binop(Num::Int(vals.len() as i64), ArithOp::Div))
+                        .and_then(|s| numeric_capacity::binop(s, Num::Int(vals.len() as i64), ArithOp::Div))
                         .map(Value::Num)
                         .unwrap_or(Value::Error))
                 }
@@ -11320,7 +11401,7 @@ fn sum_values(vals: &[Value], errored: bool) -> Option<Num> {
     }
     let mut acc = Num::Int(0);
     for v in vals {
-        acc = acc.binop(as_numeric(v)?, ArithOp::Add)?;
+        acc = numeric_capacity::binop(acc, as_numeric(v)?, ArithOp::Add)?;
     }
     Some(acc)
 }
@@ -11354,14 +11435,14 @@ fn minmax_values(mut vals: Vec<Value>, keep: Ordering) -> Value {
 }
 
 /// MIN/MAX over a variable whose group members are ALL well-formed temporal
-/// (dateTime/date) graph terms, folded at the id level through the temporals cache.
+/// (dateTime/date) graph terms, folded through exact borrowed lexical keys.
 /// `None` falls back to the general (materialise + compare_values) path: any unbound
 /// member is skipped (as the general path skips it), but a local-vocab or
 /// non-temporal member aborts the fast path entirely.
 ///
 /// Tie semantics replicate `minmax_values` exactly: the comparator is
 /// `compare_values(..).unwrap_or(Equal)` — which for two temporals IS
-/// `Temporal::cmp_t_total` (kind-first, then the timeline order extended over the
+/// `ExactTemporal::compare_total` (kind-first, then the timeline order extended over the
 /// indeterminate mixed-timezone window) — with MIN keeping the FIRST of
 /// equal members (`Iterator::min_by`) and MAX the LAST (`Iterator::max_by`); DISTINCT
 /// drops later duplicate terms first (same term ⇔ same id for graph terms), which can
@@ -11379,7 +11460,7 @@ fn minmax_temporal(
     let Expression::Variable(v) = expr else { return None };
     let col = b.col(v)?;
     let mut seen: FxHashSet<Id> = FxHashSet::default();
-    let mut best: Option<(Temporal, Id)> = None;
+    let mut best: Option<(ExactTemporal<'_>, Id)> = None;
     for &ri in members {
         let id = b.rows[ri][col];
         if id == NO_ID {
@@ -11388,7 +11469,7 @@ fn minmax_temporal(
         if is_local(id) {
             return None; // computed term: general path
         }
-        let t = graph.temporal_value(id)?; // non-temporal/ill-formed: general path
+        let t = temporal_of_id(graph, id)?; // non-temporal/ill-formed: general path
         if distinct && !seen.insert(id) {
             continue;
         }
@@ -11396,12 +11477,12 @@ fn minmax_temporal(
             None => (t, id),
             Some((bt, bid)) => {
                 // [FABLE-5] sq-wjl8i KIND-FIRST + [SONNET-4.6] sq-2k5py, both now in the
-                // shared `Temporal::cmp_t_total`, so this fold cannot drift from
+                // shared `ExactTemporal::compare_total`, so this fold cannot drift from
                 // `compare_values`: a cross-kind (dateTime vs date) pair ranks by
                 // `LiteralKind` (DateTime < Date), never lexically, and within a kind the
                 // timeline order is TOTAL (instant, then timezone presence) — the former
                 // lexical fallback for the indeterminate window was intransitive.
-                let ord = Temporal::cmp_t_total(t, bt);
+                let ord = ExactTemporal::compare_total(t, bt);
                 let replace = if is_min { ord == Ordering::Less } else { ord != Ordering::Less };
                 if replace {
                     (t, id)
@@ -11419,6 +11500,9 @@ fn minmax_temporal(
 
 /// Value comparison of two typed numerics: exact when both are int/decimal, f64 otherwise.
 fn num_compare(a: Num, c: Num) -> Option<Ordering> {
+    if budget::strict_numeric() {
+        return numeric_capacity::comparable(a, c).then(|| a.cmp_relational(c)).flatten();
+    }
     if let (Some(x), Some(y)) = (a.to_dec(), c.to_dec()) {
         if let Some(o) = x.cmp(y) {
             return Some(o);
@@ -11473,8 +11557,8 @@ fn slice_bindings(b: &mut Bindings, start: usize, length: Option<usize>) {
 /// its CACHED comparison value + id — no term materialised, no per-comparison lexical
 /// re-parse (the q09-class fix: ORDER BY dateTime was re-parsing both lexicals on every
 /// comparison of the sort). Everything else keeps the identity-preserving `Value`.
-enum SortCell {
-    Temp { t: Temporal, id: Id },
+enum SortCell<'graph> {
+    Temp { id: Id, key: ExactTemporal<'graph> },
     /// A numeric GRAPH term: the cached f64 for the fast compare PLUS its dictionary id, so
     /// an f64 TIE can be rechecked EXACTLY from the id's exact lexical — distinct integers
     /// beyond 2^53 / high-precision decimals that share one f64 (the numerics cache stores
@@ -11535,7 +11619,7 @@ enum SortCell {
 /// (same lexical kind), never a per-comparison `lit_kind` / `is_numeric_dt` /
 /// `value_str`-allocation re-derivation. [FABLE-5] sq-7d3dj.30.12
 #[inline]
-fn sort_cell_val(v: Value) -> SortCell {
+fn sort_cell_val(v: Value) -> SortCell<'static> {
     let class = v.term_class() as u8;
     // Only the literal class consults the kind rank; skip the (cheap but non-trivial)
     // `lit_kind` dispatch entirely for the non-literal classes.
@@ -11565,23 +11649,18 @@ fn sort_cell_val(v: Value) -> SortCell {
 }
 
 /// Compares two ORDER BY key cells under the lenient total order, reproducing
-/// `compare_values` exactly: two temporals by `Temporal::cmp_t_total` (kind-first, then
+/// `compare_values` exactly: two temporals by `ExactTemporal::compare_total` (kind-first, then
 /// the timeline order extended over the indeterminate mixed-timezone window — the same
 /// definition `compare_values` reaches through `CompareTerm::strict_cmp`); a temporal
 /// against any other key materialises the term lazily (rare: only mixed-type columns)
 /// and defers to `compare_values` itself.
 #[inline]
-fn cmp_sort_cells(graph: &Graph, local: &LocalVocab, a: &SortCell, c: &SortCell) -> Ordering {
+fn cmp_sort_cells(graph: &Graph, local: &LocalVocab, a: &SortCell<'_>, c: &SortCell<'_>) -> Ordering {
     match (a, c) {
-        (SortCell::Temp { t: ta, .. }, SortCell::Temp { t: tb, .. }) => {
-            // [FABLE-5] sq-wjl8i KIND-FIRST + [SONNET-4.6] sq-2k5py: both now live in the
-            // shared `Temporal::cmp_t_total` — a dateTime never value-compares against a
-            // date (`LiteralKind::DateTime < Date`), and within one kind the timeline order
-            // is TOTAL (instant, then timezone presence). The former lexical fallback for
-            // the indeterminate window is gone: it mixed timeline-decided and
-            // lexical-decided pairs inside one kind, which is intransitive. Ill-formed
-            // temporals never enter the cache, so both cells here are well-formed.
-            Temporal::cmp_t_total(*ta, *tb)
+        (SortCell::Temp { key: a, .. }, SortCell::Temp { key: b, .. }) => {
+            // [GPT-6] Keys already borrow validated lexicals; no dictionary lookup,
+            // calendar parsing, allocation, or validity assertion occurs here.
+            ExactTemporal::compare_total(*a, *b)
         }
         // Two numeric graph terms: f64 fast compare, with the EXACT tie recheck below.
         (SortCell::Num { f: fa, id: ia }, SortCell::Num { f: fb, id: ib }) => {
@@ -11774,7 +11853,7 @@ fn cmp_exact_lex_f64(lex: &str, f: f64) -> Ordering {
 }
 
 // [SONNET-4.6] sq-2k5py: the lexical-form fallback for temporal sort cells (`cmp_sort_cells_lex`)
-// is GONE — `Temporal::cmp_t_total` decides every temporal pair by value now, and a lexical
+// is GONE — `ExactTemporal::compare_total` decides every temporal pair by value now, and a lexical
 // fallback inside one temporal kind is exactly the intransitivity this bead removed.
 
 /// Materialises a temporal sort cell's term for the (rare) mixed-type-column
@@ -11861,13 +11940,16 @@ fn order_bindings(
         .collect();
 
     // The sort key cell for one compiled ORDER expression of one row. Numeric keys use the
-    // numerics cache and temporal keys the temporals cache (no per-comparison reparse); IRI
+    // numerics cache; temporal keys borrow prevalidated exact cache entries. IRI
     // terms precompute the IRI string once (SortCell::Iri) — eliminating per-comparison
     // term_of materialisation + value_str allocation for IRI ORDER BY columns; other
     // expressions fall back to identity-preserving evaluation. The plain-variable case is
     // unpacked here so the column lookup and the cache probes happen exactly once per row
     // (column index was pre-resolved above). [OPUS-4.8] sq-7d3dj.4 / [SONNET-4.6] sq-7d3dj.30.2 (Iri).
     let cell_of = |row: &Row, e: &CompiledExpr| -> Result<SortCell, String> {
+        if budget::strict_numeric() {
+            return Ok(sort_cell_val(eval_compiled(graph, local, b, row, e)?));
+        }
         if let CompiledExpr::Var(Some(c)) = e {
             let id = row[*c];
             if id != NO_ID && !is_local(id) {
@@ -11876,8 +11958,8 @@ fn order_bindings(
                     // exactly (integers > 2^53 / high-precision decimals sharing one f64).
                     return Ok(SortCell::Num { f: n, id });
                 }
-                if let Some(t) = graph.temporal_value(id) {
-                    return Ok(SortCell::Temp { t, id });
+                if let Some(key) = temporal_of_id(graph, id) {
+                    return Ok(SortCell::Temp { id, key });
                 }
                 // [FABLE-5] sq-7d3dj.30.21 — LAZY STRING-LITERAL key: a plain `xsd:string`
                 // store-literal becomes a zero-allocation `SortCell::StrId(id)` (compared via
@@ -11948,7 +12030,7 @@ fn order_bindings(
             // [SONNET-4.6] sq-7d3dj.30.23
             // Use Vec<_> to avoid the clippy::type_complexity lint on the explicit type.
             #[cfg(feature = "parallel")]
-            let mut keyed: Vec<_> = if n >= PAR_THRESHOLD {
+            let mut keyed: Vec<_> = if n >= PAR_THRESHOLD && !budget::evaluation_capacity_active() {
                 use rayon::prelude::*;
                 // sq-6aefu: mirror FILTER/BIND worker_install pattern — key_of -> eval_compiled
                 // can re-enter EXISTS / custom extension functions / spatial expressions on rayon
@@ -12029,7 +12111,7 @@ fn order_bindings(
     // Full stable sort path (unchanged). Precompute the keys (independent, read-only)
     // — in parallel for large result sets.
     #[cfg(feature = "parallel")]
-    let mut keyed: Vec<(Vec<(bool, SortCell)>, Row)> = if n >= PAR_THRESHOLD {
+    let mut keyed: Vec<(Vec<(bool, SortCell)>, Row)> = if n >= PAR_THRESHOLD && !budget::evaluation_capacity_active() {
         use rayon::prelude::*;
         // sq-6aefu: mirror FILTER/BIND worker_install pattern — same rationale as the
         // top-k path above: key_of -> eval_compiled can re-enter EXISTS / custom
@@ -12085,7 +12167,7 @@ fn order_bindings(
     // tie-break defect in this sort. So no total-order tie-breaker is added: it would cost a
     // term materialisation per tied row for an order the spec does not constrain.
     #[cfg(feature = "parallel")]
-    if keyed.len() >= PAR_THRESHOLD {
+    if keyed.len() >= PAR_THRESHOLD && !budget::evaluation_capacity_active() {
         use rayon::prelude::*;
         keyed.par_sort_by(cmp);
     } else {
@@ -12377,7 +12459,7 @@ mod lazy_strkey_differential {
     }
 
     /// The eager cell the feature-OFF path builds for a term.
-    fn eager(t: &Term) -> SortCell {
+    fn eager(t: &Term) -> SortCell<'static> {
         sort_cell_val(Value::Term(t.clone()))
     }
 
@@ -12853,7 +12935,7 @@ fn columnar_aggregate(
                                 let sum_i64 = crate::reduce::narrow_sum_to_i64(sum_i128)?;
                                 // integer / integer → Decimal (SPARQL §17.4.4.3).
                                 // Mirrors: sum_values → binop(Div) → value_to_id.
-                                let result = Num::Int(sum_i64).binop(Num::Int(count_i64), ArithOp::Div)?;
+                                let result = numeric_capacity::binop(Num::Int(sum_i64), Num::Int(count_i64), ArithOp::Div)?;
                                 value_to_id(graph, local, &Value::Num(result))
                             }
                         }
@@ -12941,7 +13023,7 @@ fn apply_filter_scalar(graph: &Graph, local: &LocalVocab, b: &mut Bindings, expr
     // Row identity for BNODE(str)'s per-solution scoping (see ROW_SCOPE).
     let scope = b.rows.as_ptr() as usize;
     #[cfg(feature = "parallel")]
-    let keep: Vec<bool> = if b.rows.len() >= PAR_THRESHOLD {
+    let keep: Vec<bool> = if b.rows.len() >= PAR_THRESHOLD && !budget::evaluation_capacity_active() {
         use rayon::prelude::*;
         // The extension-function registry and the dataset view are thread-local:
         // snapshot them here and re-install per worker item (free when neither is
@@ -13280,20 +13362,31 @@ fn ebv(v: &Value) -> Option<bool> {
     }
 }
 
+/// [GPT-6] General expression operands share the constructor capacity boundary.
+fn checked_term_value(term: Term) -> Result<Value, String> {
+    if let Term::Literal(literal) = &term {
+        budget::check_temporal(literal.value(), literal.datatype().as_str())?;
+    }
+    Ok(Value::Term(term))
+}
+
 fn eval_expr(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], e: &Expression) -> Result<Value, String> {
     use Expression::*;
     match e {
-        Variable(v) if local.correlation.contains_key(v) => Ok(Value::Term(local.correlation[v].clone())),
+        Variable(v) if local.correlation.contains_key(v) => checked_term_value(local.correlation[v].clone()),
         Variable(v) => match b.col(v) {
             // Always return the original term so term identity is preserved
             // (sameTerm, BIND passthrough, STR, etc.). The numeric fast path that
             // skips this materialisation lives in `eval_numeric`, used only by the
             // arithmetic / comparison operators where only the value matters.
-            Some(c) if row[c] != NO_ID => Ok(Value::Term(term_of(graph, local, row[c]).unwrap())),
+            Some(c) if row[c] != NO_ID => checked_term_value(term_of(graph, local, row[c]).unwrap()),
             _ => Ok(Value::Unbound),
         },
         NamedNode(n) => Ok(Value::Term(Term::NamedNode(n.clone()))),
-        Literal(l) => Ok(Value::Term(Term::Literal(l.clone()))),
+        Literal(l) => {
+            budget::check_temporal(l.value(), l.datatype().as_str())?;
+            Ok(Value::Term(Term::Literal(l.clone())))
+        },
         And(a, c) => {
             // SPARQL 3-valued logic, short-circuiting: false dominates, so once the
             // left is false we return false WITHOUT evaluating the right (which may be
@@ -13331,12 +13424,12 @@ fn eval_expr(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], e: &Ex
         Subtract(a, c) => arith(graph, local, b, row, a, c, ArithOp::Sub),
         Multiply(a, c) => arith(graph, local, b, row, a, c, ArithOp::Mul),
         Divide(a, c) => arith(graph, local, b, row, a, c, ArithOp::Div),
-        UnaryPlus(a) => eval_expr(graph, local, b, row, a),
+        UnaryPlus(a) => Ok(unary_plus(eval_expr(graph, local, b, row, a)?)),
         UnaryMinus(a) => {
             // Typed negation: the result keeps the argument's (promoted) numeric
             // datatype; a non-numeric operand is a type error.
             let v = eval_expr(graph, local, b, row, a)?;
-            Ok(as_numeric(&v).map(|n| Value::Num(n.neg())).unwrap_or(Value::Error))
+            Ok(as_numeric(&v).and_then(|n| numeric_capacity::unary(n, Num::neg)).map(Value::Num).unwrap_or(Value::Error))
         }
         Bound(v) => Ok(Value::Bool(local.correlation.contains_key(v)
             || b.col(v).map(|c| row[c] != NO_ID).unwrap_or(false))),
@@ -13538,12 +13631,12 @@ fn eval_numeric(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], e: 
 
 /// Fast temporal (xsd:dateTime / xsd:dateTimeStamp / xsd:date) evaluation that never
 /// materialises a term: a variable bound to a graph term resolves through the
-/// load-time `temporals` cache (O(1), no lexical re-parse); a constant literal and a
-/// BIND-computed (local-vocab) term parse once here. Returns `None` for anything
+/// borrowed dictionary lexical; constants and BIND-computed terms borrow their
+/// original literal too. Parsing is linear in the literal length. Returns `None` for anything
 /// non-temporal or ill-formed, so the caller falls back to the general path (which
 /// yields the exact type-error semantics). Used only where the VALUE matters
 /// (comparison operators); term identity is never needed there.
-fn eval_temporal(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], e: &Expression) -> Option<Temporal> {
+fn eval_temporal<'a>(graph: &'a Graph, local: &'a LocalVocab, b: &Bindings, row: &[Id], e: &'a Expression) -> Option<ExactTemporal<'a>> {
     use Expression::*;
     match e {
         Variable(v) if local.correlation.contains_key(v) => None,
@@ -13556,7 +13649,7 @@ fn eval_temporal(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], e:
                 // Computed values are rare; parse through the local vocab term.
                 temporal_of_term(local.term(id))
             } else {
-                graph.temporal_value(id)
+                temporal_of_id(graph, id)
             }
         }
         Literal(l) => temporal_of_lit(l),
@@ -13565,18 +13658,32 @@ fn eval_temporal(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], e:
 }
 
 /// The temporal value of a term, if it is a well-formed dateTime/date literal.
-fn temporal_of_term(t: &Term) -> Option<Temporal> {
+fn temporal_of_term(t: &Term) -> Option<ExactTemporal<'_>> {
     match t {
         Term::Literal(l) => temporal_of_lit(l),
         _ => None,
     }
 }
 
-fn temporal_of_lit(l: &Literal) -> Option<Temporal> {
+fn temporal_of_lit(l: &Literal) -> Option<ExactTemporal<'_>> {
     if l.language().is_some() {
         return None;
     }
-    Temporal::of_lit(l.value(), l.datatype().as_str())
+    budget::check_temporal(l.value(), l.datatype().as_str()).ok()?;
+    ExactTemporal::of_lit(l.value(), l.datatype().as_str())
+}
+
+/// [GPT-6] Stored temporal values obey the same evaluation domain as constructors.
+fn temporal_of_id(graph: &Graph, id: Id) -> Option<ExactTemporal<'_>> {
+    if dict::is_inline(id) { return None; }
+    // Capacity checks remain input-based even for malformed/out-of-cache values.
+    // Native unbounded evaluation avoids dictionary/year parsing on the hot path.
+    if budget::temporal_capacity_active() {
+        if let dict::TermParts::Lit { value, datatype, .. } = graph.dict.term_parts(id) {
+            budget::check_temporal(value, datatype).ok()?;
+        }
+    }
+    graph.exact_temporal_value(id)
 }
 
 /// The lexical form of an expression IF it is an exact-valued numeric operand (an
@@ -13610,14 +13717,18 @@ fn eval_exact_lexical(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id
     }
 }
 
+// [GPT-6] Every exact lexical shortcut validates the original RDF datatype first.
+fn exact_lexical_of_literal(l: &Literal) -> Option<&str> {
+    let datatype = l.datatype();
+    (l.language().is_none()
+        && (sparq_core::is_integer_datatype(datatype.as_str()) || datatype == xsd::DECIMAL)
+        && sparq_core::numeric_literal_valid(l.value(), datatype.as_str()))
+        .then_some(l.value())
+}
+
 fn exact_lexical_of_term(t: &Term) -> Option<String> {
     match t {
-        Term::Literal(l)
-            if l.language().is_none()
-                && (sparq_core::is_integer_datatype(l.datatype().as_str()) || l.datatype() == xsd::DECIMAL) =>
-        {
-            Some(l.value().to_string())
-        }
+        Term::Literal(l) => exact_lexical_of_literal(l).map(str::to_owned),
         _ => None,
     }
 }
@@ -13655,7 +13766,7 @@ fn eval_compiled_numeric(graph: &Graph, local: &LocalVocab, row: &[Id], e: &Comp
 }
 
 /// Fast temporal evaluation on a pre-compiled expression. Mirrors [`eval_temporal`]. [OPUS-4.8] sq-7d3dj.4.
-fn eval_compiled_temporal(graph: &Graph, local: &LocalVocab, row: &[Id], e: &CompiledExpr) -> Option<Temporal> {
+fn eval_compiled_temporal<'a>(graph: &'a Graph, local: &'a LocalVocab, row: &[Id], e: &'a CompiledExpr) -> Option<ExactTemporal<'a>> {
     use CompiledExpr::*;
     match e {
         Var(col) => {
@@ -13666,7 +13777,7 @@ fn eval_compiled_temporal(graph: &Graph, local: &LocalVocab, row: &[Id], e: &Com
             } else if is_local(id) {
                 temporal_of_term(local.term(id))
             } else {
-                graph.temporal_value(id)
+                temporal_of_id(graph, id)
             }
         }
         Literal(l) => temporal_of_lit(l),
@@ -13689,9 +13800,7 @@ fn eval_compiled_dec(graph: &Graph, local: &LocalVocab, row: &[Id], e: &Compiled
                 Dec::parse(&graph.exact_numeric_lexical(id)?)
             }
         }
-        Literal(l) if sparq_core::is_integer_datatype(l.datatype().as_str()) || l.datatype() == xsd::DECIMAL => {
-            Dec::parse(l.value())
-        }
+        Literal(l) => Dec::parse(exact_lexical_of_literal(l)?),
         Add(a, d) => eval_compiled_dec(graph, local, row, a)?.checked_add(eval_compiled_dec(graph, local, row, d)?),
         Subtract(a, d) => {
             eval_compiled_dec(graph, local, row, a)?.checked_sub(eval_compiled_dec(graph, local, row, d)?)
@@ -13723,17 +13832,7 @@ fn eval_compiled_exact_lexical(graph: &Graph, local: &LocalVocab, row: &[Id], e:
                 graph.exact_numeric_lexical(id)
             }
         }
-        Literal(l) => {
-            // Avoid a `Term` allocation: check directly whether the literal has an exact
-            // integer/decimal lexical form (same condition as `exact_lexical_of_term`).
-            if l.language().is_none()
-                && (sparq_core::is_integer_datatype(l.datatype().as_str()) || l.datatype() == xsd::DECIMAL)
-            {
-                Some(l.value().to_string())
-            } else {
-                None
-            }
-        }
+        Literal(l) => exact_lexical_of_literal(l).map(str::to_owned),
         UnaryPlus(a) => eval_compiled_exact_lexical(graph, local, row, a),
         UnaryMinus(a) => eval_compiled_exact_lexical(graph, local, row, a).map(|s| match s.strip_prefix('-') {
             Some(r) => r.to_string(),
@@ -13824,9 +13923,7 @@ fn eval_dec(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], e: &Exp
                 Dec::parse(&graph.exact_numeric_lexical(id)?)
             }
         }
-        Literal(l) if sparq_core::is_integer_datatype(l.datatype().as_str()) || l.datatype() == xsd::DECIMAL => {
-            Dec::parse(l.value())
-        }
+        Literal(l) => Dec::parse(exact_lexical_of_literal(l)?),
         Add(a, c) => eval_dec(graph, local, b, row, a)?.checked_add(eval_dec(graph, local, b, row, c)?),
         Subtract(a, c) => eval_dec(graph, local, b, row, a)?.checked_sub(eval_dec(graph, local, b, row, c)?),
         Multiply(a, c) => eval_dec(graph, local, b, row, a)?.checked_mul(eval_dec(graph, local, b, row, c)?),
@@ -13845,6 +13942,13 @@ fn eval_dec(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], e: &Exp
 /// turns into "excluded". (Distinct from the lenient total order `compare_values`
 /// used by ORDER BY / MIN / MAX, which must order across every type.)
 fn cmp_expr(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], a: &Expression, c: &Expression, f: impl Fn(Ordering) -> bool) -> Result<Value, String> {
+    if budget::strict_numeric() {
+        let (x, y) = (eval_expr(graph, local, b, row, a)?, eval_expr(graph, local, b, row, c)?);
+        if let (Some(a), Some(b)) = (as_numeric(&x), as_numeric(&y)) {
+            if a.is_nan() || b.is_nan() { return Ok(Value::Bool(false)); }
+        }
+        return Ok(value_compare_strict(&x, &y).map(|o| Value::Bool(f(o))).unwrap_or(Value::Error));
+    }
     // EXACT path: integer/decimal arithmetic (`+ - *`) must not round through f64, which
     // can flip an ordering (`0.1 + 0.2` < `0.3` in f64). Only attempted when arithmetic is
     // present (the common, arithmetic-free comparison keeps the f64 fast path below).
@@ -13871,11 +13975,11 @@ fn cmp_expr(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], a: &Exp
         }
         return Ok(Value::Bool(x.partial_cmp(&y).map(&f).unwrap_or(false)));
     }
-    // Fast path: both sides temporal -> compare cached/parsed timeline values, no term
+    // Fast path: both sides temporal -> compare exact borrowed timeline values, no term
     // materialised. `None` from `cmp_t` is exactly the strict path's type-error cases
     // (cross-family dateTime vs date, or mixed timezone presence inside the ±14h window).
     if let (Some(ta), Some(tb)) = (eval_temporal(graph, local, b, row, a), eval_temporal(graph, local, b, row, c)) {
-        return Ok(match Temporal::cmp_t(ta, tb) {
+        return Ok(match ExactTemporal::compare(ta, tb) {
             Some(o) => Value::Bool(f(o)),
             None => Value::Error,
         });
@@ -13889,6 +13993,10 @@ fn cmp_expr(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], a: &Exp
 
 /// SPARQL `=` (and, negated, `!=`). See [`values_equal`].
 fn equal_expr(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], a: &Expression, c: &Expression) -> Result<Value, String> {
+    if budget::strict_numeric() {
+        let (x, y) = (eval_expr(graph, local, b, row, a)?, eval_expr(graph, local, b, row, c)?);
+        return Ok(values_equal(&x, &y).map(Value::Bool).unwrap_or(Value::Error));
+    }
     // EXACT integer/decimal arithmetic equality (see `cmp_expr`) — `0.1 + 0.2 = 0.3`.
     if expr_has_arith(a) || expr_has_arith(c) {
         if let (Some(da), Some(db)) = (eval_dec(graph, local, b, row, a), eval_dec(graph, local, b, row, c)) {
@@ -13917,7 +14025,7 @@ fn equal_expr(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], a: &E
         if ta.kind != tb.kind {
             return Ok(Value::Bool(false));
         }
-        return Ok(match Temporal::cmp_t(ta, tb) {
+        return Ok(match ExactTemporal::compare(ta, tb) {
             Some(o) => Value::Bool(o == Ordering::Equal),
             None => Value::Error,
         });
@@ -13939,9 +14047,9 @@ enum LitKind<'a> {
     /// A boolean-datatype operand; `None` = ill-formed lexical.
     Bool(Option<bool>),
     /// xsd:dateTime / xsd:dateTimeStamp on the timeline; `None` = ill-formed.
-    DateTime(Option<Timeline>),
+    DateTime(Option<ExactTimeline<'a>>),
     /// xsd:date on the timeline (midnight); `None` = ill-formed.
-    Date(Option<Timeline>),
+    Date(Option<ExactTimeline<'a>>),
     /// Another XSD datatype (time, duration, gYear, …): (datatype IRI, lexical).
     OtherXsd(&'a str, &'a str),
     /// Language-tagged: (lowercased tag, value).
@@ -13961,15 +14069,15 @@ fn lit_kind(v: &Value) -> LitKind<'_> {
             }
             let dt = l.datatype();
             if is_numeric_dt(l) {
-                LitKind::Num(Num::of_literal(l))
+                LitKind::Num(numeric_capacity::operand(l))
             } else if dt == xsd::STRING {
                 LitKind::Str(l.value())
             } else if dt == xsd::BOOLEAN {
                 LitKind::Bool(as_bool_val(v))
             } else if dt == xsd::DATE_TIME || dt == xsd::DATE_TIME_STAMP {
-                LitKind::DateTime(Timeline::parse_datetime(l.value()))
+                LitKind::DateTime(temporal_of_lit(l).map(|value| value.timeline))
             } else if dt == xsd::DATE {
-                LitKind::Date(Timeline::parse_date(l.value()))
+                LitKind::Date(temporal_of_lit(l).map(|value| value.timeline))
             } else if dt.as_str().starts_with("http://www.w3.org/2001/XMLSchema#") {
                 LitKind::OtherXsd(dt.as_str(), l.value())
             } else {
@@ -13980,8 +14088,8 @@ fn lit_kind(v: &Value) -> LitKind<'_> {
     }
 }
 
-// `Timeline` (the parsed xsd:date/dateTime value) and its comparison rules live in
-// `sparq_core::temporal`, shared with the graph's load-time `temporals` cache.
+// Exact borrowed date/dateTime keys live in core; approximate load-time epoch
+// caches remain available separately for representation consumers.
 
 /// SPARQL `=` (and, negated, `!=`) as a three-valued result: `Some(true/false)` for a
 /// decided comparison, `None` for a type error. OPEN-WORLD rules: identical terms are
@@ -13991,6 +14099,13 @@ fn lit_kind(v: &Value) -> LitKind<'_> {
 /// ill-formed lexicals, cross-family pairs — is a TYPE ERROR (`"a"^^ex:dt != "b"^^ex:other`
 /// filters the row out rather than evaluating to true).
 fn values_equal(x: &Value, y: &Value) -> Option<bool> {
+    if budget::strict_numeric() {
+        // Equality of identical terms may otherwise bypass every numeric consumer.
+        if let (Some(a), Some(b)) = (as_numeric(x), as_numeric(y)) {
+            // NaN is not numerically equal to itself, even with identical RDF terms.
+            return Some(num_compare(a, b) == Some(Ordering::Equal));
+        }
+    }
     if matches!(x, Value::Unbound | Value::Error) || matches!(y, Value::Unbound | Value::Error) {
         return None;
     }
@@ -14021,8 +14136,8 @@ fn values_equal(x: &Value, y: &Value) -> Option<bool> {
         (Str(a), Str(b)) => Some(a == b),
         (Bool(Some(a)), Bool(Some(b))) => Some(a == b),
         (Bool(_), Bool(_)) => None,
-        (DateTime(Some(a)), DateTime(Some(b))) => Timeline::cmp_tl(a, b).map(|o| o == Ordering::Equal),
-        (Date(Some(a)), Date(Some(b))) => Timeline::cmp_tl(a, b).map(|o| o == Ordering::Equal),
+        (DateTime(Some(a)), DateTime(Some(b))) => ExactTimeline::compare(a, b).map(|o| o == Ordering::Equal),
+        (Date(Some(a)), Date(Some(b))) => ExactTimeline::compare(a, b).map(|o| o == Ordering::Equal),
         (DateTime(_), DateTime(_)) | (Date(_), Date(_)) => None,
         // date and dateTime values are disjoint -> known different.
         (DateTime(_), Date(_)) | (Date(_), DateTime(_)) => Some(false),
@@ -14044,8 +14159,8 @@ fn value_compare_strict(x: &Value, y: &Value) -> Option<Ordering> {
         (Num(Some(a)), Num(Some(b))) => num_compare(a, b),
         (Str(a), Str(b)) => Some(a.cmp(b)),
         (Bool(Some(a)), Bool(Some(b))) => Some(a.cmp(&b)),
-        (DateTime(Some(a)), DateTime(Some(b))) => Timeline::cmp_tl(a, b),
-        (Date(Some(a)), Date(Some(b))) => Timeline::cmp_tl(a, b),
+        (DateTime(Some(a)), DateTime(Some(b))) => ExactTimeline::compare(a, b),
+        (Date(Some(a)), Date(Some(b))) => ExactTimeline::compare(a, b),
         // Same language tag: compare values (the suites' lenient extension).
         (Lang(t1, v1), Lang(t2, v2)) if t1 == t2 => Some(v1.cmp(v2)),
         // Same other-XSD datatype: lexical order (correct for time, gYear, …).
@@ -14062,7 +14177,7 @@ fn value_compare_strict(x: &Value, y: &Value) -> Option<Ordering> {
 fn temporal_total_cmp(x: &Value, y: &Value) -> Option<Ordering> {
     match (lit_kind(x), lit_kind(y)) {
         (LitKind::DateTime(Some(a)), LitKind::DateTime(Some(b)))
-        | (LitKind::Date(Some(a)), LitKind::Date(Some(b))) => Some(Timeline::cmp_tl_total(a, b)),
+        | (LitKind::Date(Some(a)), LitKind::Date(Some(b))) => Some(ExactTimeline::compare_total(a, b)),
         _ => None,
     }
 }
@@ -14109,7 +14224,7 @@ fn or3(x: Option<bool>, y: Option<bool>) -> Value {
 fn arith(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], a: &Expression, c: &Expression, op: ArithOp) -> Result<Value, String> {
     let (x, y) = (eval_expr(graph, local, b, row, a)?, eval_expr(graph, local, b, row, c)?);
     Ok(match (as_numeric(&x), as_numeric(&y)) {
-        (Some(p), Some(q)) => p.binop(q, op).map(Value::Num).unwrap_or(Value::Error),
+        (Some(p), Some(q)) => numeric_capacity::binop(p, q, op).map(Value::Num).unwrap_or(Value::Error),
         _ => Value::Error,
     })
 }
@@ -14120,12 +14235,42 @@ fn arith(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], a: &Expres
 fn as_numeric(v: &Value) -> Option<Num> {
     match v {
         Value::Num(n) => Some(*n),
-        Value::Term(Term::Literal(l)) => Num::of_literal(l),
+        Value::Term(Term::Literal(l)) => numeric_capacity::operand(l),
+        _ => None,
+    }
+}
+
+// [GPT-6] XPath numeric-unary-plus returns its numeric operand unchanged.
+// Validate the value space without imposing the arithmetic representation bound.
+fn unary_plus(value: Value) -> Value {
+    match &value {
+        Value::Num(_) => value,
+        Value::Term(Term::Literal(l))
+            if sparq_core::numeric_literal_valid(l.value(), l.datatype().as_str()) => value,
+        _ => Value::Error,
+    }
+}
+
+// [GPT-6] SUBSTR's SPARQL signature requires integer operands, not numeric coercion.
+fn integer_argument(v: &Value) -> Option<i128> {
+    match v {
+        Value::Num(Num::Int(n)) => Some(i128::from(*n)),
+        Value::Term(Term::Literal(l))
+            if l.language().is_none()
+                && sparq_core::is_integer_datatype(l.datatype().as_str())
+                && sparq_core::numeric_literal_valid(l.value(), l.datatype().as_str()) =>
+        {
+            numeric_capacity::representable(true,
+                l.value().trim_matches([' ', '\t', '\r', '\n']).parse().ok())
+        }
         _ => None,
     }
 }
 
 fn as_num(v: &Value) -> Option<f64> {
+    if budget::strict_numeric() && !matches!(v, Value::Bool(_)) {
+        return as_numeric(v).map(Num::f64);
+    }
     match v {
         Value::Num(n) => Some(n.f64()),
         Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
@@ -14240,7 +14385,7 @@ impl CompareTerm for Value {
         // XPath promoted semantics via `num_compare`; this total order refines only
         // their ties. `None` (a lexical beyond the exact tower) keeps the tie.
         match (as_numeric(self), as_numeric(other)) {
-            (Some(a), Some(b)) => Some(a.cmp_total(b)),
+            (Some(a), Some(b)) => numeric_capacity::comparable(a, b).then(|| a.cmp_total(b)),
             _ => None,
         }
     }
@@ -14289,6 +14434,11 @@ impl CompareTerm for Value {
 /// vs a documented extension). Relational `<` / `=` semantics are UNTOUCHED.
 #[inline]
 fn compare_values(x: &Value, y: &Value) -> Option<Ordering> {
+    if budget::strict_numeric() {
+        if let (Some(a), Some(b)) = (as_numeric(x), as_numeric(y)) {
+            return numeric_capacity::comparable(a, b).then(|| a.cmp_total(b));
+        }
+    }
     compare_terms(x, y)
 }
 
@@ -14401,25 +14551,25 @@ fn eval_function_inner<E: Fn(usize) -> Result<Value, String>>(
                 Some(x) => x,
                 None => return Ok(Value::Error),
             };
-            let start = match as_num(&ev(1)?) {
-                Some(n) => n as i64,
+            let start = match integer_argument(&ev(1)?) {
+                Some(n) => n,
                 None => return Ok(Value::Error),
             };
             // [GPT-6] XPath positions satisfy start <= position < start+length.
             // Clipping the start before adding length incorrectly extends slices
             // that start before position one. Widen before addition to avoid overflow.
             let end = if nargs >= 3 {
-                let len = match as_num(&ev(2)?) {
-                    Some(n) => n.max(0.0) as usize,
+                let len = match integer_argument(&ev(2)?) {
+                    Some(n) => n.max(0),
                     None => return Ok(Value::Error),
                 };
-                i128::from(start) + len as i128
+                start.saturating_add(len)
             } else {
                 i128::MAX
             };
-            let out = s.chars().enumerate().filter_map(|(i, ch)| {
+            let out = s.chars().enumerate().take_while(|(i, _)| (*i as i128 + 1) < end).filter_map(|(i, ch)| {
                 let position = i as i128 + 1;
-                (position >= i128::from(start) && position < end).then_some(ch)
+                (position >= start && position < end).then_some(ch)
             }).collect();
             lit_with_lang(out, lang.as_deref())
         }
@@ -14462,14 +14612,15 @@ fn eval_function_inner<E: Fn(usize) -> Result<Value, String>>(
         },
         // ABS/CEIL/FLOOR/ROUND preserve the argument's numeric DATATYPE
         // (CEIL("2.5"^^xsd:decimal) is "3"^^xsd:decimal, not xsd:integer).
-        F::Abs => as_numeric(&ev(0)?).map(|n| Value::Num(n.abs())).unwrap_or(Value::Error),
-        F::Ceil => as_numeric(&ev(0)?).map(|n| Value::Num(n.ceil())).unwrap_or(Value::Error),
-        F::Floor => as_numeric(&ev(0)?).map(|n| Value::Num(n.floor())).unwrap_or(Value::Error),
-        F::Round => as_numeric(&ev(0)?).map(|n| Value::Num(n.round())).unwrap_or(Value::Error),
+        F::Abs => as_numeric(&ev(0)?).and_then(|n| numeric_capacity::unary(n, Num::abs)).map(Value::Num).unwrap_or(Value::Error),
+        F::Ceil => as_numeric(&ev(0)?).and_then(|n| numeric_capacity::unary(n, Num::ceil)).map(Value::Num).unwrap_or(Value::Error),
+        F::Floor => as_numeric(&ev(0)?).and_then(|n| numeric_capacity::unary(n, Num::floor)).map(Value::Num).unwrap_or(Value::Error),
+        F::Round => as_numeric(&ev(0)?).and_then(|n| numeric_capacity::unary(n, Num::round)).map(Value::Num).unwrap_or(Value::Error),
         // STRDT(lexical, datatypeIRI) -> typed literal. The first argument must be a
         // SIMPLE literal (= xsd:string in RDF 1.1) — lang-tagged / typed input errors.
         F::StrDt => match (str_lit(&ev(0)?), ev(1)?) {
             (Some((lex, None)), Value::Term(Term::NamedNode(dt))) => {
+                budget::check_temporal(&lex, dt.as_str())?;
                 Value::Term(Term::Literal(Literal::new_typed_literal(lex, dt)))
             }
             _ => Value::Error,
@@ -14706,6 +14857,9 @@ fn eval_function_inner<E: Fn(usize) -> Result<Value, String>>(
                 vals.push(ev(i)?);
             }
             if vals.len() == 1 {
+                if let Value::Term(Term::Literal(literal)) = &vals[0] {
+                    budget::check_temporal(literal.value(), nn.as_str())?;
+                }
                 if let Some(out) = eval_cast(nn.as_str(), &vals[0]) {
                     return Ok(out);
                 }
@@ -14724,7 +14878,12 @@ fn eval_function_inner<E: Fn(usize) -> Result<Value, String>>(
                     }
                 }
                 return Ok(match f(&terms) {
-                    Ok(t) => Value::Term(t),
+                    Ok(t) => {
+                        if let Term::Literal(literal) = &t {
+                            budget::check_temporal(literal.value(), literal.datatype().as_str())?;
+                        }
+                        Value::Term(t)
+                    }
                     Err(_) => Value::Error,
                 });
             }
@@ -14765,6 +14924,13 @@ fn cmp_compiled(
     c: &CompiledExpr,
     f: impl Fn(Ordering) -> bool,
 ) -> Result<Value, String> {
+    if budget::strict_numeric() {
+        let (x, y) = (eval_compiled(graph, local, b, row, a)?, eval_compiled(graph, local, b, row, c)?);
+        if let (Some(a), Some(b)) = (as_numeric(&x), as_numeric(&y)) {
+            if a.is_nan() || b.is_nan() { return Ok(Value::Bool(false)); }
+        }
+        return Ok(value_compare_strict(&x, &y).map(|o| Value::Bool(f(o))).unwrap_or(Value::Error));
+    }
     if compiled_expr_has_arith(a) || compiled_expr_has_arith(c) {
         if let (Some(da), Some(db)) =
             (eval_compiled_dec(graph, local, row, a), eval_compiled_dec(graph, local, row, c))
@@ -14792,7 +14958,7 @@ fn cmp_compiled(
     if let (Some(ta), Some(tb)) =
         (eval_compiled_temporal(graph, local, row, a), eval_compiled_temporal(graph, local, row, c))
     {
-        return Ok(match Temporal::cmp_t(ta, tb) {
+        return Ok(match ExactTemporal::compare(ta, tb) {
             Some(o) => Value::Bool(f(o)),
             None => Value::Error,
         });
@@ -14850,6 +15016,10 @@ fn equal_compiled(
     a: &CompiledExpr,
     c: &CompiledExpr,
 ) -> Result<Value, String> {
+    if budget::strict_numeric() {
+        let (x, y) = (eval_compiled(graph, local, b, row, a)?, eval_compiled(graph, local, b, row, c)?);
+        return Ok(values_equal(&x, &y).map(Value::Bool).unwrap_or(Value::Error));
+    }
     // [FABLE-5] (sq-7d3dj.30.11) Fast path (b): EQUAL ids of ANY kind are the SAME term (the
     // canonicalising dict gives each term one id), so `=` is `true` — mirroring the `p == q`
     // sameTerm short-circuit `values_equal` takes today, which is safe even for ill-typed
@@ -14893,7 +15063,7 @@ fn equal_compiled(
         if ta.kind != tb.kind {
             return Ok(Value::Bool(false));
         }
-        return Ok(match Temporal::cmp_t(ta, tb) {
+        return Ok(match ExactTemporal::compare(ta, tb) {
             Some(o) => Value::Bool(o == Ordering::Equal),
             None => Value::Error,
         });
@@ -14916,7 +15086,7 @@ fn arith_compiled(
 ) -> Result<Value, String> {
     let (x, y) = (eval_compiled(graph, local, b, row, a)?, eval_compiled(graph, local, b, row, c)?);
     Ok(match (as_numeric(&x), as_numeric(&y)) {
-        (Some(p), Some(q)) => p.binop(q, op).map(Value::Num).unwrap_or(Value::Error),
+        (Some(p), Some(q)) => numeric_capacity::binop(p, q, op).map(Value::Num).unwrap_or(Value::Error),
         _ => Value::Error,
     })
 }
@@ -14934,14 +15104,17 @@ fn eval_compiled(
     use CompiledExpr::*;
     match e {
         Var(col) => match col {
-            Some(c) if row[*c] != NO_ID => Ok(Value::Term(term_of(graph, local, row[*c]).unwrap())),
+            Some(c) if row[*c] != NO_ID => checked_term_value(term_of(graph, local, row[*c]).unwrap()),
             _ => Ok(Value::Unbound),
         },
-        Captured(term) => Ok(Value::Term(term.clone())),
+        Captured(term) => checked_term_value(term.clone()),
         CapturedBound => Ok(Value::Bool(true)),
         BoundCol(col) => Ok(Value::Bool(col.map(|c| row[c] != NO_ID).unwrap_or(false))),
         NamedNode(n) => Ok(Value::Term(Term::NamedNode(n.clone()))),
-        Literal(l) => Ok(Value::Term(Term::Literal(l.clone()))),
+        Literal(l) => {
+            budget::check_temporal(l.value(), l.datatype().as_str())?;
+            Ok(Value::Term(Term::Literal(l.clone())))
+        },
         And(a, c) => {
             let x = ebv3(&eval_compiled(graph, local, b, row, a)?);
             if x == Some(false) {
@@ -14977,10 +15150,10 @@ fn eval_compiled(
         Subtract(a, c) => arith_compiled(graph, local, b, row, a, c, ArithOp::Sub),
         Multiply(a, c) => arith_compiled(graph, local, b, row, a, c, ArithOp::Mul),
         Divide(a, c) => arith_compiled(graph, local, b, row, a, c, ArithOp::Div),
-        UnaryPlus(a) => eval_compiled(graph, local, b, row, a),
+        UnaryPlus(a) => Ok(unary_plus(eval_compiled(graph, local, b, row, a)?)),
         UnaryMinus(a) => {
             let v = eval_compiled(graph, local, b, row, a)?;
-            Ok(as_numeric(&v).map(|n| Value::Num(n.neg())).unwrap_or(Value::Error))
+            Ok(as_numeric(&v).and_then(|n| numeric_capacity::unary(n, Num::neg)).map(Value::Num).unwrap_or(Value::Error))
         }
         If(cond, t, f) => match ebv3(&eval_compiled(graph, local, b, row, cond)?) {
             Some(true) => eval_compiled(graph, local, b, row, t),
@@ -15035,7 +15208,8 @@ fn dec_trim_min1(d: Dec) -> String {
         d.scale -= 1;
     }
     if d.scale == 0 {
-        d = Dec { mant: d.mant.saturating_mul(10), scale: 1 };
+        // Adding a lexical fraction digit must not overflow the numeric mantissa.
+        return format!("{}.0", d.mant);
     }
     d.lexical()
 }
@@ -15061,7 +15235,8 @@ fn eval_cast(target: &str, v: &Value) -> Option<Value> {
     // (language-tagged literals and non-string types are NOT castable as strings).
     let src_str = || match v {
         Value::Term(Term::Literal(l)) if l.language().is_none() && l.datatype() == xsd::STRING => {
-            Some(l.value().trim().to_string())
+            // [GPT-6] XSD whitespace collapse excludes Unicode spaces such as NBSP.
+            Some(l.value().trim_matches([' ', '\t', '\r', '\n']).to_string())
         }
         _ => None,
     };
@@ -15139,7 +15314,8 @@ fn eval_cast(target: &str, v: &Value) -> Option<Value> {
                     // truncation is zero. Reject an out-of-range integer instead
                     // of wrapping its i128 mantissa through an `as i64` cast.
                     let integer = 10i128.checked_pow(d.scale).map_or(0, |p| d.mant / p);
-                    i64::try_from(integer).map(|i| Value::Num(Num::Int(i))).unwrap_or(Value::Error)
+                    numeric_capacity::representable(true, i64::try_from(integer).ok())
+                        .map(|i| Value::Num(Num::Int(i))).unwrap_or(Value::Error)
                 },
                 Num::Float(_) | Num::Double(_) => {
                     let f = n.f64();
@@ -15149,12 +15325,15 @@ fn eval_cast(target: &str, v: &Value) -> Option<Value> {
                     if (lower..-lower).contains(&f) {
                         Value::Num(Num::Int(f.trunc() as i64))
                     } else {
+                        let _ = numeric_capacity::representable::<()>(f.is_finite(), None);
                         Value::Error
                     }
                 }
             });
         }
-        return Some(src_str().and_then(|s| s.parse::<i64>().ok()).map(|i| Value::Num(Num::Int(i))).unwrap_or(Value::Error));
+        return Some(src_str().and_then(|s| numeric_capacity::representable(
+            sparq_core::numeric_literal_valid(&s, xsd::INTEGER.as_str()), s.parse::<i64>().ok()))
+            .map(|i| Value::Num(Num::Int(i))).unwrap_or(Value::Error));
     }
     if is_dec {
         if let Some(b) = as_bool_val(v) {
@@ -15181,7 +15360,7 @@ fn eval_cast(target: &str, v: &Value) -> Option<Value> {
         // fraction digit ("+33.3300" -> "33.33", "0" -> "0.0").
         return Some(
             src_str()
-                .and_then(|s| Dec::parse_lexical(&s))
+                .and_then(|s| numeric_capacity::decimal_cast(&s))
                 .map(|d| typed(dec_trim_min1(d), xsd::DECIMAL))
                 .unwrap_or(Value::Error),
         );
@@ -15412,6 +15591,7 @@ fn datetime_arg_tz(v: &Value) -> Option<String> {
         }
         _ => return None,
     };
+    temporal_of_lit(l)?; // Shared datatype validation includes dateTimeStamp's required timezone.
     let s = l.value().trim_matches([' ', '\t', '\r', '\n']);
     parse_datetime(s)?; // lexical shape check
     let (_, time) = s.split_once('T')?;
@@ -15564,7 +15744,10 @@ fn datetime_field(v: &Value, idx: usize) -> Value {
     // whose text happens to look like a timestamp.
     let s = match v {
         Value::Term(Term::Literal(l))
-            if l.datatype() == xsd::DATE_TIME || l.datatype() == xsd::DATE_TIME_STAMP => l.value().trim_matches([' ', '\t', '\r', '\n']),
+            if l.datatype() == xsd::DATE_TIME || l.datatype() == xsd::DATE_TIME_STAMP => {
+                if temporal_of_lit(l).is_none() { return Value::Error; }
+                l.value().trim_matches([' ', '\t', '\r', '\n'])
+            },
         _ => return Value::Error,
     };
     let fields = match parse_datetime(s) {
@@ -15577,8 +15760,22 @@ fn datetime_field(v: &Value, idx: usize) -> Value {
             .split_once('T')
             .map(|(_, t)| if let Some(i) = t.find(['Z', '+', '-']) { &t[..i] } else { t })
             .and_then(|t| t.rsplit_once(':').map(|(_, sec)| sec));
-        return match lex.and_then(Dec::parse_lexical) {
-            Some(d) => Value::Num(Num::Dec(d)),
+        return match lex {
+            Some(lex) => match Dec::parse_lexical(lex) {
+                Some(d) => Value::Num(Num::Dec(d)),
+                None => {
+                    // [GPT-6] Accessor output is lexical, not bounded-decimal arithmetic.
+                    // Preserve every validated fractional digit without f64/i128 rounding.
+                    let (whole, fraction) = lex.split_once('.').unwrap_or((lex, ""));
+                    let whole = whole.trim_start_matches('0');
+                    let fraction = fraction.trim_end_matches('0');
+                    Value::Term(Term::Literal(Literal::new_typed_literal(
+                        format!("{}.{}", if whole.is_empty() { "0" } else { whole },
+                            if fraction.is_empty() { "0" } else { fraction }),
+                        xsd::DECIMAL,
+                    )))
+                }
+            },
             None => Value::Error,
         };
     }
@@ -22480,3 +22677,26 @@ mod capped_rhs_tests {
 #[cfg(test)]
 #[path = "nullable_path_tests.rs"]
 mod nullable_path_tests;
+
+#[cfg(test)]
+mod exact_temporal_sort_cache_tests {
+    // [GPT-6] The comparator consumes prevalidated keys, not dictionary IDs.
+    use super::*;
+
+    #[test]
+    fn temporal_sort_compares_borrowed_keys_without_dictionary_reparsing() {
+        let graph = Graph::load_str("", "nt").unwrap();
+        let local = LocalVocab::default();
+        let a = SortCell::Temp {
+            id: 1,
+            key: ExactTemporal::of_lit("2024-01-01T00:00:00.000000001Z", "http://www.w3.org/2001/XMLSchema#dateTime").unwrap(),
+        };
+        let b = SortCell::Temp {
+            id: 2,
+            key: ExactTemporal::of_lit("2024-01-01T00:00:00.000000002Z", "http://www.w3.org/2001/XMLSchema#dateTime").unwrap(),
+        };
+        assert_eq!(cmp_sort_cells(&graph, &local, &a, &b), Ordering::Less);
+        assert_eq!(cmp_sort_cells(&graph, &local, &b, &a), Ordering::Greater);
+        assert_eq!(cmp_sort_cells(&graph, &local, &a, &a), Ordering::Equal);
+    }
+}

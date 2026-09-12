@@ -1,0 +1,121 @@
+{
+  "authored_by": "GPT-6",
+  "expectation_kind": "implementation_capacity",
+  "cases": [
+    {
+      "id": "integer-add-overflow",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (COALESCE(9223372036854775807 + 1, 0) AS ?v) {}",
+      "dataset_ntriples": ""
+    },
+    {
+      "id": "integer-multiply-overflow",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (COALESCE(9223372036854775807 * 2, 0) AS ?v) {}",
+      "dataset_ntriples": ""
+    },
+    {
+      "id": "integer-negation-overflow",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (COALESCE(-(xsd:integer(\"-9223372036854775808\")), 0) AS ?v) {}",
+      "dataset_ntriples": ""
+    },
+    {
+      "id": "integer-abs-overflow",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (COALESCE(ABS(xsd:integer(\"-9223372036854775808\")), 0) AS ?v) {}",
+      "dataset_ntriples": ""
+    },
+    {
+      "id": "decimal-add-overflow",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (COALESCE(\"170141183460469231731687303715884105727\"^^xsd:decimal + 1.0, 0) AS ?v) {}",
+      "dataset_ntriples": ""
+    },
+    {
+      "id": "decimal-multiply-overflow",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (COALESCE(\"100000000000000000000\"^^xsd:decimal * \"100000000000000000000\"^^xsd:decimal, 0) AS ?v) {}",
+      "dataset_ntriples": ""
+    },
+    {
+      "id": "integer-string-cast",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (COALESCE(xsd:integer(\"9223372036854775808\"), 0) AS ?v) {}",
+      "dataset_ntriples": ""
+    },
+    {
+      "id": "decimal-string-cast",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (COALESCE(xsd:decimal(\"100000000000000000000000000000000000000000000\"), 0) AS ?v) {}",
+      "dataset_ntriples": ""
+    },
+    {
+      "id": "decimal-alignment-overflow",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (COALESCE(\"0.0000000000000000000000000000000000000001\"^^xsd:decimal < 1, 0) AS ?v) {}",
+      "dataset_ntriples": ""
+    },
+    {
+      "id": "seconds-numeric-consumer",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (COALESCE(SECONDS(\"2024-01-01T00:00:00.1234567890123456789012345678901234567890123Z\"^^xsd:dateTime) = 0.0, 0) AS ?v) {}",
+      "dataset_ntriples": ""
+    },
+    {
+      "id": "substr-huge-length",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (COALESCE(SUBSTR(\"abcd\", 1, \"100000000000000000000000000000000000000000000\"^^xsd:integer), 0) AS ?v) {}",
+      "dataset_ntriples": "",
+      "deferred_normative_rows": [
+        [
+          "\"abcd\""
+        ]
+      ]
+    },
+    {
+      "id": "substr-huge-cancellation",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (COALESCE(SUBSTR(\"abcd\", \"-100000000000000000000000000000000000000000000\"^^xsd:integer, \"100000000000000000000000000000000000000000002\"^^xsd:integer), 0) AS ?v) {}",
+      "dataset_ntriples": "",
+      "deferred_normative_rows": [
+        [
+          "\"a\""
+        ]
+      ]
+    },
+    {
+      "id": "stored-false-ask",
+      "query": "ASK {?s ?p ?n FILTER(?n < 0)}",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \"9223372036854775808\"^^<http://www.w3.org/2001/XMLSchema#integer> ."
+    },
+    {
+      "id": "stored-false-count",
+      "query": "SELECT (COUNT(*) AS ?v) {?s ?p ?n FILTER(?n = 0)}",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \"9223372036854775808\"^^<http://www.w3.org/2001/XMLSchema#integer> ."
+    },
+    {
+      "id": "stored-order",
+      "query": "SELECT ?n {?s ?p ?n} ORDER BY ?n",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \"9223372036854775808\"^^<http://www.w3.org/2001/XMLSchema#integer> ."
+    },
+    {
+      "id": "stored-topk",
+      "query": "SELECT ?n {?s ?p ?n} ORDER BY ?n LIMIT 1",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \"9223372036854775808\"^^<http://www.w3.org/2001/XMLSchema#integer> ."
+    },
+    {
+      "id": "stored-sum",
+      "query": "SELECT (SUM(?n) AS ?v) {?s ?p ?n}",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \"9223372036854775808\"^^<http://www.w3.org/2001/XMLSchema#integer> ."
+    },
+    {
+      "id": "stored-avg",
+      "query": "SELECT (AVG(?n) AS ?v) {?s ?p ?n}",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \"9223372036854775808\"^^<http://www.w3.org/2001/XMLSchema#integer> ."
+    },
+    {
+      "id": "stored-min",
+      "query": "SELECT (MIN(?n) AS ?v) {?s ?p ?n}",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \"9223372036854775808\"^^<http://www.w3.org/2001/XMLSchema#integer> ."
+    },
+    {
+      "id": "stored-max",
+      "query": "SELECT (MAX(?n) AS ?v) {?s ?p ?n}",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \"9223372036854775808\"^^<http://www.w3.org/2001/XMLSchema#integer> ."
+    },
+    {
+      "id": "stored-identity-equality",
+      "query": "SELECT ?n {?s ?p ?n FILTER(?n = ?n)}",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \"9223372036854775808\"^^<http://www.w3.org/2001/XMLSchema#integer> ."
+    }
+  ]
+}

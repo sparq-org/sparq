@@ -220,6 +220,22 @@ class TestBomRefNormalization(unittest.TestCase):
         root = self.norm["metadata"]["component"]["bom-ref"]
         self.assertEqual(root, "pkg:cargo/sparq-cli@0.1.0")
 
+    def test_explicit_package_identity_differs_from_directory(self):
+        # [GPT-6] Real detached member refs use #name@version, including targets.
+        raw = "path+file:///build/zk/sparql-evaluator/host#sparq-proved-evaluator@0.1.0"
+        canonical = "pkg:cargo/sparq-proved-evaluator@0.1.0"
+        doc = {"components": [{"name": "sparq-proved-evaluator", "bom-ref": raw,
+                               "components": [{"name": "sparq_proved_evaluator",
+                                               "bom-ref": raw + " bin-target-0"}]}],
+               "dependencies": [{"ref": raw, "dependsOn": [raw + " bin-target-0"]}]}
+        result = _normalize(doc)
+        self.assertEqual(result["components"][0]["bom-ref"], canonical)
+        self.assertEqual(result["components"][0]["components"][0]["bom-ref"],
+                         canonical + " bin-target-0")
+        self.assertEqual(result["dependencies"],
+                         [{"ref": canonical, "dependsOn": [canonical + " bin-target-0"]}])
+        self.assertEqual(_normalize(result), result)
+
     def test_nested_build_target_suffix_is_preserved(self):
         # canon_ref preserves the trailing build-target suffix while stripping the path.
         sub = self.norm["metadata"]["component"]["components"][0]["bom-ref"]

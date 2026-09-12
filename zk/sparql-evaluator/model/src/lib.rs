@@ -12,6 +12,8 @@ use std::fmt;
 pub mod v2;
 
 #[cfg(feature = "evaluate")]
+mod aggregate_profile;
+#[cfg(feature = "evaluate")]
 mod evaluate;
 #[cfg(feature = "evaluate")]
 pub use evaluate::{admit, evaluate};

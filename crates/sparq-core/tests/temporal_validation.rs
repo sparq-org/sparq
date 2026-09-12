@@ -60,6 +60,8 @@ fn valid_boundaries_keep_their_timeline_values() {
             .instant(),
         next_day.instant()
     );
+    // [GPT-6] Capacity control only: the f64 cache collapses these distinct XSD
+    // instants. This is not normative value equality or exact fractional support.
     assert_eq!(
         Timeline::parse_datetime("2024-03-01T00:00:59.999999999999999999Z")
             .unwrap()

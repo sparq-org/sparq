@@ -83,5 +83,10 @@ not cryptographic receipts.
 dataset-reference capacity boundary. `host/tests/real_datasets.rs` defines the two
 V2 receipt fixtures, catalog/framing negatives and V1/V2 wire checks. All V1 host
 tests remain required on the changed dual-version guest image.
+The shared builtin matrix also runs under both versions in native model tests
+and `host/tests/actual_builtin_edges.rs`, authenticating each case's optional
+stored source before execution. REC-derived errors and finite-capacity controls
+remain separately counted. The V2 false-ASK fixture retains the named-catalog
+restriction branch and adds an invalid numeric-facet arithmetic discriminator.
 The [evaluator README](../../../zk/sparql-evaluator/README.md) describes pinned
 toolchain execution, receipt evidence and deployment limitations.

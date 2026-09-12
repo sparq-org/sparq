@@ -1,0 +1,5 @@
+{
+  "pr": 6497,
+  "date": "2026-09-12",
+  "reason": "Intentional shared parser, engine, core and substrate correctness changes preserve SPARQL bag/path endpoint semantics and substitution scope, and validate numeric/temporal terms and builtin results. The detached proof SDK remains opt-in, but these shared changes affect ordinary native/WASM code. Feature-OFF byte identity is not claimed; the separate hosted wasm_bundle_bytes floor and runtime gates remain required."
+}

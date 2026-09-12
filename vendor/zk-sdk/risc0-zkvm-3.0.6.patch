@@ -1,0 +1,33 @@
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -74,6 +74,8 @@
+ metal = ["prove"]
+ prove = [
+     "client",
++    # [GPT-6] The instruction decoder is used only by the prover profiler.
++    "dep:rrs-lib",
+     "dep:addr2line",
+     "dep:bincode",
+     "dep:elf",
+@@ -204,6 +206,7 @@
+ 
+ [dependencies.risc0-zkos-v1compat]
+ version = "2.2.3"
++default-features = false
+ 
+ [dependencies.risc0-zkp]
+ version = "3.0.5"
+@@ -219,6 +222,7 @@
+ 
+ [dependencies.rrs-lib]
+ version = "0.1"
++optional = true
+ 
+ [dependencies.semver]
+ version = "1.0"
+@@ -445,3 +449,5 @@
+ version = "0.2"
+ features = ["trace"]
+ default-features = false
++
++[workspace]

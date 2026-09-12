@@ -128,7 +128,7 @@ fn negation_and_false_ask_evaluate_the_complete_graph() {
             .unwrap()
             .result,
         CanonicalResult::Ask(false),
-        "VALUES must preserve path/MINUS domains and SUBSTR must honor position bounds"
+        "VALUES/SUBSTR domains and numeric subtype errors must survive evaluation"
     );
     let (_, rows) = select(
         "SELECT ?s WHERE { ?s <http://ex/score> ?n FILTER NOT EXISTS { ?s <http://ex/blocked> true } }",

@@ -1,0 +1,116 @@
+{
+  "source_base": "665727fc789d443bb9035afed44b9d548cdc7cbb",
+  "records": [
+    {
+      "mutation": "fraction",
+      "path": "crates/sparq-core/src/temporal/exact.rs",
+      "restored_sha256": "d1965401d7b3965990040766c5ca5f09dc56752925a6f10f6412832f5754672b",
+      "mutant_sha256": "3ff3fb21fc59d0d2951a3cd3907f5a458d0fc6a32ac4dcc37d0cc6f966402d33",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "-p",
+        "sparq-core",
+        "--no-default-features",
+        "--test",
+        "exact_temporal",
+        "fractional_digits"
+      ],
+      "assertion_killed": true
+    },
+    {
+      "mutation": "sticky",
+      "path": "crates/sparq-engine/src/exec.rs",
+      "restored_sha256": "2a28248533977f354ebf8b44fe4f5dd5f6d10acacc5f7b1ed6b8c1d86ecd436d",
+      "mutant_sha256": "0905e902616d49cea4a5fb079fd304ebb8650d6bbf1c1253bd618df4232f6330",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "-p",
+        "sparq-engine",
+        "--features",
+        "service-local",
+        "--lib",
+        "capacity_failure_is_sticky"
+      ],
+      "assertion_killed": true
+    },
+    {
+      "mutation": "parallel",
+      "path": "crates/sparq-engine/src/exec.rs",
+      "restored_sha256": "2a28248533977f354ebf8b44fe4f5dd5f6d10acacc5f7b1ed6b8c1d86ecd436d",
+      "mutant_sha256": "91bee59f7ac8aec06ab3d3a93c23701892f0daf1794fcb7d28289d251329f510",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "-p",
+        "sparq-engine",
+        "--features",
+        "service-local",
+        "--test",
+        "exact_temporal",
+        "bounded_expression_evaluation"
+      ],
+      "assertion_killed": true
+    }
+  ],
+  "test_scope": "native guarded source only; no guest proof or cryptographic claim",
+  "checks": {
+    "core_units": {
+      "passed": 226,
+      "existing_ignored": 4
+    },
+    "core_exact_temporal_tests": 5,
+    "final_engine_units": {
+      "passed": 430,
+      "existing_ignored": 2
+    },
+    "engine_exact_temporal_tests": 5,
+    "shared_builtin_tests": {
+      "functions": 3,
+      "cases": 139,
+      "representation_modes": [
+        "dense",
+        "compressed"
+      ]
+    },
+    "reasoner_compare_units": 13,
+    "reasoner_engine_parity_tests": 2,
+    "native_model_tests_after_scoped_rebuild": 23,
+    "temporal_value_cases": 26,
+    "separate_temporal_capacity_rejections": 8,
+    "clippy": [
+      "core/engine/reason all targets -D warnings",
+      "model all targets -D warnings"
+    ],
+    "server_check": "--no-default-features --features server",
+    "mechanical": [
+      "preflight",
+      "unsafe count 93 unchanged",
+      "no dynamic dispatch",
+      "feature test execution inventory"
+    ],
+    "guest_execution": "not run for this source",
+    "genuine_receipts": "not run for this source"
+  },
+  "source_sha256": {
+    "crates/sparq-core/src/temporal/exact.rs": "d1965401d7b3965990040766c5ca5f09dc56752925a6f10f6412832f5754672b",
+    "crates/sparq-core/src/temporal.rs": "a670c3a4c40363b01d821576f6a3faa20e1b1bb1a8448c5f06636f81b35f8957",
+    "crates/sparq-core/src/lib.rs": "8a171cbbb16bc4b7088c27db8bce88c3b2c0623e497a56620add4a282e1c9608",
+    "crates/sparq-engine/src/exec.rs": "2a28248533977f354ebf8b44fe4f5dd5f6d10acacc5f7b1ed6b8c1d86ecd436d",
+    "crates/sparq-engine/src/lib.rs": "415808288178f517a307a9a010e0f438b7af66a5dd29598b4e4bf80311e154e7",
+    "crates/sparq-reason/src/compare.rs": "0c100c2a9df0e4b4520a3e1858db3e0991ea210931664a30d3fdd6a38ef9a04f",
+    "zk/sparql-evaluator/model/src/evaluate.rs": "cf6d2615e95b9629293aa90c9796e6b105f523d8e5de1630211cb0ca110e33b0",
+    "crates/sparq-engine/tests/fixtures/exact_temporal.json": "109bf0d0442dfd88c3c22ec769e12b9ba84e1a5cb53171d96c3c4d3e542b19d2",
+    "zk/sparql-evaluator/fixtures/conformance/temporal-capacity.json": "d6590aaa3194e133ca141f7b9d42fad8ab15b4964ff1264c5f2f7c6b109dc99a"
+  },
+  "native_toolchain": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+  "model_cache_provenance": "After restoring mutation sources, removed only sparq-core, sparq-engine and sparq-proved-evaluator-model packages from the idle detached native target, then rebuilt all native model tests with --offline --locked. No SDK/guest build was invoked.",
+  "known_followup": "Exact numeric capacity must guard consumers of long SECONDS decimal output before the next combined proof freeze. V1/V2 guest evidence remains separately required."
+}

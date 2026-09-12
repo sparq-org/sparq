@@ -110,6 +110,9 @@ adds a committed catalog including empty named graphs, GRAPH and local snapshot
 FROM/FROM NAMED selection. V1 requests and commitments retain their meaning.
 [GPT-6] The [V3 graph-result design](references/graph-results-v3.md) tracks pending
 blank-node and graph-form work; it does not claim V3 guest or receipt evidence.
+[GPT-6] The [campaign evidence guide](references/evaluator-evidence.md) explains
+exact artifact export, actual receipt evidence and source/HAL provenance.
+
 [GPT-6] The [query-coverage corpus](references/evaluator-conformance.md) separates
 executed host semantics, explicit unsupported features, and guest proof evidence.
 Its opt-in NPS comparison recipe records other engines' observations without
@@ -369,3 +372,21 @@ This input bound is independent of candidate-triple search fuel.
 [GPT-6] Successful-result preparation also checks `MAX_DISCLOSURE_CREDENTIALS`
 before its authentication prepass. Its graph contract is string-canonical only;
 the generated gate matrix records dual-leaf and value-only pairs as unsupported.
+
+[GPT-6] [Exact temporal keys and enforced year capacity](references/exact-temporals.md)
+cover the shared evaluator and separate native/actual-guest regression evidence.
+
+[GPT-6] The exact-dataset evaluator applies the [aggregate operand boundary](references/aggregate-profile.md) in both native admission and guest evaluation. Non-COUNT aggregate operands must be constants or variables proven bound by the inner algebra; expression operands and nullable bindings are outside this initial profile. This is a restriction, not complete aggregate conformance.
+
+## Exact-evaluator SDK dependencies
+
+[GPT-6] The separate [exact evaluator](../../zk/sparql-evaluator/README.md) uses
+detached workspaces. Its [SDK patch record](../../vendor/zk-sdk/README.md) preserves
+upstream source/license identity and documents discovery-only dependency selection
+and derive-macro, server-profiler and kernel-binary feature boundaries, with
+executable patch reconstruction, explicit lockfile patch-selection corruption
+controls, and the native `edge_matrix.py` feature compiler. The kernel's default
+binary dependency activation and embedded ELF remain unchanged; the patch record
+separately documents an upstream real-target binary compilation limitation.
+Synthetic dependency checks remain separate from actual guest proof evidence.
+[GPT-6] The exact evaluator enables the [numeric capacity guard](references/numeric-capacity.md). Valid values beyond the finite arithmetic lane can be returned directly, but unsupported numeric consumption fails the entire evaluation. Native default budgets leave this option off.

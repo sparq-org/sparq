@@ -22,14 +22,15 @@ class ExactEvaluatorSelection(unittest.TestCase):
         self.assertNotIn("    paths:", workflow)
         self.assertIn("Require explicit classification output", workflow)
         self.assertIn("python3 scripts/ci_exact_evaluator_paths.py", workflow)
-        self.assertIn("-p sparq-proved-evaluator -- --nocapture --test-threads=1", workflow)
+        self.assertIn("python3 scripts/ci_exact_evaluator_evidence.py", workflow)
 
     def test_every_execution_input_is_relevant(self):
         for path in ["zk/sparql-evaluator/fixtures/case.json", "crates/sparq-engine/src/exec.rs",
                      "crates/sparq-core/Cargo.toml", "crates/sparq-substrate/src/lib.rs",
                      "vendor/spargebra/src/parser.rs", ".cargo/config.toml", "Cargo.lock",
                      "Cargo.toml", "rust-toolchain.toml", ".github/workflows/zk-exact-evaluator.yml",
-                     "scripts/ci_exact_evaluator_paths.py"]:
+                     "scripts/ci_exact_evaluator_paths.py", "scripts/ci_exact_evaluator_evidence.py",
+                     "scripts/tests/test_ci_exact_evaluator_evidence.py", "vendor/zk-sdk/risc0-build/src/lib.rs"]:
             self.assertTrue(selector.relevant_path(path), path)
 
     def test_explicit_irrelevant_diff_only_skips_heavy_steps(self):

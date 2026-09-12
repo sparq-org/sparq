@@ -25,6 +25,26 @@ url = "https://raw.githubusercontent.com/zcash/rust-ecosystem/main/supply-chain/
 [policy.spargebra]
 audit-as-crates-io = true
 
+
+# [GPT-6] Local SDK patches retain their upstream registry audit obligations.
+[policy.risc0-build]
+audit-as-crates-io = true
+
+[policy.rzup]
+audit-as-crates-io = true
+
+[policy.ark-relations]
+audit-as-crates-io = true
+
+[policy.ark-crypto-primitives]
+audit-as-crates-io = true
+
+[policy.risc0-zkvm]
+audit-as-crates-io = true
+
+[policy.risc0-zkos-v1compat]
+audit-as-crates-io = true
+
 [[exemptions.aead]]
 version = "0.5.2"
 criteria = "safe-to-deploy"
