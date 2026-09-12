@@ -35,6 +35,19 @@
 #      shards download — so the shards keep receiving the same byte-identical
 #      archive, and the nextest test set is unchanged.
 #
+# [OPUS-5] issue #5231 adds a third property of the same shape:
+#
+#   3. CROSS-JOB CACHE SHARING. `coverage-engine-run` (3 partitions) and
+#      `coverage-engine-merge` compile the SAME instrumented sparq-engine, so they
+#      must land on ONE rust-cache entry. rust-cache composes the `key:` input WITH a
+#      GITHUB_JOB-derived segment and uses `shared-key:` INSTEAD of it, so the former
+#      `key: coverage-engine-run-<part>` / `key: coverage-engine-run-1` pair resolved
+#      to different keys and different restore-key prefixes in the two jobs — the
+#      merge job restored nothing and paid a cold dep compile on the merge-queue
+#      critical path, while the comment above the step claimed the opposite. Exactly
+#      this file's failure mode: invisible when wrong, reds nothing. So the two jobs'
+#      `shared-key` is pinned equal, and a bare `key:` on either is rejected.
+#
 # Deliberately NOT asserted: sccache. Bead item 3 (an sccache/GHA-backend A/B on
 # build-archive) is measure-first with a >=60 s median-win adoption bar, and no such
 # measurement has been taken — so nothing about sccache is wired, claimed, or pinned
@@ -59,6 +72,10 @@ SAVE_IF_KEY = "save-if:"
 # stop main from ever seeding a cache, so every job would restore nothing forever.
 # The value is pinned exactly for that reason.
 SAVE_IF_VALUE = "${{ github.ref == 'refs/heads/main' }}"
+
+# The pair whose dep cache must be ONE entry (issue #5231): three run partitions plus
+# the merge job that recompiles the same instrumented objects to map the counters.
+COVERAGE_ENGINE_JOBS = ("coverage-engine-run", "coverage-engine-merge")
 
 NEXTEST_ARCHIVE_ARTIFACT = "nextest-archive"
 UPLOAD_ARTIFACT = "actions/upload-artifact@"
@@ -120,6 +137,29 @@ def step_body(lines: list[str], start: int) -> list[str]:
             break
         i += 1
     return lines[start:i]
+
+
+def job_body(lines: list[str], job_id: str) -> list[str]:
+    """The lines of the `jobs:` entry `job_id`, or [] when it is absent.
+
+    Jobs sit at indent 2 under the top-level `jobs:` key, so the entry runs from its
+    `  <job_id>:` header to the next non-comment line at indent <= 2.
+    """
+    start = next(
+        (i for i, l in enumerate(lines) if l == f"  {job_id}:"),
+        None,
+    )
+    if start is None:
+        return []
+    end = len(lines)
+    for i in range(start + 1, len(lines)):
+        line = lines[i]
+        if not line.strip() or _is_comment(line):
+            continue
+        if len(line) - len(line.lstrip()) <= 2:
+            end = i
+            break
+    return lines[start:end]
 
 
 def steps_using(lines: list[str], marker: str) -> list[tuple[int, list[str]]]:
@@ -276,6 +316,65 @@ class TestNextestArchiveDiet(unittest.TestCase):
             f"nothing in ci.yml downloads `{NEXTEST_ARCHIVE_ARTIFACT}` — the build-once "
             "archive would be uploaded and never consumed.",
         )
+
+
+class TestCoverageEngineCacheIsShared(unittest.TestCase):
+    """Property 3 (issue #5231): the engine-coverage partitions and the merge job
+    must resolve to ONE rust-cache entry, which only `shared-key` achieves."""
+
+    def _rust_cache_steps(self, job_id: str) -> list[list[str]]:
+        body = job_body(_lines(CI_YML), job_id)
+        self.assertTrue(
+            body,
+            f"ci.yml has no `{job_id}:` job — the engine coverage split was renamed or "
+            "removed; re-point this test rather than deleting it.",
+        )
+        return [b for _, b in steps_using(body, RUST_CACHE)]
+
+    def test_each_job_has_exactly_one_rust_cache_step(self) -> None:
+        # Non-vacuity: the assertions below read [0]. If the walker found nothing they
+        # would raise rather than pass, but a SECOND cache step would go unchecked.
+        for job_id in COVERAGE_ENGINE_JOBS:
+            self.assertEqual(
+                len(self._rust_cache_steps(job_id)),
+                1,
+                f"`{job_id}` no longer has exactly one rust-cache step; this test only "
+                "reasons about a single dep cache per job.",
+            )
+
+    def test_both_jobs_declare_the_same_shared_key(self) -> None:
+        keys = {
+            job_id: with_value(self._rust_cache_steps(job_id)[0], "shared-key:")
+            for job_id in COVERAGE_ENGINE_JOBS
+        }
+        for job_id, got in keys.items():
+            self.assertIsNotNone(
+                got,
+                f"`{job_id}`'s rust-cache step has no `shared-key`. Without it rust-cache "
+                "appends the GITHUB_JOB-derived segment, so the two jobs get different "
+                "keys AND different restore-key prefixes and the merge job compiles its "
+                "deps cold (issue #5231).",
+            )
+        self.assertEqual(
+            len(set(keys.values())),
+            1,
+            "coverage-engine-run and coverage-engine-merge must share ONE rust-cache "
+            "entry — they compile the same instrumented sparq-engine, and the merge job's "
+            "whole cache warm-up depends on the two `shared-key` values being identical. "
+            f"Got: {keys}",
+        )
+
+    def test_neither_job_re_splits_the_entry_with_a_bare_key(self) -> None:
+        # `key:` is composed WITH the automatic job-id segment rather than replacing it,
+        # so re-adding one alongside `shared-key` (or instead of it) silently re-splits
+        # the shared entry back into one-per-job. That is the exact #5231 regression.
+        for job_id in COVERAGE_ENGINE_JOBS:
+            self.assertIsNone(
+                with_value(self._rust_cache_steps(job_id)[0], "key:"),
+                f"`{job_id}`'s rust-cache step declares a bare `key:`. rust-cache adds the "
+                "job id to `key:`, so the partitions and the merge job would stop sharing "
+                "an entry (issue #5231). Use `shared-key:` alone.",
+            )
 
 
 class TestSuiteIsWiredIntoCi(unittest.TestCase):
