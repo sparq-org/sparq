@@ -70,7 +70,9 @@ fn real_exact_result_rejects_all_public_binding_tampering_and_replay() {
     let guest = accepted_guest();
     let verify =
         |p: &Presentation, r: &Request, n: &mut MemoryNonces| verify_with_artifact(p, r, n, &guest);
-    eprintln!("proving authenticated OPTIONAL/MINUS/COUNT/subquery/ORDER/LIMIT fixture");
+    eprintln!(
+        "proving authenticated OPTIONAL/MINUS/COUNT/subquery/ORDER/LIMIT/path/EXISTS fixture"
+    );
     let presentation = prove_with_artifact(&witness, &r0vm(), &guest).expect("genuine local proof");
     if guest.image_id() != method_id() {
         assert!(
@@ -102,7 +104,7 @@ fn real_exact_result_rejects_all_public_binding_tampering_and_replay() {
     assert_eq!(rows[1][2], None, "unmatched OPTIONAL is unbound");
     assert_eq!(
         rows[0][1].as_deref(),
-        Some("\"2\"^^<http://www.w3.org/2001/XMLSchema#integer>")
+        Some("\"4\"^^<http://www.w3.org/2001/XMLSchema#integer>")
     );
     let mut nonces = MemoryNonces::default();
     verify(&presentation, &witness.request, &mut nonces).unwrap();
@@ -176,7 +178,35 @@ fn actual_guest_rejects_bad_anchors_nondeterminism_and_exhausted_capacity() {
     let mut w = base;
     w.request.query = " ".repeat(MAX_QUERY_BYTES + 1);
     cases.push(w);
+    // Execute the exact same exclusion corpus in the actual guest. Native
+    // rejection alone is not evidence that the guest enforces this boundary.
+    let corpus: serde_json::Value =
+        serde_json::from_str(include_str!("../../fixtures/conformance/cases.json")).unwrap();
+    let excluded = corpus["cases"].as_array().unwrap().iter().filter(|case| {
+        case["features"].as_array().unwrap().iter().any(|feature| {
+            feature == "exists_complex_bodies" || feature == "nullable_path_composition"
+        })
+    });
+    let mut excluded_count = 0;
+    for case in excluded {
+        cases.push(witness(case["query"].as_str().unwrap()));
+        excluded_count += 1;
+    }
+    assert!(
+        excluded_count > 0,
+        "actual guest exclusion corpus is required"
+    );
     let executor = ExternalProver::new("real-sparq-guest-negative", r0vm());
+    // A broken local executor must not count as successful relation rejection.
+    let positive = ExecutorEnv::builder()
+        .session_limit(Some(1 << 24))
+        .write(&witness("ASK {}"))
+        .unwrap()
+        .build()
+        .unwrap();
+    executor
+        .execute(positive, SPARQ_EXACT_GUEST_ELF)
+        .expect("positive actual-guest execution before negative cases");
     for w in cases {
         let env = ExecutorEnv::builder()
             .session_limit(Some(1 << 24))

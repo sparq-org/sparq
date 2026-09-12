@@ -29,3 +29,8 @@ constants are not assumed portable across checkout paths. Reject pins received
 only from the proof sender. The byte digest is checked before ELF processing.
 See the workspace README for limits, exact bag/sequence/unbound encoding, rejected
 features, proof-mode leakage caveats and the host-versus-guest evidence distinction.
+EXISTS/NOT EXISTS bodies in this first profile admit only BGP/join/UNION and pure
+FILTER, including fixed sequences lowered to BGP. Nested EXISTS, residual paths,
+OPTIONAL/MINUS, binding operators, subqueries and modifiers inside those bodies
+are rejected pending explicit published-SPARQL-1.1 substitution support. Their
+admission elsewhere is unchanged; these rejections do not count as conformance.

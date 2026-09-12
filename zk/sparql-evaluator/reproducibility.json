@@ -6,7 +6,7 @@
   "host_rust": "1.97.1",
   "guest_rust": "1.97.0",
   "risc0_sdk": "3.0.6",
-  "source_base_commit": "2c8a6bf59ad5c33171b700db0ea513e51f1c43e8",
+  "experiment_source_commit": "34292f64e65d41f0f12336250bd886fd05d60567",
   "changed_guest_source_sha256": {
     "model/src/evaluate.rs": "ed6f0255bf51e6ed626aa9ca66041ea5765d3d634f747403cb3467297178d405"
   },

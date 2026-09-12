@@ -202,7 +202,7 @@
     },
     {
       "id": "exists",
-      "status": "known_gap",
+      "status": "partial_fixture_coverage",
       "spec": "https://www.w3.org/TR/sparql11-query/#neg-exists",
       "positive_cases": [
         "exists-correlated-filter",
@@ -210,9 +210,7 @@
       ],
       "rejection_cases": [],
       "guest_proof_evidence": "not_asserted",
-      "failing_case": "exists-correlated-filter",
-      "observed": "Outer FILTER-only binding is lost, returning no row instead of ex:a.",
-      "implementation_requirement": "Substitute outer bindings throughout nested EXISTS expressions, including FILTER-only uses."
+      "limits": "Linked positive-body fixtures pass; complex/nested EXISTS bodies are rejected separately. This is not full SPARQL substitution conformance."
     },
     {
       "id": "filter_errors",
@@ -329,7 +327,7 @@
     },
     {
       "id": "not_exists",
-      "status": "known_gap",
+      "status": "partial_fixture_coverage",
       "spec": "https://www.w3.org/TR/sparql11-query/#neg-notexists",
       "positive_cases": [
         "not-exists-correlated",
@@ -338,9 +336,7 @@
       ],
       "rejection_cases": [],
       "guest_proof_evidence": "not_asserted",
-      "failing_case": "not-exists-correlated-filter",
-      "observed": "Correlated inner FILTER misses outer bindings, accepting mappings that should be excluded.",
-      "implementation_requirement": "Preserve complete outer-variable substitution through EXISTS and NOT EXISTS expressions."
+      "limits": "Linked positive-body fixtures pass; complex/nested EXISTS bodies are rejected separately. This is not full SPARQL substitution conformance."
     },
     {
       "id": "numeric_functions",
@@ -394,16 +390,13 @@
     },
     {
       "id": "paths_alternative",
-      "status": "known_gap",
+      "status": "partial_fixture_coverage",
       "spec": "https://www.w3.org/TR/sparql11-query/#propertypaths",
       "positive_cases": [
         "path-alternative-duplicates"
       ],
       "rejection_cases": [],
-      "guest_proof_evidence": "not_asserted",
-      "failing_case": "path-alternative-duplicates",
-      "observed": "Alternative path endpoints are deduplicated instead of preserving both derivations.",
-      "implementation_requirement": "Implement alternatives as multiset union; retain distinct endpoints only for path forms requiring set semantics."
+      "guest_proof_evidence": "not_asserted"
     },
     {
       "id": "paths_inverse",
@@ -429,16 +422,13 @@
     },
     {
       "id": "paths_sequence",
-      "status": "known_gap",
+      "status": "partial_fixture_coverage",
       "spec": "https://www.w3.org/TR/sparql11-query/#propertypaths",
       "positive_cases": [
         "path-sequence"
       ],
       "rejection_cases": [],
-      "guest_proof_evidence": "not_asserted",
-      "failing_case": "path-sequence",
-      "observed": "Admission rejects an internal blank node from fixed-path lowering.",
-      "implementation_requirement": "Separate generated query existential variables from unsupported RDF blank-node values; preserve join multiplicities and scope."
+      "guest_proof_evidence": "not_asserted"
     },
     {
       "id": "paths_transitive",
@@ -563,17 +553,14 @@
     },
     {
       "id": "subqueries",
-      "status": "known_gap",
+      "status": "partial_fixture_coverage",
       "spec": "https://www.w3.org/TR/sparql11-query/#subqueries",
       "positive_cases": [
         "subquery-project-scope",
         "subquery-order-does-not-order-outer-bag"
       ],
       "rejection_cases": [],
-      "guest_proof_evidence": "not_asserted",
-      "failing_case": "subquery-order-does-not-order-outer-bag",
-      "observed": "Inner ORDER BY incorrectly marks the outer query as a sequence.",
-      "implementation_requirement": "Stop result-order detection at the subquery ToMultiset boundary."
+      "guest_proof_evidence": "not_asserted"
     },
     {
       "id": "term_functions",
@@ -705,6 +692,41 @@
         "crates/sparq-core/src/lib.rs::Graph::ensure_named",
         "crates/sparq-engine/tests/storage/named_graph_durable_clear_drop.rs"
       ]
+    },
+    {
+      "id": "exists_complex_bodies",
+      "status": "rejected",
+      "spec": "https://www.w3.org/TR/sparql11-query/#defn_evalExists",
+      "positive_cases": [],
+      "rejection_cases": [
+        "reject-exists-minus",
+        "reject-exists-optional",
+        "reject-exists-values",
+        "reject-exists-bind",
+        "reject-exists-subquery",
+        "reject-exists-aggregate",
+        "reject-exists-ordered-slice",
+        "reject-exists-nullable-path",
+        "reject-exists-residual-path",
+        "reject-exists-nested-exists",
+        "reject-exists-nested-not-exists",
+        "reject-exists-nested-in-function"
+      ],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "The first exact profile admits only BGP, Join, Union and pure Filter bodies. Nested EXISTS, residual path operators, MINUS, OPTIONAL, VALUES, BIND, subqueries and modifiers inside EXISTS are rejected pending explicit SPARQL 1.1 REC substitution support (zkp-10.6). These remain valid SPARQL syntax; rejection is a profile limit, not feature coverage."
+    },
+    {
+      "id": "nullable_path_composition",
+      "status": "rejected",
+      "spec": "https://www.w3.org/TR/sparql11-query/#defn_evalPP",
+      "positive_cases": [],
+      "rejection_cases": [
+        "reject-nullable-path-alternative",
+        "reject-nullable-path-lowered-sequence",
+        "reject-nullable-path-nested-quantifier"
+      ],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Nullable subexpressions inside path composition and nullable lowered-sequence intermediates are rejected while absent-constant propagation is repaired. Ordinary root +/*/? with non-nullable operands remains admitted; these rejection cases do not count as support."
     }
   ],
   "functions": [
@@ -762,25 +784,27 @@
     {
       "name": "EXISTS",
       "group": "exists",
-      "status": "known_gap",
+      "status": "partial_fixture_coverage",
       "positive_cases": [
         "exists-correlated-filter",
         "exists-filter-only-outer-variable"
       ],
       "rejection_cases": [],
-      "guest_proof_evidence": "not_asserted"
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Linked positive-body fixtures pass; complex/nested EXISTS bodies are rejected separately. This is not full SPARQL substitution conformance."
     },
     {
       "name": "NOT EXISTS",
       "group": "not_exists",
-      "status": "known_gap",
+      "status": "partial_fixture_coverage",
       "positive_cases": [
         "not-exists-correlated",
         "not-exists-fixed-pattern-removes-all",
         "not-exists-correlated-filter"
       ],
       "rejection_cases": [],
-      "guest_proof_evidence": "not_asserted"
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Linked positive-body fixtures pass; complex/nested EXISTS bodies are rejected separately. This is not full SPARQL substitution conformance."
     },
     {
       "name": "isIRI",
@@ -1414,6 +1438,46 @@
       ],
       "rejection_cases": [],
       "guest_proof_evidence": "not_asserted"
+    }
+  ],
+  "known_semantic_divergences": [
+    {
+      "id": "exists-minus-disjoint-domain-after-substitution",
+      "tracking": "zkp-10.6",
+      "case": "reject-exists-minus",
+      "dataset": "fixtures/conformance/core.nt",
+      "baseline": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#defn_evalExists",
+      "published_2013_expected_mappings": [
+        {
+          "s": "<http://example.org/a>"
+        },
+        {
+          "s": "<http://example.org/b>"
+        },
+        {
+          "s": "<http://example.org/c>"
+        }
+      ],
+      "prior_deferred_compatibility_mappings": [],
+      "profile_behavior": "Rejected before evaluation; the published expectation is retained separately from this admission rejection.",
+      "reason": "Substitution makes the shared outer ?s a constant in both MINUS arguments, leaving disjoint ?m and ?z domains. Deferred compatibility removes the inner rows before the outer binding is applied. This slice does not claim to repair that operator combination.",
+      "errata_discussion": "https://github.com/w3c/sparql-query/issues/156"
+    },
+    {
+      "id": "nullable-alternative-absent-constant",
+      "case": "reject-nullable-path-alternative",
+      "dataset": "fixtures/conformance/core.nt",
+      "baseline": "https://www.w3.org/TR/sparql11-query/#defn_evalPP",
+      "published_2013_expected_mappings": [
+        {
+          "o": "<http://example.org/missing>"
+        },
+        {
+          "o": "<http://example.org/missing>"
+        }
+      ],
+      "engine_5055fddb_mappings": [],
+      "profile_behavior": "Rejected before evaluation pending absent-constant propagation through composition."
     }
   ]
 }

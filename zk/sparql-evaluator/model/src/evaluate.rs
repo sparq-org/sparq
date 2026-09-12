@@ -33,15 +33,32 @@ fn admit_query(query: &spargebra::Query) -> Result<(), Rejected> {
         Pattern(&'a GraphPattern),
         Expression(&'a Expression),
         Path(&'a PropertyPathExpression),
+        ExitExists,
     }
     let mut pending = vec![Visit::Pattern(pattern)];
     let mut fuel = 0;
+    let mut in_exists = false;
     while let Some(node) = pending.pop() {
         fuel += 1;
         if fuel > 1024 {
             return Err(Rejected("query AST capacity"));
         }
         match node {
+            Visit::ExitExists => in_exists = false,
+            Visit::Pattern(p)
+                if in_exists
+                    && !matches!(
+                        p,
+                        GraphPattern::Bgp { .. }
+                            | GraphPattern::Join { .. }
+                            | GraphPattern::Union { .. }
+                            | GraphPattern::Filter { .. }
+                    ) =>
+            {
+                return Err(Rejected(
+                    "EXISTS body is outside the positive-pattern profile",
+                ));
+            }
             Visit::Pattern(p) => match p {
                 GraphPattern::Bgp { patterns } => {
                     if patterns.len() > 64 {
@@ -59,6 +76,13 @@ fn admit_query(query: &spargebra::Query) -> Result<(), Rejected> {
                 } => {
                     pattern_term(subject)?;
                     pattern_term(object)?;
+                    // Lowered sequence intermediates must not hide nullable
+                    // composition whose absent-constant behavior is unresolved.
+                    if path_nullable(path)
+                        && (internal_path_node(subject) || internal_path_node(object))
+                    {
+                        return Err(Rejected("nullable path composition is not admitted"));
+                    }
                     pending.push(Visit::Path(path));
                 }
                 GraphPattern::Join { left, right }
@@ -156,7 +180,15 @@ fn admit_query(query: &spargebra::Query) -> Result<(), Rejected> {
                 Expression::UnaryPlus(e) | Expression::UnaryMinus(e) | Expression::Not(e) => {
                     pending.push(Visit::Expression(e))
                 }
-                Expression::Exists(p) => pending.push(Visit::Pattern(p)),
+                Expression::Exists(p) => {
+                    if in_exists {
+                        return Err(Rejected("nested EXISTS is not admitted"));
+                    }
+                    // LIFO exit marker keeps this context around the complete
+                    // subtree, including FILTER operands and UNION branches.
+                    in_exists = true;
+                    pending.extend([Visit::ExitExists, Visit::Pattern(p)]);
+                }
                 Expression::If(a, b, c) => pending.extend([
                     Visit::Expression(a),
                     Visit::Expression(b),
@@ -212,15 +244,39 @@ fn admit_query(query: &spargebra::Query) -> Result<(), Rejected> {
                 PropertyPathExpression::Reverse(p)
                 | PropertyPathExpression::ZeroOrMore(p)
                 | PropertyPathExpression::OneOrMore(p)
-                | PropertyPathExpression::ZeroOrOne(p) => pending.push(Visit::Path(p)),
+                | PropertyPathExpression::ZeroOrOne(p) => {
+                    if path_nullable(p) {
+                        return Err(Rejected("nullable path composition is not admitted"));
+                    }
+                    pending.push(Visit::Path(p));
+                }
                 PropertyPathExpression::Sequence(a, b)
                 | PropertyPathExpression::Alternative(a, b) => {
-                    pending.extend([Visit::Path(a), Visit::Path(b)])
+                    if path_nullable(a) || path_nullable(b) {
+                        return Err(Rejected("nullable path composition is not admitted"));
+                    }
+                    pending.extend([Visit::Path(a), Visit::Path(b)]);
                 }
             },
         }
     }
     Ok(())
+}
+
+fn internal_path_node(term: &TermPattern) -> bool {
+    matches!(term, TermPattern::BlankNode(node) if node.as_str().starts_with("#sparq-path#"))
+}
+
+// Parser nesting is bounded before this structural predicate runs.
+fn path_nullable(path: &PropertyPathExpression) -> bool {
+    use PropertyPathExpression as P;
+    match path {
+        P::NamedNode(_) | P::NegatedPropertySet(_) => false,
+        P::ZeroOrMore(_) | P::ZeroOrOne(_) => true,
+        P::Reverse(inner) | P::OneOrMore(inner) => path_nullable(inner),
+        P::Sequence(left, right) => path_nullable(left) && path_nullable(right),
+        P::Alternative(left, right) => path_nullable(left) || path_nullable(right),
+    }
 }
 
 fn literal(l: &Literal) -> Result<(), Rejected> {
@@ -237,7 +293,7 @@ fn pattern_term(term: &TermPattern) -> Result<(), Rejected> {
         // The opt-in vendored parser creates these only when lowering a fixed
         // path sequence. Its leading # is forbidden in source blank-node labels.
         // They bind existential intermediates, never RDF blank-node identities.
-        TermPattern::BlankNode(node) if node.as_str().starts_with("#sparq-path#") => Ok(()),
+        TermPattern::BlankNode(_) if internal_path_node(term) => Ok(()),
         TermPattern::Literal(l) => literal(l),
         _ => Err(Rejected(
             "query blank nodes and triple terms are not admitted",

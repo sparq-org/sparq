@@ -5,26 +5,10 @@ on:
   workflow_dispatch:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
-    paths:
-      - "zk/sparql-evaluator/**"
-      - "crates/sparq-core/**"
-      - "crates/sparq-engine/**"
-      - "crates/sparq-substrate/**"
-      - "vendor/spargebra/**"
-      - "Cargo.toml"
-      - "rust-toolchain*"
-      - ".github/workflows/zk-exact-evaluator.yml"
+  merge_group:
+    types: [checks_requested]
   push:
     branches: [main]
-    paths:
-      - "zk/sparql-evaluator/**"
-      - "crates/sparq-core/**"
-      - "crates/sparq-engine/**"
-      - "crates/sparq-substrate/**"
-      - "vendor/spargebra/**"
-      - "Cargo.toml"
-      - "rust-toolchain*"
-      - ".github/workflows/zk-exact-evaluator.yml"
 
 permissions:
   contents: read
@@ -36,6 +20,8 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   CARGO_BUILD_JOBS: 2
+  # Share the guest cache across host test and Clippy build-script variants.
+  CARGO_TARGET_DIR: ${{ github.workspace }}/zk/sparql-evaluator/target
   RISC0_BUILD_LOCKED: 1
 
 jobs:
@@ -48,7 +34,28 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Classify exact-evaluator inputs (fail closed)
+        id: changes
+        env:
+          EXACT_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+          EXACT_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
+        run: python3 scripts/ci_exact_evaluator_paths.py
+
+      - name: Require explicit classification output
+        env:
+          EXECUTION_REQUIRED: ${{ steps.changes.outputs.required }}
+        run: |
+          case "$EXECUTION_REQUIRED" in
+            true|false) ;;
+            *) echo "Missing or invalid exact-evaluator classification" >&2; exit 1 ;;
+          esac
+
+      - name: Successful irrelevant-diff classification
+        if: steps.changes.outputs.required == 'false'
+        run: echo "No exact-evaluator inputs changed; the mandatory check remains successful."
+
       - name: Install checksum-pinned RISC Zero binaries and guest Rust
+        if: steps.changes.outputs.required == 'true'
         # Official release-asset SHA256 digests, pinned with the exact SDK version.
         run: |
           set -euo pipefail
@@ -67,22 +74,27 @@ jobs:
           echo "RISC0_SERVER_PATH=$tool_root/bin/r0vm" >> "$GITHUB_ENV"
 
       - name: Activate pinned host Rust
+        if: steps.changes.outputs.required == 'true'
         run: |
           rustup show active-toolchain
           rustup component add clippy
 
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        if: steps.changes.outputs.required == 'true'
         with:
           key: zk-exact-evaluator-risc0-3.0.6-rust-1.97.0
           workspaces: zk/sparql-evaluator
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Native semantic and admission regressions
+        if: steps.changes.outputs.required == 'true'
         run: cargo test --locked --manifest-path zk/sparql-evaluator/Cargo.toml -p sparq-proved-evaluator-model --features evaluate
 
       - name: Actual guest execution and real proof tamper tests
+        if: steps.changes.outputs.required == 'true'
         # No ignored-test shortcut, mock mode, or missing-tool success.
         run: cargo test --locked --manifest-path zk/sparql-evaluator/Cargo.toml -p sparq-proved-evaluator -- --nocapture --test-threads=1
 
       - name: Scoped detached-workspace lint
+        if: steps.changes.outputs.required == 'true'
         run: cargo clippy --locked --manifest-path zk/sparql-evaluator/Cargo.toml --workspace --all-targets --features sparq-proved-evaluator-model/evaluate -- -D warnings

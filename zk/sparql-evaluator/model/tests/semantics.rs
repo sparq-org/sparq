@@ -49,8 +49,8 @@ fn combined_optional_minus_count_order_limit_has_exact_bindings() {
     assert_eq!(
         rows,
         vec![
-            vec![iri("alice"), int(2), Some("\"Alice\"".into())],
-            vec![iri("bob"), int(1), None]
+            vec![iri("alice"), int(4), Some("\"Alice\"".into())],
+            vec![iri("bob"), int(2), None]
         ]
     );
 }

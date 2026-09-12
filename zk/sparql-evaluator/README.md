@@ -68,6 +68,20 @@ The surface is the versioned `SparqSparql11SnapshotV1` profile, with its impleme
 pinned by the guest image. It is not a claim of complete SPARQL 1.1 or conformance
 to the evolving SPARQL 1.2 draft. `model::admit` visits nested patterns and
 expressions, including subqueries, aggregate operands and EXISTS bodies.
+EXISTS and NOT EXISTS bodies are restricted to BGP, join, UNION and pure FILTER.
+Fixed path sequences lowered to BGP are included; residual path operators,
+nested EXISTS, OPTIONAL/MINUS, binding operators, subqueries and modifiers inside
+an EXISTS body are rejected. The rejection applies to these combinations, not
+to those operators elsewhere in the query. This avoids silently selecting an
+alternative to published SPARQL 1.1 substitution semantics while broader
+correlation work remains in zkp-10.6. The [W3C discussion](https://github.com/w3c/sparql-query/issues/156)
+describes the relevant errata and proposed alternatives; none is implicitly
+enabled by this profile.
+Nullable path composition is also excluded while absent-constant propagation is
+repaired: nullable subexpressions below other path operators, or at a lowered
+sequence's internal endpoint, are rejected. Ordinary root `*`, `+` and `?` over
+non-nullable operands remain admitted. The coverage ledger retains the known
+standard expectation separately from the rejection case.
 
 | Family | Admission | Evidence definition |
 | --- | --- | --- |
@@ -77,11 +91,14 @@ expressions, including subqueries, aggregate operands and EXISTS bodies.
 | VALUES, UNION, unbound | admitted | host semantics; holder-declared bag proof fixture |
 | NOT EXISTS, true ASK, arithmetic/error | admitted | host semantics |
 | false ASK, numeric FILTER | admitted | host semantics; genuine false-ASK proof fixture |
-| Paths, other pure functions, other built-in aggregates | admitted by AST | shared evaluator; no complete guest conformance claim |
+| Fixed sequence and alternative paths, positive correlated EXISTS | admitted | combined genuine proof fixture; native conformance cases |
+| Other paths, pure functions and built-in aggregates | admitted by AST | shared evaluator; no complete guest conformance claim |
 | GRAPH, FROM/FROM NAMED, SERVICE, LATERAL | rejected | whole-AST negatives |
 | NOW, RAND, UUID/STRUUID, BNODE, external functions | rejected | nested host and actual guest rejection fixtures |
-| Blank nodes, triple terms, directional literals | rejected | input/query/output checks |
+| Source blank nodes, triple terms, directional literals | rejected | input/query/output checks |
 | CONSTRUCT, DESCRIBE, UPDATE | rejected | admission negatives |
+| Complex/nested EXISTS bodies | rejected | corpus admission and actual guest rejection cases |
+| Nullable path composition | rejected | corpus admission and actual guest rejection cases |
 
 Test definitions are distinct from execution evidence: `model/tests/semantics.rs`
 runs native semantic tests; `host/tests/real_proof.rs` generates genuine receipts
@@ -153,10 +170,12 @@ cost in benchmarks. The source witness is visible to the local caller and prover
 process. See the [upstream security model](https://dev.risczero.com/api/security-model#zero-knowledge-proving).
 
 The workspace is detached: normal engine/native/WASM builds acquire no proof SDK
-dependencies. Engine portability changes only affect `target_os = "zkvm"`, where
-ambient-clock and UUID/RAND support are unavailable. Ordinary native and WASM
-behavior is unchanged.
+dependencies. The target-specific clock and UUID/RAND exclusions apply only to
+`target_os = "zkvm"`. Shared corrections to correlated EXISTS and path multiset
+semantics also apply to the native evaluator.
 
 The vendored parser's zkvm-only synthetic-variable allocator uses a monotonic
 namespace outside SPARQL user-variable syntax instead of requesting randomness
 for hidden aggregate variables. It does not provide query-visible randomness.
+The separate `sparq-deterministic-paths` parser feature is enabled only by the
+detached evaluator and supplies its existential path intermediates.

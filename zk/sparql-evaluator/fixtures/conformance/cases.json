@@ -1142,7 +1142,7 @@
         "string_functions"
       ],
       "spec": "https://www.w3.org/TR/sparql11-query/#func-strings",
-      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ASK { FILTER(STRLEN(\"café\") = 4) }",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ASK { FILTER(STRLEN(\"caf\u00e9\") = 4) }",
       "expected": {
         "kind": "result",
         "result": {
@@ -1869,6 +1869,201 @@
             ]
           }
         }
+      }
+    },
+    {
+      "id": "reject-exists-minus",
+      "features": [
+        "exists_complex_bodies"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#defn_evalExists",
+      "query": "PREFIX ex: <http://example.org/> SELECT ?s WHERE { ?s ex:score ?n FILTER EXISTS { ?s ex:score ?m MINUS { ?s ex:score ?z } } }",
+      "expected": {
+        "kind": "rejection",
+        "stage": "admission",
+        "error": "EXISTS body is outside the positive-pattern profile"
+      }
+    },
+    {
+      "id": "reject-exists-optional",
+      "features": [
+        "exists_complex_bodies"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#defn_evalExists",
+      "query": "PREFIX ex: <http://example.org/> SELECT ?s WHERE { ?s ex:score ?n FILTER EXISTS { ?s ex:score ?m OPTIONAL { ?s ex:knows ?o } } }",
+      "expected": {
+        "kind": "rejection",
+        "stage": "admission",
+        "error": "EXISTS body is outside the positive-pattern profile"
+      }
+    },
+    {
+      "id": "reject-exists-values",
+      "features": [
+        "exists_complex_bodies"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#defn_evalExists",
+      "query": "PREFIX ex: <http://example.org/> SELECT ?s WHERE { ?s ex:score ?n FILTER EXISTS { VALUES ?m { 1 } } }",
+      "expected": {
+        "kind": "rejection",
+        "stage": "admission",
+        "error": "EXISTS body is outside the positive-pattern profile"
+      }
+    },
+    {
+      "id": "reject-exists-bind",
+      "features": [
+        "exists_complex_bodies"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#defn_evalExists",
+      "query": "PREFIX ex: <http://example.org/> SELECT ?s WHERE { ?s ex:score ?n FILTER EXISTS { BIND(?n + 1 AS ?m) } }",
+      "expected": {
+        "kind": "rejection",
+        "stage": "admission",
+        "error": "EXISTS body is outside the positive-pattern profile"
+      }
+    },
+    {
+      "id": "reject-exists-subquery",
+      "features": [
+        "exists_complex_bodies"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#defn_evalExists",
+      "query": "PREFIX ex: <http://example.org/> SELECT ?s WHERE { ?s ex:score ?n FILTER EXISTS { { SELECT ?s WHERE { ?s ex:score ?m } } } }",
+      "expected": {
+        "kind": "rejection",
+        "stage": "admission",
+        "error": "EXISTS body is outside the positive-pattern profile"
+      }
+    },
+    {
+      "id": "reject-exists-aggregate",
+      "features": [
+        "exists_complex_bodies"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#defn_evalExists",
+      "query": "PREFIX ex: <http://example.org/> SELECT ?s WHERE { ?s ex:score ?n FILTER EXISTS { { SELECT (COUNT(*) AS ?m) WHERE { ?s ex:score ?v } } } }",
+      "expected": {
+        "kind": "rejection",
+        "stage": "admission",
+        "error": "EXISTS body is outside the positive-pattern profile"
+      }
+    },
+    {
+      "id": "reject-exists-ordered-slice",
+      "features": [
+        "exists_complex_bodies"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#defn_evalExists",
+      "query": "PREFIX ex: <http://example.org/> SELECT ?s WHERE { ?s ex:score ?n FILTER EXISTS { { SELECT ?s WHERE { ?s ex:score ?m } ORDER BY ?s LIMIT 1 } } }",
+      "expected": {
+        "kind": "rejection",
+        "stage": "admission",
+        "error": "EXISTS body is outside the positive-pattern profile"
+      }
+    },
+    {
+      "id": "reject-exists-nullable-path",
+      "features": [
+        "exists_complex_bodies"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#defn_evalExists",
+      "query": "PREFIX ex: <http://example.org/> SELECT ?s WHERE { ?s ex:score ?n FILTER EXISTS { ?s ex:knows* ?o } }",
+      "expected": {
+        "kind": "rejection",
+        "stage": "admission",
+        "error": "EXISTS body is outside the positive-pattern profile"
+      }
+    },
+    {
+      "id": "reject-exists-residual-path",
+      "features": [
+        "exists_complex_bodies"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#defn_evalExists",
+      "query": "PREFIX ex: <http://example.org/> SELECT ?s WHERE { ?s ex:score ?n FILTER EXISTS { ?s (ex:knows|ex:knows) ?o } }",
+      "expected": {
+        "kind": "rejection",
+        "stage": "admission",
+        "error": "EXISTS body is outside the positive-pattern profile"
+      }
+    },
+    {
+      "id": "reject-exists-nested-exists",
+      "features": [
+        "exists_complex_bodies"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#defn_evalExists",
+      "query": "PREFIX ex: <http://example.org/> SELECT ?s WHERE { ?s ex:score ?n FILTER EXISTS { FILTER EXISTS { ?s ex:score ?m } } }",
+      "expected": {
+        "kind": "rejection",
+        "stage": "admission",
+        "error": "nested EXISTS is not admitted"
+      }
+    },
+    {
+      "id": "reject-exists-nested-not-exists",
+      "features": [
+        "exists_complex_bodies"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#defn_evalExists",
+      "query": "PREFIX ex: <http://example.org/> SELECT ?s WHERE { ?s ex:score ?n FILTER EXISTS { FILTER NOT EXISTS { ?s ex:score ?m } } }",
+      "expected": {
+        "kind": "rejection",
+        "stage": "admission",
+        "error": "nested EXISTS is not admitted"
+      }
+    },
+    {
+      "id": "reject-exists-nested-in-function",
+      "features": [
+        "exists_complex_bodies"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#defn_evalExists",
+      "query": "PREFIX ex: <http://example.org/> SELECT ?s WHERE { ?s ex:score ?n FILTER EXISTS { FILTER(IF(true, EXISTS { ?s ex:score ?m }, false)) } }",
+      "expected": {
+        "kind": "rejection",
+        "stage": "admission",
+        "error": "nested EXISTS is not admitted"
+      }
+    },
+    {
+      "id": "reject-nullable-path-alternative",
+      "features": [
+        "nullable_path_composition"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#defn_evalPP",
+      "query": "PREFIX ex: <http://example.org/> SELECT ?o WHERE { ex:missing (ex:knows*|ex:knows*) ?o }",
+      "expected": {
+        "kind": "rejection",
+        "stage": "admission",
+        "error": "nullable path composition is not admitted"
+      }
+    },
+    {
+      "id": "reject-nullable-path-lowered-sequence",
+      "features": [
+        "nullable_path_composition"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#defn_evalPP",
+      "query": "PREFIX ex: <http://example.org/> SELECT ?o WHERE { ex:missing ex:knows*/ex:knows* ?o }",
+      "expected": {
+        "kind": "rejection",
+        "stage": "admission",
+        "error": "nullable path composition is not admitted"
+      }
+    },
+    {
+      "id": "reject-nullable-path-nested-quantifier",
+      "features": [
+        "nullable_path_composition"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#defn_evalPP",
+      "query": "PREFIX ex: <http://example.org/> SELECT ?o WHERE { ex:missing (ex:knows?)+ ?o }",
+      "expected": {
+        "kind": "rejection",
+        "stage": "admission",
+        "error": "nullable path composition is not admitted"
       }
     }
   ]

@@ -1,10 +1,17 @@
 SELECT ?s ?n ?name WHERE {
   { SELECT ?s (COUNT(?v) AS ?n) WHERE {
-      ?s <http://ex/value> ?v
+      ?s (<http://ex/value>|<http://ex/value>) ?v
     } GROUP BY ?s
   }
   OPTIONAL { ?s <http://ex/name> ?name }
   MINUS { ?s <http://ex/blocked> true }
+  FILTER EXISTS {
+    ?s <http://ex/score> ?score
+    FILTER(?score > ?n)
+  }
+  FILTER EXISTS {
+    ?s <http://ex/value>/^<http://ex/value> ?s
+  }
 }
 ORDER BY DESC(?n) ?s
 LIMIT 2
