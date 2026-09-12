@@ -108,6 +108,8 @@ issuer-signature or credential-status claim.
 [GPT-6] The separately versioned [complete named-dataset API](references/exact-datasets-v2.md)
 adds a committed catalog including empty named graphs, GRAPH and local snapshot
 FROM/FROM NAMED selection. V1 requests and commitments retain their meaning.
+[GPT-6] The [V3 graph-result design](references/graph-results-v3.md) tracks pending
+blank-node and graph-form work; it does not claim V3 guest or receipt evidence.
 [GPT-6] The [query-coverage corpus](references/evaluator-conformance.md) separates
 executed host semantics, explicit unsupported features, and guest proof evidence.
 Its opt-in NPS comparison recipe records other engines' observations without
