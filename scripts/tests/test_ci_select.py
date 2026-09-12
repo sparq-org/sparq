@@ -407,6 +407,88 @@ class FailClosedMainTests(unittest.TestCase):
         self.assertEqual(obj["affected"], ["app"])
 
 
+class MergeGroupForcesFullTests(unittest.TestCase):
+    """[OPUS-5] #6048 COMBINED-HEAD RULE — a `merge_group` event resolves to
+    mode=full, reversing design §7 P8 (now §10).
+
+    WHY THE RULE EXISTS: the queue is moving to HEADGREEN grouping, where the
+    combined head is the only tree whose green is required before a whole group
+    lands on `main`. Compressing up to eight required validations into one run
+    makes that run the wrong place to spend a selection proof whose premises live
+    in a hand-maintained ownership map — a risk-budget call, deliberately NOT a
+    claim that per-prefix validation was catching something the head run misses
+    (§10.2 is explicit that prefix runs are nested and add no leg coverage).
+
+    WHY THE TEST IS NOT VACUOUS: removing the override in `main()` turns the first
+    test below from `full`/all-members back into `selected`/["app"] — red by
+    construction, on the SAME inputs a pull_request event still selects on.
+    """
+
+    def _run_main(self, argv):
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            code = cs.main(argv)
+        return code, json.loads(buf.getvalue())
+
+    def _write(self, text, suffix=".json"):
+        fd, path = tempfile.mkstemp(suffix=suffix)
+        with os.fdopen(fd, "w") as fh:
+            fh.write(text)
+        self.addCleanup(lambda: os.path.exists(path) and os.remove(path))
+        return path
+
+    def _select_for(self, event):
+        meta_path = self._write(json.dumps(_synthetic_meta()))
+        changed = self._write("crates/app/src/lib.rs\n", suffix=".txt")
+        return self._run_main(["--event", event, "--base", "b", "--head", "h",
+                               "--metadata-file", meta_path,
+                               "--changed-file", changed, "--repo-root", ROOT])
+
+    def test_merge_group_is_full_on_a_diff_a_pr_would_select(self):
+        # `crates/app/src/lib.rs` is a reverse-graph leaf: on a pull_request head
+        # it selects down to exactly ["app"]. The SAME diff on merge_group must
+        # run the whole workspace.
+        code, pr = self._select_for("pull_request")
+        self.assertEqual(code, 0)
+        self.assertEqual(pr["mode"], "selected")
+        self.assertEqual(pr["affected"], ["app"])
+
+        code, mg = self._select_for("merge_group")
+        self.assertEqual(code, 0)
+        self.assertEqual(mg["mode"], "full",
+                         "merge_group must never select: the combined head is the only "
+                         "tree the queue validates under HEADGREEN grouping (#6048)")
+        self.assertEqual(mg["affected"], ALL_MEMBERS)
+        self.assertNotIn("selector error", mg["reason"],
+                         "full on merge_group must come from the rule, not the error trap")
+
+    def test_merge_group_is_full_even_for_an_inert_diff(self):
+        # A docs-only batch would otherwise select an EMPTY closure; the rule is
+        # unconditional on the event, so the guards see mode=full and run. (Cost is
+        # still bounded: the `changes` pre-jobs class-gate the whole Rust matrix off
+        # for such a batch via --classify-only — see the next test.)
+        meta_path = self._write(json.dumps(_synthetic_meta()))
+        changed = self._write("docs/branch-protection.md\n", suffix=".txt")
+        code, obj = self._run_main(["--event", "merge_group", "--base", "b", "--head", "h",
+                                    "--metadata-file", meta_path,
+                                    "--changed-file", changed, "--repo-root", ROOT])
+        self.assertEqual(code, 0)
+        self.assertEqual(obj["mode"], "full")
+
+    def test_merge_group_full_does_not_leak_into_classify_only(self):
+        # The cost guard for the flip: --classify-only returns BEFORE the selector,
+        # so an inert merge-group batch is still classified (and still skips the Rust
+        # matrix wholesale upstream). Were the #6048 rule applied there too, every
+        # queued batch would rebuild the world.
+        buf = io.StringIO()
+        changed = self._write("docs/branch-protection.md\n", suffix=".txt")
+        with redirect_stdout(buf):
+            code = cs.main(["--classify-only", "--event", "merge_group",
+                            "--base", "b", "--head", "h", "--changed-file", changed])
+        self.assertEqual(code, 0)
+        self.assertEqual(buf.getvalue().strip(), "docs-only")
+
+
 class WiringHookTests(unittest.TestCase):
     """[FABLE-5] sq-fmx4u.3: the hooks the CI wiring consumes — the shadow rollout
     mode, the nextest filterset output, and clean full-mode on non-PR events."""

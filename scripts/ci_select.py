@@ -5,6 +5,10 @@
 # Authored by Opus 4.8 (Fable unavailable; flag for re-review when Fable returns).
 #
 # WHAT THIS IS (and is NOT):
+#   [OPUS-5] #6048: selection narrows a `pull_request` head only. A
+#   `merge_group` event resolves to mode=full — see the COMBINED-HEAD RULE in
+#   main() and research/change-based-test-selection.md §10.
+#
 #   Given the set of paths changed in a PR (a git diff), compute the set of
 #   workspace crates whose tests/benchmarks MUST run = the reverse-dependency
 #   closure (transitive dependents) of every changed crate, derived from
@@ -41,6 +45,7 @@
 #   ci_select.py                                   # real: git diff HEAD vs merge-base, cargo metadata
 #   ci_select.py --base <sha> --head <sha>         # explicit revision pair
 #   ci_select.py --event schedule                  # no diff => mode=full
+#   ci_select.py --event merge_group ...           # combined head => mode=full (#6048)
 #   ci_select.py --full                            # forced full (e.g. the `ci-full` label)
 #   ci_select.py --shadow ...                      # report-only: compute + report the
 #                                                  #   selection but emit mode=shadow so no
@@ -1033,7 +1038,8 @@ def _classify_only_main(args: argparse.Namespace, output_file: str | None,
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Change-based CI test-selection (design §3).")
     p.add_argument("--event", default="pull_request",
-                   help="GitHub event; anything but pull_request/merge_group => full (no PR diff)")
+                   help="GitHub event; only pull_request narrows (merge_group validates the "
+                        "combined head => full, #6048; every other event has no diff => full)")
     p.add_argument("--full", action="store_true", help="force mode=full (e.g. the ci-full label)")
     p.add_argument("--shadow", action="store_true",
                    help="report-only rollout mode (design §6.4): compute + report the "
@@ -1079,8 +1085,31 @@ def main(argv: list[str] | None = None) -> int:
         # [FABLE-5] sq-fmx4u.3: only pull_request and merge_group carry a sound
         # (base, head) revision pair; push/schedule/workflow_dispatch (and any
         # future event) get the full matrix by construction, not by error-trap.
-        if args.full or args.event not in ("pull_request", "merge_group"):
-            reason = "forced full run (ci-full override)" if args.full else f"{args.event} event: no PR diff"
+        #
+        # [OPUS-5] #6048 COMBINED-HEAD RULE — `merge_group` ⇒ mode=full, reversing
+        # design §7 P8 (full argument, incl. what it does NOT claim:
+        # research/change-based-test-selection.md §10).
+        # The merge queue is moving from ALLGREEN grouping (every entry's prefix
+        # must be green) to HEADGREEN (only the combined head must), which
+        # compresses up to eight required validations per group into one run that
+        # admits the whole batch to `main`. This is a RISK-BUDGET call, not a proof
+        # repair: the union-diff argument for selecting on a queue tree is unchanged,
+        # but the single surviving run is the wrong place to spend a proof whose
+        # premises live in a hand-maintained ownership map, so it gets the FULL
+        # matrix. Cost: a REGRESSION while the ruleset is still ALLGREEN (every
+        # prefix now runs full) that inverts once it flips. An inert batch is still
+        # skipped wholesale upstream by the cheap `--classify-only` change-class gate
+        # in the `changes` pre-jobs (that path returns above and is deliberately NOT
+        # affected here).
+        merge_group_full = args.event == "merge_group"
+        if args.full or merge_group_full or args.event not in ("pull_request", "merge_group"):
+            if args.full:
+                reason = "forced full run (ci-full override)"
+            elif merge_group_full:
+                reason = ("merge_group event: the combined head is the only tree the "
+                          "queue validates, so it runs the full matrix (#6048)")
+            else:
+                reason = f"{args.event} event: no PR diff"
             meta = load_metadata(args.metadata_file, repo_root)
             ws = parse_workspace(meta)
             sel = Selection(mode="full", reason=reason, affected=sorted(ws.members),
