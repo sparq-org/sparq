@@ -56,6 +56,11 @@ criteria = "safe-to-deploy"
 version = "1.1.4"
 criteria = "safe-to-deploy"
 
+[[exemptions.aho-corasick]]
+version = "1.1.5"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 c982642fa9e8606056828ee9a8505737230110bb1099153c79efe865c59d12ba. Substring automata underneath the evaluator's regex path; retain matching correctness, allocation and bounded-input review, rather than treating this as build-only code. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
 [[exemptions.anstream]]
 version = "1.0.0"
 criteria = "safe-to-deploy"
@@ -81,6 +86,11 @@ criteria = "safe-to-deploy"
 version = "1.0.102"
 criteria = "safe-to-deploy"
 
+[[exemptions.anyhow]]
+version = "1.0.104"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470. Error representation and conversions run at runtime as well as a compiler-probing build script; ownership/downcast invariants and diagnostic disclosure remain review topics. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
 [[exemptions.approx]]
 version = "0.5.1"
 criteria = "safe-to-deploy"
@@ -94,8 +104,28 @@ version = "1.2.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.ark-bn254]]
+version = "0.5.0"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 d69eab57e8d2663efa5c63135b2af4f396d66424f88954c21104125ab6b3e6bc. Curve parameters and point/scalar operations feed the SDK Groth16 closure; require a matching cryptographic source review to replace this exemption, not a local feature-patch approval. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
+[[exemptions.ark-bn254]]
 version = "0.6.0"
 criteria = "safe-to-deploy"
+
+[[exemptions.ark-crypto-primitives]]
+version = "0.5.0"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 1e0c292754729c8a190e50414fd1a37093c786c709899f29c9f7daccecfa855e. The selected snark/sponge/merlin/std surface remains cryptographic code. Optional derivative wiring is separately reviewed; neither that patch nor passing feature builds audits the upstream primitives. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
+[[exemptions.ark-crypto-primitives-macros]]
+version = "0.5.0"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 e7e89fe77d1f0f4fe5b96dfc940923d88d17b6a773808124f21e764dfb063c6a. Macro expansion generates code used by cryptographic primitives; review both build-host execution and emitted algorithm semantics. A procedural-macro label does not reduce cryptographic relevance. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
+[[exemptions.ark-ec]]
+version = "0.5.0"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 43d68f2d516162846c1238e755a7c4d131b892b70cc70c471a8e3ca3ed818fce. Curve/group/pairing operations sit in the verification closure; subgroup checks, arithmetic and encodings remain exact-version source-review backlog. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
 
 [[exemptions.ark-ec]]
 version = "0.6.0"
@@ -106,28 +136,83 @@ version = "0.6.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.ark-ff]]
+version = "0.5.0"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 a177aba0ed1e0fbb62aa9f6d0502e9b46dad8c2eab04c14258a1212d2557ea70. Finite-field implementation feeds proof verification; arithmetic, representation and generated implementation boundaries remain high-priority source-review topics. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
+[[exemptions.ark-ff]]
 version = "0.6.0"
 criteria = "safe-to-deploy"
+
+[[exemptions.ark-ff-asm]]
+version = "0.5.0"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 62945a2f7e6de02a31fe400aa489f0e0f5b2502e69f95f853adb82a96c7a6b60. This crate generates x86-64 finite-field assembly during compilation. Architecture conditions and emitted arithmetic require review even though the current machine is Apple Silicon. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
 
 [[exemptions.ark-ff-asm]]
 version = "0.6.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.ark-ff-macros]]
+version = "0.5.0"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 09be120733ee33f7693ceaa202ca41accd5653b779563608f1234f78ae07c4b3. Field implementation generation can affect arithmetic correctness; the macro executes on a build host and its generated code is a distinct risk from a passive manifest dependency. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
+[[exemptions.ark-ff-macros]]
 version = "0.6.0"
 criteria = "safe-to-deploy"
+
+[[exemptions.ark-groth16]]
+version = "0.5.0"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 88f1d0f3a534bb54188b8dcc104307db6c56cdae574ddc3212aec0625740fc7e. Proof verification algorithms remain an upstream audit gap at this version. The evaluator's Succinct-only admission narrows its public route, but the resolved SDK closure must not be called fully audited. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
+[[exemptions.ark-poly]]
+version = "0.5.0"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 579305839da207f02b89cd1679e50e67b4331e2f9294a57693e5051b7703fe27. Polynomial/FFT arithmetic forms part of the Ark dependency closure; algorithm and size/overflow assumptions remain review backlog independent of passing application proof fixtures. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
 
 [[exemptions.ark-poly]]
 version = "0.6.0"
 criteria = "safe-to-deploy"
+
+[[exemptions.ark-r1cs-std]]
+version = "0.5.0"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 941551ef1df4c7a401de7068758db6503598e6f01850bdb2cfdb614a1f9dbea1. Constraint gadgets are present in the all-target resolved closure. Metadata necessity is not a claim that every gadget executes in Sparq's Succinct verification path. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
+[[exemptions.ark-relations]]
+version = "0.5.1"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 ec46ddc93e7af44bcab5230937635b06fb5744464dd6a7e7b083e80ebd274384. Constraint-system semantics remain upstream review backlog. The tracing-subscriber compatibility patch changes instrumentation dependencies, with separate provenance; it does not certify constraint arithmetic. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
+[[exemptions.ark-serialize]]
+version = "0.5.0"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 3f4d068aaf107ebcd7dfb52bc748f8030e0fc930ac8e360146ca54c1203088f7. Cryptographic element encodings and deserialization validation are security-sensitive input boundaries; retain canonicality, subgroup/validation mode and allocation review. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
 
 [[exemptions.ark-serialize]]
 version = "0.6.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.ark-serialize-derive]]
+version = "0.5.0"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 213888f660fddcca0d257e88e54ac05bca01885f258ccdf695bafd77031bb69d. Generated serialization implementations can affect proof element decoding; require review of emitted validation behavior as well as build-host execution. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
+[[exemptions.ark-serialize-derive]]
 version = "0.6.0"
 criteria = "safe-to-deploy"
+
+[[exemptions.ark-snark]]
+version = "0.5.1"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 d368e2848c2d4c129ce7679a7d0d2d612b6a274d3ea6a13bad4445d61b381b88. SNARK traits define assumptions used across cryptographic implementations; the small interface scope is not evidence that consumers satisfy those assumptions. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
+[[exemptions.ark-std]]
+version = "0.5.0"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 246a225cc6131e9ee4f24619af0f19d67761fff15d7ccc22e42b80846e69449a. Compatibility, containers and random utilities underpin Ark code. Keep allocator/randomness/feature behavior in scope, without describing this support crate itself as a whole proof-system audit. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
 
 [[exemptions.ark-std]]
 version = "0.6.0"
@@ -216,6 +301,11 @@ notes = "solid-server-rs import pre-flight (sq-gg0qq.1): TLS-serving path of the
 version = "0.2.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.base64]]
+version = "0.23.1"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 ac07cdecf99051d9a5238b80f35af32cdeba5b336e55d957b318b50137e18da5. Byte/text encoding through SDK configuration serializers; invalid-input behavior and allocation remain relevant even though no cryptographic algorithm is supplied here. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
 [[exemptions.base64ct]]
 version = "1.8.3"
 criteria = "safe-to-deploy"
@@ -237,20 +327,50 @@ version = "0.10.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.bitflags]]
+version = "1.3.2"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 bef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a. Flag construction and interpretation are present through platform APIs. Preserve both exact major-version entries and their target paths; the old 1.x Metal path is not guest execution evidence. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
+[[exemptions.bitflags]]
 version = "2.13.0"
 criteria = "safe-to-deploy"
+
+[[exemptions.bitflags]]
+version = "2.13.2"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 3ded4057c258ba199e2d26386d3af3780957ecaee6c4ef4041c6b4b8b97c0b06. Flag construction and interpretation are present through platform APIs. Preserve both exact major-version entries and their target paths; the old 1.x Metal path is not guest execution evidence. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
 
 [[exemptions.bitset-core]]
 version = "0.1.1"
 criteria = "safe-to-deploy"
 
+[[exemptions.blake2]]
+version = "0.10.6"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 46502ad458c9a52b69d4d4d32775c788b7a1b85e8bc9d482d92250fc0e3f8efe. Hash implementation feeds risc0-zkp; algorithm correctness and implementation behavior remain unaudited by this policy disposition. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
 [[exemptions.blake3]]
 version = "1.8.5"
 criteria = "safe-to-deploy"
 
+[[exemptions.block]]
+version = "0.1.6"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 0d8c1fef690941d3e7788d328517591fecc684c084084702d6ff1641e993699a. Apple block ABI, captured ownership and callback lifetime are runtime FFI risks on its target path. The observed upstream future-compatibility warning remains a follow-up; compilation success is not FFI audit evidence. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
 [[exemptions.block-buffer]]
 version = "0.12.1"
 criteria = "safe-to-deploy"
+
+[[exemptions.borsh]]
+version = "1.8.1"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 553c5d846a6ba5150c65e3b1b8ec073bcf1abc20f9b7220de384a4443ea4e20a. Binary serialization for SDK values is a runtime input/length/encoding boundary, with a separate build script and derive helper. Preserve exact limits and validation obligations in future source review. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
+[[exemptions.borsh-derive]]
+version = "1.8.1"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 12cdfe656708a01f89b451a7d36466e6fe6c414de0aa18fc54f864f6f9ca9f56. Build-host procedural macros generate binary encoders/decoders; emitted length/error behavior is as relevant as macro host execution. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
 
 [[exemptions.bs58]]
 version = "0.5.1"
@@ -260,13 +380,28 @@ criteria = "safe-to-deploy"
 version = "1.25.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.bytemuck]]
+version = "1.25.2"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 95832e849adfb21180ccb6826a99da14e5d266ae5c2e668e1602cf234f153797. Byte casting and layout invariants are runtime memory-safety boundaries in SDK code; safe public APIs and successful compilation do not audit underlying unsafe implementation. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
 [[exemptions.bytemuck_derive]]
 version = "1.10.2"
 criteria = "safe-to-deploy"
 
+[[exemptions.bytemuck_derive]]
+version = "1.12.1"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 6a1f896587b6f2c069c73d2f0913e2d590c3990285cd2f0b6aa02b786b4c679c. Generated trait implementations assert byte-layout properties relied on by unsafe consumers; review the emitted safety preconditions, not only whether the macro compiles. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
 [[exemptions.bytes]]
 version = "1.11.1"
 criteria = "safe-to-deploy"
+
+[[exemptions.bytes]]
+version = "1.12.1"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04. Reference-counted byte buffers and serialization participate in host SDK framing. Ownership, slicing and allocation behavior remain exact-version memory/input review backlog. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
 
 [[exemptions.bytesize]]
 version = "2.3.1"
@@ -276,9 +411,24 @@ criteria = "safe-to-deploy"
 version = "0.6.1"
 criteria = "safe-to-deploy"
 
+[[exemptions.camino]]
+version = "1.2.5"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 bb1307f12aa967b5a58416e87b3653360e0fd614a016b6e970db08fecbb1b80d. UTF-8 path handling supports Cargo build metadata and has a build script; path normalization, error handling and filesystem consumers remain relevant without implying network exposure. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
+[[exemptions.cargo-platform]]
+version = "0.1.9"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 e35af189006b9c0f00a064685c727031e3ed2d8020f7ba284d78cc2671bd36ea. Cargo target-expression parsing influences build selection. Preserve all target conditions in policy inventory and review parser/evaluation correctness rather than dropping non-host targets. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
 [[exemptions.cc]]
 version = "1.2.63"
 criteria = "safe-to-deploy"
+
+[[exemptions.cc]]
+version = "1.4.5"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 005ec2760ca554fae18df7a11195552ec576cd665632a881bc011d5bb2fd4d80. Native compiler discovery and invocation run on the build host through target-specific dependencies. Environment, subprocess arguments and toolchain trust remain in scope despite the utility cohort. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
 
 [[exemptions.cesu8]]
 version = "1.1.0"
@@ -398,6 +548,11 @@ criteria = "safe-to-deploy"
 version = "0.2.17"
 criteria = "safe-to-deploy"
 
+[[exemptions.cpufeatures]]
+version = "0.3.1"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 5ca28b0ae3115b884660db4118d803791fd6756b6e88f39c0f3f7859060d7566. Architecture feature detection selects implementations at runtime; retain platform/FFI and instruction-selection review for each target, not an Apple-only inference. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
 [[exemptions.crc]]
 version = "3.4.0"
 criteria = "safe-to-deploy"
@@ -465,6 +620,36 @@ criteria = "safe-to-deploy"
 version = "0.1.1"
 criteria = "safe-to-deploy"
 
+[[exemptions.darling]]
+version = "0.20.11"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 fc7f46116c46ff9ab3eb1597a45688b6715c6e628b5c133e288e709a29bcb4ee. Attribute parsing support executes inside derive macros and influences generated code. Both selected versions have distinct consumers and remain separate exact-version review units. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
+[[exemptions.darling]]
+version = "0.24.1"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 ed17f5901b6630b993ca003def43f2f8ef4014fc13b047b57aad617ff32bc2ec. Attribute parsing support executes inside derive macros and influences generated code. Both selected versions have distinct consumers and remain separate exact-version review units. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
+[[exemptions.darling_core]]
+version = "0.20.11"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 0d00b9596d185e565c2207a0b01f8bd1a135483d02d9b7b0a54b11da8d53412e. Macro attribute parsing and diagnostics feed code generation; both versions need their own accepted source coverage. Runtime input handling is not inferred merely from Rust token parsing. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
+[[exemptions.darling_core]]
+version = "0.24.1"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 6837e2cf7485aaae18f86181d2f0e9a7ed297a025e220aeabf63fdebd3a2ddff. Macro attribute parsing and diagnostics feed code generation; both versions need their own accepted source coverage. Runtime input handling is not inferred merely from Rust token parsing. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
+[[exemptions.darling_macro]]
+version = "0.20.11"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 fc34b93ccb385b40dc71c6fceac4b2ad23662c7eeb248cf10d529b7e055b6ead. Procedural macro code executes in the compiler host; retain both selected versions, generated-code behavior and their separate parent chains. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
+[[exemptions.darling_macro]]
+version = "0.24.1"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 2ac7135c3ef02b2f7833bbeb1be5ba7f966dcde8a87c6b87f65a778d71a02785. Procedural macro code executes in the compiler host; retain both selected versions, generated-code behavior and their separate parent chains. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
 [[exemptions.dashmap]]
 version = "6.2.1"
 criteria = "safe-to-deploy"
@@ -473,6 +658,21 @@ criteria = "safe-to-deploy"
 version = "2.11.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.defmt]]
+version = "1.1.1"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 e2953bfe4f93bbd20cc71198842756f77d161884c99ebbabc41d80231ded88d1. Embedded logging support includes build-time generation plus target/runtime formatting. Resolved target presence is not evidence that the evaluator exposes log content through this crate. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
+[[exemptions.defmt-macros]]
+version = "1.1.1"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 bad9c72e7ca2137e0dc3813245a0d282fd6daad32fd800af018306a9169b5fe8. Formatting macros and a build script execute during compilation; emitted format metadata and host side effects remain review topics even for target-conditional consumers. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
+[[exemptions.defmt-parser]]
+version = "1.0.0"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 10d60334b3b2e7c9d91ef8150abfb6fa4c1c39ebbcf4a81c2e346aad939fee3e. Format-string parsing under the defmt macro chain affects generated code; its utility label must retain compile-time parser risk. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
 [[exemptions.der-parser]]
 version = "10.0.0"
 criteria = "safe-to-run"
@@ -480,6 +680,31 @@ criteria = "safe-to-run"
 [[exemptions.deranged]]
 version = "0.5.8"
 criteria = "safe-to-deploy"
+
+[[exemptions.derive_builder]]
+version = "0.20.2"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 507dfb09ea8b7fa618fcf76e953f4f5e192547945816d5358edffe39f6f94947. Builder macro facade is needed by risc0-build. Generated defaults/setter behavior and the delegated macro chain remain review backlog, not a runtime proof primitive. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
+[[exemptions.derive_builder_core]]
+version = "0.20.2"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 2d5bcf7b024d6835cfb3d473887cd966994907effbe9227e8c8219824d06c4e8. Builder code-generation support consumes syntax and emits implementation code on the build host; preserve its own exact package coverage rather than assuming facade coverage is transitive. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
+[[exemptions.derive_builder_macro]]
+version = "0.20.2"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 ab63b0e2bf4d5928aff72e83a7dace85d7bba5fe12dcc3c5a572d78caffd3f3c. Procedural macro expansion supplies SDK build configuration builders; review code generation and host execution separately from the application configuration tests. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
+[[exemptions.derive_more]]
+version = "2.1.1"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 d751e9e49156b02b44f9c1815bcb94b984cdcc4396ecc32521c739452808b134. Trait-derive facade selects add/add_assign/debug expansions in the SDK closure; generated arithmetic and diagnostics depend on its implementation crate and are not audited by facade compilation. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
+[[exemptions.derive_more-impl]]
+version = "2.1.1"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 799a97264921d8623a957f6c3b9011f3b5492f557bbb7a5a19b7fa6d06ba8dcb. Selected generated trait implementations execute at application runtime after compile-time expansion; review both expansion behavior and compiler-host execution. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
 
 [[exemptions.digest]]
 version = "0.10.7"
@@ -501,9 +726,19 @@ criteria = "safe-to-deploy"
 version = "0.5.3"
 criteria = "safe-to-deploy"
 
+[[exemptions.docker-generate]]
+version = "0.1.3"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 ccf673e0848ef09fa4aeeba78e681cf651c0c7d35f76ee38cec8e55bc32fa111. Dockerfile read/write support is in SDK build tooling; parsing, path/output handling and downstream build invocation are review topics even where the current build avoids Docker. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
 [[exemptions.dunce]]
 version = "1.0.5"
 criteria = "safe-to-deploy"
+
+[[exemptions.dyn-clone]]
+version = "1.0.20"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555. Trait-object cloning for schema support depends on ownership and allocation invariants; keep memory review rather than equating a small helper with no security relevance. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
 
 [[exemptions.dyn_size_of]]
 version = "0.4.5"
@@ -530,6 +765,11 @@ criteria = "safe-to-deploy"
 version = "0.6.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.elf]]
+version = "0.7.4"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 4445909572dbd556c457c849c4ca58623d84b27c8fff1e74b0b4227d8b90d17b. ELF parsing feeds method image construction/validation. Bounds, offsets, allocation and malformed executable handling are a concrete binary-input review surface outside the parser cohort. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
 [[exemptions.elliptic-curve]]
 version = "0.13.8"
 criteria = "safe-to-deploy"
@@ -539,9 +779,19 @@ notes = "RustCrypto-org crate; transitive dep of the OFF-by-default vc-bridge fe
 version = "4.3.2"
 criteria = "safe-to-deploy"
 
+[[exemptions.enum-ordinalize]]
+version = "4.4.2"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 89dd01549b09589510cf0647475075d12071456586d70f5c75c98ae2a5537677. Enum ordinal conversion facade participates in Ark derives; generated conversion/discriminant validity matters and its derive dependency needs distinct coverage. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
 [[exemptions.enum-ordinalize-derive]]
 version = "4.3.2"
 criteria = "safe-to-deploy"
+
+[[exemptions.enum-ordinalize-derive]]
+version = "4.4.2"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 a65863d15a4ce2888bd2f0f543cc963d3879c3a022c8ee43f6141d479a3ac815. Macro-generated ordinal conversions can assert enum validity; build-host execution and emitted range/discriminant behavior remain review topics. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
 
 [[exemptions.env_filter]]
 version = "2.0.0"
@@ -567,6 +817,11 @@ criteria = "safe-to-deploy"
 version = "2.4.1"
 criteria = "safe-to-run"
 
+[[exemptions.fastrand]]
+version = "2.5.0"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 da7c62ceae207dd37ea5b845da6a0696c799f85e97da1ab5b7910be3c1c80223. Used on the shown tempfile path for noncryptographic choices. Accepting a backlog entry does not permit treating this RNG as proof blinding, secret-key or cryptographic nonce entropy. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
 [[exemptions.ff]]
 version = "0.13.1"
 criteria = "safe-to-deploy"
@@ -575,6 +830,11 @@ notes = "RustCrypto-org crate; transitive dep of the OFF-by-default vc-bridge fe
 [[exemptions.find-msvc-tools]]
 version = "0.1.9"
 criteria = "safe-to-deploy"
+
+[[exemptions.find-msvc-tools]]
+version = "0.1.12"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 3e0f1c7c3a72c66fd80abe965175f7523475c0489a87d3ff9d6e8c87d87a9d2d. Windows registry/COM tool discovery supports native compiler invocation. Preserve its target and build-host boundary even though the local machine does not exercise it. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
 
 [[exemptions.flatbuffers]]
 version = "25.12.19"
@@ -588,6 +848,11 @@ criteria = "safe-to-deploy"
 [[exemptions.float_next_after]]
 version = "2.0.0"
 criteria = "safe-to-deploy"
+
+[[exemptions.foreign-types-macros]]
+version = "0.2.4"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 ea5190182e6915eb873ddbc16e23b711b6eb1f9c00a0d0a3a91b5f6228475225. Macros generate foreign-type ownership wrappers through the Metal dependency path; review emitted FFI lifetime/drop contracts and host expansion, not just target gating. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
 
 [[exemptions.fs-err]]
 version = "3.3.1"
@@ -613,6 +878,11 @@ criteria = "safe-to-deploy"
 version = "0.3.32"
 criteria = "safe-to-deploy"
 
+[[exemptions.futures-core]]
+version = "0.3.34"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 92d699e522242e69e3003b94ecc1f960f3a5e015aa7c5d7486e65ad01dd94f5e. Future/stream trait contracts occur on the shown JS-target path. Record all-target graph necessity without claiming the guest RISC-V binary executes browser async APIs. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
 [[exemptions.futures-executor]]
 version = "0.3.32"
 criteria = "safe-to-deploy"
@@ -633,9 +903,19 @@ criteria = "safe-to-deploy"
 version = "0.3.32"
 criteria = "safe-to-deploy"
 
+[[exemptions.futures-task]]
+version = "0.3.34"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 cd417de3d1d015fc3bfd2b1ea46dfc7bab72ef86f1cc7cc9c78e728b34a6d1fd. Task/waker utilities carry lifetime and concurrency assumptions through the JS-target closure; retain those assumptions even when current-target reachability is absent. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
 [[exemptions.futures-util]]
 version = "0.3.32"
 criteria = "safe-to-deploy"
+
+[[exemptions.futures-util]]
+version = "0.3.34"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 0d50a92467f8ba5dd6e3ee5d4bd04d73ab2e4e1c44474a0674821dfce14b79bc. Async combinators and pinning/ownership behavior require source review on their actual target path; the utility category is not a memory-safety determination. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
 
 [[exemptions.generic-array]]
 version = "0.14.7"
@@ -668,6 +948,11 @@ criteria = "safe-to-deploy"
 [[exemptions.getrandom]]
 version = "0.3.4"
 criteria = "safe-to-deploy"
+
+[[exemptions.getrandom]]
+version = "0.4.3"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 300e883d756b2e4ec94e02791f39b04b522276138852cfc41d9fb7e904106099. System entropy acquisition is target-dependent and includes build-time configuration. Review failure paths and actual backend selection; metadata membership alone establishes neither guest nondeterminism nor cryptographic quality. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
 
 [[exemptions.gl_generator]]
 version = "0.14.0"
@@ -718,6 +1003,11 @@ criteria = "safe-to-deploy"
 version = "0.14.5"
 criteria = "safe-to-deploy"
 
+[[exemptions.hashlink]]
+version = "0.10.0"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 7382cf6263419f2d8df38c55d7da83da5c18aef87fc7a7fc1fb1e344edfe14c1. Ordered hash containers support YAML parsing; allocation, mutation and ownership invariants remain runtime risk even where inputs originate from local configuration. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
 [[exemptions.hdt]]
 version = "0.7.3"
 criteria = "safe-to-deploy"
@@ -729,6 +1019,11 @@ criteria = "safe-to-deploy"
 [[exemptions.hermit-abi]]
 version = "0.5.2"
 criteria = "safe-to-deploy"
+
+[[exemptions.hex-literal]]
+version = "0.4.1"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 6fe2267d4ed49bc07b63801559be28c718ea06c4738b7a03c94df7386d2cde46. Compile-time hexadecimal conversion feeds SDK constants; review lexical/length interpretation and generated bytes rather than treating the macro as a cryptographic hash implementation. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
 
 [[exemptions.hexf-parse]]
 version = "0.2.1"
@@ -770,6 +1065,11 @@ criteria = "safe-to-deploy"
 [[exemptions.hybrid-array]]
 version = "0.4.12"
 criteria = "safe-to-deploy"
+
+[[exemptions.hybrid-array]]
+version = "0.4.15"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 27f864f10dfb56725ce5ce5472bc52252c8f93a4ab86327122cebf62c5f59a17. Array layout/indexing support feeds hash-buffer code in the evaluator closure; length and representation invariants remain memory review backlog. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
 
 [[exemptions.hyper]]
 version = "1.10.1"
@@ -860,8 +1160,18 @@ version = "1.2.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.indexmap]]
+version = "1.9.3"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 bd070e393353796e801d209ad339e89596eb4c8d430d18ede6a1cced8fafbd99. Ordered map behavior and allocation matter to serializers/parsers. Both selected versions remain distinct units; 1.x also has a build script, so neither is purely compile-time metadata. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
+[[exemptions.indexmap]]
 version = "2.14.0"
 criteria = "safe-to-deploy"
+
+[[exemptions.indexmap]]
+version = "2.14.2"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 cc4e190f5d26ca7051642629da2c52fc03bde85a03197c99408dcd291734c855. Ordered map behavior and allocation matter to serializers/parsers. Both selected versions remain distinct units; 1.x also has a build script, so neither is purely compile-time metadata. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
 
 [[exemptions.inout]]
 version = "0.1.4"
@@ -885,12 +1195,42 @@ version = "1.70.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.itertools]]
+version = "0.13.0"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 413ee7dfc52ee1a4949ceeb7dbc8a33f2d6c088194d9f922fb8318faf1f01186. Iterator combinators are consumed by arithmetic/support code; iteration, allocation and edge behavior remain source-review backlog without asserting independent cryptographic assurance. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
+[[exemptions.itertools]]
 version = "0.14.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.itoa]]
 version = "1.0.18"
 criteria = "safe-to-deploy"
+
+[[exemptions.jiff]]
+version = "0.2.35"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 668b7183bd07af9a4885f5c35b0cc5c83c4607a913c16b7e17291832910d2dcc. Date/time and system timezone handling under SDK configuration serializers can depend on host files/environment. Do not conflate this with the separately implemented deterministic SPARQL temporal relation. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
+[[exemptions.jiff-core]]
+version = "0.1.1"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 5e52fe76043ccecc9005d2305ebaadf7d7fc0cc89ca6baa10a94d6bc68c7128c. Low-level datetime primitives and timezone representation underpin Jiff; range/normalization/parser semantics remain source-review backlog in the host configuration closure. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
+[[exemptions.jiff-static]]
+version = "0.2.35"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 3a69dcb3a21cfb32ce1cd056169337ca284af0766dd766e7878819b251a49204. Timezone construction macros run in the build host and emit embedded data; review compile-time parser behavior and generated timezone representation. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
+[[exemptions.jiff-tzdb]]
+version = "0.1.8"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 142bd39932ad231f10513df9ab62661fead8719872150b7ad02a2df79f4e141e. Bundled timezone data requires provenance/version and decoder review. Data presence is not proof that every timezone path executes in the evaluator. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
+[[exemptions.jiff-tzdb-platform]]
+version = "0.1.3"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 875a5a69ac2bab1a891711cf5eccbec1ce0341ea805560dcd90b7a2e925132e8. Target-dependent timezone bundle selection must retain platform conditions; this backlog disposition does not certify timezone freshness or host-independent behavior. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
 
 [[exemptions.jni]]
 version = "0.22.4"
@@ -920,6 +1260,11 @@ criteria = "safe-to-deploy"
 version = "0.3.99"
 criteria = "safe-to-deploy"
 
+[[exemptions.js-sys]]
+version = "0.3.105"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 ce57d20d1ea864ce2ac172ab472d409214f4fd359f0b2a2775abdf522e2af99e. JS bindings include the resolved unsafe-eval feature on a wasm target path. Preserve that explicit capability in review scope; do not imply eval is called by the RISC-V guest or the admitted deterministic query API. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
 [[exemptions.json-event-parser]]
 version = "0.2.3"
 criteria = "safe-to-deploy"
@@ -937,6 +1282,16 @@ criteria = "safe-to-deploy"
 version = "3.1.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.lazy-regex]]
+version = "3.6.1"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 4994ba703f78b083e2f7946dac9251abd83fd43a0365f030e99b69be5b4b9ef9. Host SDK regex wrapper combines compile-time validation and runtime matching. Resource limits and regex behavior remain relevant despite the static-pattern orientation. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
+[[exemptions.lazy-regex-proc_macros]]
+version = "3.6.1"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 fd97232314824e6dbef1918a871bb93f51070455e3715bf26e19a6d01aa977a0. Compile-time regex parsing and emitted initialization execute at build/runtime boundaries; review pattern compilation behavior and host execution separately. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
 [[exemptions.libbz2-rs-sys]]
 version = "0.2.5"
 criteria = "safe-to-deploy"
@@ -944,6 +1299,11 @@ criteria = "safe-to-deploy"
 [[exemptions.libc]]
 version = "0.2.186"
 criteria = "safe-to-deploy"
+
+[[exemptions.libc]]
+version = "0.2.189"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2. Raw operating-system ABI bindings and platform build detection are runtime FFI boundaries. Keep target conditions; a build-script cohort does not make libc build-only. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
 
 [[exemptions.libloading]]
 version = "0.8.9"
@@ -960,6 +1320,11 @@ criteria = "safe-to-deploy"
 [[exemptions.libz-ng-sys]]
 version = "1.1.29"
 criteria = "safe-to-deploy"
+
+[[exemptions.linux-raw-sys]]
+version = "0.12.1"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53. Generated Linux syscall/type constants support rustix. ABI/version correctness matters on Linux even though local checks run on macOS. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
 
 [[exemptions.linux-raw-sys]]
 version = "0.12.1"
@@ -980,6 +1345,11 @@ criteria = "safe-to-deploy"
 [[exemptions.log]]
 version = "0.4.32"
 criteria = "safe-to-deploy"
+
+[[exemptions.log]]
+version = "0.4.34"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6. Logging facade can expose diagnostic content through selected consumers. No claim is made that this crate itself logs private witnesses; call-site disclosure remains a separate review obligation. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
 
 [[exemptions.lru-slab]]
 version = "0.1.2"
@@ -1009,9 +1379,19 @@ criteria = "safe-to-deploy"
 version = "2.8.2"
 criteria = "safe-to-deploy"
 
+[[exemptions.memchr]]
+version = "2.8.3"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98. SIMD byte search under RDF/text parsers has target dispatch and bounds-sensitive implementation. Retain runtime input and memory review despite the utility classification. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
 [[exemptions.memmap2]]
 version = "0.9.11"
 criteria = "safe-to-deploy"
+
+[[exemptions.merlin]]
+version = "3.0.0"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 58c38e2799fc0978b65dfff8023ec7843e2330bb462f19198840b34b6582397d. Transcript composition supplies challenge/domain-separation behavior. Upstream version-specific source coverage is required before removing this exception; application success tests do not audit transcript security. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
 
 [[exemptions.mimalloc]]
 version = "0.1.52"
@@ -1044,6 +1424,16 @@ criteria = "safe-to-deploy"
 [[exemptions.mownstr]]
 version = "0.3.1"
 criteria = "safe-to-deploy"
+
+[[exemptions.multiversion]]
+version = "0.9.0"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 b4ca4bea16ffc3f443cf7d866912118196bfef4c6a1556ca00f9f9b00bb43f7c. Architecture-specific function selection under text encoding combines generated code with runtime dispatch; preserve target feature contracts and do not infer selected paths from host hardware alone. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
+[[exemptions.multiversion-macros]]
+version = "0.9.0"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 0d416831a7317ef4b08bee00b69cbbb9c8763da7959a7026244d6266869f9c83. Code generation for architecture variants runs on the build host; review emitted target-feature attributes and dispatch contracts as well as macro execution. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
 
 [[exemptions.naga]]
 version = "30.0.0"
@@ -1078,6 +1468,11 @@ version = "0.4.6"
 criteria = "safe-to-deploy"
 
 [[exemptions.num-bigint]]
+version = "0.4.8"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 c89e69e7e0f03bea5ef08013795c25018e101932225a656383bd384495ecc367. Large-integer encoding/arithmetic is used in SDK cryptographic support. Review bounds and algorithm semantics, and do not assume general-purpose bigint operations are constant-time. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
+[[exemptions.num-bigint]]
 version = "0.5.1"
 criteria = "safe-to-deploy"
 
@@ -1092,6 +1487,21 @@ criteria = "safe-to-deploy"
 [[exemptions.num_cpus]]
 version = "1.17.0"
 criteria = "safe-to-deploy"
+
+[[exemptions.num_enum]]
+version = "0.7.6"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 5d0bca838442ec211fa11de3a8b0e0e8f3a4522575b5c4c06ed722e005036f26. Primitive/enum conversion facade feeds VM platform types; exact discriminant handling and its derive implementation remain review topics. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
+[[exemptions.num_enum_derive]]
+version = "0.7.6"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 680998035259dcfcafe653688bf2aa6d3e2dc05e98be6ab46afb089dc84f1df8. Generated enum conversion code can affect VM/platform interpretation; build-host expansion and emitted invalid-value handling require matching source review. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
+[[exemptions.objc]]
+version = "0.2.7"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 915b1b472bc21c53464d6c8461c9d3af805ba1ef837e1cac254428f4a77177b1. Objective-C messaging, ownership and lifetime contracts are target-specific runtime FFI risks through Metal. All-target inventory is retained without claiming execution in the guest. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
 
 [[exemptions.objc2]]
 version = "0.6.4"
@@ -1276,9 +1686,19 @@ notes = "RustCrypto/dalek AEAD+X25519 stack pulled in by the opt-in, publish=fal
 version = "1.13.1"
 criteria = "safe-to-deploy"
 
+[[exemptions.portable-atomic]]
+version = "1.15.0"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 05c8b63e8d9609db387f0324918f81d68fe27748f084ef092fb35954d0539a85. Atomic operations and architecture fallback logic are runtime synchronization risks with a build script; retain memory-ordering and target behavior in scope. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
 [[exemptions.portable-atomic-util]]
 version = "0.2.7"
 criteria = "safe-to-deploy"
+
+[[exemptions.portable-atomic-util]]
+version = "0.2.8"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 10ab3eb7f3becc3a1cbc4f2c6f20267996cfc1a6467a873763411b136a122715. Allocation/reference-counting utilities built on portable atomics have runtime lifetime/synchronization obligations; the build-script category is nonexclusive. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
 
 [[exemptions.potential_utf]]
 version = "0.1.5"
@@ -1305,6 +1725,11 @@ version = "0.13.6"
 criteria = "safe-to-deploy"
 notes = "RustCrypto-org crate; transitive dep of the OFF-by-default vc-bridge feature (p256 path); no upstream audit covers this exact version [OPUS-4.8]"
 
+[[exemptions.proc-macro-crate]]
+version = "3.5.0"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 e67ba7e9b2b56446f1d419b1d807906278ffa1a658a8a5d8a39dcb1f5a78614f. Manifest discovery/parsing for macro crate names touches build-host filesystem/environment. Review path resolution and generated names; guest graph membership does not mean guest filesystem access. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
 [[exemptions.profiling]]
 version = "1.0.18"
 criteria = "safe-to-deploy"
@@ -1315,8 +1740,23 @@ criteria = "safe-to-deploy"
 
 [[exemptions.proptest]]
 version = "1.11.0"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 4b45fcc2344c680f5025fe57779faef368840d0bd1f42f216291f0dc4ace4744. The shown ruint path appears in all-target resolution and must remain covered by the current gate. This is not evidence that property generators or shrinking execute in production; any future edge removal must be demonstrated independently. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
+[[exemptions.proptest]]
+version = "1.11.0"
 criteria = "safe-to-run"
 notes = "DEV/TEST-ONLY property-testing harness (sq-3dyje property-testing program: substrate/core/engine/canon). NOT in the shipped or wasm build — pulled in only under [dev-dependencies]. Trusted sets reach proptest via zcash's safe-to-deploy delta chain only up to 1.4.0 and google's ub-risk-3 audit of 0.10.1; neither covers the current 1.11.0, and no trusted set audits 1.4.0 -> 1.11.0. Scoped dev-only safe-to-run exemption at the exact in-tree version until an upstream trusted audit reaches 1.11.0. [OPUS-4.8]"
+
+[[exemptions.prost]]
+version = "0.13.5"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 2796faa41db3ec313a31f7624d9286acf277b52de526150b7e69f3debf891ee5. Protocol Buffers encode/decode the ordinary external-prover IPC path. Length, allocation, malformed-message and version handling are important host input boundaries; successful proofs are not a parser audit. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
+[[exemptions.prost-derive]]
+version = "0.13.5"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 8a56d757972c98b346a9b766e3f02746cde6dd1cd1d1d563472929fdd74bec4d. Generated protobuf codecs define runtime decoding behavior for SDK IPC. Review emitted bounds/error semantics as well as build-host macro execution. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
 
 [[exemptions.pyo3]]
 version = "0.29.0"
@@ -1383,6 +1823,16 @@ version = "0.8.10"
 criteria = "safe-to-deploy"
 notes = "solid-server-rs import pre-flight (sq-gg0qq.1): blocking connection pool for the opt-in redis-replay feature (distributed DPoP jti replay store); dedicated-OS-thread pattern, no async runtime features. [FABLE-5]"
 
+[[exemptions.rand]]
+version = "0.8.8"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 e058c7de0b26af77780c769414d6257830bb240f3c38477dbc2c16e5f54d6d4c. The two versions have different feature/consumer paths. RNG selection, seeding and error handling remain call-site-sensitive; no blanket claim that all consumers use cryptographic generators or that the admitted guest queries use entropy. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
+[[exemptions.rand]]
+version = "0.9.5"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 b9ef1d0d795eb7d84685bca4f72f3649f064e6641543d3a8c415898726a57b41. The two versions have different feature/consumer paths. RNG selection, seeding and error handling remain call-site-sensitive; no blanket claim that all consumers use cryptographic generators or that the admitted guest queries use entropy. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
 [[exemptions.rand_core]]
 version = "0.10.1"
 criteria = "safe-to-deploy"
@@ -1416,13 +1866,33 @@ notes = "solid-server-rs import pre-flight (sq-gg0qq.1): SYNC-only client (defau
 version = "0.5.18"
 criteria = "safe-to-deploy"
 
+[[exemptions.ref-cast]]
+version = "1.0.27"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 7e440fb4e4b4147295338efb76001ab9e4efc0e5839df2c47fc5ac2381d365c3. Reference reinterpreting APIs rely on layout invariants and generated implementations, alongside a build script. Treat as runtime memory review, not only compiler tooling. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
+[[exemptions.ref-cast-impl]]
+version = "1.0.27"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 92ecd8964f8453721699a1ed72037b0db49ce2f5a5138486ee89bed6f67cdf3a. Derive expansion establishes layout preconditions for reference casting; review generated invariants and build-host behavior independently of the facade. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
 [[exemptions.regex]]
 version = "1.12.4"
 criteria = "safe-to-deploy"
 
+[[exemptions.regex]]
+version = "1.13.1"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 f020237b6c8eed93db2e2cb53c00c60a8e1bc73da7d073199a1180401450218d. User query regex handling affects semantic correctness and resource use. Upstream complexity statements do not remove the need to review pattern construction/allocation and application budgets. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
 [[exemptions.regex-automata]]
 version = "0.4.14"
 criteria = "safe-to-deploy"
+
+[[exemptions.regex-automata]]
+version = "0.4.18"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 ad8553b9b26413251cbf30e620595c7a41b3887f03da04579c0e6b0d6a06b4b2. Automata construction and multiple matching engines under regex have allocation/bounds/semantic review needs; exact selected engines/features are preserved in the inventory. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
 
 [[exemptions.regex-syntax]]
 version = "0.8.11"
@@ -1461,6 +1931,61 @@ criteria = "safe-to-deploy"
 version = "0.8.6"
 criteria = "safe-to-deploy"
 
+[[exemptions.risc0-binfmt]]
+version = "3.0.5"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 d836c6ad82f4ced7c61d5feedf905a17780312e393aa681d29cc0bbc5131672b. ELF/image parsing, encoding and image identity calculations affect what code a receipt authenticates. Build/source audits and prebuilt method artifact provenance must remain separate. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
+[[exemptions.risc0-build]]
+version = "3.0.6"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 bd8216cdd9f573808a94769767480b06ad1e74ae60841c9582fdf51b8e29ba53. Cargo/toolchain discovery, subprocess/build behavior and artifact generation are trusted build inputs. Removed unused dirs and kernel defaults are separate local patches; this entry covers only the exact upstream audit gap. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
+[[exemptions.risc0-circuit-keccak]]
+version = "4.0.6"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 7c731e12429eb4457e1ddc69c56ee7343a1e10b86e4aa55bc8f4d2b13734abb9. Circuit definitions and build-time generated kernels influence proof semantics. Source archive review, native downloaded kernel provenance and external r0vm binary trust are separate obligations. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
+[[exemptions.risc0-circuit-recursion]]
+version = "4.0.5"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 40dd640122abcc67d4d4e4f055c68cbc3ad2efb8589c65c2b23d354632971b60. Recursive circuit/receipt compression code and source-pinned recursion artifacts are security-critical. Keep reviewed ZIP integrity and actual backend evidence separate from a crate audit or ZK assurance claim. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
+[[exemptions.risc0-circuit-rv32im]]
+version = "4.0.5"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 cb11231aa4b74bcc0c8d16597893fbd7ea6f6a9ebbc35e16bfd06b467c7ee104. Instruction/circuit constraints sit in the proof-system trust boundary. Resolved features do not certify every HAL or establish complete upstream soundness/zero-knowledge assurance. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
+[[exemptions.risc0-core]]
+version = "3.0.2"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 d6eb2d2b2c6cac0e43cbb2202daacee1a2f24d0dfa03fd08887a11dc6defdcc1. Shared proof-system primitives and word/field representations carry cross-crate invariants; upstream source review remains distinct from application relation tests. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
+[[exemptions.risc0-groth16]]
+version = "3.0.5"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 b0ca702ea7d0162766defe7ed6a79bda4a747ad9e2684000a6edd14df0a6d1f3. Groth16 receipt parsing/verifying and representation conversion are present in the resolved SDK closure. Succinct-only public admission does not justify deleting all-target review obligations or claiming all receipt modes tested. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
+[[exemptions.risc0-zkos-v1compat]]
+version = "2.2.3"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 b8b0b598ba7946354b10ca5c56e382de801e6c7fce9fccad0396ec436bc5072b. The selected library embeds exact unchanged ELF bytes. Manifest edge removal does not remove code already compiled into that ELF or fix its security properties; the identical upstream/candidate binary E0004 limitation remains documented. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
+[[exemptions.risc0-zkp]]
+version = "3.0.5"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 21c0c921e5e2d44197940d387a45e29c6165e318b5a168fdfdbd50f50ba03678. Proof-system core, hashing, field operations and build configuration require specialist source review. Scope-specific upstream audits may exist; this exact accepted cargo-vet criterion remains uncovered. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
+[[exemptions.risc0-zkvm]]
+version = "3.0.6"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 a5d4f24ec767f71a1663a4d24cf9d02b6bfee44c64647cae677227817051007a. Receipt verification, guest APIs and client/prover selection define trust boundaries. Sparq uses explicit ExternalProver and rejects fake receipts; upstream and local feature-edge changes require separate reviews, and no full cryptographic assurance follows here. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
+[[exemptions.risc0-zkvm-platform]]
+version = "2.2.3"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 2eb37a97ff7e8e4ee1b2a1c43ec143b4887759883c343507af9e4787a57914cd. Guest syscall/runtime/entropy exports are target-dependent ABI boundaries. Preserve exact features and distinguish tested guest execution from whole-platform or embedded-kernel audit coverage. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
 [[exemptions.robust]]
 version = "1.2.0"
 criteria = "safe-to-deploy"
@@ -1473,6 +1998,16 @@ criteria = "safe-to-deploy"
 version = "0.13.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.ruint]]
+version = "1.20.0"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 f5e99bff0393163bb25029a6af25d3d8d202ba5b5438a74d1bd8789f5c822970. Fixed-width integer parsing/arithmetic and serialization feed image/SDK code. Range/overflow/encoding and feature-specific implementations remain backlog; property-test dependencies in metadata are not runtime proof evidence. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
+[[exemptions.ruint-macro]]
+version = "1.2.1"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 48fd7bd8a6377e15ad9d42a8ec25371b94ddc67abe7c8b9127bec79bebaaae18. Compile-time integer literals generate values used by consumers. Lexical width/overflow handling and emitted constants require review along with build-host execution. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
 [[exemptions.rustc-hash]]
 version = "2.1.3"
 criteria = "safe-to-deploy"
@@ -1480,6 +2015,11 @@ criteria = "safe-to-deploy"
 [[exemptions.rusticata-macros]]
 version = "4.1.0"
 criteria = "safe-to-run"
+
+[[exemptions.rustix]]
+version = "1.1.4"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 b6fe4565b9518b83ef4f91bb47ce29620ca828bd32cb7e408f0062e9930ba190. Syscall wrappers and tempfile filesystem operations are runtime ownership/FFI/security boundaries with a build script. Preserve Linux/Unix/Windows paths rather than treating this as build-only code. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
 
 [[exemptions.rustix]]
 version = "1.1.4"
@@ -1522,6 +2062,11 @@ criteria = "safe-to-deploy"
 version = "1.0.2"
 criteria = "safe-to-deploy"
 
+[[exemptions.rzup]]
+version = "0.5.2"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 96909a7ea8fdf7e18da727d7facbc43eea8a4f77635e7ec75a69794dede16fb6. The active feature-free discovery surface reads toolchain/configuration state. Install/publish signatures are separated by the reviewed local patch, but installed binary trust, path selection and upstream source coverage remain separate obligations. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
 [[exemptions.same-file]]
 version = "1.0.6"
 criteria = "safe-to-deploy"
@@ -1533,6 +2078,16 @@ criteria = "safe-to-deploy"
 [[exemptions.scheduled-thread-pool]]
 version = "0.2.7"
 criteria = "safe-to-deploy"
+
+[[exemptions.schemars]]
+version = "0.9.0"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 4cd191f9397d57d581cddd31014772520aa448f65ef991055d7f61582c65165f. Both schema-generation versions run through SDK configuration support. Schema traversal/allocation and generated reference behavior remain backlog; schema generation is not payload validation assurance. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
+[[exemptions.schemars]]
+version = "1.2.2"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 687274d293b6cdc6e73e0fee520bf2049650090d7164f87672d212a3c530cf4a. Both schema-generation versions run through SDK configuration support. Schema traversal/allocation and generated reference behavior remain backlog; schema generation is not payload validation assurance. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
 
 [[exemptions.scopeguard]]
 version = "1.2.0"
@@ -1568,13 +2123,33 @@ criteria = "safe-to-deploy"
 version = "1.0.150"
 criteria = "safe-to-deploy"
 
+[[exemptions.serde_json]]
+version = "1.0.151"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 c841b55ecdae098c80dcae9cf767f6f8a0c2cdb3416bbef72181df4d0fe73f14. Host and guest JSON parsing/serialization bind request/result data. The resolved unbounded_depth feature must stay visible: feature presence alone does not disable recursion checks, and accepting this entry does not waive framing/depth limits at callers. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
 [[exemptions.serde_path_to_error]]
 version = "0.1.20"
 criteria = "safe-to-deploy"
 
+[[exemptions.serde_spanned]]
+version = "0.6.9"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 bf41e0cfaf7226dca15e8197172c295a782857fcb97fad1808a166870dee75a3. Source-span wrappers participate in TOML parsing and error reporting; retain indexing/serialization behavior and input provenance in the review scope. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
 [[exemptions.serde_urlencoded]]
 version = "0.7.1"
 criteria = "safe-to-deploy"
+
+[[exemptions.serde_with]]
+version = "3.23.0"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 935177bb8c0cd8ca1a4e6d1a2ac8988bea69cab4f9d3a31311e012ad27868ea4. Custom conversions widen the SDK configuration serialization surface. Exact enabled adapters and dependency paths matter; a derive helper's review does not audit these runtime conversions. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
+[[exemptions.serde_with_macros]]
+version = "3.23.0"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 1d607aa01a3cb0ad757d6fd216136910db3c97b102fe686585689615a02dbcdc. Macros emit runtime serialization behavior and execute on the build host; generated conversion semantics need separate coverage from serde_with's facade. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
 
 [[exemptions.serdect]]
 version = "0.2.0"
@@ -1693,6 +2268,11 @@ criteria = "safe-to-deploy"
 version = "0.3.6"
 criteria = "safe-to-deploy"
 
+[[exemptions.spin]]
+version = "0.9.9"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 3763264f6b73151db08c50ff20d7d8a0b8796e021cdea7ceedad07b80155fa0e. Selected once-initialization behavior has concurrency/memory-ordering obligations. Low-level synchronization is not certified by no-default-features builds or the absence of an advisory. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
 [[exemptions.spirv]]
 version = "0.3.0+sdk-1.3.268.0"
 criteria = "safe-to-deploy"
@@ -1700,6 +2280,11 @@ criteria = "safe-to-deploy"
 [[exemptions.spki]]
 version = "0.7.3"
 criteria = "safe-to-deploy"
+
+[[exemptions.stability]]
+version = "0.2.1"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 d904e7009df136af5297832a3ace3370cd14ff1546a232f4f185036c2736fcac. API stability attribute expansion executes on the compiler host and emits Rust items. It is a build-execution review unit, not passive documentation. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
 
 [[exemptions.stable_deref_trait]]
 version = "1.2.1"
@@ -1716,6 +2301,16 @@ criteria = "safe-to-deploy"
 [[exemptions.syn]]
 version = "2.0.117"
 criteria = "safe-to-deploy"
+
+[[exemptions.syn]]
+version = "2.0.119"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 872831b642d1a07999a962a351ed35b955ea2cfc8f3862091e2a240a84f17297. Both major versions parse Rust syntax for procedural macros. Retain exact consumer/version paths and parser/resource behavior; code-generation consumers are not covered transitively by a syn audit. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
+[[exemptions.syn]]
+version = "3.0.5"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 12df2e0110f65b775f769bb17ef989067a1d931b2eb822bd4346631eeada89f9. Both major versions parse Rust syntax for procedural macros. Retain exact consumer/version paths and parser/resource behavior; code-generation consumers are not covered transitively by a syn audit. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
 
 [[exemptions.sync_wrapper]]
 version = "1.0.2"
@@ -1737,6 +2332,11 @@ criteria = "safe-to-deploy"
 version = "0.13.5"
 criteria = "safe-to-deploy"
 
+[[exemptions.tempfile]]
+version = "3.27.0"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd. Host temporary-file creation/removal depends on path, ownership, collision and OS behavior. The real consumer may process sensitive prover artifacts; retain filesystem and noncryptographic naming RNG distinction. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
 [[exemptions.termcolor]]
 version = "1.4.1"
 criteria = "safe-to-deploy"
@@ -1745,13 +2345,28 @@ criteria = "safe-to-deploy"
 version = "2.0.18"
 criteria = "safe-to-deploy"
 
+[[exemptions.thiserror]]
+version = "2.0.20"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 ec86235f5fcc2a73650310756d2ac5b138a5780bbbdfae3eeccec992c435ba4f. Error facade/build detection and generated Error implementations are separate surfaces. Diagnostic formatting can propagate application data; no privacy claim follows from this exact-version exception. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
 [[exemptions.thiserror-impl]]
 version = "2.0.18"
 criteria = "safe-to-deploy"
 
+[[exemptions.thiserror-impl]]
+version = "2.0.20"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 bc04cd3e1236dd4a98afca4569f2deb3f120e5422a4023be2cb683f8486292af. Error derive macro expansion supplies runtime conversions and formatting. Review emitted behavior and compiler-host execution, separately from thiserror facade coverage. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
 [[exemptions.time]]
 version = "0.3.53"
 criteria = "safe-to-deploy"
+
+[[exemptions.time]]
+version = "0.3.55"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 cdb87b95ec50ddfa440816d227a17b2ccbdda963a316a727fda0fc4334f7d134. Parsing/formatting and serde conversions handle SDK configuration temporal data. Range, normalization and allocation behavior remain backlog, distinct from evaluator temporal semantic fixes. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
 
 [[exemptions.time-core]]
 version = "0.1.9"
@@ -1760,6 +2375,11 @@ criteria = "safe-to-deploy"
 [[exemptions.time-macros]]
 version = "0.2.31"
 criteria = "safe-to-deploy"
+
+[[exemptions.time-macros]]
+version = "0.2.32"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 7e689342a48d2ea927c87ea50cabf8594854bf940e9310208848d680d668ed85. Compile-time date/time parsing emits constants and format descriptions; review lexical/range behavior and host macro execution. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
 
 [[exemptions.tiny-keccak]]
 version = "2.0.2"
@@ -1772,6 +2392,11 @@ criteria = "safe-to-deploy"
 [[exemptions.tinyvec]]
 version = "1.11.0"
 criteria = "safe-to-deploy"
+
+[[exemptions.tinyvec]]
+version = "1.13.2"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 4cf0ded5c4e56918d8f8a339e1bb67d038d3bc6d144ac407904015ba2e4cde9b. Small-vector allocation/index behavior supports encoding helpers. Upstream claims of safe source do not amount to independent source coverage for this exact version. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
 
 [[exemptions.tokio]]
 version = "1.52.3"
@@ -1792,6 +2417,41 @@ criteria = "safe-to-deploy"
 [[exemptions.tokio-util]]
 version = "0.7.18"
 criteria = "safe-to-deploy"
+
+[[exemptions.toml]]
+version = "0.8.23"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 dc1beb996b9d83529a9e75c17a1686767d148d70663143c7854d8b4a09ced362. SDK configuration parsing/writing consumes structured input; preserve parser resource/error behavior and filesystem consumers in the review scope. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
+[[exemptions.toml_datetime]]
+version = "0.6.11"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 22cddaf88f4fbc13c51aebbf5f8eceb5c7c5a9da2ac40a13519eb5b0a0e8f11c. Both datetime representations support different TOML generations. Preserve their separate paths and lexical/normalization behavior rather than assuming one version's review covers the other. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
+[[exemptions.toml_datetime]]
+version = "1.1.1+spec-1.1.0"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 3165f65f62e28e0115a00b2ebdd37eb6f3b641855f9d636d3cd4103767159ad7. Both datetime representations support different TOML generations. Preserve their separate paths and lexical/normalization behavior rather than assuming one version's review covers the other. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
+[[exemptions.toml_edit]]
+version = "0.22.27"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 41fe8c660ae4257887cf66394862d21dbca4a6ddd26f04a3560410406a2f819a. Two TOML parser/editor versions serve SDK configuration and build-time macro manifest discovery. Runtime input and compiler-host filesystem parsing remain distinct risks. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
+[[exemptions.toml_edit]]
+version = "0.25.15+spec-1.1.0"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 1340ea94a5856333492c9064b02c778b191dd2c853778d9609debdcdfea3a614. Two TOML parser/editor versions serve SDK configuration and build-time macro manifest discovery. Runtime input and compiler-host filesystem parsing remain distinct risks. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
+[[exemptions.toml_parser]]
+version = "1.1.3+spec-1.1.0"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 1d38ac1cf9b95face32296c0a3ede1fdc270627c9d9c02a7274dd6d960dc4d56. The shown proc-macro-crate chain parses manifests on the build host. Parser limits/error behavior matter even when this is not a guest query parser. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
+[[exemptions.toml_write]]
+version = "0.1.2"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 5d99f8c9a7727884afe522e9bd5edbfc91a3312b36a77b5fb8926e4c31a41801. TOML escaping/serialization under SDK config editing affects downstream interpretation; writer-only scope narrows input exposure but does not establish semantic audit coverage. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
 
 [[exemptions.tower]]
 version = "0.5.3"
@@ -1883,6 +2543,11 @@ criteria = "safe-to-deploy"
 version = "1.23.4"
 criteria = "safe-to-deploy"
 
+[[exemptions.uuid]]
+version = "1.26.1"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 2ef6dac1e96601b4fb3acccccff2139741fcb757cb9a36089bf5be91cfb285ce. UUID parsing/generation sits in the engine closure, including target-specific JS/entropy edges. The deterministic guest profile's volatile-function rejection remains a separate contract; metadata presence is not proof of admitted nondeterminism. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
 [[exemptions.version_check]]
 version = "0.9.5"
 criteria = "safe-to-deploy"
@@ -1899,6 +2564,11 @@ criteria = "safe-to-deploy"
 version = "0.2.122"
 criteria = "safe-to-deploy"
 
+[[exemptions.wasm-bindgen]]
+version = "0.2.128"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 aecb87a33d3b0c5e3b7aa46336eaf486cffafbd281b195e4c8b80d50df2351bf. Wasm/JS boundary code includes runtime ABI and build-time components on its target path. Preserve the target condition instead of assuming RISC-V execution or excluding it from the all-target gate. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
 [[exemptions.wasm-bindgen-futures]]
 version = "0.4.72"
 criteria = "safe-to-deploy"
@@ -1907,13 +2577,28 @@ criteria = "safe-to-deploy"
 version = "0.2.122"
 criteria = "safe-to-deploy"
 
+[[exemptions.wasm-bindgen-macro]]
+version = "0.2.128"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 a690d511e3c1a8b3a55e33511e3c2c00c78415cd23650f32b808627f5696b9ed. Macro expansion emits JS/wasm bindings and executes on the build host when selected. Review generated ABI contracts separately from the runtime facade. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
 [[exemptions.wasm-bindgen-macro-support]]
 version = "0.2.122"
 criteria = "safe-to-deploy"
 
+[[exemptions.wasm-bindgen-macro-support]]
+version = "0.2.128"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 411e4887f0071ef2d2164a9d5fdf2d20efbef78fccd3a78b0c10a1dc5295e48a. Internal binding generation parses Rust and emits cross-language glue; this support crate belongs to build-code-generation review despite its platform cohort. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
 [[exemptions.wasm-bindgen-shared]]
 version = "0.2.122"
 criteria = "safe-to-deploy"
+
+[[exemptions.wasm-bindgen-shared]]
+version = "0.2.128"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 81941cd78d0c92026c33e5e01312845a4cb1e9af3407f9134b100dd03144103e. Shared binding metadata/ABI definitions and a build script must agree with generated/runtime components; exact family versions remain separate source units. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
 
 [[exemptions.wasm-bindgen-test]]
 version = "0.3.72"
@@ -2161,6 +2846,16 @@ criteria = "safe-to-deploy"
 version = "0.53.1"
 criteria = "safe-to-deploy"
 
+[[exemptions.winnow]]
+version = "0.7.15"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 df79d97927682d2fd8adb29682d1140b343be4ac0f08fd68b7765d9c059d3945. Both parser-combinator versions support distinct TOML/runtime/build chains. Review parser bounds/backtracking/error behavior in those contexts; metadata includes both for a reason. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
+[[exemptions.winnow]]
+version = "1.0.4"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 23b97319f7b8343df12cc98938e5c3eb436064524c8d2b4e30a1d3a36eecdf81. Both parser-combinator versions support distinct TOML/runtime/build chains. Review parser bounds/backtracking/error behavior in those contexts; metadata includes both for a reason. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
 [[exemptions.wkt]]
 version = "0.14.0"
 criteria = "safe-to-deploy"
@@ -2186,6 +2881,11 @@ criteria = "safe-to-deploy"
 version = "0.8.16"
 criteria = "safe-to-deploy"
 
+[[exemptions.yaml-rust2]]
+version = "0.10.4"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 2462ea039c445496d8793d052e13787f2b90e750b833afee748e601c17621ed9. YAML parsing and encoding conversion serve SDK toolchain configuration. Nesting, alias/resource, malformed-input and downstream path interpretation remain review backlog. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
 [[exemptions.yasna]]
 version = "0.6.0"
 criteria = "safe-to-run"
@@ -2202,9 +2902,19 @@ criteria = "safe-to-deploy"
 version = "0.8.50"
 criteria = "safe-to-deploy"
 
+[[exemptions.zerocopy]]
+version = "0.8.57"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 d35102a9f36d089ccae9e4c6802bc118be4487b80aaffc0ab4e0cf5ce92d2873. SIMD/byte-representation helpers are unsafe-sensitive runtime code with build detection. Preserve selected features and exact layout invariants; no safety conclusion follows from its name or successful builds. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
+
 [[exemptions.zerocopy-derive]]
 version = "0.8.50"
 criteria = "safe-to-deploy"
+
+[[exemptions.zerocopy-derive]]
+version = "0.8.57"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 146c01f5ab44258da43cf276c74a2763db2ff3969c9c652c3f2de07041d0b2bc. The recorded path contains cfg(any()), a never-enabled edge in ordinary target evaluation. This remains an all-target resolved-graph coverage unit, not evidence the macro executes; review emitted safety traits if ever enabled and verify any future policy removal. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
 
 [[exemptions.zerofrom]]
 version = "0.1.8"
@@ -2242,6 +2952,11 @@ notes = "pure-Rust flate2 backend reached by tower-http compression in the all-f
 [[exemptions.zmij]]
 version = "1.0.21"
 criteria = "safe-to-deploy"
+
+[[exemptions.zmij]]
+version = "1.0.23"
+criteria = "safe-to-deploy"
+notes = "[GPT-6] Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b. Floating-point-to-decimal formatting affects serialized JSON values and includes build detection. Runtime rounding/lexical correctness and memory bounds matter despite its build cohort. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
 
 [[exemptions.zstd]]
 version = "0.13.3"

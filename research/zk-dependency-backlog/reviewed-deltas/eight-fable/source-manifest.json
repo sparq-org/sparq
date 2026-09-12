@@ -1,0 +1,507 @@
+{
+  "authored_by": "GPT-6",
+  "sdk_commit": "b75ac40dcea157c764a722e96bffde2b24bf4ea1",
+  "scope": "Exact registry delta review packages. Approved upstream audit chains cover baselines only. No current-version audit is asserted. Keep current versions; no downgrade requested.",
+  "units": [
+    {
+      "name": "android_system_properties",
+      "from": "0.1.5",
+      "to": "0.1.6",
+      "criteria": [
+        "safe-to-deploy"
+      ],
+      "baseline_audit_chain": [
+        {
+          "source": "mozilla",
+          "version": "0.1.2"
+        },
+        {
+          "source": "mozilla",
+          "delta": "0.1.2 -> 0.1.4"
+        },
+        {
+          "source": "mozilla",
+          "delta": "0.1.4 -> 0.1.5"
+        }
+      ],
+      "archives": [
+        {
+          "role": "old",
+          "version": "0.1.5",
+          "sha256": "819e7219dbd41043ac279b19830f2efc897156490d7fd6ea916720117ee66311",
+          "archive": "android_system_properties/android_system_properties-0.1.5.crate",
+          "registry_url": "https://static.crates.io/crates/android_system_properties/android_system_properties-0.1.5.crate",
+          "export_verified_against_archive": true
+        },
+        {
+          "role": "new",
+          "version": "0.1.6",
+          "sha256": "ae221649c9976a6f6c56ae1facf410f3ddb33cc661c4b7b61020a912d4237fbc",
+          "archive": "android_system_properties/android_system_properties-0.1.6.crate",
+          "registry_url": "https://static.crates.io/crates/android_system_properties/android_system_properties-0.1.6.crate",
+          "export_verified_against_archive": true
+        }
+      ],
+      "patch_sha256": "19c29793e7a7c6bd6b8b06adb59895e96b919275a43d5aaafbc8fc13fc68cf07",
+      "patch_bytes": 5321
+    },
+    {
+      "name": "arrayvec",
+      "from": "0.7.6",
+      "to": "0.7.8",
+      "criteria": [
+        "safe-to-deploy"
+      ],
+      "baseline_audit_chain": [
+        {
+          "source": "google",
+          "version": "0.7.6"
+        }
+      ],
+      "archives": [
+        {
+          "role": "old",
+          "version": "0.7.6",
+          "sha256": "7c02d123df017efcdfbd739ef81735b36c5ba83ec3c59c80a9d7ecc718f92e50",
+          "archive": "arrayvec/arrayvec-0.7.6.crate",
+          "registry_url": "https://static.crates.io/crates/arrayvec/arrayvec-0.7.6.crate",
+          "export_verified_against_archive": true
+        },
+        {
+          "role": "new",
+          "version": "0.7.8",
+          "sha256": "d3fb67a6e08acf24fdeccbac2cb6ac4305825bd1f117462e0e6f2f193345ad56",
+          "archive": "arrayvec/arrayvec-0.7.8.crate",
+          "registry_url": "https://static.crates.io/crates/arrayvec/arrayvec-0.7.8.crate",
+          "export_verified_against_archive": true
+        }
+      ],
+      "patch_sha256": "a9bdc70908fb303fff455ec12badc6030c5af1170d49df144a2c813f6849cd54",
+      "patch_bytes": 13866
+    },
+    {
+      "name": "either",
+      "from": "1.16.0",
+      "to": "1.18.0",
+      "criteria": [
+        "safe-to-deploy"
+      ],
+      "baseline_audit_chain": [
+        {
+          "source": "mozilla",
+          "version": "1.6.1"
+        },
+        {
+          "source": "mozilla",
+          "delta": "1.6.1 -> 1.7.0"
+        },
+        {
+          "source": "mozilla",
+          "delta": "1.7.0 -> 1.8.0"
+        },
+        {
+          "source": "mozilla",
+          "delta": "1.8.0 -> 1.8.1"
+        },
+        {
+          "source": "mozilla",
+          "delta": "1.8.1 -> 1.9.0"
+        },
+        {
+          "source": "mozilla",
+          "delta": "1.9.0 -> 1.10.0"
+        },
+        {
+          "source": "mozilla",
+          "delta": "1.10.0 -> 1.12.0"
+        },
+        {
+          "source": "mozilla",
+          "delta": "1.12.0 -> 1.13.0"
+        },
+        {
+          "source": "mozilla",
+          "delta": "1.13.0 -> 1.14.0"
+        },
+        {
+          "source": "mozilla",
+          "delta": "1.14.0 -> 1.15.0"
+        },
+        {
+          "source": "mozilla",
+          "delta": "1.15.0 -> 1.16.0"
+        }
+      ],
+      "archives": [
+        {
+          "role": "old",
+          "version": "1.16.0",
+          "sha256": "91622ff5e7162018101f2fea40d6ebf4a78bbe5a49736a2020649edf9693679e",
+          "archive": "either/either-1.16.0.crate",
+          "registry_url": "https://static.crates.io/crates/either/either-1.16.0.crate",
+          "export_verified_against_archive": true
+        },
+        {
+          "role": "new",
+          "version": "1.18.0",
+          "sha256": "252afb9ae5eaa683babdc6a068b3f5726eb19e05070c731f9b2a23a7c3e8ed34",
+          "archive": "either/either-1.18.0.crate",
+          "registry_url": "https://static.crates.io/crates/either/either-1.18.0.crate",
+          "export_verified_against_archive": true
+        }
+      ],
+      "patch_sha256": "ea52a13b8c415fa9dbdfbe90295de083417bd6d408be982aaf7f1272cb908ef4",
+      "patch_bytes": 22502
+    },
+    {
+      "name": "num-integer",
+      "from": "0.1.46",
+      "to": "0.1.47",
+      "criteria": [
+        "safe-to-deploy"
+      ],
+      "baseline_audit_chain": [
+        {
+          "source": "google",
+          "version": "0.1.46"
+        }
+      ],
+      "archives": [
+        {
+          "role": "old",
+          "version": "0.1.46",
+          "sha256": "7969661fd2958a5cb096e56c8e1ad0444ac2bbcd0061bd28660485a44879858f",
+          "archive": "num-integer/num-integer-0.1.46.crate",
+          "registry_url": "https://static.crates.io/crates/num-integer/num-integer-0.1.46.crate",
+          "export_verified_against_archive": true
+        },
+        {
+          "role": "new",
+          "version": "0.1.47",
+          "sha256": "7ce2d95d4b3734dc35aa2f45e1aa22cd416814592a4f9d9205e11affd5b8e10b",
+          "archive": "num-integer/num-integer-0.1.47.crate",
+          "registry_url": "https://static.crates.io/crates/num-integer/num-integer-0.1.47.crate",
+          "export_verified_against_archive": true
+        }
+      ],
+      "patch_sha256": "2b10d159e5ce80bf220a92836e6fd6129e32fd4d8bdd11c6b78ebdba3b21c1d3",
+      "patch_bytes": 8573
+    },
+    {
+      "name": "proc-macro2",
+      "from": "1.0.106",
+      "to": "1.0.107",
+      "criteria": [
+        "safe-to-deploy"
+      ],
+      "baseline_audit_chain": [
+        {
+          "source": "google",
+          "version": "1.0.78"
+        },
+        {
+          "source": "google",
+          "delta": "1.0.78 -> 1.0.79"
+        },
+        {
+          "source": "google",
+          "delta": "1.0.79 -> 1.0.80"
+        },
+        {
+          "source": "google",
+          "delta": "1.0.80 -> 1.0.81"
+        },
+        {
+          "source": "google",
+          "delta": "1.0.81 -> 1.0.82"
+        },
+        {
+          "source": "google",
+          "delta": "1.0.82 -> 1.0.83"
+        },
+        {
+          "source": "google",
+          "delta": "1.0.83 -> 1.0.84"
+        },
+        {
+          "source": "google",
+          "delta": "1.0.84 -> 1.0.85"
+        },
+        {
+          "source": "google",
+          "delta": "1.0.85 -> 1.0.86"
+        },
+        {
+          "source": "google",
+          "delta": "1.0.86 -> 1.0.87"
+        },
+        {
+          "source": "google",
+          "delta": "1.0.87 -> 1.0.89"
+        },
+        {
+          "source": "google",
+          "delta": "1.0.89 -> 1.0.92"
+        },
+        {
+          "source": "google",
+          "delta": "1.0.92 -> 1.0.93"
+        },
+        {
+          "source": "google",
+          "delta": "1.0.93 -> 1.0.94"
+        },
+        {
+          "source": "mozilla",
+          "delta": "1.0.94 -> 1.0.106"
+        }
+      ],
+      "archives": [
+        {
+          "role": "old",
+          "version": "1.0.106",
+          "sha256": "8fd00f0bb2e90d81d1044c2b32617f68fcb9fa3bb7640c23e9c748e53fb30934",
+          "archive": "proc-macro2/proc-macro2-1.0.106.crate",
+          "registry_url": "https://static.crates.io/crates/proc-macro2/proc-macro2-1.0.106.crate",
+          "export_verified_against_archive": true
+        },
+        {
+          "role": "new",
+          "version": "1.0.107",
+          "sha256": "985e7ec9bb745e6ce6535b544d84d6cd6f7ad8bd711c398938ae983b91a766d9",
+          "archive": "proc-macro2/proc-macro2-1.0.107.crate",
+          "registry_url": "https://static.crates.io/crates/proc-macro2/proc-macro2-1.0.107.crate",
+          "export_verified_against_archive": true
+        }
+      ],
+      "patch_sha256": "2210f56efce3d325fba061e309bcfc6343c493239d7fdb2d59fbda9c1d9435b8",
+      "patch_bytes": 16498
+    },
+    {
+      "name": "rustversion",
+      "from": "1.0.22",
+      "to": "1.0.23",
+      "criteria": [
+        "safe-to-deploy"
+      ],
+      "baseline_audit_chain": [
+        {
+          "source": "google",
+          "version": "1.0.14"
+        },
+        {
+          "source": "google",
+          "delta": "1.0.14 -> 1.0.15"
+        },
+        {
+          "source": "google",
+          "delta": "1.0.15 -> 1.0.16"
+        },
+        {
+          "source": "google",
+          "delta": "1.0.16 -> 1.0.17"
+        },
+        {
+          "source": "google",
+          "delta": "1.0.17 -> 1.0.18"
+        },
+        {
+          "source": "google",
+          "delta": "1.0.18 -> 1.0.19"
+        },
+        {
+          "source": "google",
+          "delta": "1.0.19 -> 1.0.20"
+        },
+        {
+          "source": "zcash",
+          "delta": "1.0.20 -> 1.0.21"
+        },
+        {
+          "source": "zcash",
+          "delta": "1.0.21 -> 1.0.22"
+        }
+      ],
+      "archives": [
+        {
+          "role": "old",
+          "version": "1.0.22",
+          "sha256": "b39cdef0fa800fc44525c84ccb54a029961a8215f9619753635a9c0d2538d46d",
+          "archive": "rustversion/rustversion-1.0.22.crate",
+          "registry_url": "https://static.crates.io/crates/rustversion/rustversion-1.0.22.crate",
+          "export_verified_against_archive": true
+        },
+        {
+          "role": "new",
+          "version": "1.0.23",
+          "sha256": "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f",
+          "archive": "rustversion/rustversion-1.0.23.crate",
+          "registry_url": "https://static.crates.io/crates/rustversion/rustversion-1.0.23.crate",
+          "export_verified_against_archive": true
+        }
+      ],
+      "patch_sha256": "8239f0ecd20f25bc7384f331173d341862a3c4219b90531737cffa1be75d1299",
+      "patch_bytes": 22356
+    },
+    {
+      "name": "serde",
+      "from": "1.0.228",
+      "to": "1.0.229",
+      "criteria": [
+        "safe-to-deploy"
+      ],
+      "baseline_audit_chain": [
+        {
+          "source": "google",
+          "version": "1.0.197"
+        },
+        {
+          "source": "google",
+          "delta": "1.0.197 -> 1.0.198"
+        },
+        {
+          "source": "google",
+          "delta": "1.0.198 -> 1.0.201"
+        },
+        {
+          "source": "google",
+          "delta": "1.0.201 -> 1.0.202"
+        },
+        {
+          "source": "google",
+          "delta": "1.0.202 -> 1.0.203"
+        },
+        {
+          "source": "google",
+          "delta": "1.0.203 -> 1.0.204"
+        },
+        {
+          "source": "google",
+          "delta": "1.0.204 -> 1.0.207"
+        },
+        {
+          "source": "google",
+          "delta": "1.0.207 -> 1.0.209"
+        },
+        {
+          "source": "google",
+          "delta": "1.0.209 -> 1.0.210"
+        },
+        {
+          "source": "google",
+          "delta": "1.0.210 -> 1.0.213"
+        },
+        {
+          "source": "google",
+          "delta": "1.0.213 -> 1.0.214"
+        },
+        {
+          "source": "google",
+          "delta": "1.0.214 -> 1.0.215"
+        },
+        {
+          "source": "google",
+          "delta": "1.0.215 -> 1.0.216"
+        },
+        {
+          "source": "google",
+          "delta": "1.0.216 -> 1.0.217"
+        },
+        {
+          "source": "google",
+          "delta": "1.0.217 -> 1.0.218"
+        },
+        {
+          "source": "google",
+          "delta": "1.0.218 -> 1.0.219"
+        },
+        {
+          "source": "isrg",
+          "delta": "1.0.219 -> 1.0.224"
+        },
+        {
+          "source": "isrg",
+          "delta": "1.0.224 -> 1.0.225"
+        },
+        {
+          "source": "isrg",
+          "delta": "1.0.225 -> 1.0.226"
+        },
+        {
+          "source": "mozilla",
+          "delta": "1.0.226 -> 1.0.227"
+        },
+        {
+          "source": "mozilla",
+          "delta": "1.0.227 -> 1.0.228"
+        }
+      ],
+      "archives": [
+        {
+          "role": "old",
+          "version": "1.0.228",
+          "sha256": "9a8e94ea7f378bd32cbbd37198a4a91436180c5bb472411e48b5ec2e2124ae9e",
+          "archive": "serde/serde-1.0.228.crate",
+          "registry_url": "https://static.crates.io/crates/serde/serde-1.0.228.crate",
+          "export_verified_against_archive": true
+        },
+        {
+          "role": "new",
+          "version": "1.0.229",
+          "sha256": "4148590afebada386688f18773da617792bf2ef03ffc1e4cbd2b1d45b023e0ba",
+          "archive": "serde/serde-1.0.229.crate",
+          "registry_url": "https://static.crates.io/crates/serde/serde-1.0.229.crate",
+          "export_verified_against_archive": true
+        }
+      ],
+      "patch_sha256": "80e45cc372bc98f09c460a02100694d74c78325f7f1bb937f7be44fefb3fff90",
+      "patch_bytes": 9398
+    },
+    {
+      "name": "smallvec",
+      "from": "1.15.2",
+      "to": "1.16.1",
+      "criteria": [
+        "safe-to-deploy"
+      ],
+      "baseline_audit_chain": [
+        {
+          "source": "google",
+          "version": "1.13.2"
+        },
+        {
+          "source": "google",
+          "delta": "1.13.2 -> 1.14.0"
+        },
+        {
+          "source": "mozilla",
+          "delta": "1.14.0 -> 1.15.1"
+        },
+        {
+          "source": "mozilla",
+          "delta": "1.15.1 -> 1.15.2"
+        }
+      ],
+      "archives": [
+        {
+          "role": "old",
+          "version": "1.15.2",
+          "sha256": "8ed6a63f02c8539c91a8685a86f4099661ba3da017932f6ebbea6de3f0fa7c90",
+          "archive": "smallvec/smallvec-1.15.2.crate",
+          "registry_url": "https://static.crates.io/crates/smallvec/smallvec-1.15.2.crate",
+          "export_verified_against_archive": true
+        },
+        {
+          "role": "new",
+          "version": "1.16.1",
+          "sha256": "ba467056f1b547ed52077911161fc86985becbc60e8e1857c8a144dab0def891",
+          "archive": "smallvec/smallvec-1.16.1.crate",
+          "registry_url": "https://static.crates.io/crates/smallvec/smallvec-1.16.1.crate",
+          "export_verified_against_archive": true
+        }
+      ],
+      "patch_sha256": "08502e40447fa2ef39a7d2c491c66d384801ace6d11d730a1f35b8dd9842bc00",
+      "patch_bytes": 69380
+    }
+  ]
+}

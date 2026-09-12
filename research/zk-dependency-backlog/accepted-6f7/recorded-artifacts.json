@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "recorded_by": "GPT-6",
+  "reviewer": "GPT-6, independent task vc_suite_design",
+  "review_scope": "143 exact-version tracked backlog policy dispositions, not source audits",
+  "source_commit": "6f7d750ac6c8d8118bdcac6ef6dc0b266c0909b9",
+  "proposal_manifest_original_sha256": "46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9",
+  "source_review_artifact_hashes": {
+    "review-final.md": "c448c0c0108905c248f1f39e441aa3eae5d09033d0fa154961764a6f81edd30d",
+    "per-entry-dispositions.json": "299a83b9a1cb3f445e233a88094d31663f91173e0bb71e1aca072204820c6f00",
+    "input-verification.json": "a19b1e708d00efdc4decf9deb294c0b45af675e501d1b85c3f12abcc473645ad",
+    "verify_inputs.py": "d783221ba44c82b2bb3a92623fbc725f4d9155af7dfbad2ee5d145aaeae78236",
+    "risk_notes.tsv": "92e2d0ecdee6f9f080bc26941447c30a38796fbe28b8d47174e518caff40f982",
+    "finalize.py": "8d0d3903f8b0410045421fd4ebb6ff99ebdf42556df9709426ec4d4024880437"
+  },
+  "files": {
+    "build-and-procedural-macro.toml": "acded2b969fbb3f9881b2cc6a8acc2bc7e9798bd5cbc97ee3539898b09a09df0",
+    "cryptographic-and-large-integer.toml": "8dbde99a5fbfedc31130b441633ed3153feada2e93df6d09dcbb5b2e1af01a4a",
+    "input-verification.json": "a19b1e708d00efdc4decf9deb294c0b45af675e501d1b85c3f12abcc473645ad",
+    "memory-collections-and-concurrency.toml": "ffa6b3ca96f7e15680f529ebb1263bdc273d5941f1901360d81a1dd4a535fdc1",
+    "other-utilities.toml": "05ab151e305f33e1cacad2d9080e5dddf244e6f8a8afa96f8156de6645e6b792",
+    "parsing-serialization-and-time.toml": "7622d67b6b2f23bac1636f0873503afb45138d61bfb2d639d7573eae48cce06c",
+    "per-entry-dispositions.json": "299a83b9a1cb3f445e233a88094d31663f91173e0bb71e1aca072204820c6f00",
+    "platform-and-ffi.toml": "73de85704eae8cf449055cd5b403c51896bcf88e93d2ad90a5419b8050b9a0af",
+    "proposal-manifest.json": "46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9",
+    "randomness.toml": "bebbef3793382c679337b228dc00a0d9f29aec78deeee3daf2c85d65cb0ee458",
+    "review-final.txt": "c448c0c0108905c248f1f39e441aa3eae5d09033d0fa154961764a6f81edd30d",
+    "sdk-and-tooling.toml": "c56f5f398760d54710ed1222627963dadf01424380a0d96bc59dd5a4e93ad010"
+  },
+  "original_frozen_status": "Proposal-only and policy-not-applied fields describe review time; the config assembly is recorded separately.",
+  "tracking": "zkp-10.8.1"
+}

@@ -1,0 +1,41 @@
+{
+  "actual_model_usage": {
+    "claude-haiku-4-5-20251001": {
+      "inputTokens": 1644,
+      "outputTokens": 16,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 0,
+      "webSearchRequests": 0,
+      "costUSD": 0.001724,
+      "contextWindow": 200000,
+      "maxOutputTokens": 32000,
+      "thinkingTokens": 0,
+      "canonicalModel": "claude-haiku-4-5",
+      "provider": "firstParty",
+      "costBasis": "list"
+    },
+    "claude-fable-5-1": {
+      "inputTokens": 194,
+      "outputTokens": 42161,
+      "cacheReadInputTokens": 518877,
+      "cacheCreationInputTokens": 208227,
+      "webSearchRequests": 0,
+      "costUSD": 6.40424925,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 64000,
+      "thinkingTokens": 30690,
+      "canonicalModel": "claude-fable-5-1",
+      "provider": "firstParty",
+      "costBasis": "list"
+    }
+  },
+  "head": "registry versions in MANIFEST.json; SDKb75ac40dcea157c764a722e96bffde2b24bf4ea1",
+  "base": "exact approved baseline versions and chains in MANIFEST.json",
+  "exit_code": 0,
+  "exit_code_observed": true,
+  "is_error": false,
+  "permission_denials": [],
+  "changed_source_hashes_reverified": true,
+  "completed_at": "2026-09-12T21:22:06.581267+00:00",
+  "source_only": true
+}
