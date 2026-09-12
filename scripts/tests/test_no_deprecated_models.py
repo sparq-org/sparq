@@ -120,6 +120,8 @@ class TestRoutingTable(unittest.TestCase):
         self.assertEqual(len(docs), 1, "exactly one role=docs route expected")
         chain = docs[0]["model_chain"]
         self.assertEqual(chain[0], "sol", "docs writing must lead with sol (gpt-5.6)")
+        self.assertTrue(docs[0].get("escalate"),
+                        "docs writing needs a bounded exit when every provider is unavailable")
         self.assertEqual(sorted(set(chain) & {"haiku", "sonnet"}), [],
                          "docs writing was moved off the cheap anthropic tiers on 2026-07-26")
 
@@ -147,26 +149,14 @@ class TestRoutingTable(unittest.TestCase):
 
 
 class TestProviderPreference(unittest.TestCase):
-    """[OPUS-5] Opus 5 is preferred over sol EXCEPT on `area:gui` (maintainer 2026-07-26).
+    """[SPARQ agent] The 2026-09-02 protocol makes model responsibility explicit.
 
-    WHY THIS IS A GUARD AND NOT JUST AN EDIT: sol did not win ~every implementation route through
-    any adaptive heuristic. The registry's allocator walks `model_chain` IN ORDER and claims the
-    first available account, so the sol-first literal — set during a 2026-07-18 high-availability
-    window — simply won every route on every tick, and kept winning long after availability
-    shifted. Measured 2026-07-26: 11 of the 12 most recent orchestrator PRs were sol-implemented.
-    A preference expressed purely as chain ORDER decays exactly this way, so the order is pinned.
+    Sol is the primary default implementation tier. Opus 5 is retained behind it for continuity
+    with current Anthropic-authored fixes and total Sol unavailability, and is the sole
+    review/soundness tier. These tests pin whole chains rather than only their first elements.
     """
 
-    # The routes where opus5 and sol are BOTH viable implementors and the preference is expressed
-    # as ORDER. role:docs is excluded: the separate 2026-07-26 docs-writing directive puts sol first
-    # there deliberately. role:impl is excluded because it is no longer a preference at all — see
-    # OPUS5_ONLY_ROLES.
-    OPUS5_FIRST_ROLES = ("site", "ci", "perf")
-    # [OPUS-5] registry #738 (maintainer decision 2026-07-26: "Remove sol from impl fallback"). The
-    # routes where sol is EXCLUDED, not merely outranked. Measured in-cell `role:impl` first-attempt
-    # yield: sol 7/40 = 18% vs opus5 12/14 = 86%, n=74, same route and same brief; 4/4 same-issue
-    # crossovers; budget exhaustion refuted (longest no-diff model step 177s vs a 90-minute timeout).
-    OPUS5_ONLY_ROLES = ("impl",)
+    IMPLEMENTATION_ROLES = ("impl", "site", "gui", "ci", "perf")
     GUI_ROLE = "gui"
 
     @classmethod
@@ -174,61 +164,32 @@ class TestProviderPreference(unittest.TestCase):
         cls.doc = _routing_doc()
         cls.routes = {r["role"]: r for r in cls.doc["route"] if r.get("role")}
 
-    def test_default_prefers_opus5_over_sol(self):
-        """MUTANT: reorder any of these chains back to sol-first => RED."""
-        for role in self.OPUS5_FIRST_ROLES:
-            chain = self.routes[role]["model_chain"]
-            self.assertEqual(chain[0], "opus5",
-                             f"role:{role} must prefer opus5 over sol (maintainer 2026-07-26)")
-            self.assertLess(chain.index("opus5"), chain.index("sol"),
-                            f"role:{role}: opus5 must outrank sol")
+    def test_implementation_routes_are_sol_first(self):
+        """MUTANT: add or substitute any implementation tier => RED."""
+        for role in self.IMPLEMENTATION_ROLES:
+            self.assertEqual(self.routes[role]["model_chain"], ["sol", "opus5"],
+                             f"role:{role} must be Sol-first implementation")
 
-    def test_defaults_chain_prefers_opus5(self):
-        self.assertEqual(self.doc["defaults"]["model_chain"][0], "opus5")
+    def test_defaults_chain_is_sol_first(self):
+        self.assertEqual(self.doc["defaults"]["model_chain"], ["sol", "opus5"])
+        self.assertTrue(self.doc["defaults"].get("escalate"))
 
-    def test_preference_is_not_exclusion(self):
-        """sol must stay REACHABLE on the ORDER-preference routes. MUTANT: drop sol from one of
-        these chains => RED. `role:impl` is deliberately NOT in this set since 2026-07-26."""
-        for role in self.OPUS5_FIRST_ROLES:
-            self.assertIn("sol", self.routes[role]["model_chain"],
-                          f"role:{role}: sol must remain a fallback, not be excluded")
+    def test_review_and_soundness_routes_are_opus5_only(self):
+        for role in ("review", "soundness"):
+            self.assertEqual(self.routes[role]["model_chain"], ["opus5"])
+            self.assertTrue(self.routes[role].get("escalate"))
 
-    def test_impl_route_is_opus5_only(self):
-        """[OPUS-5] registry #738 — the EXCLUSION, asserted as a whole-chain equality rather than a
-        head check so demoting sol back to a second rung reds this too.
+    def test_implementation_routes_preserve_cross_provider_continuity(self):
+        for role in self.IMPLEMENTATION_ROLES:
+            providers = {self.doc["models"][m]["provider"]
+                         for m in self.routes[role]["model_chain"]}
+            self.assertEqual(providers, {"anthropic", "openai"})
 
-        MUTANT: restore ["opus5", "sol"] on role:impl => RED."""
-        for role in self.OPUS5_ONLY_ROLES:
-            chain = self.routes[role]["model_chain"]
-            self.assertEqual(chain, ["opus5"],
-                             f"role:{role} must be opus5-ONLY (maintainer 2026-07-26: remove sol "
-                             f"from impl fallback)")
-            providers = {self.doc["models"][m]["provider"] for m in chain}
-            self.assertEqual(providers, {"anthropic"},
-                             f"role:{role} must name no openai tier at all")
-
-    def test_impl_exclusion_comes_with_an_exit(self):
-        """A single-rung chain with no `escalate` has NO exit: on an opus5 capacity outage the item
-        defers, and defers again, forever, with nobody notified. Deprecating a fallback has to come
-        with an exit — the same shape role:research uses.
-
-        MUTANT: delete `escalate = true` from the role:impl route => RED."""
-        for role in self.OPUS5_ONLY_ROLES:
+    def test_implementation_routes_have_an_explicit_exhaustion_exit(self):
+        """Total implementation-chain exhaustion must park visibly rather than defer forever."""
+        for role in self.IMPLEMENTATION_ROLES:
             self.assertTrue(self.routes[role].get("escalate"),
-                            f"role:{role} is single-provider and single-rung, so it MUST escalate")
-
-    def test_the_exclusion_is_scoped_to_the_roles_the_maintainer_named(self):
-        """The directive removed sol from `role:impl` and nothing else. This is the guard that reds
-        if a future edit copies the exclusion onto another implementor route (or onto docs/gui).
-
-        MUTANT: drop sol from role:site / role:perf / role:ci / role:gui / role:docs => RED."""
-        excluded = sorted(
-            role for role, r in self.routes.items()
-            if role in ("impl", "site", "ci", "perf", "gui", "docs")
-            and not any(self.doc["models"][m]["provider"] == "openai"
-                        for m in r["model_chain"]))
-        self.assertEqual(excluded, sorted(self.OPUS5_ONLY_ROLES),
-                         "exactly the roles in OPUS5_ONLY_ROLES may lack an openai rung")
+                            f"role:{role} needs a bounded exit when both providers are unavailable")
 
     def test_gui_carve_out_keeps_sol_first(self):
         """MUTANT: delete the role:gui route, or flip it to opus5-first => RED."""
@@ -238,20 +199,8 @@ class TestProviderPreference(unittest.TestCase):
         self.assertEqual(chain[0], "sol",
                          "GUI work keeps sol first (original-builder steer, task #331)")
 
-    def test_gui_carve_out_is_preference_not_exclusion(self):
-        """GUI must stay dispatchable during a sol/OpenAI outage."""
-        self.assertIn("opus5", self.routes[self.GUI_ROLE]["model_chain"])
-
-    def test_every_preference_chain_terminates_cross_provider(self):
-        """Both directions must terminate: a chain naming only ONE provider can be starved by that
-        provider's outage with no other rung to fall to. `role:impl` is excluded since 2026-07-26 —
-        it is deliberately single-provider and its termination guarantee is `escalate = true`
-        (test_impl_exclusion_comes_with_an_exit), not a cross-provider rung."""
-        for role in self.OPUS5_FIRST_ROLES + (self.GUI_ROLE,):
-            chain = self.routes[role]["model_chain"]
-            providers = {self.doc["models"][m]["provider"] for m in chain}
-            self.assertEqual(providers, {"anthropic", "openai"},
-                             f"role:{role} chain {chain} is single-provider — it can be starved")
+    def test_gui_route_keeps_the_continuity_fallback(self):
+        self.assertEqual(self.routes[self.GUI_ROLE]["model_chain"], ["sol", "opus5"])
 
     def test_carve_out_selector_is_exactly_area_gui(self):
         """THE ONE THAT MATTERS MOST. "GUI" informally reads as covering the site surfaces, so the
@@ -269,8 +218,8 @@ class TestProviderPreference(unittest.TestCase):
                          "no surface:frontend, no dashboard")
 
     def test_site_surfaces_are_not_in_the_carve_out(self):
-        """The same property from the other side: the generic UI label set (which routes to the
-        opus5-first role:site) must not contain area:gui, and the gui set must not contain any
+        """The same property from the other side: the generic UI label set (which routes to
+        role:site) must not contain area:gui, and the gui set must not contain any
         site* label. MUTANT: move area:gui back into UI_SURFACE_LABELS => RED."""
         triage_src = (REPO_ROOT / "scripts" / "triage.py").read_text(encoding="utf-8")
         ui = re.search(r"(?m)^UI_SURFACE_LABELS = \(([^)]*)\)", triage_src)
@@ -278,7 +227,7 @@ class TestProviderPreference(unittest.TestCase):
         ui_labels = [x.strip().strip("\"'") for x in ui.group(1).split(",") if x.strip()]
         self.assertNotIn("area:gui", ui_labels,
                          "area:gui must derive role:gui, not role:site — otherwise the carve-out "
-                         "is inexpressible and GUI silently takes the opus5-first default")
+                         "is inexpressible on older target refs during the protocol rollout")
         self.assertIn("area:site", ui_labels, "role:site must still cover area:site")
 
 
@@ -325,13 +274,12 @@ class TestLabelsToModelChain(unittest.TestCase):
 
     def test_area_gui_with_no_role_at_all_is_sol_first(self):
         """The fail-open case the write path produced: a GUI issue promoted with NO role label
-        resolves through `[defaults]`, which is opus5-first. The carve-out must bind there too."""
+        resolves through `[defaults]`, which is now Sol-first."""
         self.assertEqual(self.chain(["area:gui", "priority:P2", "area:sparq-gui"])[0], "sol")
 
-    def test_gui_carve_out_is_preference_not_exclusion_end_to_end(self):
-        """GUI work must stay dispatchable during an OpenAI outage."""
+    def test_gui_implementation_is_sol_first_end_to_end(self):
         for role in ("impl", "perf", "site", "ci", "gui"):
-            self.assertIn("opus5", self.chain(["area:gui", f"role:{role}"]))
+            self.assertEqual(self.chain(["area:gui", f"role:{role}"]), ["sol", "opus5"])
 
     def test_gui_carve_out_re_orders_but_never_re_routes(self):
         """The directive speaks only about MODEL priority. The carve-out must not change which
@@ -343,20 +291,19 @@ class TestLabelsToModelChain(unittest.TestCase):
                          self.rr.resolve(["role:perf"], self.doc)[1])
 
     # -- the exclusion that already worked, now asserted at the deciding layer ------------------
-    def test_site_surfaces_are_opus5_first_end_to_end(self):
-        """`site*` is NOT in the carve-out (maintainer: "Let's just go with area:gui work").
-        MUTANT: add any site* label to `GUI_CARVE_OUT_LABELS` => RED."""
+    def test_site_surfaces_are_sol_first_end_to_end(self):
         for area in ("area:site", "area:site-specs", "area:site-papers", "area:sitemap"):
-            self.assertEqual(self.chain([area, "role:impl", "priority:P2"])[0], "opus5",
-                             f"{area} must take the opus5-first default")
-            self.assertEqual(self.chain([area, "role:site", "priority:P2"])[0], "opus5")
-        self.assertEqual(self.chain(["surface:frontend", "role:site"])[0], "opus5")
-        self.assertEqual(self.chain(["dashboard", "role:site"])[0], "opus5")
+            self.assertEqual(self.chain([area, "role:impl", "priority:P2"]), ["sol", "opus5"])
+            self.assertEqual(self.chain([area, "role:site", "priority:P2"]), ["sol", "opus5"])
+        self.assertEqual(self.chain(["surface:frontend", "role:site"]), ["sol", "opus5"])
+        self.assertEqual(self.chain(["dashboard", "role:site"]), ["sol", "opus5"])
 
     def test_the_selector_is_an_exact_label_not_a_substring(self):
         """`"gui" in label` would sweep `area:guide` into the sol carve-out."""
-        self.assertEqual(self.chain(["area:guide", "role:impl"])[0], "opus5")
-        self.assertEqual(self.chain(["kind:guidance", "role:impl"])[0], "opus5")
+        self.assertEqual(self.rr.gui_carve_out({"area:guide"}, ["opus5"], role="impl"),
+                         ["opus5"])
+        self.assertEqual(self.rr.gui_carve_out({"kind:guidance"}, ["opus5"], role="impl"),
+                         ["opus5"])
 
     def test_carve_out_label_set_is_exactly_area_gui(self):
         """MUTANT: widen `GUI_CARVE_OUT_LABELS` => RED. Pinned as a set as well as behaviourally,
@@ -400,29 +347,13 @@ class TestLabelsToModelChain(unittest.TestCase):
                    & {"research", "review", "soundness"}), [],
             "no authorship-pinned escalating lane may be in the injection allow-list")
 
-    def test_gui_impl_work_survives_the_single_rung_impl_chain(self):
-        """[OPUS-5] THE HEADLINE GUARD OF registry #738's ROUTING CHANGE.
-
-        `role:impl` is now `["opus5"]`. The `area:gui` carve-out was a pure RE-ORDERING, so on a
-        chain that no longer contains sol its both-implementors condition declines and the carve-out
-        goes INERT — all 33 open `area:gui` + `role:impl` issues would resolve opus5-only, which is
-        the exact inversion of the maintainer's one stated exception that PR #4211 fixed. And it has
-        NO symptom: PLAN and CLAIM agree on the wrong answer, so the cross-resolver agreement
-        harness reports nothing.
-
-        MUTANT (any of these) => RED:
-          * delete `inject_roles` from the `[[chain_preference]]` block in routing.toml
-          * delete the injection branch from `route-resolve.gui_carve_out`
-          * remove "impl" from `GUI_CARVE_OUT_INJECT_ROLES`
-        """
+    def test_gui_impl_work_uses_the_sol_implementation_lane(self):
         impl_route = next(r for r in self.doc["route"] if r.get("role") == "impl")
-        self.assertEqual(impl_route["model_chain"], ["opus5"],
-                         "precondition: this guard is only meaningful on a single-rung impl chain")
+        self.assertEqual(impl_route["model_chain"], ["sol", "opus5"])
         for labels in (["area:gui", "role:impl"],
                        ["area:gui", "role:impl", "priority:P2"],
                        ["area:gui", "role:impl", "area:sparq-gui"]):
-            self.assertEqual(self.chain(labels), ["sol", "opus5"],
-                             f"{labels} must stay SOL-FIRST (maintainer: GUI keeps sol)")
+            self.assertEqual(self.chain(labels), ["sol", "opus5"])
         self.assertEqual(self.rr.resolve(["area:gui", "role:impl"], self.doc)[1],
                          "sparq-rust-impl",
                          "the carve-out re-orders/leads the chain and never re-routes the agent")
@@ -447,14 +378,14 @@ class TestLabelsToModelChain(unittest.TestCase):
                              "typo would make the carve-out silently never fire")
 
     def test_injection_is_scoped_to_the_exact_gui_label(self):
-        """The carve-out can now hand back a model the impl route deliberately excludes, so a
-        false-matching selector is worse than a re-order: it would give sol to non-GUI work.
+        """On an older Opus-only target ref, this compatibility rule may add Sol to impl work.
+        A false-matching selector would therefore alter non-GUI routing during the rollout.
 
         MUTANT: make the selector a substring test => RED (area:guide would gain a sol rung)."""
         for near in ("area:guide", "area:guidance", "area:gui-toolkit", "kind:guidance",
                      "area:site", "surface:frontend", "dashboard"):
-            self.assertEqual(self.chain([near, "role:impl"]), ["opus5"],
-                             f"{near} is not area:gui and must be given NO sol rung")
+            self.assertEqual(self.rr.gui_carve_out({near}, ["opus5"], role="impl"), ["opus5"],
+                             f"{near} is not area:gui and must not gain a sol rung")
 
     def test_a_roleless_gui_issue_is_never_injected_into(self):
         """`role=None` (the `[defaults]` branch) has no role to check against the allow-list, so it
@@ -472,23 +403,15 @@ class TestLabelsToModelChain(unittest.TestCase):
                          (["sol", "terra", "opus5"], "sparq-docs"))
 
     # -- non-GUI work is unaffected ------------------------------------------------------------
-    def test_non_gui_implementation_work_is_opus5_first_end_to_end(self):
-        """The first directive, asserted the same way: labels in, chain out."""
+    def test_non_gui_implementation_work_is_sol_first_end_to_end(self):
         for role in ("impl", "site", "ci", "perf"):
-            self.assertEqual(self.chain([f"role:{role}", "area:sparq-core", "priority:P1"])[0],
-                             "opus5")
-        self.assertEqual(self.chain(["area:sparq-core", "priority:P1"])[0], "opus5")
+            self.assertEqual(self.chain([f"role:{role}", "area:sparq-core", "priority:P1"]),
+                             ["sol", "opus5"])
+        self.assertEqual(self.chain(["area:sparq-core", "priority:P1"]), ["sol", "opus5"])
 
-    def test_non_gui_impl_work_gets_no_sol_rung_end_to_end(self):
-        """[OPUS-5] registry #738, at the deciding layer: a plain `role:impl` issue resolves to the
-        WHOLE opus5-only chain. Asserted as an equality rather than a head check, because the defect
-        this replaces (sol serving the majority of impl work) came from the SECOND rung, not the
-        first — a head-only assertion cannot see it.
-
-        MUTANT: restore sol as a second rung on role:impl => RED."""
+    def test_non_gui_impl_work_keeps_the_opus_continuity_fallback(self):
         for area in ("area:sparq-core", "area:sparq-engine", "area:orchestration"):
-            self.assertEqual(self.chain(["role:impl", area, "priority:P1"]), ["opus5"],
-                             f"role:impl + {area} must resolve to the opus5-only chain")
+            self.assertEqual(self.chain(["role:impl", area, "priority:P1"]), ["sol", "opus5"])
         self.assertTrue(self.rr.resolve(["role:impl", "area:sparq-core"], self.doc)[2],
                         "and it must escalate, so a capacity outage is not a silent stall")
 
