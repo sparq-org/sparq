@@ -33,22 +33,22 @@ fn admit_query(query: &spargebra::Query) -> Result<(), Rejected> {
     };
     enum Visit<'a> {
         Pattern(&'a GraphPattern),
-        Expression(&'a Expression),
+        Expression(&'a Expression, &'a GraphPattern),
         Path(&'a PropertyPathExpression),
         ExitExists,
     }
     let mut pending = vec![Visit::Pattern(pattern)];
     let mut fuel = 0;
-    let mut in_exists = false;
+    let mut exists_captures: Option<std::collections::BTreeSet<&oxrdf::Variable>> = None;
     while let Some(node) = pending.pop() {
         fuel += 1;
         if fuel > 1024 {
             return Err(Rejected("query AST capacity"));
         }
         match node {
-            Visit::ExitExists => in_exists = false,
+            Visit::ExitExists => exists_captures = None,
             Visit::Pattern(p)
-                if in_exists
+                if exists_captures.is_some()
                     && !matches!(
                         p,
                         GraphPattern::Bgp { .. }
@@ -99,16 +99,16 @@ fn admit_query(query: &spargebra::Query) -> Result<(), Rejected> {
                 } => {
                     pending.extend([Visit::Pattern(left), Visit::Pattern(right)]);
                     if let Some(e) = expression {
-                        pending.push(Visit::Expression(e));
+                        pending.push(Visit::Expression(e, p));
                     }
                 }
                 GraphPattern::Filter { expr, inner } => {
-                    pending.extend([Visit::Pattern(inner), Visit::Expression(expr)]);
+                    pending.extend([Visit::Pattern(inner), Visit::Expression(expr, inner)]);
                 }
                 GraphPattern::Extend {
                     inner, expression, ..
                 } => {
-                    pending.extend([Visit::Pattern(inner), Visit::Expression(expression)]);
+                    pending.extend([Visit::Pattern(inner), Visit::Expression(expression, inner)]);
                 }
                 GraphPattern::Project { inner, variables } => {
                     if variables.len() > 64 {
@@ -123,7 +123,7 @@ fn admit_query(query: &spargebra::Query) -> Result<(), Rejected> {
                     pending.push(Visit::Pattern(inner));
                     for e in expression {
                         let (OrderExpression::Asc(e) | OrderExpression::Desc(e)) = e;
-                        pending.push(Visit::Expression(e));
+                        pending.push(Visit::Expression(e, inner));
                     }
                 }
                 GraphPattern::Group {
@@ -136,7 +136,7 @@ fn admit_query(query: &spargebra::Query) -> Result<(), Rejected> {
                             if matches!(name, AggregateFunction::Custom(_)) {
                                 return Err(Rejected("custom aggregate is not admitted"));
                             }
-                            pending.push(Visit::Expression(expr));
+                            pending.push(Visit::Expression(expr, inner));
                         }
                     }
                 }
@@ -163,9 +163,21 @@ fn admit_query(query: &spargebra::Query) -> Result<(), Rejected> {
                     return Err(Rejected("GRAPH, SERVICE and LATERAL are not admitted"));
                 }
             },
-            Visit::Expression(e) => match e {
+            Visit::Expression(e, scope) => match e {
                 Expression::Literal(l) => literal(l)?,
-                Expression::NamedNode(_) | Expression::Variable(_) | Expression::Bound(_) => {}
+                Expression::NamedNode(_) | Expression::Variable(_) => {}
+                Expression::Bound(variable) => {
+                    // [GPT-6] Literal 2013 substitution has no BOUND(term) rule.
+                    // Reject possible captures, while preserving body-local BOUND.
+                    if exists_captures
+                        .as_ref()
+                        .is_some_and(|vars| vars.contains(variable))
+                    {
+                        return Err(Rejected(
+                            "captured BOUND is outside the SPARQL 1.1 substitution profile",
+                        ));
+                    }
+                }
                 Expression::Or(a, b)
                 | Expression::And(a, b)
                 | Expression::Equal(a, b)
@@ -178,30 +190,38 @@ fn admit_query(query: &spargebra::Query) -> Result<(), Rejected> {
                 | Expression::Subtract(a, b)
                 | Expression::Multiply(a, b)
                 | Expression::Divide(a, b) => {
-                    pending.extend([Visit::Expression(a), Visit::Expression(b)]);
+                    pending.extend([Visit::Expression(a, scope), Visit::Expression(b, scope)]);
                 }
                 Expression::UnaryPlus(e) | Expression::UnaryMinus(e) | Expression::Not(e) => {
-                    pending.push(Visit::Expression(e))
+                    pending.push(Visit::Expression(e, scope))
                 }
                 Expression::Exists(p) => {
-                    if in_exists {
+                    if exists_captures.is_some() {
                         return Err(Rejected("nested EXISTS is not admitted"));
                     }
                     // LIFO exit marker keeps this context around the complete
                     // subtree, including FILTER operands and UNION branches.
-                    in_exists = true;
+                    let mut captures = std::collections::BTreeSet::new();
+                    // Input scope honors subquery projection and MINUS domains;
+                    // a possibly unbound variable still counts as a potential capture.
+                    scope.on_in_scope_variable(|variable| {
+                        captures.insert(variable);
+                    });
+                    exists_captures = Some(captures);
                     pending.extend([Visit::ExitExists, Visit::Pattern(p)]);
                 }
                 Expression::If(a, b, c) => pending.extend([
-                    Visit::Expression(a),
-                    Visit::Expression(b),
-                    Visit::Expression(c),
+                    Visit::Expression(a, scope),
+                    Visit::Expression(b, scope),
+                    Visit::Expression(c, scope),
                 ]),
                 Expression::In(e, args) => {
-                    pending.push(Visit::Expression(e));
-                    pending.extend(args.iter().map(Visit::Expression));
+                    pending.push(Visit::Expression(e, scope));
+                    pending.extend(args.iter().map(|e| Visit::Expression(e, scope)));
                 }
-                Expression::Coalesce(args) => pending.extend(args.iter().map(Visit::Expression)),
+                Expression::Coalesce(args) => {
+                    pending.extend(args.iter().map(|e| Visit::Expression(e, scope)))
+                }
                 Expression::FunctionCall(f, args) => {
                     match f {
                         Function::Now
@@ -238,7 +258,7 @@ fn admit_query(query: &spargebra::Query) -> Result<(), Rejected> {
                         }
                         _ => {}
                     }
-                    pending.extend(args.iter().map(Visit::Expression));
+                    pending.extend(args.iter().map(|e| Visit::Expression(e, scope)));
                 }
             },
             Visit::Path(p) => match p {

@@ -75,6 +75,8 @@ enforces finite arithmetic limits as whole-query failures, separately from
 lexical validity and direct RDF output. [Exact temporal/year capacity](../../skills/zk-query-proofs/references/exact-temporals.md)
 has its own explicit limits.
 EXISTS and NOT EXISTS bodies are restricted to BGP, join, UNION and pure FILTER.
+[Captured BOUND](../../skills/zk-query-proofs/references/exists-bound-scope.md) is
+rejected as an ambiguous published-2013 shape; body-local BOUND stays admitted.
 Fixed path sequences lowered to BGP are included; residual path operators,
 nested EXISTS, OPTIONAL/MINUS, binding operators, subqueries and modifiers inside
 an EXISTS body are rejected. The rejection applies to these combinations, not
