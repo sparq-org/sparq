@@ -106,6 +106,24 @@ trust-graph-did = ["trust-graph", "sparq-trust/did"]
 # research/odrl-pattern-scoped-targets-2026-07.md; overhead JSONs in bench/pattern-scope/.
 pattern-scope = []
 
+# [SONNET-4.6] sq-lzvl (issue #3296): WAC/ACP-aware per-source authorisation for federated
+# planning — the B7 source-skipping hook of
+# research/mpc-untrusted-planner-routing-design.md §8 Phase 7, whose §9 Q4 left open
+# whether it belongs in the MPC routing track or with sparq-solid (WAC/ACP), only
+# REFERENCING the seam. Answered as the latter: the policy lives with the crate that
+# already owns WAC/ACP evaluation.
+#
+# OFF by default and adds NO dependency (pure logic over the existing AuthIndex/Session
+# accessible-set path), so the default build carries zero source-authorisation code and
+# stays byte-identical. It adds no dependency EDGE either: sparq-solid does not depend on
+# sparq-fedplan-mpc and vice versa — the join is a plain `bool` that an integrator opting
+# into both crates feeds to the seam's reserved authorisation field.
+#
+# HONEST SCOPE: a PLAN-TIME decision over the LOCAL auth view. It enforces nothing at a
+# remote source and authenticates no participant, and it makes no MPC/privacy/ZK claim
+# (the MPC estate it can feed is semi-honest-only and externally unaudited, sq-qhy4).
+source-auth = []
+
 # [OPUS-4.8] sq-gq28y (issue #1546, maintainer decision "spec compliant - empty by default"):
 # a LEGACY escape hatch that restores the pre-flip union-always default-graph semantics.
 #

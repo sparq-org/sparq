@@ -1126,6 +1126,42 @@ graph-granular enforcement walk is reused unchanged.
   path as `query_as`. Build once per (session × scopes), query many; rebuild after any
   store mutation. READ path only (UPDATE stays graph-granular, record §2.4).
 
+## Per-source authorisation for federated planning — [SONNET-4.6] sq-lzvl (opt-in `source-auth`)
+
+The **B7 hook** of `research/mpc-untrusted-planner-routing-design.md` §8 Phase 7, whose §9
+Q4 asked whether access-control-aware source skipping belongs in the MPC routing track or
+here. **Answered: here** — the policy lives with the crate that already owns WAC/ACP, and
+the MPC seam only *references* it. **No dependency edge exists in either direction**:
+`sparq-solid` does not depend on `sparq-fedplan-mpc`, nor the reverse. The join is a plain
+`bool` an integrator that opts into both crates passes to the seam's reserved
+authorisation field (`SourcePrivacyDescriptorBuilder::participates`).
+
+**SAFE-style source skipping.** A source is declared as the set of named graphs it serves;
+it participates iff the session may read ≥1 of them, and a participating source is
+**narrowed** to its authorised subset — a decision can shrink what a source is asked for,
+never widen it.
+
+- `SourceDescriptor::new(id)` + `.serving(graph)` / `.serving_all(graphs)` — the declared
+  source (no discovery, nothing is contacted); `id()` / `graphs()` read it back.
+- `store.authorize_source(&Session, Mode, &SourceDescriptor) -> SourceAuthorization`, and
+  `store.authorize_sources(&Session, Mode, &[SourceDescriptor]) -> Vec<_>` (one decision
+  per input, **in input order**).
+- `SourceAuthorization::{source_id, participates, authorized_graphs, skip_reason}` —
+  `authorized_graphs` is sorted by IRI and deduplicated (deterministic), and empty exactly
+  when the source is skipped.
+- **Fail-closed:** a source declaring no graphs is skipped (`SkipReason::NoDeclaredGraphs`);
+  a source with no readable declared graph is skipped (`SkipReason::NoAuthorizedGraph`);
+  and everything `accessible` fails closed on — pre-`materialize_*`, no matching grant, a
+  reserved-`urn:sparq:` session value — skips **every** source.
+
+**Honest scope.** A **plan-time** decision over the LOCAL auth view: it enforces nothing at
+a remote source and authenticates no participant, so a source that is asked for a graph must
+still enforce its own access control. Skipping is a confidentiality-and-cost measure, not a
+completeness guarantee (an undeclared or stale served-graph set is skipped, and the answer
+is correspondingly incomplete). It makes **no** MPC, privacy or zero-knowledge claim — it is
+ordinary WAC/ACP evaluation, and the MPC estate it can feed remains research-grade,
+semi-honest-only and externally unaudited (`sq-qhy4`).
+
 ## Related skills
 
 - [`http-server`](../http-server/SKILL.md) — the sparq SPARQL HTTP server has **no**

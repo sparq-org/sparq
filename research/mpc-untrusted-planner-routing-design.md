@@ -46,7 +46,10 @@ Date: 2026-06-19. Parent epics: **sq-pwr** (MPC over federated SPARQL with ZKP o
 > See §8 for the per-phase status and `crates/sparq-fedplan-mpc/README.md` for the honest
 > boundary. **§9 Q3** (where the Phase-5 untrusted-plan re-validation binds) is now **PARTLY
 > ANSWERED** — `sq-1fo4` settled *what* is bound and confirmed no landed plumbing had to change;
-> *where* it attaches is still open. **§9 Q4** (B7 authorisation scope) remains **OPEN**.
+> *where* it attaches is still open. **§9 Q4** (B7 authorisation scope) is now **RESOLVED**
+> (`sq-lzvl`): B7 belongs with `sparq-solid`, which owns WAC/ACP, and only *references* this
+> seam — see Phase 7 in §8. No dependency edge was created in either direction and nothing in
+> `sparq-fedplan-mpc` changed.
 >
 > **The audit posture is unchanged by any of this.** Everything landed is *plumbing* —
 > source selection, a combination prune, a disclosed/hidden partition, and leakage
@@ -396,7 +399,9 @@ four-flatmates pipeline.
 > 6 (`sq-pwr.3` + `sq-xkrt`), in `crates/sparq-fedplan-mpc/`. **PARTLY LANDED:** Phase 5
 > (`sq-1fo4`) — its *canonicalisation* half only; the **soundness** half stays audit-gated on
 > `sq-qhy4` / `sq-9hrn` and on §9 Q3, and nothing in it may be presented as sound.
-> **NOT STARTED:** Phase 7 (needs the §9 Q4 decision). Per-phase annotations below.
+> **LANDED OUTSIDE THIS CRATE:** Phase 7 (`sq-lzvl`) — §9 Q4 resolved to `sparq-solid`, so
+> the hook lives in `crates/sparq-solid/` and this crate is unchanged. Per-phase annotations
+> below.
 
 1. **Phase 1 — `sparq-fedplan-mpc` crate skeleton + privacy descriptor.** **[LANDED — `sq-2q1x`]** Off-by-default opt-in
    crate depending on `sparq-fedplan` + `sparq-mpc`; define `SourcePrivacyDescriptor`
@@ -462,11 +467,19 @@ four-flatmates pipeline.
    keys): served characteristic sets are routinely truncated, and truncation strictly lowers
    that sum, so a truncated / unknown / non-partition summary **declines** rather than
    over-prunes. *(P3, depends Phase 2)*
-7. **Phase 7 — B7 authorisation hook (WAC/ACP-aware source skipping).** **[NOT STARTED —
-   needs the §9 Q4 decision; only the reserved `participates` field exists (Phase 1), which
-   Phase 2 reads as a bare participation flag, NOT as access control]** Design + wire the
-   reserved authorisation field to SAFE-style per-source access control. Separately scoped;
-   `ambiguous-ask-user`. *(P3, depends Phase 1; needs maintainer decision)*
+7. **Phase 7 — B7 authorisation hook (WAC/ACP-aware source skipping).** **[LANDED OUTSIDE
+   THIS CRATE — `sq-lzvl`, `crates/sparq-solid/src/source_auth.rs`, opt-in `source-auth`
+   feature]** §9 Q4 is answered as the second option: the decision lives with `sparq-solid`,
+   which already owns WAC/ACP evaluation, and this seam only *references* it. `sparq-solid`
+   gains `SourceDescriptor` (a source as the named graphs it serves) and
+   `PodStore::authorize_source`/`authorize_sources` → `SourceAuthorization`, which
+   participates iff the session may read ≥1 declared graph and carries the **narrowed**
+   authorised subset. **No dependency edge was created in either direction** — the join is a
+   plain `bool` an integrator that opts into both crates feeds to Phase 1's reserved
+   `participates` field, so nothing in `sparq-fedplan-mpc` changed and Phase 2 still reads
+   that field as a bare participation flag. The decision is **plan-time over a local auth
+   view**: it enforces nothing at a remote source, authenticates no participant, and makes no
+   MPC/privacy/ZK claim. *(P3, depends Phase 1)*
 
 ---
 
@@ -474,7 +487,7 @@ four-flatmates pipeline.
 
 *Q1 and Q2 were the two choices [#755](https://github.com/sparq-org/sparq/issues/755) held the build
 on; both are **RESOLVED** (full rationale + code evidence in the decision log at the top of this
-record). **Q3 and Q4 are still OPEN.***
+record). **Q3 is still OPEN; Q4 is RESOLVED by `sq-lzvl` — see below.***
 
 1. ~~**Crate vs feature granularity.**~~ **RESOLVED (#755): the STANDALONE CRATE.**
    `sparq-fedplan-mpc` is its own `publish = false` workspace member, additionally gated behind
@@ -516,8 +529,26 @@ record). **Q3 and Q4 are still OPEN.***
    layout was NOT touched.** The maintainer's call: accept the `FederatedStatement` attachment
    point (and schedule the layout extension), or defer the *where* to its own record once the proof
    exists.
-4. **OPEN — B7 scope.** Is access-control-aware source skipping in-scope for this track at all,
-   or does it belong with `sparq-solid` (WAC/ACP) and only *reference* this seam? (Phase 1's
-   reserved `participates` field exists as the seam's placeholder and Phase 2 reads it as a bare
-   participation flag; nothing interprets an access-control policy, and nothing will until this
-   is decided.)
+4. ~~**OPEN — B7 scope.**~~ **RESOLVED (`sq-lzvl`, issue #3296): it belongs with `sparq-solid`
+   and only REFERENCES this seam.** The question was whether access-control-aware source
+   skipping is in-scope for this track at all, or belongs with the WAC/ACP crate. Answered as
+   the latter, on the same coupling-cost ground that decided Q1: the policy lives where the
+   evaluation engine already is, so this track gains no access-control code and `sparq-solid`
+   gains no federation/MPC code. Evidence: `crates/sparq-solid/src/source_auth.rs`, behind
+   the OFF-by-default `source-auth` feature.
+
+   **What that buys, and what it deliberately is not.** `sparq-solid` decides participation
+   from its materialized `<urn:sparq:auth>` view — a source declares the named graphs it
+   serves, participates iff the session may read at least one of them, and is **narrowed** to
+   that authorised subset (a decision can shrink what a source is asked for, never widen it).
+   Fail-closed in both directions: an undeclared served-graph set and a no-readable-graph set
+   are both skips. The hand-off to this seam is a plain `bool` fed to Phase 1's reserved
+   `participates` field, so **no dependency edge exists either way** and nothing in
+   `sparq-fedplan-mpc` had to change — the same useful negative result Q3 recorded.
+
+   It is a **plan-time** decision over a **local** auth view. It enforces nothing at a remote
+   source and authenticates no participant (the WebID/client/issuer stay caller-asserted, as
+   throughout `sparq-solid`), so a source that is asked for a graph must still enforce its own
+   access control; skipping is a confidentiality-and-cost measure, not a completeness
+   guarantee. It makes no MPC, privacy or zero-knowledge claim, and the audit posture above is
+   unchanged by it.
