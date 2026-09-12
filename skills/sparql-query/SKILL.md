@@ -225,6 +225,19 @@ substituting an endpoint could introduce an invalid zero-length solution; this
 can increase work for small-side joins involving nullable paths. Query row
 budgets also bound repeated constant-seed results.
 
+Join-driven IRI substitution is limited to positive BGP/path/join/UNION shapes.
+A FILTER admits substitution only when every pushed variable is guaranteed bound
+in its own input; EXISTS, volatile and custom expression calls decline this path.
+MINUS, OPTIONAL, VALUES/BIND, subquery projection, grouping, solution modifiers and
+graph/service boundaries also use ordinary evaluation. This preserves local
+variable scopes, MINUS domains and the complete right-side matching relation.
+Both ordinary small-side joins and the theta anti-join seed path apply the same
+eligibility rules, and can consequently do more work for complex right operands.
+Eligible positive BGPs and non-nullable paths retain constant-seeded scans.
+Negated property sets use existential predicate matching: two allowed predicates
+connecting the same endpoints yield one mapping per direction. A forward/reverse
+alternative still combines its two directional result sets with bag semantics.
+
 `FILTER EXISTS` and `FILTER NOT EXISTS` evaluate inner expressions with bound outer
 terms, including variables that occur only inside an inner `FILTER`. This also preserves
 blank-node identity and computed literal values across the inner vocabulary boundary.

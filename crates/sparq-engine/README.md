@@ -46,7 +46,11 @@ let json = sparq_engine::query_json(&g, "SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?
   constant endpoint seeds, including terms absent from the active graph, while
   variable endpoints range over graph nodes. Sequence midpoint hints preserve
   their variable role. Joins fall back from constant substitution when it would
-  change a nullable path's domain.
+  change a nullable path's domain. Join-driven substitution is limited to positive
+  BGP/path/join/UNION shapes and locally bound deterministic FILTERs. MINUS,
+  OPTIONAL, binding, subquery, modifier and graph/service boundaries use ordinary
+  evaluation, preserving their variable scopes and domains. These fallbacks can
+  perform more work than the positive substitution path.
 - **Named graphs** — query across an active dataset with `GRAPH` and `FROM` / `FROM NAMED`.
 - **RDF 1.2 triple terms** — match [triple terms](https://www.w3.org/TR/rdf12-concepts/), including variables inside them.
 - **Materialized full paths** *(opt-in `paths` feature, OFF by default)* — `enumerate_paths` returns intermediate nodes and edges for tied shortest paths, bounded simple paths, or cycles back to their start. Each endpoint is unrestricted, one fixed node, or a graph pattern selecting a candidate set.
