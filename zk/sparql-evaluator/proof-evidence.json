@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "source_commit": "db21481af0e1b1b91c0ff7d458b9c0d5ec40cfae",
+  "date": "2026-09-12",
+  "platform": "macOS arm64",
+  "toolchain": {
+    "risc0_sdk_server": "3.0.6",
+    "guest_rust": "1.97.0",
+    "host_rust": "1.97.1"
+  },
+  "artifact_sha256": "9e62a058b952ba3b256dec7502c1f55d9ceaecdfa8bafab22cff675464ada408",
+  "image_id": [
+    4226903298,
+    1737109912,
+    323086654,
+    132275724,
+    1898706681,
+    4167760866,
+    1885247632,
+    3084952257
+  ],
+  "receipt_kind": "Succinct",
+  "dev_mode_disabled": true,
+  "genuine_proof_fixtures": [
+    "real_exact_result_rejects_all_public_binding_tampering_and_replay",
+    "real_false_ask_proves_absence_from_the_accepted_complete_graph",
+    "real_holder_declared_bag_preserves_duplicates_unbound_and_provenance"
+  ],
+  "genuine_proof_fixtures_result": "passed",
+  "actual_guest_positive_control": "ASK {}",
+  "actual_guest_rejection_cases": 21,
+  "actual_guest_rejections_result": "passed",
+  "artifact_admission_tests": 3,
+  "artifact_admission_result": "passed",
+  "native_evidence": {
+    "normative_positive_cases": 79,
+    "rejection_cases": 34,
+    "relation_tests": 16,
+    "coverage_metadata_tests": 2,
+    "result": "passed",
+    "is_cryptographic_proof_evidence": false
+  },
+  "gates": {
+    "detached_workspace_clippy": "passed",
+    "privacy_claims": "passed",
+    "no_perf_numbers": "passed",
+    "selector_tests": 6,
+    "selector_result": "passed"
+  },
+  "hosted_ci": "pending publication",
+  "cross_platform_reproducibility": "not established",
+  "privacy_limit": "Standard Succinct receipts retain outer recursion control metadata; this is not an external cryptographic audit or complete execution-length hiding claim."
+}
