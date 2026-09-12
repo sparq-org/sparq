@@ -30,3 +30,8 @@ explicitly removes them. The [official aggregate erratum](https://www.w3.org/201
 records ambiguity for MAX. This profile avoids choosing a global interpretation
 of that disputed error case. MIN(?x + 0) over VALUES {1 "bad"} and SUM(?x) over
 VALUES {1 UNDEF} are concrete excluded cases, not counted as successful conformance.
+
+[GPT-6] `host/tests/actual_aggregates.rs` executes all twelve admitted cases before
+checking the twelve strict guest relation rejections. These authored tests are
+separate from the native corpus; they establish execution only when the final
+artifact's hosted or local campaign records them, not when this file is added.

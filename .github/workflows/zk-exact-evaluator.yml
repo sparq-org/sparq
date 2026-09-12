@@ -28,7 +28,7 @@ jobs:
   exact-evaluator:
     name: real exact-dataset guest and proof
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -86,15 +86,22 @@ jobs:
           workspaces: zk/sparql-evaluator
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Native semantic and admission regressions
+      - name: Evidence export guard regressions
         if: steps.changes.outputs.required == 'true'
-        run: cargo test --locked --manifest-path zk/sparql-evaluator/Cargo.toml -p sparq-proved-evaluator-model --features evaluate
+        run: python3 -m unittest discover -s scripts/tests -p 'test_ci_exact_evaluator_*.py'
 
-      - name: Actual guest execution and real proof tamper tests
+      - name: Export source-bound actual guest and genuine proof evidence
         if: steps.changes.outputs.required == 'true'
-        # No ignored-test shortcut, mock mode, or missing-tool success.
-        run: cargo test --locked --manifest-path zk/sparql-evaluator/Cargo.toml -p sparq-proved-evaluator -- --nocapture --test-threads=1
+        # Executes native regressions, every real guest/proof test, and Clippy.
+        # Local path packages are rebuilt; the same exported program must verify
+        # every persisted synthetic receipt. Missing provenance fails the job.
+        run: python3 scripts/ci_exact_evaluator_evidence.py --output "$RUNNER_TEMP/sparq-exact-evidence"
 
-      - name: Scoped detached-workspace lint
-        if: steps.changes.outputs.required == 'true'
-        run: cargo clippy --locked --manifest-path zk/sparql-evaluator/Cargo.toml --workspace --all-targets --features sparq-proved-evaluator-model/evaluate -- -D warnings
+      - name: Upload exact artifact and campaign evidence
+        if: always() && steps.changes.outputs.required == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: exact-evaluator-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/sparq-exact-evidence
+          if-no-files-found: error
+          retention-days: 30

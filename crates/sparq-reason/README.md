@@ -109,11 +109,9 @@ let g = Graph::from_parts(dict, triples);
 
 ## 📚 Learn more
 
-- **How-to** — [`skills/inference/SKILL.md`](../../skills/inference/SKILL.md) (profiles,
-  incremental maintenance, proof trees, CLI seam).
+- **How-to** — [`skills/inference/SKILL.md`](../../skills/inference/SKILL.md) (profiles, incremental maintenance, proof trees, CLI seam).
 - **API reference** — [docs.rs/sparq-reason](https://docs.rs/sparq-reason).
-- **Design** — the inference verdicts in [`research/`](../../research) and
-  [`research/ARCHITECTURE.md`](../../research/ARCHITECTURE.md).
+- **Design** — [`research/`](../../research) and [`ARCHITECTURE.md`](../../research/ARCHITECTURE.md).
 - **Performance** — see the [benchmarks dashboard](https://sparq.jeswr.org/dev/bench).
 - **Contribute** — [`AGENTS.md`](../../AGENTS.md) and [`CONTRIBUTING.md`](../../CONTRIBUTING.md).
 

@@ -116,6 +116,8 @@ labeled integer-constructor capacity controls remain separate evidence. These
 executions authenticate each case's optional N-Triples source, covering literal,
 VALUES and stored-term arithmetic/error paths. They generate no individual receipts;
 the false-ASK fixture also discriminates SUBSTR positions and invalid numeric facets.
+The aggregate, temporal and numeric-capacity test files exercise positive controls
+and whole-relation rejections; these definitions require current guest execution.
 The dedicated CI workflow runs every host test. No ignored
 test or missing-tool shortcut counts as a successful proof run. Broader guest
 conformance coverage and remaining features belong to zkp-10.
@@ -207,3 +209,6 @@ namespace outside SPARQL user-variable syntax instead of requesting randomness
 for hidden aggregate variables. It does not provide query-visible randomness.
 The separate `sparq-deterministic-paths` parser feature is enabled only by the
 detached evaluator and supplies its existential path intermediates.
+
+The mandatory CI lane exports the accepted executable, actual synthetic receipts
+and source/toolchain/HAL evidence using the [campaign evidence contract](../../skills/zk-query-proofs/references/evaluator-evidence.md). Partial uploads are not success records.

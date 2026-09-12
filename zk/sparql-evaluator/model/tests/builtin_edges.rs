@@ -35,8 +35,19 @@ fn shared_builtin_goldens_are_admitted_and_evaluated_by_the_native_model() {
             nonce: [29; 32],
         };
         admit(&request).unwrap_or_else(|e| panic!("{}: admission {e:?}", case["id"]));
-        let journal = evaluate(&Witness { request, dataset })
-            .unwrap_or_else(|e| panic!("{}: evaluation {e:?}", case["id"]));
+        let evaluation = evaluate(&Witness { request, dataset });
+        // [GPT-6] Preserve the native corpus golden, but reject its two labeled
+        // capacity controls at the stricter proof relation boundary.
+        if case["expectation_kind"] == "implementation_capacity" {
+            assert_eq!(
+                evaluation.unwrap_err().0,
+                "query evaluation or resource budget rejected",
+                "{}",
+                case["id"]
+            );
+            continue;
+        }
+        let journal = evaluation.unwrap_or_else(|e| panic!("{}: evaluation {e:?}", case["id"]));
         let CanonicalResult::Select { rows, .. } = journal.result else {
             panic!("SELECT expected")
         };

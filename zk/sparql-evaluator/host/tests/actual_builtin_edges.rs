@@ -55,9 +55,21 @@ fn actual_guest_executes_shared_builtin_edges_and_labeled_capacity_controls() {
             .unwrap()
             .build()
             .unwrap();
-        let session = executor
-            .execute(env, SPARQ_EXACT_GUEST_ELF)
-            .unwrap_or_else(|e| panic!("{}: actual guest execution {e:#}", case["id"]));
+        let execution = executor.execute(env, SPARQ_EXACT_GUEST_ELF);
+        // [GPT-6] Capacity is a whole-relation rejection, not an unbound result.
+        if case["expectation_kind"] == "implementation_capacity" {
+            let error = execution.expect_err("capacity violation must not reach Halted(0)");
+            let rejection = format!("{error:#}");
+            assert!(
+                rejection.contains("Guest panicked:")
+                    && rejection.contains("bounded exact-dataset relation rejected"),
+                "{}: expected relation rejection, got {rejection}",
+                case["id"]
+            );
+            continue;
+        }
+        let session =
+            execution.unwrap_or_else(|e| panic!("{}: actual guest execution {e:#}", case["id"]));
         let journal: Journal = session.journal.decode().unwrap();
         bind_journal(&journal, &input.request).unwrap();
         let CanonicalResult::Select { rows, .. } = journal.result else {
@@ -70,7 +82,7 @@ fn actual_guest_executes_shared_builtin_edges_and_labeled_capacity_controls() {
             case["id"]
         );
     }
-    assert_eq!(rec_cases, 137, "execute every REC-derived edge expectation");
+    assert_eq!(rec_cases, 167, "execute every REC-derived edge expectation");
     assert_eq!(
         capacity_controls, 2,
         "capacity controls are separate evidence"
