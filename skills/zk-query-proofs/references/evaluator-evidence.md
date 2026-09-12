@@ -63,3 +63,8 @@ A local operator can use the same runner with `--local --output NEW_DIRECTORY`.
 It records a local checkout identity and no hosted or PR-head attestation; this
 mode is refused inside GitHub Actions. Both modes require a clean tracked checkout
 and reject non-ignored untracked files before rebuilding local source packages.
+
+Guest package invalidation explicitly selects `--release --target
+riscv32im-risc0-zkvm-elf`; Cargo's default host/debug clean scope does not clear
+those artifacts. A real read-only dry run checked this distinction before the
+first exported campaign. The host package rebuild uses its actual default scope.

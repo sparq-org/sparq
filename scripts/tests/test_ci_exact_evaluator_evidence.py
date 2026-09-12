@@ -124,6 +124,18 @@ class EvidenceGuards(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "HAL execution diagnostics"):
                 evidence.observed_hal(unrelated)
 
+    def test_guest_invalidation_targets_actual_release_artifacts(self):
+        # Real dry-run evidence found zero files with Cargo's default host/debug
+        # scope and seven guest/release files with these explicit selectors.
+        guest = evidence.clean_command("guest", "guest/Cargo.toml", self.root, ["sparq-core"])
+        self.assertIn("--release", guest)
+        self.assertEqual(guest[guest.index("--target") + 1], "riscv32im-risc0-zkvm-elf")
+        self.assertEqual(guest[-2:], ["-p", "sparq-core"])
+        host = evidence.clean_command("host", "Cargo.toml", self.root, ["sparq-core"])
+        self.assertNotIn("--release", host)
+        with self.assertRaisesRegex(ValueError, "unknown package"):
+            evidence.clean_command("ambiguous", "Cargo.toml", self.root, [])
+
     def test_workflow_requires_export_and_upload_of_actual_evidence(self):
         root = Path(__file__).parents[2]
         workflow = (root / ".github/workflows/zk-exact-evaluator.yml").read_text()

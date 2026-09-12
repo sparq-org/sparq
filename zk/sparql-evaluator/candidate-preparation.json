@@ -44,8 +44,8 @@
     "numeric_guest_success_control": 1
   },
   "native_clippy": "core/engine/reason all targets with mmap, parallel, vectorized, id-filter-fastpath, topk-lazy-strkey, substrate-compare passed; /private/tmp/sparq-v1-common-integration-clippy.log",
-  "exporter_hermetic_tests": 14,
-  "exporter_guard_mutations": 5,
+  "exporter_hermetic_tests": 15,
+  "exporter_guard_mutations": 6,
   "pending": [
     "Final SDK feature-edge source integration",
     "Current guest compile and full actual execution including strict negative classification",

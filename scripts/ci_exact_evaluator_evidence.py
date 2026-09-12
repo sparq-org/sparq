@@ -147,6 +147,19 @@ def run_logged(args: list[str], name: str, output: Path, env: dict, commands: li
         raise ValueError(f"{name} failed with exit status {status}")
 
 
+def clean_command(label: str, manifest: str, target: Path, packages: list[str]) -> list[str]:
+    command = ["cargo", "clean", "--locked", "--offline", "--manifest-path", manifest,
+               "--target-dir", str(target)]
+    if label == "guest":
+        # Host Cargo defaults to host/debug; that does not invalidate guest/release.
+        command.extend(["--release", "--target", "riscv32im-risc0-zkvm-elf"])
+    elif label != "host":
+        raise ValueError("unknown package rebuild scope")
+    for package in packages:
+        command.extend(["-p", package])
+    return command
+
+
 def build_metadata(manifest: str, env: dict) -> dict:
     return json.loads(subprocess.check_output([
         "cargo", "metadata", "--manifest-path", manifest, "--locked", "--offline",
@@ -205,9 +218,7 @@ def main() -> int:
             metadata = build_metadata(manifest, env)
             (output / f"{label}-metadata.json").write_text(json.dumps(metadata) + "\n")
             local = sorted({p["name"] for p in metadata["packages"] if p["source"] is None})
-            clean = ["cargo", "clean", "--manifest-path", manifest, "--target-dir", str(package_target)]
-            for package in local:
-                clean.extend(["-p", package])
+            clean = clean_command(label, manifest, package_target, local)
             run_logged(clean, f"rebuild-{label}-local-packages", output, env, commands)
         cargo = ["cargo", "run", "--locked", "--manifest-path", MANIFEST,
                  "-p", "sparq-proved-evaluator", "--example", "export_guest", "--"]
