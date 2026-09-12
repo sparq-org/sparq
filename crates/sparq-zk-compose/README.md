@@ -23,7 +23,7 @@ v3, §S4.E). Drives the per-property Noir circuit family at
 
 [GPT-6] How-to: [ZK query proofs](../../skills/zk-query-proofs/SKILL.md), [disclosure planning](../../skills/zk-query-proofs/references/disclosure-planner.md), and the opt-in [successful-result contract](../../skills/zk-query-proofs/references/successful-results.md).
 Benchmarks (gate counts, timing): [`bench/zk-compose/`](../../bench/zk-compose).
-Contributing: [`AGENTS.md`](../../AGENTS.md).
+[GPT-6] Status snapshots must fit their selected Merkle tree. Contributing: [`AGENTS.md`](../../AGENTS.md).
 
 ## License
 

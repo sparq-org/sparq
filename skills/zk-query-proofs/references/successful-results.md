@@ -42,6 +42,9 @@ CLI identifies this as the ZK target; `noir-recursive-no-zk` is a different targ
 
 Use a durable `SeenNonces` implementation. Authentication of external status
 snapshots and selecting acceptable issuers remain the relying party's job.
+Each accepted status snapshot must fit the depth-ten tree in full: at most
+128 bytes. Prover preparation and independent verifier reconstruction both reject
+oversized snapshots; no prefix truncation is accepted.
 
 [GPT-6] Backend builders can use `planner::plan_disclosure_admitted` to restrict
 candidate eligibility without changing committed graphs or query semantics. The

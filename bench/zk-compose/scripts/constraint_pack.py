@@ -97,11 +97,24 @@ TOOL = "bb gates -s ultra_honk"
 # member none of them matches — so adding a circuit family to the estate without describing
 # it here is a hard error, never a silent omission from the evaluation.
 #
-# `layer` splits the two things the manifest unifies and that a reviewer will want separated:
+# `layer` separates the proof contracts represented by the compiled members:
 #   query      — the SPARQL-algebra members (section 7.3 of the spec draft)
 #   credential — the credential-layer members (possession, revocation, issuer attestation)
+#   result     — integrated support for released mappings, without result completeness
 # ---------------------------------------------------------------------------------------
 FAMILIES: list[dict] = [
+    # [GPT-6] Keep the selected-result contract separate from complete-scan members.
+    {
+        "key": "result_v1",
+        "pattern": r"result_v1_k(?P<k>\d+)_n(?P<n>\d+)_p(?P<p>\d+)_r(?P<r>\d+)_f(?P<f>\d+)",
+        "params": ["k", "n", "p", "r", "f"],
+        "layer": "result",
+        "role": "Support for released SELECT DISTINCT mappings: issuer authentication, "
+        "credential status, selected triple membership, BGP joins and residual private "
+        "integer FILTERs. Capacity parameters: k credentials, n triples per credential, "
+        "p patterns, r released rows, f private FILTERs per row. Does not establish "
+        "result completeness or holder identity.",
+    },
     {
         "key": "scan",
         "pattern": r"scan_k(?P<k>\d+)_n(?P<n>\d+)_r(?P<r>\d+)",
@@ -577,6 +590,7 @@ def render_markdown(pack: dict) -> str:
     add("")
 
     for layer_name, layer_title in (
+        ("result", "Successful-result circuits (released mapping support)"),
         ("query", "Query-layer circuits (SPARQL algebra fragment)"),
         ("credential", "Credential-layer circuits"),
     ):
