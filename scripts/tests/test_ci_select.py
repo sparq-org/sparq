@@ -585,6 +585,20 @@ class ChangeClassTests(unittest.TestCase):
         self.assertEqual(sel.change_class, "orchestration-only")
         self.assertIn("skipped-by-class: orchestration-only", sel.reason)
 
+    def test_flow_on_rules_and_selftest_select_empty_closure(self):
+        # [GPT-5] #6240: changing the reactive rule table normally entails changing
+        # its engine and hermetic self-test. All three are orchestration-only and
+        # must avoid the broad scripts/ full-run trigger as a group.
+        sel = self._select([
+            "scripts/flow-on.py",
+            "scripts/flow-on-rules.toml",
+            "scripts/tests/test_flow_on.py",
+        ])
+        self.assertEqual(sel.mode, "selected")
+        self.assertEqual(sel.affected, [])
+        self.assertEqual(sel.change_class, "orchestration-only")
+        self.assertIn("skipped-by-class: orchestration-only", sel.reason)
+
     def test_docs_only_diff_selects_empty_closure(self):
         m = [{"pattern": "research/**", "safe": True}]
         sel = self._select(["research/design.md"], m)
