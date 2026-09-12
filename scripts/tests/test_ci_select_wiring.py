@@ -495,9 +495,20 @@ class TestWiring(unittest.TestCase):
         self.assertIn('[ "$CI_FULL_LABEL" = "true" ]', run)
 
     def test_label_toggle_reevaluates_selection(self):
-        """[FABLE-5] sq-fmx4u.5. Toggling the ci-full label must re-run selection, so
-        both selection-consuming workflows react to labeled/unlabeled — and must NOT
-        drop the default `synchronize` (push-to-PR) trigger while doing so."""
+        """[FABLE-5] sq-fmx4u.5. APPLYING the ci-full label must re-run selection, so
+        every selection-consuming workflow reacts to `labeled` — and must NOT drop the
+        default `synchronize` (push-to-PR) trigger while doing so.
+
+        [OPUS-5] #5215: `unlabeled` is deliberately NOT a trigger and is asserted
+        ABSENT here. The override is MONOTONE (ci-full only ever maps to
+        `ci_select.py --full`), so the run standing on the head SHA after a removal is
+        already a strict SUPERSET of what re-selection would ask for — while every
+        removal event cost one `skipped` check-run per job definition across four
+        workflows. The monotonicity invariant that makes this sound (no label read by
+        these workflows may be a NEGATIVE condition) is pinned separately by
+        scripts/tests/test_label_trigger_economy.py; this assertion is the trigger-set
+        half, kept here so the two files cannot drift apart silently.
+        """
         for wf_name, wf in (("ci.yml", self.ci), ("feature-matrix.yml", self.fm),
                             ("fuzz.yml", self.fuzz), ("bench.yml", self.bench)):
             on = _on_block(wf)
@@ -505,10 +516,14 @@ class TestWiring(unittest.TestCase):
             self.assertIsInstance(
                 pr, dict, f"{wf_name}: pull_request must carry a types list")
             types = pr.get("types", [])
-            for needed in ("labeled", "unlabeled"):
-                self.assertIn(needed, types,
-                              f"{wf_name}: pull_request must react to {needed} so the "
-                              f"ci-full label toggle re-evaluates selection")
+            self.assertIn("labeled", types,
+                          f"{wf_name}: pull_request must react to labeled so APPLYING "
+                          f"the ci-full label re-evaluates selection")
+            self.assertNotIn("unlabeled", types,
+                             f"{wf_name}: `unlabeled` re-introduces the #5215 no-op "
+                             f"generations and buys nothing — removing a monotone "
+                             f"opt-in label can only ask for LESS work than the run "
+                             f"already on this head SHA")
             for keep in ("opened", "synchronize", "reopened"):
                 self.assertIn(keep, types,
                               f"{wf_name}: must keep the default {keep} trigger")

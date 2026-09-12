@@ -346,7 +346,7 @@ belts, and rule 9 is diagnosis + a recorded decision rather than a belt (all in
    an old attempt that reused the run id from leaking into the verdict; the
    workflow-run conclusion supplies the verdict when an entire job evaporates.
 7. **A run that assembled NO LEGS is not evidence (#3781).** [OPUS-5] A
-   `labeled`/`unlabeled` `pull_request` event whose label is not
+   `labeled` `pull_request` event whose label is not
    `ci-full`/`bench-full`/`fuzz-full` is a guarded no-op for every `ci-select`
    caller: the #2546 label-trigger guard skips every root job of `ci.yml`,
    `bench.yml`, `feature-matrix.yml` and `fuzz.yml`, so the run's ONLY non-skipped
@@ -374,6 +374,20 @@ belts, and rule 9 is diagnosis + a recorded decision rather than a belt (all in
    EVALUATES the marker expression against synthetic payloads and proves, by
    `needs:`-graph reachability, that every caller job really is inert on such a
    flip — the claim, not just the string.
+   [OPUS-5] **#5215: only label ADDITIONS reach here now.** `unlabeled` was removed
+   from the `on.pull_request.types` of `ci.yml`, `feature-matrix.yml`, `bench.yml`,
+   `fuzz.yml` and `vectorized-feature-off.yml`, so a label REMOVAL starts no run at
+   all — halving this no-op class, because a `review:*`/`status:*` state transition
+   is a remove+add pair. Sound because every label those workflows read is a
+   MONOTONE OPT-IN TO MORE WORK (`ci-full` ⇒ `ci_select.py --full`, `bench-full` ⇒
+   the well-known suites, `fuzz-full` ⇒ the randomized budget): removing one can only
+   ask for LESS than the run already standing on that head SHA, so skipping the
+   removal event leaves a strict superset of the required coverage. The marker
+   expression still handles `unlabeled` verbatim, so restoring the trigger needs no
+   other edit. Practical consequence: **toggling `ci-full` OFF is no longer a way to
+   force a re-run** — apply a label (or re-run the workflow) instead. Both halves —
+   the trigger sets and the no-negative-label-read invariant that makes them sound —
+   are pinned by `scripts/tests/test_label_trigger_economy.py`.
 8. **An unsatisfiable hold REDs immediately, with the diagnosis (#3781).**
    [OPUS-5] Rule 4's hold is a WAIT for the `ready_for_review` full-tier re-runs.
    When every sibling has CONCLUDED, a draft-marked select still lacks a successor,
