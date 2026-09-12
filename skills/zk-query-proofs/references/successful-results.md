@@ -15,14 +15,15 @@ patterns, four released rows, six variables and two private predicates.
 check for one-credential answers and reveals the smaller supporting capacity.
 `prepare_result_with_options` with `CredentialCapacity::HideInTwo` keeps two
 slots, privately repeating a single credential when needed; this does not assert
-two distinct credentials. Private integers are bounded by `MAX_PRIVATE_INTEGER`; public
+two distinct credentials. Private canonical nonnegative integers cover the complete
+`u64` range (`MAX_PRIVATE_INTEGER`); public
 predicates use the shared planner semantics. Selected blank nodes are rejected
 in-circuit. Public predicates choose the `f0` member without numeric circuitry;
 the `f2` member binds private numeric values back to canonical literal encodings.
-Measured member costs live in the [gate snapshot](../../../crates/sparq-zk-compose/tests/gate_count_snapshot.json).
+Measured member costs live in the [gate snapshot](../../../crates/sparq-zk-compose/tests/gate_count_snapshot.json); expanded-profile measurement scope, source hashes and ACIR hashes are in [result capacity evidence](../../../bench/zk-compose/result_capacity_gates.json).
 
 The presentation contains only version, query, released RDF terms, challenge, one or two
-issuer key slots and proof bytes. Its reconstructed public inputs additionally
+issuer key slots, an optional public integer-capacity selector and proof bytes. Its reconstructed public inputs additionally
 contain the accepted status-policy root and query-derived layout. Graph roots,
 sizes, salts, credential status references, signatures, selected sources and hidden
 term encodings stay in the private witness. Issuer identities, fixed capacities
@@ -42,9 +43,12 @@ CLI identifies this as the ZK target; `noir-recursive-no-zk` is a different targ
 
 Use a durable `SeenNonces` implementation. Authentication of external status
 snapshots and selecting acceptable issuers remain the relying party's job.
-Each accepted status snapshot must fit the depth-ten tree in full: at most
-128 bytes. Prover preparation and independent verifier reconstruction both reject
-oversized snapshots; no prefix truncation is accepted.
+The largest freshness-accepted status snapshot in the verifier policy selects
+status depth 10, 17 or 20. Each snapshot must fit that tree in full. The shared
+root/witness guard rejects oversized snapshots; no prefix truncation is accepted.
+This choice depends on all accepted lists, including lists unused by the witness.
+Missing trailing bits remain revoked padding. The policy retains its existing
+fixed accepted-list capacity.
 
 [GPT-6] Backend builders can use `planner::plan_disclosure_admitted` to restrict
 candidate eligibility without changing committed graphs or query semantics. The
@@ -108,3 +112,33 @@ inherit dual-leaf compatibility from the legacy lexical-handle dispatch rule.
 this is separate from the planner’s first-occurrence variable ordering. FILTER
 bounds retain their complete `u64` public field encoding. Witness TOML represents
 values above `i64::MAX` as decimal strings accepted by Noir.
+
+
+[GPT-6] `ResultOptions::integer_capacity` defaults to
+`IntegerCapacityPolicy::Smallest`: selected private values through 99 use
+`PrivateIntegerCapacity::TwoDigits`, and larger canonical values select
+`FullU64`. `HideInU64` uses the full-width member for any private predicate,
+including small values. Public predicates still select `f0`. The public capacity
+choice reveals a range bucket; the full-width relation keeps the exact decimal
+length private. No public digit-count field is introduced. The joint planner
+continues to minimize authentication and membership counts, not the gate cost
+of competing numeric profiles.
+
+The full-width relation reconstructs the canonical unsigned decimal lexical form
+from a private `u64`, selects among fixed-length BLAKE3 token openings inside the
+circuit, and checks the original signed string commitment. Checked accumulation
+rejects overflow; leading zeros, signs, non-integer datatypes and values beyond
+`u64` are outside this profile. No issuer re-attestation or host-only
+value-to-lexical bridge replaces the commitment check. Nineteen- and twenty-digit
+tokens cross the BLAKE3 block boundary, and all private-length branches contribute
+to compiled cost. Gate snapshots report that cost; this is not a runtime speedup
+claim. Signed `i64`, arbitrary precision and other numeric datatypes remain
+separate extensions or exact-evaluator work.
+
+Depth-ten small profiles retain version-one members and the legacy serialized
+shape. Expanded profiles use version two. The verifier derives the member from
+the issuer-slot count, query-derived private-filter count, integer capacity and
+its own status depth, rejecting a version mismatch. The presentation carries no
+prover-supplied key or status-depth override. Member suffix `i64` denotes the
+unsigned integer width in bits, not signed `i64` support. Old proof-byte/key
+compatibility is not assumed: the verifier builds keys from its installed source.

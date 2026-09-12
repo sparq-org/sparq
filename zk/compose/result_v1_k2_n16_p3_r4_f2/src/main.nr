@@ -40,5 +40,8 @@ fn main(
     filter_values: [[u8; F]; R],
 ) {
     let _ = challenge;
-    result_check::<K, F>(version, accepted_root, issuer_keys, pattern_count, pattern_vars, pattern_constants, projection, result_count, results, filter_count, filter_vars, filter_ops, filter_bounds, counts, salts, enc, status_lists, status_versions, status_indices, status_roots, status_siblings, policy_indices, policy_siblings, signatures, selected_graphs, selected_leaves, values, selected_types, selected_hashes, filter_values);
+    // [GPT-6] Keep the existing tiny-member witness ABI while sharing the relation.
+    let mut widened_values: [[u64; F]; R] = [[0; F]; R];
+    for r in 0..R { for f in 0..F { widened_values[r][f] = filter_values[r][f] as u64; } }
+    result_check::<K, F, STATUS_DEPTH, 8, 1>(version, accepted_root, issuer_keys, pattern_count, pattern_vars, pattern_constants, projection, result_count, results, filter_count, filter_vars, filter_ops, filter_bounds, counts, salts, enc, status_lists, status_versions, status_indices, status_roots, status_siblings, policy_indices, policy_siblings, signatures, selected_graphs, selected_leaves, values, selected_types, selected_hashes, widened_values);
 }

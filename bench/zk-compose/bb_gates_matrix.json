@@ -480,7 +480,7 @@
       }
     },
     "result_v1_k1_n16_p3_r4_f2": {
-      "circuit_size": 68963,
+      "circuit_size": 69055,
       "lane": "string",
       "configs": {
         "string-canonical": {
@@ -514,7 +514,245 @@
       }
     },
     "result_v1_k2_n16_p3_r4_f2": {
-      "circuit_size": 95775,
+      "circuit_size": 95867,
+      "lane": "string",
+      "configs": {
+        "string-canonical": {
+          "legal": true
+        },
+        "dual-leaf": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
+        "value-only": {
+          "legal": false,
+          "reason": "IllegalPair"
+        }
+      }
+    },
+    "result_v2_k1_n16_p3_r4_f0_i0_d17": {
+      "circuit_size": 32836,
+      "lane": "string",
+      "configs": {
+        "string-canonical": {
+          "legal": true
+        },
+        "dual-leaf": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
+        "value-only": {
+          "legal": false,
+          "reason": "IllegalPair"
+        }
+      }
+    },
+    "result_v2_k1_n16_p3_r4_f0_i0_d20": {
+      "circuit_size": 33071,
+      "lane": "string",
+      "configs": {
+        "string-canonical": {
+          "legal": true
+        },
+        "dual-leaf": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
+        "value-only": {
+          "legal": false,
+          "reason": "IllegalPair"
+        }
+      }
+    },
+    "result_v2_k1_n16_p3_r4_f2_i64_d10": {
+      "circuit_size": 462049,
+      "lane": "string",
+      "configs": {
+        "string-canonical": {
+          "legal": true
+        },
+        "dual-leaf": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
+        "value-only": {
+          "legal": false,
+          "reason": "IllegalPair"
+        }
+      }
+    },
+    "result_v2_k1_n16_p3_r4_f2_i64_d17": {
+      "circuit_size": 462597,
+      "lane": "string",
+      "configs": {
+        "string-canonical": {
+          "legal": true
+        },
+        "dual-leaf": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
+        "value-only": {
+          "legal": false,
+          "reason": "IllegalPair"
+        }
+      }
+    },
+    "result_v2_k1_n16_p3_r4_f2_i64_d20": {
+      "circuit_size": 462832,
+      "lane": "string",
+      "configs": {
+        "string-canonical": {
+          "legal": true
+        },
+        "dual-leaf": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
+        "value-only": {
+          "legal": false,
+          "reason": "IllegalPair"
+        }
+      }
+    },
+    "result_v2_k1_n16_p3_r4_f2_i8_d17": {
+      "circuit_size": 69619,
+      "lane": "string",
+      "configs": {
+        "string-canonical": {
+          "legal": true
+        },
+        "dual-leaf": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
+        "value-only": {
+          "legal": false,
+          "reason": "IllegalPair"
+        }
+      }
+    },
+    "result_v2_k1_n16_p3_r4_f2_i8_d20": {
+      "circuit_size": 69854,
+      "lane": "string",
+      "configs": {
+        "string-canonical": {
+          "legal": true
+        },
+        "dual-leaf": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
+        "value-only": {
+          "legal": false,
+          "reason": "IllegalPair"
+        }
+      }
+    },
+    "result_v2_k2_n16_p3_r4_f0_i0_d17": {
+      "circuit_size": 60197,
+      "lane": "string",
+      "configs": {
+        "string-canonical": {
+          "legal": true
+        },
+        "dual-leaf": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
+        "value-only": {
+          "legal": false,
+          "reason": "IllegalPair"
+        }
+      }
+    },
+    "result_v2_k2_n16_p3_r4_f0_i0_d20": {
+      "circuit_size": 60667,
+      "lane": "string",
+      "configs": {
+        "string-canonical": {
+          "legal": true
+        },
+        "dual-leaf": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
+        "value-only": {
+          "legal": false,
+          "reason": "IllegalPair"
+        }
+      }
+    },
+    "result_v2_k2_n16_p3_r4_f2_i64_d10": {
+      "circuit_size": 488858,
+      "lane": "string",
+      "configs": {
+        "string-canonical": {
+          "legal": true
+        },
+        "dual-leaf": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
+        "value-only": {
+          "legal": false,
+          "reason": "IllegalPair"
+        }
+      }
+    },
+    "result_v2_k2_n16_p3_r4_f2_i64_d17": {
+      "circuit_size": 489954,
+      "lane": "string",
+      "configs": {
+        "string-canonical": {
+          "legal": true
+        },
+        "dual-leaf": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
+        "value-only": {
+          "legal": false,
+          "reason": "IllegalPair"
+        }
+      }
+    },
+    "result_v2_k2_n16_p3_r4_f2_i64_d20": {
+      "circuit_size": 490424,
+      "lane": "string",
+      "configs": {
+        "string-canonical": {
+          "legal": true
+        },
+        "dual-leaf": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
+        "value-only": {
+          "legal": false,
+          "reason": "IllegalPair"
+        }
+      }
+    },
+    "result_v2_k2_n16_p3_r4_f2_i8_d17": {
+      "circuit_size": 96979,
+      "lane": "string",
+      "configs": {
+        "string-canonical": {
+          "legal": true
+        },
+        "dual-leaf": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
+        "value-only": {
+          "legal": false,
+          "reason": "IllegalPair"
+        }
+      }
+    },
+    "result_v2_k2_n16_p3_r4_f2_i8_d20": {
+      "circuit_size": 97449,
       "lane": "string",
       "configs": {
         "string-canonical": {
@@ -722,10 +960,10 @@
     }
   },
   "summary": {
-    "circuits": 41,
+    "circuits": 55,
     "methods": 3,
-    "configs": 123,
-    "legal_configs": 78,
-    "illegal_configs": 45
+    "configs": 165,
+    "legal_configs": 92,
+    "illegal_configs": 73
   }
 }

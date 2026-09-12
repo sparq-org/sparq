@@ -51,9 +51,24 @@
     "path_reach_d4_k2_n16": 8322,
     "path_reach_d8_k1_n16": 6180,
     "result_v1_k2_n16_p3_r4_f0": 59101,
-    "result_v1_k2_n16_p3_r4_f2": 95775,
+    "result_v1_k2_n16_p3_r4_f2": 95867,
     "result_v1_k1_n16_p3_r4_f0": 32288,
-    "result_v1_k1_n16_p3_r4_f2": 68963
+    "result_v1_k1_n16_p3_r4_f2": 69055,
+    "result_v2_k1_n16_p3_r4_f0_i0_d17": 32836,
+    "result_v2_k1_n16_p3_r4_f0_i0_d20": 33071,
+    "result_v2_k1_n16_p3_r4_f2_i64_d10": 462049,
+    "result_v2_k1_n16_p3_r4_f2_i64_d17": 462597,
+    "result_v2_k1_n16_p3_r4_f2_i64_d20": 462832,
+    "result_v2_k1_n16_p3_r4_f2_i8_d17": 69619,
+    "result_v2_k1_n16_p3_r4_f2_i8_d20": 69854,
+    "result_v2_k2_n16_p3_r4_f0_i0_d17": 60197,
+    "result_v2_k2_n16_p3_r4_f0_i0_d20": 60667,
+    "result_v2_k2_n16_p3_r4_f2_i64_d10": 488858,
+    "result_v2_k2_n16_p3_r4_f2_i64_d17": 489954,
+    "result_v2_k2_n16_p3_r4_f2_i64_d20": 490424,
+    "result_v2_k2_n16_p3_r4_f2_i8_d17": 96979,
+    "result_v2_k2_n16_p3_r4_f2_i8_d20": 97449
   },
-  "_comment_gpt6_result": "[GPT-6] Additive successful-result members measured on darwin arm64 with pinned nargo beta.21 and bb 5.0.0-nightly.20260324, 2026-09-09. F=0 excludes all private integer predicate circuitry; F=2 retains lexical-to-value binding. These are circuit measurements, not externally audited security or end-to-end performance evidence."
+  "_comment_gpt6_result": "[GPT-6] Additive successful-result members measured on darwin arm64 with pinned nargo beta.21 and bb 5.0.0-nightly.20260324, 2026-09-09. F=0 excludes all private integer predicate circuitry; F=2 retains lexical-to-value binding. These are circuit measurements, not externally audited security or end-to-end performance evidence.",
+  "_comment_zkp_10_3": "[GPT-6] Listed result-capacity and integer members remeasured with the pinned toolchain; scope, source/ACIR hashes and actual values are in bench/zk-compose/result_capacity_gates.json. Other baseline entries retain their earlier provenance; no timing claim."
 }

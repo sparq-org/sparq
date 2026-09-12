@@ -65,3 +65,6 @@ mod tests;
 
 // [GPT-6] Additive selected-result relation; not externally audited.
 pub mod result;
+
+// [GPT-6] Additive private full-u64 result literal relation.
+pub mod result_integer;

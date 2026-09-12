@@ -17,6 +17,53 @@ Toolchain baselined for these counts: `bb 5.0.0-nightly.20260324`, `nargo 1.0.0-
 
 ## Successful-result circuits (released mapping support)
 
+### `result_v2`
+
+Versioned support for released SELECT DISTINCT mappings with canonical unsigned integer capacity i bits (0 means no private predicate) and status tree depth d. Exact decimal length is private. The small i=8 lane admits values through 99; i=64 covers u64. Preserves issuer authentication and string-commitment binding, without result completeness or holder identity.
+
+| member | parameters | `circuit_size` |
+| --- | --- | --- |
+| `result_v2_k1_n16_p3_r4_f0_i0_d17` | k=1, n=16, p=3, r=4, f=0, i=0, d=17 | 32,836 |
+| `result_v2_k1_n16_p3_r4_f0_i0_d20` | k=1, n=16, p=3, r=4, f=0, i=0, d=20 | 33,071 |
+| `result_v2_k1_n16_p3_r4_f2_i8_d17` | k=1, n=16, p=3, r=4, f=2, i=8, d=17 | 69,619 |
+| `result_v2_k1_n16_p3_r4_f2_i8_d20` | k=1, n=16, p=3, r=4, f=2, i=8, d=20 | 69,854 |
+| `result_v2_k1_n16_p3_r4_f2_i64_d10` | k=1, n=16, p=3, r=4, f=2, i=64, d=10 | 462,049 |
+| `result_v2_k1_n16_p3_r4_f2_i64_d17` | k=1, n=16, p=3, r=4, f=2, i=64, d=17 | 462,597 |
+| `result_v2_k1_n16_p3_r4_f2_i64_d20` | k=1, n=16, p=3, r=4, f=2, i=64, d=20 | 462,832 |
+| `result_v2_k2_n16_p3_r4_f0_i0_d17` | k=2, n=16, p=3, r=4, f=0, i=0, d=17 | 60,197 |
+| `result_v2_k2_n16_p3_r4_f0_i0_d20` | k=2, n=16, p=3, r=4, f=0, i=0, d=20 | 60,667 |
+| `result_v2_k2_n16_p3_r4_f2_i8_d17` | k=2, n=16, p=3, r=4, f=2, i=8, d=17 | 96,979 |
+| `result_v2_k2_n16_p3_r4_f2_i8_d20` | k=2, n=16, p=3, r=4, f=2, i=8, d=20 | 97,449 |
+| `result_v2_k2_n16_p3_r4_f2_i64_d10` | k=2, n=16, p=3, r=4, f=2, i=64, d=10 | 488,858 |
+| `result_v2_k2_n16_p3_r4_f2_i64_d17` | k=2, n=16, p=3, r=4, f=2, i=64, d=17 | 489,954 |
+| `result_v2_k2_n16_p3_r4_f2_i64_d20` | k=2, n=16, p=3, r=4, f=2, i=64, d=20 | 490,424 |
+
+Scaling — pairs differing in exactly one parameter:
+
+| parameter | from | to | held fixed | Δ gates | ratio |
+| --- | --- | --- | --- | --- | --- |
+| `d` | 17 (32,836) | 20 (33,071) | k=1, n=16, p=3, r=4, f=0, i=0 | +235 | 1.0072 |
+| `d` | 10 (462,049) | 17 (462,597) | k=1, n=16, p=3, r=4, f=2, i=64 | +548 | 1.0012 |
+| `d` | 10 (462,049) | 20 (462,832) | k=1, n=16, p=3, r=4, f=2, i=64 | +783 | 1.0017 |
+| `d` | 17 (462,597) | 20 (462,832) | k=1, n=16, p=3, r=4, f=2, i=64 | +235 | 1.0005 |
+| `d` | 17 (69,619) | 20 (69,854) | k=1, n=16, p=3, r=4, f=2, i=8 | +235 | 1.0034 |
+| `d` | 17 (60,197) | 20 (60,667) | k=2, n=16, p=3, r=4, f=0, i=0 | +470 | 1.0078 |
+| `d` | 10 (488,858) | 17 (489,954) | k=2, n=16, p=3, r=4, f=2, i=64 | +1,096 | 1.0022 |
+| `d` | 10 (488,858) | 20 (490,424) | k=2, n=16, p=3, r=4, f=2, i=64 | +1,566 | 1.0032 |
+| `d` | 17 (489,954) | 20 (490,424) | k=2, n=16, p=3, r=4, f=2, i=64 | +470 | 1.0010 |
+| `d` | 17 (96,979) | 20 (97,449) | k=2, n=16, p=3, r=4, f=2, i=8 | +470 | 1.0048 |
+| `i` | 8 (69,619) | 64 (462,597) | k=1, n=16, p=3, r=4, f=2, d=17 | +392,978 | 6.6447 |
+| `i` | 8 (69,854) | 64 (462,832) | k=1, n=16, p=3, r=4, f=2, d=20 | +392,978 | 6.6257 |
+| `i` | 8 (96,979) | 64 (489,954) | k=2, n=16, p=3, r=4, f=2, d=17 | +392,975 | 5.0522 |
+| `i` | 8 (97,449) | 64 (490,424) | k=2, n=16, p=3, r=4, f=2, d=20 | +392,975 | 5.0326 |
+| `k` | 1 (32,836) | 2 (60,197) | n=16, p=3, r=4, f=0, i=0, d=17 | +27,361 | 1.8333 |
+| `k` | 1 (33,071) | 2 (60,667) | n=16, p=3, r=4, f=0, i=0, d=20 | +27,596 | 1.8344 |
+| `k` | 1 (462,049) | 2 (488,858) | n=16, p=3, r=4, f=2, i=64, d=10 | +26,809 | 1.0580 |
+| `k` | 1 (462,597) | 2 (489,954) | n=16, p=3, r=4, f=2, i=64, d=17 | +27,357 | 1.0591 |
+| `k` | 1 (462,832) | 2 (490,424) | n=16, p=3, r=4, f=2, i=64, d=20 | +27,592 | 1.0596 |
+| `k` | 1 (69,619) | 2 (96,979) | n=16, p=3, r=4, f=2, i=8, d=17 | +27,360 | 1.3930 |
+| `k` | 1 (69,854) | 2 (97,449) | n=16, p=3, r=4, f=2, i=8, d=20 | +27,595 | 1.3950 |
+
 ### `result_v1`
 
 Support for released SELECT DISTINCT mappings: issuer authentication, credential status, selected triple membership, BGP joins and residual private integer FILTERs. Capacity parameters: k credentials, n triples per credential, p patterns, r released rows, f private FILTERs per row. Does not establish result completeness or holder identity.
@@ -24,18 +71,18 @@ Support for released SELECT DISTINCT mappings: issuer authentication, credential
 | member | parameters | `circuit_size` |
 | --- | --- | --- |
 | `result_v1_k1_n16_p3_r4_f0` | k=1, n=16, p=3, r=4, f=0 | 32,288 |
-| `result_v1_k1_n16_p3_r4_f2` | k=1, n=16, p=3, r=4, f=2 | 68,963 |
+| `result_v1_k1_n16_p3_r4_f2` | k=1, n=16, p=3, r=4, f=2 | 69,055 |
 | `result_v1_k2_n16_p3_r4_f0` | k=2, n=16, p=3, r=4, f=0 | 59,101 |
-| `result_v1_k2_n16_p3_r4_f2` | k=2, n=16, p=3, r=4, f=2 | 95,775 |
+| `result_v1_k2_n16_p3_r4_f2` | k=2, n=16, p=3, r=4, f=2 | 95,867 |
 
 Scaling — pairs differing in exactly one parameter:
 
 | parameter | from | to | held fixed | Δ gates | ratio |
 | --- | --- | --- | --- | --- | --- |
-| `f` | 0 (32,288) | 2 (68,963) | k=1, n=16, p=3, r=4 | +36,675 | 2.1359 |
-| `f` | 0 (59,101) | 2 (95,775) | k=2, n=16, p=3, r=4 | +36,674 | 1.6205 |
+| `f` | 0 (32,288) | 2 (69,055) | k=1, n=16, p=3, r=4 | +36,767 | 2.1387 |
+| `f` | 0 (59,101) | 2 (95,867) | k=2, n=16, p=3, r=4 | +36,766 | 1.6221 |
 | `k` | 1 (32,288) | 2 (59,101) | n=16, p=3, r=4, f=0 | +26,813 | 1.8304 |
-| `k` | 1 (68,963) | 2 (95,775) | n=16, p=3, r=4, f=2 | +26,812 | 1.3888 |
+| `k` | 1 (69,055) | 2 (95,867) | n=16, p=3, r=4, f=2 | +26,812 | 1.3883 |
 
 ## Query-layer circuits (SPARQL algebra fragment)
 
@@ -291,4 +338,4 @@ bench/zk-compose/scripts/constraint_pack.py --write
 bench/zk-compose/scripts/constraint_pack.py --check
 ```
 
-Coverage: 41 of 41 snapshot members across 15 families, 37 single-parameter scaling pairs, 3 invariance facts. The generator **fails** on a snapshot member it cannot classify, so a new circuit family cannot silently drop out of this evaluation.
+Coverage: 55 of 55 snapshot members across 16 families, 58 single-parameter scaling pairs, 3 invariance facts. The generator **fails** on a snapshot member it cannot classify, so a new circuit family cannot silently drop out of this evaluation.

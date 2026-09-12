@@ -15,6 +15,7 @@ use crate::hashes::{commit_fold, h2, h3, h4, TYPE_CODE_LITERAL};
 use crate::issuer::{schnorr_verify, Point};
 use crate::revoke::revoke_unset_check;
 use crate::filter_int::filter_int_check;
+use crate::result_integer::full_u64_check;
 
 pub global N: u32 = 16;
 pub global P: u32 = 3;
@@ -38,7 +39,7 @@ pub fn small_integer_check(operand: Field, op: u32, bound: u64, value: u8) {
 }
 
 /// Checks the selected result witnesses under the fixed-capacity public statement.
-pub fn result_check<let K: u32, let F: u32>(
+pub fn result_check<let K: u32, let F: u32, let SD: u32, let INTEGER_BITS: u32, let CONTRACT_VERSION: u32>(
     version: Field,
     accepted_root: Field,
     issuer_keys: [[Field; 2]; K],
@@ -59,7 +60,7 @@ pub fn result_check<let K: u32, let F: u32>(
     status_versions: [u64; K],
     status_indices: [Field; K],
     status_roots: [Field; K],
-    status_siblings: [[Field; STATUS_DEPTH]; K],
+    status_siblings: [[Field; SD]; K],
     policy_indices: [Field; K],
     policy_siblings: [[Field; POLICY_DEPTH]; K],
     signatures: [[Field; 5]; K],
@@ -68,9 +69,13 @@ pub fn result_check<let K: u32, let F: u32>(
     values: [[Field; V]; R],
     selected_types: [[[u32; 3]; P]; R],
     selected_hashes: [[[Field; 3]; P]; R],
-    filter_values: [[u8; F]; R],
+    filter_values: [[u64; F]; R],
 ) {
-    assert_eq(version, 1, "unsupported successful-result contract");
+    // [GPT-6] Every published member fixes these capacities at compile time.
+    std::static_assert((SD == 10) | (SD == 17) | (SD == 20), "unsupported status depth");
+    std::static_assert((INTEGER_BITS == 0) | (INTEGER_BITS == 8) | (INTEGER_BITS == 64), "unsupported integer capacity");
+    std::static_assert((F == 0) == (INTEGER_BITS == 0), "numeric capacity must match filter member");
+    assert_eq(version, CONTRACT_VERSION as Field, "unsupported successful-result contract");
     assert((pattern_count > 0) & (pattern_count <= P), "pattern capacity");
     assert((result_count > 0) & (result_count <= R), "result capacity");
     assert(filter_count <= F, "filter capacity");
@@ -108,7 +113,7 @@ pub fn result_check<let K: u32, let F: u32>(
             node = if directions[d] { h2(sib, node) } else { h2(node, sib) };
         }
         assert_eq(node, accepted_root, "credential status outside verifier policy");
-        revoke_unset_check::<STATUS_DEPTH>(status_roots[g], status_indices[g], 0, status_siblings[g]);
+        revoke_unset_check::<SD>(status_roots[g], status_indices[g], 0, status_siblings[g]);
     }
     for r in 0..R {
         let row_active = r < result_count;
@@ -143,7 +148,12 @@ pub fn result_check<let K: u32, let F: u32>(
         }
         for f in 0..F {
             if row_active & (f < filter_count) {
-                small_integer_check(values[r][filter_vars[f] - 1], filter_ops[f], filter_bounds[f], filter_values[r][f]);
+                if INTEGER_BITS == 8 {
+                    assert(filter_values[r][f] <= 99, "integer exceeds successful-result lane");
+                    small_integer_check(values[r][filter_vars[f] - 1], filter_ops[f], filter_bounds[f], filter_values[r][f] as u8);
+                } else {
+                    full_u64_check(values[r][filter_vars[f] - 1], filter_ops[f], filter_bounds[f], filter_values[r][f]);
+                }
             }
         }
     }
