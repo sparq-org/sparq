@@ -75,6 +75,12 @@ jobs:
           rustup show active-toolchain
       - name: Cache cargo + target
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          # sq-3sbrr save-if discipline: SAVE only from main — a `refs/pull/<n>/merge`-scoped
+          # save is restorable by that one PR alone while still consuming the shared 10 GB
+          # budget. RESTORE is untouched, and the unfiltered `push: branches:[main]` trigger
+          # (kept for post-merge cover — see the header) re-seeds this key on every main push.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
@@ -119,6 +125,12 @@ jobs:
           rustup show active-toolchain
       - name: Cache cargo + target
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          # sq-3sbrr save-if discipline: SAVE only from main — a `refs/pull/<n>/merge`-scoped
+          # save is restorable by that one PR alone while still consuming the shared 10 GB
+          # budget. RESTORE is untouched, and the unfiltered `push: branches:[main]` trigger
+          # (kept for post-merge cover — see the header) re-seeds this key on every main push.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"

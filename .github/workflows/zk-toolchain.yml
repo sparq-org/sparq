@@ -226,6 +226,12 @@ jobs:
         with:
           # Distinct cache key: this lane builds sparq-zk* with the toolchain present.
           key: zk-toolchain
+          # sq-3sbrr save-if discipline: SAVE only from main — a `refs/pull/<n>/merge`-scoped
+          # save is restorable by that one PR alone while still consuming the shared 10 GB
+          # budget. RESTORE is untouched; this lane's `push: branches:[main]` trigger carries
+          # the same paths filter as its `pull_request` trigger, so any change that runs it on
+          # a PR also runs it on main and re-seeds this key.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       # Install nargo via noirup, pinned to NARGO_VERSION. We fetch the `noirup` binary
       # DIRECTLY from a tagged release (NOIRUP_BIN_URL) rather than running upstream's

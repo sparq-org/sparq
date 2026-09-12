@@ -280,6 +280,11 @@ jobs:
           # The fuzz crate has its OWN target dir + lockfile under `fuzz/`; key the
           # cache on its manifests so it is not shared with the workspace build.
           workspaces: "fuzz"
+          # sq-3sbrr save-if discipline: SAVE only from main — a `refs/pull/<n>/merge`-scoped
+          # save is restorable by that one PR alone while still consuming the shared 10 GB
+          # budget. RESTORE is untouched, and this lane also runs on `push: branches:[main]`,
+          # which re-seeds this key.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install cargo-fuzz
         uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
         with:
@@ -608,6 +613,12 @@ jobs:
           # same sparq-bench release-fast binary, and differential.yml's main-scoped
           # nightly save keeps this warm for every PR.
           shared-key: differential-nightly
+          # sq-3sbrr save-if discipline: SAVE only from main. This lane RESTORES the shared
+          # key but must not write it from a PR ref: such a save is restorable by that one PR
+          # alone, yet it competes for the same shared 10 GB budget as the main-scoped entry
+          # named just above — which is the one every PR actually restores. RESTORE is
+          # untouched, and this lane's own `push: branches:[main]` runs re-seed the key too.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       # Build distinctly so a compile error is reported separately from a mismatch.
       - name: Build the differential fuzzer
         run: cargo build -p sparq-bench --profile release-fast
