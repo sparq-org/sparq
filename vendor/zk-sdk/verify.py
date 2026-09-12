@@ -15,6 +15,26 @@ ROOT = Path(__file__).resolve().parent
 REPO = ROOT.parents[1]
 
 
+def reconstruct(package: dict, directory: Path) -> None:
+    """[GPT-6] Reverse to exact upstream bytes, then replay the recorded patch."""
+    name = f"{package['name']}-{package['version']}"
+    with tempfile.TemporaryDirectory(prefix="sparq-sdk-reconstruct-") as temporary:
+        restored = Path(temporary) / name
+        shutil.copytree(directory, restored)
+        for addition in package.get("additional_files", []):
+            (restored / addition["path"]).unlink()
+        patch = str(ROOT / f"{name}.patch")
+        command = ["git", "apply", "--whitespace=nowarn", "-p1"]
+        subprocess.run(command + ["--reverse", patch], cwd=restored, check=True, timeout=60)
+        upstream = package["upstream_files"]
+        assert {str(p.relative_to(restored)) for p in restored.rglob("*") if p.is_file()} == set(upstream)
+        for path, sha in upstream.items():
+            assert hashlib.sha256((restored / path).read_bytes()).hexdigest() == sha, (name, path, "reconstructed upstream")
+        subprocess.run(command + [patch], cwd=restored, check=True, timeout=60)
+        for path in upstream:
+            assert (restored / path).read_bytes() == (directory / path).read_bytes(), (name, path, "patch replay")
+
+
 def check() -> None:
     metadata = json.loads((ROOT / "UPSTREAM.json").read_text())
     for package in metadata["packages"]:
@@ -31,6 +51,7 @@ def check() -> None:
         for path, sha in expected.items():
             assert hashlib.sha256((directory / path).read_bytes()).hexdigest() == sha, (name, path)
         assert hashlib.sha256((ROOT / f"{name}.patch").read_bytes()).hexdigest() == package["patch_sha256"]
+        reconstruct(package, directory)
     rzup = tomllib.loads((ROOT / "rzup-0.5.2/Cargo.toml").read_text())
     assert rzup["features"]["default"] == ["cli", "install", "publish"]
     assert all("signatures" in rzup["features"][f] for f in ["install", "publish"])
@@ -43,10 +64,20 @@ def check() -> None:
     assert all("crh" in primitives["features"][f] for f in ["commitment", "merkle_tree"])
     for relative in ["Cargo.lock", "methods/guest/Cargo.lock"]:
         lock = tomllib.loads((REPO / "zk/sparql-evaluator" / relative).read_text())
+        # [GPT-6] Registry entries are not evidence that Cargo selected our patch.
+        expected_patches = {"ark-relations", "ark-crypto-primitives"}
+        if relative == "Cargo.lock":
+            expected_patches |= {"risc0-build", "rzup"}
+        for package in metadata["packages"]:
+            if package["name"] in expected_patches:
+                selected = [p for p in lock["package"] if p["name"] == package["name"]]
+                assert len(selected) == 1, (relative, package["name"], "patch selection")
+                assert selected[0]["version"] == package["version"]
+                assert "source" not in selected[0] and "checksum" not in selected[0], (relative, package["name"], "registry package selected")
         assert not {p["name"] for p in lock["package"]} & {"rsa", "option-ext", "dirs", "dirs-sys", "derivative"}
         assert {p["version"] for p in lock["package"] if p["name"] == "risc0-zkvm"} == {"3.0.6"}
         assert {p["version"] for p in lock["package"] if p["name"] == "tracing-subscriber"} == {"0.3.23"}
-    print("SDK upstream/patched inventories, hashes, retained feature defaults and detached locks match")
+    print("SDK upstream/patched inventories, patch reconstruction, hashes, retained feature defaults and detached patch selections match")
 
 
 def smoke(offline: bool) -> None:
@@ -90,7 +121,7 @@ debug = 0
         if offline:
             command.append("--offline")
         subprocess.run(command, env=env, check=True, timeout=600)
-        # Also compile/run the additive key-taking API; installer/publication
+        # Also compile the additive key-taking API; installer/publication
         # integration remains outside this synthetic harness.
         env["RISC0_HOME"] = str(directory / "risc0-key-mode")
         subprocess.run(command + ["--features", "rzup/signatures"], env=env, check=True, timeout=600)
@@ -136,7 +167,7 @@ debug = 0
             print("SDK feature compile:", ",".join(features) or "no features", flush=True)
             subprocess.run(["cargo", "check", "--lib"] + options, env=env, check=True, timeout=600)
             metadata = json.loads(subprocess.check_output(
-                ["cargo", "metadata", "--format-version", "1", "--locked"] + options, env=env))
+                ["cargo", "metadata", "--format-version", "1", "--locked"] + options, env=env, timeout=600))
             active = {node["id"] for node in metadata["resolve"]["nodes"]}
             has_derivative = any(p["name"] == "derivative" and p["id"] in active
                                  for p in metadata["packages"])

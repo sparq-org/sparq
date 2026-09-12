@@ -375,5 +375,6 @@ cover the shared evaluator and separate native/actual-guest regression evidence.
 [GPT-6] The separate [exact evaluator](../../zk/sparql-evaluator/README.md) uses
 detached workspaces. Its [SDK patch record](../../vendor/zk-sdk/README.md) preserves
 upstream source/license identity and documents discovery-only dependency selection
-and derive-macro feature boundaries, with executable synthetic feature checks.
+and derive-macro feature boundaries, with executable patch reconstruction,
+explicit lockfile patch-selection checks, and synthetic feature checks.
 Synthetic dependency checks remain separate from actual guest proof evidence.

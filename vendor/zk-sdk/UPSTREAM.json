@@ -29,7 +29,7 @@
           "patched_sha256": "bda771b244a15b01a8d69fe565acc85136c21873307d556b14e5b0b15866c3ad"
         }
       ],
-      "patch_sha256": "9f6a9ca8b1cffd26b8ed413a135fccfe20eb66da12a3b6ef92b8ac67835901c7",
+      "patch_sha256": "1e06886b8aac23efd579d29e6bb8425247076a436a51ce0951d808767d5b1507",
       "additional_files": [
         {
           "path": "LICENSE",
@@ -107,7 +107,7 @@
           "patched_sha256": "7e44244c3ceb95230006ec38244b63854685f66592c47415de51cd8a37bc8f0e"
         }
       ],
-      "patch_sha256": "139231c6483c94ed28307edef189c2ea1c3aebd94e854dc175435120713b0f6a",
+      "patch_sha256": "601657615515c4476f51191939d94463a3bd811a1ddd8519763c6eda60a0d9b4",
       "additional_files": [
         {
           "path": "LICENSE",
@@ -153,7 +153,7 @@
           "patched_sha256": "409d63955378487897c47564593898316d13ad3f8faf70a9a026425dc92f4735"
         }
       ],
-      "patch_sha256": "a99a789a3aa91e0d61f8478ef4f7196d9f3b073876abe20144f57536f2137bd8"
+      "patch_sha256": "3a07c1079f3f17138d28cd85b957eeb3ae37b17189f6859e6ac09356fd34fe1d"
     },
     {
       "name": "ark-crypto-primitives",
