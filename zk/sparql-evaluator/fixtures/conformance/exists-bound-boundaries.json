@@ -1,0 +1,148 @@
+{
+  "provenance": "[GPT-6] Synthetic profile boundaries, not W3C suite cases. Rejections have no asserted normative Boolean.",
+  "sources": [
+    "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#defn_substitute",
+    "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#func-bound",
+    "https://w3c.github.io/sparql-exists/docs/sparql-exists.html"
+  ],
+  "cases": [
+    {
+      "id": "captured-values",
+      "query": "SELECT ?n { VALUES ?n {1} FILTER EXISTS { FILTER(BOUND(?n)) } }",
+      "admitted": false
+    },
+    {
+      "id": "captured-not-exists",
+      "query": "SELECT ?n { VALUES ?n {1} FILTER NOT EXISTS { FILTER(BOUND(?n)) } }",
+      "admitted": false
+    },
+    {
+      "id": "captured-bind",
+      "query": "SELECT ?n { BIND(1 AS ?n) FILTER EXISTS { FILTER(BOUND(?n)) } }",
+      "admitted": false
+    },
+    {
+      "id": "captured-select-expression",
+      "query": "SELECT (EXISTS { FILTER(BOUND(?n)) } AS ?v) { VALUES ?n {1} }",
+      "admitted": false
+    },
+    {
+      "id": "captured-order-expression",
+      "query": "SELECT ?n { VALUES ?n {1} } ORDER BY EXISTS { FILTER(BOUND(?n)) }",
+      "admitted": false
+    },
+    {
+      "id": "captured-optional-condition",
+      "query": "SELECT ?n { VALUES ?n {1} OPTIONAL { ?s <http://ex/p> ?m FILTER EXISTS { FILTER(BOUND(?n)) } } }",
+      "admitted": false
+    },
+    {
+      "id": "captured-union-wrapper",
+      "query": "SELECT ?n { VALUES ?n {1} FILTER EXISTS { { FILTER(IF(true, COALESCE(BOUND(?n), false), false)) } UNION { FILTER(false) } } }",
+      "admitted": false
+    },
+    {
+      "id": "captured-in-wrapper",
+      "query": "SELECT ?n { VALUES ?n {1} FILTER EXISTS { FILTER(BOUND(?n) IN (true)) } }",
+      "admitted": false
+    },
+    {
+      "id": "captured-function-wrapper",
+      "query": "SELECT ?n { VALUES ?n {1} FILTER EXISTS { FILTER(STR(BOUND(?n)) = \"true\") } }",
+      "admitted": false
+    },
+    {
+      "id": "potentially-captured-partial-values",
+      "query": "SELECT ?n { VALUES ?n {1 UNDEF} FILTER EXISTS { FILTER(BOUND(?n)) } }",
+      "admitted": false
+    },
+    {
+      "id": "potentially-captured-all-undef",
+      "query": "SELECT ?n { VALUES ?n {UNDEF} FILTER EXISTS { FILTER(BOUND(?n)) } }",
+      "admitted": false
+    },
+    {
+      "id": "captured-projected-subquery",
+      "query": "SELECT ?n { { SELECT ?n { VALUES ?n {1} } } FILTER EXISTS { FILTER(BOUND(?n)) } }",
+      "admitted": false
+    },
+    {
+      "id": "local-bgp-bound",
+      "query": "SELECT ?n { VALUES ?n {1} FILTER EXISTS { ?s <http://ex/p> ?m FILTER(BOUND(?m)) } }",
+      "admitted": true,
+      "expected_rows": [
+        [
+          "\"1\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+        ]
+      ],
+      "dataset_ntriples": "<http://ex/a> <http://ex/p>  \"2\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n"
+    },
+    {
+      "id": "local-absent-bound",
+      "query": "SELECT ?n { VALUES ?n {1} FILTER EXISTS { FILTER(BOUND(?m)) } }",
+      "admitted": true,
+      "expected_rows": []
+    },
+    {
+      "id": "local-absent-not-bound",
+      "query": "SELECT ?n { VALUES ?n {1} FILTER EXISTS { FILTER(!BOUND(?m)) } }",
+      "admitted": true,
+      "expected_rows": [
+        [
+          "\"1\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+        ]
+      ]
+    },
+    {
+      "id": "ordinary-outer-bound",
+      "query": "SELECT ?n { VALUES ?n {1 UNDEF} FILTER(BOUND(?n)) }",
+      "admitted": true,
+      "expected_rows": [
+        [
+          "\"1\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+        ]
+      ]
+    },
+    {
+      "id": "outer-subquery-hidden-variable",
+      "query": "SELECT ?n { { SELECT ?n { VALUES (?n ?m) {(1 2)} } } FILTER EXISTS { ?s <http://ex/p> ?m FILTER(BOUND(?m)) } }",
+      "admitted": true,
+      "expected_rows": [
+        [
+          "\"1\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+        ]
+      ],
+      "dataset_ntriples": "<http://ex/a> <http://ex/p> \"3\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n"
+    },
+    {
+      "id": "sibling-exists-scope-reset",
+      "query": "SELECT ?n { VALUES ?n {1} FILTER(EXISTS { FILTER(!BOUND(?m)) } && EXISTS { FILTER(!BOUND(?z)) }) }",
+      "admitted": true,
+      "expected_rows": [
+        [
+          "\"1\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+        ]
+      ]
+    },
+    {
+      "id": "ordinary-bound-after-exists",
+      "query": "SELECT ?n { VALUES ?n {1} FILTER(EXISTS { FILTER(true) } && BOUND(?n)) }",
+      "admitted": true,
+      "expected_rows": [
+        [
+          "\"1\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+        ]
+      ]
+    },
+    {
+      "id": "minus-right-is-not-outer-domain",
+      "query": "SELECT ?n { VALUES ?n {1} MINUS { VALUES ?m {2} } FILTER EXISTS { FILTER(!BOUND(?m)) } }",
+      "admitted": true,
+      "expected_rows": [
+        [
+          "\"1\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+        ]
+      ]
+    }
+  ]
+}
