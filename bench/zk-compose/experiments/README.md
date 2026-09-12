@@ -50,9 +50,12 @@ Nargo dependency caches remain uncontrolled. Compiler-internal cache hits are
 unavailable, even when ACIR bytes repeat. The optional immutable-snapshot event
 reports reuse only after reading and verifying the existing bytes; this successful
 result adapter uses private copies instead of that snapshot API. Rust compilation is outside all
-reported timers. Local output is **NONcanonical**, with source/tree/lock, compiler,
-adapter and prover executable hashes and version output. No cross-system timing
-comparison or calibrated performance claim follows from one local run.
+reported timers. Local output is **NONcanonical**. Its source/tree/lock and compiler
+fields describe the clean checkout and toolchain observed at execution time; they
+are not compile-time attestation for an arbitrary prebuilt executable. Adapter
+and prover executable hashes identify the actual binaries separately. Rebuild at
+the recorded checkout before running, as in the command above. No cross-system
+timing comparison or calibrated performance claim follows from one local run.
 
 Each run stores actual binary proof bytes, compact public JSON without the proof,
 and the full JSON presentation. Their byte counts are separate: JSON-encoded proof
@@ -81,3 +84,10 @@ commit and executable hashes. It retains separate public/proof byte counts and
 noncanonical inclusive timings; it is a fixture smoke test, not a statistical
 comparison or publication benchmark. Original binary artifacts remain with the
 run export and are identified by both report hashes and artifact SHA-256 digests.
+
+The [schema-version-2 stage smoke record](local-stage-smoke.json) preserves the
+actual nested driver events from both planner runs. It records the explicit
+release rebuild and execution checkout separately from the unchanged runtime
+source checkpoint, plus hashes for the retained executable and artifacts. Both
+runs passed verification, replay and the configured tamper controls. The local
+measurements establish working instrumentation, not a performance advantage.
