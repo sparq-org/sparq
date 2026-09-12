@@ -396,6 +396,11 @@ jobs:
   # once, off the warm build this job already has (was a guarded shard-1 step before).
   build-archive:
     name: build + archive test binaries (+ doctests once)
+    env:
+      # [GPT-5] #6273: canonical CI archive feature set. The parity test in
+      # scripts/tests/test_archive_feature_parity.py keeps the measurement lane
+      # and EC2 build-farm default synchronized with this test population.
+      ARCHIVE_FEATURES: approx-ann,filtered-ann,vec-predicate
     # [FABLE-5] sq-fmx4u.3: the workspace archive runs whenever the affected
     # closure is NON-EMPTY (design §5.2) — the bulk shards it feeds are narrowed,
     # not skipped, so they need the archive for any non-empty selection. Only a
@@ -503,7 +508,8 @@ jobs:
       # .tar.zst is self-contained (binaries + the metadata nextest needs to run them
       # on another runner with `--archive-file`), so the shards never recompile.
       #
-      # [OPUS-4.8] The archive runs `--features approx-ann,filtered-ann,vec-predicate`
+      # [SONNET-4.6] The archive runs the opt-in set declared by this job's
+      # `ARCHIVE_FEATURES`
       # (#363, LOAD-BEARING): sparq-vectors' heavy recall/over-fetch/vec-predicate tests are
       # MODULE-gated (`#![cfg(feature = ...)]`) and MUST run in this sharded lane — without
       # these the gated binaries compile EMPTY and the heavy-hnsw shard's exact filter matches
@@ -518,7 +524,7 @@ jobs:
       # (read that file's GUARD block). Prove a suite is reached: `cargo nextest list -p <crate>
       # --features <set>` must SHOW its test names.
       - name: Build + archive test binaries (nextest archive)
-        run: cargo nextest archive --workspace --all-targets --features approx-ann,filtered-ann,vec-predicate --archive-file nextest.tar.zst
+        run: cargo nextest archive --workspace --all-targets --features "${ARCHIVE_FEATURES}" --archive-file nextest.tar.zst
       # [OPUS-4.8] Upload the archive immediately after the build, BEFORE doctests, so
       # the shards' input artifact is produced even if the doctest step later fails.
       - name: Upload nextest archive
@@ -556,7 +562,7 @@ jobs:
       # sparq-vectors doc examples (the approx-ann/filtered-ann/vec-predicate-gated `///`
       # blocks) are compiled/run here too, not silently dropped.
       - name: Doctests (nextest does not run these; run once, off the warm build)
-        run: cargo test --workspace --features approx-ann,filtered-ann,vec-predicate --doc
+        run: cargo test --workspace --features "${ARCHIVE_FEATURES}" --doc
 
   test:
     # [OPUS-4.8] LOAD-AWARE sharded test matrix (merge-queue-drain speed — @jeswr).
