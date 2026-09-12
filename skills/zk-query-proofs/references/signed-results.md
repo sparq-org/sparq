@@ -56,5 +56,7 @@ controls remain part of that test.
 
 Measured circuit sizes and exact Noir source identity are recorded in
 [`result_signed_gates.json`](../../../bench/zk-compose/result_signed_gates.json).
+The default host evidence checker binds its source/toolchain and complete member
+inventory to the compatibility record and gate snapshot, with corruption controls.
 These are local constraint measurements, not canonical runtime benchmarks.
 Unsigned proof evidence is not used as evidence for the signed relation.

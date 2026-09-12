@@ -205,7 +205,5 @@
     "result_v3_k2_n16_p3_r4_f2_s64_d20": {
       "circuit_size": 464716
     }
-  },
-  "result_members_measured_at": "2026-09-09",
-  "result_members_platform": "darwin arm64"
+  }
 }

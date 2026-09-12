@@ -376,3 +376,8 @@ API, lexical limits and evidence boundary, and
 [signed admission](references/disclosure-planner.md#canonical-signed-integer-admission)
 for the independent planner. Native/core checks do not constitute genuine signed
 result-proof evidence.
+
+[GPT-6] Default host checks validate the legacy compatibility evidence's source
+hashes and byte lengths. The ZK toolchain lane independently rebuilds the fixed
+foundation keys in addition to checking current keys. Only v1 byte stability is
+promised; unchanged v2 circuit sizes do not establish key compatibility.
