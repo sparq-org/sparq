@@ -221,3 +221,10 @@ detached evaluator and supplies its existential path intermediates.
 
 The mandatory CI lane exports the accepted executable, actual synthetic receipts
 and source/toolchain/HAL evidence using the [campaign evidence contract](../../skills/zk-query-proofs/references/evaluator-evidence.md). Partial uploads are not success records.
+
+## Exact experiment adapter
+
+[GPT-6] The opt-in [experiment adapter](experiments/README.md) uses fixed synthetic
+V2 contracts, independently accepted artifact/pin inputs, genuine local succinct
+receipts and separate verifier controls. Its measurements explicitly distinguish
+inclusive API costs, unavailable internal stages and noncanonical provenance.

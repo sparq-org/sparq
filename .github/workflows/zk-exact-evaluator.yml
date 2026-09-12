@@ -90,6 +90,11 @@ jobs:
         if: steps.changes.outputs.required == 'true'
         run: python3 -m unittest discover -s scripts/tests -p 'test_ci_exact_evaluator_*.py'
 
+      - name: Exact experiment native contract and rejection-class regressions
+        if: steps.changes.outputs.required == 'true'
+        # [GPT-6] Native fixture/adapter tests; this step generates no receipt.
+        run: cargo test --locked --manifest-path zk/sparql-evaluator/Cargo.toml -p sparq-proved-evaluator --example exact_experiment
+
       - name: Export source-bound actual guest and genuine proof evidence
         if: steps.changes.outputs.required == 'true'
         # Executes native regressions, every real guest/proof test, and Clippy.
