@@ -212,6 +212,15 @@ sparq_engine::query(&g,
     "PREFIX ex: <http://ex/> SELECT ?x WHERE { ex:alice ex:knows+ ?x }").unwrap();   // transitive
 ```
 
+<!-- [GPT-6] Shared expression correlation and path bag semantics. -->
+Alternatives preserve duplicate solutions: `ex:p|ex:p` contributes each matching
+edge twice. Sequences multiply compatible occurrences; `DISTINCT` removes duplicates
+when requested. Reachability operators (`*`, `+`, `?`) retain endpoint set semantics.
+`FILTER EXISTS` and `FILTER NOT EXISTS` evaluate inner expressions with bound outer
+terms, including variables that occur only inside an inner `FILTER`. This also preserves
+blank-node identity and computed literal values across the inner vocabulary boundary.
+These fixes do not establish complete conformance for every correlated algebra form.
+
 **Materialized full paths** (opt-in `paths` feature) — unlike standard SPARQL property paths,
 this programmatic API returns every intermediate node and edge. `Shortest` returns all tied
 minimum-length paths per endpoint pair; `All` requires a finite `max_length` and returns simple
