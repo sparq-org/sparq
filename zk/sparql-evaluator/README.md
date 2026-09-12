@@ -90,7 +90,7 @@ standard expectation separately from the rejection case.
 | OPTIONAL, MINUS, COUNT, subquery, ORDER/LIMIT | admitted | combined genuine proof fixture |
 | VALUES, UNION, unbound | admitted | host semantics; holder-declared bag proof fixture |
 | NOT EXISTS, true ASK, arithmetic/error | admitted | host semantics |
-| false ASK, numeric FILTER, VALUES joined with root zero-length paths | admitted | host semantics; genuine false-ASK proof fixture |
+| false ASK, numeric FILTER, VALUES joined with root zero-length paths or MINUS, SUBSTR position bounds | admitted | host semantics; genuine false-ASK proof fixture |
 | Fixed sequence and alternative paths, positive correlated EXISTS | admitted | combined genuine proof fixture; native conformance cases |
 | Negated property sets, including forward/reverse endpoint multiplicity | admitted | REC-derived expectations checked natively and in actual guest execution; separate from receipt evidence |
 | Other paths, pure functions and built-in aggregates | admitted by AST | shared evaluator; no complete guest conformance claim |
@@ -103,7 +103,11 @@ standard expectation separately from the rejection case.
 
 Test definitions are distinct from execution evidence: `model/tests/semantics.rs`
 runs native semantic tests; `host/tests/real_proof.rs` generates genuine receipts
-and exercises the actual guest. The dedicated CI workflow runs both. No ignored
+and exercises the actual guest. `host/tests/actual_builtin_edges.rs` executes the
+shared builtin edge corpus in the actual guest; REC-derived expectations and
+labeled integer-constructor capacity controls remain separate evidence. These
+executions generate no individual receipts; the false-ASK proof also discriminates
+the corrected SUBSTR boundary. The dedicated CI workflow runs every host test. No ignored
 test or missing-tool shortcut counts as a successful proof run. Broader guest
 conformance coverage and remaining features belong to zkp-10.
 

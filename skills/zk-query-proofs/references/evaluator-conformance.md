@@ -36,6 +36,15 @@ proof-performance result. The separate guest tests remain the source of actual
 proof evidence. The same query/data fixtures can be reused by an explicitly
 selected guest campaign with pinned program identity and genuine receipts.
 
+The shared engine's `tests/fixtures/builtin_edges.json` also runs through native
+model admission/evaluation and `host/tests/actual_builtin_edges.rs`. The latter
+executes the actual guest and compares its journal with the unchanged shared
+expected cells. `published_recommendation` cases and `implementation_capacity`
+controls are counted separately; the existing bounded integer-constructor lane
+does not establish support for arbitrary XSD integer magnitudes. These guest
+executions are distinct from receipts. The genuine false-ASK fixture includes a
+SUBSTR position case alongside its numeric, nullable-path and MINUS branches.
+
 ## Exact result expectations
 
 A SELECT fixture declares its projected variables, `Bag` or `Sequence`, and every

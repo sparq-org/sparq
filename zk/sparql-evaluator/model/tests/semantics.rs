@@ -128,7 +128,7 @@ fn negation_and_false_ask_evaluate_the_complete_graph() {
             .unwrap()
             .result,
         CanonicalResult::Ask(false),
-        "VALUES must preserve nullable path endpoint roles and MINUS variable domains"
+        "VALUES must preserve path/MINUS domains and SUBSTR must honor position bounds"
     );
     let (_, rows) = select(
         "SELECT ?s WHERE { ?s <http://ex/score> ?n FILTER NOT EXISTS { ?s <http://ex/blocked> true } }",
