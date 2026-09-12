@@ -1008,6 +1008,54 @@ pub fn holder_key_digest(hpk: &PublicKey) -> Result<Fr, HolderKeyError> {
     Ok(poseidon2::hash(&[Fr::from(SIG_DOMAIN_HOLDER_KEY), x, y]))
 }
 
+/// Domain separator for the SINGLE-USE NULLIFIER (`sq-rsd3v.1`): `"ZKSIG_NF"`.
+/// Distinct from every other `SIG_DOMAIN_*` tag — in particular from the
+/// [`SIG_DOMAIN_HOLDER_KEY`] `"ZKSIG_HK"` digest computed over the SAME holder and
+/// from the nonce-PRF `"ZKSIG_N1"` tag in [`derive_nonce`] — so a nullifier can
+/// never be confused with a holder-key digest, a commitment challenge, or a signing
+/// nonce. The in-circuit gadget (`sparq_zk_compose_core::nullifier`) folds the
+/// identical byte tag, so the host and circuit nullifiers are bit-identical.
+// [OPUS-4.8] sq-rsd3v.1: nullifier domain tag.
+pub const SIG_DOMAIN_NULLIFIER: u64 = 0x5a4b_5349_475f_4e46; // "ZKSIG_NF"
+
+/// The SINGLE-USE NULLIFIER for a holder key + epoch (`sq-rsd3v.1`, design
+/// `research/zk-inference-and-credentials.md` §6.3):
+/// `nf = Poseidon2([ZKSIG_NF, hsk, epoch])`.
+///
+/// `hsk` is the holder secret scalar EMBEDDED IN THE BASE FIELD (the same value the
+/// in-circuit gadget witnesses — [`InCircuitHolderPokWitness::hsk`], i.e.
+/// [`jj_scalar_to_base`] of the Baby-JubJub scalar). `epoch` is a
+/// verifier-published rate-limit window (a field element). This host helper is the
+/// SINGLE SOURCE OF TRUTH with the in-circuit `nullifier` gadget: the circuit
+/// recomputes the SAME `Poseidon2([ZKSIG_NF, hsk, epoch])` from the WITNESSED `hsk`
+/// and asserts it equals the PUBLIC `nf`, so a drift here would break that
+/// in-circuit equality (pinned by the `nullifier_cross_vector` Noir test).
+///
+/// # Soundness (NOT-yet-sound, `sq-qhy4`) — rides TWO assumptions (§6.3(b))
+/// The nullifier is only meaningful when the SAME `hsk` is DL-bound to a credential
+/// by the holder-PoK (`hpk = hsk·G`, `holder_key_digest(hpk) == holder_pk_digest`);
+/// the in-circuit `nullifier` gadget is composed WITH [`holder_key_digest`]-based
+/// possession (see `sparq_zk_compose_core`'s `tests.nr`) so a prover cannot witness
+/// an arbitrary `hsk`. Its unforgeability then rides (1) that holder-PoK DL-binding
+/// (itself
+/// NOT-yet-sound, `sq-qhy4`) AND (2) Poseidon2 domain-separated collision
+/// resistance over `(ZKSIG_NF, hsk, epoch)`. The whole ZK estate is internally
+/// re-audited but NOT externally audited (`sq-qhy4`); this asserts NO soundness
+/// property as achieved.
+///
+/// # Granularity — per-holder-per-epoch, NOT per-presentation (§6.3(c))
+/// `nf` binds `hsk` and `epoch` but NOT the credential/commitment. So ONE holder
+/// key reused across DISTINCT credentials in the SAME epoch produces the SAME `nf`
+/// (they COLLIDE) — this is a per-holder-per-epoch RATE-LIMIT, usable as a feature,
+/// but it is NOT a per-presentation single-use token. A per-presentation nullifier
+/// additionally folds the commitment into the hash; that is a SEPARATE, larger
+/// obligation (see the module + design §6.3) and is deliberately NOT what this
+/// helper computes.
+// [OPUS-4.8] sq-rsd3v.1: in-circuit-mirrored single-use nullifier primitive.
+pub fn nullifier(hsk: &Fr, epoch: &Fr) -> Fr {
+    poseidon2::hash(&[Fr::from(SIG_DOMAIN_NULLIFIER), *hsk, *epoch])
+}
+
 /// The signed message for a per-graph commitment that binds the per-graph RDFC10
 /// salt (audit #9), the credential's status-list reference (audit #12), AND a
 /// HOLDER-public-key digest (sq-y464, HolderPoP T1). The issuer signs
@@ -2089,6 +2137,40 @@ mod tests {
             dig_a,
             key_set_leaf(&pk_a).expect("non-identity key has a leaf"),
             "holder_key_digest (ZKSIG_HK) must differ from the key-set leaf (h2(x,y))"
+        );
+    }
+
+    /// [OPUS-4.8] sq-rsd3v.1: the single-use nullifier primitive. It is
+    /// deterministic, per-holder + per-epoch (the two granularity axes of §6.3(c)),
+    /// domain-separated from the holder-key digest over the same holder, and
+    /// bit-identical to the pinned in-circuit cross-vector (seed-102 hsk, epoch 7).
+    #[test]
+    fn nullifier_is_deterministic_per_holder_per_epoch() {
+        let sk_a = SecretKey::from_seed(102);
+        let sk_b = SecretKey::from_seed(200);
+        let hsk_a = jj_scalar_to_base(&sk_a.0);
+        let hsk_b = jj_scalar_to_base(&sk_b.0);
+        let e7 = Fr::from(7u64);
+        let e8 = Fr::from(8u64);
+
+        // Deterministic.
+        assert_eq!(nullifier(&hsk_a, &e7), nullifier(&hsk_a, &e7));
+        // Per-epoch: same holder, different epoch => different nf.
+        assert_ne!(nullifier(&hsk_a, &e7), nullifier(&hsk_a, &e8));
+        // Per-holder: different holder, same epoch => different nf.
+        assert_ne!(nullifier(&hsk_a, &e7), nullifier(&hsk_b, &e7));
+        // Domain-separated from the holder-key digest over the same holder (ZKSIG_NF
+        // vs ZKSIG_HK) — a nullifier can never be confused with a holder-key digest.
+        assert_ne!(
+            nullifier(&hsk_a, &e7),
+            holder_key_digest(&sk_a.public_key()).expect("non-identity holder key digests"),
+        );
+        // CROSS-VECTOR PIN: bit-identical to the in-circuit `nullifier_cross_vector`
+        // (tests.nr) and the host `nullifier_matches_noir_cross_vector`
+        // (sparq-zk-compose). Drift here breaks the in-circuit `nf == public nf`.
+        assert_eq!(
+            crate::field::field_to_hex(&nullifier(&hsk_a, &e7)),
+            "0x27113b53c9dd70eaf8705b017290442911e46676758fd901c1446286940c7d7e"
         );
     }
 
