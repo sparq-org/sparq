@@ -11,11 +11,13 @@ import { ArrowLeft } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { SuiteGroup } from "@/components/benchmarks/suite-group";
+import { BaselineCoverageMatrix } from "@/components/benchmarks/baseline-coverage";
 import { ZkCircuitCostBreakdown } from "@/components/benchmarks/zk-circuit-costs";
 import { ZkSparqlCatalog } from "@/components/benchmarks/zk-sparql-catalog";
 import {
   FAMILIES,
   LATEST,
+  competitorCoverage,
   fullSuiteGroupsForFamily,
 } from "@/data/benchmarks";
 
@@ -80,6 +82,14 @@ export default async function BenchmarkTypePage({
           categories and the not-yet-ZK-provable gaps. Sits below the per-member cost
           breakdown, above the CI-feed groups. */}
       {family.key === "zk" && <ZkSparqlCatalog />}
+
+      {/* [OPUS-4.8] sq-vw3ax.12 — the competitor-baseline coverage matrix (recognised engines ×
+          recognised SPARQL query suites), derived live from the committed same-box gathers.
+          Sits ABOVE the per-suite groups so the missing baselines are visible at a glance —
+          honestly "pending" where a canonical-host gather has not run, never fabricated. */}
+      {family.key === "sparql" && (
+        <BaselineCoverageMatrix matrix={competitorCoverage()} />
+      )}
 
       {groups.length === 0 ? (
         <div className="rounded-lg bg-muted/40 p-6 text-sm text-muted-foreground">
