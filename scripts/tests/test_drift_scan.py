@@ -21,6 +21,7 @@ import sys
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
+from datetime import datetime, timezone
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -401,6 +402,184 @@ class ConformanceSplitTest(unittest.TestCase):
         _write(self.root, "crates/sparq-shacl/tests/constraints.rs", "// unit test")
         items = drift_scan.scan_conformance_split(self.root)
         self.assertEqual([], items)
+
+
+# --------------------------------------------------------------------------- #
+# beads-export-stale (bead sq-0b0sh)
+# --------------------------------------------------------------------------- #
+NOW = datetime(2026, 8, 3, tzinfo=timezone.utc)
+KEY = "beads-export-stale:issues-jsonl"
+
+
+def make_beads_export(root: Path, records: list[dict], *, raw_extra: str = "") -> None:
+    """Write a `.beads/issues.jsonl` fixture from bead records (+ optional raw
+    trailing text, used to exercise malformed-line tolerance)."""
+    body = "".join(json.dumps({"_type": "issue", **r}) + "\n" for r in records)
+    _write(root, ".beads/issues.jsonl", body + raw_extra)
+
+
+def bead(bead_id: str, stamp: str = "2026-08-01T00:00:00Z") -> dict:
+    return {"id": bead_id, "status": "open", "created_at": stamp, "updated_at": stamp}
+
+
+class BeadsExportStaleTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+
+    def _keys(self, now=NOW) -> set[str]:
+        return {it.dedup_key for it in drift_scan.scan_beads_export_stale(self.root, now)}
+
+    # -- the two triggers ---------------------------------------------------- #
+    def test_fresh_and_complete_export_is_not_flagged(self):
+        # Newest stamp 2 days old, and every id the repo cites is exported.
+        make_beads_export(self.root, [bead("sq-aaa1"), bead("sq-bbb2")])
+        _write(self.root, "research/notes.md", "see sq-aaa1 and sq-bbb2")
+        self.assertEqual(set(), self._keys())
+
+    def test_stale_stamp_is_flagged(self):
+        # Freshness trigger ALONE: no missing references at all, but the newest
+        # record stamp is well past BEADS_EXPORT_STALE_DAYS.
+        make_beads_export(self.root, [bead("sq-aaa1", "2026-06-01T00:00:00Z")])
+        _write(self.root, "research/notes.md", "see sq-aaa1")
+        self.assertEqual({KEY}, self._keys())
+
+    def test_many_cited_but_unexported_ids_are_flagged(self):
+        # Missing-reference trigger ALONE: the stamp is fresh, but the repo cites
+        # far more beads than the export knows about — the sq-0b0sh symptom.
+        make_beads_export(self.root, [bead("sq-aaa1")])
+        cited = " ".join(f"sq-m{n:04d}" for n in range(60))
+        _write(self.root, "research/notes.md", f"see sq-aaa1 {cited}")
+        self.assertEqual({KEY}, self._keys())
+
+    def test_a_few_missing_ids_stay_under_threshold(self):
+        # The threshold is NOT zero: compacted-out closed beads stay cited in
+        # research records forever, and must not trip the check on their own.
+        make_beads_export(self.root, [bead("sq-aaa1")])
+        cited = " ".join(f"sq-m{n:04d}" for n in range(5))
+        _write(self.root, "research/notes.md", f"see sq-aaa1 {cited}")
+        self.assertEqual(set(), self._keys())
+
+    def test_absent_export_is_a_no_op(self):
+        # A tree with no `.beads/` (fixture repo, partial checkout) must produce
+        # NO drift rather than a false positive — this is what keeps the existing
+        # clean-repo test green.
+        _write(self.root, "research/notes.md", "sq-aaa1 sq-bbb2 sq-ccc3")
+        self.assertEqual(set(), self._keys())
+
+    # -- reference-scan semantics -------------------------------------------- #
+    def test_export_cannot_corroborate_itself(self):
+        # Ids cited only from inside `.beads/` are NOT counted as references: the
+        # export must not vouch for its own completeness.
+        make_beads_export(self.root, [bead("sq-aaa1")])
+        cited = " ".join(f"sq-m{n:04d}" for n in range(60))
+        _write(self.root, ".beads/sidecar.md", cited)
+        self.assertEqual(set(), self._keys())
+
+    def test_reference_regex_accepts_sub_beads_and_rejects_hyphenated_tokens(self):
+        # `sq-pbz04.7` is a real sub-bead id and must be seen; `sq-bench-adapters`
+        # is a PATH, and a bare \b boundary would truncate it to a phantom
+        # `sq-bench` id, inflating the missing count.
+        found = set(drift_scan.BEAD_ID_RE.findall("sq-pbz04.7 sq-bench-adapters sq-aaa1"))
+        self.assertEqual({"sq-pbz04.7", "sq-aaa1"}, found)
+
+    def test_repo_bead_references_honours_suffix_and_dir_bounds(self):
+        _write(self.root, "research/notes.md", "sq-aaa1")
+        _write(self.root, "crates/x/src/lib.rs", "// sq-bbb2")
+        _write(self.root, "node_modules/pkg/index.js", "sq-ccc3")  # skipped dir
+        _write(self.root, "assets/blob.bin", "sq-ddd4")  # skipped suffix
+        self.assertEqual({"sq-aaa1", "sq-bbb2"}, drift_scan.repo_bead_references(self.root))
+
+    # -- parsing robustness --------------------------------------------------- #
+    def test_malformed_lines_do_not_abort_the_parse(self):
+        make_beads_export(
+            self.root, [bead("sq-aaa1")], raw_extra="not json at all\n\n[1,2,3]\n"
+        )
+        ids, newest = drift_scan.beads_export_records(self.root)
+        self.assertEqual({"sq-aaa1"}, ids)
+        self.assertEqual("2026-08-01T00:00:00Z", newest)
+
+    def test_newest_stamp_is_the_max_across_records_and_fields(self):
+        make_beads_export(
+            self.root,
+            [bead("sq-aaa1", "2026-01-02T00:00:00Z"), bead("sq-bbb2", "2026-05-06T00:00:00Z")],
+        )
+        _, newest = drift_scan.beads_export_records(self.root)
+        self.assertEqual("2026-05-06T00:00:00Z", newest)
+
+    def test_a_malformed_stamp_cannot_outrank_a_valid_one(self):
+        # `zzzz` sorts ABOVE every ISO-8601 stamp lexicographically but parses to
+        # nothing, so a raw-string max() would elect it and then report the age
+        # as unavailable — suppressing the stale finding on an export that is
+        # provably months old. The valid stamp must win instead.
+        make_beads_export(
+            self.root,
+            [bead("sq-aaa1", "2026-06-01T00:00:00Z"), bead("sq-bbb2", "zzzz")],
+        )
+        _, newest = drift_scan.beads_export_records(self.root)
+        self.assertEqual("2026-06-01T00:00:00Z", newest)
+
+    def test_stale_still_fires_when_a_malformed_stamp_is_present(self):
+        # End to end, with NO missing references, so the freshness proxy is the
+        # only thing that can trip: one junk stamp must not poison the evidence.
+        make_beads_export(
+            self.root,
+            [bead("sq-aaa1", "2026-06-01T00:00:00Z"), bead("sq-bbb2", "zzzz")],
+        )
+        _write(self.root, "research/notes.md", "see sq-aaa1 and sq-bbb2")
+        self.assertEqual({KEY}, self._keys())
+
+    def test_newest_stamp_orders_by_instant_across_offsets(self):
+        # `2026-08-01T05:00:00+10:00` is 2026-07-31T19:00Z — EARLIER than
+        # `2026-08-01T00:00:00Z`, yet the LARGER of the two as raw text. Only
+        # instant-wise comparison picks the right record.
+        make_beads_export(
+            self.root,
+            [
+                bead("sq-aaa1", "2026-08-01T05:00:00+10:00"),
+                bead("sq-bbb2", "2026-08-01T00:00:00Z"),
+            ],
+        )
+        _, newest = drift_scan.beads_export_records(self.root)
+        self.assertEqual("2026-08-01T00:00:00Z", newest)
+
+    def test_export_age_days(self):
+        self.assertAlmostEqual(
+            2.0, drift_scan.export_age_days("2026-08-01T00:00:00Z", NOW), places=3
+        )
+        self.assertIsNone(drift_scan.export_age_days(None, NOW))
+        self.assertIsNone(drift_scan.export_age_days("not-a-date", NOW))
+
+    def test_unparsable_stamp_still_reports_via_the_reference_count(self):
+        # No usable timestamp => the age proxy is unavailable, but the missing-id
+        # proxy must still fire (and the body must say the stamp was unusable
+        # rather than print a bogus age).
+        make_beads_export(self.root, [{"id": "sq-aaa1", "status": "open"}])
+        cited = " ".join(f"sq-m{n:04d}" for n in range(60))
+        _write(self.root, "research/notes.md", cited)
+        items = drift_scan.scan_beads_export_stale(self.root, NOW)
+        self.assertEqual([KEY], [it.dedup_key for it in items])
+        self.assertIn("unparsable", items[0].body)
+
+    # -- report contract ------------------------------------------------------ #
+    def test_body_carries_the_measurements_and_the_no_hand_edit_rule(self):
+        make_beads_export(self.root, [bead("sq-aaa1", "2026-06-01T00:00:00Z")])
+        item = drift_scan.scan_beads_export_stale(self.root, NOW)[0]
+        self.assertEqual("beads-export-stale", item.drift_class)
+        self.assertIn("63 days old", item.body)
+        self.assertIn("bd export", item.body)
+        self.assertIn("chore-beads-resync", item.body)
+        self.assertIn("Do NOT hand-edit", item.body)
+
+    def test_scanner_is_registered(self):
+        # Wiring guard: the class only ever files an issue because it is in
+        # SCANNERS, and print_report derives its heading from the function name.
+        self.assertIn(drift_scan.scan_beads_export_stale, drift_scan.SCANNERS)
+        self.assertEqual(
+            "beads-export-stale",
+            drift_scan.scan_beads_export_stale.__name__.replace("scan_", "").replace("_", "-"),
+        )
 
 
 # --------------------------------------------------------------------------- #
