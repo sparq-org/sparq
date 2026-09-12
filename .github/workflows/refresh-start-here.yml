@@ -85,7 +85,7 @@ jobs:
         # rule must fail here, not half-way through rewriting the maintainer's front door.
         run: python3 scripts/render-start-here.py --self-test
 
-      - name: Render #1135 from orchestration/start-here.toml + live state
+      - name: "Render #1135 from orchestration/start-here.toml + live state"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
