@@ -8,6 +8,8 @@ workspace does not select these patches.
 evaluator lockfile, upstream VCS identity, complete original file hashes, changed
 file hashes and the accompanying unified patch hash. Original license files and
 `Cargo.toml.orig` are retained. The normalized `Cargo.toml` is the effective manifest.
+The RISC Zero archives omitted standalone license text; their additional `LICENSE`
+files come from the exact recorded upstream VCS revision, with URL/hash recorded.
 
 | Package | Local change |
 | --- | --- |
@@ -26,7 +28,8 @@ Run `python3 vendor/zk-sdk/verify.py` with Python supporting `tomllib` to check 
 defaults and both evaluator lockfiles. With an existing compatible Cargo cache,
 `CARGO_TARGET_DIR=/absolute/cache python3 vendor/zk-sdk/verify.py --smoke` also runs
 synthetic local discovery, constraint tracing/satisfaction, and unchanged upstream
-signature round-trip/tampering checks. The temporary smoke harness uses RSA only
+signature round-trip/tampering checks in discovery and additive key-API modes.
+The temporary smoke harness uses RSA only
 to test the preserved signature code; it is absent from both evaluator graphs.
 Add `--offline` when all test dependencies are cached; otherwise Cargo can fetch
 public dependencies. The temporary smoke lock is derived from the evaluator lock
@@ -39,3 +42,8 @@ or hosted CI. The full upstream installation/publication integration suite is no
 claimed to have run here. Retire the patches when an upstream release provides
 equivalent dependency boundaries and passes the same checks; do not change SDK
 versions or cryptographic arithmetic merely to remove an advisory.
+
+The literal unified patches contain blank context lines whose single leading
+space is patch syntax. One untouched upstream rustdoc line also has a Markdown
+hard break. Those import-only whitespace diagnostics are preserved with the exact
+upstream bytes; authored source still receives the normal formatting checks.

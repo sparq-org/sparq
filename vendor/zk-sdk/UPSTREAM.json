@@ -29,7 +29,15 @@
           "patched_sha256": "bda771b244a15b01a8d69fe565acc85136c21873307d556b14e5b0b15866c3ad"
         }
       ],
-      "patch_sha256": "9f6a9ca8b1cffd26b8ed413a135fccfe20eb66da12a3b6ef92b8ac67835901c7"
+      "patch_sha256": "9f6a9ca8b1cffd26b8ed413a135fccfe20eb66da12a3b6ef92b8ac67835901c7",
+      "additional_files": [
+        {
+          "path": "LICENSE",
+          "source_url": "https://raw.githubusercontent.com/risc0/risc0/8c215e2f4ccdd935f0517bf05d90f1ae032840a9/LICENSE",
+          "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+          "reason": "License text from exact package VCS revision; archive carried Apache headers but omitted standalone license file"
+        }
+      ]
     },
     {
       "name": "rzup",
@@ -99,7 +107,15 @@
           "patched_sha256": "7e44244c3ceb95230006ec38244b63854685f66592c47415de51cd8a37bc8f0e"
         }
       ],
-      "patch_sha256": "139231c6483c94ed28307edef189c2ea1c3aebd94e854dc175435120713b0f6a"
+      "patch_sha256": "139231c6483c94ed28307edef189c2ea1c3aebd94e854dc175435120713b0f6a",
+      "additional_files": [
+        {
+          "path": "LICENSE",
+          "source_url": "https://raw.githubusercontent.com/risc0/risc0/8c215e2f4ccdd935f0517bf05d90f1ae032840a9/LICENSE",
+          "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+          "reason": "License text from exact package VCS revision; archive carried Apache headers but omitted standalone license file"
+        }
+      ]
     },
     {
       "name": "ark-relations",

@@ -24,6 +24,9 @@ def check() -> None:
         for patch in package["patch_files"]:
             assert expected[patch["path"]] == patch["upstream_sha256"]
             expected[patch["path"]] = patch["patched_sha256"]
+        for addition in package.get("additional_files", []):
+            assert addition["path"] not in expected
+            expected[addition["path"]] = addition["sha256"]
         assert {str(p.relative_to(directory)) for p in directory.rglob("*") if p.is_file()} == set(expected)
         for path, sha in expected.items():
             assert hashlib.sha256((directory / path).read_bytes()).hexdigest() == sha, (name, path)
@@ -81,6 +84,10 @@ debug = 0
         if offline:
             command.append("--offline")
         subprocess.run(command, env=env, check=True, timeout=600)
+        # Also compile/run the additive key-taking API; installer/publication
+        # integration remains outside this synthetic harness.
+        env["RISC0_HOME"] = str(directory / "risc0-key-mode")
+        subprocess.run(command + ["--features", "rzup/signatures"], env=env, check=True, timeout=600)
 
 
 if __name__ == "__main__":
