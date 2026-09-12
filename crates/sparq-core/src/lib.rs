@@ -2755,15 +2755,30 @@ impl Graph {
     }
 
     /// The temporal (xsd:dateTime / xsd:dateTimeStamp / xsd:date) value of a term id,
-    /// or `None` if it is not a well-formed temporal literal. O(1), no allocation, no
-    /// lexical re-parse — the engine's fast path for dateTime FILTER / ORDER BY /
-    /// MIN/MAX, the temporal twin of [`numeric_value`](Self::numeric_value).
+    /// or `None` if it is not a well-formed temporal literal. This O(1) legacy
+    /// cache uses an approximate f64 epoch; it must not decide exact equality/order.
+    /// Use [`exact_temporal_value`](Self::exact_temporal_value) for value decisions.
     #[inline]
     pub fn temporal_value(&self, id: Id) -> Option<Temporal> {
         if dict::is_inline(id) {
             return None; // inline ids are integers, never temporal
         }
         self.temporals.lookup(id)
+    }
+
+    /// Parses an exact temporal key from the borrowed dictionary lexical form.
+    ///
+    /// [GPT-6] Preserves fractional digits across dense and compressed dictionaries.
+    /// Returns `None` for foreign datatypes, malformed values or calendar capacity
+    /// exhaustion. Unlike the approximate cache, it performs no floating comparison.
+    pub fn exact_temporal_value(&self, id: Id) -> Option<temporal::ExactTemporal<'_>> {
+        if dict::is_inline(id) {
+            return None;
+        }
+        match self.dict.term_parts(id) {
+            dict::TermParts::Lit { value, datatype, lang: None } => temporal::ExactTemporal::of_lit(value, datatype),
+            _ => None,
+        }
     }
 
     /// The lexical form of a term id IF it is an exact-valued numeric literal (an

@@ -34,9 +34,9 @@ subtype facets after XML whitespace trimming, independently of finite arithmetic
 capacity. `numeric_cache_value` omits invalid lexicals/facets, values outside its
 representation and the existing NaN sentinel; larger literals can remain valid.
 
-The shared `temporal` parsers validate XSD 1.0 calendar/time fields and offsets.
-Malformed Unicode and unrepresentable timestamps return `None`. RDF ingest retains
-ill-typed literals; validation controls evaluation and cache eligibility.
+`temporal::ExactTimeline` / `Graph::exact_temporal_value` borrow exact fractional
+keys with checked calendar/timezone parsing; legacy epoch caches remain approximate.
+Malformed input returns `None`; [API details](../../skills/data-formats/SKILL.md) cover range and cost.
 
 **Legacy mmap archives:** `Graph::open` ignores the old unversioned
 `numerics.bin`/`temporals.bin` and rebuilds caches in memory, preserving all RDF

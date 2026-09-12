@@ -10,4 +10,9 @@ ASK {
   { VALUES ?s { ex:alice }
     { ?s ex:value ?v MINUS { ?s ex:value ?other } }
   }
+  UNION
+  {
+    FILTER("2024-01-01T00:00:00Z"^^<http://www.w3.org/2001/XMLSchema#dateTime>
+      = "2024-01-01T00:00:00.000000001Z"^^<http://www.w3.org/2001/XMLSchema#dateTime>)
+  }
 }

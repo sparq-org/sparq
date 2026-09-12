@@ -299,6 +299,12 @@ pub struct QueryBudget {
     /// anti-OOM ceiling, not an exact RSS quota. `None` (the default) disables it; it
     /// composes with `max_rows` (whichever trips first aborts).
     pub max_bytes: Option<usize>,
+    /// [GPT-6] Inclusive year range for temporal evaluation and construction.
+    /// `None` retains the native parser's checked range. An exceeded range is a
+    /// sticky query-capacity error, even if FILTER/BIND/COALESCE could absorb an
+    /// ordinary expression error. Capacity-constrained expression work stays
+    /// on the calling thread; row-only parallel operations may also fall back.
+    pub temporal_year_range: Option<(i64, i64)>,
     /// Cross-thread cooperative cancellation flag. The executor observes `true`
     /// at the same coarse polling sites as the other limits and aborts with
     /// `"query budget exceeded (cancelled)"`; cancellation is therefore prompt at

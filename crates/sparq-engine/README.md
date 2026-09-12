@@ -10,11 +10,11 @@ The [SPARQL 1.1](https://www.w3.org/TR/sparql11-query/) / [1.2](https://www.w3.o
 query engine over [`sparq-core`](../sparq-core) `Graph`s.
 
 Query in-memory or out-of-core graphs, inspect plans with `EXPLAIN` / `EXPLAIN ANALYZE`,
-and register custom functions. The design docs below describe execution.
+and register custom functions. [Exact temporal comparison and optional year budgets](../../skills/zk-query-proofs/references/exact-temporals.md) preserve fractional precision.
 
 <!-- [GPT-6] The detached proof guest does not add an engine dependency. -->
 The opt-in [proved evaluator](../../zk/sparql-evaluator/README.md) restricts `target_os = "zkvm"`,
-rejecting ambient NOW/RAND/UUID. Native/WASM behavior is unchanged. The experiment is
+rejecting ambient NOW/RAND/UUID in that target only. The experiment is
 not externally audited.
 
 ## 🚀 Quickstart

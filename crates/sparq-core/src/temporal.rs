@@ -1,30 +1,25 @@
-//! XSD date/dateTime VALUES and the epoch side-cache cells.
+//! Checked temporal parsing, exact borrowed keys and approximate epoch caches.
 //!
-//! [`Timeline`] is the parsed value of an `xsd:date` / `xsd:dateTime` lexical —
-//! seconds-from-epoch plus timezone presence — with XPath comparison semantics
-//! (both-with-tz / both-without compare directly; MIXED presence is only
-//! decidable outside the ±14h window). That XPath order is PARTIAL, which is
-//! right for the relational operators (indeterminate = type error) but not for a
-//! sort: [`Timeline::cmp_tl_total`] / [`Temporal::cmp_t_total`] are the TOTAL-order
-//! extension the `ORDER BY` / `MIN`/`MAX` order uses instead. It lives in core
-//! (rather than the engine, which consumes it for FILTER/ORDER BY/`=`) so the
-//! graph can precompute a
-//! per-term [`Temporal`] cache at load time, exactly like the f64 `numerics`
-//! cache: dateTime evaluation then never round-trips the dictionary per row.
+//! [GPT-6] [`ExactTimeline`] and [`ExactTemporal`] preserve integer whole seconds
+//! and every lexical fractional digit. Query/reasoner comparison uses these keys,
+//! including the partial mixed-timezone order and its deterministic total extension.
+//! They borrow the original lexical form and reparse it without allocation.
 //!
-//! [`Temporal`] is the cache cell: the literal's datatype family plus the
-//! PRECOMPUTED comparison key `Timeline::instant()` (an f64 — bit-identical to
-//! what the per-row parse would feed `partial_cmp`, so cached comparisons match
-//! the dict-based path exactly, including sub-second precision and the f64
-//! collapse of far-apart instants) and the timezone-presence bit that decides
-//! the mixed-presence indeterminate window. `xsd:time` is NOT cached: the
-//! engine compares it lexically (OtherXsd), not on the timeline, and a cache
-//! must not change that.
+//! [`Timeline`] retains the legacy parsed floating fraction; [`Temporal`] retains
+//! the approximate f64 epoch cache used by representation-oriented consumers.
+//! Neither floating representation is an exact equality/order key: close fractions
+//! and large epochs can alias. Cache files and approximate vector encoding remain
+//! compatible. `xsd:time` is outside these date/dateTime APIs.
 
 use std::cmp::Ordering;
 
+mod exact;
+#[doc(inline)]
+pub use exact::{ExactTemporal, ExactTimeline, year_within_capacity};
+
 /// An xsd:date / xsd:dateTime VALUE: seconds-from-epoch of the local time, fractional
-/// seconds, and the timezone offset when present. Comparison follows XSD: both-with-tz
+/// seconds, and timezone offset. Its floating comparisons can round; use
+/// [`ExactTimeline`] for exact value decisions. Both-with-tz
 /// and both-without compare directly; MIXED presence is only decidable outside the
 /// ±14h window (inside it the comparison is indeterminate — a SPARQL type error).
 #[derive(Clone, Copy, Debug)]
@@ -98,7 +93,8 @@ impl Timeline {
         cmp_instants(a.instant(), a.tz.is_some(), b.instant(), b.tz.is_some())
     }
 
-    /// The TOTAL-order EXTENSION of [`cmp_tl`](Self::cmp_tl) — for the `ORDER BY` /
+    /// Legacy approximate total extension of [`cmp_tl`](Self::cmp_tl).
+    /// Exact query decisions use [`ExactTimeline::compare_total`]. This API's `ORDER BY` /
     /// `MIN`/`MAX` total order ONLY. Never for the relational operators: `<` / `>` / `=`
     /// keep [`cmp_tl`](Self::cmp_tl)'s indeterminate window as a SPARQL type error.
     ///
