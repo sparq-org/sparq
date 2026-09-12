@@ -113,7 +113,6 @@ this is separate from the planner’s first-occurrence variable ordering. FILTER
 bounds retain their complete `u64` public field encoding. Witness TOML represents
 values above `i64::MAX` as decimal strings accepted by Noir.
 
-
 [GPT-6] `ResultOptions::integer_capacity` defaults to
 `IntegerCapacityPolicy::Smallest`: selected private values through 99 use
 `PrivateIntegerCapacity::TwoDigits`, and larger canonical values select
