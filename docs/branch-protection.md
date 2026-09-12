@@ -349,7 +349,8 @@ belts, and rule 9 is diagnosis + a recorded decision rather than a belt (all in
    `labeled`/`unlabeled` `pull_request` event whose label is not
    `ci-full`/`bench-full`/`fuzz-full` is a guarded no-op for every `ci-select`
    caller: the #2546 label-trigger guard skips every root job of `ci.yml`,
-   `bench.yml`, `feature-matrix.yml` and `fuzz.yml`, so the run's ONLY non-skipped
+   `bench.yml`, `feature-matrix.yml`, `fuzz.yml` and `vectorized-feature-off.yml`,
+   so the run's ONLY non-skipped
    job is the deliberately-unconditional `select` pre-job. `ci-select.yml`
    therefore names that job **`…, no-leg`**, never `…, draft-tier`, and the gate
    treats the whole run as **non-authoritative**: it is excluded from newest-run
@@ -374,6 +375,13 @@ belts, and rule 9 is diagnosis + a recorded decision rather than a belt (all in
    EVALUATES the marker expression against synthetic payloads and proves, by
    `needs:`-graph reachability, that every caller job really is inert on such a
    flip — the claim, not just the string.
+   <!-- [GPT-6-ASTRA] #6081: retain native lane identity and evidence. -->
+   Vectorized feature-OFF uses this shared pre-job without narrowing its existing
+   path/draft decisions. All three escape-label toggles still reach both root jobs;
+   other label flips run only the selector. Per-run label concurrency groups keep
+   those flips from cancelling or evicting real runs. Ordinary events add the
+   selector dependency; runner-time savings have not been measured. Workflow
+   identities, check names, reporter correlation and permissions stay native.
 8. **An unsatisfiable hold REDs immediately, with the diagnosis (#3781).**
    [OPUS-5] Rule 4's hold is a WAIT for the `ready_for_review` full-tier re-runs.
    When every sibling has CONCLUDED, a draft-marked select still lacks a successor,

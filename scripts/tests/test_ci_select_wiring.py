@@ -36,11 +36,13 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
 import re
 import sys
 import unittest
 from pathlib import Path
+from contextlib import redirect_stdout
 
 try:
     import tomllib  # stdlib >= 3.11
@@ -1921,7 +1923,8 @@ class TestNoLegMarkerWiring(unittest.TestCase):
         evidence. Only the ci-select caller job is exempt — it is deliberately
         unconditional, because a skipped select poisons the gate."""
         guard = "contains(fromJSON('[\"labeled\",\"unlabeled\"]'), github.event.action)"
-        for wf_name in ("ci.yml", "feature-matrix.yml", "bench.yml", "fuzz.yml"):
+        for wf_name in ("ci.yml", "feature-matrix.yml", "bench.yml", "fuzz.yml",
+                        "vectorized-feature-off.yml"):
             wf = _load(REPO_ROOT / ".github" / "workflows" / wf_name)
             jobs = wf["jobs"]
 
@@ -1976,7 +1979,8 @@ class TestNoLegMarkerWiring(unittest.TestCase):
             excluded |= set(json.loads(group))
         self.assertTrue(excluded, "the no-leg condition must exclude the escape labels")
         self.assertEqual(excluded, set(self.ESCAPE_LABELS))
-        for wf_name in ("ci.yml", "feature-matrix.yml", "bench.yml", "fuzz.yml"):
+        for wf_name in ("ci.yml", "feature-matrix.yml", "bench.yml", "fuzz.yml",
+                        "vectorized-feature-off.yml"):
             text = (REPO_ROOT / ".github" / "workflows" / wf_name).read_text(
                 encoding="utf-8")
             work_labels = set(
@@ -2390,6 +2394,128 @@ class TestMergeGroupChangeClassGate(unittest.TestCase):
                          "fuzz.yml grew a `changes` job — its merge-group gating is the "
                          "select pre-job; keep one gate, not two")
 
+
+
+class TestNativeVectorizedLabelContract(unittest.TestCase):
+    """[GPT-6-ASTRA] #6081: native producers plus their real gate consumer."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.wf = _load(REPO_ROOT / ".github/workflows/vectorized-feature-off.yml")
+        cls.select = _load(SELECT_YML)["jobs"]["select"]
+        cls.gate = _gate_module()
+
+    def test_native_lane_identities_and_reporter_route_are_retained(self):
+        wfdir = REPO_ROOT / ".github/workflows"
+        self.assertFalse((wfdir / "ci-label-override.yml").exists())
+        for file, name in (("ci.yml", "CI"), ("feature-matrix.yml", "feature-matrix"),
+                           ("bench.yml", "Benchmarks"), ("fuzz.yml", "fuzz"),
+                           ("vectorized-feature-off.yml", "vectorized-feature-off")):
+            wf = _load(wfdir / file)
+            self.assertEqual(wf["name"], name)
+            on = _on_block(wf)
+            self.assertNotIn("workflow_call", on, file)
+            self.assertTrue({"labeled", "unlabeled"} <= set(on["pull_request"]["types"]))
+        reporter = _load(wfdir / "feature-matrix-report.yml")
+        self.assertEqual(_on_block(reporter)["workflow_run"]["workflows"], ["feature-matrix"])
+        fm = _load(wfdir / "feature-matrix.yml")
+        group = fm["jobs"]["opt-in-features"]["name"]
+        self.assertTrue(self.gate.is_real_fm_group({"name": group, "status": "completed", "conclusion": "success"}), group)
+
+    def test_select_is_unconditional_and_both_roots_depend_on_it(self):
+        jobs = self.wf["jobs"]
+        self.assertEqual(set(jobs), {"select", "quick-gates", "artifact-exact-equality"})
+        self.assertEqual(jobs["select"].get("uses"), "./.github/workflows/ci-select.yml")
+        self.assertNotIn("if", jobs["select"])
+        self.assertNotIn("needs", jobs["select"])
+        for name in ("quick-gates", "artifact-exact-equality"):
+            self.assertEqual(jobs[name].get("needs"), "select")
+            self.assertNotIn("needs.select.outputs", jobs[name].get("if", "true"))
+
+    def test_root_reachability_agrees_with_the_no_leg_marker(self):
+        for action in ("labeled", "unlabeled"):
+            for label in ("review:pass", "review:needs", "status:ready", "area:ci",
+                          "ci-full", "bench-full", "fuzz-full"):
+                for draft in (True, False):
+                    ctx = pr_event(action=action, label=label, draft=draft)
+                    no_leg = self.gate.is_no_leg_select(render_job_name(self.select["name"], ctx))
+                    for name in ("quick-gates", "artifact-exact-equality"):
+                        self.assertEqual(eval_job_if(self.wf["jobs"][name].get("if", "true"), ctx),
+                                         not no_leg, (action, label, draft, name))
+        for ctx in (pr_event(), pr_event(action="ready_for_review"),
+                    pr_event(event="push"), pr_event(event="merge_group")):
+            for name in ("quick-gates", "artifact-exact-equality"):
+                self.assertTrue(eval_job_if(self.wf["jobs"][name].get("if", "true"), ctx))
+
+    def test_label_groups_cannot_cancel_or_evict_real_runs(self):
+        template = self.wf.get("concurrency", {}).get("group", "")
+        self.assertTrue(self.wf["concurrency"]["cancel-in-progress"])
+
+        def group(action, run_id, ref="refs/pull/42/merge", event="pull_request"):
+            ctx = pr_event(action=action, label="ci-full", event=event)
+            ctx["github"].update(workflow="vectorized-feature-off", ref=ref, run_id=run_id)
+            return re.sub(r"\$\{\{(.*?)\}\}",
+                          lambda m: str(_GhExpr(m[1], ctx).parse()), template).lower()
+
+        real = group("synchronize", "101")
+        self.assertEqual(real, group("synchronize", "102"))
+        for action in ("labeled", "unlabeled"):
+            flip = group(action, "103")
+            self.assertNotEqual(flip, real)  # protects pending slots as well as running jobs
+            self.assertNotEqual(flip, group(action, "104"))
+        self.assertNotEqual(real, group("synchronize", "102", "refs/pull/43/merge"))
+        self.assertNotEqual(real, group("", "102", "refs/heads/main", "push"))
+        self.assertNotEqual(real, group("", "102", "refs/heads/gh-readonly-queue/main/pr-42",
+                                        "merge_group"))
+
+    def test_native_no_leg_run_preserves_previous_real_gate_verdict(self):
+        # Real YAML producer names flow through WorkflowRunResolver and run_gate.
+        # Both failure and success discriminate exclusion from an always-red fixture.
+        self.assertEqual(self.wf["jobs"].get("select", {}).get("uses"),
+                         "./.github/workflows/ci-select.yml")
+        g = self.gate
+        real_select = "select / " + render_job_name(self.select["name"], pr_event())
+        root_names = [self.wf["jobs"][j]["name"]
+                      for j in ("quick-gates", "artifact-exact-equality")]
+        for action in ("labeled", "unlabeled"):
+            flip_select = "select / " + render_job_name(
+                self.select["name"], pr_event(action=action, label="review:pass", draft=True))
+            for conclusion, expected in (("failure", 1), ("success", 0)):
+                def job(name, run_id, result, jid):
+                    return {"name": name, "status": "completed", "conclusion": result,
+                            "id": jid, "started_at": f"2026-09-06T20:{run_id - 100:02d}:00Z",
+                            "html_url": f"https://github.test/o/r/actions/runs/{run_id}/job/{jid}"}
+
+                jobs = {101: [job(real_select, 101, "success", 1),
+                              job(root_names[0], 101, conclusion, 2),
+                              job(root_names[1], 101, "success", 3)],
+                        102: [job(flip_select, 102, "success", 4),
+                              job(root_names[0], 102, "skipped", 5),
+                              job(root_names[1], 102, "skipped", 6)]}
+                checks = [dict(j, details_url=j["html_url"]) for rows in jobs.values() for j in rows]
+                runs = [{"id": rid, "workflow_id": 7, "name": self.wf["name"],
+                         "path": ".github/workflows/vectorized-feature-off.yml", "head_sha": "same-head",
+                         "status": "completed", "conclusion": conclusion if rid == 101 else "success",
+                         "created_at": f"2026-09-06T20:{rid - 100:02d}:00Z", "run_attempt": 1}
+                        for rid in jobs]
+                fetched, posts = [], []
+
+                def fetch_jobs(run_id, attempt):
+                    fetched.append(run_id)
+                    return jobs[run_id]
+
+                resolver = g.WorkflowRunResolver(self_run_id="999", fetch_checks=lambda: checks,
+                    fetch_workflows=lambda: runs, fetch_attempt_jobs=fetch_jobs, redispatch=posts.append)
+                cfg = g.Config(self_run_id="999", interval=0, min_polls=2, settle_polls=2,
+                               base_polls=4, max_total_polls=8, sat_interval=0,
+                               reporter_grace_polls=3, summary_path="")
+                out = io.StringIO()
+                with redirect_stdout(out):
+                    code = g.run_gate(cfg, resolver, lambda: 0, sleep_fn=lambda _: None)
+                self.assertEqual(code, expected, out.getvalue())
+                self.assertIn("declared NO LEGS", out.getvalue())
+                self.assertEqual(set(fetched), {101}, "the later no-op must not become authoritative")
+                self.assertFalse(posts, "completed native evidence must never trigger redispatch")
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
