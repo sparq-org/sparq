@@ -93,7 +93,8 @@ standard expectation separately from the rejection case.
 | false ASK, numeric FILTER, VALUES joined with root zero-length paths | admitted | host semantics; genuine false-ASK proof fixture |
 | Fixed sequence and alternative paths, positive correlated EXISTS | admitted | combined genuine proof fixture; native conformance cases |
 | Negated property sets, including forward/reverse endpoint multiplicity | admitted | normative native cases and actual guest execution; separate from receipt evidence |
-| Other paths, pure functions and built-in aggregates | admitted by AST | shared evaluator; no complete guest conformance claim |
+| Other paths and pure functions | admitted by AST | shared evaluator; no complete guest conformance claim |
+| Built-in aggregates | COUNT; other operands must be bound terms | [restricted aggregate profile](../../skills/zk-query-proofs/references/aggregate-profile.md) |
 | GRAPH, FROM/FROM NAMED, SERVICE, LATERAL | rejected | whole-AST negatives |
 | NOW, RAND, UUID/STRUUID, BNODE, external functions | rejected | nested host and actual guest rejection fixtures |
 | Source blank nodes, triple terms, directional literals | rejected | input/query/output checks |
