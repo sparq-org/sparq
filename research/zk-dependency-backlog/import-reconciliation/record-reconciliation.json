@@ -1,0 +1,1930 @@
+{
+  "original": {
+    "total": 357,
+    "missing_or_changed_in_live": [],
+    "omitted_by_fresh_graph_filter": [
+      {
+        "source": "bytecode-alliance",
+        "section": "audits",
+        "name": "anes",
+        "record": {
+          "who": "Pat Hickey <phickey@fastly.com>",
+          "criteria": "safe-to-deploy",
+          "version": "0.1.6",
+          "notes": "Contains no unsafe code, no IO, no build.rs."
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "bytecode-alliance",
+        "section": "audits",
+        "name": "arrayref",
+        "record": {
+          "who": "Nick Fitzgerald <fitzgen@gmail.com>",
+          "criteria": "safe-to-deploy",
+          "version": "0.3.6",
+          "notes": "Unsafe code, but its logic looks good to me. Necessary given what it is\ndoing. Well tested, has quickchecks.\n"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "bytecode-alliance",
+        "section": "audits",
+        "name": "atomic-waker",
+        "record": {
+          "who": "Alex Crichton <alex@alexcrichton.com>",
+          "criteria": "safe-to-deploy",
+          "version": "1.1.2",
+          "notes": "Contains `unsafe` code but it's well-documented and scoped to what it's intended to be doing. Otherwise a well-focused and straightforward crate."
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "bytecode-alliance",
+        "section": "audits",
+        "name": "codespan-reporting",
+        "record": {
+          "who": "Jamey Sharp <jsharp@fastly.com>",
+          "criteria": "safe-to-deploy",
+          "version": "0.11.1",
+          "notes": "This library uses `forbid(unsafe_code)` and has no filesystem or network I/O."
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "bytecode-alliance",
+        "section": "audits",
+        "name": "http-body",
+        "record": {
+          "who": "Pat Hickey <phickey@fastly.com>",
+          "criteria": "safe-to-deploy",
+          "version": "1.0.0-rc.2"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "bytecode-alliance",
+        "section": "audits",
+        "name": "http-body",
+        "record": {
+          "who": "Alex Crichton <alex@alexcrichton.com>",
+          "criteria": "safe-to-deploy",
+          "delta": "1.0.0-rc.2 -> 1.0.0",
+          "notes": "Only minor changes made for a stable release."
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "bytecode-alliance",
+        "section": "audits",
+        "name": "idna",
+        "record": {
+          "who": "Alex Crichton <alex@alexcrichton.com>",
+          "criteria": "safe-to-deploy",
+          "version": "0.3.0",
+          "notes": "This is a crate without unsafe code or usage of the standard library. The large\nsize of this crate comes from the large generated unicode tables file. This\ncrate is broadly used throughout the ecosystem and does not contain anything\nsuspicious.\n"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "bytecode-alliance",
+        "section": "audits",
+        "name": "leb128fmt",
+        "record": {
+          "who": "Alex Crichton <alex@alexcrichton.com>",
+          "criteria": "safe-to-deploy",
+          "version": "0.1.0",
+          "notes": "Well-scoped crate do doing LEB encoding with no `unsafe` code and does what it says on the tin."
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "bytecode-alliance",
+        "section": "audits",
+        "name": "matchers",
+        "record": {
+          "who": "Pat Hickey <phickey@fastly.com>",
+          "criteria": "safe-to-deploy",
+          "version": "0.1.0"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "bytecode-alliance",
+        "section": "audits",
+        "name": "matchers",
+        "record": {
+          "who": "Alex Crichton <alex@alexcrichton.com>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.1.0 -> 0.2.0",
+          "notes": "Some unsafe code, but not more than before. Nothing awry."
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "bytecode-alliance",
+        "section": "audits",
+        "name": "miniz_oxide",
+        "record": {
+          "who": "Alex Crichton <alex@alexcrichton.com>",
+          "criteria": "safe-to-deploy",
+          "version": "0.7.1",
+          "notes": "This crate is a Rust implementation of zlib compression/decompression and has\nbeen used by default by the Rust standard library for quite some time. It's also\na default dependency of the popular `backtrace` crate for decompressing debug\ninformation. This crate forbids unsafe code and does not otherwise access system\nresources. It's originally a port of the `miniz.c` library as well, and given\nits own longevity should be relatively hardened against some of the more common\ncompression-related issues.\n"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "bytecode-alliance",
+        "section": "audits",
+        "name": "miniz_oxide",
+        "record": {
+          "who": "Alex Crichton <alex@alexcrichton.com>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.7.1 -> 0.8.0",
+          "notes": "Minor updates, using new Rust features like `const`, no major changes."
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "bytecode-alliance",
+        "section": "audits",
+        "name": "miniz_oxide",
+        "record": {
+          "who": "Alex Crichton <alex@alexcrichton.com>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.8.0 -> 0.8.5",
+          "notes": "Lots of small updates here and there, for example around modernizing Rust\nidioms. No new `unsafe` code and everything looks like what you'd expect a\ncompression library to be doing.\n"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "bytecode-alliance",
+        "section": "audits",
+        "name": "miniz_oxide",
+        "record": {
+          "who": "Alex Crichton <alex@alexcrichton.com>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.8.5 -> 0.8.9",
+          "notes": "No new unsafe code, just refactorings."
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "bytecode-alliance",
+        "section": "audits",
+        "name": "nu-ansi-term",
+        "record": {
+          "who": "Pat Hickey <phickey@fastly.com>",
+          "criteria": "safe-to-deploy",
+          "version": "0.46.0",
+          "notes": "one use of unsafe to call windows specific api to get console handle."
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "bytecode-alliance",
+        "section": "audits",
+        "name": "nu-ansi-term",
+        "record": {
+          "who": "Alex Crichton <alex@alexcrichton.com>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.46.0 -> 0.50.1",
+          "notes": "Lots of stylistic/rust-related changes, plus new features, but nothing out of the ordrinary."
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "bytecode-alliance",
+        "section": "audits",
+        "name": "nu-ansi-term",
+        "record": {
+          "who": "Alex Crichton <alex@alexcrichton.com>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.50.1 -> 0.50.3",
+          "notes": "CI changes, Rust changes, nothing out of the ordinary."
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "bytecode-alliance",
+        "section": "audits",
+        "name": "percent-encoding",
+        "record": {
+          "who": "Alex Crichton <alex@alexcrichton.com>",
+          "criteria": "safe-to-deploy",
+          "version": "2.2.0",
+          "notes": "This crate is a single-file crate that does what it says on the tin. There are\na few `unsafe` blocks related to utf-8 validation which are locally verifiable\nas correct and otherwise this crate is good to go.\n"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "bytecode-alliance",
+        "section": "audits",
+        "name": "sha1",
+        "record": {
+          "who": "Andrew Brown <andrew.brown@intel.com>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.10.5 -> 0.10.6",
+          "notes": "Only new code is some loongarch64 additions which include assembly code for that platform."
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "bytecode-alliance",
+        "section": "audits",
+        "name": "sharded-slab",
+        "record": {
+          "who": "Pat Hickey <phickey@fastly.com>",
+          "criteria": "safe-to-deploy",
+          "version": "0.1.4",
+          "notes": "I always really enjoy reading eliza's code, she left perfect comments at every use of unsafe."
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "bytecode-alliance",
+        "section": "audits",
+        "name": "thread_local",
+        "record": {
+          "who": "Pat Hickey <phickey@fastly.com>",
+          "criteria": "safe-to-deploy",
+          "version": "1.1.4",
+          "notes": "uses unsafe to implement thread local storage of objects"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "bytecode-alliance",
+        "section": "audits",
+        "name": "try-lock",
+        "record": {
+          "who": "Pat Hickey <phickey@fastly.com>",
+          "criteria": "safe-to-deploy",
+          "version": "0.2.4",
+          "notes": "Implements a concurrency primitive with atomics, and is not obviously incorrect"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "bytecode-alliance",
+        "section": "audits",
+        "name": "want",
+        "record": {
+          "who": "Pat Hickey <phickey@fastly.com>",
+          "criteria": "safe-to-deploy",
+          "version": "0.3.0"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "bytecode-alliance",
+        "section": "audits",
+        "name": "wasm-metadata",
+        "record": {
+          "who": "Alex Crichton <alex@alexcrichton.com>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.236.0 -> 0.237.0",
+          "notes": "The Bytecode Alliance is the author of this crate"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "bytecode-alliance",
+        "section": "audits",
+        "name": "wasm-metadata",
+        "record": {
+          "who": "Alex Crichton <alex@alexcrichton.com>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.237.0 -> 0.238.1",
+          "notes": "The Bytecode Alliance is the author of this crate"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "bytecode-alliance",
+        "section": "audits",
+        "name": "wasm-metadata",
+        "record": {
+          "who": "Alex Crichton <alex@alexcrichton.com>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.238.1 -> 0.239.0",
+          "notes": "The Bytecode Alliance is the author of this crate"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "bytecode-alliance",
+        "section": "audits",
+        "name": "wasm-metadata",
+        "record": {
+          "who": "Alex Crichton <alex@alexcrichton.com>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.239.0 -> 0.240.0",
+          "notes": "The Bytecode Alliance is the author of this crate"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "bytecode-alliance",
+        "section": "audits",
+        "name": "wasm-metadata",
+        "record": {
+          "who": "Alex Crichton <alex@alexcrichton.com>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.240.0 -> 0.241.2",
+          "notes": "The Bytecode Alliance is the author of this crate"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "bytecode-alliance",
+        "section": "audits",
+        "name": "wasm-metadata",
+        "record": {
+          "who": "Alex Crichton <alex@alexcrichton.com>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.241.2 -> 0.242.0",
+          "notes": "The Bytecode Alliance is the author of this crate"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "bytecode-alliance",
+        "section": "audits",
+        "name": "wasm-metadata",
+        "record": {
+          "who": "Alex Crichton <alex@alexcrichton.com>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.242.0 -> 0.243.0",
+          "notes": "The Bytecode Alliance is the author of this crate"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "bytecode-alliance",
+        "section": "audits",
+        "name": "wasm-metadata",
+        "record": {
+          "who": "Alex Crichton <alex@alexcrichton.com>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.243.0 -> 0.244.0",
+          "notes": "The Bytecode Alliance is the author of this crate"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "bytecode-alliance",
+        "section": "wildcard-audits",
+        "name": "wasip3",
+        "record": {
+          "who": "Alex Crichton <alex@alexcrichton.com>",
+          "criteria": "safe-to-deploy",
+          "user-id": 1,
+          "start": "2025-09-10",
+          "end": "2026-08-21",
+          "notes": "This is a Bytecode Alliance authored crate.\n"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "bytecode-alliance",
+        "section": "wildcard-audits",
+        "name": "wasm-encoder",
+        "record": {
+          "who": "Alex Crichton <alex@alexcrichton.com>",
+          "criteria": "safe-to-deploy",
+          "trusted-publisher": "github:bytecodealliance/wasm-tools",
+          "start": "2025-08-14",
+          "end": "2027-01-08",
+          "notes": "The Bytecode Alliance is the author of this crate"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "bytecode-alliance",
+        "section": "wildcard-audits",
+        "name": "wasm-metadata",
+        "record": {
+          "who": "Alex Crichton <alex@alexcrichton.com>",
+          "criteria": "safe-to-deploy",
+          "user-id": 73222,
+          "start": "2023-01-01",
+          "end": "2026-06-03",
+          "notes": "The Bytecode Alliance uses the `wasmtime-publish` crates.io account to automate\npublication of this crate from CI. This repository requires all PRs are reviewed\nby a Bytecode Alliance maintainer and it owned by the Bytecode Alliance itself.\n"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "bytecode-alliance",
+        "section": "wildcard-audits",
+        "name": "wasmparser",
+        "record": {
+          "who": "Alex Crichton <alex@alexcrichton.com>",
+          "criteria": "safe-to-deploy",
+          "trusted-publisher": "github:bytecodealliance/wasm-tools",
+          "start": "2025-08-14",
+          "end": "2027-01-08",
+          "notes": "The Bytecode Alliance is the author of this crate"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "bytecode-alliance",
+        "section": "wildcard-audits",
+        "name": "wit-bindgen-core",
+        "record": {
+          "who": "Alex Crichton <alex@alexcrichton.com>",
+          "criteria": "safe-to-deploy",
+          "trusted-publisher": "github:bytecodealliance/wit-bindgen",
+          "start": "2025-08-13",
+          "end": "2027-01-08",
+          "notes": "The Bytecode Alliance is the author of this crate"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "bytecode-alliance",
+        "section": "wildcard-audits",
+        "name": "wit-bindgen-rust",
+        "record": {
+          "who": "Alex Crichton <alex@alexcrichton.com>",
+          "criteria": "safe-to-deploy",
+          "trusted-publisher": "github:bytecodealliance/wit-bindgen",
+          "start": "2025-08-13",
+          "end": "2027-01-12",
+          "notes": "The Bytecode Alliance is the author of this crate"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "bytecode-alliance",
+        "section": "wildcard-audits",
+        "name": "wit-bindgen-rust-macro",
+        "record": {
+          "who": "Alex Crichton <alex@alexcrichton.com>",
+          "criteria": "safe-to-deploy",
+          "trusted-publisher": "github:bytecodealliance/wit-bindgen",
+          "start": "2025-08-13",
+          "end": "2027-01-08",
+          "notes": "The Bytecode Alliance is the author of this crate"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "bytecode-alliance",
+        "section": "wildcard-audits",
+        "name": "wit-component",
+        "record": {
+          "who": "Alex Crichton <alex@alexcrichton.com>",
+          "criteria": "safe-to-deploy",
+          "trusted-publisher": "github:bytecodealliance/wasm-tools",
+          "start": "2025-08-14",
+          "end": "2027-01-08",
+          "notes": "The Bytecode Alliance is the author of this crate"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "bytecode-alliance",
+        "section": "wildcard-audits",
+        "name": "wit-parser",
+        "record": {
+          "who": "Alex Crichton <alex@alexcrichton.com>",
+          "criteria": "safe-to-deploy",
+          "trusted-publisher": "github:bytecodealliance/wasm-tools",
+          "start": "2025-08-14",
+          "end": "2027-01-08",
+          "notes": "The Bytecode Alliance is the author of this crate"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "embark-studios",
+        "section": "audits",
+        "name": "idna",
+        "record": {
+          "who": "Johan Andersson <opensource@embark-studios.com>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.3.0 -> 0.4.0",
+          "notes": "No unsafe usage or ambient capabilities"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "embark-studios",
+        "section": "audits",
+        "name": "jni",
+        "record": {
+          "who": "Robert Bragg <opensource@embark-studios.com>",
+          "criteria": "safe-to-deploy",
+          "version": "0.21.1",
+          "notes": "Aims to provide a safe JNI (Java Native Interface) API over the\nunsafe `jni_sys` crate.\n\nThis is a very general FFI abstraction for Java VMs with a lot of unsafe code\nthroughout the API. There are almost certainly some edge cases with its design\nthat could lead to unsound behaviour but it should still be considerably safer\nthan working with JNI directly.\n\nA lot of the unsafe usage relates to quite-simple use of `from_raw` APIs to\nconstruct or cast wrapper types (around JNI pointers) which are fairly\nstraight-forward to verify/trust in context.\n\nSome unsafe code has good `// # Safety` documentation (this has been enforced for\nnewer code) but a lot of unsafe code doesn't document invariants that are\nbeing relied on.\n\nThe design depends on non-trivial named lifetimes across many APIs to associate\nJava local references with JNI stack frames.\n\nThe crate is not very actively maintained and was practically unmaintained for\nover a year before the 0.20 release.\n\nRobert Bragg who now works at Embark Studios became the maintainer of this\ncrate in October 2022.\n\nIn the process of working on the `jni` crate since becoming maintainer it's\nworth noting that I came across multiple APIs that I found needed to be\nre-worked to address safety issues, including ensuring that APIs that are not\nimplemented safely are correctly declared as `unsafe`.\n\nThere has been a focus on improving safety in the last two release.\n\nThe jni crate has been used in production with the Signal messaging application\nfor over two years:\nhttps://github.com/signalapp/libsignal/blob/main/rust/bridge/jni/Cargo.toml\n\n# Some Notable Open Issues\n- https://github.com/jni-rs/jni-rs/issues/422 - questions soundness of linking\n  multiple versions of jni crate into an application, considering the use\n  of (separately scoped) thread-local-storage to track thread attachments\n- https://github.com/jni-rs/jni-rs/issues/405 - discusses the ease with which\n  code may expose the JVM to invalid booleans with undefined behaviour\n"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "embark-studios",
+        "section": "wildcard-audits",
+        "name": "presser",
+        "record": {
+          "who": "Gray Olson <opensource@embark-studios.com>",
+          "criteria": "safe-to-deploy",
+          "user-id": 52553,
+          "start": "2021-01-01",
+          "end": "2024-05-23",
+          "notes": "Small crate with no dependencies and no ambient capabilities. The safe interface of the crate\nis gated behind unsafe implementation of a core trait, and care must be taken to ensure that\nthe relevant invariants are guaranteed when doing so. Maintained by the Ark team at Embark\nand used in production.\n"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "google",
+        "section": "audits",
+        "name": "adler2",
+        "record": {
+          "who": "Lukasz Anforowicz <lukasza@chromium.org>",
+          "criteria": "safe-to-deploy",
+          "version": "2.0.0",
+          "notes": "This audit has been reviewed in https://crrev.com/c/5811890\n\nThe crate is fairly easy to read thanks to its small size and rich comments.\n\nI've grepped for `-i cipher`, `-i crypto`, `\\bfs\\b`, `\\bnet\\b`, and\n`\\bunsafe\\b`.  There were no hits (except for a comment in `README.md`\nand `lib.rs` pointing out \"Zero `unsafe`\").\n",
+          "aggregated-from": "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "google",
+        "section": "audits",
+        "name": "ash",
+        "record": {
+          "who": "David Koloski <dkoloski@google.com>",
+          "criteria": "safe-to-deploy",
+          "version": "0.37.0+1.3.209",
+          "notes": "Reviewed on https://fxrev.dev/694269",
+          "aggregated-from": "https://fuchsia.googlesource.com/fuchsia/+/refs/heads/main/third_party/rust_crates/supply-chain/audits.toml?format=TEXT"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "google",
+        "section": "audits",
+        "name": "cast",
+        "record": {
+          "who": "George Burgess IV <gbiv@google.com>",
+          "criteria": "safe-to-run",
+          "version": "0.3.0",
+          "aggregated-from": "https://chromium.googlesource.com/chromiumos/third_party/rust_crates/+/refs/heads/main/cargo-vet/audits.toml?format=TEXT"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "google",
+        "section": "audits",
+        "name": "ciborium",
+        "record": {
+          "who": "Daniel Verkamp <dverkamp@chromium.org>",
+          "criteria": "safe-to-run",
+          "version": "0.2.2",
+          "aggregated-from": "https://chromium.googlesource.com/chromiumos/third_party/rust_crates/+/refs/heads/main/cargo-vet/audits.toml?format=TEXT"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "google",
+        "section": "audits",
+        "name": "ciborium-io",
+        "record": {
+          "who": "Daniel Verkamp <dverkamp@chromium.org>",
+          "criteria": "safe-to-run",
+          "version": "0.2.2",
+          "aggregated-from": "https://chromium.googlesource.com/chromiumos/third_party/rust_crates/+/refs/heads/main/cargo-vet/audits.toml?format=TEXT"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "google",
+        "section": "audits",
+        "name": "ciborium-ll",
+        "record": {
+          "who": "Daniel Verkamp <dverkamp@chromium.org>",
+          "criteria": "safe-to-run",
+          "version": "0.2.2",
+          "aggregated-from": "https://chromium.googlesource.com/chromiumos/third_party/rust_crates/+/refs/heads/main/cargo-vet/audits.toml?format=TEXT"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "google",
+        "section": "audits",
+        "name": "httpdate",
+        "record": {
+          "who": "George Burgess IV <gbiv@google.com>",
+          "criteria": "safe-to-deploy",
+          "version": "1.0.3",
+          "aggregated-from": "https://chromium.googlesource.com/chromiumos/third_party/rust_crates/+/refs/heads/main/cargo-vet/audits.toml?format=TEXT"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "google",
+        "section": "audits",
+        "name": "num-rational",
+        "record": {
+          "who": "Manish Goregaokar <manishearth@google.com>",
+          "criteria": "safe-to-deploy",
+          "version": "0.4.2",
+          "notes": "Contains no unsafe",
+          "aggregated-from": "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "google",
+        "section": "audits",
+        "name": "quick-error",
+        "record": {
+          "who": "George Burgess IV <gbiv@google.com>",
+          "criteria": "safe-to-run",
+          "version": "1.2.3",
+          "aggregated-from": "https://chromium.googlesource.com/chromiumos/third_party/rust_crates/+/refs/heads/main/cargo-vet/audits.toml?format=TEXT"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "google",
+        "section": "audits",
+        "name": "sha1",
+        "record": {
+          "who": "David Koloski <dkoloski@google.com>",
+          "criteria": "safe-to-deploy",
+          "version": "0.10.5",
+          "notes": "Reviewed on https://fxrev.dev/712371.",
+          "aggregated-from": "https://fuchsia.googlesource.com/fuchsia/+/refs/heads/main/third_party/rust_crates/supply-chain/audits.toml?format=TEXT"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "google",
+        "section": "audits",
+        "name": "static_assertions",
+        "record": {
+          "who": "Lukasz Anforowicz <lukasza@chromium.org>",
+          "criteria": "safe-to-deploy",
+          "version": "1.1.0",
+          "notes": "Grepped for `-i cipher`, `-i crypto`, `'\bfs\b'`, `'\bnet\b'`, `'\bunsafe\b'`\nand there were no hits except for one `unsafe`.\n\nThe lambda where `unsafe` is used is never invoked (e.g. the `unsafe` code\nnever runs) and is only introduced for some compile-time checks.  Additional\nunsafe review comments can be found in https://crrev.com/c/5353376.\n\nThis crate has been added to Chromium in https://crrev.com/c/3736562.  The CL\ndescription contains a link to a document with an additional security review.\n",
+          "aggregated-from": "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "google",
+        "section": "audits",
+        "name": "tinytemplate",
+        "record": {
+          "who": "Ying Hsu <yinghsu@chromium.org>",
+          "criteria": "safe-to-run",
+          "version": "1.2.1",
+          "aggregated-from": "https://chromium.googlesource.com/chromiumos/third_party/rust_crates/+/refs/heads/main/cargo-vet/audits.toml?format=TEXT"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "google",
+        "section": "audits",
+        "name": "wait-timeout",
+        "record": {
+          "who": "George Burgess IV <gbiv@google.com>",
+          "criteria": "safe-to-run",
+          "version": "0.2.0",
+          "aggregated-from": "https://chromium.googlesource.com/chromiumos/third_party/rust_crates/+/refs/heads/main/cargo-vet/audits.toml?format=TEXT"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "google",
+        "section": "audits",
+        "name": "winapi",
+        "record": {
+          "who": "danakj@chromium.org",
+          "criteria": "safe-to-run",
+          "version": "0.3.9",
+          "notes": "Reviewed in https://crrev.com/c/5171063\n\nPreviously reviewed during security review and the audit is grandparented in.\n",
+          "aggregated-from": "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "isrg",
+        "section": "audits",
+        "name": "alloca",
+        "record": {
+          "who": "David Cook <dcook@divviup.org>",
+          "criteria": "safe-to-run",
+          "version": "0.4.0"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "isrg",
+        "section": "audits",
+        "name": "chacha20",
+        "record": {
+          "who": "David Cook <dcook@divviup.org>",
+          "criteria": "safe-to-deploy",
+          "version": "0.10.0"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "isrg",
+        "section": "audits",
+        "name": "criterion",
+        "record": {
+          "who": "Tim Geoghegan <timg@divviup.org>",
+          "criteria": "safe-to-run",
+          "delta": "0.5.1 -> 0.6.0",
+          "notes": "No new unsafe code and nothing suspicious in build scripts."
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "isrg",
+        "section": "audits",
+        "name": "criterion",
+        "record": {
+          "who": "David Cook <dcook@divviup.org>",
+          "criteria": "safe-to-run",
+          "delta": "0.6.0 -> 0.7.0"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "isrg",
+        "section": "audits",
+        "name": "criterion",
+        "record": {
+          "who": "David Cook <dcook@divviup.org>",
+          "criteria": "safe-to-run",
+          "delta": "0.7.0 -> 0.8.0"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "isrg",
+        "section": "audits",
+        "name": "criterion",
+        "record": {
+          "who": "J.C. Jones <jc@divviup.org>",
+          "criteria": "safe-to-run",
+          "delta": "0.8.0 -> 0.8.1"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "isrg",
+        "section": "audits",
+        "name": "criterion",
+        "record": {
+          "who": "J.C. Jones <jc@divviup.org>",
+          "criteria": "safe-to-run",
+          "delta": "0.8.1 -> 0.8.2"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "isrg",
+        "section": "audits",
+        "name": "criterion-plot",
+        "record": {
+          "who": "J.C. Jones <jc@divviup.org>",
+          "criteria": "safe-to-run",
+          "version": "0.8.1"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "isrg",
+        "section": "audits",
+        "name": "criterion-plot",
+        "record": {
+          "who": "J.C. Jones <jc@divviup.org>",
+          "criteria": "safe-to-run",
+          "delta": "0.8.1 -> 0.8.2"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "isrg",
+        "section": "audits",
+        "name": "fiat-crypto",
+        "record": {
+          "who": "David Cook <dcook@divviup.org>",
+          "criteria": "safe-to-deploy",
+          "version": "0.1.17",
+          "notes": "This crate does not contain any unsafe code, and does not use any items from\nthe standard library or other crates, aside from operations backed by\n`std::ops`. All paths with array indexing use integer literals for indexes, so\nthere are no panics due to indexes out of bounds (as rustc would catch an\nout-of-bounds literal index). I did not check whether arithmetic overflows\ncould cause a panic, and I am relying on the Coq code having satisfied the\nnecessary preconditions to ensure panics due to overflows are unreachable.\n"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "isrg",
+        "section": "audits",
+        "name": "fiat-crypto",
+        "record": {
+          "who": "Brandon Pitman <bran@bran.land>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.1.17 -> 0.1.18"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "isrg",
+        "section": "audits",
+        "name": "fiat-crypto",
+        "record": {
+          "who": "David Cook <dcook@divviup.org>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.1.18 -> 0.1.19",
+          "notes": "This release renames many items and adds a new module. The code in the new\nmodule is entirely composed of arithmetic and array accesses.\n"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "isrg",
+        "section": "audits",
+        "name": "fiat-crypto",
+        "record": {
+          "who": "David Cook <dcook@divviup.org>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.1.19 -> 0.1.20"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "isrg",
+        "section": "audits",
+        "name": "fiat-crypto",
+        "record": {
+          "who": "David Cook <dcook@divviup.org>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.1.20 -> 0.2.0"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "isrg",
+        "section": "audits",
+        "name": "fiat-crypto",
+        "record": {
+          "who": "Brandon Pitman <bran@bran.land>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.2.0 -> 0.2.1"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "isrg",
+        "section": "audits",
+        "name": "fiat-crypto",
+        "record": {
+          "who": "Tim Geoghegan <timg@divviup.org>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.2.1 -> 0.2.2",
+          "notes": "No changes to `unsafe` code, or any functional changes that I can detect at all."
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "isrg",
+        "section": "audits",
+        "name": "fiat-crypto",
+        "record": {
+          "who": "Brandon Pitman <bran@bran.land>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.2.2 -> 0.2.4"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "isrg",
+        "section": "audits",
+        "name": "fiat-crypto",
+        "record": {
+          "who": "David Cook <dcook@divviup.org>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.2.4 -> 0.2.5"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "isrg",
+        "section": "audits",
+        "name": "fiat-crypto",
+        "record": {
+          "who": "Brandon Pitman <bran@bran.land>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.2.5 -> 0.2.6"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "isrg",
+        "section": "audits",
+        "name": "fiat-crypto",
+        "record": {
+          "who": "Brandon Pitman <bran@bran.land>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.2.6 -> 0.2.7"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "isrg",
+        "section": "audits",
+        "name": "fiat-crypto",
+        "record": {
+          "who": "David Cook <dcook@divviup.org>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.2.7 -> 0.2.8"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "isrg",
+        "section": "audits",
+        "name": "fiat-crypto",
+        "record": {
+          "who": "Tim Geoghegan <timg@divviup.org>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.2.8 -> 0.2.9",
+          "notes": "No changes to Rust code between 0.2.8 and 0.2.9"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "isrg",
+        "section": "audits",
+        "name": "hmac",
+        "record": {
+          "who": "David Cook <dcook@divviup.org>",
+          "criteria": "safe-to-deploy",
+          "version": "0.12.1"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "isrg",
+        "section": "audits",
+        "name": "page_size",
+        "record": {
+          "who": "David Cook <dcook@divviup.org>",
+          "criteria": "safe-to-run",
+          "version": "0.6.0"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "isrg",
+        "section": "audits",
+        "name": "rayon-core",
+        "record": {
+          "who": "Ameer Ghani <inahga@divviup.org>",
+          "criteria": "safe-to-deploy",
+          "version": "1.12.1"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "isrg",
+        "section": "audits",
+        "name": "rayon-core",
+        "record": {
+          "who": "David Cook <dcook@divviup.org>",
+          "criteria": "safe-to-deploy",
+          "delta": "1.12.1 -> 1.13.0"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "audits",
+        "name": "adler2",
+        "record": {
+          "who": "Erich Gubler <erichdongubler@gmail.com>",
+          "criteria": "safe-to-deploy",
+          "delta": "2.0.0 -> 2.0.1",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "audits",
+        "name": "ash",
+        "record": {
+          "who": "Jim Blandy <jimb@red-bean.com>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.37.0+1.3.209 -> 0.37.1+1.3.235",
+          "notes": "Nicolas Silva, Jim Blandy, and Teodor Tanasoaia audited ash master\nbranch commits from e43e9c0c to 6bd82768 inclusive.\n",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "audits",
+        "name": "ash",
+        "record": {
+          "who": "Nicolas Silva <nical@fastmail.com>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.37.1+1.3.235 -> 0.37.2+1.3.238",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "audits",
+        "name": "ash",
+        "record": {
+          "who": "Teodor Tanasoaia <ttanasoaia@mozilla.com>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.37.2+1.3.238 -> 0.37.3+1.3.251",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "audits",
+        "name": "ash",
+        "record": {
+          "who": "Erich Gubler <erichdongubler@gmail.com>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.37.3+1.3.251 -> 0.38.0+1.3.281",
+          "notes": "There are many sweeping changes to code generation that make this review intimidating, at first.\nHowever, I have audited all hand-written code, and vetted changes to the code generator (with some\nauditing of generated output to ensure correspondence to my mental model). Vulkan is an inherently\nunsafe API, but this crate makes many of the preparatory steps for calling Vulkan APIs safer and\neasier to use.\n",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "audits",
+        "name": "bit-set",
+        "record": {
+          "who": "Aria Beingessner <a.beingessner@gmail.com>",
+          "criteria": "safe-to-deploy",
+          "version": "0.5.2",
+          "notes": "Another crate I own via contain-rs that is ancient and maintenance mode, no known issues.",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "audits",
+        "name": "bit-set",
+        "record": {
+          "who": "Mike Hommey <mh+mozilla@glandium.org>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.5.2 -> 0.5.3",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "audits",
+        "name": "bit-set",
+        "record": {
+          "who": "Teodor Tanasoaia <ttanasoaia@mozilla.com>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.5.3 -> 0.6.0",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "audits",
+        "name": "bit-set",
+        "record": {
+          "who": "Jim Blandy <jimb@red-bean.com>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.6.0 -> 0.8.0",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "audits",
+        "name": "bit-set",
+        "record": {
+          "who": "Erich Gubler <erichdongubler@gmail.com>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.8.0 -> 0.9.1",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "audits",
+        "name": "bit-vec",
+        "record": {
+          "who": "Erich Gubler <erichdongubler@gmail.com>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.8.0 -> 0.9.1",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "audits",
+        "name": "block2",
+        "record": {
+          "who": "Andy Leiserson <aleiserson@mozilla.com>",
+          "criteria": "safe-to-deploy",
+          "version": "0.6.2",
+          "notes": "Contains unsafe code to interoperate with the ObjC runtime.",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "audits",
+        "name": "codespan-reporting",
+        "record": {
+          "who": "Erich Gubler <erichdongubler@gmail.com>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.11.1 -> 0.12.0",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "audits",
+        "name": "codespan-reporting",
+        "record": {
+          "who": "Erich Gubler <erichdongubler@gmail.com>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.12.0 -> 0.13.1",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "audits",
+        "name": "crunchy",
+        "record": {
+          "who": "Erich Gubler <erichdongubler@gmail.com>",
+          "criteria": "safe-to-deploy",
+          "version": "0.2.3",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "audits",
+        "name": "document-features",
+        "record": {
+          "who": "Erich Gubler <erichdongubler@gmail.com>",
+          "criteria": "safe-to-deploy",
+          "version": "0.2.8",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "audits",
+        "name": "document-features",
+        "record": {
+          "who": "Erich Gubler <erichdongubler@gmail.com>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.2.8 -> 0.2.9",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "audits",
+        "name": "document-features",
+        "record": {
+          "who": "Erich Gubler <erichdongubler@gmail.com>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.2.9 -> 0.2.10",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "audits",
+        "name": "document-features",
+        "record": {
+          "who": "Teodor Tanasoaia <ttanasoaia@mozilla.com>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.2.10 -> 0.2.11",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "audits",
+        "name": "form_urlencoded",
+        "record": {
+          "who": "Valentin Gosu <valentin.gosu@gmail.com>",
+          "criteria": "safe-to-deploy",
+          "version": "1.2.0",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "audits",
+        "name": "form_urlencoded",
+        "record": {
+          "who": "Valentin Gosu <valentin.gosu@gmail.com>",
+          "criteria": "safe-to-deploy",
+          "delta": "1.2.0 -> 1.2.1",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "audits",
+        "name": "form_urlencoded",
+        "record": {
+          "who": "edgul <ed.guloien@gmail.com>",
+          "criteria": "safe-to-deploy",
+          "delta": "1.2.1 -> 1.2.2",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "audits",
+        "name": "gpu-allocator",
+        "record": {
+          "who": "Erich Gubler <erichdongubler@gmail.com>",
+          "criteria": "safe-to-deploy",
+          "version": "0.25.0",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "audits",
+        "name": "gpu-allocator",
+        "record": {
+          "who": "Erich Gubler <erichdongubler@gmail.com>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.25.0 -> 0.26.0",
+          "notes": "New Metal backend is written with no `unsafe`. New `unsafe` usage of DX12's platform APIs appear correct and safe. Otherwise, minimal changes.",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "audits",
+        "name": "gpu-allocator",
+        "record": {
+          "who": "Jim Blandy <jimb@red-bean.com>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.26.0 -> 0.27.0",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "audits",
+        "name": "gpu-allocator",
+        "record": {
+          "who": "Erich Gubler <erichdongubler@gmail.com>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.27.0 -> 0.28.0",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "audits",
+        "name": "idna",
+        "record": {
+          "who": "Valentin Gosu <valentin.gosu@gmail.com>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.4.0 -> 0.5.0",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "audits",
+        "name": "idna",
+        "record": {
+          "who": "Henri Sivonen <hsivonen@hsivonen.fi>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.5.0 -> 1.0.2",
+          "notes": "In the 0.5.0 to 1.0.2 delta, I, Henri Sivonen, rewrote the non-Punycode internals of the crate and made the changes to the Punycode code.",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "audits",
+        "name": "idna",
+        "record": {
+          "who": "Valentin Gosu <valentin.gosu@gmail.com>",
+          "criteria": "safe-to-deploy",
+          "delta": "1.0.2 -> 1.0.3",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "audits",
+        "name": "idna",
+        "record": {
+          "who": "edgul <ed.guloien@gmail.com>",
+          "criteria": "safe-to-deploy",
+          "delta": "1.0.3 -> 1.1.0",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "audits",
+        "name": "objc2-core-foundation",
+        "record": {
+          "who": "Andy Leiserson <aleiserson@mozilla.com>",
+          "criteria": "safe-to-deploy",
+          "version": "0.3.2",
+          "notes": "Contains substantial unsafe code, as is typical for FFI.\n\nThe (non-published) `header-translator` crate that produces generated bindings\nin this crate was also reviewed, in lieu of a full review of the generated\nbindings.\n\nUsers of this crate should be aware of the information in\nhttps://github.com/madsmtm/objc2/blob/main/crates/objc2/src/topics/frameworks_soundness.md.\n",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "audits",
+        "name": "objc2-encode",
+        "record": {
+          "who": "Andy Leiserson <aleiserson@mozilla.com>",
+          "criteria": "safe-to-deploy",
+          "version": "4.1.0",
+          "notes": "Support library for objc2 with no unsafe code",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "audits",
+        "name": "objc2-foundation",
+        "record": {
+          "who": "Andy Leiserson <aleiserson@mozilla.com>",
+          "criteria": "safe-to-deploy",
+          "version": "0.3.2",
+          "notes": "Contains substantial unsafe code, as is typical for FFI.\n\nThe (non-published) `header-translator` crate that produces generated bindings\nin this crate was also reviewed, in lieu of a full review of the generated\nbindings.\n\nUsers of this crate should be aware of the information in\nhttps://github.com/madsmtm/objc2/blob/main/crates/objc2/src/topics/frameworks_soundness.md.\n",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "audits",
+        "name": "objc2-metal",
+        "record": {
+          "who": "Andy Leiserson <aleiserson@mozilla.com>",
+          "criteria": "safe-to-deploy",
+          "version": "0.3.2",
+          "notes": "Contains substantial unsafe code, as is typical for FFI.\n\nThe (non-published) `header-translator` crate that produces generated bindings\nin this crate was also reviewed, in lieu of a full review of the generated\nbindings.\n\nUsers of this crate should be aware of the information in\nhttps://github.com/madsmtm/objc2/blob/main/crates/objc2/src/topics/frameworks_soundness.md.\n",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "audits",
+        "name": "objc2-quartz-core",
+        "record": {
+          "who": "Andy Leiserson <aleiserson@mozilla.com>",
+          "criteria": "safe-to-deploy",
+          "version": "0.3.2",
+          "notes": "Contains substantial unsafe code, as is typical for FFI.\n\nThe (non-published) `header-translator` crate that produces generated bindings\nin this crate was also reviewed, in lieu of a full review of the generated\nbindings.\n\nUsers of this crate should be aware of the information in\nhttps://github.com/madsmtm/objc2/blob/main/crates/objc2/src/topics/frameworks_soundness.md.\n",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "audits",
+        "name": "oorandom",
+        "record": {
+          "who": "Jan-Erik Rediger <jrediger@mozilla.com>",
+          "criteria": "safe-to-run",
+          "version": "11.1.5",
+          "notes": "Small random number generator, explicitly not cryptographically secure, no use of unsafe code, no dependencies",
+          "aggregated-from": "https://raw.githubusercontent.com/mozilla/glean/main/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "audits",
+        "name": "percent-encoding",
+        "record": {
+          "who": "Valentin Gosu <valentin.gosu@gmail.com>",
+          "criteria": "safe-to-deploy",
+          "delta": "2.2.0 -> 2.3.0",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "audits",
+        "name": "percent-encoding",
+        "record": {
+          "who": "Valentin Gosu <valentin.gosu@gmail.com>",
+          "criteria": "safe-to-deploy",
+          "delta": "2.3.0 -> 2.3.1",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "audits",
+        "name": "percent-encoding",
+        "record": {
+          "who": "edgul <ed.guloien@gmail.com>",
+          "criteria": "safe-to-deploy",
+          "delta": "2.3.1 -> 2.3.2",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "audits",
+        "name": "quinn-udp",
+        "record": {
+          "who": "Max Inden <mail@max-inden.de>",
+          "criteria": "safe-to-deploy",
+          "version": "0.5.4",
+          "notes": "This is a small crate, providing safe wrappers around various low-level networking specific operating system features. Given that the Rust standard library does not provide safe wrappers for these low-level features, safe wrappers need to be build in the crate itself, i.e. `quinn-udp`, thus requiring `unsafe` code.",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "audits",
+        "name": "quinn-udp",
+        "record": {
+          "who": "Max Inden <mail@max-inden.de>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.5.4 -> 0.5.6",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "audits",
+        "name": "quinn-udp",
+        "record": {
+          "who": "Max Inden <mail@max-inden.de>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.5.6 -> 0.5.8",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "audits",
+        "name": "quinn-udp",
+        "record": {
+          "who": "Max Inden <mail@max-inden.de>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.5.8 -> 0.5.9",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "audits",
+        "name": "quinn-udp",
+        "record": {
+          "who": "Max Leonard Inden <mail@max-inden.de>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.5.9 -> 0.5.10",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "audits",
+        "name": "quinn-udp",
+        "record": {
+          "who": "Max Leonard Inden <mail@max-inden.de>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.5.10 -> 0.5.11",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "audits",
+        "name": "quinn-udp",
+        "record": {
+          "who": "Max Leonard Inden <mail@max-inden.de>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.5.11 -> 0.5.12",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "audits",
+        "name": "quinn-udp",
+        "record": {
+          "who": "Max Leonard Inden <mail@max-inden.de>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.5.12 -> 0.5.13",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "audits",
+        "name": "raw-window-handle",
+        "record": {
+          "who": "Jim Blandy <jimb@red-bean.com>",
+          "criteria": "safe-to-deploy",
+          "version": "0.5.0",
+          "notes": "I looked through all the sources of the v0.5.0 crate.",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "audits",
+        "name": "raw-window-handle",
+        "record": {
+          "who": "Mike Hommey <mh+mozilla@glandium.org>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.5.0 -> 0.5.2",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "audits",
+        "name": "raw-window-handle",
+        "record": {
+          "who": "Nicolas Silva <nical@fastmail.com>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.5.2 -> 0.6.0",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "audits",
+        "name": "raw-window-handle",
+        "record": {
+          "who": "Erich Gubler <erichdongubler@gmail.com>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.6.0 -> 0.6.2",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "audits",
+        "name": "raw-window-metal",
+        "record": {
+          "who": "Andy Leiserson <aleiserson@mozilla.com>",
+          "criteria": "safe-to-deploy",
+          "version": "1.1.0",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "audits",
+        "name": "rustc-hash",
+        "record": {
+          "who": "Bobby Holley <bobbyholley@gmail.com>",
+          "criteria": "safe-to-deploy",
+          "version": "1.1.0",
+          "notes": "Straightforward crate with no unsafe code, does what it says on the tin.",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "audits",
+        "name": "sharded-slab",
+        "record": {
+          "who": "Mark Hammond <mhammond@skippinet.com.au>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.1.4 -> 0.1.7",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "audits",
+        "name": "spirv",
+        "record": {
+          "who": "Erich Gubler <erichdongubler@gmail.com>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.3.0+sdk-1.3.268.0 -> 0.4.0+sdk-1.4.341.0",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "audits",
+        "name": "synstructure",
+        "record": {
+          "who": "Nika Layzell <nika@thelayzells.com>",
+          "criteria": "safe-to-deploy",
+          "version": "0.12.6",
+          "notes": "I am the primary author of the `synstructure` crate, and its current\nmaintainer. The one use of `unsafe` is unnecessary, but documented and\nharmless. It will be removed in the next version.\n",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "audits",
+        "name": "synstructure",
+        "record": {
+          "who": "Mike Hommey <mh+mozilla@glandium.org>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.12.6 -> 0.13.0",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "audits",
+        "name": "synstructure",
+        "record": {
+          "who": "Mike Hommey <mh+mozilla@glandium.org>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.13.0 -> 0.13.1",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "audits",
+        "name": "synstructure",
+        "record": {
+          "who": "Nika Layzell <nika@thelayzells.com>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.13.1 -> 0.13.2",
+          "aggregated-from": "https://raw.githubusercontent.com/mozilla/cargo-vet/main/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "audits",
+        "name": "wait-timeout",
+        "record": {
+          "who": "Jan-Erik Rediger <jrediger@mozilla.com>",
+          "criteria": "safe-to-run",
+          "delta": "0.2.0 -> 0.2.1",
+          "aggregated-from": "https://raw.githubusercontent.com/mozilla/glean/main/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "wildcard-audits",
+        "name": "unicode-segmentation",
+        "record": {
+          "who": "Manish Goregaokar <manishsmail@gmail.com>",
+          "criteria": "safe-to-deploy",
+          "user-id": 1139,
+          "start": "2019-05-15",
+          "end": "2027-04-23",
+          "notes": "All code written or reviewed by Manish",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "wildcard-audits",
+        "name": "unicode-width",
+        "record": {
+          "who": "Manish Goregaokar <manishsmail@gmail.com>",
+          "criteria": "safe-to-deploy",
+          "user-id": 1139,
+          "start": "2019-12-05",
+          "end": "2026-02-01",
+          "notes": "All code written or reviewed by Manish",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "mozilla",
+        "section": "wildcard-audits",
+        "name": "utf8_iter",
+        "record": {
+          "who": "Makoto Kato <m_kato@ga2.so-net.ne.jp>",
+          "criteria": "safe-to-deploy",
+          "user-id": 4484,
+          "start": "2022-04-19",
+          "end": "2024-06-16",
+          "notes": "Maintained by Henri Sivonen who works at Mozilla.",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "zcash",
+        "section": "audits",
+        "name": "arrayref",
+        "record": {
+          "who": "Daira-Emma Hopwood <daira@jacaranda.org>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.3.6 -> 0.3.8",
+          "aggregated-from": "https://raw.githubusercontent.com/zcash/zcash/master/qa/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "zcash",
+        "section": "audits",
+        "name": "arrayref",
+        "record": {
+          "who": "Jack Grigg <jack@electriccoin.co>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.3.8 -> 0.3.9",
+          "notes": "Changes to `unsafe` lines are to make some existing `unsafe fn`s `const`.",
+          "aggregated-from": "https://raw.githubusercontent.com/zcash/zcash/master/qa/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "zcash",
+        "section": "audits",
+        "name": "crunchy",
+        "record": {
+          "who": "Jack Grigg <jack@electriccoin.co>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.2.3 -> 0.2.4",
+          "notes": "Build script change is to fix a bug where a path separator for an included file\nwas being selected by the target OS instead of the host OS.\n",
+          "aggregated-from": "https://raw.githubusercontent.com/zcash/zcash/master/qa/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "zcash",
+        "section": "audits",
+        "name": "document-features",
+        "record": {
+          "who": "Jack Grigg <jack@electriccoin.co>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.2.11 -> 0.2.12",
+          "aggregated-from": "https://raw.githubusercontent.com/zcash/wallet/main/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "zcash",
+        "section": "audits",
+        "name": "http-body",
+        "record": {
+          "who": "Jack Grigg <jack@electriccoin.co>",
+          "criteria": "safe-to-deploy",
+          "delta": "1.0.0 -> 1.0.1",
+          "aggregated-from": "https://raw.githubusercontent.com/zcash/librustzcash/main/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "zcash",
+        "section": "audits",
+        "name": "quinn-udp",
+        "record": {
+          "who": "Jack Grigg <jack@electriccoin.co>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.5.13 -> 0.5.14",
+          "aggregated-from": "https://raw.githubusercontent.com/zcash/wallet/main/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "zcash",
+        "section": "audits",
+        "name": "thread_local",
+        "record": {
+          "who": "Jack Grigg <jack@z.cash>",
+          "criteria": "safe-to-deploy",
+          "delta": "1.1.4 -> 1.1.7",
+          "notes": "New `unsafe` usage:\n- An extra `deallocate_bucket`, to replace a `Mutex::lock` with a `compare_exchange`.\n- Setting and getting a `#[thread_local] static mut Option<Thread>` on nightly.\n",
+          "aggregated-from": "https://raw.githubusercontent.com/zcash/zcash/master/qa/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "zcash",
+        "section": "audits",
+        "name": "thread_local",
+        "record": {
+          "who": "Daira-Emma Hopwood <daira@jacaranda.org>",
+          "criteria": "safe-to-deploy",
+          "delta": "1.1.7 -> 1.1.8",
+          "notes": "Adds `unsafe` code that makes an assumption that `ptr::null_mut::<Entry<T>>()` is a valid representation\nof an `AtomicPtr<Entry<T>>`, but this is likely a correct assumption.\n",
+          "aggregated-from": "https://raw.githubusercontent.com/zcash/zcash/master/qa/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "zcash",
+        "section": "audits",
+        "name": "thread_local",
+        "record": {
+          "who": "Jack Grigg <jack@electriccoin.co>",
+          "criteria": "safe-to-deploy",
+          "delta": "1.1.8 -> 1.1.9",
+          "aggregated-from": "https://raw.githubusercontent.com/zcash/zcash/master/qa/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "zcash",
+        "section": "audits",
+        "name": "try-lock",
+        "record": {
+          "who": "Jack Grigg <jack@electriccoin.co>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.2.4 -> 0.2.5",
+          "notes": "Bumps MSRV to remove unsafe code block.",
+          "aggregated-from": "https://raw.githubusercontent.com/zcash/zcash/master/qa/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      },
+      {
+        "source": "zcash",
+        "section": "audits",
+        "name": "want",
+        "record": {
+          "who": "Jack Grigg <jack@electriccoin.co>",
+          "criteria": "safe-to-deploy",
+          "delta": "0.3.0 -> 0.3.1",
+          "notes": "Migrates to `try-lock 0.2.4` to replace some unsafe APIs that were not marked\n`unsafe` (but that were being used safely).\n",
+          "aggregated-from": "https://raw.githubusercontent.com/zcash/zcash/master/qa/supply-chain/audits.toml"
+        },
+        "still_in_live": true
+      }
+    ]
+  },
+  "refreshed": {
+    "total": 275,
+    "missing_or_changed_in_live": [],
+    "omitted_by_fresh_graph_filter": []
+  }
+}

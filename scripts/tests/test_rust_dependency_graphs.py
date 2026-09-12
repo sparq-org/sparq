@@ -96,20 +96,46 @@ class GraphCoverage(unittest.TestCase):
 
     def test_path_patch_does_not_silently_bypass_upstream_audit(self):
         (self.root / "vendor/zk-sdk").mkdir(parents=True)
-        (self.root / "vendor/zk-sdk/UPSTREAM.json").write_text(json.dumps({"packages": [{"name": "patched"}]}))
+        metadata = self.root / "vendor/zk-sdk/UPSTREAM.json"
+        packages = [{"name": name, "version": version} for name, version in gate.SDK_PATCHES.items()]
+        metadata.write_text(json.dumps({"packages": packages}))
         (self.root / "supply-chain").mkdir()
         config = self.root / "supply-chain/config.toml"
-        config.write_text("[policy]\n")
-        with self.assertRaisesRegex(ValueError, "explicit upstream audit policy"):
-            gate.patch_policy(self.root)
-        config.write_text("[policy.patched]\naudit-as-crates-io = false\n")
-        with self.assertRaisesRegex(ValueError, "explicit upstream audit policy"):
-            gate.patch_policy(self.root)
-        config.write_text("[policy.patched]\naudit-as-crates-io = true\n")
+        policy = "".join(f"[policy.{name}]\naudit-as-crates-io = true\n" for name in gate.SDK_PATCHES)
+        for name in gate.SDK_PATCHES:
+            for replacement in ["", f"[policy.{name}]\naudit-as-crates-io = false\n"]:
+                with self.subTest(name=name, replacement=replacement):
+                    config.write_text(policy.replace(f"[policy.{name}]\naudit-as-crates-io = true\n", replacement))
+                    with patch.object(gate.subprocess, "run") as run:
+                        with self.assertRaisesRegex(ValueError, "explicit upstream audit policy"):
+                            gate.patch_policy(self.root)
+                        run.assert_not_called()
+        config.write_text(policy)
         with patch.object(gate.subprocess, "run") as run:
             gate.patch_policy(self.root)
             self.assertEqual(run.call_args.args[0][-1], "vendor/zk-sdk/verify.py")
             self.assertTrue(run.call_args.kwargs["check"])
+        for invalid in [[], packages[:-1], packages + [packages[0]],
+                        packages[:-1] + [{**packages[-1], "version": "0.0.0"}]]:
+            with self.subTest(invalid=invalid):
+                metadata.write_text(json.dumps({"packages": invalid}))
+                with self.assertRaisesRegex(ValueError, "six pinned packages"):
+                    gate.patch_policy(self.root)
+
+    def test_committed_six_host_four_guest_patch_inventory(self):
+        metadata = json.loads((REPO / "vendor/zk-sdk/UPSTREAM.json").read_text())
+        self.assertEqual({p["name"]: p["version"] for p in metadata["packages"]}, gate.SDK_PATCHES)
+        for manifest in gate.MANIFESTS[1:]:
+            lock = gate.tomllib.loads((REPO / manifest.with_name("Cargo.lock")).read_text())
+            selected = {p["name"]: p for p in lock["package"] if p["name"] in gate.SDK_PATCHES}
+            expected = set(gate.SDK_PATCHES)
+            if "methods/guest" in str(manifest):
+                expected -= {"risc0-build", "rzup"}
+            self.assertEqual(set(selected), expected)
+            for name, package in selected.items():
+                self.assertEqual(package["version"], gate.SDK_PATCHES[name])
+                self.assertNotIn("source", package)
+                self.assertNotIn("checksum", package)
 
     def test_workflow_selector_and_watchdog_cover_nested_locks(self):
         workflow = (REPO / ".github/workflows/supply-chain.yml").read_text()
@@ -120,6 +146,8 @@ class GraphCoverage(unittest.TestCase):
             self.assertIn(f"scripts/rust-dependency-graphs.py {action}", workflow)
         self.assertIn("verify.py --smoke", workflow)
         self.assertIn("verify.py --feature-matrix", workflow)
+        self.assertIn("python3 vendor/zk-sdk/tests/test_provenance.py", workflow)
+        self.assertIn("python3 vendor/zk-sdk/edge_matrix.py", workflow)
         # A producer failure must not disappear inside Bash process substitution.
         self.assertIn('sbom-paths > "$RUNNER_TEMP/rust-sbom-paths"', workflow)
         self.assertNotIn("<(python3 scripts/rust-dependency-graphs.py", workflow)

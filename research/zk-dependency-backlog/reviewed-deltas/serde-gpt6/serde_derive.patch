@@ -1,0 +1,1121 @@
+diff -ruN old/.cargo_vcs_info.json new/.cargo_vcs_info.json
+--- old/.cargo_vcs_info.json	2026-09-12 22:35:17
++++ new/.cargo_vcs_info.json	2026-09-12 22:35:18
+@@ -1,6 +1,6 @@
+ {
+   "git": {
+-    "sha1": "a866b336f14aa57a07f0d0be9f8762746e64ecb4"
++    "sha1": "7fc3b4c30c94f73a96ebd1553f2b090d928fc3a8"
+   },
+   "path_in_vcs": "serde_derive"
+ }
+\ No newline at end of file
+diff -ruN old/Cargo.lock new/Cargo.lock
+--- old/Cargo.lock	2026-09-12 22:35:17
++++ new/Cargo.lock	2026-09-12 22:35:18
+@@ -4,66 +4,66 @@
+ 
+ [[package]]
+ name = "proc-macro2"
+-version = "1.0.101"
++version = "1.0.106"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "89ae43fd86e4158d6db51ad8e2b80f313af9cc74f5c0e03ccb87de09998732de"
++checksum = "8fd00f0bb2e90d81d1044c2b32617f68fcb9fa3bb7640c23e9c748e53fb30934"
+ dependencies = [
+  "unicode-ident",
+ ]
+ 
+ [[package]]
+ name = "quote"
+-version = "1.0.40"
++version = "1.0.46"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "1885c039570dc00dcb4ff087a89e185fd56bae234ddc7f056a945bf36467248d"
++checksum = "dfbc457d0c7a0759a614551b11a6409e5951f6c7537be1f1b7682b9ae9230368"
+ dependencies = [
+  "proc-macro2",
+ ]
+ 
+ [[package]]
+ name = "serde"
+-version = "1.0.227"
++version = "1.0.228"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "80ece43fc6fbed4eb5392ab50c07334d3e577cbf40997ee896fe7af40bba4245"
++checksum = "9a8e94ea7f378bd32cbbd37198a4a91436180c5bb472411e48b5ec2e2124ae9e"
+ dependencies = [
+  "serde_core",
+ ]
+ 
+ [[package]]
+ name = "serde_core"
+-version = "1.0.227"
++version = "1.0.228"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "7a576275b607a2c86ea29e410193df32bc680303c82f31e275bbfcafe8b33be5"
++checksum = "41d385c7d4ca58e59fc732af25c3983b67ac852c1a25000afe1175de458b67ad"
+ dependencies = [
+- "serde_derive 1.0.227",
++ "serde_derive 1.0.228",
+ ]
+ 
+ [[package]]
+ name = "serde_derive"
+-version = "1.0.227"
++version = "1.0.228"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "51e694923b8824cf0e9b382adf0f60d4e05f348f357b38833a3fa5ed7c2ede04"
++checksum = "d540f220d3187173da220f885ab66608367b6574e925011a9353e4badda91d79"
+ dependencies = [
+  "proc-macro2",
+  "quote",
+- "syn",
++ "syn 2.0.119",
+ ]
+ 
+ [[package]]
+ name = "serde_derive"
+-version = "1.0.228"
++version = "1.0.229"
+ dependencies = [
+  "proc-macro2",
+  "quote",
+  "serde",
+- "syn",
++ "syn 3.0.0",
+ ]
+ 
+ [[package]]
+ name = "syn"
+-version = "2.0.106"
++version = "2.0.119"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "ede7c438028d4436d71104916910f5bb611972c5cfd7f89b8300a8186e6fada6"
++checksum = "872831b642d1a07999a962a351ed35b955ea2cfc8f3862091e2a240a84f17297"
+ dependencies = [
+  "proc-macro2",
+  "quote",
+@@ -71,7 +71,18 @@
+ ]
+ 
+ [[package]]
++name = "syn"
++version = "3.0.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "f2fac314a64dc9a36e61a9eb4261a5e9bbfbc922b27e518af97bc32b926cf967"
++dependencies = [
++ "proc-macro2",
++ "quote",
++ "unicode-ident",
++]
++
++[[package]]
+ name = "unicode-ident"
+-version = "1.0.19"
++version = "1.0.24"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "f63a545481291138910575129486daeaf8ac54aee4387fe7906919f7830c7d9d"
++checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
+diff -ruN old/Cargo.toml new/Cargo.toml
+--- old/Cargo.toml	2026-09-12 22:35:17
++++ new/Cargo.toml	2026-09-12 22:35:18
+@@ -11,9 +11,9 @@
+ 
+ [package]
+ edition = "2021"
+-rust-version = "1.61"
++rust-version = "1.71"
+ name = "serde_derive"
+-version = "1.0.228"
++version = "1.0.229"
+ authors = [
+     "Erick Tryzelaar <erick.tryzelaar@gmail.com>",
+     "David Tolnay <dtolnay@gmail.com>",
+@@ -73,7 +73,7 @@
+ default-features = false
+ 
+ [dependencies.syn]
+-version = "2.0.81"
++version = "3"
+ features = [
+     "clone-impls",
+     "derive",
+diff -ruN old/Cargo.toml.orig new/Cargo.toml.orig
+--- old/Cargo.toml.orig	2026-09-12 22:35:17
++++ new/Cargo.toml.orig	2026-09-12 22:35:18
+@@ -1,6 +1,6 @@
+ [package]
+ name = "serde_derive"
+-version = "1.0.228"
++version = "1.0.229"
+ authors = ["Erick Tryzelaar <erick.tryzelaar@gmail.com>", "David Tolnay <dtolnay@gmail.com>"]
+ categories = ["no-std", "no-std::no-alloc"]
+ description = "Macros 1.1 implementation of #[derive(Serialize, Deserialize)]"
+@@ -12,7 +12,7 @@
+ license = "MIT OR Apache-2.0"
+ readme = "crates-io.md"
+ repository = "https://github.com/serde-rs/serde"
+-rust-version = "1.61"
++rust-version = "1.71"
+ 
+ [features]
+ default = []
+diff -ruN old/README.md new/README.md
+--- old/README.md	2026-09-12 22:35:17
++++ new/README.md	2026-09-12 22:35:18
+@@ -1,4 +1,4 @@
+-# Serde &emsp; [![Build Status]][actions] [![Latest Version]][crates.io] [![serde msrv]][Rust 1.56] [![serde_derive msrv]][Rust 1.61]
++# Serde &emsp; [![Build Status]][actions] [![Latest Version]][crates.io] [![serde msrv]][Rust 1.56] [![serde_derive msrv]][Rust 1.71]
+ 
+ [Build Status]: https://img.shields.io/github/actions/workflow/status/serde-rs/serde/ci.yml?branch=master
+ [actions]: https://github.com/serde-rs/serde/actions?query=branch%3Amaster
+@@ -6,8 +6,8 @@
+ [crates.io]: https://crates.io/crates/serde
+ [serde msrv]: https://img.shields.io/crates/msrv/serde.svg?label=serde%20msrv&color=lightgray
+ [serde_derive msrv]: https://img.shields.io/crates/msrv/serde_derive.svg?label=serde_derive%20msrv&color=lightgray
+-[Rust 1.56]: https://blog.rust-lang.org/2021/10/21/Rust-1.56.0.html
+-[Rust 1.61]: https://blog.rust-lang.org/2022/05/19/Rust-1.61.0.html
++[Rust 1.56]: https://blog.rust-lang.org/2021/10/21/Rust-1.56.0/
++[Rust 1.71]: https://blog.rust-lang.org/2023/07/13/Rust-1.71.0/
+ 
+ **Serde is a framework for *ser*ializing and *de*serializing Rust data structures efficiently and generically.**
+ 
+diff -ruN old/src/bound.rs new/src/bound.rs
+--- old/src/bound.rs	2026-09-12 22:35:17
++++ new/src/bound.rs	2026-09-12 22:35:18
+@@ -15,7 +15,6 @@
+             .iter()
+             .map(|param| match param {
+                 syn::GenericParam::Type(param) => syn::GenericParam::Type(syn::TypeParam {
+-                    eq_token: None,
+                     default: None,
+                     ..param.clone()
+                 }),
+@@ -31,11 +30,12 @@
+     predicates: &[syn::WherePredicate],
+ ) -> syn::Generics {
+     let mut generics = generics.clone();
++    let dst_predicates = &mut generics.make_where_clause().predicates;
++
++    for predicate in predicates {
++        dst_predicates.push(predicate.clone());
++    }
+     generics
+-        .make_where_clause()
+-        .predicates
+-        .extend(predicates.iter().cloned());
+-    generics
+ }
+ 
+ pub fn with_where_predicates_from_fields(
+@@ -43,14 +43,17 @@
+     generics: &syn::Generics,
+     from_field: fn(&attr::Field) -> Option<&[syn::WherePredicate]>,
+ ) -> syn::Generics {
+-    let predicates = cont
+-        .data
+-        .all_fields()
+-        .filter_map(|field| from_field(&field.attrs))
+-        .flat_map(<[syn::WherePredicate]>::to_vec);
+-
+     let mut generics = generics.clone();
+-    generics.make_where_clause().predicates.extend(predicates);
++    let dst_predicates = &mut generics.make_where_clause().predicates;
++
++    for field in cont.data.all_fields() {
++        let Some(predicate_slice) = from_field(&field.attrs) else {
++            continue;
++        };
++        for inner_predicate in predicate_slice {
++            dst_predicates.push(inner_predicate.clone());
++        }
++    }
+     generics
+ }
+ 
+@@ -65,14 +68,17 @@
+             return generics.clone();
+         }
+     };
+-
+-    let predicates = variants
+-        .iter()
+-        .filter_map(|variant| from_variant(&variant.attrs))
+-        .flat_map(<[syn::WherePredicate]>::to_vec);
+-
+     let mut generics = generics.clone();
+-    generics.make_where_clause().predicates.extend(predicates);
++    let dst_predicates = &mut generics.make_where_clause().predicates;
++
++    for variant in variants {
++        let Some(predicate_slice) = from_variant(&variant.attrs) else {
++            continue;
++        };
++        for inner_predicate in predicate_slice {
++            dst_predicates.push(inner_predicate.clone());
++        }
++    }
+     generics
+ }
+ 
+@@ -146,7 +152,7 @@
+             match ty {
+                 #![cfg_attr(all(test, exhaustive), deny(non_exhaustive_omitted_patterns))]
+                 syn::Type::Array(ty) => self.visit_type(&ty.elem),
+-                syn::Type::BareFn(ty) => {
++                syn::Type::FnPtr(ty) => {
+                     for arg in &ty.inputs {
+                         self.visit_type(&arg.ty);
+                     }
+@@ -209,7 +215,7 @@
+                 }
+                 syn::PathArguments::Parenthesized(arguments) => {
+                     for argument in &arguments.inputs {
+-                        self.visit_type(argument);
++                        self.visit_type(&argument.ty);
+                     }
+                     self.visit_return_type(&arguments.output);
+                 }
+@@ -256,57 +262,68 @@
+     match &cont.data {
+         Data::Enum(variants) => {
+             for variant in variants {
+-                let relevant_fields = variant
+-                    .fields
+-                    .iter()
+-                    .filter(|field| filter(&field.attrs, Some(&variant.attrs)));
+-                for field in relevant_fields {
+-                    visitor.visit_field(field.original);
++                for field in &variant.fields {
++                    if filter(&field.attrs, Some(&variant.attrs)) {
++                        visitor.visit_field(field.original);
++                    }
+                 }
+             }
+         }
+         Data::Struct(_, fields) => {
+-            for field in fields.iter().filter(|field| filter(&field.attrs, None)) {
+-                visitor.visit_field(field.original);
++            for field in fields {
++                if filter(&field.attrs, None) {
++                    visitor.visit_field(field.original);
++                }
+             }
+         }
+     }
+ 
+     let relevant_type_params = visitor.relevant_type_params;
+     let associated_type_usage = visitor.associated_type_usage;
+-    let new_predicates = generics
+-        .type_params()
+-        .map(|param| param.ident.clone())
+-        .filter(|id| relevant_type_params.contains(id))
+-        .map(|id| syn::TypePath {
+-            qself: None,
+-            path: id.into(),
+-        })
+-        .chain(associated_type_usage.into_iter().cloned())
+-        .map(|bounded_ty| {
+-            syn::WherePredicate::Type(syn::PredicateType {
+-                lifetimes: None,
+-                // the type parameter that is being bounded e.g. T
+-                bounded_ty: syn::Type::Path(bounded_ty),
+-                colon_token: <Token![:]>::default(),
+-                // the bound e.g. Serialize
+-                bounds: vec![syn::TypeParamBound::Trait(syn::TraitBound {
++
++    fn make_where_bounded_type(
++        bounded_ty: syn::TypePath,
++        bound: &syn::Path,
++    ) -> syn::WherePredicate {
++        syn::WherePredicate::Type(syn::PredicateType {
++            attrs: Vec::new(),
++            lifetimes: None,
++            // the type parameter that is being bounded e.g. T
++            bounded_ty: syn::Type::Path(bounded_ty),
++            colon_token: <Token![:]>::default(),
++            // the bound e.g. Serialize
++            bounds: {
++                let mut punct = Punctuated::new();
++                punct.push(syn::TypeParamBound::Trait(syn::TraitBound {
+                     paren_token: None,
+-                    modifier: syn::TraitBoundModifier::None,
+                     lifetimes: None,
++                    modifiers: syn::TraitBoundModifiers::default(),
++                    maybe: None,
+                     path: bound.clone(),
+-                })]
+-                .into_iter()
+-                .collect(),
+-            })
+-        });
++                }));
++                punct
++            },
++        })
++    }
+ 
+-    let mut generics = generics.clone();
+-    generics
+-        .make_where_clause()
+-        .predicates
+-        .extend(new_predicates);
+-    generics
++    let mut dst_generics = generics.clone();
++    let dst_predicates = &mut dst_generics.make_where_clause().predicates;
++    for param in generics.type_params() {
++        let id = &param.ident;
++        if !relevant_type_params.contains(id) {
++            continue;
++        }
++        let bounded_ty = syn::TypePath {
++            attrs: Vec::new(),
++            qself: None,
++            path: id.clone().into(),
++        };
++        dst_predicates.push(make_where_bounded_type(bounded_ty, bound));
++    }
++    for bounded_ty in associated_type_usage {
++        dst_predicates.push(make_where_bounded_type(bounded_ty.clone(), bound));
++    }
++    dst_generics
+ }
+ 
+ pub fn with_self_bound(
+@@ -319,6 +336,7 @@
+         .make_where_clause()
+         .predicates
+         .push(syn::WherePredicate::Type(syn::PredicateType {
++            attrs: Vec::new(),
+             lifetimes: None,
+             // the type that is being bounded e.g. MyStruct<'a, T>
+             bounded_ty: type_of_item(cont),
+@@ -326,8 +344,9 @@
+             // the bound e.g. Default
+             bounds: vec![syn::TypeParamBound::Trait(syn::TraitBound {
+                 paren_token: None,
+-                modifier: syn::TraitBoundModifier::None,
+                 lifetimes: None,
++                modifiers: syn::TraitBoundModifiers::default(),
++                maybe: None,
+                 path: bound.clone(),
+             })]
+             .into_iter()
+@@ -371,6 +390,7 @@
+ 
+ fn type_of_item(cont: &Container) -> syn::Type {
+     syn::Type::Path(syn::TypePath {
++        attrs: Vec::new(),
+         qself: None,
+         path: syn::Path {
+             leading_colon: None,
+@@ -387,6 +407,7 @@
+                             .map(|param| match param {
+                                 syn::GenericParam::Type(param) => {
+                                     syn::GenericArgument::Type(syn::Type::Path(syn::TypePath {
++                                        attrs: Vec::new(),
+                                         qself: None,
+                                         path: param.ident.clone().into(),
+                                     }))
+diff -ruN old/src/de/enum_adjacently.rs new/src/de/enum_adjacently.rs
+--- old/src/de/enum_adjacently.rs	2026-09-12 22:35:17
++++ new/src/de/enum_adjacently.rs	2026-09-12 22:35:18
+@@ -31,20 +31,19 @@
+ 
+     let (variants_stmt, variant_visitor) = enum_::prepare_enum_variant_enum(variants);
+ 
+-    let variant_arms: &Vec<_> = &variants
+-        .iter()
+-        .enumerate()
+-        .filter(|&(_, variant)| !variant.attrs.skip_deserializing())
+-        .map(|(i, variant)| {
+-            let variant_index = field_i(i);
++    let mut variant_arms = Vec::new();
++    for (i, variant) in variants.iter().enumerate() {
++        if variant.attrs.skip_deserializing() {
++            continue;
++        }
++        let variant_index = field_i(i);
+ 
+-            let block = Match(enum_untagged::deserialize_variant(params, variant, cattrs));
++        let block = Match(enum_untagged::deserialize_variant(params, variant, cattrs));
+ 
+-            quote! {
+-                __Field::#variant_index => #block
+-            }
+-        })
+-        .collect();
++        variant_arms.push(quote! {
++            __Field::#variant_index => #block
++        });
++    }
+ 
+     let rust_name = params.type_name();
+     let expecting = format!("adjacently tagged enum {}", rust_name);
+@@ -64,35 +63,35 @@
+         _serde::#private::Err(<__A::Error as _serde::de::Error>::missing_field(#content))
+     };
+     let mut missing_content_fallthrough = quote!();
+-    let missing_content_arms = variants
+-        .iter()
+-        .enumerate()
+-        .filter(|&(_, variant)| !variant.attrs.skip_deserializing())
+-        .filter_map(|(i, variant)| {
+-            let variant_index = field_i(i);
+-            let variant_ident = &variant.ident;
++    let mut missing_content_arms = Vec::new();
++    for (i, variant) in variants.iter().enumerate() {
++        if variant.attrs.skip_deserializing() {
++            continue;
++        }
++        let variant_index = field_i(i);
++        let variant_ident = &variant.ident;
+ 
+-            let arm = match variant.style {
+-                Style::Unit => quote! {
+-                    _serde::#private::Ok(#this_value::#variant_ident)
+-                },
+-                Style::Newtype if variant.attrs.deserialize_with().is_none() => {
+-                    let span = variant.original.span();
+-                    let func = quote_spanned!(span=> _serde::#private::de::missing_field);
+-                    quote! {
+-                        #func(#content).map(#this_value::#variant_ident)
+-                    }
++        let arm = match variant.style {
++            Style::Unit => quote! {
++                _serde::#private::Ok(#this_value::#variant_ident)
++            },
++            Style::Newtype if variant.attrs.deserialize_with().is_none() => {
++                let span = variant.original.span();
++                let func = quote_spanned!(span=> _serde::#private::de::missing_field);
++                quote! {
++                    #func(#content).map(#this_value::#variant_ident)
+                 }
+-                _ => {
+-                    missing_content_fallthrough = quote!(_ => #missing_content);
+-                    return None;
+-                }
+-            };
+-            Some(quote! {
+-                __Field::#variant_index => #arm,
+-            })
+-        })
+-        .collect::<Vec<_>>();
++            }
++            _ => {
++                missing_content_fallthrough = quote!(_ => #missing_content);
++                continue;
++            }
++        };
++        missing_content_arms.push(quote! {
++            __Field::#variant_index => #arm,
++        });
++    }
++
+     if !missing_content_arms.is_empty() {
+         missing_content = quote! {
+             match __field {
+@@ -282,8 +281,8 @@
+                 __A: _serde::de::SeqAccess<#delife>,
+             {
+                 // Visit the first element - the tag.
+-                match _serde::de::SeqAccess::next_element(&mut __seq)? {
+-                    _serde::#private::Some(__variant) => {
++                match _serde::de::SeqAccess::next_element(&mut __seq) {
++                    _serde::#private::Ok(_serde::#private::Some(__variant)) => {
+                         // Visit the second element - the content.
+                         match _serde::de::SeqAccess::next_element_seed(
+                             &mut __seq,
+@@ -292,18 +291,20 @@
+                                 marker: _serde::#private::PhantomData,
+                                 lifetime: _serde::#private::PhantomData,
+                             },
+-                        )? {
+-                            _serde::#private::Some(__ret) => _serde::#private::Ok(__ret),
++                        ) {
++                            _serde::#private::Ok(_serde::#private::Some(__ret)) => _serde::#private::Ok(__ret),
+                             // There is no second element.
+-                            _serde::#private::None => {
++                            _serde::#private::Ok(_serde::#private::None) => {
+                                 _serde::#private::Err(_serde::de::Error::invalid_length(1, &self))
+                             }
++                            _serde::#private::Err(__err) => _serde::#private::Err(__err),
+                         }
+                     }
+                     // There is no first element.
+-                    _serde::#private::None => {
++                    _serde::#private::Ok(_serde::#private::None) => {
+                         _serde::#private::Err(_serde::de::Error::invalid_length(0, &self))
+                     }
++                    _serde::#private::Err(__err) => _serde::#private::Err(__err),
+                 }
+             }
+         }
+diff -ruN old/src/de/enum_externally.rs new/src/de/enum_externally.rs
+--- old/src/de/enum_externally.rs	2026-09-12 22:35:17
++++ new/src/de/enum_externally.rs	2026-09-12 22:35:18
+@@ -49,7 +49,7 @@
+             ));
+ 
+             quote! {
+-                (__Field::#variant_name, __variant) => #block
++                _serde::#private::Ok((__Field::#variant_name, __variant)) => #block
+             }
+         });
+ 
+@@ -69,8 +69,9 @@
+         }
+     } else {
+         quote! {
+-            match _serde::de::EnumAccess::variant(__data)? {
++            match _serde::de::EnumAccess::variant(__data) {
+                 #(#variant_arms)*
++                _serde::#private::Err(__err) => _serde::#private::Err(__err),
+             }
+         }
+     };
+diff -ruN old/src/de.rs new/src/de.rs
+--- old/src/de.rs	2026-09-12 22:35:17
++++ new/src/de.rs	2026-09-12 22:35:18
+@@ -26,9 +26,9 @@
+     replace_receiver(input);
+ 
+     let ctxt = Ctxt::new();
+-    let cont = match Container::from_ast(&ctxt, input, Derive::Deserialize, &private.ident()) {
+-        Some(cont) => cont,
+-        None => return Err(ctxt.check().unwrap_err()),
++    let Some(cont) = Container::from_ast(&ctxt, input, Derive::Deserialize, &private.ident())
++    else {
++        return Err(ctxt.check().unwrap_err());
+     };
+     precondition(&ctxt, &cont);
+     ctxt.check()?;
+@@ -594,13 +594,16 @@
+                     let (wrapper, wrapper_ty) = wrap_deserialize_field_with(params, field.ty, path);
+                     quote!({
+                         #wrapper
+-                        match _serde::de::SeqAccess::next_element::<#wrapper_ty>(&mut __seq)? {
+-                            _serde::#private::Some(__wrap) => {
++                        match _serde::de::SeqAccess::next_element::<#wrapper_ty>(&mut __seq) {
++                            _serde::#private::Ok(_serde::#private::Some(__wrap)) => {
+                                 self.place.#member = __wrap.value;
+                             }
+-                            _serde::#private::None => {
++                            _serde::#private::Ok(_serde::#private::None) => {
+                                 #value_if_none;
+                             }
++                            _serde::#private::Err(__err) => {
++                                return _serde::#private::Err(__err);
++                            }
+                         }
+                     })
+                 }
+@@ -652,7 +655,7 @@
+     aliases: &'a BTreeSet<Name>,
+ }
+ 
+-fn field_i(i: usize) -> Ident {
++pub(crate) fn field_i(i: usize) -> Ident {
+     Ident::new(&format!("__field{}", i), Span::call_site())
+ }
+ 
+diff -ruN old/src/internals/ast.rs new/src/internals/ast.rs
+--- old/src/internals/ast.rs	2026-09-12 22:35:17
++++ new/src/internals/ast.rs	2026-09-12 22:35:18
+@@ -202,17 +202,24 @@
+     container_default: &attr::Default,
+     private: &Ident,
+ ) -> Vec<Field<'a>> {
+-    fields
+-        .iter()
+-        .enumerate()
+-        .map(|(i, field)| Field {
++    let mut dst_fields = Vec::with_capacity(fields.len());
++    for field in fields {
++        dst_fields.push(Field {
+             member: match &field.ident {
+                 Some(ident) => syn::Member::Named(ident.clone()),
+-                None => syn::Member::Unnamed(i.into()),
++                None => syn::Member::Unnamed(dst_fields.len().into()),
+             },
+-            attrs: attr::Field::from_ast(cx, i, field, attrs, container_default, private),
++            attrs: attr::Field::from_ast(
++                cx,
++                dst_fields.len(),
++                field,
++                attrs,
++                container_default,
++                private,
++            ),
+             ty: &field.ty,
+             original: field,
+-        })
+-        .collect()
++        });
++    }
++    dst_fields
+ }
+diff -ruN old/src/internals/attr.rs new/src/internals/attr.rs
+--- old/src/internals/attr.rs	2026-09-12 22:35:17
++++ new/src/internals/attr.rs	2026-09-12 22:35:18
+@@ -1185,13 +1185,11 @@
+             }
+         }
+ 
+-        // Is skip_deserializing, initialize the field to Default::default() unless a
++        // If skip_deserializing, initialize the field to Default::default() unless a
+         // different default is specified by `#[serde(default = "...")]` on
+         // ourselves or our container (e.g. the struct we are in).
+-        if let Default::None = *container_default {
+-            if skip_deserializing.0.value.is_some() {
+-                default.set_if_none(Default::Default);
+-            }
++        if container_default.is_none() && skip_deserializing.0.value.is_some() {
++            default.set_if_none(Default::Default);
+         }
+ 
+         let mut borrowed_lifetimes = borrowed_lifetimes.get().unwrap_or_default();
+@@ -1459,9 +1457,8 @@
+     attr_name: Symbol,
+     meta: &ParseNestedMeta,
+ ) -> syn::Result<Option<syn::Path>> {
+-    let string = match get_lit_str(cx, attr_name, meta)? {
+-        Some(string) => string,
+-        None => return Ok(None),
++    let Some(string) = get_lit_str(cx, attr_name, meta)? else {
++        return Ok(None);
+     };
+ 
+     Ok(match string.parse() {
+@@ -1481,9 +1478,8 @@
+     attr_name: Symbol,
+     meta: &ParseNestedMeta,
+ ) -> syn::Result<Option<syn::ExprPath>> {
+-    let string = match get_lit_str(cx, attr_name, meta)? {
+-        Some(string) => string,
+-        None => return Ok(None),
++    let Some(string) = get_lit_str(cx, attr_name, meta)? else {
++        return Ok(None);
+     };
+ 
+     Ok(match string.parse() {
+@@ -1504,9 +1500,8 @@
+     meta_item_name: Symbol,
+     meta: &ParseNestedMeta,
+ ) -> syn::Result<Vec<syn::WherePredicate>> {
+-    let string = match get_lit_str2(cx, attr_name, meta_item_name, meta)? {
+-        Some(string) => string,
+-        None => return Ok(Vec::new()),
++    let Some(string) = get_lit_str2(cx, attr_name, meta_item_name, meta)? else {
++        return Ok(Vec::new());
+     };
+ 
+     Ok(
+@@ -1525,9 +1520,8 @@
+     attr_name: Symbol,
+     meta: &ParseNestedMeta,
+ ) -> syn::Result<Option<syn::Type>> {
+-    let string = match get_lit_str(cx, attr_name, meta)? {
+-        Some(string) => string,
+-        None => return Ok(None),
++    let Some(string) = get_lit_str(cx, attr_name, meta)? else {
++        return Ok(None);
+     };
+ 
+     Ok(match string.parse() {
+@@ -1548,9 +1542,8 @@
+     cx: &Ctxt,
+     meta: &ParseNestedMeta,
+ ) -> syn::Result<BTreeSet<syn::Lifetime>> {
+-    let string = match get_lit_str(cx, BORROW, meta)? {
+-        Some(string) => string,
+-        None => return Ok(BTreeSet::new()),
++    let Some(string) = get_lit_str(cx, BORROW, meta)? else {
++        return Ok(BTreeSet::new());
+     };
+ 
+     if let Ok(lifetimes) = string.parse_with(|input: ParseStream| {
+@@ -1620,11 +1613,8 @@
+             return false;
+         }
+     };
+-    let seg = match path.segments.last() {
+-        Some(seg) => seg,
+-        None => {
+-            return false;
+-        }
++    let Some(seg) = path.segments.last() else {
++        return false;
+     };
+     let args = match &seg.arguments {
+         syn::PathArguments::AngleBracketed(bracketed) => &bracketed.args,
+@@ -1647,11 +1637,8 @@
+             return false;
+         }
+     };
+-    let seg = match path.segments.last() {
+-        Some(seg) => seg,
+-        None => {
+-            return false;
+-        }
++    let Some(seg) = path.segments.last() else {
++        return false;
+     };
+     let args = match &seg.arguments {
+         syn::PathArguments::AngleBracketed(bracketed) => &bracketed.args,
+@@ -1798,7 +1785,7 @@
+         syn::Type::Macro(ty) => {
+             collect_lifetimes_from_tokens(ty.mac.tokens.clone(), out);
+         }
+-        syn::Type::BareFn(_)
++        syn::Type::FnPtr(_)
+         | syn::Type::Never(_)
+         | syn::Type::TraitObject(_)
+         | syn::Type::ImplTrait(_)
+diff -ruN old/src/internals/ctxt.rs new/src/internals/ctxt.rs
+--- old/src/internals/ctxt.rs	2026-09-12 22:35:18
++++ new/src/internals/ctxt.rs	2026-09-12 22:35:18
+@@ -25,7 +25,7 @@
+         }
+     }
+ 
+-    /// Add an error to the context object with a tokenenizable object.
++    /// Add an error to the context object with a tokenizable object.
+     ///
+     /// The object is used for spanning in error messages.
+     pub fn error_spanned_by<A: ToTokens, T: Display>(&self, obj: A, msg: T) {
+@@ -46,9 +46,8 @@
+     pub fn check(self) -> syn::Result<()> {
+         let mut errors = self.errors.borrow_mut().take().unwrap().into_iter();
+ 
+-        let mut combined = match errors.next() {
+-            Some(first) => first,
+-            None => return Ok(()),
++        let Some(mut combined) = errors.next() else {
++            return Ok(());
+         };
+ 
+         for rest in errors {
+diff -ruN old/src/internals/receiver.rs new/src/internals/receiver.rs
+--- old/src/internals/receiver.rs	2026-09-12 22:35:18
++++ new/src/internals/receiver.rs	2026-09-12 22:35:18
+@@ -111,7 +111,7 @@
+                 self.visit_type_mut(&mut ty.elem);
+                 self.visit_expr_mut(&mut ty.len);
+             }
+-            Type::BareFn(ty) => {
++            Type::FnPtr(ty) => {
+                 for arg in &mut ty.inputs {
+                     self.visit_type_mut(&mut arg.ty);
+                 }
+@@ -190,7 +190,7 @@
+             }
+             PathArguments::Parenthesized(arguments) => {
+                 for argument in &mut arguments.inputs {
+-                    self.visit_type_mut(argument);
++                    self.visit_type_mut(&mut argument.ty);
+                 }
+                 self.visit_return_type_mut(&mut arguments.output);
+             }
+diff -ruN old/src/lib.rs new/src/lib.rs
+--- old/src/lib.rs	2026-09-12 22:35:18
++++ new/src/lib.rs	2026-09-12 22:35:18
+@@ -13,7 +13,7 @@
+ //!
+ //! [https://serde.rs/derive.html]: https://serde.rs/derive.html
+ 
+-#![doc(html_root_url = "https://docs.rs/serde_derive/1.0.228")]
++#![doc(html_root_url = "https://docs.rs/serde_derive/1.0.229")]
+ #![cfg_attr(not(check_cfg), allow(unexpected_cfgs))]
+ // Ignored clippy lints
+ #![allow(
+diff -ruN old/src/pretend.rs new/src/pretend.rs
+--- old/src/pretend.rs	2026-09-12 22:35:18
++++ new/src/pretend.rs	2026-09-12 22:35:18
+@@ -114,18 +114,18 @@
+     let type_ident = &cont.ident;
+     let (_, ty_generics, _) = cont.generics.split_for_impl();
+ 
+-    let patterns = variants
+-        .iter()
+-        .filter_map(|variant| match variant.style {
++    let mut patterns = Vec::new();
++    for variant in variants {
++        match variant.style {
+             Style::Struct | Style::Tuple | Style::Newtype => {
+                 let variant_ident = &variant.ident;
+                 let members = variant.fields.iter().map(|field| &field.member);
+                 let placeholders = (0usize..).map(|i| format_ident!("__v{}", i));
+-                Some(quote!(#type_ident::#variant_ident { #(#members: #placeholders),* }))
++                patterns.push(quote!(#type_ident::#variant_ident { #(#members: #placeholders),* }));
+             }
+-            Style::Unit => None,
+-        })
+-        .collect::<Vec<_>>();
++            Style::Unit => {}
++        }
++    }
+ 
+     let private2 = private;
+     quote! {
+diff -ruN old/src/ser.rs new/src/ser.rs
+--- old/src/ser.rs	2026-09-12 22:35:18
++++ new/src/ser.rs	2026-09-12 22:35:18
+@@ -1,3 +1,4 @@
++use crate::de::field_i;
+ use crate::deprecated::allow_deprecated;
+ use crate::fragment::{Fragment, Match, Stmts};
+ use crate::internals::ast::{Container, Data, Field, Style, Variant};
+@@ -13,9 +14,8 @@
+     replace_receiver(input);
+ 
+     let ctxt = Ctxt::new();
+-    let cont = match Container::from_ast(&ctxt, input, Derive::Serialize, &private.ident()) {
+-        Some(cont) => cont,
+-        None => return Err(ctxt.check().unwrap_err()),
++    let Some(cont) = Container::from_ast(&ctxt, input, Derive::Serialize, &private.ident()) else {
++        return Err(ctxt.check().unwrap_err());
+     };
+     precondition(&ctxt, &cont);
+     ctxt.check()?;
+@@ -458,8 +458,7 @@
+                 }
+             }
+             Style::Tuple => {
+-                let field_names = (0..variant.fields.len())
+-                    .map(|i| Ident::new(&format!("__field{}", i), Span::call_site()));
++                let field_names = (0..variant.fields.len()).map(field_i);
+                 quote! {
+                     #this_value::#variant_ident(#(ref #field_names),*)
+                 }
+@@ -714,9 +713,9 @@
+                 unreachable!()
+             }
+         }
+-        Style::Newtype => vec![Member::Named(Ident::new("__field0", Span::call_site()))],
++        Style::Newtype => vec![Member::Named(field_i(0))],
+         Style::Tuple => (0..variant.fields.len())
+-            .map(|i| Member::Named(Ident::new(&format!("__field{}", i), Span::call_site())))
++            .map(|i| Member::Named(field_i(i)))
+             .collect(),
+         Style::Struct => variant.fields.iter().map(|f| f.member.clone()).collect(),
+     };
+@@ -835,7 +834,7 @@
+         .map(|(i, field)| match field.attrs.skip_serializing_if() {
+             None => quote!(1),
+             Some(path) => {
+-                let field_expr = Ident::new(&format!("__field{}", i), Span::call_site());
++                let field_expr = field_i(i);
+                 quote!(if #path(#field_expr) { 0 } else { 1 })
+             }
+         })
+@@ -1060,46 +1059,47 @@
+     is_enum: bool,
+     tuple_trait: &TupleTrait,
+ ) -> Vec<TokenStream> {
+-    fields
+-        .iter()
+-        .enumerate()
+-        .filter(|(_, field)| !field.attrs.skip_serializing())
+-        .map(|(i, field)| {
+-            let mut field_expr = if is_enum {
+-                let id = Ident::new(&format!("__field{}", i), Span::call_site());
+-                quote!(#id)
+-            } else {
+-                get_member(
+-                    params,
+-                    field,
+-                    &Member::Unnamed(Index {
+-                        index: i as u32,
+-                        span: Span::call_site(),
+-                    }),
+-                )
+-            };
++    let mut dst_fields = Vec::new();
+ 
+-            let skip = field
+-                .attrs
+-                .skip_serializing_if()
+-                .map(|path| quote!(#path(#field_expr)));
++    for (i, field) in fields.iter().enumerate() {
++        if field.attrs.skip_serializing() {
++            continue;
++        }
++        let mut field_expr = if is_enum {
++            let id = field_i(i);
++            quote!(#id)
++        } else {
++            get_member(
++                params,
++                field,
++                &Member::Unnamed(Index {
++                    index: i as u32,
++                    span: Span::call_site(),
++                }),
++            )
++        };
+ 
+-            if let Some(path) = field.attrs.serialize_with() {
+-                field_expr = wrap_serialize_field_with(params, field.ty, path, &field_expr);
+-            }
++        let skip = field
++            .attrs
++            .skip_serializing_if()
++            .map(|path| quote!(#path(#field_expr)));
+ 
+-            let span = field.original.span();
+-            let func = tuple_trait.serialize_element(span);
+-            let ser = quote! {
+-                #func(&mut __serde_state, #field_expr)?;
+-            };
++        if let Some(path) = field.attrs.serialize_with() {
++            field_expr = wrap_serialize_field_with(params, field.ty, path, &field_expr);
++        }
+ 
+-            match skip {
+-                None => ser,
+-                Some(skip) => quote!(if !#skip { #ser }),
+-            }
+-        })
+-        .collect()
++        let span = field.original.span();
++        let func = tuple_trait.serialize_element(span);
++        let ser = quote! {
++            #func(&mut __serde_state, #field_expr)?;
++        };
++
++        dst_fields.push(match skip {
++            None => ser,
++            Some(skip) => quote!(if !#skip { #ser }),
++        });
++    }
++    dst_fields
+ }
+ 
+ fn serialize_struct_visitor(
+@@ -1108,64 +1108,66 @@
+     is_enum: bool,
+     struct_trait: &StructTrait,
+ ) -> Vec<TokenStream> {
+-    fields
+-        .iter()
+-        .filter(|&field| !field.attrs.skip_serializing())
+-        .map(|field| {
+-            let member = &field.member;
++    let mut dst_fields = Vec::new();
+ 
+-            let mut field_expr = if is_enum {
+-                quote!(#member)
+-            } else {
+-                get_member(params, field, member)
+-            };
++    for field in fields {
++        if field.attrs.skip_serializing() {
++            continue;
++        }
++        let member = &field.member;
+ 
+-            let key_expr = field.attrs.name().serialize_name();
++        let mut field_expr = if is_enum {
++            quote!(#member)
++        } else {
++            get_member(params, field, member)
++        };
+ 
+-            let skip = field
+-                .attrs
+-                .skip_serializing_if()
+-                .map(|path| quote!(#path(#field_expr)));
++        let key_expr = field.attrs.name().serialize_name();
+ 
+-            if let Some(path) = field.attrs.serialize_with() {
+-                field_expr = wrap_serialize_field_with(params, field.ty, path, &field_expr);
+-            }
++        let skip = field
++            .attrs
++            .skip_serializing_if()
++            .map(|path| quote!(#path(#field_expr)));
+ 
+-            let span = field.original.span();
+-            let ser = if field.attrs.flatten() {
+-                let func = quote_spanned!(span=> _serde::Serialize::serialize);
+-                quote! {
+-                    #func(&#field_expr, _serde::#private::ser::FlatMapSerializer(&mut __serde_state))?;
+-                }
+-            } else {
+-                let func = struct_trait.serialize_field(span);
+-                quote! {
+-                    #func(&mut __serde_state, #key_expr, #field_expr)?;
+-                }
+-            };
++        if let Some(path) = field.attrs.serialize_with() {
++            field_expr = wrap_serialize_field_with(params, field.ty, path, &field_expr);
++        }
+ 
+-            match skip {
+-                None => ser,
+-                Some(skip) => {
+-                    if let Some(skip_func) = struct_trait.skip_field(span) {
+-                        quote! {
+-                            if !#skip {
+-                                #ser
+-                            } else {
+-                                #skip_func(&mut __serde_state, #key_expr)?;
+-                            }
++        let span = field.original.span();
++        let ser = if field.attrs.flatten() {
++            let func = quote_spanned!(span=> _serde::Serialize::serialize);
++            quote! {
++                #func(&#field_expr, _serde::#private::ser::FlatMapSerializer(&mut __serde_state))?;
++            }
++        } else {
++            let func = struct_trait.serialize_field(span);
++            quote! {
++                #func(&mut __serde_state, #key_expr, #field_expr)?;
++            }
++        };
++
++        dst_fields.push(match skip {
++            None => ser,
++            Some(skip) => {
++                if let Some(skip_func) = struct_trait.skip_field(span) {
++                    quote! {
++                        if !#skip {
++                            #ser
++                        } else {
++                            #skip_func(&mut __serde_state, #key_expr)?;
+                         }
+-                    } else {
+-                        quote! {
+-                            if !#skip {
+-                                #ser
+-                            }
++                    }
++                } else {
++                    quote! {
++                        if !#skip {
++                            #ser
+                         }
+                     }
+                 }
+             }
+-        })
+-        .collect()
++        });
++    }
++    dst_fields
+ }
+ 
+ fn wrap_serialize_field_with(
+@@ -1189,9 +1191,7 @@
+         .map(|field| {
+             let id = match &field.member {
+                 Member::Named(ident) => ident.clone(),
+-                Member::Unnamed(member) => {
+-                    Ident::new(&format!("__field{}", member.index), Span::call_site())
+-                }
++                Member::Unnamed(member) => field_i(member.index as usize),
+             };
+             quote!(#id)
+         })
