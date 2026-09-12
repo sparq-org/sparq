@@ -53,8 +53,14 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import gh_dedupe  # noqa: E402  (sibling module; the sys.path insert above is the seam)
+
 PROG = "ci-file-demoted-lane-failure"
 MARKER = "[demoted-lane]"
+# The label the filer stamps on every issue it opens, and the one its own dedupe lookup
+# reads back (#5804). Matches the labels on the companion bead (build_bead_record).
+LABEL = "demoted-lane"
 _ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
 # How much of the captured log to inline in the issue (the tail is where the crash /
 # reproducer lines are).
@@ -221,23 +227,36 @@ def gh(*argv: str) -> str:
 
 
 def find_open_issue(lane: str) -> str | None:
-    try:
-        out = gh(
-            "issue", "list", "--state", "open",
-            "--search", f'in:title "{MARKER} lane={lane}"',
-            "--json", "number,title", "--limit", "10",
-        )
-        for item in json.loads(out or "[]"):
-            if MARKER in item.get("title", "") and f"lane={lane}" in item.get("title", ""):
-                return str(item["number"])
-    except (subprocess.CalledProcessError, json.JSONDecodeError) as e:
-        log(f"warning: issue dedupe search failed ({e}) — will attempt creation")
-    return None
+    """Number of an existing open demoted-lane issue for this lane, if any.
+
+    [OPUS-5] #5804: LIST BY LABEL and exact-substring-match the title locally
+    (scripts/gh_dedupe.py) rather than trusting `gh --search`. A title of the shape
+    `[demoted-lane] lane=fuzz-randomized` is exactly the punctuation gh's search
+    tokeniser handles unreliably, and the search index also lags — either would MISS
+    an issue this filer already opened and mint a duplicate.
+    """
+    res = gh_dedupe.find_open_issue(
+        LABEL,
+        (MARKER, f"lane={lane}"),
+        legacy_search=f'in:title "{MARKER} lane={lane}"',
+        log=log,
+        backfill_label=True,
+    )
+    if res.issue is None and not res.probed:
+        log("warning: issue dedupe lookup failed — will attempt creation")
+    return res.number
 
 
 def file_github_issue(bead_id: str, lane: str, args, log_tail: str) -> None:
     body = build_issue_body(bead_id, lane, args, log_tail)
     title = f"{MARKER} lane={lane}: full-form CI run failed"
+    # The label is load-bearing for dedupe (find_open_issue reads it back), so upsert
+    # it BEFORE the lookup — an unlabelled issue is one the next tick cannot see.
+    gh_dedupe.ensure_label(
+        LABEL, color="b60205",
+        description="full form of a lane demoted off the per-PR path failed",
+        log=log,
+    )
     existing = find_open_issue(lane)
     with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as tf:
         tf.write(body)
@@ -247,7 +266,8 @@ def file_github_issue(bead_id: str, lane: str, args, log_tail: str) -> None:
             gh("issue", "comment", existing, "--body-file", body_file)
             log(f"commented the fresh failure on existing open issue #{existing} (deduped)")
         else:
-            url = gh("issue", "create", "--title", title, "--body-file", body_file)
+            url = gh("issue", "create", "--title", title, "--body-file", body_file,
+                     "--label", LABEL)
             log(f"filed GitHub issue: {url}")
     except subprocess.CalledProcessError as e:
         log(f"warning: gh issue filing failed (exit {e.returncode}): {e.stderr.strip() if e.stderr else e}")

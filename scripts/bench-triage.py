@@ -56,6 +56,9 @@ import sys
 import tempfile
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import gh_dedupe  # noqa: E402  (sibling module; the sys.path insert above is the seam)
+
 PROG = "bench-triage"
 FLAKE_LABEL = "bench-flake"
 REGRESSION_LABEL = "bench-regression"
@@ -398,20 +401,26 @@ def ensure_label(name: str, color: str, desc: str) -> None:
         log(f"warning: label create {name} failed (non-fatal): {e.stderr.strip() if e.stderr else e}")
 
 
-def find_open_issue(marker: str, key: str) -> str | None:
-    try:
-        out = gh(
-            "issue", "list", "--state", "open",
-            "--search", f'in:title "{marker} {key}"',
-            "--json", "number,title", "--limit", "10",
-        )
-        for item in json.loads(out or "[]"):
-            title = item.get("title", "")
-            if marker in title and key in title:
-                return str(item["number"])
-    except (subprocess.CalledProcessError, json.JSONDecodeError) as e:
-        log(f"warning: issue dedupe search failed ({e})")
-    return None
+def find_open_issue(label: str, marker: str, key: str) -> str | None:
+    """Number of the open triage issue already filed for (marker, key), if any.
+
+    [OPUS-5] #5804: LIST BY LABEL and exact-substring-match the title locally
+    (scripts/gh_dedupe.py) rather than trusting `gh --search`. The keys here are
+    `suite=<suite>` and `cluster=sparq-engine+sparq-core` — the `+`, `-` and `[` are
+    exactly the punctuation gh's search tokeniser handles unreliably, and the search
+    index also lags, so the previous lookup could MISS an issue this lane already
+    filed and re-file it.
+    """
+    res = gh_dedupe.find_open_issue(
+        label,
+        (marker, key),
+        legacy_search=f'in:title "{marker} {key}"',
+        log=log,
+        backfill_label=True,
+    )
+    if res.issue is None and not res.probed:
+        log("warning: issue dedupe lookup failed")
+    return res.number
 
 
 def _post_issue(title: str, body: str, labels: list[str], existing: str | None) -> str | None:
@@ -588,7 +597,7 @@ def file_flake_issues(part: dict, soft: float, hard: float, run_url: str) -> lis
     for suite, rows in sorted(by_suite.items()):
         key = f"suite={suite}"
         title = f"{FLAKE_MARKER} {key}: benchmarks in the soft zone (possible runner noise)"
-        existing = find_open_issue(FLAKE_MARKER, key)
+        existing = find_open_issue(FLAKE_LABEL, FLAKE_MARKER, key)
         body = build_flake_body(suite, rows, soft, hard, run_url)
         res = _post_issue(title, body, [FLAKE_LABEL], existing)
         if res:
@@ -737,7 +746,7 @@ def file_regression_issues(part: dict, soft: float, hard: float, baseline_sha: s
         area = ranked[0]["overlap"][0] if (ranked and ranked[0]["overlap"]) else cluster_crates[0]
         key = f"cluster={'+'.join(cluster_crates)}"
         title = f"{REGRESSION_MARKER} {key}: nightly benchmark regression (P1)"
-        existing = find_open_issue(REGRESSION_MARKER, key)
+        existing = find_open_issue(REGRESSION_LABEL, REGRESSION_MARKER, key)
         body = build_regression_body(cluster_crates, rows, ranked, hard, run_url, repo,
                                      baseline_sha, head_sha)
         labels = [REGRESSION_LABEL, "priority:P1", "role:impl", f"area:{area}"]

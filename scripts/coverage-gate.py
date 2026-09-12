@@ -92,6 +92,9 @@
 # the ratchet of record — raise it deliberately as coverage grows.
 import argparse, json, math, os, subprocess, sys, tempfile
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import gh_dedupe  # noqa: E402  (sibling module; the sys.path insert above is the seam)
+
 MARGIN = 2  # percentage points of slack below the measured value
 
 # [OPUS-4.8] sq-x4jy: total independent measurements per crate in the robust gate
@@ -490,33 +493,38 @@ def advance_block_verdict(advances, alarm_open):
 
 # The lane token the demoted-lane filer files the post-merge coverage alarm under
 # (scripts/ci-file-demoted-lane-failure.py --lane); the alarm issue title is
-# "[demoted-lane] lane=<lane>: full-form CI run failed".
+# "[demoted-lane] lane=<lane>: full-form CI run failed", carrying its LABEL.
 COVERAGE_ALARM_LANE = "coverage-ratchet-main"
+COVERAGE_ALARM_MARKER = "[demoted-lane]"
+COVERAGE_ALARM_LABEL = "demoted-lane"
 
 
 def open_alarm_issue_state(lane=COVERAGE_ALARM_LANE, log=print):
     """[SONNET-4.6] sq-6vshe.17: probe GitHub for an OPEN post-merge coverage alarm issue.
 
     Returns True (an open alarm exists), False (none), or None (the probe could not run —
-    the caller FAILS OPEN). Matches the filer's own dedupe query + title contract exactly
+    the caller FAILS OPEN). Matches the filer's own dedupe lookup + title contract exactly
     (scripts/ci-file-demoted-lane-failure.py find_open_issue), so the two cannot drift on
-    which issue counts as "the alarm"."""
-    marker = "[demoted-lane]"
-    try:
-        r = subprocess.run(
-            ["gh", "issue", "list", "--state", "open",
-             "--search", f'in:title "{marker} lane={lane}"',
-             "--json", "number,title", "--limit", "10"],
-            capture_output=True, text=True, timeout=120, check=True)
-        items = json.loads(r.stdout or "[]")
-    except (subprocess.SubprocessError, OSError, json.JSONDecodeError) as e:
-        log(f"  note: could not probe the post-merge coverage alarm ({e}) — fail-OPEN")
+    which issue counts as "the alarm".
+
+    [OPUS-5] #5804: that lookup is now a LABEL LISTING matched by exact substring locally
+    (scripts/gh_dedupe.py), not `gh --search` — the search tokeniser mishandles
+    `[demoted-lane] lane=...` punctuation and the index lags, so the old query could
+    report "no alarm" while the alarm was open, silently un-pausing the ratchet advance.
+    This probe is READ-ONLY: unlike the filer it never backfills the label."""
+    res = gh_dedupe.find_open_issue(
+        COVERAGE_ALARM_LABEL,
+        (COVERAGE_ALARM_MARKER, f"lane={lane}"),
+        legacy_search=f'in:title "{COVERAGE_ALARM_MARKER} lane={lane}"',
+        log=lambda m: log(f"  note: {m}"),
+    )
+    if res.issue is not None:
+        log(f"  OPEN post-merge coverage alarm: issue #{res.issue['number']} — "
+            f"{res.issue.get('title', '')}")
+        return True
+    if not res.probed:
+        log("  note: could not probe the post-merge coverage alarm — fail-OPEN")
         return None
-    for item in items:
-        title = item.get("title", "")
-        if marker in title and f"lane={lane}" in title:
-            log(f"  OPEN post-merge coverage alarm: issue #{item['number']} — {title}")
-            return True
     return False
 
 
