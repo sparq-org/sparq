@@ -35,6 +35,17 @@
 # requirements. The README (b) is still required (a stub still needs a one-line
 # "what/why" README).
 #
+# ESCAPE HATCH 2 (design §2.1 "Escape hatch" column / the AGENTS.md new-crate
+# row): a `<!-- flow-on-exempt: reason -->` marker in the new crate's README
+# waives G1 for that crate ENTIRELY — the crate carries its own README (that is
+# where the marker lives), and the stated reason is the audit trail. The reason
+# must be NON-EMPTY: a bare `<!-- flow-on-exempt -->` waives nothing, and main()
+# says so loudly rather than silently ignoring it. This marker is read here and
+# by the reactive engine (scripts/flow-on.py loads this module and calls
+# exempt_crates()), so the two halves share ONE definition of "exempt". Until
+# #5701 the marker was documented in AGENTS.md + the design record but read by
+# NEITHER script.
+#
 # DIFF SOURCE: the PR's changed-file list. In CI this is
 #   git diff --name-only origin/<base>...HEAD          (changed files)
 #   git diff --name-status origin/<base>...HEAD        (to find ADDED files)
@@ -66,6 +77,14 @@ BENCH_REGISTRY = REPO_ROOT / "bench" / "benchmarks.toml"
 
 # A line in a status-prefixed diff: "A\tpath", "M\tpath", "R100\told\tnew", etc.
 _STATUS_RE = re.compile(r"^([A-Z])\d*\t(.*)$")
+
+# The documented per-crate escape hatch: `<!-- flow-on-exempt: reason -->` in the
+# crate README. Single-line only (`.` does not span newlines), reason captured so
+# the gate can print WHY the crate was waived.
+_EXEMPT_RE = re.compile(r"<!--[ \t]*flow-on-exempt:[ \t]*(.+?)[ \t]*-->")
+# A marker written without a reason (or misspelt around the colon) — never a
+# waiver, but worth reporting so the author doesn't think it took effect.
+_EXEMPT_TOKEN = "flow-on-exempt"
 
 
 def parse_status_lines(lines: list[str]) -> tuple[list[str], list[str]]:
@@ -162,6 +181,55 @@ def crate_is_stub(crate: str, changed: list[str]) -> bool:
     return re.search(r"^\s*publish\s*=\s*false\b", text, re.MULTILINE) is not None
 
 
+def crate_readme_text(crate: str, root: Path | None = None) -> str | None:
+    """The crate README's text, or None when it is absent/unreadable."""
+    readme = (root or REPO_ROOT) / "crates" / crate / "README.md"
+    try:
+        return readme.read_text(encoding="utf-8")
+    except OSError:
+        return None
+
+
+def flow_on_exempt_reason(readme_text: str | None) -> str | None:
+    """The REASON from a `<!-- flow-on-exempt: reason -->` marker, else None.
+
+    A marker with an empty reason is NOT an exemption: the design's escape hatch
+    is "`<!-- flow-on-exempt: reason -->` in the crate README, recorded as a
+    bead" — the reason IS the record, so waiving the gate without one would make
+    the hatch unauditable."""
+    if not readme_text:
+        return None
+    m = _EXEMPT_RE.search(readme_text)
+    if not m:
+        return None
+    return m.group(1).strip() or None
+
+
+def flow_on_exempt_marker_is_malformed(readme_text: str | None) -> bool:
+    """True when the README mentions the marker but no valid one parses — a
+    silently-inert escape hatch, which is exactly the #5701 failure mode."""
+    if not readme_text:
+        return False
+    return _EXEMPT_TOKEN in readme_text and flow_on_exempt_reason(readme_text) is None
+
+
+def crate_flow_on_exempt(crate: str, root: Path | None = None) -> str | None:
+    """The exemption reason declared in `crates/<crate>/README.md`, else None."""
+    return flow_on_exempt_reason(crate_readme_text(crate, root))
+
+
+def exempt_crates(added: list[str], root: Path | None = None) -> dict[str, str]:
+    """{crate: reason} for every newly-added crate whose README waives follow-on
+    machinery. Shared with scripts/flow-on.py so the proactive gate and the
+    reactive engine honour the same marker."""
+    out: dict[str, str] = {}
+    for crate in added_crates(added):
+        reason = crate_flow_on_exempt(crate, root)
+        if reason:
+            out[crate] = reason
+    return out
+
+
 def crate_has_registered_bench(crate: str) -> bool:
     """True iff bench/benchmarks.toml has a `source` field referencing the crate.
 
@@ -184,17 +252,27 @@ def evaluate(
     *,
     stub_overrides: dict[str, bool] | None = None,
     bench_overrides: dict[str, bool] | None = None,
+    exempt_overrides: dict[str, str | None] | None = None,
 ) -> list[tuple[str, list[str]]]:
     """Return [(crate, [missing-reasons])] for every newly-added crate that
     violates G1. An empty list means the gate PASSES.
 
-    stub_overrides / bench_overrides let hermetic tests inject the
-    publish-status and bench-registration facts without touching disk."""
+    stub_overrides / bench_overrides / exempt_overrides let hermetic tests inject
+    the publish-status, bench-registration and README-exemption facts without
+    touching disk."""
     stub_overrides = stub_overrides or {}
     bench_overrides = bench_overrides or {}
+    exempt_overrides = exempt_overrides or {}
     violations: list[tuple[str, list[str]]] = []
 
     for crate in added_crates(added):
+        # The README escape hatch waives the whole crate (see ESCAPE HATCH 2).
+        exempt = exempt_overrides.get(crate)
+        if exempt is None:
+            exempt = crate_flow_on_exempt(crate)
+        if exempt:
+            continue
+
         is_stub = stub_overrides.get(crate)
         if is_stub is None:
             is_stub = crate_is_stub(crate, changed)
@@ -266,6 +344,24 @@ def main(argv: list[str] | None = None) -> int:
     else:
         changed, added = git_diff(args.base)
 
+    # Report both halves of the escape hatch BEFORE the verdict: a waiver must be
+    # visible in the log (it is meant to be reconciled into a bead), and a marker
+    # that does not parse must not look like it worked.
+    for crate in added_crates(added):
+        readme = crate_readme_text(crate)
+        reason = flow_on_exempt_reason(readme)
+        if reason:
+            print(
+                f"G1: crates/{crate} is EXEMPT via `<!-- flow-on-exempt: {reason} -->` "
+                "in its README — record the decision as a bead."
+            )
+        elif flow_on_exempt_marker_is_malformed(readme):
+            print(
+                f"G1: crates/{crate}'s README mentions `{_EXEMPT_TOKEN}` but no valid "
+                "marker parsed — the exact form is `<!-- flow-on-exempt: reason -->` "
+                "with a non-empty reason. NOT exempt."
+            )
+
     violations = evaluate(changed, added)
 
     if not violations:
@@ -281,7 +377,9 @@ def main(argv: list[str] | None = None) -> int:
         "\nA new crate must ship its maintenance artifacts in the SAME PR "
         "(research/maintenance-flow-on-automation-design.md §2.1, gate G1). "
         "Stub crates may set `publish = false` in Cargo.toml to opt out of the "
-        "bench + SKILL requirements (README still required)."
+        "bench + SKILL requirements (README still required); a crate README "
+        "carrying `<!-- flow-on-exempt: reason -->` is waived entirely, with the "
+        "reason recorded as a bead."
     )
 
     if args.advisory or args.dry_run:
