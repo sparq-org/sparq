@@ -1,5 +1,5 @@
---- a/ark-relations-0.5.1/Cargo.toml
-+++ b/ark-relations-0.5.1/Cargo.toml
+--- a/Cargo.toml
++++ b/Cargo.toml
 @@ -58,7 +58,8 @@
  default-features = false
  
@@ -17,8 +17,8 @@
 +
 +# [GPT-6] Keep this vendored package outside the main workspace.
 +[workspace]
---- a/ark-relations-0.5.1/src/r1cs/trace.rs
-+++ b/ark-relations-0.5.1/src/r1cs/trace.rs
+--- a/src/r1cs/trace.rs
++++ b/src/r1cs/trace.rs
 @@ -59,7 +59,8 @@
  
      /// Notifies this layer that a new span was constructed with the given

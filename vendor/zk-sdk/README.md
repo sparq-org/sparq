@@ -25,11 +25,20 @@ bodies are unchanged. There is no replacement or accepting stub for signatures.
 The SHA hashing helpers remain because distribution code also uses them for file
 integrity. Install/publication still require their original verification paths.
 
-Run `python3 vendor/zk-sdk/verify.py` with Python supporting `tomllib` to check all inventories/hashes, feature
-defaults and both evaluator lockfiles. With an existing compatible Cargo cache,
+Run `python3 vendor/zk-sdk/verify.py` with Python supporting `tomllib` and Git to
+check inventories/hashes, feature defaults and explicit local patch selection in
+both evaluator lockfiles. It reverses each patch in a private temporary copy,
+checks every reconstructed file against its upstream hash, then replays the patch
+and compares the patched bytes. All patch paths use `a/` and `b/` relative to the
+package directory and one strip level. Additional upstream license files have
+their own recorded provenance and are excluded from patch reconstruction.
+With an existing compatible Cargo cache,
 `CARGO_TARGET_DIR=/absolute/cache python3 vendor/zk-sdk/verify.py --smoke` also runs
 synthetic local discovery, constraint tracing/satisfaction, and unchanged upstream
 signature round-trip/tampering checks in discovery and additive key-API modes.
+The smoke harness targets macOS and Linux. The additive key-taking constructor
+is compiled; it is not called by these tests. The upstream rzup unit-test module
+requires its default features; the synthetic harness does not claim that suite.
 `--feature-matrix` also compiles the empty/default-equivalent and active
 SNARK/sponge feature selections, each derive-consuming family, their constraint
 gadget combinations and the combined selection. It checks that only selections
@@ -46,6 +55,12 @@ public dependencies. The temporary smoke lock is derived from the evaluator lock
 and adds explicitly pinned test dependencies; it is not a proof artifact lock.
 The harness sets a synthetic GitHub token and a private temporary RISC0 directory.
 It neither installs artifacts nor accesses hosted proving or publication services.
+
+The scoped native Clippy check selects the four patched packages from the locked
+host workspace with `--lib` and `-- -D warnings`. Its resolved features are
+`risc0-build/unstable`, no rzup features, `ark-relations/std,tracing-subscriber`,
+and `ark-crypto-primitives/merlin,snark,sponge,std`. It does not claim Clippy
+coverage of every feature combination or the guest target.
 
 These checks do not replace a guest rebuild, receipt tests, the dependency audit,
 or hosted CI. The full upstream installation/publication integration suite is not
