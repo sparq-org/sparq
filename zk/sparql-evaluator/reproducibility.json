@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "experiment": "same-host checkout and Cargo-home relocation",
+  "date": "2026-09-12",
+  "platform": "macOS arm64",
+  "host_rust": "1.97.1",
+  "guest_rust": "1.97.0",
+  "risc0_sdk": "3.0.6",
+  "source_base_commit": "2c8a6bf59ad5c33171b700db0ea513e51f1c43e8",
+  "changed_guest_source_sha256": {
+    "model/src/evaluate.rs": "ed6f0255bf51e6ed626aa9ca66041ea5765d3d634f747403cb3467297178d405"
+  },
+  "guest_lock_sha256": "87bec4158a2faf757a2b30245c831510e91be01ac36badcad025fc2394a703fe",
+  "normalization": [
+    "explicit repository prefix remap",
+    "explicit Cargo-home prefix remap",
+    "fixed cwd prefix",
+    "caller-location detail omitted"
+  ],
+  "distinct_checkout_roots": true,
+  "distinct_cargo_source_roots": true,
+  "same_pinned_guest_toolchain": true,
+  "cases": [
+    {
+      "label": "primary",
+      "artifact_sha256": "f6eb2a0b5cd5144f006c0785465c1867aa9e913c3b705816317d13c654f60452",
+      "image_id": [
+        2164508524,
+        4219846766,
+        3463869854,
+        2086017310,
+        1472760526,
+        1661128049,
+        1606901549,
+        3967005943
+      ]
+    },
+    {
+      "label": "independent_checkout_and_cargo_home",
+      "artifact_sha256": "53c9129df94173fc48443c75b6cb5a8ea6a1f748d276266c0784b571799dedf6",
+      "image_id": [
+        3530585373,
+        2849764529,
+        355483982,
+        4288013907,
+        2990319083,
+        1192113784,
+        3127202866,
+        4000387245
+      ]
+    }
+  ],
+  "byte_identical": false,
+  "identical_image_id": false,
+  "cross_platform_reproducibility": "not established",
+  "deployment_contract": "Both peers use the same independently approved full-byte SHA-256 and image ID, never presenter-derived pins.",
+  "shared_artifact_proof": {
+    "status": "passed",
+    "receipt_kind": "Succinct",
+    "accepted_artifact": "independent_checkout_and_cargo_home",
+    "verifier_build": "primary",
+    "trusted_pins": ["full-byte SHA-256", "image ID"],
+    "fixture": "real_exact_result_rejects_all_public_binding_tampering_and_replay",
+    "local_embedded_id_verifier_rejected": true,
+    "dev_mode_disabled": true
+  }
+}

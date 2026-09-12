@@ -6,7 +6,8 @@ license.workspace = true
 publish.workspace = true
 
 [build-dependencies]
-risc0-build = "=3.0.6"
+risc0-build = { version = "=3.0.6", features = ["unstable"] }
+risc0-binfmt = "=3.0.5"
 
 [package.metadata.risc0]
 methods = ["guest"]

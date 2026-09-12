@@ -248,3 +248,14 @@ fn aggregate_empty_input_and_ordered_offset_are_exact() {
     assert_eq!(order, RowOrder::Sequence);
     assert_eq!(rows, vec![vec![iri("alice")]]);
 }
+
+#[test]
+fn subquery_order_is_dropped_at_the_outer_multiset_boundary() {
+    let body = "WHERE { { SELECT ?x WHERE { VALUES ?x { 2 1 } } ORDER BY DESC(?x) } }";
+    let (order, rows) = select(&format!("SELECT ?x {body}"));
+    assert_eq!(order, RowOrder::Bag);
+    assert_eq!(rows, vec![vec![int(1)], vec![int(2)]]);
+    let (order, rows) = select(&format!("SELECT ?x {body} ORDER BY DESC(?x)"));
+    assert_eq!(order, RowOrder::Sequence);
+    assert_eq!(rows, vec![vec![int(2)], vec![int(1)]]);
+}

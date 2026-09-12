@@ -2420,6 +2420,7 @@ dependencies = [
  "risc0-zkvm",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "sparq-proved-evaluator-methods",
  "sparq-proved-evaluator-model",
 ]
@@ -2428,6 +2429,7 @@ dependencies = [
 name = "sparq-proved-evaluator-methods"
 version = "0.1.0"
 dependencies = [
+ "risc0-binfmt",
  "risc0-build",
 ]
 

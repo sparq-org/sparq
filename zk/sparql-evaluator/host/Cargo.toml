@@ -11,6 +11,7 @@ sparq-proved-evaluator-methods = { path = "../methods" }
 risc0-zkvm = { workspace = true, features = ["client", "std", "disable-dev-mode"] }
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 
 [dev-dependencies]
 sparq-proved-evaluator-model = { path = "../model", features = ["evaluate"] }

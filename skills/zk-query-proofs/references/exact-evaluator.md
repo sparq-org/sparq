@@ -22,5 +22,10 @@ or `model::bind_journal` as substitutes for receipt verification.
 `HolderDeclared` is supported only as an explicit weaker authority mode. Keep the
 returned `HolderDeclaredOnly` provenance visible to downstream policy decisions.
 No issuer signatures or credential status are checked by this first adapter.
+For separate deployments, export a reviewed guest with the `export_guest` example,
+independently pin its artifact digest and execution ID, and load `AcceptedGuest`
+on both peers. Use `prove_with_artifact` and `verify_with_artifact`; locally rebuilt
+constants are not assumed portable across checkout paths. Reject pins received
+only from the proof sender. The byte digest is checked before ELF processing.
 See the workspace README for limits, exact bag/sequence/unbound encoding, rejected
 features, proof-mode leakage caveats and the host-versus-guest evidence distinction.

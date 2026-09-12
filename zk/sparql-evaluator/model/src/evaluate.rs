@@ -251,11 +251,17 @@ fn term_string(term: &Term) -> Result<String, Rejected> {
 }
 
 fn ordered(mut p: &GraphPattern) -> bool {
+    let mut projected = false;
     loop {
         p = match p {
             GraphPattern::OrderBy { .. } => return true,
-            GraphPattern::Project { inner, .. }
-            | GraphPattern::Distinct { inner }
+            // A second projection crosses the subquery's ToMultiset boundary.
+            // Its internal ordering does not order the outer SELECT result.
+            GraphPattern::Project { inner, .. } if !projected => {
+                projected = true;
+                inner
+            }
+            GraphPattern::Distinct { inner }
             | GraphPattern::Reduced { inner }
             | GraphPattern::Slice { inner, .. }
             | GraphPattern::Extend { inner, .. } => inner,

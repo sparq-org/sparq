@@ -3,7 +3,10 @@ use risc0_zkvm::{
     Executor, ExecutorEnv, ExternalProver, FakeReceipt, InnerReceipt, Receipt, ReceiptClaim,
     VerifierContext,
 };
-use sparq_proved_evaluator::{Error, Nonces, Presentation, method_id, prove, verify};
+use sparq_proved_evaluator::{
+    AcceptedGuest, ArtifactPin, Error, Nonces, Presentation, embedded_artifact, embedded_pin,
+    method_id, prove, prove_with_artifact, verify, verify_with_artifact,
+};
 use sparq_proved_evaluator_methods::SPARQ_EXACT_GUEST_ELF;
 use sparq_proved_evaluator_model::*;
 use std::{collections::BTreeSet, path::PathBuf};
@@ -44,11 +47,42 @@ fn r0vm() -> PathBuf {
         .expect("RISC0_SERVER_PATH must identify the installed real r0vm 3.0.6 executable")
 }
 
+fn accepted_guest() -> AcceptedGuest {
+    if let Some(path) = std::env::var_os("SPARQ_ACCEPTED_GUEST_ARTIFACT") {
+        // Test/deployment-owner configuration, deliberately separate from the presentation.
+        let pin: ArtifactPin = serde_json::from_slice(
+            &std::fs::read(
+                std::env::var_os("SPARQ_ACCEPTED_GUEST_PIN")
+                    .expect("a separately accepted artifact pin is required"),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        AcceptedGuest::from_artifact(std::fs::read(path).unwrap(), &pin).unwrap()
+    } else {
+        AcceptedGuest::from_artifact(embedded_artifact().to_vec(), &embedded_pin()).unwrap()
+    }
+}
+
 #[test]
 fn real_exact_result_rejects_all_public_binding_tampering_and_replay() {
     let witness = witness(include_str!("../../fixtures/combined.rq"));
+    let guest = accepted_guest();
+    let verify =
+        |p: &Presentation, r: &Request, n: &mut MemoryNonces| verify_with_artifact(p, r, n, &guest);
     eprintln!("proving authenticated OPTIONAL/MINUS/COUNT/subquery/ORDER/LIMIT fixture");
-    let presentation = prove(&witness, &r0vm()).expect("genuine local proof");
+    let presentation = prove_with_artifact(&witness, &r0vm(), &guest).expect("genuine local proof");
+    if guest.image_id() != method_id() {
+        assert!(
+            sparq_proved_evaluator::verify(
+                &presentation,
+                &witness.request,
+                &mut MemoryNonces::default()
+            )
+            .is_err(),
+            "a different local build is not the accepted guest"
+        );
+    }
     let journal = verify(
         &presentation,
         &witness.request,
@@ -91,7 +125,7 @@ fn real_exact_result_rejects_all_public_binding_tampering_and_replay() {
     let mut tampered = presentation.clone();
     tampered.receipt.journal.bytes[0] ^= 1;
     assert!(verify(&tampered, &witness.request, &mut MemoryNonces::default()).is_err());
-    let mut wrong_id = method_id();
+    let mut wrong_id = guest.image_id();
     wrong_id[0] ^= 1;
     assert!(
         presentation
@@ -102,7 +136,7 @@ fn real_exact_result_rejects_all_public_binding_tampering_and_replay() {
     let fake = Presentation {
         receipt: Receipt::new(
             InnerReceipt::Fake(FakeReceipt::new(ReceiptClaim::ok(
-                method_id(),
+                guest.image_id(),
                 presentation.receipt.journal.bytes.clone(),
             ))),
             presentation.receipt.journal.bytes.clone(),
@@ -111,8 +145,9 @@ fn real_exact_result_rejects_all_public_binding_tampering_and_replay() {
     assert!(verify(&fake, &witness.request, &mut MemoryNonces::default()).is_err());
     let receipt_bytes = serde_json::to_vec(&presentation).unwrap();
     eprintln!(
-        "real exact-evaluator proof verified; presentation_bytes={}",
-        receipt_bytes.len()
+        "real exact-evaluator proof verified; presentation_bytes={}; accepted_image_id={:?}",
+        receipt_bytes.len(),
+        guest.image_id()
     );
 }
 

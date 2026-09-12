@@ -93,9 +93,37 @@ Pins: RISC Zero SDK/build/server 3.0.6, guest Rust 1.97.0, host repository Rust
 1.97.1. Both Cargo lockfiles are checked in. The build uses the local toolchain
 selected by `RISC0_HOME` and requires an explicitly supplied local `r0vm` path.
 It never delegates private inputs to a hosted prover.
-The build step removes host compiler wrappers in a child process before guest
-cross compilation, so host Clippy cannot substitute its host sysroot for guest std.
-The actual guest build still runs during the lint gate.
+The build step uses the pinned SDK's opt-in `cargo_command` build API and its
+`ProgramBinary`/image-ID primitives. It removes host compiler wrappers only from
+the child, so host Clippy cannot substitute its host sysroot for guest std. The
+actual guest build still runs during lint, and skipping compilation is rejected.
+Explicit compiler flags remap repository and Cargo-home roots to fixed prefixes,
+remap the working directory and omit caller-location detail. These flags are
+supported by the pinned custom guest compiler; precompiled toolchain libraries
+can retain their own upstream build metadata. Cross-platform
+reproducibility is not established: prover and verifier deployments must agree on
+the exact independently accepted guest artifact and compare its method ID. A source
+revision or a presenter-supplied image ID is not a replacement for that agreement.
+
+The two-checkout experiment in `reproducibility.json` produced different artifacts
+and IDs even after sanitization on the same host/compiler. Fixed-path canonical
+release builds are part of the stage-4 reproducible harness work. Use a common
+approved artifact for deployment now:
+
+```sh
+cargo run --locked --manifest-path zk/sparql-evaluator/Cargo.toml \
+  -p sparq-proved-evaluator --example export_guest -- ./reviewed-guest
+```
+
+The release operator independently reviews the resulting program and distributes
+`guest.bin`; the verifier pins `pin.json` through its trusted configuration channel.
+Never accept a pin merely because the proof sender supplied it. Both peers load
+`AcceptedGuest::from_artifact(bytes, &trusted_pin)` and use `prove_with_artifact`
+and `verify_with_artifact` with that object. The constructor checks the full-byte
+SHA-256 before parsing ELF or computing the execution ID; this rejects unapproved
+memory declarations before expensive SDK processing. These APIs work even if the
+peers' local embedded guest IDs differ. `prove`/`verify` remain conveniences for a
+single locally compiled artifact.
 
 ```sh
 cargo test --locked --manifest-path zk/sparql-evaluator/Cargo.toml \
