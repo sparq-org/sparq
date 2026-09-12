@@ -13,10 +13,12 @@ files come from the exact recorded upstream VCS revision, with URL/hash recorded
 
 | Package | Local change |
 | --- | --- |
-| `risc0-build` | Remove `dirs`, which no source in the archive uses. |
+| `risc0-build` | Remove unused `dirs`; select the kernel's embedded-ELF library without its binary-only dependencies. |
 | `rzup` | Make RSA optional behind additive `signatures`, enabled by both existing `install` and `publish` features. Their default selection remains unchanged. Discovery omits key construction/storage; fetching a signed manifest without signature support returns an error. |
 | `ark-relations` | Backport the tracing-subscriber dependency to the compatible maintained API, retaining disabled default features. Rename the empty layer callback to `on_new_span`; constraint arithmetic is unchanged. |
 | `ark-crypto-primitives` | Make `derivative` optional and select it from the existing `crh`, `encryption` and `signature` feature families. `commitment` and `merkle_tree` inherit `crh`. Gate the macro import the same way; algorithms and derives are unchanged. |
+| `risc0-zkvm` | Select `rrs-lib` from the existing `prove` feature, whose server profiler is its only consumer. Select the embedded kernel library without binary-only dependencies. The existing `client,bonsai` defaults are unchanged. |
+| `risc0-zkos-v1compat` | Add a default-on `kernel` feature for the existing binary's `no_std_strings` and `include_bytes_aligned` dependencies. The binary requires this feature; ELF-only library consumers disable defaults. All Rust source, assembly, blobs and the embedded ELF are unchanged. |
 
 The rzup key-taking custom constructor is available with `signatures`; ordinary
 `Rzup::new` and local toolchain discovery retain their API. The real upstream
@@ -67,6 +69,39 @@ or hosted CI. The full upstream installation/publication integration suite is no
 claimed to have run here. Retire the patches when an upstream release provides
 equivalent dependency boundaries and passes the same checks; do not change SDK
 versions or cryptographic arithmetic merely to remove an advisory.
+
+`python3 vendor/zk-sdk/tests/test_provenance.py` exercises corruption controls for
+every required local patch in both lockfiles, the embedded ELF, upstream hashes,
+and patch paths with a consistent but incorrect patch hash.
+`CARGO_TARGET_DIR=/absolute/cache python3 vendor/zk-sdk/edge_matrix.py` compiles
+the SDK's empty, client, default and prover selections and the kernel library with
+its default feature. It verifies the resolved dependency edges and compares the
+public embedded-ELF slice with its recorded source file. It does not run a prover,
+profile a program, or contact the hosted proving service. `--offline` is available
+when these additional feature dependencies are cached and `RECURSION_SRC_PATH`
+points to the upstream checksum-pinned recursion archive. Cargo's offline option
+alone does not prohibit a dependency build script from downloading that archive;
+the edge harness checks its bytes before the offline compile and rejects
+`DOCS_RS` and `RISC0_SKIP_BUILD_KERNELS` build stubs. Feature-harness lockfiles
+are temporary and separate from the two pinned evaluator lockfiles.
+
+The actual RISC-V kernel binary build has an upstream limitation with the pinned
+platform package: the unchanged `Syscall` match omits `ProveZkr` and Rust reports
+`E0004`. The exact registry baseline and the candidate fail at the same match with
+the same compiler and dependency versions. This is not a successful kernel binary
+build. Its default dependency activation is preserved, the feature-off binary
+request is rejected, and the ELF-only library compiles for the real guest target.
+The [feature-edge evidence](feature-edge-evidence.json) distinguishes those
+controls from native compilation and the unchanged embedded-ELF identity. No
+kernel instruction or cryptographic behavior was changed to repair that separate
+upstream source incompatibility.
+
+These are Cargo dependency boundaries, not a removal of code from existing
+binaries. The preserved kernel ELF was compiled from an implementation using
+the formatting and alignment helpers; an external `r0vm` can contain its own
+server/profiler dependencies. Their binary provenance remains separate. Omitting
+unused source packages from the evaluator graphs is not a claim that an embedded
+or external binary has received a security fix or a source audit.
 
 The literal unified patches contain blank context lines whose single leading
 space is patch syntax. One untouched upstream rustdoc line also has a Markdown

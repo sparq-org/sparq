@@ -378,7 +378,10 @@ cover the shared evaluator and separate native/actual-guest regression evidence.
 [GPT-6] The separate [exact evaluator](../../zk/sparql-evaluator/README.md) uses
 detached workspaces. Its [SDK patch record](../../vendor/zk-sdk/README.md) preserves
 upstream source/license identity and documents discovery-only dependency selection
-and derive-macro feature boundaries, with executable patch reconstruction,
-explicit lockfile patch-selection checks, and synthetic feature checks.
+and derive-macro, server-profiler and kernel-binary feature boundaries, with
+executable patch reconstruction, explicit lockfile patch-selection corruption
+controls, and the native `edge_matrix.py` feature compiler. The kernel's default
+binary dependency activation and embedded ELF remain unchanged; the patch record
+separately documents an upstream real-target binary compilation limitation.
 Synthetic dependency checks remain separate from actual guest proof evidence.
 [GPT-6] The exact evaluator enables the [numeric capacity guard](references/numeric-capacity.md). Valid values beyond the finite arithmetic lane can be returned directly, but unsupported numeric consumption fails the entire evaluation. Native default budgets leave this option off.
