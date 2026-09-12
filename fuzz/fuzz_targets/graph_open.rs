@@ -8,7 +8,8 @@
 //   - dict-meta.bin + dict-terms/offs/hash/hid.bin  (Dict::open_mmap; attacker-
 //                               controlled counts/lengths — the sq-znld hardening)
 //   - dict.bin                 (legacy single-file dict fallback)
-//   - numerics.bin / temporals.bin   (sidecar caches, length-validated)
+//   - numerics-v2.bin / temporals-v2.bin (current sidecars, length-validated)
+//   - numerics.bin / temporals.bin   (legacy sidecars, ignored and regenerated)
 //   - predstats.bin            (persisted per-predicate stats)
 //   - named.bin                (named-graph manifest — the sq-3ui0 / open_named path)
 //
@@ -42,7 +43,9 @@ const STORE_FILES: &[&str] = &[
     "dict-hash.bin",
     "dict-hid.bin",
     "dict.bin",
-    "numerics.bin",
+    "numerics-v2.bin",
+    "temporals-v2.bin",
+    "numerics.bin", // Legacy hostile bytes must remain ignored.
     "temporals.bin",
     "predstats.bin",
     "named.bin",

@@ -73,17 +73,17 @@ Recurring invariant shorthands used below:
 
 | File:line | Kind | Invariant relied on | Why sound / how bounded |
 |---|---|---|---|
-| `src/lib.rs:285` | slice reinterpret (read) | page-align; `numerics.bin` is whole f64 | mmap base ≥ 8-byte f64 align; `n = len/8`. Mapped-file open validates size == `dict.len()*8`. |
+| `src/lib.rs:285` | slice reinterpret (read) | page-align; `numerics-v2.bin` is whole f64 | mmap base ≥ 8-byte f64 align; `n = len/8`. Mapped-file open validates size == `dict.len()*8`. |
 | `src/lib.rs:389` | ptr read | page-align; instant section is `n` f64 at offset 0 | `i < n` checked at the call; f64 at `base+i`. |
 | `src/lib.rs:456` | slice reinterpret (read) | page-align; instants are `n` f64 at offset 0 | `n = mapped_len`; materialises the cells. |
-| `src/lib.rs:577` | slice reinterpret (write) | POD-bytes | reinterpret the f64 column as bytes to write `temporals.bin`. |
-| `src/lib.rs:1584` | `Mmap::map` | own-for-lifetime | `numerics.bin` opened only if `size == dict.len()*8` (length pre-validated). |
-| `src/lib.rs:1592` | `Mmap::map` | own-for-lifetime | `temporals.bin` opened only if `size == dict.len()*9` (length pre-validated). |
+| `src/lib.rs:577` | slice reinterpret (write) | POD-bytes | reinterpret the f64 column as bytes to write `temporals-v2.bin`. |
+| `src/lib.rs:1584` | `Mmap::map` | own-for-lifetime | `numerics-v2.bin` opened only if `size == dict.len()*8` (length pre-validated). |
+| `src/lib.rs:1592` | `Mmap::map` | own-for-lifetime | `temporals-v2.bin` opened only if `size == dict.len()*9` (length pre-validated). |
 | `src/lib.rs:1885` | slice reinterpret (read) | page-align; perm0 is whole `[u32;3]` rows | `n` from `map_perm`; map outlives the loop. Written by us above. |
 | `src/lib.rs:2303` | slice reinterpret (read) | page-align; perm0 is whole `[u32;3]` rows | same as 1885 (external-build path). |
-| `src/lib.rs:3728` | slice reinterpret (write) | POD-bytes | reinterpret the f64 numerics cache as bytes to write `numerics.bin`. |
+| `src/lib.rs:3728` | slice reinterpret (write) | POD-bytes | reinterpret the f64 numerics cache as bytes to write `numerics-v2.bin`. |
 | `src/lib.rs:3761` | slice reinterpret (write) | POD-bytes | (sq-7ph8) `stream_write_numerics` flush: reinterprets a reusable `Vec<f64>` BLOCK as bytes for `write_all`. (a) `buf` is a live `Vec<f64>` of `buf.len()` elems; `size_of_val(&buf[..]) = len*8` covers the initialised contiguous region exactly. (b) target `u8` has align 1; the f64 source is over-aligned — no misalignment. (c) bytes are only READ (passed to `write_all`), never written through the alias. (d) the `&[u8]` is consumed inside the closure before `buf.clear()`; no provenance/lifetime escape past the source borrow. (e) NATIVE-endian reinterpret, identical to `write_numerics` (3728) it replaces and symmetric with the native-endian READ at `NumData::as_slice` (285): write-native + read-native round-trips on the same arch (the established cache contract; the cache is rebuilt, never shipped cross-arch). Test `streamed_caches_byte_identical_to_dense` asserts byte-identity to the dense write. **GX-5**. [OPUS-4.8] |
-| `src/lib.rs:3805` | slice reinterpret (write) | POD-bytes | (sq-7ph8) `stream_write_temporals` flush_f: reinterprets a reusable `Vec<f64>` instant BLOCK as bytes for `write_all`. Same invariants (a)–(e) as 3761: full-length `len*8` byte view of a live `Vec<f64>`, `u8` align 1, read-only, no escape, native-endian — symmetric with the native-endian temporal read (`temporals.bin` first `n` f64; rows 285/389/456) and byte-identical to `write_temporals` (577). The trailing flag-byte column is written from a `Vec<u8>` (no unsafe). **GX-5**. [OPUS-4.8] |
+| `src/lib.rs:3805` | slice reinterpret (write) | POD-bytes | (sq-7ph8) `stream_write_temporals` flush_f: reinterprets a reusable `Vec<f64>` instant BLOCK as bytes for `write_all`. Same invariants (a)–(e) as 3761: full-length `len*8` byte view of a live `Vec<f64>`, `u8` align 1, read-only, no escape, native-endian — symmetric with the native-endian temporal read (`temporals-v2.bin` first `n` f64; rows 285/389/456) and byte-identical to `write_temporals` (577). The trailing flag-byte column is written from a `Vec<u8>` (no unsafe). **GX-5**. [OPUS-4.8] |
 | `src/lib.rs:3934` | `_mm_prefetch` (x86_64) | hint-only | prefetch is defined for any address; the hint is dropped on a bad one — cannot fault. |
 | `src/lib.rs:3939` | `prfm` asm (aarch64) | hint-only | `prfm pldl1keep` is a hint; `nostack, preserves_flags`; cannot fault or write memory/regs. |
 | `src/lib.rs:3994` | ptr `add` (prefetch arg) | `id-1 < remap.len()` for every dict id | only computes an address for the hint-only `prefetch_read`; never dereferenced here. |
