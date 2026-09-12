@@ -47,7 +47,6 @@
   "exporter_hermetic_tests": 15,
   "exporter_guard_mutations": 6,
   "pending": [
-    "Final SDK feature-edge source integration",
     "Current guest compile and full actual execution including strict negative classification",
     "Current three V1 succinct receipt fixtures with source/artifact export",
     "Independent source review dispositions",
@@ -55,7 +54,35 @@
   ],
   "default_native_boundary": "Strict numeric capacity defaults false; temporal capacity defaults absent. Shared semantic fixes and conditional guard code remain compiled; hosted floors must measure actual native/WASM bytes.",
   "native_model_clippy": "passed -D warnings all targets; /private/tmp/sparq-v1-model-integration-clippy.log",
-  "record_scope": "Inherited V1 preparation is bound to75dbb3bc3050ea3db5a8d80e8bddd9d641d4610e; current dual-version source is described by v2_preparation. Neither record establishes guest execution.",
+  "dependency_freeze": {
+    "upstream_author_checkpoint": "6f7d750ac6c8d8118bdcac6ef6dc0b266c0909b9",
+    "host_local_patches": 6,
+    "guest_local_patches": 4,
+    "explicit_upstream_audit_policies": 6,
+    "existing_root_exemptions_imports_other_policies": "preserved exactly; no new audit or exemption claim",
+    "integration_checks": {
+      "real_patch_policy_and_provenance": "passed",
+      "provenance_regression_functions": 6,
+      "dependency_helper_tests": 9,
+      "native_v1_model_tests": 26,
+      "preflight": "passed"
+    },
+    "logs": [
+      "/private/tmp/sparq-v1-final-sdk-policy.log",
+      "/private/tmp/sparq-v1-final-sdk-provenance-tests.log",
+      "/private/tmp/sparq-v1-final-dependency-helper-tests.log",
+      "/private/tmp/sparq-v1-sdk-final-model.log",
+      "/private/tmp/sparq-v1-final-sdk-preflight.log"
+    ],
+    "sha256": {
+      "zk/sparql-evaluator/Cargo.lock": "cc8d1a8fbef372055bc3e5a65ec74f085021e940ff3c96e1ea03e4d39a38219f",
+      "zk/sparql-evaluator/methods/guest/Cargo.lock": "58ea55da0b37f32324c493625121b28c22ec398742eb20dd39d2366e69825cc9",
+      "vendor/zk-sdk/UPSTREAM.json": "4c54b0665000d9d6ca5504b9a71e8343685ce1a6d1d8f898157b22f19325ea8b",
+      "supply-chain/config.toml": "5fcc3dee4ef39d5163b12c5794229bd8acfc313d2681962891c16622ef8c751e"
+    },
+    "guest_execution_and_current_receipts": "pending; historical c52 receipts remain separate"
+  },
+  "record_scope": "Inherited V1 preparation is bound to a2f72c4f6341dd53032c55f260b4ee8577ac7c4d; the dual-version source is described by v2_preparation. Neither record establishes guest execution.",
   "v2_preparation": {
     "base_commit": "91a43ac2f512e03bef879245d876a4838845f99c",
     "source_sha256": {
@@ -74,11 +101,10 @@
     "native_model_log": "/private/tmp/sparq-v2-temporal-numeric-integrated-model.log",
     "native_model_clippy": "passed -D warnings all targets; /private/tmp/sparq-v2-model-integration-clippy.log",
     "preflight": "passed scoped integration; /private/tmp/sparq-v2-integrated-preflight.log",
-    "exporter_hermetic_tests": 14,
+    "exporter_hermetic_tests": 15,
     "actual_execution_definitions": "All V1 and V2 builtin/aggregate/temporal/numeric capacity cases; three V1 and two V2 genuine receipts with one common exported program. Execution remains pending.",
     "publication_ready": false,
     "pending": [
-      "Final SDK feature-edge integration",
       "Actual framing compilation and strict negative-error classification",
       "All V1 and V2 current-artifact guest executions and five genuine receipts",
       "Independent review dispositions and hosted gates"

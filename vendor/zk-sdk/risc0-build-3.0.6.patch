@@ -10,7 +10,15 @@
  
  [dependencies.docker-generate]
  version = "0.1"
-@@ -96,3 +95,6 @@
+@@ -66,6 +65,7 @@
+ 
+ [dependencies.risc0-zkos-v1compat]
+ version = "2.2.3"
++default-features = false
+ 
+ [dependencies.risc0-zkp]
+ version = "3.0.5"
+@@ -96,3 +96,6 @@
  
  [dependencies.tempfile]
  version = "3"

@@ -17,6 +17,8 @@ sha2 = "0.10"
 risc0-zkvm = { version = "=3.0.6", default-features = false }
 
 [patch.crates-io]
+risc0-zkvm = { path = "../../vendor/zk-sdk/risc0-zkvm-3.0.6" }
+risc0-zkos-v1compat = { path = "../../vendor/zk-sdk/risc0-zkos-v1compat-2.2.3" }
 ark-crypto-primitives = { path = "../../vendor/zk-sdk/ark-crypto-primitives-0.5.0" }
 # [GPT-6] Exact upstream archives with narrowly recorded dependency/feature patches.
 risc0-build = { path = "../../vendor/zk-sdk/risc0-build-3.0.6" }
