@@ -162,7 +162,7 @@ impl<'a> ExactTemporal<'a> {
 }
 
 // [GPT-6] Cache only owned scalar fields and offsets, never self-references.
-// Dictionary re-encoding preserves lexical bytes; appended IDs invalidate the memo.
+// Dictionary re-encoding preserves lexical bytes; appends extend an initialized memo.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct CacheCell {
     seconds: i128,

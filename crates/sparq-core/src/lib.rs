@@ -11674,10 +11674,30 @@ mod exact_temporal_cache_tests {
     }
 
     #[test]
-    fn appends_parse_only_new_temporal_ids_in_dense_sparse_and_forked_graphs() {
+    fn appends_parse_only_new_temporal_ids_in_dense_compressed_and_forked_graphs() {
         assert_incremental_parse_work(append_fixture());
         assert_incremental_parse_work(append_fixture().into_compressed());
         assert_incremental_parse_work(append_fixture().fork());
+    }
+
+    #[test]
+    fn appends_preserve_initialized_memo_with_sparse_temporal_backing() {
+        // [GPT-6] Compression alone does not select sparse temporal storage:
+        // more than three quarters of dictionary terms must be non-temporal.
+        let mut graph = append_fixture();
+        let strings: Vec<_> = (0..512).map(|i| [
+            Term::NamedNode(oxrdf::NamedNode::new_unchecked("http://ex/s")),
+            Term::NamedNode(oxrdf::NamedNode::new_unchecked("http://ex/text")),
+            Term::Literal(oxrdf::Literal::new_simple_literal(format!("ordinary {i}"))),
+        ]).collect();
+        graph.apply_delta(&strings, &[]).unwrap();
+        let sparse = graph.into_compressed();
+        assert!(matches!(sparse.temporals, TempData::Sparse(_)), "fixture must activate sparse backing");
+        let fork = sparse.fork();
+        assert!(matches!(&fork.temporals, TempData::Forked { base, .. }
+            if matches!(base.as_ref(), TempData::Sparse(_))));
+        assert_incremental_parse_work(sparse);
+        assert_incremental_parse_work(fork);
     }
 
     #[test]
