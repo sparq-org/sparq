@@ -1,0 +1,286 @@
+{
+  "authored_by": "GPT-6",
+  "normative_source": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#ebv",
+  "interpretation": "Exact integer/decimal EBV classification does not consume the arithmetic representation lane. Invalid numeric/boolean lexical EBV is false per REC17.2.2; arithmetic capacity is a separate whole-evaluation failure. Synthetic manual goldens, not generated engine answers.",
+  "cases": [
+    {
+      "id": "tiny-positive-stored-ask",
+      "query": "ASK {?s ?p ?n FILTER(?n)}",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \"0.0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001\"^^<http://www.w3.org/2001/XMLSchema#decimal> .\n",
+      "expected_result": {
+        "Ask": true
+      }
+    },
+    {
+      "id": "tiny-negative-stored-ask",
+      "query": "ASK {?s ?p ?n FILTER(?n)}",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \"-0.0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001\"^^<http://www.w3.org/2001/XMLSchema#decimal> .\n",
+      "expected_result": {
+        "Ask": true
+      }
+    },
+    {
+      "id": "tiny-if",
+      "query": "SELECT (IF(?n,true,false) AS ?v) {?s ?p ?n}",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \"0.0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001\"^^<http://www.w3.org/2001/XMLSchema#decimal> .\n",
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "v"
+          ],
+          "order": "Bag",
+          "rows": [
+            [
+              "\"true\"^^<http://www.w3.org/2001/XMLSchema#boolean>"
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "tiny-not",
+      "query": "SELECT (!?n AS ?v) {?s ?p ?n}",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \"0.0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001\"^^<http://www.w3.org/2001/XMLSchema#decimal> .\n",
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "v"
+          ],
+          "order": "Bag",
+          "rows": [
+            [
+              "\"false\"^^<http://www.w3.org/2001/XMLSchema#boolean>"
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "tiny-and",
+      "query": "SELECT (?n && true AS ?v) {?s ?p ?n}",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \"0.0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001\"^^<http://www.w3.org/2001/XMLSchema#decimal> .\n",
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "v"
+          ],
+          "order": "Bag",
+          "rows": [
+            [
+              "\"true\"^^<http://www.w3.org/2001/XMLSchema#boolean>"
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "tiny-or",
+      "query": "SELECT (?n || false AS ?v) {?s ?p ?n}",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \"0.0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001\"^^<http://www.w3.org/2001/XMLSchema#decimal> .\n",
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "v"
+          ],
+          "order": "Bag",
+          "rows": [
+            [
+              "\"true\"^^<http://www.w3.org/2001/XMLSchema#boolean>"
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "large-integer",
+      "query": "ASK {VALUES ?n {\"9999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999\"^^<http://www.w3.org/2001/XMLSchema#integer>} FILTER(?n)}",
+      "dataset_ntriples": "",
+      "expected_result": {
+        "Ask": true
+      }
+    },
+    {
+      "id": "negative-decimal-zero",
+      "query": "ASK {VALUES ?n {\"-0.0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\"^^<http://www.w3.org/2001/XMLSchema#decimal>} FILTER(?n)}",
+      "dataset_ntriples": "",
+      "expected_result": {
+        "Ask": false
+      }
+    },
+    {
+      "id": "float-underflow",
+      "query": "ASK {VALUES ?n {\"1e-46\"^^<http://www.w3.org/2001/XMLSchema#float>} FILTER(?n)}",
+      "dataset_ntriples": "",
+      "expected_result": {
+        "Ask": false
+      }
+    },
+    {
+      "id": "double-not-underflow",
+      "query": "ASK {VALUES ?n {\"1e-46\"^^<http://www.w3.org/2001/XMLSchema#double>} FILTER(?n)}",
+      "dataset_ntriples": "",
+      "expected_result": {
+        "Ask": true
+      }
+    },
+    {
+      "id": "nan",
+      "query": "ASK {VALUES ?n {\"NaN\"^^<http://www.w3.org/2001/XMLSchema#double>} FILTER(?n)}",
+      "dataset_ntriples": "",
+      "expected_result": {
+        "Ask": false
+      }
+    },
+    {
+      "id": "infinity",
+      "query": "ASK {VALUES ?n {\"INF\"^^<http://www.w3.org/2001/XMLSchema#float>} FILTER(?n)}",
+      "dataset_ntriples": "",
+      "expected_result": {
+        "Ask": true
+      }
+    },
+    {
+      "id": "invalid-integer",
+      "query": "ASK {VALUES ?n {\"1.5\"^^<http://www.w3.org/2001/XMLSchema#integer>} FILTER(?n)}",
+      "dataset_ntriples": "",
+      "expected_result": {
+        "Ask": false
+      }
+    },
+    {
+      "id": "invalid-byte-not",
+      "query": "SELECT (!\"1200\"^^<http://www.w3.org/2001/XMLSchema#byte> AS ?v) {}",
+      "dataset_ntriples": "",
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "v"
+          ],
+          "order": "Bag",
+          "rows": [
+            [
+              "\"true\"^^<http://www.w3.org/2001/XMLSchema#boolean>"
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "invalid-boolean-not",
+      "query": "SELECT (!\"yes\"^^<http://www.w3.org/2001/XMLSchema#boolean> AS ?v) {}",
+      "dataset_ntriples": "",
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "v"
+          ],
+          "order": "Bag",
+          "rows": [
+            [
+              "\"true\"^^<http://www.w3.org/2001/XMLSchema#boolean>"
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "ordinary-ebv-error",
+      "query": "SELECT (COALESCE(IF(<http://ex/iri>,1,2),7) AS ?v) {}",
+      "dataset_ntriples": "",
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "v"
+          ],
+          "order": "Bag",
+          "rows": [
+            [
+              "\"7\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "large-unary-plus-term",
+      "query": "SELECT (+?n AS ?v) {?s ?p ?n}",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \"0.0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001\"^^<http://www.w3.org/2001/XMLSchema#decimal> .\n",
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "v"
+          ],
+          "order": "Bag",
+          "rows": [
+            [
+              "\"0.0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001\"^^<http://www.w3.org/2001/XMLSchema#decimal>"
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "arithmetic-filter",
+      "query": "ASK {?s ?p ?n FILTER(?n+1)}",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \"0.0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001\"^^<http://www.w3.org/2001/XMLSchema#decimal> .\n",
+      "expected_capacity_error": true
+    },
+    {
+      "id": "arithmetic-coalesce",
+      "query": "ASK {?s ?p ?n FILTER(COALESCE(IF(?n+1,1,2),7))}",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \"0.0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001\"^^<http://www.w3.org/2001/XMLSchema#decimal> .\n",
+      "expected_capacity_error": true
+    },
+    {
+      "id": "arithmetic-and",
+      "query": "ASK {?s ?p ?n FILTER((?n+1) && false)}",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \"0.0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001\"^^<http://www.w3.org/2001/XMLSchema#decimal> .\n",
+      "expected_capacity_error": true
+    }
+  ],
+  "independent_engine_observations": {
+    "versions": {
+      "pyoxigraph": "0.5.11",
+      "rdflib": "7.6.0"
+    },
+    "cases": [
+      {
+        "id": "tiny-positive",
+        "query": "ASK {FILTER(\"0.0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001\"^^<http://www.w3.org/2001/XMLSchema#decimal>)}",
+        "pyoxigraph": false,
+        "rdflib": true
+      },
+      {
+        "id": "tiny-negative",
+        "query": "ASK {FILTER(\"-0.0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001\"^^<http://www.w3.org/2001/XMLSchema#decimal>)}",
+        "pyoxigraph": false,
+        "rdflib": true
+      },
+      {
+        "id": "invalid-integer",
+        "query": "ASK {FILTER(\"1.5\"^^<http://www.w3.org/2001/XMLSchema#integer>)}",
+        "pyoxigraph": false,
+        "rdflib": false
+      },
+      {
+        "id": "invalid-boolean-not",
+        "query": "ASK {FILTER(!\"yes\"^^<http://www.w3.org/2001/XMLSchema#boolean>)}",
+        "pyoxigraph": false,
+        "rdflib": true
+      },
+      {
+        "id": "float-underflow",
+        "query": "ASK {FILTER(\"1e-46\"^^<http://www.w3.org/2001/XMLSchema#float>)}",
+        "pyoxigraph": false,
+        "rdflib": true
+      },
+      {
+        "id": "double-nonzero",
+        "query": "ASK {FILTER(\"1e-46\"^^<http://www.w3.org/2001/XMLSchema#double>)}",
+        "pyoxigraph": true,
+        "rdflib": true
+      }
+    ]
+  },
+  "differential_note": "These pinned observations disagree. REC17.2.2 and datatype value-space rules determine goldens; no cross-engine consensus is claimed."
+}

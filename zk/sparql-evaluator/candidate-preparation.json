@@ -1,0 +1,90 @@
+{
+  "schema": "sparq-evaluator-candidate-preparation-v1",
+  "base_commit": "a816cf6b0e3bf7ed700f749a08240da3e22a552b",
+  "scope": "Historical native integration and execution-definition snapshot at the recorded base and source hashes. Later completed hosted execution and dependency policy evidence are linked below; these historical measurements and hashes have not been replaced.",
+  "publication_ready": false,
+  "source_sha256": {
+    "crates/sparq-core/src/lib.rs": "8bf52d61b30421c8bfa2e73b7733e86f786ffabff074be720f915bc4df419aeb",
+    "crates/sparq-core/src/temporal.rs": "8b986a313f9daf148029afbae7cbae8ab9edf8b7333717de067b5a20922d5da5",
+    "crates/sparq-core/src/temporal/exact.rs": "931ddc5522167bbac7c47bb70adf54a32af3f5a9231e7e05e74feec5847f5729",
+    "crates/sparq-engine/src/lib.rs": "66a483e0f1c669f1582e18da40cfe1d27de8069e211aaf5670375d19816e0e23",
+    "crates/sparq-engine/src/exec.rs": "29e6761f4b2d4a34323511c1a93e25419cd9059c17e400c3a7c5872d7d8bdc93",
+    "crates/sparq-engine/src/numeric_capacity.rs": "12be8b74c91a3696ed89bff041789f82bd466904aada413b4e648002097268b6",
+    "zk/sparql-evaluator/model/src/evaluate.rs": "a484bac85977fd89437227be3c17431d837bcad78366b71be7e78b92d1fa54e6",
+    "zk/sparql-evaluator/model/tests/builtin_edges.rs": "ff93cd4030993e0b7d740b2e7054b0dc1c2c712b20f75e37c6ad69ccab9e640e",
+    "zk/sparql-evaluator/host/tests/actual_builtin_edges.rs": "4800f6ec0f5138ac006a70bd0693a62ba93af2c2de783b33ef3bc17f8d11b141",
+    "zk/sparql-evaluator/host/tests/actual_aggregates.rs": "3d745ec0749f6ab31380ccf748c57c1d9d229e41a64f5e8332c9e754360212e9",
+    "zk/sparql-evaluator/host/tests/actual_temporal.rs": "3a69a8a00caa89aaabf5320c603cb6d69ad89f27937d71934131e375baf4b79b",
+    "zk/sparql-evaluator/host/tests/actual_numeric_capacity.rs": "ddab96fd4307189d3406501a53df6c27b3e25903b5461f8f25352eaeda48e319",
+    "zk/sparql-evaluator/host/tests/real_proof.rs": "28bba0d90f996963e3987fed3cc5f60a438e26ea9c3407873d59ddfce1bd4712",
+    "zk/sparql-evaluator/host/tests/support/evidence.rs": "a26aaaa309db5a67171fe72fa99e72379cadbfe269d996f106ca59622433302a"
+  },
+  "native_tests": {
+    "core_unit": 229,
+    "core_pre_existing_ignored": 4,
+    "core_temporal": 5,
+    "engine_unit": 406,
+    "engine_pre_existing_ignored": 2,
+    "engine_temporal": 7,
+    "engine_numeric_capacity": 3,
+    "v1_model": 26,
+    "logs": [
+      "/private/tmp/sparq-v1-temporal-numeric-native.log",
+      "/private/tmp/sparq-v1-temporal-numeric-integrated-model.log"
+    ]
+  },
+  "fixture_definitions": {
+    "builtin_rec_derived": 167,
+    "old_unbounded_builtin_capacity_goldens_preserved_but_rejected_in_proof_mode": 2,
+    "aggregate_admitted": 12,
+    "aggregate_rejected": 12,
+    "temporal_rec_derived": 28,
+    "temporal_capacity_rejected": 13,
+    "numeric_capacity_rejected": 21,
+    "numeric_guest_success_control": 1
+  },
+  "native_clippy": "core/engine/reason all targets with mmap, parallel, vectorized, id-filter-fastpath, topk-lazy-strkey, substrate-compare passed; /private/tmp/sparq-v1-common-integration-clippy.log",
+  "exporter_hermetic_tests": 15,
+  "exporter_guard_mutations": 6,
+  "pending": [
+    "Independent source review dispositions",
+    "Fresh integrated mandatory hosted policy, feature-OFF/WASM and other gates"
+  ],
+  "default_native_boundary": "Strict numeric capacity defaults false; temporal capacity defaults absent. Shared semantic fixes and conditional guard code remain compiled; hosted floors must measure actual native/WASM bytes.",
+  "native_model_clippy": "passed -D warnings all targets; /private/tmp/sparq-v1-model-integration-clippy.log",
+  "dependency_freeze": {
+    "upstream_author_checkpoint": "6f7d750ac6c8d8118bdcac6ef6dc0b266c0909b9",
+    "host_local_patches": 6,
+    "guest_local_patches": 4,
+    "explicit_upstream_audit_policies": 6,
+    "existing_root_exemptions_imports_other_policies": "Historical preparation state: original root values preserved and no new audit or exemption assembled at that snapshot. Later separately reviewed policy assembly is recorded in the linked dependency validation.",
+    "integration_checks": {
+      "real_patch_policy_and_provenance": "passed",
+      "provenance_regression_functions": 6,
+      "dependency_helper_tests": 9,
+      "native_v1_model_tests": 26,
+      "preflight": "passed"
+    },
+    "logs": [
+      "/private/tmp/sparq-v1-final-sdk-policy.log",
+      "/private/tmp/sparq-v1-final-sdk-provenance-tests.log",
+      "/private/tmp/sparq-v1-final-dependency-helper-tests.log",
+      "/private/tmp/sparq-v1-sdk-final-model.log",
+      "/private/tmp/sparq-v1-final-sdk-preflight.log"
+    ],
+    "sha256": {
+      "zk/sparql-evaluator/Cargo.lock": "cc8d1a8fbef372055bc3e5a65ec74f085021e940ff3c96e1ea03e4d39a38219f",
+      "zk/sparql-evaluator/methods/guest/Cargo.lock": "58ea55da0b37f32324c493625121b28c22ec398742eb20dd39d2366e69825cc9",
+      "vendor/zk-sdk/UPSTREAM.json": "4c54b0665000d9d6ca5504b9a71e8343685ce1a6d1d8f898157b22f19325ea8b",
+      "supply-chain/config.toml": "5fcc3dee4ef39d5163b12c5794229bd8acfc313d2681962891c16622ef8c751e"
+    },
+    "guest_execution_and_current_receipts": "Pending at this historical preparation snapshot; the later completed campaign is recorded in hosted-a2-evidence.json."
+  },
+  "snapshot_status": "historical_preparation_snapshot",
+  "later_evidence": {
+    "completed_hosted_execution": "hosted-a2-evidence.json",
+    "reviewed_dependency_policy_validation": "../../research/zk-dependency-backlog/validation.json",
+    "dependency_review_provenance": "../../research/zk-dependency-backlog/README.md",
+    "note": "Hosted evidence binds its actual PR head, merge checkout and artifact. It does not retroactively assign current-source validity to this historical source hash map. Publication readiness remains false pending reviews and fresh integrated gates."
+  }
+}

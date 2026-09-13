@@ -1,0 +1,188 @@
+{
+  "schema": "sparq-temporal-cache-native-evidence-v1",
+  "authored_by": "GPT-6",
+  "base_source_sha": "236d5574d1afd11fdde3bb1e533c5ad1893d1bd5",
+  "reviewed_prior_source_sha": "c0ab8a98f2439bf2d02abe398be4497d02416a57",
+  "scope": "Native source validation only; no new guest/artifact/receipt or full workspace/hosted claim.",
+  "source_sha256": {
+    "crates/sparq-core/src/lib.rs": "9a035b221e1cf0a9904e0d8e89e36d279a5481c5b19889c80682f9ad1740a875",
+    "crates/sparq-core/src/temporal.rs": "8b986a313f9daf148029afbae7cbae8ab9edf8b7333717de067b5a20922d5da5",
+    "crates/sparq-core/src/temporal/exact.rs": "931ddc5522167bbac7c47bb70adf54a32af3f5a9231e7e05e74feec5847f5729",
+    "crates/sparq-engine/src/exec.rs": "a0be958de5f1bb69b39f069b18133986082cf9899ff6ed71a0a092a478ffaffa"
+  },
+  "mutations": [
+    {
+      "name": "warm-date-reparse",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "sparq-core",
+        "--features",
+        "mmap,parallel",
+        "--lib",
+        "exact_temporal_cache_tests::exact_cache_reuses_validation_and_preserves_fractional_precision"
+      ],
+      "status": 101,
+      "assertion_failure_observed": true,
+      "mutated_source_sha256": {
+        "crates/sparq-core/src/lib.rs": "bd12396c245f930b9e0e812d526c97f6c49834d9358908a3a37b26bf628fdbcf",
+        "crates/sparq-core/src/temporal.rs": "8b986a313f9daf148029afbae7cbae8ab9edf8b7333717de067b5a20922d5da5",
+        "crates/sparq-core/src/temporal/exact.rs": "931ddc5522167bbac7c47bb70adf54a32af3f5a9231e7e05e74feec5847f5729",
+        "crates/sparq-engine/src/exec.rs": "a0be958de5f1bb69b39f069b18133986082cf9899ff6ed71a0a092a478ffaffa"
+      },
+      "log": "/private/tmp/sparq-temporal-cache-mutant-warm-date-reparse.log"
+    },
+    {
+      "name": "sort-date-reparse",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "sparq-engine",
+        "--features",
+        "parallel,vectorized,id-filter-fastpath,topk-lazy-strkey",
+        "--lib",
+        "exact_temporal_sort_cache_tests"
+      ],
+      "status": 101,
+      "assertion_failure_observed": true,
+      "mutated_source_sha256": {
+        "crates/sparq-core/src/lib.rs": "9a035b221e1cf0a9904e0d8e89e36d279a5481c5b19889c80682f9ad1740a875",
+        "crates/sparq-core/src/temporal.rs": "8b986a313f9daf148029afbae7cbae8ab9edf8b7333717de067b5a20922d5da5",
+        "crates/sparq-core/src/temporal/exact.rs": "931ddc5522167bbac7c47bb70adf54a32af3f5a9231e7e05e74feec5847f5729",
+        "crates/sparq-engine/src/exec.rs": "781ab0b04ebcf46f92840dec878e6047c69f22fa78ad2833caa8d3913528c7d6"
+      },
+      "log": "/private/tmp/sparq-temporal-cache-mutant-sort-date-reparse.log"
+    },
+    {
+      "name": "year-zero-bypass",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "sparq-engine",
+        "--features",
+        "parallel,vectorized,id-filter-fastpath,topk-lazy-strkey",
+        "--test",
+        "exact_temporal",
+        "year_zero_is_a_capacity_failure_before_expression_error_handling"
+      ],
+      "status": 101,
+      "assertion_failure_observed": true,
+      "mutated_source_sha256": {
+        "crates/sparq-core/src/lib.rs": "9a035b221e1cf0a9904e0d8e89e36d279a5481c5b19889c80682f9ad1740a875",
+        "crates/sparq-core/src/temporal.rs": "8b986a313f9daf148029afbae7cbae8ab9edf8b7333717de067b5a20922d5da5",
+        "crates/sparq-core/src/temporal/exact.rs": "c8a3d97de6567ccf9ca237b24da0a884b32c937112d6378c584da0691b88da77",
+        "crates/sparq-engine/src/exec.rs": "a0be958de5f1bb69b39f069b18133986082cf9899ff6ed71a0a092a478ffaffa"
+      },
+      "log": "/private/tmp/sparq-temporal-cache-mutant-year-zero-bypass.log"
+    }
+  ],
+  "restored_source_sha256": {
+    "crates/sparq-core/src/lib.rs": "9a035b221e1cf0a9904e0d8e89e36d279a5481c5b19889c80682f9ad1740a875",
+    "crates/sparq-core/src/temporal.rs": "8b986a313f9daf148029afbae7cbae8ab9edf8b7333717de067b5a20922d5da5",
+    "crates/sparq-core/src/temporal/exact.rs": "931ddc5522167bbac7c47bb70adf54a32af3f5a9231e7e05e74feec5847f5729",
+    "crates/sparq-engine/src/exec.rs": "a0be958de5f1bb69b39f069b18133986082cf9899ff6ed71a0a092a478ffaffa"
+  },
+  "native_tests": [
+    {
+      "scope": "core lib mmap+parallel",
+      "passed": 213,
+      "pre_existing_ignored": 4,
+      "log": "/private/tmp/sparq-temporal-cache-core-all.log"
+    },
+    {
+      "scope": "engine lib parallel+vectorized+id-filter-fastpath+topk-lazy-strkey",
+      "passed": 405,
+      "pre_existing_ignored": 2,
+      "log": "/private/tmp/sparq-temporal-cache-restored-engine.log"
+    },
+    {
+      "scope": "engine exact_temporal integration",
+      "passed": 6,
+      "log": "/private/tmp/sparq-temporal-cache-restored-engine.log"
+    },
+    {
+      "scope": "model all evaluate tests",
+      "log": "/private/tmp/sparq-temporal-cache-restored-model.log"
+    },
+    {
+      "scope": "final restored core cache incl mmap + NO_ID controls",
+      "passed": 3,
+      "log": "/private/tmp/sparq-temporal-cache-final-core.log"
+    }
+  ],
+  "lint": {
+    "scope": "core+engine+reason all targets, mmap/parallel/vectorized/id-filter-fastpath/topk-lazy-strkey/substrate-compare",
+    "result": "passed -D warnings",
+    "log": "/private/tmp/sparq-temporal-cache-clippy.log"
+  },
+  "fixture_inventory": {
+    "original_rec_derived_temporal_cases_unchanged": 26,
+    "capacity_rejections": 12
+  },
+  "guest_execution": "pending current combined source freeze",
+  "hosted_ratchets": "pending",
+  "external_delta_review": "pending",
+  "original_source_sha256": {
+    "crates/sparq-core/src/lib.rs": "9a035b221e1cf0a9904e0d8e89e36d279a5481c5b19889c80682f9ad1740a875",
+    "crates/sparq-core/src/temporal.rs": "8b986a313f9daf148029afbae7cbae8ab9edf8b7333717de067b5a20922d5da5",
+    "crates/sparq-core/src/temporal/exact.rs": "931ddc5522167bbac7c47bb70adf54a32af3f5a9231e7e05e74feec5847f5729",
+    "crates/sparq-engine/src/exec.rs": "a0be958de5f1bb69b39f069b18133986082cf9899ff6ed71a0a092a478ffaffa"
+  },
+  "model_lint": {
+    "result": "passed -D warnings all targets",
+    "log": "/private/tmp/sparq-temporal-cache-model-clippy.log"
+  },
+  "final_combined_native_gate": {
+    "command": "cargo test --locked -p sparq-core -p sparq-engine --features sparq-core/mmap,sparq-core/parallel,sparq-engine/parallel,sparq-engine/vectorized,sparq-engine/id-filter-fastpath,sparq-engine/topk-lazy-strkey --lib --test exact_temporal",
+    "core_unit_passed": 229,
+    "core_pre_existing_ignored": 4,
+    "core_temporal_integration_passed": 5,
+    "engine_unit_passed": 405,
+    "engine_pre_existing_ignored": 2,
+    "engine_temporal_integration_passed": 6,
+    "log": "/private/tmp/sparq-temporal-cache-final-all.log"
+  },
+  "validated_fixture_sha256": {
+    "crates/sparq-core/tests/exact_temporal.rs": "4bb644ebae4475ffe654304049d7905b636e07dd16ca7950ff01d3c0f82b9698",
+    "crates/sparq-engine/tests/exact_temporal.rs": "a5ef34d16f97611c61d25d6e60f812cb88f146f8e936ba8cf288cd2a2e78c70d",
+    "crates/sparq-engine/tests/fixtures/exact_temporal.json": "109bf0d0442dfd88c3c22ec769e12b9ba84e1a5cb53171d96c3c4d3e542b19d2",
+    "zk/sparql-evaluator/fixtures/conformance/temporal-capacity.json": "ca394d226cc2382ef5761cf6d9f624c8d1782395614e2010cd0c65d6143f4071"
+  },
+  "core_capacity_expectation_correction": "Year0000 moved from the old malformed-value group into the explicit positive-year capacity rejection group; original26 query expectations unchanged.",
+  "followup_test_checkpoint": {
+    "runtime_source_commit": "d5458d3954a2ae63e0e2dd3224b51d8e7bc4384f",
+    "scope": "Test-only follow-up; earlier mutation and full-suite evidence remains bound to d545 source. The lib.rs change is inside cfg(test). No new guest execution claim.",
+    "source_sha256": {
+      "crates/sparq-core/src/lib.rs": "8bf52d61b30421c8bfa2e73b7733e86f786ffabff074be720f915bc4df419aeb",
+      "crates/sparq-engine/tests/exact_temporal.rs": "7126078274f144f0309ecbf577412d3084000a92f4fcaa871b121c79af1cdf79",
+      "crates/sparq-engine/tests/fixtures/exact_temporal.json": "7c792689ce969842fd89d4458b9c16bd168bdebc8d70ac938ca528ff7998e973",
+      "zk/sparql-evaluator/fixtures/conformance/temporal-capacity.json": "0a0bea138d07480cd10c7c427ab5092b6562af0c70cf5b4e5ce15803f4e5fc7b"
+    },
+    "original_26_fixture_objects_unchanged": true,
+    "rec_derived_temporal_cases": 28,
+    "capacity_rejections": 13,
+    "native_tests": [
+      {
+        "scope": "reopened mmap long-fraction cache",
+        "passed": 1,
+        "log": "/private/tmp/sparq-temporal-cache-long-mmap.log"
+      },
+      {
+        "scope": "engine exact temporal integration including ORDER ties and year-zero stored ASK/COUNT",
+        "passed": 7,
+        "log": "/private/tmp/sparq-temporal-cache-followup-engine.log"
+      },
+      {
+        "scope": "native model temporal and capacity runners",
+        "passed": 2,
+        "log": "/private/tmp/sparq-temporal-cache-followup-model.log"
+      }
+    ]
+  }
+}

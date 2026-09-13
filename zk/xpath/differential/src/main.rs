@@ -37,8 +37,8 @@
 //! This harness is **VERIFICATION, not proof**. Its trusted computing base is:
 //!
 //! 1. **sparq's Rust XSD evaluator** — itself UNAUDITED; it is the repo's reference
-//!    semantics, not a proven-correct implementation. Two live divergences from XPath F&O
-//!    are already recorded in [`DIVERGENCES`].
+//!    semantics, not a proven-correct implementation. One live divergence from XPath F&O
+//!    is recorded in [`DIVERGENCES`].
 //! 2. **The SAMPLE** — the corpus is hand-picked edge cases, not exhaustive. A wrong
 //!    answer on an unsampled input is not caught.
 //! 3. **The Noir → ACIR → Barretenberg lowering** — entirely untrusted-but-unchecked here.
@@ -248,14 +248,6 @@ struct Divergence {
 
 const DIVERGENCES: &[Divergence] = &[
     Divergence {
-        expr: "SUBSTR(s, start, len) for start < 1",
-        sparq: "clamps start to 1 and then takes `len` characters",
-        spec: "the window [start, start+len) is NOT shifted, so a start below 1 consumes length",
-        why: "sparq-engine exec.rs SubStr uses `start.max(1) - 1` then `.take(len)`; F&O 3.1 \
-              §5.4.3 `fn:substring` keeps the window. e.g. SUBSTR(\"12345\", 0, 3) is \"12\", \
-              not \"123\".",
-    },
-    Divergence {
         expr: "ROUND(xsd:double(\"-0.5\"))",
         sparq: "+0.0 (lexical \"0\")",
         spec: "-0.0E0 — a negative argument in [-0.5, 0) rounds to NEGATIVE zero",
@@ -336,8 +328,8 @@ fn pair_corpus() -> Vec<(S, S)> {
 /// an un-normalized window.
 ///
 /// `start < 1` cases carry the F&O window semantics that `sq-3x7dl.6` fixed in the
-/// circuit; sparq-engine still shifts (see [`DIVERGENCES`]), so those rows are emitted
-/// commented-out against the spec value.
+/// circuit. [GPT-6] sparq-engine now agrees, so every row must pass the ordinary
+/// oracle/reference equality check and remain a live circuit assertion.
 fn substring_corpus() -> Vec<(&'static str, usize, i64, i64)> {
     vec![
         // (value, cap, start, length)
@@ -772,8 +764,7 @@ enum Positions {
 fn gen_substring(out: &mut String, g: &Graph, c: &mut Counts, f: &mut Faults) {
     writeln!(out, "/// fn:substring — ASCII-only (see the byte-vs-codepoint scope limit above).").unwrap();
     writeln!(out, "/// Oracle: SPARQL `SUBSTR`, cross-checked against the F&O 3.1 sec. 5.4.3 fn:substring").unwrap();
-    writeln!(out, "/// window. The `start < 1` rows are SPEC-REFERENCE (see the header): sparq-engine shifts").unwrap();
-    writeln!(out, "/// the window, so their expected value is F&O's, and they assert noir_XPath against the SPEC.").unwrap();
+    writeln!(out, "/// window, including starts below one. Every row must agree with the reference.").unwrap();
     writeln!(out, "///").unwrap();
     writeln!(out, "/// Positions reach the circuit VERBATIM here, which is what holds noir_XPath to the F&O").unwrap();
     writeln!(out, "/// window arithmetic itself (sq-3x7dl.6). Multibyte content is covered separately, by").unwrap();
@@ -859,22 +850,12 @@ fn substring_section(
         let expr = format!("SUBSTR({}, {start}, {length})", sparql_str(value));
         let sparq_answer = oracle_plain_string(g, &expr);
         let spec_answer = fo_substring(value, start, length);
-        let diverges = sparq_answer != spec_answer;
-        // A divergence is only ever expected for the recorded start < 1 window bug.
-        assert!(
-            !diverges || start < 1,
-            "UNRECORDED oracle divergence on `{expr}`: sparq-engine {sparq_answer:?} vs \
-             F&O {spec_answer:?}. Investigate before pinning — do not widen DIVERGENCES blindly."
+        // [GPT-6] The historical shifted-window exception is fixed. Any renewed
+        // mismatch must now abort generation, including starts below one.
+        assert_eq!(
+            sparq_answer, spec_answer,
+            "oracle/reference substring mismatch on `{expr}`"
         );
-        if diverges {
-            writeln!(out, "    // SPEC-REFERENCE (start < 1): sparq-engine says {sparq_answer:?}, F&O 3.1 sec. 5.4.3").unwrap();
-            writeln!(out, "    // fn:substring says {spec_answer:?}. noir_XPath is correct here (sq-3x7dl.6) and the").unwrap();
-            writeln!(out, "    // oracle is not, so the row asserts the SPEC value LIVE — it holds noir_XPath to").unwrap();
-            writeln!(out, "    // F&O, not to sparq.").unwrap();
-            writeln!(out, "    // Drop the special-casing (not the assertion) when the engine is fixed.").unwrap();
-            // One length assertion plus one per expected byte.
-            c.spec_reference += 1 + spec_answer.len();
-        }
         c.assertions += 1 + spec_answer.len();
         // An empty expected result leaves the byte buffer unread; bind it to `_out` so
         // the generated file does not trip Noir's unused-variable warning.
@@ -1459,8 +1440,8 @@ mod tests {
 
     /// The two circuit edges `noir_XPath` FIXED — the F&O window for `start < 1`
     /// (`sq-3x7dl.6`) and negative zero out of `fn:round` — must reach the circuit as LIVE
-    /// assertions. They are the cases the oracle gets wrong, so they are asserted against
-    /// the F&O reference instead; if they were ever emitted commented out, a `noir_XPath`
+    /// assertions. [GPT-6] Substring now agrees with the oracle; ROUND still uses
+    /// the F&O reference. If either were emitted commented out, a `noir_XPath`
     /// regression on an edge it advertises as fixed would go completely undetected while
     /// every other check stayed green. This test is that guard.
     #[test]
@@ -1483,7 +1464,7 @@ mod tests {
             assert!(live.contains(&want), "missing LIVE assertion `{}`", want);
         };
 
-        // substring("12345", 0, 3) == "12" — the F&O window, NOT the oracle's "123".
+        // substring("12345", 0, 3) == "12" — the oracle and F&O window agree.
         // Located by corpus content so a corpus edit cannot silently orphan this guard.
         let i = substring_corpus()
             .iter()
@@ -1503,20 +1484,18 @@ mod tests {
         ));
     }
 
-    /// SELF-EXPIRING GUARD #1. `DIVERGENCES[0]` claims sparq-engine shifts the
-    /// `fn:substring` window when `start < 1`. When that engine bug is fixed this test
-    /// goes RED — the signal to delete the entry and stop special-casing those rows (the
-    /// assertions themselves already run; they just stop needing the F&O expected value).
+    /// [GPT-6] Keep the former divergence cases as affirmative agreement controls.
     #[test]
-    fn recorded_divergence_substring_start_below_one_still_reproduces() {
+    fn substring_start_below_one_agrees_with_the_reference() {
         let g = oracle_graph();
-        assert_eq!(oracle_plain_string(&g, "SUBSTR(\"12345\", 0, 3)"), "123");
-        assert_eq!(fo_substring("12345", 0, 3), "12");
-        assert_eq!(oracle_plain_string(&g, "SUBSTR(\"hello\", -2, 4)"), "hell");
-        assert_eq!(fo_substring("hello", -2, 4), "h");
+        for (value, start, length, expected) in [("12345", 0, 3, "12"), ("hello", -2, 4, "h")] {
+            assert_eq!(fo_substring(value, start, length), expected);
+            let expr = format!("SUBSTR({}, {start}, {length})", sparql_str(value));
+            assert_eq!(oracle_plain_string(&g, &expr), expected);
+        }
     }
 
-    /// SELF-EXPIRING GUARD #2. `DIVERGENCES[1]` claims sparq-engine's `ROUND` loses the
+    /// SELF-EXPIRING GUARD. `DIVERGENCES[0]` claims sparq-engine's `ROUND` loses the
     /// sign of a negative zero result. Goes RED when the engine is fixed, at which point
     /// the row stops being SPEC-REFERENCE and becomes an ordinary oracle-derived one.
     #[test]
@@ -1585,7 +1564,7 @@ mod tests {
         // A non-exact quotient (sq-3x7dl.4).
         assert!(DIVIDE_CORPUS.iter().any(|&(a, b)| a % b != 0));
         // Every mixed-comparison integer is out of i8 range (sq-3x7dl.5).
-        assert!(MIXED_CORPUS.iter().all(|&(n, _)| n < -128 || n > 127));
+        assert!(MIXED_CORPUS.iter().all(|&(n, _)| !(-128..=127).contains(&n)));
         // A pre-1970 dateTime (sq-3x7dl.7).
         assert!(DATETIME_CORPUS.iter().any(|&(_, y, ..)| y < 1970));
     }

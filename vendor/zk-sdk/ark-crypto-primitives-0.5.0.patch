@@ -1,0 +1,49 @@
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -85,6 +85,7 @@
+ [dependencies.derivative]
+ version = "2.0"
+ features = ["use_core"]
++optional = true
+ 
+ [dependencies.digest]
+ version = "0.10"
+@@ -153,9 +154,9 @@
+ 
+ [features]
+ commitment = ["crh"]
+-crh = ["sponge"]
++crh = ["sponge", "dep:derivative"]
+ default = ["std"]
+-encryption = []
++encryption = ["dep:derivative"]
+ merkle_tree = [
+     "crh",
+     "hashbrown",
+@@ -173,7 +174,7 @@
+     "ark-r1cs-std",
+     "tracing",
+ ]
+-signature = []
++signature = ["dep:derivative"]
+ snark = []
+ sponge = ["merlin"]
+ std = [
+@@ -190,3 +191,6 @@
+ [target.'cfg(not(all(target_has_atomic = "8", target_has_atomic = "16", target_has_atomic = "32", target_has_atomic = "64", target_has_atomic = "ptr")))'.dependencies.fnv]
+ version = "1.0"
+ default-features = false
++
++# [GPT-6] Keep the vendored crate independent of the outer workspace.
++[workspace]
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -11,6 +11,8 @@
+ #[macro_use]
+ extern crate ark_std;
+ 
++// [GPT-6] Only these feature families use the unchanged upstream derives.
++#[cfg(any(feature = "crh", feature = "encryption", feature = "signature"))]
+ #[allow(unused_imports)]
+ #[macro_use]
+ extern crate derivative;

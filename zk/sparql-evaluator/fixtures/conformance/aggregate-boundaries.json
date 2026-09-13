@@ -1,0 +1,185 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "aggregate-profile-sum-unbound-values",
+      "query": "SELECT (SUM(?x) AS ?v) {VALUES ?x {1 UNDEF}}",
+      "admitted": false
+    },
+    {
+      "id": "aggregate-profile-avg-unbound-values",
+      "query": "SELECT (AVG(?x) AS ?v) {VALUES ?x {1 UNDEF}}",
+      "admitted": false
+    },
+    {
+      "id": "aggregate-profile-min-unbound-values",
+      "query": "SELECT (MIN(?x) AS ?v) {VALUES ?x {1 UNDEF}}",
+      "admitted": false
+    },
+    {
+      "id": "aggregate-profile-max-unbound-values",
+      "query": "SELECT (MAX(?x) AS ?v) {VALUES ?x {1 UNDEF}}",
+      "admitted": false
+    },
+    {
+      "id": "aggregate-profile-min-expression-error",
+      "query": "SELECT (MIN(?x+0) AS ?v) {VALUES ?x {1 \"bad\"}}",
+      "admitted": false
+    },
+    {
+      "id": "aggregate-profile-max-expression-error",
+      "query": "SELECT (MAX(?x+0) AS ?v) {VALUES ?x {1 \"bad\"}}",
+      "admitted": false
+    },
+    {
+      "id": "aggregate-profile-sum-valid-expression-excluded",
+      "query": "SELECT (SUM(?x+1) AS ?v) {VALUES ?x {1 2}}",
+      "admitted": false
+    },
+    {
+      "id": "aggregate-profile-sum-optional-domain",
+      "query": "SELECT (SUM(?x) AS ?v) {VALUES ?s {<http://ex/a>} OPTIONAL {?s <http://ex/p> ?x}}",
+      "admitted": false
+    },
+    {
+      "id": "aggregate-profile-sum-union-domain",
+      "query": "SELECT (SUM(?x) AS ?v) {{VALUES ?x {1}} UNION {VALUES ?y {2}}}",
+      "admitted": false
+    },
+    {
+      "id": "aggregate-profile-sum-projected-away",
+      "query": "SELECT (SUM(?x) AS ?v) {{SELECT ?y {VALUES (?x ?y) {(1 2)}}}}",
+      "admitted": false
+    },
+    {
+      "id": "aggregate-profile-sum-fallible-bind",
+      "query": "SELECT (SUM(?x) AS ?v) {VALUES ?y {1 \"bad\"} BIND(?y+0 AS ?x)}",
+      "admitted": false
+    },
+    {
+      "id": "aggregate-profile-concat-unbound-domain",
+      "query": "SELECT (GROUP_CONCAT(?x) AS ?v) {VALUES ?x {\"a\" UNDEF}}",
+      "admitted": false
+    },
+    {
+      "id": "aggregate-profile-sum-bound-values",
+      "query": "SELECT (SUM(?x) AS ?v) {VALUES ?x {1 2}}",
+      "admitted": true,
+      "expected_rows": [
+        [
+          "\"3\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+        ]
+      ]
+    },
+    {
+      "id": "aggregate-profile-count-unbound",
+      "query": "SELECT (COUNT(?x) AS ?v) {VALUES ?x {1 UNDEF}}",
+      "admitted": true,
+      "expected_rows": [
+        [
+          "\"1\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+        ]
+      ]
+    },
+    {
+      "id": "aggregate-profile-count-expression-error",
+      "query": "SELECT (COUNT(?x+0) AS ?v) {VALUES ?x {1 \"bad\"}}",
+      "admitted": true,
+      "expected_rows": [
+        [
+          "\"1\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+        ]
+      ]
+    },
+    {
+      "id": "aggregate-profile-sum-bound-union",
+      "query": "SELECT (SUM(?x) AS ?v) {{VALUES ?x {1}} UNION {VALUES ?x {2}}}",
+      "admitted": true,
+      "expected_rows": [
+        [
+          "\"3\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+        ]
+      ]
+    },
+    {
+      "id": "aggregate-profile-sum-bound-alias",
+      "query": "SELECT (SUM(?x) AS ?v) {VALUES ?y {1 2} BIND(?y AS ?x)}",
+      "admitted": true,
+      "expected_rows": [
+        [
+          "\"3\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+        ]
+      ]
+    },
+    {
+      "id": "aggregate-profile-sum-empty",
+      "query": "SELECT (SUM(?x) AS ?v) {FILTER(false)}",
+      "admitted": true,
+      "expected_rows": [
+        [
+          "\"0\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+        ]
+      ]
+    },
+    {
+      "id": "aggregate-profile-avg-empty",
+      "query": "SELECT (AVG(?x) AS ?v) {FILTER(false)}",
+      "admitted": true,
+      "expected_rows": [
+        [
+          "\"0\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+        ]
+      ]
+    },
+    {
+      "id": "aggregate-profile-min-empty",
+      "query": "SELECT (MIN(?x) AS ?v) {FILTER(false)}",
+      "admitted": true,
+      "expected_rows": [
+        [
+          null
+        ]
+      ]
+    },
+    {
+      "id": "aggregate-profile-sum-bound-invalid-facet",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (SUM(?x) AS ?v) {VALUES ?x {1 \"1200\"^^xsd:byte}}",
+      "admitted": true,
+      "expected_rows": [
+        [
+          null
+        ]
+      ]
+    },
+    {
+      "id": "aggregate-profile-sum-bound-nan",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (SUM(?x) AS ?v) {VALUES ?x {1 \"NaN\"^^xsd:double}}",
+      "admitted": true,
+      "expected_rows": [
+        [
+          "\"NaN\"^^<http://www.w3.org/2001/XMLSchema#double>"
+        ]
+      ]
+    },
+    {
+      "id": "aggregate-profile-min-single-nan",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (MIN(?x) AS ?v) {VALUES ?x {\"NaN\"^^xsd:double}}",
+      "admitted": true,
+      "expected_rows": [
+        [
+          "\"NaN\"^^<http://www.w3.org/2001/XMLSchema#double>"
+        ]
+      ]
+    },
+    {
+      "id": "aggregate-profile-max-single-nan",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (MAX(?x) AS ?v) {VALUES ?x {\"NaN\"^^xsd:double}}",
+      "admitted": true,
+      "expected_rows": [
+        [
+          "\"NaN\"^^<http://www.w3.org/2001/XMLSchema#double>"
+        ]
+      ]
+    }
+  ]
+}

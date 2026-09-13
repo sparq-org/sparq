@@ -2198,10 +2198,13 @@ class TestSupplyChainMergeGroupGate(unittest.TestCase):
         glob_to_fragment = {
             "**/*.rs": r"\.rs$",
             "**/Cargo.toml": r"Cargo\.toml$",
-            "Cargo.lock": r"^Cargo\.lock$",
+            "**/Cargo.lock": r"Cargo\.lock$",
             "rust-toolchain*": r"rust-toolchain",
             "deny.toml": r"^deny\.toml$",
             "supply-chain/**": r"^supply-chain/",
+            "vendor/zk-sdk/**": r"^vendor/zk-sdk/",
+            "scripts/rust-dependency-graphs.py": r"rust-dependency-graphs",
+            "scripts/tests/test_rust_dependency_graphs.py": r"test_rust_dependency_graphs",
             ".github/workflows/supply-chain.yml": r"supply-chain\.yml$",
         }
         for glob in self._dorny_rust_filter():

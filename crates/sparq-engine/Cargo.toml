@@ -469,7 +469,9 @@ sha2 = { version = "0.11", optional = true }
 # [OPUS-4.8] (sq-6vshe.4) The SERVICE feature's blocking HTTP client (ureq) moved with
 # the `service` module to the `sparq-engine-service` sub-crate (seam A2), where it keeps
 # the same `cfg(not(wasm32))` gating so no HTTP/TLS stack ever enters the browser bundle.
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# [GPT-6] Proof guests have no ambient OS entropy; their admission layer rejects
+# UUID/RAND. Existing native and WASM dependency graphs are unchanged.
+[target.'cfg(all(not(target_arch = "wasm32"), not(target_os = "zkvm")))'.dependencies]
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]

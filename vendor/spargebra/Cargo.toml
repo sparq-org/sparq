@@ -44,6 +44,8 @@ sep-0002 = []
 sep-0006 = []
 sparql-12 = ["oxrdf/rdf-12"]
 standard-unicode-escaping = []
+# [GPT-6] Detached exact-evaluator lowering; not enabled in the lean engine.
+sparq-deterministic-paths = []
 
 [lib]
 name = "spargebra"

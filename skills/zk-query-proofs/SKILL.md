@@ -100,6 +100,19 @@ cryptographic verification; this surface is not externally audited.
 
 ## Common recipes
 
+<!-- [GPT-6] zkp-10.1: separate exact-dataset contract, not a selected-result upgrade. -->
+The opt-in detached [exact evaluator](references/exact-evaluator.md) proves bounded
+default-graph evaluation with explicit verifier-agreed or holder-declared scope.
+It is experimental and not externally audited; its first adapter carries no
+issuer-signature or credential-status claim.
+[GPT-6] The [campaign evidence guide](references/evaluator-evidence.md) explains
+exact artifact export, actual receipt evidence and source/HAL provenance.
+
+[GPT-6] The [query-coverage corpus](references/evaluator-conformance.md) separates
+executed host semantics, explicit unsupported features, and guest proof evidence.
+Its opt-in NPS comparison recipe records other engines' observations without
+installing dependencies or treating their output as a conformance oracle.
+
 ### 1. Commit a credential graph and attest it as an issuer
 ```rust
 use sparq_zk::commit::commit_triples;
@@ -354,3 +367,27 @@ This input bound is independent of candidate-triple search fuel.
 [GPT-6] Successful-result preparation also checks `MAX_DISCLOSURE_CREDENTIALS`
 before its authentication prepass. Its graph contract is string-canonical only;
 the generated gate matrix records dual-leaf and value-only pairs as unsupported.
+
+[GPT-6] [Exact temporal keys and enforced year capacity](references/exact-temporals.md)
+cover the shared evaluator and separate native/actual-guest regression evidence.
+
+[GPT-6] The exact-dataset evaluator applies the [aggregate operand boundary](references/aggregate-profile.md) in both native admission and guest evaluation. Non-COUNT aggregate operands must be constants or variables proven bound by the inner algebra; expression operands and nullable bindings are outside this initial profile. This is a restriction, not complete aggregate conformance.
+
+## Exact-evaluator SDK dependencies
+
+[GPT-6] The separate [exact evaluator](../../zk/sparql-evaluator/README.md) uses
+detached workspaces. Its [SDK patch record](../../vendor/zk-sdk/README.md) preserves
+upstream source/license identity and documents discovery-only dependency selection
+and derive-macro, server-profiler and kernel-binary feature boundaries, with
+executable patch reconstruction, explicit lockfile patch-selection corruption
+controls, and the native `edge_matrix.py` feature compiler. The kernel's default
+binary dependency activation and embedded ELF remain unchanged; the patch record
+separately documents an upstream real-target binary compilation limitation.
+Synthetic dependency checks remain separate from actual guest proof evidence.
+[GPT-6] The exact evaluator enables the [numeric capacity guard](references/numeric-capacity.md). Valid values beyond the finite arithmetic lane can be returned directly; integer/decimal EBV uses exact zero classification. Unsupported arithmetic/comparison consumption fails the entire evaluation. Native default budgets leave this option off.
+
+[GPT-6] The SDK provenance checks bind both workspace patch tables and resolved
+feature-matrix package manifests to the exact inventoried vendor directories.
+The [SDK reference](../../vendor/zk-sdk/README.md) distinguishes direct Cargo
+kernel defaults from the embedding helper's explicit feature requirement, and
+records library-only Clippy scope separately from kernel or guest execution.

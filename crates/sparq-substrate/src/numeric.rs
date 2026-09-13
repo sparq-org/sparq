@@ -172,7 +172,9 @@ impl Dec {
                 match mode {
                     RoundMode::Floor => q,
                     RoundMode::Ceil => q + i128::from(r > 0),
-                    RoundMode::HalfUp => q + i128::from(r * 2 >= p),
+                    // [GPT-6] Compare against the half threshold without doubling
+                    // a remainder near 10^38, which can overflow signed i128.
+                    RoundMode::HalfUp => q + i128::from(r >= p / 2 + p % 2),
                 }
             }
             None => match mode {
@@ -764,37 +766,47 @@ impl Num {
     }
 
     /// The typed numeric value of a literal, or `None` if the literal is not a
-    /// well-formed numeric (an ill-formed numeric operand is a SPARQL type error).
+    /// valid, representable numeric (an invalid operand is a SPARQL type error).
+    /// Valid integer/decimal values beyond the finite mantissa capacity also return `None`.
     /// This is the EXACT engine lexical path: `parse_xsd_f32`/`parse_xsd_f64` (with the
     /// XSD `INF`/`-INF`/`NaN`/exponent spellings) for float/double, and the
     /// scale-preserving [`Dec::parse_lexical`] for decimal.
     #[inline]
     pub fn of_literal(l: &oxrdf::Literal) -> Option<Num> {
-        use oxrdf::vocab::xsd;
         if l.language().is_some() {
             return None;
         }
-        let dt = l.datatype();
-        let v = l.value().trim();
-        if sparq_core::is_integer_datatype(dt.as_str()) {
+        Self::of_parts(l.value(), l.datatype().as_str())
+    }
+
+    /// Parses borrowed numeric literal parts using the shared datatype and capacity rules.
+    ///
+    /// [GPT-6] Equivalent to [`Self::of_literal`] for a literal without a language tag.
+    /// Returns `None` for invalid lexicals, subtype facet violations, nonnumeric
+    /// datatypes, or values beyond this arithmetic tower's finite representation.
+    #[inline]
+    pub fn of_parts(value: &str, datatype: &str) -> Option<Num> {
+        use oxrdf::vocab::xsd;
+        let v = value.trim_matches([' ', '\t', '\r', '\n']);
+        if !sparq_core::numeric_literal_valid(v, datatype) {
+            return None;
+        }
+        if sparq_core::is_integer_datatype(datatype) {
             if let Ok(i) = v.parse::<i64>() {
                 return Some(Num::Int(i));
             }
-            // Integer beyond i64: exact i128 mantissa if it fits (scale 0 = integer
-            // lexical), else not representable -> double.
             return match Dec::parse(v) {
                 Some(d) if d.scale == 0 => Some(Num::Dec(d)),
-                Some(_) => None, // "1.5"^^xsd:integer is ill-formed
-                None => None,
+                _ => None,
             };
         }
-        if dt == xsd::DECIMAL {
+        if datatype == xsd::DECIMAL.as_str() {
             return Dec::parse_lexical(v).map(Num::Dec);
         }
-        if dt == xsd::FLOAT {
+        if datatype == xsd::FLOAT.as_str() {
             return parse_xsd_f32(v).map(Num::Float);
         }
-        if dt == xsd::DOUBLE {
+        if datatype == xsd::DOUBLE.as_str() {
             return parse_xsd_f64(v).map(Num::Double);
         }
         None
@@ -933,6 +945,19 @@ pub fn fmt_xsd_double(v: f64) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn round_large_scale_remainder_does_not_overflow() {
+        for (lexical, expected) in [
+            ("0.99999999999999999999999999999999999999", 1),
+            ("-0.00000000000000000000000000000000000001", 0),
+            ("0.49999999999999999999999999999999999999", 0),
+            ("-0.50000000000000000000000000000000000001", -1),
+        ] {
+            let d = super::Dec::parse_lexical(lexical).unwrap();
+            assert_eq!(d.round_to_int(super::RoundMode::HalfUp).mant, expected);
+        }
+    }
+
     use super::*;
     use oxrdf::vocab::xsd;
     use oxrdf::Literal;
@@ -2052,10 +2077,10 @@ mod tests {
             ("1.5E2", xsd::DOUBLE),
             ("INF", xsd::DOUBLE),
             ("3.0", xsd::FLOAT),
-            // scale-0-after-normalisation integers `of_literal` accepts as `Dec` (mant, scale 0):
-            ("5.", xsd::INTEGER),        // trailing dot, no fraction -> value 5
-            ("5.0", xsd::INTEGER),       // trailing zero fraction -> normalised scale 0
-            ("5.00", xsd::INTEGER),      // ditto
+            // [GPT-6] Both reject decimal notation for an integer datatype.
+            ("5.", xsd::INTEGER),
+            ("5.0", xsd::INTEGER),
+            ("5.00", xsd::INTEGER),
             ("-0", xsd::INTEGER),        // signed zero
             (".5", xsd::DECIMAL),        // empty integer part
             ("5.5", xsd::DECIMAL),       // ordinary decimal

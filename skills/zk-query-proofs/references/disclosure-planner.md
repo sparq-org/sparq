@@ -94,8 +94,10 @@ variable occurrence to its first occurrence, including repetitions within one
 triple. Backends must enforce RDF term identity, including blank-node scope, on
 these links.
 
-`DisclosureQuery::variables()` gives deterministic first-occurrence variable
-ordering for backend IDs. `canonical_integer` and `integer_comparison` provide
+[GPT-6] `DisclosureQuery::variables()` gives deterministic first-occurrence
+ordering for the planner’s variable IDs. The [successful-result public ABI](successful-results.md)
+instead sorts variable names lexicographically. `canonical_integer` and
+`integer_comparison` provide
 the same narrow numeric semantics to a verifier. Verifiers reparse their public
 query using `DisclosureQuery::parse`; they never trust the public fields of a
 prover-supplied `DisclosureQuery` instance.

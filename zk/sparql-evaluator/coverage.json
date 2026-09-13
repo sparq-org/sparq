@@ -1,0 +1,1509 @@
+{
+  "schema_version": 1,
+  "authored_by": "GPT-6",
+  "tracking": "zkp-10.2",
+  "profile": "SparqSparql11SnapshotV1",
+  "standard_baseline": {
+    "sparql11": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/",
+    "optional_sparql12_working_draft": "https://www.w3.org/TR/2026/WD-sparql12-query-20260910/",
+    "checked_on": "2026-09-12"
+  },
+  "evidence": {
+    "layer": "host_semantics",
+    "corpus": "fixtures/conformance/cases.json",
+    "runner": "model/tests/conformance.rs",
+    "command": "cargo test --locked --manifest-path zk/sparql-evaluator/Cargo.toml -p sparq-proved-evaluator-model --features evaluate --test conformance",
+    "guest_proof_coverage": "not_asserted",
+    "full_w3c_conformance": "not_asserted",
+    "negative_cases_are_feature_support": false
+  },
+  "features": [
+    {
+      "id": "aggregate_distinct",
+      "status": "partial_fixture_coverage",
+      "spec": "https://www.w3.org/TR/sparql11-query/#defn_aggCount",
+      "positive_cases": [
+        "aggregate-count-distinct-unbound"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Only the linked original examples are covered; this is not whole-feature conformance."
+    },
+    {
+      "id": "aggregate_empty",
+      "status": "partial_fixture_coverage",
+      "spec": "https://www.w3.org/TR/sparql11-query/#aggregateExample",
+      "positive_cases": [
+        "aggregate-empty-count"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "COUNT over empty input only; other empty/error aggregates remain unassessed."
+    },
+    {
+      "id": "aggregates",
+      "status": "partial_fixture_coverage",
+      "spec": "https://www.w3.org/TR/sparql11-query/#defn_aggMin",
+      "positive_cases": [
+        "aggregate-min-max",
+        "aggregate-average-value",
+        "aggregate-sample-unambiguous",
+        "aggregate-group-concat-unambiguous"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "SAMPLE and GROUP_CONCAT use unambiguous input; error cases and arbitrary selection/order are not established."
+    },
+    {
+      "id": "ask",
+      "status": "partial_fixture_coverage",
+      "spec": "https://www.w3.org/TR/sparql11-query/#ask",
+      "positive_cases": [
+        "ask-true",
+        "ask-false"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Only the linked original examples are covered; this is not whole-feature conformance."
+    },
+    {
+      "id": "bgp",
+      "status": "partial_fixture_coverage",
+      "spec": "https://www.w3.org/TR/sparql11-query/#BasicGraphPatterns",
+      "positive_cases": [
+        "bgp-projection-bag",
+        "rdf-graph-deduplicates-source"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Only the linked original examples are covered; this is not whole-feature conformance."
+    },
+    {
+      "id": "bind_errors",
+      "status": "partial_fixture_coverage",
+      "spec": "https://www.w3.org/TR/sparql11-query/#bind",
+      "positive_cases": [
+        "bind-error-keeps-mapping-unbound"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Only the linked original examples are covered; this is not whole-feature conformance."
+    },
+    {
+      "id": "blank_nodes",
+      "status": "rejected",
+      "spec": "https://www.w3.org/TR/sparql11-query/#QSynBlankNodes",
+      "positive_cases": [],
+      "rejection_cases": [
+        "reject-query-blank-node",
+        "reject-dataset-blank-subject",
+        "reject-dataset-blank-object"
+      ],
+      "guest_proof_evidence": "not_asserted",
+      "implementation_requirement": "Separate existential query variables from document-scoped RDF blank-node identity; define blank-node result serialization.",
+      "engine_reuse_candidates": [
+        "crates/sparq-core/src/lib.rs::Graph",
+        "crates/sparq-engine/src/construct.rs::subject_term",
+        "crates/sparq-engine/src/construct.rs::fresh"
+      ],
+      "engine_reuse_evidence": "Existing source paths and native tests inspected; these are not proof-adapter support or an independently rerun conformance claim."
+    },
+    {
+      "id": "casts",
+      "status": "partial_fixture_coverage",
+      "spec": "https://www.w3.org/TR/sparql11-query/#FunctionMapping",
+      "positive_cases": [
+        "xsd-casts",
+        "datetime-cast"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Successful constructor examples only; complete conversion/error matrix remains unassessed."
+    },
+    {
+      "id": "custom_functions",
+      "status": "rejected",
+      "spec": "https://www.w3.org/TR/sparql11-query/#extensionFunctions",
+      "positive_cases": [],
+      "rejection_cases": [
+        "reject-custom-function"
+      ],
+      "guest_proof_evidence": "not_asserted",
+      "implementation_requirement": "Execute a deterministic versioned function registry inside the relation; host evaluation alone cannot authenticate an extension.",
+      "engine_reuse_candidates": [
+        "crates/sparq-engine/src/lib.rs::FunctionRegistry",
+        "crates/sparq-engine/src/lib.rs::query_with_functions_and_budget"
+      ],
+      "engine_reuse_evidence": "Existing source paths and native tests inspected; these are not proof-adapter support or an independently rerun conformance claim."
+    },
+    {
+      "id": "dataset_clauses",
+      "status": "rejected",
+      "spec": "https://www.w3.org/TR/sparql11-query/#specifyingDataset",
+      "positive_cases": [],
+      "rejection_cases": [
+        "reject-from-default",
+        "reject-from-named"
+      ],
+      "guest_proof_evidence": "not_asserted",
+      "implementation_requirement": "Bind FROM/FROM NAMED and RDF merge behavior to independently accepted complete snapshots without implicit network retrieval.",
+      "engine_reuse_candidates": [
+        "crates/sparq-engine/src/lib.rs::active_dataset",
+        "crates/sparq-engine/tests/query_features/dataset_view.rs"
+      ],
+      "engine_reuse_evidence": "Existing source paths and native tests inspected; these are not proof-adapter support or an independently rerun conformance claim."
+    },
+    {
+      "id": "date_functions",
+      "status": "partial_fixture_coverage",
+      "spec": "https://www.w3.org/TR/sparql11-query/#func-date-time",
+      "positive_cases": [
+        "date-components",
+        "date-zone",
+        "date-comparison"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Explicit timezone offsets and leap-day components; absent zones and invalid lexical forms remain unassessed."
+    },
+    {
+      "id": "distinct",
+      "status": "partial_fixture_coverage",
+      "spec": "https://www.w3.org/TR/sparql11-query/#modDuplicates",
+      "positive_cases": [
+        "distinct-projection"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Only the linked original examples are covered; this is not whole-feature conformance."
+    },
+    {
+      "id": "ebv",
+      "status": "partial_fixture_coverage",
+      "spec": "https://www.w3.org/TR/sparql11-query/#func-logical-or",
+      "positive_cases": [
+        "error-or-true",
+        "error-and-false"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Only the linked original examples are covered; this is not whole-feature conformance."
+    },
+    {
+      "id": "empty_group",
+      "status": "partial_fixture_coverage",
+      "spec": "https://www.w3.org/TR/sparql11-query/#emptyGroupPattern",
+      "positive_cases": [
+        "empty-group-one-empty-mapping"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Only the linked original examples are covered; this is not whole-feature conformance."
+    },
+    {
+      "id": "exists",
+      "status": "partial_fixture_coverage",
+      "spec": "https://www.w3.org/TR/sparql11-query/#neg-exists",
+      "positive_cases": [
+        "exists-correlated-filter",
+        "exists-filter-only-outer-variable"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Linked positive-body fixtures pass; complex/nested EXISTS bodies are rejected separately. This is not full SPARQL substitution conformance."
+    },
+    {
+      "id": "filter_errors",
+      "status": "partial_fixture_coverage",
+      "spec": "https://www.w3.org/TR/sparql11-query/#evaluation",
+      "positive_cases": [
+        "filter-error-removes-only-error-row"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Only the linked original examples are covered; this is not whole-feature conformance."
+    },
+    {
+      "id": "functional_forms",
+      "status": "partial_fixture_coverage",
+      "spec": "https://www.w3.org/TR/sparql11-query/#func-if",
+      "positive_cases": [
+        "if-lazy-branch",
+        "coalesce-skips-errors",
+        "in-match-survives-error",
+        "not-in-absent",
+        "bound-unbound"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Only the linked original examples are covered; this is not whole-feature conformance."
+    },
+    {
+      "id": "graph_outputs",
+      "status": "rejected",
+      "spec": "https://www.w3.org/TR/sparql11-query/#construct",
+      "positive_cases": [],
+      "rejection_cases": [
+        "reject-construct",
+        "reject-describe"
+      ],
+      "guest_proof_evidence": "not_asserted",
+      "implementation_requirement": "Add CONSTRUCT graph deduplication and template blank nodes; define a deterministic DESCRIBE policy because its selected graph is implementation-defined. Existing CONSTRUCT fresh() uses random BlankNode::default() and its budget covers WHERE rows; guest-safe deterministic freshening and explicit graph-output bounds need validation.",
+      "engine_reuse_candidates": [
+        "crates/sparq-engine/src/construct.rs::construct_prepared_with_budget",
+        "crates/sparq-engine/src/construct.rs::describe_prepared_with_budget",
+        "crates/sparq-engine/src/construct.rs::instantiate",
+        "crates/sparq-engine/src/construct.rs::cbd"
+      ],
+      "engine_reuse_evidence": "Existing source paths and native tests inspected; these are not proof-adapter support or an independently rerun conformance claim."
+    },
+    {
+      "id": "group_having",
+      "status": "partial_fixture_coverage",
+      "spec": "https://www.w3.org/TR/sparql11-query/#aggregates",
+      "positive_cases": [
+        "aggregate-group-having"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Only the linked original examples are covered; this is not whole-feature conformance."
+    },
+    {
+      "id": "hash_functions",
+      "status": "partial_fixture_coverage",
+      "spec": "https://www.w3.org/TR/sparql11-query/#func-hash",
+      "positive_cases": [
+        "hash-md5",
+        "hash-sha1",
+        "hash-sha256",
+        "hash-sha384",
+        "hash-sha512"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Only the linked original examples are covered; this is not whole-feature conformance."
+    },
+    {
+      "id": "joins",
+      "status": "partial_fixture_coverage",
+      "spec": "https://www.w3.org/TR/sparql11-query/#GroupPatterns",
+      "positive_cases": [
+        "join-shared-variable",
+        "repeated-variable-no-match"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Only the linked original examples are covered; this is not whole-feature conformance."
+    },
+    {
+      "id": "minus",
+      "status": "partial_fixture_coverage",
+      "spec": "https://www.w3.org/TR/sparql11-query/#neg-minus",
+      "positive_cases": [
+        "minus-removes-compatible",
+        "minus-disjoint-domains-keeps-left"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Only the linked original examples are covered; this is not whole-feature conformance."
+    },
+    {
+      "id": "named_graphs",
+      "status": "rejected",
+      "spec": "https://www.w3.org/TR/sparql11-query/#queryDataset",
+      "positive_cases": [],
+      "rejection_cases": [
+        "reject-named-graph"
+      ],
+      "guest_proof_evidence": "not_asserted",
+      "implementation_requirement": "Represent complete named graphs, bind graph identity in dataset anchors, and evaluate GRAPH variable/name semantics.",
+      "engine_reuse_candidates": [
+        "crates/sparq-core/src/lib.rs::Graph::load_dataset",
+        "crates/sparq-core/src/lib.rs::Graph::ensure_named",
+        "crates/sparq-engine/src/lib.rs::DatasetView",
+        "crates/sparq-engine/tests/query_features/dataset_view.rs"
+      ],
+      "engine_reuse_evidence": "Existing source paths and native tests inspected; these are not proof-adapter support or an independently rerun conformance claim."
+    },
+    {
+      "id": "not_exists",
+      "status": "partial_fixture_coverage",
+      "spec": "https://www.w3.org/TR/sparql11-query/#neg-notexists",
+      "positive_cases": [
+        "not-exists-correlated",
+        "not-exists-fixed-pattern-removes-all",
+        "not-exists-correlated-filter"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Linked positive-body fixtures pass; complex/nested EXISTS bodies are rejected separately. This is not full SPARQL substitution conformance."
+    },
+    {
+      "id": "numeric_functions",
+      "status": "partial_fixture_coverage",
+      "spec": "https://www.w3.org/TR/sparql11-query/#func-numerics",
+      "positive_cases": [
+        "numeric-promotion",
+        "numeric-divide",
+        "numeric-abs",
+        "numeric-rounding",
+        "numeric-unary"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Basic promotion/arithmetic/rounding; overflow, NaN, infinities, signed zero and decimal precision remain unassessed."
+    },
+    {
+      "id": "optional",
+      "status": "partial_fixture_coverage",
+      "spec": "https://www.w3.org/TR/sparql11-query/#optionals",
+      "positive_cases": [
+        "optional-unbound-versus-empty"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Only the linked original examples are covered; this is not whole-feature conformance."
+    },
+    {
+      "id": "optional_correlation",
+      "status": "partial_fixture_coverage",
+      "spec": "https://www.w3.org/TR/sparql11-query/#OptionalMatching",
+      "positive_cases": [
+        "optional-filter-correlated"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Only the linked original examples are covered; this is not whole-feature conformance."
+    },
+    {
+      "id": "order_slice",
+      "status": "partial_fixture_coverage",
+      "spec": "https://www.w3.org/TR/sparql11-query/#modOffset",
+      "positive_cases": [
+        "ordered-limit-offset",
+        "ordered-unbound-first",
+        "limit-zero"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Distinct explicit sort keys and unbound ordering; ties and unordered nonzero slicing lack a portable exact oracle."
+    },
+    {
+      "id": "paths_alternative",
+      "status": "partial_fixture_coverage",
+      "spec": "https://www.w3.org/TR/sparql11-query/#propertypaths",
+      "positive_cases": [
+        "path-alternative-duplicates"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "id": "paths_inverse",
+      "status": "partial_fixture_coverage",
+      "spec": "https://www.w3.org/TR/sparql11-query/#propertypaths",
+      "positive_cases": [
+        "path-inverse"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Only the linked original examples are covered; this is not whole-feature conformance."
+    },
+    {
+      "id": "paths_negated",
+      "status": "partial_fixture_coverage",
+      "spec": "https://www.w3.org/TR/sparql11-query/#propertypaths",
+      "positive_cases": [
+        "path-negated-set",
+        "path-negated-duplicate-forward",
+        "path-negated-duplicate-reverse",
+        "path-negated-both-orientations"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Duplicate-sensitive forward, reverse and mixed-direction examples retain one endpoint pair per orientation; complete property-path conformance is not established.",
+      "differential_observations": {
+        "baseline": "Published SPARQL 1.1 REC existential NPS mapping set and mixed-direction alternative/Union translation; expected forward/reverse/mixed cardinalities 1/1/2.",
+        "pyoxigraph_0_5_11": "Independent reviewer observed 2/2/1 on the discriminating synthetic graph.",
+        "interpretation": "Cross-engine agreement is not established; normative expectations are retained rather than rewritten to match an implementation.",
+        "rdflib_7_6_0": "Independent reviewer observed forward/reverse/mixed cardinalities 2/2/error (InvalidPath) on the same discriminating synthetic graph.",
+        "published_errata": "https://www.w3.org/2013/sparql-errata has no NPS cardinality correction.",
+        "independent_formalization": "Kaminski, Kostylev and Cuenca Grau, ACM TODS 2017, Definition 7.4 explicitly assigns NPS multiplicity one; alternatives retain Union multiplicity.",
+        "authors_manuscript": "https://ora.ox.ac.uk/objects/uuid%3A869c0e3c-dfb2-4942-add2-9c750db168ee/files/m42fb8ab8221ec31ba681249281b8ee9c",
+        "reproduce": "scripts/reproduce_nps_differential.py --engine pyoxigraph|rdflib (explicit preinstalled pinned version; no automatic installation)",
+        "recorded_observations": "fixtures/conformance/nps-differential.json"
+      }
+    },
+    {
+      "id": "paths_sequence",
+      "status": "partial_fixture_coverage",
+      "spec": "https://www.w3.org/TR/sparql11-query/#propertypaths",
+      "positive_cases": [
+        "path-sequence"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "id": "paths_transitive",
+      "status": "partial_fixture_coverage",
+      "spec": "https://www.w3.org/TR/sparql11-query/#PropertyPathPatterns",
+      "positive_cases": [
+        "path-transitive-deduplicates"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Only the linked original examples are covered; this is not whole-feature conformance."
+    },
+    {
+      "id": "paths_zero",
+      "status": "partial_fixture_coverage",
+      "spec": "https://www.w3.org/TR/sparql11-query/#PropertyPathPatterns",
+      "positive_cases": [
+        "path-zero-length",
+        "path-zero-or-one"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Zero and optional paths; cycles and absent endpoint terms remain unassessed."
+    },
+    {
+      "id": "projection",
+      "status": "partial_fixture_coverage",
+      "spec": "https://www.w3.org/TR/sparql11-query/#BasicGraphPatterns",
+      "positive_cases": [
+        "bgp-projection-bag",
+        "subquery-project-scope"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Only the linked original examples are covered; this is not whole-feature conformance."
+    },
+    {
+      "id": "rdf12_direction",
+      "status": "rejected",
+      "spec": "https://www.w3.org/TR/2026/WD-sparql12-query-20260910/#func-strlangdir",
+      "positive_cases": [],
+      "rejection_cases": [
+        "reject-rdf12-direction-function",
+        "reject-rdf12-direction-literal"
+      ],
+      "guest_proof_evidence": "not_asserted",
+      "implementation_requirement": "Preserve language and base direction in term encoding, then implement direction-sensitive functions and equality.",
+      "surface": [
+        "direction-aware language literals",
+        "LANGDIR",
+        "HASLANG",
+        "HASLANGDIR",
+        "STRLANGDIR"
+      ]
+    },
+    {
+      "id": "rdf12_triples",
+      "status": "rejected",
+      "spec": "https://www.w3.org/TR/2026/WD-sparql12-query-20260910/#func-triple",
+      "positive_cases": [],
+      "rejection_cases": [
+        "reject-rdf12-triple-function"
+      ],
+      "guest_proof_evidence": "not_asserted",
+      "implementation_requirement": "Represent recursive triple terms and reification in input, algebra, result encoding and commitments before admitting triple functions.",
+      "surface": [
+        "triple-term syntax",
+        "reification and annotation patterns",
+        "TRIPLE",
+        "SUBJECT",
+        "PREDICATE",
+        "OBJECT",
+        "isTRIPLE"
+      ]
+    },
+    {
+      "id": "reduced",
+      "status": "partial_fixture_coverage",
+      "spec": "https://www.w3.org/TR/sparql11-query/#modReduced",
+      "positive_cases": [
+        "reduced-unique-input"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Unique input only; duplicate removal policy is deliberately not pinned by this oracle."
+    },
+    {
+      "id": "service",
+      "status": "rejected",
+      "spec": "https://www.w3.org/TR/sparql11-query/#basic-federated-query",
+      "positive_cases": [],
+      "rejection_cases": [
+        "reject-service"
+      ],
+      "guest_proof_evidence": "not_asserted",
+      "implementation_requirement": "Bind external service data/results and completeness authority to verifier-accepted snapshots, including SERVICE SILENT/error semantics. Existing local service hooks return rows from host callbacks and do not themselves prove remote evaluation; prefer guest evaluation of a bound endpoint snapshot.",
+      "engine_reuse_candidates": [
+        "crates/sparq-engine/src/service_local.rs::LocalServiceRegistry",
+        "crates/sparq-engine/tests/federation_features/service_local.rs"
+      ],
+      "engine_reuse_evidence": "Existing source paths and native tests inspected; these are not proof-adapter support or an independently rerun conformance claim."
+    },
+    {
+      "id": "string_functions",
+      "status": "partial_fixture_coverage",
+      "spec": "https://www.w3.org/TR/sparql11-query/#func-strings",
+      "positive_cases": [
+        "string-length-unicode",
+        "string-substring",
+        "string-case",
+        "string-start-end-contains",
+        "string-before-after",
+        "string-concat",
+        "string-langmatches",
+        "string-uri-encode",
+        "string-regex-flags",
+        "string-replace"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Normal and Unicode examples; exhaustive language compatibility and XPath regex behavior remain unassessed."
+    },
+    {
+      "id": "subqueries",
+      "status": "partial_fixture_coverage",
+      "spec": "https://www.w3.org/TR/sparql11-query/#subqueries",
+      "positive_cases": [
+        "subquery-project-scope",
+        "subquery-order-does-not-order-outer-bag"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "id": "term_functions",
+      "status": "partial_fixture_coverage",
+      "spec": "https://www.w3.org/TR/sparql11-query/#func-isIRI",
+      "positive_cases": [
+        "term-types",
+        "term-identity",
+        "term-str-lang-datatype",
+        "term-constructors",
+        "uri-constructor-alias"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "IRI/literal terms only; true isBlank cases are outside the admitted dataset profile."
+    },
+    {
+      "id": "union",
+      "status": "partial_fixture_coverage",
+      "spec": "https://www.w3.org/TR/sparql11-query/#alternatives",
+      "positive_cases": [
+        "union-keeps-duplicates"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Only the linked original examples are covered; this is not whole-feature conformance."
+    },
+    {
+      "id": "updates",
+      "status": "rejected",
+      "spec": "https://www.w3.org/TR/sparql11-update/",
+      "positive_cases": [],
+      "rejection_cases": [
+        "reject-update"
+      ],
+      "guest_proof_evidence": "not_asserted",
+      "implementation_requirement": "Use a separate state-transition contract; SELECT/ASK journals do not assert update semantics."
+    },
+    {
+      "id": "values",
+      "status": "partial_fixture_coverage",
+      "spec": "https://www.w3.org/TR/sparql11-query/#inline-data",
+      "positive_cases": [
+        "values-undef-duplicate-bind",
+        "values-tuple-compatible-join"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Only the linked original examples are covered; this is not whole-feature conformance."
+    },
+    {
+      "id": "volatile_functions",
+      "status": "rejected",
+      "spec": "https://www.w3.org/TR/sparql11-query/#FunctionMapping",
+      "positive_cases": [],
+      "rejection_cases": [
+        "reject-now",
+        "reject-rand",
+        "reject-uuid",
+        "reject-struuid",
+        "reject-bnode"
+      ],
+      "guest_proof_evidence": "not_asserted",
+      "implementation_requirement": "Define time/entropy inputs, per-query evaluation scope and verifier trust before admitting NOW/RAND/UUID/STRUUID/BNODE."
+    },
+    {
+      "id": "entailment",
+      "status": "unassessed",
+      "spec": "https://www.w3.org/TR/sparql11-entailment/",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted",
+      "implementation_requirement": "Use a versioned entailment regime and authenticated schema/input closure; the current graph is evaluated as supplied."
+    },
+    {
+      "id": "protocol_and_result_formats",
+      "status": "unassessed",
+      "spec": "https://www.w3.org/TR/sparql11-protocol/",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted",
+      "implementation_requirement": "Journal encoding does not establish HTTP or SPARQL JSON/XML/CSV/TSV conformance."
+    },
+    {
+      "id": "rdf12_version_announcement",
+      "status": "unassessed",
+      "spec": "https://www.w3.org/TR/2026/WD-sparql12-query-20260910/#syntaxVersionAnnouncement",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted",
+      "implementation_requirement": "Pin a 1.2 dialect and VERSION directive admission; parser support alone is not conformance."
+    },
+    {
+      "id": "rdf12_same_value",
+      "status": "unassessed",
+      "spec": "https://www.w3.org/TR/2026/WD-sparql12-query-20260910/#func-sameValue",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted",
+      "implementation_requirement": "Implement sameValue including NaN and recursive triple-term values under the pinned draft."
+    },
+    {
+      "id": "lateral_extension",
+      "status": "unassessed",
+      "spec": "https://www.w3.org/TR/2026/WD-sparql12-query-20260910/",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted",
+      "implementation_requirement": "The profile rejects LATERAL. An extension needs separately specified dialect and correlation semantics."
+    },
+    {
+      "id": "syntax_and_ill_typed_values",
+      "status": "unassessed",
+      "spec": "https://www.w3.org/TR/sparql11-query/#sparqlGrammar",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted",
+      "implementation_requirement": "Run W3C syntax and datatype-error suites with exact profile classifications; original examples do not replace them."
+    },
+    {
+      "id": "empty_named_graphs",
+      "status": "unassessed",
+      "spec": "https://www.w3.org/TR/sparql11-query/#rdfDataset",
+      "positive_cases": [],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted",
+      "implementation_requirement": "Commit an explicit named-graph catalog because N-Quads alone cannot represent empty named graphs; distinguish present-empty from absent for GRAPH ?g {} and GRAPH <g> {}.",
+      "engine_reuse_candidates": [
+        "crates/sparq-core/src/lib.rs::Graph::ensure_named",
+        "crates/sparq-engine/tests/storage/named_graph_durable_clear_drop.rs"
+      ]
+    },
+    {
+      "id": "exists_complex_bodies",
+      "status": "rejected",
+      "spec": "https://www.w3.org/TR/sparql11-query/#defn_evalExists",
+      "positive_cases": [],
+      "rejection_cases": [
+        "reject-exists-optional",
+        "reject-exists-values",
+        "reject-exists-bind",
+        "reject-exists-subquery",
+        "reject-exists-aggregate",
+        "reject-exists-ordered-slice",
+        "reject-exists-nullable-path",
+        "reject-exists-residual-path",
+        "reject-exists-nested-exists",
+        "reject-exists-nested-not-exists",
+        "reject-exists-nested-in-function"
+      ],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "The exact profile admits BGP, Join, Union, pure Filter and MINUS bodies with captured IRI/literal substitution. Nested EXISTS, residual paths, OPTIONAL, VALUES, BIND, subqueries and modifiers inside EXISTS remain rejected; captured BOUND and blank/triple values are separately excluded. Rejection is a profile limit, not feature coverage."
+    },
+    {
+      "id": "nullable_path_composition",
+      "status": "rejected",
+      "spec": "https://www.w3.org/TR/sparql11-query/#defn_evalPP",
+      "positive_cases": [],
+      "rejection_cases": [
+        "reject-nullable-path-alternative",
+        "reject-nullable-path-lowered-sequence",
+        "reject-nullable-path-nested-quantifier"
+      ],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Nullable subexpressions inside path composition and nullable lowered-sequence intermediates are rejected while absent-constant propagation is repaired. Ordinary root +/*/? with non-nullable operands remains admitted; these rejection cases do not count as support."
+    },
+    {
+      "id": "exists_minus_domains",
+      "status": "partial_fixture_coverage",
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#defn_substitute",
+      "positive_cases": [
+        "exists-minus-disjoint-domain-after-substitution"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Only the shared BGP/Join/UNION/Filter/MINUS branch with IRI/literal captures. Published 2013 domain behavior differs from some alternative binding-injection implementations. The separate direct guest fixture runner is execution evidence only after a source-bound campaign runs it."
+    }
+  ],
+  "functions": [
+    {
+      "name": "BOUND",
+      "group": "functional_forms",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "bound-unbound"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "IF",
+      "group": "functional_forms",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "if-lazy-branch"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "COALESCE",
+      "group": "functional_forms",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "coalesce-skips-errors"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "IN",
+      "group": "functional_forms",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "in-match-survives-error",
+        "not-in-absent"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "NOT IN",
+      "group": "functional_forms",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "not-in-absent"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "EXISTS",
+      "group": "exists",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "exists-correlated-filter",
+        "exists-filter-only-outer-variable"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Linked positive-body fixtures pass; complex/nested EXISTS bodies are rejected separately. This is not full SPARQL substitution conformance."
+    },
+    {
+      "name": "NOT EXISTS",
+      "group": "not_exists",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "not-exists-correlated",
+        "not-exists-fixed-pattern-removes-all",
+        "not-exists-correlated-filter"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Linked positive-body fixtures pass; complex/nested EXISTS bodies are rejected separately. This is not full SPARQL substitution conformance."
+    },
+    {
+      "name": "isIRI",
+      "group": "term_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "term-types"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "isURI",
+      "group": "term_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "term-types"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "isBlank",
+      "group": "term_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "term-types"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "isLiteral",
+      "group": "term_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "term-types"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "isNumeric",
+      "group": "term_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "term-types"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "STR",
+      "group": "term_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "term-str-lang-datatype"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "LANG",
+      "group": "term_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "term-str-lang-datatype"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "DATATYPE",
+      "group": "term_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "term-str-lang-datatype"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "IRI",
+      "group": "term_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "term-constructors"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "URI",
+      "group": "term_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "uri-constructor-alias"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "STRDT",
+      "group": "term_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "term-constructors"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "STRLANG",
+      "group": "term_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "term-constructors"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "sameTerm",
+      "group": "term_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "term-identity",
+        "term-constructors"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "STRLEN",
+      "group": "string_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "string-length-unicode"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "SUBSTR",
+      "group": "string_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "string-substring"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "UCASE",
+      "group": "string_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "string-case"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "LCASE",
+      "group": "string_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "string-case"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "STRSTARTS",
+      "group": "string_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "string-start-end-contains"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "STRENDS",
+      "group": "string_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "string-start-end-contains"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "CONTAINS",
+      "group": "string_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "string-start-end-contains"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "STRBEFORE",
+      "group": "string_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "string-before-after"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "STRAFTER",
+      "group": "string_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "string-before-after"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "ENCODE_FOR_URI",
+      "group": "string_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "string-uri-encode"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "CONCAT",
+      "group": "string_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "string-concat"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "LANGMATCHES",
+      "group": "string_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "string-langmatches"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "REGEX",
+      "group": "string_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "string-regex-flags"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "REPLACE",
+      "group": "string_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "string-replace"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "ABS",
+      "group": "numeric_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "numeric-abs"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "ROUND",
+      "group": "numeric_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "numeric-rounding"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "CEIL",
+      "group": "numeric_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "numeric-rounding"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "FLOOR",
+      "group": "numeric_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "numeric-rounding"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "YEAR",
+      "group": "date_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "date-components"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "MONTH",
+      "group": "date_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "date-components"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "DAY",
+      "group": "date_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "date-components"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "HOURS",
+      "group": "date_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "date-components"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "MINUTES",
+      "group": "date_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "date-components"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "SECONDS",
+      "group": "date_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "date-components"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "TIMEZONE",
+      "group": "date_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "date-zone"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "TZ",
+      "group": "date_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "date-zone"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "MD5",
+      "group": "hash_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "hash-md5"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "SHA1",
+      "group": "hash_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "hash-sha1"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "SHA256",
+      "group": "hash_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "hash-sha256"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "SHA384",
+      "group": "hash_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "hash-sha384"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "SHA512",
+      "group": "hash_functions",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "hash-sha512"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "xsd:integer",
+      "group": "casts",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "xsd-casts"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "xsd:decimal",
+      "group": "casts",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "xsd-casts"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "xsd:float",
+      "group": "casts",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "xsd-casts"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "xsd:double",
+      "group": "casts",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "xsd-casts"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "xsd:string",
+      "group": "casts",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "xsd-casts"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "xsd:boolean",
+      "group": "casts",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "xsd-casts"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "xsd:dateTime",
+      "group": "casts",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "datetime-cast"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "NOW",
+      "group": "volatile_functions",
+      "status": "rejected",
+      "positive_cases": [],
+      "rejection_cases": [
+        "reject-now"
+      ],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "RAND",
+      "group": "volatile_functions",
+      "status": "rejected",
+      "positive_cases": [],
+      "rejection_cases": [
+        "reject-rand"
+      ],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "UUID",
+      "group": "volatile_functions",
+      "status": "rejected",
+      "positive_cases": [],
+      "rejection_cases": [
+        "reject-uuid"
+      ],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "STRUUID",
+      "group": "volatile_functions",
+      "status": "rejected",
+      "positive_cases": [],
+      "rejection_cases": [
+        "reject-struuid"
+      ],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "BNODE",
+      "group": "volatile_functions",
+      "status": "rejected",
+      "positive_cases": [],
+      "rejection_cases": [
+        "reject-bnode"
+      ],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "COUNT",
+      "group": "aggregates",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "aggregate-group-having",
+        "aggregate-empty-count",
+        "aggregate-count-distinct-unbound"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "SUM",
+      "group": "aggregates",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "aggregate-group-having"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "MIN",
+      "group": "aggregates",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "aggregate-min-max"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "MAX",
+      "group": "aggregates",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "aggregate-min-max"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "AVG",
+      "group": "aggregates",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "aggregate-average-value"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "SAMPLE",
+      "group": "aggregates",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "aggregate-sample-unambiguous"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    },
+    {
+      "name": "GROUP_CONCAT",
+      "group": "aggregates",
+      "status": "partial_fixture_coverage",
+      "positive_cases": [
+        "aggregate-group-concat-unambiguous"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted"
+    }
+  ],
+  "known_semantic_divergences": [
+    {
+      "id": "exists-minus-disjoint-domain-after-substitution",
+      "tracking": "zkp-10.6",
+      "case": "exists-minus-disjoint-domain-after-substitution",
+      "dataset": "fixtures/conformance/core.nt",
+      "baseline": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#defn_evalExists",
+      "published_2013_expected_mappings": [
+        {
+          "s": "<http://example.org/a>"
+        },
+        {
+          "s": "<http://example.org/b>"
+        },
+        {
+          "s": "<http://example.org/c>"
+        }
+      ],
+      "prior_deferred_compatibility_mappings": [],
+      "profile_behavior": "Admitted with the unchanged query, core dataset, and retained published-2013 expected mappings.",
+      "reason": "Captured IRI/literal values are constrained by exact RDF term identity and their columns removed before MINUS observes child domains. This resolves the retained discriminator; blank/binder/subquery and other unsupported combinations remain outside the claim.",
+      "errata_discussion": "https://github.com/w3c/sparql-query/issues/156",
+      "prior_case": "reject-exists-minus",
+      "status": "resolved_for_admitted_iri_literal_body"
+    },
+    {
+      "id": "nullable-alternative-absent-constant",
+      "case": "reject-nullable-path-alternative",
+      "dataset": "fixtures/conformance/core.nt",
+      "baseline": "https://www.w3.org/TR/sparql11-query/#defn_evalPP",
+      "published_2013_expected_mappings": [
+        {
+          "o": "<http://example.org/missing>"
+        },
+        {
+          "o": "<http://example.org/missing>"
+        }
+      ],
+      "engine_5055fddb_mappings": [],
+      "profile_behavior": "Rejected before evaluation pending absent-constant propagation through composition."
+    }
+  ]
+}

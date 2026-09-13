@@ -24,7 +24,7 @@ unapproved contradictory pairs), not new issues. Issues 1+2 are unreported
 (closed #81 was an author-retracted misreading, different specifics) — file as new issues.
 
 The final-eleven conformance work surfaced six parser bugs in spargebra 0.4.6
-(fixed in our vendored copy, `vendor/spargebra/SPARQ-PATCHES.md`) and four
+(fixed in our vendored copy, `vendor/spargebra/SPARQ-PATCHES.md`) and five
 defective expected-results files in w3c/rdf-tests (reported as documented
 divergences by `sparq-conformance`). This file holds ready-to-submit PR
 descriptions for oxigraph/oxigraph and issue drafts for w3c/rdf-tests; § D
@@ -34,7 +34,7 @@ sq-tonhr.12) holds two unfiled `oxttl` RDF 1.2 Turtle parser issues** found by
 the Shuttle generate-mode harvest — unlike § A they are NOT fixed on oxigraph
 main, and they affect sparq's default Turtle path. Every item in § A and § B was
 verified against w3c/rdf-tests @ `f25dbc092c654d792974848e81bb519d7328f0e8`;
-sparq's full run is 1225 pass + 4 documented divergences / 0 fail / 0 skip over
+sparq's full run is 1224 pass + 5 documented divergences / 0 fail / 0 skip over
 the 1229-test scope.
 
 ---
@@ -292,6 +292,34 @@ apply to upstream `lib/spargebra/src/parser.rs` with only path changes.
 
 ---
 
+### Issue 5 — `sparql11/aggregates` agg-min-02: expected MIN changes the selected term
+
+[GPT-6] **Title:** `agg-min-02.srx changes the selected double from 2E-1 to 2.0E-1`
+
+**Body:**
+
+The approved `MIN with GROUP BY` test uses `agg-numeric.ttl`, whose `:mixed2`
+group contains `2E-1` and `2.2`. `agg-min-02.srx` instead writes `2.0E-1`
+for the selected double. These denote equal numeric values but different RDF
+literal terms. [SPARQL 1.1 REC §18.5.1.5](https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#defn_aggMin)
+selects the first term of the ordered input; it does not reconstruct a numeric
+literal. The [suite comparison rules](https://www.w3.org/2009/sparql/docs/tests/README.html)
+require identical literal nodes under result-graph isomorphism. The other result
+rows already retain their input lexical forms. Proposed upstream correction:
+change only this cell to `2E-1`.
+
+**Provenance and local treatment:** the unchanged query, input and result from
+[W3C commit f25dbc092c654d792974848e81bb519d7328f0e8](https://github.com/w3c/rdf-tests/tree/f25dbc092c654d792974848e81bb519d7328f0e8/sparql/sparql11/aggregates)
+are retained with SHA-256 digests in
+[`provenance.json`](../crates/sparq-conformance/tests/fixtures/agg-min-02/provenance.json).
+RDFLib 7.6.0 with `NORMALIZE_LITERALS=False` independently retains `2E-1`.
+PyOxigraph 0.5.11 normalizes numeric literals at ingest, so it does not corroborate
+lexical identity. The local runner records a divergence only for the exact input,
+manifest identity and single-cell diagnostic. Changed values, additional changed
+rows, source edits and unrelated errors remain failures. Neither upstream result
+bytes, the strict comparator nor the ratchet is changed. This proposal is local;
+no upstream report has been submitted.
+
 ## C. Status
 
 | item | where fixed locally | upstream action |
@@ -306,6 +334,7 @@ apply to upstream `lib/spargebra/src/parser.rs` with only path changes.
 | cast-decimal expected file | divergence allowlist (runner) | Issue 2 (rdf-tests) — unreported, file as new issue |
 | agg-sum-distinct expected file | divergence allowlist (runner) | comment with evidence on open rdf-tests#58 |
 | divide-numbers-cast expected file | divergence allowlist (runner) | comment with evidence on open rdf-tests#58 |
+| agg-min-02 expected selected term | pinned source and diagnostic guard (runner) | Issue 5 (rdf-tests) — local proposal only |
 
 ---
 

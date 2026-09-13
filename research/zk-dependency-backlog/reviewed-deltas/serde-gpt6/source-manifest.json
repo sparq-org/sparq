@@ -1,0 +1,249 @@
+{
+  "authored_by": "GPT-6",
+  "sdk_commit": "b75ac40dcea157c764a722e96bffde2b24bf4ea1",
+  "scope": "Two additional exact registry deltas required by the conditional serde1.0.229 source approval. Existing imported safe-to-deploy coverage ends at1.0.228. These packages are not yet attested at1.0.229; no downgrade or full-graph assurance is claimed.",
+  "original_imports_sha256": "838f7043ef392dfad4c2416c9a5c25f760baf4d8b249d34ff6cfcf0dde53c781",
+  "units": [
+    {
+      "name": "serde_core",
+      "from": "1.0.228",
+      "to": "1.0.229",
+      "criteria": [
+        "safe-to-deploy"
+      ],
+      "baseline_imported_records": [
+        {
+          "source": "isrg",
+          "who": "J.C. Jones <jc@divviup.org>",
+          "criteria": "safe-to-deploy",
+          "version": "1.0.224"
+        },
+        {
+          "source": "isrg",
+          "who": "J.C. Jones <jc@divviup.org>",
+          "criteria": "safe-to-deploy",
+          "delta": "1.0.224 -> 1.0.225"
+        },
+        {
+          "source": "isrg",
+          "who": "Tim Geoghegan <timg@divviup.org>",
+          "criteria": "safe-to-deploy",
+          "delta": "1.0.225 -> 1.0.226"
+        },
+        {
+          "source": "mozilla",
+          "who": "Erich Gubler <erichdongubler@gmail.com>",
+          "criteria": "safe-to-deploy",
+          "delta": "1.0.226 -> 1.0.227",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        {
+          "source": "mozilla",
+          "who": "Jan-Erik Rediger <jrediger@mozilla.com>",
+          "criteria": "safe-to-deploy",
+          "delta": "1.0.227 -> 1.0.228",
+          "aggregated-from": "https://raw.githubusercontent.com/mozilla/glean/main/supply-chain/audits.toml"
+        }
+      ],
+      "archives": [
+        {
+          "role": "old",
+          "version": "1.0.228",
+          "archive": "serde_core/serde_core-1.0.228.crate",
+          "sha256": "41d385c7d4ca58e59fc732af25c3983b67ac852c1a25000afe1175de458b67ad",
+          "registry_url": "https://static.crates.io/crates/serde_core/serde_core-1.0.228.crate",
+          "files_verified_against_registry_export": 27
+        },
+        {
+          "role": "new",
+          "version": "1.0.229",
+          "archive": "serde_core/serde_core-1.0.229.crate",
+          "sha256": "67dca2c9c51e58a4791a4b1ed58308b39c64224d349a935ab5039aa360942a48",
+          "registry_url": "https://static.crates.io/crates/serde_core/serde_core-1.0.229.crate",
+          "files_verified_against_registry_export": 27
+        }
+      ],
+      "patch_bytes": 6654,
+      "patch_sha256": "efea1423554f85f6fcb30cef4e3907dfc1611cdcfde592e74d96ee61d0589988"
+    },
+    {
+      "name": "serde_derive",
+      "from": "1.0.228",
+      "to": "1.0.229",
+      "criteria": [
+        "safe-to-deploy"
+      ],
+      "baseline_imported_records": [
+        {
+          "source": "google",
+          "who": "Lukasz Anforowicz <lukasza@chromium.org>",
+          "criteria": "safe-to-deploy",
+          "version": "1.0.197",
+          "notes": "Grepped for \"unsafe\", \"crypt\", \"cipher\", \"fs\", \"net\" - there were no hits",
+          "aggregated-from": "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
+        },
+        {
+          "source": "google",
+          "who": "danakj <danakj@chromium.org>",
+          "criteria": "safe-to-deploy",
+          "delta": "1.0.197 -> 1.0.201",
+          "aggregated-from": "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
+        },
+        {
+          "source": "google",
+          "who": "Dustin J. Mitchell <djmitche@chromium.org>",
+          "criteria": "safe-to-deploy",
+          "delta": "1.0.201 -> 1.0.202",
+          "aggregated-from": "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
+        },
+        {
+          "source": "google",
+          "who": "Lukasz Anforowicz <lukasza@chromium.org>",
+          "criteria": "safe-to-deploy",
+          "delta": "1.0.202 -> 1.0.203",
+          "notes": "Grepped for \"unsafe\", \"crypt\", \"cipher\", \"fs\", \"net\" - there were no hits",
+          "aggregated-from": "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
+        },
+        {
+          "source": "google",
+          "who": "Adrian Taylor <adetaylor@chromium.org>",
+          "criteria": "safe-to-deploy",
+          "delta": "1.0.203 -> 1.0.204",
+          "aggregated-from": "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
+        },
+        {
+          "source": "google",
+          "who": "Lukasz Anforowicz <lukasza@chromium.org>",
+          "criteria": "safe-to-deploy",
+          "delta": "1.0.204 -> 1.0.207",
+          "notes": "Grepped for \\\"unsafe\\\", \\\"crypt\\\", \\\"cipher\\\", \\\"fs\\\", \\\"net\\\" - there were no hits",
+          "aggregated-from": "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
+        },
+        {
+          "source": "google",
+          "who": "Lukasz Anforowicz <lukasza@chromium.org>",
+          "criteria": "safe-to-deploy",
+          "delta": "1.0.207 -> 1.0.209",
+          "notes": "There are no code changes in this delta - see https://crrev.com/c/5812194/2..5\n\nI've neverthless also grepped for `-i cipher`, `-i crypto`, `\\bfs\\b`,\n`\\bnet\\b`, and `\\bunsafe\\b`.  There were no hits.\n",
+          "aggregated-from": "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
+        },
+        {
+          "source": "google",
+          "who": "Adrian Taylor <adetaylor@chromium.org>",
+          "criteria": "safe-to-deploy",
+          "delta": "1.0.209 -> 1.0.210",
+          "notes": "Almost no new code - just feature rearrangement",
+          "aggregated-from": "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
+        },
+        {
+          "source": "google",
+          "who": "Liza Burakova <liza@chromium.org>",
+          "criteria": "safe-to-deploy",
+          "delta": "1.0.210 -> 1.0.213",
+          "notes": "Grepped for 'unsafe', 'crypt', 'cipher', 'fs', 'net' - there were no hits",
+          "aggregated-from": "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
+        },
+        {
+          "source": "google",
+          "who": "Dustin J. Mitchell <djmitche@chromium.org>",
+          "criteria": "safe-to-deploy",
+          "delta": "1.0.213 -> 1.0.214",
+          "notes": "No changes to unsafe, no crypto",
+          "aggregated-from": "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
+        },
+        {
+          "source": "google",
+          "who": "Adrian Taylor <adetaylor@chromium.org>",
+          "criteria": "safe-to-deploy",
+          "delta": "1.0.214 -> 1.0.215",
+          "notes": "Minor changes should not impact UB risk",
+          "aggregated-from": "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
+        },
+        {
+          "source": "google",
+          "who": "Lukasz Anforowicz <lukasza@chromium.org>",
+          "criteria": "safe-to-deploy",
+          "delta": "1.0.215 -> 1.0.216",
+          "notes": "The delta adds `#[automatically_derived]` in a few places.  Still no `unsafe`.",
+          "aggregated-from": "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
+        },
+        {
+          "source": "google",
+          "who": "Dustin J. Mitchell <djmitche@chromium.org>",
+          "criteria": "safe-to-deploy",
+          "delta": "1.0.216 -> 1.0.217",
+          "notes": "No changes",
+          "aggregated-from": "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
+        },
+        {
+          "source": "google",
+          "who": "Daniel Cheng <dcheng@chromium.org>",
+          "criteria": "safe-to-deploy",
+          "delta": "1.0.217 -> 1.0.218",
+          "notes": "No changes outside comments and documentation.",
+          "aggregated-from": "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
+        },
+        {
+          "source": "google",
+          "who": "Lukasz Anforowicz <lukasza@chromium.org>",
+          "criteria": "safe-to-deploy",
+          "delta": "1.0.218 -> 1.0.219",
+          "notes": "Minor changes (clippy tweaks, using `mem::take` instead of `mem::replace`).",
+          "aggregated-from": "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
+        },
+        {
+          "source": "isrg",
+          "who": "J.C. Jones <jc@divviup.org>",
+          "criteria": "safe-to-deploy",
+          "delta": "1.0.219 -> 1.0.224"
+        },
+        {
+          "source": "isrg",
+          "who": "J.C. Jones <jc@divviup.org>",
+          "criteria": "safe-to-deploy",
+          "delta": "1.0.224 -> 1.0.225"
+        },
+        {
+          "source": "isrg",
+          "who": "Tim Geoghegan <timg@divviup.org>",
+          "criteria": "safe-to-deploy",
+          "delta": "1.0.225 -> 1.0.226"
+        },
+        {
+          "source": "mozilla",
+          "who": "Erich Gubler <erichdongubler@gmail.com>",
+          "criteria": "safe-to-deploy",
+          "delta": "1.0.226 -> 1.0.227",
+          "aggregated-from": "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+        },
+        {
+          "source": "mozilla",
+          "who": "Jan-Erik Rediger <jrediger@mozilla.com>",
+          "criteria": "safe-to-deploy",
+          "delta": "1.0.227 -> 1.0.228",
+          "aggregated-from": "https://raw.githubusercontent.com/mozilla/glean/main/supply-chain/audits.toml"
+        }
+      ],
+      "archives": [
+        {
+          "role": "old",
+          "version": "1.0.228",
+          "archive": "serde_derive/serde_derive-1.0.228.crate",
+          "sha256": "d540f220d3187173da220f885ab66608367b6574e925011a9353e4badda91d79",
+          "registry_url": "https://static.crates.io/crates/serde_derive/serde_derive-1.0.228.crate",
+          "files_verified_against_registry_export": 36
+        },
+        {
+          "role": "new",
+          "version": "1.0.229",
+          "archive": "serde_derive/serde_derive-1.0.229.crate",
+          "sha256": "e7a5d71263a5a7d47b41f6b3f06ba276f10cc18b0931f1799f710578e2309348",
+          "registry_url": "https://static.crates.io/crates/serde_derive/serde_derive-1.0.229.crate",
+          "files_verified_against_registry_export": 36
+        }
+      ],
+      "patch_bytes": 40085,
+      "patch_sha256": "c217e6d5fd5b25dc6ab1e9097ec6676a6f504a1f7765e6cbf9f0702f33e234c4"
+    }
+  ]
+}

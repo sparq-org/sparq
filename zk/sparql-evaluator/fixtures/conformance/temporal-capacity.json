@@ -1,0 +1,71 @@
+{
+  "authored_by": "GPT-6",
+  "expectation_kind": "implementation_capacity",
+  "cases": [
+    {
+      "id": "static-year",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (\"1000000001-01-01T00:00:00Z\"^^xsd:dateTime AS ?x) {}",
+      "dataset_ntriples": ""
+    },
+    {
+      "id": "bce-year",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (\"-0001-01-01T00:00:00Z\"^^xsd:dateTime AS ?x) {}",
+      "dataset_ntriples": ""
+    },
+    {
+      "id": "overflow-year",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (\"99999999999999999999999-01-01T00:00:00Z\"^^xsd:dateTime AS ?x) {}",
+      "dataset_ntriples": ""
+    },
+    {
+      "id": "dynamic-coalesce",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (COALESCE(STRDT(CONCAT(\"1000000001\", \"-01-01T00:00:00Z\"), xsd:dateTime),1) AS ?x) {}",
+      "dataset_ntriples": ""
+    },
+    {
+      "id": "dynamic-bind-false-ask",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> ASK { BIND(STRDT(CONCAT(\"1000000001\", \"-01-01T00:00:00Z\"), xsd:dateTime) AS ?x) FILTER(!BOUND(?x)) }",
+      "dataset_ntriples": ""
+    },
+    {
+      "id": "dynamic-filter-false-ask",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> ASK { FILTER(STRDT(CONCAT(\"1000000001\", \"-01-01T00:00:00Z\"), xsd:dateTime) = STRDT(CONCAT(\"1000000001\", \"-01-01T00:00:00Z\"), xsd:dateTime)) }",
+      "dataset_ntriples": ""
+    },
+    {
+      "id": "dynamic-cast",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> ASK { FILTER(xsd:dateTime(CONCAT(\"1000000001\", \"-01-01T00:00:00Z\")) = xsd:dateTime(CONCAT(\"1000000001\", \"-01-01T00:00:00Z\"))) }",
+      "dataset_ntriples": ""
+    },
+    {
+      "id": "stored-year",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> ASK {?s ?p ?x FILTER(?x < \"2024-01-01T00:00:00Z\"^^xsd:dateTime)}",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \"1000000001-01-01T00:00:00Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> .\n"
+    },
+    {
+      "id": "zero-year-literal",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> ASK { FILTER(\"0000-01-01T00:00:00Z\"^^xsd:dateTime < \"0001-01-01T00:00:00Z\"^^xsd:dateTime) }",
+      "dataset_ntriples": ""
+    },
+    {
+      "id": "zero-year-strdt",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> ASK { BIND(STRDT(CONCAT(\"0000\",\"-01-01T00:00:00Z\"),xsd:dateTime) AS ?t) FILTER(?t < \"0001-01-01T00:00:00Z\"^^xsd:dateTime) }",
+      "dataset_ntriples": ""
+    },
+    {
+      "id": "zero-year-cast",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (COALESCE(xsd:dateTime(CONCAT(\"0000\",\"-01-01T00:00:00Z\")),1) AS ?t) {}",
+      "dataset_ntriples": ""
+    },
+    {
+      "id": "zero-year-stored",
+      "query": "ASK { ?s ?p ?t }",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \"0000-01-01T00:00:00Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> ."
+    },
+    {
+      "id": "zero-year-stored-count",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (COUNT(*) AS ?n) { ?s ?p ?t FILTER(?t < \"0001-01-01T00:00:00Z\"^^xsd:dateTime) }",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \"0000-01-01T00:00:00Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> ."
+    }
+  ]
+}
