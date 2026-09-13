@@ -88,6 +88,11 @@ tests remain required on the changed dual-version guest image.
 submits those complete inputs to the actual V2 guest and requires typed relation
 rejections. These later definitions require new execution evidence; they do not
 retroactively extend the historical 048 campaign.
+The exact numeric EBV corpus runs in `model/tests/v2_numeric_ebv.rs` and
+`host/tests/actual_v2_numeric_ebv.rs`: 17 REC-derived results and three arithmetic
+capacity rejections, with full input/result binding. Lexical EBV itself requires
+no finite arithmetic conversion. These new actual-guest definitions are pending
+execution at the corrected image; historical receipts do not cover them.
 The shared builtin matrix also runs under both versions in native model tests
 and `host/tests/actual_builtin_edges.rs`, authenticating each case's optional
 stored source before execution. REC-derived errors and finite-capacity controls

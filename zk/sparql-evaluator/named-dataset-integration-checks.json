@@ -1,33 +1,53 @@
 {
   "schema": "sparq-named-dataset-integration-v1",
-  "base_sha": "6825d96df780a57772486f9c3bee697dac95cde5",
-  "integrated_v1_sha": "c65618e901311d9f765a459e29188b5ee7e72903",
+  "base_sha": "8e2fa4c58421727b897e0fa5a1e4533abd3773e9",
+  "integrated_v1_sha": "be1d6fd64c01947c3d6cad6eb3ff4396c06bd303",
   "publication_ready": false,
-  "native_model_test_functions": 50,
+  "native_model_test_functions": 52,
   "native_model_clippy": "passed --all-targets --features evaluate -- -D warnings",
   "new_v2_case_inventories": {
     "exists_bound_admitted": 8,
     "exists_bound_rejected": 12,
     "exists_minus_results": 8,
-    "false_ask_discriminator": 1
+    "false_ask_discriminator": 1,
+    "numeric_ebv_results": 17,
+    "numeric_ebv_arithmetic_capacity_rejections": 3
   },
-  "guest_status": "New V1/V2 correlation runner definitions exist but this integrated artifact has not been built or executed. Historical 048 and d7 artifacts remain separate.",
+  "guest_status": "New V1/V2 correlation and exact numeric EBV runner definitions exist but this integrated artifact has not been built or executed. Historical048/d7 evidence remains immutable; the mandatory hosted V2 lane must execute the current program.",
   "merge_resolution": "LocalVocab retains both borrowed root dataset catalog and the new per-EXISTS domain-substitution flag; the cfg(test) scalar-oracle lifetime repair remains.",
   "source_sha256": {
-    "crates/sparq-core/src/lib.rs": "eddf7507ea55f3001cd79caeca5934b1830d911f5ac7c2ffe70561eb370182c7",
-    "crates/sparq-engine/src/exec.rs": "a31576add81cd89ac551467f097f40c16fc9fb81b9b08d29ce42727a274dc318",
+    "crates/sparq-core/src/lib.rs": "71eb8ab82e28a4feb42fb580ccdc5f8854aa9538051215a39a4e6f25157a3414",
+    "crates/sparq-engine/src/exec.rs": "441f13d340cef619745cd0ea03be61db96cb71171bb045ac9bd55d6396b2ac2e",
     "crates/sparq-engine/src/exists_domain.rs": "ae2c364e9b8f0a848912e4f36e6a8d61c29a992720aedd553a85079170c581bd",
     "zk/sparql-evaluator/model/src/evaluate.rs": "c7e9d6634a50ceb4c5687c8c2dc6809988b49ca60c753aff4f1bc03a0470c288",
     "zk/sparql-evaluator/model/tests/v2_exists.rs": "a3c2660546ed8d2f81d854c55caadda4d3cfecda43f61d56a3768f745597d77d",
-    "zk/sparql-evaluator/host/tests/actual_v2_exists.rs": "0efdeff5e6b15bc8c07347cf5783f1dfdbde0b0be904c08d355e55e6ea5d37ea"
+    "zk/sparql-evaluator/host/tests/actual_v2_exists.rs": "0efdeff5e6b15bc8c07347cf5783f1dfdbde0b0be904c08d355e55e6ea5d37ea",
+    "zk/sparql-evaluator/model/tests/v2_numeric_ebv.rs": "e569179c0cb6a825f6bf071ca20f9002172a0e4605553bb6268fc5b36c3f0ff0",
+    "zk/sparql-evaluator/host/tests/actual_v2_numeric_ebv.rs": "4a96dc2db480bfc34d046b4eaabbbb345e0dd060eb3aa3545a62e855e18c4378",
+    "zk/sparql-evaluator/fixtures/conformance/numeric-ebv.json": "49dd44539374fa4145d5f06b88d09e40e276c10de537a0b665b7df4036e56bf2",
+    "zk/sparql-evaluator/fixtures/false-absence.rq": "75ab3d201c32b73c1cac581b3e71123e76beb11b4ddce39da5460590f7841af2"
   },
   "logs": {
-    "/private/tmp/sparq-v2-c656-native.log": "369343eaf425588aeee568f379ce135746136d496fb349b6d0b94f0291f213d5",
-    "/private/tmp/sparq-v2-c656-model-clippy.log": "76e0bd20cad8ed486815aae8fbc29a64d8d17228e4e3b9f71d4229d05de50f78"
+    "/private/tmp/sparq-v2-be1-native.log": "21346d73081b808de44cc8a44c5cb9074ea8bbc198c23f654394d6174faa6d78",
+    "/private/tmp/sparq-v2-be1-clippy.log": "0ae6d8bd235a9d83b236884a1d949475edaf8acc0721b94ea4fce55b1ec8c0cf",
+    "/private/tmp/sparq-v2-be1-preflight.log": "ec7499eb7d18b61e2e363377efc3ad5196ff67c358407bba047b5bfcc66be080"
   },
   "remaining": [
-    "Integrate the newly reported numeric EBV correctness fix and its versioned corpus",
-    "Compile and execute all actual guest fixtures on the final integrated source",
-    "Required hosted gates and repository landing conditions"
+    "Review and integrate the bounded nullable-alternative admission follow-up before final freeze",
+    "Compile and execute all actual guest fixtures and required receipts at the corrected image through the mandatory hosted gate",
+    "Required independent reviews and repository landing conditions"
+  ],
+  "historical_native_checkpoints": [
+    {
+      "base_sha": "6825d96df780a57772486f9c3bee697dac95cde5",
+      "integrated_v1_sha": "c65618e901311d9f765a459e29188b5ee7e72903",
+      "native_model_test_functions": 50,
+      "native_model_clippy": "passed --all-targets --features evaluate -- -D warnings",
+      "logs": {
+        "/private/tmp/sparq-v2-c656-native.log": "369343eaf425588aeee568f379ce135746136d496fb349b6d0b94f0291f213d5",
+        "/private/tmp/sparq-v2-c656-model-clippy.log": "76e0bd20cad8ed486815aae8fbc29a64d8d17228e4e3b9f71d4229d05de50f78"
+      },
+      "source_sha": "8e2fa4c58421727b897e0fa5a1e4533abd3773e9"
+    }
   ]
 }
