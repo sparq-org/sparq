@@ -110,6 +110,9 @@ adds a committed catalog including empty named graphs, GRAPH and local snapshot
 FROM/FROM NAMED selection. V1 requests and commitments retain their meaning.
 [GPT-6] The [campaign evidence guide](references/evaluator-evidence.md) explains
 exact artifact export, actual receipt evidence and source/HAL provenance.
+[GPT-6] The [exact-evaluator experiment adapter](../../zk/sparql-evaluator/experiments/README.md)
+runs fixed synthetic V2 contracts against an independently accepted caller artifact
+and pin, with real local receipts, typed tamper controls and scoped measurement.
 
 [GPT-6] The [query-coverage corpus](references/evaluator-conformance.md) separates
 executed host semantics, explicit unsupported features, and guest proof evidence.

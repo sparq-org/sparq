@@ -1,0 +1,5 @@
+{
+  "pr": 6502,
+  "date": "2026-09-13",
+  "reason": "This stacked change adds a detached opt-in host experiment example, synthetic benchmark fixtures, tests, workflow wiring, documentation and source-bound local evidence. It introduces no new shared core or engine runtime changes beyond its V2 parent. This is an intent declaration, not an assertion of measured feature-OFF neutrality; the hosted WASM byte floor and runtime gates remain required."
+}

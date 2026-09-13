@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "run_id": "0123456789abcdef0123456789abcdef",
+  "repetitions": 1,
+  "warmups": 0,
+  "cases": [
+    { "fixture": "default_select", "authority": "verifier_agreed" },
+    { "fixture": "false_ask", "authority": "holder_declared" },
+    { "fixture": "named_catalog", "authority": "verifier_agreed" }
+  ]
+}
