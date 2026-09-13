@@ -103,7 +103,11 @@ is not a dataset validator: a proof profile must also validate input/query terms
 Temporal comparisons, ORDER BY and MIN/MAX use exact integer-second/borrowed-fraction
 keys rather than the approximate epoch cache. Graph keys lazily memoize validated
 seconds/flags and borrow fraction slices; ORDER BY retains these keys without
-per-comparison reparsing. Forks and dictionary appends rebuild the in-memory memo. SECONDS preserves all validated
+per-comparison reparsing. Forks start with an empty memo; dictionary appends extend
+initialized entries only for new temporal IDs. Cold mmap lookup still scans temporal
+flags and parses all cached temporal literals; selective cold-read performance remains
+unmeasured. See [cache work and benchmark scope](temporal-cache-work.md).
+SECONDS preserves all validated
 fractional digits as an xsd:decimal result; this does not expand finite decimal
 arithmetic. See [exact temporal scope](../zk-query-proofs/references/exact-temporals.md).
 
