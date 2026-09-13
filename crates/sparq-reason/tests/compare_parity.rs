@@ -91,6 +91,9 @@ ex:bob ex:invalidByte "1200"^^xsd:byte .
 ex:bob ex:invalidInteger "5.0"^^xsd:integer .
 ex:bob ex:invalidUnsigned "-1"^^xsd:unsignedLong .
 ex:bob ex:invalidWhitespace " 5"^^xsd:integer .
+ex:bob ex:rawIntegerWhitespace " 1 "^^xsd:integer .
+ex:bob ex:rawDecimalWhitespace " 7 "^^xsd:decimal .
+ex:bob ex:rawBooleanWhitespace " true "^^xsd:boolean .
 
 "#;
 

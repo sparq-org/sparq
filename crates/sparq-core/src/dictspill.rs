@@ -25,7 +25,7 @@
 //!   3. assign    — per shard in order: external sort of the distinct terms by
 //!      min_seq; final id = baseshard + rank (the sharded path's
 //!      assignment). The dictionary files (`dict-terms/offs/hash/hid/
-//!      meta.bin`) plus `numerics-v2.bin`/`temporals-v2.bin` are STREAM-written
+//!      meta.bin`) plus `numerics-v3.bin`/`temporals-v2.bin` are STREAM-written
 //!      in final-id order — never resident.
 //!   4. join      — (seq -> min_seq) ⋈ (min_seq -> final id) -> dense per-shard
 //!      `seq -> final id` remap files (two more small external sorts).
@@ -887,7 +887,7 @@ impl TableBuilder {
 }
 
 /// Phases 2–4: externally dedup + rank the spilled terms, STREAM-write the dictionary
-/// (`dict-meta/terms/offs/hash/hid.bin`) and the `numerics-v2.bin`/`temporals-v2.bin` caches in
+/// (`dict-meta/terms/offs/hash/hid.bin`) and the `numerics-v3.bin`/`temporals-v2.bin` caches in
 /// final-id order, and build the per-shard `seq -> final id` remap files. Returns the
 /// plan for the triple-remap phase.
 pub(crate) fn consolidate(mut st: SpillInterner, dir: &Path, tmp: &Path, cfg: &SpillConfig) -> Result<RemapPlan, String> {

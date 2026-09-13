@@ -39,4 +39,8 @@ ASK {
     }
     FILTER(?nullable_count != 2)
   }
+  UNION
+  { FILTER(" true "^^xsd:boolean) }
+  UNION
+  { FILTER(ISNUMERIC(" 1 "^^xsd:integer)) }
 }

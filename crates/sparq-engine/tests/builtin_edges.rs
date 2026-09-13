@@ -42,7 +42,7 @@ fn stored_invalid_literals_fail_soft_in_dense_and_compressed_caches() {
         ("\"-1\"^^xsd:unsignedLong", "?v < 0", false),
         ("\"1\"^^xsd:nonPositiveInteger", "?v > 0", false),
         ("\"é\"^^xsd:integer", "?v > 0", false),
-        ("\" 5 \"^^xsd:integer", "?v = 5", true),
+        ("\" 5 \"^^xsd:integer", "?v = 5", false),
         ("\"127\"^^xsd:byte", "?v > 0", true),
         (
             "\"2023-02-29T00:00:00Z\"^^xsd:dateTime",
@@ -98,7 +98,7 @@ fn stored_arithmetic_validity_agrees_in_dense_and_compressed_graphs() {
         ("\"\u{a0}5\"^^xsd:integer", false),
         ("\"é\"^^xsd:integer", false),
         ("\"127\"^^xsd:byte", true),
-        ("\" 5 \"^^xsd:integer", true),
+        ("\" 5 \"^^xsd:integer", false),
         ("\"0.5\"^^xsd:decimal", true),
     ] {
         let data = format!(

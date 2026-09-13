@@ -787,7 +787,7 @@ impl Num {
     #[inline]
     pub fn of_parts(value: &str, datatype: &str) -> Option<Num> {
         use oxrdf::vocab::xsd;
-        let v = value.trim_matches([' ', '\t', '\r', '\n']);
+        let v = value;
         if !sparq_core::numeric_literal_valid(v, datatype) {
             return None;
         }
@@ -2053,6 +2053,22 @@ mod tests {
         );
     }
 
+    // [GPT-6] Independent expectations prevent shared trimming from passing parity.
+    #[test]
+    fn raw_numeric_whitespace_is_invalid_in_both_layers() {
+        for dt in [xsd::INTEGER, xsd::BYTE, xsd::UNSIGNED_LONG, xsd::DECIMAL, xsd::FLOAT, xsd::DOUBLE] {
+            for lexical in [" 1 ", "\t1\r\n", "\u{a0}1", "\u{b}1"] {
+                assert!(!sparq_core::numeric_literal_valid(lexical, dt.as_str()));
+                assert_eq!(sparq_core::numeric_cache_value(lexical, dt.as_str()), None);
+                assert!(as_numeric(&typed(lexical, dt)).is_none());
+            }
+        }
+        for lexical in ["+1", "-0"] {
+            assert!(sparq_core::numeric_literal_valid(lexical, xsd::UNSIGNED_LONG.as_str()));
+            assert!(as_numeric(&typed(lexical, xsd::UNSIGNED_LONG)).is_some());
+        }
+    }
+
     /// [FABLE-5] (sq-9781x / sq-74oy4 / sq-6b1lj) TRUE cross-seam differential: the sparq-core
     /// numeric-value CACHE acceptance (`sparq_core::numeric_cache_value` — the EXACT acceptance
     /// `numerics_of`/`numeric_of`/`dictspill` compute, NOT a re-implementation, so this is not
@@ -2070,9 +2086,9 @@ mod tests {
         let cases: &[(&str, oxrdf::NamedNodeRef<'_>)] = &[
             // ---- both accept (well-formed for datatype), same f64 image ----
             ("42", xsd::INTEGER),
-            (" 7 ", xsd::DECIMAL),      // whitespace collapse — both trim
+            (" 7 ", xsd::DECIMAL),      // [GPT-6] invalid raw lexical: both reject
             ("+3", xsd::INTEGER),
-            (" 1 ", xsd::INTEGER),      // padded integer: both value-1 (sq-74oy4)
+            (" 1 ", xsd::INTEGER),      // invalid raw lexical: both reject
             ("1.5", xsd::DECIMAL),
             ("1.5E2", xsd::DOUBLE),
             ("INF", xsd::DOUBLE),

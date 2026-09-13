@@ -272,6 +272,12 @@ validated operands in later arithmetic. PyOxigraph 0.5.11 also accepts the
 invalid-byte identity example; that interoperability difference does not change
 the numeric-operand golden. String casts collapse only XML whitespace, so NBSP
 does not disappear before integer, decimal, float, double or boolean validation.
+[GPT-6] Raw typed literals are checked verbatim: `" true "^^xsd:boolean` and
+`" 1 "^^xsd:integer` are ill-typed. They retain their RDF identity, but have false
+EBV under the published 2013 Recommendation; numeric interpretation and typed
+casts reject them. String constructors still normalize XML boundary whitespace.
+See [raw literal semantics](raw-literal-whitespace.md) for the source definitions,
+old-test correction record and the separate SPARQL 1.2 EBV boundary.
 The shared matrix contains regression and positive controls as well as
 guard-discriminating cases; its size is not a count of independently fixed bugs.
 
