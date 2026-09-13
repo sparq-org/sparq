@@ -357,6 +357,45 @@ fn exists_requires_all_source_graphs_blank_free_but_allows_later_template_nodes(
 }
 
 #[test]
+fn captured_bound_profile_is_retained_in_v3_with_blank_free_input() {
+    let corpus: serde_json::Value = serde_json::from_str(include_str!(
+        "../../fixtures/conformance/exists-bound-boundaries.json"
+    ))
+    .unwrap();
+    let mut counts = (0, 0);
+    for case in corpus["cases"].as_array().unwrap() {
+        let mut input = witness(
+            "ASK {}",
+            case["dataset_ntriples"].as_str().unwrap_or(""),
+            &[],
+        );
+        input.request.query = case["query"].as_str().unwrap().into();
+        if case["admitted"] == true {
+            let v3::CanonicalResult::Select { rows, .. } = v3::evaluate(&input).unwrap().result
+            else {
+                panic!("SELECT")
+            };
+            assert_eq!(
+                serde_json::json!(rows),
+                case["expected_rows"],
+                "{}",
+                case["id"]
+            );
+            counts.0 += 1;
+        } else {
+            assert_eq!(
+                v3::evaluate(&input).unwrap_err().0,
+                "captured BOUND is outside the SPARQL 1.1 substitution profile",
+                "{}",
+                case["id"]
+            );
+            counts.1 += 1;
+        }
+    }
+    assert_eq!(counts, (8, 12));
+}
+
+#[test]
 fn existing_positive_goldens_run_through_v3_without_changing_expectations() {
     let corpus: serde_json::Value =
         serde_json::from_str(include_str!("../../fixtures/conformance/cases.json")).unwrap();

@@ -56,5 +56,6 @@
     "/private/tmp/sparq-v3-all-host-compile.log",
     "/private/tmp/sparq-v3-integrated-clippy.log",
     "/private/tmp/sparq-v3-receipt-inventory-restored.log"
-  ]
+  ],
+  "source_checkpoint": "843a7768ca5565e577bbba21d82180fb7cb612fb"
 }

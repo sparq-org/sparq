@@ -1,7 +1,7 @@
 # Blank nodes and graph results: V3 implementation design
 
 [GPT-6] This is work in progress after the separate V2 named-dataset relation.
-It does not establish V3 guest execution, receipts or full SPARQL coverage.
+Execution status is recorded in the linked structured checks; full SPARQL coverage is not claimed.
 
 The V3 model schema preserves V1/V2 request and commitment meanings.
 It binds source blank-node identity within the complete N-Quads document,
@@ -77,9 +77,9 @@ commitments while yielding the same canonical result.
 graph N-Triples. `v3::bind_journal` checks independently expected version, request
 and authority **after receipt verification**; calling it alone verifies no proof.
 The typed host `v3::{prove_with_artifact, verify_with_artifact}` APIs and guest
-version dispatch now define the V3 relation. Guest execution and receipt validation
-remain pending until recorded for the corresponding exported artifact. A native
-result or successful compile alone is not a proof.
+version dispatch define the V3 relation. Native and actual-guest checks are recorded in
+[the integrated checks](../../../zk/sparql-evaluator/graph-results-bound-integration-checks.json);
+genuine receipts require the separate immutable artifact campaign.
 
 ```sh
 cargo test --locked --manifest-path zk/sparql-evaluator/Cargo.toml \
@@ -99,7 +99,8 @@ terms, and CONSTRUCT template nodes arise after WHERE evaluation. This avoids
 the disputed SPARQL 1.1 captured-blank substitution semantics described in the
 [EXISTS community report](https://w3c.github.io/sparql-exists/docs/sparql-exists.html);
 this version declines the blank-containing case instead of assigning a practical
-repair to the published Recommendation. V1/V2 retain their prior profile.
+repair to the published Recommendation. All versions reject potentially captured
+BOUND inside EXISTS; local BOUND is retained, with versioned actual-guest tests.
 
 ## Guest and receipt validation
 
@@ -109,7 +110,8 @@ exact relation-panic rejection for capacity, domain and admission failures.
 `real_graph_results.rs` requires three genuine Succinct receipts: a holder-declared
 bag, verifier-agreed CONSTRUCT and holder-declared DESCRIBE. Independent request,
 nonce, authority, policy, journal and cross-version substitutions must reject.
-The campaign helper retains every V1/V2 receipt and requires all three V3 exports,
+Changes to `sparq-canon` trigger the mandatory actual guest job. The helper retains
+every V1/V2 receipt and requires all three V3 exports,
 with the same independently checked artifact throughout. Use its evidence record
 to determine execution status; these test definitions alone establish no receipt.
 
