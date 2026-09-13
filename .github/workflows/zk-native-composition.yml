@@ -8,6 +8,10 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - "zk/native-composition/**"
+      - "crates/sparq-canon/**"
+      - "crates/sparq-core/**"
+      - "vendor/spargebra/**"
+      - "Cargo.toml"
       - "rust-toolchain*"
       - ".cargo/**"
       - ".github/workflows/zk-native-composition.yml"
@@ -15,6 +19,10 @@ on:
     branches: [main]
     paths:
       - "zk/native-composition/**"
+      - "crates/sparq-canon/**"
+      - "crates/sparq-core/**"
+      - "vendor/spargebra/**"
+      - "Cargo.toml"
       - "rust-toolchain*"
       - ".cargo/**"
       - ".github/workflows/zk-native-composition.yml"
@@ -77,7 +85,20 @@ jobs:
         run: cargo test --release --locked --manifest-path zk/native-composition/Cargo.toml
 
       - name: Clippy for the standalone prototype
-        run: cargo clippy --locked --manifest-path zk/native-composition/Cargo.toml --all-targets -- -D warnings
+        run: cargo clippy --locked --manifest-path zk/native-composition/Cargo.toml --all-features --all-targets -- -D warnings
+
+      - name: Real public RDF proofs and malicious weaker-proof controls
+        run: cargo test --release --locked --manifest-path zk/native-composition/Cargo.toml --features native-rdf --lib
+
+      - name: Run the public RDF experiment
+        run: cargo run --release --locked --manifest-path zk/native-composition/Cargo.toml --features native-rdf --bin native-rdf > native-rdf-experiment.json
+
+      - name: Preserve public RDF experiment report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: native-rdf-experiment
+          path: native-rdf-experiment.json
+          if-no-files-found: error
 
       - name: Build the prototype CLI
         run: cargo build --release --locked --manifest-path zk/native-composition/Cargo.toml
