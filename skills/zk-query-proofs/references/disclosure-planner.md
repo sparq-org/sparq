@@ -172,8 +172,10 @@ verifier keep their existing nonnegative `u64` semantics.
 
 `canonical_signed_integer` accepts only the exact canonical `xsd:integer` token
 within the signed range: zero is `0`; negatives have one leading minus; no leading
-plus, leading zero, negative zero, whitespace or numeric datatype substitution is
-normalized. Other valid XML Schema spellings are outside this admitted profile.
+plus, leading zero, negative zero, whitespace within a literal's lexical form or
+numeric datatype substitution is normalized. Other valid XML Schema spellings are
+outside this admitted profile. Ordinary query syntax whitespace, including between
+unary minus and its operand, remains accepted.
 The parser rejects noncanonical and out-of-range public bounds. A noncanonical or
 out-of-range private operand cannot satisfy a planned predicate.
 
