@@ -137,7 +137,10 @@ fn is_value_lane(member: &str) -> bool {
 /// members are legal only for value-handle methods; string-lane members are
 /// illegal for `value-only`.
 fn expect_legal(method_key: &str, member: &str) -> bool {
-    if member.starts_with("result_v1_") {
+    if member.starts_with("result_v1_")
+        || member.starts_with("result_v2_")
+        || member.starts_with("result_v3_")
+    {
         // [GPT-6] The additive result relation authenticates whole string-canonical
         // graphs; it cannot reuse a dual-leaf graph's lexical handle as its root.
         method_key == "string-canonical"
@@ -510,9 +513,13 @@ fn successful_result_members_only_admit_string_canonical_commitments() {
     let members: Vec<_> = matrix
         .matrix
         .iter()
-        .filter(|(member, _)| member.starts_with("result_v1_"))
+        .filter(|(member, _)| {
+            member.starts_with("result_v1_")
+                || member.starts_with("result_v2_")
+                || member.starts_with("result_v3_")
+        })
         .collect();
-    assert_eq!(members.len(), 4);
+    assert_eq!(members.len(), 30);
     for (_, row) in members {
         assert!(row.configs["string-canonical"].legal);
         assert!(!row.configs["dual-leaf"].legal);

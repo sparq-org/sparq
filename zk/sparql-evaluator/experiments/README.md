@@ -29,7 +29,8 @@ timers. There is no hosted prover, fake receipt or development-mode fallback.
 
 The output directory must not exist and must be outside the clean source
 checkout. Manifest, pin and guest reads have explicit byte bounds. The manifest
-admits only the three fixed fixtures and two explicit authority modes, rejects
+admits the fixed fixtures and a separately versioned generated organization
+profile under two explicit authority modes, rejects
 duplicate contracts and unknown fields, and bounds repetitions and warmups. The
 published salt, dataset and nonce derivation are synthetic test inputs. Change
 `run_id` between campaigns; its lowercase hexadecimal value separates challenges
@@ -99,8 +100,15 @@ cargo test --locked --manifest-path zk/sparql-evaluator/Cargo.toml \
 
 Native tests execute all six fixture/authority combinations against fixed goldens,
 manifest bounds, distinct contract/nonce identities and wrong-error rejection.
+Schema-version-2 manifests add complete materialized named-organization fixtures,
+including empty graphs, and independently derived count goldens. The adapter
+regenerates this bounded profile to validate its query, catalog, data and answer;
+it admits one ordinary sample per generated manifest.
+The [common workload campaign](../../../bench/zk-compose/campaigns/README.md)
+materializes these inputs before interleaving separately identified authority modes.
 These tests do not generate receipts. The example CLI generates genuine receipts;
-its completed report is separate evidence. Arbitrary queries, additional datasets,
+its completed report is separate evidence. Arbitrary queries or datasets outside
+those validated synthetic profiles,
 credential suites, internal prover stages and optimization ablations are outside
 this adapter's admitted experiment profile.
 
