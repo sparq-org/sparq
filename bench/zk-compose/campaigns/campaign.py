@@ -30,6 +30,10 @@ CONTRACT = {
 }
 
 
+class StartedProcessError(OSError):
+    """A host I/O failure after the sample process was actually created."""
+
+
 def encoded(value):
     return (json.dumps(value, sort_keys=True, indent=2, allow_nan=False) + "\n").encode()
 
@@ -217,6 +221,7 @@ def invoke(argv, cwd, stdout_path, stderr_path, timeout, env):
     start = time.monotonic_ns()
     with stdout_path.open("xb") as stdout, stderr_path.open("xb") as stderr:
         child = subprocess.Popen(argv, cwd=cwd, stdout=stdout, stderr=stderr, env=env, start_new_session=True)
+        code = None
         try:
             while True:
                 remaining = timeout - (time.monotonic_ns() - start) / 1e9
@@ -228,11 +233,12 @@ def invoke(argv, cwd, stdout_path, stderr_path, timeout, env):
                     break
                 try:
                     code = child.wait(timeout=min(remaining, 30))
-                    status = "exited"
+                    # A successful exit can race the last polling observation.
+                    status = "output_capacity" if stdout_path.stat().st_size + stderr_path.stat().st_size > 16 * 1024 * 1024 else "exited"
                     break
                 except subprocess.TimeoutExpired:
                     print("local adapter sample remains active; no result inferred", flush=True)
-            if status != "exited":
+            if status != "exited" and code is None:
                 # Only the new child process group we own, including prover children.
                 try:
                     os.killpg(child.pid, signal.SIGKILL)
@@ -240,12 +246,14 @@ def invoke(argv, cwd, stdout_path, stderr_path, timeout, env):
                     pass
                 child.wait()
                 code = child.returncode
-        except BaseException:
+        except BaseException as error:
             try:
                 os.killpg(child.pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
             child.wait()
+            if isinstance(error, OSError):
+                raise StartedProcessError(str(error)) from error
             raise
     return dict(status=status, exit_code=code, inclusive_process_ns=time.monotonic_ns() - start)
 
@@ -309,8 +317,8 @@ def run(directory, output, tools, run_id):
                     argv += [str(tools[name]) for name in ["artifact", "pin", "r0vm"]]
                 argv.append(str(adapter_output))
                 record["argv"] = argv
-                record["subprocess_started"] = True
                 record["process"] = invoke(argv, ROOT, sample_path / "stdout.txt", sample_path / "stderr.txt", plan["profile"]["timeout_seconds"], env)
+                record["subprocess_started"] = True
                 raw = adapter_output / "report.json"
                 if raw.exists():
                     record["adapter_report_sha256"] = file_digest(raw)
@@ -335,6 +343,8 @@ def run(directory, output, tools, run_id):
                         key = job["fixture"], job["mode"]
                         warmups[key] = warmups.get(key, 0) + 1
         except (OSError, ValueError, KeyError, TypeError, AttributeError, IndexError) as error:
+            if isinstance(error, StartedProcessError):
+                record["subprocess_started"] = True
             record["error"] = str(error)
         save(sample_path / "record.json", record)
         records.append(record)

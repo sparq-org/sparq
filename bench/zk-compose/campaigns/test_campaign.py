@@ -127,6 +127,40 @@ class CampaignTests(unittest.TestCase):
             self.assertEqual(failed["status"], "exited")
             self.assertEqual(failed["exit_code"], 7)
 
+    def test_output_capacity_is_checked_after_successful_exit(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            def spawn(argv, **kwargs):
+                class Completed:
+                    def wait(self, timeout=None):
+                        kwargs["stdout"].truncate(16 * 1024 * 1024 + 1)
+                        kwargs["stdout"].flush()
+                        return 0
+                return Completed()
+            # A sparse protocol fixture models output written between poll and exit.
+            # No adapter or prover is executed by this deterministic test.
+            with patch.object(c.subprocess, "Popen", spawn):
+                observed = c.invoke(["protocol-stub"], root, root / "stdout", root / "stderr", 2, {})
+            self.assertEqual(observed["status"], "output_capacity")
+            self.assertEqual(observed["exit_code"], 0)
+
+    def test_spawn_failure_is_distinct_from_io_failure_after_spawn(self):
+        for error, started in [(OSError("spawn refused"), False), (c.StartedProcessError("post-spawn host I/O"), True)]:
+            with tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                profile = dict(self.profile(), wallet_scales=[3], organization_scales=[], warmups=0, repetitions=1, include_unsupported=False)
+                c.save(root / "profile.json", profile)
+                c.generate(root / "profile.json", root / "generated")
+                tools = {"selected": Path(sys.executable)}
+                for name in ["nargo", "bb"]:
+                    tools[name] = root / name
+                    tools[name].touch(mode=0o700)
+                with patch.object(c, "invoke", side_effect=error):
+                    self.assertFalse(c.run(root / "generated", root / "output", tools, "1" * 32))
+                records = c.load(root / "output/report.json")["records"]
+                self.assertEqual(len(records), 2)
+                self.assertTrue(all(r["status"] == "failure" and r["subprocess_started"] is started for r in records))
+
     def test_exact_report_success_requires_bound_answer_authority_and_controls(self):
         fixture = c.organization("0123456789abcdef", 2)
         job = {"ordinal": 0, "backend": "exact", "mode": "holder_declared"}

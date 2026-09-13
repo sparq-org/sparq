@@ -90,7 +90,10 @@ unsupported combinations and missing-tool failures. Completed adapter outputs,
 process output files, command arguments and hashes are retained beside it. A killed
 or failing process is never converted into proof acceptance. Timeouts kill only
 the new child process group owned by that sample; output size is checked while
-waiting, with an explicit capacity outcome. Completed samples are not discarded
+waiting and after exit, with an explicit capacity outcome. This is a sampled
+observation, not a hard disk quota: a child can overshoot between checks. Spawn
+failures remain distinct from host I/O failures after a process was created.
+Completed samples are not discarded
 when a later one fails. The campaign summary distinguishes a completed schedule
 from a campaign in which every supported sample succeeded.
 
