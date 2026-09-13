@@ -123,7 +123,15 @@ wire input and replay. A deliberately weaker proof is first verified under its
 own weaker specification with the same context and nonce, then rejected by the
 independently constructed required verifier specification. Structural input
 tests are separate from proof executions; test-function counts are not receipt
-counts. See source-bound generated experiment evidence for completed runs.
+counts. The [local evidence](../../../zk/native-composition/evidence/native-rdf-local-smoke.json)
+pins the executed source, original report, executable, typed outcomes and guard
+mutations. Its local debug timings are validation evidence only.
+
+The [dependency gate record](../../../zk/native-composition/evidence/native-rdf-dependency-gates.json)
+preserves failed license, advisory and source-audit coverage checks. Running the
+same accepted policy on the exact foundation baseline produced the same failures;
+that comparison does not make the dependency gates pass. Dependency remediation
+and independent review remain required before publication is ready to land.
 
 All dependencies remain in the detached opt-in workspace. Its existing build
 script still requires Circom even for this RDF feature, and the pinned
