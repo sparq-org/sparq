@@ -384,7 +384,7 @@ controls, and the native `edge_matrix.py` feature compiler. The kernel's default
 binary dependency activation and embedded ELF remain unchanged; the patch record
 separately documents an upstream real-target binary compilation limitation.
 Synthetic dependency checks remain separate from actual guest proof evidence.
-[GPT-6] The exact evaluator enables the [numeric capacity guard](references/numeric-capacity.md). Valid values beyond the finite arithmetic lane can be returned directly, but unsupported numeric consumption fails the entire evaluation. Native default budgets leave this option off.
+[GPT-6] The exact evaluator enables the [numeric capacity guard](references/numeric-capacity.md). Valid values beyond the finite arithmetic lane can be returned directly; integer/decimal EBV uses exact zero classification. Unsupported arithmetic/comparison consumption fails the entire evaluation. Native default budgets leave this option off.
 
 [GPT-6] The SDK provenance checks bind both workspace patch tables and resolved
 feature-matrix package manifests to the exact inventoried vendor directories.

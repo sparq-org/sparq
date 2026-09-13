@@ -13334,8 +13334,8 @@ fn effective_boolean(v: &Value) -> bool {
 }
 
 /// SPARQL effective boolean value, three-valued: `None` is a TYPE ERROR (unbound,
-/// non-literal terms, literals of unknown datatypes, ill-formed boolean / numeric
-/// lexicals) — it matters because `!error` must stay an error, not become true.
+/// non-literal terms and unknown datatypes). Invalid numeric/boolean lexicals
+/// instead have false EBV per SPARQL 1.1 §17.2.2, independently of arithmetic errors.
 fn ebv(v: &Value) -> Option<bool> {
     match v {
         Value::Bool(b) => Some(*b),
@@ -13349,16 +13349,23 @@ fn ebv(v: &Value) -> Option<bool> {
             }
             let dt = l.datatype().as_str();
             if dt == xsd::BOOLEAN.as_str() {
-                match l.value() {
+                match l.value().trim_matches([' ', '\t', '\r', '\n']) {
                     "true" | "1" => Some(true),
                     "false" | "0" => Some(false),
-                    _ => None,
+                    _ => Some(false),
                 }
             } else if is_numeric_dt(l) {
-                // [OPUS-4.8] sq-rkzhr: XSD acceptance set (via `parse_xsd_f64`) — a
-                // numeric-typed literal with an ill-formed lexical is a type error (`None`),
-                // matching `as_num` rather than silently swallowing Rust-only spellings.
-                parse_xsd_f64(l.value()).map(|n| n != 0.0 && !n.is_nan())
+                // [GPT-6] EBV needs zero/NaN classification, not finite arithmetic.
+                // Validate datatype facets before inspecting exact decimal digits;
+                // converting them to f64 could underflow a nonzero value to false.
+                if !sparq_core::numeric_literal_valid(l.value(), dt) {
+                    Some(false)
+                } else if sparq_core::is_integer_datatype(dt) || dt == xsd::DECIMAL.as_str() {
+                    Some(l.value().bytes().any(|b| matches!(b, b'1'..=b'9')))
+                } else {
+                    // Float/double zero is measured in that datatype's value space.
+                    Num::of_literal(l).map(|n| !n.is_zero() && !n.is_nan())
+                }
             } else if dt == xsd::STRING.as_str() {
                 Some(!l.value().is_empty())
             } else {
@@ -19990,9 +19997,10 @@ mod effective_boolean_unit {
     }
 
     #[test]
-    fn ebv_ill_formed_boolean_is_type_error() {
+    fn ebv_ill_formed_boolean_is_false_per_sparql_11() {
         let ill = Value::Term(Term::Literal(Literal::new_typed_literal("yes", xsd::BOOLEAN)));
-        assert_eq!(ebv(&ill), None, "ill-formed boolean EBV is type error");
+        // [GPT-6] REC §17.2.2 first bullet explicitly specifies false here.
+        assert_eq!(ebv(&ill), Some(false));
     }
 
     #[test]

@@ -116,7 +116,10 @@ a sticky whole-query capacity failure; it is `false` by default. It retains the
 `i64` integer and `i128` decimal lanes, including the existing bounded decimal
 division precision, while refusing overflow fallback to floating point.
 Direct RDF output, valid unary plus, `isNumeric` and `sameTerm` preserve large
-lexicals without asserting arithmetic support. Constrained expression work
+lexicals without asserting arithmetic support. Numeric EBV separately classifies
+validated integer/decimal digits exactly, without a floating-point conversion.
+Invalid numeric/boolean lexical EBV is false under SPARQL 1.1 §17.2.2;
+arithmetic on invalid numeric terms still errors. Constrained expression work
 stays on the calling thread. See the [numeric capacity contract](../zk-query-proofs/references/numeric-capacity.md).
 
 SELECT/ASK entry points (each has `_prepared`, `_with_budget`, and `_view` variants):
@@ -1276,5 +1279,5 @@ integer/decimal lexical syntax and subtype facets before parsing an operand.
 The same gate covers literal constants, local `VALUES` bindings and graph IDs,
 including compressed graphs. `builtin_edges.json` records bounded REC error
 cases; an optional `dataset_ntriples` field supplies the authenticated data for
-stored-term cases. Invalid numeric RDF terms remain stored but produce expression
-errors; this does not extend the finite arithmetic representation.
+stored-term cases. Invalid numeric RDF terms remain stored but produce arithmetic
+expression errors; their EBV is false. This does not extend finite arithmetic.

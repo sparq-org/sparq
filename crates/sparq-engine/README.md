@@ -43,7 +43,9 @@ let json = sparq_engine::query_json(&g, "SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?
   only positive shapes with locally bound FILTERs; scope-sensitive shapes and triple-term
   endpoints use potentially more expensive ordinary evaluation. [Boundaries and examples](../../skills/sparql-query/SKILL.md).
 - **Deterministic builtins** — `isNumeric` validates lexicals/facets independently of finite
-  arithmetic capacity; integer casts truncate within `i64`. `SUBSTR` clips the original
+  arithmetic capacity; integer/decimal EBV classifies validated digits without floating
+  underflow. Invalid numeric/boolean lexicals have false EBV per SPARQL 1.1 §17.2.2,
+  while invalid arithmetic operands error. Integer casts truncate within `i64`. `SUBSTR` clips the original
   one-based interval. Date accessors validate calendars/offsets and normalize next-day
   midnight; `MIN`/`MAX` retain input terms. [Bounded coverage and numeric limits](../../skills/sparql-query/SKILL.md)
   remain explicit; these corrections do not establish complete builtin conformance.
