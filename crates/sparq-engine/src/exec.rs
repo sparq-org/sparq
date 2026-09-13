@@ -20172,12 +20172,12 @@ mod columnar_aggregate_seam {
     /// cannot catch a columnar mutation. This helper replicates the sequential scalar fallback
     /// of `group_aggregate` WITHOUT the columnar seam. [SONNET-4.6]
     /// (C2-fix sq-pntvh.4 adversarial review)
-    fn scalar_oracle(
-        g: &Graph,
+    fn scalar_oracle<'g>(
+        g: &'g Graph,
         b: &Bindings,
         group_vars: &[Variable],
         aggregates: &[(Variable, AggregateExpression)],
-    ) -> (Vec<Row>, LocalVocab) {
+    ) -> (Vec<Row>, LocalVocab<'g>) {
         let key_cols: Vec<Option<usize>> = group_vars.iter().map(|v| b.col(v)).collect();
         let (mut order, mut members) = build_groups(b, &key_cols);
         if group_vars.is_empty() && order.is_empty() {
