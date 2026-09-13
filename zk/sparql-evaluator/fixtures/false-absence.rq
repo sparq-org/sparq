@@ -3,6 +3,7 @@
 # even when VALUES binds it to a predicate-only IRI or an absent IRI.
 # SUBSTR positions include only position one for start zero and length two.
 # Invalid integer subtype facets remain expression errors through arithmetic.
+# Substituted ?s disappears from both inner MINUS domains, making EXISTS true.
 PREFIX ex: <http://ex/>
 PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
 ASK {
@@ -21,5 +22,9 @@ ASK {
   {
     FILTER("2024-01-01T00:00:00Z"^^<http://www.w3.org/2001/XMLSchema#dateTime>
       = "2024-01-01T00:00:00.000000001Z"^^<http://www.w3.org/2001/XMLSchema#dateTime>)
+  }
+  UNION
+  { VALUES ?s { ex:alice }
+    FILTER NOT EXISTS { ?s ex:value ?m MINUS { ?s ex:value ?z } }
   }
 }

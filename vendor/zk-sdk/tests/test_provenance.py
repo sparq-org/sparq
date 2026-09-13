@@ -25,7 +25,7 @@ class ProvenanceControls(unittest.TestCase):
         cls.repo = Path(cls.temporary.name)
         cls.root = cls.repo / "vendor/zk-sdk"
         shutil.copytree(SOURCE, cls.root, ignore=shutil.ignore_patterns("__pycache__"))
-        for relative in ["Cargo.lock", "methods/guest/Cargo.lock"]:
+        for relative in ["Cargo.lock", "methods/guest/Cargo.lock", "Cargo.toml", "methods/guest/Cargo.toml"]:
             target = cls.repo / "zk/sparql-evaluator" / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(VERIFY.REPO / "zk/sparql-evaluator" / relative, target)
@@ -76,6 +76,43 @@ class ProvenanceControls(unittest.TestCase):
                     with self.changed(path, altered.encode()):
                         with self.assertRaisesRegex(AssertionError, "registry package selected"):
                             self.check()
+
+    def test_each_manifest_patch_path_rejects_a_different_local_copy(self):
+        packages = json.loads((self.root / "UPSTREAM.json").read_text())["packages"]
+        for lane, names in [
+            ("Cargo.toml", {p["name"] for p in packages}),
+            ("methods/guest/Cargo.toml", {"ark-relations", "ark-crypto-primitives", "risc0-zkvm", "risc0-zkos-v1compat"}),
+        ]:
+            path = self.repo / "zk/sparql-evaluator" / lane
+            for package in packages:
+                name = package["name"]
+                if name not in names:
+                    continue
+                with self.subTest(lane=lane, package=name):
+                    needle = f"vendor/zk-sdk/{name}-{package['version']}"
+                    altered = path.read_text().replace(needle, "vendor/unrelated/" + name)
+                    self.assertNotEqual(altered, path.read_text())
+                    with self.changed(path, altered.encode()):
+                        with self.assertRaisesRegex(AssertionError, "manifest vendor patch path"):
+                            self.check()
+
+    def test_resolved_edge_packages_must_be_the_exact_vendor_paths(self):
+        versions = {"risc0-zkvm": "3.0.6", "risc0-zkos-v1compat": "2.2.3"}
+        metadata = {"resolve": {"nodes": [{"id": name} for name in versions]},
+                    "packages": [{"name": name, "id": name, "version": version, "source": None,
+                                  "manifest_path": str(self.root / f"{name}-{version}" / "Cargo.toml")}
+                                 for name, version in versions.items()]}
+        VERIFY.selected_vendor_manifests(metadata, versions)
+        for package in metadata["packages"]:
+            path = package["manifest_path"]
+            package["manifest_path"] = str(self.repo / "unrelated" / package["name"] / "Cargo.toml")
+            with self.assertRaisesRegex(AssertionError, "resolved vendor manifest path"):
+                VERIFY.selected_vendor_manifests(metadata, versions)
+            package["manifest_path"] = path
+            package["source"] = "registry+https://github.com/rust-lang/crates.io-index"
+            with self.assertRaisesRegex(AssertionError, "resolved vendor source"):
+                VERIFY.selected_vendor_manifests(metadata, versions)
+            package["source"] = None
 
     def test_embedded_kernel_bytes_are_bound(self):
         path = self.root / "risc0-zkos-v1compat-2.2.3/elfs/v1compat.elf"

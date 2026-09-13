@@ -713,7 +713,6 @@
       "spec": "https://www.w3.org/TR/sparql11-query/#defn_evalExists",
       "positive_cases": [],
       "rejection_cases": [
-        "reject-exists-minus",
         "reject-exists-optional",
         "reject-exists-values",
         "reject-exists-bind",
@@ -727,7 +726,7 @@
         "reject-exists-nested-in-function"
       ],
       "guest_proof_evidence": "not_asserted",
-      "limits": "The first exact profile admits only BGP, Join, Union and pure Filter bodies. Nested EXISTS, residual path operators, MINUS, OPTIONAL, VALUES, BIND, subqueries and modifiers inside EXISTS are rejected pending explicit SPARQL 1.1 REC substitution support (zkp-10.6). These remain valid SPARQL syntax; rejection is a profile limit, not feature coverage."
+      "limits": "The exact profile admits BGP, Join, Union, pure Filter and MINUS bodies with captured IRI/literal substitution. Nested EXISTS, residual paths, OPTIONAL, VALUES, BIND, subqueries and modifiers inside EXISTS remain rejected; captured BOUND and blank/triple values are separately excluded. Rejection is a profile limit, not feature coverage."
     },
     {
       "id": "nullable_path_composition",
@@ -741,6 +740,17 @@
       ],
       "guest_proof_evidence": "not_asserted",
       "limits": "Nullable subexpressions inside path composition and nullable lowered-sequence intermediates are rejected while absent-constant propagation is repaired. Ordinary root +/*/? with non-nullable operands remains admitted; these rejection cases do not count as support."
+    },
+    {
+      "id": "exists_minus_domains",
+      "status": "partial_fixture_coverage",
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#defn_substitute",
+      "positive_cases": [
+        "exists-minus-disjoint-domain-after-substitution"
+      ],
+      "rejection_cases": [],
+      "guest_proof_evidence": "not_asserted",
+      "limits": "Only the shared BGP/Join/UNION/Filter/MINUS branch with IRI/literal captures. Published 2013 domain behavior differs from some alternative binding-injection implementations. The separate direct guest fixture runner is execution evidence only after a source-bound campaign runs it."
     }
   ],
   "functions": [
@@ -1458,7 +1468,7 @@
     {
       "id": "exists-minus-disjoint-domain-after-substitution",
       "tracking": "zkp-10.6",
-      "case": "reject-exists-minus",
+      "case": "exists-minus-disjoint-domain-after-substitution",
       "dataset": "fixtures/conformance/core.nt",
       "baseline": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#defn_evalExists",
       "published_2013_expected_mappings": [
@@ -1473,9 +1483,11 @@
         }
       ],
       "prior_deferred_compatibility_mappings": [],
-      "profile_behavior": "Rejected before evaluation; the published expectation is retained separately from this admission rejection.",
-      "reason": "Substitution makes the shared outer ?s a constant in both MINUS arguments, leaving disjoint ?m and ?z domains. Deferred compatibility removes the inner rows before the outer binding is applied. This slice does not claim to repair that operator combination.",
-      "errata_discussion": "https://github.com/w3c/sparql-query/issues/156"
+      "profile_behavior": "Admitted with the unchanged query, core dataset, and retained published-2013 expected mappings.",
+      "reason": "Captured IRI/literal values are constrained by exact RDF term identity and their columns removed before MINUS observes child domains. This resolves the retained discriminator; blank/binder/subquery and other unsupported combinations remain outside the claim.",
+      "errata_discussion": "https://github.com/w3c/sparql-query/issues/156",
+      "prior_case": "reject-exists-minus",
+      "status": "resolved_for_admitted_iri_literal_body"
     },
     {
       "id": "nullable-alternative-absent-constant",

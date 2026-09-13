@@ -83,6 +83,11 @@ not cryptographic receipts.
 dataset-reference capacity boundary. `host/tests/real_datasets.rs` defines the two
 V2 receipt fixtures, catalog/framing negatives and V1/V2 wire checks. All V1 host
 tests remain required on the changed dual-version guest image.
+`model/tests/v2_exists.rs` preserves the eight MINUS goldens and the shared
+8-admitted/12-rejected captured-BOUND matrix. `host/tests/actual_v2_exists.rs`
+submits those complete inputs to the actual V2 guest and requires typed relation
+rejections. These later definitions require new execution evidence; they do not
+retroactively extend the historical 048 campaign.
 The shared builtin matrix also runs under both versions in native model tests
 and `host/tests/actual_builtin_edges.rs`, authenticating each case's optional
 stored source before execution. REC-derived errors and finite-capacity controls

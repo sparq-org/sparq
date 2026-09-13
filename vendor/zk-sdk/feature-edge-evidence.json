@@ -2,7 +2,6 @@
   "schema_version": 1,
   "authored_by": "GPT-6",
   "scope": "Local dependency-edge compile and provenance checks; no guest execution, receipt, source audit, or performance claim.",
-  "source_base": "c310499708a31ba130243c23dfdc9d90650dd225",
   "source_sha256": {
     "vendor/zk-sdk/UPSTREAM.json": "4c54b0665000d9d6ca5504b9a71e8343685ce1a6d1d8f898157b22f19325ea8b",
     "vendor/zk-sdk/verify.py": "1709b3db871aabfc10ae2207e637eaed26a0159e11a5f4a06e38863143d9367b",
@@ -83,7 +82,19 @@
     "build_stub_negative_controls": [
       "DOCS_RS rejected before compiler invocation",
       "RISC0_SKIP_BUILD_KERNELS rejected before compiler invocation"
-    ]
+    ],
+    "clippy_resolved_features": {
+      "risc0-zkvm": [
+        "client",
+        "disable-dev-mode",
+        "std"
+      ],
+      "risc0-zkos-v1compat": [],
+      "risc0-build": [
+        "unstable"
+      ]
+    },
+    "clippy_feature_attribution": "Resolved host metadata independently checked during provenance-only follow-up; pinned host manifest and lock retain their recorded source hashes."
   },
   "kernel": {
     "compiles": {
@@ -194,5 +205,8 @@
     "candidate.log": "dd3aa1a302e8be0436b9e1af6071c5608fdebf60b9c9bb3031e1d4aedfc7a2cb",
     "elf_library.log": "d40ea3c3092c0c462490a66b69a93b97409de3d0c7ab834569cba3068934854d",
     "binary_feature_off.log": "e7acf0ffe1605258bace915674a45262e6e9f7be4655f50dd5e1717b0f53deb2"
-  }
+  },
+  "source_parent_before_feature_edge_changes": "c310499708a31ba130243c23dfdc9d90650dd225",
+  "source_commit": "6f7d750ac6c8d8118bdcac6ef6dc0b266c0909b9",
+  "source_sha256_scope": "Historical six-package feature-edge checkpoint; later provenance-only helper changes do not update these recorded execution source hashes."
 }

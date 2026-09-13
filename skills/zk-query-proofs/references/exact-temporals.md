@@ -13,8 +13,9 @@ Source literal identity remains unchanged, including the original MIN/MAX term.
 The graph lazily memoizes checked temporal seconds, flags and fraction offsets.
 Warm whole-second lookups need no lexical access; fractions borrow dictionary
 slices. ORDER BY cells hold the borrowed keys, avoiding comparator-time parsing.
-Forks, dictionary appends and re-encoding rebuild the memo; persisted cache bytes
-stay compatible. No unmeasured throughput or memory neutrality claim is made.
+Forks and re-encoding start cold; dictionary appends extend initialized memos only
+for new temporal IDs. Persisted cache bytes stay compatible. Selective cold-mmap
+work remains unmeasured; see [cache work](../../sparql-query/temporal-cache-work.md). No unmeasured throughput or memory neutrality claim is made.
 The existing `Timeline` floating fraction, `Temporal` f64 epoch/cache files and
 approximate vector representations remain available for their representation
 purposes. Their floating comparisons are not exact value or equality oracles.

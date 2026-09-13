@@ -29,7 +29,8 @@ integrity. Install/publication still require their original verification paths.
 
 Run `python3 vendor/zk-sdk/verify.py` with Python supporting `tomllib` and Git to
 check inventories/hashes, feature defaults and explicit local patch selection in
-both evaluator lockfiles. It reverses each patch in a private temporary copy,
+both evaluator lockfiles and the exact vendor directories in both workspace
+patch tables. It reverses each patch in a private temporary copy,
 checks every reconstructed file against its upstream hash, then replays the patch
 and compares the patched bytes. All patch paths use `a/` and `b/` relative to the
 package directory and one strip level. Additional upstream license files have
@@ -58,11 +59,18 @@ and adds explicitly pinned test dependencies; it is not a proof artifact lock.
 The harness sets a synthetic GitHub token and a private temporary RISC0 directory.
 It neither installs artifacts nor accesses hosted proving or publication services.
 
-The scoped native Clippy check selects the four patched packages from the locked
-host workspace with `--lib` and `-- -D warnings`. Its resolved features are
-`risc0-build/unstable`, no rzup features, `ark-relations/std,tracing-subscriber`,
-and `ark-crypto-primitives/merlin,snark,sponge,std`. It does not claim Clippy
-coverage of every feature combination or the guest target.
+The earlier scoped native Clippy record selects `risc0-build`, `rzup`,
+`ark-relations` and `ark-crypto-primitives` from the locked host workspace, with
+`--lib -- -D warnings`. Its resolved features are `risc0-build/unstable`, no rzup
+features, `ark-relations/std,tracing-subscriber`, and
+`ark-crypto-primitives/merlin,snark,sponge,std`. The later
+[feature-edge record](feature-edge-evidence.json) selects `risc0-zkvm`,
+`risc0-zkos-v1compat` and `risc0-build`, with the same library-only Clippy flags.
+That selection resolves `risc0-zkvm/client,disable-dev-mode,std`, no kernel library
+features, and `risc0-build/unstable`. Together these recorded scopes include every
+patched package; neither covers every feature combination or the guest target.
+The feature compile matrix uses `cargo check`, not code generation or linking;
+the separate embedded-ELF API test builds and executes a native test binary.
 
 These checks do not replace a guest rebuild, receipt tests, the dependency audit,
 or hosted CI. The full upstream installation/publication integration suite is not
@@ -72,10 +80,12 @@ versions or cryptographic arithmetic merely to remove an advisory.
 
 `python3 vendor/zk-sdk/tests/test_provenance.py` exercises corruption controls for
 every required local patch in both lockfiles, the embedded ELF, upstream hashes,
-and patch paths with a consistent but incorrect patch hash.
+and incorrect patch path nesting even when the recorded hash matches the changed
+patch bytes. It also rejects unrelated local manifest paths and registry
+substitutions in resolved Cargo metadata.
 `CARGO_TARGET_DIR=/absolute/cache python3 vendor/zk-sdk/edge_matrix.py` compiles
 the SDK's empty, client, default and prover selections and the kernel library with
-its default feature. It verifies the resolved dependency edges and compares the
+its default feature. It verifies the resolved dependency edges and exact vendor manifest paths, then compares the
 public embedded-ELF slice with its recorded source file. It does not run a prover,
 profile a program, or contact the hosted proving service. `--offline` is available
 when these additional feature dependencies are cached and `RECURSION_SRC_PATH`
@@ -84,6 +94,12 @@ alone does not prohibit a dependency build script from downloading that archive;
 the edge harness checks its bytes before the offline compile and rejects
 `DOCS_RS` and `RISC0_SKIP_BUILD_KERNELS` build stubs. Feature-harness lockfiles
 are temporary and separate from the two pinned evaluator lockfiles.
+
+Direct Cargo kernel builds retain default feature activation. Code embedding the
+kernel package through `risc0-build` must explicitly request the `kernel` feature
+in its guest options: that upstream helper filters binary targets using the
+requested feature list and does not infer default-enabled `required-features`.
+No evaluator consumer embeds this kernel package through that helper.
 
 The actual RISC-V kernel binary build has an upstream limitation with the pinned
 platform package: the unchanged `Syscall` match omits `ProveZkr` and Rust reports

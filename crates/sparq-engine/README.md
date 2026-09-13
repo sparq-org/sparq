@@ -36,7 +36,7 @@ let json = sparq_engine::query_json(&g, "SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?
   [1.2](https://www.w3.org/TR/sparql12-query/) over your data (conformance tracked by the CI
   ratchets), plus the *non-standard* `MULTIPLICITY()` aggregate extension — see the SKILL.
 - **Path multiplicity and correlation** — alternatives/sequences preserve bag counts;
-  reachability retains endpoint sets. EXISTS expressions retain outer RDF term identity.
+  reachability retains endpoint sets. [Scoped EXISTS/MINUS substitution](../../skills/sparql-query/exists-minus.md) applies captured IRI/literal bindings before domain subtraction; unresolved shapes retain native practical behavior.
   Nullable paths preserve constant seeds and variable node domains. Substitution admits
   only positive shapes with locally bound FILTERs; scope-sensitive shapes and triple-term
   endpoints use potentially more expensive ordinary evaluation. [Boundaries and examples](../../skills/sparql-query/SKILL.md).
