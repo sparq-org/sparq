@@ -67,7 +67,19 @@
     "result_v2_k2_n16_p3_r4_f2_i64_d17": 489954,
     "result_v2_k2_n16_p3_r4_f2_i64_d20": 490424,
     "result_v2_k2_n16_p3_r4_f2_i8_d17": 96979,
-    "result_v2_k2_n16_p3_r4_f2_i8_d20": 97449
+    "result_v2_k2_n16_p3_r4_f2_i8_d20": 97449,
+    "result_v3_k1_n16_p3_r4_f0_s0_d10": 32288,
+    "result_v3_k1_n16_p3_r4_f0_s0_d17": 32836,
+    "result_v3_k1_n16_p3_r4_f0_s0_d20": 33071,
+    "result_v3_k1_n16_p3_r4_f2_s64_d10": 436341,
+    "result_v3_k1_n16_p3_r4_f2_s64_d17": 436889,
+    "result_v3_k1_n16_p3_r4_f2_s64_d20": 437124,
+    "result_v3_k2_n16_p3_r4_f0_s0_d10": 59101,
+    "result_v3_k2_n16_p3_r4_f0_s0_d17": 60197,
+    "result_v3_k2_n16_p3_r4_f0_s0_d20": 60667,
+    "result_v3_k2_n16_p3_r4_f2_s64_d10": 463150,
+    "result_v3_k2_n16_p3_r4_f2_s64_d17": 464246,
+    "result_v3_k2_n16_p3_r4_f2_s64_d20": 464716
   },
   "_comment_gpt6_result": "[GPT-6] Additive successful-result members measured on darwin arm64 with pinned nargo beta.21 and bb 5.0.0-nightly.20260324, 2026-09-09. F=0 excludes all private integer predicate circuitry; F=2 retains lexical-to-value binding. These are circuit measurements, not externally audited security or end-to-end performance evidence."
 }

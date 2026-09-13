@@ -161,3 +161,36 @@ small datasets. Further regressions cover shared credentials, membership reuse,
 capacity restrictions, admission, exact rows, RDF identity, and forced exhaustion.
 These are structural host tests; they do not measure prover runtime or audit
 cryptographic correctness.
+
+## Canonical signed-integer admission
+
+[GPT-6] `planner::signed::SignedDisclosureQuery::parse` separately admits the same
+positive query shape with canonical signed `i64` comparison bounds. Use
+`plan_signed_disclosure[_admitted]` or `optimize_signed_disclosure[_admitted]` with
+that type. The unsigned `DisclosureQuery::parse`, planning functions and proof
+verifier keep their existing nonnegative `u64` semantics.
+
+`canonical_signed_integer` accepts only the exact canonical `xsd:integer` token
+within the signed range: zero is `0`; negatives have one leading minus; no leading
+plus, leading zero, negative zero, whitespace within a literal's lexical form or
+numeric datatype substitution is normalized. Other valid XML Schema spellings are
+outside this admitted profile. Ordinary query syntax whitespace, including between
+unary minus and its operand, remains accepted.
+The parser rejects noncanonical and out-of-range public bounds. A noncanonical or
+out-of-range private operand cannot satisfy a planned predicate.
+
+The signed query wrapper exposes `kind`, `projection`, unchanged `patterns` and
+`filters` with actual signed bounds. Its internal order-preserving bias is not an
+unsigned query instance available to callers. Both signed search paths apply the
+same RDF identity, backend admission, resource limits and proof-obligation rules;
+original committed graphs, literal spellings and membership references are never
+rewritten. Host selection is not signed-predicate proof verification.
+
+[GPT-6] The separate Noir `result_signed_integer` core gadget now reconstructs
+the exact canonical signed token from a private order-preserving unsigned value.
+It reuses the existing literal hash and comparison functions, handles the signed
+minimum without signed negation, and uses one fixed capacity for both signs and
+all admitted lexical lengths. Its unit checks cover boundaries, ordering across
+zero, noncanonical spellings and type substitution. The separate
+[signed successful-result API](signed-results.md) reuses this gadget; these core
+unit executions are not genuine result proofs.

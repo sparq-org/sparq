@@ -68,3 +68,6 @@ pub mod result;
 
 // [GPT-6] Additive private full-u64 result literal relation.
 pub mod result_integer;
+
+// [GPT-6] Separate signed-i64 lexical binding; unsigned result members are unchanged.
+pub mod result_signed_integer;

@@ -131,8 +131,9 @@ rejects overflow; leading zeros, signs, non-integer datatypes and values beyond
 value-to-lexical bridge replaces the commitment check. Nineteen- and twenty-digit
 tokens cross the BLAKE3 block boundary, and all private-length branches contribute
 to compiled cost. Gate snapshots report that cost; this is not a runtime speedup
-claim. Signed `i64`, arbitrary precision and other numeric datatypes remain
-separate extensions or exact-evaluator work.
+claim. Canonical signed `i64` uses the separately versioned
+[signed successful-result API](signed-results.md). Arbitrary precision and other
+numeric datatypes remain outside these integer profiles.
 
 Depth-ten small profiles retain version-one members and the legacy serialized
 shape. Expanded profiles use version two. The verifier derives the member from

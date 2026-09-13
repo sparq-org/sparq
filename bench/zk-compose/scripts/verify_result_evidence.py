@@ -16,6 +16,7 @@ BASE = "713025dc0fcdcbdcd070ba4dcbde524be50ba055"
 ROOT = Path(__file__).resolve().parents[3]
 EVIDENCE = ROOT / "bench/zk-compose/result_v1_compatibility.json"
 CAPACITY = ROOT / "bench/zk-compose/result_capacity_gates.json"
+SIGNED = ROOT / "bench/zk-compose/result_signed_gates.json"
 SNAPSHOT = ROOT / "bench/zk-compose/gate_counts_latest.json"
 MEMBERS = {f"result_v1_k{k}_n16_p3_r4_f{f}" for k in (1, 2) for f in (0, 2)}
 
@@ -77,7 +78,28 @@ def check_capacity(capacity: dict, data: dict, snapshot: dict) -> None:
             raise ValueError(f"{name}: measured capacity and compatibility ACIR hashes differ")
 
 
-def self_test(data: dict, capacity: dict, snapshot: dict) -> None:
+def check_signed(signed: dict, data: dict, snapshot: dict) -> None:
+    """[GPT-6] Bind the fixed signed-capacity measurement inventory to its source."""
+    if signed["source_files"] != data["source_files"] or signed["tool_versions"] != data["tool_versions"]:
+        raise ValueError("signed evidence source or toolchain differs from compatibility evidence")
+    expected = {
+        f"result_v3_k{k}_n16_p3_r4_f{f}_s{64 if f else 0}_d{depth}"
+        for k in (1, 2) for f in (0, 2) for depth in (10, 17, 20)
+    }
+    if set(signed["members"]) != expected or {
+        name for name in snapshot["benchmarks"] if name.startswith("result_v3_")
+    } != expected:
+        raise ValueError("signed measurement or snapshot member inventory mismatch")
+    for name, record in signed["members"].items():
+        if record["circuit_size"] != snapshot["benchmarks"][name]["circuit_size"]:
+            raise ValueError(f"{name}: signed gate count differs from the snapshot")
+        for field in ("acir_bytecode_sha256", "abi_sha256"):
+            value = record[field]
+            if len(value) != 64 or any(c not in "0123456789abcdef" for c in value):
+                raise ValueError(f"{name}: invalid signed {field}")
+
+
+def self_test(data: dict, capacity: dict, signed: dict, snapshot: dict) -> None:
     member = sorted(MEMBERS)[0]
     variants = []
     changed = copy.deepcopy(data)
@@ -96,7 +118,7 @@ def self_test(data: dict, capacity: dict, snapshot: dict) -> None:
     changed["source_files"][next(iter(changed["source_files"]))] = "0" * 64
     variants.append(changed)
     changed = copy.deepcopy(data)
-    changed["comparison_base"] = changed["candidate_parent"]
+    changed["comparison_base"] = "0" * 40
     variants.append(changed)
     for index, changed in enumerate(variants):
         try:
@@ -120,7 +142,28 @@ def self_test(data: dict, capacity: dict, snapshot: dict) -> None:
         except ValueError:
             continue
         raise AssertionError(f"corrupted capacity evidence variant {index} was accepted")
-    print(f"Result evidence: {len(variants) + len(capacity_variants)} corruption controls rejected")
+    signed_variants = []
+    member = sorted(signed["members"])[0]
+    for field, value in (("source_files", {}), ("tool_versions", {})):
+        changed = copy.deepcopy(signed)
+        changed[field] = value
+        signed_variants.append(changed)
+    changed = copy.deepcopy(signed)
+    del changed["members"][member]
+    signed_variants.append(changed)
+    changed = copy.deepcopy(signed)
+    changed["members"][member]["circuit_size"] += 1
+    signed_variants.append(changed)
+    changed = copy.deepcopy(signed)
+    changed["members"][member]["abi_sha256"] = "invalid"
+    signed_variants.append(changed)
+    for index, changed in enumerate(signed_variants):
+        try:
+            check_signed(changed, data, snapshot)
+        except ValueError:
+            continue
+        raise AssertionError(f"corrupted signed evidence variant {index} was accepted")
+    print(f"Result evidence: {len(variants) + len(capacity_variants) + len(signed_variants)} corruption controls rejected")
 
 
 def run(command: list[str], cwd: Path, timeout: int = 600) -> str:
@@ -162,12 +205,14 @@ def main() -> None:
     args = parser.parse_args()
     data = json.loads(EVIDENCE.read_text())
     capacity = json.loads(CAPACITY.read_text())
+    signed = json.loads(SIGNED.read_text())
     snapshot = json.loads(SNAPSHOT.read_text())
     check(data, ROOT)
     check_capacity(capacity, data, snapshot)
+    check_signed(signed, data, snapshot)
     print("Result evidence: inventory, lengths, identities, gate counts and source hashes match")
     if args.self_test:
-        self_test(data, capacity, snapshot)
+        self_test(data, capacity, signed, snapshot)
     if args.baseline_root:
         rebuild_baseline(data, args.baseline_root)
 

@@ -97,6 +97,10 @@ PRIVATE planning data; authentication remains required for public triples and
 FILTER operands. See [disclosure planning](references/disclosure-planner.md) for
 the API, bounds, result contract, and limitations. Host planning is not
 cryptographic verification; this surface is not externally audited.
+[GPT-6] `planner::signed::SignedDisclosureQuery` and its signed planning/optimization
+functions separately admit canonical `i64` FILTERs. They preserve committed RDF
+terms and do not extend the existing unsigned proof verifier. See the signed
+admission section in the disclosure-planning reference.
 
 ## Common recipes
 
@@ -364,6 +368,14 @@ preserved under the pinned toolchain and checked against independent baseline
 keys in the toolchain suite. Expanded v2 tiny and predicate-free profiles have
 representative genuine-proof checks in addition to wrapper execution coverage;
 see the successful-result reference for evidence and scope.
+
+[GPT-6] `result::signed` exposes separately versioned canonical signed-integer
+preparation and verification, with a fixed capacity and no public sign/length
+selector. See the [signed result contract](references/signed-results.md) for its
+API, lexical limits and evidence boundary, and
+[signed admission](references/disclosure-planner.md#canonical-signed-integer-admission)
+for the independent planner. Native/core checks do not constitute genuine signed
+result-proof evidence.
 
 [GPT-6] Default host checks validate the legacy compatibility evidence's source
 hashes and byte lengths. The ZK toolchain lane independently rebuilds the fixed
