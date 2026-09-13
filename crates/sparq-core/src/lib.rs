@@ -2799,8 +2799,10 @@ impl Graph {
     /// [GPT-6] The first temporal lookup parses valid temporal dictionary entries.
     /// Later lookups reuse checked seconds/flags and borrow fractional digits by
     /// offset. Whole-second values need no dictionary read. The cache is in memory
-    /// only, survives neither a fork nor a dictionary append, and never changes
-    /// source terms or approximate persisted cache files.
+    /// only. Forks start cold; dictionary appends preserve initialized entries and
+    /// parse only new temporal IDs. Source terms and persisted caches are unchanged.
+    /// A cold mmap lookup still sweeps the temporal flags and parses all valid
+    /// temporal IDs; this memo does not establish cold-read performance neutrality.
     pub fn exact_temporal_value(&self, id: Id) -> Option<temporal::ExactTemporal<'_>> {
         if id == dict::NO_ID || dict::is_inline(id) || self.temporals.lookup(id).is_none() {
             return None;
@@ -3511,8 +3513,19 @@ impl Graph {
         // Keep the numeric- and temporal-filter caches covering the grown dictionary.
         self.numerics.extend_for(&self.dict, old_len);
         self.temporals.extend_for(&self.dict, old_len);
-        if self.dict.len() != old_len {
-            self.exact_temporals.take();
+        // [GPT-6] Dictionary IDs and lexical slices are append-only. Preserve
+        // initialized exact cells and validate only new temporal IDs, using the
+        // existing exclusive Graph borrow rather than a lookup-path lock.
+        if let Some(cells) = self.exact_temporals.get_mut() {
+            for i in old_len..self.dict.len() {
+                let id = i as Id + 1;
+                if self.temporals.lookup(id).is_none() { continue; }
+                if let dict::TermParts::Lit { value, datatype, lang: None } = self.dict.term_parts(id) {
+                    if let Some(cell) = temporal::ExactCacheCell::of_lit(value, datatype) {
+                        cells.insert(id, cell);
+                    }
+                }
+            }
         }
         // sq-lr2ii: an inserted term may be an f64-inexact decimal. If the sargable-safety
         // guard was memoised as "no such decimal" (1), reset it to recompute over the grown
@@ -11622,6 +11635,68 @@ mod exact_temporal_cache_tests {
         }
     }
 
+    fn append_fixture() -> Graph {
+        let source = (2000..2128).map(|year| {
+            format!("<http://ex/s> <http://ex/p> {} .", literal(&format!("{year}-01-01T00:00:00.000000001Z")))
+        }).collect::<Vec<_>>().join("\n");
+        Graph::load_str(&source, "nt").unwrap()
+    }
+
+    fn assert_incremental_parse_work(mut graph: Graph) {
+        let old = literal("2000-01-01T00:00:00.000000001Z");
+        let later = literal("2200-01-01T00:00:00.000000002Z");
+        let old_id = graph.id_of(&old).unwrap();
+        graph.exact_temporal_value(old_id).unwrap();
+        let parsed = temporal::EXACT_PARSE_CALLS.with(|calls| calls.get());
+        let iri = |s| Term::NamedNode(oxrdf::NamedNode::new_unchecked(s));
+        let ordinary = [iri("http://ex/unrelated"), iri("http://ex/text"), Term::Literal(oxrdf::Literal::new_simple_literal("ordinary new value"))];
+        graph.apply_delta(std::slice::from_ref(&ordinary), &[]).unwrap();
+        graph.exact_temporal_value(old_id).unwrap();
+        assert_eq!(temporal::EXACT_PARSE_CALLS.with(|calls| calls.get()), parsed,
+            "an unrelated dictionary append must not reparse old temporal values");
+        let triple = [iri("http://ex/new"), iri("http://ex/p"), later.clone()];
+        graph.apply_delta(std::slice::from_ref(&triple), &[]).unwrap();
+        let new_id = graph.id_of(&later).unwrap();
+        assert_eq!(graph.exact_temporal_value(old_id).unwrap().compare(graph.exact_temporal_value(new_id).unwrap()), Some(Ordering::Less));
+        assert_eq!(temporal::EXACT_PARSE_CALLS.with(|calls| calls.get()) - parsed, 2,
+            "one new temporal value is validated once for each approximate/exact cache");
+        let parsed = temporal::EXACT_PARSE_CALLS.with(|calls| calls.get());
+        for _ in 0..8 {
+            graph.apply_delta(std::slice::from_ref(&triple), &[]).unwrap();
+            graph.exact_temporal_value(old_id).unwrap();
+            graph.exact_temporal_value(new_id).unwrap();
+        }
+        graph.apply_delta(&[], &[ordinary, triple]).unwrap();
+        graph.exact_temporal_value(old_id).unwrap();
+        assert_eq!(temporal::EXACT_PARSE_CALLS.with(|calls| calls.get()), parsed,
+            "existing-ID insertions, deletes and warm lookups reuse all parsed cells");
+        assert_eq!(graph.exact_temporals.get().unwrap().len(), 129);
+    }
+
+    #[test]
+    fn appends_parse_only_new_temporal_ids_in_dense_sparse_and_forked_graphs() {
+        assert_incremental_parse_work(append_fixture());
+        assert_incremental_parse_work(append_fixture().into_compressed());
+        assert_incremental_parse_work(append_fixture().fork());
+    }
+
+    #[test]
+    fn appends_do_not_initialize_an_unused_exact_memo() {
+        let mut graph = append_fixture();
+        let new = literal("2300-01-01T00:00:00Z");
+        graph.apply_delta(&[[Term::NamedNode(oxrdf::NamedNode::new_unchecked("http://ex/s")), Term::NamedNode(oxrdf::NamedNode::new_unchecked("http://ex/p")), new]], &[]).unwrap();
+        assert!(graph.exact_temporals.get().is_none());
+    }
+
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn mapped_dictionary_appends_preserve_the_initialized_exact_memo() {
+        let dir = std::env::temp_dir().join(format!("sparq_exact_append_{}", std::process::id()));
+        append_fixture().save(&dir).unwrap();
+        assert_incremental_parse_work(Graph::open(&dir).unwrap());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn exact_cache_tracks_fork_compression_and_dictionary_appends() {
         let old = literal("2024-01-01T00:00:00Z");
@@ -11633,7 +11708,7 @@ mod exact_temporal_cache_tests {
         assert!(fork.exact_temporals.get().is_none());
         assert_eq!(fork.exact_temporal_value(id).unwrap().compare(graph.exact_temporal_value(id).unwrap()), Some(Ordering::Equal));
         graph.apply_delta(&[[Term::NamedNode(oxrdf::NamedNode::new_unchecked("http://ex/s")), Term::NamedNode(oxrdf::NamedNode::new_unchecked("http://ex/p")), new.clone()]], &[]).unwrap();
-        assert!(graph.exact_temporals.get().is_none());
+        assert_eq!(graph.exact_temporals.get().unwrap().len(), 2);
         let new_id = graph.id_of(&new).unwrap();
         assert_eq!(graph.exact_temporal_value(id).unwrap().compare(graph.exact_temporal_value(new_id).unwrap()), Some(Ordering::Less));
         assert!(fork.id_of(&new).is_none());

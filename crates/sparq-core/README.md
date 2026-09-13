@@ -35,7 +35,7 @@ capacity. `numeric_cache_value` omits invalid lexicals/facets, values outside it
 representation and the existing NaN sentinel; larger literals can remain valid.
 
 `temporal::ExactTimeline` / `Graph::exact_temporal_value` borrow exact fractional
-keys with checked calendar/timezone parsing; legacy epoch caches remain approximate.
+keys with checked calendar/timezone parsing; initialized keys survive dictionary appends, which parse only new temporal IDs. Legacy epoch caches remain approximate.
 Malformed input returns `None`; [API details](../../skills/data-formats/SKILL.md) cover range and cost.
 
 **Legacy mmap archives:** `Graph::open` ignores the old unversioned
