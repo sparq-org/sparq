@@ -430,3 +430,10 @@ promised; unchanged v2 circuit sizes do not establish key compatibility.
 versioned materialized synthetic profiles: bounded wallet candidates and named
 organization counts. Each generated manifest runs one ordinary sample and preserves
 the existing authentication, authority, replay and typed rejection contracts.
+
+[GPT-6] The [bounded workload campaign](../../bench/zk-compose/campaigns/README.md)
+materializes wallet candidate and named-organization fixtures before measurement,
+then interleaves real adapter subprocesses. It preserves per-sample failures,
+unsupported combinations, exact inputs, authority/authentication identities and
+raw reports. Paired planner acceptance contracts retain visibly different public
+capacities; exact authority modes and selected support are separate contracts.

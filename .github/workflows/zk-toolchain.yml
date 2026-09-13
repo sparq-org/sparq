@@ -71,6 +71,7 @@ on:
       # sparq-org/noir_XPath face repos (#1599), whose own CI covers their nargo tests
       # and the ieee754 differential oracle. zk/compose is the only in-tree Noir tree left.
       - "zk/compose/**"
+      - "bench/zk-compose/campaigns/**"
       - ".github/workflows/zk-toolchain.yml"
   # [FABLE-5] (2026-07-18 maintainer directive, merge-queue subset) merge_group
   # REMOVED: the forge suite already ran + gated on any zk-touching PR (paths filter
@@ -89,6 +90,7 @@ on:
       # [OPUS-4.8] sq-5reoy: narrowed from zk/** to zk/compose/** (see the pull_request
       # paths note above — the ieee754/xpath trees moved to their face repos, #1599).
       - "zk/compose/**"
+      - "bench/zk-compose/campaigns/**"
       - ".github/workflows/zk-toolchain.yml"
 
 # Least-privilege: this lane only reads the repo + runs tests.
@@ -373,6 +375,7 @@ jobs:
         if: steps.changes.outputs.zk == 'true'
         run: |
           cargo test -p sparq-zk-compose --features successful-results --lib result:: -- --include-ignored --test-threads=1
+          python3 bench/zk-compose/campaigns/test_campaign.py
           cargo test -p sparq-zk-compose --features successful-results --example result_experiment
           cargo test -p sparq-zk-compose --features successful-results --lib driver::
           cd zk/compose

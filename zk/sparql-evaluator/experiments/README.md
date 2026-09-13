@@ -104,6 +104,8 @@ Schema-version-2 manifests add complete materialized named-organization fixtures
 including empty graphs, and independently derived count goldens. The adapter
 regenerates this bounded profile to validate its query, catalog, data and answer;
 it admits one ordinary sample per generated manifest.
+The [common workload campaign](../../../bench/zk-compose/campaigns/README.md)
+materializes these inputs before interleaving separately identified authority modes.
 These tests do not generate receipts. The example CLI generates genuine receipts;
 its completed report is separate evidence. Arbitrary queries or datasets outside
 those validated synthetic profiles,

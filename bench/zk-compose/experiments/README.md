@@ -82,6 +82,8 @@ and validates this bounded synthetic profile before signing its commitments. Eac
 generated manifest selects one planner and one ordinary sample with a supplied
 synthetic nonce. RSS measurement, canonical infrastructure and additional signature
 suites are not provided by this adapter.
+The [common workload campaign](../campaigns/README.md) materializes these inputs
+and interleaves both planners with retained per-sample outcomes.
 
 The historical schema-version-1 [local smoke record](local-smoke.json) binds its actual source
 commit and executable hashes. It retains separate public/proof byte counts and
