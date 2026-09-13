@@ -108,6 +108,9 @@ issuer-signature or credential-status claim.
 [GPT-6] The separately versioned [complete named-dataset API](references/exact-datasets-v2.md)
 adds a committed catalog including empty named graphs, GRAPH and local snapshot
 FROM/FROM NAMED selection. V1 requests and commitments retain their meaning.
+[GPT-6] The separate [V4 NOW context API](references/evaluation-context-v4.md)
+binds an independently expected dateTime; it makes no clock freshness claim.
+
 [GPT-6] The opt-in [V3 graph-result API](references/graph-results-v3.md)
 adds blank-node identity, canonical tables and bounded graph forms through typed
 host/guest APIs; consult artifact-bound evidence for actual execution status.

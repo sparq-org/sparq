@@ -53,6 +53,16 @@ fn main() {
             let journal = model::v3::evaluate(&witness).unwrap_or_else(|_| reject());
             risc0_zkvm::guest::env::commit(&journal);
         }
+        model::v4::VERSION => {
+            let witness: model::v4::Witness =
+                risc0_zkvm::serde::from_slice(&bytes).unwrap_or_else(|_| reject());
+            canonical_input(
+                &bytes,
+                risc0_zkvm::serde::to_vec(&witness).unwrap_or_else(|_| reject()),
+            );
+            let journal = model::v4::evaluate(&witness).unwrap_or_else(|_| reject());
+            risc0_zkvm::guest::env::commit(&journal);
+        }
         _ => reject(),
     }
 }

@@ -22,6 +22,9 @@ pub mod v2;
 /// Versioned blank-node identity and canonical graph-result proving and verification.
 pub mod v3;
 
+/// Versioned deterministic NOW context, independently expected by the verifier.
+pub mod v4;
+
 /// Public presentation contains only the cryptographic receipt and its journal.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

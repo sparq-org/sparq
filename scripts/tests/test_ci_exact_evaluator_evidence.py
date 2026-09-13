@@ -38,6 +38,12 @@ class EvidenceGuards(unittest.TestCase):
         self.assertEqual(feature, "graph-results")
         self.assertEqual(expected, evidence.V1_RECEIPTS | evidence.V2_RECEIPTS | evidence.V3_RECEIPTS)
         self.assertEqual(len(expected), 8)
+        (modules / "v4.rs").touch()
+        feature, expected = evidence.active_profile(self.root)
+        self.assertEqual(feature, "graph-results")
+        self.assertEqual(expected, evidence.V1_RECEIPTS | evidence.V2_RECEIPTS
+                         | evidence.V3_RECEIPTS | evidence.V4_RECEIPTS)
+        self.assertEqual(len(expected), 10)
         (self.root / "receipts").mkdir()
         with self.assertRaisesRegex(ValueError, "missing or unexpected"):
             evidence.receipts(self.root, self.pin, expected)

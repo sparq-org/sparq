@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "source_base": "86e033b46ece9cbe99c0d386afc9f38eb66ea662",
+  "source_sha256": {
+    "scripts/ci_exact_evaluator_evidence.py": "3b774453aeae670a32d9e58b49862d0d02b36a4e6951f121a8aed55b3b2c2fea",
+    "scripts/tests/test_ci_exact_evaluator_evidence.py": "bffbc15b56af347eeca5c00bd01611ff9c6d065c0338a87cebcc591a8761c8eb",
+    "skills/zk-query-proofs/SKILL.md": "ee5ff2cf44eecd9f5f58dedeffb4264c84847fe9510a3ea585637a20fcc1fad5",
+    "skills/zk-query-proofs/references/evaluation-context-v4.md": "44a4018db960477082b38888b013fb1975d4c21137f29c670d2fb75bb5b9b721",
+    "zk/sparql-evaluator/README.md": "7dc2d76862a8d12ab78f6e0b3f90251fe0d4c7c41d45b2a30c123e9993c9d796",
+    "zk/sparql-evaluator/fixtures/now-context.json": "6e11739c1c24573596a84dc772ffbd29f46cb91109ff8be0e5a5e19ab6a0fa09",
+    "zk/sparql-evaluator/host/src/lib.rs": "0264ce9307ceb5847fdf9b60d80f6ac5732a04d0216beebe5c62ab8ad336f067",
+    "zk/sparql-evaluator/host/src/v4.rs": "da531292cb2c14539d513f80ad6821e1b90d078debaebc8d2e6182552efbf40e",
+    "zk/sparql-evaluator/host/tests/actual_now_context.rs": "37457bd7157a17b4439427d33fa3ad8a07a1b58f8063e64941c4d8206305f0ca",
+    "zk/sparql-evaluator/host/tests/real_now_context.rs": "e024b045b0f106e7b992f8706b33f9d2a7df12ad38a5df89bc3a8fa0e63a8bd5",
+    "zk/sparql-evaluator/host/tests/support/now_context.rs": "3e8511e117492d3a6855918e1e8ec1f3a93a183f487d3192705e1892ca147d2b",
+    "zk/sparql-evaluator/methods/guest/src/main.rs": "c344ebc6b3f3769ffcac1abdb777bb6913584b68261e8c020892926ede220c3f",
+    "zk/sparql-evaluator/model/src/lib.rs": "c62175d158838221ecda6abfbc5087fae056112fd20420390627e8b393266643",
+    "zk/sparql-evaluator/model/src/v3.rs": "807dfec24bd37932f6b79cfd3c9b3b6678bd19169603d416b3235224ba75a8dc",
+    "zk/sparql-evaluator/model/src/v3/evaluate.rs": "832820ddeab6da05fa06ab6baf763e3149aa8e1088c874df61b134a207542b2f",
+    "zk/sparql-evaluator/model/src/v4.rs": "e53272edd00fbd5d2ccc6ba7dfa903a07ead73c5437ee577744087854dd1dbd3",
+    "zk/sparql-evaluator/model/src/v4/evaluate.rs": "f49eba727f21bbd4db6dd4ff3e47f1c9cdcb4e1f5ef9484f03d982841f93f885",
+    "zk/sparql-evaluator/model/src/v4/evaluate/specialize.rs": "a78dd9b2a87c983477295264e06d58d75257bdbee9395e672804d5ef88bdfe9e",
+    "zk/sparql-evaluator/model/tests/now_context.rs": "0d0cd856b0de13f42fbb96b9eadd530c90fa8d23ac75a2b07ea079797708d462"
+  },
+  "native_model_functions": 66,
+  "native_now_functions": 6,
+  "native_model_all_target_clippy": "passed",
+  "author_preflight": "passed",
+  "guard_mutations": [
+    "strict_context_xml_boundary",
+    "specialization_byte_capacity",
+    "mandatory_v4_receipt_inventory"
+  ],
+  "host_tests_compiled": false,
+  "guest_executed": false,
+  "genuine_receipts": 0,
+  "publication_ready": false,
+  "pending": [
+    "Integrate final common lexical/semantic corrections from V1/V2/V3.",
+    "Compile host and guest V4 dispatch; execute all versioned actual guest corpora.",
+    "Run two V4 genuine receipts plus all prior version receipts on one independently accepted image.",
+    "Independent source review and required hosted gates."
+  ],
+  "evidence_files": {
+    "/private/tmp/sparq-v4-model-final.log": "62bc1d2d435d24d96f5b19c3d87023c78b3e4338835b1e285997f810dc466bf0",
+    "/private/tmp/sparq-v4-clippy-final.log": "d02041c1bfe7f13cf83a767e068216a7cd96d06bb8469c15ff36e279ee9a10c0",
+    "/private/tmp/sparq-v4-preflight-final.log": "ec7499eb7d18b61e2e363377efc3ad5196ff67c358407bba047b5bfcc66be080",
+    "/private/tmp/sparq-v4-now-guard-mutations.json": "f964bf19db52c2de5f2e6bd89d81f6852f31628c74884741113cf77060482954",
+    "/private/tmp/sparq-v4-receipt-gate-mutation.json": "d141b485c69394dac4ac0d05a78894d090b37b98e8744055ee4809402eb10ee0"
+  }
+}

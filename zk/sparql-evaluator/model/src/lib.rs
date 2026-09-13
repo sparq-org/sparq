@@ -11,6 +11,7 @@ use std::fmt;
 /// Complete default/named dataset relation with a separately versioned schema.
 pub mod v2;
 pub mod v3;
+pub mod v4;
 
 #[cfg(feature = "evaluate")]
 mod aggregate_profile;

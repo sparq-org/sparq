@@ -40,8 +40,25 @@ pub fn evaluate(witness: &Witness) -> Result<Journal, Rejected> {
     };
     let prepared =
         PreparedQuery::parse(&request.query).map_err(|_| Rejected("SPARQL parse rejected"))?;
+    let result = evaluate_prepared(&witness.dataset, &request.policy, &prepared)?;
+    Ok(Journal {
+        version: VERSION,
+        request_digest: request_digest(request)?,
+        dataset_commitment: commitment,
+        provenance,
+        result,
+    })
+}
+
+// [GPT-6] Versioned callers retain their own request/authority/journal bindings.
+// Only deterministic evaluation and canonical result construction are shared.
+pub(crate) fn evaluate_prepared(
+    dataset: &PrivateDataset,
+    policy: &Policy,
+    prepared: &PreparedQuery,
+) -> Result<CanonicalResult, Rejected> {
     admit_query(prepared.query(), DatasetProfile::GraphResultsBlankFree)?;
-    let graph = v2::evaluate::build_dataset(&witness.dataset, &request.policy.dataset, true)?;
+    let graph = v2::evaluate::build_dataset(dataset, &policy.dataset, true)?;
     // [GPT-6] No admitted expression creates a blank term before WHERE finishes:
     // BNODE/custom calls and triple terms are excluded, query blank nodes are
     // existential variables, and template nodes are allocated only afterward.
@@ -58,12 +75,12 @@ pub fn evaluate(witness: &Witness) -> Result<Journal, Rejected> {
     {
         admit_query(prepared.query(), DatasetProfile::GraphResults)?;
     }
-    let max_rows = request.policy.dataset.max_rows;
+    let max_rows = policy.dataset.max_rows;
     let budget = query_budget(max_rows);
-    let canonical = &request.policy.canonicalization;
+    let canonical = &policy.canonicalization;
     let result = match prepared.query() {
         spargebra::Query::Select { pattern, .. } => {
-            let table = query_prepared_with_budget(&graph, &prepared, &budget)
+            let table = query_prepared_with_budget(&graph, prepared, &budget)
                 .map_err(|_| Rejected("V3 query evaluation or resource budget rejected"))?;
             if table.rows.len() > max_rows as usize {
                 return Err(Rejected("V3 result row capacity"));
@@ -79,21 +96,21 @@ pub fn evaluate(witness: &Witness) -> Result<Journal, Rejected> {
             )?
         }
         spargebra::Query::Ask { .. } => {
-            let table = query_prepared_with_budget(&graph, &prepared, &budget)
+            let table = query_prepared_with_budget(&graph, prepared, &budget)
                 .map_err(|_| Rejected("V3 query evaluation or resource budget rejected"))?;
             CanonicalResult::Ask(!table.rows.is_empty())
         }
         spargebra::Query::Construct { .. } => {
-            let triples = construct_prepared_with_budget(&graph, &prepared, &budget)
+            let triples = construct_prepared_with_budget(&graph, prepared, &budget)
                 .map_err(|_| Rejected("V3 graph evaluation or resource budget rejected"))?;
             result::graph(triples, canonical)?
         }
         spargebra::Query::Describe { .. } => {
             // [GPT-6] The enum has one explicitly bound closure policy; the engine
             // traverses outgoing blank objects in the selected active default graph.
-            let triples = match &request.policy.describe {
+            let triples = match &policy.describe {
                 DescribePolicy::OutgoingBlankNodeClosure => {
-                    describe_prepared_with_budget(&graph, &prepared, &budget)
+                    describe_prepared_with_budget(&graph, prepared, &budget)
                 }
             }
             .map_err(|_| Rejected("V3 graph evaluation or resource budget rejected"))?;
@@ -101,11 +118,5 @@ pub fn evaluate(witness: &Witness) -> Result<Journal, Rejected> {
         }
     };
     result::check_output(&result, canonical)?;
-    Ok(Journal {
-        version: VERSION,
-        request_digest: request_digest(request)?,
-        dataset_commitment: commitment,
-        provenance,
-        result,
-    })
+    Ok(result)
 }

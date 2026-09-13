@@ -19,10 +19,13 @@ GUEST_MANIFEST = "zk/sparql-evaluator/methods/guest/Cargo.toml"
 V1_RECEIPTS = {"v1-verifier-select", "v1-holder-bag", "v1-verifier-false-ask"}
 V2_RECEIPTS = {"v2-verifier-catalog", "v2-holder-false-ask"}
 V3_RECEIPTS = {"v3-holder-bag", "v3-verifier-construct", "v3-holder-describe"}
+V4_RECEIPTS = {"v4-holder-now-bag", "v4-verifier-now-construct"}
 
 
 def active_profile(root: Path) -> tuple[str, set[str]]:
     """Select native features and require every receipt of the installed guest API."""
+    if (root / "zk/sparql-evaluator/host/src/v4.rs").exists():
+        return "graph-results", V1_RECEIPTS | V2_RECEIPTS | V3_RECEIPTS | V4_RECEIPTS
     if (root / "zk/sparql-evaluator/host/src/v3.rs").exists():
         return "graph-results", V1_RECEIPTS | V2_RECEIPTS | V3_RECEIPTS
     if (root / "zk/sparql-evaluator/host/src/v2.rs").exists():

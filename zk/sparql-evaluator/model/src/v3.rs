@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 #[cfg(feature = "graph-results")]
-mod evaluate;
+pub(crate) mod evaluate;
 #[cfg(feature = "graph-results")]
 mod result;
 #[cfg(feature = "graph-results")]
@@ -128,7 +128,7 @@ pub struct Journal {
     pub result: CanonicalResult,
 }
 
-fn validate_policy(policy: &Policy) -> Result<(), Rejected> {
+pub(crate) fn validate_policy(policy: &Policy) -> Result<(), Rejected> {
     v2::validate_policy(&policy.dataset)?;
     let c = &policy.canonicalization;
     let ceiling = CanonicalizationPolicy::default();

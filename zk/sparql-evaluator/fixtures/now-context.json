@@ -1,0 +1,166 @@
+{
+  "schema": "sparq-now-context-fixtures-v1",
+  "note": "Original REC-derived expectations for an explicitly agreed fixed context; no clock observation.",
+  "now": "2026-09-13T01:02:03.000000001+01:00",
+  "cases": [
+    {
+      "id": "repeated-nested",
+      "query": "SELECT (NOW() AS ?a) (IF(true,COALESCE(NOW(),NOW()),NOW()) AS ?b) {VALUES ?n {1 1}}",
+      "nquads": "",
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "a",
+            "b"
+          ],
+          "order": "Bag",
+          "rows": [
+            [
+              "\"2026-09-13T01:02:03.000000001+01:00\"^^<http://www.w3.org/2001/XMLSchema#dateTime>",
+              "\"2026-09-13T01:02:03.000000001+01:00\"^^<http://www.w3.org/2001/XMLSchema#dateTime>"
+            ],
+            [
+              "\"2026-09-13T01:02:03.000000001+01:00\"^^<http://www.w3.org/2001/XMLSchema#dateTime>",
+              "\"2026-09-13T01:02:03.000000001+01:00\"^^<http://www.w3.org/2001/XMLSchema#dateTime>"
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "subquery",
+      "query": "SELECT ?a (NOW() AS ?b) {{SELECT (NOW() AS ?a) {}} FILTER(sameTerm(?a,NOW()))}",
+      "nquads": "",
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "a",
+            "b"
+          ],
+          "order": "Bag",
+          "rows": [
+            [
+              "\"2026-09-13T01:02:03.000000001+01:00\"^^<http://www.w3.org/2001/XMLSchema#dateTime>",
+              "\"2026-09-13T01:02:03.000000001+01:00\"^^<http://www.w3.org/2001/XMLSchema#dateTime>"
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "aggregate",
+      "query": "SELECT (MIN(NOW()) AS ?a) (MAX(NOW()) AS ?b) {VALUES ?n {1 2}}",
+      "nquads": "",
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "a",
+            "b"
+          ],
+          "order": "Bag",
+          "rows": [
+            [
+              "\"2026-09-13T01:02:03.000000001+01:00\"^^<http://www.w3.org/2001/XMLSchema#dateTime>",
+              "\"2026-09-13T01:02:03.000000001+01:00\"^^<http://www.w3.org/2001/XMLSchema#dateTime>"
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "source-text",
+      "query": "SELECT (\"NOW()\" AS ?text) {} # NOW() is a comment",
+      "nquads": "",
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "text"
+          ],
+          "order": "Bag",
+          "rows": [
+            [
+              "\"NOW()\""
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "offset-equality",
+      "query": "ASK {FILTER(NOW()=\"2026-09-13T00:02:03.000000001Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime>)}",
+      "nquads": "",
+      "expected_result": {
+        "Ask": true
+      }
+    },
+    {
+      "id": "fraction-distinction",
+      "query": "ASK {FILTER(NOW()=\"2026-09-13T00:02:03.000000002Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime>)}",
+      "nquads": "",
+      "expected_result": {
+        "Ask": false
+      }
+    },
+    {
+      "id": "construct",
+      "query": "CONSTRUCT {<http://ex/s> <http://ex/at> ?n} WHERE {BIND(NOW() AS ?n) FILTER(?n=\"2026-09-13T00:02:03.000000001Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime>)}",
+      "nquads": "",
+      "expected_result": {
+        "Graph": {
+          "ntriples": "<http://ex/s> <http://ex/at> \"2026-09-13T01:02:03.000000001+01:00\"^^<http://www.w3.org/2001/XMLSchema#dateTime> .\n"
+        }
+      }
+    },
+    {
+      "id": "describe",
+      "query": "DESCRIBE <http://ex/s> WHERE {FILTER(NOW()=NOW())}",
+      "nquads": "<http://ex/s> <http://ex/p> <http://ex/o> .",
+      "expected_result": {
+        "Graph": {
+          "ntriples": "<http://ex/s> <http://ex/p> <http://ex/o> .\n"
+        }
+      }
+    },
+    {
+      "id": "optional-condition",
+      "query": "SELECT (NOW() AS ?n) ?v {VALUES ?v {1} OPTIONAL {FILTER(NOW()=NOW())}}",
+      "nquads": "",
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "n",
+            "v"
+          ],
+          "order": "Bag",
+          "rows": [
+            [
+              "\"2026-09-13T01:02:03.000000001+01:00\"^^<http://www.w3.org/2001/XMLSchema#dateTime>",
+              "\"1\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "exists-blank-free",
+      "query": "ASK {FILTER EXISTS {FILTER(NOW()=NOW())}}",
+      "nquads": "",
+      "expected_result": {
+        "Ask": true
+      }
+    }
+  ],
+  "invalid_contexts": [
+    "",
+    "2026-09-13T01:02:03",
+    "2026-02-30T00:00:00Z",
+    "2026-01-01T24:01:00Z",
+    "2026-01-01T00:00:00+14:01",
+    "0000-01-01T00:00:00Z",
+    "-0001-01-01T00:00:00Z",
+    "1000000001-01-01T00:00:00Z",
+    "2026-01-01T00:00:60Z",
+    " 2026-01-01T00:00:00Z",
+    "2026-01-01T00:00:00Z\t"
+  ]
+}
