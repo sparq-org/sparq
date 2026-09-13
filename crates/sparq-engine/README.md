@@ -45,7 +45,8 @@ let json = sparq_engine::query_json(&g, "SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?
   underflow. Invalid numeric/boolean lexicals have false EBV per SPARQL 1.1 §17.2.2,
   while invalid arithmetic operands error. Integer casts truncate within `i64`. `SUBSTR` clips the original
   one-based interval. Date accessors validate calendars/offsets and normalize next-day
-  midnight; `MIN`/`MAX` retain input terms. [Bounded coverage and numeric limits](../../skills/sparql-query/SKILL.md)
+  midnight; `MIN`/`MAX` retain input terms. Raw numeric/boolean lexical
+  forms are checked verbatim; XML whitespace normalization applies to string casts only. [Bounded coverage and numeric limits](../../skills/sparql-query/SKILL.md)
   remain explicit; these corrections do not establish complete builtin conformance.
 - **Named graphs** — query across an active dataset with `GRAPH` and `FROM` / `FROM NAMED`.
   [GPT-6] Nested `GRAPH` borrows the same catalog, preserving empty graphs,

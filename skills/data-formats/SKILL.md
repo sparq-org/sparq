@@ -21,7 +21,8 @@ loaders live in `sparq-core`; the binary HDT archive format (including content-s
 
 [GPT-6] RDF ingestion preserves ill-typed literals. To check numeric datatype
 membership, call `sparq_core::numeric_literal_valid(value, datatype_iri)`: this
-checks lexical grammar, XML whitespace and integer subtype facets, including the
+checks raw lexical grammar and integer subtype facets, rejecting all boundary
+whitespace. This includes the
 range of `xsd:byte` and unsigned integer types. It does not impose the evaluator's
 finite mantissa capacity. `numeric_cache_value` can return `None` for a valid large
 number; a missing cache value is not a datatype-validity result.
@@ -37,9 +38,10 @@ retain them, but query equality/order must use the exact keys. `year_within_capa
 checks an explicit year range separately from ordinary datatype validity.
 Malformed Unicode returns `None` without slicing panics.
 [GPT-6] `Graph::open` ignores legacy `numerics.bin`/`temporals.bin` caches and
+also ignores `numerics-v2.bin`, which accepted padded raw numeric literals, and
 recomputes derived values from the dictionary using current rules. It does not
 rewrite the old cache files or drop ill-typed RDF terms. Current writers use
-`numerics-v2.bin` and `temporals-v2.bin` across ordinary, compressed and external
+`numerics-v3.bin` and `temporals-v2.bin` across ordinary, compressed and external
 builds; absent or wrong-sized current caches are rebuilt in memory. To persist a
 migrated archive, call `Graph::open(old)?.save(new)?` with a separate destination.
 Until saved, legacy opens repeat the dictionary scan and cache allocation.

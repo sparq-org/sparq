@@ -227,3 +227,11 @@ detached evaluator and supplies its existential path intermediates.
 
 The mandatory CI lane exports the accepted executable, actual synthetic receipts
 and source/toolchain/HAL evidence using the [campaign evidence contract](../../skills/zk-query-proofs/references/evaluator-evidence.md). Partial uploads are not success records.
+
+[GPT-6] The shared raw-literal boundary checks numeric/boolean typed lexicals
+verbatim and retains XML whitespace normalization for string constructors. The
+separate `raw-literal-whitespace.json` matrix contains 32 complete result controls;
+its native and actual-guest runners authenticate each case's source dataset.
+Definitions of actual-guest tests are not execution evidence. The strengthened
+false-ASK fixture includes padded raw boolean/numeric branches; earlier receipts
+retain their original source scope. See [the semantics record](../../skills/sparql-query/raw-literal-whitespace.md).

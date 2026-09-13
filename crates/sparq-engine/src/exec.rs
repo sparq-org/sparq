@@ -13361,11 +13361,9 @@ fn ebv(v: &Value) -> Option<bool> {
             }
             let dt = l.datatype().as_str();
             if dt == xsd::BOOLEAN.as_str() {
-                match l.value().trim_matches([' ', '\t', '\r', '\n']) {
-                    "true" | "1" => Some(true),
-                    "false" | "0" => Some(false),
-                    _ => Some(false),
-                }
+                // [GPT-6] Raw RDF booleans have exactly four lexical forms.
+                // Constructor whitespace normalization applies only to string inputs.
+                Some(as_bool_val(v).unwrap_or(false))
             } else if is_numeric_dt(l) {
                 // [GPT-6] EBV needs zero/NaN classification, not finite arithmetic.
                 // Validate datatype facets before inspecting exact decimal digits;
@@ -14296,7 +14294,7 @@ fn integer_argument(v: &Value) -> Option<i128> {
                 && sparq_core::numeric_literal_valid(l.value(), l.datatype().as_str()) =>
         {
             numeric_capacity::representable(true,
-                l.value().trim_matches([' ', '\t', '\r', '\n']).parse().ok())
+                l.value().parse().ok())
         }
         _ => None,
     }
@@ -14309,18 +14307,8 @@ fn as_num(v: &Value) -> Option<f64> {
     match v {
         Value::Num(n) => Some(n.f64()),
         Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
-        // [FABLE-5] sq-74oy4 / sq-6b1lj: route the lexical→f64 arm through the DATATYPE-AWARE
-        // `numeric_cache_f64` — the SAME acceptance the graph `numeric_value` cache and
-        // `LocalVocab::intern` use. This keeps the lenient relational `<`/`>` seam in lock-step
-        // with the equality reference `Num::of_literal` on BOTH residuals sq-9781x left open:
-        // (a) whitespace — the value is TRIMMED (XSD `collapse` facet), so a padded
-        // `" 1"^^xsd:integer` is value-1 on `<`/`>` exactly as it is on `=` (was: type-error
-        // on `<`/`>`, cache-miss, but value-1 on `=` via the trimming cache); (b) per-datatype
-        // well-formedness — a lexical ill-formed FOR its datatype (`"1.5"^^xsd:integer`,
-        // `"1E2"^^xsd:decimal`, an i128-overflow decimal) is `None` here, a type error on
-        // `<`/`>` matching `of_literal` (was: compared as f64). The XSD f64 SPELLINGS
-        // (INF/+INF/-INF/NaN yes; Rust-only inf/infinity/nan no) are still enforced by the
-        // underlying `parse_xsd_f64` image.
+        // [GPT-6] Keep scalar comparisons and caches on the same raw
+        // lexical/facet acceptance path; string constructors preprocess separately.
         Value::Term(Term::Literal(l)) => numeric_cache_f64(l),
         _ => None,
     }
@@ -14334,25 +14322,12 @@ fn is_numeric_dt(l: &Literal) -> bool {
         || dt == xsd::FLOAT.as_str()
 }
 
-/// The DATATYPE-AWARE cached/lenient f64 of a numeric literal, matching the graph's
-/// `Graph::numeric_value` cache acceptance (sparq-core `cached_numeric_f64`): `Some` iff the
-/// lexical is well-formed FOR ITS DATATYPE (`Num::of_literal` accepts it), imaged by the
-/// shared `parse_xsd_f64` on the TRIMMED lexical so the value is bit-identical to what the
-/// graph cache and `LocalVocab::intern` store for the same term. `None` (a datatype-ill-formed
-/// lexical like `"1.5"^^xsd:integer`, or a non-numeric) is a SPARQL type error.
-///
-/// [FABLE-5] (sq-74oy4 / sq-6b1lj) This is the single acceptance the lenient relational seam
-/// (`as_num`/`as_f64`), the local-vocab numeric cache (`LocalVocab::intern`), and the graph
-/// cache now all share — closing the pre-fix asymmetry where `as_num`/`intern` parsed
-/// datatype-agnostically (and un-trimmed) while `Num::of_literal` (the equality reference)
-/// did not, so a padded or per-datatype-ill-formed lexical compared numerically on `<`/`>`
-/// yet type-errored on `=`. Acceptance is gated on `Num::of_literal` (the strictest, so the
-/// datatype rules can never drift); the f64 image is `parse_xsd_f64` (every lexical
-/// `of_literal` accepts, `parse_xsd_f64` also accepts, for the same value).
+/// [GPT-6] Returns the raw literal's numeric image within the shared cache lane.
+/// Invalid lexical forms, subtype facets and unsupported representations return None.
 #[inline]
 fn numeric_cache_f64(l: &Literal) -> Option<f64> {
     if is_numeric_dt(l) && Num::of_literal(l).is_some() {
-        parse_xsd_f64(l.value().trim())
+        parse_xsd_f64(l.value())
     } else {
         None
     }

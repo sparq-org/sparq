@@ -55,6 +55,62 @@ fn dump(graph: &Graph) -> Vec<[String; 3]> {
 }
 
 #[test]
+fn v2_numeric_whitespace_values_are_recomputed_without_rewriting_source() {
+    let graph = Graph::load_str(
+        "@prefix xsd:<http://www.w3.org/2001/XMLSchema#> .
+         <http://ex/a> <http://ex/n> \" 1 \"^^xsd:integer .
+         <http://ex/b> <http://ex/n> \"1.25\"^^xsd:decimal .",
+        "turtle",
+    )
+    .unwrap();
+    let padded = graph
+        .id_of(&Term::Literal(Literal::new_typed_literal(
+            " 1 ",
+            xsd::INTEGER,
+        )))
+        .unwrap();
+    assert_eq!(graph.numeric_value(padded), None);
+    let expected = dump(&graph);
+    for compressed in [false, true] {
+        let scratch = Scratch::new();
+        let archive = scratch.0.join("v2");
+        if compressed {
+            graph.save_compressed(&archive).unwrap();
+        } else {
+            graph.save(&archive).unwrap();
+        }
+        let mut old = std::fs::read(archive.join("numerics-v3.bin"))
+            .or_else(|_| std::fs::read(archive.join("numerics-v2.bin")))
+            .unwrap();
+        let offset = (padded as usize - 1) * 8;
+        old[offset..offset + 8].copy_from_slice(&1_f64.to_le_bytes());
+        std::fs::write(archive.join("numerics-v2.bin"), old).unwrap();
+        let _ = std::fs::remove_file(archive.join("numerics-v3.bin"));
+        let before = files(&archive);
+        let opened = Graph::open(&archive).unwrap();
+        assert_eq!(
+            opened.numeric_value(padded),
+            None,
+            "compressed={compressed}"
+        );
+        assert_eq!(dump(&opened), expected);
+        for id in 1..=graph.dict.len() as u32 {
+            assert_eq!(opened.numeric_value(id), graph.numeric_value(id));
+        }
+        for (name, bytes) in before {
+            assert_eq!(std::fs::read(archive.join(name)).unwrap(), bytes);
+        }
+        let saved = scratch.0.join("current");
+        opened.save(&saved).unwrap();
+        assert!(saved.join("numerics-v3.bin").is_file());
+        assert!(!saved.join("numerics-v2.bin").exists());
+        let reopened = Graph::open(&saved).unwrap();
+        assert_eq!(dump(&reopened), expected);
+        assert_eq!(reopened.numeric_value(padded), None);
+    }
+}
+
+#[test]
 fn legacy_caches_are_recomputed_without_modifying_the_archive() {
     let graph = Graph::load_str(
         "@prefix xsd:<http://www.w3.org/2001/XMLSchema#> .
@@ -85,10 +141,15 @@ fn legacy_caches_are_recomputed_without_modifying_the_archive() {
             } else {
                 graph.save(&archive).unwrap();
             }
-            let mut numeric = std::fs::read(archive.join("numerics-v2.bin"))
+            let mut numeric = std::fs::read(archive.join("numerics-v3.bin"))
                 .or_else(|_| std::fs::read(archive.join("numerics.bin")))
                 .unwrap();
-            let mut temporal = std::fs::read(archive.join("temporals-v2.bin"))
+            let temporal_file = if archive.join("temporals-v3.bin").is_file() {
+                "temporals-v3.bin"
+            } else {
+                "temporals-v2.bin"
+            };
+            let mut temporal = std::fs::read(archive.join(temporal_file))
                 .or_else(|_| std::fs::read(archive.join("temporals.bin")))
                 .unwrap();
             let valid_numeric = numeric.clone();
@@ -107,8 +168,8 @@ fn legacy_caches_are_recomputed_without_modifying_the_archive() {
             std::fs::write(archive.join("numerics.bin"), numeric).unwrap();
             std::fs::write(archive.join("temporals.bin"), temporal).unwrap();
             for (bit, name, bytes) in [
-                (1, "numerics-v2.bin", valid_numeric),
-                (2, "temporals-v2.bin", valid_temporal),
+                (1, "numerics-v3.bin", valid_numeric),
+                (2, temporal_file, valid_temporal),
             ] {
                 if current_mask & bit == 0 {
                     let _ = std::fs::remove_file(archive.join(name));
@@ -153,8 +214,8 @@ fn legacy_caches_are_recomputed_without_modifying_the_archive() {
             }
             let saved = scratch.0.join("current");
             opened.save(&saved).unwrap();
-            assert!(saved.join("numerics-v2.bin").is_file());
-            assert!(saved.join("temporals-v2.bin").is_file());
+            assert!(saved.join("numerics-v3.bin").is_file());
+            assert!(saved.join(temporal_file).is_file());
             assert!(!saved.join("numerics.bin").exists());
             assert!(!saved.join("temporals.bin").exists());
             let reopened = Graph::open(&saved).unwrap();
