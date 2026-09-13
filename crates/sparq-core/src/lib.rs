@@ -67,7 +67,8 @@ use store::{Pattern, TripleStore};
 #[cfg(feature = "mmap")]
 const NUMERIC_CACHE_FILE: &str = "numerics-v3.bin";
 #[cfg(feature = "mmap")]
-const TEMPORAL_CACHE_FILE: &str = "temporals-v2.bin";
+// [GPT-6] V2 cached padded raw lexicals and timezone-less dateTimeStamp values.
+const TEMPORAL_CACHE_FILE: &str = "temporals-v3.bin";
 
 /// An immutable, dictionary-encoded RDF graph ready for querying.
 pub struct Graph {
@@ -399,14 +400,14 @@ impl NumData {
 
 /// Backing storage for the temporal-value cache, mirroring [`NumData`]: owned dense in
 /// RAM (two parallel columns — a flag byte per term and an f64 instant per term), mmap'd
-/// from `temporals-v2.bin` (out-of-core), or SPARSE (only the temporal literals, the right
+/// from `temporals-v3.bin` (out-of-core), or SPARSE (only the temporal literals, the right
 /// shape for the memory-bound browser store — most terms are not dates).
 enum TempData {
     /// `cells[id-1]` — flag (see [`temp_flag`]; 0 = not temporal) + instant in ONE
     /// 16-byte cell, so a cache probe touches a single cache line (the probes are
     /// random-access from row order; split columns would double the misses).
     Owned(Vec<TempCell>),
-    /// The mmap'd dense cache (`temporals-v2.bin`: `n` little-endian f64 instants then `n`
+    /// The mmap'd dense cache (`temporals-v3.bin`: `n` little-endian f64 instants then `n`
     /// flag bytes), plus a side map for terms APPENDED after open (delta-overlay growth).
     #[cfg(feature = "mmap")]
     Mapped(memmap2::Mmap, rustc_hash::FxHashMap<Id, Temporal>),
@@ -488,7 +489,7 @@ impl TempData {
         }
     }
 
-    /// Number of terms covered by a mapped `temporals-v2.bin` (9 bytes per term).
+    /// Number of terms covered by a mapped `temporals-v3.bin` (9 bytes per term).
     #[cfg(feature = "mmap")]
     #[inline]
     fn mapped_len(m: &memmap2::Mmap) -> usize {
@@ -4447,7 +4448,7 @@ fn stream_write_numerics(path: &std::path::Path, n: usize, num: &NumData) -> std
     w.flush()
 }
 
-/// [OPUS-4.8] (sq-7ph8) STREAM-writes the dense `temporals-v2.bin` (`n` little-endian f64
+/// [OPUS-4.8] (sq-7ph8) STREAM-writes the dense `temporals-v3.bin` (`n` little-endian f64
 /// instants then `n` flag bytes — the layout [`write_temporals`] emits and
 /// [`TempData::lookup`]/[`Graph::open`] read) DIRECTLY from the cache, without first
 /// materialising the two whole-dictionary dense columns `dense_temporals` builds.
@@ -8373,7 +8374,7 @@ mod tests {
             ));
         }
         nt.push_str("<http://ex/n0> <http://ex/name> \"caf\\u00e9\"@fr .\n");
-        // Temporal literals so the temporals-v2.bin round-trip below has real cells:
+        // Temporal literals so the temporals-v3.bin round-trip below has real cells:
         // zoned + floating dateTimes (sub-second), a date, and an ill-formed dateTime
         // (must stay uncached on both sides).
         nt.push_str("<http://ex/n1> <http://ex/at> \"2024-03-15T13:00:00.25Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> .\n");
@@ -8922,7 +8923,7 @@ mod tests {
     /// previously-uncovered `intern_batch`/`consolidate`/`remap_staged`/`ShardWindow`
     /// pipeline. The dataset deliberately mixes inline integers (passthrough), repeated
     /// IRIs (prefix factoring + dedup), language-tagged + datatyped literals, a numeric
-    /// literal (numerics-v3.bin), an xsd:dateTime (temporals-v2.bin), and blank nodes.
+    /// literal (numerics-v3.bin), an xsd:dateTime (temporals-v3.bin), and blank nodes.
     #[cfg(feature = "dict-spill")]
     #[test]
     fn dict_spill_build_byte_identical_to_sharded() {
@@ -10851,7 +10852,7 @@ mod tests {
     }
 
     /// [OPUS-4.8] (sq-7ph8) The streamed numerics/temporals save must write BYTE-IDENTICAL
-    /// `numerics-v3.bin`/`temporals-v2.bin` to the old dense-materialise path — for a DENSE-owned
+    /// `numerics-v3.bin`/`temporals-v3.bin` to the old dense-materialise path — for a DENSE-owned
     /// cache, a SPARSE cache (`into_compressed`), AND a graph carrying temporal literals — so
     /// the bounded-RSS finalize is purely a memory optimisation, never an on-disk format change.
     /// We prove it by comparing the streamed files against a reference dense computation done
@@ -10887,7 +10888,7 @@ mod tests {
                     }
                 }
             }
-            inst.extend_from_slice(&flags); // temporals-v2.bin = instants || flags
+            inst.extend_from_slice(&flags); // temporals-v3.bin = instants || flags
             (num, inst)
         };
 
@@ -10911,7 +10912,7 @@ mod tests {
                 let got_temp = std::fs::read(dir.join(TEMPORAL_CACHE_FILE)).unwrap();
                 let n = g.dict.len();
                 assert_eq!(got_num.len(), n * 8, "numerics-v3.bin size (sparse={sparse} compressed={compressed})");
-                assert_eq!(got_temp.len(), n * 9, "temporals-v2.bin size (sparse={sparse} compressed={compressed})");
+                assert_eq!(got_temp.len(), n * 9, "temporals-v3.bin size (sparse={sparse} compressed={compressed})");
                 assert_eq!(got_num, want_num, "streamed numerics != dense (sparse={sparse} compressed={compressed})");
                 assert_eq!(got_temp, want_temp, "streamed temporals != dense (sparse={sparse} compressed={compressed})");
 

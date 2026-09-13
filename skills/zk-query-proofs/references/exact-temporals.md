@@ -14,7 +14,7 @@ The graph lazily memoizes checked temporal seconds, flags and fraction offsets.
 Warm whole-second lookups need no lexical access; fractions borrow dictionary
 slices. ORDER BY cells hold the borrowed keys, avoiding comparator-time parsing.
 Forks and re-encoding start cold; dictionary appends extend initialized memos only
-for new temporal IDs. Persisted cache bytes stay compatible. Selective cold-mmap
+for new temporal IDs. Temporal v3 sidecars invalidate former padded-lexical values. Selective cold-mmap
 work remains unmeasured; see [cache work](../../sparql-query/temporal-cache-work.md). No unmeasured throughput or memory neutrality claim is made.
 The existing `Timeline` floating fraction, `Temporal` f64 epoch/cache files and
 approximate vector representations remain available for their representation
@@ -53,6 +53,31 @@ The [numeric-capacity guard](numeric-capacity.md) rejects consumers outside the
 finite numeric lane as whole-query failures. Direct accessor output remains
 exact. Existing historical receipts do not establish those updated semantics.
 
+## Raw literals and constructors
+
+Raw RDF typed date/dateTime/dateTimeStamp lexical forms are validated exactly:
+XML boundary whitespace is not stripped, and dateTimeStamp requires a timezone.
+Ill-typed terms remain storable and retain STR/sameTerm identity; temporal value
+operations produce ordinary expression errors. A padded out-of-range year is an
+ill-typed lexical, while a valid bare year outside the proof range still rejects
+whole evaluation. Dynamic STRDT preserves its supplied raw lexical form.
+
+This separates [RDF datatype lexical membership](https://www.w3.org/TR/rdf11-concepts/#section-Datatypes)
+from [XSD pre-lexical processing](https://www.w3.org/TR/xmlschema11-2/#dt-lexical-space).
+The existing dateTime cast from a string applies the
+[XPath string-construction whitespace rule](https://www.w3.org/TR/xpath-functions/#casting-from-strings)
+before validating the constructed value. It does not repair a raw typed literal.
+Temporal sidecar v3 recomputes prior v2 values; opening preserves archive bytes
+and source terms, and saving to a new destination persists the current cache.
+
+The separate original 37-case
+[`temporal_lexical.json`](../../../crates/sparq-engine/tests/fixtures/temporal_lexical.json)
+covers literals, VALUES, dense/compressed storage, accessors, casts and source
+identity; three separate construction-capacity cases reject the whole relation.
+Native model and actual-guest runner definitions share those inventories.
+Date/dateTimeStamp extension cases are labeled. Historical temporal goldens and
+receipts remain unchanged; these new definitions require a new guest campaign.
+
 ## Evidence boundaries
 
 The original 26 cases plus exact ORDER BY tie/lexical-preservation controls are in
@@ -81,3 +106,6 @@ hashes. It remains native evidence; its pending guest/hosted status is explicit.
 
 The cache corpus also uses long fractional suffixes after mmap reopening and
 rejects stored year zero through actual native ASK/FILTER/COUNT evaluation.
+
+The [raw lexical native checkpoint](../../../zk/sparql-evaluator/temporal-lexical-native-evidence.json)
+records deliberate package rebuilds, strict/raw constructor guards and archive migration; new guest execution remains pending.
