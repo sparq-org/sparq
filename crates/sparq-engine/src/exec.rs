@@ -14868,7 +14868,12 @@ fn eval_function_inner<E: Fn(usize) -> Result<Value, String>>(
             }
             if vals.len() == 1 {
                 if let Value::Term(Term::Literal(literal)) = &vals[0] {
-                    budget::check_temporal(literal.value(), nn.as_str())?;
+                    // [GPT-6] Capacity applies to the constructed lexical after the
+                    // string-cast preprocessing, while raw typed terms stay strict.
+                    let lexical = if literal.datatype() == xsd::STRING && nn.as_str() == xsd::DATE_TIME.as_str() {
+                        literal.value().trim_matches([' ', '\t', '\r', '\n'])
+                    } else { literal.value() };
+                    budget::check_temporal(lexical, nn.as_str())?;
                 }
                 if let Some(out) = eval_cast(nn.as_str(), &vals[0]) {
                     return Ok(out);
@@ -15294,7 +15299,7 @@ fn eval_cast(target: &str, v: &Value) -> Option<Value> {
         return Some(match v {
             Value::Term(Term::Literal(l))
                 if (l.datatype() == xsd::DATE_TIME || l.datatype() == xsd::DATE_TIME_STAMP)
-                    && parse_datetime(l.value()).is_some() =>
+                    && temporal_of_lit(l).is_some() =>
             {
                 typed(l.value().to_string(), xsd::DATE_TIME)
             }
@@ -15602,7 +15607,7 @@ fn datetime_arg_tz(v: &Value) -> Option<String> {
         _ => return None,
     };
     temporal_of_lit(l)?; // Shared datatype validation includes dateTimeStamp's required timezone.
-    let s = l.value().trim_matches([' ', '\t', '\r', '\n']);
+    let s = l.value();
     parse_datetime(s)?; // lexical shape check
     let (_, time) = s.split_once('T')?;
     Some(match time.find(['Z', '+', '-']) {
@@ -15756,7 +15761,7 @@ fn datetime_field(v: &Value, idx: usize) -> Value {
         Value::Term(Term::Literal(l))
             if l.datatype() == xsd::DATE_TIME || l.datatype() == xsd::DATE_TIME_STAMP => {
                 if temporal_of_lit(l).is_none() { return Value::Error; }
-                l.value().trim_matches([' ', '\t', '\r', '\n'])
+                l.value()
             },
         _ => return Value::Error,
     };
@@ -15798,7 +15803,6 @@ fn datetime_field(v: &Value, idx: usize) -> Value {
 fn parse_datetime(s: &str) -> Option<[f64; 6]> {
     // One validation boundary also serves the graph's temporal cache and
     // comparison fast paths. Component extraction below preserves local time.
-    let s = s.trim_matches([' ', '\t', '\r', '\n']);
     Timeline::parse_datetime(s)?;
     let (date, time) = s.split_once('T')?;
     let neg = date.starts_with('-');

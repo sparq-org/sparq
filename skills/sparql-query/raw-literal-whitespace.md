@@ -58,3 +58,5 @@ constructor behavior also differs from the pinned XPath normalization rule.
 These are interoperability observations, not sources of the expected results.
 Actual guest execution and source-bound receipts remain separate evidence from
 native regression tests and runner definitions.
+
+V1 and V2 separately consume all 32 raw-literal goldens through native and actual-guest runner definitions. Shared source and native success do not establish execution of a new guest image.

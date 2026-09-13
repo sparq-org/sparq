@@ -9,8 +9,8 @@
 //! [`Timeline`] retains the legacy parsed floating fraction; [`Temporal`] retains
 //! the approximate f64 epoch cache used by representation-oriented consumers.
 //! Neither floating representation is an exact equality/order key: close fractions
-//! and large epochs can alias. Cache files and approximate vector encoding remain
-//! compatible. `xsd:time` is outside these date/dateTime APIs.
+//! and large epochs can alias. Approximate vector encoding remains available;
+//! temporal cache version 3 rejects raw padded lexicals. `xsd:time` is outside these APIs.
 
 use std::cmp::Ordering;
 
@@ -46,7 +46,6 @@ thread_local! { pub(crate) static EXACT_PARSE_CALLS: std::cell::Cell<usize> = co
 fn parse_datetime_parts(s: &str) -> Option<ParsedDateTime<'_>> {
     #[cfg(test)]
     EXACT_PARSE_CALLS.with(|calls| calls.set(calls.get() + 1));
-    let s = s.trim_matches([' ', '\t', '\r', '\n']);
     let (date, rest) = s.split_once('T')?;
     let (time, tz) = match rest.find(['Z', '+', '-']) {
         Some(i) => (&rest[..i], Some(parse_tz(&rest[i..])?)),
@@ -81,6 +80,7 @@ fn parse_datetime_parts(s: &str) -> Option<ParsedDateTime<'_>> {
 }
 
 impl Timeline {
+    /// Parses the raw lexical form without XML construction preprocessing.
     pub fn parse_datetime(s: &str) -> Option<Timeline> {
         let parsed = parse_datetime_parts(s)?;
         let second: f64 = parsed.second_lexical.parse().ok()?;
@@ -91,8 +91,8 @@ impl Timeline {
         })
     }
 
+    /// Parses the raw lexical form without XML construction preprocessing.
     pub fn parse_date(s: &str) -> Option<Timeline> {
-        let s = s.trim_matches([' ', '\t', '\r', '\n']);
         // The timezone suffix starts after the day: "...-23Z" / "...-23+05:00". A bare
         // date's own hyphens must not be mistaken for an offset sign, so require the
         // ":" of "±hh:mm" at the right position.
@@ -279,7 +279,12 @@ impl Temporal {
     /// temporals stay on the slow path, which yields the type-error semantics).
     pub fn of_lit(value: &str, datatype: &str) -> Option<Temporal> {
         let (kind, tl) = match datatype {
-            XSD_DATE_TIME | XSD_DATE_TIME_STAMP => (TemporalKind::DateTime, Timeline::parse_datetime(value)?),
+            XSD_DATE_TIME | XSD_DATE_TIME_STAMP => {
+                let timeline = Timeline::parse_datetime(value)?;
+                // [GPT-6] Keep the approximate cache aligned with exact typed validity.
+                if datatype == XSD_DATE_TIME_STAMP && timeline.tz.is_none() { return None; }
+                (TemporalKind::DateTime, timeline)
+            },
             XSD_DATE => (TemporalKind::Date, Timeline::parse_date(value)?),
             _ => return None,
         };

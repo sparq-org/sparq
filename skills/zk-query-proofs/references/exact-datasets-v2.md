@@ -97,6 +97,10 @@ execution at the corrected image; historical receipts do not cover them.
 15 path results, one row-budget rejection and six inherited exclusions. The
 actual runner also submits the original core/query/two-row golden; V2 native
 conformance retains that same case. These definitions need new-artifact execution.
+`v2_raw_literal_whitespace.rs` and `v2_temporal_lexical.rs` add the same 32 raw
+numeric/boolean results and 37 temporal results plus three constructor-capacity
+rejections. Corresponding `actual_v2_*` host runners bind full V2 inputs/journals;
+their new guest execution remains pending the common dialect/source freeze.
 The shared builtin matrix also runs under both versions in native model tests
 and `host/tests/actual_builtin_edges.rs`, authenticating each case's optional
 stored source before execution. REC-derived errors and finite-capacity controls

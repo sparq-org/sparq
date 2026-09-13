@@ -14,8 +14,7 @@ and register custom functions. [Exact temporal comparison and optional year budg
 
 <!-- [GPT-6] The detached proof guest does not add an engine dependency. -->
 The opt-in [proved evaluator](../../zk/sparql-evaluator/README.md) restricts `target_os = "zkvm"`,
-rejecting ambient NOW/RAND/UUID in that target only. The experiment is
-not externally audited.
+rejecting ambient NOW/RAND/UUID in that target only. The experiment is not externally audited.
 
 ## 🚀 Quickstart
 
@@ -38,15 +37,13 @@ let json = sparq_engine::query_json(&g, "SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?
 - **Path multiplicity and correlation** — alternatives/sequences preserve bag counts;
   reachability retains endpoint sets. [Scoped EXISTS/MINUS substitution](../../skills/sparql-query/exists-minus.md) applies captured IRI/literal bindings before domain subtraction; unresolved shapes retain native practical behavior.
   Nullable paths preserve constant seeds and variable node domains. Substitution admits
-  only positive shapes with locally bound FILTERs; scope-sensitive shapes and triple-term
-  endpoints use potentially more expensive ordinary evaluation. [Boundaries and examples](../../skills/sparql-query/SKILL.md).
+  only positive shapes with locally bound FILTERs; scope-sensitive shapes and triple-term endpoints use potentially more expensive ordinary evaluation. [Boundaries and examples](../../skills/sparql-query/SKILL.md).
 - **Deterministic builtins** — `isNumeric` validates lexicals/facets independently of finite
   arithmetic capacity; integer/decimal EBV classifies validated digits without floating
   underflow. Invalid numeric/boolean lexicals have false EBV per SPARQL 1.1 §17.2.2,
   while invalid arithmetic operands error. Integer casts truncate within `i64`. `SUBSTR` clips the original
   one-based interval. Date accessors validate calendars/offsets and normalize next-day
-  midnight; `MIN`/`MAX` retain input terms. Raw numeric/boolean lexical
-  forms are checked verbatim; XML whitespace normalization applies to string casts only. [Bounded coverage and numeric limits](../../skills/sparql-query/SKILL.md)
+  midnight; `MIN`/`MAX` retain input terms. Raw numeric/boolean lexical forms are checked verbatim; XML whitespace normalization applies to string casts only. [Bounded coverage and numeric limits](../../skills/sparql-query/SKILL.md)
   remain explicit; these corrections do not establish complete builtin conformance.
 - **Named graphs** — query across an active dataset with `GRAPH` and `FROM` / `FROM NAMED`.
   [GPT-6] Nested `GRAPH` borrows the same catalog, preserving empty graphs,
