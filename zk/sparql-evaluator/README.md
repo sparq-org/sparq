@@ -74,11 +74,12 @@ including unsigned `+1` and `-0`. The [numeric capacity guard](../../skills/zk-q
 enforces finite arithmetic limits as whole-query failures, separately from
 lexical validity and direct RDF output. [Exact temporal/year capacity](../../skills/zk-query-proofs/references/exact-temporals.md)
 has its own explicit limits.
-EXISTS and NOT EXISTS bodies are restricted to BGP, join, UNION and pure FILTER.
+EXISTS and NOT EXISTS bodies admit BGP, join, UNION, pure FILTER and the
+[scoped published-2013 MINUS rule](../../skills/sparql-query/exists-minus.md).
 [Captured BOUND](../../skills/zk-query-proofs/references/exists-bound-scope.md) is
 rejected as an ambiguous published-2013 shape; body-local BOUND stays admitted.
 Fixed path sequences lowered to BGP are included; residual path operators,
-nested EXISTS, OPTIONAL/MINUS, binding operators, subqueries and modifiers inside
+nested EXISTS, OPTIONAL, binding operators, subqueries and modifiers inside
 an EXISTS body are rejected. The rejection applies to these combinations, not
 to those operators elsewhere in the query. This avoids silently selecting an
 alternative to published SPARQL 1.1 substitution semantics while broader
@@ -107,7 +108,8 @@ standard expectation separately from the rejection case.
 | NOW, RAND, UUID/STRUUID, BNODE, external functions | rejected | nested host and actual guest rejection fixtures |
 | Source blank nodes, triple terms, directional literals | rejected | input/query/output checks |
 | CONSTRUCT, DESCRIBE, UPDATE | rejected | admission negatives |
-| Complex/nested EXISTS bodies | rejected | corpus admission and actual guest rejection cases |
+| Scoped EXISTS/MINUS bodies | admitted | preserved 2013 golden and direct guest runner; execution requires a new artifact |
+| Other complex/nested EXISTS bodies | rejected | corpus admission and actual guest rejection cases |
 | Nullable path composition | rejected | corpus admission and actual guest rejection cases |
 
 Test definitions are distinct from execution evidence: `model/tests/semantics.rs`

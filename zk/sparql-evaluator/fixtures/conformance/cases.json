@@ -1872,16 +1872,33 @@
       }
     },
     {
-      "id": "reject-exists-minus",
+      "id": "exists-minus-disjoint-domain-after-substitution",
       "features": [
-        "exists_complex_bodies"
+        "exists_minus_domains"
       ],
       "spec": "https://www.w3.org/TR/sparql11-query/#defn_evalExists",
       "query": "PREFIX ex: <http://example.org/> SELECT ?s WHERE { ?s ex:score ?n FILTER EXISTS { ?s ex:score ?m MINUS { ?s ex:score ?z } } }",
       "expected": {
-        "kind": "rejection",
-        "stage": "admission",
-        "error": "EXISTS body is outside the positive-pattern profile"
+        "kind": "result",
+        "result": {
+          "Select": {
+            "variables": [
+              "s"
+            ],
+            "order": "Bag",
+            "rows": [
+              [
+                "<http://example.org/a>"
+              ],
+              [
+                "<http://example.org/b>"
+              ],
+              [
+                "<http://example.org/c>"
+              ]
+            ]
+          }
+        }
       }
     },
     {
@@ -1894,7 +1911,7 @@
       "expected": {
         "kind": "rejection",
         "stage": "admission",
-        "error": "EXISTS body is outside the positive-pattern profile"
+        "error": "EXISTS body is outside the supported substitution profile"
       }
     },
     {
@@ -1907,7 +1924,7 @@
       "expected": {
         "kind": "rejection",
         "stage": "admission",
-        "error": "EXISTS body is outside the positive-pattern profile"
+        "error": "EXISTS body is outside the supported substitution profile"
       }
     },
     {
@@ -1920,7 +1937,7 @@
       "expected": {
         "kind": "rejection",
         "stage": "admission",
-        "error": "EXISTS body is outside the positive-pattern profile"
+        "error": "EXISTS body is outside the supported substitution profile"
       }
     },
     {
@@ -1933,7 +1950,7 @@
       "expected": {
         "kind": "rejection",
         "stage": "admission",
-        "error": "EXISTS body is outside the positive-pattern profile"
+        "error": "EXISTS body is outside the supported substitution profile"
       }
     },
     {
@@ -1946,7 +1963,7 @@
       "expected": {
         "kind": "rejection",
         "stage": "admission",
-        "error": "EXISTS body is outside the positive-pattern profile"
+        "error": "EXISTS body is outside the supported substitution profile"
       }
     },
     {
@@ -1959,7 +1976,7 @@
       "expected": {
         "kind": "rejection",
         "stage": "admission",
-        "error": "EXISTS body is outside the positive-pattern profile"
+        "error": "EXISTS body is outside the supported substitution profile"
       }
     },
     {
@@ -1972,7 +1989,7 @@
       "expected": {
         "kind": "rejection",
         "stage": "admission",
-        "error": "EXISTS body is outside the positive-pattern profile"
+        "error": "EXISTS body is outside the supported substitution profile"
       }
     },
     {
@@ -1985,7 +2002,7 @@
       "expected": {
         "kind": "rejection",
         "stage": "admission",
-        "error": "EXISTS body is outside the positive-pattern profile"
+        "error": "EXISTS body is outside the supported substitution profile"
       }
     },
     {

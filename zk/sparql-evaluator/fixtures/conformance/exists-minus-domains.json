@@ -1,0 +1,157 @@
+{
+  "authored_by": "GPT-6",
+  "interpretation": "Published 2013 substitution and MINUS solution domains; synthetic fixtures, not independently agreed engine consensus.",
+  "dataset_ntriples": "<http://example.org/a> <http://example.org/score> \"10\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n<http://example.org/b> <http://example.org/score> \"20\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n<http://example.org/c> <http://example.org/score> \"30\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n",
+  "cases": [
+    {
+      "id": "captured-subject-domains",
+      "query": "PREFIX ex:<http://example.org/> SELECT ?s {?s ex:score ?n FILTER EXISTS {?s ex:score ?m MINUS {?s ex:score ?z}}}",
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "s"
+          ],
+          "order": "Bag",
+          "rows": [
+            [
+              "<http://example.org/a>"
+            ],
+            [
+              "<http://example.org/b>"
+            ],
+            [
+              "<http://example.org/c>"
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "shared-local-still-subtracts",
+      "query": "PREFIX ex:<http://example.org/> SELECT ?s {?s ex:score ?n FILTER EXISTS {?s ex:score ?m MINUS {?s ex:score ?m}}}",
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "s"
+          ],
+          "order": "Bag",
+          "rows": []
+        }
+      }
+    },
+    {
+      "id": "capture-only-on-right",
+      "query": "PREFIX ex:<http://example.org/> SELECT ?s {VALUES ?s {ex:a ex:missing} FILTER EXISTS {ex:a ex:score ?m MINUS {?s ex:score ?m}}}",
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "s"
+          ],
+          "order": "Bag",
+          "rows": [
+            [
+              "<http://example.org/missing>"
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "unbound-outer-domain",
+      "query": "PREFIX ex:<http://example.org/> SELECT ?tag {VALUES (?s ?tag) {(ex:a \"bound\") (UNDEF \"unbound\")} FILTER EXISTS {?s ex:score ?m MINUS {?s ex:score ?z}}}",
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "tag"
+          ],
+          "order": "Bag",
+          "rows": [
+            [
+              "\"bound\""
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "literal-term-identity",
+      "query": "PREFIX ex:<http://example.org/> SELECT ?n {VALUES ?n {10 \"010\"^^<http://www.w3.org/2001/XMLSchema#integer>} FILTER EXISTS {ex:a ex:score ?n MINUS {?s ex:score ?n}}}",
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "n"
+          ],
+          "order": "Bag",
+          "rows": [
+            [
+              "\"10\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "duplicate-outer-mappings",
+      "query": "PREFIX ex:<http://example.org/> SELECT ?s {VALUES ?s {ex:a ex:a ex:b} FILTER EXISTS {?s ex:score ?m MINUS {?s ex:score ?z}}}",
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "s"
+          ],
+          "order": "Bag",
+          "rows": [
+            [
+              "<http://example.org/a>"
+            ],
+            [
+              "<http://example.org/a>"
+            ],
+            [
+              "<http://example.org/b>"
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "union-local-bound-domain",
+      "query": "PREFIX ex:<http://example.org/> SELECT ?s {VALUES ?s {ex:a} FILTER EXISTS { { ?s ex:score ?m FILTER(BOUND(?m)) } UNION {ex:b ex:score ?z} MINUS {?s ex:score ?m} }}",
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "s"
+          ],
+          "order": "Bag",
+          "rows": [
+            [
+              "<http://example.org/a>"
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "nested-minus",
+      "query": "PREFIX ex:<http://example.org/> SELECT ?s {?s ex:score ?n FILTER EXISTS {?s ex:score ?m MINUS {?s ex:score ?z MINUS {?s ex:score ?z}}}}",
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "s"
+          ],
+          "order": "Bag",
+          "rows": [
+            [
+              "<http://example.org/a>"
+            ],
+            [
+              "<http://example.org/b>"
+            ],
+            [
+              "<http://example.org/c>"
+            ]
+          ]
+        }
+      }
+    }
+  ]
+}

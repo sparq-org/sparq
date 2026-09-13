@@ -55,10 +55,11 @@ fn admit_query(query: &spargebra::Query) -> Result<(), Rejected> {
                             | GraphPattern::Join { .. }
                             | GraphPattern::Union { .. }
                             | GraphPattern::Filter { .. }
+                            | GraphPattern::Minus { .. }
                     ) =>
             {
                 return Err(Rejected(
-                    "EXISTS body is outside the positive-pattern profile",
+                    "EXISTS body is outside the supported substitution profile",
                 ));
             }
             Visit::Pattern(p) => match p {

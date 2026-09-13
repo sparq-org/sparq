@@ -31,7 +31,8 @@ This is conservative potential-capture analysis: an outer variable declared by
 VALUES or OPTIONAL counts even if a particular row leaves it unbound. An
 all-UNDEF VALUES column is therefore also rejected when used by inner BOUND.
 Admission does not run the query to infer row-specific binding presence. Nested
-EXISTS and the prior complex-body exclusions remain in force. This boundary
+EXISTS and the other complex-body exclusions remain in force; scoped MINUS
+uses the separately documented published-2013 domain rule. This boundary
 does not settle substituted blank-node or subquery/binding-target ambiguities.
 
 The synthetic [fixture inventory](../../../zk/sparql-evaluator/fixtures/conformance/exists-bound-boundaries.json)
