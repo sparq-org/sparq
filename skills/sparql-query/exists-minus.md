@@ -20,7 +20,7 @@ and [MINUS](https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#defn_algMinu
 definitions. The [EXISTS community report](https://w3c.github.io/sparql-exists/docs/sparql-exists.html)
 explicitly identifies the resulting domain change as Issue 4. Its alternative
 binding-injection proposal changes this result; it is not silently selected here.
-The retained [differential fixtures](../../../crates/sparq-engine/tests/fixtures/exists_minus_differential.json)
+The retained [differential fixtures](../../crates/sparq-engine/tests/fixtures/exists_minus_differential.json)
 record that PyOxigraph 0.5.11 returns no mapping for this discriminator, so interoperability
 with that implementation does not establish agreement with this selected rule.
 
