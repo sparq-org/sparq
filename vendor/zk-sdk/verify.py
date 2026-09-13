@@ -35,6 +35,30 @@ def reconstruct(package: dict, directory: Path) -> None:
             assert (restored / path).read_bytes() == (directory / path).read_bytes(), (name, path, "patch replay")
 
 
+def selected_vendor_manifests(metadata: dict, versions: dict) -> None:
+    """[GPT-6] A same-version registry or unrelated local package is not our patch."""
+    active = {node["id"] for node in metadata["resolve"]["nodes"]}
+    for name, version in versions.items():
+        selected = [package for package in metadata["packages"]
+                    if package["name"] == name and package["id"] in active]
+        expected = (ROOT / f"{name}-{version}" / "Cargo.toml").resolve()
+        assert len(selected) == 1, (name, "resolved vendor inventory")
+        package = selected[0]
+        assert package["version"] == version and package.get("source") is None, (name, "resolved vendor source")
+        assert Path(package["manifest_path"]).resolve() == expected, (name, "resolved vendor manifest path")
+
+
+def patch_table_paths(manifest: Path, versions: dict, inventory: set) -> None:
+    """[GPT-6] Bind each detached patch edge to the exact inventoried directory."""
+    patches = tomllib.loads(manifest.read_text()).get("patch", {}).get("crates-io", {})
+    assert set(patches) & set(versions) == inventory, (str(manifest), "manifest patch inventory")
+    for name in inventory:
+        entry = patches[name]
+        expected = (ROOT / f"{name}-{versions[name]}").resolve()
+        assert isinstance(entry, dict) and set(entry) == {"path"}, (name, "manifest patch path entry")
+        assert (manifest.parent / entry["path"]).resolve() == expected, (name, "manifest vendor patch path")
+
+
 def check() -> None:
     metadata = json.loads((ROOT / "UPSTREAM.json").read_text())
     expected_versions = {
@@ -42,6 +66,10 @@ def check() -> None:
         "ark-crypto-primitives": "0.5.0", "risc0-zkvm": "3.0.6",
         "risc0-zkos-v1compat": "2.2.3",
     }
+    guest_patches = {"ark-relations", "ark-crypto-primitives", "risc0-zkvm", "risc0-zkos-v1compat"}
+    for relative, inventory in [("Cargo.toml", set(expected_versions)),
+                                ("methods/guest/Cargo.toml", guest_patches)]:
+        patch_table_paths(REPO / "zk/sparql-evaluator" / relative, expected_versions, inventory)
     assert len(metadata["packages"]) == len(expected_versions), "complete patch inventory"
     assert {p["name"]: p["version"] for p in metadata["packages"]} == expected_versions, "complete patch inventory"
     for package in metadata["packages"]:
