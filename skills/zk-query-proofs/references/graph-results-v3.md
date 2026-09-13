@@ -112,8 +112,8 @@ bag, verifier-agreed CONSTRUCT and holder-declared DESCRIBE. Independent request
 nonce, authority, policy, journal and cross-version substitutions must reject.
 Changes to `sparq-canon` trigger the mandatory actual guest job. The helper retains
 every V1/V2 receipt and requires all three V3 exports,
-with the same independently checked artifact throughout. Use its evidence record
-to determine execution status; these test definitions alone establish no receipt.
+with the same independently checked artifact throughout. [Local d7 evidence](../../../zk/sparql-evaluator/proof-evidence-v3.json)
+records eight receipts and later known follow-ups; it is not a blanket conformance claim.
 
 Sources: [SPARQL 1.1 CONSTRUCT](https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#construct),
 [DESCRIBE](https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#describe),
