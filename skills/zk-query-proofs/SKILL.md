@@ -385,3 +385,9 @@ binary dependency activation and embedded ELF remain unchanged; the patch record
 separately documents an upstream real-target binary compilation limitation.
 Synthetic dependency checks remain separate from actual guest proof evidence.
 [GPT-6] The exact evaluator enables the [numeric capacity guard](references/numeric-capacity.md). Valid values beyond the finite arithmetic lane can be returned directly, but unsupported numeric consumption fails the entire evaluation. Native default budgets leave this option off.
+
+[GPT-6] The SDK provenance checks bind both workspace patch tables and resolved
+feature-matrix package manifests to the exact inventoried vendor directories.
+The [SDK reference](../../vendor/zk-sdk/README.md) distinguishes direct Cargo
+kernel defaults from the embedding helper's explicit feature requirement, and
+records library-only Clippy scope separately from kernel or guest execution.
