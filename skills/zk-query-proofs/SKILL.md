@@ -425,3 +425,8 @@ result-proof evidence.
 hashes and byte lengths. The ZK toolchain lane independently rebuilds the fixed
 foundation keys in addition to checking current keys. Only v1 byte stability is
 promised; unchanged v2 circuit sizes do not establish key compatibility.
+
+[GPT-6] The selected-support and exact-evaluator examples also admit separately
+versioned materialized synthetic profiles: bounded wallet candidates and named
+organization counts. Each generated manifest runs one ordinary sample and preserves
+the existing authentication, authority, replay and typed rejection contracts.

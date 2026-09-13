@@ -1,19 +1,23 @@
 // [GPT-6] Synthetic, NONcanonical stage-13 experiment; not external security assurance.
 //! Run with a strict experiment JSON and a new output directory. No real wallet input.
+#[path = "result_experiment/workloads.rs"]
+mod workloads;
+
 use oxrdf::{Literal, NamedNode, Term, Triple};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sparq_zk::{
     commit::commit_triples,
-    field::{field_to_hex, Fr},
+    field::{Fr, field_to_hex},
     sig::{self, SecretKey},
 };
 use sparq_zk_compose::{
     driver::CircuitProver,
     manifest::{DisclosedTerm, StatusListSnapshot},
     result::{
-        prepare_result_with_options, verify_result, PrivateIntegerCapacity, ResultCredential,
-        ResultError, ResultOptions, ResultPolicy, ResultPresentation, ResultWork, WitnessSelection,
+        PrivateIntegerCapacity, ResultCredential, ResultError, ResultOptions, ResultPolicy,
+        ResultPresentation, ResultWork, WitnessSelection, prepare_result_with_options,
+        verify_result,
     },
     verifier::{InMemorySeenNonces, VerifierNonce},
 };
@@ -30,7 +34,7 @@ use std::{
 type Fallible<T> = Result<T, Box<dyn Error>>;
 const QUERY: &str =
     "SELECT DISTINCT ?name WHERE { ?s <urn:name> ?name . ?s <urn:age> ?age . FILTER(?age >= 18) }";
-const MAX_MANIFEST_BYTES: u64 = 16 * 1024;
+const MAX_MANIFEST_BYTES: u64 = 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -76,16 +80,31 @@ struct Experiment {
     planners: Vec<Planner>,
     warmup_runs_per_planner: u32,
     measured_runs_per_planner: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    wallet: Option<workloads::Wallet>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    nonce_id: Option<u64>,
 }
 impl Experiment {
     fn validate(&self) -> Fallible<()> {
-        if self.schema_version != 1
-            || self.fixture != "synthetic_shared_alternative_v1"
-            || self.contract != Contract::synthetic()
-        {
+        let fixed = self.schema_version == 1
+            && self.fixture == "synthetic_shared_alternative_v1"
+            && self.wallet.is_none()
+            && self.nonce_id.is_none();
+        let generated = self.schema_version == 2
+            && self.fixture == "wallet_candidate_sweep_v1"
+            && self.wallet.is_some()
+            && self.nonce_id.is_some_and(|n| n != 0 && n != 999999)
+            && self.planners.len() == 1
+            && self.warmup_runs_per_planner == 0
+            && self.measured_runs_per_planner == 1;
+        if (!fixed && !generated) || self.contract != Contract::synthetic() {
             return Err(
                 "unsupported fixture, contract or signature/status/disclosure regime".into(),
             );
+        }
+        if let Some(wallet) = &self.wallet {
+            wallet.validate()?;
         }
         if self.planners.is_empty()
             || self.planners.len() > 2
@@ -129,9 +148,13 @@ fn fixture() -> Fallible<Fixture> {
         ));
     }
     let all = names.iter().chain(&ages).cloned().collect();
+    authenticate(vec![names, ages, all])
+}
+
+fn authenticate(inputs: Vec<Vec<Triple>>) -> Fallible<Fixture> {
     let sk = SecretKey::from_seed(1);
     let mut credentials = Vec::new();
-    for (i, triples) in [names, ages, all].into_iter().enumerate() {
+    for (i, triples) in inputs.into_iter().enumerate() {
         let graph = commit_triples(&triples, Fr::from(100 + i as u64))?;
         let status = sig::status_ref_digest(
             &sig::status_list_id_to_field("urn:synthetic:status"),
@@ -522,7 +545,10 @@ fn execute(exp: &Experiment, out: &Path) -> Fallible<bool> {
         report["backend"]["nargo"] = tool_identity("nargo", "1.0.0-beta.21", &root)?;
         report["backend"]["bb"] = tool_identity("bb", "5.0.0-nightly.20260324", &root)?;
         let start = Instant::now();
-        let f = fixture()?;
+        let f = match &exp.wallet {
+            Some(wallet) => authenticate(wallet.triples()?)?,
+            None => fixture()?,
+        };
         report["fixture_setup_seconds"] = json!(start.elapsed().as_secs_f64());
         let binding = fixture_binding(&f);
         report["synthetic_input_binding"] = binding.clone();
@@ -544,7 +570,7 @@ fn execute(exp: &Experiment, out: &Path) -> Fallible<bool> {
                 let result = run_one(
                     planner,
                     &f,
-                    420000 + ordinal,
+                    exp.nonce_id.unwrap_or(420000 + ordinal),
                     &prover,
                     &dir,
                     !warmup && i == exp.warmup_runs_per_planner,
@@ -552,6 +578,12 @@ fn execute(exp: &Experiment, out: &Path) -> Fallible<bool> {
                 );
                 if let Err(ref e) = result {
                     r["error"] = json!(e.to_string());
+                    r["error_class"] = json!(match e.downcast_ref::<ResultError>() {
+                        Some(ResultError::SearchExhausted) => "search_exhausted",
+                        Some(ResultError::Rejected(_)) => "relation_rejected",
+                        Some(ResultError::Driver(_)) => "backend_error",
+                        None => "adapter_error",
+                    });
                 }
                 report["runs"].as_array_mut().ok_or("run array")?.push(r);
                 result?;
@@ -700,16 +732,49 @@ mod tests {
         assert_eq!(before, fixture_binding(&f));
     }
     #[test]
+    fn generated_candidate_growth_preserves_the_matched_planner_contract() {
+        for scale in [3, 8] {
+            let wallet = workloads::Wallet::generated("0123456789abcdef", scale).unwrap();
+            let f = authenticate(wallet.triples().unwrap()).unwrap();
+            let before = fixture_binding(&f);
+            let nonce = VerifierNonce::from_field(Fr::from(42u64));
+            for (selection, signatures) in [
+                (WitnessSelection::FirstSuccess, 2),
+                (WitnessSelection::Optimize, 1),
+            ] {
+                let prepared = prepare_result_with_options(
+                    QUERY,
+                    &f.credentials,
+                    &f.rows,
+                    &f.policy,
+                    &nonce,
+                    ResultOptions {
+                        witness_selection: selection,
+                        ..ResultOptions::default()
+                    },
+                )
+                .unwrap();
+                assert_eq!(prepared.work().signature_checks, signatures);
+                assert_eq!(fixture_binding(&f), before);
+            }
+        }
+    }
+
+    #[test]
     fn backend_errors_do_not_count_as_rejected_tampers() {
-        assert!(rejection(
-            Err(ResultError::SearchExhausted),
-            "cryptographic proof rejected"
-        )
-        .is_err());
-        assert!(rejection(
-            Err(ResultError::Rejected("unrelated".into())),
-            "cryptographic proof rejected"
-        )
-        .is_err());
+        assert!(
+            rejection(
+                Err(ResultError::SearchExhausted),
+                "cryptographic proof rejected"
+            )
+            .is_err()
+        );
+        assert!(
+            rejection(
+                Err(ResultError::Rejected("unrelated".into())),
+                "cryptographic proof rejected"
+            )
+            .is_err()
+        );
     }
 }

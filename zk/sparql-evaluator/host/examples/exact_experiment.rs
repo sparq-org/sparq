@@ -23,7 +23,7 @@ use std::{
 };
 
 type Result<T> = std::result::Result<T, Box<dyn StdError>>;
-const HELP: &str = "Usage: exact_experiment MANIFEST.json ACCEPTED_GUEST.bin INDEPENDENT_PIN.json LOCAL_R0VM NEW_OUTPUT_DIRECTORY\nRun only fixed synthetic fixtures. The pin must be accepted independently; never derive it from the supplied artifact. Output must be outside the source checkout and must not exist. Local timings are NONcanonical.";
+const HELP: &str = "Usage: exact_experiment MANIFEST.json ACCEPTED_GUEST.bin INDEPENDENT_PIN.json LOCAL_R0VM NEW_OUTPUT_DIRECTORY\nRun only validated fixed or generated synthetic profiles. The pin must be accepted independently; never derive it from the supplied artifact. Output must be outside the source checkout and must not exist. Local timings are NONcanonical.";
 
 #[derive(Default)]
 struct MemoryNonces(BTreeSet<[u8; 32]>);
@@ -260,7 +260,7 @@ fn acceptance_controls(
 }
 
 fn contract_identity(case: &Case) -> Result<Value> {
-    let input = witness(case, [1; 32]);
+    let input = witness(case, [1; 32])?;
     Ok(json!({
         "backend_contract": "exact_dataset_v2",
         "fixture": case.fixture,
@@ -273,7 +273,7 @@ fn contract_identity(case: &Case) -> Result<Value> {
         "nquads_sha256": digest(input.dataset.nquads.as_bytes()),
         "named_graph_catalog": input.dataset.named_graphs,
         "synthetic_salt": input.dataset.salt,
-        "expected_result": expected(case.fixture),
+        "expected_result": expected(case),
         "issuer_authentication": "none",
         "scope": "complete committed bounded dataset; local FROM/FROM NAMED snapshots",
         "disclosure": "canonical complete SELECT result or exact ASK boolean, dataset commitment and request binding",
@@ -288,7 +288,7 @@ fn run_sample(
     output: &Path,
 ) -> Result<Value> {
     let started = Instant::now();
-    let input = witness(case, challenge);
+    let input = witness(case, challenge)?;
     let prepare_ns = elapsed_ns(started)?;
     let started = Instant::now();
     let presentation = prove_with_artifact(&input, r0vm, guest)?;
@@ -297,7 +297,7 @@ fn run_sample(
     let started = Instant::now();
     let journal = verify_with_artifact(&presentation, &input.request, &mut consumed, guest)?;
     let independent_verify_ns = elapsed_ns(started)?;
-    if journal.result != expected(case.fixture) {
+    if journal.result != expected(case) {
         return Err("genuine result disagrees with fixed golden".into());
     }
     let controls = acceptance_controls(
@@ -348,7 +348,7 @@ fn run_sample(
 }
 
 fn run(args: &[PathBuf]) -> Result<()> {
-    let manifest_bytes = bounded_read(&args[0], 16 * 1024)?;
+    let manifest_bytes = bounded_read(&args[0], 1024 * 1024)?;
     let manifest: Manifest = serde_json::from_slice(&manifest_bytes)?;
     manifest.validate()?;
     let artifact = bounded_read(&args[1], 32 * 1024 * 1024)?;
@@ -494,8 +494,15 @@ mod tests {
                 fixtures::Authority::HolderDeclared,
             ] {
                 identities.insert(digest(
-                    &serde_json::to_vec(&contract_identity(&Case { fixture, authority }).unwrap())
+                    &serde_json::to_vec(
+                        &contract_identity(&Case {
+                            fixture,
+                            authority,
+                            organization: None,
+                        })
                         .unwrap(),
+                    )
+                    .unwrap(),
                 ));
             }
         }

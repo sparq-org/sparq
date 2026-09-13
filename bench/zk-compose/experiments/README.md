@@ -14,7 +14,7 @@ cargo run --release -p sparq-zk-compose --features successful-results \
 ```
 
 Commit source first and choose a new output directory outside the checkout. Only
-the built-in synthetic fixture is accepted; its deterministic keys, salts and
+validated fixed or generated synthetic wallet profiles are accepted; their deterministic keys, salts and
 challenges are test data. Never adapt those values into credential issuance or a
 production nonce policy. The manifest rejects unknown fields, changed contracts,
 unsupported signature/status/disclosure regimes, duplicate planners, and excessive
@@ -76,8 +76,12 @@ collection has no global state and retains at most 4096 events per drain. Overfl
 or collector poisoning prevents a successful measurement record. Concurrent users
 need separate driver instances for per-call attribution. These local diagnostics
 can disclose workload information and do not belong in real presentations.
-RSS measurement, canonical infrastructure, an exact-dataset adapter, and further signature suites
-remain unfinished work.
+Schema-version-2 manifests admit a materialized wallet with a namespace seed,
+candidate count and complete credential facts. The adapter independently regenerates
+and validates this bounded synthetic profile before signing its commitments. Each
+generated manifest selects one planner and one ordinary sample with a supplied
+synthetic nonce. RSS measurement, canonical infrastructure and additional signature
+suites are not provided by this adapter.
 
 The historical schema-version-1 [local smoke record](local-smoke.json) binds its actual source
 commit and executable hashes. It retains separate public/proof byte counts and
