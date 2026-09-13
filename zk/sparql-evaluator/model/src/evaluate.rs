@@ -94,7 +94,7 @@ pub(crate) fn admit_query(
                     pattern_term(subject)?;
                     pattern_term(object)?;
                     // Lowered sequence intermediates must not hide nullable
-                    // composition whose absent-constant behavior is unresolved.
+                    // composition outside this bounded admitted slice.
                     if path_nullable(path)
                         && (internal_path_node(subject) || internal_path_node(object))
                     {
@@ -282,8 +282,13 @@ pub(crate) fn admit_query(
             Visit::Path(p) => match p {
                 PropertyPathExpression::NamedNode(_)
                 | PropertyPathExpression::NegatedPropertySet(_) => {}
-                PropertyPathExpression::Reverse(p)
-                | PropertyPathExpression::ZeroOrMore(p)
+                // [GPT-6] Inverse swaps endpoint roles; alternative is bag union. Neither
+                // introduces the variable midpoint of a path sequence.
+                PropertyPathExpression::Reverse(p) => pending.push(Visit::Path(p)),
+                PropertyPathExpression::Alternative(a, b) => {
+                    pending.extend([Visit::Path(a), Visit::Path(b)]);
+                }
+                PropertyPathExpression::ZeroOrMore(p)
                 | PropertyPathExpression::OneOrMore(p)
                 | PropertyPathExpression::ZeroOrOne(p) => {
                     if path_nullable(p) {
@@ -291,8 +296,7 @@ pub(crate) fn admit_query(
                     }
                     pending.push(Visit::Path(p));
                 }
-                PropertyPathExpression::Sequence(a, b)
-                | PropertyPathExpression::Alternative(a, b) => {
+                PropertyPathExpression::Sequence(a, b) => {
                     if path_nullable(a) || path_nullable(b) {
                         return Err(Rejected("nullable path composition is not admitted"));
                     }

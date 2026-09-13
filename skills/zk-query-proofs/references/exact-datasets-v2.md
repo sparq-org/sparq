@@ -93,6 +93,10 @@ The exact numeric EBV corpus runs in `model/tests/v2_numeric_ebv.rs` and
 capacity rejections, with full input/result binding. Lexical EBV itself requires
 no finite arithmetic conversion. These new actual-guest definitions are pending
 execution at the corrected image; historical receipts do not cover them.
+`v2_nullable_alternatives.rs` and its actual-guest counterpart preserve the
+15 path results, one row-budget rejection and six inherited exclusions. The
+actual runner also submits the original core/query/two-row golden; V2 native
+conformance retains that same case. These definitions need new-artifact execution.
 The shared builtin matrix also runs under both versions in native model tests
 and `host/tests/actual_builtin_edges.rs`, authenticating each case's optional
 stored source before execution. REC-derived errors and finite-capacity controls

@@ -730,16 +730,17 @@
     },
     {
       "id": "nullable_path_composition",
-      "status": "rejected",
+      "status": "partial_fixture_coverage",
       "spec": "https://www.w3.org/TR/sparql11-query/#defn_evalPP",
-      "positive_cases": [],
+      "positive_cases": [
+        "nullable-path-alternative-absent-constant"
+      ],
       "rejection_cases": [
-        "reject-nullable-path-alternative",
         "reject-nullable-path-lowered-sequence",
         "reject-nullable-path-nested-quantifier"
       ],
       "guest_proof_evidence": "not_asserted",
-      "limits": "Nullable subexpressions inside path composition and nullable lowered-sequence intermediates are rejected while absent-constant propagation is repaired. Ordinary root +/*/? with non-nullable operands remains admitted; these rejection cases do not count as support."
+      "limits": "Nullable alternatives and inverses are admitted with bag multiplicity and concrete endpoint identity. Nullable sequence/midpoint composition, nested nullable quantifiers and residual paths inside EXISTS remain rejected. Shared native endpoint repair predates this admission change; actual execution requires the new guest artifact."
     },
     {
       "id": "exists_minus_domains",
@@ -1491,7 +1492,7 @@
     },
     {
       "id": "nullable-alternative-absent-constant",
-      "case": "reject-nullable-path-alternative",
+      "case": "nullable-path-alternative-absent-constant",
       "dataset": "fixtures/conformance/core.nt",
       "baseline": "https://www.w3.org/TR/sparql11-query/#defn_evalPP",
       "published_2013_expected_mappings": [
@@ -1503,7 +1504,9 @@
         }
       ],
       "engine_5055fddb_mappings": [],
-      "profile_behavior": "Rejected before evaluation pending absent-constant propagation through composition."
+      "profile_behavior": "Admitted with unchanged query, core dataset and two published-2013 mappings; historical 5055 output is retained. Shared native correction is 96888523; guest evidence must bind the new admission artifact.",
+      "prior_case": "reject-nullable-path-alternative",
+      "status": "resolved_for_alternative_and_inverse"
     }
   ]
 }

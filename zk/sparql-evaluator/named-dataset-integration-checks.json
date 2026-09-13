@@ -1,9 +1,9 @@
 {
   "schema": "sparq-named-dataset-integration-v1",
-  "base_sha": "8e2fa4c58421727b897e0fa5a1e4533abd3773e9",
-  "integrated_v1_sha": "be1d6fd64c01947c3d6cad6eb3ff4396c06bd303",
+  "base_sha": "3f50629d6a6722c8f7136e9f34e74fbf095484db",
+  "integrated_v1_sha": "9c2cfa84f86c185488af16ea51b37f2574ec3bbe",
   "publication_ready": false,
-  "native_model_test_functions": 52,
+  "native_model_test_functions": 54,
   "native_model_clippy": "passed --all-targets --features evaluate -- -D warnings",
   "new_v2_case_inventories": {
     "exists_bound_admitted": 8,
@@ -11,29 +11,36 @@
     "exists_minus_results": 8,
     "false_ask_discriminator": 1,
     "numeric_ebv_results": 17,
-    "numeric_ebv_arithmetic_capacity_rejections": 3
+    "numeric_ebv_arithmetic_capacity_rejections": 3,
+    "nullable_results": 15,
+    "nullable_original_core_result_in_actual_runner": 1,
+    "nullable_budget_rejections": 1,
+    "nullable_admission_rejections": 6
   },
-  "guest_status": "New V1/V2 correlation and exact numeric EBV runner definitions exist but this integrated artifact has not been built or executed. Historical048/d7 evidence remains immutable; the mandatory hosted V2 lane must execute the current program.",
+  "guest_status": "New V1/V2 correlation, numeric EBV and nullable-alternative runner definitions exist but this integrated artifact has not been built or executed. Historical048/d7 evidence remains immutable; the mandatory hosted V2 lane must execute the current program.",
   "merge_resolution": "LocalVocab retains both borrowed root dataset catalog and the new per-EXISTS domain-substitution flag; the cfg(test) scalar-oracle lifetime repair remains.",
   "source_sha256": {
     "crates/sparq-core/src/lib.rs": "71eb8ab82e28a4feb42fb580ccdc5f8854aa9538051215a39a4e6f25157a3414",
     "crates/sparq-engine/src/exec.rs": "441f13d340cef619745cd0ea03be61db96cb71171bb045ac9bd55d6396b2ac2e",
     "crates/sparq-engine/src/exists_domain.rs": "ae2c364e9b8f0a848912e4f36e6a8d61c29a992720aedd553a85079170c581bd",
-    "zk/sparql-evaluator/model/src/evaluate.rs": "c7e9d6634a50ceb4c5687c8c2dc6809988b49ca60c753aff4f1bc03a0470c288",
+    "zk/sparql-evaluator/model/src/evaluate.rs": "1c47914d6d719b2b7b56d08983509a61fcfcf6847430812f7381b5127897386a",
     "zk/sparql-evaluator/model/tests/v2_exists.rs": "a3c2660546ed8d2f81d854c55caadda4d3cfecda43f61d56a3768f745597d77d",
     "zk/sparql-evaluator/host/tests/actual_v2_exists.rs": "0efdeff5e6b15bc8c07347cf5783f1dfdbde0b0be904c08d355e55e6ea5d37ea",
     "zk/sparql-evaluator/model/tests/v2_numeric_ebv.rs": "e569179c0cb6a825f6bf071ca20f9002172a0e4605553bb6268fc5b36c3f0ff0",
     "zk/sparql-evaluator/host/tests/actual_v2_numeric_ebv.rs": "4a96dc2db480bfc34d046b4eaabbbb345e0dd060eb3aa3545a62e855e18c4378",
     "zk/sparql-evaluator/fixtures/conformance/numeric-ebv.json": "49dd44539374fa4145d5f06b88d09e40e276c10de537a0b665b7df4036e56bf2",
-    "zk/sparql-evaluator/fixtures/false-absence.rq": "75ab3d201c32b73c1cac581b3e71123e76beb11b4ddce39da5460590f7841af2"
+    "zk/sparql-evaluator/fixtures/false-absence.rq": "df35e15e294372e54be8ce5d0967a4e37c96fe2726ba722749f73393b6ccaad6",
+    "zk/sparql-evaluator/model/tests/v2_nullable_alternatives.rs": "d875d2b127ee5d6504c8f09319df117ebd11e8a54dc247cdd015d30c704534a8",
+    "zk/sparql-evaluator/host/tests/actual_v2_nullable_alternatives.rs": "81da88518e2d7e2a0dc16c717b330dbb775ba7001c1e6100e83a29d8c6395634",
+    "zk/sparql-evaluator/fixtures/conformance/nullable-alternatives.json": "d097e7e8d2877bb8c3dc1db6e531f8acd1f40312c0794d3c5fee1b8c18c248a2"
   },
   "logs": {
-    "/private/tmp/sparq-v2-be1-native.log": "21346d73081b808de44cc8a44c5cb9074ea8bbc198c23f654394d6174faa6d78",
-    "/private/tmp/sparq-v2-be1-clippy.log": "0ae6d8bd235a9d83b236884a1d949475edaf8acc0721b94ea4fce55b1ec8c0cf",
-    "/private/tmp/sparq-v2-be1-preflight.log": "ec7499eb7d18b61e2e363377efc3ad5196ff67c358407bba047b5bfcc66be080"
+    "/private/tmp/sparq-v2-nullable-rebuilt-native.log": "f7b2cb33156f48139941ce12ac60460e49f273bdbb40ebc22a7e80b786c7cc6d",
+    "/private/tmp/sparq-v2-nullable-rebuilt-clippy.log": "ff423dde7a32d0bdead8fb1e1fe83d298d5428c11f7f78ac3f2dd1372e5208a9",
+    "/private/tmp/sparq-v2-nullable-preflight.log": "ec7499eb7d18b61e2e363377efc3ad5196ff67c358407bba047b5bfcc66be080"
   },
   "remaining": [
-    "Review and integrate the bounded nullable-alternative admission follow-up before final freeze",
+    "Resolve newly identified typed-literal versus string-cast whitespace policy before final artifact freeze",
     "Compile and execute all actual guest fixtures and required receipts at the corrected image through the mandatory hosted gate",
     "Required independent reviews and repository landing conditions"
   ],
@@ -48,6 +55,19 @@
         "/private/tmp/sparq-v2-c656-model-clippy.log": "76e0bd20cad8ed486815aae8fbc29a64d8d17228e4e3b9f71d4229d05de50f78"
       },
       "source_sha": "8e2fa4c58421727b897e0fa5a1e4533abd3773e9"
+    },
+    {
+      "base_sha": "8e2fa4c58421727b897e0fa5a1e4533abd3773e9",
+      "integrated_v1_sha": "be1d6fd64c01947c3d6cad6eb3ff4396c06bd303",
+      "native_model_test_functions": 52,
+      "native_model_clippy": "passed --all-targets --features evaluate -- -D warnings",
+      "logs": {
+        "/private/tmp/sparq-v2-be1-native.log": "21346d73081b808de44cc8a44c5cb9074ea8bbc198c23f654394d6174faa6d78",
+        "/private/tmp/sparq-v2-be1-clippy.log": "0ae6d8bd235a9d83b236884a1d949475edaf8acc0721b94ea4fce55b1ec8c0cf",
+        "/private/tmp/sparq-v2-be1-preflight.log": "ec7499eb7d18b61e2e363377efc3ad5196ff67c358407bba047b5bfcc66be080"
+      },
+      "source_sha": "3f50629d6a6722c8f7136e9f34e74fbf095484db"
     }
-  ]
+  ],
+  "build_provenance": "Final native/model Clippy gates followed successful explicit core/substrate/engine/model package invalidation with set -e. An earlier invalidation command incorrectly listed absent sparq-canon; its preliminary run is not used for this checkpoint."
 }

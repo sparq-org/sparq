@@ -95,11 +95,12 @@ alternative to published SPARQL 1.1 substitution semantics while broader
 correlation work remains in zkp-10.6. The [W3C discussion](https://github.com/w3c/sparql-query/issues/156)
 describes the relevant errata and proposed alternatives; none is implicitly
 enabled by this profile.
-Nullable path composition is also excluded from this bounded profile: nullable
-subexpressions below other path operators, or at a lowered
-sequence's internal endpoint, are rejected. Ordinary root `*`, `+` and `?` over
-non-nullable operands remain admitted. The coverage ledger retains the known
-standard expectation separately from the rejection case.
+Nullable alternatives and inverses preserve branch multiplicity and concrete
+zero-length endpoints, including terms absent from the dataset. The
+[bounded path profile](../../skills/zk-query-proofs/references/nullable-paths.md)
+keeps nullable sequence intermediates and nested nullable quantifiers excluded.
+The shared native endpoint repair predates this admission change; the new test
+runner requires a newly built guest before any actual execution claim.
 
 | Family | Admission | Evidence definition |
 | --- | --- | --- |
@@ -119,7 +120,8 @@ standard expectation separately from the rejection case.
 | CONSTRUCT, DESCRIBE, UPDATE | rejected | admission negatives |
 | Scoped EXISTS/MINUS bodies | admitted | preserved 2013 golden and direct guest runner; execution requires a new artifact |
 | Other complex/nested EXISTS bodies | rejected | corpus admission and actual guest rejection cases |
-| Nullable path composition | rejected | corpus admission and actual guest rejection cases |
+| Nullable alternatives and inverses | admitted | preserved published golden and full-result guest runner; new artifact execution required |
+| Nullable sequences and nested nullable quantifiers | rejected | corpus admission and guest rejection definitions |
 
 Test definitions are distinct from execution evidence: `model/tests/semantics.rs`
 runs native semantic tests; `host/tests/real_proof.rs` generates genuine receipts

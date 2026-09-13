@@ -1,0 +1,406 @@
+{
+  "authored_by": "GPT-6",
+  "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#defn_evalPP",
+  "interpretation": "Inverse swaps endpoints; alternatives use bag union. Concrete zero-length endpoints may be absent from nodes(G); variable endpoints range over subject/object terms. Synthetic normative goldens, separate from actual guest execution evidence.",
+  "cases": [
+    {
+      "id": "absent-subject-empty",
+      "query": "PREFIX ex:<http://example.org/> SELECT ?o {ex:missing (ex:p*|ex:p*) ?o}",
+      "dataset_ntriples": "",
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "o"
+          ],
+          "order": "Bag",
+          "rows": [
+            [
+              "<http://example.org/missing>"
+            ],
+            [
+              "<http://example.org/missing>"
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "absent-object-empty",
+      "query": "PREFIX ex:<http://example.org/> SELECT ?s {?s (ex:p*|ex:p*) ex:missing}",
+      "dataset_ntriples": "",
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "s"
+          ],
+          "order": "Bag",
+          "rows": [
+            [
+              "<http://example.org/missing>"
+            ],
+            [
+              "<http://example.org/missing>"
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "equal-constants-empty",
+      "query": "PREFIX ex:<http://example.org/> SELECT * {ex:missing (ex:p*|ex:p*) ex:missing}",
+      "dataset_ntriples": "",
+      "expected_result": {
+        "Select": {
+          "variables": [],
+          "order": "Bag",
+          "rows": [
+            [],
+            []
+          ]
+        }
+      }
+    },
+    {
+      "id": "different-constants-empty",
+      "query": "PREFIX ex:<http://example.org/> SELECT * {ex:missing (ex:p*|ex:p*) ex:a}",
+      "dataset_ntriples": "",
+      "expected_result": {
+        "Select": {
+          "variables": [],
+          "order": "Bag",
+          "rows": []
+        }
+      }
+    },
+    {
+      "id": "inverse-absent-subject",
+      "query": "PREFIX ex:<http://example.org/> SELECT ?o {ex:missing ^(ex:p?|ex:p*) ?o}",
+      "dataset_ntriples": "",
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "o"
+          ],
+          "order": "Bag",
+          "rows": [
+            [
+              "<http://example.org/missing>"
+            ],
+            [
+              "<http://example.org/missing>"
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "inverse-absent-object",
+      "query": "PREFIX ex:<http://example.org/> SELECT ?s {?s ^(ex:p?|ex:p*) ex:missing}",
+      "dataset_ntriples": "",
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "s"
+          ],
+          "order": "Bag",
+          "rows": [
+            [
+              "<http://example.org/missing>"
+            ],
+            [
+              "<http://example.org/missing>"
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "nested-alternatives",
+      "query": "PREFIX ex:<http://example.org/> SELECT ?o {ex:missing ((ex:p*|ex:p?)|(ex:p?|ex:p*)) ?o}",
+      "dataset_ntriples": "",
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "o"
+          ],
+          "order": "Bag",
+          "rows": [
+            [
+              "<http://example.org/missing>"
+            ],
+            [
+              "<http://example.org/missing>"
+            ],
+            [
+              "<http://example.org/missing>"
+            ],
+            [
+              "<http://example.org/missing>"
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "variable-node-domain",
+      "query": "PREFIX ex:<http://example.org/> SELECT ?s ?o {?s (ex:p*|ex:p*) ?o}",
+      "dataset_ntriples": "<http://example.org/a> <http://example.org/p> <http://example.org/b> .\n",
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "s",
+            "o"
+          ],
+          "order": "Bag",
+          "rows": [
+            [
+              "<http://example.org/a>",
+              "<http://example.org/a>"
+            ],
+            [
+              "<http://example.org/a>",
+              "<http://example.org/a>"
+            ],
+            [
+              "<http://example.org/a>",
+              "<http://example.org/b>"
+            ],
+            [
+              "<http://example.org/a>",
+              "<http://example.org/b>"
+            ],
+            [
+              "<http://example.org/b>",
+              "<http://example.org/b>"
+            ],
+            [
+              "<http://example.org/b>",
+              "<http://example.org/b>"
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "inverse-variable-node-domain",
+      "query": "PREFIX ex:<http://example.org/> SELECT ?s ?o {?s (^(ex:p*)|^(ex:p*)) ?o}",
+      "dataset_ntriples": "<http://example.org/a> <http://example.org/p> <http://example.org/b> .\n",
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "s",
+            "o"
+          ],
+          "order": "Bag",
+          "rows": [
+            [
+              "<http://example.org/a>",
+              "<http://example.org/a>"
+            ],
+            [
+              "<http://example.org/a>",
+              "<http://example.org/a>"
+            ],
+            [
+              "<http://example.org/b>",
+              "<http://example.org/a>"
+            ],
+            [
+              "<http://example.org/b>",
+              "<http://example.org/a>"
+            ],
+            [
+              "<http://example.org/b>",
+              "<http://example.org/b>"
+            ],
+            [
+              "<http://example.org/b>",
+              "<http://example.org/b>"
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "same-variable",
+      "query": "PREFIX ex:<http://example.org/> SELECT ?s {?s (ex:p*|ex:p*) ?s}",
+      "dataset_ntriples": "<http://example.org/a> <http://example.org/p> <http://example.org/b> .\n",
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "s"
+          ],
+          "order": "Bag",
+          "rows": [
+            [
+              "<http://example.org/a>"
+            ],
+            [
+              "<http://example.org/a>"
+            ],
+            [
+              "<http://example.org/b>"
+            ],
+            [
+              "<http://example.org/b>"
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "predicate-only-concrete",
+      "query": "PREFIX ex:<http://example.org/> SELECT ?o {ex:p (ex:p*|ex:p*) ?o}",
+      "dataset_ntriples": "<http://example.org/a> <http://example.org/p> <http://example.org/b> .\n",
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "o"
+          ],
+          "order": "Bag",
+          "rows": [
+            [
+              "<http://example.org/p>"
+            ],
+            [
+              "<http://example.org/p>"
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "values-are-variable-hints",
+      "query": "PREFIX ex:<http://example.org/> SELECT ?s ?o {VALUES ?s {ex:p ex:missing} ?s (ex:p*|ex:p*) ?o}",
+      "dataset_ntriples": "<http://example.org/a> <http://example.org/p> <http://example.org/b> .\n",
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "s",
+            "o"
+          ],
+          "order": "Bag",
+          "rows": []
+        }
+      }
+    },
+    {
+      "id": "optional-unbound",
+      "query": "PREFIX ex:<http://example.org/> SELECT ?s ?o {VALUES ?s {ex:missing} OPTIONAL {?s (ex:p*|ex:p*) ?o}}",
+      "dataset_ntriples": "<http://example.org/a> <http://example.org/p> <http://example.org/b> .\n",
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "s",
+            "o"
+          ],
+          "order": "Bag",
+          "rows": [
+            [
+              "<http://example.org/missing>",
+              null
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "mixed-empty-and-edge",
+      "query": "PREFIX ex:<http://example.org/> SELECT ?o {ex:a (ex:p?|ex:p*) ?o}",
+      "dataset_ntriples": "<http://example.org/a> <http://example.org/p> <http://example.org/b> .\n",
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "o"
+          ],
+          "order": "Bag",
+          "rows": [
+            [
+              "<http://example.org/a>"
+            ],
+            [
+              "<http://example.org/a>"
+            ],
+            [
+              "<http://example.org/b>"
+            ],
+            [
+              "<http://example.org/b>"
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "row-budget-exact",
+      "query": "PREFIX ex:<http://example.org/> SELECT ?o {ex:missing ((ex:p*|ex:p*)|(ex:p*|ex:p*)) ?o}",
+      "dataset_ntriples": "",
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "o"
+          ],
+          "order": "Bag",
+          "rows": [
+            [
+              "<http://example.org/missing>"
+            ],
+            [
+              "<http://example.org/missing>"
+            ],
+            [
+              "<http://example.org/missing>"
+            ],
+            [
+              "<http://example.org/missing>"
+            ]
+          ]
+        }
+      },
+      "max_rows": 4
+    },
+    {
+      "id": "row-budget-overflow",
+      "query": "PREFIX ex:<http://example.org/> SELECT ?o {ex:missing ((ex:p*|ex:p*)|(ex:p*|ex:p*)) ?o}",
+      "dataset_ntriples": "",
+      "max_rows": 3,
+      "expected_capacity_error": true
+    },
+    {
+      "id": "lowered-sequence",
+      "query": "PREFIX ex:<http://example.org/> SELECT ?o {ex:missing ex:p*/ex:p* ?o}",
+      "dataset_ntriples": "",
+      "expected_admission_error": true
+    },
+    {
+      "id": "residual-sequence",
+      "query": "PREFIX ex:<http://example.org/> SELECT ?o {ex:missing ^(ex:p*/ex:p*) ?o}",
+      "dataset_ntriples": "",
+      "expected_admission_error": true
+    },
+    {
+      "id": "nested-quantifier",
+      "query": "PREFIX ex:<http://example.org/> SELECT ?o {ex:missing (ex:p?)+ ?o}",
+      "dataset_ntriples": "",
+      "expected_admission_error": true
+    },
+    {
+      "id": "hidden-sequence",
+      "query": "PREFIX ex:<http://example.org/> SELECT ?o {ex:missing ((ex:p*/ex:p*)|ex:p) ?o}",
+      "dataset_ntriples": "",
+      "expected_admission_error": true
+    },
+    {
+      "id": "hidden-quantifier",
+      "query": "PREFIX ex:<http://example.org/> SELECT ?o {ex:missing (^((ex:p*)+)|ex:p) ?o}",
+      "dataset_ntriples": "",
+      "expected_admission_error": true
+    },
+    {
+      "id": "exists-body",
+      "query": "PREFIX ex:<http://example.org/> SELECT ?o {FILTER EXISTS {ex:missing (ex:p*|ex:p*) ?o}}",
+      "dataset_ntriples": "",
+      "expected_admission_error": true
+    }
+  ]
+}
