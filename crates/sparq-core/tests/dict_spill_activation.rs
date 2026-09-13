@@ -99,7 +99,7 @@ const DICT_FILES: &[&str] = &[
     "dict-offs.bin",
     "dict-hash.bin",
     "dict-hid.bin",
-    "numerics-v2.bin",
+    "numerics-v3.bin",
     "temporals-v2.bin",
     "predstats.bin",
 ];
@@ -145,6 +145,9 @@ fn tiny_budget_eviction_matches_comfortable_budget_byte_for_byte() {
     Graph::build_external_spill(nt.as_bytes(), "ntriples", &tiny_dir, 256, &tiny).unwrap();
     Graph::build_external_spill(nt.as_bytes(), "ntriples", &comfy_dir, 256, &comfy).unwrap();
 
+    // [GPT-6] An obsolete inventory must not silently skip both current files.
+    assert!(tiny_dir.join("numerics-v3.bin").is_file());
+    assert!(comfy_dir.join("numerics-v3.bin").is_file());
     for &f in DICT_FILES {
         let a = std::fs::read(tiny_dir.join(f));
         let b = std::fs::read(comfy_dir.join(f));
