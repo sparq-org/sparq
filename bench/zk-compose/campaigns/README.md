@@ -127,3 +127,14 @@ explicit synthetic protocol records. Those records are not measured proof data.
 The existing example test gates validate both Rust generated-input modes, including
 full-scale organization goldens and unchanged fixed fixtures. Native fixture tests
 execute semantics; genuine campaign reports require separate actual adapter runs.
+
+The [local smoke record](local-smoke.json) retains the original completed campaign
+report and independently rechecked artifact hashes. It contains two wallet planner
+samples and two organization authority samples, with no warmups, plus explicit
+unsupported records. Rust adapters were built at commit `5512ee3`; the corrected
+Python runner and observed checkout were `f18d96c`. Both are recorded separately
+from the independently accepted historical `048cb43` guest artifact. That artifact predates the
+known tiny-decimal EBV correction; these fixed queries do not exercise that case.
+The run does not validate the latest guest or the full scale sweep, and it provides
+no general-correctness or performance conclusion. V3 graph-result workloads remain
+a separate required extension.
