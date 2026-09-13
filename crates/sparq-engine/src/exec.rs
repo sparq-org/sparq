@@ -2591,6 +2591,8 @@ pub struct LocalVocab {
     /// this evaluation's vocabulary, so nested queries and Rayon workers cannot
     /// inherit another evaluation's bindings through thread-local state.
     correlation: FxHashMap<Variable, Term>,
+    /// [GPT-6] Remove substituted variables before domain-sensitive operators.
+    substitute_exists_domains: bool,
 }
 
 impl LocalVocab {
@@ -5375,7 +5377,24 @@ fn trace_label(p: &GraphPattern) -> String {
     }
 }
 
+#[path = "exists_domain.rs"]
+mod exists_domain;
+
 fn eval_graph_pattern_inner(graph: &Graph, local: &mut LocalVocab, p: &GraphPattern) -> Result<Bindings, String> {
+    let bindings = eval_graph_pattern_unsubstituted(graph, local, p)?;
+    if !local.substitute_exists_domains {
+        return Ok(bindings);
+    }
+    // [GPT-6] Charge the materialized intermediate before capture filtering and
+    // projection reduce it. Tracing then sees the actual substituted output.
+    let previous = budget::set_width(bindings.vars.len());
+    let result = budget::check(bindings.rows.len());
+    budget::restore_width(previous);
+    result?;
+    Ok(exists_domain::restrict(graph, local, bindings))
+}
+
+fn eval_graph_pattern_unsubstituted(graph: &Graph, local: &mut LocalVocab, p: &GraphPattern) -> Result<Bindings, String> {
     budget::check(0)?; // coarse cooperative cancellation: once per operator entry
     if is_conjunctive(p) {
         let mut patterns = Vec::new();
@@ -13463,12 +13482,12 @@ fn eval_expr(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], e: &Ex
     }
 }
 
-/// Correlated `EXISTS { inner }` for one outer solution row: evaluate `inner` and
-/// test whether any of its solutions is join-compatible with the row on the
-/// variables they share (same term, or unbound on the inner side). Working at the
-/// id/term level — rather than substituting the row's terms into the pattern AST —
-/// keeps blank-node-valued bindings expressible (spargebra has no ground blank-node
-/// term pattern).
+/// Correlated `EXISTS { inner }` for one outer solution row. The bounded
+/// BGP/Join/UNION/FILTER/MINUS branch constrains captured IRI/literal values and
+/// removes their columns before MINUS observes child domains, per SPARQL 1.1.
+/// Other shapes retain the native practical compatibility evaluation, including
+/// the unresolved blank-node and variable-only-position substitution cases.
+/// These fallbacks are not a claim of complete published-2013 correlation support.
 ///
 /// The inner pattern is evaluated against `graph`, which inside `GRAPH <g> { … }`
 /// is the active named graph — so an EXISTS nested in a GRAPH pattern sees the same
@@ -13528,6 +13547,15 @@ fn eval_exists_inner(
                 .entry(variable.clone())
                 .or_insert(term);
         }
+    }
+
+    // [GPT-6] MINUS observes solution domains before final compatibility. For
+    // the admitted BGP/Join/UNION/FILTER/MINUS shape, restrict and remove each
+    // bound IRI/literal column before its parent operator can inspect domains.
+    if exists_domain::required(inner, &inner_local.correlation) {
+        inner_local.substitute_exists_domains = true;
+        let result = eval_graph_pattern(graph, &mut inner_local, inner)?;
+        return Ok(!result.rows.is_empty());
     }
 
     // Only shared solution columns require the compatibility scan below.

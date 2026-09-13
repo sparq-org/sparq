@@ -32,6 +32,10 @@ let json = sparq_engine::query_json(&g, "SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?
 # Ok(()) }
 ```
 
+[EXISTS with MINUS](../../skills/sparql-query/exists-minus.md) applies captured
+IRI/literal bindings before subtraction for a bounded body algebra.
+Undefined and unsupported correlation combinations retain explicit limitations.
+
 ## ✨ Features
 
 - **SPARQL query** — run [SPARQL 1.1](https://www.w3.org/TR/sparql11-query/) and

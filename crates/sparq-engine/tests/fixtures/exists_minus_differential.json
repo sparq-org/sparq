@@ -1,0 +1,45 @@
+{
+  "prefix": "PREFIX ex:<http://example.org/> PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> ",
+  "data": "<http://example.org/a> <http://example.org/score> 10 .\n<http://example.org/b> <http://example.org/score> 20 .\n<http://example.org/c> <http://example.org/score> 30 .",
+  "cases": [
+    {
+      "id": "captured-subject-domain",
+      "query": "SELECT ?s WHERE {?s ex:score ?n FILTER EXISTS {?s ex:score ?m MINUS {?s ex:score ?z}}}",
+      "expected": [
+        "a",
+        "b",
+        "c"
+      ],
+      "pyoxigraph_0_5_11_rows": []
+    },
+    {
+      "id": "captured-right-only",
+      "query": "SELECT ?s WHERE {VALUES ?s {ex:a ex:missing} FILTER EXISTS {ex:a ex:score ?m MINUS {?s ex:score ?m}}}",
+      "expected": [
+        "missing"
+      ],
+      "pyoxigraph_0_5_11_rows": [
+        [
+          "<http://example.org/missing>"
+        ]
+      ]
+    },
+    {
+      "id": "captured-unbound",
+      "query": "SELECT ?tag WHERE {VALUES (?s ?tag) {(ex:a \"bound\") (UNDEF \"unbound\")} FILTER EXISTS {?s ex:score ?m MINUS {?s ex:score ?z}}}",
+      "expected": [
+        "bound"
+      ],
+      "pyoxigraph_0_5_11_rows": []
+    }
+  ],
+  "observed_engine_version": "0.5.11",
+  "interpretation": "Published 2013 substitution and MINUS domain definitions; disagreement with an independent implementation is retained rather than treated as consensus.",
+  "authored_by": "GPT-6",
+  "input_format": "Turtle",
+  "spec_sources": [
+    "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#defn_substitute",
+    "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#defn_algMinus",
+    "https://w3c.github.io/sparql-exists/docs/sparql-exists.html"
+  ]
+}

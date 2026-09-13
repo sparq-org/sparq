@@ -17,6 +17,9 @@ permutation-indexed in-memory RDF store). You load RDF into a `Graph`, then call
 `sparq_engine` to run SELECT/ASK/CONSTRUCT/DESCRIBE and SPARQL Update. Results come back either as a
 typed `QueryResult` (rows of `Option<oxrdf::Term>`) or directly as a SPARQL-1.1-JSON string.
 
+[Correlated EXISTS with MINUS](exists-minus.md) documents the bounded published-2013
+solution-domain correction and the remaining native practical fallbacks.
+
 ## Quickstart
 
 `Cargo.toml`:
