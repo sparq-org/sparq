@@ -1,0 +1,25 @@
+{
+  "fixture_sha256": "d097e7e8d2877bb8c3dc1db6e531f8acd1f40312c0794d3c5fee1b8c18c248a2",
+  "pyoxigraph": "0.5.11",
+  "rdflib": "7.6.0",
+  "rdflib_materialization": "Result.bindings, retaining empty mappings omitted by Result iterator",
+  "fixture": "nullable-alternatives.json",
+  "scope": "Native independent-engine observations, not the normative oracle. Full query/data/expected terms remain in the hashed synthetic fixture. No guest execution or source audit claim.",
+  "cases": [
+    {"id":"absent-subject-empty","pyoxigraph":{"variables":["o"],"rows":[]},"rdflib":{"variables":["o"],"rows":[["<http://example.org/missing>"],["<http://example.org/missing>"]]}},
+    {"id":"absent-object-empty","pyoxigraph":{"variables":["s"],"rows":[]},"rdflib":{"variables":["s"],"rows":[["<http://example.org/missing>"],["<http://example.org/missing>"]]}},
+    {"id":"equal-constants-empty","pyoxigraph":{"variables":[],"rows":[]},"rdflib":{"variables":[],"rows":[[],[]]}},
+    {"id":"different-constants-empty","pyoxigraph":{"variables":[],"rows":[]},"rdflib":{"variables":[],"rows":[]}},
+    {"id":"inverse-absent-subject","pyoxigraph":{"variables":["o"],"rows":[]},"rdflib":{"variables":["o"],"rows":[["<http://example.org/missing>"],["<http://example.org/missing>"]]}},
+    {"id":"inverse-absent-object","pyoxigraph":{"variables":["s"],"rows":[]},"rdflib":{"variables":["s"],"rows":[["<http://example.org/missing>"],["<http://example.org/missing>"]]}},
+    {"id":"nested-alternatives","pyoxigraph":{"variables":["o"],"rows":[]},"rdflib":{"variables":["o"],"rows":[["<http://example.org/missing>"],["<http://example.org/missing>"],["<http://example.org/missing>"],["<http://example.org/missing>"]]}},
+    {"id":"variable-node-domain","pyoxigraph":{"variables":["s","o"],"rows":[["<http://example.org/a>","<http://example.org/a>"],["<http://example.org/a>","<http://example.org/b>"],["<http://example.org/b>","<http://example.org/b>"]]},"rdflib":{"variables":["s","o"],"rows":[["<http://example.org/a>","<http://example.org/a>"],["<http://example.org/a>","<http://example.org/a>"],["<http://example.org/a>","<http://example.org/b>"],["<http://example.org/a>","<http://example.org/b>"],["<http://example.org/b>","<http://example.org/b>"],["<http://example.org/b>","<http://example.org/b>"]]}},
+    {"id":"inverse-variable-node-domain","pyoxigraph":{"variables":["s","o"],"rows":[["<http://example.org/a>","<http://example.org/a>"],["<http://example.org/b>","<http://example.org/a>"],["<http://example.org/b>","<http://example.org/b>"]]},"rdflib":{"variables":["s","o"],"rows":[["<http://example.org/a>","<http://example.org/a>"],["<http://example.org/a>","<http://example.org/a>"],["<http://example.org/b>","<http://example.org/a>"],["<http://example.org/b>","<http://example.org/a>"],["<http://example.org/b>","<http://example.org/b>"],["<http://example.org/b>","<http://example.org/b>"]]}},
+    {"id":"same-variable","pyoxigraph":{"variables":["s"],"rows":[["<http://example.org/a>"],["<http://example.org/b>"]]},"rdflib":{"variables":["s"],"rows":[["<http://example.org/a>"],["<http://example.org/a>"],["<http://example.org/b>"],["<http://example.org/b>"]]}},
+    {"id":"predicate-only-concrete","pyoxigraph":{"variables":["o"],"rows":[]},"rdflib":{"variables":["o"],"rows":[["<http://example.org/p>"],["<http://example.org/p>"]]}},
+    {"id":"values-are-variable-hints","pyoxigraph":{"variables":["s","o"],"rows":[]},"rdflib":{"variables":["s","o"],"rows":[["<http://example.org/missing>","<http://example.org/missing>"],["<http://example.org/missing>","<http://example.org/missing>"],["<http://example.org/p>","<http://example.org/p>"],["<http://example.org/p>","<http://example.org/p>"]]}},
+    {"id":"optional-unbound","pyoxigraph":{"variables":["s","o"],"rows":[["<http://example.org/missing>",null]]},"rdflib":{"variables":["s","o"],"rows":[["<http://example.org/missing>","<http://example.org/missing>"],["<http://example.org/missing>","<http://example.org/missing>"]]}},
+    {"id":"mixed-empty-and-edge","pyoxigraph":{"variables":["o"],"rows":[["<http://example.org/a>"],["<http://example.org/b>"]]},"rdflib":{"variables":["o"],"rows":[["<http://example.org/a>"],["<http://example.org/a>"],["<http://example.org/b>"],["<http://example.org/b>"]]}},
+    {"id":"row-budget-exact","pyoxigraph":{"variables":["o"],"rows":[]},"rdflib":{"variables":["o"],"rows":[["<http://example.org/missing>"],["<http://example.org/missing>"],["<http://example.org/missing>"],["<http://example.org/missing>"]]}}
+  ]
+}

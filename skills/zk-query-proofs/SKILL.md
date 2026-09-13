@@ -391,3 +391,5 @@ feature-matrix package manifests to the exact inventoried vendor directories.
 The [SDK reference](../../vendor/zk-sdk/README.md) distinguishes direct Cargo
 kernel defaults from the embedding helper's explicit feature requirement, and
 records library-only Clippy scope separately from kernel or guest execution.
+
+[GPT-6] The exact evaluator admits the [bounded nullable alternative/inverse profile](references/nullable-paths.md). Bag duplicates and concrete absent endpoints are retained; nullable sequences, nested nullable quantifiers and residual paths in EXISTS remain excluded. Actual guest evidence must bind the updated admission artifact.
