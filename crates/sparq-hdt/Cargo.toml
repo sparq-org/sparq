@@ -73,7 +73,7 @@ flate2 = "1"
 # the existing gzip path; selection is by MAGIC BYTES, not file name.
 #   zstd  — `.hdt.zst` (magic 28 B5 2F FD). `zstd::stream::read::Decoder`.
 #   bzip2 — `.hdt.bz2` (magic "BZh").       `bzip2::read::MultiBzDecoder`.
-zstd = "0.13"
+zstd = "0.14"
 bzip2 = "0.6"
 # [OPUS-4.8] CRC8/CRC32-C verification in the direct decoder (decode.rs). Same
 # crate (and the same CRC params) the wrapped `hdt` reader uses for the bitmap /

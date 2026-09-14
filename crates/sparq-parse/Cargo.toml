@@ -40,7 +40,7 @@ zlib-rs = ["flate2/zlib-rs"]
 # Multi-member gzip (one RFC 1952 member per result chunk).
 flate2 = "1"
 # Multi-frame zstd + dictionary training/compression (zdict_builder is a default feature).
-zstd = "0.13"
+zstd = "0.14"
 # Parallel chunk compression (CompressedSink Mode::Parallel).
 rayon = { workspace = true }
 

@@ -217,7 +217,7 @@ oxrdf.workspace = true
 # ingestion bottleneck; recompress a .bz2 source once with `zstd -9 -T0`).
 flate2 = "1"
 bzip2 = "0.6"
-zstd = "0.13"
+zstd = "0.14"
 # Direct mmap for the compression probe (measure-first sizing of permutation indexes).
 memmap2 = { workspace = true }
 
@@ -229,7 +229,7 @@ memmap2 = { workspace = true }
 # link them. (hdt_cli.rs uses flate2 the same way under the `hdt` feature.)
 flate2 = "1"
 bzip2 = "0.6"
-zstd = "0.13"
+zstd = "0.14"
 # [OPUS-4.8] (sq-d7d) `bench`/`bench-mmap` emit a dependency-free JSON results document via
 # `--json <path>` (the runtime CLI adds NO serde dep — it hand-builds the JSON like
 # mpc_net_bench::cell_json). serde_json is a TEST-ONLY dep so cli_contract.rs can prove the
