@@ -124,7 +124,7 @@ rstar = "0.13"
 quick-xml = { version = "0.41", default-features = false }
 # Behind the `reproject` feature: pure-Rust proj4 (NOT the C `proj` binding —
 # the workspace's pure-Rust constraint holds). One transitive dep (thiserror).
-proj4rs = { version = "0.1", optional = true }
+proj4rs = { version = "0.2", optional = true }
 # Behind the `epsg_full` feature: the embedded EPSG registry (CC0-licensed
 # proj4 definition strings; no_std, zero transitive deps). The `wkt` strings
 # are compiled in alongside `proj4` because they carry the AXIS metadata the
