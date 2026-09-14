@@ -39,10 +39,10 @@
     "node": ">=18"
   },
   "devDependencies": {
-    "@rdfjs/dataset": "^2.0.2",
+    "@rdfjs/dataset": "^2.0.3",
     "@rdfjs/types": "^2.0.1",
-    "@types/node": "^26.1.2",
-    "n3": "^2.1.1",
+    "@types/node": "^26.5.1",
+    "n3": "^2.7.12",
     "typescript": "^6.0.3"
   }
 }
