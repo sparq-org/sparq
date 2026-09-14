@@ -281,7 +281,7 @@ jobs:
           # cache on its manifests so it is not shared with the workspace build.
           workspaces: "fuzz"
       - name: Install cargo-fuzz
-        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
+        uses: taiki-e/install-action@9534c84618278caac52cb373bb164ed464dbd8af # v2.87.11
         with:
           tool: cargo-fuzz
       # [FABLE-5] sq-0iqzw: persistent corpus. Without this, every run — including
