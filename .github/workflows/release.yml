@@ -27,7 +27,8 @@ name: release
 on:
   push:
     tags: ["v*"]
-  # Manual recovery must select an existing tag containing this workflow and guard.
+  # Manual recovery retries the workflow AT the tag; it cannot pick up workflow fixes
+  # merged later. See docs/release.md §3b before retrying a deterministic failure.
   workflow_dispatch:
     inputs:
       tag:
@@ -646,7 +647,8 @@ jobs:
           BUNDLE_DIR="gui/src-tauri/target/release/bundle"
           OUT="gui-bundles"
           mkdir -p "$OUT"
-          shopt -s nullglob globstar
+          # [GPT-6] macOS ships Bash 3.2. These one-directory globs need only nullglob.
+          shopt -s nullglob
 
           # matrix label -> ONE canonical arch token for the emitted asset name.
           case "${{ matrix.label }}" in
