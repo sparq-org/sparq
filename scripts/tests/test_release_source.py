@@ -93,6 +93,12 @@ class TestSourceIdentity(unittest.TestCase):
         with self.assertRaisesRegex(guard.SourceMismatch, "does not contain"):
             guard.validate_remote_tag(self.root, ".", "v0.1.3", self.sha)
 
+    def test_semver_build_metadata_tag_is_accepted(self):
+        tag = "v0.1.2+recovery.1"
+        self.git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                 "-c", "tag.gpgsign=false", "tag", "-a", tag, "-m", "fixture")
+        guard.validate_remote_tag(self.root, ".", tag, self.sha)
+
     def test_malformed_identity_refuses(self):
         for overrides in ({"tag": "v0.1.2\nversion=v9.9.9"}, {"commit": ""}):
             with self.subTest(overrides=overrides), self.assertRaises(guard.SourceMismatch):
@@ -262,6 +268,8 @@ class TestWorkflowWiring(unittest.TestCase):
             (publish["npm-eyereasoner-compat"],
              lambda step: "npm publish" in step.get("run", "")),
             (publish["npm-solid-server"], lambda step: "npm publish" in step.get("run", "")),
+            (publish["crates"],
+             lambda step: step.get("uses", "").startswith("actions/attest-build-provenance@")),
             (publish["pypi-publish"],
              lambda step: step.get("uses", "").startswith("pypa/gh-action-pypi-publish@")),
             (release["release"],

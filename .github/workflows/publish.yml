@@ -444,6 +444,10 @@ jobs:
             echo "::error::packaged count ${packaged} does not match expected count ${expected}"
             exit 1
           fi
+      - name: Reverify remote release tag immediately before attestation handoff
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name || github.ref_name }}
+        run: python3 scripts/check-release-source.py --tag "$RELEASE_TAG" --remote-tag origin
       # Same SHA-pinned attest action + version as release.yml — one signed SLSA provenance
       # predicate per .crate, binding its digest to this workflow run.
       - name: Attest crate-package provenance

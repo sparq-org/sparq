@@ -17,6 +17,13 @@ class SourceMismatch(ValueError):
     """The requested release does not identify the checked-out source."""
 
 
+RELEASE_TAG_RE = re.compile(
+    r"v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
+    r"(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
+    r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
+)
+
+
 def git(repo: Path, revision: str) -> str:
     return subprocess.check_output(
         ["git", "rev-parse", "--verify", revision], cwd=repo, text=True,
@@ -26,7 +33,7 @@ def git(repo: Path, revision: str) -> str:
 
 def validate_remote_tag(repo: Path, remote: str, tag: str, commit: str) -> None:
     """Fail if the public tag no longer resolves to the workflow build commit."""
-    if not re.fullmatch(r"v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?", tag):
+    if not RELEASE_TAG_RE.fullmatch(tag):
         raise SourceMismatch("release tag must be vX.Y.Z (optionally with a prerelease suffix)")
     if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", commit):
         raise SourceMismatch("the workflow build commit is missing or invalid")
@@ -46,7 +53,7 @@ def validate_remote_tag(repo: Path, remote: str, tag: str, commit: str) -> None:
 
 
 def validate(repo: Path, tag: str, ref: str, commit: str, npm_manifests: list[str]) -> None:
-    if not re.fullmatch(r"v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?", tag):
+    if not RELEASE_TAG_RE.fullmatch(tag):
         raise SourceMismatch("release tag must be vX.Y.Z (optionally with a prerelease suffix)")
     if ref != f"refs/tags/{tag}":
         raise SourceMismatch(f"run this workflow at the exact tag {tag}, not {ref!r}")
