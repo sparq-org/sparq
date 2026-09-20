@@ -19,7 +19,7 @@ primary_region = "iad"        # US East; change to the region nearest your users
 [build]
   image = "ghcr.io/sparq-org/sparq-server:latest"
   # Pin to a specific release tag in production:
-  #   image = "ghcr.io/sparq-org/sparq-server:0.1.0"
+  #   image = "ghcr.io/sparq-org/sparq-server:0.1.2"
 
 [env]
   # Override the image's open bind opt-in. Without a valid read+write token the server now
