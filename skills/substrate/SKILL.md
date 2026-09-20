@@ -23,7 +23,7 @@ re-exported inline-integer id helpers `inline_id_of_int`, `is_inline`, and `NO_I
 
 ```toml
 [dependencies]
-sparq-substrate = { version = "0.1.0", features = ["rows"] }
+sparq-substrate = { version = "0.1.2", features = ["rows"] }
 ```
 
 ```rust,ignore
@@ -101,7 +101,7 @@ A second, unrelated `xsd:float` defect is still open in a different crate:
 
 ```toml
 [dependencies]
-sparq-substrate = { version = "0.1.0", features = ["numeric"] }
+sparq-substrate = { version = "0.1.2", features = ["numeric"] }
 oxrdf = { version = "0.3", features = ["rdf-12"] }
 ```
 
@@ -160,7 +160,7 @@ closes most of the `hash_probe` descriptor-projection overhead the #1810 delta m
 
 ```toml
 [dependencies]
-sparq-substrate = { version = "0.1.0", features = ["join"] }  # implies "rows"
+sparq-substrate = { version = "0.1.2", features = ["join"] }  # implies "rows"
 ```
 
 ```rust,ignore
@@ -205,7 +205,7 @@ ORDER BY total order refines promoted ties and positions NaN.
 
 ```toml
 [dependencies]
-sparq-substrate = { version = "0.1.0", features = ["compare"] }
+sparq-substrate = { version = "0.1.2", features = ["compare"] }
 ```
 
 **Machine-checked order laws (Kani, sq-sqtk2.4 + sq-wjl8i).** `src/compare.rs` hosts a

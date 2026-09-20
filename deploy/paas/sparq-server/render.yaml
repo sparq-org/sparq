@@ -25,7 +25,7 @@ services:
     image:
       url: ghcr.io/sparq-org/sparq-server:latest
       # Pin to a specific release tag in production:
-      #   url: ghcr.io/sparq-org/sparq-server:0.1.0
+      #   url: ghcr.io/sparq-org/sparq-server:0.1.2
 
     # R7: health-check path for sparq-server.
     healthCheckPath: /health

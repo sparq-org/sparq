@@ -123,8 +123,8 @@ release-plz does not version npm workspaces. The public `@sparq-org/sparq`,
 their workspace records in the shared root `package-lock.json` must also move to **0.1.2**.
 The compatibility package skips
 0.1.1: its registry release is still 0.1.0, while its source has changed since that publish.
-PyPI's version is derived from the Cargo workspace. Until the separate reviewed version
-PR merges, versions remain at 0.1.1; that version PR is the release-triggering change.
+PyPI's version is derived from the Cargo workspace. This version PR prepares 0.1.2;
+its merge is the release-triggering change, not evidence of successful publication.
 
 ## 2. Changelog
 
@@ -586,10 +586,11 @@ python3 scripts/release-interval-guard.py --dry-run
 It prints the publishable crate list, each version, the dependency-first publish order and
 the cadence verdict it *would* return. It only ever runs `git`, never `cargo`.
 
-> [GPT-6] **Historical v0.1.1 source closure:** the tagged source contained 37
+> [GPT-6] **Closure reconciliation for v0.1.2:** the v0.1.1 tag contained 37
 > publishable crates in the `sparq` version group, but those crates were not published.
-> Re-run the guard on the final v0.1.2 version PR commit; its printed dependency-first order
-> is the bootstrap order in §4, and any mismatch blocks publication.
+> Re-run the guard on the final v0.1.2 version PR commit. It must still report all 37 crates,
+> and its printed dependency-first order is the exact bootstrap order in §4; any mismatch
+> blocks the crates.io flip.
 
 ### 8e. release-plz forge token — configured and verified (issue #3273)
 

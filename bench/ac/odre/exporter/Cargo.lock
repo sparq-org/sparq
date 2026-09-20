@@ -352,7 +352,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-acbench"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "oxrdf",
  "oxttl",
@@ -361,7 +361,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-core"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "hashbrown",
  "oxrdf",
@@ -371,7 +371,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-engine"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "oxiri",
  "oxrdf",
@@ -385,7 +385,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-policy"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "oxrdf",
  "sparq-core",
@@ -394,7 +394,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-substrate"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "hashbrown",
  "oxrdf",

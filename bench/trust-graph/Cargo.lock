@@ -926,7 +926,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-canon"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "digest 0.10.7",
  "oxrdf 0.2.4",
@@ -939,7 +939,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-core"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "hashbrown",
  "memchr",
@@ -951,7 +951,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-engine"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "md-5",
  "oxiri",
@@ -970,7 +970,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-reason"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "oxrdf 0.3.3",
  "regex",
@@ -981,7 +981,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-shacl"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "oxrdf 0.3.3",
  "oxttl 0.2.3",
@@ -994,7 +994,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-substrate"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "hashbrown",
  "oxrdf 0.3.3",
@@ -1005,7 +1005,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-trust"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "oxrdf 0.3.3",
  "sparq-canon",
@@ -1017,7 +1017,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-zk"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "ark-bn254",
  "ark-ec",

@@ -45,7 +45,7 @@
       "type": "string",
       "defaultValue": "ghcr.io/sparq-org/sparq-server:latest",
       "metadata": {
-        "description": "  Full image reference (registry/image:tag).\nDefaults to the canonical GHCR image. Pin a specific version in production\n(e.g. ghcr.io/sparq-org/sparq-server:0.1.0).\n"
+        "description": "  Full image reference (registry/image:tag).\nDefaults to the canonical GHCR image. Pin a specific version in production\n(e.g. ghcr.io/sparq-org/sparq-server:0.1.2).\n"
       }
     },
     "healthPath": {

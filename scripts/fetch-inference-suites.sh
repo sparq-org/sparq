@@ -47,8 +47,10 @@ echo "w3c/N3 pinned at $N3_PIN."
 # Pin = the Internet Archive snapshot timestamp (an immutable capture of
 # http://owl.semanticweb.org/exports/all.rdf, the full test-case export of the
 # OWL WG wiki referenced by the OWL 2 Conformance REC) + sha256 of the payload.
+# [GPT-6] Use HTTPS for the archive transport; the captured origin remains HTTP.
+# Plain HTTP can fail from CI runners even when this same snapshot serves over HTTPS.
 OWL_SNAPSHOT="20160703034201"
-OWL_URL="http://web.archive.org/web/${OWL_SNAPSHOT}if_/http://owl.semanticweb.org/exports/all.rdf"
+OWL_URL="https://web.archive.org/web/${OWL_SNAPSHOT}if_/http://owl.semanticweb.org/exports/all.rdf"
 OWL_SHA256="446e9eae0488e7eb58a8bd7db92b5fb358316c63e3cad1749103cd912664bee4"
 OWL_DEST="$ROOT/tests/w3c/owl2/all.rdf"
 

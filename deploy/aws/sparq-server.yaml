@@ -69,7 +69,7 @@ Parameters:
     Default: "ghcr.io/sparq-org/sparq-server:latest"
     Description: >
       Full image reference (registry/image:tag). Defaults to the canonical GHCR image.
-      Pin to a specific version tag in production (e.g. ghcr.io/sparq-org/sparq-server:0.1.0).
+      Pin to a specific version tag in production (e.g. ghcr.io/sparq-org/sparq-server:0.1.2).
     AllowedPattern: "^[a-z0-9._/-]+:[a-zA-Z0-9._-]+$"
 
   TaskCpu:
