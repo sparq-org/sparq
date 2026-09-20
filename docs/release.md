@@ -134,6 +134,10 @@ measurement (e.g. `bench/qlever-baselines.md`). Add the compare/tag link at the 
 
 ### v0.1.2 recovery sequence
 
+> [GPT-6] Historical preparation sequence: the immutable v0.1.2 tag now exists, but
+> its GitHub Release failed at GUI staging. Do not execute the remaining publication
+> steps below as recovery for that failure; use the decision and operator steps in §3b.
+
 1. Merge the source-integrity/recovery changes without changing versions. Prepare the
    separate manual 0.1.2 version PR, including the new changelog and lockfiles. Before its
    merge, complete CI and package-file inspection, re-check version availability and the
@@ -250,6 +254,63 @@ Why not a `dist`/`release` archive:
 crate + name; or a consumer needs a non-container deployment. The change is then small — add a
 package/bin selector to `build-matrix.yml` — and it should ship as a clearly EXPERIMENTAL-
 labelled OPT-IN artifact, not silently alongside the `sparq-cli` archives.
+
+## 3b. Recovering a failed immutable-tag release
+
+[GPT-6] **Retry infrastructure failures at the same tag; fix deterministic source or
+workflow failures in a new version.** The existing exact-tag `workflow_dispatch` is
+the reusable retry mechanism. It cannot import a workflow fix from a later commit.
+
+For v0.1.2, [run 35540471918](https://github.com/sparq-org/sparq/actions/runs/35540471918)
+failed because macOS Bash 3.2 rejects `shopt -s nullglob globstar`. The staging loop
+uses only single-directory globs, so `nullglob` alone preserves its file selection.
+Both macOS builds reached staging, but neither uploaded installers or their subject
+digests. The alias gate correctly refused the missing `sparq-gui-arm64-darwin.dmg`
+and `sparq-gui-x64-darwin.dmg`. Successful provenance over the other assets does not
+cover those missing installers. Both container publication workflows already succeeded;
+the GitHub Release did not exist when checked on 2026-09-21.
+
+Preserve the annotated tag object `05efded769a745d5b0e8d6d076425c171732ab1d`,
+which peels to commit `4b37254efe502f8a0aeba36076130ed9b44853ef`.
+Direct recovery of this tag is unavailable **under the current source/provenance
+contract**, for these independently checkable reasons:
+
+| Attempt | Why it cannot apply this fix safely |
+|---|---|
+| Rerun all or failed jobs | GitHub retains the original SHA/ref and workflow; the same staging command fails again. A full rerun also repeats completed container publication. |
+| Dispatch `release.yml --ref v0.1.2 -f tag=v0.1.2` | Selects the workflow stored at v0.1.2, including the broken command. |
+| Dispatch at main, checking out v0.1.2 | Violates the enforced equality of event tag, workflow SHA, tag commit, and checkout HEAD. |
+| Build elsewhere and combine old/new artifacts | The pinned generic generator derives source identity from the caller's workflow context; it has no source-commit override. The existing bundle cannot attest new DMG digests. |
+| Upload manually, suppress aliases, or relabel newer binaries | Bypasses completeness, source identity, or isolated provenance; not an acceptable recovery. |
+
+GitHub documents [rerun identity](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/re-run-workflows-and-jobs)
+and [workflow revision selection](https://docs.github.com/en/actions/concepts/workflows-and-actions/workflows).
+The pinned generator's [input contract](https://github.com/slsa-framework/slsa-github-generator/blob/v2.1.0/.github/workflows/generator_generic_slsa3.yml)
+and [attestation implementation](https://github.com/slsa-framework/slsa-github-generator/blob/v2.1.0/internal/builders/generic/attest.go)
+explain why a new checkout alone cannot preserve the old source identity. `upload-tag-name`
+selects a publication destination, not a provenance source. A distinct recovery builder
+would need a separately reviewed trust model and verifier policy; it is not a retry switch.
+
+After the staging fix merges, the operator should:
+
+1. Leave v0.1.2 and its existing container images/provenance untouched. Do not rerun
+   run 35540471918 or dispatch its release workflow as a way to load this fix.
+2. Prepare a separate release version PR for the next unused version (normally 0.1.3),
+   following §§1–2 for manifests, lockfiles, changelog and release notes. Explain that
+   v0.1.2 had container publication but no complete GitHub Release. Check registry state
+   and the release interval again; do not assume any version is available.
+3. Complete the repository's merge gates and deliberate release review before merging
+   that version PR. Its new immutable tag must contain this fix and run the normal
+   pipeline, rebuilding all artifacts and generating both provenance bundles from that
+   same commit. Let both container lanes publish the new version normally.
+4. Require all site aliases, checksums, and `verify published provenance` to pass, then
+   follow §§4, 7–8 for the selected registry publication and evidence recording using
+   the new tag. Do not copy or rename v0.1.2 artifacts into the new release.
+
+For future transient failures, inspect completed publication lanes before choosing a
+targeted rerun; do not blindly republish successful lanes. Exact-tag dispatch starts the
+whole pipeline, including containers. Retain source verification, cadence, alias checks,
+and both isolated provenance dependencies in every recovery path.
 
 ## 4. crates.io publication
 
