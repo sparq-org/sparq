@@ -240,6 +240,7 @@ test("state-B: latest-404 + list-empty — all controls degrade to 'No release y
   // [GPT-6] Registry installation paths remain discoverable independently of GitHub releases.
   const packages = page.getByRole("region", { name: "Package managers" });
   await expect(packages).toBeVisible();
+  await expect(packages.locator("pre[tabindex='0'][aria-label$='install commands']")).toHaveCount(5);
   const registryLinks = [
     ["sparq-cli on crates.io", "https://crates.io/crates/sparq-cli"],
     ["Browse the sparq crate family", "https://crates.io/search?q=sparq-"],
@@ -251,7 +252,7 @@ test("state-B: latest-404 + list-empty — all controls degrade to 'No release y
   for (const [name, href] of registryLinks) {
     const link = packages.getByRole("link", { name, exact: true });
     await expect(link).toHaveAttribute("href", href);
-    await expect(link).toHaveAttribute("rel", "noopener noreferrer");
+    await expect(link).not.toHaveAttribute("target", "_blank");
   }
   await expect(packages.getByText("python -m pip install sparq-rdf", { exact: true })).toBeVisible();
   await expect(packages.getByText(/use import sparq in Python/)).toBeVisible();

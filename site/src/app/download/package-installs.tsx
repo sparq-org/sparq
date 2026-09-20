@@ -56,7 +56,11 @@ export function PackageInstalls() {
               <p className="text-sm text-muted-foreground">{description}</p>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
-              <pre className="overflow-x-auto rounded-md bg-muted px-3 py-2 text-xs">
+              <pre
+                tabIndex={0}
+                aria-label={`${title} install commands`}
+                className="overflow-x-auto rounded-md bg-muted px-3 py-2 text-xs"
+              >
                 <code>{command}</code>
               </pre>
               <ul className="space-y-1">
@@ -64,7 +68,6 @@ export function PackageInstalls() {
                   <li key={href}>
                     <a
                       href={href}
-                      rel="noopener noreferrer"
                       className="break-words text-primary underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-4"
                     >
                       {label}
