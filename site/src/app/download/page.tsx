@@ -18,5 +18,9 @@ export const metadata: Metadata = {
 };
 
 export default function DownloadPage() {
-  return <DownloadClient packages={<PackageInstalls />} />;
+  return (
+    <DownloadClient>
+      <PackageInstalls />
+    </DownloadClient>
+  );
 }

@@ -796,7 +796,7 @@ function CliServerCard({
 
 // ---- page --------------------------------------------------------------------------------------
 
-export function DownloadClient({ packages }: { packages?: React.ReactNode }) {
+export function DownloadClient({ children }: { children?: React.ReactNode }) {
   // null until hydrated → SSR renders the full grid with nothing promoted (no hydration mismatch).
   const [detected, setDetected] = React.useState<OsKey | null>(null);
   const release = useLatestRelease();
@@ -838,7 +838,7 @@ export function DownloadClient({ packages }: { packages?: React.ReactNode }) {
         </p>
       </header>
 
-      {packages}
+      {children}
 
       {/* Unsigned-build honesty banner — front and centre in BOTH states, never buried. */}
       <div
