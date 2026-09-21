@@ -15,6 +15,8 @@ and require the cadence guard and hosted release verification to pass.
 
 ### Fixed
 
+- [GPT-6] Already-expired or cancelled SELECT-JSON requests refuse before scanning,
+  emitting output, or waiting for unrelated Rayon pool work.
 - GUI installer staging uses Bash 3.2-compatible glob options on macOS. The shared
   staging step is exercised by hermetic fixtures for every desktop platform; empty
   output still fails and the full release alias/provenance contracts remain enforced.

@@ -1,5 +1,5 @@
 {
   "pr": 6573,
   "date": "2026-09-21",
-  "reason": "[GPT-6] Intentional release metadata change: inherited workspace package identities and local lock records advance from 0.1.2 to 0.1.3. Rust implementation, default features, and external dependencies are unchanged. Version-dependent build metadata may change feature-OFF WASM bytes; hosted comparison and the separate size ratchet remain required, with no local byte-size claim."
+  "reason": "[GPT-6] Intentional release metadata change: inherited workspace package identities and local lock records advance from 0.1.2 to 0.1.3. The SELECT-JSON evaluator also checks its budget at entry so expired or cancelled requests refuse before scanning, emitting output, or waiting on Rayon; this correctness fix is compiled with features OFF as well. Default features and external dependencies are unchanged. Version metadata and the entry check may change feature-OFF WASM bytes; hosted comparison and the separate size ratchet remain required, with no local byte-size claim."
 }
