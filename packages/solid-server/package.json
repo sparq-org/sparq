@@ -34,7 +34,7 @@
     "node": ">=18"
   },
   "dependencies": {
-    "@solid/access-token-verifier": "^2.1.1"
+    "@solid/access-token-verifier": "^2.1.2"
   },
   "peerDependencies": {
     "fastify": "^4.28.0 || ^5.0.0"
@@ -45,9 +45,9 @@
     }
   },
   "devDependencies": {
-    "fastify": "^5.0.0",
+    "fastify": "^5.12.5",
     "fastify-v4": "npm:fastify@^4.28.0",
-    "jose": "^6.2.4"
+    "jose": "^6.2.12"
   },
   "repository": {
     "type": "git",
