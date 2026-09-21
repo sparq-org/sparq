@@ -139,8 +139,9 @@ measurement (e.g. `bench/qlever-baselines.md`). Add the compare/tag link at the 
 
 > [GPT-6] v0.1.3 is the new candidate after v0.1.2 failed at GUI staging. Preserve
 > the old tag and containers; do not rerun its workflow. See §3b for the diagnosis.
-> The 24-hour cadence guard must pass before this version PR merges; see the
-> dated [preflight evidence](release-preflight-v0.1.3.json).
+> The cadence guard must pass before this version PR merges, including the narrow
+> maintainer-authorized v0.1.3 exception in §8d. See the dated
+> [preflight evidence](release-preflight-v0.1.3.json).
 
 1. PR #6544 has merged the Bash 3.2 staging fix. Prepare the separate manual 0.1.3
    version PR, including the new changelog and lockfiles. Before its
@@ -192,7 +193,8 @@ Pushing the tag triggers `.github/workflows/release.yml`:
    match. A branch dispatch naming an older tag refuses before any build or publication.
    Then the job runs
    `scripts/release-interval-guard.py --enforce --released-tag vX.Y.Z` before anything is
-   built. If the previous release was less than 24h ago the job fails and **every** job
+   built. Outside the fixed v0.1.3 recovery exception (§8d), if the previous release
+   was less than 24h ago the job fails and **every** job
    below it is blocked (they all depend on `setup`). See §8d — this is the tag-push half
    of the at-most-one-release-per-day policy. Keep the tag immutable. After the window,
    retry at that same tag only if it already contains working release logic and nothing
@@ -578,11 +580,38 @@ tag-cutting). This is the "config-flip" the design record (§6 item 4) calls "th
 
 ### 8d. Publish-rate protections (issues #1135, #2552) — what stops a runaway release
 
-**The policy: at most one release per day.** `MIN_RELEASE_INTERVAL` in
+**The normal policy: at most one release per day.** `MIN_RELEASE_INTERVAL` in
 `scripts/release-interval-guard.py` is the single constant that states it (24h), and it is
 enforced at **both** points a release can start — the Release-PR path (`release-plz.yml`)
-and the `v*` tag push (`release.yml`). There is no override flag: releasing inside the
-window is done by hand, deliberately.
+and the `v*` tag push (`release.yml`). There is no override flag or environment escape.
+
+[GPT-6] **One maintainer-authorized exception, PR #6573:** the complete-release
+candidate v0.1.3 may recover the incomplete v0.1.2 attempt inside that interval.
+The exception is fixed in code and requires every condition below, re-read on both
+the release-plz pre-tag path and `release.yml`'s tag-push path:
+
+- Workspace version is exactly `0.1.3`; an explicit released tag must be `v0.1.3`.
+  Before tag creation, that target must be absent locally and remotely. On tag push,
+  it must exist locally and remotely with matching object/commit, dated no earlier
+  than the predecessor and no later than the current clock.
+- Full local history identifies v0.1.2 as the newest predecessor, created at
+  `2026-09-20T22:03:11Z`, with annotated tag object
+  `05efded769a745d5b0e8d6d076425c171732ab1d` and commit
+  `4b37254efe502f8a0aeba36076130ed9b44853ef`.
+- The canonical GitHub repository's entire `v*` tag inventory must match the pinned
+  four historical tags and their seven object/peeled records, plus only v0.1.3 on
+  its tag-push path. Missing, changed, extra or even backdated new tags refuse.
+  Local tag names must match that inventory; future timestamps refuse.
+- Every publishable crate must return a definitive crates.io **404**. Any registry
+  publication, even an old one, or a 200 response with an empty/malformed versions
+  list invalidates recovery. Unreadable Git state or indeterminate HTTP reads refuse.
+
+`MIN_RELEASE_INTERVAL` remains 24 hours for v0.1.4 and every other version. The
+already-tagged release-plz no-op remains a no-op, not an exception-based publication.
+The rationale is to build the corrected source under a new identity without mutating
+or rerunning v0.1.2 or its completed containers. No source/provenance/alias check is
+relaxed. A partial crates.io bootstrap invalidates this recovery path: inspect any
+failed publication before retrying. Do not broaden the predicate to make it pass.
 
 **A crates.io version can never be unpublished.** Four protections stand between an
 automated pipeline and the registry. All four are already in place; none of them is what
@@ -612,7 +641,8 @@ you flip.
    crates.io publication)`. It refuses on any indeterminacy — shallow checkout, unreadable
    tag list, unparseable date, unreachable crates.io, a future-dated last release. A
    definitive crates.io 404 is the only accepted "never published" answer. There is no
-   override flag: publishing inside the window is done by hand, consciously.
+   override flag; only the fixed v0.1.3 recovery evidence above can admit a shorter
+   interval. Ordinary publication still requires the full 24 hours.
 3. **The same interval, on the tag-push path** (issue #2552). Protection 2 only covers
    releases that go through the Release PR. §3's canonical instruction — push a `vX.Y.Z`
    tag — fires `release.yml` **directly**, which was previously uncadenced: a hand-pushed

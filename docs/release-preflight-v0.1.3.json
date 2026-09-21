@@ -302,11 +302,38 @@
   },
   "cadence": {
     "command": "python3 scripts/release-interval-guard.py --enforce --released-tag v0.1.3",
-    "verdict": "refused",
     "minimum_hours": 24,
     "latest_tag_created_at": "2026-09-20T22:03:11Z",
-    "earliest_if_no_newer_release": "2026-09-21T22:03:11Z",
-    "requires_fresh_check_before_merge": true
+    "requires_fresh_check_before_merge": true,
+    "verdict_before_exception_authorization": "refused",
+    "ordinary_policy_earliest_if_no_newer_release": "2026-09-21T22:03:11Z",
+    "recovery_exception": {
+      "authorization": "Maintainer explicitly authorized a one-time cadence exception for v0.1.3 only in PR #6573 preparation, 2026-09-21.",
+      "workspace_version": "0.1.3",
+      "released_tag": "absent (pre-tag) or exactly v0.1.3 (tag-push)",
+      "predecessor_tag": "v0.1.2",
+      "predecessor_created_at": "2026-09-20T22:03:11Z",
+      "pinned_remote_refs": {
+        "refs/tags/v0.1.0": "9692ce389b0b8243068fffabf278763f8c1dc280",
+        "refs/tags/v0.1.0^{}": "60f21e1dcee763668d490ba7981487f95a1e7c7d",
+        "refs/tags/v0.1.0-dev.3": "0bc4412d13da35966ce6e3acf75f4d6d06aa5767",
+        "refs/tags/v0.1.1": "9b93b277d6700e05f1c2d4ce3ee4ca1923416bc8",
+        "refs/tags/v0.1.1^{}": "1a63aa7c638bd80da55f1811d5fb97e8d014f631",
+        "refs/tags/v0.1.2": "05efded769a745d5b0e8d6d076425c171732ab1d",
+        "refs/tags/v0.1.2^{}": "4b37254efe502f8a0aeba36076130ed9b44853ef"
+      },
+      "git_requirements": "Non-shallow local history, exact predecessor inventory and timestamp, local predecessor object/commit pinned; canonical remote inventory exactly matches pinned refs plus only the matching target on tag-push; no future or backdated target.",
+      "registry_requirement": "Every derived publishable crate must return authoritative HTTP 404; any 200 or indeterminate read refuses, including partial bootstrap.",
+      "normal_interval_hours": 24,
+      "other_versions": "No exception, including v0.1.4.",
+      "live_pre_tag_command": "python3 scripts/release-interval-guard.py --enforce",
+      "live_pre_tag_exit_code": 0,
+      "live_pre_tag_verdict": "ALLOW \u2014 maintainer-authorized v0.1.3 recovery; pinned tag evidence verified and every public crate absent",
+      "result_recorded_at": "2026-09-21T12:27:23.747666+00:00",
+      "tag_push_validation": "Hermetic exact-state fixture passes; no real target tag created or workflow dispatched.",
+      "effects": "Read-only checks only. Does not mutate/rerun v0.1.2 or existing containers.",
+      "review": "Independent GPT-5.5 code-review-and-quality review found no required changes; 86 guard tests passed."
+    }
   },
   "publication": "not performed; existing v0.1.2 containers preserved",
   "local_validation": {
@@ -327,7 +354,7 @@
       "limitation": "source inventory only; generated JS/WASM artifacts absent locally and must be built/inspected in hosted checks"
     },
     "source_guard_tests": 21,
-    "publish_guard_tests": 71,
+    "publish_guard_tests": 86,
     "gui_staging_tests": 7,
     "slsa_contract_tests": 4,
     "container_contract_tests": 12,

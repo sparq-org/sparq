@@ -14,9 +14,12 @@ from v0.1.2; the private LWS crate retains its independent Cargo version. See th
 
 The dated [preflight record](release-preflight-v0.1.3.json) records version
 availability, not reservation or publication authorization. At preparation time,
-the cadence guard refused: the earliest possible release is 2026-09-21 at
-22:03:11 UTC, provided a fresh check confirms no newer release. Keep the version
-PR in draft pending operator review and the hosted checks.
+the normal cadence guard refused until 2026-09-21 at 22:03:11 UTC. The maintainer
+subsequently authorized the fixed v0.1.3 recovery exception in the runbook (§8d):
+it requires the exact immutable predecessor/tag inventory and definitive absence of
+every publishable crate on crates.io. Fresh authoritative reads must pass; v0.1.4
+and other versions retain the full 24-hour interval. Keep the version PR in draft
+pending operator review and the hosted checks.
 
 After the corresponding publications and attestations have been verified:
 

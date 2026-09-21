@@ -29,6 +29,9 @@ and require the cadence guard and hosted release verification to pass.
 - Release preparation and installation documentation now distinguish the incomplete
   v0.1.2 attempt from this new candidate. The existing v0.1.2 tag, containers and
   provenance remain intact; they are not rebuilt or renamed as v0.1.3 artifacts.
+- A maintainer-authorized cadence exception admits only the v0.1.3 recovery with
+  pinned predecessor/tag evidence and definitive crates.io absence. All other
+  versions retain the 24-hour minimum, and indeterminate reads still refuse.
 
 ## [0.1.2] - 2026-09-20
 
