@@ -302,7 +302,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c60c79628e9a97cb90d7a0dc3e944f216a902f837d4ecabc14d524bddbbc137"
 dependencies = [
  "ahash",
- "arrow-buffer",
+ "arrow-buffer 59.3.0",
  "arrow-data",
  "arrow-schema",
  "chrono",
@@ -315,13 +315,25 @@ dependencies = [
 
 [[package]]
 name = "arrow-buffer"
-version = "59.0.0"
+version = "59.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6026f638c400e9878c1b1cc05c3cfd46fbf381285916ab408678701c1df46c1a"
+checksum = "097d193003ce7995d5d087089069ec2a6e0187faf5a6f8c9f38af2645d987182"
 dependencies = [
  "bytes",
  "half",
- "num-bigint 0.4.6",
+ "num-bigint 0.5.1",
+ "num-traits",
+]
+
+[[package]]
+name = "arrow-buffer"
+version = "60.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c7235b863533e9db3ab86905b4521251de11226275b436ff3cb2d0010558d1c5"
+dependencies = [
+ "bytes",
+ "half",
+ "num-bigint 0.5.1",
  "num-traits",
 ]
 
@@ -331,7 +343,7 @@ version = "59.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7bd568aa70c4ec5947027b0d5caee94877433b661a0bb9e8ddceeeb5f0c9b1ab"
 dependencies = [
- "arrow-buffer",
+ "arrow-buffer 59.3.0",
  "arrow-schema",
  "half",
  "num-integer",
@@ -345,7 +357,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e57ee4d470eab1a021bc4b63fa2b2c15d572892bf227b0a982d3b755a6c662b5"
 dependencies = [
  "arrow-array",
- "arrow-buffer",
+ "arrow-buffer 59.3.0",
  "arrow-data",
  "arrow-schema",
  "arrow-select",
@@ -369,7 +381,7 @@ checksum = "067a67e0361f6c31f4a7248759f36ca4ca71b187a941ed4d49da1c7d3d4db624"
 dependencies = [
  "ahash",
  "arrow-array",
- "arrow-buffer",
+ "arrow-buffer 59.3.0",
  "arrow-data",
  "arrow-schema",
  "num-traits",
@@ -3526,7 +3538,7 @@ checksum = "970dff83e97d953c827ae8176f6bf4e9f77bf62daacc01ec5df348ec5eacd913"
 dependencies = [
  "ahash",
  "arrow-array",
- "arrow-buffer",
+ "arrow-buffer 59.3.0",
  "arrow-data",
  "arrow-ipc",
  "arrow-schema",
@@ -4911,7 +4923,7 @@ name = "sparq-arrow"
 version = "0.1.2"
 dependencies = [
  "arrow-array",
- "arrow-buffer",
+ "arrow-buffer 60.0.0",
  "arrow-ipc",
  "arrow-schema",
  "bytes",

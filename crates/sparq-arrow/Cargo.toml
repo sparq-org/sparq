@@ -68,7 +68,7 @@ arrow-array = { version = "59", optional = true }
 arrow-schema = { version = "59", optional = true }
 # `NullBuffer` for the per-row struct validity (unbound cells). It is `arrow-array`'s
 # own dependency; named directly because the code references `arrow_buffer::NullBuffer`.
-arrow-buffer = { version = "59", optional = true }
+arrow-buffer = { version = "60", optional = true }
 # Arrow IPC stream serialization only; the `arrow` feature supplies RecordBatch values.
 arrow-ipc = { version = "59", optional = true }
 # Parquet serialization only; the `arrow` feature provides RecordBatch integration.
