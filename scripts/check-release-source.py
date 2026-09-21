@@ -81,6 +81,13 @@ def validate(repo: Path, tag: str, ref: str, commit: str, npm_manifests: list[st
         "version" not in project and "version" in project.get("dynamic", [])
     ):
         raise SourceMismatch(f"PyPI project version does not match {tag}")
+    # [GPT-6] Installer filenames alone must not disguise stale desktop metadata.
+    desktop = tomllib.loads((repo / "gui/src-tauri/Cargo.toml").read_text(encoding="utf-8"))
+    if desktop["package"].get("version") != version:
+        raise SourceMismatch(f"gui/src-tauri/Cargo.toml version does not match {tag}")
+    tauri = json.loads((repo / "gui/src-tauri/tauri.conf.json").read_text(encoding="utf-8"))
+    if tauri.get("version") != version:
+        raise SourceMismatch(f"gui/src-tauri/tauri.conf.json version does not match {tag}")
     lock_workspaces = {}
     if npm_manifests:
         package_lock = json.loads((repo / "package-lock.json").read_text(encoding="utf-8"))
@@ -113,7 +120,7 @@ def main() -> int:
     # release.yml emits the primary npm client's SBOM as well as Rust artifacts.
     # publish.yml validates only selected npm jobs; the optional compatibility
     # package has its own version and must not block an unrelated publication.
-    manifests = ["js/package.json", "packages/solid-server/package.json"]
+    manifests = ["js/package.json", "packages/solid-server/package.json", "gui/app/package.json"]
     if args.publish:
         manifests = []
         for flag, manifest in (

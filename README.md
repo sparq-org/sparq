@@ -47,30 +47,31 @@ JavaScript/WASM.
 
 <!-- [GPT-6] Shared with the mdBook install page; keep this block link-portable. -->
 <!-- ANCHOR: release-install -->
-### v0.1.2 release install paths
+### v0.1.3 release install paths
 
-These are the install commands for the planned `v0.1.2` release. Use them only after
+These are the install commands for the planned `v0.1.3` release. Use them only after
 the tagged release and corresponding registry publications have succeeded; the
-incomplete `v0.1.1` bootstrap is not a complete release. Until then, build from source.
+earlier `v0.1.1` and `v0.1.2` attempts did not produce a complete GitHub Release.
+Until then, build from source.
 
 ```sh
 # Rust CLI and HTTP server
-cargo install sparq-cli --version 0.1.2
-cargo install sparq-server --version 0.1.2
+cargo install sparq-cli --version 0.1.3
+cargo install sparq-server --version 0.1.3
 
 # Rust libraries (run inside your Cargo project)
-cargo add sparq-core@0.1.2 sparq-engine@0.1.2
+cargo add sparq-core@0.1.3 sparq-engine@0.1.3
 
 # Python: distribution name sparq-rdf, import name sparq
-python -m pip install sparq-rdf==0.1.2
+python -m pip install sparq-rdf==0.1.3
 python -c 'import sparq'
 
 # JavaScript/WASM RDF store
-npm install @sparq-org/sparq@0.1.2
+npm install @sparq-org/sparq@0.1.3
 # Loopback-only Solid/LDP development host (not a production server)
-npm install @sparq-org/solid-server@0.1.2
+npm install @sparq-org/solid-server@0.1.3
 # eye-js / eyereasoner migration API backed by sparq's N3 reasoner
-npm install @sparq-org/eyereasoner-compat@0.1.2
+npm install @sparq-org/eyereasoner-compat@0.1.3
 ```
 <!-- ANCHOR_END: release-install -->
 

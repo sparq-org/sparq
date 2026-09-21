@@ -1,0 +1,354 @@
+{
+  "checked_at": "2026-09-21T11:55:31.072815+00:00",
+  "version": "0.1.3",
+  "results": [
+    {
+      "registry": "crates.io",
+      "package": "sparq-core",
+      "url": "https://crates.io/api/v1/crates/sparq-core/0.1.3",
+      "status": 404,
+      "unused": true
+    },
+    {
+      "registry": "crates.io",
+      "package": "sparq-engine",
+      "url": "https://crates.io/api/v1/crates/sparq-engine/0.1.3",
+      "status": 404,
+      "unused": true
+    },
+    {
+      "registry": "crates.io",
+      "package": "sparq-cli",
+      "url": "https://crates.io/api/v1/crates/sparq-cli/0.1.3",
+      "status": 404,
+      "unused": true
+    },
+    {
+      "registry": "crates.io",
+      "package": "sparq-reason",
+      "url": "https://crates.io/api/v1/crates/sparq-reason/0.1.3",
+      "status": 404,
+      "unused": true
+    },
+    {
+      "registry": "crates.io",
+      "package": "sparq-server",
+      "url": "https://crates.io/api/v1/crates/sparq-server/0.1.3",
+      "status": 404,
+      "unused": true
+    },
+    {
+      "registry": "crates.io",
+      "package": "sparq-http3",
+      "url": "https://crates.io/api/v1/crates/sparq-http3/0.1.3",
+      "status": 404,
+      "unused": true
+    },
+    {
+      "registry": "crates.io",
+      "package": "sparq-serve",
+      "url": "https://crates.io/api/v1/crates/sparq-serve/0.1.3",
+      "status": 404,
+      "unused": true
+    },
+    {
+      "registry": "crates.io",
+      "package": "sparq-shacl",
+      "url": "https://crates.io/api/v1/crates/sparq-shacl/0.1.3",
+      "status": 404,
+      "unused": true
+    },
+    {
+      "registry": "crates.io",
+      "package": "sparq-hdt",
+      "url": "https://crates.io/api/v1/crates/sparq-hdt/0.1.3",
+      "status": 404,
+      "unused": true
+    },
+    {
+      "registry": "crates.io",
+      "package": "sparq-sim",
+      "url": "https://crates.io/api/v1/crates/sparq-sim/0.1.3",
+      "status": 404,
+      "unused": true
+    },
+    {
+      "registry": "crates.io",
+      "package": "sparq-geo",
+      "url": "https://crates.io/api/v1/crates/sparq-geo/0.1.3",
+      "status": 404,
+      "unused": true
+    },
+    {
+      "registry": "crates.io",
+      "package": "sparq-introspect",
+      "url": "https://crates.io/api/v1/crates/sparq-introspect/0.1.3",
+      "status": 404,
+      "unused": true
+    },
+    {
+      "registry": "crates.io",
+      "package": "sparq-nlq",
+      "url": "https://crates.io/api/v1/crates/sparq-nlq/0.1.3",
+      "status": 404,
+      "unused": true
+    },
+    {
+      "registry": "crates.io",
+      "package": "sparq-vectors",
+      "url": "https://crates.io/api/v1/crates/sparq-vectors/0.1.3",
+      "status": 404,
+      "unused": true
+    },
+    {
+      "registry": "crates.io",
+      "package": "sparq-rsp",
+      "url": "https://crates.io/api/v1/crates/sparq-rsp/0.1.3",
+      "status": 404,
+      "unused": true
+    },
+    {
+      "registry": "crates.io",
+      "package": "sparq-solid",
+      "url": "https://crates.io/api/v1/crates/sparq-solid/0.1.3",
+      "status": 404,
+      "unused": true
+    },
+    {
+      "registry": "crates.io",
+      "package": "sparq-policy",
+      "url": "https://crates.io/api/v1/crates/sparq-policy/0.1.3",
+      "status": 404,
+      "unused": true
+    },
+    {
+      "registry": "crates.io",
+      "package": "sparq-text",
+      "url": "https://crates.io/api/v1/crates/sparq-text/0.1.3",
+      "status": 404,
+      "unused": true
+    },
+    {
+      "registry": "crates.io",
+      "package": "sparq-canon",
+      "url": "https://crates.io/api/v1/crates/sparq-canon/0.1.3",
+      "status": 404,
+      "unused": true
+    },
+    {
+      "registry": "crates.io",
+      "package": "sparq-zk",
+      "url": "https://crates.io/api/v1/crates/sparq-zk/0.1.3",
+      "status": 404,
+      "unused": true
+    },
+    {
+      "registry": "crates.io",
+      "package": "sparq-fedplan",
+      "url": "https://crates.io/api/v1/crates/sparq-fedplan/0.1.3",
+      "status": 404,
+      "unused": true
+    },
+    {
+      "registry": "crates.io",
+      "package": "sparq-algos",
+      "url": "https://crates.io/api/v1/crates/sparq-algos/0.1.3",
+      "status": 404,
+      "unused": true
+    },
+    {
+      "registry": "crates.io",
+      "package": "sparq-trust",
+      "url": "https://crates.io/api/v1/crates/sparq-trust/0.1.3",
+      "status": 404,
+      "unused": true
+    },
+    {
+      "registry": "crates.io",
+      "package": "sparq-terse",
+      "url": "https://crates.io/api/v1/crates/sparq-terse/0.1.3",
+      "status": 404,
+      "unused": true
+    },
+    {
+      "registry": "crates.io",
+      "package": "sparq-reason-el",
+      "url": "https://crates.io/api/v1/crates/sparq-reason-el/0.1.3",
+      "status": 404,
+      "unused": true
+    },
+    {
+      "registry": "crates.io",
+      "package": "sparq-reason-ql",
+      "url": "https://crates.io/api/v1/crates/sparq-reason-ql/0.1.3",
+      "status": 404,
+      "unused": true
+    },
+    {
+      "registry": "crates.io",
+      "package": "sparq-vc",
+      "url": "https://crates.io/api/v1/crates/sparq-vc/0.1.3",
+      "status": 404,
+      "unused": true
+    },
+    {
+      "registry": "crates.io",
+      "package": "sparq-mcp",
+      "url": "https://crates.io/api/v1/crates/sparq-mcp/0.1.3",
+      "status": 404,
+      "unused": true
+    },
+    {
+      "registry": "crates.io",
+      "package": "sparq-arrow",
+      "url": "https://crates.io/api/v1/crates/sparq-arrow/0.1.3",
+      "status": 404,
+      "unused": true
+    },
+    {
+      "registry": "crates.io",
+      "package": "sparq-substrate",
+      "url": "https://crates.io/api/v1/crates/sparq-substrate/0.1.3",
+      "status": 404,
+      "unused": true
+    },
+    {
+      "registry": "crates.io",
+      "package": "sparq-jsonld",
+      "url": "https://crates.io/api/v1/crates/sparq-jsonld/0.1.3",
+      "status": 404,
+      "unused": true
+    },
+    {
+      "registry": "crates.io",
+      "package": "sparq-engine-serialize",
+      "url": "https://crates.io/api/v1/crates/sparq-engine-serialize/0.1.3",
+      "status": 404,
+      "unused": true
+    },
+    {
+      "registry": "crates.io",
+      "package": "sparq-engine-service",
+      "url": "https://crates.io/api/v1/crates/sparq-engine-service/0.1.3",
+      "status": 404,
+      "unused": true
+    },
+    {
+      "registry": "crates.io",
+      "package": "sparq-forms",
+      "url": "https://crates.io/api/v1/crates/sparq-forms/0.1.3",
+      "status": 404,
+      "unused": true
+    },
+    {
+      "registry": "crates.io",
+      "package": "sparq-wrapper",
+      "url": "https://crates.io/api/v1/crates/sparq-wrapper/0.1.3",
+      "status": 404,
+      "unused": true
+    },
+    {
+      "registry": "crates.io",
+      "package": "sparq-shaclc",
+      "url": "https://crates.io/api/v1/crates/sparq-shaclc/0.1.3",
+      "status": 404,
+      "unused": true
+    },
+    {
+      "registry": "crates.io",
+      "package": "sparq-secprop-vocab",
+      "url": "https://crates.io/api/v1/crates/sparq-secprop-vocab/0.1.3",
+      "status": 404,
+      "unused": true
+    },
+    {
+      "registry": "npm",
+      "package": "@sparq-org/sparq",
+      "url": "https://registry.npmjs.org/%40sparq-org%2Fsparq/0.1.3",
+      "status": 404,
+      "unused": true
+    },
+    {
+      "registry": "npm",
+      "package": "@sparq-org/solid-server",
+      "url": "https://registry.npmjs.org/%40sparq-org%2Fsolid-server/0.1.3",
+      "status": 404,
+      "unused": true
+    },
+    {
+      "registry": "npm",
+      "package": "@sparq-org/eyereasoner-compat",
+      "url": "https://registry.npmjs.org/%40sparq-org%2Feyereasoner-compat/0.1.3",
+      "status": 404,
+      "unused": true
+    },
+    {
+      "registry": "PyPI",
+      "package": "sparq-rdf",
+      "url": "https://pypi.org/pypi/sparq-rdf/0.1.3/json",
+      "status": 404,
+      "unused": true
+    }
+  ],
+  "kind": "release-preparation snapshot; not a reservation, attestation, or publish authorization",
+  "git": {
+    "base_commit": "424c55c21435d660c4a30820afd4923dd9b78781",
+    "candidate_tag": "v0.1.3",
+    "candidate_tag_present": false,
+    "candidate_github_release_present": false,
+    "preserved_tag": "v0.1.2",
+    "preserved_tag_object": "05efded769a745d5b0e8d6d076425c171732ab1d",
+    "preserved_tag_commit": "4b37254efe502f8a0aeba36076130ed9b44853ef"
+  },
+  "cadence": {
+    "command": "python3 scripts/release-interval-guard.py --enforce --released-tag v0.1.3",
+    "verdict": "refused",
+    "minimum_hours": 24,
+    "latest_tag_created_at": "2026-09-20T22:03:11Z",
+    "earliest_if_no_newer_release": "2026-09-21T22:03:11Z",
+    "requires_fresh_check_before_merge": true
+  },
+  "publication": "not performed; existing v0.1.2 containers preserved",
+  "local_validation": {
+    "inherited_workspace_packages": 67,
+    "updated_cargo_lockfiles": 21,
+    "validated_local_lock_records": 173,
+    "external_cargo_dependency_changes": 0,
+    "external_npm_dependency_changes": 0,
+    "cargo_metadata": "root --locked --offline; desktop --locked --offline --filter-platform aarch64-apple-darwin passed",
+    "cargo_package_lists": {
+      "command": "cargo package --list --allow-dirty --locked --offline -p <crate>",
+      "passed": 37,
+      "limitation": "file inventory only, not registry-resolution package verification"
+    },
+    "npm_package_lists": {
+      "command": "npm pack --dry-run --ignore-scripts --json --workspace js --workspace packages/solid-server --workspace packages/eyereasoner-compat",
+      "passed": 3,
+      "limitation": "source inventory only; generated JS/WASM artifacts absent locally and must be built/inspected in hosted checks"
+    },
+    "source_guard_tests": 21,
+    "publish_guard_tests": 71,
+    "gui_staging_tests": 7,
+    "slsa_contract_tests": 4,
+    "container_contract_tests": 12,
+    "alias_checks": 7,
+    "provenance_verifier_checks": 18,
+    "candidate_manifests": "actual files passed source guard version checks with mocked Git identity; no candidate tag created",
+    "website": "download UI consumes live release metadata and stable aliases; registry links are version-independent; mdBook includes updated README install commands",
+    "review": "code-review-and-quality skill; independent GPT-5.5 review found no required changes",
+    "not_run": "full Rust/clippy/conformance/performance gates; full JS/WASM/frontend builds; hosted installers, signing and publication verification"
+  },
+  "credential_checks": {
+    "release_plz_main_run": "https://github.com/sparq-org/sparq/actions/runs/35546714130",
+    "release_plz_result": "success",
+    "github_pypi_environment": "exists",
+    "registry_trusted_publisher_settings": "not verified; operator must confirm before publication",
+    "secrets": "values not read"
+  },
+  "verification_assets": [
+    "SHA256SUMS",
+    "sparq-cli-v0.1.3.intoto.jsonl",
+    "sparq-artifacts-v0.1.3.intoto.jsonl",
+    "served-conformance-v0.1.3.json"
+  ]
+}

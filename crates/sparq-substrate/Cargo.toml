@@ -82,7 +82,7 @@ overhead = ["join", "numeric", "compare"]
 # `version` alongside `path`: cargo uses the path locally and the version on crates.io
 # (required to publish — crates.io strips `path`). sparq-core is the ONLY dependency: this
 # crate sits at the leaf, below the engine, so the reasoners can reach it without a cycle.
-sparq-core = { path = "../sparq-core", version = "0.1.2", default-features = false }
+sparq-core = { path = "../sparq-core", version = "0.1.3", default-features = false }
 # Inline small rows (avoid a heap allocation per solution row / join key). Same crate the
 # engine already uses for its `Row`/`Key` aliases, so the representation is byte-identical.
 smallvec.workspace = true

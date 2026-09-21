@@ -613,7 +613,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-core"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "hashbrown 0.17.1",
  "memchr",
@@ -625,7 +625,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-engine"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "md-5",
  "oxiri",
@@ -644,7 +644,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-substrate"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "hashbrown 0.17.1",
  "oxrdf",

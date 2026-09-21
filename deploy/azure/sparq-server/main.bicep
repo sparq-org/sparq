@@ -44,7 +44,7 @@ param location string = resourceGroup().location
 @description('''
   Full image reference (registry/image:tag).
   Defaults to the canonical GHCR image. Pin a specific version in production
-  (e.g. ghcr.io/sparq-org/sparq-server:0.1.2).
+  (e.g. ghcr.io/sparq-org/sparq-server:0.1.3).
 ''')
 param imageRef string = 'ghcr.io/sparq-org/sparq-server:latest'
 
