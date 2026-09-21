@@ -207,7 +207,7 @@ jobs:
       # nextest = the process-per-test runner (see THE FIX above). Same pinned installer
       # action + tool the ci.yml test shards use.
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
+        uses: taiki-e/install-action@4076c08d76dba979c11a7285295b0716c1d67908 # v2.87.15
         with:
           tool: nextest
       - name: Cache cargo + target

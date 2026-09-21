@@ -188,7 +188,7 @@ jobs:
       # `release` job below still uses the pinned release-plz/action (no containment needed there).
       - name: Install release-plz + cargo-semver-checks (pinned)
         if: steps.bootstrap.outputs.ready == 'true'
-        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
+        uses: taiki-e/install-action@4076c08d76dba979c11a7285295b0716c1d67908 # v2.87.15
         with:
           tool: release-plz@0.3.160,cargo-semver-checks@0.48
       - name: Run release-plz release-pr (output captured for failure classification)
@@ -403,7 +403,7 @@ jobs:
       # git tag — it skips cargo publish and skips its own GitHub Release (release.yml owns
       # that). The pushed tag then triggers release.yml.
       - name: Run release-plz (create v<version> tag on version commit)
-        uses: release-plz/action@2eb1d8bcb770b4c48ccfaad919734b38b51958c9 # v0.5.131
+        uses: release-plz/action@d6c56271d640b6c1b61d1e00593641c400a9f4bd # v0.5.138
         with:
           command: release
         env:
