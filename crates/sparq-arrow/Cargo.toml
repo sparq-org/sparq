@@ -70,7 +70,7 @@ arrow-schema = { version = "59", optional = true }
 # own dependency; named directly because the code references `arrow_buffer::NullBuffer`.
 arrow-buffer = { version = "59", optional = true }
 # Arrow IPC stream serialization only; the `arrow` feature supplies RecordBatch values.
-arrow-ipc = { version = "59", optional = true }
+arrow-ipc = { version = "60", optional = true }
 # Parquet serialization only; the `arrow` feature provides RecordBatch integration.
 # Compression codecs stay disabled so this opt-in surface pulls the narrowest closure.
 parquet = { version = "59", optional = true, default-features = false, features = ["arrow"] }
