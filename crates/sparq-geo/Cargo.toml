@@ -109,7 +109,7 @@ geo-types = "0.7"
 # uses for polygon overlay (it depends on i_overlay 4.5.x), so adding it as a
 # direct dependency pulls in no new transitive crates. `default-features =
 # false` mirrors geo's own usage and keeps the lockfile stable. [OPUS-4.8]
-i_overlay = { version = "7.0.0", default-features = false }
+i_overlay = { version = "8.1.2", default-features = false }
 # R-tree (bulk-loaded STR) over geometry bounding boxes.
 rstar = "0.13"
 # GML-SF geometry parsing (geo:gmlLiteral). A streaming XML reader, NOT a full

@@ -2302,9 +2302,9 @@ dependencies = [
 
 [[package]]
 name = "i_float"
-version = "3.0.0"
+version = "4.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "519b2780a1187eeed09145e5d168863c87f0d704abe84084206ebd897f99c6dc"
+checksum = "c614c2cfc06cfe8809ccc48cd445864502478e673721ca2a05931fc057ec33a0"
 dependencies = [
  "libm",
 ]
@@ -2319,13 +2319,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "i_key_sort"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7c6c58d0c60705e66264ce0f788a69a2f21472aeb8188559e7c8c619dbdc10fa"
+
+[[package]]
 name = "i_overlay"
 version = "4.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8dd314b4668e2b3a12508f2e125558c82a6c0a8636fa5107a900f79ce414e450"
 dependencies = [
  "i_float 1.16.0",
- "i_key_sort",
+ "i_key_sort 0.10.3",
  "i_shape 1.18.0",
  "i_tree 0.18.0",
  "rayon",
@@ -2333,13 +2339,13 @@ dependencies = [
 
 [[package]]
 name = "i_overlay"
-version = "7.0.2"
+version = "8.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf284de04038af713dad8b4a88d2bc97f1c8c0a87fc1f43e28e3b965d0136d9e"
+checksum = "997dfc291f5192f34b4f3ddc67e60086a27ee9f3b880154933582490c6e218d3"
 dependencies = [
- "i_float 3.0.0",
- "i_key_sort",
- "i_shape 3.0.0",
+ "i_float 4.1.0",
+ "i_key_sort 0.11.0",
+ "i_shape 4.0.0",
  "i_tree 0.19.0",
 ]
 
@@ -2354,11 +2360,11 @@ dependencies = [
 
 [[package]]
 name = "i_shape"
-version = "3.0.0"
+version = "4.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "90b2ee7bae072887c579a2f2fd2a7fa1c29cceecfae1998ef940061c5570afff"
+checksum = "67ec1fc3ad980a24e4761b763bf5bfbf58c1d88be1bffb14654d369d7f420258"
 dependencies = [
- "i_float 3.0.0",
+ "i_float 4.1.0",
 ]
 
 [[package]]
@@ -5171,7 +5177,7 @@ dependencies = [
  "crs-definitions",
  "geo",
  "geo-types",
- "i_overlay 7.0.2",
+ "i_overlay 8.1.2",
  "oxrdf 0.3.3",
  "proj4rs",
  "proptest",
