@@ -73,7 +73,7 @@ arrow-buffer = { version = "59", optional = true }
 arrow-ipc = { version = "59", optional = true }
 # Parquet serialization only; the `arrow` feature provides RecordBatch integration.
 # Compression codecs stay disabled so this opt-in surface pulls the narrowest closure.
-parquet = { version = "59", optional = true, default-features = false, features = ["arrow"] }
+parquet = { version = "60", optional = true, default-features = false, features = ["arrow"] }
 # `Bytes` is parquet-rs's in-memory `ChunkReader`; it is optional with Parquet and is
 # already in that dependency's closure.
 bytes = { version = "1", optional = true }
