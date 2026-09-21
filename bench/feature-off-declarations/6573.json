@@ -1,0 +1,5 @@
+{
+  "pr": 6573,
+  "date": "2026-09-21",
+  "reason": "[GPT-6] Intentional release metadata change: inherited workspace package identities and local lock records advance from 0.1.2 to 0.1.3. Rust implementation, default features, and external dependencies are unchanged. Version-dependent build metadata may change feature-OFF WASM bytes; hosted comparison and the separate size ratchet remain required, with no local byte-size claim."
+}

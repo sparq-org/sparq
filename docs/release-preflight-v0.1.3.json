@@ -336,7 +336,8 @@
     "candidate_manifests": "actual files passed source guard version checks with mocked Git identity; no candidate tag created",
     "website": "download UI consumes live release metadata and stable aliases; registry links are version-independent; mdBook includes updated README install commands",
     "review": "code-review-and-quality skill; independent GPT-5.5 review found no required changes",
-    "not_run": "full Rust/clippy/conformance/performance gates; full JS/WASM/frontend builds; hosted installers, signing and publication verification"
+    "not_run": "full Rust/clippy/conformance/performance gates; full JS/WASM/frontend builds; hosted installers, signing and publication verification",
+    "feature_off_declaration": "bench/feature-off-declarations/6573.json; intentional version metadata only, hosted byte/size comparison pending"
   },
   "credential_checks": {
     "release_plz_main_run": "https://github.com/sparq-org/sparq/actions/runs/35546714130",
