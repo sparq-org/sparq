@@ -64,7 +64,7 @@ oxrdf.workspace = true
 # which additionally pulls IPC / Flight / CSV / JSON / cast machinery we do not use. This
 # keeps the dependency (and cargo-vet exemption) closure as small as a RecordBatch export
 # can be. Only behind the `arrow` feature. [OPUS-4.8]
-arrow-array = { version = "59", optional = true }
+arrow-array = { version = "60", optional = true }
 arrow-schema = { version = "59", optional = true }
 # `NullBuffer` for the per-row struct validity (unbound cells). It is `arrow-array`'s
 # own dependency; named directly because the code references `arrow_buffer::NullBuffer`.
