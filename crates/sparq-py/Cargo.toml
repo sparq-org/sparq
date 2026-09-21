@@ -77,7 +77,7 @@ spargebra.workspace = true
 # sparq-arrow's arrow 59 exactly so the `RecordBatch` type is byte-identical across the edge.
 sparq-arrow = { path = "../sparq-arrow", features = ["arrow"], optional = true }
 arrow-array = { version = "59", features = ["ffi"], optional = true }
-arrow-schema = { version = "59", features = ["ffi"], optional = true }
+arrow-schema = { version = "60", features = ["ffi"], optional = true }
 
 [features]
 # [OPUS-4.8] sq-oy1f.20: JSON-LD is DEFAULT-ON in the Python wheel — the maintainer-

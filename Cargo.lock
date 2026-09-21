@@ -304,7 +304,7 @@ dependencies = [
  "ahash",
  "arrow-buffer",
  "arrow-data",
- "arrow-schema",
+ "arrow-schema 59.3.0",
  "chrono",
  "half",
  "hashbrown 0.17.1",
@@ -332,7 +332,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7bd568aa70c4ec5947027b0d5caee94877433b661a0bb9e8ddceeeb5f0c9b1ab"
 dependencies = [
  "arrow-buffer",
- "arrow-schema",
+ "arrow-schema 59.3.0",
  "half",
  "num-integer",
  "num-traits",
@@ -347,16 +347,25 @@ dependencies = [
  "arrow-array",
  "arrow-buffer",
  "arrow-data",
- "arrow-schema",
+ "arrow-schema 59.3.0",
  "arrow-select",
  "flatbuffers",
 ]
 
 [[package]]
 name = "arrow-schema"
-version = "59.0.0"
+version = "59.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "80b3e786a0dd9103acd583a6fb486dbf2f3268466cc0bd571dcf34cef231c1f1"
+checksum = "10fab8d4563491417ba801fab29d205104d20d4bdf37bda6cd1cf425cff598cd"
+dependencies = [
+ "bitflags",
+]
+
+[[package]]
+name = "arrow-schema"
+version = "60.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f85a9a58cd03560526b0066487574aacb9008e413504fa0ee23d61141e96c338"
 dependencies = [
  "bitflags",
 ]
@@ -371,7 +380,7 @@ dependencies = [
  "arrow-array",
  "arrow-buffer",
  "arrow-data",
- "arrow-schema",
+ "arrow-schema 59.3.0",
  "num-traits",
 ]
 
@@ -3529,7 +3538,7 @@ dependencies = [
  "arrow-buffer",
  "arrow-data",
  "arrow-ipc",
- "arrow-schema",
+ "arrow-schema 59.3.0",
  "arrow-select",
  "base64",
  "bytes",
@@ -4913,7 +4922,7 @@ dependencies = [
  "arrow-array",
  "arrow-buffer",
  "arrow-ipc",
- "arrow-schema",
+ "arrow-schema 60.0.0",
  "bytes",
  "oxrdf 0.3.3",
  "parquet",
@@ -5456,7 +5465,7 @@ name = "sparq-py"
 version = "0.1.2"
 dependencies = [
  "arrow-array",
- "arrow-schema",
+ "arrow-schema 60.0.0",
  "oxrdf 0.3.3",
  "pyo3",
  "pyo3-build-config",
