@@ -131,7 +131,7 @@ proj4rs = { version = "0.1", optional = true }
 # proj4 strings lack — the axis-order gate in `full_epsg_definition` accepts a
 # projected registry entry only when its WKT proves easting/northing order.
 # [FABLE-5]
-crs-definitions = { version = "0.5.0", default-features = false, features = ["proj4", "wkt"], optional = true }
+crs-definitions = { version = "0.6.0", default-features = false, features = ["proj4", "wkt"], optional = true }
 # Fast hash maps for the geometry-node -> feature mapping during index build.
 rustc-hash.workspace = true
 
