@@ -392,3 +392,26 @@
   crate: "sparq-engine"
   features: "spatial-exact-pushdown"
   test: true
+
+# [FABLE-5] sq-7d3dj.11: the `expr-program` opt-in FLAT compiled scalar-expression programs
+# for FILTER/BIND. The whole lowering (`exec::expr_program`, the `RowEval` program arm, the
+# `expr_program_testing` toggle in lib.rs) is `#[cfg(feature = "expr-program")]`, so the
+# default build — and ci.yml's `--workspace --all-targets` archive, which passes NO
+# `--features` — compiles it EMPTY. Its acceptance suite
+# `tests/differentials/expr_program_differential.rs` compiles in BOTH states, but WITHOUT this
+# leg its load-bearing half never runs: with the feature off both legs of `tree_vs_program`
+# are the same tree evaluator, so the ON==OFF row-identity differential (over SPARQL 3VL
+# short-circuiting, `!error`, `IF`/`COALESCE` over a type error, `IN` with an erroring member,
+# `sameTerm` vs `=`, BIND/STR term-identity passthrough, EXISTS re-entry inside a lowered
+# spine, and the rayon path) is vacuous, and the FIRED anti-vacuity counter assertion
+# (`expr_program_testing::lowered() > 0` on the program leg, `== 0` on the tree leg) is
+# `#[cfg]`-inert. This leg is where the flat evaluator is actually exercised. No new dep
+# (`expr-program = []`, no `unsafe`); with the feature off the FILTER/BIND path is the
+# verbatim tree evaluator and the scratch stack is a zero-sized placeholder, but the call-site
+# edits in `apply_filter_scalar`/`extend_bindings` are always-compiled, so the feature-OFF
+# wasm bundle MOVES BYTES vs base (behaviour-identical — declare it under
+# bench/feature-off-declarations/).
+- name: "sparq-engine (expr-program)"
+  crate: "sparq-engine"
+  features: "expr-program"
+  test: true
