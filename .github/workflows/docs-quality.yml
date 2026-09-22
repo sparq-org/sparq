@@ -525,6 +525,21 @@ jobs:
         run: bash scripts/reconcile-merged-beads.sh --dry-run-self-test
       - name: Self-test reconcile-merged-beads.sh (exact-match + gating + apply/idempotency, end-to-end)
         run: bash scripts/tests/test_reconcile_merged_beads.sh
+      # [OPUS-5] issue #6088: the BOX-SIDE `bd export` producer for the committed bead
+      # mirror (.beads/issues.jsonl). It is a cron that PUSHES, and it runs on the
+      # orchestrator's own main checkout — so its failure modes are destructive rather
+      # than merely wrong: committing an empty or truncated export deletes the only
+      # git-visible copy of the bead graph, and a disruptive commit path would move HEAD
+      # out from under a live session. It has NO runtime in CI (it needs `bd` + the Dolt
+      # DB, which exist only on the work box), so this hermetic harness — real git against
+      # a local bare remote, PATH-shadowed bd/gh, no network — is the ONLY place those
+      # guards are exercised. Both the pure self-test and the end-to-end harness run HARD.
+      - name: shellcheck beads-export-push.sh + its self-test
+        run: shellcheck scripts/beads-export-push.sh scripts/tests/test_beads_export_push.sh
+      - name: Self-test beads-export-push.sh (retention floor + order-insensitive diff, hermetic)
+        run: bash scripts/beads-export-push.sh --dry-run-self-test
+      - name: Self-test beads-export-push.sh (fail-closed exports + checkout non-disruption, end-to-end)
+        run: bash scripts/tests/test_beads_export_push.sh
       # [FABLE-5] PR #3488 review: the canonical BEIR gather's honesty must be
       # MACHINE-enforced, not narrative — a failed/partial/invalid gather must never
       # emit the GATHER_DONE success sentinel or canonical=true, and the serial-console
