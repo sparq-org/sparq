@@ -23,6 +23,18 @@
 //     directly comparable — every speedup is labelled with its gather provenance.
 
 import data from "./benchmarks.generated.json";
+import { deriveCoverage } from "@/lib/baseline-coverage";
+import type { CoverageMatrix } from "@/lib/baseline-coverage";
+export {
+  COVERAGE_ENGINES,
+  COVERAGE_SUITES,
+} from "@/lib/baseline-coverage";
+export type {
+  CoverageCell,
+  CoverageEngine,
+  CoverageMatrix,
+  CoverageSuite,
+} from "@/lib/baseline-coverage";
 
 export interface Bench {
   name: string;
@@ -1000,6 +1012,16 @@ export function scalingFamiliesForFamily(key: string): ScalingFamily[] {
             ? 1
             : 0,
     );
+}
+
+// ---- competitor-baseline COVERAGE matrix (sq-vw3ax.12) --------------------------------
+// The honest at-a-glance answer to "which named competitors are (not) yet baselined on which
+// SPARQL suite". Derived live from the committed same-box gathers — a cell is "measured" only
+// when the engine produced a real timing; the missing engines/suites render "pending" (a
+// canonical-host gather is greenlight-gated, never fabricated here). Server-side only (reads
+// the snapshot); pass the result to the presentational component as a prop.
+export function competitorCoverage(): CoverageMatrix {
+  return deriveCoverage(COMPETITORS.same_box_comparisons || []);
 }
 
 // A one-line headline for a suite's collapsed group header.
