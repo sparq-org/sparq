@@ -462,8 +462,31 @@ sq-6vshe.7 lands.
   the sub-minute survivors are not worth a run-history pass. Per §2.1's `max`-not-`sum`
   argument, the *median-wall* re-profile that matters is the ci.yml JOB-LEVEL pre/post
   sample §3.4a already names as its own follow-up — these two should be one pass.
+  **The pass is now one command, not a hand audit (issue #5250).**
+  `scripts/ci_mergegroup_poles.py` re-derives the whole of §2.1 — per-lane n / median /
+  p90 / max over successful `merge_group` runs, ranked, plus the top-3 poles — and
+  `--jobs ci.yml` produces the job-level half. It reports a triggering-but-unobserved
+  lane (the `codeql.yml`-while-`disabled_manually` shape) as UNOBSERVED rather than as a
+  fast lane, so the two corrections §6 credits to the structural method survive a
+  run-history pass. What remains OPEN is running it and acting on the result; what is no
+  longer open is *how* to measure, or whether the estimator can be trusted
+  (`scripts/tests/test_ci_mergegroup_poles.py`, gated in `docs-quality quick-gates`).
 
 ## 6. Method / reproducibility
+
+**Superseded as of issue #5250 — use `python3 scripts/ci_mergegroup_poles.py`** (add
+`--jobs ci.yml` for the job-level decomposition, `--json` for machine output). The
+hand-run recipe below is what produced the 2026-07-10 figures and is kept for
+provenance; it is no longer the way to re-take them. The tool applies four corrections
+this recipe does not: it re-filters `event`/`conclusion` locally (a cancelled run's wall
+clock is a truncated lower bound, and the queue cancels waves mid-flight — including
+them biases every median toward "no pole here"), it reports the entry wall as `max` over
+lanes rather than leaving a reader to sum the table, and it reconciles the observed lanes
+against the structural trigger set in BOTH directions so a triggering-but-unobserved lane
+is never rendered as a cheap one. **Why the change:** every duration in this record was a
+hand-run snapshot with no owner and no test, which is why §2.1 decayed into "STALE" /
+"not re-sampled" / "never sampled" — and why #3005 could size a lever off a CodeQL figure
+that `codeql.yml`'s own header had already refuted. A re-derivable number does not rot.
 
 `gh run list --event merge_group --limit 250` (duration stats over successful runs);
 `gh api repos/sparq-org/sparq/actions/runs/<id>/jobs` for job/step decomposition (runs
