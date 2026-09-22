@@ -84,6 +84,27 @@ follow-up only replaces the *transport* (resident loop → event-driven invocati
 
 ## 5. Status
 
-Tracked as a follow-up bead (created with sq-90cv4's PR; blocked on maintainer
-appetite for a required-check migration). Until then the adaptive budget is the
-operative mitigation, and the merge-queue/org plans reduce exposure.
+**Stage 1 of §3.1 is implemented (bead sq-lfmvd); the required-check migration is
+not.** `.github/workflows/ci-gate-status.yml` runs the §2 evaluator
+(`scripts/ci_summary_gate.py --evaluate`, sharing `render_verdict` verbatim per §4)
+and publishes the `ci-gate` commit status. It runs **in shadow**: the
+branch-protection ruleset still requires only `ci-summary / gate`, and the poll loop
+still runs, exactly as §3.1 demands. Stages 2 and 3 — adding `ci-gate` to the ruleset
+alongside `gate`, then dropping `gate` and deleting the poll job — are **maintainer
+edits to out-of-repo settings** and remain open. `docs/branch-protection.md`
+§Slotless gate evaluation is the doc-of-record for the procedure and the stage-1 exit
+criteria.
+
+How the §3 risks stand:
+
+| Risk | Status |
+|---|---|
+| 1. Required-check migration | **Resolved by construction** — staged, never swapped; a test reds if the `gate` job is deleted while the shadow lane is the only evaluator. Stages 2/3 are maintainer-owned. |
+| 2. Trust model | **Resolved** — the evaluator runs the default-branch definition and checks out the default branch's script + registry; its token holds `statuses: write` only. The honest cost (a PR editing the gate script or registry is judged by `main`'s copy) is documented, not hidden. |
+| 3. Bootstrap / quiet PRs / forks | **Resolved without a `pull_request` seed** — `workflow_run: [requested]` seeds `pending` from the base repo's token, which works for fork heads too, so the fork token problem never arises. |
+| 4. `merge_group` compatibility | **OPEN — the one risk the repo cannot settle.** That `workflow_run` fires for merge-group-triggered sibling runs, and that the status lands on the ref the ruleset checks, is a stage-1 verification item. Recorded as an assumption in the workflow header, not a claim. |
+| 5. Event storms | **Resolved** — per-head-SHA concurrency group with `cancel-in-progress`, plus a settle window that absorbs the burst. |
+| 6. Startup-race parity | **Resolved, more fail-closed than the poll loop** — `MIN_POLLS` becomes a confirm re-fetch, and an empty sibling set never passes (the poll loop's stable-empty pass is not carried over). Both pinned by `TestSlotlessEvaluation`. |
+
+Until the migration completes, the adaptive budget remains the operative mitigation
+for the saturation false-RED, and the merge-queue/org plans reduce exposure.
