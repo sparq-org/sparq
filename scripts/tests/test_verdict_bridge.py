@@ -393,14 +393,25 @@ def node(number: int, **overrides) -> dict:
     """A GraphQL pullRequest node as `list_open` returns it.
 
     Modelled on the REAL population (censused 2026-07-26): the PR is opened by the
-    orchestrator App and its commits are authored by `claude`, while reviewers comment
-    under a DIFFERENT login. A fixture whose author fields were absent would make every
-    grant fail closed for the wrong reason and hide real regressions.
+    orchestrator App on a `sparq-agent/issue-N-…` worker branch in THIS repo — the shape
+    89 of the 118 open PRs actually have, and the only shape the registry review lane can
+    enumerate — and its commits are authored by `claude`, while reviewers comment under a
+    DIFFERENT login. A fixture whose author or head fields were absent would make every
+    grant (and, since #4677, every flag) fail closed for the wrong reason and hide real
+    regressions.
     """
     labels = overrides.pop("labels", ())
     reviews = overrides.pop("reviews", ())
     base = {
-        "author": {"login": overrides.pop("author", "sparq-orchestrator")},
+        # `__typename` is how GraphQL reports an App — the login carries no `[bot]`
+        # suffix there, so the typename is the machine-account signal (#4677).
+        "author": {
+            "login": overrides.pop("author", "sparq-orchestrator"),
+            "__typename": overrides.pop("author_typename", "Bot"),
+        },
+        "headRefName": "sparq-agent/issue-4200-30221671021-1",
+        "headRepository": {"nameWithOwner": REPO},
+        "title": "feat: resolve target issue #4200",
         "commits": overrides.pop("commits", commits_connection()),
         "reviews": {
             "nodes": [
@@ -1440,11 +1451,16 @@ class TestAuthorXorReviewer(unittest.TestCase):
                 query = getattr(vb, name)
                 lines = [line.strip() for line in query.splitlines()]
                 self.assertIn(
-                    "author{login}",
+                    "author{login __typename}",
                     lines,
                     "the PR-node-level author field is gone; the `reviews` one does "
                     "not feed the guard",
                 )
+                # [OPUS-5] #4677: the review-lane reachability inputs. Dropping any of
+                # them makes `lane_reachable` fail closed for every PR, which silently
+                # retires the informational label rather than fixing its scope.
+                self.assertIn("headRefName title", lines)
+                self.assertIn("headRepository{nameWithOwner}", lines)
                 start = query.find("commits(last:")
                 self.assertGreater(start, 0, "the commits connection is gone")
                 block = query[start : start + 260]
@@ -1883,6 +1899,128 @@ class TestEventModeFailureSemantics(unittest.TestCase):
 
     def test_sweep_is_the_default_mode(self):
         self.assertEqual(vb.run_bridge(self.Transient(), log=lambda _: None), 0)
+
+
+class TestLabellerAgreesWithTheReviewer(unittest.TestCase):
+    """sparq#4677: THE LABELLER'S VISIBILITY PREDICATE MUST NOT EXCEED THE REVIEWER'S.
+
+    Measured on live sparq: four green, ready, not-moving PRs carried `review:unreviewed`
+    — written by THIS repository — while the only review producer that exists lives in
+    `jeswr/agent-account-registry` and structurally cannot enumerate any of them (the
+    string `review:unreviewed` appears nowhere in that codebase). One of them was the
+    FIRST crates.io release PR, unreviewed for ~22h. A labelled-but-unreviewable PR is
+    worse than an unlabelled one: the label makes it look enrolled, so it is neither
+    reviewed nor noticed, and every success rate the lane reports is computed over a
+    population that excludes it.
+
+    These tests drive the REAL GraphQL node -> `parse_node` -> `decide` path, not a
+    hand-set boolean, because the seam that actually broke was the labeller reading
+    fields the reviewer's predicate needs and never comparing them.
+    """
+
+    # The four PRs the issue measured, by their real head refs and authors.
+    UNREVIEWABLE = (
+        ("ci/auto-arm-workflows-permission", "jeswr", "User"),
+        ("research/knowledge-management-strategy", "jeswr", "User"),
+        ("release-plz-2026-07-27T02-19-35Z", "sparq-orchestrator", "Bot"),
+        ("dependabot/github_actions/actions-minor", "dependabot", "Bot"),
+    )
+
+    def parsed(self, **overrides):
+        return bridge(FakeGitHub([node(4200, **overrides)])).parse_node(
+            node(4200, **overrides), "success"
+        )
+
+    def test_the_measured_population_is_never_flagged(self):
+        for ref, author, typename in self.UNREVIEWABLE:
+            with self.subTest(ref=ref):
+                pull = self.parsed(
+                    headRefName=ref, author=author, author_typename=typename
+                )
+                self.assertFalse(pull.lane_reachable, ref)
+                self.assertEqual(vb.decide(pull, []).action, "none")
+
+    def test_a_stale_flag_on_an_unreviewable_pr_is_WITHDRAWN(self):
+        """Not merely "stop adding it": the four live PRs already carry it."""
+        for ref, author, typename in self.UNREVIEWABLE:
+            with self.subTest(ref=ref):
+                pull = self.parsed(
+                    headRefName=ref,
+                    author=author,
+                    author_typename=typename,
+                    labels=[vb.UNREVIEWED_LABEL],
+                )
+                self.assertEqual(vb.decide(pull, []).action, "unflag")
+
+    def test_the_withdrawal_removes_ONLY_the_informational_label(self):
+        """The write path, not just the word: this must never touch the attestation."""
+        fake = FakeGitHub(
+            [node(4200, headRefName="release-plz-2026", labels=[vb.UNREVIEWED_LABEL])]
+        )
+        self.assertEqual(bridge(fake).run(), 0)
+        self.assertEqual(
+            fake.writes,
+            [["pr", "edit", "4200", "--repo", REPO, "--remove-label", vb.UNREVIEWED_LABEL]],
+        )
+
+    def test_the_CONTROL_arm_still_flags_a_worker_pr(self):
+        """Non-vacuity. If the guard were "never flag", every assertion above would pass
+        while the informational label was silently retired for the whole repository."""
+        pull = self.parsed()
+        self.assertTrue(pull.lane_reachable)
+        self.assertEqual(vb.decide(pull, []).action, "flag")
+
+    def test_a_worker_branch_from_a_HUMAN_author_is_not_flagged(self):
+        """The registry gates on the AUTHOR too, so agreeing on the branch is not enough."""
+        pull = self.parsed(author="jeswr", author_typename="User")
+        self.assertFalse(pull.lane_reachable)
+        self.assertEqual(vb.decide(pull, []).action, "none")
+
+    def test_a_FORK_head_is_not_flagged(self):
+        pull = self.parsed(headRepository={"nameWithOwner": "attacker/sparq"})
+        self.assertFalse(pull.lane_reachable)
+
+    def test_an_APP_login_without_the_bot_suffix_still_reads_as_the_worker(self):
+        """GraphQL reports an App as `sparq-orchestrator`, REST as
+        `sparq-orchestrator[bot]`. A copied `endswith("[bot]")` would read as a guard
+        while never matching here — every worker PR would be classed unreachable and the
+        label would quietly disappear from the repository."""
+        self.assertFalse(self.parsed().opener.endswith("[bot]"))
+        self.assertTrue(self.parsed().lane_reachable)
+
+    def test_missing_head_fields_fail_CLOSED(self):
+        """An unreadable head must never mint an enrolment claim."""
+        for dropped in ("headRefName", "headRepository"):
+            with self.subTest(dropped=dropped):
+                payload = node(4200)
+                payload.pop(dropped)
+                pull = bridge(FakeGitHub([payload])).parse_node(payload, "success")
+                self.assertFalse(pull.lane_reachable)
+
+    def test_the_refusal_states_the_disposition_rather_than_going_quiet(self):
+        """#4677 asked for release / dependabot PRs to be DECIDED, not silently dropped."""
+        release = self.parsed(headRefName="release-plz-2026", title="chore: release v0.2.0")
+        deps = self.parsed(headRefName="dependabot/cargo/serde-1.0", author="dependabot")
+        self.assertIn("MAINTAINER-REVIEWED", release.disposition)
+        self.assertIn("MAINTAINER-REVIEWED", deps.disposition)
+        self.assertIn("MAINTAINER-REVIEWED", vb.decide(release, []).reason)
+        self.assertIn("NOT ENROLLED", self.parsed(headRefName="research/x").disposition)
+
+    def test_an_unreviewable_pr_is_still_PROMOTED_on_a_real_hand_review(self):
+        """The guard scopes the informational flag only. Suppressing an attestation a
+        human actually earned would strand the release PR outside every lane instead."""
+        pull = self.parsed(headRefName="release-plz-2026")
+        self.assertEqual(vb.decide(pull, PASS_COMMENT).action, "promote")
+
+    def test_the_labeller_and_the_census_share_ONE_predicate(self):
+        """The defect was the DISAGREEMENT, so a second copy would re-commit it: assert
+        the two components resolve to the same module object, not to equal source."""
+        alarm = load(SCRIPTS / "review_lane_alarm.py", "review_lane_alarm_policy")
+        self.assertIs(alarm.review_lane_reach, vb.review_lane_reach)
+        self.assertIs(
+            alarm.REGISTRY_HEAD_REF_RE, vb.review_lane_reach.REGISTRY_HEAD_REF_RE
+        )
+        self.assertEqual(alarm.UNREVIEWED_LABEL, vb.UNREVIEWED_LABEL)
 
 
 class TestCrossPolicyConsistency(unittest.TestCase):
