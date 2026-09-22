@@ -7,7 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-09-21
+
+[GPT-6] New complete-release candidate after the immutable v0.1.2 attempt.
+Publication is not implied by this entry; use the [release runbook](docs/release.md)
+and require the cadence guard and hosted release verification to pass.
+
+### Fixed
+
+- [GPT-6] Already-expired or cancelled SELECT-JSON requests refuse before scanning,
+  emitting output, or waiting for unrelated Rayon pool work.
+- GUI installer staging uses Bash 3.2-compatible glob options on macOS. The shared
+  staging step is exercised by hermetic fixtures for every desktop platform; empty
+  output still fails and the full release alias/provenance contracts remain enforced.
+- Desktop package and installer metadata now match the release version, instead of
+  retaining the old 0.1.0 value underneath versioned asset filenames.
+
+### Changed
+
+- Workspace packages, Python's derived version, all three public npm packages and
+  the desktop application target 0.1.3. Lockfiles preserve external dependencies;
+  the private LWS crate and tooling retain their independent versions.
+- Release preparation and installation documentation now distinguish the incomplete
+  v0.1.2 attempt from this new candidate. The existing v0.1.2 tag, containers and
+  provenance remain intact; they are not rebuilt or renamed as v0.1.3 artifacts.
+- A maintainer-authorized cadence exception admits only the v0.1.3 recovery with
+  pinned predecessor/tag evidence and definitive crates.io absence. All other
+  versions retain the 24-hour minimum, and indeterminate reads still refuse.
+
 ## [0.1.2] - 2026-09-20
+
+[GPT-6] **Incomplete GitHub Release.** Both container publication lanes completed,
+but [run 35540471918](https://github.com/sparq-org/sparq/actions/runs/35540471918)
+failed on macOS GUI staging and the alias completeness gate correctly blocked the
+GitHub Release. The immutable tag and published containers remain unchanged.
+The fix and next complete-release candidate belong to v0.1.3.
 
 [GPT-6] Recovery release prepared from the changes after the immutable `v0.1.1`
 source tag. Publication is not implied by this version entry; verify the release
@@ -546,6 +580,7 @@ reproduce):
   single-pattern/FILTER comparisons short-circuit via index range-counting and are excluded
   from the claims above.
 
-[Unreleased]: https://github.com/sparq-org/sparq/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/sparq-org/sparq/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/sparq-org/sparq/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/sparq-org/sparq/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/sparq-org/sparq/tree/v0.1.1

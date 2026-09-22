@@ -1,5 +1,11 @@
 # sparq v0.1.2 — exact-source recovery
 
+> [GPT-6] **Historical incomplete release attempt.** The immutable v0.1.2 tag
+> published both container lanes, but macOS GUI staging failed and the alias gate
+> blocked the GitHub Release. Do not use the publication instructions below to retry
+> that failure. The staging fix is merged; the next candidate is
+> [v0.1.3](release-notes-v0.1.3.md). Preserve the old tag and existing containers.
+
 [GPT-6] Prepared 2026-09-20. This is the next complete-release candidate after the
 [incomplete v0.1.1 bootstrap](release-notes-v0.1.1.md); publication is not implied
 by this document. All artifacts must come from the same immutable `v0.1.2` tag.

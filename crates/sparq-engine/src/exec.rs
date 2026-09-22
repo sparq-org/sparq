@@ -3005,6 +3005,9 @@ pub fn eval_select_json_emit(
     flush: Option<usize>,
     emit: &mut dyn FnMut(String) -> ControlFlow<()>,
 ) -> Result<(), String> {
+    // [GPT-6] Refuse an exhausted budget before scanning, emitting a header, or
+    // queuing Rayon work: chunk checks cannot bound time spent waiting for a busy pool.
+    budget::check(0)?;
     // Streaming fast paths — no Bindings materialised at all.
     if single_pattern_scan_json_emit(graph, pattern, flush, emit).is_some() {
         budget::check(0)?; // sticky: the streaming loop may have stopped mid-scan

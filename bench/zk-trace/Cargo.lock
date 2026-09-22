@@ -795,7 +795,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-core"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "hashbrown 0.15.5",
  "oxrdf",
@@ -806,7 +806,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-engine"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "md-5",
  "oxiri",

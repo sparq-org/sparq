@@ -27,6 +27,9 @@ class TestSourceIdentity(unittest.TestCase):
                    '[workspace.package]\nversion = "0.1.2"\n')
         self.write("crates/sparq-py/Cargo.toml", '[package]\nname = "sparq-py"\nversion.workspace = true\n')
         self.write("crates/sparq-py/pyproject.toml", '[project]\nname = "sparq-rdf"\ndynamic = ["version"]\n')
+        self.write("gui/src-tauri/Cargo.toml", '[package]\nname = "sparq-gui"\nversion = "0.1.2"\n')
+        self.write("gui/src-tauri/tauri.conf.json", '{"version":"0.1.2"}')
+        self.write("gui/app/package.json", '{"version":"0.1.2"}')
         for manifest in ("js/package.json", "packages/solid-server/package.json"):
             self.write(manifest, json.dumps({"version": "0.1.2"}))
         self.write("packages/eyereasoner-compat/package.json", '{"version":"0.1.0"}')
@@ -34,6 +37,7 @@ class TestSourceIdentity(unittest.TestCase):
             "js": {"version": "0.1.2"},
             "packages/solid-server": {"version": "0.1.2"},
             "packages/eyereasoner-compat": {"version": "0.1.0"},
+            "gui/app": {"version": "0.1.2"},
         }}))
         self.git("init", "-q")
         self.git("add", ".")
@@ -128,6 +132,35 @@ class TestSourceIdentity(unittest.TestCase):
         self.write("crates/private/Cargo.toml", '[package]\nname = "private"\nversion = "0.0.1"\n')
         with self.assertRaisesRegex(guard.SourceMismatch, "version does not match"):
             self.validate()
+
+    def test_desktop_metadata_cannot_hide_behind_release_asset_names(self):
+        for manifest, content in (
+            ("gui/src-tauri/Cargo.toml", '[package]\nversion = "0.1.0"'),
+            ("gui/src-tauri/tauri.conf.json", '{"version":"0.1.0"}'),
+        ):
+            original = (self.root / manifest).read_text()
+            with self.subTest(manifest=manifest):
+                self.write(manifest, content)
+                with self.assertRaisesRegex(guard.SourceMismatch, "version does not match"):
+                    self.validate()
+                self.write(manifest, original)
+
+    def test_release_checks_gui_frontend_and_its_lock_record(self):
+        command = ["python3", "-B", str(SCRIPT), "--repo-root", str(self.root), "--tag", "v0.1.2"]
+        env = os.environ | {"GITHUB_REF": "refs/tags/v0.1.2", "GITHUB_SHA": self.sha}
+        result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.write("gui/app/package.json", '{"version":"0.1.0"}')
+        result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=10)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("gui/app/package.json version does not match", result.stderr)
+        self.write("gui/app/package.json", '{"version":"0.1.2"}')
+        lock = json.loads((self.root / "package-lock.json").read_text())
+        lock["packages"]["gui/app"]["version"] = "0.1.0"
+        self.write("package-lock.json", json.dumps(lock))
+        result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=10)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("workspace gui/app version does not match", result.stderr)
 
     def test_each_selected_npm_lock_workspace_version_is_checked(self):
         lock_path = self.root / "package-lock.json"
