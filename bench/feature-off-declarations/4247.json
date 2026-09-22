@@ -1,0 +1,5 @@
+{
+  "pr": 4247,
+  "date": "2026-07-28",
+  "reason": "[OPUS-5] #4247 changes NO always-compiled code. Every added line in crates/sparq-core/src/compress.rs is either a comment or a `#[cfg(feature = \"spqcprm2\")]` test inside `#[cfg(test)] mod tests`, and the crates/sparq-core/Cargo.toml edit is comment-only. The feature-OFF bundle nevertheless moves because `core::panic::Location` records embed the LINE NUMBER of every panicking call site, and the inserted comment block shifts every always-compiled line below it in that file. MEASURED by rebuilding this PR's own base.sha and head.sha trees locally with the same `cargo build --profile release-wasm -p sparq-wasm --target wasm32-unknown-unknown` the leg runs (deltas reproduce the CI run exactly): base=1555522 head=1555522 bytes, size delta +0, and exactly 3 of 1555522 bytes differ. Nothing entered or left the default build; a control experiment that inserts 34 pure comment lines into this same file reproduces the identical signature (delta 0, 3 differing bytes). Bundle SIZE remains governed separately by the wasm_bundle_bytes ratchet."
+}
