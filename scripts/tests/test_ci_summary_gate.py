@@ -1315,7 +1315,10 @@ class TestAdvisoryRegistryLoading(unittest.TestCase):
             # NEGATIVE: the four gates #3773 restored must NOT be declared advisory.
             for restored in (
                 "site e2e determinism gate (no waitForTimeout calls)",
-                "GUI hermetic guards (browserName tripwire + no-sleep-gate)",
+                # #5691 folded the standalone `gui-hermetic-guards` job (the #1740
+                # browserName tripwire + the gui/e2e no-sleep-gate) into this lane as
+                # its first steps, so THIS is now the name that must stay undeclared.
+                "GUI Playwright mocked-IPC lane",
                 "site a11y ratchet — axe WCAG 2.1 AA (headless Chromium)",
             ):
                 self.assertNotIn(restored, raw, restored)
