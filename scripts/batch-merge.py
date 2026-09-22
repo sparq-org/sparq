@@ -59,7 +59,8 @@
 #     failure (which reports on the queue's synthetic ref, not the PR head), a dropped
 #     auto-merge arm, or checks that never reported. Constituents remain individually
 #     armed — no worse than before. Bisection is deliberately v2: the close comment
-#     carries the v2 marker and NOTHING else is filed (the orchestrator tracks v2).
+#     carries the v2 marker and NOTHING else is filed (the orchestrator tracks v2;
+#     design: research/batch-merge-v2-revision-pinning.md — issue #3490).
 #     A dying omnibus does NOT suppress a new batch in the same run (close-and-recreate),
 #     so one bad batch can never wedge the batcher.
 #  7. RE-ARM LIVENESS. GitHub DROPS the auto-merge arm when a merge group fails. Each
