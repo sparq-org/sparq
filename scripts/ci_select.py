@@ -151,6 +151,17 @@ _ORCHESTRATION_SAFE: list[str] = [
     "scripts/batch-merge.py",
     "scripts/save-agent-log.sh",
     "scripts/push-frontier.sh",
+    # [OPUS-5] #6060: the REACTIVE follow-on engine + its declarative rule table.
+    # Inert for the Rust matrix by the same argument as the triage/dispatch scripts
+    # above: no cargo build/test/clippy/coverage/bench/fuzz/CodeQL step reads either
+    # file, and no crate include_str!/include_bytes!-escapes to scripts/. Their only
+    # CI consumers are flow-on.yml (mints follow-on issues on a MERGED PR) and the
+    # flow-on-gates.yml `quick-gates` self-test leg (`python3
+    # scripts/tests/test_flow_on.py`) — neither is a Rust-CI workflow, and
+    # flow-on-gates.yml carries NO ci-select guard, so that self-test still runs on a
+    # flow-on-only PR and a rule/engine regression is still caught pre-merge.
+    "scripts/flow-on.py",
+    "scripts/flow-on-rules.toml",
 ]
 
 
