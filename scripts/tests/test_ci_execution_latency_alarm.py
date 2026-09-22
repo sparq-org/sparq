@@ -7,7 +7,11 @@ Three halves, because three different things can go wrong:
      inverted. Includes the two guards that are easiest to get wrong in the SILENT
      direction: the missing-baseline fallback (a lane whose runs never complete must still
      be watchable) and the empty-scan-set fail-loud (a detector watching nothing must not
-     report health).
+     report health). M4 (#4802) additionally carries a KNOWN POSITIVE and a KNOWN NEGATIVE
+     named test built from measurements recorded in the detector's own header, a
+     real-workflow-tree anti-vacuity anchor for its admission predicate (whose empty state
+     is legitimate and therefore cannot be fail-loud), and the exit-code rule that keeps a
+     CHRONIC finding from permanently redding — and so muting — the incident modes.
 
   2. THE #4368 DISJOINTNESS — M1's scope is the exact set complement of
      `cron_lane_liveness.py`'s. If either predicate drifts the two detectors could both
@@ -278,6 +282,258 @@ class TestM1NewLaneWindow(unittest.TestCase):
         self.assertEqual(by_path[".github/workflows/ci.yml"]["created_at"],
                          "2026-07-01T00:00:00Z")
 
+class TestM4CadenceFidelity(unittest.TestCase):
+    """M4 (#4802): a lane that keeps running, keeps going green, and delivers a small
+    fraction of its DECLARED cadence.
+
+    The instrument is validated in both directions against measurements recorded in the
+    detector's own header — see `test_KNOWN_POSITIVE_*` and `test_KNOWN_NEGATIVE_*`. The
+    negative is deliberately NOT "the same lanes on a healthy day", because those lanes
+    deliver the same ~12/day on a healthy day; that reconciliation is the whole reason M4
+    keys on the declaration rather than on the day.
+    """
+
+    # The real cron strings from this repo's workflow files paired with the achieved
+    # counts measured over the 24h to 2026-07-28T13:15Z. Nothing is derived from
+    # M4_FIDELITY_FLOOR, so the floor cannot rescale the fixture.
+    MEASURED_2026_07_28 = [
+        ("promote-on-approval.yml", "*/10 * * * *", 12),
+        ("rearm-sweeper.yml", "8,18,28,38,48,58 * * * *", 13),
+        ("auto-arm.yml", "4,14,24,34,44,54 * * * *", 12),
+        ("verdict-bridge.yml", "1,11,21,31,41,51 * * * *", 12),
+        ("batch-merge.yml", "7,22,37,52 * * * *", 12),
+        ("retriage.yml", "*/30 * * * *", 12),
+    ]
+    # Lanes from the SAME census whose declaration is achievable here: 1/1 and 3/4.
+    MEASURED_ACHIEVABLE = [
+        ("ci.yml", "17 3 * * *", 1),
+        ("refresh-start-here.yml", "23 5,11,17,23 * * *", 3),
+    ]
+    HOURLY = ("0 * * * *",)  # exactly 23 declared firings inside the graced 24h window
+
+    def test_KNOWN_POSITIVE_the_measured_2026_07_28_lanes_are_all_divergent(self):
+        lanes = [_lane(workflow=w, crons=(c,), fires=n, spacing_min=30)
+                 for w, c, n in self.MEASURED_2026_07_28]
+        f, c = alarm.find_cadence_fidelity_gaps(lanes, NOW)
+        self.assertEqual(c.get("declaration-unachievable"),
+                         len(self.MEASURED_2026_07_28))
+        self.assertEqual(len(f), 1)
+        named = {x["workflow"] for x in f[0]["lanes"]}
+        self.assertEqual(named, {w for w, _, _ in self.MEASURED_2026_07_28})
+        # The headline of #4802: `promote-on-approval` declares ~144/day and delivers 12.
+        pop = {x["workflow"]: x for x in f[0]["lanes"]}["promote-on-approval.yml"]
+        self.assertEqual(pop["actual"], 12)
+        self.assertGreater(pop["nominal"], 100)
+        self.assertLess(pop["fidelity"], 0.10)
+
+    def test_KNOWN_NEGATIVE_lanes_with_an_achievable_declaration_are_silent(self):
+        lanes = [_lane(workflow=w, crons=(c,), fires=n)
+                 for w, c, n in self.MEASURED_ACHIEVABLE]
+        f, c = alarm.find_cadence_fidelity_gaps(lanes, NOW)
+        self.assertEqual(f, [])
+        self.assertEqual(c.get("declaration-within-the-measured-ceiling"), 2)
+
+    def test_ONE_repo_level_finding_never_one_per_lane(self):
+        """13 identical issues is the shape that gets an alarm muted (#4802). The finding
+        must aggregate, and its subject must not be readable as a single lane."""
+        lanes = [_lane(workflow=w, crons=(c,), fires=n, spacing_min=30)
+                 for w, c, n in self.MEASURED_2026_07_28]
+        f, _ = alarm.find_cadence_fidelity_gaps(lanes, NOW)
+        self.assertEqual(len(f), 1)
+        self.assertTrue(f[0]["workflow"].startswith("(repo-level"))
+        self.assertNotIn(f[0]["workflow"], {w for w, _, _ in self.MEASURED_2026_07_28})
+
+    def test_the_denominator_is_the_DECLARATION_not_M1s_capped_expectation(self):
+        """If M4 used the cap it would be M1 with a different floor, and every one of the
+        measured lanes — which deliver exactly the cap — would read as healthy."""
+        lanes = [_lane(workflow=w, crons=(c,), fires=n, spacing_min=30)
+                 for w, c, n in self.MEASURED_2026_07_28]
+        f, _ = alarm.find_cadence_fidelity_gaps(lanes, NOW)
+        for entry in f[0]["lanes"]:
+            with self.subTest(lane=entry["workflow"]):
+                self.assertGreater(entry["nominal"], alarm.capped_expectation())
+
+    def test_the_fidelity_floor_is_pinned_by_a_LITERAL_fixture_from_BOTH_sides(self):
+        """`0 * * * *` declares exactly 23 firings in the graced window — a number that
+        derives from neither M4_FIDELITY_FLOOR nor the cap, so neither can rescale it.
+        9/23 = 0.391 must raise and 10/23 = 0.435 must not."""
+        f, _ = alarm.find_cadence_fidelity_gaps([_lane(crons=self.HOURLY, fires=9)], NOW)
+        self.assertEqual(len(f), 1)
+        self.assertEqual(f[0]["lanes"][0]["nominal"], 23)
+        self.assertEqual(f[0]["lanes"][0]["actual"], 9)
+        f, c = alarm.find_cadence_fidelity_gaps([_lane(crons=self.HOURLY, fires=10)], NOW)
+        self.assertEqual(f, [])
+        self.assertEqual(c.get("declaration-honoured"), 1)
+
+    def test_the_admission_ceiling_is_pinned_from_BOTH_sides(self):
+        """A lane declaring no more than the measured ceiling is M1's question on M1's
+        denominator; admitting it would put two detectors on one lane. `0 0-11 * * *`
+        declares exactly 12 and `30 0-12 * * *` exactly 13, both literal."""
+        f, c = alarm.find_cadence_fidelity_gaps(
+            [_lane(crons=("0 0-11 * * *",), fires=0)], NOW)
+        self.assertEqual(f, [], "12 declared == the ceiling: not M4's question")
+        self.assertEqual(c.get("declaration-within-the-measured-ceiling"), 1)
+        f, _ = alarm.find_cadence_fidelity_gaps(
+            [_lane(crons=("30 0-12 * * *",), fires=0)], NOW)
+        self.assertEqual(len(f), 1, "13 declared > the ceiling: admitted")
+        self.assertEqual(f[0]["lanes"][0]["nominal"], 13)
+
+    def test_the_floor_constant_is_pinned_against_the_measured_empty_band(self):
+        """0.75 was the worst HONOURED declaration and 0.25 the best FICTIONAL one on the
+        2026-07-28 census; the floor must sit strictly inside that empty band. It is also
+        kept below 0.50 so an hourly lane is not judged on an unmeasured inference."""
+        self.assertGreater(alarm.M4_FIDELITY_FLOOR, 0.25)
+        self.assertLess(alarm.M4_FIDELITY_FLOOR, 0.50)
+
+    def test_CRON_ONLY_lanes_are_in_scope_because_M1_cannot_see_them(self):
+        """Three of the five lanes #4802 measured — promote-on-approval, rearm-sweeper,
+        retriage — are cron-only, and M1's scope predicate excludes every one of them."""
+        lane = _lane(workflow="promote-on-approval.yml", cron_only=True, in_scope=False,
+                     fires=12, spacing_min=30)
+        f, _ = alarm.find_cadence_fidelity_gaps([lane], NOW)
+        self.assertEqual(len(f), 1)
+        self.assertEqual(
+            alarm.find_cron_deficits([lane], NOW)[0], [],
+            "fixture is vacuous unless M1 really is blind to this lane")
+
+    def test_a_truncated_run_sample_is_fail_safe_QUIET_and_counted(self):
+        """The sample is the newest 100 runs. An undercount would manufacture a fiction
+        out of a healthy lane, which is the one direction this alarm must never fail in."""
+        lane = _lane(fires=0)
+        lane["truncated"] = True
+        f, c = alarm.find_cadence_fidelity_gaps([lane], NOW)
+        self.assertEqual(f, [])
+        self.assertEqual(c.get("sample-truncated"), 1)
+
+    def test_coverage_is_judged_per_WINDOW_not_once_against_M1s(self):
+        """A full 100-run page reaching back ~6.9h COVERS a 6h window and does NOT cover
+        M4's 24h one. Deciding truncation once at fetch time against `--window-hours`
+        therefore leaks M1's window into M4: at `--window-hours 6` this sample would be
+        called complete and M4 would divide by a 24h declaration over a ~7h count."""
+        lane = _lane(fires=0, crons=self.HOURLY)
+        newest = NOW - dt.timedelta(minutes=alarm.CRON_GRACE_MINUTES + 1)
+        lane["schedule_run_times"] = [newest - dt.timedelta(minutes=4 * i)
+                                      for i in range(100)]
+        self.assertTrue(alarm.sample_truncated(lane, NOW - dt.timedelta(hours=24)))
+        self.assertFalse(alarm.sample_truncated(lane, NOW - dt.timedelta(hours=6)))
+        f, c = alarm.find_cadence_fidelity_gaps([lane], NOW)
+        self.assertEqual(f, [])
+        self.assertEqual(c.get("sample-truncated"), 1)
+
+    def test_a_page_that_came_back_SHORT_is_complete_not_truncated(self):
+        """ANTI-VACUITY for the guard above: `sample_truncated` must key on the page being
+        FULL, not merely on the oldest run being young, or every quiet lane would mute
+        itself and M4 could never raise at all."""
+        lane = _lane(fires=3, crons=self.HOURLY)
+        self.assertFalse(alarm.sample_truncated(lane, NOW - dt.timedelta(hours=24)))
+
+    def test_THE_CALL_PATH_M4_keeps_its_24h_window_when_M1s_is_overridden(self):
+        """`--window-hours` is M1's. M4's floor and admission ceiling are validated
+        against a 24h census only, and the header states plainly that a six-hour
+        degradation must stay invisible to M4 — so handing M4 the CLI window would let
+        `--window-hours 6` manufacture a chronic declaration finding out of exactly the
+        sub-day burstiness M4 is documented not to see.
+
+        The fixture separates the two windows: an hourly lane that delivered 10 firings,
+        all of them between 7h and 23h ago. Over 24h that is 10/23 = 0.43, above the
+        floor. Over 6h it is 0 of a declared 5, far below it.
+        """
+        lane = _lane(fires=0, crons=self.HOURLY)
+        lane["schedule_run_times"] = [NOW - dt.timedelta(hours=h) for h in range(7, 17)]
+
+        m4_at_24h, _ = alarm.find_cadence_fidelity_gaps([lane], NOW)
+        m4_at_6h, _ = alarm.find_cadence_fidelity_gaps([lane], NOW, 6)
+        self.assertEqual(m4_at_24h, [], "10 of a declared 23 is above the floor")
+        self.assertEqual(len(m4_at_6h), 1,
+                         "fixture is vacuous unless the two windows disagree")
+
+        run = TestCensusAndExitCodes._run
+        import contextlib
+        import io
+        # Assertions key on CENSUS STATES, never on the mode names: every mode name is
+        # printed on every run as a census heading, so a containment check on one of those
+        # is true whether the detector fired or not.
+        for extra, expect_m1 in ((), False), (("--window-hours", "6"), True):
+            with self.subTest(window=extra or "default"):
+                buf = io.StringIO()
+                with contextlib.redirect_stdout(buf):
+                    rc = run(lanes=[lane], live=[], extra=extra)
+                out = buf.getvalue()
+                # M1 DOES honour the override — without this the M4 assertion below would
+                # pass on a build that ignored `--window-hours` everywhere.
+                self.assertEqual("firing-deficit: 1" in out, expect_m1)
+                self.assertEqual(rc, 1 if expect_m1 else 0)
+                # M4 reached `declaration-honoured`, which is only true on its own 24h
+                # window; on a 6h one this same lane is `declaration-unachievable`.
+                self.assertIn("declaration-honoured: 1", out)
+                self.assertNotIn("declaration-unachievable", out)
+
+    def test_a_lane_younger_than_the_window_is_skipped_and_counted(self):
+        f, c = alarm.find_cadence_fidelity_gaps([_lane(fires=0, created_hours_ago=2)], NOW)
+        self.assertEqual(f, [])
+        self.assertEqual(c.get("lane-too-new-for-an-expectation"), 1)
+
+    def test_the_quiet_exits_are_not_unconditional_mutes(self):
+        """ANTI-VACUITY for both skips above: the identical delivery from an established,
+        untruncated lane must still be divergent."""
+        self.assertEqual(len(alarm.find_cadence_fidelity_gaps([_lane(fires=0)], NOW)[0]), 1)
+
+    def test_a_disabled_or_unparseable_lane_is_quiet_and_VISIBLE(self):
+        for lane, state in ((_lane(state="disabled_manually", fires=0), "disabled"),
+                            (_lane(crons=("nonsense",), fires=0), "cron-unparseable"),
+                            (_lane(crons=(), fires=0), "not-scheduled")):
+            with self.subTest(state=state):
+                f, c = alarm.find_cadence_fidelity_gaps([lane], NOW)
+                self.assertEqual(f, [])
+                self.assertEqual(c.get(state), 1)
+
+    def test_the_real_workflow_tree_admits_a_non_empty_M4_population(self):
+        """ANTI-VACUITY over the REAL tree. M4's population is defined by a CONDITION, so
+        an empty one is its success state and cannot be fail-loud the way M1's empty scope
+        is — which means a broken admission predicate would look exactly like a fixed
+        repo. This pins that the predicate still admits the lanes #4802 named."""
+        start = NOW - dt.timedelta(hours=alarm.M4_WINDOW_HOURS)
+        end = NOW - dt.timedelta(minutes=alarm.CRON_GRACE_MINUTES)
+        ceiling = alarm.capped_expectation(alarm.M4_WINDOW_HOURS)
+        admitted = set()
+        for path in sorted(WORKFLOWS.glob("*.yml")):
+            on = alarm.workflow_triggers(path.read_text())
+            crons = [s.get("cron") for s in (on.get("schedule") or [])
+                     if isinstance(s, dict) and isinstance(s.get("cron"), str)]
+            if crons and sum(alarm.expected_firings(c, start, end)
+                             for c in crons) > ceiling:
+                admitted.add(path.name)
+        self.assertGreaterEqual(len(admitted), 5, f"M4 admission collapsed to {admitted}")
+        for named in ("promote-on-approval.yml", "rearm-sweeper.yml", "retriage.yml"):
+            with self.subTest(workflow=named):
+                self.assertIn(named, admitted)
+
+    def test_the_fetch_layer_supplies_run_times_for_CRON_ONLY_lanes_too(self):
+        """THE CALL SITE. Narrowing the run-time fetch to M1's scope would leave M4
+        reading `actual = 0` for every cron-only lane and calling all of them fictions."""
+        listing = {"workflows": [
+            {"path": f".github/workflows/{p.name}", "state": "active",
+             "created_at": "2020-01-01T00:00:00Z"} for p in WORKFLOWS.glob("*.yml")]}
+        fetched = []
+
+        def fake_gh(args, *, parse=True):
+            url = args[-1]
+            if "actions/workflows?" in url:
+                return listing
+            fetched.append(url)
+            return {"workflow_runs": []}
+
+        real = alarm._gh
+        alarm._gh = fake_gh
+        try:
+            alarm.fetch_lanes("o/r", WORKFLOWS, 24.0, NOW)
+        finally:
+            alarm._gh = real
+        # promote-on-approval is cron-only; M1 would never have fetched it.
+        self.assertTrue(any("promote-on-approval.yml/runs" in u for u in fetched),
+                        "no schedule-run fetch for a cron-only lane")
+
+
 class TestQueueWaitIsAnHonestlyDocumentedGap(unittest.TestCase):
     """Queue wait is NOT detected. This class exists so that stays TRUE and stays VISIBLE.
 
@@ -460,7 +716,9 @@ class TestCensusAndExitCodes(unittest.TestCase):
         _, c1 = alarm.find_cron_deficits([_lane(fires=36)], NOW)
         _, c3 = alarm.find_execution_overruns(
             [_run_obj(age_min=1)], TestM3ExecutionOverrun.BASE, NOW)
-        for name, census in (("M1", c1), ("M3", c3)):
+        _, c4 = alarm.find_cadence_fidelity_gaps(
+            [_lane(crons=TestM4CadenceFidelity.HOURLY, fires=10)], NOW)
+        for name, census in (("M1", c1), ("M3", c3), ("M4", c4)):
             with self.subTest(mode=name):
                 self.assertTrue(census, f"{name} emitted no census on the all-clear")
 
@@ -471,6 +729,42 @@ class TestCensusAndExitCodes(unittest.TestCase):
         alarmed = self._run(lanes=[_lane(fires=0)], live=[])
         broken = alarm.main(["--repo", "not-a-slug", "--dry-run"])
         self.assertEqual((clean, alarmed, broken), (0, 1, 2))
+
+    def test_an_M4_only_finding_is_REPORTED_but_does_NOT_red_the_run(self):
+        """M4 is chronic: true on a good day, and true until a workflow file is edited.
+        Wiring it to exit 1 would leave this hourly lane permanently red, which mutes the
+        two INCIDENT modes sharing it. The artifact is the deduped issue, not the red."""
+        import contextlib
+        import io
+        # `*/10` declaring 142 and delivering 12 is the measured #4802 shape, and it is
+        # exactly AT M1's capped expectation, so M1 is silent on it.
+        chronic = [_lane(crons=("*/10 * * * *",), fires=alarm.capped_expectation(),
+                         spacing_min=30)]
+        self.assertEqual(alarm.find_cron_deficits(chronic, NOW)[0], [],
+                         "fixture is vacuous unless M1 is silent on it")
+        self.assertEqual(len(alarm.find_cadence_fidelity_gaps(chronic, NOW)[0]), 1)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = self._run(lanes=chronic, live=[])
+        self.assertEqual(rc, 0, "a chronic finding must not red the incident lane")
+        out = buf.getvalue()
+        self.assertIn("M4-declared-cadence-unachievable", out,
+                      "the finding must still reach the issue body")
+        self.assertNotIn("::error::", out)
+
+    def test_an_incident_still_reds_even_when_M4_is_also_firing(self):
+        """ANTI-VACUITY for the exit rule above: the soft-exit must be scoped to M4, not
+        an unconditional `return 0`."""
+        import contextlib
+        import io
+        both = [_lane(crons=("*/10 * * * *",), fires=0)]
+        self.assertEqual(len(alarm.find_cron_deficits(both, NOW)[0]), 1)
+        self.assertEqual(len(alarm.find_cadence_fidelity_gaps(both, NOW)[0]), 1)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = self._run(lanes=both, live=[])
+        self.assertEqual(rc, 1)
+        self.assertIn("::error::", buf.getvalue())
 
     def test_an_empty_scan_set_is_fail_LOUD(self):
         """100% question, applied to M1: if every scheduled workflow were cron-only, M1's
@@ -497,7 +791,7 @@ class TestCensusAndExitCodes(unittest.TestCase):
             self.assertIn(expect, buf.getvalue())
 
     @staticmethod
-    def _run(lanes, live, baselines=None):
+    def _run(lanes, live, baselines=None, extra=()):
         state = {
             "repo": "o/r",
             "lanes": [dict(x, schedule_run_times=[t.strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -510,7 +804,7 @@ class TestCensusAndExitCodes(unittest.TestCase):
             json.dump(state, fh)
             path = fh.name
         return alarm.main(["--state-file", path, "--now", "2026-07-28T12:00:00Z",
-                           "--dry-run"])
+                           "--dry-run", *extra])
 
 
 class TestIssueBody(unittest.TestCase):
