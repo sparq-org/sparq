@@ -95,6 +95,18 @@ export const SPECS: Spec[] = [
       "The vec: vector-search extension to SPARQL — magic-predicate k-NN patterns with score bindings, answer-exact vs approximate modes, filtered-search answer-safety, the persisted store format and its staleness contract, embedding acquisition, and grounded-generation obligations — plus a normative embedding-provenance record (model, version, metric, normalisation, dimension) with a MUST-reject compatibility rule and a deterministic tie-break. Every normative assertion carries a testable ID; an informative report states which requirements the sparq build satisfies today.",
   },
   {
+    slug: "trust-expression",
+    source: "trust-expression.typ",
+    title:
+      "Trust Expression: A Verifier-Holder Contract for Framework-Anchored Attestation Queries",
+    shortName: "trust-expression",
+    status: "unofficial",
+    date: "2026-07-06",
+    editors: "Jesse Wright · the sparq project",
+    blurb:
+      "The minimal verifier-holder contract for trust-framework-anchored questions — one SPARQL query, one RDF trust-requirements document, one nonce — with two trust modes (enumerated issuers; framework-certified issuers with certification-scope conformance, e.g. eIDAS 2.0 / UK DIATF), non-revocation and certification as positive time-windowed attestations (OWA-monotone, fail-closed), a normative RDF 1.2 reifier response encoding with a fixed named-graph mapping, and a reference rewrite into plain SPARQL that doubles as the conformance oracle. Framework trust bottoms out in a trust anchor, not cryptography; the ZK realisation is research-grade and NOT externally audited (sq-qhy4).",
+  },
+  {
     slug: "trust-graph-authz",
     source: "trust-graph-authz.typ",
     title:
