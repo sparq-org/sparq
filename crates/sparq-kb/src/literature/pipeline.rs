@@ -196,6 +196,100 @@ impl Sidecar {
         }
         self.grounded as f64 / self.candidates_total as f64
     }
+
+    /// The **source-yield rate**: sources that produced ≥1 grounded Finding
+    /// (`pkg:Explored`) / sources the connector parsed, in `[0,1]`. `1.0` when the batch
+    /// parsed no sources (vacuous — nothing was wasted), mirroring
+    /// [`grounding_rate`](Self::grounding_rate)'s empty-batch convention.
+    ///
+    /// This is a **targeting**-quality signal (how well the connector query selected
+    /// usable sources), NOT a quality signal for any individual Finding, and it is
+    /// deliberately computed over parsed sources only — `sources_skipped` (no DOI/title)
+    /// never reached extraction, so folding it in here would conflate connector-input
+    /// hygiene with extraction yield.
+    pub fn source_yield_rate(&self) -> f64 {
+        let sources = self.sources_explored + self.sources_dead_end;
+        if sources == 0 {
+            return 1.0;
+        }
+        self.sources_explored as f64 / sources as f64
+    }
+
+    /// Emit this run's batch-level quality as **DQV `dqv:QualityMeasurement` triples** —
+    /// the §4.5 "how good is this batch?" surface, so the run verdict is a *query* (the
+    /// `batch-quality` canned query) rather than a log line only.
+    ///
+    /// The document is standalone (its own `@prefix` block) and is emitted SEPARATELY
+    /// from the finding artifacts: the batch metrics describe the *run*, not the graph's
+    /// content, so a consumer can load the findings without the run telemetry, or the
+    /// telemetry alone to compare batches over time.
+    ///
+    /// `batch_iri` names the run (see [`batch_iri`]); each measurement hangs off it as
+    /// `{batch_iri}/quality/{metric}`. Only metrics this pipeline actually computes are
+    /// emitted — see [`crate::vocab::BATCH_QUALITY_DIMENSION`] for why the design's
+    /// audit-, dedup- and topic-coverage metrics are absent rather than emitted as zero.
+    ///
+    /// **Honest reading of these numbers:** both are *structural* rates. A grounding rate
+    /// of 1.0 means every committed Finding is anchored in its source text and cites only
+    /// in-batch sources; it does **not** mean the Findings are true. Extraction accuracy
+    /// is unmeasured until the Phase-6 human-audited sample.
+    pub fn quality_measurements_turtle(
+        &self,
+        batch_iri: &str,
+        generated_at_time: &str,
+    ) -> Result<String, String> {
+        let mut t = String::from(QUALITY_TTL_PREFIXES);
+        writeln!(
+            t,
+            "<{batch}> a prov:Activity ;\n  \
+             rdfs:label \"literature ingestion batch\"@en ;\n  \
+             prov:wasAssociatedWith <{agent}> ;\n  \
+             prov:generatedAtTime \"{ts}\"^^xsd:dateTime ;\n  \
+             dqv:hasQualityMeasurement <{batch}/quality/grounding-rate> , \
+             <{batch}/quality/source-yield-rate> .",
+            batch = batch_iri,
+            agent = MACHINE_AGENT_IRI,
+            ts = generated_at_time,
+        )
+        .map_err(|e| e.to_string())?;
+        for (slug, metric, value) in [
+            (
+                "grounding-rate",
+                crate::vocab::GROUNDING_RATE_METRIC,
+                self.grounding_rate(),
+            ),
+            (
+                "source-yield-rate",
+                crate::vocab::SOURCE_YIELD_RATE_METRIC,
+                self.source_yield_rate(),
+            ),
+        ] {
+            writeln!(
+                t,
+                "\n<{batch}/quality/{slug}> a dqv:QualityMeasurement ;\n  \
+                 dqv:isMeasurementOf <{metric}> ;\n  \
+                 dqv:computedOn <{batch}> ;\n  \
+                 dqv:value {value:.4} ;\n  \
+                 prov:wasAttributedTo <{agent}> ;\n  \
+                 prov:generatedAtTime \"{ts}\"^^xsd:dateTime .",
+                batch = batch_iri,
+                slug = slug,
+                metric = metric,
+                value = value,
+                agent = MACHINE_AGENT_IRI,
+                ts = generated_at_time,
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        Ok(t)
+    }
+}
+
+/// The canonical IRI naming one ingestion run, the subject the batch-quality
+/// measurements are `dqv:computedOn`. `batch_id` is the caller's run identifier (a
+/// fixture name, a pilot run id); it is used verbatim, so pass an IRI-safe token.
+pub fn batch_iri(batch_id: &str) -> String {
+    format!("{}/batch/{}", MACHINE_AGENT_IRI, batch_id)
 }
 
 /// The output of one pipeline run: the emitted Turtle (grounded machine-tier triples with
@@ -478,6 +572,16 @@ const TTL_PREFIXES: &str = "@prefix pkg:     <https://sparq.dev/ns/pkg#> .\n\
      @prefix secx:    <https://w3id.org/zkp-sparql/sec-prop#> .\n\
      @prefix rdfs:    <http://www.w3.org/2000/01/rdf-schema#> .\n\
      @prefix xsd:     <http://www.w3.org/2001/XMLSchema#> .\n\n";
+
+/// The prefix block of the batch-quality artifact
+/// ([`Sidecar::quality_measurements_turtle`]). Deliberately its OWN block, not an
+/// extension of [`TTL_PREFIXES`]: the quality document is a separate artifact, and the
+/// finding artifacts are byte-pinned by a golden test, so they must not gain a `dqv:`
+/// prefix they never use.
+const QUALITY_TTL_PREFIXES: &str = "@prefix prov: <http://www.w3.org/ns/prov#> .\n\
+     @prefix dqv:  <http://www.w3.org/ns/dqv#> .\n\
+     @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .\n\
+     @prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .\n\n";
 
 /// Write the extraction-agent node (typed `pkg:MachineAgent` so the literature shapes bind).
 fn write_agent_node(t: &mut String) -> Result<(), String> {
@@ -977,5 +1081,93 @@ mod tests {
         assert!(out.completeness.is_complete());
         assert!(!out.machine_tier.contains("INCOMPLETE"));
         assert!(!out.license_restricted_tier.contains("INCOMPLETE"));
+    }
+
+    // --- batch-quality DQV measurements (sq-2489d.5, design §4.5) -----------
+
+    #[test]
+    fn source_yield_rate_counts_explored_over_parsed_sources() {
+        // Explicit arithmetic, independent of the fixture: 1 of 4 parsed sources yielded.
+        let sc = Sidecar {
+            sources_explored: 1,
+            sources_dead_end: 3,
+            // Skipped sources never reached extraction, so they must NOT move the yield.
+            sources_skipped: 96,
+            ..Sidecar::default()
+        };
+        assert!((sc.source_yield_rate() - 0.25).abs() < 1e-9);
+        // Empty batch: vacuously 1.0 (mirrors grounding_rate) — nothing was wasted.
+        assert_eq!(Sidecar::default().source_yield_rate(), 1.0);
+        // All sources yielding is 1.0.
+        let all = Sidecar {
+            sources_explored: 3,
+            ..Sidecar::default()
+        };
+        assert_eq!(all.source_yield_rate(), 1.0);
+    }
+
+    #[test]
+    fn batch_iri_is_the_agent_scoped_run_iri() {
+        assert_eq!(
+            batch_iri("openalex-fixture"),
+            format!("{}/batch/openalex-fixture", MACHINE_AGENT_IRI)
+        );
+    }
+
+    #[test]
+    fn quality_measurements_carry_both_metrics_with_the_computed_values() {
+        let out = run_fixture();
+        let iri = batch_iri("fixture");
+        let ttl = out
+            .sidecar
+            .quality_measurements_turtle(&iri, "2026-07-05T14:30:00Z")
+            .unwrap();
+        // The batch node the measurements hang off, with its PROV lineage.
+        assert!(ttl.contains(&format!("<{}> a prov:Activity", iri)));
+        assert!(ttl.contains(&format!("prov:wasAssociatedWith <{}>", MACHINE_AGENT_IRI)));
+        // Exactly the two metrics the pipeline computes — no unmeasured metric is emitted.
+        assert_eq!(ttl.matches("a dqv:QualityMeasurement").count(), 2);
+        assert!(ttl.contains(&format!(
+            "dqv:isMeasurementOf <{}>",
+            crate::vocab::GROUNDING_RATE_METRIC
+        )));
+        assert!(ttl.contains(&format!(
+            "dqv:isMeasurementOf <{}>",
+            crate::vocab::SOURCE_YIELD_RATE_METRIC
+        )));
+        // The VALUES are the sidecar's, not a constant: 4 of 6 candidates grounded.
+        assert_eq!(out.sidecar.grounded, 4);
+        assert_eq!(out.sidecar.candidates_total, 6);
+        assert!(
+            ttl.contains(&format!("dqv:value {:.4}", out.sidecar.grounding_rate())),
+            "grounding-rate value must be the computed rate; got:\n{}",
+            ttl
+        );
+        assert!(
+            ttl.contains(&format!("dqv:value {:.4}", out.sidecar.source_yield_rate())),
+            "source-yield value must be the computed rate; got:\n{}",
+            ttl
+        );
+        // Every measurement is computedOn the batch and carries the injected timestamp.
+        assert_eq!(ttl.matches(&format!("dqv:computedOn <{}>", iri)).count(), 2);
+        assert_eq!(
+            ttl.matches("\"2026-07-05T14:30:00Z\"^^xsd:dateTime").count(),
+            3, // the batch activity + one per measurement
+        );
+    }
+
+    #[test]
+    fn quality_artifact_is_separate_from_the_finding_artifacts() {
+        // The batch telemetry describes the RUN, not the graph content: it must not leak
+        // findings, and the finding artifact must not gain the dqv: prefix (the golden
+        // byte-for-byte artifact test depends on that).
+        let out = run_fixture();
+        let ttl = out
+            .sidecar
+            .quality_measurements_turtle(&batch_iri("fixture"), "2026-07-05T14:30:00Z")
+            .unwrap();
+        assert!(!ttl.contains("a pkg:Finding"));
+        assert!(!ttl.contains("a pkg:Source"));
+        assert!(!out.turtle.contains("dqv:"));
     }
 }

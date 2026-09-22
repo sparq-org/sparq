@@ -74,6 +74,9 @@ no new bespoke predicate:
 | `pkg:EpistemicBasisDimension` | `dqv:Dimension` | the categorical assurance axis (proven/claimed/conjectured) — `pkg:assurance` is a `dqv:Metric` in it |
 | `pkg:ConfidenceMeasurement` | `dqv:Metric` | the metric a Finding's `pkg:confidence` measures |
 | `pkg:SourceReliabilityMeasurement` | `dqv:Metric` | the metric a Source's `pkg:confidence` measures |
+| `pkg:BatchQualityDimension` | `dqv:Dimension` | the RUN-level axis (sq-2489d.5): how good was one ingestion batch |
+| `pkg:GroundingRateMetric` | `dqv:Metric` | a batch's citation-grounding rate (grounded / candidate Findings) |
+| `pkg:SourceYieldRateMetric` | `dqv:Metric` | the fraction of a batch's sources that yielded ≥1 grounded Finding |
 
 A subject's `pkg:confidence` is kept as a convenience shorthand (every canned query
 reads it directly, no regression) and is **also** expressible as the `dqv:value` of a
@@ -83,6 +86,17 @@ example file demonstrates both forms agreeing). DQV carries
 `prov:wasGeneratedBy`/`wasAttributedTo` natively, so a measurement composes with
 `sparq-prov` for free, and `pkg:Source rdfs:subClassOf dcat:CatalogRecord` (DQV's
 anchor) was already paid.
+
+The three **batch-quality** individuals (sq-2489d.5, design §4.5) reuse the same shape one
+level up: the subject is the ingestion *run* (a `prov:Activity`) rather than a Finding, so
+"how good was this batch?" is a query (`batch-quality`) that can feed a per-topic
+recommend-adopt decision instead of living only in a run log. Only metrics the pipeline
+**actually computes** are declared — the design also names extraction-precision-on-sample
+(needs a human-audited sample, Phase 6), dedup-collision rate and topic-coverage, and
+those are deliberately absent rather than declared-and-unpopulated, because an unmeasured
+metric IRI in the vocabulary reads as a capability the code does not have. Both declared
+metrics are **structural** (anchoring + targeting); like the SHACL gate, neither measures
+whether a machine-extracted Finding is *true*.
 
 **Honest caveats (the design's §3 caveats, recorded here):** DQV is a W3C **Working
 Group Note** (2016), *not* a Recommendation — lower normative weight than

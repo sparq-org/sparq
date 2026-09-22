@@ -69,6 +69,7 @@ fn registry_is_complete_and_named() {
         "findings-about",
         "finding-provenance",
         "finding-quality-dqv",
+        "batch-quality",
         "unexplored-sources",
         "task-depends-on",
         "task-blocks",
@@ -261,6 +262,80 @@ exq:meas a dqv:QualityMeasurement ;
         found,
         "the DQV quality query must surface the fixture Finding's measurement; got {} rows",
         r.rows.len()
+    );
+}
+
+/// The **batch-quality** query (sq-2489d.5, design §4.5) makes "how good was THIS
+/// ingestion batch?" a query. Over a fixture carrying BOTH a run-level measurement
+/// (`pkg:GroundingRateMetric`, in the `pkg:BatchQualityDimension`) and a per-Finding one
+/// (`pkg:ConfidenceMeasurement`, in the epistemic-weight dimension), `batch-quality` must
+/// return the run metric and NOT the belief — the `dqv:inDimension` filter is what keeps a
+/// run statistic from being read as confidence in a claim.
+///
+/// The fixture mirrors the shape
+/// `literature::pipeline::Sidecar::quality_measurements_turtle` emits (that emitter is
+/// gated behind the `literature` feature, so the query is proved here against the same
+/// triples without coupling the two features).
+#[test]
+fn ground_batch_quality_returns_run_metrics_not_per_finding_beliefs() {
+    const BATCH_FIXTURE: &str = r#"
+@prefix pkg:  <https://sparq.dev/ns/pkg#> .
+@prefix dqv:  <http://www.w3.org/ns/dqv#> .
+@prefix prov: <http://www.w3.org/ns/prov#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix exb:  <https://sparq.dev/ns/pkg/batch-fixture#> .
+
+exb:batch a prov:Activity ;
+  rdfs:label "fixture ingestion batch"@en-GB ;
+  dqv:hasQualityMeasurement exb:meas-grounding , exb:meas-yield .
+exb:meas-grounding a dqv:QualityMeasurement ;
+  dqv:isMeasurementOf pkg:GroundingRateMetric ;
+  dqv:computedOn exb:batch ;
+  dqv:value 0.6667 .
+exb:meas-yield a dqv:QualityMeasurement ;
+  dqv:isMeasurementOf pkg:SourceYieldRateMetric ;
+  dqv:computedOn exb:batch ;
+  dqv:value 0.5 .
+
+# A per-FINDING measurement in a DIFFERENT dimension — must NOT appear in the answer.
+exb:meas-belief a dqv:QualityMeasurement ;
+  dqv:isMeasurementOf pkg:ConfidenceMeasurement ;
+  dqv:computedOn exb:some-finding ;
+  dqv:value 0.9 .
+"#;
+
+    let g = load_pkg_with_extra(&[BATCH_FIXTURE]).expect("PKG + batch fixture loads");
+    let r = ask_pkg(&g, &canned::BATCH_QUALITY.render(None)).expect("batch-quality query runs");
+
+    let rows: Vec<(String, String, String)> = r
+        .rows
+        .iter()
+        .map(|row| {
+            let value = match &row[2] {
+                Some(Term::Literal(l)) => l.value().to_string(),
+                _ => String::new(),
+            };
+            (term_str(&row[0]), term_str(&row[1]), value)
+        })
+        .collect();
+
+    // Exactly the two run-level metrics, both computed on the batch.
+    assert_eq!(
+        rows.len(),
+        2,
+        "batch-quality must return only the two batch-dimension measurements; got {rows:?}"
+    );
+    assert!(rows.iter().all(|(batch, _, _)| batch == "batch"));
+    assert!(rows
+        .iter()
+        .any(|(_, m, v)| m == "groundingratemetric" && v == "0.6667"));
+    assert!(rows
+        .iter()
+        .any(|(_, m, v)| m == "sourceyieldratemetric" && v == "0.5"));
+    // The per-Finding belief is in another dimension and must be filtered out.
+    assert!(
+        !rows.iter().any(|(_, m, _)| m == "confidencemeasurement"),
+        "a per-Finding confidence is not batch quality; got {rows:?}"
     );
 }
 
