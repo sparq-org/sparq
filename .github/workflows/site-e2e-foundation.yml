@@ -56,6 +56,19 @@ jobs:
   # install, no browser, no toolchain, ~15 s. NOT declared in
   # `.github/advisory-registry.json`, so `ci-summary / gate` waits on it — which is what
   # `.github/E2E-GATING-POLICY.md` §1.1 always claimed and, until now, was not true.
+  #
+  # [OPUS-5] sq-6vshe.7(e) / issue #5692 — CONSOLIDATION FOLD EVALUATED AND **DECLINED**.
+  # Do not re-file: this job is a one-grep runner claim, which is the shape the runner-
+  # consolidation sweep looks for, but its only unconditional gating sibling is
+  # `a11y-ratchet` and folding into it is a net LOSS. Both jobs GATE (neither is declared
+  # in the registry), so the fold would merge two distinct gate identities — each a
+  # separately-named row of `.github/E2E-GATING-POLICY.md` §2 — into one check-run whose
+  # name would misdescribe half the failures it reports. It would also force a choice
+  # between two regressions that do not exist today: grep-first fail-fast suppresses the
+  # a11y result on a determinism failure, and the `if: ${{ !cancelled() }}` fix for that
+  # withholds the sub-minute determinism verdict until the browser lane concludes. The
+  # saving is ONE claim on `site/**` events (this workflow has no merge_group leg).
+  # Full rationale + the criterion it refines: `research/ci-runner-consolidation-2026-07.md` §8.
   determinism-gate:
     name: site e2e determinism gate (no waitForTimeout calls)
     runs-on: ubuntu-latest
