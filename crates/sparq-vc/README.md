@@ -80,10 +80,21 @@ Nothing in sparq's default build or the wasm artifact depends on this crate —
 Data Integrity verify/sign. It reuses [`sparq-canon`](../sparq-canon)'s single
 RDFC-1.0 bridge, so the canonical seam stays single-sourced. `publish = false`.
 
+<!-- [OPUS-5] #6132: this crate README is the CANONICAL copy of the path-dependency
+     stanza. skills/verifiable-credentials/SKILL.md materialises it into a BEGIN-INJECT
+     region sourced from `crates/sparq-vc/README.md#path-dep` (scripts/gen-doc-inject.py;
+     research/docs-site-single-sourcing-anti-drift.md §5), because neither renderer can
+     link to the other — a crate README is read on GitHub/crates.io/docs.rs, a SKILL.md
+     by an agent. Keep the anchored block LINK-FREE (an injected repo-relative link
+     would resolve from the consumer's directory, not this one), and keep the
+     ANCHOR / ANCHOR_END marker lines one-per-line. Do not nest a comment terminator in
+     this comment: HTML comments do not nest, so the rest would render as visible text. -->
+<!-- ANCHOR: path-dep -->
 ```toml
 sparq-vc = { path = "crates/sparq-vc" }                       # did:key + verify/sign
 sparq-vc = { path = "crates/sparq-vc", features = ["did-web"] } # + did:web resolution
 ```
+<!-- ANCHOR_END: path-dep -->
 
 ## 📚 Learn more
 

@@ -153,6 +153,27 @@ while a hand-copy of the same text still is.
 This is the mechanism that closes the `README.md` ↔ `crates/sparq-cli/README.md` and the
 three-way `*-wasm` README duplications in §3.
 
+**Update — the generator has landed (issue #6132).** `scripts/gen-doc-inject.py`
+materialises each region and `--check` is wired GATING in `docs-quality.yml`'s
+quick-gates job. It reads the SAME `<!-- ANCHOR: name -->` markers mdBook already
+consumes, so one anchor serves both the guide's `{{#include}}` and a non-mdBook
+renderer — there is no second marker vocabulary. A marker inside a fenced code block is
+documentation of the syntax rather than a region, which is what keeps the example above
+from rewriting this record. Its first and only consumer so far is the `sparq-vc`
+path-dependency stanza (`skills/verifiable-credentials/SKILL.md` ← the `path-dep` anchor
+in `crates/sparq-vc/README.md`); the `sparq-cli` and `*-wasm` README duplications named
+above are **not** yet converted and remain open.
+
+**Coordination with §4, now enforced rather than merely noted.** Injecting a stanza
+obsoletes any duplication-allowlist entry that used to excuse the hand-copy, and §4's
+gate FAILS on an entry that suppressed nothing — so the entry must be deleted in the
+same change or `ci-summary / gate` reds on an otherwise-correct PR. The two edits live
+in different files, so `gen-doc-inject.py --check` reds on an allowlist entry naming
+both a region's consumer and its source, naming the entry to delete. It is inert while
+that allowlist is absent, which is the state on `main` today: §4's checker and its
+allowlist are still an unmerged PR, so this generator's PR had no entry to delete.
+Whichever of the two lands second is the one that must carry the deletion.
+
 ## 6. Code examples as tested code
 
 The `{{#rustdoc_include <example>:<anchor>}}` pattern is proven in
@@ -251,7 +272,9 @@ tracked:
 
 1. `ci`: `scripts/check-doc-duplication.py` + `docs-quality.yml` wiring + both-direction
    self-test (§4). Exact tier gating, near tier advisory.
-2. `ci`: the `BEGIN-INJECT`/`END-INJECT` generator with `--check` (§5).
+2. ~~`ci`: the `BEGIN-INJECT`/`END-INJECT` generator with `--check` (§5).~~ **Landed**
+   (issue #6132) — `scripts/gen-doc-inject.py`, GATING in `docs-quality.yml`. The
+   remaining §3 README duplications it enables are still to be converted.
 3. `docs`: migrate the §3 duplicated code examples into `crates/*/examples/*.rs` with
    `ANCHOR` regions and inject them into both consumers (§6).
 4. `ci`: require `#![doc = include_str!("../README.md")]` for publishable crates (§7).

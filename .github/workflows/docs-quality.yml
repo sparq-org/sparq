@@ -455,6 +455,35 @@ jobs:
       - name: Self-test mdbook-rewrite-links.py (which link targets get rewritten)
         run: python3 scripts/mdbook-rewrite-links.py --self-test
 
+      # [OPUS-5] #6132: the BEGIN-INJECT/END-INJECT generator (scripts/gen-doc-inject.py;
+      # research/docs-site-single-sourcing-anti-drift.md §5, §10 follow-up 2) — the
+      # single-sourcing mechanism for the renderers mdBook CANNOT reach. mdBook's
+      # `{{#include}}` (self-tested above) only serves book/; a crate README is read by
+      # GitHub/crates.io/rustdoc and a SKILL.md by an agent, so where the same stanza must
+      # appear in both, neither can link to the other and neither can preprocess. The copy
+      # is therefore MATERIALISED from the canonical `ANCHOR:` region and `--check` is the
+      # standard "generated file is up to date" gate. Without it the region is a hand-copy
+      # again the moment the source anchor changes — silently, since the file stays valid
+      # markdown. First consumer: skills/verifiable-credentials/SKILL.md ← the `path-dep`
+      # anchor in crates/sparq-vc/README.md.
+      #
+      # `--check` also reds an entry in scripts/doc-duplication-allowlist.json (issue
+      # #5019) that names BOTH a region's consumer and its source: injecting the stanza
+      # obsoletes the entry that used to excuse the hand-copy, and that gate FAILS on an
+      # entry which suppressed nothing. The two edits live in different files, so this is
+      # what names the obligation instead of leaving a generic stale-config failure on
+      # `ci-summary / gate`. It is inert while that allowlist does not exist.
+      #
+      # GATING: deterministic, in-repo, no network, no mdbook, no build. The self-test's
+      # both-direction fixtures prove the drift check has teeth (a region that drifted from
+      # its source must red; a matching one must pass) and pin the fenced-example case —
+      # the research record documents this very marker syntax inside a ```text fence, and
+      # treating that as a region would rewrite the record specifying the script.
+      - name: Self-test gen-doc-inject.py (drift teeth + fenced-example + allowlist coordination)
+        run: python3 scripts/gen-doc-inject.py --self-test
+      - name: "Enforce injected doc regions match their source anchors (§5) — GATING"
+        run: python3 scripts/gen-doc-inject.py --check
+
       - name: Demo deployment manifests
         run: |
           bash deploy/demo/check.sh
