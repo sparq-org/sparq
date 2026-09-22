@@ -148,7 +148,12 @@ jobs:
           echo "have_labels=1" >> "$GITHUB_OUTPUT"
 
       # ---- former job: new-crate-completeness (G1) ----
-      - name: new-crate-completeness (G1) — new crate ships bench + README (+ SKILL if public)
+      # [OPUS-5] #5843 — G1 also carries the npm leg (G1-npm): a new
+      # `packages/<x>` must resolve to a repo-root workspace entry AND have its
+      # test script invoked by some workflow leg, so a new package can never ship
+      # tests that never execute. Same script, same HARD step — no new check-run,
+      # so the advisory registry and branch protection are untouched.
+      - name: new-crate-completeness (G1) — new crate ships bench + README (+ SKILL if public); new npm package is a workspace member a CI leg tests
         env:
           # On pull_request github.base_ref is the bare target branch ('main'); on
           # merge_group it is empty, so fall back to merge_group.base_ref (a full
