@@ -117,8 +117,14 @@
 #   stale `area:*` label is inert — no `[[map]]` row names it, and the deriver only
 #   ever emits an area some changed path attributes to — so it costs a line in the
 #   label list, not a wrong partition.
-# * Adding a top-level directory: add a `[[map]]` row, or every PR touching it
-#   silently falls back to `__global__` and starves the frontier again.
+# * Adding a top-level directory — or any repo-root file: add a `[[map]]` row, or every
+#   PR touching it silently falls back to `__global__` and starves the frontier again.
+#   Enforced on YOUR PR by `scripts/pr-area-labels.py --check-totality`, run from
+#   docs-quality's `quick-gates` — the lane with NO `paths:` filter. It lives there, not
+#   with the rest of the suite in routing-self-tests.yml, precisely because a `paths:`
+#   filter cannot name a file that does not exist yet: before issue #5160 a PR adding one
+#   (reported in #5160: `.jscpd.json`, added by #5150) triggered no lane, merged with the totality assertion
+#   already broken, and reddened the NEXT unrelated PR instead.
 # * `scripts/tests/test_pr_area_labels.py` asserts every row's pattern root exists
 #   on disk and every row's `area` is either a live workspace member or a declared
 #   `[lanes] non_crate` name — so a typo'd row cannot ship.
