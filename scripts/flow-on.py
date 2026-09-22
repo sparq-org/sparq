@@ -60,6 +60,13 @@ SKILL_PATHS = ("skills/",)
 DOCS_RULE_ID = "changed-public-feature-docs"
 BENCH_DASHBOARD_RULE_ID = "new-bench-dashboard-row"
 
+# [OPUS-5] (#2547) The only recognised `for_each` fan-out mode: expand a rule's
+# templates once per crate whose `crates/<x>/Cargo.toml` was ADDED, binding
+# `{crate}` to that crate. Without it a two-crate PR would mint follow-ons for
+# whichever crate the shared `{crate}` placeholder happened to resolve to first.
+FOR_EACH_NEW_CRATE = "new_crate"
+FOR_EACH_MODES = (FOR_EACH_NEW_CRATE,)
+
 
 # Sibling scripts are loaded by path (the scripts dir is not an importable package).
 def _load_script_module(stem: str):
@@ -77,6 +84,13 @@ def _load_script_module(stem: str):
 # multiset-diff used by merge gate G2, factored into scripts/pub_api_diff.py, so
 # the reactive engine and the proactive gate can never drift.
 _pad = _load_script_module("pub_api_diff")
+
+# [OPUS-5] (#2547) The `new-crate-followons` rule fans its templates out per
+# newly-added crate and skips the user-facing ones for a non-published crate.
+# Both facts are read from merge gate G1's own helpers rather than re-derived
+# here, so the reactive and proactive halves can never disagree about what counts
+# as "a new crate" or as "a public crate".
+_gnc = _load_script_module("gate-new-crate")
 
 # [FABLE-5] (#2474) The shared static-triage pass, also used by triage-issue.yml and
 # the retriage cron — flow-on computes each follow-on's routing labels with it so
@@ -115,6 +129,12 @@ class CreateTemplate:
     title: str
     body: str
     labels: list[str] = field(default_factory=list)
+    # [OPUS-5] (#2547) Skip this template when `{crate}` names a crate whose
+    # Cargo.toml carries `publish = false`. Used for follow-ons that only make
+    # sense for a surface users can reach (a website page, a guide chapter) — the
+    # SAME public/internal split gate G1 uses to decide whether a new crate owes
+    # a SKILL.md.
+    when_public_crate: bool = False
 
 
 @dataclass
@@ -133,6 +153,9 @@ class Rule:
     exclude_new_paths: list[str] = field(default_factory=list)
     when_label: str | None = None
     when_title: str | None = None
+    # [OPUS-5] (#2547) Optional fan-out mode; see FOR_EACH_MODES. `None` (the
+    # default) expands the templates once, against the single shared context.
+    for_each: str | None = None
     creates: list[CreateTemplate] = field(default_factory=list)
 
 
@@ -161,6 +184,7 @@ def load_rules(path: Path) -> list[Rule]:
                 title=c["title"],
                 body=c["body"],
                 labels=list(c.get("labels", [])),
+                when_public_crate=bool(c.get("when_public_crate", False)),
             )
             for c in raw.get("create", [])
         ]
@@ -172,10 +196,32 @@ def load_rules(path: Path) -> list[Rule]:
             exclude_new_paths=list(raw.get("exclude_new_paths", [])),
             when_label=raw.get("when_label"),
             when_title=raw.get("when_title"),
+            for_each=raw.get("for_each"),
             creates=creates,
         )
         if not (rule.when_paths or rule.when_new_paths or rule.when_label or rule.when_title):
             raise ValueError(f"rule {rule.id!r} has no trigger predicate")
+        # [OPUS-5] (#2547) Fail LOUDLY on an unknown fan-out mode: silently
+        # treating a typo'd `for_each` as "no fan-out" would quietly mint only
+        # one crate's follow-ons, which is the exact gap this field closes.
+        if rule.for_each is not None and rule.for_each not in FOR_EACH_MODES:
+            raise ValueError(
+                f"rule {rule.id!r} has unknown for_each={rule.for_each!r} "
+                f"(known: {', '.join(FOR_EACH_MODES)})"
+            )
+        # [OPUS-5] (#2547) Labels are placeholder-expanded, so a `{crate}` that
+        # resolves to the empty string would emit a DANGLING key — `area:` — which
+        # scripts/triage.py counts as a real area and the readiness engine then
+        # resolves to a partition no work belongs to. Only a `for_each` rule
+        # guarantees a bound `{crate}`, so require the pairing at load time rather
+        # than silently emitting a broken label at mint time.
+        for tmpl in creates:
+            bad = [lb for lb in tmpl.labels if "{crate}" in lb]
+            if bad and rule.for_each != FOR_EACH_NEW_CRATE:
+                raise ValueError(
+                    f"rule {rule.id!r} label(s) {bad} use {{crate}} but the rule is "
+                    f'not for_each = "{FOR_EACH_NEW_CRATE}", so {{crate}} may be empty'
+                )
         if not rule.creates:
             raise ValueError(f"rule {rule.id!r} has no create templates")
         rules.append(rule)
@@ -231,6 +277,40 @@ def build_context(
         "surface": surface or "",
         "zk_circuit": zk_circuit or "",
     }
+
+
+def crate_is_published(crate: str) -> bool:
+    """True iff `crates/<crate>/Cargo.toml` does NOT declare `publish = false`.
+
+    [OPUS-5] (#2547) The public/internal split for the `when_public_crate`
+    templates. Delegates to gate G1's `crate_is_stub()` so the reactive engine
+    and the merge gate read the same field the same way — G1 uses it to decide
+    whether a new crate owes a SKILL.md, and we use it to decide whether it owes
+    a website page and a guide chapter.
+
+    Reads the crate manifest from the checkout. `flow-on.yml` checks out the
+    MERGED commit, so a crate added by the PR is present. If the manifest cannot
+    be read the crate is treated as PUBLISHED — fail-open toward minting a
+    follow-on a human can close, rather than silently dropping one."""
+    if not crate:
+        return False
+    return not _gnc.crate_is_stub(crate, [])
+
+
+def rule_contexts(rule: Rule, ctx: dict[str, str], added: list[str]) -> list[dict[str, str]]:
+    """The placeholder contexts a rule's templates are expanded against.
+
+    [OPUS-5] (#2547) Default: the single shared context (one expansion, today's
+    behaviour). With `for_each = "new_crate"`: one context per crate whose
+    `crates/<x>/Cargo.toml` was ADDED, with `{crate}` rebound to that crate, so a
+    PR landing two crates mints both crates' follow-ons. The crate list comes
+    from gate G1's `added_crates()`, which matches `crates/<x>/Cargo.toml`
+    exactly — so a rule glob that over-matches (fnmatch's `*` crosses `/`) still
+    yields NO contexts, and therefore no follow-ons, rather than a phantom
+    crate name."""
+    if rule.for_each == FOR_EACH_NEW_CRATE:
+        return [{**ctx, "crate": crate} for crate in _gnc.added_crates(added)]
+    return [ctx]
 
 
 def expand(text: str, ctx: dict[str, str]) -> str:
@@ -353,30 +433,37 @@ def evaluate(
     for rule in rules:
         if not rule_matches(rule, changed, added, labels, pr_title, pub_changed):
             continue
-        for tmpl in rule.creates:
-            dedup_key = expand(tmpl.dedup_key, ctx)
-            if dedup_key in seen_keys:
-                continue  # de-dup within a single run
-            seen_keys.add(dedup_key)
-            body = expand(tmpl.body, ctx).rstrip() + "\n\n" + key_marker(dedup_key)
-            body += (
-                f"\n\n> 🤖 SPARQ agent — auto-generated by the flow-on engine "
-                f"(rule `{rule.id}`) from merged PR #{pr}. Reconcile into a bead."
-            )
-            labels_full = list(dict.fromkeys(BASE_LABELS + tmpl.labels))
-            # [FABLE-5] (#2474) dispatch-visibility: append role/priority/status
-            # routing labels at creation (see routing_labels for why the event
-            # path can never label these issues).
-            labels_full += routing_labels(labels_full)
-            out.append(
-                FollowOn(
-                    rule_id=rule.id,
-                    dedup_key=dedup_key,
-                    title=expand(tmpl.title, ctx),
-                    body=body,
-                    labels=labels_full,
+        for rctx in rule_contexts(rule, ctx, added):
+            for tmpl in rule.creates:
+                # [OPUS-5] (#2547) A user-facing follow-on (website / guide) is
+                # not owed by an internal `publish = false` crate.
+                if tmpl.when_public_crate and not crate_is_published(rctx.get("crate", "")):
+                    continue
+                dedup_key = expand(tmpl.dedup_key, rctx)
+                if dedup_key in seen_keys:
+                    continue  # de-dup within a single run
+                seen_keys.add(dedup_key)
+                body = expand(tmpl.body, rctx).rstrip() + "\n\n" + key_marker(dedup_key)
+                body += (
+                    f"\n\n> 🤖 SPARQ agent — auto-generated by the flow-on engine "
+                    f"(rule `{rule.id}`) from merged PR #{pr}. Reconcile into a bead."
                 )
-            )
+                labels_full = list(
+                    dict.fromkeys(BASE_LABELS + [expand(lb, rctx) for lb in tmpl.labels])
+                )
+                # [FABLE-5] (#2474) dispatch-visibility: append role/priority/status
+                # routing labels at creation (see routing_labels for why the event
+                # path can never label these issues).
+                labels_full += routing_labels(labels_full)
+                out.append(
+                    FollowOn(
+                        rule_id=rule.id,
+                        dedup_key=dedup_key,
+                        title=expand(tmpl.title, rctx),
+                        body=body,
+                        labels=labels_full,
+                    )
+                )
     return out
 
 
