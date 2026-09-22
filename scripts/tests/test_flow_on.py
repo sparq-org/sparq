@@ -113,6 +113,231 @@ class NewCrateTest(unittest.TestCase):
         self.assertNotIn("new-crate-bench-and-skill", {fo.rule_id for fo in fos})
 
 
+class PerCrateFanOutTest(unittest.TestCase):
+    """[OPUS-5] (#5242) `{crate}` must range over EVERY crate the PR added.
+
+    build_context() resolves `{crate}` to a single crate, so a PR landing two new
+    crates minted a `{crate}`-keyed follow-on for only the first — while merge gate
+    G1 (`gate-new-crate.py::added_crates`) already iterates over all of them. These
+    pin the fan-out and the two properties it must not break: a crate-agnostic
+    template is still minted exactly once, and a single-crate PR is unchanged."""
+
+    TWO_CRATES = [
+        "crates/sparq-alpha/Cargo.toml",
+        "crates/sparq-alpha/src/lib.rs",
+        "crates/sparq-beta/Cargo.toml",
+        "crates/sparq-beta/src/lib.rs",
+    ]
+
+    def _crate_rule(self):
+        """A synthetic new-crate rule whose templates name `{crate}`."""
+        return flow_on.Rule(
+            id="synthetic-new-crate",
+            when_new_paths=["crates/*/Cargo.toml"],
+            creates=[
+                flow_on.CreateTemplate(
+                    dedup_key="synthetic-{crate}",
+                    title="chore: follow up on new crate {crate}",
+                    body="PR #{pr} added `crates/{crate}`.",
+                )
+            ],
+        )
+
+    def _crate_labelled_rule(self):
+        """Same trigger, but `{crate}` also appears in a LABEL (which
+        validate_crate_identity permits once dedup_key names it)."""
+        return flow_on.Rule(
+            id="synthetic-labelled",
+            when_new_paths=["crates/*/Cargo.toml"],
+            creates=[
+                flow_on.CreateTemplate(
+                    dedup_key="follow-up-{crate}",
+                    title="chore: follow up on {crate}",
+                    body="PR #{pr}.",
+                    labels=["docs", "area:{crate}"],
+                )
+            ],
+        )
+
+    def _crate_agnostic_rule(self):
+        """Same trigger, but no `{crate}` anywhere — must stay single-minted."""
+        return flow_on.Rule(
+            id="synthetic-pr-scoped",
+            when_new_paths=["crates/*/Cargo.toml"],
+            creates=[
+                flow_on.CreateTemplate(
+                    dedup_key="synthetic-pr-{pr}",
+                    title="chore: one per PR",
+                    body="PR #{pr}.",
+                )
+            ],
+        )
+
+    def test_two_new_crates_mint_a_follow_on_for_each(self):
+        fos = flow_on.evaluate(
+            [self._crate_rule()], 42, "add two crates",
+            self.TWO_CRATES, self.TWO_CRATES, [],
+        )
+        self.assertEqual(
+            sorted(fo.dedup_key for fo in fos),
+            ["synthetic-sparq-alpha", "synthetic-sparq-beta"],
+        )
+        # The title and body are expanded per crate too, not just the key.
+        self.assertEqual(
+            sorted(fo.title for fo in fos),
+            [
+                "chore: follow up on new crate sparq-alpha",
+                "chore: follow up on new crate sparq-beta",
+            ],
+        )
+        for fo in fos:
+            crate = fo.dedup_key.removeprefix("synthetic-")
+            self.assertIn(f"`crates/{crate}`", fo.body)
+
+    def test_per_crate_labels_are_expanded_not_left_literal(self):
+        # validate_crate_identity() ACCEPTS `{crate}` in a label, so evaluate()
+        # must expand it: an unexpanded label would put the literal (and invalid)
+        # `area:{crate}` on both issues instead of the per-crate label.
+        fos = flow_on.evaluate(
+            [self._crate_labelled_rule()], 42, "add two crates",
+            self.TWO_CRATES, self.TWO_CRATES, [],
+        )
+        by_key = {fo.dedup_key: fo for fo in fos}
+        self.assertEqual(
+            sorted(by_key), ["follow-up-sparq-alpha", "follow-up-sparq-beta"]
+        )
+        for key, fo in by_key.items():
+            crate = key.removeprefix("follow-up-")
+            self.assertIn(f"area:{crate}", fo.labels)
+            self.assertIn("docs", fo.labels)
+            self.assertEqual(
+                [lb for lb in fo.labels if "{" in lb],
+                [],
+                f"unexpanded placeholder label on {key}: {fo.labels}",
+            )
+
+    def test_fan_out_covers_exactly_gate_g1s_added_crate_set(self):
+        # The proactive (G1) and reactive (flow-on) halves must agree on WHICH
+        # crates a diff adds — the disagreement #5242 reported.
+        gnc = flow_on._gnc
+        contexts = flow_on.build_contexts(42, "t", self.TWO_CRATES, self.TWO_CRATES)
+        self.assertEqual(
+            sorted({c["crate"] for c in contexts}),
+            sorted(gnc.added_crates(self.TWO_CRATES)),
+        )
+
+    def test_crate_agnostic_template_is_still_minted_once(self):
+        # Fanning out must not multiply a rule that never names {crate}: its
+        # dedup_key is identical in every context, so it collapses.
+        fos = flow_on.evaluate(
+            [self._crate_agnostic_rule()], 42, "add two crates",
+            self.TWO_CRATES, self.TWO_CRATES, [],
+        )
+        self.assertEqual([fo.dedup_key for fo in fos], ["synthetic-pr-42"])
+
+    def test_single_new_crate_is_unchanged(self):
+        added = ["crates/sparq-alpha/Cargo.toml", "crates/sparq-alpha/src/lib.rs"]
+        fos = flow_on.evaluate(
+            [self._crate_rule()], 42, "add one crate", added, added, [],
+        )
+        self.assertEqual([fo.dedup_key for fo in fos], ["synthetic-sparq-alpha"])
+
+    def test_a_new_file_in_an_existing_crate_is_not_treated_as_a_new_crate(self):
+        # Adding a module to sparq-core alongside a genuinely new crate: the base
+        # {crate} resolution picks the EXISTING crate (it scans directories, not
+        # Cargo.toml additions), so it must be replaced by the added-crate set —
+        # otherwise the fan-out would mint a false "new crate sparq-core" follow-on.
+        added = ["crates/sparq-core/src/new_mod.rs", "crates/sparq-new/Cargo.toml"]
+        self.assertEqual(
+            flow_on.build_context(42, "t", added, added)["crate"], "sparq-core"
+        )
+        contexts = flow_on.build_contexts(42, "t", added, added)
+        self.assertEqual([c["crate"] for c in contexts], ["sparq-new"])
+        fos = flow_on.evaluate([self._crate_rule()], 42, "t", added, added, [])
+        self.assertEqual([fo.dedup_key for fo in fos], ["synthetic-sparq-new"])
+
+    def test_no_added_crate_keeps_the_single_base_context(self):
+        # A pure modification adds no crate, so there is nothing to fan out over
+        # and {crate} still resolves from the changed pool exactly as before.
+        changed = ["crates/sparq-core/src/store/mod.rs"]
+        contexts = flow_on.build_contexts(42, "t", changed, [])
+        self.assertEqual([c["crate"] for c in contexts], ["sparq-core"])
+
+    def test_shipped_rules_are_unaffected_by_a_two_crate_diff(self):
+        # Regression guard on the live rule table: none of its templates name
+        # {crate}, so the fan-out must not change what a two-crate PR mints.
+        rules = flow_on.load_rules(RULES)
+        fos = flow_on.evaluate(rules, 42, "add two crates", self.TWO_CRATES, self.TWO_CRATES, [])
+        keys = [fo.dedup_key for fo in fos]
+        self.assertEqual(len(keys), len(set(keys)), f"duplicate follow-ons minted: {keys}")
+
+
+class CrateIdentityRuleTest(unittest.TestCase):
+    """[OPUS-5] (#5242) `{crate}` outside a crate-agnostic `dedup_key` is rejected.
+
+    The fan-out expands per crate but evaluate() de-duplicates on the expanded
+    dedup_key, so a template with `{crate}` in title/body and a crate-agnostic key
+    collapses to the FIRST crate — silently dropping the rest. Minting them anyway
+    is not an option: the key is the `flow-on-key` marker open_issue_exists()
+    searches, so two issues sharing one key are indistinguishable across runs.
+    Hence the identity rule, enforced at load time."""
+
+    def _tmpl(self, **kw):
+        base = dict(dedup_key="k-{pr}", title="t", body="b", labels=[])
+        base.update(kw)
+        return flow_on.CreateTemplate(**base)
+
+    def test_crate_in_title_without_crate_in_key_is_rejected(self):
+        with self.assertRaises(ValueError) as cm:
+            flow_on.validate_crate_identity("r", self._tmpl(title="Follow up {crate}"))
+        self.assertIn("title", str(cm.exception))
+        self.assertIn("dedup_key", str(cm.exception))
+
+    def test_crate_in_body_without_crate_in_key_is_rejected(self):
+        with self.assertRaises(ValueError) as cm:
+            flow_on.validate_crate_identity("r", self._tmpl(body="see crates/{crate}"))
+        self.assertIn("body", str(cm.exception))
+
+    def test_crate_in_a_label_without_crate_in_key_is_rejected(self):
+        with self.assertRaises(ValueError) as cm:
+            flow_on.validate_crate_identity("r", self._tmpl(labels=["docs", "area:{crate}"]))
+        self.assertIn("labels[1]", str(cm.exception))
+
+    def test_crate_in_key_permits_it_everywhere(self):
+        flow_on.validate_crate_identity(
+            "r",
+            self._tmpl(
+                dedup_key="k-{crate}", title="{crate}", body="{crate}", labels=["area:{crate}"]
+            ),
+        )
+
+    def test_crate_agnostic_template_is_permitted(self):
+        flow_on.validate_crate_identity("r", self._tmpl())
+
+    def test_load_rules_rejects_an_incoherent_template(self):
+        # End-to-end through the only production entry point for rules: a rule file
+        # carrying the gap must fail to load rather than mint a partial fan-out.
+        toml = """
+[[rule]]
+id = "bad-per-crate"
+when_new_paths = ["crates/*/Cargo.toml"]
+[[rule.create]]
+dedup_key = "follow-up-{pr}"
+title = "Follow up {crate}"
+body = "PR #{pr}."
+"""
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "rules.toml"
+            path.write_text(toml)
+            with self.assertRaises(ValueError) as cm:
+                flow_on.load_rules(path)
+        self.assertIn("bad-per-crate", str(cm.exception))
+
+    def test_shipped_rules_satisfy_the_identity_rule(self):
+        # load_rules() validates, so this passing IS the assertion for the live table.
+        self.assertTrue(flow_on.load_rules(RULES))
+
+
 class ChangedSurfaceTest(unittest.TestCase):
     def setUp(self):
         self.rules = flow_on.load_rules(RULES)

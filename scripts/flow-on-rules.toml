@@ -38,7 +38,20 @@
 #   # One or more follow-on issue templates. Placeholders expanded from the match:
 #   #   {pr}        merged PR number
 #   #   {pr_title}  merged PR title
-#   #   {crate}       crate dir name, when a crates/<crate>/... path matched
+#   #   {crate}       crate dir name, when a crates/<crate>/... path matched. [OPUS-5]
+#   #                 (#5242) When the PR ADDS crates, {crate} ranges over ALL of them
+#   #                 (gate G1's `added_crates`) — a template naming it is minted once
+#   #                 per added crate, so a PR landing two new crates gets the follow-on
+#   #                 for BOTH, not just the first. Otherwise it is the single crate
+#   #                 dir the diff touched, as before. A template WITHOUT {crate} is
+#   #                 still minted once: its dedup_key is identical in every context,
+#   #                 so the existing de-duplication collapses it.
+#   #                 IDENTITY RULE (enforced at load time by
+#   #                 flow-on.py::validate_crate_identity — a violation raises): if a
+#   #                 template names {crate} in title/body/labels it MUST name it in
+#   #                 dedup_key too. dedup_key IS the issue identity, so a crate-
+#   #                 agnostic key would collapse the per-crate expansions back to
+#   #                 the first crate and silently drop the rest.
 #   #   {suite}       bench suite dir name, when a bench/<suite>/... path matched
 #   #   {surface}     skill surface dir name, when a skills/<surface>/... path matched
 #   #   {zk_circuit}  top-level zk/ circuit family dir (excludes zk/compose/; never bench/)
