@@ -4904,6 +4904,7 @@ dependencies = [
  "proptest",
  "rustc-hash 2.1.3",
  "sparq-core",
+ "sparq-text",
 ]
 
 [[package]]
