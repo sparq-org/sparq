@@ -47,6 +47,8 @@
 #   G1/G2/G6, no-perf-numbers, readme-template, privacy-claims  — delegated to the
 #   existing gate scripts, scoped to YOUR diff, so they fire in-worktree instead of
 #   on CI (and instead of in a review round).
+#   md018-issue-reference — flags a `#1234` issue citation wrapped to column zero,
+#   which markdownlint otherwise reports only as a malformed ATX heading.
 #   guard-untested — NEW here: a guard-shaped PUBLIC symbol added by the diff that
 #   is named nowhere in the TEST TEXT of the tree. "Test text" is defined precisely
 #   at `searchable_test_text` below, and it deliberately EXCLUDES the symbol's own
@@ -717,6 +719,55 @@ def check_guard_untested(added_lines: dict[str, list[str]], root: Path) -> list[
 
 
 # ---------------------------------------------------------------------------
+# markdownlint MD018: a line-initial issue reference looks like a broken heading.
+# ---------------------------------------------------------------------------
+# Keep this deliberately narrower than MD018 itself. The purpose is to explain the
+# non-obvious authoring footgun (`#1234` wrapped to column zero), while markdownlint
+# remains the authority for genuinely malformed ATX headings.
+MD018_ISSUE_RE = re.compile(r"^#(?P<number>[0-9]+)\b")
+FENCE_RE = re.compile(r"^[ \t]{0,3}(?P<marker>`{3,}|~{3,})")
+
+
+def check_md018_issue_references(changed: list[str], root: Path) -> list[Finding]:
+    """Flag column-zero issue references in changed Markdown, excluding fences."""
+    findings: list[Finding] = []
+    for path in changed:
+        if not path.lower().endswith(".md"):
+            continue
+        try:
+            lines = (root / path).read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+        fence_char: str | None = None
+        fence_width = 0
+        for line_no, line in enumerate(lines, 1):
+            fence = FENCE_RE.match(line)
+            if fence and fence_char is None:
+                marker = fence.group("marker")
+                fence_char, fence_width = marker[0], len(marker)
+                continue
+            if fence_char is not None:
+                closing = re.match(
+                    rf"^[ \t]{{0,3}}{re.escape(fence_char)}{{{fence_width},}}[ \t]*$", line
+                )
+                if closing:
+                    fence_char, fence_width = None, 0
+                continue
+            match = MD018_ISSUE_RE.match(line)
+            if match:
+                findings.append(
+                    Finding(
+                        check="md018-issue-reference",
+                        path=f"{path}:{line_no}",
+                        detail=(f"issue reference `#{match.group('number')}` starts at column 0; "
+                                "markdownlint reads it as an ATX heading without a space"),
+                        fix="reflow the paragraph so the issue reference is not line-initial",
+                    )
+                )
+    return findings
+
+
+# ---------------------------------------------------------------------------
 # Delegated gates: the scripts the repo already owns and the briefs never name.
 # ---------------------------------------------------------------------------
 @dataclass
@@ -880,7 +931,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--changed-files", help="hermetic input: file of changed paths")
     ap.add_argument("--added-lines", help="hermetic input: a unified diff to read added lines from")
     ap.add_argument("--root", default=str(REPO_ROOT), help="repo root (tests inject a fixture tree)")
-    ap.add_argument("--only", choices=["guard-untested", "delegates"],
+    ap.add_argument("--only", choices=["guard-untested", "md018-issue-reference", "delegates"],
                     help="run a single check group (tests + fast local loops)")
     ap.add_argument("--quiet", action="store_true")
     ap.add_argument("--self-test", action="store_true", help="run the hermetic self-test and exit")
@@ -903,15 +954,17 @@ def main(argv: list[str] | None = None) -> int:
         changed, added = collect_diff(args.base, root)
 
     res = Result()
-    if args.only != "delegates":
+    if args.only in (None, "guard-untested"):
         res.findings += check_guard_untested(added, root)
-    if args.only != "guard-untested":
+        res.ran.append("guard-untested")
+    if args.only in (None, "md018-issue-reference"):
+        res.findings += check_md018_issue_references(changed, root)
+        res.ran.append("md018-issue-reference")
+    if args.only in (None, "delegates"):
         sub = run_delegates(changed, root, changed_files_path)
         res.findings += sub.findings
         res.ran += sub.ran
         res.skipped += sub.skipped
-    if args.only != "delegates":
-        res.ran.append("guard-untested")
     return report(res, args.quiet)
 
 
@@ -984,6 +1037,18 @@ def self_test() -> int:
     chk("parse_added keeps only + lines", parse_added(diff), {"scripts/a.py": ["def validate_x(v):"]})
     chk("parse_added ignores the +++ header",
         "+++ b/scripts/a.py" in parse_added(diff)["scripts/a.py"], False)
+
+    # --- markdownlint MD018: issue references at column zero, but not code ---
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        (root / "docs").mkdir()
+        doc = root / "docs/x.md"
+        doc.write_text("See the discussion in\n#1234 before proceeding.\n")
+        chk("line-initial issue reference -> 1 finding",
+            len(check_md018_issue_references(["docs/x.md"], root)), 1)
+        doc.write_text("```text\n#1234 is literal code\n```\n")
+        chk("issue reference inside a fence -> 0 findings",
+            len(check_md018_issue_references(["docs/x.md"], root)), 0)
 
     # --- END-TO-END on a real throwaway git tree: the check must RED on a guard
     #     with no test, and GREEN once a test names it. This is the behaviour the
