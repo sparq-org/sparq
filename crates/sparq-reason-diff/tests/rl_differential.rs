@@ -48,6 +48,28 @@ fn cases() -> Vec<(String, PathBuf)> {
     nt
 }
 
+/// [OPUS-5] sq-ovl6f — the corpus's W3C-vocabulary-subject invariant as its own
+/// gate, so a fixture edit that would mask a divergence fails with a message naming
+/// the offending DOCUMENT rather than only surfacing inside a case run.
+/// `rl::sparq_rl_closure_lines` enforces the same constraint on the closure of every
+/// case the differential test runs (the entailed channel this lint cannot see).
+#[test]
+fn corpus_documents_have_no_w3c_vocab_subjects() {
+    let mut failures = Vec::new();
+    for (name, nt_path) in cases() {
+        let nt_text = std::fs::read_to_string(&nt_path).expect("readable .nt case");
+        if let Err(report) = rl::lint_corpus_document(&nt_text) {
+            failures.push(format!("{name}: {report}"));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "corpus documents violating the no-user-data-at-a-W3C-vocab-subject \
+         invariant:\n{}",
+        failures.join("\n")
+    );
+}
+
 #[test]
 fn rl_differential_vs_owlrl_golden() {
     let mut failures = Vec::new();
