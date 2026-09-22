@@ -8,6 +8,18 @@
 #     select EXPLICITLY via `--profile ci`. Local `cargo nextest run` invocations keep
 #     the built-in `default` profile (no retries), so a locally-reproducible flake
 #     stays loudly red on the work box.
+#
+# [OPUS-5] sq-yhcge — GUARD: the CI legs still on plain `cargo test` are NOT an
+# unfinished migration. They were evaluated per-leg and deliberately left alone; read
+# research/ci-nextest-leg-conversion-evaluation.md before converting any of them. Short
+# version: doctests are never convertible (nextest does not run them), and the 19 ci.yml
+# conformance/ratchet legs pipe test stdout into a grepped `.out` file, so they break
+# TWICE under this profile — nextest captures a PASSING test's output (empty scoreboard
+# → the sq-shacl-flake/#1236 infra guard fires on every run), and `retries` puts a
+# retried test's scoreboard into that file twice, where the parsers' `head -1` picks the
+# FAILING attempt and reports a false ratchet regression. The flake class those legs
+# actually see is a crates.io fetch abort BEFORE any test starts, which a per-test retry
+# cannot help; their existing whole-step retry wrappers already cover it.
 
 # [FABLE-5] registry#563 item 2 (maintainer-approved OSS adoption): CI retry profile.
 #
