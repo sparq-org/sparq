@@ -1,34 +1,6 @@
 {
- "_doc": "Advisory-job registry. [OPUS-5] sparq-org/sparq#3773 made this file LOAD-BEARING: it is the ONLY thing that can make a check-run non-gating. scripts/ci_summary_gate.py excludes a check-run from the `gate` verdict IFF its name is a key here (whole-name, case-insensitive; a ${{ ... }} expression in a key matches its runtime expansion); everything else GATES, whatever it is called. Before #3773 the gate INFERRED advisory status from the job name matching \\b(advisory|informational)\\b, which silently neutralised four real gates. Every entry needs {owner_bead, promotion_criteria, registered, workflow, job_id}: workflow+job_id is the STABLE IDENTITY the declaration binds to, and check-advisory-registry.py C4 fails if that job's current YAML name is not exactly the key — so renaming a job can never silently flip whether it gates (the renamed job GATES, fail-closed, and C4 REDs until the declaration is updated). A job that intentionally runs a gate-classified command (python/shell/node/npm — C3, now language-agnostic) must also carry gate_script_waiver. C2 keeps requiring that any job whose NAME carries an advisory/informational token be declared here or lose the misleading token. Maintained by scripts/check-advisory-registry.py. PROMOTING a lane = deleting its entry.",
+ "_doc": "Advisory-job registry. [GPT-5] #6293: this file means a gate lane deliberately declared non-blocking; event scoping is separate, so exact schedule-triggered workflow runs are excluded before advisory classification and do not belong here. [OPUS-5] sparq-org/sparq#3773 made this file LOAD-BEARING: for an in-scope, non-platform-managed check-run, scripts/ci_summary_gate.py excludes it from the `gate` verdict IFF its name is a key here (whole-name, case-insensitive; a ${{ ... }} expression in a key matches its runtime expansion); every other in-scope check GATES, whatever it is called. Before #3773 the gate INFERRED advisory status from the job name matching \\b(advisory|informational)\\b, which silently neutralised four real gates. Every entry needs {owner_bead, promotion_criteria, registered, workflow, job_id}: workflow+job_id is the STABLE IDENTITY the declaration binds to, and check-advisory-registry.py C4 fails if that job's current YAML name is not exactly the key — so renaming a job can never silently flip whether it gates (the renamed job GATES, fail-closed, and C4 REDs until the declaration is updated). A job that intentionally runs a gate-classified command (python/shell/node/npm — C3, now language-agnostic) must also carry gate_script_waiver. C2 keeps requiring that any job whose NAME carries an advisory/informational token be declared here or lose the misleading token. Maintained by scripts/check-advisory-registry.py. PROMOTING a lane = deleting its entry.",
  "jobs": {
-  "review-lane blind-spot alarm": {
-   "workflow": "review-alarm.yml",
-   "job_id": "alarm",
-   "owner_bead": "sq-huwr8",
-   "promotion_criteria": "NEVER promotable — promoting it would INVERT its purpose. This is a DETECTOR: it REDs when it finds PRs that no review producer can reach, and it REDs fail-loud when the detector itself breaks. Neither condition is a property of the commit being gated, so gating on it would block every merge on an unrelated repo-wide backlog — the exact pressure that gets an alarm muted, which is the one outcome that destroys the signal. Registered because the lane was SILENTLY GATING: its header claimed it 'can never enter the ci-summary / gate poll set' on the premise that it creates no check-run on a PR head or merge-group ref, but ci-summary.yml ALSO runs on push to main (timeout-minutes: 80) and this workflow's scheduled run puts its check-run on exactly that head SHA. MEASURED 2026-07-27: ci_summary_gate.py render_verdict() over the real 477-check-run set for main head cb0c6739c listed `review-lane blind-spot alarm: failure` as a GATING failure. Delete this entry only if the workflow is removed.",
-   "registered": "2026-07-27"
-  },
-  "CI execution-latency alarm": {
-   "workflow": "ci-latency-alarm.yml",
-   "job_id": "alarm",
-   "owner_bead": "sq-1lc4i",
-   "promotion_criteria": "NEVER promotable, same reason as `review-lane blind-spot alarm` — this is a DETECTOR of repo-wide CI EXECUTION LATENCY (cron firing deficit, queue wait, execution overrun). Every condition it REDs on is a property of the runner fleet and the scheduler, never of the commit under test, so gating on it would block every merge whenever CI is merely slow — which is exactly the pressure that gets an alarm muted, the one outcome that destroys the signal. It also REDs fail-loud (exit 2) when the detector itself breaks or its scan set is empty. Declared for the same silent-gating reason as its sibling lanes (sq-huwr8): it is scheduled on main, so its check-run lands on the same head SHA the push-triggered ci-summary gate polls. Delete this entry only if the workflow is removed.",
-   "registered": "2026-07-28"
-  },
-  "formal-lane no-verdict alarm": {
-   "workflow": "formal-alarm.yml",
-   "job_id": "alarm",
-   "owner_bead": "sq-63ups",
-   "promotion_criteria": "NEVER promotable, same reason as `review-lane blind-spot alarm` — a detector that REDs when a nightly formal lane stopped producing verdicts is reporting on the LANE's health, not on the commit under test, so it must never gate a merge. Same silent-gating defect (sq-huwr8): scheduled on main, so its check-run lands on the same head SHA the push-triggered ci-summary gate polls. Delete this entry only if the workflow is removed.",
-   "registered": "2026-07-27"
-  },
-  "HEAVY-set drift alarm": {
-   "workflow": "heavy-set-alarm.yml",
-   "job_id": "alarm",
-   "owner_bead": "sq-6vshe.7",
-   "promotion_criteria": "NEVER promotable, same reason as `formal-lane no-verdict alarm` — this is a DETECTOR of DRIFT between ci.yml's hand-maintained `jobs.test.env.HEAVY` filterset and the measured per-test wall-times. Every condition it REDs on is a property of the repository's accumulated test-time distribution (a test that got slow weeks ago, an atom left behind by a rename), never of the commit under test, so gating on it would block an unrelated PR on a shard-balance chore — the pressure that gets an alarm muted, which is strictly worse than no alarm because it still looks like coverage. It also REDs fail-loud (exit 2) when the detector itself breaks: HEAVY unreadable/ambiguous, an empty event stream, or test events carrying no exec_time (the case where it would otherwise report a permanent false all-clear). Declared for the same silent-gating reason as its sibling lanes (sq-huwr8): it is scheduled on main, so its check-run lands on the same head SHA the push-triggered ci-summary gate polls. No gate_script_waiver: scripts/heavy_set_alarm.py carries no gate-ish filename token and is not a gate script — it asserts nothing about the commit, only about shard balance. Delete this entry only if the workflow is removed.",
-   "registered": "2026-08-03"
-  },
   "nightly selection-bug alarm": {
    "workflow": "selection-alarm.yml",
    "job_id": "alarm",

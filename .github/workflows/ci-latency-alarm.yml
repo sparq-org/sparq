@@ -29,12 +29,10 @@
 # on live run STATE, which #4368 does not read in any scope.
 #
 # NOT A GATE (same posture as review-alarm.yml / formal-alarm.yml): scheduled on main,
-# files issues, blocks NO merge. That holds because this job is DECLARED in
-# `.github/advisory-registry.json` — since #3773 the ONLY thing that can make a check-run
-# non-gating. It is NOT true because of where the check-run lands: ci-summary.yml also runs
-# on `push: branches: [main]`, so a scheduled run on main puts its check-run on the very
-# head SHA the gate polls. The registry entry, not the trigger type, is what makes this
-# lane safe to RED. Pinned by scripts/tests/test_alarm_lanes_non_gating.py.
+# files issues, blocks NO merge. [GPT-5] #6293: ci-summary excludes workflow runs whose API `event` is
+# exactly `schedule`; missing or other event values remain fail-closed and gating. This
+# lane is deliberately absent from `.github/advisory-registry.json`. Pinned by
+# scripts/tests/test_alarm_lanes_non_gating.py.
 #
 # NO ARMING AUTHORITY, STRUCTURALLY: this job holds `issues: write`, `actions: read` and
 # `contents: read` and nothing else — no `pull-requests: write` (it cannot label, promote
