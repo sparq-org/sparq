@@ -159,8 +159,12 @@ cells on the loopback tier; the shaped LAN/WAN multiplier awaits the privileged/
   segmented group-agg scans, AVG — are therefore **unblocked at the primitive layer**;
   malicious hardening of the reshare (IT-MACs / verifiable resharing) is future work behind the
   same backend (`sq-km34.*`), not claimed by the semi-honest `degree_reduce` itself.
-- **The hidden equi-join is still all-pairs** `O(|L|·|R|)` `secure_equal` (`join.rs:411,
-  443`). ORQ-style O(n log n) sort-merge is **OPEN** (bead **sq-ujz8**).
+- **The hidden equi-join's inner MATERIALISATION is still all-pairs** `O(|L|·|R|)`
+  `secure_equal` (`join.rs:411, 443`). ORQ-style O(n log² n) sort-merge is **PARTIALLY
+  LANDED** (bead **sq-ujz8**): the secret-key oblivious sort + the fan-out-free
+  **semi/anti-join** (`sort_merge_join`) are built and differential-tested;
+  inner-materialisation (many-to-many fan-out expansion) + eager numeric aggregation
+  remain follow-ups on the same substrate.
 - **No collaborative ZK proof; no in-circuit signature.** `proof.rs` is honest
   `NotYetImplemented` stubs.
 - **Single-dealer randomness simulation.** A real federation needs PRSS / dealer-less VSS;
@@ -310,11 +314,11 @@ leaks the boolean) or needs P5 to keep the sum itself secret (OPEN — see §4.2
 
 | Config | Tier | Most performant | sparq |
 |---|---|---|---|
-| SH, HM, any N | **BUILT (naive)** | sparq runs **all-pairs** `O(\|L\|·\|R\|)` `secure_equal`. **SOTA is O(n log n)** ORQ sort-merge join-aggregation OR ~linear **circuit-PSI** (cuckoo+simple hashing; VOLE-PSI eprint 2021/266) | `HiddenValueJoin` all-pairs (`join.rs:443`); SOTA = bead **sq-ujz8 OPEN** |
+| SH, HM, any N | **BUILT (naive + sort-merge semi/anti)** | sparq runs **all-pairs** `O(\|L\|·\|R\|)` `secure_equal` for inner materialisation; the **O(n log² n)** ORQ sort-merge is built for the fan-out-free **semi/anti** family. **SOTA** is the full sort-merge join-aggregation OR ~linear **circuit-PSI** (cuckoo+simple hashing; VOLE-PSI eprint 2021/266) | `HiddenValueJoin` all-pairs (`join.rs:443`) + `sort_merge_join::sort_merge_semi_anti` (bead **sq-ujz8 PARTIAL**: secret-key sort + semi/anti done; inner-materialisation/agg follow-up) |
 | SH, HM, **disclosed global-IRI key** | **BUILT, crypto-free** | hash-join `O(\|L\|+\|R\|)` in cleartext — sparq's genuine lead (global IRIs as cross-holder join keys) | `DisclosedKeyJoin` (`join.rs:119`) |
 | Mal, HM, N=3 | KNOWN | **ORQ 4-party Fantastic Four** sort-merge; relational SOTA | not built |
 | Mal, DM | KNOWN | malicious circuit-PSI (VOLE-PSI, malicious, single equi-join only — does NOT compose into multi-pattern BGP) | no backend |
-| any, multi-pattern BGP | **primitives BUILT; awaits sort-merge join** | sort-merge composed per pattern (P6) needs the secure comparator + mult-chaining | **[RECONCILED 2026-06-16]** the secure comparator (`sq-rrz4`) + mult-chaining (`sq-dvuc`) are CLOSED; the remaining dependency is the SOTA sort-merge join (`sq-ujz8`, OPEN) |
+| any, multi-pattern BGP | **primitives BUILT; sort-merge join PARTIAL** | sort-merge composed per pattern (P6) needs the secure comparator + mult-chaining | **[RECONCILED 2026-06-16]** the secure comparator (`sq-rrz4`) + mult-chaining (`sq-dvuc`) are CLOSED; the SOTA sort-merge join (`sq-ujz8`) is **PARTIAL** — the secret-key oblivious sort + semi/anti are built (`sort_merge_join`); inner-materialisation fan-out expansion remains |
 
 **Cost note (N, network):** all-pairs join is the **cost center** at every config (the parent
 record's ORQ anchor: even SOTA O(n log n) joins are minutes-to-tens-of-minutes on LAN, ×1.2–6.9
