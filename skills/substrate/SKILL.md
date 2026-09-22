@@ -135,9 +135,13 @@ The four id-tuple join kernels over `&[Row]` slices. Requires `rows`; pulls `rus
 | `probe_emit` | per-row probe emit — single-hash (FxHash once for partition + `raw_entry().from_hash`), `reserve` before materialising (batch-emission contract) |
 | `probe_gather_indices` | M4 batch-emission primitive — collect build-row indices WITHOUT materialising `Row`s; morsel pipeline calls this, then materialises per output chunk (sq-pntvh.7) |
 | `hash_probe_serial` | probe loop: calls `probe_emit` per row with a `Budget` cooperative-cancel poll |
-| `bind_combine` | index-nested-loop combine step |
+| `bind_combine` | index-nested-loop combine step for indexed groups |
+| `bind_combine_rows` | contiguous row-slice combine; appends one row per input, preserving duplicates and existing output ([GPT-6-ASTRA]) |
 | `lftj_recurse` over `Trie`/`TrieIter` | leapfrog trie-join (WCOJ) |
 | `join::delta::DeltaTable` | persistent build-side table for semi-naive Δ-vs-full shapes (built for the OWL-RL fixpoint; drives `sparq-rsp`'s Delta/Snapshot window diff) |
+
+Pass `&rows[start..end]`, one match's `new_vals`, and `&mut out` to
+`bind_combine_rows`; scanning, filtering and budget checks remain with the caller.
 
 `JoinTable` is a public type alias for `hashbrown::HashMap<Key, Posting, FxBuildHasher>`.
 All kernels are generic over a `JoinKeys` column descriptor and a `Budget` cooperative-cancel
