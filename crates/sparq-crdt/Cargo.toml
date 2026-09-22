@@ -4,22 +4,24 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "Opt-in SPARQL-CRDT replication primitives for the sparq RDF engine: canonical delta-envelope codec, causal summaries, durable append/recovery journal, snapshots, and sync/stability primitives"
+description = "Opt-in SPARQL-CRDT replication primitives for the sparq RDF engine: canonical delta-envelope codec, causal summaries, durable append/recovery journal, snapshots, sync/stability primitives, and the executable formal model + convergence verification harness"
 repository.workspace = true
 homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 readme = "README.md"
-# [FABLE-5] sq-tag1q.7.2: intentional partial surface — this bead lands the canonical
+# [FABLE-5] sq-tag1q.7.2: intentional partial surface — that bead landed the canonical
 # codec + durable journal layer of the SPARQL-CRDT design
-# (research/sparql-crdt-gpt56-2026-07.md §6/§8). The replicated dot-store state +
-# merge algebra and the evaluate-at-origin SPARQL Update compiler are sibling beads
-# of epic sq-tag1q.7; the crate stays `publish = false` (and README a stub) until
-# that surface is complete enough to claim a conformance class from
-# site/specs/sparql-crdt.typ. Opt-in by construction: nothing in the workspace
-# depends on this crate, so core builds and bundles carry zero CRDT code. No cargo
-# features — the whole crate is the opt-in unit (cf. sparq-shaclc/sparq-algos), so
-# the default workspace lane exercises the entire surface.
+# (research/sparql-crdt-gpt56-2026-07.md §6/§8).
+# [OPUS-5] sq-tag1q.7.4 adds the *executable formal model* of the replicated dot-store
+# state + merge algebra and of evaluate-at-origin update compilation, plus a bounded
+# model checker and generated-schedule harness. That model is the specification the
+# PRODUCTION state/compiler surface must be differentially tested against — it is not
+# itself that production surface — so the crate stays `publish = false` and claims no
+# conformance class from site/specs/sparql-crdt.typ. Opt-in by construction: nothing in
+# the workspace depends on this crate, so core builds and bundles carry zero CRDT code.
+# No cargo features — the whole crate is the opt-in unit (cf. sparq-shaclc/sparq-algos),
+# so the default workspace lane exercises the entire surface.
 publish = false
 
 [dependencies]
@@ -39,3 +41,6 @@ sha2 = "0.10"
 [dev-dependencies]
 # Crash-recovery / atomic-rename journal tests need real files; already in-tree.
 tempfile = "3"
+# DEV/TEST-ONLY — covered by the workspace-wide dev-only proptest supply-chain
+# exemption (sq-3dyje program); already used by sparq-core, sparq-canon, sparq-algos.
+proptest = "1"
