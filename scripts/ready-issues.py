@@ -19,8 +19,9 @@ of a quarantine label. An issue is READY iff, in priority order, ALL hold:
 
 The snapshot uses real cursor pagination (`gh api --paginate`) with an explicit fail-closed
 ceiling. Open blockers are the UNION of GitHub's NATIVE issue dependencies and the legacy
-validated `Blocked-by: #NN` body markers — see `open_blocker_count`. Pure `compute_ready()` is
-unit-tested; the CLI wraps it over the paginated fetch.
+validated `Blocked-by: #NN` body markers — see `open_blocker_count`, which also WARNS per issue
+when the two channels disagree, so the union never absorbs their drift silently. Pure
+`compute_ready()` is unit-tested; the CLI wraps it over the paginated fetch.
 """
 import argparse
 import contextlib
@@ -506,6 +507,20 @@ NATIVE_SUMMARY = "issue_dependencies_summary"
 MALFORMED_SUMMARY_BLOCKERS = 1
 
 
+def native_summary_spoke(issue):
+    """Did the NATIVE channel actually report a count for this issue?
+
+    True iff `issue_dependencies_summary` is PRESENT and well-formed — i.e. exactly the case where
+    `native_open_blockers` returns a real count rather than 0-for-absent or the fail-closed
+    `MALFORMED_SUMMARY_BLOCKERS` placeholder. The single source of that validity rule; both
+    `native_open_blockers` and the drift check in `open_blocker_count` branch on it, so the two
+    cannot drift apart.
+    """
+    summary = issue.get(NATIVE_SUMMARY)
+    value = summary.get("blocked_by") if isinstance(summary, dict) else None
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
 def native_open_blockers(issue, warn=None):
     """OPEN blockers from GitHub's NATIVE dependency edges, per `issue_dependencies_summary`.
 
@@ -518,18 +533,14 @@ def native_open_blockers(issue, warn=None):
     summary = issue.get(NATIVE_SUMMARY)
     if summary is None:
         return 0
-    number = issue.get("number", "?")
-    if not isinstance(summary, dict):
+    if not native_summary_spoke(issue):
         if warn is not None:
-            warn(f"#{number}: {NATIVE_SUMMARY} is not an object — holding the issue (fail-closed)")
+            detail = (f"{NATIVE_SUMMARY} is not an object" if not isinstance(summary, dict)
+                      else f"{NATIVE_SUMMARY}.blocked_by is {summary.get('blocked_by')!r}, not a "
+                           "non-negative int")
+            warn(f"#{issue.get('number', '?')}: {detail} — holding the issue (fail-closed)")
         return MALFORMED_SUMMARY_BLOCKERS
-    value = summary.get("blocked_by")
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        if warn is not None:
-            warn(f"#{number}: {NATIVE_SUMMARY}.blocked_by is {value!r}, not a non-negative int — "
-                 "holding the issue (fail-closed)")
-        return MALFORMED_SUMMARY_BLOCKERS
-    return value
+    return summary["blocked_by"]
 
 
 def marker_open_blockers(body, open_numbers):
@@ -547,9 +558,30 @@ def open_blocker_count(issue, open_numbers, warn=None):
     count without double-counting the overlap). Under-reporting the count can only understate the
     delay in `--diagnose`; it can never flip a held issue to ready. MEASURED over all 1368 open
     issues: 0 issues where the two channels disagree on the count, so today max == the true union.
+
+    [OPUS-5] That MEASURED agreement is now ENFORCED rather than merely recorded. The union keeps
+    dispatch correct under drift, but it also ABSORBS drift silently — which is the whole
+    complaint in #3817: two sources of truth that agree today will diverge, and only the native
+    one is what a maintainer sees or edits in the GitHub UI. So a per-issue disagreement is
+    reported through `warn`. It is a WARNING, not a hold: the union already decided the dispatch
+    question fail-closed, and hard-failing would take the frontier down over a data-entry slip.
+
+    Detection is COUNT-level only, and that is a real limit: the native channel reports a count,
+    not blocker numbers, so `native == marker` does not prove the two channels name the SAME
+    blockers — one native edge plus one unrelated marker reads as agreement here. This catches
+    drift in cardinality (an edge added in the UI, a marker line dropped from a body), not
+    substitution. Only rows where the native channel actually SPOKE are compared: an absent
+    summary means the snapshot carries no native data (`native_channel_alarm` owns that case) and
+    a malformed one already warned in `native_open_blockers`, so neither is re-reported here.
     """
-    return max(native_open_blockers(issue, warn), marker_open_blockers(issue.get("body"),
-                                                                       open_numbers))
+    native = native_open_blockers(issue, warn)
+    marker = marker_open_blockers(issue.get("body"), open_numbers)
+    if warn is not None and native != marker and native_summary_spoke(issue):
+        warn(f"#{issue.get('number', '?')}: BLOCKER-CHANNEL DRIFT — native GitHub dependencies "
+             f"report {native} open blocker(s), `Blocked-by:` body markers report {marker}. "
+             f"Dispatch is unaffected (the union, {max(native, marker)}, still holds the issue), "
+             "but the two sources of truth have diverged and one of them needs fixing.")
+    return max(native, marker)
 
 
 def labels_of(issue):
@@ -1374,6 +1406,38 @@ def _self_test():
           native_channel_alarm([raw_issue(50, []), raw_issue(51, [], summary=summary(0))]), [])
     check("a PR-only snapshot never raises the dark alarm",
           native_channel_alarm([raw_issue(52, [], pr=True)]), [])
+
+    # (7) CHANNEL DRIFT (#3817): the union keeps dispatch correct, but it must not swallow a
+    # disagreement between the two sources of truth. Only rows where the native channel actually
+    # spoke are compared, and a malformed summary must warn ONCE (its own message), not twice.
+    def drift_warnings(issue):
+        seen = []
+        open_blocker_count(issue, {41}, seen.append)
+        return [w for w in seen if "DRIFT" in w]
+
+    check("native-only edge (no marker) is reported as channel drift",
+          len(drift_warnings(raw_issue(60, [], body="", summary=summary(1)))), 1)
+    check("marker-only edge (native says zero) is reported as channel drift",
+          len(drift_warnings(raw_issue(61, [], body="Blocked-by: #41", summary=summary(0)))), 1)
+    check("channels that AGREE are silent (both zero, and both one)",
+          [len(drift_warnings(raw_issue(62, [], body="", summary=summary(0)))),
+           len(drift_warnings(raw_issue(63, [], body="Blocked-by: #41", summary=summary(1))))],
+          [0, 0])
+    check("a marker whose blocker is CLOSED does not read as drift",
+          len(drift_warnings(raw_issue(64, [], body="Blocked-by: #99", summary=summary(0, 1)))), 0)
+    check("an ABSENT summary is never drift — that channel never spoke",
+          len(drift_warnings(raw_issue(65, [], body="Blocked-by: #41"))), 0)
+    # body deliberately carries NO marker, so the fail-closed placeholder (1) differs from the
+    # marker count (0) — without the `native_summary_spoke` suppression this row WOULD drift-warn.
+    malformed = raw_issue(66, [], body="", summary={"blocked_by": "1"})
+    malformed_seen = []
+    open_blocker_count(malformed, {41}, malformed_seen.append)
+    check("a MALFORMED summary warns once about itself, not again as drift",
+          [len(malformed_seen), "DRIFT" in "".join(malformed_seen)], [1, False])
+    check("...and drift detection never changes the count the frontier consumes",
+          [open_blocker_count(raw_issue(67, [], body=b, summary=s), {41})
+           for b, s in (("", summary(1)), ("Blocked-by: #41", summary(0)),
+                        ("Blocked-by: #41", summary(3)))], [1, 1, 3])
     check("valid_priority single", valid_priority({"priority:P0"}), 0)
     check("valid_priority ambiguous", valid_priority({"priority:P1", "priority:P2"}), None)
     check("valid_priority out-of-range", valid_priority({"priority:P7"}), None)
