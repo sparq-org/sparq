@@ -44,8 +44,17 @@ SHARED="${ROOT}/scripts/honesty-phrases.json"
 # fail-closed gates real: the verifier still runs (it is not disabled), and the honesty-boundary
 # assertions (the actual thing under test) are untouched.
 VERIFIER="${ROOT}/scripts/verify-paper-evidence.py"
+# [OPUS-5] sq-gum8.16: build-papers.mjs also imports the canonical-timing derivation module and
+# byte-compares its output against the committed site/src/data/paper-timing.generated.json. The
+# throwaway repo must mirror that dependency too, or the builder would fail to even load its
+# imports — which would make the should-FAIL cases below pass for the WRONG reason and silently
+# void this whole harness.
+TIMING_SYNC="${ROOT}/site/scripts/sync-canonical-timing.mjs"
+# ...and the publication-boundary source gate, which the builder also imports (it asserts no
+# paper source reaches a measured timing except through the provenance-rendering accessors).
+TIMING_GATE="${ROOT}/site/scripts/timing-source-gate.mjs"
 
-for f in "$BUILDER" "$PERF_GATE" "$PRIV_GATE" "$SHARED" "$VERIFIER"; do
+for f in "$BUILDER" "$PERF_GATE" "$PRIV_GATE" "$SHARED" "$VERIFIER" "$TIMING_SYNC" "$TIMING_GATE"; do
   [ -f "$f" ] || { echo "FATAL: required file not found: $f"; exit 2; }
 done
 command -v node >/dev/null 2>&1 || { echo "FATAL: node not found"; exit 2; }
@@ -72,6 +81,14 @@ cp "$PRIV_GATE"  "${REPO}/scripts/check-privacy-claims.sh"
 cp "$SHARED"     "${REPO}/scripts/honesty-phrases.json"
 # [OPUS-4.8] sq-gum8.13: the builder now invokes this verifier at the build boundary.
 cp "$VERIFIER"   "${REPO}/scripts/verify-paper-evidence.py"
+# [OPUS-5] sq-gum8.16: the builder imports this module and re-derives the measured-timing file.
+cp "$TIMING_SYNC" "${REPO}/site/scripts/sync-canonical-timing.mjs"
+cp "$TIMING_GATE" "${REPO}/site/scripts/timing-source-gate.mjs"
+# ...and, when typst IS available, compiles the timing-lib self-check fixture. Mirror both so
+# this harness behaves identically with and without typst on PATH. (It also means the
+# zero-record branch of the fixture gets exercised: this throwaway repo derives no timings.)
+cp "${ROOT}/site/papers/_lib/timing.typ" "${ROOT}/site/papers/_lib/timing-selfcheck.typ" \
+   "${REPO}/site/papers/_lib/"
 
 # Minimal papers.ts the builder's regex registry parser understands (slug + source).
 cat > "${REPO}/site/src/data/papers.ts" <<'TS'
@@ -110,6 +127,11 @@ JSON
   cat > "${REPO}/scripts/paper-evidence-binding-allowlist.json" <<'JSON'
 { "seed_count": 1, "keys": ["x.foo"] }
 JSON
+  # [OPUS-5] sq-gum8.16: derive the measured-timing file the same way `prebuild` does, rather
+  # than hand-writing an expected serialisation here (which would drift the moment the schema
+  # changes). This throwaway repo has no bench/canonical-competitor-results/, so the honest
+  # result is an EMPTY derivation — and the builder's byte-compare must accept exactly that.
+  ( cd "$REPO" && node site/scripts/sync-canonical-timing.mjs >/dev/null )
 }
 
 # Run the builder inside the throwaway repo; echo its exit code.
