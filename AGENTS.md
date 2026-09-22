@@ -615,6 +615,26 @@ disappears. Fail the sweep outright on a duplicate id or an anchor that no longe
   required check (`ci-summary / gate` polls the PR head while the PR is OPEN; this
   workflow does not trigger on the open-PR events). The merge is verified against the
   GitHub API as defense-in-depth on top of the `merged == true` event gate.
+- **`.github/workflows/beads-sync.yml` + `scripts/beads-export-sync.py`** (sq-2xdg; issue
+  #3290) — the daily **export-sync** that keeps the committed `.beads/issues.jsonl` from
+  going stale. Nothing else refreshes it: agents are forbidden to stage `.beads/` (one 1.6 MB
+  file every parallel agent would conflict on) and bead-autoclose is close-only and
+  issue-native, so the committed file had frozen at its 2026-07-18 export while every later
+  transition lived only in the work box's git-ignored Dolt DB. The lane **union-merges** the
+  committed file with the authenticated `bd-migration` board (marker **and** label — a
+  forgeable body marker alone is never trusted, and a bd-id claimed by two issues fails
+  closed): a line is never dropped, a line is rewritten only when its mapped issue closed it,
+  and a bead with no line is appended reconstructed from its issue. Closing is **one-way** —
+  a reopened issue is reported, never reopened locally. Serialisation is byte-identical to
+  `bd export` (Go conventions: raw non-ASCII, `<>&` escaped, close fields after
+  `updated_at`), verified in `--self-test` against every committed line, so a synced line is
+  not re-churned by the next real export. **Boundary, restated in every run's step summary:**
+  a bead created on the box and never migrated to an issue is invisible to a GitHub-hosted
+  runner and is *not* covered — closing that half needs a box-side `bd export` push. The
+  write lands on the non-protected `beads-sync/snapshot` branch (which is what makes it
+  survive box loss); the PR into `main` is opened only when the optional `BEADS_SYNC_TOKEN`
+  PAT is set, because a `GITHUB_TOKEN`-authored PR triggers no workflows and would hang
+  unmergeable — absent the secret the run logs the compare URL and exits green.
 - **`scripts/bead-close-on-merge.sh <pr> [--apply]`** (Phase A) — the **manual** sibling of
   the bead-autoclose CI, for orchestrator use outside CI: closes the bead a PR
   maps to, but **only after verifying the merge against the API** (`gh pr view --json
