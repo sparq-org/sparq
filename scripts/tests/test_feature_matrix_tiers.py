@@ -15,6 +15,9 @@
 #   (i) cfg(all(test, feature)) in src/ => SENSITIVE (b-direct pattern)
 #   (j) a test:true leg for the same feature NAME in a DIFFERENT crate does not
 #       satisfy the sq-vya1 guard (invariant (2) keys on (crate, feature))
+#   (k) [OPUS-5] issue #5138 — invariant (3): a cargo feature DECLARED in a
+#       legged crate's Cargo.toml that NO leg activates is still classified, so
+#       a sensitive zero-leg feature reds --enforce instead of being invisible
 #
 # All tests are hermetic: they create temporary directories with synthetic
 # Rust files and call the detector functions directly. No subprocess, no
@@ -54,18 +57,31 @@ det = _load_detector()
 # Helpers for building fixture crate directories
 # ---------------------------------------------------------------------------
 
-def _make_crate(tmpdir: str, src_files: dict = None, test_files: dict = None) -> Path:
+def _make_crate(
+    tmpdir: str,
+    src_files: dict = None,
+    test_files: dict = None,
+    cargo_features: dict = None,
+) -> Path:
     """Build a minimal fixture crate directory.
 
     src_files:  {relative_path_under_src: content, ...}
     test_files: {relative_path_under_tests: content, ...}
+    cargo_features: {feature_name: [implied, ...], ...} written into the
+        fixture's ``[features]`` table — the DECLARED features invariant (3)
+        enumerates. Default: an empty table (what every pre-#5138 test wants).
 
     Returns the crate root Path.
     """
     root = Path(tmpdir)
     # Minimal Cargo.toml so the fixture looks like a real crate
+    feature_lines = "".join(
+        '{} = [{}]\n'.format(name, ", ".join('"{}"'.format(i) for i in implied))
+        for name, implied in (cargo_features or {}).items()
+    )
     (root / "Cargo.toml").write_text(
-        '[package]\nname = "fixture"\nversion = "0.1.0"\n[features]\n',
+        '[package]\nname = "fixture"\nversion = "0.1.0"\n[features]\n'
+        + feature_lines,
         encoding="utf-8",
     )
     src_dir = root / "src"
@@ -662,6 +678,241 @@ class TestCrossCrateFeatureNameCollision(unittest.TestCase):
             self._run({"test-reason": "   "}),
             0,
             "A blank test-reason: must not silence the sq-vya1 guard.",
+        )
+
+
+# ---------------------------------------------------------------------------
+# (k) invariant (3): a DECLARED feature with ZERO legs is still classified
+#     ([OPUS-5] issue #5138 — the zero-leg blind spot)
+# ---------------------------------------------------------------------------
+
+GATED_TEST_FILE = '#![cfg(feature = "gated")]\n#[test]\nfn t() {}\n'
+
+
+class TestDeclaredFeatureWithNoLeg(unittest.TestCase):
+    """A cargo feature declared in Cargo.toml but named by NO leg.
+
+    Invariants (1) and (2) iterate the LEGS, so such a feature never reached
+    the detector at all: it was invisible to the guard rather than
+    sensitive-and-uncovered, which is the exact case the guard exists to catch.
+    Invariant (3) iterates the DECLARED features instead.
+    """
+
+    def _run(
+        self,
+        cargo_features: dict,
+        leg_features: str,
+        exemptions: dict = None,
+        test_files: dict = None,
+    ) -> list:
+        """Build a one-crate fixture and return invariant (3)'s violations."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _make_crate(
+                tmp,
+                test_files=(
+                    {"gated.rs": GATED_TEST_FILE} if test_files is None
+                    else test_files
+                ),
+                cargo_features=cargo_features,
+            )
+            original = det._crate_dir
+            det._crate_dir = lambda name: root if name == "fixture" else original(name)
+            try:
+                return det.check_declared_sensitive_features(
+                    [
+                        {
+                            "name": "fixture ({})".format(leg_features),
+                            "crate": "fixture",
+                            "features": leg_features,
+                            "test": True,
+                        }
+                    ],
+                    exemptions=exemptions if exemptions is not None else {},
+                )
+            finally:
+                det._crate_dir = original
+
+    def test_zero_leg_sensitive_feature_is_a_violation(self):
+        """The headline guard: `gated` is declared, sensitive, and has no leg."""
+        violations = self._run(
+            cargo_features={"gated": [], "other": []},
+            leg_features="other",
+        )
+        self.assertEqual(
+            len(violations),
+            1,
+            "A declared, sensitive, zero-leg feature must produce exactly one "
+            "VIOLATION(3); got: {}".format(violations),
+        )
+        self.assertIn("VIOLATION(3)", violations[0])
+        self.assertIn("'gated'", violations[0])
+
+    def test_written_exemption_silences_the_violation(self):
+        """The reviewed escape hatch: a written UNLEGGED_SENSITIVE_EXEMPT reason."""
+        self.assertEqual(
+            self._run(
+                cargo_features={"gated": [], "other": []},
+                leg_features="other",
+                exemptions={
+                    ("fixture", "gated"): "executed by the fixture lane in ci.yml"
+                },
+            ),
+            [],
+            "A written exemption reason must satisfy invariant (3).",
+        )
+
+    def test_blank_exemption_does_not_silence_the_violation(self):
+        """A whitespace-only reason is not a justification."""
+        self.assertNotEqual(
+            self._run(
+                cargo_features={"gated": [], "other": []},
+                leg_features="other",
+                exemptions={("fixture", "gated"): "   "},
+            ),
+            [],
+            "A blank exemption reason must not silence invariant (3).",
+        )
+
+    def test_transitively_activated_feature_is_covered(self):
+        """A leg whose feature IMPLIES `gated` does compile it — no violation."""
+        self.assertEqual(
+            self._run(
+                cargo_features={"gated": [], "umbrella": ["gated"]},
+                leg_features="umbrella",
+            ),
+            [],
+            "`cargo test --features umbrella` turns `gated` on, so invariant (3) "
+            "must credit the transitive activation.",
+        )
+
+    def test_default_feature_activation_is_covered(self):
+        """Legs run WITHOUT --no-default-features, so a default-on feature is on."""
+        self.assertEqual(
+            self._run(
+                cargo_features={"gated": [], "other": [], "default": ["gated"]},
+                leg_features="other",
+            ),
+            [],
+            "A feature enabled by `default` is compiled by every leg of the crate.",
+        )
+
+    def test_dep_only_implication_does_not_activate(self):
+        """`f = ["dep:other-crate"]` enables a DEPENDENCY, not a local feature.
+
+        This is the sparq-lws-core `trust-graph = ["dep:sparq-solid",
+        "dep:sparq-trust"]` shape called out in issue #5138: it must not be read
+        as activating anything in this crate's own feature namespace.
+        """
+        self.assertEqual(
+            det._feature_closure(
+                {"umbrella"},
+                {"umbrella": ["dep:some-crate", "some-crate/gated"], "gated": []},
+            ),
+            {"umbrella"},
+            "`dep:` and `crate/feature` entries must not be followed as local "
+            "features.",
+        )
+
+    def test_non_sensitive_zero_leg_feature_is_not_a_violation(self):
+        """(3) fires on SENSITIVITY, not on the mere absence of a leg."""
+        self.assertEqual(
+            self._run(
+                cargo_features={"plain": [], "other": []},
+                leg_features="other",
+                test_files={},
+            ),
+            [],
+            "A zero-leg feature with no feature-gated code is not a violation — "
+            "that is the advisory --report-unlegged's job.",
+        )
+
+    def test_unreadable_cargo_toml_is_fail_closed(self):
+        """A legged crate whose Cargo.toml cannot be read is a VIOLATION."""
+        with tempfile.TemporaryDirectory() as tmp:
+            missing = Path(tmp) / "no-such-crate"
+            original = det._crate_dir
+            det._crate_dir = lambda name: missing if name == "fixture" else original(name)
+            try:
+                violations = det.check_declared_sensitive_features(
+                    [{"name": "fixture (x)", "crate": "fixture", "features": "x"}],
+                    exemptions={},
+                )
+            finally:
+                det._crate_dir = original
+        self.assertEqual(len(violations), 1, violations)
+        self.assertIn("fail-closed", violations[0])
+
+    def test_other_crates_leg_does_not_activate_this_crates_feature(self):
+        """Feature names are crate-local — (3) keys on the (crate, feature) pair."""
+        with tempfile.TemporaryDirectory() as tmp_a, \
+                tempfile.TemporaryDirectory() as tmp_b:
+            root_a = _make_crate(tmp_a, cargo_features={"gated": []})
+            root_b = _make_crate(
+                tmp_b,
+                test_files={"gated.rs": GATED_TEST_FILE},
+                cargo_features={"gated": []},
+            )
+            original = det._crate_dir
+
+            def patched(name: str) -> Path:
+                return {"crate_a": root_a, "crate_b": root_b}.get(
+                    name, original(name)
+                )
+
+            det._crate_dir = patched
+            try:
+                violations = det.check_declared_sensitive_features(
+                    [
+                        {
+                            "name": "crate_a (gated)",
+                            "crate": "crate_a",
+                            "features": "gated",
+                            "test": True,
+                        },
+                        # crate_b is legged (so it is in scope) but its leg names
+                        # a DIFFERENT feature, leaving its own `gated` unlegged.
+                        {
+                            "name": "crate_b (unrelated)",
+                            "crate": "crate_b",
+                            "features": "unrelated",
+                            "test": True,
+                        },
+                    ],
+                    exemptions={},
+                )
+            finally:
+                det._crate_dir = original
+        self.assertEqual(len(violations), 1, violations)
+        self.assertIn("'crate_b'", violations[0])
+
+    def test_cmd_enforce_reports_invariant_three(self):
+        """(3) is WIRED into cmd_enforce, not merely importable."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _make_crate(
+                tmp,
+                test_files={"gated.rs": GATED_TEST_FILE},
+                cargo_features={"gated": [], "other": []},
+            )
+            original = det._crate_dir
+            det._crate_dir = lambda name: root if name == "fixture" else original(name)
+            try:
+                rc = det.cmd_enforce(
+                    [
+                        {
+                            "name": "fixture (other)",
+                            "crate": "fixture",
+                            "features": "other",
+                            "test": True,
+                        }
+                    ]
+                )
+            finally:
+                det._crate_dir = original
+        self.assertNotEqual(
+            rc,
+            0,
+            "cmd_enforce must exit non-zero on a declared, sensitive, zero-leg "
+            "feature — the whole point of issue #5138.",
         )
 
 

@@ -276,6 +276,28 @@ same doctrine as `ci_select.py` — P1 in the fmx4u record):
      (feature-gated suites compile EMPTY in the workspace archive; a leg here is
      the only thing that runs them). The pyramid work *hardens* this invariant
      rather than relying on review discipline;
+  2b. **[OPUS-5] issue #5138 — every SENSITIVE feature *declared* by a legged
+     crate must be activated by some leg of that crate.** Invariants 1 and 2
+     iterate the LEGS, so a cargo feature with **zero** legs was never handed to
+     the detector at all: it was *invisible* to the guard rather than
+     sensitive-and-uncovered — the precise case the guard exists to catch.
+     Demonstrated empirically: with the `sparq-lws-core (odrl-authz)` leg
+     deleted, `--enforce` still reported OK although `tests/odrl_gate.rs` is
+     `#![cfg(all(feature = "odrl-authz", …))]` and so compiles empty everywhere.
+     This invariant enumerates each legged crate's `[features]` table instead,
+     subtracts what its legs actually turn on (default + explicit + transitive
+     implications, matching `cargo test -p <crate> --features <set>`; `dep:` and
+     `crate/feat` entries are NOT followed, since they enable a *dependency*,
+     not a local feature — which is why `sparq-lws-core`'s own `trust-graph`
+     does not activate `sparq-solid`'s), classifies the remainder, and reds on a
+     sensitive leftover. The only exit is a written `UNLEGGED_SENSITIVE_EXEMPT`
+     reason in the script, which either names the non-leg executor (a bespoke
+     `ci.yml` per-suite step, a `coverage.sh` `measure()` arm) or records a KNOWN
+     GAP; seeding that table from the state at landing is what lets the invariant
+     bind on NEW features without a repo-wide leg sweep first. Fail-closed on an
+     unreadable `Cargo.toml`, and scoped to crates that HAVE a fragment — a crate
+     with no leg at all stays the business of guard C1
+     (`scripts/check-feature-test-execution.py`) and of the advisory below;
   3. reports (advisory) declared opt-in features that have **no** leg at all,
      against the documented SCOPE exclusion allowlist (zlib-ng, hdt/write, live,
      embeddings, mimalloc) — the completeness gap cargo-hack's `--each-feature`
