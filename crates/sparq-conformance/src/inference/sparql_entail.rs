@@ -187,6 +187,13 @@ fn run_one(entry: &TestEntry, profile: Profile, direct_sanctioned: bool) -> Outc
     // entailment semantics in sparq-reason, not just harness wiring). Wiring that
     // properly is tracked as a deferred bead; do NOT drop the guard to "make it run"
     // until the reasoner models named-graph materialization.
+    //
+    // [SONNET-4.6] sq-6qpyf — that "zero cases at the pin" census is no longer a
+    // prose claim: `tests/named_graph_entailment_census.rs` ASSERTS it, and goes red
+    // the moment a suite bump introduces one (the tripwire that says "now go do the
+    // per-graph materialization work in sparq-reason", epic sq-pbz04). Both arms of
+    // this guard — held when named, fall-through when not — are pinned directly by
+    // `mod named_graph_guard_tests` at the foot of this file.
     if !entry.action.graph_data.is_empty() {
         return Outcome::OutOfScope("named-graph entailment dataset not wired".into());
     }
@@ -2150,5 +2157,94 @@ mod ql_tests {
             panic!("select");
         };
         assert_eq!(projected_vars(pattern), vec!["x".to_string()]);
+    }
+}
+
+// [SONNET-4.6] sq-6qpyf (epic sq-pbz04) — DIRECT tests for the fail-closed
+// named-graph (`qt:graphData`) guard in `run_one`. The guard is UNREACHABLE from
+// the pinned rdf-tests manifest (zero such cases — asserted by
+// `tests/named_graph_entailment_census.rs`), so without these it carries no
+// coverage at all and could be deleted or inverted silently. They exercise the
+// guard through the real `run_one` entry point on a synthetic manifest entry, and
+// pin BOTH arms so either mutation goes red:
+//   - delete the guard  → the named-graph case falls through to the query path and
+//     reports `Fail("manifest entry has no qt:query")` instead of the held reason;
+//   - invert the guard  → the default-graph case is held instead of falling through.
+// Default feature state (no `d-entail` / `ql-experimental` needed), so this runs in
+// the bare `cargo test -p sparq-conformance` as well as every gated lane.
+#[cfg(test)]
+mod named_graph_guard_tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    /// The exact single-line `OutOfScope` reason a named-graph entailment case is
+    /// held under. Spelled out here rather than shared with the guard via a const,
+    /// so a reword of the reported reason is a deliberate, visible edit.
+    const HELD_REASON: &str = "named-graph entailment dataset not wired";
+
+    /// A synthetic `sparql11/entailment`-shaped QueryEvaluationTest with the given
+    /// named-graph dataset and no `qt:query` — enough to reach the guard, and the
+    /// missing query makes the fall-through path distinguishable from the held one.
+    fn entry(graph_data: Vec<(String, PathBuf)>) -> TestEntry {
+        TestEntry {
+            id: "http://example.org/entailment-manifest#synthetic".into(),
+            name: "synthetic-named-graph-entailment".into(),
+            suite: "sparql11/entailment".into(),
+            kind: EntryKind::QueryEval,
+            withdrawn: false,
+            action: manifest::QueryAction { graph_data, ..Default::default() },
+            result_file: None,
+            update_request: None,
+            update_pre: manifest::UpdateState::default(),
+            update_post: manifest::UpdateState::default(),
+        }
+    }
+
+    #[test]
+    fn named_graph_dataset_is_held_out_of_scope_under_every_profile() {
+        let e = entry(vec![(
+            "http://example.org/g".into(),
+            PathBuf::from("/nonexistent/named-graph.ttl"),
+        )]);
+        // Every regime the runner can pick must hold — the default-graph-only
+        // materialization path is wrong for a named-graph dataset regardless of
+        // which closure it would have computed.
+        for profile in [Profile::Rdf, Profile::Rdfs, Profile::OwlRl] {
+            match run_one(&e, profile, false) {
+                Outcome::OutOfScope(reason) => assert_eq!(
+                    reason, HELD_REASON,
+                    "a named-graph entailment case must be held under the documented \
+                     fail-closed reason, not laundered under some other skip"
+                ),
+                // Positional `format!`/assert args per the CodeQL
+                // `rust/unused-variable` false-positive guard.
+                other => panic!(
+                    "named-graph entailment case was NOT held fail-closed: {:?} — the \
+                     default-graph materialization path gives a WRONG closure for a \
+                     named-graph dataset (per-graph semantics are unimplemented, \
+                     sq-6qpyf / epic sq-pbz04)",
+                    other
+                ),
+            }
+        }
+    }
+
+    #[test]
+    fn default_graph_dataset_falls_through_the_guard() {
+        // The guard must be conditioned on the dataset, not an unconditional hold:
+        // an ordinary default-graph entailment case reaches the real query path
+        // (and, having no `qt:query`, fails there rather than being held).
+        match run_one(&entry(Vec::new()), Profile::Rdfs, false) {
+            Outcome::Fail(reason) => assert!(
+                reason.contains("no qt:query"),
+                "expected the query-path failure, got {:?}",
+                reason
+            ),
+            other => panic!(
+                "a default-graph entailment case must fall THROUGH the named-graph \
+                 guard into the query path, got {:?}",
+                other
+            ),
+        }
     }
 }
