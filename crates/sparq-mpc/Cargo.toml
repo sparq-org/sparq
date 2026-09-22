@@ -43,6 +43,22 @@ publish = false
 # The feature name is the warning: turning it on opts into insecure randomness.
 insecure-test-rng = []
 
+# [OPUS-5] sq-dz10l (Phase 6, epic sq-0dksu): the PER-PROTOCOL security-properties
+# annotation graph (`secprop` module) — the machine-readable form of this crate's
+# per-operator posture, keyed on `mpc:` protocol IRIs, recording the
+# `secx:HonestMajority` / `secx:SemiHonest` ASSUMPTIONS each guarantee rests on so a
+# preference requiring malicious-security / dishonest-majority can EXCLUDE them
+# mechanically instead of by reading prose (design §5c). Ships the four over-claim
+# guards, including the drift guard that pins the graph to `SecurityDescriptor` so the
+# Turtle cannot become a stale parallel truth. OFF by default: the default build is
+# byte-unchanged and the `secprop` module is compiled out. Pulls in the `oxttl` Turtle
+# parser to load the static graph, and the ZERO-dependency `sparq-secprop-vocab` leaf
+# for the `secx:` IRI constants (no cycle: the leaf sits below everything).
+#
+# RECORDS claims + their epistemic basis; asserts NO soundness/privacy property (the
+# crate is research-grade and NOT externally audited, sq-qhy4).
+secprop-annotations = ["dep:oxttl", "dep:sparq-secprop-vocab"]
+
 [dependencies]
 # The single-holder query engine. The MPC layer's whole point is to MINIMISE
 # data sharing: each holder evaluates a query fragment over ITS OWN graphs
@@ -95,3 +111,11 @@ subtle = "2"
 # fold into the 61-bit Mersenne field. Pinned to the same 0.11 line sparq-engine
 # uses so the workspace resolves a single `sha2`/`digest` version.
 sha2 = "0.11"
+
+# [OPUS-5] sq-dz10l: the `secprop-annotations` gate only. `oxttl` parses the bundled
+# `ontologies/secprop-methods.ttl`; `sparq-secprop-vocab` is the ZERO-dependency leaf
+# that owns the `secx:` IRI constants (so they cannot drift from the canonical
+# `secprop-ext.ttl`). Both OPTIONAL — a default build links neither, and the crate's
+# native-only / wasm-exclusion invariant is untouched.
+oxttl = { workspace = true, optional = true }
+sparq-secprop-vocab = { path = "../sparq-secprop-vocab", optional = true }
