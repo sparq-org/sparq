@@ -10,7 +10,7 @@
 #   - THIS scanner sweeps the WHOLE repo on a schedule to find EXISTING drift
 #     the gates predate or the heuristics missed. It complements, never gates.
 #
-# DRIFT CLASSES (each maps to a §5 finding in the design doc):
+# DRIFT CLASSES (the first five map to a §5 finding in the design doc):
 #   bench-missing       a PUBLISHABLE crate with NO registered benchmark in
 #                       bench/benchmarks.toml (cross-ref `source = crates/<x>` vs
 #                       crates/*/). Honors gate G1's `publish = false` stub
@@ -22,6 +22,16 @@
 #                       bench/dashboard/dashboard.js                              §5.D
 #   conformance-split   a conformance ratchet living OUTSIDE the central
 #                       sparq-conformance scoreboard                             §5.E
+#   beads-export-stale  the committed `.beads/issues.jsonl` export has fallen
+#                       behind the live bd DB — measured by the export's own
+#                       newest record stamp plus the count of bead ids the repo
+#                       cites that have no record in it. CI cannot diff the real
+#                       DB (gitignored, orchestrator-local), so both are proxies;
+#                       see scan_beads_export_stale.        bead sq-0b0sh
+#
+# NOTE ON THE §-REFS: classes A–E each map to a numbered finding in the design
+# doc's §5. beads-export-stale does NOT — it post-dates the doc (bead sq-0b0sh,
+# found by the 2026-07 program-level status review) and carries no § of its own.
 #
 # WHY GITHUB ISSUES, NOT `bd create` (identical reasoning to flow-on.py):
 # (design §2.2) In CI there is NO `bd` dolt DB — it lives only in the
@@ -55,12 +65,49 @@ import re
 import subprocess
 import sys
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # Labels every drift issue carries.
 BASE_LABELS = ["drift", "auto"]
+
+# --------------------------------------------------------------------------- #
+# beads-export-stale (bead sq-0b0sh) tuning — see scan_beads_export_stale
+# for what these two thresholds are proxies FOR and why neither can be exact.
+# --------------------------------------------------------------------------- #
+BEADS_EXPORT_REL = ".beads/issues.jsonl"
+
+# Days the export's newest record stamp may lag before it counts as stale. The
+# sweep is weekly (drift-scan.yml), so 14 = one full missed refresh cycle, not a
+# single late day.
+BEADS_EXPORT_STALE_DAYS = 14
+
+# How many repo-cited-but-unexported bead ids are tolerated before the count
+# alone trips the check. Not zero: closed beads that were later compacted/gc'd
+# out of the DB stay cited in research records forever and are legitimately
+# absent from the export. Scores of them, though, mean a real lag.
+BEADS_MISSING_REF_THRESHOLD = 25
+
+# A bd bead id: `sq-` + a 3-6 char hash, optionally `.N` sub-bead suffixes.
+# The trailing lookahead (rather than a bare `\b`) rejects a longer hyphenated
+# token such as `sq-bench-adapters`, which `\b` would happily truncate to a
+# phantom `sq-bench` id.
+BEAD_ID_RE = re.compile(r"\bsq-[0-9a-z]{3,6}(?:\.\d+)*(?![-\w])")
+
+# The reference scan is bounded by suffix, size and directory so it stays a
+# couple of seconds on the full tree — irrelevant against a weekly sweep, but
+# the bounds also keep it off vendored/build trees where a bead id would be
+# noise. `.beads/` is excluded on purpose: the export must not corroborate
+# itself.
+REF_SCAN_SUFFIXES = frozenset(
+    {".md", ".rs", ".py", ".yml", ".yaml", ".toml", ".sh", ".ts", ".tsx", ".js", ".mjs", ".nr"}
+)
+REF_SCAN_SKIP_DIRS = frozenset(
+    {".git", ".beads", "node_modules", "target", "dist", ".next", "__pycache__"}
+)
+REF_SCAN_MAX_BYTES = 1_000_000
 
 # Crates whose absence of a DIRECT `source = crates/<x>` bench registration is
 # by design, because they are the shared query-execution STACK that the CLI /
@@ -532,12 +579,192 @@ def scan_conformance_split(root: Path) -> list[DriftItem]:
     return items
 
 
+def _parse_stamp(stamp: object) -> datetime | None:
+    """One record stamp as a timezone-aware datetime, or `None` if unusable.
+
+    Tolerant by design (this is an audit, not a validator): anything that is not
+    a parsable ISO-8601 string is simply not evidence. A naive stamp is read as
+    UTC so every candidate is directly comparable — bd writes Zulu, but a stamp
+    carrying a real offset must still order by INSTANT against it."""
+    if not isinstance(stamp, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
+
+
+def beads_export_records(root: Path) -> tuple[set[str], str | None]:
+    """Parse `.beads/issues.jsonl` -> (bead ids present, newest ISO-8601 stamp).
+
+    Returns `(set(), None)` when the export is absent (fixture repos, a checkout
+    without `.beads/`) so the scanner degrades to a no-op rather than a false
+    positive. Malformed lines are skipped, not fatal: this is an audit, and a
+    half-parsable export is still evidence about the half that parsed — and that
+    tolerance extends to the stamps themselves, which are compared as parsed
+    instants rather than raw strings (see the loop below)."""
+    path = root / BEADS_EXPORT_REL
+    ids: set[str] = set()
+    newest: str | None = None
+    newest_at: datetime | None = None
+    try:
+        text = path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return ids, None
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(rec, dict):
+            continue
+        bead_id = rec.get("id")
+        if isinstance(bead_id, str):
+            ids.add(bead_id)
+        for field in ("created_at", "updated_at", "closed_at"):
+            stamp = rec.get(field)
+            # Compare PARSED instants, never the raw strings: a lexicographic
+            # max() lets one malformed field (`zzzz`) outrank every valid stamp
+            # and then fail to parse downstream, so a single junk value would
+            # silently destroy the whole age proxy. Unparsable candidates are
+            # skipped here instead; the raw winner is kept for reporting.
+            parsed = _parse_stamp(stamp)
+            if parsed is not None and (newest_at is None or parsed > newest_at):
+                newest_at, newest = parsed, stamp
+    return ids, newest
+
+
+def repo_bead_references(root: Path) -> set[str]:
+    """Every `sq-…` bead id referenced by a TRACKED-ish text file in the tree.
+
+    This is the git-visible proxy for "which beads exist" that CI can compute
+    WITHOUT the bd Dolt DB (which is gitignored and lives only in the
+    orchestrator's checkout — see WHY GITHUB ISSUES, NOT `bd create` above).
+    Deliberately excludes `.beads/` itself so the export cannot corroborate
+    itself. Bounded by suffix + size + directory (see REF_SCAN_* above)."""
+    refs: set[str] = set()
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in REF_SCAN_SKIP_DIRS]
+        for name in filenames:
+            if Path(name).suffix not in REF_SCAN_SUFFIXES:
+                continue
+            fp = Path(dirpath) / name
+            try:
+                if fp.stat().st_size > REF_SCAN_MAX_BYTES:
+                    continue
+                text = fp.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            refs.update(BEAD_ID_RE.findall(text))
+    return refs
+
+
+def export_age_days(newest: str | None, now: datetime | None = None) -> float | None:
+    """Whole-ish days between the export's newest record stamp and `now`.
+
+    `None` when there is no parsable stamp. `now` is injectable so the tests are
+    deterministic (the scanner otherwise reads the wall clock)."""
+    parsed = _parse_stamp(newest)
+    if parsed is None:
+        return None
+    now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    return (now - parsed).total_seconds() / 86400.0
+
+
+def scan_beads_export_stale(root: Path, now: datetime | None = None) -> list[DriftItem]:
+    """sq-0b0sh — `.beads/issues.jsonl` has fallen behind the live bd DB.
+
+    `.beads/issues.jsonl` is the ONLY git-visible / cross-checkout view of the
+    backlog: every agent, digest and program review that cannot reach the
+    orchestrator's Dolt DB reads it instead. When the export is not re-run, that
+    view silently reports a backlog months out of date — the 2026-07 Fable status
+    digest wrongly flagged already-closed survey items as unbeaded gaps for
+    exactly this reason.
+
+    CI CANNOT DIFF AGAINST THE LIVE DB (it is gitignored and local to the
+    orchestrator), so this scanner measures the two proxies it CAN compute
+    hermetically from the checkout:
+
+      1. AGE — how old the newest record stamp in the export is. This is a LOWER
+         bound on staleness: a re-export with no intervening bead mutation would
+         not move it. Accepted, because beads in this repo mutate ~daily, so in
+         practice the newest stamp tracks the last export closely.
+      2. MISSING REFERENCES — bead ids the repo itself cites (in research
+         records, code comments, workflows, SKILLs) that have NO record in the
+         export. This is an UPPER bound on the true gap: a bead that was closed
+         and later compacted/gc'd out of the DB is cited but legitimately absent.
+         Hence the threshold below — a handful of these is normal; scores of them
+         mean the export genuinely lags the DB.
+
+    Either proxy tripping files ONE item (a single stable dedup key), because
+    both have the same one fix: re-run `bd export` onto a `chore-beads-resync-*`
+    branch, and automate it (a post-mutation hook or a scheduler-tick step) so it
+    does not drift again. This scanner NEVER touches `bd` or `.beads/` — it only
+    reads the committed export, per the standing no-hand-edits rule."""
+    ids, newest = beads_export_records(root)
+    if not ids:
+        # No export in this tree (fixture / partial checkout): nothing to assert.
+        return []
+
+    age = export_age_days(newest, now)
+    missing = sorted(r for r in repo_bead_references(root) if r not in ids)
+
+    stale = age is not None and age > BEADS_EXPORT_STALE_DAYS
+    orphaned = len(missing) > BEADS_MISSING_REF_THRESHOLD
+    if not (stale or orphaned):
+        return []
+
+    age_line = (
+        f"- newest record stamp: `{newest}` — **{age:.0f} days old** "
+        f"(threshold: {BEADS_EXPORT_STALE_DAYS} days)"
+        if age is not None
+        else "- newest record stamp: *unparsable* — the export carries no usable timestamp"
+    )
+    sample = ", ".join(f"`{m}`" for m in missing[:20])
+    return [
+        DriftItem(
+            drift_class="beads-export-stale",
+            dedup_key="beads-export-stale:issues-jsonl",
+            title="drift: `.beads/issues.jsonl` export has fallen behind the live bd DB",
+            body=(
+                f"`{BEADS_EXPORT_REL}` is the only git-visible view of the backlog, and it "
+                f"reads as stale. Measured from this checkout ({len(ids)} exported "
+                f"bead records):\n\n"
+                f"{age_line}\n"
+                f"- bead ids cited elsewhere in the repo with NO record in the export: "
+                f"**{len(missing)}** (threshold: {BEADS_MISSING_REF_THRESHOLD})\n\n"
+                f"Sample of cited-but-absent ids: {sample or '(none)'}\n\n"
+                f"Both numbers are PROXIES — CI has no access to the bd Dolt DB (it is "
+                f"gitignored and lives only in the orchestrator's checkout), so this lane "
+                f"cannot diff the export against the real backlog. The age is a LOWER bound "
+                f"on staleness (a re-export with no bead mutation would not move it); the "
+                f"missing-reference count is an UPPER bound on the real gap (a bead that was "
+                f"closed and later compacted out of the DB is cited but legitimately absent).\n\n"
+                f"Why it matters: any agent, digest or program review that reads the export "
+                f"instead of the DB gets a materially wrong picture of the backlog.\n\n"
+                f"Follow-on: re-run `bd export` onto a dedicated `chore-beads-resync-*` branch "
+                f"(never folded into a feature branch — AGENTS.md *Merge discipline*), and "
+                f"automate the refresh so it cannot drift again: a post-mutation `bd` hook, or "
+                f"an export step on the orchestrator's scheduler tick. Do NOT hand-edit "
+                f"`{BEADS_EXPORT_REL}` (standing rule) — `bd export` regenerates it."
+            ),
+        )
+    ]
+
+
 SCANNERS = (
     scan_bench_missing,
     scan_skill_missing,
     scan_explain_asymmetry,
     scan_dashboard_row,
     scan_conformance_split,
+    scan_beads_export_stale,
 )
 
 
