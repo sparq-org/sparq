@@ -571,6 +571,27 @@ jobs:
       # self-test in differential.yml).
       - name: Self-test demoted-lane failure filer (id/dedupe/append/log-tail logic)
         run: python3 scripts/ci-file-demoted-lane-failure.py --self-test
+      # [OPUS-5] #5804: the shared OPEN-ISSUE DEDUPE the auto-filers share
+      # (scripts/gh_dedupe.py). Five lanes decided "have I already filed this?" with
+      # `gh issue list --search 'in:title "[marker] key=value"'` — the mechanism two
+      # siblings (ci_selection_alarm.py, triage-area.py) deliberately refuse for exactly
+      # this job, because gh's search TOKENISER mishandles that punctuation and the search
+      # INDEX lags. Either makes the lookup MISS, so the lane re-files an issue it already
+      # filed and the non-spam invariant fails open, silently. The lookup is now a label
+      # listing matched by exact substring locally. Hermetic (no gh, no network): the fake
+      # gh's label listing and search index DISAGREE, and the suite drives the REAL
+      # find_open_issue of all five sites over that fixture, so un-routing any one of them
+      # reds here. It also pins its OWN call site, so it cannot silently leave CI.
+      - name: Self-test auto-filer issue dedupe (label listing, not the search index — #5804)
+        run: python3 scripts/tests/test_gh_dedupe.py
+      # [OPUS-5] #5804: bench-triage.py's own hermetic self-test had no CI call site
+      # anywhere in the tree — its zone partitioning, suspect ranking and body
+      # sanitizers were only ever exercised by hand, so a regression in them could only
+      # be found by a nightly bench misfiling. Noticed while re-pointing its dedupe; the
+      # dedupe itself is covered by test_gh_dedupe.py above, not here. Same stdlib-only,
+      # no-deps pattern as the lints above.
+      - name: Self-test bench triage (zone partition + suspect ranking + body sanitizers)
+        run: python3 scripts/bench-triage.py --self-test
       # [OPUS-5] sq-jxeqz / #4559: the bench HARD-ZONE gate's pure logic
       # (scripts/bench_hardzone.py). Its --self-test previously ran ONLY inside bench.yml's
       # "Hard zone" step, which is guarded `github.event_name != 'schedule' && github.ref ==
