@@ -40,6 +40,7 @@ import {
 
 import { useEngine } from "@/lib/engine-context";
 import { loadTauriFs } from "@/lib/tauri-fs";
+import { upsertSource } from "@/lib/workspace-sources";
 import { DEFAULT_QUERY } from "@/data/sample-graph";
 
 // [OPUS-4.8] sq-lcd6e — the starting editor query a freshly-created workspace carries. It is the
@@ -69,9 +70,13 @@ export interface WorkspaceContextValue {
   workspaces: WorkspaceSummary[];
   /**
    * Record an imported source + persist a fresh dataset SNAPSHOT of the live store. Called by the
-   * Import drawer on a successful ingest. `snapshot` is the live store's whole-dataset N-Quads
-   * (the engine context's `snapshotStore()`), the save/open cache. Best-effort persistence: a
-   * write failure does not throw (the import itself already succeeded in-memory).
+   * Import drawer on a successful ingest, and by the rail's re-fetch of a recorded `url` source.
+   * `snapshot` is the live store's whole-dataset N-Quads (the engine context's `snapshotStore()`),
+   * the save/open cache. Best-effort persistence: a write failure does not throw (the import
+   * itself already succeeded in-memory).
+   *
+   * The source list is UPSERTED by {@link upsertSource}: a `url` source re-fetched from the rail
+   * updates its existing entry in place rather than appending a duplicate.
    */
   recordImport: (source: WorkspaceSourceMeta, snapshot: string | null) => Promise<void>;
   /**
@@ -273,7 +278,10 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
       const base = workspaceRef.current ?? newWorkspace("default workspace", STARTER_QUERY);
       const next: Workspace = {
         ...base,
-        sources: [...base.sources, source],
+        // [OPUS-5] sq-ixc3.13 — UPSERT, not append: re-fetching a recorded `url` source updates
+        // that entry in place (fresher importedAt / bytes / format) instead of growing a duplicate
+        // rail row. Local imports always append (they have no re-fetch identity).
+        sources: upsertSource(base.sources, source),
         dataSnapshot: snapshot ?? base.dataSnapshot,
         updatedAt: Date.now(),
       };
