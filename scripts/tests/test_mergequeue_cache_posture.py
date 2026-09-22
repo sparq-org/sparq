@@ -10,8 +10,8 @@
 # So the two lines are PINNED here, structurally, over every workflow that still
 # triggers on `merge_group`:
 #
-#   1. CACHE-SAVE DISCIPLINE. Every `Swatinem/rust-cache` step in a
-#      merge_group-triggered workflow must carry
+#   1. CACHE-SAVE DISCIPLINE. Every `Swatinem/rust-cache` step in a workflow that
+#      is IN SCOPE (defined below) must carry
 #      `save-if: ${{ github.ref == 'refs/heads/main' }}`.
 #      A save from a merge-queue entry is DEAD ON ARRIVAL: Actions cache scoping
 #      makes an entry written from `refs/heads/gh-readonly-queue/<base>/pr-<N>-<sha>`
@@ -21,9 +21,50 @@
 #      churn the repo's shared 10 GB Actions-cache budget and LRU-evict the
 #      main-scoped entries that every branch actually restores. This is sq-3sbrr's
 #      doctrine, already live in feature-matrix.yml and the wasm lanes; sq-6vshe.15
-#      closed the remaining gap (ci.yml's 20 cache steps + vectorized-feature-off).
+#      closed the merge-queue half (ci.yml's 20 cache steps + vectorized-feature-off).
 #      RESTORE is deliberately untouched — `save-if` gates saving only, and queue
 #      refs branch off main and read main's entry, which is where the hit comes from.
+#
+#      SCOPE (#5166 widened this from "triggers on merge_group" to the rule below).
+#      sq-6vshe.15 scoped itself to merge_group lanes because its justification was
+#      the queue's critical path. The OTHER half of the sq-3sbrr rationale — shared-
+#      budget churn — applies to any lane that runs on branch refs. But the guard is
+#      NOT safe to apply mechanically: it is safe only when some run on
+#      `refs/heads/main` RE-SEEDS the same cache key. Otherwise the lane never saves
+#      AND has nothing to restore, and goes permanently cold — a regression, not a
+#      win. So a workflow is in scope iff BOTH:
+#
+#        (a) it triggers on `pull_request` or `merge_group` — i.e. it actually runs
+#            on branch refs, so there is churn to eliminate; AND
+#        (b) it triggers on `push:` with `main` among its branches — so main keeps
+#            re-seeding whatever keys the lane uses.
+#
+#      This is a FLOOR, not an exact set: a lane outside it may still carry `save-if`
+#      (pages.yml does), and that is fine. What the rule forbids is an in-scope lane
+#      WITHOUT the guard.
+#
+#      DELIBERATELY OUT OF SCOPE, and why (#5166 decided these per lane rather than
+#      mechanically — each is a case where the guard is wrong or useless):
+#
+#        * LANES THAT NEVER RUN ON A PR REF — asan, datalog-souffle, differential,
+#          differential-update, kani, lws-cth, metamorph, miri, shacl-diff-fuzz
+#          (schedule and/or workflow_dispatch only), plus pkg-ingest (`push:` to main
+#          + dispatch) and selection-alarm (`workflow_run` on main + dispatch). None
+#          has a `pull_request` trigger, so whatever DOES run them — schedule, a main
+#          push, a workflow_run — is already on main and the guard is a no-op that
+#          only adds noise. (`workflow_dispatch` against a branch is the lone
+#          exception, and is rare and deliberate.)
+#        * mutants-diff.yml — `pull_request` ONLY, so it fails (b): main never runs
+#          it and nothing would ever seed its key. Guarding it would mean never
+#          saving and never restoring, i.e. a cold rebuild on every PR. Its branch-
+#          scoped save is genuinely useful, because the same PR restores it on each
+#          subsequent push.
+#        * release.yml — runs off `push: tags:`, so `github.ref` is `refs/tags/*`
+#          and a main-only guard would stop it saving at all. Its saves ARE dead in
+#          the same way queue-ref saves are (a tag-scoped entry is invisible to
+#          every later tag), but the correct guard there is a different one
+#          (`save-if: false`) on the release critical path, which is a separate
+#          decision and NOT made here.
 #
 #   2. ARTIFACT DIET. The `nextest-archive` upload must set `compression-level: 0`.
 #      `nextest.tar.zst` is already zstd-compressed; upload-artifact's default
@@ -80,10 +121,10 @@ def _is_comment(line: str) -> bool:
     return line.lstrip().startswith("#")
 
 
-def triggers_on_merge_group(path: Path) -> bool:
-    """True iff the workflow's top-level `on:` block declares `merge_group`.
+def on_block(path: Path) -> list[str]:
+    """The workflow's top-level `on:` block, comment lines stripped.
 
-    Comment lines are ignored: several workflows carry a prose note explaining
+    Comments are dropped because several workflows carry a prose note explaining
     that `merge_group` was REMOVED (2026-07-18 maintainer directive), and
     counting those would be exactly the false positive that makes this suite
     assert the property over lanes that never see a queue ref.
@@ -94,17 +135,76 @@ def triggers_on_merge_group(path: Path) -> bool:
         None,
     )
     if start is None:
-        return False
+        return []
     end = len(lines)
     for i in range(start + 1, len(lines)):
         line = lines[i]
         if line and not line[0].isspace() and not _is_comment(line):
             end = i
             break
-    block = lines[start:end]
-    return any(
-        re.match(r"^\s+merge_group:", l) for l in block if not _is_comment(l)
+    return [l for l in lines[start:end] if not _is_comment(l)]
+
+
+def triggers_on(path: Path, event: str) -> bool:
+    """True iff the workflow's `on:` block declares the top-level event `event`."""
+    return any(re.match(rf"^\s+{event}:", l) for l in on_block(path))
+
+
+def triggers_on_merge_group(path: Path) -> bool:
+    return triggers_on(path, "merge_group")
+
+
+def _sub_block(block: list[str], i: int, indent: int) -> list[str]:
+    """The lines of `block` after index `i` indented deeper than `indent`."""
+    out = []
+    for line in block[i + 1 :]:
+        if not line.strip():
+            continue
+        if len(line) - len(line.lstrip()) <= indent:
+            break
+        out.append(line)
+    return out
+
+
+def pushes_to_main(path: Path) -> bool:
+    """True iff the workflow runs on `push` to `main`.
+
+    This is the half of the scope rule that makes the guard SAFE: if main never
+    runs the lane, main never re-seeds its cache key, and a main-only `save-if`
+    would leave the lane permanently cold instead of merely un-churned.
+    """
+    block = on_block(path)
+    for i, line in enumerate(block):
+        m = re.match(r"^(\s+)push:", line)
+        if not m:
+            continue
+        sub = _sub_block(block, i, len(m.group(1)))
+        for j, s in enumerate(sub):
+            bm = re.match(r"^(\s+)branches:(.*)$", s)
+            if not bm:
+                continue
+            inline = bm.group(2).strip()
+            if inline:  # `branches: [main, ...]`
+                return "main" in re.findall(r"[\w.\-/*]+", inline)
+            # block form: `branches:` then `- main`
+            return any(
+                t.strip().lstrip("- ").strip("\"'") == "main"
+                for t in _sub_block(sub, j, len(bm.group(1)))
+            )
+        # A `push:` filtered to `tags:` only (release.yml) never fires on a branch.
+        if any(re.match(r"^\s+tags(-ignore)?:", s) for s in sub):
+            return False
+        # `push:` with no ref filter at all fires on every branch, main included.
+        return True
+    return False
+
+
+def requires_save_if(path: Path) -> bool:
+    """The #5166 scope rule. See the CACHE-SAVE DISCIPLINE header note."""
+    runs_on_branch_refs = triggers_on(path, "pull_request") or triggers_on(
+        path, "merge_group"
     )
+    return runs_on_branch_refs and pushes_to_main(path)
 
 
 def step_body(lines: list[str], start: int) -> list[str]:
@@ -150,6 +250,14 @@ def merge_group_workflows_with_rust_cache() -> list[Path]:
     )
 
 
+def workflows_requiring_save_if() -> list[Path]:
+    return sorted(
+        p
+        for p in WORKFLOWS.glob("*.yml")
+        if RUST_CACHE in p.read_text() and requires_save_if(p)
+    )
+
+
 class TestParserNonVacuity(unittest.TestCase):
     """The assertions below iterate over discovered sets. If discovery silently
     returns nothing, every other test in this file passes while checking NOTHING.
@@ -177,8 +285,69 @@ class TestParserNonVacuity(unittest.TestCase):
             "parser is matching comments.",
         )
 
+    def test_scope_rule_covers_the_lanes_5166_guarded(self) -> None:
+        # The #5166 set: lanes that run on branch refs AND on push-to-main. If the
+        # scope rule regresses to "merge_group only", these drop out and the guards
+        # below stop being enforced — so the membership is pinned by name.
+        names = {p.name for p in workflows_requiring_save_if()}
+        for expected in (
+            "bench.yml",
+            "formal-verification.yml",
+            "fuzz.yml",
+            "python.yml",
+            "xpath-differential.yml",
+            "zk-toolchain.yml",
+        ):
+            self.assertIn(
+                expected,
+                names,
+                f"{expected} runs on branch refs AND on push-to-main, so #5166's rule "
+                f"must hold it in scope. In scope: {sorted(names)}",
+            )
+
+    def test_pr_only_lane_is_out_of_scope(self) -> None:
+        # mutants-diff.yml is `pull_request`-ONLY. Guarding it would mean it never
+        # saves and — since nothing on main seeds its key — never restores either,
+        # i.e. a cold rebuild every PR. This is the safety half of the rule; if it
+        # ever flips to a bare "runs on PRs" test, this goes red.
+        wf = WORKFLOWS / "mutants-diff.yml"
+        self.assertTrue(wf.exists(), "fixture-by-reference vanished; re-point this test")
+        self.assertTrue(triggers_on(wf, "pull_request"), "trigger changed; re-point")
+        self.assertFalse(
+            pushes_to_main(wf),
+            "mutants-diff.yml gained a push-to-main trigger — main now seeds its cache "
+            "key, so it should be brought IN scope and given the `save-if` guard.",
+        )
+        self.assertFalse(requires_save_if(wf))
+
+    def test_tag_only_lane_is_out_of_scope(self) -> None:
+        # release.yml runs off `push: tags:`, where `github.ref` is `refs/tags/*` — a
+        # main-only guard would stop it saving ENTIRELY. Pins that `pushes_to_main`
+        # distinguishes a tag filter from a branch filter.
+        wf = WORKFLOWS / "release.yml"
+        self.assertTrue(wf.exists(), "fixture-by-reference vanished; re-point this test")
+        self.assertFalse(
+            pushes_to_main(wf),
+            "release.yml's `push:` is tag-filtered; reading that as a push-to-main "
+            "would put the release lane in scope and stop it caching at all.",
+        )
+        self.assertFalse(requires_save_if(wf))
+
+    def test_nightly_only_lanes_are_out_of_scope(self) -> None:
+        # schedule/dispatch-only lanes already run on main, so the guard is a no-op
+        # that only adds noise (#5166). Pinned so a future edit does not quietly
+        # mechanically-expand the rule to them.
+        for name in ("miri.yml", "kani.yml", "asan.yml", "differential.yml"):
+            wf = WORKFLOWS / name
+            self.assertTrue(wf.exists(), f"{name} vanished; re-point this test")
+            self.assertFalse(
+                requires_save_if(wf),
+                f"{name} is nightly/dispatch-only — it has no `pull_request` trigger, so "
+                "there is no branch-ref churn for the guard to remove.",
+            )
+
     def test_step_walker_finds_every_rust_cache_step(self) -> None:
-        for wf in merge_group_workflows_with_rust_cache():
+        for wf in workflows_requiring_save_if():
             text = wf.read_text()
             found = steps_using(text.split("\n"), RUST_CACHE)
             self.assertEqual(
@@ -191,18 +360,20 @@ class TestParserNonVacuity(unittest.TestCase):
 
 
 class TestCacheSaveDiscipline(unittest.TestCase):
-    def test_every_merge_group_rust_cache_step_saves_on_main_only(self) -> None:
-        for wf in merge_group_workflows_with_rust_cache():
+    def test_every_in_scope_rust_cache_step_saves_on_main_only(self) -> None:
+        for wf in workflows_requiring_save_if():
             lines = _lines(wf)
             for idx, body in steps_using(lines, RUST_CACHE):
                 where = f"{wf.name}:{idx + 1}"
                 got = with_value(body, SAVE_IF_KEY)
                 self.assertIsNotNone(
                     got,
-                    f"{where}: rust-cache step in a merge_group-triggered workflow has no "
-                    f"`save-if`. Saves from a `gh-readonly-queue/*` ref are unrestorable "
-                    f"(the ref is deleted at merge) — add "
-                    f"`save-if: {SAVE_IF_VALUE}` (sq-6vshe.15 lever 2).",
+                    f"{where}: rust-cache step in a workflow that runs on branch refs AND "
+                    f"on push-to-main has no `save-if`. Saves from a `gh-readonly-queue/*` "
+                    f"ref are unrestorable (the ref is deleted at merge) and saves from a "
+                    f"`refs/pull/<n>/merge` ref are restorable by that one PR alone, while "
+                    f"both consume the shared 10 GB budget — add "
+                    f"`save-if: {SAVE_IF_VALUE}` (sq-6vshe.15 lever 2, widened by #5166).",
                 )
                 self.assertEqual(
                     got,
@@ -216,7 +387,7 @@ class TestCacheSaveDiscipline(unittest.TestCase):
         # `save-if` gates SAVING only — the whole design depends on queue refs and PR
         # heads still RESTORING main's entry. `lookup-only` would break that silently
         # (a cache "hit" that unpacks nothing).
-        for wf in merge_group_workflows_with_rust_cache():
+        for wf in workflows_requiring_save_if():
             lines = _lines(wf)
             for idx, body in steps_using(lines, RUST_CACHE):
                 self.assertIsNone(
