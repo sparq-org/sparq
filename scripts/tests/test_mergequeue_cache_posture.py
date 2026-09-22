@@ -278,6 +278,94 @@ class TestNextestArchiveDiet(unittest.TestCase):
         )
 
 
+class TestCoverageEngineSharesOneCacheKey(unittest.TestCase):
+    """[OPUS-5] #5213 — `coverage-engine-run` (matrix part 1..3) and
+    `coverage-engine-merge` must name the SAME `shared-key`, and must not fall back
+    to `key:` for it.
+
+    WHY this is not interchangeable with `key:`, verified against the PINNED action
+    revision e18b497 (`src/config.ts`, "Construct key prefix"):
+
+        if (sharedKey) { key += `-${sharedKey}` }
+        else { if (inputKey) key += `-${inputKey}`
+               if (job && addJobIdKey) key += `-${job}` }   // job = $GITHUB_JOB
+
+    `shared-key` REPLACES the job component; `key` is an ADDITIONAL discriminator that
+    still gets `$GITHUB_JOB` appended (`add-job-id-key` defaults to "true"). So the
+    pre-#5213 pairing — `key: coverage-engine-run-<part>` on the run job and
+    `key: coverage-engine-run-1` on the merge job — produced the prefixes
+    `…-run-1-coverage-engine-run-…` and `…-run-1-coverage-engine-merge-…`, which never
+    match. `restore.ts` passes exactly one fallback (`config.restoreKey`, built from the
+    same prefix), so there was no second chance: the merge job restored COLD on every
+    run while its comment claimed it reused part 1's cache.
+
+    That failure is INVISIBLE — a cold restore is a slow green job, not a red one — so
+    the shared value is pinned structurally here. A future edit that splits the two
+    jobs' keys, or reverts either to `key:`, goes red instead of silently going cold.
+    """
+
+    JOBS = ("coverage-engine-run", "coverage-engine-merge")
+
+    def _cache_step(self, job_id: str) -> list[str]:
+        lines = _lines(CI_YML)
+        header = re.compile(rf"^ {{2}}{re.escape(job_id)}:\s*$")
+        start = next((i for i, l in enumerate(lines) if header.match(l)), None)
+        self.assertIsNotNone(
+            start, f"ci.yml has no job `{job_id}:` — renamed or removed; re-point this test."
+        )
+        end = next(
+            (
+                i
+                for i in range(start + 1, len(lines))
+                if re.match(r"^ {2}\S", lines[i]) and not _is_comment(lines[i])
+            ),
+            len(lines),
+        )
+        steps = steps_using(lines[start:end], RUST_CACHE)
+        # Non-vacuity: if discovery returns nothing, every assertion below passes
+        # while checking NOTHING.
+        self.assertEqual(
+            len(steps),
+            1,
+            f"expected exactly 1 rust-cache step in `{job_id}`, found {len(steps)}; "
+            "the cross-job shared-key contract is ambiguous — re-point this test.",
+        )
+        return steps[0][1]
+
+    def test_both_jobs_declare_the_same_shared_key(self) -> None:
+        values = {}
+        for job_id in self.JOBS:
+            got = with_value(self._cache_step(job_id), "shared-key:")
+            self.assertIsNotNone(
+                got,
+                f"`{job_id}`'s rust-cache step has no `shared-key:`. Only `shared-key` "
+                "replaces the job component of the cache key; a `key:` still gets "
+                "$GITHUB_JOB appended, so the merge job could never restore the run "
+                "partitions' cache (#5213).",
+            )
+            values[job_id] = got
+        self.assertEqual(
+            len(set(values.values())),
+            1,
+            f"coverage-engine-run and coverage-engine-merge must share ONE cache entry, "
+            f"but their `shared-key`s differ: {values}. They compile the identical "
+            "instrumented dep closure (same -p sparq-engine, same ENGINE_FEATURES, same "
+            "RUSTFLAGS), and the merge job's whole warmth depends on this value matching.",
+        )
+
+    def test_neither_job_reintroduces_a_job_scoped_key(self) -> None:
+        # `key:` is silently INERT once `shared-key` is set (the `else` branch above is
+        # never taken), so a re-added `key:` would read as meaningful while doing
+        # nothing — exactly the misreading #5213 was.
+        for job_id in self.JOBS:
+            self.assertIsNone(
+                with_value(self._cache_step(job_id), "key:"),
+                f"`{job_id}`'s rust-cache step sets `key:` alongside `shared-key:`. "
+                "rust-cache ignores `key` entirely when `shared-key` is present — drop "
+                "it rather than implying a discriminator that has no effect (#5213).",
+            )
+
+
 class TestSuiteIsWiredIntoCi(unittest.TestCase):
     """A structural test that never runs is a comment. Pin its own call site."""
 
