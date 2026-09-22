@@ -195,6 +195,42 @@ def check_doc(text: str, golden_text: str | None = None) -> list[str]:
     ]
 
 
+# The SCOPE contract the workflow must carry in its own header. Keyed to the needles a
+# DECOMPOSER greps for, not to prose: each is a literal string a bead spec would have to
+# copy to scope the work correctly.
+SCOPE_DOC_NEEDLES = (
+    GOLDEN_REL.as_posix(),
+    WORKFLOW_REL.as_posix(),
+    "python3 scripts/check-fast-fix-ring-guard.py --update-golden",
+    "TWO-FILE",
+)
+
+
+def check_scope_doc(text: str) -> list[str]:
+    """[OPUS-5] issue #5235. The whole-file pin makes EVERY edit to the workflow a
+    two-file change (workflow + golden). That contract is only useful if it is stated
+    where a decomposer reads it — in the workflow itself, which is the single path a bead
+    spec names. This keeps the SCOPE block from being deleted or drifting.
+
+    The pin alone does NOT cover this: a golden bump that drops the block leaves the two
+    files byte-consistent, so `check_doc` stays clean while the contract quietly vanishes.
+    That is the gap this closes — and the --self-test fixture mutates BOTH files to prove
+    the check is not merely shadowing the pin."""
+    missing = [n for n in SCOPE_DOC_NEEDLES if n not in text]
+    if not missing:
+        return []
+    return [
+        "SCOPE-DOC: the fast-fix ring workflow no longer states its TWO-FILE scope "
+        f"contract; missing {missing}. {WORKFLOW_REL.as_posix()} is byte-pinned to "
+        f"{GOLDEN_REL.as_posix()}, so ANY edit to it is a two-file change — a task scoped "
+        "to the workflow alone forbids the golden regeneration it requires and must "
+        "decline (issue #2384's shape, swept in #5235). Restore the SCOPE block in the "
+        "workflow header: it must name BOTH in-scope paths, say TWO-FILE, and give the "
+        "exact regeneration command "
+        "`python3 scripts/check-fast-fix-ring-guard.py --update-golden`."
+    ]
+
+
 def check_root(root: Path) -> list[str]:
     """Live path used by both the default run and every --self-test fixture: read the
     workflow from `root` and compare it against the golden that ALSO lives under `root`
@@ -208,10 +244,11 @@ def check_root(root: Path) -> list[str]:
     golden_path = root / GOLDEN_REL
     if not golden_path.exists():
         raise Offence(f"{golden_path} not found")
+    wf_text = wf.read_text(encoding="utf-8")
     return check_doc(
-        wf.read_text(encoding="utf-8"),
+        wf_text,
         golden_path.read_text(encoding="utf-8"),
-    )
+    ) + check_scope_doc(wf_text)
 
 
 def _update_golden() -> int:
@@ -243,10 +280,14 @@ def _self_test() -> int:
     golden_text = GOLDEN.read_text(encoding="utf-8")
     failures = 0
 
-    def _run_on(mutated: str) -> list[str]:
-        """Write the (mutated) workflow AND the pristine golden into a throwaway
-        repo-root tree and run the LIVE --root path over it, so every fixture goes
-        through check_root/check_doc exactly as CI does."""
+    def _run_on(mutated: str, mutated_golden: str | None = None) -> list[str]:
+        """Write the (mutated) workflow AND a golden into a throwaway repo-root tree and
+        run the LIVE --root path over it, so every fixture goes through
+        check_root/check_doc exactly as CI does. The golden defaults to the pristine one
+        (so a workflow-only mutation reds the pin); pass `mutated_golden` to move BOTH
+        files together, which is how the #5235 SCOPE-DOC fixture isolates that check from
+        the pin."""
+        golden_for_run = golden_text if mutated_golden is None else mutated_golden
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             wf = root / WORKFLOW_REL
@@ -254,7 +295,7 @@ def _self_test() -> int:
             wf.write_text(mutated, encoding="utf-8")
             gp = root / GOLDEN_REL
             gp.parent.mkdir(parents=True, exist_ok=True)
-            gp.write_text(golden_text, encoding="utf-8")
+            gp.write_text(golden_for_run, encoding="utf-8")
             return check_root(root)
 
     def expect_clean(label: str, t: str) -> None:
@@ -550,6 +591,52 @@ def _self_test() -> int:
         "WORKFLOW-PIN",
     )
 
+    # --- #5235 fixture: the SCOPE contract must survive in the workflow header ------
+    # Delete the whole SCOPE block from the workflow AND the golden TOGETHER. The two
+    # files stay byte-consistent, so the whole-file pin is CLEAN and only SCOPE-DOC reds
+    # — which is what makes this a real test of check_scope_doc rather than a second look
+    # at check_doc. It is exactly the drift the pin cannot see: a golden bump that quietly
+    # drops the two-file contract, re-opening the #2384 one-file-scope trap.
+    _SCOPE_START = "# SCOPE — THE TWO-FILE RULE"
+    _SCOPE_END = "# WHY THIS IS ITS OWN"
+
+    def _strip_scope(t: str) -> str:
+        head, sep, rest = t.partition(_SCOPE_START)
+        if not sep:
+            return t
+        _, end_sep, tail = rest.partition(_SCOPE_END)
+        return head + end_sep + tail if end_sep else t
+
+    scope_deleted = _strip_scope(text)
+    scope_deleted_golden = _strip_scope(golden_text)
+    if scope_deleted == text or scope_deleted_golden == golden_text:
+        failures += 1
+        print(
+            "  [FAIL] #5235 SCOPE-DOC deletion: MUTATION DID NOT APPLY — the SCOPE block "
+            f"markers ({_SCOPE_START!r} / {_SCOPE_END!r}) were not found in both the "
+            "workflow and the golden."
+        )
+    else:
+        offs = _run_on(scope_deleted, mutated_golden=scope_deleted_golden)
+        if any("WORKFLOW-PIN" in o for o in offs):
+            failures += 1
+            print(
+                "  [FAIL] #5235 SCOPE-DOC deletion: the whole-file pin fired, so this "
+                "fixture is not isolating check_scope_doc (workflow and golden were "
+                f"meant to move together): {offs}"
+            )
+        elif not any("SCOPE-DOC" in o for o in offs):
+            failures += 1
+            print(
+                "  [FAIL] #5235 SCOPE-DOC deletion: expected a SCOPE-DOC offence "
+                f"(pin clean, contract gone) but got: {offs}"
+            )
+        else:
+            print(
+                "  [ok]   #5235 SCOPE-DOC deletion: correctly RED (SCOPE-DOC) with the "
+                "whole-file pin CLEAN — the check is independent of the pin"
+            )
+
     if failures:
         print(f"\nSELF-TEST FAILED: {failures} case(s) did not behave as expected.")
         return 1
@@ -558,7 +645,10 @@ def _self_test() -> int:
         "(whole-FILE byte-pin WORKFLOW-PIN, each verified through the live --root path "
         "against a physically-mutated workflow copy). The round-5 bracket-consumer / "
         "workflow-env-inherit / defaults-shell fixtures — which BEAT the whole-JOB pin — "
-        "all red because there is no level above the whole file."
+        "all red because there is no level above the whole file. Plus the #5235 fixture: "
+        "deleting the header SCOPE block from the workflow AND the golden together leaves "
+        "the pin clean and reds SCOPE-DOC, so the two-file scope contract cannot drift "
+        "out of the file the decomposer reads."
     )
     return 0
 
