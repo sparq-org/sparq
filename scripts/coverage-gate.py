@@ -39,6 +39,12 @@
 #                             not CI). A deliberate, reviewed regression must pass --allow-
 #                             lower. New crates and RAISED floors always pass.
 #
+#   --check-untracked         [OPUS-5] #6121: the UNTRACKED-CRATE arm (no compile, no
+#                             summary). FAIL (exit 1) if a crate under crates/ is neither a
+#                             row in the floor file nor DECLARED in NO_FLOOR_CRATES /
+#                             AWAITING_SEED below — the drift the floor file had accumulated
+#                             (28 crates behind crates/), which no other mode can see.
+#
 #   --check-advance-allowed   [SONNET-4.6] sq-6vshe.17: the RATCHET-ADVANCE PAUSE. The
 #                             coverage MEASUREMENT is demoted off the merge_group blocking
 #                             path (PR + push-to-main still measure), so `main` is an
@@ -132,6 +138,95 @@ CONFORMANCE_MERGE_NOTE = (
     "`cargo test`) into this crate's llvm-cov report — a higher number than the test-only "
     "per-commit `floor`. See scripts/coverage.sh measure_merged + the coverage-nightly job."
 )
+
+# ---------------------------------------------------------------------------------------
+# [OPUS-5] #6121: the UNTRACKED-CRATE arm — this gate's own defence against DRIFT.
+#
+# Every mode above reasons only about crates that ALREADY have a row in the floor file. A
+# crate that never got one is invisible to all of them: `--check` has nothing to compare,
+# `--check-monotonic` sees no base row to lower, and coverage.sh's `--check-shards` guard
+# polices PER_COMMIT_CRATES against SHARD_GROUPS — not `crates/` against this file. So the
+# floor file silently drifted 28 crates behind the tree (#6121), the same hole
+# bench/coverage-presence.json had drifted into (#5140).
+#
+# `--check-untracked` closes it: every directory under crates/ carrying a Cargo.toml must be
+# either (a) a row in bench/coverage-floor.json, or (b) DECLARED below with a reason. An
+# UNDECLARED crate FAILS, so the next crate added to the workspace cannot repeat this.
+# The two registries below are NOT the same kind of thing:
+#
+#   NO_FLOOR_CRATES  permanent, principled exemptions — a line-% floor would measure nothing
+#                    meaningful for them. They stay guarded by the test-PRESENCE gate
+#                    (bench/coverage-presence.json / scripts/coverage-presence.py, whose
+#                    NO_TEST_CRATES records the same two crates for the same reasons).
+#   AWAITING_SEED    DEBT, not exemption. These crates SHOULD carry a floor and do not,
+#                    because seeding one is not a no-compile change: it needs a measured
+#                    `cargo llvm-cov` run per crate AND a scripts/coverage.sh
+#                    PER_COMMIT_CRATES + SHARD_GROUPS slot (without the slot, `coverage.sh
+#                    --check-shards` reds). So the debt is written down HERE — enumerated,
+#                    never silent — and the gate makes the list SHRINK-ONLY: once a crate
+#                    gets a floor row its declaration is STALE and fails until deleted.
+#
+# Adding a crate to AWAITING_SEED instead of seeding it is a LAST resort, not the default
+# path: it gates nothing. Prefer measuring the crate and giving it a real floor.
+CRATES_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "crates"))
+
+NO_FLOOR_CRATES = {
+    "sparq-bench": "perf-harness crate (criterion benchmarks, not a measurable library "
+                   "surface); presence-gated instead — mirrors coverage-presence.py "
+                   "NO_TEST_CRATES.",
+    "sparq-py": "pyo3 bindings; exercised by pytest (crates/sparq-py/tests), not by Rust "
+                "#[test]s, so a native llvm-cov line% is the same misleading artifact as "
+                "sparq-cli's. Presence-gated instead.",
+}
+
+# The three shapes of "not yet seeded", so a reader can tell how much work each row is.
+_SEED_NEEDS_FEATURES = (
+    "seed must choose a feature set first: this crate has DEFAULT-OFF opt-in features, so a "
+    "plain `cargo llvm-cov -p` instruments only the default build and can report a "
+    "non-representative number (cf. the measure() `case` arms in scripts/coverage.sh, which "
+    "name the feature set for sparq-core / sparq-policy / sparq-substrate and friends)"
+)
+_SEED_DEFAULT_SURFACE = (
+    "whole surface is default-compiled (no default-off features to select), so seeding needs "
+    "only a PER_COMMIT_CRATES + SHARD_GROUPS slot and one measured run — no measure() arm"
+)
+_SEED_EMPTY_SEAM = (
+    "reserved seam stub: src/lib.rs is a doc comment with no executable code, so a line-% "
+    "floor would measure nothing until the seam is actually implemented"
+)
+
+AWAITING_SEED = {
+    # --- opt-in features are default-off; the seed must name the measured feature set.
+    "sparq-arrow": _SEED_NEEDS_FEATURES,
+    "sparq-fedplan-mpc": _SEED_NEEDS_FEATURES,
+    "sparq-http3": _SEED_NEEDS_FEATURES,
+    "sparq-kb": _SEED_NEEDS_FEATURES,
+    "sparq-lws-core": _SEED_NEEDS_FEATURES,
+    "sparq-lws-wasm": _SEED_NEEDS_FEATURES,
+    "sparq-mcp": _SEED_NEEDS_FEATURES,
+    "sparq-metamorph": _SEED_NEEDS_FEATURES,
+    "sparq-reason-diff": _SEED_NEEDS_FEATURES,
+    "sparq-reason-dl": _SEED_NEEDS_FEATURES,
+    "sparq-terse": _SEED_NEEDS_FEATURES,
+    "sparq-trust": _SEED_NEEDS_FEATURES,
+    "sparq-vc": _SEED_NEEDS_FEATURES,
+    "sparq-wac-oracle": _SEED_NEEDS_FEATURES,
+    "sparq-wrapper": _SEED_NEEDS_FEATURES,
+    # --- whole surface default-compiled; only a shard slot + a measured run are missing.
+    "sparq-acbench": _SEED_DEFAULT_SURFACE,
+    "sparq-conformance-floors": _SEED_DEFAULT_SURFACE,
+    "sparq-crdt": _SEED_DEFAULT_SURFACE,
+    "sparq-difftest": _SEED_DEFAULT_SURFACE,
+    "sparq-e2ee-ng": _SEED_DEFAULT_SURFACE,
+    "sparq-jsonld-registry": _SEED_DEFAULT_SURFACE,
+    "sparq-secprop-vocab": _SEED_DEFAULT_SURFACE,
+    "sparq-shaclc": _SEED_DEFAULT_SURFACE,
+    # --- reserved seam stubs with no executable code yet.
+    "sparq-wrapper-gen": _SEED_EMPTY_SEAM,
+    "sparq-wrapper-integration": _SEED_EMPTY_SEAM,
+    "sparq-wrapper-shacl": _SEED_EMPTY_SEAM,
+}
+
 
 def load(p):
     with open(p) as f:
@@ -227,6 +322,16 @@ def seed(summary_path, floor_path, allow_lower):
             "BINARIES (which run as `cargo run`, not `cargo test`) into that crate's llvm-cov "
             "report. Seeding from a nightly summary raises `nightly_floor`; seeding from a "
             "per-commit summary raises the base `floor`. Neither seed touches the other.",
+            "[OPUS-5] #6121: this file gates only the crates it LISTS — every other mode "
+            "compares floors to a measurement or to a base file, so a crate with no row at "
+            "all was invisible to all of them (that is how this file drifted 28 crates "
+            "behind crates/). `coverage-gate.py --check-untracked`, run by the no-compile "
+            "`coverage-floors` job, now FAILS unless every crate under crates/ is either a "
+            "row here or DECLARED in coverage-gate.py's NO_FLOOR_CRATES (permanent "
+            "exemptions) / AWAITING_SEED (written-down DEBT: crates that SHOULD carry a "
+            "floor but cannot be seeded without a measured run plus a PER_COMMIT_CRATES + "
+            "SHARD_GROUPS slot in scripts/coverage.sh). An AWAITING_SEED crate gates "
+            "NOTHING here; seeding it is the fix, and the gate keeps that list shrink-only.",
             "[SONNET-4.6] sq-iwf3c: an entry with `seed_pending: true` carries a floor "
             "that was NOT measured over the surface the gate now measures (it was carried "
             "forward across a change that WIDENED the crate's denominator). --check "
@@ -692,6 +797,98 @@ def _base_floors_from_git(base_ref, floor_path, log=print):
         return None
 
 
+def workspace_crate_dirs(crates_dir=CRATES_DIR):
+    """[OPUS-5] #6121: every directory under crates/ that carries a Cargo.toml.
+
+    Deliberately the SAME rule scripts/coverage-presence.py scan() uses, so the two coverage
+    gates can never disagree about what counts as "a crate in the tree"."""
+    if not os.path.isdir(crates_dir):
+        return []
+    return sorted(c for c in os.listdir(crates_dir)
+                  if os.path.isfile(os.path.join(crates_dir, c, "Cargo.toml")))
+
+
+def untracked_crates(disk, floors, declared):
+    """[OPUS-5] #6121: PURE — crates in the tree with NO floor row and NO declaration.
+
+    This is the gate's failure set: a crate here is measured by nothing and gated by
+    nothing, and (unlike a floor that regressed) no other mode can see it."""
+    return sorted(set(disk) - set(floors) - set(declared))
+
+
+def stale_declarations(disk, floors, declared):
+    """[OPUS-5] #6121: PURE — (crate, why) for every declaration that no longer describes
+    reality. This is what makes the AWAITING_SEED ledger SHRINK-ONLY: the moment a crate
+    earns a real floor row, its "not floored yet" note is a lie and the gate says so."""
+    out = []
+    for crate in sorted(declared):
+        if crate in floors:
+            out.append((crate, "now HAS a floor row — delete the declaration"))
+        elif crate not in disk:
+            out.append((crate, "no longer exists under crates/ — delete the declaration"))
+    return out
+
+
+def orphan_floors(disk, floors):
+    """[OPUS-5] #6121: PURE — floor rows whose crate is gone from crates/ (the mirror-image
+    drift: the floor file running AHEAD of the tree). coverage-presence.py --check already
+    fails on this shape ("crate DISAPPEARED from crates/"); this keeps the two consistent."""
+    return sorted(set(floors) - set(disk))
+
+
+def check_untracked(floor_path, crates_dir=CRATES_DIR, declared=None, disk=None, log=print):
+    """[OPUS-5] #6121: FAIL if crates/ and the floor file have drifted apart. Fast + hermetic
+    (no compile, no measured summary, no network), so it belongs in the same no-compile
+    `coverage-floors` job as --check-monotonic. Returns an exit code."""
+    floors = _load_floors_obj(load(floor_path))
+    if declared is None:
+        overlap = sorted(set(NO_FLOOR_CRATES) & set(AWAITING_SEED))
+        assert not overlap, f"a crate may be exempt OR awaiting a seed, not both: {overlap}"
+        declared = {**NO_FLOOR_CRATES, **AWAITING_SEED}
+    if disk is None:
+        disk = workspace_crate_dirs(crates_dir)
+
+    untracked = untracked_crates(disk, floors, declared)
+    stale = stale_declarations(disk, floors, declared)
+    orphans = orphan_floors(disk, floors)
+    debt = sorted(c for c in disk if c in AWAITING_SEED and c not in floors)
+
+    log(f"==> coverage untracked-crate gate: {len(disk)} crate(s) under crates/ vs "
+        f"{len(floors)} floor row(s) + {len(declared)} declaration(s)")
+    # The debt is grouped by REASON (26 identical paragraphs would bury the FAIL lines) but
+    # every crate is still named — no silent truncation.
+    for reason in sorted({AWAITING_SEED[c] for c in debt}):
+        members = [c for c in debt if AWAITING_SEED[c] == reason]
+        log(f"  debt ({len(members)}) NO line-% floor: {', '.join(members)}")
+        log(f"         -> {reason}")
+    for crate in untracked:
+        log(f"  FAIL {crate:<28} UNTRACKED: no floor row and no declaration")
+    for crate, why in stale:
+        log(f"  FAIL {crate:<28} STALE declaration: {why}")
+    for crate in orphans:
+        log(f"  FAIL {crate:<28} ORPHAN floor row: crate absent from crates/")
+
+    if untracked:
+        log(f"::error::{len(untracked)} crate(s) under crates/ carry NO coverage floor and "
+            f"are not declared: {', '.join(untracked)}. Seed a floor (scripts/coverage.sh "
+            f"then coverage-gate.py --seed, plus a PER_COMMIT_CRATES + SHARD_GROUPS slot in "
+            f"scripts/coverage.sh), or — only if a line-% floor genuinely cannot measure the "
+            f"crate — declare it in scripts/coverage-gate.py NO_FLOOR_CRATES/AWAITING_SEED "
+            f"with a reason. Silently un-gated crates are what #6121 fixed.")
+    if stale:
+        log(f"::error::{len(stale)} stale declaration(s) in scripts/coverage-gate.py: "
+            + "; ".join(f"{c} ({w})" for c, w in stale))
+    if orphans:
+        log(f"::error::{len(orphans)} floor row(s) name a crate that no longer exists under "
+            f"crates/: {', '.join(orphans)}. Drop the row (coverage-gate.py "
+            f"--check-monotonic needs --allow-lower for a deliberate removal).")
+    bad = bool(untracked) or bool(stale) or bool(orphans)
+    log(f"\nuntracked-crate gate: {len(floors)} floored / {len(debt)} awaiting a seed / "
+        f"{len(untracked)} untracked / {len(stale)} stale / {len(orphans)} orphan — "
+        + ("FAIL" if bad else "PASS"))
+    return 1 if bad else 0
+
+
 def check_monotonic(floor_path, base_ref, base_file, allow_lower, log=print):
     """[OPUS-4.8] sq-neq8: FAIL if THIS branch's floor file LOWERS or DROPS any crate's floor
     vs the base (origin/main by default). Mirrors the conformance ratchet's only-rises rule.
@@ -756,6 +953,10 @@ def main():
     g.add_argument("--check-monotonic", action="store_true",
                    help="[OPUS-4.8] sq-neq8: FAIL if the floor file LOWERS/DROPS any crate's "
                         "floor vs the base (origin/main); the ratchet only RISES")
+    g.add_argument("--check-untracked", action="store_true",
+                   help="[OPUS-5] #6121: FAIL if a crate under crates/ has neither a floor "
+                        "row nor a declaration in NO_FLOOR_CRATES/AWAITING_SEED (no compile, "
+                        "no summary)")
     g.add_argument("--check-advance-allowed", action="store_true",
                    help="[SONNET-4.6] sq-6vshe.17: FAIL if the floor file RAISES a floor "
                         "while the post-merge coverage alarm issue is OPEN (fail-OPEN on "
@@ -778,6 +979,9 @@ def main():
     ap.add_argument("--base-file", default=None,
                     help="--check-monotonic: compare against a base floor FILE on disk "
                          "instead of a git ref (overrides --base-ref)")
+    ap.add_argument("--crates-dir", default=CRATES_DIR,
+                    help="--check-untracked: the workspace crates/ directory to scan "
+                         "(default: the repo's own)")
     ap.add_argument("--alarm-lane", default=COVERAGE_ALARM_LANE,
                     help="--check-advance-allowed: demoted-lane token of the post-merge "
                          f"coverage alarm issue (default {COVERAGE_ALARM_LANE})")
@@ -785,6 +989,8 @@ def main():
     floor = os.path.abspath(a.floor)
     if a.check_monotonic:
         sys.exit(check_monotonic(floor, a.base_ref, a.base_file, a.allow_lower))
+    if a.check_untracked:
+        sys.exit(check_untracked(floor, os.path.abspath(a.crates_dir)))
     if a.check_advance_allowed:
         sys.exit(check_advance_allowed(floor, a.base_ref, a.base_file, a.alarm_lane))
     if a.summary is None:
@@ -1170,6 +1376,65 @@ def self_test():
         os.unlink(sp); os.unlink(fp)
     assert reseeded["floor"] == 93, f"--seed must raise the floor to 93, got {reseeded}"
     assert "seed_pending" not in reseeded, "--seed must clear the seed_pending flag"
+
+    # === UNTRACKED-CRATE arm (#6121) [OPUS-5] ==================================
+    # The drift no other mode can see: a crate in the tree with NO floor row. --check has
+    # nothing to compare it against, --check-monotonic sees no base row to lower, and
+    # coverage.sh --check-shards only compares PER_COMMIT_CRATES to SHARD_GROUPS. That is
+    # how bench/coverage-floor.json ended up 28 crates behind crates/.
+    DISK = ["a", "b", "c", "d"]
+    FLOORED = {"a": {"floor": 80}}
+    DECL = {"b": "exempt", "c": "awaiting seed"}
+    # 'd' is in the tree, has no floor row and no declaration -> the failure set.
+    assert untracked_crates(DISK, FLOORED, DECL) == ["d"], untracked_crates(DISK, FLOORED, DECL)
+    # a fully-declared tree is clean...
+    assert untracked_crates(DISK, FLOORED, {**DECL, "d": "x"}) == []
+    # ...and so is one where every crate carries a real floor (the end state we want).
+    assert untracked_crates(DISK, {c: {"floor": 1} for c in DISK}, {}) == []
+    # SHRINK-ONLY: a declaration for a crate that NOW has a floor is stale (this is what
+    # stops AWAITING_SEED from outliving the debt it records).
+    assert stale_declarations(DISK, {"a": {"floor": 80}, "c": {"floor": 70}}, DECL) \
+        == [("c", "now HAS a floor row — delete the declaration")]
+    # ...as is a declaration for a crate that no longer exists in the tree.
+    assert stale_declarations(["a", "b"], FLOORED, DECL) \
+        == [("c", "no longer exists under crates/ — delete the declaration")]
+    assert stale_declarations(DISK, FLOORED, DECL) == [], "declarations matching reality"
+    # ORPHAN: the mirror-image drift — a floor row for a deleted crate.
+    assert orphan_floors(["a"], {"a": 1, "gone": 2}) == ["gone"]
+    assert orphan_floors(DISK, FLOORED) == []
+    # The two registries are different KINDS of row; a crate in both would be incoherent
+    # (and the merged `declared` map would silently hide one reason).
+    assert not (set(NO_FLOOR_CRATES) & set(AWAITING_SEED)), \
+        "a crate is either permanently exempt OR awaiting a seed, never both"
+
+    # check_untracked end-to-end over a synthetic tree (proves the wiring, not just the
+    # pure seam: a real crates/ dir + a real floor file on disk).
+    with tempfile.TemporaryDirectory() as td:
+        cdir = os.path.join(td, "crates")
+        for c in ("floored", "declared", "undeclared"):
+            os.makedirs(os.path.join(cdir, c))
+            open(os.path.join(cdir, c, "Cargo.toml"), "w").close()
+        os.makedirs(os.path.join(cdir, "not-a-crate"))   # no Cargo.toml -> not a crate
+        fp = os.path.join(td, "floor.json")
+        with open(fp, "w") as fh:
+            json.dump({"crates": {"floored": {"floor": 80}}}, fh)
+        ok_decl = {"declared": "documented exemption", "undeclared": "documented exemption"}
+        assert check_untracked(fp, cdir, declared=ok_decl, log=quiet) == 0, \
+            "a fully floored-or-declared tree must PASS"
+        # Drop the declaration for 'undeclared' -> the #6121 shape -> FAIL.
+        assert check_untracked(fp, cdir, declared={"declared": "x"}, log=quiet) == 1, \
+            "a crate with no floor row and no declaration must FAIL the gate"
+        # A directory without a Cargo.toml is not a crate and must not fail the gate.
+        assert "not-a-crate" not in workspace_crate_dirs(cdir), \
+            "only directories carrying a Cargo.toml count as crates"
+        # A declaration for a crate that now has a floor is STALE -> FAIL.
+        assert check_untracked(fp, cdir, declared={**ok_decl, "floored": "x"}, log=quiet) == 1, \
+            "a declaration for an already-floored crate must FAIL as stale"
+        # A floor row for a crate that is not in the tree is an ORPHAN -> FAIL.
+        with open(fp, "w") as fh:
+            json.dump({"crates": {"floored": {"floor": 80}, "deleted": {"floor": 50}}}, fh)
+        assert check_untracked(fp, cdir, declared=ok_decl, log=quiet) == 1, \
+            "a floor row naming a crate absent from the tree must FAIL as an orphan"
 
     print("coverage-gate self-test: ALL ASSERTIONS PASSED")
     return 0
