@@ -667,9 +667,14 @@ soundness-of-claims violation, not just an estimate.
 - **Feasibility verdict: HIGH.** Every primitive (`commit_fold`, `h3`, `h2`,
   present-in-graph sweep, equality) is **already in-tree and compiled** in
   `scan.nr`. `join_eq` is assembled entirely from reused, already-benchmarked
-  gadgets — no new cryptography. The actual `bb gates` figure MUST be measured and
-  regression-gated (`gate_count.rs` + `gate_count_snapshot.json` precedent) before
-  any number is published.
+  gadgets — no new cryptography. The `bb gates` figure is **measured and
+  regression-gated** (step 6 landed): all four compiled
+  `join_eq_na{16,64}_nb{16,64}` members carry baselines in
+  `crates/sparq-zk-compose/tests/gate_count_snapshot.json`, enforced by
+  `gate_count_regression` in `crates/sparq-zk-compose/tests/gate_count.rs`. Read
+  the figures from that snapshot — per repo policy they are cited, not restated
+  here. This settles only the `join_eq` cost itself; the Alt-A trade above stays
+  open on `sq-uii0`.
 
 ---
 
@@ -759,8 +764,13 @@ listed with their step.
   scope (and arguably contradicts presenting a query the verifier reads).
 - **FILTER-over-joined-column is v2** (§3.4): v1 joins hide the join column and
   filters operate on other columns. A `filter_committed` member is the follow-up.
-- **Gate count is unmeasured** by policy: §5 gives only a cost *class*; the figure
-  must come from `bb gates` (step 6) before publication.
+- **Gate count is measured and regression-gated** (step 6 landed): §5 gives only
+  the cost *class*, and the `bb gates` figures for all four compiled
+  `join_eq_na{16,64}_nb{16,64}` members live in
+  `crates/sparq-zk-compose/tests/gate_count_snapshot.json`, enforced by
+  `gate_count.rs`. They are cited, not restated here. What remains unmeasured is
+  the **Alt-A** trade (§2.6/§5) — gated on `sq-uii0`, not on the `join_eq`
+  baseline.
 - **Bnodes are not valid cross-credential join keys** (§2.5) by the audit-#9 salt
   separation — the verifier rejects a cross-graph join on a bnode-typed slot. The
   global-IRI convention (`join.rs:14-23`) is the intended join-key domain.
