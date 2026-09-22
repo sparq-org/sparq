@@ -1440,7 +1440,16 @@ def _self_test():
           (sorted(_dump), _dump["resolved"]["ci-fragments"]),
           (["non_reserving", "reserves", "resolved", "roots"], ["ci"]))
     # SCOPE: candidacy untouched, and a SELECTED candidate still reserves — per-tick width stays
-    # one worker per partition, which is why the live frontier moved 1 -> 3 and not 1 -> ~50.
+    # one worker per partition, so the carve-out is worth at most +1 ROW PER EXEMPTED PARTITION,
+    # never one row per exempted CANDIDATE.
+    #
+    # [OPUS-5 2026-07-29] The delta this comment used to state (`1 -> 3`) did not survive four
+    # days, exactly as the sibling warning in `dispatch-plan.py` predicts of any pinned frontier
+    # number: re-measured through the production call shape (`compute_ready(ready_input)`, one
+    # positional argument) on the 2026-07-29T19:05:57Z snapshot — 1869 open rows, 365 candidates —
+    # it reads 1 -> 2, because on that board `docs` had no sole-area candidate on a free key and
+    # contributed +0. The DURABLE claim is the bound asserted on the next two lines, not the
+    # delta; for a current figure read `--diagnose`'s realisable-headroom line.
     check("candidate keying for ci/docs is unchanged", (packages_of({"area:ci"}),
                                                         packages_of({"area:docs"})),
           ({"ci"}, {"docs"}))
@@ -1448,6 +1457,41 @@ def _self_test():
           [i["number"] for i in compute_ready(
               [iss(20, R + ["priority:P0", "area:ci"]), iss(21, R + ["priority:P1", "area:ci"])],
               conflict_log=quiet)], [20])
+
+    # --- [OPUS-5 2026-07-29] CONTENTION IS NOT HEADROOM (`refusal_attribution`) ------------------
+    # sparq#5119 argued for a partition change from "`ci` is 61 of 357 candidates". Measured
+    # through the production call shape on the 2026-07-29T19:05:57Z snapshot, the realisable gain
+    # from that same board was ONE ROW, because 306 of the 363 refusals were held by an in-flight
+    # artifact and not by the width rule at all. These rows pin the DISTINCTION, so the next
+    # reader of the census cannot repeat the substitution.
+    _occupied = [pr(70, ["area:sparq-core"]),                     # an in-flight occupant
+                 iss(30, R + ["priority:P1", "area:sparq-core"]),  # occupant-blocked
+                 iss(31, R + ["priority:P2", "area:sparq-core"]),  # occupant-blocked
+                 iss(32, R + ["priority:P0", "area:sparq-hdt"]),   # SELECTED
+                 iss(33, R + ["priority:P1", "area:sparq-hdt"])]   # self-blocked by #32
+    _occ, _self = refusal_attribution(_occupied)
+    check("occupant-blocked candidates are attributed to the OCCUPANT", _occ, [30, 31])
+    check("...and only the width-refused one is headroom, on the key that took it",
+          _self, {"sparq-hdt": 1})
+    # THE IDENTITY. Without it the two buckets could both be wrong by the same amount and still
+    # look consistent; with it, any candidate that falls out of the walk is red.
+    check("frontier + occupant-blocked + self-blocked == candidates",
+          len(compute_ready(_occupied, conflict_log=quiet)) + len(_occ) + sum(_self.values()),
+          len(ready_candidates(_occupied)))
+    # THE OVER-COUNT MUTATION, pinned. A multi-area candidate declares several keys; counting it
+    # once PER KEY inflates the headroom, which is the #5119 error in miniature. Two candidates,
+    # one of them two-area, must total 1 refusal — not 2.
+    _multi = [iss(40, R + ["priority:P0", "area:sparq-hdt"]),
+              iss(41, R + ["priority:P1", "area:sparq-hdt", "area:sparq-geo"])]
+    check("a multi-area self-blocked candidate is counted ONCE, not once per key",
+          sum(refusal_attribution(_multi)[1].values()), 1)
+    # THE HEADLINE CLAIM: a key with MANY candidates and an in-flight holder has ZERO headroom.
+    # This is the exact shape #5119 read as a 61-row prize.
+    _contended = [pr(71, ["area:sparq-core"])] + [
+        iss(50 + i, R + ["priority:P2", "area:sparq-core"]) for i in range(9)]
+    _c_occ, _c_self = refusal_attribution(_contended)
+    check("9 candidates contending one OCCUPIED key are 9 contention and 0 headroom",
+          (len(_c_occ), _c_self), (9, {}))
     print("ready-issues self-test", "PASSED" if ok else "FAILED")
     return 0 if ok else 1
 
@@ -1606,6 +1650,71 @@ def dispatchable_view(issues, linked=()):
             if it.get("number") not in linked or labels_of(it) & IN_FLIGHT_STATUS]
 
 
+def refusal_attribution(issues, source_links=None):
+    """WHY the frontier is narrow, split into the two causes that have OPPOSITE remedies.
+
+    [OPUS-5 2026-07-29] THE NUMBER THIS EXISTS TO REPLACE. The orchestrator's partition census
+    (registry `dispatch.yml`, step `readiness`) ranks the keys that the most REFUSED CANDIDATES
+    declare, and prints e.g. `ci=60`. That is a CONTENTION count, and it has now twice been read
+    as a frontier prize — sparq#5119 proposed a change on the strength of "`ci` is 61 of 357
+    candidates" when the realisable gain from the same board was ONE ROW. Contention counts every
+    candidate that wants a key; headroom counts the rows the frontier could actually carry. They
+    differ here by a factor of ~30, and nothing printed the second one.
+
+    The split, both derived from the same walk so they cannot drift:
+
+    * OCCUPANT-blocked — the candidate collides with a key some IN-FLIGHT artifact (an open PR, an
+      `status:in-progress*` issue) is holding. This is the one-per-area rule doing the job it
+      exists to do: a second worker on that key would be a genuine double-dispatch. It is NOT
+      headroom, and widening the frontier cannot recover it without weakening concurrency safety.
+    * SELF-blocked — the candidate collides ONLY with a key THIS TICK'S OWN SELECTION took. No
+      in-flight artifact holds it; the refusal is the per-tick WIDTH rule (`reserve(pkgs, it)` in
+      `compute_ready`'s selection loop), not occupancy. This is the whole of the relaxable
+      headroom, and it is reported PER KEY because the remedy is per-key too: a width change is
+      only ever defensible on a partition whose concurrent holders are measured not to collide
+      (today, that is `NON_RESERVING_PARTITIONS` and nothing else).
+
+    Returns `(occupant_blocked, self_blocked)` — a sorted list of issue numbers, and a
+    `{partition key: count}` mapping. A candidate refused for BOTH reasons is attributed to the
+    OCCUPANT, because that is the binding one: releasing the width would not free it.
+
+    EACH CANDIDATE IS COUNTED EXACTLY ONCE, against the single key that actually refused it,
+    chosen by `compute_ready`'s OWN tie-break (coarsest partition first, then alphabetical). The
+    first cut of this function incremented every key a multi-area candidate declared, which
+    over-counted the headroom by 3 on the measuring board and — much worse — reproduced in
+    miniature the exact error it was written to prevent: reporting a per-key WANT as if it were a
+    per-key GAIN. `sum(self_blocked.values()) + len(occupant_blocked) + len(frontier)` therefore
+    equals the candidate count exactly, and that identity is asserted in `--self-test`.
+
+    Pure, and deliberately built from `unit_reservations` + `ready_candidates` + `compute_ready`
+    rather than by re-walking `compute_ready`'s selection loop. A second copy of that loop is the
+    two-legs-disagree defect this file has already paid for twice; and parsing `conflict_log`'s
+    prose would couple this to a message format the registry consumes.
+    """
+    held = set()
+    for areas, _artifact in unit_reservations(issues, source_links):
+        held |= areas
+    frontier = compute_ready(issues, conflict_log=lambda _m: None, source_links=source_links)
+    selected = {it.get("number") for it in frontier}
+    # What THIS TICK's own selections took. `packages_of`, not `_reserving_packages`: the
+    # selection loop reserves a selected row's declared areas in full, exemptions included, and
+    # that asymmetry with the occupancy half is precisely what this split makes visible.
+    taken = {key for it in frontier for key in packages_of(labels_of(it))}
+    occupant, self_blocked = [], {}
+    for _priority, number, _it, pkgs in ready_candidates(issues, log=None):
+        if number in selected:
+            continue
+        if any(keys_conflict(key, h) for key in pkgs for h in held):
+            occupant.append(number)
+            continue
+        blocking = [key for key in taken if any(keys_conflict(key, p) for p in pkgs)]
+        if not blocking:                  # refused by neither: not reachable via compute_ready
+            continue
+        key = min(blocking, key=lambda k: (len(partition_path(k)), k))
+        self_blocked[key] = self_blocked.get(key, 0) + 1
+    return sorted(occupant), self_blocked
+
+
 def occupancy_parity(issues, source_links=None):
     """The PR-HALF-STRIPPED occupancy divergence, as a re-runnable measurement.
 
@@ -1755,6 +1864,17 @@ def main():
             print(f"  {n:5d}  {100 * n / total:5.1f}%  {reason}")
         print(f"\ndrainable backlog (ready_candidates): {len(cands)}")
         print(f"concurrency frontier (compute_ready): {len(frontier)}")
+        # [OPUS-5 2026-07-29] The two refusal causes, ALWAYS printed including at zero — the
+        # headroom line is the one the orchestrator's contention census does not carry, and a
+        # figure that appears only when it is interesting cannot be trusted when it is absent.
+        occ_blocked, headroom = refusal_attribution(visible, source_links)
+        print(f"  refused, held by an in-flight artifact: {len(occ_blocked)} "
+              f"(concurrency safety — NOT recoverable by widening the frontier)")
+        print(f"  refused by this tick's own selection:   {sum(headroom.values())} "
+              f"(per-tick WIDTH — the whole of the relaxable headroom)")
+        if headroom:
+            print("    realisable headroom by key: " + ", ".join(
+                f"{key}={n}" for key, n in sorted(headroom.items(), key=lambda kv: (-kv[1], kv[0]))))
         print(f"unit occupancy: {len(units)} unit(s), "
               f"{sum(len(a) for a, _ in units)} reservation(s) over "
               f"{len(set().union(set(), *[a for a, _ in units]))} partition key(s)")
