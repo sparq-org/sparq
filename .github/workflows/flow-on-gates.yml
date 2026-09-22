@@ -188,9 +188,11 @@ jobs:
         run: python3 scripts/tests/test_check_new_bench_registered.py
       # [SONNET-4.6] sq-8hfhi: wire the reactive flow-on engine tests into CI so a
       # rule/engine regression (like the #1655 false-positive fnmatch/{suite} defect
-      # fixed in #1664) is caught pre-merge, not post-merge. 31 tests covering: rule
-      # loading + well-formedness, evaluate() rule firing (new-crate / changed-surface /
-      # pub-API diff plumbing / competitor-label / new-bench / ZK circuit gate-count),
+      # fixed in #1664) is caught pre-merge, not post-merge. Covers: rule loading +
+      # well-formedness, evaluate() rule firing (new-crate / changed-surface /
+      # pub-API diff plumbing / competitor-label / new-bench / ZK circuit gate-count /
+      # [OPUS-5] #5243 the non-Rust `packages/` new-package rules + their
+      # `private: true` predicate and `unless_paths` suppression),
       # idempotency-key stability, dry-run output correctness, and the CI guard that
       # refuses to mint issues outside CI. Stdlib-only, no network, no git. Gating: the
       # job name carries no advisory/informational token, so ci-summary gates on it.

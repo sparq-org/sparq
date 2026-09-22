@@ -46,6 +46,11 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_RULES = REPO_ROOT / "scripts" / "flow-on-rules.toml"
 BENCH_REGISTRY = REPO_ROOT / "bench" / "benchmarks.toml"
+# [OPUS-5] (#5243) npm-workspace package roots. The root package.json's
+# `workspaces` globs are `packages/*`, `js`, `site`, `gui/*` — of those only
+# `packages/*` is the "a NEW package lands here" directory; the others are one
+# fixed package each. So the non-Rust new-package rules key on `packages/`.
+PACKAGES_DIR = REPO_ROOT / "packages"
 
 # Labels every flow-on issue carries (in addition to a rule's own labels and the
 # routing labels computed by routing_labels() below).
@@ -59,6 +64,24 @@ SKILL_PATHS = ("skills/",)
 # The reactive docs rule that the pub-API-diff gate below applies to.
 DOCS_RULE_ID = "changed-public-feature-docs"
 BENCH_DASHBOARD_RULE_ID = "new-bench-dashboard-row"
+
+# [OPUS-5] (#5243) The non-Rust new-package rules. ALL of them require a genuinely
+# new TOP-LEVEL package root (`packages/<pkg>/package.json`, matched strictly —
+# `fnmatch`'s `*` crosses `/`, the sq-fyzq7 lesson, so the glob alone would also
+# accept a nested `packages/<pkg>/<sub>/package.json` and name the package "").
+NEW_PACKAGE_RULE_IDS = frozenset(
+    {"new-package-test-methods", "new-package-site-advert", "new-package-guide-docs"}
+)
+# The subset that additionally requires the package to be PUBLISHABLE. `private:
+# true` in package.json is the npm analogue of a crate's `publish = false`: an
+# unpublished workspace package has no public artifact to advertise on the site
+# and no audience for a guide page, so those two mint nothing — exactly as gate
+# G1 exempts a `publish = false` crate from its bench + SKILL legs. The
+# test-methods rule is deliberately NOT in this set: `.github/workflows/js.yml`
+# enumerates each package explicitly, so an unlisted package runs ZERO tests
+# whether or not it publishes.
+PUBLIC_PACKAGE_RULE_IDS = frozenset({"new-package-site-advert", "new-package-guide-docs"})
+_PACKAGE_MANIFEST_RE = re.compile(r"^packages/([^/]+)/package\.json$")
 
 
 # Sibling scripts are loaded by path (the scripts dir is not an importable package).
@@ -131,6 +154,13 @@ class Rule:
     # not mis-fire the "new top-level circuit" follow-on. Only filters the
     # `when_new_paths` check; other predicates are unaffected.
     exclude_new_paths: list[str] = field(default_factory=list)
+    # [OPUS-5] (#5243) SUPPRESSION: if ANY changed path matches one of these
+    # globs, the rule does not fire — "the merged PR already did this follow-on's
+    # work, so asking for it again is noise". This is the sq-l0a0 don't-blindly-
+    # mint lesson expressed declaratively, instead of another rule-id-keyed
+    # special case in rule_matches() (the shape `changed-public-feature-docs`
+    # uses for its SKILL_PATHS suppression).
+    unless_paths: list[str] = field(default_factory=list)
     when_label: str | None = None
     when_title: str | None = None
     creates: list[CreateTemplate] = field(default_factory=list)
@@ -170,6 +200,7 @@ def load_rules(path: Path) -> list[Rule]:
             when_paths=list(raw.get("when_paths", [])),
             when_new_paths=list(raw.get("when_new_paths", [])),
             exclude_new_paths=list(raw.get("exclude_new_paths", [])),
+            unless_paths=list(raw.get("unless_paths", [])),
             when_label=raw.get("when_label"),
             when_title=raw.get("when_title"),
             creates=creates,
@@ -198,13 +229,50 @@ def _first_segment_after(prefix: str, paths: list[str]) -> str | None:
     return None
 
 
+def new_package(added: list[str]) -> str | None:
+    """[OPUS-5] (#5243) The directory name of the FIRST newly-added top-level npm
+    package (`packages/<pkg>/package.json`), or None if the PR adds no package
+    root. Strict — a nested `packages/<pkg>/<sub>/package.json` is NOT a package
+    root, even though the `packages/*/package.json` trigger glob matches it
+    (`fnmatch`'s `*` crosses `/`; that hole made a `zk/compose/` member look like
+    a new circuit family in #1655).
+
+    Both `build_context` and `rule_matches` call this, so the package a follow-on
+    is NAMED for and the package its publish/private predicate is TESTED against
+    are the same one by construction."""
+    for p in added:
+        m = _PACKAGE_MANIFEST_RE.match(p)
+        if m:
+            return m.group(1)
+    return None
+
+
+def package_is_publishable(pkg: str) -> bool:
+    """[OPUS-5] (#5243) True iff `packages/<pkg>/package.json` exists and does NOT
+    set `private: true` — the npm analogue of a crate lacking `publish = false`.
+
+    Fail-closed to SILENCE, matching `_bench_suite_needs_dashboard_follow_on`: an
+    absent or unparseable manifest yields False, so a rule that cannot prove the
+    package is public mints nothing rather than filing a "advertise this" issue
+    about a package nobody can see. flow-on runs post-merge on a checkout of the
+    merged tree (`.github/workflows/flow-on.yml`), so a genuinely-added manifest
+    is readable here."""
+    try:
+        manifest = json.loads(
+            (PACKAGES_DIR / pkg / "package.json").read_text(encoding="utf-8")
+        )
+    except (OSError, ValueError):
+        return False
+    return isinstance(manifest, dict) and manifest.get("private") is not True
+
+
 def build_context(
     pr: int,
     pr_title: str,
     changed: list[str],
     added: list[str],
 ) -> dict[str, str]:
-    """Compute the placeholder dict for {pr}/{pr_title}/{crate}/{suite}/{surface}/{zk_circuit}.
+    """Compute the placeholder dict for {pr}/{pr_title}/{crate}/{suite}/{surface}/{zk_circuit}/{package}.
 
     Prefer ADDED paths for crate/suite (the rules that use them are new-* rules),
     falling back to all changed paths so changed-surface rules still resolve."""
@@ -230,6 +298,10 @@ def build_context(
         "suite": suite or "",
         "surface": surface or "",
         "zk_circuit": zk_circuit or "",
+        # [OPUS-5] (#5243) The new non-Rust package. Derived from ADDED manifests
+        # ONLY — an empty value can never leak into a follow-on, because every
+        # rule that uses it is gated on `new_package(added)` being non-empty.
+        "package": new_package(added) or "",
     }
 
 
@@ -299,10 +371,28 @@ def rule_matches(
             new_pool = [p for p in added if not _any_glob_match(rule.exclude_new_paths, [p])]
         if not _any_glob_match(rule.when_new_paths, new_pool):
             return False
+    # [OPUS-5] (#5243) The merged PR already did this follow-on's work.
+    if rule.unless_paths and _any_glob_match(rule.unless_paths, changed):
+        return False
     if rule.when_label is not None and rule.when_label not in labels:
         return False
     if rule.when_title is not None and not re.search(rule.when_title, title, re.IGNORECASE):
         return False
+
+    # [OPUS-5] (#5243) The non-Rust new-package rules. The `packages/*/package.json`
+    # trigger glob is only a cheap pre-filter; two further conditions decide:
+    #   1. the PR adds a genuine TOP-LEVEL package root (see new_package) — so a
+    #      nested manifest cannot mint a follow-on named for the empty string; and
+    #   2. for the site/guide rules, that package is PUBLISHABLE (no
+    #      `private: true`) — the npm analogue of G1's `publish = false` stub
+    #      exemption. The test-methods rule skips (2) on purpose: js.yml lists its
+    #      package legs one by one, so a private package is just as invisible to CI.
+    if rule.id in NEW_PACKAGE_RULE_IDS:
+        pkg = new_package(added)
+        if not pkg:
+            return False
+        if rule.id in PUBLIC_PACKAGE_RULE_IDS and not package_is_publishable(pkg):
+            return False
 
     if rule.id == BENCH_DASHBOARD_RULE_ID:
         suite = _first_segment_after("bench/", added)

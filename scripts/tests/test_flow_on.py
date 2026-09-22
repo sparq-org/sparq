@@ -53,6 +53,12 @@ class RuleLoadingTest(unittest.TestCase):
             # [OPUS-4.8] ZK circuit gate-count follow-on (a PR-description
             # deliverable, present in the rules file) — enforce the contract.
             "new-zk-circuit-gatecount",
+            # [OPUS-5] (#5243) The non-Rust half: G1 defines a package as an added
+            # `crates/*/Cargo.toml`, so the npm workspace packages under
+            # `packages/` had no CI / site / guide follow-on at all.
+            "new-package-test-methods",
+            "new-package-site-advert",
+            "new-package-guide-docs",
         ):
             self.assertIn(required, ids)
         # [OPUS-4.8] (bead sq-l0a0) The new-crate bench/SKILL follow-on rule was
@@ -111,6 +117,109 @@ class NewCrateTest(unittest.TestCase):
         added: list[str] = []
         fos = self._eval(changed=changed, added=added)
         self.assertNotIn("new-crate-bench-and-skill", {fo.rule_id for fo in fos})
+
+
+class NewPackageTest(unittest.TestCase):
+    """[OPUS-5] (#5243) The non-Rust new-package rules. Merge gate G1 keys on an
+    added `crates/*/Cargo.toml`, so the npm workspace packages under `packages/`
+    got no CI-leg / website / guide follow-on when a new one landed. These three
+    rules close that, with `private: true` as the npm analogue of a crate's
+    `publish = false` stub exemption — PARTIAL, exactly like that exemption:
+    site + guide are public-only, the CI-leg one applies to every new package."""
+
+    # Real in-tree fixtures: `package_is_publishable` reads the manifest off disk
+    # (flow-on runs post-merge on a checkout of the merged tree), so the publish
+    # state must come from a real package, as the bench-registry tests do.
+    PUBLIC_PKG = "eyereasoner-compat"
+    PRIVATE_PKG = "sparq-client"
+
+    def setUp(self):
+        self.rules = flow_on.load_rules(RULES)
+
+    def _eval(self, changed, added, title="feat: new package"):
+        return flow_on.evaluate(self.rules, 5243, title, changed, added, [])
+
+    def _rule_ids(self, changed, added, **kw):
+        return {fo.rule_id for fo in self._eval(changed, added, **kw)}
+
+    def test_fixture_packages_have_the_publish_state_these_tests_assume(self):
+        # Pin the fixtures: if either package flips its `private` flag, fail HERE
+        # with a clear reason rather than silently voiding the tests below.
+        self.assertTrue(
+            flow_on.package_is_publishable(self.PUBLIC_PKG),
+            f"packages/{self.PUBLIC_PKG} is expected to be publishable",
+        )
+        self.assertFalse(
+            flow_on.package_is_publishable(self.PRIVATE_PKG),
+            f"packages/{self.PRIVATE_PKG} is expected to be `private: true`",
+        )
+        # Fail-closed on a manifest that is not there at all.
+        self.assertFalse(flow_on.package_is_publishable("no-such-package"))
+
+    def test_new_publishable_package_fires_all_three(self):
+        added = [f"packages/{self.PUBLIC_PKG}/package.json",
+                 f"packages/{self.PUBLIC_PKG}/src/index.ts"]
+        fos = self._eval(added, added)
+        self.assertEqual(
+            {fo.rule_id for fo in fos},
+            {"new-package-test-methods", "new-package-site-advert",
+             "new-package-guide-docs"},
+        )
+        # Every follow-on names the package it is about — no empty {package}.
+        for fo in fos:
+            self.assertTrue(fo.dedup_key.endswith(self.PUBLIC_PKG), fo.dedup_key)
+            self.assertIn(self.PUBLIC_PKG, fo.title)
+
+    def test_private_package_gets_the_ci_leg_follow_on_but_not_site_or_guide(self):
+        # THE headline predicate: `private: true` suppresses the two PUBLIC-only
+        # rules and only those. js.yml enumerates its package legs one by one, so
+        # a private package is just as invisible to CI as a published one.
+        added = [f"packages/{self.PRIVATE_PKG}/package.json"]
+        self.assertEqual(
+            self._rule_ids(added, added), {"new-package-test-methods"}
+        )
+
+    def test_nested_manifest_is_not_a_new_package_root(self):
+        # `fnmatch`'s `*` crosses `/`, so `packages/*/package.json` also matches a
+        # nested manifest — the sq-fyzq7 / #1655 hole. Without the strict
+        # `new_package()` check this would mint follow-ons named for "".
+        added = ["packages/solid-server/vendor/dep/package.json"]
+        self.assertEqual(self._rule_ids(added, added), set())
+
+    def test_modified_manifest_does_not_fire(self):
+        # Changed but NOT added — a version bump is not a new package.
+        changed = [f"packages/{self.PUBLIC_PKG}/package.json"]
+        self.assertEqual(self._rule_ids(changed, []), set())
+
+    def test_site_edit_in_the_same_pr_suppresses_only_the_site_rule(self):
+        added = [f"packages/{self.PUBLIC_PKG}/package.json"]
+        ids = self._rule_ids(added + ["site/src/data/surfaces.ts"], added)
+        self.assertNotIn("new-package-site-advert", ids)
+        self.assertIn("new-package-guide-docs", ids)
+        self.assertIn("new-package-test-methods", ids)
+
+    def test_book_edit_in_the_same_pr_suppresses_only_the_guide_rule(self):
+        added = [f"packages/{self.PUBLIC_PKG}/package.json"]
+        ids = self._rule_ids(added + ["book/src/SUMMARY.md"], added)
+        self.assertNotIn("new-package-guide-docs", ids)
+        self.assertIn("new-package-site-advert", ids)
+
+    def test_js_lane_edit_in_the_same_pr_suppresses_only_the_ci_rule(self):
+        added = [f"packages/{self.PUBLIC_PKG}/package.json"]
+        ids = self._rule_ids(added + [".github/workflows/js.yml"], added)
+        self.assertNotIn("new-package-test-methods", ids)
+        self.assertIn("new-package-site-advert", ids)
+
+    def test_unless_paths_only_suppresses_the_rule_that_declares_it(self):
+        # The suppression predicate is per-rule, not global: an unrelated rule
+        # with no `unless_paths` still fires on the same diff.
+        rules = [r for r in self.rules if r.id == "new-bench-dashboard-row"]
+        self.assertEqual([r.unless_paths for r in rules], [[]])
+        added = ["bench/watdiv/benchmarks.toml"]
+        fos = flow_on.evaluate(
+            self.rules, 5243, "bench + site", added + ["site/x.tsx"], added, []
+        )
+        self.assertIn("new-bench-dashboard-row", {fo.rule_id for fo in fos})
 
 
 class ChangedSurfaceTest(unittest.TestCase):
@@ -341,6 +450,11 @@ class RoutingLabelsTest(unittest.TestCase):
             # new-zk-circuit-gatecount
             dict(changed=["zk/arith/Nargo.toml"], added=["zk/arith/Nargo.toml"],
                  labels=[], title="zk arith", pub_changed=None),
+            # [OPUS-5] (#5243) the three non-Rust new-package templates (a
+            # publishable package fires all three at once).
+            dict(changed=["packages/eyereasoner-compat/package.json"],
+                 added=["packages/eyereasoner-compat/package.json"],
+                 labels=[], title="new npm package", pub_changed=None),
         ]
         out = []
         for fx in fixtures:
@@ -369,6 +483,11 @@ class RoutingLabelsTest(unittest.TestCase):
         self.assertIn("role:docs", by_rule["new-bench-dashboard-row"].labels)
         self.assertIn("role:perf", by_rule["competitor-feature-gather"].labels)
         self.assertIn("role:soundness", by_rule["new-zk-circuit-gatecount"].labels)
+        # [OPUS-5] (#5243) kind:ci → role:ci (the infra chain); kind:site →
+        # role:site; kind:docs → role:docs.
+        self.assertIn("role:ci", by_rule["new-package-test-methods"].labels)
+        self.assertIn("role:site", by_rule["new-package-site-advert"].labels)
+        self.assertIn("role:docs", by_rule["new-package-guide-docs"].labels)
         for fo in by_rule.values():
             self.assertIn("priority:P3", fo.labels, fo.rule_id)
 
