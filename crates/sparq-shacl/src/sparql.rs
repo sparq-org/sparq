@@ -1127,6 +1127,9 @@ pub(crate) fn ask_violates(
 /// (`?value`/`?path`/`?message` → result fields, with `{?var}` message
 /// substitution). `bindings` carries `$this`, the parameter VALUES and (on a
 /// property shape) `$PATH`. `message` is the component's `sh:message`, if any.
+/// [SONNET-4.6] (sq-ou3) `label_template` is the component's `sh:labelTemplate`
+/// with its PARAMETER placeholders already rendered by the caller — used as the
+/// message only when neither `message` nor the solution's `?message` supplies one.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn select_validate(
     query: &Query,
@@ -1134,6 +1137,7 @@ pub(crate) fn select_validate(
     focus: &Term,
     bindings: &[Binding],
     message: Option<&str>,
+    label_template: Option<&str>,
     mut make_result: impl FnMut(ComponentResultFields) -> ValidationResult,
     out: &mut Vec<ValidationResult>,
 ) {
@@ -1163,10 +1167,15 @@ pub(crate) fn select_validate(
             .and_then(|i| row.get(i))
             .and_then(|c| c.clone())
             .map(term_lexical);
-        let default_message = match (message, &row_message) {
-            (Some(tpl), _) => substitute(tpl, &result_vars, row),
-            (None, Some(m)) => m.clone(),
-            (None, None) => "Violates SPARQL-based constraint".to_string(),
+        let default_message = match (message, &row_message, label_template) {
+            (Some(tpl), _, _) => substitute(tpl, &result_vars, row),
+            (None, Some(m), _) => m.clone(),
+            // [SONNET-4.6] (sq-ou3) `sh:labelTemplate` is the LAST resort — below
+            // the validator's `sh:message` and the solution's own `?message`. Its
+            // parameter placeholders are already rendered by the caller; this pass
+            // resolves any `{?var}` naming a projected solution variable.
+            (None, None, Some(label)) => substitute(label, &result_vars, row),
+            (None, None, None) => "Violates SPARQL-based constraint".to_string(),
         };
         out.push(make_result(ComponentResultFields {
             focus: focus.clone(),
@@ -1709,6 +1718,7 @@ mod tests {
             &focus,
             bindings,
             None,
+            None,
             |f: ComponentResultFields| ValidationResult {
                 focus_node: f.focus,
                 path: f.path,
@@ -1902,6 +1912,7 @@ mod tests {
             &bnode,
             &[("this", &bnode)],
             None,
+            None,
             |_f: ComponentResultFields| unreachable!("no solutions for an inexpressible focus"),
             &mut out,
         );
@@ -1980,6 +1991,7 @@ mod tests {
             &data,
             &focus,
             &[("this", &focus)],
+            None,
             None,
             |_f: ComponentResultFields| unreachable!("a runtime query error yields no solutions"),
             &mut out,
@@ -2163,6 +2175,7 @@ mod tests {
             &focus,
             &[("this", &focus)],
             None,
+            None,
             |f: ComponentResultFields| ValidationResult {
                 focus_node: f.focus,
                 path: f.path,
@@ -2204,6 +2217,7 @@ mod tests {
             &data,
             &focus,
             &[("this", &focus)],
+            None,
             None,
             |f: ComponentResultFields| ValidationResult {
                 focus_node: f.focus,
