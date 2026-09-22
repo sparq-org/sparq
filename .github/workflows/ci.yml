@@ -3427,7 +3427,6 @@ jobs:
             --mode report \
             --cone cone.json \
             --coverage-summary target/coverage/coverage-summary.json \
-            --divergence-log coverage-cone-divergence-shard-${{ matrix.shard }}.json \
             --summary-file "$GITHUB_STEP_SUMMARY" || true
       - name: Upload coverage summary (shard ${{ matrix.shard }})
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
