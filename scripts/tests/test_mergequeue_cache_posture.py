@@ -12,7 +12,9 @@
 #
 #   1. CACHE-SAVE DISCIPLINE. Every `Swatinem/rust-cache` step in a
 #      merge_group-triggered workflow must carry
-#      `save-if: ${{ github.ref == 'refs/heads/main' }}`.
+#      `save-if: ${{ github.ref == 'refs/heads/main' }}` — optionally NARROWED by
+#      further `&&` conjuncts, each of which has to be a registered, PROVEN
+#      non-vacuous matrix flag (see NARROWING_CONJUNCT_PROOFS below).
 #      A save from a merge-queue entry is DEAD ON ARRIVAL: Actions cache scoping
 #      makes an entry written from `refs/heads/gh-readonly-queue/<base>/pr-<N>-<sha>`
 #      visible to that ref alone, and GitHub deletes that ref as soon as the entry
@@ -40,11 +42,17 @@
 # measurement has been taken — so nothing about sccache is wired, claimed, or pinned
 # here, and no verdict on it should be inferred from this file's silence.
 #
-# Hermetic: stdlib only (no PyYAML, no network, no gh) so it runs anywhere.
+# Hermetic: no network, no gh, and stdlib-only for the YAML walking. The ONE
+# exception is a narrowing-conjunct proof (below), which loads the matrix generator
+# it is proving non-vacuous — that script parses the fragment set with PyYAML, which
+# the docs-quality job installs in its first step. Missing PyYAML FAILS that proof
+# rather than skipping it; a skipped proof is a green run that checked nothing.
 # Run:  python3 scripts/tests/test_mergequeue_cache_posture.py
 
 from __future__ import annotations
 
+import collections
+import importlib.util
 import re
 import unittest
 from pathlib import Path
@@ -57,8 +65,24 @@ RUST_CACHE = "Swatinem/rust-cache@"
 SAVE_IF_KEY = "save-if:"
 # The canonical guard. Bare `false` would ALSO stop the queue-ref saves — and would
 # stop main from ever seeding a cache, so every job would restore nothing forever.
-# The value is pinned exactly for that reason.
 SAVE_IF_VALUE = "${{ github.ref == 'refs/heads/main' }}"
+# ...which is why the value used to be pinned by string EQUALITY. [OPUS-5] sq-an4by
+# needs a strictly NARROWER save (one seed per shared-key, not one per group racing
+# for the same immutable key), so equality is replaced by a structural rule that
+# keeps both teeth the equality had:
+#
+#   * the canonical `github.ref == 'refs/heads/main'` conjunct must be PRESENT, and
+#     the expression may only be a conjunction of it with more terms — no `||`, so
+#     no disjunct can hand the dead queue-ref save back its exemption; and
+#   * every EXTRA conjunct must be a registered narrowing flag whose non-vacuity is
+#     PROVEN below. That is what stops the `false`-shaped failure the equality pin
+#     existed to catch: a never-true (or typo'd, or unset) extra conjunct is a bare
+#     `false` wearing a matrix expression, and main silently seeds nothing forever.
+#
+# An UNREGISTERED extra conjunct FAILS: narrowing the save is allowed, but only with
+# a proof attached, and the proof is a real one — it runs the matrix generator.
+MAIN_REF_CONJUNCT = "github.ref == 'refs/heads/main'"
+_EXPR = re.compile(r"^\$\{\{(?P<body>.*)\}\}$", re.DOTALL)
 
 NEXTEST_ARCHIVE_ARTIFACT = "nextest-archive"
 UPLOAD_ARTIFACT = "actions/upload-artifact@"
@@ -150,6 +174,82 @@ def merge_group_workflows_with_rust_cache() -> list[Path]:
     )
 
 
+# --------------------------------------------------------------------------- #
+# Non-vacuity proofs for the extra `&&` conjuncts a `save-if` may narrow with.
+# Each takes (test, workflow_path, rust_cache_step_body) and must FAIL unless the
+# flag is genuinely set for at least one matrix entry per cache key — i.e. unless
+# main still seeds every key it did under the un-narrowed guard.
+# --------------------------------------------------------------------------- #
+ASSEMBLER = REPO_ROOT / "scripts" / "assemble-feature-matrix.py"
+
+
+def _load_assembler():
+    spec = importlib.util.spec_from_file_location("assemble_feature_matrix", ASSEMBLER)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _prove_cache_save(test: unittest.TestCase, wf: Path, body: list[str]) -> None:
+    """`matrix.cache_save` (sq-an4by): exactly ONE seed per rust-cache shared-key.
+
+    A crate's legs bin-pack into several groups that all share one `shared-key`,
+    and the Actions cache is immutable — so the un-narrowed guard had every one of
+    them race to write that key. The flag elects a single deterministic seed. The
+    guard the equality pin gave us (main still seeds) survives only if the flag is
+    true SOMEWHERE for every key, so prove it against the real generator rather
+    than trusting the name: run the assembler over the live fragment set and check
+    every `cache_crate` — the value the `shared-key` is built from — has exactly
+    one saver.
+    """
+    test.assertEqual(
+        wf.name,
+        "feature-matrix.yml",
+        f"{wf.name}: `matrix.cache_save`'s proof is written against the "
+        "feature-matrix assembler; register a proof for this workflow's own matrix "
+        "generator before narrowing its save-if with the same flag name.",
+    )
+    shared_key = with_value(body, "shared-key:")
+    test.assertIsNotNone(shared_key, f"{wf.name}: rust-cache step has no `shared-key`")
+    test.assertIn(
+        "matrix.cache_crate",
+        shared_key,
+        f"{wf.name}: `cache_save` elects one seed per `cache_crate`, so it only "
+        f"covers every cache key while the key IS the cache_crate; got {shared_key!r}.",
+    )
+    # Fail-closed, never skip: a skipped proof is a green run that checked nothing.
+    # The docs-quality job installs PyYAML before this suite (`Install PyYAML`).
+    test.assertIsNotNone(
+        importlib.util.find_spec("yaml"),
+        "the assembler needs PyYAML to read the fragment set, so the non-vacuity "
+        "proof cannot run — `pip install pyyaml` (CI installs it from "
+        ".github/requirements/docs-quality.txt).",
+    )
+    mod = _load_assembler()
+    groups = mod.group_legs(mod.load_legs())
+    test.assertTrue(groups, "the assembler produced no groups — nothing was proven")
+    keys = {g["cache_crate"] for g in groups}
+    seeds = collections.Counter(g["cache_crate"] for g in groups if g.get("cache_save"))
+    test.assertEqual(
+        set(seeds),
+        keys,
+        f"{wf.name}: `save-if` is narrowed by `matrix.cache_save`, but "
+        f"{sorted(keys - set(seeds))} have NO group with the flag set — for those "
+        "shared-keys the conjunct is a `false` in disguise and main never seeds "
+        "the cache again.",
+    )
+    for crate, n in sorted(seeds.items()):
+        test.assertEqual(
+            n,
+            1,
+            f"{wf.name}: {n} groups carry `cache_save` for shared-key {crate} — they "
+            "race for one immutable key, which is the defect the narrowing exists to fix.",
+        )
+
+
+NARROWING_CONJUNCT_PROOFS = {"matrix.cache_save": _prove_cache_save}
+
+
 class TestParserNonVacuity(unittest.TestCase):
     """The assertions below iterate over discovered sets. If discovery silently
     returns nothing, every other test in this file passes while checking NOTHING.
@@ -204,13 +304,42 @@ class TestCacheSaveDiscipline(unittest.TestCase):
                     f"(the ref is deleted at merge) — add "
                     f"`save-if: {SAVE_IF_VALUE}` (sq-6vshe.15 lever 2).",
                 )
-                self.assertEqual(
-                    got,
-                    SAVE_IF_VALUE,
-                    f"{where}: `save-if` must be exactly `{SAVE_IF_VALUE}`. A bare `false` "
-                    "also stops main from ever SEEDING a cache; a wider condition lets the "
-                    "dead queue-ref save back in.",
+                expr = _EXPR.match(got)
+                self.assertIsNotNone(
+                    expr,
+                    f"{where}: `save-if` must be a `${{{{ ... }}}}` expression built on "
+                    f"`{SAVE_IF_VALUE}`; got {got!r}. A literal (`false`, `true`) either "
+                    "stops main from ever SEEDING a cache or lets the dead queue-ref save "
+                    "back in.",
                 )
+                conjuncts = [c.strip() for c in expr.group("body").split("&&")]
+                self.assertNotIn(
+                    "||",
+                    expr.group("body"),
+                    f"{where}: `save-if` may only be a CONJUNCTION — a `||` disjunct can "
+                    "re-admit the unrestorable `gh-readonly-queue/*` save the guard exists "
+                    "to block.",
+                )
+                self.assertIn(
+                    MAIN_REF_CONJUNCT,
+                    conjuncts,
+                    f"{where}: `save-if` must carry the exact conjunct "
+                    f"`{MAIN_REF_CONJUNCT}` (canonically `{SAVE_IF_VALUE}`); got {got!r}.",
+                )
+                for extra in conjuncts:
+                    if extra == MAIN_REF_CONJUNCT:
+                        continue
+                    proof = NARROWING_CONJUNCT_PROOFS.get(extra)
+                    self.assertIsNotNone(
+                        proof,
+                        f"{where}: `save-if` is narrowed by an unregistered conjunct "
+                        f"`{extra}`. Narrowing is allowed, but only with a non-vacuity "
+                        "proof: a conjunct that is never true is a bare `false` in "
+                        "disguise and main silently stops seeding the cache. Add it to "
+                        "NARROWING_CONJUNCT_PROOFS with a proof that it holds for at "
+                        "least one matrix entry per cache key.",
+                    )
+                    proof(self, wf, body)
 
     def test_restore_is_never_disabled(self) -> None:
         # `save-if` gates SAVING only — the whole design depends on queue refs and PR
