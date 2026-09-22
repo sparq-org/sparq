@@ -144,6 +144,86 @@ class G1Test(unittest.TestCase):
 
 
 # --------------------------------------------------------------------------- #
+# G1 — the `<!-- flow-on-exempt: reason -->` crate-README escape hatch (#5701)
+# --------------------------------------------------------------------------- #
+class G1FlowOnExemptTest(unittest.TestCase):
+    def _bare_new_crate(self):
+        return g1.parse_status_lines(_statused(["crates/sparq-foo/Cargo.toml"]))
+
+    def test_exempt_readme_waives_the_whole_gate(self):
+        changed, added = self._bare_new_crate()
+        # Without the marker this diff is a 3-violation FAIL (see G1Test above).
+        self.assertTrue(
+            g1.evaluate(
+                changed,
+                added,
+                stub_overrides={"sparq-foo": False},
+                bench_overrides={"sparq-foo": False},
+            )
+        )
+        self.assertEqual(
+            g1.evaluate(
+                changed,
+                added,
+                stub_overrides={"sparq-foo": False},
+                bench_overrides={"sparq-foo": False},
+                exempt_overrides={"sparq-foo": "vendored fork, tracked in sq-xxxx"},
+            ),
+            [],
+        )
+
+    def test_reason_is_required(self):
+        # The reason IS the audit record, so a marker without one waives nothing.
+        self.assertIsNone(g1.flow_on_exempt_reason("<!-- flow-on-exempt: -->"))
+        self.assertIsNone(g1.flow_on_exempt_reason("<!-- flow-on-exempt -->"))
+        self.assertIsNone(g1.flow_on_exempt_reason("no marker here"))
+        self.assertIsNone(g1.flow_on_exempt_reason(None))
+        self.assertEqual(
+            g1.flow_on_exempt_reason("intro\n<!-- flow-on-exempt: bench lands in sq-1 -->\n"),
+            "bench lands in sq-1",
+        )
+
+    def test_reasonless_marker_is_reported_as_malformed(self):
+        self.assertTrue(g1.flow_on_exempt_marker_is_malformed("<!-- flow-on-exempt -->"))
+        self.assertFalse(
+            g1.flow_on_exempt_marker_is_malformed("<!-- flow-on-exempt: why -->")
+        )
+        self.assertFalse(g1.flow_on_exempt_marker_is_malformed("# sparq-foo"))
+
+    def test_marker_is_read_from_the_crate_readme_on_disk(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            crate = root / "crates" / "sparq-foo"
+            crate.mkdir(parents=True)
+            (crate / "README.md").write_text(
+                "# sparq-foo\n\n<!-- flow-on-exempt: internal fork, bead sq-9 -->\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                g1.crate_flow_on_exempt("sparq-foo", root), "internal fork, bead sq-9"
+            )
+            self.assertEqual(
+                g1.exempt_crates(["crates/sparq-foo/Cargo.toml"], root),
+                {"sparq-foo": "internal fork, bead sq-9"},
+            )
+            # A crate with no README at all is never exempt.
+            self.assertIsNone(g1.crate_flow_on_exempt("sparq-absent", root))
+
+    def test_marker_only_exempts_the_crate_that_carries_it(self):
+        changed, added = g1.parse_status_lines(
+            _statused(["crates/sparq-foo/Cargo.toml", "crates/sparq-bar/Cargo.toml"])
+        )
+        violations = g1.evaluate(
+            changed,
+            added,
+            stub_overrides={"sparq-foo": False, "sparq-bar": False},
+            bench_overrides={"sparq-foo": False, "sparq-bar": False},
+            exempt_overrides={"sparq-foo": "tracked in sq-xxxx"},
+        )
+        self.assertEqual([c for c, _ in violations], ["sparq-bar"])
+
+
+# --------------------------------------------------------------------------- #
 # G2 — public-api → skill
 # --------------------------------------------------------------------------- #
 class G2Test(unittest.TestCase):

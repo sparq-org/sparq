@@ -314,6 +314,81 @@ class ZkCircuitGatecountTest(unittest.TestCase):
         self.assertEqual(self._zk_follow_ons(fos), [])
 
 
+class FlowOnExemptTest(unittest.TestCase):
+    """[OPUS-5] (#5701) The documented `<!-- flow-on-exempt: reason -->` crate-README
+    escape hatch must be HONOURED by the reactive engine, not just documented: an
+    exempt new crate's ADDED paths never reach the `when_new_paths` pool or the
+    {crate} placeholder, so no new-crate follow-on can be minted for it.
+
+    The shipped rule table has no new-crate rule (flow-on-rules.toml leaves
+    new-crate completeness to gate G1), so the end-to-end case is driven against a
+    synthetic rule of exactly the shape that file describes restoring."""
+
+    NEW_CRATE_RULE = """
+[[rule]]
+id = "new-crate-safety-net"
+when_new_paths = ["crates/*/Cargo.toml"]
+
+[[rule.create]]
+dedup_key = "safety-net-{crate}"
+title = "follow-on for {crate}"
+body = "new crate {crate} from PR #{pr}"
+labels = ["area:docs"]
+"""
+
+    def _rules(self, tmp: Path):
+        p = tmp / "rules.toml"
+        p.write_text(self.NEW_CRATE_RULE, encoding="utf-8")
+        return flow_on.load_rules(p)
+
+    def test_path_filter_drops_only_the_exempt_crate(self):
+        added = [
+            "crates/sparq-foo/Cargo.toml",
+            "crates/sparq-foo/src/lib.rs",
+            "crates/sparq-bar/Cargo.toml",
+            "bench/benchmarks.toml",
+        ]
+        kept = flow_on.drop_exempt_new_crate_paths(added, {"sparq-foo"})
+        self.assertEqual(kept, ["crates/sparq-bar/Cargo.toml", "bench/benchmarks.toml"])
+        # No exemptions → the pool is untouched.
+        self.assertEqual(flow_on.drop_exempt_new_crate_paths(added, set()), added)
+
+    def test_exempt_new_crate_mints_nothing(self):
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            rules = self._rules(tmp)
+            added = ["crates/sparq-foo/Cargo.toml", "crates/sparq-foo/README.md"]
+            # Not exempt: the safety-net rule fires.
+            fos = flow_on.evaluate(rules, 1, "feat: sparq-foo", added, added, [])
+            self.assertEqual([fo.dedup_key for fo in fos], ["safety-net-sparq-foo"])
+            # Exempt: nothing is minted, and the {crate} placeholder cannot leak.
+            fos = flow_on.evaluate(
+                rules,
+                1,
+                "feat: sparq-foo",
+                added,
+                added,
+                [],
+                exempt_crates={"sparq-foo"},
+            )
+            self.assertEqual(fos, [])
+
+    def test_exemption_is_read_from_the_crate_readme(self):
+        # The engine shares gate G1's reader, so both halves agree on the marker.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            crate = root / "crates" / "sparq-foo"
+            crate.mkdir(parents=True)
+            (crate / "README.md").write_text(
+                "# sparq-foo\n\n<!-- flow-on-exempt: vendored, bead sq-7 -->\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                flow_on._g1.exempt_crates(["crates/sparq-foo/Cargo.toml"], root),
+                {"sparq-foo": "vendored, bead sq-7"},
+            )
+
+
 class RoutingLabelsTest(unittest.TestCase):
     """[FABLE-5] (#2474) GITHUB_TOKEN-created issues fire no `issues: opened`
     event, so triage-issue.yml can never label a flow-on follow-up post-hoc.
