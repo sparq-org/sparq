@@ -259,6 +259,27 @@
    "promotion_criteria": "NOT promotable while the harness's prerequisites are external. The Solid CTH needs Docker, network egress, a live Keycloak realm at localhost:8080 with the conformance-alice/bob DPoP service-account clients, and an ath-patched CTH image (the published harness omits the RFC 9449 DPoP `ath` claim and cannot authenticate against this server). A GitHub-hosted runner has none of those, so a gating leg could only ever be red, and the run is long + Docker-heavy + network-bound — exactly the shape that causes CI congestion collapse if it reaches the per-PR path. Promote only if the whole stack (realm + patched image) becomes reproducible on a runner the required gate can depend on. Delete this entry only if the workflow is removed.",
    "gate_script_waiver": "Runs `cargo build --release -p sparq-lws-core` and `./crates/sparq-lws-core/conformance/run.sh`, gate-classified by C3. run.sh IS a real ratchet — it fails when the generated CTH score drops below the floor in conformance/baseline.json — but it asserts nothing about any other surface, and it is unrunnable without the external stack above, so it cannot stand in for a gate that would otherwise run.",
    "registered": "2026-07-28"
+  },
+  "sccache A/B: prime the GHA cache namespace (advisory)": {
+   "workflow": "sccache-ab.yml",
+   "job_id": "prime",
+   "owner_bead": "sq-6vshe.15",
+   "promotion_criteria": "This is a dispatch-only MEASUREMENT lane for research/ci-mergequeue-speedup-2026-07.md §3.2 lever 2 item 3 (the sccache >=60 s median-win A/B). NEVER promotable while it stays an experiment: every condition it reds on is a property of the runner fleet, of the GitHub Actions cache backend, or of the harness's own health -- never a property of the commit under test -- so gating on it would block every push-to-main on an unrelated experiment. Declared because the lane SILENTLY GATES otherwise, the same defect sq-huwr8 found on the alarm lanes: a workflow_dispatch run on main lands its check-runs on refs/heads/main's head SHA, which is exactly the SHA the push-triggered ci-summary gate polls. Delete this entry when the A/B is decided and the workflow is removed (or when sccache is ADOPTED, at which point the production wiring in ci.yml gates normally and this experiment is redundant). This job is additionally the designated WRITER of the sccache namespace; a failure here leaves the treatment arm cold, which scripts/sccache_ab_verdict.py reports as INCONCLUSIVE rather than as a negative result.",
+   "registered": "2026-09-01"
+  },
+  "sccache A/B: ${{ matrix.arm }} trial ${{ matrix.trial }} (advisory)": {
+   "workflow": "sccache-ab.yml",
+   "job_id": "measure",
+   "owner_bead": "sq-6vshe.15",
+   "promotion_criteria": "This is a dispatch-only MEASUREMENT lane for research/ci-mergequeue-speedup-2026-07.md §3.2 lever 2 item 3 (the sccache >=60 s median-win A/B). NEVER promotable while it stays an experiment: every condition it reds on is a property of the runner fleet, of the GitHub Actions cache backend, or of the harness's own health -- never a property of the commit under test -- so gating on it would block every push-to-main on an unrelated experiment. Declared because the lane SILENTLY GATES otherwise, the same defect sq-huwr8 found on the alarm lanes: a workflow_dispatch run on main lands its check-runs on refs/heads/main's head SHA, which is exactly the SHA the push-triggered ci-summary gate polls. Delete this entry when the A/B is decided and the workflow is removed (or when sccache is ADOPTED, at which point the production wiring in ci.yml gates normally and this experiment is redundant). fail-fast is off across the 2x5 matrix so a single dead trial cannot truncate the sample; an unequal or short trial set is caught downstream as INCONCLUSIVE.",
+   "registered": "2026-09-01"
+  },
+  "sccache A/B: verdict against the adoption bar (advisory)": {
+   "workflow": "sccache-ab.yml",
+   "job_id": "verdict",
+   "owner_bead": "sq-6vshe.15",
+   "promotion_criteria": "This is a dispatch-only MEASUREMENT lane for research/ci-mergequeue-speedup-2026-07.md §3.2 lever 2 item 3 (the sccache >=60 s median-win A/B). NEVER promotable while it stays an experiment: every condition it reds on is a property of the runner fleet, of the GitHub Actions cache backend, or of the harness's own health -- never a property of the commit under test -- so gating on it would block every push-to-main on an unrelated experiment. Declared because the lane SILENTLY GATES otherwise, the same defect sq-huwr8 found on the alarm lanes: a workflow_dispatch run on main lands its check-runs on refs/heads/main's head SHA, which is exactly the SHA the push-triggered ci-summary gate polls. Delete this entry when the A/B is decided and the workflow is removed (or when sccache is ADOPTED, at which point the production wiring in ci.yml gates normally and this experiment is redundant). This job exits 0 for BOTH outcomes -- 'do not adopt' is the design record's PREDICTED result and a complete deliverable, not a failure -- and reds only on exit 2, meaning the instrument did not earn the right to a verdict.",
+   "registered": "2026-09-01"
   }
  }
 }
