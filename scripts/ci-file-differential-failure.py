@@ -52,19 +52,46 @@ MARKER = "[differential-fuzz]"
 
 _MISMATCH_RE = re.compile(r"^MISMATCH seed=(\d+)\s*$", re.MULTILINE)
 _ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
+# [OPUS-5] sq-c9q4r sibling fix: any run of 3+ backticks in the UNTRUSTED first-failing-case
+# block. That block is inlined inside a ``` fence by build_issue_body() and
+# write_repro_artifact(), so such a run CLOSES the fence early and everything after it
+# renders as markdown in an issue this repo's own CI opens.
+_FENCE_RUN_RE = re.compile(r"`{3,}")
 
 
 def log(msg: str) -> None:
     print(f"[{PROG}] {msg}", file=sys.stderr)
 
 
+def defuse_code_fences(text: str) -> str:
+    """Neutralise ``` runs so untrusted repro text cannot escape the markdown code fence
+    it is inlined into.
+
+    [OPUS-5] The twin of scripts/ci-file-demoted-lane-failure.py's helper of the same
+    name (sq-c9q4r), applied here to the identical hole this filer carries. The FIRST
+    FAILING CASE block is fuzzer-generated SPARQL + RDF text, so a case containing a run
+    of three-or-more backticks closes the fence in build_issue_body() /
+    write_repro_artifact() early and the remainder renders as markdown in an issue this
+    repo's own CI opens (own-repo markdown injection).
+    Each such run is rewritten to the same number of apostrophes: ASCII, no invisible
+    characters, visually near-identical, and impossible to read as a fence. Nothing
+    replayable is lost — the authoritative repro is the SEED (`fuzz <seed> 1 <category>`),
+    the inline block is diagnostic display, and the artifact's fuzz-log.txt keeps the raw
+    bytes verbatim.
+    """
+    return _FENCE_RUN_RE.sub(lambda m: "'" * len(m.group(0)), text)
+
+
 def parse_fuzz_log(text: str) -> dict:
-    """Extract the failing-seed list + the FIRST FAILING CASE repro block."""
+    """Extract the failing-seed list + the FIRST FAILING CASE repro block.
+
+    The case block is fence-defused here (it is only ever inlined into a ``` block);
+    the raw log is still written verbatim to the artifact's fuzz-log.txt."""
     seeds = [int(m) for m in _MISMATCH_RE.findall(text)]
     first_case = ""
     marker = "FIRST FAILING CASE:"
     if marker in text:
-        first_case = text.split(marker, 1)[1].strip()
+        first_case = defuse_code_fences(text.split(marker, 1)[1].strip())
     # The summary line (counts) if present — useful context in the issue.
     summary = ""
     for line in text.splitlines():
@@ -182,7 +209,11 @@ def build_issue_body(bead_id: str, shard: str, parsed: dict, args) -> str:
     if args.mode != "baseline":
         replay = f"{args.mode}=1 {replay}"
     seeds_line = ", ".join(str(s) for s in parsed["seeds"][:50]) + (" …" if n > 50 else "")
-    case = parsed["first_case"] or "(no FIRST FAILING CASE block captured — see the artifact log)"
+    # [OPUS-5] Defuse AT the fence as well as in parse_fuzz_log(), so the "untrusted text
+    # cannot escape this block" invariant holds for every caller rather than only the one
+    # that parsed the log. Idempotent (the rewrite emits no backticks), so a case that
+    # already went through parse_fuzz_log() is unchanged.
+    case = defuse_code_fences(parsed["first_case"]) or "(no FIRST FAILING CASE block captured — see the artifact log)"
     return f"""> 🤖 **SPARQ agent** — auto-filed by the nightly differential-fuzz lane (bead sq-0iqzw). [FABLE-5]
 
 The nightly sparq-vs-Oxigraph differential fuzzer found **{n} non-adjudicated mismatch(es)** in shard `{shard}` (category `{args.category}`, mode `{args.mode}`, seed window {args.seed_start}+{args.count}).
@@ -259,7 +290,9 @@ def write_repro_artifact(out_dir: Path, parsed: dict, log_text: str, args) -> No
         f"window: seeds {args.seed_start}+{args.count} category={args.category}\n"
         f"failing seeds: {parsed['seeds']}\n"
         f"summary: {parsed['summary']}\n\n"
-        f"## first failing case\n\n```\n{parsed['first_case']}\n```\n",
+        # [OPUS-5] Same fence-defusing as build_issue_body(): repro.md is markdown, and the
+        # case block is untrusted fuzzer-generated text. Idempotent.
+        f"## first failing case\n\n```\n{defuse_code_fences(parsed['first_case'])}\n```\n",
         encoding="utf-8",
     )
     (out_dir / "fuzz-log.txt").write_text(log_text, encoding="utf-8")
@@ -325,6 +358,37 @@ def self_test() -> int:
             shard="equality", mode="baseline", seed_start="4695", count="2200",
             category="equality"))
         assert (out / "repro.md").exists() and (out / "fuzz-log.txt").exists()
+        # [OPUS-5] sq-c9q4r sibling: MARKDOWN-INJECTION guard. The FIRST FAILING CASE block
+        # is fuzzer-generated SPARQL + RDF, so a case carrying a ``` run must not be able to
+        # close the fence it is inlined into — this filer opens an issue in THIS repo.
+        # Assert on the round-trip through the real parser, not just the helper.
+        hostile_log = (
+            "MISMATCH seed=7\n"
+            "FIRST FAILING CASE:\nseed=7\n--- query ---\n"
+            'SELECT ?s WHERE { ?s ex:p """```\n## injected heading\n'
+            "[x](https://evil.invalid)\n````\"\"\" }\n"
+        )
+        hostile = parse_fuzz_log(hostile_log)
+        assert "```" not in hostile["first_case"], hostile["first_case"]
+        # Runs are neutralised in place, not deleted — length + surrounding text survive.
+        assert "'''" in hostile["first_case"] and "''''" in hostile["first_case"]
+        assert "seed=7" in hostile["first_case"] and "## injected heading" in hostile["first_case"]
+        # The assembled body then contains EXACTLY the two fences it opens/closes itself.
+        assert build_issue_body(b1, "equality", hostile, A).count("```") == 2
+        # ...and defusing at the fence also covers a caller that never went through the
+        # parser (e.g. a hand-built dict), for the body AND the artifact.
+        raw = {"seeds": [7], "summary": "", "first_case": hostile_log}
+        assert build_issue_body(b1, "equality", raw, A).count("```") == 2
+        out2 = Path(td) / "repro-hostile"
+        write_repro_artifact(out2, raw, hostile_log, argparse.Namespace(
+            shard="equality", mode="baseline", seed_start="7", count="1",
+            category="equality"))
+        assert (out2 / "repro.md").read_text(encoding="utf-8").count("```") == 2
+        # The raw log artifact is NOT markdown, so it keeps the bytes verbatim.
+        assert "```" in (out2 / "fuzz-log.txt").read_text(encoding="utf-8")
+        # A single/double backtick is NOT a fence and must be left alone (no over-strip).
+        assert defuse_code_fences("a `b` c ``d``") == "a `b` c ``d``"
+        assert defuse_code_fences(defuse_code_fences(hostile_log)) == defuse_code_fences(hostile_log)
     log("self-test OK")
     return 0
 
