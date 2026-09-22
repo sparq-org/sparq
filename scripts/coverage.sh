@@ -210,6 +210,20 @@ PER_COMMIT_CRATES=(
   # `service`, so it MUST be measured WITH `service` (the `case` in measure() below names it).
   # Brings the moved client + its ~1.3k test LOC under the ratchet ("no crate silently dropped").
   sparq-engine-service
+  # [OPUS-5] #5139 (follow-up to sq-gg0qq.11 / #2741): the ported Solid/LWS server crate. It was
+  # imported PRESENCE-gated only (bench/coverage-presence.json, floor 1000 #[test]s) with its
+  # line-% floor recorded as DEFERRED, and #2741 could not close the deferral because seeding a
+  # floor needs a real cargo-llvm-cov run and that environment had no usable cargo toolchain —
+  # so until now the crate had NO line-% ratchet at all. Measured with DEFAULT features
+  # (`embedded-sparq` + `sparql-endpoint`) — unlike the opt-in crates above, the default build
+  # already compiles the whole server (router, LDP handlers, auth middleware, store backends),
+  # so it needs NO `case` arm in measure(). NOT SILENTLY TRUNCATED: the crate's six OPT-IN
+  # features (`redis-replay`, `odrl-authz`, `trust-graph`, `http-sparq`, `http3`, `wasm`) and
+  # their `#![cfg(feature = …)]` test files are compiled OUT of this measurement, so the floor
+  # is over the DEFAULT surface only — the same convention as sparq-engine, and recorded in the
+  # crate's bench/coverage-floor.json note. It is deliberately NOT in a SHARD_GROUPS shard —
+  # see DEDICATED_PIPELINE_CRATES below for why.
+  sparq-lws-core
 )
 # Crates whose HEAVY tests are only run in the nightly tier.
 NIGHTLY_ONLY_NOTE="sparq-vectors heavy 50k recall/diskann tests run only in nightly tier"
@@ -244,7 +258,21 @@ NIGHTLY_ONLY_NOTE="sparq-vectors heavy 50k recall/diskann tests run only in nigh
 # The DEDICATED_PIPELINE_CRATES set below records exactly that: crates that are in
 # PER_COMMIT_CRATES and gated, but gated OUTSIDE SHARD_GROUPS. The invariant becomes:
 #     union(SHARD_GROUPS) ∪ DEDICATED_PIPELINE_CRATES  ==  PER_COMMIT_CRATES   (disjoint).
-DEDICATED_PIPELINE_CRATES=(sparq-engine)
+#
+# [OPUS-5] #5139: sparq-lws-core joins the set for a DIFFERENT reason than sparq-engine.
+# Engine is here because it is too SLOW for one shard; lws-core is here because putting it in a
+# shard would raise the floor cost of EVERY Rust PR. The `coverage-measure` matrix runs whenever
+# the affected closure is non-empty, so a crate appended to a shard is measured on essentially
+# every Rust PR — and this crate is large (37 `tests/*.rs` integration files plus the inline
+# units; measured 283s instrumented on the seeding box), against the
+# "keep untouched-PR cost flat / watch CI congestion" constraint #2741 recorded. Its dedicated
+# `coverage-lws-core` job in ci.yml is instead gated on
+# `contains(needs.select.outputs.affected, '"sparq-lws-core"')`, so an unrelated Rust PR pays
+# NOTHING for it. That is sound on exactly the COVERAGE_CONE argument below (sq-3dr4t): outside
+# the PR's reverse-dep closure neither the crate nor any of its deps changed, so its floor
+# verdict carries forward from main's last run, and the nightly full tier re-measures it anyway.
+# The lane body is small because coverage.sh already takes an explicit COVERAGE_CRATES subset.
+DEDICATED_PIPELINE_CRATES=(sparq-engine sparq-lws-core)
 
 # INVARIANT (guarded by `coverage.sh --check-shards`, a fast no-compile CI step): the union
 # of SHARD_GROUPS PLUS DEDICATED_PIPELINE_CRATES equals PER_COMMIT_CRATES exactly and is
