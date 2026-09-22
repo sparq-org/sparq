@@ -6683,6 +6683,19 @@ async fn run_query_pinned(
             #[cfg(not(feature = "query-registry"))]
             let (budget, qr_guard): (QueryBudget, Option<Box<dyn std::any::Any + Send>>) =
                 (make_budget(&config, true), None);
+            // [FABLE-5] (sq-0kq6k) A GET streams its body: the rendered RDF document is fed to
+            // the response in chunks as it is written, so a large CONSTRUCT never holds the
+            // whole document in memory and its first bytes reach the socket early (TTFB). A
+            // result small enough to fit one chunk still answers buffered, with the same
+            // `Content-Length` it always had.
+            //
+            // HEAD deliberately keeps the buffered path: it must advertise the `Content-Length`
+            // the GET would have carried (the documented "HEAD mirrors GET" contract), which
+            // means rendering the document anyway — there is nothing to stream to.
+            if !head_only {
+                return stream_graph_result(gen, query, gfmt, budget, allow, qr_guard, &config)
+                    .await;
+            }
             let cfg = config.clone();
             let task = tokio::task::spawn_blocking(move || {
                 let _guard = qr_guard;
@@ -7384,16 +7397,267 @@ async fn stream_select_json(
 /// [OPUS-4.8] (sq-7d3dj.34.2) Awaits the first streamed chunk (or the pre-first-byte error)
 /// under the read wall-clock cap (`query_timeout + TIMEOUT_GRACE`), mirroring
 /// [`await_worker`]. `Err(())` means the cap elapsed before the worker produced anything.
-async fn recv_first_chunk(
-    rx: &mut tokio::sync::mpsc::Receiver<StreamItem>,
+///
+/// Generic over the channel's item so both streamed paths share the one cap: the SELECT stream
+/// carries [`StreamItem`] (chunk / done / failed), the CONSTRUCT-DESCRIBE stream of
+/// [`stream_graph_result`] carries `Result<Bytes, String>`.
+async fn recv_first_chunk<T>(
+    rx: &mut tokio::sync::mpsc::Receiver<T>,
     config: &ServerConfig,
-) -> Result<Option<StreamItem>, ()> {
+) -> Result<Option<T>, ()> {
     match config.query_timeout {
         Some(t) => match tokio::time::timeout(t + TIMEOUT_GRACE, rx.recv()).await {
             Ok(item) => Ok(item),
             Err(_elapsed) => Err(()),
         },
         None => Ok(rx.recv().await),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Streamed CONSTRUCT / DESCRIBE bodies ([FABLE-5] sq-0kq6k)
+// ---------------------------------------------------------------------------
+
+/// How many rendered bytes accumulate before a chunk is handed to the response body.
+///
+/// This is the knob that decides "buffered" vs "chunked" for a graph result: a document that
+/// fits in one chunk takes the buffered branch of [`stream_graph_result`] and is answered with
+/// a `Content-Length`, exactly as before this change; only a document that exceeds it streams.
+/// 64 KiB is the same order as the SELECT-JSON stream's natural chunking, big enough that the
+/// per-chunk channel send is noise against the serialisation work.
+const GRAPH_STREAM_CHUNK_BYTES: usize = 64 * 1024;
+
+/// [FABLE-5] sq-0kq6k: an [`std::io::Write`] that forwards the rendered RDF document to the
+/// response body in ~[`GRAPH_STREAM_CHUNK_BYTES`] pieces instead of accumulating it.
+///
+/// This is the whole point of the streaming path: peak resident memory for the response body
+/// becomes one chunk plus whatever the serialiser holds, rather than the entire rendered
+/// document. (The `Vec<Triple>` the engine produced is still fully materialised — that is the
+/// CONSTRUCT/DESCRIBE result itself, not the rendering, and is out of scope here.)
+///
+/// A failed send means the receiver was dropped — the client disconnected — and is surfaced as
+/// an `io::Error` so the serialiser stops rendering instead of finishing work nobody will read.
+struct ChunkSink {
+    tx: tokio::sync::mpsc::Sender<Result<Bytes, String>>,
+    buf: Vec<u8>,
+    /// Whether any chunk has been handed over yet — [`ChunkSink::finish`] uses it to guarantee
+    /// at least one (possibly empty) chunk, so an empty CONSTRUCT still answers `200` with an
+    /// empty body rather than looking like a worker that produced no stream at all.
+    sent: bool,
+}
+
+impl ChunkSink {
+    fn new(tx: tokio::sync::mpsc::Sender<Result<Bytes, String>>) -> Self {
+        Self { tx, buf: Vec::with_capacity(GRAPH_STREAM_CHUNK_BYTES), sent: false }
+    }
+
+    fn send(&mut self, chunk: Vec<u8>) -> std::io::Result<()> {
+        self.sent = true;
+        self.tx
+            .blocking_send(Ok(Bytes::from(chunk)))
+            .map_err(|_| std::io::Error::other("client disconnected"))
+    }
+
+    /// Hands over every WHOLE chunk currently buffered, keeping the trailing remainder.
+    fn drain_full_chunks(&mut self) -> std::io::Result<()> {
+        while self.buf.len() >= GRAPH_STREAM_CHUNK_BYTES {
+            let rest = self.buf.split_off(GRAPH_STREAM_CHUNK_BYTES);
+            let chunk = std::mem::replace(&mut self.buf, rest);
+            self.send(chunk)?;
+        }
+        Ok(())
+    }
+
+    /// Hands over the trailing partial chunk. Consumes the sink so the sender is dropped
+    /// afterwards, which is what closes the response stream.
+    fn finish(mut self) -> std::io::Result<()> {
+        if !self.buf.is_empty() || !self.sent {
+            let chunk = std::mem::take(&mut self.buf);
+            self.send(chunk)?;
+        }
+        Ok(())
+    }
+}
+
+impl std::io::Write for ChunkSink {
+    fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
+        self.buf.extend_from_slice(data);
+        self.drain_full_chunks()?;
+        Ok(data.len())
+    }
+
+    /// A no-op: partial chunks are held deliberately (that is the buffering) and are handed
+    /// over by [`ChunkSink::finish`]. Flushing early would emit tiny chunks for no benefit.
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// [FABLE-5] sq-0kq6k: evaluates a CONSTRUCT / DESCRIBE and STREAMS the negotiated RDF
+/// document as the response body, so a large result does not buffer the whole rendered
+/// document in the server before the first byte reaches the socket.
+///
+/// **Shape** (deliberately the same as [`stream_select_json`]): the engine runs on a blocking
+/// worker that feeds a bounded channel; a **single-chunk** result is answered buffered with a
+/// `Content-Length` (byte-identical response to the pre-streaming path — every small
+/// CONSTRUCT keeps its old wire shape); a **multi-chunk** result streams under chunked
+/// transfer-encoding with no `Content-Length`.
+///
+/// **Status semantics are unchanged, and stronger than the SELECT stream's.** The engine
+/// materialises the whole `Vec<Triple>` BEFORE serialisation begins, so every budget / deadline
+/// / evaluation failure is known before a single byte is rendered. A refusal is therefore
+/// always a clean `413`/`503`/`500` — a graph result can never be truncated mid-stream the way
+/// a streamed SELECT can. The `Some(Err(_))` arm below is defensive, not reachable today.
+async fn stream_graph_result(
+    gen: PinnedGen,
+    runnable: String,
+    gfmt: GraphFormat,
+    budget: QueryBudget,
+    allow: crate::service_config::ServiceAllowlist,
+    // [SONNET-4.6] (sq-qsm5z) The RAII running-query registry guard, type-erased so the
+    // signature compiles in both feature states. Held for the whole evaluation.
+    qr_guard: Option<Box<dyn std::any::Any + Send>>,
+    config: &ServerConfig,
+) -> Response {
+    let ct = gfmt.content_type();
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<Result<Bytes, String>>(STREAM_CHANNEL_CAP);
+    tokio::task::spawn_blocking(move || {
+        let _guard = qr_guard;
+        with_engine_scope_allow(&allow, || {
+            match sparq_engine::construct_or_describe_with_budget(
+                gen.snapshot(),
+                &runnable,
+                &budget,
+            ) {
+                // Nothing has been rendered yet, so this still maps to the right status.
+                Err(e) => {
+                    let _ = tx.blocking_send(Err(e));
+                }
+                Ok(triples) => {
+                    let mut sink = ChunkSink::new(tx);
+                    // The only error the writers can raise here is the sink's own "client
+                    // disconnected"; in that case abandon the remaining chunks too.
+                    if serialise_graph_triples_to(&triples, gfmt, &mut sink).is_ok() {
+                        let _ = sink.finish();
+                    }
+                }
+            }
+            // `gen` is held until the worker returns, so the snapshot borrow above is valid
+            // for the whole evaluation.
+        });
+    });
+
+    // Await the first item under the same wall-clock cap the buffered path uses, so a
+    // pre-first-byte failure still maps to the right status.
+    let first = match recv_first_chunk(&mut rx, config).await {
+        Ok(Some(Ok(bytes))) => bytes,
+        // CONSTRUCT/DESCRIBE used `make_budget(_, true)` → max_results applied.
+        Ok(Some(Err(e))) => return engine_error_response(&e, config, true),
+        Ok(None) => return execution_error("query produced no result stream"),
+        Err(()) => return timeout_response(config),
+    };
+
+    match rx.recv().await {
+        // One chunk only: answer exactly as the buffered path did, Content-Length and all.
+        None => {
+            let len = first.len();
+            Response::builder()
+                .status(StatusCode::OK)
+                .header(header::CONTENT_TYPE, ct)
+                .header(header::CONTENT_LENGTH, len)
+                .body(axum::body::Body::from(first))
+                .unwrap()
+        }
+        // Defensive: the worker never reports an error after a chunk (see the doc above).
+        Some(Err(e)) => engine_error_response(&e, config, true),
+        Some(Ok(second)) => {
+            let mut prefix: std::collections::VecDeque<Result<Bytes, String>> =
+                std::collections::VecDeque::with_capacity(2);
+            prefix.push_back(Ok(first));
+            prefix.push_back(Ok(second));
+            let body = axum::body::Body::from_stream(futures_util::stream::unfold(
+                (prefix, rx),
+                |(mut prefix, mut rx)| async move {
+                    let item = match prefix.pop_front() {
+                        Some(it) => Some(it),
+                        None => rx.recv().await,
+                    };
+                    item.map(|it| (it.map_err(std::io::Error::other), (prefix, rx)))
+                },
+            ));
+            Response::builder()
+                .status(StatusCode::OK)
+                .header(header::CONTENT_TYPE, ct)
+                .body(body)
+                .unwrap()
+        }
+    }
+}
+
+#[cfg(test)]
+mod chunk_sink_tests {
+    use super::*;
+    use std::io::Write as _;
+
+    /// A channel roomy enough that a synchronous test can fill it without blocking (the real
+    /// path uses `STREAM_CHANNEL_CAP` and is drained concurrently by the response body).
+    fn sink() -> (ChunkSink, tokio::sync::mpsc::Receiver<Result<Bytes, String>>) {
+        let (tx, rx) = tokio::sync::mpsc::channel(64);
+        (ChunkSink::new(tx), rx)
+    }
+
+    /// Drains everything the sink handed over, in order.
+    fn drain(mut rx: tokio::sync::mpsc::Receiver<Result<Bytes, String>>) -> Vec<Vec<u8>> {
+        let mut out = Vec::new();
+        while let Ok(Ok(b)) = rx.try_recv() {
+            out.push(b.to_vec());
+        }
+        out
+    }
+
+    #[test]
+    fn a_small_document_is_handed_over_as_one_chunk() {
+        let (mut s, rx) = sink();
+        s.write_all(b"hello world").unwrap();
+        s.finish().unwrap();
+        assert_eq!(drain(rx), vec![b"hello world".to_vec()]);
+    }
+
+    #[test]
+    fn an_empty_document_still_yields_exactly_one_empty_chunk() {
+        // Load-bearing: the response builder treats "no chunk at all" as a worker that died,
+        // so an empty CONSTRUCT must still produce a chunk to answer 200 with an empty body.
+        let (s, rx) = sink();
+        s.finish().unwrap();
+        assert_eq!(drain(rx), vec![Vec::<u8>::new()]);
+    }
+
+    #[test]
+    fn a_large_document_splits_on_the_threshold_and_reassembles_exactly() {
+        let (mut s, rx) = sink();
+        // Two and a half chunks, written in pieces that do not align with the boundary.
+        let payload: Vec<u8> = (0..GRAPH_STREAM_CHUNK_BYTES * 5 / 2).map(|i| (i % 251) as u8).collect();
+        for piece in payload.chunks(7777) {
+            s.write_all(piece).unwrap();
+        }
+        s.finish().unwrap();
+
+        let chunks = drain(rx);
+        assert_eq!(chunks.len(), 3, "2.5 chunks of payload → 2 full chunks + the remainder");
+        assert!(
+            chunks[..2].iter().all(|c| c.len() == GRAPH_STREAM_CHUNK_BYTES),
+            "every non-final chunk must be exactly the threshold"
+        );
+        assert_eq!(chunks.concat(), payload, "the chunks must reassemble to the exact document");
+    }
+
+    #[test]
+    fn a_disconnected_client_stops_the_serialiser() {
+        let (mut s, rx) = sink();
+        drop(rx);
+        // The first write that crosses the threshold discovers the dropped receiver.
+        let payload = vec![b'x'; GRAPH_STREAM_CHUNK_BYTES + 1];
+        assert!(s.write_all(&payload).is_err(), "a dropped receiver must surface as an io error");
     }
 }
 
@@ -8478,15 +8742,36 @@ async fn serialise_graph(
 /// — the single dispatch shared by the CONSTRUCT/DESCRIBE and GSP-read paths. N-Triples is the
 /// canonical line form; Turtle compacts the [`crate::graph::COMMON_PREFIXES`]; RDF/XML is the
 /// `application/rdf+xml` document. The writers are guaranteed to emit well-formed output.
+///
+/// [FABLE-5] sq-0kq6k: implemented BY [`serialise_graph_triples_to`] over an in-memory buffer,
+/// so the buffered response body and the streamed one are the same bytes by construction.
 fn serialise_graph_triples(triples: &[oxrdf::Triple], gfmt: GraphFormat) -> String {
+    let mut out: Vec<u8> = Vec::with_capacity(triples.len() * 64);
+    // An in-memory writer cannot fail.
+    let _ = serialise_graph_triples_to(triples, gfmt, &mut out);
+    String::from_utf8(out).unwrap_or_default()
+}
+
+/// [FABLE-5] sq-0kq6k: the sink-shaped twin of [`serialise_graph_triples`] — renders the graph
+/// in the negotiated syntax straight into `w` instead of into a `String`. Feeding it a
+/// [`ChunkSink`] is what makes a large CONSTRUCT / DESCRIBE a chunked-transfer response whose
+/// first bytes reach the socket before the last triple is rendered.
+///
+/// Turtle / N-Triples / RDF/XML stream genuinely; JSON-LD does not (see
+/// [`crate::graph::write_jsonld_to`]) — it still materialises its document before writing.
+fn serialise_graph_triples_to<W: std::io::Write>(
+    triples: &[oxrdf::Triple],
+    gfmt: GraphFormat,
+    w: &mut W,
+) -> std::io::Result<()> {
     match gfmt {
-        GraphFormat::NTriples => crate::graph::triples_to_ntriples(triples),
-        GraphFormat::Turtle => crate::graph::triples_to_turtle(triples),
-        GraphFormat::RdfXml => crate::graph::triples_to_rdfxml(triples),
+        GraphFormat::NTriples => crate::graph::write_ntriples_to(triples, w),
+        GraphFormat::Turtle => crate::graph::write_turtle_to(triples, w),
+        GraphFormat::RdfXml => crate::graph::write_rdfxml_to(triples, w),
         // [OPUS-4.8] sq-oy1f.1: JSON-LD (flattened) — only reachable when the `jsonld` feature
         // is on (the variant does not exist otherwise, so the match stays exhaustive).
         #[cfg(feature = "jsonld")]
-        GraphFormat::JsonLd => crate::graph::triples_to_jsonld(triples),
+        GraphFormat::JsonLd => crate::graph::write_jsonld_to(triples, w),
     }
 }
 
