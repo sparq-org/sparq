@@ -67,6 +67,13 @@ Why this shape and not the alternatives:
 4. **`merge_group` compatibility.** The merge-queue ref needs the same status; verify
    `workflow_run` events fire for merge-group-triggered sibling runs and that the
    status lands on the merge-group head SHA the ruleset checks.
+   **RESOLVED (issue #6110) — see `docs/branch-protection.md` §Slotless gate
+   evaluation.** Delivery and head-SHA targeting are confirmed by the existing
+   `feature-matrix-report.yml` coupling (a merge-group batch would stall the queue if
+   either failed); still open is that it is a *check-run* write, not the *commit
+   status* write this design needs. That section also settles risk 5's sibling
+   question: the `workflows:` enumeration is mandatory for recursion-safety, so an
+   unfiltered trigger is not an option whatever its delivery semantics.
 5. **Event storms.** One evaluation per sibling-workflow completion is dozens per
    push; each is cheap, but debounce (concurrency-group per head SHA,
    `cancel-in-progress`) to keep it tidy.
