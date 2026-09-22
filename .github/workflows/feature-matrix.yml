@@ -172,8 +172,16 @@ on:
   # marker) and the required gate stops honouring the draft-tier-assembled set —
   # see docs/branch-protection.md §Draft-tier CI. Independent of the label guard
   # above: a non-`ci-full` label flip stays a no-op regardless of draft state.
+  # [OPUS-5] #5215 CHECK-RUN ECONOMY: `unlabeled` is DELIBERATELY NOT a trigger — a
+  # guarded no-op run still announces one `skipped` check-run per job definition, and
+  # each review-pipeline label flip is a remove+add PAIR. Sound because the only label
+  # this workflow reads (`ci-full`, via the selection outputs) is a MONOTONE OPT-IN TO
+  # MORE WORK: not re-running on its removal leaves a strict superset of the required
+  # coverage. Full rationale: ci.yml's `pull_request` note. The `["labeled","unlabeled"]`
+  # guards below are kept verbatim (still correct, and safe if `unlabeled` returns).
+  # Pinned by scripts/tests/test_label_trigger_economy.py.
   pull_request:
-    types: [opened, synchronize, reopened, labeled, unlabeled, ready_for_review]
+    types: [opened, synchronize, reopened, labeled, ready_for_review]
   # Merge queue: mirror the PR check-set onto the merge_group ref so the required
   # ci-summary gate finds the same legs it finds on a PR (matches ci.yml/ci-summary.yml).
   merge_group:

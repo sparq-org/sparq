@@ -93,7 +93,16 @@ on:
   pull_request:
     # [FABLE-5] Draft-tier CI: + ready_for_review so the un-draft moment re-runs
     # this gate-feeding lane (docs/branch-protection.md §Draft-tier CI).
-    types: [opened, synchronize, reopened, labeled, unlabeled, ready_for_review]
+    # [OPUS-5] #5215 CHECK-RUN ECONOMY: `unlabeled` is DELIBERATELY NOT a trigger — a
+    # guarded no-op run still announces one `skipped` check-run per job definition, and
+    # each review-pipeline label flip is a remove+add PAIR. Sound because both labels
+    # this workflow reads (`ci-full`, `fuzz-full` — the latter only opts BACK IN to the
+    # randomized budget and escapes the draft skip) are MONOTONE OPT-INS TO MORE WORK:
+    # not re-running on a removal leaves a strict superset of the required coverage.
+    # Full rationale: ci.yml's `pull_request` note. The `["labeled","unlabeled"]` guards
+    # below are kept verbatim (still correct, and safe if `unlabeled` returns). Pinned
+    # by scripts/tests/test_label_trigger_economy.py.
+    types: [opened, synchronize, reopened, labeled, ready_for_review]
   # [FABLE-5] (2026-07-18 maintainer directive, merge-queue subset) merge_group
   # REMOVED: the deterministic corpus-replay already ran + gated on the PR head
   # (select-scoped), the push-to-main run above re-replays POST-MERGE (a break on

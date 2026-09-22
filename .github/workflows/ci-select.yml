@@ -23,7 +23,11 @@
 # not-affected crate's wide-lane tests/benchmarks are actually SKIPPED. Two overrides,
 # both fail toward RUNNING MORE:
 #   * ci-full PR label => the selector runs with --full (mode=full, nothing skipped);
-#     the calling workflows react to labeled/unlabeled so toggling re-evaluates.
+#     the calling workflows react to `labeled` so APPLYING it re-evaluates. [OPUS-5]
+#     #5215: REMOVING it does NOT start a fresh run — `unlabeled` is no longer a
+#     trigger, because the override is monotone (it only ever asks for MORE), so the
+#     already-computed full run stays a strict superset of what re-selection would
+#     have asked for. The narrower selection resumes on the next push (`synchronize`).
 #   * CI_SELECT_MODE repo variable == the literal "shadow" => report-only rollback
 #     escape hatch (--shadow: compute + report the would-skip set, skip nothing).
 # Any other CI_SELECT_MODE value (incl. unset / "enforce") enforces. Fail-safe is
@@ -146,8 +150,10 @@ jobs:
           CI_SELECT_MODE: ${{ vars.CI_SELECT_MODE }}
           # [FABLE-5] sq-fmx4u.5 ci-full label override (design §6.2): applying the
           # `ci-full` label to a PR forces the FULL matrix (mode=full, nothing
-          # skipped); removing it re-selects. The calling workflows react to
-          # labeled/unlabeled PR events so a toggle re-runs this pre-job. On non-PR
+          # skipped). The calling workflows react to `labeled` PR events so APPLYING
+          # it re-runs this pre-job; [OPUS-5] #5215 removed `unlabeled` from their
+          # trigger sets, so REMOVING it does not re-run — the standing full run is a
+          # superset of the re-selected one, and the next push re-selects. On non-PR
           # events there is no pull_request payload, so this evaluates false and the
           # override is inert (non-PR events already resolve to full by construction).
           CI_FULL_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'ci-full') }}
