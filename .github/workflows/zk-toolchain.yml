@@ -298,6 +298,7 @@ jobs:
           CARGO_TARGET_DIR: ${{ github.workspace }}/target
         run: |
           python3 -m unittest discover -s bench/zk-bindings -p 'test_*.py'
+          cargo check --locked -p sparq-conformance --example proof_corpus
           cargo test --locked --manifest-path zk/sparql-evaluator/Cargo.toml -p sparq-proved-evaluator-model --features evaluate --example proof_bindings
           python3 bench/zk-bindings/ci.py --output "${RUNNER_TEMP}/proof-binding-evidence"
 

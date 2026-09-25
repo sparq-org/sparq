@@ -32,6 +32,8 @@ class CiTests(unittest.TestCase):
         matches = [line.strip() for line in workflow.splitlines() if command in line]
         self.assertEqual(matches, [command + ' --skip result::proof_bindings::run_job'])
         self.assertIn('python3 bench/zk-bindings/ci.py --output', workflow)
+        self.assertIn('cargo check --locked -p sparq-conformance --example proof_corpus', workflow)
+        self.assertIn('cargo test --locked --manifest-path zk/sparql-evaluator/Cargo.toml -p sparq-proved-evaluator-model --features evaluate --example proof_bindings', workflow)
         self.assertIn('timeout-minutes: 20', workflow)
         self.assertEqual(workflow.count('- "bench/zk-bindings/**"'), 2)
         self.assertEqual(workflow.count('- "zk/sparql-evaluator/model/**"'), 2)
