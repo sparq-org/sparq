@@ -949,6 +949,8 @@ jobs:
         run: python3 scripts/ci_summary_gate.py --self-test
       - name: Self-test ci-summary gate loop (verdict semantics + adaptive saturation budget — sq-90cv4)
         run: python3 scripts/tests/test_ci_summary_gate.py
+      - name: Self-test native composition fail-closed input selection
+        run: python3 scripts/tests/test_ci_native_composition_paths.py
       # [FABLE-5] sq-fmx4u.3: the change-based test-selection stack is now
       # LOAD-BEARING (the select pre-job feeds every wide lane's skip guard and
       # the ci-summary gate's skipped-only-under-successful-selection rule), so

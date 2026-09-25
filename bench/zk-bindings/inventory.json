@@ -38,10 +38,12 @@
     {
       "id": "native_rdf",
       "contract": "nonempty public SELECT DISTINCT BGP with every BGP variable projected; canonical signed RDF preimages",
-      "adapter": "pending separate native adapter integration",
+      "adapter": "native-bindings executable; native_ci.py mandatory finite replay",
       "required_actual_suites": [
-        "native RDF genuine weaker same-context disclosures and wrong preimage/status proofs"
-      ]
+        "native RDF genuine weaker same-context disclosures and wrong preimage/status proofs",
+        "native_ci.py: 576 jobs: 72 required accepts, 468 weaker verified then required rejected, 36 empty admissions; 80 other cases classified"
+      ],
+      "execution_status": "CI wiring requires actual replay; historical 89a local campaign is separately source-bound, not evidence this later CI ran"
     },
     {
       "id": "native_tuple",

@@ -1,0 +1,5 @@
+{
+  "pr": 6504,
+  "date": "2026-09-13",
+  "reason": "[GPT-6] This change adds a default-off native-rdf feature and optional executable in the detached native-composition workspace, public support proof tests, workflow wiring, documentation and source-bound local evidence. Its existing tuple executable remains the default; there are no shared core/engine runtime edits or added root-workspace dependencies. This is an intent declaration, not an assertion of measured feature-OFF neutrality; the independent hosted WASM byte floor and runtime gates remain required. Existing native dependency gate failures remain explicit blockers."
+}

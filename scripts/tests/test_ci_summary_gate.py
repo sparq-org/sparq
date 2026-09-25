@@ -138,10 +138,10 @@ def run(cfg, polls, depth=0, tier_ctx=None):
     (default None) exercises the draft-tier integrity semantics."""
     out = io.StringIO()
     # [GPT-6] Existing tier tests exercise independent draft/selection rules.
-    # Supply their now-mandatory successful evaluator sibling explicitly here;
-    # TestExactEvaluatorPresence drives raw polls to test absence and bad states.
+    # Supply mandatory proof-workflow siblings explicitly here. Dedicated exact
+    # and native presence tests drive raw polls to test absence and bad states.
     if tier_ctx and tier_ctx.event_name in {"pull_request", "merge_group"}:
-        polls = [p if isinstance(p, Exception) else [*p, R(g.EXACT_EVALUATOR_CHECK)] for p in polls]
+        polls = [p if isinstance(p, Exception) else [*p, R(g.EXACT_EVALUATOR_CHECK), R(g.NATIVE_COMPOSITION_CHECK)] for p in polls]
     fetch = scripted(polls)
 
     def depth_fn():
@@ -156,8 +156,12 @@ def run(cfg, polls, depth=0, tier_ctx=None):
 class TestExactEvaluatorPresence(unittest.TestCase):
     """[GPT-6] A missing or skipped proof job must never authorize a merge."""
 
+    check_name = g.EXACT_EVALUATOR_CHECK
+    other_name = g.NATIVE_COMPOSITION_CHECK
+    label = "exact evaluator"
+
     def drive(self, polls, event="pull_request", **cfg_options):
-        fetch = scripted(polls)
+        fetch = scripted([[*p, R(self.other_name)] for p in polls])
         out = io.StringIO()
         with redirect_stdout(out):
             code = g.run_gate(
@@ -172,12 +176,12 @@ class TestExactEvaluatorPresence(unittest.TestCase):
                 with self.subTest(event=event, siblings=siblings):
                     code, out, calls = self.drive([siblings], event)
                     self.assertEqual(code, 1, out)
-                    self.assertIn("exact evaluator success is required", out)
+                    self.assertIn(self.label + " success is required", out)
                     self.assertEqual(calls, tiny_cfg().max_total_polls)
 
     def test_present_success_satisfies_both_merge_events(self):
         for event in ("pull_request", "merge_group"):
-            code, out, _ = self.drive([[GREEN, R(g.EXACT_EVALUATOR_CHECK)]], event)
+            code, out, _ = self.drive([[GREEN, R(self.check_name)]], event)
             self.assertEqual(code, 0, out)
 
     def test_non_success_and_incomplete_cannot_satisfy_requirement(self):
@@ -185,24 +189,27 @@ class TestExactEvaluatorPresence(unittest.TestCase):
             for status in ("completed", "in_progress"):
                 with self.subTest(conclusion=conclusion, status=status):
                     code, out, _ = self.drive([[GREEN, R(
-                        g.EXACT_EVALUATOR_CHECK, status=status, conclusion=conclusion)]])
+                        self.check_name, status=status, conclusion=conclusion)]])
                     self.assertEqual(code, 1, out)
 
     def test_late_success_restarts_normal_settle_window(self):
         code, out, calls = self.drive([
-            [GREEN], [GREEN], [GREEN, R(g.EXACT_EVALUATOR_CHECK)],
+            [GREEN], [GREEN], [GREEN, R(self.check_name)],
         ])
         self.assertEqual(code, 0, out)
         self.assertEqual(calls, 4)
 
     def test_other_success_or_similar_name_does_not_replace_job(self):
-        code, out, _ = self.drive([[GREEN, R(g.EXACT_EVALUATOR_CHECK + " (old)")]])
+        self.assertEqual(g.required_proof_status(
+            [R(self.other_name)], g.TierContext(run_tier="full", event_name="pull_request"),
+            self.check_name), "pending")
+        code, out, _ = self.drive([[GREEN, R(self.check_name + " (old)")]])
         self.assertEqual(code, 1, out)
 
     def test_old_success_does_not_mask_unresolved_or_failed_current_sighting(self):
         for status, conclusion in (("in_progress", None), ("completed", "failure")):
-            code, out, _ = self.drive([[R(g.EXACT_EVALUATOR_CHECK), R(
-                g.EXACT_EVALUATOR_CHECK, status=status, conclusion=conclusion)]])
+            code, out, _ = self.drive([[R(self.check_name), R(
+                self.check_name, status=status, conclusion=conclusion)]])
             self.assertEqual(code, 1, out)
 
     def test_missing_job_cannot_borrow_feature_reporter_only_grace(self):
@@ -213,6 +220,14 @@ class TestExactEvaluatorPresence(unittest.TestCase):
     def test_push_keeps_discovered_sibling_semantics(self):
         code, out, _ = self.drive([[GREEN]], "push")
         self.assertEqual(code, 0, out)
+
+
+class TestNativeCompositionPresence(TestExactEvaluatorPresence):
+    """[GPT-6] The independently scoped native workflow has the same hard gate."""
+
+    check_name = g.NATIVE_COMPOSITION_CHECK
+    other_name = g.EXACT_EVALUATOR_CHECK
+    label = "native composition"
 
 
 class TestVerdictSemantics(unittest.TestCase):
@@ -1851,8 +1866,8 @@ class TestRateLimitFailClosed(unittest.TestCase):
         self.assertIn("no further polling or recovery", out)
 
     def test_draft_finalization_and_full_hold_do_not_retry_known_limit(self):
-        cases = (("draft", [GREEN, R(g.EXACT_EVALUATOR_CHECK)], 2),
-                 ("full", [R(SELECT_DRAFT), R(g.EXACT_EVALUATOR_CHECK)], 4))
+        cases = (("draft", [GREEN, R(g.EXACT_EVALUATOR_CHECK), R(g.NATIVE_COMPOSITION_CHECK)], 2),
+                 ("full", [R(SELECT_DRAFT), R(g.EXACT_EVALUATOR_CHECK), R(g.NATIVE_COMPOSITION_CHECK)], 4))
         for tier, rows, expected_polls in cases:
             with self.subTest(tier=tier):
                 fetch = scripted([rows])
@@ -2447,6 +2462,7 @@ class TestNoLegRunExclusion(unittest.TestCase):
         checks = [
             _check("test shard", run_id=101, rid=1),
             _check(g.EXACT_EVALUATOR_CHECK, run_id=101, rid=9),
+            _check(g.NATIVE_COMPOSITION_CHECK, run_id=101, rid=10),
             _check(SELECT_FULL, run_id=101, rid=2),
             _check(SELECT_NO_LEG, run_id=102, rid=4,
                    started="2026-07-25T07:29:23Z"),
@@ -2454,6 +2470,7 @@ class TestNoLegRunExclusion(unittest.TestCase):
         resolver = self._resolver([checks], [[real, flip]])
         resolver.jobs[101] = [_job("test shard", run_id=101),
                               _job(g.EXACT_EVALUATOR_CHECK, run_id=101, jid=9),
+                              _job(g.NATIVE_COMPOSITION_CHECK, run_id=101, jid=10),
                               _job(SELECT_FULL, run_id=101, jid=2)]
         code, out = self._drive(
             resolver, tier_ctx=draft_ctx(counting(True), run_tier="full"))
@@ -3300,7 +3317,7 @@ class TestFeatureMatrixReporterPostCapGrace(unittest.TestCase):
         self.assertNotIn("PASSED", out)
 
     def test_cap_recovery_fresh_ordinary_work_or_full_hold_stops_immediately(self):
-        waiting = [_grp("222"), GREEN, R(g.EXACT_EVALUATOR_CHECK)]
+        waiting = [_grp("222"), GREEN, R(g.EXACT_EVALUATOR_CHECK), R(g.NATIVE_COMPOSITION_CHECK)]
         cases = (
             ("ordinary work", [*waiting, PENDING], None),
             ("full-tier hold", [*waiting, R(SELECT_DRAFT)],

@@ -187,15 +187,18 @@ directive, under sq-6vshe.6). This is a **decision, not a defect**.
 
 The lanes that DO trigger on `merge_group` today are: `ci-summary.yml` (the gate itself),
 `ci.yml`, `feature-matrix.yml`, `vectorized-feature-off.yml`, `docs-quality.yml`,
-`flow-on-gates.yml`, `routing-self-tests.yml`, `zk-exact-evaluator.yml` and `pr-area-label.yml` — plus
+`flow-on-gates.yml`, `routing-self-tests.yml`, `zk-exact-evaluator.yml`,
+`zk-native-composition.yml` and `pr-area-label.yml` — plus
 `codeql.yml`, whose trigger set lists `merge_group` but which is operationally disabled
 per the note above and so produces no check-run there.
 
 Why it stays sound:
 
-- The gate polls whatever sibling check-runs actually exist on the ref and requires only
-  the single `gate` context — a lane absent from `merge_group` is *never scheduled*, so
-  it is never "expected but missing" and the gate never hangs on it.
+- The single required `gate` polls sibling check-runs on the ref. The exact-evaluator
+  and native-composition jobs must be present and successful on PR/merge-group events;
+  missing, cancelled or skipped jobs fail closed. Each always-created job uses its
+  own fail-closed input selector, so unrelated changes skip heavy work inside a
+  successful job. Other lanes outside the merge-group subset are not expected there.
 - Every subset lane still runs and gates on the **PR head** (and the draft→ready-for-review
   re-run), so a real break is caught **before** admission for the code that changed.
 - The **safety net for a lane the queue skips is POST-MERGE detection**: each such lane

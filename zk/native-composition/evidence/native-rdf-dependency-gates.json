@@ -1,0 +1,511 @@
+{
+  "recorded_by": "GPT-6",
+  "recorded_at": "2026-09-13T02:13:56.419555+00:00",
+  "source_base": "713025dc0fcdcbdcd070ba4dcbde524be50ba055",
+  "source_status": "Dependency checks executed before source commit; the identical native lock and manifest were subsequently frozen at candidate_source_commit.",
+  "native_lock_sha256": "dd30a3397d0685cd22f2b963af07dc0cc6bfa9802222e96ec14303ae3f7aa7a9",
+  "policy_head": "2a67f00d60627100709304036d0a0a93c75a6d61",
+  "policy_files_sha256": {
+    "deny.toml": "67870084974e5fb0a05374df8d86af3defb2e83725c670741358d6fd33b6b4a1",
+    "supply-chain/config.toml": "9546f37103054391b2d717c11d5656923c18f173afdf9627d57a8e9c91a32b7e",
+    "supply-chain/imports.lock": "ebb5f99a4e981eede6073f05935b03765e73b268e3a8378a3c0fa89586f52764",
+    "supply-chain/audits.toml": "6ca257a1acb2313beb8706600bb82409cea84826c3390c9ade00800cb48275e6"
+  },
+  "added_packages": [
+    {
+      "name": "allocator-api2",
+      "version": "0.2.21",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "checksum": "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
+    },
+    {
+      "name": "base16ct",
+      "version": "0.2.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "checksum": "4c7f02d4ea65f2c1853089ffd8d2787bdbc63de2f0d29dedbcf8ccdfa0ccd4cf"
+    },
+    {
+      "name": "foldhash",
+      "version": "0.2.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "checksum": "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
+    },
+    {
+      "name": "getrandom",
+      "version": "0.3.4",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "checksum": "899def5c37c4fd7b2664648c28120ecec138e4d395b459e5ca34f9cce2dd77fd",
+      "dependencies": [
+        "cfg-if",
+        "libc",
+        "r-efi",
+        "wasip2"
+      ]
+    },
+    {
+      "name": "oxilangtag",
+      "version": "0.1.6",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "checksum": "5d3b4eb570abd4a1dcb062c31fd37b832264d9dc7292c3e69acfe926c87b063f",
+      "dependencies": [
+        "serde"
+      ]
+    },
+    {
+      "name": "oxiri",
+      "version": "0.2.11",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "checksum": "54b4ed3a7192fa19f5f48f99871f2755047fabefd7f222f12a1df1773796a102"
+    },
+    {
+      "name": "oxrdf",
+      "version": "0.2.4",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "checksum": "a04761319ef84de1f59782f189d072cbfc3a9a40c4e8bded8667202fbd35b02a",
+      "dependencies": [
+        "oxilangtag",
+        "oxiri",
+        "rand 0.8.8",
+        "thiserror 2.0.20"
+      ]
+    },
+    {
+      "name": "oxrdf",
+      "version": "0.3.3",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "checksum": "0afd5c28e4a399c57ee2bc3accd40c7b671fdc7b6537499f14e95b265af7d7e0",
+      "dependencies": [
+        "oxilangtag",
+        "oxiri",
+        "rand 0.8.8",
+        "thiserror 2.0.20"
+      ]
+    },
+    {
+      "name": "oxttl",
+      "version": "0.1.8",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "checksum": "0d385f1776d7cace455ef6b7c54407838eff902ca897303d06eb12a26f4cf8a0",
+      "dependencies": [
+        "memchr",
+        "oxilangtag",
+        "oxiri",
+        "oxrdf 0.2.4",
+        "thiserror 2.0.20"
+      ]
+    },
+    {
+      "name": "oxttl",
+      "version": "0.2.3",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "checksum": "f03fd471bd54c23d76631c0a2677aa4bb308d905f6e491ee35dcb0732b7c5c6c",
+      "dependencies": [
+        "memchr",
+        "oxilangtag",
+        "oxiri",
+        "oxrdf 0.3.3",
+        "thiserror 2.0.20"
+      ]
+    },
+    {
+      "name": "peg",
+      "version": "0.8.6",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "checksum": "0aad070be5b63aa72103f2fcdd70a83adbd5e90112ce5b574171ff1c65501773",
+      "dependencies": [
+        "peg-macros",
+        "peg-runtime"
+      ]
+    },
+    {
+      "name": "peg-macros",
+      "version": "0.8.6",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "checksum": "ddd8ef6825cae95355031ae26a99b616a2a21f22ba2de0197c43dfb05acbe7ee",
+      "dependencies": [
+        "peg-runtime",
+        "proc-macro2",
+        "quote"
+      ]
+    },
+    {
+      "name": "peg-runtime",
+      "version": "0.8.6",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "checksum": "7011d97b484a5ebdc4b1fdb3b12d5e4bbbea56e9d22b688f2e79e04b65a7d8a6"
+    },
+    {
+      "name": "r-efi",
+      "version": "5.3.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "checksum": "69cdb34c158ceb288df11e18b4bd39de994f6657d83847bdffdbd7f346754b0f"
+    },
+    {
+      "name": "rand",
+      "version": "0.9.5",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "checksum": "b9ef1d0d795eb7d84685bca4f72f3649f064e6641543d3a8c415898726a57b41",
+      "dependencies": [
+        "rand_chacha 0.9.0",
+        "rand_core 0.9.5"
+      ]
+    },
+    {
+      "name": "rand_chacha",
+      "version": "0.9.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "checksum": "d3022b5f1df60f26e1ffddd6c66e8aa15de382ae63b3a0c1bfc0e4d3e3f325cb",
+      "dependencies": [
+        "ppv-lite86",
+        "rand_core 0.9.5"
+      ]
+    },
+    {
+      "name": "rand_core",
+      "version": "0.9.5",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "checksum": "76afc826de14238e6e8c374ddcc1fa19e374fd8dd986b0d2af0d02377261d83c",
+      "dependencies": [
+        "getrandom 0.3.4"
+      ]
+    },
+    {
+      "name": "rdf-canon",
+      "version": "0.15.3",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "checksum": "6783be73f4fa73010f249412ad8f0bb1ac9cdb22b2310bf20a967d80d5906dd0",
+      "dependencies": [
+        "base16ct",
+        "digest",
+        "itertools 0.14.0",
+        "oxrdf 0.2.4",
+        "sha2",
+        "thiserror 2.0.20",
+        "tracing"
+      ]
+    },
+    {
+      "name": "rustc-hash",
+      "version": "2.1.3",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "checksum": "6b1e7f9a428571be2dc5bc0505c13fb6bf936822b894ec87abf8a08a4e51742d"
+    },
+    {
+      "name": "spargebra",
+      "version": "0.4.6",
+      "dependencies": [
+        "oxilangtag",
+        "oxiri",
+        "oxrdf 0.3.3",
+        "peg",
+        "rand 0.9.5",
+        "thiserror 2.0.20"
+      ]
+    },
+    {
+      "name": "sparq-canon",
+      "version": "0.1.1",
+      "dependencies": [
+        "digest",
+        "oxrdf 0.2.4",
+        "oxrdf 0.3.3",
+        "oxttl 0.1.8",
+        "oxttl 0.2.3",
+        "rdf-canon",
+        "sparq-core"
+      ]
+    },
+    {
+      "name": "sparq-core",
+      "version": "0.1.1",
+      "dependencies": [
+        "hashbrown 0.17.1",
+        "oxrdf 0.3.3",
+        "oxttl 0.2.3",
+        "rustc-hash 2.1.3"
+      ]
+    },
+    {
+      "name": "wasip2",
+      "version": "1.0.4+wasi-0.2.12",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "checksum": "b67efb37e106e55ce722a510d6b5f9c17f083e5fc79afc2badeb12cc313d9487",
+      "dependencies": [
+        "wit-bindgen"
+      ]
+    },
+    {
+      "name": "wit-bindgen",
+      "version": "0.57.1",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "checksum": "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
+    }
+  ],
+  "removed_versions": [],
+  "deny": {
+    "integrity_exit_code": 4,
+    "advisories_exit_code": 1,
+    "baseline_combined_exit_code": 5,
+    "actual_baseline_diagnostics_equal_candidate": true,
+    "errors": [
+      {
+        "code": "rejected",
+        "packages": [
+          {
+            "name": "cranelift-bforest",
+            "version": "0.110.2"
+          }
+        ],
+        "advisory": null,
+        "message": "failed to satisfy license requirements",
+        "license_labels": [
+          "Apache-2.0 WITH LLVM-exception"
+        ]
+      },
+      {
+        "code": "rejected",
+        "packages": [
+          {
+            "name": "cranelift-bitset",
+            "version": "0.110.3"
+          }
+        ],
+        "advisory": null,
+        "message": "failed to satisfy license requirements",
+        "license_labels": [
+          "Apache-2.0 WITH LLVM-exception"
+        ]
+      },
+      {
+        "code": "rejected",
+        "packages": [
+          {
+            "name": "cranelift-codegen",
+            "version": "0.110.2"
+          }
+        ],
+        "advisory": null,
+        "message": "failed to satisfy license requirements",
+        "license_labels": [
+          "Apache-2.0 WITH LLVM-exception"
+        ]
+      },
+      {
+        "code": "rejected",
+        "packages": [
+          {
+            "name": "cranelift-codegen-meta",
+            "version": "0.110.3"
+          }
+        ],
+        "advisory": null,
+        "message": "failed to satisfy license requirements",
+        "license_labels": [
+          "Apache-2.0 WITH LLVM-exception"
+        ]
+      },
+      {
+        "code": "rejected",
+        "packages": [
+          {
+            "name": "cranelift-codegen-shared",
+            "version": "0.110.3"
+          }
+        ],
+        "advisory": null,
+        "message": "failed to satisfy license requirements",
+        "license_labels": [
+          "Apache-2.0 WITH LLVM-exception"
+        ]
+      },
+      {
+        "code": "rejected",
+        "packages": [
+          {
+            "name": "cranelift-control",
+            "version": "0.110.3"
+          }
+        ],
+        "advisory": null,
+        "message": "failed to satisfy license requirements",
+        "license_labels": [
+          "Apache-2.0 WITH LLVM-exception"
+        ]
+      },
+      {
+        "code": "rejected",
+        "packages": [
+          {
+            "name": "cranelift-entity",
+            "version": "0.110.2"
+          }
+        ],
+        "advisory": null,
+        "message": "failed to satisfy license requirements",
+        "license_labels": [
+          "Apache-2.0 WITH LLVM-exception"
+        ]
+      },
+      {
+        "code": "rejected",
+        "packages": [
+          {
+            "name": "cranelift-frontend",
+            "version": "0.110.2"
+          }
+        ],
+        "advisory": null,
+        "message": "failed to satisfy license requirements",
+        "license_labels": [
+          "Apache-2.0 WITH LLVM-exception"
+        ]
+      },
+      {
+        "code": "rejected",
+        "packages": [
+          {
+            "name": "cranelift-isle",
+            "version": "0.110.2"
+          }
+        ],
+        "advisory": null,
+        "message": "failed to satisfy license requirements",
+        "license_labels": [
+          "Apache-2.0 WITH LLVM-exception"
+        ]
+      },
+      {
+        "code": "rejected",
+        "packages": [
+          {
+            "name": "enum-iterator",
+            "version": "0.7.0"
+          }
+        ],
+        "advisory": null,
+        "message": "failed to satisfy license requirements",
+        "license_labels": [
+          "0BSD"
+        ]
+      },
+      {
+        "code": "rejected",
+        "packages": [
+          {
+            "name": "enum-iterator-derive",
+            "version": "0.7.0"
+          }
+        ],
+        "advisory": null,
+        "message": "failed to satisfy license requirements",
+        "license_labels": [
+          "0BSD"
+        ]
+      },
+      {
+        "code": "rejected",
+        "packages": [
+          {
+            "name": "regalloc2",
+            "version": "0.9.3"
+          }
+        ],
+        "advisory": null,
+        "message": "failed to satisfy license requirements",
+        "license_labels": [
+          "Apache-2.0 WITH LLVM-exception"
+        ]
+      },
+      {
+        "code": "rejected",
+        "packages": [
+          {
+            "name": "target-lexicon",
+            "version": "0.12.16"
+          }
+        ],
+        "advisory": null,
+        "message": "failed to satisfy license requirements",
+        "license_labels": [
+          "Apache-2.0 WITH LLVM-exception"
+        ]
+      },
+      {
+        "code": "rejected",
+        "packages": [
+          {
+            "name": "xxhash-rust",
+            "version": "0.8.18"
+          }
+        ],
+        "advisory": null,
+        "message": "failed to satisfy license requirements",
+        "license_labels": [
+          "BSL-1.0"
+        ]
+      },
+      {
+        "code": "unmaintained",
+        "packages": [
+          {
+            "name": "derivative",
+            "version": "2.2.0"
+          }
+        ],
+        "advisory": "RUSTSEC-2024-0388",
+        "message": "`derivative` is unmaintained; consider using an alternative",
+        "license_labels": []
+      },
+      {
+        "code": "unmaintained",
+        "packages": [
+          {
+            "name": "proc-macro-error2",
+            "version": "2.0.1"
+          }
+        ],
+        "advisory": "RUSTSEC-2026-0173",
+        "message": "proc-macro-error2 is unmaintained",
+        "license_labels": []
+      },
+      {
+        "code": "vulnerability",
+        "packages": [
+          {
+            "name": "tracing-subscriber",
+            "version": "0.2.25"
+          }
+        ],
+        "advisory": "RUSTSEC-2025-0055",
+        "message": "Logging user input may result in poisoning logs with ANSI escape sequences",
+        "license_labels": []
+      }
+    ],
+    "refresh": "actual non-offline cargo-deny advisories invocation; read accepted database source separately before claiming exact database commit",
+    "refreshed_database_commit": "b50980aad8b8f14f77e25a97b32dd94bf008b0af",
+    "database_scope": "Actual refresh invocation completed with advisory findings; recorded local checkout HEAD after check, not a guarantee of later upstream freshness."
+  },
+  "vet": {
+    "tool": "cargo-vet0.10.2",
+    "default_all_features": true,
+    "baseline_and_candidate_exit_code": 255,
+    "missing_safe_to_deploy": 142,
+    "failure_sets_identical": true,
+    "new_uncovered_versions": [],
+    "scope": "Existing accepted policy may satisfy packages through exemptions; no new audit claim.",
+    "known_invalid_attempt": "Extra --cargo-arg=--all-features rejected duplicateflag; not used as coverage evidence."
+  },
+  "failed_setup_attempts": [
+    "initial offline deny required missing cross-platform cached crates; real locked fetch then completed",
+    "initial sandbox baseline advisory lock failed; explicitly authorized read/check rerun completed"
+  ],
+  "logs_sha256": {
+    "deny-integrity-complete.jsonl": "067332da5f73eb788e06f53674a7463c074f1a119a93dd6e1eaf2402ff0f2b01",
+    "deny-advisories-refreshed.jsonl": "f1a14aedbf09741d8b52b9594b91d066cafd1846ec14f3d248c74bd2b488d197",
+    "baseline-deny-complete.jsonl": "abd2476dbc417ed90f32f48ec3f6b859f3bb734d4f7725216a5d8d27378b6fe2",
+    "vet-current.json": "f557ecbe43b6303587eba5d11ec12eeaef7822d9928301606e263ef5a2310a87",
+    "vet-baseline.json": "f557ecbe43b6303587eba5d11ec12eeaef7822d9928301606e263ef5a2310a87"
+  },
+  "candidate_source_commit": "c44611f8867db66179897354e5bb9d1069816bc2",
+  "candidate_source_kind": "exact frozen source; no policy changes"
+}

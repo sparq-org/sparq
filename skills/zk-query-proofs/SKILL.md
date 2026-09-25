@@ -18,8 +18,35 @@ Zero-knowledge proofs that a SPARQL query result is correct over RDF held in nam
 
 For the isolated BBS+/BLS12-381 and Circom/LegoGroth16 composition experiment, see
 [`zk/native-composition/README.md`](../../zk/native-composition/README.md). Its dedicated
-CI runs real proof tests; it provides no Noir linkage, RDF adapter, or credential-status
-integration and remains unaudited. [GPT-6]
+CI runs real proof tests. The native-only [Ark tracing patch](../../zk/native-composition/vendor-support/README.md)
+has separate provenance and compatibility checks; it does not certify upstream
+constraint arithmetic. Its optional `native-rdf` feature adds a separately
+versioned [public RDF support API](references/native-rdf.md): `issue_rdf`,
+`prove_public_bgp`, and `verify_public_bgp` authenticate reconstructed public BGP
+triples against verifier-owned issuer/status policy. Public signed-slot indices
+and status references are disclosed. Support selection covers all accepted roles
+when a matching allocation exists. Signed epoch labels must match exactly;
+status bytes use the native least-significant-bit-first convention documented in
+the reference. It provides no hidden RDF predicate or Noir
+linkage and remains unaudited. The original tuple executable stays separate. [GPT-6]
+
+[GPT-6] `prepare_public_bgp` exposes the honest prover's support preparation
+without a proof or authentication verdict. The separate `native-binding` feature
+enables the [finite binding-job adapter](references/native-binding-tests.md),
+which reports native preparation, admission refusals and actual proof verification
+as distinct outcomes. Its `rdf::binding_tests` helper constructs genuine weaker
+statements for synthetic fixture controls; these must fail the required verifier.
+The mandatory malicious-proof library suite remains separate.
+The native CI lane also requires the complete shared finite binding replay;
+see the [native CI profile](../../bench/zk-bindings/README.md#native-finite-ci-replay)
+for its fixed domain, actual-verifier negative requirements and evidence limits.
+CI matches the retained Cargo package/target executable record to the supplied
+binary; manual calls without those records explicitly retain no build attestation.
+
+[GPT-6] The native [dependency policy record](../../research/native-dependency-policy/README.md)
+separates inherited trust records, exact-version licenses and candidate-owned
+metadata checks. Native audit-coverage and maintenance failures remain open;
+passing the proof tests does not satisfy these dependency gates.
 
 [GPT-6] For the opt-in synthetic selected-support measurement adapter, its strict
 experiment manifest, timing boundaries and unavailable stages, see
