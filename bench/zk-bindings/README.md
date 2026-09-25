@@ -81,3 +81,19 @@ while preserving query and original seed. It refuses to rewrite imported goldens
 Reports separate configured/executed counts and rejection stages. Graph result
 isomorphism still requires the original RDF comparator adapter; it is never
 substituted with per-row blank-node relabeling or a lossy literal normalizer.
+
+## Required CI profile
+
+The existing `zk-toolchain` job runs `ci.py` on its relevant paths and standing
+schedule, using its pinned tools. A dedicated bounded step executes all native
+cells and the complete finite Noir profile; exact counts and direct constraint
+rejection stages are checked. Only the input-driven helper is excluded from the
+generic `result::` sweep, and the dedicated step supplies all its jobs. Every
+preexisting result test remains selected. The step has an explicit timeout inside
+the existing job budget; timeout is failure, never successful negative evidence.
+
+The SHA-pinned upload step retains checkout/PR/merge identities, locked build
+commands, exact executable/tool hashes, plans, outcomes and synthetic artifacts,
+including partial failures. The [local finite evidence](evidence/finite-noir-ff58.json)
+pins its original source and controller; it does not establish hosted execution
+of a later CI commit. Broader inventory shards remain configured and unexecuted.

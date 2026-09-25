@@ -1,0 +1,146 @@
+{
+  "actual": {
+    "absent_bindings_constraint_rejected": 64,
+    "genuine_artifact_controls": 56,
+    "genuine_proofs": 8,
+    "honest_api_only_negatives": 0,
+    "independently_verified_proofs": 8,
+    "jobs_passed": 92,
+    "private_attacks_constraint_rejected": 20
+  },
+  "adapter_build": {
+    "DEVELOPER_DIR": "/Library/Developer/CommandLineTools",
+    "attestation": false,
+    "command": "cargo test --locked --offline -p sparq-zk-compose --features successful-results --lib --no-run",
+    "controller_only_successor": "ff58; all Rust/circuit bytes unchanged",
+    "package_clean_before_build": "sparq-zk-compose dev only;492files/20.2MiB",
+    "profile": "dev debug=0 incremental=0 jobs=1",
+    "rust_source_commit": "a48f21e4888987b1bdfb8c504a36c48f99184009",
+    "target": "/Users/jesght/Documents/ChatGPT/sparq/study-artifacts/zk-resume-2026-09-25/harness/target"
+  },
+  "adapters_sha256": "2e9e3bea4d42853caf73ea7f06e1815f96b0bcaf0508f64e9e281fd6672c9429",
+  "artifacts": [
+    {
+      "bytes": 42253,
+      "path": "000001-eb16f564e2ac/adapter/presentation.json",
+      "sha256": "3f27cc939c54a92a8393440fd6366993c3c2ba56383d7fa89dfe2da12af440eb"
+    },
+    {
+      "bytes": 42239,
+      "path": "000003-1f8f246b42a7/adapter/presentation.json",
+      "sha256": "8d4b568d6e7fb56e3de54498c6eb31b11c05faeee5d60e0f89ff556e4f5bc097"
+    },
+    {
+      "bytes": 42254,
+      "path": "000012-e4f136f70e02/adapter/presentation.json",
+      "sha256": "5c6717e9081eea97b187c47a6fb1a614d1f7f1581ebdaf6d0175e072d3215106"
+    },
+    {
+      "bytes": 42299,
+      "path": "000019-d98ced5fd1bd/adapter/presentation.json",
+      "sha256": "6c967a8a9c9b30c7de03c7e288c90cb5dc62956ee16ffa5a30d6b6223832deb5"
+    },
+    {
+      "bytes": 42179,
+      "path": "000047-234a2affba8c/adapter/presentation.json",
+      "sha256": "6230c4c42660fbd5851c93bbd36e9c85239da73384aa58e465049b49baf1e052"
+    },
+    {
+      "bytes": 42224,
+      "path": "000049-54ada081778d/adapter/presentation.json",
+      "sha256": "f0ccf2f4c6e70ad39639b2371cedd216fbf963e4e52de479e7b88b32b9fbf425"
+    },
+    {
+      "bytes": 42273,
+      "path": "000058-c80a5b4bc430/adapter/presentation.json",
+      "sha256": "9ae78fe1ae606e25b9893da3486213eb34ed1c6008d84760293ebf5d02fb6169"
+    },
+    {
+      "bytes": 42181,
+      "path": "000065-f1e15cdd0074/adapter/presentation.json",
+      "sha256": "a75d5c1773eb9de447d0745e290ffdbbd5197b68047246fff5163f02a0b8f2df"
+    }
+  ],
+  "controller_only_successor": true,
+  "denominators": {
+    "absent_bindings": 64,
+    "candidate_terms": 3,
+    "direct_private_witness_attacks": 20,
+    "graphs": 1,
+    "profiles": 2,
+    "query_templates": 2,
+    "total_jobs": 92,
+    "valid_bindings": 8
+  },
+  "executable_sha256": "213b64868f237aa622a8423c247967fd9dd3d7c7ea1a07d08ffb799c84b66461",
+  "hosted_execution_claim": false,
+  "known_followup": {
+    "finding": "The ff58 importer/controller did not preserve required capacity/admission categories and could accept an unrelated native parse error for an imported capacity case.",
+    "review_path": "study-artifacts/zk-resume-2026-09-25/reviews/bindings-ff58-gpt6/review-final.md",
+    "review_sha256": "fd06c135583c6839b8cc6f6ffdc1decc40a5b0b644f1c366fd06f543e0a2d31a",
+    "scope": "Imported regression rejection categories outside this finite Noir profile",
+    "status": "Required source correction pending; finite 92 retained outcomes independently verified and unaffected."
+  },
+  "limits": [
+    "Finite fixed two-edge cycle only; not all queries or all RDF inputs.",
+    "Noir unsigned/signed successful-result profiles only; legacy/native/RISC0 still require their separate adapter/suite gates.",
+    "Source review pending; no independent cryptographic security/privacy audit.",
+    "Compiled binary and source hashes recorded; no independent build attestation.",
+    "Initial a48 replay controller failed before any job; corrected backend-order guard has serialize/reload test."
+  ],
+  "markdown_gate": {
+    "errors": 0,
+    "files": 515,
+    "tool": "markdownlint-cli2@0.18.1"
+  },
+  "original_durable_report": "/Users/jesght/Documents/ChatGPT/sparq/study-artifacts/zk-resume-2026-09-25/proofs/finite-noir-ff58/report.json",
+  "plan_sha256": "e45ae827539b5a0fe5f46b35006d723f078f577d0aba86b48bb917029bcf7f7f",
+  "proof_scope": {
+    "candidate_terms": [
+      "<urn:a>",
+      "<urn:b>",
+      "<urn:missing>"
+    ],
+    "queries": [
+      "SELECT DISTINCT ?s ?o WHERE { ?s <urn:p> ?o }",
+      "SELECT DISTINCT ?s ?m ?o WHERE { ?s <urn:p> ?m . ?m <urn:p> ?o }"
+    ],
+    "triples": [
+      [
+        "<urn:a>",
+        "<urn:p>",
+        "<urn:b>"
+      ],
+      [
+        "<urn:b>",
+        "<urn:p>",
+        "<urn:a>"
+      ]
+    ]
+  },
+  "report_sha256": "1bf7056eb37efc86bdcc66a4690da9712cde2f22cc9e7bcbc0c0cf66542368f1",
+  "rust_source_head": "a48f21e4888987b1bdfb8c504a36c48f99184009",
+  "schema": "sparq.proof-bindings.portable-finite-evidence.v1",
+  "source_files": {
+    "Cargo.lock": "aba44059ab8397f96e4aef394d498ec976be6d435a3e44102ab2b87093402fcc",
+    "bench/zk-bindings/corpus.py": "2bb204e703c582b55f3be5a397ee404e70d05e6fd49496fc5ae322251cde9cc9",
+    "bench/zk-bindings/protocol.json": "cafd97a6eba389518590a5522737d21b5b2d078bf1e86d922451c0f88e30247b",
+    "bench/zk-bindings/run.py": "84924e0a38facdbb2e69b501b5397887d37f5fb758f59a55e566358999f13180",
+    "crates/sparq-zk-compose/src/result/proof_bindings.rs": "fe8cdcd1c92fbeb433c7a534f9accff29166c723cf7709e123f1b743fa3eb3b2"
+  },
+  "source_head": "ff58dbedd2761fc7a8c9f59dcbfd668cc59f8a7a",
+  "tools": {
+    "bb": {
+      "path": "/Users/jesght/.bb/bb",
+      "sha256": "6bf8ebe16175ba1e8ffb8ac83829d4b1ec1594a206c0a1470c05918e3eafdc01",
+      "version_stderr": "",
+      "version_stdout": "5.0.0-nightly.20260324\n"
+    },
+    "nargo": {
+      "path": "/Users/jesght/.nargo/bin/nargo",
+      "sha256": "8174924bda8d8ef3ed04d0d863495efdb12c5efefd2ba7827b17eabf1ee65866",
+      "version_stderr": "",
+      "version_stdout": "nargo version = 1.0.0-beta.21\nnoirc version = 1.0.0-beta.21+89a0f0faf3a5f1273c8ac4843b7877882437e277\n(git version hash: 89a0f0faf3a5f1273c8ac4843b7877882437e277, is dirty: false)\n"
+    }
+  }
+}
