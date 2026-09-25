@@ -3,9 +3,11 @@
 import argparse
 from collections import Counter
 import hashlib
+import json
 from pathlib import Path
 import subprocess
 import sys
+import tomllib
 
 from corpus import digest, encoded, exhaustive, load, plan
 import run as controller
@@ -140,10 +142,63 @@ def verify_campaign(output):
             "claim": "This declared finite native domain only; admission exclusions and actual verifier negatives are distinct. The artifact checker does not rerun cryptography."}
 
 
-def execute(binary, circom, output):
+def check_build_artifact(root, binary, events_path, metadata_path):
+    """Bind retained Cargo records to this package/target and supplied executable.
+
+    Cargo's compiler-artifact and metadata-v1 formats provide the package ID,
+    manifest, target and actual executable path. This is a build-record linkage,
+    not an independent reproduction or signed build attestation.
+    """
+    manifest = (root / "zk/native-composition/Cargo.toml").resolve(strict=True)
+    package = tomllib.loads(manifest.read_text())["package"]
+    require(events_path.stat().st_size <= 32 * 1024 * 1024
+            and metadata_path.stat().st_size <= 2 * 1024 * 1024, "Cargo record capacity exceeded")
+    metadata = load(metadata_path)
+    require(metadata.get("version") == 1, "unsupported Cargo metadata format")
+    packages = [p for p in metadata.get("packages", []) if p.get("name") == package["name"]
+                and p.get("version") == package["version"]
+                and Path(p.get("manifest_path", "")).resolve(strict=True) == manifest]
+    require(len(packages) == 1, "missing or ambiguous native Cargo package")
+    package_id = packages[0].get("id")
+    require(isinstance(package_id, str) and bool(package_id)
+            and package_id in metadata.get("workspace_members", [])
+            and Path(metadata.get("workspace_root", "")).resolve(strict=True) == manifest.parent,
+            "Cargo package is not the detached native workspace member")
+    source = (manifest.parent / "src/bin/native-bindings.rs").resolve(strict=True)
+    targets = [t for t in packages[0].get("targets", []) if t.get("name") == "native-bindings"
+               and t.get("kind") == ["bin"] and Path(t.get("src_path", "")).resolve(strict=True) == source]
+    require(len(targets) == 1, "missing or ambiguous native binding target")
+    events = [json.loads(line) for line in events_path.read_text().splitlines() if line.strip()]
+    finished = [e for e in events if e.get("reason") == "build-finished"]
+    require(len(finished) == 1 and finished[0].get("success") is True, "Cargo build did not finish successfully")
+    artifacts = [e for e in events if e.get("reason") == "compiler-artifact"
+                 and e.get("package_id") == package_id and e.get("target", {}).get("name") == "native-bindings"]
+    require(len(artifacts) == 1, "missing or ambiguous native compiler artifact")
+    artifact = artifacts[0]
+    require(Path(artifact.get("manifest_path", "")).resolve(strict=True) == manifest
+            and artifact.get("target", {}).get("kind") == ["bin"]
+            and Path(artifact["target"].get("src_path", "")).resolve(strict=True) == source
+            and artifact.get("profile", {}).get("test") is False
+            and "native-binding" in artifact.get("features", []),
+            "compiler artifact package, target or feature differs")
+    executable = artifact.get("executable")
+    require(isinstance(executable, str) and Path(executable).is_absolute()
+            and Path(executable).resolve(strict=True) == binary.resolve(strict=True),
+            "Cargo executable differs from supplied binary")
+    return {"cargo_events_sha256": controller.file_hash(events_path),
+            "cargo_metadata_sha256": controller.file_hash(metadata_path),
+            "package_id": package_id, "manifest_path": str(manifest), "target": artifact["target"],
+            "executable": str(binary.resolve(strict=True)), "executable_sha256": controller.file_hash(binary),
+            "cargo_profile": artifact["profile"], "cargo_fresh": artifact.get("fresh"),
+            "independent_or_signed_build_attestation": False}
+
+
+def execute(binary, circom, output, cargo_events=None, cargo_metadata=None):
     root = Path(__file__).resolve().parents[2]
     binary, circom = binary.resolve(strict=True), circom.resolve(strict=True)
     output.mkdir(parents=True, exist_ok=False)
+    require((cargo_events is None) == (cargo_metadata is None), "both Cargo records are required together")
+    build = None if cargo_events is None else check_build_artifact(root, binary, cargo_events, cargo_metadata)
     source = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
     version = subprocess.run([str(circom), "--version"], capture_output=True, check=True, timeout=30)
     require(version.stdout == b"circom compiler 2.2.2\n" and not version.stderr, "unpinned Circom compiler")
@@ -153,6 +208,7 @@ def execute(binary, circom, output):
                                       "version_stdout": version.stdout.decode(), "version_stderr": ""}}}
     provenance = {"schema": "sparq.native-bindings-ci-source.v1", "source_commit": source,
                   "observed_checkout_not_binary_build_attestation": True,
+                  "cargo_build_record": build,
                   "adapter": adapter, "rustc_verbose": subprocess.check_output(["rustc", "-vV"], text=True),
                   "source_hashes": {name: controller.file_hash(root / name) for name in (
                       "bench/zk-bindings/corpus.py", "bench/zk-bindings/run.py", "bench/zk-bindings/native_ci.py",
@@ -175,8 +231,10 @@ def main():
     parser.add_argument("--binary", type=Path, required=True)
     parser.add_argument("--circom", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--cargo-events", type=Path, help="CI compiler-artifact JSONL; requires metadata")
+    parser.add_argument("--cargo-metadata", type=Path, help="Cargo metadata-v1 JSON; requires events")
     args = parser.parse_args()
-    execute(args.binary, args.circom, args.output)
+    execute(args.binary, args.circom, args.output, args.cargo_events, args.cargo_metadata)
 
 
 if __name__ == "__main__":

@@ -161,5 +161,72 @@ class NativeCiTests(unittest.TestCase):
             native_ci.verify_campaign(self.output)
 
 
+class NativeBuildRecordTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        package = self.root / "zk/native-composition"
+        source = package / "src/bin/native-bindings.rs"
+        source.parent.mkdir(parents=True)
+        source.write_text("// Mock compiler input; no Rust compilation in this test.\n")
+        manifest = package / "Cargo.toml"
+        manifest.write_text('[package]\nname="sparq-native-composition-spike"\nversion="0.0.0"\n')
+        self.binary = self.root / "native-bindings"
+        self.binary.write_bytes(b"MOCK-EXECUTABLE-NEVER-RUN")
+        self.other = self.root / "wrong-target"
+        self.other.write_bytes(b"OTHER-MOCK-EXECUTABLE-NEVER-RUN")
+        package_id = "path+file://" + str(package) + "#sparq-native-composition-spike@0.0.0"
+        target = {"name": "native-bindings", "kind": ["bin"], "src_path": str(source)}
+        self.metadata = {"version": 1, "workspace_root": str(package), "workspace_members": [package_id],
+                         "packages": [{"id": package_id, "name": "sparq-native-composition-spike",
+                                       "version": "0.0.0", "manifest_path": str(manifest), "targets": [target]}]}
+        self.artifact = {"reason": "compiler-artifact", "package_id": package_id,
+                         "manifest_path": str(manifest), "target": copy.deepcopy(target),
+                         "profile": {"test": False, "opt_level": "3"}, "features": ["native-binding"],
+                         "executable": str(self.binary), "fresh": False}
+
+    def check(self, events=None, metadata=None):
+        event_path, metadata_path = self.root / "cargo.jsonl", self.root / "metadata.json"
+        event_path.write_bytes(b"".join(encoded(e) for e in (
+            events if events is not None else [self.artifact, {"reason": "build-finished", "success": True}])))
+        metadata_path.write_bytes(encoded(self.metadata if metadata is None else metadata))
+        return native_ci.check_build_artifact(self.root, self.binary, event_path, metadata_path)
+
+    def test_exact_package_target_and_supplied_binary_match(self):
+        for fresh in (False, True):
+            self.artifact["fresh"] = fresh
+            result = self.check()
+            self.assertEqual(result["executable_sha256"], hashlib.sha256(self.binary.read_bytes()).hexdigest())
+            self.assertEqual(result["cargo_fresh"], fresh)
+            self.assertIs(result["independent_or_signed_build_attestation"], False)
+
+    def test_missing_ambiguous_failed_wrong_package_target_or_binary_rejected(self):
+        done = {"reason": "build-finished", "success": True}
+        cases = [[], [done], [self.artifact], [self.artifact, done, done],
+                 [self.artifact, self.artifact, done], [self.artifact, {"reason": "build-finished", "success": False}]]
+        for field, value in [("package_id", "another-package"), ("manifest_path", str(self.other)),
+                             ("target", self.artifact["target"] | {"name": "native-rdf"}),
+                             ("target", self.artifact["target"] | {"kind": ["lib"]}),
+                             ("target", self.artifact["target"] | {"src_path": str(self.other)}),
+                             ("profile", {"test": True}), ("features", []),
+                             ("executable", str(self.other)), ("executable", None)]:
+            cases.append([self.artifact | {field: value}, done])
+        for events in cases:
+            with self.subTest(events=events), self.assertRaises(ValueError):
+                self.check(events=events)
+
+    def test_metadata_must_identify_the_current_detached_package(self):
+        cases = [self.metadata | {"version": 2}, self.metadata | {"workspace_members": []},
+                 self.metadata | {"workspace_root": str(self.root)}, self.metadata | {"packages": []},
+                 self.metadata | {"packages": self.metadata["packages"] * 2}]
+        for field, value in [("name", "another-package"), ("version", "9.9.9"),
+                             ("manifest_path", str(self.other)), ("targets", [])]:
+            cases.append(self.metadata | {"packages": [self.metadata["packages"][0] | {field: value}]})
+        for metadata in cases:
+            with self.subTest(metadata=metadata), self.assertRaises(ValueError):
+                self.check(metadata=metadata)
+
+
 if __name__ == "__main__":
     unittest.main()

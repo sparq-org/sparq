@@ -142,7 +142,14 @@ fixtures test only these reporting guards and are never counted as proofs.
 CI retains partial failures, Cargo build events, executable and tool hashes,
 source hashes, plans and proof/public artifacts. Observed checkout/tool versions
 are explicitly separate from a binary build attestation; CI build events provide
-the build attribution. The workflow has a bounded timeout, whose exhaustion is
+the build attribution. CI supplies `--cargo-events` and `--cargo-metadata`;
+the helper requires one compiler artifact for the exact native package and
+binary target and matches its resolved executable path to the supplied binary.
+Missing, ambiguous or mismatched records fail. Manual callers may omit both
+records, leaving the build-record field explicitly null. This linkage is not
+an independent reproduction or signed build attestation. The record formats
+follow the [Cargo JSON interface](https://doc.rust-lang.org/cargo/reference/external-tools.html#artifact-messages).
+The workflow has a bounded timeout, whose exhaustion is
 a failure. Wiring the replay does not establish a completed hosted campaign;
 the retained historical native evidence remains bound to its original source.
 

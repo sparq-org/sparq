@@ -129,9 +129,12 @@ jobs:
           # The Cargo event stream and executable hash retain build attribution.
           # No ignored-test, smaller-domain or tool-presence fallback is allowed.
           cargo build --release --locked --manifest-path zk/native-composition/Cargo.toml --features native-binding --bin native-bindings --message-format=json > "$RUNNER_TEMP/native-bindings-build/cargo.jsonl"
+          cargo metadata --offline --locked --no-deps --format-version 1 --manifest-path zk/native-composition/Cargo.toml > "$RUNNER_TEMP/native-bindings-build/metadata.json"
           python3 bench/zk-bindings/native_ci.py \
             --binary "$GITHUB_WORKSPACE/zk/native-composition/target/release/native-bindings" \
             --circom "$GITHUB_WORKSPACE/.ci-tools/circom/target/release/circom" \
+            --cargo-events "$RUNNER_TEMP/native-bindings-build/cargo.jsonl" \
+            --cargo-metadata "$RUNNER_TEMP/native-bindings-build/metadata.json" \
             --output "$RUNNER_TEMP/native-bindings-ci"
 
       - name: Preserve native finite-campaign evidence including failures

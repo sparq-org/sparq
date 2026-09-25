@@ -29,6 +29,8 @@ class NativeSelectionTests(unittest.TestCase):
         for step in tail.split("      - name:"):
             self.assertRegex(step, r"if: (?:always\(\) && )?steps.changes.outputs.required == 'true'")
         self.assertIn("python3 bench/zk-bindings/native_ci.py", workflow)
+        self.assertIn('--cargo-events "$RUNNER_TEMP/native-bindings-build/cargo.jsonl"', workflow)
+        self.assertIn('--cargo-metadata "$RUNNER_TEMP/native-bindings-build/metadata.json"', workflow)
         self.assertIn("python3 scripts/tests/test_ci_native_composition_paths.py",
                       (ROOT / ".github/workflows/docs-quality.yml").read_text())
 
