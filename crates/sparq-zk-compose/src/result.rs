@@ -54,6 +54,10 @@ const POLICY_DEPTH: u32 = 4;
 /// Separately versioned signed-integer successful-result preparation and verification.
 pub mod signed;
 
+// [GPT-6] Adversarial corpus access stays test-only; private witnesses are not a public API.
+#[cfg(test)]
+mod proof_bindings;
+
 // [GPT-6] Only the typed entry point selects the numeric contract. A signed
 // capacity is never added to the legacy presentation's deserialization enum.
 #[derive(Clone, Copy)]

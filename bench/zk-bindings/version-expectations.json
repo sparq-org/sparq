@@ -1,0 +1,82 @@
+{
+  "schema": "sparq.proof-bindings.version-expectations.v1",
+  "authored_by": "GPT-6",
+  "scope": "Independent V2 positive goldens for these exact unchanged inputs only; original V1 fixtures remain authoritative and unchanged. No V3 expectation inferred.",
+  "entries": [
+    {
+      "id": "reject-named-graph",
+      "original_fixture_sha256": "57812d9fe84c01f68a76631daaeadfb7534ec8a57bd5498d17c5730dd9418fb6",
+      "dataset_sha256": "e662d9da005922f7d37e6118967f6e86b40230f0a8c9b9d455c9b3fc4cfef1fe",
+      "backend_expectations": {
+        "exact_v2": {
+          "expected": {
+            "Select": {
+              "variables": [
+                "s"
+              ],
+              "order": "Bag",
+              "rows": []
+            }
+          },
+          "oracle": {
+            "kind": "REC_derived_fixed_snapshot_profile",
+            "authored_by": "GPT-6",
+            "reason": "The retained source contains only a default graph and an empty named-graph catalog. GRAPH ex:g has no matching active named graph, hence no solution mappings.",
+            "specification": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#queryDataset",
+            "profile_contract": "zk/sparql-evaluator/model/src/v2/evaluate.rs: evaluate documents local-snapshot-only dataset clauses"
+          }
+        }
+      }
+    },
+    {
+      "id": "reject-from-default",
+      "original_fixture_sha256": "f458faf81bd717eeb6fca7bc0e46f5fd1f3856a643097645ba9e1862308ef17e",
+      "dataset_sha256": "e662d9da005922f7d37e6118967f6e86b40230f0a8c9b9d455c9b3fc4cfef1fe",
+      "backend_expectations": {
+        "exact_v2": {
+          "expected": {
+            "Select": {
+              "variables": [
+                "s"
+              ],
+              "order": "Bag",
+              "rows": []
+            }
+          },
+          "oracle": {
+            "kind": "REC_derived_fixed_snapshot_profile",
+            "authored_by": "GPT-6",
+            "reason": "The V2 fixed-snapshot contract resolves FROM only against its committed local named-graph catalog. ex:g is absent, so the selected default graph is empty; the nonempty source default graph is not substituted and no network retrieval occurs.",
+            "specification": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#queryDataset",
+            "profile_contract": "zk/sparql-evaluator/model/src/v2/evaluate.rs: evaluate documents local-snapshot-only dataset clauses"
+          }
+        }
+      }
+    },
+    {
+      "id": "reject-from-named",
+      "original_fixture_sha256": "5352e0e34f5bf4046e205d1646a7b9bfe5752a32312434abfd05a2c8672d7db4",
+      "dataset_sha256": "e662d9da005922f7d37e6118967f6e86b40230f0a8c9b9d455c9b3fc4cfef1fe",
+      "backend_expectations": {
+        "exact_v2": {
+          "expected": {
+            "Select": {
+              "variables": [
+                "s"
+              ],
+              "order": "Bag",
+              "rows": []
+            }
+          },
+          "oracle": {
+            "kind": "REC_derived_fixed_snapshot_profile",
+            "authored_by": "GPT-6",
+            "reason": "FROM NAMED selects ex:g from the fixed local snapshot; it contributes no triples when absent. GRAPH ?g over that view cannot produce a mapping for the retained nonempty triple pattern. An empty result does not certify catalog membership.",
+            "specification": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#queryDataset",
+            "profile_contract": "zk/sparql-evaluator/model/src/v2/evaluate.rs: evaluate documents local-snapshot-only dataset clauses"
+          }
+        }
+      }
+    }
+  ]
+}

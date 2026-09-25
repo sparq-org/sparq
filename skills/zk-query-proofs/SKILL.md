@@ -28,6 +28,8 @@ measurements are explicitly enabled by `with_stage_metrics()` and drained by
 `take_stage_metrics()`; they remain local diagnostics outside presentations. Local
 measurements are NONcanonical and do not establish external security assurance.
 
+[GPT-6] Use the [binding corpus and replay harness](../../bench/zk-bindings/README.md) to retain original goldens and separate native, actual constraint, and genuine proof coverage. Imported negative cases require their declared rejection category and phase; an ambiguous evaluation/budget error cannot certify capacity rejection. Explicit version-specific positive goldens preserve the original V1 rejections and unchanged inputs.
+
 ## Prerequisites
 
 - **Noir toolchain on `PATH`** (the only way to prove/verify): `nargo` **1.0.0-beta.21** and Barretenberg `bb` **5.0.0-nightly.20260324** (bb target `noir-recursive`). Other versions may change the bb public-input byte layout the verifier reconstructs against. If `nargo`/`bb` are absent, the structural pre-filter and all host-side helpers still work, but `verify_manifest` / `CircuitProver` cannot.

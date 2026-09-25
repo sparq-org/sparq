@@ -1,0 +1,171 @@
+{
+  "schema": "sparq.proof-bindings.inventory.v1",
+  "coverage_is_configured_not_executed": true,
+  "backends": [
+    {
+      "id": "noir_legacy",
+      "contract": "existing scan/filter/join and fragment profiles; each existing member retains its own admitted relation",
+      "adapter": "existing_suite_required",
+      "sources": [
+        "crates/sparq-zk-compose/tests/differential_fuzz.rs",
+        "crates/sparq-zk-compose/tests/join_forge.rs"
+      ],
+      "required_actual_suites": [
+        "differential_fuzz_full_prove",
+        "join_forge"
+      ],
+      "counts_from": "actual suite outcomes, never a tool-availability early return"
+    },
+    {
+      "id": "noir_unsigned",
+      "contract": "nonempty DISTINCT selected support; canonical u64 private predicates, explicit capacity/depth members",
+      "adapter": "result::proof_bindings::run_job",
+      "required_actual_suites": [
+        "result_real_capacity_and_predicate_member_matrix",
+        "result_relation_rejects_tampered_private_witnesses"
+      ],
+      "omission": "a newly proved supported subset is allowed; altering rows under an existing proof must reject"
+    },
+    {
+      "id": "noir_signed",
+      "contract": "separate signed contract and private biased-i64 interpretation",
+      "adapter": "result::proof_bindings::run_job",
+      "required_actual_suites": [
+        "signed_relation_executes_capacity_matrix_and_rejects_bias_tampering",
+        "signed_real_proofs_bind_version_policy_and_signed_order"
+      ]
+    },
+    {
+      "id": "native_rdf",
+      "contract": "nonempty public SELECT DISTINCT BGP with every BGP variable projected; canonical signed RDF preimages",
+      "adapter": "pending separate native adapter integration",
+      "required_actual_suites": [
+        "native RDF genuine weaker same-context disclosures and wrong preimage/status proofs"
+      ]
+    },
+    {
+      "id": "native_tuple",
+      "contract": "two signed schema/subject/amount tuples, hidden common subject, unsigned32 income - 12*rent >= threshold",
+      "adapter": "existing tuple suite required; not the RDF query adapter",
+      "required_actual_suites": [
+        "real_composition_accepts_valid_and_rejects_tampered_presentations"
+      ]
+    },
+    {
+      "id": "exact_v1",
+      "contract": "whole SELECT bag/sequence or ASK over committed bounded default graph",
+      "adapter": "native model example; real accepted-artifact adapter pending",
+      "required_actual_suites": [
+        "host/tests/real_proof.rs",
+        "host/tests/actual_*.rs"
+      ]
+    },
+    {
+      "id": "exact_v2",
+      "contract": "V1 read forms plus versioned complete named graph catalog; both authorities",
+      "adapter": "native model example; real accepted-artifact adapter pending",
+      "required_actual_suites": [
+        "host/tests/real_proof.rs",
+        "host/tests/real_datasets.rs",
+        "host/tests/actual_*.rs"
+      ]
+    },
+    {
+      "id": "exact_v3",
+      "contract": "separate graph-result/bnode profile with global result isomorphism and resource budget",
+      "adapter": "pending isolated V3 integration; never inferred from V2",
+      "required_actual_suites": [
+        "versioned original V3 eight-receipt suite and actual corpus definitions"
+      ]
+    }
+  ],
+  "execution_axes": [
+    {
+      "axis": "algebra/optimizer",
+      "values": [
+        "default",
+        "algebra-rewrite",
+        "value-join",
+        "id-filter-fastpath",
+        "vectorized"
+      ],
+      "lane": "fast original engine differential/replay plus variant-to-prepared-witness parity",
+      "proof_reuse": "only if canonical signed input and actual prepared public/private relation match"
+    },
+    {
+      "axis": "storage",
+      "values": [
+        "dense",
+        "compressed",
+        "mmap-reopen",
+        "fork/append"
+      ],
+      "lane": "fast retained native differential corpus",
+      "proof_reuse": "guest data serialized independently; cache-specific result parity remains explicit"
+    },
+    {
+      "axis": "parallel",
+      "values": [
+        "serial",
+        "parallel above actual threshold"
+      ],
+      "lane": "native semantics/domain-guard parity; no inferred proof from native pass"
+    },
+    {
+      "axis": "authority",
+      "values": [
+        "holder_declared",
+        "verifier_agreed"
+      ],
+      "lane": "each exact version, separately bound request/policy/commitment"
+    },
+    {
+      "axis": "proof artifact",
+      "values": [
+        "independently accepted old artifact",
+        "corrected artifact"
+      ],
+      "lane": "each actual image identity; old admitted counterexamples stay failures, not retrospective exclusions"
+    }
+  ],
+  "scheduled_profiles": [
+    {
+      "id": "fast-tiny-complete",
+      "command": "run.py plan --exhaustive-tiny --tier native",
+      "domain": {
+        "graphs": 16,
+        "query_templates": 7,
+        "selected_candidates_per_profile": 576,
+        "exact_result_requests_per_version": 224
+      },
+      "shards": 8,
+      "claim": "configured; executed counts come only from reports"
+    },
+    {
+      "id": "noir-cycle-all-valid",
+      "command": "run.py plan --finite-noir --tier real --backends noir_unsigned noir_signed",
+      "domain": {
+        "graphs": 1,
+        "query_templates": 2,
+        "candidate_terms": 3,
+        "valid_bindings_per_backend": 4,
+        "absent_bindings_per_backend": 32,
+        "private_witness_attacks_per_backend": 10
+      },
+      "shards": 1,
+      "claim": "every valid binding in this stated finite universe, not every SPARQL input"
+    },
+    {
+      "id": "original-suite-replay",
+      "command": "proof_corpus MANIFEST SUITE_ROOT OUTPUT; run.py plan --corpus OUTPUT ...",
+      "domain": "exact original imported fixture IDs plus source hashes",
+      "shards": "explicit complete partition; unresolved admission/adapter gaps retained"
+    }
+  ],
+  "negative_tiers": [
+    "honest API admission/support refusal",
+    "actual unsatisfied witness after positive constraint control",
+    "genuine candidate artifact rejected by independently reconstructed verifier"
+  ],
+  "completion_rule": "Each backend reports its own executed/configured denominators. Missing adapters, required suites or unresolved original cases prevent full programme completion. No native or constraint-only result counts as a cryptographic proof."
+}
