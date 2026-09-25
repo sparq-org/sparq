@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import tomllib
 
@@ -54,6 +55,21 @@ def check_metadata(metadata):
     )
 
 
+def native_metadata():
+    """Resolve the already fetched locked graph; preserve Cargo failure details."""
+    result = subprocess.run(
+        ["cargo", "metadata", "--offline", "--locked", "--all-features", "--format-version", "1", "--manifest-path", str(NATIVE / "Cargo.toml")],
+        capture_output=True, text=True, timeout=120,
+    )
+    if result.returncode:
+        # Metadata stdout is machine data. Only Cargo's diagnostic stream belongs
+        # in a failed check; there is no retry with different resolution flags.
+        if result.stderr:
+            print(result.stderr, file=sys.stderr, end="" if result.stderr.endswith("\n") else "\n")
+        result.check_returncode()
+    return json.loads(result.stdout)
+
+
 def verify():
     provenance = json.loads((SUPPORT / "UPSTREAM.json").read_text())
     require(provenance["package_path"] == "vendor/ark-relations-0.4.0", "package path")
@@ -86,11 +102,7 @@ def verify():
     lock = tomllib.loads((NATIVE / "Cargo.lock").read_text())
     ark = [p for p in lock["package"] if p["name"] == "ark-relations"]
     require(len(ark) == 1 and ark[0]["version"] == "0.4.0" and "source" not in ark[0], "local Ark lock selection")
-    metadata = subprocess.run(
-        ["cargo", "metadata", "--offline", "--locked", "--all-features", "--format-version", "1", "--manifest-path", str(NATIVE / "Cargo.toml")],
-        capture_output=True, text=True, check=True, timeout=120,
-    )
-    check_metadata(json.loads(metadata.stdout))
+    check_metadata(native_metadata())
     return provenance
 
 

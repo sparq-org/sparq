@@ -86,6 +86,9 @@ jobs:
 
       - name: Verify native dependency patch provenance and API compatibility
         run: |
+          # Default tuple tests do not fetch the optional RDF graph. Populate the
+          # locked detached graph explicitly before the fail-closed offline check.
+          cargo fetch --locked --manifest-path zk/native-composition/Cargo.toml
           python3 zk/native-composition/vendor-support/test_verify.py
           python3 zk/native-composition/vendor-support/verify.py --smoke
 

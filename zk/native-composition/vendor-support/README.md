@@ -17,12 +17,17 @@ The zero-context patch uses one stripped `a/` or `b/` path component; it is
 reversed and reapplied in a private copy to verify complete reconstruction.
 
 ```sh
+cargo fetch --locked --manifest-path zk/native-composition/Cargo.toml
 python3 zk/native-composition/vendor-support/verify.py
 python3 zk/native-composition/vendor-support/test_verify.py
 python3 zk/native-composition/vendor-support/verify.py --smoke --offline
 ```
 
-The first command checks both declared and actually resolved native vendor paths,
+The explicit fetch populates the locked native graph, including optional RDF
+dependencies that default tuple tests do not build. The verifier always resolves
+that graph with `--offline --locked --all-features`; failed resolution retains
+Cargo's stderr and fails without a network fallback or skipped provenance check.
+The verifier checks both declared and actually resolved native vendor paths,
 lock selection, unchanged default features and the maintained subscriber version.
 The smoke command uses an isolated test-only graph, starting from the native lock:
 it compiles the no-default Ark API and executes real Registry span capture and
