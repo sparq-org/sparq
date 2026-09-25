@@ -43,6 +43,10 @@ audit-as-crates-io = true
 [policy.spargebra]
 audit-as-crates-io = true
 
+# [GPT-6] Registry coverage and independent local patch review are both required.
+[policy.wasmer-derive]
+audit-as-crates-io = true
+
 [[exemptions.aead]]
 version = "0.5.2"
 criteria = "safe-to-deploy"

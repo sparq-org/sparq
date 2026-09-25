@@ -48,3 +48,5 @@ unsafe_code = "forbid"
 # [GPT-6] Native-only instrumentation compatibility patch; SDK remains separate.
 [patch.crates-io]
 ark-relations = { path = "vendor/ark-relations-0.4.0" }
+# [GPT-6] Preserve derive layout; replace only the diagnostic adapter dependency.
+wasmer-derive = { path = "vendor/wasmer-derive-6.1.0" }
