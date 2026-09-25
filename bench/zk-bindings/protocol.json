@@ -30,7 +30,8 @@
     "authority",
     "attack",
     "policy_overrides",
-    "expected_rejection"
+    "expected_rejection",
+    "expectation_oracle"
   ],
   "tiers": [
     "native",
@@ -80,5 +81,6 @@
   "unsupported": "Only a documented profile exclusion with a stable reason is unsupported. Missing adapters, parse bugs and infrastructure failures fail the run. Configured and executed coverage denominators remain separate.",
   "toolchain_identity": "Non-native Noir adapter configuration must pin exact nargo and bb executable SHA-256 and complete stdout/stderr version outputs; retained in adapters.json.",
   "expected_rejection": "Imported negative contract: category(capacity|profile|parse), optional phase(admission|dataset|evaluation) and exact diagnostic. Preserve original declared stage/error; unknown original categories require classification. The adapter must not read this expectation to classify its own error.",
-  "rejection": "Observed exact-model classification {category,phase,diagnostic}. Unknown/combined model errors are observed:error, never a successful capacity negative. No substring-based inference."
+  "rejection": "Observed exact-model classification {category,phase,diagnostic}. Unknown/combined model errors are observed:error, never a successful capacity negative. No substring-based inference.",
+  "expectation_oracle": "Optional version-specific independently derived oracle. The case retains the unchanged original fixture/query/dataset and original version golden; a newer profile positive is selected only by an explicit backend_expectations record pinned to the exact original fixture and dataset hashes. No implicit promotion to other versions."
 }

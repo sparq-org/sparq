@@ -126,9 +126,15 @@ def import_regressions(path, variables=None):
     document = load(path)
     dataset_path = path.parent / document["default_dataset"] if "default_dataset" in document else None
     dataset = dataset_path.read_text() if dataset_path else ""
+    versioned = {entry["id"]: entry for entry in
+                 load(Path(__file__).with_name("version-expectations.json"))["entries"]}
     output = []
     for original in document["cases"]:
         source_data = original.get("dataset_ntriples", original.get("dataset", dataset))
+        version_entry = versioned.get(original["id"])
+        if version_entry and (version_entry["original_fixture_sha256"] != digest(original)
+                              or version_entry["dataset_sha256"] != hashlib.sha256(source_data.encode()).hexdigest()):
+            raise ValueError(f"version-specific golden input changed: {original['id']}")
         expected = original.get("expected", {})
         result = expected.get("result", original.get("expected_result"))
         capacity = (original.get("expected_capacity_error", False)
@@ -160,6 +166,7 @@ def import_regressions(path, variables=None):
         output.append({"id": original["id"], "query": original["query"], "triples": [],
                        "dataset": {"ntriples": source_data, "nquads": source_data, "named_graphs": []},
                        "expected": None if rejection else result, "rejection": rejection,
+                       **({"backend_expectations":version_entry["backend_expectations"]} if version_entry else {}),
                        **({"expected_rejection":required} if required else {}),
                        **({"classification":{"status":"requires_rejection_classification", "reason":unclassified}} if unclassified else {}),
                        "policy_overrides": {"max_rows":original["max_rows"]} if "max_rows" in original else {},
@@ -180,11 +187,16 @@ def jobs_for(case, backend, tier):
     if case.get("classification"):
         return [], {"case_id":case["id"], "backend":backend, **case["classification"]}
     case_hash = digest(case)
+    # [GPT-6] Profile promotion changes only the version's expected outcome.
+    # Original query, dataset, fixture and V1 rejection stay bound in case_hash.
+    versioned = case.get("backend_expectations", {}).get(backend)
+    rejected = case.get("rejection", False) if versioned is None else False
+    expected_result = case["expected"] if versioned is None else versioned["expected"]
     base = {"schema": "sparq.proof-binding-job.v1", "case_id": case["id"],
             "case_sha256": case_hash, "backend": backend, "tier": tier,
             "query": case["query"], "triples": case["triples"], "dataset": case["dataset"],
             "policy_overrides":case.get("policy_overrides", {}),
-            "variables": [], "rows": [], "expected_accept": not case.get("rejection", False)}
+            "variables": [], "rows": [], "expected_accept": not rejected}
     candidates = []
     if case["template"] == "noir_witness_attack":
         if backend not in ("noir_unsigned", "noir_signed") or tier == "native":
@@ -196,9 +208,10 @@ def jobs_for(case, backend, tier):
                                   "attack":{"kind":case["attack"]}})
     elif backend.startswith("exact_"):
         for authority in ("verifier_agreed", "holder_declared"):
-            candidates.append(base | {"operation": "admission" if case.get("rejection") else "result",
-                                      "expected_result": case["expected"], "authority": authority,
-                                      **({"expected_rejection":case["expected_rejection"]} if case.get("expected_rejection") else {})})
+            candidates.append(base | {"operation": "admission" if rejected else "result",
+                                      "expected_result": expected_result, "authority": authority,
+                                      **({"expectation_oracle":versioned["oracle"]} if versioned else {}),
+                                      **({"expected_rejection":case["expected_rejection"]} if rejected and case.get("expected_rejection") else {})})
     elif case["template"] in ("scan", "join"):
         expected = case["expected"]["Select"]
         rows = {tuple(row) for row in expected["rows"]}

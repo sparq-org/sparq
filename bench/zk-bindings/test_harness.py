@@ -97,6 +97,55 @@ class CorpusTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "projection"):
             import_regressions(source)
 
+    def test_versioned_dataset_positives_retain_original_v1_rejections(self):
+        source = Path(__file__).resolve().parents[2] / "zk/sparql-evaluator/fixtures/conformance/cases.json"
+        originals = {c["id"]:c for c in json.loads(source.read_text())["cases"]}
+        names = {"reject-from-default", "reject-from-named", "reject-named-graph"}
+        cases = [c for c in import_regressions(source) if c["id"] in names]
+        manifest = plan(cases, ["exact_v1", "exact_v2"], "native")
+        self.assertEqual(len(manifest["jobs"]), 12)
+        self.assertEqual(manifest["classifications"], [])
+        validate_plan(json.loads(encoded(manifest)))
+        for case in cases:
+            self.assertEqual(case["original_fixture"], originals[case["id"]])
+            self.assertEqual(case["query"], originals[case["id"]]["query"])
+            self.assertTrue(case["rejection"])
+            self.assertIsNone(case["expected"])
+        for job in manifest["jobs"]:
+            self.assertEqual(job["query"], originals[job["case_id"]]["query"])
+            if job["backend"] == "exact_v1":
+                self.assertFalse(job["expected_accept"])
+                self.assertEqual(job["operation"], "admission")
+                self.assertEqual(job["expected_rejection"]["diagnostic"], originals[job["case_id"]]["expected"]["error"])
+            else:
+                self.assertTrue(job["expected_accept"])
+                self.assertEqual(job["operation"], "result")
+                self.assertNotIn("expected_rejection", job)
+                self.assertEqual(job["expected_result"], select(["s"], []))
+                self.assertEqual(job["expectation_oracle"]["kind"], "REC_derived_fixed_snapshot_profile")
+                outcome = {"schema":"sparq.proof-binding-outcome.v1", "job_id":job["id"],
+                           "case_sha256":job["case_sha256"], "backend":"exact_v2", "tier":"native",
+                           "observed":"accepted", "stage":"native", "proof_count":0,
+                           "verified_count":0, "error_class":None, "artifacts":[], "controls":[],
+                           "result":select(["s"], [["<http://example.org/a>"]])}
+                with tempfile.TemporaryDirectory() as directory, self.assertRaises(ValueError):
+                    check_outcome(job, outcome, Path(directory))
+
+    def test_versioned_golden_refuses_changed_query_or_source(self):
+        source = Path(__file__).resolve().parents[2] / "zk/sparql-evaluator/fixtures/conformance/cases.json"
+        original = next(c for c in json.loads(source.read_text())["cases"] if c["id"] == "reject-from-default")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "retained.json"
+            dataset = (source.parent / "core.nt").read_text()
+            path.write_text(json.dumps({"cases":[original | {"query":original["query"] + " "}], "default_dataset":"core.nt"}))
+            (path.parent / "core.nt").write_text(dataset)
+            with self.assertRaisesRegex(ValueError, "golden input changed"):
+                import_regressions(path)
+            path.write_text(json.dumps({"cases":[original], "default_dataset":"core.nt"}))
+            (path.parent / "core.nt").write_text("")
+            with self.assertRaisesRegex(ValueError, "golden input changed"):
+                import_regressions(path)
+
     def test_imported_negatives_require_original_category_phase_and_diagnostic(self):
         root = Path(__file__).resolve().parents[2]
         imported = import_regressions(root / "crates/sparq-engine/tests/fixtures/builtin_edges.json", ["v"])

@@ -107,3 +107,10 @@ Unknown historical classes remain classification gaps. The model's combined
 unclassified; it cannot certify which cause occurred. These cases stay unresolved
 until a typed production error API distinguishes capacity from evaluation failure.
 The original golden objects and historical finite Noir evidence remain unchanged.
+
+[Version-specific expectations](version-expectations.json) retain the three
+original V1 dataset rejections while assigning explicit empty-bag V2 positives
+for their unchanged default-only source. Each is independently derived from the
+fixed local snapshot contract, pinned to the original fixture and source hashes;
+no network retrieval or named-graph membership claim is implied. Both authority
+modes execute each version's own expectation. No V3 promotion is inferred.
