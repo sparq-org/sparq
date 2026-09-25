@@ -165,3 +165,8 @@ repo root: the face repo's root `Nargo.toml` is a `[workspace]`, so the git dep 
 `directory = "xpath"` (default) and `XPATH_PATH` wants `<checkout>/xpath`.
 
 **License:** MIT
+
+[GPT-6] The Rust oracle requires the vendored spargebra 0.4.6 fork. Its exact
+workspace requirement and this detached workspace's local patch must both remain;
+a compatible registry release lacks the VERSION metadata APIs. Other detached
+resolution remains intentionally unlocked, as documented in Cargo.toml.

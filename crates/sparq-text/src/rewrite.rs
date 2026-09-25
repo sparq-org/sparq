@@ -96,8 +96,7 @@ pub fn prepare_text(
     sparql: &str,
     index: &TextIndex,
 ) -> Result<PreparedQuery, String> {
-    let (query, versions) = spargebra::SparqlParser::new()
-        .parse_query_with_versions(sparql)
+    let (query, versions) = sparq_engine::parse_versioned_query(spargebra::SparqlParser::new(), sparql)
         .map_err(|e| e.to_string())?;
     let prepared = PreparedQuery::from_query_with_versions(query, versions)?;
     Ok(prepared.with_query(rewrite_query(prepared.query().clone(), graph, index)?))

@@ -125,6 +125,10 @@
     "EXISTS body is outside the supported substitution profile": {
       "category": "profile",
       "phase": "admission"
+    },
+    "query VERSION contradicts REC 2013 profile": {
+      "category": "profile",
+      "phase": "admission"
     }
   },
   "typed_causes": {

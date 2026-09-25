@@ -125,6 +125,11 @@ differential-smoke = ["sparq-core", "sparq-engine", "sparq-bench"]
 # CONSERVATIVE: it keeps a charter/skill edit aligned with its ingest consumer
 # (sparq-kb re-runs) instead of being silently skipped — an over-trigger, never
 # a skip (design §4.2). No other crate reads these paths.
+# [GPT-6] Shared original raw-lexical goldens are also read by the engine test.
+[[map]]
+pattern = "zk/sparql-evaluator/fixtures/conformance/raw-literal-whitespace.json"
+crates = ["sparq-engine"]
+
 [[map]]
 pattern = "AGENTS.md"
 crates = ["sparq-kb"]

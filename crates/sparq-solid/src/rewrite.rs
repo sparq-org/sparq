@@ -65,7 +65,7 @@ use spargebra::{Query, SparqlParser};
 /// # Ok::<(), String>(())
 /// ```
 pub fn rewrite_for(sparql: &str, allowed: &[NamedNode]) -> Result<String, String> {
-    let (mut q, versions) = SparqlParser::new().parse_query_with_versions(sparql).map_err(|e| e.to_string())?;
+    let (mut q, versions) = sparq_engine::parse_versioned_query(SparqlParser::new(), sparql).map_err(|e| e.to_string())?;
     let dataset = match &mut q {
         Query::Select { dataset, .. }
         | Query::Construct { dataset, .. }
@@ -111,7 +111,7 @@ pub fn rewrite_for(sparql: &str, allowed: &[NamedNode]) -> Result<String, String
 /// # Ok::<(), String>(())
 /// ```
 pub fn wrap_for_view(sparql: &str) -> Result<String, String> {
-    let (mut q, versions) = SparqlParser::new().parse_query_with_versions(sparql).map_err(|e| e.to_string())?;
+    let (mut q, versions) = sparq_engine::parse_versioned_query(SparqlParser::new(), sparql).map_err(|e| e.to_string())?;
     wrap_query(&mut q, sparql);
     serialize_with_versions(q, versions)
 }
@@ -211,7 +211,7 @@ fn take_union_default_opt_in(q: &mut Query) -> bool {
 /// assert!(!opted.contains(UNION_DEFAULT_GRAPH_IRI));
 /// ```
 pub fn wrap_for_view_opt_in(sparql: &str) -> Result<String, String> {
-    let (mut q, versions) = SparqlParser::new().parse_query_with_versions(sparql).map_err(|e| e.to_string())?;
+    let (mut q, versions) = sparq_engine::parse_versioned_query(SparqlParser::new(), sparql).map_err(|e| e.to_string())?;
     if take_union_default_opt_in(&mut q) {
         wrap_query(&mut q, sparql);
     }

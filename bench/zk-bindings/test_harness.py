@@ -25,7 +25,11 @@ class CorpusTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             for cause in ("budget_rows", "budget_bytes", "numeric_representation", "temporal_year"):
                 actual = classes["typed_causes"][cause] | {"cause":cause}
-                check_outcome(job, outcome | {"error_class":"capacity", "rejection":actual}, Path(directory))
+                if cause == "numeric_representation":
+                    check_outcome(job, outcome | {"error_class":"capacity", "rejection":actual}, Path(directory))
+                else:
+                    with self.assertRaisesRegex(ValueError, "cause"):
+                        check_outcome(job, outcome | {"error_class":"capacity", "rejection":actual}, Path(directory))
             for cause in ("budget_deadline", "budget_cancelled", "execution"):
                 actual = classes["typed_causes"][cause] | {"cause":cause}
                 with self.assertRaises(ValueError):
@@ -200,7 +204,7 @@ class CorpusTests(unittest.TestCase):
         imported = import_regressions(root / "crates/sparq-engine/tests/fixtures/builtin_edges.json", ["v"])
         case = next(c for c in imported if c["id"] == "integer-cast-outside-range")
         job = plan([case], ["exact_v1"], "native")["jobs"][0]
-        self.assertEqual(job["expected_rejection"], {"category":"capacity"})
+        self.assertEqual(job["expected_rejection"], {"category":"capacity", "phase":"evaluation", "cause":"numeric_representation"})
         outcome = {"schema":"sparq.proof-binding-outcome.v1", "job_id":job["id"],
                    "case_sha256":job["case_sha256"], "backend":"exact_v1", "tier":"native",
                    "observed":"rejected", "stage":"native", "proof_count":0,
@@ -220,6 +224,9 @@ class CorpusTests(unittest.TestCase):
                 with self.subTest(diagnostic=diagnostic), self.assertRaises(ValueError):
                     check_outcome(job, outcome, path)
             outcome.update(error_class="capacity", rejection={"category":"capacity","phase":"evaluation","diagnostic":"result row capacity"})
+            with self.assertRaises(ValueError):
+                check_outcome(job, outcome, path)
+            outcome["rejection"] = {"category":"capacity", "phase":"evaluation", "cause":"numeric_representation", "diagnostic":"typed:numeric_representation"}
             check_outcome(job, outcome, path)
             original = import_regressions(root / "zk/sparql-evaluator/fixtures/conformance/cases.json")
             case = next(c for c in original if c["id"] == "reject-named-graph")

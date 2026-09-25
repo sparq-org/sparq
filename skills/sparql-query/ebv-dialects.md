@@ -27,6 +27,21 @@ when an integration first wraps parsed algebra. `PreparedQuery::with_query`
 retains that metadata across a structural rewrite. Bare `From<Query>`/`into_query` carry
 algebra alone; callers must retain announcement metadata separately.
 
+[OPUS-5.5] Integrations that configure their own parser call
+`sparq_engine::parse_versioned_query(parser, text)` (or
+`parse_versioned_update`) and pass the labels to `from_query_with_versions`.
+These use only the stable upstream `spargebra` 0.4.6 API, so they compile
+unchanged for crates.io consumers. The configured parser (base IRI, prefixes,
+custom aggregates) parses the unchanged text and is the syntax authority. Labels
+are then read from the accepted leading prologue only. Comments, IRIs, prefixed
+names and literals never contribute labels. Syntax errors keep the parser's
+text; `VersionedParseError::is_prologue` marks a declaration that could not be
+accounted for, which is refused rather than guessed. Upstream's optional
+`standard-unicode-escaping` feature decodes `\uXXXX` before its grammar, so an
+escaped line feed can end a comment. Any crate in a dependency graph may enable
+that feature, so for such text the helper asks the linked parser for its mode
+and scans the same decoded text.
+
 Every query entry point installs its own selection. The executor copies it
 once into its local vocabulary, inherited by GRAPH/EXISTS and shared read-only
 with Rayon workers. Nested public engine invocations use their own option or
@@ -34,8 +49,8 @@ default and restore the outer query on return/unwind. Per-row EBV does not
 read a global or thread-local selector. UPDATE and the PATHS extension remain
 REC 2013 only: they reject other VERSION labels; budgeted UPDATE also rejects
 an explicit draft EBV option. UPDATE protocol rewrites use
-`parse_update_rec2013` before discarding parser metadata. The legacy vendored
-parser still accepts syntax independently via `parse_update_with_versions`;
+`parse_update_rec2013` before discarding parser metadata. The parser still
+accepts every label syntactically (`parse_versioned_update` retains them all);
 syntax acceptance does not establish an executable dialect.
 
 Custom-aggregate parsing, inline OVER rewriting and text/structured EXPLAIN

@@ -16,6 +16,6 @@ fn rewrite_preserves_version_ebv_and_conflicts() {
         }
     }
     for query in ["VERSION 'bogus' ASK {}", "VERSION '1.1' VERSION '1.2' ASK {}"] {
-        assert!(sparq_vectors::prepare_vec(&graph, &query, &store).is_err());
+        assert!(sparq_vectors::prepare_vec(&graph, query, &store).is_err());
     }
 }

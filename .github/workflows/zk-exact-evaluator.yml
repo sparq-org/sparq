@@ -25,8 +25,75 @@ env:
   RISC0_BUILD_LOCKED: 1
 
 jobs:
+  # [OPUS-5.5] Registry-only parser compatibility, in its own job so the proof
+  # job keeps its full 120-minute budget. exact-evaluator needs this job without
+  # a status-function bypass, so its mandatory SUCCESS also requires this gate.
+  registry-parser:
+    name: registry-only spargebra parser compatibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Registry parser gate and selector unit tests
+        run: |
+          python3 -m unittest discover -s scripts/tests -p 'test_registry_parser.py'
+          python3 -m unittest discover -s scripts/tests -p 'test_ci_exact_evaluator_paths.py'
+
+      - name: Forbid fork-only parser methods outside the dedicated differential
+        run: python3 scripts/check_registry_parser.py scan
+
+      - name: Classify registry-parser inputs (fail closed)
+        id: changes
+        env:
+          EXACT_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+          EXACT_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
+        run: python3 scripts/ci_exact_evaluator_paths.py --scope registry-parser
+
+      - name: Require explicit classification output
+        env:
+          EXECUTION_REQUIRED: ${{ steps.changes.outputs.required }}
+        run: |
+          case "$EXECUTION_REQUIRED" in
+            true|false) ;;
+            *) echo "Missing or invalid registry-parser classification" >&2; exit 1 ;;
+          esac
+
+      - name: Successful irrelevant-diff classification
+        if: steps.changes.outputs.required == 'false'
+        run: echo "No registry-parser inputs changed; the unit tests and static scan above still ran."
+
+      - name: Activate pinned host Rust
+        if: steps.changes.outputs.required == 'true'
+        run: rustup show active-toolchain
+
+      - name: Root fork graph and registry-only consumer in both escaping modes
+        id: gate
+        if: steps.changes.outputs.required == 'true'
+        env:
+          # This job's own target directory, separate from the proof job's cache.
+          CARGO_TARGET_DIR: ${{ runner.temp }}/sparq-registry-parser-target
+        run: >-
+          python3 scripts/check_registry_parser.py gate
+          --output "$RUNNER_TEMP/sparq-registry-parser-evidence"
+          --target-dir "$CARGO_TARGET_DIR"
+
+      - name: Upload registry parser evidence, including partial evidence
+        if: always() && steps.changes.outputs.required == 'true' && steps.gate.outcome != 'skipped'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: registry-parser-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/sparq-registry-parser-evidence
+          if-no-files-found: error
+          retention-days: 30
+
   exact-evaluator:
     name: real exact-dataset guest and proof
+    # [OPUS-5.5] Deliberately no job-level `if`: a failed, cancelled or skipped
+    # registry gate skips this job, and ci-summary accepts only its SUCCESS.
+    needs: registry-parser
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:

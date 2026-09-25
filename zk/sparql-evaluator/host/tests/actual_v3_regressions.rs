@@ -1,6 +1,7 @@
 // [GPT-6] Actual V3 execution of unchanged shared goldens; these are not receipts.
 use risc0_zkvm::{Executor, ExecutorEnv, ExternalProver};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use sparq_proved_evaluator::embedded_artifact;
 use sparq_proved_evaluator_model::{BudgetExceeded, DatasetAuthority, EvaluationCapacity, EvaluationError, ProofContract, Rejected, v3};
 use std::path::PathBuf;
@@ -32,11 +33,63 @@ fn suites() -> Vec<Suite> {
     ]
 }
 
-fn capacity(error: EvaluationError) -> bool {
-    matches!(error,
-        EvaluationError::Budget(BudgetExceeded::Rows | BudgetExceeded::Bytes)
-        | EvaluationError::Capacity(EvaluationCapacity::NumericRepresentation | EvaluationCapacity::TemporalYear)
-        | EvaluationError::Rejected(Rejected("temporal year capacity" | "result row capacity")))
+fn expected_capacity(suite: &Suite, case: &Value) -> EvaluationError {
+    // Same reviewed expectations as the importer, bound to unchanged source bytes.
+    let registry: Value = serde_json::from_str(include_str!(
+        "../../../../bench/zk-bindings/capacity-expectations.json")).unwrap();
+    let source_hash = format!("{:x}", Sha256::digest(suite.json.as_bytes()));
+    let source = registry["sources"].as_array().unwrap().iter()
+        .find(|entry| entry["source_sha256"] == source_hash && entry["field"] == suite.field)
+        .expect("unclassified capacity source");
+    let expected = &source["cases"].as_array().unwrap().iter()
+        .find(|entry| entry["id"] == case["id"]).expect("unclassified capacity case")["expected_rejection"];
+    match expected["cause"].as_str() {
+        Some("numeric_representation") => EvaluationError::Capacity(EvaluationCapacity::NumericRepresentation),
+        Some("temporal_year") => EvaluationError::Capacity(EvaluationCapacity::TemporalYear),
+        Some("budget_rows") => EvaluationError::Budget(BudgetExceeded::Rows),
+        None if expected["diagnostic"] == "temporal year capacity" => EvaluationError::Rejected(Rejected("temporal year capacity")),
+        _ => panic!("unclassified original capacity expectation"),
+    }
+}
+
+fn assert_capacity(suite: &Suite, case: &Value, actual: EvaluationError) {
+    assert_eq!(actual, expected_capacity(suite, case), "{}", case["id"]);
+}
+
+#[test]
+fn capacity_inventory_requires_each_original_cause() {
+    let mut counts = [0; 4];
+    for suite in suites() {
+        let document: Value = serde_json::from_str(suite.json).unwrap();
+        for case in document[suite.field].as_array().unwrap() {
+            if !(suite.capacity || case["expected_capacity_error"] == true
+                || case["expectation_kind"] == "implementation_capacity") { continue; }
+            let expected = expected_capacity(&suite, case);
+            let index = match expected {
+                EvaluationError::Capacity(EvaluationCapacity::NumericRepresentation) => 0,
+                EvaluationError::Capacity(EvaluationCapacity::TemporalYear) => 1,
+                EvaluationError::Budget(BudgetExceeded::Rows) => 2,
+                EvaluationError::Rejected(Rejected("temporal year capacity")) => 3,
+                _ => panic!("wrong original cause"),
+            };
+            counts[index] += 1;
+            for actual in [
+                EvaluationError::Capacity(EvaluationCapacity::NumericRepresentation),
+                EvaluationError::Capacity(EvaluationCapacity::TemporalYear),
+                EvaluationError::Budget(BudgetExceeded::Rows),
+                EvaluationError::Budget(BudgetExceeded::Bytes),
+                EvaluationError::Budget(BudgetExceeded::Deadline),
+                EvaluationError::Budget(BudgetExceeded::Cancelled),
+                EvaluationError::Execution,
+            ] {
+                if actual != expected {
+                    assert!(std::panic::catch_unwind(|| assert_capacity(&suite, case, actual)).is_err());
+                }
+            }
+            assert_capacity(&suite, case, expected);
+        }
+    }
+    assert_eq!(counts, [26, 9, 1, 7]);
 }
 
 #[test]
@@ -79,7 +132,7 @@ fn actual_v3_executes_shared_semantic_and_rejection_inventories() {
                     }, dataset,
                 };
                 if is_capacity {
-                    assert!(capacity(v3::evaluate_detailed(&input).expect_err("typed capacity preflight")), "{}", case["id"]);
+                    assert_capacity(&suite, case, v3::evaluate_detailed(&input).expect_err("typed capacity preflight"));
                 } else if is_profile {
                     assert!(v3::admit(&input.request).is_err(), "{}: original profile rejection", case["id"]);
                 }

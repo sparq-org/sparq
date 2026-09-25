@@ -94,7 +94,9 @@ def check_outcome(job, outcome, output):
                 or not actual.get("diagnostic")):
             raise ValueError("unclassified or wrong rejection category")
         if any(actual.get(key) != value for key, value in required.items()):
-            raise ValueError("wrong rejection phase or diagnostic")
+            raise ValueError("wrong rejection phase or diagnostic or cause")
+        if required["category"] == "capacity" and not (required.get("cause") or required.get("diagnostic")):
+            raise ValueError("capacity expectation must name its exact cause or diagnostic")
         classes = load(Path(__file__).with_name("rejections.json"))
         if "cause" in actual:
             # Typed emitters are a separate protocol, never a diagnostic match.

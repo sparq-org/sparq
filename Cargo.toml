@@ -61,7 +61,11 @@ oxjsonld = { version = "0.2", features = ["rdf-12"] }
 # feature so the lean default / wasm build never links it (it pulls `quick-xml`).
 oxrdfxml = { version = "0.2", features = ["rdf-12"] }
 # SPARQL syntax -> algebra (we build the planner + physical execution ourselves).
-spargebra = { version = "0.4", features = ["sparql-12", "sep-0006"] }
+# [OPUS-5.5] Callers recover VERSION labels through the stable-API
+# `sparq_engine::parse_versioned_*` helpers, which also build against registry
+# 0.4.6 (`scripts/check_registry_parser.py`). The exact pin keeps the vendored
+# patch selected: a newer registry release cannot silently replace its fixes.
+spargebra = { version = "=0.4.6", features = ["sparql-12", "sep-0006"] }
 # Fast hashing / maps. These are the NEWEST side of a duplicate pair in Cargo.lock;
 # the lagging copies are held by third-party crates. Blockers are surveyed once, in
 # `deny.toml` § [bans] (the duplicate-version blocker registry) — read that before
