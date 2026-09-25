@@ -66,8 +66,12 @@ roles, eight rows and eight BGP patterns. Query bytes, document bytes, term
 bytes, input-triple count, status bytes, proof statement sizes and replay-store
 size have explicit bounds in `rdf.rs`. Exceeding a bound rejects; credentials
 or rows are never silently truncated. Every accepted issuer role must contribute
-support. The convenience prover chooses the first matching credential slot and
-rejects if that choice leaves an accepted role unused.
+support. The convenience prover considers all matching credential slots and
+deterministically selects an allocation covering every role when one exists.
+It tracks reachable role subsets within the fixed capacities; overlapping
+credentials cannot make a first-match choice exclude a required role. This
+witness-selection change retains the versioned verifier relation and wire format.
+The chosen public slot indices can differ from a former first-match allocation.
 
 Credential issuance parses a bounded N-Quads document containing only default
 graph triples and uses `sparq-canon::canonicalize_triples`. Canonical lines are

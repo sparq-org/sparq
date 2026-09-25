@@ -698,6 +698,37 @@ fn decode(encoded: &[u8], count: usize) -> Result<Proof<Bls12_381>> {
     })
 }
 
+// [GPT-6] An occurrence can have support in several issuer roles. Track every
+// reachable role set so first-match choices cannot starve a required role. The
+// request bounds this to 16 masks and 64 occurrences; traversal is deterministic.
+fn covering_slots(candidates: &[Vec<Slot>], roles: usize) -> Result<Vec<Slot>> {
+    if roles == 0 || roles > MAX_ROLES || candidates.len() > MAX_ROWS * MAX_PATTERNS {
+        return Err(Error::Capacity);
+    }
+    let states = 1 << roles;
+    let mut reachable: Vec<Option<Vec<Slot>>> = vec![None; states];
+    reachable[0] = Some(Vec::new());
+    for choices in candidates {
+        let mut next = vec![None; states];
+        for (mask, prefix) in reachable.iter().enumerate() {
+            let Some(prefix) = prefix else { continue };
+            for slot in choices {
+                if slot.role >= roles || slot.triple >= TRIPLE_SLOTS {
+                    return Err(Error::Support);
+                }
+                let target = mask | (1 << slot.role);
+                if next[target].is_none() {
+                    let mut allocation = prefix.clone();
+                    allocation.push(*slot);
+                    next[target] = Some(allocation);
+                }
+            }
+        }
+        reachable = next;
+    }
+    reachable[states - 1].take().ok_or(Error::Support)
+}
+
 /// Find public support and prove possession of the corresponding issuer signatures.
 ///
 /// # Errors
@@ -712,27 +743,28 @@ pub fn prove_public_bgp<R: RngCore + CryptoRng>(
         return Err(Error::Support);
     }
     let required = required_lines(request)?;
+    let candidates = required
+        .iter()
+        .flatten()
+        .map(|line| {
+            credentials
+                .iter()
+                .enumerate()
+                .filter_map(|(role, credential)| {
+                    credential.lines.iter().position(|s| s == line)
+                        .map(|triple| Slot { role, triple })
+                })
+                .collect()
+        })
+        .collect::<Vec<_>>();
+    let selected = covering_slots(&candidates, request.roles.len())?;
+    let mut offset = 0;
     let support = Support {
-        rows: required
-            .iter()
-            .map(|row| {
-                row.iter()
-                    .map(|line| {
-                        credentials
-                            .iter()
-                            .enumerate()
-                            .find_map(|(role, credential)| {
-                                credential
-                                    .lines
-                                    .iter()
-                                    .position(|s| s == line)
-                                    .map(|triple| Slot { role, triple })
-                            })
-                            .ok_or(Error::Support)
-                    })
-                    .collect::<Result<Vec<_>>>()
-            })
-            .collect::<Result<_>>()?,
+        rows: required.iter().map(|row| {
+            let slots = selected[offset..offset + row.len()].to_vec();
+            offset += row.len();
+            slots
+        }).collect(),
     };
     let (disclosed, _) = relation(request, &support)?;
     let mut witnesses = Witnesses::new();

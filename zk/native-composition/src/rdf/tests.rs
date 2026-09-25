@@ -308,8 +308,9 @@ fn valid_weaker_same_nonce_proof_cannot_omit_a_required_disclosure() {
 }
 
 // [GPT-6] Both required triples are signed by the first issuer; the second
-// accepted issuer has a real credential but contributes no selected support.
-fn unused_role_fixture() -> (StdRng, Request, Vec<Credential>) {
+// accepted issuer signs the age triple, so selecting all support from role zero
+// would wrongly reject an available role-covering allocation.
+fn overlapping_role_fixture() -> (StdRng, Request, Vec<Credential>) {
     let (mut rng, mut request, mut credentials) = fixture(true);
     let issuer = Issuer::generate(&mut rng, "urn:issuer:both").unwrap();
     credentials[0] = issue_rdf(
@@ -321,6 +322,77 @@ fn unused_role_fixture() -> (StdRng, Request, Vec<Credential>) {
     .unwrap();
     request.roles[0].issuer = issuer.public();
     (rng, request, credentials)
+}
+
+fn unused_role_fixture() -> (StdRng, Request, Vec<Credential>) {
+    let (mut rng, mut request, mut credentials) = overlapping_role_fixture();
+    let issuer = Issuer::generate(&mut rng, "urn:issuer:unrelated").unwrap();
+    credentials[1] = issue_rdf(
+        &mut rng, &issuer, "<urn:unrelated> <urn:other> <urn:value> .",
+        &request.roles[1].status.reference,
+    ).unwrap();
+    request.roles[1].issuer = issuer.public();
+    (rng, request, credentials)
+}
+
+#[test]
+fn overlapping_credentials_find_covering_support_and_verify() {
+    let (mut rng, request, credentials) = overlapping_role_fixture();
+    let proof = prove_public_bgp(&mut rng, &request, &credentials).unwrap();
+    let roles: BTreeSet<_> = proof.support.rows.iter().flatten().map(|s| s.role).collect();
+    assert_eq!(roles, BTreeSet::from([0, 1]));
+    assert_eq!(check(&mut rng, &request, &proof), Ok(()));
+}
+
+#[test]
+fn covering_allocator_matches_independent_exhaustive_oracle() {
+    // Deliberately recursive product enumeration, not the production mask DP.
+    fn oracle(rows: &[Vec<Slot>], roles: usize, selected: &mut Vec<Slot>) -> bool {
+        let Some((first, rest)) = rows.split_first() else {
+            return (0..roles).all(|role| selected.iter().any(|slot| slot.role == role));
+        };
+        for choice in first {
+            selected.push(*choice);
+            let covered = oracle(rest, roles, selected);
+            selected.pop();
+            if covered { return true; }
+        }
+        false
+    }
+    let check = |rows: Vec<Vec<Slot>>, roles| {
+        let actual = covering_slots(&rows, roles);
+        assert_eq!(actual.is_ok(), oracle(&rows, roles, &mut Vec::new()), "{rows:?}");
+        assert_eq!(actual, covering_slots(&rows, roles));
+        if let Ok(selected) = actual {
+            assert_eq!(selected.len(), rows.len());
+            assert!(selected.iter().zip(&rows).all(|(slot, options)| options.contains(slot)));
+            assert!((0..roles).all(|role| selected.iter().any(|slot| slot.role == role)));
+        }
+    };
+    for roles in 1..=4 {
+        for occurrences in 0..=4 {
+            for matrix in 0..(1usize << (roles * occurrences)) {
+                let rows = (0..occurrences).map(|row| {
+                    (0..roles).filter(|role| matrix & (1 << (row * roles + role)) != 0)
+                        .map(|role| Slot { role, triple: 0 }).collect()
+                }).collect();
+                check(rows, roles);
+            }
+        }
+    }
+    // Four roles, reverse restrictions force reassignment of earlier choices.
+    check((0..4).map(|row| (0..4-row).map(|role| Slot {role, triple: 0}).collect()).collect(), 4);
+    check(vec![vec![Slot { role: 0, triple: 0 }]; 4], 4);
+    // Repeated occurrences and repeated slots are legitimate support inputs.
+    check(vec![vec![Slot {role: 0, triple: 0}, Slot {role: 1, triple: 0}]; 4], 2);
+    let mut boundary = vec![vec![Slot {role: 0, triple: 0}]; MAX_ROWS * MAX_PATTERNS];
+    for (role, choices) in boundary.iter_mut().take(MAX_ROLES).enumerate() {
+        choices[0].role = role;
+    }
+    check(boundary.clone(), MAX_ROLES);
+    boundary.push(vec![Slot {role: 0, triple: 0}]);
+    assert_eq!(covering_slots(&boundary, MAX_ROLES), Err(Error::Capacity));
+    check(vec![vec![Slot {role: 0, triple: 0}]; MAX_ROWS * MAX_PATTERNS], MAX_ROLES);
 }
 
 #[test]
@@ -336,19 +408,6 @@ fn every_role_contributes_honest_prover_rejects_unused_issuer() {
 fn every_role_contributes_verifier_rejects_valid_weaker_proof() {
     let (mut rng, request, credentials) = unused_role_fixture();
     let lines = required_lines(&request).unwrap();
-    let valid_support = Support {
-        rows: vec![lines[0]
-            .iter()
-            .map(|line| {
-                let role = usize::from(credentials[1].lines.contains(line));
-                Slot {
-                    role,
-                    triple: credentials[role].lines.iter().position(|s| s == line).unwrap(),
-                }
-            })
-            .collect()],
-    };
-    let (mut disclosed, context) = relation(&request, &valid_support).unwrap();
     let unused_support = Support {
         rows: vec![lines[0]
             .iter()
@@ -358,6 +417,12 @@ fn every_role_contributes_verifier_rejects_valid_weaker_proof() {
             })
             .collect()],
     };
+    // Derive the exact context layout with a hypothetical covering allocation;
+    // the unrelated issuer does not sign that triple. Its weaker proof below
+    // discloses only protocol/status and uses the actual unused-role allocation.
+    let mut covering_support = unused_support.clone();
+    covering_support.rows[0][0] = Slot { role: 1, triple: 0 };
+    let (mut disclosed, context) = relation(&request, &covering_support).unwrap();
     for messages in &mut disclosed {
         messages.retain(|index, _| *index < 2);
     }

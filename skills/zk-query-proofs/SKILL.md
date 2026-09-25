@@ -24,7 +24,8 @@ constraint arithmetic. Its optional `native-rdf` feature adds a separately
 versioned [public RDF support API](references/native-rdf.md): `issue_rdf`,
 `prove_public_bgp`, and `verify_public_bgp` authenticate reconstructed public BGP
 triples against verifier-owned issuer/status policy. Public signed-slot indices
-and status references are disclosed. Signed epoch labels must match exactly;
+and status references are disclosed. Support selection covers all accepted roles
+when a matching allocation exists. Signed epoch labels must match exactly;
 status bytes use the native least-significant-bit-first convention documented in
 the reference. It provides no hidden RDF predicate or Noir
 linkage and remains unaudited. The original tuple executable stays separate. [GPT-6]
