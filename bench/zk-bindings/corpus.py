@@ -226,6 +226,7 @@ def plan(cases, backends, tier, shard=0, shards=1, coverage="retained_corpus"):
     if not jobs:
         raise ValueError("empty replay shard")
     return {"schema": "sparq.proof-bindings.plan.v1", "coverage": coverage, "tier": tier,
+            "backends":list(backends),
             "domain": {"nodes": list(NODES), "candidate_terms": list(CANDIDATES),
                        "graph_count": 16, "query_templates": list(TEMPLATES)} if coverage == "exhaustive_tiny_v1" else None,
             "case_count": len(cases), "corpus_sha256": digest(cases), "shard": shard, "shards": shards,

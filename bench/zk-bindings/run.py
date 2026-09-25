@@ -158,7 +158,7 @@ def adapter_identity(adapter):
 def validate_plan(manifest):
     if manifest.get("schema") != "sparq.proof-bindings.plan.v1" or not manifest.get("jobs"):
         raise ValueError("empty or unknown replay plan")
-    rebuilt = plan(manifest["cases"], list(manifest["totals"]), manifest["tier"],
+    rebuilt = plan(manifest["cases"], manifest["backends"], manifest["tier"],
                    manifest["shard"], manifest["shards"], manifest["coverage"])
     if rebuilt != manifest:
         raise ValueError("plan differs from its retained corpus, oracle jobs or complete denominators")

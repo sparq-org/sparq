@@ -12,6 +12,8 @@ from minimize import minimize
 
 class CorpusTests(unittest.TestCase):
     def test_replay_rejects_changed_query_or_denominator(self):
+        multiple = plan([tiny_case(6, "join")], ["noir_unsigned", "noir_signed"], "real")
+        validate_plan(json.loads(encoded(multiple)))
         source = plan([tiny_case(6, "join")], ["noir_unsigned"], "real")
         validate_plan(source)
         altered = json.loads(json.dumps(source))
