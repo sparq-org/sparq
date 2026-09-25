@@ -72,6 +72,11 @@ It tracks reachable role subsets within the fixed capacities; overlapping
 credentials cannot make a first-match choice exclude a required role. This
 witness-selection change retains the versioned verifier relation and wire format.
 The chosen public slot indices can differ from a former first-match allocation.
+`prepare_public_bgp(request, credentials)` returns this support after the shared
+honest construction checks without generating or verifying a signature proof.
+The real prover calls the same preparation implementation. A prepared support
+value is not an authentication verdict; call `verify_public_bgp` on a genuine
+presentation against independently accepted policy.
 
 Credential issuance parses a bounded N-Quads document containing only default
 graph triples and uses `sparq-canon::canonicalize_triples`. Canonical lines are

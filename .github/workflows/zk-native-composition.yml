@@ -95,6 +95,11 @@ jobs:
       - name: Real public RDF proofs and malicious weaker-proof controls
         run: cargo test --release --locked --manifest-path zk/native-composition/Cargo.toml --features native-rdf --lib
 
+      - name: Native binding adapter and genuine proof controls
+        run: |
+          cargo test --release --locked --manifest-path zk/native-composition/Cargo.toml --features native-binding --lib rdf::binding_tests::
+          cargo test --release --locked --manifest-path zk/native-composition/Cargo.toml --features native-binding --bin native-bindings
+
       - name: Run the public RDF experiment
         run: cargo run --release --locked --manifest-path zk/native-composition/Cargo.toml --features native-rdf --bin native-rdf > native-rdf-experiment.json
 
