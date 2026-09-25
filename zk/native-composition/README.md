@@ -24,6 +24,10 @@ the genuine sample and source hashes; its separate
 [dependency gate record](evidence/native-rdf-dependency-gates.json) retains the
 existing baseline failures. This source checkpoint does not claim clean dependency
 gates or readiness to merge.
+The [native follow-up record](evidence/native-rdf-followups.json) separates the
+dependency compatibility patch, corrected-lock CLI sample, role-covering
+allocator controls and their source reviews. Its own-policy failures and the
+separate uncommitted policy-inheritance comparison are both retained.
 
 The dedicated [native composition CI workflow](../../.github/workflows/zk-native-composition.yml)
 runs real release tests, scoped Clippy and the unsupported-Noir CLI check on pull
