@@ -37,7 +37,14 @@ use rustc_hash::FxHashMap;
 use spargebra::algebra::GraphPattern;
 use spargebra::term::GroundTerm;
 use spargebra::{Query, SparqlParser};
+use sparq_engine::PreparedQuery;
 use std::cell::Cell;
+
+// [GPT-6] Preserve announcements without enabling an extra optimizer pass.
+fn parse_prepared(text: &str) -> Option<PreparedQuery> {
+    let (query, versions) = SparqlParser::new().parse_query_with_versions(text).ok()?;
+    PreparedQuery::from_query_with_versions(query, versions).ok()
+}
 
 thread_local! {
     /// [OPUS-4.8] (sq-7d3dj.33.1) Per-thread monotonic count of `sh:sparql`
@@ -152,7 +159,7 @@ impl PreBindingViolation {
 #[derive(Debug, Clone)]
 pub(crate) struct PreparedSparql {
     /// The parsed `sh:select` algebra (prefixes already resolved at parse time).
-    query: Query,
+    query: PreparedQuery,
     /// [OPUS-4.8] (sq-7d3dj.33.1) Whether all focus nodes may be validated in ONE
     /// batched `VALUES ?this { … }` execution (see [`Self::evaluate_batch`]). Batching
     /// is result-equivalent to the per-focus path for the pre-binding-legal subset the
@@ -185,11 +192,11 @@ impl PreparedSparql {
         constraint: &SparqlConstraint,
     ) -> Result<Option<PreparedSparql>, PreBindingViolation> {
         let text = format!("{}\n{}", constraint.prefixes, constraint.select);
-        let Ok(query) = SparqlParser::new().parse_query(&text) else {
+        let Some(query) = parse_prepared(&text) else {
             return Ok(None);
         };
         // Only SELECT is meaningful for sh:sparql; the solutions drive the result count.
-        let Query::Select { pattern, .. } = &query else {
+        let Query::Select { pattern, .. } = query.query() else {
             return Ok(None);
         };
         // [OPUS-4.8] (sq-0mjfd) Reject a query whose pre-binding of `$this` is
@@ -231,11 +238,11 @@ impl PreparedSparql {
         mut make_result: impl FnMut(ResultFields) -> ValidationResult,
         out: &mut Vec<ValidationResult>,
     ) {
-        let Some(bound) = pre_bind_select(&self.query, &[("this", focus)]) else {
+        let Some(bound) = pre_bind_select(self.query.query(), &[("this", focus)]) else {
             return; // focus node not expressible as a VALUES ground term (unreachable today)
         };
         bump_exec_count();
-        let prepared = sparq_engine::PreparedQuery::from(bound);
+        let prepared = self.query.with_query(bound);
         let Ok(result) = sparq_engine::query_prepared(data, &prepared) else {
             return; // a runtime query error → no solutions (lenient; never panics validate())
         };
@@ -293,11 +300,11 @@ impl PreparedSparql {
             grouped.entry((*f).clone()).or_default();
         }
         for chunk in ground.chunks(FOCUS_BATCH_CHUNK) {
-            let Some(bound) = pre_bind_select_multi(&self.query, "this", chunk) else {
+            let Some(bound) = pre_bind_select_multi(self.query.query(), "this", chunk) else {
                 continue; // inexpressible term in the chunk (unreachable — all ground)
             };
             bump_exec_count();
-            let prepared = sparq_engine::PreparedQuery::from(bound);
+            let prepared = self.query.with_query(bound);
             let Ok(result) = sparq_engine::query_prepared(data, &prepared) else {
                 continue; // runtime query error → no solutions for this chunk (lenient)
             };
@@ -432,7 +439,7 @@ pub(crate) struct ResultFields {
 #[derive(Debug, Clone)]
 pub(crate) struct PreparedSelectExpr {
     /// The parsed SELECT algebra (prefixes already resolved at build time).
-    query: Query,
+    query: PreparedQuery,
 }
 
 impl PreparedSelectExpr {
@@ -441,8 +448,8 @@ impl PreparedSelectExpr {
     /// dropped leniently, so its target/value set is empty rather than misfiring).
     pub(crate) fn build_select(prefixes: &str, select: &str) -> Option<PreparedSelectExpr> {
         let text = format!("{}\n{}", prefixes, select);
-        let query = SparqlParser::new().parse_query(&text).ok()?;
-        if !matches!(query, Query::Select { .. }) {
+        let query = parse_prepared(&text)?;
+        if !matches!(query.query(), Query::Select { .. }) {
             return None;
         }
         Some(PreparedSelectExpr { query })
@@ -465,10 +472,10 @@ impl PreparedSelectExpr {
     /// expressible as a VALUES ground term (a blank node) or a runtime query error
     /// yields an empty set (lenient; never panics `validate`).
     pub(crate) fn eval(&self, data: &sparq_core::Graph, focus: &Term) -> Vec<Term> {
-        let Some(bound) = pre_bind_select(&self.query, &[("this", focus)]) else {
+        let Some(bound) = pre_bind_select(self.query.query(), &[("this", focus)]) else {
             return Vec::new();
         };
-        Self::run(data, bound)
+        Self::run(data, self.query.with_query(bound))
     }
 
     /// [OPUS-4.8] (sq-rnkdh) Evaluates the expression as a **target** query — with
@@ -502,11 +509,11 @@ impl PreparedSelectExpr {
             grouped.entry((*f).clone()).or_default();
         }
         for chunk in ground.chunks(FOCUS_BATCH_CHUNK) {
-            let Some(bound) = pre_bind_select_multi(&self.query, "this", chunk) else {
+            let Some(bound) = pre_bind_select_multi(self.query.query(), "this", chunk) else {
                 continue; // inexpressible term in chunk (unreachable — all ground)
             };
             bump_exec_count();
-            let prepared = sparq_engine::PreparedQuery::from(bound);
+            let prepared = self.query.with_query(bound);
             let Ok(result) = sparq_engine::query_prepared(data, &prepared) else {
                 continue; // runtime query error → no nodes for this chunk (lenient)
             };
@@ -529,8 +536,7 @@ impl PreparedSelectExpr {
     /// Runs a (possibly pre-bound) SELECT and collects the FIRST-result-variable
     /// bindings, skipping unbound rows. A runtime query error yields no nodes
     /// (lenient; never panics `validate`).
-    fn run(data: &sparq_core::Graph, query: Query) -> Vec<Term> {
-        let prepared = sparq_engine::PreparedQuery::from(query);
+    fn run(data: &sparq_core::Graph, prepared: PreparedQuery) -> Vec<Term> {
         let Ok(result) = sparq_engine::query_prepared(data, &prepared) else {
             return Vec::new();
         };
@@ -1039,8 +1045,8 @@ fn substitute(template: &str, vars: &[String], row: &[Option<Term>]) -> String {
 /// parsed (so a malformed query is rejected up front, not per focus node).
 #[derive(Debug, Clone)]
 pub(crate) enum PreparedValidator {
-    Ask(Query),
-    Select(Query),
+    Ask(PreparedQuery),
+    Select(PreparedQuery),
 }
 
 impl PreparedValidator {
@@ -1048,8 +1054,8 @@ impl PreparedValidator {
     /// is an [`Ask`](Self::Ask), a SELECT form a [`Select`](Self::Select), any
     /// other form (or an unparsable query) is `None` (ill-formed → skipped).
     pub(crate) fn build(text: &str, is_ask: bool) -> Option<PreparedValidator> {
-        let query = SparqlParser::new().parse_query(text).ok()?;
-        match (&query, is_ask) {
+        let query = parse_prepared(text)?;
+        match (query.query(), is_ask) {
             (Query::Ask { .. }, true) => Some(PreparedValidator::Ask(query)),
             (Query::Select { .. }, false) => Some(PreparedValidator::Select(query)),
             _ => None,
@@ -1108,14 +1114,14 @@ pub(crate) struct ComponentResultFields {
 /// that fails to pre-bind (inexpressible value) or errors at runtime is treated
 /// as conforming (lenient — never panics validate()).
 pub(crate) fn ask_violates(
-    query: &Query,
+    query: &PreparedQuery,
     data: &sparq_core::Graph,
     bindings: &[Binding],
 ) -> bool {
-    let Some(bound) = pre_bind_ask(query, bindings) else {
+    let Some(bound) = pre_bind_ask(query.query(), bindings) else {
         return false;
     };
-    let prepared = sparq_engine::PreparedQuery::from(bound);
+    let prepared = query.with_query(bound);
     match sparq_engine::ask_prepared(data, &prepared) {
         Ok(holds) => !holds, // ASK true = conforms; ASK false = violation
         Err(_) => false,
@@ -1129,7 +1135,7 @@ pub(crate) fn ask_violates(
 /// property shape) `$PATH`. `message` is the component's `sh:message`, if any.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn select_validate(
-    query: &Query,
+    query: &PreparedQuery,
     data: &sparq_core::Graph,
     focus: &Term,
     bindings: &[Binding],
@@ -1137,10 +1143,10 @@ pub(crate) fn select_validate(
     mut make_result: impl FnMut(ComponentResultFields) -> ValidationResult,
     out: &mut Vec<ValidationResult>,
 ) {
-    let Some(bound) = pre_bind_select(query, bindings) else {
+    let Some(bound) = pre_bind_select(query.query(), bindings) else {
         return;
     };
-    let prepared = sparq_engine::PreparedQuery::from(bound);
+    let prepared = query.with_query(bound);
     let Ok(result) = sparq_engine::query_prepared(data, &prepared) else {
         return;
     };
@@ -1704,7 +1710,7 @@ mod tests {
         let bindings: &[Binding] = &[("this", &focus)];
         let mut out = Vec::new();
         select_validate(
-            &validator,
+            &validator.into(),
             &data,
             &focus,
             bindings,
@@ -1766,7 +1772,7 @@ mod tests {
         let data = graph(DATA);
         let query = SparqlParser::new().parse_query(ask).unwrap();
         let this = Term::NamedNode(NamedNode::new("http://example.org/alice").unwrap());
-        ask_violates(&query, &data, &[("this", &this), ("value", value)])
+        ask_violates(&query.clone().into(), &data, &[("this", &this), ("value", value)])
     }
 
     #[test]
@@ -1884,7 +1890,7 @@ mod tests {
         let q = SparqlParser::new()
             .parse_query("ASK { FILTER (STRLEN(STR($value)) <= 3) }")
             .unwrap();
-        assert!(!ask_violates(&q, &data, &[("value", &bnode)]));
+        assert!(!ask_violates(&q.clone().into(), &data, &[("value", &bnode)]));
     }
 
     #[test]
@@ -1897,7 +1903,7 @@ mod tests {
             .unwrap();
         let mut out = Vec::new();
         select_validate(
-            &q,
+            &q.clone().into(),
             &data,
             &bnode,
             &[("this", &bnode)],
@@ -1962,7 +1968,7 @@ mod tests {
             .parse_query("ASK { SERVICE <http://example.org/remote> { ?s ?p ?o } }")
             .unwrap();
         // ask_prepared returns Err -> ask_violates returns false (conforms).
-        assert!(!ask_violates(&q, &data, &[("this", &this)]));
+        assert!(!ask_violates(&q.clone().into(), &data, &[("this", &this)]));
     }
 
     #[test]
@@ -1976,7 +1982,7 @@ mod tests {
             .unwrap();
         let mut out = Vec::new();
         select_validate(
-            &q,
+            &q.clone().into(),
             &data,
             &focus,
             &[("this", &focus)],
@@ -2158,7 +2164,7 @@ mod tests {
             .unwrap();
         let mut out = Vec::new();
         select_validate(
-            &query,
+            &query.clone().into(),
             &data,
             &focus,
             &[("this", &focus)],
@@ -2200,7 +2206,7 @@ mod tests {
             .unwrap();
         let mut out = Vec::new();
         select_validate(
-            &query,
+            &query.clone().into(),
             &data,
             &focus,
             &[("this", &focus)],
@@ -2709,5 +2715,51 @@ mod tests {
         assert_eq!(grouped[&foci[1]].len(), 0); // ex:b age 5
         assert_eq!(grouped[&foci[2]].len(), 1); // ex:c age -2
         assert_eq!(grouped[&foci[3]].len(), 0); // ex:d age 9
+    }
+}
+
+// [GPT-6] Every pre-binding executor keeps the author's validated metadata.
+#[cfg(test)]
+mod version_tests {
+    use super::*;
+    fn record(focus: &Term) -> ValidationResult {
+        ValidationResult { focus_node: focus.clone(), path: None, value: None,
+            source_shape: focus.clone(), source_constraint: None,
+            source_component: crate::model::sh("SPARQLConstraintComponent"),
+            severity: crate::model::sh("Violation"), messages: vec![],
+            default_message: String::new(), details: vec![] }
+    }
+    #[test]
+    fn all_prebinding_paths_preserve_version_ebv() {
+        let graph = sparq_core::Graph::load_str("", "ntriples").unwrap();
+        let focus: Term = oxrdf::NamedNode::new("urn:focus").unwrap().into();
+        let body = "FILTER(!\"z\"^^<http://www.w3.org/2001/XMLSchema#boolean>)";
+        for (label, count) in [("1.1", 1), ("1.2", 0)] {
+            let text = format!("VERSION '{label}' SELECT (7 AS ?v) WHERE {{{body}}}");
+            let expr = PreparedSelectExpr::build_select("", &text).unwrap();
+            assert_eq!(expr.eval(&graph, &focus).len(), count);
+            assert_eq!(expr.eval_target(&graph).len(), count);
+            assert_eq!(expr.eval_batch(&graph, std::slice::from_ref(&focus))[&focus].len(), count);
+            let select = format!("VERSION '{label}' SELECT ?this WHERE {{{body}}}");
+            let constraint = SparqlConstraint { node: focus.clone(), select: select.clone(),
+                prefixes: String::new(), message: None, severity: None, deactivated: false, prepared: None };
+            let prepared = PreparedSparql::build(&constraint).unwrap().unwrap();
+            let mut out = Vec::new();
+            prepared.evaluate(&graph, &focus, &constraint, |_| record(&focus), &mut out);
+            assert_eq!(out.len(), count);
+            let batched = prepared.evaluate_batch(&graph, std::slice::from_ref(&focus), &constraint, |f, _| record(f));
+            assert_eq!(batched[&focus].len(), count);
+            let PreparedValidator::Select(query) = PreparedValidator::build(&select, false).unwrap() else { panic!("SELECT validator") };
+            out.clear();
+            select_validate(&query, &graph, &focus, &[("this", &focus)], None, |_| record(&focus), &mut out);
+            assert_eq!(out.len(), count);
+            let ask = format!("VERSION '{label}' ASK {{{body}}}");
+            let PreparedValidator::Ask(query) = PreparedValidator::build(&ask, true).unwrap() else { panic!("ASK validator") };
+            assert_eq!(ask_violates(&query, &graph, &[("this", &focus)]), count == 0);
+        }
+        for prefix in ["VERSION 'bogus'", "VERSION '1.1' VERSION '1.2'"] {
+            assert!(PreparedSelectExpr::build_select("", &format!("{prefix} SELECT ?this WHERE {{}}")).is_none());
+            assert!(PreparedValidator::build(&format!("{prefix} ASK {{}}"), true).is_none());
+        }
     }
 }

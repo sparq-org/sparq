@@ -106,8 +106,8 @@ async fn execute<S: Store>(
         .as_deref()
         .filter(|query| !query.trim().is_empty())
         .ok_or_else(|| ServerError::BadRequest("missing query parameter".to_owned()))?;
-    let mut query = SparqlParser::new()
-        .parse_query(query_text)
+    let (mut query, versions) = SparqlParser::new()
+        .parse_query_with_versions(query_text)
         .map_err(|error| ServerError::BadRequest(format!("invalid SPARQL query: {error}")))?;
     apply_protocol_dataset(&mut query, &request)?;
 
@@ -124,7 +124,9 @@ async fn execute<S: Store>(
     let _snapshot = state.sparql_snapshot_read().await;
     let authorized = assemble_authorized_dataset(state.as_ref(), &token, origin).await?;
     expand_union_default(&mut query, &authorized.graph_names)?;
-    let prepared = sparq_engine::PreparedQuery::from(query);
+    // [GPT-6] Protocol and authorized-dataset rewrites retain the query contract.
+    let prepared = sparq_engine::PreparedQuery::from_query_with_versions(query, versions)
+        .map_err(ServerError::BadRequest)?;
 
     let (content_type, body) = match prepared.query() {
         Query::Select { .. } | Query::Ask { .. } => {

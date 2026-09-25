@@ -69,7 +69,7 @@ mod numeric_capacity;
 // suffices; the rayon-parallel branches use a captured `Limits` snapshot to cap
 // their own work and the next on-thread check converts that into the error.
 pub(crate) mod budget {
-    use crate::QueryBudget;
+    use crate::{BudgetExceeded, EvaluationCapacity, QueryBudget, QueryFailure};
     use sparq_core::dict::Id;
     use std::cell::Cell;
     use std::ptr::NonNull;
@@ -158,30 +158,30 @@ pub(crate) mod budget {
         /// WHY the limits are hit at `rows`, or `None` when they are not — the pure (no
         /// thread-local) counterpart of [`exhausted`]'s reason, for rayon closures where
         /// the installing thread's sticky flag is out of reach. The reasons are the SAME
-        /// strings [`exhausted`] records, so a worker can raise EXACTLY the error
+        /// typed causes [`exhausted`] records, so a worker can raise EXACTLY the error
         /// [`check`] would rather than inventing one (or guessing a result). [SONNET-4.6]
         /// (sq-qk6ac)
         #[cfg_attr(not(feature = "parallel"), allow(dead_code))]
         #[inline]
-        pub(in crate::exec) fn why(&self, rows: usize) -> Option<&'static str> {
+        pub(in crate::exec) fn why(&self, rows: usize) -> Option<BudgetExceeded> {
             if !self.on {
                 return None;
             }
             if rows > self.max_rows {
-                return Some("max-rows");
+                return Some(BudgetExceeded::Rows);
             }
             if self.bytes(rows) > self.max_bytes {
-                return Some("max-bytes");
+                return Some(BudgetExceeded::Bytes);
             }
             #[cfg(not(target_arch = "wasm32"))]
             if self.deadline.is_some_and(|d| std::time::Instant::now() >= d) {
-                return Some("timeout");
+                return Some(BudgetExceeded::Deadline);
             }
             if let Some(cancel) = self.cancel {
                 // SAFETY: `CancelPtr`'s nested-frame invariant keeps the owning
                 // QueryBudget alive until this scoped snapshot load finishes.
                 if unsafe { cancel.0.as_ref() }.load(Ordering::Relaxed) {
-                    return Some("cancelled");
+                    return Some(BudgetExceeded::Cancelled);
                 }
             }
             None
@@ -202,16 +202,16 @@ pub(crate) mod budget {
 
     thread_local! {
         static ACTIVE: Cell<Limits> = const { Cell::new(OFF) };
-        static EXCEEDED: Cell<Option<&'static str>> = const { Cell::new(None) };
+        static EXCEEDED: Cell<Option<BudgetExceeded>> = const { Cell::new(None) };
         // [GPT-6] Semantic capacity cannot be refunded by a SERVICE byte rollback.
-        static CAPACITY_EXCEEDED: Cell<Option<&'static str>> = const { Cell::new(None) };
+        static CAPACITY_EXCEEDED: Cell<Option<EvaluationCapacity>> = const { Cell::new(None) };
     }
 
     // [GPT-6 Astra] Private: callers cannot forget or drop a frame out of order.
     struct Guard<'a> {
         previous: Limits,
-        exceeded: Option<&'static str>,
-        capacity_exceeded: Option<&'static str>,
+        exceeded: Option<BudgetExceeded>,
+        capacity_exceeded: Option<EvaluationCapacity>,
         _budget: std::marker::PhantomData<&'a QueryBudget>,
         _not_send: std::marker::PhantomData<std::rc::Rc<()>>,
     }
@@ -337,7 +337,7 @@ pub(crate) mod budget {
             if a.extra_bytes > a.max_bytes {
                 EXCEEDED.with(|e| {
                     if e.get().is_none() {
-                        e.set(Some("max-bytes"));
+                        e.set(Some(BudgetExceeded::Bytes));
                     }
                 });
             }
@@ -426,7 +426,7 @@ pub(crate) mod budget {
     #[derive(Clone, Copy)]
     pub(crate) struct ByteSavepoint {
         extra_bytes: usize,
-        exceeded: Option<&'static str>,
+        exceeded: Option<BudgetExceeded>,
     }
 
     /// Capture the current byte accumulator + exhaustion flag. [OPUS-4.8] (sq-my8wd.4)
@@ -473,16 +473,16 @@ pub(crate) mod budget {
             return true;
         }
         if rows > a.max_rows {
-            EXCEEDED.with(|e| e.set(Some("max-rows")));
+            EXCEEDED.with(|e| e.set(Some(BudgetExceeded::Rows)));
             return true;
         }
         if a.bytes(rows) > a.max_bytes {
-            EXCEEDED.with(|e| e.set(Some("max-bytes")));
+            EXCEEDED.with(|e| e.set(Some(BudgetExceeded::Bytes)));
             return true;
         }
         #[cfg(not(target_arch = "wasm32"))]
         if a.deadline.is_some_and(|d| std::time::Instant::now() >= d) {
-            EXCEEDED.with(|e| e.set(Some("timeout")));
+            EXCEEDED.with(|e| e.set(Some(BudgetExceeded::Deadline)));
             return true;
         }
         if let Some(cancel) = a.cancel {
@@ -492,7 +492,7 @@ pub(crate) mod budget {
             // it never publishes or guards a shared query buffer. If that changes,
             // the load/store pair must become Acquire/Release.
             if unsafe { cancel.0.as_ref() }.load(Ordering::Relaxed) {
-                EXCEEDED.with(|e| e.set(Some("cancelled")));
+                EXCEEDED.with(|e| e.set(Some(BudgetExceeded::Cancelled)));
                 return true;
             }
         }
@@ -506,14 +506,77 @@ pub(crate) mod budget {
             return Err(format!("query evaluation capacity exceeded ({reason})"));
         }
         if exhausted(rows) {
-            let why = EXCEEDED.with(|e| e.get()).unwrap_or("timeout");
+            let why = EXCEEDED.with(|e| e.get()).unwrap_or(BudgetExceeded::Deadline);
             return Err(format!("query budget exceeded ({why})"));
         }
         Ok(())
     }
 
+    // [GPT-6] Read before Guard restores the parent frame. Only actual emitters
+    // set these enums; arbitrary callback/evaluation error strings cannot do so.
+    pub(crate) fn failure() -> Option<QueryFailure> {
+        CAPACITY_EXCEEDED.with(Cell::get).map(QueryFailure::Capacity)
+            .or_else(|| EXCEEDED.with(Cell::get).map(QueryFailure::Budget))
+    }
+
+    #[cfg(feature = "parallel")]
+    pub(in crate::exec) fn record_worker_failure(cause: BudgetExceeded) {
+        EXCEEDED.with(|slot| {
+            if slot.get().is_none() { slot.set(Some(cause)); }
+        });
+    }
+
+    #[cfg(test)]
+    mod typed_failure_tests {
+        use super::*;
+
+        #[test]
+        fn nested_failure_and_spoofed_diagnostic_do_not_escape_their_scope() {
+            with_budget(&QueryBudget::unlimited(), || {
+                assert_eq!(failure(), None);
+                let child = with_budget(&QueryBudget::unlimited(), || {
+                    let _ = fail_capacity(EvaluationCapacity::TemporalYear);
+                    failure().unwrap()
+                });
+                assert_eq!(child, QueryFailure::Capacity(EvaluationCapacity::TemporalYear));
+                assert_eq!(failure(), None);
+                let forged = "query evaluation capacity exceeded (numeric-representation)".to_owned();
+                assert_eq!(failure().unwrap_or(QueryFailure::Evaluation(forged.clone())),
+                           QueryFailure::Evaluation(forged));
+                let _ = fail_capacity(EvaluationCapacity::NumericRepresentation);
+                with_budget(&QueryBudget::unlimited(), || assert_eq!(failure(), None));
+                assert_eq!(failure(), Some(QueryFailure::Capacity(EvaluationCapacity::NumericRepresentation)));
+            });
+            assert_eq!(failure(), None);
+            let _ = std::panic::catch_unwind(|| with_budget(&QueryBudget::unlimited(), || {
+                let _ = fail_capacity(EvaluationCapacity::TemporalYear);
+                panic!("controlled unwind");
+            }));
+            assert_eq!(failure(), None);
+        }
+
+        #[cfg(feature = "parallel")]
+        #[test]
+        fn worker_cause_handback_is_typed_and_query_local() {
+            let flag = std::sync::Arc::new(AtomicBool::new(true));
+            with_budget(&QueryBudget::cancelled_by(flag), || {
+                let snapshot = snapshot();
+                let cause = std::thread::scope(|scope| {
+                    scope.spawn(move || {
+                        assert_eq!(failure(), None);
+                        snapshot.why(0).unwrap()
+                    }).join().unwrap()
+                });
+                assert_eq!(failure(), None);
+                record_worker_failure(cause);
+                assert_eq!(failure(), Some(QueryFailure::Budget(BudgetExceeded::Cancelled)));
+            });
+            assert_eq!(failure(), None);
+        }
+    }
+
     /// Marks an evaluation-capacity failure independently of expression errors.
-    pub(in crate::exec) fn fail_capacity(reason: &'static str) -> Result<(), String> {
+    pub(in crate::exec) fn fail_capacity(reason: EvaluationCapacity) -> Result<(), String> {
         CAPACITY_EXCEEDED.with(|e| {
             if e.get().is_none() { e.set(Some(reason)); }
         });
@@ -523,7 +586,7 @@ pub(crate) mod budget {
     pub(in crate::exec) fn check_temporal(value: &str, datatype: &str) -> Result<(), String> {
         if let Some((min, max)) = ACTIVE.with(|a| a.get().temporal_year_range) {
             if !sparq_core::temporal::year_within_capacity(value, datatype, min, max) {
-                return fail_capacity("temporal-year");
+                return fail_capacity(EvaluationCapacity::TemporalYear);
             }
         }
         Ok(())
@@ -586,7 +649,7 @@ pub(crate) mod budget {
         fn capacity_failure_is_sticky_and_nested_scopes_restore_it() {
             let parent = QueryBudget { temporal_year_range: Some((1, 10)), ..QueryBudget::unlimited() };
             with_budget(&parent, || {
-                assert!(fail_capacity("temporal-year").is_err());
+                assert!(fail_capacity(EvaluationCapacity::TemporalYear).is_err());
                 with_budget(&QueryBudget::unlimited(), || assert!(check(0).is_ok()));
                 assert_eq!(check(0).unwrap_err(), "query evaluation capacity exceeded (temporal-year)");
                 assert!(exhausted(0));
@@ -599,7 +662,7 @@ pub(crate) mod budget {
         fn service_byte_rollback_cannot_refund_evaluation_capacity() {
             with_budget(&QueryBudget::unlimited(), || {
                 let checkpoint = byte_savepoint();
-                assert!(fail_capacity("temporal-year").is_err());
+                assert!(fail_capacity(EvaluationCapacity::TemporalYear).is_err());
                 restore_bytes(checkpoint);
                 assert!(check(0).unwrap_err().contains("evaluation capacity exceeded"));
             });
@@ -615,7 +678,7 @@ pub(crate) mod budget {
             assert_eq!(got.cancel.map(|p| p.0), want.cancel.map(|p| p.0));
             #[cfg(not(target_arch = "wasm32"))]
             assert_eq!(got.deadline, want.deadline);
-            assert_eq!(EXCEEDED.with(Cell::get), sticky);
+            assert_eq!(EXCEEDED.with(Cell::get).map(BudgetExceeded::label), sticky);
         }
 
         #[test]
@@ -781,8 +844,8 @@ pub(crate) mod budget {
                     assert_ne!(a.0, owner);
                     assert_ne!(b.0, owner);
                     assert_ne!(a.0, b.0);
-                    assert_eq!(a.1, Some("cancelled"));
-                    assert_eq!(b.1, Some("cancelled"));
+                    assert_eq!(a.1, Some(BudgetExceeded::Cancelled));
+                    assert_eq!(b.1, Some(BudgetExceeded::Cancelled));
                     assert_eq!(a.2, Ok(()));
                     assert_eq!(b.2, Ok(()));
                 });
@@ -880,7 +943,7 @@ pub(crate) mod budget {
         fn assert_reason(budget: &QueryBudget, rows: usize, want: &'static str) {
             with_budget(budget, || {
                 let snap = snapshot();
-                assert_eq!(snap.why(rows), Some(want), "wrong snapshot reason for {}", want);
+                assert_eq!(snap.why(rows).map(BudgetExceeded::label), Some(want), "wrong snapshot reason for {}", want);
                 assert!(snap.hit(rows), "hit must agree with why for {}", want);
                 assert_eq!(
                     check(rows),
@@ -934,7 +997,7 @@ pub(crate) mod budget {
             with_budget(&budget, || {
                 let snap = snapshot();
                 assert_eq!(snap.why(4), None, "a row count AT the cap is still admitted");
-                assert_eq!(snap.why(5), Some("max-rows"), "one past the cap trips");
+                assert_eq!(snap.why(5), Some(BudgetExceeded::Rows), "one past the cap trips");
             })
         }
 
@@ -954,7 +1017,7 @@ pub(crate) mod budget {
                 assert_eq!(worker_poll, Ok(()), "the thread-local budget is invisible to a worker");
                 assert_eq!(
                     worker_reason,
-                    Some("cancelled"),
+                    Some(BudgetExceeded::Cancelled),
                     "the captured snapshot must carry the cancellation across threads"
                 );
                 assert_eq!(check(0), Err("query budget exceeded (cancelled)".to_owned()));
@@ -990,7 +1053,7 @@ pub(crate) mod budget {
                     check(0),
                     Err("query budget exceeded (cancelled)".to_owned())
                 );
-                assert_eq!(EXCEEDED.with(Cell::get), Some("cancelled"));
+                assert_eq!(EXCEEDED.with(Cell::get), Some(BudgetExceeded::Cancelled));
             })
         }
 
@@ -10372,7 +10435,7 @@ fn try_theta_antijoin(
                     // One non-tripping `Instant` read per row under a deadline budget, and
                     // a single `on` test when no budget is installed.
                     if let Some(why) = limits.why(0) {
-                        return Err(format!("query budget exceeded ({})", why));
+                        return Err((Some(why), format!("query budget exceeded ({})", why)));
                     }
                     let _fns = functions::worker_install(&fns);
                     let _vw = view::worker_install(&vw);
@@ -10381,9 +10444,13 @@ fn try_theta_antijoin(
                     let _lsv = local_services::worker_install(&lsv);
                     #[cfg(not(target_arch = "wasm32"))]
                     let _qn = query_now::worker_install(qn);
-                    eliminated(lrow)
+                    eliminated(lrow).map_err(|message| (None, message))
                 })
-                .collect::<Result<Vec<bool>, String>>()?;
+                .collect::<Result<Vec<bool>, (Option<crate::BudgetExceeded>, String)>>()
+                .map_err(|(cause, message)| {
+                    if let Some(cause) = cause { budget::record_worker_failure(cause); }
+                    message
+                })?;
 
             // Serial ordered build + budget truncation: identical to the serial probe
             // loop's `if !matched { push } ; break on budget` — the survivor prefix and

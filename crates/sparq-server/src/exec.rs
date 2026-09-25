@@ -241,8 +241,7 @@ pub fn apply_update_dataset(
     if over.is_empty() {
         return Ok(update.to_string());
     }
-    let mut parsed: Update = SparqlParser::new()
-        .parse_update(update)
+    let mut parsed: Update = sparq_engine::parse_update_rec2013(update)
         .map_err(|e| UpdateDatasetError::Malformed(e.to_string()))?;
     // §2.2: it is an error to supply the protocol params when ANY operation already names its WHERE
     // dataset in-string (USING / USING NAMED / WITH — all encoded as `using: Some(..)`).
@@ -468,6 +467,21 @@ mod tests {
             apply_update_dataset(u, &UsingOverride::default()).unwrap(),
             u
         );
+    }
+
+    #[test]
+    fn using_override_cannot_erase_unsupported_update_version() {
+        // [GPT-6] Protocol dataset rewriting must reject before serialization
+        // could discard a VERSION announcement. Empty overrides retain text
+        // for the engine's same REC-only validation.
+        let over = UsingOverride { default: vec!["urn:g".into()], named: vec![] };
+        for label in ["1.2", "1.2-basic", "unknown"] {
+            let text = format!("VERSION '{label}' INSERT {{?s <urn:q> ?o}} WHERE {{?s <urn:p> ?o}}");
+            assert!(matches!(apply_update_dataset(&text, &over), Err(UpdateDatasetError::Malformed(_))));
+            let retained = apply_update_dataset(&text, &UsingOverride::default()).unwrap();
+            assert!(sparq_engine::parse_update_rec2013(&retained).is_err());
+        }
+        assert!(apply_update_dataset("VERSION '1.1' INSERT {?s <urn:q> ?o} WHERE {?s <urn:p> ?o}", &over).is_ok());
     }
 
     #[test]

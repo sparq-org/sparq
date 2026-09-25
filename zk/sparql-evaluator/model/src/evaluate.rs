@@ -371,6 +371,19 @@ fn ordered(mut p: &GraphPattern) -> bool {
 /// # Errors
 /// Rejects mismatched anchors, unsupported queries/data, or evaluation/resource errors.
 pub fn evaluate(witness: &Witness) -> Result<Journal, Rejected> {
+    evaluate_detailed(witness).map_err(Rejected::from)
+}
+
+/// [GPT-6] Evaluates the same relation while retaining typed execution causes.
+///
+/// Request, dataset and journal encodings are identical to [`evaluate`].
+/// Private execution diagnostics are discarded; a cause comes from the actual
+/// engine emitter, never from a diagnostic substring.
+///
+/// # Errors
+/// Returns an existing relation rejection, typed capacity/budget cause, or an
+/// ordinary whole-query execution failure. Expression errors remain SPARQL data.
+pub fn evaluate_detailed(witness: &Witness) -> Result<Journal, EvaluationError> {
     validate_request(&witness.request)?;
     let request = &witness.request;
     let commitment = dataset_commitment(&witness.dataset, &request.policy)?;
@@ -379,7 +392,7 @@ pub fn evaluate(witness: &Witness) -> Result<Journal, Rejected> {
             commitment: expected,
         } => {
             if commitment != expected {
-                return Err(Rejected("complete dataset anchor mismatch"));
+                return Err(Rejected("complete dataset anchor mismatch").into());
             }
             Provenance::VerifierAcceptedCommitment
         }
@@ -393,10 +406,10 @@ pub fn evaluate(witness: &Witness) -> Result<Journal, Rejected> {
     for triple in oxttl::NTriplesParser::new().for_slice(witness.dataset.ntriples.as_bytes()) {
         let triple = triple.map_err(|_| Rejected("N-Triples parse rejected"))?;
         if triples.len() >= request.policy.max_triples as usize {
-            return Err(Rejected("source triple capacity"));
+            return Err(Rejected("source triple capacity").into());
         }
         let NamedOrBlankNode::NamedNode(subject) = triple.subject else {
-            return Err(Rejected("dataset blank nodes are not admitted"));
+            return Err(Rejected("dataset blank nodes are not admitted").into());
         };
         term_string(&triple.object)?;
         triples.push([
@@ -415,10 +428,9 @@ pub fn evaluate(witness: &Witness) -> Result<Journal, Rejected> {
         max_bytes: Some(4 * MAX_DATASET_BYTES as usize),
         ..Default::default()
     };
-    let result = sparq_engine::query_prepared_with_budget(&graph, &prepared, &budget)
-        .map_err(|_| Rejected("query evaluation or resource budget rejected"))?;
+    let result = sparq_engine::query_prepared_with_budget_detailed(&graph, &prepared, &budget)?;
     if result.rows.len() > request.policy.max_rows as usize {
-        return Err(Rejected("result row capacity"));
+        return Err(Rejected("result row capacity").into());
     }
     let result = match prepared.query() {
         spargebra::Query::Ask { .. } => CanonicalResult::Ask(!result.rows.is_empty()),
@@ -446,7 +458,7 @@ pub fn evaluate(witness: &Witness) -> Result<Journal, Rejected> {
                 rows,
             }
         }
-        _ => return Err(Rejected("query form rejected")),
+        _ => return Err(Rejected("query form rejected").into()),
     };
     Ok(Journal {
         version: VERSION,

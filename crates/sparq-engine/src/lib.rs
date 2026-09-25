@@ -24,6 +24,8 @@ pub mod cs;
 mod cs_gate;
 mod dataset;
 mod exec;
+mod query_failure;
+pub use query_failure::{BudgetExceeded, EvaluationCapacity, QueryFailure};
 mod explain;
 #[cfg(feature = "persistent-stats")]
 pub mod stats;
@@ -143,7 +145,7 @@ pub use explain_json::{
     SlowQueryRing,
 };
 pub use update::{
-    apply_effects, update, update_in_place, update_in_place_atomic,
+    apply_effects, parse_update_rec2013, update, update_in_place, update_in_place_atomic,
     update_in_place_atomic_with_budget, update_in_place_capturing, update_in_place_with_budget,
     with_load_base, UpdateEffect,
 };
@@ -932,6 +934,14 @@ impl PreparedQuery {
         &self.query
     }
 
+    /// Replaces algebra while retaining all validated VERSION announcements.
+    ///
+    /// [GPT-6] Use after structural rewrites of this query. Unlike `From<Query>`,
+    /// this preserves the source query's EBV contract without re-parsing text.
+    pub fn with_query(&self, query: Query) -> Self {
+        Self { query, versions: self.versions.clone() }
+    }
+
     /// True for the graph-valued query forms (CONSTRUCT / DESCRIBE), which produce a set
     /// of triples rather than a solution sequence. SELECT/ASK go through [`query`]/[`count`];
     /// the graph forms go through [`construct_or_describe`]. Lets callers (e.g. the CLI bench
@@ -1013,7 +1023,7 @@ impl PreparedUpdate {
     /// Parses a SPARQL UPDATE string into its reusable algebra form.
     pub fn parse(sparql: &str) -> Result<PreparedUpdate, String> {
         Ok(PreparedUpdate {
-            update: SparqlParser::new().parse_update(sparql).map_err(|e| e.to_string())?,
+            update: parse_update_rec2013(sparql)?,
         })
     }
 
@@ -1098,14 +1108,30 @@ pub fn query_prepared_with_budget(
     prepared: &PreparedQuery,
     budget: &QueryBudget,
 ) -> Result<QueryResult, String> {
-    let semantics = prepared.resolve_ebv_semantics(budget.ebv_semantics)?;
+    query_prepared_with_budget_detailed(graph, prepared, budget).map_err(|error| error.to_string())
+}
+
+/// [GPT-6] Executes a prepared SELECT/ASK query with typed whole-query causes.
+///
+/// Budget/domain causes are captured from actual emitters before query-local
+/// state is restored. Diagnostic text is never used to classify a failure.
+/// Ordinary SPARQL expression errors retain their existing row semantics.
+///
+/// # Errors
+/// Returns a typed budget/capacity failure or another whole-query diagnostic.
+pub fn query_prepared_with_budget_detailed(
+    graph: &Graph,
+    prepared: &PreparedQuery,
+    budget: &QueryBudget,
+) -> Result<QueryResult, QueryFailure> {
+    let semantics = prepared.resolve_ebv_semantics(budget.ebv_semantics).map_err(QueryFailure::Evaluation)?;
     let q = &prepared.query;
     let active = active_dataset(graph, q);
     let graph = active.as_ref().unwrap_or(graph);
     let _view_scope = view_scope(&active);
     exec::budget::with_query_budget(budget, semantics, || {
         exec::set_query_base(q.base_iri().map(|b| b.as_str()));
-        match q {
+        let result = (|| match q {
             Query::Select { pattern, .. } => exec::eval_select(graph, pattern),
             // ASK as a QueryResult: zero variables, and one (empty) row iff the pattern
             // is satisfiable — the standard "unit row" encoding of a boolean result.
@@ -1114,7 +1140,8 @@ pub fn query_prepared_with_budget(
                 rows: if exec::eval_ask(graph, pattern)? { vec![Vec::new()] } else { Vec::new() },
             }),
             _ => Err("only SELECT and ASK queries are supported".into()),
-        }
+        })();
+        result.map_err(|message| exec::budget::failure().unwrap_or(QueryFailure::Evaluation(message)))
     })
 }
 

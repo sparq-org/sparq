@@ -211,10 +211,12 @@ fn validate_prologue(prologue: &str) -> Result<(), String> {
     if prologue.is_empty() {
         return Ok(());
     }
-    SparqlParser::new()
-        .parse_query(&format!("{prologue} ASK {{ }}"))
+    // [GPT-6] This extension serializes inner patterns without a prologue.
+    // Reject unsupported semantics before that intentional metadata boundary.
+    crate::PreparedQuery::parse(&format!("{prologue} ASK {{ }}"))?
+        .resolve_ebv_semantics(Some(crate::EbvSemantics::Rec2013))
         .map(|_| ())
-        .map_err(|error| format!("invalid PATHS prologue: {error}"))
+        .map_err(|error| format!("PATHS supports only REC 2013 EBV semantics: {error}"))
 }
 
 fn resolve_iri(prologue: &str, token: &str) -> Result<NamedNode, String> {

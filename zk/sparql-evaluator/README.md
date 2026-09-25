@@ -226,3 +226,9 @@ its native and actual-guest runners authenticate each case's source dataset.
 Definitions of actual-guest tests are not execution evidence. The strengthened
 false-ASK fixture includes padded raw boolean/numeric branches; earlier receipts
 retain their original source scope. See [the semantics record](../../skills/sparql-query/raw-literal-whitespace.md).
+
+`evaluate_detailed` exposes typed execution causes without changing request or
+journal encodings. Row/byte exhaustion, deadline, cancellation, exact numeric or
+temporal capacity, ordinary whole-query failure, and existing relation rejection
+remain distinguishable. Private engine diagnostic text is discarded. The legacy
+`evaluate` API preserves its original generic execution error. [GPT-6]

@@ -203,14 +203,26 @@ pub fn run_syntax_test(entry: &TestEntry, positive: bool, update: bool) -> Statu
 
 // [GPT-6] The downloaded suite determines EBV expectations. This does not
 // claim complete 1.2 support and never changes expected RDF terms or ratchets.
-fn suite_budget(entry: &TestEntry) -> sparq_engine::QueryBudget {
+fn suite_budget(suite: &str) -> sparq_engine::QueryBudget {
     sparq_engine::QueryBudget {
-        ebv_semantics: Some(if entry.suite.starts_with("sparql12/") {
+        ebv_semantics: Some(if suite == "sparql12" || suite.starts_with("sparql12/") {
             sparq_engine::EbvSemantics::Draft20260912
         } else {
             sparq_engine::EbvSemantics::Rec2013
         }),
         ..Default::default()
+    }
+}
+
+#[test]
+fn root_and_nested_suite_labels_select_only_the_pinned_ebv_dialect() {
+    // [GPT-6] Root manifests and their descendants share the suite dialect;
+    // similarly named directories must not acquire it accidentally.
+    for suite in ["sparql12", "sparql12/ebv", "sparql12/syntax"] {
+        assert_eq!(suite_budget(suite).ebv_semantics, Some(sparq_engine::EbvSemantics::Draft20260912));
+    }
+    for suite in ["sparql11", "sparql11/ebv", "sparql12-other", "other/sparql12"] {
+        assert_eq!(suite_budget(suite).ebv_semantics, Some(sparq_engine::EbvSemantics::Rec2013));
     }
 }
 
@@ -327,7 +339,7 @@ pub fn run_query_test_filtered(
         },
     };
     let query_with_base = with_base(&query_text, &base);
-    let budget = suite_budget(entry);
+    let budget = suite_budget(&entry.suite);
 
     // ASK: run on the engine's native boolean path and compare to the expected boolean.
     if is_ask {
@@ -537,7 +549,7 @@ fn run_construct_test(
         },
     };
     let query_with_base = with_base(query_text, base);
-    let budget = suite_budget(entry);
+    let budget = suite_budget(&entry.suite);
 
     let graph_names: Vec<String> = graph_data.iter().map(|(g, _)| g.clone()).collect();
     let (tx, rx) = mpsc::channel();

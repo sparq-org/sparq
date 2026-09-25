@@ -500,8 +500,31 @@ fn apply_op(ds: &mut Dataset, op: &GraphUpdateOperation) -> Result<(), String> {
 /// preserved). Errors (leaving the input untouched — it is borrowed) on a parse error or a
 /// non-SILENT failing LOAD.
 pub fn update(graph: &Graph, sparql: &str) -> Result<Graph, String> {
-    let upd = SparqlParser::new().parse_update(sparql).map_err(|e| e.to_string())?;
+    let upd = parse_update_rec2013(sparql)?;
     apply_update_rebuild(graph, &upd)
+}
+
+/// Parses an update, rejecting VERSION labels outside the supported REC 2013 contract.
+///
+/// [GPT-6] Protocol rewrites must use this before discarding parser metadata.
+/// SPARQL 1.2 draft EBV selection is currently supported for queries only.
+///
+/// # Errors
+/// Returns a parse error or rejects any announcement other than `1.1`.
+pub fn parse_update_rec2013(sparql: &str) -> Result<Update, String> {
+    let (update, versions) = SparqlParser::new()
+        .parse_update_with_versions(sparql).map_err(|e| e.to_string())?;
+    if versions.iter().any(|version| version != "1.1") {
+        return Err("UPDATE supports only REC 2013 EBV semantics (VERSION 1.1)".into());
+    }
+    Ok(update)
+}
+
+fn require_update_budget(budget: &crate::QueryBudget) -> Result<(), String> {
+    if budget.ebv_semantics.is_some_and(|rule| rule != crate::EbvSemantics::Rec2013) {
+        return Err("UPDATE supports only REC 2013 EBV semantics".into());
+    }
+    Ok(())
 }
 
 /// The shared rebuild loop over an ALREADY-PARSED `Update` (decode → apply ops →
@@ -509,11 +532,13 @@ pub fn update(graph: &Graph, sparql: &str) -> Result<Graph, String> {
 /// prepared-update path so the bound algebra is applied DIRECTLY (no re-serialise /
 /// re-parse — a hostile bound value can never re-enter the parser). [OPUS-4.8] (sq-rp3um)
 fn apply_update_rebuild(graph: &Graph, upd: &Update) -> Result<Graph, String> {
-    let mut ds = Dataset::decode(graph);
-    for op in &upd.operations {
-        apply_op(&mut ds, op)?;
-    }
-    Ok(ds.build())
+    crate::exec::budget::with_query_budget(&crate::QueryBudget::unlimited(), crate::EbvSemantics::Rec2013, || {
+        let mut ds = Dataset::decode(graph);
+        for op in &upd.operations {
+            apply_op(&mut ds, op)?;
+        }
+        Ok(ds.build())
+    })
 }
 
 /// [OPUS-4.8] (sq-rp3um) [`update`] over an ALREADY-PARSED bound `Update` — the rebuild
@@ -532,6 +557,7 @@ pub(crate) fn update_in_place_prepared_with_budget(
     upd: &Update,
     budget: &crate::QueryBudget,
 ) -> Result<(), String> {
+    require_update_budget(budget)?;
     crate::exec::budget::with_budget(budget, || {
         apply_update_in_place(graph, upd, None)
     })
@@ -726,8 +752,9 @@ fn update_in_place_core(
     budget: &crate::QueryBudget,
     sink: EffectSink,
 ) -> Result<(), String> {
+    require_update_budget(budget)?;
     crate::exec::budget::with_budget(budget, || {
-        let upd = SparqlParser::new().parse_update(sparql).map_err(|e| e.to_string())?;
+        let upd = parse_update_rec2013(sparql)?;
         apply_update_in_place(graph, &upd, sink)
     })
 }

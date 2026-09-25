@@ -174,6 +174,18 @@ def test_ask():
         graph.ask("DESCRIBE <http://ex/alice>")
 
 
+def test_ask_and_select_count_retain_version_ebv():
+    # [GPT-6] Exercise the real Python entry points, including SELECT-as-bool.
+    graph = g()
+    body = 'FILTER(!"z"^^<http://www.w3.org/2001/XMLSchema#boolean>)'
+    for form in ("ASK", "SELECT * WHERE"):
+        assert graph.ask(f"VERSION '1.1' {form} {{{body}}}")
+        assert not graph.ask(f"VERSION '1.2' {form} {{{body}}}")
+        for prologue in ("VERSION 'bogus'", "VERSION '1.1' VERSION '1.2'"):
+            with pytest.raises(ValueError):
+                graph.ask(f"{prologue} {form} {{{body}}}")
+
+
 # --- construct / describe ----------------------------------------------------
 
 

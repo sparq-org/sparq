@@ -984,11 +984,14 @@ fn the_parallel_verdict_fan_out_abandons_probing_when_the_budget_trips() {
     //     raise the canonical error and stop probing well short of all `N` left rows.
     armed.store(true, Ordering::SeqCst);
     let budget = sparq_engine::QueryBudget::cancelled_by(Arc::clone(&cancel));
-    assert_eq!(
-        sparq_engine::query_with_functions_and_budget(&g, &q, &fns, &budget).map(|r| r.rows.len()),
-        Err("query budget exceeded (cancelled)".to_owned()),
-        "a mid-probe cancellation must raise the canonical budget error, never a partial answer"
-    );
+    // [GPT-6] The worker's typed reason must survive the synchronous handback;
+    // a matching diagnostic alone must not be reclassified as cancellation.
+    let prepared = sparq_engine::PreparedQuery::parse(&q).unwrap();
+    let error = sparq_engine::with_functions(&fns, || {
+        sparq_engine::query_prepared_with_budget_detailed(&g, &prepared, &budget)
+    }).unwrap_err();
+    assert_eq!(error, sparq_engine::QueryFailure::Budget(sparq_engine::BudgetExceeded::Cancelled));
+    assert_eq!(error.to_string(), "query budget exceeded (cancelled)");
     let evaluated = probes.load(Ordering::SeqCst);
     assert!(
         evaluated >= TRIP_AFTER,

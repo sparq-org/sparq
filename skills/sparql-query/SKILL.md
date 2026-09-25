@@ -67,7 +67,7 @@ graphs (so `GRAPH <g> {…}` / `GRAPH ?g {…}` work), use `Graph::load_dataset(
 
 ## Key APIs
 
-All entry points take `&Graph` + `&str` and return `Result<_, String>` (parse + eval errors are
+The ordinary text-query entry points take `&Graph` + `&str` and return `Result<_, String>` (parse + eval errors are
 `String`). The result types:
 
 - `sparq_core::strdist::edit_distance(&str, &str) -> usize` computes character-based
@@ -125,6 +125,13 @@ validated integer/decimal digits exactly, without a floating-point conversion.
 Invalid numeric/boolean lexical EBV is false under SPARQL 1.1 §17.2.2;
 arithmetic on invalid numeric terms still errors. Constrained expression work
 stays on the calling thread. See the [numeric capacity contract](../zk-query-proofs/references/numeric-capacity.md).
+
+[GPT-6] `query_prepared_with_budget_detailed` returns `QueryFailure` with typed
+`Budget(BudgetExceeded::{Rows, Bytes, Deadline, Cancelled})`,
+`Capacity(EvaluationCapacity::{NumericRepresentation, TemporalYear})`, or
+`Evaluation(String)`. Causes are captured before the query budget scope is
+restored; never infer a category from the diagnostic. Ordinary expression errors
+retain SPARQL semantics. Existing String-returning entry points are unchanged.
 
 SELECT/ASK entry points (each has `_prepared`, `_with_budget`, and `_view` variants):
 

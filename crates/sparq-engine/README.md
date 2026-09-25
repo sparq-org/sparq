@@ -15,7 +15,7 @@ and register custom functions. [Exact temporal comparison and optional year budg
 <!-- [GPT-6] The detached proof guest does not add an engine dependency. -->
 The opt-in [proved evaluator](../../zk/sparql-evaluator/README.md) restricts `target_os = "zkvm"`, rejecting ambient NOW/RAND/UUID in that target only. The experiment is not externally audited.
 
-[GPT-6] `QueryBudget.ebv_semantics` selects [version-pinned EBV rules](../../skills/sparql-query/ebv-dialects.md), with REC 2013 as the unannounced default; this does not claim full SPARQL 1.2 support.
+[GPT-6] `query_prepared_with_budget_detailed` preserves typed budget/domain causes; existing String APIs remain compatible. `QueryBudget.ebv_semantics` selects [version-pinned EBV rules](../../skills/sparql-query/ebv-dialects.md), with REC 2013 as the unannounced default; this does not claim full SPARQL 1.2 support.
 
 ## 🚀 Quickstart
 
@@ -110,7 +110,7 @@ let json = sparq_engine::query_json(&g, "SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?
 
 ## 📚 Learn more
 
-- **How-to** — [query guide](../../skills/sparql-query/SKILL.md); **API** — [docs.rs](https://docs.rs/sparq-engine).
+- **How-to** — [query guide](../../skills/sparql-query/SKILL.md); **API** — [docs.rs](https://docs.rs/sparq-engine). [GPT-6] Prepared-query rewrites use `with_query` to retain VERSION metadata. UPDATE and the PATHS extension are REC 2013 only and reject unsupported announcements; see the [EBV dialect contract](../../skills/sparql-query/ebv-dialects.md).
 - **Design** — [`research/ARCHITECTURE.md`](../../research/ARCHITECTURE.md) and the planning / parallelism verdicts in [`research/`](../../research).
 - **Performance** — numbers live on the [benchmarks dashboard](https://sparq.jeswr.org/dev/bench), not in docs.
 - **Contribute** — [`AGENTS.md`](../../AGENTS.md) and [`CONTRIBUTING.md`](../../CONTRIBUTING.md).

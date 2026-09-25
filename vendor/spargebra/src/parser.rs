@@ -150,11 +150,14 @@ impl SparqlParser {
     /// assert_eq!(update.to_string().trim(), update_str);
     /// # Ok::<_, spargebra::SparqlSyntaxError>(())
     /// ```
-    #[cfg_attr(
-        not(feature = "standard-unicode-escaping"),
-        expect(clippy::needless_borrow)
-    )]
     pub fn parse_update(self, update: &str) -> Result<Update, SparqlSyntaxError> {
+        self.parse_update_with_versions(update).map(|(update, _)| update)
+    }
+
+    /// [GPT-6] Parses update algebra and retains every VERSION announcement.
+    /// Execution support is checked by the caller; the legacy AST is unchanged.
+    #[cfg_attr(not(feature = "standard-unicode-escaping"), expect(clippy::needless_borrow))]
+    pub fn parse_update_with_versions(self, update: &str) -> Result<(Update, Vec<String>), SparqlSyntaxError> {
         let mut state = ParserState::new(
             self.base_iri,
             self.prefixes,
@@ -171,10 +174,10 @@ impl SparqlParser {
             Err(e) => return Err(SparqlSyntaxErrorKind::Syntax(e).into()),
         };
         check_if_insert_data_are_sharing_blank_nodes(&operations)?;
-        Ok(Update {
+        Ok((Update {
             operations,
             base_iri: state.base_iri,
-        })
+        }, state.versions))
     }
 }
 

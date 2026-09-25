@@ -106,7 +106,7 @@ docker run --rm --name sparq-lws-core -p 127.0.0.1:3000:3000 \
 
 ## 📚 Learn more
 
-- Usage: [`skills/solid-lws-server/SKILL.md`](../../skills/solid-lws-server/SKILL.md).
+- Usage: [`skills/solid-lws-server/SKILL.md`](../../skills/solid-lws-server/SKILL.md). [GPT-6] Authorized dataset rewrites retain query VERSION announcements. Unknown or incompatible labels return a bad-request error before evaluation; see the [EBV dialect contract](../../skills/sparql-query/ebv-dialects.md).
 - Design records: [`research/lws-design-records.md`](../../research/lws-design-records.md) — the in-repo home for this crate's migrated `decisions/` + `docs/design/` estate (sq-gg0qq.10), reconstructed from the code. Doc-comments here cite that record by section; where a source-repo path is still named it carries its `RSS`/`PSS` namespace (§2), and §1 maps every source path to its in-repo home. `bench/` stays in the source repo.
 - Specification estate (what this crate is pinned to, and what is still UNRESOLVED — issue #4971): the crate-level rustdoc, `cargo doc -p sparq-lws-core --open`.
 - Normative specs — the spec is the contract, not this implementation: [DPoP-SK](https://jeswr.github.io/dpop-sk-spec/), implemented here in `src/pop/sk/` against that profile (its Appendix-A worked example runs as a test vector); and the pinned [solid-oidc-verifier](https://github.com/jeswr/solid-oidc-verifier), which owns baseline (cache-miss) Solid-OIDC token + DPoP proof verification. On a verified-token-cache hit `src/auth_cache.rs` re-verifies the fresh proof locally — signature, `htm`/`htu`/`iat`, `ath`, `jti` replay, `cnf.jkt` binding — built from the verifier's own public primitives and its shared replay store, so that path is security-sensitive code to audit here.

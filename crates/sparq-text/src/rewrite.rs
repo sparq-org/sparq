@@ -44,7 +44,7 @@
 //! resolved through the graph's dictionary. The surrounding query then joins
 //! those literals to triples through the store's ordinary permutation
 //! indexes; the rewritten algebra runs through sparq-engine's prepared-query
-//! seam ([`PreparedQuery`]`: From<spargebra::Query>`), so the engine —
+//! seam ([`PreparedQuery::with_query`], retaining VERSION metadata), so the engine —
 //! planner, executor, wasm bundle — is completely unaware of text search.
 //!
 //! Result ordering: `VALUES` rows carry no order through joins — sort with
@@ -96,10 +96,11 @@ pub fn prepare_text(
     sparql: &str,
     index: &TextIndex,
 ) -> Result<PreparedQuery, String> {
-    let query = spargebra::SparqlParser::new()
-        .parse_query(sparql)
+    let (query, versions) = spargebra::SparqlParser::new()
+        .parse_query_with_versions(sparql)
         .map_err(|e| e.to_string())?;
-    Ok(PreparedQuery::from(rewrite_query(query, graph, index)?))
+    let prepared = PreparedQuery::from_query_with_versions(query, versions)?;
+    Ok(prepared.with_query(rewrite_query(prepared.query().clone(), graph, index)?))
 }
 
 /// Rewrites every `text:` magic pattern in the query into inline `VALUES`

@@ -52,7 +52,7 @@ use pyo3::types::{PyDict, PyList, PyString};
 use sparq_core::dict::{Dict, Id};
 use sparq_core::Graph as CoreGraph;
 use sparq_text::TextIndex;
-use spargebra::{Query, SparqlParser};
+use spargebra::Query;
 
 #[cfg(feature = "arrow")]
 mod arrow_export;
@@ -405,14 +405,16 @@ impl Graph {
     /// ASK runs on the engine's native entry point (evaluation early-exits at the
     /// first solution); a SELECT is answered by the engine's lazy solution count.
     fn ask(&self, py: Python<'_>, sparql: &str) -> PyResult<bool> {
-        let parsed = SparqlParser::new().parse_query(sparql).map_err(|e| engine_err(e.to_string()))?;
-        match parsed {
+        // [GPT-6] Keep VERSION metadata on both ASK and SELECT/count paths.
+        let (query, versions) = spargebra::SparqlParser::new()
+            .parse_query_with_versions(sparql).map_err(|error| engine_err(error.to_string()))?;
+        let prepared = sparq_engine::PreparedQuery::from_query_with_versions(query, versions)
+            .map_err(engine_err)?;
+        match prepared.query() {
             Query::Ask { .. } => {
-                let prepared = parsed.into();
                 py.detach(|| sparq_engine::ask_prepared(&self.inner, &prepared)).map_err(engine_err)
             }
             Query::Select { .. } => {
-                let prepared = parsed.into();
                 let n = py
                     .detach(|| sparq_engine::count_prepared(&self.inner, &prepared))
                     .map_err(engine_err)?;

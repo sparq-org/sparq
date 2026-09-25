@@ -4,6 +4,41 @@ use sparq_core::Graph;
 use sparq_engine::{EbvSemantics, FunctionRegistry, PreparedQuery, QueryBudget};
 
 const PREFIX: &str = "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> ";
+
+#[test]
+fn structural_rewrite_retains_all_announcements_and_conflict_refusal() {
+    let graph = Graph::load_str("", "ntriples").unwrap();
+    let prepared = PreparedQuery::parse(&format!(
+        "VERSION '1.2' VERSION '1.2-basic' {PREFIX} ASK {{FILTER(!\"z\"^^xsd:boolean)}}"
+    )).unwrap();
+    let rewritten = prepared.with_query(prepared.query().clone());
+    assert_eq!(rewritten.versions(), ["1.2", "1.2-basic"]);
+    assert!(!sparq_engine::ask_prepared(&graph, &rewritten).unwrap());
+    assert!(sparq_engine::ask_prepared_with_budget(&graph, &rewritten, &budget(EbvSemantics::Rec2013)).is_err());
+}
+
+#[test]
+fn update_refuses_unimplemented_dialects_before_mutation() {
+    let graph = Graph::load_str("", "ntriples").unwrap();
+    let insert = "INSERT DATA { <urn:s> <urn:p> <urn:o> }";
+    for label in ["1.2", "1.2-basic", "bogus"] {
+        let text = format!("VERSION '{label}' {insert}");
+        assert!(sparq_engine::update(&graph, &text).is_err());
+        let mut copy = graph.fork();
+        assert!(sparq_engine::update_in_place(&mut copy, &text).is_err());
+        assert!(!sparq_engine::ask(&copy, "ASK {?s ?p ?o}").unwrap());
+        #[cfg(feature = "params")]
+        assert!(sparq_engine::PreparedUpdate::parse(&text).is_err());
+        // Parser syntax compatibility remains separate from execution support.
+        let (_, labels) = spargebra::SparqlParser::new().parse_update_with_versions(&text).unwrap();
+        assert_eq!(labels, [label]);
+    }
+    let updated = sparq_engine::update(&graph, &format!("VERSION '1.1' {insert}")).unwrap();
+    assert!(sparq_engine::ask(&updated, "ASK {?s ?p ?o}").unwrap());
+    let mut copy = graph.fork();
+    assert!(sparq_engine::update_in_place_with_budget(&mut copy, insert, &budget(EbvSemantics::Draft20260912)).is_err());
+    assert!(!sparq_engine::ask(&copy, "ASK {?s ?p ?o}").unwrap());
+}
 fn budget(semantics: EbvSemantics) -> QueryBudget {
     QueryBudget {
         ebv_semantics: Some(semantics),

@@ -7,6 +7,10 @@ description: "Full-text search and IRI/label prefix completion via sparq-text: b
 
 `sparq-text` is an **opt-in, separate crate** that adds full-text search over the string literals of a sparq `Graph`. It gives you two surfaces: a low-level owned BM25 inverted index (`TextIndex`) keyed by dictionary term id, and `text:` **magic predicates** that you write inside ordinary SPARQL and that `query_text` rewrites into inline `VALUES` over the index's hits. The engine, planner, and the **lean** `sparq-wasm` bundle carry zero text-search code — full-text support exists only when you depend on `sparq-text` (or load its dedicated tier-b `sparq-text-wasm` browser bundle; see below).
 
+[GPT-6] Query entry points and structural rewrites retain VERSION announcements;
+see the [version-pinned EBV rules](../sparql-query/ebv-dialects.md). Unsupported
+or incompatible labels do not silently select REC 2013.
+
 ## Quickstart
 
 `Cargo.toml`:

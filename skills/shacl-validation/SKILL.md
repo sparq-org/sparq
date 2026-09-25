@@ -36,6 +36,10 @@ scale-tier corpora — sq-01xlp, `research/shacl-wasm-stateful-2026-07.md`) its 
 pre-parsed `ParsedGraph` handle — parse once, validate many times, same report
 surface. See `crates/sparq-shacl-wasm/README.md`.
 
+[GPT-6] Query rewrites and pre-binding retain VERSION announcements and their
+[version-pinned EBV rules](../sparql-query/ebv-dialects.md). Unknown labels follow
+the surface's existing query/ill-formed-input error policy.
+
 ## Quickstart
 
 `Cargo.toml`:

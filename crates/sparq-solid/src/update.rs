@@ -64,7 +64,9 @@ use rustc_hash::FxHashSet;
 use sparq_engine::QueryBudget;
 use spargebra::algebra::{GraphPattern, GraphTarget, QueryDataset};
 use spargebra::term::{GraphName, GraphNamePattern};
-use spargebra::{GraphUpdateOperation, Query, SparqlParser, Update};
+use spargebra::{GraphUpdateOperation, Query, Update};
+#[cfg(test)]
+use spargebra::SparqlParser;
 
 /// The write permission a single graph target requires.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -531,7 +533,7 @@ pub(crate) fn check(
     group_docs: &FxHashSet<String>,
     budget: &QueryBudget,
 ) -> Result<Permit, String> {
-    let upd = SparqlParser::new().parse_update(sparql).map_err(|e| e.to_string())?;
+    let upd = sparq_engine::parse_update_rec2013(sparql)?;
     let mut reqs = analyze(&upd);
 
     if reqs.touches_default {

@@ -13,7 +13,11 @@ mod aggregate_profile;
 #[cfg(feature = "evaluate")]
 mod evaluate;
 #[cfg(feature = "evaluate")]
-pub use evaluate::{admit, evaluate};
+pub use evaluate::{admit, evaluate, evaluate_detailed};
+#[cfg(feature = "evaluate")]
+mod evaluation_error;
+#[cfg(feature = "evaluate")]
+pub use evaluation_error::EvaluationError;
 
 /// Wire version for this bounded default-graph experiment.
 pub const VERSION: u32 = 1;
