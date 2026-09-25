@@ -97,6 +97,57 @@ class CorpusTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "projection"):
             import_regressions(source)
 
+    def test_imported_negatives_require_original_category_phase_and_diagnostic(self):
+        root = Path(__file__).resolve().parents[2]
+        imported = import_regressions(root / "crates/sparq-engine/tests/fixtures/builtin_edges.json", ["v"])
+        case = next(c for c in imported if c["id"] == "integer-cast-outside-range")
+        job = plan([case], ["exact_v1"], "native")["jobs"][0]
+        self.assertEqual(job["expected_rejection"], {"category":"capacity"})
+        outcome = {"schema":"sparq.proof-binding-outcome.v1", "job_id":job["id"],
+                   "case_sha256":job["case_sha256"], "backend":"exact_v1", "tier":"native",
+                   "observed":"rejected", "stage":"native", "proof_count":0,
+                   "verified_count":0, "error_class":"parse error", "artifacts":[], "controls":[]}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)
+            # The actual review counterexample: any nonempty error used to pass.
+            with self.assertRaisesRegex(ValueError, "rejection category"):
+                check_outcome(job, outcome, path)
+            for category, phase, diagnostic in [
+                ("parse", "admission", "SPARQL parse rejected"),
+                ("profile", "admission", "only SELECT and ASK are admitted"),
+                ("capacity", "evaluation", "query evaluation or resource budget rejected"),
+                ("capacity", "evaluation", "unknown capacity error"),
+            ]:
+                outcome.update(error_class=category, rejection={"category":category,"phase":phase,"diagnostic":diagnostic})
+                with self.subTest(diagnostic=diagnostic), self.assertRaises(ValueError):
+                    check_outcome(job, outcome, path)
+            outcome.update(error_class="capacity", rejection={"category":"capacity","phase":"evaluation","diagnostic":"result row capacity"})
+            check_outcome(job, outcome, path)
+            original = import_regressions(root / "zk/sparql-evaluator/fixtures/conformance/cases.json")
+            case = next(c for c in original if c["id"] == "reject-named-graph")
+            job = plan([case], ["exact_v1"], "native")["jobs"][0]
+            wanted = job["expected_rejection"]
+            self.assertEqual(wanted["phase"], case["original_fixture"]["expected"]["stage"])
+            self.assertEqual(wanted["diagnostic"], case["original_fixture"]["expected"]["error"])
+            outcome.update(job_id=job["id"], case_sha256=job["case_sha256"], error_class="profile", rejection=wanted)
+            check_outcome(job, outcome, path)
+            for key, value in [("phase","dataset"),("diagnostic","only SELECT and ASK are admitted")]:
+                outcome["rejection"] = wanted | {key:value}
+                with self.assertRaisesRegex(ValueError, "phase or diagnostic"):
+                    check_outcome(job, outcome, path)
+
+    def test_unknown_legacy_classes_remain_unclassified(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "legacy.json"
+            original = {"id":"unknown", "query":"ASK {}", "expected":{
+                "kind":"rejection", "stage":"admission", "error":"unrecognized historical reason"}}
+            path.write_text(json.dumps({"cases":[original]}))
+            cases = import_regressions(path)
+            self.assertEqual(cases[0]["original_fixture"], original)
+            manifest = plan([tiny_case(0, "scan"), *cases], ["exact_v1"], "native")
+            self.assertEqual(len(manifest["jobs"]), 2)
+            self.assertEqual(manifest["classifications"][0]["status"], "requires_rejection_classification")
+
     def test_seed_replay_is_explicitly_sampled(self):
         self.assertEqual(sampled(5, 100), sampled(5, 100))
         self.assertNotEqual(sampled(5, 100), sampled(6, 100))

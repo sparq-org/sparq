@@ -85,6 +85,20 @@ def check_outcome(job, outcome, output):
         raise ValueError("real positive lacks genuine proving and independent verification")
     if not job["expected_accept"] and not outcome.get("error_class"):
         raise ValueError("untyped rejection")
+    if job["operation"] == "admission" and not job["expected_accept"]:
+        required, actual = job.get("expected_rejection"), outcome.get("rejection")
+        if (not isinstance(required, dict) or required.get("category") not in ("capacity", "profile", "parse")
+                or not isinstance(actual, dict) or actual.get("category") != required["category"]
+                or outcome["error_class"] != actual["category"]
+                or actual.get("phase") not in ("admission", "dataset", "evaluation")
+                or not actual.get("diagnostic")):
+            raise ValueError("unclassified or wrong rejection category")
+        if any(actual.get(key) != value for key, value in required.items()):
+            raise ValueError("wrong rejection phase or diagnostic")
+        known = load(Path(__file__).with_name("rejections.json"))["diagnostics"].get(actual["diagnostic"])
+        if (not known or known["category"] != actual["category"]
+                or actual["phase"] not in (known["phase"], "admission")):
+            raise ValueError("unclassified observed diagnostic")
     if job["operation"] == "result" and job["expected_accept"]:
         if not equal_result(job["expected_result"], outcome.get("result")):
             raise ValueError("independent full-result oracle mismatch")

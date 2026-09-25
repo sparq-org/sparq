@@ -29,7 +29,8 @@
     "expected_result",
     "authority",
     "attack",
-    "policy_overrides"
+    "policy_overrides",
+    "expected_rejection"
   ],
   "tiers": [
     "native",
@@ -67,7 +68,8 @@
     "result",
     "unsupported_reason",
     "implementation",
-    "notes"
+    "notes",
+    "rejection"
   ],
   "terms": "Canonical N-Triples term strings; null denotes an unbound SELECT cell. Variable names omit ?. No lossy numeric or per-row blank-node normalization.",
   "dataset": "Optional {ntriples, nquads, named_graphs}; triples is the independent default-graph triple array when available. Preserve source bytes and graph catalog.",
@@ -76,5 +78,7 @@
   "acceptance": "Native/constraint outcomes have proof_count=verified_count=0. A real positive requires actual cryptographic proving and independent verification (counts at least 1/1), retained proof artifacts, and proof_verifier stage. Missing tools, process crashes, timeouts and arbitrary panics are errors, never successful relation rejection.",
   "negatives": "Record honest support refusal, actual unsatisfied constraint, and verifier rejection of a genuine candidate separately. A support refusal alone does not discharge the required malicious-prover attack lane. Real negative jobs may have zero verified_count and positive proof_count when a deliberately weaker proof is rejected by the required verifier.",
   "unsupported": "Only a documented profile exclusion with a stable reason is unsupported. Missing adapters, parse bugs and infrastructure failures fail the run. Configured and executed coverage denominators remain separate.",
-  "toolchain_identity": "Non-native Noir adapter configuration must pin exact nargo and bb executable SHA-256 and complete stdout/stderr version outputs; retained in adapters.json."
+  "toolchain_identity": "Non-native Noir adapter configuration must pin exact nargo and bb executable SHA-256 and complete stdout/stderr version outputs; retained in adapters.json.",
+  "expected_rejection": "Imported negative contract: category(capacity|profile|parse), optional phase(admission|dataset|evaluation) and exact diagnostic. Preserve original declared stage/error; unknown original categories require classification. The adapter must not read this expectation to classify its own error.",
+  "rejection": "Observed exact-model classification {category,phase,diagnostic}. Unknown/combined model errors are observed:error, never a successful capacity negative. No substring-based inference."
 }

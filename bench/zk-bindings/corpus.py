@@ -131,19 +131,37 @@ def import_regressions(path, variables=None):
         source_data = original.get("dataset_ntriples", original.get("dataset", dataset))
         expected = original.get("expected", {})
         result = expected.get("result", original.get("expected_result"))
-        capacity = original.get("expected_capacity_error", False) or original.get("expectation_kind") == "implementation_capacity"
+        capacity = (original.get("expected_capacity_error", False)
+                    or original.get("expectation_kind") == "implementation_capacity"
+                    or document.get("expectation_kind") == "implementation_capacity")
         rejection = expected.get("kind") == "rejection" or original.get("admitted") is False or original.get("expected_admission_error", False) or capacity
         if result is None and "expected_rows" in original:
             if not variables:
                 raise ValueError("row-only goldens require their existing runner's explicit projection variables")
             result = select(variables, original["expected_rows"])
-        if result is None and document.get("expectation_kind") == "implementation_capacity":
-            rejection = True
         if result is None and not rejection:
             raise ValueError(f"fixture {original['id']} has no independent expected result or declared rejection")
+        required, unclassified = None, None
+        if rejection:
+            if capacity:
+                required = {"category":"capacity"}
+            elif expected.get("kind") == "rejection":
+                diagnostic = expected.get("error")
+                known = load(Path(__file__).with_name("rejections.json"))["diagnostics"].get(diagnostic)
+                if known and expected.get("stage") in ("admission", "dataset", "evaluation"):
+                    required = {"category":known["category"], "phase":expected["stage"],
+                                "diagnostic":diagnostic}
+                else:
+                    unclassified = "Original rejection class or stage has no explicit mapping."
+            elif original.get("admitted") is False or original.get("expected_admission_error"):
+                required = {"category":"profile", "phase":"admission"}
+            else:
+                unclassified = "Original rejection requires an explicit category."
         output.append({"id": original["id"], "query": original["query"], "triples": [],
                        "dataset": {"ntriples": source_data, "nquads": source_data, "named_graphs": []},
                        "expected": None if rejection else result, "rejection": rejection,
+                       **({"expected_rejection":required} if required else {}),
+                       **({"classification":{"status":"requires_rejection_classification", "reason":unclassified}} if unclassified else {}),
                        "policy_overrides": {"max_rows":original["max_rows"]} if "max_rows" in original else {},
                        "template": "existing_regression", "candidate_terms": [],
                        "features": original.get("features", []), "original_fixture": original,
@@ -179,7 +197,8 @@ def jobs_for(case, backend, tier):
     elif backend.startswith("exact_"):
         for authority in ("verifier_agreed", "holder_declared"):
             candidates.append(base | {"operation": "admission" if case.get("rejection") else "result",
-                                      "expected_result": case["expected"], "authority": authority})
+                                      "expected_result": case["expected"], "authority": authority,
+                                      **({"expected_rejection":case["expected_rejection"]} if case.get("expected_rejection") else {})})
     elif case["template"] in ("scan", "join"):
         expected = case["expected"]["Select"]
         rows = {tuple(row) for row in expected["rows"]}

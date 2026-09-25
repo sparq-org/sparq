@@ -97,3 +97,13 @@ commands, exact executable/tool hashes, plans, outcomes and synthetic artifacts,
 including partial failures. The [local finite evidence](evidence/finite-noir-ff58.json)
 pins its original source and controller; it does not establish hosted execution
 of a later CI commit. Broader inventory shards remain configured and unexecuted.
+
+Imported negatives retain the original rejection category, phase and diagnostic
+in `expected_rejection`. The adapter classifies its actual model error independently
+using the exact `rejections.json` allowlist. Parse errors cannot discharge capacity
+or profile expectations, and a different phase or declared diagnostic fails.
+Unknown historical classes remain classification gaps. The model's combined
+`query evaluation or resource budget rejected` diagnostic is deliberately
+unclassified; it cannot certify which cause occurred. These cases stay unresolved
+until a typed production error API distinguishes capacity from evaluation failure.
+The original golden objects and historical finite Noir evidence remain unchanged.

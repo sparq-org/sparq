@@ -28,7 +28,7 @@ measurements are explicitly enabled by `with_stage_metrics()` and drained by
 `take_stage_metrics()`; they remain local diagnostics outside presentations. Local
 measurements are NONcanonical and do not establish external security assurance.
 
-[GPT-6] Use the [binding corpus and replay harness](../../bench/zk-bindings/README.md) to retain original goldens and separate native, actual constraint, and genuine proof coverage.
+[GPT-6] Use the [binding corpus and replay harness](../../bench/zk-bindings/README.md) to retain original goldens and separate native, actual constraint, and genuine proof coverage. Imported negative cases require their declared rejection category and phase; an ambiguous evaluation/budget error cannot certify capacity rejection.
 
 ## Prerequisites
 

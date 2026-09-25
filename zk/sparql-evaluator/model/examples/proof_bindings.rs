@@ -17,6 +17,22 @@ fn authority(job: &Value, commitment: [u8; 32]) -> Result<DatasetAuthority, Box<
     }
 }
 
+// [GPT-6] The model exposes static diagnostics, including one deliberately
+// ambiguous evaluation/budget error. Classify only exact reviewed producers;
+// never let expected job data or a substring decide what actually failed.
+fn rejection(error: &model::Rejected, phase: &str) -> Option<Value> {
+    let classes: Value = serde_json::from_str(include_str!(
+        "../../../../bench/zk-bindings/rejections.json"
+    ))
+    .expect("committed rejection classifications");
+    let mut classified = classes["diagnostics"].get(error.0)?.clone();
+    if phase == "admission" {
+        classified["phase"] = json!("admission");
+    }
+    classified["diagnostic"] = json!(error.0);
+    Some(classified)
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     if args.len() != 2 {
@@ -41,7 +57,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     hash.update(b"sparq-proof-binding-native-nonce-v1\0");
     hash.update(job["id"].as_str().ok_or("missing job identity")?.as_bytes());
     let nonce: [u8; 32] = hash.finalize().into();
-    let result = match job["backend"].as_str() {
+    let (phase, result) = match job["backend"].as_str() {
         Some("exact_v1") => {
             let mut policy = model::Policy::default();
             if let Some(limit) = job["policy_overrides"]["max_rows"].as_u64() {
@@ -67,7 +83,13 @@ fn main() -> Result<(), Box<dyn Error>> {
                 },
                 dataset,
             };
-            model::evaluate(&witness).map(|journal| journal.result)
+            match model::admit(&witness.request) {
+                Err(error) => ("admission", Err(error)),
+                Ok(()) => (
+                    "evaluation",
+                    model::evaluate(&witness).map(|journal| journal.result),
+                ),
+            }
         }
         Some("exact_v2") => {
             let mut policy = v2::Policy::default();
@@ -95,18 +117,46 @@ fn main() -> Result<(), Box<dyn Error>> {
                 },
                 dataset,
             };
-            v2::evaluate(&witness).map(|journal| journal.result)
+            match v2::admit(&witness.request) {
+                Err(error) => ("admission", Err(error)),
+                Ok(()) => (
+                    "evaluation",
+                    v2::evaluate(&witness).map(|journal| journal.result),
+                ),
+            }
         }
         _ => return Err("adapter backend unavailable; never classified as unsupported".into()),
     };
-    let (observed, value, error_class) = match result {
-        Ok(value) => ("accepted", serde_json::to_value(value)?, None),
-        Err(error) => ("rejected", Value::Null, Some(error.to_string())),
+    let (observed, value, error_class, classified, diagnostic) = match result {
+        Ok(value) => (
+            "accepted",
+            serde_json::to_value(value)?,
+            Value::Null,
+            Value::Null,
+            Value::Null,
+        ),
+        Err(error) => match rejection(&error, phase) {
+            Some(classified) => (
+                "rejected",
+                Value::Null,
+                classified["category"].clone(),
+                classified,
+                json!(error.0),
+            ),
+            None => (
+                "error",
+                Value::Null,
+                json!("unclassified_model_rejection"),
+                Value::Null,
+                json!(error.0),
+            ),
+        },
     };
     let outcome = json!({"schema":"sparq.proof-binding-outcome.v1", "job_id":job["id"],
         "case_sha256":job["case_sha256"], "backend":job["backend"], "tier":"native",
         "observed":observed,"stage":"native","proof_count":0,"verified_count":0,
-        "error_class":error_class,"artifacts":[],"controls":[],"result":value});
+        "error_class":error_class,"rejection":classified,"notes":diagnostic,
+        "artifacts":[],"controls":[],"result":value});
     let output = PathBuf::from(&args[1]);
     fs::create_dir(&output)?;
     let mut file = fs::OpenOptions::new()
@@ -116,4 +166,22 @@ fn main() -> Result<(), Box<dyn Error>> {
     file.write_all(&serde_json::to_vec_pretty(&outcome)?)?;
     file.write_all(b"\n")?;
     Ok(())
+}
+
+#[test]
+fn unrelated_and_ambiguous_errors_are_not_capacity_evidence() {
+    for message in [
+        "query evaluation or resource budget rejected",
+        "unexpected capacity panic",
+        "dataset byte capacity or blinding rejected",
+    ] {
+        assert_eq!(rejection(&model::Rejected(message), "evaluation"), None);
+    }
+    assert_eq!(
+        rejection(&model::Rejected("SPARQL parse rejected"), "admission").unwrap()["category"],
+        "parse"
+    );
+    let actual = rejection(&model::Rejected("temporal year capacity"), "admission").unwrap();
+    assert_eq!(actual["category"], "capacity");
+    assert_eq!(actual["phase"], "admission");
 }
