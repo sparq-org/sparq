@@ -34,10 +34,15 @@ timeouts and missing artifacts. `native`, `constraint` and `real` lanes remain
 separate. Genuine proof evidence requires actual generation and independent
 verification; honest preparation refusal does not establish constraint rejection.
 
-The native exact example requires model feature `evaluate`. Original rejection
-categories follow [rejections.json](rejections.json); a combined legacy diagnostic
-is deliberately unclassified. [Versioned expectations](version-expectations.json)
-bind each promoted result to the unchanged original fixture and dataset hashes.
+The native exact example requires model feature `evaluate`, or `graph-results`
+to enable all three versioned APIs. Its detailed evaluation consumes actual
+engine cause enums; row/byte/domain limits are distinct from deadline,
+cancellation and execution errors. Static rejection categories follow
+[rejections.json](rejections.json); combined legacy diagnostics stay unclassified.
+[Versioned expectations](version-expectations.json) bind each promoted result to
+the unchanged original fixture and dataset hashes. V3 graph expectations are
+explicit identity-template/outgoing-edge definitions over the original source;
+they are not computed by the evaluator or its canonicalizer.
 Blank-node comparison uses one global bijection and preserves row multiplicity.
 Graph canonical bytes must match their independently defined fixture; a mismatch
 is never repaired by per-row relabeling or literal normalization.

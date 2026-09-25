@@ -11,6 +11,55 @@ from minimize import minimize
 
 
 class CorpusTests(unittest.TestCase):
+    def test_typed_capacity_rejects_deadline_execution_and_forged_cause(self):
+        root = Path(__file__).resolve().parents[2]
+        case = next(c for c in import_regressions(
+            root / "crates/sparq-engine/tests/fixtures/builtin_edges.json", ["v"])
+            if c["id"] == "integer-cast-outside-range")
+        job = plan([case], ["exact_v3"], "native")["jobs"][0]
+        classes = json.loads((Path(__file__).with_name("rejections.json")).read_text())
+        outcome = {"schema":"sparq.proof-binding-outcome.v1", "job_id":job["id"],
+                   "case_sha256":job["case_sha256"], "backend":"exact_v3", "tier":"native",
+                   "observed":"rejected", "stage":"native", "proof_count":0,
+                   "verified_count":0, "artifacts":[], "controls":[]}
+        with tempfile.TemporaryDirectory() as directory:
+            for cause in ("budget_rows", "budget_bytes", "numeric_representation", "temporal_year"):
+                actual = classes["typed_causes"][cause] | {"cause":cause}
+                check_outcome(job, outcome | {"error_class":"capacity", "rejection":actual}, Path(directory))
+            for cause in ("budget_deadline", "budget_cancelled", "execution"):
+                actual = classes["typed_causes"][cause] | {"cause":cause}
+                with self.assertRaises(ValueError):
+                    check_outcome(job, outcome | {"error_class":actual["category"], "rejection":actual}, Path(directory))
+                with self.assertRaises(ValueError):
+                    check_outcome(job, outcome | {"error_class":"capacity", "rejection":actual | {"category":"capacity"}}, Path(directory))
+            with self.assertRaises(ValueError):
+                check_outcome(job, outcome | {"error_class":"capacity", "rejection":{
+                    "category":"capacity", "phase":"evaluation", "diagnostic":"typed:numeric_representation"}}, Path(directory))
+
+    def test_v3_promotions_preserve_originals_and_exact_graphs(self):
+        root = Path(__file__).resolve().parents[2]
+        originals = import_regressions(root / "zk/sparql-evaluator/fixtures/conformance/cases.json")
+        cases = [c for c in originals if "exact_v3" in c.get("backend_expectations", {})]
+        self.assertEqual(len(cases), 8)
+        manifest = plan(cases, ["exact_v1", "exact_v2", "exact_v3"], "native")
+        self.assertEqual(len(manifest["jobs"]), 48)
+        self.assertEqual(manifest["classifications"], [])
+        self.assertEqual(sum(j["expected_accept"] for j in manifest["jobs"]), 22)
+        for job in manifest["jobs"]:
+            if job["backend"] == "exact_v3":
+                self.assertTrue(job["expected_accept"])
+                self.assertNotIn("expected_rejection", job)
+            if job["backend"] == "exact_v1":
+                self.assertFalse(job["expected_accept"])
+        by_id = {c["id"]:c for c in cases}
+        construct = by_id["reject-construct"]["backend_expectations"]["exact_v3"]["expected"]
+        describe = by_id["reject-describe"]["backend_expectations"]["exact_v3"]["expected"]
+        self.assertEqual(len(construct["Graph"]["ntriples"].splitlines()), 13)
+        self.assertEqual(len(describe["Graph"]["ntriples"].splitlines()), 6)
+        self.assertTrue(equal_result(construct, construct))
+        with self.assertRaises(ValueError):
+            equal_result(construct, describe)
+
     def test_replay_rejects_changed_query_or_denominator(self):
         multiple = plan([tiny_case(6, "join")], ["noir_unsigned", "noir_signed"], "real")
         validate_plan(json.loads(encoded(multiple)))
