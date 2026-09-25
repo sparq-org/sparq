@@ -1,0 +1,44 @@
+{
+  "schema": "sparq.proof-binding-job.v1",
+  "case_id": "tiny-v1/02/scan",
+  "case_sha256": "af968cf43a1acb8f5696c20b533689f02adf6cc2891eed3bb7d0cea497a70095",
+  "backend": "native_rdf",
+  "tier": "real",
+  "query": "SELECT DISTINCT ?s ?o WHERE { ?s <urn:p> ?o }",
+  "triples": [
+    [
+      "<urn:a>",
+      "<urn:p>",
+      "<urn:b>"
+    ]
+  ],
+  "dataset": {
+    "ntriples": "<urn:a> <urn:p> <urn:b> .\n",
+    "nquads": "<urn:a> <urn:p> <urn:b> .\n",
+    "named_graphs": []
+  },
+  "policy_overrides": {},
+  "variables": [
+    "s",
+    "o"
+  ],
+  "rows": [
+    [
+      "<urn:a>",
+      "<urn:b>"
+    ]
+  ],
+  "expected_accept": true,
+  "operation": "binding",
+  "attack": {
+    "anchor_rows": [
+      [
+        "<urn:a>",
+        "<urn:b>"
+      ]
+    ],
+    "kind": "fabricated_binding"
+  },
+  "nonce_id": 2,
+  "id": "c040421bfb47332aec38d2cd801aa92f244eef74ff50c1b9c91da97845d6c5d4"
+}

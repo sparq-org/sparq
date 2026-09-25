@@ -1,0 +1,234 @@
+"""[GPT-6] Independent finite relational oracle and retained source-case import."""
+import hashlib
+import itertools
+import json
+from pathlib import Path
+
+BACKENDS = ("noir_unsigned", "noir_signed", "native_rdf", "exact_v1", "exact_v2", "exact_v3")
+NODES = ("<urn:a>", "<urn:b>")
+CANDIDATES = (*NODES, "<urn:missing>")
+PREDICATE = "<urn:p>"
+TEMPLATES = ("scan", "join", "projection_bag", "count", "ask_absence", "negation", "top_k")
+NOIR_ATTACKS = ("selected_padding", "leaf_out_of_range", "credential_out_of_range",
+                "empty_signed_graph", "length_mismatch", "activate_padding_row",
+                "deactivate_real_row", "inactive_public_nonzero", "valid_looking_padding",
+                "duplicate_support_preimage")
+INTEGER = "http://www.w3.org/2001/XMLSchema#integer"
+
+
+def encoded(value):
+    return (json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+                       allow_nan=False) + "\n").encode()
+
+
+def digest(value):
+    return hashlib.sha256(encoded(value)).hexdigest()
+
+
+def load(path):
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"duplicate JSON key: {key}")
+            result[key] = value
+        return result
+    data = Path(path).read_bytes()
+    if len(data) > 16 * 1024 * 1024:
+        raise ValueError("corpus byte capacity exceeded")
+    return json.loads(data, object_pairs_hook=unique,
+                      parse_constant=lambda x: (_ for _ in ()).throw(ValueError(x)))
+
+
+def select(variables, rows, ordered=False):
+    return {"Select": {"variables": variables, "order": "Sequence" if ordered else "Bag",
+                       "rows": rows}}
+
+
+def oracle(triples, template):
+    """Closed finite algebra; never calls Sparq, its planner, or its evaluator."""
+    edges = sorted({(s, o) for s, p, o in triples if p == PREDICATE})
+    if template == "scan":
+        return "SELECT DISTINCT ?s ?o WHERE { ?s <urn:p> ?o }", select(["s", "o"], [list(e) for e in edges])
+    if template == "join":
+        rows = sorted({(s, middle, o) for s, middle in edges for other, o in edges if middle == other})
+        return "SELECT DISTINCT ?s ?m ?o WHERE { ?s <urn:p> ?m . ?m <urn:p> ?o }", select(["s", "m", "o"], [list(r) for r in rows])
+    if template == "projection_bag":
+        return "SELECT ?s WHERE { ?s <urn:p> ?o }", select(["s"], [[s] for s, _ in edges])
+    if template == "count":
+        return "SELECT (COUNT(*) AS ?n) WHERE { ?s <urn:p> ?o }", select(["n"], [[f'"{len(edges)}"^^<{INTEGER}>']])
+    if template == "ask_absence":
+        return "ASK { <urn:missing> <urn:p> ?o }", {"Ask": False}
+    if template == "negation":
+        rows = [[s, o] for s, o in edges if not any(other == o for other, _ in edges)]
+        return "SELECT ?s ?o WHERE { ?s <urn:p> ?o FILTER NOT EXISTS { ?o <urn:p> ?z } }", select(["s", "o"], rows)
+    if template == "top_k":
+        return "SELECT ?s ?o WHERE { ?s <urn:p> ?o } ORDER BY ?s ?o LIMIT 1", select(["s", "o"], [list(e) for e in edges[:1]], True)
+    raise ValueError(f"unknown template: {template}")
+
+
+def tiny_case(mask, template):
+    universe = [(s, PREDICATE, o) for s in NODES for o in NODES]
+    if type(mask) is not int or not 0 <= mask < 1 << len(universe):
+        raise ValueError("graph mask outside declared universe")
+    triples = [list(t) for i, t in enumerate(universe) if mask & (1 << i)]
+    query, expected = oracle(triples, template)
+    return {"id": f"tiny-v1/{mask:02x}/{template}", "query": query, "triples": triples,
+            "dataset": {"ntriples": "".join(" ".join(t) + " .\n" for t in triples),
+                        "nquads": "".join(" ".join(t) + " .\n" for t in triples), "named_graphs": []},
+            "expected": expected, "template": template, "candidate_terms": list(CANDIDATES),
+            "oracle": {"kind": "finite_relational_definition", "domain": "tiny-v1",
+                       "graph_mask": mask, "source": "corpus.py:oracle"}}
+
+
+def exhaustive():
+    return [tiny_case(mask, template) for mask in range(16) for template in TEMPLATES]
+
+
+def finite_proof_universe():
+    """All valid scan/join bindings for the fixed two-edge cycle, plus attacks."""
+    cases = [tiny_case(6, template) for template in ("scan", "join")]
+    for attack in NOIR_ATTACKS:
+        case = tiny_case(6, "join")
+        case.update(id=f"noir-witness-v1/{attack}", template="noir_witness_attack",
+                    attack=attack)
+        cases.append(case)
+    return cases
+
+
+def splitmix(seed):
+    """The same deterministic PRNG family as sparq-bench and prior ZK fuzzers."""
+    state = seed & ((1 << 64) - 1)
+    while True:
+        state = (state + 0x9E3779B97F4A7C15) & ((1 << 64) - 1)
+        z = state
+        z = ((z ^ (z >> 30)) * 0xBF58476D1CE4E5B9) & ((1 << 64) - 1)
+        z = ((z ^ (z >> 27)) * 0x94D049BB133111EB) & ((1 << 64) - 1)
+        yield z ^ (z >> 31)
+
+
+def sampled(seed, count):
+    if not 1 <= count <= 100_000:
+        raise ValueError("sample count outside bounded profile")
+    rng = splitmix(seed)
+    result = []
+    for ordinal in range(count):
+        case = tiny_case(next(rng) % 16, TEMPLATES[next(rng) % len(TEMPLATES)])
+        case["oracle"]["sample"] = {"seed": seed, "ordinal": ordinal}
+        case["id"] = f"sample-v1/{seed}/{ordinal}/{case['id']}"
+        result.append(case)
+    return result
+
+
+def import_regressions(path, variables=None):
+    """Retain original case IDs, query bytes, golden objects and source digest."""
+    path = Path(path).resolve()
+    document = load(path)
+    dataset_path = path.parent / document["default_dataset"] if "default_dataset" in document else None
+    dataset = dataset_path.read_text() if dataset_path else ""
+    output = []
+    for original in document["cases"]:
+        source_data = original.get("dataset_ntriples", original.get("dataset", dataset))
+        expected = original.get("expected", {})
+        result = expected.get("result", original.get("expected_result"))
+        capacity = original.get("expected_capacity_error", False) or original.get("expectation_kind") == "implementation_capacity"
+        rejection = expected.get("kind") == "rejection" or original.get("admitted") is False or original.get("expected_admission_error", False) or capacity
+        if result is None and "expected_rows" in original:
+            if not variables:
+                raise ValueError("row-only goldens require their existing runner's explicit projection variables")
+            result = select(variables, original["expected_rows"])
+        if result is None and document.get("expectation_kind") == "implementation_capacity":
+            rejection = True
+        if result is None and not rejection:
+            raise ValueError(f"fixture {original['id']} has no independent expected result or declared rejection")
+        output.append({"id": original["id"], "query": original["query"], "triples": [],
+                       "dataset": {"ntriples": source_data, "nquads": source_data, "named_graphs": []},
+                       "expected": None if rejection else result, "rejection": rejection,
+                       "policy_overrides": {"max_rows":original["max_rows"]} if "max_rows" in original else {},
+                       "template": "existing_regression", "candidate_terms": [],
+                       "features": original.get("features", []), "original_fixture": original,
+                       "oracle": {"kind": "retained_golden", "source": str(path),
+                                  "source_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                                  "dataset_sha256": hashlib.sha256(source_data.encode()).hexdigest(),
+                                  "spec": original.get("spec")}})
+    if not output or len({c["id"] for c in output}) != len(output):
+        raise ValueError("empty or duplicate-ID regression corpus")
+    return output
+
+
+def jobs_for(case, backend, tier):
+    if backend not in BACKENDS or tier not in ("native", "constraint", "real"):
+        raise ValueError("unknown backend or tier")
+    if case.get("classification"):
+        return [], {"case_id":case["id"], "backend":backend, **case["classification"]}
+    case_hash = digest(case)
+    base = {"schema": "sparq.proof-binding-job.v1", "case_id": case["id"],
+            "case_sha256": case_hash, "backend": backend, "tier": tier,
+            "query": case["query"], "triples": case["triples"], "dataset": case["dataset"],
+            "policy_overrides":case.get("policy_overrides", {}),
+            "variables": [], "rows": [], "expected_accept": not case.get("rejection", False)}
+    candidates = []
+    if case["template"] == "noir_witness_attack":
+        if backend not in ("noir_unsigned", "noir_signed") or tier == "native":
+            return [], {"case_id":case["id"], "backend":backend, "status":"requires_adapter",
+                        "reason":"This concrete private-witness mutation is implemented only by the Noir constraint adapter."}
+        expected = case["expected"]["Select"]
+        candidates.append(base | {"operation":"attack", "variables":expected["variables"],
+                                  "rows":expected["rows"][:1], "expected_accept":False,
+                                  "attack":{"kind":case["attack"]}})
+    elif backend.startswith("exact_"):
+        for authority in ("verifier_agreed", "holder_declared"):
+            candidates.append(base | {"operation": "admission" if case.get("rejection") else "result",
+                                      "expected_result": case["expected"], "authority": authority})
+    elif case["template"] in ("scan", "join"):
+        expected = case["expected"]["Select"]
+        rows = {tuple(row) for row in expected["rows"]}
+        # Every candidate in this explicit domain, including every valid binding.
+        for row in itertools.product(case["candidate_terms"], repeat=len(expected["variables"])):
+            candidates.append(base | {"operation": "binding", "variables": expected["variables"],
+                                      "rows": [list(row)], "expected_accept": row in rows,
+                                      "attack": {"anchor_rows": expected["rows"][:1],
+                                                 "kind": "fabricated_binding"}})
+    else:
+        return [], {"case_id": case["id"], "backend": backend, "status": "requires_profile_classification"
+                    if case["template"].startswith("existing_") else "excluded",
+                    "reason": "Existing query needs actual backend admission; no syntax rewriting or guessed support."
+                    if case["template"].startswith("existing_") else
+                    "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support."}
+    for ordinal, job in enumerate(candidates):
+        job["nonce_id"] = ordinal + 1
+        job["id"] = digest(job)
+    return candidates, None
+
+
+def plan(cases, backends, tier, shard=0, shards=1, coverage="retained_corpus"):
+    if not cases or not backends or len(set(backends)) != len(backends) or not 0 <= shard < shards <= 1024:
+        raise ValueError("empty, duplicate or invalid profile")
+    if len({case["id"] for case in cases}) != len(cases):
+        raise ValueError("duplicate case IDs")
+    jobs, exclusions, totals = [], [], {}
+    for backend in backends:
+        all_jobs = []
+        for case in cases:
+            generated, exclusion = jobs_for(case, backend, tier)
+            all_jobs.extend(generated)
+            if exclusion:
+                exclusions.append(exclusion)
+        selected = [j for i, j in enumerate(all_jobs) if i % shards == shard]
+        totals[backend] = {"configured_jobs": len(all_jobs), "shard_jobs": len(selected),
+                           "input_cases":len(cases), "classified_cases":sum(e["backend"] == backend for e in exclusions),
+                           "operation_counts":{operation:sum(j["operation"] == operation for j in all_jobs)
+                                               for operation in ("binding", "result", "admission", "attack")},
+                           "positive_bindings_or_results": sum(j["expected_accept"] for j in all_jobs),
+                           "negative_bindings_or_admissions": sum(not j["expected_accept"] for j in all_jobs),
+                           "executed_jobs": 0, "genuine_proofs": 0}
+        jobs.extend(selected)
+    if not jobs:
+        raise ValueError("empty replay shard")
+    return {"schema": "sparq.proof-bindings.plan.v1", "coverage": coverage, "tier": tier,
+            "domain": {"nodes": list(NODES), "candidate_terms": list(CANDIDATES),
+                       "graph_count": 16, "query_templates": list(TEMPLATES)} if coverage == "exhaustive_tiny_v1" else None,
+            "case_count": len(cases), "corpus_sha256": digest(cases), "shard": shard, "shards": shards,
+            "cases":cases,
+            "totals": totals, "classifications": exclusions, "jobs": jobs,
+            "claim": "Configured coverage only. No execution or proof is established by this plan."}

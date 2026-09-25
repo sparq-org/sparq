@@ -25,6 +25,8 @@ v3, §S4.E). Drives the per-property Noir circuit family at
 [GPT-6] Benchmarks: [`bench/zk-compose/`](../../bench/zk-compose), including the opt-in [synthetic `result_experiment` contract, opt-in driver timings and limitations](../../bench/zk-compose/experiments/README.md).
 [GPT-6] Successful-result profiles admit canonical private `u64` values with private decimal length and explicit small/full range-capacity choice; status depths 10/17/20 derive from the complete verifier policy, with no truncation. Witness tags are validated filename labels. Contributing: [`AGENTS.md`](../../AGENTS.md).
 
+[GPT-6] Testing: [cross-backend binding corpus and replay](../../bench/zk-bindings/README.md), with exact declared finite domains and separate native, constraint and real-proof counts.
+
 ## License
 
 [MIT](../../LICENSE).
