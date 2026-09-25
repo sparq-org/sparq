@@ -25,7 +25,7 @@ use oxrdf::{BlankNode, NamedOrBlankNode, Term, Triple, Variable};
 use rustc_hash::{FxHashMap, FxHashSet};
 use sparq_core::Graph;
 use spargebra::term::{NamedNodePattern, TermPattern, TriplePattern};
-use spargebra::{Query, SparqlParser};
+use spargebra::Query;
 
 use crate::{PreparedQuery, QueryBudget, QueryResult};
 
@@ -51,13 +51,14 @@ pub fn construct_prepared_with_budget(
     prepared: &PreparedQuery,
     budget: &QueryBudget,
 ) -> Result<Vec<Triple>, String> {
+    let semantics = prepared.resolve_ebv_semantics(budget.ebv_semantics)?;
     let q = prepared.query();
     let active = crate::active_dataset(graph, q);
     let graph = active.as_ref().unwrap_or(graph);
     let _view_scope = crate::view_scope(&active);
     match q {
         Query::Construct { template, pattern, .. } => {
-            crate::exec::budget::with_budget(budget, || {
+            crate::exec::budget::with_query_budget(budget, semantics, || {
                 let solutions = crate::exec::eval_select(graph, pattern)?;
                 Ok(instantiate(template, &solutions))
             })
@@ -88,13 +89,14 @@ pub fn describe_prepared_with_budget(
     prepared: &PreparedQuery,
     budget: &QueryBudget,
 ) -> Result<Vec<Triple>, String> {
+    let semantics = prepared.resolve_ebv_semantics(budget.ebv_semantics)?;
     let q = prepared.query();
     let active = crate::active_dataset(graph, q);
     let graph = active.as_ref().unwrap_or(graph);
     let _view_scope = crate::view_scope(&active);
     match q {
         Query::Describe { pattern, .. } => {
-            crate::exec::budget::with_budget(budget, || {
+            crate::exec::budget::with_query_budget(budget, semantics, || {
                 let solutions = crate::exec::eval_select(graph, pattern)?;
                 cbd(graph, &solutions)
             })
@@ -118,18 +120,20 @@ pub fn construct_or_describe_with_budget(
     sparql: &str,
     budget: &QueryBudget,
 ) -> Result<Vec<Triple>, String> {
-    let q = SparqlParser::new().parse_query(sparql).map_err(|e| e.to_string())?;
-    let active = crate::active_dataset(graph, &q);
+    let prepared = PreparedQuery::parse(sparql)?;
+    let semantics = prepared.resolve_ebv_semantics(budget.ebv_semantics)?;
+    let q = prepared.query();
+    let active = crate::active_dataset(graph, q);
     let graph = active.as_ref().unwrap_or(graph);
     let _view_scope = crate::view_scope(&active);
-    crate::exec::budget::with_budget(budget, || {
+    crate::exec::budget::with_query_budget(budget, semantics, || {
         match q {
             Query::Construct { template, pattern, .. } => {
-                let solutions = crate::exec::eval_select(graph, &pattern)?;
-                Ok(instantiate(&template, &solutions))
+                let solutions = crate::exec::eval_select(graph, pattern)?;
+                Ok(instantiate(template, &solutions))
             }
             Query::Describe { pattern, .. } => {
-                let solutions = crate::exec::eval_select(graph, &pattern)?;
+                let solutions = crate::exec::eval_select(graph, pattern)?;
                 cbd(graph, &solutions)
             }
             _ => Err("construct_or_describe() requires a CONSTRUCT or DESCRIBE query".to_string()),

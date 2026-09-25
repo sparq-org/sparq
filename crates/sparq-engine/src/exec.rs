@@ -129,6 +129,7 @@ pub(crate) mod budget {
         extra_bytes: usize,
         temporal_year_range: Option<(i64, i64)>,
         strict_numeric_capacity: bool,
+        ebv_semantics: crate::EbvSemantics,
         cancel: Option<CancelPtr>,
     }
 
@@ -142,6 +143,7 @@ pub(crate) mod budget {
         extra_bytes: 0,
         temporal_year_range: None,
         strict_numeric_capacity: false,
+        ebv_semantics: crate::EbvSemantics::Rec2013,
         cancel: None,
     };
 
@@ -246,6 +248,7 @@ pub(crate) mod budget {
                 extra_bytes: 0,
                 temporal_year_range: b.temporal_year_range,
                 strict_numeric_capacity: b.strict_numeric_capacity,
+                ebv_semantics: b.ebv_semantics.unwrap_or_default(),
                 cancel,
             })
         });
@@ -258,6 +261,22 @@ pub(crate) mod budget {
             _budget: std::marker::PhantomData,
             _not_send: std::marker::PhantomData,
         }
+    }
+
+    // [GPT-6] Query entry only. The resolved rule is copied into LocalVocab;
+    // per-row evaluation and Rayon workers never consult this TLS selector.
+    pub(crate) fn with_query_budget<T>(b: &QueryBudget, semantics: crate::EbvSemantics, f: impl FnOnce() -> T) -> T {
+        let _scope = install(b);
+        ACTIVE.with(|a| {
+            let mut limits = a.get();
+            limits.ebv_semantics = semantics;
+            a.set(limits);
+        });
+        f()
+    }
+
+    pub(super) fn ebv_semantics() -> crate::EbvSemantics {
+        ACTIVE.with(|a| a.get().ebv_semantics)
     }
 
     /// [GPT-6 Astra] Runs a child budget, restoring its parent on return or unwind.
@@ -2580,6 +2599,7 @@ fn local_term_bytes(t: &Term) -> usize {
 /// that are not in the graph dictionary.
 #[derive(Default)]
 pub struct LocalVocab {
+    ebv_semantics: crate::EbvSemantics,
     terms: Vec<Term>,
     ids: FxHashMap<Term, Id>,
     /// Parallel to `terms`: the f64 value of each numeric local literal (NaN
@@ -2596,6 +2616,10 @@ pub struct LocalVocab {
 }
 
 impl LocalVocab {
+    fn for_query() -> Self {
+        Self { ebv_semantics: budget::ebv_semantics(), ..Self::default() }
+    }
+
     /// Interns a term, returning a stable id: equal terms get the same id so
     /// DISTINCT, GROUP BY, joins and equality work on computed values.
     fn intern(&mut self, t: Term) -> Id {
@@ -2696,7 +2720,7 @@ impl Bindings {
 }
 
 pub fn eval_select(graph: &Graph, pattern: &GraphPattern) -> Result<QueryResult, String> {
-    let mut local = LocalVocab::default();
+    let mut local = LocalVocab::for_query();
     let bindings = eval_modified(graph, &mut local, pattern)?;
     // Final budget gate: converts a row-capped/timed-out evaluation (including the
     // uninstrumented rayon branches) into the error before the expensive term
@@ -3065,7 +3089,7 @@ pub fn eval_select_json_emit(
         budget::check(0)?; // sticky: the streaming loop may have stopped mid-scan
         return Ok(());
     }
-    let mut local = LocalVocab::default();
+    let mut local = LocalVocab::for_query();
     let bindings = eval_modified(graph, &mut local, pattern)?;
     budget::check(bindings.rows.len())?; // final gate (see eval_select)
 
@@ -3213,7 +3237,7 @@ pub fn eval_ask(graph: &Graph, pattern: &GraphPattern) -> Result<bool, String> {
         return Ok(n > 0);
     }
     let sliced = GraphPattern::Slice { inner: Box::new(simplified), start: 0, length: Some(1) };
-    let mut local = LocalVocab::default();
+    let mut local = LocalVocab::for_query();
     let b = eval_modified(graph, &mut local, &sliced)?;
     budget::check(b.rows.len())?;
     Ok(!b.rows.is_empty())
@@ -3262,7 +3286,7 @@ pub fn count_select(graph: &Graph, pattern: &GraphPattern) -> Result<usize, Stri
         budget::check(0)?;
         return Ok(n);
     }
-    let mut local = LocalVocab::default();
+    let mut local = LocalVocab::for_query();
     let bindings = eval_modified(graph, &mut local, pattern)?;
     budget::check(bindings.rows.len())?; // final gate (see eval_select)
     Ok(bindings.rows.len())
@@ -5126,7 +5150,7 @@ fn eval_graph_named_pref(
         // default (wasm) build is byte-identical.
         #[cfg(feature = "zk")]
         let _zk = crate::zk::graph_scope(gname);
-        let mut sub_local = LocalVocab { correlation: local.correlation.clone(), ..LocalVocab::default() };
+        let mut sub_local = LocalVocab { ebv_semantics: local.ebv_semantics, correlation: local.correlation.clone(), ..LocalVocab::default() };
         let b = eval_graph_pattern(sub, &mut sub_local, inner)?;
         let rows: Vec<Row> = b
             .rows
@@ -5173,7 +5197,7 @@ fn eval_graph_named_pref(
                     #[cfg(feature = "zk")]
                     let _zk = crate::zk::graph_scope(&target);
                     let empty = Graph::load_str("", "ntriples").map_err(|e| e.to_string())?;
-                    let mut el = LocalVocab::default();
+                    let mut el = LocalVocab { ebv_semantics: local.ebv_semantics, ..LocalVocab::default() };
                     let mut b = eval_graph_pattern(&empty, &mut el, inner)?;
                     b.rows.clear();
                     Ok(b)
@@ -9960,7 +9984,7 @@ fn left_outer_join(graph: &Graph, local: &mut LocalVocab, left: Bindings, right:
                 None => true,
                 Some(e) => {
                     let tmp = Bindings { vars: out_vars.clone(), rows: vec![], sorted_by: None };
-                    effective_boolean(&eval_expr(graph, local, &tmp, &combined, e)?)
+                    effective_boolean(&eval_expr(graph, local, &tmp, &combined, e)?, local.ebv_semantics)
                 }
             };
             if keep {
@@ -10025,7 +10049,7 @@ fn left_outer_merge(
                     None => true,
                     Some(e) => {
                         let tmp = Bindings { vars: out_vars.clone(), rows: vec![], sorted_by: None };
-                        effective_boolean(&eval_expr(graph, local, &tmp, &combined, e)?)
+                        effective_boolean(&eval_expr(graph, local, &tmp, &combined, e)?, local.ebv_semantics)
                     }
                 };
                 if keep {
@@ -10566,7 +10590,7 @@ fn antijoin_row_matches(
             .collect();
         let mut ok = true;
         for e in checks {
-            if !effective_boolean(&eval_expr(graph, local, &tmp, &combined, e)?) {
+            if !effective_boolean(&eval_expr(graph, local, &tmp, &combined, e)?, local.ebv_semantics) {
                 ok = false;
                 break;
             }
@@ -12751,7 +12775,7 @@ fn columnar_filter(
             let global_idx = start + local_idx;
             let row = &rows[global_idx];
             let val = eval_expr(graph, local, b, row.as_ref(), expr)?;
-            if effective_boolean(&val) {
+            if effective_boolean(&val, local.ebv_semantics) {
                 delegated_passes.push(local_idx);
             }
         }
@@ -13058,14 +13082,14 @@ fn apply_filter_scalar(graph: &Graph, local: &LocalVocab, b: &mut Bindings, expr
                 #[cfg(not(target_arch = "wasm32"))]
                 let _qn = query_now::worker_install(qn);
                 ROW_SCOPE.set((scope, i));
-                Ok(effective_boolean(&eval_compiled(graph, local, b, row, &compiled)?))
+                Ok(effective_boolean(&eval_compiled(graph, local, b, row, &compiled)?, local.ebv_semantics))
             })
             .collect::<Result<Vec<bool>, String>>()?
     } else {
         let mut keep = Vec::with_capacity(b.rows.len());
         for (i, row) in b.rows.iter().enumerate() {
             ROW_SCOPE.set((scope, i));
-            keep.push(effective_boolean(&eval_compiled(graph, local, b, row, &compiled)?));
+            keep.push(effective_boolean(&eval_compiled(graph, local, b, row, &compiled)?, local.ebv_semantics));
         }
         keep
     };
@@ -13074,7 +13098,7 @@ fn apply_filter_scalar(graph: &Graph, local: &LocalVocab, b: &mut Bindings, expr
         let mut keep = Vec::with_capacity(b.rows.len());
         for (i, row) in b.rows.iter().enumerate() {
             ROW_SCOPE.set((scope, i));
-            keep.push(effective_boolean(&eval_compiled(graph, local, b, row, &compiled)?));
+            keep.push(effective_boolean(&eval_compiled(graph, local, b, row, &compiled)?, local.ebv_semantics));
         }
         keep
     };
@@ -13329,14 +13353,15 @@ fn num_canonical_term(n: Num) -> Value {
     Value::Term(Term::Literal(Literal::new_typed_literal(n.canonical_lexical(), n.datatype())))
 }
 
-fn effective_boolean(v: &Value) -> bool {
-    ebv(v) == Some(true)
+fn effective_boolean(v: &Value, semantics: crate::EbvSemantics) -> bool {
+    ebv(v, semantics) == Some(true)
 }
 
 /// SPARQL effective boolean value, three-valued: `None` is a TYPE ERROR (unbound,
 /// non-literal terms and unknown datatypes). Invalid numeric/boolean lexicals
-/// instead have false EBV per SPARQL 1.1 §17.2.2, independently of arithmetic errors.
-fn ebv(v: &Value) -> Option<bool> {
+/// instead have false EBV per SPARQL 1.1 §17.2.2, or error under the pinned
+/// 1.2 draft, independently of arithmetic capacity errors.
+fn ebv(v: &Value, semantics: crate::EbvSemantics) -> Option<bool> {
     match v {
         Value::Bool(b) => Some(*b),
         Value::Num(n) => Some(!n.is_zero() && !n.is_nan()),
@@ -13351,13 +13376,13 @@ fn ebv(v: &Value) -> Option<bool> {
             if dt == xsd::BOOLEAN.as_str() {
                 // [GPT-6] Raw RDF booleans have exactly four lexical forms.
                 // Constructor whitespace normalization applies only to string inputs.
-                Some(as_bool_val(v).unwrap_or(false))
+                as_bool_val(v).or_else(|| (semantics == crate::EbvSemantics::Rec2013).then_some(false))
             } else if is_numeric_dt(l) {
                 // [GPT-6] EBV needs zero/NaN classification, not finite arithmetic.
                 // Validate datatype facets before inspecting exact decimal digits;
                 // converting them to f64 could underflow a nonzero value to false.
                 if !sparq_core::numeric_literal_valid(l.value(), dt) {
-                    Some(false)
+                    (semantics == crate::EbvSemantics::Rec2013).then_some(false)
                 } else if sparq_core::is_integer_datatype(dt) || dt == xsd::DECIMAL.as_str() {
                     Some(l.value().bytes().any(|b| matches!(b, b'1'..=b'9')))
                 } else {
@@ -13403,23 +13428,23 @@ fn eval_expr(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], e: &Ex
             // SPARQL 3-valued logic, short-circuiting: false dominates, so once the
             // left is false we return false WITHOUT evaluating the right (which may be
             // an error or an unsupported expression that would otherwise abort).
-            let x = ebv3(&eval_expr(graph, local, b, row, a)?);
+            let x = ebv3(&eval_expr(graph, local, b, row, a)?, local.ebv_semantics);
             if x == Some(false) {
                 return Ok(Value::Bool(false));
             }
-            let y = ebv3(&eval_expr(graph, local, b, row, c)?);
+            let y = ebv3(&eval_expr(graph, local, b, row, c)?, local.ebv_semantics);
             Ok(and3(x, y))
         }
         Or(a, c) => {
             // SPARQL 3-valued logic, short-circuiting: true dominates.
-            let x = ebv3(&eval_expr(graph, local, b, row, a)?);
+            let x = ebv3(&eval_expr(graph, local, b, row, a)?, local.ebv_semantics);
             if x == Some(true) {
                 return Ok(Value::Bool(true));
             }
-            let y = ebv3(&eval_expr(graph, local, b, row, c)?);
+            let y = ebv3(&eval_expr(graph, local, b, row, c)?, local.ebv_semantics);
             Ok(or3(x, y))
         }
-        Not(a) => Ok(match ebv3(&eval_expr(graph, local, b, row, a)?) {
+        Not(a) => Ok(match ebv3(&eval_expr(graph, local, b, row, a)?, local.ebv_semantics) {
             Some(v) => Value::Bool(!v),
             None => Value::Error, // !error = error
         }),
@@ -13448,7 +13473,7 @@ fn eval_expr(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], e: &Ex
         If(cond, t, f) => {
             // A type error in the condition propagates (it does NOT silently select
             // the else branch).
-            match ebv3(&eval_expr(graph, local, b, row, cond)?) {
+            match ebv3(&eval_expr(graph, local, b, row, cond)?, local.ebv_semantics) {
                 Some(true) => eval_expr(graph, local, b, row, t),
                 Some(false) => eval_expr(graph, local, b, row, f),
                 None => Ok(Value::Error),
@@ -13542,6 +13567,7 @@ fn eval_exists_inner(
     // including variables used only in FILTER expressions. A separate local
     // vocabulary preserves actual term identity across graph/local ID spaces.
     let mut inner_local = LocalVocab {
+        ebv_semantics: local.ebv_semantics,
         correlation: local.correlation.clone(),
         ..LocalVocab::default()
     };
@@ -14216,8 +14242,8 @@ fn as_bool_val(v: &Value) -> Option<bool> {
 
 /// Three-valued effective boolean: `None` is a SPARQL error (type error or unbound),
 /// used by the logical operators to implement SPARQL's 3-valued `&&` / `||` / `!`.
-fn ebv3(v: &Value) -> Option<bool> {
-    ebv(v)
+fn ebv3(v: &Value, semantics: crate::EbvSemantics) -> Option<bool> {
+    ebv(v, semantics)
 }
 
 fn and3(x: Option<bool>, y: Option<bool>) -> Value {
@@ -15113,22 +15139,22 @@ fn eval_compiled(
             Ok(Value::Term(Term::Literal(l.clone())))
         },
         And(a, c) => {
-            let x = ebv3(&eval_compiled(graph, local, b, row, a)?);
+            let x = ebv3(&eval_compiled(graph, local, b, row, a)?, local.ebv_semantics);
             if x == Some(false) {
                 return Ok(Value::Bool(false));
             }
-            let y = ebv3(&eval_compiled(graph, local, b, row, c)?);
+            let y = ebv3(&eval_compiled(graph, local, b, row, c)?, local.ebv_semantics);
             Ok(and3(x, y))
         }
         Or(a, c) => {
-            let x = ebv3(&eval_compiled(graph, local, b, row, a)?);
+            let x = ebv3(&eval_compiled(graph, local, b, row, a)?, local.ebv_semantics);
             if x == Some(true) {
                 return Ok(Value::Bool(true));
             }
-            let y = ebv3(&eval_compiled(graph, local, b, row, c)?);
+            let y = ebv3(&eval_compiled(graph, local, b, row, c)?, local.ebv_semantics);
             Ok(or3(x, y))
         }
-        Not(a) => Ok(match ebv3(&eval_compiled(graph, local, b, row, a)?) {
+        Not(a) => Ok(match ebv3(&eval_compiled(graph, local, b, row, a)?, local.ebv_semantics) {
             Some(v) => Value::Bool(!v),
             None => Value::Error,
         }),
@@ -15152,7 +15178,7 @@ fn eval_compiled(
             let v = eval_compiled(graph, local, b, row, a)?;
             Ok(as_numeric(&v).and_then(|n| numeric_capacity::unary(n, Num::neg)).map(Value::Num).unwrap_or(Value::Error))
         }
-        If(cond, t, f) => match ebv3(&eval_compiled(graph, local, b, row, cond)?) {
+        If(cond, t, f) => match ebv3(&eval_compiled(graph, local, b, row, cond)?, local.ebv_semantics) {
             Some(true) => eval_compiled(graph, local, b, row, t),
             Some(false) => eval_compiled(graph, local, b, row, f),
             None => Ok(Value::Error),
@@ -19903,91 +19929,91 @@ mod effective_boolean_unit {
     #[test]
     fn ebv_error_is_none() {
         // SPARQL EBV: error → None (a type error in the expression).
-        assert_eq!(ebv(&Value::Error), None, "ebv(Error) must be None");
-        assert!(!effective_boolean(&Value::Error), "effective_boolean(Error) must be false (drop row)");
+        assert_eq!(ebv(&Value::Error, crate::EbvSemantics::Rec2013), None, "ebv(Error) must be None");
+        assert!(!effective_boolean(&Value::Error, crate::EbvSemantics::Rec2013), "effective_boolean(Error) must be false (drop row)");
     }
 
     #[test]
     fn ebv_unbound_is_none() {
-        assert_eq!(ebv(&Value::Unbound), None, "ebv(Unbound) must be None");
-        assert!(!effective_boolean(&Value::Unbound), "effective_boolean(Unbound) must be false (drop row)");
+        assert_eq!(ebv(&Value::Unbound, crate::EbvSemantics::Rec2013), None, "ebv(Unbound) must be None");
+        assert!(!effective_boolean(&Value::Unbound, crate::EbvSemantics::Rec2013), "effective_boolean(Unbound) must be false (drop row)");
     }
 
     #[test]
     fn ebv_bool_true_is_some_true() {
-        assert_eq!(ebv(&Value::Bool(true)), Some(true));
-        assert!(effective_boolean(&Value::Bool(true)));
+        assert_eq!(ebv(&Value::Bool(true), crate::EbvSemantics::Rec2013), Some(true));
+        assert!(effective_boolean(&Value::Bool(true), crate::EbvSemantics::Rec2013));
     }
 
     #[test]
     fn ebv_bool_false_is_some_false() {
-        assert_eq!(ebv(&Value::Bool(false)), Some(false));
-        assert!(!effective_boolean(&Value::Bool(false)));
+        assert_eq!(ebv(&Value::Bool(false), crate::EbvSemantics::Rec2013), Some(false));
+        assert!(!effective_boolean(&Value::Bool(false), crate::EbvSemantics::Rec2013));
     }
 
     #[test]
     fn ebv_nonzero_int_is_true() {
-        assert_eq!(ebv(&Value::Num(Num::Int(1))), Some(true));
-        assert_eq!(ebv(&Value::Num(Num::Int(-1))), Some(true));
+        assert_eq!(ebv(&Value::Num(Num::Int(1)), crate::EbvSemantics::Rec2013), Some(true));
+        assert_eq!(ebv(&Value::Num(Num::Int(-1)), crate::EbvSemantics::Rec2013), Some(true));
     }
 
     #[test]
     fn ebv_zero_int_is_false() {
-        assert_eq!(ebv(&Value::Num(Num::Int(0))), Some(false));
+        assert_eq!(ebv(&Value::Num(Num::Int(0)), crate::EbvSemantics::Rec2013), Some(false));
     }
 
     #[test]
     fn ebv_iri_term_is_none_type_error() {
         use oxrdf::NamedNode;
         let iri = Value::Term(Term::NamedNode(NamedNode::new_unchecked("http://ex/x")));
-        assert_eq!(ebv(&iri), None, "EBV of IRI is a type error → None");
-        assert!(!effective_boolean(&iri), "effective_boolean(IRI) = false (drop row)");
+        assert_eq!(ebv(&iri, crate::EbvSemantics::Rec2013), None, "EBV of IRI is a type error → None");
+        assert!(!effective_boolean(&iri, crate::EbvSemantics::Rec2013), "effective_boolean(IRI) = false (drop row)");
     }
 
     #[test]
     fn ebv_nonempty_string_is_true() {
         let t = Value::Term(Term::Literal(Literal::new_simple_literal("hello")));
-        assert_eq!(ebv(&t), Some(true), "non-empty string literal EBV = true");
+        assert_eq!(ebv(&t, crate::EbvSemantics::Rec2013), Some(true), "non-empty string literal EBV = true");
     }
 
     #[test]
     fn ebv_empty_string_is_false() {
         let t = Value::Term(Term::Literal(Literal::new_simple_literal("")));
-        assert_eq!(ebv(&t), Some(false), "empty string literal EBV = false");
+        assert_eq!(ebv(&t, crate::EbvSemantics::Rec2013), Some(false), "empty string literal EBV = false");
     }
 
     #[test]
     fn ebv_lang_tagged_literal_is_none_type_error() {
         // rdf:langString is NOT xsd:string: its EBV is a type error.
         let t = Value::Term(Term::Literal(Literal::new_language_tagged_literal_unchecked("hello", "en")));
-        assert_eq!(ebv(&t), None, "lang-tagged literal EBV is type error → None");
+        assert_eq!(ebv(&t, crate::EbvSemantics::Rec2013), None, "lang-tagged literal EBV is type error → None");
     }
 
     #[test]
     fn ebv_typed_boolean_true_false() {
         let tt = Value::Term(Term::Literal(Literal::new_typed_literal("true", xsd::BOOLEAN)));
         let ff = Value::Term(Term::Literal(Literal::new_typed_literal("false", xsd::BOOLEAN)));
-        assert_eq!(ebv(&tt), Some(true));
-        assert_eq!(ebv(&ff), Some(false));
+        assert_eq!(ebv(&tt, crate::EbvSemantics::Rec2013), Some(true));
+        assert_eq!(ebv(&ff, crate::EbvSemantics::Rec2013), Some(false));
     }
 
     #[test]
     fn ebv_ill_formed_boolean_is_false_per_sparql_11() {
         let ill = Value::Term(Term::Literal(Literal::new_typed_literal("yes", xsd::BOOLEAN)));
         // [GPT-6] REC §17.2.2 first bullet explicitly specifies false here.
-        assert_eq!(ebv(&ill), Some(false));
+        assert_eq!(ebv(&ill, crate::EbvSemantics::Rec2013), Some(false));
     }
 
     #[test]
     fn ebv_xsd_string_nonempty_is_true() {
         let s = Value::Term(Term::Literal(Literal::new_typed_literal("abc", xsd::STRING)));
-        assert_eq!(ebv(&s), Some(true));
+        assert_eq!(ebv(&s, crate::EbvSemantics::Rec2013), Some(true));
     }
 
     #[test]
     fn ebv_xsd_string_empty_is_false() {
         let s = Value::Term(Term::Literal(Literal::new_typed_literal("", xsd::STRING)));
-        assert_eq!(ebv(&s), Some(false));
+        assert_eq!(ebv(&s, crate::EbvSemantics::Rec2013), Some(false));
     }
 }
 
@@ -20650,7 +20676,7 @@ mod compiled_expr_tests {
                 .iter()
                 .filter(|row| {
                     eval_expr(&g, &local, &b_ref, row, expr)
-                        .map(|val| effective_boolean(&val))
+                        .map(|val| effective_boolean(&val, crate::EbvSemantics::Rec2013))
                         .unwrap_or(false)
                 })
                 .cloned()
@@ -21218,7 +21244,7 @@ mod idfast_unit {
         idfast_rewrite(&mut compiled, nonlit_cols);
         b.rows
             .iter()
-            .map(|row| ebv3(&eval_compiled(graph, local, b, row, &compiled).unwrap()))
+            .map(|row| ebv3(&eval_compiled(graph, local, b, row, &compiled).unwrap(), crate::EbvSemantics::Rec2013))
             .collect()
     }
 
@@ -21900,7 +21926,7 @@ mod idfast_unit {
         // ...so an inverted verdict (false) would be a detectable mismatch.
         let mutated = Value::Bool(false);
         assert_ne!(
-            ebv3(&mutated),
+            ebv3(&mutated, crate::EbvSemantics::Rec2013),
             reference_equal(&g, &local, id, id),
             "an inverted equal-id verdict must disagree with the oracle"
         );

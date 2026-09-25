@@ -130,8 +130,8 @@ pub fn prepare_with_dataset(
     sparql: &str,
     over: &DatasetOverride,
 ) -> Result<Prepared, PrepareError> {
-    let mut parsed = SparqlParser::new()
-        .parse_query(sparql)
+    let (mut parsed, version) = SparqlParser::new()
+        .parse_query_with_versions(sparql)
         .map_err(|e| PrepareError::Malformed(e.to_string()))?;
     let form = match parsed {
         Query::Select { .. } => QueryForm::Select,
@@ -145,13 +145,15 @@ pub fn prepare_with_dataset(
         set_query_dataset(&mut parsed, over.to_query_dataset()?);
         // Re-serialise the rewritten algebra: spargebra's `Display` re-emits the FROM / FROM
         // NAMED clauses, and the engine re-parses this string (the CONSTRUCT / DESCRIBE path).
-        parsed.to_string()
+        let announcements = version.iter().map(|label| format!("VERSION \"{label}\"\n")).collect::<String>();
+        format!("{announcements}{parsed}")
     };
     // [OPUS-4.8] (sq-7d3dj.34.1) Carry the algebra we JUST parsed (the original query, or — under
     // a dataset override — the rewritten one, which `runnable` was serialised FROM, so the two
     // denote the same query) so the SELECT / ASK floor path executes it prepared, without the
     // engine re-parsing `runnable`.
-    let query = sparq_engine::PreparedQuery::from(parsed);
+    let query = sparq_engine::PreparedQuery::from_query_with_versions(parsed, version)
+        .map_err(PrepareError::Malformed)?;
     Ok(Prepared {
         form,
         runnable,
@@ -430,6 +432,29 @@ mod tests {
                 .len(),
             2
         );
+    }
+
+    // [GPT-6] Protocol dataset rewriting must retain query VERSION metadata.
+    #[test]
+    fn version_survives_protocol_dataset_rewrite_and_conflicts_reject() {
+        let over = DatasetOverride { default: vec!["http://ex/absent".into()], named: vec![] };
+        for override_dataset in [&DatasetOverride::default(), &over] {
+            for label in ["1.1", "1.2", "1.2-basic"] {
+                let p = prepare_with_dataset(&format!("VERSION '{label}' SELECT (!!\"z\"^^<http://www.w3.org/2001/XMLSchema#boolean> AS ?v) {{}}"), override_dataset).unwrap();
+                assert_eq!(p.query.versions(), [label]);
+                let from_text = sparq_engine::PreparedQuery::parse(&p.runnable).unwrap();
+                assert_eq!(from_text.versions(), [label]);
+                let pin = sparq_engine::QueryBudget { ebv_semantics: Some(sparq_engine::EbvSemantics::Rec2013), ..Default::default() };
+                let pinned = sparq_engine::query_prepared_with_budget(&g(), &p.query, &pin);
+                assert_eq!(pinned.is_ok(), label == "1.1");
+                let rows = sparq_engine::query_prepared(&g(), &p.query).unwrap().rows;
+                assert_eq!(rows[0][0].is_none(), label != "1.1");
+            }
+            let p = prepare_with_dataset("VERSION '1.2' VERSION '1.2-basic' VERSION '1.2' ASK {}", override_dataset).unwrap();
+            assert_eq!(p.query.versions(), ["1.2", "1.2-basic", "1.2"]);
+            assert_eq!(sparq_engine::PreparedQuery::parse(&p.runnable).unwrap().versions(), p.query.versions());
+        }
+        assert!(prepare("VERSION 'unsupported' ASK {}").is_err());
     }
 
     // ---------------------------------------------------------------------------

@@ -189,12 +189,14 @@ fn write_json_opt_f64(s: &mut String, v: Option<f64>) {
 /// Supports SELECT / ASK / CONSTRUCT / DESCRIBE (every query form, like the text
 /// `explain`). Returns `Err` for a malformed query.
 pub fn explain_plan(graph: &Graph, sparql: &str) -> Result<PlanNode, String> {
-    let q = SparqlParser::new().parse_query(sparql).map_err(|e| e.to_string())?;
-    let active = crate::active_dataset(graph, &q);
+    let (query, version) = SparqlParser::new().parse_query_with_versions(sparql).map_err(|e| e.to_string())?;
+    let prepared = crate::PreparedQuery::from_query_with_versions(query, version)?;
+    let q = prepared.query();
+    let active = crate::active_dataset(graph, q);
     let graph = active.as_ref().unwrap_or(graph);
     let _view_scope = crate::view_scope(&active);
     exec::set_query_base(q.base_iri().map(|b| b.as_str()));
-    let pattern = query_pattern(&q);
+    let pattern = query_pattern(q);
     Ok(plan_from_pattern(graph, pattern))
 }
 
@@ -208,8 +210,10 @@ pub fn explain_plan_analyze(graph: &Graph, sparql: &str) -> Result<PlanNode, Str
 
 /// [`explain_plan_analyze`] under a cooperative [`QueryBudget`] (deadline / max rows).
 pub fn explain_plan_analyze_with_budget(graph: &Graph, sparql: &str, budget: &QueryBudget) -> Result<PlanNode, String> {
-    let q = SparqlParser::new().parse_query(sparql).map_err(|e| e.to_string())?;
-    let active = crate::active_dataset(graph, &q);
+    let (query, version) = SparqlParser::new().parse_query_with_versions(sparql).map_err(|e| e.to_string())?;
+    let prepared = crate::PreparedQuery::from_query_with_versions(query, version)?;
+    let q = prepared.query();
+    let active = crate::active_dataset(graph, q);
     let graph = active.as_ref().unwrap_or(graph);
     let _view_scope = crate::view_scope(&active);
     exec::set_query_base(q.base_iri().map(|b| b.as_str()));
@@ -217,9 +221,10 @@ pub fn explain_plan_analyze_with_budget(graph: &Graph, sparql: &str, budget: &Qu
         return Err("EXPLAIN ANALYZE supports SELECT and ASK queries only (use explain_plan for CONSTRUCT/DESCRIBE)".into());
     }
 
+    let semantics = prepared.resolve_ebv_semantics(budget.ebv_semantics)?;
     // Execute under the budget with the operator trace installed (exactly as the
     // text `explain_analyze` does), then reconstruct the typed tree from the trace.
-    exec::budget::with_budget(budget, || {
+    exec::budget::with_query_budget(budget, semantics, || {
         let _tguard = exec::trace::install();
         match &q {
             Query::Select { pattern, .. } => {

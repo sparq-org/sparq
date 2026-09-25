@@ -20,6 +20,10 @@ typed `QueryResult` (rows of `Option<oxrdf::Term>`) or directly as a SPARQL-1.1-
 [Correlated EXISTS with MINUS](exists-minus.md) documents the bounded published-2013
 solution-domain correction and the remaining native practical fallbacks.
 
+[GPT-6] Query options can pin [EBV rules](ebv-dialects.md) to REC 2013 or the
+12 September 2026 SPARQL 1.2 draft. VERSION announcements are retained and
+explicit contradictions reject evaluation; this is not full 1.2 conformance.
+
 ## Quickstart
 
 `Cargo.toml`:
@@ -949,7 +953,7 @@ let r = query_view(&v, "SELECT ?s WHERE { GRAPH ?g { ?s ?p ?o } }").unwrap(); //
   generation), so the check is re-run against the LIVE graph every eval — an UPDATE inserting a
   literal object publishes a new snapshot the next query re-checks; the verdict never outlives its
   snapshot (there is no plan/inference cache across snapshots; the result cache is keyed by
-  `(query, version)`). The same snapshot-aware column set is now also installed at the FUSED
+  `(query, version, resolved EBV semantics)`). The same snapshot-aware column set is now also installed at the FUSED
   conjunctive residual-FILTER sites (`eval_flat_conjunctive`, `eval_bgp_binary_capped`), drain-safe
   via `with_idfast_nonlit_cols` (the set drains on the first consuming `apply_filter`, so a nested
   EXISTS on a different `Bindings` layout sees the empty default). A differential test witnesses the
@@ -1149,8 +1153,8 @@ let r = query_view(&v, "SELECT ?s WHERE { GRAPH ?g { ?s ?p ?o } }").unwrap(); //
   off, zero of this code compiles, the conjunctive path is byte-identical, no new dependencies.
 - **Materialised-view / query-result cache** is the non-default `result-cache` cargo feature (bead
   `sq-a9cn`): `ResultCache::new(capacity)` is a bounded, version-aware LRU that stores a SELECT/ASK
-  `QueryResult` keyed by `(parsed query algebra, caller graph-version)`; serve a query through
-  `cache.get_or_eval(&graph, &query, version, &budget)` (returns an `Arc<QueryResult>`). It re-serves
+  `QueryResult` keyed by `(parsed query algebra, caller graph-version, resolved EBV semantics)`;
+  serve a prepared query through `cache.get_or_eval_prepared(&graph, &query, version, &budget)` (returns an `Arc<QueryResult>`). It re-serves
   the same read query against a slowly-changing graph without re-executing. **Soundness contract**:
   the engine evaluates against a borrowed `&Graph` and can't see mutations, so the **caller bumps the
   `u64` version on every mutation** (`apply_delta`/`update`/reload) — a hit is only returned for the
@@ -1165,13 +1169,13 @@ let r = query_view(&v, "SELECT ?s WHERE { GRAPH ?g { ?s ?p ?o } }").unwrap(); //
   // Cargo.toml: sparq-engine = { version = "0.1", features = ["result-cache"] }
   use sparq_engine::{PreparedQuery, QueryBudget, ResultCache};
   let cache = ResultCache::new(256);          // up to 256 distinct results, LRU
-  let q = PreparedQuery::parse("SELECT ?s WHERE { ?s ?p ?o }")?.into_query();
+  let q = PreparedQuery::parse("SELECT ?s WHERE { ?s ?p ?o }")?;
   let mut version = 0u64;
-  let r1 = cache.get_or_eval(&graph, &q, version, &QueryBudget::unlimited())?; // miss
-  let r2 = cache.get_or_eval(&graph, &q, version, &QueryBudget::unlimited())?; // hit (same Arc)
+  let r1 = cache.get_or_eval_prepared(&graph, &q, version, &QueryBudget::unlimited())?; // miss
+  let r2 = cache.get_or_eval_prepared(&graph, &q, version, &QueryBudget::unlimited())?; // hit (same Arc)
   // ... mutate the graph, then bump the epoch so the next read re-evaluates:
   version += 1;
-  let r3 = cache.get_or_eval(&graph, &q, version, &QueryBudget::unlimited())?; // miss (fresh)
+  let r3 = cache.get_or_eval_prepared(&graph, &q, version, &QueryBudget::unlimited())?; // miss (fresh)
   # Ok::<(), String>(())
   ```
 - **Experimental deletion projection caching** — [GPT-6 Astra] opt in only on the

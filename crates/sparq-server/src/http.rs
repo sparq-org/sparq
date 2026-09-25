@@ -6732,6 +6732,7 @@ pub(crate) fn make_budget(config: &ServerConfig, apply_max_results: bool) -> Que
         max_bytes: config.max_query_bytes,
         temporal_year_range: None, // Native server retains the checked temporal range.
         strict_numeric_capacity: false, // Proof-only numeric capacity is opt-in.
+        ebv_semantics: None, // Retain an announced version, otherwise REC 2013.
         cancel: None,
     }
 }
@@ -6757,6 +6758,7 @@ fn update_budget(config: &ServerConfig) -> QueryBudget {
         max_bytes: config.max_query_bytes,
         temporal_year_range: None, // Native server retains the checked temporal range.
         strict_numeric_capacity: false, // Proof-only numeric capacity is opt-in.
+        ebv_semantics: None, // Retain an announced version, otherwise REC 2013.
         cancel: None,
     }
 }

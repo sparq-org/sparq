@@ -13,9 +13,9 @@ Query in-memory or out-of-core graphs, inspect plans with `EXPLAIN` / `EXPLAIN A
 and register custom functions. [Exact temporal comparison and optional year budgets](../../skills/zk-query-proofs/references/exact-temporals.md) preserve fractional precision.
 
 <!-- [GPT-6] The detached proof guest does not add an engine dependency. -->
-The opt-in [proved evaluator](../../zk/sparql-evaluator/README.md) restricts `target_os = "zkvm"`,
-rejecting ambient NOW/RAND/UUID in that target only. The experiment is
-not externally audited.
+The opt-in [proved evaluator](../../zk/sparql-evaluator/README.md) restricts `target_os = "zkvm"`, rejecting ambient NOW/RAND/UUID in that target only. The experiment is not externally audited.
+
+[GPT-6] `QueryBudget.ebv_semantics` selects [version-pinned EBV rules](../../skills/sparql-query/ebv-dialects.md), with REC 2013 as the unannounced default; this does not claim full SPARQL 1.2 support.
 
 ## 🚀 Quickstart
 
@@ -43,11 +43,9 @@ let json = sparq_engine::query_json(&g, "SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?
   only positive shapes with locally bound FILTERs; scope-sensitive shapes and triple-term
   endpoints use potentially more expensive ordinary evaluation. [Boundaries and examples](../../skills/sparql-query/SKILL.md).
 - **Deterministic builtins** — `isNumeric` validates lexicals/facets independently of finite
-  arithmetic capacity; integer/decimal EBV classifies validated digits without floating
-  underflow. Invalid numeric/boolean lexicals have false EBV per SPARQL 1.1 §17.2.2,
+  arithmetic capacity; integer/decimal EBV classifies validated digits without floating underflow. Invalid numeric/boolean lexicals have false EBV per SPARQL 1.1 §17.2.2,
   while invalid arithmetic operands error. Integer casts truncate within `i64`. `SUBSTR` clips the original
-  one-based interval. Date accessors validate calendars/offsets and normalize next-day
-  midnight; `MIN`/`MAX` retain input terms. Raw numeric/boolean lexical
+  one-based interval. Date accessors validate calendars/offsets and normalize next-day midnight; `MIN`/`MAX` retain input terms. Raw numeric/boolean lexical
   forms are checked verbatim; XML whitespace normalization applies to string casts only. [Bounded coverage and numeric limits](../../skills/sparql-query/SKILL.md)
   remain explicit; these corrections do not establish complete builtin conformance.
 - **Named graphs** — query across an active dataset with `GRAPH` and `FROM` / `FROM NAMED`.
@@ -67,8 +65,7 @@ let json = sparq_engine::query_json(&g, "SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?
   binder outputs and invalid term positions fail closed. The opt-in `templates` feature
   adds named typed-JSON templates. [Query/update examples and restrictions](../../skills/sparql-query/SKILL.md).
 - **Query-result cache** *(opt-in `result-cache`, OFF by default)* — bounded LRU
-  `cache::ResultCache` keys SELECT/ASK by query algebra and caller graph version. The caller
-  must advance its `u64` version on every mutation; `is_cacheable` rejects volatile functions,
+  `cache::ResultCache` keys SELECT/ASK by query algebra, caller graph version and resolved EBV semantics. The caller must advance its `u64` version on every mutation; `is_cacheable` rejects volatile functions,
   SERVICE and custom functions/aggregates. [Cache contract](../../skills/sparql-query/SKILL.md).
 - **MVCC / ACID transaction isolation** *(opt-in `txn` feature, OFF by default)* —
   a `txn::TransactionManager` over one logical `Graph`: **snapshot-isolation** reads (`begin_read` → a

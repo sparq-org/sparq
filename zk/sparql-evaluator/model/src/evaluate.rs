@@ -17,10 +17,11 @@ const TEMPORAL_YEAR_RANGE: (i64, i64) = (1, 1_000_000_000);
 /// functions, unsupported RDF 1.2 terms, and resource exhaustion.
 pub fn admit(request: &Request) -> Result<(), Rejected> {
     validate_request(request)?;
-    let query = spargebra::SparqlParser::new()
-        .parse_query(&request.query)
+    let prepared = sparq_engine::PreparedQuery::parse(&request.query)
         .map_err(|_| Rejected("SPARQL parse rejected"))?;
-    admit_query(&query)
+    prepared.resolve_ebv_semantics(Some(sparq_engine::EbvSemantics::Rec2013))
+        .map_err(|_| Rejected("query VERSION contradicts REC 2013 profile"))?;
+    admit_query(prepared.query())
 }
 
 fn admit_query(query: &spargebra::Query) -> Result<(), Rejected> {
@@ -409,6 +410,7 @@ pub fn evaluate(witness: &Witness) -> Result<Journal, Rejected> {
         max_rows: Some(request.policy.max_rows as usize),
         temporal_year_range: Some(TEMPORAL_YEAR_RANGE),
         strict_numeric_capacity: true,
+        ebv_semantics: Some(sparq_engine::EbvSemantics::Rec2013),
         // Bound computed terms as well as row counts; this is an estimate, not RSS.
         max_bytes: Some(4 * MAX_DATASET_BYTES as usize),
         ..Default::default()

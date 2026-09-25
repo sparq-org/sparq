@@ -23,6 +23,10 @@ curl --compressed -G http://127.0.0.1:3030/sparql \
   --data-urlencode 'query=SELECT * WHERE { ?s ?p ?o }'
 ```
 
+[GPT-6] Query VERSION metadata survives protocol dataset overrides and prepared
+execution. The query engine resolves its [scoped EBV rules](../sparql-query/ebv-dialects.md);
+this is not a full SPARQL 1.2 protocol or language conformance claim.
+
 ## Quickstart
 
 Run the binary (server stack is the default-on `server` feature):

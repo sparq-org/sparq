@@ -521,7 +521,7 @@ fn value_join(
     let scratch = Bindings::unsorted(vec![lv.clone(), rv.clone()], Vec::new());
     let (ea, eb) = (Expression::Variable(lv.clone()), Expression::Variable(rv.clone()));
     let pair_true = |ida: Id, idb: Id| -> Result<bool, String> {
-        Ok(effective_boolean(&equal_expr(graph, local, &scratch, &[ida, idb], &ea, &eb)?))
+        Ok(effective_boolean(&equal_expr(graph, local, &scratch, &[ida, idb], &ea, &eb)?, local.ebv_semantics))
     };
     for (li, lk) in lkeys.iter().enumerate() {
         if !matches!(lk, JKey::Hard) {

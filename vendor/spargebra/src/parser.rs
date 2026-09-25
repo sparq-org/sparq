@@ -115,11 +115,15 @@ impl SparqlParser {
     /// assert_eq!(query.to_string(), query_str);
     /// # Ok::<_, spargebra::SparqlSyntaxError>(())
     /// ```
-    #[cfg_attr(
-        not(feature = "standard-unicode-escaping"),
-        expect(clippy::needless_borrow)
-    )]
     pub fn parse_query(self, query: &str) -> Result<Query, SparqlSyntaxError> {
+        self.parse_query_with_versions(query).map(|(query, _)| query)
+    }
+
+    /// [GPT-6] Parses query algebra and retains all VERSION announcements.
+    /// The legacy AST and `parse_query` API remain unchanged. Execution engines
+    /// must validate supported labels and resolve their own semantic options.
+    #[cfg_attr(not(feature = "standard-unicode-escaping"), expect(clippy::needless_borrow))]
+    pub fn parse_query_with_versions(self, query: &str) -> Result<(Query, Vec<String>), SparqlSyntaxError> {
         let mut state = ParserState::new(
             self.base_iri,
             self.prefixes,
@@ -128,7 +132,7 @@ impl SparqlParser {
         #[cfg(feature = "standard-unicode-escaping")]
         let query = unescape_unicode_codepoints(query);
         match parser::QueryUnit(&query, &mut state) {
-            Ok(query) => Ok(query),
+            Ok(query) => Ok((query, state.versions)),
             // [OPUS-4.8] Prefer the clear depth-limit error over the raw PEG
             // "unexpected token" when the cap was the actual cause (bead sq-v5dg).
             Err(_) if state.hit_recursion_limit => Err(SparqlSyntaxErrorKind::TooDeeplyNested.into()),
@@ -1035,6 +1039,7 @@ enum Either<L, R> {
 const MAX_RECURSION_DEPTH: usize = 128;
 
 pub struct ParserState {
+    versions: Vec<String>,
     base_iri: Option<Iri<String>>,
     prefixes: HashMap<String, String>,
     custom_aggregate_functions: HashSet<NamedNode>,
@@ -1067,6 +1072,7 @@ impl ParserState {
         custom_aggregate_functions: HashSet<NamedNode>,
     ) -> Self {
         Self {
+            versions: Vec::new(),
             base_iri,
             prefixes,
             custom_aggregate_functions,
@@ -1265,15 +1271,18 @@ parser! {
             state.prefixes.insert(ns.into(), i.into_inner());
         }
 
-        rule VersionDecl() = i("VERSION") _ VersionSpecifier() {?
+        rule VersionDecl() = i("VERSION") _ version:VersionSpecifier() {?
             if cfg!(feature = "sparql-12") {
+                // [GPT-6] Retain every label; semantic compatibility belongs
+                // to the consumer, not the syntax grammar. UPDATE discards these.
+                state.versions.push(version);
                 Ok(())
             } else {
                 Err("The VERSION declaration is only supported in SPARQL 1.2")
             }
         }
 
-        rule VersionSpecifier() = STRING_LITERAL1() / STRING_LITERAL2() {}
+        rule VersionSpecifier() -> String = STRING_LITERAL1() / STRING_LITERAL2()
 
         rule SelectQuery() -> Query = s:SelectClause() _ d:DatasetClauses() _ w:WhereClause() _ g:GroupClause()? _ h:HavingClause()? _ o:OrderClause()? _ l:LimitOffsetClauses()? _ v:ValuesClause() {?
             Ok(Query::Select {
