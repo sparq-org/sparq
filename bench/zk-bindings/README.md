@@ -56,7 +56,9 @@ python3 bench/zk-bindings/run.py plan --regressions /path/to/conformance.json \
 
 `--regressions` retains each original JSON fixture and its golden. Row-only
 fixtures require `--variables` from the original runner; no projection is guessed.
-Capacity controls remain distinct from normative goldens. Historical artifacts
+Capacity controls remain distinct from normative goldens; [exact cause expectations](capacity-expectations.json)
+bind each retained numeric, temporal or row-limit control to its intended failure.
+An unrelated capacity cause cannot satisfy it. Historical artifacts
 with an admitted semantic defect must report a failure against the original
 expectation; a newer profile exclusion cannot excuse the old program.
 

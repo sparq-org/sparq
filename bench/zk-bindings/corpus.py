@@ -120,6 +120,16 @@ def sampled(seed, count):
     return result
 
 
+def capacity_expectation(original):
+    """Exact cause from a reviewed original, never inferred from an actual error."""
+    registry = load(Path(__file__).with_name("capacity-expectations.json"))
+    matches = [entry for source in registry["sources"] for entry in source["cases"]
+               if entry["id"] == original["id"] and entry["original_fixture_sha256"] == digest(original)]
+    if len(matches) > 1:
+        raise ValueError("duplicate capacity expectation")
+    return matches[0]["expected_rejection"] if matches else None
+
+
 def import_regressions(path, variables=None):
     """Retain original case IDs, query bytes, golden objects and source digest."""
     path = Path(path).resolve()
@@ -150,7 +160,9 @@ def import_regressions(path, variables=None):
         required, unclassified = None, None
         if rejection:
             if capacity:
-                required = {"category":"capacity"}
+                required = capacity_expectation(original)
+                if required is None:
+                    unclassified = "Original capacity fixture has no exact cause expectation."
             elif expected.get("kind") == "rejection":
                 diagnostic = expected.get("error")
                 known = load(Path(__file__).with_name("rejections.json"))["diagnostics"].get(diagnostic)

@@ -118,11 +118,29 @@ fn original_dialect_controls_apply_to_both_versioned_admission_and_execution() {
                 assert_eq!(serde_json::to_value(v2::evaluate_detailed(&w2).unwrap().result).unwrap(), case["expected_result"]);
                 assert_eq!(serde_json::to_value(v3::evaluate_detailed(&w3).unwrap().result).unwrap(), case["expected_result"]);
             } else {
-                let rejection = Rejected("query VERSION contradicts REC 2013 profile");
+                // All labels are syntactically valid strings in the pinned parser.
+                // PreparedQuery additionally rejects unknown/incompatible labels
+                // before the proof profile applies its explicit REC restriction.
+                spargebra::SparqlParser::new().parse_query(&w2.request.query).unwrap();
+                let preparation_error = match case["id"].as_str().unwrap() {
+                    "unknown-version" => Some("unsupported SPARQL VERSION announcement"),
+                    "contradictory-declarations" => Some("SPARQL VERSION announcements require incompatible EBV semantics"),
+                    "conflicting-wd" | "conflicting-wd-basic"
+                    | "compatible-draft-labels-conflict-with-proof-rec" => None,
+                    id => panic!("unclassified original VERSION rejection: {id}"),
+                };
+                let (rejection, execution) = if let Some(expected) = preparation_error {
+                    assert_eq!(sparq_engine::PreparedQuery::parse(&w2.request.query).unwrap_err(), expected);
+                    let rejection = Rejected("SPARQL parse rejected");
+                    (rejection, EvaluationError::Rejected(rejection))
+                } else {
+                    sparq_engine::PreparedQuery::parse(&w2.request.query).unwrap();
+                    (Rejected("query VERSION contradicts REC 2013 profile"), EvaluationError::Execution)
+                };
                 assert_eq!(v2::admit(&w2.request).unwrap_err(), rejection);
                 assert_eq!(v3::admit(&w3.request).unwrap_err(), rejection);
-                assert_eq!(v2::evaluate_detailed(&w2).unwrap_err(), EvaluationError::Execution);
-                assert_eq!(v3::evaluate_detailed(&w3).unwrap_err(), EvaluationError::Execution);
+                assert_eq!(v2::evaluate_detailed(&w2).unwrap_err(), execution);
+                assert_eq!(v3::evaluate_detailed(&w3).unwrap_err(), execution);
             }
         }
     }

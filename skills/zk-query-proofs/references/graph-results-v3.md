@@ -28,7 +28,6 @@ Blank-free tables skip isomorphism work. Other tables use distinct typed row and
 value nodes, retain each duplicate row occurrence, and encode sequence indices.
 Unbound cells have no value edge; columns retain their ordered variable names.
 Result serialization has a separate byte limit, including JSON escaping.
-
 The dependency assessment used rdf-canon 0.15.3's `counter.rs` and
 `canon.rs::hash_n_degree_quads`: default `None` selects 4000 calls, and
 `call_counter.add` precedes each function body. Its sole `permutations` loop may
@@ -36,9 +35,10 @@ skip candidates before another counted call. If each node has at most `d` relate
 occurrences, each call has at most `d` groups of at most `d!` candidates, so
 `call_limit × d × d!` bounds total candidates. Occurrences include repetitions;
 checked overflow or excessive bounds reject before canonicalization. The bound
-is conservative and can reject an easy graph; it never changes canonical output.
+is conservative: the fixed V3 ceiling rejects a node with seven related occurrences,
+including duplicate result rows, even if easy to canonicalize. Callers cannot raise
+the ceiling; rejection never changes canonical output.
 Size limits separately bound encoding, sorting, issuer maps and per-candidate work.
-
 The native `bounded_canonicalization` tests target standard-output parity,
 relabeling, each capacity, actual HNDQ exhaustion and repeated-neighbour counting.
 They are not guest or proof evidence. The default-off engine feature
