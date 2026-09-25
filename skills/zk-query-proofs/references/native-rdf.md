@@ -99,6 +99,19 @@ snapshot, checks that the bit is unset, and binds the snapshot's digest in the
 context. A holder cannot substitute another list, epoch, index or snapshot as
 trusted input.
 
+The epoch is an issuance-time label inside the issuer-signed status message,
+not a freshness discovery mechanism. A different verifier-accepted epoch requires
+a credential signed for that exact label; an existing presentation fails
+verification against the changed label. The caller can select updated snapshot
+bytes under the same signed label, with the exact accepted snapshot digest bound
+into each newly constructed proof context.
+
+Status input is a raw byte vector: index `i` selects byte `i / 8` and mask
+`1 << (i % 8)`, least significant bit first within each byte. This API does not
+decode a [W3C Bitstring Status List encodedList](https://www.w3.org/TR/vc-bitstring-status-list/#bitstringstatuslistcredential)
+or authenticate a status-list credential; an application must supply the stated
+native representation and independent trust policy.
+
 Public transcript fields include query, mappings, issuer roles, fixed capacity,
 status list/epoch/index, and **disclosed signed-slot indices**. Those indices
 reveal position/rank in the canonical message vector. This disclosure differs

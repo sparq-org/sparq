@@ -93,9 +93,14 @@ pub type Mapping = BTreeMap<String, String>;
 pub struct StatusReference {
     /// Absolute IRI of the verifier-accepted status list.
     pub list: String,
-    /// Verifier-accepted snapshot epoch; this API does not discover freshness.
+    /// Signed issuance epoch label, required to equal the verifier's expectation.
+    ///
+    /// A different accepted epoch requires a credential signed for that label;
+    /// this API does not discover freshness or rebind an existing signature.
     pub epoch: u64,
-    /// Little-endian bit index; a set bit means revoked.
+    /// Raw-byte bit index: byte `index / 8`, mask `1 << (index % 8)`.
+    ///
+    /// Within each byte, the least significant bit comes first; a set bit is revoked.
     pub index: u64,
 }
 
@@ -104,7 +109,9 @@ pub struct StatusReference {
 pub struct AcceptedStatus {
     /// The verifier's independently selected reference, not a holder trust hint.
     pub reference: StatusReference,
-    /// Complete accepted bit string; this API does not authenticate its source.
+    /// Complete raw byte vector in the index convention above.
+    ///
+    /// This API does not decode a W3C encodedList or authenticate the list source.
     pub bits: Vec<u8>,
 }
 
