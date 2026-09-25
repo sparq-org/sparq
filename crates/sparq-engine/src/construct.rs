@@ -27,7 +27,7 @@ use sparq_core::Graph;
 use spargebra::term::{NamedNodePattern, TermPattern, TriplePattern};
 use spargebra::Query;
 
-use crate::{PreparedQuery, QueryBudget, QueryResult};
+use crate::{PreparedQuery, QueryBudget, QueryFailure, QueryResult};
 
 /// Executes a CONSTRUCT query, returning the constructed graph as a deduplicated
 /// triple list (an RDF graph is a set; first-production order is preserved).
@@ -51,7 +51,20 @@ pub fn construct_prepared_with_budget(
     prepared: &PreparedQuery,
     budget: &QueryBudget,
 ) -> Result<Vec<Triple>, String> {
-    let semantics = prepared.resolve_ebv_semantics(budget.ebv_semantics)?;
+    construct_prepared_with_budget_detailed(graph, prepared, budget).map_err(|error| error.to_string())
+}
+
+/// [GPT-6] Constructs a graph while preserving typed whole-query failures.
+///
+/// # Errors
+/// Returns actual budget/capacity causes or a whole-query evaluation diagnostic.
+/// Ordinary expression errors still omit invalid template instances.
+pub fn construct_prepared_with_budget_detailed(
+    graph: &Graph,
+    prepared: &PreparedQuery,
+    budget: &QueryBudget,
+) -> Result<Vec<Triple>, QueryFailure> {
+    let semantics = prepared.resolve_ebv_semantics(budget.ebv_semantics).map_err(QueryFailure::Evaluation)?;
     let q = prepared.query();
     let active = crate::active_dataset(graph, q);
     let graph = active.as_ref().unwrap_or(graph);
@@ -59,11 +72,15 @@ pub fn construct_prepared_with_budget(
     match q {
         Query::Construct { template, pattern, .. } => {
             crate::exec::budget::with_query_budget(budget, semantics, || {
-                let solutions = crate::exec::eval_select(graph, pattern)?;
-                instantiate(template, &solutions, graph)
+                let result = (|| {
+                    let solutions = crate::exec::eval_select(graph, pattern)?;
+                    instantiate(template, &solutions, graph)
+                })();
+                // Read the owning frame before its guard restores parent state.
+                result.map_err(|message| crate::exec::budget::failure().unwrap_or(QueryFailure::Evaluation(message)))
             })
         }
-        _ => Err("construct() requires a CONSTRUCT query".into()),
+        _ => Err(QueryFailure::Evaluation("construct() requires a CONSTRUCT query".into())),
     }
 }
 
@@ -89,7 +106,20 @@ pub fn describe_prepared_with_budget(
     prepared: &PreparedQuery,
     budget: &QueryBudget,
 ) -> Result<Vec<Triple>, String> {
-    let semantics = prepared.resolve_ebv_semantics(budget.ebv_semantics)?;
+    describe_prepared_with_budget_detailed(graph, prepared, budget).map_err(|error| error.to_string())
+}
+
+/// [GPT-6] Describes resources while preserving typed whole-query failures.
+///
+/// # Errors
+/// Returns actual budget/capacity causes or a whole-query evaluation diagnostic.
+/// The existing outgoing blank-node closure and source terms are unchanged.
+pub fn describe_prepared_with_budget_detailed(
+    graph: &Graph,
+    prepared: &PreparedQuery,
+    budget: &QueryBudget,
+) -> Result<Vec<Triple>, QueryFailure> {
+    let semantics = prepared.resolve_ebv_semantics(budget.ebv_semantics).map_err(QueryFailure::Evaluation)?;
     let q = prepared.query();
     let active = crate::active_dataset(graph, q);
     let graph = active.as_ref().unwrap_or(graph);
@@ -97,11 +127,14 @@ pub fn describe_prepared_with_budget(
     match q {
         Query::Describe { pattern, .. } => {
             crate::exec::budget::with_query_budget(budget, semantics, || {
-                let solutions = crate::exec::eval_select(graph, pattern)?;
-                cbd(graph, &solutions)
+                let result = (|| {
+                    let solutions = crate::exec::eval_select(graph, pattern)?;
+                    cbd(graph, &solutions)
+                })();
+                result.map_err(|message| crate::exec::budget::failure().unwrap_or(QueryFailure::Evaluation(message)))
             })
         }
-        _ => Err("describe() requires a DESCRIBE query".into()),
+        _ => Err(QueryFailure::Evaluation("describe() requires a DESCRIBE query".into())),
     }
 }
 

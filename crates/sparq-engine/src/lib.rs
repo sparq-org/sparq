@@ -117,7 +117,9 @@ pub mod zk;
 pub use construct::{
     construct, construct_ntriples, construct_ntriples_with_budget, construct_or_describe,
     construct_or_describe_with_budget, construct_prepared, construct_prepared_with_budget,
+    construct_prepared_with_budget_detailed,
     construct_with_budget, describe, describe_prepared, describe_prepared_with_budget,
+    describe_prepared_with_budget_detailed,
     describe_with_budget, triples_to_ntriples,
 };
 // [OPUS-4.8] (sq-it1x) Opt-in MVCC / ACID transaction isolation. NON-DEFAULT `txn`

@@ -126,7 +126,8 @@ Invalid numeric/boolean lexical EBV is false under SPARQL 1.1 §17.2.2;
 arithmetic on invalid numeric terms still errors. Constrained expression work
 stays on the calling thread. See the [numeric capacity contract](../zk-query-proofs/references/numeric-capacity.md).
 
-[GPT-6] `query_prepared_with_budget_detailed` returns `QueryFailure` with typed
+[GPT-6] `query_prepared_with_budget_detailed`, `construct_prepared_with_budget_detailed`
+and `describe_prepared_with_budget_detailed` return `QueryFailure` with typed
 `Budget(BudgetExceeded::{Rows, Bytes, Deadline, Cancelled})`,
 `Capacity(EvaluationCapacity::{NumericRepresentation, TemporalYear})`, or
 `Evaluation(String)`. Causes are captured before the query budget scope is
