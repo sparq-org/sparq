@@ -19,6 +19,11 @@ and public status references with verifier-owned issuer policy; canonical signed
 slot indices are also disclosed. It uses no residual circuit and provides no
 hidden RDF predicate or Noir linkage. The tuple executable described below
 remains the default, with its original statement and unsupported cases.
+The separate `native-binding` feature enables the
+[finite binding-job adapter](../../skills/zk-query-proofs/references/native-binding-tests.md).
+It shares actual support preparation and uses the real native prover/verifier;
+honest support refusals, same-context weaker-proof verifier controls and the
+mandatory malicious-proof library tests are recorded separately.
 The RDF [local validation record](evidence/native-rdf-local-smoke.json) preserves
 the genuine sample and source hashes; its separate
 [dependency gate record](evidence/native-rdf-dependency-gates.json) retains the

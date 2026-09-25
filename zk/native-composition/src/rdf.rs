@@ -729,16 +729,8 @@ fn covering_slots(candidates: &[Vec<Slot>], roles: usize) -> Result<Vec<Slot>> {
     reachable[states - 1].take().ok_or(Error::Support)
 }
 
-/// Find public support and prove possession of the corresponding issuer signatures.
-///
-/// # Errors
-/// Rejects unsupported requests, missing matching triples, invalid policy,
-/// excess capacity, or signature-proof construction failures.
-pub fn prove_public_bgp<R: RngCore + CryptoRng>(
-    rng: &mut R,
-    request: &Request,
-    credentials: &[Credential],
-) -> Result<Presentation> {
+// [GPT-6] Shared honest construction path; native preparation creates no proof.
+fn prepare_relation(request: &Request, credentials: &[Credential]) -> Result<(Support, Disclosures)> {
     if credentials.len() != request.roles.len() {
         return Err(Error::Support);
     }
@@ -767,15 +759,39 @@ pub fn prove_public_bgp<R: RngCore + CryptoRng>(
         }).collect(),
     };
     let (disclosed, _) = relation(request, &support)?;
-    let mut witnesses = Witnesses::new();
-    for (credential, public) in credentials.iter().zip(disclosed) {
-        // Match every public message before constructing the signature witness.
-        if public
-            .iter()
-            .any(|(i, v)| credential.messages.get(*i) != Some(v))
-        {
+    for (credential, public) in credentials.iter().zip(&disclosed) {
+        if public.iter().any(|(i, v)| credential.messages.get(*i) != Some(v)) {
             return Err(Error::Support);
         }
+    }
+    Ok((support, disclosed))
+}
+
+/// Prepare the exact public support used by the honest native prover.
+///
+/// This validates the same query, policy, allocation and disclosed messages as
+/// proof construction. It does not generate or verify a zero-knowledge proof.
+///
+/// # Errors
+/// Rejects unsupported requests, missing role-covering support, mismatched signed
+/// public messages, invalid status policy and public capacity violations.
+pub fn prepare_public_bgp(request: &Request, credentials: &[Credential]) -> Result<Support> {
+    prepare_relation(request, credentials).map(|(support, _)| support)
+}
+
+/// Find public support and prove possession of the corresponding issuer signatures.
+///
+/// # Errors
+/// Rejects unsupported requests, missing matching triples, invalid policy,
+/// excess capacity, or signature-proof construction failures.
+pub fn prove_public_bgp<R: RngCore + CryptoRng>(
+    rng: &mut R,
+    request: &Request,
+    credentials: &[Credential],
+) -> Result<Presentation> {
+    let (support, disclosed) = prepare_relation(request, credentials)?;
+    let mut witnesses = Witnesses::new();
+    for (credential, public) in credentials.iter().zip(disclosed) {
         witnesses.add(PoKBBSSignatureG1::new_as_witness(
             credential.signature.clone(),
             credential
@@ -829,3 +845,7 @@ pub fn verify_public_bgp<R: RngCore + CryptoRng>(
 
 #[cfg(test)]
 mod tests;
+
+/// Local synthetic-fixture controls, excluded without the explicit test feature.
+#[cfg(feature = "native-binding")]
+pub mod binding_tests;

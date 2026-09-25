@@ -2424,6 +2424,7 @@ dependencies = [
  "oxrdf 0.3.3",
  "proof_system",
  "serde_json",
+ "sha2",
  "spargebra",
  "sparq-canon",
 ]

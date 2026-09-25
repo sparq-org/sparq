@@ -19,6 +19,8 @@ blake2 = "=0.10.6"
 legogroth16 = "=0.18.0"
 proof_system = "=0.34.0"
 serde_json = "=1.0.149"
+# [GPT-6] Existing locked hash crate, exposed only to the binding-test adapter.
+sha2 = { version = "=0.10.9", optional = true }
 # [GPT-6] Public-preimage RDF route; this workspace remains detached.
 dock_crypto_utils = { version = "=0.23.0", optional = true }
 oxrdf = { version = "=0.3.3", features = ["rdf-12"], optional = true }
@@ -27,12 +29,18 @@ spargebra = { path = "../../vendor/spargebra", features = ["sparql-12", "sep-000
 
 [features]
 default = []
+native-binding = ["native-rdf", "dep:sha2"]
 native-rdf = ["dep:dock_crypto_utils", "dep:oxrdf", "dep:sparq-canon", "dep:spargebra"]
 
 [[bin]]
 name = "native-rdf"
 path = "src/bin/native-rdf.rs"
 required-features = ["native-rdf"]
+
+[[bin]]
+name = "native-bindings"
+path = "src/bin/native-bindings.rs"
+required-features = ["native-binding"]
 
 [lints.rust]
 unsafe_code = "forbid"

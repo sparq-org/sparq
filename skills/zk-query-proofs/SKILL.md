@@ -30,6 +30,14 @@ status bytes use the native least-significant-bit-first convention documented in
 the reference. It provides no hidden RDF predicate or Noir
 linkage and remains unaudited. The original tuple executable stays separate. [GPT-6]
 
+[GPT-6] `prepare_public_bgp` exposes the honest prover's support preparation
+without a proof or authentication verdict. The separate `native-binding` feature
+enables the [finite binding-job adapter](references/native-binding-tests.md),
+which reports native preparation, admission refusals and actual proof verification
+as distinct outcomes. Its `rdf::binding_tests` helper constructs genuine weaker
+statements for synthetic fixture controls; these must fail the required verifier.
+The mandatory malicious-proof library suite remains separate.
+
 ## Prerequisites
 
 - **Noir toolchain on `PATH`** (the only way to prove/verify): `nargo` **1.0.0-beta.21** and Barretenberg `bb` **5.0.0-nightly.20260324** (bb target `noir-recursive`). Other versions may change the bb public-input byte layout the verifier reconstructs against. If `nargo`/`bb` are absent, the structural pre-filter and all host-side helpers still work, but `verify_manifest` / `CircuitProver` cannot.
