@@ -239,7 +239,7 @@ false-ASK fixture includes padded raw boolean/numeric branches; earlier receipts
 retain their original source scope. See [the semantics record](../../skills/sparql-query/raw-literal-whitespace.md).
 
 `evaluate_detailed`, `v2::evaluate_detailed` and `v3::evaluate_detailed` expose
-typed execution causes without changing request or
+typed execution causes (`BudgetExceeded` and `EvaluationCapacity` are re-exported) without changing request or
 journal encodings. Row/byte exhaustion, deadline, cancellation, exact numeric or
 temporal capacity, ordinary whole-query failure, and existing relation rejection
 remain distinguishable. Private engine diagnostic text is discarded. The legacy
@@ -248,3 +248,10 @@ distinct query and graph messages. Canonicalizer library failures are not inferr
 to be capacity failures from their text. Native definitions in
 `model/tests/versioned_evaluation_causes.rs` cover both authorities and graph forms;
 actual execution at the integrated source remains separately required. [GPT-6]
+
+The V3 shared guest regression runner retains the original builtin, temporal,
+lexical, aggregate, EXISTS, nullable-path and dialect fixtures under agreed scope.
+Its exact success/profile/capacity denominators are asserted in
+`host/tests/actual_v3_regressions.rs`; these are actual-execution definitions, not
+receipt evidence. Both-authority native replay and the genuine authority receipt
+families remain distinct. V2 also executes the original VERSION controls. [GPT-6]

@@ -22,6 +22,8 @@ pub use evaluate::{admit, evaluate, evaluate_detailed};
 mod evaluation_error;
 #[cfg(feature = "evaluate")]
 pub use evaluation_error::EvaluationError;
+#[cfg(feature = "evaluate")]
+pub use sparq_engine::{BudgetExceeded, EvaluationCapacity};
 
 /// Wire version for this bounded default-graph experiment.
 pub const VERSION: u32 = 1;

@@ -71,3 +71,73 @@ fn actual_guest_pins_rec2013_before_version_rejections() {
     }
     assert_eq!(counts, (3, 5));
 }
+
+#[test]
+fn actual_v2_guest_pins_rec2013_before_version_rejections() {
+    use sparq_proved_evaluator_model::v2::{Dialect, Journal, Policy, PrivateDataset, Request, VERSION, Witness, bind_journal, dataset_commitment};
+    let corpus: serde_json::Value =
+        serde_json::from_str(include_str!("../../fixtures/conformance/ebv-dialect.json")).unwrap();
+    let r0vm = std::env::var_os("RISC0_SERVER_PATH")
+        .map(PathBuf::from)
+        .expect("real r0vm is required");
+    let executor = ExternalProver::new("real-sparq-v2-ebv-dialect", r0vm);
+    let mut counts = (0, 0);
+    // A successful real execution must precede all classified guest rejections.
+    for accepted in [true, false] {
+        for case in corpus["cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|case| case["admitted"] == accepted)
+        {
+            let dataset = PrivateDataset {
+                nquads: String::new(),
+                named_graphs: vec![],
+                salt: [79; 32],
+            };
+            let policy = Policy::default();
+            let input = Witness {
+                request: Request {
+                    version: VERSION,
+                    contract: ProofContract::ExactDataset,
+                    dialect: Dialect::SparqSparql11DatasetV2,
+                    query: case["query"].as_str().unwrap().into(),
+                    authority: DatasetAuthority::VerifierAgreed {
+                        commitment: dataset_commitment(&dataset, &policy).unwrap(),
+                    },
+                    policy,
+                    nonce: [83; 32],
+                },
+                dataset,
+            };
+            eprintln!("actual V2 EBV dialect case {}", case["id"]);
+            let env = ExecutorEnv::builder()
+                .session_limit(Some(1 << 24))
+                .write(&input)
+                .unwrap()
+                .build()
+                .unwrap();
+            let execution = executor.execute(env, SPARQ_EXACT_GUEST_ELF);
+            if accepted {
+                let session = execution.unwrap_or_else(|error| panic!("{}: {error:#}", case["id"]));
+                let journal: Journal = session.journal.decode().unwrap();
+                bind_journal(&journal, &input.request).unwrap();
+                let expected: CanonicalResult =
+                    serde_json::from_value(case["expected_result"].clone()).unwrap();
+                assert_eq!(journal.result, expected, "{}", case["id"]);
+                counts.0 += 1;
+            } else {
+                let error = execution.expect_err("conflicting VERSION must not produce a journal");
+                let message = format!("{error:#}");
+                assert!(
+                    message.contains("Guest panicked:")
+                        && message.contains("bounded exact-dataset relation rejected"),
+                    "{}: {message}",
+                    case["id"]
+                );
+                counts.1 += 1;
+            }
+        }
+    }
+    assert_eq!(counts, (3, 5));
+}

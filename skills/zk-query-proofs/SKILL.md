@@ -403,7 +403,8 @@ records library-only Clippy scope separately from kernel or guest execution.
 [GPT-6] The exact model's `evaluate_detailed`, `v2::evaluate_detailed` and
 `v3::evaluate_detailed` evaluate their same versioned requests and emit
 the same journal as `evaluate`, while returning `EvaluationError` with distinct
-`Budget`, `Capacity`, `Execution` and existing `Rejected` cases. Execution causes
+`Budget`, `Capacity`, `Execution` and existing `Rejected` cases; their
+`BudgetExceeded` and `EvaluationCapacity` enums are re-exported by the model. Execution causes
 come from actual engine emitters; private engine diagnostics are discarded. The
 legacy `evaluate` APIs keep their original execution rejections, including V3's
 separate query and graph diagnostics. This error
