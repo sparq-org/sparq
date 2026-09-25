@@ -255,3 +255,10 @@ Its exact success/profile/capacity denominators are asserted in
 `host/tests/actual_v3_regressions.rs`; these are actual-execution definitions, not
 receipt evidence. Both-authority native replay and the genuine authority receipt
 families remain distinct. V2 also executes the original VERSION controls. [GPT-6]
+
+## Exact experiment adapter
+
+[GPT-6] The opt-in [experiment adapter](experiments/README.md) uses fixed synthetic
+V2 contracts, independently accepted artifact/pin inputs, genuine local succinct
+receipts and separate verifier controls. Its measurements explicitly distinguish
+inclusive API costs, unavailable internal stages and noncanonical provenance.

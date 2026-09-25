@@ -21,6 +21,7 @@ spargebra = { version = "=0.4.6", features = ["sparql-12", "sep-0006", "sparq-de
 oxrdf = { version = "0.3", features = ["rdf-12"], optional = true }
 oxttl = { version = "0.2", features = ["rdf-12"], optional = true }
 
+# [GPT-6] Explicit native corpus adapter; no proof or default-feature claim.
 [[example]]
 name = "proof_bindings"
 required-features = ["evaluate"]

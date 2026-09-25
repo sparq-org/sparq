@@ -35,7 +35,7 @@
 #     operand via the committed `value_component`) are LEGAL only against a method
 #     that committed a value handle: `dual-leaf` and the `value-only` research
 #     dial. ILLEGAL against `string-canonical` (no value handle — unprovable).
-#   * [GPT-6] Successful-result result_v1_* members admit string-canonical
+#   * [GPT-6] Successful-result result_v1_*, result_v2_*, and result_v3_* members admit string-canonical
 #     graphs only. Their complete-root authentication does not use the legacy
 #     lexical-handle dispatch rule or admit dual-leaf/value-only commitments.
 #   * STRING-LANE members (all remaining members — scan, join, path, revoke, issuer,
@@ -152,7 +152,7 @@ def lane_of(member: str) -> str:
 
 def legality(method_key: str, lane: str, member: str = "") -> dict:
     """Admit the result contract or mirror the legacy lane dispatch rule."""
-    if member.startswith("result_v1_"):
+    if member.startswith(("result_v1_", "result_v2_", "result_v3_")):
         # [GPT-6] Additive successful-result relation uses complete signed
         # string-canonical graphs; lexical-handle reuse is not its contract.
         legal = method_key == "string-canonical"

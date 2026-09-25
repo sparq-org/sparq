@@ -1,0 +1,5 @@
+{
+  "pr": 6503,
+  "date": "2026-09-13",
+  "reason": "[GPT-6] This stacked change adds opt-in selected-support and exact-evaluator host examples, a Python standard-library campaign runner, synthetic inputs, tests, workflow wiring, documentation and source-bound local evidence. It introduces no new shared core or engine runtime changes beyond its inherited PR6500 and PR6502 parents. This is an intent declaration, not an assertion of measured feature-OFF neutrality; the independent hosted WASM byte floor and runtime gates remain required."
+}

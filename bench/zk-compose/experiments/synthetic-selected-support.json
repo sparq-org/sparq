@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "fixture": "synthetic_shared_alternative_v1",
+  "contract": {
+    "meaning": "selected_successful_support_unsigned_v1",
+    "exact_dataset_scope": "not_applicable_no_completeness_claim",
+    "query": "SELECT DISTINCT ?name WHERE { ?s <urn:name> ?name . ?s <urn:age> ?age . FILTER(?age >= 18) }",
+    "released_terms": [
+      {
+        "name": "\"Alice\""
+      }
+    ],
+    "authority": "synthetic_babyjubjub_issuer_seed_1",
+    "signature_suite": "sparq_schnorr_babyjubjub_poseidon2",
+    "status_regime": "verifier_owned_snapshot_epoch_7_hidden_reference",
+    "disclosure_regime": "public_query_result_issuer_capacity_private_roots_and_operands",
+    "capacity_policy": "k1_or_k2_smallest_p3_r4_n16_tiny_integer_status_d10"
+  },
+  "planners": [
+    "first_success",
+    "optimize"
+  ],
+  "warmup_runs_per_planner": 0,
+  "measured_runs_per_planner": 1
+}

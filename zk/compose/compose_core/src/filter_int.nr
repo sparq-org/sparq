@@ -28,7 +28,7 @@
 //! cost of leaking ceil(log10(value)) of the hidden operand.
 //!
 //! v1 limits: canonical non-negative `xsd:integer` only (no sign, no leading
-//! zeros, D <= 19 so the value fits u64). Negative integers and
+//! zeros, D <= 20 with checked u64 accumulation). Negative integers and
 //! xsd:decimal/double operands are deferred (README).
 
 use crate::hashes::{h2, TYPE_CODE_LITERAL};
@@ -51,7 +51,8 @@ pub fn filter_int_check<let D: u32>(
     digits: [u8; D],
 ) {
     std::static_assert(D >= 1, "at least one digit");
-    std::static_assert(D <= 19, "value must fit u64");
+    // [GPT-6] Twenty digits cover u64::MAX; checked accumulation rejects overflow.
+    std::static_assert(D <= 20, "at most twenty decimal digits");
     assert(op <= OP_NE, "unknown comparison operator");
 
     // Canonical digit string: ASCII digits, no leading zero (unless D == 1).
