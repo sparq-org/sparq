@@ -8,7 +8,7 @@ import subprocess
 
 def relevant_path(path: str) -> bool:
     return path.startswith((
-        "zk/sparql-evaluator/", "crates/sparq-core/", "crates/sparq-engine/",
+        "zk/sparql-evaluator/", "bench/zk-bindings/", "crates/sparq-core/", "crates/sparq-engine/",
         "crates/sparq-substrate/", "crates/sparq-canon/", "vendor/spargebra/", "vendor/zk-sdk/", ".cargo/", "rust-toolchain",
     )) or path in {
         "Cargo.toml", "Cargo.lock", ".github/workflows/zk-exact-evaluator.yml",
@@ -16,6 +16,7 @@ def relevant_path(path: str) -> bool:
         "scripts/ci_exact_evaluator_evidence.py",
         "scripts/tests/test_ci_exact_evaluator_evidence.py",
         "scripts/tests/test_ci_exact_evaluator_paths.py",
+        "crates/sparq-conformance/examples/proof_corpus.rs",
     }
 
 

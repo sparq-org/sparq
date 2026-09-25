@@ -31,7 +31,9 @@ class ExactEvaluatorSelection(unittest.TestCase):
                      "vendor/spargebra/src/parser.rs", ".cargo/config.toml", "Cargo.lock",
                      "Cargo.toml", "rust-toolchain.toml", ".github/workflows/zk-exact-evaluator.yml",
                      "scripts/ci_exact_evaluator_paths.py", "scripts/ci_exact_evaluator_evidence.py",
-                     "scripts/tests/test_ci_exact_evaluator_evidence.py", "vendor/zk-sdk/risc0-build/src/lib.rs"]:
+                     "scripts/tests/test_ci_exact_evaluator_evidence.py", "vendor/zk-sdk/risc0-build/src/lib.rs",
+                     "bench/zk-bindings/exact_ci.py", "bench/zk-bindings/corpus.py",
+                     "bench/zk-bindings/exact-originals.json", "crates/sparq-conformance/examples/proof_corpus.rs"]:
             self.assertTrue(selector.relevant_path(path), path)
 
     def test_explicit_irrelevant_diff_only_skips_heavy_steps(self):

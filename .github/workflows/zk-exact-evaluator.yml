@@ -88,7 +88,9 @@ jobs:
 
       - name: Evidence export guard regressions
         if: steps.changes.outputs.required == 'true'
-        run: python3 -m unittest discover -s scripts/tests -p 'test_ci_exact_evaluator_*.py'
+        run: |
+          python3 -m unittest discover -s scripts/tests -p 'test_ci_exact_evaluator_*.py'
+          python3 -m unittest discover -s bench/zk-bindings -p 'test_*.py'
 
       - name: Export source-bound actual guest and genuine proof evidence
         if: steps.changes.outputs.required == 'true'
@@ -97,11 +99,20 @@ jobs:
         # every persisted synthetic receipt. Missing provenance fails the job.
         run: python3 scripts/ci_exact_evaluator_evidence.py --output "$RUNNER_TEMP/sparq-exact-evidence"
 
+      - name: Required original-fixture typed replay for all evaluator versions
+        if: steps.changes.outputs.required == 'true'
+        timeout-minutes: 15
+        # Every declared original case and both authority contexts must execute.
+        # This native lane counts zero proofs; the real campaign above remains required.
+        run: python3 bench/zk-bindings/exact_ci.py --output "$RUNNER_TEMP/sparq-exact-originals"
+
       - name: Upload exact artifact and campaign evidence
         if: always() && steps.changes.outputs.required == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: exact-evaluator-${{ github.sha }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/sparq-exact-evidence
+          path: |
+            ${{ runner.temp }}/sparq-exact-evidence
+            ${{ runner.temp }}/sparq-exact-originals
           if-no-files-found: error
           retention-days: 30

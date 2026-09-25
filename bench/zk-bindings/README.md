@@ -46,3 +46,22 @@ they are not computed by the evaluator or its canonicalizer.
 Blank-node comparison uses one global bijection and preserves row multiplicity.
 Graph canonical bytes must match their independently defined fixture; a mismatch
 is never repaired by per-row relabeling or literal normalization.
+
+## Required original replay
+
+`exact_ci.py` is required by the existing exact-evaluator job after its genuine
+guest campaign. [exact-originals.json](exact-originals.json) pins the complete
+original corpus, builtin edges and numeric/temporal capacity inventories. Every
+configured case executes under all three versioned profiles and both authorities;
+missing, duplicate, unclassified or failed cells fail the job. Historical rejection
+IDs promoted by reviewed semantics retain their original objects and exact query
+mapping in that inventory. The current profile uses its explicit positive golden.
+
+The Cargo-produced example is bound to the clean checkout and executable hash.
+Reports retain plans, original fixture objects, outcomes and separate checkout,
+PR-head and merge identities, including partial failures. The step has a bounded
+timeout within the existing job budget. Pure-Python controller tests exercise
+count/classification guards without executing the model. Neither those tests nor
+configured inventories count as native executions or proofs. The existing genuine
+receipt step remains independently required; full W3C and engine-variant replay
+remain separately tracked work.

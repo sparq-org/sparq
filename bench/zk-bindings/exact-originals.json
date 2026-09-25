@@ -1,0 +1,90 @@
+{
+  "schema": "sparq.exact-original-corpus.v1",
+  "authored_by": "GPT-6",
+  "inputs": [
+    {
+      "path": "zk/sparql-evaluator/fixtures/conformance/cases.json",
+      "sha256": "807c9c322ea797d861caa4895def8a96530fd47c7826dda3dfa9981e7a63027e",
+      "variables": null,
+      "cases": 116,
+      "original_negative_cases": 32
+    },
+    {
+      "path": "crates/sparq-engine/tests/fixtures/builtin_edges.json",
+      "sha256": "b2a2983fc3cb5d808ca6c0f07719990d9351967487a410a0c026bffd7c7eb987",
+      "variables": [
+        "v"
+      ],
+      "cases": 169,
+      "original_negative_cases": 2
+    },
+    {
+      "path": "zk/sparql-evaluator/fixtures/conformance/numeric-capacity.json",
+      "sha256": "ce6057181771de5864f97cc8d0ddf6592e8b5f5954a2f771d3f5128726d48999",
+      "variables": null,
+      "cases": 21,
+      "original_negative_cases": 21
+    },
+    {
+      "path": "zk/sparql-evaluator/fixtures/conformance/temporal-capacity.json",
+      "sha256": "0a0bea138d07480cd10c7c427ab5092b6562af0c70cf5b4e5ce15803f4e5fc7b",
+      "variables": null,
+      "cases": 13,
+      "original_negative_cases": 13
+    }
+  ],
+  "data": {
+    "path": "zk/sparql-evaluator/fixtures/conformance/core.nt",
+    "sha256": "e662d9da005922f7d37e6118967f6e86b40230f0a8c9b9d455c9b3fc4cfef1fe"
+  },
+  "cases": 319,
+  "expected_jobs_per_backend": {
+    "exact_v1": 638,
+    "exact_v2": 638,
+    "exact_v3": 638
+  },
+  "expected_positives_per_backend": {
+    "exact_v1": 502,
+    "exact_v2": 508,
+    "exact_v3": 518
+  },
+  "scope": "Native only; zero proofs. All original fixture objects and query bytes retained. Includes previously rejected MINUS/nullable originals now carrying their reviewed positive goldens; historical IDs and original objects retained explicitly in historical_promotions. Full W3C suite and execution variants remain separately configured.",
+  "historical_promotions": [
+    {
+      "source_commit": "a1dce9168de3c1fb03cdfed50d8c81f83ffcc232",
+      "original_fixture": {
+        "id": "reject-exists-minus",
+        "features": [
+          "exists_complex_bodies"
+        ],
+        "spec": "https://www.w3.org/TR/sparql11-query/#defn_evalExists",
+        "query": "PREFIX ex: <http://example.org/> SELECT ?s WHERE { ?s ex:score ?n FILTER EXISTS { ?s ex:score ?m MINUS { ?s ex:score ?z } } }",
+        "expected": {
+          "kind": "rejection",
+          "stage": "admission",
+          "error": "EXISTS body is outside the positive-pattern profile"
+        }
+      },
+      "current_id": "exists-minus-disjoint-domain-after-substitution",
+      "interpretation": "Historical profile rejection retained for the old artifact; corrected current profile executes its reviewed positive golden for identical query/data."
+    },
+    {
+      "source_commit": "a1dce9168de3c1fb03cdfed50d8c81f83ffcc232",
+      "original_fixture": {
+        "id": "reject-nullable-path-alternative",
+        "features": [
+          "nullable_path_composition"
+        ],
+        "spec": "https://www.w3.org/TR/sparql11-query/#defn_evalPP",
+        "query": "PREFIX ex: <http://example.org/> SELECT ?o WHERE { ex:missing (ex:knows*|ex:knows*) ?o }",
+        "expected": {
+          "kind": "rejection",
+          "stage": "admission",
+          "error": "nullable path composition is not admitted"
+        }
+      },
+      "current_id": "nullable-path-alternative-absent-constant",
+      "interpretation": "Historical profile rejection retained for the old artifact; corrected current profile executes its reviewed positive golden for identical query/data."
+    }
+  ]
+}
