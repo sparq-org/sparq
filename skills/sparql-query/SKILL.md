@@ -917,7 +917,7 @@ let r = query_view(&v, "SELECT ?s WHERE { GRAPH ?g { ?s ?p ?o } }").unwrap(); //
   each IRI/bnode one id); **(b)** EQUAL ids of ANY kind are the same term, so `=` short-circuits `true`
   and `!=` `false` (mirroring the `sameTerm` decision the exact path already takes — safe even for
   ill-typed literals, which return a boolean not a type error). UNEQUAL ids of possibly-LITERAL
-  operands (numeric promotion `"1"^^integer` = `"1.0"^^decimal`, whitespace-padded lexicals — the
+  operands (numeric promotion `"1"^^integer` = `"1.0"^^decimal`, valid integer spellings `"+01"` vs `"1"` — the
   `sq-lr2ii` class) and `=` cases that can be a TYPE ERROR fall through to the exact value path
   unchanged. Result-identical whether on or off — a differential test pairs every id kind (IRIs,
   bnodes, numeric-promotion pairs, language-tagged, ill-typed literals) and asserts the fast verdict

@@ -2611,7 +2611,7 @@ impl LocalVocab {
             // [FABLE-5] sq-74oy4 / sq-6b1lj: cache the DATATYPE-AWARE f64 (`numeric_cache_f64`)
             // — the SAME acceptance the graph `numeric_value` cache and the lenient `as_num`
             // seam use — so a computed (BIND/aggregate) numeric term joins/compares identically
-            // to a graph term. It TRIMS (XSD `collapse` facet) and rejects a per-datatype-
+            // to a graph term. [GPT-6] It validates raw RDF lexical bytes verbatim and rejects a per-datatype-
             // ill-formed lexical (`"1.5"^^xsd:integer`); either folds to the NaN cache-miss
             // sentinel, deferring `=`/`<`/`>` to the exact evaluator (which type-errors it).
             Term::Literal(l) => numeric_cache_f64(l).unwrap_or(f64::NAN),
@@ -6582,7 +6582,7 @@ fn extract_sargable<'a>(graph: &Graph, e: &'a Expression) -> Option<(Variable, S
     fn lit_num(e: &Expression) -> Option<f64> {
         match e {
             Expression::Literal(l) if is_numeric_dt(l) => {
-                // [FABLE-5] sq-6b1lj: datatype-aware/trimmed constant (`numeric_cache_f64`).
+                // [FABLE-5] sq-6b1lj: datatype-aware, verbatim-validated constant (`numeric_cache_f64`).
                 // A datatype-ill-formed threshold (`"1.5"^^xsd:integer`) yields `None`, so
                 // `extract_sargable` DECLINES the numeric fast path and the FILTER takes the
                 // exact general comparison — which type-errors the ill-formed constant,
@@ -13635,7 +13635,7 @@ fn eval_numeric(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], e: 
                 graph.numeric_value(id)
             }
         }
-        // [FABLE-5] sq-6b1lj: the CONSTANT operand is datatype-aware/trimmed too
+        // [FABLE-5] sq-6b1lj: the CONSTANT operand is datatype-aware and validated verbatim too
         // (`numeric_cache_f64`), so a datatype-ill-formed literal constant (`"1.5"^^xsd:integer`)
         // is a type error on this fast comparison path exactly as the graph-term side is.
         Literal(l) => numeric_cache_f64(l),
@@ -13767,7 +13767,7 @@ fn eval_compiled_numeric(graph: &Graph, local: &LocalVocab, row: &[Id], e: &Comp
             let id = row[c];
             if id == NO_ID { None } else if is_local(id) { local.numeric(id) } else { graph.numeric_value(id) }
         }
-        // [FABLE-5] sq-6b1lj: datatype-aware/trimmed constant, matching `eval_numeric`.
+        // [FABLE-5] sq-6b1lj: datatype-aware, verbatim-validated constant, matching `eval_numeric`.
         Literal(l) => numeric_cache_f64(l),
         Add(a, d) => Some(eval_compiled_numeric(graph, local, row, a)? + eval_compiled_numeric(graph, local, row, d)?),
         Subtract(a, d) => {

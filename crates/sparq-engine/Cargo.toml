@@ -380,7 +380,7 @@ paths = []
 #       and `!=` `false`, exactly mirroring the `p == q` sameTerm short-circuit `values_equal` takes
 #       today (safe even for ill-typed literals: sameTerm returns a boolean, never a type error).
 # CAUTION mirrored in code: UNEQUAL ids of possible LITERALS do NOT imply value-inequality (numeric
-# promotion `"1"^^integer` vs `"1.0"^^decimal`, whitespace-padded lexicals — the sq-lr2ii class) and
+# promotion `"1"^^integer` vs `"1.0"^^decimal`, valid integer spellings `"+01"` vs `"1"` — the sq-lr2ii class) and
 # `=` on two ill-typed literals can be a TYPE ERROR, not `false`; both DECLINE to the existing exact
 # path unchanged. OPT-IN and OFF by default: when off, zero of this code compiles and the FILTER path
 # is byte-identical. No new dependencies, no `unsafe`.

@@ -89,8 +89,9 @@ const XSD_WHITESPACE: &[char] = &['\t', '\n', '\r', ' '];
 /// `xsd:integer` fixes XML Schema's `whiteSpace` facet to `collapse`, so
 /// boundary whitespace is normalized away before the lexical-to-value mapping
 /// and `" 7"` decodes as `7`. Interior whitespace survives the collapse, so
-/// `"+ 1"` is still rejected. This keeps the codec agreeing with the query
-/// engine, which reads `" 1 "^^xsd:integer` as the value 1.
+/// `"+ 1"` is still rejected. [GPT-6] This convenience normalization differs
+/// from the query engine: it validates raw RDF numeric lexical bytes verbatim,
+/// so a padded typed literal is invalid for numeric value operations there.
 ///
 /// Other datatypes, malformed lexical forms, and integers outside the `i128`
 /// range are returned as typed errors rather than coerced or truncated. The

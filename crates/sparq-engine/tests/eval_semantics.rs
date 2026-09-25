@@ -1229,7 +1229,7 @@ mod numeric_fast_slow_path_agreement {
     }
 
     #[test]
-    fn padded_raw_lexicals_are_errors_on_all_value_operators() {
+    fn padded_raw_lexicals_bind_but_value_filters_exclude_them() {
         // [GPT-6] No raw RDF pre-lexical processing on `<`/`>`/`=`.
         for obj in [
             "\" 1 \"^^xsd:integer",
@@ -1239,28 +1239,29 @@ mod numeric_fast_slow_path_agreement {
             assert_eq!(filter_rows(obj, "?o < 5"), 0, "{obj} < 5 (raw padding is ill-typed)");
             assert_eq!(filter_rows(obj, "?o = 1"), 0, "{obj} = 1 (raw padding is ill-typed)");
             assert_eq!(filter_rows(obj, "?o > 0"), 0, "{obj} > 0 (raw padding is ill-typed)");
+            assert_eq!(filter_rows(obj, "BOUND(?o)"), 1, "{obj} remains a bound RDF term");
         }
     }
 
     #[test]
-    fn per_datatype_illformed_lexicals_are_type_errors_on_all_operators() {
-        // sq-6b1lj: ill-formed FOR the datatype → type error → row excluded on `<`, `>`, `=`
-        // — on BOTH paths (the fast path no longer over-includes them). A FILTER type error
-        // drops the row exactly like `false`.
+    fn invalid_or_out_of_capacity_numerics_are_excluded_by_value_filters() {
+        // [GPT-6] Datatype-invalid lexicals and valid out-of-capacity values both
+        // produce native expression errors in this lane. These FILTER results
+        // do not identify representation overflow with normative lexical invalidity.
         for (obj, why) in [
             ("\"1.5\"^^xsd:integer", "fraction on an integer"),
             ("\"1E2\"^^xsd:integer", "exponent on an integer"),
             ("\"1E2\"^^xsd:decimal", "exponent on a decimal"),
-            // 40-digit integer / decimal: beyond i128 (i128::MAX is a 39-digit number
-            // ~1.7e38) → of_literal None (not i128-representable), so a type error.
+            // Valid 40-digit integer / decimal: beyond the native i128 lane.
+            // This is a representation limit, not an invalid datatype lexical.
             ("\"9999999999999999999999999999999999999999\"^^xsd:integer", "i128-overflow integer"),
             ("\"9999999999999999999999999999999999999999.5\"^^xsd:decimal", "i128-overflow decimal"),
         ] {
             assert_eq!(filter_rows(obj, "?o < 999999"), 0, "{obj} < … excluded ({why})");
             assert_eq!(filter_rows(obj, "?o > -999999"), 0, "{obj} > … excluded ({why})");
             assert_eq!(filter_rows(obj, "?o = 100"), 0, "{obj} = … excluded ({why})");
-            // BOUND(?o) is still true (the row is a real term) — proves it is a numeric TYPE
-            // error on the comparison, not that the term vanished from the graph.
+            // BOUND(?o) remains true: neither lexical rejection nor representation
+            // limits erase the original RDF term from the graph.
             let bound = query(
                 &graph_with(obj, false),
                 "SELECT ?s WHERE { ?s <http://ex/v> ?o FILTER(BOUND(?o)) }",
