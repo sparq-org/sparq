@@ -3,8 +3,8 @@
 Benchmarks for the ZK proof-composition layer (`crates/sparq-zk-compose` +
 the `zk/compose/` Noir circuit family).
 
-Model: Opus 4.8 (Fable 5 unavailable — flag for re-review/upgrade when Fable
-returns). Numbers below were measured by Opus 4.8.
+Historical measurements record Opus 4.8 (Fable 5 unavailable). Newer result
+records identify GPT-6 and their exact measurement provenance separately.
 
 ## What is measured
 
@@ -27,6 +27,8 @@ returns). Numbers below were measured by Opus 4.8.
 | file                              | contents |
 |-----------------------------------|----------|
 | `gate_counts_latest.json`         | per-member ultra_honk gate counts |
+| [result_capacity_gates.json](result_capacity_gates.json) | [GPT-6] exact measured result capacities, toolchain output and source hashes |
+| [result_v1_compatibility.json](result_v1_compatibility.json) | [GPT-6] baseline/current v1 ACIR, ABI and key comparisons, with baseline key bytes |
 | `prove_verify_timing.json`        | bb prove/verify wall-clock + proof sizes (early, 2-member, darwin) |
 | `family_cost_curve.json`          | sq-pn2 full-family (k,n,r,d) prove/verify/size curve |
 | `family_curve/`                   | sq-pn2 standalone timing harness (own cargo project) |
@@ -39,6 +41,7 @@ returns). Numbers below were measured by Opus 4.8.
 | `scripts/sparql_catalog.py`       | regenerate the SPARQL feature catalog (joins the snapshot) |
 | `scripts/bb_gates_matrix.py`      | regenerate the per-config bb-gates matrix (joins the snapshot) |
 | `scripts/constraint_pack.py`      | regenerate + verify the constraint-count evaluation pack |
+| [verify_result_evidence.py](scripts/verify_result_evidence.py) | [GPT-6] default evidence consistency checks and independent fixed-foundation rebuild |
 
 > The gate-count JSON is also the source the in-crate **regression gate**
 > (`crates/sparq-zk-compose/tests/gate_count.rs`, sq-c5f) baselines against —

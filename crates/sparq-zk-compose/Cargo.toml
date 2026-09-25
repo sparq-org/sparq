@@ -66,3 +66,8 @@ libc = { workspace = true }
 
 [dev-dependencies]
 # Deterministic temp dirs for prove/verify e2e.
+
+# [GPT-6] Reuses this opt-in crate and its existing lock; no detached benchmark graph.
+[[example]]
+name = "result_experiment"
+required-features = ["successful-results"]

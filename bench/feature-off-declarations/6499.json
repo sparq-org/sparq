@@ -1,0 +1,5 @@
+{
+  "pr": 6499,
+  "date": "2026-09-12",
+  "reason": "[GPT-6] This additive separately versioned signed-i64 extension is confined to the default-off successful-results capability crate, Noir circuits, tests and evidence; it adds no always-compiled core/engine implementation or dependency. This file satisfies the feature-OFF intent-declaration gate for the stacked PR. It is not a measured byte-neutrality assertion: the independent hosted byte comparison and WASM size ratchet still apply."
+}

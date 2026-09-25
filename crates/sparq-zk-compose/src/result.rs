@@ -17,6 +17,7 @@
 
 use crate::driver::{CircuitProver, DriverError};
 use crate::manifest::{DisclosedTerm, FieldHex, StatusListSnapshot};
+use crate::planner::signed::{NumericProfile, SignedDisclosureQuery};
 use crate::planner::{
     optimize_disclosure_admitted, plan_disclosure_admitted, DisclosureQuery, MembershipRef,
     OptimizationCompletion, OptimizationLimits, PlannerLimits, QueryKind, QuerySlot,
@@ -38,17 +39,71 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::process::Command;
 
-/// Maximum private integer value in this first bounded circuit lane.
-pub const MAX_PRIVATE_INTEGER: u64 = 99;
+/// Maximum canonical nonnegative private integer accepted by the full-width profile.
+pub const MAX_PRIVATE_INTEGER: u64 = u64::MAX;
+const SMALL_PRIVATE_INTEGER: u64 = 99;
 const MAX_CREDENTIALS: usize = 2;
 const N: usize = 16;
 const P: usize = 3;
 const R: usize = 4;
 const V: usize = 6;
 const F: usize = 2;
-const STATUS_DEPTH: u32 = 10;
+const STATUS_DEPTHS: [u32; 3] = [10, 17, 20];
 const POLICY_DEPTH: u32 = 4;
-const VERSION: u32 = 1;
+
+/// Separately versioned signed-integer successful-result preparation and verification.
+pub mod signed;
+
+// [GPT-6] Only the typed entry point selects the numeric contract. A signed
+// capacity is never added to the legacy presentation's deserialization enum.
+#[derive(Clone, Copy)]
+enum NumericContract {
+    Unsigned(PrivateIntegerCapacity),
+    Signed,
+}
+
+impl NumericContract {
+    fn profile(self) -> NumericProfile {
+        match self {
+            Self::Unsigned(_) => NumericProfile::Unsigned,
+            Self::Signed => NumericProfile::Signed,
+        }
+    }
+
+    fn parse(self, query: &str) -> Result<DisclosureQuery, ResultError> {
+        parse_numeric_query(query, self.profile())
+    }
+
+    fn accepts_version(self, version: u32) -> bool {
+        match self {
+            Self::Unsigned(_) => matches!(version, 1 | 2),
+            Self::Signed => version == signed::VERSION,
+        }
+    }
+
+    fn package(
+        self,
+        credentials: usize,
+        filters: usize,
+        depth: u32,
+    ) -> Result<(&'static str, u32), ResultError> {
+        match self {
+            Self::Unsigned(capacity) => package(credentials, filters, capacity, depth),
+            Self::Signed => signed::package(credentials, filters, depth),
+        }
+    }
+}
+
+fn parse_numeric_query(
+    query: &str,
+    profile: NumericProfile,
+) -> Result<DisclosureQuery, ResultError> {
+    match profile {
+        NumericProfile::Unsigned => DisclosureQuery::parse(query),
+        NumericProfile::Signed => SignedDisclosureQuery::parse(query).map(|q| q.inner),
+    }
+    .map_err(|e| reject(e.to_string()))
+}
 
 /// A private credential and its existing issuer-authenticated status reference.
 ///
@@ -75,7 +130,8 @@ pub struct ResultCredential {
 /// Supply the verifier's own issuer allow-list and status snapshots. The prover
 /// cannot replace these through the presentation. Versions outside the inclusive
 /// interval are excluded from the accepted set; conflicting snapshots reject.
-/// Each accepted snapshot must fit the circuit's 1024-bit status tree in full.
+/// The largest accepted snapshot selects depth 10, 17 or 20 for the complete
+/// policy. Every snapshot must fit that tree in full; none is truncated.
 #[derive(Debug, Clone)]
 pub struct ResultPolicy {
     /// Issuers the relying party accepts.
@@ -86,6 +142,24 @@ pub struct ResultPolicy {
     pub min_version: u64,
     /// Newest accepted publication version.
     pub max_version: u64,
+}
+
+// [GPT-6] Capacity is public; the exact decimal length remains a private witness.
+/// Public private-integer capacity selected by the successful-result proof.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PrivateIntegerCapacity {
+    /// Canonical integers from zero through 99, preserving the small circuit lane.
+    #[default]
+    TwoDigits,
+    /// Canonical integers through u64::MAX, with no public decimal-length selector.
+    FullU64,
+}
+
+impl PrivateIntegerCapacity {
+    fn is_default(&self) -> bool {
+        *self == Self::TwoDigits
+    }
 }
 
 /// Public presentation for the versioned successful-result contract.
@@ -105,8 +179,34 @@ pub struct ResultPresentation {
     pub challenge: FieldHex,
     /// Public capacity bucket: one or two issuer slots, selected by prover policy.
     pub issuer_slots: Vec<String>,
+    /// Public numeric capacity; omitted legacy values select the small profile.
+    /// The verifier derives the canonical circuit from this capacity and its policy.
+    #[serde(default, skip_serializing_if = "PrivateIntegerCapacity::is_default")]
+    pub integer_capacity: PrivateIntegerCapacity,
     /// Barretenberg proof bytes under the explicitly ZK `noir-recursive` target.
     pub proof: Vec<u8>,
+}
+
+// A borrowed view avoids cloning an untrusted presentation before admission.
+// Numeric interpretation is supplied separately by the typed verifier entry point.
+struct PresentationView<'a> {
+    version: u32,
+    query: &'a str,
+    rows: &'a [BTreeMap<String, DisclosedTerm>],
+    challenge: &'a FieldHex,
+    issuer_slots: &'a [String],
+}
+
+impl<'a> From<&'a ResultPresentation> for PresentationView<'a> {
+    fn from(p: &'a ResultPresentation) -> Self {
+        Self {
+            version: p.version,
+            query: &p.query,
+            rows: &p.rows,
+            challenge: &p.challenge,
+            issuer_slots: &p.issuer_slots,
+        }
+    }
 }
 
 /// Private preparation statistics; these do not enter the public presentation.
@@ -177,6 +277,21 @@ fn reject(message: impl Into<String>) -> ResultError {
 }
 
 impl ResultPolicy {
+    // Select from all freshness-accepted snapshots, not only the prover's chosen list.
+    fn status_depth(&self) -> Result<u32, ResultError> {
+        let bytes = self
+            .snapshots
+            .iter()
+            .filter(|s| (self.min_version..=self.max_version).contains(&s.version))
+            .map(|s| s.bits.len())
+            .max()
+            .unwrap_or(0);
+        STATUS_DEPTHS
+            .into_iter()
+            .find(|depth| bytes <= (1usize << depth) / 8)
+            .ok_or_else(|| reject("accepted status snapshot exceeds maximum tree capacity"))
+    }
+
     fn entries(&self) -> Result<Vec<AcceptedStatusEntry>, ResultError> {
         if self.min_version > self.max_version {
             return Err(reject("inverted status freshness interval"));
@@ -203,13 +318,14 @@ impl ResultPolicy {
         if unique.is_empty() || unique.len() > (1 << POLICY_DEPTH) {
             return Err(reject("accepted status-policy capacity"));
         }
+        let depth = self.status_depth()?;
         unique
             .into_values()
             .map(|s| {
                 Ok(AcceptedStatusEntry {
                     status_list: s.status_list.clone(),
                     version: s.version,
-                    status_list_root: merkle_root(s, STATUS_DEPTH)
+                    status_list_root: merkle_root(s, depth)
                         .ok_or_else(|| reject("status root unavailable"))?,
                 })
             })
@@ -217,13 +333,40 @@ impl ResultPolicy {
     }
 }
 
-fn package(credentials: usize, hidden_filters: usize) -> Result<&'static str, ResultError> {
-    match (credentials, hidden_filters == 0) {
-        (1, true) => Ok("result_v1_k1_n16_p3_r4_f0"),
-        (1, false) => Ok("result_v1_k1_n16_p3_r4_f2"),
-        (2, true) => Ok("result_v1_k2_n16_p3_r4_f0"),
-        (2, false) => Ok("result_v1_k2_n16_p3_r4_f2"),
-        _ => Err(reject("unsupported credential capacity bucket")),
+fn package(
+    credentials: usize,
+    hidden_filters: usize,
+    capacity: PrivateIntegerCapacity,
+    depth: u32,
+) -> Result<(&'static str, u32), ResultError> {
+    let bits = match (hidden_filters == 0, capacity) {
+        (true, PrivateIntegerCapacity::TwoDigits) => 0,
+        (true, PrivateIntegerCapacity::FullU64) => {
+            return Err(reject("numeric capacity without a private predicate"))
+        }
+        (false, PrivateIntegerCapacity::TwoDigits) => 8,
+        (false, PrivateIntegerCapacity::FullU64) => 64,
+    };
+    match (credentials, bits, depth) {
+        (1, 0, 10) => Ok(("result_v1_k1_n16_p3_r4_f0", 1)),
+        (1, 0, 17) => Ok(("result_v2_k1_n16_p3_r4_f0_i0_d17", 2)),
+        (1, 0, 20) => Ok(("result_v2_k1_n16_p3_r4_f0_i0_d20", 2)),
+        (1, 8, 10) => Ok(("result_v1_k1_n16_p3_r4_f2", 1)),
+        (1, 8, 17) => Ok(("result_v2_k1_n16_p3_r4_f2_i8_d17", 2)),
+        (1, 8, 20) => Ok(("result_v2_k1_n16_p3_r4_f2_i8_d20", 2)),
+        (1, 64, 10) => Ok(("result_v2_k1_n16_p3_r4_f2_i64_d10", 2)),
+        (1, 64, 17) => Ok(("result_v2_k1_n16_p3_r4_f2_i64_d17", 2)),
+        (1, 64, 20) => Ok(("result_v2_k1_n16_p3_r4_f2_i64_d20", 2)),
+        (2, 0, 10) => Ok(("result_v1_k2_n16_p3_r4_f0", 1)),
+        (2, 0, 17) => Ok(("result_v2_k2_n16_p3_r4_f0_i0_d17", 2)),
+        (2, 0, 20) => Ok(("result_v2_k2_n16_p3_r4_f0_i0_d20", 2)),
+        (2, 8, 10) => Ok(("result_v1_k2_n16_p3_r4_f2", 1)),
+        (2, 8, 17) => Ok(("result_v2_k2_n16_p3_r4_f2_i8_d17", 2)),
+        (2, 8, 20) => Ok(("result_v2_k2_n16_p3_r4_f2_i8_d20", 2)),
+        (2, 64, 10) => Ok(("result_v2_k2_n16_p3_r4_f2_i64_d10", 2)),
+        (2, 64, 17) => Ok(("result_v2_k2_n16_p3_r4_f2_i64_d17", 2)),
+        (2, 64, 20) => Ok(("result_v2_k2_n16_p3_r4_f2_i64_d20", 2)),
+        _ => Err(reject("unsupported result capacity bucket")),
     }
 }
 
@@ -295,6 +438,8 @@ struct PublicStatement {
     hidden_filters: Vec<usize>,
     entries: Vec<AcceptedStatusEntry>,
     fields: Vec<(&'static str, Value)>,
+    status_depth: u32,
+    package: &'static str,
 }
 
 fn public_statement(
@@ -302,13 +447,27 @@ fn public_statement(
     policy: &ResultPolicy,
     nonce: &VerifierNonce,
 ) -> Result<PublicStatement, ResultError> {
-    if p.version != VERSION || p.challenge != nonce.as_field_hex() {
+    public_statement_for(
+        p.into(),
+        NumericContract::Unsigned(p.integer_capacity),
+        policy,
+        nonce,
+    )
+}
+
+fn public_statement_for(
+    p: PresentationView<'_>,
+    contract: NumericContract,
+    policy: &ResultPolicy,
+    nonce: &VerifierNonce,
+) -> Result<PublicStatement, ResultError> {
+    if !contract.accepts_version(p.version) || p.challenge != &nonce.as_field_hex() {
         return Err(reject("version or challenge mismatch"));
     }
     if p.issuer_slots.is_empty() || p.issuer_slots.len() > MAX_CREDENTIALS {
         return Err(reject("unsupported credential capacity bucket"));
     }
-    let query = DisclosureQuery::parse(&p.query).map_err(|e| reject(e.to_string()))?;
+    let query = contract.parse(p.query)?;
     // Keep ASK out of this first wire contract; no accidental false/absence claim.
     if query.kind != QueryKind::SelectDistinct {
         return Err(reject("only SELECT DISTINCT is supported"));
@@ -328,7 +487,7 @@ fn public_statement(
     }
     let mut rows = Vec::new();
     let mut distinct = BTreeSet::new();
-    for row in &p.rows {
+    for row in p.rows {
         if row.keys().cloned().collect::<BTreeSet<_>>() != expected {
             return Err(reject("released row does not match projection"));
         }
@@ -366,9 +525,18 @@ fn public_statement(
         }
         if expected.contains(&filter.variable) {
             for row in &rows {
-                let value =
-                    crate::planner::canonical_integer(&row[&filter.variable]).ok_or_else(|| {
-                        reject("public FILTER operand is not a canonical nonnegative integer")
+                let value = contract
+                    .profile()
+                    .value(&row[&filter.variable])
+                    .ok_or_else(|| {
+                        reject(match contract {
+                            NumericContract::Unsigned(_) => {
+                                "public FILTER operand is not a canonical nonnegative integer"
+                            }
+                            NumericContract::Signed => {
+                                "public FILTER operand is not a canonical signed integer"
+                            }
+                        })
                     })?;
                 if !crate::planner::integer_comparison(value, filter.op, filter.bound) {
                     return Err(reject("public FILTER is false"));
@@ -377,10 +545,18 @@ fn public_statement(
         }
     }
     let entries = policy.entries()?;
+    let status_depth = policy.status_depth()?;
+    let (package, version) =
+        contract.package(p.issuer_slots.len(), hidden_filters.len(), status_depth)?;
+    if p.version != version {
+        return Err(reject(
+            "version does not match independently derived capacity profile",
+        ));
+    }
     let root = accepted_set_root(&entries, POLICY_DEPTH)
         .ok_or_else(|| reject("status policy root unavailable"))?;
     let mut keys = Vec::new();
-    for text in &p.issuer_slots {
+    for text in p.issuer_slots {
         let key = sig::public_key_from_hex(text).ok_or_else(|| reject("malformed issuer key"))?;
         if sig::public_key_to_hex(&key) != *text || !policy.trusted_issuers.contains(&key) {
             return Err(reject("untrusted or noncanonical issuer key"));
@@ -420,7 +596,7 @@ fn public_statement(
     }
     let mut fields = vec![
         ("challenge", json!(p.challenge.0)),
-        ("version", json!(VERSION)),
+        ("version", json!(p.version)),
         ("accepted_root", json!(field_to_hex(&root))),
         ("issuer_keys", json!(keys)),
         ("pattern_count", json!(query.patterns.len())),
@@ -458,6 +634,8 @@ fn public_statement(
         hidden_filters,
         entries,
         fields,
+        status_depth,
+        package,
     })
 }
 
@@ -509,11 +687,23 @@ pub enum WitnessSelection {
     FirstSuccess,
 }
 
+/// Chooses whether to disclose the small private-integer capacity.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum IntegerCapacityPolicy {
+    /// Use the small member when every selected private operand is at most 99.
+    #[default]
+    Smallest,
+    /// Use the full-u64 member for any private predicate, hiding the small bucket.
+    HideInU64,
+}
+
 /// Prover-side choices that never waive independent verifier checks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ResultOptions {
     /// Smallest selects the smallest admitted circuit; HideInTwo retains two issuer slots.
     pub credential_capacity: CredentialCapacity,
+    /// Public range-capacity disclosure; neither choice discloses exact digit length.
+    pub integer_capacity: IntegerCapacityPolicy,
     /// Joint bounded optimization is the default; FirstSuccess provides a baseline.
     pub witness_selection: WitnessSelection,
     /// Maximum candidate triple attempts, including rejected candidates.
@@ -524,6 +714,7 @@ impl Default for ResultOptions {
     fn default() -> Self {
         Self {
             credential_capacity: CredentialCapacity::default(),
+            integer_capacity: IntegerCapacityPolicy::default(),
             witness_selection: WitnessSelection::default(),
             max_search_steps: PlannerLimits::default().max_search_steps,
         }
@@ -567,13 +758,34 @@ pub fn prepare_result_with_options(
     nonce: &VerifierNonce,
     options: ResultOptions,
 ) -> Result<PreparedResult, ResultError> {
+    prepare_result_numeric(
+        query,
+        credentials,
+        rows,
+        policy,
+        nonce,
+        options,
+        NumericProfile::Unsigned,
+    )
+}
+
+fn prepare_result_numeric(
+    query: &str,
+    credentials: &[ResultCredential],
+    rows: &[BTreeMap<String, Term>],
+    policy: &ResultPolicy,
+    nonce: &VerifierNonce,
+    options: ResultOptions,
+    profile: NumericProfile,
+) -> Result<PreparedResult, ResultError> {
     // [GPT-6] Reject the wallet shape before authentication or graph cloning;
     // empty and ineligible credentials still count toward resource admission.
     if credentials.len() > crate::planner::MAX_DISCLOSURE_CREDENTIALS {
         return Err(reject("input credentials exceed disclosure planning limit"));
     }
-    let parsed = DisclosureQuery::parse(query).map_err(|e| reject(e.to_string()))?;
+    let parsed = parse_numeric_query(query, profile)?;
     let entries = policy.entries()?;
+    let status_depth = policy.status_depth()?;
     let eligible: Vec<bool> = credentials
         .iter()
         .map(|c| {
@@ -593,7 +805,7 @@ pub fn prepare_result_with_options(
             else {
                 return false;
             };
-            if snapshot.bit(c.status_index) || c.status_index >= (1 << STATUS_DEPTH) {
+            if snapshot.bit(c.status_index) || c.status_index >= (1 << status_depth) {
                 return false;
             }
             let leaves = c
@@ -630,8 +842,7 @@ pub fn prepare_result_with_options(
             if let QuerySlot::Variable(v) = &parsed.patterns[pattern][slot] {
                 if !parsed.projection.contains(v) && parsed.filters.iter().any(|f| &f.variable == v)
                 {
-                    return crate::planner::canonical_integer(term)
-                        .is_some_and(|n| n <= MAX_PRIVATE_INTEGER);
+                    return profile.value(term).is_some();
                 }
             }
             true
@@ -644,22 +855,45 @@ pub fn prepare_result_with_options(
     };
     let (plan, optimization) = match options.witness_selection {
         WitnessSelection::FirstSuccess => (
-            plan_disclosure_admitted(&parsed, &graphs, rows, limits, admit)
-                .map_err(|e| reject(e.to_string()))?,
+            match profile {
+                NumericProfile::Unsigned => {
+                    plan_disclosure_admitted(&parsed, &graphs, rows, limits, admit)
+                }
+                NumericProfile::Signed => crate::planner::signed::plan_signed_disclosure_admitted(
+                    &SignedDisclosureQuery {
+                        inner: parsed.clone(),
+                    },
+                    &graphs,
+                    rows,
+                    limits,
+                    admit,
+                ),
+            }
+            .map_err(|e| reject(e.to_string()))?,
             None,
         ),
         WitnessSelection::Optimize => {
-            let report = optimize_disclosure_admitted(
-                &parsed,
-                &graphs,
-                rows,
-                OptimizationLimits {
-                    planner: limits,
-                    max_pattern_occurrences: P * R,
-                    max_authentications: MAX_CREDENTIALS,
-                },
-                admit,
-            )
+            let optimization_limits = OptimizationLimits {
+                planner: limits,
+                max_pattern_occurrences: P * R,
+                max_authentications: MAX_CREDENTIALS,
+            };
+            let report = match profile {
+                NumericProfile::Unsigned => {
+                    optimize_disclosure_admitted(&parsed, &graphs, rows, optimization_limits, admit)
+                }
+                NumericProfile::Signed => {
+                    crate::planner::signed::optimize_signed_disclosure_admitted(
+                        &SignedDisclosureQuery {
+                            inner: parsed.clone(),
+                        },
+                        &graphs,
+                        rows,
+                        optimization_limits,
+                        admit,
+                    )
+                }
+            }
             .map_err(|e| reject(e.to_string()))?;
             let plan = report.plan.ok_or_else(|| match report.completion {
                 OptimizationCompletion::BudgetExhausted => ResultError::SearchExhausted,
@@ -685,8 +919,54 @@ pub fn prepare_result_with_options(
     {
         used.push(used[0]);
     }
+    let hidden_filters = parsed
+        .filters
+        .iter()
+        .filter(|f| !parsed.projection.contains(&f.variable))
+        .count();
+    let mut needs_wide = false;
+    'selected_operands: for row in &plan.rows {
+        for (pattern, witness) in row.witnesses.iter().enumerate() {
+            let triple = &credentials[witness.credential].graph.canonical.triples[witness.leaf];
+            for (slot, term) in term_parts(triple).iter().enumerate() {
+                let QuerySlot::Variable(variable) = &parsed.patterns[pattern][slot] else {
+                    continue;
+                };
+                let private_operand = !parsed.projection.contains(variable)
+                    && parsed
+                        .filters
+                        .iter()
+                        .any(|filter| &filter.variable == variable);
+                if private_operand
+                    && profile
+                        .value(term)
+                        .is_some_and(|value| value > SMALL_PRIVATE_INTEGER)
+                {
+                    needs_wide = true;
+                    break 'selected_operands;
+                }
+            }
+        }
+    }
+    let integer_capacity = if hidden_filters != 0
+        && (matches!(profile, NumericProfile::Signed)
+            || needs_wide
+            || options.integer_capacity == IntegerCapacityPolicy::HideInU64)
+    {
+        PrivateIntegerCapacity::FullU64
+    } else {
+        PrivateIntegerCapacity::TwoDigits
+    };
+    let contract = match profile {
+        NumericProfile::Unsigned => NumericContract::Unsigned(integer_capacity),
+        NumericProfile::Signed => NumericContract::Signed,
+    };
+    let (_, version) = contract.package(used.len(), hidden_filters, status_depth)?;
+    // Shared private storage only: the signed wrapper emits its separate wire
+    // type, omitting this unsigned-only capacity field, after proving succeeds.
     let presentation = ResultPresentation {
-        version: VERSION,
+        version,
+        integer_capacity,
         query: query.into(),
         challenge: nonce.as_field_hex(),
         rows: rows
@@ -703,7 +983,7 @@ pub fn prepare_result_with_options(
             .collect(),
         proof: Vec::new(),
     };
-    let statement = public_statement(&presentation, policy, nonce)?;
+    let statement = public_statement_for((&presentation).into(), contract, policy, nonce)?;
     let public_inputs = public_bytes(&statement.fields)?;
     let mut fields = statement.fields.clone();
     let zero = field_to_hex(&Fr::from(0u64));
@@ -763,7 +1043,7 @@ pub fn prepare_result_with_options(
             &statement.entries[policy_index].status_list_root,
         ));
         status_siblings.push(
-            merkle_witness(snapshot, STATUS_DEPTH, c.status_index)
+            merkle_witness(snapshot, statement.status_depth, c.status_index)
                 .ok_or_else(|| reject("status witness unavailable"))?
                 .siblings
                 .iter()
@@ -784,7 +1064,7 @@ pub fn prepare_result_with_options(
     let mut values = vec![vec![zero.clone(); V]; R];
     let mut selected_types = [[[0u32; 3]; P]; R];
     let mut selected_hashes = vec![vec![vec![zero; 3]; P]; R];
-    let mut filter_values = [[0u8; F]; R];
+    let mut filter_values = [[0u64; F]; R];
     let mut memberships = BTreeSet::new();
     for (r, row) in plan.rows.iter().enumerate() {
         let mut bindings = BTreeMap::new();
@@ -820,13 +1100,22 @@ pub fn prepare_result_with_options(
         for (f, &index) in statement.hidden_filters.iter().enumerate() {
             let filter = &statement.query.filters[index];
             let term = &bindings[&filter.variable];
-            let value = crate::planner::canonical_integer(term).ok_or_else(|| {
-                reject("private FILTER operand is not a canonical nonnegative integer")
+            let value = profile.value(term).ok_or_else(|| {
+                reject(match profile {
+                    NumericProfile::Unsigned => {
+                        "private FILTER operand is not a canonical nonnegative integer"
+                    }
+                    NumericProfile::Signed => {
+                        "private FILTER operand is not a canonical signed integer"
+                    }
+                })
             })?;
-            if value > MAX_PRIVATE_INTEGER {
+            if integer_capacity == PrivateIntegerCapacity::TwoDigits
+                && value > SMALL_PRIVATE_INTEGER
+            {
                 return Err(reject("private FILTER exceeds bounded integer lane"));
             }
-            filter_values[r][f] = value as u8;
+            filter_values[r][f] = value;
         }
     }
     fields.extend([
@@ -865,7 +1154,7 @@ pub fn prepare_result_with_options(
     };
     Ok(PreparedResult {
         presentation,
-        package: package(used.len(), statement.hidden_filters.len())?,
+        package: statement.package,
         toml,
         public_inputs,
         work,
@@ -965,7 +1254,27 @@ pub fn verify_result(
         return Err(reject("query differs from relying-party request"));
     }
     let statement = public_statement(presentation, policy, nonce)?;
-    if presentation.proof.is_empty() {
+    verify_statement(
+        expected_query,
+        &presentation.proof,
+        statement,
+        nonce,
+        seen,
+        prover,
+        work_dir,
+    )
+}
+
+fn verify_statement(
+    expected_query: &str,
+    proof: &[u8],
+    statement: PublicStatement,
+    nonce: &VerifierNonce,
+    seen: &dyn SeenNonces,
+    prover: &CircuitProver,
+    work_dir: &Path,
+) -> Result<VerifiedResult, ResultError> {
+    if proof.is_empty() {
         return Err(reject("missing proof"));
     }
     pinned_toolchain()?;
@@ -973,14 +1282,8 @@ pub fn verify_result(
         return Err(reject("challenge already consumed"));
     }
     let inputs = public_bytes(&statement.fields)?;
-    let vk = prover.canonical_package_vk(
-        package(
-            presentation.issuer_slots.len(),
-            statement.hidden_filters.len(),
-        )?,
-        &work_dir.join("canonical"),
-    )?;
-    if !prover.verify_with(&presentation.proof, &inputs, &vk, &work_dir.join("verify"))? {
+    let vk = prover.canonical_package_vk(statement.package, &work_dir.join("canonical"))?;
+    if !prover.verify_with(proof, &inputs, &vk, &work_dir.join("verify"))? {
         return Err(reject("cryptographic proof rejected"));
     }
     Ok(VerifiedResult {
@@ -1375,11 +1678,12 @@ mod tests {
         assert_eq!(policy.snapshots[0].bits.len(), 128);
         assert!(public_statement(&prepared.presentation, &policy, &nonce).is_ok());
         for suffix in [0, 0xFF] {
-            policy.snapshots[0].bits.push(suffix);
+            policy.snapshots[0].bits = vec![0; (1 << 20) / 8 + 1];
+            *policy.snapshots[0].bits.last_mut().unwrap() = suffix;
             assert!(policy.entries().is_err());
             assert!(prepare_result(QUERY, &credentials, &rows, &policy, &nonce).is_err());
             assert!(public_statement(&prepared.presentation, &policy, &nonce).is_err());
-            policy.snapshots[0].bits.pop();
+            policy.snapshots[0].bits = vec![0; 128];
         }
     }
 
@@ -1454,7 +1758,14 @@ mod tests {
         let (_, mut policy, nonce, _) = fixture();
         let c = credential(
             vec![
-                triple("urn:alice", "urn:age", integer(100)),
+                triple(
+                    "urn:alice",
+                    "urn:age",
+                    Term::Literal(Literal::new_typed_literal(
+                        "0100",
+                        iri("http://www.w3.org/2001/XMLSchema#integer"),
+                    )),
+                ),
                 triple("urn:alice", "urn:age", integer(42)),
             ],
             1,
@@ -1477,7 +1788,233 @@ mod tests {
         assert!(!line.contains("100"));
     }
 
-    fn alter_input(toml: &str, key: &str, edit: impl FnOnce(&mut Value)) -> String {
+    #[test]
+    fn canonical_large_sibling_remains_eligible_or_fails_its_actual_predicate() {
+        // [GPT-6] Keep the valid large-sibling case distinct from lexical rejection.
+        let (_, mut policy, nonce, _) = fixture();
+        let c = credential(
+            vec![
+                triple("urn:alice", "urn:age", integer(100)),
+                triple("urn:alice", "urn:age", integer(42)),
+            ],
+            1,
+            3,
+            "urn:status:people",
+        );
+        policy.trusted_issuers = vec![c.issuer];
+        let rows = vec![BTreeMap::from([(
+            "person".into(),
+            Term::NamedNode(iri("urn:alice")),
+        )])];
+        // [GPT-6] The first case characterizes today's equal-cost tie break:
+        // canonical leaf order visits 100 first. A measured tiny-first optimizer
+        // may legitimately change that expectation; it is not a wire-contract rule.
+        for (predicate, value, capacity) in [
+            ("?age >= 18", 100, PrivateIntegerCapacity::FullU64),
+            ("?age < 100", 42, PrivateIntegerCapacity::TwoDigits),
+        ] {
+            let query = format!(
+                "SELECT DISTINCT ?person WHERE {{ ?person <urn:age> ?age FILTER({predicate}) }}"
+            );
+            let p =
+                prepare_result(&query, std::slice::from_ref(&c), &rows, &policy, &nonce).unwrap();
+            assert_eq!(p.presentation.integer_capacity, capacity);
+            assert!(p
+                .toml
+                .lines()
+                .any(|line| line.starts_with("filter_values = ")
+                    && line.contains(&value.to_string())));
+        }
+    }
+
+    // [GPT-6] Goldens cover value, lexical, type and capacity boundaries independently.
+    pub(super) fn numeric_fixture(
+        term: Term,
+        index: u64,
+        bytes: usize,
+    ) -> (
+        ResultCredential,
+        ResultPolicy,
+        VerifierNonce,
+        Vec<BTreeMap<String, Term>>,
+    ) {
+        let c = credential(
+            vec![triple("urn:alice", "urn:age", term)],
+            1,
+            index,
+            "urn:status:people",
+        );
+        let policy = ResultPolicy {
+            trusted_issuers: vec![c.issuer],
+            snapshots: vec![StatusListSnapshot {
+                status_list: "urn:status:people".into(),
+                version: 7,
+                bits: vec![0; bytes],
+            }],
+            min_version: 7,
+            max_version: 7,
+        };
+        (
+            c,
+            policy,
+            VerifierNonce::from_field(Fr::from(111u64)),
+            vec![BTreeMap::from([(
+                "person".into(),
+                Term::NamedNode(iri("urn:alice")),
+            )])],
+        )
+    }
+
+    #[test]
+    fn full_u64_private_operands_keep_exact_witness_and_select_capacity() {
+        for value in [
+            0,
+            9,
+            10,
+            99,
+            100,
+            i64::MAX as u64,
+            1u64 << 63,
+            10_000_000_000_000_000_000,
+            u64::MAX,
+        ] {
+            let (c, policy, nonce, rows) = numeric_fixture(integer(value), 3, 128);
+            let q = format!(
+                "SELECT DISTINCT ?person WHERE {{ ?person <urn:age> ?age FILTER(?age = {value}) }}"
+            );
+            let p = prepare_result(&q, &[c], &rows, &policy, &nonce).unwrap();
+            let expected = if value <= 99 {
+                PrivateIntegerCapacity::TwoDigits
+            } else {
+                PrivateIntegerCapacity::FullU64
+            };
+            assert_eq!(p.presentation.integer_capacity, expected);
+            let values: Value = serde_json::from_str(
+                p.toml
+                    .lines()
+                    .find_map(|line| line.strip_prefix("filter_values = "))
+                    .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(values[0][0], toml_witness_value(&json!(value)));
+            assert_eq!(
+                public_statement(&p.presentation, &policy, &nonce)
+                    .unwrap()
+                    .package,
+                p.package
+            );
+            if value > 99 {
+                assert_eq!(p.package, "result_v2_k1_n16_p3_r4_f2_i64_d10");
+                let mut downgrade = p.presentation.clone();
+                downgrade.integer_capacity = PrivateIntegerCapacity::TwoDigits;
+                assert!(public_statement(&downgrade, &policy, &nonce).is_err());
+            }
+        }
+    }
+
+    #[test]
+    fn lexical_overflow_sign_and_type_substitution_reject() {
+        for (lexical, datatype) in [
+            ("18446744073709551616", "integer"),
+            ("0100", "integer"),
+            ("+100", "integer"),
+            ("-1", "integer"),
+            (" 100", "integer"),
+            ("100", "string"),
+            ("100", "decimal"),
+            ("100", "unsignedLong"),
+        ] {
+            let term = Term::Literal(Literal::new_typed_literal(
+                lexical,
+                iri(&format!("http://www.w3.org/2001/XMLSchema#{datatype}")),
+            ));
+            let (c, policy, nonce, rows) = numeric_fixture(term, 3, 128);
+            let q = "SELECT DISTINCT ?person WHERE { ?person <urn:age> ?age FILTER(?age >= 0) }";
+            assert!(
+                prepare_result(q, &[c], &rows, &policy, &nonce).is_err(),
+                "{lexical} / {datatype}"
+            );
+        }
+    }
+
+    #[test]
+    fn full_width_hiding_is_explicit_and_public_predicates_remain_circuit_free() {
+        let (c, policy, nonce, rows) = numeric_fixture(integer(42), 3, 128);
+        let q = "SELECT DISTINCT ?person WHERE { ?person <urn:age> ?age FILTER(?age >= 18) }";
+        let options = ResultOptions {
+            integer_capacity: IntegerCapacityPolicy::HideInU64,
+            ..ResultOptions::default()
+        };
+        let p = prepare_result_with_options(q, &[c], &rows, &policy, &nonce, options).unwrap();
+        assert_eq!(
+            p.presentation.integer_capacity,
+            PrivateIntegerCapacity::FullU64
+        );
+        let serialized = serde_json::to_value(&p.presentation).unwrap();
+        assert_eq!(serialized["integer_capacity"], "full_u64");
+        assert!(serialized.get("decimal_length").is_none());
+        let (c, policy, nonce, _) = numeric_fixture(integer(u64::MAX), 3, 128);
+        let rows = vec![BTreeMap::from([("age".into(), integer(u64::MAX))])];
+        let public =
+            prepare_result_with_options(PUBLIC_QUERY, &[c], &rows, &policy, &nonce, options)
+                .unwrap();
+        assert_eq!(public.package, "result_v1_k1_n16_p3_r4_f0");
+        assert!(!public.toml.contains("filter_values"));
+    }
+
+    #[test]
+    fn status_capacity_uses_complete_verifier_policy_and_preserves_padding() {
+        let q = "SELECT DISTINCT ?person WHERE { ?person <urn:age> ?age FILTER(?age >= 18) }";
+        for (bytes, depth) in [(128, 10), (129, 17), (16384, 17), (16385, 20), (131072, 20)] {
+            let index = (bytes * 8 - 1) as u64;
+            let (c, mut policy, nonce, rows) = numeric_fixture(integer(100), index, bytes);
+            let p = prepare_result(q, &[c], &rows, &policy, &nonce).unwrap();
+            assert_eq!(policy.status_depth().unwrap(), depth);
+            let siblings: Value = serde_json::from_str(
+                p.toml
+                    .lines()
+                    .find_map(|line| line.strip_prefix("status_siblings = "))
+                    .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(siblings[0].as_array().unwrap().len(), depth as usize);
+            policy.snapshots[0].bits[bytes - 1] |= 128;
+            assert_ne!(
+                public_statement(&p.presentation, &policy, &nonce)
+                    .unwrap()
+                    .fields,
+                public_statement(
+                    &p.presentation,
+                    &ResultPolicy {
+                        snapshots: vec![StatusListSnapshot {
+                            status_list: "urn:status:people".into(),
+                            version: 7,
+                            bits: vec![0; bytes]
+                        }],
+                        ..policy.clone()
+                    },
+                    &nonce
+                )
+                .unwrap()
+                .fields
+            );
+        }
+        let (c, mut policy, nonce, rows) = numeric_fixture(integer(42), 3, 128);
+        policy.snapshots.push(StatusListSnapshot {
+            status_list: "urn:status:unused".into(),
+            version: 7,
+            bits: vec![0; 16385],
+        });
+        let p = prepare_result(q, &[c], &rows, &policy, &nonce).unwrap();
+        assert_eq!(p.package, "result_v2_k1_n16_p3_r4_f2_i8_d20");
+        let (c, policy, nonce, rows) = numeric_fixture(integer(42), 129 * 8, 129);
+        assert!(
+            prepare_result(q, &[c], &rows, &policy, &nonce).is_err(),
+            "padding is revoked"
+        );
+    }
+
+    pub(super) fn alter_input(toml: &str, key: &str, edit: impl FnOnce(&mut Value)) -> String {
         let mut edit = Some(edit);
         toml.lines()
             .map(|line| {
@@ -1665,6 +2202,278 @@ mod tests {
                 .unwrap();
                 assert_eq!(verified.rows, rows);
             }
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Every expanded wrapper executes; representative full proofs cover each new status depth.
+    #[test]
+    #[ignore = "requires pinned nargo and bb; full-u64/status-capacity matrix and adversarial proofs"]
+    fn result_real_expanded_capacity_matrix() {
+        pinned_toolchain().unwrap();
+        let driver = CircuitProver::from_crate_root();
+        let dir =
+            std::env::temp_dir().join(format!("sparq_result_expanded_{}", std::process::id()));
+        let hidden_query =
+            "SELECT DISTINCT ?person WHERE { ?person <urn:age> ?age FILTER(?age >= 0) }";
+        let mut exercised = BTreeSet::new();
+        for depth in [10, 17, 20] {
+            for capacity in [CredentialCapacity::Smallest, CredentialCapacity::HideInTwo] {
+                for lane in [0, 8, 64] {
+                    if depth == 10 && lane != 64 {
+                        continue;
+                    }
+                    let value = if lane == 8 { 42 } else { u64::MAX };
+                    let bytes = (1usize << depth) / 8;
+                    let (c, policy, nonce, hidden_rows) =
+                        numeric_fixture(integer(value), (bytes * 8 - 1) as u64, bytes);
+                    let public_rows = vec![BTreeMap::from([("age".into(), integer(value))])];
+                    let (query, rows) = if lane == 0 {
+                        (PUBLIC_QUERY, &public_rows)
+                    } else {
+                        (hidden_query, &hidden_rows)
+                    };
+                    let prepared = prepare_result_with_options(
+                        query,
+                        &[c],
+                        rows,
+                        &policy,
+                        &nonce,
+                        ResultOptions {
+                            credential_capacity: capacity,
+                            ..ResultOptions::default()
+                        },
+                    )
+                    .unwrap();
+                    assert_eq!(prepared.presentation.version, 2);
+                    exercised.insert(prepared.package);
+                    let witness = driver
+                        .private_package_witness(
+                            prepared.package,
+                            &prepared.toml,
+                            "expanded_matrix",
+                        )
+                        .unwrap();
+                    assert!(witness.path.exists());
+                    drop(witness);
+                    let prove_this = lane == 64
+                        && ((depth == 10 && capacity == CredentialCapacity::Smallest)
+                            || (depth != 10 && capacity == CredentialCapacity::HideInTwo));
+                    if !prove_this {
+                        continue;
+                    }
+                    for (name, inputs) in [
+                        (
+                            "integer_detach",
+                            alter_input(&prepared.toml, "filter_values", |v| {
+                                v[0][0] = json!((u64::MAX - 1).to_string())
+                            }),
+                        ),
+                        (
+                            "integer_overflow",
+                            alter_input(&prepared.toml, "filter_values", |v| {
+                                v[0][0] = json!("18446744073709551616")
+                            }),
+                        ),
+                        (
+                            "status_path",
+                            alter_input(&prepared.toml, "status_siblings", |v| {
+                                v[0][0] = json!("0x01")
+                            }),
+                        ),
+                        (
+                            "status_index",
+                            alter_input(&prepared.toml, "status_indices", |v| v[0] = json!("0x00")),
+                        ),
+                    ] {
+                        assert!(
+                            driver
+                                .private_package_witness(prepared.package, &inputs, name)
+                                .is_err(),
+                            "{name}"
+                        );
+                    }
+                    let proof = prepared
+                        .prove(&driver, &dir.join(format!("d{depth}")), "expanded_proof")
+                        .unwrap();
+                    let checked = verify_result(
+                        query,
+                        &proof,
+                        &policy,
+                        &nonce,
+                        &InMemorySeenNonces::default(),
+                        &driver,
+                        &dir,
+                    )
+                    .unwrap();
+                    assert_eq!(&checked.rows, rows);
+                    let mut wrong_capacity = proof.clone();
+                    wrong_capacity.integer_capacity = PrivateIntegerCapacity::TwoDigits;
+                    assert!(verify_result(
+                        query,
+                        &wrong_capacity,
+                        &policy,
+                        &nonce,
+                        &InMemorySeenNonces::default(),
+                        &driver,
+                        &dir
+                    )
+                    .is_err());
+                    let mut revoked = policy.clone();
+                    *revoked.snapshots[0].bits.last_mut().unwrap() |= 128;
+                    assert!(verify_result(
+                        query,
+                        &proof,
+                        &revoked,
+                        &nonce,
+                        &InMemorySeenNonces::default(),
+                        &driver,
+                        &dir
+                    )
+                    .is_err());
+                }
+            }
+        }
+        assert_eq!(exercised.len(), 14);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires pinned nargo; private full-u64 boundary execution independent of host admission"]
+    fn result_relation_executes_full_width_private_boundaries() {
+        pinned_toolchain().unwrap();
+        let driver = CircuitProver::from_crate_root();
+        let query = "SELECT DISTINCT ?person WHERE { ?person <urn:age> ?age FILTER(?age >= 0) }";
+        for value in [0, 99, 100, 1u64 << 63, 10_000_000_000_000_000_000, u64::MAX] {
+            let (c, policy, nonce, rows) = numeric_fixture(integer(value), 3, 128);
+            let p = prepare_result_with_options(
+                query,
+                &[c],
+                &rows,
+                &policy,
+                &nonce,
+                ResultOptions {
+                    integer_capacity: IntegerCapacityPolicy::HideInU64,
+                    ..ResultOptions::default()
+                },
+            )
+            .unwrap();
+            assert!(driver
+                .private_package_witness(p.package, &p.toml, "private_u64_boundary")
+                .is_ok());
+        }
+    }
+
+    #[test]
+    #[ignore = "requires pinned nargo; expanded tiny-profile witness narrowing must not wrap"]
+    fn result_relation_tiny_capacity_rejects_wrapping_private_values() {
+        pinned_toolchain().unwrap();
+        let driver = CircuitProver::from_crate_root();
+        let query = "SELECT DISTINCT ?person WHERE { ?person <urn:age> ?age FILTER(?age >= 0) }";
+        for depth in [17, 20] {
+            for capacity in [CredentialCapacity::Smallest, CredentialCapacity::HideInTwo] {
+                let (c, policy, nonce, rows) = numeric_fixture(integer(42), 3, (1 << depth) / 8);
+                let p = prepare_result_with_options(
+                    query,
+                    &[c],
+                    &rows,
+                    &policy,
+                    &nonce,
+                    ResultOptions {
+                        credential_capacity: capacity,
+                        ..ResultOptions::default()
+                    },
+                )
+                .unwrap();
+                assert_eq!(
+                    p.presentation.integer_capacity,
+                    PrivateIntegerCapacity::TwoDigits
+                );
+                assert!(driver
+                    .private_package_witness(p.package, &p.toml, "tiny_positive")
+                    .is_ok());
+                // 298 truncated to u8 is 42, so deleting the pre-cast guard would accept
+                // this malicious private value while the signed lexical token stays 42.
+                let malicious = alter_input(&p.toml, "filter_values", |v| v[0][0] = json!(298));
+                assert!(driver
+                    .private_package_witness(p.package, &malicious, "tiny_wrap")
+                    .is_err());
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "requires pinned nargo and bb; preserves actual baseline v1 verification keys"]
+    fn result_legacy_v1_keys_match_pinned_foundation_keys() {
+        // [GPT-6] Expected bytes were built from the independent foundation713 archive.
+        pinned_toolchain().unwrap();
+        let expected: Value = serde_json::from_str(include_str!(
+            "../../../bench/zk-compose/result_v1_compatibility.json"
+        ))
+        .unwrap();
+        let driver = CircuitProver::from_crate_root();
+        let dir = std::env::temp_dir().join(format!("sparq_v1_key_compat_{}", std::process::id()));
+        for (package, evidence) in expected["members"].as_object().unwrap() {
+            let key = driver.canonical_package_vk(package, &dir).unwrap();
+            let actual: String = key.iter().map(|byte| format!("{byte:02x}")).collect();
+            assert!(
+                actual == evidence["base"]["verification_key_hex"].as_str().unwrap(),
+                "{package}: canonical verification key differs from the pinned baseline"
+            );
+        }
+        assert_eq!(expected["members"].as_object().unwrap().len(), 4);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires pinned nargo and bb; genuine expanded tiny and predicate-free proofs"]
+    fn result_real_proofs_cover_expanded_tiny_and_predicate_free_public_abis() {
+        // [GPT-6] These are genuine proofs, separately counted from wrapper executions.
+        pinned_toolchain().unwrap();
+        let driver = CircuitProver::from_crate_root();
+        let dir =
+            std::env::temp_dir().join(format!("sparq_result_small_v2_{}", std::process::id()));
+        for (depth, capacity, query, expected_package) in [
+            (
+                17,
+                CredentialCapacity::Smallest,
+                "SELECT DISTINCT ?person WHERE { ?person <urn:age> ?age FILTER(?age >= 18) }",
+                "result_v2_k1_n16_p3_r4_f2_i8_d17",
+            ),
+            (
+                20,
+                CredentialCapacity::HideInTwo,
+                "SELECT DISTINCT ?person WHERE { ?person <urn:age> ?age }",
+                "result_v2_k2_n16_p3_r4_f0_i0_d20",
+            ),
+        ] {
+            let (c, policy, nonce, rows) = numeric_fixture(integer(42), 3, (1 << depth) / 8);
+            let p = prepare_result_with_options(
+                query,
+                &[c],
+                &rows,
+                &policy,
+                &nonce,
+                ResultOptions {
+                    credential_capacity: capacity,
+                    ..ResultOptions::default()
+                },
+            )
+            .unwrap();
+            assert_eq!(p.package, expected_package);
+            assert_eq!(p.presentation.version, 2);
+            let proof = p.prove(&driver, &dir, "small_v2_public_abi").unwrap();
+            let checked = verify_result(
+                query,
+                &proof,
+                &policy,
+                &nonce,
+                &InMemorySeenNonces::default(),
+                &driver,
+                &dir,
+            )
+            .unwrap();
+            assert_eq!(&checked.rows, &rows);
         }
         std::fs::remove_dir_all(dir).unwrap();
     }
