@@ -8,6 +8,10 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - "zk/native-composition/**"
+      - "crates/sparq-canon/**"
+      - "crates/sparq-core/**"
+      - "vendor/spargebra/**"
+      - "Cargo.toml"
       - "rust-toolchain*"
       - ".cargo/**"
       - ".github/workflows/zk-native-composition.yml"
@@ -15,6 +19,10 @@ on:
     branches: [main]
     paths:
       - "zk/native-composition/**"
+      - "crates/sparq-canon/**"
+      - "crates/sparq-core/**"
+      - "vendor/spargebra/**"
+      - "Cargo.toml"
       - "rust-toolchain*"
       - ".cargo/**"
       - ".github/workflows/zk-native-composition.yml"
@@ -76,8 +84,34 @@ jobs:
         # No ignored-test shortcut or tool-presence skip: build.rs requires Circom.
         run: cargo test --release --locked --manifest-path zk/native-composition/Cargo.toml
 
+      - name: Verify native dependency patch provenance and API compatibility
+        run: |
+          # Default tuple tests do not fetch the optional RDF graph. Populate the
+          # locked detached graph explicitly before the fail-closed offline check.
+          cargo fetch --locked --manifest-path zk/native-composition/Cargo.toml
+          python3 zk/native-composition/vendor-support/test_verify.py
+          python3 zk/native-composition/vendor-support/verify.py --smoke
+
       - name: Clippy for the standalone prototype
-        run: cargo clippy --locked --manifest-path zk/native-composition/Cargo.toml --all-targets -- -D warnings
+        run: cargo clippy --locked --manifest-path zk/native-composition/Cargo.toml --all-features --all-targets -- -D warnings
+
+      - name: Real public RDF proofs and malicious weaker-proof controls
+        run: cargo test --release --locked --manifest-path zk/native-composition/Cargo.toml --features native-rdf --lib
+
+      - name: Native binding adapter and genuine proof controls
+        run: |
+          cargo test --release --locked --manifest-path zk/native-composition/Cargo.toml --features native-binding --lib rdf::binding_tests::
+          cargo test --release --locked --manifest-path zk/native-composition/Cargo.toml --features native-binding --bin native-bindings
+
+      - name: Run the public RDF experiment
+        run: cargo run --release --locked --manifest-path zk/native-composition/Cargo.toml --features native-rdf --bin native-rdf > native-rdf-experiment.json
+
+      - name: Preserve public RDF experiment report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: native-rdf-experiment
+          path: native-rdf-experiment.json
+          if-no-files-found: error
 
       - name: Build the prototype CLI
         run: cargo build --release --locked --manifest-path zk/native-composition/Cargo.toml

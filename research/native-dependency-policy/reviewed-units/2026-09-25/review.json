@@ -1,0 +1,231 @@
+{
+  "schema": "sparq.dependency-source-review.v1",
+  "reviewer": "GPT-6",
+  "date": "2026-09-25",
+  "verdict": "APPROVE",
+  "criterion": "safe-to-deploy",
+  "review_kind": "actual independent source review, no policy mutation",
+  "units": [
+    {
+      "package": "num-iter",
+      "delta": "0.1.45 -> 0.1.46",
+      "scope": "exact registry delta across all packaged targets/features",
+      "verdict": "APPROVE",
+      "baseline_chain": {
+        "google": [
+          {
+            "who": "George Burgess IV <gbiv@google.com>",
+            "criteria": "safe-to-deploy",
+            "version": "0.1.43",
+            "aggregated-from": "https://chromium.googlesource.com/chromiumos/third_party/rust_crates/+/refs/heads/main/cargo-vet/audits.toml?format=TEXT"
+          }
+        ],
+        "isrg": [
+          {
+            "who": "David Cook <dcook@divviup.org>",
+            "criteria": "safe-to-deploy",
+            "delta": "0.1.43 -> 0.1.44"
+          },
+          {
+            "who": "David Cook <dcook@divviup.org>",
+            "criteria": "safe-to-deploy",
+            "delta": "0.1.44 -> 0.1.45"
+          }
+        ]
+      },
+      "source_unchanged_sha256": "220089a391d352be4884b36de457466a8a7c7b079c35a0d46f0ae14aeb77e92d"
+    },
+    {
+      "package": "cranelift-codegen-shared",
+      "version": "0.110.3",
+      "scope": "full exact registry package, all eight files and all declared targets/features",
+      "verdict": "APPROVE"
+    }
+  ],
+  "source_manifests": {
+    "num-iter-0.1.45": {
+      "archive": "/Users/jesght/.cargo/registry/cache/index.crates.io-1949cf8c6b5b557f/num-iter-0.1.45.crate",
+      "archive_sha256": "1429034a0490724d0075ebb2bc9e875d6503c3cf69e235a8941aa757d83ef5bf",
+      "files": {
+        ".cargo_vcs_info.json": "f07d7474f69e58e61ca41cc961ec5d7991df20aa37db98ef81677bfe61c4a272",
+        ".gitignore": "944bf600c6230664922a011cbca026699969f2f89f6c7ff689835836ccd7b1de",
+        "Cargo.toml": "51beb79ed987feacc09c0676453f9ff0c960b7e11d516eeb2c2e21537e51da4c",
+        "Cargo.toml.orig": "e7015b5793e2d0d46fbd094deacd70d668ce946aa4c72f3591dbb4d9bc20d6f3",
+        "LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+        "LICENSE-MIT": "6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb",
+        "README.md": "4280426ca726949aae7565fa0acc1ef4e5a67a9d33c0750897be0cc8944aede9",
+        "RELEASES.md": "1a7a3414040cba73509acdbb6de33de19c980516721ad6ab004f40fa51bb02fc",
+        "src/lib.rs": "220089a391d352be4884b36de457466a8a7c7b079c35a0d46f0ae14aeb77e92d"
+      },
+      "vcs": {
+        "git": {
+          "sha1": "3f9c189bddc6ecbacddc298adaa0da3d73397070"
+        },
+        "path_in_vcs": ""
+      }
+    },
+    "num-iter-0.1.46": {
+      "archive": "/Users/jesght/.cargo/registry/cache/index.crates.io-1949cf8c6b5b557f/num-iter-0.1.46.crate",
+      "archive_sha256": "c92800bd69a1eac91786bcfe9da64a897eb72911b8dc3095decbd07429e8048b",
+      "files": {
+        ".cargo_vcs_info.json": "8f0513baaf8da10ad2bac0fe91ddb7bb428098ec67b9333279ee0188521f4265",
+        ".gitignore": "944bf600c6230664922a011cbca026699969f2f89f6c7ff689835836ccd7b1de",
+        "Cargo.lock": "c3c4139280ac543e309bde34b9708c7d04abc014a129a1d8e2d9063cec861dc5",
+        "Cargo.toml": "0d255306687301564fc208a4a7d3a72e9d6114943506c0b6e2851c12851177bc",
+        "Cargo.toml.orig": "5eea3082196cf472e2bb5c70e64e78a310d1d4726cbda912e3e289b2be5b2ae8",
+        "LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+        "LICENSE-MIT": "6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb",
+        "README.md": "c131a435c84a4f545841b7ae28d19a4e34d44229245b1b9fc229af982cb8ceda",
+        "RELEASES.md": "176f9ab234d765fff04704f9ead73e5d7348e8734f9d743667ad421ca39c29ec",
+        "src/lib.rs": "220089a391d352be4884b36de457466a8a7c7b079c35a0d46f0ae14aeb77e92d"
+      },
+      "vcs": {
+        "git": {
+          "sha1": "6bfec7678bae3f4a38d1eeeab20532ac0bae7c9c"
+        },
+        "path_in_vcs": ""
+      }
+    },
+    "cranelift-codegen-shared-0.110.3": {
+      "archive": "/Users/jesght/.cargo/registry/cache/index.crates.io-1949cf8c6b5b557f/cranelift-codegen-shared-0.110.3.crate",
+      "archive_sha256": "efcff860573cf3db9ae98fbd949240d78b319df686cc306872e7fab60e9c84d7",
+      "files": {
+        ".cargo_vcs_info.json": "8791ad98dbce71dbaf5a1313b4d3bbb041a980119f91fdd78c821f9ea4999c86",
+        "Cargo.toml": "216b661be4167de0b7aaf4e2bbf8694b83262041e9ac4710aa384c36639e1062",
+        "Cargo.toml.orig": "8030f9109fb2f580135f154cab62e6a8459c7299ca78e7fc9d2d39ce2f969ed4",
+        "LICENSE": "268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5",
+        "README.md": "a410bc2f5dcbde499c0cd299c2620bc8111e3c5b3fccdd9e2d85caf3c24fdab3",
+        "src/constant_hash.rs": "4dc1a4e6f31a2f25d41fc7ee4ed2ae94563a090cdc77d7bbd972aa4098bd4f01",
+        "src/constants.rs": "930ecd722ef9cef5e3a807bcab310034b1b6d17e6153e5c69a53858865b11c51",
+        "src/lib.rs": "317c5fad6b13ad2ef5b4fe5ac45a45e776dda246f293fe9f7f1248096ddfaedd"
+      },
+      "vcs": {
+        "git": {
+          "sha1": "72bedc12e00084fdf49f7d4f5d40b979c184b0a5"
+        },
+        "path_in_vcs": "cranelift/codegen/shared"
+      }
+    }
+  },
+  "cached_index_records": [
+    {
+      "name": "num-iter",
+      "vers": "0.1.45",
+      "deps": [
+        {
+          "name": "autocfg",
+          "req": "^1",
+          "features": [],
+          "optional": false,
+          "default_features": true,
+          "target": null,
+          "kind": "build"
+        },
+        {
+          "name": "num-integer",
+          "req": "^0.1.46",
+          "features": [
+            "i128"
+          ],
+          "optional": false,
+          "default_features": false,
+          "target": null,
+          "kind": "normal"
+        },
+        {
+          "name": "num-traits",
+          "req": "^0.2.11",
+          "features": [
+            "i128"
+          ],
+          "optional": false,
+          "default_features": false,
+          "target": null,
+          "kind": "normal"
+        }
+      ],
+      "cksum": "1429034a0490724d0075ebb2bc9e875d6503c3cf69e235a8941aa757d83ef5bf",
+      "features": {
+        "default": [
+          "std"
+        ],
+        "i128": [],
+        "std": [
+          "num-integer/std",
+          "num-traits/std"
+        ]
+      },
+      "yanked": false,
+      "rust_version": "1.31",
+      "pubtime": "2024-05-04T00:23:07Z"
+    },
+    {
+      "name": "num-iter",
+      "vers": "0.1.46",
+      "deps": [
+        {
+          "name": "num-integer",
+          "req": "^0.1.46",
+          "features": [
+            "i128"
+          ],
+          "optional": false,
+          "default_features": false,
+          "target": null,
+          "kind": "normal"
+        },
+        {
+          "name": "num-traits",
+          "req": "^0.2.11",
+          "features": [
+            "i128"
+          ],
+          "optional": false,
+          "default_features": false,
+          "target": null,
+          "kind": "normal"
+        }
+      ],
+      "cksum": "c92800bd69a1eac91786bcfe9da64a897eb72911b8dc3095decbd07429e8048b",
+      "features": {
+        "default": [
+          "std"
+        ],
+        "i128": [],
+        "std": [
+          "num-integer/std",
+          "num-traits/std"
+        ]
+      },
+      "yanked": false,
+      "rust_version": "1.31",
+      "pubtime": "2026-07-07T19:51:46Z"
+    },
+    {
+      "name": "cranelift-codegen-shared",
+      "vers": "0.110.3",
+      "deps": [],
+      "cksum": "efcff860573cf3db9ae98fbd949240d78b319df686cc306872e7fab60e9c84d7",
+      "features": {},
+      "yanked": false,
+      "pubtime": "2024-10-09T16:57:44Z"
+    }
+  ],
+  "baseline_imports_sha256": "3bfb97a524d7ff005f50f5ab305e1a4654ddf7db5cd589eeeb5f90b354ac95e8",
+  "triage_sha256": "8545d6e46e3ad636db4a34dd1b2e213df00cb1a3708963eb2f510bc196094288",
+  "findings": [],
+  "executed": {
+    "cargo": false,
+    "compiler": false,
+    "tests": false,
+    "proofs": false,
+    "downloads": false,
+    "policy_changes": false
+  },
+  "limits": [
+    "num-iter is a delta review resting on the independently retained accepted baseline chain; no full re-audit of unchanged 0.1.45",
+    "cranelift-codegen-shared review does not cover other Cranelift compiler packages or generated machine code",
+    "No transitive dependency, cryptographic backend, deployment integration, or toolchain audit",
+    "Review is a scoped basis for a later explicitly attributed audit proposal; no cargo-vet record inserted and no gate closure asserted"
+  ]
+}
