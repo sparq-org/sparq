@@ -21,12 +21,26 @@ pub fn admit(request: &Request) -> Result<(), Rejected> {
         .map_err(|_| Rejected("SPARQL parse rejected"))?;
     prepared.resolve_ebv_semantics(Some(sparq_engine::EbvSemantics::Rec2013))
         .map_err(|_| Rejected("query VERSION contradicts REC 2013 profile"))?;
-    admit_query(prepared.query())
+    admit_query(prepared.query(), DatasetProfile::DefaultOnly)
 }
 
-fn admit_query(query: &spargebra::Query) -> Result<(), Rejected> {
-    if query.dataset().is_some() {
-        return Err(Rejected("dataset clauses are not admitted"));
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DatasetProfile {
+    DefaultOnly,
+    NamedCatalog,
+}
+
+pub(crate) fn admit_query(
+    query: &spargebra::Query,
+    profile: DatasetProfile,
+) -> Result<(), Rejected> {
+    if let Some(dataset) = query.dataset() {
+        if profile == DatasetProfile::DefaultOnly {
+            return Err(Rejected("dataset clauses are not admitted"));
+        }
+        if dataset.default.len() + dataset.named.as_ref().map_or(0, Vec::len) > 64 {
+            return Err(Rejected("dataset clause capacity"));
+        }
     }
     let pattern = match query {
         spargebra::Query::Select { pattern, .. } | spargebra::Query::Ask { pattern, .. } => pattern,
@@ -158,6 +172,9 @@ fn admit_query(query: &spargebra::Query) -> Result<(), Rejected> {
                             }
                         }
                     }
+                }
+                GraphPattern::Graph { inner, .. } if profile == DatasetProfile::NamedCatalog => {
+                    pending.push(Visit::Pattern(inner));
                 }
                 GraphPattern::Graph { .. }
                 | GraphPattern::Service { .. }
@@ -334,7 +351,7 @@ fn pattern_term(term: &TermPattern) -> Result<(), Rejected> {
     }
 }
 
-fn term_string(term: &Term) -> Result<String, Rejected> {
+pub(crate) fn term_string(term: &Term) -> Result<String, Rejected> {
     match term {
         Term::NamedNode(_) => {}
         Term::Literal(l) => literal(l)?,
@@ -400,7 +417,7 @@ pub fn evaluate_detailed(witness: &Witness) -> Result<Journal, EvaluationError> 
     };
     let prepared = sparq_engine::PreparedQuery::parse(&request.query)
         .map_err(|_| Rejected("SPARQL parse rejected"))?;
-    admit_query(prepared.query())?;
+    admit_query(prepared.query(), DatasetProfile::DefaultOnly)?;
     let mut dict = Dict::new();
     let mut triples = Vec::new();
     for triple in oxttl::NTriplesParser::new().for_slice(witness.dataset.ntriples.as_bytes()) {
@@ -419,8 +436,31 @@ pub fn evaluate_detailed(witness: &Witness) -> Result<Journal, EvaluationError> 
         ]);
     }
     let graph = Graph::from_parts(dict, triples);
+    let result = execute_detailed(&graph, &prepared, request.policy.max_rows)?;
+    Ok(Journal {
+        version: VERSION,
+        request_digest: request_digest(request)?,
+        dataset_commitment: commitment,
+        provenance,
+        result,
+    })
+}
+
+pub(crate) fn execute(
+    graph: &Graph,
+    prepared: &sparq_engine::PreparedQuery,
+    max_rows: u32,
+) -> Result<CanonicalResult, Rejected> {
+    execute_detailed(graph, prepared, max_rows).map_err(Rejected::from)
+}
+
+pub(crate) fn execute_detailed(
+    graph: &Graph,
+    prepared: &sparq_engine::PreparedQuery,
+    max_rows: u32,
+) -> Result<CanonicalResult, EvaluationError> {
     let budget = sparq_engine::QueryBudget {
-        max_rows: Some(request.policy.max_rows as usize),
+        max_rows: Some(max_rows as usize),
         temporal_year_range: Some(TEMPORAL_YEAR_RANGE),
         strict_numeric_capacity: true,
         ebv_semantics: Some(sparq_engine::EbvSemantics::Rec2013),
@@ -428,8 +468,8 @@ pub fn evaluate_detailed(witness: &Witness) -> Result<Journal, EvaluationError> 
         max_bytes: Some(4 * MAX_DATASET_BYTES as usize),
         ..Default::default()
     };
-    let result = sparq_engine::query_prepared_with_budget_detailed(&graph, &prepared, &budget)?;
-    if result.rows.len() > request.policy.max_rows as usize {
+    let result = sparq_engine::query_prepared_with_budget_detailed(graph, prepared, &budget)?;
+    if result.rows.len() > max_rows as usize {
         return Err(Rejected("result row capacity").into());
     }
     let result = match prepared.query() {
@@ -460,11 +500,5 @@ pub fn evaluate_detailed(witness: &Witness) -> Result<Journal, EvaluationError> 
         }
         _ => return Err(Rejected("query form rejected").into()),
     };
-    Ok(Journal {
-        version: VERSION,
-        request_digest: request_digest(request)?,
-        dataset_commitment: commitment,
-        provenance,
-        result,
-    })
+    Ok(result)
 }

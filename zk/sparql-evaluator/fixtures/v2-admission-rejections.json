@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "authored_by": "GPT-6",
+  "profile": "SparqSparql11DatasetV2",
+  "cases": [
+    {
+      "id": "dataset-reference-capacity",
+      "query": "SELECT ?g FROM NAMED <http://ex/selected-0> FROM NAMED <http://ex/selected-1> FROM NAMED <http://ex/selected-2> FROM NAMED <http://ex/selected-3> FROM NAMED <http://ex/selected-4> FROM NAMED <http://ex/selected-5> FROM NAMED <http://ex/selected-6> FROM NAMED <http://ex/selected-7> FROM NAMED <http://ex/selected-8> FROM NAMED <http://ex/selected-9> FROM NAMED <http://ex/selected-10> FROM NAMED <http://ex/selected-11> FROM NAMED <http://ex/selected-12> FROM NAMED <http://ex/selected-13> FROM NAMED <http://ex/selected-14> FROM NAMED <http://ex/selected-15> FROM NAMED <http://ex/selected-16> FROM NAMED <http://ex/selected-17> FROM NAMED <http://ex/selected-18> FROM NAMED <http://ex/selected-19> FROM NAMED <http://ex/selected-20> FROM NAMED <http://ex/selected-21> FROM NAMED <http://ex/selected-22> FROM NAMED <http://ex/selected-23> FROM NAMED <http://ex/selected-24> FROM NAMED <http://ex/selected-25> FROM NAMED <http://ex/selected-26> FROM NAMED <http://ex/selected-27> FROM NAMED <http://ex/selected-28> FROM NAMED <http://ex/selected-29> FROM NAMED <http://ex/selected-30> FROM NAMED <http://ex/selected-31> FROM NAMED <http://ex/selected-32> FROM NAMED <http://ex/selected-33> FROM NAMED <http://ex/selected-34> FROM NAMED <http://ex/selected-35> FROM NAMED <http://ex/selected-36> FROM NAMED <http://ex/selected-37> FROM NAMED <http://ex/selected-38> FROM NAMED <http://ex/selected-39> FROM NAMED <http://ex/selected-40> FROM NAMED <http://ex/selected-41> FROM NAMED <http://ex/selected-42> FROM NAMED <http://ex/selected-43> FROM NAMED <http://ex/selected-44> FROM NAMED <http://ex/selected-45> FROM NAMED <http://ex/selected-46> FROM NAMED <http://ex/selected-47> FROM NAMED <http://ex/selected-48> FROM NAMED <http://ex/selected-49> FROM NAMED <http://ex/selected-50> FROM NAMED <http://ex/selected-51> FROM NAMED <http://ex/selected-52> FROM NAMED <http://ex/selected-53> FROM NAMED <http://ex/selected-54> FROM NAMED <http://ex/selected-55> FROM NAMED <http://ex/selected-56> FROM NAMED <http://ex/selected-57> FROM NAMED <http://ex/selected-58> FROM NAMED <http://ex/selected-59> FROM NAMED <http://ex/selected-60> FROM NAMED <http://ex/selected-61> FROM NAMED <http://ex/selected-62> FROM NAMED <http://ex/selected-63> FROM NAMED <http://ex/selected-64> WHERE { GRAPH ?g {} }"
+    },
+    {
+      "id": "remote-service",
+      "query": "SELECT ?s { SERVICE <http://ex/remote> { ?s ?p ?o } }"
+    },
+    {
+      "id": "lateral",
+      "query": "SELECT ?s { LATERAL { ?s ?p ?o } }"
+    },
+    {
+      "id": "construct",
+      "query": "CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o }"
+    },
+    {
+      "id": "graph-inside-exists",
+      "query": "SELECT ?s { ?s ex:p ?o FILTER EXISTS { GRAPH ex:g2 { ?s ex:p ?o } } }"
+    }
+  ]
+}

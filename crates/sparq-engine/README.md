@@ -22,10 +22,8 @@ The opt-in [proved evaluator](../../zk/sparql-evaluator/README.md) restricts `ta
 ```rust
 # fn main() -> Result<(), Box<dyn std::error::Error>> {
 use sparq_core::Graph;
-
 let g = Graph::load_str(
     r#"<http://example.org/alice> a <http://schema.org/Person> ."#, "turtle")?;
-
 let rows = sparq_engine::query(&g, "SELECT ?s WHERE { ?s a <http://schema.org/Person> }")?;
 let json = sparq_engine::query_json(&g, "SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?o }")?;
 # let _ = (rows, json);
@@ -40,15 +38,14 @@ let json = sparq_engine::query_json(&g, "SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?
 - **Path multiplicity and correlation** — alternatives/sequences preserve bag counts;
   reachability retains endpoint sets. [Scoped EXISTS/MINUS substitution](../../skills/sparql-query/exists-minus.md) applies captured IRI/literal bindings before domain subtraction; unresolved shapes retain native practical behavior.
   Nullable paths preserve constant seeds and variable node domains. Substitution admits
-  only positive shapes with locally bound FILTERs; scope-sensitive shapes and triple-term
-  endpoints use potentially more expensive ordinary evaluation. [Boundaries and examples](../../skills/sparql-query/SKILL.md).
+  only positive shapes with locally bound FILTERs; scope-sensitive shapes and triple-term endpoints use potentially more expensive ordinary evaluation. [Boundaries and examples](../../skills/sparql-query/SKILL.md).
 - **Deterministic builtins** — `isNumeric` validates lexicals/facets independently of finite
   arithmetic capacity; integer/decimal EBV classifies validated digits without floating underflow. Invalid numeric/boolean lexicals have false EBV per SPARQL 1.1 §17.2.2,
   while invalid arithmetic operands error. Integer casts truncate within `i64`. `SUBSTR` clips the original
   one-based interval. Date accessors validate calendars/offsets and normalize next-day midnight; `MIN`/`MAX` retain input terms. Raw numeric/boolean lexical
   forms are checked verbatim; XML whitespace normalization applies to string casts only. [Bounded coverage and numeric limits](../../skills/sparql-query/SKILL.md)
   remain explicit; these corrections do not establish complete builtin conformance.
-- **Named graphs** — query across an active dataset with `GRAPH` and `FROM` / `FROM NAMED`.
+- **Named graphs** — query across an active dataset with `GRAPH` and `FROM` / `FROM NAMED`. [GPT-6] Nested `GRAPH` borrows the same catalog, preserving empty graphs, binding multiplicity and dataset restrictions.
 - **RDF 1.2 triple terms** — match [triple terms](https://www.w3.org/TR/rdf12-concepts/), including variables inside them.
 - **Materialized full paths** *(opt-in `paths` feature, OFF by default)* — `enumerate_paths` returns intermediate nodes and edges for tied shortest paths, bounded simple paths, or cycles back to their start. Each endpoint is unrestricted, one fixed node, or a graph pattern selecting a candidate set.
 - **Query plan introspection** — `EXPLAIN` and `EXPLAIN ANALYZE`.

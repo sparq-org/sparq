@@ -125,6 +125,52 @@ fn deterministic_query_results_match_normative_expectations() {
 }
 
 #[test]
+fn v2_default_graph_matches_the_original_normative_expectations() {
+    use sparq_proved_evaluator_model::v2;
+    let mut failures = Vec::new();
+    let mut executed = 0;
+    for case in corpus().cases {
+        let Expected::Result { ref result } = case.expected else {
+            continue;
+        };
+        executed += 1;
+        let original = witness(&case);
+        // N-Triples statements are default-graph statements in N-Quads. Reuse
+        // the independent original oracle, not output from either evaluator.
+        let dataset = v2::PrivateDataset {
+            nquads: original.dataset.ntriples,
+            named_graphs: Vec::new(),
+            salt: original.dataset.salt,
+        };
+        let policy = v2::Policy::default();
+        let input = v2::Witness {
+            request: v2::Request {
+                version: v2::VERSION,
+                contract: original.request.contract,
+                dialect: v2::Dialect::SparqSparql11DatasetV2,
+                query: original.request.query,
+                authority: DatasetAuthority::VerifierAgreed {
+                    commitment: v2::dataset_commitment(&dataset, &policy).unwrap(),
+                },
+                policy,
+                nonce: original.request.nonce,
+            },
+            dataset,
+        };
+        let expected = canonical_bag(result.clone());
+        match v2::evaluate(&input) {
+            Ok(journal) if journal.result == expected => {}
+            actual => failures.push(format!(
+                "{}: expected {expected:?}; actual {actual:?}",
+                case.id
+            )),
+        }
+    }
+    assert!(executed > 0, "V2 compatibility corpus must not be empty");
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
 fn unsupported_features_fail_at_the_declared_boundary() {
     let mut failures = Vec::new();
     let mut executed = 0;
