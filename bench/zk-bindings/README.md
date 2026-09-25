@@ -114,3 +114,42 @@ for their unchanged default-only source. Each is independently derived from the
 fixed local snapshot contract, pinned to the original fixture and source hashes;
 no network retrieval or named-graph membership claim is implied. Both authority
 modes execute each version's own expectation. No V3 promotion is inferred.
+
+## Native finite CI replay
+
+[GPT-6] The separate native workflow runs `native_ci.py` after the existing
+tuple, RDF malicious-proof and adapter suites. It builds the release adapter
+and replays the unchanged exhaustive native domain: 576 jobs, comprising
+72 required proofs accepted, 468 genuine weaker proofs independently verified
+then rejected by the required verifier, and 36 empty-graph admission refusals.
+The other 80 query cases remain explicit classifications. None becomes a
+cryptographic negative merely because honest preparation refuses it.
+
+```sh
+python3 bench/zk-bindings/native_ci.py \
+  --binary /path/to/native-bindings --circom /path/to/circom \
+  --output /path/to/new-native-campaign
+```
+
+The helper requires the pinned complete plan, every individual result, exact
+rejection stages and named weaker-proof/replay controls. It rechecks retained
+artifact hashes and query/row/issuer/status/nonce fields, rejects missing or
+reused proof artifacts, and reconciles aggregate counts with the individual
+records. It does not independently reimplement BBS+ verification: the actual
+native adapter rebuilds and verifies each cryptographic statement. Python unit
+fixtures test only these reporting guards and are never counted as proofs.
+
+CI retains partial failures, Cargo build events, executable and tool hashes,
+source hashes, plans and proof/public artifacts. Observed checkout/tool versions
+are explicitly separate from a binary build attestation; CI build events provide
+the build attribution. The workflow has a bounded timeout, whose exhaustion is
+a failure. Wiring the replay does not establish a completed hosted campaign;
+the retained historical native evidence remains bound to its original source.
+
+The native workflow is always created on PR and merge-group events. Its input
+selector runs the heavy steps for native workspace, shared corpus/controller,
+local dependency, toolchain or gate changes; an explicit irrelevant diff leaves
+a successful lightweight job. An uncertain diff runs the checks. `ci-summary`
+requires this job's completed success, so missing, cancelled and skipped jobs
+cannot pass the merge gate. Root `Cargo.lock` and exact-only harness files do
+not alter this detached native workspace and do not trigger native proving.

@@ -40,10 +40,15 @@ the historical private-store results above are not substituted for these checks.
 
 The dedicated [native composition CI workflow](../../.github/workflows/zk-native-composition.yml)
 runs real release tests, scoped Clippy and the unsupported-Noir CLI check on pull
-requests and main-branch pushes touching this workspace or its Rust configuration.
+requests, merge groups and main-branch pushes. Heavy work runs only for relevant
+workspace, shared harness or Rust configuration changes; uncertain diffs run it.
 It builds Circom from a pinned source commit and uses both committed lockfiles.
 It can also be run manually. Passing this lane is regression evidence for the
 bounded prototype, not an external cryptographic audit.
+Its shared [finite binding replay](../../bench/zk-bindings/README.md#native-finite-ci-replay)
+additionally requires all declared native binding jobs and the genuine
+weaker-statement controls, retaining admission exclusions separately. Historical
+local evidence is not reattributed to a newly wired CI execution.
 
 ## Run
 

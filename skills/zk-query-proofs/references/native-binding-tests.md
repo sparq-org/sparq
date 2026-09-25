@@ -83,5 +83,9 @@ binds the frozen adapter, harness, executable, corpus and actual artifact counts
 It records successful required proofs, same-context weaker-proof rejections and
 empty-graph admissions separately, with the other query families explicitly
 excluded. This is local finite-domain evidence. The native workflow runs the
-listed library/adapter controls; it does not currently run the complete finite
-campaign or establish continuous coverage of every proof backend.
+listed library/adapter controls. The shared harness's
+[`native_ci.py`](../../../bench/zk-bindings/native_ci.py) now also requires the
+complete finite native campaign in this workflow, with the same denominators
+and distinct refusal classes. A missing job, tool, proof artifact or required
+weaker-statement control fails the lane. This source wiring does not itself
+establish a completed hosted replay or coverage of every proof backend.

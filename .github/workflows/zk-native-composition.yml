@@ -6,26 +6,10 @@ on:
   workflow_dispatch:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
-    paths:
-      - "zk/native-composition/**"
-      - "crates/sparq-canon/**"
-      - "crates/sparq-core/**"
-      - "vendor/spargebra/**"
-      - "Cargo.toml"
-      - "rust-toolchain*"
-      - ".cargo/**"
-      - ".github/workflows/zk-native-composition.yml"
+  merge_group:
+    types: [checks_requested]
   push:
     branches: [main]
-    paths:
-      - "zk/native-composition/**"
-      - "crates/sparq-canon/**"
-      - "crates/sparq-core/**"
-      - "vendor/spargebra/**"
-      - "Cargo.toml"
-      - "rust-toolchain*"
-      - ".cargo/**"
-      - ".github/workflows/zk-native-composition.yml"
 
 permissions:
   contents: read
@@ -48,7 +32,28 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Classify native composition inputs (fail closed)
+        id: changes
+        env:
+          NATIVE_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+          NATIVE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
+        run: python3 scripts/ci_native_composition_paths.py
+
+      - name: Require explicit classification output
+        env:
+          EXECUTION_REQUIRED: ${{ steps.changes.outputs.required }}
+        run: |
+          case "$EXECUTION_REQUIRED" in
+            true|false) ;;
+            *) echo "Missing or invalid native composition classification" >&2; exit 1 ;;
+          esac
+
+      - name: Successful irrelevant-diff classification
+        if: steps.changes.outputs.required == 'false'
+        run: echo "No native composition inputs changed; the mandatory check remains successful."
+
       - name: Check out pinned Circom source
+        if: steps.changes.outputs.required == 'true'
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: iden3/circom
@@ -58,12 +63,14 @@ jobs:
           persist-credentials: false
 
       - name: Activate repository Rust toolchain
+        if: steps.changes.outputs.required == 'true'
         # rustup honors the root rust-toolchain.toml, including its components.
         run: |
           rustup show active-toolchain
           rustup component add clippy
 
       - name: Cache detached workspace dependencies
+        if: steps.changes.outputs.required == 'true'
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           key: zk-native-composition-circom-2.2.2
@@ -73,6 +80,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build pinned Circom compiler
+        if: steps.changes.outputs.required == 'true'
         run: |
           set -euo pipefail
           cargo build --release --locked --manifest-path .ci-tools/circom/Cargo.toml
@@ -81,10 +89,12 @@ jobs:
           echo "$GITHUB_WORKSPACE/.ci-tools/circom/target/release" >> "$GITHUB_PATH"
 
       - name: Real composition and adversarial proof tests
+        if: steps.changes.outputs.required == 'true'
         # No ignored-test shortcut or tool-presence skip: build.rs requires Circom.
         run: cargo test --release --locked --manifest-path zk/native-composition/Cargo.toml
 
       - name: Verify native dependency patch provenance and API compatibility
+        if: steps.changes.outputs.required == 'true'
         run: |
           # Default tuple tests do not fetch the optional RDF graph. Populate the
           # locked detached graph explicitly before the fail-closed offline check.
@@ -93,20 +103,54 @@ jobs:
           python3 zk/native-composition/vendor-support/verify.py --smoke
 
       - name: Clippy for the standalone prototype
+        if: steps.changes.outputs.required == 'true'
         run: cargo clippy --locked --manifest-path zk/native-composition/Cargo.toml --all-features --all-targets -- -D warnings
 
       - name: Real public RDF proofs and malicious weaker-proof controls
+        if: steps.changes.outputs.required == 'true'
         run: cargo test --release --locked --manifest-path zk/native-composition/Cargo.toml --features native-rdf --lib
 
       - name: Native binding adapter and genuine proof controls
+        if: steps.changes.outputs.required == 'true'
         run: |
           cargo test --release --locked --manifest-path zk/native-composition/Cargo.toml --features native-binding --lib rdf::binding_tests::
           cargo test --release --locked --manifest-path zk/native-composition/Cargo.toml --features native-binding --bin native-bindings
 
+      - name: Check native finite-campaign guards
+        if: steps.changes.outputs.required == 'true'
+        run: python3 -m unittest discover -s bench/zk-bindings -p test_native_ci.py
+
+      - name: Replay every native finite binding and verifier negative
+        if: steps.changes.outputs.required == 'true'
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/native-bindings-build"
+          # The Cargo event stream and executable hash retain build attribution.
+          # No ignored-test, smaller-domain or tool-presence fallback is allowed.
+          cargo build --release --locked --manifest-path zk/native-composition/Cargo.toml --features native-binding --bin native-bindings --message-format=json > "$RUNNER_TEMP/native-bindings-build/cargo.jsonl"
+          python3 bench/zk-bindings/native_ci.py \
+            --binary "$GITHUB_WORKSPACE/zk/native-composition/target/release/native-bindings" \
+            --circom "$GITHUB_WORKSPACE/.ci-tools/circom/target/release/circom" \
+            --output "$RUNNER_TEMP/native-bindings-ci"
+
+      - name: Preserve native finite-campaign evidence including failures
+        if: always() && steps.changes.outputs.required == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: native-bindings-finite-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/native-bindings-ci
+            ${{ runner.temp }}/native-bindings-build
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Run the public RDF experiment
+        if: steps.changes.outputs.required == 'true'
         run: cargo run --release --locked --manifest-path zk/native-composition/Cargo.toml --features native-rdf --bin native-rdf > native-rdf-experiment.json
 
       - name: Preserve public RDF experiment report
+        if: steps.changes.outputs.required == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: native-rdf-experiment
@@ -114,9 +158,11 @@ jobs:
           if-no-files-found: error
 
       - name: Build the prototype CLI
+        if: steps.changes.outputs.required == 'true'
         run: cargo build --release --locked --manifest-path zk/native-composition/Cargo.toml
 
       - name: Reject unsupported Noir linkage
+        if: steps.changes.outputs.required == 'true'
         run: |
           set -euo pipefail
           native_binary="$GITHUB_WORKSPACE/zk/native-composition/target/release/sparq-native-composition-spike"

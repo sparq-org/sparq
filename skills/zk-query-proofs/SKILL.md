@@ -37,6 +37,9 @@ which reports native preparation, admission refusals and actual proof verificati
 as distinct outcomes. Its `rdf::binding_tests` helper constructs genuine weaker
 statements for synthetic fixture controls; these must fail the required verifier.
 The mandatory malicious-proof library suite remains separate.
+The native CI lane also requires the complete shared finite binding replay;
+see the [native CI profile](../../bench/zk-bindings/README.md#native-finite-ci-replay)
+for its fixed domain, actual-verifier negative requirements and evidence limits.
 
 [GPT-6] The native [dependency policy record](../../research/native-dependency-policy/README.md)
 separates inherited trust records, exact-version licenses and candidate-owned
