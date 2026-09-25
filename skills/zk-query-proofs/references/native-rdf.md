@@ -139,6 +139,11 @@ script still requires Circom even for this RDF feature, and the pinned
 The RDF proof itself uses no residual circuit. No dependency fork hides that
 build cost or changes the original tuple executable's supported behavior.
 
+The native-only [Ark tracing patch](../../../zk/native-composition/vendor-support/README.md)
+has independent provenance and compatibility checks. Its callback rename does
+not change constraint arithmetic; the historical unpatched evidence above
+retains its original source identity and dependency failures.
+
 Primary references: [SPARQL BGP matching](https://www.w3.org/TR/sparql11-query/#BasicGraphPatternMatching),
 [RDF dataset canonicalization](https://www.w3.org/TR/rdf-canon/), and
 [Dock composite proof statements](https://github.com/docknetwork/crypto/tree/main/proof_system).

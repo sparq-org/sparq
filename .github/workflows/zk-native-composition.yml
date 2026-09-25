@@ -84,6 +84,11 @@ jobs:
         # No ignored-test shortcut or tool-presence skip: build.rs requires Circom.
         run: cargo test --release --locked --manifest-path zk/native-composition/Cargo.toml
 
+      - name: Verify native dependency patch provenance and API compatibility
+        run: |
+          python3 zk/native-composition/vendor-support/test_verify.py
+          python3 zk/native-composition/vendor-support/verify.py --smoke
+
       - name: Clippy for the standalone prototype
         run: cargo clippy --locked --manifest-path zk/native-composition/Cargo.toml --all-features --all-targets -- -D warnings
 
