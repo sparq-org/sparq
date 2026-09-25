@@ -130,8 +130,7 @@ pub fn prepare_with_dataset(
     sparql: &str,
     over: &DatasetOverride,
 ) -> Result<Prepared, PrepareError> {
-    let (mut parsed, version) = SparqlParser::new()
-        .parse_query_with_versions(sparql)
+    let (mut parsed, version) = sparq_engine::parse_versioned_query(SparqlParser::new(), sparql)
         .map_err(|e| PrepareError::Malformed(e.to_string()))?;
     let form = match parsed {
         Query::Select { .. } => QueryForm::Select,

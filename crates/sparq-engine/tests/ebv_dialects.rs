@@ -30,7 +30,8 @@ fn update_refuses_unimplemented_dialects_before_mutation() {
         #[cfg(feature = "params")]
         assert!(sparq_engine::PreparedUpdate::parse(&text).is_err());
         // Parser syntax compatibility remains separate from execution support.
-        let (_, labels) = spargebra::SparqlParser::new().parse_update_with_versions(&text).unwrap();
+        let (_, labels) =
+            sparq_engine::parse_versioned_update(spargebra::SparqlParser::new(), &text).unwrap();
         assert_eq!(labels, [label]);
     }
     let updated = sparq_engine::update(&graph, &format!("VERSION '1.1' {insert}")).unwrap();

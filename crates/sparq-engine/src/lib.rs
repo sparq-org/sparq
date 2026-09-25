@@ -110,6 +110,10 @@ pub use sparq_engine_service::service::{with_service_remote_request_cap, SERVICE
 #[cfg(feature = "serialize-rdf")]
 pub use sparq_engine_serialize::serialize;
 mod update;
+// [OPUS-5.5] Stable-parser VERSION metadata: the published crate resolves upstream
+// spargebra 0.4.6, which has no label-retaining parse methods.
+mod versioned_parse;
+pub use versioned_parse::{parse_versioned_query, parse_versioned_update, VersionedParseError};
 // zk-trace seam (NON-DEFAULT `zk` feature; consumed only by `sparq-zk`).
 // When off, zero zk code is compiled — default builds and wasm are untouched.
 #[cfg(feature = "zk")]
@@ -884,7 +888,7 @@ impl PreparedQuery {
     /// algebra verbatim (the opt-out / test-baseline path). When the feature is
     /// OFF the algebra is stored verbatim and the build is byte-identical.
     pub fn parse(sparql: &str) -> Result<PreparedQuery, String> {
-        let (query, version) = SparqlParser::new().parse_query_with_versions(sparql).map_err(|e| e.to_string())?;
+        let (query, version) = parse_versioned_query(SparqlParser::new(), sparql).map_err(|e| e.to_string())?;
         #[cfg(feature = "algebra-rewrite")]
         let query = rewrite::rewrite_query(query);
         Self::from_query_with_versions(query, version)

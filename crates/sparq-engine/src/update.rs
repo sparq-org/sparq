@@ -512,8 +512,8 @@ pub fn update(graph: &Graph, sparql: &str) -> Result<Graph, String> {
 /// # Errors
 /// Returns a parse error or rejects any announcement other than `1.1`.
 pub fn parse_update_rec2013(sparql: &str) -> Result<Update, String> {
-    let (update, versions) = SparqlParser::new()
-        .parse_update_with_versions(sparql).map_err(|e| e.to_string())?;
+    let (update, versions) = crate::parse_versioned_update(SparqlParser::new(), sparql)
+        .map_err(|e| e.to_string())?;
     if versions.iter().any(|version| version != "1.1") {
         return Err("UPDATE supports only REC 2013 EBV semantics (VERSION 1.1)".into());
     }

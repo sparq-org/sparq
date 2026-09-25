@@ -189,7 +189,7 @@ fn write_json_opt_f64(s: &mut String, v: Option<f64>) {
 /// Supports SELECT / ASK / CONSTRUCT / DESCRIBE (every query form, like the text
 /// `explain`). Returns `Err` for a malformed query.
 pub fn explain_plan(graph: &Graph, sparql: &str) -> Result<PlanNode, String> {
-    let (query, version) = SparqlParser::new().parse_query_with_versions(sparql).map_err(|e| e.to_string())?;
+    let (query, version) = crate::parse_versioned_query(SparqlParser::new(), sparql).map_err(|e| e.to_string())?;
     let prepared = crate::PreparedQuery::from_query_with_versions(query, version)?;
     let q = prepared.query();
     let active = crate::active_dataset(graph, q);
@@ -210,7 +210,7 @@ pub fn explain_plan_analyze(graph: &Graph, sparql: &str) -> Result<PlanNode, Str
 
 /// [`explain_plan_analyze`] under a cooperative [`QueryBudget`] (deadline / max rows).
 pub fn explain_plan_analyze_with_budget(graph: &Graph, sparql: &str, budget: &QueryBudget) -> Result<PlanNode, String> {
-    let (query, version) = SparqlParser::new().parse_query_with_versions(sparql).map_err(|e| e.to_string())?;
+    let (query, version) = crate::parse_versioned_query(SparqlParser::new(), sparql).map_err(|e| e.to_string())?;
     let prepared = crate::PreparedQuery::from_query_with_versions(query, version)?;
     let q = prepared.query();
     let active = crate::active_dataset(graph, q);

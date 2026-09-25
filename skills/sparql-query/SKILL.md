@@ -23,6 +23,8 @@ solution-domain correction and the remaining native practical fallbacks.
 [GPT-6] Query options can pin [EBV rules](ebv-dialects.md) to REC 2013 or the
 12 September 2026 SPARQL 1.2 draft. VERSION announcements are retained and
 explicit contradictions reject evaluation; this is not full 1.2 conformance.
+[OPUS-5.5] With your own `SparqlParser`, keep them via
+`parse_versioned_query`/`parse_versioned_update` (stable upstream parser API).
 
 ## Quickstart
 

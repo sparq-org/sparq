@@ -42,7 +42,7 @@ use std::cell::Cell;
 
 // [GPT-6] Preserve announcements without enabling an extra optimizer pass.
 fn parse_prepared(text: &str) -> Option<PreparedQuery> {
-    let (query, versions) = SparqlParser::new().parse_query_with_versions(text).ok()?;
+    let (query, versions) = sparq_engine::parse_versioned_query(SparqlParser::new(), text).ok()?;
     PreparedQuery::from_query_with_versions(query, versions).ok()
 }
 
