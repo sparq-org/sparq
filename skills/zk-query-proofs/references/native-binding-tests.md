@@ -77,3 +77,11 @@ cargo clippy --locked --manifest-path zk/native-composition/Cargo.toml --all-fea
 The dedicated native workflow runs both library adversarial tests and genuine
 adapter controls. These bounded checks are regression evidence, not an external
 cryptographic audit or complete SPARQL proof coverage.
+
+The [retained finite campaign record](../../../zk/native-composition/evidence/native-bindings-89a38eb.json)
+binds the frozen adapter, harness, executable, corpus and actual artifact counts.
+It records successful required proofs, same-context weaker-proof rejections and
+empty-graph admissions separately, with the other query families explicitly
+excluded. This is local finite-domain evidence. The native workflow runs the
+listed library/adapter controls; it does not currently run the complete finite
+campaign or establish continuous coverage of every proof backend.

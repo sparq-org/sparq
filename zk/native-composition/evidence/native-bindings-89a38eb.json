@@ -1,0 +1,711 @@
+{
+  "schema": "sparq.native-binding-evidence.v1",
+  "author_model": "GPT-6",
+  "source_commit": "89a38eb28eb2a28b924b4ec9a587d58f41c323d6",
+  "source_base": "e12c94ca7b7d8e71cb05b6ccacc0a235a2cb6d64",
+  "source_hashes": {
+    ".github/workflows/zk-native-composition.yml": "cf2a3abc9f8a1b3104bae887563fe44dd75fe200aebbedb7bd62c2f99f9cbaec",
+    "skills/zk-query-proofs/SKILL.md": "2dcf526ffcf18f9367b3df6fd51b67f51cf576e5f5ad9513607fe09d5c13ee20",
+    "skills/zk-query-proofs/references/native-binding-tests.md": "3246d72e1a5bde6bffd1f6cb5bb6796936bac9506d0df25c34258ecf39a6aff3",
+    "skills/zk-query-proofs/references/native-rdf.md": "7d093bfb48eaaaaca55750d2a0d3d033b84d1962a4f8740da2d08db1787fb9a6",
+    "zk/native-composition/Cargo.lock": "67d4fc7ad7f2a52d75aec3e963f372f93dc901a646922954376322fb529d3f02",
+    "zk/native-composition/Cargo.toml": "808391a79fbac5556e56ad016700eb1cb6428b5709c1861d221d6800191c09f3",
+    "zk/native-composition/README.md": "355f5d034e98a30248f9115c944ef2252408da38f6cce386b454a21e8c990f99",
+    "zk/native-composition/src/bin/native-bindings.rs": "616c7c5efeb233ba04c3d028f30e86cb8a02c2f0ac160811c35fcc04127cb43e",
+    "zk/native-composition/src/bin/native-bindings/tests.rs": "2f20c56acd820b97ebfe3982c05ce2d9b45958499206e25a6e245fd275c67d9c",
+    "zk/native-composition/src/rdf.rs": "24106cebec23da4ace2956562b966a5e27f19903e78cd9ec106944a81bc1eeb0",
+    "zk/native-composition/src/rdf/binding_tests.rs": "e87f0dea1c1f7bcd5fa6b71e7eeadecaecd165fd158b2ebac895bc7cfb12bd1b"
+  },
+  "harness": {
+    "source": "ff58dbedd2761fc7a8c9f59dcbfd668cc59f8a7a",
+    "files": {
+      "bench/zk-bindings/README.md": "8690ca9765a0ee845d2e9ad9883dbd1367879e2c449a15494e08e79765a7dee2",
+      "bench/zk-bindings/corpus.py": "2bb204e703c582b55f3be5a397ee404e70d05e6fd49496fc5ae322251cde9cc9",
+      "bench/zk-bindings/example-job.json": "ab0f7ddce7164708eee3f56fd034f19c6c10a2e818a785e4a9f72e9fb422236b",
+      "bench/zk-bindings/inventory.json": "422ca872656247ed12f1bdc7a577cd65e68bf0a9c07e455fe92317f6036448b9",
+      "bench/zk-bindings/minimize.py": "8c5835be179604434edb0eb9cf081b8fd0c4c2c6eb62b636b3a8913842587a1b",
+      "bench/zk-bindings/protocol.json": "cafd97a6eba389518590a5522737d21b5b2d078bf1e86d922451c0f88e30247b",
+      "bench/zk-bindings/run.py": "84924e0a38facdbb2e69b501b5397887d37f5fb758f59a55e566358999f13180",
+      "bench/zk-bindings/test_harness.py": "d7dcc6d1b475a03b948cd2b78d0da9b789a0be71971d7c4b947357fd792b9012"
+    }
+  },
+  "fixture_domain": {
+    "candidate_terms": [
+      "<urn:a>",
+      "<urn:b>",
+      "<urn:missing>"
+    ],
+    "graph_count": 16,
+    "nodes": [
+      "<urn:a>",
+      "<urn:b>"
+    ],
+    "query_templates": [
+      "scan",
+      "join",
+      "projection_bag",
+      "count",
+      "ask_absence",
+      "negation",
+      "top_k"
+    ]
+  },
+  "classified_exclusions": [
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/00/projection_bag",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/00/count",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/00/ask_absence",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/00/negation",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/00/top_k",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/01/projection_bag",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/01/count",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/01/ask_absence",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/01/negation",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/01/top_k",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/02/projection_bag",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/02/count",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/02/ask_absence",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/02/negation",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/02/top_k",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/03/projection_bag",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/03/count",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/03/ask_absence",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/03/negation",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/03/top_k",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/04/projection_bag",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/04/count",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/04/ask_absence",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/04/negation",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/04/top_k",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/05/projection_bag",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/05/count",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/05/ask_absence",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/05/negation",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/05/top_k",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/06/projection_bag",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/06/count",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/06/ask_absence",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/06/negation",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/06/top_k",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/07/projection_bag",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/07/count",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/07/ask_absence",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/07/negation",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/07/top_k",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/08/projection_bag",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/08/count",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/08/ask_absence",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/08/negation",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/08/top_k",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/09/projection_bag",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/09/count",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/09/ask_absence",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/09/negation",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/09/top_k",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/0a/projection_bag",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/0a/count",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/0a/ask_absence",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/0a/negation",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/0a/top_k",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/0b/projection_bag",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/0b/count",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/0b/ask_absence",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/0b/negation",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/0b/top_k",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/0c/projection_bag",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/0c/count",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/0c/ask_absence",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/0c/negation",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/0c/top_k",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/0d/projection_bag",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/0d/count",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/0d/ask_absence",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/0d/negation",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/0d/top_k",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/0e/projection_bag",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/0e/count",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/0e/ask_absence",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/0e/negation",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/0e/top_k",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/0f/projection_bag",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/0f/count",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/0f/ask_absence",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/0f/negation",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    },
+    {
+      "backend": "native_rdf",
+      "case_id": "tiny-v1/0f/top_k",
+      "reason": "This fixture requires bag/completeness/negation/aggregation/order semantics outside selected DISTINCT BGP support.",
+      "status": "excluded"
+    }
+  ],
+  "execution": {
+    "tier": "real",
+    "local_only": true,
+    "profile": "debug; debug symbols0; incremental0; jobs1",
+    "complete_declared_scan_join_domain": true,
+    "all_backend_profiles_complete": false,
+    "observed_report_totals": {
+      "classified_cases": 80,
+      "configured_jobs": 576,
+      "executed_jobs": 576,
+      "genuine_proofs": 540,
+      "input_cases": 112,
+      "negative_bindings_or_admissions": 504,
+      "negative_stages": {
+        "admission": 36,
+        "proof_verifier": 468
+      },
+      "operation_counts": {
+        "admission": 0,
+        "attack": 0,
+        "binding": 576,
+        "result": 0
+      },
+      "passed_jobs": 576,
+      "positive_bindings_or_results": 72,
+      "shard_jobs": 576,
+      "verified_proofs": 72
+    },
+    "required_proofs_accepted": 72,
+    "weaker_proofs_independently_verified": 468,
+    "weaker_proofs_rejected_by_required_verifier": 468,
+    "empty_graph_admission_only": 36,
+    "negative_family": "All query preimages omitted from genuine BBS statement while exact required claim context and nonce remain unchanged. Honest support refusal is additional control, not credited as crypto rejection.",
+    "campaign_exit_code": 0
+  },
+  "artifacts": {
+    "binary_sha256": "c3e593e4ec52291ca338f72b59756111bca4f4e38c1ddd19b574f858c5635f7a",
+    "report_sha256": "6beecffb5ed7b53e37ee716b11be0c51892f065e1f7637052b7c6184501f48a1",
+    "plan_sha256": "4963a1ff1aa9a68de9a396432f6163b313587ef20910eb6655d1badde90added",
+    "retained_verification": {
+      "checker_model": "GPT-6",
+      "scope": "Post-run retained byte/identity/count verification, not new crypto execution",
+      "report_sha256": "6beecffb5ed7b53e37ee716b11be0c51892f065e1f7637052b7c6184501f48a1",
+      "plan_sha256": "4963a1ff1aa9a68de9a396432f6163b313587ef20910eb6655d1badde90added",
+      "counts": {
+        "empty_admission_refusals": 36,
+        "required_proofs_verified": 72,
+        "genuine_weaker_proofs_rejected": 468
+      },
+      "unique_proof_blobs": 540,
+      "unique_claim_nonces": 540,
+      "proof_and_public_artifacts": 1080,
+      "retained_job_outcome_artifact_files": 2232,
+      "inventory_sha256": "ef1c1b52508a4dc9ec7a87391d04c53eb4da1775704c8912004c14c4f59bfc4e",
+      "checker_sha256": "2e7b872e7bcd6fe14434701041a92fee0a830cde921b631d7da3cd38fa6f7cb3"
+    },
+    "durable_directory": "study-artifacts/zk-resume-2026-09-25/proofs/native-bindings-ff58",
+    "portable_record_is_not_embedded_proof_blobs": true
+  },
+  "build": {
+    "command": [
+      "cargo",
+      "build",
+      "--offline",
+      "--locked",
+      "--manifest-path",
+      "zk/native-composition/Cargo.toml",
+      "--features",
+      "native-binding",
+      "--bin",
+      "native-bindings"
+    ],
+    "cwd": "/Users/jesght/Documents/ChatGPT/sparq/zk-native-binding-adapter",
+    "exit_code": 0,
+    "log": "/Users/jesght/Documents/ChatGPT/sparq/study-artifacts/zk-resume-2026-09-25/native/binding-adapter-89a38eb-build.txt",
+    "sha256": "27eb9ac794175d32155d6c4b37c067e8ae10d152abc930d4d96f0881bb4198d6"
+  },
+  "local_gates": {
+    "test_functions": {
+      "native_rdf_library_functions": 21,
+      "adapter_functions": 7,
+      "legacy_tuple_functions": 2,
+      "failed": 0,
+      "ignored": 0
+    },
+    "mutations": [
+      {
+        "command": [
+          "cargo",
+          "test",
+          "--offline",
+          "--locked",
+          "--manifest-path",
+          "zk/native-composition/Cargo.toml",
+          "--all-features",
+          "--lib",
+          "weaker_control_requires_actual_verification_under_expected_issuer"
+        ],
+        "cwd": "/Users/jesght/Documents/ChatGPT/sparq/zk-native-binding-adapter",
+        "exit_code": 101,
+        "log": "/Users/jesght/Documents/ChatGPT/sparq/study-artifacts/zk-resume-2026-09-25/native/binding-mutant-required-verifier.txt",
+        "sha256": "caed2fd0510087e8f0d20238f5a960da2f258476824a26432df10dfb055953bc",
+        "source": "zk/native-composition/src/rdf.rs",
+        "original_sha256": "24106cebec23da4ace2956562b966a5e27f19903e78cd9ec106944a81bc1eeb0",
+        "mutant_sha256": "7587eaf9c770ca3c83054a2d570ad6e24d80497fadde784efdb88f19b1641e64",
+        "expected_assertion_failure": true
+      },
+      {
+        "command": [
+          "cargo",
+          "test",
+          "--offline",
+          "--locked",
+          "--manifest-path",
+          "zk/native-composition/Cargo.toml",
+          "--all-features",
+          "--lib",
+          "weaker_control_requires_actual_verification_under_expected_issuer"
+        ],
+        "cwd": "/Users/jesght/Documents/ChatGPT/sparq/zk-native-binding-adapter",
+        "exit_code": 101,
+        "log": "/Users/jesght/Documents/ChatGPT/sparq/study-artifacts/zk-resume-2026-09-25/native/binding-mutant-weaker-verifier.txt",
+        "sha256": "1ee1470a1d10fdaa37f24717f188b95e6d9884d77c40cbdc01892cbd1c854d96",
+        "source": "zk/native-composition/src/rdf/binding_tests.rs",
+        "original_sha256": "e87f0dea1c1f7bcd5fa6b71e7eeadecaecd165fd158b2ebac895bc7cfb12bd1b",
+        "mutant_sha256": "4da7a3c1ca1e83fa20dd85fe45c6e9a127114ac449ecb2414dba8b1efb715baf",
+        "expected_assertion_failure": true
+      },
+      {
+        "command": [
+          "cargo",
+          "test",
+          "--offline",
+          "--locked",
+          "--manifest-path",
+          "zk/native-composition/Cargo.toml",
+          "--all-features",
+          "--bin",
+          "native-bindings",
+          "full_input_bytes_bind_nonce_and_hashes"
+        ],
+        "cwd": "/Users/jesght/Documents/ChatGPT/sparq/zk-native-binding-adapter",
+        "exit_code": 101,
+        "log": "/Users/jesght/Documents/ChatGPT/sparq/study-artifacts/zk-resume-2026-09-25/native/binding-mutant-nonce-binding.txt",
+        "sha256": "f627d470edc4ceb7d3cb7102b0cf49524a1d64d6a5b8f7413120da9f7c350018",
+        "source": "zk/native-composition/src/bin/native-bindings.rs",
+        "original_sha256": "616c7c5efeb233ba04c3d028f30e86cb8a02c2f0ac160811c35fcc04127cb43e",
+        "mutant_sha256": "6b08e75ab4e98ccaa9e16e6fe44c2a2dfd8cd2d73ba6e737dac63b51e12d82c3",
+        "expected_assertion_failure": true
+      }
+    ],
+    "evidence_file_hashes": {
+      "/Users/jesght/Documents/ChatGPT/sparq/study-artifacts/zk-resume-2026-09-25/native/binding-adapter-restored-all.json": "1f6e21fa8f7dc2a57d1c12427bf91145136baa2225a3d3edcd98bf4db5f98c5e",
+      "/Users/jesght/Documents/ChatGPT/sparq/study-artifacts/zk-resume-2026-09-25/native/binding-adapter-final-clippy.json": "ba38c8891fa2415b9a6677b8a454a07773410c377482e2051000265c3e3e4d0c",
+      "/Users/jesght/Documents/ChatGPT/sparq/study-artifacts/zk-resume-2026-09-25/native/binding-mutation-controls.json": "f4b3a0c1c5fa63304f6aca3b25939aea74f5769af87071da0ead27b6079d6ca3",
+      "/Users/jesght/Documents/ChatGPT/sparq/study-artifacts/zk-resume-2026-09-25/native/binding-adapter-default-off-graph.json": "ab081d2b55575deef3a08f3cb2257f6ef354016a354f6d2422504de2f5950cc4",
+      "/Users/jesght/Documents/ChatGPT/sparq/study-artifacts/zk-resume-2026-09-25/native/binding-adapter-active-graph.json": "a6ff9a0ed748f4837a4090a7f810a131f9dff43954d4ff89e4cee2eafd066f4d",
+      "/Users/jesght/Documents/ChatGPT/sparq/study-artifacts/zk-resume-2026-09-25/native/binding-final-preflight.txt": "ec7499eb7d18b61e2e363377efc3ad5196ff67c358407bba047b5bfcc66be080",
+      "/Users/jesght/Documents/ChatGPT/sparq/study-artifacts/zk-resume-2026-09-25/native/binding-final-markdown.txt": "2e25bd1c4d18157f058c03ad2829e14e99a5b5961b61b8277fc2995a7704045c"
+    }
+  },
+  "workflow_scope": "The native workflow executes library/adapter/legacy controls, not this full576 campaign. Mandatory finite replay belongs to joint harness integration; local completeness here does not assert hosted continuous coverage.",
+  "dependency_policy": "Inherited unresolved native policy remains blocked; adding a direct optional edge to existing sha2 does not supply audits, licenses or maintenance exceptions.",
+  "review": {
+    "model": "GPT-6",
+    "scope": "independent source review at89a; no independent proof execution",
+    "verdict": "APPROVE",
+    "artifact_sha256": "5a6288fca43cfded9324cc2336868c464a71be9dd075e5c970660a915423f2f8"
+  },
+  "external_crypto_audit": false,
+  "publication_ready": false,
+  "observed_tools": {
+    "rustc": "rustc 1.89.0 (29483883e 2025-08-04)",
+    "cargo": "cargo 1.89.0 (c24e10642 2025-06-23)",
+    "circom": "circom compiler 2.2.2"
+  }
+}
