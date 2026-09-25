@@ -56,10 +56,15 @@ def campaign(output, target):
     native, support = verify.NATIVE, verify.SUPPORT
     env = os.environ | {"CARGO_TARGET_DIR":str(target), "CARGO_BUILD_JOBS":"1", "CARGO_INCREMENTAL":"0"}
     (output / "inputs.json").write_text(json.dumps({
+        "observed_checkout":subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=native, text=True).strip(),
+        "independent_or_signed_build_attestation":False,
         "native_lock_sha256":verify.sha((native / "Cargo.lock").read_bytes()),
         "provenance_sha256":verify.sha((support / "UPSTREAM.json").read_bytes()),
         "layout_control_sha256":verify.sha((support / "layout.rs").read_bytes()),
-        "target":str(target), "scope":"remote diagnostics/layout controls; zero proofs; no performance claim",
+        "control_source_hashes":{name:verify.sha((support / name).read_bytes()) for name in
+                                  ("remote_checks.py", "fetch_baseline.py", "verify.py", "layout.rs")},
+        "target":str(target), "profile":"Cargo default dev/test; no release override",
+        "scope":"remote diagnostics/layout controls; zero proofs; no performance claim",
     }, indent=2) + "\n")
     run(["cargo", "metadata", "--offline", "--locked", "--all-features", "--format-version", "1"], native, output, "native-metadata", env)
     verify.check_metadata(json.loads((output / "native-metadata.stdout").read_text()))
