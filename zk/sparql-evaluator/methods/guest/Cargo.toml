@@ -9,7 +9,7 @@ license = "MIT"
 
 [dependencies]
 risc0-zkvm = { version = "=3.0.6", default-features = false, features = ["std"] }
-sparq-proved-evaluator-model = { path = "../../model", features = ["evaluate"] }
+sparq-proved-evaluator-model = { path = "../../model", features = ["graph-results"] }
 
 [patch.crates-io]
 risc0-zkvm = { path = "../../../../vendor/zk-sdk/risc0-zkvm-3.0.6" }

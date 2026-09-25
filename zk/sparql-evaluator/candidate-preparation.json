@@ -114,5 +114,10 @@
     "dependency_review_provenance": "../../research/zk-dependency-backlog/README.md",
     "note": "Hosted evidence binds its actual PR head, merge checkout and artifact. It does not retroactively assign current-source validity to this historical source hash map. Publication readiness remains false pending reviews and fresh integrated gates.",
     "completed_local_dual_version_execution": "proof-evidence-v2.json"
+  },
+  "completed_v3_local_execution": {
+    "source_commit": "d7ce154401e9cb54a3d1714045a8451984ade114",
+    "record": "proof-evidence-v3.json",
+    "scope": "Complete local V3 artifact campaign, including V1/V2 wire compatibility; separate from historical V1 hosted a2 and V2 local048 programs."
   }
 }

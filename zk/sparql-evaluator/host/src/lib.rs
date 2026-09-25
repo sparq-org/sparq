@@ -19,6 +19,9 @@ use std::{fmt, path::Path};
 /// Versioned complete default/named dataset proving and verification.
 pub mod v2;
 
+/// Versioned blank-node identity and canonical graph-result proving and verification.
+pub mod v3;
+
 /// Public presentation contains only the cryptographic receipt and its journal.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

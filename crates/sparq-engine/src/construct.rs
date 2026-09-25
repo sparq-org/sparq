@@ -60,7 +60,7 @@ pub fn construct_prepared_with_budget(
         Query::Construct { template, pattern, .. } => {
             crate::exec::budget::with_query_budget(budget, semantics, || {
                 let solutions = crate::exec::eval_select(graph, pattern)?;
-                Ok(instantiate(template, &solutions))
+                instantiate(template, &solutions, graph)
             })
         }
         _ => Err("construct() requires a CONSTRUCT query".into()),
@@ -130,7 +130,7 @@ pub fn construct_or_describe_with_budget(
         match q {
             Query::Construct { template, pattern, .. } => {
                 let solutions = crate::exec::eval_select(graph, pattern)?;
-                Ok(instantiate(template, &solutions))
+                instantiate(template, &solutions, graph)
             }
             Query::Describe { pattern, .. } => {
                 let solutions = crate::exec::eval_select(graph, pattern)?;
@@ -172,29 +172,45 @@ pub fn triples_to_ntriples(triples: &[Triple]) -> String {
 /// Instantiates `template` once per solution row, skipping triples with unbound
 /// or illegal slots, freshening template blank nodes per solution, and
 /// deduplicating the output (set semantics, first-production order).
-fn instantiate(template: &[TriplePattern], solutions: &QueryResult) -> Vec<Triple> {
+fn instantiate(template: &[TriplePattern], solutions: &QueryResult, graph: &Graph) -> Result<Vec<Triple>, String> {
+    #[cfg(feature = "deterministic-blank-nodes")]
+    let namespace = template_namespace(graph);
+    #[cfg(not(feature = "deterministic-blank-nodes"))]
+    let _ = graph;
     let cols: FxHashMap<&Variable, usize> =
         solutions.vars.iter().enumerate().map(|(i, v)| (v, i)).collect();
     let mut out: Vec<Triple> = Vec::new();
     let mut seen: FxHashSet<Triple> = FxHashSet::default();
-    for row in &solutions.rows {
+    #[cfg(feature = "deterministic-blank-nodes")]
+    let rows = solutions.rows.iter().enumerate();
+    #[cfg(not(feature = "deterministic-blank-nodes"))]
+    let rows = solutions.rows.iter().map(|row| ((), row));
+    for (_row_index, row) in rows {
         let get = |v: &Variable| -> Option<Term> { cols.get(v).and_then(|&i| row[i].clone()) };
         // Blank nodes in the template are scoped to one solution: the same label
         // maps to one fresh node within a row, different nodes across rows.
-        // `BlankNode::default()` is a random 128-bit id, so fresh nodes can never
-        // collide with data blank nodes flowing in from the WHERE solutions.
-        let mut row_bnodes: FxHashMap<&str, BlankNode> = FxHashMap::default();
+        // [GPT-6] The optional deterministic namespace is chosen against all
+        // blank nodes in the active dataset, not only projected WHERE bindings.
+        #[cfg(not(feature = "deterministic-blank-nodes"))]
+        let mut row_bnodes: TemplateNodes<'_> = FxHashMap::default();
+        #[cfg(feature = "deterministic-blank-nodes")]
+        let mut row_bnodes = TemplateNodes {
+            nodes: FxHashMap::default(),
+            prefix: format!("{namespace}{_row_index}_"),
+        };
         for tp in template {
             let Some(s) = subject_term(&tp.subject, &get, &mut row_bnodes) else { continue };
             let Some(p) = predicate_term(&tp.predicate, &get) else { continue };
             let Some(o) = object_term(&tp.object, &get, &mut row_bnodes) else { continue };
             let t = Triple { subject: s, predicate: p, object: o };
             if seen.insert(t.clone()) {
+                #[cfg(feature = "deterministic-blank-nodes")]
+                crate::exec::budget::check(out.len().checked_add(1).ok_or("CONSTRUCT output capacity")?)?;
                 out.push(t);
             }
         }
     }
-    out
+    Ok(out)
 }
 
 /// Template subject: an IRI or blank node. A variable bound to a literal (or an
@@ -202,7 +218,7 @@ fn instantiate(template: &[TriplePattern], solutions: &QueryResult) -> Vec<Tripl
 fn subject_term<'a>(
     tp: &'a TermPattern,
     get: &dyn Fn(&Variable) -> Option<Term>,
-    row_bnodes: &mut FxHashMap<&'a str, BlankNode>,
+    row_bnodes: &mut TemplateNodes<'a>,
 ) -> Option<NamedOrBlankNode> {
     match tp {
         TermPattern::NamedNode(n) => Some(NamedOrBlankNode::NamedNode(n.clone())),
@@ -231,7 +247,7 @@ fn predicate_term(p: &NamedNodePattern, get: &dyn Fn(&Variable) -> Option<Term>)
 fn object_term<'a>(
     tp: &'a TermPattern,
     get: &dyn Fn(&Variable) -> Option<Term>,
-    row_bnodes: &mut FxHashMap<&'a str, BlankNode>,
+    row_bnodes: &mut TemplateNodes<'a>,
 ) -> Option<Term> {
     match tp {
         TermPattern::NamedNode(n) => Some(Term::NamedNode(n.clone())),
@@ -249,8 +265,64 @@ fn object_term<'a>(
     }
 }
 
-fn fresh<'a>(label: &'a str, row_bnodes: &mut FxHashMap<&'a str, BlankNode>) -> BlankNode {
+#[cfg(not(feature = "deterministic-blank-nodes"))]
+type TemplateNodes<'a> = FxHashMap<&'a str, BlankNode>;
+
+#[cfg(feature = "deterministic-blank-nodes")]
+struct TemplateNodes<'a> {
+    nodes: FxHashMap<&'a str, BlankNode>,
+    prefix: String,
+}
+
+#[cfg(not(feature = "deterministic-blank-nodes"))]
+fn fresh<'a>(label: &'a str, row_bnodes: &mut TemplateNodes<'a>) -> BlankNode {
     row_bnodes.entry(label).or_default().clone()
+}
+
+#[cfg(feature = "deterministic-blank-nodes")]
+fn fresh<'a>(label: &'a str, row_bnodes: &mut TemplateNodes<'a>) -> BlankNode {
+    let next = row_bnodes.nodes.len();
+    row_bnodes.nodes.entry(label).or_insert_with(|| {
+        BlankNode::new_unchecked(format!("{}{next}", row_bnodes.prefix))
+    }).clone()
+}
+
+#[cfg(feature = "deterministic-blank-nodes")]
+fn template_namespace(graph: &Graph) -> String {
+    let mut labels = FxHashSet::default();
+    for (name, _) in &graph.named {
+        if let Term::BlankNode(node) = name {
+            labels.insert(node.as_str().to_owned());
+        }
+    }
+    for graph in std::iter::once(graph).chain(graph.named.iter().map(|(_, graph)| graph)) {
+        let scan = graph.store.scan(&[None, None, None]);
+        for row in scan.rows.iter() {
+            let [subject, _, object] = scan.to_spo(row);
+            let mut terms = vec![graph.dict.term(subject), graph.dict.term(object)];
+            while let Some(term) = terms.pop() {
+                match term {
+                    Term::BlankNode(node) => { labels.insert(node.as_str().to_owned()); }
+                    Term::Triple(triple) => {
+                        if let NamedOrBlankNode::BlankNode(node) = triple.subject {
+                            labels.insert(node.as_str().to_owned());
+                        }
+                        terms.push(triple.object);
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    // These prefixes are disjoint. N source labels occupy at most N prefixes,
+    // so examining N+1 candidates finds an unused namespace without randomness.
+    for index in 0..=labels.len() {
+        let prefix = format!("tc{index}_");
+        if labels.iter().all(|label| !label.starts_with(&prefix)) {
+            return prefix;
+        }
+    }
+    unreachable!("N labels cannot occupy N+1 disjoint namespaces")
 }
 
 // ---------------------------------------------------------------------------

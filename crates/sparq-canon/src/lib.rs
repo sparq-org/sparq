@@ -81,6 +81,11 @@ use oxttl::NQuadsParser;
 use sparq_core::Graph;
 use std::collections::HashMap;
 
+mod bounded;
+pub use bounded::{
+    CanonicalizationLimits, canonicalize_quads_bounded_with, issue_quads_bounded_with,
+};
+
 // ---------------------------------------------------------------------------
 // Text-in / text-out API ([OPUS-4.8] sq-1dd5t). A self-contained N-Quads
 // document is the interchange form RDFC-1.0 is defined over, so a `&str` ->

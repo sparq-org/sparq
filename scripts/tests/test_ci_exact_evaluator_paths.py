@@ -27,6 +27,7 @@ class ExactEvaluatorSelection(unittest.TestCase):
     def test_every_execution_input_is_relevant(self):
         for path in ["zk/sparql-evaluator/fixtures/case.json", "crates/sparq-engine/src/exec.rs",
                      "crates/sparq-core/Cargo.toml", "crates/sparq-substrate/src/lib.rs",
+                     "crates/sparq-canon/src/lib.rs", "crates/sparq-canon/Cargo.toml",
                      "vendor/spargebra/src/parser.rs", ".cargo/config.toml", "Cargo.lock",
                      "Cargo.toml", "rust-toolchain.toml", ".github/workflows/zk-exact-evaluator.yml",
                      "scripts/ci_exact_evaluator_paths.py", "scripts/ci_exact_evaluator_evidence.py",

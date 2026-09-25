@@ -228,6 +228,22 @@ triple/predicate/bucket/byte counts for operational checks.
 
 ## Common recipes
 
+**Deterministic blank nodes** — opt in with the engine's
+`deterministic-blank-nodes` feature for environments without ambient entropy.
+Anonymous query, list and template labels use a reserved parser namespace.
+CONSTRUCT selects a namespace disjoint from every blank node in the active
+input dataset, including unselected named graphs, and creates distinct template
+nodes per solution occurrence. Repeated template labels within one occurrence
+still share a node; duplicate solutions keep their own fresh nodes. The option
+also applies the query row budget to constructed output triples, rejecting an
+excessive result without returning a partial graph. [GPT-6]
+
+The output labels are deterministic and local to a result. Independently created
+results must be standardized apart before combining their blank-node namespaces;
+these labels are not persistent identifiers across query executions. This option
+does not canonicalize the result or enable a new SPARQL proof relation by itself.
+Native controls: `crates/sparq-engine/tests/deterministic_blank_nodes.rs`.
+
 **Aggregates, GROUP BY / HAVING, subqueries** — standard SPARQL 1.1; no special API:
 
 ```rust
@@ -655,6 +671,15 @@ named graph from that catalog, including an empty graph. `FROM NAMED` restrictio
 continue to apply at every nesting level; graph-name bindings retain normal join
 compatibility and result multiplicity. The evaluator borrows this catalog in its
 per-query context rather than cloning graphs or using global dataset state.
+
+[GPT-6] Read-query `FROM` builds an RDF merge: blank nodes are renamed consistently
+within each source graph and kept distinct between source graphs and preserved
+`FROM NAMED` graphs. `GRAPH` alone preserves source dataset identity. Repeated
+`FROM` IRIs use one stored snapshot per distinct IRI; this acquisition policy is
+explicit because [SPARQL 1.1 §13.2.3](https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#specifyingDataset)
+does not prescribe blank-node identity for repeated dataset-clause references.
+The merge applies to SELECT/ASK and graph-producing queries; it does not define
+SPARQL Update `USING` identity behavior.
 
 ## Gotchas / feature flags / prerequisites
 

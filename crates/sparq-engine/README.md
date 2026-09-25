@@ -6,8 +6,7 @@
   <a href="../../LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
 </p>
 
-The [SPARQL 1.1](https://www.w3.org/TR/sparql11-query/) / [1.2](https://www.w3.org/TR/sparql12-query/)
-query engine over [`sparq-core`](../sparq-core) `Graph`s.
+The [SPARQL 1.1](https://www.w3.org/TR/sparql11-query/) / [1.2](https://www.w3.org/TR/sparql12-query/) engine over [`sparq-core`](../sparq-core) `Graph`s.
 
 Query in-memory or out-of-core graphs, inspect plans with `EXPLAIN` / `EXPLAIN ANALYZE`,
 and register custom functions. [Exact temporal comparison and optional year budgets](../../skills/zk-query-proofs/references/exact-temporals.md) preserve fractional precision.
@@ -45,7 +44,11 @@ let json = sparq_engine::query_json(&g, "SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?
   one-based interval. Date accessors validate calendars/offsets and normalize next-day midnight; `MIN`/`MAX` retain input terms. Raw numeric/boolean lexical
   forms are checked verbatim; XML whitespace normalization applies to string casts only. [Bounded coverage and numeric limits](../../skills/sparql-query/SKILL.md)
   remain explicit; these corrections do not establish complete builtin conformance.
-- **Named graphs** — query across an active dataset with `GRAPH` and `FROM` / `FROM NAMED`. [GPT-6] Nested `GRAPH` borrows the same catalog, preserving empty graphs, binding multiplicity and dataset restrictions.
+- **Named graphs** — query across an active dataset with `GRAPH` and `FROM` / `FROM NAMED`.
+  Read-query `FROM` standardizes source blank nodes apart; `GRAPH` preserves identity.
+  [GPT-6] Nested `GRAPH` preserves the catalog, empty graphs, bindings and `FROM NAMED` restrictions.
+- **Deterministic blank nodes** *(opt-in `deterministic-blank-nodes`)* — entropy-free
+  parser/template labels, fresh per solution and disjoint from active input; see the SKILL.
 - **RDF 1.2 triple terms** — match [triple terms](https://www.w3.org/TR/rdf12-concepts/), including variables inside them.
 - **Materialized full paths** *(opt-in `paths` feature, OFF by default)* — `enumerate_paths` returns intermediate nodes and edges for tied shortest paths, bounded simple paths, or cycles back to their start. Each endpoint is unrestricted, one fixed node, or a graph pattern selecting a candidate set.
 - **Query plan introspection** — `EXPLAIN` and `EXPLAIN ANALYZE`.

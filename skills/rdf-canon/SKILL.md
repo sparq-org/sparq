@@ -53,6 +53,28 @@ assert_eq!(map.get("x").map(String::as_str), Some("c14n0"));
 
 `canonicalize_quads` / `issue_quads` are aliases (the `rdf_canon`-style names).
 
+### Explicit work limits
+
+[GPT-6] `canonicalize_quads_bounded_with::<sha2::Sha256>(&quads, &limits)` and
+`issue_quads_bounded_with::<sha2::Sha256>(&quads, &limits)` retain standard RDFC-1.0
+output while adding `CanonicalizationLimits`. Set every field explicitly:
+`max_quads`, `max_input_bytes`, `max_output_bytes`, `max_hndq_calls` and
+`max_permutation_steps`. Input encoding and the conservative canonical-output
+size bound are checked before the library is called; input quads/bytes also
+bound encoding, first-degree hashing and sorting. No new default feature is needed.
+
+The underlying library's default HNDQ limit is 4000 calls. That counter counts
+recursive function entries, not permutation candidates skipped within an entry.
+The bounded APIs additionally compute `calls × d × d!`, where `d` is the largest
+number of related blank-node occurrences for any input blank node, including
+repetitions across quads or term positions. Each call has at most `d` groups
+and each group's permutation loop has at most `d!` iterations. Checked arithmetic
+and an excessive bound return `CanonError::Canonicalization` before that work.
+This deliberately rejects some easy inputs whose first-degree hashes would
+resolve quickly. No weaker comparison or alternate canonicalization is substituted.
+These are algorithmic/input bounds, not elapsed-time or process-memory guarantees.
+Tests: `crates/sparq-canon/tests/bounded_canonicalization.rs`.
+
 ### Text in, text out (`canonicalize_nquads`)
 
 When you already hold serialized RDF — e.g. across a language boundary — skip the
@@ -135,7 +157,8 @@ crate grew — keep a wildcard arm) and has five variants:
   of risking a stack overflow. Ungated, like `NestedBlankNode`.
 - `Canonicalization(String)` — `rdf-canon` rejected the dataset. This includes
   the **HNDQ call-limit guard**: RDFC-1.0 has pathological-input blow-ups, so a
-  poison graph trips the limit and fails closed rather than running unbounded.
+  recursive call exhaustion fails closed. The separate bounded APIs also guard
+  permutation work that occurs inside a call.
 - `Bridge(String)` — an internal serialize/parse error (should not occur for
   well-formed RDFC-1.0-model input; surfaced rather than swallowed).
 
