@@ -13,7 +13,7 @@ mod evaluate;
 #[cfg(feature = "graph-results")]
 mod result;
 #[cfg(feature = "graph-results")]
-pub use evaluate::{admit, evaluate};
+pub use evaluate::{admit, evaluate, evaluate_detailed};
 
 /// Wire version for the blank-node and graph-result relation.
 pub const VERSION: u32 = 3;

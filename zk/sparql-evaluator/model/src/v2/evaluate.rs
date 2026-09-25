@@ -1,6 +1,7 @@
 // [GPT-6] Complete source/catalog authentication and evaluation run in the guest.
 use super::*;
-use crate::evaluate::{DatasetProfile, admit_query, execute, term_string};
+use crate::EvaluationError;
+use crate::evaluate::{DatasetProfile, admit_query, execute_detailed, term_string};
 use oxrdf::{GraphName, NamedNode, NamedOrBlankNode, Term};
 use sparq_core::{Graph, dict::Dict};
 use std::collections::BTreeMap;
@@ -11,10 +12,11 @@ use std::collections::BTreeMap;
 /// Rejects unsupported forms, nondeterminism and excessive inputs.
 pub fn admit(request: &Request) -> Result<(), Rejected> {
     validate_request(request)?;
-    let query = spargebra::SparqlParser::new()
-        .parse_query(&request.query)
+    let prepared = sparq_engine::PreparedQuery::parse(&request.query)
         .map_err(|_| Rejected("SPARQL parse rejected"))?;
-    admit_query(&query, DatasetProfile::NamedCatalog)
+    prepared.resolve_ebv_semantics(Some(sparq_engine::EbvSemantics::Rec2013))
+        .map_err(|_| Rejected("query VERSION contradicts REC 2013 profile"))?;
+    admit_query(prepared.query(), DatasetProfile::NamedCatalog)
 }
 
 /// Executes the complete bounded dataset and produces its V2 public journal.
@@ -28,6 +30,17 @@ pub fn admit(request: &Request) -> Result<(), Rejected> {
 /// Rejects mismatched anchors, unsupported source/query terms, catalog omissions,
 /// malformed source and exhausted query or dataset capacities.
 pub fn evaluate(witness: &Witness) -> Result<Journal, Rejected> {
+    evaluate_detailed(witness).map_err(Rejected::from)
+}
+
+/// [GPT-6] Evaluates V2 while retaining actual typed execution causes.
+///
+/// Request, catalog, commitment and journal bytes are unchanged. The existing
+/// entry point retains its original rejection strings through a wrapper.
+///
+/// # Errors
+/// Returns a relation rejection, actual engine budget/capacity, or execution error.
+pub fn evaluate_detailed(witness: &Witness) -> Result<Journal, EvaluationError> {
     validate_request(&witness.request)?;
     let request = &witness.request;
     let commitment = dataset_commitment(&witness.dataset, &request.policy)?;
@@ -36,7 +49,7 @@ pub fn evaluate(witness: &Witness) -> Result<Journal, Rejected> {
             commitment: expected,
         } => {
             if commitment != expected {
-                return Err(Rejected("V2 complete dataset anchor mismatch"));
+                return Err(Rejected("V2 complete dataset anchor mismatch").into());
             }
             Provenance::VerifierAcceptedCommitment
         }
@@ -46,7 +59,7 @@ pub fn evaluate(witness: &Witness) -> Result<Journal, Rejected> {
         .map_err(|_| Rejected("SPARQL parse rejected"))?;
     admit_query(prepared.query(), DatasetProfile::NamedCatalog)?;
     let graph = build_dataset(&witness.dataset, &request.policy, false)?;
-    let result = execute(&graph, &prepared, request.policy.max_rows)?;
+    let result = execute_detailed(&graph, &prepared, request.policy.max_rows)?;
     Ok(Journal {
         version: VERSION,
         request_digest: request_digest(request)?,

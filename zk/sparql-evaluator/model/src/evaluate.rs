@@ -466,14 +466,6 @@ pub fn evaluate_detailed(witness: &Witness) -> Result<Journal, EvaluationError> 
     })
 }
 
-pub(crate) fn execute(
-    graph: &Graph,
-    prepared: &sparq_engine::PreparedQuery,
-    max_rows: u32,
-) -> Result<CanonicalResult, Rejected> {
-    execute_detailed(graph, prepared, max_rows).map_err(Rejected::from)
-}
-
 pub(crate) fn execute_detailed(
     graph: &Graph,
     prepared: &sparq_engine::PreparedQuery,

@@ -400,9 +400,11 @@ records library-only Clippy scope separately from kernel or guest execution.
 
 [GPT-6] The exact evaluator admits the [bounded nullable alternative/inverse profile](references/nullable-paths.md). Bag duplicates and concrete absent endpoints are retained; nullable sequences, nested nullable quantifiers and residual paths in EXISTS remain excluded. Actual guest evidence must bind the updated admission artifact.
 
-[GPT-6] The exact model's `evaluate_detailed` evaluates the same request and emits
+[GPT-6] The exact model's `evaluate_detailed`, `v2::evaluate_detailed` and
+`v3::evaluate_detailed` evaluate their same versioned requests and emit
 the same journal as `evaluate`, while returning `EvaluationError` with distinct
 `Budget`, `Capacity`, `Execution` and existing `Rejected` cases. Execution causes
 come from actual engine emitters; private engine diagnostics are discarded. The
-legacy `evaluate` API keeps its original generic execution rejection. This error
+legacy `evaluate` APIs keep their original execution rejections, including V3's
+separate query and graph diagnostics. This error
 API is outside request/journal encoding and adds no receipt evidence by itself.

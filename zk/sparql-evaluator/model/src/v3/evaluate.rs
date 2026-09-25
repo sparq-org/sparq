@@ -1,9 +1,10 @@
 // [GPT-6] Native/guest-shared V3 evaluation; execution evidence is separate.
 use super::*;
 use crate::evaluate::{DatasetProfile, admit_query, ordered, query_budget};
+use crate::EvaluationError;
 use sparq_engine::{
-    PreparedQuery, construct_prepared_with_budget, describe_prepared_with_budget,
-    query_prepared_with_budget,
+    PreparedQuery, QueryFailure, construct_prepared_with_budget_detailed,
+    describe_prepared_with_budget_detailed, query_prepared_with_budget_detailed,
 };
 
 /// Checks the complete V3 query, including templates and nested expressions.
@@ -15,6 +16,8 @@ pub fn admit(request: &Request) -> Result<(), Rejected> {
     validate_request(request)?;
     let prepared =
         PreparedQuery::parse(&request.query).map_err(|_| Rejected("SPARQL parse rejected"))?;
+    prepared.resolve_ebv_semantics(Some(sparq_engine::EbvSemantics::Rec2013))
+        .map_err(|_| Rejected("query VERSION contradicts REC 2013 profile"))?;
     admit_query(prepared.query(), DatasetProfile::GraphResultsBlankFree)
 }
 
@@ -24,6 +27,27 @@ pub fn admit(request: &Request) -> Result<(), Rejected> {
 /// Rejects wrong dataset anchors, unsupported input, evaluation errors and any
 /// source, query, result-encoding or canonicalization capacity exhaustion.
 pub fn evaluate(witness: &Witness) -> Result<Journal, Rejected> {
+    evaluate_inner(witness, |_, legacy_message| Rejected(legacy_message))
+}
+
+/// [GPT-6] Evaluates V3 graph/table results with actual typed engine causes.
+///
+/// Journal framing, blank-node canonicalization and DESCRIBE policy are unchanged.
+/// Ordinary relation/canonicalization rejections retain their existing category;
+/// an unclassified library failure is never inferred to be capacity from text.
+///
+/// # Errors
+/// Returns a relation rejection, actual engine budget/capacity, or execution error.
+pub fn evaluate_detailed(witness: &Witness) -> Result<Journal, EvaluationError> {
+    evaluate_inner(witness, |error, _| error.into())
+}
+
+// Both public paths share the same relation. This callback selects only error
+// representation and preserves the legacy query-versus-graph diagnostic strings.
+fn evaluate_inner<E: From<Rejected>>(
+    witness: &Witness,
+    failure: impl Fn(QueryFailure, &'static str) -> E,
+) -> Result<Journal, E> {
     let request = &witness.request;
     validate_request(request)?;
     let commitment = dataset_commitment(&witness.dataset, &request.policy)?;
@@ -32,7 +56,7 @@ pub fn evaluate(witness: &Witness) -> Result<Journal, Rejected> {
             commitment: expected,
         } => {
             if commitment != expected {
-                return Err(Rejected("V3 complete dataset anchor mismatch"));
+                return Err(Rejected("V3 complete dataset anchor mismatch").into());
             }
             Provenance::VerifierAcceptedCommitment
         }
@@ -63,10 +87,10 @@ pub fn evaluate(witness: &Witness) -> Result<Journal, Rejected> {
     let canonical = &request.policy.canonicalization;
     let result = match prepared.query() {
         spargebra::Query::Select { pattern, .. } => {
-            let table = query_prepared_with_budget(&graph, &prepared, &budget)
-                .map_err(|_| Rejected("V3 query evaluation or resource budget rejected"))?;
+            let table = query_prepared_with_budget_detailed(&graph, &prepared, &budget)
+                .map_err(|error| failure(error, "V3 query evaluation or resource budget rejected"))?;
             if table.rows.len() > max_rows as usize {
-                return Err(Rejected("V3 result row capacity"));
+                return Err(Rejected("V3 result row capacity").into());
             }
             result::select(
                 table,
@@ -79,13 +103,13 @@ pub fn evaluate(witness: &Witness) -> Result<Journal, Rejected> {
             )?
         }
         spargebra::Query::Ask { .. } => {
-            let table = query_prepared_with_budget(&graph, &prepared, &budget)
-                .map_err(|_| Rejected("V3 query evaluation or resource budget rejected"))?;
+            let table = query_prepared_with_budget_detailed(&graph, &prepared, &budget)
+                .map_err(|error| failure(error, "V3 query evaluation or resource budget rejected"))?;
             CanonicalResult::Ask(!table.rows.is_empty())
         }
         spargebra::Query::Construct { .. } => {
-            let triples = construct_prepared_with_budget(&graph, &prepared, &budget)
-                .map_err(|_| Rejected("V3 graph evaluation or resource budget rejected"))?;
+            let triples = construct_prepared_with_budget_detailed(&graph, &prepared, &budget)
+                .map_err(|error| failure(error, "V3 graph evaluation or resource budget rejected"))?;
             result::graph(triples, canonical)?
         }
         spargebra::Query::Describe { .. } => {
@@ -93,10 +117,10 @@ pub fn evaluate(witness: &Witness) -> Result<Journal, Rejected> {
             // traverses outgoing blank objects in the selected active default graph.
             let triples = match &request.policy.describe {
                 DescribePolicy::OutgoingBlankNodeClosure => {
-                    describe_prepared_with_budget(&graph, &prepared, &budget)
+                    describe_prepared_with_budget_detailed(&graph, &prepared, &budget)
                 }
             }
-            .map_err(|_| Rejected("V3 graph evaluation or resource budget rejected"))?;
+            .map_err(|error| failure(error, "V3 graph evaluation or resource budget rejected"))?;
             result::graph(triples, canonical)?
         }
     };

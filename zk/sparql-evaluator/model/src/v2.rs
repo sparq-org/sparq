@@ -16,7 +16,7 @@ use std::fmt;
 #[cfg(feature = "evaluate")]
 pub(crate) mod evaluate;
 #[cfg(feature = "evaluate")]
-pub use evaluate::{admit, evaluate};
+pub use evaluate::{admit, evaluate, evaluate_detailed};
 
 /// Wire version for the complete default/named graph relation.
 pub const VERSION: u32 = 2;
