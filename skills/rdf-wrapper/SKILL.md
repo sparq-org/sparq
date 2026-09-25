@@ -245,10 +245,11 @@ assert!(store.unsubscribe(subscription));
 `decode_i128` round-trip the full Rust `i128` range as exact `xsd:integer`
 literals. The decoder accepts only that exact datatype and returns
 `CodecError::InvalidInteger` for malformed or out-of-range lexical forms.
-Because `xsd:integer` fixes XML Schema's `whiteSpace` facet to `collapse`,
-boundary whitespace is normalized away before the lexical-to-value mapping, so
-`" 7"^^xsd:integer` decodes as `7` — matching how the query engine values a
-padded numeric lexical — while interior whitespace such as `"+ 1"` is rejected.
+The proposed wrapper codec currently normalizes boundary XML whitespace:
+`" 7"^^xsd:integer` decodes as `7`, while interior whitespace such as `"+ 1"`
+is rejected. [GPT-6] This is the codec's existing behavior, distinct from the
+query engine's strict raw RDF lexical validation. The engine normalizes only
+string-sourced constructors; this change does not alter the proposed codec.
 `encode_lang_string` validates a BCP47 language tag and produces an
 `rdf:langString`; `decode_lang_string` returns an owned `LangString` containing
 both `value` and `language`, so a round trip cannot discard the tag. Datatype,
