@@ -1,0 +1,392 @@
+[
+  {
+    "name": "cranelift-bforest",
+    "version": "0.110.2",
+    "declared_license": "Apache-2.0 WITH LLVM-exception",
+    "repository": "https://github.com/bytecodealliance/wasmtime",
+    "archive_sha256": "305d51c180ebdc46ef61bc60c54ae6512db3bc9a05842a1f1e762e45977019ab",
+    "archive_url": "https://static.crates.io/crates/cranelift-bforest/cranelift-bforest-0.110.2.crate",
+    "vcs": {
+      "git": {
+        "sha1": "694ee661e6f2ef89841487c7ba9aa6e64c9078df"
+      },
+      "path_in_vcs": "cranelift/bforest"
+    },
+    "packaged_license_files": [
+      {
+        "archive_member": "cranelift-bforest-0.110.2/LICENSE",
+        "sha256": "268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5",
+        "size": 12243
+      }
+    ],
+    "proposed_exception": {
+      "crate": "cranelift-bforest@0.110.2",
+      "allow": [
+        "Apache-2.0 WITH LLVM-exception"
+      ]
+    },
+    "status": "proposed_not_applied_or_independently_reviewed"
+  },
+  {
+    "name": "cranelift-bitset",
+    "version": "0.110.3",
+    "declared_license": "Apache-2.0 WITH LLVM-exception",
+    "repository": "https://github.com/bytecodealliance/wasmtime",
+    "archive_sha256": "690d8ae6c73748e5ce3d8fe59034dceadb8823e6c8994ba324141c5eae909b0e",
+    "archive_url": "https://static.crates.io/crates/cranelift-bitset/cranelift-bitset-0.110.3.crate",
+    "vcs": {
+      "git": {
+        "sha1": "72bedc12e00084fdf49f7d4f5d40b979c184b0a5"
+      },
+      "path_in_vcs": "cranelift/bitset"
+    },
+    "packaged_license_files": [],
+    "proposed_exception": {
+      "crate": "cranelift-bitset@0.110.3",
+      "allow": [
+        "Apache-2.0 WITH LLVM-exception"
+      ]
+    },
+    "status": "proposed_not_applied_or_independently_reviewed",
+    "exact_vcs_license": {
+      "url": "https://raw.githubusercontent.com/bytecodealliance/wasmtime/72bedc12e00084fdf49f7d4f5d40b979c184b0a5/LICENSE",
+      "sha256": "268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5",
+      "size": 12243,
+      "vcs_from_matching_archive": true
+    }
+  },
+  {
+    "name": "cranelift-codegen",
+    "version": "0.110.2",
+    "declared_license": "Apache-2.0 WITH LLVM-exception",
+    "repository": "https://github.com/bytecodealliance/wasmtime",
+    "archive_sha256": "bd7ca95e831c18d1356da783765c344207cbdffea91e13e47fa9327dbb2e0719",
+    "archive_url": "https://static.crates.io/crates/cranelift-codegen/cranelift-codegen-0.110.2.crate",
+    "vcs": {
+      "git": {
+        "sha1": "694ee661e6f2ef89841487c7ba9aa6e64c9078df"
+      },
+      "path_in_vcs": "cranelift/codegen"
+    },
+    "packaged_license_files": [
+      {
+        "archive_member": "cranelift-codegen-0.110.2/LICENSE",
+        "sha256": "268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5",
+        "size": 12243
+      }
+    ],
+    "proposed_exception": {
+      "crate": "cranelift-codegen@0.110.2",
+      "allow": [
+        "Apache-2.0 WITH LLVM-exception"
+      ]
+    },
+    "status": "proposed_not_applied_or_independently_reviewed"
+  },
+  {
+    "name": "cranelift-codegen-meta",
+    "version": "0.110.3",
+    "declared_license": "Apache-2.0 WITH LLVM-exception",
+    "repository": "https://github.com/bytecodealliance/wasmtime",
+    "archive_sha256": "f0a2d2ab65e6cbf91f81781d8da65ec2005510f18300eff21a99526ed6785863",
+    "archive_url": "https://static.crates.io/crates/cranelift-codegen-meta/cranelift-codegen-meta-0.110.3.crate",
+    "vcs": {
+      "git": {
+        "sha1": "72bedc12e00084fdf49f7d4f5d40b979c184b0a5"
+      },
+      "path_in_vcs": "cranelift/codegen/meta"
+    },
+    "packaged_license_files": [
+      {
+        "archive_member": "cranelift-codegen-meta-0.110.3/LICENSE",
+        "sha256": "268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5",
+        "size": 12243
+      }
+    ],
+    "proposed_exception": {
+      "crate": "cranelift-codegen-meta@0.110.3",
+      "allow": [
+        "Apache-2.0 WITH LLVM-exception"
+      ]
+    },
+    "status": "proposed_not_applied_or_independently_reviewed"
+  },
+  {
+    "name": "cranelift-codegen-shared",
+    "version": "0.110.3",
+    "declared_license": "Apache-2.0 WITH LLVM-exception",
+    "repository": "https://github.com/bytecodealliance/wasmtime",
+    "archive_sha256": "efcff860573cf3db9ae98fbd949240d78b319df686cc306872e7fab60e9c84d7",
+    "archive_url": "https://static.crates.io/crates/cranelift-codegen-shared/cranelift-codegen-shared-0.110.3.crate",
+    "vcs": {
+      "git": {
+        "sha1": "72bedc12e00084fdf49f7d4f5d40b979c184b0a5"
+      },
+      "path_in_vcs": "cranelift/codegen/shared"
+    },
+    "packaged_license_files": [
+      {
+        "archive_member": "cranelift-codegen-shared-0.110.3/LICENSE",
+        "sha256": "268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5",
+        "size": 12243
+      }
+    ],
+    "proposed_exception": {
+      "crate": "cranelift-codegen-shared@0.110.3",
+      "allow": [
+        "Apache-2.0 WITH LLVM-exception"
+      ]
+    },
+    "status": "proposed_not_applied_or_independently_reviewed"
+  },
+  {
+    "name": "cranelift-control",
+    "version": "0.110.3",
+    "declared_license": "Apache-2.0 WITH LLVM-exception",
+    "repository": "https://github.com/bytecodealliance/wasmtime",
+    "archive_sha256": "69d70e5b75c2d5541ef80a99966ccd97aaa54d2a6af19ea31759a28538e1685a",
+    "archive_url": "https://static.crates.io/crates/cranelift-control/cranelift-control-0.110.3.crate",
+    "vcs": {
+      "git": {
+        "sha1": "72bedc12e00084fdf49f7d4f5d40b979c184b0a5"
+      },
+      "path_in_vcs": "cranelift/control"
+    },
+    "packaged_license_files": [
+      {
+        "archive_member": "cranelift-control-0.110.3/LICENSE",
+        "sha256": "268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5",
+        "size": 12243
+      }
+    ],
+    "proposed_exception": {
+      "crate": "cranelift-control@0.110.3",
+      "allow": [
+        "Apache-2.0 WITH LLVM-exception"
+      ]
+    },
+    "status": "proposed_not_applied_or_independently_reviewed"
+  },
+  {
+    "name": "cranelift-entity",
+    "version": "0.110.2",
+    "declared_license": "Apache-2.0 WITH LLVM-exception",
+    "repository": "https://github.com/bytecodealliance/wasmtime",
+    "archive_sha256": "a48cb0a194c9ba82fec35a1e492055388d89b2e3c03dee9dcf2488892be8004d",
+    "archive_url": "https://static.crates.io/crates/cranelift-entity/cranelift-entity-0.110.2.crate",
+    "vcs": {
+      "git": {
+        "sha1": "694ee661e6f2ef89841487c7ba9aa6e64c9078df"
+      },
+      "path_in_vcs": "cranelift/entity"
+    },
+    "packaged_license_files": [
+      {
+        "archive_member": "cranelift-entity-0.110.2/LICENSE",
+        "sha256": "268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5",
+        "size": 12243
+      }
+    ],
+    "proposed_exception": {
+      "crate": "cranelift-entity@0.110.2",
+      "allow": [
+        "Apache-2.0 WITH LLVM-exception"
+      ]
+    },
+    "status": "proposed_not_applied_or_independently_reviewed"
+  },
+  {
+    "name": "cranelift-frontend",
+    "version": "0.110.2",
+    "declared_license": "Apache-2.0 WITH LLVM-exception",
+    "repository": "https://github.com/bytecodealliance/wasmtime",
+    "archive_sha256": "8327afc6c1c05f4be62fefce5b439fa83521c65363a322e86ea32c85e7ceaf64",
+    "archive_url": "https://static.crates.io/crates/cranelift-frontend/cranelift-frontend-0.110.2.crate",
+    "vcs": {
+      "git": {
+        "sha1": "694ee661e6f2ef89841487c7ba9aa6e64c9078df"
+      },
+      "path_in_vcs": "cranelift/frontend"
+    },
+    "packaged_license_files": [
+      {
+        "archive_member": "cranelift-frontend-0.110.2/LICENSE",
+        "sha256": "268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5",
+        "size": 12243
+      }
+    ],
+    "proposed_exception": {
+      "crate": "cranelift-frontend@0.110.2",
+      "allow": [
+        "Apache-2.0 WITH LLVM-exception"
+      ]
+    },
+    "status": "proposed_not_applied_or_independently_reviewed"
+  },
+  {
+    "name": "cranelift-isle",
+    "version": "0.110.2",
+    "declared_license": "Apache-2.0 WITH LLVM-exception",
+    "repository": "https://github.com/bytecodealliance/wasmtime/tree/main/cranelift/isle",
+    "archive_sha256": "56b08621c00321efcfa3eee6a3179adc009e21ea8d24ca7adc3c326184bc3f48",
+    "archive_url": "https://static.crates.io/crates/cranelift-isle/cranelift-isle-0.110.2.crate",
+    "vcs": {
+      "git": {
+        "sha1": "694ee661e6f2ef89841487c7ba9aa6e64c9078df"
+      },
+      "path_in_vcs": "cranelift/isle/isle"
+    },
+    "packaged_license_files": [],
+    "proposed_exception": {
+      "crate": "cranelift-isle@0.110.2",
+      "allow": [
+        "Apache-2.0 WITH LLVM-exception"
+      ]
+    },
+    "status": "proposed_not_applied_or_independently_reviewed",
+    "exact_vcs_license": {
+      "url": "https://raw.githubusercontent.com/bytecodealliance/wasmtime/694ee661e6f2ef89841487c7ba9aa6e64c9078df/LICENSE",
+      "sha256": "268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5",
+      "size": 12243,
+      "vcs_from_matching_archive": true
+    }
+  },
+  {
+    "name": "regalloc2",
+    "version": "0.9.3",
+    "declared_license": "Apache-2.0 WITH LLVM-exception",
+    "repository": "https://github.com/bytecodealliance/regalloc2",
+    "archive_sha256": "ad156d539c879b7a24a363a2016d77961786e71f48f2e2fc8302a92abd2429a6",
+    "archive_url": "https://static.crates.io/crates/regalloc2/regalloc2-0.9.3.crate",
+    "vcs": {
+      "git": {
+        "sha1": "4777ec92df3b4e6f5f354af462f254630b70641e"
+      },
+      "path_in_vcs": ""
+    },
+    "packaged_license_files": [
+      {
+        "archive_member": "regalloc2-0.9.3/LICENSE",
+        "sha256": "268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5",
+        "size": 12243
+      }
+    ],
+    "proposed_exception": {
+      "crate": "regalloc2@0.9.3",
+      "allow": [
+        "Apache-2.0 WITH LLVM-exception"
+      ]
+    },
+    "status": "proposed_not_applied_or_independently_reviewed"
+  },
+  {
+    "name": "target-lexicon",
+    "version": "0.12.16",
+    "declared_license": "Apache-2.0 WITH LLVM-exception",
+    "repository": "https://github.com/bytecodealliance/target-lexicon",
+    "archive_sha256": "61c41af27dd6d1e27b1b16b489db798443478cef1f06a660c96db617ba5de3b1",
+    "archive_url": "https://static.crates.io/crates/target-lexicon/target-lexicon-0.12.16.crate",
+    "vcs": {
+      "git": {
+        "sha1": "7c80d459a9fdd121e9f23feb680c3db13c1baa39"
+      },
+      "path_in_vcs": ""
+    },
+    "packaged_license_files": [
+      {
+        "archive_member": "target-lexicon-0.12.16/LICENSE",
+        "sha256": "268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5",
+        "size": 12243
+      }
+    ],
+    "proposed_exception": {
+      "crate": "target-lexicon@0.12.16",
+      "allow": [
+        "Apache-2.0 WITH LLVM-exception"
+      ]
+    },
+    "status": "proposed_not_applied_or_independently_reviewed"
+  },
+  {
+    "name": "enum-iterator",
+    "version": "0.7.0",
+    "declared_license": "0BSD",
+    "repository": "https://github.com/stephaneyfx/enum-iterator.git",
+    "archive_sha256": "4eeac5c5edb79e4e39fe8439ef35207780a11f69c52cbe424ce3dfad4cb78de6",
+    "archive_url": "https://static.crates.io/crates/enum-iterator/enum-iterator-0.7.0.crate",
+    "vcs": {
+      "git": {
+        "sha1": "4ad8ca2d69cb3a607a0a616ca660d52737825245"
+      }
+    },
+    "packaged_license_files": [],
+    "proposed_exception": {
+      "crate": "enum-iterator@0.7.0",
+      "allow": [
+        "0BSD"
+      ]
+    },
+    "status": "proposed_not_applied_or_independently_reviewed",
+    "exact_vcs_license": {
+      "url": "https://raw.githubusercontent.com/stephaneyfx/enum-iterator/4ad8ca2d69cb3a607a0a616ca660d52737825245/LICENSE",
+      "sha256": "b1dc8814098eb28905a23b15cb3e8111afa1cd4b6b56c8ab02edb8510eb940b1",
+      "size": 646,
+      "vcs_from_matching_archive": true
+    }
+  },
+  {
+    "name": "enum-iterator-derive",
+    "version": "0.7.0",
+    "declared_license": "0BSD",
+    "repository": "https://github.com/stephaneyfx/enum-iterator.git",
+    "archive_sha256": "c134c37760b27a871ba422106eedbb8247da973a09e82558bf26d619c882b159",
+    "archive_url": "https://static.crates.io/crates/enum-iterator-derive/enum-iterator-derive-0.7.0.crate",
+    "vcs": {
+      "git": {
+        "sha1": "4ad8ca2d69cb3a607a0a616ca660d52737825245"
+      }
+    },
+    "packaged_license_files": [],
+    "proposed_exception": {
+      "crate": "enum-iterator-derive@0.7.0",
+      "allow": [
+        "0BSD"
+      ]
+    },
+    "status": "proposed_not_applied_or_independently_reviewed",
+    "exact_vcs_license": {
+      "url": "https://raw.githubusercontent.com/stephaneyfx/enum-iterator/4ad8ca2d69cb3a607a0a616ca660d52737825245/LICENSE",
+      "sha256": "b1dc8814098eb28905a23b15cb3e8111afa1cd4b6b56c8ab02edb8510eb940b1",
+      "size": 646,
+      "vcs_from_matching_archive": true
+    }
+  },
+  {
+    "name": "xxhash-rust",
+    "version": "0.8.18",
+    "declared_license": "BSL-1.0",
+    "repository": "https://github.com/DoumanAsh/xxhash-rust",
+    "archive_sha256": "aee1b19627c7c60102ab80d3a9cbe18de90bfe03bfa6c3715447681f0e8c8af6",
+    "archive_url": "https://static.crates.io/crates/xxhash-rust/xxhash-rust-0.8.18.crate",
+    "vcs": {
+      "git": {
+        "sha1": "f93abc7ce0363e6910601e89ada2240f9ed7def6"
+      },
+      "path_in_vcs": ""
+    },
+    "packaged_license_files": [
+      {
+        "archive_member": "xxhash-rust-0.8.18/LICENSE",
+        "sha256": "c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566",
+        "size": 1338
+      }
+    ],
+    "proposed_exception": {
+      "crate": "xxhash-rust@0.8.18",
+      "allow": [
+        "BSL-1.0"
+      ]
+    },
+    "status": "proposed_not_applied_or_independently_reviewed"
+  }
+]

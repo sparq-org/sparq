@@ -33,6 +33,10 @@ The [native follow-up record](evidence/native-rdf-followups.json) separates the
 dependency compatibility patch, corrected-lock CLI sample, role-covering
 allocator controls and their source reviews. Its own-policy failures and the
 separate uncommitted policy-inheritance comparison are both retained.
+The later [policy reconciliation](../../research/native-dependency-policy/README.md)
+applies the reviewed inheritance to this candidate and records its own frozen
+metadata checks. Native audit-coverage and maintenance failures remain explicit;
+the historical private-store results above are not substituted for these checks.
 
 The dedicated [native composition CI workflow](../../.github/workflows/zk-native-composition.yml)
 runs real release tests, scoped Clippy and the unsupported-Noir CLI check on pull

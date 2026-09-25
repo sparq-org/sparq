@@ -1,0 +1,746 @@
+diff --git a/old/.cargo_vcs_info.json b/new/.cargo_vcs_info.json
+index 148bd94..2f93a1e 100644
+--- a/old/.cargo_vcs_info.json
++++ b/new/.cargo_vcs_info.json
+@@ -1,6 +1,6 @@
+ {
+   "git": {
+-    "sha1": "8f4ecd9964ea909a7f989a3668a2710310a0e62f"
++    "sha1": "ce6f07fc3d56d6a56ecfc32256d2c33bd0b4ad09"
+   },
+   "path_in_vcs": ""
+ }
+\ No newline at end of file
+diff --git a/old/.github/workflows/ci.yml b/new/.github/workflows/ci.yml
+index 1c6dbb0..842e45d 100644
+--- a/old/.github/workflows/ci.yml
++++ b/new/.github/workflows/ci.yml
+@@ -37,7 +37,11 @@ jobs:
+         env:
+           CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS: fallback
+         # Note that this uses the runner's pre-installed stable cargo
+-        run: cargo generate-lockfile
++        # Also, the resolver is still too greedy, pulling in too-new serde_derive:
++        # https://github.com/serde-rs/serde/issues/3088
++        run: |
++          cargo generate-lockfile
++          cargo update -p serde --precise 1.0.228
+ 
+       - name: Set up Rust
+         uses: dtolnay/rust-toolchain@master
+diff --git a/old/Cargo.lock b/new/Cargo.lock
+index 3064f8b..e002261 100644
+--- a/old/Cargo.lock
++++ b/new/Cargo.lock
+@@ -4,7 +4,7 @@ version = 3
+ 
+ [[package]]
+ name = "either"
+-version = "1.16.0"
++version = "1.18.0"
+ dependencies = [
+  "serde",
+  "serde_json",
+@@ -12,48 +12,64 @@ dependencies = [
+ 
+ [[package]]
+ name = "itoa"
+-version = "1.0.10"
++version = "1.0.15"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "b1a46d1a171d865aa5f83f92695765caa047a9b4cbae2cbf37dbd613a793fd4c"
++checksum = "4a5f13b858c8d314ee3e8f639011f7ccefe71f97f96e50151fb991f267928e2c"
++
++[[package]]
++name = "memchr"
++version = "2.8.3"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
+ 
+ [[package]]
+ name = "proc-macro2"
+-version = "1.0.71"
++version = "1.0.103"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "75cb1540fadbd5b8fbccc4dddad2734eba435053f725621c070711a14bb5f4b8"
++checksum = "5ee95bc4ef87b8d5ba32e8b7714ccc834865276eab0aed5c9958d00ec45f49e8"
+ dependencies = [
+  "unicode-ident",
+ ]
+ 
+ [[package]]
+ name = "quote"
+-version = "1.0.33"
++version = "1.0.41"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "5267fca4496028628a95160fc423a33e8b2e6af8a5302579e322e4b520293cae"
++checksum = "ce25767e7b499d1b604768e7cde645d14cc8584231ea6b295e9c9eb22c02e1d1"
+ dependencies = [
+  "proc-macro2",
+ ]
+ 
+ [[package]]
+ name = "ryu"
+-version = "1.0.16"
++version = "1.0.20"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "f98d2aa92eebf49b69786be48e4477826b256916e84a57ff2a4f21923b48eb4c"
++checksum = "28d3b2b1366ec20994f1fd18c3c594f05c5dd4bc44d8bb0c1c632c8d6829481f"
+ 
+ [[package]]
+ name = "serde"
+-version = "1.0.193"
++version = "1.0.228"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "9a8e94ea7f378bd32cbbd37198a4a91436180c5bb472411e48b5ec2e2124ae9e"
++dependencies = [
++ "serde_core",
++ "serde_derive",
++]
++
++[[package]]
++name = "serde_core"
++version = "1.0.228"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "25dd9975e68d0cb5aa1120c288333fc98731bd1dd12f561e468ea4728c042b89"
++checksum = "41d385c7d4ca58e59fc732af25c3983b67ac852c1a25000afe1175de458b67ad"
+ dependencies = [
+  "serde_derive",
+ ]
+ 
+ [[package]]
+ name = "serde_derive"
+-version = "1.0.193"
++version = "1.0.228"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "43576ca501357b9b071ac53cdc7da8ef0cbd9493d8df094cd821777ea6e894d3"
++checksum = "d540f220d3187173da220f885ab66608367b6574e925011a9353e4badda91d79"
+ dependencies = [
+  "proc-macro2",
+  "quote",
+@@ -62,20 +78,22 @@ dependencies = [
+ 
+ [[package]]
+ name = "serde_json"
+-version = "1.0.108"
++version = "1.0.145"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "3d1c7e3eac408d115102c4c24ad393e0821bb3a5df4d506a80f85f7a742a526b"
++checksum = "402a6f66d8c709116cf22f558eab210f5a50187f702eb4d7e5ef38d9a7f1c79c"
+ dependencies = [
+  "itoa",
++ "memchr",
+  "ryu",
+  "serde",
++ "serde_core",
+ ]
+ 
+ [[package]]
+ name = "syn"
+-version = "2.0.43"
++version = "2.0.106"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "ee659fb5f3d355364e1f3e5bc10fb82068efbf824a1e9d1c9504244a6469ad53"
++checksum = "ede7c438028d4436d71104916910f5bb611972c5cfd7f89b8300a8186e6fada6"
+ dependencies = [
+  "proc-macro2",
+  "quote",
+@@ -84,6 +102,6 @@ dependencies = [
+ 
+ [[package]]
+ name = "unicode-ident"
+-version = "1.0.12"
++version = "1.0.22"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "3354b9ac3fae1ff6755cb6db53683adb661634f67557942dea4facebec0fee4b"
++checksum = "9312f7c4f6ff9069b165498234ce8be658059c6728633667c526e27dc2cf1df5"
+diff --git a/old/Cargo.toml b/new/Cargo.toml
+index 15de810..f326b4b 100644
+--- a/old/Cargo.toml
++++ b/new/Cargo.toml
+@@ -13,7 +13,7 @@
+ edition = "2021"
+ rust-version = "1.63.0"
+ name = "either"
+-version = "1.16.0"
++version = "1.18.0"
+ build = false
+ autolib = false
+ autobins = false
+@@ -24,7 +24,7 @@ description = """
+ The enum `Either` with variants `Left` and `Right` is a general purpose sum type with two cases.
+ """
+ documentation = "https://docs.rs/either/1/"
+-readme = "README-crates.io.md"
++readme = "README.md"
+ keywords = [
+     "data-structure",
+     "no_std",
+diff --git a/old/Cargo.toml.orig b/new/Cargo.toml.orig
+index fc46d17..32d5111 100644
+--- a/old/Cargo.toml.orig
++++ b/new/Cargo.toml.orig
+@@ -1,13 +1,12 @@
+ [package]
+ name = "either"
+-version = "1.16.0"
++version = "1.18.0"
+ edition = "2021"
+ rust-version = "1.63.0"
+ 
+ license = "MIT OR Apache-2.0"
+ repository = "https://github.com/rayon-rs/either"
+ documentation = "https://docs.rs/either/1/"
+-readme = "README-crates.io.md"
+ 
+ description = """
+ The enum `Either` with variants `Left` and `Right` is a general purpose sum type with two cases.
+diff --git a/old/README-crates.io.md b/old/README-crates.io.md
+deleted file mode 100644
+index d368902..0000000
+--- a/old/README-crates.io.md
++++ /dev/null
+@@ -1,10 +0,0 @@
+-The enum `Either` with variants `Left` and `Right` is a general purpose
+-sum type with two cases.
+-
+-Either has methods that are similar to Option and Result, and it also implements
+-traits like `Iterator`.
+-
+-Includes macros `try_left!()` and `try_right!()` to use for
+-short-circuiting logic, similar to how the `?` operator is used with `Result`.
+-Note that `Either` is general purpose. For describing success or error, use the
+-regular `Result`.
+diff --git a/new/README.md b/new/README.md
+new file mode 100644
+index 0000000..d294c6e
+--- /dev/null
++++ b/new/README.md
+@@ -0,0 +1,36 @@
++# Either
++
++[![Either crate](https://img.shields.io/crates/v/either.svg)](https://crates.io/crates/either)
++[![Either documentation](https://docs.rs/either/badge.svg)](https://docs.rs/either)
++![minimum rustc 1.63](https://img.shields.io/badge/rustc-1.63+-red.svg)
++[![build status](https://github.com/rayon-rs/either/actions/workflows/ci.yml/badge.svg)](https://github.com/rayon-rs/either/actions)
++
++The enum `Either` with variants `Left` and `Right` is a general purpose sum
++type with two cases.
++
++`Either` has methods that are similar to `Option` and `Result`, and it also
++implements traits like `Iterator`, `Read`, and `Write`.
++
++The crate includes macros `try_left!()` and `try_right!()` to use for
++short-circuiting logic, similar to how the `?` operator is used with `Result`.
++Note that `Either` is general purpose and unopinionated about the meaning of
++`Left` and `Right`. For describing success or error, use the regular `Result`.
++
++Please read the [API documentation here](https://docs.rs/either/), and see
++[RELEASES.md](RELEASES.md) for the version history.
++
++How to use with cargo:
++
++```toml
++[dependencies]
++either = "1"
++```
++
++## License
++
++Dual-licensed to be compatible with the Rust project.
++
++Licensed under the Apache License, Version 2.0
++<https://www.apache.org/licenses/LICENSE-2.0> or the MIT license
++<https://opensource.org/licenses/MIT>, at your option. This file may not
++be copied, modified, or distributed except according to those terms.
+diff --git a/old/README.rst b/old/README.rst
+deleted file mode 100644
+index 10f392a..0000000
+--- a/old/README.rst
++++ /dev/null
+@@ -1,220 +0,0 @@
+-
+-Either
+-======
+-
+-The enum ``Either`` with variants ``Left`` and ``Right`` and trait
+-implementations including Iterator, Read, Write.
+-
+-Either has methods that are similar to Option and Result.
+-
+-Includes convenience macros ``try_left!()`` and ``try_right!()`` to use for
+-short-circuiting logic.
+-
+-Please read the `API documentation here`__
+-
+-__ https://docs.rs/either/
+-
+-|build_status|_ |crates|_
+-
+-.. |build_status| image:: https://github.com/rayon-rs/either/workflows/CI/badge.svg?branch=main
+-.. _build_status: https://github.com/rayon-rs/either/actions
+-
+-.. |crates| image:: https://img.shields.io/crates/v/either.svg
+-.. _crates: https://crates.io/crates/either
+-
+-How to use with cargo::
+-
+-    [dependencies]
+-    either = "1"
+-
+-
+-Recent Changes
+---------------
+-
+-- 1.16.0
+-
+-  - Add many new methods dealing with each side, by @A4-Tacks:
+-
+-    - ``inspect_left`` and ``inspect_right`` (#124)
+-
+-    - ``left_and`` and ``right_and`` (#125)
+-
+-    - ``is_left_and`` and ``is_right_and`` (#126)
+-
+-    - ``map_left_or`` and ``map_right_or`` (#127)
+-
+-  - Add a version of ``for_both!`` with a single ``ident``, by @A4-Tacks (#128)
+-
+-  - Add a ``map_both!`` macro, by @JohnScience (#109) and @ronnodas (#137)
+-
+-- 1.15.0
+-
+-  - Fix ``serde`` support when building without ``std``, by @klkvr (#119)
+-
+-  - Use a more common ``std`` feature for default enablement, deprecating
+-    the ``use_std`` feature as a mere alias of the new name.
+-
+-- 1.14.0
+-
+-  - **MSRV**: ``either`` now requires Rust 1.63 or later.
+-
+-  - Implement ``fmt::Write`` for ``Either``, by @yotamofek (#113)
+-
+-  - Replace ``Into<Result> for Either`` with ``From<Either> for Result``, by @cuviper (#118)
+-
+-- 1.13.0
+-
+-  - Add new methods ``.cloned()`` and ``.copied()``, by @ColonelThirtyTwo (#107)
+-
+-- 1.12.0
+-
+-  - **MSRV**: ``either`` now requires Rust 1.37 or later.
+-
+-  - Specialize ``nth_back`` for ``Either`` and ``IterEither``, by @cuviper (#106)
+-
+-- 1.11.0
+-
+-  - Add new trait ``IntoEither`` that is useful to convert to ``Either`` in method chains,
+-    by @SFM61319 (#101)
+-
+-- 1.10.0
+-
+-  - Add new methods ``.factor_iter()``, ``.factor_iter_mut()``,  and ``.factor_into_iter()``
+-    that return ``Either`` items, plus ``.iter()`` and ``.iter_mut()`` to convert to direct
+-    reference iterators; by @aj-bagwell and @cuviper (#91)
+-
+-- 1.9.0
+-
+-  - Add new methods ``.map_either()`` and ``.map_either_with()``, by @nasadorian (#82)
+-
+-- 1.8.1
+-
+-  - Clarified that the multiple licenses are combined with OR.
+-
+-- 1.8.0
+-
+-  - **MSRV**: ``either`` now requires Rust 1.36 or later.
+-
+-  - Add new methods ``.as_pin_ref()`` and ``.as_pin_mut()`` to project a
+-    pinned ``Either`` as inner ``Pin`` variants, by @cuviper (#77)
+-
+-  - Implement the ``Future`` trait, by @cuviper (#77)
+-
+-  - Specialize more methods of the ``io`` traits, by @Kixunil and @cuviper (#75)
+-
+-- 1.7.0
+-
+-  - **MSRV**: ``either`` now requires Rust 1.31 or later.
+-
+-  - Export the macro ``for_both!``, by @thomaseizinger (#58)
+-
+-  - Implement the ``io::Seek`` trait, by @Kerollmops (#60)
+-
+-  - Add new method ``.either_into()`` for ``Into`` conversion, by @TonalidadeHidrica (#63)
+-
+-  - Add new methods ``.factor_ok()``, ``.factor_err()``, and ``.factor_none()``,
+-    by @zachs18 (#67)
+-
+-  - Specialize ``source`` in the ``Error`` implementation, by @thomaseizinger (#69)
+-
+-  - Specialize more iterator methods and implement the ``FusedIterator`` trait,
+-    by @Ten0 (#66) and @cuviper (#71)
+-
+-  - Specialize ``Clone::clone_from``, by @cuviper (#72)
+-
+-- 1.6.1
+-
+-  - Add new methods ``.expect_left()``, ``.unwrap_left()``,
+-    and equivalents on the right, by @spenserblack (#51)
+-
+-- 1.6.0
+-
+-  - Add new modules ``serde_untagged`` and ``serde_untagged_optional`` to customize
+-    how ``Either`` fields are serialized in other types, by @MikailBag (#49)
+-
+-- 1.5.3
+-
+-  - Add new method ``.map()`` for ``Either<T, T>`` by @nvzqz (#40).
+-
+-- 1.5.2
+-
+-  - Add new methods ``.left_or()``, ``.left_or_default()``, ``.left_or_else()``,
+-    and equivalents on the right, by @DCjanus (#36)
+-
+-- 1.5.1
+-
+-  - Add ``AsRef`` and ``AsMut`` implementations for common unsized types:
+-    ``str``, ``[T]``, ``CStr``, ``OsStr``, and ``Path``, by @mexus (#29)
+-
+-- 1.5.0
+-
+-  - Add new methods ``.factor_first()``, ``.factor_second()`` and ``.into_inner()``
+-    by @mathstuf (#19)
+-
+-- 1.4.0
+-
+-  - Add inherent method ``.into_iter()`` by @cuviper (#12)
+-
+-- 1.3.0
+-
+-  - Add opt-in serde support by @hcpl
+-
+-- 1.2.0
+-
+-  - Add method ``.either_with()`` by @Twey (#13)
+-
+-- 1.1.0
+-
+-  - Add methods ``left_and_then``, ``right_and_then`` by @rampantmonkey
+-  - Include license files in the repository and released crate
+-
+-- 1.0.3
+-
+-  - Add crate categories
+-
+-- 1.0.2
+-
+-  - Forward more ``Iterator`` methods
+-  - Implement ``Extend`` for ``Either<L, R>`` if ``L, R`` do.
+-
+-- 1.0.1
+-
+-  - Fix ``Iterator`` impl for ``Either`` to forward ``.fold()``.
+-
+-- 1.0.0
+-
+-  - Add default crate feature ``use_std`` so that you can opt out of linking to
+-    std.
+-
+-- 0.1.7
+-
+-  - Add methods ``.map_left()``, ``.map_right()`` and ``.either()``.
+-  - Add more documentation
+-
+-- 0.1.3
+-
+-  - Implement Display, Error
+-
+-- 0.1.2
+-
+-  - Add macros ``try_left!`` and ``try_right!``.
+-
+-- 0.1.1
+-
+-  - Implement Deref, DerefMut
+-
+-- 0.1.0
+-
+-  - Initial release
+-  - Support Iterator, Read, Write
+-
+-License
+--------
+-
+-Dual-licensed to be compatible with the Rust project.
+-
+-Licensed under the Apache License, Version 2.0
+-https://www.apache.org/licenses/LICENSE-2.0 or the MIT license
+-https://opensource.org/licenses/MIT, at your
+-option. This file may not be copied, modified, or distributed
+-except according to those terms.
+diff --git a/new/RELEASES.md b/new/RELEASES.md
+new file mode 100644
+index 0000000..b378cd2
+--- /dev/null
++++ b/new/RELEASES.md
+@@ -0,0 +1,138 @@
++- 1.18.0 - 2026-08-20
++  - Add trait impls akin to `Itertools::partition_map`, by @cuviper (#144)
++    - `Extend<Either<L, R>> for (A, B)`
++    - `FromIterator<Either<L, R>> for (A, B)`
++
++- 1.17.0 - 2026-07-24
++  - Add implementations for all `std::fmt` traits, by @msrd0 (#141)
++
++- 1.16.0 - 2026-05-20
++  - Add many new methods dealing with each side, by @A4-Tacks:
++    - `inspect_left` and `inspect_right` (#124)
++    - `left_and` and `right_and` (#125)
++    - `is_left_and` and `is_right_and` (#126)
++    - `map_left_or` and `map_right_or` (#127)
++  - Add a version of `for_both!` with a single `ident`, by @A4-Tacks (#128)
++  - Add a `map_both!` macro, by @JohnScience (#109) and @ronnodas (#137)
++
++- 1.15.0 - 2025-03-05
++  - Fix `serde` support when building without `std`, by @klkvr (#119)
++  - Use a more common `std` feature for default enablement, deprecating the
++    `use_std` feature as a mere alias of the new name.
++
++- 1.14.0 - 2025-02-23
++  - **MSRV**: `either` now requires Rust 1.63 or later.
++  - Implement `fmt::Write` for `Either`, by @yotamofek (#113)
++  - Replace `Into<Result> for Either` with `From<Either> for Result`, by
++    @cuviper (#118)
++
++- 1.13.0 - 2024-06-25
++  - Add new methods `.cloned()` and `.copied()`, by @ColonelThirtyTwo (#107)
++
++- 1.12.0 - 2024-05-16
++  - **MSRV**: `either` now requires Rust 1.37 or later.
++  - Specialize `nth_back` for `Either` and `IterEither`, by @cuviper (#106)
++
++- 1.11.0 - 2024-04-13
++  - Add new trait `IntoEither` that is useful to convert to `Either` in method
++    chains, by @SFM61319 (#101)
++
++- 1.10.0 - 2024-02-10
++  - Add new methods `.factor_iter()`, `.factor_iter_mut()`, and
++    `.factor_into_iter()` that return `Either` items, plus `.iter()` and
++    `.iter_mut()` to convert to direct reference iterators; by @aj-bagwell and
++    @cuviper (#91)
++
++- 1.9.0 - 2023-07-22
++  - Add new methods `.map_either()` and `.map_either_with()`, by @nasadorian
++    (#82)
++
++- 1.8.1 - 2023-01-26
++  - Clarified that the multiple licenses are combined with OR.
++
++- 1.8.0 - 2022-08-17
++  - **MSRV**: `either` now requires Rust 1.36 or later.
++  - Add new methods `.as_pin_ref()` and `.as_pin_mut()` to project a pinned
++    `Either` as inner `Pin` variants, by @cuviper (#77)
++  - Implement the `Future` trait, by @cuviper (#77)
++  - Specialize more methods of the `io` traits, by @Kixunil and @cuviper (#75)
++
++- 1.7.0 - 2022-06-29
++  - **MSRV**: `either` now requires Rust 1.31 or later.
++  - Export the macro `for_both!`, by @thomaseizinger (#58)
++  - Implement the `io::Seek` trait, by @Kerollmops (#60)
++  - Add new method `.either_into()` for `Into` conversion, by
++    @TonalidadeHidrica (#63)
++  - Add new methods `.factor_ok()`, `.factor_err()`, and `.factor_none()`, by
++    @zachs18 (#67)
++  - Specialize `source` in the `Error` implementation, by @thomaseizinger (#69)
++  - Specialize more iterator methods and implement the `FusedIterator` trait,
++    by @Ten0 (#66) and @cuviper (#71)
++  - Specialize `Clone::clone_from`, by @cuviper (#72)
++
++- 1.6.1 - 2020-09-16
++  - Add new methods `.expect_left()`, `.unwrap_left()`, and equivalents on the
++    right, by @spenserblack (#51)
++
++- 1.6.0 - 2020-08-10
++  - Add new modules `serde_untagged` and `serde_untagged_optional` to customize
++    how `Either` fields are serialized in other types, by @MikailBag (#49)
++
++- 1.5.3 - 2019-09-13
++  - Add new method `.map()` for `Either<T, T>` by @nvzqz (#40).
++
++- 1.5.2 - 2019-04-02
++  - Add new methods `.left_or()`, `.left_or_default()`, `.left_or_else()`, and
++    equivalents on the right, by @DCjanus (#36)
++
++- 1.5.1 - 2019-02-21
++  - Add `AsRef` and `AsMut` implementations for common unsized types: `str`,
++    `[T]`, `CStr`, `OsStr`, and `Path`, by @mexus (#29)
++
++- 1.5.0 - 2018-03-25
++  - Add new methods `.factor_first()`, `.factor_second()` and `.into_inner()`
++    by @mathstuf (#19)
++
++- 1.4.0 - 2017-11-14
++  - Add inherent method `.into_iter()` by @cuviper (#12)
++
++- 1.3.0 - 2017-10-15
++  - Add opt-in `serde` support by @hcpl
++
++- 1.2.0 - 2017-09-28
++  - Add method `.either_with()` by @Twey (#13)
++
++- 1.1.0 - 2017-03-25
++  - Add methods `left_and_then`, `right_and_then` by @rampantmonkey
++  - Include license files in the repository and released crate
++
++- 1.0.3 - 2017-02-10
++  - Add crate categories
++
++- 1.0.2 - 2016-11-13
++  - Forward more `Iterator` methods
++  - Implement `Extend` for `Either<L, R>` if `L, R` do.
++
++- 1.0.1 - 2016-10-21
++  - Fix `Iterator` impl for `Either` to forward `.fold()`.
++
++- 1.0.0 - 2016-09-23
++  - Add default crate feature `use_std` so that you can opt out of
++    linking to std.
++
++- 0.1.7 - 2016-09-03
++  - Add methods `.map_left()`, `.map_right()` and `.either()`.
++  - Add more documentation
++
++- 0.1.3 - 2015-09-25
++  - Implement `Display`, `Error`
++
++- 0.1.2 - 2015-09-20
++  - Add macros `try_left!` and `try_right!`.
++
++- 0.1.1 - 2015-09-16
++  - Implement `Deref`, `DerefMut`
++
++- 0.1.0 - 2015-09-14
++  - Initial release
++  - Support `Iterator`, `Read`, `Write`
+diff --git a/old/src/iterator.rs b/new/src/iterator.rs
+index a5535f0..d711736 100644
+--- a/old/src/iterator.rs
++++ b/new/src/iterator.rs
+@@ -39,6 +39,48 @@ where
+     }
+ }
+ 
++impl<A, B, L, R> Extend<Either<L, R>> for (A, B)
++where
++    A: Extend<L>,
++    B: Extend<R>,
++{
++    fn extend<T>(&mut self, iter: T)
++    where
++        T: IntoIterator<Item = Either<L, R>>,
++    {
++        iter.into_iter().for_each(move |item| match item {
++            // TODO: use `Extend::extend_one` <https://github.com/rust-lang/rust/issues/72631>
++            Left(item) => self.0.extend(iter::once(item)),
++            Right(item) => self.1.extend(iter::once(item)),
++        });
++    }
++}
++
++/// Collects `Left` and `Right` items into separate collections
++///
++/// ```
++/// use either::Either::*;
++/// let (threes, other): (Vec<i32>, Vec<i32>) = (1..10)
++///     .map(|i| if i % 3 == 0 { Left(i) } else { Right(i) })
++///     .collect();
++/// assert_eq!(threes, [3, 6, 9]);
++/// assert_eq!(other, [1, 2, 4, 5, 7, 8]);
++/// ```
++impl<A, B, L, R> FromIterator<Either<L, R>> for (A, B)
++where
++    A: Default + Extend<L>,
++    B: Default + Extend<R>,
++{
++    fn from_iter<T>(iter: T) -> Self
++    where
++        T: IntoIterator<Item = Either<L, R>>,
++    {
++        let mut pair = (A::default(), B::default());
++        pair.extend(iter);
++        pair
++    }
++}
++
+ /// `Either<L, R>` is an iterator if both `L` and `R` are iterators.
+ impl<L, R> Iterator for Either<L, R>
+ where
+diff --git a/old/src/lib.rs b/new/src/lib.rs
+index ec16cee..dead851 100644
+--- a/old/src/lib.rs
++++ b/new/src/lib.rs
+@@ -1634,16 +1634,24 @@ where
+     }
+ }
+ 
+-impl<L, R> fmt::Display for Either<L, R>
+-where
+-    L: fmt::Display,
+-    R: fmt::Display,
+-{
+-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+-        for_both!(self, inner => inner.fmt(f))
++macro_rules! impl_fmt_traits {
++    ($($trait:ident),*) => {
++        $(
++            impl <L, R> fmt::$trait for Either<L, R>
++            where
++                L: fmt::$trait,
++                R: fmt::$trait,
++            {
++                fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++                    for_both!(self, inner => fmt::$trait::fmt(inner, f))
++                }
++            }
++        )*
+     }
+ }
+ 
++impl_fmt_traits!(Binary, Display, LowerExp, LowerHex, Octal, Pointer, UpperExp, UpperHex);
++
+ impl<L, R> fmt::Write for Either<L, R>
+ where
+     L: fmt::Write,
+@@ -1700,6 +1708,31 @@ fn deref() {
+     is_str(&value);
+ }
+ 
++#[test]
++fn fmt_traits() {
++    use std::format;
++
++    let value: Either<u32, i32> = Left(0xC0DE);
++    // fmt::Binary
++    assert_eq!("1100000011011110", format!("{value:b}"));
++    // fmt::Display
++    assert_eq!("49374", format!("{value}"));
++    // fmt::LowerExp
++    assert_eq!("4.9374e4", format!("{value:e}"));
++    // fmt::LowerHex
++    assert_eq!("c0de", format!("{value:x}"));
++    // fmt::Octal
++    assert_eq!("140336", format!("{value:o}"));
++    // fmt::UpperExp
++    assert_eq!("4.9374E4", format!("{value:E}"));
++    // fmt::UpperHex
++    assert_eq!("C0DE", format!("{value:X}"));
++
++    // fmt::Pointer
++    let pointer: Either<*const u32, &mut i32> = Left(std::ptr::null());
++    assert_eq!("0x0", format!("{pointer:p}"));
++}
++
+ #[test]
+ fn iter() {
+     let x = 3;

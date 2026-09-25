@@ -1,0 +1,45 @@
+# Serde prerequisite delta review
+
+**Verdict: APPROVE both exact `1.0.228 -> 1.0.229` deltas for the `safe-to-deploy` source-review criterion.** Reviewer: **GPT-6**, Codex task `/root/vc_suite_design`, 2026-09-12. The changes are authored upstream; this is an independent local source review. It is not a Claude/Fable verdict, a full re-audit of either historical crate, or proof that the complete dependency graph is audited. No audit-store or policy record was applied.
+
+The immutable input manifest is `a955a84e030fccaf881e1f4d52a35511333501487ac0e07c45fe9d92bbe38516`. All four archive hashes match actual cached registry bytes and the root/SDK lockfiles. Every exported file (126 total) matches its archive; applying each complete patch to the old export reconstructs the new export byte-for-byte. Source exports remained unchanged after the behavior probes.
+
+| Unit | Baseline archive SHA256 | Candidate archive SHA256 | Complete patch SHA256 |
+| --- | --- | --- | --- |
+| `serde_core` | `41d385c7d4ca58e59fc732af25c3983b67ac852c1a25000afe1175de458b67ad` | `67dca2c9c51e58a4791a4b1ed58308b39c64224d349a935ab5039aa360942a48` | `efea1423554f85f6fcb30cef4e3907dfc1611cdcfde592e74d96ee61d0589988` |
+| `serde_derive` | `d540f220d3187173da220f885ab66608367b6574e925011a9353e4badda91d79` | `e7a5d71263a5a7d47b41f6b3f06ba276f10cc18b0931f1799f710578e2309348` | `c217e6d5fd5b25dc6ab1e9097ec6676a6f504a1f7765e6cbf9f0702f33e234c4` |
+
+Both packages record upstream VCS revision `7fc3b4c30c94f73a96ebd1553f2b090d928fc3a8`, from baseline `a866b336f14aa57a07f0d0be9f8762746e64ecb4`. Registry archive URLs and complete per-file hashes are preserved in the input bundle and `source-files-sha256.json`.
+
+## Baseline coverage
+
+I independently matched all 25 embedded baseline audit records against the original accepted `imports.lock`, SHA256 `838f7043ef392dfad4c2416c9a5c25f760baf4d8b249d34ff6cfcf0dde53c781`. Both chains are continuous and retain the `safe-to-deploy` criterion:
+
+- `serde_core`: existing ISRG full audit at `1.0.224`, then ISRG `.224 -> .225 -> .226` and Mozilla `.226 -> .227 -> .228` (five records).
+- `serde_derive`: existing Google full audit at `1.0.197`, then Google deltas to `.219`, ISRG to `.226`, and Mozilla to `.228` (20 records).
+
+The original people/source attribution and complete records are retained in `baseline-chain-verification.json`; I do not take credit for those audits or repeat them. The integrator must preserve those accepted baseline chains rather than assuming my delta record replaces them. This check establishes the recorded local baseline coverage, not a fresh independent audit of each upstream audit publisher or the current live-store residual.
+
+## Source findings
+
+No blocking finding was identified in either reviewed delta.
+
+For **serde_core**, the only runtime change makes collection in-place deserialization explicitly reborrow the existing `&mut` collection (`&mut *self.0`) and removes the unnecessary mutable visitor binding. The clear/reserve/insert order, cautious size hint, iteration and error propagation remain the same; no new unsafe operation is introduced. The build script changes the derive availability cutoff from Rust 1.61 to 1.71, matching the new derive package MSRV. Its existing compiler subprocess and generated private-module behavior are unchanged. The remaining differences are exact version links/dependency pin, package lock metadata and lint naming.
+
+For **serde_derive**, I reviewed every changed source hunk and the surrounding generation paths. The Syn 3 migration matches the selected Syn 3.0.5 AST definitions: type-parameter defaults now hold the equals token with the type; function pointers are `FnPtr`; parenthesized argument entries expose `.ty`; new type/predicate attribute fields and trait-bound modifiers are initialized consistently for freshly constructed syntax. The new direct `syn = "3"` dependency is a separate source-coverage obligation, not silently included in this delta approval.
+
+The iterator-to-loop rewrites preserve filtering, enumeration before skipped tuple fields, field order, clone ownership, and missing-content fallthrough. Replacing `?` with explicit `Ok`/`Err` matches in enum and custom-field deserialization returns the same deserializer error type; it does not turn failures into accepted values. Factoring field identifier construction preserves names and call-site spans. No new filesystem/network/process behavior or unsafe operation is introduced by the derive source changes. The build-host procedural-macro execution boundary itself remains part of the inherited trust model.
+
+## Actual behavior evidence
+
+Using Rust/Cargo **1.97.1**, offline registry data, the exact frozen local `serde_core`/`serde_derive` sources and the same synthetic test source, I ran eight test functions on the **228 baseline** and again on the **229 candidate**. Both passed: **8 passed, 0 failed, 0 ignored** per version.
+
+The controls cover collection in-place replacement and set deduplication; invalid sequence elements; adjacent enum map/sequence forms, missing tag/content and invalid errors; external enum variant errors; custom in-place decoder rejection; generic defaults, skip and flatten; and skipped tuple field indices. The probe explicitly enables `deserialize_in_place` to exercise its changed generation path. Candidate dependencies resolve Syn 3.0.5; baseline resolves Syn 2.0.119. Exact temporary manifests, locks, source and logs are retained.
+
+The probes emit one expected local fixture dead-code warning for the deliberately rejected `Skipped` enum variant. They are not Clippy runs, the full upstream Serde suite, Miri, an old-MSRV matrix, a guest-target run, or a proof campaign. The MSRV increase is compatible with Sparq's pinned native/guest toolchains; no general old-toolchain compatibility claim is made. No performance measurement or speedup claim is made.
+
+## Disposition boundaries
+
+These are **two actual source delta approvals**, not two backlog exemptions. They satisfy the additional Serde package review scope left by the earlier conditional Fable review of `serde 1.0.229`, provided the integrator retains the baseline chains and covers other transitive packages separately. Syn 3.0.5, other dependency changes, and any existing exceptions are not automatically audited by this result. The complete assembled root/host/guest cargo-vet, fresh advisory, integrity, SBOM and provenance gates remain separate requirements.
+
+The queued Claude/Fable review remains explicitly pending; this report neither rewrites its status nor attributes my work to it.

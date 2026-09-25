@@ -154,6 +154,10 @@ preserves failed license, advisory and source-audit coverage checks. Running the
 same accepted policy on the exact foundation baseline produced the same failures;
 that comparison does not make the dependency gates pass. Dependency remediation
 and independent review remain required before publication is ready to land.
+The later [policy reconciliation](../../../research/native-dependency-policy/README.md)
+preserves this history and records checks against the candidate's own policy.
+License checks pass under reviewed exact-version entries; native audit coverage
+and maintenance advisories still fail. This is not a clean dependency verdict.
 
 All dependencies remain in the detached opt-in workspace. Its existing build
 script still requires Circom even for this RDF feature, and the pinned

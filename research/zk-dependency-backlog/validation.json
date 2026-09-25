@@ -1,0 +1,95 @@
+{
+  "schema_version": 1,
+  "recorded_by": "GPT-6",
+  "canonical": false,
+  "policy_preservation": {
+    "base": "69ac7cc155606d00dbb1c9f27ee6152e60310ef4",
+    "new_exact_backlog_entries": 143,
+    "new_delta_audits": 10,
+    "original_config_policies_preserved": true,
+    "all_original_exemptions_preserved": true,
+    "all_original_audits_preserved": true,
+    "all_original_imports_preserved": true,
+    "policy_sha256": {
+      "config.toml": "9546f37103054391b2d717c11d5656923c18f173afdf9627d57a8e9c91a32b7e",
+      "audits.toml": "6ca257a1acb2313beb8706600bb82409cea84826c3390c9ade00800cb48275e6",
+      "imports.lock": "ebb5f99a4e981eede6073f05935b03765e73b268e3a8378a3c0fa89586f52764"
+    }
+  },
+  "vet": {
+    "root": "131 fully audited, 9 partially audited, 503 exempted",
+    "evaluator": "72 fully audited, 2 partially audited, 201 exempted",
+    "guest": "49 fully audited, 2 partially audited, 132 exempted",
+    "note": "Actual frozen cargo-vet outcomes; exempted is tool graph classification, not the count of stored exceptions."
+  },
+  "deny": {
+    "all_three_integrity_scopes": "pass",
+    "all_three_advisory_scopes": "pass",
+    "refresh_performed": true,
+    "advisory_database_commit": "b50980aad8b8f14f77e25a97b32dd94bf008b0af",
+    "advisory_database_commit_date": "2026-09-09T12:49:52+02:00",
+    "checked_at_utc": "2026-09-12T23:21:03.050132+00:00",
+    "initial_attempt": "Sandbox advisory-lock permission error; scoped permission allowed the real refresh/check. This error was not counted as a pass.",
+    "hosted_fresh_check_still_required": true,
+    "explicit_fetch_log_sha256": "bcb068cce4dbde3aabbccc6dab3df9455dba4cb206d3ac69977d209f56260612",
+    "explicit_fetch_completed_at_utc": "2026-09-12T23:21:59Z"
+  },
+  "sbom": {
+    "documents": 72,
+    "bom_refs_checked": 53817,
+    "bom_ref_check": "passed using unchanged test module predicates",
+    "purl_check": "passed",
+    "supplier_check": "passed"
+  },
+  "sbom_generator": "cargo-cyclonedx 0.5.9",
+  "sbom_self_tests": {
+    "purl": 10,
+    "bom_ref": 10,
+    "supplier": 10
+  },
+  "sbom_export_sha256": "8a5353c2baff489b13819de9e80995415a7d03c7aa8288ac1fed96d8af37b936",
+  "patch_provenance": "All six selected patches passed the normal committed provenance verifier; expensive feature/proof campaigns were not repeated for policy-only assembly.",
+  "logs": [
+    {
+      "path": "/tmp/sparq-assembled-three-vet.log",
+      "sha256": "579c4ac8086b9cf3ea7085e4335568200de450407b4618bf88235871b16a1521"
+    },
+    {
+      "path": "/tmp/sparq-assembled-three-deny-integrity.log",
+      "sha256": "b0f31038d82252d6b65553b45f5bb5a1280675f80dc4d739cf8b4c9a57af6d0d"
+    },
+    {
+      "path": "/tmp/sparq-assembled-three-deny-advisories-refreshed.log",
+      "sha256": "eca5c7dd1dfe4767eedd8faecf1b0951006808388f386816d7d80ae51c59fd96"
+    },
+    {
+      "path": "/tmp/sparq-assembled-provenance.log",
+      "sha256": "f96c23309e3441ff9dc77e59e178e0f19602513d1a5536baeab4c9ac735af71b"
+    },
+    {
+      "path": "/tmp/sparq-assembled-three-sbom.log",
+      "sha256": "9349e0104ae569b90a985c776a13322a33499b9c320080adec6443039a9aa03b"
+    },
+    {
+      "path": "/tmp/sparq-assembled-sbom-purl-tests.log",
+      "sha256": "517722acf71082081eee58adc546cb97bccea981202ada3d8c8bb1e5366e7aa0"
+    },
+    {
+      "path": "/tmp/sparq-assembled-sbom-ref-tests.log",
+      "sha256": "ed6af19a4509878a646c0e4192239a04ab649d28ac8ad0b5f28953e5c5171f71"
+    },
+    {
+      "path": "/tmp/sparq-assembled-sbom-supplier-tests.log",
+      "sha256": "219171b1713d2210354ec6a27b8d519d9ebe81ec3456a30cf78c03af60117f68"
+    },
+    {
+      "path": "/tmp/sparq-assembled-advisory-fetch.log",
+      "sha256": "bcb068cce4dbde3aabbccc6dab3df9455dba4cb206d3ac69977d209f56260612"
+    }
+  ],
+  "limits": [
+    "143 exact versions remain tracked review backlog; this does not certify all source or cryptography.",
+    "Patch deltas and upstream audit coverage are separate evidence.",
+    "The three manifest scopes do not cover every detached lockfile in this repository."
+  ]
+}

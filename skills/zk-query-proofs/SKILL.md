@@ -38,6 +38,11 @@ as distinct outcomes. Its `rdf::binding_tests` helper constructs genuine weaker
 statements for synthetic fixture controls; these must fail the required verifier.
 The mandatory malicious-proof library suite remains separate.
 
+[GPT-6] The native [dependency policy record](../../research/native-dependency-policy/README.md)
+separates inherited trust records, exact-version licenses and candidate-owned
+metadata checks. Native audit-coverage and maintenance failures remain open;
+passing the proof tests does not satisfy these dependency gates.
+
 ## Prerequisites
 
 - **Noir toolchain on `PATH`** (the only way to prove/verify): `nargo` **1.0.0-beta.21** and Barretenberg `bb` **5.0.0-nightly.20260324** (bb target `noir-recursive`). Other versions may change the bb public-input byte layout the verifier reconstructs against. If `nargo`/`bb` are absent, the structural pre-filter and all host-side helpers still work, but `verify_manifest` / `CircuitProver` cannot.
