@@ -18,11 +18,16 @@ Zero-knowledge proofs that a SPARQL query result is correct over RDF held in nam
 
 For the isolated BBS+/BLS12-381 and Circom/LegoGroth16 composition experiment, see
 [`zk/native-composition/README.md`](../../zk/native-composition/README.md). Its dedicated
-CI runs real proof tests. Its optional `native-rdf` feature adds a separately
+CI runs real proof tests. The native-only [Ark tracing patch](../../zk/native-composition/vendor-support/README.md)
+has separate provenance and compatibility checks; it does not certify upstream
+constraint arithmetic. Its optional `native-rdf` feature adds a separately
 versioned [public RDF support API](references/native-rdf.md): `issue_rdf`,
 `prove_public_bgp`, and `verify_public_bgp` authenticate reconstructed public BGP
 triples against verifier-owned issuer/status policy. Public signed-slot indices
-and status references are disclosed. It provides no hidden RDF predicate or Noir
+and status references are disclosed. Support selection covers all accepted roles
+when a matching allocation exists. Signed epoch labels must match exactly;
+status bytes use the native least-significant-bit-first convention documented in
+the reference. It provides no hidden RDF predicate or Noir
 linkage and remains unaudited. The original tuple executable stays separate. [GPT-6]
 
 ## Prerequisites

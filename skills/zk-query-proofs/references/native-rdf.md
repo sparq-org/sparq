@@ -66,8 +66,12 @@ roles, eight rows and eight BGP patterns. Query bytes, document bytes, term
 bytes, input-triple count, status bytes, proof statement sizes and replay-store
 size have explicit bounds in `rdf.rs`. Exceeding a bound rejects; credentials
 or rows are never silently truncated. Every accepted issuer role must contribute
-support. The convenience prover chooses the first matching credential slot and
-rejects if that choice leaves an accepted role unused.
+support. The convenience prover considers all matching credential slots and
+deterministically selects an allocation covering every role when one exists.
+It tracks reachable role subsets within the fixed capacities; overlapping
+credentials cannot make a first-match choice exclude a required role. This
+witness-selection change retains the versioned verifier relation and wire format.
+The chosen public slot indices can differ from a former first-match allocation.
 
 Credential issuance parses a bounded N-Quads document containing only default
 graph triples and uses `sparq-canon::canonicalize_triples`. Canonical lines are
@@ -98,6 +102,19 @@ and bit index. The verifier checks the index against its complete accepted
 snapshot, checks that the bit is unset, and binds the snapshot's digest in the
 context. A holder cannot substitute another list, epoch, index or snapshot as
 trusted input.
+
+The epoch is an issuance-time label inside the issuer-signed status message,
+not a freshness discovery mechanism. A different verifier-accepted epoch requires
+a credential signed for that exact label; an existing presentation fails
+verification against the changed label. The caller can select updated snapshot
+bytes under the same signed label, with the exact accepted snapshot digest bound
+into each newly constructed proof context.
+
+Status input is a raw byte vector: index `i` selects byte `i / 8` and mask
+`1 << (i % 8)`, least significant bit first within each byte. This API does not
+decode a [W3C Bitstring Status List encodedList](https://www.w3.org/TR/vc-bitstring-status-list/#bitstringstatuslistcredential)
+or authenticate a status-list credential; an application must supply the stated
+native representation and independent trust policy.
 
 Public transcript fields include query, mappings, issuer roles, fixed capacity,
 status list/epoch/index, and **disclosed signed-slot indices**. Those indices
@@ -138,6 +155,11 @@ script still requires Circom even for this RDF feature, and the pinned
 `proof_system` dependency still activates the LegoGroth16/Circom/Wasmer graph.
 The RDF proof itself uses no residual circuit. No dependency fork hides that
 build cost or changes the original tuple executable's supported behavior.
+
+The native-only [Ark tracing patch](../../../zk/native-composition/vendor-support/README.md)
+has independent provenance and compatibility checks. Its callback rename does
+not change constraint arithmetic; the historical unpatched evidence above
+retains its original source identity and dependency failures.
 
 Primary references: [SPARQL BGP matching](https://www.w3.org/TR/sparql11-query/#BasicGraphPatternMatching),
 [RDF dataset canonicalization](https://www.w3.org/TR/rdf-canon/), and
