@@ -102,7 +102,12 @@ def verify():
     lock = tomllib.loads((NATIVE / "Cargo.lock").read_text())
     ark = [p for p in lock["package"] if p["name"] == "ark-relations"]
     require(len(ark) == 1 and ark[0]["version"] == "0.4.0" and "source" not in ark[0], "local Ark lock selection")
-    check_metadata(native_metadata())
+    metadata = native_metadata()
+    check_metadata(metadata)
+    # [GPT-6] Same locked native graph; local patches retain independent provenance.
+    from wasmer import verify as wasmer_verify
+    wasmer_verify.verify()
+    wasmer_verify.check_metadata(metadata)
     return provenance
 
 

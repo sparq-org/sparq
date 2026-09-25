@@ -26,7 +26,7 @@ jobs:
   native-composition:
     name: native credential and circuit composition
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -101,6 +101,33 @@ jobs:
           cargo fetch --locked --manifest-path zk/native-composition/Cargo.toml
           python3 zk/native-composition/vendor-support/test_verify.py
           python3 zk/native-composition/vendor-support/verify.py --smoke
+
+      - name: Wasmer diagnostic, token and layout controls
+        if: steps.changes.outputs.required == 'true'
+        timeout-minutes: 15
+        run: |
+          set -euo pipefail
+          python3 zk/native-composition/vendor-support/wasmer/test_verify.py
+          python3 zk/native-composition/vendor-support/wasmer/test_remote_protocol.py
+          python3 zk/native-composition/vendor-support/wasmer/test_hosted.py
+          # Only the two removed diagnostic packages are new to the native
+          # locked cache. Their exact transitive pins remain in this fetch-only
+          # baseline package; it is never a native runtime dependency.
+          python3 zk/native-composition/vendor-support/wasmer/fetch_baseline.py --fetch \
+            --output "$RUNNER_TEMP/wasmer-baseline-fetch"
+          python3 zk/native-composition/vendor-support/wasmer/remote_checks.py \
+            --output "$RUNNER_TEMP/wasmer-controls" \
+            --target-dir "$GITHUB_WORKSPACE/zk/native-composition/target"
+
+      - name: Preserve Wasmer control evidence including failures
+        if: always() && steps.changes.outputs.required == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: wasmer-diagnostic-controls
+          path: |
+            ${{ runner.temp }}/wasmer-baseline-fetch
+            ${{ runner.temp }}/wasmer-controls
+          if-no-files-found: error
 
       - name: Clippy for the standalone prototype
         if: steps.changes.outputs.required == 'true'

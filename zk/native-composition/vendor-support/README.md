@@ -45,3 +45,8 @@ policy and maintenance advisories remain separate. The historical unpatched
 [native gate failures](../evidence/native-rdf-dependency-gates.json) are preserved.
 Do not interpret successful patch checks as clean dependency gates or transfer
 the earlier proof artifact's source identity to this successor.
+
+[GPT-6] The same native verifier also checks the separate
+[Wasmer derive diagnostic patch](wasmer/README.md), including its registry audit
+obligation and exact resolved local path. Its remote layout/diagnostic controls
+are separate from this Ark smoke and have no proof-count claim.
