@@ -18,7 +18,7 @@ All existing configuration, audit, exemption, publisher and import records are
 retained. The inherited SDK backlog exemptions and actual source-delta audits
 remain separate in the [unchanged historical record](../zk-dependency-backlog/README.md).
 That history describes its original SDK graph, not execution of this native graph.
-This native change creates no exemption, local source audit or new trust source.
+That reconciliation created no exemption, local source audit or new trust source.
 
 The [trusted chains](trusted-chains.json) add sixteen already published records
 from the six configured sources, covering seven exact native package versions.
@@ -59,7 +59,7 @@ verdict or general code unreachability. The exact reviewed SDK registry release
 names VCS commit `8c215e2f4ccdd935f0517bf05d90f1ae032840a9`; this explanation
 does not assert that the SDK runtime is introduced by the native policy change.
 
-## Validation and remaining failures
+## Original reconciliation validation and failures
 
 The [candidate validation record](validation.json) binds the candidate's own
 manifests, lockfiles and policy. Cached, frozen metadata checks pass root vet and
@@ -83,3 +83,23 @@ candidate run support the residual count; the formatting failure does not.
 Those distinct receipts and their hashes are identified in `validation.json`.
 The remaining native audit coverage and maintenance failures prevent a clean
 dependency-gate claim.
+
+## Two independently reviewed source units
+
+[GPT-6] The [2026-09-25 source review](reviewed-units/2026-09-25/review-final.md)
+adds an explicitly attributed automated GPT-6 audit for the exact
+`num-iter 0.1.45 -> 0.1.46` delta and a full exact-package audit for
+`cranelift-codegen-shared 0.110.3`. The
+[review manifest](reviewed-units/2026-09-25/review.json) retains the archive and
+member checksums, cached registry entries and accepted num-iter baseline chain.
+The reviewer ran no compiler, tests or proofs. These records do not extend to
+transitive dependencies, other Cranelift packages, generated machine code or
+cryptographic backends.
+
+The [candidate-owned validation](reviewed-units/2026-09-25/validation.json)
+records cached frozen metadata checks: root vet still passes, while native vet
+still fails with 132 exact missing units. Only the two reviewed units leave the
+original 134-unit set. All existing audits, imports, criteria and exemptions are
+preserved; this addition creates no exemption or trust source. Both previously
+recorded native maintenance advisories remain unresolved and were not rerun in
+this audit-only slice. The original reconciliation receipts remain unchanged.
