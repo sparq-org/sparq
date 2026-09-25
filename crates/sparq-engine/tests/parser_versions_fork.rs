@@ -2,7 +2,7 @@
 //!
 //! The vendored `spargebra` fork retains VERSION labels itself. This target is
 //! the only permitted caller of those fork-only methods
-//! (`scripts/ci_registry_parser.py scan` enforces it); production code uses
+//! (`scripts/check_registry_parser.py scan` enforces it); production code uses
 //! `sparq_engine::parse_versioned_{query,update}`, which also compiles against
 //! upstream `spargebra` 0.4.6. The gate runs this target in both upstream
 //! escaping modes: plainly and with

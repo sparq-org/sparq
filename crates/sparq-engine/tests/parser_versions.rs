@@ -1,7 +1,7 @@
 //! [OPUS-5.5] Stable-parser contract for `parse_versioned_query`/`_update`.
 //!
 //! Only APIs present in the published `spargebra` 0.4.6 appear here, so the
-//! registry-only consumer gate (`scripts/ci_registry_parser.py`) compiles and
+//! registry-only consumer gate (`scripts/check_registry_parser.py`) compiles and
 //! runs this same file against upstream, once per Unicode escaping mode. Set
 //! `SPARQ_EXPECT_STANDARD_UNICODE_ESCAPING` to `0` or `1` to require a mode.
 //! Keep it free of crate-feature `cfg`s: the gate compiles it inside another

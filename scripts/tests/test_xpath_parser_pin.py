@@ -13,7 +13,7 @@ def validate_parser_pin(root):
     fork = root / "vendor/spargebra"
     version = tomllib.loads((fork / "Cargo.toml").read_text())["package"]["version"]
     if workspace["workspace"]["dependencies"]["spargebra"]["version"] != "=" + version:
-        raise ValueError("fork API requires an exact workspace parser version")
+        raise ValueError("vendored patch selection requires an exact workspace parser version")
     patch = manifest["patch"]["crates-io"]["spargebra"]
     if (detached / patch["path"]).resolve() != fork.resolve():
         raise ValueError("detached oracle must select the same local parser fork")
