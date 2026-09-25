@@ -1,0 +1,126 @@
+{
+  "authored_by": "GPT-6",
+  "schema": "sparq.proof-bindings.rejection-categories.v1",
+  "scope": "Exact diagnostic allowlist for the retained V1/V2 model. Explicit admission call supplies its actual phase; remaining phases follow the reviewed producer. Unknown or combined errors remain unclassified, never substring-matched.",
+  "deliberately_unclassified": [
+    "query evaluation or resource budget rejected",
+    "dataset byte capacity or blinding rejected",
+    "V2 graph capacity or blinding rejected",
+    "query size or challenge rejected",
+    "V2 query size or challenge rejected"
+  ],
+  "diagnostics": {
+    "dataset clauses are not admitted": {
+      "category": "profile",
+      "phase": "admission"
+    },
+    "only SELECT and ASK are admitted": {
+      "category": "profile",
+      "phase": "admission"
+    },
+    "GRAPH, SERVICE and LATERAL are not admitted": {
+      "category": "profile",
+      "phase": "admission"
+    },
+    "query blank nodes and triple terms are not admitted": {
+      "category": "profile",
+      "phase": "admission"
+    },
+    "custom function is not admitted": {
+      "category": "profile",
+      "phase": "admission"
+    },
+    "nondeterministic or RDF 1.2 function is not admitted": {
+      "category": "profile",
+      "phase": "admission"
+    },
+    "directional literals are not admitted": {
+      "category": "profile",
+      "phase": "admission"
+    },
+    "EXISTS body is outside the positive-pattern profile": {
+      "category": "profile",
+      "phase": "admission"
+    },
+    "nested EXISTS is not admitted": {
+      "category": "profile",
+      "phase": "admission"
+    },
+    "nullable path composition is not admitted": {
+      "category": "profile",
+      "phase": "admission"
+    },
+    "custom aggregate is not admitted": {
+      "category": "profile",
+      "phase": "admission"
+    },
+    "triple terms are not admitted": {
+      "category": "profile",
+      "phase": "admission"
+    },
+    "dataset blank nodes are not admitted": {
+      "category": "profile",
+      "phase": "dataset"
+    },
+    "blank nodes and triple terms are not admitted": {
+      "category": "profile",
+      "phase": "dataset"
+    },
+    "blank-node graph names are not admitted": {
+      "category": "profile",
+      "phase": "dataset"
+    },
+    "SPARQL parse rejected": {
+      "category": "parse",
+      "phase": "admission"
+    },
+    "N-Triples parse rejected": {
+      "category": "parse",
+      "phase": "dataset"
+    },
+    "N-Quads parse rejected": {
+      "category": "parse",
+      "phase": "dataset"
+    },
+    "dataset clause capacity": {
+      "category": "capacity",
+      "phase": "admission"
+    },
+    "query AST capacity": {
+      "category": "capacity",
+      "phase": "admission"
+    },
+    "BGP capacity": {
+      "category": "capacity",
+      "phase": "admission"
+    },
+    "projection capacity": {
+      "category": "capacity",
+      "phase": "admission"
+    },
+    "VALUES capacity": {
+      "category": "capacity",
+      "phase": "admission"
+    },
+    "source triple capacity": {
+      "category": "capacity",
+      "phase": "dataset"
+    },
+    "V2 source quad capacity": {
+      "category": "capacity",
+      "phase": "dataset"
+    },
+    "V2 dataset byte capacity rejected": {
+      "category": "capacity",
+      "phase": "dataset"
+    },
+    "temporal year capacity": {
+      "category": "capacity",
+      "phase": "dataset"
+    },
+    "result row capacity": {
+      "category": "capacity",
+      "phase": "evaluation"
+    }
+  }
+}

@@ -408,3 +408,6 @@ come from actual engine emitters; private engine diagnostics are discarded. The
 legacy `evaluate` APIs keep their original execution rejections, including V3's
 separate query and graph diagnostics. This error
 API is outside request/journal encoding and adds no receipt evidence by itself.
+
+[GPT-6] The [shared original-corpus controller](../../bench/zk-bindings/README.md)
+retains native versus actual-proof counters and independently pinned goldens.
