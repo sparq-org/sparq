@@ -19421,14 +19421,14 @@ mod f64_collapse_order_agreement {
             );
         }
 
-        // [FABLE-5] sq-74oy4 / sq-6b1lj: the alignment now extends to PER-DATATYPE
-        // well-formedness AND whitespace. `as_num` is datatype-aware and trimming, so it
-        // agrees with `as_numeric` (`Num::of_literal`) on integer/decimal lexicals too — a
-        // padded lexical is its trimmed value; a lexical ill-formed FOR its datatype is None.
+        // [GPT-6] Both numeric seams validate raw RDF lexicals verbatim.
+        // Padding and per-datatype malformed forms are ordinary type errors.
         let ints = |s: &str| Value::Term(Term::Literal(Literal::new_typed_literal(s, xsd::INTEGER)));
         let decs = |s: &str| Value::Term(Term::Literal(Literal::new_typed_literal(s, xsd::DECIMAL)));
-        assert_eq!(as_num(&ints(" 1 ")), Some(1.0), "padded integer trims to 1");
-        assert_eq!(as_num(&decs(" 1.5 ")), Some(1.5), "padded decimal trims to 1.5");
+        assert_eq!(as_num(&ints(" 1 ")), None, "raw padded integer is invalid");
+        assert_eq!(as_num(&decs(" 1.5 ")), None, "raw padded decimal is invalid");
+        assert_eq!(as_num(&ints("1")), Some(1.0), "plain integer control");
+        assert_eq!(as_num(&decs("1.5")), Some(1.5), "plain decimal control");
         assert_eq!(as_num(&ints("1.5")), None, "fraction on integer is a type error");
         assert_eq!(as_num(&ints("1E2")), None, "exponent on integer is a type error");
         assert_eq!(as_num(&decs("1E2")), None, "exponent on decimal is a type error");

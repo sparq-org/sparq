@@ -43,10 +43,11 @@ tower), and the XSD lexical helpers `split_decimal`, `parse_xsd_f64`, `parse_xsd
 `fmt_xsd_double`. `parse_xsd_f64` delegates to `sparq_core::parse_xsd_f64` (sq-9781x) — the
 shared XSD f64 SPELLING body. The `sparq-core` numeric-value cache layers a DATATYPE-AWARE
 gate on top (`sparq_core::numeric_cache_value`: integer digit grammar and subtype
-facets, decimals without exponents, i128-fit, XML-whitespace-trimmed), so a cache-hit ⟺ `Num::of_literal` accepts — a lexical
-ill-formed for its datatype (`"1.5"^^xsd:integer`) misses the cache exactly as `of_literal`
-type-errors it, uniformly on `=`/`<`/`>`. The differential test
-`cache_f64_seam_vs_as_numeric_differential` pins that agreement.
+facets and decimals without exponents). [GPT-6] Raw RDF lexical bytes are
+validated verbatim; boundary whitespace is invalid. Cache representation and
+arithmetic capacity remain separate from validity, so a cache miss alone is not
+proof of an ill-typed literal. String-sourced SPARQL constructors normalize XML
+boundary whitespace before calling these raw parsers.
 [GPT-6] `Num::of_literal` and `as_numeric` share the lexical/facet check
 `sparq_core::numeric_literal_valid`. Decimal spellings such as `"5.0"^^xsd:integer`
 and out-of-range subtype values such as `"1200"^^xsd:byte` return `None`.
@@ -307,7 +308,8 @@ numeric/compare micro-benches within noise). Phase-5 reasoner adoption (consumin
 
 `numeric::Num::of_parts(value, datatype)` is the allocation-free parser shared
 by `Num::of_literal` and the reasoner comparator. Both validate numeric lexical
-syntax, XML whitespace and integer facets before the finite arithmetic tower.
+syntax and integer facets before the finite arithmetic tower; raw boundary
+whitespace is rejected, not stripped.
 The core `Graph::exact_numeric_lexical` and engine exact-decimal comparison
 helpers apply the same validity gate before preserving the original lexical.
 This keeps cached, scalar and compiled arithmetic errors aligned; it does not
