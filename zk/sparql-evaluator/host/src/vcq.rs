@@ -342,12 +342,19 @@ pub fn expected_v3_request(
     })
 }
 
-/// Current Unix time in seconds; a pre-epoch clock reads as zero and fails closed.
+/// Current Unix time in seconds; a pre-epoch clock reads as `u64::MAX`.
+///
+/// `u64::MAX` is never below an exclusive `not_after`, so every request
+/// window rejects it as expired. Zero would pass a `not_before = 0` window.
 #[must_use]
 pub fn system_unix_seconds() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |elapsed| elapsed.as_secs())
+    unix_seconds(SystemTime::now())
+}
+
+// [OPUS-5.5] Failed epoch conversion must not read as a valid instant.
+fn unix_seconds(now: SystemTime) -> u64 {
+    now.duration_since(UNIX_EPOCH)
+        .map_or(u64::MAX, |elapsed| elapsed.as_secs())
 }
 
 /// Descriptor digest plus bounded, serialized receipt bytes.
@@ -1087,6 +1094,14 @@ mod tests {
         let error = bridge.finish::<()>(Err(verification_error())).unwrap_err();
         assert_eq!(error.code(), ErrorCode::Backend("vcq-proof-rejected"));
         assert_eq!(store.calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn pre_epoch_clock_reads_as_expired_not_zero() {
+        use std::time::Duration;
+        let pre_epoch = UNIX_EPOCH.checked_sub(Duration::from_secs(1)).unwrap();
+        assert_eq!(unix_seconds(pre_epoch), u64::MAX);
+        assert_eq!(unix_seconds(UNIX_EPOCH + Duration::from_secs(7)), 7);
     }
 
     fn select(order: RowOrder, variables: &[&str], rows: &[&[Option<&str>]]) -> v3::CanonicalResult {

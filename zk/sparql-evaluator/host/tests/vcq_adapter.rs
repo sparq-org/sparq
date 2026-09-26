@@ -298,7 +298,8 @@ fn nonce_and_statement_follow_the_documented_composition() {
 }
 
 #[test]
-fn every_stored_request_field_changes_the_nonce() {
+fn representative_stored_request_fields_change_the_nonce() {
+    // [OPUS-5.5] A subset; full field coverage lives in the shared encoding tests.
     let base = Spec::bag();
     let other_pin = ArtifactPin {
         sha256: [1; 32],

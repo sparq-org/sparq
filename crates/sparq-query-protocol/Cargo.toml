@@ -1,7 +1,8 @@
 # [OPUS-5.5] zkp-16.1 — typed negotiation and method contract for the vcq draft 0
 # (`research/vc-query-protocol.md`). A dependency-free LEAF: no proof backend,
-# wire encoding or cryptography lives here, and nothing in the workspace consumes
-# it yet, so sparq-core / sparq-engine / the default wasm build are unchanged.
+# wire encoding or cryptography lives here. Its only consumer is the detached
+# zk/sparql-evaluator/host crate's OFF-by-default `vcq` feature, so
+# sparq-core / sparq-engine / the default wasm build are unchanged.
 [package]
 name = "sparq-query-protocol"
 version.workspace = true

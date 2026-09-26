@@ -8,8 +8,9 @@
 > claim** and has **no proof backend**: no actual method, no hash or other cryptography, no query
 > parser, no RDF/SPARQL canonicalization, and no interoperable wire encoding or transport. Every
 > draft registry entry still has `adapter_available: false`, and this crate registers no method.
-> No workspace crate consumes it yet, so `sparq-core`, `sparq-engine` and the default wasm build
-> are unchanged.
+> Its only consumer is the detached `zk/sparql-evaluator/host` crate's OFF-by-default `vcq`
+> feature; the backend, store and cryptography live there, never here. `sparq-core`,
+> `sparq-engine` and the default wasm build are unchanged.
 
 ## 🚀 Quickstart
 

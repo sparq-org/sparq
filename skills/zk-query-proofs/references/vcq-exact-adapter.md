@@ -22,6 +22,7 @@ cargo test --manifest-path zk/sparql-evaluator/Cargo.toml -p sparq-proved-evalua
 | `Risc0ExactV3::new(&ArtifactPin, AcceptedGuest)` | Method from an independently approved pin and guest; rejects a guest that does not match the pin |
 | `.with_r0vm(PathBuf)` | Local `r0vm` used by `prove` |
 | `.with_verifier(Identifier, fn() -> u64)` | Verifier audience and clock used by the trait `verify` |
+| `system_unix_seconds()` | Default clock; a pre-epoch system time reads as `u64::MAX`, so every window rejects it as expired <!-- [OPUS-5.5] --> |
 | `verify_at(request, audience, now_unix, admission, presentation, store)` | Verification with explicitly supplied audience and Unix time |
 | `descriptor(&ArtifactPin)` | The exact `MethodDescriptor` a verifier lists in its request |
 | `derive_nonce`, `stored_request_digest`, `descriptor_digest`, `statement_digest`, `parameter_digest` | Documented digests below |
