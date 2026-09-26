@@ -1,5 +1,7 @@
 // [GPT-6] Synthetic, NONcanonical stage-13 experiment; not external security assurance.
 //! Run with a strict experiment JSON and a new output directory. No real wallet input.
+#[path = "../src/toolchain.rs"]
+mod toolchain;
 #[path = "result_experiment/workloads.rs"]
 mod workloads;
 
@@ -27,7 +29,7 @@ use std::{
     fs,
     io::Read,
     path::{Path, PathBuf},
-    process::{Command, ExitCode},
+    process::{Command, ExitCode, Output},
     time::Instant,
 };
 
@@ -210,24 +212,34 @@ fn work(w: &ResultWork) -> Value {
         "witness_uses":w.witness_uses,"public_predicates":w.public_predicates,"private_predicates":w.private_predicates,
         "signature_checks":w.signature_checks,"optimization":w.optimization.map(|v|format!("{v:?}"))})
 }
-fn command(tool: &str, args: &[&str], cwd: &Path) -> Fallible<String> {
-    let out = Command::new(tool).args(args).current_dir(cwd).output()?;
+fn successful_stdout(tool: &str, out: Output) -> Fallible<Vec<u8>> {
     if !out.status.success() {
         return Err(format!("{tool} failed: {}", String::from_utf8_lossy(&out.stderr)).into());
     }
-    Ok(String::from_utf8(out.stdout)?.trim().to_owned())
+    Ok(out.stdout)
 }
-fn pinned_version(tool: &str, output: &str, expected: &str) -> bool {
-    match tool {
-        "nargo" => output
-            .lines()
-            .next()
-            .is_some_and(|line| line == format!("nargo version = {expected}")),
-        "bb" => output.trim() == expected,
-        _ => false,
+fn command(tool: &str, args: &[&str], cwd: &Path) -> Fallible<String> {
+    let out = Command::new(tool).args(args).current_dir(cwd).output()?;
+    Ok(String::from_utf8(successful_stdout(tool, out)?)?
+        .trim()
+        .to_owned())
+}
+// [OPUS-5.5] Checks raw, untrimmed stdout: generic trimming would rescue leading blanks.
+fn pinned_version(tool: &str, out: Output) -> Fallible<String> {
+    let stdout = successful_stdout(tool, out)?;
+    let version = String::from_utf8(stdout).map_err(|e| {
+        format!(
+            "{tool} --version output is not UTF-8: {:?}",
+            String::from_utf8_lossy(e.as_bytes())
+        )
+    })?;
+    // Shared exact field matcher; a later diagnostic cannot rescue a near match.
+    if !toolchain::pinned_version_output(tool, version.as_bytes()) {
+        return Err(format!("unsupported {tool} version: {version:?}").into());
     }
+    Ok(version)
 }
-fn tool_identity(tool: &str, expected: &str, root: &Path) -> Fallible<Value> {
+fn tool_identity(tool: &str, root: &Path) -> Fallible<Value> {
     // This driver is Unix-only. Match executable lookup before hashing the same file.
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
@@ -246,17 +258,15 @@ fn tool_identity(tool: &str, expected: &str, root: &Path) -> Fallible<Value> {
         })
         .ok_or("executable tool not found on PATH or unsupported platform")?
         .canonicalize()?;
-    let version = command(
-        found.to_str().ok_or("non-UTF-8 tool path")?,
-        &["--version"],
-        root,
-    )?;
-    // Match the tool's actual version field; a later diagnostic cannot rescue a near match.
-    if !pinned_version(tool, &version, expected) {
-        return Err(format!("unsupported {tool} version: {version}").into());
-    }
+    // Run and hash the same resolved file; record the exact validated stdout.
+    let out = Command::new(&found)
+        .arg("--version")
+        .current_dir(root)
+        .output()?;
+    let version = pinned_version(tool, out)?;
     Ok(json!({"version_output":version,"binary_blake3":hash(&fs::read(found)?)}))
 }
+
 fn source_identity(root: &Path) -> Fallible<Value> {
     let head = command("git", &["rev-parse", "HEAD"], root)?;
     let status = command(
@@ -542,8 +552,9 @@ fn execute(exp: &Experiment, out: &Path) -> Fallible<bool> {
             "backend_prove_excluding_key_seconds":{"value":null,"reason":"bb prove --write_vk is measured as one subprocess; internal proof/key split unavailable"},
             "peak_rss_bytes":{"value":null,"reason":"host/subprocess RSS not instrumented"}}});
     let outcome = (|| -> Fallible<()> {
-        report["backend"]["nargo"] = tool_identity("nargo", "1.0.0-beta.21", &root)?;
-        report["backend"]["bb"] = tool_identity("bb", "5.0.0-nightly.20260324", &root)?;
+        for (tool, _) in toolchain::PINNED_TOOLS {
+            report["backend"][tool] = tool_identity(tool, &root)?;
+        }
         let start = Instant::now();
         let f = match &exp.wallet {
             Some(wallet) => authenticate(wallet.triples()?)?,
@@ -642,26 +653,6 @@ mod tests {
         assert!(require_driver_inventory(&record, "verify", &["bb_verify"]).is_err());
         record["stages"]["verify"]["driver"]["events"] = json!([]);
         assert!(require_driver_inventory(&record, "verify", &["bb_verify"]).is_err());
-    }
-    #[test]
-    fn version_fields_reject_near_matches_and_diagnostic_rescue() {
-        let n = "1.0.0-beta.21";
-        let b = "5.0.0-nightly.20260324";
-        assert!(pinned_version(
-            "nargo",
-            &format!("nargo version = {n}\nnoirc version = {n}+hash"),
-            n
-        ));
-        assert!(pinned_version("bb", b, b));
-        for suffix in ["0", "-other", "+other"] {
-            assert!(!pinned_version("bb", &format!("{b}{suffix}"), b));
-            assert!(!pinned_version(
-                "nargo",
-                &format!("nargo version = {n}{suffix}\n{n}"),
-                n
-            ));
-        }
-        assert!(!pinned_version("bb", &format!("bad\n{b}"), b));
     }
     fn config() -> Experiment {
         serde_json::from_str(include_str!(
@@ -776,5 +767,50 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    // [OPUS-5.5] Synthetic `Output`s exercise the adapter boundary without spawning tools.
+    #[cfg(unix)]
+    #[test]
+    fn tool_versions_are_checked_on_raw_successful_stdout() {
+        use std::os::unix::process::ExitStatusExt;
+        use std::process::ExitStatus;
+        let out = |code: i32, stdout: &[u8]| Output {
+            status: ExitStatus::from_raw(code << 8),
+            stdout: stdout.to_vec(),
+            stderr: b"diagnostic".to_vec(),
+        };
+        let [(_, n), (_, b)] = toolchain::PINNED_TOOLS;
+        let nargo = format!("nargo version = {n}\nnoirc version = {n}+0123\n");
+        assert_eq!(
+            pinned_version("nargo", out(0, nargo.as_bytes())).unwrap(),
+            nargo
+        );
+        // `bb` trimming is part of the matcher contract; the report keeps raw stdout.
+        let bb = format!(" {b}\n");
+        assert_eq!(pinned_version("bb", out(0, bb.as_bytes())).unwrap(), bb);
+        for prefix in ["\n", " ", "\r\n", "\t", "\n \n"] {
+            let padded = format!("{prefix}{nargo}");
+            // The generic trimmed `command` path would have normalized this into acceptance.
+            assert!(toolchain::pinned_version_output(
+                "nargo",
+                padded.trim().as_bytes()
+            ));
+            assert!(
+                pinned_version("nargo", out(0, padded.as_bytes())).is_err(),
+                "{padded:?}"
+            );
+        }
+        for (tool, stdout) in [("nargo", &nargo), ("bb", &bb)] {
+            let failed = pinned_version(tool, out(1, stdout.as_bytes())).unwrap_err();
+            assert!(
+                failed.to_string().contains("failed: diagnostic"),
+                "{failed}"
+            );
+            let mut malformed = stdout.clone().into_bytes();
+            malformed.push(0xff);
+            let malformed = pinned_version(tool, out(0, &malformed)).unwrap_err();
+            assert!(malformed.to_string().contains("not UTF-8"), "{malformed}");
+        }
     }
 }
