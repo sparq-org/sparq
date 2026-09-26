@@ -12,18 +12,19 @@
       "limitations": [
         "Native RDF integration from PRs 6504 and 6577 is not in this snapshot and is not described.",
         "sparq-zk import entries are summarized from skills/zk-query-proofs/SKILL.md, not re-read from source.",
-        "No build, test or proof was executed to produce this file."
+        "No build, test or proof was executed to produce this file.",
+        "[OPUS-5.5] query_methods method:risc0-exact vcq_adapter records the V3 vcq adapter as implemented at source 872c219ca18c6cc978d2f5c705f020e8c69748a6 and cites an independently certified genuine run at that source. That run was not repeated to edit this file; its evidence is retained outside the repository."
       ]
     },
     "rules": [
       "An entry is a name and a status. It is never evidence that a suite, method or combination is supported, secure or interoperable.",
       "Verifiers accept only exact descriptor tuples named in their own stored request; there is no wildcard, fallback or downgrade.",
       "A (suite, mapping, method, linking, authority, source evidence) tuple absent from combinations is unsupported.",
-      "status describes component source only. adapter_available is false for every entry in draft 0; a consumer MUST NOT register an entry as an executable vcq method from its status.",
+      "status describes component source only; a consumer MUST NOT register an entry as an executable vcq method from its status. [OPUS-5.5] adapter_available is true only for method:risc0-exact version 3 and only for the six tuples listed in its vcq_adapter.tuples and in combinations; it is false for risc0-exact versions 1 and 2 and for every other entry. A true value means only that an experimental adapter exists for exactly those tuples.",
       "issuer-authenticated source evidence requires the verifier-pinned authorization binding of spec §4.2 rule 9 (issuer or controller, key identity, exact suite and curve or algorithm, explicit assertion authorization), checked through the suite's profile over the verified credential bytes: Data Integrity envelopes against the signed issuer, verificationMethod and assertionMethod proofPurpose; JOSE/COSE envelopes against the protected-header key identifier and algorithm and the authenticated issuer claim; direct pinned-key suites against the pinned key and any signed issuer claim the suite carries. No profile requires envelope fields its suite lacks. Key authorization comes only from verifier trust material, never from holder or presentation metadata; a signature verifying under a caller-supplied or presentation-located key is not issuer authentication. Unpinned authorization is unsupported and a wrong issuer, key, suite, curve, algorithm or purpose is policy-rejected.",
-      "conformance_vectors are illustrative proposals; none has been executed. Each applies entry resolves to an id in this registry, per enumerations.vector_applies, and says where a vector would apply, never that it passes.",
+      "conformance_vectors are illustrative proposals; none has been executed as a vector. [OPUS-5.5] The genuine run recorded under method:risc0-exact vcq_adapter.evidence executed that adapter's own test controls, which are not a vector run. Each applies entry resolves to an id in this registry, per enumerations.vector_applies, and says where a vector would apply, never that it passes.",
       "Binding a field into the statement (binding) is not enforcing a predicate on a hidden witness (enforces). An obligation with no enforcer is unsupported, whatever policy digest the request or challenge hashes.",
-      "Identifiers are short forms of id_prefix plus id; they are proposals and do not occur in source. current_api values name existing items.",
+      "Identifiers are short forms of id_prefix plus id and are proposals. [OPUS-5.5] Only the identifiers that method:risc0-exact vcq_adapter lists as full urn values occur in source, as constants in zk/sparql-evaluator/host/src/vcq.rs; no other identifier does. current_api values name existing items.",
       "No entry is externally audited (sq-qhy4), and no entry makes a security, privacy or conformance claim."
     ]
   },
@@ -271,7 +272,8 @@
         "2": "v2::Dialect::SparqSparql11DatasetV2",
         "3": "v3::Dialect::SparqSparql11GraphResultsV3"
       },
-      "adapter_available": false,
+      "adapter_available": {"1": false, "2": false, "3": true},
+      "adapter_available_note": "[OPUS-5.5] Version 3 only, through vcq_adapter and only for its six tuples. The family fields below describe the direct V1/V2/V3 host APIs, which are unchanged; vcq_adapter describes what the V3 adapter adds.",
       "scope_authority": ["verifier-agreed-anchor", "holder-declared"],
       "source_evidence": ["none"],
       "completeness": "relative-to-scope",
@@ -297,7 +299,82 @@
       "challenge_note": "A failed attempt leaves the challenge unconsumed until expiry. vcq requires an atomic consume admitting at most one success per challenge. Nonces (zk/sparql-evaluator/host/src/lib.rs:42) is a relying-party trait documented as atomic persistent acceptance; the host supplies no production store, so an adapter depends on the deployment's implementation for this property.",
       "disclosure_inventory": ["journal: request digest, dataset commitment (linkable when reused), provenance and result"],
       "caveat": "Inherits the upstream RISC Zero privacy-assurance limitation and advisory GHSA-5xgj-pmjj-gw49 recorded in skills/zk-query-proofs/references/exact-evaluator.md; no privacy property is claimed.",
-      "adapter_gaps": ["typed failure classes", "no credential authentication or status enforcer", "request-derived nonce", "wire-profile request digest", "capabilities and adapter"]
+      "adapter_gaps": {
+        "1": ["typed failure classes", "no credential authentication or status enforcer", "request-derived nonce", "wire-profile request digest", "capabilities and adapter"],
+        "2": ["typed failure classes", "no credential authentication or status enforcer", "request-derived nonce", "wire-profile request digest", "capabilities and adapter"],
+        "3": ["no credential authentication, status or holder-binding enforcer", "local-struct-v1 is a local encoding, not a wire profile", "select-sequence, DESCRIBE and explicit base IRIs rejected", "fixed default V3 policy only", "no production challenge store"]
+      },
+      "vcq_adapter": {
+        "authored_by": "[OPUS-5.5]",
+        "version": 3,
+        "adapter_available": true,
+        "status": "implemented-experimental",
+        "current_api": {
+          "workspace": "zk/sparql-evaluator (detached)",
+          "feature": "sparq-proved-evaluator/vcq, off by default",
+          "method": "sparq_proved_evaluator::vcq::Risc0ExactV3 (sparq_query_protocol::QueryMethod)",
+          "descriptor": "sparq_proved_evaluator::vcq::descriptor",
+          "request": "sparq_query_protocol::StoredRequest",
+          "private_inputs": "sparq_proved_evaluator_model::v3::PrivateDataset",
+          "presentation": "sparq_proved_evaluator::vcq::VcqPresentation",
+          "output": "sparq_proved_evaluator::vcq::V3Output",
+          "error": "sparq_query_protocol::ProtocolError"
+        },
+        "descriptor": {
+          "method": "urn:sparq:vcq:method:risc0-exact",
+          "version": 3,
+          "parameter_set": "urn:sparq:vcq:params:risc0-exact:v3-default-policy",
+          "parameter_digest": "sparq_proved_evaluator::vcq::parameter_digest() over the fixed default V3 policy and query bound",
+          "artifact": "ArtifactIdentity::ZkvmGuest { artifact_digest: ArtifactPin.sha256, image_id } from verifier configuration",
+          "backend": "urn:sparq:vcq:backend:risc0-zkvm:3.0.6:succinct"
+        },
+        "query_profile": {"dialect": "urn:sparq:vcq:dialect:sparq-sparql11-graph-results:v3", "fragment": "urn:sparq:vcq:fragment:v3-static-admission"},
+        "tuples": [
+          {"contract": "select-bag", "authority": "verifier-agreed-anchor", "mode": "exact-bounded", "source_evidence": "none", "status": "not-requested", "holder": "bearer-accepted", "assembly": "DatasetAssembly::ExactSourceCatalog", "suite": null, "mapping": "map:exact-source-bytes", "linking": ["link:committed-dataset-evaluation"], "anchor": "host-public"},
+          {"contract": "select-bag", "authority": "holder-declared", "mode": "exact-bounded", "source_evidence": "none", "status": "not-requested", "holder": "bearer-accepted", "assembly": "DatasetAssembly::ExactSourceCatalog", "suite": null, "mapping": "map:exact-source-bytes", "linking": ["link:committed-dataset-evaluation"], "anchor": "none"},
+          {"contract": "ask-boolean", "authority": "verifier-agreed-anchor", "mode": "exact-bounded", "source_evidence": "none", "status": "not-requested", "holder": "bearer-accepted", "assembly": "DatasetAssembly::ExactSourceCatalog", "suite": null, "mapping": "map:exact-source-bytes", "linking": ["link:committed-dataset-evaluation"], "anchor": "host-public"},
+          {"contract": "ask-boolean", "authority": "holder-declared", "mode": "exact-bounded", "source_evidence": "none", "status": "not-requested", "holder": "bearer-accepted", "assembly": "DatasetAssembly::ExactSourceCatalog", "suite": null, "mapping": "map:exact-source-bytes", "linking": ["link:committed-dataset-evaluation"], "anchor": "none"},
+          {"contract": "graph-rdfc10", "form": "CONSTRUCT only", "authority": "verifier-agreed-anchor", "mode": "exact-bounded", "source_evidence": "none", "status": "not-requested", "holder": "bearer-accepted", "assembly": "DatasetAssembly::ExactSourceCatalog", "suite": null, "mapping": "map:exact-source-bytes", "linking": ["link:committed-dataset-evaluation"], "anchor": "host-public"},
+          {"contract": "graph-rdfc10", "form": "CONSTRUCT only", "authority": "holder-declared", "mode": "exact-bounded", "source_evidence": "none", "status": "not-requested", "holder": "bearer-accepted", "assembly": "DatasetAssembly::ExactSourceCatalog", "suite": null, "mapping": "map:exact-source-bytes", "linking": ["link:committed-dataset-evaluation"], "anchor": "none"}
+        ],
+        "enforces": {
+          "authenticity": "none",
+          "mapping": "relation: urn:sparq:vcq:relation:risc0-exact-v3-guest",
+          "status": "none",
+          "holder_binding": "none",
+          "linking": "relation: urn:sparq:vcq:relation:risc0-exact-v3-guest",
+          "query": "relation: urn:sparq:vcq:relation:risc0-exact-v3-guest",
+          "anchor": "host-public: urn:sparq:vcq:host:anchor-equality, owed only under verifier-agreed-anchor"
+        },
+        "claim": "authenticity, status and holder binding are always not-established; the anchor is established only under verifier-agreed-anchor",
+        "ceilings": {"released_rows": 4096, "presentation_bytes": 16777216},
+        "binding": {"request": "every local-struct-v1 stored-request field, including the original challenge, audience and validity window, reaches the journaled V3 request digest through derive_nonce", "descriptor": "derive_nonce and the presentation's descriptor digest", "audience_validity": "journaled through derive_nonce and checked on host against the verifier's own audience and clock", "statement": "statement_digest over the stored request, descriptor and exact verified journal bytes"},
+        "challenge_owner": "method",
+        "challenge_consumption": "consume-on-success",
+        "challenge_note": "The original StoredRequest challenge is consumed once through the shared sparq_query_protocol::ChallengeStore after every other check, including the result contract and released-row bound on the verified journal. The derived nonce is never stored. Replay and store failure are classified from the typed store outcome. No production store is shipped.",
+        "rejects": ["select-sequence (outer ORDER BY)", "DESCRIBE", "explicit base IRI", "select-distinct-set and ask-true-only contracts", "any request requiring issuer-authenticated or re-attested source evidence, status or holder binding"],
+        "disclosure_inventory": ["urn:sparq:vcq:disclosure:risc0-exact-v3-journal: V3 request digest, dataset commitment (linkable when reused), provenance and result"],
+        "resource_bounds": {
+          "authored_by": "[OPUS-5.5]",
+          "presentation_bytes": "encoded VcqPresentation length, checked before the receipt is decoded; excess is capacity at verify (CapacityExceeded Backend vcq-presentation-bytes)",
+          "released_rows": "semantic bound read from the verified journal result (SELECT rows, CONSTRUCT N-Triples lines; ASK has no row bound), checked after result decoding and proof verification and before the original challenge is consumed; excess is capacity at verify (CapacityExceeded Backend vcq-released-rows)",
+          "vector": "conformance vector neg-excess-rows was aligned with this source and the seventh genuine receipt; it has not been executed as a vector"
+        },
+        "evidence": {
+          "source_commit": "872c219ca18c6cc978d2f5c705f020e8c69748a6",
+          "certification": "independently certified by the root run at that source; not re-executed to edit this file",
+          "test": "host/tests/vcq_genuine.rs (ignored, --features vcq), public synthetic fixture",
+          "genuine_receipts": 7,
+          "receipt_form": "InnerReceipt::Succinct, ExitCode::Halted(0)",
+          "protocol_accepted": ["select-bag-verifier-agreed", "select-bag-holder-declared", "ask-true-verifier-agreed", "ask-false-holder-declared", "construct-verifier-agreed", "construct-holder-declared"],
+          "protocol_rejected": {"case": "select-bag-row-bound", "result": "valid V3 result with 2 rows against released_rows 1", "outcome": "capacity CapacityExceeded Backend vcq-released-rows (requested 2, ceiling 1), before challenge consumption"},
+          "controls": "81 controls across the 6 protocol-accepted cases, reusing their receipts",
+          "mutation_check": "The verify-only test failed against the consume-first mutant (nonce call before the caller check), as intended. The root's wrapper around it reported overall failure, because its expected failure text was multiline; its verdict is therefore not a pass. Source was then restored (506 files and 29 lock files checked, Git clean), and a separate verify-only continuation and an all-targets Clippy run passed with zero new proofs.",
+          "native": "Native model, doc, vcq-feature and default test functions, three guard mutants and Clippy in both configurations were certified at the same source. Eight older genuine-proof test functions were excluded, so no full-gate claim is made.",
+          "evidence_digests": {"algorithm": "SHA-256", "file": "independently-verified-terminal-evidence.json; post_restore is the file with the same name from the separate post-restore run", "run":"d523b5405540c127c529749b5d0a571d308d348ed25d17ee27066c4457e9331b", "post_restore": "5f8385d87f5d85dd49c043a31c1a28995218d95dcf679cdf6a8110989cb83eac"},
+          "not_claimed": ["source evidence other than none", "credential status", "holder identity or holder binding (bearer only)", "conventional issuer-authenticated verifiable credentials", "federation or completeness of a nondeterministic dataset beyond the agreed bytes", "a benchmark or any performance figure", "external audit (sq-qhy4)", "any privacy or soundness property"]
+        }
+      }
     },
     {
       "id": "method:noir-manifest-legacy",
@@ -332,7 +409,8 @@
   "combinations": [
     {"suite": "suite:sparq-poseidon2-schnorr-v1", "mapping": "map:sparq-string-canonical-v1", "method": "method:noir-selected-support-unsigned", "versions": [1, 2], "linking": ["link:same-relation", "link:public-authenticated-value"], "authority": ["holder-declared"], "source_evidence": ["issuer-authenticated"], "status": "implemented-experimental", "adapter_available": false},
     {"suite": "suite:sparq-poseidon2-schnorr-v1", "mapping": "map:sparq-string-canonical-v1", "method": "method:noir-selected-support-signed", "versions": [3], "linking": ["link:same-relation", "link:public-authenticated-value"], "authority": ["holder-declared"], "source_evidence": ["issuer-authenticated"], "status": "implemented-experimental", "adapter_available": false},
-    {"suite": null, "mapping": "map:exact-source-bytes", "method": "method:risc0-exact", "versions": [1, 2, 3], "linking": ["link:committed-dataset-evaluation"], "authority": ["verifier-agreed-anchor", "holder-declared"], "source_evidence": ["none"], "status": "implemented-experimental", "adapter_available": false, "note": "The linking profile is the same under both authorities; a holder-declared request keeps holder-declared provenance."},
+    {"suite": null, "mapping": "map:exact-source-bytes", "method": "method:risc0-exact", "versions": [1, 2], "linking": ["link:committed-dataset-evaluation"], "authority": ["verifier-agreed-anchor", "holder-declared"], "source_evidence": ["none"], "status": "implemented-experimental", "adapter_available": false, "note": "The linking profile is the same under both authorities; a holder-declared request keeps holder-declared provenance."},
+    {"suite": null, "mapping": "map:exact-source-bytes", "method": "method:risc0-exact", "versions": [3], "linking": ["link:committed-dataset-evaluation"], "authority": ["verifier-agreed-anchor", "holder-declared"], "source_evidence": ["none"], "status": "implemented-experimental", "adapter_available": true, "adapter_tuples": "exactly the six method:risc0-exact vcq_adapter.tuples: select-bag, ask-boolean and graph-rdfc10 (CONSTRUCT only), each under verifier-agreed-anchor and holder-declared, exact-bounded, status not-requested, holder bearer-accepted", "note": "[OPUS-5.5] adapter_available covers only those six tuples; other version 3 contracts (select-sequence, DESCRIBE graphs) are reachable through the direct host API only. The linking profile is the same under both authorities; a holder-declared request keeps holder-declared provenance."},
     {"suite": "suite:di-eddsa-rdfc-2022", "mapping": "map:sparq-string-canonical-v1", "method": "method:noir-selected-support-unsigned", "versions": [1, 2], "linking": ["link:trusted-reattestation", "link:same-relation"], "authority": ["holder-declared"], "source_evidence": ["re-attested"], "status": "proposed", "adapter_available": false, "note": "The claim would name the re-attesting key, not the source issuer."},
     {"suite": "suite:di-ecdsa-rdfc-2019", "mapping": "map:sparq-string-canonical-v1", "method": "method:noir-selected-support-unsigned", "versions": [1, 2], "linking": ["link:trusted-reattestation", "link:same-relation"], "authority": ["holder-declared"], "source_evidence": ["re-attested"], "status": "proposed", "adapter_available": false, "note": "As for eddsa-rdfc-2022."},
     {"suite": "suite:dock-bbsplus-tuple-research", "mapping": null, "method": null, "prototype": "prototype:native-bbsplus-legogroth16-eligibility", "linking": ["link:native-witness-equality"], "status": "standalone-prototype", "adapter_available": false}
@@ -372,7 +450,7 @@
     {"id": "neg-missing-row-exact", "expect": "invalid", "phase": "verify", "applies": ["method:risc0-exact"]},
     {"id": "neg-bag-collapsed", "expect": "invalid", "phase": "verify", "applies": ["method:risc0-exact"]},
     {"id": "neg-extra-row", "expect": "unsatisfiable", "phase": "prepare", "forced": "invalid at verify", "applies": ["method:noir-selected-support-unsigned", "method:noir-selected-support-signed"]},
-    {"id": "neg-excess-rows", "expect": "invalid", "phase": "verify", "note": "rejected before proof decoding", "applies": ["*"]},
+    {"id": "neg-excess-rows", "setup": "a valid result carries more released rows than request resources allow", "expect": "capacity", "phase": "verify", "note": "after result decoding and proof verification, before challenge consumption; never accept. The encoded presentation-byte bound is a separate check before decoding.", "applies": ["*"]},
     {"id": "neg-json-mapping-substitution", "expect": "invalid", "phase": "verify", "applies": ["map:jsonld-pinned-contexts-v1"]},
     {"id": "neg-context-substitution", "expect": "policy-rejected", "phase": "import", "applies": ["map:jsonld-pinned-contexts-v1", "map:jcs-json-to-rdf"]},
     {"id": "neg-unauthenticated-field", "expect": "invalid", "phase": "import", "applies": ["map:jose-payload-to-rdf"]},

@@ -262,3 +262,59 @@ families remain distinct. V2 also executes the original VERSION controls. [GPT-6
 V2 contracts, independently accepted artifact/pin inputs, genuine local succinct
 receipts and separate verifier controls. Its measurements explicitly distinguish
 inclusive API costs, unavailable internal stages and noncanonical provenance.
+
+## Engine replay proof bridge
+
+[OPUS-5.5] The experimental [engine replay proof bridge](../../bench/zk-bindings/engine-proof-replay.md)
+prepares one retained native engine replay cell's unchanged `query.rq` and
+`data.ttl` for the exact V3 relation. Native preparation tests
+(`model/tests/engine_replay.rs`) check conversion, identity, request and anchor
+binding against hand-derived expectations and produce no receipts. Genuine
+receipts come only from the ignored `host/tests/actual_engine_replay.rs` test
+or the example's `real` mode. Turtle-to-N-Quads conversion and original-file
+SHA-256 checks are host experiment checks before proving; the guest does not
+execute them and a receipt does not attest to them. The synthetic-only
+`engine_replay_setup` example (`engine_replay_setup synthetic REPLAY_DIR PROFILE
+EXPECTED.json RUN_ID NEW_OUTPUT_DIR`) writes the holder manifest and both
+verifier manifests for the proof CLI and the ignored test. Its nonces come from a
+caller-chosen `RUN_ID` and are test challenges only. It computes the agreed anchor
+on the host from the original `data.ttl`. That anchor is test-setup trust input
+from the same host that also acts as holder, not source authentication. The
+setup checks both requests natively against the supplied expectation, which it
+never rewrites, and it creates no proof. The ignored test's job requires a
+`new_output_directory`. This must be an absent, absolute path outside the
+checkout and the replay directory. The test writes each authority's verified
+public presentation, journal and request there, owner-only on Unix, before the
+controls run. It writes `summary.json` only after both proofs, all controls and
+the omission check have passed. The summary does not certify a guest abort,
+because the host's proof error is generic. The adapter's native gate has passed
+(see the bridge page's execution status). No proof or verification result for
+this bridge has been recorded yet.
+
+## vcq query-method adapter
+
+[OPUS-5.5] The optional `vcq` feature (off by default; `cargo test -p
+sparq-proved-evaluator --features vcq`) adds `vcq::Risc0ExactV3`, a
+`sparq-query-protocol` `QueryMethod` over the V3 relation. It uses
+`v3::prove_with_artifact` and the existing checked V3 verification with an
+independently approved `ArtifactPin` and `AcceptedGuest`. It supports bag
+SELECT, boolean ASK and CONSTRUCT graphs, holder-declared and verifier-agreed
+authority, and the fixed default V3 policy only. SELECT sequences, DESCRIBE,
+explicit base IRIs, issuer authentication, status and holder binding are
+rejected. The V3 nonce is derived from the `local-struct-v1` stored request and
+selected descriptor. The actual query form is checked by the host-only
+`v3::query_shape` helper. Result checks run on the verified journal before the
+original challenge is consumed once through the shared store. The existing
+public verify APIs keep their behavior. The registry sets `adapter_available: true`
+for `method:risc0-exact` version 3 and these six tuples only; V1 and V2 stay `false`.
+[OPUS-5.5] The ignored `host/tests/vcq_genuine.rs` defines the genuine-receipt run.
+It uses an explicit `SPARQ_VCQ_PROOF_JOB`, an approved guest and pin, and a public
+synthetic fixture. It proves six accepted tuples plus one receipt that the protocol
+row bound rejects after the proof checks and before challenge consumption. Controls
+reuse those receipts. A separate verify-only test re-checks the retained
+row-bound receipt. One run at source `872c219ca` was independently certified, with
+seven Succinct receipts: six accepted, one rejected as `capacity`. It was not a full
+gate and is no benchmark. It authenticates no credential, status or holder, and the
+adapter is not externally audited. See
+[the adapter reference](../../skills/zk-query-proofs/references/vcq-exact-adapter.md)
+for the record and its caveats.

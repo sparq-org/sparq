@@ -6,10 +6,17 @@
 > [VC query protocol draft](../../research/vc-query-protocol.md) and its
 > [method registry](../../research/vc-query-methods.json). This crate **proves no cryptographic
 > claim** and has **no proof backend**: no actual method, no hash or other cryptography, no query
-> parser, no RDF/SPARQL canonicalization, and no interoperable wire encoding or transport. Every
-> draft registry entry still has `adapter_available: false`, and this crate registers no method.
-> No workspace crate consumes it yet, so `sparq-core`, `sparq-engine` and the default wasm build
-> are unchanged.
+> parser, no RDF/SPARQL canonicalization, and no interoperable wire encoding or transport. This
+> crate registers no method. The registry sets `adapter_available` true only for the experimental
+> `method:risc0-exact` version 3 adapter's six tuples (SELECT bag, ASK, CONSTRUCT, each
+> holder-declared or verifier-agreed; no source authentication, status `NotRequested`, bearer
+> holder); every other entry is false. See the
+> [vcq exact adapter reference](../../skills/zk-query-proofs/references/vcq-exact-adapter.md).
+> Its only consumer is the detached `zk/sparql-evaluator/host` crate's OFF-by-default `vcq`
+> feature, which supplies the proof backend and cryptography. The durable challenge store is
+> supplied by the APPLICATION: neither crate ships a production store; the host tests use
+> in-memory test doubles only. `sparq-core`, `sparq-engine` and the default wasm build are
+> unchanged. <!-- [OPUS-5.5] -->
 
 ## 🚀 Quickstart
 

@@ -24,9 +24,10 @@ integration and remains unaudited. [GPT-6]
 [OPUS-5.5] The [VC query protocol draft](../../research/vc-query-protocol.md) and its
 [method registry](../../research/vc-query-methods.json) propose separating credential suites
 from pluggable query proof methods, and map the selected-result, exact-evaluator and native
-paths from source. They are design records only: no shared adapter, JSON signature mode or
-cross-method linking exists, a registry label shows no support (every entry has
-`adapter_available: false`), and none is externally audited.
+paths from source. They are design records: no JSON signature mode or cross-method linking
+exists, a registry label shows no support, and none is externally audited. Only
+`method:risc0-exact` version 3 has `adapter_available: true`, for exactly the six tuples of the
+exact V3 adapter below; every other entry and version stays `false`.
 
 [OPUS-5.5] The experimental, unpublished, dependency-free `sparq-query-protocol` crate adds a
 first executable layer of that draft. It provides typed descriptors, whole capability tuples,
@@ -39,6 +40,21 @@ original challenge once. It has no backend, interoperable wire encoding, transpo
 hash or other cryptography, ships no production challenge store, proves no cryptographic claim,
 and registers no method. See [query-method contracts](references/query-method-contracts.md).
 
+[OPUS-5.5] The detached exact-evaluator host crate has an optional `vcq` feature (off by
+default) with the first `QueryMethod` adapter, `sparq_proved_evaluator::vcq::Risc0ExactV3`, over
+the existing V3 relation. It declares bag SELECT, boolean ASK and CONSTRUCT graphs under
+holder-declared and verifier-agreed authority only, with the fixed default V3 policy. It binds
+the stored request through a documented derived nonce and consumes the original challenge once,
+after every other check. It authenticates no credential and checks no status or holder key.
+Source evidence is `None`, status `NotRequested` and holder `BearerAccepted` in every tuple.
+The ignored `host/tests/vcq_genuine.rs` has a prove mode and a verify-only row-bound mode,
+both driven by an explicit `SPARQ_VCQ_PROOF_JOB`. One run at source `872c219ca` was
+independently certified. It verified seven genuine Succinct receipts: six protocol-accepted
+tuples, plus one valid two-row result rejected as `capacity` by a row bound of one before
+challenge consumption. It was run on a public synthetic fixture, with no benchmark. It is not
+a full gate, and the reference records its caveats and evidence digests. See
+[vcq exact adapter](references/vcq-exact-adapter.md).
+
 [GPT-6] For the opt-in synthetic selected-support measurement adapter, its strict
 experiment manifest, timing boundaries and unavailable stages, see
 [experiment instructions](../../bench/zk-compose/experiments/README.md). Driver
@@ -46,7 +62,7 @@ measurements are explicitly enabled by `with_stage_metrics()` and drained by
 `take_stage_metrics()`; they remain local diagnostics outside presentations. Local
 measurements are NONcanonical and do not establish external security assurance.
 
-[GPT-6] Use the [binding corpus and replay harness](../../bench/zk-bindings/README.md) to retain original goldens and separate native, actual constraint, and genuine proof coverage. Imported negative cases require their declared rejection category and phase; an ambiguous evaluation/budget error cannot certify capacity rejection. Explicit version-specific positive goldens preserve the original V1 rejections and unchanged inputs.
+[GPT-6] Use the [binding corpus and replay harness](../../bench/zk-bindings/README.md) to retain original goldens and separate native, actual constraint, and genuine proof coverage. Imported negative cases require their declared rejection category and phase; an ambiguous evaluation/budget error cannot certify capacity rejection. Explicit version-specific positive goldens preserve the original V1 rejections and unchanged inputs. The [existing engine/storage replay](../../bench/zk-bindings/engine-replay.md) preserves seed/query/dataset identity; normalized oracle agreement never authorizes proof reuse. [OPUS-5.5] The experimental [engine proof replay bridge](../../bench/zk-bindings/engine-proof-replay.md) (`sparq_proved_evaluator_model::replay` plus the `engine_replay_proof` host example) prepares one retained cell for exact V3 evaluation and can prove and independently verify it; it authenticates no source credential. The Turtle conversion and original-file hash checks are host checks, not proved by the guest. Only a verifier-agreed anchor that the verifier prepared from the originals binds the converted N-Quads to them. For synthetic experiments, `engine_replay_setup synthetic REPLAY_DIR PROFILE EXPECTED.json RUN_ID NEW_OUTPUT_DIR` writes `holder.json`, `holder-declared.json`, `verifier-agreed.json`, a byte-exact `expected.json` and `setup.json`. Before writing, it checks both authorities natively against the independently supplied expectation. It creates no proof. Its `RUN_ID`-derived nonces are test challenges, never a production challenge source. The host computes its agreed anchor from the original `data.ttl` while also acting as holder, so that anchor is test-setup trust input, not source authentication. The ignored `real_engine_replay_omission_is_an_observed_guest_abort` test (`SPARQ_ENGINE_REPLAY_OMISSION_JOB`) creates no proof. It requires the exact SDK guest-abort message for an omitted statement under the agreed anchor. That is an observed execution rejection, not a negative cryptographic proof.
 
 ## Prerequisites
 
