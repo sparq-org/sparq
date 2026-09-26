@@ -28,6 +28,10 @@
 #set document(title: "Toward Contract-Bound Proofs for SPARQL over Verifiable Credentials")
 #set text(size: 11pt)
 #set par(justify: true)
+// Plain page numbers in the PDF footer (page set rules have no effect in HTML export).
+#set page(numbering: "1")
+// Figures may break across pages by default; short tables that must stay with their caption
+// opt out locally with a scoped `set block(breakable: false)`.
 #show figure: set block(breakable: true)
 // Level-2 (==) headings are the top-level sections ("1.", "2.", ...), level-3 (===) are
 // subsections ("1.1.", ...); the abstract is explicitly unnumbered.
@@ -212,6 +216,8 @@ sources, artifacts and receipts from a frozen snapshot — is weaker than the la
 that the reported runs happened at the stated commits, not that the relations achieve their
 goals, and it is not an external security review.
 
+#[
+#show figure: set block(breakable: false)
 #figure(
   table(
     columns: (1fr, 1.3fr, 1fr, 1.2fr),
@@ -234,7 +240,7 @@ goals, and it is not an external security review.
     [Ed25519 over RDFC-1.0, verifier-owned key table],
     [Executed native (model tests); guest extension unvalidated; no guest execution, no proof],
     [Public pattern V4 (#short-id("zkvcq.pp_source_commit"))],
-    [Fully public BGP pattern, bounded one- and two-credential profiles],
+    [Selected `SELECT DISTINCT` rows (set inclusion; no multiplicity, completeness or `ASK`) for a fully public BGP pattern, bounded one- and two-credential profiles],
     [Issuer signature and membership inside the relation],
     [Genuine verified proofs],
     [Native public RDF (#short-id("zkvcq.nc_source_commit"))],
@@ -254,6 +260,7 @@ goals, and it is not an external security review.
     systems whose counts are never combined, and no row reaches external audit.
   ],
 ) <paths-table>
+]
 
 == Contracts: what a verifier accepts <contract>
 
@@ -284,10 +291,14 @@ the SPARQL algebra @pag09 @sparql11, and $⊑$ for sub-multiset inclusion.
   displace the latest entry, although not every addition does.
 
 For a positive pattern — a basic graph pattern with joins, filters and projection — bag evaluation
-is monotone under sub-multiset inclusion: $D ⊆ D'$ implies $⟦P⟧_D ⊑ ⟦P⟧_(D')$. A row, together with
-a lower bound on its multiplicity, that is supported by an authenticated subset therefore remains
-supported by all of the holder's data; the completion example yields "at least two" from any input
-containing both records. Monotonicity does not protect _exact_ claims: that the course appears
+is monotone under sub-multiset inclusion: $D ⊆ D'$ implies $⟦P⟧_D ⊑ ⟦P⟧_(D')$. Mathematically, a
+row and a lower bound on its multiplicity obtained by evaluating over a fully known authenticated
+subset therefore remain valid over all of the holder's data; the completion example yields "at
+least two" when evaluated over any input containing both records. That lower bound is available to
+whoever knows the whole authenticated supporting subset; it is not what a selected-results
+presentation establishes. `SelectedResults` (§#ref(<contract-tuple>, supplement: none)) shows only
+that each released distinct row occurs in the answer, and repeated witnesses for one row prove no
+further multiplicity. Monotonicity does not protect _exact_ claims: that the course appears
 exactly twice, that the count is two, that no disqualification exists, or that an entry is the
 latest. When a verifier relies on such a claim, it needs a statement that is exact over a
 specified dataset, and that dataset must be fixed by an authority the verifier accepts.
@@ -304,7 +315,8 @@ $ C = ⟨ m, o, q, f, a, s, e, d, b, t ⟩ $
 whose components are:
 
 / $m$ — method: query-proof method identifier, version and descriptor digest (§#ref(<method>, supplement: none)).
-/ $o$ — answer mode: `SelectedResults` (every released row is supported) or `Exact` (the released
+/ $o$ — answer mode: `SelectedResults` (every released distinct row is supported; no multiplicity
+  or completeness) or `Exact` (the released
   result is the complete answer). A method may fix $o$; the adapter's methods fix `Exact`.
 / $q$ — query: the query text and declared language version (SPARQL 1.1; SPARQL 1.2 optional).
 / $f$ — result form: bag `SELECT`, set `SELECT`, `ASK`, `CONSTRUCT` or `DESCRIBE` with its closure
@@ -355,10 +367,14 @@ The answer predicate depends on the mode and the form. $"Ans"_"Exact"^f$ require
 answer under the method's canonical equality for $f$: multiset equality for an unordered table,
 the method's ordering and tie rules for `ORDER BY`, `LIMIT` and `OFFSET` results, boolean equality
 for `ASK`, and the method's canonical graph equality, with its blank-node and closure policy, for
-`CONSTRUCT` and `DESCRIBE`. $"Ans"_"SelectedResults"^f (r, R)$ is $r ⊑ R$ and is defined only for
-unordered table results of a positive pattern; it is not a relation for booleans, graphs or
-ordered results. A true `ASK` over a positive pattern can be supported by exhibiting one
-supporting solution, a separate statement from table membership; a false `ASK` needs `Exact`.
+`CONSTRUCT` and `DESCRIBE`. $"Ans"_"SelectedResults"^f (r, R)$ is $r ⊆ "supp"(R)$, where $r$ is a
+set of distinct rows and $"supp"(R)$ is the set of rows occurring in $R$ at least once. It is
+defined only for unordered distinct-set (`SELECT DISTINCT`) results of a positive pattern and
+asserts neither multiplicity nor completeness; it is not a relation for bag tables, booleans,
+graphs or ordered results. A true `ASK` over a positive pattern is conceptually a separate
+positive-existence statement, supportable by exhibiting one supporting solution rather than by
+table membership; the implemented selected-results relation V4 does not support `ASK`. A false
+`ASK` needs `Exact`.
 
 === Dataset authority <authority>
 
@@ -505,7 +521,7 @@ A lender asks:
 
 ```sparql
 PREFIX ex: <https://example.org/>
-SELECT ?person WHERE {
+SELECT DISTINCT ?person WHERE {
   ?person a ex:Employee .              # t1
   ?person ex:employer ex:Acme .        # t2
   ?person ex:annualIncome ?income .    # t3
@@ -610,7 +626,11 @@ are constraints, while roots, salts and status indices remain private witnesses,
 bounded status snapshot and policy that the verifier accepted. The profile is restricted to the
 filter-free form F0 (no hidden filter), status depth 10 and K1/K2. How the verifier acquires that
 snapshot and how fresh it is are deployment policy; V4 does not establish world-wide freshness of
-authoritative status. Its tests replay a finite
+authoritative status. Its answer mode is `SelectedResults` in the set sense of
+§#ref(<contract-tuple>, supplement: none): the method admits only `SELECT DISTINCT` queries and
+rejects a released result that repeats a row, so a V4 proof shows that each released distinct row
+is supported and asserts neither multiplicity nor completeness; V4 does not support `ASK`. Its
+tests replay a finite
 set of valid and absent bindings and adversarial witnesses; genuine proofs were produced for both
 profiles. The authentication, membership and status obligations are implemented within V4's relation;
 what V4 does not do is authenticate conventional RDF or JSON Data Integrity credentials. V5
@@ -769,6 +789,8 @@ routine. Receipts were produced on an EC2 host from frozen source
   ],
 ) <adapter-table>
 
+#[
+#show figure: set block(breakable: false)
 #figure(
   table(
     columns: (auto, 1fr, auto),
@@ -797,6 +819,7 @@ routine. Receipts were produced on an EC2 host from frozen source
     fire in these cases, not that no other substitution succeeds.
   ],
 ) <controls-table>
+]
 
 The audit wrapper for this campaign itself reported failure: a mutation check expected a test
 failure line that `--nocapture` output had split across lines, although the intended assertion
