@@ -1178,13 +1178,14 @@ fn toml_witness_value(value: &Value) -> Value {
     }
 }
 
+// [OPUS-5.5] beadzkp-13.5: exact version field, not a substring of lossy stdout.
 fn pinned_toolchain() -> Result<(), ResultError> {
-    for (tool, version) in [("nargo", "1.0.0-beta.21"), ("bb", "5.0.0-nightly.20260324")] {
+    for (tool, version) in crate::toolchain::PINNED_TOOLS {
         let out = Command::new(tool)
             .arg("--version")
             .output()
             .map_err(|e| reject(format!("{tool}: {e}")))?;
-        if !out.status.success() || !String::from_utf8_lossy(&out.stdout).contains(version) {
+        if !out.status.success() || !crate::toolchain::pinned_version_output(tool, &out.stdout) {
             return Err(reject(format!("{tool} must use pinned version {version}")));
         }
     }

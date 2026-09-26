@@ -335,7 +335,11 @@ depth 10/17/20 from all freshness-accepted snapshots.
 Public predicates run in the verifier and select the member without numeric
 circuitry. Roots/salts/status indices and intermediate encodings are private;
 issuer slots/capacities/result size remain public. See the [successful-result contract](references/successful-results.md)
-for exact scope. Research-stage, not externally
+for exact scope. [OPUS-5.5] Before proving or verifying, it requires the exact
+pinned version field (`nargo version = 1.0.0-beta.21` as the first line; trimmed
+`bb` output `5.0.0-nightly.20260324`); substrings, diagnostics and non-UTF-8
+output are rejected. This is a pin guard, not binary attestation (no hash check).
+Research-stage, not externally
 audited: no complete-answer, absence, wallet-size or holder-identity guarantee.
 
 [GPT-6] `planner::plan_disclosure_admitted` additionally accepts a predicate
