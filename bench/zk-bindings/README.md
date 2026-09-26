@@ -48,9 +48,22 @@ apart from constraint and proof evidence. False bindings carry reconstructed
 `public_triples` with the original signed support unchanged. The ten existing
 attacks apply unchanged; one that touched the unused pattern-zero opening would
 fail rather than count, and a separate positive control shows that opening is
-unread. Real cells also check that relabeled versions are rejected. This backend is
-source-configured and not yet executed. It is research-grade and not externally
-audited, and it is not a benchmark or gate measurement.
+unread. Real cells also check that relabeled versions are rejected. It is
+research-grade and not externally audited, and it is not a benchmark or gate
+measurement.
+
+[OPUS-5.5] One independent non-canonical EC2 run at corpus source
+`2e0f4a9dba47d537835b4745c66147f097c68e43` executed this backend: all 576 native cells (72 accepted, 468 `native_support`
+and 36 `empty_graph` refusals) and all 46 real cells (4 genuine K1 proofs, 32
+absent-binding and 10 private-witness-attack constraint failures, i.e. 42 actual
+assertion failures), with 36 negative verifier controls in total plus the 4
+unused-opening positive controls. In that run 213 native Rust tests passed (16
+ignored), the 22+3 Python tests and Clippy passed, and all 647 source files, 29
+lock files and 3211 artifact hashes matched. Its evidence bundle has SHA-256
+`b2410b3290cdda391782a5ab4e4a6019436fffa779a4b0add44a055e6dfe4f2d`. It is
+separate from the `14d426bd` static and genuine-proof measurements recorded in
+the [ZK query proofs skill](../../skills/zk-query-proofs/SKILL.md); no local,
+full-workspace or hosted-CI execution is claimed.
 
 ## Original tests
 
@@ -98,7 +111,8 @@ The native exact example requires model feature `evaluate`, or `graph-results` f
 `result::proof_bindings::run_job` in the `successful-results` test binary. Test
 preparation uses synthetic issuer keys/data only. Generated TOML contains private
 fixture inputs and must stay in a private evidence directory. Every outcome
-echoes the job identity; proof artifacts are retained and hash-checked. These
+echoes the job identity; proof artifacts are retained and hash-checked, but are
+stored separately, not in the repository; only their hashes are committed. These
 hashes provide reproducibility records, not an independent build attestation.
 
 The bounded reducer in `minimize.py` only minimizes generated finite-oracle data

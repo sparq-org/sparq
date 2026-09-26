@@ -1,11 +1,10 @@
 {
-  "prepared_by": "GPT-6",
+  "prepared_by": "OPUS-5.5",
   "metric": "circuit_size",
   "tool": "bb gates -s ultra_honk",
-  "prior_measurement": {
-    "timestamp": "2026-09-12T20:44:49.380619+00:00",
-    "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
-    "note": "Earlier GPT-6 measurement over superseded Noir bytes (older compose_core/src/lib.nr, no version-4 files). Kept for history only; it is not the measurement bound to source_files."
+  "tool_versions": {
+    "nargo": "nargo version = 1.0.0-beta.21\nnoirc version = 1.0.0-beta.21+89a0f0faf3a5f1273c8ac4843b7877882437e277\n(git version hash: 89a0f0faf3a5f1273c8ac4843b7877882437e277, is dirty: false)",
+    "bb": "5.0.0-nightly.20260324"
   },
   "measured_source": {
     "recorded_by": "OPUS-5.5",
@@ -21,11 +20,9 @@
     "job_sha256": "8045b96ad07910bcc2d5f72d23a241bf27a5a201a84997eb8081cfa32be6a378",
     "independent_handoff_sha256": "36bdbdd26a2238e5a140e8c00dedc4afe68dc7657b29e2728b95c2e8b045603c"
   },
-  "measurement_method": "[OPUS-5.5] At measured_source, each listed member was compiled with the pinned nargo and measured with `bb gates -s ultra_honk`; the compiled artifact was rehashed on the remote host. Every circuit_size and ACIR bytecode hash equalled the value already recorded here, so no member value changed.",
-  "limitations": "[OPUS-5.5] One independent non-canonical work-box run; future CI replays are still required. Static circuit size only; no timing was taken and no earlier timing is relabelled. source_files, not source_commit, binds the Noir bytes.",
-  "nargo_version": "nargo version = 1.0.0-beta.21\nnoirc version = 1.0.0-beta.21+89a0f0faf3a5f1273c8ac4843b7877882437e277\n(git version hash: 89a0f0faf3a5f1273c8ac4843b7877882437e277, is dirty: false)",
-  "bb_version": "5.0.0-nightly.20260324",
-  "comparison_base": "713025dc0fcdcbdcd070ba4dcbde524be50ba055",
+  "measurement_method": "[OPUS-5.5] beadzkp-15.1: at measured_source, each version-4 public-pattern member was compiled with the pinned nargo and measured with `bb gates -s ultra_honk`. acir_bytecode_sha256 and abi_sha256 follow the convention of the legacy records, which the same run reproduced for every recorded legacy ACIR hash and every recorded legacy ABI hash. artifact_sha256 identifies the compiled artifact, rehashed on the remote host with a matching result; gate_log_sha256 identifies the recorded bb gates output.",
+  "scope": "Static circuit size, ACIR and ABI identities for the two version-4 members only. Not a runtime, proving-time, soundness or external-audit claim; no saving over earlier result versions is claimed.",
+  "limitations": "[OPUS-5.5] One independent non-canonical work-box run; future CI replays are still required. The artifacts and gate logs themselves are not retained in the repository, only their hashes. source_files, not source_commit, binds the Noir bytes.",
   "source_files": {
     "zk/compose/compose_core/src/derivation.nr": "cd6e9ebd2b77265d8535e26108558dc3e87eb5d7d674f4f9ce0849df3c0cba5d",
     "zk/compose/compose_core/src/entail.nr": "a6793433075b49bc50d535c400e5141d62b74e1ceaf68aa67608dea63c56f25c",
@@ -118,96 +115,20 @@
     "zk/compose/scan_k2_n64_r4/src/main.nr": "473667b4edee0139ea8c055beeb8fa7f1a4b35d1dabb016368c21e90943209e8",
     "zk/compose/scan_k2_n64_r8/src/main.nr": "1b29967beca6e1a7643b0fc95a1a74479d18711a8072966a662c0ad579a63a85"
   },
-  "source_identity": "The source_files hash map identifies the measured Noir bytes; comparison_base names only the historical baseline.",
-  "scope": "Only listed members were remeasured; gate counts are circuit size, not runtime or security evidence. Full-u64 private decimal length is not public.",
   "members": {
-    "result_v1_k1_n16_p3_r4_f0": {
-      "circuit_size": 32288,
-      "acir_bytecode_sha256": "5b6cfbb878699a105cc522738c8aefcc581506472b36f71b836a3d0e4e92dd16"
+    "result_v4_k1_n16_p3_r4_f0_d10": {
+      "circuit_size": 31209,
+      "acir_bytecode_sha256": "e766a27624124ecdcfffc75024b679afe84d0ea6046d5f8c2610281486a67069",
+      "abi_sha256": "25f066cecd70496a312e8ec266f6d2f13c6a91cf51d5fa88940a84d86da38518",
+      "artifact_sha256": "14bdc638dfd3ff228537ab5cee154aa74d47c86a702bdf0aaf9fbeaee015df0c",
+      "gate_log_sha256": "7d5b483e9edd985247d691eede60b98c1284b91557db08d6d830ece4619bad01"
     },
-    "result_v1_k1_n16_p3_r4_f2": {
-      "circuit_size": 68963,
-      "acir_bytecode_sha256": "da3113852d560d0d070702c0b10e8ea29887f9d7833fc8b7054cf98ddeed4589"
-    },
-    "result_v1_k2_n16_p3_r4_f0": {
-      "circuit_size": 59101,
-      "acir_bytecode_sha256": "346bd26aef7d4b705dde34670f0ad21cd79ec6c92983814673a821aee010702e"
-    },
-    "result_v1_k2_n16_p3_r4_f2": {
-      "circuit_size": 95775,
-      "acir_bytecode_sha256": "198cd56ca80a2949e1c44f87315d16c71dba8f568298f975cbea87c8a19b5d4d"
-    },
-    "result_v2_k1_n16_p3_r4_f0_i0_d17": {
-      "circuit_size": 32836,
-      "acir_bytecode_sha256": "2179f2c84eb415901df25731d6003a770e440190cc085a1e74fae54537899154"
-    },
-    "result_v2_k1_n16_p3_r4_f0_i0_d20": {
-      "circuit_size": 33071,
-      "acir_bytecode_sha256": "eabe4c1578eb0e494a5c52948777c914b18c1f4e87b368444b0980c82695151b"
-    },
-    "result_v2_k1_n16_p3_r4_f2_i64_d10": {
-      "circuit_size": 462049,
-      "acir_bytecode_sha256": "457572732890e59403f43d07d383510ddd63195fe963f50792272574042bad24"
-    },
-    "result_v2_k1_n16_p3_r4_f2_i64_d17": {
-      "circuit_size": 462597,
-      "acir_bytecode_sha256": "b6c7cb56f9a879a82d1116eaca22ba976306a01304c3c62412789b3607d107f2"
-    },
-    "result_v2_k1_n16_p3_r4_f2_i64_d20": {
-      "circuit_size": 462832,
-      "acir_bytecode_sha256": "d894345ebaee45832eb7b47b3772eac50a2bc51b4598b9219eab1a0edcecb272"
-    },
-    "result_v2_k1_n16_p3_r4_f2_i8_d17": {
-      "circuit_size": 69619,
-      "acir_bytecode_sha256": "8350284b77c19b73f661c10e616543850d7e0695f27c909c331cc1ce760c6930"
-    },
-    "result_v2_k1_n16_p3_r4_f2_i8_d20": {
-      "circuit_size": 69854,
-      "acir_bytecode_sha256": "504657c7decacb28206cc352d0bd3e6a7afa01b2fa49bba989a3d032815372a4"
-    },
-    "result_v2_k2_n16_p3_r4_f0_i0_d17": {
-      "circuit_size": 60197,
-      "acir_bytecode_sha256": "dd4a231f1bf0b84de7342d05f1c6dabc5bad2185d527a29d3d20fb1493b74c58"
-    },
-    "result_v2_k2_n16_p3_r4_f0_i0_d20": {
-      "circuit_size": 60667,
-      "acir_bytecode_sha256": "3b2ddec768d8485a89b2598e83f6dc27df9cdea6963213c2f1e74eb7143a628f"
-    },
-    "result_v2_k2_n16_p3_r4_f2_i64_d10": {
-      "circuit_size": 488858,
-      "acir_bytecode_sha256": "8389e9b07f5750b9e07e06c8072c9718e7dde2af85d6046ae318eedbe6e0dc4c"
-    },
-    "result_v2_k2_n16_p3_r4_f2_i64_d17": {
-      "circuit_size": 489954,
-      "acir_bytecode_sha256": "270d7273d89ca3f1c8e128153bf38ad98ba72fc7e4b59dd66bf7a8899392a668"
-    },
-    "result_v2_k2_n16_p3_r4_f2_i64_d20": {
-      "circuit_size": 490424,
-      "acir_bytecode_sha256": "caac29170d101dfa3c5b7117930fd198fb418639ecda11a499322eec41da5274"
-    },
-    "result_v2_k2_n16_p3_r4_f2_i8_d17": {
-      "circuit_size": 96979,
-      "acir_bytecode_sha256": "665d265b2d740c8e6f6533f1169b600e875bb36ca9d461e3932f41e6c66f6055"
-    },
-    "result_v2_k2_n16_p3_r4_f2_i8_d20": {
-      "circuit_size": 97449,
-      "acir_bytecode_sha256": "1ced99e11f35c1627b8e3b1f6998a4c1b2fea5eeab2b8d2bfda494dc85fa1135"
-    },
-    "filter_int_d1": {
-      "circuit_size": 17416,
-      "acir_bytecode_sha256": "544a1e3a262d3bf456c9068570e9c85f4f4b61dff0d90743844f674938bac5b4"
-    },
-    "filter_int_d2": {
-      "circuit_size": 17416,
-      "acir_bytecode_sha256": "f0c8a52851e7ff832ed453aaf9dab9b688c464fe109c0cd53cb8cee237083315"
-    },
-    "filter_int_d3": {
-      "circuit_size": 17416,
-      "acir_bytecode_sha256": "d54b5f120288aafd8049e1bb7e214bd49781a2fe6b05059e85db06ab04319ea6"
-    },
-    "filter_int_d4": {
-      "circuit_size": 17416,
-      "acir_bytecode_sha256": "3b0ae9bb38ddda3f39d5cf7fdce418728f0273168fc2d27356136fd253054376"
+    "result_v4_k2_n16_p3_r4_f0_d10": {
+      "circuit_size": 58022,
+      "acir_bytecode_sha256": "8e256748e1f6d4f2a7a1a9653a46e1512d2dc540b882414f307b94f233312b59",
+      "abi_sha256": "5c4d8044d93bcd55e64a1caf4bce207edb18dacbacd3d1e992fe7075441e596e",
+      "artifact_sha256": "5c24bff2e97fb4e0dd32d4ef25ff8cb3b5fe0a526517efce2524348536c62c12",
+      "gate_log_sha256": "44c292a0d0ad9aa5a85fe9e6af94946d030ecbfb8c14ab5451a9d36541c0652e"
     }
   }
 }

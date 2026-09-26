@@ -39,7 +39,7 @@
       "id": "noir_public_pattern",
       "contract": "[OPUS-5.5] explicit opt-in version 4 (prepare_result_public_pattern / NumericContract::PublicPattern): first constant-or-projected pattern checked against a verifier-derived public triple table; F0, depth 10, K1/K2 only; never a fallback to V1 or signed",
       "adapter": "result::proof_bindings::run_job",
-      "status": "source-configured, not executed; research-grade, not externally audited",
+      "status": "[OPUS-5.5] executed once on EC2 (non-canonical) at corpus source 2e0f4a9dba47d537835b4745c66147f097c68e43, independently verified evidence bundle SHA-256 b2410b3290cdda391782a5ab4e4a6019436fffa779a4b0add44a055e6dfe4f2d; experimental, research-grade, not hosted CI, not externally audited",
       "required_actual_suites": [
         "mandatory ci.py native and finite real campaigns for noir_public_pattern"
       ],
@@ -181,8 +181,8 @@
         "native_support_refusals": 468
       },
       "shards": 1,
-      "status": "source-configured, not executed",
-      "claim": "configured only; the same finite universe as noir-cycle-all-valid under version 4, not a benchmark or gate measurement"
+      "status": "[OPUS-5.5] executed once on EC2 (non-canonical) at corpus source 2e0f4a9dba47d537835b4745c66147f097c68e43, independently verified evidence bundle SHA-256 b2410b3290cdda391782a5ab4e4a6019436fffa779a4b0add44a055e6dfe4f2d; not hosted CI",
+      "claim": "the same finite universe as noir-cycle-all-valid under version 4, executed in that single run; experimental, research-grade, not externally audited, not a benchmark or gate measurement"
     },
     {
       "id": "original-suite-replay",
