@@ -1,6 +1,6 @@
 {
   "name": "@sparq-org/sparq",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "RDF/JS interface to the sparq SPARQL engine (Rust → WebAssembly): an in-memory, dictionary-encoded RDF store with SELECT/ASK and SPARQL Update.",
   "license": "MIT",
   "repository": {
