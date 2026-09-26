@@ -12,8 +12,12 @@
 > holder-declared or verifier-agreed; no source authentication, status `NotRequested`, bearer
 > holder); every other entry is false. See the
 > [vcq exact adapter reference](../../skills/zk-query-proofs/references/vcq-exact-adapter.md).
-> Its only consumer is the detached `zk/sparql-evaluator/host` crate's OFF-by-default `vcq`
-> feature, which supplies the proof backend and cryptography. The durable challenge store is
+> Its only consumer is the detached `zk/sparql-evaluator/host` crate: the OFF-by-default `vcq`
+> feature supplies the proof backend and cryptography, and the OFF-by-default
+> `vcq-authenticated` feature adds a V5 issuer-authenticated RDF adapter as source only (no
+> adapter receipt retained; the registry keeps it `false`; see the
+> [V5 adapter reference](../../skills/zk-query-proofs/references/vcq-authenticated-rdf-adapter.md)).
+> The durable challenge store is
 > supplied by the APPLICATION: neither crate ships a production store; the host tests use
 > in-memory test doubles only. `sparq-core`, `sparq-engine` and the default wasm build are
 > unchanged. <!-- [OPUS-5.5] -->

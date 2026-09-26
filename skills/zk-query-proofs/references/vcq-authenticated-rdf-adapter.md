@@ -16,10 +16,28 @@ are unchanged. The only other changes are crate-private: shared V3 adapter helpe
 `verify_checked` hook are now `pub(crate)`, with no behavior change.
 
 ```sh
-# Native adapter gates and unit tests; no proof.
+# Native adapter gates, unit tests and the V3 adapter regression; no proof.
 cargo test --locked --manifest-path zk/sparql-evaluator/Cargo.toml -p sparq-proved-evaluator \
-  --features vcq-authenticated --lib --test vcq_authenticated --test vcq_authenticated_genuine
+  --features vcq-authenticated --lib --test vcq_authenticated --test vcq_authenticated_genuine \
+  --test vcq_adapter
 ```
+
+## CI campaign scope (source only, not yet run)
+
+The exact-evaluator campaign (`scripts/ci_exact_evaluator_evidence.py`) names four commands for
+this feature and its dependencies; see [campaign evidence](evaluator-evidence.md) for the table.
+None of them has run at this source.
+
+- `native-vcq`: the V3 adapter tests under `vcq` alone, covering the shared helpers.
+- `native-vcq-authenticated`: the command above; it runs the genuine driver file's native
+  job-parser tests but never its ignored prove test.
+- `lint-vcq-authenticated`: all-target workspace Clippy with `-D warnings`.
+- `actual-authrdf-direct-execution`: the ignored direct V5 executor tests in
+  `actual_authenticated_rdf.rs` only. That is SDK execution, not proving: it creates no receipt,
+  and the campaign records zero V5 receipts.
+
+A passing campaign would be native, lint and direct-execution evidence only. It would not be an
+adapter receipt and would not change the registry's `adapter_available: false`.
 
 ## Availability: implementation is not validation
 

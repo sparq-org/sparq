@@ -78,7 +78,41 @@ native model and host gates and a Clippy pass with the host `authenticated-rdf`
 feature, then re-exports both guests to reject drift. `evidence.json` keeps
 `artifact_pin` for the exact guest and adds `guest_artifact_pins`, keyed by
 `sparq-exact-guest` and `sparq-authrdf-guest`. The two pins must differ in both
-digest and image ID. It executes no V5 guest and creates no V5 receipt,
-as `authrdf_scope` records. Until `methods/guest-authrdf/Cargo.lock` exists,
-these locked steps fail and the campaign does not complete. This change has not
-yet been run.
+digest and image ID. These zkp-14.5 steps execute no V5 guest, and the campaign
+creates no V5 receipt, as `authrdf_scope` records. Until
+`methods/guest-authrdf/Cargo.lock` exists, these locked steps fail and the
+campaign does not complete. This change has not yet been run.
+
+[OPUS-5.5] zkp-14.6: after `lint-authrdf`, the campaign runs the commands named in
+`VCQ_COMMANDS`, each through the same fail-closed `run_logged` path, before both
+guests are re-exported. None of them has run at this source.
+
+| Command | Scope | Cargo selection (`--locked`, evaluator manifest) |
+|---|---|---|
+| `native-vcq` | native | `test -p sparq-proved-evaluator --features vcq --lib --test vcq_adapter` |
+| `native-vcq-authenticated` | native | `test -p sparq-proved-evaluator --features vcq-authenticated --lib --test vcq_authenticated --test vcq_authenticated_genuine --test vcq_adapter` |
+| `lint-vcq-authenticated` | lint | `clippy --workspace --all-targets --features sparq-proved-evaluator/vcq-authenticated -- -D warnings` |
+| `actual-authrdf-direct-execution` | direct SDK execution | `test -p sparq-proved-evaluator --features authenticated-rdf --test actual_authenticated_rdf -- --ignored --nocapture --test-threads=1` |
+
+- `native-vcq` checks the V3 adapter, whose helpers the V5 adapter now shares,
+  under its own feature. `native-vcq-authenticated` runs the library unit tests
+  (including the `vcq_authenticated` module's), the V5 adapter's native gates,
+  the non-ignored job-parser and policy tests in `vcq_authenticated_genuine.rs`,
+  and the V3 adapter tests again with both features enabled.
+- `actual-authrdf-direct-execution` is the only command with `--ignored`, and it
+  selects one target. Its four tests run the embedded V5 guest (and one exact-guest
+  control rejecting V5 input) in the real `r0vm` executor. They create no proof,
+  receipt or presentation, and a direct execution never counts as a receipt.
+  `RISC0_DEV_MODE` must be unset for these tests, not merely `0`.
+- The ignored genuine drivers (`authenticated_rdf_genuine`,
+  `vcq_authenticated_genuine`'s prove test, `vcq_genuine`) are never selected: each
+  needs independently approved pins and an explicit bounded job.
+- `evidence.json` adds `authrdf_command_scopes` (every V5 and vcq command as
+  `artifact`, `native`, `lint` or `direct-sdk-execution`) and `authrdf_receipts: 0`.
+  The receipt collector still requires exactly the V1–V3 fixture set, so any V5
+  receipt export fails the campaign. `authrdf_scope` states the same split.
+
+Hermetic Python tests pin each command's feature, `--lib` and `--test` targets,
+each target's feature gate, the single `--ignored` use and the scope table. They
+do not show that any command ran; registry `adapter_available` stays false for
+the V5 adapter.

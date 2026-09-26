@@ -243,11 +243,12 @@ rule 9 and linked to the evaluated values, §8); or `re-attested` (a trusted imp
 source issuer). Either authority may carry any source evidence. A holder-chosen subset of
 issuer-authenticated credentials remains `holder-declared`: authentication never upgrades
 authority. An anchor over authenticated credentials is expressible, but the authentication
-must be linked to the anchored bytes, not checked beside them. No method with retained
-execution evidence offers it (§9). [OPUS-5.5] The V5 relation and its adapter source
-(§9.2) declare it, with the anchor defined over the signed canonical hashes; no receipt has
-exercised that. Completeness, status policy and holder policy are separate fields implied by
-neither axis.
+must be linked to the anchored bytes, not checked beside them. [OPUS-5.5] The V5 relation
+and its vcq adapter source (§9.2) declare that link, with the anchor defined over the signed
+canonical hashes, but no generic authenticated vcq adapter receipt is retained, so no
+registry entry offers it as available (§9). Direct V5 guest execution and low-level V5
+runtime evidence are separate from, and are not, an adapter receipt. Completeness, status
+policy and holder policy are separate fields implied by neither axis.
 
 No scope establishes whole-wallet completeness. A holder commitment to "all my credentials"
 is holder-declared however it is computed. Absence claims (false ASK, an empty result, NOT
@@ -547,7 +548,9 @@ there is no status, holder binding, DID or controller resolution, or completenes
 
 No adapter test run and no genuine V5 adapter receipt is recorded, so the registry keeps
 `adapter_available: false` for this method. Its ignored genuine driver proves only the case
-IDs a job declares.
+IDs a job declares. The exact-evaluator CI campaign source now names native, Clippy and
+direct V5 executor commands for this feature; none has run at this source, and that campaign
+creates no V5 receipt.
 
 ## 10. Worked examples (illustrative notation, not a wire encoding)
 

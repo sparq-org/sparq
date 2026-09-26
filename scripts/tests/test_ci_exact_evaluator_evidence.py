@@ -3,6 +3,7 @@
 import importlib.util
 import json
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 import tomllib
@@ -192,6 +193,104 @@ class EvidenceGuards(unittest.TestCase):
         self.assertIn('"--example", "export_authrdf_guest"', runner)
         self.assertIn("creates no V5 receipt", evidence.AUTHRDF_SCOPE)
 
+    # [OPUS-5.5] zkp-14.6: feature and target selection of the added commands.
+    @staticmethod
+    def targets(argv):
+        return [argv[index + 1] for index, arg in enumerate(argv) if arg == "--test"]
+
+    def test_vcq_native_commands_select_every_feature_gated_target(self):
+        commands = dict(evidence.VCQ_COMMANDS)
+        self.assertEqual(len(commands), len(evidence.VCQ_COMMANDS), "unique command names")
+        expected = {
+            "native-vcq": ("vcq", ["vcq_adapter"]),
+            "native-vcq-authenticated": ("vcq-authenticated", [
+                "vcq_authenticated", "vcq_authenticated_genuine", "vcq_adapter"]),
+        }
+        root = Path(__file__).parents[2]
+        host = root / "zk/sparql-evaluator/host"
+        features = tomllib.loads((host / "Cargo.toml").read_text())["features"]
+        # Default-off; the adapter feature combines exactly the two existing ones.
+        self.assertEqual(features["default"], [])
+        self.assertEqual(features["vcq-authenticated"], ["vcq", "authenticated-rdf"])
+        for name, (feature, targets) in expected.items():
+            with self.subTest(name=name):
+                argv = commands[name]
+                self.assertEqual(argv[:4], ["-p", "sparq-proved-evaluator", "--features", feature])
+                self.assertIn("--lib", argv)  # module unit tests, including vcq_authenticated
+                self.assertEqual(self.targets(argv), targets)
+                # No filter, skip or ignored selection on a native command.
+                self.assertNotIn("--", argv)
+                self.assertNotIn("--ignored", argv)
+                self.assertNotIn("--skip", argv)
+                for target in targets:
+                    # A file gated on another feature would compile to zero tests.
+                    source = (host / "tests" / f"{target}.rs").read_text()
+                    gate = re.search(r'#!\[cfg\(feature = "([^"]+)"\)\]', source).group(1)
+                    self.assertIn(gate, {feature} | set(features[feature]), target)
+        self.assertIn("mod vcq_authenticated;", (host / "src/lib.rs").read_text())
+        genuine = (host / "tests/vcq_authenticated_genuine.rs").read_text()
+        for test in ["genuine_job_rejects_unknown_fields_and_invalid_seeds",
+                     "genuine_job_case_selection_is_bounded_known_and_distinct"]:
+            self.assertIn(f"#[test]\nfn {test}()", genuine, "non-ignored parser test")
+
+    def test_vcq_authenticated_lint_covers_all_targets_with_warnings_denied(self):
+        argv = dict(evidence.VCQ_COMMANDS)["lint-vcq-authenticated"]
+        self.assertEqual(argv, ["--workspace", "--all-targets", "--features",
+                                "sparq-proved-evaluator/vcq-authenticated", "--", "-D", "warnings"])
+        runner = (Path(__file__).parents[2] / "scripts/ci_exact_evaluator_evidence.py").read_text()
+        self.assertIn('if name.startswith("lint-") else test', runner)
+        self.assertEqual([name for name, _ in evidence.VCQ_COMMANDS if name.startswith("lint-")],
+                         ["lint-vcq-authenticated"])
+
+    def test_only_the_direct_v5_executor_target_runs_ignored_tests(self):
+        commands = dict(evidence.VCQ_COMMANDS)
+        ignored = [name for name, argv in evidence.VCQ_COMMANDS if "--ignored" in argv]
+        self.assertEqual(ignored, ["actual-authrdf-direct-execution"])
+        argv = commands["actual-authrdf-direct-execution"]
+        self.assertEqual(argv[:4], ["-p", "sparq-proved-evaluator", "--features", "authenticated-rdf"])
+        self.assertEqual(self.targets(argv), ["actual_authenticated_rdf"])
+        self.assertEqual(argv[argv.index("--") + 1:], ["--ignored", "--nocapture", "--test-threads=1"])
+        source = (Path(__file__).parents[2]
+                  / "zk/sparql-evaluator/host/tests/actual_authenticated_rdf.rs").read_text()
+        reasons = re.findall(r'#\[ignore = "([^"]+)"\]', source)
+        self.assertEqual(len(reasons), 4)
+        for reason in reasons:
+            self.assertIn("creates no receipt", reason)
+        # Executor only: no prover, presentation, proof job or receipt export.
+        for forbidden in [".prove(", "prove_with_artifact", "Presentation", "PROOF_JOB",
+                          "SPARQ_EVALUATOR_EVIDENCE_DIR", "support/evidence.rs"]:
+            self.assertNotIn(forbidden, source)
+        runner = (Path(__file__).parents[2] / "scripts/ci_exact_evaluator_evidence.py").read_text()
+        self.assertEqual(runner.count('"--ignored"'), 1)
+        # Genuine proof drivers are never selected; the V5 adapter driver's file
+        # runs only its non-ignored native tests under native-vcq-authenticated.
+        for driver in ["authenticated_rdf_genuine", "vcq_genuine", "actual_engine_replay"]:
+            self.assertNotIn(f'"{driver}"', runner)
+
+    def test_v5_command_scopes_distinguish_native_direct_execution_and_zero_receipts(self):
+        scopes = evidence.AUTHRDF_COMMAND_SCOPES
+        runner = (Path(__file__).parents[2] / "scripts/ci_exact_evaluator_evidence.py").read_text()
+        zkp_14_5 = {"export-authrdf-guest", "confirm-authrdf-guest", "native-authrdf",
+                     "native-authrdf-host", "lint-authrdf"}
+        self.assertEqual(set(scopes), zkp_14_5 | {name for name, _ in evidence.VCQ_COMMANDS})
+        for name in scopes:
+            # Named both in the scope table and where the command runs.
+            self.assertGreaterEqual(runner.count(f'"{name}"'), 2, name)
+        self.assertEqual([name for name, scope in scopes.items() if scope == "direct-sdk-execution"],
+                         ["actual-authrdf-direct-execution"])
+        for phrase in ["Native:", "Direct SDK execution:", "without proving", "zero V5 receipts",
+                       "counts no direct execution as a receipt", "runs no genuine V5 proof driver"]:
+            self.assertIn(phrase, evidence.AUTHRDF_SCOPE)
+        self.assertIn('"authrdf_command_scopes": AUTHRDF_COMMAND_SCOPES, "authrdf_receipts": 0', runner)
+        # The receipt collector admits exactly the V1-V3 fixtures; a V5 file is rejected.
+        _, expected = evidence.active_profile(Path(__file__).parents[2])
+        self.assertFalse({name for name in expected if not name.startswith(("v1-", "v2-", "v3-"))})
+        (self.root / "receipts").mkdir()
+        for name in expected | {"v5-direct-execution"}:
+            (self.root / "receipts" / f"{name}.json").write_text("{}")
+        with self.assertRaisesRegex(ValueError, "missing or unexpected"):
+            evidence.receipts(self.root, self.pin, expected)
+
     def test_workflow_requires_export_and_upload_of_actual_evidence(self):
         root = Path(__file__).parents[2]
         workflow = (root / ".github/workflows/zk-exact-evaluator.yml").read_text()
@@ -200,7 +299,8 @@ class EvidenceGuards(unittest.TestCase):
         self.assertIn("actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a", workflow)
         runner = (root / "scripts/ci_exact_evaluator_evidence.py").read_text()
         self.assertIn('"--nocapture", "--test-threads=1"', runner)
-        self.assertNotIn('"--ignored"', runner)
+        # [OPUS-5.5] zkp-14.6: once, for the direct V5 executor target only (see above).
+        self.assertEqual(runner.count('"--ignored"'), 1)
 
 
 if __name__ == "__main__":

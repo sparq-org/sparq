@@ -388,5 +388,10 @@ The native tests are `host/tests/vcq_authenticated.rs` and unit tests in
 `host/tests/vcq_authenticated_genuine.rs` proves only the case IDs a job declares.
 At this checkpoint none of these tests has been run, and no V5 adapter receipt
 exists. The research registry keeps this method's `adapter_available` false until
-a genuine end-to-end adapter receipt is independently retained. See the
+a genuine end-to-end adapter receipt is independently retained. The exact-evaluator
+campaign source adds `native-vcq`, `native-vcq-authenticated`,
+`lint-vcq-authenticated` and the direct V5 executor command
+`actual-authrdf-direct-execution` (SDK execution, no proof); none has run at this
+source, the genuine drivers are not selected, and the campaign creates no V5
+receipt ([campaign evidence](../../skills/zk-query-proofs/references/evaluator-evidence.md)). See the
 [adapter reference](../../skills/zk-query-proofs/references/vcq-authenticated-rdf-adapter.md).

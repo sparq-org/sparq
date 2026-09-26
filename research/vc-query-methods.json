@@ -540,7 +540,7 @@
     {"tuple": "suite:di-selective-disclosure without a host verifier", "reason": "the default verifier rejects every suite"},
     {"tuple": "map:sparq-dual-leaf-v1 with method:noir-selected-support-*", "reason": "members accept string-canonical commitments only"},
     {"tuple": "selected-support with select-bag, select-sequence, false ASK or graph results", "reason": "these assert completeness"},
-    {"tuple": "any current method with verifier-agreed-anchor authority and issuer-authenticated or re-attested source evidence", "reason": "no method with retained execution evidence links authentication to anchored bytes; [OPUS-5.5] method:risc0-authenticated-rdf version 5 declares it in source only, with adapter_available false"},
+    {"tuple": "any current method with verifier-agreed-anchor authority and issuer-authenticated or re-attested source evidence", "reason": "no generic authenticated vcq adapter receipt is retained for a method linking authentication to anchored bytes; [OPUS-5.5] method:risc0-authenticated-rdf version 5 declares that link in adapter source only, with adapter_available false; direct V5 guest execution and low-level V5 runtime evidence are not adapter receipts"},
     {"tuple": "any request requiring holder binding from a mapped query method", "reason": "none of the mapped methods enforces holder binding; the legacy manifest path that does is not mapped"}
   ],
   "conformance_vectors": [
