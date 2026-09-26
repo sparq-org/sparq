@@ -98,9 +98,9 @@ IN_BAND_CONTAINER_PROVENANCE = "provenance: mode=max"
 SUBJECTS_EXPR = "${{ needs.package.outputs.hashes }}"
 ARTIFACT_SUBJECTS_EXPR = "${{ needs.artifact-subjects.outputs.hashes }}"
 DIST_SUBJECTS_EXPR = "${{ needs.build.outputs.binary-hashes }}"
-PROVENANCE_ARTIFACT_EXPR = "${{ needs.provenance.outputs.provenance-download-name }}"
+PROVENANCE_ARTIFACT_EXPR = "name: ${{ needs.provenance.outputs.provenance-name }}"
 ARTIFACTS_PROVENANCE_EXPR = (
-    "${{ needs.provenance-artifacts.outputs.provenance-download-name }}"
+    "name: ${{ needs.provenance-artifacts.outputs.provenance-name }}"
 )
 HASHES_OUTPUT_VALUE = "${{ jobs.hashes.outputs.hashes }}"
 BINARY_HASHES_OUTPUT_VALUE = "${{ jobs.binary-hashes.outputs.hashes }}"
@@ -446,6 +446,20 @@ def check(release_text: str, matrix_text: str, dist_text: str) -> list[str]:
                 f"the docs claim L3 coverage; found: {sorted(rel_needs)!r}"
             )
     sums = index_of(rel, SHA256SUMS_CMD)
+    # [GPT-5] An empty name makes download-artifact fetch the entire run. v0.1.3 reached
+    # SHA256SUMS with every artifact directory because both output keys were misspelled.
+    guard = step_block(rel, "Validate signed provenance artifact names")
+    if guard is None:
+        bad.append("the `release` job must reject missing or unexpected provenance names")
+    else:
+        for expected in (
+            "ARCHIVE_PROVENANCE: ${{ needs.provenance.outputs.provenance-name }}",
+            "ARTIFACT_PROVENANCE: ${{ needs.provenance-artifacts.outputs.provenance-name }}",
+            '"$ARCHIVE_PROVENANCE" != "sparq-cli-${VERSION}.intoto.jsonl"',
+            '"$ARTIFACT_PROVENANCE" != "sparq-artifacts-${VERSION}.intoto.jsonl"',
+        ):
+            if not any(expected in line for line in guard):
+                bad.append(f"the provenance-name guard must check {expected}")
     for label, expr in (
         ("archives", PROVENANCE_ARTIFACT_EXPR),
         ("non-archive artifacts", ARTIFACTS_PROVENANCE_EXPR),
@@ -817,7 +831,7 @@ MUTATIONS = {
     # M8 — the release stops attaching the signed bundle at all.
     "signed provenance never attached to the release": _sub(
         "release",
-        "name: ${{ needs.provenance.outputs.provenance-download-name }}",
+        PROVENANCE_ARTIFACT_EXPR,
         "name: sbom-vex",
     ),
     # ---- #4570: the same regressions, one per newly-isolated lane. ----
@@ -873,8 +887,25 @@ MUTATIONS = {
     # MA8 — the second signed bundle never reaches the Release.
     "artifact provenance never attached to the release": _sub(
         "release",
-        "name: ${{ needs.provenance-artifacts.outputs.provenance-download-name }}",
+        ARTIFACTS_PROVENANCE_EXPR,
         "name: sbom-vex",
+    ),
+    # [GPT-5] v0.1.3's real failure: `provenance-download-name` is not an output of the pinned
+    # generator, so the action received no name and downloaded every artifact in the run.
+    "archive provenance uses nonexistent output": _sub(
+        "release",
+        PROVENANCE_ARTIFACT_EXPR,
+        "name: ${{ needs.provenance.outputs.provenance-download-name }}",
+    ),
+    "artifact provenance uses nonexistent output": _sub(
+        "release",
+        ARTIFACTS_PROVENANCE_EXPR,
+        "name: ${{ needs.provenance-artifacts.outputs.provenance-download-name }}",
+    ),
+    "release no longer guards provenance names": _sub(
+        "release",
+        "- name: Validate signed provenance artifact names",
+        "- name: Ignore signed provenance artifact names",
     ),
     # MA9 — dist.yml's binaries revert to in-band-only provenance.
     "dist subjects no longer threaded from the build matrix": _sub(
