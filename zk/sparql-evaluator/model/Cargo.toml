@@ -9,6 +9,8 @@ publish.workspace = true
 default = []
 evaluate = ["dep:sparq-engine", "dep:sparq-core", "dep:spargebra", "dep:oxrdf", "dep:oxttl"]
 graph-results = ["evaluate", "dep:sparq-canon", "sparq-engine/deterministic-blank-nodes"]
+# [OPUS-5.5] Native-only V5 issuer-authenticated RDF model; no guest, host or proof use.
+authenticated-rdf = ["graph-results", "dep:ed25519-dalek"]
 
 [dependencies]
 serde.workspace = true
@@ -20,6 +22,7 @@ sparq-canon = { path = "../../../crates/sparq-canon", default-features = false, 
 spargebra = { version = "=0.4.6", features = ["sparql-12", "sep-0006", "sparq-deterministic-paths"], optional = true }
 oxrdf = { version = "0.3", features = ["rdf-12"], optional = true }
 oxttl = { version = "0.2", features = ["rdf-12"], optional = true }
+ed25519-dalek = { version = "=2.2.0", default-features = false, features = ["alloc"], optional = true }
 
 # [GPT-6] Explicit native corpus adapter; no proof or default-feature claim.
 [[example]]

@@ -318,3 +318,16 @@ gate and is no benchmark. It authenticates no credential, status or holder, and 
 adapter is not externally audited. See
 [the adapter reference](../../skills/zk-query-proofs/references/vcq-exact-adapter.md)
 for the record and its caveats.
+
+## Issuer-authenticated RDF model
+
+[OPUS-5.5] The model crate's `authenticated-rdf` feature (off by default) adds the
+native-only relation version 5 in `authenticated_rdf`; V1–V3 are unchanged. The
+verifier-owned policy table authorizes each issuer, verification method and public
+key. Each credential needs strict Ed25519 over the hashes of its RDFC-1.0 canonical
+document and proof configuration and an issuer matching the method's table entry.
+The model internally builds the V3 default-graph union, scoping blank nodes per
+credential. `VerifierAgreed` and `HolderDeclared` authority bind distinct
+authenticated provenance values. No guest adapter, host API, receipt or proof exists,
+and it makes no credential status, holder binding or wallet-completeness claim. See
+the [native model reference](../../skills/zk-query-proofs/references/authenticated-rdf-model.md).

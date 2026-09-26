@@ -158,6 +158,11 @@ FROM/FROM NAMED selection. V1 requests and commitments retain their meaning.
 [GPT-6] The opt-in [V3 graph-result API](references/graph-results-v3.md)
 adds blank-node identity, canonical tables and bounded graph forms through typed
 host/guest APIs; consult artifact-bound evidence for actual execution status.
+[OPUS-5.5] The detached model's off-by-default `authenticated-rdf` feature adds a
+[native-only V5 issuer-authenticated RDF model](references/authenticated-rdf-model.md).
+It checks W3C `eddsa-rdfc-2022` credentials against a verifier-pinned key table, then
+reuses V3 evaluation. It has no guest adapter and no real proof, and it checks no
+status, holder binding or completeness. <!-- privacy-claims-allow: native model only, no proof -->
 [GPT-6] The [campaign evidence guide](references/evaluator-evidence.md) explains
 exact artifact export, actual receipt evidence and source/HAL provenance.
 [GPT-6] The [exact-evaluator experiment adapter](../../zk/sparql-evaluator/experiments/README.md)
