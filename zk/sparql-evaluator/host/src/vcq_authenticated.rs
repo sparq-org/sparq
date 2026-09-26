@@ -1,5 +1,6 @@
 // [OPUS-5.5] zkp-14.6 optional vcq adapter over the V5 authenticated-RDF relation.
-// Experimental source, not externally audited; no V5 adapter receipt exists yet.
+// Experimental source, not externally audited. At frozen source 7fe88955 one
+// audited genuine receipt covers only the select-bag-verifier-agreed case.
 // Rust guideline compliant 2026-02-21
 //! `sparq-query-protocol` adapter over the issuer-authenticated RDF (V5) relation.
 //!
@@ -59,9 +60,11 @@
 //! query-shape check, before any proof work or challenge use.
 //!
 //! `Capabilities::is_executable` is true because this build contains the
-//! adapter. That is an implementation declaration only. The research registry
-//! keeps `adapter_available: false` for this method until a genuine end-to-end
-//! adapter receipt is independently retained; this code never reads the
+//! adapter. That is an implementation declaration only. One independently
+//! audited genuine receipt, at frozen source `7fe88955`, covers only the
+//! verifier-agreed `SelectBag` tuple on one public synthetic fixture. The other
+//! five tuples have not run, so the research registry keeps
+//! `adapter_available: false` for this method; this code never reads the
 //! registry.
 //!
 //! # Policy binding

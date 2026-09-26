@@ -24,8 +24,15 @@
 //!
 //! Proving shares the exact APIs' prover-local session ceiling. The valid
 //! synthetic V5 witnesses of the direct execution tests fit it; that does not
-//! show every valid witness fits, and exceeding it yields no presentation. No
-//! genuine V5 receipt is recorded.
+//! show every valid witness fits, and exceeding it yields no presentation.
+//!
+//! The one low-level genuine-receipt job, at `42d13fed`, timed out without a
+//! receipt. Separately, the generic VCQ adapter (`vcq_authenticated`) at frozen
+//! source `7fe88955` produced one verified genuine V5 receipt with the same
+//! approved guest `c35f5e4b`. It covers only one public synthetic
+//! verifier-agreed SELECT bag case. It shows neither that every valid witness
+//! fits the ceiling nor that the other five declared tuples have retained
+//! proofs.
 //!
 //! Experimental, not externally audited. Neither provenance establishes
 //! credential status, holder binding, or wallet or world completeness.

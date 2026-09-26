@@ -347,8 +347,9 @@ not established. All credential authentication runs inside the V5 guest. Its
 real Cargo resolution. An independently audited scoped gate at `42d13fed`
 passed the native host and job-parsing tests, a feature Clippy pass and direct
 guest execution, which observed each guest rejecting the other's input and
-created no receipt. No genuine V5 receipt is recorded: the one genuine job
-attempted there timed out before completing a proof. The dependency, SBOM,
+created no receipt. The one low-level genuine job attempted there timed out
+before completing a proof; the only genuine V5 receipt, for one case, came later
+through the vcq adapter (see below). The dependency, SBOM,
 registry-parser and exact-evaluator campaign gates register its workspace and
 lock and fail closed without that lock; no completed campaign run with the V5
 steps is recorded, and the campaign creates no V5 receipt. The ignored
@@ -395,11 +396,14 @@ The native tests are `host/tests/vcq_authenticated.rs` and unit tests in
 An independently verified, manually scoped native gate at adapter source
 `7fe88955` passed these native tests, the genuine driver's non-ignored job-parser
 and policy tests, the existing low-level V5 and V3 adapter tests and two
-all-target Clippy feature scopes. It created no proof and executed no guest; the
-ignored genuine driver was not run, and no V5 adapter receipt exists. The six
-declared tuples are therefore unproved. The research registry keeps this method's
-`adapter_available` false until a genuine end-to-end adapter receipt is
-independently retained. The exact-evaluator campaign source (at `e4fb7dff`) adds
+all-target Clippy feature scopes. It created no proof and executed no guest, and
+the ignored genuine driver was not run there. Separately, one independently
+audited genuine job at that frozen source proved one public synthetic case,
+`select-bag-verifier-agreed`, with the approved V5 guest (`c35f5e4b`): one
+Succinct `Halted(0)` receipt, accepted by the protocol, matching the expected
+result and native journal, with 28 controls. The other five tuples and the
+row-bound rejection case have not run, so the research registry keeps this
+method's `adapter_available` false. The exact-evaluator campaign source (at `e4fb7dff`) adds
 `native-vcq`, `native-vcq-authenticated`, `lint-vcq-authenticated` and the direct
 V5 executor command `actual-authrdf-direct-execution` (SDK execution, no proof).
 The full named campaign has not run at that revision, and the manual native gate
@@ -408,4 +412,4 @@ creates no V5 receipt
 ([campaign evidence](../../skills/zk-query-proofs/references/evaluator-evidence.md)).
 See the
 [adapter reference](../../skills/zk-query-proofs/references/vcq-authenticated-rdf-adapter.md)
-for the record and its audit digest. Not externally audited (`sq-qhy4`).
+for both records and their audit digests. Not externally audited (`sq-qhy4`).

@@ -1,12 +1,15 @@
 <!-- [OPUS-5.5] zkp-14.6: usage reference for the optional vcq adapter over the V5 authenticated-RDF relation. -->
 # vcq adapter for issuer-authenticated RDF (V5)
 
-**Natively tested; no receipt.** An independently verified, manually scoped native gate at
-adapter source `7fe88955` passed the adapter's native tests and Clippy, without proving; see
-[recorded native validation](#recorded-native-validation). Its ignored genuine-receipt driver has
-not completed a job, so no V5 adapter receipt exists and none of the six declared tuples is
-proved. It is experimental and not externally audited (sq-qhy4). Do not treat it as a validated,
-available method. <!-- privacy-claims-allow: native tests only; no receipt, not audited -->
+**One genuine case; five tuples and the row-bound case not run.** At frozen adapter source
+`7fe88955`, one independently audited genuine job proved one public synthetic case,
+`select-bag-verifier-agreed`, with the approved V5 guest `c35f5e4b`, and the protocol accepted it;
+see [recorded genuine validation](#recorded-genuine-validation). A separate independently verified
+native gate at the same source passed the adapter's native tests and Clippy without proving; see
+[recorded native validation](#recorded-native-validation). The other five declared result and
+authority tuples and the genuine row-bound rejection case have not run, so the registry keeps
+`adapter_available: false`. It is experimental and not externally audited (sq-qhy4). Do not
+treat it as a validated, available method. <!-- privacy-claims-allow: one genuine synthetic case plus native tests; not audited -->
 
 `sparq_proved_evaluator::vcq_authenticated` (detached crate `zk/sparql-evaluator/host`, cargo
 feature `vcq-authenticated`, **off by default**) implements the `sparq-query-protocol`
@@ -48,9 +51,10 @@ adapter receipt and would not change the registry's `adapter_available: false`.
 `Capabilities::is_executable()` is true in this build because the adapter code exists; without
 that local declaration, `admit` could not select it. That is an implementation declaration only.
 The research [method registry](../../../research/vc-query-methods.json) lists
-`method:risc0-authenticated-rdf` version 5 with `adapter_available: false`. It stays false until
-a genuine end-to-end adapter receipt run is independently retained and reviewed. The adapter never
-reads the registry.
+`method:risc0-authenticated-rdf` version 5 with `adapter_available: false`. One genuine adapter
+receipt is now independently audited, for `select-bag-verifier-agreed` only. That is partial
+coverage of one of six declared tuples, so the value stays false for the six-tuple declaration.
+Six source capabilities are not six proven profiles. The adapter never reads the registry.
 
 ## API
 
@@ -225,7 +229,8 @@ commitments publicly linkable.
 
 The unit tests, native gates and the genuine driver's non-ignored job-parser and policy tests
 passed in the [recorded native gate](#recorded-native-validation). The ignored genuine driver was
-not run there.
+not run there. It ran separately for one declared case; see
+[recorded genuine validation](#recorded-genuine-validation).
 
 - **Unit tests** (`host/src/vcq_authenticated.rs`). They check claim conversion on hand-built
   journals: agreed and holder scope and obligations, and output fields. They also check that
@@ -346,10 +351,63 @@ not a genuine receipt and not a full workspace gate, and it leaves the registry'
 `adapter_available` false. A separate independent source review found no actionable production
 or test defect; that review is not a security audit.
 
+## Recorded genuine validation
+
+Frozen adapter source `7fe88955` (`7fe889557afcf1497769c1360ef53348980a7bae`). One genuine job
+declared only `select-bag-verifier-agreed` over the public synthetic W3C `eddsa-rdfc-2022`
+vector, under an eight-CPU allowance. The independent audit found the source identical before
+and after the run and equal to a local archive of that commit (7,085 source files, 30 lock
+files). The run was not repeated at later commits. The audit record and evidence archive are
+kept outside this repository. Host timings and memory are non-canonical and are not reported.
+
+| Record | SHA-256 |
+|---|---|
+| Independent audit (`sparq.independent-genuine-evidence-audit.v1`) | `7eddc0999228f9db3a2ddcd8b9415d36272dc63e0bb1c7727675e071701eea49` |
+| Evidence archive, `vcq-authrdf-genuine-7fe-select-agreed/terminal-evidence.tar.gz` (26 files verified) | `4c123dc5c5b4dc94483d77af905940918aa6ad7b527b0943018c4d0a81508b8c` |
+| Source audit | `4796827c3602ef6e4cfaa3b8aa06ffdb1b0850d68914326619186a56ca6ecbe1` |
+| Proof job; runner | `8e3dab7f927c43508378418091811c2562380f21047bf69ad23850940e338cfd`; `89a899a1798c51f9f75eaa99d88b78a66f7bb861442370724e49e2ad9b99787a` |
+| `vcq_authenticated_genuine` test executable | `693c8e36fb69788b01f79a67aef0e187f213423bacf1dbe33c37cdb71d10be07` |
+| `r0vm` 3.0.6 | `751b9b188d341e8bec5e02060086b7b1dc3f7289e90f726c38589bb6735dd6d7` |
+| `summary.json`; case `record.json`; run log | `f2bf9ac622453adbed64cfaca47e9f501caffc53086af7726346e0243fceeea0`; `a237a5a09d5210aad7ac76b56cb76dd54e3cdac3aea600058d4ed72cbe79993a`; `45db3b8af8194ec608b66b3e3f94b01e46d8d42e6bbd3c5fc735562e5bd7c397` |
+
+- **Receipt.** One genuine receipt, protocol-accepted: `Succinct`, `Halted(0)`, dev mode off,
+  seal 55,667 words. Receipt SHA-256
+  `1e24b3af5dfd186054040f694135c235def3f28183b8a459df51c8208be50810`, journal SHA-256
+  `d68246c1c14c18927bf09e00db62e1c45921ba07463f165de255acd7d39a94b1`. Presentation file SHA-256
+  `7736b137b085b33aa7eacc0211ac595ff5690b6024ad8fa300fff52a168e01b4`, vcq transport SHA-256
+  `0ff8dc6073eb40add2bd2b8ee40ff18125ffed6bd0fdc2f1ac14b3779145f19b`.
+- **Pin.** The approved V5 guest, artifact SHA-256
+  `c35f5e4b74169aa51b244b8feecb0c8e746296a6aa052be8c58f0190b1b10b11`, with the image ID recorded
+  by the [V5 guest gate](authenticated-rdf-guest.md#recorded-evidence) at `42d13fed`. The
+  cross-image control used the exact guest's pin (`e8c9b6b6…`, same reference).
+- **Result.** The expected bag SELECT result, two identical `"Alumni Credential"` rows for
+  `?name`, matched the native journal. The test completed SDK verification with dev mode off
+  under the V5 pin, the native and hand-defined result comparison and the generic protocol
+  checks. The audit checked the retained bytes, source and execution provenance and the test's
+  assertions; it launched no extra verification process.
+- **Controls.** 28, all reusing the receipt. 25 binding controls failed as `invalid` with their
+  exact codes and zero store calls: 16 `vcq-proof-rejected`, 6 `vcq-descriptor-digest-mismatch`
+  and one each of `vcq-audience-mismatch`, `vcq-request-expired` and `vcq-request-not-yet-valid`.
+  A replay gave `ChallengeReplayed` after two store calls, a broken store `infrastructure` after
+  one, and two concurrent verifications one accept and one replay. The stores are in-memory test
+  doubles, not production durability or concurrency evidence.
+- **Scope.** `all_defined_cases_run` is false. The driver emitted no guest cycle metric.
+
+This is one tested fixture for one of six tuples. The other five tuples
+(`select-bag-holder-declared`, `ask-true-verifier-agreed`, `ask-false-holder-declared`,
+`construct-verifier-agreed`, `construct-holder-declared`) and the genuine `select-bag-row-bound`
+rejection case have not run, and the registry keeps `adapter_available` false. It is not a broad
+semantic or security result, not a benchmark and not an external audit. The earlier low-level V5
+job at `42d13fed` that [timed out](authenticated-rdf-guest.md#recorded-evidence) is separate
+evidence, as are the native gate above and the V5 guest gate's direct executions; no count here
+combines with theirs.
+
 ## Not established
 
 - no credential status, holder binding, validity period, clock or DID or controller resolution;
 - no JSON-LD, full Data Integrity or other-suite processing;
 - no wallet or world completeness under either authority;
+- no genuine receipt for five of the six tuples or for the row-bound case, and no result beyond
+  one public synthetic fixture;
 - no general SPARQL conformance, benchmark or performance figure;
 - no external audit, and no soundness or privacy claim.

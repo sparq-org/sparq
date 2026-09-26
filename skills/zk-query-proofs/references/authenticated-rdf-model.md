@@ -1,16 +1,19 @@
 # Issuer-authenticated RDF: native V5 model
 
-[OPUS-5.5] **Native model.** No genuine receipt has been recorded for this
-relation. A separately pinned optional guest and a low-level host API run it
-unchanged; at source `42d13fed` that guest was built and executed directly,
-without proving (see the [V5 guest reference](authenticated-rdf-guest.md)). A
-separate [vcq adapter](vcq-authenticated-rdf-adapter.md) has passed a scoped
-native gate only; the research registry lists `method:risc0-authenticated-rdf`
+[OPUS-5.5] **Native model.** A separately pinned optional guest and a low-level
+host API run it unchanged; at source `42d13fed` that guest was built and
+executed directly, without proving (see the
+[V5 guest reference](authenticated-rdf-guest.md)). A separate
+[vcq adapter](vcq-authenticated-rdf-adapter.md) has passed a scoped native gate
+and, at frozen source `7fe88955`, produced one independently audited genuine
+receipt of this relation for one public synthetic case,
+`select-bag-verifier-agreed`. Its other five tuples and its row-bound case have
+not run, so the research registry lists `method:risc0-authenticated-rdf`
 version 5 with `adapter_available: false`. It makes no
 conformance or performance claim, is not a complete Data Integrity processor,
 and is not externally audited (`sq-qhy4` is open). Treat it as research-grade
 and not yet sound.
-<!-- privacy-claims-allow: native model plus directly executed guest; explicitly not audited, no genuine receipt recorded -->
+<!-- privacy-claims-allow: native model, directly executed guest and one synthetic adapter receipt; explicitly not audited -->
 
 The detached model crate's `authenticated-rdf` feature (off by default) adds
 `sparq_proved_evaluator_model::authenticated_rdf`, relation version 5. It is
@@ -85,9 +88,9 @@ publicly linkable.
 `evaluate(&Witness) -> Journal { version, request_digest, dataset_commitment,
 provenance, result }`. The journal does not publish a credential count or issuer
 list. `request_digest` frames every request and policy field. After receipt
-verification (see the [V5 guest reference](authenticated-rdf-guest.md); no
-genuine receipt is recorded), `bind_journal(&journal, &expected)` checks the
-version and request digest. For `VerifierAgreed`, it also requires the new
+verification (see the [V5 guest reference](authenticated-rdf-guest.md); one
+adapter-driven genuine receipt is recorded, for one case),
+`bind_journal(&journal, &expected)` checks the version and request digest. For `VerifierAgreed`, it also requires the new
 authenticated commitment and `Provenance::VerifierAgreedAuthenticated`. For
 `HolderDeclared`, it requires `Provenance::HolderSelectedAuthenticated`. Calling
 it verifies no proof.

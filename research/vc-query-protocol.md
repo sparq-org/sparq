@@ -13,7 +13,8 @@ vectors. A registry label is a name, never evidence that anything it names is su
 [OPUS-5.5] Only `method:risc0-exact` version 3 has a vcq adapter (`adapter_available: true` for
 exactly six tuples, §6.1, §9); every other entry and version keeps `adapter_available: false`.
 Adapter source for `method:risc0-authenticated-rdf` version 5 now exists (§9.2), but its entry
-stays `false`, because no genuine adapter receipt has been independently retained.
+stays `false`: an independently audited genuine adapter receipt covers only one of its six
+declared tuples.
 
 ## 1. Conventions and snapshot
 
@@ -245,10 +246,12 @@ issuer-authenticated credentials remains `holder-declared`: authentication never
 authority. An anchor over authenticated credentials is expressible, but the authentication
 must be linked to the anchored bytes, not checked beside them. [OPUS-5.5] The V5 relation
 and its vcq adapter source (§9.2) declare that link, with the anchor defined over the signed
-canonical hashes, but no generic authenticated vcq adapter receipt is retained, so no
-registry entry offers it as available (§9). Direct V5 guest execution and low-level V5
-runtime evidence are separate from, and are not, an adapter receipt. Completeness, status
-policy and holder policy are separate fields implied by neither axis.
+canonical hashes. One independently audited genuine adapter receipt covers only its
+verifier-agreed bag SELECT tuple, on one public synthetic fixture; the verifier-agreed ASK and
+CONSTRUCT tuples have not run, so no registry entry offers the link as available (§9).
+Direct V5 guest execution and low-level V5 runtime evidence are separate from, and are not,
+an adapter receipt. Completeness, status policy and holder policy are separate fields implied
+by neither axis.
 
 No scope establishes whole-wallet completeness. A holder commitment to "all my credentials"
 is holder-declared however it is computed. Absence claims (false ASK, an empty result, NOT
@@ -274,7 +277,7 @@ for the six tuples its `vcq_adapter` lists (§9); it is false for every other en
 An adapter's local `Capabilities` must declare itself available so that `admit` can select it.
 That local declaration records an implementation. It is not the registry's validated
 availability: `method:risc0-authenticated-rdf` declares it in source but stays `false` in the
-registry (§9.2).
+registry (§9.2), even after one genuine receipt for one of its six tuples.
 
 ### 6.2 Operations (proposed interface *QueryMethod*)
 
@@ -519,7 +522,7 @@ SELECT rows and CONSTRUCT N-Triples lines count; ASK has no row bound. The propo
 `neg-excess-rows` (§11) now expects the same outcome as the seventh receipt. That vector
 has not been executed.
 
-### 9.2 Authenticated-RDF V5 vcq adapter (native gate only, no receipt)
+### 9.2 Authenticated-RDF V5 vcq adapter (native gate and one genuine case)
 
 [OPUS-5.5] `sparq_proved_evaluator::vcq_authenticated::Risc0AuthenticatedRdfV5` (detached
 host crate, feature `vcq-authenticated`, off by default) implements *QueryMethod* over the V5
@@ -550,12 +553,18 @@ An independently verified, manually scoped native gate at source `7fe88955` pass
 adapter's native tests and Clippy without proving (record and audit digest in the registry's
 `vcq_adapter.evidence` and the
 [adapter reference](../skills/zk-query-proofs/references/vcq-authenticated-rdf-adapter.md#recorded-native-validation)).
-No genuine V5 adapter receipt is recorded, so none of the six tuples is proved and the
-registry keeps `adapter_available: false` for this method. Its ignored genuine driver proves
-only the case IDs a job declares. The exact-evaluator CI campaign source names native, Clippy
+Separately, one independently audited genuine job at that frozen source declared and proved
+only `select-bag-verifier-agreed` over a public synthetic W3C vector with the approved V5
+guest: one Succinct `Halted(0)` receipt, verified with dev mode off, accepted by the protocol,
+matching the expected result and native journal, with 28 controls (record in the registry's
+`vcq_adapter.genuine_evidence` and the
+[adapter reference](../skills/zk-query-proofs/references/vcq-authenticated-rdf-adapter.md#recorded-genuine-validation)).
+The other five tuples and the genuine row-bound rejection case have not run, so the registry
+keeps `adapter_available: false` for this method. Its ignored genuine driver proves only the
+case IDs a job declares. The exact-evaluator CI campaign source names native, Clippy
 and direct V5 executor commands for this feature at `e4fb7dff`; the full named campaign has
-not run at that revision, the manual native gate is not that campaign, and the campaign
-creates no V5 receipt.
+not run at that revision, neither manual run is that campaign, and the campaign creates no V5
+receipt.
 
 ## 10. Worked examples (illustrative notation, not a wire encoding)
 

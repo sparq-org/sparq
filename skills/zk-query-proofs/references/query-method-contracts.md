@@ -15,11 +15,12 @@ verifier-agreed authority, with source evidence `None`, status `NotRequested` an
 for the full rule list. [OPUS-5.5] Its consumers are the optional, off-by-default `vcq`
 feature of the detached exact-evaluator host crate (see [vcq exact adapter](vcq-exact-adapter.md))
 and, since zkp-14.6, its `vcq-authenticated` feature: a V5 issuer-authenticated RDF adapter
-whose registry entry keeps `adapter_available` false, because no genuine adapter receipt is
-retained yet (see [vcq authenticated-RDF adapter](vcq-authenticated-rdf-adapter.md)). That
-adapter is the first source to declare `SourceEvidence::IssuerAuthenticated` tuples with a
-suite. It names its guest relation as the authenticity enforcer; that is a source declaration,
-and no receipt has exercised it.
+whose registry entry keeps `adapter_available` false, because an independently audited genuine
+receipt covers only one of its six tuples, `select-bag-verifier-agreed`, on one public synthetic
+fixture (see [vcq authenticated-RDF adapter](vcq-authenticated-rdf-adapter.md)). That adapter
+is the first source to declare `SourceEvidence::IssuerAuthenticated` tuples with a suite. It
+names its guest relation as the authenticity enforcer; that is a source declaration, exercised
+by that one receipt and not by any receipt for the other five tuples.
 
 ## API
 

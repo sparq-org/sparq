@@ -125,4 +125,8 @@ manually scoped native gate at adapter source `7fe88955` ran the adapter's nativ
 tests and two Clippy feature scopes, with no proof and no direct guest execution.
 That gate is not this campaign; see
 [its record](vcq-authenticated-rdf-adapter.md#recorded-native-validation).
-Registry `adapter_available` stays false for the V5 adapter.
+Also outside this campaign, one independently audited genuine job at frozen
+source `7fe88955` proved one V5 adapter case, `select-bag-verifier-agreed`; see
+[its record](vcq-authenticated-rdf-adapter.md#recorded-genuine-validation). The
+campaign still selects no genuine V5 driver and its receipt collector is
+unchanged. Registry `adapter_available` stays false for the V5 adapter.
