@@ -1,463 +1,1034 @@
-// [FABLE-5] sq-3kd2g.1 (epic sq-3kd2g / GitHub issue #1591) — the PURE SINGLE-PROVER
-// zkSPARQL ARCHITECTURE paper: system design + measured artifact facts + research-grade
-// security analysis. Verified gap (research/zksparql-fragment-extension.md §6): no paper
-// describes the single-prover architecture itself. This paper does NOT overlap:
-//   - cozk-witness-validation.typ — the COLLABORATIVE (multi-prover) negative result;
-//   - verifiable-fed-sparql.typ    — the SoK across the whole estate.
-// This one is the single-prover SYSTEM: commitment scheme, fixed named circuit family,
-// manifest composition, verifier re-derivation, the provable fragment, and an honest
-// cost + security analysis.
+// [OPUS-5.5] zkp-19 — full revision of the single-prover zkSPARQL paper (originally
+// sq-3kd2g.1, epic sq-3kd2g / #1591) into a working paper on CONTRACT-BOUND proofs for SPARQL
+// over credential-derived RDF. The earlier fixed-circuit architecture is retained as the
+// LEGACY baseline (section "legacy"); the new material is the query/disclosure contract, the
+// bounded exact-evaluator path, the disclosure-specialized (public-pattern) path and the
+// query-over-VC method abstraction.
 //
-// HONESTY FRAME (the empirical-honesty mandate + gate sq-qhy4, C-family / wip-arxiv):
-// this paper asserts NO proven security, privacy, soundness, or attestation property. The
-// single-prover ZK verifier is INTERNALLY RE-AUDITED but has NO external accredited
-// cryptographer audit (bead sq-qhy4, OPEN). Every soundness-adjacent sentence is written
-// negated or hedged (so it clears the privacy-claims gate BY MEANING, not by evasion), and
-// every performance figure is a DETERMINISTIC ARTIFACT FACT (bb ultra_honk gate counts from
-// the regression-gated snapshot) pulled through #headline(...) — NO wall-clock number is
-// claimed as a headline (work-box timings are non-canonical; see §7). "Malicious security"
-// / "soundness" appear as NOUNS or under an explicit negator on purpose.
+// HONESTY FRAME (empirical-honesty mandate + gate sq-qhy4, C-family / wip-arxiv): NO proven
+// security, privacy, integrity or attestation property is asserted for any implementation.
+// Design arguments are CONDITIONAL on named assumptions. Evidence levels are kept distinct:
+// implemented source / executed native / executed guest / genuine verified receipt / external
+// audit (none reached). The exact-evaluator and adapter PROOFS carry NO conventional
+// issuer-signature authentication (source evidence None). The authenticated extension of the
+// exact evaluator (V5) has passed scoped NATIVE model tests only; its guest is unvalidated
+// source, with zero guest executions and zero V5 proofs. The separate native experiment's
+// finite/CLI proofs are native BBS+ public-BGP proofs (not exact SPARQL, not LegoGroth16
+// composition proofs); tuple composition ran only in 2 legacy test functions. Counts from
+// different campaigns (and overlapping test configurations) are never summed. Timings are
+// INDICATIVE development measurements, shown only in one labelled pilot table via #ev(...),
+// never co-tabulated with canonical counts.
 //
-// Single-source Typst. Numbers come ONLY from #headline(...) / #ev(...) (paper-evidence.json),
-// never hard-coded. Compiles to BOTH a PDF (the download) and semantic HTML (the in-site page).
+// Single-source Typst. Every result number comes from paper-evidence.json through
+// #headline(...) (canonical, json-pointer-bound to the frozen snapshots under
+// research/zk-paper-evidence/) or #ev(...) (the indicative pilot only); none is hard-coded.
 
 #import "_lib/bench.typ": headline, ev, provenance, authors, anon, paper_heading_numbering
 
-#set document(title: "A Single-Prover Zero-Knowledge Architecture for Verifiable SPARQL over Committed RDF Graphs")
+#set document(title: "Toward Contract-Bound Proofs for SPARQL over Verifiable Credentials")
 #set text(size: 11pt)
 #set par(justify: true)
 #show figure: set block(breakable: true)
-// Section numbering is switched on AFTER the abstract; the abstract renders unnumbered as
-// venue-conventional front matter and == sections number "1.", "2.", ...
+// Level-2 (==) headings are the top-level sections ("1.", "2.", ...), level-3 (===) are
+// subsections ("1.1.", ...); the abstract is explicitly unnumbered.
 #set heading(numbering: paper_heading_numbering)
+
+// Short commit / digest rendering for bound identity records (first twelve hex characters).
+#let short-id(key) = raw(headline(key).slice(0, 12))
+
+// Fixed three-decimal rendering for the indicative pilot values (a display helper; the value
+// itself always comes from the evidence file).
+#let fmt3(x) = {
+  let s = str(calc.round(x, digits: 3))
+  let parts = s.split(".")
+  if parts.len() == 1 { s + ".000" } else { s + "0" * calc.max(0, 3 - parts.at(1).len()) }
+}
+#let pilot(key) = fmt3(ev(key))
 
 #align(center)[
   #text(size: 17pt, weight: "bold")[
-    A Single-Prover Zero-Knowledge Architecture for Verifiable SPARQL over Committed RDF Graphs
+    Toward Contract-Bound Proofs for SPARQL over Verifiable Credentials
+  ]
+  #v(0.2em)
+  #text(size: 12pt)[
+    Exact Evaluation, Disclosure Specialization and Method Dispatch — a Working Paper
   ]
 ]
 #authors()
 
 #align(center)[#text(style: "italic", size: 0.9em)[
-  A systems-and-design contribution under an open audit gate. It describes the architecture of
-  a single-prover zero-knowledge query-answering stack and reports deterministic artifact facts
-  about it (circuit-family gate counts). It is _not_ a security, soundness, privacy, or
-  attestation proof: the verifier is _internally re-audited but not externally audited_ (the
-  accredited-cryptographer review, gate `sq-qhy4`, is *open*), the hidden-holder tiers are
-  explicitly _not yet sound_, and the dual-leaf value lane carries an accepted invariant
-  downgrade. No property below may be read as a settled guarantee. "Soundness" and "binding"
-  are used as the technical _nouns_ of the goals the design reaches for, never as achieved
-  claims. Wall-clock proving cost is _non-canonical_ on our development host and is presented
-  only as a model driven by the gate counts (§7).
+  Working paper and design record under the open external-audit gate `sq-qhy4`. It reports
+  implemented relations, and test and proof evidence for exact source commits that a second
+  internal evidence inspection re-checked. It claims no proven security, privacy or integrity
+  property for any implementation, and no component has had an external cryptographic review.
+  The exact-evaluation proofs cover committed or holder-declared datasets _without_ conventional
+  issuer-signature authentication; the extension that adds such authentication has passed native
+  model tests but has produced no guest execution or proof. All timing figures are indicative
+  development measurements.
 ]]
 
 #heading(level: 2, numbering: none, outlined: false)[Abstract]
 
-Federated SPARQL assumes every endpoint discloses its solution mappings in cleartext. A single
-data holder who wants to answer a query over credentials it holds — proving the answer follows
-from _attested_ data without revealing the data — needs a different machine: a zero-knowledge
-proof that a SPARQL result is a genuine evaluation over committed graphs. We describe the
-architecture of one such single-prover stack. Its shape is deliberate: a per-graph algebraic
-commitment over the RDF-canonical form; a _fixed, named family_ of #headline("zkarch.circuit_kinds")
-circuit kinds (#headline("zkarch.circuit_members") compiled members across their size lattices),
-each proving one operator instance of a small monotone SPARQL fragment; a JSON _manifest_ that
-composes sub-proofs through binding edges; and a verifier that _re-derives_ the circuit identity
-and the claimed statement from the query text and the relying party's trust anchors, trusting
-nothing the prover declares. We give the fragment and its algebraic semantics, the commitment
-and attestation layer, the manifest composition model, and the verifier's
-#headline("zkarch.binding_obligations")-obligation fail-closed pipeline organised around
-#headline("zkarch.audit_gates") cross-cutting audit gates. We report the family's cost as
-deterministic `bb` gate counts — the scan lattice spans
-#headline("zkarch.gates_scan_min")–#headline("zkarch.gates_scan_max") gates and the composable
-filter lanes are gate-identical at #headline("zkarch.gates_filter_lane") — and derive a proving
-cost model from them, because we hold our own wall-clock numbers to be non-canonical. On
-security we are equally precise: the design has survived an internal adversarial audit that
-found and remediated #headline("cozk.single_prover_audit_issues") issues, each now pinned closed
-by a standing forge-negative regression test, but it has _no_ external audit, so we claim no
-proven property and treat the internal audit as necessary and explicitly not sufficient.
+A verifier that asks a credential holder a SPARQL query must know which statement an accepted
+proof establishes: that each released row is supported by some authenticated data, or that the
+released result is the exact answer over a dataset someone has fixed. The two differ whenever the
+verifier relies on an exact multiplicity, a false `ASK`, an aggregate, negation or a top-k answer,
+and the second is only as strong as the authority that fixes the dataset. We define an explicit
+query/disclosure contract — method, answer mode, query, result form, dataset authority, scope,
+source-evidence requirement, disclosure policy, resource bounds and session binding — together
+with a method abstraction that dispatches credential signature suites and query-proof methods
+separately under verifier-owned policy, and a conservative rule for turning result-inferable
+triples into public inputs while retaining authentication, membership and hidden-join
+obligations; the rule extends the published selective-disclosure approach of Braun, Wright and
+Käfer. At exact source commits, a bounded RISC Zero exact evaluator produced genuine receipts that
+collectively cover bag `SELECT`, false `ASK`, `CONSTRUCT` and `DESCRIBE` and both authority
+profiles, a protocol adapter bound such receipts to requests with before-consume validation
+controls, a disclosure-specialized Noir relation produced genuine proofs in a paired development
+pilot that shows only small differences, and an authenticated extension of the exact evaluator
+passed native model tests. Conventional-credential authentication inside exact proofs,
+authenticated linkage between native credential proofs and circuits, and a cost-based planner
+remain open, so this is a design and partial-evidence contribution rather than a validated system.
 
-= Introduction <intro>
+== Introduction <intro>
 
-A verifiable credential lets a holder prove a fact an issuer signed. But real questions are
-rarely a single signed fact — they are _queries_: "does the union of my credentials contain a
-person over 18 whose employer is on this list?" Answering such a question while disclosing only
-the answer, and proving the answer is a faithful SPARQL evaluation over _attested_ data, is the
-problem this architecture addresses. It is the single-holder, single-prover case: one party
-holds the graphs, commits to them, and produces one proof a relying party checks.
+A holder of verifiable credentials @vcdm2 is usually asked a question rather than for a
+document. A lender wants to know whether an applicant is employed by an approved organisation
+and earns above a threshold; a licensing body, whether any recorded disqualification exists; a
+training provider, how many accredited courses were completed. SPARQL @sparql11 states such
+questions directly over RDF-shaped credentials, and zero-knowledge proofs promise answers without
+handing over the credentials. What is less obvious is _which statement_ a verifier obtains when
+it accepts such a proof.
 
-The problem is hard for three reasons that a naive design misses. First, _the prover is the
-adversary_. Everything in a proof request is prover-controlled — the query text, the declared
-circuit, the public inputs, the verification key, even the freshness nonce if the design lets
-it. A verifier that trusts any prover-declared quantity has no soundness to speak of. Second,
-_composition is where forgeries live_. A result over "age ≥ 18 AND employer ∈ S" is not one
-proof but several — a scan, a filter, a join — and the dangerous attacks are not against a
-single circuit but against the _seams_: proving `17 ≥ 17` for a `≥ 18` query, pointing a filter
-edge at the wrong column, or replaying an honest proof of a true-but-different statement. Third,
-_the RDF data model adds its own hazards_ — blank-node identity is graph-scoped, so a join that
-correlates blank nodes across two committed graphs is semantically meaningless and must be
-excluded, not silently admitted.
+Two statements are routinely conflated. _Result membership_ says that every released row is
+supported by some authenticated data the holder possesses. It suits positive questions: once Alice
+is shown to be an Acme employee earning above the threshold, further credentials cannot undo it.
+_Exact evaluation_ says that the released result is the complete answer of the query over a
+stated dataset. It is needed whenever the verifier relies on what is absent or on exactly how
+often something occurs — an exact number of duplicate rows under bag semantics, an `ASK` that
+returns false, a `COUNT`, a `NOT EXISTS` or `MINUS`, an `ORDER BY … LIMIT` that claims the latest
+entry. Exactness is itself
+only meaningful relative to a dataset someone has fixed: a holder who chooses which credentials
+enter the dataset can make "no disqualification recorded" true by omission.
 
-Why has this not been solved off-the-shelf? Verifiable-database systems (IntegriDB
-@integridb, vSQL @vsql, ZKSQL @zksql) prove SQL over a _known_ database
-to a client that already trusts the schema; they do not hide the graph from the verifier, and
-they do not bind results to _issuer attestations_. Anonymous-credential systems
-@cl01 @zkcreds prove signed attributes but not _query evaluation_ over a set of
-credentials. The closest semantic-web work proves selective-disclosure soundness of SPARQL
-results @braun26; this paper is a companion _systems_ description of an
-independently-built engine-integrated stack and its cost and audit posture, framed under an
-open external-audit gate.
+Three further difficulties make the problem more than an engineering exercise. _Evaluation and
+authentication decouple easily._ A general-purpose zkVM proves that a program ran over the bytes
+it received, but not who signed those bytes; a native credential proof authenticates disclosed
+terms but cannot establish an absence. _Signed representations differ from queried ones._
+Credentials are signed as canonical N-Quads @rdfc10 @vcdieddsa, as JSON, or as BBS messages
+@bbs, while the query runs over an RDF dataset; the verifier must know that the data queried is
+the data that was signed. _Secret proof work is expensive_, and many facts are already fixed by
+the public query and the released answer; removing them from secret work is attractive and easy
+to get wrong.
 
-This paper contributes:
+The closest published work, zkRDF by Braun, Wright and Käfer @braun26, building on RDF-based
+selective-disclosure semantics @braunkaefer25, already reveals query constants and projected
+terms, hides the remaining terms behind blank nodes, and proves issuer signatures, hidden
+equalities and numeric bounds with native primitives; its authors state that it cannot prove
+non-existence and so cannot support `MINUS` or a false `ASK`. The earlier single-prover
+architecture of this project (§#ref(<legacy>, supplement: none)) proves result membership with a
+fixed family of Noir circuits. Neither states exact complete-input semantics relative to a dataset
+authority, nor a contract recording which signature suite, representation mapping and query-proof
+method a verifier relied upon.
 
-- *The provable fragment and its semantics* (§#ref(<fragment>, supplement: none)) — a monotone,
-  open-world-conforming SPARQL subset (BGP scans, datatype-bucketed value `FILTER`, a
-  hidden-credential equality `JOIN`, membership-indifferent modifiers), pinned to the
-  Pérez–Arenas–Gutiérrez algebra @pag09 with a stated _result-membership_ correctness
-  target and an explicit cross-graph blank-node exclusion.
-- *The commitment and attestation layer* (§#ref(<commit>, supplement: none)) — per-graph
-  Poseidon2 @poseidon2 commitments over the RDFC-1.0 @rdfc10 canonical form,
-  bound to issuer keys by a Schnorr-over-Baby-Jubjub @schnorr91 @eip2494
-  attestation, so a prover cannot be the issuer of its own facts.
-- *The fixed named circuit family and the manifest composition model*
-  (§#ref(<family>, supplement: none)) — #headline("zkarch.circuit_kinds") circuit kinds,
-  #headline("zkarch.circuit_members") compiled members, composed by a manifest whose binding
-  edges chain sub-proofs; and *the verifier re-derivation discipline*
-  (§#ref(<verify>, supplement: none)) — the #headline("zkarch.binding_obligations") fail-closed
-  obligations and #headline("zkarch.audit_gates") audit gates that reconstruct the statement
-  from trust anchors rather than trust the manifest.
-- *A deterministic cost characterisation and a proving-cost model*
-  (§#ref(<cost>, supplement: none)) — `bb` UltraHonk gate counts from the regression-gated
-  snapshot, and a proving-cost model over them, with an explicit statement that our own
-  wall-clock numbers are non-canonical.
-- *An honest security analysis under an open gate* (§#ref(<security>, supplement: none)) — the
-  threat model, the #headline("cozk.single_prover_audit_issues") findings of an internal
-  adversarial audit and their remediations pinned by #headline("zkarch.forge_findings_mapped")
-  standing forge-negative regression tests, and a precise statement of what the _absence_ of an
-  external audit (`sq-qhy4`) means for every claim.
+*Message.* A verifier should reason about an explicit query/disclosure _contract_; a prover should
+pay proof cost only for the _secret-dependent authenticated obligations_ that remain under that
+contract. The long-term programme goal is the full SPARQL 1.1 read semantics (all four query forms
+and the full algebra), with SPARQL 1.2 @sparql12 as an optional extension; this paper does not
+narrow that goal to basic graph patterns, and it does not claim that any current path reaches it.
+We organise the work around three questions:
 
-= The provable SPARQL fragment <fragment>
+- *RQ1 — statement.* What statement should a verifier accept for a SPARQL query over
+  credential-derived RDF, and when does it require exact evaluation over a complete input fixed
+  by a stated authority?
+- *RQ2 — minimization.* Which proof obligations can be made public or removed under an explicit
+  contract without weakening that statement or the disclosure policy?
+- *RQ3 — integration and evidence.* How can signature suites and query-proof methods be combined
+  behind one verifier-owned contract, and what does current evidence show about the correctness
+  controls and costs of the implemented paths?
 
-The fragment is deliberately small, and the smallness is principled rather than incidental. The
-target correctness property is _result membership_: a manifest disclosing a solution mapping μ
-(or asserting one exists) for a pattern P over committed graphs G#sub[1] … G#sub[n] is correct
-iff μ ∈ eval(P). The admission rule is: include exactly the constructs for which membership is
-_monotone_ — a witness that survives the world gaining more data. That is the operational
-content of "conforms to the open-world assumption", and it is exactly the deployment model, in
-which a holder presents a _subset_ of its credentials.
+This working paper contributes:
 
-*Grammar and algebra.* Following the SPARQL 1.1 algebra of Pérez, Arenas and Gutiérrez
-@pag09 over the RDF 1.1 graph model @rdf11, a fragment pattern is
+- *A contract and relation* (§#ref(<contract>, supplement: none)): a contract tuple with an
+  explicit answer mode and a request/method/result relation over a method-indexed commitment that
+  separate selected-result membership from exact evaluation, with worked cases for bag
+  multiplicity, false `ASK`, aggregates, negation and top-k; HolderDeclared
+  and VerifierAgreed authority semantics; and conditional design arguments that name every
+  assumption instead of claiming implementation soundness.
+- *A query-over-credentials method abstraction* (§#ref(<method>, supplement: none)): separate
+  versioned dispatch of signature suites and query-proof methods, verifier-owned capability
+  tuples, a same-data linkage requirement between the signed representation and the queried RDF,
+  and a before-consume validation order for method, scope, result, challenge, audience and
+  expiry. It is an integration design, not a new cryptographic primitive.
+- *A conservative public-triple rule* (§#ref(<minimize>, supplement: none)): an eligibility
+  condition for moving result-inferable triples from secret witnesses to public inputs,
+  implemented in one bounded Noir relation and proposed for exact relations, with counterexamples
+  (`OPTIONAL`, `UNION`, blank nodes, value equality, omission) and the authentication, membership
+  and hidden-join obligations that remain. It extends, and credits, the disclosure method of
+  @braun26.
+- *An evidence account* (§#ref(<evidence>, supplement: none)): three proof campaigns at exact
+  commits, each re-checked by a second internal evidence inspection — a bounded exact evaluator
+  with #headline("zkvcq.exact_hosted_receipts") genuine receipts, a protocol adapter with
+  #headline("zkvcq.adapter_receipts") genuine receipts and #headline("zkvcq.adapter_controls")
+  retained control records, and a public-pattern relation with
+  #headline("zkvcq.pp_genuine_proofs") genuine proofs — plus native test evidence for the
+  authenticated extension, a separate native-composition experiment and a separately labelled
+  indicative pilot, with the evidence level of every path stated
+  (§#ref(<paths>, supplement: none)).
 
-$ P ::= "BGP" | "Filter"(C, P) | "Join"(P_1, P_2) $
+The current evidence answers each question only in part (§#ref(<discussion>, supplement: none)).
+For RQ1 it shows exact-result relations executing with genuine receipts, but over datasets whose
+issuer provenance is not proved. For RQ2 it shows one implemented specialization and a pilot too
+small to establish a general speedup. For RQ3 it shows contract dispatch and validation controls
+for one method family and native execution of issuer authentication in front of the exact
+evaluator, while authenticated exact proofs and authenticated linkage across proof systems remain
+open.
 
-where a BGP is evaluated against _exactly one_ committed graph, `C` is a datatype-bucketed value
-constraint, and `Join` is an equality join whose two sub-patterns range over _distinct_ committed
-graphs and share a variable. Evaluation is the standard set semantics, with SPARQL expression
-errors in a `Filter` treated as _not satisfied_ @sparql11.
+== Three proof paths and an evidence vocabulary <paths>
+
+The project contains three proof paths that must not be read as one system, and a separate
+native-composition experiment. The _legacy fixed-circuit path_ (§#ref(<legacy>, supplement: none))
+proves result membership for a monotone fragment with a fixed family of Noir circuits over
+Poseidon2-committed graphs. The _bounded exact-evaluator path_ runs a SPARQL evaluator for a
+bounded input inside the RISC Zero zkVM @risc0 and journals a contract-bound exact result; a
+protocol adapter wraps it in typed requests and verification, and an _authenticated extension_
+(V5) places Ed25519 verification of RDFC-1.0 credentials in front of the same evaluator. The
+_disclosure-specialized path_ keeps secret-dependent obligations in specialized Noir relations and
+moves result-inferable data to public inputs; its one implemented relation is the bounded
+public-pattern relation V4. The _native-composition experiment_ combines BBS+ credential proofs
+with Circom circuits and exposes a public-BGP interface over RDF credentials
+(§#ref(<composition>, supplement: none)); it does not evaluate SPARQL exactly.
+
+Claims about these paths are graded on five levels, which the rest of the paper keeps distinct:
+
+/ Implemented source: code exists at a pinned commit.
+/ Executed native: host tests of the model or relation ran and passed.
+/ Executed guest: the zkVM guest or circuit executed, possibly without producing a real proof.
+/ Genuine verified receipt: a real proof was produced (development modes refused) and verified
+  against a pinned image identifier or verification key.
+/ External audit: independent cryptographic review. No path has reached this level (`sq-qhy4`).
+
+A _second internal evidence inspection_ — a separate project-internal check that re-hashes
+sources, artifacts and receipts from a frozen snapshot — is weaker than the last level: it checks
+that the reported runs happened at the stated commits, not that the relations achieve their
+goals, and it is not an external security review.
 
 #figure(
   table(
-    columns: (auto, auto, 1fr),
+    columns: (1fr, 1.3fr, 1fr, 1.2fr),
+    align: (left, left, left, left),
+    table.header[Path][Relation][Source authentication][Highest level reached],
+    [Legacy fixed circuits],
+    [Result membership, monotone fragment, committed graphs],
+    [Issuer Schnorr signature over the graph commitment],
+    [Implemented, regression-gated gate counts, internal audit; no new runs here],
+    [Exact evaluator (#short-id("zkvcq.exact_source_commit"))],
+    [Exact bag `SELECT`, `ASK` incl. false, `CONSTRUCT`, `DESCRIBE`; HolderDeclared and VerifierAgreed],
+    [None],
+    [Genuine verified receipts; the receipts collectively cover these forms and both authorities],
+    [Protocol adapter (#short-id("zkvcq.adapter_source_commit"))],
+    [Contract-bound exact `SELECT`/`ASK`/`CONSTRUCT` requests],
+    [None (source evidence `None`)],
+    [Genuine verified receipts],
+    [Authenticated extension V5 (#short-id("zkvcq.v5_source_commit"))],
+    [Exact evaluation over Ed25519/RDFC-1.0-verified documents],
+    [Ed25519 over RDFC-1.0, verifier-owned key table],
+    [Executed native (model tests); guest extension unvalidated; no guest execution, no proof],
+    [Public pattern V4 (#short-id("zkvcq.pp_source_commit"))],
+    [Fully public BGP pattern, bounded one- and two-credential profiles],
+    [Issuer signature and membership inside the relation],
+    [Genuine verified proofs],
+    [Native public RDF (#short-id("zkvcq.nc_source_commit"))],
+    [Public BGP triples reconstructed from signed slots; not exact SPARQL],
+    [BBS+ over BLS12-381, verifier-owned issuer and status policy],
+    [Genuine verified native BBS+ proofs in a finite declared domain; no Noir linkage],
+    [Tuple composition (same source)],
+    [Same-field BBS+ and Circom/LegoGroth16 tuple composition],
+    [BBS+ over BLS12-381],
+    [Executed native in two legacy test functions; proof count not enumerated; no Noir linkage],
+    [Cross-backend linkage, planner, fusion, JSON mapping],
+    [—], [—], [Design only],
+  ),
+  caption: [
+    Proof paths and the evidence level each has reached. Read the last column before any other
+    claim: no exact proof carries conventional credential authentication, the rows are separate
+    systems whose counts are never combined, and no row reaches external audit.
+  ],
+) <paths-table>
+
+== Contracts: what a verifier accepts <contract>
+
+=== Membership versus exact evaluation <semantics>
+
+Consider a holder with an employment credential from Acme (`ex:alice a ex:Employee`,
+`ex:alice ex:employer ex:Acme`, an income literal), two course credentials from different
+providers, and possibly a registry credential stating `ex:alice ex:hasDisqualification ex:case42`.
+Each course credential describes its own completion record, `ex:rec1` in one and `ex:rec2` in
+the other, each with `ex:person ex:alice` and `ex:course ex:SecurityBasics`.
+Assume the contract's scope explicitly forms the default graph as the union of the credential
+graphs. Write $⟦P⟧_D$ for the multiset of solution mappings of pattern $P$ over dataset $D$ under
+the SPARQL algebra @pag09 @sparql11, and $⊑$ for sub-multiset inclusion.
+
+- *Bag multiplicity.* `SELECT ?c WHERE { ?completion ex:person ex:alice ; ex:course ?c }` has two
+  solutions that differ only in `?completion`; projection removes the record and leaves two
+  identical rows `?c = ex:SecurityBasics`, which `DISTINCT` would collapse. The distinct record
+  IRIs matter: had both credentials stated the identical triple
+  `ex:alice ex:completed ex:SecurityBasics`, the union would contain it once, because an RDF graph
+  is a set of triples, and the query would return one row.
+- *False `ASK`.* `ASK { ex:alice ex:hasDisqualification ?x }` is false exactly when no matching
+  triple is in the evaluated dataset. Selected-result membership cannot express a false answer.
+- *Aggregates.* `SELECT (COUNT(?c) AS ?n) WHERE { ?completion ex:person ex:alice ; ex:course ?c }`
+  returns two only over input that contains both records; over a subset it returns a smaller,
+  equally "supported" number.
+- *Negation and top-k.* `FILTER NOT EXISTS { … }`, `MINUS` and `ORDER BY DESC(?date) LIMIT 1` can
+  each be changed by data that was never shown: a single additional triple may remove a row or
+  displace the latest entry, although not every addition does.
+
+For a positive pattern — a basic graph pattern with joins, filters and projection — bag evaluation
+is monotone under sub-multiset inclusion: $D ⊆ D'$ implies $⟦P⟧_D ⊑ ⟦P⟧_(D')$. A row, together with
+a lower bound on its multiplicity, that is supported by an authenticated subset therefore remains
+supported by all of the holder's data; the completion example yields "at least two" from any input
+containing both records. Monotonicity does not protect _exact_ claims: that the course appears
+exactly twice, that the count is two, that no disqualification exists, or that an entry is the
+latest. When a verifier relies on such a claim, it needs a statement that is exact over a
+specified dataset, and that dataset must be fixed by an authority the verifier accepts.
+
+The engine's own W3C SPARQL conformance floor (#headline("conformance.sparql_floor") passing
+assertions) measures the production engine; it is not evidence about the bounded proved
+evaluator, whose coverage is established only by the tests and receipts in
+§#ref(<evidence>, supplement: none).
+
+=== The contract tuple <contract-tuple>
+
+A request carries an explicit contract
+$ C = ⟨ m, o, q, f, a, s, e, d, b, t ⟩ $
+whose components are:
+
+/ $m$ — method: query-proof method identifier, version and descriptor digest (§#ref(<method>, supplement: none)).
+/ $o$ — answer mode: `SelectedResults` (every released row is supported) or `Exact` (the released
+  result is the complete answer). A method may fix $o$; the adapter's methods fix `Exact`.
+/ $q$ — query: the query text and declared language version (SPARQL 1.1; SPARQL 1.2 optional).
+/ $f$ — result form: bag `SELECT`, set `SELECT`, `ASK`, `CONSTRUCT` or `DESCRIBE` with its closure
+  policy, and the canonical result encoding.
+/ $a$ — authority: HolderDeclared, or VerifierAgreed with an anchor $k$.
+/ $s$ — scope: default-graph and named-graph construction, including `FROM` and `FROM NAMED`.
+/ $e$ — source evidence: `None`, or accepted signature suites, issuer/verification-method/key
+  table, representation mapping, status requirement and holder-binding requirement.
+/ $d$ — disclosure policy: what the verifier may learn beyond the result (issuer identities,
+  credential count, capacity profile, method).
+/ $b$ — bounds: row, triple and capacity limits.
+/ $t$ — session: challenge, audience and validity window.
+
+A presentation returns a result $r$ and a proof $pi$ whose public output (the journal, for a zkVM
+method) binds the contract, a dataset commitment $c$ and $r$ or its digest. Conceptually the
+contract enters as a digest $h(C)$; an implementation may realise that binding indirectly
+rather than as a literal journal field. In the adapter, the verifier's stored method descriptor
+and request binding determine a derived nonce, which enters the model request whose digest the
+journal carries, so the session bytes in $t$ are cryptographically bound to the proof (under
+assumptions A1 and A3 of §#ref(<arguments>, supplement: none)). The
+verifier additionally checks the validity window and audience of $t$ on the host and consumes the
+challenge (§#ref(<validation>, supplement: none)).
+
+The commitment and the queried dataset are method-defined. Let $E$ be the signed or source
+encoding of the credentials, $K$ the graph catalog that names default and named graphs, and $rho$
+a salt or other auxiliary witness where the profile requires one. Let $p_C$ be the publicly known,
+method-specific commitment parameters that the method extracts from $C$ — for example an
+authorization table, evaluation policy or representation mapping, as applicable; $p_C$ is empty
+where a method binds none. A method fixes a commitment function $"Com"_m (E, K, rho; p_C)$ and,
+separately, a dataset mapping $D = "Map"_m (E, K)$ from that encoding to the RDF dataset the query
+runs over. Request version 3 of the exact evaluator commits source bytes and the graph catalog;
+the authenticated extension V5 commits the canonical authenticated documents together with the
+verifier's authorization table as part of $p_C$. The commitment need not bind the whole contract:
+the query, challenge and other session data are bound, where they are bound, through the request
+and descriptor digests rather than through $"Com"_m$. Keeping $"Map"_m$ explicit prevents a
+signature over one representation from being read as a signature over an abstract dataset $D$.
+With public input $(C, c, r)$, the intended relation is
+$ ((C, c, r), w) ∈ R_C quad ⟺ quad
+  & w = (E, K, rho, sigma, x) \
+  & ∧ c = "Com"_m (E, K, rho; p_C) ∧ D = "Map"_m (E, K) \
+  & ∧ "Anc"_a (c) ∧ "Src"_e (E, sigma) ∧ "Scp"_s (D) \
+  & ∧ "Bnd"_b (D, r) ∧ "Ans"_o^f (r, ⟦q⟧_D) $
+where $sigma$ are credential signatures, $x$ further auxiliary witness data,
+$"Anc"_"HolderDeclared" (c)$ is always true, $"Anc"_("VerifierAgreed"(k)) (c)$ holds iff $c = k$,
+and $"Src"_"None"$ is always true.
+
+The answer predicate depends on the mode and the form. $"Ans"_"Exact"^f$ requires $r$ to equal the
+answer under the method's canonical equality for $f$: multiset equality for an unordered table,
+the method's ordering and tie rules for `ORDER BY`, `LIMIT` and `OFFSET` results, boolean equality
+for `ASK`, and the method's canonical graph equality, with its blank-node and closure policy, for
+`CONSTRUCT` and `DESCRIBE`. $"Ans"_"SelectedResults"^f (r, R)$ is $r ⊑ R$ and is defined only for
+unordered table results of a positive pattern; it is not a relation for booleans, graphs or
+ordered results. A true `ASK` over a positive pattern can be supported by exhibiting one
+supporting solution, a separate statement from table membership; a false `ASK` needs `Exact`.
+
+=== Dataset authority <authority>
+
+*HolderDeclared* makes the result exact over the dataset the holder chose to commit. A false
+`ASK` then means "the dataset I committed contains no match" — not "my wallet contains no match".
+It is useful when the commitment is reused elsewhere (so omission is detectable later) or when the
+verifier only needs internal consistency, and it must never be presented as wallet completeness.
+
+*VerifierAgreed* makes the result exact over a dataset whose commitment equals an anchor $k$ the
+verifier accepted _independently of this presentation_: published by an issuer or registry that
+vouches for completeness of a record set, fixed in an earlier session under the verifier's
+control, or co-signed by a party the verifier trusts for that purpose. A verifier that approves
+whatever root the holder sends in the same exchange obtains nothing beyond HolderDeclared. How
+anchors are obtained is deployment policy outside the implemented code; the implementation only
+checks that the proved commitment equals the anchor in the request.
+
+=== Conditional design arguments <arguments>
+
+*Design argument 1 (exact result under a contract).* Assume (A1) knowledge soundness of the
+receipt system for the pinned guest image; (A2) functional correctness of the guest evaluator:
+for every input admitted by bounds $b$ it computes $"Map"_m (E, K)$ and the canonical form-$f$ encoding of $⟦q⟧_D$ under the declared
+semantics;
+(A3) binding of the dataset commitment $"Com"_m$, and collision resistance and domain separation
+of the hash functions that form the request and method-descriptor digests; and (A4) that the
+verifier accepts only if the
+journal's request binding, authority, anchor and scope match its stored request and the result
+claimed in the response equals the result in the verified journal — the verifier does not know
+the answer in advance, so it compares against the journal, not against its request. Then
+acceptance implies, except with the failure probabilities of A1 and A3, that some $(E, K, rho)$
+with $"Com"_m (E, K, rho; p_C) = c$ satisfies $"Ans"_"Exact"^f (r, ⟦q⟧_D)$ for $D = "Map"_m (E, K)$;
+under VerifierAgreed, additionally $c = k$. Nothing follows about issuers unless $e ≠ "None"$ and
+(A5) $"Src"_e$ is enforced inside the proved relation. A2 is supported by tests
+and native replay (§#ref(<evidence>, supplement: none)), not proved; A1 and A3 are assumptions on
+third-party components; A4 is implemented and exercised by the adapter's controls. These are
+design arguments, not a proof that the implementation meets them, and they carry no weight beyond
+their named assumptions while `sq-qhy4` remains open.
+
+== A method abstraction for queries over credentials <method>
+
+=== Two dispatches, not one <dispatch>
+
+A _signature suite_ says how an issuer's bytes were signed: for example the EdDSA Data Integrity
+suite over RDFC-1.0 canonical N-Quads @vcdieddsa @rdfc10, a JSON-based signature over a JSON
+serialization, or BBS over RDF statements @bbs. A _query-proof method_ says what relation is proved
+about the query and on which backend: the exact evaluator on RISC Zero, the public-pattern relation
+on Noir/UltraHonk @noir @barretenberg, or the legacy fixed family. The two vary independently, and
+conflating them hides the obligation that joins them — that the dataset the method evaluates is
+the dataset the suite authenticated. Each is therefore identified by a versioned identifier and a
+descriptor digest held in a verifier-side registry; a presentation that names an unregistered
+method or a mismatched digest is rejected before any receipt is examined.
+
+=== Verifier-owned policy and capability tuples <capabilities>
+
+The verifier, not the holder, decides what it will accept. Its policy is a set of _capability
+tuples_ $(m, o, f, a, e, "status", "holder")$: a method, answer mode, result form, authority,
+source-evidence class, status-checking requirement and holder-binding requirement. A request is
+valid only if its contract instantiates an accepted tuple; a method advertises only tuples it
+implements and tests. The protocol adapter currently implements the tuples with $o$ = `Exact`, $f$
+in bag `SELECT`, `ASK` and `CONSTRUCT`, $a$ in HolderDeclared and VerifierAgreed, source evidence
+`None`, status
+`NotRequested` and a bearer holder (@adapter-table). These tuples say what was proved about
+evaluation; they say nothing about who issued the data.
+
+=== Issuer authentication and same-data linkage <linkage>
+
+Authenticating a credential and querying it are linked by one requirement: _the RDF dataset
+queried must be derived, inside the proved relation or under an explicitly trusted mapping, from
+exactly the bytes whose signature was verified_. For RDF Data Integrity with RDFC-1.0, the signed
+message is derived from the canonical N-Quads of the document and its proof configuration, so the
+queried dataset can be those same canonical quads. For JSON-signed credentials the signed bytes are
+JSON; producing RDF requires JSON-LD processing with a pinned context set, and that mapping must be
+part of the relation or a named trust assumption. Substituting an RDF graph for the JSON bytes that
+were signed silently breaks linkage.
+
+Key authorization is a separate step: a signature verifies under a verification method, and the
+verifier must know that the issuer authorized that method for assertions. In the V5 extension
+this is a verifier-owned issuer/verification-method/key table rather than live resolution.
+Credential status and holder binding are further obligations; a signed claim about `ex:alice` does
+not authenticate the presenter as Alice.
+
+The three paths meet this requirement to different degrees. The legacy path authenticates a
+Poseidon2 graph commitment signed by the issuer with Schnorr over Baby Jubjub, which requires the
+issuer to adopt that representation; conventional Ed25519 or ECDSA credentials are checked outside
+the circuit at ingestion and recommitted, which a verifier cannot rely on against a dishonest
+holder. The exact evaluator and adapter proofs use source evidence `None`. V5 implements
+Ed25519 verification over RDFC-1.0, checked against a W3C test vector, and queries the same
+canonical documents under both authorities; its native model tests pass
+(§#ref(<v5-evidence>, supplement: none)), but its guest extension is unvalidated and no V5 proof
+exists. The native-composition experiment authenticates BBS+-signed statements, but only for
+public triples (§#ref(<composition>, supplement: none)).
+
+=== Scope and result contracts <scope>
+
+Exactness is relative to a precise dataset construction and a precise result encoding. The scope
+must fix which credential graphs form the default graph and which are named, and how `FROM` and
+`FROM NAMED` restrict them. The result encoding must be canonical for its form: a bag `SELECT`
+keeps duplicate rows, unbound positions and row identity; `CONSTRUCT` is a set of triples with
+freshly minted blank nodes; `DESCRIBE` needs an explicit blank-node closure policy, because the
+SPARQL specification leaves its output implementation-defined. The hosted genuine-proof test
+functions exercise each of these obligations (§#ref(<exact-evidence>, supplement: none)).
+
+=== Session binding and before-consume validation <validation>
+
+A presentation must be checked completely before its challenge is consumed, and the result must be
+released only after consumption. We specify the order: (i) resolve the method in the registry and
+compare descriptor digests; (ii) check that the contract instantiates an accepted capability tuple;
+(iii) check audience and validity window against the stored request; (iv) verify the receipt
+against the pinned image with development mode refused; (v) decode the journal, compare its
+request binding, authority, anchor and scope with the stored request, and compare the response's
+claimed result with the journal result; (vi) check the result against the bounds; (vii)
+atomically consume the challenge, failing closed on store errors; (viii) release the result. Checking before consuming prevents a malformed presentation from burning a legitimate
+challenge; atomic consumption prevents two concurrent verifications from both succeeding. The
+adapter implements these checks and its retained controls exercise each group (@controls-table);
+we have not separately established that its internal ordering matches the specification step for
+step.
+
+=== Composing native credential proofs with circuits <composition>
+
+A tempting design verifies BBS-signed credentials natively, disclosing public terms, and hands
+hidden values to a Noir circuit for predicates that native proofs do not support. The session
+challenge alone cannot bind the two: it shows both proofs belong to one exchange, not that they
+talk about the same income. Such composition would need an explicit linkage relation — a
+commitment to the hidden value in one system opened consistently in the other, a canonical byte
+and field encoding, range constraints for cross-field representation, domain separation, and a
+composition argument whose extraction assumptions hold jointly for both proof systems.
+
+A separate, experimental native path exists with two distinct parts. Its tuple composition
+combines BBS+ signatures over BLS12-381 with Circom circuits proved with LegoGroth16 in the same
+field. Its opt-in native-RDF interface (`issue_rdf`, `prove_public_bgp`, `verify_public_bgp`)
+uses BBS+ proofs alone to authenticate reconstructed public BGP triples under a verifier-owned
+issuer and status policy. The native-RDF interface discloses signed-slot indices and status references,
+supports no hidden RDF predicate, has no linkage to the Noir relations, does not evaluate full
+exact SPARQL and is unaudited; its evidence is in §#ref(<nc-evidence>, supplement: none). The
+cross-backend linkage described above — between native credential proofs and Noir or zkVM
+relations — is not implemented. Consequently we draw no conclusion about migrating backends or
+about the relative merit of native proofs, circuits and zkVMs; such a comparison is meaningful
+only between relations with matched statements, authentication and disclosure.
+
+== Minimizing secret-dependent obligations <minimize>
+
+=== Running example <example>
+
+A lender asks:
+
+```sparql
+PREFIX ex: <https://example.org/>
+SELECT ?person WHERE {
+  ?person a ex:Employee .              # t1
+  ?person ex:employer ex:Acme .        # t2
+  ?person ex:annualIncome ?income .    # t3
+  FILTER(?income >= 30000)
+}
+```
+
+and receives the single row $mu = {"?person" ↦ "ex:alice"}$. @example-table classifies each
+obligation. Under $mu$, `t1` and `t2` become fully ground triples built only from query constants
+and a projected binding; the verifier can compute them itself from the query and the answer.
+`t3` still contains the hidden `?income`, and the filter constrains that hidden value.
+
+#figure(
+  table(
+    columns: (0.8fr, 1.2fr, 1.4fr),
     align: (left, left, left),
-    table.header[Construct][Disposition][Why],
-    [`SELECT` / `ASK`], [In], [Membership / non-emptiness of eval(P); monotone.],
-    [BGP scan], [In], [Row soundness + per-scan completeness proved in-circuit.],
-    [Value `FILTER`], [In (4+ datatype lanes)], [Monotone under error-as-unsatisfied semantics.],
-    [Equality `JOIN`], [In], [Hidden-credential join key; cross-graph blank-node join excluded.],
-    [`DISTINCT`/`REDUCED`/`LIMIT`/`OFFSET`/projection], [In], [Membership-indifferent modifiers.],
-    [`OPTIONAL` / `MINUS` / `NOT EXISTS`], [Out], [Non-monotone: a closed-world "no extension exists" claim.],
-    [Aggregation / `GROUP BY`], [Out], [An aggregate is a whole-pattern completeness claim — closed-world.],
-    [`GRAPH`], [Out], [Naming graphs discloses the attribution the model hides.],
-    [`SERVICE`], [Out], [Federation is out of scope by construction.],
-    [`ORDER BY`], [Out], [Membership-indifferent, but a reader infers an unproved top-k claim.],
+    table.header[Obligation][Status under the contract][What remains to prove],
+    [`t1`, `t2` membership], [Result-inferable; may be a public input if $d$ permits disclosing them and their source],
+    [Membership in the authenticated credential, as a public-input constraint],
+    [`t3` membership], [Secret (hidden object)], [Membership with a hidden term],
+    [`FILTER`], [Secret predicate on a hidden value], [Predicate over the hidden income],
+    [Issuer authentication], [Unchanged by disclosure], [Signature over the whole credential, which still contains the hidden income],
+    [Subject linkage], [Public via `ex:alice`],
+    [Membership of every subject occurrence and its equality to the public binding `ex:alice`; the equalities can be checked against public inputs rather than as a hidden join, but they remain],
   ),
   caption: [
-    The provable fragment. Constructs are admitted on _semantics_ (monotone result membership),
-    not on circuit cost; the closed-world / completeness-dependent operators are excluded because
-    additional undisclosed data could falsify a "proved" answer. This is the maximal-monotone
-    position; property paths and most filter _expressions_ are a designed but not-yet-implemented
-    extension (bead `sq-3kd2g`), out of scope for this paper's architecture.
+    Obligations in the running example. Disclosure removes secrecy, not proof work: `t1` and `t2`
+    still have to be members of an authenticated credential, and under a conventional (non
+    selective-disclosure) signature the signature check covers hidden data and stays
+    secret-dependent. If `?person` were not projected, `t1`–`t3` would be linked by a hidden join
+    and none would be eligible.
   ],
-)
+) <example-table>
 
-*Cross-graph blank nodes.* Blank-node identity is scoped to a single graph @rdf11, and
-per-graph canonicalisation cannot align blank-node labels _across_ graphs. A `Join` solution
-binding a shared variable to a blank node in more than one committed graph is therefore _excluded_
-from eval; the architecture enforces this exclusion (the "Q6" guard) rather than admitting a
-correlation the data model does not support.
+=== A conservative eligibility rule <rule>
 
-= Commitment and attestation <commit>
+*Definition (public eligibility).* Let the query pattern be a positive basic graph pattern with
+filters — no `OPTIONAL`, `UNION`, `MINUS`, `NOT EXISTS`, `GRAPH` variables, property paths,
+subqueries, aggregates, `BIND` or `VALUES` — with projection $V$ and released mapping $mu$. A
+triple pattern $t$ is _public-eligible_ for $mu$ iff (i) every position of $t$ is an IRI or literal
+constant of the query, or a variable $v ∈ V ∩ "dom"(mu)$ with $mu(v)$ an IRI or literal; (ii) $t$
+contains no query blank node; and (iii) the disclosure policy $d$ permits revealing $t mu$ together
+with its source attribution. The method must still enforce (iv) membership of $t mu$ in the
+committed or authenticated dataset and (v) authentication of its source, and the verifier must
+recompute $t mu$ from $(q, r)$ rather than accept a prover-supplied list.
 
-*Per-graph commitment.* Each source graph is canonicalised with RDF Dataset Canonicalization
-(RDFC-1.0) @rdfc10 — so the commitment is independent of blank-node labelling and triple
-order — and committed with the Poseidon2 permutation @poseidon2 over the BN254 scalar
-field, one commitment per graph. Poseidon2 is chosen for in-circuit efficiency (it is
-arithmetization-friendly, unlike a byte-oriented hash); the commitment is a standard binding
-commitment in the sense of Pedersen @pedersen91, a design goal the architecture reaches
-for and does not claim as an audited property.
+*Design argument 2 (conditional).* Under (i)–(v), replacing the hidden witness for $t mu$ by a
+public input leaves $R_C$ unchanged: the constraint "the witness term equals the constant or
+projected value" becomes a direct public-input constraint, and every other conjunct is untouched.
+The verifier learns nothing beyond $(q, r)$ and the attribution that $d$ already permits, because
+$t mu$ is a function of $(q, r)$. Condition (i) also excludes hidden joins through $t$: every
+variable of $t$ is public, so $t$ connects to other patterns only through public terms. The
+argument is about the relation, not about any implementation's constraint system, and it assumes
+that the specialized relation still checks (iv) and (v).
 
-*Issuer attestation.* A commitment alone lets a prover commit to any graph it invents — it would
-be the issuer of its own facts. The architecture therefore binds each commitment to an issuer
-key by a Schnorr signature @schnorr91 over the Baby-Jubjub curve @eip2494 with a
-Poseidon2-derived challenge. The verifier accepts a key only if the relying party placed it in an
-_external_ trusted key set K (§#ref(<verify>, supplement: none)) — never merely because the
-manifest lists it. This attestation layer is the design's answer to the single most severe class
-of the internal audit (§#ref(<security>, supplement: none)); it _transfers_ trust from issuer to
-result, it does not create trust in the issuer's real-world honesty, which is out of cryptographic
-scope.
+=== Why each condition is needed <counterexamples>
 
-*Post-quantum posture (a settled negative).* The signature and the commitment binding rest on
-discrete-log and hash assumptions; the Schnorr/Baby-Jubjub attestation falls to a Shor-capable
-adversary, so this stack offers no post-quantum guarantee and we state so plainly rather than
-imply resilience.
+- *`OPTIONAL`.* In `?p a ex:Employee OPTIONAL { ?p ex:email ?e }`, a row with `?e` unbound asserts
+  that no email triple matched. That is an absence claim; nothing is ground, and eliminating it
+  needs an exact method.
+- *`UNION`.* In `{ ?p ex:degree ex:MSc } UNION { ?p ex:degree ex:PhD }` with only `?p` projected,
+  the row does not determine which branch held. Grounding either triple reveals the branch — a
+  disclosure beyond $(q, r)$ unless $d$ explicitly permits it.
+- *Blank nodes.* A query blank node, as in `?p ex:address [ ex:city ex:Oxford ]`, behaves as a
+  non-projected variable. A data blank node in a result has graph-scoped identity; disclosing a
+  triple around it can link presentations without saying anything stable.
+- *Value equality.* `"30000"^^xsd:integer` and `"030000"^^xsd:integer` are equal values but
+  different terms. Grounding by value can produce a triple that was never signed; the rule grounds
+  only by term identity, and does not treat `FILTER(?x = ex:Acme)` as grounding `?x`.
+- *Omission.* Grounding released rows says nothing about rows not released. It supports result
+  membership, not exactness. And a triple that is public but unauthenticated would let a holder
+  fabricate `t1`: removing secrecy never removes authentication or membership.
 
-= The circuit family and the manifest <family>
+=== Relation to selective disclosure in zkRDF <zkrdf>
 
-Every sub-proof is generated against exactly one circuit of a _fixed, named_ family — this is the
-load-bearing architectural choice. A fixed family means the verifier can re-derive _which_
-circuit a statement demands and recompute _that_ circuit's verification key, instead of trusting a
-prover-supplied key over a prover-chosen circuit. The alternative — synthesising a bespoke circuit
-per query — would require a circuit-identity-to-query binding the verifier could check, a much
-larger trust-model surface, and is deliberately not taken here.
+The idea of disclosing query constants and projected terms is not ours. zkRDF @braun26, building
+on @braunkaefer25, traces the term occurrences behind each solution, reveals constants and
+projected terms, hides the rest behind blank nodes, and proves knowledge of issuer signatures
+(one per contributing graph), equality of hidden occurrences and numeric bounds natively with BBS
+and range proofs; the verifier re-evaluates a rewritten query over the resulting selectively
+disclosing dataset. It also reports proving substantially cheaper than an earlier zkVM execution
+prototype @wright25dc on a small credential benchmark, under a changed signature scheme (BBS
+rather than Ed25519).
 
-#figure(
-  table(
-    columns: (auto, 1fr),
-    align: (left, left),
-    table.header[Circuit kind][Statement proved (descriptive gloss)],
-    [`Scan`], [A BGP scan matches against a committed graph (row soundness + per-scan completeness).],
-    [`FilterInt` / `FilterF64` / `FilterSignedInt` / `FilterDecimal`], [A datatype-bucketed value FILTER holds, operand bound to the committed literal.],
-    [`FilterValueDl*`], [An opt-in dual-leaf value-lane FILTER (accepted invariant downgrade; off by default).],
-    [`JoinEq`], [Two hidden credentials agree on an equality join key.],
-    [`RevokeUnset`], [A revocation bit is unset in a committed status snapshot.],
-    [`HiddenIssuer`], [The issuer of a hidden credential lies in an attested key set.],
-    [`HolderPok` / `HolderSet`], [Hidden-holder binding tiers — explicitly _not yet sound_; opt-in only.],
-  ),
-  caption: [
-    The #headline("zkarch.circuit_kinds") circuit kinds of the fixed family
-    (#headline("zkarch.circuit_members") compiled members across their size lattices). Each kind
-    realises one operator instance of the fragment (§#ref(<fragment>, supplement: none)) or one
-    auxiliary statement. The circuit identifier a manifest declares is re-derived by the verifier
-    and never trusted on its own (§#ref(<verify>, supplement: none)). The hidden-holder kinds are
-    labelled not-yet-sound in the implementation and are gated off by default.
-  ],
-)
+What this paper adds is narrower. First, eligibility is stated relative to an explicit contract,
+including dataset authority and a disclosure policy that covers source attribution and branch
+information. Second, the counterexamples delimit the rule where a method _does_ support
+non-monotone operators, which zkRDF deliberately excludes. Third, the rule is implemented for a
+bounded Noir relation (V4) whose signatures are not selective-disclosure signatures, where the
+signature check covers hidden data and the benefit of disclosure is confined to membership and
+equality work (@example-table). Applying it inside the zkVM exact relations, or more broadly, is
+proposed and not implemented. Whether the benefit is material is an empirical question.
 
-*The manifest.* A proof is a JSON _manifest_ carrying the key set, the sub-proofs (each a
-length-prefixed proof, public-input segment, and verification key), the attribution set relating
-result rows to source graphs, and the binding material the verifier's obligations consume. The
-verifier nonce is committed as public-input field 0 of _every_ sub-proof, so a manifest is bound
-to a single request. Composition across operators is expressed by _binding edges_: an edge asserts
-that, e.g., the scanned column a filter constrains equals the filter's operand, chaining sub-proofs
-into one statement. The binding-edge mechanism is exactly where composition attacks live, and it
-was itself the subject of an internal adversarial review — the analysis in
-§#ref(<security>, supplement: none) is organised around it.
+=== The implemented public-pattern relation <v4>
 
-= Verification: re-derive, never trust <verify>
+V4 is an opt-in Noir relation specialized for the first fully public BGP pattern in a bounded
+profile: the pattern's triple is a public input, while issuer-signature verification and
+credential membership remain constraints of the relation (one signature check per selected
+credential in the one- and two-credential capacity profiles K1 and K2). Credential status is also
+checked inside the relation: status references, status-policy paths and status-leaf membership
+are constraints, while roots, salts and status indices remain private witnesses, so V4 enforces a
+bounded status snapshot and policy that the verifier accepted. The profile is restricted to the
+filter-free form F0 (no hidden filter), status depth 10 and K1/K2. How the verifier acquires that
+snapshot and how fresh it is are deployment policy; V4 does not establish world-wide freshness of
+authoritative status. Its tests replay a finite
+set of valid and absent bindings and adversarial witnesses; genuine proofs were produced for both
+profiles. The authentication, membership and status obligations are implemented within V4's relation;
+what V4 does not do is authenticate conventional RDF or JSON Data Integrity credentials. V5
+addresses conventional RDF credentials for the exact evaluator, not for V4
+(§#ref(<linkage>, supplement: none)).
 
-The verifier's discipline is a single principle: _reconstruct the claimed statement from the query
-text and the relying party's trust anchors, and check the cryptography against the reconstruction_
-— trusting no prover-declared quantity. It runs fail-closed: the first failed check rejects the
-whole manifest, with no partial results and no downgrade to a warning.
+A cost-based planner that chooses between public checks, native proofs, specialized circuits and
+the exact evaluator; fusion of native and circuit work; and expansion to JSON-signed suites are
+research outcomes this paper does not establish.
 
-The pipeline enforces #headline("zkarch.binding_obligations") binding obligations, structured
-around #headline("zkarch.audit_gates") cross-cutting _audit gates_ whose individual failure would
-each void the intended soundness on its own:
+== The legacy fixed-circuit architecture <legacy>
 
-#figure(
-  table(
-    columns: (auto, 1fr),
-    align: (left, left),
-    table.header[Audit gate][What the verifier does instead of trusting the manifest],
-    [1 — public-input reconstruction],
-    [Independently reconstructs every sub-proof's expected public-input bytes — with the verifier
-     nonce at field 0 — from the declared statement and compares byte-for-byte; any difference
-     rejects. Without this, an honest proof of a _different_ true statement is replayable as a
-     forgery.],
-    [2 — canonical verification key],
-    [Recomputes each sub-proof's verification key from the canonical circuit named by the
-     _re-derived_ identifier; a manifest-supplied key is never trusted. Without this, a
-     prover-chosen key over an unconstrained circuit defeats the whole gate.],
-    [3 — issuer signature and key set],
-    [Requires every issuer key used to be a member of the _external_ key set K, and the issuer
-     signature over the graph commitment to verify. Without this, the prover is the issuer of its
-     own facts.],
-    [4 — nonce single-use and binding],
-    [Mints a fresh single-use nonce, records it as burnt _before_ the cryptographic checks, and
-     rejects any manifest that binds a different nonce. Without this, an accepting manifest is
-     replayable forever.],
-  ),
-  caption: [
-    The #headline("zkarch.audit_gates") audit gates. Backend proof verification is layered
-    _around_ them: verifying a proof is meaningless unless gates 1 and 2 pin _what_ is being
-    verified and _against which key_. The gates are internally re-audited, _not_ externally
-    audited (`sq-qhy4`, open); this table describes the mechanism, not a proven guarantee.
-  ],
-)
+The earlier architecture remains the project's most complete circuit-based design and a baseline
+for the new paths. It proves _result membership_ for a monotone fragment — BGP scans over one
+committed graph, datatype-bucketed value `FILTER`, a hidden-credential equality `JOIN` across
+distinct graphs, and membership-indifferent modifiers — under the algebra of @pag09. Non-monotone
+operators, aggregation and `ORDER BY` are excluded because extra undisclosed data could falsify
+them; a join binding a shared variable to blank nodes in two committed graphs is rejected, since
+blank-node identity is graph-scoped @rdf11.
 
-Beyond the gates, the obligation set re-derives the circuit identifier from the statement,
-re-checks the cross-graph blank-node exclusion of §#ref(<fragment>, supplement: none), enforces the
-attribution superset rule binding result rows to source graphs, binds filter operators/bounds and
-join keys to the query text, and re-checks any declared RDFS/OWL derivation steps against
-_disclosed_ bases (only simple entailment is proved in zero knowledge; an in-circuit closure proof
-is deferred). Each failure maps to an explicit variant of a closed error taxonomy.
-
-= Cost characterisation and a proving-cost model <cost>
-
-We characterise the family's cost by its _deterministic artifact facts_: `bb gates -s ultra_honk`
-circuit sizes, the ground-truth constraint count under the pinned toolchain, taken from the
-regression-gated snapshot (so the numbers cannot silently drift). These are machine-_independent_
-integer facts of the compiled circuits — not timings — and are the only cost numbers this paper
-treats as canonical.
+Each graph is canonicalised with RDFC-1.0 @rdfc10 and committed with Poseidon2 @poseidon2 over the
+BN254 scalar field; the commitment is bound to an issuer key by a Schnorr signature @schnorr91 over
+Baby Jubjub @eip2494, accepted only if the key is in the relying party's external key set. The
+commitments are public and unblinded, so low-entropy graphs can be guessed and repeated commitments
+linked. Every sub-proof uses one circuit of a fixed, named family, so the verifier can re-derive
+the circuit identity and recompute its verification key rather than trust a prover-supplied key.
+A JSON manifest composes sub-proofs through binding edges, and the verifier binds the query nonce
+into every sub-proof's public inputs.
 
 #figure(
   table(
     columns: (1fr, auto),
     align: (left, right),
-    table.header[Family member (representative)][UltraHonk gates],
-    [`RevokeUnset` (revocation, depth 10)], [#headline("zkarch.gates_revoke")],
-    [`FilterValueDl` (opt-in dual-leaf integer lane)], [#headline("zkarch.gates_filter_value_dl_int")],
-    [`Scan` — smallest (k=1, n=16, r=4)], [#headline("zkarch.gates_scan_min")],
-    [`JoinEq` — smallest (n#sub[a]=16, n#sub[b]=16)], [#headline("zkarch.gates_join_min")],
-    [`HolderPok` (hidden-holder, not-yet-sound)], [#headline("zkarch.gates_holder_pok")],
-    [`HiddenIssuer` (in-circuit Schnorr + key-set membership)], [#headline("zkarch.gates_hidden_issuer")],
-    [`JoinEq` — largest (n#sub[a]=64, n#sub[b]=64)], [#headline("zkarch.gates_join_max")],
-    [Composable filter lane (`filter_int`/`filter_f64`/… any digit count)], [#headline("zkarch.gates_filter_lane")],
-    [`Scan` — largest (k=2, n=64, r=8)], [#headline("zkarch.gates_scan_max")],
+    table.header[Committed structural fact or circuit size][Value],
+    [Circuit identifier kinds], [#headline("zkarch.circuit_kinds")],
+    [Compiled circuit members], [#headline("zkarch.circuit_members")],
+    [Fail-closed verifier binding obligations], [#headline("zkarch.binding_obligations")],
+    [Cross-cutting audit gates], [#headline("zkarch.audit_gates")],
+    [`Scan`, smallest member (UltraHonk gates)], [#headline("zkarch.gates_scan_min")],
+    [`Scan`, largest member], [#headline("zkarch.gates_scan_max")],
+    [Composable string-canonical filter lane], [#headline("zkarch.gates_filter_lane")],
+    [Opt-in dual-leaf integer value lane], [#headline("zkarch.gates_filter_value_dl_int")],
+    [`JoinEq`, smallest / largest], [#headline("zkarch.gates_join_min") / #headline("zkarch.gates_join_max")],
+    [`RevokeUnset` (depth 10)], [#headline("zkarch.gates_revoke")],
+    [`HiddenIssuer` (in-circuit Schnorr and key-set membership)], [#headline("zkarch.gates_hidden_issuer")],
+    [`HolderPok` (hidden holder; explicitly not yet sound)], [#headline("zkarch.gates_holder_pok")],
   ),
   caption: [
-    Deterministic circuit sizes across the family, from the regression-gated gate-count snapshot
-    (`bb gates -s ultra_honk`, toolchain pinned to `bb 5.0.0-nightly.20260324` /
-    `nargo 1.0.0-beta.21`). Two facts drive the design's cost story: the string-canonical filter
-    lanes are _gate-identical_ at #headline("zkarch.gates_filter_lane") regardless of digit count
-    (the blake3 binding of the canonical literal token dominates and fits one hash block), and the
-    scan members scale with the (k·n) commitment-recompute sweep. The opt-in dual-leaf lane
-    (#headline("zkarch.gates_filter_value_dl_int")) shows the cost the blake3 binding buys — it is
-    cheaper but carries an accepted invariant downgrade and is off by default.
+    Deterministic facts of the legacy family from the regression-gated gate-count snapshot and
+    committed verifier source (`bb gates -s ultra_honk`, pinned `nargo 1.0.0-beta.21`). They are
+    constraint counts, not timings, and describe the main-branch family only; they say nothing
+    about the new paths.
   ],
-)
+) <legacy-table>
 
 #provenance("zkarch.gates_scan_max")
 
-*A proving-cost model, and why we publish a model rather than a headline time.* UltraHonk proving
-cost is, to first order, linear in the circuit's gate count for a fixed backend and thread count;
-proof size and verification cost are _constant_ across the family (the succinctness property of the
-scheme). So the gate-count table above _is_ the cost profile up to a single machine-dependent
-constant: prove-time ≈ κ · gates for a per-host κ, with verification and proof size flat. We do
-_not_ publish a headline wall-clock number because our development measurements are taken on an
-AWS EC2 host whose timings are non-canonical under the project's empirical-honesty mandate — a
-speed claim would require the canonical runner, which is not yet available for this family.
-Relative cost within the family, however, is a property of the gate counts and _is_ canonical: a
-largest-scan proof carries about #calc.round(
-  headline("zkarch.gates_scan_max") / headline("zkarch.gates_scan_min"), digits: 1)× the
-constraints of the smallest scan, and about #calc.round(
-  headline("zkarch.gates_scan_max") / headline("zkarch.gates_filter_lane"), digits: 1)× a
-composable filter lane — ratios a reader can multiply by any host's measured κ. This is the honest form of a cost
-result when the absolute timer is not yet canonical: publish the constraint counts and the linear
-model, and name the missing constant.
+The verifier's four audit gates reconstruct public inputs from the declared statement, recompute
+canonical verification keys, require issuer signatures under the external key set, and enforce a
+single-use nonce. An internal adversarial audit of an earlier verifier found
+#headline("cozk.single_prover_audit_issues") confirmed issues — among them unreconstructed public
+inputs, trusted prover-supplied keys, unsigned commitments, replayable manifests and filter
+operators not bound to the query — and
+#headline("zkarch.forge_findings_mapped") of them now carry a standing forge-and-verify regression
+test. That evidence pins known attacks closed; it does not find unknown ones. The hidden-holder
+tiers are explicitly not yet sound and off by default; the dual-leaf value lane carries an accepted
+invariant downgrade; lexical/value agreement of value-bearing leaves relies on the issuer. The
+path's limits motivate the new work: it cannot state exact results, it authenticates conventional
+credentials only off-circuit, and it proves every retained operator in secret.
 
-= Security analysis under an open audit gate <security>
+== Evidence: method and current findings <evidence>
 
-We are precise about status because the framing is the contribution. The architecture is
-_research-grade_ and has _no_ external accredited-cryptographer audit; the external audit is an
-open gate (`sq-qhy4`). Nothing below is a proven guarantee.
+=== Method <evidence-method>
 
-*Threat model.* The prover is fully adversarial: it controls the manifest, the query text, the
-declared circuit and public inputs, the verification key, and any replayed material, and its goal
-is to make the verifier accept a false SPARQL statement, reuse a proof, or smuggle in an untrusted
-issuer. The verifier is honest-but-curious for privacy and is trusted by its relying party to run
-the whole obligation set. Issuer content veracity, side channels, and transport are out of scope.
+All new-path evidence comes from frozen JSON snapshots under `research/zk-paper-evidence/`, each
+listed with its SHA-256 digest in `provenance.json`. Each snapshot summarises a second internal
+evidence inspection of a completed run — source trees re-hashed against the stated commit,
+artifacts and receipts re-hashed, recorded outcomes compared — rather than a new execution, and
+none is an external security review. Every number below is read from `paper-evidence.json`
+records whose values are machine-checked against those snapshots by JSON pointer. The inspections
+did not re-run cryptographic verification locally; genuine-receipt verification and refusal of
+development mode are exercised by the source-bound tests whose outcomes the snapshots record.
+Campaigns are reported separately and never summed; in particular, the hosted campaign and the
+EC2 adapter campaign used different guest binaries (#short-id("zkvcq.exact_guest_sha256") and
+#short-id("zkvcq.adapter_guest_sha256")).
 
-*The internal adversarial audit.* An internal adversarial audit of the verifier found and
-confirmed #headline("cozk.single_prover_audit_issues") issues on a v1 verifier — that v1 was
-documented _not_ sound. The confirmed classes were exactly the composition-seam attacks the
-architecture must defend: public inputs never reconstructed from the declared statement, a
-prover-supplied verification key trusted as-is, commitments accepted without an issuer signature,
-manifests infinitely replayable for want of a nonce binding, and filter operator/bound/slot never
-bound to the query's FILTER. Each has a stated remediation — the four audit gates of
-§#ref(<verify>, supplement: none) are, in large part, that remediation — and each finding now
-carries a standing _forge-negative_ regression test:
+=== Bounded exact evaluator (hosted campaign) <exact-evidence>
+
+A GitHub-hosted CI job built the guest from source #short-id("zkvcq.exact_source_commit") with
+locked dependency graphs, ran the native model tests, then ran the host suite that executes the
+actual guest and produces genuine receipts serially with #raw(headline("zkvcq.exact_r0vm_version")).
 
 #figure(
   table(
-    columns: 2,
+    columns: (1fr, auto),
     align: (left, right),
-    table.header[Committed structural fact][Count],
-    [Confirmed findings in the internal single-prover verifier audit], [#headline("cozk.single_prover_audit_issues")],
-    [Findings pinned closed by a 1:1 forge-and-verify regression test], [#headline("zkarch.forge_findings_mapped")],
-    [Fail-closed binding obligations enforced per manifest], [#headline("zkarch.binding_obligations")],
-    [Cross-cutting audit gates], [#headline("zkarch.audit_gates")],
+    table.header[Hosted campaign fact][Count],
+    [Genuine receipts (Succinct, halted with exit 0, no assumptions, image pin matched)], [#headline("zkvcq.exact_hosted_receipts")],
+    [Native model test functions passed], [#headline("zkvcq.exact_hosted_model_tests")],
+    [Host guest-and-proof test functions passed], [#headline("zkvcq.exact_hosted_host_tests")],
+    [Host test functions explicitly ignored], [#headline("zkvcq.exact_hosted_ignored")],
+    [Typed native replay cases], [#headline("zkvcq.exact_replay_cases")],
+    [Native replay jobs (cases × request versions × authorities)], [#headline("zkvcq.exact_replay_jobs")],
+    [of which expected and observed accepted], [#headline("zkvcq.exact_replay_expected_positive")],
+    [of which expected and observed rejected], [#headline("zkvcq.exact_replay_expected_negative")],
+    [Proofs produced by the native replay], [#headline("zkvcq.exact_replay_proofs")],
   ),
   caption: [
-    The audit posture as _deterministic structural facts_ (source/document scans over committed
-    code, not measurements). The #headline("zkarch.forge_findings_mapped") forge-negative tests
-    each construct a specific historical forgery and assert the verifier rejects it with the mapped
-    error, so a future refactor cannot silently re-open a remediated finding. This is _necessary
-    and explicitly not sufficient_ evidence: it pins known attacks closed; it does not discover
-    unknown ones, which is the job of the open external audit.
+    Hosted exact-evaluator evidence at #short-id("zkvcq.exact_source_commit"). Test functions and
+    replay jobs are not W3C conformance cases, and the replay is native execution only. The two
+    ignored functions are the engine-replay proof functions; they are not counted as executed.
   ],
-)
+) <exact-table>
 
-#provenance("zkarch.forge_findings_mapped")
+#provenance("zkvcq.exact_hosted_receipts")
 
-*What the absence of an external audit means.* A passing verification must _not_ be read as a
-settled guarantee against an adversarial prover. The internal audit and the forge-negative suite
-raise assurance and are honestly reported as such; they are not a proof of soundness, and no
-accredited cryptographer has reviewed the estate. Positive security properties are therefore at
-most _claimed_, with audit status "external sign-off pending". The hidden-holder tiers
-(`HolderPok`, `HolderSet`) are explicitly _not yet sound_ and are off by default; the dual-leaf
-value lane carries an accepted, documented invariant downgrade and is opt-in; only simple
-entailment is in zero knowledge. We report each of these with equal precision to the design's
-strengths, because an honest architecture paper under an open gate is honest only if it does.
+The receipts are `v1-holder-bag`, `v1-verifier-select`, `v1-verifier-false-ask`,
+`v2-holder-false-ask`, `v2-verifier-catalog`, `v3-holder-bag`, `v3-holder-describe` and
+`v3-verifier-construct`. Together they cover all three request versions, the listed forms and
+both authorities; not every form was proved under every authority. The genuine-proof test
+functions that produced them assert that a holder-declared bag preserves
+duplicates, unbound values and provenance; that a false `ASK` proves absence from the accepted
+complete graph and a holder-declared absence respects `FROM NAMED` scope; that catalog and nested
+graph results bind every public expectation; that `DESCRIBE` binds its explicit blank-node closure
+policy; that `CONSTRUCT` mints fresh nodes with graph set semantics; and that tampering with or
+replaying any public binding is rejected. This run completed the legacy genuine-proof functions that earlier campaigns had left
+unfinished. What it does not show: whole-SPARQL conformance, any issuer authentication (none is in
+these relations), performance, or anything about the historical EC2 receipts, which remain
+attributed to their own guest binary.
 
-*Relation to the collaborative path.* This paper is strictly single-prover. The _multi-prover_
-(collaborative) extension — several holders jointly proving over their private graphs — is a
-separate, _unbuilt_ path with its own open gate and its own negative-result analysis against the
-collaborative-zk-SNARK failure modes of Garg et al. @garg25; it is out of scope here and
-claims nothing.
+=== Protocol adapter (EC2 campaign) <adapter-evidence>
 
-= Related work
+The adapter wraps the exact evaluator in typed requests, method descriptors and a verification
+routine. Receipts were produced on an EC2 host from frozen source
+#short-id("zkvcq.adapter_source_commit").
 
-_Verifiable databases._ IntegriDB @integridb, vSQL @vsql, and ZKSQL
-@zksql prove SQL query results over an outsourced database. They target a different trust
-shape: the querier trusts the schema and wants integrity of an untrusted _server's_ computation;
-they do not hide the data from the verifier, do not operate over RDF, and do not bind results to
-issuer attestations. Our architecture hides the committed graphs and roots results in signed
-issuer keys.
+#figure(
+  table(
+    columns: (1.6fr, 0.9fr, 1fr, 1.3fr),
+    align: (left, left, left, left),
+    table.header[Case][Form][Authority][Protocol outcome],
+    [`select-bag-verifier-agreed`], [bag `SELECT`], [VerifierAgreed], [accepted],
+    [`select-bag-holder-declared`], [bag `SELECT`], [HolderDeclared], [accepted],
+    [`ask-true-verifier-agreed`], [`ASK` (true)], [VerifierAgreed], [accepted],
+    [`ask-false-holder-declared`], [`ASK` (false)], [HolderDeclared], [accepted],
+    [`construct-verifier-agreed`], [`CONSTRUCT`], [VerifierAgreed], [accepted],
+    [`construct-holder-declared`], [`CONSTRUCT`], [HolderDeclared], [accepted],
+    [`select-bag-row-bound`], [bag `SELECT`], [—], [rejected: result exceeds row bound],
+  ),
+  caption: [
+    The #headline("zkvcq.adapter_receipts") genuine adapter receipts:
+    #headline("zkvcq.adapter_accepted") accepted and #headline("zkvcq.adapter_row_bound_rejected")
+    genuine receipt rejected at the contract's row bound — a genuine proof is necessary, not
+    sufficient, for acceptance. Every tuple has source evidence `None`, status `NotRequested` and
+    a bearer holder.
+  ],
+) <adapter-table>
 
-_Anonymous credentials._ CL signatures @cl01, BBS @bbs, and zk-creds
-@zkcreds prove possession of signed attributes with selective disclosure. They prove facts
-about _one credential's fields_, not _query evaluation_ over a set of credentials with joins and
-filters — which is the structure this fragment adds.
+#figure(
+  table(
+    columns: (auto, 1fr, auto),
+    align: (left, left, right),
+    table.header[Validation step][Control class][Records],
+    [Method, contract], [Changed query of the same form], [#headline("zkvcq.ctl_changed_query_same_form")],
+    [Method, contract], [Wrong method descriptor digest], [#headline("zkvcq.ctl_wrong_descriptor_digest")],
+    [Journal binding], [Altered journal result], [#headline("zkvcq.ctl_altered_journal_result")],
+    [Session], [Wrong challenge], [#headline("zkvcq.ctl_wrong_challenge")],
+    [Session], [Wrong verifier audience], [#headline("zkvcq.ctl_wrong_verifier_audience")],
+    [Session], [Stored audience changed to match the supplied one], [#headline("zkvcq.ctl_changed_stored_audience")],
+    [Session], [Expired], [#headline("zkvcq.ctl_expired")],
+    [Session], [Not yet valid], [#headline("zkvcq.ctl_not_yet_valid")],
+    [Session], [Substituted window still containing now], [#headline("zkvcq.ctl_changed_window")],
+    [Authority, scope], [HolderDeclared proof against VerifierAgreed request], [#headline("zkvcq.ctl_scope_holder_to_agreed")],
+    [Authority, scope], [VerifierAgreed proof against HolderDeclared request], [#headline("zkvcq.ctl_scope_agreed_to_holder")],
+    [Authority, scope], [Commitment other than the agreed anchor], [#headline("zkvcq.ctl_wrong_agreed_anchor")],
+    [Consumption], [Replay against the same store], [#headline("zkvcq.ctl_replay_same_store")],
+    [Consumption], [Concurrent verifications of one challenge], [#headline("zkvcq.ctl_concurrent_verifications")],
+    [Consumption], [Broken challenge store], [#headline("zkvcq.ctl_broken_store")],
+  ),
+  caption: [
+    Inventory of the #headline("zkvcq.adapter_controls") retained control records, grouped by the
+    before-consume step of §#ref(<validation>, supplement: none) they exercise. Stores are
+    in-memory test doubles, not durable production stores; the controls show the checks exist and
+    fire in these cases, not that no other substitution succeeds.
+  ],
+) <controls-table>
 
-_Signed RDF and semantic-web ZK._ Signing RDF graphs is classical @carroll03; the
-canonicalisation this architecture relies on is the modern RDFC-1.0 @rdfc10. The most
-direct neighbour proves selective-disclosure soundness of SPARQL results over RDF datasets with
-zero-knowledge proofs @braun26; this paper is a companion systems description of an
-engine-integrated single-prover stack — its fixed-circuit-family architecture, its verifier
-re-derivation discipline, its deterministic cost profile, and its audit posture under an open gate.
-We claim no cryptographic novelty over the primitives we compose; the contribution is the system
-and its honest characterisation.
+The audit wrapper for this campaign itself reported failure: a mutation check expected a test
+failure line that `--nocapture` output had split across lines, although the intended assertion
+mutant was killed, and the post-restore gates were not reached in that wrapper. The receipts and
+controls above were verified from retained files before the mutation step. A later, separate
+continuation at the same source (#short-id("zkvcq.post_restore_head")) closed the two skipped
+gates: a verify-only replay of the retained row-bound presentation passed
+(#headline("zkvcq.post_restore_row_bound_passed") test function, none failed) and the adapter's
+all-target host Clippy passed with warnings denied. It generated
+#headline("zkvcq.post_restore_new_proofs") new proofs, and the original wrapper failure remains on
+record unchanged. The adapter campaign did not complete the unfinished legacy proof functions; the
+hosted campaign did.
 
-= Conclusion
+=== Public-pattern relation and development pilot <pilot-evidence>
 
-A single holder answering a SPARQL query in zero knowledge over attested credentials needs a
-machine whose every part is built for an adversarial prover: a per-graph commitment bound to an
-issuer signature, a _fixed named family_ of #headline("zkarch.circuit_kinds") circuit kinds
-(#headline("zkarch.circuit_members") compiled members) so the verifier can recompute keys rather
-than trust them, a manifest that composes sub-proofs through checkable binding edges, and a
-#headline("zkarch.binding_obligations")-obligation, #headline("zkarch.audit_gates")-audit-gate
-verifier that re-derives the claimed statement from the query and the relying party's trust
-anchors. We reported the family's cost as deterministic gate counts
-(#headline("zkarch.gates_scan_min")–#headline("zkarch.gates_scan_max") for the scan lattice,
-#headline("zkarch.gates_filter_lane") for the composable filter lanes) and a linear proving-cost
-model over them, and we named the one missing piece — a canonical wall-clock constant — rather than
-quote a non-canonical time. On security we reported an internal audit that found and remediated
-#headline("cozk.single_prover_audit_issues") issues, each pinned closed by a standing
-forge-negative test, and we stated plainly that with _no_ external audit (`sq-qhy4`) the design
-claims no proven property. The architecture is what it is: a carefully-composed, internally
-re-audited, not-yet-externally-audited system, described so that both its design and its open gate
-are legible.
+At source #short-id("zkvcq.pp_source_commit"), a paired harness produced
+#headline("zkvcq.pp_genuine_proofs") genuine Noir/UltraHonk proofs with
+#headline("zkvcq.pp_positive_verifications") successful backend verifications, alternating the
+baseline relation V1 and the public-pattern relation V4 with the same query, rows, credentials,
+policy and realised capacity. #headline("zkvcq.pp_warmups") warmups were excluded, leaving
+#headline("zkvcq.pp_measured_samples") measured samples in #headline("zkvcq.pp_measured_pairs")
+pairs (#headline("zkvcq.pp_n_per_cell") per arm and profile). All
+#headline("zkvcq.pp_tamper_controls") tamper controls and #headline("zkvcq.pp_replay_controls")
+replay controls were rejected. Every proof payload was #headline("zkvcq.pp_proof_bytes") bytes in
+both arms; full presentation size was not measured separately. The harness's work counters were
+identical across arms (same selected credentials, signature checks and shared memberships), so the
+comparison isolates the relation's specialization.
+
+#let prove-diffs = range(1, headline("zkvcq.pp_measured_pairs") + 1).map(i => ev("zkvcq.pilot_pair" + str(i) + "_prove_diff"))
+#let verify-diffs = range(1, headline("zkvcq.pp_measured_pairs") + 1).map(i => ev("zkvcq.pilot_pair" + str(i) + "_verify_diff"))
+
+#block(inset: 8pt, stroke: 0.5pt + gray, width: 100%)[
+  *Indicative development measurement — not the basis of any claim.* Paired sequential runs on
+  a shared EC2 KVM guest (Intel Xeon Platinum 8488C, eight vCPUs; Linux `7.0.0-1013-aws`; instance
+  type not recorded in the snapshot) under a two-CPU quota and an eight-GiB memory cap, with
+  heavy-job locks held, OS and dependency caches uncontrolled, `nargo 1.0.0-beta.21` with a pinned
+  `bb` nightly. Times are inclusive prove and verify API timers that nest compilation, key and host
+  I/O stages; they are not exclusive backend times and must not be decomposed.
+
+  #figure(
+    table(
+      columns: (auto, auto, 1fr, 1fr),
+      align: (left, left, right, right),
+      table.header[Profile][Arm][Prove, s: median (min–max)][Verify, s: median (min–max)],
+      [K1], [baseline V1],
+      [#pilot("zkvcq.pilot_k1_v1_prove_median") (#pilot("zkvcq.pilot_k1_v1_prove_min")–#pilot("zkvcq.pilot_k1_v1_prove_max"))],
+      [#pilot("zkvcq.pilot_k1_v1_verify_median") (#pilot("zkvcq.pilot_k1_v1_verify_min")–#pilot("zkvcq.pilot_k1_v1_verify_max"))],
+      [K1], [public pattern V4],
+      [#pilot("zkvcq.pilot_k1_v4_prove_median") (#pilot("zkvcq.pilot_k1_v4_prove_min")–#pilot("zkvcq.pilot_k1_v4_prove_max"))],
+      [#pilot("zkvcq.pilot_k1_v4_verify_median") (#pilot("zkvcq.pilot_k1_v4_verify_min")–#pilot("zkvcq.pilot_k1_v4_verify_max"))],
+      [K2], [baseline V1],
+      [#pilot("zkvcq.pilot_k2_v1_prove_median") (#pilot("zkvcq.pilot_k2_v1_prove_min")–#pilot("zkvcq.pilot_k2_v1_prove_max"))],
+      [#pilot("zkvcq.pilot_k2_v1_verify_median") (#pilot("zkvcq.pilot_k2_v1_verify_min")–#pilot("zkvcq.pilot_k2_v1_verify_max"))],
+      [K2], [public pattern V4],
+      [#pilot("zkvcq.pilot_k2_v4_prove_median") (#pilot("zkvcq.pilot_k2_v4_prove_min")–#pilot("zkvcq.pilot_k2_v4_prove_max"))],
+      [#pilot("zkvcq.pilot_k2_v4_verify_median") (#pilot("zkvcq.pilot_k2_v4_verify_min")–#pilot("zkvcq.pilot_k2_v4_verify_max"))],
+    ),
+    caption: [
+      Indicative development pilot, four measured samples per cell, warmups excluded. Descriptive
+      only: no significance test, no general speedup, no scaling claim.
+    ],
+  ) <pilot-table>
+
+  In #prove-diffs.filter(x => x < 0).len() of #prove-diffs.len() pairs the V4 inclusive prove time
+  was lower, with paired differences (V4 minus V1) between #fmt3(calc.min(..prove-diffs)) and
+  #fmt3(calc.max(..prove-diffs)) s; verify differences were lower in
+  #verify-diffs.filter(x => x < 0).len() of #verify-diffs.len() pairs and ranged from
+  #fmt3(calc.min(..verify-diffs)) to #fmt3(calc.max(..verify-diffs)) s, the largest driven by a
+  single slow baseline sample.
+]
+
+The pilot establishes that the harness runs, enforces its equal-guarantee comparison contract
+and rejects its controls. The differences it shows are small relative to the totals and come from
+too few samples on shared hardware to say more; they do not show that disclosure specialization
+yields a material or general gain, and full presentation size, memory, cold-start and larger
+scales are unmeasured.
+
+=== Authenticated extension of the exact evaluator (V5) <v5-evidence>
+
+V5 implements strict Ed25519 verification over RDFC-1.0 canonical documents, checked against a
+published W3C test vector, resolves issuers through a verifier-owned
+issuer/verification-method/key table, and evaluates the query over the same canonical documents
+under both authority profiles. At source #short-id("zkvcq.v5_source_commit"), a scoped native run
+of the evaluator model passed in three feature configurations with no failed or ignored test
+functions: #headline("zkvcq.v5_auth_tests_passed") with the `authenticated-rdf` feature,
+#headline("zkvcq.v5_default_off_tests_passed") with default features off, and
+#headline("zkvcq.v5_graph_results_tests_passed") with `graph-results`. The configurations overlap
+and are not added: the `authenticated-rdf` count consists of
+#headline("zkvcq.v5_new_integration_tests") new integration and
+#headline("zkvcq.v5_new_unit_tests") new unit test functions plus existing model functions that
+also run under `graph-results`. The new functions cover, among other things, the W3C vector,
+rejection of valid signatures under the wrong issuer, method, purpose or suite, preservation of
+signed lexical forms, per-credential blank-node scope, binding of the authorization table into
+request and commitment, and `SELECT`, `ASK` and `CONSTRUCT` under both authorities. Scoped Clippy
+with warnings denied passed in all three configurations.
+
+This is executed-native evidence only. The run made #headline("zkvcq.v5_guest_executions") guest
+executions and produced #headline("zkvcq.v5_proofs") V5 proofs; it was not a full-workspace gate
+and not a security audit, and the guest extension is unvalidated source under review.
+Conventional-credential authentication inside exact _proofs_ therefore remains open. V5 is not a
+generic authenticated query adapter, provides no JSON, JCS or JOSE-to-RDF relation, and makes no
+status or holder-binding claim.
+
+=== Native-composition experiment <nc-evidence>
+
+The experimental native path produced two distinct kinds of evidence at source
+#short-id("zkvcq.nc_source_commit"), whose proofs must not be conflated. The first is native
+public-RDF evidence: BBS+ proofs over the public-BGP interface, with no Circom or LegoGroth16
+component. A hosted CI run exercised a declared finite native-RDF domain with
+#headline("zkvcq.nc_distinct_proofs") distinct proofs under
+#headline("zkvcq.nc_distinct_nonces") distinct nonces:
+#headline("zkvcq.nc_required_accepted") proofs accepted by the required verifier policy, and
+#headline("zkvcq.nc_weaker_rejected") proofs that verified under a weaker policy and were rejected
+by the required verifier. A further #headline("zkvcq.nc_empty_graph_admission") empty-graph cells
+were refused at admission and #headline("zkvcq.nc_other_exclusions") other cases were explicitly
+excluded; neither group produced a proof. Separately, #headline("zkvcq.nc_cli_proofs") retained
+command-line proof verified positively and was rejected under substituted issuer, query, result
+and nonce, replay, revocation and status-epoch controls; proofs made inside the native test
+functions are not enumerated. These are native BBS+ public-BGP proofs within one finite domain,
+not composition proofs and not exact SPARQL proofs, and they share no counts with any other
+campaign. The second kind is tuple composition: same-field composition of BBS+ over BLS12-381 with
+Circom circuits proved with LegoGroth16 was executed by two legacy test functions, whose internal
+proof count is not enumerated. Neither kind has linkage to the Noir relations, and the native-RDF
+interface discloses only public triples.
+
+=== Reproducing the evidence <repro>
+
+The hosted snapshot records the exact commands, including
+`cargo test --locked --manifest-path zk/sparql-evaluator/Cargo.toml -p sparq-proved-evaluator -- --nocapture --test-threads=1`
+for the guest and proof suite and the `graph-results` feature for the native model; toolchain
+versions and hashes of the host compiler, guest compiler and prover binary; the guest ELF digest and
+image identifier; and the digest of every receipt. The pilot snapshot records every sample, the
+paired differences, the executable and tool hashes, the resource limits and the hardware record.
+The adapter snapshot records per-receipt, presentation and journal digests and the control
+inventory, and its continuation records the replayed presentation digest. The V5 snapshot records
+each native command, per-configuration test inventories, lock-file and toolchain hashes; the
+native-composition snapshot records plan, report, source and executable hashes and the artifact
+digests. Re-running the campaigns requires the pinned toolchains and, for the proofs, hardware
+able to run the RISC Zero and Barretenberg provers.
+
+== Related work
+
+_Selective disclosure over RDF._ Braun and Käfer define RDF-based semantics for selective
+disclosure and zero-knowledge proofs on credentials @braunkaefer25, and zkRDF turns SPARQL answers
+into selectively disclosing datasets with native signature, equality and bound proofs @braun26;
+Yamamoto, Suga and Sako formalise linked-data credentials for selective disclosure @yamamoto22.
+These works established the disclosure of public terms that §#ref(<minimize>, supplement: none)
+builds on, with formal treatment of the monotone fragment. Our contribution is complementary:
+exact, authority-relative statements and method dispatch for paths that evaluate non-monotone
+queries, and a precise account of what disclosure does and does not save when the signature is not
+a selective-disclosure signature.
+
+_General computation in a zkVM._ The first prototype in this line proved SPARQL evaluation over
+Ed25519-signed credentials in RISC Zero @wright25dc @risc0, at a proving cost that zkRDF later
+undercut substantially with a data-centric design @braun26. The exact evaluator returns to a zkVM
+for a different reason — non-monotone semantics under an explicit contract — and inherits the cost
+question rather than answering it.
+
+_Verifiable databases and graph queries._ IntegriDB @integridb, vSQL @vsql and ZKSQL @zksql prove
+SQL results, the last with zero-knowledge and explicit leakage of schema and cardinalities;
+ZKGraph decomposes graph queries into expansion-centric operators @zkgraph25. Query decomposition
+and private query proofs are therefore not new here. VeriDKG provides authenticated, complete
+SPARQL results over a decentralized knowledge graph using authenticated indexes @veridkg23; its
+completeness is over a published dataset, the natural counterpart of our VerifierAgreed anchor,
+rather than over a holder's private credentials.
+
+_Credentials._ CL signatures @cl01, BBS @bbs, zk-creds @zkcreds and Crescent @crescent prove
+statements about signed attributes, with Crescent separating reusable credential preprocessing
+from fresh presentations; OpenID for Verifiable Presentations restricts query expressiveness to
+limit oversharing @openid4vp. These provide the suites and presentation protocols our method
+abstraction dispatches to, not the query statement itself. Carroll's graph signing @carroll03 and
+RDFC-1.0 @rdfc10 underpin the signed-representation side of §#ref(<linkage>, supplement: none).
+
+== Discussion <discussion>
+
+=== What the evidence answers now
+
+*RQ1.* The contract and relation of §#ref(<contract>, supplement: none) separate membership from
+exact evaluation and make authority explicit. The hosted campaign's genuine receipts
+collectively cover exact bag `SELECT`, false `ASK`, `CONSTRUCT`, `DESCRIBE` and catalog results
+and both authorities, without every form being proved under every authority. The answer is
+partial: the proved datasets carry no issuer authentication,
+the evaluator is bounded and its coverage is a test suite, not conformance, and exactness under
+VerifierAgreed is only as good as the deployment's anchor policy.
+
+*RQ2.* The eligibility rule, its counterexamples and design argument 2 identify one safe class of
+reductions, and V4 implements its first instance while retaining authentication and membership in
+the relation; application to the exact relations is proposed only. The pilot neither confirms
+nor rules out a material benefit. Sharing, witness
+selection and planning across obligations are not yet studied.
+
+*RQ3.* Separate dispatch of suites and methods, capability tuples and before-consume validation
+are implemented for one method family, with retained controls for each validation step. Issuer
+authentication in front of exact evaluation (V5) now executes natively, but no V5 guest execution
+or proof exists; JSON-signed suites are unmapped. The native-composition experiment authenticates
+public BGP triples under verifier policy, while authenticated linkage between native proofs and
+Noir or zkVM relations, and a cost planner across them, remain unimplemented.
+
+=== Limitations and threats to validity
+
+The design arguments are informal and conditional; no part is mechanised, and the implementation
+is not shown to meet them. Every piece of proof evidence is internal to the project and re-checked
+by a second internal evidence inspection, not externally audited (`sq-qhy4`); the collaborative multi-prover setting is
+out of scope and separately gated (`sq-9hrn`). Tests and controls demonstrate the presence of
+specific checks and cannot exclude untested substitutions. Commitments in the legacy path are
+public and unblinded, and the disclosure analysis here does not account for all public inputs of
+every method, for linkage across repeated presentations, or for what a sequence of permitted
+queries reveals together. The pilot is small, run on shared hardware, and not canonical; no latency,
+memory or size conclusion about any path should be drawn from it. The exact-evaluator, adapter
+and V5 relations have no status relation. V4 enforces its bounded, verifier-accepted status
+snapshot and policy in the relation, and the native public-RDF path applies a verifier-owned status
+policy to public triples; in both, acquisition and freshness of authoritative status are
+deployment policy, not a world-wide freshness guarantee. Holder binding and key-authorization freshness
+are established by none of the exact-evaluator, adapter, V5 or V4 relations.
+
+== Conclusion
+
+Accepting a proof of a SPARQL answer is meaningful only relative to a contract that fixes the
+result semantics, the authority over the dataset, the evidence about its source and what may be
+disclosed. With that contract explicit, result-inferable triples that meet the eligibility
+conditions can be moved to public inputs without weakening the statement, while authentication,
+membership and hidden joins remain proof obligations. At exact commits, the bounded exact
+evaluator produced #headline("zkvcq.exact_hosted_receipts") genuine receipts that collectively
+cover both authority profiles, with
+#headline("zkvcq.exact_replay_jobs") native replay jobs matching expectation; the adapter produced
+#headline("zkvcq.adapter_receipts") genuine receipts, rejected one at its row bound and retained
+#headline("zkvcq.adapter_controls") validation control records; and the public-pattern relation
+produced #headline("zkvcq.pp_genuine_proofs") genuine proofs with all controls rejected. The
+authenticated extension passed #headline("zkvcq.v5_auth_tests_passed") native model test
+functions but has produced no proof, so no exact proof yet authenticates conventional credentials;
+the native-composition experiment proves public BGP triples only. Nothing is externally audited.
+The work is a design and partial-evidence contribution under an open audit gate.
 
 #heading(level: 2, numbering: none)[References]
 #bibliography("zksparql-architecture.refs.yml", style: "ieee", title: none)
@@ -465,13 +1036,12 @@ are legible.
 #if not anon [
   #line(length: 100%)
   #text(size: 0.8em, fill: gray)[
-    sparq project. This paper is a systems-and-design contribution under the OPEN external-audit
-    gate `sq-qhy4`; it asserts _no_ proven security, soundness, privacy, or attestation property.
-    Evidence traces to the fixed circuit family `zk/compose/`, the regression-gated gate-count
-    snapshot `crates/sparq-zk-compose/tests/gate_count_snapshot.json`, the verifier
-    `crates/sparq-zk-compose/src/verifier.rs`, the internal audit `research/zk-soundness-audit.md`,
-    and the forge-negative regression map `crates/sparq-zk-compose/tests/audit_forge_map.rs`.
-    Numbers are injected at build time from the paper-bound evidence file; see the provenance stamp
-    on the published page.
+    sparq project. Working paper under the OPEN external-audit gate `sq-qhy4`; it asserts no
+    proven security, privacy, integrity or attestation property. New-path evidence traces to the
+    frozen snapshots in `research/zk-paper-evidence/` (digests in `provenance.json`), bound to
+    `site/src/data/paper-evidence.json` by JSON pointer. Legacy-path evidence traces to
+    `crates/sparq-zk-compose/tests/gate_count_snapshot.json`,
+    `crates/sparq-zk-compose/src/verifier.rs`, `research/zk-soundness-audit.md` and
+    `crates/sparq-zk-compose/tests/audit_forge_map.rs`. Numbers are injected at build time.
   ]
 ]

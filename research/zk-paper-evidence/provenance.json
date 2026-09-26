@@ -1,0 +1,35 @@
+{
+  "schema": "sparq.paper-audit-snapshot.v1",
+  "recorded_at": "2026-09-26T19:19:23.432886+00:00",
+  "status": "Frozen reported test evidence for exact commits, not an external security audit or a new execution. Local raw artifact paths are historical acquisition metadata.",
+  "files": {
+    "hosted-exact-query-audit.json": {
+      "source": "continued-after-reset/pr6590-4bb-completed/independently-verified-evidence.json",
+      "sha256": "242c0f1502be6724b1eed9a9c321dc865dde6078fda35c1b2d81e323c1afd31a"
+    },
+    "public-pattern-pilot.json": {
+      "source": "remote/public-pattern-ablation-2aaf-bounded20/audit/author-ready-measured-data.json",
+      "sha256": "110f7cf3ad6687f9bf7d31ffc5cd851fe1837ed3d4f7813766f92dccedc35adc"
+    },
+    "public-pattern-audit.json": {
+      "source": "remote/public-pattern-ablation-2aaf-bounded20/audit/independently-verified-terminal-evidence.json",
+      "sha256": "d02b93b3cb2600c5a89205475b01d6a76568b0d3b062f852da388213e9afec94"
+    },
+    "vcq-adapter-audit.json": {
+      "source": "remote/combined-vcq-integration-audit-141305/independently-verified-terminal-evidence.json",
+      "sha256": "d523b5405540c127c529749b5d0a571d308d348ed25d17ee27066c4457e9331b"
+    },
+    "authenticated-rdf-native-audit.json": {
+      "source": "study-artifacts/zk-resume-2026-09-26/continued-after-reset/auth-model-phase-b-8322a6ff/independently-verified-phase-b.json",
+      "sha256": "2a2ea330c6e84c31bb282c2522afd2ef9742c130d728b9a181b4e812d2fe316d"
+    },
+    "vcq-post-restore-audit.json": {
+      "source": "study-artifacts/zk-resume-2026-09-26/remote/vcq-872c-post-restore/audit/independently-verified-terminal-evidence.json",
+      "sha256": "5f8385d87f5d85dd49c043a31c1a28995218d95dcf679cdf6a8110989cb83eac"
+    },
+    "native-rdf-composition-audit.json": {
+      "source": "study-artifacts/zk-resume-2026-09-25/ci/pr6577-fcb7-native-completed-evidence.json",
+      "sha256": "1ac22974ba3ce2c44f841a6f8d179bf13b3e21013af9d60dbd4ac6ad12e72af7"
+    }
+  }
+}
