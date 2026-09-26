@@ -64,24 +64,31 @@ mod proof_bindings;
 enum NumericContract {
     Unsigned(PrivateIntegerCapacity),
     Signed,
+    // [OPUS-5.5] beadzkp-15.1: opt-in version four; unsigned public filters only.
+    PublicPattern,
 }
 
 impl NumericContract {
     fn profile(self) -> NumericProfile {
         match self {
-            Self::Unsigned(_) => NumericProfile::Unsigned,
+            Self::Unsigned(_) | Self::PublicPattern => NumericProfile::Unsigned,
             Self::Signed => NumericProfile::Signed,
         }
     }
 
     fn parse(self, query: &str) -> Result<DisclosureQuery, ResultError> {
-        parse_numeric_query(query, self.profile())
+        let query = parse_numeric_query(query, self.profile())?;
+        match self {
+            Self::PublicPattern => public_prefix(query),
+            _ => Ok(query),
+        }
     }
 
     fn accepts_version(self, version: u32) -> bool {
         match self {
             Self::Unsigned(_) => matches!(version, 1 | 2),
             Self::Signed => version == signed::VERSION,
+            Self::PublicPattern => version == PUBLIC_PATTERN_VERSION,
         }
     }
 
@@ -94,8 +101,96 @@ impl NumericContract {
         match self {
             Self::Unsigned(capacity) => package(credentials, filters, capacity, depth),
             Self::Signed => signed::package(credentials, filters, depth),
+            Self::PublicPattern => public_pattern_package(credentials, filters, depth),
         }
     }
+}
+
+// [OPUS-5.5] beadzkp-15.1: version-four public-pattern contract. Research-grade,
+// not externally audited; no gate or runtime saving is claimed before measurement.
+/// Contract version of the opt-in public-pattern successful-result members.
+///
+/// Presentations carrying this version are verified by [`verify_result`]
+/// against the specialized circuit. Default preparation never emits it.
+pub const PUBLIC_PATTERN_VERSION: u32 = 4;
+// The first specialization publishes only the depth-10 status tree.
+const PUBLIC_PATTERN_STATUS_DEPTH: u32 = 10;
+
+/// Moves the first query-public pattern to index zero, preserving other order.
+///
+/// A pattern is public when each slot is a constant or a projected variable,
+/// so its per-row triple follows from the query and released rows alone.
+fn public_prefix(mut query: DisclosureQuery) -> Result<DisclosureQuery, ResultError> {
+    let index = query
+        .patterns
+        .iter()
+        .position(|pattern| {
+            pattern.iter().all(|slot| match slot {
+                QuerySlot::Constant(_) => true,
+                QuerySlot::Variable(v) => query.projection.contains(v),
+            })
+        })
+        .ok_or_else(|| {
+            reject("public-pattern contract requires a constant-or-projected pattern")
+        })?;
+    let pattern = query.patterns.remove(index);
+    query.patterns.insert(0, pattern);
+    Ok(query)
+}
+
+fn public_pattern_package(
+    credentials: usize,
+    hidden_filters: usize,
+    depth: u32,
+) -> Result<(&'static str, u32), ResultError> {
+    if hidden_filters != 0 {
+        return Err(reject(
+            "public-pattern contract does not support hidden numeric filters",
+        ));
+    }
+    match (credentials, depth) {
+        (1, PUBLIC_PATTERN_STATUS_DEPTH) => {
+            Ok(("result_v4_k1_n16_p3_r4_f0_d10", PUBLIC_PATTERN_VERSION))
+        }
+        (2, PUBLIC_PATTERN_STATUS_DEPTH) => {
+            Ok(("result_v4_k2_n16_p3_r4_f0_d10", PUBLIC_PATTERN_VERSION))
+        }
+        _ => Err(reject("unsupported public-pattern capacity bucket")),
+    }
+}
+
+/// Derives the public row triples for pattern zero from query and released rows.
+///
+/// Subject and predicate must be IRIs; the object must be an IRI or literal.
+/// Rows beyond the released count stay zero, matching the circuit's padding check.
+fn public_triples(
+    query: &DisclosureQuery,
+    rows: &[BTreeMap<String, Term>],
+) -> Result<Vec<Vec<String>>, ResultError> {
+    let zero = field_to_hex(&Fr::from(0u64));
+    let mut table = vec![vec![zero; 3]; R];
+    for (r, row) in rows.iter().enumerate() {
+        for (s, slot) in query.patterns[0].iter().enumerate() {
+            let term = match slot {
+                QuerySlot::Constant(t) => t,
+                QuerySlot::Variable(v) => row
+                    .get(v)
+                    .ok_or_else(|| reject("public pattern variable is not released"))?,
+            };
+            let supported = match term {
+                Term::NamedNode(_) => true,
+                Term::Literal(_) => s == 2,
+                _ => false,
+            };
+            if !supported {
+                return Err(reject(
+                    "public triple needs IRI subject and predicate and an IRI or literal object",
+                ));
+            }
+            table[r][s] = field_to_hex(&field(term)?);
+        }
+    }
+    Ok(table)
 }
 
 fn parse_numeric_query(
@@ -451,12 +546,17 @@ fn public_statement(
     policy: &ResultPolicy,
     nonce: &VerifierNonce,
 ) -> Result<PublicStatement, ResultError> {
-    public_statement_for(
-        p.into(),
-        NumericContract::Unsigned(p.integer_capacity),
-        policy,
-        nonce,
-    )
+    // [OPUS-5.5] beadzkp-15.1: dispatch uses only the public version; the
+    // specialized pattern is then re-derived from the query, never the witness.
+    let contract = if p.version == PUBLIC_PATTERN_VERSION {
+        if p.integer_capacity != PrivateIntegerCapacity::TwoDigits {
+            return Err(reject("numeric capacity outside public-pattern contract"));
+        }
+        NumericContract::PublicPattern
+    } else {
+        NumericContract::Unsigned(p.integer_capacity)
+    };
+    public_statement_for(p.into(), contract, policy, nonce)
 }
 
 fn public_statement_for(
@@ -534,7 +634,7 @@ fn public_statement_for(
                     .value(&row[&filter.variable])
                     .ok_or_else(|| {
                         reject(match contract {
-                            NumericContract::Unsigned(_) => {
+                            NumericContract::Unsigned(_) | NumericContract::PublicPattern => {
                                 "public FILTER operand is not a canonical nonnegative integer"
                             }
                             NumericContract::Signed => {
@@ -630,6 +730,9 @@ fn public_statement_for(
             ("filter_ops", json!(ops)),
             ("filter_bounds", json!(bounds)),
         ]);
+    }
+    if matches!(contract, NumericContract::PublicPattern) {
+        fields.push(("public_triples", json!(public_triples(&query, &rows)?)));
     }
     Ok(PublicStatement {
         query,
@@ -773,6 +876,43 @@ pub fn prepare_result_with_options(
     )
 }
 
+// [OPUS-5.5] beadzkp-15.1: explicit opt-in; ResultOptions is unchanged so
+// existing struct literals and default dispatch keep their behavior.
+/// Prepares a version-four result whose first public pattern skips typed openings.
+///
+/// The first pattern in original query order whose slots are all constants or
+/// projected variables moves to index zero, identically for prover and verifier.
+/// The circuit compares that pattern's selected private leaf with a public
+/// per-row triple table derived from the query and released rows. Every
+/// signature, hidden root, salt, status reference, policy path, and leaf
+/// membership check remains; other patterns use the generic relation.
+/// This proves support for released rows only, never completeness.
+/// Research-grade and not externally audited; gate effect is unmeasured.
+///
+/// # Errors
+/// Rejects rather than falling back when no pattern is public, a FILTER is on
+/// a hidden variable, the status policy needs a depth other than 10, or more
+/// than two credentials are needed; otherwise as [`prepare_result`].
+pub fn prepare_result_public_pattern(
+    query: &str,
+    credentials: &[ResultCredential],
+    rows: &[BTreeMap<String, Term>],
+    policy: &ResultPolicy,
+    nonce: &VerifierNonce,
+    options: ResultOptions,
+) -> Result<PreparedResult, ResultError> {
+    prepare_result_contract(
+        query,
+        credentials,
+        rows,
+        policy,
+        nonce,
+        options,
+        NumericProfile::Unsigned,
+        true,
+    )
+}
+
 fn prepare_result_numeric(
     query: &str,
     credentials: &[ResultCredential],
@@ -782,14 +922,53 @@ fn prepare_result_numeric(
     options: ResultOptions,
     profile: NumericProfile,
 ) -> Result<PreparedResult, ResultError> {
+    prepare_result_contract(
+        query,
+        credentials,
+        rows,
+        policy,
+        nonce,
+        options,
+        profile,
+        false,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn prepare_result_contract(
+    query: &str,
+    credentials: &[ResultCredential],
+    rows: &[BTreeMap<String, Term>],
+    policy: &ResultPolicy,
+    nonce: &VerifierNonce,
+    options: ResultOptions,
+    profile: NumericProfile,
+    public_pattern: bool,
+) -> Result<PreparedResult, ResultError> {
     // [GPT-6] Reject the wallet shape before authentication or graph cloning;
     // empty and ineligible credentials still count toward resource admission.
     if credentials.len() > crate::planner::MAX_DISCLOSURE_CREDENTIALS {
         return Err(reject("input credentials exceed disclosure planning limit"));
     }
-    let parsed = parse_numeric_query(query, profile)?;
+    let mut parsed = parse_numeric_query(query, profile)?;
     let entries = policy.entries()?;
     let status_depth = policy.status_depth()?;
+    // [OPUS-5.5] beadzkp-15.1: unsupported opt-in shapes reject before search.
+    if public_pattern {
+        parsed = public_prefix(parsed)?;
+        if parsed
+            .filters
+            .iter()
+            .any(|f| !parsed.projection.contains(&f.variable))
+        {
+            return Err(reject(
+                "public-pattern contract does not support hidden numeric filters",
+            ));
+        }
+        if status_depth != PUBLIC_PATTERN_STATUS_DEPTH {
+            return Err(reject("unsupported public-pattern capacity bucket"));
+        }
+    }
     let eligible: Vec<bool> = credentials
         .iter()
         .map(|c| {
@@ -962,6 +1141,7 @@ fn prepare_result_numeric(
         PrivateIntegerCapacity::TwoDigits
     };
     let contract = match profile {
+        _ if public_pattern => NumericContract::PublicPattern,
         NumericProfile::Unsigned => NumericContract::Unsigned(integer_capacity),
         NumericProfile::Signed => NumericContract::Signed,
     };
@@ -1083,8 +1263,11 @@ fn prepare_result_numeric(
             let triple = &credentials[witness.credential].graph.canonical.triples[witness.leaf];
             for (s, term) in term_parts(triple).into_iter().enumerate() {
                 let (ty, hs) = type_opening(&term)?;
-                selected_types[r][p][s] = ty;
-                selected_hashes[r][p][s] = field_to_hex(&hs);
+                // Version four never opens pattern zero; keep those witnesses zero.
+                if !(public_pattern && p == 0) {
+                    selected_types[r][p][s] = ty;
+                    selected_hashes[r][p][s] = field_to_hex(&hs);
+                }
                 if let QuerySlot::Variable(v) = &statement.query.patterns[p][s] {
                     if let Some(old) = bindings.insert(v.clone(), term.clone()) {
                         if old != term {
@@ -1422,6 +1605,536 @@ mod tests {
         let (_, mut policy, nonce, rows) = fixture();
         policy.trusted_issuers = vec![credentials[0].issuer];
         (credentials, policy, nonce, rows)
+    }
+
+    // [OPUS-5.5] beadzkp-15.1: native version-four statement tests. These do not
+    // prove; real-proof and Noir execution remain pending pinned-toolchain runs.
+    const PUBLIC_NAME_QUERY: &str =
+        "SELECT DISTINCT ?person ?name WHERE { ?person <urn:name> ?name . }";
+    const HIDDEN_JOIN_QUERY: &str = "SELECT DISTINCT ?person WHERE { ?person <urn:age> ?age . ?person <urn:licensed> <urn:yes> . }";
+
+    fn alice_name_rows() -> Vec<BTreeMap<String, Term>> {
+        vec![BTreeMap::from([
+            ("person".into(), Term::NamedNode(iri("urn:alice"))),
+            (
+                "name".into(),
+                Term::Literal(Literal::new_simple_literal("Alice")),
+            ),
+        ])]
+    }
+
+    fn prepare_public(
+        query: &str,
+        credentials: &[ResultCredential],
+        rows: &[BTreeMap<String, Term>],
+        policy: &ResultPolicy,
+        nonce: &VerifierNonce,
+    ) -> Result<PreparedResult, ResultError> {
+        prepare_result_public_pattern(
+            query,
+            credentials,
+            rows,
+            policy,
+            nonce,
+            ResultOptions::default(),
+        )
+    }
+
+    fn statement_bytes(
+        p: &ResultPresentation,
+        policy: &ResultPolicy,
+        nonce: &VerifierNonce,
+    ) -> Result<Vec<u8>, ResultError> {
+        public_bytes(&public_statement(p, policy, nonce)?.fields)
+    }
+
+    #[test]
+    fn public_pattern_constant_and_result_bound_triple_round_trips() {
+        let (credentials, policy, nonce, _) = fixture();
+        let rows = alice_name_rows();
+        let prepared =
+            prepare_public(PUBLIC_NAME_QUERY, &credentials, &rows, &policy, &nonce).unwrap();
+        assert_eq!(prepared.presentation.version, PUBLIC_PATTERN_VERSION);
+        assert_eq!(prepared.package, "result_v4_k1_n16_p3_r4_f0_d10");
+        let statement = public_statement(&prepared.presentation, &policy, &nonce).unwrap();
+        assert_eq!(statement.package, prepared.package);
+        assert_eq!(
+            public_bytes(&statement.fields).unwrap(),
+            prepared.public_inputs
+        );
+        let table = statement.fields.last().unwrap();
+        assert_eq!(table.0, "public_triples");
+        let expected = [
+            Term::NamedNode(iri("urn:alice")),
+            Term::NamedNode(iri("urn:name")),
+            Term::Literal(Literal::new_simple_literal("Alice")),
+        ]
+        .map(|t| json!(field_to_hex(&field(&t).unwrap())));
+        assert_eq!(table.1[0], json!(expected));
+        assert_eq!(table.1[1], json!(vec![field_to_hex(&Fr::from(0u64)); 3]));
+        // Pattern zero's typed openings are never emitted as witnesses.
+        assert!(prepared.toml.contains("selected_types = [[[0,0,0]"));
+    }
+
+    #[test]
+    fn public_pattern_moves_first_eligible_pattern_for_hidden_join_across_two_sources() {
+        let (credentials, policy, nonce, _) = fixture();
+        let rows = vec![BTreeMap::from([(
+            "person".into(),
+            Term::NamedNode(iri("urn:alice")),
+        )])];
+        let prepared =
+            prepare_public(HIDDEN_JOIN_QUERY, &credentials, &rows, &policy, &nonce).unwrap();
+        assert_eq!(prepared.package, "result_v4_k2_n16_p3_r4_f0_d10");
+        assert_eq!(prepared.work.signature_checks, 2);
+        let statement = public_statement(&prepared.presentation, &policy, &nonce).unwrap();
+        assert_eq!(
+            statement.query.patterns[0][1],
+            QuerySlot::Constant(Term::NamedNode(iri("urn:licensed")))
+        );
+        assert_eq!(
+            statement.query.patterns[1][1],
+            QuerySlot::Constant(Term::NamedNode(iri("urn:age")))
+        );
+        assert_eq!(
+            public_bytes(&statement.fields).unwrap(),
+            prepared.public_inputs
+        );
+    }
+
+    #[test]
+    fn public_pattern_statement_rejects_tampering() {
+        let (credentials, policy, nonce, _) = fixture();
+        let rows = alice_name_rows();
+        let prepared =
+            prepare_public(PUBLIC_NAME_QUERY, &credentials, &rows, &policy, &nonce).unwrap();
+        let honest = &prepared.presentation;
+        // Substituted released row: the verifier derives a different public table.
+        let mut result = honest.clone();
+        result.rows[0].insert(
+            "person".into(),
+            DisclosedTerm::Iri {
+                value: "urn:bob".into(),
+            },
+        );
+        assert_ne!(
+            statement_bytes(&result, &policy, &nonce).unwrap(),
+            prepared.public_inputs
+        );
+        // Substituted query constant.
+        let mut query = honest.clone();
+        query.query = "SELECT DISTINCT ?person ?name WHERE { ?person <urn:alias> ?name . }".into();
+        assert_ne!(
+            statement_bytes(&query, &policy, &nonce).unwrap(),
+            prepared.public_inputs
+        );
+        // Legacy version selects a different package and omits the table.
+        let mut legacy = honest.clone();
+        legacy.version = 1;
+        let statement = public_statement(&legacy, &policy, &nonce).unwrap();
+        assert_eq!(statement.package, "result_v1_k1_n16_p3_r4_f0");
+        assert!(statement.fields.iter().all(|(n, _)| *n != "public_triples"));
+        assert_ne!(
+            public_bytes(&statement.fields).unwrap(),
+            prepared.public_inputs
+        );
+        // Unknown versions and a version-four numeric capacity reject.
+        let mut unknown = honest.clone();
+        unknown.version = 3;
+        assert!(public_statement(&unknown, &policy, &nonce).is_err());
+        let mut wide = honest.clone();
+        wide.integer_capacity = PrivateIntegerCapacity::FullU64;
+        assert!(public_statement(&wide, &policy, &nonce).is_err());
+        // Two issuer slots select the K2 package, never the prover's K1 bytes.
+        let mut slots = honest.clone();
+        slots.issuer_slots = {
+            let mut keys: Vec<_> = credentials
+                .iter()
+                .map(|c| sig::public_key_to_hex(&c.issuer))
+                .collect();
+            keys.sort();
+            keys
+        };
+        let statement = public_statement(&slots, &policy, &nonce).unwrap();
+        assert_eq!(statement.package, "result_v4_k2_n16_p3_r4_f0_d10");
+    }
+
+    #[test]
+    fn public_pattern_rejects_absent_revoked_and_untrusted_support() {
+        let (credentials, policy, nonce, _) = fixture();
+        let absent = vec![BTreeMap::from([
+            ("person".into(), Term::NamedNode(iri("urn:carol"))),
+            (
+                "name".into(),
+                Term::Literal(Literal::new_simple_literal("Carol")),
+            ),
+        ])];
+        assert!(prepare_public(PUBLIC_NAME_QUERY, &credentials, &absent, &policy, &nonce).is_err());
+        let rows = alice_name_rows();
+        let mut revoked = policy.clone();
+        revoked.snapshots[0].bits = vec![0xff; 128];
+        assert!(prepare_public(PUBLIC_NAME_QUERY, &credentials, &rows, &revoked, &nonce).is_err());
+        let mut untrusted = policy.clone();
+        untrusted.trusted_issuers = vec![credentials[1].issuer];
+        assert!(
+            prepare_public(PUBLIC_NAME_QUERY, &credentials, &rows, &untrusted, &nonce).is_err()
+        );
+    }
+
+    #[test]
+    fn public_pattern_rejects_unsupported_profiles_without_fallback() {
+        let (credentials, policy, nonce, rows) = fixture();
+        let none = prepare_public(QUERY, &credentials, &rows, &policy, &nonce)
+            .err()
+            .unwrap();
+        assert!(none.to_string().contains("constant-or-projected pattern"));
+        let hidden_filter = "SELECT DISTINCT ?person ?name WHERE { ?person <urn:name> ?name . ?person <urn:age> ?age . FILTER(?age >= 18) }";
+        let err = prepare_public(
+            hidden_filter,
+            &credentials,
+            &alice_name_rows(),
+            &policy,
+            &nonce,
+        )
+        .err()
+        .unwrap();
+        assert!(err.to_string().contains("hidden numeric filters"));
+        let mut deep = policy.clone();
+        deep.snapshots[0].bits = vec![0; 129];
+        let err = prepare_public(
+            PUBLIC_NAME_QUERY,
+            &credentials,
+            &alice_name_rows(),
+            &deep,
+            &nonce,
+        )
+        .err()
+        .unwrap();
+        assert!(err.to_string().contains("public-pattern capacity bucket"));
+    }
+
+    #[test]
+    fn public_triple_table_rejects_literal_subject_and_predicate() {
+        let literal = Term::Literal(Literal::new_simple_literal("x"));
+        let rows = vec![BTreeMap::new()];
+        for slot in 0..2 {
+            let mut pattern = [
+                QuerySlot::Constant(Term::NamedNode(iri("urn:s"))),
+                QuerySlot::Constant(Term::NamedNode(iri("urn:p"))),
+                QuerySlot::Constant(Term::NamedNode(iri("urn:o"))),
+            ];
+            pattern[slot] = QuerySlot::Constant(literal.clone());
+            let query = DisclosureQuery {
+                kind: QueryKind::SelectDistinct,
+                projection: Vec::new(),
+                patterns: vec![pattern],
+                filters: Vec::new(),
+            };
+            assert!(public_triples(&query, &rows).is_err());
+        }
+        let blank = DisclosureQuery {
+            kind: QueryKind::SelectDistinct,
+            projection: vec!["o".into()],
+            patterns: vec![[
+                QuerySlot::Constant(Term::NamedNode(iri("urn:s"))),
+                QuerySlot::Constant(Term::NamedNode(iri("urn:p"))),
+                QuerySlot::Variable("o".into()),
+            ]],
+            filters: Vec::new(),
+        };
+        let blank_rows = vec![BTreeMap::from([(
+            "o".into(),
+            Term::BlankNode(oxrdf::BlankNode::default()),
+        )])];
+        assert!(public_triples(&blank, &blank_rows).is_err());
+        // A released row missing the public variable is malformed.
+        assert!(public_triples(&blank, &[BTreeMap::new()]).is_err());
+    }
+
+    #[test]
+    fn default_dispatch_is_unchanged_for_public_pattern_queries() {
+        let (credentials, policy, nonce, _) = fixture();
+        let rows = alice_name_rows();
+        let prepared =
+            prepare_result(PUBLIC_NAME_QUERY, &credentials, &rows, &policy, &nonce).unwrap();
+        assert_eq!(prepared.presentation.version, 1);
+        assert_eq!(prepared.package, "result_v1_k1_n16_p3_r4_f0");
+        let statement = public_statement(&prepared.presentation, &policy, &nonce).unwrap();
+        assert!(statement.fields.iter().all(|(n, _)| *n != "public_triples"));
+        assert_eq!(statement.query.patterns.len(), 1);
+    }
+
+    /// Creates the explicitly supplied, new, owner-only evidence directory.
+    fn public_pattern_evidence_dir() -> std::path::PathBuf {
+        let dir = std::path::PathBuf::from(
+            std::env::var_os("SPARQ_PUBLIC_PATTERN_EVIDENCE")
+                .expect("SPARQ_PUBLIC_PATTERN_EVIDENCE must name a new absolute directory"),
+        );
+        assert!(dir.is_absolute(), "evidence directory must be absolute");
+        // [OPUS-5.5] zkp-15.1.2: location-only containment check. The manifest
+        // directory is canonicalized FIRST and the checkout root is then taken
+        // as two parents of that resolved path, matching the former
+        // `join("../..").canonicalize()`: a symlinked `crates/<crate>` resolves
+        // to its real checkout rather than the apparent one. Only path metadata
+        // is resolved; nothing beneath the checkout is ever read.
+        let manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .canonicalize()
+            .expect("crate manifest dir must resolve");
+        let checkout = manifest
+            .ancestors()
+            .nth(2)
+            .expect("resolved manifest dir has two ancestors");
+        let parent = dir
+            .parent()
+            .and_then(|p| p.canonicalize().ok())
+            .expect("evidence parent must exist");
+        assert!(
+            !parent.starts_with(checkout),
+            "evidence must live outside the checkout"
+        );
+        let mut builder = std::fs::DirBuilder::new();
+        #[cfg(unix)]
+        std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+        builder
+            .create(&dir)
+            .expect("evidence directory must not preexist");
+        dir
+    }
+
+    fn write_owner_only(path: &Path, bytes: &[u8]) {
+        use std::io::Write;
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+        options.open(path).unwrap().write_all(bytes).unwrap();
+    }
+
+    /// [OPUS-5.5] beadzkp-15.1: genuine version-four K1 and K2 proofs with verifier controls.
+    ///
+    /// Synthetic fixture only; this is not production-store certification. Public
+    /// evidence is retained only after every assertion passes.
+    #[test]
+    #[ignore = "requires pinned nargo and bb plus a new SPARQ_PUBLIC_PATTERN_EVIDENCE directory"]
+    fn result_real_public_pattern_k1_k2_proofs_and_verifier_controls() {
+        pinned_toolchain().unwrap();
+        let evidence = public_pattern_evidence_dir();
+        let (credentials, policy, nonce, _) = fixture();
+        let join_rows = vec![BTreeMap::from([(
+            "person".into(),
+            Term::NamedNode(iri("urn:alice")),
+        )])];
+        let fresh_nonce = VerifierNonce::from_field(Fr::from(999_999u64));
+        let mut revoked = policy.clone();
+        revoked.snapshots[0].bits[0] |= 1 << 3;
+        let driver = CircuitProver::from_crate_root();
+        let dir = std::env::temp_dir().join(format!("sparq_result_public_{}", std::process::id()));
+        let mut retained = Vec::new();
+        for (name, query, alt_query, rows, package) in [
+            (
+                "k1_public_name",
+                PUBLIC_NAME_QUERY,
+                "SELECT DISTINCT ?person ?name WHERE { ?person <urn:alias> ?name . }",
+                alice_name_rows(),
+                "result_v4_k1_n16_p3_r4_f0_d10",
+            ),
+            (
+                "k2_hidden_join",
+                HIDDEN_JOIN_QUERY,
+                "SELECT DISTINCT ?person WHERE { ?person <urn:name> ?age . ?person <urn:licensed> <urn:yes> . }",
+                join_rows,
+                "result_v4_k2_n16_p3_r4_f0_d10",
+            ),
+        ] {
+            let prepared = prepare_public(query, &credentials, &rows, &policy, &nonce).unwrap();
+            assert_eq!(prepared.package, package);
+            let p = prepared.prove(&driver, &dir.join(name), name).unwrap();
+            assert_eq!(p.version, PUBLIC_PATTERN_VERSION);
+            // Verifier-side reconstruction from the query, rows, policy, and nonce alone.
+            let public_inputs = statement_bytes(&p, &policy, &nonce).unwrap();
+            assert_eq!(public_inputs, prepared.public_inputs);
+            let seen = InMemorySeenNonces::default();
+            let work = dir.join(name);
+            let verified =
+                verify_result(query, &p, &policy, &nonce, &seen, &driver, &work).unwrap();
+            assert_eq!(verified.rows, rows);
+            let replay = verify_result(query, &p, &policy, &nonce, &seen, &driver, &work);
+            assert!(
+                matches!(replay, Err(ResultError::Rejected(ref s)) if s == "challenge already consumed")
+            );
+            let mut controls =
+                vec![json!({"kind": "nonce_replay", "error": "challenge already consumed"})];
+            for kind in ["nonce", "query", "result", "version", "capacity", "policy"] {
+                let mut altered = p.clone();
+                let (mut q, mut pol, mut n) = (query, &policy, &nonce);
+                match kind {
+                    // Both envelope and verifier nonce change; only the proof binds the old one.
+                    "nonce" => {
+                        altered.challenge = fresh_nonce.as_field_hex();
+                        n = &fresh_nonce;
+                    }
+                    "query" => {
+                        altered.query = alt_query.into();
+                        q = alt_query;
+                    }
+                    "result" => {
+                        altered.rows[0].insert(
+                            "person".into(),
+                            DisclosedTerm::Iri {
+                                value: "urn:bob".into(),
+                            },
+                        );
+                    }
+                    "version" => altered.version = 1,
+                    "capacity" => {
+                        if altered.issuer_slots.len() == 1 {
+                            altered.issuer_slots.push(altered.issuer_slots[0].clone());
+                        } else {
+                            altered.issuer_slots.pop();
+                        }
+                    }
+                    "policy" => pol = &revoked,
+                    _ => unreachable!(),
+                }
+                // A fresh nonce store per control, so replay cannot mask the intended check.
+                let Err(ResultError::Rejected(reason)) = verify_result(
+                    q,
+                    &altered,
+                    pol,
+                    n,
+                    &InMemorySeenNonces::default(),
+                    &driver,
+                    &work.join(kind),
+                ) else {
+                    panic!("{name}: {kind} substitution was not a typed verifier rejection");
+                };
+                controls.push(json!({"kind": kind, "error": reason}));
+            }
+            let expected_rows: Vec<BTreeMap<_, _>> = rows
+                .iter()
+                .map(|r| r.iter().map(|(k, t)| (k.clone(), t.to_string())).collect())
+                .collect();
+            let presentation = serde_json::to_vec_pretty(&p).unwrap();
+            retained.push((
+                name,
+                package,
+                presentation,
+                public_inputs,
+                expected_rows,
+                controls,
+            ));
+        }
+        let mut cases = Vec::new();
+        for (name, package, presentation, public_inputs, expected_rows, controls) in retained {
+            let presentation_file = format!("{name}.presentation.json");
+            let inputs_file = format!("{name}.public-inputs.bin");
+            write_owner_only(&evidence.join(&presentation_file), &presentation);
+            write_owner_only(&evidence.join(&inputs_file), &public_inputs);
+            cases.push(json!({
+                "name": name,
+                "package": package,
+                "presentation": presentation_file,
+                "reconstructed_public_inputs": inputs_file,
+                "expected_rows": expected_rows,
+                "controls": controls,
+            }));
+        }
+        // Written last: its presence means every assertion above passed.
+        let summary = json!({
+            "schema": "sparq.public-pattern-evidence.v1",
+            "scope": "synthetic fixture; two genuine version-four proofs; not production-store certification",
+            "all_passed": true,
+            "cases": cases,
+        });
+        write_owner_only(
+            &evidence.join("summary.json"),
+            &serde_json::to_vec_pretty(&summary).unwrap(),
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// [OPUS-5.5] beadzkp-15.1: version-four witness mutations reach their intended constraints.
+    #[test]
+    #[ignore = "requires pinned nargo; version-four constraint execution"]
+    fn result_relation_public_pattern_rejects_tampered_retained_witnesses() {
+        pinned_toolchain().unwrap();
+        let (credentials, policy, nonce, _) = fixture();
+        let rows = vec![BTreeMap::from([(
+            "person".into(),
+            Term::NamedNode(iri("urn:alice")),
+        )])];
+        let p = prepare_public(HIDDEN_JOIN_QUERY, &credentials, &rows, &policy, &nonce).unwrap();
+        assert_eq!(p.package, "result_v4_k2_n16_p3_r4_f0_d10");
+        let age = public_statement(&p.presentation, &policy, &nonce)
+            .unwrap()
+            .vars
+            .iter()
+            .position(|v| v == "age")
+            .unwrap();
+        let bob = json!(field_to_hex(
+            &field(&Term::NamedNode(iri("urn:bob"))).unwrap()
+        ));
+        let driver = CircuitProver::from_crate_root();
+        driver
+            .private_package_witness(p.package, &p.toml, "public_pattern_baseline")
+            .unwrap();
+        // Positive control, not an attack: pattern zero's typed openings are
+        // intentionally elided, so changing them leaves the witness valid.
+        let elided = alter_input(&p.toml, "selected_types", |v| v[0][0] = json!([2, 2, 2]));
+        let elided = alter_input(&elided, "selected_hashes", |v| v[0][0][0] = json!("0x01"));
+        driver
+            .private_package_witness(p.package, &elided, "public_pattern_elided_opening")
+            .unwrap();
+        for (name, expected, inputs) in [
+            (
+                "public_binding",
+                "public triple mismatch",
+                alter_input(&p.toml, "public_triples", |v| v[0][0] = bob.clone()),
+            ),
+            (
+                "active_padding_leaf",
+                "selected padding leaf",
+                alter_input(&p.toml, "selected_leaves", |v| v[0][0] = json!(15)),
+            ),
+            (
+                "inactive_table_padding",
+                "noncanonical public triple padding",
+                alter_input(&p.toml, "public_triples", |v| v[1][0] = json!("0x01")),
+            ),
+            // Pattern one keeps its typed opening; swapping IRI/literal type rejects.
+            (
+                "remaining_type_opening",
+                "selected term type opening mismatch",
+                alter_input(&p.toml, "selected_types", |v| {
+                    v[0][1][2] = json!(3 - v[0][1][2].as_u64().unwrap())
+                }),
+            ),
+            (
+                "hidden_joined_binding",
+                "joined variable mismatch",
+                alter_input(&p.toml, "values", |v| v[0][age] = json!("0x01")),
+            ),
+            (
+                "signature",
+                "schnorr verification equation failed",
+                alter_input(&p.toml, "signatures", |v| v[0][2] = json!("0x01")),
+            ),
+            // The status reference is inside the signed message.
+            (
+                "signed_status_reference",
+                "challenge reduction not bound to its preimage",
+                alter_input(&p.toml, "status_indices", |v| v[0] = json!("0x05")),
+            ),
+        ] {
+            match driver.private_package_witness(p.package, &inputs, name) {
+                Err(DriverError::Tool { tool, stderr }) => assert!(
+                    tool.starts_with("nargo") && stderr.contains(expected),
+                    "{name}: expected `{expected}`, got `{tool}`:\n{stderr}"
+                ),
+                Err(other) => panic!("{name}: infrastructure failure, not a constraint: {other}"),
+                Ok(_) => panic!("{name}: tampered witness satisfied the relation"),
+            }
+        }
     }
 
     #[test]

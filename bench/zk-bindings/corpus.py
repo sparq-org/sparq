@@ -4,7 +4,10 @@ import itertools
 import json
 from pathlib import Path
 
-BACKENDS = ("noir_unsigned", "noir_signed", "native_rdf", "exact_v1", "exact_v2", "exact_v3")
+BACKENDS = ("noir_unsigned", "noir_signed", "native_rdf", "exact_v1", "exact_v2", "exact_v3",
+            "noir_public_pattern")
+# [OPUS-5.5] beadzkp-15.1.1: explicit V4 cells reuse the same Noir job shapes.
+NOIR_BACKENDS = ("noir_unsigned", "noir_signed", "noir_public_pattern")
 NODES = ("<urn:a>", "<urn:b>")
 CANDIDATES = (*NODES, "<urn:missing>")
 PREDICATE = "<urn:p>"
@@ -278,7 +281,7 @@ def jobs_for(case, backend, tier):
             "variables": [], "rows": [], "expected_accept": not rejected}
     candidates = []
     if case["template"] == "noir_witness_attack":
-        if backend not in ("noir_unsigned", "noir_signed") or tier == "native":
+        if backend not in NOIR_BACKENDS or tier == "native":
             return [], {"case_id":case["id"], "backend":backend, "status":"requires_adapter",
                         "reason":"This concrete private-witness mutation is implemented only by the Noir constraint adapter."}
         expected = case["expected"]["Select"]

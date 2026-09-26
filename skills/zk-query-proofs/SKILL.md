@@ -447,6 +447,47 @@ keys in the toolchain suite. Expanded v2 tiny and predicate-free profiles have
 representative genuine-proof checks in addition to wrapper execution coverage;
 see the successful-result reference for evidence and scope.
 
+[OPUS-5.5] Opt-in `result::prepare_result_public_pattern` (unchanged
+`ResultOptions`) emits version 4 (`PUBLIC_PATTERN_VERSION`): the first
+all-constant-or-projected pattern is checked against a verifier-derived public
+triple table instead of private typed openings. `verify_result` recognizes it;
+default dispatch is unchanged. The pattern moves to index zero identically in
+prover and verifier, and the `public_triples` table is appended last to the
+`result_v4_k{1,2}_n16_p3_r4_f0_d10` public ABI. Signatures, hidden roots, salts,
+status references, policy paths and leaf membership stay in-circuit. Remaining
+patterns keep the generic typed and shared-variable checks. The verifier
+rebuilds the pattern, table, package and byte order from its query, released rows,
+issuer-slot count and policy. Public subjects and predicates must be IRIs, and
+objects must be IRIs or literals. Dispatch never uses the witness choice or count.
+Only F0 (no FILTER on a hidden variable), status depth 10 and K1/K2 are
+supported; no public pattern or any other profile rejects without fallback. It
+proves support for the selected rows only, not completeness. Research-grade, not
+externally audited; no runtime saving is claimed.
+[OPUS-5.5] Checked-in static evidence for both members, from one independent
+non-canonical Linux x86_64 work-box run at source `14d426bd`: `bb gates` circuit
+sizes in the [gate snapshot](../../crates/sparq-zk-compose/tests/gate_count_snapshot.json),
+plus ACIR, ABI and source-bound tool provenance in
+[`result_public_gates.json`](../../bench/zk-compose/result_public_gates.json).
+`bench/zk-compose/scripts/verify_result_evidence.py` checks these records
+against the snapshots and the shared Noir source inventory. The refreshed legacy
+inventories stay value-identical, and legacy keys are compared byte-for-byte by
+test with no key files retained. Static counts are not a runtime or security
+audit. In that run the ignored toolchain tests
+`result_real_public_pattern_k1_k2_proofs_and_verifier_controls` (one genuine K1
+and one K2 proof, each with typed verifier-rejection controls) and
+`result_relation_public_pattern_rejects_tampered_retained_witnesses` passed. Their
+proof outputs are not retained in the repository (that run's evidence bundle has
+SHA-256 `a1944e1c49692b360155fc725ad8800b33ebe7a5ef09de8afdfd68ae63b81fbb`), so
+future CI replays are still required.
+[OPUS-5.5] The [binding corpus](../../bench/zk-bindings/README.md) registers an
+explicit `noir_public_pattern` backend over its existing finite domain; it never
+substitutes version 1 or signed members. A separate non-canonical EC2 run at
+corpus source `2e0f4a9dba47d537835b4745c66147f097c68e43` executed all 576 native cells (72 accepted, 468 support
+refusals, 36 empty-graph refusals) and all 46 real cells (4 genuine K1 proofs,
+32 absent-binding and 10 private-witness-attack constraint failures). That run is
+distinct from the `14d426bd` measurements above, is not a hosted CI run, and makes
+no gate, runtime or security claim; see the corpus README for its controls and hashes.
+
 [GPT-6] `result::signed` exposes separately versioned canonical signed-integer
 preparation and verification, with a fixed capacity and no public sign/length
 selector. See the [signed result contract](references/signed-results.md) for its

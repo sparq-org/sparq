@@ -11,11 +11,26 @@ Every number below is the `circuit_size` reported by `bb gates -s ultra_honk`, *
 - **A size, not a time.** No wall-clock figure appears here. Prove/verify timings are machine-dependent; only canonical runs may carry them.
 - **A size, not a coverage claim.** What each circuit *proves* is `site/specs/zksparql.typ` §7.1 and `sparql_feature_catalog.json`. The `path_reach` family proves a **bounded-existence** statement — there exists a chain of at most `d` committed triples, `d` public — which is strictly weaker than the SPARQL property path, whatever its gate count.
 - **A size, not a security claim.** The estate is internally re-audited but **not externally audited** (open gate `sq-qhy4`); the forge suite is toolchain-gated (`sq-1gir`); the value lane carries the documented INV-VL / CR-G8 downgrade. Nothing here asserts a soundness, privacy, or zero-knowledge property.
-- **No third-party figure is reproduced.** See [Related work](#related-work-cited-never-re-measured).
+- **No third-party figure is reproduced.** See [Related work](#related-work--cited-never-re-measured).
 
 Toolchain baselined for these counts: `bb 5.0.0-nightly.20260324`, `nargo 1.0.0-beta.21` (regression tolerance 3.0%).
 
 ## Successful-result circuits (released mapping support)
+
+### `result_v4`
+
+Version 4 support for released SELECT DISTINCT mappings. The first BGP pattern whose slots are all constants or projected variables is moved to index zero and checked against a public triple table the verifier reconstructs from its query and the released rows, instead of private typed openings. Issuer authentication, credential status (tree depth d), leaf membership and the remaining patterns' private typed and shared-variable joins stay in-circuit. f=0 only: no private FILTER. Compiled only for k in {1, 2}, n=16, p=3, r=4, d=10. Does not establish result completeness or holder identity.
+
+| member | parameters | `circuit_size` |
+| --- | --- | --- |
+| `result_v4_k1_n16_p3_r4_f0_d10` | k=1, n=16, p=3, r=4, f=0, d=10 | 31,209 |
+| `result_v4_k2_n16_p3_r4_f0_d10` | k=2, n=16, p=3, r=4, f=0, d=10 | 58,022 |
+
+Scaling — pairs differing in exactly one parameter:
+
+| parameter | from | to | held fixed | Δ gates | ratio |
+| --- | --- | --- | --- | --- | --- |
+| `k` | 1 (31,209) | 2 (58,022) | n=16, p=3, r=4, f=0, d=10 | +26,813 | 1.8591 |
 
 ### `result_v3`
 
@@ -380,4 +395,4 @@ bench/zk-compose/scripts/constraint_pack.py --write
 bench/zk-compose/scripts/constraint_pack.py --check
 ```
 
-Coverage: 67 of 67 snapshot members across 17 families, 76 single-parameter scaling pairs, 3 invariance facts. The generator **fails** on a snapshot member it cannot classify, so a new circuit family cannot silently drop out of this evaluation.
+Coverage: 69 of 69 snapshot members across 18 families, 77 single-parameter scaling pairs, 3 invariance facts. The generator **fails** on a snapshot member it cannot classify, so a new circuit family cannot silently drop out of this evaluation.
