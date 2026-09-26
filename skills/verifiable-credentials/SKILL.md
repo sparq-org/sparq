@@ -136,9 +136,42 @@ config first, per the spec). Consequences you can rely on:
   Proofs signed by earlier releases (`sec:created`, plain `cryptosuite` literal) **no
   longer verify** — there is no legacy fallback; re-sign them.
 - **Typed subset only.** `ProofConfig` carries type, cryptosuite, verificationMethod,
-  proofPurpose, created, domain and challenge; other proof options/`@context` are not
-  preserved, and field values (`created`, IRIs, purpose) are not fully validated.
-  Issuer/controller authorization and credential status are not checked.
+  proofPurpose, created, domain and challenge. Unknown JSON-LD proof options and
+  `@context` mappings are not representable, so a caller mapping a JSON-LD `proof`
+  node must reject what this subset cannot carry — nothing here validates JSON.
+
+## Proof-option validation (runs first)
+
+[OPUS-5.5] `sign`, `sign_graph`, `verify` and `verify_graph` all run
+`ProofConfig::validate` **before** graph materialization, RDFC-1.0 canonicalization,
+signing or DID resolution, and fail with `VcError::InvalidProofOption(ProofOptionError)`:
+
+- **`verification_method`** — must be an absolute IRI (oxrdf/RFC 3987); hashed verbatim.
+- **`proof_purpose`** — one of `SUPPORTED_PURPOSE_TERMS` (`assertionMethod`,
+  `authentication`, `capabilityInvocation`, `capabilityDelegation`, `keyAgreement`),
+  hashed as `https://w3id.org/security#<term>`; or, if it contains `:`, an absolute
+  IRI hashed verbatim (never appended to `sec:`). Other bare terms are rejected;
+  compact IRIs like `sec:assertionMethod` are not expanded — pass the full IRI.
+  Proofs that earlier releases made with an absolute-IRI purpose no longer verify.
+- **`created`** — an XSD 1.1 `xsd:dateTime` (vc-di-eddsa §3.3.5 requires rejecting
+  invalid values): year `0000` (leap) and negative years, `24:00:00` with a zero
+  fraction, any number of fraction digits, optional timezone within `±14:00`, real
+  calendar dates. Signed exactly as written — never normalized, no whitespace trimming.
+  The Data Integrity core's `dateTimeStamp` (timezone-required) profile is **not** enforced.
+
+```rust
+use sparq_vc::{ProofConfig, ProofOptionError};
+
+let vm = "did:key:z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2";
+assert!(ProofConfig::new(vm).with_created("-0004-02-29T24:00:00Z").validate().is_ok());
+let bad = ProofConfig::new(vm).with_created("2023-02-29T00:00:00Z");
+assert!(matches!(bad.validate(), Err(ProofOptionError::Created { .. })));
+```
+
+Validation is **lexical only**. A successful `verify` is a signature check: it does
+not establish that the key is authorized for the purpose (issuer/controller
+authorization), nor that purpose, `domain`, `challenge` or `created` match what you
+expect, nor credential status. Check those yourself on `VerifiedProof::config`.
 
 ## See also
 

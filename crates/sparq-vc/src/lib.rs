@@ -60,8 +60,23 @@
 //!   the published [vc-di-eddsa test vectors]; the published `proofValue` is
 //!   regression-tested. Proofs from earlier releases (`sec:created`, plain
 //!   `cryptosuite` literal) no longer verify — no legacy fallback; re-sign them.
-//!   Only [`ProofConfig`]'s typed fields are represented, their values are not
-//!   fully validated, and issuer authorization / credential status are not checked.
+//! - **Proof options are validated first.** [OPUS-5.5] zkp-14.3: [`sign`],
+//!   [`verify`] and the graph wrappers run [`ProofConfig::validate`] before any
+//!   graph materialization, canonicalization, signing or DID resolution, failing
+//!   with [`VcError::InvalidProofOption`]: `verificationMethod` must be an
+//!   absolute IRI, `proofPurpose` one of [`SUPPORTED_PURPOSE_TERMS`] or an
+//!   absolute IRI (hashed verbatim), and `created` an XSD 1.1 `xsd:dateTime`
+//!   (hashed exactly as given). A config that passes and uses a compact purpose
+//!   term hashes exactly as before, so its signature bytes are unchanged.
+//!   **Incompatibility:** earlier releases appended *any* purpose to `sec:`, so
+//!   proofs they made with an absolute-IRI purpose no longer verify, and
+//!   other bare purpose terms are now rejected. This is lexical validation only.
+//! - **Not checked by this signature-only API:** issuer/controller key
+//!   authorization, the expected purpose, `domain`, `challenge` or `created`
+//!   window, and credential status — enforce them on [`VerifiedProof::config`].
+//!   Only [`ProofConfig`]'s typed fields are representable; a caller mapping a
+//!   JSON-LD `proof` node must itself reject proof options and `@context`
+//!   mappings outside that subset.
 //!
 //! [vc-di-eddsa test vectors]: https://www.w3.org/TR/vc-di-eddsa/#test-vectors
 //! - **DID methods:** `did:key` (offline, self-certifying) by default; `did:web`
@@ -110,9 +125,11 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 pub mod did;
+mod proof_options;
 mod suite;
 
+pub use proof_options::{ProofOptionError, SUPPORTED_PURPOSE_TERMS};
 pub use suite::{
-    sign, sign_graph, verify, verify_graph, DataIntegrityProof, ProofConfig, SigningKey, VcError,
-    VerifiedProof, VerifyingKey, CRYPTOSUITE, PROOF_TYPE,
+    CRYPTOSUITE, DataIntegrityProof, PROOF_TYPE, ProofConfig, SigningKey, VcError, VerifiedProof,
+    VerifyingKey, sign, sign_graph, verify, verify_graph,
 };
