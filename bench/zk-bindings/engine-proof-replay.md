@@ -364,22 +364,43 @@ bounded error chain (16 entries, 64 KiB each), a mutated-witness digest and
 check passes. It records zero new proofs and `guest_abort_observed: true`. This
 is an observed guest execution rejection, not a negative cryptographic proof.
 
-## Execution status
+## Evidence interpretation
 
-The native gate for the adapter at commit `ee23a415a` passed on a remote runner.
-It covered the `engine_replay` model tests, the `convert_turtle` doctest, an
-anchor mutation check and scoped clippy. The coordinator's generated validation
-evidence for that commit is the record; this page does not copy its counts.
-The `engine_replay_setup` example was added afterwards and has not been compiled
-or run. Neither has the ignored test's evidence persistence, nor its native
-`job_requires_a_new_output_directory_and_rejects_unknown_fields` and
-`output_directory_must_be_new_owner_only_and_outside_checkout_and_replay`
-tests. Host/guest compilation at that commit is a separate gate and is not
-recorded here. Executed real proofs: zero. Configured but unexecuted: two genuine
-receipts plus one expected guest abort in the ignored test, and one receipt per
-real-mode CLI invocation. The omission test and its native
-`only_the_exact_known_guest_abort_counts_as_relation_rejection` regression have
-not been compiled or run.
+[OPUS-5.5] This page, the examples and the tests only configure experiments.
+They are not evidence that any experiment ran, and this page records no run
+results. Current review and evaluation context lives in
+[PR #6579](https://github.com/sparq-org/sparq/pull/6579), not here.
+
+An accepted or rejected count is evidence only when it comes with all of the
+following:
+
+- the exact source commit that was built and run;
+- the guest artifact and an `ArtifactPin` accepted through a trusted channel,
+  never derived from the offered artifact;
+- the test or CLI log of that run;
+- the completed evidence summary (`summary.json` or `status.json`) that the run
+  wrote; and
+- the retained output directory whose file digests that summary records.
+
+A partial or failed run is still evidence of what it reached. Keep its output
+directory and diagnostics, and report it as incomplete. Do not rerun it into a
+fresh directory and cite only the success.
+
+Keep three outcomes separate:
+
+1. **Baseline execution.** A valid witness executes, halts and gives the native
+   journal and expected result. This shows no proof and no rejection.
+2. **Proof acceptance.** A genuine Succinct receipt passes independent
+   verification against the verifier's request. Count only receipts that a
+   completed summary records as verified.
+3. **Observed guest rejection.** A mutated witness makes the guest abort with the
+   exact relation-rejection text in the SDK error chain. This is not a negative
+   cryptographic proof. A generic host error such as `real local proof failed`
+   cannot tell a guest abort from an infrastructure failure, so it certifies no
+   rejection.
+
+Draw no conclusion from an ignored test that was not run, a test that was only
+compiled, a skipped control or a generic error.
 
 ## Known limitations
 
