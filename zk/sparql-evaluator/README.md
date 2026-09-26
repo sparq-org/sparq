@@ -290,3 +290,22 @@ the omission check have passed. The summary does not certify a guest abort,
 because the host's proof error is generic. The adapter's native gate has passed
 (see the bridge page's execution status). No proof or verification result for
 this bridge has been recorded yet.
+
+## vcq query-method adapter
+
+[OPUS-5.5] The optional `vcq` feature (off by default; `cargo test -p
+sparq-proved-evaluator --features vcq`) adds `vcq::Risc0ExactV3`, a
+`sparq-query-protocol` `QueryMethod` over the V3 relation. It uses
+`v3::prove_with_artifact` and the existing checked V3 verification with an
+independently approved `ArtifactPin` and `AcceptedGuest`. It supports bag
+SELECT, boolean ASK and CONSTRUCT graphs, holder-declared and verifier-agreed
+authority, and the fixed default V3 policy only. SELECT sequences, DESCRIBE,
+explicit base IRIs, issuer authentication, status and holder binding are
+rejected. The V3 nonce is derived from the `local-struct-v1` stored request and
+selected descriptor. The actual query form is checked by the host-only
+`v3::query_shape` helper. Result checks run on the verified journal before the
+original challenge is consumed once through the shared store. The existing
+public verify APIs keep their behavior. Only native tests exist; no genuine
+receipt has been verified through the adapter, and the registry keeps
+`adapter_available: false`. See
+[the adapter reference](../../skills/zk-query-proofs/references/vcq-exact-adapter.md).

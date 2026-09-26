@@ -6,10 +6,11 @@ holds the typed negotiation and method contract of the
 [VC query protocol draft](../../../research/vc-query-protocol.md) (§5 to §7), a validated stored
 request subset, a named LOCAL structural encoding and a shared challenge-store contract. It has
 **no proof backend, interoperable wire encoding, transport, parser, hash or other cryptography,
-proves no cryptographic claim**, and is not externally audited (sq-qhy4). No crate depends on it, and every entry in the
+proves no cryptographic claim**, and is not externally audited (sq-qhy4). Every entry in the
 [method registry](../../../research/vc-query-methods.json) keeps `adapter_available: false`.
 The crate registers no method. See the [crate README](../../../crates/sparq-query-protocol/README.md)
-for the full rule list.
+for the full rule list. [OPUS-5.5] Its only consumer is the optional, off-by-default `vcq`
+feature of the detached exact-evaluator host crate; see [vcq exact adapter](vcq-exact-adapter.md).
 
 ## API
 

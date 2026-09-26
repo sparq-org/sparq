@@ -6,7 +6,7 @@ use sparq_proved_evaluator_methods::{SPARQ_EXACT_GUEST_ELF, SPARQ_EXACT_GUEST_ID
 use sparq_proved_evaluator_model::v3::{
     Journal, Request, Witness, bind_journal, dataset_commitment, validate_request,
 };
-use std::path::Path;
+use std::{convert::Infallible, path::Path};
 
 /// Proves a complete V3 dataset using the locally embedded guest.
 ///
@@ -97,9 +97,56 @@ fn verify_program(
     nonces: &mut impl Nonces,
     image_id: [u32; 8],
 ) -> Result<Journal, Error> {
-    let journal = checked_journal(presentation, expected, image_id)?;
-    if !nonces.consume(expected.nonce)? {
-        return Err(Error("challenge already consumed"));
+    // [OPUS-5.5] The public APIs run no extra check; behavior is unchanged.
+    let no_check = |_: &Journal| Ok::<(), Infallible>(());
+    match verify_checked_program(presentation, expected, nonces, image_id, no_check) {
+        Ok((journal, ())) => Ok(journal),
+        Err(CheckedFailure::Verification(error)) => Err(error),
+        Err(CheckedFailure::Check(never)) => match never {},
     }
-    Ok(journal)
+}
+
+/// [OPUS-5.5] Failure of a checked V3 verification.
+pub(crate) enum CheckedFailure<E> {
+    /// Receipt, request binding or nonce consumption failed.
+    Verification(Error),
+    /// The caller's check rejected the verified, request-bound journal.
+    Check(E),
+}
+
+/// [OPUS-5.5] Verifies like [`verify_with_artifact`], plus a caller check.
+///
+/// `check` sees the journal only after Succinct receipt verification, journal
+/// decoding and independent request binding, and runs BEFORE `nonces` is
+/// called. A rejected check therefore never consumes the challenge.
+#[cfg(feature = "vcq")]
+pub(crate) fn verify_checked_with_artifact<T, E>(
+    presentation: &Presentation,
+    expected: &Request,
+    nonces: &mut impl Nonces,
+    guest: &AcceptedGuest,
+    check: impl FnOnce(&Journal) -> Result<T, E>,
+) -> Result<(Journal, T), CheckedFailure<E>> {
+    verify_checked_program(presentation, expected, nonces, guest.image_id, check)
+}
+
+fn verify_checked_program<T, E>(
+    presentation: &Presentation,
+    expected: &Request,
+    nonces: &mut impl Nonces,
+    image_id: [u32; 8],
+    check: impl FnOnce(&Journal) -> Result<T, E>,
+) -> Result<(Journal, T), CheckedFailure<E>> {
+    let journal =
+        checked_journal(presentation, expected, image_id).map_err(CheckedFailure::Verification)?;
+    let checked = check(&journal).map_err(CheckedFailure::Check)?;
+    if !nonces
+        .consume(expected.nonce)
+        .map_err(CheckedFailure::Verification)?
+    {
+        return Err(CheckedFailure::Verification(Error(
+            "challenge already consumed",
+        )));
+    }
+    Ok((journal, checked))
 }

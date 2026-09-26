@@ -14,6 +14,11 @@ mod evaluate;
 mod result;
 #[cfg(feature = "graph-results")]
 pub use evaluate::{admit, evaluate, evaluate_detailed};
+// [OPUS-5.5] Host-only actual-form classification for protocol adapters.
+#[cfg(all(feature = "graph-results", not(target_os = "zkvm")))]
+mod request_shape;
+#[cfg(all(feature = "graph-results", not(target_os = "zkvm")))]
+pub use request_shape::{QueryShape, ShapeError, query_shape};
 
 /// Wire version for the blank-node and graph-result relation.
 pub const VERSION: u32 = 3;

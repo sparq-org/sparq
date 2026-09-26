@@ -22,6 +22,10 @@ pub mod v2;
 /// Versioned blank-node identity and canonical graph-result proving and verification.
 pub mod v3;
 
+/// [OPUS-5.5] Optional `sparq-query-protocol` adapter over the V3 relation.
+#[cfg(feature = "vcq")]
+pub mod vcq;
+
 /// Public presentation contains only the cryptographic receipt and its journal.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

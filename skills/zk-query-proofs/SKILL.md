@@ -39,6 +39,15 @@ original challenge once. It has no backend, interoperable wire encoding, transpo
 hash or other cryptography, ships no production challenge store, proves no cryptographic claim,
 and registers no method. See [query-method contracts](references/query-method-contracts.md).
 
+[OPUS-5.5] The detached exact-evaluator host crate has an optional `vcq` feature (off by
+default) with the first `QueryMethod` adapter, `sparq_proved_evaluator::vcq::Risc0ExactV3`, over
+the existing V3 relation. It declares bag SELECT, boolean ASK and CONSTRUCT graphs under
+holder-declared and verifier-agreed authority only, with the fixed default V3 policy. It binds
+the stored request through a documented derived nonce and consumes the original challenge once,
+after every other check. It authenticates no credential, checks no status or holder key, and
+the registry entry stays `adapter_available: false`. No genuine receipt has been verified
+through it yet. See [vcq exact adapter](references/vcq-exact-adapter.md).
+
 [GPT-6] For the opt-in synthetic selected-support measurement adapter, its strict
 experiment manifest, timing boundaries and unavailable stages, see
 [experiment instructions](../../bench/zk-compose/experiments/README.md). Driver
