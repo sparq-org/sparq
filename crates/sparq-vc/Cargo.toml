@@ -30,9 +30,9 @@ rustdoc-args = ["--cfg", "docsrs"]
 # single-sourced. [OPUS-4.8] sq-ylbrq.
 [dependencies]
 # RDFC-1.0 canonical N-Quads — the canonical unit eddsa-rdfc-2022 hashes and signs.
-sparq-canon = { path = "../sparq-canon", version = "0.1.3" }
+sparq-canon = { path = "../sparq-canon", version = "0.1.4" }
 # sparq term model (oxrdf 0.3 re-export) + store Graph (sign a named graph / store).
-sparq-core = { path = "../sparq-core", version = "0.1.3", default-features = false }
+sparq-core = { path = "../sparq-core", version = "0.1.4", default-features = false }
 oxrdf.workspace = true
 
 # VETTED Ed25519 (dalek). This is the WHOLE point of this crate vs the ZK estate's

@@ -112,8 +112,8 @@ vc-bridge = [
 # sparq term model / store / engine. The engine dep turns on its non-default
 # `zk` feature (the zk-trace executor seam); that feature only exists inside
 # sparq-zk's own dependency graph.
-sparq-core = { path = "../sparq-core", version = "0.1.3" }
-sparq-engine = { path = "../sparq-engine", version = "0.1.3", features = ["zk"] }
+sparq-core = { path = "../sparq-core", version = "0.1.4" }
+sparq-engine = { path = "../sparq-engine", version = "0.1.4", features = ["zk"] }
 oxrdf = { workspace = true }
 spargebra = { workspace = true }
 
@@ -121,7 +121,7 @@ spargebra = { workspace = true }
 # `sparq-canon` crate (the public canonicalization surface; sq-0qip). It owns
 # the oxrdf 0.3 <-> 0.2 bridge and the rdf-canon dependency, so `sparq-zk`'s
 # `canon` module is now just a re-export. [OPUS-4.8]
-sparq-canon = { path = "../sparq-canon", version = "0.1.3" }
+sparq-canon = { path = "../sparq-canon", version = "0.1.4" }
 
 # BN254 scalar field (the Noir `Field`) for Poseidon2.
 # [OPUS-4.8] The whole arkworks stack (ark-bn254/ark-ff/ark-ec/ark-serialize/ark-ed-on-bn254/
@@ -149,7 +149,7 @@ oxttl = { workspace = true, optional = true }
 # `include_str!("../../sparq-trust/…")` drift test that broke `cargo package` here. It has
 # no dependencies of its own, so the opt-in build grows by a `const &str` table only and
 # the default build pulls nothing.
-sparq-secprop-vocab = { path = "../sparq-secprop-vocab", version = "0.1.3", optional = true }
+sparq-secprop-vocab = { path = "../sparq-secprop-vocab", version = "0.1.4", optional = true }
 
 # [OPUS-4.8] sq-u8a8 (epic sq-toze / from side-channel analysis sq-egx6, gap
 # CR-G5): secret-memory hygiene + constant-time-equality PRIMITIVES for the

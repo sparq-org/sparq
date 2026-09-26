@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-09-26
+
+[GPT-5] Recovery candidate after the immutable v0.1.3 release workflow failed before
+creating a GitHub Release. Publication is not implied by this entry; verify the
+tagged run and every registry and release artifact before using the install paths.
+
+### Fixed
+
+- The release job reads the pinned SLSA generator's actual `provenance-name` output
+  for both signed bundles and rejects missing or unexpected names before downloading.
+  The v0.1.3 workflow requested an absent output, downloaded unrelated artifacts,
+  and failed while generating checksums over their directories.
+
+### Changed
+
+- Workspace, desktop, and public npm package versions move to 0.1.4. Local lockfile
+  records follow the workspace; external dependency versions remain unchanged.
+- The v0.1.3 tag and already-published container artifacts remain intact. This
+  candidate rebuilds and attests its own bytes under a new immutable source tag.
+
 ## [0.1.3] - 2026-09-21
 
 [GPT-6] New complete-release candidate after the immutable v0.1.2 attempt.
@@ -580,7 +600,8 @@ reproduce):
   single-pattern/FILTER comparisons short-circuit via index range-counting and are excluded
   from the claims above.
 
-[Unreleased]: https://github.com/sparq-org/sparq/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/sparq-org/sparq/compare/v0.1.4...HEAD
+[0.1.4]: https://github.com/sparq-org/sparq/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/sparq-org/sparq/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/sparq-org/sparq/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/sparq-org/sparq/tree/v0.1.1
