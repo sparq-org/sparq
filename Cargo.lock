@@ -5469,6 +5469,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "sparq-query-protocol"
+version = "0.1.1"
+
+[[package]]
 name = "sparq-reason"
 version = "0.1.1"
 dependencies = [
