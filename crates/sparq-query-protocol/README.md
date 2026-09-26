@@ -18,20 +18,23 @@ verifier-side flow (the complete, doctested version is the crate-level rustdoc,
 `cargo doc -p sparq-query-protocol --open`):
 
 ```rust,ignore
-use sparq_query_protocol::{admit, consume_challenge, Capabilities, QueryRequirements, StoredRequest};
+use sparq_query_protocol::{admit, Capabilities, StoredRequest};
 
-// Verifier configuration: exact descriptors, capability tuples and requirements.
-let capabilities = Capabilities::new(capabilities_spec)?;      // local backend's declaration
-let requirements = QueryRequirements::new(requirements_spec)?; // verifier-owned, stored
-let request = StoredRequest::new(stored_request_spec)?;        // exact query, challenge, audience
+// Verifier configuration: the local backend's declaration and the stored request.
+let capabilities = Capabilities::new(capabilities_spec)?; // exact descriptors, capability tuples
+let request = StoredRequest::new(stored_request_spec)?;   // requirements, query, challenge, audience
 
-// The presentation names a descriptor; the verifier recomputes admission itself.
-let admission = admit(&requirements, &presentation_descriptor, &capabilities)?;
+// The presentation names a descriptor; the verifier recomputes admission from the stored
+// request's own requirements. Admission is structural only and accepts no proof.
+let admission = admit(request.requirements(), &presentation_descriptor, &capabilities)?;
 for (obligation, enforcer) in admission.obligations() {
     // Each owed obligation, with the enforcer the adapter's verify must actually run.
 }
-// Exactly one owner consumes the ORIGINAL challenge once, via the verifier's shared store.
-consume_challenge(&challenge_store, &request)?;
+
+// Only a registered, trusted `QueryMethod` (this crate ships none) can accept a proof:
+// let claim = method.verify(&request, &admission, &presentation, &shared_challenge_store)?;
+// That method or adapter consumes the ORIGINAL challenge exactly once at its declared
+// `ChallengePolicy`; callers must not consume it separately.
 ```
 
 ## ✨ Features
