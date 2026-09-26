@@ -18,13 +18,13 @@ non-canonical numeric lexicals, blank nodes compared under RDFC-1.0 isomorphism,
 canonical per-step store + probe compare; nightly `differential-update.yml`). The
 oracles, and the adjudicated divergence classes both fuzzers read from
 `bench/differential-divergences.json`, are documented in their module headers.
+[GPT-6] [`fuzz-replay`](../../bench/zk-bindings/engine-replay.md) retains original seeds and raw storage observations separately from proofs.
 
 > **Internal tooling — not published** to crates.io (`publish = false`). Run it
 > as a workspace binary; it is not a library. Measured numbers belong in the
 > [benchmarks dashboard](https://sparq.jeswr.org/dev/bench), never baked into docs.
 
 Contributing: [`AGENTS.md`](../../AGENTS.md).
-
 ## License
 
 [MIT](../../LICENSE).

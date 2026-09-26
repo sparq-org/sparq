@@ -259,3 +259,7 @@ pub fn bind_journal(journal: &Journal, expected: &Request) -> Result<(), Rejecte
     }
     Ok(())
 }
+
+// [OPUS-5.5] Host-only replay preparation; excluded from the guest image build.
+#[cfg(all(feature = "graph-results", not(target_os = "zkvm")))]
+pub mod replay;

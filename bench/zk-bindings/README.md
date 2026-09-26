@@ -4,6 +4,8 @@
 support and a complete result over a fixed committed scope. Tests do not establish
 a cryptographic security or privacy guarantee. The [inventory](inventory.json)
 lists backend contracts, original suites, host variants and configured coverage.
+The [engine/storage replay](engine-replay.md) preserves existing fuzz seeds and
+separates normalized oracle agreement, raw term observations and proof identity.
 
 `native`, `constraint` and `real` are separate lanes. Only an actual proof followed
 by independent verification increments proof counts. A missing tool, timeout,
