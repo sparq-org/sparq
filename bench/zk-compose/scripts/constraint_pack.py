@@ -618,7 +618,7 @@ def render_markdown(pack: dict) -> str:
     )
     add(
         "- **No third-party figure is reproduced.** See "
-        "[Related work](#related-work-cited-never-re-measured)."
+        "[Related work](#related-work--cited-never-re-measured)."
     )
     add("")
     tc = pack["toolchain"]

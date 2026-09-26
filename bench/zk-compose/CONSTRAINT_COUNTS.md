@@ -11,7 +11,7 @@ Every number below is the `circuit_size` reported by `bb gates -s ultra_honk`, *
 - **A size, not a time.** No wall-clock figure appears here. Prove/verify timings are machine-dependent; only canonical runs may carry them.
 - **A size, not a coverage claim.** What each circuit *proves* is `site/specs/zksparql.typ` §7.1 and `sparql_feature_catalog.json`. The `path_reach` family proves a **bounded-existence** statement — there exists a chain of at most `d` committed triples, `d` public — which is strictly weaker than the SPARQL property path, whatever its gate count.
 - **A size, not a security claim.** The estate is internally re-audited but **not externally audited** (open gate `sq-qhy4`); the forge suite is toolchain-gated (`sq-1gir`); the value lane carries the documented INV-VL / CR-G8 downgrade. Nothing here asserts a soundness, privacy, or zero-knowledge property.
-- **No third-party figure is reproduced.** See [Related work](#related-work-cited-never-re-measured).
+- **No third-party figure is reproduced.** See [Related work](#related-work--cited-never-re-measured).
 
 Toolchain baselined for these counts: `bb 5.0.0-nightly.20260324`, `nargo 1.0.0-beta.21` (regression tolerance 3.0%).
 

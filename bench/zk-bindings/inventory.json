@@ -36,6 +36,16 @@
       ]
     },
     {
+      "id": "noir_public_pattern",
+      "contract": "[OPUS-5.5] explicit opt-in version 4 (prepare_result_public_pattern / NumericContract::PublicPattern): first constant-or-projected pattern checked against a verifier-derived public triple table; F0, depth 10, K1/K2 only; never a fallback to V1 or signed",
+      "adapter": "result::proof_bindings::run_job",
+      "status": "[OPUS-5.5] executed once on EC2 (non-canonical) at corpus source 2e0f4a9dba47d537835b4745c66147f097c68e43, independently verified evidence bundle SHA-256 b2410b3290cdda391782a5ab4e4a6019436fffa779a4b0add44a055e6dfe4f2d; experimental, research-grade, not hosted CI, not externally audited",
+      "required_actual_suites": [
+        "mandatory ci.py native and finite real campaigns for noir_public_pattern"
+      ],
+      "controls": "unused pattern-zero opening positive, legacy/version-three relabel rejection, reconstructed public_triples on every false binding"
+    },
+    {
       "id": "native_rdf",
       "contract": "nonempty public SELECT DISTINCT BGP with every BGP variable projected; canonical signed RDF preimages",
       "adapter": "pending separate native adapter integration",
@@ -154,6 +164,25 @@
       },
       "shards": 1,
       "claim": "every valid binding in this stated finite universe, not every SPARQL input"
+    },
+    {
+      "id": "noir-cycle-public-pattern",
+      "command": "run.py plan --finite-noir --tier real --backends noir_public_pattern",
+      "domain": {
+        "graphs": 1,
+        "query_templates": 2,
+        "candidate_terms": 3,
+        "valid_bindings_per_backend": 4,
+        "absent_bindings_per_backend": 32,
+        "private_witness_attacks_per_backend": 10,
+        "native_exhaustive_cells": 576,
+        "native_accepted": 72,
+        "native_empty_graph_refusals": 36,
+        "native_support_refusals": 468
+      },
+      "shards": 1,
+      "status": "[OPUS-5.5] executed once on EC2 (non-canonical) at corpus source 2e0f4a9dba47d537835b4745c66147f097c68e43, independently verified evidence bundle SHA-256 b2410b3290cdda391782a5ab4e4a6019436fffa779a4b0add44a055e6dfe4f2d; not hosted CI",
+      "claim": "the same finite universe as noir-cycle-all-valid under version 4, executed in that single run; experimental, research-grade, not externally audited, not a benchmark or gate measurement"
     },
     {
       "id": "original-suite-replay",

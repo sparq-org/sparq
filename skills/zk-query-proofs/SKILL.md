@@ -476,8 +476,17 @@ audit. In that run the ignored toolchain tests
 `result_real_public_pattern_k1_k2_proofs_and_verifier_controls` (one genuine K1
 and one K2 proof, each with typed verifier-rejection controls) and
 `result_relation_public_pattern_rejects_tampered_retained_witnesses` passed. Their
-proof outputs are not retained in the repository, so future CI replays are still
-required.
+proof outputs are not retained in the repository (that run's evidence bundle has
+SHA-256 `a1944e1c49692b360155fc725ad8800b33ebe7a5ef09de8afdfd68ae63b81fbb`), so
+future CI replays are still required.
+[OPUS-5.5] The [binding corpus](../../bench/zk-bindings/README.md) registers an
+explicit `noir_public_pattern` backend over its existing finite domain; it never
+substitutes version 1 or signed members. A separate non-canonical EC2 run at
+corpus source `2e0f4a9dba47d537835b4745c66147f097c68e43` executed all 576 native cells (72 accepted, 468 support
+refusals, 36 empty-graph refusals) and all 46 real cells (4 genuine K1 proofs,
+32 absent-binding and 10 private-witness-attack constraint failures). That run is
+distinct from the `14d426bd` measurements above, is not a hosted CI run, and makes
+no gate, runtime or security claim; see the corpus README for its controls and hashes.
 
 [GPT-6] `result::signed` exposes separately versioned canonical signed-integer
 preparation and verification, with a fixed capacity and no public sign/length

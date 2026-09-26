@@ -29,7 +29,7 @@ records identify GPT-6 and their exact measurement provenance separately.
 | `gate_counts_latest.json`         | per-member ultra_honk gate counts |
 | [result_capacity_gates.json](result_capacity_gates.json) | [GPT-6] exact measured result capacities, toolchain output and source hashes |
 | [result_v1_compatibility.json](result_v1_compatibility.json) | [GPT-6] baseline/current v1 ACIR, ABI and key comparisons, with baseline key bytes |
-| [result_public_gates.json](result_public_gates.json) | [OPUS-5.5] static evidence for the two version-4 public-pattern members (`result_v4_k{1,2}_n16_p3_r4_f0_d10`): `bb gates` circuit size, ACIR/ABI/artifact/gate-log hashes, Noir source hashes and tool provenance from one non-canonical work-box run. No runtime, proving-time, saving, soundness or external-audit claim; the artifacts themselves are not retained |
+| [result_public_gates.json](result_public_gates.json) | [OPUS-5.5] static evidence for the two version-4 public-pattern members (`result_v4_k{1,2}_n16_p3_r4_f0_d10`): `bb gates` circuit size, ACIR/ABI/artifact/gate-log hashes, Noir source hashes and tool provenance from one non-canonical work-box run. No runtime, proving-time, saving, soundness or external-audit claim; the artifacts are retained separately and only their hashes are committed |
 | `prove_verify_timing.json`        | bb prove/verify wall-clock + proof sizes (early, 2-member, darwin) |
 | `family_cost_curve.json`          | sq-pn2 full-family (k,n,r,d) prove/verify/size curve |
 | `family_curve/`                   | sq-pn2 standalone timing harness (own cargo project) |

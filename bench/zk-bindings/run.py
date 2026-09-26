@@ -124,7 +124,48 @@ def check_outcome(job, outcome, output):
         raise ValueError("missing control inventory")
     if job["operation"] == "attack" and stage != "constraint":
         raise ValueError("malicious-witness job stopped at an honest API wrapper")
+    if job["backend"] == "noir_public_pattern":
+        check_public_pattern(job, outcome, stage)
     return {"proofs": proofs, "verified": verified, "stage": stage}
+
+
+PUBLIC_PATTERN_PACKAGES = ("result_v4_k1_n16_p3_r4_f0_d10", "result_v4_k2_n16_p3_r4_f0_d10")
+
+
+def check_public_pattern(job, outcome, stage):
+    """[OPUS-5.5] V4 cells never fall back or count an API refusal as an attack."""
+    executed = [c.get("kind") for c in outcome["controls"]
+                if isinstance(c, dict) and c.get("executed") is True]
+    if len(set(executed)) != len(executed):
+        raise ValueError("duplicate public-pattern control")
+    required = set()
+    if job["expected_accept"] or stage == "constraint":
+        contract = outcome.get("contract")
+        if (not isinstance(contract, dict) or set(contract) != {"version", "package"}
+                or contract["version"] != 4 or contract["package"] not in PUBLIC_PATTERN_PACKAGES):
+            raise ValueError("public-pattern cell fell back from its V4 contract")
+    elif "contract" in outcome:
+        raise ValueError("public-pattern refusal claims a prepared contract")
+    if job["tier"] == "native":
+        if not job["expected_accept"]:
+            scope = "native_support" if job["triples"] else "empty_graph"
+            if stage != "support" or outcome.get("rejection_scope") != scope:
+                raise ValueError("empty graph and native support refusal are not separated")
+    elif job["expected_accept"]:
+        required.add("unused_pattern_zero_opening_positive")
+        if job["tier"] == "real":
+            required |= {"nonce_replay", "legacy_version_one", "version_three"}
+    else:
+        if stage != "constraint":
+            raise ValueError("public-pattern negative lacks a direct malicious witness")
+        required.add("honest_constraint_positive")
+        required |= ({job["attack"]["kind"], "pattern_zero_opening_untouched"}
+                     if job["operation"] == "attack" else
+                     {"planner_bypassed_false_binding", "public_triples_reconstructed"})
+    if job["tier"] != "native" and "rejection_scope" in outcome:
+        raise ValueError("native rejection scope on a constraint or proof cell")
+    if not required <= set(executed):
+        raise ValueError("missing public-pattern control: " + ", ".join(sorted(required - set(executed))))
 
 
 def execute_child(argv, directory, timeout, output_limit, env=None):
