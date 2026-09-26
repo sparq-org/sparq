@@ -42,8 +42,17 @@
 //! Only the typed subset `ProofConfig` carries is represented (type,
 //! cryptosuite, verificationMethod, proofPurpose, created, domain, challenge);
 //! any other proof option or `@context` a JSON-LD proof may carry is not
-//! preserved. Field values (the `created` lexical form, IRIs, purpose) are not
-//! fully validated here.
+//! preserved.
+//!
+//! [OPUS-5.5] zkp-14.3: every entry point lexically validates the `ProofConfig`
+//! (absolute-IRI `verificationMethod`, supported `proofPurpose`, XSD 1.1
+//! `created`) through one seam before any graph materialization,
+//! canonicalization, signing, or DID resolution, failing with
+//! [`VcError::InvalidProofOption`]. See [`ProofOptionError`] and
+//! [`ProofConfig::validate`] for the exact contract and what it does not check.
+//! Compact `proofPurpose` terms hash as their VC v2 `@context` `@id`s. Only
+//! `assertionMethod` (the published vector's purpose) hashes as in earlier
+//! releases; proofs made with the other four compact terms must be re-signed.
 
 use oxrdf::{Literal, NamedNode, NamedOrBlankNode, Term, Triple};
 use sha2::{Digest as _, Sha256};
@@ -51,7 +60,8 @@ use sha2::{Digest as _, Sha256};
 pub use ed25519_dalek::VerifyingKey;
 use ed25519_dalek::{Signature, Signer, SigningKey as DalekSigningKey, Verifier};
 
-use crate::did::{did_key_for, DidError, DidResolver};
+use crate::did::{DidError, DidResolver, did_key_for};
+use crate::proof_options::{self, CheckedProofConfig, ProofOptionError};
 
 /// The `type` of a W3C Data Integrity proof.
 pub const PROOF_TYPE: &str = "DataIntegrityProof";
@@ -111,14 +121,31 @@ impl SigningKey {
 /// a verifier and a signer that disagree on any field produce a different hash and
 /// the signature fails — binding the signature to the verification method, purpose,
 /// time, and domain.
+///
+/// Fields are public and unchecked at construction; [`sign`], [`verify`], and
+/// their graph wrappers run [`ProofConfig::validate`] first and reject invalid
+/// options with [`VcError::InvalidProofOption`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProofConfig {
-    /// The `verificationMethod` IRI — the DID (`did:key:…`) or fragment IRI
-    /// (`did:web:…#key`) that resolves to the Ed25519 key. **Required.**
+    /// The `verificationMethod` — an absolute IRI such as a DID (`did:key:…`) or
+    /// fragment IRI (`did:web:…#key`) that resolves to the Ed25519 key. **Required.**
+    /// Hashed verbatim.
     pub verification_method: String,
     /// The proof purpose (`sec:proofPurpose`). Defaults to `assertionMethod`.
+    ///
+    /// Either one of the compact terms in [`SUPPORTED_PURPOSE_TERMS`], hashed as
+    /// the `@id` the VC v2 `@context` gives it (`authentication` becomes
+    /// `https://w3id.org/security#authenticationMethod`; only `assertionMethod`
+    /// is `sec:` plus the term), or, if the value contains `:`, an absolute IRI
+    /// hashed verbatim. Other bare terms are rejected; compact IRIs such as
+    /// `sec:assertionMethod` are not expanded.
+    ///
+    /// [`SUPPORTED_PURPOSE_TERMS`]: crate::SUPPORTED_PURPOSE_TERMS
     pub proof_purpose: String,
-    /// The proof creation time, an `xsd:dateTime` string (`dcterms:created`). Optional.
+    /// The proof creation time (`dcterms:created`). Optional.
+    ///
+    /// Must be an XSD 1.1 `xsd:dateTime` lexical form (year zero, negative years,
+    /// `24:00:00`, and an absent timezone are allowed). Hashed exactly as given.
     pub created: Option<String>,
     /// An optional domain the proof is bound to (`sec:domain`).
     pub domain: Option<String>,
@@ -156,6 +183,38 @@ impl ProofConfig {
     pub fn with_challenge(mut self, challenge: impl Into<String>) -> ProofConfig {
         self.challenge = Some(challenge.into());
         self
+    }
+
+    /// Lexically validates the proof options, as every sign/verify call does first.
+    ///
+    /// Checks that `verification_method` is an absolute IRI, that `proof_purpose`
+    /// is a supported compact term or an absolute IRI, and that `created` (if set)
+    /// is an XSD 1.1 `xsd:dateTime`. `domain` and `challenge` accept any string.
+    ///
+    /// Passing is **lexical** well-formedness only. It does not establish that the
+    /// verification method is authorized for the purpose, nor that the purpose,
+    /// `domain`, `challenge`, or `created` match what a verifier expects; the
+    /// signature-only API checks none of those, so enforce them on
+    /// [`VerifiedProof::config`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use sparq_vc::{ProofConfig, ProofOptionError};
+    ///
+    /// let vm = "did:key:z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2";
+    /// assert!(ProofConfig::new(vm).with_created("0000-02-29T24:00:00Z").validate().is_ok());
+    ///
+    /// let bad = ProofConfig::new(vm).with_created("2023-02-29T00:00:00Z");
+    /// assert!(matches!(bad.validate(), Err(ProofOptionError::Created { .. })));
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns the [`ProofOptionError`] for the first invalid option, in the
+    /// order `verification_method`, `proof_purpose`, `created`.
+    pub fn validate(&self) -> Result<(), ProofOptionError> {
+        proof_options::check(self).map(|_| ())
     }
 }
 
@@ -207,11 +266,15 @@ pub enum VcError {
     SignatureInvalid,
     /// The proof's cryptosuite/type is not `eddsa-rdfc-2022` / `DataIntegrityProof`.
     UnsupportedProof(String),
+    /// A [`ProofConfig`] option failed lexical validation. Raised before any
+    /// canonicalization, signing, or `verificationMethod` resolution. [OPUS-5.5]
+    InvalidProofOption(ProofOptionError),
 }
 
 impl std::fmt::Display for VcError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            VcError::InvalidProofOption(e) => write!(f, "{}", e),
             VcError::Canon(e) => write!(f, "RDFC-1.0 canonicalization failed: {}", e),
             VcError::Did(e) => write!(f, "verificationMethod resolution failed: {}", e),
             VcError::BadProofValue(s) => write!(f, "bad proofValue: {}", s),
@@ -232,6 +295,12 @@ impl From<sparq_canon::CanonError> for VcError {
     }
 }
 
+impl From<ProofOptionError> for VcError {
+    fn from(e: ProofOptionError) -> Self {
+        VcError::InvalidProofOption(e)
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Sign
 // ---------------------------------------------------------------------------
@@ -244,34 +313,55 @@ impl From<sparq_canon::CanonError> for VcError {
 /// The proof config's `verificationMethod` must resolve (at verify time) to the
 /// public half of `key`; mismatch makes [`verify`] return [`VcError::Did`] or
 /// [`VcError::SignatureInvalid`].
+///
+/// # Errors
+///
+/// [`VcError::InvalidProofOption`] if `config` fails [`ProofConfig::validate`]
+/// (checked before canonicalizing anything), or [`VcError::Canon`] if the
+/// triples cannot be RDFC-1.0 canonicalized.
 pub fn sign(
     triples: &[Triple],
     key: &SigningKey,
     config: &ProofConfig,
 ) -> Result<DataIntegrityProof, VcError> {
-    let hash_data = hash_data(triples, config)?;
+    let checked = proof_options::check(config)?;
+    sign_checked(triples, key, &checked)
+}
+
+/// Sign the content of a [`sparq_core::Graph`] (a named graph or a whole store's
+/// default graph) under `eddsa-rdfc-2022`. Materializes the graph's triples through
+/// [`sparq_canon::graph_triples`] and signs them as [`sign`] does — the resulting
+/// proof is the portable *"this endpoint asserted exactly this graph"* attestation.
+///
+/// # Errors
+///
+/// As [`sign`]; the proof options are validated before the graph is materialized.
+pub fn sign_graph(
+    graph: &sparq_core::Graph,
+    key: &SigningKey,
+    config: &ProofConfig,
+) -> Result<DataIntegrityProof, VcError> {
+    let checked = proof_options::check(config)?;
+    let triples = sparq_canon::graph_triples(graph)?;
+    sign_checked(&triples, key, &checked)
+}
+
+/// Signs `triples` under an already-validated proof configuration.
+fn sign_checked(
+    triples: &[Triple],
+    key: &SigningKey,
+    checked: &CheckedProofConfig<'_>,
+) -> Result<DataIntegrityProof, VcError> {
+    let hash_data = hash_data(triples, checked)?;
     let sig: Signature = key.inner.sign(&hash_data);
     // proofValue: multibase z-base58btc over the 64-byte signature.
     let proof_value = format!("z{}", bs58::encode(sig.to_bytes()).into_string());
     Ok(DataIntegrityProof {
         proof_type: PROOF_TYPE.to_string(),
         cryptosuite: CRYPTOSUITE.to_string(),
-        config: config.clone(),
+        config: checked.config.clone(),
         proof_value,
     })
-}
-
-/// Sign the content of a [`sparq_core::Graph`] (a named graph or a whole store's
-/// default graph) under `eddsa-rdfc-2022`. Materializes the graph's triples through
-/// [`sparq_canon::graph_triples`] and delegates to [`sign`] — the resulting proof is
-/// the portable *"this endpoint asserted exactly this graph"* attestation.
-pub fn sign_graph(
-    graph: &sparq_core::Graph,
-    key: &SigningKey,
-    config: &ProofConfig,
-) -> Result<DataIntegrityProof, VcError> {
-    let triples = sparq_canon::graph_triples(graph)?;
-    sign(&triples, key, config)
 }
 
 // ---------------------------------------------------------------------------
@@ -286,17 +376,64 @@ pub fn sign_graph(
 /// asserted exactly these triples, unmodified.* It fails closed
 /// ([`VcError::SignatureInvalid`]) if the triples were changed, a different key
 /// signed, or the proof config disagrees with what was signed.
+///
+/// A successful verify is a signature check only: it does not decide whether the
+/// key is authorized for the purpose, or whether the purpose, `domain`,
+/// `challenge`, or `created` are the ones the caller expects. Check those on the
+/// returned [`VerifiedProof::config`].
+///
+/// # Errors
+///
+/// In check order: [`VcError::UnsupportedProof`] for a foreign type/cryptosuite;
+/// [`VcError::InvalidProofOption`] if the proof's config fails
+/// [`ProofConfig::validate`] (before `resolver` is called or anything is
+/// canonicalized); [`VcError::Did`] if resolution fails;
+/// [`VcError::BadProofValue`]; [`VcError::Canon`]; [`VcError::SignatureInvalid`].
 pub fn verify<R: DidResolver>(
     triples: &[Triple],
     proof: &DataIntegrityProof,
     resolver: &R,
 ) -> Result<VerifiedProof, VcError> {
+    let checked = check_proof(proof)?;
+    verify_checked(triples, proof, &checked, resolver)
+}
+
+/// Verify an `eddsa-rdfc-2022` proof over the content of a [`sparq_core::Graph`].
+/// The store-side counterpart of [`verify`]: materializes the graph's triples and
+/// checks the proof against them.
+///
+/// # Errors
+///
+/// As [`verify`]; the proof type and options are checked before the graph is
+/// materialized.
+pub fn verify_graph<R: DidResolver>(
+    graph: &sparq_core::Graph,
+    proof: &DataIntegrityProof,
+    resolver: &R,
+) -> Result<VerifiedProof, VcError> {
+    let checked = check_proof(proof)?;
+    let triples = sparq_canon::graph_triples(graph)?;
+    verify_checked(&triples, proof, &checked, resolver)
+}
+
+/// Checks the proof's type and cryptosuite, then validates its proof options.
+fn check_proof(proof: &DataIntegrityProof) -> Result<CheckedProofConfig<'_>, VcError> {
     if proof.proof_type != PROOF_TYPE {
         return Err(VcError::UnsupportedProof(proof.proof_type.clone()));
     }
     if proof.cryptosuite != CRYPTOSUITE {
         return Err(VcError::UnsupportedProof(proof.cryptosuite.clone()));
     }
+    proof_options::check(&proof.config).map_err(VcError::from)
+}
+
+/// Verifies `proof` over `triples`, given its already-validated configuration.
+fn verify_checked<R: DidResolver>(
+    triples: &[Triple],
+    proof: &DataIntegrityProof,
+    checked: &CheckedProofConfig<'_>,
+    resolver: &R,
+) -> Result<VerifiedProof, VcError> {
     // Resolve the verificationMethod to an Ed25519 key.
     let vk = resolver
         .resolve_str(&proof.config.verification_method)
@@ -304,7 +441,7 @@ pub fn verify<R: DidResolver>(
     // Decode the proofValue.
     let sig = decode_proof_value(&proof.proof_value)?;
     // Reconstruct hashData from the SAME proof config and verify.
-    let hash_data = hash_data(triples, &proof.config)?;
+    let hash_data = hash_data(triples, checked)?;
     vk.verify(&hash_data, &sig)
         .map_err(|_| VcError::SignatureInvalid)?;
     Ok(VerifiedProof {
@@ -313,27 +450,15 @@ pub fn verify<R: DidResolver>(
     })
 }
 
-/// Verify an `eddsa-rdfc-2022` proof over the content of a [`sparq_core::Graph`].
-/// The store-side counterpart of [`verify`]: materializes the graph's triples and
-/// checks the proof against them.
-pub fn verify_graph<R: DidResolver>(
-    graph: &sparq_core::Graph,
-    proof: &DataIntegrityProof,
-    resolver: &R,
-) -> Result<VerifiedProof, VcError> {
-    let triples = sparq_canon::graph_triples(graph)?;
-    verify(&triples, proof, resolver)
-}
-
 // ---------------------------------------------------------------------------
 // Hashing (the shared sign/verify core)
 // ---------------------------------------------------------------------------
 
 /// `hashData = SHA-256(canon(proofConfig)) ‖ SHA-256(canon(document))` — the
 /// 64-byte input the Ed25519 signature covers (vc-di-eddsa §3, proof config first).
-fn hash_data(triples: &[Triple], config: &ProofConfig) -> Result<Vec<u8>, VcError> {
+fn hash_data(triples: &[Triple], checked: &CheckedProofConfig<'_>) -> Result<Vec<u8>, VcError> {
     let doc_canon = sparq_canon::canonicalize_triples(triples)?;
-    let cfg_triples = proof_config_triples(config);
+    let cfg_triples = proof_config_triples(checked);
     let cfg_canon = sparq_canon::canonicalize_triples(&cfg_triples)?;
 
     let doc_hash = Sha256::digest(doc_canon.to_nquads().as_bytes());
@@ -351,7 +476,12 @@ fn hash_data(triples: &[Triple], config: &ProofConfig) -> Result<Vec<u8>, VcErro
 /// want. Uses the standard `https://w3id.org/security#` vocabulary, with
 /// `dcterms:created` and a `sec:cryptosuiteString`-typed cryptosuite (see the
 /// module-level mapping notes).
-fn proof_config_triples(config: &ProofConfig) -> Vec<Triple> {
+///
+/// Takes only a [`CheckedProofConfig`]: the two option IRIs come pre-parsed from
+/// the validation seam, and `pred` is applied to fixed vocabulary terms only —
+/// never to caller input. [OPUS-5.5] zkp-14.3
+fn proof_config_triples(checked: &CheckedProofConfig<'_>) -> Vec<Triple> {
+    let config = checked.config;
     let subject = || NamedOrBlankNode::BlankNode(oxrdf::BlankNode::new_unchecked("proof"));
     let pred = |local: &str| NamedNode::new_unchecked(format!("{}{}", SEC, local));
 
@@ -373,17 +503,18 @@ fn proof_config_triples(config: &ProofConfig) -> Vec<Triple> {
                 NamedNode::new_unchecked(CRYPTOSUITE_STRING),
             )),
         ),
-        // sec:verificationMethod <iri>
+        // sec:verificationMethod <iri> (validated absolute IRI, verbatim)
         Triple::new(
             subject(),
             pred("verificationMethod"),
-            Term::NamedNode(NamedNode::new_unchecked(&config.verification_method)),
+            Term::NamedNode(checked.verification_method.clone()),
         ),
-        // sec:proofPurpose <iri> (relative to the sec: vocabulary, per VC DI)
+        // sec:proofPurpose <iri> (a supported term's VC v2 `@context` `@id`, or
+        // a verbatim absolute IRI — see `proof_options`)
         Triple::new(
             subject(),
             pred("proofPurpose"),
-            Term::NamedNode(pred(&config.proof_purpose)),
+            Term::NamedNode(checked.proof_purpose.clone()),
         ),
     ];
     if let Some(created) = &config.created {
@@ -550,6 +681,30 @@ mod tests {
         ));
     }
 
+    /// The published vector's `verificationMethod`.
+    const W3C_VM: &str = "did:key:z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2\
+                          #z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2";
+    /// The published vector's `created`.
+    const W3C_CREATED: &str = "2023-02-24T23:36:38Z";
+    /// The published canonical proof configuration (Example 12).
+    const W3C_NQUADS: &str = concat!(
+        "_:c14n0 <http://purl.org/dc/terms/created> \"2023-02-24T23:36:38Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> .\n",
+        "_:c14n0 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/security#DataIntegrityProof> .\n",
+        "_:c14n0 <https://w3id.org/security#cryptosuite> \"eddsa-rdfc-2022\"^^<https://w3id.org/security#cryptosuiteString> .\n",
+        "_:c14n0 <https://w3id.org/security#proofPurpose> <https://w3id.org/security#assertionMethod> .\n",
+        "_:c14n0 <https://w3id.org/security#verificationMethod> <did:key:z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2#z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2> .\n",
+    );
+    /// The published SHA-256 of [`W3C_NQUADS`] (Example 13).
+    const W3C_SHA256: &str = "bea7b7acfbad0126b135104024a5f1733e705108f42d59668b05c0c50004c6b0";
+
+    /// The canonical N-Quads the validated builder produces for `cfg`.
+    fn canonical_proof_config(cfg: &ProofConfig) -> String {
+        let checked = proof_options::check(cfg).unwrap();
+        sparq_canon::canonicalize_triples(&proof_config_triples(&checked))
+            .unwrap()
+            .to_nquads()
+    }
+
     /// [OPUS-5.5] zkp-14.2: the proof-config RDF mapping reproduces the W3C
     /// vc-di-eddsa `eddsa-rdfc-2022` test vector byte-for-byte — canonical
     /// proof-config N-Quads (Example 12) and their published SHA-256 (Example 13).
@@ -558,25 +713,220 @@ mod tests {
     /// plain `cryptosuite` literal.
     #[test]
     fn proof_config_matches_w3c_eddsa_rdfc_2022_vector() {
-        const VM: &str = "did:key:z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2\
-                          #z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2";
-        const EXPECTED_NQUADS: &str = concat!(
-            "_:c14n0 <http://purl.org/dc/terms/created> \"2023-02-24T23:36:38Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> .\n",
-            "_:c14n0 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/security#DataIntegrityProof> .\n",
-            "_:c14n0 <https://w3id.org/security#cryptosuite> \"eddsa-rdfc-2022\"^^<https://w3id.org/security#cryptosuiteString> .\n",
-            "_:c14n0 <https://w3id.org/security#proofPurpose> <https://w3id.org/security#assertionMethod> .\n",
-            "_:c14n0 <https://w3id.org/security#verificationMethod> <did:key:z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2#z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2> .\n",
-        );
-        const EXPECTED_SHA256: &str =
-            "bea7b7acfbad0126b135104024a5f1733e705108f42d59668b05c0c50004c6b0";
+        let cfg = ProofConfig::new(W3C_VM).with_created(W3C_CREATED);
+        // [OPUS-5.5] zkp-14.3: the published options pass validation, and the
+        // expanded `sec:assertionMethod` IRI hashes to the same published digest,
+        // so the published proofValue verifies under either spelling.
+        let expanded = ProofConfig {
+            proof_purpose: format!("{SEC}assertionMethod"),
+            ..cfg.clone()
+        };
+        for cfg in [&cfg, &expanded] {
+            let nquads = canonical_proof_config(cfg);
+            assert_eq!(nquads, W3C_NQUADS);
+            assert_eq!(
+                hex::encode(<Sha256 as sha2::Digest>::digest(nquads.as_bytes())),
+                W3C_SHA256
+            );
+        }
+    }
 
-        let cfg = ProofConfig::new(VM).with_created("2023-02-24T23:36:38Z");
-        let canon = sparq_canon::canonicalize_triples(&proof_config_triples(&cfg)).unwrap();
-        let nquads = canon.to_nquads();
-        assert_eq!(nquads, EXPECTED_NQUADS);
+    /// [OPUS-5.5] Each compact purpose canonicalizes to the `@id` the VC v2
+    /// `@context` (<https://www.w3.org/ns/credentials/v2>, `proofPurpose` scoped
+    /// context, retrieved 2026-09-26) gives it. The purpose lines are written out
+    /// from that primary source, not from the production lookup. Only the
+    /// `assertionMethod` row is a published W3C vector; the other four are this
+    /// crate's own regressions, not published vectors.
+    #[test]
+    fn compact_purposes_canonicalize_to_w3c_v2_context_ids() {
+        const PUBLISHED_PURPOSE_LINE: &str = "_:c14n0 <https://w3id.org/security#proofPurpose> <https://w3id.org/security#assertionMethod> .\n";
+        const PURPOSE_LINES: [(&str, &str); 5] = [
+            (
+                "assertionMethod",
+                "_:c14n0 <https://w3id.org/security#proofPurpose> <https://w3id.org/security#assertionMethod> .\n",
+            ),
+            (
+                "authentication",
+                "_:c14n0 <https://w3id.org/security#proofPurpose> <https://w3id.org/security#authenticationMethod> .\n",
+            ),
+            (
+                "capabilityDelegation",
+                "_:c14n0 <https://w3id.org/security#proofPurpose> <https://w3id.org/security#capabilityDelegationMethod> .\n",
+            ),
+            (
+                "capabilityInvocation",
+                "_:c14n0 <https://w3id.org/security#proofPurpose> <https://w3id.org/security#capabilityInvocationMethod> .\n",
+            ),
+            (
+                "keyAgreement",
+                "_:c14n0 <https://w3id.org/security#proofPurpose> <https://w3id.org/security#keyAgreementMethod> .\n",
+            ),
+        ];
+        assert!(W3C_NQUADS.contains(PUBLISHED_PURPOSE_LINE));
+
+        for (term, line) in PURPOSE_LINES {
+            let cfg = ProofConfig {
+                proof_purpose: term.to_string(),
+                ..ProofConfig::new(W3C_VM).with_created(W3C_CREATED)
+            };
+            // Only the purpose object differs, so the canonical line order is fixed.
+            let expected = W3C_NQUADS.replace(PUBLISHED_PURPOSE_LINE, line);
+            let nquads = canonical_proof_config(&cfg);
+            assert_eq!(nquads, expected, "{term}");
+
+            let digest = hex::encode(<Sha256 as sha2::Digest>::digest(nquads.as_bytes()));
+            if term == "assertionMethod" {
+                // The published vector is still reproduced byte-for-byte.
+                assert_eq!(nquads, W3C_NQUADS);
+                assert_eq!(digest, W3C_SHA256);
+            } else {
+                assert_ne!(digest, W3C_SHA256, "{term}");
+            }
+        }
+    }
+
+    /// The pre-zkp-14.3 builder: every option value went in through
+    /// `new_unchecked`, and the purpose was always appended to `sec:`.
+    fn legacy_proof_config_triples(config: &ProofConfig) -> Vec<Triple> {
+        let subject = || NamedOrBlankNode::BlankNode(BlankNode::new_unchecked("proof"));
+        let pred = |local: &str| NamedNode::new_unchecked(format!("{SEC}{local}"));
+        let mut t = vec![
+            Triple::new(
+                subject(),
+                NamedNode::new_unchecked(RDF_TYPE),
+                Term::NamedNode(pred(PROOF_TYPE)),
+            ),
+            Triple::new(
+                subject(),
+                pred("cryptosuite"),
+                Term::Literal(Literal::new_typed_literal(
+                    CRYPTOSUITE,
+                    NamedNode::new_unchecked(CRYPTOSUITE_STRING),
+                )),
+            ),
+            Triple::new(
+                subject(),
+                pred("verificationMethod"),
+                Term::NamedNode(NamedNode::new_unchecked(&config.verification_method)),
+            ),
+            Triple::new(
+                subject(),
+                pred("proofPurpose"),
+                Term::NamedNode(pred(&config.proof_purpose)),
+            ),
+        ];
+        if let Some(created) = &config.created {
+            t.push(Triple::new(
+                subject(),
+                NamedNode::new_unchecked(DCTERMS_CREATED),
+                Term::Literal(Literal::new_typed_literal(
+                    created.clone(),
+                    NamedNode::new_unchecked(XSD_DATETIME),
+                )),
+            ));
+        }
+        for (local, value) in [("domain", &config.domain), ("challenge", &config.challenge)] {
+            if let Some(value) = value {
+                t.push(Triple::new(
+                    subject(),
+                    pred(local),
+                    Term::Literal(Literal::new_simple_literal(value)),
+                ));
+            }
+        }
+        t
+    }
+
+    /// Canonical N-Quads of the pre-zkp-14.3 unchecked builder for `cfg`.
+    fn legacy_canonical_proof_config(cfg: &ProofConfig) -> String {
+        sparq_canon::canonicalize_triples(&legacy_proof_config_triples(cfg))
+            .unwrap()
+            .to_nquads()
+    }
+
+    /// [OPUS-5.5] zkp-14.3: for valid `assertionMethod` configs — the only purpose
+    /// the old blanket `sec:<term>` mapping got right — the validated builder
+    /// hashes exactly what the unchecked one did, so deterministic Ed25519
+    /// produces byte-identical signatures for those existing inputs.
+    #[test]
+    fn validated_builder_matches_legacy_mapping_for_assertion_method_only() {
+        let key = SigningKey::from_seed(&[8u8; 32]);
+        let vm = vm_for(&key);
+        let configs = [
+            ProofConfig::new(vm.clone()),
+            ProofConfig::new(key.did_key()).with_created("2023-02-24T23:36:38Z"),
+            ProofConfig::new(vm.clone())
+                .with_created("2026-06-22T12:00:00.250+05:30")
+                .with_domain("vc.example")
+                .with_challenge("nonce-A"),
+            ProofConfig::new("https://issuer.example/keys/1"),
+        ];
+        for cfg in &configs {
+            assert_eq!(cfg.proof_purpose, "assertionMethod");
+            assert_eq!(
+                canonical_proof_config(cfg),
+                legacy_canonical_proof_config(cfg),
+                "{cfg:?}"
+            );
+        }
+    }
+
+    /// [OPUS-5.5] The other four compact purposes were hashed as `sec:<term>`,
+    /// which is not their VC v2 `@context` `@id`. The corrected mapping must
+    /// differ from that legacy output, so proofs signed with it must be re-signed.
+    #[test]
+    fn validated_builder_differs_from_legacy_mapping_for_other_compact_purposes() {
+        for (term, wrong, right) in [
+            (
+                "authentication",
+                "<https://w3id.org/security#authentication>",
+                "<https://w3id.org/security#authenticationMethod>",
+            ),
+            (
+                "capabilityDelegation",
+                "<https://w3id.org/security#capabilityDelegation>",
+                "<https://w3id.org/security#capabilityDelegationMethod>",
+            ),
+            (
+                "capabilityInvocation",
+                "<https://w3id.org/security#capabilityInvocation>",
+                "<https://w3id.org/security#capabilityInvocationMethod>",
+            ),
+            (
+                "keyAgreement",
+                "<https://w3id.org/security#keyAgreement>",
+                "<https://w3id.org/security#keyAgreementMethod>",
+            ),
+        ] {
+            let cfg = ProofConfig {
+                proof_purpose: term.to_string(),
+                ..ProofConfig::new(W3C_VM).with_created(W3C_CREATED)
+            };
+            let new = canonical_proof_config(&cfg);
+            let old = legacy_canonical_proof_config(&cfg);
+            assert_ne!(new, old, "{term}");
+            assert!(old.contains(wrong) && !old.contains(right), "{term}: {old}");
+            assert!(new.contains(right) && !new.contains(wrong), "{term}: {new}");
+        }
+    }
+
+    /// An absolute purpose IRI is hashed verbatim, never appended to `sec:`.
+    #[test]
+    fn absolute_purpose_iri_is_not_prefixed_with_sec() {
+        let cfg = ProofConfig {
+            proof_purpose: "https://example.test/purposes#audit".to_string(),
+            ..ProofConfig::new("did:key:z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2")
+        };
+        let checked = proof_options::check(&cfg).unwrap();
+        let purpose = proof_config_triples(&checked)
+            .into_iter()
+            .find(|t| t.predicate.as_str() == format!("{SEC}proofPurpose"))
+            .unwrap();
         assert_eq!(
-            hex::encode(<Sha256 as sha2::Digest>::digest(nquads.as_bytes())),
-            EXPECTED_SHA256
+            purpose.object,
+            Term::NamedNode(NamedNode::new_unchecked(
+                "https://example.test/purposes#audit"
+            ))
         );
     }
 }
