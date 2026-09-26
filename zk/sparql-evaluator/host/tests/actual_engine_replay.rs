@@ -320,7 +320,7 @@ fn job_requires_a_new_output_directory_and_rejects_unknown_fields() {
         fields.insert(key.into(), json!(format!("/abs/{key}")));
     }
     let job = |fields: &Map<String, Value>| serde_json::from_value::<Job>(Value::Object(fields.clone()));
-    let complete = job(&fields).ok().expect("complete job");
+    let complete = job(&fields).expect("complete job");
     assert_eq!(complete.new_output_directory, Path::new("/abs/new_output_directory"));
     let mut missing = fields.clone();
     missing.remove("new_output_directory");
