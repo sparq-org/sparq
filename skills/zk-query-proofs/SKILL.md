@@ -446,6 +446,10 @@ API is outside request/journal encoding and adds no receipt evidence by itself.
 
 [GPT-6] The [shared original-corpus controller](../../bench/zk-bindings/README.md)
 retains native versus actual-proof counters and independently pinned goldens.
+[OPUS-5.5] Row-only goldens keep the caller's default `--variables`, except
+where a hash-pinned reviewed projection override matches the exact source file
+and fixture. Imported SELECT goldens whose row width differs from the
+projection width are rejected, not replayed.
 
 [GPT-6] Original successful-result v1 circuit, ABI and verification-key bytes are
 preserved under the pinned toolchain and checked against independent baseline
