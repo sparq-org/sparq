@@ -1056,6 +1056,7 @@ functions but has produced no proof, so no exact proof yet authenticates convent
 the native-composition experiment proves public BGP triples only. Nothing is externally audited.
 The work is a design and partial-evidence contribution under an open audit gate.
 
+#pagebreak(weak: true)
 #heading(level: 2, numbering: none)[References]
 #bibliography("zksparql-architecture.refs.yml", style: "ieee", title: none)
 
