@@ -579,6 +579,7 @@ fn real_engine_replay_omission_is_an_observed_guest_abort() {
         Ok(_) => (1, 0, Vec::new()),
         Err(error) => (0, error.chain().count(), bounded_chain(error.chain())),
     };
+    let guest_abort_observed = observed_guest_abort(&chain);
     let omission = json!({
         "mode": "sdk_external_prover_prove_with_ctx",
         "mutation": "first N-Quads statement removed; request and verifier-agreed anchor unchanged",
@@ -591,7 +592,7 @@ fn real_engine_replay_omission_is_an_observed_guest_abort() {
         "sdk_error_chain_length": chain_length,
         "sdk_error_chain": chain,
         "new_genuine_proof_count": new_proofs,
-        "guest_abort_observed": false,
+        "guest_abort_observed": guest_abort_observed,
     });
     write_new(&output.join("omission.json"), &pretty(&omission)).expect("omission evidence");
     assert!(
@@ -599,7 +600,7 @@ fn real_engine_replay_omission_is_an_observed_guest_abort() {
         "a receipt exists for the omitted witness; see omission.json"
     );
     assert!(
-        observed_guest_abort(&chain),
+        guest_abort_observed,
         "SDK error chain lacks the exact known guest abort; see omission.json"
     );
 
