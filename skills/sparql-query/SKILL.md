@@ -480,7 +480,8 @@ sites; tripping it fails with `"query budget exceeded (timeout)"` / `"... (max-r
 evaluation (`sq-yfcu2`): a SELECT-JSON body whose deadline falls due while the (already
 materialised) result is being written out is reported as the budget error, not returned as a
 complete-but-late result — on the streamed entry points some chunks may already have reached the
-sink when the trip is detected:
+sink when the trip is detected. [GPT-6] A SELECT-JSON budget already expired or cancelled
+at evaluator entry refuses before scanning, queuing Rayon work, or emitting any chunks:
 
 ```rust
 use sparq_engine::QueryBudget;

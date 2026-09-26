@@ -54,13 +54,13 @@ vectors = ["dep:sparq-core", "dep:sparq-nlq", "dep:sparq-vectors", "dep:oxrdf"]
 spargebra.workspace = true
 # The engine graph the lexical/vector resolution reads (only behind `vectors`).
 # default-features=false keeps it lean.
-sparq-core = { path = "../sparq-core", version = "0.1.1", default-features = false, optional = true }
+sparq-core = { path = "../sparq-core", version = "0.1.3", default-features = false, optional = true }
 # The deterministic, no-model, no-network LEXICAL entity linker reused for V() (design
 # §6.4 "lexical-first"). Only behind `vectors`.
-sparq-nlq = { path = "../sparq-nlq", version = "0.1.1", optional = true }
+sparq-nlq = { path = "../sparq-nlq", version = "0.1.3", optional = true }
 # The staleness-guarded nearest-term search (the §6.5 mandatory staleness guard) for the
 # V() vector fallback. Only behind `vectors`.
-sparq-vectors = { path = "../sparq-vectors", version = "0.1.1", optional = true }
+sparq-vectors = { path = "../sparq-vectors", version = "0.1.3", optional = true }
 # Term types for the resolution surface (Resolution.iri is an oxrdf NamedNode). Only
 # behind `vectors`; workspace-pinned so the term type is byte-identical to sparq-core's.
 oxrdf = { workspace = true, optional = true }

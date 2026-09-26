@@ -32,7 +32,7 @@ readme = "README.md"
 # default `parallel` feature below (which forwards to `sparq-core/parallel`), so
 # Cargo feature unification still turns rayon on for every native build exactly as
 # before. The RDFC-1.0 algorithm itself (`rdf-canon`) is single-threaded regardless.
-sparq-core = { path = "../sparq-core", version = "0.1.1", default-features = false }
+sparq-core = { path = "../sparq-core", version = "0.1.3", default-features = false }
 oxrdf = { workspace = true }
 oxttl = { workspace = true }
 

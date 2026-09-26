@@ -4,11 +4,22 @@ How to cut a sparq release. Everything below is **maintainer-triggered**: the ve
 cuts the tag, while registry uploads require either the one-time bootstrap commands or an
 explicit `publish.yml` dispatch.
 
-## 0. One-time pre-release steps (before the first complete v0.1.1 release)
+## 0. One-time pre-release steps (before the first complete v0.1.3 release)
 
-[GPT-5.6] `v0.1.0` already points at an abandoned release-plz CI commit and cannot be
-reused safely. The first complete release is therefore **v0.1.1**; do not move or delete
-the public `v0.1.0` tag as part of the release.
+[GPT-6] **Recovery snapshot, 2026-09-12:** `v0.1.1` is an incomplete bootstrap.
+Its immutable tag resolves to `1a63aa7c638bd80da55f1811d5fb97e8d014f631`;
+[release run 33723421273](https://github.com/sparq-org/sparq/actions/runs/33723421273)
+failed at workflow startup. There is no GitHub Release, all 37 crates remain unpublished,
+and PyPI `sparq-rdf` remains unpublished. npm `@sparq-org/sparq@0.1.1` and
+`@sparq-org/solid-server@0.1.1` are already published **without `dist.attestations`**.
+Those versions cannot be republished to add provenance. Keep that evidence gap explicit.
+
+The next complete-release candidate targets **v0.1.3**. Preserve the public `v0.1.0`,
+`v0.1.1`, and `v0.1.2` tags. v0.1.2 published both containers but failed before its
+GitHub Release; the Bash 3.2 fix is merged in PR #6544 (see §3b). The SLSA permission and Cargo bootstrap fixes in
+[PR #6488](https://github.com/sparq-org/sparq/pull/6488) landed after `v0.1.1`;
+building main and attaching those different bytes to the old tag is not a recovery.
+Re-check registry state before any irreversible upload; this snapshot is historical evidence.
 
 These are tracked as beads (`bd list -l area:release`); the procedure is documented
 here for the runbook:
@@ -47,8 +58,8 @@ taken name itself.
 | Name | Registry | Required preflight |
 |---|---|---|
 | the 37 names printed by `python3 scripts/release-interval-guard.py --dry-run` | crates.io | available on 2026-08-31; re-check before bootstrap |
-| `@sparq-org/sparq` | npm | available on 2026-08-31; confirm organization rights before bootstrap |
-| `@sparq-org/solid-server` | npm | available on 2026-08-31; confirm organization rights before bootstrap |
+| `@sparq-org/sparq` | npm | 0.1.1 exists without provenance; check new-version availability and Trusted Publisher |
+| `@sparq-org/solid-server` | npm | 0.1.1 exists without provenance; check new-version availability and Trusted Publisher |
 | `@sparq-org/eyereasoner-compat` | npm | already published at 0.1.0; no bootstrap needed |
 | `sparq` | PyPI | **taken** — unrelated `shiventi/sparq` (SJSU degree-planning API client, latest 0.2.6) |
 | `sparq-rdf` | PyPI | chosen distribution name (owner-approved; `pip install sparq-rdf`, `import sparq`) |
@@ -58,7 +69,7 @@ The PyPI **distribution** name `sparq` is taken, so the Python wheel ships as
 **`@sparq-org` for all public packages**; the private `@sparq/client` workspace package is
 an internal build dependency and is not a registry surface.
 
-## 0b. v0.1.1 ships ahead of the external ZK review (issue #2552)
+## 0b. Experimental releases precede the external ZK review (issue #2552)
 
 **Decision (maintainer, issue #2552, 2026-07-26): the first complete release goes out without waiting for the
 external accredited-cryptographer review of the ZK estate (bead `sq-qhy4`), carrying
@@ -95,22 +106,73 @@ published manifests, allowing workspace-only tests without adding a registry edg
 version PR must update the root version, every shipped path-dependency requirement, and
 `Cargo.lock` together; the release guard refuses an incomplete dependency closure.
 
-The first-release PR sets these files explicitly to **0.1.1**. This is deliberately not a
+The recovery version PR must set these files explicitly to **0.1.3**. This is deliberately not a
 release-plz-generated PR: before the first dependency-first crates.io bootstrap,
 `release-plz update` runs `cargo package` while calculating changes and Cargo cannot resolve
-the unpublished inter-crate registry dependencies. `release-plz.toml` therefore keeps
-`git_only = true` only for the tag phase, using the existing `v0.1.0` tag as its baseline.
+the unpublished inter-crate registry dependencies, including in its temporary package graph.
+While `release-plz.toml` has `git_only = true` and `publish = false`, the Release-PR job
+explicitly skips automatic version calculation. The separate tag job remains active and
+creates the new version's tag after the manual version PR merges.
 After all 37 crates exist, flip `git_only = false` only in the same change that enables
-crates.io OIDC publishing; normal release-plz-generated version PRs resume then.
+crates.io OIDC publishing. A generated release-plz PR can resume Cargo versioning then,
+but it is **not merge-ready** until the same PR also aligns every public npm manifest and
+its shared root-lock workspace record. Keep the manual cross-ecosystem version-PR review
+step until that augmentation is automated; the source guard refuses a mismatched tag.
 
-release-plz does not version npm workspaces. The public `@sparq-org/sparq` and
-`@sparq-org/solid-server` manifests are explicitly set to **0.1.1** for this release.
+release-plz does not version npm workspaces. The public `@sparq-org/sparq`,
+`@sparq-org/solid-server`, and `@sparq-org/eyereasoner-compat` manifests and
+their workspace records in the shared root `package-lock.json` must also move to **0.1.3**.
+The compatibility package skips
+0.1.1 and 0.1.2: its registry release is still 0.1.0, while its source has changed since that publish.
+The desktop Cargo manifest, Tauri installer configuration, GUI frontend manifest and
+their lock records also target 0.1.3; private tooling and the independent LWS crate keep
+their own versions. PyPI's version is derived from the Cargo workspace. This version PR prepares 0.1.3;
+its merge is the release-triggering change, not evidence of successful publication.
 
 ## 2. Changelog
 
 Add a `## [X.Y.Z] - YYYY-MM-DD` section to `CHANGELOG.md` (Keep-a-Changelog format:
 Added / Changed / Fixed / Removed). Performance claims go in only with a pointer to the
 measurement (e.g. `bench/qlever-baselines.md`). Add the compare/tag link at the bottom.
+
+### v0.1.3 recovery sequence
+
+> [GPT-6] v0.1.3 is the new candidate after v0.1.2 failed at GUI staging. Preserve
+> the old tag and containers; do not rerun its workflow. See §3b for the diagnosis.
+> The cadence guard must pass before this version PR merges, including the narrow
+> maintainer-authorized v0.1.3 exception in §8d. See the dated
+> [preflight evidence](release-preflight-v0.1.3.json).
+
+1. PR #6544 has merged the Bash 3.2 staging fix. Prepare the separate manual 0.1.3
+   version PR, including the new changelog and lockfiles. Before its
+   merge, complete CI and package-file inspection, re-check version availability and the
+   release interval, and confirm registry credentials/Trusted Publishers. **That version
+   PR merge authorizes tag creation and the release workflow's artifact/container uploads.**
+2. Let the new `v0.1.3` tag run `release.yml`, including provenance verification. Keep the
+   tag fixed. If this run needs source changes, fix forward with another version; a
+   dispatch at main with `tag=v0.1.3` is refused. For a transient failure before publication,
+   retry with `gh workflow run release.yml --ref v0.1.3 -f tag=v0.1.3 -f prerelease=false`
+   only after checking no assets/image were already published.
+3. From a clean checkout of `v0.1.3`, bootstrap crates.io in §4's dependency-first order.
+   Run each dry-run immediately before its publish, once its dependencies exist. Do not
+   use main or fill the old 0.1.1 registry gaps with different source.
+4. After bootstrap, explicitly dispatch package publication **at the same immutable tag**:
+
+   ```sh
+   gh workflow run publish.yml --ref v0.1.3 \
+     -f publish_npm=true -f publish_solid_server=true \
+     -f publish_eyereasoner_compat=true \
+     -f publish_pypi=true -f attest_crates=true
+   ```
+
+   `publish.yml` checks source identity and selected package versions before its jobs run.
+   All three public npm manifests must match the tag before this combined dispatch can run.
+   Check which versions/files already exist before retrying any failed publication; never
+   attempt to replace published bytes.
+5. Verify all three npm versions' `dist.attestations`, every PyPI distribution's PEP-740
+   attestation, and the published GitHub assets. Compare attested `.crate` hashes with
+   registry downloads before claiming coverage of the uploaded crate bytes. New-version
+   provenance does not retroactively attest either npm 0.1.1 package.
 
 ## 3. Tag push → what CI does
 
@@ -125,12 +187,21 @@ git push origin vX.Y.Z
 
 Pushing the tag triggers `.github/workflows/release.yml`:
 
-0. **publish-cadence guard** — the `setup` job runs
+0. **source identity and publish-cadence guards** — `setup` first runs
+   `scripts/check-release-source.py`: the workflow must run at the exact existing release
+   tag, the tag must resolve to the workflow/checkout commit, and manifest versions must
+   match. A branch dispatch naming an older tag refuses before any build or publication.
+   Then the job runs
    `scripts/release-interval-guard.py --enforce --released-tag vX.Y.Z` before anything is
-   built. If the previous release was less than 24h ago the job fails and **every** job
+   built. Outside the fixed v0.1.3 recovery exception (§8d), if the previous release
+   was less than 24h ago the job fails and **every** job
    below it is blocked (they all depend on `setup`). See §8d — this is the tag-push half
-   of the at-most-one-release-per-day policy. The tag stays pushed; delete it
-   (`git push --delete <remote> vX.Y.Z`) and re-push once the window has passed.
+   of the at-most-one-release-per-day policy. Keep the tag immutable. After the window,
+   retry at that same tag only if it already contains working release logic and nothing
+   was published. A source/workflow fix requires a new version and tag; do not overwrite
+   published assets or reuse registry versions. The npm, PyPI, GitHub Release, and GHCR
+   paths also re-read the remote tag immediately before their irreversible write and refuse
+   if it no longer identifies the workflow commit.
 1. **package** — builds `sparq-cli` for every hardware tier (same matrix as `dist.yml`:
    arm64/x64 darwin, x86-64 baseline/v2/v3/v4 + arm64 Linux, x64/arm64 Windows) and packages
    each as `sparq-cli-vX.Y.Z-<tier>.tar.gz` (`.zip` on Windows) containing the binary,
@@ -190,6 +261,63 @@ crate + name; or a consumer needs a non-container deployment. The change is then
 package/bin selector to `build-matrix.yml` — and it should ship as a clearly EXPERIMENTAL-
 labelled OPT-IN artifact, not silently alongside the `sparq-cli` archives.
 
+## 3b. Recovering a failed immutable-tag release
+
+[GPT-6] **Retry infrastructure failures at the same tag; fix deterministic source or
+workflow failures in a new version.** The existing exact-tag `workflow_dispatch` is
+the reusable retry mechanism. It cannot import a workflow fix from a later commit.
+
+For v0.1.2, [run 35540471918](https://github.com/sparq-org/sparq/actions/runs/35540471918)
+failed because macOS Bash 3.2 rejects `shopt -s nullglob globstar`. The staging loop
+uses only single-directory globs, so `nullglob` alone preserves its file selection.
+Both macOS builds reached staging, but neither uploaded installers or their subject
+digests. The alias gate correctly refused the missing `sparq-gui-arm64-darwin.dmg`
+and `sparq-gui-x64-darwin.dmg`. Successful provenance over the other assets does not
+cover those missing installers. Both container publication workflows already succeeded;
+the GitHub Release did not exist when checked on 2026-09-21.
+
+Preserve the annotated tag object `05efded769a745d5b0e8d6d076425c171732ab1d`,
+which peels to commit `4b37254efe502f8a0aeba36076130ed9b44853ef`.
+Direct recovery of this tag is unavailable **under the current source/provenance
+contract**, for these independently checkable reasons:
+
+| Attempt | Why it cannot apply this fix safely |
+|---|---|
+| Rerun all or failed jobs | GitHub retains the original SHA/ref and workflow; the same staging command fails again. A full rerun also repeats completed container publication. |
+| Dispatch `release.yml --ref v0.1.2 -f tag=v0.1.2` | Selects the workflow stored at v0.1.2, including the broken command. |
+| Dispatch at main, checking out v0.1.2 | Violates the enforced equality of event tag, workflow SHA, tag commit, and checkout HEAD. |
+| Build elsewhere and combine old/new artifacts | The pinned generic generator derives source identity from the caller's workflow context; it has no source-commit override. The existing bundle cannot attest new DMG digests. |
+| Upload manually, suppress aliases, or relabel newer binaries | Bypasses completeness, source identity, or isolated provenance; not an acceptable recovery. |
+
+GitHub documents [rerun identity](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/re-run-workflows-and-jobs)
+and [workflow revision selection](https://docs.github.com/en/actions/concepts/workflows-and-actions/workflows).
+The pinned generator's [input contract](https://github.com/slsa-framework/slsa-github-generator/blob/v2.1.0/.github/workflows/generator_generic_slsa3.yml)
+and [attestation implementation](https://github.com/slsa-framework/slsa-github-generator/blob/v2.1.0/internal/builders/generic/attest.go)
+explain why a new checkout alone cannot preserve the old source identity. `upload-tag-name`
+selects a publication destination, not a provenance source. A distinct recovery builder
+would need a separately reviewed trust model and verifier policy; it is not a retry switch.
+
+After the staging fix merges, the operator should:
+
+1. Leave v0.1.2 and its existing container images/provenance untouched. Do not rerun
+   run 35540471918 or dispatch its release workflow as a way to load this fix.
+2. Prepare a separate release version PR for the next unused version (normally 0.1.3),
+   following §§1–2 for manifests, lockfiles, changelog and release notes. Explain that
+   v0.1.2 had container publication but no complete GitHub Release. Check registry state
+   and the release interval again; do not assume any version is available.
+3. Complete the repository's merge gates and deliberate release review before merging
+   that version PR. Its new immutable tag must contain this fix and run the normal
+   pipeline, rebuilding all artifacts and generating both provenance bundles from that
+   same commit. Let both container lanes publish the new version normally.
+4. Require all site aliases, checksums, and `verify published provenance` to pass, then
+   follow §§4, 7–8 for the selected registry publication and evidence recording using
+   the new tag. Do not copy or rename v0.1.2 artifacts into the new release.
+
+For future transient failures, inspect completed publication lanes before choosing a
+targeted rerun; do not blindly republish successful lanes. Exact-tag dispatch starts the
+whole pipeline, including containers. Retain source verification, cadence, alias checks,
+and both isolated provenance dependencies in every recovery path.
+
 ## 4. crates.io publication
 
 **37 crates publish.** [GPT-5.6] This is the complete crates.io dependency closure, not
@@ -200,7 +328,8 @@ Versioned dev-dependencies are shipped and therefore participate in the derived 
 The `sparq-introspect` test-only edge back to `sparq-engine` is deliberately path-only;
 publishing it with a version would create an impossible first-release dependency cycle.
 
-Exact bootstrap commands, from the repo root on the tagged **v0.1.1** commit:
+Exact bootstrap commands, from a clean checkout of the new tagged **v0.1.3** commit,
+after the recovery version PR has merged and the tag's release workflow is green:
 
 ```sh
 cargo publish -p sparq-core
@@ -391,18 +520,13 @@ The primary `npm` job authenticates entirely via OIDC trusted publishing (no `NO
 `npm@^11.5.1` (the trusted-publishing CLI floor — Node 22's bundled npm can be older) and keeps
 `--provenance --access public`.
 
-**needs:user (npmjs.com):** `@sparq-org/sparq` and `@sparq-org/solid-server` must each
-exist before npm allows Trusted Publisher configuration:
+`@sparq-org/sparq` and `@sparq-org/solid-server` already exist at 0.1.1. Their manual
+bootstrap is complete; **do not run it again or try to republish those versions**.
+Before the 0.1.3 release, verify the remaining registry-side configuration:
 
 1. Confirm the `sparq-org` npm organization and the publisher's package-creation rights.
-2. From the tagged v0.1.1 checkout, build/inspect each tarball and perform one bootstrap
-   publish using a short-lived **granular** token:
-   `cd js && NPM_CONFIG_PROVENANCE=false npm publish --access public`, then
-   `cd ../packages/solid-server && NPM_CONFIG_PROVENANCE=false npm publish --access public`.
-   The explicit override is required because provenance can only be generated on a supported
-   hosted CI runner; subsequent trusted-publisher runs generate it automatically.
-3. Delete the granular token.
-4. On each package's **Settings → Trusted Publisher → GitHub Actions**, configure:
+2. Confirm any bootstrap granular token has been removed.
+3. On each package's **Settings → Trusted Publisher → GitHub Actions**, configure:
    - Organization or user: **`sparq-org`**
    - Repository: **`sparq`**
    - Workflow filename: **`publish.yml`** (filename only, with extension — **not** a path)
@@ -410,9 +534,9 @@ exist before npm allows Trusted Publisher configuration:
    - Allowed actions: **`npm publish`**
 
 `@sparq-org/eyereasoner-compat` already exists at 0.1.0, so it only needs its Trusted
-Publisher checked. Every subsequent CI publish is tokenless and provenance-bearing
-(`npm audit signatures`). The bootstrap versions themselves are the unavoidable pre-OIDC
-exception because npm cannot register a publisher for a package that does not yet exist.
+Publisher checked. Subsequent CI publishes use the exact-tag command in §2 and verify
+registry provenance (`npm audit signatures`). The bootstrap versions themselves remain
+unattested; configuring Trusted Publishing now does not add attestations to old versions.
 
 ### 8b. PyPI `sparq-rdf` — WIRED (`publish.yml` `pypi-publish` job)
 
@@ -456,11 +580,38 @@ tag-cutting). This is the "config-flip" the design record (§6 item 4) calls "th
 
 ### 8d. Publish-rate protections (issues #1135, #2552) — what stops a runaway release
 
-**The policy: at most one release per day.** `MIN_RELEASE_INTERVAL` in
+**The normal policy: at most one release per day.** `MIN_RELEASE_INTERVAL` in
 `scripts/release-interval-guard.py` is the single constant that states it (24h), and it is
 enforced at **both** points a release can start — the Release-PR path (`release-plz.yml`)
-and the `v*` tag push (`release.yml`). There is no override flag: releasing inside the
-window is done by hand, deliberately.
+and the `v*` tag push (`release.yml`). There is no override flag or environment escape.
+
+[GPT-6] **One maintainer-authorized exception, PR #6573:** the complete-release
+candidate v0.1.3 may recover the incomplete v0.1.2 attempt inside that interval.
+The exception is fixed in code and requires every condition below, re-read on both
+the release-plz pre-tag path and `release.yml`'s tag-push path:
+
+- Workspace version is exactly `0.1.3`; an explicit released tag must be `v0.1.3`.
+  Before tag creation, that target must be absent locally and remotely. On tag push,
+  it must exist locally and remotely with matching object/commit, dated no earlier
+  than the predecessor and no later than the current clock.
+- Full local history identifies v0.1.2 as the newest predecessor, created at
+  `2026-09-20T22:03:11Z`, with annotated tag object
+  `05efded769a745d5b0e8d6d076425c171732ab1d` and commit
+  `4b37254efe502f8a0aeba36076130ed9b44853ef`.
+- The canonical GitHub repository's entire `v*` tag inventory must match the pinned
+  four historical tags and their seven object/peeled records, plus only v0.1.3 on
+  its tag-push path. Missing, changed, extra or even backdated new tags refuse.
+  Local tag names must match that inventory; future timestamps refuse.
+- Every publishable crate must return a definitive crates.io **404**. Any registry
+  publication, even an old one, or a 200 response with an empty/malformed versions
+  list invalidates recovery. Unreadable Git state or indeterminate HTTP reads refuse.
+
+`MIN_RELEASE_INTERVAL` remains 24 hours for v0.1.4 and every other version. The
+already-tagged release-plz no-op remains a no-op, not an exception-based publication.
+The rationale is to build the corrected source under a new identity without mutating
+or rerunning v0.1.2 or its completed containers. No source/provenance/alias check is
+relaxed. A partial crates.io bootstrap invalidates this recovery path: inspect any
+failed publication before retrying. Do not broaden the predicate to make it pass.
 
 **A crates.io version can never be unpublished.** Four protections stand between an
 automated pipeline and the registry. All four are already in place; none of them is what
@@ -490,7 +641,8 @@ you flip.
    crates.io publication)`. It refuses on any indeterminacy — shallow checkout, unreadable
    tag list, unparseable date, unreachable crates.io, a future-dated last release. A
    definitive crates.io 404 is the only accepted "never published" answer. There is no
-   override flag: publishing inside the window is done by hand, consciously.
+   override flag; only the fixed v0.1.3 recovery evidence above can admit a shorter
+   interval. Ordinary publication still requires the full 24 hours.
 3. **The same interval, on the tag-push path** (issue #2552). Protection 2 only covers
    releases that go through the Release PR. §3's canonical instruction — push a `vX.Y.Z`
    tag — fires `release.yml` **directly**, which was previously uncadenced: a hand-pushed
@@ -505,12 +657,12 @@ you flip.
    against the *previous* release. It refuses if handed anything that is not a `vX.Y.Z`
    tag.
 
-   It is **unconditional** — `workflow_dispatch` builds are guarded too. They look like a
-   developer/test path (pre-release, `dev-`-prefixed image tags), but the Release they
-   create fires `release: published`, and `publish.yml`'s `npm` job runs on *any* `release`
-   event, so a dispatch reaches a registry as well. Two consequences: `inputs.tag` on a
-   dispatch **must** be a `vX.Y.Z` tag (a `-dev` suffix is fine), and the unbounded way to
-   exercise the pipeline is a local build, not a dispatch.
+   It is **unconditional** — `workflow_dispatch` builds are guarded too because they
+   publish Release assets and container images. GitHub suppresses the downstream release
+   event when these assets are published with `GITHUB_TOKEN`; registry uploads then need
+   the separate explicit package dispatch. Both workflows require an exact existing tag,
+   matching checkout commit and manifest versions. A `-dev` tag also needs matching
+   prerelease manifest versions; untagged experiments belong in local builds.
    `scripts/tests/test_release_publish_guard.py` pins the step's `run:`, that it carries
    no `if:` and no `continue-on-error`, the `fetch-depth: 0` checkout it depends on, and
    that no job in `release.yml` escapes `setup`.
@@ -529,17 +681,18 @@ python3 scripts/release-interval-guard.py --dry-run
 It prints the publishable crate list, each version, the dependency-first publish order and
 the cadence verdict it *would* return. It only ever runs `git`, never `cargo`.
 
-> [GPT-5.6] **Closure reconciliation complete for v0.1.1:** the guard reports 37
-> publishable crates, all 37 are in the `sparq` version group, and the printed order is the
-> exact bootstrap order in §4. Re-run it on the final Release PR commit; any mismatch blocks
-> the crates.io flip.
+> [GPT-6] **Closure reconciliation for v0.1.3:** the v0.1.1 tag contained 37
+> publishable crates in the `sparq` version group, but those crates were not published.
+> Re-run the guard on the final v0.1.3 version PR commit. It must still report all 37 crates,
+> and its printed dependency-first order is the exact bootstrap order in §4; any mismatch
+> blocks the crates.io flip.
 
 ### 8e. release-plz forge token — configured and verified (issue #3273)
 
-For the first complete release, the checked-in v0.1.1 version PR replaces the generated
+For the first complete release, the checked-in v0.1.3 recovery version PR replaces the generated
 Release-PR because `release-plz update` cannot package the unpublished dependency closure.
 The privileged forge token below is still required **before that PR merges**: the
-`release-plz release` job uses it to push `v0.1.1` as a normal actor so the tag starts
+`release-plz release` job uses it to push `v0.1.3` as a normal actor so the tag starts
 `release.yml`. Once the 37-crate bootstrap and post-bootstrap config flip are complete,
 the same token also restores normal generated Release-PRs.
 
@@ -559,10 +712,11 @@ App token (ORCHESTRATOR_APP_ID + ORCHESTRATOR_APP_PRIVATE_KEY)  ← preferred
   || GITHUB_TOKEN          (fallback; cannot open PRs while the setting is disabled)
 ```
 
-**Live verification, 2026-08-31:** `ORCHESTRATOR_APP_ID` and
-`ORCHESTRATOR_APP_PRIVATE_KEY` are present, and run `33434042300` successfully minted the
-App token in both the Release-PR and tag jobs. No PAT or Actions-setting change is needed
-for v0.1.1.
+**Historical verification, 2026-08-31:** `ORCHESTRATOR_APP_ID` and
+`ORCHESTRATOR_APP_PRIVATE_KEY` were present, and run `33434042300` successfully minted the
+App token in both the Release-PR and tag jobs. Reconfirm that the App credentials still mint
+a token before merging the v0.1.3 version PR; no PAT or Actions-setting change is needed
+when that probe succeeds.
 
 **Recovery if that App credential is removed or expires — do exactly one:**
 1. Provision `ORCHESTRATOR_APP_ID` + `ORCHESTRATOR_APP_PRIVATE_KEY` (the App used by

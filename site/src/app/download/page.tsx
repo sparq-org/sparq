@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 
 import { DownloadClient } from "./download-client";
+import { PackageInstalls } from "./package-installs";
 
 // [OPUS-4.8] sq-gl3cf / sq-ixc3 / sq-vw3ax.11 — the /download route.
 //
@@ -13,9 +14,13 @@ import { DownloadClient } from "./download-client";
 export const metadata: Metadata = {
   title: "Download",
   description:
-    "Download the sparq desktop GUI (macOS/Windows/Linux) and the CLI/server binaries — one click, straight to the right file for your platform. Desktop bundles are unsigned developer builds; the web workbench at /app needs no install.",
+    "Install sparq through npm, crates.io, or PyPI, or download desktop and CLI/server builds for macOS, Windows, and Linux. Desktop bundles are unsigned developer builds.",
 };
 
 export default function DownloadPage() {
-  return <DownloadClient />;
+  return (
+    <DownloadClient>
+      <PackageInstalls />
+    </DownloadClient>
+  );
 }

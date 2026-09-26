@@ -394,7 +394,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-acbench"
-version = "0.1.0"
+version = "0.1.3"
 dependencies = [
  "oxrdf",
  "oxttl",
@@ -403,7 +403,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-core"
-version = "0.1.0"
+version = "0.1.3"
 dependencies = [
  "hashbrown",
  "oxrdf",
@@ -413,7 +413,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-engine"
-version = "0.1.0"
+version = "0.1.3"
 dependencies = [
  "oxiri",
  "oxrdf",
@@ -427,7 +427,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-policy"
-version = "0.1.0"
+version = "0.1.3"
 dependencies = [
  "oxrdf",
  "sparq-core",
@@ -436,7 +436,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-reason"
-version = "0.1.0"
+version = "0.1.3"
 dependencies = [
  "oxrdf",
  "regex",
@@ -447,7 +447,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-solid"
-version = "0.1.0"
+version = "0.1.3"
 dependencies = [
  "oxrdf",
  "rustc-hash",
@@ -460,7 +460,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-substrate"
-version = "0.1.0"
+version = "0.1.3"
 dependencies = [
  "hashbrown",
  "oxrdf",
