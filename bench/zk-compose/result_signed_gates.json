@@ -1,12 +1,31 @@
 {
   "prepared_by": "GPT-6",
-  "measured_at": "2026-09-12T20:41:53.316753+00:00",
+  "prior_measurement": {
+    "measured_at": "2026-09-12T20:41:53.316753+00:00",
+    "note": "Earlier GPT-6 local measurement over superseded Noir bytes (older compose_core/src/lib.nr, no version-4 files). Kept for history only; it is not the measurement bound to source_files."
+  },
+  "measured_source": {
+    "recorded_by": "OPUS-5.5",
+    "source_commit": "14d426bde6557ffc3621f50fd34133f8d278aea9",
+    "source_tree": "c076ab7f82bd8b770c92cded76e21363266bc258",
+    "observed_at_utc": "2026-09-26T13:38:08.582199+00:00",
+    "platform": "Linux x86_64 EC2 work box",
+    "canonical": false,
+    "tool_executable_sha256": {
+      "nargo": "0852cd5631ac5ca25f744f25c931e3cff16351d9bcdbfb03cebb48a4494a0fe3",
+      "bb": "d7621dfb151f55c23fb04bf274f366a6a1e0516b85a3cf0ae9165a9952509793"
+    },
+    "job_sha256": "8045b96ad07910bcc2d5f72d23a241bf27a5a201a84997eb8081cfa32be6a378",
+    "independent_handoff_sha256": "36bdbdd26a2238e5a140e8c00dedc4afe68dc7657b29e2728b95c2e8b045603c"
+  },
+  "measurement_method": "[OPUS-5.5] At measured_source, each signed member was compiled with the pinned nargo and measured with `bb gates -s ultra_honk`; the compiled artifact was rehashed on the remote host. Every circuit_size, ACIR bytecode hash and ABI hash equalled the value already recorded here, so no member value changed.",
+  "limitations": "[OPUS-5.5] One independent non-canonical work-box run; future CI replays are still required. Static circuit size only; no timing was taken and no earlier timing is relabelled. source_files, not source_commit, binds the Noir bytes.",
   "tool_versions": {
     "nargo": "nargo version = 1.0.0-beta.21\nnoirc version = 1.0.0-beta.21+89a0f0faf3a5f1273c8ac4843b7877882437e277\n(git version hash: 89a0f0faf3a5f1273c8ac4843b7877882437e277, is dirty: false)",
     "bb": "5.0.0-nightly.20260324"
   },
   "metric": "bb gates ultra_honk circuit_size",
-  "scope": "Actual local circuit-size measurements; no canonical timing or proof verification claim.",
+  "scope": "Actual circuit-size measurements (see measured_source); no canonical timing or proof verification claim.",
   "source_files": {
     "zk/compose/compose_core/src/derivation.nr": "cd6e9ebd2b77265d8535e26108558dc3e87eb5d7d674f4f9ce0849df3c0cba5d",
     "zk/compose/compose_core/src/entail.nr": "a6793433075b49bc50d535c400e5141d62b74e1ceaf68aa67608dea63c56f25c",
@@ -18,11 +37,12 @@
     "zk/compose/compose_core/src/holder.nr": "188547970112d6ddd02ebbb36a7745a66ef69e5ee3130c39b28ab9ab285f31e5",
     "zk/compose/compose_core/src/issuer.nr": "526117da030c2be5b69d34aff7aa04d51081d7200cc35fb853d86ae961980e36",
     "zk/compose/compose_core/src/join.nr": "584777b6c74b0c1986dddb95ecf2c0a501993e9baf4f813ac9a04929a293d0b3",
-    "zk/compose/compose_core/src/lib.nr": "1e072da7caa6c190bebb48db67b86bfd91da69e0c55d474030a8c8a5c661398b",
+    "zk/compose/compose_core/src/lib.nr": "7c8177062cb77aa566e1b3d552013c7423107e8f93f13d4cd751e429426cc289",
     "zk/compose/compose_core/src/n3.nr": "6af6c777a5ac26d53c722cbc6f93f4b89e64efa3e03a02c2cf15815a2acb491a",
     "zk/compose/compose_core/src/path.nr": "9c3d3bbf417e169e7b236eae9e40505200b832af4a59980577e3b8ab5f2e807d",
     "zk/compose/compose_core/src/result.nr": "573287c58a8981a9add36c98c0cbab3fb8d53b1d4bed5bc916d3d8659176acf3",
     "zk/compose/compose_core/src/result_integer.nr": "bbc2708d4aea762024012e8004081529763b0c648889b750e39099be80d2a6c6",
+    "zk/compose/compose_core/src/result_public.nr": "e546207a0f726050e60576d52d5c3f0c17e98838dad1fa2a0210ff4069778fd2",
     "zk/compose/compose_core/src/result_signed_integer.nr": "00e3a145242e7e5a809b91dc3b4862b78c82d93217288a46094ef4e94bde7706",
     "zk/compose/compose_core/src/revoke.nr": "46b78bfc9164a9b531b03a86f67508ded3f27989bcc0be9d29377d610cc12089",
     "zk/compose/compose_core/src/sameas.nr": "3efdb7675101ac68fd42a94b4943a111bc41f8e79d8403f5866dd623503033cf",
@@ -85,6 +105,8 @@
     "zk/compose/result_v3_k2_n16_p3_r4_f2_s64_d10/src/main.nr": "5055c007bf371fb42eac977dd0ed0a990488bfb1082fbc0bfe7b446957d134ab",
     "zk/compose/result_v3_k2_n16_p3_r4_f2_s64_d17/src/main.nr": "8a202864759cd928e87d87fb525452fcc63d09df0e28aa324031b40a492674ff",
     "zk/compose/result_v3_k2_n16_p3_r4_f2_s64_d20/src/main.nr": "1a6f555cd620f60f004e87693b614f426050376b4d1c3a94637cfdaccc99576e",
+    "zk/compose/result_v4_k1_n16_p3_r4_f0_d10/src/main.nr": "e5e78d3e4698223c7f8f6f293a58e5eb22b7c88b20852212dd32c7a9b3f0d75a",
+    "zk/compose/result_v4_k2_n16_p3_r4_f0_d10/src/main.nr": "0705cd115b06a7ceefd706260b2af4762cadd28a39f49997103098301f51595b",
     "zk/compose/revoke_hidden_ref_d10_a4/src/main.nr": "8742184ba62ac919d1fef28c709b9280f504433e7bcf8efc60d7304aeb53a481",
     "zk/compose/revoke_unset_d10/src/main.nr": "cf053d5490016efbb93af377ee86ea65b80403a00f8e29bdd2ce32dc56dcccc7",
     "zk/compose/scan_k1_n16_r4/src/main.nr": "8b62a9ee2ad60df1a1e29ca0a842a1ff26c0e84fdec843b80d5fc26b06d9125e",

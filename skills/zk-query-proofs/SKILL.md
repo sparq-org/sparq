@@ -462,8 +462,22 @@ objects must be IRIs or literals. Dispatch never uses the witness choice or coun
 Only F0 (no FILTER on a hidden variable), status depth 10 and K1/K2 are
 supported; no public pattern or any other profile rejects without fallback. It
 proves support for the selected rows only, not completeness. Research-grade, not
-externally audited; no gate or runtime saving is claimed. Gate snapshot entries,
-result-evidence inventories and genuine proofs are pending coordinator measurement.
+externally audited; no runtime saving is claimed.
+[OPUS-5.5] Checked-in static evidence for both members, from one independent
+non-canonical Linux x86_64 work-box run at source `14d426bd`: `bb gates` circuit
+sizes in the [gate snapshot](../../crates/sparq-zk-compose/tests/gate_count_snapshot.json),
+plus ACIR, ABI and source-bound tool provenance in
+[`result_public_gates.json`](../../bench/zk-compose/result_public_gates.json).
+`bench/zk-compose/scripts/verify_result_evidence.py` checks these records
+against the snapshots and the shared Noir source inventory. The refreshed legacy
+inventories stay value-identical, and legacy keys are compared byte-for-byte by
+test with no key files retained. Static counts are not a runtime or security
+audit. In that run the ignored toolchain tests
+`result_real_public_pattern_k1_k2_proofs_and_verifier_controls` (one genuine K1
+and one K2 proof, each with typed verifier-rejection controls) and
+`result_relation_public_pattern_rejects_tampered_retained_witnesses` passed. Their
+proof outputs are not retained in the repository, so future CI replays are still
+required.
 
 [GPT-6] `result::signed` exposes separately versioned canonical signed-integer
 preparation and verification, with a fixed capacity and no public sign/length

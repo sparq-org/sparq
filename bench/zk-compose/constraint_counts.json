@@ -25,11 +25,12 @@
   "layers": {
     "result": {
       "families": [
+        "result_v4",
         "result_v3",
         "result_v2",
         "result_v1"
       ],
-      "members": 30
+      "members": 32
     },
     "query": {
       "families": [
@@ -57,6 +58,67 @@
     }
   },
   "families": {
+    "result_v4": {
+      "layer": "result",
+      "role": "Version 4 support for released SELECT DISTINCT mappings. The first BGP pattern whose slots are all constants or projected variables is moved to index zero and checked against a public triple table the verifier reconstructs from its query and the released rows, instead of private typed openings. Issuer authentication, credential status (tree depth d), leaf membership and the remaining patterns' private typed and shared-variable joins stay in-circuit. f=0 only: no private FILTER. Compiled only for k in {1, 2}, n=16, p=3, r=4, d=10. Does not establish result completeness or holder identity.",
+      "parameters": [
+        "k",
+        "n",
+        "p",
+        "r",
+        "f",
+        "d"
+      ],
+      "members": [
+        {
+          "member": "result_v4_k1_n16_p3_r4_f0_d10",
+          "params": {
+            "k": 1,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 0,
+            "d": 10
+          },
+          "circuit_size": 31209
+        },
+        {
+          "member": "result_v4_k2_n16_p3_r4_f0_d10",
+          "params": {
+            "k": 2,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 0,
+            "d": 10
+          },
+          "circuit_size": 58022
+        }
+      ],
+      "min_circuit_size": 31209,
+      "max_circuit_size": 58022,
+      "scaling": [
+        {
+          "parameter": "k",
+          "from_member": "result_v4_k1_n16_p3_r4_f0_d10",
+          "from_value": 1,
+          "from_circuit_size": 31209,
+          "to_member": "result_v4_k2_n16_p3_r4_f0_d10",
+          "to_value": 2,
+          "to_circuit_size": 58022,
+          "delta_gates": 26813,
+          "ratio": 1.8591,
+          "held_fixed": {
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 0,
+            "d": 10
+          }
+        }
+      ],
+      "invariances": []
+    },
     "result_v3": {
       "layer": "result",
       "role": "Separately versioned support for released SELECT DISTINCT mappings with canonical signed i64 predicates (s=64; s=0 has no private predicate) and status tree depth d. Sign and exact lexical length have no public selector. Preserves issuer authentication and original string-commitment binding, without result completeness or holder identity.",
@@ -2357,10 +2419,10 @@
     ]
   },
   "summary": {
-    "families": 17,
-    "members": 67,
-    "snapshot_members": 67,
-    "scaling_pairs": 76,
+    "families": 18,
+    "members": 69,
+    "snapshot_members": 69,
+    "scaling_pairs": 77,
     "invariance_facts": 3
   }
 }

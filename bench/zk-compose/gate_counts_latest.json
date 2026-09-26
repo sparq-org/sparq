@@ -204,6 +204,13 @@
     },
     "result_v3_k2_n16_p3_r4_f2_s64_d20": {
       "circuit_size": 464716
+    },
+    "result_v4_k1_n16_p3_r4_f0_d10": {
+      "circuit_size": 31209
+    },
+    "result_v4_k2_n16_p3_r4_f0_d10": {
+      "circuit_size": 58022
     }
-  }
+  },
+  "_comment_opus55_result_v4": "[OPUS-5.5] The two result_v4_* rows were measured separately at source 14d426bde6557ffc3621f50fd34133f8d278aea9 on a non-canonical Linux x86_64 EC2 work box, observed 2026-09-26; the top-level timestamp and nargo_version describe the earlier generated run, not these rows. Provenance and hashes: result_public_gates.json."
 }
