@@ -58,6 +58,14 @@ python3 bench/zk-bindings/run.py plan --regressions /path/to/conformance.json \
 
 `--regressions` retains each original JSON fixture and its golden. Row-only
 fixtures require `--variables` from the original runner; no projection is guessed.
+[OPUS-5.5] The reviewed [projection expectations](projection-expectations.json)
+override that default only for an exact repository source path, source SHA-256
+and retained fixture object (it currently covers three `builtin_edges` date cases
+aliased `y m day h`). Stale, unknown, duplicate or malformed override records
+fail the import. Every imported non-rejection SELECT golden must have unique
+nonempty variable names and list rows whose width equals the projection width.
+The case oracle records which projection it used; `exact-originals.json` pins
+the registry hash and override count.
 Capacity controls remain distinct from normative goldens; [exact cause expectations](capacity-expectations.json)
 bind each retained numeric, temporal or row-limit control to its intended failure.
 An unrelated capacity cause cannot satisfy it. Historical artifacts
