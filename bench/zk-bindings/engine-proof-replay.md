@@ -234,9 +234,9 @@ Controls change verifier expectations (nonce, query bytes, commitment,
 authority), replay a consumed nonce, alter public journal bytes (result and
 commitment), damage the seal and present a fake receipt. Each requires its exact
 host error. The prover never receives a result, so journal edits are integrity
-checks, not malicious-witness checks. The malicious-witness case is the ignored
-test's omitted statement under a verifier-agreed anchor, where the guest aborts
-and no receipt exists. The same omission under `HolderDeclared` is a valid
+checks, not malicious-witness checks. The malicious-witness case is an omitted
+statement under a verifier-agreed anchor. The guest is expected to abort without
+a receipt, but only the separate omission test observes that cause. The same omission under `HolderDeclared` is a valid
 computation that verification binding accepts; only the independent oracle can
 notice a changed result, and it is not a wallet-incompleteness rejection.
 
@@ -263,6 +263,11 @@ cargo test --locked --manifest-path zk/sparql-evaluator/Cargo.toml \
 SPARQ_ENGINE_REPLAY_PROOF_JOB=/abs/job.json RISC0_SERVER_PATH=/installed/r0vm \
   cargo test --locked --release --manifest-path zk/sparql-evaluator/Cargo.toml \
   -p sparq-proved-evaluator --test actual_engine_replay -- --ignored --nocapture
+# [OPUS-5.5] omission negative only; creates no proof
+SPARQ_ENGINE_REPLAY_OMISSION_JOB=/abs/omission-job.json RISC0_SERVER_PATH=/installed/r0vm \
+  cargo test --locked --release --manifest-path zk/sparql-evaluator/Cargo.toml \
+  -p sparq-proved-evaluator --test actual_engine_replay -- --ignored --nocapture \
+  --exact real_engine_replay_omission_is_an_observed_guest_abort
 ```
 
 Native contract tests in `model/tests/engine_replay.rs`:
@@ -335,6 +340,30 @@ log can confirm that the guest aborted. Persisted receipts are evidence for this
 one run and cell only. They are not reusable for other cells, storage modes or
 profiles.
 
+[OPUS-5.5] The ignored `real_engine_replay_omission_is_an_observed_guest_abort`
+reads a separate job with the same schema and a fresh `new_output_directory`,
+named by `SPARQ_ENGINE_REPLAY_OMISSION_JOB`. It uses the same pinned guest and
+r0vm, and it creates no receipt. It prepares the same cell under the
+verifier-agreed request and checks the anchor and the independent expectation.
+It then executes the valid witness once with the SDK `ExternalProver` executor
+(execution only). That run must halt with `Halted(0)`, and its journal must
+equal the native journal and match the expectation. Next it removes the first
+N-Quads statement under the unchanged anchor. Native V3 must reject it with the
+typed anchor mismatch. Finally, it calls `ExternalProver::prove_with_ctx`
+directly with production limits and options (Succinct, dev mode off). This
+bypasses `prove_with_artifact`, which replaces the error with a generic one.
+One entry of the SDK error chain must equal
+`Guest panicked: bounded exact-dataset relation rejected`: the r0vm server
+forwards the guest `abort` text rendered by `SysPanic`. A generic host error,
+missing tool, timeout, session limit or other panic fails the test.
+`inputs.json` (input, guest, pin and r0vm digests), `baseline.json` and
+`omission.json` are written before their assertions. `omission.json` holds the
+bounded error chain (16 entries, 64 KiB each), a mutated-witness digest and
+`guest_abort_observed: false`. `summary.json`
+(`sparq.engine-replay-omission.real-test-summary.v1`) follows only when every
+check passes. It records zero new proofs and `guest_abort_observed: true`. This
+is an observed guest execution rejection, not a negative cryptographic proof.
+
 ## Execution status
 
 The native gate for the adapter at commit `ee23a415a` passed on a remote runner.
@@ -348,7 +377,9 @@ or run. Neither has the ignored test's evidence persistence, nor its native
 tests. Host/guest compilation at that commit is a separate gate and is not
 recorded here. Executed real proofs: zero. Configured but unexecuted: two genuine
 receipts plus one expected guest abort in the ignored test, and one receipt per
-real-mode CLI invocation.
+real-mode CLI invocation. The omission test and its native
+`only_the_exact_known_guest_abort_counts_as_relation_rejection` regression have
+not been compiled or run.
 
 ## Known limitations
 
