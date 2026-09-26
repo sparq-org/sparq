@@ -1,0 +1,107 @@
+# [GPT-6] zkp-10.1: detached guest compilation and genuine local proofs.
+name: zk-exact-evaluator
+
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  merge_group:
+    types: [checks_requested]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: zk-exact-evaluator-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_BUILD_JOBS: 2
+  # Share the guest cache across host test and Clippy build-script variants.
+  CARGO_TARGET_DIR: ${{ github.workspace }}/zk/sparql-evaluator/target
+  RISC0_BUILD_LOCKED: 1
+
+jobs:
+  exact-evaluator:
+    name: real exact-dataset guest and proof
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Classify exact-evaluator inputs (fail closed)
+        id: changes
+        env:
+          EXACT_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+          EXACT_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
+        run: python3 scripts/ci_exact_evaluator_paths.py
+
+      - name: Require explicit classification output
+        env:
+          EXECUTION_REQUIRED: ${{ steps.changes.outputs.required }}
+        run: |
+          case "$EXECUTION_REQUIRED" in
+            true|false) ;;
+            *) echo "Missing or invalid exact-evaluator classification" >&2; exit 1 ;;
+          esac
+
+      - name: Successful irrelevant-diff classification
+        if: steps.changes.outputs.required == 'false'
+        run: echo "No exact-evaluator inputs changed; the mandatory check remains successful."
+
+      - name: Install checksum-pinned RISC Zero binaries and guest Rust
+        if: steps.changes.outputs.required == 'true'
+        # Official release-asset SHA256 digests, pinned with the exact SDK version.
+        run: |
+          set -euo pipefail
+          tool_root="$RUNNER_TEMP/sparq-risc0-3.0.6"
+          mkdir -p "$tool_root/bin" "$tool_root/home/toolchains/v1.97.0-rust-x86_64-unknown-linux-gnu"
+          curl --fail --location --retry 3 https://github.com/risc0/risc0/releases/download/v3.0.6/cargo-risczero-x86_64-unknown-linux-gnu.tgz -o "$tool_root/cli.tgz"
+          curl --fail --location --retry 3 https://github.com/risc0/rust/releases/download/r0.1.97.0/rust-toolchain-x86_64-unknown-linux-gnu.tar.gz -o "$tool_root/rust.tar.gz"
+          echo "615d961bfb81d318db5071d7548389c850e324ac7f421c075176daf26082a60a  $tool_root/cli.tgz" | sha256sum --check --strict
+          echo "100b597d605b706bec94e1d32bfaaf5851df8d75173f986d4b56a3e90916be53  $tool_root/rust.tar.gz" | sha256sum --check --strict
+          tar -xzf "$tool_root/cli.tgz" -C "$tool_root/bin"
+          tar -xzf "$tool_root/rust.tar.gz" -C "$tool_root/home/toolchains/v1.97.0-rust-x86_64-unknown-linux-gnu"
+          printf '[default_versions]\nrust = "1.97.0"\n' > "$tool_root/home/settings.toml"
+          "$tool_root/bin/r0vm" --version
+          echo "$tool_root/bin" >> "$GITHUB_PATH"
+          echo "RISC0_HOME=$tool_root/home" >> "$GITHUB_ENV"
+          echo "RISC0_SERVER_PATH=$tool_root/bin/r0vm" >> "$GITHUB_ENV"
+
+      - name: Activate pinned host Rust
+        if: steps.changes.outputs.required == 'true'
+        run: |
+          rustup show active-toolchain
+          rustup component add clippy
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        if: steps.changes.outputs.required == 'true'
+        with:
+          key: zk-exact-evaluator-risc0-3.0.6-rust-1.97.0
+          workspaces: zk/sparql-evaluator
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Evidence export guard regressions
+        if: steps.changes.outputs.required == 'true'
+        run: python3 -m unittest discover -s scripts/tests -p 'test_ci_exact_evaluator_*.py'
+
+      - name: Export source-bound actual guest and genuine proof evidence
+        if: steps.changes.outputs.required == 'true'
+        # Executes native regressions, every real guest/proof test, and Clippy.
+        # Local path packages are rebuilt; the same exported program must verify
+        # every persisted synthetic receipt. Missing provenance fails the job.
+        run: python3 scripts/ci_exact_evaluator_evidence.py --output "$RUNNER_TEMP/sparq-exact-evidence"
+
+      - name: Upload exact artifact and campaign evidence
+        if: always() && steps.changes.outputs.required == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: exact-evaluator-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/sparq-exact-evidence
+          if-no-files-found: error
+          retention-days: 30

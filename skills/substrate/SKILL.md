@@ -42,11 +42,18 @@ the fixed-point `Dec` struct (EXACT integer/decimal arithmetic, no f64 rounding)
 tower), and the XSD lexical helpers `split_decimal`, `parse_xsd_f64`, `parse_xsd_f32`,
 `fmt_xsd_double`. `parse_xsd_f64` delegates to `sparq_core::parse_xsd_f64` (sq-9781x) — the
 shared XSD f64 SPELLING body. The `sparq-core` numeric-value cache layers a DATATYPE-AWARE
-gate on top (`sparq_core::numeric_cache_value`, sq-74oy4/sq-6b1lj: integers scale-0, decimals
-no-exponent, i128-fit, trimmed), so a cache-hit ⟺ `Num::of_literal` accepts — a lexical
+gate on top (`sparq_core::numeric_cache_value`: integer digit grammar and subtype
+facets, decimals without exponents, i128-fit, XML-whitespace-trimmed), so a cache-hit ⟺ `Num::of_literal` accepts — a lexical
 ill-formed for its datatype (`"1.5"^^xsd:integer`) misses the cache exactly as `of_literal`
 type-errors it, uniformly on `=`/`<`/`>`. The differential test
 `cache_f64_seam_vs_as_numeric_differential` pins that agreement.
+[GPT-6] `Num::of_literal` and `as_numeric` share the lexical/facet check
+`sparq_core::numeric_literal_valid`. Decimal spellings such as `"5.0"^^xsd:integer`
+and out-of-range subtype values such as `"1200"^^xsd:byte` return `None`.
+A valid integer or decimal beyond the tower's finite mantissa capacity also returns
+`None`; use `numeric_literal_valid` when asking about datatype membership instead
+of arithmetic representability. The existing overflow promotion policy is unchanged.
+
 Pulls `oxrdf` only when enabled. Two ordering methods on `Num`:
 - `Num::cmp_total` — ORDER BY / MIN/MAX total order; NaN totalised FIRST.
 - `Num::cmp_relational` — SPARQL `<`/`>` / D-entailment / RIF numeric equality; NaN → `None`
@@ -295,3 +302,18 @@ _Status: publishable (sq-qonbz.4 [SONNET-4.6]). All four modules implemented and
 neutral vs the pre-move engine baseline (W3C SPARQL conformance floor bit-identical; join/
 numeric/compare micro-benches within noise). Phase-5 reasoner adoption (consuming `join` from
 `sparq-reason` / `sparq-reason-el`) is tracked separately._
+
+### Borrowed numeric operands (GPT-6)
+
+`numeric::Num::of_parts(value, datatype)` is the allocation-free parser shared
+by `Num::of_literal` and the reasoner comparator. Both validate numeric lexical
+syntax, XML whitespace and integer facets before the finite arithmetic tower.
+The core `Graph::exact_numeric_lexical` and engine exact-decimal comparison
+helpers apply the same validity gate before preserving the original lexical.
+This keeps cached, scalar and compiled arithmetic errors aligned; it does not
+expand arithmetic magnitude capacity or change D-entailment's distinct keys.
+
+Numeric unsigned signs follow [XSD 1.1 §3.4.21](https://www.w3.org/TR/xmlschema11-2/#unsignedLong):
+`+1` and `-0` remain valid within range. This matches the datatype reference in
+[RDF 1.1 Concepts §5.1](https://www.w3.org/TR/rdf11-concepts/#xsd-datatypes);
+it does not change the separately bounded temporal representation.

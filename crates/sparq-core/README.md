@@ -27,6 +27,27 @@ assert_eq!(count, 1);
 # Ok(()) }
 ```
 
+## Literal validation and evaluation caches
+
+[GPT-6] `numeric_literal_valid(value, datatype)` checks lexical forms and integer
+subtype facets after XML whitespace trimming, independently of finite arithmetic
+capacity. `numeric_cache_value` omits invalid lexicals/facets, values outside its
+representation and the existing NaN sentinel; larger literals can remain valid.
+
+`temporal::ExactTimeline` / `Graph::exact_temporal_value` borrow exact fractional
+keys with checked calendar/timezone parsing; initialized keys survive dictionary appends, which parse only new temporal IDs. Legacy epoch caches remain approximate.
+Malformed input returns `None`; [API details](../../skills/data-formats/SKILL.md) cover range and cost.
+
+**Legacy mmap archives:** `Graph::open` ignores the old unversioned
+`numerics.bin`/`temporals.bin` and rebuilds caches in memory, preserving all RDF
+terms and triples. All writers use `numerics-v2.bin`/`temporals-v2.bin`; missing or
+wrong-sized current files also trigger rebuilds.
+
+Legacy opens cost a dictionary scan and cache allocation until migrated with
+`Graph::open(old)?.save(new)?`. Current compatible caches remain memory-mapped.
+Versions mark semantic compatibility, not integrity; the trusted-storage contract
+still applies. Details: [data-formats guide](../../skills/data-formats/SKILL.md).
+
 ## ✨ Features
 
 - **RDF parsing & ingest** — load Turtle, N-Triples, N-Quads, and TriG from a `&str` or any

@@ -7,8 +7,8 @@ table in `Cargo.toml`, required for the `[patch.crates-io]` path patch).
 Patches **§1–§6** are surgical spec-conformance parser fixes, each verified
 against the W3C SPARQL test suite (w3c/rdf-tests @ `f25dbc0`) and prepared as an
 upstream PR against oxigraph/oxigraph — see `docs/upstream-proposals.md` at the
-repo root. Patches **§7–§10** are sparq-local (a build guard, DoS hardening, a
-custom-aggregate fix, and a vendor extension); §10 is explicitly *not* an
+repo root. Patches **§7–§11** are sparq-local (a build guard, DoS hardening, a
+custom-aggregate fix, a vendor extension, and guest portability); §10 is explicitly *not* an
 upstream candidate. Retiring this tree therefore takes more than an upstream
 release — see the release watch below.
 
@@ -330,3 +330,28 @@ means the release is missing a fix — keep the tree and report it upstream.
 - **Not upstream**: this is a sparq extension, not a spec conformance fix — it is NOT
   prepared as an oxigraph PR (unlike §1–§6). Drop if/when W3C standardises a callable
   multiplicity builtin.
+
+## 11. Deterministic internal variables for the bounded zkvm evaluator
+
+<!-- [GPT-6] zkp-10.1; sparq-local portability patch. -->
+
+On `target_os = "zkvm"` only, generated aggregate/projection variables use a
+checked monotonic counter in the `#sparq-zkvm-var#` namespace. The `#` character
+is outside SPARQL VARNAME syntax, so user variables cannot capture these internal
+names. Namespace exhaustion panics and cannot produce a successful guest receipt.
+Other targets keep the upstream allocator unchanged.
+
+This removes the parser's ambient-randomness requirement when running inside the
+detached exact-evaluator guest; it does not implement RAND, UUID or RDF blank-node
+generation. The actual guest proof fixture in `zk/sparql-evaluator/host/tests`
+exercises aggregate aliases and a grouped subquery with this allocator.
+Retiring the vendored tree must preserve equivalent guest portability.
+
+The opt-in `sparq-deterministic-paths` feature also lowers fixed-length path
+intermediates into checked monotonic `#sparq-path#` blank-node patterns, on native
+and guest targets. These are existential query variables, excluded from
+`SELECT *`; they are not generated RDF data. The leading `#` cannot be written
+in a source blank-node label, allowing the exact evaluator to admit only these
+internal patterns while rejecting source blank nodes. Normal parser builds keep
+the upstream allocator. The detached evaluator enables this feature explicitly;
+its internal algebra is for execution, not a portable SPARQL text serialization.

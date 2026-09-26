@@ -1,0 +1,2165 @@
+{
+  "schema_version": 1,
+  "authored_by": "GPT-6",
+  "fixture_origin": "Original synthetic cases; expectations derived from the linked SPARQL specification, not generated from evaluator output.",
+  "default_dataset": "core.nt",
+  "cases": [
+    {
+      "id": "bgp-projection-bag",
+      "features": [
+        "bgp",
+        "projection"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#BasicGraphPatterns",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?s WHERE { ?s ex:knows ?o }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Select": {
+            "variables": [
+              "s"
+            ],
+            "order": "Bag",
+            "rows": [
+              [
+                "<http://example.org/a>"
+              ],
+              [
+                "<http://example.org/a>"
+              ],
+              [
+                "<http://example.org/b>"
+              ]
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "join-shared-variable",
+      "features": [
+        "joins"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#GroupPatterns",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?s ?name WHERE { ?s ex:knows ?o . ?o ex:name ?name }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Select": {
+            "variables": [
+              "s",
+              "name"
+            ],
+            "order": "Bag",
+            "rows": [
+              [
+                "<http://example.org/a>",
+                "\"Bob\""
+              ]
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "repeated-variable-no-match",
+      "features": [
+        "joins"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#BasicGraphPatterns",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?s WHERE { ?s ex:knows ?s }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Select": {
+            "variables": [
+              "s"
+            ],
+            "order": "Bag",
+            "rows": []
+          }
+        }
+      }
+    },
+    {
+      "id": "rdf-graph-deduplicates-source",
+      "features": [
+        "bgp"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#BasicGraphPatterns",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?s WHERE { ?s ex:score 10 }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Select": {
+            "variables": [
+              "s"
+            ],
+            "order": "Bag",
+            "rows": [
+              [
+                "<http://example.org/a>"
+              ]
+            ]
+          }
+        }
+      },
+      "dataset": "<http://example.org/a> <http://example.org/score> \"10\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n<http://example.org/b> <http://example.org/score> \"20\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n<http://example.org/c> <http://example.org/score> \"30\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n<http://example.org/a> <http://example.org/name> \"Alice\" .\n<http://example.org/b> <http://example.org/name> \"Bob\" .\n<http://example.org/a> <http://example.org/group> \"red\" .\n<http://example.org/b> <http://example.org/group> \"red\" .\n<http://example.org/c> <http://example.org/group> \"blue\" .\n<http://example.org/a> <http://example.org/knows> <http://example.org/b> .\n<http://example.org/a> <http://example.org/knows> <http://example.org/c> .\n<http://example.org/b> <http://example.org/knows> <http://example.org/c> .\n<http://example.org/c> <http://example.org/blocked> \"true\"^^<http://www.w3.org/2001/XMLSchema#boolean> .\n<http://example.org/a> <http://example.org/nick> \"\" .\n<http://example.org/a> <http://example.org/score> \"10\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n"
+    },
+    {
+      "id": "distinct-projection",
+      "features": [
+        "distinct"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#modDuplicates",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT DISTINCT ?s WHERE { ?s ex:knows ?o }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Select": {
+            "variables": [
+              "s"
+            ],
+            "order": "Bag",
+            "rows": [
+              [
+                "<http://example.org/a>"
+              ],
+              [
+                "<http://example.org/b>"
+              ]
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "empty-group-one-empty-mapping",
+      "features": [
+        "empty_group"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#emptyGroupPattern",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT * WHERE {}",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Select": {
+            "variables": [],
+            "order": "Bag",
+            "rows": [
+              []
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "union-keeps-duplicates",
+      "features": [
+        "union"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#alternatives",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?x WHERE { { VALUES ?x { 1 1 } } UNION { VALUES ?x { 1 2 } } }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Select": {
+            "variables": [
+              "x"
+            ],
+            "order": "Bag",
+            "rows": [
+              [
+                "\"1\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+              ],
+              [
+                "\"1\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+              ],
+              [
+                "\"1\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+              ],
+              [
+                "\"2\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+              ]
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "values-undef-duplicate-bind",
+      "features": [
+        "values"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#inline-data",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?x ?y WHERE { VALUES ?x { 1 1 UNDEF } BIND((?x + 2) AS ?y) }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Select": {
+            "variables": [
+              "x",
+              "y"
+            ],
+            "order": "Bag",
+            "rows": [
+              [
+                null,
+                null
+              ],
+              [
+                "\"1\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+                "\"3\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+              ],
+              [
+                "\"1\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+                "\"3\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+              ]
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "values-tuple-compatible-join",
+      "features": [
+        "values"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#inline-data",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?x ?y WHERE { VALUES (?x ?y) { (1 UNDEF) (UNDEF 2) } VALUES ?x { 1 3 } }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Select": {
+            "variables": [
+              "x",
+              "y"
+            ],
+            "order": "Bag",
+            "rows": [
+              [
+                "\"1\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+                null
+              ],
+              [
+                "\"1\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+                "\"2\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+              ],
+              [
+                "\"3\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+                "\"2\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+              ]
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "filter-error-removes-only-error-row",
+      "features": [
+        "filter_errors"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#evaluation",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?x WHERE { VALUES ?x { 1 UNDEF \"bad\" } FILTER(?x > 0) }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Select": {
+            "variables": [
+              "x"
+            ],
+            "order": "Bag",
+            "rows": [
+              [
+                "\"1\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+              ]
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "bind-error-keeps-mapping-unbound",
+      "features": [
+        "bind_errors"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#bind",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?x ?y WHERE { VALUES ?x { 1 \"bad\" } BIND((?x + 1) AS ?y) }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Select": {
+            "variables": [
+              "x",
+              "y"
+            ],
+            "order": "Bag",
+            "rows": [
+              [
+                "\"1\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+                "\"2\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+              ],
+              [
+                "\"bad\"",
+                null
+              ]
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "error-or-true",
+      "features": [
+        "ebv"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#func-logical-or",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ASK { FILTER((?missing || true)) }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Ask": true
+        }
+      }
+    },
+    {
+      "id": "error-and-false",
+      "features": [
+        "ebv"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#func-logical-and",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ASK { FILTER(?missing && false) }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Ask": false
+        }
+      }
+    },
+    {
+      "id": "if-lazy-branch",
+      "features": [
+        "functional_forms"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#func-if",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ASK { FILTER(IF(true, 7, ?missing) = 7) }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Ask": true
+        }
+      }
+    },
+    {
+      "id": "coalesce-skips-errors",
+      "features": [
+        "functional_forms"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#func-coalesce",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ASK { FILTER(COALESCE(?missing, 1 / 0, 7) = 7) }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Ask": true
+        }
+      }
+    },
+    {
+      "id": "in-match-survives-error",
+      "features": [
+        "functional_forms"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#func-in",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ASK { FILTER(2 IN (1, ?missing, 2)) }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Ask": true
+        }
+      }
+    },
+    {
+      "id": "not-in-absent",
+      "features": [
+        "functional_forms"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#func-not-in",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ASK { FILTER(2 NOT IN (1, 3)) }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Ask": true
+        }
+      }
+    },
+    {
+      "id": "optional-unbound-versus-empty",
+      "features": [
+        "optional"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#optionals",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?s ?nick WHERE { ?s ex:score ?n OPTIONAL { ?s ex:nick ?nick } }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Select": {
+            "variables": [
+              "s",
+              "nick"
+            ],
+            "order": "Bag",
+            "rows": [
+              [
+                "<http://example.org/a>",
+                "\"\""
+              ],
+              [
+                "<http://example.org/b>",
+                null
+              ],
+              [
+                "<http://example.org/c>",
+                null
+              ]
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "optional-filter-correlated",
+      "features": [
+        "optional_correlation"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#OptionalMatching",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?s ?other WHERE { ?s ex:score ?score OPTIONAL { ?s ex:knows ?other . ?other ex:score ?otherScore FILTER(?otherScore > ?score + 10) } }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Select": {
+            "variables": [
+              "s",
+              "other"
+            ],
+            "order": "Bag",
+            "rows": [
+              [
+                "<http://example.org/a>",
+                "<http://example.org/c>"
+              ],
+              [
+                "<http://example.org/b>",
+                null
+              ],
+              [
+                "<http://example.org/c>",
+                null
+              ]
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "minus-removes-compatible",
+      "features": [
+        "minus"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#neg-minus",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?s WHERE { ?s ex:score ?n MINUS { ?s ex:blocked true } }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Select": {
+            "variables": [
+              "s"
+            ],
+            "order": "Bag",
+            "rows": [
+              [
+                "<http://example.org/a>"
+              ],
+              [
+                "<http://example.org/b>"
+              ]
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "minus-disjoint-domains-keeps-left",
+      "features": [
+        "minus"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#neg-notexists-minus",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?s WHERE { ?s ex:score ?n MINUS { VALUES ?unrelated { 1 } } }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Select": {
+            "variables": [
+              "s"
+            ],
+            "order": "Bag",
+            "rows": [
+              [
+                "<http://example.org/a>"
+              ],
+              [
+                "<http://example.org/b>"
+              ],
+              [
+                "<http://example.org/c>"
+              ]
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "not-exists-correlated",
+      "features": [
+        "not_exists"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#neg-notexists",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?s WHERE { ?s ex:score ?n FILTER NOT EXISTS { ?s ex:blocked true } }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Select": {
+            "variables": [
+              "s"
+            ],
+            "order": "Bag",
+            "rows": [
+              [
+                "<http://example.org/a>"
+              ],
+              [
+                "<http://example.org/b>"
+              ]
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "not-exists-fixed-pattern-removes-all",
+      "features": [
+        "not_exists"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#neg-notexists-minus",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?s WHERE { ?s ex:score ?n FILTER NOT EXISTS { ex:c ex:blocked true } }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Select": {
+            "variables": [
+              "s"
+            ],
+            "order": "Bag",
+            "rows": []
+          }
+        }
+      }
+    },
+    {
+      "id": "exists-correlated-filter",
+      "features": [
+        "exists"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#neg-exists",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?s WHERE { ?s ex:score ?n FILTER EXISTS { ?s ex:knows ?o . ?o ex:score ?m FILTER(?m > ?n + 10) } }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Select": {
+            "variables": [
+              "s"
+            ],
+            "order": "Bag",
+            "rows": [
+              [
+                "<http://example.org/a>"
+              ]
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "aggregate-group-having",
+      "features": [
+        "group_having"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#aggregates",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?g (COUNT(*) AS ?count) (SUM(?score) AS ?sum) WHERE { ?s ex:group ?g ; ex:score ?score } GROUP BY ?g HAVING(COUNT(*) > 1)",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Select": {
+            "variables": [
+              "g",
+              "count",
+              "sum"
+            ],
+            "order": "Bag",
+            "rows": [
+              [
+                "\"red\"",
+                "\"2\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+                "\"30\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+              ]
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "aggregate-empty-count",
+      "features": [
+        "aggregate_empty"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#aggregateExample",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT (COUNT(*) AS ?count) WHERE { ?s ex:missing ?o }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Select": {
+            "variables": [
+              "count"
+            ],
+            "order": "Bag",
+            "rows": [
+              [
+                "\"0\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+              ]
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "aggregate-count-distinct-unbound",
+      "features": [
+        "aggregate_distinct"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#defn_aggCount",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT (COUNT(?x) AS ?count) (COUNT(DISTINCT ?x) AS ?distinct) WHERE { VALUES ?x { 1 1 UNDEF 2 } }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Select": {
+            "variables": [
+              "count",
+              "distinct"
+            ],
+            "order": "Bag",
+            "rows": [
+              [
+                "\"3\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+                "\"2\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+              ]
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "aggregate-min-max",
+      "features": [
+        "aggregates"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#defn_aggMin",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT (MIN(?x) AS ?min) (MAX(?x) AS ?max) WHERE { VALUES ?x { 2 1 4 } }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Select": {
+            "variables": [
+              "min",
+              "max"
+            ],
+            "order": "Bag",
+            "rows": [
+              [
+                "\"1\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+                "\"4\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+              ]
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "aggregate-average-value",
+      "features": [
+        "aggregates"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#defn_aggAvg",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ASK { { SELECT (AVG(?x) AS ?avg) WHERE { VALUES ?x { 1 4 } } } FILTER(?avg = 2.5) }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Ask": true
+        }
+      }
+    },
+    {
+      "id": "aggregate-sample-unambiguous",
+      "features": [
+        "aggregates"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#defn_aggSample",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT (SAMPLE(?x) AS ?sample) WHERE { VALUES ?x { 7 7 } }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Select": {
+            "variables": [
+              "sample"
+            ],
+            "order": "Bag",
+            "rows": [
+              [
+                "\"7\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+              ]
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "aggregate-group-concat-unambiguous",
+      "features": [
+        "aggregates"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#defn_aggGroupConcat",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT (GROUP_CONCAT(?x; SEPARATOR=\"|\") AS ?text) WHERE { VALUES ?x { \"a\" \"a\" } }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Select": {
+            "variables": [
+              "text"
+            ],
+            "order": "Bag",
+            "rows": [
+              [
+                "\"a|a\""
+              ]
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "subquery-project-scope",
+      "features": [
+        "subqueries",
+        "projection"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#subqueries",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?s WHERE { { SELECT ?s WHERE { ?s ex:score ?score FILTER(?score >= 20) } } ?s ex:group \"red\" }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Select": {
+            "variables": [
+              "s"
+            ],
+            "order": "Bag",
+            "rows": [
+              [
+                "<http://example.org/b>"
+              ]
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "ordered-limit-offset",
+      "features": [
+        "order_slice"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#modOffset",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?s WHERE { ?s ex:score ?score } ORDER BY DESC(?score) LIMIT 1 OFFSET 1",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Select": {
+            "variables": [
+              "s"
+            ],
+            "order": "Sequence",
+            "rows": [
+              [
+                "<http://example.org/b>"
+              ]
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "ordered-unbound-first",
+      "features": [
+        "order_slice"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#modOrderBy",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?s ?nick WHERE { ?s ex:score ?n OPTIONAL { ?s ex:nick ?nick } } ORDER BY ?nick ?s",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Select": {
+            "variables": [
+              "s",
+              "nick"
+            ],
+            "order": "Sequence",
+            "rows": [
+              [
+                "<http://example.org/b>",
+                null
+              ],
+              [
+                "<http://example.org/c>",
+                null
+              ],
+              [
+                "<http://example.org/a>",
+                "\"\""
+              ]
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "limit-zero",
+      "features": [
+        "order_slice"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#modResultLimit",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?s WHERE { ?s ex:score ?n } LIMIT 0",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Select": {
+            "variables": [
+              "s"
+            ],
+            "order": "Bag",
+            "rows": []
+          }
+        }
+      }
+    },
+    {
+      "id": "ask-true",
+      "features": [
+        "ask"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#ask",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ASK { ex:a ex:score 10 }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Ask": true
+        }
+      }
+    },
+    {
+      "id": "ask-false",
+      "features": [
+        "ask"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#ask",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ASK { ?s ex:score ?n FILTER(?n > 100) }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Ask": false
+        }
+      }
+    },
+    {
+      "id": "path-sequence",
+      "features": [
+        "paths_sequence"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#propertypaths",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?o WHERE { ex:a ex:knows/ex:knows ?o }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Select": {
+            "variables": [
+              "o"
+            ],
+            "order": "Bag",
+            "rows": [
+              [
+                "<http://example.org/c>"
+              ]
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "path-inverse",
+      "features": [
+        "paths_inverse"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#propertypaths",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?s WHERE { ex:c ^ex:knows ?s }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Select": {
+            "variables": [
+              "s"
+            ],
+            "order": "Bag",
+            "rows": [
+              [
+                "<http://example.org/a>"
+              ],
+              [
+                "<http://example.org/b>"
+              ]
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "path-alternative-duplicates",
+      "features": [
+        "paths_alternative"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#propertypaths",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?o WHERE { ex:a (ex:knows|ex:knows) ?o }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Select": {
+            "variables": [
+              "o"
+            ],
+            "order": "Bag",
+            "rows": [
+              [
+                "<http://example.org/b>"
+              ],
+              [
+                "<http://example.org/b>"
+              ],
+              [
+                "<http://example.org/c>"
+              ],
+              [
+                "<http://example.org/c>"
+              ]
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "path-transitive-deduplicates",
+      "features": [
+        "paths_transitive"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#PropertyPathPatterns",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?o WHERE { ex:a ex:knows+ ?o }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Select": {
+            "variables": [
+              "o"
+            ],
+            "order": "Bag",
+            "rows": [
+              [
+                "<http://example.org/b>"
+              ],
+              [
+                "<http://example.org/c>"
+              ]
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "path-zero-length",
+      "features": [
+        "paths_zero"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#PropertyPathPatterns",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?o WHERE { ex:a ex:knows* ?o }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Select": {
+            "variables": [
+              "o"
+            ],
+            "order": "Bag",
+            "rows": [
+              [
+                "<http://example.org/a>"
+              ],
+              [
+                "<http://example.org/b>"
+              ],
+              [
+                "<http://example.org/c>"
+              ]
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "path-zero-or-one",
+      "features": [
+        "paths_zero"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#propertypaths",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?o WHERE { ex:a ex:knows? ?o }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Select": {
+            "variables": [
+              "o"
+            ],
+            "order": "Bag",
+            "rows": [
+              [
+                "<http://example.org/a>"
+              ],
+              [
+                "<http://example.org/b>"
+              ],
+              [
+                "<http://example.org/c>"
+              ]
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "path-negated-set",
+      "features": [
+        "paths_negated"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#propertypaths",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?s WHERE { ?s !ex:score \"Alice\" }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Select": {
+            "variables": [
+              "s"
+            ],
+            "order": "Bag",
+            "rows": [
+              [
+                "<http://example.org/a>"
+              ]
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "term-types",
+      "features": [
+        "term_functions"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#func-isIRI",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ASK { FILTER(isIRI(ex:a) && isURI(ex:a) && isLiteral(\"x\") && !isBlank(ex:a) && isNumeric(2) && !isNumeric(\"x\")) }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Ask": true
+        }
+      }
+    },
+    {
+      "id": "term-identity",
+      "features": [
+        "term_functions"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#func-sameTerm",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ASK { FILTER(sameTerm(\"x\"@en, \"x\"@en) && !sameTerm(1, 1.0)) }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Ask": true
+        }
+      }
+    },
+    {
+      "id": "term-str-lang-datatype",
+      "features": [
+        "term_functions"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#func-str",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ASK { FILTER(STR(ex:a) = \"http://example.org/a\" && LANG(\"x\"@en) = \"en\" && DATATYPE(2) = xsd:integer) }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Ask": true
+        }
+      }
+    },
+    {
+      "id": "term-constructors",
+      "features": [
+        "term_functions"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#func-strdt",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ASK { FILTER(IRI(\"http://example.org/a\") = ex:a && STRDT(\"3\", xsd:integer) = 3 && sameTerm(STRLANG(\"x\", \"en\"), \"x\"@en)) }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Ask": true
+        }
+      }
+    },
+    {
+      "id": "string-length-unicode",
+      "features": [
+        "string_functions"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#func-strings",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ASK { FILTER(STRLEN(\"caf\u00e9\") = 4) }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Ask": true
+        }
+      }
+    },
+    {
+      "id": "string-substring",
+      "features": [
+        "string_functions"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#func-strings",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ASK { FILTER(SUBSTR(\"abcdef\", 2, 3) = \"bcd\") }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Ask": true
+        }
+      }
+    },
+    {
+      "id": "string-case",
+      "features": [
+        "string_functions"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#func-strings",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ASK { FILTER(UCASE(\"Abc\") = \"ABC\" && LCASE(\"AbC\") = \"abc\") }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Ask": true
+        }
+      }
+    },
+    {
+      "id": "string-start-end-contains",
+      "features": [
+        "string_functions"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#func-strings",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ASK { FILTER(STRSTARTS(\"abc\", \"a\") && STRENDS(\"abc\", \"c\") && CONTAINS(\"abc\", \"b\")) }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Ask": true
+        }
+      }
+    },
+    {
+      "id": "string-before-after",
+      "features": [
+        "string_functions"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#func-strings",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ASK { FILTER(STRBEFORE(\"abc:def\", \":\") = \"abc\" && STRAFTER(\"abc:def\", \":\") = \"def\") }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Ask": true
+        }
+      }
+    },
+    {
+      "id": "string-concat",
+      "features": [
+        "string_functions"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#func-strings",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ASK { FILTER(CONCAT(\"a\", \"b\", \"c\") = \"abc\") }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Ask": true
+        }
+      }
+    },
+    {
+      "id": "string-langmatches",
+      "features": [
+        "string_functions"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#func-strings",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ASK { FILTER(LANGMATCHES(\"en-GB\", \"en\") && !LANGMATCHES(\"\", \"*\")) }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Ask": true
+        }
+      }
+    },
+    {
+      "id": "string-uri-encode",
+      "features": [
+        "string_functions"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#func-strings",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ASK { FILTER(ENCODE_FOR_URI(\"a b\") = \"a%20b\") }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Ask": true
+        }
+      }
+    },
+    {
+      "id": "string-regex-flags",
+      "features": [
+        "string_functions"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#func-strings",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ASK { FILTER(REGEX(\"AbC\", \"^abc$\", \"i\")) }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Ask": true
+        }
+      }
+    },
+    {
+      "id": "string-replace",
+      "features": [
+        "string_functions"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#func-strings",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ASK { FILTER(REPLACE(\"abc123\", \"[0-9]+\", \"x\") = \"abcx\") }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Ask": true
+        }
+      }
+    },
+    {
+      "id": "numeric-promotion",
+      "features": [
+        "numeric_functions"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#func-numerics",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ASK { FILTER(1 + 2.5 = 3.5) }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Ask": true
+        }
+      }
+    },
+    {
+      "id": "numeric-divide",
+      "features": [
+        "numeric_functions"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#func-numerics",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ASK { FILTER(5 / 2 = 2.5) }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Ask": true
+        }
+      }
+    },
+    {
+      "id": "numeric-abs",
+      "features": [
+        "numeric_functions"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#func-numerics",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ASK { FILTER(ABS(-3) = 3) }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Ask": true
+        }
+      }
+    },
+    {
+      "id": "numeric-rounding",
+      "features": [
+        "numeric_functions"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#func-numerics",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ASK { FILTER(CEIL(2.1) = 3 && FLOOR(2.9) = 2 && ROUND(-2.5) = -2) }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Ask": true
+        }
+      }
+    },
+    {
+      "id": "numeric-unary",
+      "features": [
+        "numeric_functions"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#func-numerics",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ASK { FILTER(-(-2) = +2) }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Ask": true
+        }
+      }
+    },
+    {
+      "id": "date-components",
+      "features": [
+        "date_functions"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#func-date-time",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ASK { FILTER(YEAR(\"2024-02-29T10:30:15.5+02:00\"^^xsd:dateTime) = 2024 && MONTH(\"2024-02-29T10:30:15.5+02:00\"^^xsd:dateTime) = 2 && DAY(\"2024-02-29T10:30:15.5+02:00\"^^xsd:dateTime) = 29 && HOURS(\"2024-02-29T10:30:15.5+02:00\"^^xsd:dateTime) = 10 && MINUTES(\"2024-02-29T10:30:15.5+02:00\"^^xsd:dateTime) = 30 && SECONDS(\"2024-02-29T10:30:15.5+02:00\"^^xsd:dateTime) = 15.5) }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Ask": true
+        }
+      }
+    },
+    {
+      "id": "date-zone",
+      "features": [
+        "date_functions"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#func-timezone",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ASK { FILTER(TZ(\"2024-02-29T10:30:15.5+02:00\"^^xsd:dateTime) = \"+02:00\" && TIMEZONE(\"2024-02-29T10:30:15.5+02:00\"^^xsd:dateTime) = \"PT2H\"^^xsd:dayTimeDuration) }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Ask": true
+        }
+      }
+    },
+    {
+      "id": "date-comparison",
+      "features": [
+        "date_functions"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#OperatorMapping",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ASK { FILTER(\"2024-01-01T00:00:00Z\"^^xsd:dateTime = \"2024-01-01T01:00:00+01:00\"^^xsd:dateTime) }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Ask": true
+        }
+      }
+    },
+    {
+      "id": "xsd-casts",
+      "features": [
+        "casts"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#FunctionMapping",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ASK { FILTER(xsd:integer(\"3\") = 3 && xsd:decimal(\"2.5\") = 2.5 && xsd:double(\"2.5\") = 2.5 && xsd:float(\"2.5\") = 2.5 && xsd:boolean(\"true\") && xsd:string(3) = \"3\") }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Ask": true
+        }
+      }
+    },
+    {
+      "id": "hash-md5",
+      "features": [
+        "hash_functions"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#func-hash",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ASK { FILTER(MD5(\"abc\") = \"900150983cd24fb0d6963f7d28e17f72\") }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Ask": true
+        }
+      }
+    },
+    {
+      "id": "hash-sha1",
+      "features": [
+        "hash_functions"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#func-hash",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ASK { FILTER(SHA1(\"abc\") = \"a9993e364706816aba3e25717850c26c9cd0d89d\") }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Ask": true
+        }
+      }
+    },
+    {
+      "id": "hash-sha256",
+      "features": [
+        "hash_functions"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#func-hash",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ASK { FILTER(SHA256(\"abc\") = \"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\") }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Ask": true
+        }
+      }
+    },
+    {
+      "id": "hash-sha384",
+      "features": [
+        "hash_functions"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#func-hash",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ASK { FILTER(SHA384(\"abc\") = \"cb00753f45a35e8bb5a03d699ac65007272c32ab0eded1631a8b605a43ff5bed8086072ba1e7cc2358baeca134c825a7\") }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Ask": true
+        }
+      }
+    },
+    {
+      "id": "hash-sha512",
+      "features": [
+        "hash_functions"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#func-hash",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ASK { FILTER(SHA512(\"abc\") = \"ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f\") }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Ask": true
+        }
+      }
+    },
+    {
+      "id": "reject-named-graph",
+      "features": [
+        "named_graphs"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#queryDataset",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?s WHERE { GRAPH ex:g { ?s ?p ?o } }",
+      "expected": {
+        "kind": "rejection",
+        "stage": "admission",
+        "error": "GRAPH, SERVICE and LATERAL are not admitted"
+      }
+    },
+    {
+      "id": "reject-from-default",
+      "features": [
+        "dataset_clauses"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#specifyingDataset",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?s FROM <http://example.org/g> WHERE { ?s ?p ?o }",
+      "expected": {
+        "kind": "rejection",
+        "stage": "admission",
+        "error": "dataset clauses are not admitted"
+      }
+    },
+    {
+      "id": "reject-from-named",
+      "features": [
+        "dataset_clauses"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#specifyingDataset",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?s FROM NAMED <http://example.org/g> WHERE { GRAPH ?g { ?s ?p ?o } }",
+      "expected": {
+        "kind": "rejection",
+        "stage": "admission",
+        "error": "dataset clauses are not admitted"
+      }
+    },
+    {
+      "id": "reject-construct",
+      "features": [
+        "graph_outputs"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#construct",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o }",
+      "expected": {
+        "kind": "rejection",
+        "stage": "admission",
+        "error": "only SELECT and ASK are admitted"
+      }
+    },
+    {
+      "id": "reject-describe",
+      "features": [
+        "graph_outputs"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#describe",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> DESCRIBE ex:a",
+      "expected": {
+        "kind": "rejection",
+        "stage": "admission",
+        "error": "only SELECT and ASK are admitted"
+      }
+    },
+    {
+      "id": "reject-service",
+      "features": [
+        "service"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#basic-federated-query",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?s WHERE { SERVICE <https://example.org/sparql> { ?s ?p ?o } }",
+      "expected": {
+        "kind": "rejection",
+        "stage": "admission",
+        "error": "GRAPH, SERVICE and LATERAL are not admitted"
+      }
+    },
+    {
+      "id": "reject-query-blank-node",
+      "features": [
+        "blank_nodes"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#QSynBlankNodes",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?o WHERE { _:x ex:score ?o }",
+      "expected": {
+        "kind": "rejection",
+        "stage": "admission",
+        "error": "query blank nodes and triple terms are not admitted"
+      }
+    },
+    {
+      "id": "reject-custom-function",
+      "features": [
+        "custom_functions"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#extensionFunctions",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT (ex:custom(1) AS ?x) WHERE {}",
+      "expected": {
+        "kind": "rejection",
+        "stage": "admission",
+        "error": "custom function is not admitted"
+      }
+    },
+    {
+      "id": "reject-now",
+      "features": [
+        "volatile_functions"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#FunctionMapping",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT (NOW() AS ?x) WHERE {}",
+      "expected": {
+        "kind": "rejection",
+        "stage": "admission",
+        "error": "nondeterministic or RDF 1.2 function is not admitted"
+      }
+    },
+    {
+      "id": "reject-rand",
+      "features": [
+        "volatile_functions"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#FunctionMapping",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT (RAND() AS ?x) WHERE {}",
+      "expected": {
+        "kind": "rejection",
+        "stage": "admission",
+        "error": "nondeterministic or RDF 1.2 function is not admitted"
+      }
+    },
+    {
+      "id": "reject-uuid",
+      "features": [
+        "volatile_functions"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#FunctionMapping",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT (UUID() AS ?x) WHERE {}",
+      "expected": {
+        "kind": "rejection",
+        "stage": "admission",
+        "error": "nondeterministic or RDF 1.2 function is not admitted"
+      }
+    },
+    {
+      "id": "reject-struuid",
+      "features": [
+        "volatile_functions"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#FunctionMapping",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT (STRUUID() AS ?x) WHERE {}",
+      "expected": {
+        "kind": "rejection",
+        "stage": "admission",
+        "error": "nondeterministic or RDF 1.2 function is not admitted"
+      }
+    },
+    {
+      "id": "reject-bnode",
+      "features": [
+        "volatile_functions"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#FunctionMapping",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT (BNODE(\"x\") AS ?x) WHERE {}",
+      "expected": {
+        "kind": "rejection",
+        "stage": "admission",
+        "error": "nondeterministic or RDF 1.2 function is not admitted"
+      }
+    },
+    {
+      "id": "reject-dataset-blank-subject",
+      "features": [
+        "blank_nodes"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#QSynBlankNodes",
+      "query": "ASK { ?s ?p ?o }",
+      "dataset": "_:x <http://example.org/p> \"v\" .",
+      "expected": {
+        "kind": "rejection",
+        "stage": "dataset",
+        "error": "dataset blank nodes are not admitted"
+      }
+    },
+    {
+      "id": "reject-dataset-blank-object",
+      "features": [
+        "blank_nodes"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#QSynBlankNodes",
+      "query": "ASK { ?s ?p ?o }",
+      "dataset": "<http://example.org/s> <http://example.org/p> _:x .",
+      "expected": {
+        "kind": "rejection",
+        "stage": "dataset",
+        "error": "blank nodes and triple terms are not admitted"
+      }
+    },
+    {
+      "id": "bound-unbound",
+      "features": [
+        "functional_forms"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#func-bound",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ASK { FILTER(BOUND(?missing) = false) }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Ask": true
+        }
+      }
+    },
+    {
+      "id": "datetime-cast",
+      "features": [
+        "casts"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#FunctionMapping",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ASK { FILTER(xsd:dateTime(\"2024-01-01T00:00:00Z\") = \"2024-01-01T00:00:00Z\"^^xsd:dateTime) }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Ask": true
+        }
+      }
+    },
+    {
+      "id": "uri-constructor-alias",
+      "features": [
+        "term_functions"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#func-iri",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ASK { FILTER(URI(\"http://example.org/a\") = ex:a) }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Ask": true
+        }
+      }
+    },
+    {
+      "id": "reduced-unique-input",
+      "features": [
+        "reduced"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#modReduced",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT REDUCED ?x WHERE { VALUES ?x { 1 2 } }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Select": {
+            "variables": [
+              "x"
+            ],
+            "order": "Bag",
+            "rows": [
+              [
+                "\"1\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+              ],
+              [
+                "\"2\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+              ]
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "reject-update",
+      "features": [
+        "updates"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-update/",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> INSERT DATA { ex:a ex:knows ex:b }",
+      "expected": {
+        "kind": "rejection",
+        "stage": "admission",
+        "error": "SPARQL parse rejected"
+      }
+    },
+    {
+      "id": "reject-rdf12-triple-function",
+      "features": [
+        "rdf12_triples"
+      ],
+      "spec": "https://www.w3.org/TR/2026/WD-sparql12-query-20260910/#func-triple",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT (TRIPLE(ex:a, ex:knows, ex:b) AS ?t) WHERE {}",
+      "expected": {
+        "kind": "rejection",
+        "stage": "admission",
+        "error": "nondeterministic or RDF 1.2 function is not admitted"
+      }
+    },
+    {
+      "id": "reject-rdf12-direction-function",
+      "features": [
+        "rdf12_direction"
+      ],
+      "spec": "https://www.w3.org/TR/2026/WD-sparql12-query-20260910/#func-strlangdir",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT (STRLANGDIR(\"abc\", \"en\", \"ltr\") AS ?t) WHERE {}",
+      "expected": {
+        "kind": "rejection",
+        "stage": "admission",
+        "error": "nondeterministic or RDF 1.2 function is not admitted"
+      }
+    },
+    {
+      "id": "reject-rdf12-direction-literal",
+      "features": [
+        "rdf12_direction"
+      ],
+      "spec": "https://www.w3.org/TR/2026/WD-sparql12-query-20260910/#QSynLiterals",
+      "query": "PREFIX ex: <http://example.org/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?x WHERE { VALUES ?x { \"abc\"@en--ltr } }",
+      "expected": {
+        "kind": "rejection",
+        "stage": "admission",
+        "error": "directional literals are not admitted"
+      }
+    },
+    {
+      "id": "not-exists-correlated-filter",
+      "features": [
+        "not_exists"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#defn_evalExists",
+      "query": "PREFIX ex: <http://example.org/> SELECT ?s WHERE { ?s ex:score ?n FILTER NOT EXISTS { ?s ex:knows ?o . ?o ex:score ?m FILTER(?m > ?n + 10) } }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Select": {
+            "variables": [
+              "s"
+            ],
+            "order": "Bag",
+            "rows": [
+              [
+                "<http://example.org/b>"
+              ],
+              [
+                "<http://example.org/c>"
+              ]
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "exists-filter-only-outer-variable",
+      "features": [
+        "exists"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#defn_substitute",
+      "query": "PREFIX ex: <http://example.org/> SELECT ?s WHERE { ?s ex:score ?n FILTER EXISTS { FILTER(?n = 10) } }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Select": {
+            "variables": [
+              "s"
+            ],
+            "order": "Bag",
+            "rows": [
+              [
+                "<http://example.org/a>"
+              ]
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "subquery-order-does-not-order-outer-bag",
+      "features": [
+        "subqueries"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#defn_evalToMultiSet",
+      "query": "PREFIX ex: <http://example.org/> SELECT ?s WHERE { { SELECT ?s WHERE { ?s ex:score ?n } ORDER BY DESC(?n) } }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Select": {
+            "variables": [
+              "s"
+            ],
+            "order": "Bag",
+            "rows": [
+              [
+                "<http://example.org/a>"
+              ],
+              [
+                "<http://example.org/b>"
+              ],
+              [
+                "<http://example.org/c>"
+              ]
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "exists-minus-disjoint-domain-after-substitution",
+      "features": [
+        "exists_minus_domains"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#defn_evalExists",
+      "query": "PREFIX ex: <http://example.org/> SELECT ?s WHERE { ?s ex:score ?n FILTER EXISTS { ?s ex:score ?m MINUS { ?s ex:score ?z } } }",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Select": {
+            "variables": [
+              "s"
+            ],
+            "order": "Bag",
+            "rows": [
+              [
+                "<http://example.org/a>"
+              ],
+              [
+                "<http://example.org/b>"
+              ],
+              [
+                "<http://example.org/c>"
+              ]
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "reject-exists-optional",
+      "features": [
+        "exists_complex_bodies"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#defn_evalExists",
+      "query": "PREFIX ex: <http://example.org/> SELECT ?s WHERE { ?s ex:score ?n FILTER EXISTS { ?s ex:score ?m OPTIONAL { ?s ex:knows ?o } } }",
+      "expected": {
+        "kind": "rejection",
+        "stage": "admission",
+        "error": "EXISTS body is outside the supported substitution profile"
+      }
+    },
+    {
+      "id": "reject-exists-values",
+      "features": [
+        "exists_complex_bodies"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#defn_evalExists",
+      "query": "PREFIX ex: <http://example.org/> SELECT ?s WHERE { ?s ex:score ?n FILTER EXISTS { VALUES ?m { 1 } } }",
+      "expected": {
+        "kind": "rejection",
+        "stage": "admission",
+        "error": "EXISTS body is outside the supported substitution profile"
+      }
+    },
+    {
+      "id": "reject-exists-bind",
+      "features": [
+        "exists_complex_bodies"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#defn_evalExists",
+      "query": "PREFIX ex: <http://example.org/> SELECT ?s WHERE { ?s ex:score ?n FILTER EXISTS { BIND(?n + 1 AS ?m) } }",
+      "expected": {
+        "kind": "rejection",
+        "stage": "admission",
+        "error": "EXISTS body is outside the supported substitution profile"
+      }
+    },
+    {
+      "id": "reject-exists-subquery",
+      "features": [
+        "exists_complex_bodies"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#defn_evalExists",
+      "query": "PREFIX ex: <http://example.org/> SELECT ?s WHERE { ?s ex:score ?n FILTER EXISTS { { SELECT ?s WHERE { ?s ex:score ?m } } } }",
+      "expected": {
+        "kind": "rejection",
+        "stage": "admission",
+        "error": "EXISTS body is outside the supported substitution profile"
+      }
+    },
+    {
+      "id": "reject-exists-aggregate",
+      "features": [
+        "exists_complex_bodies"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#defn_evalExists",
+      "query": "PREFIX ex: <http://example.org/> SELECT ?s WHERE { ?s ex:score ?n FILTER EXISTS { { SELECT (COUNT(*) AS ?m) WHERE { ?s ex:score ?v } } } }",
+      "expected": {
+        "kind": "rejection",
+        "stage": "admission",
+        "error": "EXISTS body is outside the supported substitution profile"
+      }
+    },
+    {
+      "id": "reject-exists-ordered-slice",
+      "features": [
+        "exists_complex_bodies"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#defn_evalExists",
+      "query": "PREFIX ex: <http://example.org/> SELECT ?s WHERE { ?s ex:score ?n FILTER EXISTS { { SELECT ?s WHERE { ?s ex:score ?m } ORDER BY ?s LIMIT 1 } } }",
+      "expected": {
+        "kind": "rejection",
+        "stage": "admission",
+        "error": "EXISTS body is outside the supported substitution profile"
+      }
+    },
+    {
+      "id": "reject-exists-nullable-path",
+      "features": [
+        "exists_complex_bodies"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#defn_evalExists",
+      "query": "PREFIX ex: <http://example.org/> SELECT ?s WHERE { ?s ex:score ?n FILTER EXISTS { ?s ex:knows* ?o } }",
+      "expected": {
+        "kind": "rejection",
+        "stage": "admission",
+        "error": "EXISTS body is outside the supported substitution profile"
+      }
+    },
+    {
+      "id": "reject-exists-residual-path",
+      "features": [
+        "exists_complex_bodies"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#defn_evalExists",
+      "query": "PREFIX ex: <http://example.org/> SELECT ?s WHERE { ?s ex:score ?n FILTER EXISTS { ?s (ex:knows|ex:knows) ?o } }",
+      "expected": {
+        "kind": "rejection",
+        "stage": "admission",
+        "error": "EXISTS body is outside the supported substitution profile"
+      }
+    },
+    {
+      "id": "reject-exists-nested-exists",
+      "features": [
+        "exists_complex_bodies"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#defn_evalExists",
+      "query": "PREFIX ex: <http://example.org/> SELECT ?s WHERE { ?s ex:score ?n FILTER EXISTS { FILTER EXISTS { ?s ex:score ?m } } }",
+      "expected": {
+        "kind": "rejection",
+        "stage": "admission",
+        "error": "nested EXISTS is not admitted"
+      }
+    },
+    {
+      "id": "reject-exists-nested-not-exists",
+      "features": [
+        "exists_complex_bodies"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#defn_evalExists",
+      "query": "PREFIX ex: <http://example.org/> SELECT ?s WHERE { ?s ex:score ?n FILTER EXISTS { FILTER NOT EXISTS { ?s ex:score ?m } } }",
+      "expected": {
+        "kind": "rejection",
+        "stage": "admission",
+        "error": "nested EXISTS is not admitted"
+      }
+    },
+    {
+      "id": "reject-exists-nested-in-function",
+      "features": [
+        "exists_complex_bodies"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#defn_evalExists",
+      "query": "PREFIX ex: <http://example.org/> SELECT ?s WHERE { ?s ex:score ?n FILTER EXISTS { FILTER(IF(true, EXISTS { ?s ex:score ?m }, false)) } }",
+      "expected": {
+        "kind": "rejection",
+        "stage": "admission",
+        "error": "nested EXISTS is not admitted"
+      }
+    },
+    {
+      "id": "reject-nullable-path-alternative",
+      "features": [
+        "nullable_path_composition"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#defn_evalPP",
+      "query": "PREFIX ex: <http://example.org/> SELECT ?o WHERE { ex:missing (ex:knows*|ex:knows*) ?o }",
+      "expected": {
+        "kind": "rejection",
+        "stage": "admission",
+        "error": "nullable path composition is not admitted"
+      }
+    },
+    {
+      "id": "reject-nullable-path-lowered-sequence",
+      "features": [
+        "nullable_path_composition"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#defn_evalPP",
+      "query": "PREFIX ex: <http://example.org/> SELECT ?o WHERE { ex:missing ex:knows*/ex:knows* ?o }",
+      "expected": {
+        "kind": "rejection",
+        "stage": "admission",
+        "error": "nullable path composition is not admitted"
+      }
+    },
+    {
+      "id": "reject-nullable-path-nested-quantifier",
+      "features": [
+        "nullable_path_composition"
+      ],
+      "spec": "https://www.w3.org/TR/sparql11-query/#defn_evalPP",
+      "query": "PREFIX ex: <http://example.org/> SELECT ?o WHERE { ex:missing (ex:knows?)+ ?o }",
+      "expected": {
+        "kind": "rejection",
+        "stage": "admission",
+        "error": "nullable path composition is not admitted"
+      }
+    },
+    {
+      "id": "path-negated-duplicate-forward",
+      "features": [
+        "paths_negated"
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#defn_evalNPS",
+      "query": "PREFIX ex: <http://ex/> SELECT ?o { ex:a !ex:excluded ?o }",
+      "dataset": "<http://ex/a> <http://ex/p> <http://ex/b> .\n<http://ex/a> <http://ex/q> <http://ex/b> .\n<http://ex/b> <http://ex/r> <http://ex/a> .\n<http://ex/b> <http://ex/s> <http://ex/a> .\n",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Select": {
+            "variables": [
+              "o"
+            ],
+            "order": "Bag",
+            "rows": [
+              [
+                "<http://ex/b>"
+              ]
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "path-negated-duplicate-reverse",
+      "features": [
+        "paths_negated"
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#defn_evalNPS",
+      "query": "PREFIX ex: <http://ex/> SELECT ?o { ex:a ^(!ex:excluded) ?o }",
+      "dataset": "<http://ex/a> <http://ex/p> <http://ex/b> .\n<http://ex/a> <http://ex/q> <http://ex/b> .\n<http://ex/b> <http://ex/r> <http://ex/a> .\n<http://ex/b> <http://ex/s> <http://ex/a> .\n",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Select": {
+            "variables": [
+              "o"
+            ],
+            "order": "Bag",
+            "rows": [
+              [
+                "<http://ex/b>"
+              ]
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "path-negated-both-orientations",
+      "features": [
+        "paths_negated"
+      ],
+      "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#defn_evalNPS",
+      "query": "PREFIX ex: <http://ex/> SELECT ?o { ex:a !(ex:excluded|^ex:excluded) ?o }",
+      "dataset": "<http://ex/a> <http://ex/p> <http://ex/b> .\n<http://ex/a> <http://ex/q> <http://ex/b> .\n<http://ex/b> <http://ex/r> <http://ex/a> .\n<http://ex/b> <http://ex/s> <http://ex/a> .\n",
+      "expected": {
+        "kind": "result",
+        "result": {
+          "Select": {
+            "variables": [
+              "o"
+            ],
+            "order": "Bag",
+            "rows": [
+              [
+                "<http://ex/b>"
+              ],
+              [
+                "<http://ex/b>"
+              ]
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

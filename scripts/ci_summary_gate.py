@@ -20,7 +20,8 @@
 #     the MIN_POLLS startup floor, and only after SETTLE_POLLS consecutive quiet
 #     polls. Verdict: only DECLARED-advisory checks (see §ADVISORY MUST BE DECLARED)
 #     are EXCLUDED; a gating check passes iff its conclusion is success/skipped/
-#     neutral; an empty stable set passes.
+#     neutral. PR/merge_group additionally require the exact-evaluator job to
+#     finish success; an empty stable set passes only outside those events.
 #
 # ADVISORY MUST BE DECLARED, NOT INFERRED FROM A NAME (#3773). [OPUS-5] Until
 # 2026-07-25 this gate dropped a whole check-run from the gating set whenever its
@@ -1545,6 +1546,22 @@ def _draft_recheck(tier_ctx: TierContext | None, summary_path: str = "") -> int:
     return 0
 
 
+# [GPT-6] This always-created workflow job is mandatory on merge-authorizing
+# events. Its successful internal diff selector may skip heavy steps, but the
+# job itself must finish SUCCESS; absence/skip is not proof of irrelevance.
+EXACT_EVALUATOR_CHECK = "real exact-dataset guest and proof"
+
+
+def exact_evaluator_status(runs: list[dict], tier_ctx: TierContext | None) -> str:
+    """Status on the authoritative current-head sibling set from the resolver."""
+    if not tier_ctx or tier_ctx.event_name not in {"pull_request", "merge_group"}:
+        return "n/a"
+    checks = [r for r in runs if r.get("name") == EXACT_EVALUATOR_CHECK]
+    if not checks or any(r.get("status") != "completed" for r in checks):
+        return "pending"
+    return "ok" if all(r.get("conclusion") == "success" for r in checks) else "failed"
+
+
 def render_verdict(runs: list[dict], summary_path: str = "", tier_ctx: TierContext | None = None) -> int:
     """Shared by the clean-converge, graceful-timeout, and post-extension paths, so
     every path applies IDENTICAL gating semantics. Returns the process exit code.
@@ -1559,8 +1576,14 @@ def render_verdict(runs: list[dict], summary_path: str = "", tier_ctx: TierConte
         draft-tier run, full run pending"), and an unreadable state fail-closes
         to FAILURE after bounded retries. A draft-tier verdict that is already a
         FAILURE skips the re-check (a RED can never be latched by the queue).
-    Without a TierContext (tests / push / merge_group) the semantics are exactly
-    the pre-draft-tier ones.
+    Without a TierContext (isolated tests), the draft-tier and mandatory
+    evaluator rules do not apply. main() always supplies its trigger context.
+
+    EXACT EVALUATOR PRESENCE ([GPT-6]): pull_request and merge_group must
+    contain a completed-success `real exact-dataset guest and proof` job,
+    including when every other sibling is green or the observed set is empty.
+    Its internal successful diff selection may skip heavy steps; a skipped job
+    cannot satisfy this requirement.
 
     SELECTION SEMANTICS ([FABLE-5] sq-fmx4u.3, design §5.3): a `skipped`
     conclusion is satisfied ONLY when the change-based selection pre-job
@@ -1638,6 +1661,17 @@ def render_verdict(runs: list[dict], summary_path: str = "", tier_ctx: TierConte
                 summary_path,
             )
             print("::error::ci-summary failed — the feature-matrix reporter verdict is missing (fail-closed).")
+        return 1
+    exact = exact_evaluator_status(runs, tier_ctx)
+    if exact not in {"n/a", "ok"}:
+        _emit(
+            f"### ci-summary: FAILED — mandatory `{EXACT_EVALUATOR_CHECK}` "
+            f"is {exact} on this head. Pull requests and merge groups require "
+            "its completed SUCCESS verdict; an absent, skipped, cancelled or "
+            "failed job cannot establish that evaluator checks were satisfied.",
+            summary_path,
+        )
+        print("::error::ci-summary failed — exact evaluator success is required (fail-closed).")
         return 1
     total = len(runs)
     if total == 0:
@@ -1923,16 +1957,18 @@ def run_gate(cfg: Config, fetch_runs, fetch_queue_depth, sleep_fn=time.sleep,
         # FAILS CLOSED via render_verdict's reporter belt — never conclude-by-timing.
         report_state = fm_report_status(runs)
         awaiting_report = report_state == "pending"
+        awaiting_exact = exact_evaluator_status(runs, tier_ctx) == "pending"
         completed_hist.append(total - pending)
         # Settle is a POST-TERMINAL window re-armed ONLY by pending work (sq-ipkku):
         # already-terminal injections must not starve convergence.
-        stable = 0 if (pending or awaiting_full or awaiting_report) else stable + 1
+        stable = 0 if (pending or awaiting_full or awaiting_report or awaiting_exact) else stable + 1
         names = sorted({r.get("name", "") for r in runs})
         changed = " (name set changed)" if prev_names is not None and names != prev_names else ""
         prev_names = names
         extra = f", {len(forgiven)} superseded-cancelled forgiven" if forgiven else ""
         extra += ", awaiting the full-tier re-run (draft-tier selection present)" if awaiting_full else ""
         extra += ", awaiting the feature-matrix reporter verdict" if awaiting_report else ""
+        extra += ", awaiting the mandatory exact evaluator verdict" if awaiting_exact else ""
         print(
             f"attempt {attempt}: {total} check-run(s), {pending} running, "
             f"all-terminal stable for {stable}/{cfg.settle_polls} poll(s){changed}{extra}",
@@ -1953,6 +1989,7 @@ def run_gate(cfg: Config, fetch_runs, fetch_queue_depth, sleep_fn=time.sleep,
         reporter_grace_eligible = (
             (awaiting_report or (report_state == "ok" and stable < cfg.settle_polls))
             and not awaiting_full
+            and not awaiting_exact
             and non_reporter_pending == 0
             and cfg.reporter_grace_polls > 0
         )
@@ -2110,7 +2147,7 @@ def run_gate(cfg: Config, fetch_runs, fetch_queue_depth, sleep_fn=time.sleep,
         if (
             reporter_grace_started
             and attempt > cfg.max_total_polls
-            and (non_reporter_pending > 0 or awaiting_full)
+            and (non_reporter_pending > 0 or awaiting_full or awaiting_exact)
         ):
             _emit(
                 "::notice::ci-summary reporter-only grace stopped because ordinary "
@@ -2192,7 +2229,7 @@ def run_gate(cfg: Config, fetch_runs, fetch_queue_depth, sleep_fn=time.sleep,
     # unresolved current report takes the existing reporter failure belt. A report
     # that first became green on the final grace poll also cannot bypass the normal
     # settle window merely because the bounded tail ended.
-    if reporter_grace_started and non_reporter_pending == 0 and not awaiting_full:
+    if reporter_grace_started and non_reporter_pending == 0 and not awaiting_full and not awaiting_exact:
         report_state = fm_report_status(runs)
         if report_state == "pending":
             print(

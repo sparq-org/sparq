@@ -1,30 +1,27 @@
-//! XSD date/dateTime VALUES and the epoch side-cache cells.
+//! Checked temporal parsing, exact borrowed keys and approximate epoch caches.
 //!
-//! [`Timeline`] is the parsed value of an `xsd:date` / `xsd:dateTime` lexical —
-//! seconds-from-epoch plus timezone presence — with XPath comparison semantics
-//! (both-with-tz / both-without compare directly; MIXED presence is only
-//! decidable outside the ±14h window). That XPath order is PARTIAL, which is
-//! right for the relational operators (indeterminate = type error) but not for a
-//! sort: [`Timeline::cmp_tl_total`] / [`Temporal::cmp_t_total`] are the TOTAL-order
-//! extension the `ORDER BY` / `MIN`/`MAX` order uses instead. It lives in core
-//! (rather than the engine, which consumes it for FILTER/ORDER BY/`=`) so the
-//! graph can precompute a
-//! per-term [`Temporal`] cache at load time, exactly like the f64 `numerics`
-//! cache: dateTime evaluation then never round-trips the dictionary per row.
+//! [GPT-6] [`ExactTimeline`] and [`ExactTemporal`] preserve integer whole seconds
+//! and every lexical fractional digit. Query/reasoner comparison uses these keys,
+//! including the partial mixed-timezone order and its deterministic total extension.
+//! Direct keys parse without allocation; graph keys memoize validation and borrow
+//! fractional digits from dictionary storage without reparsing on each lookup.
 //!
-//! [`Temporal`] is the cache cell: the literal's datatype family plus the
-//! PRECOMPUTED comparison key `Timeline::instant()` (an f64 — bit-identical to
-//! what the per-row parse would feed `partial_cmp`, so cached comparisons match
-//! the dict-based path exactly, including sub-second precision and the f64
-//! collapse of far-apart instants) and the timezone-presence bit that decides
-//! the mixed-presence indeterminate window. `xsd:time` is NOT cached: the
-//! engine compares it lexically (OtherXsd), not on the timeline, and a cache
-//! must not change that.
+//! [`Timeline`] retains the legacy parsed floating fraction; [`Temporal`] retains
+//! the approximate f64 epoch cache used by representation-oriented consumers.
+//! Neither floating representation is an exact equality/order key: close fractions
+//! and large epochs can alias. Cache files and approximate vector encoding remain
+//! compatible. `xsd:time` is outside these date/dateTime APIs.
 
 use std::cmp::Ordering;
 
+mod exact;
+pub(crate) use exact::CacheCell as ExactCacheCell;
+#[doc(inline)]
+pub use exact::{ExactTemporal, ExactTimeline, year_within_capacity};
+
 /// An xsd:date / xsd:dateTime VALUE: seconds-from-epoch of the local time, fractional
-/// seconds, and the timezone offset when present. Comparison follows XSD: both-with-tz
+/// seconds, and timezone offset. Its floating comparisons can round; use
+/// [`ExactTimeline`] for exact value decisions. Both-with-tz
 /// and both-without compare directly; MIXED presence is only decidable outside the
 /// ±14h window (inside it the comparison is indeterminate — a SPARQL type error).
 #[derive(Clone, Copy, Debug)]
@@ -34,30 +31,68 @@ pub struct Timeline {
     pub tz: Option<i64>,
 }
 
+// [GPT-6] Validate once without using floating point in the exact-key path.
+struct ParsedDateTime<'a> {
+    secs: i64,
+    whole_second: i64,
+    second_lexical: &'a str,
+    fraction: &'a str,
+    tz: Option<i64>,
+}
+
+#[cfg(test)]
+thread_local! { pub(crate) static EXACT_PARSE_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
+
+fn parse_datetime_parts(s: &str) -> Option<ParsedDateTime<'_>> {
+    #[cfg(test)]
+    EXACT_PARSE_CALLS.with(|calls| calls.set(calls.get() + 1));
+    let s = s.trim_matches([' ', '\t', '\r', '\n']);
+    let (date, rest) = s.split_once('T')?;
+    let (time, tz) = match rest.find(['Z', '+', '-']) {
+        Some(i) => (&rest[..i], Some(parse_tz(&rest[i..])?)),
+        None => (rest, None),
+    };
+    let days = parse_civil_date(date)?;
+    let mut t = time.split(':');
+    let h = two_digits(t.next()?)?;
+    let mi = two_digits(t.next()?)?;
+    let sec_lex = t.next()?;
+    if t.next().is_some() {
+        return None;
+    }
+    let (whole_sec, fraction) = sec_lex.split_once('.').map_or((sec_lex, None), |(a, b)| (a, Some(b)));
+    let whole_sec = two_digits(whole_sec)?;
+    if fraction.is_some_and(|f| f.is_empty() || !f.bytes().all(|b| b.is_ascii_digit())) {
+        return None;
+    }
+    let nonzero_second = whole_sec != 0 || fraction.is_some_and(|f| f.bytes().any(|b| b != b'0'));
+    if h > 24 || mi > 59 || whole_sec > 59 || (h == 24 && (mi != 0 || nonzero_second)) {
+        return None;
+    }
+    let secs = days.checked_mul(86_400)?.checked_add(h * 3600 + mi * 60 + whole_sec)?;
+    secs.checked_sub(tz.unwrap_or(0))?;
+    Some(ParsedDateTime {
+        secs,
+        whole_second: whole_sec,
+        second_lexical: sec_lex,
+        fraction: fraction.unwrap_or(""),
+        tz,
+    })
+}
+
 impl Timeline {
     pub fn parse_datetime(s: &str) -> Option<Timeline> {
-        let (date, rest) = s.split_once('T')?;
-        let (time, tz) = match rest.find(['Z', '+', '-']) {
-            Some(i) => (&rest[..i], Some(parse_tz(&rest[i..])?)),
-            None => (rest, None),
-        };
-        let days = parse_civil_date(date)?;
-        let mut t = time.split(':');
-        let h: i64 = t.next()?.parse().ok()?;
-        let mi: i64 = t.next()?.parse().ok()?;
-        let sec_lex = t.next()?;
-        if t.next().is_some() {
-            return None;
-        }
-        let sec: f64 = sec_lex.parse().ok()?;
+        let parsed = parse_datetime_parts(s)?;
+        let second: f64 = parsed.second_lexical.parse().ok()?;
         Some(Timeline {
-            secs: days * 86_400 + h * 3600 + mi * 60 + sec.trunc() as i64,
-            frac: sec.fract(),
-            tz,
+            secs: parsed.secs,
+            frac: second - parsed.whole_second as f64,
+            tz: parsed.tz,
         })
     }
 
     pub fn parse_date(s: &str) -> Option<Timeline> {
+        let s = s.trim_matches([' ', '\t', '\r', '\n']);
         // The timezone suffix starts after the day: "...-23Z" / "...-23+05:00". A bare
         // date's own hyphens must not be mistaken for an offset sign, so require the
         // ":" of "±hh:mm" at the right position.
@@ -68,19 +103,23 @@ impl Timeline {
         } else {
             (s, None)
         };
-        Some(Timeline { secs: parse_civil_date(date)? * 86_400, frac: 0.0, tz })
+        let secs = parse_civil_date(date)?.checked_mul(86_400)?;
+        secs.checked_sub(tz.unwrap_or(0))?;
+        Some(Timeline { secs, frac: 0.0, tz })
     }
 
     /// The absolute instant (treating an absent timezone as UTC) in seconds.
     pub fn instant(&self) -> f64 {
-        (self.secs - self.tz.unwrap_or(0)) as f64 + self.frac
+        let tz = self.tz.unwrap_or(0);
+        self.secs.checked_sub(tz).map_or_else(|| self.secs as f64 - tz as f64, |s| s as f64) + self.frac
     }
 
     pub fn cmp_tl(a: Timeline, b: Timeline) -> Option<Ordering> {
         cmp_instants(a.instant(), a.tz.is_some(), b.instant(), b.tz.is_some())
     }
 
-    /// The TOTAL-order EXTENSION of [`cmp_tl`](Self::cmp_tl) — for the `ORDER BY` /
+    /// Legacy approximate total extension of [`cmp_tl`](Self::cmp_tl).
+    /// Exact query decisions use [`ExactTimeline::compare_total`]. This API's `ORDER BY` /
     /// `MIN`/`MAX` total order ONLY. Never for the relational operators: `<` / `>` / `=`
     /// keep [`cmp_tl`](Self::cmp_tl)'s indeterminate window as a SPARQL type error.
     ///
@@ -153,30 +192,60 @@ pub fn parse_tz(tz: &str) -> Option<i64> {
     if tz == "Z" {
         return Some(0);
     }
-    let (sign, hm) = tz.split_at(1);
-    let (h, m) = hm.split_once(':')?;
-    let (h, m): (i64, i64) = (h.parse().ok()?, m.parse().ok()?);
+    // [GPT-6] Check bytes before slicing: malformed or non-ASCII API input
+    // must not panic, and XSD offsets are bounded by fourteen hours.
+    if !tz.is_ascii() || tz.len() != 6 || !matches!(tz.as_bytes()[0], b'+' | b'-') || tz.as_bytes()[3] != b':' {
+        return None;
+    }
+    let h = two_digits(&tz[1..3])?;
+    let m = two_digits(&tz[4..6])?;
+    if h > 14 || m > 59 || (h == 14 && m != 0) {
+        return None;
+    }
     let off = h * 3600 + m * 60;
-    Some(if sign == "-" { -off } else { off })
+    Some(if tz.starts_with('-') { -off } else { off })
+}
+
+fn two_digits(s: &str) -> Option<i64> {
+    (s.len() == 2 && s.bytes().all(|b| b.is_ascii_digit())).then(|| s.parse().ok()).flatten()
 }
 
 /// `[-]YYYY-MM-DD` -> days from the epoch (Howard Hinnant's days_from_civil).
 pub fn parse_civil_date(date: &str) -> Option<i64> {
-    let neg = date.starts_with('-');
-    let mut p = date.strip_prefix('-').unwrap_or(date).split('-');
-    let y: i64 = p.next()?.parse().ok()?;
-    let y = if neg { -y } else { y };
-    let m: i64 = p.next()?.parse().ok()?;
-    let d: i64 = p.next()?.parse().ok()?;
-    if p.next().is_some() || !(1..=12).contains(&m) || !(1..=31).contains(&d) {
+    if !date.is_ascii() {
         return None;
     }
+    let neg = date.starts_with('-');
+    let mut p = date.strip_prefix('-').unwrap_or(date).split('-');
+    let year = p.next()?;
+    if year.len() < 4 || (year.len() > 4 && year.starts_with('0')) || !year.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let y: i64 = year.parse().ok()?;
+    if y == 0 {
+        return None; // XSD 1.0 has no year zero.
+    }
+    let y = if neg { -y } else { y };
+    let m = two_digits(p.next()?)?;
+    let d = two_digits(p.next()?)?;
+    let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
+    let max_day = match m {
+        2 => if leap { 29 } else { 28 },
+        4 | 6 | 9 | 11 => 30,
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        _ => return None,
+    };
+    if p.next().is_some() || !(1..=max_day).contains(&d) {
+        return None;
+    }
+    // Widen before calendar arithmetic; reject an unrepresentable cache value.
+    let (y, m, d) = (i128::from(y), i128::from(m), i128::from(d));
     let y = if m <= 2 { y - 1 } else { y };
     let era = y.div_euclid(400);
     let yoe = y - era * 400;
     let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d - 1;
     let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    Some(era * 146_097 + doe - 719_468)
+    i64::try_from(era * 146_097 + doe - 719_468).ok()
 }
 
 /// The datatype family of a cached temporal value. `xsd:dateTime` and
