@@ -130,10 +130,70 @@ def capacity_expectation(original):
     return matches[0]["expected_rejection"] if matches else None
 
 
+ROOT = Path(__file__).resolve().parents[2]
+PROJECTIONS = Path(__file__).with_name("projection-expectations.json")
+PROJECTION_KEYS = {"source", "source_sha256", "id", "original_fixture", "variables"}
+
+
+def valid_variables(variables):
+    return (type(variables) is list
+            and all(type(v) is str and v and v == v.strip() and v[0] not in "?$" for v in variables)
+            and len(set(variables)) == len(variables))
+
+
+def check_select(result, case_id):
+    """[OPUS-5.5] Structural SELECT golden: unique names, list rows of projection width."""
+    if type(result) is not dict or "Select" not in result:
+        return
+    body = result["Select"]
+    if type(body) is not dict or not valid_variables(body.get("variables")):
+        raise ValueError(f"fixture {case_id} has invalid SELECT projection variables")
+    rows = body.get("rows")
+    if type(rows) is not list or any(type(row) is not list for row in rows):
+        raise ValueError(f"fixture {case_id} has malformed SELECT rows")
+    if any(len(row) != len(body["variables"]) for row in rows):
+        raise ValueError(f"fixture {case_id} row width differs from its projection width")
+
+
+def projection_overrides(path, document):
+    """[OPUS-5.5] Reviewed per-fixture projections; exact source path, hash and object."""
+    registry = load(PROJECTIONS)
+    if (set(registry) != {"schema", "authored_by", "scope", "overrides"}
+            or registry["schema"] != "sparq.projection-expectations.v1"
+            or type(registry["overrides"]) is not list):
+        raise ValueError("unknown projection expectation schema")
+    registry_sha256 = hashlib.sha256(PROJECTIONS.read_bytes()).hexdigest()
+    source_sha256 = hashlib.sha256(path.read_bytes()).hexdigest()
+    originals = {c.get("id"):c for c in document["cases"]}
+    seen, used = set(), {}
+    for entry in registry["overrides"]:
+        if (type(entry) is not dict or set(entry) != PROJECTION_KEYS
+                or type(entry["source"]) is not str or type(entry["id"]) is not str):
+            raise ValueError("unknown projection override record")
+        relative = Path(entry["source"])
+        if relative.is_absolute() or ".." in relative.parts or not entry["variables"] or not valid_variables(entry["variables"]):
+            raise ValueError(f"invalid projection override: {entry['id']}")
+        if (entry["source"], entry["id"]) in seen:
+            raise ValueError(f"duplicate projection override: {entry['id']}")
+        seen.add((entry["source"], entry["id"]))
+        if (ROOT / relative).resolve() != path:
+            continue  # Same ID in an unrelated file never adopts this override.
+        original = originals.get(entry["id"])
+        if (entry["source_sha256"] != source_sha256 or original != entry["original_fixture"]
+                or "expected_rows" not in original or "expected" in original or "expected_result" in original):
+            raise ValueError(f"stale or unknown projection override: {entry['id']}")
+        used[entry["id"]] = {"kind":"reviewed_projection_override", "registry":PROJECTIONS.name,
+                             "registry_sha256":registry_sha256, "source":entry["source"],
+                             "source_sha256":source_sha256, "original_fixture_sha256":digest(original),
+                             "variables":entry["variables"]}
+    return used
+
+
 def import_regressions(path, variables=None):
     """Retain original case IDs, query bytes, golden objects and source digest."""
     path = Path(path).resolve()
     document = load(path)
+    overrides = projection_overrides(path, document)
     dataset_path = path.parent / document["default_dataset"] if "default_dataset" in document else None
     dataset = dataset_path.read_text() if dataset_path else ""
     versioned = {entry["id"]: entry for entry in
@@ -151,12 +211,18 @@ def import_regressions(path, variables=None):
                     or original.get("expectation_kind") == "implementation_capacity"
                     or document.get("expectation_kind") == "implementation_capacity")
         rejection = expected.get("kind") == "rejection" or original.get("admitted") is False or original.get("expected_admission_error", False) or capacity
+        projection = None
         if result is None and "expected_rows" in original:
-            if not variables:
+            # [OPUS-5.5] Reviewed exact-fixture override first, else the caller's default.
+            projection = overrides.get(original["id"]) or (
+                {"kind":"caller_variables", "variables":list(variables)} if variables else None)
+            if projection is None:
                 raise ValueError("row-only goldens require their existing runner's explicit projection variables")
-            result = select(variables, original["expected_rows"])
+            result = select(projection["variables"], original["expected_rows"])
         if result is None and not rejection:
             raise ValueError(f"fixture {original['id']} has no independent expected result or declared rejection")
+        if not rejection:
+            check_select(result, original["id"])
         required, unclassified = None, None
         if rejection:
             if capacity:
@@ -187,7 +253,8 @@ def import_regressions(path, variables=None):
                        "oracle": {"kind": "retained_golden", "source": str(path),
                                   "source_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
                                   "dataset_sha256": hashlib.sha256(source_data.encode()).hexdigest(),
-                                  "spec": original.get("spec")}})
+                                  "spec": original.get("spec"),
+                                  **({"projection":projection} if projection and not rejection else {})}})
     if not output or len({c["id"] for c in output}) != len(output):
         raise ValueError("empty or duplicate-ID regression corpus")
     return output

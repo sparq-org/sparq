@@ -132,7 +132,8 @@ fn original_dialect_controls_apply_to_both_versioned_admission_and_execution() {
                 let (rejection, execution) = if let Some(expected) = preparation_error {
                     assert_eq!(sparq_engine::PreparedQuery::parse(&w2.request.query).unwrap_err(), expected);
                     let rejection = Rejected("SPARQL parse rejected");
-                    (rejection, EvaluationError::Rejected(rejection))
+                    // [OPUS-5.5] Rejected is Clone, not Copy: admission and execution each own one.
+                    (rejection.clone(), EvaluationError::Rejected(rejection))
                 } else {
                     sparq_engine::PreparedQuery::parse(&w2.request.query).unwrap();
                     (Rejected("query VERSION contradicts REC 2013 profile"), EvaluationError::Execution)
