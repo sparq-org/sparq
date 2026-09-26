@@ -24,9 +24,10 @@ integration and remains unaudited. [GPT-6]
 [OPUS-5.5] The [VC query protocol draft](../../research/vc-query-protocol.md) and its
 [method registry](../../research/vc-query-methods.json) propose separating credential suites
 from pluggable query proof methods, and map the selected-result, exact-evaluator and native
-paths from source. They are design records only: no shared adapter, JSON signature mode or
-cross-method linking exists, a registry label shows no support (every entry has
-`adapter_available: false`), and none is externally audited.
+paths from source. They are design records: no JSON signature mode or cross-method linking
+exists, a registry label shows no support, and none is externally audited. Only
+`method:risc0-exact` version 3 has `adapter_available: true`, for exactly the six tuples of the
+exact V3 adapter below; every other entry and version stays `false`.
 
 [OPUS-5.5] The experimental, unpublished, dependency-free `sparq-query-protocol` crate adds a
 first executable layer of that draft. It provides typed descriptors, whole capability tuples,
@@ -44,12 +45,15 @@ default) with the first `QueryMethod` adapter, `sparq_proved_evaluator::vcq::Ris
 the existing V3 relation. It declares bag SELECT, boolean ASK and CONSTRUCT graphs under
 holder-declared and verifier-agreed authority only, with the fixed default V3 policy. It binds
 the stored request through a documented derived nonce and consumes the original challenge once,
-after every other check. It authenticates no credential, checks no status or holder key, and
-the registry entry stays `adapter_available: false`. No genuine receipt has been verified
-through it yet. The ignored `host/tests/vcq_genuine.rs` defines that run: a prove mode and a
-verify-only row-bound mode, both driven by an explicit `SPARQ_VCQ_PROOF_JOB`. The reference
-gives its commands, job fields, assertions, mutation check and evidence limits; no run is
-recorded. See [vcq exact adapter](references/vcq-exact-adapter.md).
+after every other check. It authenticates no credential and checks no status or holder key.
+Source evidence is `None`, status `NotRequested` and holder `BearerAccepted` in every tuple.
+The ignored `host/tests/vcq_genuine.rs` has a prove mode and a verify-only row-bound mode,
+both driven by an explicit `SPARQ_VCQ_PROOF_JOB`. One run at source `872c219ca` was
+independently certified. It verified seven genuine Succinct receipts: six protocol-accepted
+tuples, plus one valid two-row result rejected as `capacity` by a row bound of one before
+challenge consumption. It was run on a public synthetic fixture, with no benchmark. It is not
+a full gate, and the reference records its caveats and evidence digests. See
+[vcq exact adapter](references/vcq-exact-adapter.md).
 
 [GPT-6] For the opt-in synthetic selected-support measurement adapter, its strict
 experiment manifest, timing boundaries and unavailable stages, see

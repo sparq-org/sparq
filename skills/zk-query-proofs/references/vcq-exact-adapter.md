@@ -4,10 +4,12 @@
 `sparq_proved_evaluator::vcq` (detached crate `zk/sparql-evaluator/host`, cargo feature `vcq`,
 **off by default**) implements the `sparq-query-protocol` `QueryMethod` trait over the existing
 V3 relation. It is experimental and not externally audited (sq-qhy4). It authenticates no
-source credential, checks no credential status and no holder key. The research
-[method registry](../../../research/vc-query-methods.json) still lists `method:risc0-exact` with
-`adapter_available: false`; the adapter's local `Capabilities` declaration is not a registry
-entry. The existing V1/V2/V3 host APIs and the engine replay bridge are unchanged.
+source credential, checks no credential status and no holder key. <!-- [OPUS-5.5] --> The research
+[method registry](../../../research/vc-query-methods.json) lists `method:risc0-exact` with
+`adapter_available` true for version 3 only, and only for the six tuples below (its
+`vcq_adapter` entry); versions 1 and 2 stay `false`. The registry mirrors the adapter's local
+`Capabilities` declaration; the declaration is not itself a registry entry. The existing
+V1/V2/V3 host APIs and the engine replay bridge are unchanged.
 
 ```sh
 cargo test --manifest-path zk/sparql-evaluator/Cargo.toml -p sparq-proved-evaluator --features vcq
@@ -90,13 +92,39 @@ classified from the typed store outcome.
 
 Native tests (`host/tests/vcq_adapter.rs`, unit tests in `host/src/vcq.rs`,
 `model/tests/vcq_request_shape.rs`) create no proof. The only receipt they use is a fake one,
-which must be rejected without touching the store. No genuine receipt has been produced or
-verified through this adapter yet. The genuine-receipt tests below are **definitions**: this
-page records no run of them. <!-- [OPUS-5.5] -->
+which must be rejected without touching the store.
+
+<!-- [OPUS-5.5] Records an independently certified run; this page re-executed nothing. -->
+The genuine-receipt tests below were run once and independently certified at source
+`872c219ca18c6cc978d2f5c705f020e8c69748a6`. The record:
+
+- Seven genuine receipts, each `InnerReceipt::Succinct` with `ExitCode::Halted(0)`.
+- Six were protocol-accepted: SELECT bag, ASK and CONSTRUCT, each under holder-declared and
+  verifier-agreed authority.
+- The seventh (`select-bag-row-bound`) was a valid V3 result of two rows against
+  `released_rows = 1`. It was rejected as `capacity`
+  `CapacityExceeded(Backend { "vcq-released-rows", .. })` before challenge consumption.
+- 81 controls ran across the six accepted cases.
+- Mutation check: the verify-only test failed against the consume-first mutant, as intended.
+  The root's wrapper around it still reported overall failure, because its expected failure
+  text was multiline. Treat the wrapper's verdict as not a pass.
+- Source was then restored (506 files and 29 lock files checked, Git clean). A separate
+  verify-only continuation and an all-targets Clippy run passed, with no new proof.
+- Native gate at the same source: model, doc, `vcq`-feature and default test functions, three
+  guard mutants and Clippy in both configurations. Eight older genuine-proof test functions
+  were excluded, so do not cite this as a full gate.
+- Evidence digests: run `d523b5405540c127c529749b5d0a571d308d348ed25d17ee27066c4457e9331b`,
+  post-restore `5f8385d87f5d85dd49c043a31c1a28995218d95dcf679cdf6a8110989cb83eac`. The evidence
+  itself stays outside the repository.
+
+This is execution evidence for the adapter on a public synthetic fixture only. It shows no
+issuer-authenticated credential, no status, no holder identity (bearer only), and no
+completeness beyond the exact agreed bytes (no federation or nondeterministic dataset). It is
+no benchmark. Any new claim needs its own run with the evidence listed below.
 
 ## Genuine receipt tests (`host/tests/vcq_genuine.rs`)
 
-<!-- [OPUS-5.5] Definitions only; not execution evidence. -->
+<!-- [OPUS-5.5] Test definitions; the one certified run is recorded under Evidence status. -->
 Two ignored tests, compiled only with `--features vcq`, driven by one explicit job file named by
 `SPARQ_VCQ_PROOF_JOB`. The tests read environment variables but never set them.
 `RISC0_DEV_MODE` must be unset. A missing job, tool or input fails the test; nothing is skipped
@@ -200,5 +228,11 @@ verification and `record.json` after controls. The row-bound directory keeps its
 `record.json` marked `protocol_accepted: false`. `summary.json` is written only after every
 assertion. It counts 6 protocol-accepted genuine receipts plus 1 genuine receipt rejected by the
 row bound, and it counts controls separately. Limits: public synthetic data only; no source
-credential, status or holder key is authenticated; not externally audited. The registry keeps
-`adapter_available: false`. Keep raw receipts and evidence outside the tracked repository.
+credential, status or holder key is authenticated; not externally audited. <!-- [OPUS-5.5] -->
+The certified run at `872c219ca` wrote a v1 summary, and that summary is frozen as written. Its
+`registry_adapter_available` field is a `false` hardcoded in that test source. It predates the
+registry's version 3 entry and says nothing about it. Newer source writes schema
+`sparq.vcq-genuine-proof.test-summary.v2` (`SUMMARY_SCHEMA`). That schema replaces the field with
+the string `registry_adapter_availability`: "not tested; this test reads no registry entry".
+The certified run did not exercise the v2 source, and no v2 summary is part of its evidence.
+Keep raw receipts and evidence outside the tracked repository.

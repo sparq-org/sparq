@@ -34,7 +34,12 @@ use std::sync::{Barrier, Mutex};
 
 const JOB_SCHEMA: &str = "sparq.vcq-genuine-proof.test-job.v1";
 const METADATA_SCHEMA: &str = "sparq.vcq-genuine-proof.test-metadata.v1";
-const SUMMARY_SCHEMA: &str = "sparq.vcq-genuine-proof.test-summary.v1";
+/// Summary schema id.
+///
+/// [OPUS-5.5] Version 2 replaces v1's fixed `registry_adapter_available: false`
+/// with `registry_adapter_availability`, since this test never reads the
+/// registry. Summaries already written under v1 stay as they are.
+const SUMMARY_SCHEMA: &str = "sparq.vcq-genuine-proof.test-summary.v2";
 /// Domain separator for test-only original challenges derived from the job seed.
 const CHALLENGE_DOMAIN: &[u8] = b"sparq:vcq-genuine-test:original-challenge:v1\0";
 const STORES: &str = "in-memory test doubles only; not durable, not production stores";
@@ -1179,7 +1184,7 @@ fn genuine_vcq_receipts_verify_every_tuple_and_reject_controls() {
         "cases": accepted,
         "row_bound": row_bound,
         "challenge_stores": STORES,
-        "registry_adapter_available": false,
+        "registry_adapter_availability": "not tested; this test reads no registry entry",
         "scope": "public synthetic fixture; experimental, not externally audited; no source credential, status or holder key is authenticated",
     });
     write_new(&output.join("summary.json"), &pretty(&summary)).expect("final summary");

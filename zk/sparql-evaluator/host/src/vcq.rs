@@ -42,13 +42,24 @@
 //! [`ChallengeStore`]. Replay and store failure are classified from the typed
 //! store outcome, never from error text.
 //!
+//! # Resource bounds
+//!
+//! Two distinct checks, each `capacity` at [`Phase::Verify`]. The encoded
+//! presentation length is checked against `presentation_bytes` before the
+//! receipt is decoded (`vcq-presentation-bytes`). The released-row count is a
+//! semantic bound on the result: it is read from the verified, request-bound
+//! journal and checked against `released_rows` after the proof checks and
+//! before the original challenge is consumed (`vcq-released-rows`). SELECT rows
+//! and CONSTRUCT N-Triples lines count; ASK has no row bound.
+//!
 //! # Limits
 //!
 //! This adapter authenticates no source credential and checks no status or
 //! holder key. Holder-declared results assert only computation over the
-//! holder's chosen bytes. The research registry still lists the method with
-//! `adapter_available: false`; the local [`Capabilities`] declaration here is
-//! not a registry entry.
+//! holder's chosen bytes. The research registry records the `vcq_adapter` of
+//! `method:risc0-exact` as available for version 3 and for exactly the six
+//! tuples above; every other version and contract has no adapter. This code
+//! never reads the registry: admission checks only the local [`Capabilities`].
 
 use crate::v3::{CheckedFailure, prove_with_artifact, verify_checked_with_artifact};
 use crate::{AcceptedGuest, ArtifactPin, Error, Nonces, Presentation};
@@ -625,6 +636,7 @@ fn shape_error(error: &ShapeError, phase: Phase) -> ProtocolError {
     }
 }
 
+/// Checks the encoded presentation length; runs before the receipt is decoded.
 fn check_size(
     presentation: &VcqPresentation,
     bounds: ResourceBounds,
@@ -645,6 +657,7 @@ fn check_size(
     Ok(())
 }
 
+/// Checks released rows from the verified journal; runs before challenge consumption.
 fn check_rows(rows: usize, bound: u32) -> Result<(), ProtocolError> {
     let requested = u64::try_from(rows).unwrap_or(u64::MAX);
     if requested > u64::from(bound) {

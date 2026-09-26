@@ -9,8 +9,9 @@
 
 The companion [`vc-query-methods.json`](vc-query-methods.json) is a bounded proposed registry
 of suites, mapping profiles, methods, linking profiles, allowed combinations and conformance
-vectors. A registry label is a name, never evidence that anything it names is supported, and
-no entry has a vcq adapter (`adapter_available: false` throughout, §6.1).
+vectors. A registry label is a name, never evidence that anything it names is supported.
+[OPUS-5.5] Only `method:risc0-exact` version 3 has a vcq adapter (`adapter_available: true` for
+exactly six tuples, §6.1, §9); every other entry and version keeps `adapter_available: false`.
 
 ## 1. Conventions and snapshot
 
@@ -163,7 +164,8 @@ material, blank-node scope id) or a typed failure (§6.4).
    algorithm or purpose is `policy-rejected`. Current `vc_bridge_json` returns
    `verification_method` but leaves binding it to the caller, so current import suites are
    import primitives, not end-to-end issuer authentication (§9). No vcq adapter exists for
-   any profile.
+   any profile; the one vcq adapter (§9) requires source evidence `none` and authenticates
+   nothing.
 
 ### 4.3 Status, freshness and holder binding
 
@@ -193,7 +195,7 @@ material, blank-node scope id) or a typed failure (§6.4).
 | `evaluation_context` | entailment regime (simple only), dataset-clause policy, DESCRIBE and canonicalization policy, numeric and temporal profile; volatile functions rejected |
 | `methods` | exact acceptable descriptors (§6.1), preference-ordered, no wildcards |
 | `trust` | issuer set, accepted suites and mappings, status policy, holder policy, linking profiles, disclosure policy |
-| `resources` | verifier bounds on presentation bytes, released rows and graph size |
+| `resources` | verifier bounds on encoded presentation bytes (checked before decoding) and on released rows and graph size (semantic bounds on the result, §6.2) |
 
 1. The verifier constructs and stores the request; a presentation never supplies or
    overrides a field. A field no proof binds (§7.3) is enforced from that stored copy.
@@ -261,7 +263,8 @@ Capabilities include an `enforces` map from each obligation the method can disch
 enforcer (§7.3), the challenge owner and policy (§6.4), and `adapter_available`. A registry
 `status` such as `implemented-experimental` says only that component source exists; a
 consumer MUST NOT register a method as executable through vcq unless `adapter_available` is
-true, and in draft 0 it is false for every entry.
+true. [OPUS-5.5] In the registry it is true only for `method:risc0-exact` version 3, and only
+for the six tuples its `vcq_adapter` lists (§9); it is false for every other entry and version.
 
 ### 6.2 Operations (proposed interface *QueryMethod*)
 
@@ -277,7 +280,12 @@ true, and in draft 0 it is false for every entry.
 `admit` is deterministic over public data and sees no result. The verifier recomputes it
 and never uses a holder's copy. `admit` returns `unsupported` when a required obligation has
 no enforcer and `capacity` when a public request bound (such as `resources` released rows)
-exceeds a method ceiling. `verify` MUST bound presentation size and row count before decoding.
+exceeds a method ceiling. [OPUS-5.5] `verify` MUST check two distinct bounds. The encoded
+presentation byte size is checked before anything is decoded. The released-row capacity is
+a semantic bound on the result. When rows are read only from the proof's result (§9.1), it is
+checked after the result is decoded and the proof is verified, and BEFORE the challenge is
+atomically consumed. A method whose presentation carries rows outside the proof MAY also
+count them before decoding. Either excess is `capacity` at verify and never yields a claim.
 
 ### 6.3 Verified claims and witness lifetime
 
@@ -302,7 +310,7 @@ diagnostics never enter presentations.
 | Class | Meaning |
 |---|---|
 | `unsupported` | outside declared capabilities: form, feature, unknown or unimplemented method, unlisted combination, unenforced obligation, Update; decided from public inputs, except a hidden value outside the method's value domain, found at `prepare` |
-| `capacity` | admissible but beyond a declared bound; names the bound (search budget, rows, numeric range, circuit bucket) |
+| `capacity` | admissible but beyond a declared bound; names the bound (search budget, encoded presentation bytes, released rows, numeric range, circuit bucket) |
 | `unsatisfiable` | prover side only: under the query's SPARQL semantics no witness supports the requested or released result |
 | `policy-rejected` | trust policy excludes an input: untrusted issuer, status outside the window, missing holder binding |
 | `invalid` | a request or presentation fails a check: missing request policy, statement or result mismatch, proof, replay, expiry, audience, oversize or malformed encoding |
@@ -428,12 +436,14 @@ evidence) tuples listed in the registry's `combinations` are valid; every other 
 | audience, validity | unbound | unbound | fixed context bytes only |
 | challenge consumption | owner method, `burn-on-attempt`: `SeenNonces::record_fresh` precedes the proof check | owner method, `consume-on-success`: `Nonces::consume` after journal binding; `Nonces` is a relying-party trait whose documented contract is atomic persistent acceptance, and the host supplies no production store | not applicable (single run) |
 
-Gaps between this source and the draft, for the planned adapter work:
+Gaps between this source and the draft, for the planned adapter work (items 1, 4 and 6 are
+narrowed for exact V3 by the adapter described after this list):
 
-1. No shared request, descriptor, capability or claim types exist, so every registry entry
-   has `adapter_available: false`. `verify_result` returns `VerifiedResult { query, rows }`
-   and exact hosts return a `Journal` (which does carry `Provenance`); neither reports
-   enforcers, source evidence and completeness as a typed claim.
+1. At this snapshot no shared request, descriptor, capability or claim types existed.
+   `verify_result` returns `VerifiedResult { query, rows }` and exact hosts return a
+   `Journal` (which does carry `Provenance`); neither reports enforcers, source evidence and
+   completeness as a typed claim. The later `sparq-query-protocol` crate supplies those types;
+   only the exact V3 adapter uses them.
 2. `ResultError::Rejected(String)` and the host `Error(&'static str)` conflate unsupported,
    capacity, policy, invalid and toolchain cases. Only `ResultError::{SearchExhausted,
    Driver}` and the model's `EvaluationError::{Budget, Capacity, Execution}` are distinct.
@@ -453,6 +463,51 @@ Gaps between this source and the draft, for the planned adapter work:
    existing methods consume their challenge internally, so their adapters own none. The
    exact host's single-success guarantee depends on the relying party's `Nonces`
    implementation (`zk/sparql-evaluator/host/src/lib.rs:42`), which an adapter must require.
+
+### 9.1 Exact V3 vcq adapter (later source, independently certified run)
+
+[OPUS-5.5] `sparq_proved_evaluator::vcq::Risc0ExactV3` (detached `zk/sparql-evaluator/host`,
+feature `vcq`, off by default) implements *QueryMethod* over the V3 relation for descriptor
+`urn:sparq:vcq:method:risc0-exact` version 3 only. It declares exactly six capability tuples:
+`SelectBag`, `AskBoolean` and `GraphRdfc10` (CONSTRUCT only), each under
+`VerifierAgreedAnchor` and `HolderDeclared`. Every tuple is `ExactBounded` over
+`ExactSourceCatalog`, with source evidence `None`, status `NotRequested` and holder
+`BearerAccepted`. Mapping, linking and query are enforced by the guest relation; the anchor
+is a public host check owed only under verifier-agreed authority. Authenticity, status and
+holder binding have no enforcer. For those tuples it closes gap 1 (typed claim) and gap 4
+(audience and validity reach the journaled request digest through a derived nonce and are
+checked on the host). For gap 6, the method owns the challenge and consumes the ORIGINAL
+stored-request challenge once through the shared store, after every other check. V1, V2 and
+the direct V3 host APIs are unchanged and have no adapter. The registry records the tuples
+under `method:risc0-exact` `vcq_adapter`.
+
+A genuine run at source `872c219ca18c6cc978d2f5c705f020e8c69748a6` was independently
+certified; it is recorded here, not re-executed. It produced seven Succinct receipts, each
+`Halted(0)`. Six were accepted by the protocol: SELECT bag, ASK and CONSTRUCT, each under
+holder-declared and verifier-agreed authority. The seventh carried a valid V3 result of two
+rows against a released-row bound of one. It was rejected as `capacity`
+(`vcq-released-rows`) after the proof checks and before challenge consumption. The six
+accepted cases carried 81 controls. The verify-only test failed against the consume-first
+mutant, as intended. The root's wrapper around that check still reported overall failure,
+because its expected failure text was multiline, so the wrapper's verdict is not a pass.
+After the source was restored, a separate verify-only continuation and all-targets Clippy
+passed with no new proof. Eight older genuine-proof test functions were excluded from the
+native gate, so no full-gate claim is made. Evidence digests are SHA-256 of
+`independently-verified-terminal-evidence.json`. The run's file hashes to
+`d523b5405540c127c529749b5d0a571d308d348ed25d17ee27066c4457e9331b`. The post-restore
+digest `5f8385d87f5d85dd49c043a31c1a28995218d95dcf679cdf6a8110989cb83eac` is of the file
+with the same name from the separate post-restore run.
+
+The run used a public synthetic fixture. It shows no issuer authentication of any
+credential, no status, no holder identity, and no completeness beyond the exact agreed
+bytes (no federation or nondeterministic dataset). The adapter is experimental and not
+externally audited (sq-qhy4). [OPUS-5.5] The adapter applies the two §6.2 bounds
+separately. It checks the encoded presentation bytes before decoding the receipt
+(`vcq-presentation-bytes`). It checks the released rows, which it reads from the verified
+journal, after the proof checks and before challenge consumption (`vcq-released-rows`).
+SELECT rows and CONSTRUCT N-Triples lines count; ASK has no row bound. The proposed vector
+`neg-excess-rows` (§11) now expects the same outcome as the seventh receipt. That vector
+has not been executed.
 
 ## 10. Worked examples (illustrative notation, not a wire encoding)
 
@@ -513,7 +568,9 @@ method under a holder-declared request uses the same linking profile without gai
 Expected outcomes name a class and phase (§6.4); vectors that do not apply to a method are
 `unsupported` at negotiation. Machine-readable copies are in the registry, where `applies`
 names registry method, suite, mapping or linking entries. Every vector is an illustrative
-proposal and none has been executed.
+proposal and none has been executed as a vector. [OPUS-5.5] The §9.1 run executed the exact V3
+adapter's own test controls, which are not a vector run. The `neg-excess-rows` expectation
+was aligned with that adapter's source and its seventh receipt, not executed as a vector.
 
 | Vector | Setup | Expected |
 |---|---|---|
@@ -536,7 +593,7 @@ proposal and none has been executed.
 | `neg-wrong-result`, `neg-duplicate-distinct` | one released term altered; repeated DISTINCT row | invalid, verify |
 | `neg-missing-row-exact`, `neg-bag-collapsed` | exact bag loses a row; duplicates merged | invalid, verify |
 | `neg-extra-row` | released row without witness | unsatisfiable, prepare; invalid, verify if forced |
-| `neg-excess-rows` | presentation carries more rows than `resources` allows | invalid, verify, before proof decoding |
+| `neg-excess-rows` | a valid result carries more released rows than `resources` allows | capacity, verify, after result decoding and proof verification, before challenge consumption; never accept |
 | `neg-json-mapping-substitution` | same authenticated bytes, other mapping version | invalid, verify |
 | `neg-context-substitution` | pinned context IRI with different content | policy-rejected, import |
 | `neg-unauthenticated-field` | JOSE unprotected header mapped into the dataset | invalid, import |
