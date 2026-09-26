@@ -338,18 +338,24 @@ The host feature `authenticated-rdf` (off by default) adds a low-level API:
 `authenticated_rdf::{prove_with_artifact, verify_with_artifact}` against an
 independently accepted V5 guest, plus `embedded_authrdf_artifact()`,
 `embedded_authrdf_pin()` and the `export_authrdf_guest` example. The exact V1–V3
-guest keeps its flags, target, manifest, lock and constants, so that its artifact
-bytes and image ID are intended not to depend on the feature; that invariant is
-pending a byte comparison and is not yet measured. Each guest's source rejects
-the other's input; no guest execution has confirmed it. All credential
-authentication is written to run inside the V5 guest. Its
+guest keeps its flags, target, manifest, lock and constants. At source
+`42d13fed` its bytes and image ID were the same with the feature off and on;
+a same-absolute-path control also found them unchanged from `8322a6ff`, while an
+earlier differing-path comparison failed, so arbitrary-path reproducibility is
+not established. All credential authentication runs inside the V5 guest. Its
 `methods/guest-authrdf/Cargo.lock` is committed from an independently reviewed
-real Cargo resolution. At the current checkpoint no V5 guest build, execution,
-test run or receipt is recorded. The dependency, SBOM, registry-parser and
-exact-evaluator campaign gates register its workspace and lock and fail closed
-without that lock; the campaign creates no V5 receipt. The ignored genuine-proof
-driver `host/tests/authenticated_rdf_genuine.rs` proves only the case IDs its
-versioned test job declares (one to six of six defined cases, validated before
-any proof), so a bounded job can prove a subset and a later job the remainder.
-No method registry lists it, and no protocol adapter exists. See the
-[V5 guest reference](../../skills/zk-query-proofs/references/authenticated-rdf-guest.md).
+real Cargo resolution. An independently audited scoped gate at `42d13fed`
+passed the native host and job-parsing tests, a feature Clippy pass and direct
+guest execution, which observed each guest rejecting the other's input and
+created no receipt. No genuine V5 receipt is recorded: the one genuine job
+attempted there timed out before completing a proof. The dependency, SBOM,
+registry-parser and exact-evaluator campaign gates register its workspace and
+lock and fail closed without that lock; no completed campaign run with the V5
+steps is recorded, and the campaign creates no V5 receipt. The ignored
+genuine-proof driver `host/tests/authenticated_rdf_genuine.rs` proves only the
+case IDs its versioned test job declares (one to six of six defined cases,
+validated before any proof), so a bounded job can prove a subset and a later
+job the remainder. No method registry lists V5, and this slice implements no
+protocol adapter. Experimental and not externally audited (`sq-qhy4`). See the
+[V5 guest reference](../../skills/zk-query-proofs/references/authenticated-rdf-guest.md)
+for digests, identities and audit records.

@@ -1,18 +1,22 @@
 <!-- [OPUS-5.5] zkp-14.5: usage reference for the separate V5 guest and low-level host API. -->
 # Issuer-authenticated RDF: separate V5 guest and host API
 
-**Source only; unbuilt and unexecuted at the current checkpoint.** Guest, host
-and test source and both locks exist, but no V5 guest build or execution, V5
-test run or genuine receipt has been recorded. The V5 relation is listed in
-no method registry, and no protocol adapter exists. It is experimental, research
-grade, not yet sound and not externally audited.
-<!-- privacy-claims-allow: source only; explicitly unbuilt, unexecuted, unaudited, no receipt recorded -->
+**Built and directly executed; no genuine receipt.** At source `42d13fed`, an
+independently audited scoped gate built both guests, passed the native host
+tests and executed the V5 guest directly, without proving; see
+[recorded evidence](#recorded-evidence). The one genuine-receipt job attempted
+at that source timed out before completing a proof, so no genuine V5 receipt is
+recorded. It is experimental, research grade, not yet sound and not externally
+audited (`sq-qhy4` is open).
+<!-- privacy-claims-allow: direct execution only; no genuine receipt recorded, unaudited, sq-qhy4 open -->
 
 The relation is the unchanged native V5 model described in the
 [native model reference](authenticated-rdf-model.md). This slice adds a guest
-image that runs it and a low-level host API. It stops before any generic
+image that runs it and a low-level host API. It implements no generic
 `QueryMethod` adapter: `vcq.rs`, `sparq-query-protocol` and the research method
-registry are unchanged.
+registry are unchanged, and no registry lists V5. A separate generic
+authenticated VCQ adapter is under development on a successor branch; no
+genuine receipt for it is known.
 
 ## Features and images
 
@@ -33,12 +37,13 @@ The exact V1–V3 guest (`methods/guest`, `SPARQ_EXACT_GUEST_*` in `methods.rs`)
 is always built with unchanged flags, target subdirectory, manifest, lock and
 constant names in source. Enabling the feature adds a second image and a second
 generated file; it never replaces or shares the first. The generated files embed
-the absolute `OUT_DIR` artifact path, so their text varies between builds. The
-intended invariant is that the default exact guest's artifact bytes and image ID
-are unchanged; it is pending a byte comparison against the previous build and is
-not yet a measured fact. Distinct digests and image IDs, and each image
-rejecting the other's input, are likewise asserted by the unrun tests below, not
-yet observed.
+the absolute `OUT_DIR` artifact path, so their text varies between builds. At
+`42d13fed` the exact guest's bytes and image ID were the same with the feature
+off and on, and the V5 guest's differed from both. Built from the same absolute
+path, the exact guest's bytes at `8322a6ff` (before this slice) and `6bf6314a`
+were identical. An earlier comparison across differing build paths failed and
+is retained, so reproducibility from an arbitrary path is not established.
+Direct execution observed each image rejecting the other's input.
 
 `methods/build.rs` reruns when any image source input changes. For both images
 that is the root manifest, `sparq-canon`, `sparq-core`, `sparq-engine`,
@@ -48,8 +53,10 @@ and the exact guest workspace. With the feature it also watches
 directories; only this `build.rs` builds them.
 
 `methods/guest-authrdf/Cargo.lock` is committed, taken from an independently
-reviewed real Cargo resolution. The `--locked` child build uses it; nothing falls
-back to an unlocked build. No V5 guest build against it is recorded yet.
+reviewed real Cargo resolution (SHA-256
+`c40877fd9d0f354a2ebca562a393a257590bf42dea47f654989c081ec0ac2df4`). The
+`--locked` child build uses it; nothing falls back to an unlocked build. The
+detached workspace lock is committed the same way.
 
 ## Guest
 
@@ -68,8 +75,9 @@ verification, the agreed-commitment comparison and V3 evaluation all run inside
 the guest. The host supplies no precomputed dataset, journal or verdict.
 
 Proving uses the exact APIs' prover-local limits (`1 << 25` session cycles,
-`2^20` segments). Whether valid V5 witnesses fit that ceiling is unknown until
-the guest is executed; exceeding it produces no presentation.
+`2^20` segments). The valid synthetic V5 witnesses of the direct execution
+tests fit that ceiling. That does not show every valid witness fits; exceeding
+it produces no presentation.
 
 ## Host API (`sparq_proved_evaluator::authenticated_rdf`)
 
@@ -119,7 +127,7 @@ presentation. For `VerifierAgreed`, the verifier computes the commitment with
 `authenticated_rdf::dataset_commitment` from its own copy of the credentials and
 salt.
 
-## Tests (written, not yet run)
+## Tests
 
 All three files compile only with `--features authenticated-rdf`. The fixture is
 the published W3C `vc-di-eddsa` `eddsa-rdfc-2022` vector: the same bytes, key
@@ -204,8 +212,9 @@ SPARQ_AUTHRDF_PROOF_JOB=/abs/authrdf-job.json RISC0_SERVER_PATH=/abs/r0vm \
 ```
 
 The detached workspace lock and `methods/guest-authrdf/Cargo.lock` are both
-committed, so these commands use `--locked`; none of them has been recorded
-passing. `RISC0_DEV_MODE` must be unset. The tests read environment variables
+committed, so these commands use `--locked`. The tests behind the first three
+passed in the `42d13fed` scoped gate. The genuine-receipt test has not completed
+a job; see [recorded evidence](#recorded-evidence). `RISC0_DEV_MODE` must be unset. The tests read environment variables
 but never set them.
 
 Job schema `sparq.authrdf-genuine-proof.test-job.v2` (unknown and missing fields
@@ -240,10 +249,12 @@ creating the output directory or proving, the job is rejected if `cases` is
 empty, has more than six entries, repeats an ID or names an unknown ID (IDs are
 case-sensitive). Complete coverage requires listing all six IDs.
 
-A subset job reports only its declared cases. The expected results in
-`metadata.json`, the case records, the receipt count and the completed case IDs
-in `summary.json` must equal the declared list exactly, in order, or the run
-fails before `summary.json` is written. A subset run establishes nothing about
+A subset job reports only its declared cases. The case records and the
+completed case IDs in `summary.json` must equal the declared list exactly, in
+declared order, with one receipt per case. The expected results
+(`fixture.expected` in `metadata.json`) are a map keyed by case ID, not an
+ordered list; they must equal the completed records' expected results as a map.
+Any mismatch fails the run before `summary.json` is written. A subset run establishes nothing about
 undeclared cases, forms or authorities.
 
 To bound a job, declare one or a few cases. If a job times out, its completed
@@ -257,7 +268,7 @@ Evidence (all files `create_new`, owner-only on Unix, never removed):
   accepted guest (`sparq-authrdf-guest`, relation version 5) and the exact guest
   (`sparq-exact-guest`, cross-image controls only), each with its pin. It records
   `declared_cases`, `all_defined_cases_declared` and the expected results of the
-  declared cases only.
+  declared cases only, keyed by case ID.
 - Each case directory holds `request.json` and `started.json`, written before
   proving, and `presentation.json`, written straight after proving. After every
   assertion it also holds `record.json`. The record names the guest package and
@@ -284,8 +295,54 @@ packages in its own target. It exports and later re-confirms the V5 artifact in
 under `guest_artifact_pins`, keyed by guest package, and requires them to be
 distinct. It also runs the V5 native model and host gates and a V5 lint. It
 executes no V5 guest and creates no V5 receipt. Every one of these gates fails
-closed without `methods/guest-authrdf/Cargo.lock`. That lock is now committed;
-no gate run against it is recorded here.
+closed without `methods/guest-authrdf/Cargo.lock`, which is committed. No
+completed campaign run with these V5 steps is recorded; the scoped gate below is
+not a campaign record.
+
+## Recorded evidence
+
+Unless stated otherwise, these records are for source `42d13fed`
+(`42d13fedff0f42e3cde8ea63ff611408719cd6e7`). The independent audit records are
+kept outside this repository and identified by SHA-256. Host timings are
+non-canonical and are not reported.
+
+| Audit record | SHA-256 |
+|---|---|
+| Scoped gate, `guest-gates-42d13fed/independently-verified-gates.json` | `9d492f2392aad03b03d63de75914a1c73ac3557e70df0f302bec434d907b8729` |
+| Same-path exact-guest control, `8322a6ff` to `6bf6314a` | `aa50f937076c9abfbaafced6c7103840d5a466b3f33839fd8661d2f12a8f1655` |
+| Genuine job timeout, `authrdf-genuine-42d-select-agreed/independently-verified-timeout.json` | `e86acfef78a3e565294e3499532e0ad171e7c3c86c323a739956ca794d41f2ed` |
+
+The scoped gate ran on an EC2 host:
+
+- **Native.** Seven test functions passed: the five in
+  `host/tests/authenticated_rdf.rs` and the two job-parsing tests in
+  `host/tests/authenticated_rdf_genuine.rs`.
+- **Direct execution.** The four ignored functions in
+  `host/tests/actual_authenticated_rdf.rs` passed over 45 executions: 10 V5
+  executions reached `Halted(0)` and 32 aborted with the expected V5 message;
+  the exact guest completed one V3 execution and aborted twice with its own
+  message. Direct execution creates no receipt.
+- **Lint.** Clippy over all targets with the `authenticated-rdf` feature passed.
+- **Source.** 7,081 Git source blobs and 30 lock files were unchanged by the
+  gate. No receipt was created.
+
+Guest identities observed at `42d13fed` (not a reproducibility claim; operators
+still approve their own pin):
+
+| Guest | Artifact SHA-256 | Image ID (`u32` words) |
+|---|---|---|
+| `sparq-authrdf-guest` (V5) | `c35f5e4b74169aa51b244b8feecb0c8e746296a6aa052be8c58f0190b1b10b11` | `[2794517044, 4278390001, 1088095536, 53994879, 3259643235, 835127579, 1589380955, 3166477348]` |
+| `sparq-exact-guest` (V1–V3) | `e8c9b6b6bd43c2789add2fcbd9ec18914c2c48ccdcd1149e8b9dea6f0e760623` | `[3002199066, 1615302721, 2039644206, 2826525735, 178258819, 3880799180, 3190314515, 791784891]` |
+
+One genuine job, declaring only `select-bag-verifier-agreed`, ran at
+`42d13fed` with a four-CPU allowance and timed out. It completed no proof and no control
+and wrote no receipt, presentation or `summary.json`. That is incomplete
+execution, not a semantic rejection, a security finding or a benchmark, and it
+establishes nothing about any case.
+
+A separate native model validation at `8322a6ff` is described in the
+[native model reference](authenticated-rdf-model.md#tests); it is not part of
+these counts.
 
 ## Not established
 

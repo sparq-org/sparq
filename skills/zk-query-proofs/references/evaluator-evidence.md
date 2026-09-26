@@ -79,6 +79,9 @@ feature, then re-exports both guests to reject drift. `evidence.json` keeps
 `artifact_pin` for the exact guest and adds `guest_artifact_pins`, keyed by
 `sparq-exact-guest` and `sparq-authrdf-guest`. The two pins must differ in both
 digest and image ID. It executes no V5 guest and creates no V5 receipt,
-as `authrdf_scope` records. Until `methods/guest-authrdf/Cargo.lock` exists,
-these locked steps fail and the campaign does not complete. This change has not
-yet been run.
+as `authrdf_scope` records. `methods/guest-authrdf/Cargo.lock` is committed, so
+these locked steps no longer fail for lack of it. No completed campaign run with
+these V5 steps is recorded. A separate, independently audited scoped gate at
+source `42d13fed` ran the V5 host tests, direct V5 guest execution and a
+feature Clippy pass outside this campaign; it is not a campaign record. See the
+[V5 guest reference](authenticated-rdf-guest.md#recorded-evidence).

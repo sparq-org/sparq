@@ -5,8 +5,8 @@
 //! Compiled only with the off-by-default `authenticated-rdf` feature. The relation
 //! is [`sparq_proved_evaluator_model::authenticated_rdf`], unchanged. It runs in
 //! its own guest image (see [`crate::embedded_authrdf_pin`]), separate from the
-//! exact V1–V3 guest. Neither guest's source accepts the other's input (not yet
-//! confirmed by execution). Both functions
+//! exact V1–V3 guest. Neither guest accepts the other's input; direct execution
+//! at source `42d13fed` observed both rejections. Both functions
 //! take an [`AcceptedGuest`] loaded from an independently approved V5 artifact
 //! pin. There is no embedded-default shortcut.
 //!
@@ -22,11 +22,12 @@
 //! request. Only then does it consume the nonce, once. No earlier failure consumes
 //! it.
 //!
-//! Proving shares the exact APIs' prover-local session ceiling. At the current
-//! checkpoint the V5 guest is unbuilt and unexecuted, so whether valid V5
-//! witnesses fit that ceiling is unknown; exceeding it yields no presentation.
+//! Proving shares the exact APIs' prover-local session ceiling. The valid
+//! synthetic V5 witnesses of the direct execution tests fit it; that does not
+//! show every valid witness fits, and exceeding it yields no presentation. No
+//! genuine V5 receipt is recorded.
 //!
-//! Experimental source, not externally audited. Neither provenance establishes
+//! Experimental, not externally audited. Neither provenance establishes
 //! credential status, holder binding, or wallet or world completeness.
 
 use crate::v3::CheckedFailure;

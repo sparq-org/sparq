@@ -163,11 +163,12 @@ host/guest APIs; consult artifact-bound evidence for actual execution status.
 It checks W3C `eddsa-rdfc-2022` credentials against a verifier-pinned key table, then
 reuses V3 evaluation. It checks no status, holder binding or completeness.
 [OPUS-5.5] A [separately pinned V5 guest and low-level host API](references/authenticated-rdf-guest.md)
-(host feature `authenticated-rdf`, off by default) exist as source only; its guest
-lock is committed, but at the current checkpoint no guest build or execution is
-recorded. No receipt is recorded, and no registry entry or protocol adapter exists.
-Its ignored genuine-proof driver proves only the one to six case IDs a v2 test job
-declares; a subset run claims nothing about undeclared cases. <!-- privacy-claims-allow: unbuilt, unexecuted source, no receipt, not audited -->
+(host feature `authenticated-rdf`, off by default) run it. At source `42d13fed` an
+independently audited scoped gate built the guest and executed it directly, without
+proving; no genuine receipt is recorded, and this slice adds no registry entry or
+protocol adapter. Its ignored genuine-proof driver proves only the one to six case
+IDs a v2 test job declares; a subset run claims nothing about undeclared cases.
+Not externally audited (`sq-qhy4`). <!-- privacy-claims-allow: direct execution only, no genuine receipt, not audited -->
 [GPT-6] The [campaign evidence guide](references/evaluator-evidence.md) explains
 exact artifact export, actual receipt evidence and source/HAL provenance.
 [GPT-6] The [exact-evaluator experiment adapter](../../zk/sparql-evaluator/experiments/README.md)
