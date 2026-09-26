@@ -1,0 +1,21 @@
+# [OPUS-5.5] zkp-16.1 — typed negotiation and method contract for the vcq draft 0
+# (`research/vc-query-protocol.md`). A dependency-free LEAF: no proof backend,
+# wire encoding or cryptography lives here, and nothing in the workspace consumes
+# it yet, so sparq-core / sparq-engine / the default wasm build are unchanged.
+[package]
+name = "sparq-query-protocol"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Experimental typed capability negotiation and method contract for Sparq credential query proofs"
+readme = "README.md"
+# Experimental research contract (draft 0); not externally audited (sq-qhy4).
+publish = false
+
+# INTENTIONALLY EMPTY — adapters depend on this crate, never the reverse.
+[dependencies]

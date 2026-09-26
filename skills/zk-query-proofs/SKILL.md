@@ -28,6 +28,13 @@ paths from source. They are design records only: no shared adapter, JSON signatu
 cross-method linking exists, a registry label shows no support (every entry has
 `adapter_available: false`), and none is externally audited.
 
+[OPUS-5.5] The experimental, unpublished, dependency-free `sparq-query-protocol` crate adds a
+first executable layer of that draft. It provides typed descriptors, whole capability tuples,
+obligation enforcers, `admit` negotiation that rejects wildcards, fallbacks and downgrades, and
+a `QueryMethod` trait with opaque witnesses and typed claims. It has no backend, wire encoding
+or cryptography, proves no cryptographic claim, and registers no method. See
+[query-method contracts](references/query-method-contracts.md).
+
 [GPT-6] For the opt-in synthetic selected-support measurement adapter, its strict
 experiment manifest, timing boundaries and unavailable stages, see
 [experiment instructions](../../bench/zk-compose/experiments/README.md). Driver
