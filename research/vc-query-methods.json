@@ -1,0 +1,394 @@
+{
+  "registry": {
+    "id": "urn:sparq:vcq:registry:draft-0",
+    "title": "Proposed Sparq verifiable-credential query method registry",
+    "status": "proposed-experimental",
+    "authored_by": "[OPUS-5.5]",
+    "specification": "research/vc-query-protocol.md",
+    "id_prefix": "urn:sparq:vcq:",
+    "snapshot": {
+      "branch": "codex/zk-vc-query-spec",
+      "base_commit": "3b7a06c0c",
+      "limitations": [
+        "Native RDF integration from PRs 6504 and 6577 is not in this snapshot and is not described.",
+        "sparq-zk import entries are summarized from skills/zk-query-proofs/SKILL.md, not re-read from source.",
+        "No build, test or proof was executed to produce this file."
+      ]
+    },
+    "rules": [
+      "An entry is a name and a status. It is never evidence that a suite, method or combination is supported, secure or interoperable.",
+      "Verifiers accept only exact descriptor tuples named in their own stored request; there is no wildcard, fallback or downgrade.",
+      "A (suite, mapping, method, linking, authority, source evidence) tuple absent from combinations is unsupported.",
+      "status describes component source only. adapter_available is false for every entry in draft 0; a consumer MUST NOT register an entry as an executable vcq method from its status.",
+      "issuer-authenticated source evidence requires the verifier-pinned authorization binding of spec §4.2 rule 9 (issuer or controller, key identity, exact suite and curve or algorithm, explicit assertion authorization), checked through the suite's profile over the verified credential bytes: Data Integrity envelopes against the signed issuer, verificationMethod and assertionMethod proofPurpose; JOSE/COSE envelopes against the protected-header key identifier and algorithm and the authenticated issuer claim; direct pinned-key suites against the pinned key and any signed issuer claim the suite carries. No profile requires envelope fields its suite lacks. Key authorization comes only from verifier trust material, never from holder or presentation metadata; a signature verifying under a caller-supplied or presentation-located key is not issuer authentication. Unpinned authorization is unsupported and a wrong issuer, key, suite, curve, algorithm or purpose is policy-rejected.",
+      "conformance_vectors are illustrative proposals; none has been executed. Each applies entry resolves to an id in this registry, per enumerations.vector_applies, and says where a vector would apply, never that it passes.",
+      "Binding a field into the statement (binding) is not enforcing a predicate on a hidden witness (enforces). An obligation with no enforcer is unsupported, whatever policy digest the request or challenge hashes.",
+      "Identifiers are short forms of id_prefix plus id; they are proposals and do not occur in source. current_api values name existing items.",
+      "No entry is externally audited (sq-qhy4), and no entry makes a security, privacy or conformance claim."
+    ]
+  },
+  "enumerations": {
+    "entry_status": {
+      "implemented-experimental": "Component source exists behind an opt-in feature or detached workspace. It says nothing about a vcq adapter; see adapter_available.",
+      "standalone-prototype": "Executable experiment with a fixed relation; no library API and no RDF input.",
+      "delegation-seam": "An interface exists, but verification is delegated to a host component that sparq does not supply.",
+      "existing-not-adapted": "Existing verifier path outside this protocol's contracts.",
+      "planned": "Named in design records; not implemented.",
+      "proposed": "Introduced by this draft; not implemented."
+    },
+    "evaluation_mode": ["selected-support", "exact-bounded"],
+    "result_contract": ["select-distinct-set", "select-bag", "select-sequence", "ask-boolean", "ask-true-only", "graph-rdfc10"],
+    "scope_authority": ["verifier-agreed-anchor", "holder-declared"],
+    "source_evidence": ["none", "issuer-authenticated", "re-attested"],
+    "status_policy": ["required", "not-requested"],
+    "holder_policy": ["required", "bearer-accepted"],
+    "obligation_outcome": ["established", "not-established"],
+    "completeness": ["none", "relative-to-scope"],
+    "failure_class": ["unsupported", "capacity", "unsatisfiable", "policy-rejected", "invalid", "infrastructure"],
+    "phase": ["request", "negotiation", "import", "admit", "prepare", "prove", "verify"],
+    "binding_route": ["proved", "journaled", "derived", "challenge", "host", "unbound"],
+    "enforcer": ["relation", "host-with-opening", "host-public", "none"],
+    "challenge_owner": ["method", "adapter"],
+    "challenge_consumption": ["burn-on-attempt", "consume-on-success"],
+    "vector_applies": {
+      "*": "every query method",
+      "method:<id>": "every listed version of the query_methods entry with that id",
+      "method:<id>@<n>": "only version n of that query method",
+      "suite:<id>": "the authenticity_suites entry with that id, at import",
+      "map:<id>": "the mapping_profiles entry with that id",
+      "link:<id>": "the linking_profiles entry with that id",
+      "link:*": "every linking profile"
+    }
+  },
+  "authenticity_suites": [
+    {
+      "id": "suite:sparq-poseidon2-schnorr-v1",
+      "status": "implemented-experimental",
+      "representation": "sparq-commitment",
+      "current_api": ["sparq_zk::sig::SignatureScheme::Poseidon2SchnorrV1", "sparq_zk::sig::commitment_message_with_status"],
+      "verified_where": "inside the Noir selected-support relation and by the legacy manifest verifier",
+      "note": "Schnorr over Baby-JubJub signing a Poseidon2 graph commitment, its salt and a status reference.",
+      "issuer_authorization": "direct pinned-key profile (spec §4.2 rule 9): verifier trust policy pins the issuer keys authorized to assert; the signed message carries no Data Integrity or JOSE fields, and none are required"
+    },
+    {
+      "id": "suite:di-eddsa-rdfc-2022",
+      "status": "implemented-experimental",
+      "representation": "rdf-canonical",
+      "feature": "sparq-zk/vc-bridge",
+      "current_api": ["sparq_zk::vc_bridge::verify_source_proof", "sparq_zk::vc_bridge::ingest_verified_vc"],
+      "verified_where": "off-circuit at import only",
+      "note": "Reaches query methods only through trusted re-attestation; zk:sourceCryptosuite is provenance, not an in-proof property.",
+      "issuer_authorization": "caller-delegated: verification uses caller-supplied key bytes and vc_bridge_json returns verification_method for the caller to bind; an import primitive, not end-to-end issuer authentication (spec §4.2 rule 9)"
+    },
+    {
+      "id": "suite:di-ecdsa-rdfc-2019",
+      "status": "implemented-experimental",
+      "representation": "rdf-canonical",
+      "feature": "sparq-zk/vc-bridge",
+      "current_api": ["sparq_zk::vc_bridge::verify_source_proof", "sparq_zk::vc_bridge::EcdsaProfile::from_sec1_key"],
+      "verified_where": "off-circuit at import only",
+      "note": "P-256/SHA-256 and P-384/SHA-384 profiles are resolved from the issuer key; P-521 is rejected. Same re-attestation limit as eddsa-rdfc-2022.",
+      "issuer_authorization": "caller-delegated, as for eddsa-rdfc-2022"
+    },
+    {
+      "id": "suite:di-selective-disclosure",
+      "status": "delegation-seam",
+      "representation": "rdf-canonical",
+      "tokens": ["bbs-2023", "ecdsa-sd-2023"],
+      "current_api": ["sparq_zk::vc_bridge_sd::SelectiveDisclosureVerifier", "sparq_zk::vc_bridge_sd::UnavailableSdVerifier"],
+      "verified_where": "host-supplied verifier only; the in-repo default rejects every suite",
+      "note": "sparq supplies no selective-disclosure verifier."
+    },
+    {
+      "id": "suite:di-eddsa-jcs-2022",
+      "status": "planned",
+      "representation": "json-jcs",
+      "current_api": [],
+      "note": "JSON signature modes are planned and not implemented."
+    },
+    {
+      "id": "suite:vc-jose-cose",
+      "status": "planned",
+      "representation": "jose-payload",
+      "current_api": [],
+      "note": "Not implemented. Would bind exact payload octets; unprotected headers never enter the dataset."
+    },
+    {
+      "id": "suite:dock-bbsplus-tuple-research",
+      "status": "standalone-prototype",
+      "representation": "synthetic BLS12-381 scalar tuple [schema, subject, amount]",
+      "current_api": ["zk/native-composition executable (no library API)"],
+      "verified_where": "inside one Dock composite proof",
+      "note": "Not W3C bbs-2023 and not an RDF credential."
+    }
+  ],
+  "mapping_profiles": [
+    {
+      "id": "map:sparq-string-canonical-v1",
+      "status": "implemented-experimental",
+      "input": "RDF triples of one credential graph",
+      "output": "RDFC-1.0 canonical triples committed with string-canonical term encoding and a per-graph blank-node salt",
+      "current_api": ["sparq_zk::commit::CommitmentMethod::StringCanonicalV1", "sparq_zk::commit::commit_triples"],
+      "used_by": ["method:noir-selected-support-unsigned", "method:noir-selected-support-signed"]
+    },
+    {
+      "id": "map:sparq-dual-leaf-v1",
+      "status": "implemented-experimental",
+      "input": "RDF triples of one credential graph",
+      "output": "dual-leaf commitment behind the dual-leaf feature",
+      "current_api": ["sparq_zk::commit::CommitmentMethod::DualLeafV1", "sparq_zk_compose::dispatch::resolve_circuit"],
+      "used_by": [],
+      "note": "Research dial. Selected-support members accept string-canonical commitments only; resolve_circuit rejects illegal (method, circuit) pairs."
+    },
+    {
+      "id": "map:jsonld-pinned-contexts-v1",
+      "status": "implemented-experimental",
+      "input": "JSON-LD verifiable credential secured with a Data Integrity proof",
+      "output": "RDF triples by expansion against a caller-supplied context allowlist, without network access",
+      "current_api": ["sparq_zk::vc_bridge_json::parse_vc_json", "sparq_zk::vc_bridge_json::verify_vc_json"],
+      "used_by": [],
+      "note": "Named-graph expansion and proof arrays are refused. The draft additionally requires context content digests in verifier configuration and a fixed expansion base IRI."
+    },
+    {
+      "id": "map:exact-source-bytes",
+      "status": "implemented-experimental",
+      "versions": {
+        "1": "exact N-Triples bytes of one default graph",
+        "2": "exact N-Quads bytes plus an explicit IRI-named graph catalog, including empty graphs",
+        "3": "the version 2 source container under a version 3 domain that also binds canonicalization and DESCRIBE policy"
+      },
+      "current_api": ["sparq_proved_evaluator_model::dataset_commitment", "sparq_proved_evaluator_model::v2::dataset_commitment", "sparq_proved_evaluator_model::v3::dataset_commitment"],
+      "used_by": ["method:risc0-exact"],
+      "note": "SHA-256 over a versioned domain, policy, salt and exact source bytes. Not RDF canonicalization; equivalent serializations differ; reusing an anchor is publicly linkable; no issuer authentication."
+    },
+    {
+      "id": "map:jcs-json-to-rdf",
+      "status": "proposed",
+      "note": "Would require pinned context content digests and a fixed expansion base IRI, because a JCS signature covers context IRIs, not their content."
+    },
+    {
+      "id": "map:jose-payload-to-rdf",
+      "status": "proposed",
+      "note": "Would map exact authenticated payload octets only."
+    }
+  ],
+  "query_methods": [
+    {
+      "id": "method:noir-selected-support-unsigned",
+      "versions": [1, 2],
+      "status": "implemented-experimental",
+      "current_api": {
+        "feature": "sparq-zk-compose/successful-results",
+        "prepare": "sparq_zk_compose::result::prepare_result_with_options",
+        "prove": "sparq_zk_compose::result::PreparedResult::prove",
+        "verify": "sparq_zk_compose::result::verify_result",
+        "presentation": "sparq_zk_compose::result::ResultPresentation",
+        "output": "sparq_zk_compose::result::VerifiedResult",
+        "error": "sparq_zk_compose::result::ResultError"
+      },
+      "mode": "selected-support",
+      "result_contracts": ["select-distinct-set"],
+      "query_profile": "SELECT DISTINCT over a nonempty positive BGP with joins and directly bound canonical nonnegative xsd:integer comparisons up to u64::MAX; ASK, dataset clauses, GRAPH, query blank nodes, modifiers and subqueries rejected; released blank nodes and triple terms rejected",
+      "value_domain": "canonical nonnegative xsd:integer lexical forms up to u64::MAX; proposed vcq class for a hidden noncanonical form such as \"018\": unsupported at prepare, not unsatisfiable (current ResultError does not distinguish these)",
+      "adapter_available": false,
+      "scope_authority": ["holder-declared"],
+      "source_evidence": ["issuer-authenticated"],
+      "completeness": "none",
+      "suites": ["suite:sparq-poseidon2-schnorr-v1"],
+      "mappings": ["map:sparq-string-canonical-v1"],
+      "status_policy": ["required"],
+      "holder_policy": ["bearer-accepted"],
+      "enforces": {
+        "authenticity": "relation: Schnorr over commitment, salt and status reference against issuer slots in the trusted set",
+        "mapping": "relation: membership of the hidden triples in the signed string-canonical commitment",
+        "status": "relation: status reference against the verifier's accepted status-policy root",
+        "holder_binding": "none",
+        "query": "relation for the derived layout; host-public for the exact query string",
+        "audience_validity": "none today; host-public over the stored request once the derived challenge binds it"
+      },
+      "capacities": {"credential_slots": [1, 2], "triples_per_credential": 16, "patterns": 3, "released_rows": 4, "variables": 6, "private_predicates": 2, "status_depths": [10, 17, 20], "accepted_status_entries": 16},
+      "parameters": {"credential_capacity": ["smallest", "hide-in-two"], "integer_capacity": ["smallest", "hide-in-u64"]},
+      "artifact_identity": "The verifier derives the member from issuer-slot count, private-filter count, integer capacity and status depth, then regenerates its canonical key locally after checking nargo 1.0.0-beta.21 and bb 5.0.0-nightly.20260324 (noir-recursive). No key digest is pinned in verifier configuration.",
+      "binding": {"result": "proved", "query": "proved derived layout; exact query string checked on host", "challenge": "proved", "version": "proved", "parameters": "derived", "program_key": "derived", "issuer_keys": "proved", "status_policy": "proved", "audience_validity": "unbound"},
+      "challenge_owner": "method",
+      "challenge_consumption": "burn-on-attempt",
+      "disclosure_inventory": ["query", "released terms", "issuer key slots", "credential and integer capacity buckets", "result size", "accepted status-policy root"],
+      "adapter_gaps": ["typed failure classes", "typed claim with enforcers, source evidence and completeness", "request-derived challenge", "pinned key digests", "capabilities and adapter"]
+    },
+    {
+      "id": "method:noir-selected-support-signed",
+      "versions": [3],
+      "status": "implemented-experimental",
+      "current_api": {
+        "feature": "sparq-zk-compose/successful-results",
+        "prepare": "sparq_zk_compose::result::signed::prepare_signed_result_with_options",
+        "prove": "sparq_zk_compose::result::signed::PreparedSignedResult::prove",
+        "verify": "sparq_zk_compose::result::signed::verify_signed_result",
+        "presentation": "sparq_zk_compose::result::signed::SignedResultPresentation",
+        "output": "sparq_zk_compose::result::VerifiedResult",
+        "error": "sparq_zk_compose::result::ResultError"
+      },
+      "mode": "selected-support",
+      "result_contracts": ["select-distinct-set"],
+      "query_profile": "as the unsigned method, with canonical signed xsd:integer comparisons in the i64 range",
+      "value_domain": "canonical signed xsd:integer lexical forms in the i64 range; proposed vcq class for a hidden noncanonical form: unsupported at prepare, not unsatisfiable",
+      "adapter_available": false,
+      "scope_authority": ["holder-declared"],
+      "source_evidence": ["issuer-authenticated"],
+      "completeness": "none",
+      "suites": ["suite:sparq-poseidon2-schnorr-v1"],
+      "mappings": ["map:sparq-string-canonical-v1"],
+      "status_policy": ["required"],
+      "holder_policy": ["bearer-accepted"],
+      "enforces": "as the unsigned method",
+      "parameters": {"credential_capacity": ["smallest", "hide-in-two"]},
+      "binding": {"result": "proved", "query": "proved derived layout; exact query string checked on host", "challenge": "proved", "version": "proved", "parameters": "derived", "program_key": "derived", "audience_validity": "unbound"},
+      "challenge_owner": "method",
+      "challenge_consumption": "burn-on-attempt",
+      "adapter_gaps": ["as the unsigned method"]
+    },
+    {
+      "id": "method:risc0-exact",
+      "versions": [1, 2, 3],
+      "status": "implemented-experimental",
+      "current_api": {
+        "workspace": "zk/sparql-evaluator (detached)",
+        "request": ["sparq_proved_evaluator_model::Request", "sparq_proved_evaluator_model::v2::Request", "sparq_proved_evaluator_model::v3::Request"],
+        "prove": ["sparq_proved_evaluator::prove_with_artifact", "sparq_proved_evaluator::v2::prove_with_artifact", "sparq_proved_evaluator::v3::prove_with_artifact"],
+        "verify": ["sparq_proved_evaluator::verify_with_artifact", "sparq_proved_evaluator::v2::verify_with_artifact", "sparq_proved_evaluator::v3::verify_with_artifact"],
+        "artifact": "sparq_proved_evaluator::{ArtifactPin, AcceptedGuest}",
+        "output": "per-version Journal",
+        "error": "sparq_proved_evaluator::Error; the model's EvaluationError for native evaluation"
+      },
+      "mode": "exact-bounded",
+      "result_contracts": {
+        "1": ["select-bag", "select-sequence", "ask-boolean"],
+        "2": ["select-bag", "select-sequence", "ask-boolean"],
+        "3": ["select-bag", "select-sequence", "ask-boolean", "graph-rdfc10"]
+      },
+      "dialects": {
+        "1": "Dialect::SparqSparql11SnapshotV1",
+        "2": "v2::Dialect::SparqSparql11DatasetV2",
+        "3": "v3::Dialect::SparqSparql11GraphResultsV3"
+      },
+      "adapter_available": false,
+      "scope_authority": ["verifier-agreed-anchor", "holder-declared"],
+      "source_evidence": ["none"],
+      "completeness": "relative-to-scope",
+      "suites": [],
+      "mappings": ["map:exact-source-bytes"],
+      "status_policy": ["not-requested"],
+      "holder_policy": ["bearer-accepted"],
+      "enforces": {
+        "authenticity": "none",
+        "mapping": "journaled exact-source-bytes commitment over the evaluated bytes",
+        "status": "none",
+        "holder_binding": "none",
+        "query": "guest evaluation over the committed bytes, journaled",
+        "anchor": "host-public: journaled commitment compared with the verifier anchor under verifier-agreed-anchor authority only",
+        "audience_validity": "none today"
+      },
+      "capacities": {"program_ceilings": {"dataset_bytes": 65536, "source_triples": 256, "query_bytes": 8192, "rows": 4096, "named_graphs_v2_v3": 16}, "note": "Requests may lower these; version 3 adds canonicalization ceilings."},
+      "artifact_identity": "ArtifactPin { sha256, image_id } from verifier configuration, checked by AcceptedGuest::from_artifact; only succinct receipts with development mode off are accepted.",
+      "binding": {"result": "journaled", "query": "journaled inside the request digest", "challenge": "journaled", "version": "journaled", "parameters": "journaled", "program_key": "derived", "scope_anchor": "journaled and compared with the verifier anchor", "audience_validity": "unbound"},
+      "request_digest_encoding": "SHA-256 over a versioned domain tag, a length and serde_json bytes of the Rust request; deterministic for one build, not a wire profile",
+      "challenge_owner": "method",
+      "challenge_consumption": "consume-on-success",
+      "challenge_note": "A failed attempt leaves the challenge unconsumed until expiry. vcq requires an atomic consume admitting at most one success per challenge. Nonces (zk/sparql-evaluator/host/src/lib.rs:42) is a relying-party trait documented as atomic persistent acceptance; the host supplies no production store, so an adapter depends on the deployment's implementation for this property.",
+      "disclosure_inventory": ["journal: request digest, dataset commitment (linkable when reused), provenance and result"],
+      "caveat": "Inherits the upstream RISC Zero privacy-assurance limitation and advisory GHSA-5xgj-pmjj-gw49 recorded in skills/zk-query-proofs/references/exact-evaluator.md; no privacy property is claimed.",
+      "adapter_gaps": ["typed failure classes", "no credential authentication or status enforcer", "request-derived nonce", "wire-profile request digest", "capabilities and adapter"]
+    },
+    {
+      "id": "method:noir-manifest-legacy",
+      "status": "existing-not-adapted",
+      "current_api": {"verify": "sparq_zk_compose::verifier::verify_manifest", "presentation": "sparq_zk_compose::manifest::ProofManifest"},
+      "note": "Per-graph scan composition with FILTER, JOIN, revocation, hidden-issuer and holder proof-of-possession tiers. Its statement matches neither mode of this draft and is not mapped.",
+      "adapter_available": false
+    }
+  ],
+  "related_prototypes": [
+    {
+      "id": "prototype:native-bbsplus-legogroth16-eligibility",
+      "status": "standalone-prototype",
+      "location": "zk/native-composition",
+      "relation": "income - 12 * rent >= threshold over two BBS+ signed [schema, subject, amount] tuples, with unsigned 32-bit range constraints",
+      "suites": ["suite:dock-bbsplus-tuple-research"],
+      "linking": "link:native-witness-equality",
+      "verifier_inputs": ["issuer keys", "signature parameters", "disclosed schema tags", "circuit verification key", "threshold", "context", "fresh challenge"],
+      "backend_selector": "only dock-legogroth16-bls12-381; noir-bn254 is rejected at backend selection",
+      "setup": "fresh local circuit-specific setup; no production ceremony",
+      "unsupported": ["RDF credential adapter", "W3C bbs-2023 wire format", "credential status", "validity periods", "SPARQL queries", "Noir/BN254 linkage"]
+    }
+  ],
+  "linking_profiles": [
+    {"id": "link:same-relation", "status": "implemented-experimental", "establishes": "One proof relation checks signature, membership, status and query over one witness.", "evidence": "method:noir-selected-support-unsigned"},
+    {"id": "link:public-authenticated-value", "status": "implemented-experimental", "establishes": "A released value authenticated in-relation is checked by the verifier outside the circuit.", "evidence": "public FILTERs in method:noir-selected-support-unsigned"},
+    {"id": "link:committed-dataset-evaluation", "status": "implemented-experimental", "establishes": "The proof evaluates exactly the bytes whose commitment it journals. It says nothing about who endorsed the commitment (scope authority) and authenticates nothing (source evidence none).", "evidence": "method:risc0-exact"},
+    {"id": "link:trusted-reattestation", "status": "proposed", "establishes": "An importer verifies a source suite and re-signs a sparq commitment; only the re-signing key is checked in-proof.", "evidence": "components exist separately (vc_bridge ingest, Poseidon2SchnorrV1 signing); no end-to-end path checked"},
+    {"id": "link:native-witness-equality", "status": "standalone-prototype", "establishes": "One composite proof equates hidden signed messages and circuit inputs in one scalar field.", "evidence": "prototype:native-bbsplus-legogroth16-eligibility"},
+    {"id": "link:cross-field-bridge", "status": "proposed", "establishes": "Equality between BLS12-381 and BN254 witnesses.", "evidence": "none; every request needing it fails closed"}
+  ],
+  "combinations": [
+    {"suite": "suite:sparq-poseidon2-schnorr-v1", "mapping": "map:sparq-string-canonical-v1", "method": "method:noir-selected-support-unsigned", "versions": [1, 2], "linking": ["link:same-relation", "link:public-authenticated-value"], "authority": ["holder-declared"], "source_evidence": ["issuer-authenticated"], "status": "implemented-experimental", "adapter_available": false},
+    {"suite": "suite:sparq-poseidon2-schnorr-v1", "mapping": "map:sparq-string-canonical-v1", "method": "method:noir-selected-support-signed", "versions": [3], "linking": ["link:same-relation", "link:public-authenticated-value"], "authority": ["holder-declared"], "source_evidence": ["issuer-authenticated"], "status": "implemented-experimental", "adapter_available": false},
+    {"suite": null, "mapping": "map:exact-source-bytes", "method": "method:risc0-exact", "versions": [1, 2, 3], "linking": ["link:committed-dataset-evaluation"], "authority": ["verifier-agreed-anchor", "holder-declared"], "source_evidence": ["none"], "status": "implemented-experimental", "adapter_available": false, "note": "The linking profile is the same under both authorities; a holder-declared request keeps holder-declared provenance."},
+    {"suite": "suite:di-eddsa-rdfc-2022", "mapping": "map:sparq-string-canonical-v1", "method": "method:noir-selected-support-unsigned", "versions": [1, 2], "linking": ["link:trusted-reattestation", "link:same-relation"], "authority": ["holder-declared"], "source_evidence": ["re-attested"], "status": "proposed", "adapter_available": false, "note": "The claim would name the re-attesting key, not the source issuer."},
+    {"suite": "suite:di-ecdsa-rdfc-2019", "mapping": "map:sparq-string-canonical-v1", "method": "method:noir-selected-support-unsigned", "versions": [1, 2], "linking": ["link:trusted-reattestation", "link:same-relation"], "authority": ["holder-declared"], "source_evidence": ["re-attested"], "status": "proposed", "adapter_available": false, "note": "As for eddsa-rdfc-2022."},
+    {"suite": "suite:dock-bbsplus-tuple-research", "mapping": null, "method": null, "prototype": "prototype:native-bbsplus-legogroth16-eligibility", "linking": ["link:native-witness-equality"], "status": "standalone-prototype", "adapter_available": false}
+  ],
+  "explicitly_unsupported": [
+    {"tuple": "any authenticity suite with method:risc0-exact", "reason": "the guest verifies no issuer signature or status"},
+    {"tuple": "suite:dock-bbsplus-tuple-research with any Noir method", "reason": "no BLS12-381 to BN254 witness bridge"},
+    {"tuple": "suite:di-eddsa-jcs-2022 or suite:vc-jose-cose with any method", "reason": "suites planned, not implemented"},
+    {"tuple": "suite:di-selective-disclosure without a host verifier", "reason": "the default verifier rejects every suite"},
+    {"tuple": "map:sparq-dual-leaf-v1 with method:noir-selected-support-*", "reason": "members accept string-canonical commitments only"},
+    {"tuple": "selected-support with select-bag, select-sequence, false ASK or graph results", "reason": "these assert completeness"},
+    {"tuple": "any current method with verifier-agreed-anchor authority and issuer-authenticated or re-attested source evidence", "reason": "no method links authentication to anchored bytes"},
+    {"tuple": "any request requiring holder binding from a mapped query method", "reason": "none of the mapped methods enforces holder binding; the legacy manifest path that does is not mapped"}
+  ],
+  "conformance_vectors": [
+    {"id": "pos-selected-distinct", "expect": "accept", "claim": "holder binding not-established", "applies": ["method:noir-selected-support-unsigned"]},
+    {"id": "pos-selected-public-filter", "expect": "accept", "applies": ["method:noir-selected-support-unsigned", "method:noir-selected-support-signed"]},
+    {"id": "pos-exact-bag-duplicates", "expect": "accept", "applies": ["method:risc0-exact"]},
+    {"id": "pos-exact-ask-false", "expect": "accept", "applies": ["method:risc0-exact"]},
+    {"id": "pos-exact-graph-relabel", "expect": "accept", "applies": ["method:risc0-exact@3"]},
+    {"id": "sel-missing-row-undetected", "expect": "accept", "claim": "completeness none", "applies": ["method:noir-selected-support-unsigned", "method:noir-selected-support-signed"]},
+    {"id": "neg-wrong-method", "expect": "invalid", "phase": "negotiation", "applies": ["*"]},
+    {"id": "neg-unimplemented-method", "expect": "unsupported", "phase": "request", "applies": ["*"]},
+    {"id": "neg-missing-policy", "expect": "invalid", "phase": "request", "applies": ["*"]},
+    {"id": "neg-unenforced-obligation", "expect": "unsupported", "phase": "admit", "applies": ["method:risc0-exact"]},
+    {"id": "neg-weaker-contract", "expect": "invalid", "phase": "negotiation", "applies": ["*"]},
+    {"id": "neg-holder-declared-as-agreed", "expect": "invalid", "phase": "verify", "applies": ["method:risc0-exact"]},
+    {"id": "neg-authority-upgrade", "expect": "unsupported", "phase": "admit", "applies": ["method:noir-selected-support-unsigned", "method:noir-selected-support-signed"]},
+    {"id": "neg-wrong-scope", "expect": "invalid", "phase": "verify", "applies": ["*"]},
+    {"id": "neg-wrong-nonce", "expect": "invalid", "phase": "verify", "applies": ["*"]},
+    {"id": "neg-replay", "expect": "invalid", "phase": "verify", "applies": ["*"]},
+    {"id": "neg-concurrent-replay", "expect": "exactly one accept; others invalid", "phase": "verify", "applies": ["*"]},
+    {"id": "neg-expired", "expect": "invalid", "phase": "verify", "applies": ["*"]},
+    {"id": "neg-wrong-audience", "expect": "invalid", "phase": "verify", "applies": ["*"], "requires": "request-derived challenge"},
+    {"id": "neg-wrong-result", "expect": "invalid", "phase": "verify", "applies": ["*"]},
+    {"id": "neg-duplicate-distinct", "expect": "invalid", "phase": "verify", "applies": ["method:noir-selected-support-unsigned", "method:noir-selected-support-signed"]},
+    {"id": "neg-missing-row-exact", "expect": "invalid", "phase": "verify", "applies": ["method:risc0-exact"]},
+    {"id": "neg-bag-collapsed", "expect": "invalid", "phase": "verify", "applies": ["method:risc0-exact"]},
+    {"id": "neg-extra-row", "expect": "unsatisfiable", "phase": "prepare", "forced": "invalid at verify", "applies": ["method:noir-selected-support-unsigned", "method:noir-selected-support-signed"]},
+    {"id": "neg-excess-rows", "expect": "invalid", "phase": "verify", "note": "rejected before proof decoding", "applies": ["*"]},
+    {"id": "neg-json-mapping-substitution", "expect": "invalid", "phase": "verify", "applies": ["map:jsonld-pinned-contexts-v1"]},
+    {"id": "neg-context-substitution", "expect": "policy-rejected", "phase": "import", "applies": ["map:jsonld-pinned-contexts-v1", "map:jcs-json-to-rdf"]},
+    {"id": "neg-unauthenticated-field", "expect": "invalid", "phase": "import", "applies": ["map:jose-payload-to-rdf"]},
+    {"id": "neg-issuer-key-mismatch", "setup": "signature verifies under a key pinned for issuer B, or for another suite or curve, while the signed issuer is A", "expect": "policy-rejected", "phase": "import", "applies": ["suite:di-eddsa-rdfc-2022", "suite:di-ecdsa-rdfc-2019", "suite:di-eddsa-jcs-2022", "suite:di-selective-disclosure", "suite:vc-jose-cose"]},
+    {"id": "unsup-unpinned-key-locator", "setup": "no pinned authorization; only a bare caller key or the presentation's own key locator (verificationMethod, jku, x5u) is available", "expect": "unsupported", "phase": "import", "never": "issuer-authenticated", "applies": ["suite:di-eddsa-rdfc-2022", "suite:di-ecdsa-rdfc-2019", "suite:di-eddsa-jcs-2022", "suite:di-selective-disclosure", "suite:vc-jose-cose"]},
+    {"id": "neg-wrong-proof-purpose", "setup": "pinned key authorized for issuer A only under authentication, or signed proofPurpose other than assertionMethod", "expect": "policy-rejected", "phase": "import", "applies": ["suite:di-eddsa-rdfc-2022", "suite:di-ecdsa-rdfc-2019", "suite:di-eddsa-jcs-2022", "suite:di-selective-disclosure"]},
+    {"id": "neg-lexical-substitution", "setup": "signed \"018\"^^xsd:integer released or joined as the distinct term \"18\"^^xsd:integer", "expect": "unsatisfiable", "phase": "prepare", "forced": "invalid at verify", "applies": ["method:noir-selected-support-unsigned", "method:noir-selected-support-signed"]},
+    {"id": "unsup-noncanonical-value", "setup": "FILTER(?age >= 18) whose only witness is signed \"018\"^^xsd:integer, value-equal to 18 under SPARQL", "expect": "unsupported", "phase": "prepare", "never": "unsatisfiable", "applies": ["method:noir-selected-support-unsigned", "method:noir-selected-support-signed"]},
+    {"id": "neg-cross-scope-blank-node", "expect": "unsatisfiable", "phase": "prepare", "applies": ["method:noir-selected-support-unsigned"]},
+    {"id": "neg-spliced-hidden-values", "expect": "invalid", "phase": "verify", "applies": ["link:*"]},
+    {"id": "neg-cross-field-link", "expect": "unsupported", "phase": "negotiation", "applies": ["link:cross-field-bridge"]},
+    {"id": "neg-status-rollback", "expect": "policy-rejected", "phase": "prepare", "forced": "invalid at verify", "applies": ["method:noir-selected-support-unsigned", "method:noir-selected-support-signed"]},
+    {"id": "neg-algorithm-confusion", "expect": "invalid", "phase": "verify", "applies": ["*"]},
+    {"id": "neg-update-request", "expect": "unsupported", "phase": "request", "applies": ["*"]},
+    {"id": "neg-unsupported-feature", "expect": "unsupported", "phase": "admit", "applies": ["method:noir-selected-support-unsigned"]},
+    {"id": "neg-capacity", "setup": "request resources ask for 5 released rows where the member ceiling is 4", "expect": "capacity", "phase": "admit", "applies": ["method:noir-selected-support-unsigned"]},
+    {"id": "neg-infrastructure", "expect": "infrastructure", "phase": "verify", "applies": ["*"]}
+  ]
+}

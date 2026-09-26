@@ -21,6 +21,13 @@ For the isolated BBS+/BLS12-381 and Circom/LegoGroth16 composition experiment, s
 CI runs real proof tests; it provides no Noir linkage, RDF adapter, or credential-status
 integration and remains unaudited. [GPT-6]
 
+[OPUS-5.5] The [VC query protocol draft](../../research/vc-query-protocol.md) and its
+[method registry](../../research/vc-query-methods.json) propose separating credential suites
+from pluggable query proof methods, and map the selected-result, exact-evaluator and native
+paths from source. They are design records only: no shared adapter, JSON signature mode or
+cross-method linking exists, a registry label shows no support (every entry has
+`adapter_available: false`), and none is externally audited.
+
 [GPT-6] For the opt-in synthetic selected-support measurement adapter, its strict
 experiment manifest, timing boundaries and unavailable stages, see
 [experiment instructions](../../bench/zk-compose/experiments/README.md). Driver
