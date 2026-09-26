@@ -613,7 +613,7 @@ fn derived_nonce(tag: u8, request: &StoredRequest) -> [u8; 32] {
     nonce
 }
 
-/// Simulated method verify: proves over its derived nonce but consumes the original.
+/// Simulated verify: computes a test-only stand-in nonce, consumes the original, proves nothing.
 fn simulated_verify(
     tag: u8,
     store: &dyn ChallengeStore,
