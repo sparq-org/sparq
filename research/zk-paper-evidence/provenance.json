@@ -30,6 +30,18 @@
     "native-rdf-composition-audit.json": {
       "source": "study-artifacts/zk-resume-2026-09-25/ci/pr6577-fcb7-native-completed-evidence.json",
       "sha256": "1ac22974ba3ce2c44f841a6f8d179bf13b3e21013af9d60dbd4ac6ad12e72af7"
+    },
+    "authenticated-rdf-guest-audit.json": {
+      "source": "root-copied immutable snapshot of the scoped authenticated-RDF (V5) guest-build and direct-execution gate at 42d13fedff0f42e3cde8ea63ff611408719cd6e7; zero proofs, zero receipts",
+      "sha256": "9d492f2392aad03b03d63de75914a1c73ac3557e70df0f302bec434d907b8729"
+    },
+    "authenticated-rdf-proof-timeout.json": {
+      "source": "root-copied immutable snapshot of the first bounded genuine V5 proof attempt at 42d13fedff0f42e3cde8ea63ff611408719cd6e7; INCOMPLETE (command timeout), zero completed proofs or controls, retained unchanged",
+      "sha256": "e86acfef78a3e565294e3499532e0ad171e7c3c86c323a739956ca794d41f2ed"
+    },
+    "authenticated-vcq-native-audit.json": {
+      "source": "root-copied immutable snapshot of the scoped native gate of the generic authenticated (V5) VCQ adapter at 7fe889557afcf1497769c1360ef53348980a7bae; zero proofs, zero direct guest executions",
+      "sha256": "6a8fc2300f0463290859b0f8f4c0b9ef790382b0ef9401ec2a60a07645eab385"
     }
   }
 }

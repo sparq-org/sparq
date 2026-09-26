@@ -1,0 +1,109 @@
+{
+  "at": "2026-09-26T21:21:14.459400+00:00",
+  "source": "42d13fedff0f42e3cde8ea63ff611408719cd6e7",
+  "conclusion": "INCOMPLETE: bounded command timeout, not a semantic rejection",
+  "outcome": {
+    "at": "2026-09-26T21:13:32.364037+00:00",
+    "exit": null,
+    "error": "TimeoutExpired(['cargo', 'test', '--locked', '--offline', '--manifest-path', 'zk/sparql-evaluator/Cargo.toml', '-p', 'sparq-proved-evaluator', '--features', 'authenticated-rdf', '--test', 'authenticated_rdf_genuine', 'genuine_authrdf_receipts_verify_declared_cases_and_reject_controls', '--', '--exact', '--ignored', '--test-threads=1', '--nocapture'], 1139.9999825919995)",
+    "seconds": 1140.2641687690002,
+    "log_sha256": "0abe455459b0ce7ced140308b3180c23ff8bc36e71259ea48afab86935d15647",
+    "actual_summary_present": false,
+    "no_automatic_retry": true
+  },
+  "source_files_verified_against_git": 7081,
+  "locks_verified_unchanged": 30,
+  "source_clean": true,
+  "accepted_pins": {
+    "authrdf": {
+      "sha256": "c35f5e4b74169aa51b244b8feecb0c8e746296a6aa052be8c58f0190b1b10b11",
+      "image_id": [
+        2794517044,
+        4278390001,
+        1088095536,
+        53994879,
+        3259643235,
+        835127579,
+        1589380955,
+        3166477348
+      ]
+    },
+    "exact": {
+      "sha256": "e8c9b6b6bd43c2789add2fcbd9ec18914c2c48ccdcd1149e8b9dea6f0e760623",
+      "image_id": [
+        3002199066,
+        1615302721,
+        2039644206,
+        2826525735,
+        178258819,
+        3880799180,
+        3190314515,
+        791784891
+      ]
+    }
+  },
+  "actual_command": [
+    "cargo",
+    "test",
+    "--locked",
+    "--offline",
+    "--manifest-path",
+    "zk/sparql-evaluator/Cargo.toml",
+    "-p",
+    "sparq-proved-evaluator",
+    "--features",
+    "authenticated-rdf",
+    "--test",
+    "authenticated_rdf_genuine",
+    "genuine_authrdf_receipts_verify_declared_cases_and_reject_controls",
+    "--",
+    "--exact",
+    "--ignored",
+    "--test-threads=1",
+    "--nocapture"
+  ],
+  "runner_sha256": "4ddaee13d15743f3102c5ec1f9d1f2b0ca24bddb9a7b42ecef32b0f053d17a8e",
+  "proof_job_sha256": "d639b9bdda1df479f2cfd64df94c841b5d61d0c1ba299135acfbd397ea3c9166",
+  "genuine_proofs_planned": 1,
+  "genuine_proofs_completed": 0,
+  "controls_planned": 17,
+  "controls_completed": 0,
+  "receipt_present": false,
+  "guest_abort_certified": false,
+  "retained_partial_files": [
+    "proof-evidence/metadata.json",
+    "proof-evidence/select-bag-verifier-agreed/request.json",
+    "proof-evidence/select-bag-verifier-agreed/started.json"
+  ],
+  "artifact_archive_sha256": "dc11ab80e29cbe0d5fdc6ebdc7c3941ac912f203f3ad8fd1609576ef36d7e1b2",
+  "artifact_archive_bytes": 5151382,
+  "retrieval_manifest_sha256": "9ff4511e1d13081f816955a9a2dea25e39493542b281ce5bc459aadbc4fdc1be",
+  "verified_artifact_count": 19,
+  "executables": {
+    "/home/ubuntu/sparq-zk-runs/exact-host-target/debug/deps/authenticated_rdf_genuine-3793aa9e555c011b": {
+      "sha256": "770e6bdcc7f814659dca0c2cf9b2a1949e8b328c1e492c79a68618777a7049cd",
+      "bytes": 27920232
+    }
+  },
+  "r0vm": {
+    "sha256": "751b9b188d341e8bec5e02060086b7b1dc3f7289e90f726c38589bb6735dd6d7",
+    "version": "risc0-r0vm 3.0.6\n"
+  },
+  "unit": "Result=exit-code\nExecMainStatus=1\nMemoryPeak=9997029376\nActiveState=failed\nSubState=failed\n",
+  "memory_peak_bytes": 9997029376,
+  "limits": {
+    "memory_bytes": 23622320128,
+    "swap_bytes": 0,
+    "cpu_quota_percent": 400,
+    "rayon_threads": 4,
+    "cargo_jobs": 1,
+    "command_seconds": 1140,
+    "unit_seconds": 1200
+  },
+  "limitations": [
+    "Only proving start is visible in log; internal proof phase and cycle count were not instrumented.",
+    "No receipt verification or negative control result exists for this attempt.",
+    "Earlier 42d native/direct SDK gate remains separate, unchanged evidence."
+  ],
+  "no_automatic_retry": true
+}

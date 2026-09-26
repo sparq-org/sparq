@@ -982,7 +982,7 @@
       "family": "contract-bound SPARQL-over-VC proofs (authenticated extension V5, native model)",
       "source": "research/zk-paper-evidence/authenticated-rdf-native-audit.json /source_head (frozen snapshot; SHA-256 bound in research/zk-paper-evidence/provenance.json)",
       "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-rdf-native-audit.json", "pointer": "/source_head" },
-      "note": "[OPUS-5.5 zkp-19] Source of the scoped native model run of the authenticated extension. Native execution only: no guest execution, no proof, no full-workspace gate, no security audit."
+      "note": "[OPUS-5.5 zkp-19] Source of the earlier scoped native model run of the authenticated extension. That run was native execution only: no guest execution, no proof, no full-workspace gate, no security audit. Later guest, proof-attempt and adapter gates at other sources are separate records (zkvcq.v5g_*, zkvcq.v5p_*, zkvcq.vcqa_*); their counts are never added to this run's."
     },
     "zkvcq.v5_auth_tests_passed": {
       "value": 115,
@@ -1042,7 +1042,7 @@
       "family": "contract-bound SPARQL-over-VC proofs (authenticated extension V5, native model)",
       "source": "research/zk-paper-evidence/authenticated-rdf-native-audit.json /scope/guest_executions",
       "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-rdf-native-audit.json", "pointer": "/scope/guest_executions" },
-      "note": "[OPUS-5.5 zkp-19] Guest executions in the V5 native run: none. The guest extension is unvalidated source under review."
+      "note": "[OPUS-5.5 zkp-19] Guest executions in the earlier V5 native run (zkvcq.v5_source_commit): none. Historical record of that run only, not a current total; the later scoped guest gate (zkvcq.v5g_source_commit) is recorded separately (zkvcq.v5g_direct_executions)."
     },
     "zkvcq.v5_proofs": {
       "value": 0,
@@ -1052,7 +1052,367 @@
       "family": "contract-bound SPARQL-over-VC proofs (authenticated extension V5, native model)",
       "source": "research/zk-paper-evidence/authenticated-rdf-native-audit.json /scope/proofs (scope also records full_workspace_gate=false, security_audit=false)",
       "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-rdf-native-audit.json", "pointer": "/scope/proofs" },
-      "note": "[OPUS-5.5 zkp-19] Genuine V5 proofs: none. Conventional-credential authentication inside exact proofs remains open."
+      "note": "[OPUS-5.5 zkp-19] Genuine V5 proofs in the earlier native run (zkvcq.v5_source_commit): none. Historical record of that run only; later gates are separate records (zkvcq.v5g_proofs, zkvcq.v5p_proofs_completed, zkvcq.vcqa_genuine_proofs). Conventional-credential authentication inside exact proofs remains open."
+    },
+    "zkvcq.v5g_source_commit": {
+      "value": "42d13fedff0f42e3cde8ea63ff611408719cd6e7",
+      "unit": "git-commit",
+      "environment": "canonical",
+      "kind": "source-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (authenticated extension V5, guest gate)",
+      "source": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json /source (frozen snapshot; SHA-256 bound in research/zk-paper-evidence/provenance.json)",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json", "pointer": "/source" },
+      "note": "[OPUS-5.5 zkp-19] Frozen source of the scoped V5 guest-build and direct-execution gate. Scoped gate only: no proof, no receipt, no full-workspace gate, no security audit. Distinct from the earlier native run (zkvcq.v5_source_commit); counts are never added."
+    },
+    "zkvcq.v5g_source_files_verified": {
+      "value": 7081,
+      "unit": "source-files",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (authenticated extension V5, guest gate)",
+      "source": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json /verified_source_files",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json", "pointer": "/verified_source_files" },
+      "note": "[OPUS-5.5 zkp-19] Source files verified against the Git blobs of the gate source, equal before and after the run."
+    },
+    "zkvcq.v5g_locks_unchanged": {
+      "value": 30,
+      "unit": "lock-files",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (authenticated extension V5, guest gate)",
+      "source": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json /all_locks_unchanged",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json", "pointer": "/all_locks_unchanged" },
+      "note": "[OPUS-5.5 zkp-19] Cargo lock files recorded unchanged across the gate."
+    },
+    "zkvcq.v5g_native_tests_passed": {
+      "value": 7,
+      "unit": "passing-test-functions",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (authenticated extension V5, guest gate)",
+      "source": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json /native_test_functions_passed (failed recorded as zero)",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json", "pointer": "/native_test_functions_passed" },
+      "note": "[OPUS-5.5 zkp-19] Host-side native test functions of the V5 prover/verifier harness passing in this gate. Not the earlier model-test count (zkvcq.v5_auth_tests_passed) and never added to it."
+    },
+    "zkvcq.v5g_genuine_driver_ignored": {
+      "value": 1,
+      "unit": "ignored-test-functions",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (authenticated extension V5, guest gate)",
+      "source": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json /genuine_driver_ignored",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json", "pointer": "/genuine_driver_ignored" },
+      "note": "[OPUS-5.5 zkp-19] The genuine-proof driver compiled but was explicitly ignored in this gate; it is not counted as executed."
+    },
+    "zkvcq.v5g_direct_sdk_tests_passed": {
+      "value": 4,
+      "unit": "passing-test-functions",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (authenticated extension V5, guest gate)",
+      "source": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json /direct_sdk_test_functions_passed (failed recorded as zero)",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json", "pointer": "/direct_sdk_test_functions_passed" },
+      "note": "[OPUS-5.5 zkp-19] Test functions that execute the actual built guests directly through the zkVM SDK executor, without proving."
+    },
+    "zkvcq.v5g_direct_v5_positive": {
+      "value": 10,
+      "unit": "direct-guest-executions",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (authenticated extension V5, guest gate)",
+      "source": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json /direct_execution_counts_from_executed_loops/v5_positive",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json", "pointer": "/direct_execution_counts_from_executed_loops/v5_positive" },
+      "note": "[OPUS-5.5 zkp-19] Positive direct executions of the V5 guest on the published fixture. Execution without proof; no receipt."
+    },
+    "zkvcq.v5g_direct_v5_aborts": {
+      "value": 32,
+      "unit": "direct-guest-executions",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (authenticated extension V5, guest gate)",
+      "source": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json /direct_execution_counts_from_executed_loops/v5_relation_guest_abort",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json", "pointer": "/direct_execution_counts_from_executed_loops/v5_relation_guest_abort" },
+      "note": "[OPUS-5.5 zkp-19] Negative direct executions in which the V5 guest aborted with the exact expected guest panic (forged, spliced, unauthorized, noncanonical and foreign-wire inputs). A guest abort, not a verifier rejection of a receipt."
+    },
+    "zkvcq.v5g_direct_legacy_positive": {
+      "value": 1,
+      "unit": "direct-guest-executions",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (authenticated extension V5, guest gate)",
+      "source": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json /direct_execution_counts_from_executed_loops/legacy_v3_positive",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json", "pointer": "/direct_execution_counts_from_executed_loops/legacy_v3_positive" },
+      "note": "[OPUS-5.5 zkp-19] Positive direct execution of the exact (V3) guest, showing it still accepts its own request version."
+    },
+    "zkvcq.v5g_direct_legacy_aborts": {
+      "value": 2,
+      "unit": "direct-guest-executions",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (authenticated extension V5, guest gate)",
+      "source": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json /direct_execution_counts_from_executed_loops/legacy_guest_abort_on_v5",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json", "pointer": "/direct_execution_counts_from_executed_loops/legacy_guest_abort_on_v5" },
+      "note": "[OPUS-5.5 zkp-19] Cross-version direct executions in which the exact (V3) guest aborted on V5 input."
+    },
+    "zkvcq.v5g_direct_executions": {
+      "value": 45,
+      "unit": "direct-guest-executions",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (authenticated extension V5, guest gate)",
+      "source": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json /direct_execution_counts_from_executed_loops/total",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json", "pointer": "/direct_execution_counts_from_executed_loops/total" },
+      "note": "[OPUS-5.5 zkp-19] Total direct guest executions in this gate (the snapshot's own total of the four executed-loop counts). Executions without proof; not receipts."
+    },
+    "zkvcq.v5g_proofs": {
+      "value": 0,
+      "unit": "proofs",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (authenticated extension V5, guest gate)",
+      "source": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json /proofs",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json", "pointer": "/proofs" },
+      "note": "[OPUS-5.5 zkp-19] Proofs generated by the guest gate: none."
+    },
+    "zkvcq.v5g_receipts": {
+      "value": 0,
+      "unit": "receipts",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (authenticated extension V5, guest gate)",
+      "source": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json /receipts",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json", "pointer": "/receipts" },
+      "note": "[OPUS-5.5 zkp-19] Receipts generated by the guest gate: none."
+    },
+    "zkvcq.v5g_guest_sha256": {
+      "value": "c35f5e4b74169aa51b244b8feecb0c8e746296a6aa052be8c58f0190b1b10b11",
+      "unit": "sha256",
+      "environment": "canonical",
+      "kind": "artifact-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (authenticated extension V5, guest gate)",
+      "source": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json /artifacts/authrdf-artifact/sha256",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json", "pointer": "/artifacts/authrdf-artifact/sha256" },
+      "note": "[OPUS-5.5 zkp-19] SHA-256 of the separate V5 guest artifact built and pinned by the gate. Identity at a fixed build path and toolchain only; no arbitrary-build-path reproducibility is claimed."
+    },
+    "zkvcq.v5g_exact_off_sha256": {
+      "value": "e8c9b6b6bd43c2789add2fcbd9ec18914c2c48ccdcd1149e8b9dea6f0e760623",
+      "unit": "sha256",
+      "environment": "canonical",
+      "kind": "artifact-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (authenticated extension V5, guest gate)",
+      "source": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json /artifacts/exact-off/sha256",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json", "pointer": "/artifacts/exact-off/sha256" },
+      "note": "[OPUS-5.5 zkp-19] Exact (V3) guest bytes with the authenticated feature off. The snapshot records equality with a controlled baseline built at the identical absolute path; an earlier cross-path comparison failed and is retained separately. Not the hosted or EC2 receipt guests."
+    },
+    "zkvcq.v5g_exact_on_sha256": {
+      "value": "e8c9b6b6bd43c2789add2fcbd9ec18914c2c48ccdcd1149e8b9dea6f0e760623",
+      "unit": "sha256",
+      "environment": "canonical",
+      "kind": "artifact-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (authenticated extension V5, guest gate)",
+      "source": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json /artifacts/exact-on/sha256",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json", "pointer": "/artifacts/exact-on/sha256" },
+      "note": "[OPUS-5.5 zkp-19] Exact (V3) guest bytes with the authenticated feature on; equal to the feature-off bytes at the same build path."
+    },
+    "zkvcq.v5p_source_commit": {
+      "value": "42d13fedff0f42e3cde8ea63ff611408719cd6e7",
+      "unit": "git-commit",
+      "environment": "canonical",
+      "kind": "source-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (authenticated extension V5, first genuine-proof attempt)",
+      "source": "research/zk-paper-evidence/authenticated-rdf-proof-timeout.json /source (frozen snapshot; SHA-256 bound in research/zk-paper-evidence/provenance.json)",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-rdf-proof-timeout.json", "pointer": "/source" },
+      "note": "[OPUS-5.5 zkp-19] Source of the first bounded genuine V5 proof attempt. INCOMPLETE: the bounded command timed out; retained as an unsuccessful result, not a semantic rejection and not evidence about soundness."
+    },
+    "zkvcq.v5p_proofs_planned": {
+      "value": 1,
+      "unit": "genuine-proofs",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (authenticated extension V5, first genuine-proof attempt)",
+      "source": "research/zk-paper-evidence/authenticated-rdf-proof-timeout.json /genuine_proofs_planned",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-rdf-proof-timeout.json", "pointer": "/genuine_proofs_planned" },
+      "note": "[OPUS-5.5 zkp-19] Genuine proofs the attempt planned: one declared case (select-bag-verifier-agreed) on the published fixture."
+    },
+    "zkvcq.v5p_proofs_completed": {
+      "value": 0,
+      "unit": "genuine-proofs",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (authenticated extension V5, first genuine-proof attempt)",
+      "source": "research/zk-paper-evidence/authenticated-rdf-proof-timeout.json /genuine_proofs_completed (receipt_present=false)",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-rdf-proof-timeout.json", "pointer": "/genuine_proofs_completed" },
+      "note": "[OPUS-5.5 zkp-19] Genuine proofs completed by the attempt: none; no receipt and no presentation exist."
+    },
+    "zkvcq.v5p_controls_planned": {
+      "value": 17,
+      "unit": "controls",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (authenticated extension V5, first genuine-proof attempt)",
+      "source": "research/zk-paper-evidence/authenticated-rdf-proof-timeout.json /controls_planned",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-rdf-proof-timeout.json", "pointer": "/controls_planned" },
+      "note": "[OPUS-5.5 zkp-19] Negative controls the attempt planned against its receipt; none could run without a receipt."
+    },
+    "zkvcq.v5p_controls_completed": {
+      "value": 0,
+      "unit": "controls",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (authenticated extension V5, first genuine-proof attempt)",
+      "source": "research/zk-paper-evidence/authenticated-rdf-proof-timeout.json /controls_completed",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-rdf-proof-timeout.json", "pointer": "/controls_completed" },
+      "note": "[OPUS-5.5 zkp-19] Negative controls completed by the attempt: none."
+    },
+    "zkvcq.v5p_guest_sha256": {
+      "value": "c35f5e4b74169aa51b244b8feecb0c8e746296a6aa052be8c58f0190b1b10b11",
+      "unit": "sha256",
+      "environment": "canonical",
+      "kind": "artifact-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (authenticated extension V5, first genuine-proof attempt)",
+      "source": "research/zk-paper-evidence/authenticated-rdf-proof-timeout.json /accepted_pins/authrdf/sha256",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-rdf-proof-timeout.json", "pointer": "/accepted_pins/authrdf/sha256" },
+      "note": "[OPUS-5.5 zkp-19] Pinned V5 guest artifact the attempt accepted; the same bytes as the guest gate."
+    },
+    "zkvcq.vcqa_source_commit": {
+      "value": "7fe889557afcf1497769c1360ef53348980a7bae",
+      "unit": "git-commit",
+      "environment": "canonical",
+      "kind": "source-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, native gate)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-native-audit.json /source (frozen snapshot; SHA-256 bound in research/zk-paper-evidence/provenance.json)",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-native-audit.json", "pointer": "/source" },
+      "note": "[OPUS-5.5 zkp-19] Frozen source of the generic V5 VCQ adapter's scoped native gate. Native host tests and lint only: no proof, no direct guest execution, no adapter receipt; the method is not offered as available."
+    },
+    "zkvcq.vcqa_source_files_verified": {
+      "value": 7085,
+      "unit": "source-files",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, native gate)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-native-audit.json /source_files_verified_against_git",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-native-audit.json", "pointer": "/source_files_verified_against_git" },
+      "note": "[OPUS-5.5 zkp-19] Source files verified against Git at the adapter source."
+    },
+    "zkvcq.vcqa_locks_unchanged": {
+      "value": 30,
+      "unit": "lock-files",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, native gate)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-native-audit.json /cargo_locks_verified_unchanged",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-native-audit.json", "pointer": "/cargo_locks_verified_unchanged" },
+      "note": "[OPUS-5.5 zkp-19] Cargo lock files recorded unchanged across the adapter gate."
+    },
+    "zkvcq.vcqa_distinct_tests_passed": {
+      "value": 44,
+      "unit": "distinct-passing-test-functions",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, native gate)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-native-audit.json /counts/distinct_passed_test_functions_by_binary_family (failed recorded as zero)",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-native-audit.json", "pointer": "/counts/distinct_passed_test_functions_by_binary_family" },
+      "note": "[OPUS-5.5 zkp-19] Distinct passing test functions under the authenticated-adapter feature: new adapter unit, integration and job-parser functions, existing low-level V5 functions and legacy V3 adapter functions. The legacy functions also passed again under the legacy-only feature; those repeats are executions, not additional distinct functions, and are not counted here."
+    },
+    "zkvcq.vcqa_new_unit_tests": {
+      "value": 4,
+      "unit": "new-test-functions",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, native gate)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-native-audit.json /counts/new_adapter_unit",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-native-audit.json", "pointer": "/counts/new_adapter_unit" },
+      "note": "[OPUS-5.5 zkp-19] New authenticated-adapter unit test functions, included in the distinct count."
+    },
+    "zkvcq.vcqa_new_integration_tests": {
+      "value": 15,
+      "unit": "new-test-functions",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, native gate)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-native-audit.json /counts/new_adapter_integration",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-native-audit.json", "pointer": "/counts/new_adapter_integration" },
+      "note": "[OPUS-5.5 zkp-19] New authenticated-adapter integration test functions, included in the distinct count."
+    },
+    "zkvcq.vcqa_new_job_parser_tests": {
+      "value": 3,
+      "unit": "new-test-functions",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, native gate)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-native-audit.json /counts/new_genuine_driver_native",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-native-audit.json", "pointer": "/counts/new_genuine_driver_native" },
+      "note": "[OPUS-5.5 zkp-19] New native job-parser and policy-substitution functions of the genuine-proof driver; the genuine-proof driver itself stayed ignored."
+    },
+    "zkvcq.vcqa_existing_v5_tests": {
+      "value": 5,
+      "unit": "passing-test-functions",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, native gate)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-native-audit.json /counts/existing_lowlevel_v5",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-native-audit.json", "pointer": "/counts/existing_lowlevel_v5" },
+      "note": "[OPUS-5.5 zkp-19] Existing low-level V5 native functions re-run under the adapter feature, included in the distinct count."
+    },
+    "zkvcq.vcqa_legacy_tests": {
+      "value": 17,
+      "unit": "passing-test-functions",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, native gate)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-native-audit.json /counts/legacy_vcq_unit_and_integration_in_new_feature",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-native-audit.json", "pointer": "/counts/legacy_vcq_unit_and_integration_in_new_feature" },
+      "note": "[OPUS-5.5 zkp-19] Legacy V3 adapter unit and integration functions passing under the new feature, included once in the distinct count."
+    },
+    "zkvcq.vcqa_genuine_proofs": {
+      "value": 0,
+      "unit": "proofs",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, native gate)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-native-audit.json /counts/genuine_proofs",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-native-audit.json", "pointer": "/counts/genuine_proofs" },
+      "note": "[OPUS-5.5 zkp-19] Genuine proofs in the adapter gate: none; no generic adapter receipt exists."
+    },
+    "zkvcq.vcqa_direct_executions": {
+      "value": 0,
+      "unit": "direct-guest-executions",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, native gate)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-native-audit.json /counts/direct_guest_executions",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-native-audit.json", "pointer": "/counts/direct_guest_executions" },
+      "note": "[OPUS-5.5 zkp-19] Direct guest executions in the adapter gate: none."
+    },
+    "zkvcq.vcqa_guest_sha256": {
+      "value": "c35f5e4b74169aa51b244b8feecb0c8e746296a6aa052be8c58f0190b1b10b11",
+      "unit": "sha256",
+      "environment": "canonical",
+      "kind": "artifact-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, native gate)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-native-audit.json /artifact_hashes/authrdf-artifact/sha256",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-native-audit.json", "pointer": "/artifact_hashes/authrdf-artifact/sha256" },
+      "note": "[OPUS-5.5 zkp-19] V5 guest bytes exported at the adapter source: the same approved artifact as the guest gate, at a fixed build path and toolchain only."
+    },
+    "zkvcq.vcqa_exact_off_sha256": {
+      "value": "e8c9b6b6bd43c2789add2fcbd9ec18914c2c48ccdcd1149e8b9dea6f0e760623",
+      "unit": "sha256",
+      "environment": "canonical",
+      "kind": "artifact-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, native gate)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-native-audit.json /artifact_hashes/exact-off/sha256",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-native-audit.json", "pointer": "/artifact_hashes/exact-off/sha256" },
+      "note": "[OPUS-5.5 zkp-19] Exact (V3) guest bytes with the adapter feature off, at the fixed build path."
+    },
+    "zkvcq.vcqa_exact_on_sha256": {
+      "value": "e8c9b6b6bd43c2789add2fcbd9ec18914c2c48ccdcd1149e8b9dea6f0e760623",
+      "unit": "sha256",
+      "environment": "canonical",
+      "kind": "artifact-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, native gate)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-native-audit.json /artifact_hashes/exact-on/sha256",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-native-audit.json", "pointer": "/artifact_hashes/exact-on/sha256" },
+      "note": "[OPUS-5.5 zkp-19] Exact (V3) guest bytes with the adapter feature on; equal to the feature-off bytes at the fixed build path."
     },
     "zkvcq.nc_source_commit": {
       "value": "fcb7ad829124b5573ae81bbb1c05b04f27186c2a",
