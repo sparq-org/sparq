@@ -221,17 +221,24 @@ fn any_bit_set(snapshot: &StatusListSnapshot, lo: u64, hi: u64) -> bool {
 /// `h2`, same leaf layout, same fail-closed padding); cross-checked against
 /// `dense_merkle_root` in the unit tests.
 ///
-/// Returns `None` if `depth` is implausibly large (`> 31`, i.e. more than ~2^31
-/// leaves) — a guard so a hostile/buggy `depth` cannot trigger an astronomical
-/// recursion. (The compiled member is `d10`; real callers pass small depths.)
+/// Returns `None` if `depth > 31` or the snapshot contains more than `2^depth`
+/// bits. Snapshots are byte-sized, so a nonempty snapshot requires `depth >= 3`.
+/// Oversized authoritative snapshots are rejected rather than prefix-committed.
 pub fn merkle_root(snapshot: &StatusListSnapshot, depth: u32) -> Option<Fr> {
+    let set_after = covered_bits(snapshot, depth)?;
+    let defaults = SubtreeDefaults::new(depth);
+    // The first leaf index that reads as SET (padding past the covered bits).
+    Some(sparse_subtree_root(snapshot, &defaults, set_after, 0, depth))
+}
+
+// [GPT-6] Both roots and paths must cover the whole byte-sized snapshot. Checking
+// before any hashing also protects accepted-policy and hidden-reference callers.
+fn covered_bits(snapshot: &StatusListSnapshot, depth: u32) -> Option<u64> {
     if depth > 31 {
         return None;
     }
-    let defaults = SubtreeDefaults::new(depth);
-    // The first leaf index that reads as SET (padding past the covered bits).
-    let set_after = (snapshot.bits.len() as u64).saturating_mul(8);
-    Some(sparse_subtree_root(snapshot, &defaults, set_after, 0, depth))
+    let bits = u64::try_from(snapshot.bits.len()).ok()?.checked_mul(8)?;
+    (bits <= (1u64 << depth)).then_some(bits)
 }
 
 /// [OPUS-4.8] sq-hwe: the ORIGINAL dense `O(2^depth)` Merkle-root builder, retained
@@ -242,7 +249,7 @@ pub fn merkle_root(snapshot: &StatusListSnapshot, depth: u32) -> Option<Fr> {
 /// across uniform, sparse, and boundary-straddling snapshots.
 #[cfg(test)]
 fn dense_merkle_root(snapshot: &StatusListSnapshot, depth: u32) -> Option<Fr> {
-    if depth > 31 {
+    if depth > 31 || snapshot.bits.len() > (1usize << depth) / 8 {
         return None;
     }
     let n_leaves = 1usize << depth;
@@ -275,7 +282,8 @@ pub struct MerkleWitness {
 
 /// Build the [`MerkleWitness`] for `index` in `snapshot`'s depth-`depth` tree.
 /// `None` if `index >= 2^depth` (out of range for the tree — the circuit also
-/// range-bounds the index) or `depth > 31`.
+/// range-bounds the index), `depth > 31`, or the snapshot exceeds the tree's
+/// bit capacity. As for [`merkle_root`], oversized snapshots are never truncated.
 ///
 /// [OPUS-4.8] sq-hwe: SPARSE. The sibling at level `k` is the root of the
 /// height-`k` subtree hanging off the OTHER side of the path node at that level;
@@ -286,16 +294,13 @@ pub struct MerkleWitness {
 /// path is byte-identical to the one the old dense builder produced (cross-checked
 /// in the unit tests by re-folding to the dense root).
 pub fn merkle_witness(snapshot: &StatusListSnapshot, depth: u32, index: u64) -> Option<MerkleWitness> {
-    if depth > 31 {
-        return None;
-    }
+    let set_after = covered_bits(snapshot, depth)?;
     let n_leaves = 1u64 << depth;
     if index >= n_leaves {
         return None;
     }
     let bit = leaf(snapshot, index);
     let defaults = SubtreeDefaults::new(depth);
-    let set_after = (snapshot.bits.len() as u64).saturating_mul(8);
     // At level `k` the path node spans 2^k leaves; its sibling is the height-`k`
     // subtree sharing the same parent. `pos` tracks the path node's index AMONG the
     // 2^(depth-k) nodes at level k (i.e. index >> k); the sibling's node index is
@@ -618,14 +623,14 @@ mod tests {
         );
     }
 
-    // A depth-2 tree (4 leaves) built by hand matches `merkle_root`. Leaves:
-    // [0,1,0,0] -> root = h2(h2(0,1), h2(0,0)). Same construction the Noir
-    // accept tests use.
+    // [GPT-6] A depth-3 tree covers the entire byte. Its first four leaves
+    // [0,1,0,0] retain the hand-built subtree used by the Noir accept tests.
     #[test]
-    fn merkle_root_depth2_matches_hand_built() {
+    fn merkle_root_depth3_matches_hand_built() {
         let s = snap(vec![0b0000_0010]); // bit 1 set, rest unset
-        let expected = h2(h2(Fr::from(0u64), Fr::from(1u64)), h2(Fr::from(0u64), Fr::from(0u64)));
-        assert_eq!(merkle_root(&s, 2), Some(expected));
+        let zero_pair = h2(Fr::from(0u64), Fr::from(0u64));
+        let left = h2(h2(Fr::from(0u64), Fr::from(1u64)), zero_pair);
+        assert_eq!(merkle_root(&s, 3), Some(h2(left, h2(zero_pair, zero_pair))));
     }
 
     // [OPUS-4.8] sq-hwe: the SPARSE builder must return a BYTE-IDENTICAL root to
@@ -638,8 +643,8 @@ mod tests {
     fn sparse_root_equals_dense_root_for_every_shape() {
         let cases = vec![
             // (bits, depths to test)
-            (vec![0u8], vec![0u32, 1, 2, 3, 6]),                 // tiny + tail padding
-            (vec![0b0000_0010u8], vec![2, 3, 6]),                // one set bit
+            (vec![0u8], vec![3u32, 6]),                         // full byte + tail padding
+            (vec![0b0000_0010u8], vec![3, 6]),                  // one set bit
             (vec![0xFFu8], vec![3, 6]),                          // a fully-revoked byte + padding
             (vec![0u8, 0, 0, 0, 0, 0, 0, 0], vec![6]),          // 64 covered, all zero
             (vec![0b1000_0001u8, 0, 0b0100_0000, 0], vec![5, 6]),// scattered set bits
@@ -755,7 +760,7 @@ mod tests {
     #[test]
     fn witness_recomputes_root() {
         let s = snap(vec![0b0000_0010]); // index 1 revoked; 0,2,3 active
-        let depth = 2;
+        let depth = 3;
         let root = merkle_root(&s, depth).unwrap();
         for index in [0u64, 2, 3] {
             let w = merkle_witness(&s, depth, index).unwrap();
@@ -777,7 +782,36 @@ mod tests {
     #[test]
     fn out_of_range_index_is_none() {
         let s = snap(vec![0u8]);
-        assert_eq!(merkle_witness(&s, 2, 4), None); // 2^2 = 4 leaves, index 4 OOB
+        assert_eq!(merkle_witness(&s, 3, 8), None); // full snapshot, index beyond tree
+    }
+
+    // [GPT-6] The final representable bit binds the root; any appended byte is
+    // rejected, even if the requested witness still lies in the old prefix.
+    #[test]
+    fn status_snapshot_capacity_binds_roots_witnesses_and_legacy_policy() {
+        let mut snapshot = snap(vec![0; 128]);
+        let root = merkle_root(&snapshot, 10).unwrap();
+        let witness = merkle_witness(&snapshot, 10, 1023).unwrap();
+        assert_eq!(witness.bit, Fr::from(0u64));
+        snapshot.bits[127] = 0x80;
+        assert_ne!(merkle_root(&snapshot, 10), Some(root));
+        assert_eq!(merkle_witness(&snapshot, 10, 1023).unwrap().bit, Fr::from(1u64));
+        let policy = crate::verifier::RevocationPolicy::accept_version(1)
+            .with_hidden_index_depth(10)
+            .with_snapshot(snapshot.clone());
+        assert!(policy.accepted_entries().is_some());
+        for suffix in [0, 0xFF] {
+            let mut oversized = snapshot.clone();
+            oversized.bits.push(suffix);
+            assert_eq!(merkle_root(&oversized, 10), None);
+            assert_eq!(merkle_witness(&oversized, 10, 0), None);
+            assert!(policy.clone().with_snapshot(oversized).accepted_entries().is_none());
+        }
+        for depth in 0..3 {
+            assert!(merkle_root(&snap(vec![0]), depth).is_none());
+            assert!(merkle_witness(&snap(vec![0]), depth, 0).is_none());
+            assert!(merkle_root(&snap(vec![]), depth).is_some());
+        }
     }
 
     #[test]

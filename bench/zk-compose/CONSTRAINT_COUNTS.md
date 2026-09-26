@@ -15,6 +15,28 @@ Every number below is the `circuit_size` reported by `bb gates -s ultra_honk`, *
 
 Toolchain baselined for these counts: `bb 5.0.0-nightly.20260324`, `nargo 1.0.0-beta.21` (regression tolerance 3.0%).
 
+## Successful-result circuits (released mapping support)
+
+### `result_v1`
+
+Support for released SELECT DISTINCT mappings: issuer authentication, credential status, selected triple membership, BGP joins and residual private integer FILTERs. Capacity parameters: k credentials, n triples per credential, p patterns, r released rows, f private FILTERs per row. Does not establish result completeness or holder identity.
+
+| member | parameters | `circuit_size` |
+| --- | --- | --- |
+| `result_v1_k1_n16_p3_r4_f0` | k=1, n=16, p=3, r=4, f=0 | 32,288 |
+| `result_v1_k1_n16_p3_r4_f2` | k=1, n=16, p=3, r=4, f=2 | 68,963 |
+| `result_v1_k2_n16_p3_r4_f0` | k=2, n=16, p=3, r=4, f=0 | 59,101 |
+| `result_v1_k2_n16_p3_r4_f2` | k=2, n=16, p=3, r=4, f=2 | 95,775 |
+
+Scaling — pairs differing in exactly one parameter:
+
+| parameter | from | to | held fixed | Δ gates | ratio |
+| --- | --- | --- | --- | --- | --- |
+| `f` | 0 (32,288) | 2 (68,963) | k=1, n=16, p=3, r=4 | +36,675 | 2.1359 |
+| `f` | 0 (59,101) | 2 (95,775) | k=2, n=16, p=3, r=4 | +36,674 | 1.6205 |
+| `k` | 1 (32,288) | 2 (59,101) | n=16, p=3, r=4, f=0 | +26,813 | 1.8304 |
+| `k` | 1 (68,963) | 2 (95,775) | n=16, p=3, r=4, f=2 | +26,812 | 1.3888 |
+
 ## Query-layer circuits (SPARQL algebra fragment)
 
 ### `scan`
@@ -269,4 +291,4 @@ bench/zk-compose/scripts/constraint_pack.py --write
 bench/zk-compose/scripts/constraint_pack.py --check
 ```
 
-Coverage: 37 of 37 snapshot members across 14 families, 33 single-parameter scaling pairs, 3 invariance facts. The generator **fails** on a snapshot member it cannot classify, so a new circuit family cannot silently drop out of this evaluation.
+Coverage: 41 of 41 snapshot members across 15 families, 37 single-parameter scaling pairs, 3 invariance facts. The generator **fails** on a snapshot member it cannot classify, so a new circuit family cannot silently drop out of this evaluation.

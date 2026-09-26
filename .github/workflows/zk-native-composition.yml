@@ -1,0 +1,96 @@
+# [GPT-6] The native research prototype is a detached Cargo workspace. Root
+# workspace tests do not run its real BBS+/LegoGroth16 composition checks.
+name: zk-native-composition
+
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "zk/native-composition/**"
+      - "rust-toolchain*"
+      - ".cargo/**"
+      - ".github/workflows/zk-native-composition.yml"
+  push:
+    branches: [main]
+    paths:
+      - "zk/native-composition/**"
+      - "rust-toolchain*"
+      - ".cargo/**"
+      - ".github/workflows/zk-native-composition.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: zk-native-composition-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  native-composition:
+    name: native credential and circuit composition
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Check out pinned Circom source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: iden3/circom
+          # Official v2.2.2 tag resolves directly to this immutable commit.
+          ref: e410b0d5cd2948a15931df0bc50d79ce56fa8c32
+          path: .ci-tools/circom
+          persist-credentials: false
+
+      - name: Activate repository Rust toolchain
+        # rustup honors the root rust-toolchain.toml, including its components.
+        run: |
+          rustup show active-toolchain
+          rustup component add clippy
+
+      - name: Cache detached workspace dependencies
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: zk-native-composition-circom-2.2.2
+          workspaces: |
+            .ci-tools/circom
+            zk/native-composition
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build pinned Circom compiler
+        run: |
+          set -euo pipefail
+          cargo build --release --locked --manifest-path .ci-tools/circom/Cargo.toml
+          circom_bin="$GITHUB_WORKSPACE/.ci-tools/circom/target/release/circom"
+          test "$("$circom_bin" --version)" = "circom compiler 2.2.2"
+          echo "$GITHUB_WORKSPACE/.ci-tools/circom/target/release" >> "$GITHUB_PATH"
+
+      - name: Real composition and adversarial proof tests
+        # No ignored-test shortcut or tool-presence skip: build.rs requires Circom.
+        run: cargo test --release --locked --manifest-path zk/native-composition/Cargo.toml
+
+      - name: Clippy for the standalone prototype
+        run: cargo clippy --locked --manifest-path zk/native-composition/Cargo.toml --all-targets -- -D warnings
+
+      - name: Build the prototype CLI
+        run: cargo build --release --locked --manifest-path zk/native-composition/Cargo.toml
+
+      - name: Reject unsupported Noir linkage
+        run: |
+          set -euo pipefail
+          native_binary="$GITHUB_WORKSPACE/zk/native-composition/target/release/sparq-native-composition-spike"
+          rejection_log="$RUNNER_TEMP/native-noir-rejection.log"
+          test -x "$native_binary"
+          if "$native_binary" --backend noir-bn254 > "$rejection_log" 2>&1; then
+            echo "::error::The prototype accepted unsupported Noir/BN254 linkage."
+            exit 1
+          fi
+          # A missing binary, loader failure or crash must not count as rejection.
+          grep -F 'unsupported backend noir-bn254: no same-witness link to Noir/BN254 is implemented' "$rejection_log"

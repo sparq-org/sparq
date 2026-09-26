@@ -1612,7 +1612,7 @@ pub struct JoinEdge {
 /// the proof attests.
 // [OPUS-4.8] sq-1zf94: disclosed-solution term. Opt-in (`extended-fragment`),
 // research-grade, NOT-yet-sound (sq-qhy4).
-#[cfg(feature = "extended-fragment")]
+#[cfg(any(feature = "extended-fragment", feature = "successful-results"))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum DisclosedTerm {
@@ -1638,7 +1638,7 @@ pub enum DisclosedTerm {
     },
 }
 
-#[cfg(feature = "extended-fragment")]
+#[cfg(any(feature = "extended-fragment", feature = "successful-results"))]
 impl DisclosedTerm {
     /// Rebuild the `oxrdf::Term` (verifier-side) so the encoding can be
     /// recomputed. Returns `None` (fail-closed) on an unparseable IRI / datatype

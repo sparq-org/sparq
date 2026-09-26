@@ -1,6 +1,11 @@
 [workspace]
 members = [
     "compose_core",
+    # [GPT-6] Successful-result proofs, separate from complete-scan v1.
+    "result_v1_k1_n16_p3_r4_f0",
+    "result_v1_k1_n16_p3_r4_f2",
+    "result_v1_k2_n16_p3_r4_f0",
+    "result_v1_k2_n16_p3_r4_f2",
     "scan_k1_n16_r4",
     # [OPUS-4.8] sq-pzet: remaining scan (k,n,r)-lattice members the family could
     # derive but that had no compiled package (silent-unprovability gap, sq-wto
