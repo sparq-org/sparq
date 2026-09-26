@@ -66,6 +66,24 @@ class CiTests(unittest.TestCase):
         self.assertIn('if-no-files-found: error', workflow)
         self.assertIn('actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a', workflow)
 
+    def test_generic_sweep_supplies_and_retains_public_pattern_evidence(self):
+        # [OPUS-5.5] beadzkp-15.1: the step running the generic sweep must supply the
+        # fail-closed evidence directory, and a pinned upload must retain that path.
+        workflow = (Path(__file__).resolve().parents[2] / '.github/workflows/zk-toolchain.yml').read_text()
+        steps = workflow.split('\n      - name: ')[1:]
+        command = 'cargo test -p sparq-zk-compose --features successful-results --lib result:: -- --include-ignored'
+        [sweep] = [s for s in steps if command in s]
+        evidence = '${{ runner.temp }}/public-pattern-evidence-${{ github.run_id }}-${{ github.run_attempt }}'
+        self.assertIn('\n        id: selected-result\n', sweep)
+        self.assertIn('\n        env:\n          SPARQ_PUBLIC_PATTERN_EVIDENCE: ' + evidence + '\n', sweep)
+        self.assertIn('\n          nargo test --package sparq_zk_compose_core result_public::\n', sweep)
+        [upload] = [s for s in steps if 'steps.selected-result.outcome' in s and 'uses:' in s]
+        self.assertIn("if: always() && steps.changes.outputs.zk == 'true' && steps.selected-result.outcome != 'skipped'", upload)
+        self.assertIn('uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a', upload)
+        self.assertIn('\n          path: ' + evidence + '\n', upload)
+        self.assertIn("if-no-files-found: ${{ steps.selected-result.outcome == 'success' && 'error' || 'warn' }}", upload)
+        self.assertLess(steps.index(sweep), steps.index(upload))
+
 
 if __name__ == '__main__':
     unittest.main()
