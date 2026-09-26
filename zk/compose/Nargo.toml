@@ -121,4 +121,9 @@ members = [
     "result_v3_k2_n16_p3_r4_f2_s64_d10",
     "result_v3_k2_n16_p3_r4_f2_s64_d17",
     "result_v3_k2_n16_p3_r4_f2_s64_d20",
+    # [OPUS-5.5] beadzkp-15.1: opt-in version-four public-pattern members (F0,
+    # status depth 10, K1/K2). Research-grade, NOT externally audited; gate
+    # baselines are pending coordinator EC2 measurement, not invented here.
+    "result_v4_k1_n16_p3_r4_f0_d10",
+    "result_v4_k2_n16_p3_r4_f0_d10",
 ]

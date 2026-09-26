@@ -447,6 +447,24 @@ keys in the toolchain suite. Expanded v2 tiny and predicate-free profiles have
 representative genuine-proof checks in addition to wrapper execution coverage;
 see the successful-result reference for evidence and scope.
 
+[OPUS-5.5] Opt-in `result::prepare_result_public_pattern` (unchanged
+`ResultOptions`) emits version 4 (`PUBLIC_PATTERN_VERSION`): the first
+all-constant-or-projected pattern is checked against a verifier-derived public
+triple table instead of private typed openings. `verify_result` recognizes it;
+default dispatch is unchanged. The pattern moves to index zero identically in
+prover and verifier, and the `public_triples` table is appended last to the
+`result_v4_k{1,2}_n16_p3_r4_f0_d10` public ABI. Signatures, hidden roots, salts,
+status references, policy paths and leaf membership stay in-circuit. Remaining
+patterns keep the generic typed and shared-variable checks. The verifier
+rebuilds the pattern, table, package and byte order from its query, released rows,
+issuer-slot count and policy. Public subjects and predicates must be IRIs, and
+objects must be IRIs or literals. Dispatch never uses the witness choice or count.
+Only F0 (no FILTER on a hidden variable), status depth 10 and K1/K2 are
+supported; no public pattern or any other profile rejects without fallback. It
+proves support for the selected rows only, not completeness. Research-grade, not
+externally audited; no gate or runtime saving is claimed. Gate snapshot entries,
+result-evidence inventories and genuine proofs are pending coordinator measurement.
+
 [GPT-6] `result::signed` exposes separately versioned canonical signed-integer
 preparation and verification, with a fixed capacity and no public sign/length
 selector. See the [signed result contract](references/signed-results.md) for its
