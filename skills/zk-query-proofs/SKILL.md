@@ -40,20 +40,15 @@ original challenge once. It has no backend, interoperable wire encoding, transpo
 hash or other cryptography, ships no production challenge store, proves no cryptographic claim,
 and registers no method. See [query-method contracts](references/query-method-contracts.md).
 
-[OPUS-5.5] The detached exact-evaluator host crate has an optional `vcq` feature (off by
-default) with the first `QueryMethod` adapter, `sparq_proved_evaluator::vcq::Risc0ExactV3`, over
-the existing V3 relation. It declares bag SELECT, boolean ASK and CONSTRUCT graphs under
-holder-declared and verifier-agreed authority only, with the fixed default V3 policy. It binds
-the stored request through a documented derived nonce and consumes the original challenge once,
-after every other check. It authenticates no credential and checks no status or holder key.
-Source evidence is `None`, status `NotRequested` and holder `BearerAccepted` in every tuple.
-The ignored `host/tests/vcq_genuine.rs` has a prove mode and a verify-only row-bound mode,
-both driven by an explicit `SPARQ_VCQ_PROOF_JOB`. One run at source `872c219ca` was
-independently certified. It verified seven genuine Succinct receipts: six protocol-accepted
-tuples, plus one valid two-row result rejected as `capacity` by a row bound of one before
-challenge consumption. It was run on a public synthetic fixture, with no benchmark. It is not
-a full gate, and the reference records its caveats and evidence digests. See
-[vcq exact adapter](references/vcq-exact-adapter.md).
+[OPUS-5.5] The detached exact-evaluator host crate's optional `vcq` feature (off by default) adds
+the first `QueryMethod` adapter, `sparq_proved_evaluator::vcq::Risc0ExactV3`, over the V3 relation:
+bag SELECT, boolean ASK and CONSTRUCT graphs under holder-declared or verifier-agreed authority,
+with the fixed default V3 policy. It binds the stored request through a derived nonce and consumes
+the original challenge once, after every other check. It authenticates no credential and checks no
+status or holder key. The ignored `host/tests/vcq_genuine.rs` prove and verify-only row-bound modes
+take an explicit `SPARQ_VCQ_PROOF_JOB`. One run at source `872c219ca` was independently certified
+(seven genuine Succinct receipts, one rejected as `capacity`; public synthetic fixture, not a full
+gate, no benchmark). See [vcq exact adapter](references/vcq-exact-adapter.md) for tuples and caveats.
 
 [GPT-6] For the opt-in synthetic selected-support measurement adapter, its strict
 experiment manifest, timing boundaries and unavailable stages, see
@@ -148,37 +143,20 @@ admission section in the disclosure-planning reference.
 ## Common recipes
 
 <!-- [GPT-6] zkp-10.1: separate exact-dataset contract, not a selected-result upgrade. -->
-The opt-in detached [exact evaluator](references/exact-evaluator.md) proves bounded
-default-graph evaluation with explicit verifier-agreed or holder-declared scope.
-It is experimental and not externally audited; its first adapter carries no
-issuer-signature or credential-status claim.
-[GPT-6] The separately versioned [complete named-dataset API](references/exact-datasets-v2.md)
-adds a committed catalog including empty named graphs, GRAPH and local snapshot
-FROM/FROM NAMED selection. V1 requests and commitments retain their meaning.
-[GPT-6] The opt-in [V3 graph-result API](references/graph-results-v3.md)
-adds blank-node identity, canonical tables and bounded graph forms through typed
-host/guest APIs; consult artifact-bound evidence for actual execution status.
-[OPUS-5.5] The detached model's off-by-default `authenticated-rdf` feature adds a
-[native V5 issuer-authenticated RDF model](references/authenticated-rdf-model.md).
-It checks W3C `eddsa-rdfc-2022` credentials against a verifier-pinned key table, then
-reuses V3 evaluation. It checks no status, holder binding or completeness.
-[OPUS-5.5] A [separately pinned V5 guest and low-level host API](references/authenticated-rdf-guest.md)
-(host feature `authenticated-rdf`, off by default) run it. At source `42d13fed` an
-independently audited scoped gate built the guest and executed it directly, without
-proving; no genuine receipt is recorded, and this slice adds no registry entry or
-protocol adapter. Its ignored genuine-proof driver proves only the one to six case
-IDs a v2 test job declares; a subset run claims nothing about undeclared cases.
-Not externally audited (`sq-qhy4`). <!-- privacy-claims-allow: direct execution only, no genuine receipt, not audited -->
-[GPT-6] The [campaign evidence guide](references/evaluator-evidence.md) explains
-exact artifact export, actual receipt evidence and source/HAL provenance.
-[GPT-6] The [exact-evaluator experiment adapter](../../zk/sparql-evaluator/experiments/README.md)
-runs fixed synthetic V2 contracts against an independently accepted caller artifact
-and pin, with real local receipts, typed tamper controls and scoped measurement.
+The opt-in detached [exact evaluator](references/exact-evaluator.md) proves bounded default-graph evaluation with explicit verifier-agreed or holder-declared scope. It is experimental and not externally audited; its first adapter carries no issuer-signature or credential-status claim.
+[GPT-6] The separately versioned [complete named-dataset API](references/exact-datasets-v2.md) adds a committed catalog including empty named graphs, GRAPH and local snapshot FROM/FROM NAMED selection. V1 requests and commitments retain their meaning.
+[GPT-6] The opt-in [V3 graph-result API](references/graph-results-v3.md) adds blank-node identity, canonical tables and bounded graph forms through typed host/guest APIs; consult artifact-bound evidence for actual execution status.
+[OPUS-5.5] Issuer-authenticated RDF (V5): every feature is off by default and experimental, and each layer keeps its own evidence level (native model tests, native host tests, direct guest execution, adapter native tests, one genuine adapter case; the low-level driver has no receipt):
 
-[GPT-6] The [query-coverage corpus](references/evaluator-conformance.md) separates
-executed host semantics, explicit unsupported features, and guest proof evidence.
-Its opt-in NPS comparison recipe records other engines' observations without
-installing dependencies or treating their output as a conformance oracle.
+- **Model** (model feature `authenticated-rdf`): the [native V5 model](references/authenticated-rdf-model.md) checks W3C `eddsa-rdfc-2022` credentials against a verifier-pinned key table, then reuses V3 evaluation.
+- **Guest** (host feature `authenticated-rdf`): a [separately pinned V5 guest and low-level host API](references/authenticated-rdf-guest.md) with a committed guest lock. An independently audited scoped gate at `42d13fed` passed its native tests and executed the guest directly, without proving. Its ignored genuine-proof driver proves only the one to six case IDs a v2 job declares; a subset run claims nothing about undeclared cases.
+- **Adapter** (host feature `vcq-authenticated` = `vcq` + `authenticated-rdf`): the generic [V5 vcq adapter](references/vcq-authenticated-rdf-adapter.md) `vcq_authenticated::Risc0AuthenticatedRdfV5` declares six tuples (bag SELECT, ASK, CONSTRUCT; `IssuerAuthenticated`; both authorities). An independently verified scoped native gate at `7fe88955` passed its tests and Clippy without proving. Separately, at that frozen source, one independently audited genuine receipt of the approved V5 guest proved one public synthetic case, `select-bag-verifier-agreed`, with 28 controls. The other five tuples and the row-bound case have not run, so the registry keeps its `adapter_available` false.
+
+None processes JSON-LD or full Data Integrity or checks status, holder binding, validity against a clock or wallet/world completeness. The campaign's V5 and vcq commands have not run as a full campaign. Not externally audited (`sq-qhy4`). <!-- privacy-claims-allow: native tests, direct execution and one synthetic adapter receipt; not audited -->
+[GPT-6] The [campaign evidence guide](references/evaluator-evidence.md) explains exact artifact export, actual receipt evidence and source/HAL provenance.
+[GPT-6] The [exact-evaluator experiment adapter](../../zk/sparql-evaluator/experiments/README.md) runs fixed synthetic V2 contracts against an independently accepted caller artifact and pin, with real local receipts, typed tamper controls and scoped measurement.
+
+[GPT-6] The [query-coverage corpus](references/evaluator-conformance.md) separates executed host semantics, explicit unsupported features, and guest proof evidence. Its opt-in NPS comparison recipe records other engines' observations without installing dependencies or treating their output as a conformance oracle.
 
 ### 1. Commit a credential graph and attest it as an issuer
 ```rust

@@ -1,22 +1,28 @@
 <!-- [OPUS-5.5] zkp-14.5: usage reference for the separate V5 guest and low-level host API. -->
 # Issuer-authenticated RDF: separate V5 guest and host API
 
-**Built and directly executed; no genuine receipt.** At source `42d13fed`, an
-independently audited scoped gate built both guests, passed the native host
-tests and executed the V5 guest directly, without proving; see
-[recorded evidence](#recorded-evidence). The one genuine-receipt job attempted
-at that source timed out before completing a proof, so no genuine V5 receipt is
-recorded. It is experimental, research grade, not yet sound and not externally
-audited (`sq-qhy4` is open).
-<!-- privacy-claims-allow: direct execution only; no genuine receipt recorded, unaudited, sq-qhy4 open -->
+**Built and directly executed; one genuine receipt, through the adapter.** At
+source `42d13fed`, an independently audited scoped gate built both guests,
+passed the native host tests and executed the V5 guest directly, without
+proving; see [recorded evidence](#recorded-evidence). The one low-level
+genuine-receipt job attempted at that source timed out before completing a
+proof. Separately, the same approved V5 guest (`c35f5e4b`) produced one
+independently audited genuine receipt through the vcq adapter at frozen source
+`7fe88955`, for one case only; see the
+[adapter reference](vcq-authenticated-rdf-adapter.md#recorded-genuine-validation).
+The low-level driver has no receipt. It is experimental, research grade, not yet
+sound and not externally audited (`sq-qhy4` is open).
+<!-- privacy-claims-allow: direct execution plus one adapter-driven synthetic receipt; unaudited, sq-qhy4 open -->
 
 The relation is the unchanged native V5 model described in the
 [native model reference](authenticated-rdf-model.md). This slice adds a guest
-image that runs it and a low-level host API. It implements no generic
-`QueryMethod` adapter: `vcq.rs`, `sparq-query-protocol` and the research method
-registry are unchanged, and no registry lists V5. A separate generic
-authenticated VCQ adapter is under development on a successor branch; no
-genuine receipt for it is known.
+image that runs it and a low-level host API; this slice itself adds no generic
+`QueryMethod` adapter. The separate generic
+[V5 vcq adapter](vcq-authenticated-rdf-adapter.md) (host feature
+`vcq-authenticated`) builds on this API. It has passed a scoped native gate
+and one genuine case, `select-bag-verifier-agreed`; its other five tuples and
+its row-bound case have not run. The research registry lists
+`method:risc0-authenticated-rdf` version 5 with `adapter_available: false`.
 
 ## Features and images
 
@@ -119,7 +125,7 @@ and verifies the receipt before returning.
 
 Every earlier failure leaves the nonce unconsumed. A store error is returned
 unchanged. A crate-private checked-verification hook runs between steps 3 and 4
-for a later protocol adapter. No public API exposes it.
+for the vcq adapter. No public API exposes it.
 
 Obtain the expected `Request`, including its authorization table and any agreed
 commitment, from verifier-owned configuration. Never take them from a
@@ -213,8 +219,8 @@ SPARQ_AUTHRDF_PROOF_JOB=/abs/authrdf-job.json RISC0_SERVER_PATH=/abs/r0vm \
 
 The detached workspace lock and `methods/guest-authrdf/Cargo.lock` are both
 committed, so these commands use `--locked`. The tests behind the first three
-passed in the `42d13fed` scoped gate. The genuine-receipt test has not completed
-a job; see [recorded evidence](#recorded-evidence). `RISC0_DEV_MODE` must be unset. The tests read environment variables
+passed in the `42d13fed` scoped gate. This low-level genuine-receipt test has
+not completed a job; see [recorded evidence](#recorded-evidence). `RISC0_DEV_MODE` must be unset. The tests read environment variables
 but never set them.
 
 Job schema `sparq.authrdf-genuine-proof.test-job.v2` (unknown and missing fields
@@ -293,11 +299,13 @@ classification (`scripts/sbom-normalize.jq`). The exact-evaluator campaign
 packages in its own target. It exports and later re-confirms the V5 artifact in
 `authrdf-artifact`, separate from the exact `artifact`. It records both pins
 under `guest_artifact_pins`, keyed by guest package, and requires them to be
-distinct. It also runs the V5 native model and host gates and a V5 lint. It
-executes no V5 guest and creates no V5 receipt. Every one of these gates fails
-closed without `methods/guest-authrdf/Cargo.lock`, which is committed. No
-completed campaign run with these V5 steps is recorded; the scoped gate below is
-not a campaign record.
+distinct. It also runs the V5 native model and host gates and a V5 lint; those
+steps execute no V5 guest. The later zkp-14.6 campaign commands add direct V5
+guest execution without proving (see [campaign evidence](evaluator-evidence.md)).
+The campaign creates no V5 receipt. Every one of these gates fails closed without
+`methods/guest-authrdf/Cargo.lock`, which is committed. No completed campaign
+run with these V5 steps is recorded; the scoped gate below is not a campaign
+record.
 
 ## Recorded evidence
 
@@ -338,11 +346,18 @@ One genuine job, declaring only `select-bag-verifier-agreed`, ran at
 `42d13fed` with a four-CPU allowance and timed out. It completed no proof and no control
 and wrote no receipt, presentation or `summary.json`. That is incomplete
 execution, not a semantic rejection, a security finding or a benchmark, and it
-establishes nothing about any case.
+establishes nothing about any case. The later adapter-driven receipt for the
+same case ID, at `7fe88955`, is a separate job through a different driver; it
+does not complete this job or change its record.
+
+Later guest-branch commits up to `ff3b94bf` changed only comments and
+documentation.
 
 A separate native model validation at `8322a6ff` is described in the
-[native model reference](authenticated-rdf-model.md#tests); it is not part of
-these counts.
+[native model reference](authenticated-rdf-model.md#tests), and a separate
+native adapter gate and one-case genuine adapter run at `7fe88955` in the
+[adapter reference](vcq-authenticated-rdf-adapter.md#recorded-native-validation);
+none is part of these counts.
 
 ## Not established
 

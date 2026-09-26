@@ -78,10 +78,55 @@ native model and host gates and a Clippy pass with the host `authenticated-rdf`
 feature, then re-exports both guests to reject drift. `evidence.json` keeps
 `artifact_pin` for the exact guest and adds `guest_artifact_pins`, keyed by
 `sparq-exact-guest` and `sparq-authrdf-guest`. The two pins must differ in both
-digest and image ID. It executes no V5 guest and creates no V5 receipt,
-as `authrdf_scope` records. `methods/guest-authrdf/Cargo.lock` is committed, so
-these locked steps no longer fail for lack of it. No completed campaign run with
-these V5 steps is recorded. A separate, independently audited scoped gate at
-source `42d13fed` ran the V5 host tests, direct V5 guest execution and a
-feature Clippy pass outside this campaign; it is not a campaign record. See the
+digest and image ID. These zkp-14.5 steps execute no V5 guest, and the campaign
+creates no V5 receipt, as `authrdf_scope` records. `methods/guest-authrdf/Cargo.lock`
+is committed, so these locked steps no longer fail for lack of it. A separate,
+independently audited scoped gate at source `42d13fed` ran the V5 host tests,
+direct V5 guest execution and a feature Clippy pass outside this campaign; it is
+not a campaign record. See the
 [V5 guest reference](authenticated-rdf-guest.md#recorded-evidence).
+
+[OPUS-5.5] zkp-14.6: after `lint-authrdf`, the campaign runs the commands named in
+`VCQ_COMMANDS`, each through the same fail-closed `run_logged` path, before both
+guests are re-exported. These commands were authored at `e4fb7dff`. No completed
+run of the full named campaign, with these commands or the zkp-14.5 V5 steps, is
+recorded at that revision.
+
+| Command | Scope | Cargo selection (`--locked`, evaluator manifest) |
+|---|---|---|
+| `native-vcq` | native | `test -p sparq-proved-evaluator --features vcq --lib --test vcq_adapter` |
+| `native-vcq-authenticated` | native | `test -p sparq-proved-evaluator --features vcq-authenticated --lib --test vcq_authenticated --test vcq_authenticated_genuine --test vcq_adapter` |
+| `lint-vcq-authenticated` | lint | `clippy --workspace --all-targets --features sparq-proved-evaluator/vcq-authenticated -- -D warnings` |
+| `actual-authrdf-direct-execution` | direct SDK execution | `test -p sparq-proved-evaluator --features authenticated-rdf --test actual_authenticated_rdf -- --ignored --nocapture --test-threads=1` |
+
+- `native-vcq` checks the V3 adapter, whose helpers the V5 adapter now shares,
+  under its own feature. `native-vcq-authenticated` runs the library unit tests
+  (including the `vcq_authenticated` module's), the V5 adapter's native gates,
+  the non-ignored job-parser and policy tests in `vcq_authenticated_genuine.rs`,
+  and the V3 adapter tests again with both features enabled.
+- `actual-authrdf-direct-execution` is the only command with `--ignored`, and it
+  selects one target. Its four tests run the embedded V5 guest (and one exact-guest
+  control rejecting V5 input) in the real `r0vm` executor. They create no proof,
+  receipt or presentation, and a direct execution never counts as a receipt.
+  `RISC0_DEV_MODE` must be unset for these tests, not merely `0`.
+- The ignored genuine drivers (`authenticated_rdf_genuine`,
+  `vcq_authenticated_genuine`'s prove test, `vcq_genuine`) are never selected: each
+  needs independently approved pins and an explicit bounded job.
+- `evidence.json` adds `authrdf_command_scopes` (every V5 and vcq command as
+  `artifact`, `native`, `lint` or `direct-sdk-execution`) and `authrdf_receipts: 0`.
+  The receipt collector still requires exactly the V1–V3 fixture set, so any V5
+  receipt export fails the campaign. `authrdf_scope` states the same split.
+
+Hermetic Python tests pin each command's feature, `--lib` and `--test` targets,
+each target's feature gate, the single `--ignored` use and the scope table. At
+`e4fb7dff` those 17 Python tests and the scoped documentation gates passed. They
+do not show that any campaign command ran. Separately, an independently verified,
+manually scoped native gate at adapter source `7fe88955` ran the adapter's native
+tests and two Clippy feature scopes, with no proof and no direct guest execution.
+That gate is not this campaign; see
+[its record](vcq-authenticated-rdf-adapter.md#recorded-native-validation).
+Also outside this campaign, one independently audited genuine job at frozen
+source `7fe88955` proved one V5 adapter case, `select-bag-verifier-agreed`; see
+[its record](vcq-authenticated-rdf-adapter.md#recorded-genuine-validation). The
+campaign still selects no genuine V5 driver and its receipt collector is
+unchanged. Registry `adapter_available` stays false for the V5 adapter.

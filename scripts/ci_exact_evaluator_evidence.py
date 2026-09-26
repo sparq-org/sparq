@@ -24,8 +24,36 @@ EXACT_GUEST, AUTHRDF_GUEST = "sparq-exact-guest", "sparq-authrdf-guest"
 REBUILD_SCOPES = (("host", MANIFEST, None), ("guest", GUEST_MANIFEST, EXACT_GUEST),
                   ("authrdf-guest", AUTHRDF_GUEST_MANIFEST, AUTHRDF_GUEST))
 GUEST_LABELS = frozenset({"guest", "authrdf-guest"})
-AUTHRDF_SCOPE = ("V5 guest artifact export, native V5 model and host gates, and lint only; "
-                 "this campaign executes no V5 guest and creates no V5 receipt.")
+# [OPUS-5.5] zkp-14.6: the default-off vcq features and the direct V5 executor
+# target, run after the zkp-14.5 V5 gates. Native commands select every target
+# explicitly and pass no test filter. Only the direct-execution target runs
+# `--ignored`: its tests execute the V5 guest with the SDK executor and prove
+# nothing. The ignored genuine V5 proof drivers need independently approved
+# pins and an explicit bounded job, so no command selects them.
+HOST_FEATURES = ["-p", "sparq-proved-evaluator", "--features"]
+VCQ_COMMANDS = (
+    ("native-vcq", HOST_FEATURES + ["vcq", "--lib", "--test", "vcq_adapter"]),
+    ("native-vcq-authenticated", HOST_FEATURES + [
+        "vcq-authenticated", "--lib", "--test", "vcq_authenticated",
+        "--test", "vcq_authenticated_genuine", "--test", "vcq_adapter"]),
+    ("lint-vcq-authenticated", ["--workspace", "--all-targets", "--features",
+                                "sparq-proved-evaluator/vcq-authenticated", "--", "-D", "warnings"]),
+    ("actual-authrdf-direct-execution", HOST_FEATURES + [
+        "authenticated-rdf", "--test", "actual_authenticated_rdf", "--",
+        "--ignored", "--nocapture", "--test-threads=1"]),
+)
+# Every V5 and vcq command by scope; `receipts()` still admits V1-V3 fixtures only.
+AUTHRDF_COMMAND_SCOPES = {
+    "export-authrdf-guest": "artifact", "confirm-authrdf-guest": "artifact",
+    "native-authrdf": "native", "native-authrdf-host": "native", "lint-authrdf": "lint",
+    "native-vcq": "native", "native-vcq-authenticated": "native",
+    "lint-vcq-authenticated": "lint", "actual-authrdf-direct-execution": "direct-sdk-execution",
+}
+AUTHRDF_SCOPE = ("Native: V5 model and host gates, the vcq-authenticated adapter module, native and "
+                 "genuine-driver job-parser tests, and the V3 vcq adapter regression, plus lint. "
+                 "Direct SDK execution: actual_authenticated_rdf runs the V5 guest, and the exact "
+                 "guest's V5-input rejection control, in the r0vm executor without proving. Receipts: zero V5 receipts; this campaign creates no V5 "
+                 "receipt, counts no direct execution as a receipt, and runs no genuine V5 proof driver.")
 V1_RECEIPTS = {"v1-verifier-select", "v1-holder-bag", "v1-verifier-false-ask"}
 V2_RECEIPTS = {"v2-verifier-catalog", "v2-holder-false-ask"}
 V3_RECEIPTS = {"v3-holder-bag", "v3-verifier-construct", "v3-holder-describe"}
@@ -277,6 +305,10 @@ def main() -> int:
         run_logged(["cargo", "clippy", "--locked", "--manifest-path", MANIFEST, "--workspace",
                     "--all-targets", "--features", "sparq-proved-evaluator/authenticated-rdf", "--",
                     "-D", "warnings"], "lint-authrdf", output, env, commands)
+        clippy = ["cargo", "clippy", "--locked", "--manifest-path", MANIFEST]
+        for name, arguments in VCQ_COMMANDS:
+            run_logged((clippy if name.startswith("lint-") else test) + arguments, name,
+                       output, env, commands)
         run_logged(cargo + [str(output / "artifact-after")], "confirm-guest", output, env, commands)
         if pin != artifact_pin(output / "artifact-after"):
             raise ValueError("exported program changed during the campaign")
@@ -293,6 +325,7 @@ def main() -> int:
                   "identity": identity, "toolchains": toolchains, "commands": commands,
                   "build_environment": build_environment, "diagnostic_filter": env["RUST_LOG"],
                   "artifact_pin": pin, "guest_artifact_pins": pins, "authrdf_scope": AUTHRDF_SCOPE,
+                  "authrdf_command_scopes": AUTHRDF_COMMAND_SCOPES, "authrdf_receipts": 0,
                   "receipts": receipt_files,
                   "hal_execution_targets_observed": observed,
                   "hal_observation_limit": "Logged execution targets, not hardware inference; unlogged stages are not attributed.",

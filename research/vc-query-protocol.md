@@ -12,6 +12,9 @@ of suites, mapping profiles, methods, linking profiles, allowed combinations and
 vectors. A registry label is a name, never evidence that anything it names is supported.
 [OPUS-5.5] Only `method:risc0-exact` version 3 has a vcq adapter (`adapter_available: true` for
 exactly six tuples, §6.1, §9); every other entry and version keeps `adapter_available: false`.
+Adapter source for `method:risc0-authenticated-rdf` version 5 now exists (§9.2), but its entry
+stays `false`: an independently audited genuine adapter receipt covers only one of its six
+declared tuples.
 
 ## 1. Conventions and snapshot
 
@@ -241,8 +244,14 @@ rule 9 and linked to the evaluated values, §8); or `re-attested` (a trusted imp
 source issuer). Either authority may carry any source evidence. A holder-chosen subset of
 issuer-authenticated credentials remains `holder-declared`: authentication never upgrades
 authority. An anchor over authenticated credentials is expressible, but the authentication
-must be linked to the anchored bytes, not checked beside them; no current method offers it
-(§9). Completeness, status policy and holder policy are separate fields implied by neither axis.
+must be linked to the anchored bytes, not checked beside them. [OPUS-5.5] The V5 relation
+and its vcq adapter source (§9.2) declare that link, with the anchor defined over the signed
+canonical hashes. One independently audited genuine adapter receipt covers only its
+verifier-agreed bag SELECT tuple, on one public synthetic fixture; the verifier-agreed ASK and
+CONSTRUCT tuples have not run, so no registry entry offers the link as available (§9).
+Direct V5 guest execution and low-level V5 runtime evidence are separate from, and are not,
+an adapter receipt. Completeness, status policy and holder policy are separate fields implied
+by neither axis.
 
 No scope establishes whole-wallet completeness. A holder commitment to "all my credentials"
 is holder-declared however it is computed. Absence claims (false ASK, an empty result, NOT
@@ -265,6 +274,10 @@ enforcer (§7.3), the challenge owner and policy (§6.4), and `adapter_available
 consumer MUST NOT register a method as executable through vcq unless `adapter_available` is
 true. [OPUS-5.5] In the registry it is true only for `method:risc0-exact` version 3, and only
 for the six tuples its `vcq_adapter` lists (§9); it is false for every other entry and version.
+An adapter's local `Capabilities` must declare itself available so that `admit` can select it.
+That local declaration records an implementation. It is not the registry's validated
+availability: `method:risc0-authenticated-rdf` declares it in source but stays `false` in the
+registry (§9.2), even after one genuine receipt for one of its six tuples.
 
 ### 6.2 Operations (proposed interface *QueryMethod*)
 
@@ -508,6 +521,50 @@ journal, after the proof checks and before challenge consumption (`vcq-released-
 SELECT rows and CONSTRUCT N-Triples lines count; ASK has no row bound. The proposed vector
 `neg-excess-rows` (§11) now expects the same outcome as the seventh receipt. That vector
 has not been executed.
+
+### 9.2 Authenticated-RDF V5 vcq adapter (native gate and one genuine case)
+
+[OPUS-5.5] `sparq_proved_evaluator::vcq_authenticated::Risc0AuthenticatedRdfV5` (detached
+host crate, feature `vcq-authenticated`, off by default) implements *QueryMethod* over the V5
+issuer-authenticated RDF relation. Its descriptor is `urn:sparq:vcq:method:risc0-authenticated-rdf`
+version 5, and it is built from three verifier-owned inputs: an approved V5 `ArtifactPin`, its
+`AcceptedGuest` and an immutable V5 `Policy`. The policy is the §4.2 rule 9 authorization
+table of issuer, verification method and Ed25519 key, plus the V3 evaluation capacities.
+
+The parameter digest binds that policy. It reuses the model's own request digest over a fixed
+sentinel request rather than a second encoder. It also binds the suite, mapping, linking and
+relation identifiers and every fixed capacity. Table order is not significant, and invalid
+policies reject.
+
+It declares six tuples: `SelectBag`, `AskBoolean` and `GraphRdfc10` (CONSTRUCT only), each
+under both authorities. Every tuple is `ExactBounded` over `UnionDefaultGraph`, with source
+evidence `IssuerAuthenticated` under a bounded canonical RDF profile of `eddsa-rdfc-2022`.
+Status is `NotRequested` and the holder `BearerAccepted`. Authenticity, mapping, linking and
+query name the V5 guest relation as enforcer; the anchor is a public host comparison.
+
+The derived nonce and the journaled V5 request digest bind the stored request, including the
+original challenge, audience, window and accepted suites, together with the descriptor and the
+verifier's own policy. The original challenge is consumed once after every other check. The
+authenticated signing input is `SHA-256(canonical proof config) || SHA-256(canonical
+document)` over N-Quads inputs. That is not JSON-LD or full Data Integrity processing, and
+there is no status, holder binding, DID or controller resolution, or completeness claim.
+
+An independently verified, manually scoped native gate at source `7fe88955` passed the
+adapter's native tests and Clippy without proving (record and audit digest in the registry's
+`vcq_adapter.evidence` and the
+[adapter reference](../skills/zk-query-proofs/references/vcq-authenticated-rdf-adapter.md#recorded-native-validation)).
+Separately, one independently audited genuine job at that frozen source declared and proved
+only `select-bag-verifier-agreed` over a public synthetic W3C vector with the approved V5
+guest: one Succinct `Halted(0)` receipt, verified with dev mode off, accepted by the protocol,
+matching the expected result and native journal, with 28 controls (record in the registry's
+`vcq_adapter.genuine_evidence` and the
+[adapter reference](../skills/zk-query-proofs/references/vcq-authenticated-rdf-adapter.md#recorded-genuine-validation)).
+The other five tuples and the genuine row-bound rejection case have not run, so the registry
+keeps `adapter_available: false` for this method. Its ignored genuine driver proves only the
+case IDs a job declares. The exact-evaluator CI campaign source names native, Clippy
+and direct V5 executor commands for this feature at `e4fb7dff`; the full named campaign has
+not run at that revision, neither manual run is that campaign, and the campaign creates no V5
+receipt.
 
 ## 10. Worked examples (illustrative notation, not a wire encoding)
 

@@ -17,6 +17,9 @@ authenticated-rdf = [
     "sparq-proved-evaluator-model/authenticated-rdf",
     "sparq-proved-evaluator-methods/authenticated-rdf",
 ]
+# [OPUS-5.5] zkp-14.6: optional sparq-query-protocol adapter over the V5 relation.
+# Off by default; only combines the two features above and adds no dependency.
+vcq-authenticated = ["vcq", "authenticated-rdf"]
 
 [dependencies]
 sparq-proved-evaluator-model = { path = "../model" }

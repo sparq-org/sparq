@@ -347,15 +347,69 @@ not established. All credential authentication runs inside the V5 guest. Its
 real Cargo resolution. An independently audited scoped gate at `42d13fed`
 passed the native host and job-parsing tests, a feature Clippy pass and direct
 guest execution, which observed each guest rejecting the other's input and
-created no receipt. No genuine V5 receipt is recorded: the one genuine job
-attempted there timed out before completing a proof. The dependency, SBOM,
+created no receipt. The one low-level genuine job attempted there timed out
+before completing a proof; the only genuine V5 receipt, for one case, came later
+through the vcq adapter (see below). The dependency, SBOM,
 registry-parser and exact-evaluator campaign gates register its workspace and
 lock and fail closed without that lock; no completed campaign run with the V5
 steps is recorded, and the campaign creates no V5 receipt. The ignored
 genuine-proof driver `host/tests/authenticated_rdf_genuine.rs` proves only the
 case IDs its versioned test job declares (one to six of six defined cases,
 validated before any proof), so a bounded job can prove a subset and a later
-job the remainder. No method registry lists V5, and this slice implements no
-protocol adapter. Experimental and not externally audited (`sq-qhy4`). See the
+job the remainder. The research registry lists it as
+`method:risc0-authenticated-rdf` version 5, with `adapter_available: false`
+(see below). Experimental and not externally audited (`sq-qhy4`). See the
 [V5 guest reference](../../skills/zk-query-proofs/references/authenticated-rdf-guest.md)
 for digests, identities and audit records.
+
+## vcq adapter for authenticated RDF (V5)
+
+[OPUS-5.5] zkp-14.6 adds the optional `vcq-authenticated` host feature (off by
+default; it only combines `vcq` and `authenticated-rdf`). It adds source for
+`vcq_authenticated::Risc0AuthenticatedRdfV5`, a `sparq-query-protocol`
+`QueryMethod` over the V5 relation. The method is
+`urn:sparq:vcq:method:risc0-authenticated-rdf` version 5. It is built from an
+independently approved V5 `ArtifactPin`, the `AcceptedGuest` loaded under it, and a
+verifier-owned, immutable `authenticated_rdf::Policy`. The descriptor's parameter
+digest binds that policy through the model's own request digest of a fixed
+sentinel request. It also binds the suite, mapping, linking and relation
+identifiers and every fixed capacity. Table order is not significant, and an
+invalid policy is rejected.
+
+The six tuples are bag SELECT, boolean ASK and CONSTRUCT graphs, each under
+holder-declared or verifier-agreed authority. Source evidence is
+`IssuerAuthenticated` with the bounded canonical RDF `eddsa-rdfc-2022` suite
+profile, assembly is `UnionDefaultGraph`, status is `NotRequested`, and the
+holder is bearer only. The adapter rejects every other source evidence, suite,
+mapping, linking profile, stronger status or holder policy, named-graph or
+exact-source assembly, SELECT sequence, DESCRIBE and base IRI. It does so at
+admission or by the typed query-shape check, before any proof or challenge use.
+The verifier rebuilds the V5 request from its stored request and its own policy.
+The nonce is derived from the `local-struct-v1` stored request and descriptor.
+Every check, up to the released-row bound, runs before the original challenge is
+consumed once. There is no JSON-LD processing, status, holder binding or
+completeness claim.
+
+The native tests are `host/tests/vcq_authenticated.rs` and unit tests in
+`host/src/vcq_authenticated.rs`; they create no proof. The ignored
+`host/tests/vcq_authenticated_genuine.rs` proves only the case IDs a job declares.
+An independently verified, manually scoped native gate at adapter source
+`7fe88955` passed these native tests, the genuine driver's non-ignored job-parser
+and policy tests, the existing low-level V5 and V3 adapter tests and two
+all-target Clippy feature scopes. It created no proof and executed no guest, and
+the ignored genuine driver was not run there. Separately, one independently
+audited genuine job at that frozen source proved one public synthetic case,
+`select-bag-verifier-agreed`, with the approved V5 guest (`c35f5e4b`): one
+Succinct `Halted(0)` receipt, accepted by the protocol, matching the expected
+result and native journal, with 28 controls. The other five tuples and the
+row-bound rejection case have not run, so the research registry keeps this
+method's `adapter_available` false. The exact-evaluator campaign source (at `e4fb7dff`) adds
+`native-vcq`, `native-vcq-authenticated`, `lint-vcq-authenticated` and the direct
+V5 executor command `actual-authrdf-direct-execution` (SDK execution, no proof).
+The full named campaign has not run at that revision, and the manual native gate
+is not a campaign record. The genuine drivers are not selected, and the campaign
+creates no V5 receipt
+([campaign evidence](../../skills/zk-query-proofs/references/evaluator-evidence.md)).
+See the
+[adapter reference](../../skills/zk-query-proofs/references/vcq-authenticated-rdf-adapter.md)
+for both records and their audit digests. Not externally audited (`sq-qhy4`).
