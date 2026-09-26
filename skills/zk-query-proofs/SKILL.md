@@ -488,6 +488,19 @@ refusals, 36 empty-graph refusals) and all 46 real cells (4 genuine K1 proofs,
 distinct from the `14d426bd` measurements above, is not a hosted CI run, and makes
 no gate, runtime or security claim; see the corpus README for its controls and hashes.
 
+[OPUS-5.5] The `result_experiment` example also accepts a separately versioned
+schema-3 manifest for a paired `baseline_v1` versus `public_pattern_v4` ablation
+over K1 and K2 synthetic wallets. Both arms use one eligible query, the same
+released rows, signed inputs, policy and realized issuer-slot count, and one
+acceptance digest per profile. Relation version, package and proof stay
+separately visible, and transcripts are not claimed byte-identical. The legacy
+selected-support query is not version-four eligible and stays unchanged. The
+adapter reports raw per-sample timings only. No schema-3 manifest file is
+committed; the
+[experiment instructions](../../bench/zk-compose/experiments/README.md) carry an
+inline sample to save outside the checkout, plus the round options, schedule,
+controls and limits. No measured outcome is recorded in this skill.
+
 [GPT-6] `result::signed` exposes separately versioned canonical signed-integer
 preparation and verification, with a fixed capacity and no public sign/length
 selector. See the [signed result contract](references/signed-results.md) for its
