@@ -4,10 +4,14 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 
+import corpus
 from corpus import digest, encoded, exhaustive, finite_proof_universe, import_regressions, oracle, plan, sampled, select, tiny_case
 from run import check_outcome, equal_result, execute_child, validate_plan
 from minimize import minimize
+
+OVERRIDDEN = ("date-end-of-year", "date-end-of-leap-month", "date-end-before-leap-day")
 
 
 class CorpusTests(unittest.TestCase):
@@ -149,6 +153,77 @@ class CorpusTests(unittest.TestCase):
         self.assertEqual(sum(c["rejection"] for c in imported), 2)
         with self.assertRaisesRegex(ValueError, "projection"):
             import_regressions(source)
+
+    def test_reviewed_projection_overrides_keep_originals_and_denominator(self):
+        # [OPUS-5.5] Aliases come from the reviewed registry, not evaluator output.
+        source = Path(__file__).resolve().parents[2] / "crates/sparq-engine/tests/fixtures/builtin_edges.json"
+        original = json.loads(source.read_text())["cases"]
+        imported = import_regressions(source, ["v"])
+        self.assertEqual(len(imported), 169)
+        self.assertEqual(sum(c["rejection"] for c in imported), 2)
+        self.assertEqual([c["original_fixture"] for c in imported], original)
+        self.assertEqual([c["query"] for c in imported], [c["query"] for c in original])
+        by_id = {c["id"]:c for c in imported}
+        for name in OVERRIDDEN:
+            case, fixture = by_id[name], next(c for c in original if c["id"] == name)
+            self.assertEqual(case["expected"], select(["y", "m", "day", "h"], fixture["expected_rows"]))
+            projection = case["oracle"]["projection"]
+            self.assertEqual(projection["kind"], "reviewed_projection_override")
+            self.assertEqual(projection["original_fixture_sha256"], digest(fixture))
+            self.assertEqual(projection["source_sha256"], case["oracle"]["source_sha256"])
+        for case in imported:
+            if case["id"] not in OVERRIDDEN and not case["rejection"] and "expected_rows" in case["original_fixture"]:
+                self.assertEqual(case["oracle"]["projection"], {"kind":"caller_variables", "variables":["v"]})
+                self.assertEqual(case["expected"]["Select"]["variables"], ["v"])
+            if case["rejection"]:
+                self.assertNotIn("projection", case["oracle"])
+
+    def test_projection_width_guard_without_matching_override(self):
+        source = Path(__file__).resolve().parents[2] / "crates/sparq-engine/tests/fixtures/builtin_edges.json"
+        fixture = next(c for c in json.loads(source.read_text())["cases"] if c["id"] == "date-end-of-year")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "builtin_edges.json"
+            # Same ID and bytes in an unrelated file never adopt the override.
+            path.write_text(json.dumps({"cases":[fixture]}))
+            with self.assertRaisesRegex(ValueError, "projection width"):
+                import_regressions(path, ["v"])
+            case = import_regressions(path, ["y", "m", "day", "h"])[0]
+            self.assertEqual(case["oracle"]["projection"]["kind"], "caller_variables")
+            for variables in (["y", "y", "day", "h"], ["y", "", "day", "h"], ["?y", "m", "day", "h"]):
+                with self.subTest(variables=variables), self.assertRaisesRegex(ValueError, "variables"):
+                    import_regressions(path, variables)
+            for rows in ([["a", "b"]], [{"s":"a"}], {"s":"a"}):
+                golden = {"id":"full", "query":"SELECT ?s {}", "expected":{"result":select(["s"], rows)}}
+                path.write_text(json.dumps({"cases":[golden]}))
+                with self.subTest(rows=rows), self.assertRaisesRegex(ValueError, "row"):
+                    import_regressions(path)
+            for variables in (["s", "s"], [1]):
+                golden = {"id":"full", "query":"SELECT ?s {}", "expected":{"result":select(variables, [])}}
+                path.write_text(json.dumps({"cases":[golden]}))
+                with self.subTest(variables=variables), self.assertRaisesRegex(ValueError, "variables"):
+                    import_regressions(path)
+
+    def test_projection_registry_is_fail_closed(self):
+        source = Path(__file__).resolve().parents[2] / "crates/sparq-engine/tests/fixtures/builtin_edges.json"
+        registry = json.loads(corpus.PROJECTIONS.read_text())
+        entry = registry["overrides"][0]
+        mutations = {
+            "missing override": (registry | {"overrides":registry["overrides"][1:]}, "projection width"),
+            "stale source": (registry | {"overrides":[entry | {"source_sha256":"0" * 64}]}, "stale"),
+            "stale fixture": (registry | {"overrides":[entry | {"original_fixture":entry["original_fixture"] | {"query":"ASK {}"}}]}, "stale"),
+            "unknown id": (registry | {"overrides":[entry | {"id":"absent", "original_fixture":entry["original_fixture"] | {"id":"absent"}}]}, "unknown"),
+            "duplicate": (registry | {"overrides":[*registry["overrides"], entry]}, "duplicate"),
+            "unknown key": (registry | {"overrides":[entry | {"inferred":True}]}, "unknown projection override"),
+            "bad variables": (registry | {"overrides":[entry | {"variables":["y", "y", "day", "h"]}]}, "invalid"),
+            "unknown schema": (registry | {"schema":"sparq.projection-expectations.v0"}, "schema"),
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "projection-expectations.json"
+            for name, (mutated, message) in mutations.items():
+                path.write_text(json.dumps(mutated))
+                with self.subTest(name), mock.patch.object(corpus, "PROJECTIONS", path), \
+                        self.assertRaisesRegex(ValueError, message):
+                    import_regressions(source, ["v"])
 
     def test_versioned_dataset_positives_retain_original_v1_rejections(self):
         source = Path(__file__).resolve().parents[2] / "zk/sparql-evaluator/fixtures/conformance/cases.json"

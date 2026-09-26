@@ -1,0 +1,85 @@
+{
+  "schema": "sparq.projection-expectations.v1",
+  "authored_by": "OPUS-5.5",
+  "scope": "Reviewed projection variables for row-only goldens whose SELECT aliases differ from the caller's default variables. Each override applies only to its exact repository source path, source file SHA-256 and retained original fixture object; variables come from direct source inspection of the query, never from evaluator output.",
+  "overrides": [
+    {
+      "source": "crates/sparq-engine/tests/fixtures/builtin_edges.json",
+      "source_sha256": "b2a2983fc3cb5d808ca6c0f07719990d9351967487a410a0c026bffd7c7eb987",
+      "id": "date-end-of-year",
+      "original_fixture": {
+        "id": "date-end-of-year",
+        "group": "date",
+        "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (YEAR(?d) AS ?y) (MONTH(?d) AS ?m) (DAY(?d) AS ?day) (HOURS(?d) AS ?h) WHERE {VALUES ?d {\"1999-12-31T24:00:00-05:00\"^^xsd:dateTime}}",
+        "expected_rows": [
+          [
+            "\"2000\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+            "\"1\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+            "\"1\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+            "\"0\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+          ]
+        ],
+        "spec": "https://www.w3.org/TR/2010/REC-xpath-functions-20101214/#func-hours-from-dateTime",
+        "expectation_kind": "published_recommendation"
+      },
+      "variables": [
+        "y",
+        "m",
+        "day",
+        "h"
+      ]
+    },
+    {
+      "source": "crates/sparq-engine/tests/fixtures/builtin_edges.json",
+      "source_sha256": "b2a2983fc3cb5d808ca6c0f07719990d9351967487a410a0c026bffd7c7eb987",
+      "id": "date-end-of-leap-month",
+      "original_fixture": {
+        "id": "date-end-of-leap-month",
+        "group": "date",
+        "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (YEAR(?d) AS ?y) (MONTH(?d) AS ?m) (DAY(?d) AS ?day) (HOURS(?d) AS ?h) WHERE {VALUES ?d {\"2024-02-29T24:00:00Z\"^^xsd:dateTime}}",
+        "expected_rows": [
+          [
+            "\"2024\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+            "\"3\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+            "\"1\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+            "\"0\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+          ]
+        ],
+        "spec": "https://www.w3.org/TR/2010/REC-xpath-functions-20101214/#func-hours-from-dateTime",
+        "expectation_kind": "published_recommendation"
+      },
+      "variables": [
+        "y",
+        "m",
+        "day",
+        "h"
+      ]
+    },
+    {
+      "source": "crates/sparq-engine/tests/fixtures/builtin_edges.json",
+      "source_sha256": "b2a2983fc3cb5d808ca6c0f07719990d9351967487a410a0c026bffd7c7eb987",
+      "id": "date-end-before-leap-day",
+      "original_fixture": {
+        "id": "date-end-before-leap-day",
+        "group": "date",
+        "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (YEAR(?d) AS ?y) (MONTH(?d) AS ?m) (DAY(?d) AS ?day) (HOURS(?d) AS ?h) WHERE {VALUES ?d {\"2024-02-28T24:00:00+14:00\"^^xsd:dateTime}}",
+        "expected_rows": [
+          [
+            "\"2024\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+            "\"2\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+            "\"29\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+            "\"0\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+          ]
+        ],
+        "spec": "https://www.w3.org/TR/2010/REC-xpath-functions-20101214/#func-hours-from-dateTime",
+        "expectation_kind": "published_recommendation"
+      },
+      "variables": [
+        "y",
+        "m",
+        "day",
+        "h"
+      ]
+    }
+  ]
+}
