@@ -114,8 +114,8 @@ fn parse_with_aggregates(sparql: &str, reg: &CustomAggregateRegistry) -> Result<
         let nn = NamedNode::new(iri).map_err(|e| format!("custom aggregate IRI {iri:?}: {e}"))?;
         parser = parser.with_custom_aggregate_function(nn);
     }
-    let query = parser.parse_query(sparql).map_err(|e| e.to_string())?;
-    Ok(PreparedQuery::from(query))
+    let (query, version) = crate::parse_versioned_query(parser, sparql).map_err(|e| e.to_string())?;
+    PreparedQuery::from_query_with_versions(query, version)
 }
 
 /// Runs `f` with `reg` installed as the active custom-aggregate registry — the

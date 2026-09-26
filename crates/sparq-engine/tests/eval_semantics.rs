@@ -1105,15 +1105,10 @@ mod dp_planner_result_equivalence {
     }
 }
 
-/// [FABLE-5] (sq-9781x) The numeric-value cache is aligned with the evaluator's XSD
-/// acceptance set, so a whitespace-padded numeric lexical (`" 1 "^^xsd:integer`) — valid
-/// under XSD's `collapse` whitespace facet, value 1 — is treated CONSISTENTLY as the value
-/// 1 by every numeric seam: the relational FILTER fast path (`?o < 5`, reads the cache), the
-/// equality FILTER (`?o = 1`), and BIND arithmetic (`?o + 0`). Before the alignment the cache
-/// (a raw `str::parse::<f64>`) missed the padded lexical, so the fast `<`/`=` paths rejected
-/// it as a type error while arithmetic (via the trimming `Num::of_literal`) accepted it — a
-/// self-inconsistency this pins closed.
-mod numeric_whitespace_collapse_consistency {
+/// [GPT-6] Raw typed lexicals are not string constructors. The cache and exact
+/// arithmetic reject padding consistently; RDF term identity is still preserved.
+/// Historical collapse expectations are superseded by RDF lexical membership.
+mod numeric_raw_whitespace_consistency {
     use super::*;
 
     fn padded_graph() -> Graph {
@@ -1125,32 +1120,33 @@ mod numeric_whitespace_collapse_consistency {
     }
 
     #[test]
-    fn padded_integer_is_value_one_for_relational_equality_and_arithmetic() {
+    fn padded_integer_is_rejected_by_relational_equality_and_arithmetic() {
         let g = padded_graph();
-        // Relational FILTER fast path reads the numeric cache.
-        let lt = query(&g, "SELECT ?s WHERE { ?s <http://ex/v> ?o FILTER(?o < 5) }").unwrap();
-        assert_eq!(lt.rows.len(), 2, "both the padded and plain integer are < 5");
-        // Equality: the padded lexical equals the value 1.
-        let eq = query(&g, "SELECT ?s WHERE { ?s <http://ex/v> ?o FILTER(?o = 1) }").unwrap();
-        assert_eq!(eq.rows.len(), 2, "both the padded and plain integer = 1");
-        // Arithmetic (through the trimming Num::of_literal) already accepted it — assert the
-        // three seams now AGREE.
-        let arith = query(&g, "SELECT ?s WHERE { ?s <http://ex/v> ?o BIND(?o + 0 AS ?n) FILTER(?n < 5) }").unwrap();
-        assert_eq!(arith.rows.len(), 2, "arithmetic path agrees: both rows survive");
+        for q in [
+            "SELECT ?s WHERE { ?s <http://ex/v> ?o FILTER(?o < 5) }",
+            "SELECT ?s WHERE { ?s <http://ex/v> ?o FILTER(?o = 1) }",
+            "SELECT ?s WHERE { ?s <http://ex/v> ?o BIND(?o + 0 AS ?n) FILTER(?n < 5) }",
+        ] {
+            let result = query(&g, q).unwrap();
+            assert_eq!(result.rows.iter().map(|r| r[0].as_ref().unwrap().to_string()).collect::<Vec<_>>(), vec!["<http://ex/b>"], "{q}");
+        }
+        // The explicit string constructor still applies XML preprocessing.
+        assert_eq!(one_cell(&g, "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (xsd:integer(\" 1 \") AS ?v) {}"), Some(int_lit(1)));
     }
 
     #[test]
-    fn padded_and_plain_integer_are_value_equal_across_ids() {
-        // A join on value equality pairs the padded and plain integers (distinct dict ids,
-        // same value 1) — the cache-hit ⟺ evaluator-accept alignment in action.
+    fn padded_and_plain_integer_only_pair_by_term_identity() {
+        // Invalid and valid lexicals do not pair by numeric value. Identical RDF
+        // terms retain the RDFterm-equal route, including the invalid term itself.
         let g = padded_graph();
         let r = query(
             &g,
             "SELECT ?s1 ?s2 WHERE { ?s1 <http://ex/v> ?o1 . ?s2 <http://ex/v> ?o2 FILTER(?o1 = ?o2) }",
         )
         .unwrap();
-        // 2x2 value-equal pairs (a=a, a=b, b=a, b=b) — all four since both are value 1.
-        assert_eq!(r.rows.len(), 4, "all four ordered pairs are value-equal (both are 1)");
+        let mut rows = r.rows.into_iter().map(|row| row.into_iter().map(|term| term.unwrap().to_string()).collect::<Vec<_>>()).collect::<Vec<_>>();
+        rows.sort();
+        assert_eq!(rows, vec![vec!["<http://ex/a>", "<http://ex/a>"], vec!["<http://ex/b>", "<http://ex/b>"]]);
     }
 }
 
@@ -1160,10 +1156,10 @@ mod numeric_whitespace_collapse_consistency {
 /// general evaluator SLOW path (`values_equal`/`value_compare_strict` → `Num::of_literal`)
 /// must return the SAME answer for `=`, `<`, `>` over padded / per-datatype-ill-formed /
 /// well-formed lexicals across `xsd:integer`/`double`/`decimal`/`float`. The two beads pin:
-///   * sq-74oy4 — a whitespace-PADDED numeric lexical (XSD `collapse` facet) is its trimmed
-///     value on `<`/`>` too (not a `<`/`>`-only type error).
+///   * [GPT-6] Raw whitespace-PADDED numeric lexicals are invalid on every value
+///     operator. Explicit string constructors normalize XML boundary whitespace.
 ///   * sq-6b1lj — a lexical ill-formed FOR its datatype (`"1.5"^^xsd:integer`, `"1E2"^^
-///     xsd:decimal`, an i128-overflow decimal) is a type error on ALL of `=`/`<`/`>` (the
+///     xsd:decimal`) is a type error on ALL of `=`/`<`/`>` (the
 ///     cache no longer over-includes it on the sargable `=`/`<` fast path).
 ///
 /// Method: each case runs against a graph WITH the fast path (sargable numeric pushdown
@@ -1233,38 +1229,39 @@ mod numeric_fast_slow_path_agreement {
     }
 
     #[test]
-    fn padded_lexicals_are_their_trimmed_value_on_all_operators() {
-        // sq-74oy4: padding is collapsed on `<`/`>`/`=` alike (not a `<`/`>`-only type error).
+    fn padded_raw_lexicals_bind_but_value_filters_exclude_them() {
+        // [GPT-6] No raw RDF pre-lexical processing on `<`/`>`/`=`.
         for obj in [
             "\" 1 \"^^xsd:integer",
             "\" 1.0 \"^^xsd:decimal",
             "\"\\t1.0E0\\n\"^^xsd:double",
         ] {
-            assert_eq!(filter_rows(obj, "?o < 5"), 1, "{obj} < 5 (padded = value 1)");
-            assert_eq!(filter_rows(obj, "?o = 1"), 1, "{obj} = 1 (padded = value 1)");
-            assert_eq!(filter_rows(obj, "?o > 0"), 1, "{obj} > 0 (padded = value 1)");
+            assert_eq!(filter_rows(obj, "?o < 5"), 0, "{obj} < 5 (raw padding is ill-typed)");
+            assert_eq!(filter_rows(obj, "?o = 1"), 0, "{obj} = 1 (raw padding is ill-typed)");
+            assert_eq!(filter_rows(obj, "?o > 0"), 0, "{obj} > 0 (raw padding is ill-typed)");
+            assert_eq!(filter_rows(obj, "BOUND(?o)"), 1, "{obj} remains a bound RDF term");
         }
     }
 
     #[test]
-    fn per_datatype_illformed_lexicals_are_type_errors_on_all_operators() {
-        // sq-6b1lj: ill-formed FOR the datatype → type error → row excluded on `<`, `>`, `=`
-        // — on BOTH paths (the fast path no longer over-includes them). A FILTER type error
-        // drops the row exactly like `false`.
+    fn invalid_or_out_of_capacity_numerics_are_excluded_by_value_filters() {
+        // [GPT-6] Datatype-invalid lexicals and valid out-of-capacity values both
+        // produce native expression errors in this lane. These FILTER results
+        // do not identify representation overflow with normative lexical invalidity.
         for (obj, why) in [
             ("\"1.5\"^^xsd:integer", "fraction on an integer"),
             ("\"1E2\"^^xsd:integer", "exponent on an integer"),
             ("\"1E2\"^^xsd:decimal", "exponent on a decimal"),
-            // 40-digit integer / decimal: beyond i128 (i128::MAX is a 39-digit number
-            // ~1.7e38) → of_literal None (not i128-representable), so a type error.
+            // Valid 40-digit integer / decimal: beyond the native i128 lane.
+            // This is a representation limit, not an invalid datatype lexical.
             ("\"9999999999999999999999999999999999999999\"^^xsd:integer", "i128-overflow integer"),
             ("\"9999999999999999999999999999999999999999.5\"^^xsd:decimal", "i128-overflow decimal"),
         ] {
             assert_eq!(filter_rows(obj, "?o < 999999"), 0, "{obj} < … excluded ({why})");
             assert_eq!(filter_rows(obj, "?o > -999999"), 0, "{obj} > … excluded ({why})");
             assert_eq!(filter_rows(obj, "?o = 100"), 0, "{obj} = … excluded ({why})");
-            // BOUND(?o) is still true (the row is a real term) — proves it is a numeric TYPE
-            // error on the comparison, not that the term vanished from the graph.
+            // BOUND(?o) remains true: neither lexical rejection nor representation
+            // limits erase the original RDF term from the graph.
             let bound = query(
                 &graph_with(obj, false),
                 "SELECT ?s WHERE { ?s <http://ex/v> ?o FILTER(BOUND(?o)) }",

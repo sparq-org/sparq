@@ -33,6 +33,9 @@ default = ["parallel", "regex", "digest"]
 parallel = ["dep:rayon", "sparq-core/parallel"]
 regex = ["dep:regex"]
 digest = ["dep:md-5", "dep:sha1", "dep:sha2"]
+# [GPT-6] Detached graph-result guest support: deterministic collision-free
+# template nodes and anonymous parser labels; this feature is off by default.
+deterministic-blank-nodes = ["spargebra/sparq-deterministic-blank-nodes"]
 # Characteristic-set star-join cardinality estimation (Neumann & Moerkotte):
 # `cs::CsTable` + `with_cs_table` make the greedy planner consult an injected CS
 # table for star joins instead of the per-predicate independence model. OPT-IN and
@@ -380,7 +383,7 @@ paths = []
 #       and `!=` `false`, exactly mirroring the `p == q` sameTerm short-circuit `values_equal` takes
 #       today (safe even for ill-typed literals: sameTerm returns a boolean, never a type error).
 # CAUTION mirrored in code: UNEQUAL ids of possible LITERALS do NOT imply value-inequality (numeric
-# promotion `"1"^^integer` vs `"1.0"^^decimal`, whitespace-padded lexicals — the sq-lr2ii class) and
+# promotion `"1"^^integer` vs `"1.0"^^decimal`, valid integer spellings `"+01"` vs `"1"` — the sq-lr2ii class) and
 # `=` on two ill-typed literals can be a TYPE ERROR, not `false`; both DECLINE to the existing exact
 # path unchanged. OPT-IN and OFF by default: when off, zero of this code compiles and the FILTER path
 # is byte-identical. No new dependencies, no `unsafe`.

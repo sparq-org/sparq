@@ -1,7 +1,10 @@
 // [GPT-6] Native evaluation adapter; never generates or counts cryptographic proofs.
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
+use sparq_engine::{BudgetExceeded, EvaluationCapacity};
 use sparq_proved_evaluator_model::{self as model, DatasetAuthority, ProofContract, v2};
+#[cfg(feature = "graph-results")]
+use sparq_proved_evaluator_model::v3;
 use std::{
     error::Error,
     fs,
@@ -30,6 +33,28 @@ fn rejection(error: &model::Rejected, phase: &str) -> Option<Value> {
         classified["phase"] = json!("admission");
     }
     classified["diagnostic"] = json!(error.0);
+    Some(classified)
+}
+
+// [GPT-6] Only actual enum values emitted by the owning query frame certify
+// execution capacity. Neither a legacy string nor the job's expectation does.
+fn detailed_rejection(error: &model::EvaluationError, phase: &str) -> Option<Value> {
+    use model::EvaluationError;
+    let cause = match error {
+        EvaluationError::Rejected(error) => return rejection(error, phase),
+        EvaluationError::Budget(BudgetExceeded::Rows) => "budget_rows",
+        EvaluationError::Budget(BudgetExceeded::Bytes) => "budget_bytes",
+        EvaluationError::Budget(BudgetExceeded::Deadline) => "budget_deadline",
+        EvaluationError::Budget(BudgetExceeded::Cancelled) => "budget_cancelled",
+        EvaluationError::Capacity(EvaluationCapacity::NumericRepresentation) => "numeric_representation",
+        EvaluationError::Capacity(EvaluationCapacity::TemporalYear) => "temporal_year",
+        EvaluationError::Execution => "execution",
+    };
+    let classes: Value = serde_json::from_str(include_str!(
+        "../../../../bench/zk-bindings/rejections.json"
+    )).expect("committed rejection classifications");
+    let mut classified = classes["typed_causes"][cause].clone();
+    classified["cause"] = json!(cause);
     Some(classified)
 }
 
@@ -84,10 +109,10 @@ fn main() -> Result<(), Box<dyn Error>> {
                 dataset,
             };
             match model::admit(&witness.request) {
-                Err(error) => ("admission", Err(error)),
+                Err(error) => ("admission", Err(error.into())),
                 Ok(()) => (
                     "evaluation",
-                    model::evaluate(&witness).map(|journal| journal.result),
+                    model::evaluate_detailed(&witness).map(|journal| json!(journal.result)),
                 ),
             }
         }
@@ -118,11 +143,42 @@ fn main() -> Result<(), Box<dyn Error>> {
                 dataset,
             };
             match v2::admit(&witness.request) {
-                Err(error) => ("admission", Err(error)),
+                Err(error) => ("admission", Err(error.into())),
                 Ok(()) => (
                     "evaluation",
-                    v2::evaluate(&witness).map(|journal| journal.result),
+                    v2::evaluate_detailed(&witness).map(|journal| json!(journal.result)),
                 ),
+            }
+        }
+        #[cfg(feature = "graph-results")]
+        Some("exact_v3") => {
+            let mut policy = v3::Policy::default();
+            if let Some(limit) = job["policy_overrides"]["max_rows"].as_u64() {
+                policy.dataset.max_rows = limit.try_into()?;
+            }
+            let dataset = v3::PrivateDataset {
+                nquads: job["dataset"]["nquads"].as_str()
+                    .ok_or("missing complete dataset")?.to_owned(),
+                named_graphs: serde_json::from_value(job["dataset"]["named_graphs"].clone())?,
+                salt: [91; 32],
+            };
+            let commitment = v3::dataset_commitment(&dataset, &policy)?;
+            let witness = v3::Witness {
+                request: v3::Request {
+                    version: v3::VERSION,
+                    contract: ProofContract::ExactDataset,
+                    dialect: v3::Dialect::SparqSparql11GraphResultsV3,
+                    query,
+                    authority: authority(&job, commitment)?,
+                    policy,
+                    nonce,
+                },
+                dataset,
+            };
+            match v3::admit(&witness.request) {
+                Err(error) => ("admission", Err(error.into())),
+                Ok(()) => ("evaluation", v3::evaluate_detailed(&witness)
+                    .map(|journal| json!(journal.result))),
             }
         }
         _ => return Err("adapter backend unavailable; never classified as unsupported".into()),
@@ -135,20 +191,20 @@ fn main() -> Result<(), Box<dyn Error>> {
             Value::Null,
             Value::Null,
         ),
-        Err(error) => match rejection(&error, phase) {
+        Err(error) => match detailed_rejection(&error, phase) {
             Some(classified) => (
                 "rejected",
                 Value::Null,
                 classified["category"].clone(),
                 classified,
-                json!(error.0),
+                json!(error.to_string()),
             ),
             None => (
                 "error",
                 Value::Null,
                 json!("unclassified_model_rejection"),
                 Value::Null,
-                json!(error.0),
+                json!(error.to_string()),
             ),
         },
     };
@@ -184,4 +240,24 @@ fn unrelated_and_ambiguous_errors_are_not_capacity_evidence() {
     let actual = rejection(&model::Rejected("temporal year capacity"), "admission").unwrap();
     assert_eq!(actual["category"], "capacity");
     assert_eq!(actual["phase"], "admission");
+}
+
+#[test]
+fn only_typed_capacity_and_resource_limits_classify_as_capacity() {
+    use model::EvaluationError;
+    for error in [EvaluationError::Budget(BudgetExceeded::Rows),
+                  EvaluationError::Budget(BudgetExceeded::Bytes),
+                  EvaluationError::Capacity(EvaluationCapacity::NumericRepresentation),
+                  EvaluationError::Capacity(EvaluationCapacity::TemporalYear)] {
+        let actual = detailed_rejection(&error, "evaluation").unwrap();
+        assert_eq!(actual["category"], "capacity");
+        assert_eq!(actual["phase"], "evaluation");
+    }
+    for (error, category) in [(EvaluationError::Budget(BudgetExceeded::Deadline), "deadline"),
+                              (EvaluationError::Budget(BudgetExceeded::Cancelled), "cancelled"),
+                              (EvaluationError::Execution, "execution")] {
+        assert_eq!(detailed_rejection(&error, "evaluation").unwrap()["category"], category);
+    }
+    assert_eq!(detailed_rejection(&EvaluationError::Rejected(model::Rejected(
+        "query evaluation or resource budget rejected")), "evaluation"), None);
 }

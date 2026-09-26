@@ -17,6 +17,8 @@ documents its separate wire schema, N-Quads/catalog commitment and GRAPH plus
 local-snapshot FROM/FROM NAMED behavior. V1 commitment semantics are unchanged.
 `coverage.json` inventories V1 only; its named-graph rejections do not describe V2.
 V2 native and actual-guest test definitions are listed in the linked V2 reference.
+The separate [V3 graph-result API](../../skills/zk-query-proofs/references/graph-results-v3.md)
+adds bounded blank-node/graph results; its guest/receipt evidence is separate.
 
 `ProofContract::SelectedSupport` describes the existing Noir answer-support API.
 The evaluator rejects it: this guest implements `ExactDataset` only. Exactness
@@ -83,20 +85,24 @@ including unsigned `+1` and `-0`. The [numeric capacity guard](../../skills/zk-q
 enforces finite arithmetic limits as whole-query failures, separately from
 lexical validity and direct RDF output. [Exact temporal/year capacity](../../skills/zk-query-proofs/references/exact-temporals.md)
 has its own explicit limits.
-EXISTS and NOT EXISTS bodies are restricted to BGP, join, UNION and pure FILTER.
+EXISTS and NOT EXISTS bodies admit BGP, join, UNION, pure FILTER and the
+[scoped published-2013 MINUS rule](../../skills/sparql-query/exists-minus.md).
+[Captured BOUND](../../skills/zk-query-proofs/references/exists-bound-scope.md) is
+rejected as an ambiguous published-2013 shape; body-local BOUND stays admitted.
 Fixed path sequences lowered to BGP are included; residual path operators,
-nested EXISTS, OPTIONAL/MINUS, binding operators, subqueries and modifiers inside
+nested EXISTS, OPTIONAL, binding operators, subqueries and modifiers inside
 an EXISTS body are rejected. The rejection applies to these combinations, not
 to those operators elsewhere in the query. This avoids silently selecting an
 alternative to published SPARQL 1.1 substitution semantics while broader
 correlation work remains in zkp-10.6. The [W3C discussion](https://github.com/w3c/sparql-query/issues/156)
 describes the relevant errata and proposed alternatives; none is implicitly
 enabled by this profile.
-Nullable path composition is also excluded from this bounded profile: nullable
-subexpressions below other path operators, or at a lowered
-sequence's internal endpoint, are rejected. Ordinary root `*`, `+` and `?` over
-non-nullable operands remain admitted. The coverage ledger retains the known
-standard expectation separately from the rejection case.
+Nullable alternatives and inverses preserve branch multiplicity and concrete
+zero-length endpoints, including terms absent from the dataset. The
+[bounded path profile](../../skills/zk-query-proofs/references/nullable-paths.md)
+keeps nullable sequence intermediates and nested nullable quantifiers excluded.
+The shared native endpoint repair predates this admission change; the new test
+runner requires a newly built guest before any actual execution claim.
 
 | Family | Admission | Evidence definition |
 | --- | --- | --- |
@@ -114,8 +120,10 @@ standard expectation separately from the rejection case.
 | NOW, RAND, UUID/STRUUID, BNODE, external functions | rejected | nested host and actual guest rejection fixtures |
 | Source blank nodes, triple terms, directional literals | rejected | input/query/output checks |
 | CONSTRUCT, DESCRIBE, UPDATE | rejected | admission negatives |
-| Complex/nested EXISTS bodies | rejected | corpus admission and actual guest rejection cases |
-| Nullable path composition | rejected | corpus admission and actual guest rejection cases |
+| Scoped EXISTS/MINUS bodies | admitted | preserved 2013 golden and direct guest runner; execution requires a new artifact |
+| Other complex/nested EXISTS bodies | rejected | corpus admission and actual guest rejection cases |
+| Nullable alternatives and inverses | admitted | preserved published golden and full-result guest runner; new artifact execution required |
+| Nullable sequences and nested nullable quantifiers | rejected | corpus admission and guest rejection definitions |
 
 Test definitions are distinct from execution evidence: `model/tests/semantics.rs`
 runs native semantic tests; `host/tests/real_proof.rs` generates genuine receipts
@@ -221,6 +229,32 @@ detached evaluator and supplies its existential path intermediates.
 
 The mandatory CI lane exports the accepted executable, actual synthetic receipts
 and source/toolchain/HAL evidence using the [campaign evidence contract](../../skills/zk-query-proofs/references/evaluator-evidence.md). Partial uploads are not success records.
+
+[GPT-6] The shared raw-literal boundary checks numeric/boolean typed lexicals
+verbatim and retains XML whitespace normalization for string constructors. The
+separate `raw-literal-whitespace.json` matrix contains 32 complete result controls;
+its native and actual-guest runners authenticate each case's source dataset.
+Definitions of actual-guest tests are not execution evidence. The strengthened
+false-ASK fixture includes padded raw boolean/numeric branches; earlier receipts
+retain their original source scope. See [the semantics record](../../skills/sparql-query/raw-literal-whitespace.md).
+
+`evaluate_detailed`, `v2::evaluate_detailed` and `v3::evaluate_detailed` expose
+typed execution causes (`BudgetExceeded` and `EvaluationCapacity` are re-exported) without changing request or
+journal encodings. Row/byte exhaustion, deadline, cancellation, exact numeric or
+temporal capacity, ordinary whole-query failure, and existing relation rejection
+remain distinguishable. Private engine diagnostic text is discarded. The legacy
+`evaluate` APIs preserve their original generic execution errors, including V3's
+distinct query and graph messages. Canonicalizer library failures are not inferred
+to be capacity failures from their text. Native definitions in
+`model/tests/versioned_evaluation_causes.rs` cover both authorities and graph forms;
+actual execution at the integrated source remains separately required. [GPT-6]
+
+The V3 shared guest regression runner retains the original builtin, temporal,
+lexical, aggregate, EXISTS, nullable-path and dialect fixtures under agreed scope.
+Its exact success/profile/capacity denominators are asserted in
+`host/tests/actual_v3_regressions.rs`; these are actual-execution definitions, not
+receipt evidence. Both-authority native replay and the genuine authority receipt
+families remain distinct. V2 also executes the original VERSION controls. [GPT-6]
 
 ## Exact experiment adapter
 

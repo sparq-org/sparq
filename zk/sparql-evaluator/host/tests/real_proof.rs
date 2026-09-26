@@ -191,9 +191,10 @@ fn actual_guest_rejects_bad_anchors_nondeterminism_and_exhausted_capacity() {
     let corpus: serde_json::Value =
         serde_json::from_str(include_str!("../../fixtures/conformance/cases.json")).unwrap();
     let excluded = corpus["cases"].as_array().unwrap().iter().filter(|case| {
-        case["features"].as_array().unwrap().iter().any(|feature| {
-            feature == "exists_complex_bodies" || feature == "nullable_path_composition"
-        })
+        case["expected"]["kind"] == "rejection"
+            && case["features"].as_array().unwrap().iter().any(|feature| {
+                feature == "exists_complex_bodies" || feature == "nullable_path_composition"
+            })
     });
     let mut excluded_count = 0;
     for case in excluded {

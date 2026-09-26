@@ -1,7 +1,7 @@
 {
   "authored_by": "GPT-6",
   "schema": "sparq.proof-bindings.rejection-categories.v1",
-  "scope": "Exact diagnostic allowlist for the retained V1/V2 model. Explicit admission call supplies its actual phase; remaining phases follow the reviewed producer. Unknown or combined errors remain unclassified, never substring-matched.",
+  "scope": "Static reviewed model diagnostics plus actual typed engine causes. Unknown/combined messages stay unclassified; no substring inference.",
   "deliberately_unclassified": [
     "query evaluation or resource budget rejected",
     "dataset byte capacity or blinding rejected",
@@ -121,6 +121,51 @@
     "result row capacity": {
       "category": "capacity",
       "phase": "evaluation"
+    },
+    "EXISTS body is outside the supported substitution profile": {
+      "category": "profile",
+      "phase": "admission"
+    },
+    "query VERSION contradicts REC 2013 profile": {
+      "category": "profile",
+      "phase": "admission"
+    }
+  },
+  "typed_causes": {
+    "budget_rows": {
+      "category": "capacity",
+      "phase": "evaluation",
+      "diagnostic": "typed:budget_rows"
+    },
+    "budget_bytes": {
+      "category": "capacity",
+      "phase": "evaluation",
+      "diagnostic": "typed:budget_bytes"
+    },
+    "budget_deadline": {
+      "category": "deadline",
+      "phase": "evaluation",
+      "diagnostic": "typed:budget_deadline"
+    },
+    "budget_cancelled": {
+      "category": "cancelled",
+      "phase": "evaluation",
+      "diagnostic": "typed:budget_cancelled"
+    },
+    "numeric_representation": {
+      "category": "capacity",
+      "phase": "evaluation",
+      "diagnostic": "typed:numeric_representation"
+    },
+    "temporal_year": {
+      "category": "capacity",
+      "phase": "evaluation",
+      "diagnostic": "typed:temporal_year"
+    },
+    "execution": {
+      "category": "execution",
+      "phase": "evaluation",
+      "diagnostic": "typed:execution"
     }
   }
 }

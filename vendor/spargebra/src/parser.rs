@@ -115,11 +115,15 @@ impl SparqlParser {
     /// assert_eq!(query.to_string(), query_str);
     /// # Ok::<_, spargebra::SparqlSyntaxError>(())
     /// ```
-    #[cfg_attr(
-        not(feature = "standard-unicode-escaping"),
-        expect(clippy::needless_borrow)
-    )]
     pub fn parse_query(self, query: &str) -> Result<Query, SparqlSyntaxError> {
+        self.parse_query_with_versions(query).map(|(query, _)| query)
+    }
+
+    /// [GPT-6] Parses query algebra and retains all VERSION announcements.
+    /// The legacy AST and `parse_query` API remain unchanged. Execution engines
+    /// must validate supported labels and resolve their own semantic options.
+    #[cfg_attr(not(feature = "standard-unicode-escaping"), expect(clippy::needless_borrow))]
+    pub fn parse_query_with_versions(self, query: &str) -> Result<(Query, Vec<String>), SparqlSyntaxError> {
         let mut state = ParserState::new(
             self.base_iri,
             self.prefixes,
@@ -128,7 +132,7 @@ impl SparqlParser {
         #[cfg(feature = "standard-unicode-escaping")]
         let query = unescape_unicode_codepoints(query);
         match parser::QueryUnit(&query, &mut state) {
-            Ok(query) => Ok(query),
+            Ok(query) => Ok((query, state.versions)),
             // [OPUS-4.8] Prefer the clear depth-limit error over the raw PEG
             // "unexpected token" when the cap was the actual cause (bead sq-v5dg).
             Err(_) if state.hit_recursion_limit => Err(SparqlSyntaxErrorKind::TooDeeplyNested.into()),
@@ -146,11 +150,14 @@ impl SparqlParser {
     /// assert_eq!(update.to_string().trim(), update_str);
     /// # Ok::<_, spargebra::SparqlSyntaxError>(())
     /// ```
-    #[cfg_attr(
-        not(feature = "standard-unicode-escaping"),
-        expect(clippy::needless_borrow)
-    )]
     pub fn parse_update(self, update: &str) -> Result<Update, SparqlSyntaxError> {
+        self.parse_update_with_versions(update).map(|(update, _)| update)
+    }
+
+    /// [GPT-6] Parses update algebra and retains every VERSION announcement.
+    /// Execution support is checked by the caller; the legacy AST is unchanged.
+    #[cfg_attr(not(feature = "standard-unicode-escaping"), expect(clippy::needless_borrow))]
+    pub fn parse_update_with_versions(self, update: &str) -> Result<(Update, Vec<String>), SparqlSyntaxError> {
         let mut state = ParserState::new(
             self.base_iri,
             self.prefixes,
@@ -167,10 +174,10 @@ impl SparqlParser {
             Err(e) => return Err(SparqlSyntaxErrorKind::Syntax(e).into()),
         };
         check_if_insert_data_are_sharing_blank_nodes(&operations)?;
-        Ok(Update {
+        Ok((Update {
             operations,
             base_iri: state.base_iri,
-        })
+        }, state.versions))
     }
 }
 
@@ -1035,6 +1042,7 @@ enum Either<L, R> {
 const MAX_RECURSION_DEPTH: usize = 128;
 
 pub struct ParserState {
+    versions: Vec<String>,
     base_iri: Option<Iri<String>>,
     prefixes: HashMap<String, String>,
     custom_aggregate_functions: HashSet<NamedNode>,
@@ -1067,6 +1075,7 @@ impl ParserState {
         custom_aggregate_functions: HashSet<NamedNode>,
     ) -> Self {
         Self {
+            versions: Vec::new(),
             base_iri,
             prefixes,
             custom_aggregate_functions,
@@ -1216,6 +1225,22 @@ fn property_path_middle() -> BlankNode {
     BlankNode::new_unchecked(format!("#sparq-path#{id}"))
 }
 
+// [GPT-6] Anonymous query/list/template nodes have no externally meaningful
+// label. The opt-in guest namespace cannot collide with a source blank label.
+#[cfg(not(feature = "sparq-deterministic-blank-nodes"))]
+fn anonymous_blank_node() -> BlankNode {
+    BlankNode::default()
+}
+
+#[cfg(feature = "sparq-deterministic-blank-nodes")]
+fn anonymous_blank_node() -> BlankNode {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    let id = NEXT.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_add(1))
+        .expect("synthetic anonymous-node namespace exhausted");
+    BlankNode::new_unchecked(format!("#sparq-anon#{id}"))
+}
+
 #[cfg(not(target_os = "zkvm"))]
 fn variable() -> Variable {
     Variable::new_unchecked(format!("{:x}", random::<u128>()))
@@ -1265,15 +1290,18 @@ parser! {
             state.prefixes.insert(ns.into(), i.into_inner());
         }
 
-        rule VersionDecl() = i("VERSION") _ VersionSpecifier() {?
+        rule VersionDecl() = i("VERSION") _ version:VersionSpecifier() {?
             if cfg!(feature = "sparql-12") {
+                // [GPT-6] Retain every label; semantic compatibility belongs
+                // to the consumer, not the syntax grammar. UPDATE discards these.
+                state.versions.push(version);
                 Ok(())
             } else {
                 Err("The VERSION declaration is only supported in SPARQL 1.2")
             }
         }
 
-        rule VersionSpecifier() = STRING_LITERAL1() / STRING_LITERAL2() {}
+        rule VersionSpecifier() -> String = STRING_LITERAL1() / STRING_LITERAL2()
 
         rule SelectQuery() -> Query = s:SelectClause() _ d:DatasetClauses() _ w:WhereClause() _ g:GroupClause()? _ h:HavingClause()? _ o:OrderClause()? _ l:LimitOffsetClauses()? _ v:ValuesClause() {?
             Ok(Query::Select {
@@ -1839,7 +1867,7 @@ parser! {
             l:BooleanLiteral() { Some(l.into()) } /
             i("UNDEF") { None }
 
-        rule Reifier() -> TermPattern = "~" _ v:VarOrReifierId()? { v.unwrap_or_else(|| BlankNode::default().into()) }
+        rule Reifier() -> TermPattern = "~" _ v:VarOrReifierId()? { v.unwrap_or_else(|| anonymous_blank_node().into()) }
 
         rule VarOrReifierId() -> TermPattern =
             v:Var() { v.into() } /
@@ -2118,7 +2146,7 @@ parser! {
         rule BlankNodePropertyList() -> FocusedTriplePattern<TermPattern> = "[" RecursionGuard() _ po:PropertyListNotEmpty() _ "]" {?
             state.leave_recursion();
             let mut patterns = po.patterns;
-            let mut bnode = TermPattern::from(BlankNode::default());
+            let mut bnode = TermPattern::from(anonymous_blank_node());
             for (p, os) in po.focus {
                 for o in os {
                     add_to_triple_patterns(bnode.clone(), p.clone(), o, &mut patterns)?;
@@ -2137,7 +2165,7 @@ parser! {
         rule BlankNodePropertyListPath() -> FocusedTripleOrPathPattern<TermPattern> = "[" RecursionGuard() _ po:PropertyListPathNotEmpty() _ "]" {?
             state.leave_recursion();
             let mut patterns = po.patterns;
-            let mut bnode = TermPattern::from(BlankNode::default());
+            let mut bnode = TermPattern::from(anonymous_blank_node());
             for (p, os) in po.focus {
                 for o in os {
                     add_to_triple_or_path_patterns(bnode.clone(), p.clone(), o, &mut patterns)?;
@@ -2157,7 +2185,7 @@ parser! {
             let mut patterns: Vec<TriplePattern> = Vec::new();
             let mut current_list_node = TermPattern::from(rdf::NIL.into_owned());
             for objWithPatterns in o.into_iter().rev() {
-                let new_blank_node = TermPattern::from(BlankNode::default());
+                let new_blank_node = TermPattern::from(anonymous_blank_node());
                 patterns.push(TriplePattern::new(new_blank_node.clone(), rdf::FIRST.into_owned(), objWithPatterns.focus.clone()));
                 patterns.push(TriplePattern::new(new_blank_node.clone(), rdf::REST.into_owned(), current_list_node));
                 current_list_node = new_blank_node;
@@ -2177,7 +2205,7 @@ parser! {
             let mut patterns: Vec<TripleOrPathPattern> = Vec::new();
             let mut current_list_node = TermPattern::from(rdf::NIL.into_owned());
             for objWithPatterns in o.into_iter().rev() {
-                let new_blank_node = TermPattern::from(BlankNode::default());
+                let new_blank_node = TermPattern::from(anonymous_blank_node());
                 patterns.push(TriplePattern::new(new_blank_node.clone(), rdf::FIRST.into_owned(), objWithPatterns.focus.clone()).into());
                 patterns.push(TriplePattern::new(new_blank_node.clone(), rdf::REST.into_owned(), current_list_node).into());
                 current_list_node = new_blank_node;
@@ -2225,7 +2253,7 @@ parser! {
                 Ok(output)
             } /
             a:AnnotationBlockPath() _ {?
-                let mut output: FocusedTripleOrPathPattern<TermPattern> = FocusedTripleOrPathPattern::new(BlankNode::default());
+                let mut output: FocusedTripleOrPathPattern<TermPattern> = FocusedTripleOrPathPattern::new(anonymous_blank_node());
                 for (p, os) in a.focus {
                     for o in os {
                         add_to_triple_or_path_patterns(output.focus.clone(), p.clone(), o, &mut output.patterns)?;
@@ -2259,7 +2287,7 @@ parser! {
                 Ok(output)
             } /
             a:AnnotationBlock() _ {?
-                let mut output: FocusedTriplePattern<TermPattern> = FocusedTriplePattern::new(BlankNode::default());
+                let mut output: FocusedTriplePattern<TermPattern> = FocusedTriplePattern::new(anonymous_blank_node());
                 for (p, os) in a.focus {
                     for o in os {
                         add_to_triple_patterns(output.focus.clone(), p.clone(), o, &mut output.patterns)?;
@@ -2287,7 +2315,7 @@ parser! {
             state.leave_recursion();
             #[cfg(feature = "sparql-12")]
             {
-                let r = r.unwrap_or_else(|| BlankNode::default().into());
+                let r = r.unwrap_or_else(|| anonymous_blank_node().into());
                 let mut output = FocusedTriplePattern::new(r.clone());
                 output.patterns.push(TriplePattern {
                         subject: r,
@@ -2743,7 +2771,7 @@ parser! {
                 state.currently_used_bnodes.insert(node.clone());
                 Ok(node)
             }
-        } / ANON() { BlankNode::default() }
+        } / ANON() { anonymous_blank_node() }
 
         rule IRIREF() -> Iri<String> = "<" i:$((!['>'] [_])*) ">" {?
             state.parse_iri(unescape_iriref(i)?).map_err(|_| "IRI parsing failed")

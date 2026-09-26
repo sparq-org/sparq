@@ -78,6 +78,9 @@ debug = 0
             metadata = json.loads(subprocess.check_output(
                 ["cargo", "metadata", "--format-version", "1", "--locked"] + options,
                 env=env, timeout=600))
+            verify.selected_vendor_manifests(metadata, {
+                "risc0-zkvm": "3.0.6", "risc0-zkos-v1compat": "2.2.3",
+            })
             active = {n["id"] for n in metadata["resolve"]["nodes"]}
             names = {p["name"] for p in metadata["packages"] if p["id"] in active}
             assert ("rrs-lib" in names) == ("sdk-prove" in features), features

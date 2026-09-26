@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- [GPT-6] `FROM` graph merges standardize source blank nodes apart, including a
+  single `FROM`. A blank node in that merged default graph no longer aliases its
+  source node accessed with `GRAPH`, even when `FROM NAMED` names the same graph.
+  Protocol dataset overrides and LWS union-default expansion use this behavior;
+  blank-node labels in results may change.
+- [GPT-6] `sparq_engine::QueryBudget` adds temporal/numeric capacity controls and
+  an optional EBV dialect selector. Exhaustive struct literals must supply the
+  new fields or use `..Default::default()`; defaults retain ordinary native
+  behavior. Additive detailed evaluation APIs distinguish row/byte capacity,
+  numeric/temporal capacity, deadline, cancellation and execution failure.
+- [GPT-6] Query wrappers retain `VERSION` announcements through algebra rewrites.
+  Unknown or incompatible labels reject during query preparation; proof profiles
+  explicitly require REC 2013 semantics, and UPDATE remains REC-only.
+
 ## [0.1.1] - 2026-08-31
 
 First release: an experimental, from-scratch RDF triplestore and SPARQL engine in Rust

@@ -4,13 +4,70 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 
+import corpus
 from corpus import digest, encoded, exhaustive, finite_proof_universe, import_regressions, oracle, plan, sampled, select, tiny_case
 from run import check_outcome, equal_result, execute_child, validate_plan
 from minimize import minimize
 
+OVERRIDDEN = ("date-end-of-year", "date-end-of-leap-month", "date-end-before-leap-day")
+
 
 class CorpusTests(unittest.TestCase):
+    def test_typed_capacity_rejects_deadline_execution_and_forged_cause(self):
+        root = Path(__file__).resolve().parents[2]
+        case = next(c for c in import_regressions(
+            root / "crates/sparq-engine/tests/fixtures/builtin_edges.json", ["v"])
+            if c["id"] == "integer-cast-outside-range")
+        job = plan([case], ["exact_v3"], "native")["jobs"][0]
+        classes = json.loads((Path(__file__).with_name("rejections.json")).read_text())
+        outcome = {"schema":"sparq.proof-binding-outcome.v1", "job_id":job["id"],
+                   "case_sha256":job["case_sha256"], "backend":"exact_v3", "tier":"native",
+                   "observed":"rejected", "stage":"native", "proof_count":0,
+                   "verified_count":0, "artifacts":[], "controls":[]}
+        with tempfile.TemporaryDirectory() as directory:
+            for cause in ("budget_rows", "budget_bytes", "numeric_representation", "temporal_year"):
+                actual = classes["typed_causes"][cause] | {"cause":cause}
+                if cause == "numeric_representation":
+                    check_outcome(job, outcome | {"error_class":"capacity", "rejection":actual}, Path(directory))
+                else:
+                    with self.assertRaisesRegex(ValueError, "cause"):
+                        check_outcome(job, outcome | {"error_class":"capacity", "rejection":actual}, Path(directory))
+            for cause in ("budget_deadline", "budget_cancelled", "execution"):
+                actual = classes["typed_causes"][cause] | {"cause":cause}
+                with self.assertRaises(ValueError):
+                    check_outcome(job, outcome | {"error_class":actual["category"], "rejection":actual}, Path(directory))
+                with self.assertRaises(ValueError):
+                    check_outcome(job, outcome | {"error_class":"capacity", "rejection":actual | {"category":"capacity"}}, Path(directory))
+            with self.assertRaises(ValueError):
+                check_outcome(job, outcome | {"error_class":"capacity", "rejection":{
+                    "category":"capacity", "phase":"evaluation", "diagnostic":"typed:numeric_representation"}}, Path(directory))
+
+    def test_v3_promotions_preserve_originals_and_exact_graphs(self):
+        root = Path(__file__).resolve().parents[2]
+        originals = import_regressions(root / "zk/sparql-evaluator/fixtures/conformance/cases.json")
+        cases = [c for c in originals if "exact_v3" in c.get("backend_expectations", {})]
+        self.assertEqual(len(cases), 8)
+        manifest = plan(cases, ["exact_v1", "exact_v2", "exact_v3"], "native")
+        self.assertEqual(len(manifest["jobs"]), 48)
+        self.assertEqual(manifest["classifications"], [])
+        self.assertEqual(sum(j["expected_accept"] for j in manifest["jobs"]), 22)
+        for job in manifest["jobs"]:
+            if job["backend"] == "exact_v3":
+                self.assertTrue(job["expected_accept"])
+                self.assertNotIn("expected_rejection", job)
+            if job["backend"] == "exact_v1":
+                self.assertFalse(job["expected_accept"])
+        by_id = {c["id"]:c for c in cases}
+        construct = by_id["reject-construct"]["backend_expectations"]["exact_v3"]["expected"]
+        describe = by_id["reject-describe"]["backend_expectations"]["exact_v3"]["expected"]
+        self.assertEqual(len(construct["Graph"]["ntriples"].splitlines()), 13)
+        self.assertEqual(len(describe["Graph"]["ntriples"].splitlines()), 6)
+        self.assertTrue(equal_result(construct, construct))
+        with self.assertRaises(ValueError):
+            equal_result(construct, describe)
+
     def test_replay_rejects_changed_query_or_denominator(self):
         multiple = plan([tiny_case(6, "join")], ["noir_unsigned", "noir_signed"], "real")
         validate_plan(json.loads(encoded(multiple)))
@@ -97,6 +154,77 @@ class CorpusTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "projection"):
             import_regressions(source)
 
+    def test_reviewed_projection_overrides_keep_originals_and_denominator(self):
+        # [OPUS-5.5] Aliases come from the reviewed registry, not evaluator output.
+        source = Path(__file__).resolve().parents[2] / "crates/sparq-engine/tests/fixtures/builtin_edges.json"
+        original = json.loads(source.read_text())["cases"]
+        imported = import_regressions(source, ["v"])
+        self.assertEqual(len(imported), 169)
+        self.assertEqual(sum(c["rejection"] for c in imported), 2)
+        self.assertEqual([c["original_fixture"] for c in imported], original)
+        self.assertEqual([c["query"] for c in imported], [c["query"] for c in original])
+        by_id = {c["id"]:c for c in imported}
+        for name in OVERRIDDEN:
+            case, fixture = by_id[name], next(c for c in original if c["id"] == name)
+            self.assertEqual(case["expected"], select(["y", "m", "day", "h"], fixture["expected_rows"]))
+            projection = case["oracle"]["projection"]
+            self.assertEqual(projection["kind"], "reviewed_projection_override")
+            self.assertEqual(projection["original_fixture_sha256"], digest(fixture))
+            self.assertEqual(projection["source_sha256"], case["oracle"]["source_sha256"])
+        for case in imported:
+            if case["id"] not in OVERRIDDEN and not case["rejection"] and "expected_rows" in case["original_fixture"]:
+                self.assertEqual(case["oracle"]["projection"], {"kind":"caller_variables", "variables":["v"]})
+                self.assertEqual(case["expected"]["Select"]["variables"], ["v"])
+            if case["rejection"]:
+                self.assertNotIn("projection", case["oracle"])
+
+    def test_projection_width_guard_without_matching_override(self):
+        source = Path(__file__).resolve().parents[2] / "crates/sparq-engine/tests/fixtures/builtin_edges.json"
+        fixture = next(c for c in json.loads(source.read_text())["cases"] if c["id"] == "date-end-of-year")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "builtin_edges.json"
+            # Same ID and bytes in an unrelated file never adopt the override.
+            path.write_text(json.dumps({"cases":[fixture]}))
+            with self.assertRaisesRegex(ValueError, "projection width"):
+                import_regressions(path, ["v"])
+            case = import_regressions(path, ["y", "m", "day", "h"])[0]
+            self.assertEqual(case["oracle"]["projection"]["kind"], "caller_variables")
+            for variables in (["y", "y", "day", "h"], ["y", "", "day", "h"], ["?y", "m", "day", "h"]):
+                with self.subTest(variables=variables), self.assertRaisesRegex(ValueError, "variables"):
+                    import_regressions(path, variables)
+            for rows in ([["a", "b"]], [{"s":"a"}], {"s":"a"}):
+                golden = {"id":"full", "query":"SELECT ?s {}", "expected":{"result":select(["s"], rows)}}
+                path.write_text(json.dumps({"cases":[golden]}))
+                with self.subTest(rows=rows), self.assertRaisesRegex(ValueError, "row"):
+                    import_regressions(path)
+            for variables in (["s", "s"], [1]):
+                golden = {"id":"full", "query":"SELECT ?s {}", "expected":{"result":select(variables, [])}}
+                path.write_text(json.dumps({"cases":[golden]}))
+                with self.subTest(variables=variables), self.assertRaisesRegex(ValueError, "variables"):
+                    import_regressions(path)
+
+    def test_projection_registry_is_fail_closed(self):
+        source = Path(__file__).resolve().parents[2] / "crates/sparq-engine/tests/fixtures/builtin_edges.json"
+        registry = json.loads(corpus.PROJECTIONS.read_text())
+        entry = registry["overrides"][0]
+        mutations = {
+            "missing override": (registry | {"overrides":registry["overrides"][1:]}, "projection width"),
+            "stale source": (registry | {"overrides":[entry | {"source_sha256":"0" * 64}]}, "stale"),
+            "stale fixture": (registry | {"overrides":[entry | {"original_fixture":entry["original_fixture"] | {"query":"ASK {}"}}]}, "stale"),
+            "unknown id": (registry | {"overrides":[entry | {"id":"absent", "original_fixture":entry["original_fixture"] | {"id":"absent"}}]}, "unknown"),
+            "duplicate": (registry | {"overrides":[*registry["overrides"], entry]}, "duplicate"),
+            "unknown key": (registry | {"overrides":[entry | {"inferred":True}]}, "unknown projection override"),
+            "bad variables": (registry | {"overrides":[entry | {"variables":["y", "y", "day", "h"]}]}, "invalid"),
+            "unknown schema": (registry | {"schema":"sparq.projection-expectations.v0"}, "schema"),
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "projection-expectations.json"
+            for name, (mutated, message) in mutations.items():
+                path.write_text(json.dumps(mutated))
+                with self.subTest(name), mock.patch.object(corpus, "PROJECTIONS", path), \
+                        self.assertRaisesRegex(ValueError, message):
+                    import_regressions(source, ["v"])
+
     def test_versioned_dataset_positives_retain_original_v1_rejections(self):
         source = Path(__file__).resolve().parents[2] / "zk/sparql-evaluator/fixtures/conformance/cases.json"
         originals = {c["id"]:c for c in json.loads(source.read_text())["cases"]}
@@ -151,7 +279,7 @@ class CorpusTests(unittest.TestCase):
         imported = import_regressions(root / "crates/sparq-engine/tests/fixtures/builtin_edges.json", ["v"])
         case = next(c for c in imported if c["id"] == "integer-cast-outside-range")
         job = plan([case], ["exact_v1"], "native")["jobs"][0]
-        self.assertEqual(job["expected_rejection"], {"category":"capacity"})
+        self.assertEqual(job["expected_rejection"], {"category":"capacity", "phase":"evaluation", "cause":"numeric_representation"})
         outcome = {"schema":"sparq.proof-binding-outcome.v1", "job_id":job["id"],
                    "case_sha256":job["case_sha256"], "backend":"exact_v1", "tier":"native",
                    "observed":"rejected", "stage":"native", "proof_count":0,
@@ -171,6 +299,9 @@ class CorpusTests(unittest.TestCase):
                 with self.subTest(diagnostic=diagnostic), self.assertRaises(ValueError):
                     check_outcome(job, outcome, path)
             outcome.update(error_class="capacity", rejection={"category":"capacity","phase":"evaluation","diagnostic":"result row capacity"})
+            with self.assertRaises(ValueError):
+                check_outcome(job, outcome, path)
+            outcome["rejection"] = {"category":"capacity", "phase":"evaluation", "cause":"numeric_representation", "diagnostic":"typed:numeric_representation"}
             check_outcome(job, outcome, path)
             original = import_regressions(root / "zk/sparql-evaluator/fixtures/conformance/cases.json")
             case = next(c for c in original if c["id"] == "reject-named-graph")

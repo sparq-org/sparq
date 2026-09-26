@@ -69,7 +69,7 @@ mod numeric_capacity;
 // suffices; the rayon-parallel branches use a captured `Limits` snapshot to cap
 // their own work and the next on-thread check converts that into the error.
 pub(crate) mod budget {
-    use crate::QueryBudget;
+    use crate::{BudgetExceeded, EvaluationCapacity, QueryBudget, QueryFailure};
     use sparq_core::dict::Id;
     use std::cell::Cell;
     use std::ptr::NonNull;
@@ -129,6 +129,7 @@ pub(crate) mod budget {
         extra_bytes: usize,
         temporal_year_range: Option<(i64, i64)>,
         strict_numeric_capacity: bool,
+        ebv_semantics: crate::EbvSemantics,
         cancel: Option<CancelPtr>,
     }
 
@@ -142,6 +143,7 @@ pub(crate) mod budget {
         extra_bytes: 0,
         temporal_year_range: None,
         strict_numeric_capacity: false,
+        ebv_semantics: crate::EbvSemantics::Rec2013,
         cancel: None,
     };
 
@@ -156,30 +158,30 @@ pub(crate) mod budget {
         /// WHY the limits are hit at `rows`, or `None` when they are not — the pure (no
         /// thread-local) counterpart of [`exhausted`]'s reason, for rayon closures where
         /// the installing thread's sticky flag is out of reach. The reasons are the SAME
-        /// strings [`exhausted`] records, so a worker can raise EXACTLY the error
+        /// typed causes [`exhausted`] records, so a worker can raise EXACTLY the error
         /// [`check`] would rather than inventing one (or guessing a result). [SONNET-4.6]
         /// (sq-qk6ac)
         #[cfg_attr(not(feature = "parallel"), allow(dead_code))]
         #[inline]
-        pub(in crate::exec) fn why(&self, rows: usize) -> Option<&'static str> {
+        pub(in crate::exec) fn why(&self, rows: usize) -> Option<BudgetExceeded> {
             if !self.on {
                 return None;
             }
             if rows > self.max_rows {
-                return Some("max-rows");
+                return Some(BudgetExceeded::Rows);
             }
             if self.bytes(rows) > self.max_bytes {
-                return Some("max-bytes");
+                return Some(BudgetExceeded::Bytes);
             }
             #[cfg(not(target_arch = "wasm32"))]
             if self.deadline.is_some_and(|d| std::time::Instant::now() >= d) {
-                return Some("timeout");
+                return Some(BudgetExceeded::Deadline);
             }
             if let Some(cancel) = self.cancel {
                 // SAFETY: `CancelPtr`'s nested-frame invariant keeps the owning
                 // QueryBudget alive until this scoped snapshot load finishes.
                 if unsafe { cancel.0.as_ref() }.load(Ordering::Relaxed) {
-                    return Some("cancelled");
+                    return Some(BudgetExceeded::Cancelled);
                 }
             }
             None
@@ -200,16 +202,16 @@ pub(crate) mod budget {
 
     thread_local! {
         static ACTIVE: Cell<Limits> = const { Cell::new(OFF) };
-        static EXCEEDED: Cell<Option<&'static str>> = const { Cell::new(None) };
+        static EXCEEDED: Cell<Option<BudgetExceeded>> = const { Cell::new(None) };
         // [GPT-6] Semantic capacity cannot be refunded by a SERVICE byte rollback.
-        static CAPACITY_EXCEEDED: Cell<Option<&'static str>> = const { Cell::new(None) };
+        static CAPACITY_EXCEEDED: Cell<Option<EvaluationCapacity>> = const { Cell::new(None) };
     }
 
     // [GPT-6 Astra] Private: callers cannot forget or drop a frame out of order.
     struct Guard<'a> {
         previous: Limits,
-        exceeded: Option<&'static str>,
-        capacity_exceeded: Option<&'static str>,
+        exceeded: Option<BudgetExceeded>,
+        capacity_exceeded: Option<EvaluationCapacity>,
         _budget: std::marker::PhantomData<&'a QueryBudget>,
         _not_send: std::marker::PhantomData<std::rc::Rc<()>>,
     }
@@ -246,6 +248,7 @@ pub(crate) mod budget {
                 extra_bytes: 0,
                 temporal_year_range: b.temporal_year_range,
                 strict_numeric_capacity: b.strict_numeric_capacity,
+                ebv_semantics: b.ebv_semantics.unwrap_or_default(),
                 cancel,
             })
         });
@@ -258,6 +261,22 @@ pub(crate) mod budget {
             _budget: std::marker::PhantomData,
             _not_send: std::marker::PhantomData,
         }
+    }
+
+    // [GPT-6] Query entry only. The resolved rule is copied into LocalVocab;
+    // per-row evaluation and Rayon workers never consult this TLS selector.
+    pub(crate) fn with_query_budget<T>(b: &QueryBudget, semantics: crate::EbvSemantics, f: impl FnOnce() -> T) -> T {
+        let _scope = install(b);
+        ACTIVE.with(|a| {
+            let mut limits = a.get();
+            limits.ebv_semantics = semantics;
+            a.set(limits);
+        });
+        f()
+    }
+
+    pub(super) fn ebv_semantics() -> crate::EbvSemantics {
+        ACTIVE.with(|a| a.get().ebv_semantics)
     }
 
     /// [GPT-6 Astra] Runs a child budget, restoring its parent on return or unwind.
@@ -318,7 +337,7 @@ pub(crate) mod budget {
             if a.extra_bytes > a.max_bytes {
                 EXCEEDED.with(|e| {
                     if e.get().is_none() {
-                        e.set(Some("max-bytes"));
+                        e.set(Some(BudgetExceeded::Bytes));
                     }
                 });
             }
@@ -407,7 +426,7 @@ pub(crate) mod budget {
     #[derive(Clone, Copy)]
     pub(crate) struct ByteSavepoint {
         extra_bytes: usize,
-        exceeded: Option<&'static str>,
+        exceeded: Option<BudgetExceeded>,
     }
 
     /// Capture the current byte accumulator + exhaustion flag. [OPUS-4.8] (sq-my8wd.4)
@@ -454,16 +473,16 @@ pub(crate) mod budget {
             return true;
         }
         if rows > a.max_rows {
-            EXCEEDED.with(|e| e.set(Some("max-rows")));
+            EXCEEDED.with(|e| e.set(Some(BudgetExceeded::Rows)));
             return true;
         }
         if a.bytes(rows) > a.max_bytes {
-            EXCEEDED.with(|e| e.set(Some("max-bytes")));
+            EXCEEDED.with(|e| e.set(Some(BudgetExceeded::Bytes)));
             return true;
         }
         #[cfg(not(target_arch = "wasm32"))]
         if a.deadline.is_some_and(|d| std::time::Instant::now() >= d) {
-            EXCEEDED.with(|e| e.set(Some("timeout")));
+            EXCEEDED.with(|e| e.set(Some(BudgetExceeded::Deadline)));
             return true;
         }
         if let Some(cancel) = a.cancel {
@@ -473,7 +492,7 @@ pub(crate) mod budget {
             // it never publishes or guards a shared query buffer. If that changes,
             // the load/store pair must become Acquire/Release.
             if unsafe { cancel.0.as_ref() }.load(Ordering::Relaxed) {
-                EXCEEDED.with(|e| e.set(Some("cancelled")));
+                EXCEEDED.with(|e| e.set(Some(BudgetExceeded::Cancelled)));
                 return true;
             }
         }
@@ -487,14 +506,77 @@ pub(crate) mod budget {
             return Err(format!("query evaluation capacity exceeded ({reason})"));
         }
         if exhausted(rows) {
-            let why = EXCEEDED.with(|e| e.get()).unwrap_or("timeout");
+            let why = EXCEEDED.with(|e| e.get()).unwrap_or(BudgetExceeded::Deadline);
             return Err(format!("query budget exceeded ({why})"));
         }
         Ok(())
     }
 
+    // [GPT-6] Read before Guard restores the parent frame. Only actual emitters
+    // set these enums; arbitrary callback/evaluation error strings cannot do so.
+    pub(crate) fn failure() -> Option<QueryFailure> {
+        CAPACITY_EXCEEDED.with(Cell::get).map(QueryFailure::Capacity)
+            .or_else(|| EXCEEDED.with(Cell::get).map(QueryFailure::Budget))
+    }
+
+    #[cfg(feature = "parallel")]
+    pub(in crate::exec) fn record_worker_failure(cause: BudgetExceeded) {
+        EXCEEDED.with(|slot| {
+            if slot.get().is_none() { slot.set(Some(cause)); }
+        });
+    }
+
+    #[cfg(test)]
+    mod typed_failure_tests {
+        use super::*;
+
+        #[test]
+        fn nested_failure_and_spoofed_diagnostic_do_not_escape_their_scope() {
+            with_budget(&QueryBudget::unlimited(), || {
+                assert_eq!(failure(), None);
+                let child = with_budget(&QueryBudget::unlimited(), || {
+                    let _ = fail_capacity(EvaluationCapacity::TemporalYear);
+                    failure().unwrap()
+                });
+                assert_eq!(child, QueryFailure::Capacity(EvaluationCapacity::TemporalYear));
+                assert_eq!(failure(), None);
+                let forged = "query evaluation capacity exceeded (numeric-representation)".to_owned();
+                assert_eq!(failure().unwrap_or(QueryFailure::Evaluation(forged.clone())),
+                           QueryFailure::Evaluation(forged));
+                let _ = fail_capacity(EvaluationCapacity::NumericRepresentation);
+                with_budget(&QueryBudget::unlimited(), || assert_eq!(failure(), None));
+                assert_eq!(failure(), Some(QueryFailure::Capacity(EvaluationCapacity::NumericRepresentation)));
+            });
+            assert_eq!(failure(), None);
+            let _ = std::panic::catch_unwind(|| with_budget(&QueryBudget::unlimited(), || {
+                let _ = fail_capacity(EvaluationCapacity::TemporalYear);
+                panic!("controlled unwind");
+            }));
+            assert_eq!(failure(), None);
+        }
+
+        #[cfg(feature = "parallel")]
+        #[test]
+        fn worker_cause_handback_is_typed_and_query_local() {
+            let flag = std::sync::Arc::new(AtomicBool::new(true));
+            with_budget(&QueryBudget::cancelled_by(flag), || {
+                let snapshot = snapshot();
+                let cause = std::thread::scope(|scope| {
+                    scope.spawn(move || {
+                        assert_eq!(failure(), None);
+                        snapshot.why(0).unwrap()
+                    }).join().unwrap()
+                });
+                assert_eq!(failure(), None);
+                record_worker_failure(cause);
+                assert_eq!(failure(), Some(QueryFailure::Budget(BudgetExceeded::Cancelled)));
+            });
+            assert_eq!(failure(), None);
+        }
+    }
+
     /// Marks an evaluation-capacity failure independently of expression errors.
-    pub(in crate::exec) fn fail_capacity(reason: &'static str) -> Result<(), String> {
+    pub(in crate::exec) fn fail_capacity(reason: EvaluationCapacity) -> Result<(), String> {
         CAPACITY_EXCEEDED.with(|e| {
             if e.get().is_none() { e.set(Some(reason)); }
         });
@@ -504,7 +586,7 @@ pub(crate) mod budget {
     pub(in crate::exec) fn check_temporal(value: &str, datatype: &str) -> Result<(), String> {
         if let Some((min, max)) = ACTIVE.with(|a| a.get().temporal_year_range) {
             if !sparq_core::temporal::year_within_capacity(value, datatype, min, max) {
-                return fail_capacity("temporal-year");
+                return fail_capacity(EvaluationCapacity::TemporalYear);
             }
         }
         Ok(())
@@ -567,7 +649,7 @@ pub(crate) mod budget {
         fn capacity_failure_is_sticky_and_nested_scopes_restore_it() {
             let parent = QueryBudget { temporal_year_range: Some((1, 10)), ..QueryBudget::unlimited() };
             with_budget(&parent, || {
-                assert!(fail_capacity("temporal-year").is_err());
+                assert!(fail_capacity(EvaluationCapacity::TemporalYear).is_err());
                 with_budget(&QueryBudget::unlimited(), || assert!(check(0).is_ok()));
                 assert_eq!(check(0).unwrap_err(), "query evaluation capacity exceeded (temporal-year)");
                 assert!(exhausted(0));
@@ -580,7 +662,7 @@ pub(crate) mod budget {
         fn service_byte_rollback_cannot_refund_evaluation_capacity() {
             with_budget(&QueryBudget::unlimited(), || {
                 let checkpoint = byte_savepoint();
-                assert!(fail_capacity("temporal-year").is_err());
+                assert!(fail_capacity(EvaluationCapacity::TemporalYear).is_err());
                 restore_bytes(checkpoint);
                 assert!(check(0).unwrap_err().contains("evaluation capacity exceeded"));
             });
@@ -596,7 +678,7 @@ pub(crate) mod budget {
             assert_eq!(got.cancel.map(|p| p.0), want.cancel.map(|p| p.0));
             #[cfg(not(target_arch = "wasm32"))]
             assert_eq!(got.deadline, want.deadline);
-            assert_eq!(EXCEEDED.with(Cell::get), sticky);
+            assert_eq!(EXCEEDED.with(Cell::get).map(BudgetExceeded::label), sticky);
         }
 
         #[test]
@@ -762,8 +844,8 @@ pub(crate) mod budget {
                     assert_ne!(a.0, owner);
                     assert_ne!(b.0, owner);
                     assert_ne!(a.0, b.0);
-                    assert_eq!(a.1, Some("cancelled"));
-                    assert_eq!(b.1, Some("cancelled"));
+                    assert_eq!(a.1, Some(BudgetExceeded::Cancelled));
+                    assert_eq!(b.1, Some(BudgetExceeded::Cancelled));
                     assert_eq!(a.2, Ok(()));
                     assert_eq!(b.2, Ok(()));
                 });
@@ -861,7 +943,7 @@ pub(crate) mod budget {
         fn assert_reason(budget: &QueryBudget, rows: usize, want: &'static str) {
             with_budget(budget, || {
                 let snap = snapshot();
-                assert_eq!(snap.why(rows), Some(want), "wrong snapshot reason for {}", want);
+                assert_eq!(snap.why(rows).map(BudgetExceeded::label), Some(want), "wrong snapshot reason for {}", want);
                 assert!(snap.hit(rows), "hit must agree with why for {}", want);
                 assert_eq!(
                     check(rows),
@@ -915,7 +997,7 @@ pub(crate) mod budget {
             with_budget(&budget, || {
                 let snap = snapshot();
                 assert_eq!(snap.why(4), None, "a row count AT the cap is still admitted");
-                assert_eq!(snap.why(5), Some("max-rows"), "one past the cap trips");
+                assert_eq!(snap.why(5), Some(BudgetExceeded::Rows), "one past the cap trips");
             })
         }
 
@@ -935,7 +1017,7 @@ pub(crate) mod budget {
                 assert_eq!(worker_poll, Ok(()), "the thread-local budget is invisible to a worker");
                 assert_eq!(
                     worker_reason,
-                    Some("cancelled"),
+                    Some(BudgetExceeded::Cancelled),
                     "the captured snapshot must carry the cancellation across threads"
                 );
                 assert_eq!(check(0), Err("query budget exceeded (cancelled)".to_owned()));
@@ -971,7 +1053,7 @@ pub(crate) mod budget {
                     check(0),
                     Err("query budget exceeded (cancelled)".to_owned())
                 );
-                assert_eq!(EXCEEDED.with(Cell::get), Some("cancelled"));
+                assert_eq!(EXCEEDED.with(Cell::get), Some(BudgetExceeded::Cancelled));
             })
         }
 
@@ -2580,6 +2662,7 @@ fn local_term_bytes(t: &Term) -> usize {
 /// that are not in the graph dictionary.
 #[derive(Default)]
 pub struct LocalVocab<'dataset> {
+    ebv_semantics: crate::EbvSemantics,
     terms: Vec<Term>,
     ids: FxHashMap<Term, Id>,
     /// Parallel to `terms`: the f64 value of each numeric local literal (NaN
@@ -2595,11 +2678,17 @@ pub struct LocalVocab<'dataset> {
     /// Nested GRAPH switches graph dictionaries without losing this borrowed
     /// catalog; it is scoped to this evaluation, with no cloning or global state.
     dataset: Option<&'dataset Graph>,
+    /// [GPT-6] Remove substituted variables before domain-sensitive operators.
+    substitute_exists_domains: bool,
 }
 
 impl<'dataset> LocalVocab<'dataset> {
+    fn for_query() -> Self {
+        Self { ebv_semantics: budget::ebv_semantics(), ..Self::default() }
+    }
+
     fn for_dataset(dataset: &'dataset Graph) -> Self {
-        Self { dataset: Some(dataset), ..Self::default() }
+        Self { dataset: Some(dataset), ..Self::for_query() }
     }
     /// Interns a term, returning a stable id: equal terms get the same id so
     /// DISTINCT, GROUP BY, joins and equality work on computed values.
@@ -2616,7 +2705,7 @@ impl<'dataset> LocalVocab<'dataset> {
             // [FABLE-5] sq-74oy4 / sq-6b1lj: cache the DATATYPE-AWARE f64 (`numeric_cache_f64`)
             // — the SAME acceptance the graph `numeric_value` cache and the lenient `as_num`
             // seam use — so a computed (BIND/aggregate) numeric term joins/compares identically
-            // to a graph term. It TRIMS (XSD `collapse` facet) and rejects a per-datatype-
+            // to a graph term. [GPT-6] It validates raw RDF lexical bytes verbatim and rejects a per-datatype-
             // ill-formed lexical (`"1.5"^^xsd:integer`); either folds to the NaN cache-miss
             // sentinel, deferring `=`/`<`/`>` to the exact evaluator (which type-errors it).
             Term::Literal(l) => numeric_cache_f64(l).unwrap_or(f64::NAN),
@@ -5132,6 +5221,7 @@ fn eval_graph_named_pref(
         #[cfg(feature = "zk")]
         let _zk = crate::zk::graph_scope(gname);
         let mut sub_local = LocalVocab {
+            ebv_semantics: local.ebv_semantics,
             correlation: local.correlation.clone(),
             dataset: local.dataset,
             ..LocalVocab::default()
@@ -5183,7 +5273,7 @@ fn eval_graph_named_pref(
                     #[cfg(feature = "zk")]
                     let _zk = crate::zk::graph_scope(&target);
                     let empty = Graph::load_str("", "ntriples").map_err(|e| e.to_string())?;
-                    let mut el = LocalVocab { dataset: local.dataset, ..LocalVocab::default() };
+                    let mut el = LocalVocab { ebv_semantics: local.ebv_semantics, dataset: local.dataset, ..LocalVocab::default() };
                     let mut b = eval_graph_pattern(&empty, &mut el, inner)?;
                     b.rows.clear();
                     Ok(b)
@@ -5387,7 +5477,24 @@ fn trace_label(p: &GraphPattern) -> String {
     }
 }
 
+#[path = "exists_domain.rs"]
+mod exists_domain;
+
 fn eval_graph_pattern_inner(graph: &Graph, local: &mut LocalVocab, p: &GraphPattern) -> Result<Bindings, String> {
+    let bindings = eval_graph_pattern_unsubstituted(graph, local, p)?;
+    if !local.substitute_exists_domains {
+        return Ok(bindings);
+    }
+    // [GPT-6] Charge the materialized intermediate before capture filtering and
+    // projection reduce it. Tracing then sees the actual substituted output.
+    let previous = budget::set_width(bindings.vars.len());
+    let result = budget::check(bindings.rows.len());
+    budget::restore_width(previous);
+    result?;
+    Ok(exists_domain::restrict(graph, local, bindings))
+}
+
+fn eval_graph_pattern_unsubstituted(graph: &Graph, local: &mut LocalVocab, p: &GraphPattern) -> Result<Bindings, String> {
     budget::check(0)?; // coarse cooperative cancellation: once per operator entry
     if is_conjunctive(p) {
         let mut patterns = Vec::new();
@@ -6575,7 +6682,7 @@ fn extract_sargable<'a>(graph: &Graph, e: &'a Expression) -> Option<(Variable, S
     fn lit_num(e: &Expression) -> Option<f64> {
         match e {
             Expression::Literal(l) if is_numeric_dt(l) => {
-                // [FABLE-5] sq-6b1lj: datatype-aware/trimmed constant (`numeric_cache_f64`).
+                // [FABLE-5] sq-6b1lj: datatype-aware, verbatim-validated constant (`numeric_cache_f64`).
                 // A datatype-ill-formed threshold (`"1.5"^^xsd:integer`) yields `None`, so
                 // `extract_sargable` DECLINES the numeric fast path and the FILTER takes the
                 // exact general comparison — which type-errors the ill-formed constant,
@@ -9953,7 +10060,7 @@ fn left_outer_join(graph: &Graph, local: &mut LocalVocab, left: Bindings, right:
                 None => true,
                 Some(e) => {
                     let tmp = Bindings { vars: out_vars.clone(), rows: vec![], sorted_by: None };
-                    effective_boolean(&eval_expr(graph, local, &tmp, &combined, e)?)
+                    effective_boolean(&eval_expr(graph, local, &tmp, &combined, e)?, local.ebv_semantics)
                 }
             };
             if keep {
@@ -10018,7 +10125,7 @@ fn left_outer_merge(
                     None => true,
                     Some(e) => {
                         let tmp = Bindings { vars: out_vars.clone(), rows: vec![], sorted_by: None };
-                        effective_boolean(&eval_expr(graph, local, &tmp, &combined, e)?)
+                        effective_boolean(&eval_expr(graph, local, &tmp, &combined, e)?, local.ebv_semantics)
                     }
                 };
                 if keep {
@@ -10341,7 +10448,7 @@ fn try_theta_antijoin(
                     // One non-tripping `Instant` read per row under a deadline budget, and
                     // a single `on` test when no budget is installed.
                     if let Some(why) = limits.why(0) {
-                        return Err(format!("query budget exceeded ({})", why));
+                        return Err((Some(why), format!("query budget exceeded ({})", why)));
                     }
                     let _fns = functions::worker_install(&fns);
                     let _vw = view::worker_install(&vw);
@@ -10350,9 +10457,13 @@ fn try_theta_antijoin(
                     let _lsv = local_services::worker_install(&lsv);
                     #[cfg(not(target_arch = "wasm32"))]
                     let _qn = query_now::worker_install(qn);
-                    eliminated(lrow)
+                    eliminated(lrow).map_err(|message| (None, message))
                 })
-                .collect::<Result<Vec<bool>, String>>()?;
+                .collect::<Result<Vec<bool>, (Option<crate::BudgetExceeded>, String)>>()
+                .map_err(|(cause, message)| {
+                    if let Some(cause) = cause { budget::record_worker_failure(cause); }
+                    message
+                })?;
 
             // Serial ordered build + budget truncation: identical to the serial probe
             // loop's `if !matched { push } ; break on budget` — the survivor prefix and
@@ -10559,7 +10670,7 @@ fn antijoin_row_matches(
             .collect();
         let mut ok = true;
         for e in checks {
-            if !effective_boolean(&eval_expr(graph, local, &tmp, &combined, e)?) {
+            if !effective_boolean(&eval_expr(graph, local, &tmp, &combined, e)?, local.ebv_semantics) {
                 ok = false;
                 break;
             }
@@ -12744,7 +12855,7 @@ fn columnar_filter(
             let global_idx = start + local_idx;
             let row = &rows[global_idx];
             let val = eval_expr(graph, local, b, row.as_ref(), expr)?;
-            if effective_boolean(&val) {
+            if effective_boolean(&val, local.ebv_semantics) {
                 delegated_passes.push(local_idx);
             }
         }
@@ -13051,14 +13162,14 @@ fn apply_filter_scalar(graph: &Graph, local: &LocalVocab, b: &mut Bindings, expr
                 #[cfg(not(target_arch = "wasm32"))]
                 let _qn = query_now::worker_install(qn);
                 ROW_SCOPE.set((scope, i));
-                Ok(effective_boolean(&eval_compiled(graph, local, b, row, &compiled)?))
+                Ok(effective_boolean(&eval_compiled(graph, local, b, row, &compiled)?, local.ebv_semantics))
             })
             .collect::<Result<Vec<bool>, String>>()?
     } else {
         let mut keep = Vec::with_capacity(b.rows.len());
         for (i, row) in b.rows.iter().enumerate() {
             ROW_SCOPE.set((scope, i));
-            keep.push(effective_boolean(&eval_compiled(graph, local, b, row, &compiled)?));
+            keep.push(effective_boolean(&eval_compiled(graph, local, b, row, &compiled)?, local.ebv_semantics));
         }
         keep
     };
@@ -13067,7 +13178,7 @@ fn apply_filter_scalar(graph: &Graph, local: &LocalVocab, b: &mut Bindings, expr
         let mut keep = Vec::with_capacity(b.rows.len());
         for (i, row) in b.rows.iter().enumerate() {
             ROW_SCOPE.set((scope, i));
-            keep.push(effective_boolean(&eval_compiled(graph, local, b, row, &compiled)?));
+            keep.push(effective_boolean(&eval_compiled(graph, local, b, row, &compiled)?, local.ebv_semantics));
         }
         keep
     };
@@ -13322,14 +13433,15 @@ fn num_canonical_term(n: Num) -> Value {
     Value::Term(Term::Literal(Literal::new_typed_literal(n.canonical_lexical(), n.datatype())))
 }
 
-fn effective_boolean(v: &Value) -> bool {
-    ebv(v) == Some(true)
+fn effective_boolean(v: &Value, semantics: crate::EbvSemantics) -> bool {
+    ebv(v, semantics) == Some(true)
 }
 
 /// SPARQL effective boolean value, three-valued: `None` is a TYPE ERROR (unbound,
-/// non-literal terms, literals of unknown datatypes, ill-formed boolean / numeric
-/// lexicals) — it matters because `!error` must stay an error, not become true.
-fn ebv(v: &Value) -> Option<bool> {
+/// non-literal terms and unknown datatypes). Invalid numeric/boolean lexicals
+/// instead have false EBV per SPARQL 1.1 §17.2.2, or error under the pinned
+/// 1.2 draft, independently of arithmetic capacity errors.
+fn ebv(v: &Value, semantics: crate::EbvSemantics) -> Option<bool> {
     match v {
         Value::Bool(b) => Some(*b),
         Value::Num(n) => Some(!n.is_zero() && !n.is_nan()),
@@ -13342,16 +13454,21 @@ fn ebv(v: &Value) -> Option<bool> {
             }
             let dt = l.datatype().as_str();
             if dt == xsd::BOOLEAN.as_str() {
-                match l.value() {
-                    "true" | "1" => Some(true),
-                    "false" | "0" => Some(false),
-                    _ => None,
-                }
+                // [GPT-6] Raw RDF booleans have exactly four lexical forms.
+                // Constructor whitespace normalization applies only to string inputs.
+                as_bool_val(v).or_else(|| (semantics == crate::EbvSemantics::Rec2013).then_some(false))
             } else if is_numeric_dt(l) {
-                // [OPUS-4.8] sq-rkzhr: XSD acceptance set (via `parse_xsd_f64`) — a
-                // numeric-typed literal with an ill-formed lexical is a type error (`None`),
-                // matching `as_num` rather than silently swallowing Rust-only spellings.
-                parse_xsd_f64(l.value()).map(|n| n != 0.0 && !n.is_nan())
+                // [GPT-6] EBV needs zero/NaN classification, not finite arithmetic.
+                // Validate datatype facets before inspecting exact decimal digits;
+                // converting them to f64 could underflow a nonzero value to false.
+                if !sparq_core::numeric_literal_valid(l.value(), dt) {
+                    (semantics == crate::EbvSemantics::Rec2013).then_some(false)
+                } else if sparq_core::is_integer_datatype(dt) || dt == xsd::DECIMAL.as_str() {
+                    Some(l.value().bytes().any(|b| matches!(b, b'1'..=b'9')))
+                } else {
+                    // Float/double zero is measured in that datatype's value space.
+                    Num::of_literal(l).map(|n| !n.is_zero() && !n.is_nan())
+                }
             } else if dt == xsd::STRING.as_str() {
                 Some(!l.value().is_empty())
             } else {
@@ -13391,23 +13508,23 @@ fn eval_expr(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], e: &Ex
             // SPARQL 3-valued logic, short-circuiting: false dominates, so once the
             // left is false we return false WITHOUT evaluating the right (which may be
             // an error or an unsupported expression that would otherwise abort).
-            let x = ebv3(&eval_expr(graph, local, b, row, a)?);
+            let x = ebv3(&eval_expr(graph, local, b, row, a)?, local.ebv_semantics);
             if x == Some(false) {
                 return Ok(Value::Bool(false));
             }
-            let y = ebv3(&eval_expr(graph, local, b, row, c)?);
+            let y = ebv3(&eval_expr(graph, local, b, row, c)?, local.ebv_semantics);
             Ok(and3(x, y))
         }
         Or(a, c) => {
             // SPARQL 3-valued logic, short-circuiting: true dominates.
-            let x = ebv3(&eval_expr(graph, local, b, row, a)?);
+            let x = ebv3(&eval_expr(graph, local, b, row, a)?, local.ebv_semantics);
             if x == Some(true) {
                 return Ok(Value::Bool(true));
             }
-            let y = ebv3(&eval_expr(graph, local, b, row, c)?);
+            let y = ebv3(&eval_expr(graph, local, b, row, c)?, local.ebv_semantics);
             Ok(or3(x, y))
         }
-        Not(a) => Ok(match ebv3(&eval_expr(graph, local, b, row, a)?) {
+        Not(a) => Ok(match ebv3(&eval_expr(graph, local, b, row, a)?, local.ebv_semantics) {
             Some(v) => Value::Bool(!v),
             None => Value::Error, // !error = error
         }),
@@ -13436,7 +13553,7 @@ fn eval_expr(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], e: &Ex
         If(cond, t, f) => {
             // A type error in the condition propagates (it does NOT silently select
             // the else branch).
-            match ebv3(&eval_expr(graph, local, b, row, cond)?) {
+            match ebv3(&eval_expr(graph, local, b, row, cond)?, local.ebv_semantics) {
                 Some(true) => eval_expr(graph, local, b, row, t),
                 Some(false) => eval_expr(graph, local, b, row, f),
                 None => Ok(Value::Error),
@@ -13475,12 +13592,12 @@ fn eval_expr(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], e: &Ex
     }
 }
 
-/// Correlated `EXISTS { inner }` for one outer solution row: evaluate `inner` and
-/// test whether any of its solutions is join-compatible with the row on the
-/// variables they share (same term, or unbound on the inner side). Working at the
-/// id/term level — rather than substituting the row's terms into the pattern AST —
-/// keeps blank-node-valued bindings expressible (spargebra has no ground blank-node
-/// term pattern).
+/// Correlated `EXISTS { inner }` for one outer solution row. The bounded
+/// BGP/Join/UNION/FILTER/MINUS branch constrains captured IRI/literal values and
+/// removes their columns before MINUS observes child domains, per SPARQL 1.1.
+/// Other shapes retain the native practical compatibility evaluation, including
+/// the unresolved blank-node and variable-only-position substitution cases.
+/// These fallbacks are not a claim of complete published-2013 correlation support.
 ///
 /// The inner pattern is evaluated against `graph`, which inside `GRAPH <g> { … }`
 /// is the active named graph — so an EXISTS nested in a GRAPH pattern sees the same
@@ -13530,6 +13647,7 @@ fn eval_exists_inner(
     // including variables used only in FILTER expressions. A separate local
     // vocabulary preserves actual term identity across graph/local ID spaces.
     let mut inner_local = LocalVocab {
+        ebv_semantics: local.ebv_semantics,
         correlation: local.correlation.clone(),
         dataset: local.dataset,
         ..LocalVocab::default()
@@ -13541,6 +13659,15 @@ fn eval_exists_inner(
                 .entry(variable.clone())
                 .or_insert(term);
         }
+    }
+
+    // [GPT-6] MINUS observes solution domains before final compatibility. For
+    // the admitted BGP/Join/UNION/FILTER/MINUS shape, restrict and remove each
+    // bound IRI/literal column before its parent operator can inspect domains.
+    if exists_domain::required(inner, &inner_local.correlation) {
+        inner_local.substitute_exists_domains = true;
+        let result = eval_graph_pattern(graph, &mut inner_local, inner)?;
+        return Ok(!result.rows.is_empty());
     }
 
     // Only shared solution columns require the compatibility scan below.
@@ -13615,7 +13742,7 @@ fn eval_numeric(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], e: 
                 graph.numeric_value(id)
             }
         }
-        // [FABLE-5] sq-6b1lj: the CONSTANT operand is datatype-aware/trimmed too
+        // [FABLE-5] sq-6b1lj: the CONSTANT operand is datatype-aware and validated verbatim too
         // (`numeric_cache_f64`), so a datatype-ill-formed literal constant (`"1.5"^^xsd:integer`)
         // is a type error on this fast comparison path exactly as the graph-term side is.
         Literal(l) => numeric_cache_f64(l),
@@ -13747,7 +13874,7 @@ fn eval_compiled_numeric(graph: &Graph, local: &LocalVocab, row: &[Id], e: &Comp
             let id = row[c];
             if id == NO_ID { None } else if is_local(id) { local.numeric(id) } else { graph.numeric_value(id) }
         }
-        // [FABLE-5] sq-6b1lj: datatype-aware/trimmed constant, matching `eval_numeric`.
+        // [FABLE-5] sq-6b1lj: datatype-aware, verbatim-validated constant, matching `eval_numeric`.
         Literal(l) => numeric_cache_f64(l),
         Add(a, d) => Some(eval_compiled_numeric(graph, local, row, a)? + eval_compiled_numeric(graph, local, row, d)?),
         Subtract(a, d) => {
@@ -14196,8 +14323,8 @@ fn as_bool_val(v: &Value) -> Option<bool> {
 
 /// Three-valued effective boolean: `None` is a SPARQL error (type error or unbound),
 /// used by the logical operators to implement SPARQL's 3-valued `&&` / `||` / `!`.
-fn ebv3(v: &Value) -> Option<bool> {
-    ebv(v)
+fn ebv3(v: &Value, semantics: crate::EbvSemantics) -> Option<bool> {
+    ebv(v, semantics)
 }
 
 fn and3(x: Option<bool>, y: Option<bool>) -> Value {
@@ -14261,7 +14388,7 @@ fn integer_argument(v: &Value) -> Option<i128> {
                 && sparq_core::numeric_literal_valid(l.value(), l.datatype().as_str()) =>
         {
             numeric_capacity::representable(true,
-                l.value().trim_matches([' ', '\t', '\r', '\n']).parse().ok())
+                l.value().parse().ok())
         }
         _ => None,
     }
@@ -14274,18 +14401,8 @@ fn as_num(v: &Value) -> Option<f64> {
     match v {
         Value::Num(n) => Some(n.f64()),
         Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
-        // [FABLE-5] sq-74oy4 / sq-6b1lj: route the lexical→f64 arm through the DATATYPE-AWARE
-        // `numeric_cache_f64` — the SAME acceptance the graph `numeric_value` cache and
-        // `LocalVocab::intern` use. This keeps the lenient relational `<`/`>` seam in lock-step
-        // with the equality reference `Num::of_literal` on BOTH residuals sq-9781x left open:
-        // (a) whitespace — the value is TRIMMED (XSD `collapse` facet), so a padded
-        // `" 1"^^xsd:integer` is value-1 on `<`/`>` exactly as it is on `=` (was: type-error
-        // on `<`/`>`, cache-miss, but value-1 on `=` via the trimming cache); (b) per-datatype
-        // well-formedness — a lexical ill-formed FOR its datatype (`"1.5"^^xsd:integer`,
-        // `"1E2"^^xsd:decimal`, an i128-overflow decimal) is `None` here, a type error on
-        // `<`/`>` matching `of_literal` (was: compared as f64). The XSD f64 SPELLINGS
-        // (INF/+INF/-INF/NaN yes; Rust-only inf/infinity/nan no) are still enforced by the
-        // underlying `parse_xsd_f64` image.
+        // [GPT-6] Keep scalar comparisons and caches on the same raw
+        // lexical/facet acceptance path; string constructors preprocess separately.
         Value::Term(Term::Literal(l)) => numeric_cache_f64(l),
         _ => None,
     }
@@ -14299,25 +14416,12 @@ fn is_numeric_dt(l: &Literal) -> bool {
         || dt == xsd::FLOAT.as_str()
 }
 
-/// The DATATYPE-AWARE cached/lenient f64 of a numeric literal, matching the graph's
-/// `Graph::numeric_value` cache acceptance (sparq-core `cached_numeric_f64`): `Some` iff the
-/// lexical is well-formed FOR ITS DATATYPE (`Num::of_literal` accepts it), imaged by the
-/// shared `parse_xsd_f64` on the TRIMMED lexical so the value is bit-identical to what the
-/// graph cache and `LocalVocab::intern` store for the same term. `None` (a datatype-ill-formed
-/// lexical like `"1.5"^^xsd:integer`, or a non-numeric) is a SPARQL type error.
-///
-/// [FABLE-5] (sq-74oy4 / sq-6b1lj) This is the single acceptance the lenient relational seam
-/// (`as_num`/`as_f64`), the local-vocab numeric cache (`LocalVocab::intern`), and the graph
-/// cache now all share — closing the pre-fix asymmetry where `as_num`/`intern` parsed
-/// datatype-agnostically (and un-trimmed) while `Num::of_literal` (the equality reference)
-/// did not, so a padded or per-datatype-ill-formed lexical compared numerically on `<`/`>`
-/// yet type-errored on `=`. Acceptance is gated on `Num::of_literal` (the strictest, so the
-/// datatype rules can never drift); the f64 image is `parse_xsd_f64` (every lexical
-/// `of_literal` accepts, `parse_xsd_f64` also accepts, for the same value).
+/// [GPT-6] Returns the raw literal's numeric image within the shared cache lane.
+/// Invalid lexical forms, subtype facets and unsupported representations return None.
 #[inline]
 fn numeric_cache_f64(l: &Literal) -> Option<f64> {
     if is_numeric_dt(l) && Num::of_literal(l).is_some() {
-        parse_xsd_f64(l.value().trim())
+        parse_xsd_f64(l.value())
     } else {
         None
     }
@@ -14858,7 +14962,12 @@ fn eval_function_inner<E: Fn(usize) -> Result<Value, String>>(
             }
             if vals.len() == 1 {
                 if let Value::Term(Term::Literal(literal)) = &vals[0] {
-                    budget::check_temporal(literal.value(), nn.as_str())?;
+                    // [GPT-6] Capacity applies to the constructed lexical after the
+                    // string-cast preprocessing, while raw typed terms stay strict.
+                    let lexical = if literal.datatype() == xsd::STRING && nn.as_str() == xsd::DATE_TIME.as_str() {
+                        literal.value().trim_matches([' ', '\t', '\r', '\n'])
+                    } else { literal.value() };
+                    budget::check_temporal(lexical, nn.as_str())?;
                 }
                 if let Some(out) = eval_cast(nn.as_str(), &vals[0]) {
                     return Ok(out);
@@ -15116,22 +15225,22 @@ fn eval_compiled(
             Ok(Value::Term(Term::Literal(l.clone())))
         },
         And(a, c) => {
-            let x = ebv3(&eval_compiled(graph, local, b, row, a)?);
+            let x = ebv3(&eval_compiled(graph, local, b, row, a)?, local.ebv_semantics);
             if x == Some(false) {
                 return Ok(Value::Bool(false));
             }
-            let y = ebv3(&eval_compiled(graph, local, b, row, c)?);
+            let y = ebv3(&eval_compiled(graph, local, b, row, c)?, local.ebv_semantics);
             Ok(and3(x, y))
         }
         Or(a, c) => {
-            let x = ebv3(&eval_compiled(graph, local, b, row, a)?);
+            let x = ebv3(&eval_compiled(graph, local, b, row, a)?, local.ebv_semantics);
             if x == Some(true) {
                 return Ok(Value::Bool(true));
             }
-            let y = ebv3(&eval_compiled(graph, local, b, row, c)?);
+            let y = ebv3(&eval_compiled(graph, local, b, row, c)?, local.ebv_semantics);
             Ok(or3(x, y))
         }
-        Not(a) => Ok(match ebv3(&eval_compiled(graph, local, b, row, a)?) {
+        Not(a) => Ok(match ebv3(&eval_compiled(graph, local, b, row, a)?, local.ebv_semantics) {
             Some(v) => Value::Bool(!v),
             None => Value::Error,
         }),
@@ -15155,7 +15264,7 @@ fn eval_compiled(
             let v = eval_compiled(graph, local, b, row, a)?;
             Ok(as_numeric(&v).and_then(|n| numeric_capacity::unary(n, Num::neg)).map(Value::Num).unwrap_or(Value::Error))
         }
-        If(cond, t, f) => match ebv3(&eval_compiled(graph, local, b, row, cond)?) {
+        If(cond, t, f) => match ebv3(&eval_compiled(graph, local, b, row, cond)?, local.ebv_semantics) {
             Some(true) => eval_compiled(graph, local, b, row, t),
             Some(false) => eval_compiled(graph, local, b, row, f),
             None => Ok(Value::Error),
@@ -15284,7 +15393,7 @@ fn eval_cast(target: &str, v: &Value) -> Option<Value> {
         return Some(match v {
             Value::Term(Term::Literal(l))
                 if (l.datatype() == xsd::DATE_TIME || l.datatype() == xsd::DATE_TIME_STAMP)
-                    && parse_datetime(l.value()).is_some() =>
+                    && temporal_of_lit(l).is_some() =>
             {
                 typed(l.value().to_string(), xsd::DATE_TIME)
             }
@@ -15592,7 +15701,7 @@ fn datetime_arg_tz(v: &Value) -> Option<String> {
         _ => return None,
     };
     temporal_of_lit(l)?; // Shared datatype validation includes dateTimeStamp's required timezone.
-    let s = l.value().trim_matches([' ', '\t', '\r', '\n']);
+    let s = l.value();
     parse_datetime(s)?; // lexical shape check
     let (_, time) = s.split_once('T')?;
     Some(match time.find(['Z', '+', '-']) {
@@ -15746,7 +15855,7 @@ fn datetime_field(v: &Value, idx: usize) -> Value {
         Value::Term(Term::Literal(l))
             if l.datatype() == xsd::DATE_TIME || l.datatype() == xsd::DATE_TIME_STAMP => {
                 if temporal_of_lit(l).is_none() { return Value::Error; }
-                l.value().trim_matches([' ', '\t', '\r', '\n'])
+                l.value()
             },
         _ => return Value::Error,
     };
@@ -15788,7 +15897,6 @@ fn datetime_field(v: &Value, idx: usize) -> Value {
 fn parse_datetime(s: &str) -> Option<[f64; 6]> {
     // One validation boundary also serves the graph's temporal cache and
     // comparison fast paths. Component extraction below preserves local time.
-    let s = s.trim_matches([' ', '\t', '\r', '\n']);
     Timeline::parse_datetime(s)?;
     let (date, time) = s.split_once('T')?;
     let neg = date.starts_with('-');
@@ -19424,14 +19532,14 @@ mod f64_collapse_order_agreement {
             );
         }
 
-        // [FABLE-5] sq-74oy4 / sq-6b1lj: the alignment now extends to PER-DATATYPE
-        // well-formedness AND whitespace. `as_num` is datatype-aware and trimming, so it
-        // agrees with `as_numeric` (`Num::of_literal`) on integer/decimal lexicals too — a
-        // padded lexical is its trimmed value; a lexical ill-formed FOR its datatype is None.
+        // [GPT-6] Both numeric seams validate raw RDF lexicals verbatim.
+        // Padding and per-datatype malformed forms are ordinary type errors.
         let ints = |s: &str| Value::Term(Term::Literal(Literal::new_typed_literal(s, xsd::INTEGER)));
         let decs = |s: &str| Value::Term(Term::Literal(Literal::new_typed_literal(s, xsd::DECIMAL)));
-        assert_eq!(as_num(&ints(" 1 ")), Some(1.0), "padded integer trims to 1");
-        assert_eq!(as_num(&decs(" 1.5 ")), Some(1.5), "padded decimal trims to 1.5");
+        assert_eq!(as_num(&ints(" 1 ")), None, "raw padded integer is invalid");
+        assert_eq!(as_num(&decs(" 1.5 ")), None, "raw padded decimal is invalid");
+        assert_eq!(as_num(&ints("1")), Some(1.0), "plain integer control");
+        assert_eq!(as_num(&decs("1.5")), Some(1.5), "plain decimal control");
         assert_eq!(as_num(&ints("1.5")), None, "fraction on integer is a type error");
         assert_eq!(as_num(&ints("1E2")), None, "exponent on integer is a type error");
         assert_eq!(as_num(&decs("1E2")), None, "exponent on decimal is a type error");
@@ -19906,90 +20014,91 @@ mod effective_boolean_unit {
     #[test]
     fn ebv_error_is_none() {
         // SPARQL EBV: error → None (a type error in the expression).
-        assert_eq!(ebv(&Value::Error), None, "ebv(Error) must be None");
-        assert!(!effective_boolean(&Value::Error), "effective_boolean(Error) must be false (drop row)");
+        assert_eq!(ebv(&Value::Error, crate::EbvSemantics::Rec2013), None, "ebv(Error) must be None");
+        assert!(!effective_boolean(&Value::Error, crate::EbvSemantics::Rec2013), "effective_boolean(Error) must be false (drop row)");
     }
 
     #[test]
     fn ebv_unbound_is_none() {
-        assert_eq!(ebv(&Value::Unbound), None, "ebv(Unbound) must be None");
-        assert!(!effective_boolean(&Value::Unbound), "effective_boolean(Unbound) must be false (drop row)");
+        assert_eq!(ebv(&Value::Unbound, crate::EbvSemantics::Rec2013), None, "ebv(Unbound) must be None");
+        assert!(!effective_boolean(&Value::Unbound, crate::EbvSemantics::Rec2013), "effective_boolean(Unbound) must be false (drop row)");
     }
 
     #[test]
     fn ebv_bool_true_is_some_true() {
-        assert_eq!(ebv(&Value::Bool(true)), Some(true));
-        assert!(effective_boolean(&Value::Bool(true)));
+        assert_eq!(ebv(&Value::Bool(true), crate::EbvSemantics::Rec2013), Some(true));
+        assert!(effective_boolean(&Value::Bool(true), crate::EbvSemantics::Rec2013));
     }
 
     #[test]
     fn ebv_bool_false_is_some_false() {
-        assert_eq!(ebv(&Value::Bool(false)), Some(false));
-        assert!(!effective_boolean(&Value::Bool(false)));
+        assert_eq!(ebv(&Value::Bool(false), crate::EbvSemantics::Rec2013), Some(false));
+        assert!(!effective_boolean(&Value::Bool(false), crate::EbvSemantics::Rec2013));
     }
 
     #[test]
     fn ebv_nonzero_int_is_true() {
-        assert_eq!(ebv(&Value::Num(Num::Int(1))), Some(true));
-        assert_eq!(ebv(&Value::Num(Num::Int(-1))), Some(true));
+        assert_eq!(ebv(&Value::Num(Num::Int(1)), crate::EbvSemantics::Rec2013), Some(true));
+        assert_eq!(ebv(&Value::Num(Num::Int(-1)), crate::EbvSemantics::Rec2013), Some(true));
     }
 
     #[test]
     fn ebv_zero_int_is_false() {
-        assert_eq!(ebv(&Value::Num(Num::Int(0))), Some(false));
+        assert_eq!(ebv(&Value::Num(Num::Int(0)), crate::EbvSemantics::Rec2013), Some(false));
     }
 
     #[test]
     fn ebv_iri_term_is_none_type_error() {
         use oxrdf::NamedNode;
         let iri = Value::Term(Term::NamedNode(NamedNode::new_unchecked("http://ex/x")));
-        assert_eq!(ebv(&iri), None, "EBV of IRI is a type error → None");
-        assert!(!effective_boolean(&iri), "effective_boolean(IRI) = false (drop row)");
+        assert_eq!(ebv(&iri, crate::EbvSemantics::Rec2013), None, "EBV of IRI is a type error → None");
+        assert!(!effective_boolean(&iri, crate::EbvSemantics::Rec2013), "effective_boolean(IRI) = false (drop row)");
     }
 
     #[test]
     fn ebv_nonempty_string_is_true() {
         let t = Value::Term(Term::Literal(Literal::new_simple_literal("hello")));
-        assert_eq!(ebv(&t), Some(true), "non-empty string literal EBV = true");
+        assert_eq!(ebv(&t, crate::EbvSemantics::Rec2013), Some(true), "non-empty string literal EBV = true");
     }
 
     #[test]
     fn ebv_empty_string_is_false() {
         let t = Value::Term(Term::Literal(Literal::new_simple_literal("")));
-        assert_eq!(ebv(&t), Some(false), "empty string literal EBV = false");
+        assert_eq!(ebv(&t, crate::EbvSemantics::Rec2013), Some(false), "empty string literal EBV = false");
     }
 
     #[test]
     fn ebv_lang_tagged_literal_is_none_type_error() {
         // rdf:langString is NOT xsd:string: its EBV is a type error.
         let t = Value::Term(Term::Literal(Literal::new_language_tagged_literal_unchecked("hello", "en")));
-        assert_eq!(ebv(&t), None, "lang-tagged literal EBV is type error → None");
+        assert_eq!(ebv(&t, crate::EbvSemantics::Rec2013), None, "lang-tagged literal EBV is type error → None");
     }
 
     #[test]
     fn ebv_typed_boolean_true_false() {
         let tt = Value::Term(Term::Literal(Literal::new_typed_literal("true", xsd::BOOLEAN)));
         let ff = Value::Term(Term::Literal(Literal::new_typed_literal("false", xsd::BOOLEAN)));
-        assert_eq!(ebv(&tt), Some(true));
-        assert_eq!(ebv(&ff), Some(false));
+        assert_eq!(ebv(&tt, crate::EbvSemantics::Rec2013), Some(true));
+        assert_eq!(ebv(&ff, crate::EbvSemantics::Rec2013), Some(false));
     }
 
     #[test]
-    fn ebv_ill_formed_boolean_is_type_error() {
+    fn ebv_ill_formed_boolean_is_false_per_sparql_11() {
         let ill = Value::Term(Term::Literal(Literal::new_typed_literal("yes", xsd::BOOLEAN)));
-        assert_eq!(ebv(&ill), None, "ill-formed boolean EBV is type error");
+        // [GPT-6] REC §17.2.2 first bullet explicitly specifies false here.
+        assert_eq!(ebv(&ill, crate::EbvSemantics::Rec2013), Some(false));
     }
 
     #[test]
     fn ebv_xsd_string_nonempty_is_true() {
         let s = Value::Term(Term::Literal(Literal::new_typed_literal("abc", xsd::STRING)));
-        assert_eq!(ebv(&s), Some(true));
+        assert_eq!(ebv(&s, crate::EbvSemantics::Rec2013), Some(true));
     }
 
     #[test]
     fn ebv_xsd_string_empty_is_false() {
         let s = Value::Term(Term::Literal(Literal::new_typed_literal("", xsd::STRING)));
-        assert_eq!(ebv(&s), Some(false));
+        assert_eq!(ebv(&s, crate::EbvSemantics::Rec2013), Some(false));
     }
 }
 
@@ -20652,7 +20761,7 @@ mod compiled_expr_tests {
                 .iter()
                 .filter(|row| {
                     eval_expr(&g, &local, &b_ref, row, expr)
-                        .map(|val| effective_boolean(&val))
+                        .map(|val| effective_boolean(&val, crate::EbvSemantics::Rec2013))
                         .unwrap_or(false)
                 })
                 .cloned()
@@ -21220,7 +21329,7 @@ mod idfast_unit {
         idfast_rewrite(&mut compiled, nonlit_cols);
         b.rows
             .iter()
-            .map(|row| ebv3(&eval_compiled(graph, local, b, row, &compiled).unwrap()))
+            .map(|row| ebv3(&eval_compiled(graph, local, b, row, &compiled).unwrap(), crate::EbvSemantics::Rec2013))
             .collect()
     }
 
@@ -21902,7 +22011,7 @@ mod idfast_unit {
         // ...so an inverted verdict (false) would be a detectable mismatch.
         let mutated = Value::Bool(false);
         assert_ne!(
-            ebv3(&mutated),
+            ebv3(&mutated, crate::EbvSemantics::Rec2013),
             reference_equal(&g, &local, id, id),
             "an inverted equal-id verdict must disagree with the oracle"
         );

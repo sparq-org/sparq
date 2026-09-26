@@ -21,13 +21,14 @@ loaders live in `sparq-core`; the binary HDT archive format (including content-s
 
 [GPT-6] RDF ingestion preserves ill-typed literals. To check numeric datatype
 membership, call `sparq_core::numeric_literal_valid(value, datatype_iri)`: this
-checks lexical grammar, XML whitespace and integer subtype facets, including the
+checks raw lexical grammar and integer subtype facets, rejecting all boundary
+whitespace. This includes the
 range of `xsd:byte` and unsigned integer types. It does not impose the evaluator's
 finite mantissa capacity. `numeric_cache_value` can return `None` for a valid large
 number; a missing cache value is not a datatype-validity result.
 
 `temporal::Timeline::parse_datetime`, `parse_date`, `parse_civil_date` and
-`parse_tz` reject malformed calendar/timezone values and timestamps outside their
+`parse_tz` reject raw boundary whitespace, malformed calendar/timezone values and timestamps outside their
 representation, including the existing checked BCE range. For exact value decisions,
 use `temporal::ExactTimeline`, `ExactTemporal`, or `Graph::exact_temporal_value(id)`.
 These borrow the original fraction and compare integer seconds plus lexical digits,
@@ -35,11 +36,12 @@ without allocation; work is linear in literal length. Legacy `Timeline`/`Tempora
 and `Graph::temporal_value` contain approximate floating values; vector/cache consumers
 retain them, but query equality/order must use the exact keys. `year_within_capacity`
 checks an explicit year range separately from ordinary datatype validity.
-Malformed Unicode returns `None` without slicing panics.
-[GPT-6] `Graph::open` ignores legacy `numerics.bin`/`temporals.bin` caches and
-recomputes derived values from the dictionary using current rules. It does not
-rewrite the old cache files or drop ill-typed RDF terms. Current writers use
-`numerics-v2.bin` and `temporals-v2.bin` across ordinary, compressed and external
+Malformed Unicode returns `None` without slicing panics. `dateTimeStamp` requires a timezone.
+Raw RDF temporal literals undergo no XML preprocessing; string casts are separate constructors.
+[GPT-6] `Graph::open` ignores legacy `numerics.bin`/`temporals.bin` and both v2 caches,
+which could contain padded raw literals, and recomputes values from the dictionary.
+It does not rewrite old caches or drop ill-typed RDF terms. Current writers use
+`numerics-v3.bin` and `temporals-v3.bin` across ordinary, compressed and external
 builds; absent or wrong-sized current caches are rebuilt in memory. To persist a
 migrated archive, call `Graph::open(old)?.save(new)?` with a separate destination.
 Until saved, legacy opens repeat the dictionary scan and cache allocation.

@@ -136,8 +136,8 @@ fn store_files(dir: &Path) -> Vec<std::path::PathBuf> {
         "perm3.bin",
         "perm4.bin",
         "perm5.bin",
-        "numerics-v2.bin",
-        "temporals-v2.bin",
+        "numerics-v3.bin",
+        "temporals-v3.bin",
         // [OPUS-4.8] sq-f5jh: `predstats.bin` is an untrusted on-disk file too — its u64
         // record-count drove an unbounded `FxHashMap::reserve` (OOM-abort DoS) before the
         // cap in `TripleStore::load_pred_stats`. Sweeping it here keeps that cap exercised.
@@ -255,6 +255,27 @@ fn corruption_sweep(mode: SaveMode) {
             }
             pos += stride;
         }
+    }
+}
+
+// [GPT-6] Keep the corruption inventory on the current semantic cache version.
+#[test]
+fn current_numeric_sidecar_is_in_corruption_inventory() {
+    for mode in [SaveMode::Raw, SaveMode::CompressedV1,
+        #[cfg(feature = "spqcprm2")]
+        SaveMode::CompressedV2,
+    ] {
+        let tmp = tempdir();
+        let pristine = tmp.join("pristine");
+        let reference = build_store(&pristine, mode);
+        let numeric = pristine.join("numerics-v3.bin");
+        assert!(store_files(&pristine).contains(&numeric));
+        let scratch = tmp.join("scratch");
+        corrupt_truncate(&pristine, &scratch, &numeric, 1);
+        let opened = Graph::open(&scratch).unwrap();
+        assert_eq!(exercise(&opened), reference);
+        drop(opened);
+        std::fs::remove_dir_all(tmp).unwrap();
     }
 }
 

@@ -56,7 +56,17 @@ python3 bench/zk-bindings/run.py plan --regressions /path/to/conformance.json \
 
 `--regressions` retains each original JSON fixture and its golden. Row-only
 fixtures require `--variables` from the original runner; no projection is guessed.
-Capacity controls remain distinct from normative goldens. Historical artifacts
+[OPUS-5.5] The reviewed [projection expectations](projection-expectations.json)
+override that default only for an exact repository source path, source SHA-256
+and retained fixture object (it currently covers three `builtin_edges` date cases
+aliased `y m day h`). Stale, unknown, duplicate or malformed override records
+fail the import. Every imported non-rejection SELECT golden must have unique
+nonempty variable names and list rows whose width equals the projection width.
+The case oracle records which projection it used; `exact-originals.json` pins
+the registry hash and override count.
+Capacity controls remain distinct from normative goldens; [exact cause expectations](capacity-expectations.json)
+bind each retained numeric, temporal or row-limit control to its intended failure.
+An unrelated capacity cause cannot satisfy it. Historical artifacts
 with an admitted semantic defect must report a failure against the original
 expectation; a newer profile exclusion cannot excuse the old program.
 
@@ -69,7 +79,7 @@ test. Non-native Noir configuration additionally pins both `nargo` and `bb` unde
 `tools`, each with absolute `path`, `sha256`, complete `version_stdout` and
 `version_stderr`. The runner checks exact bytes, not a version substring.
 
-The native exact example requires model feature `evaluate`. The Noir adapter is
+The native exact example requires model feature `evaluate`, or `graph-results` for V3. The Noir adapter is
 `result::proof_bindings::run_job` in the `successful-results` test binary. Test
 preparation uses synthetic issuer keys/data only. Generated TOML contains private
 fixture inputs and must stay in a private evidence directory. Every outcome
@@ -98,19 +108,33 @@ including partial failures. The [local finite evidence](evidence/finite-noir-ff5
 pins its original source and controller; it does not establish hosted execution
 of a later CI commit. Broader inventory shards remain configured and unexecuted.
 
-Imported negatives retain the original rejection category, phase and diagnostic
-in `expected_rejection`. The adapter classifies its actual model error independently
-using the exact `rejections.json` allowlist. Parse errors cannot discharge capacity
-or profile expectations, and a different phase or declared diagnostic fails.
-Unknown historical classes remain classification gaps. The model's combined
-`query evaluation or resource budget rejected` diagnostic is deliberately
-unclassified; it cannot certify which cause occurred. These cases stay unresolved
-until a typed production error API distinguishes capacity from evaluation failure.
-The original golden objects and historical finite Noir evidence remain unchanged.
+Detailed evaluation consumes actual
+engine cause enums; row/byte/domain limits are distinct from deadline,
+cancellation and execution errors. Static rejection categories follow
+[rejections.json](rejections.json); combined legacy diagnostics stay unclassified.
+[Versioned expectations](version-expectations.json) bind each promoted result to
+the unchanged original fixture and dataset hashes. V3 graph expectations are
+explicit identity-template/outgoing-edge definitions over the original source;
+they are not computed by the evaluator or its canonicalizer.
+Blank-node comparison uses one global bijection and preserves row multiplicity.
+Graph canonical bytes must match their independently defined fixture; a mismatch
+is never repaired by per-row relabeling or literal normalization.
 
-[Version-specific expectations](version-expectations.json) retain the three
-original V1 dataset rejections while assigning explicit empty-bag V2 positives
-for their unchanged default-only source. Each is independently derived from the
-fixed local snapshot contract, pinned to the original fixture and source hashes;
-no network retrieval or named-graph membership claim is implied. Both authority
-modes execute each version's own expectation. No V3 promotion is inferred.
+## Required original replay
+
+`exact_ci.py` is required by the existing exact-evaluator job after its genuine
+guest campaign. [exact-originals.json](exact-originals.json) pins the complete
+original corpus, builtin edges and numeric/temporal capacity inventories. Every
+configured case executes under all three versioned profiles and both authorities;
+missing, duplicate, unclassified or failed cells fail the job. Historical rejection
+IDs promoted by reviewed semantics retain their original objects and exact query
+mapping in that inventory. The current profile uses its explicit positive golden.
+
+The Cargo-produced example is bound to the clean checkout and executable hash.
+Reports retain plans, original fixture objects, outcomes and separate checkout,
+PR-head and merge identities, including partial failures. The step has a bounded
+timeout within the existing job budget. Pure-Python controller tests exercise
+count/classification guards without executing the model. Neither those tests nor
+configured inventories count as native executions or proofs. The existing genuine
+receipt step remains independently required; full W3C and engine-variant replay
+remain separately tracked work.

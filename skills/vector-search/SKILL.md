@@ -13,6 +13,10 @@ cosine-identical so their scores are directly comparable. Embeddings are produce
 **out-of-process** (you supply the `Embedder`); the crate never runs a model and the
 default engine build does not even compile it.
 
+[GPT-6] Query rewrites and pre-binding retain VERSION announcements and their
+[version-pinned EBV rules](../sparql-query/ebv-dialects.md). Unknown labels follow
+the surface's existing query/ill-formed-input error policy.
+
 ## Quickstart
 
 `crates/sparq-vectors/Cargo.toml` (it consumes `sparq-core`; no features needed for the

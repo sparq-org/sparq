@@ -432,11 +432,11 @@ fn prepare_with(
             ));
         }
     }
-    let query = spargebra::SparqlParser::new()
-        .parse_query(sparql)
+    let (query, versions) = sparq_engine::parse_versioned_query(spargebra::SparqlParser::new(), sparql)
         .map_err(|e| e.to_string())?;
-    Ok(PreparedQuery::from(rewrite_query_with(
-        query, graph, store, searcher, hybrid,
+    let prepared = PreparedQuery::from_query_with_versions(query, versions)?;
+    Ok(prepared.with_query(rewrite_query_with(
+        prepared.query().clone(), graph, store, searcher, hybrid,
     )?))
 }
 

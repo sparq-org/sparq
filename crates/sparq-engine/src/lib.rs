@@ -24,6 +24,8 @@ pub mod cs;
 mod cs_gate;
 mod dataset;
 mod exec;
+mod query_failure;
+pub use query_failure::{BudgetExceeded, EvaluationCapacity, QueryFailure};
 mod explain;
 #[cfg(feature = "persistent-stats")]
 pub mod stats;
@@ -108,6 +110,10 @@ pub use sparq_engine_service::service::{with_service_remote_request_cap, SERVICE
 #[cfg(feature = "serialize-rdf")]
 pub use sparq_engine_serialize::serialize;
 mod update;
+// [OPUS-5.5] Stable-parser VERSION metadata: the published crate resolves upstream
+// spargebra 0.4.6, which has no label-retaining parse methods.
+mod versioned_parse;
+pub use versioned_parse::{parse_versioned_query, parse_versioned_update, VersionedParseError};
 // zk-trace seam (NON-DEFAULT `zk` feature; consumed only by `sparq-zk`).
 // When off, zero zk code is compiled — default builds and wasm are untouched.
 #[cfg(feature = "zk")]
@@ -115,7 +121,9 @@ pub mod zk;
 pub use construct::{
     construct, construct_ntriples, construct_ntriples_with_budget, construct_or_describe,
     construct_or_describe_with_budget, construct_prepared, construct_prepared_with_budget,
+    construct_prepared_with_budget_detailed,
     construct_with_budget, describe, describe_prepared, describe_prepared_with_budget,
+    describe_prepared_with_budget_detailed,
     describe_with_budget, triples_to_ntriples,
 };
 // [OPUS-4.8] (sq-it1x) Opt-in MVCC / ACID transaction isolation. NON-DEFAULT `txn`
@@ -143,7 +151,7 @@ pub use explain_json::{
     SlowQueryRing,
 };
 pub use update::{
-    apply_effects, update, update_in_place, update_in_place_atomic,
+    apply_effects, parse_update_rec2013, update, update_in_place, update_in_place_atomic,
     update_in_place_atomic_with_budget, update_in_place_capturing, update_in_place_with_budget,
     with_load_base, UpdateEffect,
 };
@@ -260,6 +268,16 @@ use oxrdf::{Term, Variable};
 use sparq_core::Graph;
 use spargebra::{Query, SparqlParser};
 
+/// [GPT-6] Version-pinned effective boolean value rules, not a full dialect claim.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub enum EbvSemantics {
+    /// Published SPARQL 1.1 Recommendation, 21 March 2013, section 17.2.2.
+    #[default]
+    Rec2013,
+    /// SPARQL 1.2 Working Draft, 12 September 2026, section 17.2.3.
+    Draft20260912,
+}
+
 /// A cooperative resource budget for one query evaluation (T15 server hardening).
 ///
 /// The executor checks it at coarse sites only (operator entry, once per outer
@@ -275,6 +293,10 @@ use spargebra::{Query, SparqlParser};
 /// not interrupt arbitrary callback work or combine budgets across queries.
 #[derive(Debug, Clone, Default)]
 pub struct QueryBudget {
+    /// [GPT-6] EBV semantics override. `None` uses a query VERSION announcement,
+    /// or REC 2013 when absent. A conflicting announcement is rejected.
+    /// This selects EBV behavior only, not full SPARQL version conformance.
+    pub ebv_semantics: Option<EbvSemantics>,
     /// Wall-clock deadline. Native only: `std::time::Instant` is unusable on
     /// `wasm32-unknown-unknown` (it panics), so the field does not exist there —
     /// the row budget below stays fully portable.
@@ -851,6 +873,7 @@ pub(crate) fn view_scope(active: &Option<Graph>) -> Option<exec::view::Guard> {
 #[derive(Debug, Clone)]
 pub struct PreparedQuery {
     query: Query,
+    versions: Vec<String>,
 }
 
 impl PreparedQuery {
@@ -865,24 +888,64 @@ impl PreparedQuery {
     /// algebra verbatim (the opt-out / test-baseline path). When the feature is
     /// OFF the algebra is stored verbatim and the build is byte-identical.
     pub fn parse(sparql: &str) -> Result<PreparedQuery, String> {
-        // Feature-OFF arm is the VERBATIM pre-`algebra-rewrite` expression so the
-        // default build's codegen is byte-identical (the `feature_off_exact` wasm
-        // gate). Only the feature-ON arm introduces the rewrite call. [OPUS-4.8]
-        #[cfg(not(feature = "algebra-rewrite"))]
-        {
-            Ok(PreparedQuery { query: SparqlParser::new().parse_query(sparql).map_err(|e| e.to_string())? })
-        }
+        let (query, version) = parse_versioned_query(SparqlParser::new(), sparql).map_err(|e| e.to_string())?;
         #[cfg(feature = "algebra-rewrite")]
-        {
-            let query = rewrite::rewrite_query(SparqlParser::new().parse_query(sparql).map_err(|e| e.to_string())?);
-            Ok(PreparedQuery { query })
+        let query = rewrite::rewrite_query(query);
+        Self::from_query_with_versions(query, version)
+    }
+
+    /// [GPT-6] Retains parser metadata when callers rewrite an algebra's dataset.
+    /// This validates labels and EBV compatibility, not full version conformance.
+    ///
+    /// # Errors
+    /// Rejects unsupported labels or announcements requiring different EBV rules.
+    pub fn from_query_with_versions(query: Query, versions: Vec<String>) -> Result<Self, String> {
+        let prepared = Self { query, versions };
+        prepared.resolve_ebv_semantics(None)?;
+        Ok(prepared)
+    }
+
+    /// All VERSION announcements retained in source order.
+    pub fn versions(&self) -> &[String] {
+        &self.versions
+    }
+
+    /// Resolves EBV rules, rejecting unsupported labels and explicit conflicts.
+    /// Programmatic algebra without metadata uses the supplied option or REC 2013.
+    ///
+    /// # Errors
+    /// Rejects unsupported or incompatible announcements and explicit-option conflicts.
+    pub fn resolve_ebv_semantics(&self, explicit: Option<EbvSemantics>) -> Result<EbvSemantics, String> {
+        let mut announced = None;
+        for version in &self.versions {
+            let rule = match version.as_str() {
+                "1.1" => EbvSemantics::Rec2013,
+                "1.2" | "1.2-basic" => EbvSemantics::Draft20260912,
+                _ => return Err("unsupported SPARQL VERSION announcement".into()),
+            };
+            if announced.is_some_and(|prior| prior != rule) {
+                return Err("SPARQL VERSION announcements require incompatible EBV semantics".into());
+            }
+            announced = Some(rule);
         }
+        if explicit.zip(announced).is_some_and(|(a, b)| a != b) {
+            return Err("SPARQL VERSION contradicts explicit EBV semantics".into());
+        }
+        Ok(explicit.or(announced).unwrap_or_default())
     }
 
     /// The wrapped `spargebra` algebra (e.g. to inspect the query form or dataset
     /// clause before execution).
     pub fn query(&self) -> &Query {
         &self.query
+    }
+
+    /// Replaces algebra while retaining all validated VERSION announcements.
+    ///
+    /// [GPT-6] Use after structural rewrites of this query. Unlike `From<Query>`,
+    /// this preserves the source query's EBV contract without re-parsing text.
+    pub fn with_query(&self, query: Query) -> Self {
+        Self { query, versions: self.versions.clone() }
     }
 
     /// True for the graph-valued query forms (CONSTRUCT / DESCRIBE), which produce a set
@@ -895,6 +958,10 @@ impl PreparedQuery {
     }
 
     /// Unwraps into the `spargebra` algebra.
+    ///
+    /// [GPT-6] This discards the VERSION announcement. Retain [`Self::versions`]
+    /// separately and use [`Self::from_query_with_versions`] when rewriting algebra
+    /// that must preserve the declared EBV rules.
     pub fn into_query(self) -> Query {
         self.query
     }
@@ -921,14 +988,16 @@ impl PreparedQuery {
     /// constructors ([`params::value`]).
     #[cfg(feature = "params")]
     pub fn bind(&self, name: &str, value: oxrdf::Term) -> Result<PreparedQuery, String> {
-        params::bind_query(&self.query, name, value).map_err(|e| e.to_string())
+        let mut bound = params::bind_query(&self.query, name, value).map_err(|e| e.to_string())?;
+        bound.versions = self.versions.clone();
+        Ok(bound)
     }
 }
 
 impl From<Query> for PreparedQuery {
     /// Wraps already-parsed (or programmatically built / rewritten) algebra.
     fn from(query: Query) -> PreparedQuery {
-        PreparedQuery { query }
+        PreparedQuery { query, versions: Vec::new() }
     }
 }
 
@@ -960,7 +1029,7 @@ impl PreparedUpdate {
     /// Parses a SPARQL UPDATE string into its reusable algebra form.
     pub fn parse(sparql: &str) -> Result<PreparedUpdate, String> {
         Ok(PreparedUpdate {
-            update: SparqlParser::new().parse_update(sparql).map_err(|e| e.to_string())?,
+            update: parse_update_rec2013(sparql)?,
         })
     }
 
@@ -1045,13 +1114,30 @@ pub fn query_prepared_with_budget(
     prepared: &PreparedQuery,
     budget: &QueryBudget,
 ) -> Result<QueryResult, String> {
+    query_prepared_with_budget_detailed(graph, prepared, budget).map_err(|error| error.to_string())
+}
+
+/// [GPT-6] Executes a prepared SELECT/ASK query with typed whole-query causes.
+///
+/// Budget/domain causes are captured from actual emitters before query-local
+/// state is restored. Diagnostic text is never used to classify a failure.
+/// Ordinary SPARQL expression errors retain their existing row semantics.
+///
+/// # Errors
+/// Returns a typed budget/capacity failure or another whole-query diagnostic.
+pub fn query_prepared_with_budget_detailed(
+    graph: &Graph,
+    prepared: &PreparedQuery,
+    budget: &QueryBudget,
+) -> Result<QueryResult, QueryFailure> {
+    let semantics = prepared.resolve_ebv_semantics(budget.ebv_semantics).map_err(QueryFailure::Evaluation)?;
     let q = &prepared.query;
     let active = active_dataset(graph, q);
     let graph = active.as_ref().unwrap_or(graph);
     let _view_scope = view_scope(&active);
-    exec::budget::with_budget(budget, || {
+    exec::budget::with_query_budget(budget, semantics, || {
         exec::set_query_base(q.base_iri().map(|b| b.as_str()));
-        match q {
+        let result = (|| match q {
             Query::Select { pattern, .. } => exec::eval_select(graph, pattern),
             // ASK as a QueryResult: zero variables, and one (empty) row iff the pattern
             // is satisfiable — the standard "unit row" encoding of a boolean result.
@@ -1060,7 +1146,8 @@ pub fn query_prepared_with_budget(
                 rows: if exec::eval_ask(graph, pattern)? { vec![Vec::new()] } else { Vec::new() },
             }),
             _ => Err("only SELECT and ASK queries are supported".into()),
-        }
+        })();
+        result.map_err(|message| exec::budget::failure().unwrap_or(QueryFailure::Evaluation(message)))
     })
 }
 
@@ -1083,11 +1170,12 @@ pub fn ask_prepared(graph: &Graph, prepared: &PreparedQuery) -> Result<bool, Str
 
 /// [`ask_prepared`] under a cooperative [`QueryBudget`] (deadline / max result rows).
 pub fn ask_prepared_with_budget(graph: &Graph, prepared: &PreparedQuery, budget: &QueryBudget) -> Result<bool, String> {
+    let semantics = prepared.resolve_ebv_semantics(budget.ebv_semantics)?;
     let q = &prepared.query;
     let active = active_dataset(graph, q);
     let graph = active.as_ref().unwrap_or(graph);
     let _view_scope = view_scope(&active);
-    exec::budget::with_budget(budget, || {
+    exec::budget::with_query_budget(budget, semantics, || {
         exec::set_query_base(q.base_iri().map(|b| b.as_str()));
         match q {
             Query::Ask { pattern, .. } => exec::eval_ask(graph, pattern),
@@ -1120,11 +1208,12 @@ pub fn query_json_prepared_with_budget(
     prepared: &PreparedQuery,
     budget: &QueryBudget,
 ) -> Result<String, String> {
+    let semantics = prepared.resolve_ebv_semantics(budget.ebv_semantics)?;
     let q = &prepared.query;
     let active = active_dataset(graph, q);
     let graph = active.as_ref().unwrap_or(graph);
     let _view_scope = view_scope(&active);
-    exec::budget::with_budget(budget, || {
+    exec::budget::with_query_budget(budget, semantics, || {
         exec::set_query_base(q.base_iri().map(|b| b.as_str()));
         match q {
             Query::Select { pattern, .. } => exec::eval_select_json(graph, pattern),
@@ -1146,11 +1235,12 @@ const JSON_CHUNK_BYTES: usize = 64 * 1024;
 /// second whole-result copy from peak memory on large SELECTs.
 pub fn query_json_chunks_with_budget(graph: &Graph, sparql: &str, budget: &QueryBudget) -> Result<Vec<String>, String> {
     let prepared = PreparedQuery::parse(sparql)?;
+    let semantics = prepared.resolve_ebv_semantics(budget.ebv_semantics)?;
     let q = &prepared.query;
     let active = active_dataset(graph, q);
     let graph = active.as_ref().unwrap_or(graph);
     let _view_scope = view_scope(&active);
-    exec::budget::with_budget(budget, || {
+    exec::budget::with_query_budget(budget, semantics, || {
         exec::set_query_base(q.base_iri().map(|b| b.as_str()));
         match q {
             Query::Select { pattern, .. } => exec::eval_select_json_chunks(graph, pattern, Some(JSON_CHUNK_BYTES)),
@@ -1202,11 +1292,12 @@ pub fn query_json_stream_prepared_with_budget(
     budget: &QueryBudget,
     mut sink: impl FnMut(String) -> std::ops::ControlFlow<()>,
 ) -> Result<(), String> {
+    let semantics = prepared.resolve_ebv_semantics(budget.ebv_semantics)?;
     let q = &prepared.query;
     let active = active_dataset(graph, q);
     let graph = active.as_ref().unwrap_or(graph);
     let _view_scope = view_scope(&active);
-    exec::budget::with_budget(budget, || {
+    exec::budget::with_query_budget(budget, semantics, || {
         exec::set_query_base(q.base_iri().map(|b| b.as_str()));
         match q {
             Query::Select { pattern, .. } => {
@@ -1241,11 +1332,12 @@ pub fn count_prepared(graph: &Graph, prepared: &PreparedQuery) -> Result<usize, 
 
 /// [`count_prepared`] under a cooperative [`QueryBudget`].
 pub fn count_prepared_with_budget(graph: &Graph, prepared: &PreparedQuery, budget: &QueryBudget) -> Result<usize, String> {
+    let semantics = prepared.resolve_ebv_semantics(budget.ebv_semantics)?;
     let q = &prepared.query;
     let active = active_dataset(graph, q);
     let graph = active.as_ref().unwrap_or(graph);
     let _view_scope = view_scope(&active);
-    exec::budget::with_budget(budget, || {
+    exec::budget::with_query_budget(budget, semantics, || {
         exec::set_query_base(q.base_iri().map(|b| b.as_str()));
         match q {
             Query::Select { pattern, .. } => exec::count_select(graph, pattern),

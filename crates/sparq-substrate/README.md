@@ -37,7 +37,7 @@ let n: Option<Num> = as_numeric(&lit);  // exact xsd:decimal (no f64 rounding)
 
 [GPT-6] `numeric::Num::of_literal` and `as_numeric` use the shared
 `sparq_core::numeric_literal_valid` grammar/facets: `"5.0"^^xsd:integer` and
-`"1200"^^xsd:byte` are invalid; boundary whitespace must be XML whitespace.
+`"1200"^^xsd:byte` are invalid; raw boundary whitespace is invalid too.
 
 The finite tower uses `i64` integers, `i128` decimal mantissas and binary floats.
 Larger valid literals can return `None` here while validation returns `true`;

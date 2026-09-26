@@ -10,13 +10,20 @@ use std::fmt;
 
 /// Complete default/named dataset relation with a separately versioned schema.
 pub mod v2;
+pub mod v3;
 
 #[cfg(feature = "evaluate")]
 mod aggregate_profile;
 #[cfg(feature = "evaluate")]
 mod evaluate;
 #[cfg(feature = "evaluate")]
-pub use evaluate::{admit, evaluate};
+pub use evaluate::{admit, evaluate, evaluate_detailed};
+#[cfg(feature = "evaluate")]
+mod evaluation_error;
+#[cfg(feature = "evaluate")]
+pub use evaluation_error::EvaluationError;
+#[cfg(feature = "evaluate")]
+pub use sparq_engine::{BudgetExceeded, EvaluationCapacity};
 
 /// Wire version for this bounded default-graph experiment.
 pub const VERSION: u32 = 1;

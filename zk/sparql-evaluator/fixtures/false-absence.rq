@@ -2,7 +2,11 @@
 # A variable endpoint of a zero-length path ranges over subjects and objects,
 # even when VALUES binds it to a predicate-only IRI or an absent IRI.
 # SUBSTR positions include only position one for start zero and length two.
+# Raw typed temporal whitespace is not string-constructor preprocessing.
 # Invalid integer subtype facets remain expression errors through arithmetic.
+# Each nullable alternative retains its absent concrete endpoint once.
+# A nonzero decimal retains true EBV even below floating-point range.
+# Substituted ?s disappears from both inner MINUS domains, making EXISTS true.
 PREFIX ex: <http://ex/>
 PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
 ASK {
@@ -22,4 +26,25 @@ ASK {
     FILTER("2024-01-01T00:00:00Z"^^<http://www.w3.org/2001/XMLSchema#dateTime>
       = "2024-01-01T00:00:00.000000001Z"^^<http://www.w3.org/2001/XMLSchema#dateTime>)
   }
+  UNION
+  { VALUES ?s { ex:alice }
+    FILTER NOT EXISTS { ?s ex:value ?m MINUS { ?s ex:value ?z } }
+  }
+  UNION
+  { FILTER(!"0.0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001"^^xsd:decimal) }
+  UNION
+  {
+    { SELECT (COUNT(*) AS ?nullable_count) {
+        ex:missing (ex:value*|ex:value*) ?o
+      }
+    }
+    FILTER(?nullable_count != 2)
+  }
+  UNION
+  { FILTER(" true "^^xsd:boolean) }
+  UNION
+  { FILTER(ISNUMERIC(" 1 "^^xsd:integer)) }
+  UNION
+  { FILTER(" 2024-01-01T00:00:00Z "^^xsd:dateTime
+      = "2024-01-01T00:00:00Z"^^xsd:dateTime) }
 }

@@ -14,6 +14,10 @@ replacement for the supported TypeScript `prod-solid-server`, and its default
 storage is ephemeral. Use `skills/javascript-wasm/SKILL.md` instead for the
 separate `@sparq-org/solid-server` loopback development host.
 
+[GPT-6] Query entry points and structural rewrites retain VERSION announcements;
+see the [version-pinned EBV rules](../sparql-query/ebv-dialects.md). Unsupported
+or incompatible labels do not silently select REC 2013.
+
 ## Start a local server
 
 Run the default build with the in-memory backend:

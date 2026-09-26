@@ -121,6 +121,9 @@ issuer-signature or credential-status claim.
 [GPT-6] The separately versioned [complete named-dataset API](references/exact-datasets-v2.md)
 adds a committed catalog including empty named graphs, GRAPH and local snapshot
 FROM/FROM NAMED selection. V1 requests and commitments retain their meaning.
+[GPT-6] The opt-in [V3 graph-result API](references/graph-results-v3.md)
+adds blank-node identity, canonical tables and bounded graph forms through typed
+host/guest APIs; consult artifact-bound evidence for actual execution status.
 [GPT-6] The [campaign evidence guide](references/evaluator-evidence.md) explains
 exact artifact export, actual receipt evidence and source/HAL provenance.
 [GPT-6] The [exact-evaluator experiment adapter](../../zk/sparql-evaluator/experiments/README.md)
@@ -407,7 +410,32 @@ controls, and the native `edge_matrix.py` feature compiler. The kernel's default
 binary dependency activation and embedded ELF remain unchanged; the patch record
 separately documents an upstream real-target binary compilation limitation.
 Synthetic dependency checks remain separate from actual guest proof evidence.
-[GPT-6] The exact evaluator enables the [numeric capacity guard](references/numeric-capacity.md). Valid values beyond the finite arithmetic lane can be returned directly, but unsupported numeric consumption fails the entire evaluation. Native default budgets leave this option off.
+[GPT-6] The exact evaluator enables the [numeric capacity guard](references/numeric-capacity.md). Valid values beyond the finite arithmetic lane can be returned directly; integer/decimal EBV uses exact zero classification. Unsupported arithmetic/comparison consumption fails the entire evaluation. Native default budgets leave this option off.
+
+[GPT-6] The SDK provenance checks bind both workspace patch tables and resolved
+feature-matrix package manifests to the exact inventoried vendor directories.
+The [SDK reference](../../vendor/zk-sdk/README.md) distinguishes direct Cargo
+kernel defaults from the embedding helper's explicit feature requirement, and
+records library-only Clippy scope separately from kernel or guest execution.
+
+[GPT-6] The exact evaluator admits the [bounded nullable alternative/inverse profile](references/nullable-paths.md). Bag duplicates and concrete absent endpoints are retained; nullable sequences, nested nullable quantifiers and residual paths in EXISTS remain excluded. Actual guest evidence must bind the updated admission artifact.
+
+[GPT-6] The exact model's `evaluate_detailed`, `v2::evaluate_detailed` and
+`v3::evaluate_detailed` evaluate their same versioned requests and emit
+the same journal as `evaluate`, while returning `EvaluationError` with distinct
+`Budget`, `Capacity`, `Execution` and existing `Rejected` cases; their
+`BudgetExceeded` and `EvaluationCapacity` enums are re-exported by the model. Execution causes
+come from actual engine emitters; private engine diagnostics are discarded. The
+legacy `evaluate` APIs keep their original execution rejections, including V3's
+separate query and graph diagnostics. This error
+API is outside request/journal encoding and adds no receipt evidence by itself.
+
+[GPT-6] The [shared original-corpus controller](../../bench/zk-bindings/README.md)
+retains native versus actual-proof counters and independently pinned goldens.
+[OPUS-5.5] Row-only goldens keep the caller's default `--variables`, except
+where a hash-pinned reviewed projection override matches the exact source file
+and fixture. Imported SELECT goldens whose row width differs from the
+projection width are rejected, not replayed.
 
 [GPT-6] Original successful-result v1 circuit, ABI and verification-key bytes are
 preserved under the pinned toolchain and checked against independent baseline

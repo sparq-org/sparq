@@ -6,16 +6,15 @@
   <a href="../../LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
 </p>
 
-The [SPARQL 1.1](https://www.w3.org/TR/sparql11-query/) / [1.2](https://www.w3.org/TR/sparql12-query/)
-query engine over [`sparq-core`](../sparq-core) `Graph`s.
+The [SPARQL 1.1](https://www.w3.org/TR/sparql11-query/) / [1.2](https://www.w3.org/TR/sparql12-query/) engine over [`sparq-core`](../sparq-core) `Graph`s.
 
 Query in-memory or out-of-core graphs, inspect plans with `EXPLAIN` / `EXPLAIN ANALYZE`,
 and register custom functions. [Exact temporal comparison and optional year budgets](../../skills/zk-query-proofs/references/exact-temporals.md) preserve fractional precision.
 
 <!-- [GPT-6] The detached proof guest does not add an engine dependency. -->
-The opt-in [proved evaluator](../../zk/sparql-evaluator/README.md) restricts `target_os = "zkvm"`,
-rejecting ambient NOW/RAND/UUID in that target only. The experiment is
-not externally audited.
+The opt-in [proved evaluator](../../zk/sparql-evaluator/README.md) restricts `target_os = "zkvm"`, rejecting ambient NOW/RAND/UUID in that target only. The experiment is not externally audited.
+
+[GPT-6] Prepared query, construct and describe APIs have `_with_budget_detailed` variants preserving typed budget/domain causes; existing String APIs remain compatible. `QueryBudget.ebv_semantics` selects [version-pinned EBV rules](../../skills/sparql-query/ebv-dialects.md), with REC 2013 as the unannounced default; this does not claim full SPARQL 1.2 support.
 
 ## 🚀 Quickstart
 
@@ -36,23 +35,24 @@ let json = sparq_engine::query_json(&g, "SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?
   [1.2](https://www.w3.org/TR/sparql12-query/) over your data (conformance tracked by the CI
   ratchets), plus the *non-standard* `MULTIPLICITY()` aggregate extension — see the SKILL.
 - **Path multiplicity and correlation** — alternatives/sequences preserve bag counts;
-  reachability retains endpoint sets. EXISTS expressions retain outer RDF term identity.
+  reachability retains endpoint sets. [Scoped EXISTS/MINUS substitution](../../skills/sparql-query/exists-minus.md) applies captured IRI/literal bindings before domain subtraction; unresolved shapes retain native practical behavior.
   Nullable paths preserve constant seeds and variable node domains. Substitution admits
-  only positive shapes with locally bound FILTERs; scope-sensitive shapes and triple-term
-  endpoints use potentially more expensive ordinary evaluation. [Boundaries and examples](../../skills/sparql-query/SKILL.md).
+  only positive shapes with locally bound FILTERs; scope-sensitive shapes and triple-term endpoints use potentially more expensive ordinary evaluation. [Boundaries and examples](../../skills/sparql-query/SKILL.md).
 - **Deterministic builtins** — `isNumeric` validates lexicals/facets independently of finite
-  arithmetic capacity; integer casts truncate within `i64`. `SUBSTR` clips the original
-  one-based interval. Date accessors validate calendars/offsets and normalize next-day
-  midnight; `MIN`/`MAX` retain input terms. [Bounded coverage and numeric limits](../../skills/sparql-query/SKILL.md)
+  arithmetic capacity; integer/decimal EBV classifies validated digits without floating underflow. Invalid numeric/boolean lexicals have false EBV per SPARQL 1.1 §17.2.2,
+  while invalid arithmetic operands error. Integer casts truncate within `i64`. `SUBSTR` clips the original
+  one-based interval. Date accessors validate calendars/offsets and normalize next-day midnight; `MIN`/`MAX` retain input terms. Raw numeric/boolean lexical
+  forms are checked verbatim; XML whitespace normalization applies to string casts only. [Bounded coverage and numeric limits](../../skills/sparql-query/SKILL.md)
   remain explicit; these corrections do not establish complete builtin conformance.
 - **Named graphs** — query across an active dataset with `GRAPH` and `FROM` / `FROM NAMED`.
-  [GPT-6] Nested `GRAPH` borrows the same catalog, preserving empty graphs,
-  binding multiplicity and `FROM NAMED` restrictions at every nesting level.
+  Read-query `FROM` standardizes source blank nodes apart; `GRAPH` preserves identity.
+  [GPT-6] Nested `GRAPH` preserves the catalog, empty graphs, bindings and `FROM NAMED` restrictions.
+- **Deterministic blank nodes** *(opt-in `deterministic-blank-nodes`)* — entropy-free
+  parser/template labels, fresh per solution and disjoint from active input; see the SKILL.
 - **RDF 1.2 triple terms** — match [triple terms](https://www.w3.org/TR/rdf12-concepts/), including variables inside them.
 - **Materialized full paths** *(opt-in `paths` feature, OFF by default)* — `enumerate_paths` returns intermediate nodes and edges for tied shortest paths, bounded simple paths, or cycles back to their start. Each endpoint is unrestricted, one fixed node, or a graph pattern selecting a candidate set.
 - **Query plan introspection** — `EXPLAIN` and `EXPLAIN ANALYZE`.
-- **Custom functions** — register Rust closures under function IRIs;
-  see [`docs/extension-functions.md`](../../docs/extension-functions.md).
+- **Custom functions** — register Rust closures under function IRIs; see [`docs/extension-functions.md`](../../docs/extension-functions.md).
 - **Custom aggregates + window functions** *(opt-in `window-functions`, OFF by default)* —
   `CustomAggregateRegistry`, `window::apply_window` and `query_over` add named aggregates,
   ranking/offset/aggregate windows and frames. Inline `OVER`/`WINDOW` is a **non-standard**
@@ -64,8 +64,7 @@ let json = sparq_engine::query_json(&g, "SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?
   binder outputs and invalid term positions fail closed. The opt-in `templates` feature
   adds named typed-JSON templates. [Query/update examples and restrictions](../../skills/sparql-query/SKILL.md).
 - **Query-result cache** *(opt-in `result-cache`, OFF by default)* — bounded LRU
-  `cache::ResultCache` keys SELECT/ASK by query algebra and caller graph version. The caller
-  must advance its `u64` version on every mutation; `is_cacheable` rejects volatile functions,
+  `cache::ResultCache` keys SELECT/ASK by query algebra, caller graph version and resolved EBV semantics. The caller must advance its `u64` version on every mutation; `is_cacheable` rejects volatile functions,
   SERVICE and custom functions/aggregates. [Cache contract](../../skills/sparql-query/SKILL.md).
 - **MVCC / ACID transaction isolation** *(opt-in `txn` feature, OFF by default)* —
   a `txn::TransactionManager` over one logical `Graph`: **snapshot-isolation** reads (`begin_read` → a
@@ -107,10 +106,11 @@ let json = sparq_engine::query_json(&g, "SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?
 - **Characteristic-set anchor-incidence prune** *(opt-in `cs-anchor-incidence` feature, OFF by default)* — the DISTINCT predicate-projection semijoin (`SELECT DISTINCT ?p WHERE { anchor UNION probe }`, SP2Bench q09) precomputes, per anchor join position, the SET of predicates that relate SOME anchor member, so a candidate predicate absent from that set is pruned by an O(1) membership test instead of a large no-hit clipped block scan. Result-identical (the set only prunes provably-empty existence checks; differential vs the exact scan); conservatively declines on a graph with a pending-update overlay; off, zero code compiles, no new deps.
 - **Lazy top-k string sort key** *(opt-in `topk-lazy-strkey` feature, OFF by default)* — an `ORDER BY` on a plain `xsd:string` column with a `LIMIT` builds a zero-allocation id-carrying sort key (compared via the literal's zero-copy value bytes) instead of reconstructing + re-allocating the literal value per input row, so a top-k over a large scan pays no key allocation for the rows it discards. Byte-identical output (a full-output differential + W3C ORDER BY conformance); off, zero code compiles, no new deps.
 - **Audited cancellation pointer boundary** — the executor keeps its thread-local/rayon budget snapshot `Copy` with a non-owning cancellation pointer; [GPT-6 Astra] a lifetime-bound guard keeps the caller's `Arc<AtomicBool>` alive through scoped worker joins, restores the previous budget scope on return or unwind, and clears the pointer when the outermost scope exits. The four `unsafe` sites are listed in the workspace unsafe register.
+- **VERSION-aware parsing with your own parser** — [OPUS-5.5] `parse_versioned_query(parser, text)` / `parse_versioned_update(parser, text)` parse the unchanged text with the caller's configured `spargebra::SparqlParser` (base IRI, prefixes, custom aggregates; it stays the syntax authority) and return the algebra plus the leading prologue's `VERSION` labels in source order. Pass query labels to `PreparedQuery::from_query_with_versions`; `parse_update_rec2013` applies UPDATE's REC 2013 restriction. Labels are not validated at parse time. `VersionedParseError::is_syntax` keeps the parser's diagnostic text unchanged; `is_prologue` marks a declaration that could not be accounted for, which is refused rather than guessed. Only the stable crates.io `spargebra` 0.4.6 API is used, including under its `standard-unicode-escaping` feature. See the [EBV dialect contract](../../skills/sparql-query/ebv-dialects.md).
 
 ## 📚 Learn more
 
-- **How-to** — [query guide](../../skills/sparql-query/SKILL.md); **API** — [docs.rs](https://docs.rs/sparq-engine).
+- **How-to** — [query guide](../../skills/sparql-query/SKILL.md); **API** — [docs.rs](https://docs.rs/sparq-engine). [GPT-6] Prepared-query rewrites use `with_query` to retain VERSION metadata. UPDATE and the PATHS extension are REC 2013 only and reject unsupported announcements; see the [EBV dialect contract](../../skills/sparql-query/ebv-dialects.md).
 - **Design** — [`research/ARCHITECTURE.md`](../../research/ARCHITECTURE.md) and the planning / parallelism verdicts in [`research/`](../../research).
 - **Performance** — numbers live on the [benchmarks dashboard](https://sparq.jeswr.org/dev/bench), not in docs.
 - **Contribute** — [`AGENTS.md`](../../AGENTS.md) and [`CONTRIBUTING.md`](../../CONTRIBUTING.md).

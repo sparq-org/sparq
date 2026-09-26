@@ -17,6 +17,15 @@ permutation-indexed in-memory RDF store). You load RDF into a `Graph`, then call
 `sparq_engine` to run SELECT/ASK/CONSTRUCT/DESCRIBE and SPARQL Update. Results come back either as a
 typed `QueryResult` (rows of `Option<oxrdf::Term>`) or directly as a SPARQL-1.1-JSON string.
 
+[Correlated EXISTS with MINUS](exists-minus.md) documents the bounded published-2013
+solution-domain correction and the remaining native practical fallbacks.
+
+[GPT-6] Query options can pin [EBV rules](ebv-dialects.md) to REC 2013 or the
+12 September 2026 SPARQL 1.2 draft. VERSION announcements are retained and
+explicit contradictions reject evaluation; this is not full 1.2 conformance.
+[OPUS-5.5] With your own `SparqlParser`, keep them via
+`parse_versioned_query`/`parse_versioned_update` (stable upstream parser API).
+
 ## Quickstart
 
 `Cargo.toml`:
@@ -60,7 +69,7 @@ graphs (so `GRAPH <g> {…}` / `GRAPH ?g {…}` work), use `Graph::load_dataset(
 
 ## Key APIs
 
-All entry points take `&Graph` + `&str` and return `Result<_, String>` (parse + eval errors are
+The ordinary text-query entry points take `&Graph` + `&str` and return `Result<_, String>` (parse + eval errors are
 `String`). The result types:
 
 - `sparq_core::strdist::edit_distance(&str, &str) -> usize` computes character-based
@@ -100,7 +109,11 @@ is not a dataset validator: a proof profile must also validate input/query terms
 Temporal comparisons, ORDER BY and MIN/MAX use exact integer-second/borrowed-fraction
 keys rather than the approximate epoch cache. Graph keys lazily memoize validated
 seconds/flags and borrow fraction slices; ORDER BY retains these keys without
-per-comparison reparsing. Forks and dictionary appends rebuild the in-memory memo. SECONDS preserves all validated
+per-comparison reparsing. Forks start with an empty memo; dictionary appends extend
+initialized entries only for new temporal IDs. Cold mmap lookup still scans temporal
+flags and parses all cached temporal literals; selective cold-read performance remains
+unmeasured. See [cache work and benchmark scope](temporal-cache-work.md).
+SECONDS preserves all validated
 fractional digits as an xsd:decimal result; this does not expand finite decimal
 arithmetic. See [exact temporal scope](../zk-query-proofs/references/exact-temporals.md).
 
@@ -109,8 +122,19 @@ a sticky whole-query capacity failure; it is `false` by default. It retains the
 `i64` integer and `i128` decimal lanes, including the existing bounded decimal
 division precision, while refusing overflow fallback to floating point.
 Direct RDF output, valid unary plus, `isNumeric` and `sameTerm` preserve large
-lexicals without asserting arithmetic support. Constrained expression work
+lexicals without asserting arithmetic support. Numeric EBV separately classifies
+validated integer/decimal digits exactly, without a floating-point conversion.
+Invalid numeric/boolean lexical EBV is false under SPARQL 1.1 §17.2.2;
+arithmetic on invalid numeric terms still errors. Constrained expression work
 stays on the calling thread. See the [numeric capacity contract](../zk-query-proofs/references/numeric-capacity.md).
+
+[GPT-6] `query_prepared_with_budget_detailed`, `construct_prepared_with_budget_detailed`
+and `describe_prepared_with_budget_detailed` return `QueryFailure` with typed
+`Budget(BudgetExceeded::{Rows, Bytes, Deadline, Cancelled})`,
+`Capacity(EvaluationCapacity::{NumericRepresentation, TemporalYear})`, or
+`Evaluation(String)`. Causes are captured before the query budget scope is
+restored; never infer a category from the diagnostic. Ordinary expression errors
+retain SPARQL semantics. Existing String-returning entry points are unchanged.
 
 SELECT/ASK entry points (each has `_prepared`, `_with_budget`, and `_view` variants):
 
@@ -207,6 +231,22 @@ triple/predicate/bucket/byte counts for operational checks.
 
 ## Common recipes
 
+**Deterministic blank nodes** — opt in with the engine's
+`deterministic-blank-nodes` feature for environments without ambient entropy.
+Anonymous query, list and template labels use a reserved parser namespace.
+CONSTRUCT selects a namespace disjoint from every blank node in the active
+input dataset, including unselected named graphs, and creates distinct template
+nodes per solution occurrence. Repeated template labels within one occurrence
+still share a node; duplicate solutions keep their own fresh nodes. The option
+also applies the query row budget to constructed output triples, rejecting an
+excessive result without returning a partial graph. [GPT-6]
+
+The output labels are deterministic and local to a result. Independently created
+results must be standardized apart before combining their blank-node namespaces;
+these labels are not persistent identifiers across query executions. This option
+does not canonicalize the result or enable a new SPARQL proof relation by itself.
+Native controls: `crates/sparq-engine/tests/deterministic_blank_nodes.rs`.
+
 **Aggregates, GROUP BY / HAVING, subqueries** — standard SPARQL 1.1; no special API:
 
 ```rust
@@ -262,6 +302,12 @@ validated operands in later arithmetic. PyOxigraph 0.5.11 also accepts the
 invalid-byte identity example; that interoperability difference does not change
 the numeric-operand golden. String casts collapse only XML whitespace, so NBSP
 does not disappear before integer, decimal, float, double or boolean validation.
+[GPT-6] Raw typed literals are checked verbatim: `" true "^^xsd:boolean` and
+`" 1 "^^xsd:integer` are ill-typed. They retain their RDF identity, but have false
+EBV under the published 2013 Recommendation; numeric interpretation and typed
+casts reject them. String constructors still normalize XML boundary whitespace.
+See [raw literal semantics](raw-literal-whitespace.md) for the source definitions,
+old-test correction record and the separate SPARQL 1.2 EBV boundary.
 The shared matrix contains regression and positive controls as well as
 guard-discriminating cases; its size is not a count of independently fixed bugs.
 
@@ -629,6 +675,15 @@ continue to apply at every nesting level; graph-name bindings retain normal join
 compatibility and result multiplicity. The evaluator borrows this catalog in its
 per-query context rather than cloning graphs or using global dataset state.
 
+[GPT-6] Read-query `FROM` builds an RDF merge: blank nodes are renamed consistently
+within each source graph and kept distinct between source graphs and preserved
+`FROM NAMED` graphs. `GRAPH` alone preserves source dataset identity. Repeated
+`FROM` IRIs use one stored snapshot per distinct IRI; this acquisition policy is
+explicit because [SPARQL 1.1 §13.2.3](https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#specifyingDataset)
+does not prescribe blank-node identity for repeated dataset-clause references.
+The merge applies to SELECT/ASK and graph-producing queries; it does not define
+SPARQL Update `USING` identity behavior.
+
 ## Gotchas / feature flags / prerequisites
 
 - **Errors are `String`** — both SPARQL parse errors and evaluation/type errors. SPARQL is parsed by
@@ -908,7 +963,7 @@ per-query context rather than cloning graphs or using global dataset state.
   each IRI/bnode one id); **(b)** EQUAL ids of ANY kind are the same term, so `=` short-circuits `true`
   and `!=` `false` (mirroring the `sameTerm` decision the exact path already takes — safe even for
   ill-typed literals, which return a boolean not a type error). UNEQUAL ids of possibly-LITERAL
-  operands (numeric promotion `"1"^^integer` = `"1.0"^^decimal`, whitespace-padded lexicals — the
+  operands (numeric promotion `"1"^^integer` = `"1.0"^^decimal`, valid integer spellings `"+01"` vs `"1"` — the
   `sq-lr2ii` class) and `=` cases that can be a TYPE ERROR fall through to the exact value path
   unchanged. Result-identical whether on or off — a differential test pairs every id kind (IRIs,
   bnodes, numeric-promotion pairs, language-tagged, ill-typed literals) and asserts the fast verdict
@@ -940,7 +995,7 @@ per-query context rather than cloning graphs or using global dataset state.
   generation), so the check is re-run against the LIVE graph every eval — an UPDATE inserting a
   literal object publishes a new snapshot the next query re-checks; the verdict never outlives its
   snapshot (there is no plan/inference cache across snapshots; the result cache is keyed by
-  `(query, version)`). The same snapshot-aware column set is now also installed at the FUSED
+  `(query, version, resolved EBV semantics)`). The same snapshot-aware column set is now also installed at the FUSED
   conjunctive residual-FILTER sites (`eval_flat_conjunctive`, `eval_bgp_binary_capped`), drain-safe
   via `with_idfast_nonlit_cols` (the set drains on the first consuming `apply_filter`, so a nested
   EXISTS on a different `Bindings` layout sees the empty default). A differential test witnesses the
@@ -1140,8 +1195,8 @@ per-query context rather than cloning graphs or using global dataset state.
   off, zero of this code compiles, the conjunctive path is byte-identical, no new dependencies.
 - **Materialised-view / query-result cache** is the non-default `result-cache` cargo feature (bead
   `sq-a9cn`): `ResultCache::new(capacity)` is a bounded, version-aware LRU that stores a SELECT/ASK
-  `QueryResult` keyed by `(parsed query algebra, caller graph-version)`; serve a query through
-  `cache.get_or_eval(&graph, &query, version, &budget)` (returns an `Arc<QueryResult>`). It re-serves
+  `QueryResult` keyed by `(parsed query algebra, caller graph-version, resolved EBV semantics)`;
+  serve a prepared query through `cache.get_or_eval_prepared(&graph, &query, version, &budget)` (returns an `Arc<QueryResult>`). It re-serves
   the same read query against a slowly-changing graph without re-executing. **Soundness contract**:
   the engine evaluates against a borrowed `&Graph` and can't see mutations, so the **caller bumps the
   `u64` version on every mutation** (`apply_delta`/`update`/reload) — a hit is only returned for the
@@ -1156,13 +1211,13 @@ per-query context rather than cloning graphs or using global dataset state.
   // Cargo.toml: sparq-engine = { version = "0.1", features = ["result-cache"] }
   use sparq_engine::{PreparedQuery, QueryBudget, ResultCache};
   let cache = ResultCache::new(256);          // up to 256 distinct results, LRU
-  let q = PreparedQuery::parse("SELECT ?s WHERE { ?s ?p ?o }")?.into_query();
+  let q = PreparedQuery::parse("SELECT ?s WHERE { ?s ?p ?o }")?;
   let mut version = 0u64;
-  let r1 = cache.get_or_eval(&graph, &q, version, &QueryBudget::unlimited())?; // miss
-  let r2 = cache.get_or_eval(&graph, &q, version, &QueryBudget::unlimited())?; // hit (same Arc)
+  let r1 = cache.get_or_eval_prepared(&graph, &q, version, &QueryBudget::unlimited())?; // miss
+  let r2 = cache.get_or_eval_prepared(&graph, &q, version, &QueryBudget::unlimited())?; // hit (same Arc)
   // ... mutate the graph, then bump the epoch so the next read re-evaluates:
   version += 1;
-  let r3 = cache.get_or_eval(&graph, &q, version, &QueryBudget::unlimited())?; // miss (fresh)
+  let r3 = cache.get_or_eval_prepared(&graph, &q, version, &QueryBudget::unlimited())?; // miss (fresh)
   # Ok::<(), String>(())
   ```
 - **Experimental deletion projection caching** — [GPT-6 Astra] opt in only on the
@@ -1276,5 +1331,5 @@ integer/decimal lexical syntax and subtype facets before parsing an operand.
 The same gate covers literal constants, local `VALUES` bindings and graph IDs,
 including compressed graphs. `builtin_edges.json` records bounded REC error
 cases; an optional `dataset_ntriples` field supplies the authenticated data for
-stored-term cases. Invalid numeric RDF terms remain stored but produce expression
-errors; this does not extend the finite arithmetic representation.
+stored-term cases. Invalid numeric RDF terms remain stored but produce arithmetic
+expression errors; their EBV is false. This does not extend finite arithmetic.

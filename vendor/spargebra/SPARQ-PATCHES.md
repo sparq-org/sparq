@@ -355,3 +355,15 @@ in a source blank-node label, allowing the exact evaluator to admit only these
 internal patterns while rejecting source blank nodes. Normal parser builds keep
 the upstream allocator. The detached evaluator enables this feature explicitly;
 its internal algebra is for execution, not a portable SPARQL text serialization.
+
+## 12. Preserve query VERSION metadata without changing the algebra enum
+
+[GPT-6] `SparqlParser::parse_query_with_versions` returns the existing query
+algebra together with every version label in source order. The legacy `parse_query`
+method keeps its return type and discards this metadata explicitly. Repeated
+announcements remain valid syntax (including the pinned W3C `version-06` case);
+supported-label and semantic-option checks belong to the consuming engine. UPDATE behavior is unchanged.
+The engine's `ebv_dialects` tests cover label retention, declarations in comments
+and literals, explicit conflicts, nested evaluation and metadata-preserving
+integration paths. This is local API plumbing for scoped EBV rules, not a full
+SPARQL 1.2 implementation or an upstream audit claim.

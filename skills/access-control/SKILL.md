@@ -9,6 +9,10 @@ metadata:
 
 # sparq-solid — graph-level WAC/ACP access control
 
+[GPT-6] Authorized query rewrites retain all validated `VERSION` announcements;
+unsupported or incompatible labels fail before evaluation. UPDATE remains REC
+2013 only. See the [EBV dialect contract](../sparql-query/ebv-dialects.md).
+
 `sparq-solid` is an **opt-in** crate that enforces Solid-style access control over a
 sparq RDF dataset at the **named-graph** granularity. A pod is stored as
 **one named graph per document**; the WAC (`.acl`) and ACP (`.acr`) access-control

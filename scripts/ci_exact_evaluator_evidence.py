@@ -18,6 +18,16 @@ MANIFEST = "zk/sparql-evaluator/Cargo.toml"
 GUEST_MANIFEST = "zk/sparql-evaluator/methods/guest/Cargo.toml"
 V1_RECEIPTS = {"v1-verifier-select", "v1-holder-bag", "v1-verifier-false-ask"}
 V2_RECEIPTS = {"v2-verifier-catalog", "v2-holder-false-ask"}
+V3_RECEIPTS = {"v3-holder-bag", "v3-verifier-construct", "v3-holder-describe"}
+
+
+def active_profile(root: Path) -> tuple[str, set[str]]:
+    """Select native features and require every receipt of the installed guest API."""
+    if (root / "zk/sparql-evaluator/host/src/v3.rs").exists():
+        return "graph-results", V1_RECEIPTS | V2_RECEIPTS | V3_RECEIPTS
+    if (root / "zk/sparql-evaluator/host/src/v2.rs").exists():
+        return "evaluate", V1_RECEIPTS | V2_RECEIPTS
+    return "evaluate", V1_RECEIPTS
 
 
 def digest(data: bytes) -> str:
@@ -229,19 +239,19 @@ def main() -> int:
         # broad witness/preflight TRACE logs; all test input here is synthetic.
         env["RUST_LOG"] = "risc0_circuit_rv32im::prove::hal=debug,risc0_zkp::hal=debug"
         test = ["cargo", "test", "--locked", "--manifest-path", MANIFEST]
-        run_logged(test + ["-p", "sparq-proved-evaluator-model", "--features", "evaluate"],
+        model_feature, expected = active_profile(ROOT)
+        run_logged(test + ["-p", "sparq-proved-evaluator-model", "--features", model_feature],
                    "native", output, env, commands)
         run_logged(test + ["-p", "sparq-proved-evaluator", "--", "--nocapture", "--test-threads=1"],
                    "actual-guest-and-proofs", output, env, commands)
         run_logged(["cargo", "clippy", "--locked", "--manifest-path", MANIFEST, "--workspace",
-                    "--all-targets", "--features", "sparq-proved-evaluator-model/evaluate", "--",
+                    "--all-targets", "--features", f"sparq-proved-evaluator-model/{model_feature}", "--",
                     "-D", "warnings"], "lint", output, env, commands)
         run_logged(cargo + [str(output / "artifact-after")], "confirm-guest", output, env, commands)
         if pin != artifact_pin(output / "artifact-after"):
             raise ValueError("exported program changed during the campaign")
         if snapshot(ROOT) != before:
             raise ValueError("source identity changed during the campaign")
-        expected = V1_RECEIPTS | (V2_RECEIPTS if (ROOT / "zk/sparql-evaluator/model/src/v2.rs").exists() else set())
         receipt_files = receipts(output, pin, expected)
         kernel_log = (output / "actual-guest-and-proofs.log").read_text(errors="replace")
         observed = observed_hal(kernel_log)

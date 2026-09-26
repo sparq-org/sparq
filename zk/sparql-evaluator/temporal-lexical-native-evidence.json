@@ -1,0 +1,142 @@
+{
+  "schema_version": 1,
+  "source_base": "9c2cfa84f86c185488af16ea51b37f2574ec3bbe",
+  "source_sha256": {
+    "compliance/memsafety/unsafe-register.md": "18cf3923429c7307d147c4a5fd9e6e42486b510f920260a8105bacad22ea8ba2",
+    "crates/sparq-core/README.md": "13f7798261175339d9c08195e8c315990138a6bc0de7eabbb6657856659541fe",
+    "crates/sparq-core/src/dictspill.rs": "598a79476a2a5a563caffd1ebc5eeb5ad244dc9fa64e8311a1c7f7c8f30d3646",
+    "crates/sparq-core/src/lib.rs": "870ebe196edce0bc86038d564e58012e85e08972b9cee46f7e47b1405845725c",
+    "crates/sparq-core/src/temporal.rs": "a2ca58a79af0c1910b1f31b004ced1e0474a66fa1b71a281b5485c53ff971766",
+    "crates/sparq-core/src/temporal/exact.rs": "93fb075762af0053347aad2fe9f38eb57a00497077bb8a00c93221549c207901",
+    "crates/sparq-core/tests/dict_spill_activation.rs": "2b819e7962fca8cf767bcdbdd34fce46d5abd78f2297007dd6f8695a434dc62c",
+    "crates/sparq-core/tests/mmap_corruption_oracle.rs": "5b458e57ec2fd9b29d772762c1fc2ad6c756cd792f6aa8017bfafeaddeb28a1e",
+    "crates/sparq-core/tests/temporal_lexical.rs": "de7ba9bb567b05b79bca5886e2a93b9c6cefb1668b3f8185dca07e15af4f82ec",
+    "crates/sparq-core/tests/temporal_lexical_migration.rs": "df02d655d47fd22157b4d05382f5f6befa8001b1a8194502dbe0ffb55f1c2dd1",
+    "crates/sparq-engine/src/exec.rs": "805695ae25254a21ce91278df5cc547b2aa3ebac25cfc8cef4467b3ed092d2d3",
+    "crates/sparq-engine/tests/fixtures/temporal_lexical.json": "f86e927682e189318a15876c46de6ec75c91a1fbd597057770d3ad79f1bde15b",
+    "crates/sparq-engine/tests/temporal_lexical.rs": "a673efe9b2370dcbc6281c277d03a67926ce4482b333f1e1c41e3bce0c08b8ce",
+    "fuzz/fuzz_targets/graph_open.rs": "1f60c8ccbe7df225131792d8dff38f7b2b6edee26d6472dc2a4de8d8024a0133",
+    "skills/data-formats/SKILL.md": "77c4a5b784dbf86662a41a85af489f9ce43136969e1cfc07fb8266db69508e6d",
+    "skills/zk-query-proofs/references/exact-temporals.md": "d2a3d1962caa359ae2ef89dd29ad669d6cd8626330c09ba569c830853ef4917c",
+    "zk/sparql-evaluator/host/tests/actual_temporal_lexical.rs": "a10d7a656ee0a322654a2bef9ecfadf170b73f8e662e4f79dbc8c8c7e94b5ff8",
+    "zk/sparql-evaluator/model/tests/temporal_lexical.rs": "5c47b43b2743054a827e0575e5665e74b06c80863645ba8151f8fcb26120c014"
+  },
+  "scope": [
+    "Raw temporal parsing and typed dateTime casts do not normalize whitespace.",
+    "Approximate and exact dateTimeStamp validity both require a timezone.",
+    "Explicit string-constructor preprocessing occurs before the sticky year-capacity check.",
+    "Temporal sidecar v3 invalidates padded/timezone-less values cached by v2; original archive bytes and RDF terms are preserved."
+  ],
+  "fixture": {
+    "complete_result_cases": 37,
+    "labeled_datatype_extension_cases_included": 7,
+    "separate_capacity_cases": 3,
+    "original_exact_temporal_fixture_unchanged": true,
+    "actual_guest_runner": "host/tests/actual_temporal_lexical.rs",
+    "actual_guest_executed": false
+  },
+  "native_validation": {
+    "core_and_storage_functions": 23,
+    "engine_functions": 9,
+    "model_functions": 35,
+    "core_engine_all_target_clippy": true,
+    "model_all_target_clippy": true,
+    "author_preflight": true,
+    "unsafe_gate": "passed"
+  },
+  "guards": [
+    {
+      "guard": "raw-temporal-padding",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "sparq-core",
+        "--test",
+        "temporal_lexical",
+        "raw_temporal_lexicals"
+      ],
+      "exit_code": 101,
+      "original_source_sha256": "a2ca58a79af0c1910b1f31b004ced1e0474a66fa1b71a281b5485c53ff971766",
+      "mutated_source_sha256": "66243194929118e4e14d419b3a986f62ec945825e62d85ab3f49261540b157c3",
+      "log": "/private/tmp/sparq-temporal-lexical-mutation-raw-temporal-padding.log",
+      "log_sha256": "fead986743d13f4e8676f71be155171fc8c11274b2cf702bb8c2f098df41fd85",
+      "restored_source_matches": true
+    },
+    {
+      "guard": "stale-cache-version",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "sparq-core",
+        "--features",
+        "mmap",
+        "--test",
+        "temporal_lexical_migration"
+      ],
+      "exit_code": 101,
+      "original_source_sha256": "870ebe196edce0bc86038d564e58012e85e08972b9cee46f7e47b1405845725c",
+      "mutated_source_sha256": "baba4e617df1d0f820d1063cdeb060b888529733ed8dc97a3543b2a886f311f9",
+      "log": "/private/tmp/sparq-temporal-lexical-mutation-stale-cache-version.log",
+      "log_sha256": "c511ef05b356ef50f6147812a5bbd735d72a559516b89aa8600b8221d257a0b0",
+      "restored_source_matches": true
+    },
+    {
+      "guard": "constructor-capacity",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "sparq-engine",
+        "--test",
+        "temporal_lexical",
+        "constructor_preprocessing_cannot_bypass_temporal_capacity"
+      ],
+      "exit_code": 101,
+      "original_source_sha256": "805695ae25254a21ce91278df5cc547b2aa3ebac25cfc8cef4467b3ed092d2d3",
+      "mutated_source_sha256": "04ba9c4f7d878b43a40b0c66feccb41961b21f152b81c3fa3eaffcc6917a8683",
+      "log": "/private/tmp/sparq-temporal-lexical-mutation-constructor-capacity.log",
+      "log_sha256": "fb4e392f7a22847660ed36135dcefc3a05482937c4a14c083f769bf0338128a5",
+      "restored_source_matches": true
+    }
+  ],
+  "cache_provenance": {
+    "final_rebuild": "Explicit native-dev cargo clean for core/substrate/engine/model in each existing engine and detached target, followed by restored scoped tests.",
+    "engine_clean": "17211 files, 4.8 GiB",
+    "model_clean": "710 files, 669.2 MiB",
+    "unaffected": "RISC0/toolchain caches, accepted guest exports and prior receipts were not cleaned or rebuilt.",
+    "prior_attempts": "Preliminary native checks are not the final source identity evidence. Own diff review restored an unintended numeric integer_argument edit before the final package rebuild; the peer numeric inventory collision is independently documented in its checkpoint."
+  },
+  "logs_sha256": {
+    "/private/tmp/sparq-temporal-lexical-scoped-clean.log": "3ebbb971fc74a0138e23c8c5495245933f1568e3328781ff077a55ca33f53f2b",
+    "/private/tmp/sparq-temporal-lexical-model-scoped-clean.log": "8f31e9d3fb59b9aebfce34b57413153a49c46149e75eaa8e54cd3ca0a2c26ae0",
+    "/private/tmp/sparq-temporal-lexical-core-final.log": "8b1fdad2931548c705b354487bbbb9c5c179012a2baf25b102b58881fa5db959",
+    "/private/tmp/sparq-temporal-lexical-engine-final.log": "377334fb22450fa2b0e773d1b3285dfdab6319ac569e87185b30cf5593c5b988",
+    "/private/tmp/sparq-temporal-lexical-clippy-final.log": "3ea00d9ade59206d41867d35b98c498e2cfd3a6e59416dca46a473bc817635e5",
+    "/private/tmp/sparq-temporal-lexical-model-rebuilt.log": "d0c4c97a122ff7a05cc14f09f514eb09370193e473da7bff7ad1030595702ac5",
+    "/private/tmp/sparq-temporal-lexical-model-rebuilt-clippy.log": "38d9a75ceee014a16bd395500a5219887c7724bd07c8e9c4431395d345cce0ff",
+    "/private/tmp/sparq-temporal-lexical-core-baseline.log": "c275c9da842e04dbc5900e9b5c0a413774d51231c220ffa24a1a73aa67c5dd4d",
+    "/private/tmp/sparq-temporal-lexical-engine-baseline.log": "7ac1d4d67ddd9b57db7456883d075d53f053554b67259a1f56e09c3af252cbe3",
+    "/private/tmp/sparq-temporal-constructor-capacity-baseline.log": "7039c45f0c0edeaaefec4407f14712d1324df60319221ecbd399c4bdb26be7b9",
+    "/private/tmp/sparq-temporal-lexical-mutations.json": "63901a68cd56d99fbeb044b442c6470bd4e5c1e01ea48638d5f60b0b0ac58719",
+    "/private/tmp/sparq-temporal-lexical-mutation-raw-temporal-padding.log": "fead986743d13f4e8676f71be155171fc8c11274b2cf702bb8c2f098df41fd85",
+    "/private/tmp/sparq-temporal-lexical-mutation-stale-cache-version.log": "c511ef05b356ef50f6147812a5bbd735d72a559516b89aa8600b8221d257a0b0",
+    "/private/tmp/sparq-temporal-lexical-mutation-constructor-capacity.log": "fb4e392f7a22847660ed36135dcefc3a05482937c4a14c083f769bf0338128a5",
+    "/private/tmp/sparq-temporal-lexical-preflight-final.log": "ec7499eb7d18b61e2e363377efc3ad5196ff67c358407bba047b5bfcc66be080",
+    "/private/tmp/sparq-temporal-lexical-unsafe.log": "9e3474e81f19f1a09bc5e1977c28112d58770ba823be8880debc457bce34aa72"
+  },
+  "publication_ready": false,
+  "new_guest_artifact": false,
+  "new_receipts": 0,
+  "pending": [
+    "Independent temporal source review.",
+    "Merge numeric/boolean raw lexical correction and explicit EBV dialect selection.",
+    "Add temporal discriminator to the preserved combined false-ASK fixture and versioned V2/V3 actual runners.",
+    "Compile/execute all guest corpora and required receipts on the new independently accepted artifact.",
+    "Required hosted conformance, dependency, feature-OFF and performance gates."
+  ]
+}

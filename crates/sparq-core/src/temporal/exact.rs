@@ -16,7 +16,11 @@ pub fn year_within_capacity(value: &str, datatype: &str, min: i64, max: i64) -> 
     if min > max {
         return false;
     }
-    let value = value.trim_matches([' ', '\t', '\r', '\n']);
+    // [GPT-6] Raw padded RDF lexicals are ill-typed, not oversized temporal values.
+    // String constructors apply their own preprocessing before producing a term.
+    if value.trim_matches([' ', '\t', '\r', '\n']) != value {
+        return true;
+    }
     let negative = value.starts_with('-');
     let unsigned = value.strip_prefix('-').unwrap_or(value);
     let Some((year, _)) = unsigned.split_once('-') else {
@@ -162,7 +166,7 @@ impl<'a> ExactTemporal<'a> {
 }
 
 // [GPT-6] Cache only owned scalar fields and offsets, never self-references.
-// Dictionary re-encoding preserves lexical bytes; appended IDs invalidate the memo.
+// Dictionary re-encoding preserves lexical bytes; appends extend an initialized memo.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct CacheCell {
     seconds: i128,

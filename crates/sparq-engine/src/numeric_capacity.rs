@@ -3,7 +3,7 @@
 use super::{budget, xsd, ArithOp, Dec, Literal, Num};
 
 pub(super) fn miss<T>() -> Option<T> {
-    let _ = budget::fail_capacity("numeric-representation");
+    let _ = budget::fail_capacity(crate::EvaluationCapacity::NumericRepresentation);
     None
 }
 

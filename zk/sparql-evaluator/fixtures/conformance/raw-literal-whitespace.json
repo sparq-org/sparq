@@ -1,0 +1,676 @@
+{
+  "authored_by": "GPT-6",
+  "sources": [
+    "https://www.w3.org/TR/rdf11-concepts/#section-Datatypes",
+    "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#ebv",
+    "https://www.w3.org/TR/2010/REC-xpath-functions-20101214/#casting-from-strings",
+    "https://www.w3.org/TR/2012/REC-xmlschema11-2-20120405/#lexical-space"
+  ],
+  "interpretation": "Raw RDF lexical validation is separate from XPath string-constructor XML whitespace preprocessing. Invalid numeric/boolean EBV is false under the published SPARQL1.1 Recommendation; arithmetic/cast errors become unbound or take COALESCE fallback. Exact term identity remains unchanged. Original manual goldens, not engine-generated answers. SPARQL1.2 invalid-boolean EBV expectations are a separate dialect boundary.",
+  "cases": [
+    {
+      "id": "raw-boolean-values",
+      "query": "SELECT (IF(?v,1,2) AS ?a) (!?v AS ?b) (?v && true AS ?c) (?v || false AS ?d) (?v = true AS ?e) (<http://www.w3.org/2001/XMLSchema#boolean>(?v) AS ?f) (<http://www.w3.org/2001/XMLSchema#integer>(?v) AS ?g) {VALUES ?v {\" true \"^^<http://www.w3.org/2001/XMLSchema#boolean>}}",
+      "dataset_ntriples": "",
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "a",
+            "b",
+            "c",
+            "d",
+            "e",
+            "f",
+            "g"
+          ],
+          "order": "Bag",
+          "rows": [
+            [
+              "\"2\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+              "\"true\"^^<http://www.w3.org/2001/XMLSchema#boolean>",
+              "\"false\"^^<http://www.w3.org/2001/XMLSchema#boolean>",
+              "\"false\"^^<http://www.w3.org/2001/XMLSchema#boolean>",
+              null,
+              null,
+              null
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "raw-boolean-stored",
+      "query": "SELECT (IF(?v,1,2) AS ?a) (!?v AS ?b) (?v && true AS ?c) (?v || false AS ?d) (?v = true AS ?e) (<http://www.w3.org/2001/XMLSchema#boolean>(?v) AS ?f) (<http://www.w3.org/2001/XMLSchema#integer>(?v) AS ?g) {?s ?p ?v}",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \" true \"^^<http://www.w3.org/2001/XMLSchema#boolean> .\n",
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "a",
+            "b",
+            "c",
+            "d",
+            "e",
+            "f",
+            "g"
+          ],
+          "order": "Bag",
+          "rows": [
+            [
+              "\"2\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+              "\"true\"^^<http://www.w3.org/2001/XMLSchema#boolean>",
+              "\"false\"^^<http://www.w3.org/2001/XMLSchema#boolean>",
+              "\"false\"^^<http://www.w3.org/2001/XMLSchema#boolean>",
+              null,
+              null,
+              null
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "raw-boolean-constant-ask",
+      "query": "ASK {FILTER(\"\\t1\\r\\n\"^^<http://www.w3.org/2001/XMLSchema#boolean>)}",
+      "dataset_ntriples": "",
+      "expected_result": {
+        "Ask": false
+      }
+    },
+    {
+      "id": "invalid-boolean-not-not",
+      "query": "SELECT (!(!\"z\"^^<http://www.w3.org/2001/XMLSchema#boolean>) AS ?v) {}",
+      "dataset_ntriples": "",
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "v"
+          ],
+          "order": "Bag",
+          "rows": [
+            [
+              "\"false\"^^<http://www.w3.org/2001/XMLSchema#boolean>"
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "valid-boolean-true",
+      "query": "SELECT (!(!\"true\"^^<http://www.w3.org/2001/XMLSchema#boolean>) AS ?v) {}",
+      "dataset_ntriples": "",
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "v"
+          ],
+          "order": "Bag",
+          "rows": [
+            [
+              "\"true\"^^<http://www.w3.org/2001/XMLSchema#boolean>"
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "valid-boolean-1",
+      "query": "SELECT (!(!\"1\"^^<http://www.w3.org/2001/XMLSchema#boolean>) AS ?v) {}",
+      "dataset_ntriples": "",
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "v"
+          ],
+          "order": "Bag",
+          "rows": [
+            [
+              "\"true\"^^<http://www.w3.org/2001/XMLSchema#boolean>"
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "valid-boolean-false",
+      "query": "SELECT (!(!\"false\"^^<http://www.w3.org/2001/XMLSchema#boolean>) AS ?v) {}",
+      "dataset_ntriples": "",
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "v"
+          ],
+          "order": "Bag",
+          "rows": [
+            [
+              "\"false\"^^<http://www.w3.org/2001/XMLSchema#boolean>"
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "valid-boolean-0",
+      "query": "SELECT (!(!\"0\"^^<http://www.w3.org/2001/XMLSchema#boolean>) AS ?v) {}",
+      "dataset_ntriples": "",
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "v"
+          ],
+          "order": "Bag",
+          "rows": [
+            [
+              "\"false\"^^<http://www.w3.org/2001/XMLSchema#boolean>"
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "raw-integer-values",
+      "query": "SELECT (ISNUMERIC(?v) AS ?a) (IF(?v,true,false) AS ?b) (?v = 1 AS ?c) (COALESCE(?v+1,7) AS ?d) (+?v AS ?e) (<http://www.w3.org/2001/XMLSchema#integer>(?v) AS ?f) {VALUES ?v {\" 1 \"^^<http://www.w3.org/2001/XMLSchema#integer>}}",
+      "dataset_ntriples": "",
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "a",
+            "b",
+            "c",
+            "d",
+            "e",
+            "f"
+          ],
+          "order": "Bag",
+          "rows": [
+            [
+              "\"false\"^^<http://www.w3.org/2001/XMLSchema#boolean>",
+              "\"false\"^^<http://www.w3.org/2001/XMLSchema#boolean>",
+              null,
+              "\"7\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+              null,
+              null
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "raw-integer-stored",
+      "query": "SELECT (ISNUMERIC(?v) AS ?a) (IF(?v,true,false) AS ?b) (?v = 1 AS ?c) (COALESCE(?v+1,7) AS ?d) (+?v AS ?e) (<http://www.w3.org/2001/XMLSchema#integer>(?v) AS ?f) {?s ?p ?v}",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \" 1 \"^^<http://www.w3.org/2001/XMLSchema#integer> .\n",
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "a",
+            "b",
+            "c",
+            "d",
+            "e",
+            "f"
+          ],
+          "order": "Bag",
+          "rows": [
+            [
+              "\"false\"^^<http://www.w3.org/2001/XMLSchema#boolean>",
+              "\"false\"^^<http://www.w3.org/2001/XMLSchema#boolean>",
+              null,
+              "\"7\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+              null,
+              null
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "raw-byte-values",
+      "query": "SELECT (ISNUMERIC(?v) AS ?a) (IF(?v,true,false) AS ?b) (?v = 1 AS ?c) (COALESCE(?v+1,7) AS ?d) (+?v AS ?e) (<http://www.w3.org/2001/XMLSchema#integer>(?v) AS ?f) {VALUES ?v {\" 1 \"^^<http://www.w3.org/2001/XMLSchema#byte>}}",
+      "dataset_ntriples": "",
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "a",
+            "b",
+            "c",
+            "d",
+            "e",
+            "f"
+          ],
+          "order": "Bag",
+          "rows": [
+            [
+              "\"false\"^^<http://www.w3.org/2001/XMLSchema#boolean>",
+              "\"false\"^^<http://www.w3.org/2001/XMLSchema#boolean>",
+              null,
+              "\"7\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+              null,
+              null
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "raw-byte-stored",
+      "query": "SELECT (ISNUMERIC(?v) AS ?a) (IF(?v,true,false) AS ?b) (?v = 1 AS ?c) (COALESCE(?v+1,7) AS ?d) (+?v AS ?e) (<http://www.w3.org/2001/XMLSchema#integer>(?v) AS ?f) {?s ?p ?v}",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \" 1 \"^^<http://www.w3.org/2001/XMLSchema#byte> .\n",
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "a",
+            "b",
+            "c",
+            "d",
+            "e",
+            "f"
+          ],
+          "order": "Bag",
+          "rows": [
+            [
+              "\"false\"^^<http://www.w3.org/2001/XMLSchema#boolean>",
+              "\"false\"^^<http://www.w3.org/2001/XMLSchema#boolean>",
+              null,
+              "\"7\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+              null,
+              null
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "raw-unsignedLong-values",
+      "query": "SELECT (ISNUMERIC(?v) AS ?a) (IF(?v,true,false) AS ?b) (?v = 1 AS ?c) (COALESCE(?v+1,7) AS ?d) (+?v AS ?e) (<http://www.w3.org/2001/XMLSchema#integer>(?v) AS ?f) {VALUES ?v {\" 1 \"^^<http://www.w3.org/2001/XMLSchema#unsignedLong>}}",
+      "dataset_ntriples": "",
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "a",
+            "b",
+            "c",
+            "d",
+            "e",
+            "f"
+          ],
+          "order": "Bag",
+          "rows": [
+            [
+              "\"false\"^^<http://www.w3.org/2001/XMLSchema#boolean>",
+              "\"false\"^^<http://www.w3.org/2001/XMLSchema#boolean>",
+              null,
+              "\"7\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+              null,
+              null
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "raw-unsignedLong-stored",
+      "query": "SELECT (ISNUMERIC(?v) AS ?a) (IF(?v,true,false) AS ?b) (?v = 1 AS ?c) (COALESCE(?v+1,7) AS ?d) (+?v AS ?e) (<http://www.w3.org/2001/XMLSchema#integer>(?v) AS ?f) {?s ?p ?v}",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \" 1 \"^^<http://www.w3.org/2001/XMLSchema#unsignedLong> .\n",
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "a",
+            "b",
+            "c",
+            "d",
+            "e",
+            "f"
+          ],
+          "order": "Bag",
+          "rows": [
+            [
+              "\"false\"^^<http://www.w3.org/2001/XMLSchema#boolean>",
+              "\"false\"^^<http://www.w3.org/2001/XMLSchema#boolean>",
+              null,
+              "\"7\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+              null,
+              null
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "raw-decimal-values",
+      "query": "SELECT (ISNUMERIC(?v) AS ?a) (IF(?v,true,false) AS ?b) (?v = 1 AS ?c) (COALESCE(?v+1,7) AS ?d) (+?v AS ?e) (<http://www.w3.org/2001/XMLSchema#integer>(?v) AS ?f) {VALUES ?v {\" 1 \"^^<http://www.w3.org/2001/XMLSchema#decimal>}}",
+      "dataset_ntriples": "",
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "a",
+            "b",
+            "c",
+            "d",
+            "e",
+            "f"
+          ],
+          "order": "Bag",
+          "rows": [
+            [
+              "\"false\"^^<http://www.w3.org/2001/XMLSchema#boolean>",
+              "\"false\"^^<http://www.w3.org/2001/XMLSchema#boolean>",
+              null,
+              "\"7\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+              null,
+              null
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "raw-decimal-stored",
+      "query": "SELECT (ISNUMERIC(?v) AS ?a) (IF(?v,true,false) AS ?b) (?v = 1 AS ?c) (COALESCE(?v+1,7) AS ?d) (+?v AS ?e) (<http://www.w3.org/2001/XMLSchema#integer>(?v) AS ?f) {?s ?p ?v}",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \" 1 \"^^<http://www.w3.org/2001/XMLSchema#decimal> .\n",
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "a",
+            "b",
+            "c",
+            "d",
+            "e",
+            "f"
+          ],
+          "order": "Bag",
+          "rows": [
+            [
+              "\"false\"^^<http://www.w3.org/2001/XMLSchema#boolean>",
+              "\"false\"^^<http://www.w3.org/2001/XMLSchema#boolean>",
+              null,
+              "\"7\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+              null,
+              null
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "raw-float-values",
+      "query": "SELECT (ISNUMERIC(?v) AS ?a) (IF(?v,true,false) AS ?b) (?v = 1 AS ?c) (COALESCE(?v+1,7) AS ?d) (+?v AS ?e) (<http://www.w3.org/2001/XMLSchema#integer>(?v) AS ?f) {VALUES ?v {\" 1 \"^^<http://www.w3.org/2001/XMLSchema#float>}}",
+      "dataset_ntriples": "",
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "a",
+            "b",
+            "c",
+            "d",
+            "e",
+            "f"
+          ],
+          "order": "Bag",
+          "rows": [
+            [
+              "\"false\"^^<http://www.w3.org/2001/XMLSchema#boolean>",
+              "\"false\"^^<http://www.w3.org/2001/XMLSchema#boolean>",
+              null,
+              "\"7\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+              null,
+              null
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "raw-float-stored",
+      "query": "SELECT (ISNUMERIC(?v) AS ?a) (IF(?v,true,false) AS ?b) (?v = 1 AS ?c) (COALESCE(?v+1,7) AS ?d) (+?v AS ?e) (<http://www.w3.org/2001/XMLSchema#integer>(?v) AS ?f) {?s ?p ?v}",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \" 1 \"^^<http://www.w3.org/2001/XMLSchema#float> .\n",
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "a",
+            "b",
+            "c",
+            "d",
+            "e",
+            "f"
+          ],
+          "order": "Bag",
+          "rows": [
+            [
+              "\"false\"^^<http://www.w3.org/2001/XMLSchema#boolean>",
+              "\"false\"^^<http://www.w3.org/2001/XMLSchema#boolean>",
+              null,
+              "\"7\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+              null,
+              null
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "raw-double-values",
+      "query": "SELECT (ISNUMERIC(?v) AS ?a) (IF(?v,true,false) AS ?b) (?v = 1 AS ?c) (COALESCE(?v+1,7) AS ?d) (+?v AS ?e) (<http://www.w3.org/2001/XMLSchema#integer>(?v) AS ?f) {VALUES ?v {\" 1 \"^^<http://www.w3.org/2001/XMLSchema#double>}}",
+      "dataset_ntriples": "",
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "a",
+            "b",
+            "c",
+            "d",
+            "e",
+            "f"
+          ],
+          "order": "Bag",
+          "rows": [
+            [
+              "\"false\"^^<http://www.w3.org/2001/XMLSchema#boolean>",
+              "\"false\"^^<http://www.w3.org/2001/XMLSchema#boolean>",
+              null,
+              "\"7\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+              null,
+              null
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "raw-double-stored",
+      "query": "SELECT (ISNUMERIC(?v) AS ?a) (IF(?v,true,false) AS ?b) (?v = 1 AS ?c) (COALESCE(?v+1,7) AS ?d) (+?v AS ?e) (<http://www.w3.org/2001/XMLSchema#integer>(?v) AS ?f) {?s ?p ?v}",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \" 1 \"^^<http://www.w3.org/2001/XMLSchema#double> .\n",
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "a",
+            "b",
+            "c",
+            "d",
+            "e",
+            "f"
+          ],
+          "order": "Bag",
+          "rows": [
+            [
+              "\"false\"^^<http://www.w3.org/2001/XMLSchema#boolean>",
+              "\"false\"^^<http://www.w3.org/2001/XMLSchema#boolean>",
+              null,
+              "\"7\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+              null,
+              null
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "constructor-xml-integer",
+      "query": "ASK {FILTER(<http://www.w3.org/2001/XMLSchema#integer>(\"\\t1\\r\\n\") = 1)}",
+      "dataset_ntriples": "",
+      "expected_result": {
+        "Ask": true
+      }
+    },
+    {
+      "id": "constructor-xml-decimal",
+      "query": "ASK {FILTER(<http://www.w3.org/2001/XMLSchema#decimal>(\"\\t1\\r\\n\") = 1)}",
+      "dataset_ntriples": "",
+      "expected_result": {
+        "Ask": true
+      }
+    },
+    {
+      "id": "constructor-xml-float",
+      "query": "ASK {FILTER(<http://www.w3.org/2001/XMLSchema#float>(\"\\t1\\r\\n\") = 1)}",
+      "dataset_ntriples": "",
+      "expected_result": {
+        "Ask": true
+      }
+    },
+    {
+      "id": "constructor-xml-double",
+      "query": "ASK {FILTER(<http://www.w3.org/2001/XMLSchema#double>(\"\\t1\\r\\n\") = 1)}",
+      "dataset_ntriples": "",
+      "expected_result": {
+        "Ask": true
+      }
+    },
+    {
+      "id": "constructor-xml-boolean-true",
+      "query": "SELECT (<http://www.w3.org/2001/XMLSchema#boolean>(\" true \") AS ?v) {}",
+      "dataset_ntriples": "",
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "v"
+          ],
+          "order": "Bag",
+          "rows": [
+            [
+              "\"true\"^^<http://www.w3.org/2001/XMLSchema#boolean>"
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "constructor-xml-boolean-false",
+      "query": "SELECT (<http://www.w3.org/2001/XMLSchema#boolean>(\" false \") AS ?v) {}",
+      "dataset_ntriples": "",
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "v"
+          ],
+          "order": "Bag",
+          "rows": [
+            [
+              "\"false\"^^<http://www.w3.org/2001/XMLSchema#boolean>"
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "constructor-nbsp-decimal",
+      "query": "SELECT (<http://www.w3.org/2001/XMLSchema#decimal>(\" 1\") AS ?v) {}",
+      "dataset_ntriples": "",
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "v"
+          ],
+          "order": "Bag",
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "constructor-nbsp-boolean",
+      "query": "SELECT (<http://www.w3.org/2001/XMLSchema#boolean>(\" true\") AS ?v) {}",
+      "dataset_ntriples": "",
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "v"
+          ],
+          "order": "Bag",
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "raw-term-identity",
+      "query": "SELECT ?v (STR(?v) AS ?s) (sameTerm(?v,\" 1 \"^^<http://www.w3.org/2001/XMLSchema#integer>) AS ?same) {VALUES ?v {\" 1 \"^^<http://www.w3.org/2001/XMLSchema#integer>}}",
+      "dataset_ntriples": "",
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "v",
+            "s",
+            "same"
+          ],
+          "order": "Bag",
+          "rows": [
+            [
+              "\" 1 \"^^<http://www.w3.org/2001/XMLSchema#integer>",
+              "\" 1 \"",
+              "\"true\"^^<http://www.w3.org/2001/XMLSchema#boolean>"
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "unsigned-modern-sign-plus",
+      "query": "SELECT (ISNUMERIC(\"+1\"^^<http://www.w3.org/2001/XMLSchema#unsignedLong>) AS ?v) {}",
+      "dataset_ntriples": "",
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "v"
+          ],
+          "order": "Bag",
+          "rows": [
+            [
+              "\"true\"^^<http://www.w3.org/2001/XMLSchema#boolean>"
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "unsigned-modern-sign-minuszero",
+      "query": "SELECT (ISNUMERIC(\"-0\"^^<http://www.w3.org/2001/XMLSchema#unsignedLong>) AS ?v) {}",
+      "dataset_ntriples": "",
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "v"
+          ],
+          "order": "Bag",
+          "rows": [
+            [
+              "\"true\"^^<http://www.w3.org/2001/XMLSchema#boolean>"
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "raw-numeric-constant-ask",
+      "query": "ASK {FILTER(ISNUMERIC(\" 1 \"^^<http://www.w3.org/2001/XMLSchema#integer>))}",
+      "dataset_ntriples": "",
+      "expected_result": {
+        "Ask": false
+      }
+    }
+  ]
+}

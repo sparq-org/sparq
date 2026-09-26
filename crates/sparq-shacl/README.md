@@ -95,7 +95,7 @@ and call `validate_with_model`. CLI: `cargo run -p sparq-shacl --example validat
 ## 📚 Learn more
 
 - **How-to** — [`skills/shacl-validation/SKILL.md`](../../skills/shacl-validation/SKILL.md)
-  (the exhaustive supported-constraint list and the report shape).
+  (the exhaustive supported-constraint list and the report shape). [GPT-6] SPARQL constraints, validators and targets retain VERSION metadata through prebinding. Unsupported labels use the existing ill-formed-shape policy; see the [EBV dialect contract](../../skills/sparql-query/ebv-dialects.md).
 - **API reference** — [docs.rs/sparq-shacl](https://docs.rs/sparq-shacl).
 - **Spec** — W3C SHACL (Core, SPARQL, AF); the surface is pinned by [`tests/`](tests/).
 - **Contribute** — [`AGENTS.md`](../../AGENTS.md).

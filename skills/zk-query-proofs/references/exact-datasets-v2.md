@@ -83,6 +83,24 @@ not cryptographic receipts.
 dataset-reference capacity boundary. `host/tests/real_datasets.rs` defines the two
 V2 receipt fixtures, catalog/framing negatives and V1/V2 wire checks. All V1 host
 tests remain required on the changed dual-version guest image.
+`model/tests/v2_exists.rs` preserves the eight MINUS goldens and the shared
+8-admitted/12-rejected captured-BOUND matrix. `host/tests/actual_v2_exists.rs`
+submits those complete inputs to the actual V2 guest and requires typed relation
+rejections. These later definitions require new execution evidence; they do not
+retroactively extend the historical 048 campaign.
+The exact numeric EBV corpus runs in `model/tests/v2_numeric_ebv.rs` and
+`host/tests/actual_v2_numeric_ebv.rs`: 17 REC-derived results and three arithmetic
+capacity rejections, with full input/result binding. Lexical EBV itself requires
+no finite arithmetic conversion. These new actual-guest definitions are pending
+execution at the corrected image; historical receipts do not cover them.
+`v2_nullable_alternatives.rs` and its actual-guest counterpart preserve the
+15 path results, one row-budget rejection and six inherited exclusions. The
+actual runner also submits the original core/query/two-row golden; V2 native
+conformance retains that same case. These definitions need new-artifact execution.
+`v2_raw_literal_whitespace.rs` and `v2_temporal_lexical.rs` add the same 32 raw
+numeric/boolean results and 37 temporal results plus three constructor-capacity
+rejections. Corresponding `actual_v2_*` host runners bind full V2 inputs/journals;
+their new guest execution remains pending the common dialect/source freeze.
 The shared builtin matrix also runs under both versions in native model tests
 and `host/tests/actual_builtin_edges.rs`, authenticating each case's optional
 stored source before execution. REC-derived errors and finite-capacity controls

@@ -91,7 +91,7 @@ dependencies = [
  "educe",
  "fnv",
  "hashbrown 0.15.5",
- "itertools",
+ "itertools 0.13.0",
  "num-bigint",
  "num-integer",
  "num-traits",
@@ -111,7 +111,7 @@ dependencies = [
  "arrayvec",
  "digest 0.10.7",
  "educe",
- "itertools",
+ "itertools 0.13.0",
  "num-bigint",
  "num-traits",
  "paste",
@@ -255,6 +255,12 @@ name = "autocfg"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
+
+[[package]]
+name = "base16ct"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4c7f02d4ea65f2c1853089ffd8d2787bdbc63de2f0d29dedbcf8ccdfa0ccd4cf"
 
 [[package]]
 name = "bit-vec"
@@ -734,6 +740,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "itertools"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b192c782037fadd9cfa75548310488aabdbf3d2da73885b31bd0abd03351285"
+dependencies = [
+ "either",
+]
+
+[[package]]
 name = "itoa"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -920,6 +935,18 @@ checksum = "54b4ed3a7192fa19f5f48f99871f2755047fabefd7f222f12a1df1773796a102"
 
 [[package]]
 name = "oxrdf"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a04761319ef84de1f59782f189d072cbfc3a9a40c4e8bded8667202fbd35b02a"
+dependencies = [
+ "oxilangtag",
+ "oxiri",
+ "rand 0.8.8",
+ "thiserror",
+]
+
+[[package]]
+name = "oxrdf"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0afd5c28e4a399c57ee2bc3accd40c7b671fdc7b6537499f14e95b265af7d7e0"
@@ -932,6 +959,19 @@ dependencies = [
 
 [[package]]
 name = "oxttl"
+version = "0.1.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0d385f1776d7cace455ef6b7c54407838eff902ca897303d06eb12a26f4cf8a0"
+dependencies = [
+ "memchr",
+ "oxilangtag",
+ "oxiri",
+ "oxrdf 0.2.4",
+ "thiserror",
+]
+
+[[package]]
+name = "oxttl"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f03fd471bd54c23d76631c0a2677aa4bb308d905f6e491ee35dcb0732b7c5c6c"
@@ -939,7 +979,7 @@ dependencies = [
  "memchr",
  "oxilangtag",
  "oxiri",
- "oxrdf",
+ "oxrdf 0.3.3",
  "thiserror",
 ]
 
@@ -1062,6 +1102,7 @@ version = "0.8.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e058c7de0b26af77780c769414d6257830bb240f3c38477dbc2c16e5f54d6d4c"
 dependencies = [
+ "libc",
  "rand_chacha 0.3.1",
  "rand_core 0.6.4",
 ]
@@ -1101,6 +1142,9 @@ name = "rand_core"
 version = "0.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
+dependencies = [
+ "getrandom 0.2.17",
+]
 
 [[package]]
 name = "rand_core"
@@ -1118,6 +1162,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "513962919efc330f829edb2535844d1b912b0fbe2ca165d613e4e8788bb05a5a"
 dependencies = [
  "rand_core 0.9.5",
+]
+
+[[package]]
+name = "rdf-canon"
+version = "0.15.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6783be73f4fa73010f249412ad8f0bb1ac9cdb22b2310bf20a967d80d5906dd0"
+dependencies = [
+ "base16ct",
+ "digest 0.10.7",
+ "itertools 0.14.0",
+ "oxrdf 0.2.4",
+ "sha2 0.10.9",
+ "thiserror",
+ "tracing",
 ]
 
 [[package]]
@@ -1471,10 +1530,23 @@ version = "0.4.6"
 dependencies = [
  "oxilangtag",
  "oxiri",
- "oxrdf",
+ "oxrdf 0.3.3",
  "peg",
  "rand 0.9.5",
  "thiserror",
+]
+
+[[package]]
+name = "sparq-canon"
+version = "0.1.1"
+dependencies = [
+ "digest 0.10.7",
+ "oxrdf 0.2.4",
+ "oxrdf 0.3.3",
+ "oxttl 0.1.8",
+ "oxttl 0.2.3",
+ "rdf-canon",
+ "sparq-core",
 ]
 
 [[package]]
@@ -1482,8 +1554,8 @@ name = "sparq-core"
 version = "0.1.1"
 dependencies = [
  "hashbrown 0.17.1",
- "oxrdf",
- "oxttl",
+ "oxrdf 0.3.3",
+ "oxttl 0.2.3",
  "rustc-hash",
 ]
 
@@ -1493,7 +1565,7 @@ version = "0.1.1"
 dependencies = [
  "md-5",
  "oxiri",
- "oxrdf",
+ "oxrdf 0.3.3",
  "regex",
  "rustc-hash",
  "sha1",
@@ -1517,12 +1589,13 @@ dependencies = [
 name = "sparq-proved-evaluator-model"
 version = "0.1.0"
 dependencies = [
- "oxrdf",
- "oxttl",
+ "oxrdf 0.3.3",
+ "oxttl 0.2.3",
  "serde",
  "serde_json",
  "sha2 0.10.9",
  "spargebra",
+ "sparq-canon",
  "sparq-core",
  "sparq-engine",
 ]
@@ -1532,7 +1605,7 @@ name = "sparq-substrate"
 version = "0.1.1"
 dependencies = [
  "hashbrown 0.17.1",
- "oxrdf",
+ "oxrdf 0.3.3",
  "rustc-hash",
  "smallvec",
  "sparq-core",

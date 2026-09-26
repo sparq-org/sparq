@@ -104,7 +104,7 @@ smoke test (`tests/wasm_materialize.rs`, `wasm-pack test --node`) guards it. Den
 
 - **How-to** — [`skills/access-control/SKILL.md`](../../skills/access-control/SKILL.md) (public API,
   WAC/ACP notes, conformance harnesses + the differential oracle, the **request-pipeline / WAC-Allow
-  example**, ODRL-bridge mapping detail).
+  example**, ODRL-bridge mapping detail). [GPT-6] Authorized query rewrites preserve validated VERSION announcements. Update authorization refuses unsupported announcements; UPDATE remains REC 2013 only. See the [EBV dialect contract](../../skills/sparql-query/ebv-dialects.md).
 - **Design + threat model** —
   [`research/solid-access-control-design.md`](../../research/solid-access-control-design.md) (model,
   matrix, strata, boundaries) + [scope](../../research/sparq-solid-scope.md).

@@ -230,6 +230,21 @@ async fn direct_no_leak_matches_ldp_get_authorization() {
     );
 }
 
+// [GPT-6] Dataset assembly must not erase the request's VERSION contract.
+#[tokio::test]
+async fn endpoint_preserves_version_ebv_and_rejects_unknown_labels() {
+    let harness = Harness::new(false, false).await;
+    for (version, expected) in [("1.1", true), ("1.2", false)] {
+        let query = format!("VERSION '{version}' ASK {{ FILTER(!\"z\"^^<http://www.w3.org/2001/XMLSchema#boolean>) }}");
+        let response = harness.direct_query(&query).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(json(response).await["boolean"], expected);
+    }
+    for prologue in ["VERSION 'bogus'", "VERSION '1.1' VERSION '1.2'"] {
+        assert_eq!(harness.direct_query(&format!("{prologue} ASK {{}}")).await.status(), StatusCode::BAD_REQUEST);
+    }
+}
+
 #[tokio::test]
 async fn negation_cannot_distinguish_an_unreadable_resource_from_absence() {
     let with_secret = Harness::new(true, false).await;

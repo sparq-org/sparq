@@ -7,6 +7,10 @@ description: "Use the sparq RDF + SPARQL engine from Python (PyPI distribution `
 
 Python bindings (pyo3 + maturin) for the sparq RDF+SPARQL engine: a dictionary-encoded triplestore with SPARQL 1.1 query/update over the full dataset (named graphs included), opt-in RDFS / OWL-RL / Notation3 reasoning with OWL inconsistency reporting, and opt-in BM25 full-text search. Everything is reached through one class, `sparq.Graph`. The PyPI **distribution** name is `sparq-rdf` (`pip install sparq-rdf`), but the **import** name is `sparq` (`import sparq`) — the two intentionally differ because the bare `sparq` distribution name is taken on PyPI by an unrelated package.
 
+[GPT-6] Query entry points and structural rewrites retain VERSION announcements;
+see the [version-pinned EBV rules](../sparql-query/ebv-dialects.md). Unsupported
+or incompatible labels do not silently select REC 2013.
+
 ## Quickstart
 
 Install (no published wheel may be available yet — Alpha; build from the repo with maturin):

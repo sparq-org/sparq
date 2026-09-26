@@ -17,16 +17,25 @@ const TEMPORAL_YEAR_RANGE: (i64, i64) = (1, 1_000_000_000);
 /// functions, unsupported RDF 1.2 terms, and resource exhaustion.
 pub fn admit(request: &Request) -> Result<(), Rejected> {
     validate_request(request)?;
-    let query = spargebra::SparqlParser::new()
-        .parse_query(&request.query)
+    let prepared = sparq_engine::PreparedQuery::parse(&request.query)
         .map_err(|_| Rejected("SPARQL parse rejected"))?;
-    admit_query(&query, DatasetProfile::DefaultOnly)
+    prepared.resolve_ebv_semantics(Some(sparq_engine::EbvSemantics::Rec2013))
+        .map_err(|_| Rejected("query VERSION contradicts REC 2013 profile"))?;
+    admit_query(prepared.query(), DatasetProfile::DefaultOnly)
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DatasetProfile {
     DefaultOnly,
     NamedCatalog,
+    GraphResults,
+    GraphResultsBlankFree,
+}
+
+impl DatasetProfile {
+    fn graph_results(self) -> bool {
+        matches!(self, Self::GraphResults | Self::GraphResultsBlankFree)
+    }
 }
 
 pub(crate) fn admit_query(
@@ -43,36 +52,46 @@ pub(crate) fn admit_query(
     }
     let pattern = match query {
         spargebra::Query::Select { pattern, .. } | spargebra::Query::Ask { pattern, .. } => pattern,
+        spargebra::Query::Construct { template, pattern, .. } if profile.graph_results() => {
+            if template.len() > 64 { return Err(Rejected("V3 template capacity")); }
+            for triple in template {
+                pattern_term(&triple.subject, profile)?;
+                pattern_term(&triple.object, profile)?;
+            }
+            pattern
+        }
+        spargebra::Query::Describe { pattern, .. } if profile.graph_results() => pattern,
         _ => return Err(Rejected("only SELECT and ASK are admitted")),
     };
     enum Visit<'a> {
         Pattern(&'a GraphPattern),
-        Expression(&'a Expression),
+        Expression(&'a Expression, &'a GraphPattern),
         Path(&'a PropertyPathExpression),
         ExitExists,
     }
     let mut pending = vec![Visit::Pattern(pattern)];
     let mut fuel = 0;
-    let mut in_exists = false;
+    let mut exists_captures: Option<std::collections::BTreeSet<&oxrdf::Variable>> = None;
     while let Some(node) = pending.pop() {
         fuel += 1;
         if fuel > 1024 {
             return Err(Rejected("query AST capacity"));
         }
         match node {
-            Visit::ExitExists => in_exists = false,
+            Visit::ExitExists => exists_captures = None,
             Visit::Pattern(p)
-                if in_exists
+                if exists_captures.is_some()
                     && !matches!(
                         p,
                         GraphPattern::Bgp { .. }
                             | GraphPattern::Join { .. }
                             | GraphPattern::Union { .. }
                             | GraphPattern::Filter { .. }
+                            | GraphPattern::Minus { .. }
                     ) =>
             {
                 return Err(Rejected(
-                    "EXISTS body is outside the positive-pattern profile",
+                    "EXISTS body is outside the supported substitution profile",
                 ));
             }
             Visit::Pattern(p) => match p {
@@ -81,8 +100,8 @@ pub(crate) fn admit_query(
                         return Err(Rejected("BGP capacity"));
                     }
                     for p in patterns {
-                        pattern_term(&p.subject)?;
-                        pattern_term(&p.object)?;
+                        pattern_term(&p.subject, profile)?;
+                        pattern_term(&p.object, profile)?;
                     }
                 }
                 GraphPattern::Path {
@@ -90,10 +109,10 @@ pub(crate) fn admit_query(
                     path,
                     object,
                 } => {
-                    pattern_term(subject)?;
-                    pattern_term(object)?;
+                    pattern_term(subject, profile)?;
+                    pattern_term(object, profile)?;
                     // Lowered sequence intermediates must not hide nullable
-                    // composition whose absent-constant behavior is unresolved.
+                    // composition outside this bounded admitted slice.
                     if path_nullable(path)
                         && (internal_path_node(subject) || internal_path_node(object))
                     {
@@ -113,16 +132,16 @@ pub(crate) fn admit_query(
                 } => {
                     pending.extend([Visit::Pattern(left), Visit::Pattern(right)]);
                     if let Some(e) = expression {
-                        pending.push(Visit::Expression(e));
+                        pending.push(Visit::Expression(e, p));
                     }
                 }
                 GraphPattern::Filter { expr, inner } => {
-                    pending.extend([Visit::Pattern(inner), Visit::Expression(expr)]);
+                    pending.extend([Visit::Pattern(inner), Visit::Expression(expr, inner)]);
                 }
                 GraphPattern::Extend {
                     inner, expression, ..
                 } => {
-                    pending.extend([Visit::Pattern(inner), Visit::Expression(expression)]);
+                    pending.extend([Visit::Pattern(inner), Visit::Expression(expression, inner)]);
                 }
                 GraphPattern::Project { inner, variables } => {
                     if variables.len() > 64 {
@@ -137,7 +156,7 @@ pub(crate) fn admit_query(
                     pending.push(Visit::Pattern(inner));
                     for e in expression {
                         let (OrderExpression::Asc(e) | OrderExpression::Desc(e)) = e;
-                        pending.push(Visit::Expression(e));
+                        pending.push(Visit::Expression(e, inner));
                     }
                 }
                 GraphPattern::Group {
@@ -150,7 +169,7 @@ pub(crate) fn admit_query(
                             if matches!(name, AggregateFunction::Custom(_)) {
                                 return Err(Rejected("custom aggregate is not admitted"));
                             }
-                            pending.push(Visit::Expression(expr));
+                            pending.push(Visit::Expression(expr, inner));
                         }
                     }
                 }
@@ -171,7 +190,7 @@ pub(crate) fn admit_query(
                         }
                     }
                 }
-                GraphPattern::Graph { inner, .. } if profile == DatasetProfile::NamedCatalog => {
+                GraphPattern::Graph { inner, .. } if profile != DatasetProfile::DefaultOnly => {
                     pending.push(Visit::Pattern(inner));
                 }
                 GraphPattern::Graph { .. }
@@ -180,9 +199,21 @@ pub(crate) fn admit_query(
                     return Err(Rejected("GRAPH, SERVICE and LATERAL are not admitted"));
                 }
             },
-            Visit::Expression(e) => match e {
+            Visit::Expression(e, scope) => match e {
                 Expression::Literal(l) => literal(l)?,
-                Expression::NamedNode(_) | Expression::Variable(_) | Expression::Bound(_) => {}
+                Expression::NamedNode(_) | Expression::Variable(_) => {}
+                Expression::Bound(variable) => {
+                    // [GPT-6] Literal 2013 substitution has no BOUND(term) rule.
+                    // Reject possible captures, while preserving body-local BOUND.
+                    if exists_captures
+                        .as_ref()
+                        .is_some_and(|vars| vars.contains(variable))
+                    {
+                        return Err(Rejected(
+                            "captured BOUND is outside the SPARQL 1.1 substitution profile",
+                        ));
+                    }
+                }
                 Expression::Or(a, b)
                 | Expression::And(a, b)
                 | Expression::Equal(a, b)
@@ -195,30 +226,41 @@ pub(crate) fn admit_query(
                 | Expression::Subtract(a, b)
                 | Expression::Multiply(a, b)
                 | Expression::Divide(a, b) => {
-                    pending.extend([Visit::Expression(a), Visit::Expression(b)]);
+                    pending.extend([Visit::Expression(a, scope), Visit::Expression(b, scope)]);
                 }
                 Expression::UnaryPlus(e) | Expression::UnaryMinus(e) | Expression::Not(e) => {
-                    pending.push(Visit::Expression(e))
+                    pending.push(Visit::Expression(e, scope))
                 }
                 Expression::Exists(p) => {
-                    if in_exists {
+                    if profile == DatasetProfile::GraphResults {
+                        return Err(Rejected("V3 EXISTS blank-node correlation is not admitted"));
+                    }
+                    if exists_captures.is_some() {
                         return Err(Rejected("nested EXISTS is not admitted"));
                     }
                     // LIFO exit marker keeps this context around the complete
                     // subtree, including FILTER operands and UNION branches.
-                    in_exists = true;
+                    let mut captures = std::collections::BTreeSet::new();
+                    // Input scope honors subquery projection and MINUS domains;
+                    // a possibly unbound variable still counts as a potential capture.
+                    scope.on_in_scope_variable(|variable| {
+                        captures.insert(variable);
+                    });
+                    exists_captures = Some(captures);
                     pending.extend([Visit::ExitExists, Visit::Pattern(p)]);
                 }
                 Expression::If(a, b, c) => pending.extend([
-                    Visit::Expression(a),
-                    Visit::Expression(b),
-                    Visit::Expression(c),
+                    Visit::Expression(a, scope),
+                    Visit::Expression(b, scope),
+                    Visit::Expression(c, scope),
                 ]),
                 Expression::In(e, args) => {
-                    pending.push(Visit::Expression(e));
-                    pending.extend(args.iter().map(Visit::Expression));
+                    pending.push(Visit::Expression(e, scope));
+                    pending.extend(args.iter().map(|e| Visit::Expression(e, scope)));
                 }
-                Expression::Coalesce(args) => pending.extend(args.iter().map(Visit::Expression)),
+                Expression::Coalesce(args) => {
+                    pending.extend(args.iter().map(|e| Visit::Expression(e, scope)))
+                }
                 Expression::FunctionCall(f, args) => {
                     match f {
                         Function::Now
@@ -255,14 +297,19 @@ pub(crate) fn admit_query(
                         }
                         _ => {}
                     }
-                    pending.extend(args.iter().map(Visit::Expression));
+                    pending.extend(args.iter().map(|e| Visit::Expression(e, scope)));
                 }
             },
             Visit::Path(p) => match p {
                 PropertyPathExpression::NamedNode(_)
                 | PropertyPathExpression::NegatedPropertySet(_) => {}
-                PropertyPathExpression::Reverse(p)
-                | PropertyPathExpression::ZeroOrMore(p)
+                // [GPT-6] Inverse swaps endpoint roles; alternative is bag union. Neither
+                // introduces the variable midpoint of a path sequence.
+                PropertyPathExpression::Reverse(p) => pending.push(Visit::Path(p)),
+                PropertyPathExpression::Alternative(a, b) => {
+                    pending.extend([Visit::Path(a), Visit::Path(b)]);
+                }
+                PropertyPathExpression::ZeroOrMore(p)
                 | PropertyPathExpression::OneOrMore(p)
                 | PropertyPathExpression::ZeroOrOne(p) => {
                     if path_nullable(p) {
@@ -270,8 +317,7 @@ pub(crate) fn admit_query(
                     }
                     pending.push(Visit::Path(p));
                 }
-                PropertyPathExpression::Sequence(a, b)
-                | PropertyPathExpression::Alternative(a, b) => {
+                PropertyPathExpression::Sequence(a, b) => {
                     if path_nullable(a) || path_nullable(b) {
                         return Err(Rejected("nullable path composition is not admitted"));
                     }
@@ -299,7 +345,7 @@ fn path_nullable(path: &PropertyPathExpression) -> bool {
     }
 }
 
-fn literal(l: &Literal) -> Result<(), Rejected> {
+pub(crate) fn literal(l: &Literal) -> Result<(), Rejected> {
     if l.direction().is_some() {
         Err(Rejected("directional literals are not admitted"))
     } else if !sparq_core::temporal::year_within_capacity(
@@ -311,13 +357,13 @@ fn literal(l: &Literal) -> Result<(), Rejected> {
     }
 }
 
-fn pattern_term(term: &TermPattern) -> Result<(), Rejected> {
+fn pattern_term(term: &TermPattern, profile: DatasetProfile) -> Result<(), Rejected> {
     match term {
         TermPattern::NamedNode(_) | TermPattern::Variable(_) => Ok(()),
         // The opt-in vendored parser creates these only when lowering a fixed
         // path sequence. Its leading # is forbidden in source blank-node labels.
         // They bind existential intermediates, never RDF blank-node identities.
-        TermPattern::BlankNode(_) if internal_path_node(term) => Ok(()),
+        TermPattern::BlankNode(_) if internal_path_node(term) || profile.graph_results() => Ok(()),
         TermPattern::Literal(l) => literal(l),
         _ => Err(Rejected(
             "query blank nodes and triple terms are not admitted",
@@ -334,7 +380,7 @@ pub(crate) fn term_string(term: &Term) -> Result<String, Rejected> {
     Ok(term.to_string())
 }
 
-fn ordered(mut p: &GraphPattern) -> bool {
+pub(crate) fn ordered(mut p: &GraphPattern) -> bool {
     let mut projected = false;
     loop {
         p = match p {
@@ -362,6 +408,19 @@ fn ordered(mut p: &GraphPattern) -> bool {
 /// # Errors
 /// Rejects mismatched anchors, unsupported queries/data, or evaluation/resource errors.
 pub fn evaluate(witness: &Witness) -> Result<Journal, Rejected> {
+    evaluate_detailed(witness).map_err(Rejected::from)
+}
+
+/// [GPT-6] Evaluates the same relation while retaining typed execution causes.
+///
+/// Request, dataset and journal encodings are identical to [`evaluate`].
+/// Private execution diagnostics are discarded; a cause comes from the actual
+/// engine emitter, never from a diagnostic substring.
+///
+/// # Errors
+/// Returns an existing relation rejection, typed capacity/budget cause, or an
+/// ordinary whole-query execution failure. Expression errors remain SPARQL data.
+pub fn evaluate_detailed(witness: &Witness) -> Result<Journal, EvaluationError> {
     validate_request(&witness.request)?;
     let request = &witness.request;
     let commitment = dataset_commitment(&witness.dataset, &request.policy)?;
@@ -370,7 +429,7 @@ pub fn evaluate(witness: &Witness) -> Result<Journal, Rejected> {
             commitment: expected,
         } => {
             if commitment != expected {
-                return Err(Rejected("complete dataset anchor mismatch"));
+                return Err(Rejected("complete dataset anchor mismatch").into());
             }
             Provenance::VerifierAcceptedCommitment
         }
@@ -384,10 +443,10 @@ pub fn evaluate(witness: &Witness) -> Result<Journal, Rejected> {
     for triple in oxttl::NTriplesParser::new().for_slice(witness.dataset.ntriples.as_bytes()) {
         let triple = triple.map_err(|_| Rejected("N-Triples parse rejected"))?;
         if triples.len() >= request.policy.max_triples as usize {
-            return Err(Rejected("source triple capacity"));
+            return Err(Rejected("source triple capacity").into());
         }
         let NamedOrBlankNode::NamedNode(subject) = triple.subject else {
-            return Err(Rejected("dataset blank nodes are not admitted"));
+            return Err(Rejected("dataset blank nodes are not admitted").into());
         };
         term_string(&triple.object)?;
         triples.push([
@@ -397,7 +456,7 @@ pub fn evaluate(witness: &Witness) -> Result<Journal, Rejected> {
         ]);
     }
     let graph = Graph::from_parts(dict, triples);
-    let result = execute(&graph, &prepared, request.policy.max_rows)?;
+    let result = execute_detailed(&graph, &prepared, request.policy.max_rows)?;
     Ok(Journal {
         version: VERSION,
         request_digest: request_digest(request)?,
@@ -407,23 +466,15 @@ pub fn evaluate(witness: &Witness) -> Result<Journal, Rejected> {
     })
 }
 
-pub(crate) fn execute(
+pub(crate) fn execute_detailed(
     graph: &Graph,
     prepared: &sparq_engine::PreparedQuery,
     max_rows: u32,
-) -> Result<CanonicalResult, Rejected> {
-    let budget = sparq_engine::QueryBudget {
-        max_rows: Some(max_rows as usize),
-        temporal_year_range: Some(TEMPORAL_YEAR_RANGE),
-        strict_numeric_capacity: true,
-        // Bound computed terms as well as row counts; this is an estimate, not RSS.
-        max_bytes: Some(4 * MAX_DATASET_BYTES as usize),
-        ..Default::default()
-    };
-    let result = sparq_engine::query_prepared_with_budget(graph, prepared, &budget)
-        .map_err(|_| Rejected("query evaluation or resource budget rejected"))?;
+) -> Result<CanonicalResult, EvaluationError> {
+    let budget = query_budget(max_rows);
+    let result = sparq_engine::query_prepared_with_budget_detailed(graph, prepared, &budget)?;
     if result.rows.len() > max_rows as usize {
-        return Err(Rejected("result row capacity"));
+        return Err(Rejected("result row capacity").into());
     }
     let result = match prepared.query() {
         spargebra::Query::Ask { .. } => CanonicalResult::Ask(!result.rows.is_empty()),
@@ -451,7 +502,19 @@ pub(crate) fn execute(
                 rows,
             }
         }
-        _ => return Err(Rejected("query form rejected")),
+        _ => return Err(Rejected("query form rejected").into()),
     };
     Ok(result)
+}
+
+pub(crate) fn query_budget(max_rows: u32) -> sparq_engine::QueryBudget {
+    sparq_engine::QueryBudget {
+        max_rows: Some(max_rows as usize),
+        temporal_year_range: Some(TEMPORAL_YEAR_RANGE),
+        strict_numeric_capacity: true,
+        ebv_semantics: Some(sparq_engine::EbvSemantics::Rec2013),
+        // Bound computed terms as well as row counts; this is an estimate, not RSS.
+        max_bytes: Some(4 * MAX_DATASET_BYTES as usize),
+        ..Default::default()
+    }
 }
