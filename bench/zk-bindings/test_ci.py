@@ -3,7 +3,7 @@ import copy
 from pathlib import Path
 import unittest
 
-from ci import check_inventory
+from ci import PUBLIC_PATTERN_NATIVE, check_inventory, check_public_pattern_scopes
 
 
 class CiTests(unittest.TestCase):
@@ -25,6 +25,31 @@ class CiTests(unittest.TestCase):
         self.report["totals"]["unexpected"] = self.report["totals"]["noir_unsigned"]
         with self.assertRaisesRegex(ValueError, "denominator"):
             check_inventory(self.report, self.expected)
+
+    def test_public_pattern_native_scopes_are_exact(self):
+        # [OPUS-5.5] beadzkp-15.1.1: counts are re-derived, not copied from a report.
+        from itertools import product
+        from corpus import exhaustive
+        edges = [(s, o) for s in ("a", "b") for o in ("a", "b")]
+        derived = {"accepted":0, "empty_graph":0, "native_support":0}
+        for mask in range(16):
+            present = {e for i, e in enumerate(edges) if mask & (1 << i)}
+            for width in (2, 3):
+                for row in product("abm", repeat=width):
+                    valid = all(pair in present for pair in zip(row, row[1:]))
+                    derived["accepted" if valid else "native_support" if present else "empty_graph"] += 1
+        self.assertEqual(derived, PUBLIC_PATTERN_NATIVE)
+        self.assertEqual(sum(len(c["expected"]["Select"]["rows"]) for c in exhaustive()
+                             if c["template"] in ("scan", "join")), 72)
+        records = [{"backend":"noir_public_pattern", "outcome":{"observed":"accepted"}}] * 72
+        records += [{"backend":"noir_public_pattern", "outcome":{"observed":"rejected", "rejection_scope":"empty_graph"}}] * 36
+        records += [{"backend":"noir_public_pattern", "outcome":{"observed":"rejected", "rejection_scope":"native_support"}}] * 468
+        records += [{"backend":"noir_unsigned", "outcome":{"observed":"rejected"}}]
+        check_public_pattern_scopes({"records":records}, PUBLIC_PATTERN_NATIVE)
+        for altered in (records[1:], records + records[:1],
+                        records[:72] + [{"backend":"noir_public_pattern", "outcome":{"observed":"rejected"}}] + records[73:]):
+            with self.assertRaises(ValueError):
+                check_public_pattern_scopes({"records":altered}, PUBLIC_PATTERN_NATIVE)
 
     def test_generic_sweep_keeps_all_prior_tests_and_required_invocation(self):
         workflow = (Path(__file__).resolve().parents[2] / '.github/workflows/zk-toolchain.yml').read_text()

@@ -39,6 +39,19 @@ private witness attacks alter padding, graph lengths, active result lengths,
 indices and reused support slots after solving a positive witness. They bypass
 the honest planner and require an actual constraint failure, not a generic error.
 
+[OPUS-5.5] The explicit `noir_public_pattern` backend replays the same exhaustive
+native cells and finite cycle profile through opt-in version 4
+(`prepare_result_public_pattern`). It never falls back: every accepted or
+constraint cell must report a `result_v4_k{1,2}_n16_p3_r4_f0_d10` contract.
+Native refusals record `rejection_scope` (`empty_graph` or `native_support`)
+apart from constraint and proof evidence. False bindings carry reconstructed
+`public_triples` with the original signed support unchanged. The ten existing
+attacks apply unchanged; one that touched the unused pattern-zero opening would
+fail rather than count, and a separate positive control shows that opening is
+unread. Real cells also check that relabeled versions are rejected. This backend is
+source-configured and not yet executed. It is research-grade and not externally
+audited, and it is not a benchmark or gate measurement.
+
 ## Original tests
 
 The conformance exporter reuses the existing W3C manifest, RDF and expected-result

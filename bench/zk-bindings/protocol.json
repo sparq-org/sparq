@@ -70,8 +70,11 @@
     "unsupported_reason",
     "implementation",
     "notes",
-    "rejection"
+    "rejection",
+    "contract",
+    "rejection_scope"
   ],
+  "public_pattern": "[OPUS-5.5] Backend noir_public_pattern only: every accepted or constraint cell reports contract {version:4, package:result_v4_k1|k2_n16_p3_r4_f0_d10}; any other version or package is a fallback failure. Native refusals report rejection_scope empty_graph or native_support. Non-native negatives must be direct constraint rejections with reconstructed public_triples; attacks that touch the unused pattern-zero opening fail rather than count.",
   "terms": "Canonical N-Triples term strings; null denotes an unbound SELECT cell. Variable names omit ?. No lossy numeric or per-row blank-node normalization.",
   "dataset": "Optional {ntriples, nquads, named_graphs}; triples is the independent default-graph triple array when available. Preserve source bytes and graph catalog.",
   "expected_result": "Existing exact-evaluator CanonicalResult JSON: Select{variables,order:Bag|Sequence,rows}, Ask(boolean), or Graph{ntriples}.",

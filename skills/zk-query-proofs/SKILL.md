@@ -464,6 +464,9 @@ supported; no public pattern or any other profile rejects without fallback. It
 proves support for the selected rows only, not completeness. Research-grade, not
 externally audited; no gate or runtime saving is claimed. Gate snapshot entries,
 result-evidence inventories and genuine proofs are pending coordinator measurement.
+The [binding corpus](../../bench/zk-bindings/README.md) registers an explicit
+`noir_public_pattern` backend over its existing finite domain. That backend is
+source-configured and not yet executed; it never substitutes version 1 or signed members.
 
 [GPT-6] `result::signed` exposes separately versioned canonical signed-integer
 preparation and verification, with a fixed capacity and no public sign/length
