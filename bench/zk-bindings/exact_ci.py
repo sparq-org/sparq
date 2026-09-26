@@ -16,7 +16,8 @@ BACKENDS = ("exact_v1", "exact_v2", "exact_v3")
 def original_plan(root=ROOT):
     inventory = load(root / "bench/zk-bindings/exact-originals.json")
     cases = []
-    for source in [*inventory["inputs"], inventory["data"]]:
+    pin = inventory["projection_expectations"]
+    for source in [*inventory["inputs"], inventory["data"], pin]:
         if file_hash(root / source["path"]) != source["sha256"]:
             raise ValueError("original fixture hash changed; review the inventory explicitly")
     for source in inventory["inputs"]:
@@ -27,6 +28,12 @@ def original_plan(root=ROOT):
         cases.extend(imported)
     if len(cases) != inventory["cases"]:
         raise ValueError("missing original cases")
+    # [OPUS-5.5] Every applied override must come from the pinned registry bytes.
+    applied = [c["oracle"]["projection"] for c in cases
+               if c["oracle"].get("projection", {}).get("kind") == "reviewed_projection_override"]
+    if (len(applied) != pin["overrides"]
+            or any(p["registry_sha256"] != pin["sha256"] for p in applied)):
+        raise ValueError("projection override inventory changed")
     by_id = {case["id"]:case for case in cases}
     for promotion in inventory["historical_promotions"]:
         if by_id[promotion["current_id"]]["query"] != promotion["original_fixture"]["query"]:

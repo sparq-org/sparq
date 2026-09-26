@@ -3,8 +3,9 @@ import copy
 from pathlib import Path
 import unittest
 
-from corpus import digest
+from corpus import digest, load
 from exact_ci import check_report, original_plan
+from run import file_hash
 
 
 class OriginalReplayTests(unittest.TestCase):
@@ -20,6 +21,22 @@ class OriginalReplayTests(unittest.TestCase):
         self.assertIn("exists-minus-disjoint-domain-after-substitution", ids)
         self.assertIn("nullable-path-alternative-absent-constant", ids)
         for case in manifest["cases"]:
+            self.assertEqual(case["query"], case["original_fixture"]["query"])
+
+    def test_projection_registry_is_hash_pinned_and_applied_exactly(self):
+        # [OPUS-5.5] Inventory pins the reviewed projection registry bytes.
+        root = Path(__file__).resolve().parents[2]
+        pin = load(root / "bench/zk-bindings/exact-originals.json")["projection_expectations"]
+        self.assertEqual(pin["path"], "bench/zk-bindings/projection-expectations.json")
+        self.assertEqual(pin["sha256"], file_hash(root / pin["path"]))
+        manifest = original_plan()
+        applied = {c["id"]:c for c in manifest["cases"]
+                   if c["oracle"].get("projection", {}).get("kind") == "reviewed_projection_override"}
+        self.assertEqual(set(applied), {"date-end-of-year", "date-end-of-leap-month", "date-end-before-leap-day"})
+        for case in applied.values():
+            self.assertEqual(case["oracle"]["projection"]["registry_sha256"], pin["sha256"])
+            self.assertEqual(case["expected"]["Select"]["variables"], ["y", "m", "day", "h"])
+            self.assertEqual(case["expected"]["Select"]["rows"], case["original_fixture"]["expected_rows"])
             self.assertEqual(case["query"], case["original_fixture"]["query"])
 
     def test_missing_duplicate_wrong_counts_and_invented_proofs_fail(self):

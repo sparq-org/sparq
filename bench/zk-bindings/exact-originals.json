@@ -37,6 +37,11 @@
     "path": "zk/sparql-evaluator/fixtures/conformance/core.nt",
     "sha256": "e662d9da005922f7d37e6118967f6e86b40230f0a8c9b9d455c9b3fc4cfef1fe"
   },
+  "projection_expectations": {
+    "path": "bench/zk-bindings/projection-expectations.json",
+    "sha256": "c02005b01f8af02470afa385248b326df3eebfaddf93ccfa1e6954d85b7772a0",
+    "overrides": 3
+  },
   "cases": 319,
   "expected_jobs_per_backend": {
     "exact_v1": 638,
