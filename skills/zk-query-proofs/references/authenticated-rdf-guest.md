@@ -2,8 +2,8 @@
 # Issuer-authenticated RDF: separate V5 guest and host API
 
 **Source only; unbuilt and unexecuted at the current checkpoint.** Guest, host
-and test source exist, but the V5 guest has not been built or executed, and no
-V5 test run or genuine receipt has been recorded. The V5 relation is listed in
+and test source and both locks exist, but no V5 guest build or execution, V5
+test run or genuine receipt has been recorded. The V5 relation is listed in
 no method registry, and no protocol adapter exists. It is experimental, research
 grade, not yet sound and not externally audited.
 <!-- privacy-claims-allow: source only; explicitly unbuilt, unexecuted, unaudited, no receipt recorded -->
@@ -47,9 +47,9 @@ and the exact guest workspace. With the feature it also watches
 `methods/guest-authrdf`. `package.metadata.risc0.methods` lists both guest
 directories; only this `build.rs` builds them.
 
-`methods/guest-authrdf/Cargo.lock` is not committed with this source. Until it
-exists, a `--locked` build with the feature fails; nothing falls back to an
-unlocked build.
+`methods/guest-authrdf/Cargo.lock` is committed, taken from an independently
+reviewed real Cargo resolution. The `--locked` child build uses it; nothing falls
+back to an unlocked build. No V5 guest build against it is recorded yet.
 
 ## Guest
 
@@ -159,13 +159,14 @@ other issuer and method appear nowhere in the signed inputs.
   guest must still execute V3 and must abort with its own exact message on V5
   input. Any other executor failure, including a session-limit error, fails the
   test.
-- **Genuine receipts** (`genuine_authrdf_receipts_verify_both_authorities_and_reject_controls`
-  in `host/tests/authenticated_rdf_genuine.rs`, ignored). This proves six
-  receipts: SELECT (bag), ASK (true under agreed, false under holder) and
-  CONSTRUCT, each under both authorities. Each must be Succinct with
-  `Halted(0)`, consume one nonce and equal the native model. Controls reuse
-  those receipts and create no proof. Each must fail with its exact error and
-  zero nonce calls:
+- **Genuine receipts** (`genuine_authrdf_receipts_verify_declared_cases_and_reject_controls`
+  in `host/tests/authenticated_rdf_genuine.rs`, ignored). Six cases are defined:
+  SELECT (bag), ASK (true under agreed, false under holder) and CONSTRUCT, each
+  under both authorities. A job proves one receipt for each case it declares,
+  and only those; see [case selection](#case-selection). Each receipt must be
+  Succinct with `Halted(0)`, consume one nonce and equal the native model.
+  Controls reuse those receipts and create no proof. For every declared case,
+  each must fail with its exact error and zero nonce calls:
   - a changed query of the same form, or a wrong nonce;
   - tightened V3 policy rows;
   - key-table substitutions in the verifier's own expectation (widened, or
@@ -183,45 +184,80 @@ other issuer and method appear nowhere in the signed inputs.
 
 ```sh
 # Native host gates.
-cargo test --manifest-path zk/sparql-evaluator/Cargo.toml -p sparq-proved-evaluator \
+cargo test --locked --manifest-path zk/sparql-evaluator/Cargo.toml -p sparq-proved-evaluator \
   --features authenticated-rdf --test authenticated_rdf
 
+# Native job and case-selection checks for the genuine driver; no proof.
+cargo test --locked --manifest-path zk/sparql-evaluator/Cargo.toml -p sparq-proved-evaluator \
+  --features authenticated-rdf --test authenticated_rdf_genuine
+
 # Direct guest execution; no receipt.
-RISC0_SERVER_PATH=/abs/r0vm cargo test --manifest-path zk/sparql-evaluator/Cargo.toml \
+RISC0_SERVER_PATH=/abs/r0vm cargo test --locked --manifest-path zk/sparql-evaluator/Cargo.toml \
   -p sparq-proved-evaluator --features authenticated-rdf --test actual_authenticated_rdf \
   -- --ignored --test-threads=1
 
-# Genuine receipts; writes new evidence.
+# Genuine receipts for the job's declared cases; writes new evidence.
 SPARQ_AUTHRDF_PROOF_JOB=/abs/authrdf-job.json RISC0_SERVER_PATH=/abs/r0vm \
-  cargo test --manifest-path zk/sparql-evaluator/Cargo.toml -p sparq-proved-evaluator \
+  cargo test --locked --manifest-path zk/sparql-evaluator/Cargo.toml -p sparq-proved-evaluator \
   --features authenticated-rdf --test authenticated_rdf_genuine -- --ignored --exact \
-  genuine_authrdf_receipts_verify_both_authorities_and_reject_controls --nocapture
+  genuine_authrdf_receipts_verify_declared_cases_and_reject_controls --nocapture
 ```
 
-Add `--locked` once the coordinator has generated
-`methods/guest-authrdf/Cargo.lock` and resolved the detached workspace lock.
-`RISC0_DEV_MODE` must be unset. The tests read environment variables but never
-set them.
+The detached workspace lock and `methods/guest-authrdf/Cargo.lock` are both
+committed, so these commands use `--locked`; none of them has been recorded
+passing. `RISC0_DEV_MODE` must be unset. The tests read environment variables
+but never set them.
 
-Job schema `sparq.authrdf-genuine-proof.test-job.v1` (unknown fields reject):
+Job schema `sparq.authrdf-genuine-proof.test-job.v2` (unknown and missing fields
+reject; no v1 job was deployed):
 
 | Field | Meaning |
 |---|---|
-| `schema` | Exactly `sparq.authrdf-genuine-proof.test-job.v1` |
+| `schema` | Exactly `sparq.authrdf-genuine-proof.test-job.v2` |
 | `guest`, `pin` | Approved V5 guest artifact and its `ArtifactPin` |
 | `exact_guest`, `exact_pin` | Approved exact V1–V3 guest and pin, used only for cross-image controls; the pins must differ |
-| `challenge_seed32` | 64 hex characters, nonzero; a public synthetic seed. Each nonce is SHA-256 over `sparq:authrdf-genuine-test:nonce:v1\0` ‖ seed ‖ u64-be label length ‖ case label |
+| `cases` | Required list of 1–6 distinct case IDs from the table below, proved in the listed order |
+| `challenge_seed32` | 64 hex characters, nonzero; a fresh public synthetic seed per job. Each nonce is SHA-256 over `sparq:authrdf-genuine-test:nonce:v1\0` ‖ seed ‖ u64-be label length ‖ case label |
 | `new_output_directory` | Absolute, absent, parent exists, outside the checkout; created owner-only |
 
 `r0vm` comes from `RISC0_SERVER_PATH`, which must be absolute; it is
 canonicalized and recorded. Inputs must be absolute regular files without `.`
 or `..` and are read with fixed bounds.
 
+### Case selection
+
+| Case ID | Form | Authority | Expected result |
+|---|---|---|---|
+| `select-bag-verifier-agreed` | SELECT (bag) | verifier-agreed | two identical `schema:name` rows |
+| `select-bag-holder-declared` | SELECT (bag) | holder-declared | two identical `schema:name` rows |
+| `ask-true-verifier-agreed` | ASK | verifier-agreed | `true` |
+| `ask-false-holder-declared` | ASK | holder-declared | `false` |
+| `construct-verifier-agreed` | CONSTRUCT | verifier-agreed | one triple, from the only `alumniOf` statement |
+| `construct-holder-declared` | CONSTRUCT | holder-declared | one triple, from the only `alumniOf` statement |
+
+There is no default set. Right after the schema check, before loading any guest,
+creating the output directory or proving, the job is rejected if `cases` is
+empty, has more than six entries, repeats an ID or names an unknown ID (IDs are
+case-sensitive). Complete coverage requires listing all six IDs.
+
+A subset job reports only its declared cases. The expected results in
+`metadata.json`, the case records, the receipt count and the completed case IDs
+in `summary.json` must equal the declared list exactly, in order, or the run
+fails before `summary.json` is written. A subset run establishes nothing about
+undeclared cases, forms or authorities.
+
+To bound a job, declare one or a few cases. If a job times out, its completed
+cases keep their `record.json` files. Write a new job for only the cases without
+a record, with a new output directory and a fresh seed; do not re-prove cases
+already recorded. Each such job's evidence stands alone; no tool merges them.
+
 Evidence (all files `create_new`, owner-only on Unix, never removed):
 
 - `metadata.json` is written first. It is not a success record. It names the
   accepted guest (`sparq-authrdf-guest`, relation version 5) and the exact guest
-  (`sparq-exact-guest`, cross-image controls only), each with its pin.
+  (`sparq-exact-guest`, cross-image controls only), each with its pin. It records
+  `declared_cases`, `all_defined_cases_declared` and the expected results of the
+  declared cases only.
 - Each case directory holds `request.json` and `started.json`, written before
   proving, and `presentation.json`, written straight after proving. After every
   assertion it also holds `record.json`. The record names the guest package and
@@ -229,7 +265,9 @@ Evidence (all files `create_new`, owner-only on Unix, never removed):
   receipt and journal SHA-256 digests, the complete receipt, status and
   controls. It is written only after the receipt is re-verified against that V5
   pin, never against the embedded exact-guest pin.
-- `summary.json` is written last.
+- `summary.json` is written last. It records `declared_cases`,
+  `completed_cases`, `all_defined_cases_run` (true only when all six ran) and
+  `genuine_receipts`, one per declared case.
 
 This helper is `support/authenticated_rdf_evidence.rs`; the existing
 `support/evidence.rs` is unchanged. Keep evidence outside the repository.
@@ -246,7 +284,8 @@ packages in its own target. It exports and later re-confirms the V5 artifact in
 under `guest_artifact_pins`, keyed by guest package, and requires them to be
 distinct. It also runs the V5 native model and host gates and a V5 lint. It
 executes no V5 guest and creates no V5 receipt. Every one of these gates fails
-closed while `methods/guest-authrdf/Cargo.lock` is absent.
+closed without `methods/guest-authrdf/Cargo.lock`. That lock is now committed;
+no gate run against it is recorded here.
 
 ## Not established
 

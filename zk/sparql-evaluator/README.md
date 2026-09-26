@@ -342,10 +342,14 @@ guest keeps its flags, target, manifest, lock and constants, so that its artifac
 bytes and image ID are intended not to depend on the feature; that invariant is
 pending a byte comparison and is not yet measured. Each guest's source rejects
 the other's input; no guest execution has confirmed it. All credential
-authentication is written to run inside the V5 guest. At the current
-checkpoint the V5 guest is unbuilt and unexecuted: its lock is not yet
-generated, and no test run or receipt is recorded. The dependency, SBOM,
-registry-parser and exact-evaluator campaign gates register its workspace and
-lock and fail closed until the lock exists; the campaign creates no V5 receipt.
+authentication is written to run inside the V5 guest. Its
+`methods/guest-authrdf/Cargo.lock` is committed from an independently reviewed
+real Cargo resolution. At the current checkpoint no V5 guest build, execution,
+test run or receipt is recorded. The dependency, SBOM, registry-parser and
+exact-evaluator campaign gates register its workspace and lock and fail closed
+without that lock; the campaign creates no V5 receipt. The ignored genuine-proof
+driver `host/tests/authenticated_rdf_genuine.rs` proves only the case IDs its
+versioned test job declares (one to six of six defined cases, validated before
+any proof), so a bounded job can prove a subset and a later job the remainder.
 No method registry lists it, and no protocol adapter exists. See the
 [V5 guest reference](../../skills/zk-query-proofs/references/authenticated-rdf-guest.md).

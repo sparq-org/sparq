@@ -5,13 +5,15 @@
 //! One ignored test is a driver only: set `SPARQ_AUTHRDF_PROOF_JOB` to an
 //! explicit job file and `RISC0_SERVER_PATH` to the real local `r0vm`, then run
 //! it by name; see `skills/zk-query-proofs/references/authenticated-rdf-guest.md`.
-//! A missing job, tool or input fails; nothing is skipped or counted as a run. It
-//! proves six receipts: bag SELECT, ASK and CONSTRUCT, each under verifier-agreed
-//! and holder-declared authority. Every control reuses those receipts and creates
-//! no proof. Evidence goes to the job's new output directory, which is never
-//! removed; `summary.json` is written last. Every nonce store here is an
+//! A missing job, tool or input fails; nothing is skipped or counted as a run.
+//! Six cases are defined: bag SELECT, ASK and CONSTRUCT, each under
+//! verifier-agreed and holder-declared authority. The job declares which of them
+//! to prove, one to six distinct known IDs, checked before any proof; a subset
+//! run claims only its declared cases. Every control reuses those receipts and
+//! creates no proof. Evidence goes to the job's new output directory, which is
+//! never removed; `summary.json` is written last. Every nonce store here is an
 //! in-memory test double, never a production store. Not yet run at the current
-//! checkpoint: the V5 guest is unbuilt and no V5 receipt exists.
+//! checkpoint: no V5 receipt exists.
 #![cfg(feature = "authenticated-rdf")]
 
 #[path = "support/authenticated_rdf_evidence.rs"]
@@ -30,9 +32,10 @@ use sparq_proved_evaluator_model::authenticated_rdf::{self as auth, Provenance, 
 use sparq_proved_evaluator_model::{DatasetAuthority, ProofContract, v3};
 use std::path::{Path, PathBuf};
 
-const JOB_SCHEMA: &str = "sparq.authrdf-genuine-proof.test-job.v1";
-const METADATA_SCHEMA: &str = "sparq.authrdf-genuine-proof.test-metadata.v1";
-const SUMMARY_SCHEMA: &str = "sparq.authrdf-genuine-proof.test-summary.v1";
+/// V2 adds the required `cases` selection; no V1 job was deployed.
+const JOB_SCHEMA: &str = "sparq.authrdf-genuine-proof.test-job.v2";
+const METADATA_SCHEMA: &str = "sparq.authrdf-genuine-proof.test-metadata.v2";
+const SUMMARY_SCHEMA: &str = "sparq.authrdf-genuine-proof.test-summary.v2";
 /// Package name of the exact V1–V3 guest, used only for cross-image controls.
 const EXACT_GUEST_PACKAGE: &str = "sparq-exact-guest";
 /// Domain separator for test-only nonces derived from the public job seed.
@@ -69,6 +72,8 @@ struct Job {
     /// Independently approved exact V1–V3 guest and pin, for cross-image controls.
     exact_guest: PathBuf,
     exact_pin: PathBuf,
+    /// Case IDs to prove, in run order: one to six distinct IDs from `CASES`.
+    cases: Vec<String>,
     /// Fresh public synthetic seed, 64 hex characters; not a secret.
     challenge_seed32: String,
     /// Absolute, absent, outside the checkout.
@@ -111,7 +116,7 @@ const CHANGED_CONSTRUCT: &str = "CONSTRUCT { ?s <http://ex/other> ?o } \
      WHERE { ?s <https://www.w3.org/ns/credentials/examples#alumniOf> ?o }";
 
 /// Three forms x two authorities; ASK covers both boolean values.
-const CASES: [Case; 6] = [
+static CASES: [Case; 6] = [
     Case {
         id: "select-bag-verifier-agreed",
         authority: Authority::Agreed,
@@ -156,6 +161,31 @@ const CASES: [Case; 6] = [
     },
 ];
 
+/// Resolves the declared case IDs, in declared order, before any proof.
+///
+/// Rejects an empty or longer-than-`CASES` list, an unknown ID and a duplicate.
+fn select_cases(declared: &[String]) -> Result<Vec<&'static Case>, String> {
+    if declared.is_empty() || declared.len() > CASES.len() {
+        return Err(format!(
+            "cases must list 1 to {} case IDs, not {}",
+            CASES.len(),
+            declared.len()
+        ));
+    }
+    let mut selected: Vec<&'static Case> = Vec::with_capacity(declared.len());
+    for id in declared {
+        let case = CASES
+            .iter()
+            .find(|case| case.id == id)
+            .ok_or_else(|| format!("unknown case `{id}`"))?;
+        if selected.iter().any(|chosen| chosen.id == case.id) {
+            return Err(format!("duplicate case `{id}`"));
+        }
+        selected.push(case);
+    }
+    Ok(selected)
+}
+
 fn parse_seed(text: &str) -> Result<[u8; 32], &'static str> {
     if text.len() != 64 || !text.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return Err("challenge_seed32 must be 64 hex characters");
@@ -184,6 +214,8 @@ struct Setup {
     inputs: Value,
     seed: [u8; 32],
     seed_text: String,
+    /// The job's declared cases, in declared order; nothing else is proved.
+    cases: Vec<&'static Case>,
     r0vm: PathBuf,
     pin: ArtifactPin,
     exact_pin: ArtifactPin,
@@ -219,6 +251,8 @@ impl Setup {
         let job_bytes = read_input(&path, MAX_JOB_BYTES).expect("job");
         let job: Job = serde_json::from_slice(&job_bytes).expect("job JSON");
         assert_eq!(job.schema, JOB_SCHEMA);
+        // Before any guest load, output directory or proof.
+        let cases = select_cases(&job.cases).expect("declared cases");
         let seed = parse_seed(&job.challenge_seed32).expect("challenge seed");
         let r0vm = PathBuf::from(
             std::env::var_os("RISC0_SERVER_PATH")
@@ -246,6 +280,7 @@ impl Setup {
             inputs,
             seed,
             seed_text: job.challenge_seed32,
+            cases,
             r0vm,
             pin,
             exact_pin,
@@ -482,11 +517,14 @@ fn run_case(s: &Setup, case: &Case) -> Value {
 
 #[test]
 #[ignore = "genuine proofs: needs SPARQ_AUTHRDF_PROOF_JOB, a real RISC0_SERVER_PATH and approved guests and pins"]
-fn genuine_authrdf_receipts_verify_both_authorities_and_reject_controls() {
+fn genuine_authrdf_receipts_verify_declared_cases_and_reject_controls() {
     fixture::check_published_vector();
     let s = Setup::load();
     eprintln!("authrdf genuine: evidence directory {}", s.evidence.root().display());
-    let expected: serde_json::Map<String, Value> = CASES
+    let declared: Vec<&str> = s.cases.iter().map(|case| case.id).collect();
+    eprintln!("authrdf genuine: declared cases {declared:?}");
+    let expected: serde_json::Map<String, Value> = s
+        .cases
         .iter()
         .map(|case| (case.id.to_owned(), json!(case.expect.result())))
         .collect();
@@ -509,6 +547,8 @@ fn genuine_authrdf_receipts_verify_both_authorities_and_reject_controls() {
         },
         "r0vm": s.r0vm,
         "challenge_seed32": s.seed_text,
+        "declared_cases": declared,
+        "all_defined_cases_declared": declared.len() == CASES.len(),
         "nonce_derivation": "SHA-256(domain || seed || u64-be label length || case label)",
         "fixture": {
             "source": "W3C vc-di-eddsa REC 2025-05-15, eddsa-rdfc-2022 examples 7, 9, 10, 12, 13, 15",
@@ -528,17 +568,33 @@ fn genuine_authrdf_receipts_verify_both_authorities_and_reject_controls() {
     }));
     let metadata_file = s.evidence.write("metadata.json", &metadata);
 
-    let cases: Vec<Value> = CASES.iter().map(|case| run_case(&s, case)).collect();
+    let cases: Vec<Value> = s.cases.iter().map(|case| run_case(&s, case)).collect();
+    // A run reports exactly its declared cases: IDs, order, results and receipt count.
+    let completed: Vec<&str> = cases
+        .iter()
+        .map(|record| record["case"].as_str().expect("case ID"))
+        .collect();
+    assert_eq!(completed, declared, "completed cases differ from the declared cases");
+    let completed_expected: serde_json::Map<String, Value> = cases
+        .iter()
+        .map(|record| {
+            let id = record["case"].as_str().expect("case ID").to_owned();
+            (id, record["details"]["expected"].clone())
+        })
+        .collect();
+    assert_eq!(completed_expected, expected, "expected results differ from the declared cases");
     let controls: usize = cases
         .iter()
         .map(|record| record["details"]["controls"].as_array().map_or(0, Vec::len))
         .sum();
-    assert_eq!(cases.len(), 6);
     let summary = json!({
         "schema": SUMMARY_SCHEMA,
         "job_sha256": s.job_sha256,
         "metadata": metadata_file,
         "guest": GUEST_PACKAGE,
+        "declared_cases": declared,
+        "completed_cases": completed,
+        "all_defined_cases_run": completed.len() == CASES.len(),
         "genuine_receipts": cases.len(),
         "controls_on_existing_receipts": controls,
         "controls_create_proofs": false,
@@ -557,15 +613,25 @@ fn genuine_job_rejects_unknown_fields_and_invalid_seeds() {
         "pin": "/abs/authrdf/pin.json",
         "exact_guest": "/abs/exact/guest.bin",
         "exact_pin": "/abs/exact/pin.json",
+        "cases": ["ask-true-verifier-agreed"],
         "challenge_seed32": "01".repeat(32),
         "new_output_directory": "/abs/out",
     });
     let parsed: Job = serde_json::from_value(job.clone()).unwrap();
     assert_eq!(parsed.schema, JOB_SCHEMA);
-    let mut extra = job;
+    assert_eq!(parsed.cases, ["ask-true-verifier-agreed"]);
+    let mut extra = job.clone();
     extra["r0vm"] = json!("/abs/r0vm");
     let error = serde_json::from_value::<Job>(extra).err().unwrap().to_string();
     assert!(error.contains("unknown field `r0vm`"), "{error}");
+    // Case selection is required; there is no implicit default set.
+    let mut missing = job.clone();
+    assert!(missing.as_object_mut().unwrap().remove("cases").is_some());
+    let error = serde_json::from_value::<Job>(missing).err().unwrap().to_string();
+    assert!(error.contains("missing field `cases`"), "{error}");
+    let mut scalar = job;
+    scalar["cases"] = json!("ask-true-verifier-agreed");
+    assert!(serde_json::from_value::<Job>(scalar).is_err(), "cases must be a list");
     for bad in ["00".repeat(32), "0g".repeat(32), "01".into()] {
         assert!(parse_seed(&bad).is_err(), "{bad}");
     }
@@ -576,4 +642,47 @@ fn genuine_job_rejects_unknown_fields_and_invalid_seeds() {
         .map(|label| nonce_for(&seed, &label))
         .collect();
     assert_eq!(nonces.len(), 12, "distinct original and wrong nonces");
+}
+
+fn ids(list: &[&str]) -> Vec<String> {
+    list.iter().map(|id| (*id).to_owned()).collect()
+}
+
+fn selected(declared: &[&str]) -> Vec<&'static str> {
+    select_cases(&ids(declared))
+        .unwrap_or_else(|error| panic!("{declared:?}: {error}"))
+        .iter()
+        .map(|case| case.id)
+        .collect()
+}
+
+#[test]
+fn genuine_job_case_selection_is_bounded_known_and_distinct() {
+    let all: Vec<&str> = CASES.iter().map(|case| case.id).collect();
+    // Complete coverage only by listing all six.
+    assert_eq!(selected(&all), all);
+    let mut reversed = all.clone();
+    reversed.reverse();
+    assert_eq!(selected(&reversed), reversed, "declared order is kept");
+    for &id in &all {
+        assert_eq!(selected(&[id]), [id], "single case");
+    }
+    let subset = ["construct-holder-declared", "ask-true-verifier-agreed"];
+    assert_eq!(selected(&subset), subset, "a subset selects nothing else");
+
+    let mut seven = all.clone();
+    seven.push(all[0]);
+    let rejected: [(Vec<&str>, &str); 7] = [
+        (vec![], "cases must list 1 to 6 case IDs, not 0"),
+        (seven, "cases must list 1 to 6 case IDs, not 7"),
+        (vec![all[0], all[0]], "duplicate case `select-bag-verifier-agreed`"),
+        (vec![all[5], all[2], all[5]], "duplicate case `construct-holder-declared`"),
+        (vec!["select-bag"], "unknown case `select-bag`"),
+        (vec![all[1], "SELECT-BAG-HOLDER-DECLARED"], "unknown case `SELECT-BAG-HOLDER-DECLARED`"),
+        (vec![""], "unknown case ``"),
+    ];
+    for (declared, error) in rejected {
+        let outcome = select_cases(&ids(&declared)).err();
+        assert_eq!(outcome.as_deref(), Some(error), "{declared:?}");
+    }
 }
