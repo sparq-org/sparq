@@ -12,8 +12,14 @@ no method. <!-- [OPUS-5.5] --> In the [method registry](../../../research/vc-que
 of its experimental adapter: SELECT bag, ASK and CONSTRUCT, each under holder-declared or
 verifier-agreed authority, with source evidence `None`, status `NotRequested` and holder
 `BearerAccepted`. It is false for every other entry and version. See the [crate README](../../../crates/sparq-query-protocol/README.md)
-for the full rule list. [OPUS-5.5] Its only consumer is the optional, off-by-default `vcq`
-feature of the detached exact-evaluator host crate; see [vcq exact adapter](vcq-exact-adapter.md).
+for the full rule list. [OPUS-5.5] Its consumers are the optional, off-by-default `vcq`
+feature of the detached exact-evaluator host crate (see [vcq exact adapter](vcq-exact-adapter.md))
+and, since zkp-14.6, its `vcq-authenticated` feature: a V5 issuer-authenticated RDF adapter
+whose registry entry keeps `adapter_available` false, because no genuine adapter receipt is
+retained yet (see [vcq authenticated-RDF adapter](vcq-authenticated-rdf-adapter.md)). That
+adapter is the first source to declare `SourceEvidence::IssuerAuthenticated` tuples with a
+suite. It names its guest relation as the authenticity enforcer; that is a source declaration,
+and no receipt has exercised it.
 
 ## API
 

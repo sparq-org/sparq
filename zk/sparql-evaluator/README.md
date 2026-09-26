@@ -351,5 +351,42 @@ without that lock; the campaign creates no V5 receipt. The ignored genuine-proof
 driver `host/tests/authenticated_rdf_genuine.rs` proves only the case IDs its
 versioned test job declares (one to six of six defined cases, validated before
 any proof), so a bounded job can prove a subset and a later job the remainder.
-No method registry lists it, and no protocol adapter exists. See the
+The research registry lists it as `method:risc0-authenticated-rdf` version 5,
+with `adapter_available: false` (see below). See the
 [V5 guest reference](../../skills/zk-query-proofs/references/authenticated-rdf-guest.md).
+
+## vcq adapter for authenticated RDF (V5)
+
+[OPUS-5.5] zkp-14.6 adds the optional `vcq-authenticated` host feature (off by
+default; it only combines `vcq` and `authenticated-rdf`). It adds source for
+`vcq_authenticated::Risc0AuthenticatedRdfV5`, a `sparq-query-protocol`
+`QueryMethod` over the V5 relation. The method is
+`urn:sparq:vcq:method:risc0-authenticated-rdf` version 5. It is built from an
+independently approved V5 `ArtifactPin`, the `AcceptedGuest` loaded under it, and a
+verifier-owned, immutable `authenticated_rdf::Policy`. The descriptor's parameter
+digest binds that policy through the model's own request digest of a fixed
+sentinel request. It also binds the suite, mapping, linking and relation
+identifiers and every fixed capacity. Table order is not significant, and an
+invalid policy is rejected.
+
+The six tuples are bag SELECT, boolean ASK and CONSTRUCT graphs, each under
+holder-declared or verifier-agreed authority. Source evidence is
+`IssuerAuthenticated` with the bounded canonical RDF `eddsa-rdfc-2022` suite
+profile, assembly is `UnionDefaultGraph`, status is `NotRequested`, and the
+holder is bearer only. The adapter rejects every other source evidence, suite,
+mapping, linking profile, stronger status or holder policy, named-graph or
+exact-source assembly, SELECT sequence, DESCRIBE and base IRI. It does so at
+admission or by the typed query-shape check, before any proof or challenge use.
+The verifier rebuilds the V5 request from its stored request and its own policy.
+The nonce is derived from the `local-struct-v1` stored request and descriptor.
+Every check, up to the released-row bound, runs before the original challenge is
+consumed once. There is no JSON-LD processing, status, holder binding or
+completeness claim.
+
+The native tests are `host/tests/vcq_authenticated.rs` and unit tests in
+`host/src/vcq_authenticated.rs`; they create no proof. The ignored
+`host/tests/vcq_authenticated_genuine.rs` proves only the case IDs a job declares.
+At this checkpoint none of these tests has been run, and no V5 adapter receipt
+exists. The research registry keeps this method's `adapter_available` false until
+a genuine end-to-end adapter receipt is independently retained. See the
+[adapter reference](../../skills/zk-query-proofs/references/vcq-authenticated-rdf-adapter.md).

@@ -30,6 +30,10 @@ pub mod vcq;
 #[cfg(feature = "authenticated-rdf")]
 pub mod authenticated_rdf;
 
+/// [OPUS-5.5] Optional `sparq-query-protocol` adapter over the V5 authenticated-RDF relation.
+#[cfg(feature = "vcq-authenticated")]
+pub mod vcq_authenticated;
+
 /// Public presentation contains only the cryptographic receipt and its journal.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

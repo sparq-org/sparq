@@ -165,9 +165,20 @@ reuses V3 evaluation. It checks no status, holder binding or completeness.
 [OPUS-5.5] A [separately pinned V5 guest and low-level host API](references/authenticated-rdf-guest.md)
 (host feature `authenticated-rdf`, off by default) exist as source only; its guest
 lock is committed, but at the current checkpoint no guest build or execution is
-recorded. No receipt is recorded, and no registry entry or protocol adapter exists.
+recorded. No receipt is recorded.
 Its ignored genuine-proof driver proves only the one to six case IDs a v2 test job
 declares; a subset run claims nothing about undeclared cases. <!-- privacy-claims-allow: unbuilt, unexecuted source, no receipt, not audited -->
+[OPUS-5.5] The separate host feature `vcq-authenticated` (off by default, `vcq` plus
+`authenticated-rdf`) adds source for a [V5 vcq adapter](references/vcq-authenticated-rdf-adapter.md),
+`vcq_authenticated::Risc0AuthenticatedRdfV5`. It is built from an approved V5 pin, the guest
+accepted under that pin, and an immutable verifier policy. Its parameter digest binds the policy
+through the model's own request digest of a fixed sentinel request, plus the profile
+identifiers and every capacity. Its six tuples are bag SELECT, ASK and CONSTRUCT, each under
+holder-declared or verifier-agreed authority. Every tuple is `IssuerAuthenticated` under a bounded
+canonical RDF `eddsa-rdfc-2022` profile, with `UnionDefaultGraph`, status `NotRequested` and a
+bearer holder. It performs no JSON-LD or full Data Integrity processing and makes no status,
+holder or completeness claim. No adapter test run or receipt is recorded, and the registry keeps
+its `adapter_available` false. <!-- privacy-claims-allow: source only, no receipt, not audited -->
 [GPT-6] The [campaign evidence guide](references/evaluator-evidence.md) explains
 exact artifact export, actual receipt evidence and source/HAL provenance.
 [GPT-6] The [exact-evaluator experiment adapter](../../zk/sparql-evaluator/experiments/README.md)

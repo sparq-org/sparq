@@ -12,6 +12,8 @@ of suites, mapping profiles, methods, linking profiles, allowed combinations and
 vectors. A registry label is a name, never evidence that anything it names is supported.
 [OPUS-5.5] Only `method:risc0-exact` version 3 has a vcq adapter (`adapter_available: true` for
 exactly six tuples, §6.1, §9); every other entry and version keeps `adapter_available: false`.
+Adapter source for `method:risc0-authenticated-rdf` version 5 now exists (§9.2), but its entry
+stays `false`, because no genuine adapter receipt has been independently retained.
 
 ## 1. Conventions and snapshot
 
@@ -241,8 +243,11 @@ rule 9 and linked to the evaluated values, §8); or `re-attested` (a trusted imp
 source issuer). Either authority may carry any source evidence. A holder-chosen subset of
 issuer-authenticated credentials remains `holder-declared`: authentication never upgrades
 authority. An anchor over authenticated credentials is expressible, but the authentication
-must be linked to the anchored bytes, not checked beside them; no current method offers it
-(§9). Completeness, status policy and holder policy are separate fields implied by neither axis.
+must be linked to the anchored bytes, not checked beside them. No method with retained
+execution evidence offers it (§9). [OPUS-5.5] The V5 relation and its adapter source
+(§9.2) declare it, with the anchor defined over the signed canonical hashes; no receipt has
+exercised that. Completeness, status policy and holder policy are separate fields implied by
+neither axis.
 
 No scope establishes whole-wallet completeness. A holder commitment to "all my credentials"
 is holder-declared however it is computed. Absence claims (false ASK, an empty result, NOT
@@ -265,6 +270,10 @@ enforcer (§7.3), the challenge owner and policy (§6.4), and `adapter_available
 consumer MUST NOT register a method as executable through vcq unless `adapter_available` is
 true. [OPUS-5.5] In the registry it is true only for `method:risc0-exact` version 3, and only
 for the six tuples its `vcq_adapter` lists (§9); it is false for every other entry and version.
+An adapter's local `Capabilities` must declare itself available so that `admit` can select it.
+That local declaration records an implementation. It is not the registry's validated
+availability: `method:risc0-authenticated-rdf` declares it in source but stays `false` in the
+registry (§9.2).
 
 ### 6.2 Operations (proposed interface *QueryMethod*)
 
@@ -508,6 +517,37 @@ journal, after the proof checks and before challenge consumption (`vcq-released-
 SELECT rows and CONSTRUCT N-Triples lines count; ASK has no row bound. The proposed vector
 `neg-excess-rows` (§11) now expects the same outcome as the seventh receipt. That vector
 has not been executed.
+
+### 9.2 Authenticated-RDF V5 vcq adapter (source only, no receipt)
+
+[OPUS-5.5] `sparq_proved_evaluator::vcq_authenticated::Risc0AuthenticatedRdfV5` (detached
+host crate, feature `vcq-authenticated`, off by default) implements *QueryMethod* over the V5
+issuer-authenticated RDF relation. Its descriptor is `urn:sparq:vcq:method:risc0-authenticated-rdf`
+version 5, and it is built from three verifier-owned inputs: an approved V5 `ArtifactPin`, its
+`AcceptedGuest` and an immutable V5 `Policy`. The policy is the §4.2 rule 9 authorization
+table of issuer, verification method and Ed25519 key, plus the V3 evaluation capacities.
+
+The parameter digest binds that policy. It reuses the model's own request digest over a fixed
+sentinel request rather than a second encoder. It also binds the suite, mapping, linking and
+relation identifiers and every fixed capacity. Table order is not significant, and invalid
+policies reject.
+
+It declares six tuples: `SelectBag`, `AskBoolean` and `GraphRdfc10` (CONSTRUCT only), each
+under both authorities. Every tuple is `ExactBounded` over `UnionDefaultGraph`, with source
+evidence `IssuerAuthenticated` under a bounded canonical RDF profile of `eddsa-rdfc-2022`.
+Status is `NotRequested` and the holder `BearerAccepted`. Authenticity, mapping, linking and
+query name the V5 guest relation as enforcer; the anchor is a public host comparison.
+
+The derived nonce and the journaled V5 request digest bind the stored request, including the
+original challenge, audience, window and accepted suites, together with the descriptor and the
+verifier's own policy. The original challenge is consumed once after every other check. The
+authenticated signing input is `SHA-256(canonical proof config) || SHA-256(canonical
+document)` over N-Quads inputs. That is not JSON-LD or full Data Integrity processing, and
+there is no status, holder binding, DID or controller resolution, or completeness claim.
+
+No adapter test run and no genuine V5 adapter receipt is recorded, so the registry keeps
+`adapter_available: false` for this method. Its ignored genuine driver proves only the case
+IDs a job declares.
 
 ## 10. Worked examples (illustrative notation, not a wire encoding)
 

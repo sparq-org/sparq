@@ -119,15 +119,17 @@ pub const NONCE_DOMAIN: &[u8] = b"sparq:vcq:risc0-exact:v3-nonce:local-struct-v1
 /// Domain separator of [`statement_digest`].
 pub const STATEMENT_DOMAIN: &[u8] = b"sparq:vcq:risc0-exact:statement:v3\0";
 
-fn fail(class: BackendFailure, phase: Phase, code: &'static str) -> ProtocolError {
+// [OPUS-5.5] zkp-14.6: the helpers below are `pub(crate)` only so that the V5
+// adapter (`crate::vcq_authenticated`) reuses them; V3 behavior is unchanged.
+pub(crate) fn fail(class: BackendFailure, phase: Phase, code: &'static str) -> ProtocolError {
     ProtocolError::backend(class, phase, code)
 }
 
-fn invalid(phase: Phase, code: &'static str) -> ProtocolError {
+pub(crate) fn invalid(phase: Phase, code: &'static str) -> ProtocolError {
     fail(BackendFailure::Invalid, phase, code)
 }
 
-fn unsupported(phase: Phase, code: &'static str) -> ProtocolError {
+pub(crate) fn unsupported(phase: Phase, code: &'static str) -> ProtocolError {
     fail(BackendFailure::Unsupported, phase, code)
 }
 
@@ -524,37 +526,7 @@ impl Risc0ExactV3 {
         admission: &Admission,
         phase: Phase,
     ) -> Result<Admission, ProtocolError> {
-        let recomputed = admit(
-            request.requirements(),
-            admission.descriptor(),
-            &self.capabilities,
-        )?;
-        if recomputed != *admission {
-            return Err(invalid(phase, "vcq-admission-mismatch"));
-        }
-        if request.base_iri().is_some() {
-            return Err(unsupported(phase, "vcq-base-iri-unsupported"));
-        }
-        let shape = query_shape(request.query()).map_err(|error| shape_error(&error, phase))?;
-        let actual = match shape {
-            QueryShape::SelectBag | QueryShape::SelectSequence => QueryForm::Select,
-            QueryShape::Ask => QueryForm::Ask,
-            QueryShape::Construct => QueryForm::Construct,
-            QueryShape::Describe => QueryForm::Describe,
-        };
-        if actual != request.form() {
-            return Err(invalid(phase, "vcq-query-form-mismatch"));
-        }
-        match (recomputed.tuple().contract, shape) {
-            (ResultContract::SelectBag, QueryShape::SelectBag)
-            | (ResultContract::AskBoolean, QueryShape::Ask)
-            | (ResultContract::GraphRdfc10, QueryShape::Construct) => Ok(recomputed),
-            (_, QueryShape::Describe) => Err(unsupported(phase, "vcq-describe-unsupported")),
-            (_, QueryShape::SelectSequence) => {
-                Err(unsupported(phase, "vcq-select-sequence-unsupported"))
-            }
-            _ => Err(invalid(phase, "vcq-contract-shape-mismatch")),
-        }
+        checked_admission(&self.capabilities, request, admission, phase)
     }
 
     /// Verifies with an explicitly supplied audience and Unix time.
@@ -582,23 +554,7 @@ impl Risc0ExactV3 {
     ) -> Result<VerifiedClaim<V3Output>, ProtocolError> {
         let phase = Phase::Verify;
         let admission = self.check_request(request, admission, phase)?;
-        if request.audience() != audience {
-            return Err(invalid(phase, "vcq-audience-mismatch"));
-        }
-        if now_unix < request.not_before() {
-            return Err(invalid(phase, "vcq-request-not-yet-valid"));
-        }
-        if now_unix >= request.not_after() {
-            return Err(invalid(phase, "vcq-request-expired"));
-        }
-        if admission.challenge()
-            != (ChallengePolicy {
-                owner: ChallengeOwner::Method,
-                consumption: ChallengeConsumption::ConsumeOnSuccess,
-            })
-        {
-            return Err(invalid(phase, "vcq-challenge-policy"));
-        }
+        check_verifier_context(request, audience, now_unix, &admission, phase)?;
         if presentation.descriptor_digest != self.descriptor_digest {
             return Err(invalid(phase, "vcq-descriptor-digest-mismatch"));
         }
@@ -619,6 +575,77 @@ impl Risc0ExactV3 {
     }
 }
 
+/// Recomputes admission against `capabilities` and checks the actual query shape.
+///
+/// Shared with the V5 adapter. Checks run in this order: recomputed admission
+/// equals the supplied one; no explicit base IRI; the parsed, statically
+/// admitted V3 query has the declared form; the admitted contract takes that
+/// shape (SELECT sequences and DESCRIBE are unsupported).
+pub(crate) fn checked_admission(
+    capabilities: &Capabilities,
+    request: &StoredRequest,
+    admission: &Admission,
+    phase: Phase,
+) -> Result<Admission, ProtocolError> {
+    let recomputed = admit(request.requirements(), admission.descriptor(), capabilities)?;
+    if recomputed != *admission {
+        return Err(invalid(phase, "vcq-admission-mismatch"));
+    }
+    if request.base_iri().is_some() {
+        return Err(unsupported(phase, "vcq-base-iri-unsupported"));
+    }
+    let shape = query_shape(request.query()).map_err(|error| shape_error(&error, phase))?;
+    let actual = match shape {
+        QueryShape::SelectBag | QueryShape::SelectSequence => QueryForm::Select,
+        QueryShape::Ask => QueryForm::Ask,
+        QueryShape::Construct => QueryForm::Construct,
+        QueryShape::Describe => QueryForm::Describe,
+    };
+    if actual != request.form() {
+        return Err(invalid(phase, "vcq-query-form-mismatch"));
+    }
+    match (recomputed.tuple().contract, shape) {
+        (ResultContract::SelectBag, QueryShape::SelectBag)
+        | (ResultContract::AskBoolean, QueryShape::Ask)
+        | (ResultContract::GraphRdfc10, QueryShape::Construct) => Ok(recomputed),
+        (_, QueryShape::Describe) => Err(unsupported(phase, "vcq-describe-unsupported")),
+        (_, QueryShape::SelectSequence) => {
+            Err(unsupported(phase, "vcq-select-sequence-unsupported"))
+        }
+        _ => Err(invalid(phase, "vcq-contract-shape-mismatch")),
+    }
+}
+
+/// Checks audience, validity window and the method-owned challenge policy.
+///
+/// Shared with the V5 adapter; `audience` and `now_unix` come from the verifier.
+pub(crate) fn check_verifier_context(
+    request: &StoredRequest,
+    audience: &Identifier,
+    now_unix: u64,
+    admission: &Admission,
+    phase: Phase,
+) -> Result<(), ProtocolError> {
+    if request.audience() != audience {
+        return Err(invalid(phase, "vcq-audience-mismatch"));
+    }
+    if now_unix < request.not_before() {
+        return Err(invalid(phase, "vcq-request-not-yet-valid"));
+    }
+    if now_unix >= request.not_after() {
+        return Err(invalid(phase, "vcq-request-expired"));
+    }
+    if admission.challenge()
+        != (ChallengePolicy {
+            owner: ChallengeOwner::Method,
+            consumption: ChallengeConsumption::ConsumeOnSuccess,
+        })
+    {
+        return Err(invalid(phase, "vcq-challenge-policy"));
+    }
+    Ok(())
+}
+
 fn shape_error(error: &ShapeError, phase: Phase) -> ProtocolError {
     match error {
         ShapeError::QueryBytes { len } => ProtocolError::capacity(
@@ -637,7 +664,7 @@ fn shape_error(error: &ShapeError, phase: Phase) -> ProtocolError {
 }
 
 /// Checks the encoded presentation length; runs before the receipt is decoded.
-fn check_size(
+pub(crate) fn check_size(
     presentation: &VcqPresentation,
     bounds: ResourceBounds,
     phase: Phase,
@@ -674,7 +701,9 @@ fn check_rows(rows: usize, bound: u32) -> Result<(), ProtocolError> {
 }
 
 /// Checks the verified journal result against the admitted contract.
-fn released_result(
+///
+/// Shared with the V5 adapter, whose journal carries the same V3 result type.
+pub(crate) fn released_result(
     contract: ResultContract,
     result: &v3::CanonicalResult,
     released_rows: u32,
@@ -775,11 +804,12 @@ enum BridgeState {
     Consumed(Result<(), ProtocolError>),
 }
 
-/// Private [`Nonces`] bridge to the shared store's ORIGINAL challenge.
+/// Crate-private [`Nonces`] bridge to the shared store's ORIGINAL challenge.
 ///
 /// Accepts one call with the expected derived nonce, then consumes the stored
-/// request's original challenge once and records the typed outcome.
-struct OriginalChallenge<'a> {
+/// request's original challenge once and records the typed outcome. The V5
+/// adapter reuses it unchanged.
+pub(crate) struct OriginalChallenge<'a> {
     expected: [u8; 32],
     request: &'a StoredRequest,
     store: &'a dyn ChallengeStore,
@@ -788,7 +818,11 @@ struct OriginalChallenge<'a> {
 }
 
 impl<'a> OriginalChallenge<'a> {
-    fn new(expected: [u8; 32], request: &'a StoredRequest, store: &'a dyn ChallengeStore) -> Self {
+    pub(crate) fn new(
+        expected: [u8; 32],
+        request: &'a StoredRequest,
+        store: &'a dyn ChallengeStore,
+    ) -> Self {
         Self {
             expected,
             request,
@@ -798,8 +832,8 @@ impl<'a> OriginalChallenge<'a> {
         }
     }
 
-    /// Classifies the V3 outcome from the recorded store outcome only.
-    fn finish<T>(
+    /// Classifies the checked outcome from the recorded store outcome only.
+    pub(crate) fn finish<T>(
         self,
         outcome: Result<T, CheckedFailure<ProtocolError>>,
     ) -> Result<T, ProtocolError> {

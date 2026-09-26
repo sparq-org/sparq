@@ -1,0 +1,300 @@
+<!-- [OPUS-5.5] zkp-14.6: usage reference for the optional vcq adapter over the V5 authenticated-RDF relation. -->
+# vcq adapter for issuer-authenticated RDF (V5)
+
+**Source only; no test run or receipt is recorded at this checkpoint.** The adapter's native tests
+and its ignored genuine-receipt driver exist as source. No V5 adapter receipt, native adapter test
+result or Clippy result is recorded here. It is experimental and not externally audited (sq-qhy4).
+Do not treat it as a validated, available method. <!-- privacy-claims-allow: source only; no receipt, no run, not audited -->
+
+`sparq_proved_evaluator::vcq_authenticated` (detached crate `zk/sparql-evaluator/host`, cargo
+feature `vcq-authenticated`, **off by default**) implements the `sparq-query-protocol`
+`QueryMethod` trait over the V5 relation. See the [native model reference](authenticated-rdf-model.md)
+and the [V5 guest reference](authenticated-rdf-guest.md) for the relation and guest. The feature is
+exactly `["vcq", "authenticated-rdf"]`; it adds no dependency or lock change. The V3 adapter
+([vcq exact adapter](vcq-exact-adapter.md)), the low-level V5 host API, the model and both guests
+are unchanged. The only other changes are crate-private: shared V3 adapter helpers and the V5
+`verify_checked` hook are now `pub(crate)`, with no behavior change.
+
+```sh
+# Native adapter gates and unit tests; no proof.
+cargo test --locked --manifest-path zk/sparql-evaluator/Cargo.toml -p sparq-proved-evaluator \
+  --features vcq-authenticated --lib --test vcq_authenticated --test vcq_authenticated_genuine
+```
+
+## Availability: implementation is not validation
+
+`Capabilities::is_executable()` is true in this build because the adapter code exists; without
+that local declaration, `admit` could not select it. That is an implementation declaration only.
+The research [method registry](../../../research/vc-query-methods.json) lists
+`method:risc0-authenticated-rdf` version 5 with `adapter_available: false`. It stays false until
+a genuine end-to-end adapter receipt run is independently retained and reviewed. The adapter never
+reads the registry.
+
+## API
+
+| Item | Purpose |
+|---|---|
+| `Risc0AuthenticatedRdfV5::new(&ArtifactPin, AcceptedGuest, Policy)` | Method from an approved V5 pin, the guest accepted under it, and the verifier's policy; rejects a guest that does not match the pin, an invalid policy and an all-zero pin |
+| `.policy()` | The immutable verifier policy, table sorted by verification method |
+| `.with_r0vm(PathBuf)`, `.with_verifier(Identifier, fn() -> u64)` | Local `r0vm` for `prove`; verifier audience and clock for the trait `verify` |
+| `verify_at(request, audience, now_unix, admission, presentation, store)` | Verification with an explicitly supplied audience and Unix time |
+| `descriptor(&ArtifactPin, &Policy)` | The exact `MethodDescriptor` a verifier lists in its request |
+| `policy_digest`, `parameter_digest`, `derive_nonce`, `statement_digest` | Documented digests below |
+| `expected_v5_request(request, descriptor, &Policy, phase)` | The V5 request both sides derive; refuses a policy that does not produce the descriptor |
+| `vcq::VcqPresentation` | Reused unchanged: descriptor digest plus serialized receipt bytes |
+| `AuthenticatedOutput` | Claim output: `ReleasedResult`, journaled V5 `Provenance`, authenticated commitment, V5 request digest |
+
+`QueryMethod` associated types: `Request = StoredRequest`,
+`PrivateInputs = authenticated_rdf::PrivateCredentials`, `Witness = AuthenticatedWitness`,
+`Presentation = VcqPresentation`, `ChallengeStore = dyn ChallengeStore`. `PrivateCredentials`
+redacts its `Debug` output, but the model type is `Clone`, and this task did not change the
+model. The adapter's `AuthenticatedWitness` is opaque: it is not `Clone` or serializable, and
+its `Debug` output is redacted.
+
+## What the relation authenticates
+
+Per credential, inside the pinned V5 guest and within fixed bounds, the relation does this:
+
+- It parses the document and proof configuration as N-Quads (default graph only) and
+  canonicalizes each with bounded RDFC-1.0/SHA-256.
+- It reads every check from those canonical bytes: one `DataIntegrityProof` node, typed
+  `cryptosuite` `eddsa-rdfc-2022`, one IRI `verificationMethod`, `proofPurpose assertionMethod`,
+  and at most one `created` in a restricted whole-second UTC profile, never compared with a clock.
+- The method must be in the verifier's table, and the document's single issuer must equal that
+  entry's pinned issuer.
+- It verifies strict Ed25519 over `SHA-256(canonical config) || SHA-256(canonical document)`.
+
+It then unions the hashed canonical documents into one default graph with per-credential
+blank-node scopes and evaluates the V3 query over that union.
+
+This is a bounded canonical RDF profile, **not** a Data Integrity processor. It does no
+JSON-LD expansion or context handling, no `proofValue` multibase decoding and no DID or
+controller resolution. It checks no validity period or `created` time, no credential status and
+no holder binding. The verifier's table is the only trust input. The table has no controller
+field: an entry's `issuer` is the only issuer-to-key authorization.
+
+## Descriptor and capabilities
+
+- Descriptor: `urn:sparq:vcq:method:risc0-authenticated-rdf` version 5, parameter set
+  `urn:sparq:vcq:params:risc0-authenticated-rdf:v5-verifier-policy` with `parameter_digest(policy)`,
+  `ZkvmGuest { artifact_digest: pin.sha256, image_id }` (each image-id word little-endian), backend
+  `urn:sparq:vcq:backend:risc0-zkvm:3.0.6:succinct`. The backend string equals the V3 adapter's,
+  because both guests use the same SDK and receipt kind. Method, version, parameter set, parameter
+  digest and artifact all differ from the V3 descriptor.
+- Six whole tuples: `SelectBag`, `AskBoolean` and `GraphRdfc10` (CONSTRUCT only), each under
+  `VerifierAgreedAnchor` and `HolderDeclared`. All are `ExactBounded`, with profile
+  `urn:sparq:vcq:dialect:sparq-sparql11-graph-results:v3` / `urn:sparq:vcq:fragment:v3-static-admission`
+  (the V3 language, unchanged). Assembly is `UnionDefaultGraph` and source evidence is
+  `IssuerAuthenticated`, with suite `urn:sparq:vcq:suite:di-eddsa-rdfc-2022:v5-bounded-canonical-rdf`.
+  Status is `NotRequested` and the holder `BearerAccepted`. Mapping is
+  `urn:sparq:vcq:map:v5-scoped-canonical-union` and linking is
+  `urn:sparq:vcq:link:authenticated-dataset-evaluation`.
+- Enforcers: authenticity, mapping, linking and query are all declared as the relation
+  `urn:sparq:vcq:relation:risc0-authenticated-rdf-v5-guest`. The anchor is the public host check
+  `urn:sparq:vcq:host:authenticated-anchor-equality`, owed only under anchor authority; the guest
+  also rejects an unequal agreed commitment. Status and holder binding are `Absent`, so a claim
+  reports them `NotEstablished`.
+- Challenge: owner `Method`, `ConsumeOnSuccess`. Ceilings: 4,096 released rows, 16 MiB
+  presentation bytes. Disclosure: `urn:sparq:vcq:disclosure:risc0-authenticated-rdf-v5-journal`
+  (V5 request digest, authenticated commitment, provenance, result).
+
+These requests are rejected at admission (`TupleUnsupported`, `QueryProfileUnsupported`,
+`DescriptorUnavailable` or `capacity`), before any proof or challenge use:
+
+- source evidence `None` or `ReAttested`, or an accepted-suite set without this suite;
+- another mapping or linking profile;
+- required status or holder binding;
+- `CredentialNamedGraphs` or `ExactSourceCatalog` assembly;
+- SELECT sequence or set contracts;
+- another dialect;
+- a V3 or other-policy descriptor.
+
+The typed query-shape check then rejects a form mismatch, an ordered SELECT, DESCRIBE, an
+explicit base IRI, a parse failure, an unadmitted query and an oversized query.
+
+## Policy binding
+
+- `policy_digest`: SHA-256 over `sparq:vcq:risc0-authenticated-rdf:policy:v5\0` ‖ the V5 model's
+  own `authenticated_rdf::request_digest` of a fixed sentinel request. The sentinel has version 5,
+  query `ASK {}`, `HolderDeclared` authority, nonce `sparq/vcq/authrdf/policy-binding` (32 ASCII
+  bytes) and the policy. The sentinel is never evaluated.
+- Why not a second encoder: the model's policy encoder is private, and the model is out of scope.
+  With every other sentinel field fixed, the model request digest depends only on its framed
+  policy digest. That covers the suite and mapping profile tags, every fixed model bound, the
+  serialized V3 evaluation policy, and each entry's issuer, verification method and 32-byte key,
+  sorted by method. So every authorized-key, method, issuer and evaluation-policy field changes
+  the digest, while table order does not.
+- The model policy has no `created` or controller field. `created` is a signed proof option
+  inside each credential. The signature and the commitment's proof-configuration hash cover it.
+- The suite, mapping and DESCRIBE policy each have one variant. An exhaustive match maps the
+  suite and mapping to this adapter's identifiers, so a new model variant fails to compile until
+  it has its own identifiers.
+- Invalid policies reject as `invalid` `vcq-authrdf-policy-invalid` at `request`:
+  - an empty table, or more than 16 keys;
+  - a relative or oversized IRI;
+  - an invalid or small-order key;
+  - a repeated verification method;
+  - V3 evaluation capacities outside the program ceilings.
+- `parameter_digest`: SHA-256 over these fields, in order:
+  1. `sparq:vcq:risc0-authenticated-rdf:parameters:v5\0` and big-endian `u32` 5;
+  2. `policy_digest`;
+  3. the suite, mapping, linking and relation identifiers, each a big-endian `u64` length and
+     its bytes;
+  4. as big-endian `u64`: query bytes (8,192), then `MAX_CREDENTIALS` 4, `MAX_AUTHORIZED_KEYS`
+     16, `MAX_IRI_BYTES` 512, `MAX_DOCUMENT_BYTES` 8,192, `MAX_PROOF_CONFIG_BYTES` 2,048,
+     `MAX_TOTAL_BYTES` 32,768, `MAX_DOCUMENT_QUADS` 128, `MAX_PROOF_CONFIG_QUADS` 8,
+     `MAX_TOTAL_QUADS` 256 and `MAX_WITNESS_BYTES` 64,512;
+  5. as big-endian `u32`: the released-row (4,096) and presentation-byte (16 MiB) ceilings.
+
+`Risc0AuthenticatedRdfV5::new` stores the policy with its table sorted by verification method,
+and the policy cannot be changed afterwards. Build one adapter per verifier policy. A different
+policy is a different descriptor, and admission refuses a request that names it.
+
+## Request binding and verification order
+
+- `derive_nonce`: SHA-256 over `sparq:vcq:risc0-authenticated-rdf:v5-nonce:local-struct-v1\0` ‖
+  SHA-256(stored-request bytes) ‖ SHA-256(descriptor bytes), under `local-struct-v1`. It differs
+  from the V3 adapter's nonce for the same stored request.
+- `expected_v5_request` carries the exact query, the authority and anchor, the verifier's own
+  policy and that nonce. The anchor is an authenticated V5 commitment from
+  `authenticated_rdf::dataset_commitment`, not a V3 anchor. The guest journals the model request
+  digest. That binds the original challenge, audience, window, accepted suites, row and byte
+  bounds, method list, descriptor (and through it the policy), authority, anchor and query. The
+  verifier never infers a policy from a presentation.
+- `statement_digest`: SHA-256 over `sparq:vcq:risc0-authenticated-rdf:statement:v5\0` ‖
+  stored-request digest ‖ descriptor digest ‖ SHA-256(exact verified journal bytes).
+
+`prepare` and `verify` both recompute admission and run the typed shape check. `prepare` then
+authenticates natively; that check only fails early, because the guest repeats every check.
+Every model rejection is one `invalid` code, `vcq-authrdf-credentials-rejected`. The model's
+diagnostic text is never classified, so this code does not distinguish capacity, forgery or
+authorization. `prepare` then requires the credentials to open an agreed anchor (otherwise
+`unsatisfiable` `vcq-anchor-not-opened`).
+
+`verify` checks these in order:
+
+1. audience, `not_before <= now < not_after` and the challenge policy;
+2. the descriptor digest;
+3. the presentation-byte bound, before decoding;
+4. receipt decoding;
+5. the V5 request rebuilt from the stored request and the adapter's own policy;
+6. the Succinct receipt, with dev mode off, against the accepted V5 image;
+7. journal decoding and `bind_journal`;
+8. anchor or provenance: `VerifierAgreedAuthenticated` plus an equal commitment, or
+   `HolderSelectedAuthenticated`;
+9. the result contract and released-row bound;
+10. the claim.
+
+Only then does the reused crate-private bridge consume the ORIGINAL challenge once through the
+shared store. Replay and store failure are typed. Nothing before that point calls the store.
+
+## Claim
+
+A claim has scope `{authority, anchor (agreed only), IssuerAuthenticated, RelativeToScope}` and
+tuple suite `Some(...)`. Authenticity, mapping, linking and query are `Established(Relation)`.
+The anchor is `Established(HostPublic)` only under agreed authority. Status and holder binding
+are `NotEstablished`. `AuthenticatedOutput.provenance` is the journaled V5 value.
+
+Relative completeness means only this: complete over the agreed commitment, or over the holder's
+chosen authenticated credentials. It never means wallet or world completeness. Salt reuse makes
+commitments publicly linkable.
+
+## Tests (written, not yet run)
+
+- **Unit tests** (`host/src/vcq_authenticated.rs`). They check claim conversion on hand-built
+  journals: agreed and holder scope and obligations, and output fields. They also check that
+  provenance upgrade, wrong anchor, wrong version, wrong result kind and row excess reject. The
+  expected request must refuse a mismatched or invalid policy. No proof.
+- **Native gates** (`host/tests/vcq_authenticated.rs`, published W3C vector, no proof):
+  - the descriptor and six tuples, and separation from V3;
+  - the hand-computed `policy_digest` and `parameter_digest` composition;
+  - that each of 17 policy mutations changes the policy, parameter and descriptor digests, the
+    nonce and the V5 request digest, while table order does not;
+  - canonical stored policy order;
+  - nine invalid policies;
+  - nonce, statement and expected-request composition;
+  - representative stored-request fields;
+  - admission rejections and typed shape rejections, at prepare and verify;
+  - admission mismatch;
+  - native authentication and anchor opening, with redacted `Debug`;
+  - verify gates before decoding;
+  - fake receipts claiming the V5 or exact image, and a V3-descriptor presentation;
+  - a guest/pin mismatch;
+  - native oracle results.
+
+  Every rejection case asserts zero challenge-store calls. A native journal is never a proof.
+- **Genuine receipts** (`genuine_vcq_authrdf_receipts_verify_declared_cases_and_reject_controls`
+  in `host/tests/vcq_authenticated_genuine.rs`, ignored). This reuses the explicit-case job
+  design of `authenticated_rdf_genuine.rs`.
+
+```sh
+SPARQ_VCQ_AUTHRDF_PROOF_JOB=/abs/job.json RISC0_SERVER_PATH=/abs/r0vm \
+  cargo test --locked --manifest-path zk/sparql-evaluator/Cargo.toml -p sparq-proved-evaluator \
+  --features vcq-authenticated --test vcq_authenticated_genuine -- --ignored --exact \
+  genuine_vcq_authrdf_receipts_verify_declared_cases_and_reject_controls --nocapture
+```
+
+Job schema `sparq.vcq-authrdf-genuine-proof.test-job.v1` (unknown and missing fields reject):
+`schema`, V5 `guest` and `pin`, and exact `exact_guest` and `exact_pin` (cross-image control
+only; the pins must differ). `cases` lists 1–7 distinct known IDs, in run order, with no
+default. `challenge_seed32` is 64 hex characters, nonzero and public. Each original challenge
+is SHA-256 over `sparq:vcq-authrdf-genuine-test:original-challenge:v1\0` ‖ seed ‖ u64-be label
+length ‖ case label. `new_output_directory` must be absolute, absent and outside the checkout.
+`RISC0_SERVER_PATH` must be absolute, and `RISC0_DEV_MODE` must be unset. Adapters and the
+checker are built only from the job's approved pins, never from embedded guests.
+
+| Case ID | Contract | Authority | Expected |
+|---|---|---|---|
+| `select-bag-verifier-agreed`, `select-bag-holder-declared` | SELECT bag | agreed / holder | two identical `"Alumni Credential"` rows |
+| `ask-true-verifier-agreed` | ASK | agreed | `true` |
+| `ask-false-holder-declared` | ASK | holder | `false` |
+| `construct-verifier-agreed`, `construct-holder-declared` | CONSTRUCT | agreed / holder | the one `<http://ex/alumniOf>` triple |
+| `select-bag-row-bound` | SELECT bag, `released_rows = 1` | agreed | genuine receipt, protocol rejection |
+
+Expectations are hand-defined from the published document and compared with the native model.
+
+Each accepted case must do the following:
+
+- consume the original challenge exactly once;
+- match its expected result, provenance, commitment, V5 request digest, descriptor, statement
+  digest, scope, suite and obligations;
+- pass SDK-checked V5 verification with test nonces, as `Succinct` with `Halted(0)`;
+- equal the native journal.
+
+Controls reuse the receipt and create no proof. Each must fail with its exact code and zero
+store calls:
+
+- changed query, challenge, stored audience or window;
+- wrong audience;
+- expired or not-yet-valid instants;
+- wrong descriptor digest;
+- altered journal result, flipped journal byte or a fake receipt;
+- scope substitution;
+- wrong anchor or an anchor under another salt (agreed cases);
+- five verifier-policy substitutions (other key, issuer or method; widened table; tightened rows),
+  each as presented (`vcq-descriptor-digest-mismatch`) and with the descriptor digest spliced
+  (`vcq-proof-rejected`);
+- the exact guest's pin with the descriptor spliced (`vcq-proof-rejected`).
+
+Then a replay on the used store must be `ChallengeReplayed` after two calls, a broken store
+`infrastructure` after one call, and two concurrent verifications must give one accept and one
+replay. The row-bound case must reject as `capacity` `vcq-released-rows` (requested 2, ceiling 1)
+with zero store calls, and its receipt must still verify through the low-level V5 API with test
+nonces.
+
+A subset job proves and reports only its declared cases. `summary.json` is written last. It
+records `declared_cases`, `completed_cases`, `all_defined_cases_run`, the receipt and control
+counts and `registry_adapter_availability: "not tested; this test reads no registry entry"`.
+Evidence reuses `support/authenticated_rdf_evidence.rs`. Before any verification it holds
+`metadata.json`, and per case `request.json`, `started.json` and `presentation.json`, plus
+`vcq-presentation.json`, the `local-struct-v1` stored-request and descriptor bytes and
+`expected-result.json`. It adds `record.json` after the receipt is re-verified against the
+approved V5 pin. Keep evidence outside the repository.
+
+## Not established
+
+- no credential status, holder binding, validity period, clock or DID or controller resolution;
+- no JSON-LD, full Data Integrity or other-suite processing;
+- no wallet or world completeness under either authority;
+- no general SPARQL conformance, benchmark or performance figure;
+- no external audit, and no soundness or privacy claim.

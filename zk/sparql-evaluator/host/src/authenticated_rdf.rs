@@ -101,9 +101,10 @@ pub fn verify_with_artifact(
     }
 }
 
-// Private hook for a later protocol adapter: `check` sees only a verified,
-// request-bound journal and runs before the nonce is consumed.
-fn verify_checked<T, E>(
+// [OPUS-5.5] zkp-14.6: crate-private hook used by `crate::vcq_authenticated`.
+// `check` sees only a verified, request-bound journal and runs before the nonce
+// is consumed; a rejected check never reaches `nonces`. Behavior is unchanged.
+pub(crate) fn verify_checked<T, E>(
     presentation: &Presentation,
     expected: &Request,
     nonces: &mut impl Nonces,
