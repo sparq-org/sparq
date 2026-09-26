@@ -8,7 +8,7 @@
 > and is not externally audited (sq-qhy4). No workspace crate consumes it yet, so
 > `sparq-core`, `sparq-engine` and the default wasm build are unchanged.
 
-## Current subset
+## ✨ Features
 
 | Draft | API |
 |---|---|
@@ -58,7 +58,7 @@ out of scope; linking profiles are compared as exact identifiers only.
 - A `VerifiedClaim` rejects evidence that omits an owed obligation. Obligations the request did
   not owe are `NotEstablished`, whatever a backend reports.
 
-## Example
+## 🚀 Quickstart
 
 The crate-level rustdoc holds the complete, doctested version of this sketch:
 
@@ -78,7 +78,7 @@ for (obligation, enforcer) in admission.obligations() {
 // method.verify(&stored_request, &admission, &presentation, &challenge_store)?
 ```
 
-## What a real adapter still owes
+## 📚 Learn more
 
 Admission and a `VerifiedClaim` certify no cryptographic fact. `QueryMethod` implementations
 are **trusted local code**; implementing the trait is not evidence that they are correct. Each
@@ -103,3 +103,5 @@ adapter must itself:
 A request or challenge digest supplied by an adapter does not show that any hidden predicate
 was checked. Every draft registry entry still has `adapter_available: false`, and this crate
 registers no method.
+
+License: MIT
