@@ -4,10 +4,15 @@
 //! A missing job, tool or input fails; it never counts as a proof run. Public
 //! receipts persist under the job's new output directory, which is never removed;
 //! `summary.json` is written only after every proof, control and negative check.
+//! The separate omission test uses `SPARQ_ENGINE_REPLAY_OMISSION_JOB` and creates
+//! no proof: one baseline execution, then one SDK proving attempt that must abort.
 #[path = "../examples/engine_replay_proof/controls.rs"]
 mod controls;
 
 use controls::{MemoryNonces, verifier_controls};
+use risc0_zkvm::{
+    Executor, ExecutorEnv, ExitCode, ExternalProver, Prover, ProverOpts, VerifierContext,
+};
 use serde::{Deserialize, de::DeserializeOwned};
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
@@ -61,7 +66,11 @@ fn read(path: &Path, limit: usize) -> Vec<u8> {
         .take(limit as u64 + 1)
         .read_to_end(&mut bytes)
         .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
-    assert!(bytes.len() <= limit, "{} exceeds its read bound", path.display());
+    assert!(
+        bytes.len() <= limit,
+        "{} exceeds its read bound",
+        path.display()
+    );
     bytes
 }
 
@@ -139,6 +148,72 @@ fn pretty(value: &impl serde::Serialize) -> Vec<u8> {
     serde_json::to_vec_pretty(value).expect("typed public JSON")
 }
 
+// [OPUS-5.5] Omission-only SDK observation; test-only classification, never production.
+const OMISSION_SUMMARY_SCHEMA: &str = "sparq.engine-replay-omission.real-test-summary.v1";
+/// The guest's `reject()` text as the pinned SDK renders it.
+///
+/// `methods/guest/src/main.rs` calls `abort("bounded exact-dataset relation
+/// rejected")`, the SDK's `SysPanic` fails with `Guest panicked: {msg}`, and the
+/// r0vm server forwards that error's `to_string()`. Only exact equality with one
+/// chain entry counts; a substring or any other panic is a different failure.
+const GUEST_ABORT: &str = "Guest panicked: bounded exact-dataset relation rejected";
+/// Per-entry and entry-count bounds for recorded SDK error chains.
+const DIAGNOSTIC_BYTES: usize = 64 << 10;
+const DIAGNOSTIC_ENTRIES: usize = 16;
+
+/// True only when one recorded chain entry is exactly the known guest abort.
+fn observed_guest_abort(chain: &[String]) -> bool {
+    chain.iter().any(|message| message == GUEST_ABORT)
+}
+
+/// Records a bounded error chain; each entry is truncated on a UTF-8 boundary.
+fn bounded_chain<'a>(
+    errors: impl Iterator<Item = &'a (dyn std::error::Error + 'static)>,
+) -> Vec<String> {
+    errors
+        .take(DIAGNOSTIC_ENTRIES)
+        .map(|error| {
+            let mut message = error.to_string();
+            if message.len() > DIAGNOSTIC_BYTES {
+                let mut end = DIAGNOSTIC_BYTES;
+                while !message.is_char_boundary(end) {
+                    end -= 1;
+                }
+                message.truncate(end);
+            }
+            message
+        })
+        .collect()
+}
+
+/// Streams a bounded file into SHA-256 without holding it in memory.
+fn file_sha256(path: &Path, limit: u64) -> String {
+    let mut file = File::open(path).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+    let (mut hasher, mut buffer, mut total) = (Sha256::new(), vec![0u8; 1 << 20], 0u64);
+    loop {
+        let read = file
+            .read(&mut buffer)
+            .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+        if read == 0 {
+            break format!("{:x}", hasher.finalize());
+        }
+        total += read as u64;
+        assert!(total <= limit, "{} exceeds its read bound", path.display());
+        hasher.update(&buffer[..read]);
+    }
+}
+
+/// The production prover's limits: `1 << 25` session cycles, `2^20` segments.
+fn executor_env(witness: &v3::Witness) -> ExecutorEnv<'static> {
+    ExecutorEnv::builder()
+        .session_limit(Some(1 << 25))
+        .segment_limit_po2(20)
+        .write(witness)
+        .expect("witness serialization")
+        .build()
+        .expect("executor environment")
+}
+
 #[test]
 #[ignore = "genuine proofs: needs SPARQ_ENGINE_REPLAY_PROOF_JOB, RISC0_SERVER_PATH and an accepted artifact"]
 fn real_engine_replay_cell_proves_both_authorities_and_rejects_substitutions() {
@@ -156,10 +231,19 @@ fn real_engine_replay_cell_proves_both_authorities_and_rejects_substitutions() {
         PathBuf::from(std::env::var_os("RISC0_SERVER_PATH").expect("real local r0vm required"));
     let mut digests = Map::new();
     let pin: ArtifactPin = parse(&input(&mut digests, "pin", &job.pin, 4 << 20), &job.pin);
-    let guest = AcceptedGuest::from_artifact(input(&mut digests, "guest", &job.guest, 32 << 20), &pin)
-        .expect("independently pinned guest artifact");
-    let directory = job.replay_directory.canonicalize().expect("replay directory");
-    let record = input(&mut digests, "record", &directory.join("record.json"), 16 << 20);
+    let guest =
+        AcceptedGuest::from_artifact(input(&mut digests, "guest", &job.guest, 32 << 20), &pin)
+            .expect("independently pinned guest artifact");
+    let directory = job
+        .replay_directory
+        .canonicalize()
+        .expect("replay directory");
+    let record = input(
+        &mut digests,
+        "record",
+        &directory.join("record.json"),
+        16 << 20,
+    );
     let query = input(&mut digests, "query", &directory.join("query.rq"), 16 << 20);
     let data = input(&mut digests, "data", &directory.join("data.ttl"), 16 << 20);
     let originals = Originals {
@@ -168,32 +252,52 @@ fn real_engine_replay_cell_proves_both_authorities_and_rejects_substitutions() {
         data: &data,
     };
     let (holder_path, expected_path) = (&job.holder, &job.expected);
-    let holder: HolderManifest = parse(&input(&mut digests, "holder", holder_path, 4 << 20), holder_path);
-    let expected: ExpectedManifest =
-        parse(&input(&mut digests, "expected", expected_path, 4 << 20), expected_path);
+    let holder: HolderManifest = parse(
+        &input(&mut digests, "holder", holder_path, 4 << 20),
+        holder_path,
+    );
+    let expected: ExpectedManifest = parse(
+        &input(&mut digests, "expected", expected_path, 4 << 20),
+        expected_path,
+    );
     let [holder_request, agreed_request]: [VerifierManifest; 2] = [
         ("holder_declared_request", &job.holder_declared_request),
         ("verifier_agreed_request", &job.verifier_agreed_request),
     ]
     .map(|(name, path)| parse(&input(&mut digests, name, path, 4 << 20), path));
-    assert_eq!(holder_request.request.authority, DatasetAuthority::HolderDeclared);
+    assert_eq!(
+        holder_request.request.authority,
+        DatasetAuthority::HolderDeclared
+    );
     assert!(matches!(
         agreed_request.request.authority,
         DatasetAuthority::VerifierAgreed { .. }
     ));
-    assert_eq!(holder_request.originals, agreed_request.originals, "one original cell");
+    assert_eq!(
+        holder_request.originals, agreed_request.originals,
+        "one original cell"
+    );
     assert_ne!(
         holder_request.request.nonce, agreed_request.request.nonce,
         "distinct verifier challenges"
     );
-    let output = fresh_output(&job.new_output_directory, &directory).expect("new evidence directory");
+    let output =
+        fresh_output(&job.new_output_directory, &directory).expect("new evidence directory");
     eprintln!("engine replay: evidence directory {}", output.display());
 
     let mut finished = Vec::new();
     let mut agreed_witness = None;
     for (verifier, provenance, name) in [
-        (&holder_request, Provenance::HolderDeclaredOnly, "holder_declared"),
-        (&agreed_request, Provenance::VerifierAcceptedCommitment, "verifier_agreed"),
+        (
+            &holder_request,
+            Provenance::HolderDeclaredOnly,
+            "holder_declared",
+        ),
+        (
+            &agreed_request,
+            Provenance::VerifierAcceptedCommitment,
+            "verifier_agreed",
+        ),
     ] {
         let prepared = replay::prepare(originals, verifier, &holder).expect("prepared original");
         let native = prepared
@@ -207,12 +311,18 @@ fn real_engine_replay_cell_proves_both_authorities_and_rejects_substitutions() {
             risc0_zkvm::InnerReceipt::Succinct(_)
         ));
         let mut consumed = MemoryNonces::default();
-        let journal =
-            verify_with_artifact(&presentation, &verifier.request, &mut consumed, &guest)
-                .expect("independent verification");
+        let journal = verify_with_artifact(&presentation, &verifier.request, &mut consumed, &guest)
+            .expect("independent verification");
         assert_eq!(journal.provenance, provenance);
-        assert!(expected.matches(&journal.result).expect("bounded comparison"));
-        assert_eq!(journal, native, "differential: verified and native journals");
+        assert!(
+            expected
+                .matches(&journal.result)
+                .expect("bounded comparison")
+        );
+        assert_eq!(
+            journal, native,
+            "differential: verified and native journals"
+        );
         assert_eq!(journal.dataset_commitment, prepared.dataset_commitment());
 
         // Public outputs only; the private witness is never serialized.
@@ -245,8 +355,11 @@ fn real_engine_replay_cell_proves_both_authorities_and_rejects_substitutions() {
             &mut consumed,
         )
         .unwrap_or_else(|error| {
-            write_new(&child.join("control-failure.json"), &pretty(&json!({ "diagnostic": error })))
-                .expect("control diagnostic");
+            write_new(
+                &child.join("control-failure.json"),
+                &pretty(&json!({ "diagnostic": error })),
+            )
+            .expect("control diagnostic");
             panic!("verifier substitution and tamper controls: {error}")
         });
         assert_eq!(controls, CONTROLS);
@@ -258,7 +371,9 @@ fn real_engine_replay_cell_proves_both_authorities_and_rejects_substitutions() {
     }
 
     // Malicious witness: the prover omits one original statement under the
-    // verifier-agreed anchor. The guest aborts, so no presentation exists.
+    // verifier-agreed anchor. A guest abort is expected, but the sanitized host
+    // error cannot distinguish it from an infrastructure failure; only
+    // `real_engine_replay_omission_is_an_observed_guest_abort` observes the cause.
     let mut omitted = agreed_witness.expect("verifier-agreed request exercised");
     let end = omitted
         .dataset
@@ -276,7 +391,10 @@ fn real_engine_replay_cell_proves_both_authorities_and_rejects_substitutions() {
     assert_eq!(observed, Error("real local proof failed"));
 
     let proof_count = finished.len();
-    let verified_count = finished.iter().filter(|evidence| evidence["verified"] == true).count();
+    let verified_count = finished
+        .iter()
+        .filter(|evidence| evidence["verified"] == true)
+        .count();
     assert_eq!((proof_count, verified_count), (2, 2));
     let summary = json!({
         "schema": SUMMARY_SCHEMA,
@@ -303,6 +421,232 @@ fn real_engine_replay_cell_proves_both_authorities_and_rejects_substitutions() {
     write_new(&output.join("summary.json"), &pretty(&summary)).expect("final summary");
 }
 
+/// [OPUS-5.5] Observes why the omitted-statement witness fails, without new proofs.
+///
+/// The valid baseline is executed once (no proof). The omission then goes
+/// straight to the SDK's `ExternalProver::prove_with_ctx`, bypassing the
+/// production wrapper that sanitizes its error, and must fail with the exact
+/// known guest abort. This is an observed guest execution rejection, not a
+/// negative cryptographic proof.
+#[test]
+#[ignore = "real r0vm execution: needs SPARQ_ENGINE_REPLAY_OMISSION_JOB, RISC0_SERVER_PATH and an accepted artifact"]
+fn real_engine_replay_omission_is_an_observed_guest_abort() {
+    assert!(
+        std::env::var_os("RISC0_DEV_MODE").is_none(),
+        "RISC0_DEV_MODE must be unset"
+    );
+    let job_path = PathBuf::from(
+        std::env::var_os("SPARQ_ENGINE_REPLAY_OMISSION_JOB").expect("explicit replay omission job"),
+    );
+    let job_bytes = read(&job_path, 4 << 20);
+    let job: Job = parse(&job_bytes, &job_path);
+    assert_eq!(job.schema, JOB_SCHEMA);
+    let r0vm =
+        PathBuf::from(std::env::var_os("RISC0_SERVER_PATH").expect("real local r0vm required"));
+    let r0vm = r0vm.canonicalize().expect("r0vm executable");
+    let mut digests = Map::new();
+    let pin: ArtifactPin = parse(&input(&mut digests, "pin", &job.pin, 4 << 20), &job.pin);
+    let artifact = input(&mut digests, "guest", &job.guest, 32 << 20);
+    let guest = AcceptedGuest::from_artifact(artifact.clone(), &pin)
+        .expect("independently pinned guest artifact");
+    let directory = job
+        .replay_directory
+        .canonicalize()
+        .expect("replay directory");
+    let record = input(
+        &mut digests,
+        "record",
+        &directory.join("record.json"),
+        16 << 20,
+    );
+    let query = input(&mut digests, "query", &directory.join("query.rq"), 16 << 20);
+    let data = input(&mut digests, "data", &directory.join("data.ttl"), 16 << 20);
+    let originals = Originals {
+        record: &record,
+        query: &query,
+        data: &data,
+    };
+    let (holder_path, expected_path) = (&job.holder, &job.expected);
+    let holder: HolderManifest = parse(
+        &input(&mut digests, "holder", holder_path, 4 << 20),
+        holder_path,
+    );
+    let expected: ExpectedManifest = parse(
+        &input(&mut digests, "expected", expected_path, 4 << 20),
+        expected_path,
+    );
+    let [holder_request, agreed_request]: [VerifierManifest; 2] = [
+        ("holder_declared_request", &job.holder_declared_request),
+        ("verifier_agreed_request", &job.verifier_agreed_request),
+    ]
+    .map(|(name, path)| parse(&input(&mut digests, name, path, 4 << 20), path));
+    assert_eq!(
+        holder_request.originals, agreed_request.originals,
+        "one original cell"
+    );
+    let DatasetAuthority::VerifierAgreed { commitment: anchor } = &agreed_request.request.authority
+    else {
+        panic!("the omission needs a verifier-agreed anchor");
+    };
+    let output =
+        fresh_output(&job.new_output_directory, &directory).expect("new evidence directory");
+    eprintln!(
+        "engine replay omission: evidence directory {}",
+        output.display()
+    );
+    let provenance = json!({
+        "job_sha256": sha256(&job_bytes),
+        "inputs": digests,
+        "accepted_guest": { "pin": pin, "artifact_sha256": hex(&pin.sha256), "image_id": guest.image_id() },
+        "r0vm": {
+            "canonical_path_sha256": sha256(r0vm.as_os_str().as_encoded_bytes()),
+            "executable_sha256": file_sha256(&r0vm, 1 << 30),
+        },
+    });
+    write_new(&output.join("inputs.json"), &pretty(&provenance)).expect("input provenance");
+
+    // The same original replay, independently checked before any execution.
+    let prepared =
+        replay::prepare(originals, &agreed_request, &holder).expect("agreed anchor opens");
+    assert_eq!(&prepared.dataset_commitment(), anchor);
+    let native = prepared
+        .evaluate_against(&expected)
+        .expect("native V3 agrees with the independent expectation");
+    let prover = ExternalProver::new("sparq-local-r0vm", &r0vm);
+
+    // Baseline: execution only, so no receipt is created.
+    let baseline_run = Executor::execute(&prover, executor_env(prepared.witness()), &artifact);
+    let baseline = match &baseline_run {
+        Ok(session) => {
+            let executed = session.journal.decode::<v3::Journal>().ok();
+            json!({
+                "mode": "execute_only_no_proof",
+                "exit_code": format!("{:?}", session.exit_code),
+                "journal_sha256": sha256(&session.journal.bytes),
+                "journal_equals_native": executed.as_ref() == Some(&native),
+                "result_matches_expected": executed
+                    .as_ref()
+                    .is_some_and(|journal| matches!(expected.matches(&journal.result), Ok(true))),
+            })
+        }
+        Err(error) => json!({
+            "mode": "execute_only_no_proof",
+            "sdk_error_chain": bounded_chain(error.chain()),
+        }),
+    };
+    write_new(&output.join("baseline.json"), &pretty(&baseline)).expect("baseline evidence");
+    let Ok(session) = baseline_run else {
+        panic!("baseline execution failed; see baseline.json");
+    };
+    assert_eq!(session.exit_code, ExitCode::Halted(0));
+    let executed: v3::Journal = session.journal.decode().expect("baseline journal");
+    assert_eq!(
+        executed, native,
+        "differential: executed and native journals"
+    );
+    assert!(
+        expected
+            .matches(&executed.result)
+            .expect("bounded comparison")
+    );
+
+    // Remove the first statement under the unchanged agreed anchor.
+    let mut omitted = prepared.witness().clone();
+    let end = omitted
+        .dataset
+        .nquads
+        .find('\n')
+        .expect("the original fixture needs at least one statement")
+        + 1;
+    omitted.dataset.nquads.replace_range(..end, "");
+    assert_eq!(
+        omitted.request,
+        prepared.witness().request,
+        "unchanged request and anchor"
+    );
+    let native_cause = v3::evaluate_detailed(&omitted).unwrap_err();
+    assert_eq!(
+        native_cause,
+        EvaluationError::Rejected(Rejected("V3 complete dataset anchor mismatch"))
+    );
+    let attempt = prover.prove_with_ctx(
+        executor_env(&omitted),
+        &VerifierContext::default().with_dev_mode(false),
+        &artifact,
+        &ProverOpts::succinct().with_dev_mode(false),
+    );
+    let (new_proofs, chain_length, chain) = match &attempt {
+        Ok(_) => (1, 0, Vec::new()),
+        Err(error) => (0, error.chain().count(), bounded_chain(error.chain())),
+    };
+    let omission = json!({
+        "mode": "sdk_external_prover_prove_with_ctx",
+        "mutation": "first N-Quads statement removed; request and verifier-agreed anchor unchanged",
+        // Includes the holder salt; digest only, the witness itself is never written.
+        "mutated_witness_json_sha256": sha256(&serde_json::to_vec(&omitted).expect("witness JSON")),
+        "native_expected_cause": format!("{native_cause:?}"),
+        "limits": { "session_cycles": 1u64 << 25, "segment_limit_po2": 20 },
+        "options": { "receipt_kind": "succinct", "dev_mode": false },
+        "expected_chain_entry": GUEST_ABORT,
+        "sdk_error_chain_length": chain_length,
+        "sdk_error_chain": chain,
+        "new_genuine_proof_count": new_proofs,
+        "guest_abort_observed": false,
+    });
+    write_new(&output.join("omission.json"), &pretty(&omission)).expect("omission evidence");
+    assert!(
+        attempt.is_err(),
+        "a receipt exists for the omitted witness; see omission.json"
+    );
+    assert!(
+        observed_guest_abort(&chain),
+        "SDK error chain lacks the exact known guest abort; see omission.json"
+    );
+
+    let summary = json!({
+        "schema": OMISSION_SUMMARY_SCHEMA,
+        "provenance": provenance,
+        "baseline": baseline,
+        "omission": omission,
+        "new_genuine_proof_count": 0,
+        "guest_abort_observed": true,
+        "scope": "synthetic experiment evidence; an observed guest execution rejection, not a negative cryptographic proof; not externally audited",
+    });
+    write_new(&output.join("summary.json"), &pretty(&summary)).expect("final summary");
+}
+
+#[test]
+fn only_the_exact_known_guest_abort_counts_as_relation_rejection() {
+    let chain = |messages: &[&str]| messages.iter().map(|m| (*m).to_owned()).collect::<Vec<_>>();
+    assert!(observed_guest_abort(&chain(&[GUEST_ABORT])));
+    assert!(observed_guest_abort(&chain(&[
+        "outer context",
+        GUEST_ABORT
+    ])));
+    let rejected_chains: [&[&str]; 10] = [
+        &[],
+        &["real local proof failed"],
+        &["No such file or directory (os error 2)"],
+        &["Child finished with: 137"],
+        &["operation timed out"],
+        &["Session limit exceeded"],
+        &["Guest panicked: Out of memory!"],
+        &["guest panicked: bounded exact-dataset relation rejected"],
+        &["Guest panicked: bounded exact-dataset relation rejected, then more"],
+        &["wrapped: Guest panicked: bounded exact-dataset relation rejected"],
+    ];
+    for rejected in rejected_chains {
+        assert!(!observed_guest_abort(&chain(rejected)), "{rejected:?}");
+    }
+    // A truncated oversized entry stays bounded and never equals the known abort.
+    let long_error =
+        std::io::Error::other(format!("{GUEST_ABORT}{}", "é".repeat(DIAGNOSTIC_BYTES)));
+    let recorded = bounded_chain(std::iter::once(
+        &long_error as &(dyn std::error::Error + 'static),
+    ));
+    assert!(recorded[0].len() <= DIAGNOSTIC_BYTES && !observed_guest_abort(&recorded));
+}
+
 #[test]
 fn job_requires_a_new_output_directory_and_rejects_unknown_fields() {
     let mut fields = Map::new();
@@ -319,15 +663,28 @@ fn job_requires_a_new_output_directory_and_rejects_unknown_fields() {
     ] {
         fields.insert(key.into(), json!(format!("/abs/{key}")));
     }
-    let job = |fields: &Map<String, Value>| serde_json::from_value::<Job>(Value::Object(fields.clone()));
+    let job =
+        |fields: &Map<String, Value>| serde_json::from_value::<Job>(Value::Object(fields.clone()));
     let complete = job(&fields).expect("complete job");
-    assert_eq!(complete.new_output_directory, Path::new("/abs/new_output_directory"));
+    assert_eq!(
+        complete.new_output_directory,
+        Path::new("/abs/new_output_directory")
+    );
     let mut missing = fields.clone();
     missing.remove("new_output_directory");
-    let error = job(&missing).err().expect("missing output rejected").to_string();
-    assert!(error.contains("missing field `new_output_directory`"), "{error}");
+    let error = job(&missing)
+        .err()
+        .expect("missing output rejected")
+        .to_string();
+    assert!(
+        error.contains("missing field `new_output_directory`"),
+        "{error}"
+    );
     fields.insert("output".into(), json!("/abs/output"));
-    let error = job(&fields).err().expect("unknown field rejected").to_string();
+    let error = job(&fields)
+        .err()
+        .expect("unknown field rejected")
+        .to_string();
     assert!(error.contains("unknown field `output`"), "{error}");
 }
 
@@ -337,7 +694,8 @@ fn output_directory_must_be_new_owner_only_and_outside_checkout_and_replay() {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let base = std::env::temp_dir().join(format!("sparq-replay-guard-{}-{nanos}", std::process::id()));
+    let base =
+        std::env::temp_dir().join(format!("sparq-replay-guard-{}-{nanos}", std::process::id()));
     create_dir(&base).unwrap();
     let base = base.canonicalize().unwrap();
     let replay = base.join("replay");
@@ -365,7 +723,10 @@ fn output_directory_must_be_new_owner_only_and_outside_checkout_and_replay() {
     {
         use std::os::unix::fs::PermissionsExt;
         let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
-        assert_eq!((mode(&output), mode(&output.join("summary.json"))), (0o700, 0o600));
+        assert_eq!(
+            (mode(&output), mode(&output.join("summary.json"))),
+            (0o700, 0o600)
+        );
     }
     fs::remove_dir_all(&base).unwrap();
 }
