@@ -56,3 +56,9 @@ Replay failures retain every input and available partial result. Replay a cell
 using its original seed/category and exact accepted binary before minimizing it.
 This first slice preserves the original minimizers and fuzz targets; it does not
 claim a minimized counterexample or per-backend admission/proof execution.
+
+[OPUS-5.5] The separate [engine proof replay bridge](engine-proof-replay.md)
+prepares one retained cell's unchanged originals for the exact V3 relation and,
+in real mode, proves and independently verifies them. It writes its own status
+record; this controller, its null record bridge fields, its denominators and its
+classification are unchanged, and no proof is reused across cells.
