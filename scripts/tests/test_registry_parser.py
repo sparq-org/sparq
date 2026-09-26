@@ -547,6 +547,33 @@ class BoundedRunner(unittest.TestCase):
             self.assertIn("could not run", recorder.steps[0]["detail"])
 
 
+class SourceLocks(unittest.TestCase):
+    """[OPUS-5.5] zkp-14.5: every independent workspace lock, V5 guest included."""
+
+    def test_each_independent_lock_is_hashed_and_required(self):
+        self.assertEqual(registry.SOURCE_LOCKS, (
+            "Cargo.lock", "zk/sparql-evaluator/Cargo.lock",
+            "zk/sparql-evaluator/methods/guest/Cargo.lock",
+            "zk/sparql-evaluator/methods/guest-authrdf/Cargo.lock"))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for relative in registry.SOURCE_LOCKS:
+                write(root, relative, f"# {relative}\n")
+            before = registry.lock_hashes(root)
+            self.assertEqual(registry.compare_locks(before, registry.lock_hashes(root)),
+                             {"unchanged": sorted(registry.SOURCE_LOCKS)})
+            for relative in registry.SOURCE_LOCKS:
+                with self.subTest(missing=relative):
+                    (root / relative).unlink()
+                    missing = registry.lock_hashes(root)
+                    self.assertIsNone(missing[relative])
+                    with self.assertRaisesRegex(registry.GateError, "missing before"):
+                        registry.compare_locks(missing, missing)
+                    with self.assertRaisesRegex(registry.GateError, "changed during"):
+                        registry.compare_locks(before, missing)
+                    write(root, relative, f"# {relative}\n")
+
+
 class GateEvidence(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()

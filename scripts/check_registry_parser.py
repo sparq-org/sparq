@@ -90,8 +90,11 @@ ESCAPING_FEATURE = "standard-unicode-escaping"
 CONSUMER = "sparq-registry-parser-consumer"
 MODES = (("verbatim", False), ("standard-unicode-escaping", True))
 
+# [OPUS-5.5] zkp-14.5: the separately pinned V5 guest has its own lock; a missing
+# lock fails `source-locks-unchanged`, like any other.
 SOURCE_LOCKS = ("Cargo.lock", "zk/sparql-evaluator/Cargo.lock",
-                "zk/sparql-evaluator/methods/guest/Cargo.lock")
+                "zk/sparql-evaluator/methods/guest/Cargo.lock",
+                "zk/sparql-evaluator/methods/guest-authrdf/Cargo.lock")
 SOURCE_FILES = (HELPER, STABLE_CONTRACT, CORPUS, FORK_DIFFERENTIAL, "Cargo.toml",
                 "crates/sparq-engine/Cargo.toml", "crates/sparq-text/Cargo.toml",
                 "crates/sparq-shacl/Cargo.toml", "vendor/spargebra/Cargo.toml", "rust-toolchain.toml",

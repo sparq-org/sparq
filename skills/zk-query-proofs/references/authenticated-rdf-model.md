@@ -1,10 +1,13 @@
 # Issuer-authenticated RDF: native V5 model
 
-[OPUS-5.5] **Native model only.** No guest adapter, host API, receipt or real
-proof exists for this relation yet. It makes no conformance or performance claim,
-is not a complete Data Integrity processor, and is not externally audited. Treat
-it as research-grade and not yet sound.
-<!-- privacy-claims-allow: native model only; explicitly not audited, no proof exists -->
+[OPUS-5.5] **Native model.** No receipt or real proof has been recorded for this
+relation. Source for a separately pinned optional guest and a low-level host API
+runs it unchanged. At the current checkpoint that guest is unbuilt and
+unexecuted; see the [V5 guest reference](authenticated-rdf-guest.md). No method
+registry lists it, and no protocol adapter exists. It makes no conformance or
+performance claim, is not a complete Data Integrity processor, and is not
+externally audited. Treat it as research-grade and not yet sound.
+<!-- privacy-claims-allow: native model plus unbuilt, unexecuted guest source; explicitly not audited, no receipt recorded -->
 
 The detached model crate's `authenticated-rdf` feature (off by default) adds
 `sparq_proved_evaluator_model::authenticated_rdf`, relation version 5. It is
@@ -25,6 +28,8 @@ and keys must decompress and must not have small order.
 `Witness` holds only `PrivateCredentials`: 1–4 `SignedCredential { document,
 proof_config, signature }` values and a salt. It has no separately supplied query
 dataset. Byte and statement bounds (`MAX_*` constants) reject before parsing.
+`MAX_WITNESS_BYTES` is the separate V5 guest's raw input bound over the SDK
+encoding of a whole witness; the model's own checks never read it.
 
 For each credential, the model parses both N-Quads inputs. It admits only the
 default graph and rejects triple terms and directional literals. It then
@@ -77,7 +82,8 @@ publicly linkable.
 `evaluate(&Witness) -> Journal { version, request_digest, dataset_commitment,
 provenance, result }`. The journal does not publish a credential count or issuer
 list. `request_digest` frames every request and policy field. After receipt
-verification (not yet available), `bind_journal(&journal, &expected)` checks the
+verification (see the [V5 guest reference](authenticated-rdf-guest.md); source
+only, unbuilt and unexecuted), `bind_journal(&journal, &expected)` checks the
 version and request digest. For `VerifierAgreed`, it also requires the new
 authenticated commitment and `Provenance::VerifierAgreedAuthenticated`. For
 `HolderDeclared`, it requires `Provenance::HolderSelectedAuthenticated`. Calling

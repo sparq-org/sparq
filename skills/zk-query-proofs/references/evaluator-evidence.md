@@ -68,3 +68,17 @@ Guest package invalidation explicitly selects `--release --target
 riscv32im-risc0-zkvm-elf`; Cargo's default host/debug clean scope does not clear
 those artifacts. A real read-only dry run checked this distinction before the
 first exported campaign. The host package rebuild uses its actual default scope.
+
+[OPUS-5.5] zkp-14.5: the campaign also covers the separately pinned V5 guest
+(`methods/guest-authrdf`), which has its own Cargo metadata, locked fetch and
+guest/release rebuild scope in the `sparq-authrdf-guest` target subdirectory.
+It exports `authrdf-artifact/guest.bin` and `authrdf-artifact/pin.json`
+separately from the exact `artifact/`. After the exact steps it runs the V5
+native model and host gates and a Clippy pass with the host `authenticated-rdf`
+feature, then re-exports both guests to reject drift. `evidence.json` keeps
+`artifact_pin` for the exact guest and adds `guest_artifact_pins`, keyed by
+`sparq-exact-guest` and `sparq-authrdf-guest`. The two pins must differ in both
+digest and image ID. It executes no V5 guest and creates no V5 receipt,
+as `authrdf_scope` records. Until `methods/guest-authrdf/Cargo.lock` exists,
+these locked steps fail and the campaign does not complete. This change has not
+yet been run.

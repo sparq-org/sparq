@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""[GPT-6] Run dependency gates over the root, exact evaluator and guest workspaces."""
+"""[GPT-6] Run dependency gates over the root, exact evaluator and guest workspaces.
+
+[OPUS-5.5] zkp-14.5: the separately pinned V5 guest is its own workspace with its
+own lock, so it is a fourth graph. A missing lock fails its gate.
+"""
 from __future__ import annotations
 
 import argparse
@@ -15,6 +19,7 @@ MANIFESTS = (
     Path("Cargo.toml"),
     Path("zk/sparql-evaluator/Cargo.toml"),
     Path("zk/sparql-evaluator/methods/guest/Cargo.toml"),
+    Path("zk/sparql-evaluator/methods/guest-authrdf/Cargo.toml"),
 )
 ACTIONS = ("deny-integrity", "deny-advisories", "fetch", "vet", "sbom", "sbom-paths", "patch-policy")
 SDK_PATCHES = {

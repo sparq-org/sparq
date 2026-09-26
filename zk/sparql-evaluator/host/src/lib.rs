@@ -26,6 +26,10 @@ pub mod v3;
 #[cfg(feature = "vcq")]
 pub mod vcq;
 
+/// [OPUS-5.5] Issuer-authenticated RDF (V5) proving and verification over a separate guest.
+#[cfg(feature = "authenticated-rdf")]
+pub mod authenticated_rdf;
+
 /// Public presentation contains only the cryptographic receipt and its journal.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -77,6 +81,24 @@ pub fn embedded_pin() -> ArtifactPin {
     ArtifactPin {
         sha256: Sha256::digest(SPARQ_EXACT_GUEST_ELF).into(),
         image_id: SPARQ_EXACT_GUEST_ID,
+    }
+}
+
+/// [OPUS-5.5] The separately built V5 authenticated-RDF guest artifact, for export.
+///
+/// This image is distinct from [`embedded_artifact`] and rejects V1–V3 input.
+/// Release operators must approve [`embedded_authrdf_pin`] before deployment.
+#[cfg(feature = "authenticated-rdf")]
+pub fn embedded_authrdf_artifact() -> &'static [u8] {
+    sparq_proved_evaluator_methods::SPARQ_AUTHRDF_GUEST_ELF
+}
+
+/// [OPUS-5.5] Exports a pin for the locally compiled V5 guest; operators must approve it.
+#[cfg(feature = "authenticated-rdf")]
+pub fn embedded_authrdf_pin() -> ArtifactPin {
+    ArtifactPin {
+        sha256: Sha256::digest(sparq_proved_evaluator_methods::SPARQ_AUTHRDF_GUEST_ELF).into(),
+        image_id: sparq_proved_evaluator_methods::SPARQ_AUTHRDF_GUEST_ID,
     }
 }
 

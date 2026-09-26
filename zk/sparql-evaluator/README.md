@@ -322,12 +322,30 @@ for the record and its caveats.
 ## Issuer-authenticated RDF model
 
 [OPUS-5.5] The model crate's `authenticated-rdf` feature (off by default) adds the
-native-only relation version 5 in `authenticated_rdf`; V1–V3 are unchanged. The
+native relation version 5 in `authenticated_rdf`; V1–V3 are unchanged. The
 verifier-owned policy table authorizes each issuer, verification method and public
 key. Each credential needs strict Ed25519 over the hashes of its RDFC-1.0 canonical
 document and proof configuration and an issuer matching the method's table entry.
 The model internally builds the V3 default-graph union, scoping blank nodes per
 credential. `VerifierAgreed` and `HolderDeclared` authority bind distinct
-authenticated provenance values. No guest adapter, host API, receipt or proof exists,
-and it makes no credential status, holder binding or wallet-completeness claim. See
-the [native model reference](../../skills/zk-query-proofs/references/authenticated-rdf-model.md).
+authenticated provenance values. It makes no credential status, holder binding or
+wallet-completeness claim. See the
+[native model reference](../../skills/zk-query-proofs/references/authenticated-rdf-model.md).
+
+[OPUS-5.5] zkp-14.5 adds source for a separately pinned V5 guest
+(`methods/guest-authrdf`, methods feature `authenticated-rdf`, off by default).
+The host feature `authenticated-rdf` (off by default) adds a low-level API:
+`authenticated_rdf::{prove_with_artifact, verify_with_artifact}` against an
+independently accepted V5 guest, plus `embedded_authrdf_artifact()`,
+`embedded_authrdf_pin()` and the `export_authrdf_guest` example. The exact V1–V3
+guest keeps its flags, target, manifest, lock and constants, so that its artifact
+bytes and image ID are intended not to depend on the feature; that invariant is
+pending a byte comparison and is not yet measured. Each guest's source rejects
+the other's input; no guest execution has confirmed it. All credential
+authentication is written to run inside the V5 guest. At the current
+checkpoint the V5 guest is unbuilt and unexecuted: its lock is not yet
+generated, and no test run or receipt is recorded. The dependency, SBOM,
+registry-parser and exact-evaluator campaign gates register its workspace and
+lock and fail closed until the lock exists; the campaign creates no V5 receipt.
+No method registry lists it, and no protocol adapter exists. See the
+[V5 guest reference](../../skills/zk-query-proofs/references/authenticated-rdf-guest.md).

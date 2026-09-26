@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import subprocess
 import tempfile
+import tomllib
 import unittest
 
 SPEC = importlib.util.spec_from_file_location(
@@ -151,6 +152,45 @@ class EvidenceGuards(unittest.TestCase):
         self.assertNotIn("--release", host)
         with self.assertRaisesRegex(ValueError, "unknown package"):
             evidence.clean_command("ambiguous", "Cargo.toml", self.root, [])
+        # [OPUS-5.5] zkp-14.5: the V5 guest invalidates its own guest/release artifacts.
+        authrdf = evidence.clean_command("authrdf-guest", evidence.AUTHRDF_GUEST_MANIFEST,
+                                         self.root, ["sparq-canon"])
+        self.assertEqual(authrdf[authrdf.index("--target") + 1], "riscv32im-risc0-zkvm-elf")
+        self.assertIn("--release", authrdf)
+
+    def test_each_guest_workspace_has_its_own_rebuild_scope_and_target(self):
+        scopes = {label: (manifest, subdirectory) for label, manifest, subdirectory in evidence.REBUILD_SCOPES}
+        self.assertEqual(scopes, {
+            "host": ("zk/sparql-evaluator/Cargo.toml", None),
+            "guest": ("zk/sparql-evaluator/methods/guest/Cargo.toml", "sparq-exact-guest"),
+            "authrdf-guest": ("zk/sparql-evaluator/methods/guest-authrdf/Cargo.toml", "sparq-authrdf-guest"),
+        })
+        self.assertEqual(set(scopes) - {"host"}, evidence.GUEST_LABELS)
+        # The target subdirectories are the package names methods/build.rs builds into.
+        root = Path(__file__).parents[2]
+        build = (root / "zk/sparql-evaluator/methods/build.rs").read_text()
+        for label in evidence.GUEST_LABELS:
+            manifest, package = scopes[label]
+            self.assertIn(f'package: "{package}"', build)
+            self.assertIn(f'dir: "{Path(manifest).parent.name}"', build)
+            self.assertEqual(tomllib.loads((root / manifest).read_text())["package"]["name"], package)
+
+    def test_guest_pins_are_named_per_guest_and_must_be_distinct(self):
+        other = {"sha256": [7] * 32, "image_id": [9] * 8}
+        self.assertEqual(evidence.guest_pins(self.pin, other),
+                         {"sparq-exact-guest": self.pin, "sparq-authrdf-guest": other})
+        for same in [self.pin, other | {"sha256": self.pin["sha256"]}, other | {"image_id": self.pin["image_id"]}]:
+            with self.subTest(same=same):
+                with self.assertRaisesRegex(ValueError, "not distinct"):
+                    evidence.guest_pins(self.pin, same)
+
+    def test_campaign_exports_and_confirms_both_guests_without_v5_receipts(self):
+        runner = (Path(__file__).parents[2] / "scripts/ci_exact_evaluator_evidence.py").read_text()
+        for step in ["export-authrdf-guest", "confirm-authrdf-guest", "native-authrdf",
+                     "native-authrdf-host", "lint-authrdf"]:
+            self.assertIn(f'"{step}"', runner)
+        self.assertIn('"--example", "export_authrdf_guest"', runner)
+        self.assertIn("creates no V5 receipt", evidence.AUTHRDF_SCOPE)
 
     def test_workflow_requires_export_and_upload_of_actual_evidence(self):
         root = Path(__file__).parents[2]
