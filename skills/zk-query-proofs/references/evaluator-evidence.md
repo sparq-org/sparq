@@ -79,13 +79,18 @@ feature, then re-exports both guests to reject drift. `evidence.json` keeps
 `artifact_pin` for the exact guest and adds `guest_artifact_pins`, keyed by
 `sparq-exact-guest` and `sparq-authrdf-guest`. The two pins must differ in both
 digest and image ID. These zkp-14.5 steps execute no V5 guest, and the campaign
-creates no V5 receipt, as `authrdf_scope` records. Until
-`methods/guest-authrdf/Cargo.lock` exists, these locked steps fail and the
-campaign does not complete. This change has not yet been run.
+creates no V5 receipt, as `authrdf_scope` records. `methods/guest-authrdf/Cargo.lock`
+is committed, so these locked steps no longer fail for lack of it. A separate,
+independently audited scoped gate at source `42d13fed` ran the V5 host tests,
+direct V5 guest execution and a feature Clippy pass outside this campaign; it is
+not a campaign record. See the
+[V5 guest reference](authenticated-rdf-guest.md#recorded-evidence).
 
 [OPUS-5.5] zkp-14.6: after `lint-authrdf`, the campaign runs the commands named in
 `VCQ_COMMANDS`, each through the same fail-closed `run_logged` path, before both
-guests are re-exported. None of them has run at this source.
+guests are re-exported. These commands were authored at `e4fb7dff`. No completed
+run of the full named campaign, with these commands or the zkp-14.5 V5 steps, is
+recorded at that revision.
 
 | Command | Scope | Cargo selection (`--locked`, evaluator manifest) |
 |---|---|---|
@@ -113,6 +118,11 @@ guests are re-exported. None of them has run at this source.
   receipt export fails the campaign. `authrdf_scope` states the same split.
 
 Hermetic Python tests pin each command's feature, `--lib` and `--test` targets,
-each target's feature gate, the single `--ignored` use and the scope table. They
-do not show that any command ran; registry `adapter_available` stays false for
-the V5 adapter.
+each target's feature gate, the single `--ignored` use and the scope table. At
+`e4fb7dff` those 17 Python tests and the scoped documentation gates passed. They
+do not show that any campaign command ran. Separately, an independently verified,
+manually scoped native gate at adapter source `7fe88955` ran the adapter's native
+tests and two Clippy feature scopes, with no proof and no direct guest execution.
+That gate is not this campaign; see
+[its record](vcq-authenticated-rdf-adapter.md#recorded-native-validation).
+Registry `adapter_available` stays false for the V5 adapter.

@@ -14,7 +14,7 @@
         "sparq-zk import entries are summarized from skills/zk-query-proofs/SKILL.md, not re-read from source.",
         "No build, test or proof was executed to produce this file.",
         "[OPUS-5.5] query_methods method:risc0-exact vcq_adapter records the V3 vcq adapter as implemented at source 872c219ca18c6cc978d2f5c705f020e8c69748a6 and cites an independently certified genuine run at that source. That run was not repeated to edit this file; its evidence is retained outside the repository.",
-        "[OPUS-5.5] query_methods method:risc0-authenticated-rdf records V5 adapter source (zkp-14.6) written after base 42d13fedff0f42e3cde8ea63ff611408719cd6e7. No adapter test run or genuine adapter receipt is recorded, so its adapter_available stays false."
+        "[OPUS-5.5] query_methods method:risc0-authenticated-rdf records V5 adapter source (zkp-14.6) at 7fe889557afcf1497769c1360ef53348980a7bae, written after base 42d13fedff0f42e3cde8ea63ff611408719cd6e7, and cites an independently verified scoped native gate at that source (no proof). No genuine adapter receipt is recorded, so its adapter_available stays false."
       ]
     },
     "rules": [
@@ -417,7 +417,7 @@
       "result_contracts": ["select-bag", "select-sequence", "ask-boolean", "graph-rdfc10"],
       "dialect": "v3::Dialect::SparqSparql11GraphResultsV3 over the authenticated union",
       "adapter_available": false,
-      "adapter_available_note": "[OPUS-5.5] Adapter source exists (vcq_adapter below), but no adapter test run or genuine adapter receipt is recorded. It stays false until a genuine end-to-end adapter receipt is independently retained.",
+      "adapter_available_note": "[OPUS-5.5] The adapter (vcq_adapter below) exists and passed a scoped native gate, but no genuine adapter receipt is recorded and none of its six tuples is proved. It stays false until a genuine end-to-end adapter receipt is independently retained.",
       "scope_authority": ["verifier-agreed-anchor", "holder-declared"],
       "source_evidence": ["issuer-authenticated"],
       "completeness": "relative-to-scope",
@@ -437,13 +437,13 @@
       "challenge_owner": "method",
       "challenge_consumption": "consume-on-success",
       "disclosure_inventory": ["journal: V5 request digest (binds the verifier policy), authenticated commitment (linkable when a salt is reused), provenance and result"],
-      "execution_evidence": "Not recorded in this registry. Model, guest and low-level host test results reported for this branch are not adapter evidence, and no V5 adapter receipt exists.",
+      "execution_evidence": "Model, low-level host and direct guest execution evidence is recorded in the V5 model and guest references (guest gate at 42d13fedff0f42e3cde8ea63ff611408719cd6e7, no receipt) and is not adapter evidence. The adapter's native gate is in vcq_adapter.evidence. No genuine V5 receipt, low-level or adapter, exists.",
       "vcq_adapter": {
         "authored_by": "[OPUS-5.5]",
         "version": 5,
         "adapter_available": false,
         "status": "implemented-experimental",
-        "evidence": "none: source only; no native adapter test run, Clippy run or genuine adapter receipt is recorded",
+        "evidence": "native only: an independently verified, manually scoped native gate at source 7fe889557afcf1497769c1360ef53348980a7bae passed 44 distinct test functions (4 module unit, 15 vcq_authenticated integration, 3 non-ignored genuine-driver job-parser and valid-policy, 5 existing low-level V5, 17 existing V3 vcq; the 17 V3 functions also ran under vcq alone, 61 executions) and all-target Clippy in two feature scopes; 0 proofs, 0 direct guest executions, genuine driver not run; audit record vcq-authenticated-native-7fe88955/independently-verified-gates.json SHA-256 6a8fc2300f0463290859b0f8f4c0b9ef790382b0ef9401ec2a60a07645eab385. Not the CI campaign, not a full workspace gate, no genuine adapter receipt.",
         "current_api": {
           "workspace": "zk/sparql-evaluator (detached)",
           "feature": "sparq-proved-evaluator/vcq-authenticated (= vcq + authenticated-rdf), off by default",
@@ -518,7 +518,7 @@
     {"id": "link:same-relation", "status": "implemented-experimental", "establishes": "One proof relation checks signature, membership, status and query over one witness.", "evidence": "method:noir-selected-support-unsigned"},
     {"id": "link:public-authenticated-value", "status": "implemented-experimental", "establishes": "A released value authenticated in-relation is checked by the verifier outside the circuit.", "evidence": "public FILTERs in method:noir-selected-support-unsigned"},
     {"id": "link:committed-dataset-evaluation", "status": "implemented-experimental", "establishes": "The proof evaluates exactly the bytes whose commitment it journals. It says nothing about who endorsed the commitment (scope authority) and authenticates nothing (source evidence none).", "evidence": "method:risc0-exact"},
-    {"id": "link:authenticated-dataset-evaluation", "status": "implemented-experimental", "authored_by": "[OPUS-5.5]", "establishes": "One V5 relation authenticates each credential, maps the signed canonical documents and evaluates the query over exactly that mapped union, journaling its authenticated commitment.", "evidence": "method:risc0-authenticated-rdf source only; no receipt recorded"},
+    {"id": "link:authenticated-dataset-evaluation", "status": "implemented-experimental", "authored_by": "[OPUS-5.5]", "establishes": "One V5 relation authenticates each credential, maps the signed canonical documents and evaluates the query over exactly that mapped union, journaling its authenticated commitment.", "evidence": "method:risc0-authenticated-rdf adapter source with a scoped native gate only; no receipt recorded"},
     {"id": "link:trusted-reattestation", "status": "proposed", "establishes": "An importer verifies a source suite and re-signs a sparq commitment; only the re-signing key is checked in-proof.", "evidence": "components exist separately (vc_bridge ingest, Poseidon2SchnorrV1 signing); no end-to-end path checked"},
     {"id": "link:native-witness-equality", "status": "standalone-prototype", "establishes": "One composite proof equates hidden signed messages and circuit inputs in one scalar field.", "evidence": "prototype:native-bbsplus-legogroth16-eligibility"},
     {"id": "link:cross-field-bridge", "status": "proposed", "establishes": "Equality between BLS12-381 and BN254 witnesses.", "evidence": "none; every request needing it fails closed"}
@@ -540,7 +540,7 @@
     {"tuple": "suite:di-selective-disclosure without a host verifier", "reason": "the default verifier rejects every suite"},
     {"tuple": "map:sparq-dual-leaf-v1 with method:noir-selected-support-*", "reason": "members accept string-canonical commitments only"},
     {"tuple": "selected-support with select-bag, select-sequence, false ASK or graph results", "reason": "these assert completeness"},
-    {"tuple": "any current method with verifier-agreed-anchor authority and issuer-authenticated or re-attested source evidence", "reason": "no generic authenticated vcq adapter receipt is retained for a method linking authentication to anchored bytes; [OPUS-5.5] method:risc0-authenticated-rdf version 5 declares that link in adapter source only, with adapter_available false; direct V5 guest execution and low-level V5 runtime evidence are not adapter receipts"},
+    {"tuple": "any current method with verifier-agreed-anchor authority and issuer-authenticated or re-attested source evidence", "reason": "no generic authenticated vcq adapter receipt is retained for a method linking authentication to anchored bytes; [OPUS-5.5] method:risc0-authenticated-rdf version 5 declares that link in natively tested adapter source only, with adapter_available false; direct V5 guest execution and low-level V5 runtime evidence are not adapter receipts"},
     {"tuple": "any request requiring holder binding from a mapped query method", "reason": "none of the mapped methods enforces holder binding; the legacy manifest path that does is not mapped"}
   ],
   "conformance_vectors": [

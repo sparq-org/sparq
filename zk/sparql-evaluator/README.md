@@ -338,22 +338,28 @@ The host feature `authenticated-rdf` (off by default) adds a low-level API:
 `authenticated_rdf::{prove_with_artifact, verify_with_artifact}` against an
 independently accepted V5 guest, plus `embedded_authrdf_artifact()`,
 `embedded_authrdf_pin()` and the `export_authrdf_guest` example. The exact V1–V3
-guest keeps its flags, target, manifest, lock and constants, so that its artifact
-bytes and image ID are intended not to depend on the feature; that invariant is
-pending a byte comparison and is not yet measured. Each guest's source rejects
-the other's input; no guest execution has confirmed it. All credential
-authentication is written to run inside the V5 guest. Its
+guest keeps its flags, target, manifest, lock and constants. At source
+`42d13fed` its bytes and image ID were the same with the feature off and on;
+a same-absolute-path control also found them unchanged from `8322a6ff`, while an
+earlier differing-path comparison failed, so arbitrary-path reproducibility is
+not established. All credential authentication runs inside the V5 guest. Its
 `methods/guest-authrdf/Cargo.lock` is committed from an independently reviewed
-real Cargo resolution. At the current checkpoint no V5 guest build, execution,
-test run or receipt is recorded. The dependency, SBOM, registry-parser and
-exact-evaluator campaign gates register its workspace and lock and fail closed
-without that lock; the campaign creates no V5 receipt. The ignored genuine-proof
-driver `host/tests/authenticated_rdf_genuine.rs` proves only the case IDs its
-versioned test job declares (one to six of six defined cases, validated before
-any proof), so a bounded job can prove a subset and a later job the remainder.
-The research registry lists it as `method:risc0-authenticated-rdf` version 5,
-with `adapter_available: false` (see below). See the
-[V5 guest reference](../../skills/zk-query-proofs/references/authenticated-rdf-guest.md).
+real Cargo resolution. An independently audited scoped gate at `42d13fed`
+passed the native host and job-parsing tests, a feature Clippy pass and direct
+guest execution, which observed each guest rejecting the other's input and
+created no receipt. No genuine V5 receipt is recorded: the one genuine job
+attempted there timed out before completing a proof. The dependency, SBOM,
+registry-parser and exact-evaluator campaign gates register its workspace and
+lock and fail closed without that lock; no completed campaign run with the V5
+steps is recorded, and the campaign creates no V5 receipt. The ignored
+genuine-proof driver `host/tests/authenticated_rdf_genuine.rs` proves only the
+case IDs its versioned test job declares (one to six of six defined cases,
+validated before any proof), so a bounded job can prove a subset and a later
+job the remainder. The research registry lists it as
+`method:risc0-authenticated-rdf` version 5, with `adapter_available: false`
+(see below). Experimental and not externally audited (`sq-qhy4`). See the
+[V5 guest reference](../../skills/zk-query-proofs/references/authenticated-rdf-guest.md)
+for digests, identities and audit records.
 
 ## vcq adapter for authenticated RDF (V5)
 
@@ -386,12 +392,20 @@ completeness claim.
 The native tests are `host/tests/vcq_authenticated.rs` and unit tests in
 `host/src/vcq_authenticated.rs`; they create no proof. The ignored
 `host/tests/vcq_authenticated_genuine.rs` proves only the case IDs a job declares.
-At this checkpoint none of these tests has been run, and no V5 adapter receipt
-exists. The research registry keeps this method's `adapter_available` false until
-a genuine end-to-end adapter receipt is independently retained. The exact-evaluator
-campaign source adds `native-vcq`, `native-vcq-authenticated`,
-`lint-vcq-authenticated` and the direct V5 executor command
-`actual-authrdf-direct-execution` (SDK execution, no proof); none has run at this
-source, the genuine drivers are not selected, and the campaign creates no V5
-receipt ([campaign evidence](../../skills/zk-query-proofs/references/evaluator-evidence.md)). See the
-[adapter reference](../../skills/zk-query-proofs/references/vcq-authenticated-rdf-adapter.md).
+An independently verified, manually scoped native gate at adapter source
+`7fe88955` passed these native tests, the genuine driver's non-ignored job-parser
+and policy tests, the existing low-level V5 and V3 adapter tests and two
+all-target Clippy feature scopes. It created no proof and executed no guest; the
+ignored genuine driver was not run, and no V5 adapter receipt exists. The six
+declared tuples are therefore unproved. The research registry keeps this method's
+`adapter_available` false until a genuine end-to-end adapter receipt is
+independently retained. The exact-evaluator campaign source (at `e4fb7dff`) adds
+`native-vcq`, `native-vcq-authenticated`, `lint-vcq-authenticated` and the direct
+V5 executor command `actual-authrdf-direct-execution` (SDK execution, no proof).
+The full named campaign has not run at that revision, and the manual native gate
+is not a campaign record. The genuine drivers are not selected, and the campaign
+creates no V5 receipt
+([campaign evidence](../../skills/zk-query-proofs/references/evaluator-evidence.md)).
+See the
+[adapter reference](../../skills/zk-query-proofs/references/vcq-authenticated-rdf-adapter.md)
+for the record and its audit digest. Not externally audited (`sq-qhy4`).

@@ -14,8 +14,8 @@
 > [vcq exact adapter reference](../../skills/zk-query-proofs/references/vcq-exact-adapter.md).
 > Its only consumer is the detached `zk/sparql-evaluator/host` crate: the OFF-by-default `vcq`
 > feature supplies the proof backend and cryptography, and the OFF-by-default
-> `vcq-authenticated` feature adds a V5 issuer-authenticated RDF adapter as source only (no
-> adapter receipt retained; the registry keeps it `false`; see the
+> `vcq-authenticated` feature adds a V5 issuer-authenticated RDF adapter (a scoped native gate
+> only; no adapter receipt retained; the registry keeps it `false`; see the
 > [V5 adapter reference](../../skills/zk-query-proofs/references/vcq-authenticated-rdf-adapter.md)).
 > The durable challenge store is
 > supplied by the APPLICATION: neither crate ships a production store; the host tests use

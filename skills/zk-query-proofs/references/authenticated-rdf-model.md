@@ -1,13 +1,16 @@
 # Issuer-authenticated RDF: native V5 model
 
-[OPUS-5.5] **Native model.** No receipt or real proof has been recorded for this
-relation. Source for a separately pinned optional guest and a low-level host API
-runs it unchanged. At the current checkpoint that guest is unbuilt and
-unexecuted; see the [V5 guest reference](authenticated-rdf-guest.md). No method
-registry lists it, and no protocol adapter exists. It makes no conformance or
-performance claim, is not a complete Data Integrity processor, and is not
-externally audited. Treat it as research-grade and not yet sound.
-<!-- privacy-claims-allow: native model plus unbuilt, unexecuted guest source; explicitly not audited, no receipt recorded -->
+[OPUS-5.5] **Native model.** No genuine receipt has been recorded for this
+relation. A separately pinned optional guest and a low-level host API run it
+unchanged; at source `42d13fed` that guest was built and executed directly,
+without proving (see the [V5 guest reference](authenticated-rdf-guest.md)). A
+separate [vcq adapter](vcq-authenticated-rdf-adapter.md) has passed a scoped
+native gate only; the research registry lists `method:risc0-authenticated-rdf`
+version 5 with `adapter_available: false`. It makes no
+conformance or performance claim, is not a complete Data Integrity processor,
+and is not externally audited (`sq-qhy4` is open). Treat it as research-grade
+and not yet sound.
+<!-- privacy-claims-allow: native model plus directly executed guest; explicitly not audited, no genuine receipt recorded -->
 
 The detached model crate's `authenticated-rdf` feature (off by default) adds
 `sparq_proved_evaluator_model::authenticated_rdf`, relation version 5. It is
@@ -82,8 +85,8 @@ publicly linkable.
 `evaluate(&Witness) -> Journal { version, request_digest, dataset_commitment,
 provenance, result }`. The journal does not publish a credential count or issuer
 list. `request_digest` frames every request and policy field. After receipt
-verification (see the [V5 guest reference](authenticated-rdf-guest.md); source
-only, unbuilt and unexecuted), `bind_journal(&journal, &expected)` checks the
+verification (see the [V5 guest reference](authenticated-rdf-guest.md); no
+genuine receipt is recorded), `bind_journal(&journal, &expected)` checks the
 version and request digest. For `VerifierAgreed`, it also requires the new
 authenticated commitment and `Provenance::VerifierAgreedAuthenticated`. For
 `HolderDeclared`, it requires `Provenance::HolderSelectedAuthenticated`. Calling
@@ -115,11 +118,14 @@ The native tests use the published W3C `vc-di-eddsa` `eddsa-rdfc-2022` vector
 (canonical bytes, hashes, key and signature) plus deterministic synthetic keys.
 
 ```sh
-cargo test --manifest-path zk/sparql-evaluator/Cargo.toml \
+cargo test --locked --manifest-path zk/sparql-evaluator/Cargo.toml \
   -p sparq-proved-evaluator-model --features authenticated-rdf --test authenticated_rdf
-cargo test --manifest-path zk/sparql-evaluator/Cargo.toml \
+cargo test --locked --manifest-path zk/sparql-evaluator/Cargo.toml \
   -p sparq-proved-evaluator-model --features authenticated-rdf --lib authenticated_rdf
 ```
 
-Add `--locked` once the detached `zk/sparql-evaluator/Cargo.lock` has been
-regenerated to include `ed25519-dalek`.
+The committed detached lock includes `ed25519-dalek`. A native model validation
+at source `8322a6ff` passed 115 tests with `authenticated-rdf`; its
+default-feature (4) and `graph-results` (101) counts overlap those and are not
+additive. It is separate from the `42d13fed` guest gate counts in the
+[V5 guest reference](authenticated-rdf-guest.md#recorded-evidence).

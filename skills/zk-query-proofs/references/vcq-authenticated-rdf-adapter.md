@@ -1,10 +1,12 @@
 <!-- [OPUS-5.5] zkp-14.6: usage reference for the optional vcq adapter over the V5 authenticated-RDF relation. -->
 # vcq adapter for issuer-authenticated RDF (V5)
 
-**Source only; no test run or receipt is recorded at this checkpoint.** The adapter's native tests
-and its ignored genuine-receipt driver exist as source. No V5 adapter receipt, native adapter test
-result or Clippy result is recorded here. It is experimental and not externally audited (sq-qhy4).
-Do not treat it as a validated, available method. <!-- privacy-claims-allow: source only; no receipt, no run, not audited -->
+**Natively tested; no receipt.** An independently verified, manually scoped native gate at
+adapter source `7fe88955` passed the adapter's native tests and Clippy, without proving; see
+[recorded native validation](#recorded-native-validation). Its ignored genuine-receipt driver has
+not completed a job, so no V5 adapter receipt exists and none of the six declared tuples is
+proved. It is experimental and not externally audited (sq-qhy4). Do not treat it as a validated,
+available method. <!-- privacy-claims-allow: native tests only; no receipt, not audited -->
 
 `sparq_proved_evaluator::vcq_authenticated` (detached crate `zk/sparql-evaluator/host`, cargo
 feature `vcq-authenticated`, **off by default**) implements the `sparq-query-protocol`
@@ -22,11 +24,13 @@ cargo test --locked --manifest-path zk/sparql-evaluator/Cargo.toml -p sparq-prov
   --test vcq_adapter
 ```
 
-## CI campaign scope (source only, not yet run)
+## CI campaign scope (authored; full campaign not yet run)
 
 The exact-evaluator campaign (`scripts/ci_exact_evaluator_evidence.py`) names four commands for
 this feature and its dependencies; see [campaign evidence](evaluator-evidence.md) for the table.
-None of them has run at this source.
+They were authored at `e4fb7dff`, where the campaign's 17 hermetic Python tests and the scoped
+documentation gates passed. The full named campaign has not run at that revision. The manual
+native gate below is not that campaign.
 
 - `native-vcq`: the V3 adapter tests under `vcq` alone, covering the shared helpers.
 - `native-vcq-authenticated`: the command above; it runs the genuine driver file's native
@@ -217,7 +221,11 @@ Relative completeness means only this: complete over the agreed commitment, or o
 chosen authenticated credentials. It never means wallet or world completeness. Salt reuse makes
 commitments publicly linkable.
 
-## Tests (written, not yet run)
+## Tests
+
+The unit tests, native gates and the genuine driver's non-ignored job-parser and policy tests
+passed in the [recorded native gate](#recorded-native-validation). The ignored genuine driver was
+not run there.
 
 - **Unit tests** (`host/src/vcq_authenticated.rs`). They check claim conversion on hand-built
   journals: agreed and holder scope and obligations, and output fields. They also check that
@@ -308,6 +316,35 @@ Evidence reuses `support/authenticated_rdf_evidence.rs`. Before any verification
 `vcq-presentation.json`, the `local-struct-v1` stored-request and descriptor bytes and
 `expected-result.json`. It adds `record.json` after the receipt is re-verified against the
 approved V5 pin. Keep evidence outside the repository.
+
+## Recorded native validation
+
+Adapter source `7fe88955` (`7fe889557afcf1497769c1360ef53348980a7bae`), one manually scoped
+native gate on an EC2 host, independently verified. The audit record is kept outside this
+repository. Host timings are non-canonical and are not reported.
+
+| Audit record | SHA-256 |
+|---|---|
+| `vcq-authenticated-native-7fe88955/independently-verified-gates.json` | `6a8fc2300f0463290859b0f8f4c0b9ef790382b0ef9401ec2a60a07645eab385` |
+
+- **Native.** 44 distinct test functions passed: 4 new `vcq_authenticated` module unit tests,
+  15 new `host/tests/vcq_authenticated.rs` tests, 3 new non-ignored job-parser and valid-policy
+  tests in `vcq_authenticated_genuine.rs`, 5 existing low-level V5 tests and 17 existing V3
+  `vcq` adapter tests. The 17 V3 functions ran again under `vcq` alone, so there were 61
+  executions of 44 distinct functions. The one ignored genuine driver was not run.
+- **Lint.** All-target Clippy passed in two feature scopes.
+- **No proof or direct guest execution.** The gate created no proof and ran no direct guest execution.
+- **Source.** 7,085 Git blobs and 30 lock files were unchanged by the gate.
+- **Guest identities.** The V5 artifact SHA-256 was
+  `c35f5e4b74169aa51b244b8feecb0c8e746296a6aa052be8c58f0190b1b10b11`, and the exact guest's was
+  `e8c9b6b6bd43c2789add2fcbd9ec18914c2c48ccdcd1149e8b9dea6f0e760623` in both the feature-off and
+  feature-on builds. Both match the [V5 guest gate](authenticated-rdf-guest.md#recorded-evidence), built at
+  the same fixed path; this is not an arbitrary-path reproducibility claim.
+
+This is native adapter evidence only. It is not the CI campaign, not direct guest execution,
+not a genuine receipt and not a full workspace gate, and it leaves the registry's
+`adapter_available` false. A separate independent source review found no actionable production
+or test defect; that review is not a security audit.
 
 ## Not established
 

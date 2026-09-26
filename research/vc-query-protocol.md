@@ -519,7 +519,7 @@ SELECT rows and CONSTRUCT N-Triples lines count; ASK has no row bound. The propo
 `neg-excess-rows` (§11) now expects the same outcome as the seventh receipt. That vector
 has not been executed.
 
-### 9.2 Authenticated-RDF V5 vcq adapter (source only, no receipt)
+### 9.2 Authenticated-RDF V5 vcq adapter (native gate only, no receipt)
 
 [OPUS-5.5] `sparq_proved_evaluator::vcq_authenticated::Risc0AuthenticatedRdfV5` (detached
 host crate, feature `vcq-authenticated`, off by default) implements *QueryMethod* over the V5
@@ -546,10 +546,15 @@ authenticated signing input is `SHA-256(canonical proof config) || SHA-256(canon
 document)` over N-Quads inputs. That is not JSON-LD or full Data Integrity processing, and
 there is no status, holder binding, DID or controller resolution, or completeness claim.
 
-No adapter test run and no genuine V5 adapter receipt is recorded, so the registry keeps
-`adapter_available: false` for this method. Its ignored genuine driver proves only the case
-IDs a job declares. The exact-evaluator CI campaign source now names native, Clippy and
-direct V5 executor commands for this feature; none has run at this source, and that campaign
+An independently verified, manually scoped native gate at source `7fe88955` passed the
+adapter's native tests and Clippy without proving (record and audit digest in the registry's
+`vcq_adapter.evidence` and the
+[adapter reference](../skills/zk-query-proofs/references/vcq-authenticated-rdf-adapter.md#recorded-native-validation)).
+No genuine V5 adapter receipt is recorded, so none of the six tuples is proved and the
+registry keeps `adapter_available: false` for this method. Its ignored genuine driver proves
+only the case IDs a job declares. The exact-evaluator CI campaign source names native, Clippy
+and direct V5 executor commands for this feature at `e4fb7dff`; the full named campaign has
+not run at that revision, the manual native gate is not that campaign, and the campaign
 creates no V5 receipt.
 
 ## 10. Worked examples (illustrative notation, not a wire encoding)
