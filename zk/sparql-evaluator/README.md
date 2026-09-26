@@ -262,3 +262,16 @@ families remain distinct. V2 also executes the original VERSION controls. [GPT-6
 V2 contracts, independently accepted artifact/pin inputs, genuine local succinct
 receipts and separate verifier controls. Its measurements explicitly distinguish
 inclusive API costs, unavailable internal stages and noncanonical provenance.
+
+## Engine replay proof bridge
+
+[OPUS-5.5] The experimental [engine replay proof bridge](../../bench/zk-bindings/engine-proof-replay.md)
+prepares one retained native engine replay cell's unchanged `query.rq` and
+`data.ttl` for the exact V3 relation. Native preparation tests
+(`model/tests/engine_replay.rs`) check conversion, identity, request and anchor
+binding against hand-derived expectations and produce no receipts. Genuine
+receipts come only from the ignored `host/tests/actual_engine_replay.rs` test
+or the example's `real` mode. Turtle-to-N-Quads conversion and original-file
+SHA-256 checks are host experiment checks before proving; the guest does not
+execute them and a receipt does not attest to them. No verification result for
+this bridge has been recorded yet.

@@ -324,7 +324,7 @@ fn both_authorities_prepare_the_original_and_match_the_hand_derived_oracle() {
 #[test]
 fn observations_and_record_fields_never_become_input_or_expectations() {
     let retained = Retained::with(QUERY, DATA, |record| {
-        record["request"] = json!({"query": "ASK {}", "nonce": [1; 32]});
+        record["request"] = json!({"query": "ASK {}", "nonce": ([1u8; 32])});
         record["expected_result"] = json!({"Ask": true});
         record["input"]["authority"] = json!("HolderDeclared");
     });
