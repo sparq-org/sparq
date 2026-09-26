@@ -378,9 +378,10 @@ pub fn request_digest(request: &Request) -> Result<[u8; 32], Rejected> {
 /// salt before selecting `VerifierAgreed`. The module docs list what is committed.
 ///
 /// # Errors
-/// Rejects invalid policies, zero salt, capacity violations, malformed or
-/// unsupported RDF or proof options, unauthorized methods or issuers, failed
-/// signatures and duplicate canonical documents.
+/// Rejects evaluation policies outside the V3 program ceilings (with the same
+/// rejection as [`validate_request`]), invalid tables, zero salt, capacity
+/// violations, malformed or unsupported RDF or proof options, unauthorized
+/// methods or issuers, failed signatures and duplicate canonical documents.
 pub fn dataset_commitment(dataset: &PrivateCredentials, policy: &Policy) -> Result<[u8; 32], Rejected> {
     authenticate(dataset, policy).map(|authenticated| authenticated.commitment)
 }
@@ -467,6 +468,8 @@ struct Verified {
 }
 
 fn authenticate(dataset: &PrivateCredentials, policy: &Policy) -> Result<Authenticated, Rejected> {
+    // [OPUS-5.5] Same V3 program ceilings as `validate_request`, before any source work.
+    v3::validate_policy(&policy.evaluation)?;
     let table = checked_table(&policy.authorization)?;
     let policy_digest = policy_digest(policy, &table)?;
     if dataset.salt == [0; 32] {

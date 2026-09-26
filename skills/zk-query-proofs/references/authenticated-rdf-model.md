@@ -58,8 +58,11 @@ forms are kept, for example `"018"^^xsd:integer`. V3 evaluates under an internal
 
 ## Commitment and journal
 
-`dataset_commitment(&PrivateCredentials, &Policy)` runs the full authentication.
-It then hashes, under a version-5 domain:
+`dataset_commitment(&PrivateCredentials, &Policy)` first rejects a
+`Policy::evaluation` outside the V3 resource and canonicalization program
+ceilings, with the same rejection `validate_request` returns, before any table,
+salt or credential check. It then runs the full authentication and hashes, under
+a version-5 domain:
 
 - a policy digest that frames the suite and mapping profiles, every fixed bound,
   the serialized V3 policy and the method-sorted table;

@@ -7,7 +7,7 @@ use sparq_proved_evaluator_model::authenticated_rdf::{
     MAX_PROOF_CONFIG_BYTES, Policy, PrivateCredentials, Provenance, Request, SignedCredential,
     Witness,
 };
-use sparq_proved_evaluator_model::{DatasetAuthority, ProofContract, Rejected, RowOrder, v3};
+use sparq_proved_evaluator_model::{DatasetAuthority, MAX_ROWS, ProofContract, Rejected, RowOrder, v3};
 
 // Published W3C vector: vc-di-eddsa REC 2025-05-15, eddsa-rdfc-2022 representation,
 // examples 7, 9, 10, 12, 13 and 15. Data only; no secret key is involved.
@@ -607,6 +607,57 @@ fn authorization_table_is_validated_and_bound_into_request_and_commitment() {
         reason(run(query, DatasetAuthority::VerifierAgreed { commitment }, widened, vec![alice()])),
         "authenticated dataset anchor mismatch"
     );
+}
+
+// [OPUS-5.5] The commitment API enforces the same V3 policy ceilings as the request.
+#[test]
+fn dataset_commitment_rejects_evaluation_policies_outside_v3_program_ceilings() {
+    fn with_evaluation(edit: impl FnOnce(&mut v3::Policy)) -> Policy {
+        let mut policy = Policy::new(table());
+        edit(&mut policy.evaluation);
+        policy
+    }
+    const RESOURCE: &str = "V2 resource policy exceeds program bounds";
+    const CANONICALIZATION: &str = "V3 canonicalization policy exceeds program bounds";
+    let ceiling = v3::CanonicalizationPolicy::default();
+    let query = "ASK { ?person ex:name \"Alice\" }";
+    let cases = [
+        (with_evaluation(|p| p.dataset.max_rows = 0), RESOURCE),
+        (with_evaluation(|p| p.dataset.max_rows = MAX_ROWS + 1), RESOURCE),
+        (with_evaluation(|p| p.canonicalization.max_quads = 0), CANONICALIZATION),
+        (
+            with_evaluation(|p| p.canonicalization.max_permutation_steps = ceiling.max_permutation_steps + 1),
+            CANONICALIZATION,
+        ),
+    ];
+    for (policy, expected) in cases {
+        let expected: Result<(), Rejected> = Err(Rejected(expected));
+        assert_eq!(auth::dataset_commitment(&credentials(vec![alice()]), &policy).map(drop), expected);
+        assert_eq!(
+            auth::validate_request(&request(query, DatasetAuthority::HolderDeclared, policy.clone())),
+            expected
+        );
+        assert_eq!(
+            run(query, DatasetAuthority::HolderDeclared, policy.clone(), vec![alice()]).map(drop),
+            expected
+        );
+        // The policy rejects before any table, salt or credential check.
+        let unchecked = PrivateCredentials {
+            credentials: Vec::new(),
+            salt: [0; 32],
+        };
+        let untabled = Policy {
+            authorization: Vec::new(),
+            ..policy
+        };
+        assert_eq!(auth::dataset_commitment(&unchecked, &untabled).map(drop), expected);
+    }
+
+    // Positive control: the default policy still commits and anchors evaluation.
+    let default = Policy::new(table());
+    let commitment = auth::dataset_commitment(&credentials(vec![alice()]), &default).unwrap();
+    let journal = run(query, DatasetAuthority::VerifierAgreed { commitment }, default, vec![alice()]).unwrap();
+    assert_eq!(journal.result, v3::CanonicalResult::Ask(true));
 }
 
 #[test]
