@@ -534,6 +534,8 @@ obligation. Under $mu$, `t1` and `t2` become fully ground triples built only fro
 and a projected binding; the verifier can compute them itself from the query and the answer.
 `t3` still contains the hidden `?income`, and the filter constrains that hidden value.
 
+#[
+#show figure: set block(breakable: false)
 #figure(
   table(
     columns: (0.8fr, 1.2fr, 1.4fr),
@@ -555,6 +557,7 @@ and a projected binding; the verifier can compute them itself from the query and
     and none would be eligible.
   ],
 ) <example-table>
+]
 
 === A conservative eligibility rule <rule>
 
@@ -851,7 +854,7 @@ comparison isolates the relation's specialization.
 #let prove-diffs = range(1, headline("zkvcq.pp_measured_pairs") + 1).map(i => ev("zkvcq.pilot_pair" + str(i) + "_prove_diff"))
 #let verify-diffs = range(1, headline("zkvcq.pp_measured_pairs") + 1).map(i => ev("zkvcq.pilot_pair" + str(i) + "_verify_diff"))
 
-#block(inset: 8pt, stroke: 0.5pt + gray, width: 100%)[
+#block(inset: 8pt, stroke: 0.5pt + gray, width: 100%, breakable: false)[
   *Indicative development measurement — not the basis of any claim.* Paired sequential runs on
   a shared EC2 KVM guest (Intel Xeon Platinum 8488C, eight vCPUs; Linux `7.0.0-1013-aws`; instance
   type not recorded in the snapshot) under a two-CPU quota and an eight-GiB memory cap, with
