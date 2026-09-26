@@ -943,8 +943,7 @@ fn challenge_controls(
 ) -> Vec<Value> {
     let replay = v
         .verify(spec, AUDIENCE, NOW, presentation, used)
-        .err()
-        .expect("second verification on the same store");
+        .expect_err("second verification on the same store");
     assert_eq!(
         (replay.class(), replay.code(), used.calls()),
         (FailureClass::Invalid, ErrorCode::ChallengeReplayed, 2),
@@ -957,8 +956,7 @@ fn challenge_controls(
     };
     let failure = v
         .verify(spec, AUDIENCE, NOW, presentation, &broken)
-        .err()
-        .expect("broken store never accepts");
+        .expect_err("broken store never accepts");
     assert_eq!(
         (failure.class(), failure.code(), broken.calls()),
         (
@@ -1062,8 +1060,7 @@ fn check_row_bound(v: &Verifier, presentation: &VcqPresentation) -> (Value, v3::
     let store = Store::default();
     let error = v
         .verify(&spec, AUDIENCE, NOW, presentation, &store)
-        .err()
-        .expect("the protocol row bound rejects the genuine receipt");
+        .expect_err("the protocol row bound rejects the genuine receipt");
     let bound = ErrorCode::CapacityExceeded(CapacityBound::Backend {
         name: "vcq-released-rows",
         requested: 2,
