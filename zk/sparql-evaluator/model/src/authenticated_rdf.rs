@@ -481,7 +481,7 @@ fn authenticate(dataset: &PrivateCredentials, policy: &Policy) -> Result<Authent
         .iter()
         .map(|credential| verify(credential, &table))
         .collect::<Result<Vec<_>, _>>()?;
-    verified.sort_unstable_by(|a, b| a.document_hash.cmp(&b.document_hash));
+    verified.sort_unstable_by_key(|a| a.document_hash);
     if verified
         .windows(2)
         .any(|pair| pair[0].document_hash == pair[1].document_hash)
