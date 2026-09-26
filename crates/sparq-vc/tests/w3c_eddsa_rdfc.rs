@@ -1,7 +1,7 @@
 //! W3C vc-di-eddsa `eddsa-rdfc-2022` published test vector, verified through the
 //! public API. [OPUS-5.5] zkp-14.2.
 //!
-//! Testdata origin: W3C Recommendation "Data Integrity EdDSA Cryptosuites v1.0"
+//! Test data origin: W3C Recommendation "Data Integrity EdDSA Cryptosuites v1.0"
 //! (15 May 2025), Appendix B.1 (`eddsa-rdfc-2022` representation) —
 //! <https://www.w3.org/TR/vc-di-eddsa/#test-vectors>. The canonical document is
 //! Example 9, its SHA-256 Example 10, and the `proofValue` Example 16. The vectors

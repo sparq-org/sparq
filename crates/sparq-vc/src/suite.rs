@@ -24,7 +24,8 @@
 //! would force a JSON-LD context processor onto the lean build. The proof
 //! configuration is supplied as a typed [`ProofConfig`] (not extracted from a
 //! JSON-LD `proof` node), and its canonical RDF form uses the standard
-//! `https://w3id.org/security#` vocabulary.
+//! `https://w3id.org/security#` vocabulary plus Dublin Core `dcterms:created`
+//! (see the mapping below).
 //!
 //! # Proof-configuration RDF mapping
 //!
