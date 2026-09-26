@@ -77,6 +77,8 @@ let source = replay::convert_turtle(&data_ttl, &record_catalog, &policy)?;
 let anchor = v3::dataset_commitment(&source.into_dataset(published_salt), &policy)?;
 ```
 
+The [synthetic setup example](#synthetic-experiment-setup) applies this recipe.
+
 `HOLDER.json` (`sparq.engine-replay-proof.holder.v1`) must set
 `"synthetic_inputs": true` and `"salt": {"SyntheticFixed": […32 bytes…]}`. A
 fixed reproducible salt is admitted only for explicitly synthetic inputs; there
@@ -139,6 +141,61 @@ Exit status 0 means prepared, or proved and independently verified. Status 1
 means a typed rejection recorded in `status.json`. Status 2 means a usage or
 infrastructure failure; partial outputs are retained without a status record.
 
+## Synthetic experiment setup
+
+[OPUS-5.5] The `engine_replay_setup` host example writes the holder and both
+verifier manifests for one explicitly synthetic cell, so an experiment need not
+hand-author them. It has no production mode; the `synthetic` mode word is
+mandatory.
+
+```sh
+cargo build --locked --release --manifest-path zk/sparql-evaluator/Cargo.toml \
+  -p sparq-proved-evaluator --example engine_replay_setup
+
+zk/sparql-evaluator/target/release/examples/engine_replay_setup synthetic \
+  /retained/run/shipped-bgp-0-dense shipped expected.json exp-2026-09-26-a \
+  /tmp/new-engine-setup
+```
+
+- The cell identity comes from the retained record's `seed`, `category` and
+  `storage` plus the explicit `PROFILE` argument. `replay::prepare` then checks
+  all of it, including record copies, schema and identifier syntax.
+- `EXPECTED.json` must be authored independently. The setup only reads it,
+  copies its exact bytes to the output and never derives or rewrites a result.
+- `RUN_ID` is a fresh label that the caller chooses per experiment: 1–64 bytes
+  of `A-Z a-z 0-9 - _`. Each nonce is SHA-256 over a fixed domain, then the
+  u64-LE length and bytes of `RUN_ID`, `query_sha256`, `data_sha256` and the
+  authority tag. The two nonces are distinct, nonzero and reproducible. They
+  are synthetic test challenges and are never a production challenge source.
+  Reusing a `RUN_ID` reproduces the same nonces.
+- The `HolderDeclared` request has no anchor. The setup computes the
+  `VerifierAgreed` anchor from the original `data.ttl` and the record's
+  catalog with `replay::convert_turtle` and `v3::dataset_commitment`, using the
+  published synthetic salt, before any holder preparation. It never takes the
+  anchor from a holder witness or a prepared output. Both requests use
+  `v3::Policy::default()`, `ExactDataset` and `SparqSparql11GraphResultsV3`.
+- Before writing anything, both requests run through `replay::prepare` and
+  `Prepared::evaluate_against` with the supplied expectation. Any refusal exits
+  with status 1 and writes nothing. Proof count stays zero.
+
+The output directory must be new and outside both the source checkout and the
+replay directory. It is created owner-only on Unix and contains
+`holder.json`, `holder-declared.json`, `verifier-agreed.json`, a byte-exact
+`expected.json`, and `setup.json` (`sparq.engine-replay-proof.setup.v1`). The
+`setup.json` file records the input and output SHA-256 digests, `RUN_ID`, the
+cell, the trust boundary and zero proof counts. No witness value, converted
+N-Quads, guest artifact, pin or tool identity is written.
+
+**Trust boundary.** The setup runs on the host only, and no guest executes any of
+it. One process plays both verifier and holder, so the manifests are not
+independent of the holder. The agreed anchor is test-setup trust input for a
+synthetic experiment. It does not authenticate the source, and it is only as
+trustworthy as the host and the retained originals. The existing
+`engine_replay_proof` CLI accepts the outputs as `HOLDER.json`, `VERIFIER.json`
+(either request file) and `EXPECTED.json`. A coordinator can independently check
+the exported files and then assemble the ignored test's job from them. The setup
+does not create that job, start any proof or cache any results.
+
 ## Outputs
 
 The output directory must be new and outside both the source checkout and the
@@ -199,6 +256,10 @@ cargo test --locked --manifest-path zk/sparql-evaluator/Cargo.toml \
   -p sparq-proved-evaluator-model --features graph-results --test engine_replay
 cargo test --locked --manifest-path zk/sparql-evaluator/Cargo.toml \
   -p sparq-proved-evaluator --example engine_replay_proof
+cargo test --locked --manifest-path zk/sparql-evaluator/Cargo.toml \
+  -p sparq-proved-evaluator --example engine_replay_setup
+cargo test --locked --manifest-path zk/sparql-evaluator/Cargo.toml \
+  -p sparq-proved-evaluator --test actual_engine_replay
 SPARQ_ENGINE_REPLAY_PROOF_JOB=/abs/job.json RISC0_SERVER_PATH=/installed/r0vm \
   cargo test --locked --release --manifest-path zk/sparql-evaluator/Cargo.toml \
   -p sparq-proved-evaluator --test actual_engine_replay -- --ignored --nocapture
@@ -220,22 +281,74 @@ Native contract tests in `model/tests/engine_replay.rs`:
 and `manifests_reject_unknown_fields_and_other_protocol_versions`. They use
 synthetic records and hand-derived expectations and produce no receipts.
 
+Setup tests in `host/examples/engine_replay_setup.rs` exercise `setup()` on
+in-memory bytes:
+`hand_derived_expectation_matches_under_both_authorities`,
+`wrong_or_differently_bound_expectations_are_refused`,
+`malformed_or_empty_run_ids_are_refused`,
+`original_record_mismatches_are_refused`,
+`challenges_are_nonzero_distinct_and_reproducible_per_run`,
+`omission_under_the_agreed_anchor_stays_rejected` and
+`invocation_requires_the_synthetic_mode_word`. They produce no receipts.
+
 The ignored `real_engine_replay_cell_proves_both_authorities_and_rejects_substitutions`
 in `host/tests/actual_engine_replay.rs` reads a
 `sparq.engine-replay-proof.real-test.v1` job with `replay_directory`, `holder`,
-`holder_declared_request`, `verifier_agreed_request`, `expected`, `guest` and
-`pin` paths. It proves one retained cell under both authorities, runs every
+`holder_declared_request`, `verifier_agreed_request`, `expected`, `guest`,
+`pin` and the required `new_output_directory` paths. Unknown fields are
+rejected. It proves one retained cell under both authorities, runs every
 control and checks the omitted-statement malicious witness. Its two requests
 must name the same originals with distinct nonces. It is not part of the
 default run, and heavy lanes are not wired into CI until source and native
 review.
 
+[OPUS-5.5] `new_output_directory` must be absolute and must not exist. Its
+parent is canonicalized, and the directory must be outside both the source
+checkout and the canonical replay directory. It is checked and created before
+any proof. The test never removes it, so a failure keeps whatever was written.
+On Unix the directory, its children and every new file are owner-only. The
+layout is:
+
+- `holder_declared/` and `verifier_agreed/`: each is written after its receipt
+  has been independently verified against the stored request, the expected
+  result, the native journal and the dataset commitment. Each holds typed JSON
+  `presentation.json`, `journal.json` and `request.json`, plus `verified.json`
+  (authority, provenance, request digest, dataset commitment, receipt journal
+  digest and the SHA-256 of each file's exact bytes). All of this is written
+  before the controls run. A control failure adds `control-failure.json` with
+  its diagnostic. No private witness value is serialized.
+- `summary.json` (`sparq.engine-replay-proof.real-test-summary.v1`): written
+  only after both authorities, all nine controls for each and the omission
+  check have passed. It records the job and input file digests, the accepted
+  pin, artifact hash and image ID, the per-authority records with the exact
+  control names, `proof_count` and `verified_proof_count` (both counted from
+  the finished records, and both must be 2), and zero production
+  authentication claims.
+
+The omission check keeps both of its assertions: native V3 must reject with the
+typed anchor mismatch, and the external proof must fail with the expected host
+error. That host error, `real local proof failed`, is generic. Infrastructure
+failures and guest aborts both return it. The summary therefore records
+`native_expected_cause` and `observed_host_error` as separate fields and sets
+`guest_abort_certified: false`. Only an independent inspection of the prover
+log can confirm that the guest aborted. Persisted receipts are evidence for this
+one run and cell only. They are not reusable for other cells, storage modes or
+profiles.
+
 ## Execution status
 
-At authoring time, no test, build or proof for this adapter has been executed.
-Executed real proofs: zero. Configured but unexecuted: two genuine receipts plus
-one expected guest abort in the ignored test, and one receipt per real-mode CLI
-invocation. Native definitions above are not execution evidence.
+The native gate for the adapter at commit `ee23a415a` passed on a remote runner.
+It covered the `engine_replay` model tests, the `convert_turtle` doctest, an
+anchor mutation check and scoped clippy. The coordinator's generated validation
+evidence for that commit is the record; this page does not copy its counts.
+The `engine_replay_setup` example was added afterwards and has not been compiled
+or run. Neither has the ignored test's evidence persistence, nor its native
+`job_requires_a_new_output_directory_and_rejects_unknown_fields` and
+`output_directory_must_be_new_owner_only_and_outside_checkout_and_replay`
+tests. Host/guest compilation at that commit is a separate gate and is not
+recorded here. Executed real proofs: zero. Configured but unexecuted: two genuine
+receipts plus one expected guest abort in the ignored test, and one receipt per
+real-mode CLI invocation.
 
 ## Known limitations
 
@@ -247,4 +360,8 @@ invocation. Native definitions above are not execution evidence.
 - Language tags follow the parser's handling; other lexical forms are copied.
 - Only default-graph Turtle cells and synthetic fixed salts are admitted; the
   nonce store is in-process and is not persistent replay protection.
-- There is no CLI for the verifier-side anchor setup; use the Rust recipe above.
+- `engine_replay_setup` covers synthetic cells only. Its anchor and nonces are
+  test-setup inputs from a single host, not independent verifier trust or fresh
+  production challenges. Its data must be UTF-8 Turtle that converts. A Turtle
+  cell that fails to convert is refused as an anchor error, so run the proof
+  CLI's `prepare` mode to get that cell's typed disposition.

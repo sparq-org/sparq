@@ -273,5 +273,20 @@ binding against hand-derived expectations and produce no receipts. Genuine
 receipts come only from the ignored `host/tests/actual_engine_replay.rs` test
 or the example's `real` mode. Turtle-to-N-Quads conversion and original-file
 SHA-256 checks are host experiment checks before proving; the guest does not
-execute them and a receipt does not attest to them. No verification result for
+execute them and a receipt does not attest to them. The synthetic-only
+`engine_replay_setup` example (`engine_replay_setup synthetic REPLAY_DIR PROFILE
+EXPECTED.json RUN_ID NEW_OUTPUT_DIR`) writes the holder manifest and both
+verifier manifests for the proof CLI and the ignored test. Its nonces come from a
+caller-chosen `RUN_ID` and are test challenges only. It computes the agreed anchor
+on the host from the original `data.ttl`. That anchor is test-setup trust input
+from the same host that also acts as holder, not source authentication. The
+setup checks both requests natively against the supplied expectation, which it
+never rewrites, and it creates no proof. The ignored test's job requires a
+`new_output_directory`. This must be an absent, absolute path outside the
+checkout and the replay directory. The test writes each authority's verified
+public presentation, journal and request there, owner-only on Unix, before the
+controls run. It writes `summary.json` only after both proofs, all controls and
+the omission check have passed. The summary does not certify a guest abort,
+because the host's proof error is generic. The adapter's native gate has passed
+(see the bridge page's execution status). No proof or verification result for
 this bridge has been recorded yet.
