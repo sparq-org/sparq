@@ -159,10 +159,16 @@ FROM/FROM NAMED selection. V1 requests and commitments retain their meaning.
 adds blank-node identity, canonical tables and bounded graph forms through typed
 host/guest APIs; consult artifact-bound evidence for actual execution status.
 [OPUS-5.5] The detached model's off-by-default `authenticated-rdf` feature adds a
-[native-only V5 issuer-authenticated RDF model](references/authenticated-rdf-model.md).
+[native V5 issuer-authenticated RDF model](references/authenticated-rdf-model.md).
 It checks W3C `eddsa-rdfc-2022` credentials against a verifier-pinned key table, then
-reuses V3 evaluation. It has no guest adapter and no real proof, and it checks no
-status, holder binding or completeness. <!-- privacy-claims-allow: native model only, no proof -->
+reuses V3 evaluation. It checks no status, holder binding or completeness.
+[OPUS-5.5] A [separately pinned V5 guest and low-level host API](references/authenticated-rdf-guest.md)
+(host feature `authenticated-rdf`, off by default) run it. At source `42d13fed` an
+independently audited scoped gate built the guest and executed it directly, without
+proving; no genuine receipt is recorded, and this slice adds no registry entry or
+protocol adapter. Its ignored genuine-proof driver proves only the one to six case
+IDs a v2 test job declares; a subset run claims nothing about undeclared cases.
+Not externally audited (`sq-qhy4`). <!-- privacy-claims-allow: direct execution only, no genuine receipt, not audited -->
 [GPT-6] The [campaign evidence guide](references/evaluator-evidence.md) explains
 exact artifact export, actual receipt evidence and source/HAL provenance.
 [GPT-6] The [exact-evaluator experiment adapter](../../zk/sparql-evaluator/experiments/README.md)

@@ -25,25 +25,33 @@ class GraphCoverage(unittest.TestCase):
             (self.root / manifest.with_name("Cargo.lock")).write_text("version = 4\n")
 
     def test_each_independent_lock_is_required(self):
+        # [OPUS-5.5] zkp-14.5: the separately pinned V5 guest is a fourth graph.
         self.assertEqual(tuple(map(str, gate.MANIFESTS)), (
             "Cargo.toml", "zk/sparql-evaluator/Cargo.toml",
-            "zk/sparql-evaluator/methods/guest/Cargo.toml"))
-        (self.root / gate.MANIFESTS[-1].with_name("Cargo.lock")).unlink()
-        with patch.object(gate.subprocess, "run", return_value=SimpleNamespace(returncode=0)) as run:
-            self.assertEqual(gate.run_graphs("fetch", self.root), 1)
-            self.assertEqual(run.call_count, 2)
+            "zk/sparql-evaluator/methods/guest/Cargo.toml",
+            "zk/sparql-evaluator/methods/guest-authrdf/Cargo.toml"))
+        for missing in gate.MANIFESTS:
+            with self.subTest(missing=str(missing)):
+                lock = self.root / missing.with_name("Cargo.lock")
+                lock.unlink()
+                with patch.object(gate.subprocess, "run", return_value=SimpleNamespace(returncode=0)) as run:
+                    self.assertEqual(gate.run_graphs("fetch", self.root), 1)
+                    self.assertEqual(run.call_count, len(gate.MANIFESTS) - 1)
+                lock.write_text("version = 4\n")
 
     def test_child_failure_is_not_hidden_by_successful_siblings(self):
-        with patch.object(gate.subprocess, "run", side_effect=[
-            SimpleNamespace(returncode=0), SimpleNamespace(returncode=1), SimpleNamespace(returncode=0),
-        ]) as run:
-            self.assertEqual(gate.run_graphs("deny-advisories", self.root), 1)
-            self.assertEqual(run.call_count, 3)
+        for failing in range(len(gate.MANIFESTS)):
+            with self.subTest(failing=failing):
+                with patch.object(gate.subprocess, "run", side_effect=[
+                    SimpleNamespace(returncode=int(i == failing)) for i in range(len(gate.MANIFESTS))
+                ]) as run:
+                    self.assertEqual(gate.run_graphs("deny-advisories", self.root), 1)
+                    self.assertEqual(run.call_count, 4)
 
-    def test_all_three_successes_are_required(self):
+    def test_all_four_successes_are_required(self):
         with patch.object(gate.subprocess, "run", return_value=SimpleNamespace(returncode=0)) as run:
             self.assertEqual(gate.run_graphs("vet", self.root), 0)
-            self.assertEqual(run.call_count, 3)
+            self.assertEqual(run.call_count, 4)
             for call in run.call_args_list:
                 args = call.args[0]
                 self.assertIn("--cargo-arg=--locked", args)
@@ -51,7 +59,8 @@ class GraphCoverage(unittest.TestCase):
                 self.assertIn("--frozen", args)
                 self.assertNotIn("--filter-graph", args)
 
-    def test_deny_uses_one_absolute_policy_for_exactly_three_manifests(self):
+    def test_deny_uses_one_absolute_policy_for_exactly_four_manifests(self):
+        self.assertEqual(len(gate.MANIFESTS), 4)
         for manifest in gate.MANIFESTS:
             self.assertEqual(gate.command("deny-integrity", manifest, self.root), [
                 gate.os.environ.get("CARGO", "cargo"), "deny", "--manifest-path", str(manifest),
@@ -77,22 +86,28 @@ class GraphCoverage(unittest.TestCase):
             responses.append(json.dumps({"workspace_members": [name], "packages": [
                 {"id": name, "name": name, "manifest_path": str(self.root / manifest)},
             ]}).encode())
+            # Reset per call so a prior subTest's SBOM cannot satisfy a later `missing`.
+            sbom = self.root / manifest.parent / f"{name}.cdx.json"
+            sbom.unlink(missing_ok=True)
             if i != missing:
-                (self.root / manifest.parent / f"{name}.cdx.json").write_text(json.dumps({
+                sbom.write_text(json.dumps({
                     "bomFormat": "CycloneDX", "metadata": {"component": {"name": name}},
                 }))
         return responses
 
-    def test_sbom_inventory_includes_detached_guest(self):
+    def test_sbom_inventory_includes_detached_guests(self):
         with patch.object(gate.subprocess, "check_output", side_effect=self.metadata()):
             paths = gate.sbom_paths(self.root)
-        self.assertEqual(len(paths), 3)
+        self.assertEqual(len(paths), 4)
         self.assertIn(Path("zk/sparql-evaluator/methods/guest/member2.cdx.json"), paths)
+        self.assertIn(Path("zk/sparql-evaluator/methods/guest-authrdf/member3.cdx.json"), paths)
 
     def test_root_sboms_cannot_mask_missing_guest_sbom(self):
-        with patch.object(gate.subprocess, "check_output", side_effect=self.metadata(missing=2)):
-            with self.assertRaises(FileNotFoundError):
-                gate.sbom_paths(self.root)
+        for missing in (2, 3):
+            with self.subTest(missing=missing):
+                with patch.object(gate.subprocess, "check_output", side_effect=self.metadata(missing=missing)):
+                    with self.assertRaises(FileNotFoundError):
+                        gate.sbom_paths(self.root)
 
     def test_path_patch_does_not_silently_bypass_upstream_audit(self):
         (self.root / "vendor/zk-sdk").mkdir(parents=True)
@@ -125,11 +140,15 @@ class GraphCoverage(unittest.TestCase):
     def test_committed_six_host_four_guest_patch_inventory(self):
         metadata = json.loads((REPO / "vendor/zk-sdk/UPSTREAM.json").read_text())
         self.assertEqual({p["name"]: p["version"] for p in metadata["packages"]}, gate.SDK_PATCHES)
+        # Both guest workspaces patch the four guest-side SDK crates; neither builds guests.
+        guests = {"zk/sparql-evaluator/methods/guest/Cargo.toml",
+                  "zk/sparql-evaluator/methods/guest-authrdf/Cargo.toml"}
+        self.assertTrue(guests <= set(map(str, gate.MANIFESTS)))
         for manifest in gate.MANIFESTS[1:]:
             lock = gate.tomllib.loads((REPO / manifest.with_name("Cargo.lock")).read_text())
             selected = {p["name"]: p for p in lock["package"] if p["name"] in gate.SDK_PATCHES}
             expected = set(gate.SDK_PATCHES)
-            if "methods/guest" in str(manifest):
+            if str(manifest) in guests:
                 expected -= {"risc0-build", "rzup"}
             self.assertEqual(set(selected), expected)
             for name, package in selected.items():

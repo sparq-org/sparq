@@ -16,6 +16,16 @@ import time
 ROOT = Path(__file__).resolve().parent.parent
 MANIFEST = "zk/sparql-evaluator/Cargo.toml"
 GUEST_MANIFEST = "zk/sparql-evaluator/methods/guest/Cargo.toml"
+# [OPUS-5.5] zkp-14.5: the separately pinned V5 guest; its own manifest and lock.
+AUTHRDF_GUEST_MANIFEST = "zk/sparql-evaluator/methods/guest-authrdf/Cargo.toml"
+EXACT_GUEST, AUTHRDF_GUEST = "sparq-exact-guest", "sparq-authrdf-guest"
+# Rebuild scopes: label, manifest and the child target subdirectory that
+# methods/build.rs uses for each guest (its package name).
+REBUILD_SCOPES = (("host", MANIFEST, None), ("guest", GUEST_MANIFEST, EXACT_GUEST),
+                  ("authrdf-guest", AUTHRDF_GUEST_MANIFEST, AUTHRDF_GUEST))
+GUEST_LABELS = frozenset({"guest", "authrdf-guest"})
+AUTHRDF_SCOPE = ("V5 guest artifact export, native V5 model and host gates, and lint only; "
+                 "this campaign executes no V5 guest and creates no V5 receipt.")
 V1_RECEIPTS = {"v1-verifier-select", "v1-holder-bag", "v1-verifier-false-ask"}
 V2_RECEIPTS = {"v2-verifier-catalog", "v2-holder-false-ask"}
 V3_RECEIPTS = {"v3-holder-bag", "v3-verifier-construct", "v3-holder-describe"}
@@ -114,6 +124,13 @@ def artifact_pin(directory: Path) -> dict:
     return pin
 
 
+def guest_pins(exact: dict, authrdf: dict) -> dict:
+    """Name each exported pin by its guest; the two images must be distinct."""
+    if exact["sha256"] == authrdf["sha256"] or exact["image_id"] == authrdf["image_id"]:
+        raise ValueError("exact and V5 guest exports are not distinct")
+    return {EXACT_GUEST: exact, AUTHRDF_GUEST: authrdf}
+
+
 def receipts(directory: Path, pin: dict, expected: set[str]) -> dict:
     paths = {path.stem: path for path in (directory / "receipts").glob("*.json")}
     if set(paths) != expected:
@@ -160,7 +177,7 @@ def run_logged(args: list[str], name: str, output: Path, env: dict, commands: li
 def clean_command(label: str, manifest: str, target: Path, packages: list[str]) -> list[str]:
     command = ["cargo", "clean", "--locked", "--offline", "--manifest-path", manifest,
                "--target-dir", str(target)]
-    if label == "guest":
+    if label in GUEST_LABELS:
         # Host Cargo defaults to host/debug; that does not invalidate guest/release.
         command.extend(["--release", "--target", "riscv32im-risc0-zkvm-elf"])
     elif label != "host":
@@ -221,8 +238,8 @@ def main() -> int:
             raise ValueError("target directory must not contain the checkout")
         # Rebuild every path dependency, including the patched SDK. Registry
         # dependencies retain their locked cache; compiler/lock identities are recorded.
-        for label, manifest, package_target in [("host", MANIFEST, target),
-                                               ("guest", GUEST_MANIFEST, target / "sparq-exact-guest")]:
+        for label, manifest, subdirectory in REBUILD_SCOPES:
+            package_target = target / subdirectory if subdirectory else target
             run_logged(["cargo", "fetch", "--locked", "--manifest-path", manifest],
                        f"fetch-{label}-locked-graph", output, env, commands)
             metadata = build_metadata(manifest, env)
@@ -234,6 +251,11 @@ def main() -> int:
                  "-p", "sparq-proved-evaluator", "--example", "export_guest", "--"]
         run_logged(cargo + [str(output / "artifact")], "export-guest", output, env, commands)
         pin = artifact_pin(output / "artifact")
+        # [OPUS-5.5] zkp-14.5: the V5 guest is exported separately under its own name.
+        authrdf = ["cargo", "run", "--locked", "--manifest-path", MANIFEST, "-p", "sparq-proved-evaluator",
+                   "--features", "authenticated-rdf", "--example", "export_authrdf_guest", "--"]
+        run_logged(authrdf + [str(output / "authrdf-artifact")], "export-authrdf-guest", output, env, commands)
+        pins = guest_pins(pin, artifact_pin(output / "authrdf-artifact"))
         env["SPARQ_EVALUATOR_EVIDENCE_DIR"] = str(output)
         # These filters expose kernel dimensions/target names only. Never enable
         # broad witness/preflight TRACE logs; all test input here is synthetic.
@@ -247,9 +269,21 @@ def main() -> int:
         run_logged(["cargo", "clippy", "--locked", "--manifest-path", MANIFEST, "--workspace",
                     "--all-targets", "--features", f"sparq-proved-evaluator-model/{model_feature}", "--",
                     "-D", "warnings"], "lint", output, env, commands)
+        # [OPUS-5.5] zkp-14.5: V5 native gates and lint; the V5 guest is not executed.
+        run_logged(test + ["-p", "sparq-proved-evaluator-model", "--features", "authenticated-rdf",
+                           "--lib", "--test", "authenticated_rdf"], "native-authrdf", output, env, commands)
+        run_logged(test + ["-p", "sparq-proved-evaluator", "--features", "authenticated-rdf",
+                           "--test", "authenticated_rdf"], "native-authrdf-host", output, env, commands)
+        run_logged(["cargo", "clippy", "--locked", "--manifest-path", MANIFEST, "--workspace",
+                    "--all-targets", "--features", "sparq-proved-evaluator/authenticated-rdf", "--",
+                    "-D", "warnings"], "lint-authrdf", output, env, commands)
         run_logged(cargo + [str(output / "artifact-after")], "confirm-guest", output, env, commands)
         if pin != artifact_pin(output / "artifact-after"):
             raise ValueError("exported program changed during the campaign")
+        run_logged(authrdf + [str(output / "authrdf-artifact-after")], "confirm-authrdf-guest",
+                   output, env, commands)
+        if pins[AUTHRDF_GUEST] != artifact_pin(output / "authrdf-artifact-after"):
+            raise ValueError("exported V5 program changed during the campaign")
         if snapshot(ROOT) != before:
             raise ValueError("source identity changed during the campaign")
         receipt_files = receipts(output, pin, expected)
@@ -258,7 +292,8 @@ def main() -> int:
         result = {"schema": "sparq-evaluator-campaign-v1", "completed": True,
                   "identity": identity, "toolchains": toolchains, "commands": commands,
                   "build_environment": build_environment, "diagnostic_filter": env["RUST_LOG"],
-                  "artifact_pin": pin, "receipts": receipt_files,
+                  "artifact_pin": pin, "guest_artifact_pins": pins, "authrdf_scope": AUTHRDF_SCOPE,
+                  "receipts": receipt_files,
                   "hal_execution_targets_observed": observed,
                   "hal_observation_limit": "Logged execution targets, not hardware inference; unlogged stages are not attributed.",
                   "source_inventory_sha256": digest((output / "source.json").read_bytes()),

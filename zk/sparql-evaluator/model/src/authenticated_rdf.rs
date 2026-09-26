@@ -1,9 +1,12 @@
-// [OPUS-5.5] Native-only issuer-authenticated RDF relation; no guest, receipt or proof.
+// [OPUS-5.5] Issuer-authenticated RDF relation V5; zkp-14.5 runs it in a separate guest.
 //! Issuer-authenticated bounded RDF queries over W3C `eddsa-rdfc-2022` credentials.
 //!
-//! This is relation version 5, a native model only. It has no guest adapter, host
-//! API, receipt or proof, and it makes no conformance or performance claim. It is
-//! not a complete Data Integrity processor and is not externally audited.
+//! This is relation version 5. Source for a separately pinned optional guest
+//! (methods feature `authenticated-rdf`) runs this relation unchanged behind a
+//! low-level host API (host feature `authenticated-rdf`). At the current
+//! checkpoint that guest is unbuilt and unexecuted, and no receipt is recorded.
+//! It makes no conformance or performance claim. It is not a complete Data
+//! Integrity processor and is not externally audited.
 //!
 //! # Relation
 //!
@@ -85,6 +88,20 @@ pub const MAX_DOCUMENT_QUADS: usize = 128;
 pub const MAX_PROOF_CONFIG_QUADS: usize = 8;
 /// Maximum document statements across the witness; equals the V3 default ceiling.
 pub const MAX_TOTAL_QUADS: usize = 256;
+/// Raw byte ceiling of the V5 guest's serialized witness, checked before decoding.
+///
+/// The pinned SDK encoding packs each string into words behind a length word and
+/// spends one word per `u8` element of a key, signature, anchor, nonce or salt.
+/// The terms cover the V3 query, all credential source bytes, a full table (two
+/// IRIs and a 32-word key per entry) and four 64-word signatures. The fixed margin
+/// covers lengths, enum tags, V3 policy scalars, anchor, nonce, salt and padding.
+/// No valid V5 witness reaches this bound. The V5 guest image embeds it, so
+/// changing it changes that image ID; the exact guest never compiles it.
+pub const MAX_WITNESS_BYTES: usize = crate::MAX_QUERY_BYTES
+    + MAX_TOTAL_BYTES
+    + MAX_AUTHORIZED_KEYS * (2 * MAX_IRI_BYTES + 32 * 4)
+    + MAX_CREDENTIALS * 64 * 4
+    + 4_096;
 
 // Per-input RDFC-1.0 limits. Input and output allow re-serialization escapes and
 // canonical labels; exceeding them rejects and never truncates. HNDQ and

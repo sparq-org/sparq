@@ -214,6 +214,10 @@ class TestDetachedSuppliers(unittest.TestCase):
             ("sparq-proved-evaluator-model", "zk/sparql-evaluator/model", "Jesse Wright"),
             ("sparq-proved-evaluator-methods", "zk/sparql-evaluator/methods", "Jesse Wright"),
             ("sparq-exact-guest", "zk/sparql-evaluator/methods/guest", "Jesse Wright"),
+            # [OPUS-5.5] zkp-14.5: the separately pinned V5 guest, by exact path and name.
+            ("sparq-authrdf-guest", "zk/sparql-evaluator/methods/guest-authrdf", "Jesse Wright"),
+            ("sparq-authrdf-guest", "zk/sparql-evaluator/methods/guest-other", None),
+            ("sparq-authrdf-guest-extra", "zk/sparql-evaluator/methods/guest-authrdf", None),
             ("sparq_proved_evaluator", "zk/sparql-evaluator/host", "Jesse Wright"),
             ("sparq_proved_evaluator_model", "zk/sparql-evaluator/model", "Jesse Wright"),
             ("sparq_proved_evaluator_methods", "zk/sparql-evaluator/methods", "Jesse Wright"),

@@ -11,6 +11,12 @@ publish.workspace = true
 [features]
 default = []
 vcq = ["dep:sparq-query-protocol", "sparq-proved-evaluator-model/graph-results"]
+# [OPUS-5.5] zkp-14.5: low-level V5 authenticated-RDF API over its own separately
+# pinned guest image. Off by default; the exact guest and its APIs are unchanged.
+authenticated-rdf = [
+    "sparq-proved-evaluator-model/authenticated-rdf",
+    "sparq-proved-evaluator-methods/authenticated-rdf",
+]
 
 [dependencies]
 sparq-proved-evaluator-model = { path = "../model" }
@@ -23,3 +29,8 @@ sha2.workspace = true
 
 [dev-dependencies]
 sparq-proved-evaluator-model = { path = "../model", features = ["graph-results"] }
+
+# [OPUS-5.5] Exports the separate V5 guest; never overwrites an existing directory.
+[[example]]
+name = "export_authrdf_guest"
+required-features = ["authenticated-rdf"]

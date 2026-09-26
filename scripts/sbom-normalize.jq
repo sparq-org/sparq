@@ -105,7 +105,8 @@ def canon_purl:
 #          own `author` (where present) is carried into `publisher` (the originator who
 #          published it) — distinct from the distributing supplier.
 #   * path+file://<abs>/zk/sparql-evaluator/<member>#<ver>
-#       -> the explicitly named first-party evaluator members; same supplier below.
+#       -> the explicitly named first-party evaluator members and both guest
+#          workspaces (exact and V5); same supplier below.
 #   * path+file://<abs>/vendor/zk-sdk/<name>#<ver>
 #       -> the project supplies modified upstream bytes; UPSTREAM.json and patches
 #          accompany the SBOM and identify the registry base plus exact delta.
@@ -149,8 +150,9 @@ def derive_supplier($author):
       # [GPT-6] This repository supplies the patched bytes; upstream registry
       # provenance is recorded separately in the accompanying UPSTREAM.json.
       {name: "Jesse Wright", url: ["https://github.com/sparq-org/sparq"]}
-    elif (($ref | test("^path\\+file://.*/zk/sparql-evaluator/(host|model|methods|methods/guest)#"))
-          and (.name | test("^sparq[-_](proved[-_]evaluator([-_]model|[-_]methods)?|exact[-_]guest)$"))) then
+    # [OPUS-5.5] zkp-14.5: plus the separately pinned V5 guest workspace, by exact name.
+    elif (($ref | test("^path\\+file://.*/zk/sparql-evaluator/(host|model|methods|methods/guest|methods/guest-authrdf)#"))
+          and (.name | test("^sparq[-_](proved[-_]evaluator([-_]model|[-_]methods)?|exact[-_]guest|authrdf[-_]guest)$"))) then
       {name: "Jesse Wright", url: ["https://github.com/sparq-org/sparq"]}
     elif ($ref | test("^path\\+file://.*/vendor/")) then
       # vendored [patch.crates-io] upstream crate -> crates.io is the supplier-of-record

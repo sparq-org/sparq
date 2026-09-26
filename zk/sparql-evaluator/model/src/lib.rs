@@ -263,6 +263,6 @@ pub fn bind_journal(journal: &Journal, expected: &Request) -> Result<(), Rejecte
 // [OPUS-5.5] Host-only replay preparation; excluded from the guest image build.
 #[cfg(all(feature = "graph-results", not(target_os = "zkvm")))]
 pub mod replay;
-// [OPUS-5.5] Native-only V5 model; no guest adapter, receipt or proof exists.
+// [OPUS-5.5] V5 model; its separate guest source is unbuilt, with no receipt yet.
 #[cfg(feature = "authenticated-rdf")]
 pub mod authenticated_rdf;
