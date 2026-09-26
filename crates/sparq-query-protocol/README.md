@@ -9,8 +9,10 @@
 > parser, no RDF/SPARQL canonicalization, and no interoperable wire encoding or transport. Every
 > draft registry entry still has `adapter_available: false`, and this crate registers no method.
 > Its only consumer is the detached `zk/sparql-evaluator/host` crate's OFF-by-default `vcq`
-> feature; the backend, store and cryptography live there, never here. `sparq-core`,
-> `sparq-engine` and the default wasm build are unchanged.
+> feature, which supplies the proof backend and cryptography. The durable challenge store is
+> supplied by the APPLICATION: neither crate ships a production store; the host tests use
+> in-memory test doubles only. `sparq-core`, `sparq-engine` and the default wasm build are
+> unchanged. <!-- [OPUS-5.5] -->
 
 ## 🚀 Quickstart
 

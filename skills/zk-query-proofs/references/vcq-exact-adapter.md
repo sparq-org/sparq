@@ -91,4 +91,114 @@ classified from the typed store outcome.
 Native tests (`host/tests/vcq_adapter.rs`, unit tests in `host/src/vcq.rs`,
 `model/tests/vcq_request_shape.rs`) create no proof. The only receipt they use is a fake one,
 which must be rejected without touching the store. No genuine receipt has been produced or
-verified through this adapter yet.
+verified through this adapter yet. The genuine-receipt tests below are **definitions**: this
+page records no run of them. <!-- [OPUS-5.5] -->
+
+## Genuine receipt tests (`host/tests/vcq_genuine.rs`)
+
+<!-- [OPUS-5.5] Definitions only; not execution evidence. -->
+Two ignored tests, compiled only with `--features vcq`, driven by one explicit job file named by
+`SPARQ_VCQ_PROOF_JOB`. The tests read environment variables but never set them.
+`RISC0_DEV_MODE` must be unset. A missing job, tool or input fails the test; nothing is skipped
+or counted as a run.
+
+```sh
+# Prove mode: seven genuine Succinct receipts, then controls; writes new evidence.
+SPARQ_VCQ_PROOF_JOB=/abs/vcq-prove-job.json RISC0_BUILD_LOCKED=1 cargo test --locked \
+  --manifest-path zk/sparql-evaluator/Cargo.toml -p sparq-proved-evaluator --features vcq \
+  --test vcq_genuine -- --ignored --exact \
+  genuine_vcq_receipts_verify_every_tuple_and_reject_controls --nocapture --test-threads=1
+
+# Verify-only mode: re-checks one retained row-bound receipt; proves and writes nothing.
+SPARQ_VCQ_PROOF_JOB=/abs/vcq-verify-job.json RISC0_BUILD_LOCKED=1 cargo test --locked \
+  --manifest-path zk/sparql-evaluator/Cargo.toml -p sparq-proved-evaluator --features vcq \
+  --test vcq_genuine -- --ignored --exact \
+  retained_row_bound_receipt_rejects_after_proof_checks_before_consumption --nocapture
+```
+
+Job schema `sparq.vcq-genuine-proof.test-job.v1` (unknown fields rejected):
+
+| Field | Mode | Meaning |
+|---|---|---|
+| `schema` | both | Exactly `sparq.vcq-genuine-proof.test-job.v1` |
+| `guest`, `pin` | both | Independently approved guest artifact and deployment-approved `ArtifactPin`, loaded with `AcceptedGuest::from_artifact`. The embedded guest is never used implicitly. |
+| `challenge_seed32` | both | 64 hex characters, nonzero; a fresh PUBLIC synthetic seed, not a secret. Verify-only must reuse the seed of the run that produced the retained receipt. |
+| `r0vm` | prove only | Real local `r0vm` executable (canonicalized, recorded) |
+| `new_output_directory` | prove only | Absolute, must not exist, parent must exist, outside the checkout; created owner-only |
+| `verify_only_row_bound` | verify-only only | The retained `select-bag-row-bound/presentation.json` |
+
+A job is prove mode (`r0vm` + `new_output_directory`, no `verify_only_row_bound`) or verify-only
+mode (`verify_only_row_bound` alone); anything else fails. Inputs must be absolute paths without
+`.`/`..` that name regular files, not symlinks or directories. Read caps: job 64 KiB, pin 4 KiB,
+guest 32 MiB, retained presentation 72 MiB (JSON writes each receipt byte as a number; the
+adapter still applies its 16 MiB receipt bound).
+
+Fixed PUBLIC SYNTHETIC fixture: default graph
+`<http://ex/a> <http://ex/p> "1" .` and `<http://ex/b> <http://ex/p> "1" .`, no named graphs,
+salt `0x5a` x 32. The agreed anchor is `v3::dataset_commitment` of that fixture under
+`v3::Policy::default()`; holder-declared requests carry none. Verifier audience
+`urn:example:sparq-vcq-genuine-test:verifier` and the window `not_before = 1800000000`,
+`not_after = 1800000600`, `now = 1800000100` are fixed synthetic values passed to `verify_at`,
+not the ambient clock or credentials. Each case's original challenge is SHA-256 over
+`sparq:vcq-genuine-test:original-challenge:v1\0` ‖ seed ‖ u64-be label length ‖ case label.
+
+Cases, each through `admit`, `prepare`, `prove` (configured `r0vm`) and `verify_at`. Expected
+results are hand-written from the fixture, never taken from adapter or evaluator output:
+
+| Case | Query | Expected |
+|---|---|---|
+| `select-bag-{verifier-agreed,holder-declared}` | `SELECT ?o WHERE { ?s <http://ex/p> ?o }` | columns `[o]`, two identical rows `"1"` (duplicate kept) |
+| `ask-true-verifier-agreed` | `ASK { <http://ex/a> <http://ex/p> ?o }` | `true` |
+| `ask-false-holder-declared` | `ASK { <http://ex/c> <http://ex/p> ?o }` | `false` |
+| `construct-{verifier-agreed,holder-declared}` | `CONSTRUCT { ?s <http://ex/q> ?o } WHERE { ?s <http://ex/p> ?o }` | the two `<http://ex/q>` triples, sorted canonical N-Triples |
+| `select-bag-row-bound` | bag query, `released_rows = 1` | genuine receipt; protocol rejection |
+
+Assertions per accepted case: one store call; the claim's result, provenance, commitment
+(the anchor), descriptor, contract, `ExactBounded` mode and statement digest; scope
+`{authority, anchor (agreed only), SourceEvidence::None, RelativeToScope}`; tuple status
+`NotRequested` and holder `BearerAccepted`; authenticity, status and holder binding
+`NotEstablished`; the anchor established only under agreed authority. The receipt is
+re-verified through `v3::verify_with_artifact` with a separate test-only nonce set. Only after
+that check does the test read status: `InnerReceipt::Succinct`, nonempty seal and
+`ExitCode::Halted(0)`.
+
+Controls reuse that receipt and create no proof. Each asserts class, phase and exact code, and
+the fresh control store must see zero calls: a changed query of the same form; a wrong challenge;
+a changed stored audience with a matching supplied audience; a changed window that still
+contains `now` (these four fail as `vcq-proof-rejected`, the cryptographic binding); a wrong
+verifier audience; expired and not-yet-valid instants; a wrong descriptor digest; an altered
+journal result; the scope substitution (agreed to holder, or holder to agreed); and a wrong
+agreed anchor (agreed cases). Then: a second verify on the same store is `ChallengeReplayed`;
+a broken store is `infrastructure` `ChallengeStoreFailure("test-broken")`; two concurrent
+verifies on a fresh mutex store give exactly one success and one replay. Every store is an
+in-memory test double, never a production store. Policy and capability admission negatives
+stay in the native suite.
+
+Row bound: `prove` succeeds because the released-row ceiling is checked in the post-proof
+verify callback. The adapter must return `capacity` `CapacityExceeded(Backend {
+"vcq-released-rows", requested: 2, ceiling: 1 })` with **zero** original-challenge store
+calls. The same receipt then passes `v3::verify_with_artifact` against the independently derived
+request, with test nonces. This establishes that the rejection comes after the cryptographic
+checks and before consumption. The native bridge test `check_failure_before_consumption_keeps_the_challenge` does
+not exercise that hook order; this test does.
+
+Mutation check (root-run): edit `verify_checked_program` in `host/src/v3.rs` so the nonce call
+runs before the caller check. Then run the verify-only command against the retained receipt. It
+must FAIL on the capacity/zero-call assertion; the bridge then reports
+`vcq-nonce-bridge-violation` after one store call. Restore the file (`git checkout --
+zk/sparql-evaluator/host/src/v3.rs`) and rerun; it must pass. Verify-only mode proves nothing and
+writes nothing, so it never marks a fresh proof or overwrites run evidence.
+
+Evidence (prove mode, all new files, owner-only on Unix, never removed):
+`metadata.json` is written first, with the job, pin, guest and descriptor hashes, the seed, the
+fixture and hand-defined expectation hashes, the anchor, audience and clock. It is not a success
+record. Each case directory holds `started.json` (written before proving),
+`presentation.json` (`VcqPresentation`), `receipt.json` (host receipt), `v3-request.json`,
+`stored-request.local-struct-v1.bin`, `descriptor.local-struct-v1.bin`,
+`expected-result.json` and `journal.json` (verified). Accepted cases add `verified.json` after
+verification and `record.json` after controls. The row-bound directory keeps its material and a
+`record.json` marked `protocol_accepted: false`. `summary.json` is written only after every
+assertion. It counts 6 protocol-accepted genuine receipts plus 1 genuine receipt rejected by the
+row bound, and it counts controls separately. Limits: public synthetic data only; no source
+credential, status or holder key is authenticated; not externally audited. The registry keeps
+`adapter_available: false`. Keep raw receipts and evidence outside the tracked repository.

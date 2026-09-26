@@ -46,7 +46,10 @@ holder-declared and verifier-agreed authority only, with the fixed default V3 po
 the stored request through a documented derived nonce and consumes the original challenge once,
 after every other check. It authenticates no credential, checks no status or holder key, and
 the registry entry stays `adapter_available: false`. No genuine receipt has been verified
-through it yet. See [vcq exact adapter](references/vcq-exact-adapter.md).
+through it yet. The ignored `host/tests/vcq_genuine.rs` defines that run: a prove mode and a
+verify-only row-bound mode, both driven by an explicit `SPARQ_VCQ_PROOF_JOB`. The reference
+gives its commands, job fields, assertions, mutation check and evidence limits; no run is
+recorded. See [vcq exact adapter](references/vcq-exact-adapter.md).
 
 [GPT-6] For the opt-in synthetic selected-support measurement adapter, its strict
 experiment manifest, timing boundaries and unavailable stages, see

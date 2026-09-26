@@ -305,7 +305,12 @@ rejected. The V3 nonce is derived from the `local-struct-v1` stored request and
 selected descriptor. The actual query form is checked by the host-only
 `v3::query_shape` helper. Result checks run on the verified journal before the
 original challenge is consumed once through the shared store. The existing
-public verify APIs keep their behavior. Only native tests exist; no genuine
-receipt has been verified through the adapter, and the registry keeps
-`adapter_available: false`. See
+public verify APIs keep their behavior. No genuine receipt has been verified
+through the adapter, and the registry keeps `adapter_available: false`.
+[OPUS-5.5] The ignored `host/tests/vcq_genuine.rs` defines the genuine-receipt run.
+It uses an explicit `SPARQ_VCQ_PROOF_JOB`, an approved guest and pin, and a public
+synthetic fixture. It proves six accepted tuples plus one receipt that the protocol
+row bound rejects after the proof checks and before challenge consumption. Controls
+reuse those receipts. A separate verify-only test re-checks the retained
+row-bound receipt. These are definitions only; no run is recorded here. See
 [the adapter reference](../../skills/zk-query-proofs/references/vcq-exact-adapter.md).
