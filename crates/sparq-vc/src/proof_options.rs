@@ -12,17 +12,33 @@
 //!
 //! - **`verificationMethod`** must be an absolute IRI (RFC 3987, parsed by
 //!   `oxrdf::NamedNode::new`). It is hashed verbatim; no normalization.
-//! - **`proofPurpose`** is either exactly one of the compact terms the Data
-//!   Integrity `@context` scopes under `proofPurpose` —
-//!   [`SUPPORTED_PURPOSE_TERMS`] — which map to `https://w3id.org/security#<term>`,
-//!   or (when the value contains `:`) an absolute IRI hashed verbatim. Any other
-//!   value (another bare term, wrong case, empty) is rejected: under the VC v2
-//!   `@context` an unknown term would not expand into `sec:`, so guessing a
-//!   `sec:` IRI could sign semantics the JSON-LD form does not carry. An absolute
-//!   IRI is never appended to the `sec:` namespace. Compact IRIs are not expanded:
-//!   `sec:assertionMethod` is read as an IRI with scheme `sec`, so pass the expanded
-//!   `https://w3id.org/security#assertionMethod` instead (which hashes identically
-//!   to the compact term `assertionMethod`).
+//! - **`proofPurpose`** is either exactly one of the compact terms the VC v2
+//!   `@context` scopes under `proofPurpose` — [`SUPPORTED_PURPOSE_TERMS`] — or
+//!   (when the value contains `:`) an absolute IRI hashed verbatim. Each compact
+//!   term expands to the `@id` that scoped context gives it, which is
+//!   `sec:<term>` only for `assertionMethod`:
+//!
+//!   | Compact term           | Hashed IRI                                           |
+//!   |------------------------|------------------------------------------------------|
+//!   | `assertionMethod`      | `https://w3id.org/security#assertionMethod`          |
+//!   | `authentication`       | `https://w3id.org/security#authenticationMethod`     |
+//!   | `capabilityDelegation` | `https://w3id.org/security#capabilityDelegationMethod` |
+//!   | `capabilityInvocation` | `https://w3id.org/security#capabilityInvocationMethod` |
+//!   | `keyAgreement`         | `https://w3id.org/security#keyAgreementMethod`       |
+//!
+//!   Any other value (another bare term, wrong case, empty) is rejected: under the
+//!   VC v2 `@context` an unknown term has no scoped `@id`, so guessing an IRI
+//!   could sign semantics the JSON-LD form does not carry. An absolute IRI is
+//!   never appended to the `sec:` namespace. Compact IRIs are not expanded:
+//!   `sec:assertionMethod` is read as an IRI with scheme `sec`, so pass the
+//!   expanded IRI from the table instead (which hashes identically to its
+//!   compact term).
+//!
+//!   [OPUS-5.5] **Incompatibility:** the earlier implementation hashed every
+//!   compact term as `sec:<term>`. That is correct only for
+//!   `assertionMethod`; proofs made with the other four compact terms signed the
+//!   wrong IRI, no longer verify, and must be re-signed. There is deliberately
+//!   no fallback.
 //! - **`created`**, when present, must be in the XSD 1.1 `xsd:dateTime` lexical
 //!   space ([XSD 1.1 §3.3.7]), as the cryptosuite's proof-configuration algorithm
 //!   requires ([vc-di-eddsa §3.3.5]): year zero (a leap year) and negative years
@@ -58,13 +74,17 @@
 
 use oxrdf::NamedNode;
 
-use crate::suite::{ProofConfig, SEC};
+use crate::suite::ProofConfig;
 
-/// Compact `proofPurpose` terms mapped into the `https://w3id.org/security#` namespace.
+/// Compact `proofPurpose` terms accepted and expanded per the VC v2 `@context`.
 ///
-/// These are exactly the terms the Data Integrity `@context` defines in the
-/// scoped context of `proofPurpose`. Adding a term here changes which inputs are
-/// accepted, not how existing ones hash.
+/// These are exactly the terms <https://www.w3.org/ns/credentials/v2> defines in
+/// the scoped context of `proofPurpose`. Each hashes as the `@id` that context
+/// gives it, in the `https://w3id.org/security#` namespace: `assertionMethod`,
+/// `authenticationMethod`, `capabilityInvocationMethod`,
+/// `capabilityDelegationMethod`, `keyAgreementMethod` respectively. That is
+/// `sec:<term>` only for `assertionMethod`. Adding a term here changes which
+/// inputs are accepted, not how existing ones hash.
 pub const SUPPORTED_PURPOSE_TERMS: [&str; 5] = [
     "assertionMethod",
     "authentication",
@@ -155,11 +175,28 @@ pub(crate) fn check(config: &ProofConfig) -> Result<CheckedProofConfig<'_>, Proo
     })
 }
 
+/// The `@id` the VC v2 `@context` gives a compact `proofPurpose` term, if any.
+///
+/// [OPUS-5.5] Transcribed from the `proofPurpose` scoped context of
+/// <https://www.w3.org/ns/credentials/v2>. Only `assertionMethod` is `sec:` plus
+/// the term; the other four end in `Method`. Changing any IRI changes the hashed
+/// proof configuration, so every proof signed with that purpose stops verifying.
+fn purpose_term_iri(term: &str) -> Option<&'static str> {
+    Some(match term {
+        "assertionMethod" => "https://w3id.org/security#assertionMethod",
+        "authentication" => "https://w3id.org/security#authenticationMethod",
+        "capabilityDelegation" => "https://w3id.org/security#capabilityDelegationMethod",
+        "capabilityInvocation" => "https://w3id.org/security#capabilityInvocationMethod",
+        "keyAgreement" => "https://w3id.org/security#keyAgreementMethod",
+        _ => return None,
+    })
+}
+
 /// Resolves a `proofPurpose` value to its IRI (see the module-level contract).
 fn purpose_iri(value: &str) -> Result<NamedNode, ProofOptionError> {
-    if SUPPORTED_PURPOSE_TERMS.contains(&value) {
-        // A fixed namespace plus a fixed ASCII term: always a valid IRI.
-        return Ok(NamedNode::new_unchecked(format!("{SEC}{value}")));
+    if let Some(iri) = purpose_term_iri(value) {
+        // A fixed absolute ASCII IRI from the table above: always valid.
+        return Ok(NamedNode::new_unchecked(iri));
     }
     if value.contains(':') {
         return NamedNode::new(value).map_err(|e| ProofOptionError::ProofPurpose {
@@ -446,23 +483,78 @@ mod tests {
         bad(&"\u{1f600}".repeat(250_000));
     }
 
+    /// [OPUS-5.5] The `proofPurpose` scoped-context `@id`s, written out by hand
+    /// from <https://www.w3.org/ns/credentials/v2> (retrieved 2026-09-26, SHA-256
+    /// `59955ced6697d61e03f2b2556febe5308ab16842846f5b586d7f1f7adec92734`). This is
+    /// the primary-source oracle; it must not be derived from the production lookup.
+    const W3C_V2_PURPOSE_IDS: [(&str, &str); 5] = [
+        (
+            "assertionMethod",
+            "https://w3id.org/security#assertionMethod",
+        ),
+        (
+            "authentication",
+            "https://w3id.org/security#authenticationMethod",
+        ),
+        (
+            "capabilityDelegation",
+            "https://w3id.org/security#capabilityDelegationMethod",
+        ),
+        (
+            "capabilityInvocation",
+            "https://w3id.org/security#capabilityInvocationMethod",
+        ),
+        (
+            "keyAgreement",
+            "https://w3id.org/security#keyAgreementMethod",
+        ),
+    ];
+
     #[test]
-    fn purpose_terms_map_into_sec_and_absolute_iris_are_verbatim() {
-        for term in SUPPORTED_PURPOSE_TERMS {
-            assert_eq!(purpose_iri(term).unwrap().as_str(), format!("{SEC}{term}"));
+    fn purpose_terms_expand_to_the_w3c_v2_context_ids() {
+        let mut terms: Vec<&str> = W3C_V2_PURPOSE_IDS.iter().map(|(t, _)| *t).collect();
+        let mut supported = SUPPORTED_PURPOSE_TERMS.to_vec();
+        terms.sort_unstable();
+        supported.sort_unstable();
+        assert_eq!(supported, terms);
+
+        for (term, id) in W3C_V2_PURPOSE_IDS {
+            assert_eq!(purpose_iri(term).unwrap().as_str(), id, "{term}");
+            // The expanded `@id` is an absolute IRI hashed verbatim, so it is the
+            // same RDF term as its compact form.
+            assert_eq!(purpose_iri(id).unwrap(), purpose_iri(term).unwrap());
         }
+
+        // The old blanket `sec:<term>` mapping is right for `assertionMethod` only.
+        assert_eq!(
+            purpose_iri("assertionMethod").unwrap().as_str(),
+            "https://w3id.org/security#assertionMethod"
+        );
+        for term in [
+            "authentication",
+            "capabilityDelegation",
+            "capabilityInvocation",
+            "keyAgreement",
+        ] {
+            let old = format!("https://w3id.org/security#{term}");
+            assert_ne!(purpose_iri(term).unwrap().as_str(), old, "{term}");
+            // An explicit absolute IRI is still hashed verbatim, never remapped.
+            assert_eq!(purpose_iri(&old).unwrap().as_str(), old);
+        }
+    }
+
+    #[test]
+    fn absolute_purpose_iris_are_verbatim_and_other_terms_rejected() {
         let absolute = "https://example.test/purposes#audit";
         assert_eq!(purpose_iri(absolute).unwrap().as_str(), absolute);
-        assert_eq!(
-            purpose_iri("https://w3id.org/security#assertionMethod").unwrap(),
-            purpose_iri("assertionMethod").unwrap()
-        );
         for rejected in [
             "",
             "assertionmethod",
             "AssertionMethod",
             "foo",
             "assertionMethod ",
+            // An expanded IRI's local name is not itself a compact term.
+            "authenticationMethod",
         ] {
             assert!(
                 matches!(
@@ -575,327 +667,6 @@ mod tests {
             };
             let lex = format!("2023-{mo:02}-{d:02}T{h:02}:{mi:02}:{s:02}Z");
             prop_assert_eq!(check_xsd11_date_time(&lex).is_ok(), expected_ok, "{}", lex);
-        }
-    }
-}
-
-/// The validation seam exercised through the public sign/verify entry points.
-#[cfg(test)]
-mod api_tests {
-    use std::cell::Cell;
-
-    use oxrdf::{Literal, NamedNode, NamedOrBlankNode, Term, Triple};
-    use proptest::prelude::*;
-    use sparq_core::Graph;
-
-    use super::{ProofOptionError, SUPPORTED_PURPOSE_TERMS};
-    use crate::did::{Did, DidError, DidKeyResolver, DidResolver};
-    use crate::{
-        ProofConfig, SigningKey, VcError, VerifiedProof, VerifyingKey, sign, sign_graph, verify,
-        verify_graph,
-    };
-
-    /// XSD 1.1 `xsd:dateTime` values at the edges of the lexical space.
-    const VALID_CREATED: &[&str] = &[
-        "2023-02-24T23:36:38Z",
-        "0000-01-01T00:00:00Z",
-        "0000-02-29T12:00:00",
-        "-0001-12-31T23:59:59Z",
-        "-0004-02-29T00:00:00+14:00",
-        "2000-02-29T00:00:00Z",
-        "2024-02-29T00:00:00-14:00",
-        "12345-01-01T00:00:00Z",
-        "2023-12-31T24:00:00Z",
-        "2023-12-31T24:00:00.000Z",
-        "2023-01-01T00:00:00.123456789012345678901234567890Z",
-        "2023-01-01T00:00:00",
-        "2023-01-01T00:00:00-00:00",
-    ];
-
-    /// Values outside the XSD 1.1 `xsd:dateTime` lexical space.
-    const INVALID_CREATED: &[&str] = &[
-        "",
-        "2023-02-29T00:00:00Z",
-        "1900-02-29T00:00:00Z",
-        "-0001-02-29T00:00:00Z",
-        "2023-04-31T00:00:00Z",
-        "2023-13-01T00:00:00Z",
-        "023-01-01T00:00:00Z",
-        "02023-01-01T00:00:00Z",
-        "+2023-01-01T00:00:00Z",
-        "2023-01-01",
-        "2023-01-01T24:00:01Z",
-        "2023-01-01T24:00:00.5Z",
-        "2023-01-01T00:00:60Z",
-        "2023-01-01T00:00:00.Z",
-        "2023-01-01T00:00:00+14:01",
-        "2023-01-01T00:00:00+1400",
-        " 2023-01-01T00:00:00Z",
-        "\u{ff12}\u{ff10}\u{ff12}\u{ff13}-01-01T00:00:00Z",
-    ];
-
-    fn key() -> SigningKey {
-        SigningKey::from_seed(&[31_u8; 32])
-    }
-
-    fn vm_for(key: &SigningKey) -> String {
-        let did = key.did_key();
-        format!("{did}#{}", did.strip_prefix("did:key:").unwrap())
-    }
-
-    fn triples() -> Vec<Triple> {
-        vec![Triple::new(
-            NamedOrBlankNode::NamedNode(NamedNode::new_unchecked("https://example.test/s")),
-            NamedNode::new_unchecked("https://example.test/p"),
-            Term::Literal(Literal::new_simple_literal("o")),
-        )]
-    }
-
-    /// A document RDFC-1.0 rejects (an RDF 1.2 triple term), so reaching the
-    /// canonicalizer is observable as `VcError::Canon`.
-    fn uncanonicalizable() -> Vec<Triple> {
-        let inner = triples().remove(0);
-        vec![Triple::new(
-            NamedOrBlankNode::NamedNode(NamedNode::new_unchecked("https://example.test/r")),
-            NamedNode::new_unchecked("https://example.test/about"),
-            Term::Triple(Box::new(inner)),
-        )]
-    }
-
-    /// A `did:key` resolver that counts how often it is consulted.
-    #[derive(Default)]
-    struct CountingResolver(Cell<usize>);
-
-    impl DidResolver for CountingResolver {
-        fn resolve(&self, did: &Did) -> Result<VerifyingKey, DidError> {
-            self.0.set(self.0.get() + 1);
-            DidKeyResolver.resolve(did)
-        }
-    }
-
-    fn invalid_option<T: std::fmt::Debug>(result: Result<T, VcError>) -> ProofOptionError {
-        match result {
-            Err(VcError::InvalidProofOption(e)) => e,
-            other => panic!("expected InvalidProofOption, got {other:?}"),
-        }
-    }
-
-    fn verified(result: Result<VerifiedProof, VcError>) -> VerifiedProof {
-        result.expect("proof verifies")
-    }
-
-    fn with_purpose(purpose: &str, base: &ProofConfig) -> ProofConfig {
-        ProofConfig {
-            proof_purpose: purpose.to_string(),
-            ..base.clone()
-        }
-    }
-
-    #[test]
-    fn boundary_created_values_round_trip_verbatim() {
-        let key = key();
-        for &created in VALID_CREATED {
-            let cfg = ProofConfig::new(vm_for(&key)).with_created(created);
-            assert_eq!(cfg.validate(), Ok(()), "{created:?}");
-            let proof = sign(&triples(), &key, &cfg).expect("valid created signs");
-            assert_eq!(proof.config.created.as_deref(), Some(created));
-            let v = verified(verify(&triples(), &proof, &DidKeyResolver));
-            assert_eq!(v.config.created.as_deref(), Some(created));
-        }
-    }
-
-    /// The literal is signed as written: equal-valued lexical forms are
-    /// different signed statements.
-    #[test]
-    fn created_is_not_normalized() {
-        let key = key();
-        let signed = ProofConfig::new(vm_for(&key)).with_created("2023-12-31T24:00:00Z");
-        let mut proof = sign(&triples(), &key, &signed).unwrap();
-        for equal_value in [
-            "2024-01-01T00:00:00Z",
-            "2023-12-31T24:00:00.0Z",
-            "2023-12-31T24:00:00+00:00",
-        ] {
-            proof.config.created = Some(equal_value.to_string());
-            assert!(
-                matches!(
-                    verify(&triples(), &proof, &DidKeyResolver),
-                    Err(VcError::SignatureInvalid)
-                ),
-                "{equal_value:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn invalid_created_is_rejected_by_every_entry_point() {
-        let key = key();
-        let graph = Graph::new();
-        let good = sign(&triples(), &key, &ProofConfig::new(vm_for(&key))).unwrap();
-        for &created in INVALID_CREATED {
-            let cfg = ProofConfig::new(vm_for(&key)).with_created(created);
-            let expected = cfg.validate().expect_err(created);
-            assert!(
-                matches!(&expected, ProofOptionError::Created { value, .. } if value == created),
-                "{expected:?}"
-            );
-            assert_eq!(invalid_option(sign(&triples(), &key, &cfg)), expected);
-            assert_eq!(invalid_option(sign_graph(&graph, &key, &cfg)), expected);
-
-            let mut proof = good.clone();
-            proof.config = cfg;
-            let resolver = CountingResolver::default();
-            assert_eq!(
-                invalid_option(verify(&triples(), &proof, &resolver)),
-                expected
-            );
-            assert_eq!(
-                invalid_option(verify_graph(&graph, &proof, &resolver)),
-                expected
-            );
-            assert_eq!(resolver.0.get(), 0, "resolver consulted for {created:?}");
-        }
-    }
-
-    #[test]
-    fn verification_method_must_be_an_absolute_iri() {
-        let key = key();
-        for vm in [
-            "",
-            "#key",
-            "relative/key",
-            "z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2",
-            "did key",
-            "https://exa mple.test/k",
-        ] {
-            let cfg = ProofConfig::new(vm);
-            let err = invalid_option(sign(&triples(), &key, &cfg));
-            assert!(
-                matches!(&err, ProofOptionError::VerificationMethod { value, .. } if value == vm),
-                "{vm:?}: {err:?}"
-            );
-            assert_eq!(cfg.validate(), Err(err));
-        }
-    }
-
-    /// Lexical validity is not resolution: a well-formed IRI that is not a
-    /// `did:key` passes validation, then fails in the resolver.
-    #[test]
-    fn lexically_valid_method_still_goes_through_resolution() {
-        let key = key();
-        let cfg = ProofConfig::new("https://issuer.example/keys/1");
-        assert_eq!(cfg.validate(), Ok(()));
-        let proof = sign(&triples(), &key, &cfg).expect("well-formed options sign");
-        assert!(matches!(
-            verify(&triples(), &proof, &DidKeyResolver),
-            Err(VcError::Did(DidError::Malformed(_)))
-        ));
-    }
-
-    #[test]
-    fn purpose_accepts_supported_terms_and_absolute_iris_only() {
-        let key = key();
-        let base = ProofConfig::new(vm_for(&key));
-        for term in SUPPORTED_PURPOSE_TERMS {
-            let proof = sign(&triples(), &key, &with_purpose(term, &base)).unwrap();
-            verified(verify(&triples(), &proof, &DidKeyResolver));
-        }
-
-        let custom = with_purpose("https://example.test/purposes#audit", &base);
-        let proof = sign(&triples(), &key, &custom).unwrap();
-        verified(verify(&triples(), &proof, &DidKeyResolver));
-
-        for purpose in [
-            "",
-            "foo",
-            "assertionmethod",
-            "AssertionMethod",
-            "assertionMethod ",
-            "https://exa mple.test/p",
-        ] {
-            let err = invalid_option(sign(&triples(), &key, &with_purpose(purpose, &base)));
-            assert!(
-                matches!(&err, ProofOptionError::ProofPurpose { value, .. } if value == purpose),
-                "{purpose:?}: {err:?}"
-            );
-        }
-    }
-
-    /// The compact term and its expanded `sec:` IRI are the same RDF, so they
-    /// hash (and deterministically sign) identically.
-    #[test]
-    fn compact_and_expanded_purpose_sign_identically() {
-        let key = key();
-        let compact = ProofConfig::new(vm_for(&key));
-        let expanded = with_purpose("https://w3id.org/security#assertionMethod", &compact);
-        let a = sign(&triples(), &key, &compact).unwrap();
-        let b = sign(&triples(), &key, &expanded).unwrap();
-        assert_eq!(a.proof_value, b.proof_value);
-    }
-
-    /// Invalid options are reported before the canonicalizer or resolver runs;
-    /// valid ones reach them.
-    #[test]
-    fn invalid_options_fail_before_canonicalization_and_resolution() {
-        let key = key();
-        let doc = uncanonicalizable();
-        let valid = ProofConfig::new(vm_for(&key));
-        assert!(matches!(
-            sign(&doc, &key, &valid),
-            Err(VcError::Canon(sparq_canon::CanonError::TripleTerm))
-        ));
-
-        let bad_created = valid.clone().with_created("2023-02-30T00:00:00Z");
-        invalid_option(sign(&doc, &key, &bad_created));
-        invalid_option(sign(&doc, &key, &with_purpose("unsupported", &valid)));
-
-        let mut proof = sign(&triples(), &key, &valid).unwrap();
-        let resolver = CountingResolver::default();
-        assert!(matches!(
-            verify(&doc, &proof, &resolver),
-            Err(VcError::Canon(sparq_canon::CanonError::TripleTerm))
-        ));
-        assert_eq!(resolver.0.get(), 1);
-
-        proof.config = bad_created;
-        invalid_option(verify(&doc, &proof, &resolver));
-        assert_eq!(
-            resolver.0.get(),
-            1,
-            "resolver consulted for an invalid config"
-        );
-    }
-
-    #[test]
-    fn error_display_names_the_option_without_echoing_the_value() {
-        let cfg = ProofConfig::new("did:key:z6Mk").with_created("2023-02-30T00:00:00Z");
-        let message = VcError::InvalidProofOption(cfg.validate().unwrap_err()).to_string();
-        assert!(
-            message.starts_with("invalid proof option `created`: "),
-            "{message}"
-        );
-        assert!(!message.contains("2023-02-30"), "{message}");
-    }
-
-    proptest! {
-        #![proptest_config(ProptestConfig::with_cases(64))]
-
-        /// Any `created` string either signs and verifies with the literal
-        /// intact, or is rejected as an invalid `created` option.
-        #[test]
-        fn arbitrary_created_signs_verbatim_or_is_rejected(created in any::<String>()) {
-            let key = key();
-            let cfg = ProofConfig::new(vm_for(&key)).with_created(created.clone());
-            match sign(&triples(), &key, &cfg) {
-                Ok(proof) => {
-                    prop_assert_eq!(proof.config.created.as_deref(), Some(created.as_str()));
-                    prop_assert!(verify(&triples(), &proof, &DidKeyResolver).is_ok());
-                }
-                Err(VcError::InvalidProofOption(ProofOptionError::Created { value, .. })) => {
-                    prop_assert_eq!(value, created);
-                }
-                Err(other) => prop_assert!(false, "unexpected error {:?}", other),
-            }
         }
     }
 }

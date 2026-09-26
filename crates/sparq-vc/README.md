@@ -18,8 +18,8 @@ verify(&triples, &proof, &DidKeyResolver)?;
 ## ✨ Features
 
 - **Status:** research-grade, not externally audited; only a typed subset of proof options is supported.
-- A passing `verify` shows integrity under the resolved key — **not** issuer key authorization,
-  freshness, credential status, confidentiality or selective disclosure. Those checks are the caller's.
+- A passing `verify` shows integrity under the resolved key — **not** issuer key authorization, freshness, credential status, confidentiality or selective disclosure. Those checks are the caller's.
+- **Breaking:** compact `proofPurpose` terms now hash as their VC v2 `@context` IRIs. Only `assertionMethod` proofs are unaffected; re-sign proofs made with the other four terms or an absolute-IRI purpose (no fallback).
 
 ## 📚 Learn more
 

@@ -64,13 +64,16 @@
 //!   [`verify`] and the graph wrappers run [`ProofConfig::validate`] before any
 //!   graph materialization, canonicalization, signing or DID resolution, failing
 //!   with [`VcError::InvalidProofOption`]: `verificationMethod` must be an
-//!   absolute IRI, `proofPurpose` one of [`SUPPORTED_PURPOSE_TERMS`] or an
-//!   absolute IRI (hashed verbatim), and `created` an XSD 1.1 `xsd:dateTime`
-//!   (hashed exactly as given). A config that passes and uses a compact purpose
-//!   term hashes exactly as before, so its signature bytes are unchanged.
-//!   **Incompatibility:** earlier releases appended *any* purpose to `sec:`, so
-//!   proofs they made with an absolute-IRI purpose no longer verify, and
-//!   other bare purpose terms are now rejected. This is lexical validation only.
+//!   absolute IRI, `proofPurpose` one of [`SUPPORTED_PURPOSE_TERMS`] (hashed as
+//!   the `@id` the VC v2 `@context` gives it) or an absolute IRI (hashed
+//!   verbatim), and `created` an XSD 1.1 `xsd:dateTime` (hashed exactly as
+//!   given). **Incompatibility:** earlier releases appended *any* purpose to
+//!   `sec:`. Only `assertionMethod` (the published vector's purpose) still hashes
+//!   the same, so its signature bytes are unchanged. Proofs they made with
+//!   `authentication`, `capabilityDelegation`, `capabilityInvocation` or
+//!   `keyAgreement` (which expand to `sec:…Method`) or with an absolute-IRI
+//!   purpose no longer verify and must be re-signed — there is no fallback.
+//!   Other bare purpose terms are now rejected. This is lexical validation only.
 //! - **Not checked by this signature-only API:** issuer/controller key
 //!   authorization, the expected purpose, `domain`, `challenge` or `created`
 //!   window, and credential status — enforce them on [`VerifiedProof::config`].

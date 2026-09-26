@@ -50,6 +50,9 @@
 //! canonicalization, signing, or DID resolution, failing with
 //! [`VcError::InvalidProofOption`]. See [`ProofOptionError`] and
 //! [`ProofConfig::validate`] for the exact contract and what it does not check.
+//! Compact `proofPurpose` terms hash as their VC v2 `@context` `@id`s. Only
+//! `assertionMethod` (the published vector's purpose) hashes as in earlier
+//! releases; proofs made with the other four compact terms must be re-signed.
 
 use oxrdf::{Literal, NamedNode, NamedOrBlankNode, Term, Triple};
 use sha2::{Digest as _, Sha256};
@@ -67,7 +70,7 @@ pub const PROOF_TYPE: &str = "DataIntegrityProof";
 pub const CRYPTOSUITE: &str = "eddsa-rdfc-2022";
 
 // The `https://w3id.org/security#` vocabulary terms the proof config RDF uses.
-pub(crate) const SEC: &str = "https://w3id.org/security#";
+const SEC: &str = "https://w3id.org/security#";
 const XSD_DATETIME: &str = "http://www.w3.org/2001/XMLSchema#dateTime";
 const RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
 // [OPUS-5.5] The Data Integrity `@context` maps `created` to Dublin Core, not
@@ -130,10 +133,12 @@ pub struct ProofConfig {
     pub verification_method: String,
     /// The proof purpose (`sec:proofPurpose`). Defaults to `assertionMethod`.
     ///
-    /// Either one of the compact terms in [`SUPPORTED_PURPOSE_TERMS`] (hashed as
-    /// `https://w3id.org/security#<term>`) or, if the value contains `:`, an
-    /// absolute IRI hashed verbatim. Other bare terms are rejected; compact IRIs
-    /// such as `sec:assertionMethod` are not expanded.
+    /// Either one of the compact terms in [`SUPPORTED_PURPOSE_TERMS`], hashed as
+    /// the `@id` the VC v2 `@context` gives it (`authentication` becomes
+    /// `https://w3id.org/security#authenticationMethod`; only `assertionMethod`
+    /// is `sec:` plus the term), or, if the value contains `:`, an absolute IRI
+    /// hashed verbatim. Other bare terms are rejected; compact IRIs such as
+    /// `sec:assertionMethod` are not expanded.
     ///
     /// [`SUPPORTED_PURPOSE_TERMS`]: crate::SUPPORTED_PURPOSE_TERMS
     pub proof_purpose: String,
@@ -504,8 +509,8 @@ fn proof_config_triples(checked: &CheckedProofConfig<'_>) -> Vec<Triple> {
             pred("verificationMethod"),
             Term::NamedNode(checked.verification_method.clone()),
         ),
-        // sec:proofPurpose <iri> (a supported term under sec:, or a verbatim
-        // absolute IRI — see `proof_options`)
+        // sec:proofPurpose <iri> (a supported term's VC v2 `@context` `@id`, or
+        // a verbatim absolute IRI — see `proof_options`)
         Triple::new(
             subject(),
             pred("proofPurpose"),
@@ -676,6 +681,30 @@ mod tests {
         ));
     }
 
+    /// The published vector's `verificationMethod`.
+    const W3C_VM: &str = "did:key:z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2\
+                          #z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2";
+    /// The published vector's `created`.
+    const W3C_CREATED: &str = "2023-02-24T23:36:38Z";
+    /// The published canonical proof configuration (Example 12).
+    const W3C_NQUADS: &str = concat!(
+        "_:c14n0 <http://purl.org/dc/terms/created> \"2023-02-24T23:36:38Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> .\n",
+        "_:c14n0 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/security#DataIntegrityProof> .\n",
+        "_:c14n0 <https://w3id.org/security#cryptosuite> \"eddsa-rdfc-2022\"^^<https://w3id.org/security#cryptosuiteString> .\n",
+        "_:c14n0 <https://w3id.org/security#proofPurpose> <https://w3id.org/security#assertionMethod> .\n",
+        "_:c14n0 <https://w3id.org/security#verificationMethod> <did:key:z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2#z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2> .\n",
+    );
+    /// The published SHA-256 of [`W3C_NQUADS`] (Example 13).
+    const W3C_SHA256: &str = "bea7b7acfbad0126b135104024a5f1733e705108f42d59668b05c0c50004c6b0";
+
+    /// The canonical N-Quads the validated builder produces for `cfg`.
+    fn canonical_proof_config(cfg: &ProofConfig) -> String {
+        let checked = proof_options::check(cfg).unwrap();
+        sparq_canon::canonicalize_triples(&proof_config_triples(&checked))
+            .unwrap()
+            .to_nquads()
+    }
+
     /// [OPUS-5.5] zkp-14.2: the proof-config RDF mapping reproduces the W3C
     /// vc-di-eddsa `eddsa-rdfc-2022` test vector byte-for-byte — canonical
     /// proof-config N-Quads (Example 12) and their published SHA-256 (Example 13).
@@ -684,19 +713,7 @@ mod tests {
     /// plain `cryptosuite` literal.
     #[test]
     fn proof_config_matches_w3c_eddsa_rdfc_2022_vector() {
-        const VM: &str = "did:key:z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2\
-                          #z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2";
-        const EXPECTED_NQUADS: &str = concat!(
-            "_:c14n0 <http://purl.org/dc/terms/created> \"2023-02-24T23:36:38Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> .\n",
-            "_:c14n0 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/security#DataIntegrityProof> .\n",
-            "_:c14n0 <https://w3id.org/security#cryptosuite> \"eddsa-rdfc-2022\"^^<https://w3id.org/security#cryptosuiteString> .\n",
-            "_:c14n0 <https://w3id.org/security#proofPurpose> <https://w3id.org/security#assertionMethod> .\n",
-            "_:c14n0 <https://w3id.org/security#verificationMethod> <did:key:z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2#z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2> .\n",
-        );
-        const EXPECTED_SHA256: &str =
-            "bea7b7acfbad0126b135104024a5f1733e705108f42d59668b05c0c50004c6b0";
-
-        let cfg = ProofConfig::new(VM).with_created("2023-02-24T23:36:38Z");
+        let cfg = ProofConfig::new(W3C_VM).with_created(W3C_CREATED);
         // [OPUS-5.5] zkp-14.3: the published options pass validation, and the
         // expanded `sec:assertionMethod` IRI hashes to the same published digest,
         // so the published proofValue verifies under either spelling.
@@ -705,14 +722,66 @@ mod tests {
             ..cfg.clone()
         };
         for cfg in [&cfg, &expanded] {
-            let checked = proof_options::check(cfg).unwrap();
-            let canon = sparq_canon::canonicalize_triples(&proof_config_triples(&checked)).unwrap();
-            let nquads = canon.to_nquads();
-            assert_eq!(nquads, EXPECTED_NQUADS);
+            let nquads = canonical_proof_config(cfg);
+            assert_eq!(nquads, W3C_NQUADS);
             assert_eq!(
                 hex::encode(<Sha256 as sha2::Digest>::digest(nquads.as_bytes())),
-                EXPECTED_SHA256
+                W3C_SHA256
             );
+        }
+    }
+
+    /// [OPUS-5.5] Each compact purpose canonicalizes to the `@id` the VC v2
+    /// `@context` (<https://www.w3.org/ns/credentials/v2>, `proofPurpose` scoped
+    /// context, retrieved 2026-09-26) gives it. The purpose lines are written out
+    /// from that primary source, not from the production lookup. Only the
+    /// `assertionMethod` row is a published W3C vector; the other four are this
+    /// crate's own regressions, not published vectors.
+    #[test]
+    fn compact_purposes_canonicalize_to_w3c_v2_context_ids() {
+        const PUBLISHED_PURPOSE_LINE: &str = "_:c14n0 <https://w3id.org/security#proofPurpose> <https://w3id.org/security#assertionMethod> .\n";
+        const PURPOSE_LINES: [(&str, &str); 5] = [
+            (
+                "assertionMethod",
+                "_:c14n0 <https://w3id.org/security#proofPurpose> <https://w3id.org/security#assertionMethod> .\n",
+            ),
+            (
+                "authentication",
+                "_:c14n0 <https://w3id.org/security#proofPurpose> <https://w3id.org/security#authenticationMethod> .\n",
+            ),
+            (
+                "capabilityDelegation",
+                "_:c14n0 <https://w3id.org/security#proofPurpose> <https://w3id.org/security#capabilityDelegationMethod> .\n",
+            ),
+            (
+                "capabilityInvocation",
+                "_:c14n0 <https://w3id.org/security#proofPurpose> <https://w3id.org/security#capabilityInvocationMethod> .\n",
+            ),
+            (
+                "keyAgreement",
+                "_:c14n0 <https://w3id.org/security#proofPurpose> <https://w3id.org/security#keyAgreementMethod> .\n",
+            ),
+        ];
+        assert!(W3C_NQUADS.contains(PUBLISHED_PURPOSE_LINE));
+
+        for (term, line) in PURPOSE_LINES {
+            let cfg = ProofConfig {
+                proof_purpose: term.to_string(),
+                ..ProofConfig::new(W3C_VM).with_created(W3C_CREATED)
+            };
+            // Only the purpose object differs, so the canonical line order is fixed.
+            let expected = W3C_NQUADS.replace(PUBLISHED_PURPOSE_LINE, line);
+            let nquads = canonical_proof_config(&cfg);
+            assert_eq!(nquads, expected, "{term}");
+
+            let digest = hex::encode(<Sha256 as sha2::Digest>::digest(nquads.as_bytes()));
+            if term == "assertionMethod" {
+                // The published vector is still reproduced byte-for-byte.
+                assert_eq!(nquads, W3C_NQUADS);
+                assert_eq!(digest, W3C_SHA256);
+            } else {
+                assert_ne!(digest, W3C_SHA256, "{term}");
+            }
         }
     }
 
@@ -768,11 +837,19 @@ mod tests {
         t
     }
 
-    /// [OPUS-5.5] zkp-14.3: for every config that was already valid, the validated
-    /// builder hashes exactly what the unchecked one did, so deterministic Ed25519
-    /// produces byte-identical signatures for existing valid inputs.
+    /// Canonical N-Quads of the pre-zkp-14.3 unchecked builder for `cfg`.
+    fn legacy_canonical_proof_config(cfg: &ProofConfig) -> String {
+        sparq_canon::canonicalize_triples(&legacy_proof_config_triples(cfg))
+            .unwrap()
+            .to_nquads()
+    }
+
+    /// [OPUS-5.5] zkp-14.3: for valid `assertionMethod` configs — the only purpose
+    /// the old blanket `sec:<term>` mapping got right — the validated builder
+    /// hashes exactly what the unchecked one did, so deterministic Ed25519
+    /// produces byte-identical signatures for those existing inputs.
     #[test]
-    fn validated_builder_matches_legacy_mapping_for_valid_configs() {
+    fn validated_builder_matches_legacy_mapping_for_assertion_method_only() {
         let key = SigningKey::from_seed(&[8u8; 32]);
         let vm = vm_for(&key);
         let configs = [
@@ -782,20 +859,54 @@ mod tests {
                 .with_created("2026-06-22T12:00:00.250+05:30")
                 .with_domain("vc.example")
                 .with_challenge("nonce-A"),
-            ProofConfig {
-                proof_purpose: "authentication".to_string(),
-                ..ProofConfig::new(vm.clone())
-            },
-            ProofConfig {
-                proof_purpose: "capabilityDelegation".to_string(),
-                ..ProofConfig::new("https://issuer.example/keys/1")
-            },
+            ProofConfig::new("https://issuer.example/keys/1"),
         ];
         for cfg in &configs {
-            let checked = proof_options::check(cfg).unwrap();
-            let new = sparq_canon::canonicalize_triples(&proof_config_triples(&checked)).unwrap();
-            let old = sparq_canon::canonicalize_triples(&legacy_proof_config_triples(cfg)).unwrap();
-            assert_eq!(new.to_nquads(), old.to_nquads(), "{cfg:?}");
+            assert_eq!(cfg.proof_purpose, "assertionMethod");
+            assert_eq!(
+                canonical_proof_config(cfg),
+                legacy_canonical_proof_config(cfg),
+                "{cfg:?}"
+            );
+        }
+    }
+
+    /// [OPUS-5.5] The other four compact purposes were hashed as `sec:<term>`,
+    /// which is not their VC v2 `@context` `@id`. The corrected mapping must
+    /// differ from that legacy output, so proofs signed with it must be re-signed.
+    #[test]
+    fn validated_builder_differs_from_legacy_mapping_for_other_compact_purposes() {
+        for (term, wrong, right) in [
+            (
+                "authentication",
+                "<https://w3id.org/security#authentication>",
+                "<https://w3id.org/security#authenticationMethod>",
+            ),
+            (
+                "capabilityDelegation",
+                "<https://w3id.org/security#capabilityDelegation>",
+                "<https://w3id.org/security#capabilityDelegationMethod>",
+            ),
+            (
+                "capabilityInvocation",
+                "<https://w3id.org/security#capabilityInvocation>",
+                "<https://w3id.org/security#capabilityInvocationMethod>",
+            ),
+            (
+                "keyAgreement",
+                "<https://w3id.org/security#keyAgreement>",
+                "<https://w3id.org/security#keyAgreementMethod>",
+            ),
+        ] {
+            let cfg = ProofConfig {
+                proof_purpose: term.to_string(),
+                ..ProofConfig::new(W3C_VM).with_created(W3C_CREATED)
+            };
+            let new = canonical_proof_config(&cfg);
+            let old = legacy_canonical_proof_config(&cfg);
+            assert_ne!(new, old, "{term}");
+            assert!(old.contains(wrong) && !old.contains(right), "{term}: {old}");
+            assert!(new.contains(right) && !new.contains(wrong), "{term}: {new}");
         }
     }
 

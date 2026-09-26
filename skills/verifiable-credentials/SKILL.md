@@ -147,12 +147,26 @@ config first, per the spec). Consequences you can rely on:
 signing or DID resolution, and fail with `VcError::InvalidProofOption(ProofOptionError)`:
 
 - **`verification_method`** — must be an absolute IRI (oxrdf/RFC 3987); hashed verbatim.
-- **`proof_purpose`** — one of `SUPPORTED_PURPOSE_TERMS` (`assertionMethod`,
-  `authentication`, `capabilityInvocation`, `capabilityDelegation`, `keyAgreement`),
-  hashed as `https://w3id.org/security#<term>`; or, if it contains `:`, an absolute
-  IRI hashed verbatim (never appended to `sec:`). Other bare terms are rejected;
-  compact IRIs like `sec:assertionMethod` are not expanded — pass the full IRI.
-  Proofs that earlier releases made with an absolute-IRI purpose no longer verify.
+- **`proof_purpose`** — one of `SUPPORTED_PURPOSE_TERMS`, hashed as the `@id` the
+  `proofPurpose` scoped context of the [VC v2 `@context`](https://www.w3.org/ns/credentials/v2)
+  gives it; or, if it contains `:`, an absolute IRI hashed verbatim (never appended
+  to `sec:`). Other bare terms are rejected; compact IRIs like `sec:assertionMethod`
+  are not expanded — pass the full IRI from this table, which hashes like its term:
+
+  | Term | Hashed IRI (`https://w3id.org/security#…`) |
+  |---|---|
+  | `assertionMethod` | `assertionMethod` |
+  | `authentication` | `authenticationMethod` |
+  | `capabilityDelegation` | `capabilityDelegationMethod` |
+  | `capabilityInvocation` | `capabilityInvocationMethod` |
+  | `keyAgreement` | `keyAgreementMethod` |
+
+  **Breaking:** earlier releases hashed every term as `sec:<term>`. Only
+  `assertionMethod` (the published W3C vector's purpose) is unaffected. Proofs made
+  with the other four compact terms, or with an absolute-IRI purpose, no longer
+  verify — no fallback; re-sign them. Only the `assertionMethod` configuration is
+  checked against a published W3C vector; the other four rows are unit-tested
+  against the `@context` text, not against published vectors.
 - **`created`** — an XSD 1.1 `xsd:dateTime` (vc-di-eddsa §3.3.5 requires rejecting
   invalid values): year `0000` (leap) and negative years, `24:00:00` with a zero
   fraction, any number of fraction digits, optional timezone within `±14:00`, real
