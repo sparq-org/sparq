@@ -25,6 +25,25 @@
 //! configuration is supplied as a typed [`ProofConfig`] (not extracted from a
 //! JSON-LD `proof` node), and its canonical RDF form uses the standard
 //! `https://w3id.org/security#` vocabulary.
+//!
+//! # Proof-configuration RDF mapping
+//!
+//! [OPUS-5.5] zkp-14.2: the typed [`ProofConfig`] maps to the same RDF the W3C
+//! vc-di-eddsa test vectors canonicalize (<https://www.w3.org/TR/vc-di-eddsa/#test-vectors>,
+//! `eddsa-rdfc-2022` representation): `created` is
+//! `<http://purl.org/dc/terms/created>` typed `xsd:dateTime`, and `cryptosuite`
+//! is a literal typed `<https://w3id.org/security#cryptosuiteString>`. The
+//! published proof-configuration hash and `proofValue` are regression-tested.
+//!
+//! **Incompatibility:** earlier releases used `sec:created` and a plain
+//! `cryptosuite` literal. Proofs produced by that mapping do **not** verify
+//! under this one, and there is deliberately no legacy fallback — re-sign them.
+//!
+//! Only the typed subset `ProofConfig` carries is represented (type,
+//! cryptosuite, verificationMethod, proofPurpose, created, domain, challenge);
+//! any other proof option or `@context` a JSON-LD proof may carry is not
+//! preserved. Field values (the `created` lexical form, IRIs, purpose) are not
+//! fully validated here.
 
 use oxrdf::{Literal, NamedNode, NamedOrBlankNode, Term, Triple};
 use sha2::{Digest as _, Sha256};
@@ -44,6 +63,12 @@ pub const CRYPTOSUITE: &str = "eddsa-rdfc-2022";
 const SEC: &str = "https://w3id.org/security#";
 const XSD_DATETIME: &str = "http://www.w3.org/2001/XMLSchema#dateTime";
 const RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
+// [OPUS-5.5] The Data Integrity `@context` maps `created` to Dublin Core, not
+// `sec:created`. Changing this breaks every existing proof and the W3C vectors.
+const DCTERMS_CREATED: &str = "http://purl.org/dc/terms/created";
+// [OPUS-5.5] Datatype of the `cryptosuite` literal in the Data Integrity
+// `@context`. Changing it breaks every existing proof and the W3C vectors.
+const CRYPTOSUITE_STRING: &str = "https://w3id.org/security#cryptosuiteString";
 
 /// A signing key — a vetted Ed25519 (RFC 8032) keypair.
 ///
@@ -93,7 +118,7 @@ pub struct ProofConfig {
     pub verification_method: String,
     /// The proof purpose (`sec:proofPurpose`). Defaults to `assertionMethod`.
     pub proof_purpose: String,
-    /// The proof creation time, an `xsd:dateTime` string (`sec:created`). Optional.
+    /// The proof creation time, an `xsd:dateTime` string (`dcterms:created`). Optional.
     pub created: Option<String>,
     /// An optional domain the proof is bound to (`sec:domain`).
     pub domain: Option<String>,
@@ -323,7 +348,9 @@ fn hash_data(triples: &[Triple], config: &ProofConfig) -> Result<Vec<u8>, VcErro
 /// Build the RDF triples representing the proof configuration, over a single fixed
 /// blank-node subject (`_:proof`). RDFC-1.0 relabels the blank node deterministically,
 /// so the canonical form depends only on the field VALUES — exactly the binding we
-/// want. Uses the standard `https://w3id.org/security#` vocabulary.
+/// want. Uses the standard `https://w3id.org/security#` vocabulary, with
+/// `dcterms:created` and a `sec:cryptosuiteString`-typed cryptosuite (see the
+/// module-level mapping notes).
 fn proof_config_triples(config: &ProofConfig) -> Vec<Triple> {
     let subject = || NamedOrBlankNode::BlankNode(oxrdf::BlankNode::new_unchecked("proof"));
     let pred = |local: &str| NamedNode::new_unchecked(format!("{}{}", SEC, local));
@@ -337,11 +364,14 @@ fn proof_config_triples(config: &ProofConfig) -> Vec<Triple> {
             NamedNode::new_unchecked(RDF_TYPE),
             Term::NamedNode(pred(PROOF_TYPE)),
         ),
-        // sec:cryptosuite "eddsa-rdfc-2022"
+        // sec:cryptosuite "eddsa-rdfc-2022"^^sec:cryptosuiteString
         Triple::new(
             subject(),
             pred("cryptosuite"),
-            Term::Literal(Literal::new_simple_literal(CRYPTOSUITE)),
+            Term::Literal(Literal::new_typed_literal(
+                CRYPTOSUITE,
+                NamedNode::new_unchecked(CRYPTOSUITE_STRING),
+            )),
         ),
         // sec:verificationMethod <iri>
         Triple::new(
@@ -357,9 +387,10 @@ fn proof_config_triples(config: &ProofConfig) -> Vec<Triple> {
         ),
     ];
     if let Some(created) = &config.created {
+        // dcterms:created "…"^^xsd:dateTime
         t.push(Triple::new(
             subject(),
-            pred("created"),
+            NamedNode::new_unchecked(DCTERMS_CREATED),
             Term::Literal(Literal::new_typed_literal(
                 created.clone(),
                 NamedNode::new_unchecked(XSD_DATETIME),
@@ -517,5 +548,35 @@ mod tests {
             verify(&graph(), &proof, &DidKeyResolver),
             Err(VcError::UnsupportedProof(_))
         ));
+    }
+
+    /// [OPUS-5.5] zkp-14.2: the proof-config RDF mapping reproduces the W3C
+    /// vc-di-eddsa `eddsa-rdfc-2022` test vector byte-for-byte — canonical
+    /// proof-config N-Quads (Example 12) and their published SHA-256 (Example 13).
+    /// Source: <https://www.w3.org/TR/vc-di-eddsa/#test-vectors> (Recommendation,
+    /// 15 May 2025, Appendix B.1). Guards against reverting to `sec:created` or a
+    /// plain `cryptosuite` literal.
+    #[test]
+    fn proof_config_matches_w3c_eddsa_rdfc_2022_vector() {
+        const VM: &str = "did:key:z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2\
+                          #z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2";
+        const EXPECTED_NQUADS: &str = concat!(
+            "_:c14n0 <http://purl.org/dc/terms/created> \"2023-02-24T23:36:38Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> .\n",
+            "_:c14n0 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/security#DataIntegrityProof> .\n",
+            "_:c14n0 <https://w3id.org/security#cryptosuite> \"eddsa-rdfc-2022\"^^<https://w3id.org/security#cryptosuiteString> .\n",
+            "_:c14n0 <https://w3id.org/security#proofPurpose> <https://w3id.org/security#assertionMethod> .\n",
+            "_:c14n0 <https://w3id.org/security#verificationMethod> <did:key:z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2#z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2> .\n",
+        );
+        const EXPECTED_SHA256: &str =
+            "bea7b7acfbad0126b135104024a5f1733e705108f42d59668b05c0c50004c6b0";
+
+        let cfg = ProofConfig::new(VM).with_created("2023-02-24T23:36:38Z");
+        let canon = sparq_canon::canonicalize_triples(&proof_config_triples(&cfg)).unwrap();
+        let nquads = canon.to_nquads();
+        assert_eq!(nquads, EXPECTED_NQUADS);
+        assert_eq!(
+            hex::encode(<Sha256 as sha2::Digest>::digest(nquads.as_bytes())),
+            EXPECTED_SHA256
+        );
     }
 }
