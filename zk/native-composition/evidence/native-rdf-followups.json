@@ -1,0 +1,246 @@
+{
+  "schema_version": 1,
+  "authored_by": "GPT-6",
+  "source_head": "e12c94ca7b7d8e71cb05b6ccacc0a235a2cb6d64",
+  "base": "c7e118165c815c74d53636337296e7d634edf37c",
+  "status": "experimental_not_externally_audited_dependency_gates_failed",
+  "publication_ready": false,
+  "history": [
+    {
+      "head": "e45ac078925e9b5a61773122a2053f39cb514d0c",
+      "scope": "Native Ark0.4 subscriber compatibility patch and exact upstream reconstruction; incidental oxrdf rand edge subsequently corrected."
+    },
+    {
+      "head": "93d2837523037901a5f263ca26905c4037b3026a",
+      "scope": "Restores original oxrdf 0.3.3 rand 0.8.8 dependency edge; fresh actual native tests, CLI and Clippy."
+    },
+    {
+      "head": "e0f169d549f01deae406d9c0413ec617d7b1a347",
+      "scope": "Tests/docs closure; historical honest unused-role negative incorrectly treated a satisfiable overlapping allocation as impossible. Not final approval."
+    },
+    {
+      "head": "e12c94ca7b7d8e71cb05b6ccacc0a235a2cb6d64",
+      "scope": "Bounded covering allocator; preserves overlap as genuine positive, uses unrelated second credential for negative; verifier relation/wire unchanged."
+    }
+  ],
+  "source_files": {
+    ".github/workflows/zk-native-composition.yml": "0a4a6027190635d1c341da3937eaab9ebd363bcea1dc72e009e1d96081318170",
+    "skills/zk-query-proofs/SKILL.md": "7a2c70a2030acdce0c7a225b597347a308a72b33141fc8c3f8bd81d0bfbf05ab",
+    "skills/zk-query-proofs/references/native-rdf.md": "67ffcf459f976ef9279873400e90896425fd3250ab89bee49402eb3cc997df0f",
+    "zk/native-composition/Cargo.lock": "2a3fcb0b00d92f16c3969f76d643918754fca2c5a3e5aacf6d4fed43f4605a89",
+    "zk/native-composition/Cargo.toml": "76b01a949294d9d018f76888e52ea7df40d390a29522c1922f66562739e707b6",
+    "zk/native-composition/src/rdf.rs": "de0176547e09f302f3a1fe6b38183147dad187cd1b521bb871f0c9bac476fb99",
+    "zk/native-composition/src/rdf/tests.rs": "0928127aee4b1d9c562225856d7b778652f93b2a86cd5a55c76b479e5f8fa9fa",
+    "zk/native-composition/vendor-support/README.md": "589b18ffb542193e08824ddcf66a99ec0fbdbeb5ebc0653a15fedfd319d7632f",
+    "zk/native-composition/vendor-support/UPSTREAM.json": "4ea4efd20c3e9f33ebadbecc9ae2106bc45457c17bbba2c37005740627ff060f",
+    "zk/native-composition/vendor-support/ark-relations.patch": "92809ba658fd0efbb280e24871650d11d276d5ed264a07579942ee572ab0b2bf",
+    "zk/native-composition/vendor-support/constraint_smoke.rs": "4f5d9cea294a3aaeab1e19a5641f85cdf2b8556293c75428f90b517bd0150e42",
+    "zk/native-composition/vendor-support/test_verify.py": "f8a45616abf409d37541d65daefb753f5ba625cd0830bb19178c39993a2994dd",
+    "zk/native-composition/vendor-support/verify.py": "17cf0739ed0b0497fe2229c4eb34b038d1b76d40c3d2d3bc27840c2a75e89a0c",
+    "zk/native-composition/vendor/ark-relations-0.4.0/.cargo_vcs_info.json": "661488233f25acd673cde08cfb96ede0abd9ff3ccb04c29beb4663d6060dadeb",
+    "zk/native-composition/vendor/ark-relations-0.4.0/Cargo.toml": "b01295dc2cc80ed2fdbd21d21006ee1eb0c6f553cffedbbe616e671341e749a4",
+    "zk/native-composition/vendor/ark-relations-0.4.0/Cargo.toml.orig": "6ef59888ca29032be4112801970fba27e9c3bbad03acbde878b383d5667ec6f6",
+    "zk/native-composition/vendor/ark-relations-0.4.0/LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+    "zk/native-composition/vendor/ark-relations-0.4.0/LICENSE-MIT": "8f71659370c5268d9a1dc962a46232540e8fca63462586d8efaa95aab492a208",
+    "zk/native-composition/vendor/ark-relations-0.4.0/src/lib.rs": "a15c08f7ccd3a54c96d30600252c0ed0d9532d705dcf1d4fd856bc26df6f9211",
+    "zk/native-composition/vendor/ark-relations-0.4.0/src/r1cs/constraint_system.rs": "f7276fe91fdda92076ba786b6e984b87ffa83068d6b97aff118b6c5f5a92d197",
+    "zk/native-composition/vendor/ark-relations-0.4.0/src/r1cs/error.rs": "a5c680f162cffce9e060473c0b78ae5eb3de981dd83d3ca2e485a67b6c0924e3",
+    "zk/native-composition/vendor/ark-relations-0.4.0/src/r1cs/impl_lc.rs": "2e995941280e184469364c66a0178b67a6f36fdaffec07af09a8aaf404c954b3",
+    "zk/native-composition/vendor/ark-relations-0.4.0/src/r1cs/mod.rs": "9ea1937bfcc567aa952e96a9c31cebd53f80f5d8629c0e58ce4047041e5d5a6c",
+    "zk/native-composition/vendor/ark-relations-0.4.0/src/r1cs/trace.rs": "dae08a5c3ceb817b5db84f2992bc98a3a2a20533d4c0f7160635de1d0ce871bc"
+  },
+  "dependency_patch": {
+    "upstream": "ark-relations 0.4.0",
+    "registry_archive_sha256": "00796b6efc05a3f48225e59cb6a2cda78881e7c390872d5786aaf112f31fb4f0",
+    "provenance": "../vendor-support/UPSTREAM.json",
+    "patch_sha256": "92809ba658fd0efbb280e24871650d11d276d5ed264a07579942ee572ab0b2bf",
+    "changes": [
+      "Optional tracing-subscriber dependency 0.2 to 0.3.23 with default features false.",
+      "Empty instrumentation callback renamed new_span to on_new_span; all other Rust bytes remain original."
+    ],
+    "manifest_only_compile": "Original callback reproduced E0407 under updated subscriber; no claim of manifest-only compatibility.",
+    "actual_compatibility": {
+      "default_off_tuple_functions": 2,
+      "ConstraintLayer_registry_tests": 2,
+      "no_default_ark_compile": true,
+      "provenance_controls": 6,
+      "wrong_resolved_path_mutation_killed": true
+    }
+  },
+  "corrected_lock_cli": {
+    "source_head": "93d2837523037901a5f263ca26905c4037b3026a",
+    "lock_sha256": "2a3fcb0b00d92f16c3969f76d643918754fca2c5a3e5aacf6d4fed43f4605a89",
+    "artifact": "native-rdf-followup-cli-93d.json",
+    "sha256": "46726c70c090b26cebfa211b72910baa8bef860c23a8aecf8d9ff04c8b9bd533",
+    "actual": {
+      "positive_verification": true,
+      "proof_bytes": 871,
+      "public_transcript_json_bytes": 1099,
+      "typed_rejections": {
+        "issuer": "Verification",
+        "nonce": "Verification",
+        "query": "Verification",
+        "replay": "Replay",
+        "result": "Verification",
+        "revoked": "Status",
+        "status_epoch": "Verification"
+      },
+      "canonical_timing": false,
+      "build_attestation": false
+    },
+    "later_allocator_not_attested_by_this_cli_sample": true
+  },
+  "final_allocator": {
+    "source_head": "e12c94ca7b7d8e71cb05b6ccacc0a235a2cb6d64",
+    "oracle": {
+      "independent_algorithm": "recursive Cartesian enumeration",
+      "roles": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "occurrences": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "exhaustive_matrices": 74958,
+      "max_role_matrices": 65536,
+      "explicit_cases": [
+        "four-role reassignment",
+        "impossible coverage",
+        "duplicate occurrences/slots",
+        "64 occurrences accepted",
+        "65 occurrences rejected",
+        "64 occurrences impossible"
+      ]
+    },
+    "validation": {
+      "restored_full_tests": {
+        "rdf_functions": 20,
+        "legacy_tuple_functions": 2,
+        "all_passed": true,
+        "note": "before test-only expansion from 3x3 to 4x4 oracle; no runtime change afterward"
+      },
+      "final_four_role_oracle": "passed",
+      "final_clippy": "all features/all targets -D warnings passed",
+      "final_preflight": "passed",
+      "markdown": "503 files, zero errors; docs unchanged after run",
+      "mutations": {
+        "greedy": "oracle and genuine overlap proof tests failed",
+        "deleted_verifier_role_guard": "genuine weaker-proof rejection test failed; honest construction still rejected through allocator",
+        "restored": "full suite passed"
+      }
+    },
+    "runtime_verifier_unchanged": true,
+    "witness_selection_changed": true,
+    "source_only_review": "GPT-6 independent e12 approval, not external cryptographic audit"
+  },
+  "reviews": [
+    {
+      "head": "c44611f8867db66179897354e5bb9d1069816bc2",
+      "base": "713025dc0fcdcbdcd070ba4dcbde524be50ba055",
+      "actual_model": "claude-fable-5-1",
+      "cli_version": "2.1.269",
+      "result_sha256": "9ac8fb2935055f807153b200e65c9347f674d5d95210ef1e6c39250f97a0e4a9",
+      "verdict": "APPROVE",
+      "scope": "Fresh Sept25 source-only review of original RDF source; does not review subsequent dependency/allocator changes."
+    },
+    {
+      "head": "e45ac078925e9b5a61773122a2053f39cb514d0c",
+      "actual_model": "GPT-6",
+      "verdict": "APPROVE with nonblocking lock restoration",
+      "artifact_sha256": "c487bb36932204f42cf7db6538ea4fbc62311881a513fe286eb4f9d2c567d60e"
+    },
+    {
+      "head": "e0f169d549f01deae406d9c0413ec617d7b1a347",
+      "actual_model": "GPT-6",
+      "verdict": "REQUEST_CHANGES",
+      "artifact_sha256": "6ecbbf81e8b2a37b20bab7fbcad87d169c708fc156c8b0ccee9b5ee2799eac55",
+      "finding": "Valid overlapping credential allocation rejected by greedy construction; negative fixture incorrectly encoded it."
+    },
+    {
+      "head": "e12c94ca7b7d8e71cb05b6ccacc0a235a2cb6d64",
+      "actual_model": "GPT-6",
+      "verdict": "APPROVE",
+      "artifact_sha256": "18e971a9b9cc67e8d29f4d2de7769274a144f3518916d1699a83edd9e562c1b3",
+      "scope": "Focused allocator/source/evidence review; no reviewer builds or proof executions."
+    }
+  ],
+  "dependency_policy": {
+    "candidate_own_policy": {
+      "head": "e12c94ca7b7d8e71cb05b6ccacc0a235a2cb6d64",
+      "policy_ancestry": "foundation713; no reviewed2a policy inherited",
+      "lock_sha256": "2a3fcb0b00d92f16c3969f76d643918754fca2c5a3e5aacf6d4fed43f4605a89",
+      "store_sha256": {
+        "config.toml": "ec33417bbf5955eeeb3b409ecd0c6c469827d8e3eab9d8639803a3c92174aa2b",
+        "audits.toml": "2e40d301870e2f10b99d5e3bb61fcd4dccf20a08d11f6176741b1e7b7d30b0f1",
+        "imports.lock": "838f7043ef392dfad4c2416c9a5c25f760baf4d8b249d34ff6cfcf0dde53c781"
+      },
+      "vet": {
+        "exit": 255,
+        "missing_exact_version_units": 189,
+        "output_sha256": "9a8be8432a884da43375bba16a31c37df786d9ed4f51f16b5990ac14f1f810aa",
+        "local_ark_omitted_without_audit_as_crates_io": true
+      },
+      "deny": {
+        "configuration_sha256": "69f207b4ea62c73547bbb8ab1467e0bd041bd31fb9b007b440af042b485f8ac9",
+        "private_db_path_only_override_sha256": "2901826439ba54e1a91cdb368ebb2eab23dffd6b787a2544d0145f4e69efa640",
+        "integrity_exit": 4,
+        "license_errors": 14,
+        "license_names": [
+          "Apache-2.0 WITH LLVM-exception",
+          "0BSD",
+          "BSL-1.0"
+        ],
+        "advisory_exit": 1,
+        "maintenance_errors": 2,
+        "maintenance_packages": [
+          "derivative 2.2.0 / RUSTSEC-2024-0388",
+          "proc-macro-error2 2.0.1 / RUSTSEC-2026-0173"
+        ],
+        "integrity_output_sha256": "f8f88594d4bccbc66a07ba5c5d501101c8065c08186f221cb132a80449dba787",
+        "advisory_output_sha256": "38349ad354875718c8f4b8e43a3930241c954daa9cfd946c788485477964ad11"
+      },
+      "pass": false
+    },
+    "separate_uncommitted_proposal": {
+      "reviewed_policy_source_head": "2a67f00d60627100709304036d0a0a93c75a6d61",
+      "store_sha256": {
+        "config.toml": "9546f37103054391b2d717c11d5656923c18f173afdf9627d57a8e9c91a32b7e",
+        "audits.toml": "6ca257a1acb2313beb8706600bb82409cea84826c3390c9ade00800cb48275e6",
+        "imports.lock": "ebb5f99a4e981eede6073f05935b03765e73b268e3a8378a3c0fa89586f52764"
+      },
+      "corrected_lock_vet_gaps": 141,
+      "output_sha256": "b59651a8d89602a73241af68883fd70150cac7883914bc460b3d88715079f901",
+      "candidate_inherits_this_policy": false,
+      "local_ark_upstream_audit_obligation_explicit": true,
+      "pass": false
+    },
+    "new_policy_audits_exemptions_or_trust_applied": false
+  },
+  "evidence_hashes": {
+    "patch-checkpoint-e45.json": "efd2eb33f31fdc7c95f101019e5ee74b9c22717c826008908b15757ac1128972",
+    "patch-checkpoint-93d.json": "9b897e52e6d64bc13089edabda80cc24688052843978e15062ea835acffe33fb",
+    "review-closure-e0f169d.json": "77266411ba9388febc317ef836a1b28fb2d59fddb862ce73f8a16d6c3765596b",
+    "allocator-e12c94ca.json": "a2ac99e3642940b6d15a1948d3aa892e4b2f584c6bb5dcb59cf0a127b82a74a2",
+    "allocator-restored-full.txt": "f550007c881224dd64aac2aa131cb41215f4550a9aeb9b09f8eef532f799a79d",
+    "allocator-four-role-oracle.txt": "bb7d233bde15529fb8acc6389a9621b1b0e68cefe1d76a5be6656cadcdbc62f5",
+    "allocator-final-clippy.txt": "378b7aaf1d3d8b2af1e229b329625fd224b75aeae21e97f31cf672313c9f23db",
+    "allocator-final-preflight.txt": "ec7499eb7d18b61e2e363377efc3ad5196ff67c358407bba047b5bfcc66be080",
+    "allocator-markdown.txt": "912e4393f08cd448ae08b05c9c027efdae7bf64b7a4a7a3afbee84bf736e24f8",
+    "allocator-greedy-mutant.txt": "9deb100e42058e70e81ce47df1f6083cbfb0301d43e3e0972f8310b8b14dd1f1",
+    "allocator-verifier-guard-mutant.txt": "2dfb06fc4e256e48fe8d080bdbe2b80e41fe0552b5ee85c1cf58acbfc4cf0b3b",
+    "allocator-mutations.json": "db2cdc27e6b2d736e4763f0de7ec72c45aa549804959680e2b107a5abd5076da",
+    "advisory-refresh-invocation.json": "7d4aa57ec6e869bf8cb9eeb9f4b6c1804ad3d7e33791a6a81baab0c297752fed"
+  },
+  "limits": [
+    "No canonical timing or cryptographic audit.",
+    "Test function counts do not imply proof receipt counts.",
+    "Source review, author proof execution and dependency audit coverage are different claims.",
+    "No root/SDK policy or runtime change in this native successor."
+  ]
+}

@@ -12,6 +12,32 @@ RDF credential adapter, Sparq query verifier, or new cryptographic construction.
 It is a separate Cargo workspace. Its dependencies do not enter the ordinary
 Sparq build, the lean engine, or the WASM bundle. No existing verifier is changed.
 
+[GPT-6] The optional `native-rdf` feature adds a separate experimental
+[public RDF support API](../../skills/zk-query-proofs/references/native-rdf.md)
+and `native-rdf` executable. It authenticates public/result-inferable BGP triples
+and public status references with verifier-owned issuer policy; canonical signed
+slot indices are also disclosed. It uses no residual circuit and provides no
+hidden RDF predicate or Noir linkage. The tuple executable described below
+remains the default, with its original statement and unsupported cases.
+The separate `native-binding` feature enables the
+[finite binding-job adapter](../../skills/zk-query-proofs/references/native-binding-tests.md).
+It shares actual support preparation and uses the real native prover/verifier;
+honest support refusals, same-context weaker-proof verifier controls and the
+mandatory malicious-proof library tests are recorded separately.
+The RDF [local validation record](evidence/native-rdf-local-smoke.json) preserves
+the genuine sample and source hashes; its separate
+[dependency gate record](evidence/native-rdf-dependency-gates.json) retains the
+existing baseline failures. This source checkpoint does not claim clean dependency
+gates or readiness to merge.
+The [native follow-up record](evidence/native-rdf-followups.json) separates the
+dependency compatibility patch, corrected-lock CLI sample, role-covering
+allocator controls and their source reviews. Its own-policy failures and the
+separate uncommitted policy-inheritance comparison are both retained.
+The later [policy reconciliation](../../research/native-dependency-policy/README.md)
+applies the reviewed inheritance to this candidate and records its own frozen
+metadata checks. Native audit-coverage and maintenance failures remain explicit;
+the historical private-store results above are not substituted for these checks.
+
 The dedicated [native composition CI workflow](../../.github/workflows/zk-native-composition.yml)
 runs real release tests, scoped Clippy and the unsupported-Noir CLI check on pull
 requests and main-branch pushes touching this workspace or its Rust configuration.
