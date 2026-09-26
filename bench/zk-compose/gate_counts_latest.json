@@ -126,8 +126,48 @@
     },
     "result_v1_k1_n16_p3_r4_f2": {
       "circuit_size": 68963
+    },
+    "result_v2_k1_n16_p3_r4_f0_i0_d17": {
+      "circuit_size": 32836
+    },
+    "result_v2_k1_n16_p3_r4_f0_i0_d20": {
+      "circuit_size": 33071
+    },
+    "result_v2_k1_n16_p3_r4_f2_i64_d10": {
+      "circuit_size": 462049
+    },
+    "result_v2_k1_n16_p3_r4_f2_i64_d17": {
+      "circuit_size": 462597
+    },
+    "result_v2_k1_n16_p3_r4_f2_i64_d20": {
+      "circuit_size": 462832
+    },
+    "result_v2_k1_n16_p3_r4_f2_i8_d17": {
+      "circuit_size": 69619
+    },
+    "result_v2_k1_n16_p3_r4_f2_i8_d20": {
+      "circuit_size": 69854
+    },
+    "result_v2_k2_n16_p3_r4_f0_i0_d17": {
+      "circuit_size": 60197
+    },
+    "result_v2_k2_n16_p3_r4_f0_i0_d20": {
+      "circuit_size": 60667
+    },
+    "result_v2_k2_n16_p3_r4_f2_i64_d10": {
+      "circuit_size": 488858
+    },
+    "result_v2_k2_n16_p3_r4_f2_i64_d17": {
+      "circuit_size": 489954
+    },
+    "result_v2_k2_n16_p3_r4_f2_i64_d20": {
+      "circuit_size": 490424
+    },
+    "result_v2_k2_n16_p3_r4_f2_i8_d17": {
+      "circuit_size": 96979
+    },
+    "result_v2_k2_n16_p3_r4_f2_i8_d20": {
+      "circuit_size": 97449
     }
-  },
-  "result_members_measured_at": "2026-09-09",
-  "result_members_platform": "darwin arm64"
+  }
 }

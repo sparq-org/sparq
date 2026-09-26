@@ -355,6 +355,18 @@ jobs:
         run: |
           cargo test -p sparq-zk-compose -p sparq-zk -- --ignored --test-threads=1
 
+      # [GPT-6] Rebuild the immutable foundation separately from the PR candidate.
+      # This independently checks the provenance of all four legacy key goldens.
+      - name: Rebuild fixed foundation result keys independently
+        if: steps.changes.outputs.zk == 'true'
+        run: |
+          set -euo pipefail
+          baseline_dir="$(mktemp -d)"
+          trap 'rm -rf "$baseline_dir"' EXIT
+          git fetch --no-tags --depth=1 origin 713025dc0fcdcbdcd070ba4dcbde524be50ba055
+          git archive 713025dc0fcdcbdcd070ba4dcbde524be50ba055 zk/compose | tar -x -C "$baseline_dir"
+          python3 bench/zk-compose/scripts/verify_result_evidence.py --baseline-root "$baseline_dir"
+
       # [GPT-6] The additive result contract is default-off, so it needs explicit
       # feature coverage: real private-witness rejection, ZK proofs and ABI anchors.
       - name: Run selected-result private-witness and verifier tests (real bb)
@@ -363,3 +375,4 @@ jobs:
           cargo test -p sparq-zk-compose --features successful-results --lib result::tests -- --include-ignored --test-threads=1
           cd zk/compose
           nargo test --package sparq_zk_compose_core result::
+          nargo test --package sparq_zk_compose_core result_integer::
