@@ -1,9 +1,10 @@
 //! Verifier-owned requirements and deterministic, fail-closed admission (draft §5, §6.2).
 //!
 //! [`QueryRequirements`] is the negotiation subset of the draft §5.1 request:
-//! result, scope, policy, profile, resource and exact-method fields. It omits
-//! the query bytes, challenge, audience and validity window, which have no wire
-//! encoding yet and stay in the adapter's own request type.
+//! result, scope, policy, profile, resource and exact-method fields. The
+//! query text, challenge, audience, validity window, form, base IRI and
+//! DESCRIBE policy live in [`StoredRequest`](crate::StoredRequest), which
+//! wraps these requirements.
 //!
 //! [`admit`] is a pure function of the requirements, the descriptor a
 //! presentation selected and the local backend's [`Capabilities`]. It has no
@@ -62,20 +63,21 @@ pub struct RequirementsSpec {
 /// Validated, verifier-owned negotiation requirements.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct QueryRequirements {
-    contract: ResultContract,
-    mode: EvaluationMode,
-    authority: ScopeAuthority,
-    anchor: Option<Digest32>,
-    source_evidence: SourceEvidence,
-    status: StatusPolicy,
-    holder: HolderPolicy,
-    assembly: DatasetAssembly,
-    query_profile: QueryProfile,
-    accepted_suites: Vec<Identifier>,
-    accepted_mappings: Vec<Identifier>,
-    accepted_linking: Vec<Identifier>,
-    resources: ResourceBounds,
-    methods: Vec<MethodDescriptor>,
+    // `pub(crate)` only so the local encoder can destructure exhaustively.
+    pub(crate) contract: ResultContract,
+    pub(crate) mode: EvaluationMode,
+    pub(crate) authority: ScopeAuthority,
+    pub(crate) anchor: Option<Digest32>,
+    pub(crate) source_evidence: SourceEvidence,
+    pub(crate) status: StatusPolicy,
+    pub(crate) holder: HolderPolicy,
+    pub(crate) assembly: DatasetAssembly,
+    pub(crate) query_profile: QueryProfile,
+    pub(crate) accepted_suites: Vec<Identifier>,
+    pub(crate) accepted_mappings: Vec<Identifier>,
+    pub(crate) accepted_linking: Vec<Identifier>,
+    pub(crate) resources: ResourceBounds,
+    pub(crate) methods: Vec<MethodDescriptor>,
 }
 
 fn reject(class: FailureClass, phase: Phase, code: ErrorCode) -> ProtocolError {
@@ -175,6 +177,72 @@ impl QueryRequirements {
     #[must_use]
     pub fn anchor(&self) -> Option<&Digest32> {
         self.anchor.as_ref()
+    }
+
+    /// Returns the result contract.
+    #[must_use]
+    pub fn contract(&self) -> ResultContract {
+        self.contract
+    }
+
+    /// Returns the evaluation mode.
+    #[must_use]
+    pub fn mode(&self) -> EvaluationMode {
+        self.mode
+    }
+
+    /// Returns the scope authority.
+    #[must_use]
+    pub fn authority(&self) -> ScopeAuthority {
+        self.authority
+    }
+
+    /// Returns the source-evidence policy.
+    #[must_use]
+    pub fn source_evidence(&self) -> SourceEvidence {
+        self.source_evidence
+    }
+
+    /// Returns the status policy.
+    #[must_use]
+    pub fn status(&self) -> StatusPolicy {
+        self.status
+    }
+
+    /// Returns the holder policy.
+    #[must_use]
+    pub fn holder(&self) -> HolderPolicy {
+        self.holder
+    }
+
+    /// Returns the dataset assembly.
+    #[must_use]
+    pub fn assembly(&self) -> DatasetAssembly {
+        self.assembly
+    }
+
+    /// Returns the pinned dialect and admitted fragment.
+    #[must_use]
+    pub fn query_profile(&self) -> &QueryProfile {
+        &self.query_profile
+    }
+
+    /// Returns the accepted authenticity suites in stored order.
+    #[must_use]
+    pub fn accepted_suites(&self) -> &[Identifier] {
+        &self.accepted_suites
+    }
+
+    /// Returns the accepted mapping profiles in stored order.
+    #[must_use]
+    pub fn accepted_mappings(&self) -> &[Identifier] {
+        &self.accepted_mappings
+    }
+
+    /// Returns the accepted linking profiles in stored order.
+    #[must_use]
+    pub fn accepted_linking(&self) -> &[Identifier] {
+        &self.accepted_linking
     }
 
     fn matches(&self, tuple: &CapabilityTuple) -> bool {

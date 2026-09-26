@@ -3,16 +3,22 @@
 //! [OPUS-5.5] Experimental, unpublished, dependency-free contract layer for
 //! vcq draft 0 (`research/vc-query-protocol.md`, registry
 //! `research/vc-query-methods.json`). It contains shared types, the
-//! [`QueryMethod`] trait and deterministic, fail-closed capability negotiation.
-//! It contains no proof backend, no wire encoding, no canonicalization and no
-//! cryptography, and **it proves no cryptographic claim**. Nothing here is
-//! externally audited (sq-qhy4).
+//! [`QueryMethod`] trait, deterministic, fail-closed capability negotiation,
+//! a validated [`StoredRequest`], a named LOCAL structural byte encoding and
+//! a shared [`ChallengeStore`] contract. It contains no proof backend, no
+//! interoperable wire encoding or transport, no RDF or SPARQL
+//! canonicalization, no query parser and no cryptography or hash, and **it
+//! proves no cryptographic claim**. Nothing here is externally audited
+//! (sq-qhy4).
 //!
 //! # Mapping to the draft
 //!
 //! | Draft | Here |
 //! |---|---|
 //! | §5.1 request (negotiation subset) | [`RequirementsSpec`], [`QueryRequirements`] |
+//! | §5.1 request (stored subset) | [`StoredRequestSpec`], [`StoredRequest`], [`Challenge32`], [`BaseIri`], [`QueryForm`] |
+//! | §6.4 challenge consumption | [`ChallengeStore`], [`consume_challenge`] |
+//! | §7.2 (local stand-in only) | [`encode_stored_request`], [`encode_method_descriptor`] |
 //! | §5.2 result contracts and modes | [`ResultContract`], [`EvaluationMode`] |
 //! | §5.3 authority and source evidence | [`ScopeAuthority`], [`SourceEvidence`] |
 //! | §6.1 descriptor and capabilities | [`MethodDescriptor`], [`Capabilities`], [`CapabilityTuple`] |
@@ -22,9 +28,13 @@
 //! | §6.4 failures | [`ProtocolError`], [`FailureClass`], [`Phase`], [`ErrorCode`] |
 //! | §7.3 routes and enforcers | [`BindingRoute`], [`Enforcer`], [`Enforcement`] |
 //!
-//! The query bytes, base IRI, challenge, audience, validity window and status
-//! window of §5.1 are NOT modelled: they need the §7.2 wire profile, which
-//! does not exist. Adapters carry them in [`QueryMethod::Request`].
+//! [`StoredRequest`] models the query text, base IRI (shape only), original
+//! challenge, audience, validity window, form and DESCRIBE policy of §5.1. It
+//! is still a subset: issuer sets, status windows, trust-policy roots,
+//! disclosure policy, the rest of the evaluation context and graph-size bounds
+//! are not modelled, so not every credential policy is represented, and none
+//! is enforced here. The local encoding ([`LOCAL_ENCODING_PROFILE`]) is
+//! byte-exact over these typed values but is not the §7.2 wire profile.
 //!
 //! # Negotiation rules
 //!
@@ -47,9 +57,11 @@
 //!
 //! An [`Admission`] and a [`VerifiedClaim`] certify no cryptographic fact.
 //! A real adapter's `verify` must itself bind the request and result into the
-//! proved statement, check audience and validity against the stored request,
-//! use a named wire encoding and hash, atomically consume the challenge per
-//! its declared owner and policy, check issuer key authorization from verifier
+//! proved statement, check audience and validity against the [`StoredRequest`],
+//! name its hash over a named encoding, consume the ORIGINAL challenge once
+//! through the verifier's shared [`ChallengeStore`] per its declared owner and
+//! policy, check that the parsed query has the declared form and that the base
+//! IRI is a supported IRI, check issuer key authorization from verifier
 //! trust material (draft §4.2 rule 9), and link hidden witnesses across
 //! obligations (§8). A digest an adapter supplies does not show that any
 //! hidden predicate was checked.
@@ -58,12 +70,13 @@
 //!
 //! ```
 //! use sparq_query_protocol::{
-//!     admit, ArtifactIdentity, Capabilities, CapabilitiesSpec, CapabilityTuple,
-//!     ChallengeConsumption, ChallengeOwner, ChallengePolicy, ComponentStatus,
-//!     DatasetAssembly, Digest32, Enforcement, Enforcer, EvaluationMode, HolderPolicy,
-//!     Identifier, MethodDescriptor, Obligation, ProtocolError, QueryProfile,
-//!     QueryRequirements, RequirementsSpec, ResourceBounds, ResultContract,
-//!     ScopeAuthority, SourceEvidence, StatusPolicy,
+//!     admit, encode_stored_request, ArtifactIdentity, Capabilities, CapabilitiesSpec,
+//!     CapabilityTuple, Challenge32, ChallengeConsumption, ChallengeOwner, ChallengePolicy,
+//!     ComponentStatus, DatasetAssembly, Digest32, Enforcement, Enforcer, EvaluationMode,
+//!     HolderPolicy, Identifier, MethodDescriptor, Obligation, ProtocolError, QueryForm,
+//!     QueryProfile, QueryRequirements, RequirementsSpec, ResourceBounds, ResultContract,
+//!     ScopeAuthority, SourceEvidence, StatusPolicy, StoredRequest, StoredRequestSpec,
+//!     STORED_REQUEST_DOMAIN,
 //! };
 //!
 //! # fn main() -> Result<(), ProtocolError> {
@@ -139,6 +152,20 @@
 //! assert_eq!(admission.query_profile(), &profile);
 //! assert!(admission.enforcer(Obligation::Anchor).is_some());
 //! assert!(admission.enforcer(Obligation::Authenticity).is_none());
+//!
+//! // The verifier stores the full request subset and encodes it locally.
+//! let stored = StoredRequest::new(StoredRequestSpec {
+//!     requirements,
+//!     query: "SELECT ?s WHERE { ?s ?p ?o }".to_owned(),
+//!     challenge: Challenge32::new([5; 32])?,
+//!     audience: id("urn:example:verifier")?,
+//!     not_before: 1_800_000_000,
+//!     not_after: 1_800_000_600,
+//!     form: QueryForm::Select,
+//!     base_iri: None,
+//!     describe_policy: None,
+//! })?;
+//! assert!(encode_stored_request(&stored).starts_with(STORED_REQUEST_DOMAIN));
 //! # Ok(())
 //! # }
 //! ```
@@ -146,11 +173,24 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+mod challenge;
 mod descriptor;
+mod encoding;
 mod error;
 mod ids;
 mod method;
 mod negotiate;
+mod request;
+
+pub use challenge::{consume_challenge, ChallengeOutcome, ChallengeStore, ChallengeStoreError};
+pub use encoding::{
+    encode_method_descriptor, encode_stored_request, LOCAL_ENCODING_PROFILE,
+    METHOD_DESCRIPTOR_DOMAIN, STORED_REQUEST_DOMAIN,
+};
+pub use request::{
+    BaseIri, Challenge32, QueryForm, StoredRequest, StoredRequestSpec, MAX_BASE_IRI_LEN,
+    MAX_QUERY_LEN,
+};
 
 pub use descriptor::{
     ArtifactIdentity, BindingRoute, Capabilities, CapabilitiesSpec, CapabilityTuple,

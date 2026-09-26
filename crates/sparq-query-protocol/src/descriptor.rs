@@ -41,12 +41,13 @@ pub enum ArtifactIdentity {
 /// wildcard or artifact fallback.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct MethodDescriptor {
-    method: Identifier,
-    version: u32,
-    parameter_set: Identifier,
-    parameter_digest: Digest32,
-    artifact: ArtifactIdentity,
-    backend: Identifier,
+    // `pub(crate)` only so the local encoder can destructure exhaustively.
+    pub(crate) method: Identifier,
+    pub(crate) version: u32,
+    pub(crate) parameter_set: Identifier,
+    pub(crate) parameter_digest: Digest32,
+    pub(crate) artifact: ArtifactIdentity,
+    pub(crate) backend: Identifier,
 }
 
 impl MethodDescriptor {
@@ -205,6 +206,12 @@ pub enum DatasetAssembly {
     UnionDefaultGraph,
     /// One named graph per credential under an opaque name.
     CredentialNamedGraphs,
+    /// Exact source N-Quads bytes with an exact graph-name catalog.
+    ///
+    /// [OPUS-5.5] Not a credential assembly: the dataset is the source bytes as
+    /// given, not graphs built from imported credentials. The choice says
+    /// nothing about authenticity, which [`SourceEvidence`] states separately.
+    ExactSourceCatalog,
 }
 
 /// Completeness a claim carries.
@@ -395,8 +402,9 @@ pub struct CapabilityTuple {
 /// Verifier-side resource bounds or method ceilings; never zero.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ResourceBounds {
-    released_rows: u32,
-    presentation_bytes: u32,
+    // `pub(crate)` only so the local encoder can destructure exhaustively.
+    pub(crate) released_rows: u32,
+    pub(crate) presentation_bytes: u32,
 }
 
 impl ResourceBounds {
