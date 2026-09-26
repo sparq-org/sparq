@@ -1871,16 +1871,25 @@ mod tests {
                 .expect("SPARQ_PUBLIC_PATTERN_EVIDENCE must name a new absolute directory"),
         );
         assert!(dir.is_absolute(), "evidence directory must be absolute");
-        let checkout = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../..")
+        // [OPUS-5.5] zkp-15.1.2: location-only containment check. The manifest
+        // directory is canonicalized FIRST and the checkout root is then taken
+        // as two parents of that resolved path, matching the former
+        // `join("../..").canonicalize()`: a symlinked `crates/<crate>` resolves
+        // to its real checkout rather than the apparent one. Only path metadata
+        // is resolved; nothing beneath the checkout is ever read.
+        let manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
             .canonicalize()
-            .unwrap();
+            .expect("crate manifest dir must resolve");
+        let checkout = manifest
+            .ancestors()
+            .nth(2)
+            .expect("resolved manifest dir has two ancestors");
         let parent = dir
             .parent()
             .and_then(|p| p.canonicalize().ok())
             .expect("evidence parent must exist");
         assert!(
-            !parent.starts_with(&checkout),
+            !parent.starts_with(checkout),
             "evidence must live outside the checkout"
         );
         let mut builder = std::fs::DirBuilder::new();
