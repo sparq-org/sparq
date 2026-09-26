@@ -45,7 +45,7 @@ const EXPECTED_DOC_SHA256: &str =
     "517744132ae165a5349155bef0bb0cf2258fff99dfe1dbd914b938d775a36017";
 
 fn iri(s: &str) -> NamedNode {
-    NamedNode::new_unchecked(s)
+    NamedNode::new(s).unwrap_or_else(|e| panic!("invalid W3C fixture IRI {s:?}: {e}"))
 }
 
 fn triple(s: &str, p: &str, o: Term) -> Triple {
