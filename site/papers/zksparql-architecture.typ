@@ -12,10 +12,14 @@
 // audit (none reached). The exact-evaluator and adapter PROOFS carry NO conventional
 // issuer-signature authentication (source evidence None). The authenticated extension of the
 // exact evaluator (V5) has passed scoped native model tests (8322) and, at a later source (42d),
-// a scoped guest build with DIRECT guest executions but zero proofs/receipts; the first bounded
-// genuine V5 proof attempt timed out INCOMPLETE (no receipt, no controls). The generic V5 VCQ
-// adapter (7fe8) has passed scoped native tests only: no proof, no receipt, not offered as
-// available. These gates are never summed with each other. The separate native experiment's
+// a scoped guest build with DIRECT guest executions but zero proofs/receipts in that gate; the
+// first bounded low-level V5 proof attempt (42d) timed out INCOMPLETE (no receipt, no controls)
+// and is retained unchanged. The generic V5 VCQ adapter (7fe8) passed a scoped native gate (no
+// proof) and, in a SEPARATE bounded run at the same source, produced ONE genuine verified receipt
+// for ONE synthetic verifier-agreed bag SELECT case with its controls (independently audited;
+// zkvcq.vcqg_*). That closes authenticated-source genuine evidence for that fixture/profile only;
+// the other declared cases are unproved and the method stays unavailable for its full tuple set.
+// These gates and attempts are never summed with each other. The separate native experiment's
 // finite/CLI proofs are native BBS+ public-BGP proofs (not exact SPARQL, not LegoGroth16
 // composition proofs); tuple composition ran only in 2 legacy test functions. Counts from
 // different campaigns (and overlapping test configurations) are never summed. Timings are
@@ -69,9 +73,10 @@
   internal evidence inspection re-checked. It claims no proven security, privacy or integrity
   property for any implementation, and no component has had an external cryptographic review.
   The exact-evaluation proofs cover committed or holder-declared datasets _without_ conventional
-  issuer-signature authentication; the extension that adds such authentication has passed native
-  model tests and direct guest execution, but its first bounded proof attempt did not complete and
-  it has produced no receipt. All timing figures are indicative development measurements.
+  issuer-signature authentication, with one exception: the extension that adds such
+  authentication, after native model tests, direct guest execution and a first proof attempt that
+  timed out, produced one genuine receipt for a single synthetic verifier-agreed bag `SELECT` case,
+  and none for its other declared cases. All timing figures are indicative development measurements.
 ]]
 
 #heading(level: 2, numbering: none, outlined: false)[Abstract]
@@ -92,10 +97,12 @@ collectively cover bag `SELECT`, false `ASK`, `CONSTRUCT` and `DESCRIBE` and bot
 profiles, a protocol adapter bound such receipts to requests with before-consume validation
 controls, a disclosure-specialized Noir relation produced genuine proofs in a paired development
 pilot that shows only small differences, and an authenticated extension of the exact evaluator
-passed native model tests and direct guest execution, although its first bounded proof attempt
-produced no receipt. Conventional-credential authentication inside exact proofs,
-authenticated linkage between native credential proofs and circuits, and a cost-based planner
-remain open, so this is a design and partial-evidence contribution rather than a validated system.
+passed native model tests and direct guest execution and, after a first bounded proof attempt
+timed out, produced through its adapter one genuine receipt for a single synthetic
+verifier-agreed bag `SELECT` case. Retained genuine receipts for the other query-form/authority
+profiles that its relation implements, conventional suites beyond this RDFC-1.0 Ed25519 case
+(including JSON-signed credentials and a JSON-to-RDF mapping), authenticated linkage between
+native credential proofs and circuits, and a cost-based planner remain open, so this is a design and partial-evidence contribution rather than a validated system.
 
 == Introduction <intro>
 
@@ -179,18 +186,20 @@ This working paper contributes:
   #headline("zkvcq.adapter_receipts") genuine receipts and #headline("zkvcq.adapter_controls")
   retained control records, and a public-pattern relation with
   #headline("zkvcq.pp_genuine_proofs") genuine proofs — plus native and direct guest-execution
-  evidence, without any receipt, for the authenticated extension and native tests of its
-  adapter, a separate native-composition experiment and a separately labelled
+  evidence for the authenticated extension, native tests of its adapter and
+  #headline("zkvcq.vcqg_genuine_receipts") genuine adapter receipt for a single synthetic case,
+  a separate native-composition experiment and a separately labelled
   indicative pilot, with the evidence level of every path stated
   (§#ref(<paths>, supplement: none)).
 
 The current evidence answers each question only in part (§#ref(<discussion>, supplement: none)).
-For RQ1 it shows exact-result relations executing with genuine receipts, but over datasets whose
-issuer provenance is not proved. For RQ2 it shows one implemented specialization and a pilot too
-small to establish a general speedup. For RQ3 it shows contract dispatch and validation controls
-for one method family, and native and direct guest execution of issuer authentication in front of
-the exact evaluator, while authenticated exact proofs and authenticated linkage across proof
-systems remain open.
+For RQ1 it shows exact-result relations executing with genuine receipts, but, apart from one
+synthetic case, over datasets whose issuer provenance is not proved. For RQ2 it shows one
+implemented specialization and a pilot too small to establish a general speedup. For RQ3 it shows
+contract dispatch and validation controls for one method family, and issuer authentication in
+front of the exact evaluator executed natively, directly in the guest and, for that one case, in
+a genuine receipt, while authenticated exact proofs for the other declared cases and authenticated
+linkage across proof systems remain open.
 
 == Three proof paths and an evidence vocabulary <paths>
 
@@ -244,11 +253,11 @@ goals, and it is not an external security review.
     [Authenticated extension V5 (#short-id("zkvcq.v5_source_commit"), #short-id("zkvcq.v5g_source_commit"))],
     [Exact evaluation over Ed25519/RDFC-1.0-verified documents],
     [Ed25519 over RDFC-1.0, verifier-owned key table],
-    [Executed native (model tests); executed guest (direct execution, no proof); first proof attempt incomplete; no receipt],
+    [Executed native (model tests); executed guest (direct execution, no proof); first low-level proof attempt incomplete, no receipt; one receipt via the adapter (next row)],
     [Authenticated adapter (#short-id("zkvcq.vcqa_source_commit"))],
     [Contract-bound exact `SELECT`/`ASK`/`CONSTRUCT` requests over V5],
     [As V5, bound to a verifier-owned policy digest],
-    [Executed native (host tests); no guest execution, no receipt],
+    [Executed native (host tests); one genuine verified receipt for one synthetic VerifierAgreed bag `SELECT` case only; other declared cases unproved],
     [Public pattern V4 (#short-id("zkvcq.pp_source_commit"))],
     [Selected `SELECT DISTINCT` rows (set inclusion; no multiplicity, completeness or `ASK`) for a fully public BGP pattern, bounded one- and two-credential profiles],
     [Issuer signature and membership inside the relation],
@@ -266,8 +275,9 @@ goals, and it is not an external security review.
   ),
   caption: [
     Proof paths and the evidence level each has reached. Read the last column before any other
-    claim: no exact proof carries conventional credential authentication, the rows are separate
-    systems whose counts are never combined, and no row reaches external audit.
+    claim: only one exact receipt, for a single synthetic case, carries conventional credential
+    authentication, the rows are separate systems whose counts are never combined, and no row
+    reaches external audit.
   ],
 ) <paths-table>
 ]
@@ -448,8 +458,10 @@ in bag `SELECT`, `ASK` and `CONSTRUCT`, $a$ in HolderDeclared and VerifierAgreed
 `NotRequested` and a bearer holder (@adapter-table). These tuples say what was proved about
 evaluation; they say nothing about who issued the data. A separate authenticated adapter declares
 the same forms and authorities with source evidence restricted to strict, bounded canonical-RDF
-EdDSA under a verifier-owned policy; it has passed native tests only and is not offered as an
-available method (§#ref(<v5-evidence>, supplement: none)).
+EdDSA under a verifier-owned policy. It has passed native tests and has one genuine receipt, for a
+single VerifierAgreed bag `SELECT` case; until its remaining declared cases have genuine coverage,
+its registry entry conservatively does not offer these tuples as available
+(§#ref(<v5-evidence>, supplement: none)).
 
 === Issuer authentication and same-data linkage <linkage>
 
@@ -474,9 +486,10 @@ issuer to adopt that representation; conventional Ed25519 or ECDSA credentials a
 the circuit at ingestion and recommitted, which a verifier cannot rely on against a dishonest
 holder. The exact evaluator and adapter proofs use source evidence `None`. V5 implements
 Ed25519 verification over RDFC-1.0, checked against a W3C test vector, and queries the same
-canonical documents under both authorities. Its native model tests pass and its built guest has
-executed directly (§#ref(<v5-evidence>, supplement: none)), but no V5 receipt exists: the first
-bounded genuine-proof attempt did not complete. The native-composition experiment authenticates BBS+-signed statements, but only for
+canonical documents under both authorities. Its native model tests pass, its built guest has
+executed directly, and, after a first bounded proof attempt timed out, its generic adapter produced
+one genuine receipt for a single synthetic verifier-agreed bag `SELECT` case
+(§#ref(<v5-evidence>, supplement: none)). The native-composition experiment authenticates BBS+-signed statements, but only for
 public triples (§#ref(<composition>, supplement: none)).
 
 === Scope and result contracts <scope>
@@ -934,8 +947,8 @@ with warnings denied passed in all three configurations.
 
 That earlier run was executed-native evidence only: it made
 #headline("zkvcq.v5_guest_executions") guest executions and produced #headline("zkvcq.v5_proofs")
-V5 proofs. The three later gates below ran at other sources; their counts are never added to that
-run's or to each other's.
+V5 proofs. Two later scoped gates and two separately bounded genuine-proof attempts, below, ran at
+other sources; their counts are never added to that run's or to each other's.
 
 *Guest build and direct execution.* At source #short-id("zkvcq.v5g_source_commit"), a scoped gate
 built the separate V5 guest (#short-id("zkvcq.v5g_guest_sha256")), pinned independently of the
@@ -982,14 +995,15 @@ reproducibility from arbitrary paths.
 ) <v5-guest-table>
 ]
 
-*First genuine-proof attempt.* At the same source, one bounded attempt targeted a single declared
-case, `select-bag-verifier-agreed` (bag `SELECT` under VerifierAgreed), over the published fixture
-with the pinned V5 artifact (#short-id("zkvcq.v5p_guest_sha256")). The command reached its time
-limit before any receipt existed: it completed #headline("zkvcq.v5p_proofs_completed") of
-#headline("zkvcq.v5p_proofs_planned") planned proof and #headline("zkvcq.v5p_controls_completed")
-of #headline("zkvcq.v5p_controls_planned") planned controls, and produced no presentation. We
-retain it as an incomplete execution, neither a semantic rejection nor evidence about soundness; it
-was not retried automatically, and no V5 receipt exists at the time of writing.
+*First genuine-proof attempt.* At the same source, one bounded attempt of the low-level V5 driver
+targeted a single declared case, `select-bag-verifier-agreed` (bag `SELECT` under VerifierAgreed),
+over the published fixture with the pinned V5 artifact (#short-id("zkvcq.v5p_guest_sha256")). The
+command reached its time limit before any receipt existed: it completed
+#headline("zkvcq.v5p_proofs_completed") of #headline("zkvcq.v5p_proofs_planned") planned proof and
+#headline("zkvcq.v5p_controls_completed") of #headline("zkvcq.v5p_controls_planned") planned
+controls, and produced no presentation. We retain it unchanged as an incomplete execution, neither
+a semantic rejection nor evidence about soundness; it was not retried automatically, and the later
+adapter-level run below is a separate attempt at another source, not a completion of this one.
 
 *Generic authenticated adapter.* At source #short-id("zkvcq.vcqa_source_commit"), a generic
 adapter wraps V5 in the typed request, descriptor and verification routine of
@@ -1011,18 +1025,56 @@ foreign receipts are rejected without consuming the challenge, and that stronger
 foreign requests fail admission. The V5 guest exported at this source has the same bytes as in the
 guest gate (#short-id("zkvcq.vcqa_guest_sha256")), and the exact guest is again unchanged with
 the feature off and on (#short-id("zkvcq.vcqa_exact_off_sha256"),
-#short-id("zkvcq.vcqa_exact_on_sha256")) at the fixed build path. The gate made
-#headline("zkvcq.vcqa_direct_executions") direct guest executions and
-#headline("zkvcq.vcqa_genuine_proofs") proofs: no generic adapter receipt exists, and the method is
-not offered as available.
+#short-id("zkvcq.vcqa_exact_on_sha256")) at the fixed build path. In that gate the genuine-proof
+driver compiled but stayed ignored: the gate made #headline("zkvcq.vcqa_direct_executions") direct
+guest executions and #headline("zkvcq.vcqa_genuine_proofs") proofs.
 
-Together these gates bring V5 to executed guest, not to genuine verified receipt, so
-conventional-credential authentication inside exact _proofs_ remains open. None was a
-full-workspace gate or a security audit. The authentication they exercise covers the verifier's
-issuer table and the signed canonical RDF bytes inside the relation; neither V5 nor its adapter
-checks credential status, holder binding or a credential validity period, performs full JSON-LD or
-Data Integrity processing, provides a JSON, JCS or JOSE-to-RDF relation, or establishes wallet or
-world completeness.
+*Genuine adapter receipt for one case.* At the same source
+(#short-id("zkvcq.vcqg_source_commit")), a separately bounded run executed that driver for one
+declared case only, #raw(headline("zkvcq.vcqg_case")): bag `SELECT` under a verifier-agreed anchor
+over a synthetic public W3C `eddsa-rdfc-2022` test vector, whose expected bag keeps a duplicated
+row, #raw("?" + headline("zkvcq.vcqg_result_variable")) = #raw(headline("zkvcq.vcqg_result_row1"))
+twice. It produced #headline("zkvcq.vcqg_genuine_receipts") genuine receipt
+(#raw(headline("zkvcq.vcqg_receipt_inner")), #raw(headline("zkvcq.vcqg_exit_code")), `dev_mode` =
+#raw(repr(headline("zkvcq.vcqg_dev_mode")))), of which #headline("zkvcq.vcqg_protocol_accepted")
+was accepted by the protocol verifier. The test verified the receipt through the SDK under the
+accepted V5 pin, whose artifact (#short-id("zkvcq.vcqg_guest_sha256")) matches the V5 guest of the
+two gates above, compared the result with the native oracle and the hand-written expectation, and
+ran the adapter's protocol checks. Inside the proved relation the guest checks issuer
+authorization against the verifier's key table and the Ed25519 signatures, and evaluates the query
+over the union of the canonical authenticated documents; outside it, the verifier checks the
+journal against its own independently stored request and policy copy, and consumes the challenge
+last. All #headline("zkvcq.vcqg_controls") controls attached to this receipt behaved as the frozen
+test asserts; the retained audit lists each. The binding controls substitute the request (query,
+challenge, audience, validity window), the verifier policy (key, issuer, method, table rows; each
+caught at the descriptor digest and, when spliced past it, at the proof binding), the descriptor,
+the journal, the receipt, the scope or anchor, and the image — the same V5 receipt presented under
+the exact guest's independently pinned image. Each was refused with its exact typed code before
+the challenge was consumed, with #headline("zkvcq.vcqg_binding_store_calls") challenge-store
+calls. Of the challenge controls, a replay against the same store was refused as replayed, a
+broken store failed closed as an infrastructure error, and of concurrent verifications of one
+challenge #headline("zkvcq.vcqg_concurrent_accepted") was accepted and
+#headline("zkvcq.vcqg_concurrent_replayed") reported replay; the stores are in-memory test doubles.
+Its second internal evidence inspection confirmed #headline("zkvcq.vcqg_source_files_verified") source files
+unchanged across the run and matching Git, re-hashed the receipt (#short-id("zkvcq.vcqg_receipt_sha256")),
+the journal (#short-id("zkvcq.vcqg_journal_sha256")) and
+#headline("zkvcq.vcqg_archive_verified_files") retained files, and checked the recorded
+assertions; it launched no verification process of its own. The run was a validation, not a
+benchmark, and we report no timing or resource figure for it.
+
+These records bring V5, through its generic adapter, to genuine verified receipt for this one
+fixture and profile, and close the missing authenticated-source end-to-end proof evidence only
+there. The run did not cover the other declared cases (`all_defined_cases_run` =
+#raw(repr(headline("zkvcq.vcqg_all_cases_run")))). The same V5 relation and adapter source
+implements all six advertised query-form/authority tuples, and native and direct-execution tests
+exercise them, but the holder-declared, `ASK`, `CONSTRUCT` and row-bound cases have only a
+compiled, unrun genuine-proof path and no retained genuine receipt, so the registry conservatively still does not offer the method as available for its six
+declared tuples. None of
+these gates or attempts was a full-workspace gate or a security audit. The authentication they
+exercise covers the verifier's issuer table and the signed canonical RDF bytes inside the
+relation; neither V5 nor its adapter checks credential status, holder binding or a credential
+validity period, performs full JSON-LD or Data Integrity processing, provides a JSON, JCS or
+JOSE-to-RDF relation, or establishes wallet or world completeness.
 
 === Native-composition experiment <nc-evidence>
 
@@ -1058,7 +1110,9 @@ The adapter snapshot records per-receipt, presentation and journal digests and t
 inventory, and its continuation records the replayed presentation digest. The V5 native snapshot
 records each native command, per-configuration test inventories, lock-file and toolchain hashes;
 the V5 guest, proof-attempt and authenticated-adapter snapshots record commands or test inventories,
-guest digests and image identifiers, and job and archive digests; the
+guest digests and image identifiers, and job and archive digests; the authenticated-adapter
+genuine snapshot adds the test executable, prover, runner and job digests, the receipt, journal,
+presentation and transport digests, the per-control codes and the retained archive digest; the
 native-composition snapshot records plan, report, source and executable hashes and the artifact
 digests. Re-running the campaigns requires the pinned toolchains and, for the proofs, hardware
 able to run the RISC Zero and Barretenberg provers.
@@ -1104,7 +1158,8 @@ RDFC-1.0 @rdfc10 underpin the signed-representation side of §#ref(<linkage>, su
 exact evaluation and make authority explicit. The hosted campaign's genuine receipts
 collectively cover exact bag `SELECT`, false `ASK`, `CONSTRUCT`, `DESCRIBE` and catalog results
 and both authorities, without every form being proved under every authority. The answer is
-partial: the proved datasets carry no issuer authentication,
+partial: apart from one synthetic authenticated bag `SELECT` case
+(§#ref(<v5-evidence>, supplement: none)), the proved datasets carry no issuer authentication,
 the evaluator is bounded and its coverage is a test suite, not conformance, and exactness under
 VerifierAgreed is only as good as the deployment's anchor policy.
 
@@ -1116,10 +1171,13 @@ selection and planning across obligations are not yet studied.
 
 *RQ3.* Separate dispatch of suites and methods, capability tuples and before-consume validation
 are implemented for one method family, with retained controls for each validation step. Issuer
-authentication in front of exact evaluation (V5) now executes natively and directly in the guest,
-and a generic adapter binds a verifier-owned policy digest through to challenge consumption in
-native tests; but no V5 receipt exists, the first bounded proof attempt did not complete, and
-JSON-signed suites are unmapped. The native-composition experiment authenticates
+authentication in front of exact evaluation (V5) executes natively and directly in the guest, and
+a generic adapter binds a verifier-owned policy digest through to challenge consumption; after a
+first low-level proof attempt timed out, the adapter produced one genuine receipt, with its
+controls, for a single synthetic verifier-agreed bag `SELECT` case. The same relation and adapter
+implement the holder-declared, `ASK`, `CONSTRUCT` and row-bound cases, which native and direct
+tests exercise, but none of them has a retained genuine receipt; broader conventional suites,
+including JSON-signed credentials and their JSON-to-RDF mapping, are unimplemented. The native-composition experiment authenticates
 public BGP triples under verifier policy, while authenticated linkage between native proofs and
 Noir or zkVM relations, and a cost planner across them, remain unimplemented.
 
@@ -1133,8 +1191,10 @@ specific checks and cannot exclude untested substitutions. Commitments in the le
 public and unblinded, and the disclosure analysis here does not account for all public inputs of
 every method, for linkage across repeated presentations, or for what a sequence of permitted
 queries reveals together. The pilot is small, run on shared hardware, and not canonical; no latency,
-memory or size conclusion about any path should be drawn from it. The V5 guest evidence is direct
-execution, not proving, and its first proof attempt ended incomplete; guest-artifact identity is
+memory or size conclusion about any path should be drawn from it. V5's genuine evidence is one
+receipt for one synthetic fixture and case, produced once as a validation, not a benchmark; its
+guest-gate evidence is direct execution, not proving, and its first proof attempt ended
+incomplete; nothing about its scaling or optimization is established. Guest-artifact identity is
 recorded only for a fixed build path and toolchain, since an earlier cross-path comparison failed.
 The exact-evaluator, both adapters and V5 have no status relation. V4 enforces its bounded, verifier-accepted status
 snapshot and policy in the relation, and the native public-RDF path applies a verifier-owned status
@@ -1158,9 +1218,13 @@ cover both authority profiles, with
 produced #headline("zkvcq.pp_genuine_proofs") genuine proofs with all controls rejected. The
 authenticated extension passed #headline("zkvcq.v5_auth_tests_passed") native model test
 functions in one run and #headline("zkvcq.v5g_direct_executions") direct guest executions in a
-later one, and its generic adapter passed native tests, but its first bounded proof attempt
-completed #headline("zkvcq.v5p_proofs_completed") proofs, so no exact proof yet authenticates
-conventional credentials; the native-composition experiment proves public BGP triples only. Nothing is externally audited.
+later one; its first bounded proof attempt completed #headline("zkvcq.v5p_proofs_completed")
+proofs, and a separate run of its generic adapter then produced
+#headline("zkvcq.vcqg_genuine_receipts") genuine receipt, with all
+#headline("zkvcq.vcqg_controls") controls behaving as asserted, for one synthetic verifier-agreed
+bag `SELECT` case — genuine authenticated exact evidence for that fixture and profile only: the
+other profiles its relation implements have native and direct test evidence but no retained
+genuine receipt, and broader conventional suites are unimplemented; the native-composition experiment proves public BGP triples only. Nothing is externally audited.
 The work is a design and partial-evidence contribution under an open audit gate.
 
 #pagebreak(weak: true)
