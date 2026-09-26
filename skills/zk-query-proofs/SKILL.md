@@ -31,9 +31,13 @@ cross-method linking exists, a registry label shows no support (every entry has
 [OPUS-5.5] The experimental, unpublished, dependency-free `sparq-query-protocol` crate adds a
 first executable layer of that draft. It provides typed descriptors, whole capability tuples,
 obligation enforcers, `admit` negotiation that rejects wildcards, fallbacks and downgrades, and
-a `QueryMethod` trait with opaque witnesses and typed claims. It has no backend, wire encoding
-or cryptography, proves no cryptographic claim, and registers no method. See
-[query-method contracts](references/query-method-contracts.md).
+a `QueryMethod` trait with opaque witnesses and typed claims. It also validates a stored request
+subset (`StoredRequest`: query text, original `Challenge32`, audience, validity window, form,
+shape-checked base IRI, DESCRIBE policy), encodes it and descriptors under the LOCAL structural
+profile `local-struct-v1`, and defines a shared `ChallengeStore` contract that consumes the
+original challenge once. It has no backend, interoperable wire encoding, transport, parser,
+hash or other cryptography, ships no production challenge store, proves no cryptographic claim,
+and registers no method. See [query-method contracts](references/query-method-contracts.md).
 
 [GPT-6] For the opt-in synthetic selected-support measurement adapter, its strict
 experiment manifest, timing boundaries and unavailable stages, see

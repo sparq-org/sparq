@@ -132,6 +132,22 @@ pub enum ErrorCode {
     CapacityExceeded(CapacityBound),
     /// A backend-defined stable code.
     Backend(&'static str),
+    /// [OPUS-5.5] A request challenge is all zero bytes.
+    ZeroChallenge,
+    /// A query is empty or longer than [`MAX_QUERY_LEN`](crate::MAX_QUERY_LEN).
+    MalformedQuery,
+    /// A base IRI is empty, too long, or has whitespace or control characters.
+    MalformedBaseIri,
+    /// A validity window does not satisfy `not_before < not_after`.
+    InvalidValidityWindow,
+    /// The query form does not take the requested result contract.
+    FormContractMismatch,
+    /// A DESCRIBE policy is missing for DESCRIBE or present for another form.
+    DescribePolicyMismatch,
+    /// The original challenge was already consumed (replay).
+    ChallengeReplayed,
+    /// The challenge store failed; carries the store's stable code.
+    ChallengeStoreFailure(&'static str),
 }
 
 /// Backend failure classes other than `capacity`.

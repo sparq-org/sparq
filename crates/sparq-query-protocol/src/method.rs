@@ -239,11 +239,16 @@ impl<R> VerifiedClaim<R> {
 
 /// A pluggable query proof method (draft §6.2 *QueryMethod*).
 ///
-/// `Request` is the adapter's full request (query bytes, challenge, audience,
-/// validity window), which this crate does not model. Implementations are
-/// trusted: nothing here checks that `prove` or `verify` does what it claims.
+/// `Request` is the verifier-stored request. [OPUS-5.5] Adapters should use
+/// [`StoredRequest`](crate::StoredRequest), or a type wrapping it, so the
+/// query text, original challenge, audience and validity window come from one
+/// validated value. `ChallengeStore` should be `dyn`
+/// [`ChallengeStore`](crate::ChallengeStore) so every method of one verifier
+/// shares one store namespace without tying backends to one storage library.
+/// Implementations are trusted: nothing here checks that `prove` or `verify`
+/// does what it claims.
 pub trait QueryMethod {
-    /// Adapter-owned full request.
+    /// Verifier-stored request; recommended [`StoredRequest`](crate::StoredRequest).
     type Request: ?Sized;
     /// Holder-private inputs to `prepare`.
     type PrivateInputs;
@@ -253,7 +258,9 @@ pub trait QueryMethod {
     type Presentation;
     /// Typed result carried in a [`VerifiedClaim`].
     type Output;
-    /// Challenge store the declared owner consumes from.
+    /// Shared store the declared owner consumes the ORIGINAL challenge from.
+    ///
+    /// Recommended: `dyn` [`ChallengeStore`](crate::ChallengeStore).
     type ChallengeStore: ?Sized;
 
     /// Returns the backend's validated capabilities.
@@ -301,6 +308,8 @@ pub trait QueryMethod {
     /// Verifies `presentation` against the verifier's stored `request`.
     ///
     /// `admission` must be recomputed by the verifier, never taken from a holder.
+    /// When this method owns the challenge it consumes the request's original
+    /// challenge from `challenges` exactly once, never a derived nonce.
     ///
     /// # Errors
     /// `invalid`, `unsupported`, `capacity` or `infrastructure` at [`Phase::Verify`].
