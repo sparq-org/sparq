@@ -370,11 +370,15 @@ def group_legs(legs, capacity=GROUP_CAPACITY):
     the chunks are packed first-fit-decreasing into bins. A single leg heavier
     than the capacity gets its own chunk (never dropped, never split).
 
-    Returns a list of groups, each {"group", "cache_crate", "count", "legs"} where
-    `legs` is the ORDERED list of leg dicts (workflow shape: name/crate/features/
-    test). Group names/ids are NOT gate-critical — the gate-critical `opt-in
-    <name>` per-leg check-runs are emitted by scripts/run-feature-matrix-group.py
-    from inside the group job, name-preserved byte-for-byte."""
+    Returns a list of groups, each {"group", "cache_crate", "cache_save", "count",
+    "legs"} where `legs` is the ORDERED list of leg dicts (workflow shape:
+    name/crate/features/test). Group names/ids are NOT gate-critical — the
+    gate-critical `opt-in <name>` per-leg check-runs are emitted by
+    scripts/run-feature-matrix-group.py from inside the group job, name-preserved
+    byte-for-byte.
+
+    `cache_save` marks the ONE deterministic cache-seed group per `cache_crate` —
+    see pick_cache_seeds()."""
     by_crate = {}
     for leg in legs:
         by_crate.setdefault(leg["crate"], []).append(leg)
@@ -429,6 +433,82 @@ def group_legs(legs, capacity=GROUP_CAPACITY):
                 "weight": round(b["weight"], 3),
             }
         )
+    pick_cache_seeds(groups)
+    return groups
+
+
+def _feature_breadth(group):
+    """Number of DISTINCT cargo features the group compiles for its `cache_crate`.
+
+    The union over the group's dominant-crate legs — the proxy for "how much of
+    that crate's optional dependency graph does building this group populate in
+    `target/`". A `service` leg pulls ureq/serde_json; a bare `time-travel` leg
+    pulls nothing extra, so the wider group is the more valuable cache seed."""
+    feats = set()
+    for leg in group["legs"]:
+        if leg["crate"] != group["cache_crate"]:
+            continue
+        feats.update(f.strip() for f in leg["features"].split(",") if f.strip())
+    return len(feats)
+
+
+def _group_identity(group):
+    """Stable identity of a group: the sorted tuple of the leg names it carries.
+
+    Used as pick_cache_seeds' FINAL tie-breaker. It must be a property of the
+    group ITSELF, never its position in the list handed to that function —
+    a positional index makes the seed depend on the order groups happen to be
+    supplied in, which is the very scheduling-noise dependence sq-an4by removes.
+    Legs are PARTITIONED across groups, so this identity is unique."""
+    return tuple(sorted(leg["name"] for leg in group["legs"]))
+
+
+def pick_cache_seeds(groups):
+    """[OPUS-5] sq-an4by: mark exactly ONE cache-seed group per `cache_crate`
+    (`cache_save: True`); every other group with that key is RESTORE-ONLY.
+
+    WHY: `cache_crate` keys the rust-cache `shared-key`, and a crate's legs
+    bin-pack into SEVERAL groups (sparq-engine: 12). The Actions cache is
+    IMMUTABLE — the first writer of a key wins and every later save of the same
+    key is rejected — so on a push-to-main run all N same-crate groups raced to
+    save one key: the winner (hence WHICH feature states' dependencies got
+    cached) was scheduling noise, and the 11 losers each still packed and
+    uploaded a whole `target/` before the API 409'd it. Feature-specific
+    dependencies could therefore go permanently uncached: once a key is written
+    for a given lockfile+rustc hash, later runs restore it EXACTLY, and
+    rust-cache skips saving on an exact hit, so the losing groups' deps never got
+    a second chance.
+
+    The seed is chosen deterministically — widest feature breadth first (see
+    _feature_breadth: the group whose build populates the most of that crate's
+    optional dep graph), then heaviest, then the lexicographically-smallest
+    _group_identity (the group's own leg names, NOT its position in the list
+    passed here: a positional index would let a reordered list win a different
+    group, reintroducing the order dependence) — so the cached
+    content is a stable, deliberately-chosen superset rather than a race result.
+    Saving only ever happens on push-to-main, where ci_select.py returns
+    mode=full and the event is a BACKSTOP one, so the seed is computed over the
+    same complete leg set every time — PR-run selection filtering can change
+    which group is flagged, but those runs are restore-only anyway.
+
+    Mutates `groups` in place; every group gets the key.
+
+    RESIDUAL (deliberate): the seed caches only ITS OWN legs' dependencies. A dep
+    reachable only from a feature exclusive to a NON-seed group is still built
+    cold. Fixing that needs either a synthetic superset-feature build (features
+    across legs are not always co-enableable — several legs are
+    `--no-default-features`) or one cache bucket per group, which is what
+    sq-3sbrr's per-crate keying deliberately abandoned: 46 buckets would blow the
+    repo's 10 GB Actions-cache budget and LRU-evict everything."""
+    seen = {}
+    for g in groups:
+        g["cache_save"] = False
+        rank = (-_feature_breadth(g), -g["weight"], _group_identity(g))
+        best = seen.get(g["cache_crate"])
+        if best is None or rank < best[0]:
+            seen[g["cache_crate"]] = (rank, g)
+    for _rank, g in seen.values():
+        g["cache_save"] = True
     return groups
 
 
@@ -498,6 +578,10 @@ def main():
                 {
                     "group": g["group"],
                     "cache_crate": g["cache_crate"],
+                    # sq-an4by: the rust-cache `save-if` gate — True for exactly one
+                    # group per cache_crate (pick_cache_seeds), so same-key groups no
+                    # longer race to write the immutable Actions cache.
+                    "cache_save": g["cache_save"],
                     "count": g["count"],
                     "legs": json.dumps(
                         stripped, ensure_ascii=False, separators=(",", ":")

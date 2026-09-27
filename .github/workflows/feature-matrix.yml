@@ -768,8 +768,20 @@ jobs:
           # REDUCES total demand further (38-ish groups vs 159 leg jobs restoring).
           # `save-if` keeps PR and ephemeral merge_group runs RESTORE-ONLY; the
           # post-merge push-to-main run seeds/refreshes the caches.
+          #
+          # [OPUS-5] sq-an4by — SINGLE DETERMINISTIC CACHE SEED per key. A crate's
+          # legs bin-pack into several groups (sparq-engine: 12), all sharing this
+          # one shared-key. The Actions cache is IMMUTABLE, so on main those groups
+          # used to RACE: the first save won, the rest packed and uploaded a whole
+          # target/ only to be 409'd, and which feature states' dependencies ended
+          # up cached was scheduling noise (feature-specific deps — `service` pulls
+          # ureq/serde_json — could stay permanently cold, since a later run hits
+          # the key exactly and rust-cache then skips saving). `matrix.cache_save`
+          # is set by the assembler for exactly ONE group per cache_crate — the
+          # widest-feature one (scripts/assemble-feature-matrix.py:pick_cache_seeds)
+          # — so the seed is deliberate and stable and the others are restore-only.
           shared-key: feature-matrix-${{ matrix.cache_crate }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' && matrix.cache_save }}
       - name: Fetch dependencies (retry transient crates.io fetch)
         # [OPUS-4.8] sq-hhxc: transient crates.io fetch flake absorbed by a bounded
         # retry so the per-leg builds resolve from the warm cache. Fails only if
