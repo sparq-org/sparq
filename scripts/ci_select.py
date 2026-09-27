@@ -144,6 +144,7 @@ _ORCHESTRATION_SAFE: list[str] = [
     # pinned inert by the OrchestrationSafeInertnessTests grep.
     "scripts/triage.py",
     "scripts/retriage.py",
+    "scripts/promote.py",
     "scripts/routing-validate.py",
     "scripts/dispatch-plan.py",
     "scripts/bd-to-issues.py",
