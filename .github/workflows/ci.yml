@@ -3097,8 +3097,10 @@ jobs:
     #   - shard-partition guard (sq-p0hcd): FAIL if SHARD_GROUPS no longer partitions
     #     PER_COMMIT_CRATES exactly, so a crate added to the per-commit set can never be
     #     silently dropped from every shard (which would leave it un-gated).
+    #   - untracked-crate gate (#6121): FAIL if a crate under crates/ has neither a floor
+    #     row nor a declaration — the drift no other mode can see.
     # The heavy per-crate line-% MEASUREMENT moved to the `coverage-measure` MATRIX below.
-    name: coverage floors (presence + monotonicity + shard-partition, no compile)
+    name: coverage floors (presence + untracked + monotonicity + shard-partition, no compile)
     needs: changes
     # Same trigger envelope as the old job: never on the nightly schedule (the heavy tier
     # is coverage-nightly), skip a doc-only PR. push/merge_group force rust_changed=true.
@@ -3115,6 +3117,19 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Test-presence gate (fast, no compile)
         run: python3 scripts/coverage-presence.py --check
+      - name: Untracked-crate gate (coverage floors vs crates/, fast, no compile)
+        # [OPUS-5] #6121: FAIL if a crate under crates/ has neither a row in
+        # bench/coverage-floor.json nor a declaration in scripts/coverage-gate.py
+        # (NO_FLOOR_CRATES = permanent exemptions, AWAITING_SEED = written-down debt).
+        # Every other mode of the ratchet reasons only about crates that ALREADY have a
+        # floor row, and the shard-partition guard below compares PER_COMMIT_CRATES to
+        # SHARD_GROUPS — neither compares the TREE to the floor file, which is how that
+        # file drifted 28 crates behind crates/ (#5140 reports the same drift shape for
+        # bench/coverage-presence.json). Also fails on a stale declaration (the crate now
+        # has a floor) and on an orphan floor row (the crate is gone), so the ledger can
+        # only shrink. Reproduce locally: python3 scripts/coverage-gate.py --check-untracked.
+        # Unit-tested on a synthetic tree: coverage-gate.py --self-test.
+        run: python3 scripts/coverage-gate.py --check-untracked
       - name: Shard-partition guard (fast, no compile)
         # FAIL if the per-commit MATRIX shard groups drift from PER_COMMIT_CRATES (missing/
         # extra/overlapping crate) — a missing crate would be measured by NO shard and thus
