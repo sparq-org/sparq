@@ -35,11 +35,14 @@ NOT_A_ROUTING_TARGET = {"haiku", "sonnet"}
 # docs chain and must not appear anywhere else.
 DOCS_ONLY = {"terra"}
 
-# [OPUS-5] THE `area:gui` CARVE-OUT — THE BINDING MECHANISM (review of PR #4211).
+# [SPARQ agent] LEGACY `area:gui` CARVE-OUT — THE COMPATIBILITY MECHANISM (review of PR #4211).
 #
-# MAINTAINER DIRECTIVE 2026-07-26: "Opus5 should be prioritised over sol on all tasks for which they
-# are both possible implementors; except for GUI work where sol should remain prioritised", boundary
-# settled the same day as "Let's just go with area:gui work".
+# Historical maintainer directive 2026-07-26: "Opus5 should be prioritised over sol on all tasks
+# for which they are both possible implementors; except for GUI work where sol should remain
+# prioritised", boundary settled the same day as "Let's just go with area:gui work".
+# The 2026-09-02 protocol now makes every implementation route Sol-first. This mechanism is
+# idempotent for the current routing table, but remains binding when resolving older target refs and
+# therefore must stay aligned between PLAN and CLAIM during the rollout.
 #
 # The first attempt expressed this as a `role:gui` ROUTE and had scripts/triage.py derive that role
 # from `area:gui`. Review proved it could never fire, for two independent reasons:
@@ -66,8 +69,9 @@ DOCS_ONLY = {"terra"}
 # UNIONS every `match_labels` keyword, so "gui" there would human-arm every GUI PR.
 #
 # THE SELECTOR IS `area:gui` AND NOTHING ELSE. `area:site`, `area:site-specs`, `area:site-papers`,
-# `surface:frontend`, `dashboard` are NOT GUI — they take the opus5-first default. Widening this set
-# over a site* label is the likely future mistake and is asserted against.
+# `surface:frontend`, `dashboard` are NOT GUI. They historically took the Opus-first site/default
+# route and now take the common Sol-first implementation route. Widening this exact legacy selector
+# over a site* label remains a compatibility mistake and is asserted against.
 GUI_CARVE_OUT_LABELS = frozenset({"area:gui"})
 GUI_CARVE_OUT_LEAD = "sol"
 # [OPUS-5] THE ROLES WHERE THE CARVE-OUT MAY *ADD* sol BACK, not merely re-order it (registry #738).
@@ -106,9 +110,9 @@ def gui_carve_out(labels, chain, role=None):
       own qualifier, encoded literally: the chain must contain BOTH sol and opus5, and the result is
       a strict PERMUTATION (re-order only).
     * sol ABSENT -> the result is the chain with sol PREPENDED, but only when `role` is in
-      GUI_CARVE_OUT_INJECT_ROLES. `role=None` never injects. That is what keeps the carve-out alive
-      now that `role:impl` is a single-rung `["opus5"]` chain, without making `role:research`
-      (anthropic-side + escalating) quietly cross-provider.
+      GUI_CARVE_OUT_INJECT_ROLES. `role=None` never injects. This preserves compatibility with
+      historical target refs where `role:impl` was a single-rung `["opus5"]` chain, without making
+      `role:research` (Anthropic-side + escalating) quietly cross-provider.
 
     Idempotent in both modes: applying it to an already-sol-first chain is a no-op.
     """
@@ -229,7 +233,7 @@ def resolve(labels, doc):
     # role is None here BY CONSTRUCTION (a roleless issue), so the defaults branch can never be
     # injected into — passed explicitly rather than left to the parameter default.
     return (gui_carve_out(labels, list(d.get("model_chain", [])), role=None),
-            d.get("agent"), False)
+            d.get("agent"), bool(d.get("escalate")))
 
 
 def _self_test():
@@ -261,76 +265,46 @@ def _self_test():
     # (the opus-4.8 tail fallback was deprecated 2026-07-26), escalate
     mc, ag, esc = resolve(["role:impl", "area:sparq-zk"], doc)
     chk("impl+zk -> opus5/escalate", (mc, ag, esc), (["opus5"], "sparq-reviewer", True))
-    # [OPUS-5] plain impl -> OPUS5-ONLY + escalate (maintainer decision 2026-07-26 on the registry
-    # #738 measurement: "Remove sol from impl fallback"; sol 18% vs opus5 86% in-cell, n=74). The
-    # WHOLE tuple is asserted rather than the chain head, so a future demotion of sol back to a
-    # second rung reds this instead of passing on `mc[0] == "opus5"`.
+    # [SPARQ agent] 2026-09-02 protocol: ordinary implementation is Sol-first, with Opus retained as
+    # the continuity fallback for current Anthropic-authored repairs and total Sol unavailability.
     mc, ag, esc = resolve(["role:impl", "area:sparq-core"], doc)
-    chk("impl -> OPUS5-ONLY, escalating", (mc, ag, esc), (["opus5"], "sparq-rust-impl", True))
-    chk("role:impl names NO openai tier at all (exclusion, not a demotion)",
-        sorted({doc["models"][m]["provider"] for m in mc}), ["anthropic"])
-    chk("role:impl ESCALATES, so a single-rung chain has a machine exit instead of deferring "
-        "forever with nobody notified", esc, True)
+    chk("impl -> SOL-FIRST with Opus continuity fallback", (mc, ag, esc),
+        (["sol", "opus5"], "sparq-rust-impl", True))
+    chk("role:impl preserves both providers for continuity",
+        sorted({doc["models"][m]["provider"] for m in mc}), ["anthropic", "openai"])
+    chk("role:impl has an explicit total-exhaustion exit", esc, True)
     # [OPUS-5] docs -> SOL-led (maintainer 2026-07-26: docs writing off haiku/sonnet onto gpt-5.6
     # sol). terra is sol's same-provider fallback; opus5 the cross-provider tail.
-    chk("docs -> sol-led", resolve(["role:docs", "area:x"], doc)[0], ["sol", "terra", "opus5"])
+    chk("docs -> sol-led with bounded exhaustion",
+        resolve(["role:docs", "area:x"], doc),
+        (["sol", "terra", "opus5"], "sparq-docs", True))
     chk("docs chain has no cheap anthropic tier",
         sorted(set(resolve(["role:docs", "area:x"], doc)[0]) & NOT_A_ROUTING_TARGET), [])
-    # [FABLE-5] UI ownership: site -> sol-led (GPT-5.6 codex, the original dashboard builder)
-    # [OPUS-5] site is NOT the gui carve-out — it takes the opus5-first default (2026-07-26).
-    chk("site -> opus5-led (site is outside the area:gui carve-out)",
-        resolve(["role:site", "area:site"], doc)[0], ["opus5", "sol"])
-    # [FABLE-5] frontier-tier infra authorship (standing rule 2026-07-17): ci -> sol-first, opus5
-    # the SOLE anthropic tier since 2026-07-26. FRONTIER-ONLY chain — no sub-frontier model
-    # (sonnet/haiku) anywhere in it, so exhaustion DEFERS at the registry claim step (retried next
-    # tick) instead of degrading tier.
+    site_mc, _site_agent, site_esc = resolve(["role:site", "area:site"], doc)
+    chk("site -> Sol-first implementation", (site_mc, site_esc), (["sol", "opus5"], True))
+    # CI is implementation under the same Sol-first protocol.
     mc, ag, esc = resolve(["role:ci", "area:ci"], doc)
-    chk("ci -> frontier-only opus5-first", (mc, ag, esc), (["opus5", "sol"], "sparq-ci-infra", False))
+    chk("ci -> Sol-first implementation", (mc, ag, esc),
+        (["sol", "opus5"], "sparq-ci-infra", True))
     chk("ci chain has no sub-frontier tier", sorted(set(mc) & {"sonnet", "haiku"}), [])
-    # no role -> defaults (sol-led, 2026-07-18)
-    chk("no role -> defaults", resolve(["area:sparq-core"], doc)[0][0], "opus5")
-    chk("perf -> opus5-led", resolve(["role:perf", "area:sparq-engine"], doc)[0], ["opus5", "sol"])
+    default_mc, _default_agent, default_esc = resolve(["area:sparq-core"], doc)
+    chk("no role -> Sol-first defaults",
+        (default_mc, default_esc), (["sol", "opus5"], True))
+    perf_mc, _perf_agent, perf_esc = resolve(["role:perf", "area:sparq-engine"], doc)
+    chk("perf -> Sol-first implementation",
+        (perf_mc, perf_esc), (["sol", "opus5"], True))
 
     # ---------------------------------------------------------------------------------------------
-    # [OPUS-5] OPUS-5-FIRST DEFAULT + THE `area:gui` CARVE-OUT (maintainer 2026-07-26).
+    # [SPARQ agent] SOL IMPLEMENTATION + OPUS REVIEW (maintainer protocol 2026-09-02).
     # ---------------------------------------------------------------------------------------------
-    # Every route where opus5 AND sol are both viable implementors must lead with opus5...
-    # `role:impl` is deliberately EXCLUDED from this loop since 2026-07-26: it is the one
-    # implementor route where sol was REMOVED rather than demoted (asserted separately above).
-    for _role in ("site", "ci", "perf"):
-        mc = resolve([f"role:{_role}"], doc)[0]
-        chk(f"role:{_role} prefers opus5 over sol", mc[0], "opus5")
-        chk(f"role:{_role} keeps sol reachable as a fallback (preference, not exclusion)",
-            "sol" in mc, True)
-    chk("defaults prefer opus5 over sol", resolve(["area:sparq-core"], doc)[0][0], "opus5")
-    # ...and the EXCLUSION is scoped to exactly one role. This is the guard that reds if a future
-    # edit copies the sol removal onto a route the maintainer did not scope it to.
-    chk("role:impl is the ONLY role route with no openai rung besides the escalating lanes",
-        sorted(r for r in ("impl", "site", "gui", "ci", "perf", "docs")
-               if not any(doc["models"][m]["provider"] == "openai"
-                          for m in resolve([f"role:{r}"], doc)[0])),
-        ["impl"])
-    # ...EXCEPT role:gui, which keeps the sol lead (original-builder steer, task #331).
-    gui = resolve(["role:gui", "area:gui"], doc)[0]
-    chk("role:gui KEEPS sol first (the carve-out)", gui[0], "sol")
-    chk("role:gui keeps opus5 reachable (GUI stays dispatchable in a sol outage)",
-        "opus5" in gui, True)
+    for _role in ("impl", "site", "gui", "ci", "perf"):
+        mc, _agent, esc = resolve([f"role:{_role}"], doc)
+        chk(f"role:{_role} is Sol-first with Opus continuity fallback",
+            (mc, esc), (["sol", "opus5"], True))
     chk("role:gui routes to the site agent", resolve(["role:gui"], doc)[1], "sparq-site")
-    # The carve-out is EXACTLY role:gui. role:site must NOT be swept into it — "GUI" reads
-    # informally as covering the site surfaces, which is the likely future widening mistake.
-    chk("role:site is NOT in the sol carve-out", resolve(["role:site"], doc)[0][0], "opus5")
-    # Both directions terminate: neither class can become undispatchable. `role:impl` is now
-    # deliberately single-provider, so its termination guarantee is `escalate = true` (a bounded
-    # starvation ladder ending in a self-clearing machine park) rather than a cross-provider rung —
-    # asserted above and, for the GUI carve-out, immediately below.
-    for _role in ("site", "ci", "perf", "gui"):
-        mc = resolve([f"role:{_role}"], doc)[0]
-        chk(f"role:{_role} chain is cross-provider (cannot be starved by one provider)",
-            sorted({doc["models"][m]["provider"] for m in mc}), ["anthropic", "openai"])
-    chk("role:impl is single-provider, so it MUST escalate (otherwise an opus5 outage is a silent "
-        "permanent stall)",
+    chk("role:impl has an explicit total-exhaustion exit",
         (sorted({doc["models"][m]["provider"] for m in resolve(["role:impl"], doc)[0]}),
-         resolve(["role:impl"], doc)[2]), (["anthropic"], True))
+         resolve(["role:impl"], doc)[2]), (["anthropic", "openai"], True))
     chk("research -> opus5 only", resolve(["role:research"], doc)[0], ["opus5"])
     # review role -> opus5 + escalate
     chk("review -> opus5/escalate", resolve(["role:review"], doc)[1:], ("sparq-reviewer", True))
@@ -350,45 +324,35 @@ def _self_test():
         resolve(["area:gui", "role:impl"], doc)[1], "sparq-rust-impl")
     chk("area:gui with NO role at all -> defaults, SOL-first",
         resolve(["area:gui", "priority:P2"], doc)[0], ["sol", "opus5"])
-    # [OPUS-5] THE COLLISION BETWEEN THE TWO DIRECTIVES, as a test rather than as prose
-    # (registry #738). `role:impl` is now a SINGLE-RUNG `["opus5"]` chain, and the carve-out was a
-    # pure re-ordering — so without the `inject_roles` opt-in these 33 issues resolve opus5-only,
-    # re-inverting the maintainer's one stated exception with no symptom whatsoever (both resolvers
-    # agree on the wrong answer, so the PLAN/CLAIM agreement harness reports nothing). These three
-    # rows are the ones that red if the injection branch, the declaration, or the allow-list is
-    # deleted.
-    chk("the live role:impl route really IS single-rung (so the row above is not passing because "
-        "sol happens to still be in the chain)",
-        [r["model_chain"] for r in doc["route"] if r.get("role") == "impl"], [["opus5"]])
-    chk("a re-order-ONLY carve-out would DISARM on that chain (this is the defect being fixed)",
+    # Compatibility behavior: the current route is already Sol-first, while the retained
+    # declaration still handles an older Opus-only target revision identically on PLAN and CLAIM.
+    chk("the live role:impl route is Sol-first with the continuity fallback",
+        [r["model_chain"] for r in doc["route"] if r.get("role") == "impl"],
+        [["sol", "opus5"]])
+    chk("a re-order-only legacy rule declines an Opus-only chain",
         gui_carve_out({"area:gui", "role:impl"}, ["opus5"], role=None), ["opus5"])
-    chk("...and the injection allow-list is what restores it",
+    chk("...and its legacy injection allow-list restores Sol-first continuity",
         gui_carve_out({"area:gui", "role:impl"}, ["opus5"], role="impl"), ["sol", "opus5"])
     chk("area:gui + role:impl still ESCALATES (it inherits the impl route's exit; sol is a "
         "preference on top, not a replacement for the exit)",
         resolve(["area:gui", "role:impl"], doc)[2], True)
     for _role in ("impl", "site", "ci", "perf", "gui"):
         mc = resolve(["area:gui", f"role:{_role}"], doc)[0]
-        chk(f"area:gui + role:{_role} -> sol-first", mc[0], "sol")
-        chk(f"area:gui + role:{_role} keeps opus5 reachable (preference, not exclusion)",
-            "opus5" in mc, True)
-    # site* is NOT GUI — the exclusion the review confirmed already works; assert it end to end too.
-    # Since 2026-07-26 the correct answer for a NON-gui role:impl issue is the OPUS5-ONLY chain, so
-    # these rows are simultaneously the "site is outside the carve-out" guard and the "injection
-    # does not leak past the exact `area:gui` selector" guard.
+        chk(f"area:gui + role:{_role} -> Sol-first implementation", mc, ["sol", "opus5"])
+    # Non-GUI implementation takes the same Sol-first default.
     for _area in ("area:site", "area:site-specs", "area:site-papers", "area:sitemap"):
-        chk(f"{_area} + role:impl -> opus5-ONLY (site is outside the carve-out, and gets no sol)",
-            resolve([_area, "role:impl"], doc)[0], ["opus5"])
-    chk("role:site + area:site -> opus5-first end to end",
-        resolve(["role:site", "area:site"], doc)[0], ["opus5", "sol"])
+        chk(f"{_area} + role:impl -> Sol-first implementation",
+            resolve([_area, "role:impl"], doc)[0], ["sol", "opus5"])
+    chk("role:site + area:site -> Sol-first implementation end to end",
+        resolve(["role:site", "area:site"], doc)[0], ["sol", "opus5"])
     chk("surface:frontend is not in the carve-out",
-        resolve(["surface:frontend", "role:site"], doc)[0][0], "opus5")
+        gui_carve_out({"surface:frontend"}, ["opus5"], role="impl"), ["opus5"])
     # EXACT label: a substring selector would sweep area:guide into the sol carve-out. Now that the
     # carve-out can ADD sol, a false match is no longer merely a re-order — it would hand a
     # deliberately excluded model back to a non-GUI issue, so these rows carry more weight.
     for _near in ("area:guide", "area:guidance", "area:gui-toolkit", "xarea:gui", "gui"):
-        chk(f"{_near} does NOT false-match the carve-out (and is given NO sol rung)",
-            resolve([_near, "role:impl"], doc)[0], ["opus5"])
+        chk(f"{_near} does NOT false-match the carve-out",
+            gui_carve_out({_near}, ["opus5"], role="impl"), ["opus5"])
     # Security still wins, and its chain is returned UNTOUCHED by the preference rule.
     chk("area:gui + a security surface -> soundness lane, unmodified",
         resolve(["area:gui", "area:sparq-zk", "role:impl"], doc),
@@ -409,7 +373,7 @@ def _self_test():
         resolve(["area:gui", "area:sparq-zk", "role:impl"], _xsec)[0], ["opus5", "sol"])
     chk("...while the same table still applies the carve-out on the role branch (so the check "
         "above is an exemption, not a dead fixture)",
-        resolve(["area:gui", "role:impl"], _xsec)[0], ["sol", "opus5"])
+        gui_carve_out({"area:gui"}, ["opus5"], role="impl"), ["sol", "opus5"])
     # "for which they are BOTH possible implementors": a chain without sol is left alone, so the
     # carve-out cannot quietly turn research (anthropic-side + escalate) into a cross-provider route.
     chk("area:gui + role:research is NOT rewritten (sol is not an implementor there)",

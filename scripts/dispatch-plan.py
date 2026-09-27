@@ -271,17 +271,16 @@ def _self_test():
 
     R = ["status:ready"]
 
-    # --- Fixture: an impl issue → OPUS5-ONLY chain + escalate -------------------------------------
-    # [OPUS-5] maintainer decision 2026-07-26 on the registry #738 measurement ("Remove sol from
-    # impl fallback"): sol 18% vs opus5 86% in-cell first-attempt yield, n=74. The WHOLE chain is
-    # asserted, not its head — the planner row is what the registry's CLAIM step compares for EXACT
-    # equality, so a demoted-not-removed sol must red here too.
+    # [SPARQ agent] Fixture: impl → Sol-first + Opus continuity fallback + escalate.
+    # The WHOLE chain is asserted, not only its head: the planner row is what the registry's CLAIM
+    # step compares for exact equality. This catches either a lead-order regression or accidental
+    # removal of the transition fallback needed to repair existing Opus-authored PRs.
     impl = compute_ready([iss(1, R + ["priority:P1", "role:impl", "area:sparq-core"])])
     p_impl = plan_dispatch(impl, doc)
     chk("impl -> single row", len(p_impl), 1)
     row = p_impl[0]
     chk("impl row", (row["role"], row["model_chain"], row["agent"], row["escalate"]),
-        ("impl", ["opus5"], "sparq-rust-impl", True))
+        ("impl", ["sol", "opus5"], "sparq-rust-impl", True))
     chk("impl package", row["package"], "sparq-core")
     chk("impl priority", row["priority"], 1)
 
@@ -304,15 +303,14 @@ def _self_test():
     chk("docs row has no cheap anthropic tier",
         sorted(set(row["model_chain"]) & {"sonnet", "haiku"}), [])
     chk("docs -> sparq-docs", row["agent"], "sparq-docs")
+    chk("docs -> bounded exhaustion", row["escalate"], True)
 
     # --- Fixture: a ci/infra issue → frontier-only chain (standing rule 2026-07-17) --------------
-    # No sub-frontier model (sonnet/haiku) in the plan row's chain: the registry claim step can
-    # only serve a frontier account or DEFER the item to the next tick — degradation to a cheaper
-    # authoring tier is impossible by construction (see routing-validate's frontier-floor check).
+    # CI is implementation, so the plan row must be Sol-first with the continuity fallback.
     ci = compute_ready([iss(8, R + ["priority:P1", "role:ci", "area:ci"])])
     row = plan_dispatch(ci, doc)[0]
-    chk("ci -> frontier-only row", (row["role"], row["model_chain"], row["agent"], row["escalate"]),
-        ("ci", ["opus5", "sol"], "sparq-ci-infra", False))
+    chk("ci -> Sol-first row", (row["role"], row["model_chain"], row["agent"], row["escalate"]),
+        ("ci", ["sol", "opus5"], "sparq-ci-infra", True))
     chk("ci row has no sub-frontier tier", sorted(set(row["model_chain"]) & {"sonnet", "haiku"}), [])
 
     # --- Fixture: package-conflict pair → only the higher-priority one is planned ----------------
