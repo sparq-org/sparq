@@ -397,6 +397,35 @@ queue as of the §2.1 re-verification**: container-scan no longer triggers on
 container-scan is parallel and off the pole, codeql language-scoping is a small win
 against a security gate the `code_scanning` ruleset expects analyses from.
 
+> **RESOLVED 2026-08-02 (bead sq-6vshe.18) — the memo is
+> `research/change-based-test-selection.md` §10, now the doc-of-record.** [OPUS-5]
+> DOCS-ONLY; no selector behaviour changed.
+> **(i) The argument is codified, and the premise above is CORRECTED.** The union-diff
+> claim ("entry N's diff vs the target tip includes entries 1..N-1") holds *within* a
+> merge group but not *across* speculatively-stacked ones: the repo's own live-verified
+> note (`scripts/merge-group-watchdog.py::queue_ref`, pinned by
+> `test_merge_group_watchdog.py`) records that a group's base is the PREVIOUS group's
+> head, not `main`'s tip. §10.2 replaces the union claim with a telescoping *last-touch*
+> theorem that holds under either reading: the per-group affected sets union to exactly
+> the union-diff set (nothing is lost), and each crate's green transfers to the merged
+> tree because no later group touched its closure. Net conclusion — merge-group selection
+> adds **no** soundness surface beyond PR-level selection; it only redistributes where
+> evidence is collected.
+> **(ii) The P8 stricter-rule decision is closed: KEEP-SELECTED** (§10.5), a
+> proceed-and-document close. `event == merge_group ⇒ mode=full` would cost an estimated
+> **+4–10 m median group wall** on the rust-touching narrow-closure population plus a
+> large multiple of runner-minutes (DERIVED from this record's dated numbers, not a fresh
+> measurement), reverse most of this lever, and remove the pool headroom lever 3 is
+> waiting on — while buying nothing the argument does not already give except insurance
+> against precondition drift. The cheaper equivalent insurance, recommended as the
+> companion follow-up, is a probe that alarms if `grouping_strategy` stops being ALLGREEN
+> or a per-leg name joins `required_status_checks` (today both are one-off manual
+> verifications from sq-fmx4u.4 — the single soft spot).
+> **(iii) The non-extensions above stand, with two corrections** (§10.6): `container-scan`
+> no longer triggers on `merge_group` at all (removed 2026-07-18), and `codeql.yml` is
+> operationally disabled and already class-gated on `merge_group` (sq-g25hr) — so both
+> candidates are not just low-win but largely moot.
+
 ### 3.5 Lever 5 — benchmarks → nightly EC2 (sibling lane; cross-reference only)
 
 The `Benchmarks` merge-group leg ("run + track benchmarks", 233 s + select) gated when
@@ -426,7 +455,7 @@ double-implement.
 | 4 | coverage off merge_group | sq-6vshe.17 | LANDED; **measured** (§3.4a, 2026-08-01) | **−1.5–3.5 m median / −2.8–3.0 m p90 measured**, vs −2–6 m projected | **DONE** |
 | 5 | test-shard rebalance | sq-6vshe.7 (existing, annotated) | SAFE | −3–5 m engine-entry p90 | existing bead — **now the top pole** (§3.4a) |
 | 6 | cache/artifact diet + sccache A/B | sq-6vshe.15 | SAFE, measure-first | −0.5–2 m | SAFE |
-| 7 | selection memo + P8 decision | sq-6vshe.18 | SAFE (docs/audit) | 0 direct; closes an open soundness decision | SAFE-QUICK-WIN |
+| 7 | selection memo + P8 decision | sq-6vshe.18 | **DONE** (docs) — memo in `research/change-based-test-selection.md` §10; P8 closed **keep-selected** (§3.4b RESOLVED) | 0 direct; the stricter rule would have cost ~+4–10 m/group (derived) | **DONE** |
 | 8 | gate waiter off the runner slot | sq-6vshe.19 | SAFE but fiddly | frees 3–6 runner slots during drains | discovered, P3 |
 | — | CodeQL off the blocking path | — | **REJECTED** — measured non-pole (3.8 m), security gate | ~0 | falsified premise |
 

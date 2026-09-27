@@ -57,10 +57,15 @@ small selector script (§7 position P1).
   (three-dot = against the merge-base with the target branch). `--no-renames`
   reports a rename as delete + add so **both** paths are attributed —
   conservative for moves between crates.
-- `merge_group`: same diff against the target branch tip. A queue entry's diff
-  therefore contains the union of every queued change ahead of it — exactly
-  the conservative set, so selection stays sound inside the queue while still
-  saving width (§7 P8).
+- `merge_group`: same diff against the group's base (`merge_group.base_sha`).
+  Within a group the diff is the union of that group's members' changes, so
+  selection stays sound inside the queue while still saving width (§7 P8).
+  **CORRECTED — see §10.1/§10.2 (sq-6vshe.18):** the sentence this bullet used
+  to carry ("against the target branch tip … the union of every queued change
+  ahead of it") is right for the first group of a drain and wrong for a
+  speculatively-stacked one, whose base is the *previous group's* head. The
+  soundness conclusion is unchanged; the argument that carries it is the
+  telescoping last-touch theorem in §10.2, not the union claim.
 - `schedule` / `workflow_dispatch` / the `ci-full` label: no diff — `mode=full`
   (§6).
 - If the base SHA cannot be fetched (shallow-clone trouble, force-push race):
@@ -471,9 +476,15 @@ failed nightly jobs with suspect landed PRs and auto-files a deduplicated issue.
   CodeQL, fuzz, wasm, perf-gate) stay always-run until phase 2 scopes them
   deliberately (bead 6). Minimizes the initial soundness surface where the
   throughput win is smallest.
-- **P8 — selection applies to `merge_group` too**: the queue-entry diff vs
-  the target tip is the union of queued content — conservative by
-  construction, and queue width is where the throughput pain concentrates.
+- **P8 — selection applies to `merge_group` too**: queue width is where the
+  throughput pain concentrates, and skipping there is sound. *(sq-6vshe.18,
+  2026-08-02: the original justification — "the queue-entry diff vs the target
+  tip is the union of queued content, conservative by construction" — is
+  CORRECTED in §10.1 and replaced by the argument in §10.2, which holds for
+  speculatively-stacked groups too. The maintainer's stricter-rule option
+  `event == merge_group ⇒ mode=full` is DECIDED in §10.5: recommendation
+  **keep-selected**, with a precondition-drift probe as the companion
+  mitigation.)*
 - **P9 — the SAFE list starts empty** and only audit-proven entries join it.
 - **P10 — enforce only after the shadow window** (§6.4); nightly full +
   `ci-full` label remain permanent backstops. *(sq-fmx4u.5, 2026-07-03:
@@ -500,3 +511,235 @@ Once enforced, fold the operative rules (§2, §4.1, the scoped-lane table)
 into the AGENTS.md gate documentation, keep the ownership map + selector as
 the living source of truth, and rewrite this record's "will" into "does" — or
 delete it in favor of the CI docs, per the research-record graduation rule.
+
+## 10. Merge-queue selection soundness — the memo, and the P8 decision (sq-6vshe.18)
+
+> **[OPUS-5], 2026-08-02.** Bead sq-6vshe.18 / lever 4b of
+> `research/ci-mergequeue-speedup-2026-07.md` §3.4b. **DOCS-ONLY**: this section changes
+> no selector behaviour. It (a) codifies the soundness argument for running selection on
+> `merge_group`, which until now lived only in a bead note, (b) **corrects** the version
+> of that argument recorded in §3.1 / §7 P8, and (c) closes the maintainer's open
+> stricter-rule decision with a recommendation. Any behaviour change goes through its own
+> PR.
+
+### 10.1 What the queue actually hands the selector
+
+Terminology, because the surrounding records use "entry" loosely. The live ruleset
+(`17688455`, values per `docs/branch-protection.md` §*Merge-queue throughput settings*)
+sets `max_entries_to_merge: 8`, `max_entries_to_build: 3`, `grouping_strategy: ALLGREEN`.
+So the queue folds up to 8 queued PRs into one **merge group**, builds up to 3 groups
+speculatively in parallel, and each group gets **one** transient ref
+(`gh-readonly-queue/<base>/pr-<N>-<sha>`) carrying **one** check-suite. "Entry wall" in
+the profile records is that group's wall. `ci-select.yml` feeds the selector the group's
+`github.event.merge_group.base_sha` / `head_sha` pair and diffs them three-dot.
+
+**Correction to §3.1 and §7 P8.** Both currently say the `merge_group` diff is taken
+"against the target branch tip", so that a queue entry's diff "contains the union of every
+queued change ahead of it". That is right **within** a group and wrong **across
+speculatively-stacked groups**:
+
+- The group ref's trailing SHA is the group's **base**, and the repo's own live-verified
+  note says that base is *the previous group's head*, not `main`'s tip —
+  `scripts/merge-group-watchdog.py::queue_ref` ("VERIFIED against live data … the trailing
+  sha is the group's BASE (the previous entry's head), NOT its head"), the same statement
+  in `AGENTS.md`'s dead-ref runbook, pinned by
+  `scripts/tests/test_merge_group_watchdog.py::test_queue_ref_is_base_keyed_and_matches_live_format`
+  against an observed 2026-07-28 entry.
+- **Honest limit of that evidence:** what is live-verified is the *ref suffix*. That the
+  webhook field `merge_group.base_sha` carries the same commit for a stacked group was
+  **not** re-verified from a live payload here (this pass ran under the no-GitHub-API
+  orchestration contract). It is the obvious reading — the field is the group's parent
+  commit — but treat it as inference. §10.2 is therefore written so the conclusion holds
+  under **either** reading, and the decision in §10.5 does not depend on resolving it.
+
+So the accurate picture is a hybrid, and it is the one §10.2 formalises: **within** a
+group the diff is the union of that group's members' changes; **across** the
+speculative stack the diffs telescope, each against the group before it.
+
+### 10.2 The argument (covers the batch-stacking case)
+
+Fix one drain. Let
+
+- `M` = the `main` tip the first group is built on;
+- `G_1 … G_J` = the groups the queue builds, in order; `tree(G_j)` = `M` plus the members
+  of `G_1 … G_j`;
+- `base_j` = `M` for `j = 1`, else `head(G_{j-1})`; `head_j` = the group commit;
+- `Δ_j` = `git diff --no-renames base_j...head_j` — exactly what the selector sees at
+  group `j` (the union of that group's members' changes);
+- `A_j` = `affected(Δ_j)` = the reverse-dependency closure of the crates owning `Δ_j`, or
+  **all members** whenever `Δ_j` hits a §4.1 trigger, an unowned path, or the selector
+  errors (§4.3).
+
+**Telescoping.** `⋃_{j ≤ J} Δ_j = diff(M...head_J)` — the whole drain's content. (Under
+the alternative reading where every `base_j = M`, each `Δ_j` is already that union; the
+lemma and theorem below both hold trivially, with `J = 1` in effect.)
+
+**Lemma (no crate is lost).** Path→owner attribution and reverse-closure both distribute
+over unions, so `⋃_j A_j = affected(⋃_j Δ_j) = affected(diff(M...head_J))`. The set of
+crates that run **at least once** across the drain is *exactly* the set a single
+union-diff selection would have chosen. Per-group selection does not shrink the covered
+set; it distributes the runs across groups.
+
+**Theorem (last-touch).** For a crate `C`, let `L(C) = max{ j : C ∈ A_j }` (`0` if `C` is
+in no `A_j`). Then for every `j > L(C)`, `C ∉ A_j` means `Δ_j` changed no path owned by —
+or map-attributed to — `C` or any crate in `C`'s transitive dependency closure, **and**
+`Δ_j` tripped no full-run trigger (else `A_j` would be every member and `L(C) = j`).
+Therefore `C` together with its dependency closure is byte-identical between
+`tree(G_{L(C)})` and `tree(G_J)`, and `C`'s green verdict at group `L(C)` — produced on a
+tree that already contained every earlier group's content — transfers to the tree that
+actually merges. For `L(C) = 0`, `C`'s closure is byte-identical to `M`'s, whose verdict
+is the last green `main` (and the nightly full-matrix backstop, §6.1).
+
+**The one assumption is §2's, unchanged.** The step "`Δ_j` touched nothing in `C`'s
+closure ⇒ `C`'s behaviour is unchanged" is precisely the non-interference invariant that
+PR-level selection already rests on. Everything outside a crate's closure is either a
+§4.1 full-run trigger, a map attribution, a `readers` union, or unowned-and-therefore-full.
+**Conclusion: selection on `merge_group` adds no soundness surface beyond selection on
+`pull_request`.** It changes *where* the evidence for a crate is collected — at the group
+that last touched its closure, rather than at every group — not *what* is collected. The
+union-diff framing in §3.1 / P8 is the `J = 1` special case of this.
+
+### 10.3 Load-bearing preconditions
+
+Each is a fact the theorem consumes; if one drifts, re-open the decision.
+
+| # | Precondition | Why the argument needs it | Where it is pinned today |
+|---|---|---|---|
+| 1 | Checks run on the **group ref**, whose tree contains every member of that group and of all preceding groups | makes a group's green a statement about the stacked tree, not about a PR in isolation | GitHub merge-queue mechanics; `ci-summary.yml` triggers on `merge_group` |
+| 2 | A group merges only if its required check is green, and **no member merges without its group's green** — the ALLGREEN posture | under a head-only grouping strategy, "group green" would stop implying "every member was verified on this tree", and the last-touch chain would lose its links | ruleset `17688455` `grouping_strategy: ALLGREEN`, verified in sq-fmx4u.4 (2026-07-03); **not** mechanically pinned — see §10.7 |
+| 3 | **Exactly one** required context, `ci-summary / gate`, always produced (no `if:` guard) | a selection-skipped or unassembled leg must never leave a required check expected-but-missing, which would hang the queue rather than fail it | verified in sq-fmx4u.4 (§5.3 graduation note); the workflow-side properties are pinned hermetically by `test_ci_select_wiring.py::TestRequiredCheckAnchor` |
+| 4 | A failed/dequeued group **re-forms** the stack behind it (new base ⇒ new ref ⇒ new group ⇒ fresh diffs) | keeps the `Δ_j` chain in correspondence with the sequence that actually merges | GitHub queue mechanics; the base-keyed ref format is what makes a base change a *different* group |
+| 5 | The merge is a **fast-forward** of the group head onto `main` | `tree(G_J)` is what lands, and every `tree(G_j)` is an ancestor of it | `research/ci-mergequeue-speedup-2026-07.md` §2.4 ("every queue merge fast-forwards main") |
+| 6 | The selector is **fail-closed** — §4.1 trigger, unowned path, or any internal error ⇒ `mode=full` for that group | every escape hatch enlarges `A_j`; monotone enlargement can only strengthen the theorem | `ci_select.py` (§4.3) + the selector self-tests |
+
+Note that precondition 2 is the only one whose current evidence is a **one-off manual
+API read** rather than a test or a mechanism. That is the decision's real soft spot, and
+§10.7 proposes the cheap fix.
+
+### 10.4 What would actually break it
+
+- **Grouping strategy changed away from ALLGREEN** (precondition 2). The highest-value
+  thing to alarm on.
+- **A per-leg check name added to `required_status_checks`** (precondition 3). Then a
+  selection-skipped leg (`skipped`) is still satisfying, but an *assembly-filtered* leg
+  (no check-run at all — the §5.2 erratum's mechanism for feature-matrix legs) becomes
+  expected-but-missing and hangs the queue to the 60-minute timeout. This is a
+  liveness break, not a soundness break, but it is the more likely drift.
+- **A hidden cross-crate input** that is neither owned, mapped, `readers`-unioned, nor a
+  §4.1 trigger. This breaks PR-level selection identically — it is not specific to the
+  queue — and is exactly what `scripts/ci_audit_inputs.py` (`KNOWN_RESIDUALS` now empty,
+  §4.2) and the nightly backstop exist to fence.
+- **Reusing a group's green across a re-formed stack** (precondition 4). Not something
+  this repo can cause; listed so a future queue-feature change is checked against it.
+
+### 10.5 The decision — keep selection on `merge_group`
+
+The maintainer's open option is a one-line selector change: make `merge_group` fall into
+the same arm as `push`/`schedule` in `ci_select.py::main`, i.e. `event == merge_group ⇒
+mode = full`.
+
+**What it would change.** Every rust-touching group would rebuild the full per-crate test
+matrix, the full ~50-leg feature matrix, and the full nextest filterset — reversing most
+of lever 4 and re-widening the build→shard serial chain that the 2026-08-01 re-sample
+identified as the *current* pole.
+
+**What it would NOT change** (worth stating, because it bounds the cost):
+
+- the **change-class gate** is a separate conjunct — `ci.yml`'s `changes` job computes
+  `rust_changed` from `ci_select.py --classify-only` on the same batch diff, and every
+  heavy lane guards on `rust_changed == 'true' && <selection guard>`. A docs-only /
+  orchestration-only / deploy-only / inert-mixed batch would still skip the Rust lanes.
+  The ~2–4 m mode carrying 9–15 % of groups in the §3.4a sample is that population, and
+  the stricter rule does not touch it;
+- the **coverage demotion** (sq-6vshe.17) is keyed on `github.event_name`, not on
+  selection mode, so the demoted MEASURE legs stay demoted either way;
+- the **fail-safe** direction: `mode=full` is already what every §4.1 trigger and every
+  selector error produce, so the stricter rule adds no new mechanism — it just makes the
+  fail-safe unconditional on this event.
+
+**Cost — DERIVED, not measured.** No experiment was run for this memo; the figures below
+are re-derived from the dated measurements already in
+`research/ci-mergequeue-speedup-2026-07.md`, and each is a *steering estimate*, not a
+canonical number.
+
+| Component | Basis (dated) | Effect of the stricter rule |
+|---|---|---|
+| test shards forced back on | 2026-07-10: a group with **all** test shards selection-skipped walled at 11.9 m (coverage was then the pole) vs 18.9 m for an engine-touching group | the narrow-closure population loses roughly that gap; the post-.17 pole is now the build→archive → slowest-shard serial chain, which this puts back on every group |
+| feature matrix widened | 2026-07-10: 5.8 m median / 10.4 m p90 at ~15–20 selected engine legs; full set ≈ 50 legs | wall grows sub-linearly (it is set by slowest leg + queue delay), pool load ~2.5–3× |
+| pool contention feedback | 43–225 s per-job runner-queue delay observed during a 3-entry burst; the 2026-07-02 congestion-collapse episode | worsens; also removes the headroom that lever 3's `max_entries_to_build` 3→5 is waiting on |
+| inert batches | §3.4a bimodal sample | unchanged (gated by change-class, above) |
+
+Netting those: **on the order of +4–10 m median group wall** for the affected
+(rust-touching, narrow-closure) population, plus a large multiple of runner-minutes. The
+honest characterisation is that the stricter rule would give back most of what lever 4
+bought and would push against levers 1 and 3 as well.
+
+**What it would buy.** Nothing that §10.2 does not already give — *except* robustness
+against the §10.3 preconditions drifting silently. That is a real benefit, but it is
+insurance, and there is a far cheaper policy that buys the same insurance (§10.7).
+
+**RECOMMENDATION — KEEP SELECTION ON `merge_group` (Option A). Do not adopt
+`event == merge_group ⇒ mode=full`.** Rationale, in order:
+
+1. The argument in §10.2 is complete under one assumption, and that assumption is the
+   *same* §2 non-interference invariant PR-level selection already runs on and which the
+   maintainer has already accepted. The stricter rule would leave that assumption fully
+   load-bearing at PR level while paying merge-queue prices to hedge it once more.
+2. The residual is already fenced twice over: the **nightly full-matrix backstop**
+   (`schedule` ⇒ `mode=full`, asserted fail-loud by the `selection-backstop` job) re-runs
+   everything any group skipped, and the **sq-va7at selection alarm** correlates a failed
+   nightly job against the landed commits whose selection replay skipped that crate. Its
+   replay unit is `git diff --no-renames <sha>^ <sha>` — one *landed commit* against its
+   parent (squash-merge ⇒ one commit per PR), which is **finer** than a group's `Δ_j`: a
+   group's diff is the union of its members' commits, and since attribution and closure
+   distribute over unions (§10.2 lemma), a per-commit replay yields an affected set no
+   larger, hence a skip-set no smaller, than the group actually used. The detector is
+   therefore conservative in the safe direction — it can name a crate as a suspect that a
+   sibling PR in the same group had already pulled into the closure, never the reverse.
+3. The fast **coverage floor gates** (test-presence, floor monotonicity, shard partition)
+   were deliberately kept on `merge_group` by sq-6vshe.17, so no batch can silently lower
+   a committed floor even though the instrumented measurement is demoted.
+4. The `ci-full` label and `workflow_dispatch` remain the auditable per-case overrides,
+   and `CI_SELECT_MODE=shadow` remains the global rollback.
+
+This is a **proceed-and-document** close: the recommendation is recorded here with its
+argument and its preconditions, the stricter rule is documented as a one-line change that
+can be adopted at any time, and nothing is stalled waiting on the maintainer. If the
+maintainer prefers Option B, the change is one arm of one conditional in
+`ci_select.py::main` plus its selector self-test — a single follow-up PR.
+
+### 10.6 Explicit non-extensions (REJECTED — recorded so they are not re-litigated)
+
+Lever 4 is **not** extended to these lanes. Two of the three verdicts recorded in
+`ci-mergequeue-speedup-2026-07.md` §3.4b need a correction, because the lane set moved
+under them:
+
+| Candidate | 2026-07-10 rationale | Verdict now |
+|---|---|---|
+| conformance ratchets | 44–76 s each, run in parallel, **never the pole** | **REJECTED, unchanged.** Real risk (these are the specification-compliance lanes), no measurable win |
+| container-scan | 3.6 m, parallel | **REJECTED, and now moot.** `container-scan.yml` no longer triggers on `merge_group` at all — the trigger was removed under the 2026-07-18 maintainer directive (the scan gates the PR via its paths filter, re-runs on push-to-main, and has a weekly schedule). There is nothing left on the queue to scope |
+| CodeQL language-scoping | security gate, 3.8 m, the `code_scanning` ruleset expects analyses | **REJECTED, and mostly moot.** `codeql.yml` still declares `merge_group:` but is recorded as operationally disabled since 2026-07-18 (`docs/branch-protection.md`; §3.3 RESOLVED note), so it produces no check-run on any trigger today. It also already carries a *change-class* gate on `merge_group` (sq-g25hr) — the cheap, sound half of the idea. Per-language scoping stays rejected: small win, real risk on a security surface. PR #3427 owns the successor policy |
+
+The general rule these three instantiate: **scope a lane only when it is on the critical
+path**. A lane that runs in parallel and finishes well before the pole contributes zero
+wall-clock, so scoping it converts a pure-risk change into a zero-win one.
+
+### 10.7 Open items (follow-ups, not done here)
+
+1. **Precondition drift probe (the cheap substitute for Option B).** Nothing mechanical
+   asserts `grouping_strategy == ALLGREEN` or `required_status_checks == [gate]` — both
+   were verified once by hand in sq-fmx4u.4, and `TestRequiredCheckAnchor` is hermetic by
+   design (it pins the *workflow* side, deliberately making no API call). A scheduled
+   read-only probe that alarms on either value changing would fence the one soft spot in
+   §10.3 for a fraction of the stricter rule's cost. This is the recommended companion to
+   Option A.
+2. **Settle the `merge_group.base_sha` semantics** for a stacked group from a live payload
+   and, if it is the previous group's head as §10.1 infers, correct the inline comment in
+   `.github/workflows/ci-select.yml` (which currently says "target-tip … the union of
+   queued content"). Comment-only; no behaviour change; kept out of this docs-only bead
+   because it touches `.github/**`.
+3. **Measure the stricter rule's cost properly, if it is ever seriously considered.** A
+   clean natural experiment already exists in the data: compare `merge_group` groups whose
+   `select` reported `mode=full` (via a §4.1 trigger) against same-window groups reporting
+   `mode=selected`. That converts the derived +4–10 m band in §10.5 into a measurement
+   without changing anything.
