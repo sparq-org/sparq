@@ -335,16 +335,50 @@ pub enum Format {
 
 // ===== [FABLE-5] sq-7d3dj.32.2.7 — the V2 EMIT config gate =====
 //
-// The V2 *reader* ships unconditionally with `mmap`, but a build EMITS `SPQCPRM1` by DEFAULT
-// (V2 is not defaulted on — a separate decision pending a clearly-positive real-data B/triple
-// measurement). Turning on the `spqcprm2` feature and selecting `EmitFormat::V2` (via
-// `with_emit_format` in tests, or `SPARQ_EMIT_FORMAT=v2` in a process) makes the store's
-// compressed save path and the streaming `CompressedPermWriter` write `SPQCPRM2` instead.
+// The V2 *reader* ships unconditionally with `mmap`, but a build EMITS `SPQCPRM1` by DEFAULT.
+// Turning on the `spqcprm2` feature and selecting `EmitFormat::V2` (via `with_emit_format` in
+// tests, or `SPARQ_EMIT_FORMAT=v2` in a process) makes the store's compressed save path and the
+// streaming `CompressedPermWriter` write `SPQCPRM2` instead.
 //
 // Mirrors the `with_build_compressed` per-thread override (lib.rs): a thread-local read once
 // on the writing thread, so a test never mutates the process-global environment (the
 // `set_var`/`getenv` data race under parallel `cargo test`). With the feature OFF the whole
 // gate compiles out and `emit_format()` is a `const V1`, so the default build cannot emit V2.
+//
+// ===== [OPUS-5] sq-sh7be — the V2-DEFAULT FLIP DECISION: **NO**, V2 stays opt-in =====
+//
+// The flip was gated on a clearly-positive B/triple measurement. It is not one, and settling
+// that needed NO quiet-box run: the encoded length of a block is a PURE, DETERMINISTIC function
+// of its rows (varint byte counts), so the size half of the decision is host-independent and
+// reproducible anywhere. `v2_size_delta_is_shape_dependent_not_a_uniform_win` measures it
+// directly over all six permutations and pins the finding:
+//
+//   * on a col2-CLUSTERED corpus (the shape the frame-of-reference was designed for) V2 is
+//     materially SMALLER than V1, and the win widens with scale;
+//   * on a corpus whose objects are spread over a wide domain V2 is consistently LARGER —
+//     zigzag DOUBLES the offset's magnitude, so once `|r[2] - first_col2|` is comparable to
+//     `r[2]` itself the frame offset costs a varint byte the absolute id did not.
+//
+// So V2 is a SHAPE-DEPENDENT TRADE, not a uniform win, and a blanket default flip would
+// silently regress every non-clustered corpus. A canonical EC2 B/tri+RSS run cannot overturn
+// that — the regression is arithmetic on the emitted bytes, not measurement noise — so the
+// decision is taken now rather than left parked on a box that would not change the answer.
+//
+// The size regression above is on its own sufficient to block the flip, so DECODE cost was not
+// what the decision turned on — and it is NOT claimed to be measured here. What IS pinned is an
+// ENCODING property: a block containing no `reset_d1` row encodes BYTE-IDENTICALLY under both
+// formats (asserted by `v2_stream_is_byte_identical_when_no_reset_d1`), i.e. the two encoders
+// differ only in the `reset_d1` payload. That is a statement about emitted bytes, NOT about
+// runtime: a V2 perm still decodes through the separate `decode_block_v2_at` (dispatched per
+// block in `decode_block_at`, and capturing the frame origin once per block) whatever its rows
+// look like, so equal bytes do not imply equal decode work. Quantifying V2's decode overhead
+// would need a decode benchmark that covers that dispatch and per-block work; nobody has run
+// one, and the flip does not depend on it.
+//
+// WHAT WOULD RE-OPEN THIS: not more benchmarking of the blanket flip, but a different design —
+// a PER-PERMUTATION (or per-block) format choice that emits V2 only where it measures smaller,
+// which needs a selector + a mixed-format directory and is its own piece of work. Both tests
+// above go RED if the shape-dependence ever stops holding, which is the signal to revisit.
 
 /// [FABLE-5] sq-7d3dj.32.2.7 — which block-stream [`Format`] a build EMITS when writing a
 /// compressed permutation. Distinct from a perm's own `format` field: this is the *policy*
@@ -2916,5 +2950,129 @@ mod tests {
             );
         }
         println!("===== end measurement — verdict in the bead note / PR body =====\n");
+    }
+
+    // ===== [OPUS-5] sq-sh7be — the V2-DEFAULT FLIP DECISION (see the emit-gate comment) =====
+
+    /// A sorted permutation whose col2 (object) is drawn from a WIDE domain — the ADVERSE shape
+    /// for the frame-of-reference, and the complement of `clustered_col2_sample`. Subjects
+    /// repeat (long equal-col0 runs) and predicates churn, so `reset_d1` rows are dense, but the
+    /// objects are spread far enough that a block's `|r[2] - first_col2|` is comparable to `r[2]`
+    /// itself — and zigzag doubles that magnitude, so the frame offset costs MORE varint bytes
+    /// than the absolute id V1 writes. Deterministic (fixed-seed xorshift), like every other
+    /// sampler here, so the byte counts it produces are reproducible on any host.
+    #[cfg(feature = "spqcprm2")]
+    fn wide_col2_sample(n: usize) -> Vec<[Id; 3]> {
+        let mut v = Vec::with_capacity(n);
+        let mut state = 0x51ed_2701u32;
+        let mut next = || {
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+            state
+        };
+        for _ in 0..n {
+            let s = 1 + (next() % (n as u32 / 32).max(1)); // long equal-subject runs
+            let p = 1 + (next() % 30); // predicate churn → dense reset_d1 rows
+            let o = 1 + (next() % 40_000_000); // objects spread across a wide domain
+            v.push([s, p, o]);
+        }
+        v.sort_unstable();
+        v.dedup();
+        v
+    }
+
+    /// Total encoded block-stream bytes for `triples` under BOTH formats, summed over all six
+    /// permutations (the store's real cost), plus the `reset_d1` row count. Encoded length is a
+    /// pure function of the rows, so this is exact and host-independent — no timing involved.
+    #[cfg(feature = "spqcprm2")]
+    fn v1_v2_stream_bytes(triples: &[[Id; 3]]) -> (u64, u64, u64) {
+        const ORDERS: [[usize; 3]; 6] = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]];
+        let (mut v1, mut v2, mut resets) = (0u64, 0u64, 0u64);
+        for order in ORDERS {
+            let mut rows: Vec<[Id; 3]> =
+                triples.iter().map(|t| [t[order[0]], t[order[1]], t[order[2]]]).collect();
+            rows.sort_unstable();
+            rows.dedup();
+            for chunk in rows.chunks(BLOCK) {
+                let (mut b1, mut b2) = (Vec::new(), Vec::new());
+                encode_block(chunk, &mut b1);
+                encode_block_v2(chunk, &mut b2);
+                v1 += b1.len() as u64;
+                v2 += b2.len() as u64;
+                // A `reset_d1` row: leading column held, middle column moved → col2 is re-based.
+                resets += chunk.windows(2).filter(|w| w[1][0] == w[0][0] && w[1][1] != w[0][1]).count() as u64;
+            }
+        }
+        (v1, v2, resets)
+    }
+
+    /// [OPUS-5] sq-sh7be — the DECISION EVIDENCE for the V2-default flip, and the guard that
+    /// keeps it honest. Unlike `v2_measure_bytes_per_triple` (`#[ignore]`d, and measured only on
+    /// the shape V2 was designed to win on) this runs in the ordinary suite and measures BOTH
+    /// sides, because "is V2 smaller?" has no single answer:
+    ///
+    ///   * col2-CLUSTERED → V2's stream is strictly SMALLER (the frame offset beats the absolute);
+    ///   * WIDE col2      → V2's stream is strictly LARGER (zigzag doubles the offset magnitude).
+    ///
+    /// Both directions are exact integer byte comparisons over deterministic samplers, so this is
+    /// reproducible on any host and needs no quiet box — which is precisely why the flip decision
+    /// did not have to wait for one. The conclusion it pins is that V2 is a shape-dependent trade,
+    /// so it stays OPT-IN; if either direction ever stops holding, this test goes RED and the
+    /// decision must be re-taken rather than silently inherited.
+    #[cfg(feature = "spqcprm2")]
+    #[test]
+    fn v2_size_delta_is_shape_dependent_not_a_uniform_win() {
+        // Favourable shape: the frame-of-reference must actually pay off where it was aimed.
+        let clustered = clustered_col2_sample(50_000);
+        let (v1, v2, resets) = v1_v2_stream_bytes(&clustered);
+        assert!(resets > 0, "clustered sample has no reset_d1 rows — the comparison would be vacuous");
+        assert!(
+            v2 < v1,
+            "SPQCPRM2 must be SMALLER than SPQCPRM1 on a col2-clustered corpus (v1={}, v2={}, reset_d1={})",
+            v1, v2, resets
+        );
+
+        // Adverse shape: the same encoder must be shown to LOSE, which is what blocks the flip.
+        let wide = wide_col2_sample(50_000);
+        let (v1, v2, resets) = v1_v2_stream_bytes(&wide);
+        assert!(resets > 0, "wide sample has no reset_d1 rows — the comparison would be vacuous");
+        assert!(
+            v2 > v1,
+            "SPQCPRM2 is expected to be LARGER than SPQCPRM1 on a wide-object corpus; if this no \
+             longer holds, the sq-sh7be V2-default decision must be re-taken (v1={}, v2={}, reset_d1={})",
+            v1, v2, resets
+        );
+    }
+
+    /// [OPUS-5] sq-sh7be — the ENCODER-DIVERGENCE anchor. `encode_block_v2` is documented as
+    /// byte-for-byte identical to `encode_block` except at `reset_d1` rows; this asserts that
+    /// documented claim directly on a block stream that contains NO `reset_d1` row (one subject,
+    /// one predicate, strictly increasing objects — every row takes the `d0 == 0 && d1 == 0`
+    /// arm), and checks the converse is non-vacuous on a `reset_d1`-bearing stream.
+    ///
+    /// Scope, deliberately: this observes EMITTED BYTES only. It does NOT bound decode cost — a
+    /// V2 perm is still dispatched to `decode_block_v2_at`, which captures the frame origin once
+    /// per block whether or not the block holds a `reset_d1` row, so byte equality does not imply
+    /// equal decode work. Any runtime claim about V2 needs a decode benchmark, not this test.
+    #[cfg(feature = "spqcprm2")]
+    #[test]
+    fn v2_stream_is_byte_identical_when_no_reset_d1() {
+        // Spans several blocks so block re-entry (where V2 captures its frame origin) is covered.
+        let rows: Vec<[Id; 3]> = (0..5_000u32).map(|i| [1, 1, 1 + i * 7]).collect();
+        let (mut b1, mut b2) = (Vec::new(), Vec::new());
+        for chunk in rows.chunks(BLOCK) {
+            encode_block(chunk, &mut b1);
+            encode_block_v2(chunk, &mut b2);
+        }
+        assert!(rows.len() > BLOCK, "sample must span multiple blocks");
+        assert_eq!(b1, b2, "with no reset_d1 row the V2 stream must be byte-identical to V1");
+        // And the identity is not vacuous — the same encoders DO diverge once reset_d1 rows exist.
+        let (mut c1, mut c2) = (Vec::new(), Vec::new());
+        for chunk in clustered_col2_sample(2_000).chunks(BLOCK) {
+            encode_block(chunk, &mut c1);
+            encode_block_v2(chunk, &mut c2);
+        }
+        assert_ne!(c1, c2, "encoders must diverge on a reset_d1-bearing stream (else the test is vacuous)");
     }
 }

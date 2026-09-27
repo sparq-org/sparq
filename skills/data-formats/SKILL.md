@@ -726,9 +726,21 @@ cargo build -p sparq-cli --features serialize-rdf
     existing `SPQCPRM1` file on disk keeps decoding byte-identically forever** (the backward-compat
     soundness invariant). ANY OTHER 8-byte magic is a loud, clean `Err` — never a silent misdecode
     (mutation-witnessed in `mmap_corruption_oracle`).
-  - **A build EMITS `SPQCPRM1` by DEFAULT.** V2 is NOT defaulted on (a separate decision pending a
-    clearly-positive real-data B/triple measurement — the col2-clustered synthetic win did NOT hold
-    on WatDiv). The `spqcprm2` cargo feature (which implies `mmap`) exposes the emit config gate:
+  - **A build EMITS `SPQCPRM1` by DEFAULT.** V2 is NOT defaulted on, and that is now a SETTLED
+    decision ([OPUS-5] sq-sh7be), not a pending one: a block's encoded length is a pure function of
+    its rows, so the size question is deterministic and host-independent — and it answers both ways.
+    V2 is smaller on a col2-clustered corpus (its design target) but LARGER on a wide-object one,
+    because zigzag doubles the frame offset's magnitude, so once that offset is comparable to the
+    absolute id it costs an extra varint byte. The earlier synthetic win likewise did NOT hold on
+    WatDiv. A shape-dependent trade cannot be a blanket default, so V2 stays opt-in; re-opening it
+    means a per-permutation format selector, not more benchmarking of the blanket flip. Both
+    directions are pinned by `v2_size_delta_is_shape_dependent_not_a_uniform_win`, and
+    `v2_stream_is_byte_identical_when_no_reset_d1` pins the *encoding* property that the two
+    encoders differ only in the `reset_d1` payload — an emitted-bytes claim, NOT a decode-cost
+    bound: a V2 perm always decodes through the separate `decode_block_v2_at`, which captures the
+    block's frame origin whether or not the block holds a `reset_d1` row, and V2's decode cost has
+    not been benchmarked (the size result alone settles the flip). The `spqcprm2` cargo feature
+    (which implies `mmap`) exposes the emit config gate:
     `compress::with_emit_format(EmitFormat::V2, || …)` on a thread, or `SPARQ_EMIT_FORMAT=v2` for a
     process, routes the store's `save_compressed`, the streaming `CompressedPermWriter`, AND the
     in-RAM compressed profile (`TripleStore::from_triples_compressed` / `Graph::into_compressed`,
