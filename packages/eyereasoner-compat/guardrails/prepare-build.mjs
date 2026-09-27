@@ -24,7 +24,14 @@ if (!hasWasmPack) {
       'wasm engine — `wasm-pack` was not found on PATH. Install the toolchain, then reinstall:',
       '',
       '    rustup target add wasm32-unknown-unknown',
-      '    cargo install wasm-pack --locked',
+      '    cargo install wasm-pack --locked --version =0.15.0',
+      '',
+      // [OPUS-5] #5777: same pin as js/guardrails/prepare-build.mjs — the `with: version:`
+      // input to jetli/wasm-pack-action in .github/workflows/js.yml. `=0.15.0` is cargo's
+      // exact requirement; a bare `0.15.0` would float across the 0.15.x range, and each
+      // wasm-pack release carries its own wasm-bindgen CLI. Held in step with the workflow
+      // by scripts/tests/test_js_wasm_pack_install.py.
+      'That is the wasm-pack CI installs; an unpinned one bundles a wasm-bindgen CLI no lane tests.',
       '',
       'Or depend on the published @sparq-org/eyereasoner-compat registry tarball (ships prebuilt).',
     ].join('\n'),
