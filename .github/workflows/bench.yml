@@ -58,8 +58,16 @@ on:
   # entirely on draft PR heads — see its `if:` guard + docs/branch-protection.md
   # §Draft-tier CI). This is independent of the label guard above and AND-composes
   # with it on the `bench` job.
+  # [OPUS-5] #5215 CHECK-RUN ECONOMY: `unlabeled` is DELIBERATELY NOT a trigger — a
+  # guarded no-op run still announces one `skipped` check-run per job definition, and
+  # each review-pipeline label flip is a remove+add PAIR. Sound because both labels this
+  # workflow reads (`ci-full`, `bench-full` — the latter only ADDS the well-known-suite
+  # toolchains) are MONOTONE OPT-INS TO MORE WORK: not re-running on a removal leaves a
+  # strict superset of the required coverage. Full rationale: ci.yml's `pull_request`
+  # note. The `["labeled","unlabeled"]` guards below are kept verbatim (still correct,
+  # and safe if `unlabeled` returns). Pinned by scripts/tests/test_label_trigger_economy.py.
   pull_request:
-    types: [opened, synchronize, reopened, labeled, unlabeled, ready_for_review]
+    types: [opened, synchronize, reopened, labeled, ready_for_review]
   # [FABLE-5] (sq-6vshe.6, MAINTAINER-DIRECTED) merge_group REMOVED. The deterministic
   # byte-count ratchet is a pure function of the code: it already ran + hard-gated on the
   # PR head (--deterministic-only above), it re-runs on push-to-main below, and the

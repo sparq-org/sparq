@@ -58,10 +58,18 @@ on:
     branches: [main]
   # [FABLE-5] Draft-tier CI: default types + ready_for_review (the un-draft moment
   # must re-run the wasm-equality leg a draft head may have scoped out) +
-  # labeled/unlabeled (the `ci-full` label toggle must re-evaluate the draft-tier
-  # scope decision in the artifact-exact-equality decide step below).
+  # labeled (the `ci-full` label toggle must re-evaluate the draft-tier scope
+  # decision in the artifact-exact-equality decide step below).
+  # [OPUS-5] #5215 CHECK-RUN ECONOMY: `unlabeled` is DELIBERATELY NOT a trigger — a
+  # label-flip run still announces one check-run per job definition, and each
+  # review-pipeline flip is a remove+add PAIR. Sound because the only label this
+  # workflow reads (`ci-full`, in the decide step's `CI_FULL_LABEL`) is a MONOTONE
+  # OPT-IN TO MORE WORK — it can only WIDEN the draft-tier scope decision to RUN —
+  # so not re-running on its removal leaves a strict superset of the required
+  # coverage. Full rationale: ci.yml's `pull_request` note. Pinned by
+  # scripts/tests/test_label_trigger_economy.py.
   pull_request:
-    types: [opened, synchronize, reopened, labeled, unlabeled, ready_for_review]
+    types: [opened, synchronize, reopened, labeled, ready_for_review]
   merge_group:
 
 permissions:

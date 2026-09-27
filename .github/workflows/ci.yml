@@ -40,8 +40,32 @@ on:
   # draft-tier guards below are independent and AND-compose on each affected job:
   # a non-`ci-full` label flip stays a no-op regardless of draft state, and a draft
   # head stays tier-reduced regardless of label events.
+  #
+  # [OPUS-5] #5215 CHECK-RUN ECONOMY — `unlabeled` is DELIBERATELY NOT A TRIGGER.
+  # A guarded no-op run is not free: it still ANNOUNCES a `skipped` check-run for
+  # every JOB DEFINITION in every workflow the event started. (Job-level `if:` is
+  # evaluated before the matrix expands — which is why GitHub documents the `matrix`
+  # context as unavailable there, and why the #5215 counts show one row per skipped
+  # job whether or not it carries a matrix.) #5215 measured 538 of 639 check-runs on
+  # one head SHA as `skipped` no-ops, spread over ~13 generations of these same
+  # workflows, at a cost of 7 paginated reads per PR to the agent-registry
+  # dispatcher. This repo's own note above records that the review pipeline flips
+  # `review:*`/`status:*` labels several times per round; each such state transition
+  # is a remove+add PAIR, so subscribing to both events doubled that no-op class.
+  # (Those counts are quoted from #5215's measurement, not re-measured here.)
+  # WHY DROPPING THE REMOVAL EVENT IS SOUND (and does not change what is verified):
+  # every label this workflow reads is a MONOTONE OPT-IN TO MORE WORK — `ci-full`
+  # only ever maps to `ci_select.py --full`. Removing it can therefore only ever ask
+  # for LESS than the run already on this head SHA, so not re-running on the removal
+  # leaves a strict SUPERSET of the required coverage; it can never under-test.
+  # ADDING a label still triggers (`labeled` stays), so the `ci-full` opt-in works
+  # exactly as before. The `["labeled","unlabeled"]` guards below are kept VERBATIM:
+  # they remain correct, and they keep this workflow safe if `unlabeled` is ever
+  # restored. Both halves are pinned by scripts/tests/test_label_trigger_economy.py —
+  # that `unlabeled` is absent, AND that no label these workflows read is a NEGATIVE
+  # condition (a label whose REMOVAL enables work would break the argument above).
   pull_request:
-    types: [opened, synchronize, reopened, labeled, unlabeled, ready_for_review]
+    types: [opened, synchronize, reopened, labeled, ready_for_review]
   # [OPUS-4.8] Merge queue: re-run the identical PR check-set on the queue's
   # merge_group ref so the required ci-summary gate finds the same siblings it finds
   # on a PR. The per-commit `coverage` job (if: event_name != 'schedule') runs here;
