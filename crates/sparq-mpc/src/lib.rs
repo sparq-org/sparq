@@ -255,6 +255,17 @@ pub mod prss;
 // shares when redundancy is present. Closes malicious-security gap (D) at the
 // Shamir layer (parent bead sq-uu0u). See the module docs for the threat model.
 pub mod robust;
+// [OPUS-5] sq-dz10l (Phase 6, epic sq-0dksu; design record
+// research/security-properties-ontology-design.md §5c): the machine-readable
+// per-protocol security-properties annotation graph. Records, per `mpc:` protocol IRI,
+// the `secx:HonestMajority` / `secx:SemiHonest` ASSUMPTIONS each guarantee rests on, so
+// a preference requiring malicious-security or dishonest-majority EXCLUDES the affected
+// protocols mechanically rather than by reading the prose caveats. Pinned to
+// `backend::SecurityDescriptor` by a drift guard, so it cannot become a stale parallel
+// truth. RECORDS claims + their epistemic basis; proves nothing (sq-qhy4). Behind the
+// default-OFF `secprop-annotations` feature — the lean default build is unchanged.
+#[cfg(feature = "secprop-annotations")]
+pub mod secprop;
 pub mod shamir;
 // [OPUS-4.8] sq-18lk: oblivious shuffle (Waksman/Benes net) + sort (Batcher
 // odd-even mergesort) substrate over Shamir Fp — the keystone hidden-regime primitive
