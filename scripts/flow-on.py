@@ -83,6 +83,19 @@ _pad = _load_script_module("pub_api_diff")
 # the three triage surfaces can never drift.
 _triage = _load_script_module("triage")
 
+# [OPUS-5] (#5701) The documented `<!-- flow-on-exempt: reason -->` crate-README
+# escape hatch. Gate G1 owns the marker's definition (scripts/gate-new-crate.py);
+# we import rather than re-implement so the proactive and reactive halves cannot
+# drift on what "exempt" means. Effect here: every ADDED path belonging to an
+# exempt NEW crate is dropped from the `when_new_paths` pool and from the
+# placeholder context, so no rule can mint a new-crate follow-on for that crate.
+# Note the shipped rule table currently has NO rule that fires on a new crate
+# (flow-on-rules.toml deliberately leaves new-crate completeness to G1) — this
+# makes the hatch hold for the safety-net rule that file describes restoring.
+_g1 = _load_script_module("gate-new-crate")
+
+_CRATE_PATH_RE = re.compile(r"^crates/([^/]+)/")
+
 # [FABLE-5] (#2474) Default priority for minted follow-ons, matching the retriage
 # cron's convergence default (scripts/retriage.py DEFAULT_PRIORITY).
 DEFAULT_PRIORITY = "priority:P3"
@@ -338,6 +351,28 @@ def key_marker(dedup_key: str) -> str:
     return f"<!-- flow-on-key: {dedup_key} -->"
 
 
+def drop_exempt_new_crate_paths(
+    added: list[str], exempt: set[str] | None = None
+) -> list[str]:
+    """Remove every ADDED path under a new crate that waives follow-on machinery.
+
+    A crate is exempt when its README carries `<!-- flow-on-exempt: reason -->`
+    (design §2.1 / the AGENTS.md new-crate row), read via gate G1's shared
+    reader. `exempt` may be supplied to keep a caller (or a test) off disk; when
+    omitted the marker is read from the checkout, where a merged PR's new crate
+    README is present. Only crates NEWLY ADDED by this PR are considered — the
+    marker is the new-crate hatch, not a blanket per-crate mute."""
+    if exempt is None:
+        exempt = set(_g1.exempt_crates(added))
+    if not exempt:
+        return added
+    return [
+        p
+        for p in added
+        if not ((m := _CRATE_PATH_RE.match(p)) and m.group(1) in exempt)
+    ]
+
+
 def evaluate(
     rules: list[Rule],
     pr: int,
@@ -346,7 +381,12 @@ def evaluate(
     added: list[str],
     labels: list[str],
     pub_changed: set[str] | None = None,
+    exempt_crates: set[str] | None = None,
 ) -> list[FollowOn]:
+    # [OPUS-5] (#5701) Honour the crate-README escape hatch before anything reads
+    # `added`: an exempt new crate must reach neither the `when_new_paths` pool
+    # nor the {crate} placeholder.
+    added = drop_exempt_new_crate_paths(added, exempt_crates)
     ctx = build_context(pr, pr_title, changed, added)
     out: list[FollowOn] = []
     seen_keys: set[str] = set()
@@ -617,7 +657,26 @@ def main(argv: list[str] | None = None) -> int:
     else:
         title, changed, added, labels, pub_changed = fetch_pr_inputs(args.pr)
 
-    follow_ons = evaluate(rules, args.pr, title, changed, added, labels, pub_changed)
+    # [OPUS-5] (#5701) Report the escape hatch before evaluating, so a suppressed
+    # new crate is visible in the run log rather than an unexplained silence.
+    exempt = _g1.exempt_crates(added)
+    for crate, reason in exempt.items():
+        print(
+            f"flow-on: crates/{crate} carries `<!-- flow-on-exempt: {reason} -->` in "
+            "its README — its new-crate follow-ons are suppressed; record the "
+            "decision as a bead."
+        )
+
+    follow_ons = evaluate(
+        rules,
+        args.pr,
+        title,
+        changed,
+        added,
+        labels,
+        pub_changed,
+        exempt_crates=set(exempt),
+    )
 
     if not follow_ons:
         print(f"flow-on: no rules triggered for PR #{args.pr}.")
