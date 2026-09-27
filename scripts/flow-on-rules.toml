@@ -32,6 +32,9 @@
 #   when_new_paths    = ["glob", ...]  # like when_paths but only counts ADDED files (status "A")
 #   exclude_new_paths = ["glob", ...]  # added paths matching these are DROPPED from the
 #                                      #   when_new_paths pool (a sub-tree owned by another gate)
+#   unless_paths      = ["glob", ...]  # SUPPRESSION: the rule does NOT fire if any CHANGED
+#                                      #   path matches — "the merged PR already did this
+#                                      #   follow-on's work", so asking again would be noise
 #   when_label        = "label"        # PR must carry this label (opt-in rules)
 #   when_title        = "regex"        # case-insensitive regex over the PR title
 #
@@ -42,6 +45,7 @@
 #   #   {suite}       bench suite dir name, when a bench/<suite>/... path matched
 #   #   {surface}     skill surface dir name, when a skills/<surface>/... path matched
 #   #   {zk_circuit}  top-level zk/ circuit family dir (excludes zk/compose/; never bench/)
+#   #   {package}     npm package dir name, when a packages/<package>/package.json was ADDED
 #   [[rule.create]]
 #   dedup_key = "kind-{crate}"            # required; expanded, then used as the idempotency key
 #   title     = "..."                      # required; issue title (placeholders expanded)
@@ -79,6 +83,133 @@
 # non-blocking advisory, restore a SAFETY-NET reactive rule here — but it must
 # CHECK that the crate genuinely lacks the bench/SKILL on `main` before creating
 # (don't blindly mint), not re-emit unconditionally as the old rule did.
+
+# ===========================================================================
+# New non-Rust (npm) package → the follow-ons a crate's gate does not cover
+# ===========================================================================
+# [OPUS-5] (#5243) "A package" in this repo has TWO shapes, and only one of them
+# has any automation. Merge gate G1 (scripts/gate-new-crate.py) defines a package
+# as an added `crates/<x>/Cargo.toml`; the root package.json ALSO declares an npm
+# workspace (`packages/*` plus the fixed members `js`, `site`, `gui/app`,
+# `gui/e2e`, `gui/e2e-playwright`), and `packages/` is the one glob member — the
+# place a NEW non-Rust package lands (4 today: eyereasoner-compat, rdfjs-conformance,
+# solid-server, sparq-client). Nothing keys on that. The concrete cost is
+# measurable in the lanes themselves: `.github/workflows/js.yml` runs each
+# package's suite from an explicitly-named `working-directory`, and
+# `.github/workflows/publish.yml` has one hand-written job per publishable
+# package — so a package nobody remembers to enumerate is built and tested by
+# NOTHING, while its PR still turns the `js` lane green.
+#
+# DECISION (#5243): yes, they deserve equivalent treatment, minted REACTIVELY
+# here rather than as a merge gate — a CI leg, a website entry and a guide page
+# are each produced on a different surface than the package itself, which is the
+# un-gateable-remainder case this engine exists for (design §2.2).
+#
+# The `private: true` predicate is the npm analogue of a crate's `publish = false`
+# stub exemption, and like that exemption it is PARTIAL, not total:
+#   * site + guide are PUBLIC-ONLY — an unpublished workspace package has no
+#     public artifact to advertise and no audience for a guide page, so
+#     flow-on.py's `package_is_publishable()` suppresses both (`private: true`
+#     today: rdfjs-conformance, sparq-client);
+#   * test-methods applies to EVERY new package — js.yml's per-package legs are
+#     just as absent for a private package (rdfjs-conformance is private and
+#     still needs, and has, its own leg).
+# All three additionally require a genuine TOP-LEVEL `packages/<pkg>/package.json`
+# (flow-on.py `new_package()`): `fnmatch`'s `*` crosses `/`, so the trigger glob
+# alone would also accept a nested manifest and name the follow-on for the empty
+# string — the sq-fyzq7 / #1655 hole, closed here by construction.
+#
+# PYTHON is deliberately NOT a separate trigger: the repo's only Python
+# distribution is `crates/sparq-py/pyproject.toml`, which lives INSIDE the crate
+# tree, so a new Python package is a new crate and is already G1's business.
+
+[[rule]]
+id = "new-package-test-methods"
+description = "A new npm package landed; wire its CI leg and decide which test methods it needs."
+when_new_paths = ["packages/*/package.json"]
+# The merged PR already wired the JS lane — it enumerated the package itself.
+unless_paths = [".github/workflows/js.yml"]
+
+[[rule.create]]
+dedup_key = "new-package-test-methods-{package}"
+title = "ci: wire new package {package} into the JS lane and choose its test methods"
+# [OPUS-5] kind:ci + area:ci → role:ci (scripts/triage.py ROLE_BY_KIND /
+# INFRA_SURFACE_LABELS); the work lands in .github/workflows.
+labels = ["ci", "kind:ci", "area:ci"]
+body = """
+Merged PR #{pr} ({pr_title}) added the new npm package `packages/{package}`, and
+did not touch `.github/workflows/js.yml`.
+
+That lane runs each package's suite from an explicitly-named `working-directory`,
+so `packages/{package}` currently runs NO tests in CI even though its own paths
+filter (`packages/**`) makes the `js` lane trigger — and report green — on every
+PR that touches it. Add its build/test step there, then decide which test methods
+beyond its unit tests apply, and say in a comment why the rest do not:
+
+- a typecheck step, if the package ships TypeScript;
+- a parity / differential suite against an independent implementation, if it
+  re-implements an interface someone else also implements;
+- a packaging guardrail (`npm run check:package`-style), so the published tarball
+  cannot silently lose `dist/` or a wasm bundle;
+- a publish job in `.github/workflows/publish.yml`, if the package is meant to
+  reach npm — that workflow also enumerates packages one by one.
+
+Close this with a note if the package genuinely needs none of them.
+"""
+
+[[rule]]
+id = "new-package-site-advert"
+description = "A new PUBLISHABLE npm package landed but the PR touched no site/ file."
+when_new_paths = ["packages/*/package.json"]
+# The merged PR already edited the website — assume it advertised the package there.
+unless_paths = ["site/**"]
+
+[[rule.create]]
+dedup_key = "new-package-site-{package}"
+title = "site: advertise new package {package} on the website"
+# [OPUS-5] kind:site + area:site → role:site (scripts/triage.py UI_SURFACE_LABELS).
+labels = ["site", "kind:site", "area:site"]
+body = """
+Merged PR #{pr} ({pr_title}) added the publishable npm package
+`packages/{package}` (no `private: true` in its manifest), and did not touch any
+`site/**` file — so the website does not know the surface exists.
+
+Add it to the canonical site IA in `site/src/data/surfaces.ts` — the single
+source the sidebar nav, the landing surface grid and the Cmd-K command palette
+all derive from — with an HONEST `tier` badge for what actually works today; an
+aspirational tier is a false claim on a public page. Anything the package exposes
+that is still unproven (a ZK or MPC property in particular) must carry its caveat
+in the blurb rather than be presented as settled.
+
+If the package is deliberately not user-facing, say so here and close.
+"""
+
+[[rule]]
+id = "new-package-guide-docs"
+description = "A new PUBLISHABLE npm package landed but the PR touched no book/ file."
+when_new_paths = ["packages/*/package.json"]
+# The merged PR already edited the mdBook — assume it documented the package there.
+unless_paths = ["book/**"]
+
+[[rule.create]]
+dedup_key = "new-package-guide-{package}"
+title = "docs: add an mdBook guide page for new package {package}"
+# [OPUS-5] kind:docs → role:docs; area:guide is the mdBook surface.
+labels = ["docs", "kind:docs", "area:guide"]
+body = """
+Merged PR #{pr} ({pr_title}) added the publishable npm package
+`packages/{package}` (no `private: true` in its manifest), and did not touch any
+`book/**` file — so the published guide does not cover it.
+
+Add a page under `book/src/` and list it in `book/src/SUMMARY.md`. Per that
+file's header, a content page should be a thin `{{#include}}` wrapper that
+single-sources its prose from the canonical `packages/{package}/README.md` /
+`skills/<surface>/SKILL.md` anchors, so the guide cannot drift from the package's
+own docs; only the SUMMARY and the section headings carry original prose.
+
+If the package needs no guide page (an internal harness, a thin re-export), say
+so here and close.
+"""
 
 # --- Changed public feature → docs / SKILL.md update ---------------------------
 # Trigger: a change under a published crate's surface, the CLI, the HTTP server,
