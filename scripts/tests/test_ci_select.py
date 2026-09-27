@@ -1421,6 +1421,23 @@ class EnforceRolloutTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(obj["mode"], "full")
         self.assertEqual(obj["affected"], ALL_MEMBERS)
+        self.assertEqual(obj["reason"], "forced full run (ci-full override)")
+
+    def test_merge_group_full_reports_combined_head_reason(self):
+        # [GPT-6-ASTRA] Queue JSON and the step summary must identify the invariant,
+        # not attribute --full to a PR-only label that merge_group does not carry.
+        meta = self._write(json.dumps(_synthetic_meta()))
+        summary = self._write("", suffix=".md")
+        code, obj = self._run_main(["--event", "merge_group", "--full",
+                                   "--metadata-file", meta, "--repo-root", ROOT,
+                                   "--summary-file", summary])
+        self.assertEqual(code, 0)
+        self.assertEqual(obj["mode"], "full")
+        self.assertEqual(obj["affected"], ALL_MEMBERS)
+        self.assertEqual(obj["reason"],
+                         "merge_group: forced full for combined-head validation (#6048)")
+        self.assertIn(obj["reason"], Path(summary).read_text())
+        self.assertNotIn("ci-full override", Path(summary).read_text())
 
     def test_enforce_nightly_schedule_is_full(self):
         # The nightly full-matrix backstop: a schedule event carries no PR diff, so
@@ -1431,6 +1448,7 @@ class EnforceRolloutTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(obj["mode"], "full")
         self.assertEqual(obj["affected"], ALL_MEMBERS)
+        self.assertEqual(obj["reason"], "schedule event: no PR diff")
 
     def test_enforce_failsafe_trigger_stays_full(self):
         # FAIL-SAFE PRESERVED: a §4.1 trigger (Cargo.lock) under enforce (NO --shadow)

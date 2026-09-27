@@ -4,7 +4,7 @@
 # WHAT THIS IS
 # ------------
 # The deterministic policy core of .github/workflows/batch-merge.yml. The merge queue on
-# `main` (ALLGREEN, max_entries_to_merge=8) drains individually-armed worker PRs one queue
+# `main` (#6048 stages ALLGREEN -> HEADGREEN, max_entries_to_merge=8) drains individually-armed worker PRs one queue
 # window at a time. When MORE than QUEUE_WINDOW reviewed worker PRs are armed at once, the
 # overflow waits multiple queue cycles. This script batches that overflow into ONE
 # integration ("omnibus") PR so a single queue slot lands many reviewed constituents.

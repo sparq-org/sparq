@@ -1080,7 +1080,11 @@ def main(argv: list[str] | None = None) -> int:
         # (base, head) revision pair; push/schedule/workflow_dispatch (and any
         # future event) get the full matrix by construction, not by error-trap.
         if args.full or args.event not in ("pull_request", "merge_group"):
-            reason = "forced full run (ci-full override)" if args.full else f"{args.event} event: no PR diff"
+            # [GPT-6-ASTRA] The queue override is independent of PR labels (#6048).
+            if args.full and args.event == "merge_group":
+                reason = "merge_group: forced full for combined-head validation (#6048)"
+            else:
+                reason = "forced full run (ci-full override)" if args.full else f"{args.event} event: no PR diff"
             meta = load_metadata(args.metadata_file, repo_root)
             ws = parse_workspace(meta)
             sel = Selection(mode="full", reason=reason, affected=sorted(ws.members),

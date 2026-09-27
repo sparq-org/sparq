@@ -389,6 +389,12 @@ would REVERSE much of this lever) is still an open decision. Codify the argument
 research/change-based-test-selection.md, present the decision, recommend KEEP-selected
 (nightly full backstop + sq-va7at alarm already fence it).
 
+> **SUPERSEDED 2026-08-31 by #6048.** The throughput target changed the queue premise:
+> `merge_group` now forces `mode=full`, and the live ruleset moves to HEADGREEN only after
+> that executable guard lands. The selected-prefix induction remains the historical proof
+> for ALLGREEN; the new proof is simpler: the sole required gate observes one complete
+> validation of the combined group head. PR-head selection remains enforced and fast.
+
 Not worth extending selection to: conformance ratchets (44–76 s each, parallel,
 never the pole). The other two candidates this paragraph once listed are **moot on the
 queue as of the §2.1 re-verification**: container-scan no longer triggers on
