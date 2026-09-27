@@ -18,7 +18,7 @@ use sparq_algos::{
     betweenness_centrality, closeness_centrality,
     weakly_connected_components, label_propagation, LabelPropConfig, num_communities,
     is_acyclic, num_strongly_connected_components, strongly_connected_components,
-    topological_sort,
+    topological_sort, pagerank_scores_by_dict_id, scores_by_dict_id, ScoreBudget,
 };
 
 // Project the RDF graph onto a directed node graph (subjects + entity objects = nodes,
@@ -48,6 +48,10 @@ let scc = strongly_connected_components(&g);              // dense component id 
 let scc_count = num_strongly_connected_components(&scc);  // number of components
 let dag = is_acyclic(&g);                                  // false for any directed cycle
 let order = topological_sort(&g)?;                         // Err(CycleError) on a cycle
+
+// Scores re-keyed by dictionary Id, for an id-keyed consumer; requires feature `ranking`.
+let scores = scores_by_dict_id(&g, &ranks, ScoreBudget::TopK(10_000)); // FxHashMap<Id, f64>
+let hits = completion_index.complete("http://ex", 20, Some(&scores));  // ranked completion
 ```
 
 ## ✨ Features
@@ -74,17 +78,14 @@ let order = topological_sort(&g)?;                         // Err(CycleError) on
   SCC ids are densified by ascending node index; topological-sort ties choose the smallest
   ready node and cycles, including self-loops, return `CycleError`; `is_acyclic` exposes the
   same check as a boolean. [GPT-5.6] sq-awq7n.
-- **Opt-in & lean** — consumes only sparq-core's public read API; the only dependencies
-  are `sparq-core`, `oxrdf`, and `rustc-hash`. The heavier all-pairs algorithms are behind
-  `centrality-extended`, and directed topology is behind `topology`; both features are OFF
-  by default. No engine, wasm, or network code enters the build.
+- **Dictionary-id score maps** — with the default-OFF `ranking` feature, `scores_by_dict_id` / `pagerank_scores_by_dict_id` re-key scores from node index to sparq-core dictionary `Id`, for a consumer that speaks ids — notably `sparq_text::CompletionIndex::complete`, which ranks prefix hits by an injected score map. `ScoreBudget::TopK(k)` bounds the *resident* map only, so
+  retained scores stay the true global ranks; unbudgeted, predicate-only and literal terms score `0.0` and rank last rather than being hidden. Full contract in the module's rustdoc. [OPUS-5] sq-lsp7k.9.4.
+- **Opt-in & lean** — consumes only sparq-core's public read API; the only dependencies are `sparq-core`, `oxrdf`, and `rustc-hash`. The heavier all-pairs algorithms are behind `centrality-extended`, directed topology behind `topology`, and the dictionary-id score maps behind `ranking`; all three are OFF by default. No engine, wasm, or network code enters the build.
 
 ## 📚 Learn more
 
 - The capability skill: [`skills/graph-analytics/SKILL.md`](../../skills/graph-analytics/SKILL.md).
-- Source: `src/graph.rs` (the view), `src/pagerank.rs`, `src/centrality.rs`,
-  `src/centrality_extended.rs`, `src/community.rs`, and `src/topology.rs`. Tests live in
-  `src/lib.rs` and `tests/`.
+- Source: `src/graph.rs` is the view; one module per algorithm family beside it. Tests live in `src/lib.rs` and `tests/`.
 
 These are **topology** algorithms: edges are unweighted and predicate-erased. To analyse a
 sub-graph (e.g. only `foaf:knows` edges), filter the source graph first; predicate-weighted

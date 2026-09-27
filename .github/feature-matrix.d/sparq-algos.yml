@@ -16,3 +16,9 @@
   crate: "sparq-algos"
   features: "topology"
   test: true
+# [OPUS-5] sq-lsp7k.9.4: dictionary-id score maps are default-OFF; exercise the
+# feature-gated cross-crate composition tests (ranking.rs) in CI.
+- name: "sparq-algos (ranking)"
+  crate: "sparq-algos"
+  features: "ranking"
+  test: true

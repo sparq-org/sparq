@@ -32,6 +32,10 @@ centrality-extended = []
 # [GPT-5.6] sq-lsp7k.20: directed SCC and topological-order algorithms stay
 # default-OFF so consumers opt into the additional topology surface explicitly.
 topology = []
+# [OPUS-5] sq-lsp7k.9.4: dictionary-id-keyed score maps — the adapter that lets a ranker
+# here feed a consumer keyed by sparq-core ids (e.g. `sparq_text::CompletionIndex`).
+# Default-OFF like every other added surface in this crate; a consumer opts in explicitly.
+ranking = []
 
 [dependencies]
 # `version` alongside `path`: cargo uses the path locally and the version on crates.io
@@ -42,3 +46,10 @@ rustc-hash.workspace = true
 
 [dev-dependencies]
 proptest = "1"
+# [OPUS-5] sq-lsp7k.9.4 TEST-ONLY, and deliberately so: `tests/ranking.rs` proves the
+# `ranking` map really does type-check as `CompletionIndex::complete`'s `scores` argument,
+# so the two crates cannot drift apart silently. `default-features = false` keeps the
+# engine (and rayon/regex/digest) out of the test build — the completion index needs none
+# of it. There is NO normal dependency edge in either direction: sparq-text does not know
+# about sparq-algos, and this crate still ships with only sparq-core, oxrdf and rustc-hash.
+sparq-text = { path = "../sparq-text", default-features = false }
