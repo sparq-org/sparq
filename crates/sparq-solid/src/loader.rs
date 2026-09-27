@@ -55,6 +55,14 @@ const VCARD_MEMBER: &str = "http://www.w3.org/2006/vcard/ns#hasMember";
 pub(crate) const RESERVED_PREFIX: &str = "urn:sparq:";
 const PAIR_DELIMITER: &str = "&client=";
 
+/// IRI prefix of a loader-minted skolem constant for a control/group document's blank node
+/// (see [`skolemize`]). Note it is a SEPARATE space from [`RESERVED_PREFIX`], so a
+/// `urn:skolem:` named node written verbatim into a control document is NOT rejected by
+/// [`validate_principal_iri`]. That is pre-existing and unchanged here (the previous
+/// positional key ranged over small integers, so it was no harder to name); whether the
+/// prefix should also be guarded is filed separately, not decided by this constant.
+const SKOLEM_PREFIX: &str = "urn:skolem:";
+
 fn validate_principal_iri(iri: &str) -> Result<(), String> {
     if iri.starts_with(RESERVED_PREFIX) || iri.contains(PAIR_DELIMITER) {
         return Err(format!(
@@ -137,12 +145,35 @@ fn graph_iri(name: &Term) -> Option<&str> {
     }
 }
 
-/// A term with blank nodes skolemized per graph (`gix`) so the single-graph merge keeps
+/// A term with blank nodes skolemized per **document IRI** so the single-graph merge keeps
 /// per-document scoping and `solidx:inDoc` stays sound. Named nodes and literals pass
 /// through unchanged — the reasoner sees exactly the control document's own terms.
-fn skolemize(t: &Term, gix: usize) -> Term {
+///
+/// [OPUS-5] issue #5579 / `research/solid-pod-scoped-materializer-design.md` §3.1: the key
+/// is the document's IRI, NOT its index in `graph.named`. These skolem IRIs are observable
+/// in `<urn:sparq:auth>` — a blank-node `acp:noneOf` matcher surfaces as the object of
+/// `auth:exceptMatcher` and as the subject of the copied `solidx:accepts*P` matcher facts —
+/// while `put_acl`/`delete_acl` permute `graph.named` (`take_named_slot` uses
+/// `Vec::swap_remove`, the new content is `push`ed). A positional key therefore made a write
+/// to one document renumber every OTHER document's matcher, which flips
+/// `AuthIndex::matchers_eq` and collapses the per-origin cache invalidation `sq-b7k7u`
+/// shipped back to a whole-cache clear on every ACL write to a store that HAS a blank-node
+/// matcher. Keyed on the IRI, the auth view is a function of the dataset's content alone.
+///
+/// Guards: `tests/skolem_stability.rs` (the view is identical under an explicit permutation
+/// of `graph.named`, and across a `put_acl_acp`) and the white-box
+/// `scoped_acp_write_keeps_other_pod_slice_warm_with_a_blank_node_matcher` in `lib.rs` (the
+/// other pod's session-cache slice survives the write instead of being cleared).
+///
+/// The key is **length-prefixed** (`{len(doc)}:{doc}:{label}`) so the encoding is injective.
+/// A plain `{doc}:{label}` join is not: a group document is an ordinary content graph with
+/// no suffix constraint, so its IRI is unconstrained, and `("…/g:b", "x")` would collide
+/// with `("…/g", "b:x")` — merging two documents' distinct blank nodes into one matcher.
+fn skolemize(t: &Term, doc: &str) -> Term {
     match t {
-        Term::BlankNode(b) => named(&format!("urn:skolem:g{}:{}", gix, b.as_str())),
+        Term::BlankNode(b) => {
+            named(&format!("{}{}:{}:{}", SKOLEM_PREFIX, doc.len(), doc, b.as_str()))
+        }
         other => other.clone(),
     }
 }
@@ -193,8 +224,8 @@ pub(crate) fn assemble_facts(
     // 1) resources: every non-control, non-auth graph + every structural container
     //    prefix (containers exist as inheritance anchors even without their own graph).
     let mut resources: FxHashSet<String> = FxHashSet::default();
-    let mut control_graphs: Vec<(usize, &str, &Graph)> = Vec::new(); // (idx, name, sub)
-    for (gix, (name, sub)) in graph.named.iter().enumerate() {
+    let mut control_graphs: Vec<(&str, &Graph)> = Vec::new(); // (name, sub)
+    for (name, sub) in graph.named.iter() {
         let Some(iri) = graph_iri(name) else { continue };
         // Skip the whole reserved space (`<urn:sparq:auth>` included): a graph there is
         // never reasoning input. [`strip_reserved_graphs`] also drops these from the
@@ -206,7 +237,7 @@ pub(crate) fn assemble_facts(
         }
         if iri.ends_with(ACL_SUFFIX) || iri.ends_with(ACR_SUFFIX) {
             if iri.ends_with(suffix) {
-                control_graphs.push((gix, iri, sub));
+                control_graphs.push((iri, sub));
             }
             continue;
         }
@@ -226,7 +257,7 @@ pub(crate) fn assemble_facts(
 
     // 2) control-document linkage by naming convention: <R + ".acl"> controls <R>.
     //    The .acl/.acr graphs are themselves resources too (Control gates them).
-    for (_, iri, _) in &control_graphs {
+    for (iri, _) in &control_graphs {
         let r = &iri[..iri.len() - suffix.len()];
         out.push([named(r), owns.clone(), named(iri)]);
     }
@@ -236,7 +267,7 @@ pub(crate) fn assemble_facts(
     let mut group_docs: FxHashSet<String> = FxHashSet::default();
     let mut webids: FxHashSet<String> = FxHashSet::default();
     let mut principal_iris: FxHashSet<String> = FxHashSet::default();
-    for (gix, iri, sub) in &control_graphs {
+    for (iri, sub) in &control_graphs {
         let mut in_doc: FxHashSet<Term> = FxHashSet::default();
         for t in graph_triples(sub) {
             // [OPUS-4.8] sq-3jtd.5: hard-reject any forged derivation-internal fact
@@ -245,9 +276,9 @@ pub(crate) fn assemble_facts(
             if is_reserved_derivation_predicate(&t) {
                 continue;
             }
-            let s = skolemize(&t[0], *gix);
+            let s = skolemize(&t[0], iri);
             in_doc.insert(s.clone());
-            out.push([s, skolemize(&t[1], *gix), skolemize(&t[2], *gix)]);
+            out.push([s, skolemize(&t[1], iri), skolemize(&t[2], iri)]);
             collect_agents(&t, &mut webids, &mut group_docs, &mut principal_iris);
         }
         for s in in_doc {
@@ -255,7 +286,7 @@ pub(crate) fn assemble_facts(
         }
     }
     if system == System::Wac {
-        for (gix, (name, sub)) in graph.named.iter().enumerate() {
+        for (name, sub) in graph.named.iter() {
             let Some(iri) = graph_iri(name) else { continue };
             // Same reserved-space skip as the resource pass above: a forged
             // `<urn:sparq:…>` graph named by an `acl:agentGroup` must never be read.
@@ -268,11 +299,7 @@ pub(crate) fn assemble_facts(
                 if is_reserved_derivation_predicate(&t) {
                     continue;
                 }
-                out.push([
-                    skolemize(&t[0], gix),
-                    skolemize(&t[1], gix),
-                    skolemize(&t[2], gix),
-                ]);
+                out.push([skolemize(&t[0], iri), skolemize(&t[1], iri), skolemize(&t[2], iri)]);
                 if let (Term::NamedNode(p), Term::NamedNode(o)) = (&t[1], &t[2]) {
                     if p.as_str() == VCARD_MEMBER {
                         webids.insert(o.as_str().to_owned());
@@ -490,7 +517,56 @@ pub(crate) fn parent_iri(iri: &str) -> Option<&str> {
 
 #[cfg(test)]
 mod tests {
-    use super::{iri_origin, parent_iri};
+    use super::{iri_origin, parent_iri, skolemize, SKOLEM_PREFIX};
+    use oxrdf::{BlankNode, Literal, NamedNode, Term};
+
+    fn sk(doc: &str, label: &str) -> String {
+        match skolemize(&Term::BlankNode(BlankNode::new_unchecked(label)), doc) {
+            Term::NamedNode(n) => n.into_string(),
+            other => panic!("a blank node must skolemize to a named node, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn skolemize_passes_non_blank_terms_through_unchanged() {
+        // [OPUS-5] sq-nmx4l P1: only blank nodes are rewritten — the reasoner must see the
+        // control document's own IRIs and literals verbatim.
+        let iri = Term::NamedNode(NamedNode::new_unchecked("https://a.ex/x"));
+        assert_eq!(skolemize(&iri, "https://a.ex/.acl"), iri);
+        let lit = Term::Literal(Literal::new_simple_literal("v"));
+        assert_eq!(skolemize(&lit, "https://a.ex/.acl"), lit);
+    }
+
+    #[test]
+    fn skolemize_keys_on_the_document_iri_not_a_position() {
+        // The whole point of issue #5579 §3.1: the same (document, label) pair yields the
+        // same constant no matter where the document sits in `graph.named`, and two
+        // documents sharing a blank-node label stay distinct.
+        assert_eq!(sk("https://a.ex/.acl", "b0"), sk("https://a.ex/.acl", "b0"));
+        assert_ne!(sk("https://a.ex/.acl", "b0"), sk("https://b.ex/.acl", "b0"));
+        assert_ne!(sk("https://a.ex/.acl", "b0"), sk("https://a.ex/.acl", "b1"));
+        assert!(sk("https://a.ex/.acl", "b0").starts_with(SKOLEM_PREFIX));
+    }
+
+    #[test]
+    fn skolemize_key_is_injective_across_a_shifted_separator() {
+        // A group document is an ordinary content graph — no suffix constraint — so its IRI
+        // may contain `:`. A plain `{doc}:{label}` join would fold these two distinct
+        // (document, label) pairs onto one constant, merging two documents' blank nodes.
+        // The length prefix is what prevents it.
+        assert_ne!(sk("https://a.ex/g:b", "x"), sk("https://a.ex/g", "b:x"));
+        assert_ne!(sk("https://a.ex/g", "1:x"), sk("https://a.ex/g1", "x"));
+    }
+
+    #[test]
+    fn skolemize_mints_a_syntactically_valid_iri() {
+        // The loader mints these unchecked, so they must be well-formed by construction for
+        // every IRI-legal document name.
+        for doc in ["https://a.ex/.acl", "https://a.ex/g:b", "http://h:8080/x/.acr"] {
+            let s = sk(doc, "b0");
+            assert!(NamedNode::new(&s).is_ok(), "minted skolem <{}> is not a valid IRI", s);
+        }
+    }
 
     #[test]
     fn parent_walks_to_root_and_stops() {
