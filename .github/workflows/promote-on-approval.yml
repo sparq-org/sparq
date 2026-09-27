@@ -22,27 +22,37 @@ jobs:
       REPO: ${{ github.repository }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      # [OPUS-5] #5425: self-test FIRST, so a regression in the promotion predicate or in the
-      # quarantine fetch reds this run before it can write a label. The same self-test also runs
-      # at PR time in docs-quality.yml (a cron-only self-test validates the default-branch copy
-      # long after the change merged).
-      - name: Self-test promotion predicate + quarantine fetch
-        run: python3 scripts/promote.py --self-test
+      # [OPUS-5] #5802 + #5425: the pure cores self-test FIRST, BEFORE any label is written, so a
+      # regression in the promotion predicate, in the (now paginated) reaction read, or in the
+      # quarantine fetch reds this run rather than silently mis-promoting live issues. Same shape
+      # as retriage.yml. The same self-tests also run at PR time in docs-quality.yml (a cron-only
+      # self-test validates the default-branch copy long after the change merged).
+      - name: Self-test the promotion cores (predicate + reaction read + quarantine fetch)
+        run: |
+          set -euo pipefail
+          python3 scripts/promote.py --self-test
+          python3 scripts/triage.py --self-test
       - name: Poll quarantined issues for maintainer approval
         run: |
           python3 - <<'PY'
           import json, os, subprocess, sys
           sys.path.insert(0, "scripts")
-          from promote import epoch, fetch_quarantined, should_promote
+          from promote import epoch, fetch_quarantined, fetch_reactions, should_promote
           from triage import triage
           REPO = os.environ["REPO"]
 
           def gh(*a):
               return subprocess.run(["gh", *a], capture_output=True, text=True)
 
+          # Memoised: the paginated reaction read (#5802) can now surface hundreds of 👍 rows, and
+          # the same login recurs across issues — one permission call per distinct user, not per row.
+          _perm = {}
+
           def perm(user):
-              r = gh("api", f"repos/{REPO}/collaborators/{user}/permission", "--jq", ".permission")
-              return r.stdout.strip() if r.returncode == 0 else "none"
+              if user not in _perm:
+                  r = gh("api", f"repos/{REPO}/collaborators/{user}/permission", "--jq", ".permission")
+                  _perm[user] = r.stdout.strip() if r.returncode == 0 else "none"
+              return _perm[user]
 
           # `gh issue list --limit 200` SILENTLY truncated this queue: past 200 the OLDEST
           # quarantined issues were never polled and stayed quarantined forever (#5425).
@@ -50,9 +60,9 @@ jobs:
           print(f"polling {len(issues)} quarantined issue(s)")
           for it in issues:
               n = it["number"]
-              rx = json.loads(gh("api", f"repos/{REPO}/issues/{n}/reactions").stdout or "[]")
-              reactions = [{"content": r["content"], "user": r["user"]["login"],
-                            "created_at": epoch(r["created_at"])} for r in rx]
+              # fetch_reactions paginates (#5802) and returns rows already normalised to
+              # {content, user (login), created_at (epoch)} — the shape should_promote reads.
+              reactions = fetch_reactions(REPO, n, gh)
               maints = {r["user"] for r in reactions if r["content"] == "+1" and perm(r["user"]) in ("admin", "maintain", "write")}
               if should_promote(reactions, epoch(it["updatedAt"]), maints):
                   gh("issue", "edit", str(n), "-R", REPO, "--remove-label", "trust:untrusted")
