@@ -60,6 +60,11 @@ on:
 #                          which is the only exact merge-group build-time anchor.
 #   checks: read         — the load-bearing predicate: check-SUITE count on the group head.
 #   pull-requests: write — the marker comment + the dequeue/enqueue mutations.
+#
+# This is the DEFAULT for jobs in this workflow, and it is exactly the `watch` job's
+# need. The `reap` job below needs a DIFFERENT and disjoint capability (`actions: write`
+# and no PR write at all), so it declares its own job-level block, which REPLACES this
+# one rather than adding to it. Neither job can use the other's token scope.
 permissions:
   contents: read
   checks: read
@@ -173,6 +178,115 @@ jobs:
             if ! python3 scripts/merge-group-watchdog.py "${sweep_args[@]}"; then
               rc=1
               echo "::warning title=merge-group-watchdog::sweep $((i + 1)) exited non-zero; the loop continues but this run will fail"
+            fi
+            echo "::endgroup::"
+          done
+          exit "$rc"
+
+  # ── [OPUS-5] sparq-org/sparq#6068 — the STALE-RUN REAP ──────────────────────────
+  # A SECOND failure mode of the same queue. When an entry times out and GitHub rebuilds
+  # the entries behind it, the workflow runs of the SUPERSEDED `gh-readonly-queue/main/pr-*`
+  # refs stay queued / in progress and hold the capacity the replacement groups need.
+  # REPORTED from the live merge train on #6068 (that issue's observation, not a
+  # measurement taken here): three obsolete group refs retained resident `ci-summary`
+  # waiters plus queued `ci` and feature-matrix runs while the replacement group waited.
+  # The nine run ids are recorded on the issue and in the DEFAULT_REAP_GRACE_SECONDS
+  # block of the script. Cancelling them by hand released the capacity — this job does
+  # that automatically.
+  #
+  # SEPARATE JOB, NOT A STEP, for exactly one reason: the capability. Cancelling a run
+  # needs `actions: write`, and the recovery job must never hold it (nor this job hold
+  # `pull-requests: write`). A job-level `permissions:` block REPLACES the workflow-level
+  # one, so the two capabilities are disjoint by construction rather than by convention.
+  #
+  # It carries NO `needs:` on `watch`, so a recovery failure cannot delay or suppress the
+  # reap: the two passes fix different problems and neither is a precondition of the other.
+  #
+  # TRIGGERING is inherited, and that is the point: this workflow is rung by
+  # merge-group-doorbell.yml on every `pull_request_target` [enqueued, dequeued] — the two
+  # events that between them cause every queue rebuild — and the cron above is retained as
+  # the independent backstop for the rebuilds no PR-level queue event announces (notably a
+  # direct push to `main`). The doorbell needs no change: it dispatches the WORKFLOW.
+  #
+  # NEVER EXECUTES OR CHECKS OUT A MERGE REF. The checkout is pinned to the default branch
+  # exactly like `watch`'s, sparse to the two policy files, with `persist-credentials:
+  # false`. What the job learns about a merge-group ref is its NAME, head SHA and status
+  # from the Actions API, and the commit its ref points at from the git-ref API. It never
+  # fetches, checks out or executes a merge ref's CONTENTS.
+  reap:
+    name: cancel obsolete merge-group runs
+    runs-on: ubuntu-latest
+    # 5 passes with 4 x 60 s of sleep between them, plus the checkout and the self-test,
+    # with headroom. A hard ceiling: the job may not sit on the shared concurrency slot
+    # indefinitely.
+    timeout-minutes: 10
+    # LEAST PRIVILEGE, and disjoint from `watch`'s:
+    #   contents: read  — the default-branch policy checkout, and the git-ref read that
+    #                     corroborates obsolescence against the group ref itself.
+    #   actions: write  — POST /actions/runs/{id}/cancel, the job's ONE mutation. It also
+    #                     covers listing workflow runs, which is a READ on that same scope.
+    # In particular NO `pull-requests` and NO `checks`: this job must not be able to
+    # comment, label, dequeue or re-enqueue anything.
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      # No App token. `GITHUB_TOKEN` with `actions: write` can cancel a workflow run, so
+      # minting an App credential here would add blast radius for no capability.
+      - name: Checkout reap policy
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/merge-group-watchdog.py
+            scripts/gh_retry.py
+          sparse-checkout-cone-mode: false
+
+      - name: Self-test policy
+        run: |
+          python3 scripts/gh_retry.py --self-test
+          python3 scripts/merge-group-watchdog.py --self-test
+
+      # ── WHY THIS IS A LOOP, AND IT IS NOT THE SAME REASON AS `watch`'s ──────────
+      # `watch` loops because its target has to AGE past a grace. This one loops because
+      # its target has to APPEAR: the doorbell rings on the queue transition, and the
+      # rebuild that orphans the old groups lands seconds later. A single pass fired at
+      # the ring would read a queue that still contains the outgoing groups, correctly
+      # call every run CURRENT, and exit — leaving the reap to a cron this repo has
+      # MEASURED at a 93% firing deficit (see the header). Five passes a minute apart
+      # cover the rebuild from the ring that announced it.
+      #
+      # STICKY EXIT CODE, same discipline as `watch`: `rc` is only ever raised, never
+      # reset, so a failure in pass 1 survives four clean later passes. This repo has
+      # shipped the opposite defect, so the interleaved sequence is asserted by EXECUTING
+      # this block in scripts/tests/test_merge_group_watchdog.py.
+      - name: Reap merge-group runs of superseded queue groups
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          DRY_RUN: ${{ inputs.dry_run && '--dry-run' || '' }}
+          REAP_PASSES: "4"
+          REAP_INTERVAL_SECONDS: "60"
+        run: |
+          set -euo pipefail
+          # Array form so the optional flag is ONE argv element and is never word-split
+          # (shellcheck SC2086); appended only when set, because an unconditional append
+          # would pass an EMPTY element that argparse rejects on every non-dry-run pass.
+          reap_args=(reap --repo "$REPO" --branch "$DEFAULT_BRANCH")
+          if [ -n "$DRY_RUN" ]; then
+            reap_args+=("$DRY_RUN")
+          fi
+          rc=0
+          for i in $(seq 0 "$REAP_PASSES"); do
+            if [ "$i" -gt 0 ]; then
+              sleep "$REAP_INTERVAL_SECONDS"
+            fi
+            echo "::group::reap $((i + 1))/$((REAP_PASSES + 1))"
+            if ! python3 scripts/merge-group-watchdog.py "${reap_args[@]}"; then
+              rc=1
+              echo "::warning title=merge-group-watchdog::reap $((i + 1)) exited non-zero; the loop continues but this run will fail"
             fi
             echo "::endgroup::"
           done
