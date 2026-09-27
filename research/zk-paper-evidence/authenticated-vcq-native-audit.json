@@ -1,0 +1,513 @@
+{
+  "at": "2026-09-26T21:28:54.244918+00:00",
+  "source": "7fe889557afcf1497769c1360ef53348980a7bae",
+  "source_files_verified_against_git": 7085,
+  "cargo_locks_verified_unchanged": 30,
+  "source_clean": true,
+  "all_steps_passed": true,
+  "completed_at": "2026-09-26T21:25:21.806303+00:00",
+  "steps": [
+    {
+      "name": "export-exact-off",
+      "argv": [
+        "cargo",
+        "run",
+        "--locked",
+        "--offline",
+        "--manifest-path",
+        "zk/sparql-evaluator/Cargo.toml",
+        "-p",
+        "sparq-proved-evaluator",
+        "--example",
+        "export_guest",
+        "--",
+        "/home/ubuntu/sparq-zk-runs/vcq-authenticated-native-7fe88955/exact-off"
+      ],
+      "cwd": "/home/ubuntu/sparq-zk-runs/auth-guest-same-path-6bf6314a/source",
+      "exit": 0,
+      "error": null,
+      "seconds": 0.716,
+      "log_sha256": "2d8afbc03b850a1a77984ac02fa7734b3f21cee4b4b759676d7f0f094ece4e9f",
+      "test_summary_totals": {
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0
+      }
+    },
+    {
+      "name": "export-exact-on",
+      "argv": [
+        "cargo",
+        "run",
+        "--locked",
+        "--offline",
+        "--manifest-path",
+        "zk/sparql-evaluator/Cargo.toml",
+        "-p",
+        "sparq-proved-evaluator",
+        "--features",
+        "vcq-authenticated",
+        "--example",
+        "export_guest",
+        "--",
+        "/home/ubuntu/sparq-zk-runs/vcq-authenticated-native-7fe88955/exact-on"
+      ],
+      "cwd": "/home/ubuntu/sparq-zk-runs/auth-guest-same-path-6bf6314a/source",
+      "exit": 0,
+      "error": null,
+      "seconds": 1.267,
+      "log_sha256": "ee4f2ed5bdc27960f18ad626b463b2a88cb0200feeda79be1455a495e1cc80f6",
+      "test_summary_totals": {
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0
+      }
+    },
+    {
+      "name": "export-authrdf",
+      "argv": [
+        "cargo",
+        "run",
+        "--locked",
+        "--offline",
+        "--manifest-path",
+        "zk/sparql-evaluator/Cargo.toml",
+        "-p",
+        "sparq-proved-evaluator",
+        "--features",
+        "vcq-authenticated",
+        "--example",
+        "export_authrdf_guest",
+        "--",
+        "/home/ubuntu/sparq-zk-runs/vcq-authenticated-native-7fe88955/authrdf-artifact"
+      ],
+      "cwd": "/home/ubuntu/sparq-zk-runs/auth-guest-same-path-6bf6314a/source",
+      "exit": 0,
+      "error": null,
+      "seconds": 0.566,
+      "log_sha256": "7f6a4c45a1b2bc61da88a22ebf89b1bcbd04db8ce2b8efd864432916d97c7e16",
+      "test_summary_totals": {
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0
+      }
+    },
+    {
+      "name": "vcq-auth-native",
+      "argv": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "--manifest-path",
+        "zk/sparql-evaluator/Cargo.toml",
+        "-p",
+        "sparq-proved-evaluator",
+        "--features",
+        "vcq-authenticated",
+        "--lib",
+        "--test",
+        "vcq_adapter",
+        "--test",
+        "authenticated_rdf",
+        "--test",
+        "vcq_authenticated",
+        "--test",
+        "vcq_authenticated_genuine",
+        "--",
+        "--test-threads=1"
+      ],
+      "cwd": "/home/ubuntu/sparq-zk-runs/auth-guest-same-path-6bf6314a/source",
+      "exit": 0,
+      "error": null,
+      "seconds": 77.177,
+      "log_sha256": "61f52d0d6d771edb1d3e44a9e6a9cafb6ce4da4b38fe24e585fe11e59dbe9e2f",
+      "test_summary_totals": {
+        "passed": 44,
+        "failed": 0,
+        "ignored": 1
+      }
+    },
+    {
+      "name": "vcq-auth-alltarget-clippy",
+      "argv": [
+        "cargo",
+        "clippy",
+        "--locked",
+        "--offline",
+        "--manifest-path",
+        "zk/sparql-evaluator/Cargo.toml",
+        "-p",
+        "sparq-proved-evaluator",
+        "--features",
+        "vcq-authenticated",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "cwd": "/home/ubuntu/sparq-zk-runs/auth-guest-same-path-6bf6314a/source",
+      "exit": 0,
+      "error": null,
+      "seconds": 4.123,
+      "log_sha256": "a298ac90a4ceeb1eb001dac8d51c605170c66b5e6a55b2add56fd27ff07c853e",
+      "test_summary_totals": {
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0
+      }
+    },
+    {
+      "name": "vcq-legacy-native",
+      "argv": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "--manifest-path",
+        "zk/sparql-evaluator/Cargo.toml",
+        "-p",
+        "sparq-proved-evaluator",
+        "--features",
+        "vcq",
+        "--lib",
+        "--test",
+        "vcq_adapter",
+        "--",
+        "--test-threads=1"
+      ],
+      "cwd": "/home/ubuntu/sparq-zk-runs/auth-guest-same-path-6bf6314a/source",
+      "exit": 0,
+      "error": null,
+      "seconds": 8.834,
+      "log_sha256": "02488c5eacafae2e14744b9403a590b4a1bf19568e841748d9bd42099a10a081",
+      "test_summary_totals": {
+        "passed": 17,
+        "failed": 0,
+        "ignored": 0
+      }
+    },
+    {
+      "name": "vcq-legacy-alltarget-clippy",
+      "argv": [
+        "cargo",
+        "clippy",
+        "--locked",
+        "--offline",
+        "--manifest-path",
+        "zk/sparql-evaluator/Cargo.toml",
+        "-p",
+        "sparq-proved-evaluator",
+        "--features",
+        "vcq",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "cwd": "/home/ubuntu/sparq-zk-runs/auth-guest-same-path-6bf6314a/source",
+      "exit": 0,
+      "error": null,
+      "seconds": 13.091,
+      "log_sha256": "da477a05507f01ed8dddf6a4fa5f7eddc31a54eb708326c4801e8bb9aac6960f",
+      "test_summary_totals": {
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0
+      }
+    }
+  ],
+  "tests_by_binary": {
+    "vcq-auth-native": {
+      "sparq_proved_evaluator-2deb0d053dda6d77": {
+        "passed_names": [
+          "vcq::tests::bridge_consumes_the_original_challenge_exactly_once",
+          "vcq::tests::bridge_rejects_a_foreign_nonce_without_touching_the_store",
+          "vcq::tests::check_failure_before_consumption_keeps_the_challenge",
+          "vcq::tests::pre_epoch_clock_reads_as_expired_not_zero",
+          "vcq::tests::replay_and_store_failure_use_typed_outcomes",
+          "vcq::tests::result_must_match_the_exact_contract_form_and_bounds",
+          "vcq::tests::two_methods_share_one_original_challenge",
+          "vcq_authenticated::tests::agreed_claim_reports_authenticated_scope_and_established_obligations",
+          "vcq_authenticated::tests::holder_claim_keeps_holder_selected_provenance_without_anchor",
+          "vcq_authenticated::tests::policy_binding_rejects_a_mismatched_descriptor_and_invalid_policy",
+          "vcq_authenticated::tests::provenance_anchor_version_form_and_rows_reject_before_consumption"
+        ],
+        "ignored_names": []
+      },
+      "authenticated_rdf-05cc51ed29b6761c": {
+        "passed_names": [
+          "fixture_is_the_published_vector_and_the_native_oracle_matches_expectations",
+          "prove_rejects_invalid_requests_and_credentials_before_any_executor",
+          "published_witness_encoding_stays_below_the_guest_input_bound",
+          "separate_guest_pins_are_distinct_and_checked_independently",
+          "verification_failures_never_consume_the_nonce"
+        ],
+        "ignored_names": []
+      },
+      "vcq_adapter-9e2e9ed84a2cae8f": {
+        "passed_names": [
+          "actual_query_form_is_checked_before_any_challenge_use",
+          "admission_from_another_request_is_rejected",
+          "descriptor_and_capabilities_pin_the_exact_v3_method",
+          "fake_receipt_with_a_correctly_bound_journal_is_rejected_without_consumption",
+          "nonce_and_statement_follow_the_documented_composition",
+          "parameter_digest_follows_the_documented_encoding",
+          "prepare_checks_the_private_dataset_and_anchor_opening",
+          "representative_stored_request_fields_change_the_nonce",
+          "unsupported_policies_and_profiles_fail_admission",
+          "verify_gates_run_before_receipt_decoding_and_consumption"
+        ],
+        "ignored_names": []
+      },
+      "vcq_authenticated-a89d5fcd266fffe7": {
+        "passed_names": [
+          "admission_from_another_request_is_rejected",
+          "descriptor_and_capabilities_pin_the_separate_v5_method",
+          "every_policy_field_changes_every_binding_but_table_order_does_not",
+          "fake_and_foreign_receipts_are_rejected_without_consumption",
+          "invalid_policies_reject_before_any_descriptor",
+          "mismatched_guest_and_pin_are_rejected",
+          "native_oracle_matches_every_hand_defined_expectation",
+          "nonce_statement_and_expected_request_follow_the_documented_composition",
+          "policy_and_parameter_digests_follow_the_documented_composition",
+          "prepare_authenticates_natively_and_checks_the_anchor_opening",
+          "representative_stored_request_fields_change_the_nonce",
+          "stored_policy_is_the_canonically_ordered_verifier_copy",
+          "stronger_weaker_and_foreign_requests_fail_admission",
+          "typed_query_shape_rejections_precede_any_proof_or_challenge_use",
+          "verify_gates_run_before_receipt_decoding_and_consumption"
+        ],
+        "ignored_names": []
+      },
+      "vcq_authenticated_genuine-5f784fae22afd3a9": {
+        "passed_names": [
+          "genuine_job_case_selection_is_bounded_known_and_distinct",
+          "genuine_job_rejects_unknown_fields_and_invalid_seeds",
+          "substituted_verifier_policies_are_valid_and_distinct"
+        ],
+        "ignored_names": [
+          "genuine_vcq_authrdf_receipts_verify_declared_cases_and_reject_controls"
+        ]
+      }
+    },
+    "vcq-legacy-native": {
+      "sparq_proved_evaluator-c8be93c0a5e6cb71": {
+        "passed_names": [
+          "vcq::tests::bridge_consumes_the_original_challenge_exactly_once",
+          "vcq::tests::bridge_rejects_a_foreign_nonce_without_touching_the_store",
+          "vcq::tests::check_failure_before_consumption_keeps_the_challenge",
+          "vcq::tests::pre_epoch_clock_reads_as_expired_not_zero",
+          "vcq::tests::replay_and_store_failure_use_typed_outcomes",
+          "vcq::tests::result_must_match_the_exact_contract_form_and_bounds",
+          "vcq::tests::two_methods_share_one_original_challenge"
+        ],
+        "ignored_names": []
+      },
+      "vcq_adapter-1742d806448cd722": {
+        "passed_names": [
+          "actual_query_form_is_checked_before_any_challenge_use",
+          "admission_from_another_request_is_rejected",
+          "descriptor_and_capabilities_pin_the_exact_v3_method",
+          "fake_receipt_with_a_correctly_bound_journal_is_rejected_without_consumption",
+          "nonce_and_statement_follow_the_documented_composition",
+          "parameter_digest_follows_the_documented_encoding",
+          "prepare_checks_the_private_dataset_and_anchor_opening",
+          "representative_stored_request_fields_change_the_nonce",
+          "unsupported_policies_and_profiles_fail_admission",
+          "verify_gates_run_before_receipt_decoding_and_consumption"
+        ],
+        "ignored_names": []
+      }
+    }
+  },
+  "counts": {
+    "vcq_authenticated_feature_passed": 44,
+    "vcq_authenticated_feature_ignored_genuine_driver": 1,
+    "new_adapter_unit": 4,
+    "new_adapter_integration": 15,
+    "new_genuine_driver_native": 3,
+    "existing_lowlevel_v5": 5,
+    "legacy_vcq_unit_and_integration_in_new_feature": 17,
+    "legacy_vcq_repeated_under_vcq_only": 17,
+    "total_passed_executions": 61,
+    "distinct_passed_test_functions_by_binary_family": 44,
+    "genuine_proofs": 0,
+    "direct_guest_executions": 0
+  },
+  "clippy": {
+    "vcq_authenticated_all_targets": true,
+    "vcq_all_targets": true
+  },
+  "artifact_pins": {
+    "exact-off": {
+      "sha256": [
+        232,
+        201,
+        182,
+        182,
+        189,
+        67,
+        194,
+        120,
+        154,
+        221,
+        47,
+        203,
+        217,
+        236,
+        24,
+        145,
+        76,
+        44,
+        72,
+        204,
+        220,
+        209,
+        20,
+        158,
+        139,
+        157,
+        234,
+        111,
+        14,
+        118,
+        6,
+        35
+      ],
+      "image_id": [
+        3002199066,
+        1615302721,
+        2039644206,
+        2826525735,
+        178258819,
+        3880799180,
+        3190314515,
+        791784891
+      ]
+    },
+    "exact-on": {
+      "sha256": [
+        232,
+        201,
+        182,
+        182,
+        189,
+        67,
+        194,
+        120,
+        154,
+        221,
+        47,
+        203,
+        217,
+        236,
+        24,
+        145,
+        76,
+        44,
+        72,
+        204,
+        220,
+        209,
+        20,
+        158,
+        139,
+        157,
+        234,
+        111,
+        14,
+        118,
+        6,
+        35
+      ],
+      "image_id": [
+        3002199066,
+        1615302721,
+        2039644206,
+        2826525735,
+        178258819,
+        3880799180,
+        3190314515,
+        791784891
+      ]
+    },
+    "authrdf-artifact": {
+      "sha256": [
+        195,
+        95,
+        94,
+        75,
+        116,
+        22,
+        154,
+        165,
+        27,
+        36,
+        75,
+        143,
+        238,
+        203,
+        12,
+        142,
+        116,
+        98,
+        150,
+        166,
+        170,
+        5,
+        43,
+        232,
+        197,
+        143,
+        1,
+        144,
+        177,
+        177,
+        11,
+        17
+      ],
+      "image_id": [
+        2794517044,
+        4278390001,
+        1088095536,
+        53994879,
+        3259643235,
+        835127579,
+        1589380955,
+        3166477348
+      ]
+    }
+  },
+  "artifact_hashes": {
+    "exact-off": {
+      "bytes": 5278700,
+      "sha256": "e8c9b6b6bd43c2789add2fcbd9ec18914c2c48ccdcd1149e8b9dea6f0e760623"
+    },
+    "exact-on": {
+      "bytes": 5278700,
+      "sha256": "e8c9b6b6bd43c2789add2fcbd9ec18914c2c48ccdcd1149e8b9dea6f0e760623"
+    },
+    "authrdf-artifact": {
+      "bytes": 5397208,
+      "sha256": "c35f5e4b74169aa51b244b8feecb0c8e746296a6aa052be8c58f0190b1b10b11"
+    }
+  },
+  "job_sha256": "e9eafed755252fa786b3b285dcf154f595c8431ae426ed452b7ebc106eb0eb35",
+  "archive_sha256": "b336551a434134a5a9efbd8fe4d17c926c8fd2412baeee00df45e54418b05ade",
+  "archive_bytes": 1127697,
+  "declared_limits": {
+    "memory_bytes": 17179869184,
+    "swap_bytes": 0,
+    "cpu_quota_percent": 200,
+    "cargo_jobs": 1,
+    "unit_runtime_seconds": 720
+  },
+  "limitations": [
+    "Scoped native host tests and lint, not full workspace or cryptographic proof validation.",
+    "Seventeen legacy functions were repeated under two feature configurations; 61 executions are not 61 distinct functions.",
+    "Genuine driver compiled but remained ignored.",
+    "Fixed build-path/toolchain artifact identity only; earlier cross-path mismatch is retained separately.",
+    "Transient unit was collected before final retrieval, so final default infinity/not-set resource properties are not measurements of its running limits; dispatch argv and early resource snapshot retained."
+  ]
+}
