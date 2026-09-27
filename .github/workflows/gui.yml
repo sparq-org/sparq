@@ -157,8 +157,12 @@ jobs:
       # (gui-wasm-…-hashFiles(Cargo.lock)) covered the same paths and only churned
       # the shared 10 GB Actions-cache budget with a duplicate PR-scoped copy.
 
+      # [OPUS-5] #5776 — prebuilt, SHA-pinned, exactly-versioned wasm-pack (sq-khm3f):
+      # a `cargo install` here recompiles it from crates.io and flakes on a registry blip.
       - name: Install wasm-pack
-        run: cargo install wasm-pack --locked
+        uses: jetli/wasm-pack-action@0d096b08b4e5a7de8c28de67e11e945404e9eefa # v0.4.0
+        with:
+          version: v0.15.0
 
       - name: Build wasm bundle (shacl,jsonld)
         working-directory: js
@@ -239,8 +243,12 @@ jobs:
       # (gui-app-wasm-…-hashFiles(Cargo.lock)) covered the same paths and only churned
       # the shared 10 GB Actions-cache budget with a duplicate PR-scoped copy.
 
+      # [OPUS-5] #5776 — prebuilt, SHA-pinned, exactly-versioned wasm-pack (sq-khm3f):
+      # a `cargo install` here recompiles it from crates.io and flakes on a registry blip.
       - name: Install wasm-pack
-        run: cargo install wasm-pack --locked
+        uses: jetli/wasm-pack-action@0d096b08b4e5a7de8c28de67e11e945404e9eefa # v0.4.0
+        with:
+          version: v0.15.0
 
       - name: Build wasm bundle (shacl,jsonld)
         working-directory: js
@@ -358,8 +366,12 @@ jobs:
       # (gui-mock-ipc-wasm-…-hashFiles(Cargo.lock)) covered the same paths and only
       # churned the shared 10 GB Actions-cache budget with a duplicate PR-scoped copy.
 
+      # [OPUS-5] #5776 — prebuilt, SHA-pinned, exactly-versioned wasm-pack (sq-khm3f):
+      # a `cargo install` here recompiles it from crates.io and flakes on a registry blip.
       - name: Install wasm-pack
-        run: cargo install wasm-pack --locked
+        uses: jetli/wasm-pack-action@0d096b08b4e5a7de8c28de67e11e945404e9eefa # v0.4.0
+        with:
+          version: v0.15.0
 
       # The in-tab WASM engine (shacl,jsonld bundle) is required for queries to run in the browser.
       - name: Build WASM bundle (shacl,jsonld)
@@ -675,8 +687,12 @@ jobs:
           path: gui/src-tauri/target
           key: gui-e2e-${{ runner.os }}-${{ hashFiles('gui/src-tauri/Cargo.lock', 'Cargo.lock') }}
 
+      # [OPUS-5] #5776 — prebuilt, SHA-pinned, exactly-versioned wasm-pack (sq-khm3f):
+      # a `cargo install` here recompiles it from crates.io and flakes on a registry blip.
       - name: Install wasm-pack
-        run: cargo install wasm-pack --locked
+        uses: jetli/wasm-pack-action@0d096b08b4e5a7de8c28de67e11e945404e9eefa # v0.4.0
+        with:
+          version: v0.15.0
 
       # Build the frontend the Tauri webview embeds. The shell's `cargo build` embeds whatever
       # is in `gui/app/out` at COMPILE TIME (sq-ixc3.8 repointed `frontendDist` to the DISTINCT
@@ -818,8 +834,12 @@ jobs:
           path: gui/src-tauri/target
           key: gui-e2e-probe-${{ runner.os }}-${{ hashFiles('gui/src-tauri/Cargo.lock', 'Cargo.lock') }}
 
+      # [OPUS-5] #5776 — prebuilt, SHA-pinned, exactly-versioned wasm-pack (sq-khm3f):
+      # a `cargo install` here recompiles it from crates.io and flakes on a registry blip.
       - name: Install wasm-pack
-        run: cargo install wasm-pack --locked
+        uses: jetli/wasm-pack-action@0d096b08b4e5a7de8c28de67e11e945404e9eefa # v0.4.0
+        with:
+          version: v0.15.0
 
       - name: Build the WASM bundle (shacl,jsonld; the in-tab engine)
         working-directory: js
