@@ -1,0 +1,316 @@
+name: sccache A/B
+
+# [OPUS-5] sq-6vshe.15 item 3 (issue #5164) — the MEASUREMENT INSTRUMENT for the
+# sccache question in research/ci-mergequeue-speedup-2026-07.md §3.2 lever 2 item 3.
+#
+# WHAT THIS IS, AND WHAT IT DELIBERATELY IS NOT
+# ---------------------------------------------
+# It is NOT an adoption of sccache. Nothing in `ci.yml` changes; no production job
+# gains a compiler wrapper. This workflow is a DISPATCH-ONLY EXPERIMENT that answers
+# one question with a number: does putting sccache (GitHub Actions cache backend) in
+# front of ci.yml's `build + archive test binaries` compile step win at least the
+# design record's 60 s median bar? Adopt only above the bar; below it, record the
+# negative result in §3.2 and close. The record says up front to EXPECT the negative
+# outcome — dependencies are already warm via Swatinem/rust-cache, a PR's changed
+# crates always miss, and feature-matrix legs key differently per cfg, so only
+# unchanged workspace crates can hit. A negative result is a complete deliverable,
+# which is exactly why the instrument has to be trustworthy enough to produce one.
+#
+# EXPERIMENTAL DESIGN — the four things that make this an A/B rather than a vibe
+# ------------------------------------------------------------------------------
+# 1. PAIRED ARMS ON FRESH RUNNERS. `control` and `treatment` are separate jobs, five
+#    trials each, `fail-fast: false`. They are NOT two steps in one job: the second
+#    build in a job would inherit a warm `target/` and measure nothing. Both arms run
+#    the byte-identical `cargo nextest archive` command from ci.yml, under the same
+#    global env, and both restore the same Swatinem/rust-cache entry — the ONLY
+#    difference between the arms is `RUSTC_WRAPPER`.
+# 2. THE MEASURE ARMS NEVER WRITE. A `prime` job populates the sccache namespace
+#    first; the treatment trials then run `SCCACHE_GHA_RW_MODE: READ_ONLY`. This is
+#    the sq-6vshe.5 poisoning discipline (writes only from a designated context), and
+#    it is also load-bearing for the statistics: if the trials could write, trial 1
+#    would warm trial 2 and the five samples would not be samples of the same cache
+#    state. Read-only makes them independent.
+# 3. NO PRODUCTION CACHE IS TOUCHED. Every rust-cache step here is `save-if: false`
+#    (an experiment that rewrites the cache it is measuring is measuring itself), and
+#    the sccache namespace is prefixed `sccache-ab-` so it can never alias a future
+#    production sccache key. Per sq-6vshe.5 the namespace also binds {rustc version,
+#    host triple, feature set, Cargo.lock hash} — no key may alias across toolchain,
+#    lockfile or feature-set.
+# 4. CARGO_INCREMENTAL=0 IS LOAD-BEARING, NOT DECORATION. sccache refuses to cache
+#    incremental compilation: with incremental on, every request lands in
+#    `not_cached: {"incremental": N}` with zero hits AND zero misses, so the
+#    treatment arm silently degrades to "control plus wrapper overhead" and the
+#    experiment reports a confident, wrong negative. MEASURED locally while authoring
+#    this. ci.yml already sets `CARGO_INCREMENTAL: "0"` workflow-wide, so the arms are
+#    faithful to production; it is repeated in this file's env because the whole
+#    experiment is void without it. `scripts/sccache_ab_verdict.py` treats an
+#    all-non-cacheable arm as INCONCLUSIVE rather than a negative result.
+#
+# GATING: this workflow is dispatch-only, but a dispatch on `main` lands its
+# check-runs on main's head SHA — the same SHA the push-triggered `ci-summary / gate`
+# polls. That is the silent-gating shape sq-huwr8 documented for the alarm lanes, so
+# all three jobs are DECLARED in .github/advisory-registry.json. They are advisory
+# because they report on runner performance and on this harness's own health, never
+# on a property of the commit under test.
+#
+# COST: one dispatch is 11 workspace builds. Run it deliberately, not on a schedule.
+
+on:
+  workflow_dispatch:
+    inputs:
+      bar_seconds:
+        description: >-
+          Median-win adoption bar in seconds. The design record's bar is 60; this
+          input exists so a re-run can re-score an old question, NOT so the bar can
+          be lowered to fit a result.
+        required: false
+        default: "60"
+
+permissions:
+  contents: read
+
+concurrency:
+  # Per-run group: an experiment must never cancel, or be cancelled by, real CI on
+  # the same ref (the sq-qcnn.11 lesson — a dispatch and a push-to-main share
+  # `refs/heads/main`).
+  group: sccache-ab-${{ github.run_id }}
+  cancel-in-progress: false
+
+env:
+  # Mirrors the compile-relevant half of ci.yml's global env verbatim. The arms are
+  # only meaningful if they compile under the same conditions production does.
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  CARGO_NET_RETRY: "10"
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "line-tables-only"
+  CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C link-arg=-fuse-ld=lld"
+  # The exact command under test, kept in one place so the prime job and both arms
+  # provably compile the same thing. Copied from ci.yml's `build-archive` job — the
+  # `approx-ann,filtered-ann,vec-predicate` feature set is LOAD-BEARING there (#363)
+  # and changing it here would measure a different build.
+  ARCHIVE_FEATURES: approx-ann,filtered-ann,vec-predicate
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Prime: the ONLY job that writes the sccache namespace. Models the state the
+  # treatment arm would find in production — a cache warmed by an earlier build of
+  # this same tree. Without it the treatment arm is a 100%-miss run and the verdict
+  # script (correctly) refuses to call that a negative result.
+  # ---------------------------------------------------------------------------
+  prime:
+    name: "sccache A/B: prime the GHA cache namespace (advisory)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Free runner disk before build + archive
+        run: ./scripts/ci-free-disk.sh
+      - name: Rust (preinstalled stable)
+        run: |
+          rustup default stable
+          rustup show active-toolchain
+      - name: Compute the sccache key namespace
+        run: ./scripts/sccache-ab-namespace.sh
+      - name: Cache cargo + target
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          # Same key the production build-archive job restores, so the arms start from
+          # production's warm dependency set.
+          shared-key: "test-workspace"
+          # NEVER save from this workflow. This is an experiment; writing the cache it
+          # is measuring would perturb both the measurement and every real CI job that
+          # restores this key afterwards.
+          save-if: "false"
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
+        with:
+          tool: nextest
+      - name: Install sccache + export the GHA cache credentials
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          # The action exists to export ACTIONS_RESULTS_URL / ACTIONS_RUNTIME_TOKEN
+          # into the job env — a plain `run:` step cannot see them, so the GHA backend
+          # is unreachable without it. Pinned to a full commit SHA per repo policy.
+          # Version pinned explicitly: the action's README warns that sccache
+          # "versions prior to v0.11.0 probably will not work" with it.
+          version: "v0.17.0"
+      - name: Populate the namespace (READ_WRITE — the only writer in this workflow)
+        env:
+          SCCACHE_GHA_ENABLED: "true"
+        run: |
+          set -euo pipefail
+          export RUSTC_WRAPPER="$SCCACHE_PATH"
+          "$SCCACHE_PATH" --zero-stats
+          cargo nextest archive --workspace --all-targets \
+            --features "$ARCHIVE_FEATURES" --archive-file nextest.tar.zst
+          "$SCCACHE_PATH" --show-stats
+
+  # ---------------------------------------------------------------------------
+  # Measure: 2 arms x 5 trials, each on its own fresh runner.
+  # ---------------------------------------------------------------------------
+  measure:
+    name: "sccache A/B: ${{ matrix.arm }} trial ${{ matrix.trial }} (advisory)"
+    needs: prime
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      # A dead trial must not kill its siblings: the verdict script needs equal,
+      # non-trivial trial counts per arm and reports INCONCLUSIVE if it does not get
+      # them, which is a better failure than a median over the survivors.
+      fail-fast: false
+      matrix:
+        arm: [control, treatment]
+        trial: [1, 2, 3, 4, 5]
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Free runner disk before build + archive
+        run: ./scripts/ci-free-disk.sh
+      - name: Rust (preinstalled stable)
+        run: |
+          rustup default stable
+          rustup show active-toolchain
+      - name: Compute the sccache key namespace
+        run: ./scripts/sccache-ab-namespace.sh
+      - name: Cache cargo + target
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          shared-key: "test-workspace"
+          save-if: "false"
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
+        with:
+          tool: nextest
+      # TREATMENT ONLY. The control arm never installs sccache and never sets
+      # RUSTC_WRAPPER, so its build is bit-for-bit the production configuration.
+      - name: Install sccache + export the GHA cache credentials
+        if: matrix.arm == 'treatment'
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: "v0.17.0"
+      - name: Enable sccache for this trial (READ_ONLY)
+        if: matrix.arm == 'treatment'
+        run: |
+          set -euo pipefail
+          {
+            echo "SCCACHE_GHA_ENABLED=true"
+            # READ_ONLY is both the sq-6vshe.5 poisoning discipline and the thing that
+            # keeps the five trials independent samples: a writing trial would warm its
+            # successors and bias the median downward with each run.
+            echo "SCCACHE_GHA_RW_MODE=READ_ONLY"
+            echo "RUSTC_WRAPPER=$SCCACHE_PATH"
+          } >> "$GITHUB_ENV"
+      - name: Reset sccache counters
+        if: matrix.arm == 'treatment'
+        run: "$SCCACHE_PATH --zero-stats"
+      # The measured step. Identical command in both arms; the arms differ only by
+      # whether RUSTC_WRAPPER is set in the environment above.
+      - name: Timed build + archive test binaries (nextest archive)
+        run: |
+          set -euo pipefail
+          start=$(date +%s%N)
+          cargo nextest archive --workspace --all-targets \
+            --features "$ARCHIVE_FEATURES" --archive-file nextest.tar.zst
+          end=$(date +%s%N)
+          # Bash arithmetic is exact 64-bit integer math; an epoch-nanosecond delta
+          # would lose precision through a double.
+          echo "$(( (end - start) / 1000000 ))" > compile_millis.txt
+          echo "compile milliseconds: $(cat compile_millis.txt)"
+      - name: Capture sccache counters
+        if: matrix.arm == 'treatment'
+        run: |
+          set -euo pipefail
+          "$SCCACHE_PATH" --show-stats
+          "$SCCACHE_PATH" --show-stats --stats-format=json > sccache-raw.json
+      - name: Record the trial result
+        env:
+          ARM: ${{ matrix.arm }}
+          TRIAL: ${{ matrix.trial }}
+          RUN_ID: ${{ github.run_id }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          python3 - > "result-${ARM}-${TRIAL}.json" <<'PY'
+          import json, os, pathlib, subprocess
+
+          arm = os.environ["ARM"]
+          millis = int(pathlib.Path("compile_millis.txt").read_text().strip())
+
+          raw = pathlib.Path("sccache-raw.json")
+          if arm == "treatment":
+              stats = json.loads(raw.read_text())["stats"]
+              def total(key):
+                  return sum((stats.get(key) or {}).get("counts", {}).values())
+              sccache = {
+                  "compile_requests": stats.get("compile_requests", 0),
+                  # cache_hits / cache_misses are per-language maps, e.g. {"Rust": 120}.
+                  "cache_hits": total("cache_hits"),
+                  "cache_misses": total("cache_misses"),
+                  "cache_writes": stats.get("cache_writes", 0),
+                  "not_cached": stats.get("not_cached", {}),
+              }
+          elif os.environ.get("RUSTC_WRAPPER"):
+              # The control arm must be an UNWRAPPED build. If a wrapper reached it
+              # anyway, say so loudly in the data rather than emitting a clean-looking
+              # null: sccache_ab_verdict.py rejects a control arm carrying counters, so
+              # a contaminated baseline becomes INCONCLUSIVE instead of a fake verdict.
+              sccache = {"compile_requests": 0, "cache_hits": 0, "cache_misses": 0,
+                         "cache_writes": 0, "not_cached": {"CONTAMINATED-CONTROL-ARM": 1}}
+          else:
+              sccache = None
+
+          print(json.dumps({
+              "arm": arm,
+              "trial": int(os.environ["TRIAL"]),
+              "compile_seconds": millis / 1000.0,
+              "sccache": sccache,
+              "key_namespace": os.environ.get("SCCACHE_GHA_VERSION", ""),
+              "rustc": subprocess.run(["rustc", "-V"], capture_output=True, text=True).stdout.strip(),
+              "runner": os.environ.get("RUNNER_NAME", ""),
+              "run_id": os.environ["RUN_ID"],
+              "commit": os.environ["COMMIT"],
+              "archive_bytes": pathlib.Path("nextest.tar.zst").stat().st_size,
+          }, indent=2))
+          PY
+          cat "result-${ARM}-${TRIAL}.json"
+      - name: Upload the trial result
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sccache-ab-${{ matrix.arm }}-${{ matrix.trial }}
+          path: result-${{ matrix.arm }}-${{ matrix.trial }}.json
+          retention-days: 14
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # Verdict: median per arm, scored against the bar. Exits 0 for BOTH outcomes —
+  # "do not adopt" is a result, not a failure — and 2 when the instrument did not
+  # earn the right to a verdict.
+  # ---------------------------------------------------------------------------
+  verdict:
+    name: "sccache A/B: verdict against the adoption bar (advisory)"
+    needs: measure
+    # always(): if trials died, the run must still say INCONCLUSIVE out loud. A
+    # skipped verdict job is how a broken experiment gets quietly re-read later as
+    # "we measured it and it did not help".
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Download every trial result
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: sccache-ab-*
+          path: ab-results
+        continue-on-error: true
+      - name: Score the A/B against the adoption bar
+        env:
+          # Passed via env, not inlined as `${{ }}` in the shell body, so the shell
+          # sees a literal value — no template-injection surface, and shellcheck-clean
+          # (an inline expansion trips SC2296). Same convention as ci.yml's shard step.
+          BAR_SECONDS: ${{ inputs.bar_seconds }}
+        run: |
+          set -euo pipefail
+          python3 scripts/sccache_ab_verdict.py \
+            --results-dir ab-results \
+            --bar-seconds "$BAR_SECONDS"

@@ -248,6 +248,57 @@ rebuild. The honest remaining deltas, in measured order:
 >   an adoption nor an honest negative result to record; the ≥60 s bar is untested. Nothing
 >   about sccache is wired. Tracked as a follow-up issue.
 
+> **Status 2026-09-01 [OPUS-5] — item 3: the INSTRUMENT is built; there is still NO
+> VERDICT.** (issue #5164)
+>
+> Read the previous paragraph's verdict line as unchanged: **the ≥60 s bar remains
+> untested and no number exists.** What landed is the measurement apparatus item 3
+> needs and never had, not the measurement:
+>
+> - `.github/workflows/sccache-ab.yml` — a **`workflow_dispatch`-only** A/B over
+>   ci.yml's `build + archive test binaries` compile step. One `prime` job populates an
+>   sccache namespace, then 2 arms × 5 trials run on fresh runners: `control` is the
+>   production configuration untouched, `treatment` differs **only** by `RUSTC_WRAPPER`.
+>   Nothing in `ci.yml` changed; no production job gained a compiler wrapper.
+> - `scripts/sccache_ab_verdict.py` — medians, the ≥60 s scoring, and the honesty
+>   guards. It exits 0 for BOTH outcomes (a negative result is the deliverable, not a
+>   failure) and exits 2 **INCONCLUSIVE** — refusing to emit any verdict — when the
+>   instrument did not earn one.
+> - `scripts/sccache-ab-namespace.sh` — the sq-6vshe.5 key schema
+>   ({rustc version, host triple, feature-family, `Cargo.lock` digest}), so no key
+>   aliases across toolchain / lockfile / feature-set, under an `sccache-ab-` prefix
+>   that cannot collide with a future production sccache key.
+> - `scripts/tests/test_sccache_ab_harness.py` — the harness's validity conditions,
+>   pinned structurally and wired into `docs-quality.yml`.
+>
+> **Why the INCONCLUSIVE exit is the load-bearing part.** This record predicts a
+> negative result, and "sccache did not help" and "sccache never actually ran" produce
+> the *same* wall-clock table — they differ only in the sccache counters. A silently
+> broken harness therefore yields exactly the answer everyone already expects, and it
+> would be written here permanently. Two concrete instances of that failure were found
+> while building this, by running the thing rather than reasoning about it:
+> **(a)** sccache refuses to cache incremental compilation outright — with
+> `CARGO_INCREMENTAL` non-zero every request lands in `not_cached: {"incremental": N}`
+> with zero hits *and* zero misses, so the treatment arm silently degrades to
+> "control plus wrapper overhead"; **(b)** the namespace script's first version piped
+> `rustc -vV` straight into its digest, and because `set -euo pipefail` does not abort a
+> failing command inside a `{ … } | sha256sum` substitution, a broken toolchain
+> contributed an empty string and it still printed a confident key — aliasing across
+> every rustc version, the one thing sq-6vshe.5 forbids. Both are now fail-closed.
+>
+> **What is still owed, and by whom.** Someone with dispatch rights must run the
+> workflow on `main` and paste the verdict job's summary here — either an ADOPT (which
+> then needs a real `ci.yml` change, separately reviewed) or the expected DO-NOT-ADOPT,
+> at which point item 3 closes. **Do not record a negative result from an INCONCLUSIVE
+> run.** Cost is ~11 workspace builds per dispatch, which is why it is dispatch-only and
+> not scheduled.
+>
+> **Item 1's remaining halves are still NOT done** and are unchanged by this: the
+> `nextest --zstd-level` retune and pruning non-test content from the archive both
+> alter the archive's bytes, so both need the before/after test-count parity check and
+> a decomposition of the upload step into compress-vs-transfer that no measurement here
+> provides. This harness times the **compile** step only.
+
 ### 3.3 Lever 3 — prioritize/parallelize the thing about to merge → **bead sq-6vshe.16**
 
 - **CodeQL: KEEP on the blocking path.** Measured 3.8 m median (buildless). Moving a
