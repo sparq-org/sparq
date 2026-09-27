@@ -83,6 +83,14 @@ _pad = _load_script_module("pub_api_diff")
 # the three triage surfaces can never drift.
 _triage = _load_script_module("triage")
 
+# [OPUS-5] (#5242) The proactive new-crate merge gate G1. Its `added_crates()` is
+# the single definition of "this PR adds crate <x>", and it iterates over ALL added
+# `crates/<x>/Cargo.toml` paths. build_contexts() below reuses it so the reactive
+# engine fans `{crate}` out over exactly the crate set the gate already enforces
+# against — the same single-sourcing pattern as pub_api_diff between gate G2 and
+# the docs rule.
+_gnc = _load_script_module("gate-new-crate")
+
 # [FABLE-5] (#2474) Default priority for minted follow-ons, matching the retriage
 # cron's convergence default (scripts/retriage.py DEFAULT_PRIORITY).
 DEFAULT_PRIORITY = "priority:P3"
@@ -150,6 +158,40 @@ class FollowOn:
 # --------------------------------------------------------------------------- #
 # Rule loading
 # --------------------------------------------------------------------------- #
+CRATE_PLACEHOLDER = "{crate}"
+
+
+def validate_crate_identity(rule_id: str, tmpl: CreateTemplate) -> None:
+    """Reject a template that names `{crate}` outside its `dedup_key`.
+
+    [OPUS-5] (#5242) `{crate}` fans a template out over every crate the PR adds
+    (build_contexts), but `dedup_key` IS the follow-on's identity: evaluate()
+    de-duplicates on it within a run, and it becomes the `<!-- flow-on-key: … -->`
+    marker open_issue_exists() searches for across runs. So a template naming
+    `{crate}` in a presentation field but NOT in its key expands once per crate and
+    then collapses back to the FIRST crate's issue — silent, incomplete fan-out. It
+    cannot be fixed by minting them anyway: two issues sharing one key would be
+    indistinguishable to the cross-run idempotency search. So the identity rule is
+    "name `{crate}` anywhere ⇒ name it in `dedup_key`", enforced at load time where
+    the author sees it, rather than discovered as a missing issue after a merge."""
+    if CRATE_PLACEHOLDER in tmpl.dedup_key:
+        return
+    where = [
+        field_name
+        for field_name, value in (("title", tmpl.title), ("body", tmpl.body))
+        if CRATE_PLACEHOLDER in value
+    ]
+    where += [f"labels[{i}]" for i, lab in enumerate(tmpl.labels) if CRATE_PLACEHOLDER in lab]
+    if where:
+        raise ValueError(
+            "rule {!r} template {!r} uses {{crate}} in {} but not in dedup_key, so it "
+            "would be minted for only the FIRST added crate; add {{crate}} to "
+            "dedup_key (or drop it from those fields)".format(
+                rule_id, tmpl.dedup_key, ", ".join(where)
+            )
+        )
+
+
 def load_rules(path: Path) -> list[Rule]:
     with path.open("rb") as fh:
         data = tomllib.load(fh)
@@ -178,6 +220,8 @@ def load_rules(path: Path) -> list[Rule]:
             raise ValueError(f"rule {rule.id!r} has no trigger predicate")
         if not rule.creates:
             raise ValueError(f"rule {rule.id!r} has no create templates")
+        for tmpl in rule.creates:
+            validate_crate_identity(rule.id, tmpl)
         rules.append(rule)
     return rules
 
@@ -231,6 +275,42 @@ def build_context(
         "surface": surface or "",
         "zk_circuit": zk_circuit or "",
     }
+
+
+def build_contexts(
+    pr: int,
+    pr_title: str,
+    changed: list[str],
+    added: list[str],
+) -> list[dict[str, str]]:
+    """Return every expansion context a follow-on could be minted from — one per
+    crate this PR could be ABOUT, in a stable order.
+
+    [OPUS-5] (#5242) build_context() resolves `{crate}` to a SINGLE crate (the
+    first `crates/<x>/` directory in the added-then-changed pool), so a PR that
+    lands TWO new crates at once minted the `{crate}`-keyed follow-on set for only
+    the first — the second silently got none, even though merge gate G1
+    (`scripts/gate-new-crate.py::added_crates`) already iterates over ALL added
+    crates. The proactive and reactive halves disagreed; this closes the gap by
+    evaluating each rule once per context.
+
+    When the diff ADDS one or more crates, those crates ARE the contexts — one
+    each, in `added_crates()` order — replacing the base `{crate}` resolution.
+    Replacing rather than appending is deliberate: build_context() picks the first
+    `crates/<x>/` DIRECTORY in the pool, so a PR that adds a module to an existing
+    crate (`crates/sparq-core/src/new_mod.rs`) alongside a genuinely new crate
+    resolves the base to the EXISTING crate; keeping it as an extra context would
+    mint a "new crate sparq-core" follow-on that is simply false. A diff that adds
+    no crate keeps the single base context, so every other rule expands as before.
+
+    Templates that never reference `{crate}` expand identically in every context
+    and collapse back to a single follow-on via evaluate()'s existing dedup_key
+    de-duplication, so a rule unrelated to crates is not multiplied."""
+    base = build_context(pr, pr_title, changed, added)
+    crates = _gnc.added_crates(added)
+    if not crates:
+        return [base]
+    return [{**base, "crate": crate} for crate in crates]
 
 
 def expand(text: str, ctx: dict[str, str]) -> str:
@@ -347,36 +427,51 @@ def evaluate(
     labels: list[str],
     pub_changed: set[str] | None = None,
 ) -> list[FollowOn]:
-    ctx = build_context(pr, pr_title, changed, added)
+    # [OPUS-5] (#5242) One context per crate the PR could be about, so a two-new-
+    # crate PR mints the `{crate}`-keyed follow-ons for BOTH. Templates without a
+    # `{crate}` placeholder expand identically in each context and collapse via
+    # `seen_keys` below, so this is a no-op for every crate-agnostic rule.
+    # SCOPE: the fan-out is over EXPANSION only — `rule_matches` is still decided
+    # once for the whole diff, not per context. A future rule needing a per-crate
+    # trigger (say "fire only for a non-stub crate") must take the context as an
+    # argument; today no predicate depends on `{crate}`.
+    contexts = build_contexts(pr, pr_title, changed, added)
     out: list[FollowOn] = []
     seen_keys: set[str] = set()
     for rule in rules:
         if not rule_matches(rule, changed, added, labels, pr_title, pub_changed):
             continue
-        for tmpl in rule.creates:
-            dedup_key = expand(tmpl.dedup_key, ctx)
-            if dedup_key in seen_keys:
-                continue  # de-dup within a single run
-            seen_keys.add(dedup_key)
-            body = expand(tmpl.body, ctx).rstrip() + "\n\n" + key_marker(dedup_key)
-            body += (
-                f"\n\n> 🤖 SPARQ agent — auto-generated by the flow-on engine "
-                f"(rule `{rule.id}`) from merged PR #{pr}. Reconcile into a bead."
-            )
-            labels_full = list(dict.fromkeys(BASE_LABELS + tmpl.labels))
-            # [FABLE-5] (#2474) dispatch-visibility: append role/priority/status
-            # routing labels at creation (see routing_labels for why the event
-            # path can never label these issues).
-            labels_full += routing_labels(labels_full)
-            out.append(
-                FollowOn(
-                    rule_id=rule.id,
-                    dedup_key=dedup_key,
-                    title=expand(tmpl.title, ctx),
-                    body=body,
-                    labels=labels_full,
+        for ctx in contexts:
+            for tmpl in rule.creates:
+                dedup_key = expand(tmpl.dedup_key, ctx)
+                if dedup_key in seen_keys:
+                    continue  # de-dup within a single run
+                seen_keys.add(dedup_key)
+                body = expand(tmpl.body, ctx).rstrip() + "\n\n" + key_marker(dedup_key)
+                body += (
+                    f"\n\n> 🤖 SPARQ agent — auto-generated by the flow-on engine "
+                    f"(rule `{rule.id}`) from merged PR #{pr}. Reconcile into a bead."
                 )
-            )
+                # [OPUS-5] (#5242) Labels expand in the active context too, not just
+                # title/body: validate_crate_identity() explicitly ADMITS `{crate}` in
+                # a label (given a `{crate}`-keyed dedup_key), so leaving them literal
+                # would stamp every per-crate issue with the invalid label
+                # `area:{crate}` instead of `area:sparq-alpha` / `area:sparq-beta`.
+                tmpl_labels = [expand(lab, ctx) for lab in tmpl.labels]
+                labels_full = list(dict.fromkeys(BASE_LABELS + tmpl_labels))
+                # [FABLE-5] (#2474) dispatch-visibility: append role/priority/status
+                # routing labels at creation (see routing_labels for why the event
+                # path can never label these issues).
+                labels_full += routing_labels(labels_full)
+                out.append(
+                    FollowOn(
+                        rule_id=rule.id,
+                        dedup_key=dedup_key,
+                        title=expand(tmpl.title, ctx),
+                        body=body,
+                        labels=labels_full,
+                    )
+                )
     return out
 
 
