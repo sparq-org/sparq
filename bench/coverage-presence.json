@@ -77,7 +77,7 @@
     "sparq-lws-core": {
       "had_integration_dir": true,
       "min_tests": 1000,
-      "note": "[OPUS-5] sq-gg0qq.11: RATCHETED 880 -> 1000. The 880 floor was seeded at import (sq-gg0qq.2, 893 #[test]s from jeswr/solid-server-rs@1e555b10); the crate has since grown to 1014 counted #[test]/#[tokio::test]/#[rstest] attributes (inline unit + tests/ integration), so the old floor carried 134 tests of slack and would no longer catch a large test loss. Floor 1000 leaves a small margin; recount with scripts/coverage-presence.py --check. The line-% floor (bench/coverage-floor.json) is STILL absent for this crate: seeding one requires a real cargo-llvm-cov measurement (scripts/coverage-gate.py --seed), which sq-gg0qq.11 had no toolchain to perform, so the crate stays presence-gated only — open follow-up work, not closed here."
+      "note": "[OPUS-5] sq-gg0qq.11: RATCHETED 880 -> 1000. The 880 floor was seeded at import (sq-gg0qq.2, 893 #[test]s from jeswr/solid-server-rs@1e555b10); the crate has since grown to 1014 counted #[test]/#[tokio::test]/#[rstest] attributes (inline unit + tests/ integration), so the old floor carried 134 tests of slack and would no longer catch a large test loss. Floor 1000 leaves a small margin; recount with scripts/coverage-presence.py --check. [OPUS-5] #5139: the line-% deferral this note used to record is now CLOSED — the crate has a MEASURED entry in bench/coverage-floor.json (floor 56, seeded from a real cargo-llvm-cov run) enforced by the dedicated `coverage-lws-core` job in ci.yml, so it is gated on BOTH test presence and line%."
     },
     "sparq-mpc": {
       "had_integration_dir": false,
