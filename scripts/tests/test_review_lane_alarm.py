@@ -41,10 +41,17 @@ SCRIPT = REPO_ROOT / "scripts" / "review_lane_alarm.py"
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "review-alarm.yml"
 DOCS_QUALITY = REPO_ROOT / ".github" / "workflows" / "docs-quality.yml"
 
+# The alarm imports `review_lane_reach` — the reachability predicate it now SHARES with
+# the sparq-side labeller (sparq#4677) — as a sibling module. Under
+# `python3 scripts/review_lane_alarm.py` that resolves through sys.path[0]; loading the
+# module by path from here does not, so put `scripts/` on the path explicitly.
+sys.path.insert(0, str(SCRIPT.parent))
+
 _spec = importlib.util.spec_from_file_location("review_lane_alarm", SCRIPT)
 alarm = importlib.util.module_from_spec(_spec)
 assert _spec.loader is not None
 _spec.loader.exec_module(alarm)
+reach = sys.modules["review_lane_reach"]
 
 SHA_A = "a" * 40
 SHA_B = "b" * 40
@@ -260,6 +267,116 @@ class TestRegistryLaneReachability(unittest.TestCase):
         self.assertEqual(alarm.REGISTRY_HEAD_REF_RE.pattern,
                          r"^sparq-agent/issue-([1-9][0-9]*)-")
 
+    def test_the_predicate_is_the_SAME_OBJECT_the_labeller_uses(self):
+        """sparq#4677. The bug was never one predicate being wrong — it was two
+        components in different repositories holding DIFFERENT ones, so a PR could be
+        labelled `review:unreviewed` here and be invisible to the reviewer there. A
+        second sparq-side copy would re-commit exactly that, so pin identity (same module
+        object), not equality of source."""
+        self.assertIs(alarm.registry_lane_reachable.__globals__["review_lane_reach"], reach)
+        self.assertIs(alarm.REGISTRY_HEAD_REF_RE, reach.REGISTRY_HEAD_REF_RE)
+
+
+class TestLabelledButUnreviewable(unittest.TestCase):
+    """sparq#4677: the DRIFT ROW between the sparq-side labeller and the review lane.
+
+    `review:unreviewed` is written by scripts/verdict-bridge.py in THIS repository and
+    means "awaiting review"; the only reviewer lives in `jeswr/agent-account-registry`
+    and never sees the label at all. When the two visibility predicates disagree the
+    labelled-but-unreviewable class grows silently — it reached four PRs, including the
+    first crates.io release PR (~22h unreviewed), and was found by accident. The census
+    row makes that population countable on every tick.
+    """
+
+    NOW = "2026-07-26T00:00:00Z"
+    AGED = "2026-07-18T00:00:00Z"
+
+    # The four PRs the issue measured, by their real head refs and authors.
+    MEASURED = (
+        (3798, "ci/auto-arm-workflows-permission", "jeswr", reach.CLASS_NOT_ENROLLED),
+        (4193, "research/knowledge-management-strategy", "jeswr", reach.CLASS_NOT_ENROLLED),
+        (4460, "release-plz-2026-07-27T02-19-35Z", BOT, reach.CLASS_RELEASE),
+        (4488, "dependabot/github_actions/actions-minor", "dependabot[bot]",
+         reach.CLASS_DEPENDABOT),
+    )
+
+    def census(self, prs):
+        return alarm.find_blind_spot(prs, {}, REPO, alarm._parse_iso(self.NOW), 24)
+
+    def test_the_row_is_emitted_at_ZERO_on_a_clean_repository(self):
+        """A counter that materialises only when it fires cannot report agreement: its
+        absence would be indistinguishable from the check having been deleted."""
+        _, census = self.census([pr(number=1, ref="sparq-agent/issue-5-1-1", login=BOT)])
+        self.assertEqual(census[alarm.LABELLED_UNREVIEWABLE], 0)
+
+    def test_every_measured_pr_is_counted(self):
+        prs = [
+            pr(number=n, ref=ref, login=login,
+               labels=(alarm.UNREVIEWED_LABEL,), created=self.AGED)
+            for n, ref, login, _ in self.MEASURED
+        ]
+        _, census = self.census(prs)
+        self.assertEqual(census[alarm.LABELLED_UNREVIEWABLE], len(self.MEASURED))
+
+    def test_a_worker_pr_carrying_the_flag_is_NOT_drift(self):
+        """Non-vacuity: the row must count DISAGREEMENT, not merely the label."""
+        _, census = self.census([
+            pr(number=1, ref="sparq-agent/issue-5-1-1", login=BOT,
+               labels=(alarm.UNREVIEWED_LABEL,), created=self.AGED)
+        ])
+        self.assertEqual(census[alarm.LABELLED_UNREVIEWABLE], 0)
+
+    def test_the_flag_never_buys_the_lane_labelled_exit(self):
+        """`review:unreviewed` enrols a PR in nothing, so it must not silence the alarm
+        the way a real lane label does — that would hide the very population #4677 is
+        about behind the label that created it."""
+        self.assertNotIn(alarm.UNREVIEWED_LABEL, alarm.LANE_LABELS)
+        self.assertEqual(
+            alarm.classify_pr(pr(labels=(alarm.UNREVIEWED_LABEL,)), [], REPO),
+            "blind-spot",
+        )
+
+    def test_a_flagged_DRAFT_is_still_counted_as_drift(self):
+        """The label is wrong on a draft too — drafts just do not additionally alarm."""
+        _, census = self.census([
+            pr(number=1, ref="research/x", draft=True, labels=(alarm.UNREVIEWED_LABEL,))
+        ])
+        self.assertEqual(census[alarm.LABELLED_UNREVIEWABLE], 1)
+        self.assertEqual(census.get("draft"), 1)
+
+    def test_each_unreachable_class_carries_an_explicit_disposition(self):
+        """#4677 asked for release and dependabot PRs to be DECIDED rather than left to
+        silent accumulation: they cannot be enrolled (reviewer selection inverts
+        `impl_provider` and neither class has an implementing model), so the row must say
+        what happens to them instead."""
+        prs = [
+            pr(number=n, ref=ref, login=login, created=self.AGED)
+            for n, ref, login, _ in self.MEASURED
+        ]
+        findings, _ = self.census(prs)
+        by_number = {f["number"]: f for f in findings}
+        self.assertEqual(len(by_number), len(self.MEASURED))
+        for number, _, _, expected in self.MEASURED:
+            with self.subTest(pr=number):
+                self.assertEqual(by_number[number]["class"], expected)
+                self.assertTrue(by_number[number]["disposition"].strip())
+        for number in (4460, 4488):
+            self.assertIn("MAINTAINER-REVIEWED", by_number[number]["disposition"])
+
+    def test_the_issue_body_reports_the_row_and_the_dispositions(self):
+        prs = [
+            pr(number=n, ref=ref, login=login,
+               labels=(alarm.UNREVIEWED_LABEL,), created=self.AGED)
+            for n, ref, login, _ in self.MEASURED
+        ]
+        findings, census = self.census(prs)
+        body = alarm.render_issue_body(findings, census, REPO, 24)
+        self.assertIn(alarm.LABELLED_UNREVIEWABLE, body)
+        self.assertIn(f"{alarm.LABELLED_UNREVIEWABLE}: 4", body)
+        self.assertEqual(body.count("MAINTAINER-REVIEWED"), 2, body)
+        for _, _, _, klass in self.MEASURED:
+            self.assertIn(klass, body)
+
 
 class TestNonAlarmingStates(unittest.TestCase):
     """The alarm must not be so eager that a human hold or a real review re-fires it."""
@@ -305,8 +422,13 @@ class TestNonAlarmingStates(unittest.TestCase):
             # `hold-owner-unknown` rides alongside the state exits: #3's hold is exempt,
             # but with no event log supplied nothing PROVED a human applied it, and an
             # unproved exemption has to be countable or it is invisible (sparq#4911).
+            #
+            # `labelled-unreviewable` is present at ZERO, and that is the point of the row
+            # (sparq#4677): a counter that only materialises when it fires cannot say "the
+            # labeller and the reviewer still agree" — its absence would be
+            # indistinguishable from the check having been deleted.
             {"blind-spot": 1, "draft": 1, "human-held": 1, "registry-lane": 1,
-             "hold-owner-unknown": 1},
+             "hold-owner-unknown": 1, alarm.LABELLED_UNREVIEWABLE: 0},
         )
 
 

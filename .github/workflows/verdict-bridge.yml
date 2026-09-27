@@ -194,14 +194,21 @@ jobs:
           persist-credentials: false
           # gh_retry.py is verdict-bridge.py's transient-retry dependency; the self-test
           # below imports it, so a missing path fails BEFORE the live run.
+          # review_lane_reach.py (and its release_pr_guard.py dependency) is the review
+          # lane's VISIBILITY PREDICATE, shared with scripts/review_lane_alarm.py so the
+          # labeller can never mark a PR "awaiting review" that no reviewer can see (#4677).
           sparse-checkout: |
             scripts/verdict-bridge.py
             scripts/gh_retry.py
+            scripts/review_lane_reach.py
+            scripts/release_pr_guard.py
           sparse-checkout-cone-mode: false
 
       - name: Self-test policy
         run: |
           python3 scripts/gh_retry.py --self-test
+          python3 scripts/release_pr_guard.py --self-test
+          python3 scripts/review_lane_reach.py --self-test
           python3 scripts/verdict-bridge.py --self-test
 
       # `--force` makes this idempotent: create on first run, no-op-update afterwards.
@@ -212,7 +219,7 @@ jobs:
         run: >-
           gh label create "review:unreviewed" --repo "${{ github.repository }}" --force
           --color "ededed"
-          --description "Green + mergeable but no head-bound VERDICT — needs a review (informational; blocks nothing)"
+          --description "Green + mergeable, in the review lane, but no head-bound VERDICT yet (informational; blocks nothing)"
 
       - name: Bridge verdict comments to review labels
         env:
