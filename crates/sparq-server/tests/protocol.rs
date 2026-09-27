@@ -362,6 +362,181 @@ async fn streamed_select_large_multichunk_is_byte_identical() {
 }
 
 // ---------------------------------------------------------------------------
+// Streamed CONSTRUCT / DESCRIBE bodies ([FABLE-5] sq-0kq6k)
+//
+// Same contract as the streamed SELECT above: a small result keeps its buffered
+// `Content-Length` wire shape; a result too big for one chunk streams under chunked
+// transfer-encoding; either way the bytes equal the buffered serialiser's output exactly.
+// ---------------------------------------------------------------------------
+
+/// A graph whose `?s ?p ?o` CONSTRUCT renders to well over the 64 KiB chunk threshold, so the
+/// response is a genuinely multi-chunk stream over real HTTP.
+fn big_graph_ttl() -> String {
+    let mut ttl = String::from("@prefix ex: <http://ex/> .\n");
+    for i in 0..3000 {
+        ttl.push_str(&format!(
+            "ex:subject{i} ex:somePredicate \"value-{i}-padding-padding-padding\" .\n"
+        ));
+    }
+    ttl
+}
+
+/// Boots a server over `ttl` and returns its base URL (the shared `spawn` uses `DATA`).
+async fn spawn_over(ttl: &str) -> String {
+    let graph = Graph::load_str(ttl, "turtle").unwrap();
+    let app = router(AppState::new(graph));
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    format!("http://{addr}")
+}
+
+/// The buffered rendering the streamed body must equal, computed independently of the server:
+/// run the same CONSTRUCT on the engine, serialise with the public buffered writer.
+fn expected_graph_body(ttl: &str, query: &str, fmt: &str) -> String {
+    let graph = Graph::load_str(ttl, "turtle").unwrap();
+    let triples = sparq_engine::construct_or_describe(&graph, query).unwrap();
+    match fmt {
+        "turtle" => sparq_server::graph::triples_to_turtle(&triples),
+        _ => sparq_server::graph::triples_to_ntriples(&triples),
+    }
+}
+
+/// A CONSTRUCT small enough to fit one chunk keeps the pre-streaming wire shape: a
+/// `Content-Length`, no chunked transfer-encoding, and the buffered serialiser's exact bytes.
+#[tokio::test]
+async fn small_construct_stays_buffered_with_content_length() {
+    let base = spawn().await;
+    let q = "CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o }";
+    let resp = client()
+        .get(format!("{base}/sparql"))
+        .query(&[("query", q)])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let advertised: usize = resp.headers()["content-length"].to_str().unwrap().parse().unwrap();
+    let body = resp.text().await.unwrap();
+    assert_eq!(body.len(), advertised, "Content-Length must match the buffered body");
+    assert_eq!(body, expected_graph_body(DATA, q, "ntriples"));
+}
+
+/// The load-bearing test: a CONSTRUCT too large for one chunk STREAMS (no `Content-Length`)
+/// and the streamed bytes are identical to the buffered serialiser's output.
+#[tokio::test]
+async fn streamed_construct_large_multichunk_is_byte_identical() {
+    let ttl = big_graph_ttl();
+    let q = "CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o }";
+    let expect = expected_graph_body(&ttl, q, "ntriples");
+    assert!(expect.len() > 64 * 1024, "the fixture must exceed one chunk");
+
+    let base = spawn_over(&ttl).await;
+    let resp = client()
+        .get(format!("{base}/sparql"))
+        .query(&[("query", q)])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    assert_eq!(resp.headers()["content-type"], "application/n-triples; charset=utf-8");
+    assert!(
+        resp.headers().get("content-length").is_none(),
+        "a streamed multi-chunk graph result must not advertise Content-Length"
+    );
+    assert_eq!(resp.text().await.unwrap(), expect);
+}
+
+/// The same invariant through the prefix-compacting Turtle writer — the format whose
+/// serialiser carries subject/predicate grouping state across chunk boundaries, so it is the
+/// one that could actually differ if the chunking leaked into the rendering.
+#[tokio::test]
+async fn streamed_construct_turtle_is_byte_identical() {
+    let ttl = big_graph_ttl();
+    let q = "CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o }";
+    let expect = expected_graph_body(&ttl, q, "turtle");
+    assert!(expect.len() > 64 * 1024, "the fixture must exceed one chunk");
+
+    let base = spawn_over(&ttl).await;
+    let resp = client()
+        .get(format!("{base}/sparql"))
+        .header("accept", "text/turtle")
+        .query(&[("query", q)])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    assert_eq!(resp.headers()["content-type"], "text/turtle; charset=utf-8");
+    let body = resp.text().await.unwrap();
+    assert_eq!(body, expect);
+    // …and it is still a Turtle document that re-parses to the same triple count.
+    assert_eq!(Graph::load_str(&body, "turtle").unwrap().len(), 3000);
+}
+
+/// HEAD keeps the buffered path so it can still advertise the `Content-Length` the GET body
+/// would have had — the documented "HEAD mirrors GET" contract survives the streaming change
+/// even for a result that a GET would stream.
+#[tokio::test]
+async fn head_large_construct_still_advertises_content_length() {
+    let ttl = big_graph_ttl();
+    let q = "CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o }";
+    let expect = expected_graph_body(&ttl, q, "ntriples");
+
+    let base = spawn_over(&ttl).await;
+    let resp = client()
+        .head(format!("{base}/sparql"))
+        .query(&[("query", q)])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let advertised: usize = resp.headers()["content-length"].to_str().unwrap().parse().unwrap();
+    assert_eq!(advertised, expect.len(), "HEAD must advertise the GET body length");
+    assert_eq!(resp.text().await.unwrap(), "", "HEAD carries no body");
+}
+
+/// A CONSTRUCT that matches nothing still answers `200` with an empty body and a zero
+/// `Content-Length` — the empty document must not look like "the worker produced no stream".
+#[tokio::test]
+async fn empty_construct_is_200_with_empty_body() {
+    let base = spawn().await;
+    let resp = client()
+        .get(format!("{base}/sparql"))
+        .query(&[("query", "CONSTRUCT { ?s ?p ?o } WHERE { ?s <http://ex/nope> ?o }")])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    assert_eq!(resp.headers()["content-length"], "0");
+    assert_eq!(resp.text().await.unwrap(), "");
+}
+
+/// A budget refusal on a streamed-eligible CONSTRUCT is still a clean `413`, never a truncated
+/// `200`: the engine materialises the whole graph before any byte is rendered, so the status is
+/// always decided pre-first-byte.
+#[tokio::test]
+async fn large_construct_row_cap_is_a_clean_413() {
+    use sparq_server::ServerConfig;
+    let ttl = big_graph_ttl();
+    let graph = Graph::load_str(&ttl, "turtle").unwrap();
+    let config = ServerConfig { max_results: Some(10), ..ServerConfig::default() };
+    let app = router(AppState::with_config(graph, config));
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    let resp = client()
+        .get(format!("http://{addr}/sparql"))
+        .query(&[("query", "CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o }")])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 413, "a row-cap refusal must be a clean 413, not a truncated 200");
+}
+
+// ---------------------------------------------------------------------------
 // HTTP semantics: 400 / 405 / 501 / HEAD
 // ---------------------------------------------------------------------------
 

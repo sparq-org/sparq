@@ -136,6 +136,14 @@ a client that does not gets the chunked stream aborted without its terminating z
 | `application/rdf+xml` (`application/xml`, `text/xml` at lower specificity) | `application/rdf+xml; charset=utf-8` |
 | `application/ld+json` *(feature: `jsonld`, default-on)* | `application/ld+json; charset=utf-8` |
 
+<!-- [FABLE-5] sq-0kq6k -->
+**Body framing.** A CONSTRUCT / DESCRIBE response small enough to fit one 64 KiB chunk carries a
+`Content-Length`; a larger one is streamed under **chunked transfer-encoding** with **no
+`Content-Length`** (the same two shapes the streamed SELECT-JSON body uses). `HEAD` always
+carries the `Content-Length` a `GET` would have had. The status is never committed early — the
+result graph is fully evaluated before any byte is rendered, so a `413` / `503` refusal is
+always clean and a graph body is never truncated mid-stream.
+
 ### 3. Graph Store HTTP Protocol
 
 Two addressing forms, same semantics:

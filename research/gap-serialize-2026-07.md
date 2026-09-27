@@ -64,8 +64,23 @@ Scope invariants (enforced by `run.sh`, non-negotiable):
 - None blocking. Turtle prefix-compaction dominates sparq's serialize cost
   relative to the nt writer (expected); if a canonical run shows a real gap vs
   serd/oxrdfio on Turtle, profile `write_prefix_header`/abbreviation lookup
-  first. Buffered-vs-streaming already favors streaming, which is the shipped
-  HTTP path.
+  first. Buffered-vs-streaming already favors streaming.
+
+<!-- [FABLE-5] sq-0kq6k — CORRECTION. This section previously read "…favors
+streaming, which is the shipped HTTP path". That was wrong in two ways and is
+recorded here rather than quietly deleted. (1) At the time it was written NO
+HTTP path called the streaming writers at all — wiring them was the open bead
+this note closes. (2) More importantly, `sparq-server` has never used this
+crate's Turtle writer for a CONSTRUCT/DESCRIBE response: it serialises through
+`oxttl::TurtleSerializer` (`sparq_server::graph::triples_to_turtle`), a
+different writer with a different output shape — §2.4 above measures sparq's
+Turtle emitting materially more bytes than the oxrdfio family on the same
+corpus at the same prefix map. So `write_turtle_streaming` was never the
+server's writer, and swapping it in would have changed the bytes on the wire.
+The HTTP CONSTRUCT/DESCRIBE path is now genuinely streamed, but through the
+`oxttl` serialiser's own `io::Write` seam, which keeps the response
+byte-identical. The writers in THIS crate are the shipped streaming path for
+`sparq-cli dump … turtle|trig` (opt-in `streaming-serialization`). -->
 
 ## 4. What a canonical run still needs
 
