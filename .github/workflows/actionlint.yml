@@ -1,0 +1,83 @@
+# actionlint — broad GitHub Actions syntax and semantic linting. [GPT-5] #6302
+#
+# This starts advisory while it accumulates evidence across the repository's
+# workflow variants. Exit 1 means lint findings and is reported without failing
+# the job; actionlint invocation failures (exit 2/3) remain hard failures so a
+# broken lane cannot look clean. Promotion is tracked in advisory-registry.json.
+name: actionlint
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - ".github/workflows/**"
+      - ".github/advisory-registry.json"
+  merge_group:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/**"
+      - ".github/advisory-registry.json"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: actionlint-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  actionlint-advisory:
+    name: actionlint (advisory)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Install checksum-pinned actionlint v1.7.9
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/actionlint.tar.gz"
+          curl --fail --location --silent --show-error \
+            --output "$archive" \
+            https://github.com/rhysd/actionlint/releases/download/v1.7.9/actionlint_1.7.9_linux_amd64.tar.gz
+          echo "233b280d05e100837f4af1433c7b40a5dcb306e3aa68fb4f17f8a7f45a7df7b4  $archive" \
+            | sha256sum --check --strict
+          tar --extract --gzip --file "$archive" --directory "$RUNNER_TEMP" actionlint
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      - name: Self-test actionlint detects an invalid workflow
+        run: |
+          set -euo pipefail
+          fixture="$RUNNER_TEMP/actionlint-invalid.yml"
+          printf '%s\n' \
+            'name: invalid fixture' \
+            'on: push' \
+            'jobs:' \
+            '  broken:' \
+            '    runs-on: ubuntu-latest' \
+            '    unexpected-key: true' > "$fixture"
+          set +e
+          actionlint -no-color "$fixture" >/dev/null 2>&1
+          status=$?
+          set -e
+          if (( status != 1 )); then
+            echo "expected one-or-more lint findings (exit 1), got exit $status" >&2
+            exit 1
+          fi
+      - name: Lint GitHub Actions workflows (advisory findings)
+        run: |
+          set -uo pipefail
+          output="$RUNNER_TEMP/actionlint.txt"
+          actionlint -no-color .github/workflows/*.yml 2>&1 | tee "$output"
+          status=${PIPESTATUS[0]}
+          if (( status > 1 )); then
+            echo "actionlint failed to run (exit $status)" >&2
+            exit "$status"
+          fi
+          findings=$(grep -cE '^\.github/workflows/[^:]+' "$output" || true)
+          {
+            echo "### actionlint: $findings finding(s)"
+            echo
+            echo "Advisory during staged rollout; tool failures still fail this job."
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 0
