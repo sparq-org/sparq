@@ -516,6 +516,14 @@ def _ensure_markers(repo, num, markers, body=None):
 # the point before this guard existed: it put `role:impl` on issues triage had already routed
 # `role:ci` / `role:soundness`, which would have made them undispatchable.
 _SINGLE_VALUED = ("role:", "priority:", "area:")
+# [OPUS-5] Labels the reconcile may set at CREATION but must NEVER re-apply to a live issue.
+# "ADD-only, so curation survives" is false for a PARK label: re-adding `needs:user` does not
+# preserve a human decision, it OVERRIDES one. `needs:user` is terminal (ready-issues.py
+# PARKED_AREA_LABELS) and `externally_gated()` deliberately over-gates, so before this guard the
+# next migration run would have silently re-parked every issue the authorised re-triage pass
+# (scripts/retriage-needs-user.py, maintainer authorisation sparq-org/sparq#1135) demoted — 92
+# issues, back behind the front door, with no record. Removing the hold IS the curation.
+_NEVER_RECONCILE = frozenset({"needs:user"})
 
 
 def plan_reconcile(open_ids, id_map, have_labels, crates=None):
@@ -523,7 +531,8 @@ def plan_reconcile(open_ids, id_map, have_labels, crates=None):
     the plan requires. ADD-only by construction — never removes, so a human's or triage's curation
     survives. A single-valued family already present on the issue is left completely alone (see
     _SINGLE_VALUED); in particular an issue that already carries an `area:` keeps it and is not
-    `needs:area`-parked either, because it is already classified."""
+    `needs:area`-parked either, because it is already classified. `_NEVER_RECONCILE` labels are
+    never re-applied at all — for a park label, "add it back" is a revert, not a reconcile."""
     out = {}
     for bid, num in sorted(id_map.items()):
         bead = open_ids.get(bid)
@@ -536,6 +545,7 @@ def plan_reconcile(open_ids, id_map, have_labels, crates=None):
                 want = {lb for lb in want if not lb.startswith(fam)}
         if any(lb.startswith("area:") for lb in have):
             want.discard("needs:area")                 # already classified — do not park it
+        want -= _NEVER_RECONCILE                       # never re-park a deliberately-demoted issue
         gap = want - have
         if gap:
             out[num] = sorted(gap)
@@ -1221,6 +1231,19 @@ def _self_test():
                                            MIGRATION_LABEL]}, cr), {})
     chk("an unmapped/closed bead is never reconciled",
         plan_reconcile(beads, {"sq-zzz": 12}, {12: []}, cr), {})
+    # [OPUS-5] `needs:user` is TERMINAL (ready-issues.py PARKED_AREA_LABELS) and externally_gated()
+    # over-gates on purpose, so re-adding it to a live issue reverts a human's demotion instead of
+    # preserving curation. The bead below is gated (its title trips _EXTERNAL_TITLE) and its issue
+    # has had the hold removed — the reconcile must plan NOTHING for it. Without the guard this
+    # would silently re-park all 92 issues the authorised re-triage demoted.
+    gated_bead = {"sq-g": {"id": "sq-g", "priority": 2, "issue_type": "task",
+                           "title": "needs:user — flip the thing", "labels": ["area:sparq-core"]}}
+    chk("the gated bead really is externally gated (else the guard test is vacuous)",
+        "needs:user" in issue_labels(gated_bead["sq-g"], cr), True)
+    chk("a demoted issue is never re-parked with needs:user",
+        plan_reconcile(gated_bead, {"sq-g": 16},
+                       {16: ["area:sparq-core", "priority:P2", "role:impl", "status:ready",
+                             MIGRATION_LABEL]}, cr), {})
     # Single-valued families (found by a LIVE run, not by review): the reconcile put role:impl on
     # issues triage had already routed role:ci / role:soundness. Two role labels break triage.py's
     # single-role invariant and two priorities make valid_priority() return None — either way the
