@@ -462,6 +462,19 @@ substituted query re-parses — otherwise `None` and the component's shared
 (path-free) validator is used as-is. Each `$paramName` variable is the LOCAL
 NAME of the parameter's `sh:path` IRI (not its `sh:name` display label, §6.2.1).
 
+A component may also carry `sh:labelTemplate` (§6.1) — a human-readable rendering
+of the component with its parameters substituted in, e.g.
+`sh:labelTemplate "Value must be at most {$maxLen} characters"`. It is DISPLAY
+ONLY: it never affects whether a constraint fires, which results are produced, or
+`sh:conforms`. It is used as the result message only when nothing better exists —
+the precedence is the shape's `sh:message` > the validator's `sh:message` >
+(SELECT validators) the solution's `?message` > `sh:labelTemplate` > the generic
+`"Value does not satisfy constraint component <iri>"`. Placeholders use the same
+`{$param}` / `{?var}` syntax as `sh:message`. When a component declares several
+label templates (typically one per language tag), selection is deterministic: a
+plain language-neutral literal wins, otherwise the smallest language tag; a
+non-literal value is ignored. Recursive/derived parameters are NOT handled.
+
 **Relative-IRI test files / a base IRI** — `Graph::load_str` exposes no base, so use:
 
 ```rust

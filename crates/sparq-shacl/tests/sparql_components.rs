@@ -347,3 +347,240 @@ fn component_report_turtle_parses() {
         .iter()
         .any(|t| t.object.to_string().contains("MaxLenComponent")));
 }
+
+// =============================================================================
+// [SONNET-4.6] 🤖 SPARQ agent — sq-ou3: `sh:labelTemplate` (SHACL §6.1).
+//
+// A component may declare `sh:labelTemplate` string literals that render the
+// component WITH ITS PARAMETERS substituted in, e.g.
+// `"Value must be at most {$maxLen} characters"`. It is a DISPLAY facility: it
+// takes no part in deciding whether a constraint fires, so these tests pin both
+// halves — that the label reaches the result message when nothing better exists,
+// and that it never changes which results are produced or `sh:conforms`.
+//
+// Message precedence (lowest last): the shape's `sh:message` > the validator's
+// `sh:message` > (SELECT only) the solution's `?message` > `sh:labelTemplate` >
+// the generic "does not satisfy constraint component <iri>".
+// =============================================================================
+
+/// The same max-length component as `MAX_LEN_COMPONENT` but with NO validator
+/// `sh:message` — so the only human-readable text available is the component's
+/// `sh:labelTemplate`. The label references both a parameter (`{$maxLen}`) and
+/// the value node (`{$value}`), which the ASK path has pre-bound.
+const LABELLED_COMPONENT: &str = r#"
+    ex:LabelledMaxLenComponent a sh:ConstraintComponent ;
+      sh:parameter [ sh:path ex:maxLen ] ;
+      sh:labelTemplate "Value {$value} must be at most {$maxLen} characters" ;
+      sh:validator [
+        a sh:SPARQLAskValidator ;
+        sh:ask "ASK { FILTER (STRLEN(STR($value)) <= $maxLen) }" ;
+      ] .
+"#;
+
+/// With no `sh:message` anywhere, the result message is the component's
+/// `sh:labelTemplate` with `{$param}` / `{$value}` substituted — not the generic
+/// "does not satisfy constraint component" fallback.
+#[test]
+fn label_template_renders_result_message() {
+    let shapes = format!(
+        r#"{PREFIXES}
+        {LABELLED_COMPONENT}
+        ex:S a sh:NodeShape ; sh:targetNode "abcdef" ; ex:maxLen 3 .
+    "#
+    );
+    let r = run("@prefix ex: <http://example.org/> . ex:x ex:y ex:z .", &shapes);
+    assert!(!r.conforms, "{}", r.to_text());
+    assert_eq!(r.results.len(), 1, "{}", r.to_text());
+    let msg = r.results[0].effective_messages()[0].to_string();
+    // Both the parameter and the value node are rendered.
+    assert!(
+        msg.contains("must be at most 3 characters"),
+        "label not rendered: {msg}"
+    );
+    assert!(msg.contains("abcdef"), "$value not substituted: {msg}");
+    assert!(
+        !msg.contains("does not satisfy constraint component"),
+        "generic fallback used despite a label: {msg}"
+    );
+}
+
+/// The validator's own `sh:message` OUTRANKS `sh:labelTemplate` (the label is
+/// only a fallback).
+#[test]
+fn validator_message_outranks_label_template() {
+    let shapes = format!(
+        r#"{PREFIXES}
+        ex:C a sh:ConstraintComponent ;
+          sh:parameter [ sh:path ex:maxLen ] ;
+          sh:labelTemplate "LABEL at most {{$maxLen}}" ;
+          sh:validator [
+            a sh:SPARQLAskValidator ;
+            sh:message "MESSAGE at most {{$maxLen}}" ;
+            sh:ask "ASK {{ FILTER (STRLEN(STR($value)) <= $maxLen) }}" ;
+          ] .
+        ex:S a sh:NodeShape ; sh:targetNode "abcdef" ; ex:maxLen 3 .
+    "#
+    );
+    let r = run("@prefix ex: <http://example.org/> . ex:x ex:y ex:z .", &shapes);
+    assert_eq!(r.results.len(), 1, "{}", r.to_text());
+    let msg = r.results[0].effective_messages()[0].to_string();
+    assert!(msg.contains("MESSAGE at most 3"), "message: {msg}");
+    assert!(!msg.contains("LABEL"), "label must not win: {msg}");
+}
+
+/// The SHAPE's `sh:message` outranks everything — the label must not displace it.
+#[test]
+fn shape_message_outranks_label_template() {
+    let shapes = format!(
+        r#"{PREFIXES}
+        {LABELLED_COMPONENT}
+        ex:S a sh:NodeShape ;
+          sh:targetNode "abcdef" ;
+          sh:message "SHAPE SAYS NO" ;
+          ex:maxLen 3 .
+    "#
+    );
+    let r = run("@prefix ex: <http://example.org/> . ex:x ex:y ex:z .", &shapes);
+    assert_eq!(r.results.len(), 1, "{}", r.to_text());
+    let msgs = r.results[0].effective_messages();
+    assert_eq!(msgs.len(), 1, "{msgs:?}");
+    assert!(msgs[0].to_string().contains("SHAPE SAYS NO"), "{msgs:?}");
+}
+
+/// A component may declare several `sh:labelTemplate`s (typically one per
+/// language). Selection must be DETERMINISTIC: the plain, language-neutral
+/// literal wins over any language-tagged one, whatever order they parse in.
+#[test]
+fn label_template_prefers_plain_literal_over_language_tagged() {
+    let shapes = format!(
+        r#"{PREFIXES}
+        ex:C a sh:ConstraintComponent ;
+          sh:parameter [ sh:path ex:maxLen ] ;
+          sh:labelTemplate "de label {{$maxLen}}"@de ;
+          sh:labelTemplate "PLAIN label {{$maxLen}}" ;
+          sh:labelTemplate "en label {{$maxLen}}"@en ;
+          sh:validator [
+            a sh:SPARQLAskValidator ;
+            sh:ask "ASK {{ FILTER (STRLEN(STR($value)) <= $maxLen) }}" ;
+          ] .
+        ex:S a sh:NodeShape ; sh:targetNode "abcdef" ; ex:maxLen 3 .
+    "#
+    );
+    let r = run("@prefix ex: <http://example.org/> . ex:x ex:y ex:z .", &shapes);
+    assert_eq!(r.results.len(), 1, "{}", r.to_text());
+    let msg = r.results[0].effective_messages()[0].to_string();
+    assert!(msg.contains("PLAIN label 3"), "message: {msg}");
+}
+
+/// With ONLY language-tagged labels (no language-neutral one) selection still
+/// has to be deterministic — the smallest language tag is chosen, so repeated
+/// runs and report output are reproducible.
+#[test]
+fn label_template_language_tagged_only_is_deterministic() {
+    let shapes = format!(
+        r#"{PREFIXES}
+        ex:C a sh:ConstraintComponent ;
+          sh:parameter [ sh:path ex:maxLen ] ;
+          sh:labelTemplate "fr label {{$maxLen}}"@fr ;
+          sh:labelTemplate "de label {{$maxLen}}"@de ;
+          sh:labelTemplate "en label {{$maxLen}}"@en ;
+          sh:validator [
+            a sh:SPARQLAskValidator ;
+            sh:ask "ASK {{ FILTER (STRLEN(STR($value)) <= $maxLen) }}" ;
+          ] .
+        ex:S a sh:NodeShape ; sh:targetNode "abcdef" ; ex:maxLen 3 .
+    "#
+    );
+    let first = {
+        let r = run("@prefix ex: <http://example.org/> . ex:x ex:y ex:z .", &shapes);
+        assert_eq!(r.results.len(), 1, "{}", r.to_text());
+        r.results[0].effective_messages()[0].to_string()
+    };
+    // `@de` is the lexicographically smallest of {de, en, fr}.
+    assert!(first.contains("de label 3"), "message: {first}");
+    // Stable across runs (the choice must not depend on graph iteration order).
+    for _ in 0..3 {
+        let r = run("@prefix ex: <http://example.org/> . ex:x ex:y ex:z .", &shapes);
+        assert_eq!(r.results[0].effective_messages()[0].to_string(), first);
+    }
+}
+
+/// A non-literal `sh:labelTemplate` (here an IRI) is ill-formed and ignored —
+/// the crate is lenient about ill-formed shapes — so the generic fallback
+/// message is used rather than rendering the IRI.
+#[test]
+fn non_literal_label_template_is_ignored() {
+    let shapes = format!(
+        r#"{PREFIXES}
+        ex:C a sh:ConstraintComponent ;
+          sh:parameter [ sh:path ex:maxLen ] ;
+          sh:labelTemplate ex:NotAString ;
+          sh:validator [
+            a sh:SPARQLAskValidator ;
+            sh:ask "ASK {{ FILTER (STRLEN(STR($value)) <= $maxLen) }}" ;
+          ] .
+        ex:S a sh:NodeShape ; sh:targetNode "abcdef" ; ex:maxLen 3 .
+    "#
+    );
+    let r = run("@prefix ex: <http://example.org/> . ex:x ex:y ex:z .", &shapes);
+    assert_eq!(r.results.len(), 1, "{}", r.to_text());
+    let msg = r.results[0].effective_messages()[0].to_string();
+    assert!(
+        msg.contains("does not satisfy constraint component"),
+        "expected the generic fallback: {msg}"
+    );
+    assert!(!msg.contains("NotAString"), "IRI rendered as a label: {msg}");
+}
+
+/// The SELECT-validator path also falls back to the label. Parameter
+/// placeholders are rendered from the pre-bound parameters and `{?value}` from
+/// the solution row.
+#[test]
+fn label_template_renders_for_select_validator() {
+    let shapes = format!(
+        r#"{PREFIXES}
+        ex:OverLimit a sh:ConstraintComponent ;
+          sh:parameter [ sh:path ex:limit ] ;
+          sh:labelTemplate "Item {{?value}} exceeds the limit of {{$limit}}" ;
+          sh:validator [
+            a sh:SPARQLSelectValidator ;
+            sh:select """
+              SELECT $this ?value WHERE {{
+                $this <http://example.org/item> ?value .
+                FILTER (?value > $limit)
+              }}
+            """ ;
+          ] .
+        ex:S a sh:NodeShape ; sh:targetNode ex:cart ; ex:limit 10 .
+    "#
+    );
+    let data = r#"
+        @prefix ex: <http://example.org/> .
+        ex:cart ex:item 5, 20 .
+    "#;
+    let r = run(data, &shapes);
+    assert_eq!(r.results.len(), 1, "{}", r.to_text());
+    let msg = r.results[0].effective_messages()[0].to_string();
+    // `$limit` came from the parameter pre-binding, `?value` from the row.
+    assert!(msg.contains("exceeds the limit of 10"), "message: {msg}");
+    assert!(msg.contains("20"), "?value not substituted from the row: {msg}");
+}
+
+/// `sh:labelTemplate` is DISPLAY ONLY: adding one must not make a conforming
+/// graph non-conforming, nor change the number of results.
+#[test]
+fn label_template_does_not_affect_conformance() {
+    let with_label = format!(
+        r#"{PREFIXES}
+        {LABELLED_COMPONENT}
+        ex:S a sh:NodeShape ; sh:targetNode "ab" ; ex:maxLen 3 .
+    "#
+    );
+    let r = run("@prefix ex: <http://example.org/> . ex:x ex:y ex:z .", &with_label);
+    assert!(
+        r.conforms,
+        "a label must not create a violation: {}",
+        r.to_text()
+    );
+    assert!(r.results.is_empty(), "{}", r.to_text());
+}
