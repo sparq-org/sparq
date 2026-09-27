@@ -29,3 +29,10 @@
   crate: "sparq-zk-compose"
   features: "dual-leaf"
   test: true
+
+# [GPT-6] Ordinary CI must execute this default-off result contract's host tests.
+# The pinned zk-toolchain workflow separately executes its real proof tests.
+- name: "sparq-zk-compose (successful-results — selected answers and private witnesses)"
+  crate: "sparq-zk-compose"
+  features: "successful-results"
+  test: true

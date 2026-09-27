@@ -137,7 +137,11 @@ fn is_value_lane(member: &str) -> bool {
 /// members are legal only for value-handle methods; string-lane members are
 /// illegal for `value-only`.
 fn expect_legal(method_key: &str, member: &str) -> bool {
-    if is_value_lane(member) {
+    if member.starts_with("result_v1_") {
+        // [GPT-6] The additive result relation authenticates whole string-canonical
+        // graphs; it cannot reuse a dual-leaf graph's lexical handle as its root.
+        method_key == "string-canonical"
+    } else if is_value_lane(member) {
         matches!(method_key, "dual-leaf" | "value-only")
     } else {
         matches!(method_key, "string-canonical" | "dual-leaf")
@@ -496,4 +500,22 @@ fn committed_legality_matches_resolve_circuit() {
          (re-run bench/zk-compose/scripts/bb_gates_matrix.py):\n{}",
         errors.join("\n")
     );
+}
+
+// [GPT-6] Keep all measured result buckets in the comparison without inventing
+// compatibility with the legacy dual-leaf dispatch surface.
+#[test]
+fn successful_result_members_only_admit_string_canonical_commitments() {
+    let (_, matrix) = load();
+    let members: Vec<_> = matrix
+        .matrix
+        .iter()
+        .filter(|(member, _)| member.starts_with("result_v1_"))
+        .collect();
+    assert_eq!(members.len(), 4);
+    for (_, row) in members {
+        assert!(row.configs["string-canonical"].legal);
+        assert!(!row.configs["dual-leaf"].legal);
+        assert!(!row.configs["value-only"].legal);
+    }
 }

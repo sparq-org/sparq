@@ -62,3 +62,6 @@ pub mod sameas;
 pub mod n3;
 
 mod tests;
+
+// [GPT-6] Additive selected-result relation; not externally audited.
+pub mod result;
