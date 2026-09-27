@@ -386,6 +386,36 @@ paths = []
 # is byte-identical. No new dependencies, no `unsafe`.
 id-filter-fastpath = []
 
+# [FABLE-5] (sq-7d3dj.11) COMPILED SCALAR-EXPRESSION PROGRAMS for FILTER/BIND. sq-7d3dj.4
+# pre-resolves every `Variable` in a FILTER/BIND expression to a column index once per
+# operator, but the result is still a `Box`-linked TREE that `eval_compiled` re-walks
+# RECURSIVELY for every row. This feature lowers that tree, once per operator, into a FLAT
+# postfix program — a `Vec<Op>` over the same resolved column indices plus constants built
+# once — evaluated per row by a straight loop over a scratch value stack the row loop (and
+# each rayon worker) reuses. It targets the STRING / LOGICAL / FUNCTION / EXISTS filter path
+# that the M4 numeric vectorisation (sq-pntvh) does not cover; there is no overlap.
+# CORRECTNESS SURFACE — the reason this is opt-in. SPARQL's three-valued logic, type-error
+# propagation and term identity must be preserved EXACTLY, so the lowering is deliberately
+# partial and every op reuses the SAME helpers as the tree arm it replaces:
+#   * lowered: `Var`/`BOUND`/constants, `!`, `&&`, `||`, `IF`, `COALESCE`, `IN`, `sameTerm`,
+#     `+ - * /`, unary sign, and function-call ARGUMENT evaluation — same operand order, same
+#     short-circuiting, same `ebv3`/`and3`/`or3`/`values_equal`/`Num::binop`.
+#   * NOT lowered (a single `Op::Tree` leaf delegating to the unchanged `eval_compiled`):
+#     `=`, the four order comparisons and `EXISTS`. `cmp_compiled`/`equal_compiled` dispatch
+#     on the SHAPE of their operand TREES (`compiled_expr_has_arith` gates the exact-decimal
+#     path; the numeric / exact-lexical / temporal fast paths each re-walk the operand), so
+#     lowering their operands would change which path a comparison takes — i.e. change results.
+#   * function BODIES stay `eval_function_inner` driven by the same LAZY per-index closure, so
+#     an argument is evaluated exactly when, and as often as, it is today.
+# Pinned by `tests/differentials/expr_program_differential.rs`, which runs BOTH evaluators in
+# ONE binary via the `expr_program_testing` runtime toggle (an ON==OFF row-identity
+# differential over 3VL / type-error / term-identity / short-circuit / EXISTS shapes, plus
+# spec-pinned expectations and a FIRED anti-vacuity counter), and by the full W3C conformance
+# suite under the feature. OPT-IN and OFF by default: when off, zero of this code compiles,
+# the scratch stack is a zero-sized placeholder and the FILTER/BIND path is the verbatim
+# tree evaluator. No new dependencies, no `unsafe`.
+expr-program = []
+
 # [FABLE-5] (sq-7d3dj.30.21) LAZY STRING-LITERAL COLLATION KEY for the top-k ORDER BY
 # selection path (`exec::order_bindings`). Profiling SP2Bench q11
 # (`ORDER BY ?ee LIMIT 10 OFFSET 50` over 17663 `rdfs:seeAlso` objects — which are

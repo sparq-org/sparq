@@ -256,6 +256,35 @@ pub mod theta_antijoin_testing {
     }
 }
 
+/// [FABLE-5] (sq-7d3dj.11) Test hooks for the opt-in `expr-program` flat scalar-expression
+/// programs. Toggling lowering at RUNTIME lets the ON==OFF differential run BOTH the flat
+/// program and the `CompiledExpr` tree evaluator in ONE binary, over the same graph and
+/// queries — the strongest form of the result-equivalence obligation the feature carries.
+/// NOT part of the stable query API.
+#[cfg(feature = "expr-program")]
+#[doc(hidden)]
+pub mod expr_program_testing {
+    /// Enables/disables lowering FILTER/BIND expressions into flat programs on the current
+    /// thread, returning the previous value. While disabled, operators evaluate the
+    /// `CompiledExpr` tree exactly as the feature-off build does.
+    pub fn set_enabled(v: bool) -> bool {
+        crate::exec::expr_program::set_enabled(v)
+    }
+
+    /// Clears the lowering counter.
+    pub fn reset_stats() {
+        crate::exec::expr_program::reset_stats()
+    }
+
+    /// Number of FILTER/BIND operators that lowered their expression into a flat program on
+    /// this thread since the last [`reset_stats`] — the anti-vacuity witness that the
+    /// differential's "on" leg really exercised the new evaluator (and that its "off" leg
+    /// really did not).
+    pub fn lowered() -> usize {
+        crate::exec::expr_program::lowered()
+    }
+}
+
 use oxrdf::{Term, Variable};
 use sparq_core::Graph;
 use spargebra::{Query, SparqlParser};

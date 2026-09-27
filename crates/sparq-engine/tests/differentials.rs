@@ -17,6 +17,10 @@ mod vectorized_exec_differential;
 mod chunk_select_tri_mask;
 #[path = "differentials/window_inline_over.rs"]
 mod window_inline_over;
+// [FABLE-5] (sq-7d3dj.11) Flat compiled scalar-expression programs — the ON==OFF row-identity
+// differential plus the spec-pinned 3VL / type-error / term-identity expectations.
+#[path = "differentials/expr_program_differential.rs"]
+mod expr_program_differential;
 #[path = "differentials/zk_trace_differential.rs"]
 mod zk_trace_differential;
 #[path = "differentials/zk_trace_operators.rs"]
