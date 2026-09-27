@@ -22,7 +22,10 @@
 #      PR head — the job holds `pull-requests: write`), the permissions block must be
 #      exactly the least-privilege set, `pull_request` must carry NO `paths:` filter, and
 #      routing-self-tests.yml must actually INVOKE this file (a test nobody runs is a
-#      call-site mutant that survives everything else).
+#      call-site mutant that survives everything else). Since #5160 the seam extends to
+#      docs-quality.yml, the UNFILTERED lane that hosts the standalone totality gate —
+#      the one assertion here whose trigger cannot be a `paths:` entry, because what
+#      breaks it is a path that does not exist yet.
 #
 # Needs PyYAML (same dependency the other wiring suites use); everything else is stdlib.
 # Run:  python3 scripts/tests/test_pr_area_labels.py
@@ -44,6 +47,9 @@ DERIVER = REPO_ROOT / "scripts" / "pr-area-labels.py"
 POLICY = REPO_ROOT / "ci" / "area-labels.toml"
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "pr-area-label.yml"
 ROUTING_WF = REPO_ROOT / ".github" / "workflows" / "routing-self-tests.yml"
+# The UNFILTERED lane that hosts the totality gate (#5160) — see
+# TestTotalityGateRunsOnEveryPR.
+DOCS_QUALITY_WF = REPO_ROOT / ".github" / "workflows" / "docs-quality.yml"
 CRATES = REPO_ROOT / "crates"
 SKILLS = REPO_ROOT / "skills"
 REPO = "sparq-org/sparq"
@@ -74,11 +80,13 @@ def _tracked_paths():
 def _unattributed_tracked(policy, known):
     """The tracked paths that attribute to NOTHING under `policy`. Shared by the hard
     totality gate and by its non-vacuity guard, so the guard exercises the SAME code the
-    gate runs — a neutered computation reds both."""
-    tracked = _tracked_paths()
-    if tracked is None:
-        return []
-    return sorted({p for p in tracked if M.attribute(p, policy) not in known})
+    gate runs — a neutered computation reds both.
+
+    Delegates to the DERIVER's function (#5160) rather than re-implementing it, because
+    that is the one the shipped `--check-totality` CLI runs from docs-quality quick-gates.
+    A re-implementation here would let the CLI's computation be neutered while both
+    assertions below stayed green."""
+    return M.unattributed_tracked(policy, known, tracked=_tracked_paths())
 
 
 def _yaml(path: Path) -> dict:
@@ -368,7 +376,11 @@ class TestPolicyTable(unittest.TestCase):
         lands without a row, which is exactly the regression that re-opens reg#677's
         starvation for every PR that touches it. A synthetic `dir/probe.txt` probe would
         NOT discriminate (it can pass while the directory's real layout is unmapped, and
-        fail on directories that hold only one known file), so this walks git's index."""
+        fail on directories that hold only one known file), so this walks git's index.
+
+        This lane is `paths:`-filtered, so the SAME computation also ships as
+        `pr-area-labels.py --check-totality` and runs from the unfiltered docs-quality
+        lane — see TestTotalityGateRunsOnEveryPR for why (#5160)."""
         tracked = _tracked_paths()
         if tracked is None:
             self.skipTest("git ls-files unavailable")
@@ -1198,6 +1210,99 @@ class TestSelfTestIsActuallyInvoked(unittest.TestCase):
 
     def test_the_validate_job_has_no_if_guard(self):
         self.assertNotIn("if", self.wf["jobs"]["validate"])
+
+
+class TestTotalityGateRunsOnEveryPR(unittest.TestCase):
+    """Issue #5160 — the totality assertion must run on the PR that can BREAK it.
+
+    `test_every_tracked_file_in_the_repo_resolves` is TOTAL over the git tree, but the
+    lane that runs it (routing-self-tests.yml) is `paths:`-filtered and no filter can name
+    the paths that break totality: an arbitrary new repo-root file, a new top-level
+    directory. Reported on #5150 — a PR adding only `.jscpd.json` matched no trigger, the
+    lane never ran, it merged with the assertion already broken, and the red landed on the
+    next unrelated PR that touched a filtered path. So the assertion is ALSO exposed as
+    `--check-totality` and wired into docs-quality's `quick-gates`, the lane with NO
+    `paths:` filter. Everything below pins that wiring structurally (parsed YAML), which is
+    the mutation class — `if: false`, a deleted step, a paths filter added later — that a
+    substring check over the workflow text does not catch."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.wf = _yaml(DOCS_QUALITY_WF)
+        cls.job = cls.wf["jobs"]["quick-gates"]
+        cls.steps = cls.job["steps"]
+
+    def _totality_steps(self):
+        return [s for s in self.steps
+                if "--check-totality" in " ".join(str(s.get("run", "")).split())]
+
+    def test_docs_quality_invokes_the_totality_check(self):
+        """MUTANT: delete the step => RED. The hole re-opens the moment nothing calls it."""
+        runs = " ".join(" ".join(str(s.get("run", "")) for s in self.steps).split())
+        self.assertIn("python3 scripts/pr-area-labels.py --check-totality", runs,
+                      "docs-quality quick-gates must invoke the `area:` totality check — "
+                      "it is the only lane that sees a PR adding an arbitrary new path")
+
+    def test_the_hosting_lane_has_no_paths_filter(self):
+        """The WHOLE POINT. A `paths:` filter here would reproduce #5160 exactly: the
+        gate would stop seeing the new-root-file PRs it exists to catch."""
+        on = _on_block(self.wf)
+        pr = on["pull_request"]
+        self.assertNotIn("paths", pr, "a paths filter on docs-quality re-opens #5160")
+        self.assertNotIn("paths-ignore", pr)
+        self.assertIn("merge_group", on, "the queue ref must expose the same check")
+
+    def test_the_totality_step_and_its_job_are_unconditional(self):
+        """MUTANT: `if: false` on the step or the job => RED."""
+        steps = self._totality_steps()
+        self.assertEqual(len(steps), 1, "expected exactly one --check-totality step")
+        self.assertNotIn("if", steps[0], "the totality step must not be conditional")
+        self.assertNotIn("if", self.job, "quick-gates must run unconditionally")
+
+    def test_the_hosting_job_is_gating_not_advisory(self):
+        """ci-summary excludes a check IFF it is declared in the advisory registry, so an
+        advisory host would report the breakage without blocking it."""
+        name = self.job["name"]
+        self.assertNotIn("advisory", name.lower())
+        registry = json.loads((REPO_ROOT / ".github" / "advisory-registry.json")
+                              .read_text(encoding="utf-8"))
+        self.assertNotIn(name, registry["jobs"])
+
+    def test_the_cli_flag_the_workflow_calls_actually_exists(self):
+        """A call-site that argparse rejects would red loudly, but a RENAMED flag with the
+        old name still in the workflow is the drift this catches early — and it proves the
+        gate PASSES on the tree as shipped."""
+        import io
+        fake = FakeGH({}, [])
+        buf = io.StringIO()
+        rc = M.main(["--check-totality", "--repo", REPO], runner=fake, out=buf)
+        self.assertEqual(rc, 0, buf.getvalue())
+        self.assertEqual(fake.calls, [], "the totality check must make NO gh call — it "
+                                         "runs in a lane with no PR context")
+        self.assertIn("area-totality OK", buf.getvalue())
+
+    def test_the_cli_fails_closed_on_an_unattributable_path(self):
+        """NON-VACUITY for the shipped CLI: feed it a tracked set containing one unmapped
+        root file and it must exit NON-ZERO. Reproduces #5150's `.jscpd.json` shape."""
+        import io
+        real = M.tracked_paths
+        try:
+            M.tracked_paths = lambda root=M.REPO_ROOT: [".unmapped-root-probe.json"]
+            err = io.StringIO()
+            self.assertEqual(M.check_totality(io.StringIO(), err), 1)
+            self.assertIn(".unmapped-root-probe.json", err.getvalue())
+        finally:
+            M.tracked_paths = real
+
+    def test_an_unreadable_tree_fails_closed_rather_than_passing_vacuously(self):
+        """`git ls-files` failing must NOT read as "everything attributes"."""
+        import io
+        real = M.tracked_paths
+        try:
+            M.tracked_paths = lambda root=M.REPO_ROOT: None
+            self.assertEqual(M.check_totality(io.StringIO(), io.StringIO()), 2)
+        finally:
+            M.tracked_paths = real
 
 
 if __name__ == "__main__":

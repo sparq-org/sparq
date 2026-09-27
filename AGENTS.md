@@ -688,9 +688,12 @@ disappears. Fail the sweep outright on a duplicate id or an anchor that no longe
   never runs PR-authored code, explicit fork read-only-token path, and **no `if:` at any
   level** — every skip decision is in Python, where a mutant dies). Guards:
   `scripts/tests/test_pr_area_labels.py`, run by `routing-self-tests.yml`.
-  **When you add a top-level directory, add a `[[map]]` row** or every PR touching it
-  silently starves the frontier again — the totality test over `git ls-files` is what
-  catches this.
+  **When you add a top-level directory — or any repo-root file — add a `[[map]]` row** or
+  every PR touching it silently starves the frontier again. The totality check over
+  `git ls-files` is what catches this, and since #5160 it also runs standalone as
+  `scripts/pr-area-labels.py --check-totality` from **docs-quality `quick-gates`**: that
+  lane has no `paths:` filter, so the PR that ADDS the unmapped path is the one that reds,
+  rather than the next unrelated PR that happens to touch a filtered path.
 - **`.claude/workflows/autonomous-scheduler.js`** (epic sq-sgu1) — the **self-driving
   bead-frontier loop**, MATERIALISED as a committed, re-runnable harness Workflow so it
   survives a session restart. <!-- [OPUS-4.8] durable scheduler --> Each wave it reads the
