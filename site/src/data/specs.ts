@@ -49,6 +49,18 @@ export const STATUS_VARIANT: Record<
 };
 
 export const SPECS: Spec[] = [
+  // [SONNET-4.6] sq-6syab.1 — verifier-holder trust-expression contract.
+  {
+    slug: "trust-expression",
+    source: "trust-expression.typ",
+    title: "Trust Expression: A Verifier–Holder Contract for Framework-Anchored Attestations",
+    shortName: "trust-expression",
+    status: "unofficial",
+    date: "2026-07-26",
+    editors: "Jesse Wright · the sparq project",
+    blurb:
+      "One SPARQL query, one RDF trust-requirements graph, and one nonce: enumerated-party and framework-certified trust modes, positive time-windowed status evidence, certification-scope checks, and RDF 1.2 reifier provenance with a lossless SPARQL 1.1 named-graph mapping. ZK is not externally audited (sq-qhy4); MPC is honest-majority semi-honest only.",
+  },
   {
     slug: "zksparql",
     source: "zksparql.typ",
