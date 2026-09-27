@@ -6,6 +6,13 @@
 # Policy URLs still resolve. The intended served path is /.well-known/security.txt.
 # sparq-server is a SPARQL-protocol API and does not serve static files, so this file
 # is published from the repository root (and from any future project site at its root).
+#
+# NOTE — every URL below MUST name the CURRENT owner (sparq-org), never the pre-migration
+# `jeswr/sparq` owner (sq-wqs97, org migration sq-uj38w). GitHub does redirect a renamed
+# repo, so the old URLs resolve today — but that redirect only holds while the old
+# owner/name pair stays unclaimed. Canonical is what a consumer uses to authenticate this
+# file (RFC 9116 §2.5.2), so pointing it at a namespace someone else can take over is the
+# one URL here where a stale redirect is a spoofing hazard rather than a cosmetic nit.
 
 Contact: https://github.com/sparq-org/sparq/security/advisories/new
 Contact: mailto:jesse@jeswr.org
