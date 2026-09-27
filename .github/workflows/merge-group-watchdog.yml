@@ -8,11 +8,12 @@
 # groups could not land. Total cost: 73 min 41 s of zero merges and ~66 min of group CI
 # thrown away on the rebuild. The full diagnosis is on #4652.
 #
-# NOT A GATE. Schedule / workflow_dispatch only — it never runs on a PR head, never
-# produces a check-run the `ci-summary` aggregator can see, and can therefore never
-# block a merge. Its only mutations are (a) a marker comment and (b) a dequeue +
-# re-enqueue of an entry it has POSITIVELY established has zero check-suites. Every
-# ambiguous reading is a refusal, not an action (see the script header).
+# NOT A GATE. Schedule / workflow_dispatch only. Its check-run lands on the main head
+# SHA and is therefore visible to the push-triggered `ci-summary` aggregator; the
+# declaration in `.github/advisory-registry.json` is what makes it non-gating. Its only
+# mutations are (a) a marker comment and (b) a dequeue + re-enqueue of an entry it has
+# POSITIVELY established has zero check-suites. Every ambiguous reading is a refusal,
+# not an action (see the script header).
 #
 # ── [OPUS-5] THE CRON IS NOW THE BACKSTOP, NOT THE PRIMARY PATH ──────────────────
 # `.github/workflows/merge-group-doorbell.yml` rings this workflow via

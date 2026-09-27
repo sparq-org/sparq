@@ -244,6 +244,13 @@
    "promotion_criteria": "permanently advisory BY DESIGN, for the same reason as `merge-queue dequeued feedback (advisory)`: it runs on pull_request_target [enqueued, dequeued], i.e. AFTER a gate verdict already exists on the head SHA (a PR cannot be enqueued before it is green), it never checks out or executes anything, and its single action is one `gh workflow run` that rings the merge-group watchdog. Ringing a queue watchdog is not a statement about the commit's merge-worthiness, so a doorbell hiccup must never red a later gate evaluation on that same SHA. No gate_script_waiver: the job invokes no script at all. Promote never; delete this entry only if the workflow is removed",
    "registered": "2026-07-28"
   },
+  "recover zero-dispatch merge groups": {
+   "workflow": "merge-group-watchdog.yml",
+   "job_id": "watch",
+   "owner_bead": "sparq-org/sparq#6269",
+   "promotion_criteria": "permanently advisory BY DESIGN: this schedule/workflow_dispatch queue-recovery job reports on GitHub Actions dispatch and merge-queue health, never on the commit at the main head SHA where its check-run lands. It deliberately fails loud when the GitHub API is unreadable or recovery fails; allowing that infrastructure signal to gate the push-triggered ci-summary run on the same SHA would block unrelated merges and create pressure to mute the watchdog. Promote never; delete this entry only if the workflow or job is removed.",
+   "registered": "2026-09-04"
+  },
   "lws-cth preflight (advisory)": {
    "workflow": "lws-cth.yml",
    "job_id": "preflight",
