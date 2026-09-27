@@ -288,4 +288,83 @@ Notes:
    and `gate` goes green. Then watch one merge_group pass and one main push.
 4. Follow-up candidates (out of scope here): the remaining multi-short-job
    workflows outside this batch, and the `if: ${{ !cancelled() }}` lint-step
-   refinement.
+   refinement. Candidates swept off this surface — folded or declined — are
+   recorded in §8.
+
+## 8. Fold-candidate ledger (the §7.4 sweep)
+
+The §7.4 follow-up surface is swept candidate by candidate. A candidate is any
+job whose runtime is dominated by the per-job constant tax (§1). Being that
+shape is necessary but **not sufficient**: the sweep has produced both folds and
+declines, and the declines are the more informative half, so both are recorded
+here.
+
+### 8.1 The two discriminators the sweep applies
+
+§2's gate-contract invariants (a)–(c) say when a fold is *ruleset-safe*. They do
+not say when it is *worth it*. Two further questions decide that, and they are
+what separate the entries below:
+
+1. **Does the fold merge two GATING identities?** Folding two advisory jobs
+   cannot coarsen a gating verdict — the aggregator already excludes both.
+   Folding two *gating* jobs replaces two independently-named red signals with
+   one, and the surviving name then describes only one of the defect classes it
+   can report. §6 books that as "failure attribution coarsens", mitigated by
+   step names in the log; that mitigation is adequate *inside* a bucket of
+   like-for-like lint steps, and inadequate when the merged checks assert
+   unrelated properties that a human reads off the check-run name.
+2. **Are the candidates in the same hermeticity + runtime class?** A grep over
+   checked-in source and a real-browser run are different failure *populations*,
+   not just different steps. When their budgets differ by an order of magnitude
+   the fold additionally forces the ordering dilemma in 8.2 below.
+
+The repo already encodes discriminator 2 as a pattern: `gui.yml` ·
+`gui-hermetic-guards` bundles the `browserName` drift tripwire with the
+`no-sleep-gate` grep — two hermetic greps in one claim — and was deliberately
+hoisted *out* of the environment-coupled `tauri-e2e` job by #3773. Hermetic
+greps cluster with hermetic greps.
+
+### 8.2 Declined: `site-e2e-foundation.yml` · `determinism-gate` (issue #5692)
+
+`determinism-gate` is checkout + `bash site/e2e/support/no-timeout-gate.sh` and
+nothing else — the canonical §1 shape. It is declined anyway.
+
+Its only same-trigger, unconditional, gating sibling is `a11y-ratchet` (the
+third job, `foundation-smoke`, is declared advisory). Both fail discriminator 1
+and discriminator 2:
+
+- **Two gating identities.** Neither job is declared in
+  `.github/advisory-registry.json`, so both gate, and
+  `.github/E2E-GATING-POLICY.md` §2 lists them as two separate rows with two
+  separate "why it gates" justifications (a hermetic grep vs a ratchet over
+  axe's own rule output). After a fold, a `page.waitForTimeout` under
+  `site/e2e/` reds a check-run named for the axe WCAG scan. That is not a log
+  attribution problem — it is the gate-level name, and it is the name the policy
+  document pins.
+- **The ordering dilemma.** Put the grep first and fail fast, and a determinism
+  failure suppresses the a11y result for that run — the exact narrowing #5221's
+  `if: ${{ !cancelled() }}` guard was added to prevent. Add that guard, and the
+  sub-minute determinism verdict is withheld until the browser lane concludes,
+  because a check-run has one conclusion and it arrives when the job ends. The
+  lane's own budgets state the gap: `determinism-gate` carries
+  `timeout-minutes: 5`, `a11y-ratchet` carries `timeout-minutes: 20` on top of
+  `npm ci` + a Playwright Chromium download. Today neither regression exists.
+- **The saving is smaller than the §5 rows.** Those workflows also run on
+  `merge_group` and main `push`, so §5 counts a PR lifecycle at roughly 2–3× the
+  per-event figure. `site-e2e-foundation.yml` triggers only on `pull_request`
+  and `push` to main, both path-filtered to `site/**` / `package.json` /
+  `package-lock.json` / the workflow file. The saving is one claim on the subset
+  of PRs that touch the site.
+
+There is no in-class partner to fold it into instead: `determinism-gate` is the
+only hermetic grep in the workflow, and folding across workflows would mean
+carrying this lane's `site/**` path filter into a job triggered on a different
+set — paying a claim on events that do not touch the site, which is the cost
+this sweep exists to remove.
+
+One short claim on a path-filtered event subset does not buy a permanently
+misnamed gating signal plus a choice between two fresh regressions. #3773 split
+this job out of the advisory job it was hiding inside precisely so its verdict
+would be independently visible; folding it into a browser job would surrender
+that independence for the smallest saving the sweep has priced. The decline is
+recorded in the job's own header comment so a later sweep does not re-derive it.
