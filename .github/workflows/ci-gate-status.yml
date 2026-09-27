@@ -1,0 +1,216 @@
+# ci-gate-status — SLOTLESS, event-driven evaluation of the aggregate gate
+# (bead sq-lfmvd; design record research/ci-gate-slotless-aggregation.md). [FABLE-5]
+# 🤖 SPARQ agent.
+#
+# WHY. `ci-summary / gate` — the SINGLE required branch-protection check — is a
+# RESIDENT WAITER. It occupies one hosted-runner job slot for as long as the slowest
+# sibling takes (up to 80 minutes). Under pool saturation the waiters collectively
+# starve the very builds they are waiting on; that is the 2026-07-02 congestion
+# collapse the sq-90cv4 adaptive budget compensates for WITHOUT removing the slot
+# occupancy. This workflow is the deeper fix from §2 of the design record: the same
+# verdict brain, fired by sibling `workflow_run` events, publishing its result as a
+# COMMIT STATUS on the head SHA. Each firing runs for seconds instead of minutes, so
+# no waiter exists to starve the pool and the saturation false-RED class disappears
+# structurally rather than being compensated for.
+#
+# THE VERDICT SEMANTICS ARE NOT REIMPLEMENTED. `scripts/ci_summary_gate.py
+# --evaluate` re-uses forgive_superseded / is_self / is_advisory /
+# draft_selects_unsuperseded / fm_report_status / failfast_failures / render_verdict
+# verbatim — the single, unit-tested brain (scripts/tests/test_ci_summary_gate.py).
+# Only the TRANSPORT differs (resident loop -> event-driven invocations), which is
+# exactly the property design §4 relies on.
+#
+# ============================ STAGED, NOT SWAPPED ================================
+# This lane is DESIGN-SENSITIVE: it produces a candidate replacement for the one
+# check that authorises every merge. Per design §3.1 the migration is STAGED and the
+# ruleset edit is MAINTAINER-ONLY:
+#   * STAGE 1 (what this file is, today): the `ci-gate` commit status is published
+#     ALONGSIDE the existing `ci-summary / gate` job, and the branch-protection
+#     ruleset still requires ONLY `gate`. The status is therefore ADVISORY — a
+#     divergence costs a mismatch to investigate, never a blocked or a wrongly
+#     admitted merge. Both run; parity is observed on live PRs.
+#   * STAGE 2 (maintainer): add `ci-gate` to the ruleset's required contexts
+#     ALONGSIDE `gate`. Both required. Any divergence now blocks, loudly.
+#   * STAGE 3 (maintainer): once parity holds, drop `gate` from the ruleset and
+#     delete ci-summary.yml's poll job. NEVER swap the two in one edit — a required
+#     context that no run produces blocks every merge until the ruleset is fixed.
+# docs/branch-protection.md §Slotless gate evaluation is the doc-of-record for the
+# procedure and for the exit criteria of each stage.
+# =================================================================================
+#
+# THE STATUS IS TIERED, exactly as the `gate` job's NAME is tiered. A DRAFT PR runs a
+# reduced sibling matrix (docs/branch-protection.md §Draft-tier CI), so an evaluation
+# of a draft head publishes to `ci-gate/draft-tier` and NEVER to `ci-gate`. The
+# required context is then simply ABSENT on a draft head, which branch protection
+# treats as blocking — the same structural invariant, with no supersession window to
+# race. The tier is read from the PR's LIVE draft state (a `workflow_run` payload
+# describes the SIBLING run, not the PR); an unreadable draft state publishes NOTHING
+# rather than guessing which context to write.
+#
+# TRUST MODEL (design §3.2 — it CHANGES, for the better). `workflow_run` always runs
+# the DEFAULT-BRANCH copy of this file and, here, checks out the default branch's
+# `scripts/ci_summary_gate.py` + `.github/advisory-registry.json`. The evaluator logic
+# therefore stops being PR-attested: a PR can no longer alter the code or the
+# advisory declarations that judge it, which is the right posture for a
+# merge-authorising gate. The honest cost, and it is a REAL behavioural difference to
+# watch for during stage 1: a PR that legitimately EDITS the gate script or the
+# advisory registry is judged by main's copy, so `ci-summary / gate` (PR-attested)
+# and `ci-gate` (default-branch-attested) can legitimately disagree on exactly those
+# PRs until they merge. That is a divergence to explain, not a parity failure.
+# The token holds `statuses: write` and nothing that can touch source; a PR head
+# cannot forge the status because it never runs with this token.
+#
+# FORKS (design §3.3). A `pull_request`-triggered seed could not write statuses from a
+# fork (read-only token). This lane needs no such seed: `workflow_run` fires in the
+# BASE repository with the base repo's token for fork-PR sibling runs too, and a fork
+# PR's head commit exists in the base repo (refs/pull/N/head), so the status POST
+# lands. The `requested` trigger type is what seeds a quiet PR — the moment ANY
+# sibling run is created on the head, a cheap evaluation publishes `pending`, so a
+# docs-only PR is never left with no status at all.
+#
+# EVENT STORMS / DEBOUNCE (design §3.5). Dozens of sibling completions per push each
+# deliver an event. The concurrency group is keyed on the HEAD SHA with
+# `cancel-in-progress`, so a burst collapses to one surviving evaluation, and
+# EvalConfig.settle_seconds absorbs the burst inside the surviving run. The final
+# evaluation — the one fired by the LAST sibling to finish — is the one that renders
+# the verdict.
+#
+# STARTUP-RACE PARITY (design §3.6). The poll loop's MIN_POLLS floor becomes a
+# CONFIRM RE-FETCH: a would-be-terminal observation must be re-observed terminal
+# after EvalConfig.confirm_seconds before any success or failure is published, and an
+# empty sibling set NEVER passes (unlike the poll loop's stable-empty-set pass — an
+# evaluation is fired BY a run on this SHA, so an empty set is API lag, not evidence).
+# Both divergences are strictly more fail-closed, and both are pinned by
+# scripts/tests/test_ci_summary_gate.py::TestSlotlessEvaluation.
+#
+# NON-GATING BY DECLARATION, not by assumption (the sq-huwr8 lesson). This workflow's
+# OWN job produces a check-run, and a `workflow_run` run's check-runs land on the
+# DEFAULT-BRANCH head SHA — precisely the SHA ci-summary's `push: [main]` gate polls.
+# So it is declared in `.github/advisory-registry.json` (key `ci-gate status
+# (advisory)`, with a `gate_script_waiver` because it deliberately invokes a
+# gate-classified script). The job also exits 0 for EVERY verdict — the verdict is the
+# published STATUS, never this job's conclusion — and reds only when it cannot publish
+# at all.
+#
+# RECURSION. `workflow_run` has no `workflows:` filter here (the design's "any
+# sibling"), so the job `if:` excludes this workflow by name. Without that guard each
+# evaluation's own completion would fire another evaluation, forever.
+#
+# STAGE-1 VERIFICATION ITEMS — things this lane ASSUMES about the platform that only
+# a live shadow run can settle. Each is stated as an assumption on purpose; none is
+# load-bearing for a merge while the ruleset still requires only `gate`:
+#   (a) a `workflow_run` trigger with NO `workflows:` filter fires for every workflow
+#       in the repo (documented as optional; if it turns out to be required, the
+#       symptom is that NO `ci-gate` status ever appears and the fix is to enumerate);
+#   (b) `workflow_run` events are delivered for `merge_group`-triggered sibling runs,
+#       and the status lands on the merge-group head SHA the ruleset checks (design
+#       §3.4 — the one risk that cannot be reasoned out from the repo alone);
+#   (c) parity: over live PRs, `ci-gate` and `ci-summary / gate` agree, except on the
+#       PRs that edit the gate script or the advisory registry (see TRUST MODEL).
+# docs/branch-protection.md §Slotless gate evaluation records these as the stage-1
+# exit criteria.
+name: ci-gate-status
+
+on:
+  # `requested` seeds `pending` the moment any sibling run is created on a head;
+  # `completed` re-evaluates as each one finishes. No `workflows:` filter — the gate
+  # aggregates whatever actually ran, and hard-coding a list here would reintroduce
+  # exactly the brittleness the aggregator exists to avoid.
+  workflow_run:
+    types: [requested, completed]
+
+permissions: {}
+
+# Debounce (design §3.5): one live evaluation per head SHA; a burst of sibling
+# completions collapses onto the newest, which re-reads the whole set anyway.
+concurrency:
+  group: ci-gate-status-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: true
+
+jobs:
+  evaluate:
+    # DECLARED non-gating in .github/advisory-registry.json — see the header. The
+    # "(advisory)" token is naming hygiene (check-advisory-registry.py C2); the
+    # DECLARATION is what makes it non-gating.
+    name: ci-gate status (advisory)
+    # Three guards, all fail-closed:
+    #  (1) recursion — never fire on this workflow's own completion;
+    #  (2) scope — only heads branch protection actually gates (a PR head and a
+    #      merge-queue ref). A push-to-main sibling completion needs no status;
+    #  (3) the SHA must be present (a malformed payload publishes nothing).
+    if: >-
+      github.event.workflow_run.name != 'ci-gate-status'
+      && (github.event.workflow_run.event == 'pull_request'
+          || github.event.workflow_run.event == 'merge_group')
+      && github.event.workflow_run.head_sha != ''
+    runs-on: ubuntu-latest
+    # Seconds of work: settle + confirm + a handful of API reads. The cap exists to
+    # bound a pathological API stall, NOT to wait for siblings — this lane must never
+    # become the waiter it replaces.
+    timeout-minutes: 10
+    permissions:
+      # The ONE write capability, and it cannot touch source: publish the verdict.
+      statuses: write
+      # Reads: the head SHA's check-runs, the workflow runs behind them (#3505
+      # newest-run resolution), the PR's live draft state (tiering), and the script
+      # + advisory registry from the default branch.
+      checks: read
+      actions: read
+      contents: read
+      pull-requests: read
+    steps:
+      # Sparse checkout of ONLY the evaluator + the registry it reads, from the
+      # DEFAULT BRANCH (never the PR head — the §3.2 trust model). `.github/advisory-
+      # registry.json` is LOAD-BEARING: without it the evaluator refuses to evaluate
+      # (fail-closed) and publishes nothing. Pinned by
+      # scripts/tests/test_ci_summary_gate.py::TestSlotlessEvaluationWiring.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/ci_summary_gate.py
+            .github/advisory-registry.json
+          sparse-checkout-cone-mode: false
+      # The PR number is needed only for the draft-tier read. Same-repo runs usually
+      # carry it in the payload; fork runs never do, so fall back to a same-SHA
+      # lookup. A merge_group ref resolves to no PR, which is correct — there is no
+      # draft tier on the queue.
+      - name: Resolve the PR behind this head (draft-tier read)
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          RUN_PR_NUMBER: ${{ (github.event.workflow_run.pull_requests[0] != null) && github.event.workflow_run.pull_requests[0].number || '' }}
+        run: |
+          set -euo pipefail
+          PR_NUMBER="${RUN_PR_NUMBER}"
+          if [ -z "${PR_NUMBER}" ]; then
+            PR_NUMBER="$(gh api "repos/${REPO}/commits/${SHA}/pulls" \
+              --jq '[.[] | select(.state == "open")] | .[0].number // empty' || true)"
+          fi
+          echo "number=${PR_NUMBER}" >> "$GITHUB_OUTPUT"
+          echo "resolved PR number: ${PR_NUMBER:-<none: merge_group ref or unassociated head>}"
+      - name: Evaluate the aggregate gate and publish the commit status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          # The TRIGGERING run's head SHA — the commit whose sibling set is being
+          # aggregated, and the commit the status is published on. For a merge_group
+          # sibling run this is the queue ref's commit, which is the SHA the ruleset
+          # checks (design §3.4).
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          # `requested` is the cheap SEED path: a run was just created on this head,
+          # so the set is by construction not all-terminal — publish `pending` without
+          # fetching anything.
+          TRIGGER_ACTION: ${{ github.event.action }}
+          TRIGGER_EVENT: ${{ github.event.workflow_run.event }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          # This evaluation's own run id, for the anchored self-exclusion the poll
+          # loop uses (belt-and-braces: a workflow_run run's check-runs land on the
+          # default-branch head, not on SHA).
+          SELF_RUN_ID: ${{ github.run_id }}
+          # Where a reviewer goes from the status: the run that rendered the verdict.
+          TARGET_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: python3 scripts/ci_summary_gate.py --evaluate

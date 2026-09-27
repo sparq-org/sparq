@@ -209,6 +209,14 @@
    "promotion_criteria": "advisory: the helm-validate job runs on push/PR (path-filtered to deploy/**), NOT merge_group, and installs network-fetched helm+kubeconform, so it must not gate the merge queue (a missing merge_group check otherwise fails ci-summary). Promote by running it on merge_group + removing the (advisory) token once proven non-flaky on main",
    "registered": "2026-07-15"
   },
+  "ci-gate status (advisory)": {
+   "workflow": "ci-gate-status.yml",
+   "job_id": "evaluate",
+   "owner_bead": "sq-lfmvd",
+   "promotion_criteria": "NEVER promotable — promoting it would make the gate evaluate itself. This job PUBLISHES the aggregate verdict as the `ci-gate` commit status (research/ci-gate-slotless-aggregation.md §2, the slotless replacement for ci-summary's resident poll job); the verdict is the STATUS, and the job exits 0 for every verdict, redding only when it cannot publish at all. Declared because a workflow_run run's check-runs land on the DEFAULT-BRANCH head SHA — exactly the SHA ci-summary's `push: [main]` gate polls — which is the sq-huwr8 defect ('never creates a check-run on a PR head' is true and NOT sufficient). Delete this entry only if the workflow is removed; when the staged required-check migration completes (docs/branch-protection.md §Slotless gate evaluation, stage 3) the entry STAYS — the required thing is the status context, never this job.",
+   "registered": "2026-09-01",
+   "gate_script_waiver": "scripts/ci_summary_gate.py --evaluate IS the aggregate gate's verdict brain, invoked deliberately. It is gate-classified and that classification is correct: this job runs the real render_verdict. What is advisory is the JOB's own conclusion, not the verdict — the verdict is published as the `ci-gate` commit status, which the branch-protection ruleset requires (or, during the staged migration, will require). Gating on this job's check-run instead would be circular."
+  },
   "fast-fix ring (advisory)": {
    "workflow": "fast-fix-ring.yml",
    "job_id": "ring",

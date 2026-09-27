@@ -248,6 +248,91 @@ What is **not** risked: no committed floor is ever silently lowered (the monoton
 never left the queue, and a deliberate lowering stays a governed, loud re-baseline), and
 the nightly full-coverage tier (`coverage-nightly`) is untouched.
 
+## Slotless gate evaluation (`ci-gate`) — staged, NOT yet required
+
+<!-- [FABLE-5] bead sq-lfmvd. Design record: research/ci-gate-slotless-aggregation.md.
+     This section is the doc-of-record for the required-check migration it describes;
+     the ruleset edits below are MAINTAINER-ONLY and none of them has been made. -->
+
+`ci-summary / gate` is a **resident waiter**: it holds a hosted-runner job slot for as
+long as the slowest sibling takes. Under runner-pool saturation those waiters starve the
+very builds they wait on — the 2026-07-02 congestion collapse, which the adaptive
+saturation budget compensates for **without** removing the slot occupancy.
+[`.github/workflows/ci-gate-status.yml`](../.github/workflows/ci-gate-status.yml) is the
+deeper fix from §2 of the design record: the **same verdict brain**
+(`scripts/ci_summary_gate.py --evaluate`, sharing `render_verdict` verbatim), fired by
+sibling `workflow_run` events, publishing its result as a **commit status** rather than
+as a job conclusion. Each firing runs for seconds, so no waiter exists to starve the pool.
+
+**Today it is stage 1: shadow.** The ruleset still requires **only** `gate`. The
+`ci-gate` status is published alongside it and gates nothing, so a divergence costs a
+mismatch to investigate — never a blocked or a wrongly admitted merge.
+
+| Stage | Ruleset `required_status_checks` | Who | Exit criteria |
+|---|---|---|---|
+| **1 — shadow** *(current)* | `gate` only | — | The three verification items below hold over a run of live PRs. |
+| **2 — both required** | `gate` **and** `ci-gate` | **Maintainer** | No unexplained divergence while both block. |
+| **3 — migrated** | `ci-gate` only | **Maintainer** | Then, and only then, `ci-summary.yml`'s poll job is deleted. |
+
+> **Never swap the two in one edit.** A required context that no run produces blocks
+> **every** merge until the ruleset is fixed by hand. Stage 2 must overlap stage 1, and
+> stage 3 must follow a proven stage 2. `scripts/tests/test_ci_summary_gate.py`
+> `::TestSlotlessEvaluationWiring::test_the_required_check_migration_is_STAGED_not_swapped`
+> makes deleting the `gate` job while this lane exists a red CI run rather than a wedged
+> repository — but nothing in the repo can protect the ruleset itself, which is why
+> stages 2 and 3 are maintainer-only.
+
+**Stage-1 verification items** (assumptions only a live shadow run can settle; each is
+recorded in `ci-gate-status.yml`'s header as an assumption, not a claim):
+
+1. A `workflow_run` trigger with no `workflows:` filter fires for **every** workflow in
+   the repo. If it does not, the symptom is that no `ci-gate` status ever appears, and
+   the fix is to enumerate the sibling workflows.
+2. `workflow_run` events are delivered for **`merge_group`**-triggered sibling runs, and
+   the status lands on the merge-group head SHA the ruleset checks (design §3.4 — the one
+   §3 risk that cannot be settled from the repo alone).
+3. **Parity**: `ci-gate` and `ci-summary / gate` agree over live PRs, *except* on PRs that
+   edit the gate script or the advisory registry — see the trust-model note below, where
+   disagreement is correct.
+
+**What differs from the poll loop**, deliberately, and each strictly more fail-closed
+(pinned by `TestSlotlessEvaluation`):
+
+- **An empty sibling set never passes.** The poll loop passes a stable-empty set; an
+  evaluation is fired *by* a run on that SHA, so an empty set is API lag, not evidence.
+- **No information means no write.** An unobservable sibling set, or a PR whose live
+  draft state cannot be read, publishes **nothing** rather than overwriting a verdict
+  with a guess. A required-but-absent status blocks, which is the safe direction.
+- **The startup-race floor is a confirm re-fetch.** In place of `MIN_POLLS`, a would-be
+  terminal observation must be re-observed terminal after a short confirm window before
+  any success or failure is published. The same window is the fail-fast grace re-poll.
+- **The tier is a separate context.** A draft head publishes `ci-gate/draft-tier`, never
+  `ci-gate` — the status-context analogue of the tiered `gate` / `gate, draft-tier` job
+  name, so the required context is simply **absent** on a draft head (see
+  *Draft-tier CI* below for why absence, not supersession, is the invariant).
+
+**Trust model — it changes, for the better.** `workflow_run` always runs the
+**default-branch** copy of the workflow, and the evaluator checks out the default
+branch's script and `advisory-registry.json`. A PR can therefore no longer alter the code
+or the advisory declarations that judge it, which is the right posture for the check that
+authorises merges. The honest cost: a PR that legitimately **edits** the gate script or
+the registry is judged by `main`'s copy, so the PR-attested `gate` and the
+default-branch-attested `ci-gate` can correctly disagree on exactly those PRs until they
+merge. The evaluator's token holds `statuses: write` and nothing that can touch source.
+
+**Fork PRs** need no special path: `workflow_run` fires in the base repository with the
+base repo's token even for fork sibling runs, and a fork PR's head commit exists in the
+base repo (`refs/pull/N/head`), so the status POST lands. The `requested` trigger type
+seeds a `pending` status the moment any sibling run is created, so a quiet docs-only PR is
+never left with no status at all.
+
+The evaluator's own job is **declared** non-gating in
+[`.github/advisory-registry.json`](../.github/advisory-registry.json) — a `workflow_run`
+run's check-runs land on the default-branch head SHA, which is exactly the SHA
+`ci-summary`'s `push: [main]` gate polls (the sq-huwr8 lesson: "it creates no check-run on
+a PR head" is true and *not* sufficient). It also exits 0 for every verdict — the verdict
+is the status — and reds only when it cannot publish at all.
+
 ## Draft-tier CI (reduced matrix on draft PR heads)
 
 <!-- [FABLE-5] Draft-tier CI design record (2026-07-17). Motivation: the autonomous
