@@ -1,7 +1,7 @@
 # [OPUS-4.8] sq-pntvh.8 — M4 feature-OFF perf-neutrality CI proof gate.
 #
 # [FABLE-5] sq-6vshe.20 (design: research/ci-runner-consolidation-2026-07.md §4.5):
-# CONSOLIDATED from 4 jobs to 2. The seconds-cheap `changes` + `feature-resolution` +
+# Originally CONSOLIDATED from 4 jobs to 2. The seconds-cheap `changes` + `feature-resolution` +
 # `cfg-audit` jobs fold into ONE fail-fast gating job (`quick-gates`) with the path
 # filter as a leading in-job step and the former legs behind step-`if:` guards on its
 # `rust_changed` output. The heavy `artifact-exact-equality` job stays STANDALONE
@@ -14,6 +14,10 @@
 # advisory/informational tokens, so the required ci-summary `gate` reds if either
 # fails; a doc-only PR's skipped STEPS leave the jobs concluding SUCCESS —
 # non-failing to the aggregator exactly as the formerly skipped JOBS were.
+#
+# [GPT-6-ASTRA] #6081 adds the shared selector before these two gate jobs. An
+# ordinary label flip now claims only that selector; real runs wait for it before
+# starting both roots. Existing path/draft decisions remain inside the roots.
 #
 # Three-leg gate proving the `vectorized` feature-OFF build is compile-time absent
 # and artifact-deterministic:
@@ -67,8 +71,10 @@ on:
 permissions:
   contents: read
 
+# [GPT-6-ASTRA] #6081: label events must not cancel or evict the native real
+# run, including a pending run (one pending slot exists per concurrency group).
 concurrency:
-  group: vectorized-feature-off-${{ github.workflow }}-${{ github.ref }}
+  group: vectorized-feature-off-${{ github.workflow }}-${{ github.ref }}-${{ (github.event_name == 'pull_request' && contains(fromJSON('["labeled","unlabeled"]'), github.event.action)) && github.run_id || 'shared' }}
   cancel-in-progress: true
 
 env:
@@ -76,6 +82,14 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
+  # [GPT-6-ASTRA] Reuse the existing no-leg producer contract. This caller remains
+  # unconditional; a selector failure gates instead of legitimizing skipped roots.
+  # Its outputs do not narrow either job's existing path/draft decisions.
+  select:
+    uses: ./.github/workflows/ci-select.yml
+    permissions:
+      contents: read
+
   # ---------------------------------------------------------------------------
   # Quick gates: in-job path filter + Leg 1 (feature-resolution) + Leg 3 (cfg-audit).
   # [FABLE-5] sq-6vshe.20: formerly three separate runner claims. The path filter
@@ -86,6 +100,13 @@ jobs:
   # ALWAYS execute the full gate — only purely non-Rust PR diffs skip.
   # ---------------------------------------------------------------------------
   quick-gates:
+    # [GPT-6-ASTRA] Match all shared-selector escapes: each of these labels
+    # makes no no-leg claim, so preserve real work rather than publish a no-op.
+    needs: select
+    if: >-
+      github.event_name != 'pull_request' ||
+      !contains(fromJSON('["labeled","unlabeled"]'), github.event.action) ||
+      contains(fromJSON('["ci-full","bench-full","fuzz-full"]'), github.event.label.name)
     name: vectorized-feature-off quick-gates (changes + feature-resolution + cfg-audit)
     runs-on: ubuntu-latest
     permissions:
@@ -220,6 +241,13 @@ jobs:
   # aggregator, as the former job-`if:` skip was).
   # ---------------------------------------------------------------------------
   artifact-exact-equality:
+    # [GPT-6-ASTRA] Match all shared-selector escapes: each of these labels
+    # makes no no-leg claim, so preserve real work rather than publish a no-op.
+    needs: select
+    if: >-
+      github.event_name != 'pull_request' ||
+      !contains(fromJSON('["labeled","unlabeled"]'), github.event.action) ||
+      contains(fromJSON('["ci-full","bench-full","fuzz-full"]'), github.event.label.name)
     name: artifact-exact-equality (wasm bundle feature-OFF)
     runs-on: ubuntu-latest
     permissions:
