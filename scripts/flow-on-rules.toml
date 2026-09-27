@@ -35,6 +35,16 @@
 #   when_label        = "label"        # PR must carry this label (opt-in rules)
 #   when_title        = "regex"        # case-insensitive regex over the PR title
 #
+#   # Fan-out (optional). By default a rule expands its templates ONCE, against a
+#   # single placeholder context. `for_each = "new_crate"` instead expands them
+#   # once per crate whose `crates/<x>/Cargo.toml` was ADDED, with `{crate}` bound
+#   # to that crate — so a PR that lands TWO crates mints both crates' follow-ons
+#   # instead of silently covering only the first one `{crate}` happened to
+#   # resolve to. The crate list comes from gate G1's own `added_crates()`
+#   # (scripts/gate-new-crate.py), so the reactive and proactive halves can never
+#   # disagree about what "a new crate" is.
+#   for_each = "new_crate"
+#
 #   # One or more follow-on issue templates. Placeholders expanded from the match:
 #   #   {pr}        merged PR number
 #   #   {pr_title}  merged PR title
@@ -46,7 +56,15 @@
 #   dedup_key = "kind-{crate}"            # required; expanded, then used as the idempotency key
 #   title     = "..."                      # required; issue title (placeholders expanded)
 #   body      = "..."                       # required; issue body (placeholders expanded)
-#   labels    = ["extra", "labels"]         # optional; `flow-on` + `auto` are ALWAYS added
+#   labels    = ["extra", "labels"]         # optional; `flow-on` + `auto` are ALWAYS added.
+#                                           #   Placeholders are expanded here too, so a template
+#                                           #   can carry the per-match `area:{crate}` package key.
+#   when_public_crate = true                # optional; skip this template when `{crate}` is a
+#                                           #   non-published crate (`publish = false` in its
+#                                           #   Cargo.toml) — i.e. the SAME public/internal split
+#                                           #   gate G1 uses for its SKILL.md requirement. Use it
+#                                           #   for follow-ons that only make sense for a surface
+#                                           #   users can actually reach (website, guide).
 #
 # [FABLE-5] (#2474) On top of `flow-on` + `auto` + these labels, flow-on.py appends
 # role/priority/status ROUTING labels at creation via the shared static triage pass
@@ -65,20 +83,150 @@
 # it here is sound; pick the crate/surface the follow-on's work actually lands in.
 # ---------------------------------------------------------------------------
 
-# --- New crate → benchmark + README + SKILL.md  [REMOVED — owned by gate G1] ----
+# --- New crate → benchmark + README + SKILL.md  [NOT HERE — owned by gate G1] ---
 # There is intentionally NO reactive "register a bench / add a SKILL for the new
 # crate {crate}" rule here. The PROACTIVE merge gate G1 (scripts/gate-new-crate.py,
 # merged #221) ALREADY enforces — and BLOCKS the merge on — a registered benchmark
 # + README + (for a public crate) a SKILL.md *in the same PR* that adds the crate.
 # So by the time a new-crate PR is MERGED, those artifacts are guaranteed present;
-# a post-merge follow-on issue would be pure noise (dogfooded: this rule minted the
-# redundant #245 / #246 / #264 / #265 bench+SKILL follow-ons — bead sq-l0a0).
+# a post-merge follow-on issue would be pure noise (dogfooded: an earlier rule
+# minted the redundant #245 / #246 / #264 / #265 bench+SKILL follow-ons — sq-l0a0).
 #
-# G1 is the single owner of new-crate completeness. The stub escape hatch
-# (`publish = false`) is likewise handled there. If G1 is ever relaxed to a
-# non-blocking advisory, restore a SAFETY-NET reactive rule here — but it must
-# CHECK that the crate genuinely lacks the bench/SKILL on `main` before creating
-# (don't blindly mint), not re-emit unconditionally as the old rule did.
+# G1 is the single owner of new-crate completeness for THOSE THREE artifacts. The
+# stub escape hatch (`publish = false`) is likewise handled there. If G1 is ever
+# relaxed to a non-blocking advisory, restore a SAFETY-NET reactive rule here —
+# but it must CHECK that the crate genuinely lacks the bench/SKILL on `main`
+# before creating (don't blindly mint), not re-emit unconditionally.
+#
+# The follow-ons G1 does NOT cover are minted by `new-crate-followons` below.
+
+# --- New crate → the follow-ons G1 CANNOT gate ---------------------------------
+# [OPUS-5] issue #2547. G1 covers exactly three of the five things a new package
+# owes the project: a README, a registered benchmark, and a SKILL.md. The other
+# two — "is it tested by all the appropriate test METHODS?" and "is it visible to
+# users (website + published guide)?" — are un-gateable at merge time and were
+# falling through the gap entirely:
+#
+#   * WHICH test methods apply (fuzz / Miri / Kani / mutation / property /
+#     differential / a feature-matrix leg) is a judgment call about the crate's
+#     content, not a file that either exists or does not. A merge gate can only
+#     ask "is there SOME test", which the coverage-presence ratchet already does;
+#     it cannot ask "is the parser fuzzed and the `unsafe` Miri-checked".
+#   * The website (`site/`) and the published guide (`book/`) are assembled
+#     out-of-band from catalogues and single-sourced anchors, so requiring the
+#     page in the crate's own PR would block unrelated work on a front-end edit —
+#     the same reason the dashboard row is a follow-on rather than a gate (§2.2).
+#
+# So they become reactive follow-ons: one issue per new crate per dimension,
+# dedup-keyed on the crate so a re-run or a re-merge never duplicates them.
+#
+# PRECISION (the sq-l0a0 lesson — do not mint what is already guaranteed):
+#   * `for_each = "new_crate"` binds `{crate}` per ADDED crate, using G1's own
+#     `added_crates()`. A PR that adds no crate mints nothing; a PR that adds two
+#     mints both (the shared `{crate}` placeholder would have covered only one).
+#   * `when_public_crate = true` drops the website + guide follow-ons for a
+#     `publish = false` crate — an internal crate is not a user-facing surface, so
+#     advertising it would be noise. This is the SAME split G1 uses to decide
+#     whether a new crate owes a SKILL.md, read from the same Cargo.toml field.
+#   * The test-method follow-on carries NO such condition: an internal crate still
+#     has to be tested. It is deliberately the one dimension that always fires.
+# A follow-on that turns out not to apply is closed with a note — a reactive issue
+# needs no escape hatch, unlike a blocking gate.
+[[rule]]
+id = "new-crate-followons"
+description = "A new crate landed; mint the follow-ons G1 cannot gate — test methods, website, guide."
+when_new_paths = ["crates/*/Cargo.toml"]
+for_each = "new_crate"
+
+[[rule.create]]
+dedup_key = "crate-test-methods-{crate}"
+title = "test: apply the appropriate test methods to new crate {crate}"
+# [OPUS-5] kind:test → role:impl; area:{crate} is the crate's own package
+# partition (the same key scripts/pr-area-labels.py derives from crates/<x>/…),
+# so the follow-on serializes against other work on this crate rather than
+# reserving the global partition.
+labels = ["kind:test", "area:{crate}"]
+body = """
+Merged PR #{pr} ({pr_title}) added the new crate `crates/{crate}`.
+
+Merge gate G1 (`scripts/gate-new-crate.py`) already required a README, a
+registered benchmark and — for a public surface — a `skills/<surface>/SKILL.md`
+in that same PR. It does NOT decide which **test methods** the crate needs: that
+depends on what the crate contains, so it cannot be a merge gate.
+
+Audit `crates/{crate}` against the methods this repo actually operates, wire up
+the ones that apply, and record here why each of the others does not:
+
+- unit + integration tests, with the crate's floors seeded in
+  `bench/coverage-floor.json` + `bench/coverage-presence.json`
+  (`scripts/coverage-gate.py`, `scripts/coverage-presence.py`)
+- a surviving-mutant ceiling in `bench/mutants-baseline.json`
+  (`scripts/mutants-gate.py`) so the tests assert rather than merely execute
+- property / randomized tests, and a differential oracle against an independent
+  implementation where one exists
+- a `fuzz/` target when the crate reads untrusted bytes (parser, decoder,
+  on-disk format)
+- the Miri lane (`.github/workflows/miri.yml`) when the crate contains `unsafe`
+- a Kani or formal harness (`.github/workflows/kani.yml`) when the crate carries
+  a stated invariant worth proving
+- a `feature-matrix.yml` leg for every default-OFF feature, whose tests would
+  otherwise compile empty and pass vacuously (AGENTS.md, the opt-in-feature row)
+
+Close this with the disposition of each method, so the decision is recorded.
+"""
+
+[[rule.create]]
+dedup_key = "crate-website-{crate}"
+title = "site: advertise new crate {crate} on the website"
+# [OPUS-5] area:site with no kind:* derives role:site (scripts/triage.py
+# UI_SURFACE_LABELS) — front-end work, not doc work.
+labels = ["dashboard", "area:site"]
+when_public_crate = true
+body = """
+Merged PR #{pr} ({pr_title}) added `crates/{crate}`, a **published** crate (its
+Cargo.toml does not carry `publish = false`), so it is a surface users can reach
+— but nothing on the website mentions it yet.
+
+Give it a presence in `site/`:
+
+- a surface page under `site/src/app/surface/<slug>/`, or a section on the
+  existing page for the capability it belongs to
+- an entry in the matching catalogue under `site/src/data/` (`surfaces.ts`,
+  `capabilities.ts`, …) so it appears in the surface index rather than only at a
+  hand-typed URL
+- a link from the capabilities / showcase pages if it is directly user-facing
+
+Keep any wording within the honesty rules that apply to the site copy — in
+particular no hard-coded performance numbers, and no unqualified ZK/MPC privacy
+or soundness claim (`scripts/check-privacy-claims.sh`).
+
+If the crate is an implementation detail that should not be advertised, say so
+here and close — and consider marking it `publish = false` so this follow-on is
+not minted for its siblings.
+"""
+
+[[rule.create]]
+dedup_key = "crate-guide-{crate}"
+title = "docs: add a guide page for new crate {crate}"
+# [OPUS-5] area:docs + kind:docs → role:docs.
+labels = ["docs", "kind:docs", "area:docs"]
+when_public_crate = true
+body = """
+Merged PR #{pr} ({pr_title}) added `crates/{crate}`, a **published** crate, but
+the guide published at `/guide/` (mdBook, `book/`) has no chapter for it.
+
+Add the chapter under `book/src/` and list it in `book/src/SUMMARY.md`.
+
+Follow the single-sourcing rule in `book/book.toml`: guide chapters are thin
+`{{#include}}` wrappers over ANCHOR regions in the canonical `README.md` /
+`skills/<surface>/SKILL.md`, so the guide cannot drift from the source of truth.
+Add or widen the anchors in those canonical files rather than writing a second
+copy of the prose in `book/src/`. Verify with `scripts/build-guide.sh` — mdBook
+exits 0 on a broken include, so the build log is grepped for `[ERROR]`.
+
+If the crate is internal plumbing with no place in a user guide, note that here
+and close.
+"""
 
 # --- Changed public feature → docs / SKILL.md update ---------------------------
 # Trigger: a change under a published crate's surface, the CLI, the HTTP server,
