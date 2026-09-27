@@ -237,6 +237,32 @@ pkg:SourceReliabilityMeasurement a dqv:Metric ;
   dqv:inDimension pkg:EpistemicWeightDimension ;
   rdfs:comment "The metric a Source's pkg:confidence measures: how reliable the source is (0..1). Same DQV shape as pkg:ConfidenceMeasurement, distinct subject + dimension role."@en-GB .
 
+# --- Per-BATCH quality (sq-2489d.5 / design §4.5) ----------------------------
+# The two dimensions above measure ONE subject (a Finding / a Source). The literature
+# ingestion pipeline additionally needs "how good was THIS batch?" — a RUN-level axis.
+# Modelling it here (rather than in a log line or a sidecar field only) is what makes the
+# batch verdict a QUERY (the `batch-quality` canned query) that can feed the per-topic
+# recommend-adopt decision. Same reuse discipline as above: instances of the standard DQV
+# classes, NO net-new bespoke predicate.
+# HONEST SCOPE: only metrics something ACTUALLY computes are declared. The design §4.5
+# also lists extraction-precision-on-sample (needs a human-audited sample — Phase 6),
+# dedup-collision rate (no dedup layer exists yet) and topic-coverage (no topic grounding
+# yet); those are deliberately NOT declared here, because an unmeasured metric IRI in the
+# vocabulary reads as a capability the code does not have.
+pkg:BatchQualityDimension a dqv:Dimension ;
+  skos:prefLabel "Ingestion-batch quality"@en-GB ;
+  skos:definition "How good ONE machine-ingestion batch was — the run-level quality axis of the literature pipeline, orthogonal to the per-Finding/per-Source epistemic weight + basis axes."@en-GB .
+
+pkg:GroundingRateMetric a dqv:Metric ;
+  rdfs:label "Citation-grounding rate metric"@en-GB ;
+  dqv:inDimension pkg:BatchQualityDimension ;
+  rdfs:comment "The fraction (0..1) of a batch's candidate Findings that PASSED the deterministic grounding-resolver — justification is an entailed span of the source abstract AND every cited DOI resolves to a pkg:Source in the batch — and were therefore committed; the complement was quarantined, never dropped. STRUCTURAL anchoring only: like the SHACL gate it does NOT measure truth, so a high grounding rate is not an accuracy claim."@en-GB .
+
+pkg:SourceYieldRateMetric a dqv:Metric ;
+  rdfs:label "Source-yield rate metric"@en-GB ;
+  dqv:inDimension pkg:BatchQualityDimension ;
+  rdfs:comment "The fraction (0..1) of a batch's parsed sources that yielded at least one grounded Finding (flipped to pkg:Explored) rather than none (pkg:DeadEnd). A TARGETING-quality signal for the batch — how well the connector query selected readable, on-topic sources — not a quality signal for any individual Finding."@en-GB .
+
 pkg:discoveredFrom a owl:ObjectProperty ;
   rdfs:label "discovered from"@en-GB ;
   rdfs:comment "The source / activity a Finding (or Task) was discovered from. rdfs:subPropertyOf prov:wasDerivedFrom so the SHACL minCount-1 source guardrail is satisfied by either form."@en-GB ;

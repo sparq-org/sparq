@@ -184,6 +184,40 @@ SELECT ?subject ?metric ?value WHERE {
     param: None,
 };
 
+/// GROUND — "**how good was this ingestion batch?**" (sq-2489d.5, design §4.5). The
+/// run-level DQV measurements: for every `dqv:QualityMeasurement` whose metric sits in
+/// the `pkg:BatchQualityDimension`, the batch it was `dqv:computedOn` and its value.
+///
+/// This is the query that makes a machine-ingestion run's verdict *queryable* rather than
+/// a log line — it is what a per-topic recommend-adopt decision reads. The
+/// `dqv:inDimension` filter is what separates it from [`FINDING_QUALITY_DQV`]: that query
+/// returns EVERY measurement (including per-Finding confidence), this one returns only
+/// the batch-level axis, so the two never conflate a run metric with a belief.
+///
+/// The batch measurements are emitted by
+/// `literature::pipeline::Sidecar::quality_measurements_turtle` as a SEPARATE artifact,
+/// so over a graph loaded without that artifact this returns zero rows — the honest "no
+/// batch telemetry recorded" answer.
+///
+/// **Honest reading:** the metrics are structural (grounding rate, source yield). Neither
+/// measures whether a machine-extracted Finding is TRUE; extraction accuracy is unmeasured
+/// until a human-audited sample (Phase 6).
+pub const BATCH_QUALITY: CannedQuery = CannedQuery {
+    name: "batch-quality",
+    about: "GROUND: the run-level DQV quality measurements of an ingestion batch (metric + value)",
+    sparql: r#"
+PREFIX pkg: <https://sparq.dev/ns/pkg#>
+PREFIX dqv: <http://www.w3.org/ns/dqv#>
+SELECT ?batch ?metric ?value WHERE {
+  ?m a dqv:QualityMeasurement ;
+     dqv:computedOn ?batch ;
+     dqv:isMeasurementOf ?metric ;
+     dqv:value ?value .
+  ?metric dqv:inDimension pkg:BatchQualityDimension .
+} ORDER BY ?batch ?metric"#,
+    param: None,
+};
+
 /// GROUND — "which sources are still UNEXPLORED, so follow-up can be targeted?" Sources
 /// whose `pkg:exploredStatus` is anything other than `pkg:Explored`, ordered by
 /// follow-up priority. (Over the current Phase-1 ingest every source is `Explored`, so
@@ -309,6 +343,7 @@ pub const ALL: &[&CannedQuery] = &[
     &FINDINGS_ABOUT,
     &FINDING_PROVENANCE,
     &FINDING_QUALITY_DQV,
+    &BATCH_QUALITY,
     &UNEXPLORED_SOURCES,
     &SOURCE_STATUS,
     &TASK_DEPENDS_ON,
