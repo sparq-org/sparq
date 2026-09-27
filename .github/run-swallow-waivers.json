@@ -1,0 +1,229 @@
+{
+ "_doc": "[OPUS-5] sparq-org/sparq#5799 / #6226 — workflow failure-swallow waivers. scripts/check-workflow-run-swallow.py checks every job that GATES (every job not declared in .github/advisory-registry.json). W1 covers statement-level `|| true` / `|| :`, including inside double-quoted command substitutions; W2 covers undisciplined `set +e`; W4 covers non-false step-level `continue-on-error`, including expression values. Each waiver needs {workflow, job_id, match, reason, registered}; `match` pins exactly one specific command or named step, and W3 rejects stale or multiply-bound declarations. This is a ratchet, not an approval list: adding an entry is deliberate, and removing a swallow is preferred.",
+ "waivers": [
+  {
+   "workflow": "bench-ec2.yml",
+   "job_id": "nightly-full-bench",
+   "match": "git fetch --unshallow origin",
+   "reason": "History deepening for a regression-attribution `git log baseline..HEAD` after a shallow checkout. Both fetch spellings are tried because `--unshallow` errors on a repo that is already complete; the trailing `|| true` covers the case where neither is needed. If the history is still too shallow the attribution step downstream reports that itself, so no verdict is silenced here.",
+   "registered": "2026-09-02"
+  },
+  {
+   "workflow": "bench.yml",
+   "job_id": "bench",
+   "match": "git rebase --abort 2>/dev/null || true",
+   "reason": "Cleanup on the failure branch of `if git fetch origin main && git rebase FETCH_HEAD`. The rebase is a best-effort retry of the perf-floor commit against a main tip that moved during the long bench job; aborting a rebase that never started is not a failure. The perf gate itself is a separate, unswallowed step.",
+   "registered": "2026-09-02"
+  },
+  {
+   "workflow": "ci.yml",
+   "job_id": "test",
+   "match": "./scripts/ci-free-disk.sh || true",
+   "reason": "Best-effort disk reclamation between the two attempts of the sq-c76x transient-shard self-heal, in case the first attempt was a `No space left` race that left partial extraction behind. Reclaiming zero bytes is a legitimate outcome; the retried shard's own exit code is captured and re-raised (`exit \"$rc\"`) two lines above, so the shard verdict is unaffected.",
+   "registered": "2026-09-02"
+  },
+  {
+   "workflow": "ci.yml",
+   "job_id": "coverage-measure",
+   "match": "python3 scripts/cone_coverage.py",
+   "reason": "The cone coverage REPORT step (`--mode report`), which renders the measured cone into $GITHUB_STEP_SUMMARY. Its own header states it never fails the shard: coverage-gate.py --check-robust, run unswallowed in the preceding step, is the sole coverage gate. A rendering failure must not red a shard whose coverage gate passed.",
+   "registered": "2026-09-02"
+  },
+  {
+   "workflow": "ci.yml",
+   "job_id": "service-federation-conformance",
+   "match": "grep -E 'pass /' served-conformance.log",
+   "reason": "Lifts the one-line pass/fail tally out of the report log into $GITHUB_STEP_SUMMARY, inside a `{ … } >> \"$GITHUB_STEP_SUMMARY\"` group. The verdict is the `cargo run … --bin served-conformance-report` two lines above, which runs under `set -o pipefail` with NO swallow and is the fail-closed emitter; if it produced no report there is no summary line to find, and that failure has already reddened the step. Only the cosmetic summary line is tolerated missing.",
+   "registered": "2026-09-02"
+  },
+  {
+   "workflow": "feature-matrix.yml",
+   "job_id": "premerge-c1",
+   "match": "git merge --abort || true",
+   "reason": "Cleanup on the `else` branch of the premerge merge probe. The non-zero merge exit is NOT swallowed — it is the signal, recorded as `merged=false` in $GITHUB_OUTPUT on the line above and branched on downstream. Aborting the merge only restores the working tree.",
+   "registered": "2026-09-02"
+  },
+  {
+   "workflow": "formal-verification.yml",
+   "job_id": "kani",
+   "match": "pkill -9 -x cbmc 2>/dev/null || true",
+   "reason": "The anti-OOM invariant between Kani harnesses: reap any orphaned cbmc solver before the next harness starts. pkill exits 1 when there is nothing to reap, which is the expected and desired state. The harness verdict is captured separately on the line above (`&& ec=0 || ec=$?`) and acted on.",
+   "registered": "2026-09-02"
+  },
+  {
+   "workflow": "formal-verification.yml",
+   "job_id": "kani",
+   "match": "tail -n 40 \"$log\" 2>/dev/null || true",
+   "reason": "Renders the last 40 lines of a FAILED harness's log into a `<details>` block in the step summary — it sits inside `if [ \"$ec\" -ne 0 ]`, i.e. on a path where the failure has ALREADY been recorded (`had_fail=1` plus an `::error title=Kani proof failed::` annotation on the lines above). The harness verdict is `ec`, captured unswallowed and acted on; a truncated or missing log tail degrades the report, not the verdict.",
+   "registered": "2026-09-02"
+  },
+  {
+   "workflow": "miri.yml",
+   "job_id": "miri",
+   "match": "cargo +nightly-2026-06-11 miri nextest run",
+   "reason": "Deliberate, documented verdict RECLASSIFICATION, not a swallow. `cargo miri nextest` exits 100 both when a heavy loader test TIMED OUT (known cost debt, sq-0s15k) and when Miri found genuine UB, and the raw code cannot tell them apart — so the lane concluded `failure` every night on tracked debt and masked whether Miri found anything. The run emits a libtest-json-plus event stream to a file, and the NEXT step ('Classify shard verdict') parses it and exits 1 on a real UB/assertion failure. That classifier step is the shard verdict and carries no swallow.",
+   "registered": "2026-09-02"
+  },
+  {
+   "workflow": "miri.yml",
+   "job_id": "miri",
+   "match": "cat \"miri-shard-${{ matrix.shard }}.stderr\"",
+   "reason": "Echoes the shard's captured stderr into the log so a human reading the run can see what Miri printed. It is the FIRST line of the 'Classify shard verdict' step; the verdict is `python3 scripts/miri_classify_verdict.py --events …` on the very next line, unswallowed, and that exit code IS the shard verdict. A missing .stderr file (e.g. the shard aborted before writing it) must not pre-empt the classifier's own, more precise diagnosis.",
+   "registered": "2026-09-02"
+  },
+  {
+   "workflow": "pages.yml",
+   "job_id": "build",
+   "match": "grep -E '^dev/bench' || true",
+   "reason": "Feeds the glob-fold assertion's `while read` loop from `git ls-tree -d origin/benchmark-data dev/ | grep -E '^dev/bench'` via process substitution. grep exits 1 when the branch carries no dev/bench* subtree — an empty worklist, which the loop already handles by asserting nothing. Bash does not propagate a process-substitution exit status to the `done <` redirection anyway, so this `|| true` is belt-and-braces under `set -euo pipefail`. STATED BOUND: it does make a grep MALFUNCTION look like an empty branch; the overlay itself (`git archive … | tar -x`) and the `[ \"$missing\" -eq 0 ] || exit 1` verdict below are both unswallowed, so a dropped worklist weakens this assertion's coverage without ever turning a real regression green.",
+   "registered": "2026-09-02"
+  },
+  {
+   "workflow": "publish.yml",
+   "job_id": "npm",
+   "match": "npm view \"@sparq-org/sparq@${ver}\" dist.attestations",
+   "reason": "Probe, not an assertion. It asks the registry whether the just-published version carries a provenance attestation; a package published WITHOUT provenance makes `npm view` exit non-zero, which is exactly the case the following lines must inspect rather than crash on under `set -euo pipefail`. The verdict is the emptiness test on $att, which fails the job unswallowed.",
+   "registered": "2026-09-02"
+  },
+  {
+   "workflow": "publish.yml",
+   "job_id": "npm-eyereasoner-compat",
+   "match": "npm view \"@sparq-org/eyereasoner-compat@${ver}\" dist.attestations",
+   "reason": "Same provenance-attestation probe as publish.yml:npm, for the eyereasoner-compat package. The `|| true` keeps a missing-attestation registry response from aborting under `set -euo pipefail` before the explicit emptiness check can report it.",
+   "registered": "2026-09-02"
+  },
+  {
+   "workflow": "publish.yml",
+   "job_id": "npm-solid-server",
+   "match": "npm view \"@sparq-org/solid-server@${ver}\" dist.attestations",
+   "reason": "Same provenance-attestation probe as publish.yml:npm, for the solid-server package. The `|| true` keeps a missing-attestation registry response from aborting under `set -euo pipefail` before the explicit emptiness check can report it.",
+   "registered": "2026-09-02"
+  },
+  {
+   "workflow": "publish.yml",
+   "job_id": "crates",
+   "match": "echo \"Packaged crates:\"; ls -l crate-pkgs/ || true",
+   "reason": "Prints what the per-crate `cargo package` loop staged. The assertion is the very next statement — `if [ -z \"$(ls -A crate-pkgs/ 2>/dev/null)\" ]; then echo '::error::no .crate artifacts produced'; exit 1; fi` — which is unswallowed and covers the exact case (`crate-pkgs/` empty or absent) that would make this `ls -l` non-zero. Listing the directory twice must not be able to red the job before that check runs.",
+   "registered": "2026-09-02"
+  },
+  {
+   "workflow": "release.yml",
+   "job_id": "gui-bundle",
+   "match": "ls -la target/release >&2 || true",
+   "reason": "Diagnostics on an ALREADY-FAILING path: it sits inside `if [[ -z \"$binary\" ]]`, between the `ERROR: no release binary found under target/release` message and an unconditional `exit 1` on the next line. The step fails either way; the listing only tells the reader what WAS in target/release, and must not mask the exit 1 by failing first when the directory does not exist at all.",
+   "registered": "2026-09-02"
+  },
+  {
+   "workflow": "release.yml",
+   "job_id": "gui-bundle",
+   "match": "find \"$BUNDLE_DIR\" -maxdepth 2 -type f 2>/dev/null || true",
+   "reason": "Same shape as the `ls -la target/release` waiver in this job: it is inside `if [ \"$found\" -eq 0 ]`, after `ERROR: tauri build produced no installer bundles under $BUNDLE_DIR` and immediately before an unconditional `exit 1`. The verdict is `found`, computed unswallowed by the staging loop above. A missing $BUNDLE_DIR is the very condition being reported, so `find` failing there is expected and must not short-circuit the explicit exit 1.",
+   "registered": "2026-09-02"
+  },
+  {
+   "workflow": "slsa-builder-pin-review.yml",
+   "job_id": "review",
+   "match": "grep -hoE '^[[:space:]]*uses:[[:space:]]*slsa-framework/slsa-github-generator/",
+   "reason": "Harvests the pinned trusted-builder refs out of release.yml + dist.yml into `refs=$(…)` under `set -euo pipefail`. ZERO matches is precisely the failure this step exists to catch, and it is caught EXPLICITLY two lines below: `count` is compared against 1 and anything other than exactly one distinct ref exits 1. Without the `|| true` a zero-match grep would abort the step under errexit before that count check could emit its specific `expected exactly ONE distinct pinned ref … found 0` diagnostic.",
+   "registered": "2026-09-02"
+  },
+  {
+   "workflow": "ci.yml",
+   "job_id": "lint",
+   "match": "rustfmt (informational): continue-on-error: true",
+   "reason": "The repository has not had a workspace-wide reformat, so rustfmt is explicitly informational while clippy in the same job remains the blocking lint verdict. The toolchain pins rustfmt for reproducibility; issue #2360 tracks the separate reformat needed before this step can become fatal.",
+   "registered": "2026-09-04"
+  },
+  {
+   "workflow": "fuzz.yml",
+   "job_id": "file-demoted-fuzz-finding",
+   "match": "Download the fuzz run log: continue-on-error: true",
+   "reason": "The producer can fail before uploading a log. This step only fetches optional diagnostics for an issue that the job still files with an explicit missing-log message; absence of that diagnostic artifact does not erase the fuzz finding.",
+   "registered": "2026-09-04"
+  },
+  {
+   "workflow": "vectorized-feature-off.yml",
+   "job_id": "artifact-exact-equality",
+   "match": "Derive the feature-OFF declaration (advisory — leg 2's result is unchanged): continue-on-error: true",
+   "reason": "This derivation runs only after the blocking equality comparison has already failed. It may propose a reviewed declaration but cannot change leg 2's result, so tolerating its normal refusal avoids adding a second verdict while leaving the original failure intact.",
+   "registered": "2026-09-04"
+  },
+  {
+   "workflow": "triage-issue.yml",
+   "job_id": "triage",
+   "match": "gh issue edit \"$NUM\" -R \"$REPO\" --add-label trust:untrusted",
+   "reason": "Quarantine labelling for an untrusted author. Both labels are on ONE call, so this cannot half-apply the way the #4211 defect did; the quarantine's load-bearing half is that untrusted content is not acted on, which is enforced by the `if:` conditions on the downstream steps, not by this label write. Tolerated so a forge hiccup on a cosmetic label cannot red the triage lane. NB the ROUTING label write in the same job deliberately carries NO swallow (see the [OPUS-5] fail-closed comment block above it).",
+   "registered": "2026-09-02"
+  },
+  {
+   "workflow": "triage-issue.yml",
+   "job_id": "triage",
+   "match": "so the approval no longer applies",
+   "reason": "Best-effort courtesy comment explaining a re-quarantine after a revision-bound approval lapsed. It is a notification; the re-quarantine itself is the label write, and a failed comment must not red the lane.",
+   "registered": "2026-09-02"
+  },
+  {
+   "workflow": "triage-issue.yml",
+   "job_id": "triage",
+   "match": "so it is **quarantined**",
+   "reason": "Best-effort courtesy comment explaining first-time quarantine to a non-collaborator. It is a notification; the quarantine itself is the label write plus the downstream `if:` conditions, and a failed comment must not red the lane.",
+   "registered": "2026-09-02"
+  },
+  {
+   "workflow": "triage-issue.yml",
+   "job_id": "triage",
+   "match": "gh label create \"$1\" -R \"$REPO\"",
+   "reason": "This `|| true` is what makes the label create IDEMPOTENT: `gh label create` exits non-zero when the label already exists, which is the common case. It is the fix from the #4211 review, not the bug — the ensure-then-write ordering exists so the single all-or-nothing `gh issue edit` that follows cannot fail on a missing label. The function already refuses any name outside the closed role:/status:/needs: set.",
+   "registered": "2026-09-02"
+  },
+  {
+   "workflow": "bead-autoclose.yml",
+   "job_id": "close-merged-beads",
+   "match": "git log -1 --format=%s",
+   "reason": "Defensive fallback for deriving the merged change's subject when the pull-request title is already available as the primary input. A missing commit or subject produces an empty optional fallback; ci-close-merged-beads.py still receives the primary title and owns the close decision.",
+   "registered": "2026-09-04"
+  },
+  {
+   "workflow": "ci.yml",
+   "job_id": "heavy-recall-demoted-filer",
+   "match": "test(\"test \\\\(load-aware shard heavy-\"",
+   "reason": "The API query searches for a failed heavy recall shard. No matching job is a data outcome handled immediately by the empty-value branch, which records file=false; the producing shard's verdict is unaffected.",
+   "registered": "2026-09-04"
+  },
+  {
+   "workflow": "ci.yml",
+   "job_id": "coverage-demoted-filer",
+   "match": "test(\"^coverage (ratchet \\\\(shard |engine )\"",
+   "reason": "The API query searches for a failed demoted coverage leg. No matching job is a data outcome handled immediately by the empty-value branch, which records file=false; the coverage leg's verdict is unaffected.",
+   "registered": "2026-09-04"
+  },
+  {
+   "workflow": "flow-on-gates.yml",
+   "job_id": "quick-gates",
+   "match": "resolve-merge-group-pr.py",
+   "reason": "Best-effort primary resolution of the pull-request number from a merge-group ref. An empty result triggers the API fallback and then a loud fail-closed path where G2/G6 run unsuppressed.",
+   "registered": "2026-09-04"
+  },
+  {
+   "workflow": "flow-on-gates.yml",
+   "job_id": "quick-gates",
+   "match": "commits/${MERGE_HEAD_SHA}/pulls",
+   "reason": "Best-effort secondary pull-request lookup after deterministic merge-ref parsing returned empty. An empty or failed lookup reaches the loud fail-closed path where G2/G6 run unsuppressed.",
+   "registered": "2026-09-04"
+  },
+  {
+   "workflow": "slsa-builder-pin-review.yml",
+   "job_id": "review",
+   "match": "printf '%s' \"$refs\" | grep -c .",
+   "reason": "grep -c exits non-zero when the harvested reference list is empty. Zero is data consumed by the following exact-count assertion, which emits an error and exits 1 unless the count is exactly one.",
+   "registered": "2026-09-04"
+  },
+  {
+   "workflow": "vectors-aarch64.yml",
+   "job_id": "neon",
+   "match": "grep -c 'simd::tests::'",
+   "reason": "grep -c exits non-zero when no matching test is compiled. The zero count is the input to the immediately following fail-closed assertion, which emits an error and exits 1 when listed is less than one.",
+   "registered": "2026-09-04"
+  }
+ ]
+}
