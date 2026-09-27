@@ -144,6 +144,256 @@ class G1Test(unittest.TestCase):
 
 
 # --------------------------------------------------------------------------- #
+# G1-npm — new-package-completeness (#5742)
+# --------------------------------------------------------------------------- #
+class G1NpmTest(unittest.TestCase):
+    """[OPUS-5] (#5742) The npm half of G1: a new `packages/<x>/package.json`
+    must ship a README, plus tests and a CI leg unless it is `"private": true`."""
+
+    def test_new_public_package_with_nothing_else_fails(self):
+        changed, added = g1.parse_status_lines(
+            _statused(["packages/sparq-foo/package.json"])
+        )
+        violations = g1.evaluate_packages(
+            changed,
+            added,
+            private_overrides={"sparq-foo": False},
+            ci_overrides={"sparq-foo": False},
+        )
+        self.assertEqual(len(violations), 1)
+        pkg, missing = violations[0]
+        self.assertEqual(pkg, "sparq-foo")
+        # All three artifacts are missing: README, tests, CI leg.
+        self.assertEqual(len(missing), 3)
+        joined = " ".join(missing)
+        self.assertIn("README", joined)
+        self.assertIn("test", joined)
+        self.assertIn("CI leg", joined)
+
+    def test_new_public_package_with_readme_and_tests_passes(self):
+        changed, added = g1.parse_status_lines(
+            _statused(
+                [
+                    "packages/sparq-foo/package.json",
+                    "packages/sparq-foo/README.md",
+                    "packages/sparq-foo/test/index.test.ts",
+                ]
+            )
+        )
+        self.assertEqual(
+            g1.evaluate_packages(
+                changed,
+                added,
+                private_overrides={"sparq-foo": False},
+                ci_overrides={"sparq-foo": True},
+            ),
+            [],
+        )
+
+    def test_public_package_missing_only_tests_fails(self):
+        changed, added = g1.parse_status_lines(
+            _statused(
+                ["packages/sparq-foo/package.json", "packages/sparq-foo/README.md"]
+            )
+        )
+        violations = g1.evaluate_packages(
+            changed,
+            added,
+            private_overrides={"sparq-foo": False},
+            ci_overrides={"sparq-foo": True},
+        )
+        self.assertEqual(len(violations), 1)
+        _, missing = violations[0]
+        self.assertEqual(len(missing), 1)
+        self.assertIn("test", missing[0])
+
+    def test_public_package_missing_only_a_ci_leg_fails(self):
+        # README + tests present, but no workflow names the package: its tests
+        # would never run, which is the hole #5742 is about.
+        changed, added = g1.parse_status_lines(
+            _statused(
+                [
+                    "packages/sparq-foo/package.json",
+                    "packages/sparq-foo/README.md",
+                    "packages/sparq-foo/test/index.test.mjs",
+                ]
+            )
+        )
+        violations = g1.evaluate_packages(
+            changed,
+            added,
+            private_overrides={"sparq-foo": False},
+            ci_overrides={"sparq-foo": False},
+        )
+        self.assertEqual(len(violations), 1)
+        _, missing = violations[0]
+        self.assertEqual(len(missing), 1)
+        self.assertIn("CI leg", missing[0])
+
+    def test_private_package_needs_only_readme(self):
+        # `"private": true` → the test requirement is waived; README still required.
+        changed, added = g1.parse_status_lines(
+            _statused(
+                ["packages/sparq-foo/package.json", "packages/sparq-foo/README.md"]
+            )
+        )
+        self.assertEqual(
+            g1.evaluate_packages(
+                changed,
+                added,
+                private_overrides={"sparq-foo": True},
+                ci_overrides={"sparq-foo": False},
+            ),
+            [],
+        )
+
+    def test_private_package_missing_readme_still_fails(self):
+        changed, added = g1.parse_status_lines(
+            _statused(["packages/sparq-foo/package.json"])
+        )
+        violations = g1.evaluate_packages(
+            changed, added, private_overrides={"sparq-foo": True}
+        )
+        self.assertEqual(len(violations), 1)
+        _, missing = violations[0]
+        self.assertEqual(len(missing), 1)
+        self.assertIn("README", missing[0])
+
+    def test_source_file_is_not_mistaken_for_a_test(self):
+        # A src file must NOT satisfy (e) — otherwise the gate is vacuous.
+        changed, added = g1.parse_status_lines(
+            _statused(
+                [
+                    "packages/sparq-foo/package.json",
+                    "packages/sparq-foo/README.md",
+                    "packages/sparq-foo/src/index.ts",
+                ]
+            )
+        )
+        self.assertFalse(g1.package_has_tests("sparq-foo", changed))
+        self.assertEqual(
+            len(
+                g1.evaluate_packages(
+                    changed,
+                    added,
+                    private_overrides={"sparq-foo": False},
+                    ci_overrides={"sparq-foo": True},
+                )
+            ),
+            1,
+        )
+
+    def test_another_packages_tests_do_not_count(self):
+        # The test must live under THIS package, not a sibling.
+        changed, added = g1.parse_status_lines(
+            _statused(
+                [
+                    "packages/sparq-foo/package.json",
+                    "packages/sparq-foo/README.md",
+                    "packages/sparq-bar/test/index.test.ts",
+                ]
+            )
+        )
+        self.assertFalse(g1.package_has_tests("sparq-foo", changed))
+
+    def test_test_filename_conventions_are_recognised(self):
+        for path in (
+            "packages/sparq-foo/test/a.js",
+            "packages/sparq-foo/tests/a.mjs",
+            "packages/sparq-foo/__tests__/a.tsx",
+            "packages/sparq-foo/src/a.test.ts",
+            "packages/sparq-foo/src/a.spec.js",
+        ):
+            with self.subTest(path=path):
+                self.assertTrue(g1.package_has_tests("sparq-foo", [path]))
+
+    def test_changed_not_added_package_json_does_not_trigger(self):
+        changed, added = g1.parse_status_lines(
+            _statused([], ["packages/sparq-client/package.json"])
+        )
+        self.assertEqual(g1.added_packages(added), [])
+        self.assertEqual(g1.evaluate_packages(changed, added), [])
+
+    def test_nested_package_json_does_not_trigger(self):
+        # Only the package ROOT manifest marks a new package — a nested
+        # package.json (a fixture, a browser sub-bundle) must not.
+        _, added = g1.parse_status_lines(
+            _statused(["packages/sparq-client/browser/package.json"])
+        )
+        self.assertEqual(g1.added_packages(added), [])
+
+    def test_private_predicate_reads_the_real_manifests(self):
+        # The shared "public npm package" definition, against real on-disk
+        # manifests: the repo has one of each today.
+        self.assertTrue(g1.package_is_private("sparq-client"))
+        self.assertFalse(g1.package_is_private("solid-server"))
+        # A package that does not exist is NOT private (strict default).
+        self.assertFalse(g1.package_is_private("no-such-package"))
+
+    def test_ci_leg_predicate_reads_the_real_workflows(self):
+        # Every package on main is named by a workflow; an invented one is not.
+        for pkg in ("eyereasoner-compat", "solid-server", "sparq-client"):
+            with self.subTest(pkg=pkg):
+                self.assertTrue(g1.package_has_ci_leg(pkg))
+        self.assertFalse(g1.package_has_ci_leg("no-such-package"))
+
+    def test_the_back_catalogue_would_pass_this_gate(self):
+        # [OPUS-5] (#5742) G1-npm must codify the standard the repo already
+        # holds, not invent one: replay each existing package as if its whole
+        # tree were being added today, and assert the gate is silent. Walks the
+        # worktree (no git, no subprocess); node_modules/ is excluded so a local
+        # `npm install` cannot supply a test file the repo does not own.
+        pkgs = sorted(
+            d.name for d in (REPO_ROOT / "packages").iterdir() if d.is_dir()
+        )
+        self.assertTrue(pkgs, "no packages/* to replay")
+        for pkg in pkgs:
+            with self.subTest(pkg=pkg):
+                root = REPO_ROOT / "packages" / pkg
+                files = [
+                    str(f.relative_to(REPO_ROOT))
+                    for f in root.rglob("*")
+                    if f.is_file() and "node_modules" not in f.parts
+                ]
+                changed, added = g1.parse_status_lines(_statused(files))
+                self.assertEqual(g1.evaluate_packages(changed, added), [])
+
+    def test_main_fails_on_a_new_bare_package(self):
+        with tempfile.TemporaryDirectory() as td:
+            fixture = _write(
+                Path(td), "diff.txt", _statused(["packages/sparq-foo/package.json"])
+            )
+            self.assertEqual(main_rc(["--changed-files", fixture]), 1)
+
+    def test_main_passes_on_a_complete_new_package(self):
+        # main() consults the real workflow tree for (f), so this smoke test uses
+        # a package that a workflow already names (js.yml) — the invented
+        # sparq-foo above is what a package with no CI relationship looks like.
+        with tempfile.TemporaryDirectory() as td:
+            fixture = _write(
+                Path(td),
+                "diff.txt",
+                _statused(
+                    [
+                        "packages/eyereasoner-compat/package.json",
+                        "packages/eyereasoner-compat/README.md",
+                        "packages/eyereasoner-compat/test/api.test.mjs",
+                    ]
+                ),
+            )
+            self.assertEqual(main_rc(["--changed-files", fixture]), 0)
+
+
+def main_rc(argv: list[str]) -> int:
+    """Run gate-new-crate.py's main() with stdout muted, returning its exit code."""
+    import contextlib
+    import io
+
+    with contextlib.redirect_stdout(io.StringIO()):
+        return g1.main(argv)
+
+
+# --------------------------------------------------------------------------- #
 # G2 — public-api → skill
 # --------------------------------------------------------------------------- #
 class G2Test(unittest.TestCase):
