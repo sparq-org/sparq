@@ -25,15 +25,27 @@
 //!    `rdf:` / `rdfs:` / `xsd:` / `owl:` namespaces (owlrl's built-in datatype and
 //!    annotation-property typings plus the `owl:Thing`/`owl:Nothing` scaffolding,
 //!    ~100 triples emitted even for an empty input under
-//!    `axiomatic_triples=False`). Dropped from both sides. COROLLARY: the corpus
-//!    must not place user data at W3C-vocabulary subjects — a real divergence
-//!    there would be masked (see `bench/reason-diff/rl/capture.py`).
+//!    `axiomatic_triples=False`). Dropped from both sides.
 //!
 //! Everything else — including entailments ABOUT user terms via W3C-vocabulary
 //! predicates/objects (e.g. `ex:C rdfs:subClassOf ex:D`) — is compared verbatim.
 //!
 //! # Corpus constraints (enforced fail-loud, not silently worked around)
 //!
+//! * **No user data at a W3C-vocabulary subject.** Rule 2 is a blanket
+//!   subject-position drop, so anything a CASE puts there is invisible to the
+//!   differ and a real RL divergence at that subject would be silently masked.
+//!   ENFORCED as of sq-ovl6f (it was a comment-only convention before):
+//!   [`lint_corpus_document`] rejects an authored `.nt` that ASSERTS one, and
+//!   [`sparq_rl_closure_lines`] rejects sparq's CLOSURE containing one — which is
+//!   the strictly stronger check, because a case can assert no vocabulary subject
+//!   and still ENTAIL onto one (`ex:a owl:sameAs owl:Thing` asserts none, yet
+//!   eq-rep rewrites every `ex:a` triple onto `owl:Thing`).
+//!   KNOWN RESIDUAL: the check cannot be run on the ORACLE side, whose
+//!   vocabulary-subject block is legitimately ~100 triples with no pinned
+//!   empty-graph baseline to subtract, so an ORACLE-only entailment at a
+//!   vocabulary subject stays masked (owlrl's `owl:Nothing rdfs:subClassOf <user
+//!   class>` is one such, present in the corpus today).
 //! * **No blank nodes.** Canonical multiset comparison across two tool stacks has
 //!   no stable bnode labels; [`canonical_lines`] errors on any bnode rather than
 //!   guessing an alignment. RDF lists / restrictions in the corpus use NAMED nodes.
@@ -102,6 +114,42 @@ fn is_reflexive_same_as(line: &str) -> bool {
         return false;
     };
     p == SAME_AS && rest.strip_suffix(" .") == Some(s)
+}
+
+/// Fail-loud enforcement of the module docs' **no user data at a W3C-vocabulary
+/// subject** corpus constraint over one side's canonical lines. `what` names the
+/// artifact so the report says what to go and fix.
+fn deny_w3c_vocab_subjects(what: &str, lines: &[String]) -> Result<(), String> {
+    let offenders: Vec<&String> = lines.iter().filter(|l| is_w3c_vocab_subject(l)).collect();
+    if offenders.is_empty() {
+        return Ok(());
+    }
+    let mut msg = format!(
+        "{what}: {} triple(s) at a W3C-vocabulary SUBJECT. `normalize` drops every \
+         such line from BOTH sides (that is where owlrl's vocabulary self-description \
+         block lives), so a corpus case may not put its own data there — asserted or \
+         entailed — because a real RL divergence at that subject would be MASKED \
+         instead of failing:\n",
+        offenders.len()
+    );
+    for l in offenders {
+        msg.push_str("  ");
+        msg.push_str(l);
+        msg.push('\n');
+    }
+    Err(msg)
+}
+
+/// Corpus lint: enforces the W3C-vocabulary-subject constraint on one corpus `.nt`
+/// document AS AUTHORED — the check a future corpus edit must survive, reported
+/// against the file the editor actually touched.
+///
+/// This is the WEAKER half of the invariant on purpose: it sees only what the
+/// document asserts. [`sparq_rl_closure_lines`] applies the same check to sparq's
+/// closure and so also covers the entailed channel (see the module docs).
+pub fn lint_corpus_document(nt_text: &str) -> Result<(), String> {
+    let (dict, triples) = Graph::parse_to_triples(nt_text, "ntriples")?;
+    deny_w3c_vocab_subjects("corpus document", &canonical_lines(&dict, &triples)?)
 }
 
 /// A loaded golden vector: the pinned capture-tool header plus the RAW (pre-
@@ -250,10 +298,17 @@ pub fn diff_multisets(golden: &[String], ours: &[String]) -> (Vec<String>, Vec<S
 /// Parses one corpus `.nt` document, materializes sparq-reason's OWL 2 RL closure
 /// via the PUBLIC `materialize` entry point, and returns the normalized canonical
 /// line multiset.
+///
+/// Enforces the W3C-vocabulary-subject constraint on the RAW closure BEFORE
+/// normalizing it away: everything sparq derives here is the case's own data, so
+/// any of it landing at a vocabulary subject is a masked comparison, not owlrl's
+/// system block.
 pub fn sparq_rl_closure_lines(nt_text: &str) -> Result<Vec<String>, String> {
     let (mut dict, mut triples) = Graph::parse_to_triples(nt_text, "ntriples")?;
     sparq_reason::materialize(sparq_reason::Profile::OwlRl, &mut dict, &mut triples);
-    Ok(normalize(&canonical_lines(&dict, &triples)?))
+    let raw = canonical_lines(&dict, &triples)?;
+    deny_w3c_vocab_subjects("sparq's RL closure of this case", &raw)?;
+    Ok(normalize(&raw))
 }
 
 /// One case's differential outcome (pre-judgment): the observed normalized
@@ -374,6 +429,44 @@ mod tests {
             "<http://www.w3.org/2002/07/owl#Thing> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/2002/07/owl#Class> .",
         ]);
         assert_eq!(normalize(&input), v(&[&input[0], &input[1]]));
+    }
+
+    // [OPUS-5] sq-ovl6f — the W3C-vocab-subject constraint is ENFORCED, not merely
+    // documented: what `normalize` drops, the corpus may not produce.
+    #[test]
+    fn corpus_lint_rejects_data_asserted_at_a_w3c_vocab_subject() {
+        // Vocabulary terms in PREDICATE/OBJECT position are fine — only the subject
+        // position is dropped.
+        let clean =
+            "<http://ex.org/Dog> <http://www.w3.org/2000/01/rdf-schema#subClassOf> <http://ex.org/Animal> .\n";
+        assert!(lint_corpus_document(clean).is_ok());
+        assert!(sparq_rl_closure_lines(clean).is_ok());
+
+        let asserted =
+            "<http://www.w3.org/2002/07/owl#Thing> <http://ex.org/p> <http://ex.org/o> .\n";
+        let err = lint_corpus_document(asserted).unwrap_err();
+        assert!(err.contains("W3C-vocabulary SUBJECT"), "got: {err}");
+        assert!(err.contains("<http://www.w3.org/2002/07/owl#Thing>"), "got: {err}");
+        // The closure check subsumes the document check (the closure contains the
+        // asserted triple), so this case fails on either path.
+        assert!(sparq_rl_closure_lines(asserted).is_err());
+    }
+
+    // [OPUS-5] sq-ovl6f — the ENTAILED channel, which an input-only lint cannot see.
+    #[test]
+    fn closure_lint_catches_masking_the_document_lint_cannot() {
+        // Asserts nothing at a vocabulary subject, so the document lint passes; eq-rep
+        // then rewrites `ex:a`'s triples onto `owl:Thing`, where `normalize` would
+        // silently drop them from both sides.
+        let nt = "<http://ex.org/a> <http://www.w3.org/2002/07/owl#sameAs> <http://www.w3.org/2002/07/owl#Thing> .\n\
+                  <http://ex.org/a> <http://ex.org/p> <http://ex.org/o> .\n";
+        assert!(lint_corpus_document(nt).is_ok());
+        let masked = "<http://www.w3.org/2002/07/owl#Thing> <http://ex.org/p> <http://ex.org/o> .";
+        let err = sparq_rl_closure_lines(nt).unwrap_err();
+        assert!(
+            err.contains(masked),
+            "the masked entailment must be named in the report:\n{err}"
+        );
     }
 
     #[test]
