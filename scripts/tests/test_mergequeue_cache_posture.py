@@ -35,6 +35,29 @@
 #      shards download — so the shards keep receiving the same byte-identical
 #      archive, and the nextest test set is unchanged.
 #
+#   3. CACHE-KEY HYGIENE (#5214). Every `Swatinem/rust-cache` step in ci.yml must
+#      declare a `shared-key`. The action's two key inputs are NOT interchangeable:
+#      `shared-key` REPLACES the key rust-cache otherwise derives from the JOB ID,
+#      whereas `key` is an ADDITIONAL component that leaves the job-derived one in
+#      place. So a step declaring neither — and equally a step declaring only
+#      `key` — still takes its own job-scoped entry of the repo's shared 10 GB
+#      Actions-cache budget: sixteen of ci.yml's twenty steps named nothing and two
+#      more named only `key`, one entry per job for what is largely the same dep
+#      closure off one Cargo.lock, and budget pressure is the LRU-eviction mechanism
+#      sq-3sbrr (#1395) identified as what makes a warm cache restore cold. A
+#      job-derived key is also rename-fragile (renaming a job silently orphans its
+#      entry) and unaddressable from any other job — which is why the `key`-only
+#      form is rejected here BY NAME rather than accepted as "named": it is exactly
+#      how `coverage-engine-merge` came to point at `coverage-engine-run-1` and
+#      restore nothing. Same failure mode as items 1-2 — invisible when absent,
+#      nothing goes red, CI just gets slower. So this pins the property, the one
+#      cross-job reuse that depends on it (the coverage-engine run/merge pair), and
+#      the one COLLAPSE it enabled:
+#      `conformance-suite`, whose membership is exactly the six same-shaped
+#      conformance/oracle jobs, each of which runs the same release-fast
+#      `sparq-conformance-scoreboard` build (the coincidence the shared key rests
+#      on, asserted here rather than assumed).
+#
 # Deliberately NOT asserted: sccache. Bead item 3 (an sccache/GHA-backend A/B on
 # build-archive) is measure-first with a >=60 s median-win adoption bar, and no such
 # measurement has been taken — so nothing about sccache is wired, claimed, or pinned
@@ -59,6 +82,34 @@ SAVE_IF_KEY = "save-if:"
 # stop main from ever seeding a cache, so every job would restore nothing forever.
 # The value is pinned exactly for that reason.
 SAVE_IF_VALUE = "${{ github.ref == 'refs/heads/main' }}"
+
+# [OPUS-5] #5214 — the one cache key ci.yml's six same-shaped conformance/oracle jobs
+# share, and that group's exact membership. The canonical rationale (and the honest
+# residual) lives on the `geo-conformance` rust-cache step in ci.yml.
+CONFORMANCE_SUITE_KEY = "conformance-suite"
+CONFORMANCE_SUITE_JOBS = {
+    "geo-conformance",
+    "solid-conformance",
+    "odrl-conformance",
+    "text-oracle",
+    "rsp-oracle",
+    "jsonld-conformance",
+}
+# The build every member runs VERBATIM — the reason their dep closures coincide
+# enough to share one entry. Matched on the two load-bearing fragments of the ONE
+# command line, so incidental whitespace does not red the suite but a job that keeps
+# only half of it (a dev-profile scoreboard run, say) does not satisfy the premise.
+SCOREBOARD_BUILD = re.compile(
+    r"--profile release-fast.*--bin sparq-conformance-scoreboard"
+)
+
+# [OPUS-5] #5214 — the cross-job reuse the `shared-key` semantics are load-bearing for:
+# the merge job recompiles the instrumented objects the run partitions' .profraw are
+# merged against, and warms that compile off partition 1's dep cache. Only `shared-key`
+# makes the two jobs address ONE entry.
+COVERAGE_ENGINE_RUN_JOB = "coverage-engine-run"
+COVERAGE_ENGINE_MERGE_JOB = "coverage-engine-merge"
+COVERAGE_ENGINE_PART_EXPR = "${{ matrix.part }}"
 
 NEXTEST_ARCHIVE_ARTIFACT = "nextest-archive"
 UPLOAD_ARTIFACT = "actions/upload-artifact@"
@@ -140,6 +191,31 @@ def with_value(body: list[str], key: str) -> str | None:
         if stripped.startswith(key):
             return stripped[len(key) :].strip()
     return None
+
+
+def enclosing_job(lines: list[str], idx: int) -> str:
+    """The id of the job whose block contains `lines[idx]` (`  <job-id>:`)."""
+    for i in range(idx, -1, -1):
+        m = re.match(r"^  ([A-Za-z0-9_-]+):\s*$", lines[i])
+        if m:
+            return m.group(1)
+    raise AssertionError(f"no enclosing job for line {idx + 1}")
+
+
+def job_body(lines: list[str], job_id: str) -> list[str]:
+    """Every line of the `  <job-id>:` block, up to the next job."""
+    start = next(
+        (i for i, l in enumerate(lines) if re.match(rf"^  {re.escape(job_id)}:\s*$", l)),
+        None,
+    )
+    if start is None:
+        raise AssertionError(f"ci.yml has no job `{job_id}`")
+    end = len(lines)
+    for i in range(start + 1, len(lines)):
+        if re.match(r"^  [A-Za-z0-9_-]+:\s*$", lines[i]):
+            end = i
+            break
+    return lines[start:end]
 
 
 def merge_group_workflows_with_rust_cache() -> list[Path]:
@@ -224,6 +300,130 @@ class TestCacheSaveDiscipline(unittest.TestCase):
                     f"{wf.name}:{idx + 1}: rust-cache `lookup-only` would disable RESTORE; "
                     "sq-6vshe.15 restricts SAVING only.",
                 )
+
+
+class TestCacheKeyHygiene(unittest.TestCase):
+    """#5214 — no anonymous cache entries, and one honest collapse (item 3)."""
+
+    def _keys_by_step(self) -> list[tuple[str, str | None, str | None]]:
+        # (job, shared-key, key) — the two inputs are modelled SEPARATELY because
+        # rust-cache treats them differently: `shared-key` replaces the job-derived
+        # key, `key` is merely appended alongside it. Collapsing them with an `or`
+        # would score a `key`-only step as job-id-independent when it is not.
+        #
+        # A LIST, not a dict: a job with two rust-cache steps must not have one of
+        # them silently overwrite (and hide) the other.
+        lines = _lines(CI_YML)
+        steps = steps_using(lines, RUST_CACHE)
+        self.assertTrue(steps, "no rust-cache steps found in ci.yml — re-point this test")
+        out: list[tuple[str, str | None, str | None]] = []
+        for idx, body in steps:
+            shared = with_value(body, "shared-key:")
+            extra = with_value(body, "key:")
+            out.append(
+                (
+                    enclosing_job(lines, idx),
+                    shared.strip('"') if shared else None,
+                    extra.strip('"') if extra else None,
+                )
+            )
+        return out
+
+    def _shared_key_of(self, job: str) -> str:
+        keys = [s for j, s, _ in self._keys_by_step() if j == job]
+        self.assertEqual(
+            len(keys),
+            1,
+            f"expected exactly one rust-cache step in job `{job}`, found {len(keys)} — "
+            "re-point this test.",
+        )
+        self.assertIsNotNone(keys[0], f"job `{job}` declares no `shared-key`")
+        return keys[0]  # type: ignore[return-value]
+
+    def test_every_rust_cache_step_declares_a_shared_key(self) -> None:
+        anonymous = sorted(j for j, shared, _ in self._keys_by_step() if shared is None)
+        self.assertEqual(
+            anonymous,
+            [],
+            "these ci.yml jobs run rust-cache without a `shared-key`, so each takes its "
+            "OWN entry of the shared 10 GB Actions-cache budget under a key derived from "
+            "the job id — anonymous, rename-fragile, and the budget pressure that "
+            f"LRU-evicts the warm entries (#5214, #1395): {anonymous}",
+        )
+
+    def test_key_alone_does_not_count_as_naming_the_key(self) -> None:
+        # The distinction this whole item rests on, asserted rather than assumed:
+        # rust-cache appends `key` to the job-derived key and only `shared-key`
+        # replaces it. A step carrying `key:` but no `shared-key:` is therefore still
+        # job-scoped — it LOOKS named, and reading it as named is what let
+        # coverage-engine-merge point at `coverage-engine-run-1` and restore nothing.
+        key_only = sorted(
+            f"{j} (key: {extra})"
+            for j, shared, extra in self._keys_by_step()
+            if shared is None and extra is not None
+        )
+        self.assertEqual(
+            key_only,
+            [],
+            "these ci.yml jobs declare rust-cache `key:` but no `shared-key:`. `key` is "
+            "an ADDITIONAL component alongside the job-derived key, not a replacement "
+            "for it, so the entry stays scoped to the job id: unaddressable from any "
+            f"other job and orphaned by a rename. Use `shared-key` (#5214): {key_only}",
+        )
+
+    def test_coverage_engine_merge_reuses_partition_1s_cache(self) -> None:
+        # The one deliberate CROSS-JOB restore in this file, pinned in both directions:
+        # the merge job recompiles the same instrumented objects and names partition 1's
+        # key to warm that compile. That only resolves to one entry while BOTH steps use
+        # `shared-key`; drift in either value silently reverts it to a cold build.
+        run = self._shared_key_of(COVERAGE_ENGINE_RUN_JOB)
+        merge = self._shared_key_of(COVERAGE_ENGINE_MERGE_JOB)
+        self.assertIn(
+            COVERAGE_ENGINE_PART_EXPR,
+            run,
+            f"`{COVERAGE_ENGINE_RUN_JOB}` is a 3-partition matrix and its cache key must "
+            "stay per-part (one entry per partition is what avoids the concurrent-save "
+            f"clobber): expected `{COVERAGE_ENGINE_PART_EXPR}` in {run!r}.",
+        )
+        self.assertEqual(
+            merge,
+            run.replace(COVERAGE_ENGINE_PART_EXPR, "1"),
+            f"`{COVERAGE_ENGINE_MERGE_JOB}` must name exactly the key "
+            f"`{COVERAGE_ENGINE_RUN_JOB}` writes for partition 1 "
+            f"({run.replace(COVERAGE_ENGINE_PART_EXPR, '1')!r}), or it restores nothing "
+            f"and compiles the instrumented objects cold. Got {merge!r}.",
+        )
+
+    def test_conformance_suite_membership_is_exactly_the_six(self) -> None:
+        members = {
+            j for j, shared, _ in self._keys_by_step() if shared == CONFORMANCE_SUITE_KEY
+        }
+        self.assertEqual(
+            members,
+            CONFORMANCE_SUITE_JOBS,
+            f"`{CONFORMANCE_SUITE_KEY}` is sized for the six same-shaped conformance/"
+            "oracle jobs (one pinned-stable host toolchain, no job RUSTFLAGS, a "
+            "dev-profile single-crate test plus the shared release-fast scoreboard "
+            "build). Adding a differently-shaped job makes its closure fight the others "
+            "for one entry; dropping one re-splits the budget. Update the canonical note "
+            "on ci.yml's `geo-conformance` cache step and this set together.",
+        )
+
+    def test_every_suite_member_runs_the_shared_scoreboard_build(self) -> None:
+        # The PREMISE of the shared key, asserted rather than assumed: what makes these
+        # six closures coincide is that each runs the same release-fast
+        # sparq-conformance-scoreboard build. A member that stopped running it would
+        # keep the key while no longer sharing the build it is justified by.
+        lines = _lines(CI_YML)
+        for job in sorted(CONFORMANCE_SUITE_JOBS):
+            body = "\n".join(l for l in job_body(lines, job) if not _is_comment(l))
+            self.assertRegex(
+                body,
+                SCOREBOARD_BUILD,
+                f"job `{job}` carries the `{CONFORMANCE_SUITE_KEY}` cache key but no "
+                "longer runs the shared release-fast sparq-conformance-scoreboard "
+                "build. Either restore the build or give the job its own key.",
+            )
 
 
 class TestNextestArchiveDiet(unittest.TestCase):
