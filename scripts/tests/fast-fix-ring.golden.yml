@@ -1,6 +1,25 @@
 # fast-fix-ring — the FAST-FIX RING, moved OFF the PR-head trust boundary
 # (sparq-org/sparq#3474, HIGH). [OPUS-4.8] 🤖 SPARQ agent.
 #
+# SCOPE — THE TWO-FILE RULE ([OPUS-5] issue #5235, the #2384 shape). This file has a
+# committed GENERATED companion, `scripts/tests/fast-fix-ring.golden.yml`, and
+# `scripts/check-fast-fix-ring-guard.py` pins the two together BYTE-FOR-BYTE over the
+# WHOLE FILE (after semantically-inert trailing-whitespace/newline normalization only).
+# The pin does not parse: comments and blank lines are part of it. So — unlike the
+# feature-matrix fragments, whose rule fires only for a leg-NAME-set change
+# (.github/feature-matrix.d/README.md) — EVERY edit to this workflow, a comment or a
+# blank line included, is a TWO-FILE change. Any bead / issue / PR that touches this
+# file must carry BOTH of these in its permitted file scope:
+#   1. `.github/workflows/fast-fix-ring.yml`    — this file; and
+#   2. `scripts/tests/fast-fix-ring.golden.yml` — the security-load-bearing golden.
+# Scoped to this file ALONE, a task forbids the golden regeneration it simultaneously
+# requires, and a worker that obeys its scope has to decline. Regenerate the golden —
+# never hand-edit it — in the SAME PR as the workflow change:
+#   python3 scripts/check-fast-fix-ring-guard.py --update-golden
+# That is LOCAL ONLY (it refuses to run under CI: the golden bump is the human-review
+# checkpoint for a security-load-bearing file). Deleting this SCOPE block reds the
+# guard's SCOPE-DOC check, so the contract cannot drift out of the file silently.
+#
 # WHY THIS IS ITS OWN `workflow_run` WORKFLOW (the security fix):
 # The ring's only privileged capability is the cross-repo `REGISTRY_RING_TOKEN`
 # doorbell (it dispatches jeswr/agent-account-registry). Previously the ring lived
