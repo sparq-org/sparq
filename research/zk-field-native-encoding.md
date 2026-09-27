@@ -418,13 +418,19 @@ and §8/§11-bead-4 expands the regression guard to the many-to-one datatypes.
 
 The maintainer's own suggestion — *force issuers to issue only canonical-form values* —
 is, per the issuer-desync verdict, **elevated from a documented future option to a NAMED
-PRECONDITION for relying on the value lane in any adversarial-issuer setting.** If an
-issuer is contractually/technically required to emit canonical lexical forms AND
-`VALUE_HOOK = parse(canonical_lexical)`, then for that issuer class INV-VL is restored as
-an issuance invariant, value identity ≡ term identity for hooked datatypes, and the dual
-leaf could collapse back to a value-first single leaf (§7). Until such a conformance
-mechanism exists and is relied upon, **the value-FILTER lane over an adversarial issuer
-is sound only under the explicit honest-issuer-for-value assumption named in §5.2.**
+PRECONDITION for the value lane.** If an issuer *actually* emits canonical lexical forms
+AND `VALUE_HOOK = parse(canonical_lexical)`, then for that issuer class INV-VL holds as
+an issuance invariant, value identity coincides with term identity for the datatypes
+whose value handle is injective over canonical terms (NOT the many-to-one ones, §5.5),
+and the dual leaf could collapse per-datatype toward a value-first leaf (§7). The
+conformance mechanism itself is **designed at proposal grade** in
+`research/zk-canonical-form-issuance.md` (sq-mtv7) — and that design establishes it is
+**issuer self-attestation**: it scopes and attributes the honest-issuer assumption
+(which keys claim the discipline, with attribution/revocation on breach) but supplies
+**no verifier-checkable evidence of same-byte derivation**, so it does NOT make the
+value lane sound against a malicious or compromised issuer. **The value-FILTER lane
+over an adversarial issuer is sound only under the explicit honest-issuer-for-value
+assumption named in §5.2 — both before and after the conformance mechanism exists.**
 
 ## 6. The host-side same-leaf co-binding at ingest (issuer-desync fix)
 
@@ -641,9 +647,10 @@ instantiation) verdicts. Obligation-/negation-framed to pass
    §4/§6 ingest parse + the §4 B1 range-decomposition cost must be `bb gates`-measured
    first.
 6. **Canonical-issuance conformance (§5.6):** is the canonical-issuance conformance
-   mechanism — now a NAMED precondition for relying on the value lane against an
-   adversarial issuer — wanted on the roadmap now (a §11 bead), or accepted as a stated
-   precondition that bounds when the value lane may be relied upon?
+   mechanism — now a NAMED precondition that scopes the value lane's issuer-honesty
+   assumption (issuer self-attestation; it does not bind a malicious issuer, §5.6) —
+   wanted on the roadmap now (a §11 bead), or accepted as a stated precondition that
+   bounds when the value lane may be relied upon?
 
 ## 11. Beads (orchestrator to create — ordered)
 
@@ -681,11 +688,16 @@ link, not duplicate: **sq-j506** (numeric lane in `encode`/`commit`), **sq-mslu*
    join/dedup. Plus a desync-detection test: the §6 fail-closed ingest rejects a
    non-canonical hookable lexical. Depends on 3.
 5. **Canonical-issuance conformance (NAMED PRECONDITION, §5.6).** Design + implement the
-   conformance mechanism that, for conforming issuers, restores INV-VL as an issuance
-   invariant and lets the leaf collapse back to the single value-first leaf (drop the
-   carried lexical hash). Second one-time recommit. Audit-gated. This is the named
-   precondition for relying on the value lane against an adversarial issuer, not merely a
-   roadmap nicety.
+   conformance mechanism under which, for issuers that *actually follow* the discipline,
+   INV-VL holds as an issuance invariant, and which lets the leaf collapse toward a
+   value-first leaf per-datatype (injective-handle allow-list only — the many-to-one
+   datatypes keep their identity handle). Second one-time recommit. Audit-gated. This is
+   the named precondition that scopes/attributes the value lane's issuer-honesty
+   assumption (issuer self-attestation, NOT an adversarial-issuer mechanism —
+   `zk-canonical-form-issuance.md` §4), not merely a roadmap nicety. **The DESIGN half is now scoped in
+   `research/zk-canonical-form-issuance.md` (sq-mtv7 / #3286); the implement half —
+   the `secx:conformsTo` vocabulary, the attestation binding, and the fail-closed
+   relying-party gate — is the audit-gated follow-on, dependent on sq-j506.**
 
 Suggested ordering / deps: **1** (register first) → **2** → **3** (depends on 2) → **4**
 (depends on 3) → **5** (depends on 4 + this draft's resolution). 2/3 are audit-gated
@@ -717,8 +729,10 @@ for the value-FILTER lane (not "the issuer could already lie about the value"; t
 keeps value and lexical in agreement). No untrusted party can exploit it (the
 scan/issuer chain still binds to a trusted signature), and a host-side same-leaf
 co-binding at ingest (§6, fail-closed) makes honest sparq ingest unable to desync.
-Canonical-issuance conformance (§5.6) is the NAMED PRECONDITION that restores INV-VL for
-conforming issuers and is the exit path that retires the dual leaf.
+Canonical-issuance conformance (§5.6) is the NAMED PRECONDITION under which INV-VL holds
+as an issuance invariant for issuers that *actually follow* the discipline (issuer
+self-attestation — it does not bind a malicious issuer) and is the exit path that
+retires the dual leaf per-datatype.
 
 **Correction 2 (must-keep + term-identity):** the value-FILTER member MUST *instantiate*,
 not merely name, an explicit in-circuit range-decomposition of VALUE_HOOK (B1) and a
