@@ -26,6 +26,10 @@ pub mod revoke;
 pub mod issuer;
 // [OPUS-4.8] sq-xqfg (HolderPoP T5): in-circuit holder Proof-of-Possession (B2).
 pub mod holder;
+// [OPUS-4.8] sq-rsd3v.1: the single-use NULLIFIER primitive (in-circuit
+// Poseidon2([ZKSIG_NF, hsk, epoch])) -- the one genuinely-absent ZK gadget. NEW
+// in-circuit soundness surface, bound to holder possession; NOT-yet-sound (sq-qhy4).
+pub mod nullifier;
 // [OPUS-4.8] sq-bwwl (hidden-join sq-8mwz): in-circuit hidden cross-credential JOIN.
 pub mod join;
 // [FABLE-5] sq-3kd2g.2 (#1591): bounded-depth path reachability -- property
