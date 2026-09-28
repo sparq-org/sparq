@@ -98,7 +98,7 @@ jobs:
           persist-credentials: false
 
       # ---- former job: detect rust changes (vectorized-feature-off) ----
-      - uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: filter
         if: github.event_name == 'pull_request'
         with:
@@ -235,7 +235,7 @@ jobs:
           fetch-depth: 0
 
       # ---- in-job path filter (formerly the shared `changes` job) ----
-      - uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: filter
         if: github.event_name == 'pull_request'
         with:
