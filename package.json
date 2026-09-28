@@ -14,7 +14,7 @@
   "devDependencies": {
     "@solid/acl-check": "^0.4.5",
     "@solidlab/policy-engine": "^0.0.2",
-    "n3": "^2.1.1"
+    "n3": "^2.7.12"
   },
   "overrides": {
     "parse-url": "8.1.0",
