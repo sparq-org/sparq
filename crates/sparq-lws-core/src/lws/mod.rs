@@ -362,6 +362,45 @@ fn rotated_as_keys(
     Ok((current, previous))
 }
 
+/// Whether an address is one the server must not be made to reach: anything but a global unicast
+/// address. The one predicate every outbound request uses: identity documents, OpenID Providers,
+/// JWKS and webhook inboxes alike.
+pub fn is_forbidden_ip(ip: std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(v4) => {
+            let o = v4.octets();
+            v4.is_loopback()
+                || v4.is_private()
+                || v4.is_link_local()
+                || v4.is_unspecified()
+                || v4.is_broadcast()
+                || v4.is_documentation()
+                || v4.is_multicast()
+                || o[0] == 0
+                || (o[0] == 100 && (o[1] & 0xc0) == 64) // 100.64.0.0/10 shared address space
+                || (o[0] == 192 && o[1] == 0 && o[2] == 0) // 192.0.0.0/24
+                || (o[0] == 198 && (o[1] & 0xfe) == 18) // 198.18.0.0/15 benchmarking
+                || o[0] >= 240
+        }
+        std::net::IpAddr::V6(v6) => {
+            if let Some(v4) = v6.to_ipv4_mapped() {
+                return is_forbidden_ip(std::net::IpAddr::V4(v4));
+            }
+            let s = v6.segments();
+            v6.is_loopback()
+                || v6.is_unspecified()
+                || v6.is_multicast()
+                || (s[0] & 0xfe00) == 0xfc00 // unique local
+                || (s[0] & 0xffc0) == 0xfe80 // link local
+                || (s[0] & 0xffc0) == 0xfec0 // site local
+                || (s[0] == 0x2001 && s[1] == 0x0db8) // documentation
+                || (s[0] == 0x0064 && s[1] == 0xff9b) // NAT64
+                || (s[0] == 0 && s[1] == 0 && s[2] == 0 && s[3] == 0 && s[4] == 0 && s[5] == 0)
+            // IPv4-compatible
+        }
+    }
+}
+
 /// Write a private key file readable by its owner only.
 fn write_private(path: &str, contents: &str) -> std::io::Result<()> {
     use std::io::Write;
@@ -456,6 +495,8 @@ pub struct Inner<S: Store> {
     pub http: reqwest::Client,
     /// Serializes conditional writes per resource (see [`resources::IriLocks`]).
     pub locks: resources::IriLocks,
+    /// DPoP proof ids seen at the token endpoint.
+    pub dpop_replay: subject_tokens::DpopReplay,
 }
 
 impl<S: Store> std::ops::Deref for LwsState<S> {
@@ -491,6 +532,7 @@ impl<S: Store + 'static> LwsState<S> {
                 notify,
                 http,
                 locks: Default::default(),
+                dpop_replay: Default::default(),
             }),
         })
     }
@@ -1030,6 +1072,8 @@ pub(crate) mod test_store {
         pub fail_delete: Arc<AtomicBool>,
         /// `delete` of this IRI alone fails with a backend error.
         pub fail_delete_of: Arc<std::sync::Mutex<Option<String>>>,
+        /// `read` of this IRI alone fails with a backend error.
+        pub fail_read_of: Arc<std::sync::Mutex<Option<String>>>,
         /// `write` of this IRI alone fails with a backend error.
         pub fail_write_of: Arc<std::sync::Mutex<Option<String>>>,
         /// When set, how many more writes succeed; every write past them fails, as in a store
@@ -1053,6 +1097,7 @@ pub(crate) mod test_store {
                 fail_delete_of: Default::default(),
                 fail_write_of: Default::default(),
                 write_budget: Default::default(),
+                fail_read_of: Default::default(),
                 hide: Default::default(),
             }
         }
@@ -1061,6 +1106,9 @@ pub(crate) mod test_store {
     #[async_trait]
     impl Store for FlakyStore {
         async fn read(&self, iri: &str) -> ServerResult<Resource> {
+            if self.fail_read_of.lock().unwrap().as_deref() == Some(iri) {
+                return Err(ServerError::Storage("disk on fire".into()));
+            }
             self.inner.read(iri).await
         }
         async fn meta(&self, iri: &str) -> ServerResult<Option<ResourceMeta>> {

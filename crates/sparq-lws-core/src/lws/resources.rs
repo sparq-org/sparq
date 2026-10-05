@@ -356,7 +356,7 @@ fn parse_accept(accept: &str) -> Vec<Range> {
 
 /// The best of `offered` for `accept` (earlier offers win ties); the first offer when Accept is
 /// absent; `None` when nothing offered is acceptable.
-fn negotiate(accept: Option<&str>, offered: &[&str]) -> Option<String> {
+pub(super) fn negotiate(accept: Option<&str>, offered: &[&str]) -> Option<String> {
     let Some(accept) = accept.filter(|a| !a.trim().is_empty()) else {
         return offered.first().map(|s| s.to_string());
     };
@@ -1090,14 +1090,6 @@ async fn create<S: Store + 'static>(
     } else {
         req.body.clone()
     };
-    let created = match state
-        .store
-        .create_in_container(parent, &child, body.clone(), &content_type)
-        .await
-    {
-        Ok(m) => m,
-        Err(e) => return store_error(e),
-    };
     let (types, links) = if is_container {
         (Vec::new(), Default::default())
     } else {
@@ -1111,11 +1103,41 @@ async fn create<S: Store + 'static>(
         modified_ms: is_container.then(now_ms),
         ..Default::default()
     };
-    if let Err(e) = state.put_resource_meta(&child, &meta).await {
-        return store_error(e);
-    }
-    drop(parent_guard);
-    drop(_child_guards);
+    // The new member's metadata is written before its content, replacing whatever an earlier
+    // resource at the IRI left behind (a delete whose metadata removal failed): content never
+    // exists under metadata that is not its own. When the content cannot be created the metadata
+    // is removed again; one left behind describes nothing, and the next create replaces it. The
+    // writes run in a task of their own that holds the locks, so a client that goes away cannot
+    // stop them half way.
+    let created = {
+        let (state, parent, child, meta) = (
+            state.clone(),
+            parent.to_string(),
+            child.clone(),
+            meta.clone(),
+        );
+        tokio::spawn(async move {
+            let _locks = (parent_guard, _child_guards);
+            state.put_resource_meta(&child, &meta).await?;
+            match state
+                .store
+                .create_in_container(&parent, &child, body, &content_type)
+                .await
+            {
+                Ok(m) => Ok(m),
+                Err(e) => {
+                    let _ = state.store.delete(&meta_key(&child), None).await;
+                    Err(e)
+                }
+            }
+        })
+        .await
+    };
+    let created = match created {
+        Ok(Ok(m)) => m,
+        Ok(Err(e)) => return store_error(e),
+        Err(e) => return store_error(ServerError::Storage(format!("the create failed: {e}"))),
+    };
     touch_container(state, parent).await;
     state
         .notify
@@ -1360,9 +1382,11 @@ async fn update<S: Store + 'static>(
         .unwrap_or(meta.content_type.clone());
     // The types the old content stated, so the replacement can drop them.
     let old_content_types = if meta.content_type.starts_with("text/turtle") {
+        // Unreadable old content is a failure, not "states no types": otherwise the types it
+        // stated would outlive it.
         match state.store.read_at(uri, &meta).await {
             Ok(b) => content_types(uri, &meta.content_type, &b),
-            Err(_) => Vec::new(),
+            Err(e) => return store_error(e),
         }
     } else {
         Vec::new()
@@ -2146,7 +2170,8 @@ async fn lock_subtree<S: Store + 'static>(
 
 /// Remove the resources of a locked [`subtree`], members before their containers, each before its
 /// metadata (which says who may act on it, so it goes only once the resource has). Stops at the
-/// first failure; returns how many of `doomed`, from the front, were removed, and the outcome.
+/// first failure, the metadata's included; returns how many of `doomed`, from the front, were
+/// removed, and the outcome.
 async fn remove<S: Store + 'static>(
     state: &LwsState<S>,
     doomed: &[(String, Option<String>)],
@@ -2170,7 +2195,13 @@ async fn remove<S: Store + 'static>(
         if let Err(e) = removed {
             return (i, Err(e));
         }
-        let _ = state.store.delete(&meta_key(node), None).await;
+        // The resource is gone; metadata that survives it would describe the next resource at the
+        // IRI, so a failure to remove it is a failure of the delete (and a create replaces such
+        // metadata before it writes any content).
+        match state.store.delete(&meta_key(node), None).await {
+            Ok(_) | Err(ServerError::NotFound) => {}
+            Err(e) => return (i + 1, Err(e)),
+        }
     }
     (doomed.len(), Ok(()))
 }
@@ -2385,17 +2416,23 @@ async fn linkset<S: Store + 'static>(
     };
     let etag = linkset_etag(&document);
     let mut resp = match req.method {
-        Method::GET | Method::HEAD => {
-            if let Precondition::NotModified = evaluate(&req.headers, Some(&etag), None, true) {
+        Method::GET | Method::HEAD => match evaluate(&req.headers, Some(&etag), None, true) {
+            Precondition::NotModified => {
                 let mut r = StatusCode::NOT_MODIFIED.into_response();
                 set(r.headers_mut(), header::ETAG, &etag);
                 r
-            } else {
+            }
+            Precondition::Failed => {
+                let mut r = problem(StatusCode::PRECONDITION_FAILED, None);
+                set(r.headers_mut(), header::ETAG, &etag);
+                r
+            }
+            Precondition::Proceed => {
                 let mut r = json_response(StatusCode::OK, LINKSET_JSON, &document);
                 set(r.headers_mut(), header::ETAG, &etag);
                 r
             }
-        }
+        },
         Method::OPTIONS => StatusCode::NO_CONTENT.into_response(),
         Method::PATCH => {
             if let Precondition::Failed | Precondition::NotModified =
@@ -4221,5 +4258,141 @@ mod tests {
                 .status(),
             StatusCode::NO_CONTENT
         );
+    }
+
+    /// Review finding: a DELETE ignored a failure to remove the metadata, which then described
+    /// the next resource created at the IRI; and a create wrote its content before its creator
+    /// metadata, so a failure in between left the new content under the old creator.
+    #[tokio::test]
+    async fn stale_metadata_never_describes_new_content() {
+        use super::super::test_store::{request as req, FlakyStore};
+        let mut cfg = super::super::LwsConfig::new("http://localhost:3000");
+        cfg.owner = Some("https://owner.example/#me".into());
+        let store = FlakyStore::new();
+        let st = LwsState::new(store.clone(), cfg).await.expect("state");
+        let (owner, bob) = (
+            agent("https://owner.example/#me"),
+            agent("https://bob.example/#me"),
+        );
+        let base = st.cfg.absolute("");
+        let x = format!("{}x", st.cfg.storage());
+        let px = x.strip_prefix(base.as_str()).unwrap().to_string();
+        let post = |who: Agent| {
+            let st = st.clone();
+            async move {
+                let h = [("slug", "x"), ("content-type", "text/plain")];
+                create(
+                    &st,
+                    &req(Method::POST, "/", &h, "owner's"),
+                    &who,
+                    &st.cfg.storage(),
+                )
+                .await
+            }
+        };
+        // Bob's resource; its delete cannot remove the metadata: a 500, not a quiet 204.
+        assert_eq!(post(owner.clone()).await.status(), StatusCode::CREATED);
+        let mut meta = st.resource_meta(&x).await;
+        meta.creator = bob.subject.clone();
+        st.put_resource_meta(&x, &meta).await.unwrap();
+        *store.fail_delete_of.lock().unwrap() = Some(meta_key(&x));
+        let r = handle(&st, &req(Method::DELETE, &px, &[], ""), &owner).await;
+        assert_eq!(r.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        *store.fail_delete_of.lock().unwrap() = None;
+        assert!(!st.store.exists(&x).await.unwrap());
+        assert_eq!(st.resource_meta(&x).await.creator, bob.subject);
+        // A create at the IRI whose metadata write fails creates nothing under Bob's metadata.
+        *store.fail_write_of.lock().unwrap() = Some(meta_key(&x));
+        assert!(post(owner.clone()).await.status().is_server_error());
+        *store.fail_write_of.lock().unwrap() = None;
+        assert!(!st.store.exists(&x).await.unwrap());
+        // One that succeeds replaces it: the new content is the owner's, not Bob's.
+        assert_eq!(post(owner.clone()).await.status(), StatusCode::CREATED);
+        assert_eq!(st.resource_meta(&x).await.creator, owner.subject);
+        let r = handle(&st, &req(Method::GET, &px, &[], ""), &bob).await;
+        assert_eq!(r.status(), StatusCode::FORBIDDEN);
+    }
+
+    /// Review finding: a PUT that could not read the old Turtle content took it to state no
+    /// types, so the types it did state outlived it.
+    #[tokio::test]
+    async fn a_put_that_cannot_read_the_old_content_fails() {
+        use super::super::route;
+        use super::super::test_store::{request as req, state as flaky_state};
+        let (st, store) = flaky_state(100).await;
+        let ttl = "<> a <https://e.example/Old> .";
+        let r = route(
+            &st,
+            req(
+                Method::POST,
+                "/",
+                &[("slug", "t.ttl"), ("content-type", "text/turtle")],
+                ttl,
+            ),
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let uri = hdr(&r, "location");
+        let p = uri
+            .strip_prefix(st.cfg.absolute("").as_str())
+            .unwrap()
+            .to_string();
+        assert!(st
+            .resource_meta(&uri)
+            .await
+            .types
+            .contains(&"https://e.example/Old".to_string()));
+        *store.fail_read_of.lock().unwrap() = Some(uri.clone());
+        let r = route(
+            &st,
+            req(
+                Method::PUT,
+                &p,
+                &[("content-type", "text/turtle")],
+                "<> a <https://e.example/New> .",
+            ),
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        *store.fail_read_of.lock().unwrap() = None;
+        assert_eq!(st.store.read(&uri).await.unwrap().body, Bytes::from(ttl));
+        // Once readable, the old types go with the old content.
+        let r = route(
+            &st,
+            req(
+                Method::PUT,
+                &p,
+                &[("content-type", "text/turtle")],
+                "<> a <https://e.example/New> .",
+            ),
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        let types = st.resource_meta(&uri).await.types;
+        assert!(
+            !types.contains(&"https://e.example/Old".to_string()),
+            "{types:?}"
+        );
+    }
+
+    /// Review finding: a GET or HEAD of a linkset ignored a failed If-Match and answered 200.
+    #[tokio::test]
+    async fn linkset_reads_honor_preconditions() {
+        let st = state().await;
+        let uri = post(&st, "l.txt", "text/plain", "x", &[]).await;
+        let p = format!("{}{META_SUFFIX}", path_of(&uri));
+        let r = call(&st, "GET", &p, &[], "").await;
+        assert_eq!(r.status(), StatusCode::OK);
+        let tag = hdr(&r, "etag");
+        for m in ["GET", "HEAD"] {
+            let r = call(&st, m, &p, &[("if-match", "\"other\"")], "").await;
+            assert_eq!(r.status(), StatusCode::PRECONDITION_FAILED, "{m}");
+            assert_eq!(
+                call(&st, m, &p, &[("if-match", &tag)], "").await.status(),
+                StatusCode::OK
+            );
+            let r = call(&st, m, &p, &[("if-none-match", &tag)], "").await;
+            assert_eq!(r.status(), StatusCode::NOT_MODIFIED, "{m}");
+        }
     }
 }

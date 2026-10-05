@@ -88,7 +88,9 @@ pub fn parse_filter(bytes: &[u8]) -> Result<Filter, FilterError> {
         if key.starts_with('@') {
             continue;
         }
-        let parsed = groups(v).ok_or(FilterError::Malformed)?;
+        // The limit is enforced while the groups are read, so a filter of many groups is refused
+        // after at most one past the limit, not after all of them were collected.
+        let parsed = groups(v, MAX_FILTER_GROUPS - count)?;
         count += parsed.len();
         if key == "type" {
             filter.types.extend(parsed);
@@ -100,33 +102,37 @@ pub fn parse_filter(bytes: &[u8]) -> Result<Filter, FilterError> {
                 .extend(parsed);
         }
     }
-    if count > MAX_FILTER_GROUPS {
-        return Err(FilterError::TooManyGroups);
-    }
     Ok(filter)
 }
 
-/// A key's value as CNF groups, or `None` when it breaks the grammar: an array whose elements are
-/// absolute IRIs or non-empty arrays of them. Duplicate groups count once.
-fn groups(value: &Value) -> Option<Groups> {
+/// A key's value as CNF groups: an array whose elements are absolute IRIs or non-empty arrays of
+/// them (otherwise [`FilterError::Malformed`]). Duplicate groups count once (a set finds them, so
+/// many duplicates cost linear time), and more than `room` distinct groups is
+/// [`FilterError::TooManyGroups`] as soon as the first one past it is read.
+fn groups(value: &Value, room: usize) -> Result<Groups, FilterError> {
     let mut out: Groups = Vec::new();
-    for element in value.as_array()? {
+    let mut seen = std::collections::HashSet::new();
+    for element in value.as_array().ok_or(FilterError::Malformed)? {
         let group: Vec<String> = match element {
             Value::String(s) => vec![s.clone()],
             Value::Array(members) if !members.is_empty() => members
                 .iter()
                 .map(|m| m.as_str().map(str::to_string))
-                .collect::<Option<_>>()?,
-            _ => return None,
+                .collect::<Option<_>>()
+                .ok_or(FilterError::Malformed)?,
+            _ => return Err(FilterError::Malformed),
         };
         if !group.iter().all(|v| is_uri(v)) {
-            return None;
+            return Err(FilterError::Malformed);
         }
-        if !out.contains(&group) {
+        if seen.insert(group.clone()) {
+            if out.len() == room {
+                return Err(FilterError::TooManyGroups);
+            }
             out.push(group);
         }
     }
-    Some(out)
+    Ok(out)
 }
 
 /// A relation as it is compared: lower-cased when it is a registered (non-URI) relation.
@@ -197,23 +203,6 @@ pub fn relation_targets(uri: &str, meta: &ResourceMeta, rel: &str) -> BTreeSet<S
 /// Whether every group matches: some IRI of each group is in `have`.
 fn all_groups(groups: &Groups, have: impl Fn(&str) -> bool) -> bool {
     groups.iter().all(|g| g.iter().any(|v| have(v)))
-}
-
-/// Whether Accept admits lws+json or ld+json, the formats these services produce.
-fn acceptable(accept: Option<&str>) -> bool {
-    let Some(accept) = accept.filter(|a| !a.trim().is_empty()) else {
-        return true;
-    };
-    accept.split(',').any(|range| {
-        let mut parts = range.split(';');
-        let ty = parts.next().unwrap_or_default().trim().to_ascii_lowercase();
-        let zero = parts.any(|p| {
-            let p = p.trim().to_ascii_lowercase();
-            p.strip_prefix("q=")
-                .is_some_and(|q| q.trim().parse::<f64>().is_ok_and(|q| q <= 0.0))
-        });
-        !zero && matches!(ty.as_str(), "*/*" | "application/*" | LWS_JSON | LD_JSON)
-    })
 }
 
 /// What a search sees of one readable resource: its types (full IRIs) and the metadata its
@@ -354,16 +343,14 @@ pub async fn handle<S: Store + 'static>(
             }
         };
     }
-    let accept = req.header(header::ACCEPT);
-    if !acceptable(accept) {
+    // lws+json or ld+json, negotiated by quality and specificity (lws+json on a tie, or without
+    // Accept); a range with q=0 refuses its type. The response varies on Accept (section 7.2).
+    let Some(media_type) =
+        super::resources::negotiate(req.header(header::ACCEPT), &[LWS_JSON, LD_JSON])
+    else {
         return problem(StatusCode::NOT_ACCEPTABLE, None);
-    }
-    // lws+json, or ld+json for a client that asks for it and not for lws+json: the response is
-    // negotiated, so it varies on Accept (section 7.2).
-    let media_type = match accept {
-        Some(a) if a.contains(LD_JSON) && !a.contains(LWS_JSON) => LD_JSON,
-        _ => LWS_JSON,
     };
+    let media_type = media_type.as_str();
     let resources = readable(state, agent).await;
     let mut links = Vec::new();
     let mut content_location = None;
@@ -647,6 +634,22 @@ mod tests {
         assert_eq!(parse(r#"{"type": [1]}"#), Err(FilterError::Malformed));
     }
 
+    /// Review finding: groups were deduplicated by a linear scan of those kept and counted only
+    /// after every key was read, so a filter of many distinct groups cost quadratic time before
+    /// the limit refused it. The limit now stops the read, and duplicates go through a set.
+    #[test]
+    fn many_groups_are_refused_without_quadratic_work() {
+        let many: Vec<String> = (0..50_000).map(|i| format!("\"https://a/T{i}\"")).collect();
+        let body = format!("{{\"type\": [{}]}}", many.join(","));
+        let started = std::time::Instant::now();
+        assert_eq!(parse(&body), Err(FilterError::TooManyGroups));
+        assert!(started.elapsed() < std::time::Duration::from_secs(1));
+        // Duplicates of one group are one group.
+        let same = vec!["[\"https://a/T\", \"https://a/U\"]"; 50_000].join(",");
+        let f = parse(&format!("{{\"type\": [{same}]}}")).unwrap();
+        assert_eq!(f.types.len(), 1);
+    }
+
     #[test]
     fn targets_from_links_and_linkset() {
         let uri = "https://s/r";
@@ -674,12 +677,49 @@ mod tests {
         assert!(relation_targets(uri, &meta, "type").is_empty());
     }
 
-    #[test]
-    fn accept_ranges() {
-        assert!(acceptable(None));
-        assert!(acceptable(Some("application/ld+json")));
-        assert!(acceptable(Some("text/html, */*;q=0.1")));
-        assert!(!acceptable(Some("text/turtle")));
-        assert!(!acceptable(Some("application/lws+json;q=0")));
+    /// Review finding: the representation was picked by substring, so a type refused with q=0
+    /// could still be served. It is negotiated by quality and specificity now.
+    #[tokio::test]
+    async fn the_type_services_negotiate_by_quality() {
+        use super::super::test_store;
+        let (state, _) = test_store::state(100).await;
+        let served = |accept: Option<&'static str>| {
+            let state = state.clone();
+            async move {
+                let headers: Vec<(&str, &str)> =
+                    accept.map(|a| ("accept", a)).into_iter().collect();
+                let get = test_store::request(Method::GET, TYPE_INDEX_PATH, &headers, "");
+                let r = handle(&state, &get, &Agent::anonymous()).await;
+                if r.status() == StatusCode::NOT_ACCEPTABLE {
+                    return None;
+                }
+                Some(
+                    r.headers()[header::CONTENT_TYPE]
+                        .to_str()
+                        .unwrap()
+                        .to_string(),
+                )
+            }
+        };
+        let lws = Some(LWS_JSON.to_string());
+        let ld = Some(LD_JSON.to_string());
+        assert_eq!(served(None).await, lws);
+        assert_eq!(served(Some("application/ld+json")).await, ld);
+        assert_eq!(served(Some("text/html, */*;q=0.1")).await, lws);
+        assert_eq!(
+            served(Some("application/lws+json;q=0, application/ld+json")).await,
+            ld
+        );
+        assert_eq!(served(Some("application/ld+json;q=0, */*")).await, lws);
+        assert_eq!(
+            served(Some(
+                "application/ld+json;q=0.2, application/lws+json;q=0.1"
+            ))
+            .await,
+            ld
+        );
+        assert_eq!(served(Some("text/turtle")).await, None);
+        assert_eq!(served(Some("application/lws+json;q=0")).await, None);
+        assert_eq!(served(Some("*/*;q=0")).await, None);
     }
 }

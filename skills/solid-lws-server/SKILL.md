@@ -245,6 +245,9 @@ What the server exposes, all discoverable from the storage description
   Errors are `application/problem+json`.
 - **Authorization server**: metadata at `/.well-known/lws-configuration`, keys at
   `/.well-known/lws/jwks`, and RFC 8693 token exchange at `/.well-known/lws/token`.
+  A Solid-OIDC ID Token (`aud` `solid`, or bound by `cnf.jkt`) is exchanged only with a
+  `DPoP` proof of the bound key on the token request (RFC 9449: `htm` POST, `htu` the token
+  endpoint, fresh `iat`, unused `jti`).
   Storage requests take `Authorization: Bearer <access token>`; a missing or bad token
   gets `401` with `WWW-Authenticate: Bearer as_uri="…", realm="…"`.
 - **Access grants and requests** (Access Profile) under `/.lws/grants/` and

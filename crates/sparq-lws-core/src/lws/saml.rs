@@ -876,8 +876,12 @@ pub fn canonicalize(
             wanted.push(a.prefix.clone());
         }
     }
+    // An inclusive prefix is handled as inclusive canonicalization handles it: rendered when in
+    // scope and not already rendered by an output ancestor. For the default namespace that
+    // includes an undeclaration (`xmlns=""`) when an output ancestor rendered a non-empty default
+    // (Exclusive XML Canonicalization 1.0, section 3; Canonical XML 1.0, section 2.3).
     for p in inclusive {
-        if el.scope.get(p).is_some_and(|u| !u.is_empty()) {
+        if p.is_empty() || el.scope.get(p).is_some_and(|u| !u.is_empty()) {
             wanted.push(p.clone());
         }
     }
@@ -973,6 +977,34 @@ mod tests {
             c14n(r#"<r xmlns="urn:x"><s xmlns=""/></r>"#),
             r#"<r xmlns="urn:x"><s xmlns=""></s></r>"#
         );
+    }
+
+    /// Review finding: with `#default` in the InclusiveNamespaces PrefixList, an element whose
+    /// default namespace is undeclared under an output ancestor with a non-empty default must
+    /// render `xmlns=""`, though it does not use the default namespace itself.
+    #[test]
+    fn inclusive_default_namespace_keeps_its_undeclaration() {
+        let xml = r#"<r xmlns="urn:x"><p:s xmlns:p="urn:p" xmlns=""><p:t/></p:s></r>"#;
+        let root = parse(xml).unwrap();
+        let render = |inclusive: &[String]| {
+            let mut out = String::new();
+            canonicalize(&root, None, inclusive, &BTreeMap::new(), &mut out).unwrap();
+            out
+        };
+        assert_eq!(
+            render(&[String::new()]),
+            r#"<r xmlns="urn:x"><p:s xmlns="" xmlns:p="urn:p"><p:t></p:t></p:s></r>"#
+        );
+        // Without it, the default namespace is not visibly utilized by p:s and is left out.
+        assert_eq!(
+            render(&[]),
+            r#"<r xmlns="urn:x"><p:s xmlns:p="urn:p"><p:t></p:t></p:s></r>"#
+        );
+        // Nothing to undeclare when no output ancestor rendered a default.
+        let root = parse(r#"<p:s xmlns:p="urn:p" xmlns=""/>"#).unwrap();
+        let mut out = String::new();
+        canonicalize(&root, None, &[String::new()], &BTreeMap::new(), &mut out).unwrap();
+        assert_eq!(out, r#"<p:s xmlns:p="urn:p"></p:s>"#);
     }
 
     #[test]

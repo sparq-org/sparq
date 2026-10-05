@@ -13,7 +13,9 @@
 //! - **OpenID Connect** (`lws10-authn-openid`): an ID Token. The subject's identity document must
 //!   name the token's issuer, as an `lws:OpenIdProvider` service or (Solid-OIDC, as the Community
 //!   Solid Server accepts) with `solid:oidcIssuer`; the issuer's key comes from OpenID Connect
-//!   Discovery; `azp` names the client.
+//!   Discovery; `azp` names the client. A Solid-OIDC ID Token (one addressed to `solid`, or bound
+//!   to a key by `cnf.jkt`) is exchanged only with a DPoP proof of that key on the token request
+//!   (RFC 9449 section 4.3, see [`check_dpop`]): a copied ID Token is worth nothing without it.
 //!
 //! Self-issued credentials need `sub = iss = client_id`, an `aud` that includes this authorization
 //! server, an `exp` in the future and an `iat` not ahead of now. `alg: none` is always refused.
@@ -45,6 +47,113 @@ const CID_SERVICE: &str = "https://www.w3.org/ns/cid/v1#service";
 const CID_SERVICE_ENDPOINT: &str = "https://www.w3.org/ns/cid/v1#serviceEndpoint";
 const RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
 
+/// How long a DPoP proof's `iat` may lie from now, in seconds.
+pub const DPOP_WINDOW_SECS: i64 = 60;
+
+/// Most DPoP proof ids remembered at once; past it (after the expired ones are dropped) a new
+/// proof is refused rather than remembered, so replay protection never silently lapses.
+const MAX_DPOP_JTIS: usize = 65_536;
+
+/// The DPoP proof ids (`jti`) seen at the token endpoint, until their proofs are too old to be
+/// accepted anyway.
+#[derive(Default)]
+pub struct DpopReplay(std::sync::Mutex<std::collections::HashMap<String, i64>>);
+
+impl DpopReplay {
+    /// Remember `jti` until `until`; `false` when it was seen already (a replay) or there is no room.
+    fn first_use(&self, jti: &str, until: i64, now: i64) -> bool {
+        let mut seen = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        if seen.len() >= MAX_DPOP_JTIS {
+            seen.retain(|_, t| *t > now);
+        }
+        if seen.contains_key(jti) || seen.len() >= MAX_DPOP_JTIS {
+            return false;
+        }
+        seen.insert(jti.to_string(), until);
+        true
+    }
+}
+
+/// What the token request carries for proof of possession: its `DPoP` header and the replay
+/// store the proofs' ids go into.
+pub struct DpopContext<'a> {
+    pub proof: Option<&'a str>,
+    pub replay: &'a DpopReplay,
+}
+
+/// The `cnf.jkt` a token is bound to, if any.
+fn bound_jkt(jws: &Jws) -> Option<&str> {
+    jws.claims
+        .get("cnf")
+        .and_then(|c| c.get("jkt"))
+        .and_then(Value::as_str)
+}
+
+/// RFC 9449 section 4.3: `proof` is a DPoP proof JWT (`typ` `dpop+jwt`, an asymmetric `alg`, a
+/// public `jwk` it verifies with) for a POST to `htu`, issued within [`DPOP_WINDOW_SECS`] of `now`,
+/// with a `jti` not seen before, by the key whose RFC 7638 thumbprint is `jkt`.
+pub fn check_dpop(
+    proof: Option<&str>,
+    htu: &str,
+    jkt: &str,
+    now: i64,
+    replay: &DpopReplay,
+) -> Result<(), String> {
+    let proof = proof.ok_or("a DPoP-bound ID Token needs a DPoP proof on the token request")?;
+    let jws = Jws::parse(proof).ok_or("the DPoP proof is not a JWT")?;
+    if jws.typ() != Some("dpop+jwt") {
+        return Err("the DPoP proof's typ is not dpop+jwt".into());
+    }
+    if !matches!(jws.alg(), Some("ES256" | "RS256" | "EdDSA")) {
+        return Err("the DPoP proof's alg is not a supported asymmetric one".into());
+    }
+    let jwk = jws
+        .header
+        .get("jwk")
+        .filter(|k| k.is_object())
+        .ok_or("the DPoP proof carries no jwk")?;
+    if ["d", "p", "q", "dp", "dq", "qi", "k"]
+        .iter()
+        .any(|m| jwk.get(m).is_some())
+    {
+        return Err("the DPoP proof's jwk is not a public key".into());
+    }
+    if !jws.verify_jwk(jwk) {
+        return Err("the DPoP proof's signature does not verify".into());
+    }
+    if jose::thumbprint(jwk) != jkt {
+        return Err("the DPoP proof is not signed by the key the ID Token is bound to".into());
+    }
+    if jws.claim_str("htm") != Some("POST") {
+        return Err("the DPoP proof's htm is not POST".into());
+    }
+    let same_target = |a: &str, b: &str| {
+        let strip = |u: &str| {
+            url::Url::parse(u).ok().map(|mut u| {
+                u.set_query(None);
+                u.set_fragment(None);
+                u
+            })
+        };
+        strip(a).is_some_and(|a| Some(a) == strip(b))
+    };
+    if !jws.claim_str("htu").is_some_and(|u| same_target(u, htu)) {
+        return Err("the DPoP proof's htu is not the token endpoint".into());
+    }
+    let iat = jws.claim_time("iat").ok_or("the DPoP proof has no iat")?;
+    if (now - iat).abs() > DPOP_WINDOW_SECS {
+        return Err("the DPoP proof is not fresh".into());
+    }
+    let jti = jws
+        .claim_str("jti")
+        .filter(|j| !j.is_empty() && j.len() <= 256)
+        .ok_or("the DPoP proof has no jti")?;
+    if !replay.first_use(jti, iat + DPOP_WINDOW_SECS + 1, now) {
+        return Err("the DPoP proof was used before".into());
+    }
+    Ok(())
+}
+
 /// Who a valid subject token authenticates, and the client presenting it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Verified {
@@ -59,6 +168,7 @@ pub async fn verify(
     http: &reqwest::Client,
     token: &str,
     token_type: &str,
+    dpop: &DpopContext<'_>,
 ) -> Result<Verified, String> {
     match token_type {
         JWT_TOKEN_TYPE => {
@@ -72,7 +182,7 @@ pub async fn verify(
                 cid(cfg, http, &jws).await
             }
         }
-        ID_TOKEN_TYPE => oidc(cfg, http, &parse(token)?).await,
+        ID_TOKEN_TYPE => oidc(cfg, http, &parse(token)?, dpop).await,
         other => Err(format!("unsupported subject_token_type {other}")),
     }
 }
@@ -470,7 +580,12 @@ pub fn id_token_client(jws: &Jws) -> Result<String, String> {
     Ok(azp.to_string())
 }
 
-async fn oidc(cfg: &LwsConfig, http: &reqwest::Client, jws: &Jws) -> Result<Verified, String> {
+async fn oidc(
+    cfg: &LwsConfig,
+    http: &reqwest::Client,
+    jws: &Jws,
+    dpop: &DpopContext<'_>,
+) -> Result<Verified, String> {
     let issuer = jws
         .claim_str("iss")
         .filter(|s| !s.is_empty())
@@ -568,6 +683,21 @@ async fn oidc(cfg: &LwsConfig, http: &reqwest::Client, jws: &Jws) -> Result<Veri
             && jws.verify_jwk(k)
     }) {
         return Err("the ID Token's signature does not verify".into());
+    }
+    // A Solid-OIDC ID Token is DPoP-bound: whoever presents it must prove the key.
+    let solid = jws.audiences().iter().any(|a| a == "solid");
+    match bound_jkt(jws) {
+        Some(jkt) => check_dpop(
+            dpop.proof,
+            &cfg.absolute(super::AS_TOKEN_PATH),
+            jkt,
+            jose::now_secs(),
+            dpop.replay,
+        )?,
+        None if solid => {
+            return Err("a Solid-OIDC ID Token must be bound to a key (cnf.jkt)".into());
+        }
+        None => {}
     }
     Ok(Verified {
         subject,
@@ -707,43 +837,7 @@ pub fn names_issuer(
 
 // ---------------------------------------------------------------- fetching
 
-/// Whether an address is one the server must not be made to reach: anything but a global unicast
-/// address.
-pub fn is_forbidden_ip(ip: IpAddr) -> bool {
-    match ip {
-        IpAddr::V4(v4) => {
-            let o = v4.octets();
-            v4.is_loopback()
-                || v4.is_private()
-                || v4.is_link_local()
-                || v4.is_unspecified()
-                || v4.is_broadcast()
-                || v4.is_documentation()
-                || v4.is_multicast()
-                || o[0] == 0
-                || (o[0] == 100 && (o[1] & 0xc0) == 64) // 100.64.0.0/10 shared address space
-                || (o[0] == 192 && o[1] == 0 && o[2] == 0) // 192.0.0.0/24
-                || (o[0] == 198 && (o[1] & 0xfe) == 18) // 198.18.0.0/15 benchmarking
-                || o[0] >= 240
-        }
-        IpAddr::V6(v6) => {
-            if let Some(v4) = v6.to_ipv4_mapped() {
-                return is_forbidden_ip(IpAddr::V4(v4));
-            }
-            let s = v6.segments();
-            v6.is_loopback()
-                || v6.is_unspecified()
-                || v6.is_multicast()
-                || (s[0] & 0xfe00) == 0xfc00 // unique local
-                || (s[0] & 0xffc0) == 0xfe80 // link local
-                || (s[0] & 0xffc0) == 0xfec0 // site local
-                || (s[0] == 0x2001 && s[1] == 0x0db8) // documentation
-                || (s[0] == 0x0064 && s[1] == 0xff9b) // NAT64
-                || (s[0] == 0 && s[1] == 0 && s[2] == 0 && s[3] == 0 && s[4] == 0 && s[5] == 0)
-            // IPv4-compatible
-        }
-    }
-}
+pub use super::is_forbidden_ip;
 
 /// The scheme and host checks of the fetch policy, without name resolution.
 pub fn check_url_static(cfg: &LwsConfig, raw: &str) -> Result<url::Url, String> {
@@ -910,6 +1004,133 @@ mod tests {
     fn claims(did: &str, cfg: &LwsConfig) -> Value {
         let now = jose::now_secs();
         json!({"sub": did, "iss": did, "client_id": did, "aud": [cfg.issuer()], "iat": now, "exp": now + 300})
+    }
+
+    fn dpop_proof(key: &jose::EcKey, htm: &str, htu: &str, iat: i64, jti: &str) -> String {
+        let mut header = serde_json::Map::new();
+        header.insert("typ".into(), json!("dpop+jwt"));
+        header.insert("jwk".into(), key.public_jwk());
+        key.sign_jws(
+            header,
+            &json!({"htm": htm, "htu": htu, "iat": iat, "jti": jti}),
+        )
+    }
+
+    #[test]
+    fn dpop_proofs_are_checked() {
+        let htu = "http://localhost:3000/.well-known/lws/token";
+        let key = jose::EcKey::generate("c");
+        let jkt = key.thumbprint();
+        let now = jose::now_secs();
+        let replay = DpopReplay::default();
+        let ok = dpop_proof(&key, "POST", htu, now, "a");
+        assert_eq!(check_dpop(Some(&ok), htu, &jkt, now, &replay), Ok(()));
+        // Replayed, missing, another key, another target or method, stale, a private jwk.
+        assert!(check_dpop(Some(&ok), htu, &jkt, now, &replay).is_err());
+        assert!(check_dpop(None, htu, &jkt, now, &replay).is_err());
+        let other = jose::EcKey::generate("o");
+        let p = dpop_proof(&other, "POST", htu, now, "b");
+        assert!(check_dpop(Some(&p), htu, &jkt, now, &replay).is_err());
+        let p = dpop_proof(&key, "POST", "http://localhost:3000/elsewhere", now, "c");
+        assert!(check_dpop(Some(&p), htu, &jkt, now, &replay).is_err());
+        let p = dpop_proof(&key, "GET", htu, now, "d");
+        assert!(check_dpop(Some(&p), htu, &jkt, now, &replay).is_err());
+        let p = dpop_proof(&key, "POST", htu, now - 600, "e");
+        assert!(check_dpop(Some(&p), htu, &jkt, now, &replay).is_err());
+        let mut header = serde_json::Map::new();
+        header.insert("typ".into(), json!("dpop+jwt"));
+        header.insert("jwk".into(), key.private_jwk());
+        let p = key.sign_jws(
+            header,
+            &json!({"htm": "POST", "htu": htu, "iat": now, "jti": "f"}),
+        );
+        assert!(check_dpop(Some(&p), htu, &jkt, now, &replay).is_err());
+        // A query on htu is ignored, as RFC 9449 says.
+        let p = dpop_proof(&key, "POST", &format!("{htu}?x=1"), now, "g");
+        assert_eq!(check_dpop(Some(&p), htu, &jkt, now, &replay), Ok(()));
+    }
+
+    /// Review finding: a Solid-OIDC ID Token (aud `solid`, bound by `cnf.jkt`) was exchanged
+    /// without any DPoP proof, so a copied ID Token was as good as the key.
+    #[tokio::test]
+    async fn solid_oidc_id_tokens_need_a_dpop_proof() {
+        let op = jose::EcKey::generate("op-key");
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let alice = format!("{base}/alice");
+        let app = {
+            let (base, alice, jwks) = (
+                base.clone(),
+                alice.clone(),
+                json!({"keys": [op.public_jwk()]}),
+            );
+            axum::Router::new()
+                .route(
+                    "/alice",
+                    axum::routing::get({
+                        let body = format!("<{alice}> <{SOLID_OIDC_ISSUER}> <{base}> .");
+                        move || {
+                        let body = body.clone();
+                        async move { ([(axum::http::header::CONTENT_TYPE, "text/turtle")], body) }
+                    }}),
+                )
+                .route(
+                    "/.well-known/openid-configuration",
+                    axum::routing::get({
+                        let base = base.clone();
+                        move || {
+                            let doc = json!({"issuer": base, "jwks_uri": format!("{base}/jwks")});
+                            async move { axum::Json(doc) }
+                        }
+                    }),
+                )
+                .route(
+                    "/jwks",
+                    axum::routing::get(move || {
+                        let jwks = jwks.clone();
+                        async move { axum::Json(jwks) }
+                    }),
+                )
+        };
+        tokio::spawn(async move { axum::serve(listener, app).await.ok() });
+        let mut cfg = cfg();
+        cfg.allow_insecure_fetch = true;
+        let http = super::super::fetch_client(&cfg).unwrap();
+        let client = jose::EcKey::generate("client");
+        let now = jose::now_secs();
+        let id_token = |cnf: bool| {
+            let mut claims = json!({"iss": base, "sub": alice, "azp": "https://app.example/",
+                "aud": ["solid"], "iat": now, "exp": now + 300});
+            if cnf {
+                claims["cnf"] = json!({"jkt": client.thumbprint()});
+            }
+            op.sign_jws(serde_json::Map::new(), &claims)
+        };
+        let replay = DpopReplay::default();
+        let exchange = |token: String, proof: Option<String>| {
+            let (cfg, http, replay) = (&cfg, &http, &replay);
+            async move {
+                let ctx = DpopContext {
+                    proof: proof.as_deref(),
+                    replay,
+                };
+                verify(cfg, http, &token, ID_TOKEN_TYPE, &ctx).await
+            }
+        };
+        let htu = cfg.absolute(super::super::AS_TOKEN_PATH);
+        // Without a proof, or with one by another key: refused.
+        let err = exchange(id_token(true), None).await.unwrap_err();
+        assert!(err.contains("DPoP"), "{err}");
+        let stolen = dpop_proof(&jose::EcKey::generate("thief"), "POST", &htu, now, "t");
+        assert!(exchange(id_token(true), Some(stolen)).await.is_err());
+        // A Solid-OIDC token that is not bound to a key: refused.
+        let proof = dpop_proof(&client, "POST", &htu, now, "u");
+        assert!(exchange(id_token(false), Some(proof)).await.is_err());
+        // With the key's proof: exchanged, once.
+        let proof = dpop_proof(&client, "POST", &htu, now, "v");
+        let ok = exchange(id_token(true), Some(proof.clone())).await.unwrap();
+        assert_eq!(ok.subject, alice);
+        assert!(exchange(id_token(true), Some(proof)).await.is_err());
     }
 
     #[test]

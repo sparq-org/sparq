@@ -623,36 +623,10 @@ pub fn inbox_url(inbox: &str, allow_insecure: bool) -> Option<url::Url> {
     public.then_some(url)
 }
 
-/// Whether `ip` is a globally routable unicast address.
+/// Whether `ip` is a globally routable unicast address: what the authorization server's fetches
+/// may reach too (see [`super::is_forbidden_ip`]).
 pub fn is_public(ip: IpAddr) -> bool {
-    match ip {
-        IpAddr::V4(v4) => {
-            let o = v4.octets();
-            !(v4.is_loopback()
-                || v4.is_private()
-                || v4.is_link_local()
-                || v4.is_unspecified()
-                || v4.is_broadcast()
-                || v4.is_documentation()
-                || v4.is_multicast()
-                || o[0] == 0
-                || (o[0] == 100 && (o[1] & 0xc0) == 64)
-                || (o[0] == 198 && (o[1] & 0xfe) == 18)
-                || o[0] >= 240)
-        }
-        IpAddr::V6(v6) => {
-            if let Some(v4) = v6.to_ipv4_mapped() {
-                return is_public(IpAddr::V4(v4));
-            }
-            let s = v6.segments();
-            !(v6.is_loopback()
-                || v6.is_unspecified()
-                || v6.is_multicast()
-                || (s[0] & 0xfe00) == 0xfc00
-                || (s[0] & 0xffc0) == 0xfe80
-                || (s[0] == 0x2001 && s[1] == 0x0db8))
-        }
-    }
+    !super::is_forbidden_ip(ip)
 }
 
 // ---- the NotificationService ----
@@ -1196,6 +1170,27 @@ mod tests {
         assert!(is_public("8.8.8.8".parse().unwrap()));
         assert!(!is_public("169.254.169.254".parse().unwrap()));
         assert!(!is_public("100.64.0.1".parse().unwrap()));
+        // Review finding: the webhook predicate admitted what the fetch predicate refuses.
+        for ip in [
+            "fec0::1",
+            "64:ff9b::a00:1",
+            "::a00:1",
+            "192.0.0.8",
+            "198.18.0.1",
+        ] {
+            assert!(!is_public(ip.parse().unwrap()), "{ip}");
+            assert!(
+                inbox_url(
+                    &format!("https://[{ip}]/in")
+                        .replace("[192.0.0.8]", "192.0.0.8")
+                        .replace("[198.18.0.1]", "198.18.0.1"),
+                    false
+                )
+                .is_none(),
+                "{ip}"
+            );
+        }
+        assert!(is_public("2606:4700::1".parse().unwrap()));
     }
 
     #[test]

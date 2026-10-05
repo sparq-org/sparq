@@ -103,6 +103,13 @@ async fn token<S: Store + 'static>(state: &LwsState<S>, req: &LwsRequest) -> Res
                 &state.http,
                 &form.subject_token,
                 &form.subject_token_type,
+                &subject_tokens::DpopContext {
+                    // Exactly one DPoP header (RFC 9449 section 4.3).
+                    proof: (req.headers.get_all("dpop").iter().count() == 1)
+                        .then(|| req.header("dpop"))
+                        .flatten(),
+                    replay: &state.dpop_replay,
+                },
             )
             .await
         }
