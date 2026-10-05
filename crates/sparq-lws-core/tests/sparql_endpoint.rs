@@ -13,7 +13,10 @@ use solid_oidc_verifier::verifier::Verifier;
 use sparq_lws_core::app::{build_router, AppState};
 use sparq_lws_core::auth::AuthContext;
 use sparq_lws_core::ldp::handler::LdpState;
-use sparq_lws_core::store::{CompositeStore, InMemoryBlobStore, InMemorySparqClient, Store};
+use sparq_lws_core::store::{
+    BlobEntry, BlobError, BlobStore, BodyCache, CompositeStore, InMemoryBlobStore,
+    InMemorySparqClient, Store,
+};
 use tower::ServiceExt;
 
 const ROOT: &str = "https://pod.example/";
@@ -352,5 +355,132 @@ async fn protocol_get_form_post_construct_and_union_default_are_live() {
     assert_eq!(
         hidden_union_graph["boolean"], false,
         "the union opt-in must not leak into GRAPH ?g enumeration"
+    );
+}
+
+/// A blob store that records every key `get` is asked for.
+struct RecordingBlob {
+    inner: InMemoryBlobStore,
+    gets: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+}
+
+#[async_trait::async_trait]
+impl BlobStore for RecordingBlob {
+    async fn get(&self, key: &str) -> Result<Bytes, BlobError> {
+        self.gets.lock().unwrap().push(key.to_owned());
+        self.inner.get(key).await
+    }
+    async fn put(&self, key: &str, body: Bytes) -> Result<(), BlobError> {
+        self.inner.put(key, body).await
+    }
+    async fn exists(&self, key: &str) -> Result<bool, BlobError> {
+        self.inner.exists(key).await
+    }
+    async fn delete(&self, key: &str) -> Result<(), BlobError> {
+        self.inner.delete(key).await
+    }
+    async fn list(&self) -> Result<Vec<BlobEntry>, BlobError> {
+        self.inner.list().await
+    }
+    async fn delete_if_unchanged(
+        &self,
+        key: &str,
+        expected_generation: u64,
+    ) -> Result<bool, BlobError> {
+        self.inner
+            .delete_if_unchanged(key, expected_generation)
+            .await
+    }
+}
+
+#[tokio::test]
+async fn query_never_fetches_readable_non_rdf_bodies() {
+    // RDF eligibility is decided from the authorized METADATA before any byte fetch: a readable
+    // image must not be pulled from the blob store just to be discarded on every query.
+    let gets = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let store = CompositeStore::with_body_cache(
+        InMemorySparqClient::new(),
+        RecordingBlob {
+            inner: InMemoryBlobStore::new(),
+            gets: std::sync::Arc::clone(&gets),
+        },
+        BodyCache::disabled(),
+    );
+    store
+        .write(ROOT, Bytes::new(), "text/turtle")
+        .await
+        .expect("seed root container");
+    store
+        .write(
+            "https://pod.example/.acl",
+            Bytes::from(format!(
+                r#"@prefix acl: <http://www.w3.org/ns/auth/acl#>.
+<#owner> a acl:Authorization; acl:agent <{WEBID}>;
+  acl:accessTo <{ROOT}>; acl:default <{ROOT}>;
+  acl:mode acl:Read, acl:Write, acl:Control."#
+            )),
+            "text/turtle",
+        )
+        .await
+        .expect("seed ACL");
+    store
+        .create_in_container(
+            ROOT,
+            "https://pod.example/a",
+            Bytes::from_static(b"<urn:a> <urn:p> \"visible\" ."),
+            "text/turtle",
+        )
+        .await
+        .expect("seed RDF resource");
+    let image = store
+        .create_in_container(
+            ROOT,
+            "https://pod.example/photo.png",
+            Bytes::from(vec![0x89u8; 4096]),
+            "image/png",
+        )
+        .await
+        .expect("seed non-RDF resource");
+    let rdf = store.meta("https://pod.example/a").await.unwrap().unwrap();
+
+    let issuer_key = KeyKit::generate();
+    let client_key = KeyKit::generate();
+    let config = VerifierConfig::new(vec![ISSUER.to_owned()], BASE_URL);
+    let replay = InMemoryReplayStore::with_window(config.replay_ttl());
+    let verifier = Verifier::new(config, jwks_provider(&issuer_key), replay).unwrap();
+    let app = build_router(AppState::new(
+        AuthContext::new(verifier, BASE_URL),
+        LdpState::new(store, BASE_URL),
+    ));
+
+    gets.lock().unwrap().clear();
+    let access = mint_access_token(&issuer_key, &client_key.thumbprint);
+    let proof = mint_dpop_proof(&client_key, "POST", &format!("{BASE_URL}/sparql"), &access);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/sparql")
+                .header("authorization", format!("DPoP {access}"))
+                .header("dpop", proof)
+                .header("content-type", "application/sparql-query")
+                .body(Body::from(
+                    "SELECT ?g WHERE { GRAPH ?g { ?s <urn:p> ?o } }".to_owned(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let rows = json(response).await;
+    assert_eq!(binding_values(&rows, "g"), ["https://pod.example/a"]);
+
+    let gets = gets.lock().unwrap();
+    assert!(
+        gets.contains(&rdf.blob_key),
+        "the readable RDF resource is fetched and loaded"
+    );
+    assert!(
+        !gets.contains(&image.blob_key),
+        "a readable non-RDF body must not be fetched by a SPARQL query (gets: {gets:?})"
     );
 }

@@ -1076,7 +1076,7 @@ fn stale_once_store() -> (CompositeStore<StaleOnceSparq, InMemoryBlobStore>, Sta
 }
 
 #[tokio::test]
-async fn read_retries_through_current_metadata_when_a_rewrite_reclaimed_its_blob() {
+async fn a_reclaimed_blob_is_retried_by_read_but_never_substituted_by_read_at() {
     let (s, stale) = stale_once_store();
     let v1 = s
         .write(IRI, Bytes::from_static(b"<a> <b> \"v1\" ."), "text/turtle")
@@ -1101,10 +1101,19 @@ async fn read_retries_through_current_metadata_when_a_rewrite_reclaimed_its_blob
     );
     assert_eq!(r.meta.blob_key, v2.blob_key);
 
-    // `read_at`: the caller holds v1 from its read plan; it gets v2 with v2's metadata.
-    let r = s.read_at(IRI, &v1).await.expect("read_at retries too");
-    assert_eq!(r.body, Bytes::from_static(b"<a> <b> \"v22\" ."));
-    assert_eq!(r.meta.etag, v2.etag);
+    // `read_at`: the caller holds (and authorized) v1 from its read plan. Its blob is reclaimed; the
+    // store must NOT hand back v2's bytes in its place — v2 was never authorized (a rewrite can
+    // change the ACL with it). It reports `ResourceChanged` so the caller restarts, authz included.
+    let err = s.read_at(IRI, &v1).await.unwrap_err();
+    assert!(
+        matches!(err, ServerError::ResourceChanged),
+        "read_at must never substitute a newer version's bytes, got {err:?}"
+    );
+    // Through the CURRENT pointer it serves exactly that version.
+    assert_eq!(
+        s.read_at(IRI, &v2).await.unwrap(),
+        Bytes::from_static(b"<a> <b> \"v22\" .")
+    );
 
     // Deleted in the window ⇒ NotFound, not a storage error.
     s.delete(IRI, None).await.unwrap();

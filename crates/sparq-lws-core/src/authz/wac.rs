@@ -538,11 +538,19 @@ impl<'a, S: Store> WacAuthorizer<'a, S> {
         // Miss: fetch the bytes through the just-probed metadata (read_at — no duplicate get_meta).
         // A concurrent DELETE between the probe and the fetch surfaces as NotFound ⇒ vanished
         // (keep walking); any other store error propagates (fail-closed) — matching `read_acl`.
-        // The returned resource carries the metadata its bytes were read through (a concurrent
-        // rewrite can move it past the probe), so the cache is keyed by THAT etag.
+        // A concurrent rotation that reclaimed the probed version's bytes surfaces as
+        // `ResourceChanged` (never the newer bytes under the probed etag): fall back to a fresh
+        // `read`, which parses + caches the CURRENT ACL under ITS etag — exactly the uncached path's
+        // "a rotation just means we parse the newer bytes" contract. The ACL is the authority being
+        // consulted, not a resource being served, so its newest version is the right one to apply.
         let resource = match self.store.read_at(acl, &meta).await {
-            Ok(r) => r,
+            Ok(body) => crate::store::Resource { body, meta },
             Err(ServerError::NotFound) => return Ok(None),
+            Err(ServerError::ResourceChanged) => match self.store.read(acl).await {
+                Ok(r) => r,
+                Err(ServerError::NotFound) => return Ok(None),
+                Err(e) => return Err(e),
+            },
             Err(e) => return Err(e),
         };
         let triples = Self::parse_acl_body(&resource, acl);

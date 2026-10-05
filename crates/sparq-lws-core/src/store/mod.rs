@@ -220,31 +220,39 @@ pub trait Store: Send + Sync {
         })
     }
 
-    /// Fetch a resource through ALREADY-HELD authoritative metadata (from THIS request's
+    /// Fetch a resource's bytes through ALREADY-HELD authoritative metadata (from THIS request's
     /// [`read_plan`](Store::read_plan) round) — the §3.3 `read_at`: no second `get_meta` on the
     /// common path. Blob keys are minted UNIQUE PER WRITE (`CompositeStore::mint_blob_key`), so
     /// bytes fetched through a held pointer are exactly the bytes that pointer committed with.
     ///
-    /// The held pointer can go stale: a concurrent rewrite or delete commits, and the store then
-    /// reclaims the superseded blob. The returned [`Resource`] therefore carries the metadata the
-    /// bytes were actually read through — `meta` itself on the common path, or a re-read current
-    /// record after such a race — and callers MUST take validators (ETag, Last-Modified, content
-    /// type) from it, never from the `meta` they passed in. A resource deleted in that window is
-    /// [`ServerError::NotFound`].
+    /// `read_at` serves ONLY the version `meta` names — the one the caller authorized. The held
+    /// pointer can go stale: a concurrent rewrite or delete commits and the store reclaims the
+    /// superseded blob. Then:
+    /// - the resource is gone ⇒ [`ServerError::NotFound`];
+    /// - a DIFFERENT version is current ⇒ [`ServerError::ResourceChanged`]. Its bytes are NOT
+    ///   returned: the caller authorized the old version, and a rewrite can change the governing
+    ///   ACL along with the body (public → private). The caller must restart its read,
+    ///   authorization included (see [`READ_RACE_RETRIES`]).
     ///
     /// The DEFAULT implementation re-reads via [`read`](Store::read) (metadata + bytes — the
-    /// pre-read-2 cost and semantics), so non-composite [`Store`] impls (test doubles) behave
-    /// exactly as before; [`CompositeStore`] overrides it with the direct blob fetch.
-    async fn read_at(&self, iri: &str, meta: &ResourceMeta) -> ServerResult<Resource> {
-        let _ = meta;
-        self.read(iri).await
+    /// pre-read-2 cost) and applies the same rule by etag, so non-composite [`Store`] impls (test
+    /// doubles) never substitute a newer version either; [`CompositeStore`] overrides it with the
+    /// direct blob fetch.
+    async fn read_at(&self, iri: &str, meta: &ResourceMeta) -> ServerResult<Bytes> {
+        let current = self.read(iri).await?;
+        if current.meta.etag != meta.etag {
+            return Err(ServerError::ResourceChanged);
+        }
+        Ok(current.body)
     }
 }
 
-/// How many times a read re-reads the metadata after finding its blob reclaimed by a concurrent
-/// rewrite/delete (see `CompositeStore::read_through`). Each retry needs ANOTHER commit to land in
-/// the window between its metadata read and its blob fetch, so a small bound suffices.
-const READ_RACE_RETRIES: usize = 3;
+/// How many times a read starts over after finding its blob reclaimed by a concurrent rewrite/delete:
+/// [`Store::read`] re-reads the metadata (see `CompositeStore::read_through`), and a planned read
+/// that gets [`ServerError::ResourceChanged`] from [`Store::read_at`] restarts its read plan AND its
+/// authorization. Each retry needs ANOTHER commit to land in the window between its metadata read
+/// and its blob fetch, so a small bound suffices.
+pub const READ_RACE_RETRIES: usize = 3;
 
 /// The default [`Store`]: SPARQ (authoritative metadata) + a blob store (backup bytes), with a
 /// [`BodyCache`] (read-4 — `backend-read-path.md` §3.4) in front of the blob byte-fetch.
@@ -304,6 +312,10 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
     /// metadata the bytes were actually read through so the caller's validators match the body. A
     /// resource deleted meanwhile is [`ServerError::NotFound`]. A blob missing under a pointer the
     /// index STILL holds (the re-read returns the same key) is a genuine byte/index inconsistency.
+    ///
+    /// Serving the CURRENT version is correct here only because [`Store::read`] holds no prior
+    /// version: it promises "the latest committed version", not a version a caller authorized.
+    /// [`Store::read_at`] — which does hold one — never comes through here (see its doc).
     async fn read_through(&self, iri: &str, mut meta: ResourceMeta) -> ServerResult<Resource> {
         let mut retries = 0;
         loop {
@@ -311,9 +323,8 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
                 return Ok(Resource { body, meta });
             }
             if retries == READ_RACE_RETRIES {
-                return Err(ServerError::Storage(
-                    "byte/index inconsistency (blob kept moving under concurrent writes)".into(),
-                ));
+                // The resource kept being rewritten under us: transient, so retryable (503).
+                return Err(ServerError::ResourceChanged);
             }
             retries += 1;
             let current = self.get_meta_mapped(iri).await?;
@@ -664,14 +675,22 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
             })
     }
 
-    async fn read_at(&self, iri: &str, meta: &ResourceMeta) -> ServerResult<Resource> {
+    async fn read_at(&self, iri: &str, meta: &ResourceMeta) -> ServerResult<Bytes> {
         // The §3.3 direct byte fetch through the held pointer — NO second `get_meta` on the common
         // path — through the read-4 body cache: the held `(blob_key, etag)` came from THIS request's
         // authoritative read-plan round, so a hit is exactly the bytes that metadata committed with
-        // (the unique-per-write blob key names an immutable object). If a concurrent rewrite/delete
-        // reclaimed that blob after the plan was read, `read_through` re-reads the metadata for `iri`
-        // and returns the current version with ITS metadata.
-        self.read_through(iri, meta.clone()).await
+        // (the unique-per-write blob key names an immutable object).
+        if let Some(body) = self.try_fetch_body(meta).await? {
+            return Ok(body);
+        }
+        // The blob is gone. Only now (the race path) re-read the index to say why — and NEVER serve
+        // the current version's bytes in place of the authorized one (see the trait doc).
+        let current = self.get_meta_mapped(iri).await?;
+        if current.blob_key == meta.blob_key {
+            // The index still points at the missing blob: not a race, a real inconsistency.
+            return Err(ServerError::Storage("byte/index inconsistency".into()));
+        }
+        Err(ServerError::ResourceChanged)
     }
 
     async fn list_children(&self, container: &str) -> ServerResult<Vec<ValidatedChildIri>> {
