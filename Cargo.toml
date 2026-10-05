@@ -130,6 +130,10 @@ libc = "0.2"
 # HNSW approximate nearest-neighbour search (sparq-vectors only, GenAI phase 4).
 # Chosen over hnsw_rs: pure Rust, minimal dependency tree, maintained (InstantDomain).
 instant-distance = "0.6"
+# RFC 3986 percent-encoding: the ONE encoder behind every query-value / ENCODE_FOR_URI site
+# (#3712). Already in the tree transitively (ureq / axum / url), audited via the imported
+# Mozilla + Bytecode-Alliance cargo-vet sets; no_std, zero deps.
+percent-encoding = "2.3"
 
 # sparq-vectors' accuracy gate (HNSW recall@10 vs brute force on 50k vectors) runs as
 # an ordinary `cargo test`, but HNSW construction at opt-level 0 is minutes-slow. These
