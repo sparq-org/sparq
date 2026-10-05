@@ -47,8 +47,10 @@ for _ in $(seq 1 100); do
 done
 cd "$LWS_NET"
 status=0
+# LWS.net's global.json selects Microsoft.Testing.Platform, which takes --report-trx rather than
+# VSTest's --logger (it exits 5, invalid arguments, on --logger).
 Suite__BaseUri="http://localhost:$PORT/" dotnet test Suite/Test \
-  --logger "trx;LogFileName=lws-net.trx" --results-directory "$OUT" || status=$?
+  --report-trx --report-trx-filename lws-net.trx --results-directory "$OUT" || status=$?
 # One line with the counts, as a CI annotation when running in GitHub Actions.
 counts=$(grep -o '<Counters [^>]*>' "$OUT/lws-net.trx" 2>/dev/null | head -1 || true)
 echo "${GITHUB_ACTIONS:+::notice title=lws-net::}lws-net ${counts:-no results}"
