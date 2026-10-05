@@ -7096,22 +7096,39 @@ impl SendLimits {
     /// The cancel flag and the deadline are checked before EVERY send, not only while waiting:
     /// a client that keeps draining must not let a cancelled or over-time render run on and
     /// still report completion.
+    ///
+    /// Timer use: only a send with a deadline waits on a tokio timer (a server with a query
+    /// timeout already needs the runtime's time driver for its read cap). Without one, the
+    /// send never touches tokio time, so an embedding runtime built without `enable_time()`
+    /// works: with no cancel flag either it is a plain `blocking_send`; with a cancel flag it
+    /// polls `try_reserve` with a short `std::thread::sleep` backoff.
     fn send<T>(&self, tx: &tokio::sync::mpsc::Sender<T>, item: T) -> Result<(), SendStop> {
+        use tokio::sync::mpsc::error::TrySendError;
+        if self.deadline.is_none() && self.cancel.is_none() {
+            return tx.blocking_send(item).map_err(|_| SendStop::Closed);
+        }
+        let mut backoff = Duration::from_millis(1);
         loop {
             let wait = self.check()?;
             // Wait for a free slot (or the poll interval) without sending, so the item is kept
-            // for the retry. Off a runtime (unit tests), poll with `try_reserve` instead.
-            let permit = match tokio::runtime::Handle::try_current() {
-                Ok(rt) => match rt.block_on(tokio::time::timeout(wait, tx.reserve())) {
+            // for the retry.
+            let rt = match self.deadline {
+                Some(_) => tokio::runtime::Handle::try_current().ok(),
+                None => None,
+            };
+            let permit = match rt {
+                Some(rt) => match rt.block_on(tokio::time::timeout(wait, tx.reserve())) {
                     Ok(Ok(permit)) => permit,
                     Ok(Err(_)) => return Err(SendStop::Closed),
                     Err(_elapsed) => continue,
                 },
-                Err(_) => match tx.try_reserve() {
+                // Timer-free: no deadline (cancel-only), or no runtime (unit tests).
+                None => match tx.try_reserve() {
                     Ok(permit) => permit,
-                    Err(tokio::sync::mpsc::error::TrySendError::Closed(())) => return Err(SendStop::Closed),
-                    Err(tokio::sync::mpsc::error::TrySendError::Full(())) => {
-                        std::thread::sleep(wait.min(Duration::from_millis(1)));
+                    Err(TrySendError::Closed(())) => return Err(SendStop::Closed),
+                    Err(TrySendError::Full(())) => {
+                        std::thread::sleep(backoff.min(wait));
+                        backoff = (backoff * 2).min(STREAM_SEND_POLL);
                         continue;
                     }
                 },
@@ -8194,6 +8211,35 @@ mod stalled_reader_tests {
         assert!(state.running_queries.cancel_query(&id));
         wait_for_worker_exit(&state).await;
         assert_eq!(truncated_trailer(resp).await.as_deref(), Some("cancelled"));
+    }
+
+    /// An embedding runtime built without `enable_time()` and a server with no query
+    /// timeout: streamed SELECT and CONSTRUCT must not reach for a tokio timer (which would
+    /// panic in the worker and turn the request into a 500). Both answer 200 with complete
+    /// bodies.
+    #[test]
+    fn streams_work_on_a_runtime_without_a_time_driver() {
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_io()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let config = ServerConfig { query_timeout: None, ..ServerConfig::default() };
+            let state = AppState::with_config(big_graph(), config);
+            for (query, expect) in [
+                ("SELECT * WHERE { ?s ?p ?o }", "]}}"),
+                ("CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o }", " .\n"),
+            ] {
+                let uri = format!("/sparql?query={}", urlencoding_min(query));
+                let req = axum::http::Request::builder().uri(uri).body(axum::body::Body::empty()).unwrap();
+                let resp = router(state.clone()).oneshot(req).await.unwrap();
+                assert_eq!(resp.status(), StatusCode::OK, "{query}");
+                let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.expect("a complete body");
+                assert!(body.len() > 2 * 1024 * 1024 - 1, "{query}: the body is the whole result");
+                assert!(body.ends_with(expect.as_bytes()), "{query}: the document is complete");
+            }
+        });
     }
 }
 
