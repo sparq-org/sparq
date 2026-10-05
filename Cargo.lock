@@ -5119,6 +5119,7 @@ version = "0.1.3"
 dependencies = [
  "oxrdf 0.3.3",
  "oxttl 0.2.3",
+ "percent-encoding",
  "rustc-hash 2.1.3",
  "serde",
  "serde_json",
@@ -5268,6 +5269,7 @@ version = "0.1.3"
 dependencies = [
  "oxrdf 0.3.3",
  "oxttl 0.2.3",
+ "percent-encoding",
  "serde",
  "serde_json",
  "spargebra",
@@ -5380,6 +5382,7 @@ name = "sparq-metamorph"
 version = "0.1.3"
 dependencies = [
  "criterion",
+ "percent-encoding",
  "serde",
  "serde_json",
  "sparq-core",
@@ -5472,7 +5475,9 @@ dependencies = [
 name = "sparq-reason"
 version = "0.1.3"
 dependencies = [
+ "oxiri",
  "oxrdf 0.3.3",
+ "percent-encoding",
  "quick-xml 0.41.0",
  "rayon",
  "regex",
@@ -5606,6 +5611,7 @@ dependencies = [
  "oxrdf 0.3.3",
  "oxrdfxml",
  "oxttl 0.2.3",
+ "percent-encoding",
  "quinn",
  "reqwest",
  "rustls",

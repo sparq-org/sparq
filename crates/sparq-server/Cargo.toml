@@ -239,7 +239,7 @@ complete = ["server", "dep:sparq-text"]
 # untouched. STILL OFF AT RUNTIME by default even when compiled in — the operator must additionally
 # set `--tpf` / `SPARQ_TPF=1` (`ServerConfig::tpf`), mirroring `federation-descriptors`. Without the
 # feature, zero cost: no route, byte-identical to before.
-tpf = ["server"]
+tpf = ["server", "dep:percent-encoding"]
 # [OPUS-4.8] (sq-dxhb, epic sq-3183) `brtpf` (default OFF, implies `tpf`) extends the TPF
 # endpoint to bindings-restricted Triple Pattern Fragments (brTPF — Hartig & Buil-Aranda,
 # ODBASE 2016): a client may attach a SET of solution mappings (a `values` parameter on the
@@ -579,6 +579,9 @@ futures-util = { version = "0.3", optional = true, default-features = false }
 # Subscription protocol messages + result diffs (T23) — already in axum's dependency
 # graph (its `json` feature), so this adds no new transitive code.
 serde_json = { version = "1", optional = true }
+# #3712: the TPF `hydra:next` query-value encoder (`pct_encode`) — already in axum's
+# dependency graph, so this adds no new transitive code.
+percent-encoding = { workspace = true, optional = true }
 # [OPUS-4.8] (sq-ebii) Bounded gzip inflate for `Content-Encoding: gzip` request bodies
 # (the GSP write / RDF-load path) under the decompression-ratio cap (zip-bomb guard). Same
 # `flate2 = "1"` the CLI / parse / hdt crates already use, so the workspace gains no new

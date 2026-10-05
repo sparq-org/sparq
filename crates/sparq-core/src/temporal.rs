@@ -119,9 +119,12 @@ impl Timeline {
 
 /// The XPath dateTime/date comparison on precomputed instants: direct when both
 /// or neither operand carries a timezone; with MIXED presence only decidable
-/// outside the ±14h window (inside it: indeterminate -> `None`).
+/// outside the ±14h window (inside it — including exactly 14h — indeterminate -> `None`).
+/// Public so every XSD-ordering consumer (the engine via [`Timeline`]/[`Temporal`],
+/// sparq-shacl's `sh:lessThan`/range comparisons on its own instants) shares this ONE
+/// window rule (#3526).
 #[inline]
-fn cmp_instants(ai: f64, a_tz: bool, bi: f64, b_tz: bool) -> Option<Ordering> {
+pub fn cmp_instants(ai: f64, a_tz: bool, bi: f64, b_tz: bool) -> Option<Ordering> {
     // Same (or no) timezone: a direct compare. With MIXED presence the order is
     // only decidable outside the ±14h window; inside it the result is indeterminate.
     if a_tz == b_tz || (ai - bi).abs() > 14.0 * 3600.0 {
