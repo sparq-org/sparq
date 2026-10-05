@@ -3,7 +3,7 @@
 // counterexample (tests/proptest_canon_determinism.rs, seed
 // cc 14c0b82fcdfee2504e7e213e7c440c3f891a8ba23ad553051fd08ab226c0cf2a); it
 // reproduced in unmodified rdf-canon 0.15.3. Root cause and patch:
-// vendor/rdf-canon/SPARQ-PATCHES.md §1.
+// src/rdfc/SPARQ-PATCHES.md §1 (and §2 for the EXTENDED case below).
 
 use sparq_canon::{canonicalize_nquads, canonicalize_quads, parse_nquads};
 
@@ -56,6 +56,81 @@ fn issue_6475_all_label_permutations_agree() {
     check(&perm);
     let mut i = 0;
     while i < 4 {
+        if c[i] < i {
+            if i % 2 == 0 {
+                perm.swap(0, i);
+            } else {
+                perm.swap(c[i], i);
+            }
+            check(&perm);
+            c[i] += 1;
+            i = 0;
+        } else {
+            c[i] = 0;
+            i += 1;
+        }
+    }
+}
+
+// Review follow-up on #6475: ORIGINAL plus two root nodes. `_:b1` relates to `_:b2`
+// and `_:b3` with the same related hash, and the two Hash N-Degree Quads paths
+// through them are EQUAL. Unpatched HNDQ keeps the first permutation, so its issuer
+// (and the c14n4/c14n5 split of the <http://ex/q> quads) followed the input labels.
+// `_:b1` and `_:b5` get different N-degree hashes, so the 4.4.3 (5.3) tie-break never
+// sees this tie; SPARQ PATCH §2 resolves it inside HNDQ.
+const EXTENDED: &str = "\
+_:b4 <http://ex/q> _:b2 _:b3 .
+_:b4 <http://ex/p> _:b0 .
+_:b0 <http://ex/q> _:b3 _:b2 .
+_:b1 <http://ex/root0> _:b2 .
+_:b1 <http://ex/root0> _:b3 .
+_:b5 <http://ex/root0> _:b0 .
+_:b5 <http://ex/root0> _:b4 .
+";
+
+const EXTENDED_LABELS: [&str; 6] = ["b0", "b1", "b2", "b3", "b4", "b5"];
+
+/// Rename `labels[i]` to `labels[perm[i]]` (two-phase, so overlapping labels cannot collide).
+fn relabel(text: &str, labels: &[&str], perm: &[usize]) -> String {
+    let mut text = text.to_string();
+    for (i, l) in labels.iter().enumerate() {
+        text = text.replace(&format!("_:{l} "), &format!("_:T{i} "));
+    }
+    for (i, &p) in perm.iter().enumerate() {
+        text = text.replace(&format!("_:T{i} "), &format!("_:{} ", labels[p]));
+    }
+    text
+}
+
+#[test]
+fn equal_hndq_paths_swap_b2_b3_is_relabel_invariant() {
+    // Swap b2 <-> b3 only: the reported counterexample.
+    let swapped = relabel(EXTENDED, &EXTENDED_LABELS, &[0, 1, 3, 2, 4, 5]);
+    assert_eq!(
+        canonicalize_nquads(&swapped).unwrap(),
+        canonicalize_nquads(EXTENDED).unwrap(),
+        "swapping _:b2 and _:b3 changed the canonical form:\n{swapped}"
+    );
+}
+
+#[test]
+fn equal_hndq_paths_all_label_permutations_agree() {
+    let reference = canonicalize_nquads(EXTENDED).unwrap();
+    let n = EXTENDED_LABELS.len();
+    let mut perm: Vec<usize> = (0..n).collect();
+    let mut c = vec![0usize; n];
+    let check = |perm: &[usize]| {
+        let text = relabel(EXTENDED, &EXTENDED_LABELS, perm);
+        assert_eq!(
+            canonicalize_nquads(&text).unwrap(),
+            reference,
+            "relabeling {perm:?} changed the canonical form:\n{text}"
+        );
+    };
+    // Heap's algorithm over all 720 permutations of the label pool.
+    check(&perm);
+    let mut i = 0;
+    while i < n {
         if c[i] < i {
             if i % 2 == 0 {
                 perm.swap(0, i);

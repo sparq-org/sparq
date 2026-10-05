@@ -1,12 +1,15 @@
-use crate::{
+// Upstream rdf-canon 0.15.3 code is kept verbatim outside the [SPARQ PATCH] hunks so it
+// stays diffable; these lints fire only on that upstream code.
+#![allow(clippy::for_kv_map, clippy::non_canonical_partial_ord_impl)]
+
+use super::{
     counter::{HndqCallCounter, SimpleHndqCallCounter},
     error::CanonicalizationError,
 };
 use digest::Digest;
 use itertools::Itertools;
-use oxrdf::{
-    BlankNode, Dataset, Graph, GraphName, GraphNameRef, Quad, QuadRef, Subject, SubjectRef, Term,
-    TermRef, TripleRef,
+use oxrdf02::{
+    BlankNode, Dataset, GraphName, GraphNameRef, Quad, QuadRef, Subject, SubjectRef, Term, TermRef,
 };
 use std::collections::{BTreeMap, HashMap};
 
@@ -28,6 +31,10 @@ struct CanonicalizationState {
     ///   An identifier issuer, initialized with the prefix c14n, for
     ///   issuing canonical blank node identifiers.
     canonical_issuer: IdentifierIssuer,
+
+    /// [SPARQ PATCH §1] First-degree hash of every blank node (4.4.3 step 3), kept so the
+    /// label-independent tie-break keys can name a not-yet-issued blank node structurally.
+    first_degree_hashes: HashMap<String, String>,
 }
 
 impl CanonicalizationState {
@@ -38,6 +45,7 @@ impl CanonicalizationState {
             blank_node_to_quads_map: BTreeMap::<String, Vec<Quad>>::new(),
             hash_to_blank_node_map: BTreeMap::<String, Vec<String>>::new(),
             canonical_issuer: IdentifierIssuer::new(Self::DEFAULT_CANONICAL_IDENTIFER_PREFIX),
+            first_degree_hashes: HashMap::<String, String>::new(),
         }
     }
 
@@ -267,6 +275,7 @@ pub fn canonicalize_core<D: Digest>(
             .or_default()
             .push(n.clone());
     }
+    state.first_degree_hashes = first_degree_hashes; // [SPARQ PATCH §1]
 
     #[cfg(feature = "log")]
     span_ca_3.exit();
@@ -404,13 +413,20 @@ pub fn canonicalize_core<D: Digest>(
         // with the canonical identifiers they would receive (other blank nodes are shown
         // by their first-degree hash). For automorphic ties every choice yields the same
         // output, so this never changes a result that was already label-independent.
-        if hash_path_list.windows(2).any(|w| w[0].hash == w[1].hash) {
-            let mut keyed: Vec<(String, HashNDegreeQuadsResult)> = hash_path_list
-                .into_iter()
-                .map(|r| (tie_break_key(&state, &r.issuer, &first_degree_hashes), r))
-                .collect();
-            keyed.sort_by(|(ka, ra), (kb, rb)| ra.hash.cmp(&rb.hash).then_with(|| ka.cmp(kb)));
-            hash_path_list = keyed.into_iter().map(|(_, r)| r).collect();
+        // Only results inside a tied run are keyed. A key covers the quads of nodes the
+        // result's HNDQ run already visited, so it costs no more than producing the result.
+        let mut start = 0;
+        while start < hash_path_list.len() {
+            let end = start
+                + hash_path_list[start..]
+                    .iter()
+                    .take_while(|r| r.hash == hash_path_list[start].hash)
+                    .count();
+            if end - start > 1 {
+                hash_path_list[start..end]
+                    .sort_by_cached_key(|r| canonical_tie_break_key(&state, &r.issuer));
+            }
+            start = end;
         }
 
         #[cfg(feature = "log")]
@@ -508,37 +524,76 @@ fn issued_in_order(issuer: &IdentifierIssuer) -> Vec<&String> {
     inverted_map.into_values().collect()
 }
 
-/// [SPARQ PATCH §1] Label-independent secondary sort key for N-degree results whose
-/// hashes tie (see 4.4.3 (5.3)). Simulates issuing `issuer`'s identifiers on a copy of
-/// the canonical issuer, then serializes (sorted, deduplicated) every quad that mentions
-/// a newly issued node, writing issued blank nodes by their prospective canonical
-/// identifier and all other blank nodes by their first-degree hash. Nothing in the key
-/// depends on input blank-node labels.
-fn tie_break_key(
-    state: &CanonicalizationState,
-    issuer: &IdentifierIssuer,
-    first_degree_hashes: &HashMap<String, String>,
-) -> String {
-    let mut prospective = state.canonical_issuer.clone();
+/// [SPARQ PATCH §1] Label-independent secondary sort key for 4.4.3 (5.3) results whose
+/// N-degree hashes tie. Issues `issuer`'s identifiers, in order, on a prospective overlay
+/// that only reads the canonical issuer (nothing is cloned), then serializes the quads of
+/// every newly issued node (see [`structural_key`]).
+fn canonical_tie_break_key(state: &CanonicalizationState, issuer: &IdentifierIssuer) -> String {
+    let canonical = &state.canonical_issuer;
+    let mut prospective = HashMap::<&str, String>::new();
     let mut newly_issued = Vec::new();
     for existing in issued_in_order(issuer) {
-        if prospective.get(existing).is_none() {
-            prospective.issue(existing);
+        if !canonical.issued_identifiers_map.contains_key(existing) {
+            let counter = canonical.identifier_counter + prospective.len();
+            prospective.insert(
+                existing,
+                format!("{}{counter}", canonical.identifier_prefix),
+            );
             newly_issued.push(existing);
         }
     }
-    let label = |b: &BlankNode| match prospective.get(b.as_str()) {
+    structural_key(state, &newly_issued, |b| {
+        canonical
+            .issued_identifiers_map
+            .get(b)
+            .or_else(|| prospective.get(b))
+    })
+}
+
+/// [SPARQ PATCH §2] Label-independent key for choosing between equal chosen-path
+/// candidates in 4.8.3 (5.4.6). Every identifier `base` (the issuer at the start of this
+/// Hn entry) already holds is the same in all candidates, so only the nodes `candidate`
+/// issued on top of it are serialized (see [`structural_key`]).
+fn path_tie_break_key(
+    state: &CanonicalizationState,
+    base: &IdentifierIssuer,
+    candidate: &IdentifierIssuer,
+) -> String {
+    let newly_issued: Vec<&String> = issued_in_order(candidate)
+        .into_iter()
+        .filter(|n| !base.issued_identifiers_map.contains_key(*n))
+        .collect();
+    structural_key(state, &newly_issued, |b| {
+        state
+            .canonical_issuer
+            .issued_identifiers_map
+            .get(b)
+            .or_else(|| candidate.issued_identifiers_map.get(b))
+    })
+}
+
+/// [SPARQ PATCH §1/§2] The sorted, deduplicated quads that mention any of `nodes`, with
+/// each blank node written as `_:<id>` when `id` gives it one (a canonical `c14nN` or a
+/// temporary `bN` identifier) and as `_:h<first-degree hash>` otherwise. Nothing here
+/// depends on input blank-node labels. Its cost is linear in the quads of `nodes`, which
+/// the HNDQ run that issued them has already walked.
+fn structural_key<'a>(
+    state: &CanonicalizationState,
+    nodes: &[&String],
+    id: impl Fn(&str) -> Option<&'a String>,
+) -> String {
+    let label = |b: &BlankNode| match id(b.as_str()) {
         Some(id) => format!("_:{id}"),
         None => format!(
             "_:h{}",
-            first_degree_hashes
+            state
+                .first_degree_hashes
                 .get(b.as_str())
-                .map(String::as_str)
-                .unwrap_or("")
+                .map_or("", String::as_str)
         ),
     };
     let mut lines = Vec::<String>::new();
-    for n in newly_issued {
+    for n in nodes {
         for quad in state.get_quads_for_blank_node(n).into_iter().flatten() {
             let subject = match &quad.subject {
                 Subject::BlankNode(b) => label(b),
@@ -556,7 +611,7 @@ fn tie_break_key(
             lines.push(format!("{subject} {} {object}{graph} .\n", quad.predicate));
         }
     }
-    lines.sort();
+    lines.sort_unstable();
     lines.dedup();
     lines.concat()
 }
@@ -867,9 +922,7 @@ fn hash_n_degree_quads<D: Digest>(
 
                 // 3.1.2) Add a mapping of hash to the blank node identifier for component to Hn,
                 // adding an entry as necessary.
-                h_n.entry(hash)
-                    .or_default()
-                    .push(bnode_id);
+                h_n.entry(hash).or_default().push(bnode_id);
             };
         };
         // 3.1) For each component in quad, where component is the subject, object, or graph name,
@@ -898,9 +951,7 @@ fn hash_n_degree_quads<D: Digest>(
 
                 // 3.1.2) Add a mapping of hash to the blank node identifier for component to Hn,
                 // adding an entry as necessary.
-                h_n.entry(hash)
-                    .or_default()
-                    .push(bnode_id);
+                h_n.entry(hash).or_default().push(bnode_id);
             };
         };
         // 3.1) For each component in quad, where component is the subject, object, or graph name,
@@ -928,9 +979,7 @@ fn hash_n_degree_quads<D: Digest>(
 
                 // 3.1.2) Add a mapping of hash to the blank node identifier for component to Hn,
                 // adding an entry as necessary.
-                h_n.entry(hash)
-                    .or_default()
-                    .push(bnode_id);
+                h_n.entry(hash).or_default().push(bnode_id);
             };
         };
 
@@ -982,6 +1031,9 @@ fn hash_n_degree_quads<D: Digest>(
         // 5.3) Create an unset chosen issuer variable.
         let mut chosen_issuer = IdentifierIssuer::new("UNSET");
 
+        // [SPARQ PATCH §2] Lazily computed `path_tie_break_key` of chosen issuer.
+        let mut chosen_key: Option<String> = None;
+
         // 5.4) For each permutation p of blank node list:
 
         #[cfg(feature = "log")]
@@ -1026,7 +1078,8 @@ fn hash_n_degree_quads<D: Digest>(
             #[cfg(feature = "log")]
             debug!("with:");
 
-            for related in p {
+            let p_len = p.len();
+            for (i, related) in p.into_iter().enumerate() {
                 #[cfg(feature = "log")]
                 debug!(indent = 1, "- related: {}", related);
 
@@ -1057,7 +1110,14 @@ fn hash_n_degree_quads<D: Digest>(
                 #[cfg(feature = "log")]
                 debug!(indent = 2, "path: \"{}\"", path);
 
-                if !chosen_path.is_empty() && path.len() >= chosen_path.len() && path >= chosen_path
+                // [SPARQ PATCH §2] Upstream also skips when path EQUALS chosen path,
+                // which drops a tied candidate before 5.4.6 can compare it. Skip on
+                // equality only when more will still be appended (the final path is then
+                // strictly greater); a complete tie goes on to the 5.4.6 tie-break.
+                if !chosen_path.is_empty()
+                    && path.len() >= chosen_path.len()
+                    && (path > chosen_path
+                        || (path == chosen_path && (i + 1 < p_len || !recursion_list.is_empty())))
                 {
                     continue 'perm_loop;
                 }
@@ -1084,7 +1144,8 @@ fn hash_n_degree_quads<D: Digest>(
                 }
             }
 
-            for related in recursion_list {
+            let recursion_len = recursion_list.len();
+            for (k, related) in recursion_list.into_iter().enumerate() {
                 #[cfg(feature = "log")]
                 debug!(indent = 1, "- related: {}", related);
 
@@ -1136,7 +1197,10 @@ fn hash_n_degree_quads<D: Digest>(
                 // 5.4.5.5) If chosen path is not empty and the length of path is greater
                 // than or equal to the length of chosen path and path is greater than
                 // chosen path when considering code point order, then skip to the next p.
-                if !chosen_path.is_empty() && path.len() >= chosen_path.len() && path >= chosen_path
+                // [SPARQ PATCH §2] As in 5.4.4.3: equality skips only if more follows.
+                if !chosen_path.is_empty()
+                    && path.len() >= chosen_path.len()
+                    && (path > chosen_path || (path == chosen_path && k + 1 < recursion_len))
                 {
                     continue 'perm_loop;
                 }
@@ -1152,6 +1216,21 @@ fn hash_n_degree_quads<D: Digest>(
             if chosen_path.is_empty() || path < chosen_path {
                 chosen_path = path;
                 chosen_issuer = issuer_copy;
+                chosen_key = None;
+            } else if path == chosen_path && issuer_copy != chosen_issuer {
+                // [SPARQ PATCH §2] Equal paths are, per spec, resolved by permutation
+                // order, which follows the input blank-node labels; when the candidates'
+                // issuers differ, the returned issuer (and so later paths and the issued
+                // canonical identifiers) would leak those labels. Keep the candidate with
+                // the smaller label-independent key instead. Automorphic candidates yield
+                // the same output either way.
+                let key = path_tie_break_key(state, &issuer, &issuer_copy);
+                let current = chosen_key
+                    .get_or_insert_with(|| path_tie_break_key(state, &issuer, &chosen_issuer));
+                if key < *current {
+                    *current = key;
+                    chosen_issuer = issuer_copy;
+                }
             }
         }
 
@@ -1228,18 +1307,9 @@ pub fn serialize(dataset: &Dataset) -> String {
         .collect()
 }
 
-pub fn serialize_graph(graph: &Graph) -> String {
-    let mut ordered_graph: Vec<TripleRef> = graph.iter().collect();
-    ordered_graph.sort_by_cached_key(|t| t.to_string());
-    ordered_graph
-        .iter()
-        .map(|t| t.to_string() + " .\n")
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
-    use oxrdf::{BlankNode, NamedNode, NamedNodeRef};
+    use oxrdf02::{BlankNode, NamedNode, NamedNodeRef};
     use sha2::Sha256;
 
     use super::*;

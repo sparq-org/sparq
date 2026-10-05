@@ -5,7 +5,7 @@ members = ["crates/sparq-core", "crates/sparq-engine", "crates/sparq-cli", "crat
 # (libFuzzer codegen), so it is excluded from the workspace to keep the STABLE
 # `cargo build`/`cargo test`/`clippy --workspace` gate from ever trying to compile it.
 # Build/run it only via `cargo +nightly fuzz run <target>` from `fuzz/`. [OPUS-4.8]
-exclude = ["vendor/spargebra", "vendor/rdf-canon", "fuzz", "gui/src-tauri"]
+exclude = ["vendor/spargebra", "fuzz", "gui/src-tauri"]
 # `gui/src-tauri` (bead sq-2e93) is the Tauri 2 desktop GUI scaffold. It has its OWN
 # `[workspace]` table (a standalone crate root) AND is excluded here so Tauri's heavy,
 # webview-system-lib-dependent dependency tree (webkit2gtk / WebView2 / WKWebView) never
@@ -27,11 +27,6 @@ exclude = ["vendor/spargebra", "vendor/rdf-canon", "fuzz", "gui/src-tauri"]
 # section of SPARQ-PATCHES.md before starting.
 [patch.crates-io]
 spargebra = { path = "vendor/spargebra" }
-# Vendored rdf-canon 0.15.3 + a label-independent tie-break for tied N-degree hashes
-# (RDFC-1.0 §4.4.3 step 5.3; sparq-org/sparq#6475). Applies to every workspace consumer,
-# including sparq-difftest's rdf-canon oracle. See vendor/rdf-canon/SPARQ-PATCHES.md;
-# drop once an upstream release passes crates/sparq-canon/tests/bnode_relabel_regression.rs.
-rdf-canon = { path = "vendor/rdf-canon" }
 
 [workspace.package]
 version = "0.1.3"
