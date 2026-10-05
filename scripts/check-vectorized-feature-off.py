@@ -100,6 +100,10 @@ _MOD_DECL = re.compile(
 # declaration the parser above does not understand.
 _MOD_DECL_LOOSE = re.compile(r'\bmod\s+[A-Za-z_][A-Za-z0-9_]*\s*;')
 _PATH_ATTR = re.compile(r'^#\s*\[\s*path\s*=\s*"([^"]+)"\s*\]$')
+# `#[cfg_attr(<pred>, ..., path = "x.rs")]` switches a module's file per
+# configuration. Leg 3 does not model that; such a declaration fails as unsupported.
+_CFG_ATTR_HEAD = re.compile(r'^#\s*\[\s*cfg_attr\s*\(')
+_STRING_LIT = re.compile(r'"(?:[^"\\]|\\.)*"')
 _CFG_ATTR = re.compile(r'^#\s*\[\s*cfg\s*\((.*)\)\s*\]$', re.S)
 _CFG_TOKEN = re.compile(r'\s*(?:([A-Za-z_][A-Za-z0-9_]*)|("(?:[^"\\]|\\.)*")|([(),=]))')
 
@@ -519,15 +523,33 @@ def _child_module_decls(repo_root: str, rel: str, lines: list[str]):
             continue
         name = m.group(1)
         attrs: list[str] = list(same_line_attrs)
+        problem = None
         i = lineno - 2
-        while i >= 0 and lines[i].lstrip().startswith(("#", "//")):
-            if not lines[i].lstrip().startswith("//"):
-                more, tail = _split_leading_attrs(lines[i])
-                if tail.strip():
-                    break
+        while i >= 0:
+            prev = lines[i].strip()
+            if not prev or prev.startswith("//"):
+                i -= 1
+                continue
+            more, tail = _split_leading_attrs(prev)
+            if prev.startswith("#") and more and not tail.strip():
                 attrs.extend(more)
-            i -= 1
+                i -= 1
+                continue
+            if prev.endswith("]"):
+                # The tail of an attribute that spans several lines: its content
+                # (cfg, path, cfg_attr) cannot be read line by line.
+                problem = ("multi-line attribute before the `mod` declaration is "
+                           "unsupported: " + prev)
+            break
         is_gated = any(_attr_gates_vectorized(a) for a in attrs)
+        if problem is None and any(
+                _CFG_ATTR_HEAD.match(a.strip())
+                and re.search(r'\bpath\b', _STRING_LIT.sub('""', a)) for a in attrs):
+            problem = ("`cfg_attr(..., path = ...)` on a `mod` declaration is "
+                       "unsupported: leg 3 cannot tell which file rustc compiles")
+        if problem is not None:
+            yield lineno, name, None, is_gated, problem
+            continue
         if line[:len(line) - len(line.lstrip())]:
             yield lineno, name, None, is_gated, (
                 "indented out-of-line `mod` declaration (inside an inline module)")
@@ -560,9 +582,12 @@ def check_leg3(repo_root: str = ".") -> int:
        _EXEC_PATH_CHILDREN: every line referencing vectorized call sites (chunk::,
        DataChunk, SelVec, VecCmp, apply_filter_columnar) is inside a
        #[cfg(feature="vectorized")] block, has the guard within 3 preceding lines, or
-       sits in a module whose `mod` declaration is gated on `vectorized`.
+       sits in a module whose every `mod` declaration (or a gated ancestor) is
+       gated on `vectorized`.
     3. Tripwire: every `mod x;` declared by exec.rs (or by a scanned child) resolves
-       to a file in that scanned set; otherwise the audit fails.
+       to a file in that scanned set; otherwise the audit fails. A declaration
+       carrying `cfg_attr(..., path = ...)` or a multi-line attribute is
+       unsupported and also fails.
     """
     violations: list[str] = []
     findings: list[str] = []
@@ -608,9 +633,14 @@ def check_leg3(repo_root: str = ".") -> int:
 
     # Tripwire: every `mod x;` that exec.rs (or a child) declares must resolve to a
     # file this audit scans. Otherwise a vectorized reference could hide in an
-    # unscanned module. Files whose declaration is cfg-gated on `vectorized` (or whose
-    # ancestor's is) are gated as a whole.
-    gated: dict[str, str] = {}
+    # unscanned module.
+    #
+    # Gating: a file counts as gated only if EVERY declaration that reaches it is
+    # gated, either by its own cfg or because the declaring file is itself gated. All
+    # declarations are collected first, then the gated set is the greatest fixpoint
+    # of that rule (exec.rs is never gated), so two declarations of one file, one
+    # gated and one not, leave it ungated, and descendants inherit the result.
+    incoming: dict[str, list[tuple[str, bool, str]]] = {}
     queue = [_EXEC_RS] if texts.get(_EXEC_RS) else []
     seen: set[str] = set(queue)
     decl_count = 0
@@ -631,11 +661,21 @@ def check_leg3(repo_root: str = ".") -> int:
                     f"{child}, which leg 3 does not scan. Move it under {_EXEC_DIR}/ or "
                     "add it to _EXEC_PATH_CHILDREN.")
                 continue
-            if (is_gated or parent in gated) and child not in gated:
-                gated[child] = where
+            incoming.setdefault(child, []).append((parent, is_gated, where))
             if child not in seen:
                 seen.add(child)
                 queue.append(child)
+
+    gated_set = {f for f in incoming if f != _EXEC_RS}
+    changed = True
+    while changed:
+        changed = False
+        for f in list(gated_set):
+            if not all(g or p in gated_set for p, g, _ in incoming[f]):
+                gated_set.discard(f)
+                changed = True
+    gated: dict[str, str] = {
+        f: ", ".join(w for _, _, w in incoming[f]) for f in sorted(gated_set)}
 
     for rel in audited:
         lines = texts[rel]
@@ -822,6 +862,47 @@ _LEG3_TREES_NON_GATING_CFG = [
 ]
 # A `mod x;` whose file cannot be resolved must fail closed.
 _LEG3_TREE_UNRESOLVABLE = {_EXEC_RS: "mod nothere;\n"}
+
+
+def _leg3_tree_cfg_attr(decl: str) -> dict[str, str]:
+    """exec.rs holds `decl`; the default file exec/child.rs is clean and the
+    cfg_attr target src/elsewhere.rs holds an ungated reference."""
+    return {_EXEC_RS: decl, f"{_EXEC_DIR}/child.rs": "fn ok() {}\n",
+            "crates/sparq-engine/src/elsewhere.rs": _LEG3_UNGATED}
+
+
+# `cfg_attr(..., path = ...)` picks the module file per configuration; leg 3 must
+# fail on it as unsupported instead of auditing the default path.
+_LEG3_TREES_CFG_ATTR_PATH = [
+    _leg3_tree_cfg_attr('#[cfg_attr(feature = "vectorized", path = "elsewhere.rs")]\nmod child;\n'),
+    _leg3_tree_cfg_attr('#[cfg_attr(test, path="elsewhere.rs")] pub(crate) mod child;\n'),
+    _leg3_tree_cfg_attr('# [ cfg_attr ( all(test), path = "elsewhere.rs" ) ]\n\nmod child;\n'),
+    _leg3_tree_cfg_attr('#[cfg_attr(test, cfg_attr(unix, path = "elsewhere.rs"))]\nmod child;\n'),
+    _leg3_tree_cfg_attr('#[cfg_attr(\n    test,\n    path = "elsewhere.rs"\n)]\nmod child;\n'),
+]
+# cfg_attr without `path` (a `path` inside a string does not count) is fine.
+_LEG3_TREES_CFG_ATTR_OK = [
+    _leg3_tree_cfg_attr('#[cfg_attr(test, allow(dead_code))]\nmod child;\n'),
+    _leg3_tree_cfg_attr('#[cfg_attr(test, doc = "see path = x")] mod child;\n'),
+]
+
+_LEG3_GATED_DECL = '#[cfg(feature = "vectorized")]\n#[path = "exec/child.rs"]\nmod vec_child;\n'
+_LEG3_PLAIN_DECL = '#[path = "exec/child.rs"]\nmod plain_child;\n'
+# One file reached by a gated AND an ungated declaration is NOT gated, in either
+# order, and neither is anything it declares.
+_LEG3_TREES_MIXED_DECLS = [
+    {_EXEC_RS: _LEG3_GATED_DECL + _LEG3_PLAIN_DECL, f"{_EXEC_DIR}/child.rs": _LEG3_UNGATED},
+    {_EXEC_RS: _LEG3_PLAIN_DECL + _LEG3_GATED_DECL, f"{_EXEC_DIR}/child.rs": _LEG3_UNGATED},
+    {_EXEC_RS: _LEG3_GATED_DECL + _LEG3_PLAIN_DECL, f"{_EXEC_DIR}/child.rs": "mod grand;\n",
+     f"{_EXEC_DIR}/child/grand.rs": _LEG3_UNGATED},
+]
+# Every declaration gated (directly or through a gated parent): accepted.
+_LEG3_TREES_ALL_DECLS_GATED = [
+    {_EXEC_RS: _LEG3_GATED_DECL + '#[cfg(all(test, feature = "vectorized"))]\n'
+     '#[path = "exec/child.rs"]\nmod again;\n', f"{_EXEC_DIR}/child.rs": _LEG3_UNGATED},
+    {_EXEC_RS: _LEG3_GATED_DECL, f"{_EXEC_DIR}/child.rs": "mod grand;\n",
+     f"{_EXEC_DIR}/child/grand.rs": _LEG3_UNGATED},
+]
 # cfg predicates that DO require `vectorized`, in several spellings: accepted.
 _LEG3_TREES_GATING_CFG = [
     _leg3_tree_child('#[cfg(all(test, feature = "vectorized"))]\nmod child;\n'),
@@ -967,6 +1048,28 @@ def run_self_test() -> int:
               f"({len(_LEG3_TREES_GATING_CFG)} spellings)")
     else:
         print(f"TRIPWIRE 12 (leg3): FAIL — gating cfg(s) {wrong} rejected; false positive")
+        all_passed = False
+
+    # ----- Tripwire 13: cfg_attr(..., path = ...) on a mod declaration is unsupported -----
+    missed = [i for i, t in enumerate(_LEG3_TREES_CFG_ATTR_PATH) if _leg3_on_tree(t) == 0]
+    wrong = [i for i, t in enumerate(_LEG3_TREES_CFG_ATTR_OK) if _leg3_on_tree(t) != 0]
+    if not missed and not wrong:
+        print("TRIPWIRE 13 (leg3): PASS — cfg_attr(..., path) rejected as unsupported "
+              f"({len(_LEG3_TREES_CFG_ATTR_PATH)} spellings); path-free cfg_attr accepted")
+    else:
+        print(f"TRIPWIRE 13 (leg3): FAIL — cfg_attr path missed {missed}, "
+              f"path-free cfg_attr rejected {wrong}")
+        all_passed = False
+
+    # ----- Tripwire 14: a file is gated only if EVERY declaration reaching it is -----
+    missed = [i for i, t in enumerate(_LEG3_TREES_MIXED_DECLS) if _leg3_on_tree(t) == 0]
+    wrong = [i for i, t in enumerate(_LEG3_TREES_ALL_DECLS_GATED) if _leg3_on_tree(t) != 0]
+    if not missed and not wrong:
+        print("TRIPWIRE 14 (leg3): PASS — gated+ungated declarations of one file leave it "
+              "(and its descendants) ungated; all-gated declarations accepted")
+    else:
+        print(f"TRIPWIRE 14 (leg3): FAIL — mixed declarations exempted {missed}, "
+              f"all-gated declarations rejected {wrong}")
         all_passed = False
 
     if all_passed:

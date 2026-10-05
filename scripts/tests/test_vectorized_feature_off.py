@@ -420,6 +420,46 @@ def test_leg3_cfg_parser() -> bool:
     return False
 
 
+def test_leg3_cfg_attr_path_rejected() -> bool:
+    """cfg_attr(..., path = ...) on a mod declaration fails as unsupported."""
+    bad = _all_rc(_check._LEG3_TREES_CFG_ATTR_PATH, want_fail=True)
+    if not bad:
+        print("  PASS — every cfg_attr(path) spelling rejected")
+        return True
+    print(f"  FAIL — cfg_attr(path) spellings {bad} accepted")
+    return False
+
+
+def test_leg3_cfg_attr_without_path_accepted() -> bool:
+    """cfg_attr without a path argument does not trip the audit."""
+    bad = _all_rc(_check._LEG3_TREES_CFG_ATTR_OK, want_fail=False)
+    if not bad:
+        print("  PASS — path-free cfg_attr accepted")
+        return True
+    print(f"  FAIL — path-free cfg_attr {bad} rejected")
+    return False
+
+
+def test_leg3_mixed_declarations_not_gated() -> bool:
+    """A file declared both gated and ungated (and its descendants) is not gated."""
+    bad = _all_rc(_check._LEG3_TREES_MIXED_DECLS, want_fail=True)
+    if not bad:
+        print("  PASS — mixed declarations leave the file and its descendants ungated")
+        return True
+    print(f"  FAIL — mixed declarations {bad} exempted the file")
+    return False
+
+
+def test_leg3_all_declarations_gated_accepted() -> bool:
+    """A file whose every declaration is gated (directly or via its parent) is gated."""
+    bad = _all_rc(_check._LEG3_TREES_ALL_DECLS_GATED, want_fail=False)
+    if not bad:
+        print("  PASS — all-gated declarations accepted")
+        return True
+    print(f"  FAIL — all-gated declarations {bad} rejected")
+    return False
+
+
 def test_leg3_real_tree_passes() -> bool:
     """The repo's own exec tree passes leg 3."""
     root = os.path.dirname(_SCRIPT_DIR)
@@ -459,6 +499,10 @@ def main() -> int:
         ("leg3 unresolvable mod fails closed", test_leg3_unresolvable_mod_rejected),
         ("leg3 gating cfg spellings accepted", test_leg3_gating_cfg_spellings_accepted),
         ("leg3 cfg predicate parser", test_leg3_cfg_parser),
+        ("leg3 cfg_attr(path) on mod rejected", test_leg3_cfg_attr_path_rejected),
+        ("leg3 cfg_attr without path accepted", test_leg3_cfg_attr_without_path_accepted),
+        ("leg3 gated+ungated declarations do not exempt a file", test_leg3_mixed_declarations_not_gated),
+        ("leg3 all-gated declarations accepted", test_leg3_all_declarations_gated_accepted),
         ("leg3 repo exec tree passes", test_leg3_real_tree_passes),
     ]
 
