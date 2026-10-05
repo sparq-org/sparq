@@ -119,43 +119,18 @@ impl Timeline {
 
 /// The XPath dateTime/date comparison on precomputed instants: direct when both
 /// or neither operand carries a timezone; with MIXED presence only decidable
-/// outside the ±14h window (inside it — including exactly 14h — indeterminate -> `None`),
-/// decided at microsecond resolution.
+/// outside the ±14h window (inside it — including exactly 14h — indeterminate -> `None`).
+/// The window is decided on the f64 instants, so a pair within the instants' rounding
+/// error of the edge (sub-microsecond for present-day dates) may land on either side.
 /// Public so every XSD-ordering consumer (the engine via [`Timeline`]/[`Temporal`],
 /// sparq-shacl's `sh:lessThan`/range comparisons on its own instants) shares this ONE
 /// window rule (#3526).
 #[inline]
 pub fn cmp_instants(ai: f64, a_tz: bool, bi: f64, b_tz: bool) -> Option<Ordering> {
-    // Same (or no) timezone: a direct compare. With MIXED presence the order is only
-    // decidable strictly outside the ±14h window. A pair more than a millisecond from
-    // the edge is decided by the difference alone (its rounding error is far below
-    // that at any realistic date), so the common case stays a single compare.
-    const W: f64 = 14.0 * 3600.0;
-    let d = (ai - bi).abs();
-    if a_tz == b_tz || d > W + 1e-3 {
-        return ai.partial_cmp(&bi);
-    }
-    if d < W - 1e-3 || d.is_nan() {
-        return None;
-    }
-    window_edge(ai, bi)
-}
-
-/// Mixed-presence pair within a millisecond of the 14h edge: decide on whole
-/// MICROSECONDS. An f64 instant cannot carry finer precision for present-day dates
-/// anyway (its ulp near 2024 is ~0.24µs), and both the rounded difference and the
-/// rounded endpoints `ai ± W` can put a pair on the wrong side of the edge at
-/// sub-microsecond scale (#3526). Kept out of line so the common path stays small.
-#[cold]
-#[inline(never)]
-fn window_edge(ai: f64, bi: f64) -> Option<Ordering> {
-    const W_MICROS: i64 = 14 * 3600 * 1_000_000;
-    let micros = |x: f64| (x * 1e6).round() as i64;
-    let dm = micros(ai) - micros(bi);
-    if dm < -W_MICROS {
-        Some(Ordering::Less)
-    } else if dm > W_MICROS {
-        Some(Ordering::Greater)
+    // Same (or no) timezone: a direct compare. With MIXED presence the order is
+    // only decidable outside the ±14h window; inside it the result is indeterminate.
+    if a_tz == b_tz || (ai - bi).abs() > 14.0 * 3600.0 {
+        ai.partial_cmp(&bi)
     } else {
         None
     }
@@ -306,14 +281,22 @@ mod tests {
         // Outside the window the order is decidable.
         let far = dt("2024-03-17T13:00:00");
         assert_eq!(Temporal::cmp_t(zoned, far), Some(Less));
-        // Exactly 14h apart with a shared fraction stays indeterminate (the rounded
-        // endpoints once made it `Less`); one microsecond past the edge decides.
-        let (f, z) = (dt("1969-12-31T14:16:40.1"), dt("1970-01-01T04:16:40.1Z"));
-        assert_eq!(Temporal::cmp_t(f, z), None);
-        assert_eq!(Temporal::cmp_t(z, f), None);
-        let (f, z) = (dt("1969-12-31T14:16:40"), dt("1970-01-01T04:16:40.000001Z"));
-        assert_eq!(Temporal::cmp_t(f, z), Some(Less));
-        assert_eq!(Temporal::cmp_t(z, f), Some(Greater));
+        // Exactly 14h apart with a shared fraction is indeterminate; just past the
+        // edge is decided (both operand orders).
+        for (f, z) in [
+            ("1969-12-31T14:16:40.1", "1970-01-01T04:16:40.1Z"),
+            ("1969-12-31T14:16:40.0000005", "1970-01-01T04:16:40.0000005Z"),
+        ] {
+            assert_eq!(Temporal::cmp_t(dt(f), dt(z)), None, "{f} vs {z}");
+            assert_eq!(Temporal::cmp_t(dt(z), dt(f)), None, "{z} vs {f}");
+        }
+        for (f, z) in [
+            ("1969-12-31T14:16:40", "1970-01-01T04:16:40.000001Z"),
+            ("1970-01-01T00:00:00", "1970-01-01T14:00:00.0000004Z"),
+        ] {
+            assert_eq!(Temporal::cmp_t(dt(f), dt(z)), Some(Less), "{f} vs {z}");
+            assert_eq!(Temporal::cmp_t(dt(z), dt(f)), Some(Greater), "{z} vs {f}");
+        }
     }
 
     #[test]

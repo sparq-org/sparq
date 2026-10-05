@@ -3388,24 +3388,29 @@ mod tests {
     /// Intentional, documented difference kept by #3526: SHACL orders xsd:date against
     /// xsd:dateTime on one timeline (a date is its midnight), whereas the engine's
     /// `Temporal::cmp_t` treats them as disjoint families (`None`).
-    /// The 14h window is decided on whole microseconds, so neither the rounded
-    /// difference nor rounded endpoints can move a pair across the edge.
+    /// The 14h window edge, in both operand orders: exactly 14h with a shared fraction
+    /// is indeterminate, a microsecond (or less) past it is decided, matching the engine.
     #[test]
-    fn date_time_window_edge_survives_rounding() {
+    fn date_time_window_edge_matches_engine() {
         let lit = |v: &str| {
             Literal::new_typed_literal(v, oxrdf::NamedNode::new(xsd("dateTime")).unwrap())
         };
-        // Exactly 14h apart with a shared fraction: indeterminate in both orders.
-        let (floating, zoned) = (lit("1969-12-31T14:16:40.1"), lit("1970-01-01T04:16:40.1Z"));
-        assert_eq!(cmp_literals(&floating, &zoned), None);
-        assert_eq!(cmp_literals(&zoned, &floating), None);
-        // One microsecond past the edge: determinate in both orders.
-        let (floating, zoned) = (lit("1969-12-31T14:16:40"), lit("1970-01-01T04:16:40.000001Z"));
-        assert_eq!(cmp_literals(&floating, &zoned), Some(Ordering::Less));
-        assert_eq!(cmp_literals(&zoned, &floating), Some(Ordering::Greater));
-        let (floating, zoned) = (lit("2024-03-16T03:00:00.000001"), lit("2024-03-15T13:00:00Z"));
-        assert_eq!(cmp_literals(&floating, &zoned), Some(Ordering::Greater));
-        assert_eq!(cmp_literals(&zoned, &floating), Some(Ordering::Less));
+        for (f, z) in [
+            ("1969-12-31T14:16:40.1", "1970-01-01T04:16:40.1Z"),
+            ("1969-12-31T14:16:40.0000005", "1970-01-01T04:16:40.0000005Z"),
+        ] {
+            assert_eq!(cmp_literals(&lit(f), &lit(z)), None, "{f} vs {z}");
+            assert_eq!(cmp_literals(&lit(z), &lit(f)), None, "{z} vs {f}");
+        }
+        for (f, z) in [
+            ("1969-12-31T14:16:40", "1970-01-01T04:16:40.000001Z"),
+            ("1970-01-01T00:00:00", "1970-01-01T14:00:00.0000004Z"),
+            ("2024-03-16T03:00:00.000001", "2024-03-15T13:00:00Z"),
+        ] {
+            let ord = if f.starts_with("2024") { Ordering::Greater } else { Ordering::Less };
+            assert_eq!(cmp_literals(&lit(f), &lit(z)), Some(ord), "{f} vs {z}");
+            assert_eq!(cmp_literals(&lit(z), &lit(f)), Some(ord.reverse()), "{z} vs {f}");
+        }
     }
 
     #[test]
