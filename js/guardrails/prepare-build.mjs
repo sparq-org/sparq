@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// `prepare` lifecycle for the `@jeswr/sparq` git-pin path. [OPUS-4.8] sq-bkag.
+// `prepare` lifecycle for the `@sparq-org/sparq` git-pin path. [OPUS-4.8] sq-bkag.
 //
 // npm runs `prepare` (a) when a consumer installs this package from a GIT URL
-// (`github:jeswr/sparq#<sha>` with `directory: "js"`), and (b) on a maintainer's
+// (`github:sparq-org/sparq#<sha>` with `directory: "js"`), and (b) on a maintainer's
 // plain `npm install` in a source checkout. It does NOT run when installing the
 // published REGISTRY tarball (that already ships dist/ + wasm/).
 //
@@ -48,14 +48,14 @@ const hasWasmPack = spawnSync('wasm-pack', ['--version'], { stdio: 'ignore' }).s
 if (!hasWasmPack) {
   console.error(
     [
-      'prepare: @jeswr/sparq is pinned from a git build but cannot build the wasm engine.',
+      'prepare: @sparq-org/sparq is pinned from a git build but cannot build the wasm engine.',
       'A git-pinned install must compile crates/sparq-wasm to WebAssembly on install, but',
       '`wasm-pack` was not found on PATH. Install the toolchain, then reinstall:',
       '',
       '    rustup target add wasm32-unknown-unknown',
       '    cargo install wasm-pack --locked',
       '',
-      'Or depend on the published @jeswr/sparq registry tarball (ships prebuilt dist/ + wasm/).',
+      'Or depend on the published @sparq-org/sparq registry tarball (ships prebuilt dist/ + wasm/).',
     ].join('\n'),
   );
   process.exit(1);
@@ -67,12 +67,12 @@ if (!hasWasmPack) {
 // lands ahead of that JSON and breaks the parse, which the guardrail then misreports as the
 // package being unpackable. CI does not hit it today only because `prepack` has already
 // built wasm/ + wasm-node/ + dist/ by then, so the silent early-exit above fires first.
-console.error('prepare: building @jeswr/sparq (wasm-pack + tsc) for the git-pin install...');
+console.error('prepare: building @sparq-org/sparq (wasm-pack + tsc) for the git-pin install...');
 // [OPUS-4.8] sq-gl3cf — `shell: true` so this resolves the `npm` launcher on WINDOWS too.
 // Without it, execFileSync('npm', …) does no PATHEXT/`.cmd` resolution and dies with
 // `spawnSync npm ENOENT` (errno -4058) on Windows — which is what failed the win-x64
 // `GUI desktop bundle` row in release.yml at root `npm install` (run 27890097353): the
-// root install runs this `prepare` hook for the @jeswr/sparq workspace member, and its
+// root install runs this `prepare` hook for the @sparq-org/sparq workspace member, and its
 // crash also triggered npm's rollback `EPERM rmdir node_modules/next` cleanup warnings.
 // `shell: true` spawns via `cmd /c` on Windows (resolves `npm.cmd`) and `/bin/sh -c` on
 // POSIX (unchanged behavior there). The args are a fixed literal list with no shell

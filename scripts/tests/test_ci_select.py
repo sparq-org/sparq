@@ -671,6 +671,140 @@ class ChangeClassTests(unittest.TestCase):
         self.assertEqual(good.affected, ["app"])
 
 
+# [OPUS-5] ---- #5249: the ownership map's `safe = true` verdicts at the CLASS layer --
+class MapSafeChangeClassTests(unittest.TestCase):
+    """#5249: `classify_change` consulted only the built-in allowlists, never the
+    ownership map, so the two layers DISAGREED about the same diff — `site/**` is
+    `safe = true` in ci/path-ownership.toml ("Owns its own CI lane (pages.yml)"), so
+    the closure layer selected an EMPTY affected set while the class layer said
+    `engine` and the merge_group batch paid the full Rust matrix + CodeQL. The class
+    now reads the map (`_CLASS_MAP_SAFE`), and every fail-closed carve-out that keeps
+    it from being MORE permissive than the selector is pinned below."""
+
+    def setUp(self):
+        self.meta = _synthetic_meta()
+        self.real_map = cs.load_ownership_map(str(MAP_FILE))
+
+    # --- the reported bug ---
+    def test_site_only_diff_classifies_map_safe_not_engine(self):
+        # The issue's exact reproduction (it returned `engine` before #5249).
+        self.assertEqual(
+            cs.classify_change(["site/index.tsx"], self.real_map), "map-safe"
+        )
+
+    def test_class_and_closure_agree_on_a_site_only_diff(self):
+        # THE POINT of the fix: one notion of "inert". The closure was already
+        # empty; the class is now inert too, so the merge_group gate can skip.
+        sel = cs.select(["site/index.tsx"], self.meta, [{"pattern": "site/**", "safe": True}])
+        self.assertEqual(sel.mode, "selected")
+        self.assertEqual(sel.affected, [])
+        self.assertEqual(sel.change_class, "map-safe")
+        self.assertIn(sel.change_class, cs._INERT_CLASSES)
+        self.assertIn("skipped-by-class: map-safe", sel.reason)
+
+    # --- fail-closed carve-outs (each can only ever run MORE) ---
+    def test_no_map_keeps_the_pre_fix_engine_class(self):
+        # Absent map => no safe-listed rescue => `engine` (a full run), exactly the
+        # pre-#5249 behaviour. Absence of proof means run (design §2).
+        self.assertEqual(cs.classify_change(["site/index.tsx"]), "engine")
+        self.assertEqual(cs.classify_change(["site/index.tsx"], []), "engine")
+
+    def test_first_match_wins_keeps_the_zk_anchor_engine(self):
+        # sq-1s2.4 attributes two site/ files to sparq-zk-compose with entries that
+        # sit BEFORE the `site/**` safe entry. A `crates = [...]` first match is not
+        # a safe verdict, so the anchor edit still classifies engine and re-runs the
+        # drift guard.
+        self.assertEqual(
+            cs.classify_change(["site/src/lib/zk-prover.ts"], self.real_map), "engine"
+        )
+        self.assertEqual(
+            cs.classify_change(["site/scripts/capture-zk-manifest.mjs"], self.real_map),
+            "engine",
+        )
+
+    def test_a_safe_entry_cannot_rescue_a_full_run_trigger(self):
+        # The selector resolves §4.1 triggers BEFORE the map (step 1 wins over step
+        # 3), so a (bogus) safe entry covering a trigger must not make the class
+        # inert — otherwise the class would be MORE permissive than the mode.
+        bogus = [{"pattern": ".github/**", "safe": True},
+                 {"pattern": "Cargo.lock", "safe": True}]
+        self.assertEqual(cs.classify_change([".github/workflows/ci.yml"], bogus), "engine")
+        self.assertEqual(cs.classify_change(["Cargo.lock"], bogus), "engine")
+
+    def test_a_safe_entry_cannot_rescue_a_crate_owned_path(self):
+        # Crate-prefix ownership (step 2) also wins over the map (step 3). The
+        # classifier has no cargo metadata by design, so it uses the `crates/`
+        # prefix — every workspace member lives there (root Cargo.toml `members`).
+        bogus = [{"pattern": "crates/**", "safe": True}]
+        self.assertEqual(cs.classify_change(["crates/app/src/lib.rs"], bogus), "engine")
+
+    def test_malformed_map_entry_fails_closed_to_engine(self):
+        # A matched entry that is neither safe, crates, nor readers makes
+        # apply_ownership_map raise; the classifier must swallow it as "not proven
+        # inert" rather than propagate a class.
+        broken = [{"pattern": "site/**", "crates": "not-a-list"}]
+        self.assertEqual(cs.classify_change(["site/index.tsx"], broken), "engine")
+
+    # --- composition with the other inert surfaces ---
+    def test_map_safe_plus_engine_is_mixed(self):
+        self.assertEqual(
+            cs.classify_change(["site/index.tsx", "crates/app/src/lib.rs"], self.real_map),
+            "mixed",
+        )
+
+    def test_map_safe_plus_docs_is_inert_mixed(self):
+        self.assertEqual(
+            cs.classify_change(["site/index.tsx", "docs/x.md"], self.real_map),
+            "inert-mixed",
+        )
+
+    def test_docs_and_research_still_classify_docs_only(self):
+        # research/** and docs/** are safe-listed in the map AND on
+        # _DOCS_ONLY_PREFIXES; the earlier arm must keep winning so the existing
+        # token (and the batcher/gate attribution built on it) does not churn.
+        self.assertEqual(
+            cs.classify_change(["docs/x.md", "research/y.md"], self.real_map), "docs-only"
+        )
+
+    def test_every_reachable_safe_pattern_in_the_real_map_classifies_inert(self):
+        # DRIFT GUARD: the class layer must stay wired to the map. If
+        # classify_change ever stops consulting it, a safe-listed sample path falls
+        # back to `engine` and this reddens. Patterns the selector resolves BEFORE
+        # the map (triggers / crates/**) are excluded — for those the two layers
+        # already agree on `engine`.
+        checked = 0
+        for entry in self.real_map:
+            if entry.get("safe") is not True:
+                continue
+            pattern = entry["pattern"]
+            sample = pattern[:-3] + "/__probe__.txt" if pattern.endswith("/**") else pattern
+            if sample.startswith("crates/") or cs._trigger_match(sample) is not None:
+                continue
+            checked += 1
+            self.assertIn(
+                cs.classify_change([sample], self.real_map), cs._INERT_CLASSES,
+                f"safe-listed {pattern!r} is inert for the closure but not for the class",
+            )
+        self.assertGreater(checked, 0, "no reachable safe entries found — map moved?")
+
+    def test_mutation_always_map_safe_reddens_the_engine_fixture(self):
+        # MUTATION SPOT-CHECK: break _map_safe_match to always-True and the engine
+        # fixture must wrongly go inert — proving the real (False) path is what keeps
+        # an engine diff running, i.e. these assertions are not vacuous.
+        orig = cs._map_safe_match
+        try:
+            cs._map_safe_match = lambda _p, _m: True
+            self.assertEqual(
+                cs.classify_change(["crates/app/src/lib.rs"], self.real_map), "map-safe",
+                "mutation should swallow the engine path as inert",
+            )
+        finally:
+            cs._map_safe_match = orig
+        self.assertEqual(
+            cs.classify_change(["crates/app/src/lib.rs"], self.real_map), "engine"
+        )
+
+
 # [FABLE-5] ---- classify-only mode (merge-group change-class gate; #3420/#3421 follow-up)
 class ClassifyOnlyMainTests(unittest.TestCase):
     """The `--classify-only` CLI contract the ci.yml / feature-matrix.yml `changes`
@@ -784,6 +918,46 @@ class ClassifyOnlyMainTests(unittest.TestCase):
                                     "--changed-file", changed])
         self.assertEqual(code, 0)
         self.assertEqual(out.strip(), "engine")
+
+    # [OPUS-5] #5249: the classify-only entry point now loads the ownership map
+    # (still no cargo metadata / toolchain) so a `safe = true` batch is inert at the
+    # class layer too — this is the CLI contract the three `changes` pre-jobs consume.
+    def test_site_only_batch_classifies_map_safe_via_the_default_map(self):
+        # --repo-root pins the map discovery the CI step gets from `git rev-parse`,
+        # so the test does not depend on the runner's CWD.
+        changed = self._write("site/index.tsx\n")
+        code, out = self._run_main(["--classify-only", "--event", "merge_group",
+                                    "--changed-file", changed,
+                                    "--repo-root", str(REPO_ROOT)])
+        self.assertEqual(code, 0)
+        self.assertEqual(out.strip(), "map-safe")
+
+    def test_explicit_map_is_honoured(self):
+        changed = self._write("site/index.tsx\n")
+        code, out = self._run_main(["--classify-only", "--event", "merge_group",
+                                    "--changed-file", changed, "--map", str(MAP_FILE)])
+        self.assertEqual(code, 0)
+        self.assertEqual(out.strip(), "map-safe")
+
+    def test_unreadable_map_degrades_to_engine_not_to_a_crash(self):
+        # A missing/malformed map must degrade to the pre-#5249 classifier (no safe
+        # rescue => engine => full run), never abort the gate.
+        changed = self._write("site/index.tsx\n")
+        code, out = self._run_main(["--classify-only", "--event", "merge_group",
+                                    "--changed-file", changed, "--map", "/no/such/map.toml"])
+        self.assertEqual(code, 0)
+        self.assertEqual(out.strip(), "engine")
+
+    def test_a_malformed_map_does_not_taint_an_orchestration_batch(self):
+        # The map load is BEST-EFFORT here (unlike the selector's fail-closed raise):
+        # a broken map must not reclassify an unrelated orchestration-only batch as
+        # engine — degrading to no-map is already the conservative direction.
+        bad_map = self._write("this is not = valid toml [[[\n", suffix=".toml")
+        changed = self._write("orchestration/routing.toml\nscripts/triage.py\n")
+        code, out = self._run_main(["--classify-only", "--event", "merge_group",
+                                    "--changed-file", changed, "--map", bad_map])
+        self.assertEqual(code, 0)
+        self.assertEqual(out.strip(), "orchestration-only")
 
 
 class OrchestrationSafeInertnessTests(unittest.TestCase):

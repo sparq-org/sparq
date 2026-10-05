@@ -20,7 +20,7 @@
 <https://w3id.org/zkp-sparql/sig-impl-ext> a owl:Ontology ;
   rdfs:label "sparq sig-impl: extension — ML-DSA"@en-GB ;
   dcterms:description "A sparq-authored extension adding ML-DSA terms to the sig-impl: namespace. It is not part of the ontology vendored from origin SHA 0fe80ea7d858de9f02bd29df29f6e50cdada14a0."@en-GB ;
-  dcterms:creator <https://github.com/jeswr/sparq> ;
+  dcterms:creator <https://github.com/sparq-org/sparq> ;
   dcterms:date "2026-07-26"^^xsd:date ;
   owl:imports <https://w3id.org/zkp-sparql/sig-impl> .
 

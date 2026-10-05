@@ -10,12 +10,12 @@ body:
         Thanks for filing a bug! Please give us enough to reproduce it.
 
         **Do not use this form for security vulnerabilities** — report those privately
-        via the channels in [SECURITY.md](https://github.com/jeswr/sparq/blob/main/SECURITY.md).
+        via the channels in [SECURITY.md](https://github.com/sparq-org/sparq/blob/main/SECURITY.md).
   - type: input
     id: surface
     attributes:
       label: Affected surface / crate
-      description: e.g. sparq-core, sparq-engine, sparq-cli, sparq-server, @jeswr/sparq (npm), sparq (PyPI).
+      description: e.g. sparq-core, sparq-engine, sparq-cli, sparq-server, @sparq-org/sparq (npm), sparq (PyPI).
       placeholder: sparq-engine
     validations:
       required: true

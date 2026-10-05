@@ -282,7 +282,7 @@ lands, this route becomes its entry shell and the nav slot returns.
 ### 4.1 Mechanism: `releases/latest/download/<alias>` direct links
 
 GitHub serves a **direct file download** (302 to the asset CDN) at
-`https://github.com/jeswr/sparq/releases/latest/download/<asset-name>` — no release page
+`https://github.com/sparq-org/sparq/releases/latest/download/<asset-name>` — no release page
 interstitial — *provided the asset name is stable across versions*. The current
 `sparq-gui-<version>-<label>-…` naming breaks that. Fix in two halves:
 
@@ -300,7 +300,7 @@ interstitial — *provided the asset name is stable across versions*. The curren
 ### 4.2 Version / size / checksum display
 
 The static export can't know the current version, so fetch
-`https://api.github.com/repos/jeswr/sparq/releases/latest` **client-side** on page load
+`https://api.github.com/repos/sparq-org/sparq/releases/latest` **client-side** on page load
 (the page is already a client component with OS detection): render `v<x.y.z>`, asset size,
 and — if the release publishes a `SHA256SUMS` asset (add to the pipeline) — a copyable mono
 checksum line inside each card's existing collapsed "First-launch instructions" details

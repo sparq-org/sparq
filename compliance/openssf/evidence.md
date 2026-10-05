@@ -56,7 +56,7 @@ flag where sparq also satisfies **silver/gold**.
 - **`maintained`** — Met w/justification (live signal) — based on active commit/PR cadence on `main` + `SECURITY.md`'s declared posture. This is the **same live signal** Scorecard's `Maintained` check reads at scan time, where it is labelled **AR** in [`controls/openssf.md`](./controls/openssf.md) §A; the badge self-cert and the Scorecard view therefore carry the *same* confidence (the answer is true only while the cadence holds, not assertable purely from a file). *(Silver: declare a maintenance/EOL policy — `SECURITY.md` "Supported versions" partially covers; note pre-1.0.)*
 
 ### Change Control
-- **`repo_public`** — Met — public GitHub repo `jeswr/sparq`.
+- **`repo_public`** — Met — public GitHub repo `sparq-org/sparq`.
 - **`repo_track`** — Met — git history.
 - **`repo_interim`** — Met — interim commits land on `main` between releases (no long-lived release branches).
 - **`repo_distributed`** — Met — git (distributed VCS).
@@ -97,7 +97,7 @@ flag where sparq also satisfies **silver/gold**.
 - **`crypto_floss`** — Met — Sigstore + Rust crypto deps are FLOSS.
 - **`crypto_keylength`** / **`crypto_working`** / **`crypto_weaknesses`** — Met w/scope — apply to the Sigstore/TLS delivery path (modern defaults); explicitly **not** asserted about the scaffolds.
 - **`crypto_pfs`** / **`crypto_password_storage`** / **`crypto_random`** — N/A — sparq stores no passwords and runs no auth/session crypto (the no-auth boundary B3 is the operator's gateway; see `research/threat-model.md`).
-- **`delivery_mitm`** — Met — `SHA256SUMS` + Sigstore-signed SLSA **build-provenance attestation** over every release asset; verify `gh attestation verify <file> --repo jeswr/sparq` ([`release.yml`](../../.github/workflows/release.yml)).
+- **`delivery_mitm`** — Met — `SHA256SUMS` + Sigstore-signed SLSA **build-provenance attestation** over every release asset; verify `gh attestation verify <file> --repo sparq-org/sparq` ([`release.yml`](../../.github/workflows/release.yml)).
 - **`delivery_unsigned`** — Met — releases are signed (provenance attestation, above). *(Gold-relevant.)*
 - **`vulnerabilities_fixed_60_days`** — Met — `SECURITY.md` response targets + the daily advisory watchdog ([`dependency-monitoring.yml`](../../.github/workflows/dependency-monitoring.yml)) surface advisories promptly; fixes ship in the next release.
 - **`vulnerabilities_critical_fixed`** — Met — no known unfixed critical vulns; the cargo-deny gate runs **two GATING steps** (`bans/sources/licenses` *and* `advisories`) on PR/push/merge_group with a fail-closed [`deny.toml`](../../deny.toml) (`yanked = "deny"`, two justified `unmaintained` ignores — neither a vuln). The daily watchdog ([`dependency-monitoring.yml`](../../.github/workflows/dependency-monitoring.yml)) is defence-in-depth. *(PR-time advisory gating is **un-degraded** — GX-1 closed by #210 / sq-toze.2; the CVSS-4.0 parse blocker sq-q8de is resolved.)*
@@ -148,9 +148,9 @@ flag where sparq also satisfies **silver/gold**.
 The published score is recomputed by OpenSSF infrastructure; to reproduce locally:
 ```sh
 # Requires a GitHub token (read-only is fine).
-scorecard --repo=github.com/jeswr/sparq --show-details
+scorecard --repo=github.com/sparq-org/sparq --show-details
 # Or read the latest published result:
-#   https://scorecard.dev/viewer/?uri=github.com/jeswr/sparq
+#   https://scorecard.dev/viewer/?uri=github.com/sparq-org/sparq
 ```
 The SARIF from each run is also in the GitHub **Security → Code scanning** tab and as the
 `scorecard.yml` `SARIF file` artifact (5-day retention).

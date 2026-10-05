@@ -1,5 +1,5 @@
 // [OPUS-4.8] sq-55w5a (#981) — publish a SELF-HOSTED, ESM-importable artifact that exposes
-// the named `Dataset` (and the rest of the `@jeswr/sparq` RDF/JS surface) from the project's
+// the named `Dataset` (and the rest of the `@sparq-org/sparq` RDF/JS surface) from the project's
 // OWN GitHub Pages origin, so the literal `<script type="module">` snippet the maintainer's
 // issue asked for works WITHOUT a third-party ESM CDN:
 //
@@ -8,7 +8,7 @@
 //       const ds = await Dataset.fromString('<a> <b> <c> .', 'ntriples'); // wasm lazy-fetched HERE
 //     </script>
 //
-// WHY a bundle (not a raw file copy). The `@jeswr/sparq` source (js/src) is many ESM modules
+// WHY a bundle (not a raw file copy). The `@sparq-org/sparq` source (js/src) is many ESM modules
 // with bare imports (`fzstd` for zstd ingest, `@rdfjs/types` for types) that a browser
 // `<script type="module">` from a static origin cannot resolve. esbuild collapses the whole
 // graph into ONE self-contained file, inlining `fzstd` (~8 kB, pure JS) and erasing the
@@ -83,7 +83,7 @@ await build({
       "/* sparq — RDF/JS Dataset + SPARQL engine (Rust→WASM), self-hosted ESM build.\n" +
       "   import { Dataset } from \"https://sparq.jeswr.org/wasm/sparq.js\"\n" +
       "   The ~MB engine wasm is fetched lazily by the first `await Dataset.…`, not by this import.\n" +
-      "   Docs: https://sparq.jeswr.org/surface/javascript-wasm  •  npm: @jeswr/sparq */",
+      "   Docs: https://sparq.jeswr.org/surface/javascript-wasm  •  npm: @sparq-org/sparq */",
   },
 });
 

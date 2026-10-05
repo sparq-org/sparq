@@ -686,6 +686,17 @@ class TestPhase2LaneScoping(unittest.TestCase):
                          "already gated the PR head + re-runs on push-to-main; the noisy timing suite "
                          "moved to the nightly EC2 lane — keeping it on merge_group only dragged the queue)")
 
+    def test_dashboard_publisher_suite_is_enforced(self):
+        # [GPT-6-ASTRA] An unlisted/disabled test would leave publication races ungated.
+        job = _load(REPO_ROOT / ".github/workflows/docs-quality.yml")["jobs"]["quick-gates"]
+        command = "python3 scripts/tests/test_bench_dashboard_publish.py"
+        steps = [step for step in job["steps"] if command in str(step.get("run", ""))]
+        self.assertEqual(len(steps), 1)
+        self.assertEqual(steps[0]["run"], command)
+        self.assertNotIn("if", steps[0])
+        self.assertFalse(steps[0].get("continue-on-error", False))
+        self.assertNotIn("if", job)
+
     def test_bench_history_lane_scoping(self):
         # CRITICAL (design §6.1 continuity, criterion (d)): the auto-ratchet + history +
         # dashboard WRITES must stay on the push-to-main path and NOT fire on the
@@ -1225,7 +1236,9 @@ class TestCoverageMergeGroupDemotion(unittest.TestCase):
       * the measure legs SKIP on merge_group;
       * they still RUN on a non-draft PR head (the PRIMARY gate) and on push-to-main —
         the push leg is the sq-6vshe.14 EXEMPTION: if a future push-run skip lands and
-        does not exempt coverage, this test REDs;
+        does not exempt coverage, this test REDs, whether it narrows the legs' EVENT
+        envelope or (the shape §3.1 actually specifies) adds a `queue-validated` pre-job
+        upstream of them;
       * the fast no-compile FLOOR gates (`coverage-floors`) STILL RUN on merge_group, so a
         batch can never LOWER a committed floor (the "floor is never silently lowered"
         half of the invariant);
@@ -1245,6 +1258,19 @@ class TestCoverageMergeGroupDemotion(unittest.TestCase):
 
     # The measure legs whose instrumented run left the queue.
     DEMOTED_JOBS = ("coverage-measure", "coverage-engine-run")
+
+    # [OPUS-5] issue #5149: the upstream jobs each demoted leg may depend on — FROZEN,
+    # because "one more upstream job" is exactly the shape a push-run skip takes. See
+    # test_measure_legs_take_no_new_upstream_gate for why the event assertions cannot
+    # catch that shape on their own. Widen this ONLY with the exemption decided.
+    ALLOWED_UPSTREAM = {
+        "coverage-measure": {"changes", "coverage-floors", "select"},
+        "coverage-engine-run": {"changes", "coverage-floors", "select"},
+        "coverage-engine-merge": {"coverage-engine-run"},
+    }
+
+    # `needs.<job-id>.…` references inside a job-level `if:`.
+    _NEEDS_REF_RE = re.compile(r"needs\.([A-Za-z0-9_-]+)\.")
 
     def _runs(self, job_id, *, event="pull_request", draft=False, mode="full",
               affected="[]", rust_changed="true"):
@@ -1271,11 +1297,13 @@ class TestCoverageMergeGroupDemotion(unittest.TestCase):
         surviving: the PR head is the primary gate, and push-to-main is what catches the
         batch-stacking case (two PRs individually >= floor merging to < floor).
 
-        The `push` half is also the sq-6vshe.14 COORDINATION PIN: that lever skips
-        queue-validated re-validation on push to main, and coverage must be EXEMPT from it
-        (post-merge, off the queue's critical path). If it lands without the exemption,
-        this assertion REDs instead of the ratchet silently losing its last enforcement
-        point."""
+        The `push` half is the EVENT-dimension half of the sq-6vshe.14 COORDINATION PIN:
+        that lever skips queue-validated re-validation on push to main, and coverage must
+        be EXEMPT from it (post-merge, off the queue's critical path). This assertion REDs
+        if the exemption is dropped by narrowing the legs' EVENT envelope; the other shape
+        the lever can take — a new upstream gate job — is caught by
+        `test_measure_legs_take_no_new_upstream_gate` below, which is the assertion that
+        actually fires for the design in §3.1."""
         for job_id in self.DEMOTED_JOBS:
             self.assertTrue(
                 self._runs(job_id, event="pull_request", draft=False),
@@ -1287,6 +1315,47 @@ class TestCoverageMergeGroupDemotion(unittest.TestCase):
                 f"ci.yml:{job_id} must still MEASURE on push-to-main — it is the "
                 f"post-merge enforcement point the demotion depends on, and is EXEMPT "
                 f"from the sq-6vshe.14 push-run skip",
+            )
+
+    def test_measure_legs_take_no_new_upstream_gate(self):
+        """[OPUS-5] issue #5149 — the sq-6vshe.14 coordination pin, STRUCTURAL half.
+
+        `sq-6vshe.14` is specified (`research/ci-mergequeue-speedup-2026-07.md` §3.1) as a
+        cheap `push`-event pre-job (`queue-validated`) whose output makes pure-validation
+        legs skip on a SHA the queue already validated. Wired onto a coverage leg, that
+        shape is INVISIBLE to the event assertions above, in BOTH of its variants:
+
+          * as an `if:` conjunct — an absent context path evaluates to null exactly as on
+            GitHub, so a fresh `needs.queue-validated.outputs.skip != 'true'` is TRUE
+            under those synthetic payloads and the leg still LOOKS like it runs on push;
+          * as a `needs:` entry ALONE, with no `if:` change at all — a `push`-event
+            pre-job is itself conditional, and a skip propagates through `needs:` unless
+            the dependent uses a status function, which none of these legs does.
+
+        Either variant silently removes the post-merge measurement the sq-6vshe.17
+        demotion rests on. So the upstream set is FROZEN: whoever lands the lever REDs
+        here, on the leg, with the exemption in front of them as a decision — which is the
+        whole point of pinning it rather than discovering it."""
+        for job_id, allowed in self.ALLOWED_UPSTREAM.items():
+            job = self.ci["jobs"][job_id]
+            needs = job.get("needs", [])
+            needs = [needs] if isinstance(needs, str) else list(needs)
+            self.assertEqual(
+                set(needs), allowed,
+                f"ci.yml:{job_id}: its `needs:` is now {sorted(needs)}, not "
+                f"{sorted(allowed)}. A conditional upstream job SKIPS this leg with it "
+                f"(no status function here), and this leg is the post-merge coverage "
+                f"enforcement point. If this is the sq-6vshe.14 push-run skip: EXEMPT — "
+                f"keep it out of the skip, then update ALLOWED_UPSTREAM deliberately.",
+            )
+            new_refs = set(self._NEEDS_REF_RE.findall(str(job.get("if", "")))) - allowed
+            self.assertEqual(
+                new_refs, set(),
+                f"ci.yml:{job_id}: its `if:` now gates on {sorted(new_refs)} — a NEW "
+                f"upstream guard on a demoted coverage leg. Same rule: the push-to-main "
+                f"measurement is what the sq-6vshe.17 demotion trades against, so it is "
+                f"EXEMPT from the sq-6vshe.14 skip (and from any successor lever). Exempt "
+                f"the leg, then update ALLOWED_UPSTREAM deliberately.",
             )
 
     def test_engine_merge_skips_when_its_partitions_are_demoted(self):
@@ -1719,12 +1788,22 @@ class TestDraftTierWiring(unittest.TestCase):
             self.assertIn(key, env, f"gate step must export {key}")
         self.assertIn("github.event.pull_request.draft", str(env["PR_DRAFT"]))
 
-    def test_bench_concurrency_cancels_only_pull_request(self):
+    def test_bench_concurrency_coalesces_pr_and_push_only(self):
         conc = self.bench.get("concurrency", {})
+        self.assertEqual(
+            str(conc.get("group")),
+            "bench-${{ github.ref }}-${{ "
+            "(!contains(fromJSON('[\"pull_request\",\"push\"]'), github.event_name) || "
+            "(github.event_name == 'pull_request' && "
+            "contains(fromJSON('[\"labeled\",\"unlabeled\"]'), "
+            "github.event.action))) && github.run_id || 'shared' }}",
+            "only explicitly allowlisted PR/main-push runs may share a ref group; "
+            "label-only and every unknown/future event need isolated per-run groups",
+        )
         self.assertEqual(str(conc.get("cancel-in-progress")),
-                         "${{ github.event_name == 'pull_request' }}",
-                         "bench must cancel superseded PR runs but never a "
-                         "push/schedule run (history integrity)")
+                         "${{ contains(fromJSON('[\"pull_request\",\"push\"]'), github.event_name) }}",
+                         "only explicitly allowlisted PR/main-push runs may cancel; "
+                         "nightly/manual and every unknown/future event must not")
 
     def test_js_has_per_pr_concurrency(self):
         conc = self.js.get("concurrency", {})
@@ -2164,7 +2243,12 @@ class TestMergeGroupChangeClassGate(unittest.TestCase):
 
     [OPUS-5] sq-g25hr added codeql.yml to the gated set (the ~20-40min CodeQL
     analysis was the longest merge_group pole for a zero-Rust batch) and widened
-    `_INERT_CLASSES` with `deploy-only` + `inert-mixed`."""
+    `_INERT_CLASSES` with `deploy-only` + `inert-mixed`.
+
+    [OPUS-5] #5249 widened it once more with `map-safe` — an ownership-map
+    `safe = true` verdict, which the CLOSURE layer already honoured (empty affected
+    set) while the CLASS layer still said `engine`, so a site-only batch ran the full
+    Rust matrix + CodeQL despite the two layers looking at the same diff."""
 
     @classmethod
     def setUpClass(cls):
@@ -2244,7 +2328,8 @@ class TestMergeGroupChangeClassGate(unittest.TestCase):
         # run (engine/mixed/any unknown token => rust=true).
         inert = self.select_mod._INERT_CLASSES
         self.assertEqual(
-            inert, ("orchestration-only", "docs-only", "deploy-only", "inert-mixed"),
+            inert,
+            ("orchestration-only", "docs-only", "deploy-only", "map-safe", "inert-mixed"),
             "classifier tokens drifted — update the workflow case-arms in lock-step "
             "(they match on these literal strings)")
         # The arm is spelled docs-first for readability; assert on the SET so a

@@ -28,10 +28,10 @@ classifiers = [
 dynamic = ["version"]
 
 [project.urls]
-Homepage = "https://github.com/jeswr/sparq"
-Repository = "https://github.com/jeswr/sparq"
-Documentation = "https://github.com/jeswr/sparq#readme"
-Issues = "https://github.com/jeswr/sparq/issues"
+Homepage = "https://github.com/sparq-org/sparq"
+Repository = "https://github.com/sparq-org/sparq"
+Documentation = "https://github.com/sparq-org/sparq#readme"
+Issues = "https://github.com/sparq-org/sparq/issues"
 
 [project.optional-dependencies]
 test = ["pytest>=8.4.2"]

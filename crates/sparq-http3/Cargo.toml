@@ -4,13 +4,13 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "Internal opt-in HTTP/3-over-QUIC transport bridge for sparq axum servers"
+description = "Opt-in HTTP/3-over-QUIC transport bridge for sparq axum servers"
 repository.workspace = true
 homepage.workspace = true
 keywords.workspace = true
 categories = ["web-programming::http-server"]
 readme = "README.md"
-publish = false
+# [GPT-5.6] Published to satisfy sparq-server's optional crates.io dependency closure.
 
 [lib]
 crate-type = ["rlib"]
