@@ -13742,10 +13742,21 @@ fn cmp_expr(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], a: &Exp
         });
     }
     let (x, y) = (eval_expr(graph, local, b, row, a)?, eval_expr(graph, local, b, row, c)?);
-    Ok(match value_compare_strict(&x, &y) {
+    Ok(relational_value(&x, &y, arith, f))
+}
+
+/// The typed result of a relational operator (`<`, `<=`, `>`, `>=`) once both operands are
+/// evaluated. An incomparable pair is a type error, EXCEPT two numerics that are unordered
+/// because one is NaN: XPath `op:numeric-less-than` / `-greater-than` return false there.
+/// That case is only applied when `arith` sent the comparison here (an arithmetic operand,
+/// which the f64 fast path used to decide, returning false for NaN); the NaN-free typed path
+/// is unchanged.
+fn relational_value(x: &Value, y: &Value, arith: bool, f: impl Fn(Ordering) -> bool) -> Value {
+    match value_compare_strict(x, y) {
         Some(o) => Value::Bool(f(o)),
+        None if arith && as_numeric(x).is_some() && as_numeric(y).is_some() => Value::Bool(false),
         None => Value::Error,
-    })
+    }
 }
 
 /// SPARQL `=` (and, negated, `!=`). See [`values_equal`].
@@ -14674,10 +14685,7 @@ fn cmp_compiled(
         });
     }
     let (x, y) = (eval_compiled(graph, local, b, row, a)?, eval_compiled(graph, local, b, row, c)?);
-    Ok(match value_compare_strict(&x, &y) {
-        Some(o) => Value::Bool(f(o)),
-        None => Value::Error,
-    })
+    Ok(relational_value(&x, &y, arith, f))
 }
 
 /// [FABLE-5] (sq-7d3dj.30.11) The single RAW ID an operand resolves to, if it is a bound column

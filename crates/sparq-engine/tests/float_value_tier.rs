@@ -302,3 +302,61 @@ fn reopened_pre_header_store_values_floats_as_f32() {
     drop(g2);
     std::fs::remove_dir_all(&dir).ok();
 }
+
+// ── Unordered (NaN) numeric comparisons are false, not errors ───────────────────────────
+// XPath `op:numeric-less-than` and friends return false when an operand is NaN, and
+// `op:numeric-equal` returns false (so `!=` is true). Incompatible operand types are a type
+// error. The difference shows under negation and in a BIND.
+
+/// The BIND-ed value of `expr`: `Some(bool)`, or `None` when unbound (an error).
+fn bound_bool(g: &Graph, expr: &str) -> Option<bool> {
+    let r = query(g, &format!("SELECT ?b WHERE {{ BIND(({expr}) AS ?b) }}")).unwrap();
+    r.rows[0][0].as_ref().map(|t| t.to_string().starts_with("\"true\""))
+}
+
+#[test]
+fn nan_arithmetic_comparisons_are_false_not_errors() {
+    let g = promo_graph();
+    let nanf = format!("\"NaN\"^^<{XSD}float>");
+    for (expr, want) in [
+        ("0e0 / 0e0 < 1".to_string(), false),
+        ("0e0 / 0e0 > 1".to_string(), false),
+        ("0e0 / 0e0 <= 1".to_string(), false),
+        ("0e0 / 0e0 >= 1".to_string(), false),
+        ("0e0 / 0e0 = 1".to_string(), false),
+        ("0e0 / 0e0 != 1".to_string(), true),
+        ("0e0 / 0e0 = 0e0 / 0e0".to_string(), false),
+        (format!("{nanf} + 1 < 1"), false),
+        (format!("{nanf} + 1 >= 1"), false),
+        (format!("{nanf} + 1 = {nanf} + 1"), false),
+        (format!("{nanf} + 1 != 1"), true),
+    ] {
+        assert_eq!(bound_bool(&g, &expr), Some(want), "BIND {expr}");
+        assert_eq!(ask(&g, &format!("ASK {{ FILTER({expr}) }}")), want, "FILTER {expr}");
+        assert_eq!(ask(&g, &format!("ASK {{ FILTER(!({expr})) }}")), !want, "FILTER !({expr})");
+    }
+}
+
+/// Stored operands: the FILTER runs over pattern rows, so it is compiled.
+#[test]
+fn stored_nan_arithmetic_comparisons_are_false_not_errors() {
+    let nt = format!("<http://ex/a> <http://ex/n> \"NaN\"^^<{XSD}float> .\n");
+    let g = Graph::load_str(&nt, "turtle").unwrap();
+    for (filter, want) in [("?v + 1 < 1", false), ("?v / 1 >= 1", false), ("?v + 1 = 1", false), ("?v + 1 != 1", true)] {
+        let q = format!("ASK {{ ?s <http://ex/n> ?v FILTER(!({filter})) }}");
+        assert_eq!(ask(&g, &q), !want, "{q}");
+        let q = format!("SELECT ?b WHERE {{ ?s <http://ex/n> ?v BIND(({filter}) AS ?b) }}");
+        let r = query(&g, &q).unwrap();
+        let got = r.rows[0][0].as_ref().map(|t| t.to_string().starts_with("\"true\""));
+        assert_eq!(got, Some(want), "{q}");
+    }
+}
+
+#[test]
+fn incompatible_operands_of_an_ordering_stay_errors() {
+    let g = promo_graph();
+    // A numeric against a string is a type error: unbound in BIND, excluded even when negated.
+    assert_eq!(bound_bool(&g, "1 + 1 < \"a\""), None);
+    assert!(!ask(&g, "ASK { FILTER(!(1 + 1 < \"a\")) }"));
+    assert_eq!(bound_bool(&g, "0e0 / 0e0 < \"a\""), None);
+}
