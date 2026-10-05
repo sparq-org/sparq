@@ -888,7 +888,10 @@ export {
 export {
   type DatasetCompressionCodec,
   type DecompressedDatasetBytes,
+  datasetCodecFromContentType,
+  datasetCodecFromName,
   decompressDatasetBytes,
+  sniffDatasetCodec,
 } from "./decompress.js";
 
 /** Renders a term for display, with a compact datatype/lang suffix. */

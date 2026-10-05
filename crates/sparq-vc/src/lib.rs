@@ -55,6 +55,15 @@
 //!   engine's JSON-LD parser); doing it inside this crate would force a JSON-LD
 //!   context processor (and remote-context fetching) onto the lean build. See
 //!   [`ProofConfig`] for how the proof options are supplied.
+//! - **Proof-config RDF matches the W3C vectors.** [OPUS-5.5] `created` maps to
+//!   `dcterms:created` and `cryptosuite` is typed `sec:cryptosuiteString`, as in
+//!   the published [vc-di-eddsa test vectors]; the published `proofValue` is
+//!   regression-tested. Proofs from earlier releases (`sec:created`, plain
+//!   `cryptosuite` literal) no longer verify — no legacy fallback; re-sign them.
+//!   Only [`ProofConfig`]'s typed fields are represented, their values are not
+//!   fully validated, and issuer authorization / credential status are not checked.
+//!
+//! [vc-di-eddsa test vectors]: https://www.w3.org/TR/vc-di-eddsa/#test-vectors
 //! - **DID methods:** `did:key` (offline, self-certifying) by default; `did:web`
 //!   (document-fetched, host-rooted) behind the opt-in `did-web` feature, over a
 //!   pluggable `did::DidDocumentFetcher` (a `did-web`-feature item) so this crate
