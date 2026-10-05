@@ -33,7 +33,7 @@ permissions:
 - The action emits an **in-toto SLSA provenance predicate** binding each archive's SHA-256
   digest to this workflow run (repo + ref + run-id, via the OIDC identity), signs it with a
   short-lived Sigstore Fulcio certificate, and records it in the Rekor transparency log.
-- **Verify:** `gh attestation verify sparq-cli-vX.Y.Z-x64-v3.tar.gz --repo jeswr/sparq`
+- **Verify:** `gh attestation verify sparq-cli-vX.Y.Z-x64-v3.tar.gz --repo sparq-org/sparq`
   (succeeds only if the artifact's digest matches a signed attestation from this repo's
   release workflow).
 - **Hosted platform (SL-B2-a):** `runs-on:` is GitHub-hosted (`ubuntu-latest`, `macos-14`,
@@ -77,7 +77,7 @@ permissions:
   from the checked-in `supply-chain/vex.cdx.json`, kept 1:1 with `deny.toml [advisories].ignore`.
 - The SBOM + VEX are **SLSA-attested** (so a swapped SBOM is detectable) and covered by
   `SHA256SUMS` (`release.yml#release` *Generate SHA256SUMS*).
-- **Verify:** `gh attestation verify sparq-cli-vX.Y.Z.sbom.cdx.json --repo jeswr/sparq`;
+- **Verify:** `gh attestation verify sparq-cli-vX.Y.Z.sbom.cdx.json --repo sparq-org/sparq`;
   `shasum -a 256 -c SHA256SUMS`.
 
 ## 4. Container provenance + embedded SBOM (SL-B1-b, SL-B2-b/c)
@@ -102,7 +102,7 @@ permissions: { contents: read, packages: write, id-token: write, attestations: w
   the registry.
 - **Verify:** the buildkit `provenance: mode=max` output is a **cosign-style registry
   attestation** (attached to the image in the OCI registry), so verify it with
-  `cosign verify-attestation --type slsaprovenance ghcr.io/jeswr/sparq-server:<tag> …` (or the
+  `cosign verify-attestation --type slsaprovenance ghcr.io/sparq-org/sparq-server:<tag> …` (or the
   registry attestation API). Note: `gh attestation verify` is the verifier for the
   `actions/attest-build-provenance`-signed **archives + SBOM/VEX** (§1, §3); it is not the
   primary tool for the buildkit image attestation here.
@@ -143,7 +143,7 @@ permissions: { contents: read, packages: write, id-token: write, attestations: w
   uploads SARIF to code-scanning + the public OpenSSF dashboard. Scorecard's own checks
   (`Pinned-Dependencies`, `Token-Permissions`, `Branch-Protection`, `Signed-Releases`,
   `SAST`) corroborate several rows above.
-- **Verify:** the OpenSSF dashboard entry for `github.com/jeswr/sparq` + the Security-tab
+- **Verify:** the OpenSSF dashboard entry for `github.com/sparq-org/sparq` + the Security-tab
   code-scanning results.
 
 ---
@@ -152,16 +152,16 @@ permissions: { contents: read, packages: write, id-token: write, attestations: w
 
 - **`dist.yml` binaries are now attested** (GX-9 closed, sq-toze.23): `dist.yml#build` runs
   `actions/attest-build-provenance` (+ cargo-auditable, `--locked`) with `id-token`/`attestations`
-  write, so `gh attestation verify dist/sparq-cli-<tier> --repo jeswr/sparq` succeeds.
+  write, so `gh attestation verify dist/sparq-cli-<tier> --repo sparq-org/sparq` succeeds.
 - **Published-package provenance — PARTIAL (GX-10 / sq-toze.24, `publish.yml`):**
-  - **npm `@jeswr/sparq` — provenance NOW EMITTED.** `publish.yml#npm` runs `npm publish
+  - **npm `@sparq-org/sparq` — provenance NOW EMITTED.** `publish.yml#npm` runs `npm publish
     --provenance --access public` in the GitHub-Actions OIDC context; the registry stores a
     Sigstore-signed SLSA provenance statement for the version, and the job's `npm audit signatures`
     step fails if it is absent. **Verify (consumer):** `npm audit signatures` in a project that has
-    `@jeswr/sparq` installed, or inspect the "Provenance" panel on the npmjs.com version page.
+    `@sparq-org/sparq` installed, or inspect the "Provenance" panel on the npmjs.com version page.
   - **crates.io — out-of-band attestation only.** `publish.yml#crates` attests the `cargo package`
     `.crate` bytes with `attest-build-provenance`; **verify** with `gh attestation verify
-    <name>-<ver>.crate --repo jeswr/sparq` against the downloaded crate. crates.io itself stores
+    <name>-<ver>.crate --repo sparq-org/sparq` against the downloaded crate. crates.io itself stores
     **no provenance link** (no upstream mechanism) — `gh attestation verify` against a crate fetched
     via `cargo` will only succeed if you point it at the attested `.crate` artifact; the registry
     page carries no badge. This is the honest, expected boundary (external sub-gap), not a bug.
@@ -172,7 +172,7 @@ permissions: { contents: read, packages: write, id-token: write, attestations: w
     pypi`). PyPI then records an in-toto/Sigstore-signed provenance statement per file. **Verify
     (consumer):** the "Provenance" panel on the PyPI release-files page, or `pypi-attestations verify`
     / `gh attestation verify`. **NOT-yet-true caveat:** this lane only emits attestations once a
-    maintainer registers the Trusted Publisher on the `sparq-rdf` PyPI project (owner `jeswr`, repo
+    maintainer registers the Trusted Publisher on the `sparq-rdf` PyPI project (owner `sparq-org`, repo
     `sparq`, workflow `publish.yml`, env `pypi`) — a PyPI-account act that cannot be a tracked repo
     file. Until then the upload step fails to mint a token by design (no static API token is stored).
     Do NOT claim PyPI provenance is *emitted* until that registration is confirmed live.
@@ -185,7 +185,7 @@ permissions: { contents: read, packages: write, id-token: write, attestations: w
   `sparq-cli-<version>.intoto.jsonl` / `sparq-artifacts-<version>.intoto.jsonl` /
   `sparq-dist.intoto.jsonl`, and nobody has verified one**. Wiring is not evidence: this line stays
   "no L3 evidence" until a `v*` tag emits bundles that `slsa-verifier verify-artifact <file>
-  --provenance-path <bundle> --source-uri github.com/jeswr/sparq` accepts. **Where that evidence
+  --provenance-path <bundle> --source-uri github.com/sparq-org/sparq` accepts. **Where that evidence
   will come from (#4571):** after cutting the Release, `release.yml`'s `verify-provenance` job
   calls `.github/workflows/release-verify.yml`,
   which runs `scripts/verify-release-provenance.sh` over the *published* assets — both bundles

@@ -100,7 +100,7 @@ its §2 documents a genuine number collision between two upstream ADR trees.
 
 | Issue | Date | Decision | Rationale | Evidence | Status |
 |---|---|---|---|---|---|
-| #1656 | 2026-07-06 | RATIFY the early promotion of the `gui-mock-ipc` Playwright lane — keep it gating `ci-summary`, backfill its probation-ledger row as ratified | it is a fully deterministic headless-Chromium lane (`retries: 0`, mocked IPC); demoting a green gate on an active surface reduces real enforcement. Rollback = the §4 reverse flip (append the `advisory` marker to the job name + set `continue-on-error: true` on the run step) | `.github/E2E-GATING-POLICY.md` §6 · §8 | adopted |
+| #1656 | 2026-07-06 | RATIFY the early promotion of the `gui-mock-ipc` Playwright lane — keep it gating `ci-summary`, backfill its probation-ledger row as ratified | it is a fully deterministic headless-Chromium lane (`retries: 0`, mocked IPC); demoting a green gate on an active surface reduces real enforcement. Rollback = the §6 demotion runbook: add a `.github/advisory-registry.json` entry for `gui.yml` · `gui-mock-ipc` (`owner_bead` + `promotion_criteria` + `job_id`) **and** `continue-on-error: true` on the run step. Since #3773 the registry declaration — not the job name — decides gating, so a name edit alone demotes nothing (and `scripts/check-advisory-registry.py` C2 would RED on an advisory-named job with no entry) | `.github/E2E-GATING-POLICY.md` §6 · §8 | adopted |
 
 ## Still-open steering items (NOT consolidated)
 

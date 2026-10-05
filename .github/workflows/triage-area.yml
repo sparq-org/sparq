@@ -49,6 +49,17 @@
 # the full unattributed list to the run summary, whether or not anything was classified, so
 # the residue is a visible number a maintainer can act on rather than an absence.
 #
+# WRITE VOLUME IS BUDGETED (#5448). Each classified issue costs one `gh issue edit`, and the
+# widened queue's first ticks could otherwise issue several hundred of them in a few minutes
+# — into GitHub's secondary limit on content-mutating requests (~80/min, ~500/hour). The
+# classifier therefore paces its writes and spends at most a fixed budget per run
+# (WRITE_PACE_SECONDS / MAX_WRITES_PER_RUN in scripts/triage-area.py, sized against this
+# file's `25,55` cron). Unbudgeted, those ticks could 403 and RED — self-healing, because
+# the sweep is idempotent and the next tick resumes, but a red every half hour for hours is
+# alert fatigue on the one lane whose value is that a human reads its summary. The budget is
+# NOT a silent cap: the deferred issues get their own summary section below, kept separate
+# from the unattributable residue because they need no human — the next tick writes them.
+#
 # GATING POSTURE: NOT A GATE. schedule + workflow_dispatch only — it never runs on a PR head
 # or a merge_group ref, so it produces no check-run for ci-summary to aggregate and cannot
 # affect the required `gate`. Its job name carries no advisory/informational token and it
@@ -117,12 +128,21 @@ jobs:
         run: |
           set -euo pipefail
           log="$RUNNER_TEMP/triage-area.log"
-          # The script's own tally line: "-- N classified, M left unattributed (...), K scanned".
+          # The script's own tally line: "-- N classified (W writable this run, D deferred
+          # ...), M left unattributed (...), K scanned".
           summary=$(sed -n 's/^-- //p' "$log" | tail -1)
           summary=${summary:-'no tally line — the classifier produced no report'}
           {
             printf '### needs:area classifier\n\n%s\n\n' "$summary"
             printf 'The issues below carry no confident evidence in the checked-in rule table, so they gain no `area:` label and remain undispatchable until a human attributes them or a rule is added. Since #5003 this list spans every area-less open issue, not only the ones parked `needs:area`. It is the route back to a maintainer that #3816 found missing.\n\n'
             sed -n 's/^   LEFT /- /p' "$log"
+            # #5448: the per-run write budget's deferrals, deliberately a SEPARATE section.
+            # These are classified and need no human — they simply did not fit this tick's
+            # budget and the next `25,55` tick writes them. Printed only when non-empty so a
+            # steady-state tick (which never reaches the budget) stays quiet.
+            deferred=$(sed -n 's/^   DEFERRED /- /p' "$log")
+            if [ -n "$deferred" ]; then
+              printf '\n#### Deferred by the per-run write budget\n\nClassified, not yet written: the sweep bounds its `gh issue edit` volume to stay under GitHub'"'"'s secondary rate limit on content-mutating requests. Nothing is lost — the next tick resumes with these, and the list shrinks every run.\n\n%s\n' "$deferred"
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
           echo "::notice title=area-less residue::${summary}"

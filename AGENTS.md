@@ -11,9 +11,9 @@
 sparq is a from-scratch **RDF triplestore and SPARQL 1.1 engine in Rust** — dictionary-encoded, six sorted permutation indexes, parallel + streaming execution, RDFS/OWL-RL/N3 inference, an out-of-core (mmap) mode with a compressed on-disk format, a WebAssembly build, and a W3C-conformant HTTP server. The engine is published across several surfaces:
 
 - **Rust crates** (crates.io): `sparq-core`, `sparq-engine` (core), `sparq-cli`, `sparq-server`, plus opt-in capability crates (`sparq-reason`, `sparq-reason-el`, `sparq-shacl`, `sparq-geo`, `sparq-text`, `sparq-rsp`, `sparq-hdt`, `sparq-solid`, `sparq-arrow`, `sparq-mcp`, `sparq-vc`, ...). `sparq-reason-el` is a **separate** opt-in crate (depending on it is the opt-in): an OWL 2 EL consequence-based classifier that computes the **complete** `rdfs:subClassOf` subsumption lattice that OWL 2 RL (`sparq-reason`) is sound but silently incomplete for — see [`skills/inference/SKILL.md`](skills/inference/SKILL.md).
-- **In-workspace, `publish = false` server estate** (NOT on crates.io): `sparq-lws-core` — an **EXPERIMENTAL** native Solid/LDP (Linked Web Storage) server core imported from [jeswr/solid-server-rs](https://github.com/jeswr/solid-server-rs), SPARQ-authoritative for RDF + WAC, with Solid-OIDC/DPoP auth delegated to the pinned [solid-oidc-verifier](https://github.com/jeswr/solid-oidc-verifier). It does **not** replace the TypeScript prod-solid-server and its default storage is ephemeral. `sparq-lws-wasm` is its opt-in wasm adapter (the local-development host behind `@jeswr/solid-server`), and `sparq-wac-oracle` is the server-independent WAC/ACP decision test-vector corpus. Usage: [`skills/solid-lws-server/SKILL.md`](skills/solid-lws-server/SKILL.md); design decisions: [`research/lws-design-records.md`](research/lws-design-records.md).
-- **npm**: `@jeswr/sparq` — RDF/JS-typed API over the wasm build, zero runtime deps;
-  [GPT-5.6] `@jeswr/solid-server` — loopback-only Solid/LDP development host over the separate
+- **In-workspace, `publish = false` server estate** (NOT on crates.io): `sparq-lws-core` — an **EXPERIMENTAL** native Solid/LDP (Linked Web Storage) server core imported from [jeswr/solid-server-rs](https://github.com/jeswr/solid-server-rs), SPARQ-authoritative for RDF + WAC, with Solid-OIDC/DPoP auth delegated to the pinned [solid-oidc-verifier](https://github.com/jeswr/solid-oidc-verifier). It does **not** replace the TypeScript prod-solid-server and its default storage is ephemeral. `sparq-lws-wasm` is its opt-in wasm adapter (the local-development host behind `@sparq-org/solid-server`), and `sparq-wac-oracle` is the server-independent WAC/ACP decision test-vector corpus. Usage: [`skills/solid-lws-server/SKILL.md`](skills/solid-lws-server/SKILL.md); design decisions: [`research/lws-design-records.md`](research/lws-design-records.md).
+- **npm**: `@sparq-org/sparq` — RDF/JS-typed API over the wasm build, zero runtime deps;
+  [GPT-5.6] `@sparq-org/solid-server` — loopback-only Solid/LDP development host over the separate
   in-memory wasm adapter, with fixed-owner default and opt-in Node-side Solid-OIDC verification.
 - **PyPI**: `sparq-rdf` (import name `sparq`) — pyo3/maturin bindings.
 
@@ -31,7 +31,7 @@ Read [`skills/SKILL.md`](skills/SKILL.md) first — it is the router skill that 
 - [`skills/cli/SKILL.md`](skills/cli/SKILL.md) — the `sparq` CLI (query, mmap build/query, reason, bench).
 - [`skills/http-server/SKILL.md`](skills/http-server/SKILL.md) — the SPARQL 1.1 Protocol HTTP server.
 - [`skills/helm-deploy/SKILL.md`](skills/helm-deploy/SKILL.md) — [GPT-5.6] deploy either native server to Kubernetes with the secure-default Helm chart.
-- [`skills/javascript-wasm/SKILL.md`](skills/javascript-wasm/SKILL.md) — the `@jeswr/sparq` npm package.
+- [`skills/javascript-wasm/SKILL.md`](skills/javascript-wasm/SKILL.md) — the `@sparq-org/sparq` npm package.
 - [`skills/python/SKILL.md`](skills/python/SKILL.md) — the `sparq` Python package.
 
 The capability surfaces (reasoning — RDFS/OWL-RL/N3 in `sparq-reason` plus the opt-in OWL 2 EL classifier in `sparq-reason-el`, both covered by [`skills/inference/SKILL.md`](skills/inference/SKILL.md) — SHACL, full-text, vector, GeoSPARQL, streaming RSP-QL, RDFC-1.0 dataset canonicalization, ZK query proofs, MPC, GenAI retrieval) each have their own `skills/<surface>/SKILL.md` — the router in [`skills/SKILL.md`](skills/SKILL.md) enumerates them.
@@ -92,7 +92,7 @@ The seam is **clean and intentional**: generic algorithms flow outward to sparq-
 - a `pub` item in a crate's public surface (a published crate's exported types, traits, functions, or their signatures);
 - a CLI flag, subcommand, or its behavior in `sparq-cli`;
 - an HTTP route, query/body parameter, or response shape in `sparq-server`;
-- a Python binding (the `sparq` package) or a JS/RDF-JS binding (`@jeswr/sparq`).
+- a Python binding (the `sparq` package) or a JS/RDF-JS binding (`@sparq-org/sparq`).
 
 Then edit the corresponding `skills/<surface>/SKILL.md` (sparql-query / data-formats / cli / http-server / python / javascript-wasm) so its instructions and examples still compile and run against the new surface. Do not split this across a follow-up PR — a skill that documents a removed flag or a changed signature is worse than no skill. If the change spans surfaces (e.g. a new query option exposed in both the CLI and the HTTP server), update every affected `SKILL.md`. Keep each `SKILL.md` body under ~500 lines; move long flag/route tables and runnable examples into that skill's `references/` and `scripts/`.
 
@@ -382,7 +382,7 @@ Branch protection (owner-set, out-of-repo) enforces this: require `ci-summary`, 
 
 **Cross-agent self-identification — identify as the SPARQ agent in every issue/PR/comment.** <!-- [OPUS-4.8] cross-agent self-id --> @jeswr runs multiple agents under one GitHub account, so a reader cannot tell *which* agent is speaking from the account alone. Therefore **every** issue, PR, and comment you author — orchestrator **and** sub-agents — must begin with a 🤖 self-identification blockquote naming the **SPARQ agent** (mirroring how the sibling PSS agent identifies itself in cross-repo threads). Issues and PRs are *threaded*, so identify in **each** comment you add, not just the first. The canonical header:
 
-> 🤖 **SPARQ agent** — I am @jeswr's agent for the jeswr/sparq RDF/SPARQL engine. @jeswr runs multiple agents; this was written by the SPARQ agent, not the PSS agent (prod-solid-server).
+> 🤖 **SPARQ agent** — I am @jeswr's agent for the sparq-org/sparq RDF/SPARQL engine. @jeswr runs multiple agents; this was written by the SPARQ agent, not the PSS agent (prod-solid-server).
 
 The required header is **model-agnostic** — it names the *agent*, not the model, so it stays accurate whichever model is running. You MAY append the model name when it's relevant; the authoritative model record is the commit trailer + inline marker described under *Model provenance* below (don't duplicate it in the header by default). Carry this requirement into every sub-agent brief, so worktree-authored issues/PRs/comments self-identify too.
 
@@ -425,7 +425,7 @@ The rules above are the *reviewer's*. This list is the **author's**, and it exis
 
 Every commit is auto-reviewed by **roborev**: a `.git/hooks/post-commit` hook enqueues a review job to the local roborev daemon. The reviewer agent is **codex — a deliberately non-Anthropic model**, so the engine is never reviewed by the same model family that wrote it. Git worktrees share the main repo's `.git/hooks`, so commits made by worktree sub-agents are reviewed too. Verify the loop is live with `roborev list` (recent jobs, all `done`) and `~/.roborev/post-commit.log` (the per-repo enqueue trail, incl. `sparq-wt-*` worktrees).
 
-**Install the hook in EVERY repo you commit to — not just `jeswr/sparq`.** <!-- [OPUS-4.8] charter cross-poll #122 --> Worktrees off this repo inherit its `.git/hooks` automatically, but a *separate* clone you commit to does not. So when the agent works in any other repo under the maintainer's namespace (e.g. it lands a fix on a sibling like `jeswr/fetch-rdf`, or scaffolds a new repo), run `roborev install-hook` there at first entry, so no commit in any namespace repo escapes the non-Anthropic reviewer. The hook is cheap and idempotent.
+**Install the hook in EVERY repo you commit to — not just `sparq-org/sparq`.** <!-- [OPUS-4.8] charter cross-poll #122 --> Worktrees off this repo inherit its `.git/hooks` automatically, but a *separate* clone you commit to does not. So when the agent works in any other repo under the maintainer's namespace (e.g. it lands a fix on a sibling like `jeswr/fetch-rdf`, or scaffolds a new repo), run `roborev install-hook` there at first entry, so no commit in any namespace repo escapes the non-Anthropic reviewer. The hook is cheap and idempotent.
 
 **Read the verdict ASYNC — never block on `--wait`.** <!-- [OPUS-4.8] charter cross-poll #76/#122 --> Because the post-commit hook already auto-enqueues the review, read the verdict asynchronously with `roborev show <sha>` (poll briefly with `roborev list` if the daemon hasn't finished) rather than sitting on a blocking `roborev review <sha> --local --wait`, which stalls the orchestrator loop. The verdict must still PASS before a branch merges (see below); you just don't hold a foreground call to get it. (Consistent with *Orchestration cadence — background by default*.)
 

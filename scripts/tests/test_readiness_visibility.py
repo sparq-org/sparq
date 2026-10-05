@@ -1324,6 +1324,20 @@ class TestAreaClassifierCronSeam(unittest.TestCase):
         self.assertIn("LEFT", run,
                       "the residue report must extract the classifier's LEFT lines")
 
+    def test_the_budget_deferred_writes_reach_the_run_summary_too(self):
+        # [OPUS-5] #5448. The sweep bounds its `gh issue edit` volume per run to stay
+        # under GitHub's secondary limit on content-mutating requests. That cap is only
+        # acceptable because it is REPORTED: a tick that deferred 300 issues and a tick
+        # with nothing to do look identical otherwise, which is exactly the silence
+        # #3816 added this report to end. The classifier prints `DEFERRED` lines
+        # (scripts/tests/test_triage_area.py::TestWriteBudget pins that half); this step
+        # is what carries them to a human.
+        run = self._run_blocks()
+        self.assertIn("DEFERRED", run,
+                      "the per-run write budget's deferrals never reach the run "
+                      "summary — the cap is silent, and a deferred backlog is "
+                      "indistinguishable from an empty one")
+
     def test_this_lane_never_runs_on_a_pull_request(self):
         # It holds `issues: write` and executes the checked-out tree. A `pull_request`
         # trigger would run PR-authored code with a write token; `pull_request_target`

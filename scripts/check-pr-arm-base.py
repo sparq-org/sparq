@@ -32,7 +32,7 @@
 # This hook is the choke point for AGENT-typed arms (`.claude/workflows/*.js`, hand-written
 # `gh pr merge … --auto`), which bypass scripts/auto-arm.py and scripts/rearm-sweeper.py
 # entirely. Merging the Release PR cuts a `v*` tag and — once `publish = true` lands in
-# release-plz.toml — `cargo publish`es 17 crates. A crates.io version can NEVER be
+# release-plz.toml — `cargo publish`es 37 crates. A crates.io version can NEVER be
 # unpublished, so this branch is FAIL-CLOSED, keyed on branch/author/title
 # (scripts/release_pr_guard.py) and never on a label.
 #
@@ -387,7 +387,7 @@ def self_test() -> int:
         ),
         (
             "arm by URL, base=stacked → DENY",
-            "gh pr merge https://github.com/jeswr/sparq/pull/1023 --auto --squash",
+            "gh pr merge https://github.com/sparq-org/sparq/pull/1023 --auto --squash",
             base_stacked,
             "deny",
         ),
@@ -461,9 +461,9 @@ def self_test() -> int:
     # parse_pr_number unit checks
     pn_cases = [
         ("gh pr merge 1023 --auto --squash", "1023"),
-        ("gh pr merge --repo jeswr/sparq 1023 --auto", "1023"),
-        ("gh pr merge https://github.com/jeswr/sparq/pull/9 --auto",
-         "https://github.com/jeswr/sparq/pull/9"),
+        ("gh pr merge --repo sparq-org/sparq 1023 --auto", "1023"),
+        ("gh pr merge https://github.com/sparq-org/sparq/pull/9 --auto",
+         "https://github.com/sparq-org/sparq/pull/9"),
         ("gh pr merge --auto --squash", None),
     ]
     for cmd, want in pn_cases:

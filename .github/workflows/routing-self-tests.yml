@@ -302,14 +302,26 @@ jobs:
           python3 scripts/render-start-here.py --self-test
           python3 scripts/tests/test_start_here_render.py
 
-      # [OPUS-5] The bd->issues migration pair, previously ungated on a PR (see the `paths:`
-      # note above). Both are hermetic: stdlib only, every subprocess boundary stubbed, no
-      # gh/network/token. `bd-to-issues.py --self-test` carries the migration TRUST-BOUNDARY
-      # assertions (_writer_logins permission contract + the migration_owned author check),
-      # which is precisely the surface that must fail on the PR that weakens it rather than
-      # at the next bulk `--apply`.
+      # [OPUS-5] The bd->issues migration family, previously ungated on a PR (see the `paths:`
+      # note above). All are hermetic: stdlib only, no gh/network/token. `bd-to-issues.py
+      # --self-test` carries the migration TRUST-BOUNDARY assertions (_writer_logins permission
+      # contract + the migration_owned author check), which is precisely the surface that must
+      # fail on the PR that weakens it rather than at the next bulk `--apply`.
       - name: Validate the bd->issues migration and autoclose contracts
         run: |
           set -euo pipefail
           python3 scripts/bd-to-issues.py --self-test
           python3 scripts/ci-close-merged-beads.py --self-test
+          # [OPUS-5] #5886: the bd<->GitHub dependency-graph AUDIT tool, recovered here from the
+          # unmerged branch that authored it. It is the only producer in the tree of the
+          # `missing_active` / `spurious` / `cycles_bd_open` figures that #3817's Verification
+          # section names, so a native-blocker discrepancy surfaced by `ready-issues.py` (whose
+          # `open_blocker_count` unions the native and marker channels) now has something to run.
+          # Its --self-test is hermetic by CONSTRUCTION, not by stubbing: the suite reaches only
+          # bd_blocker_edges / find_cycles / bd_id_map, none of which reach the `run()` subprocess
+          # seam. It pins the ORIENTATION contract this family shares — the export record
+          # {issue_id: X, depends_on_id: Y} means X is BLOCKED BY Y. Verified by mutation:
+          # inverting that orientation, narrowing BLOCKER_TYPES back to ("blocks",) (the
+          # row-dropping bug in its module docstring), or dropping the marker-provenance check
+          # each turns this command red.
+          python3 scripts/audit-issue-deps.py --self-test

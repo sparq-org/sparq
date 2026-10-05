@@ -60,8 +60,10 @@ jobs:
   # policy against) derives from the `@ref`, so a SHA reference yields no verifiable identity.
   #
   # `upload-assets: false`: dist.yml creates no GitHub Release (it uploads workflow artifacts),
-  # so there is nothing to attach to and the job needs no `contents: write`. The signed
-  # `sparq-dist.intoto.jsonl` is left as a run artifact alongside the per-tier binaries.
+  # so there is nothing to attach. The upstream reusable workflow nevertheless declares a
+  # nested uploader job and GitHub validates its `contents: write` ceiling even when that job is
+  # skipped. The signed `sparq-dist.intoto.jsonl` is left as a run artifact alongside the
+  # per-tier binaries.
   #
   # STATUS — DOCUMENTED-UNTESTED. dist.yml is `workflow_dispatch`-only, so this job first runs on
   # the next manual dispatch. Its shape is pinned on every PR by
@@ -71,7 +73,9 @@ jobs:
     permissions:
       actions: read # read the workflow definition the provenance records as the entry point
       id-token: write # mint the generator's OWN signing identity (never shared with `build`)
-      contents: read # not the uploader — dist.yml publishes no Release (`upload-assets: false`)
+      # Required only as the upstream reusable workflow's permission ceiling; its uploader is
+      # skipped by `upload-assets: false`, and dist.yml publishes no Release.
+      contents: write
     uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
     with:
       base64-subjects: ${{ needs.build.outputs.binary-hashes }}

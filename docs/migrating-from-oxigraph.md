@@ -202,7 +202,7 @@ rustflags = ['--cfg', 'getrandom_backend="wasm_js"']
 ```
 
 With that in place the engine compiles to wasm32 cleanly. The published
-`@jeswr/sparq` npm package ships this prebuilt — for a JS migration you do not
+`@sparq-org/sparq` npm package ships this prebuilt — for a JS migration you do not
 touch the toolchain at all; see [`js/README.md`](../js/README.md). For
 `sparq-solid` specifically, the wasm status (compiles; one runtime caveat) is
 documented in [its README](../crates/sparq-solid/README.md#wasm-support).

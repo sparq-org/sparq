@@ -170,8 +170,10 @@ jobs:
                        --base "${MG_BASE_SHA}" --head "${MG_HEAD_SHA}")" || cls=engine
               # Lists ci_select.py `_INERT_CLASSES` verbatim (pinned by
               # scripts/tests/test_ci_select_wiring.py so the two cannot drift).
+              # [OPUS-5] #5249: `map-safe` = every path resolves to an ownership-map
+              # `safe = true` verdict (today site/** + ci/formal-verification.toml).
               case "${cls}" in
-                docs-only|orchestration-only|deploy-only|inert-mixed) rust=false ;;
+                docs-only|orchestration-only|deploy-only|map-safe|inert-mixed) rust=false ;;
                 *) rust=true ;;
               esac
             else

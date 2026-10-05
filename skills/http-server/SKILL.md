@@ -977,7 +977,7 @@ resource applies an atomic modify to the addressed graph, with two body dialects
   UPDATE.
 
 **5b. Container (ghcr.io).** Published on every `vX.Y.Z` release tag as a distroless OCI image
-index at `ghcr.io/jeswr/sparq-server`, with `linux/amd64` and `linux/arm64` runtime images.
+index at `ghcr.io/sparq-org/sparq-server`, with `linux/amd64` and `linux/arm64` runtime images.
 [GPT-5.6] `sq-fvzi6`: each release publishes `:X.Y.Z` (pin this for reproducible deployments),
 `:X.Y` (tracks the newest patch in that minor line), and `:latest` (tracks the newest release);
 an omitted tag selects `:latest`. The image sets `SPARQ_ALLOW_REMOTE=1` so the `0.0.0.0` bind it
@@ -986,12 +986,12 @@ container is the operator's explicit choice to publish a surface. **This default
 Because every `SPARQ_*` var is read from the environment, secure it with `-e` (no flag wiring):
 
 ```sh
-docker run --rm -p 3030:3030 ghcr.io/jeswr/sparq-server                       # empty graph, no auth
+docker run --rm -p 3030:3030 ghcr.io/sparq-org/sparq-server                       # empty graph, no auth
 docker run --rm -p 3030:3030 -v "$PWD/data:/data:ro" \
-  ghcr.io/jeswr/sparq-server --format turtle /data/dataset.ttl                # serve a dataset
+  ghcr.io/sparq-org/sparq-server --format turtle /data/dataset.ttl                # serve a dataset
 docker run --rm -p 3030:3030 \
   -e SPARQ_AUTH_TOKEN="$TOK" -e SPARQ_AUTH_TOKEN_READ=1 \
-  ghcr.io/jeswr/sparq-server                                                  # fully Bearer-gated
+  ghcr.io/sparq-org/sparq-server                                                  # fully Bearer-gated
 ```
 
 Deliver the token over TLS (terminate at a proxy). See `crates/sparq-server/README.md` →

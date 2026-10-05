@@ -727,7 +727,7 @@ mentioned only so that no reader infers it is implied by what is built.
 == Artifact and resource availability <artifact>
 
 The implementation, its tests, and this paper's source are open under the MIT license in the
-sparq repository (`github.com/jeswr/sparq`). The bridge is the opt-in `odrl-bridge` feature
+sparq repository (`github.com/sparq-org/sparq`). The bridge is the opt-in `odrl-bridge` feature
 of the `sparq-solid` crate; the stateful count path is the opt-in `count-enforcement` feature
 of the `sparq-policy` crate; the four §5.1 invariants are ordinary `cargo test` regression
 tests run in that repository's required CI (the non-anonymous footer of this paper names the

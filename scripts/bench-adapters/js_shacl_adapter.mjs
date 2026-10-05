@@ -5,7 +5,7 @@
 // (research/capability-benchmark-program.md §3.1c Tier-2 / WASM-peer):
 //   - Zazuko `rdf-validate-shacl`   (engine=rdf-validate-shacl)  [default]
 //   - Zazuko `shacl-engine`         (engine=shacl-engine)        [if installed]
-//   - sparq's OWN @jeswr/sparq WASM/JS SHACL (engine=sparq-js)   [if installed]
+//   - sparq's OWN @sparq-org/sparq WASM/JS SHACL (engine=sparq-js)   [if installed]
 // run in the SAME Node runtime as the others — the natural way to bench sparq's
 // browser SHACL story against its JS peers.
 //

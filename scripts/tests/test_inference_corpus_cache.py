@@ -30,6 +30,9 @@
 #      still hard-fail. A cached corpus and a downloaded corpus are indistinguishable
 #      to the runner, so a genuine regression still reds.
 #
+#   4. [GPT-6] ARCHIVE TRANSPORT — cache misses use HTTPS to fetch the same
+#      timestamped HTTP-origin snapshot, with the original SHA-256 pin intact.
+#
 # Hermetic: stdlib only (no PyYAML, no network, no gh, no cargo).
 # Run:  python3 scripts/tests/test_inference_corpus_cache.py
 
@@ -56,6 +59,24 @@ CACHE_SAVE = "actions/cache/save@"
 MAIN_ONLY = "github.ref == 'refs/heads/main'"
 
 _JOB_KEY = re.compile(r"^ {2}[A-Za-z0-9_-]+:\s*$")
+
+
+class TestOwlArchivePin(unittest.TestCase):
+    # [GPT-6] Only the archive transport changes; the captured resource stays HTTP.
+    def test_https_preserves_the_snapshot_and_digest(self) -> None:
+        script = FETCH_SCRIPT.read_text()
+        expected = {
+            "OWL_SNAPSHOT": "20160703034201",
+            "OWL_URL": (
+                "https://web.archive.org/web/${OWL_SNAPSHOT}if_/"
+                "http://owl.semanticweb.org/exports/all.rdf"
+            ),
+            "OWL_SHA256": "446e9eae0488e7eb58a8bd7db92b5fb358316c63e3cad1749103cd912664bee4",
+        }
+        for name, value in expected.items():
+            with self.subTest(name=name):
+                assignments = re.findall(rf'^{name}="([^"]+)"$', script, re.MULTILINE)
+                self.assertEqual(assignments, [value])
 
 
 # --------------------------------------------------------------------------- #

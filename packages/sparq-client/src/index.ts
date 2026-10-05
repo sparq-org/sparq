@@ -21,7 +21,7 @@
 // design's load-bearing "part (A) transfers" property.
 //
 // It does NOT re-implement the engine. `loadSparq()` fetches the same wasm-pack glue the
-// site already syncs into `public/wasm/` (the lean `@jeswr/sparq` bundle, built with
+// site already syncs into `public/wasm/` (the lean `@sparq-org/sparq` bundle, built with
 // `--features shacl,jsonld`), so this stays a thin, honest wrapper. No performance claim is
 // made anywhere here (this repo's work box is non-canonical); a caller MAY time a single
 // query with `performance.now()` and label it as a measured per-query latency, but must
@@ -451,7 +451,7 @@ function matchSelect(
 
 /**
  * RDF/JS `match()`-style quad lookup over a wasm {@link WasmStore}, the same generated-SELECT
- * strategy `@jeswr/sparq`'s `SparqStore.match` uses: each of subject/predicate/object/graph
+ * strategy `@sparq-org/sparq`'s `SparqStore.match` uses: each of subject/predicate/object/graph
  * is either a wildcard (a fresh `?s`/`?p`/`?o`/`?g` variable) or an inlined constant
  * N-Triples term. The graph wildcard spans the default graph AND every named graph. Returns
  * the matching rows as SPARQL-JSON bindings.
@@ -470,7 +470,7 @@ export function matchQuads(
 /**
  * `match(…).length` without materialising the matched terms, via the engine's index-level
  * {@link WasmStore.count} (the count of a generated SELECT over the same pattern
- * {@link matchQuads} builds). This is `countQuads()` in `@jeswr/sparq`.
+ * {@link matchQuads} builds). This is `countQuads()` in `@sparq-org/sparq`.
  */
 export function countQuads(
   store: WasmStore,
@@ -494,7 +494,7 @@ export interface CursorBatch {
 
 /**
  * Stream a SELECT query's rows one BATCH at a time through the wasm `queryCursor` cursor
- * (mirrors `@jeswr/sparq`'s `queryBindingsStream`): pull a batch of up to `batchSize`
+ * (mirrors `@sparq-org/sparq`'s `queryBindingsStream`): pull a batch of up to `batchSize`
  * self-contained SPARQL-JSON rows, hand it to `onBatch`, drop it, pull the next — so the
  * consumer never holds more than one batch. Returns the cursor's introspection (`vars`,
  * `rowCount`, `batchSize`) once drained. The wasm cursor is always freed, even if `onBatch`

@@ -24,7 +24,7 @@ export default function SparqlSurfacePage() {
         <p>
           sparq evaluates SPARQL 1.1/1.2 over an in-memory graph with a
           worst-case-optimal join engine; the same engine compiled to wasm ships as{" "}
-          <code className="font-mono text-foreground">@jeswr/sparq</code>, so you can
+          <code className="font-mono text-foreground">@sparq-org/sparq</code>, so you can
           run real queries in your tab with no server round-trip.
         </p>
       }

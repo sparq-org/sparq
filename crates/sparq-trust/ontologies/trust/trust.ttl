@@ -36,7 +36,7 @@ statements that an N3 reasoner merges with the local .acl/.acr rules to derive a
 EVERY term here is NON-STANDARD and invented for this proposal; the namespace is a
 placeholder. Companion: SEMANTICS.md (two-stratum semantics, degenerate-.acl
 equivalence, strict additivity) and research/solid-trust-graph-authz-design.md."""@en ;
-  rdfs:seeAlso <https://github.com/jeswr/sparq/issues/940> ;
+  rdfs:seeAlso <https://github.com/sparq-org/sparq/issues/940> ;
   rdfs:comment "Placeholder namespace; a WG would rename/rehome every term."@en .
 
 # =============================================================================

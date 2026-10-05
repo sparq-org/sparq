@@ -9,11 +9,11 @@
 # write-path-vs-read-predicate mismatch class.
 #
 # NOT A GATE, and the event triggers do not change that. `ci-summary / gate` decides by
-# POLLING check-runs on the PR HEAD commit; for `issue_comment`, `pull_request_review`
-# and `workflow_run`, GitHub sets GITHUB_SHA to the DEFAULT BRANCH head, not the PR head,
-# so this workflow's check-run never lands on a ref the aggregator inspects. That is the
-# same property batch-merge.yml and pr-backlog.yml already rely on for their `workflow_run`
-# legs. It never runs on a PR head and never executes candidate-PR code. It grants
+# POLLING check-runs on the PR HEAD commit; for `issue_comment` and `workflow_run`, GitHub
+# sets GITHUB_SHA to the DEFAULT BRANCH head, so this workflow's check-run never lands on
+# a ref the aggregator inspects. That is the same property batch-merge.yml and
+# pr-backlog.yml already rely on for their `workflow_run` legs. It never executes
+# candidate-PR code. It grants
 # NO new arming authority: it writes LABELS only. The arm itself is still performed by
 # auto-arm.py with its own expectedHeadOid CAS and its own security-label exclusions, so
 # every existing fail-closed guard still applies.
@@ -23,7 +23,7 @@
 # the last commit. This would seem to be an operation that can just be done statically by
 # CI."). Every input this policy reads — head SHA, comments on that head, review bodies,
 # the `gate` conclusion — is carried by a webhook, so the decision is a pure function of
-# state that is already delivered. Three event triggers are added below and the CRON IS
+# state that is already delivered. Two event triggers are added below and the CRON IS
 # KEPT as the reconciliation backstop for dropped or never-delivered webhooks: removing
 # it would convert a latency bug into a lost-work bug.
 #
@@ -47,8 +47,8 @@
 # green CI and an armed auto-merge release NOTHING. So every minute a mergeable PR sits
 # unlabelled-and-therefore-unarmed is a minute its partition is closed to the frontier.
 #
-# TRUST. issue_comment / pull_request_review / workflow_run all resolve the workflow file
-# from the DEFAULT BRANCH and never check out the PR head, so no candidate-controlled code
+# TRUST. issue_comment / workflow_run both resolve the workflow file from the DEFAULT BRANCH
+# and never check out the PR head, so no candidate-controlled code
 # or workflow definition ever runs. `pull_request` and `pull_request_target` are both
 # still forbidden here (the former takes its workflow file from the candidate ref). The
 # only value taken from the payload is an integer PR number, parsed by
@@ -85,12 +85,11 @@ on:
   issue_comment:
     types: [created, edited]
 
-  # EVENT: the same verdict arriving through a PR REVIEW body. Review bodies are
-  # WITHHOLD-ONLY in the policy, so this can only ever SHRINK the promote-set — but a
-  # retraction must not wait an hour either. `dismissed` carries no body change but does
-  # change which reviews are evidence.
-  pull_request_review:
-    types: [submitted, edited, dismissed]
+  # `pull_request_review` is deliberately NOT a trigger (#6311). Every automatic Copilot review
+  # created an approval-held `action_required` run with zero jobs on the PR head; ci-summary then
+  # correctly failed that head on the run-level verdict. Ten such deterministic false-red runs
+  # accumulated between 2026-08-30 and 2026-09-03. Review bodies are WITHHOLD-ONLY, so the cron
+  # reconciles their edits/dismissals; promotion still arrives immediately through issue_comment.
 
   # EVENT: `gate` concluded on a PR head, which is what makes a PR green + visible (the
   # `flag` / `unflag` population). ci-summary is the workflow that publishes the `gate`
@@ -128,7 +127,6 @@ permissions:
 concurrency:
   group: >-
     verdict-bridge-${{ github.event.issue.number
-    || github.event.pull_request.number
     || github.event.workflow_run.pull_requests[0].number
     || 'sweep' }}
   cancel-in-progress: false
@@ -168,7 +166,6 @@ jobs:
       github.event_name == 'schedule'
       || github.event_name == 'workflow_dispatch'
       || (github.event_name == 'issue_comment' && github.event.issue.pull_request != null && contains(github.event.comment.body, 'VERDICT'))
-      || (github.event_name == 'pull_request_review' && github.event.pull_request.number != null)
       || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.pull_requests[0].number != null)
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -230,7 +227,6 @@ jobs:
           # rather than degrading to a sweep.
           BRIDGE_PR: >-
             ${{ github.event.issue.number
-            || github.event.pull_request.number
             || github.event.workflow_run.pull_requests[0].number
             || '' }}
           # event: no useful cron backstop on the measured 53-75 minute real cadence, so

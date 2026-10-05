@@ -79,7 +79,7 @@ function pdfHref(slug: string): string {
 
 // [OPUS-4.8] sq-1scgk — the paper's single Typst source on GitHub: the authoring artifact the
 // PDF AND the in-site HTML both compile from (build-papers.mjs), so it is the real repro anchor.
-// Matches the site's existing source-link convention (jeswr/sparq blob/main — see the /surface/*
+// Matches the site's existing source-link convention (sparq-org/sparq blob/main — see the /surface/*
 // readmeHref/skillHref links). An absolute external link, so no basePath prefix.
 function sourceHref(source: string): string {
   return `https://github.com/sparq-org/sparq/blob/main/site/papers/${source}`;
