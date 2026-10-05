@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-# [OPUS-4.8] Pre-publish PyPI distribution-name availability check (bead sq-ed5).
-# Authored by Opus 4.8 (Fable unavailable; flag for re-review when Fable returns).
+# Pre-publish PyPI distribution-name availability check (bead sq-ed5).
 #
 # WHY THIS SCRIPT EXISTS — the executable half of docs/release.md §0a.
 # The release runbook (docs/release.md §0a "Crate-name availability") records a DATED

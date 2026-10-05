@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [FABLE-5] Auto-file a nightly metamorphic-lane finding (bead sq-3dyje.9).
+# Auto-file a nightly metamorphic-lane finding (bead sq-3dyje.9).
 #
 # WHAT: the deterministic filing core of .github/workflows/metamorph.yml's failure
 # path — the metamorphic sibling of scripts/ci-file-differential-failure.py (same
@@ -153,7 +153,7 @@ def build_bead_record(bead_id: str, shard: str, parsed: dict, args, now: str) ->
         f"metamorphic oracles: a VIOLATION is an internal-consistency wrong-result "
         f"signal in sparq itself (no cross-engine adjudication applies); an "
         f"ENGINE-FAILURE is a generated valid query that failed to evaluate. "
-        f"🤖 SPARQ agent [FABLE-5]"
+        f"🤖 SPARQ agent"
     )
     return {
         "_type": "issue",
@@ -183,7 +183,7 @@ def build_issue_body(bead_id: str, shard: str, parsed: dict, args) -> str:
     n = len(parsed["seeds"])
     seeds_line = ", ".join(str(s) for s in parsed["seeds"][:50]) + (" …" if n > 50 else "")
     case = parsed["first_case"] or "(no FIRST FAILING CASE block captured — see the artifact log)"
-    return f"""> 🤖 **SPARQ agent** — auto-filed by the nightly metamorphic lane (bead sq-3dyje.9). [FABLE-5]
+    return f"""> 🤖 **SPARQ agent** — auto-filed by the nightly metamorphic lane (bead sq-3dyje.9).
 
 The nightly TLP/NoREC metamorphic driver found **{n} failing seed(s)** in shard `{shard}` (seed window {args.seed_start}+{args.count}).
 

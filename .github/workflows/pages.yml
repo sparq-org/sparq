@@ -1,10 +1,10 @@
-# [OPUS-4.8] sq-40y0 — deploy the sparq feature-showcase site (site/) to GitHub Pages.
+# sq-40y0 — deploy the sparq feature-showcase site (site/) to GitHub Pages.
 #
 # WHAT THIS PUBLISHES: the Next.js static export served ROOT-RELATIVE (basePath '') at the custom domain
 # https://sparq.jeswr.org/ (org-migration cutover, sq-uj38w),
 # PLUS the existing benchmark dashboard preserved at /dev/, PLUS the DISTINCT
 # operational GUI frontend (gui/app) hosted at /app/, PLUS the mdBook guide at /guide/
-# ([OPUS-5] issue #5022 — see "THE mdBOOK GUIDE AT /guide/" below). The dashboard tree
+# (issue #5022 — see "THE mdBOOK GUIDE AT /guide/" below). The dashboard tree
 # (`dev/`) lives on the `benchmark-data` branch (written by bench.yml); this workflow
 # fetches that tree and OVERLAYS it into the export's `out/dev/` before upload, so a
 # single Pages artifact serves the showcase root, the unchanged dashboard at
@@ -40,7 +40,7 @@
 # committing out/ onto benchmark-data — was rejected: it couples site source to the data
 # branch and races bench.yml's root index.html seed.)
 #
-# THE mdBOOK GUIDE AT /guide/ ([OPUS-5] issue #5022 — the product decision, now MADE):
+# THE mdBOOK GUIDE AT /guide/ (issue #5022 — the product decision, now MADE):
 # Pages has ONE deploy slot and this workflow owns the / root, so the mdBook guide
 # (sq-w9sr/sq-h0tr) could not simply grow its own deploy job — a second `deploy-pages`
 # would race this one last-writer-wins. Of the three options in
@@ -60,7 +60,7 @@ name: pages
 
 on:
   push:
-    # [OPUS-4.8] sq-gdhy — rebuild on TWO sources so the paper factory's live numbers
+    # sq-gdhy — rebuild on TWO sources so the paper factory's live numbers
     # stay current. (1) `main`: the site source itself changes (pages, papers, the
     # COMMITTED site/src/data/benchmarks.generated.json). (2) `benchmark-data`: bench.yml
     # pushes a fresh benchmark point THERE (not to main), and the paper/showcase numbers
@@ -93,14 +93,14 @@ concurrency:
 jobs:
   build:
     # Gate the publish to the two first-party branches CI writes (PRs build nothing here).
-    # [OPUS-4.8] sq-gdhy — `benchmark-data` joins `main` so a fresh benchmark point
+    # sq-gdhy — `benchmark-data` joins `main` so a fresh benchmark point
     # re-publishes the paper factory; both are CI-written branches, never PR refs.
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/benchmark-data'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          # [OPUS-4.8] sq-gdhy — ALWAYS build the `main` site source, even when this run was
+          # sq-gdhy — ALWAYS build the `main` site source, even when this run was
           # triggered by a benchmark-data push: the benchmark-data branch is an orphan
           # dashboard branch (dev/ + a root redirect, NO site/), so checking it out would
           # have nothing to build. fetch-depth:0 still pulls origin/benchmark-data so the
@@ -113,7 +113,7 @@ jobs:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
-          # [FABLE-5] CI-economy (2026-07-18 directive 2b): this wasm lane compiles
+          # CI-economy (2026-07-18 directive 2b): this wasm lane compiles
           # the same sparq-wasm dependency stack as the other js/pages/gui/site wasm
           # lanes — ONE shared dependency cache across them keeps demand inside the
           # 10 GB Actions-cache budget (sq-3sbrr doctrine: save on push-to-main
@@ -125,18 +125,22 @@ jobs:
         with:
           node-version: 22
 
-      # [FABLE-5] PR #3511 review finding 5: redundant second cargo cache REMOVED —
+      # PR #3511 review finding 5: redundant second cargo cache REMOVED —
       # the Swatinem/rust-cache above (shared-key: site-wasm) already caches
       # ~/.cargo/registry + ~/.cargo/git + target/ across the js/pages/gui/site wasm
       # lanes, restore-only off main. The former PR-scoped `actions/cache`
       # (pages-wasm-…-hashFiles(Cargo.lock)) covered the same paths and only churned
       # the shared 10 GB Actions-cache budget with a duplicate PR-scoped copy.
 
+      # Prebuilt, SHA-pinned, exactly-versioned wasm-pack (sq-khm3f, #5776): a
+      # `cargo install` recompiles it from crates.io and flakes on a registry blip.
       - name: Install wasm-pack
-        run: cargo install wasm-pack --locked
+        uses: jetli/wasm-pack-action@0d096b08b4e5a7de8c28de67e11e945404e9eefa # v0.4.0
+        with:
+          version: v0.15.0
 
       # Build the lean wasm bundle (crates/sparq-wasm → js/wasm) that the live REPL loads.
-      # [OPUS-4.8] sq-jpki.1 — repo-root npm workspaces: `js/` is now a workspace member and the
+      # sq-jpki.1 — repo-root npm workspaces: `js/` is now a workspace member and the
       # per-member lock was dropped; this `npm ci` (run in js/) installs the js member's closure
       # FROM the repo-root `package-lock.json`. wasm-pack is already on PATH (installed above), so
       # js/'s `prepare` git-pin build is satisfied. `npm run build:wasm` then (re)builds the lean
@@ -147,7 +151,7 @@ jobs:
           npm ci
           npm run build:wasm
 
-      # [OPUS-4.8] sq-0po6 — build the tier-b "W-reason" bundle (crates/sparq-reason-wasm,
+      # sq-0po6 — build the tier-b "W-reason" bundle (crates/sparq-reason-wasm,
       # with --features explain) that drives the live /surface/inference page. Its
       # wasm-pack output stays in the crate's pkg/; the site's prebuild sync-wasm step
       # copies it into public/wasm/reason/. Separate from the lean bundle so the landing
@@ -156,7 +160,7 @@ jobs:
         working-directory: js
         run: npm run build:reason-wasm
 
-      # [OPUS-4.8] sq-11zy — build the tier-b "W-rsp" bundle (crates/sparq-rsp-wasm, the
+      # sq-11zy — build the tier-b "W-rsp" bundle (crates/sparq-rsp-wasm, the
       # windowed RSP-QL stream processor) that drives the live /surface/streaming-rsp page.
       # Its wasm-pack output stays in the crate's pkg/; the site's prebuild sync-wasm step
       # copies it into public/wasm/rsp/. Separate from the lean bundle so the landing page
@@ -165,7 +169,7 @@ jobs:
         working-directory: js
         run: npm run build:rsp-wasm
 
-      # [OPUS-4.8] sq-xoxu — build the tier-b "W-text" bundle (crates/sparq-text-wasm, the
+      # sq-xoxu — build the tier-b "W-text" bundle (crates/sparq-text-wasm, the
       # BM25 inverted index + `text:` magic predicates) that drives the live
       # /surface/full-text page. Its wasm-pack output stays in the crate's pkg/; the site's
       # prebuild sync-wasm step copies it into public/wasm/text/. Separate from the lean
@@ -174,7 +178,7 @@ jobs:
         working-directory: js
         run: npm run build:text-wasm
 
-      # [OPUS-4.8] sq-gum8 — install the Typst CLI so the paper-factory build step
+      # sq-gum8 — install the Typst CLI so the paper-factory build step
       # (site/scripts/build-papers.mjs, run by `prebuild`) can compile site/papers/*.typ
       # into the downloadable PDFs + the in-site HTML renders. Pinned to a release tag +
       # SHA-256-verified so the toolchain is reproducible. (ubuntu-latest is x86_64.)
@@ -192,7 +196,7 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           "$HOME/.local/bin/typst" --version
 
-      # [OPUS-4.8] sq-jpki.1 — repo-root npm workspaces: `site/` is a workspace member; this
+      # sq-jpki.1 — repo-root npm workspaces: `site/` is a workspace member; this
       # `npm ci` (run in site/) installs the site member's dependency closure FROM the repo-root
       # `package-lock.json` (no per-member lock anymore). It does NOT re-run js/'s wasm `prepare`
       # (a member-dir `npm ci` installs only that member's closure), so the wasm bundle built in
@@ -201,7 +205,7 @@ jobs:
       # before — the migration changes only WHERE deps resolve from, not the produced out/ tree.
       - name: Build static site
         working-directory: site
-        # [OPUS-4.8] sq-uj38w — org-migration Pages cutover (atomic flip). The site now serves at the
+        # sq-uj38w — org-migration Pages cutover (atomic flip). The site now serves at the
         # ROOT of the custom domain https://sparq.jeswr.org/ (custom domain set via site/public/CNAME
         # → out/CNAME below), so the Pages build must emit ROOT-RELATIVE assets (/_next/… not
         # /sparq/_next/…). NEXT_PUBLIC_BASE_PATH='' selects basePath '' in site/next.config.ts (the SAME
@@ -213,7 +217,7 @@ jobs:
           npm ci
           npm run build   # prebuild copies js/wasm → site/public/wasm + builds papers, then next build → out/ (root-relative, basePath '')
 
-      # [OPUS-4.8] sq-vnd0i — build the DISTINCT operational GUI frontend (gui/app) as its hosted
+      # sq-vnd0i — build the DISTINCT operational GUI frontend (gui/app) as its hosted
       # "Try the GUI live" web target and OVERLAY it at /app/ on the SAME Pages artifact.
       #
       # The maintainer picked Option B (bead sq-vnd0i): /try stays the lightweight in-browser
@@ -241,7 +245,7 @@ jobs:
         working-directory: gui/app
         run: npm run build:web   # presync check + prebuild sync-wasm (js/wasm → public/wasm), then next build → out/ (basePath /app)
 
-      # [OPUS-4.8] sq-d8or — anti-drift: link-check the BUILT site HTML before publish.
+      # sq-d8or — anti-drift: link-check the BUILT site HTML before publish.
       # The docs-quality `internal-links` job (sq-5fd1) lychee-checks the repo MARKDOWN;
       # this extends that scope to the static-export HTML the Pages site actually serves —
       # catching renamed routes / stale cross-links / dangling #anchors that markdown linting
@@ -263,7 +267,7 @@ jobs:
         run: bash scripts/check-site-links.sh site/out
 
       # ---- Build the mdBook guide for the /guide/ mount ----
-      # [OPUS-5] issue #5022 — the guide's publish half. docs.yml validates the same guide on
+      # issue #5022 — the guide's publish half. docs.yml validates the same guide on
       # PRs but deliberately ships no deploy job (one Pages slot, owned here); this is where it
       # actually reaches the web. The mdbook version below MUST equal docs.yml's pin — the two
       # lanes are only equivalent if they build with the same renderer, and
@@ -280,7 +284,7 @@ jobs:
         run: bash scripts/build-guide.sh book
 
       # ---- Preserve the existing benchmark dashboard(s) at /dev/ ----
-      # [OPUS-4.8] sq-zngy — fold ALL `dev/bench*` subtrees (not just dev/bench).
+      # sq-zngy — fold ALL `dev/bench*` subtrees (not just dev/bench).
       # bench.yml writes benchmark-data:dev/bench (benchmark-data-dir-path: dev/bench);
       # bench-ec2.yml writes benchmark-data:dev/bench-ec2 (benchmark-data-dir-path:
       # dev/bench-ec2) — a SECOND live dashboard dir on the SAME benchmark-data branch.
@@ -322,7 +326,7 @@ jobs:
           touch out/.nojekyll
 
       # ---- Overlay the operational GUI frontend at /app/ ----
-      # [OPUS-4.8] sq-vnd0i — place the gui/app hosted web export INTO out/app/, mirroring the
+      # sq-vnd0i — place the gui/app hosted web export INTO out/app/, mirroring the
       # dev/bench overlay above (a sub-tree of the SAME single Pages artifact). The GUI's
       # static export (basePath /app) writes its index.html at the export ROOT with assets
       # baked as /app/_next/... and /app/wasm/... , so serving it at /app/
@@ -367,7 +371,7 @@ jobs:
           echo "OK: operational GUI overlaid at out/app/" >> "$GITHUB_STEP_SUMMARY"
 
       # ---- Overlay the mdBook guide at /guide/ ----
-      # [OPUS-5] issue #5022 — place the rendered guide (book/book) into out/guide/, mirroring
+      # issue #5022 — place the rendered guide (book/book) into out/guide/, mirroring
       # the dev/bench* and /app overlays: another sub-tree of the SAME single Pages artifact, so
       # there is still exactly ONE producer for the one Pages deploy slot.
       #
@@ -419,7 +423,7 @@ jobs:
           # and whose teeth are pinned in scripts/tests/test_build_guide.sh.
           echo "OK: mdBook guide overlaid at out/guide/" >> "$GITHUB_STEP_SUMMARY"
 
-      # [OPUS-4.8] sq-zngy — ARTIFACT-LEVEL smoke check (NOT a live-URL check).
+      # sq-zngy — ARTIFACT-LEVEL smoke check (NOT a live-URL check).
       # This step asserts the ASSEMBLED Pages output dir (site/out, the exact tree handed to
       # upload-pages-artifact below) rather than probing the live https://sparq.jeswr.org/dev/...
       # URL: the artifact check is deterministic + decoupled from deploy/propagation timing
@@ -432,7 +436,7 @@ jobs:
         run: |
           set -euo pipefail
           fail=0
-          # [OPUS-4.8] sq-uj38w — org-migration Pages cutover: the published root MUST carry a CNAME
+          # sq-uj38w — org-migration Pages cutover: the published root MUST carry a CNAME
           # file (= `sparq.jeswr.org`) so this deploy sets the custom domain. Next copies site/public/
           # into the export root, so out/CNAME appears from site/public/CNAME. If it is missing or wrong,
           # the atomic flip would publish a root-relative build WITHOUT the custom domain — hard fail
@@ -455,7 +459,7 @@ jobs:
           fi
           # EC2 dashboard (dev/bench-ec2): assert presence-in-artifact IFF it exists on the
           # benchmark-data branch. bench-ec2.yml is not live until AWS_BENCH_ROLE_ARN is set AND a
-          # maintainer dispatches it ([OPUS-5] #3784 retired its crons with the descoped OIDC role), so
+          # maintainer dispatches it (#3784 retired its crons with the descoped OIDC role), so
           # dev/bench-ec2 may not exist on the branch yet — hard-failing on its absence would
           # brick every deploy and regress sq-iigf. But once the EC2 lane HAS pushed, a missing
           # out/dev/bench-ec2/index.html means the overlay dropped a subtree → hard fail.
@@ -468,7 +472,7 @@ jobs:
           else
             echo "::warning::dev/bench-ec2 not yet present on benchmark-data (bench-ec2.yml has not pushed) — skipping its artifact assertion this run"
           fi
-          # [OPUS-5] issue #5022 — the mdBook guide at /guide/. These are HARD requirements: the
+          # issue #5022 — the mdBook guide at /guide/. These are HARD requirements: the
           # guide is now a published surface, and an artifact that reaches deploy without it
           # would 404 the guide silently. index.html is the mount's entry point; 404.html is the
           # directory-level 404 GitHub Pages serves under /guide/; css/general.css proves the
@@ -496,7 +500,7 @@ jobs:
 
   deploy:
     needs: build
-    # [OPUS-4.8] sq-gdhy — mirror the build gate: deploy for either CI-written branch.
+    # sq-gdhy — mirror the build gate: deploy for either CI-written branch.
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/benchmark-data'
     runs-on: ubuntu-latest
     # Pages deployment requires these two writes; everything else stays read-only.

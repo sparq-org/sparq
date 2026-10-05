@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# [OPUS-4.8] sq-toze.3 (GX-2): per-release CycloneDX SBOM + VEX generator.
+# sq-toze.3 (GX-2): per-release CycloneDX SBOM + VEX generator.
 #
 # Produces, into $OUT_DIR (default: ./sbom):
 #   - sparq-cli-<version>.sbom.cdx.json     CycloneDX SBOM for the released sparq-cli binary
@@ -35,7 +35,7 @@ VERSION="${VERSION:-${GITHUB_REF_NAME:-$(git describe --tags --always 2>/dev/nul
 OUT_DIR="${OUT_DIR:-sbom}"
 mkdir -p "$OUT_DIR"
 
-# [GPT-5] sq-a1fgx: cargo-cyclonedx invokes `cargo metadata`, which may download
+# sq-a1fgx: cargo-cyclonedx invokes `cargo metadata`, which may download
 # registry crates even though it does not compile them. Keep transient crates.io
 # resets from aborting a release while still failing closed on a sustained outage.
 retry_cargo_cyclonedx() {
@@ -54,13 +54,13 @@ retry_cargo_cyclonedx() {
 }
 
 echo "==> generating CycloneDX SBOMs (whole workspace, sparq ${VERSION})"
-# [OPUS-4.8] sq-toze.28 (GS-4 / CDX-3): emit CycloneDX 1.5 natively. cargo-cyclonedx
+# sq-toze.28 (GS-4 / CDX-3): emit CycloneDX 1.5 natively. cargo-cyclonedx
 # 0.5.9 (the pinned toolchain version) accepts --spec-version {1.3,1.4,1.5} and defaults
 # to 1.3; pinning 1.5 aligns the SBOM with the VEX (also 1.5) and unlocks the 1.5
 # metadata.lifecycles slot (populated, phase=build, by scripts/sbom-normalize.jq).
 retry_cargo_cyclonedx --all --format json --spec-version 1.5
 
-# [OPUS-4.8] sq-toze.30 (GS-6 / F-6): cargo-cyclonedx 0.5.9 stamps the absolute build dir
+# sq-toze.30 (GS-6 / F-6): cargo-cyclonedx 0.5.9 stamps the absolute build dir
 # into every workspace/path-dependency bom-ref (path+file:///abs/...#ver) and purl
 # (?download_url=file://...), which would leak the CI runner's filesystem layout into the
 # PUBLISHED SBOM. Normalize each shipped SBOM through scripts/sbom-normalize.jq, which
@@ -84,7 +84,7 @@ done
 # Discard the per-member SBOMs we don't ship (keeps the worktree clean for `git status`).
 find crates -name '*.cdx.json' -delete
 
-# [OPUS-4.8] sq-8n1c: per-release CycloneDX SBOM for the Tauri desktop GUI shell. The release
+# sq-8n1c: per-release CycloneDX SBOM for the Tauri desktop GUI shell. The release
 # ships UNSIGNED desktop bundles (.dmg/.msi/.exe/.deb/.AppImage) built from gui/src-tauri, so
 # its dependency tree (Tauri + the webview bindings) must be enumerated for "SBOM rides for
 # free" to be literally true. The GUI crate is a STANDALONE crate root (its own empty

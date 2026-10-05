@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# [FABLE-5] sq-7d3dj.34 — dedicated same-box Oxigraph SERVER load->serve->query->teardown
+# sq-7d3dj.34 — dedicated same-box Oxigraph SERVER load->serve->query->teardown
 # recipe: the prebuilt, sha256-pinned Oxigraph CLI in `serve` mode, so the HTTP panel has a
 # clean Rust apples-to-apples column next to sparq-server (the CLI matrix already has the
 # in-process Oxigraph column; this is its HTTP twin).

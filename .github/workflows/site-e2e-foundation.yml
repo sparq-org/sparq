@@ -1,4 +1,4 @@
-# [OPUS-4.8] sq-ymr2e.1 — site E2E-foundation lane: TWO HARD jobs + one advisory one.
+# sq-ymr2e.1 — site E2E-foundation lane: TWO HARD jobs + one advisory one.
 #
 # WHAT: the shared E2E foundation smoke (site/e2e/support/foundation.smoke.spec.ts) — the
 # determinism-harness + hermetic-network demo — the deterministic no-timeout grep gate, and the
@@ -7,7 +7,7 @@
 # it is fast and self-contained (contrast site-e2e.yml, which builds spec fragments for its
 # ReSpec smoke).
 #
-# [OPUS-5] #3773 — GATING vs ADVISORY, corrected. Advisory status is now DECLARED in
+# #3773 — GATING vs ADVISORY, corrected. Advisory status is now DECLARED in
 # `.github/advisory-registry.json`, NOT inferred from a job name; a check with no declaration
 # GATES. This workflow used to put THREE things in one advisory-named job, so two of them
 # gated NOTHING while this header claimed they were "hard":
@@ -25,8 +25,7 @@ name: site-e2e-foundation
 
 on:
   pull_request:
-    # [FABLE-5] Draft-tier CI: + ready_for_review so the un-draft moment re-runs
-    # this gate-feeding lane (docs/branch-protection.md §Draft-tier CI).
+    # + ready_for_review so the un-draft moment re-runs this lane.
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - "site/**"
@@ -51,11 +50,11 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # [OPUS-5] #3773 — HARD determinism gate, split out of the advisory smoke job it used to
+  # #3773 — HARD determinism gate, split out of the advisory smoke job it used to
   # hide inside. Pure grep over site/e2e/**/*.ts (site/e2e/support/no-timeout-gate.sh): no npm
   # install, no browser, no toolchain, ~15 s. NOT declared in
-  # `.github/advisory-registry.json`, so `ci-summary / gate` waits on it — which is what
-  # `.github/E2E-GATING-POLICY.md` §1.1 always claimed and, until now, was not true.
+  # `.github/advisory-registry.json`, so it is a hard (non-advisory) check, as
+  # `.github/E2E-GATING-POLICY.md` §1.1 describes.
   determinism-gate:
     name: site e2e determinism gate (no waitForTimeout calls)
     runs-on: ubuntu-latest
@@ -96,7 +95,7 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      # [OPUS-5] #3773 — the determinism grep gate MOVED to the HARD `determinism-gate` job
+      # #3773 — the determinism grep gate MOVED to the HARD `determinism-gate` job
       # above. Running it here as well would only re-run it inside a non-gating job.
 
       # Cache the Playwright browser download keyed on the resolved @playwright/test version.
@@ -121,7 +120,7 @@ jobs:
         continue-on-error: true
         run: npm run test:e2e -- support/foundation.smoke.spec.ts
 
-  # [OPUS-4.8] sq-ymr2e.4 / [OPUS-5] #3773 — axe-core WCAG 2.1 AA a11y RATCHET, now its own
+  # sq-ymr2e.4 / #3773 — axe-core WCAG 2.1 AA a11y RATCHET, now its own
   # HARD job. It used to be a `continue-on-error` step inside the advisory smoke job, i.e.
   # double-swallowed: the committed ratchet in bench/a11y-baseline.json could not fail anything.
   # WHY IT MAY GATE while the smoke beside it may not: the assertion set is a ratchet over

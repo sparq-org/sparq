@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-# [OPUS-4.8] sq-1fz0: BEIR IR-quality adapter KIND (`python-lib`). Authored by Opus
-# 4.8 (Fable unavailable; flag for re-review when Fable returns).
+# sq-1fz0: BEIR IR-quality adapter KIND (`python-lib`).
 #
 # Wires the SECOND axis of the full-text-search suite (design §3.4): IR-quality on a
 # small BEIR cut (SciFact / TREC-COVID + qrels) loaded as RDF literals -> Recall@100 /

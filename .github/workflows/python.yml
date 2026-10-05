@@ -5,13 +5,11 @@ name: Python bindings
 # (manylinux / macOS / Windows via maturin-action) is a follow-up — see docs/release.md
 # "Python wheels".
 #
-# THESE GATE (not informational). Both jobs (`maturin build + pytest` and the opt-in
-# `maturin build (arrow) + pytest`) carry NO `advisory`/`informational` token, so the
-# `ci-summary / gate` aggregator (.github/workflows/ci-summary.yml — it excludes only
-# only the check names DECLARED in .github/advisory-registry.json — #3773) treats them as HARD
-# required gates whenever they RUN on a PR.
+# HARD checks (not informational): both jobs (`maturin build + pytest` and the opt-in
+# `maturin build (arrow) + pytest`) carry no `advisory`/`informational` token and no
+# registry entry, though neither is a required check.
 #
-# WHY a `pull_request` trigger ([OPUS-4.8] sq-5jjei, gh-910): python.yml USED to trigger
+# WHY a `pull_request` trigger (sq-5jjei, gh-910): python.yml USED to trigger
 # on `push: branches:[main]` + `workflow_dispatch` ONLY, so the `arrow` functional lane
 # (the `Graph.query_arrow -> pyarrow.Table` round-trip in tests/test_arrow.py) — and the
 # lean wheel test too — only went green/red AFTER merge to main, never at PR time. The
@@ -21,15 +19,12 @@ name: Python bindings
 # cargo leg cannot reproduce (it needs a maturin-built wheel + pyarrow).
 #
 # SCOPE: PRs that touch the Python-binding surfaces (paths below) — a docs-only or
-# unrelated-crate PR matches none, so neither job runs and the required `ci-summary / gate`
-# simply never waits on them (cross-workflow `needs:` is impossible — see js.yml/gui.yml).
-# This keeps the maturin build off unrelated PRs. NOT a `merge_group` lane (ci-summary.yml
-# never cross-workflow-needs python.yml), matching js.yml/gui.yml. The unfiltered
+# unrelated-crate PR matches none, so neither job runs. This keeps the maturin build off
+# unrelated PRs. NOT a `merge_group` lane, matching js.yml/gui.yml. The unfiltered
 # `push: branches:[main]` trigger is KEPT for post-merge cover on every main push.
 on:
   pull_request:
-    # [FABLE-5] Draft-tier CI: + ready_for_review so the un-draft moment re-runs
-    # this gate-feeding lane (docs/branch-protection.md §Draft-tier CI).
+    # + ready_for_review so the un-draft moment re-runs this lane.
     types: [opened, synchronize, reopened, ready_for_review]
     # Every input the jobs read: the crate (Rust binding source + Cargo.toml + tests +
     # pyproject), the workspace manifests/lock the maturin build resolves from, the
@@ -65,7 +60,7 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Rust (preinstalled stable)
-        # [FABLE-5] CI-economy (2026-07-18 directive): the ubuntu runner image
+        # CI-economy (2026-07-18 directive): the ubuntu runner image
         # ships a rustup stable toolchain; the SHA-pinned action's `rustup
         # toolchain install stable` re-downloads the whole toolchain whenever
         # the image lags the newest release. Use the preinstalled one —
@@ -75,11 +70,15 @@ jobs:
           rustup show active-toolchain
       - name: Cache cargo + target
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          # sq-3sbrr save-if discipline: SAVE only from main; a branch-scoped save is
+          # unreachable from main and only churns the shared 10 GB Actions-cache budget.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
       - name: Install maturin + pytest
-        # [OPUS-4.8] HASH-pinned (Scorecard PinnedDependenciesID): a `==` version pin still
+        # HASH-pinned (Scorecard PinnedDependenciesID): a `==` version pin still
         # trusts whatever PyPI serves, so --require-hashes verifies every artifact's sha256
         # — including the full transitive closure — against .github/requirements/python-build.txt
         # before use. See that file's header to bump versions / regenerate the hash set.
@@ -89,7 +88,7 @@ jobs:
       - name: Install wheel
         run: pip install dist/*.whl
       - name: Run tests
-        # [OPUS-4.8] Runs the full pytest suite incl. the new result-parity + panic-surface
+        # Runs the full pytest suite incl. the new result-parity + panic-surface
         # tests (test_parity.py). Deselect the `bench` marker (bench_py.py timed FFI-overhead
         # micro-bench): it's quiet-box-sensitive + advisory, so it must not gate on a noisy
         # GitHub runner. The python-release profile above is the unwinding build the
@@ -99,7 +98,7 @@ jobs:
         run: pytest crates/sparq-py/tests -q -m "not bench"
 
   arrow:
-    # [OPUS-4.8] sq-lt1ml (gh-910): the opt-in Arrow export lane. Builds the wheel WITH
+    # sq-lt1ml (gh-910): the opt-in Arrow export lane. Builds the wheel WITH
     # `--features arrow` (the `Graph.query_arrow -> pyarrow.Table` surface), installs
     # pyarrow (the consumer side of the Arrow C Data Interface), and runs the arrow-only
     # pytest. Kept a SEPARATE job so the lean (no-arrow) job above stays pyarrow-free and
@@ -109,7 +108,7 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Rust (preinstalled stable)
-        # [FABLE-5] CI-economy (2026-07-18 directive): the ubuntu runner image
+        # CI-economy (2026-07-18 directive): the ubuntu runner image
         # ships a rustup stable toolchain; the SHA-pinned action's `rustup
         # toolchain install stable` re-downloads the whole toolchain whenever
         # the image lags the newest release. Use the preinstalled one —
@@ -119,6 +118,10 @@ jobs:
           rustup show active-toolchain
       - name: Cache cargo + target
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          # sq-3sbrr save-if discipline: SAVE only from main; a branch-scoped save is
+          # unreachable from main and only churns the shared 10 GB Actions-cache budget.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"

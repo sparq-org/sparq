@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [SONNET-4.6] Hermetic tests for the feature-matrix tier detector (bead sq-6g9kr).
+# Hermetic tests for the feature-matrix tier detector (bead sq-6g9kr).
 # Design: research/feature-matrix-pyramid.md §4.
 # Authored under the proceed-and-document rule.
 #
@@ -570,7 +570,7 @@ class TestEnforceMode(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# (j) [OPUS-5] cross-crate regression: cargo feature names are crate-LOCAL, so
+# (j) cross-crate regression: cargo feature names are crate-LOCAL, so
 # invariant (2) must key on (crate, feature). A test:true leg for feature F in
 # crate A must NOT satisfy a sensitive F in crate B — keying on the bare name
 # silently masked exactly that gap (15 feature names are shared across crates
@@ -868,7 +868,7 @@ class TestCfgExtraction(unittest.TestCase):
         self.assertIn('not(any(target_arch = "wasm32", feature = "ci"))', exprs)
 
     def test_sanitizer_preserves_lines_and_live_cfg_after_comment_quote(self):
-        # [SONNET-4.6] Regression: a quote in prose must not erase later attributes.
+        # Regression: a quote in prose must not erase later attributes.
         content = (
             '// prose mentions "an unterminated literal\n'
             '#[cfg(not(feature = "quoted-triples"))]\n'

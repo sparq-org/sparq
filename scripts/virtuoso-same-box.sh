@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# [OPUS-4.8] sq-vw3ax.12.1 — dedicated same-box Virtuoso OSS bulk-load->serve->query->teardown
-# recipe. Authored by Opus 4.8 (Fable unavailable; flag for re-review when Fable returns).
+# sq-vw3ax.12.1 — dedicated same-box Virtuoso OSS bulk-load->serve->query->teardown
+# recipe.
 #
 # WHY THIS SCRIPT EXISTS
 #   Virtuoso OSS (competitors.json id `virtuoso`, kind `http-sparql`) is a Tier-1 mainstream
@@ -80,7 +80,7 @@ case "$ITERS" in ''|*[!0-9]*) die "iters must be a positive integer (got '$ITERS
 [ -d "$QUERIES_DIR" ] || die "queries dir not found: $QUERIES_DIR"
 have python3 || die "python3 required (http_sparql_adapter client)"
 [ -f "$ADAPTER" ] || die "shared adapter not found: $ADAPTER"
-# [OPUS-4.8] daemon PREFLIGHT — fail fast with a CLEAR message (not a confusing pull-then-run
+# daemon PREFLIGHT — fail fast with a CLEAR message (not a confusing pull-then-run
 # cascade) when Docker is absent or the daemon is not reachable. This is the same preflight
 # the QLever recipe gained; a bench box without a live daemon keeps virtuoso honest-n/a.
 have docker || die "docker not installed (Virtuoso OSS is Docker-only here) — install Docker + start the daemon"
@@ -164,7 +164,7 @@ case "${NTRIP:-0}" in ''|0) die "bulk load produced 0 triples in <$VIRTUOSO_GRAP
 # honest cross-check is COUNT/result-size vs sparq FIRST — a truncated Virtuoso count shows up as a
 # mismatch, not a silent pass. (Row cap raising is a Virtuoso-config concern documented in the
 # registry note; for the small same-box corpus the default cap is not hit for most queries.)
-# [FABLE-5] sq-7d3dj.34: HTTP_PROFILE=1 switches the adapter to --profile (6-col rows:
+# sq-7d3dj.34: HTTP_PROFILE=1 switches the adapter to --profile (6-col rows:
 # keep-alive + fresh-connect full-request latency AND TTFB); the awk renames col1 and
 # reprints ALL columns, serving both the 3-col and 6-col contracts.
 PROFILE_FLAG=""
@@ -174,7 +174,7 @@ shopt -s nullglob
 any_ok=0
 for q in "$QUERIES_DIR"/*.rq; do
   name="$(basename "$q" .rq)"
-  # [OPUS-4.8] brace-group `|| true` is LOAD-BEARING under `set -euo pipefail` — see the identical
+  # brace-group `|| true` is LOAD-BEARING under `set -euo pipefail` — see the identical
   # note in fuseki-same-box.sh: a per-query `timeout` (rc=124) would otherwise propagate via
   # pipefail + set -e and abort the whole loop instead of recording one ERROR row and continuing.
   row="$({ timeout "$VIRTUOSO_QUERY_TIMEOUT" python3 "$ADAPTER" \

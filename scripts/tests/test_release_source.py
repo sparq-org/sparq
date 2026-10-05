@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""[GPT-6] Release source identity and fail-closed workflow wiring regressions."""
+"""Release source identity and fail-closed workflow wiring regressions."""
 
 import importlib.util
 import json
