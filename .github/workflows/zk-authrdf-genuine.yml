@@ -8,7 +8,7 @@ name: zk-authrdf-genuine
 on:
   workflow_dispatch:
   push:
-    branches: [claude/zk-authrdf-genuine-receipts, claude/zk-payment-false-ask]
+    branches: [claude/zk-payment-false-ask]
 
 permissions:
   contents: read
@@ -26,15 +26,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # The six W3C-vector cases ran from claude/zk-authrdf-genuine-receipts
+        # at the parent commit; this branch adds only the payment cases.
         case:
           - ask-false-payment-verifier-agreed
           - ask-false-payment-holder-declared
-          - ask-false-holder-declared
-          - ask-true-verifier-agreed
-          - select-bag-holder-declared
-          - construct-verifier-agreed
-          - construct-holder-declared
-          - select-bag-row-bound
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
