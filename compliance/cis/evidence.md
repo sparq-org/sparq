@@ -147,7 +147,7 @@ grep -nE 'permissions:|contents: read' .github/workflows/ci.yml | head
 #  ci.yml:  permissions: contents: read   (default least-privilege; per-job opt-ins only)
 ```
 
-Branch protection requires the `ci-summary / gate` aggregator (governance per
+Branch protection requires the `ci-fast` check (governance per
 `feedback-pr-workflow`); the default workflow token is read-only with scoped per-job escalation
 (e.g. `release.yml` `docker:` adds only `packages: write`). → C-6.8 PASS (project-side).
 

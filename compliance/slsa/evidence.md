@@ -124,16 +124,18 @@ permissions: { contents: read, packages: write, id-token: write, attestations: w
 |---|---|
 | Two-person review (AR) | `CODEOWNERS` (catch-all `@jeswr` + high-risk path overrides); `docs/branch-protection.md` records zero required approving reviews, no required code-owner review, no stale-review dismissal, and an always-on repository-administrator bypass; the automated landing path does not use the bypass |
 | Protected branch (AR) | `docs/branch-protection.md` — linear history, block force-push, block deletion |
-| Single required gate (IV) | `.github/workflows/ci-summary.yml` (`ci-summary / gate`); required-check record in `docs/branch-protection.md` |
-| Trusted dep sources (IV) | `deny.toml [sources]` (`unknown-registry/unknown-git = "deny"`); gated by `supply-chain.yml#audit` (`cargo deny check … sources`) |
-| Per-dep audit attest (IV) | `supply-chain/{config.toml,audits.toml,imports.lock}`; gated by `supply-chain.yml#vet` (`cargo vet --locked`) |
-| Vuln gate (IV) | `supply-chain.yml#audit` (`cargo deny check advisories`); `dependency-monitoring.yml` daily watchdog |
+| Single required gate (partial) | `.github/workflows/ci-fast.yml` (`ci-fast`: clippy `-D warnings` + nextest/doctests on the core crates + the W3C SPARQL conformance ratchet); required-check record in `docs/branch-protection.md`. The former `ci-summary / gate` aggregator is deleted, so no other lane blocks a merge |
+| Trusted dep sources (IV, post-merge) | `deny.toml [sources]` (`unknown-registry/unknown-git = "deny"`); checked by `supply-chain.yml` (`supply-chain-gates` job) step `cargo deny check … sources` on push to `main` + nightly |
+| Per-dep audit attest (IV, post-merge) | `supply-chain/{config.toml,audits.toml,imports.lock}`; checked by `supply-chain.yml` (`supply-chain-gates` job) step `cargo vet --locked` on push to `main` + nightly |
+| Vuln gate (IV, post-merge) | `supply-chain.yml` (`supply-chain-gates` job) step `cargo deny check advisories` on push to `main` + nightly; `dependency-monitoring.yml` daily watchdog |
 | Least-privilege tokens (IV) | top-level `permissions: contents: read` in every workflow; `persist-credentials: false` on `scorecard.yml` checkout |
 | Disclosure channel (IV) | `.well-known/security.txt` (RFC 9116) + `SECURITY.md` |
 
-- **Verify (vet/deny gating):** the jobs run on every PR and `merge_group`; `ci-summary`
-  aggregates them as required check-runs (`docs/branch-protection.md` job map). A new
-  unaudited/banned dependency fails the PR.
+- **Verify (vet/deny):** the steps run on push to `main`, nightly and `workflow_dispatch` —
+  **not** on pull requests, and they are not required checks (the only required check is
+  `ci-fast`, `docs/branch-protection.md`). A new unaudited/banned dependency is therefore
+  **detected post-merge** (red `main` run / nightly), not rejected before merge; to check a
+  dependency change pre-merge, dispatch it: `gh workflow run supply-chain.yml --ref <branch>`.
 
 ## 7. OpenSSF Scorecard (posture signal feeding SLSA confidence)
 

@@ -107,7 +107,7 @@ security guarantee** today and is **not** credited as a risk control anywhere in
 ## 3. Secure development lifecycle (the per-stage security controls)
 
 sparq runs a gated secure-SDLC: every change passes the security checks at each lifecycle stage,
-enforced by CI + branch protection (`ci-summary / gate`). The **full per-stage criteria** are
+enforced by CI + branch protection (required `ci-fast` pre-merge; heavier lanes post-merge/nightly). The **full per-stage criteria** are
 single-sourced in the **Secure-SDLC policy template**
 ([`policy-secure-sdlc.md`](./policy-secure-sdlc.md), SSDF PO.1/PO.2) — this cybersecurity policy
 **adopts that document by reference** rather than re-stating it. Summary of the load-bearing gates:
@@ -141,7 +141,7 @@ supply-chain CI; this section names the standing rules:
   ([`../sbom/policy-sbom-publication.md`](../sbom/policy-sbom-publication.md)).
 
 This satisfies the "made available **without known exploitable vulnerabilities**" essential
-requirement on the **real PR-time advisory gate**, not aspiration
+requirement on the **real, fail-closed advisory check** (post-merge + nightly, not a PR gate), not aspiration
 ([`../cra/controls.md`](../cra/controls.md) I.2, II.1).
 
 ## 5. Coordinated vulnerability disclosure & vulnerability handling (CRA Annex I Part II)
@@ -212,7 +212,7 @@ is part of the §13 sign-off.
 The controls in §2–§6 are **automatically enforced** by the CI/branch-protection wiring cited
 inline and indexed in [`../cra/evidence.md`](../cra/evidence.md) (by-artifact, with verification
 commands) and [`../cra/controls.md`](../cra/controls.md) (per-requirement status). A reviewer can
-spot-check any change against the `ci-summary / gate` result and verify a release with
+spot-check any change against the `ci-fast` result (plus the next nightly runs) and verify a release with
 `gh attestation verify <file> --repo sparq-org/sparq`. This policy does **not** restate that evidence —
 it points to the single source so the two never drift.
 

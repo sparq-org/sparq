@@ -25,7 +25,7 @@ meeting and retain the minutes as documented information.
 sparq cannot hold a management review, but several mandated inputs have a **standing data
 source** in the repo/CI that the org can pull into the meeting pack:
 
-- **CI / monitoring results** — `ci.yml`, `ci-summary.yml` aggregate gate, `scorecard.yml`
+- **CI / monitoring results** — `ci-fast.yml` required check, `ci.yml` nightly, `scorecard.yml`
   (OpenSSF Scorecard), the daily advisory watchdog (`dependency-monitoring.yml`).
 - **Vulnerability / nonconformity feed** — RustSec/GHSA advisories, Dependabot PRs, the beads
   tracker (corrective-action items), `SECURITY.md` disclosure intake.
@@ -50,7 +50,7 @@ These are **inputs**, not the review itself. The org's management makes the judg
 | b | Changes in external/internal issues relevant to the ISMS | `isms-scope-template.md` §4.1; new sparq major versions; new regulation | `<FILL-IN>` |
 | c | Changes in interested-party needs/expectations | `isms-scope-template.md` §4.2 | `<FILL-IN>` |
 | d | Feedback on ISMS performance: nonconformities & corrective actions | Beads tracker; GHSA advisories | `<FILL-IN>` |
-| e | …monitoring & measurement results | `ci-summary.yml`, Scorecard, conformance ratchets, advisory watchdog | `<FILL-IN>` |
+| e | …monitoring & measurement results | `ci-fast.yml`, nightly `ci.yml`, Scorecard, conformance ratchets, advisory watchdog | `<FILL-IN>` |
 | f | …audit results | Internal-audit programme; compliance engineer↔auditor findings | `<FILL-IN>` |
 | g | …fulfilment of security objectives | `risk-methodology-template.md` §D objectives | `<FILL-IN>` |
 | h | Feedback from interested parties | `<FILL-IN: customer/user/regulator feedback>` | `<FILL-IN>` |
