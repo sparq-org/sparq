@@ -259,6 +259,13 @@
    "promotion_criteria": "NOT promotable while the harness's prerequisites are external. The Solid CTH needs Docker, network egress, a live Keycloak realm at localhost:8080 with the conformance-alice/bob DPoP service-account clients, and an ath-patched CTH image (the published harness omits the RFC 9449 DPoP `ath` claim and cannot authenticate against this server). A GitHub-hosted runner has none of those, so a gating leg could only ever be red, and the run is long + Docker-heavy + network-bound — exactly the shape that causes CI congestion collapse if it reaches the per-PR path. Promote only if the whole stack (realm + patched image) becomes reproducible on a runner the required gate can depend on. Delete this entry only if the workflow is removed.",
    "gate_script_waiver": "Runs `cargo build --release -p sparq-lws-core` and `./crates/sparq-lws-core/conformance/run.sh`, gate-classified by C3. run.sh IS a real ratchet — it fails when the generated CTH score drops below the floor in conformance/baseline.json — but it asserts nothing about any other surface, and it is unrunnable without the external stack above, so it cannot stand in for a gate that would otherwise run.",
    "registered": "2026-07-28"
+  },
+  "notation3tests (advisory)": {
+   "workflow": "notation3tests.yml",
+   "job_id": "notation3tests",
+   "owner_bead": "sparq-org/sparq#6467",
+   "promotion_criteria": "Promote (delete this entry) only after (1) NOTATION3TESTS_REF is pinned to a commit SHA, (2) a measured baseline pass count exists from a run at that SHA, and (3) the run step passes --min-pass <baseline> so a regression fails. Until then it measures an EXTERNALLY hosted suite (codeberg.org) whose availability must not gate merges.",
+   "registered": "2026-10-05"
   }
  }
 }
