@@ -609,8 +609,9 @@ pub enum Destination {
     /// Into the default graph.
     Default,
     /// Into this named graph (merged with it if the dataset already has it,
-    /// otherwise appended as a new named graph).
-    Named(Term),
+    /// otherwise appended as a new named graph). Typed as an IRI or blank node so a
+    /// literal or triple term can never become a graph name.
+    Named(NamedOrBlankNode),
 }
 
 /// (gh-6614) The result of [`expand_dataset`]: the expanded dataset plus the
@@ -674,6 +675,7 @@ pub fn expand_dataset(
             out
         }
         Destination::Named(name) => {
+            let name = &Term::from(name.clone());
             let mut out = data.fork();
             let merged = match data.named_graph(name) {
                 Some(g) => merge_into(g, &inference.triples),

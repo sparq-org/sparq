@@ -567,7 +567,8 @@ let g = |s: &str| oxrdf::Term::NamedNode(oxrdf::NamedNode::new(s).unwrap());
 // Scope: GraphScope::Default | Named(name) | Union { default: bool, named: Vec<Term> }
 let scope = GraphScope::Union { default: false, named: vec![g("urn:ex:g1"), g("urn:ex:g2")] };
 let inf = apply_rules_in_scope(&data, &shapes, &scope);           // -> Inference
-let out = expand_dataset(&data, &shapes, &scope, &Destination::Named(g("urn:ex:derived")));
+let dest = oxrdf::NamedOrBlankNode::NamedNode(oxrdf::NamedNode::new("urn:ex:derived").unwrap());
+let out = expand_dataset(&data, &shapes, &scope, &Destination::Named(dest)); // IRI or blank node only
 // out.dataset: Graph (ALL asserted graphs preserved, derived triples in the destination)
 // out.inference: Inference (triples / iterations / capped — diagnostics are not hidden)
 ```

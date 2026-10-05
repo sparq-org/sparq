@@ -7,7 +7,7 @@
 //! points are pinned unchanged here too.
 #![cfg(feature = "shacl-af")]
 
-use oxrdf::{NamedNode, Term};
+use oxrdf::{NamedNode, NamedOrBlankNode, Term};
 use sparq_core::Graph;
 use sparq_shacl::rules::{
     apply_rules, apply_rules_in_scope, expand, expand_dataset, Destination, GraphScope,
@@ -18,6 +18,10 @@ const RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
 
 fn iri(s: &str) -> Term {
     Term::NamedNode(NamedNode::new(s).unwrap())
+}
+
+fn graph(s: &str) -> NamedOrBlankNode {
+    NamedOrBlankNode::NamedNode(NamedNode::new(s).unwrap())
 }
 
 /// The issue's synthetic dataset: one default-graph triple, a Person in each of
@@ -331,7 +335,7 @@ fn expand_dataset_into_a_named_destination() {
     let data = dataset();
     let shapes = triple_rule_shapes();
     let scope = GraphScope::Named(iri("urn:ex:g1"));
-    let dest = Destination::Named(iri("urn:ex:derived"));
+    let dest = Destination::Named(graph("urn:ex:derived"));
     let out = expand_dataset(&data, &shapes, &scope, &dest);
     // Default graph untouched.
     assert_eq!(len(&out.dataset), 1);
@@ -345,7 +349,7 @@ fn expand_dataset_into_a_named_destination() {
         &data,
         &shapes,
         &scope,
-        &Destination::Named(iri("urn:ex:g1")),
+        &Destination::Named(graph("urn:ex:g1")),
     );
     let g1 = into_g1.dataset.named_graph(&iri("urn:ex:g1")).unwrap();
     assert_eq!(len(g1), 2);
@@ -374,7 +378,7 @@ fn materialization_dedups_per_destination() {
         &data,
         &shapes,
         &scope,
-        &Destination::Named(iri("urn:ex:g1")),
+        &Destination::Named(graph("urn:ex:g1")),
     );
     assert_eq!(len(&out.dataset), 1);
     assert_eq!(len(out.dataset.named_graph(&iri("urn:ex:g1")).unwrap()), 2);
@@ -408,7 +412,7 @@ ex:S2 a sh:NodeShape; sh:targetClass ex:Agent;
         &data,
         &shapes,
         &GraphScope::Named(iri("urn:ex:g1")),
-        &Destination::Named(iri("urn:ex:inferred")),
+        &Destination::Named(graph("urn:ex:inferred")),
     );
     assert_eq!(out.inference.triples.len(), 2);
     assert!(out.inference.iterations >= 2);
