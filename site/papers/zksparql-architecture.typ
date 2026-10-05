@@ -10,10 +10,11 @@
 // security, privacy, integrity or attestation property is asserted for any implementation.
 // Design arguments are CONDITIONAL on named assumptions. Evidence levels are kept distinct:
 // implemented source / executed native / executed guest / genuine verified receipt / external
-// audit (none reached). Exactly ONE genuine receipt checks issuer signatures inside the proof
-// (synthetic verifier-agreed bag SELECT, zkvcq.vcqg_*). The exact-evaluator and adapter receipts
-// (SELECT/ASK/CONSTRUCT/DESCRIBE) carry source evidence None. There is NO authenticated false-ASK
-// receipt yet; every place that needs one carries a TODO(evidence) marker and a visible note.
+// audit (none reached). Exactly TWO genuine receipts check issuer signatures inside the proof,
+// each for one synthetic verifier-agreed case: a bag SELECT (zkvcq.vcqg_*, inspected) and the
+// payment false ASK (zkvcq.vcqp_*, not yet second-party inspected). The exact-evaluator and adapter
+// receipts (SELECT/ASK/CONSTRUCT/DESCRIBE) carry source evidence None. Holder-declared and other
+// authenticated cases have no genuine receipt yet.
 // Counts from different campaigns are never summed. Timings are INDICATIVE development
 // measurements, shown only in one labelled pilot table via #ev(...).
 //
@@ -48,12 +49,6 @@
 }
 #let pilot(key) = fmt3(ev(key))
 
-// Visible placeholder for evidence that does not exist yet. It must never be replaced by a
-// result that has not been produced and frozen in research/zk-paper-evidence/.
-#let todo-evidence(body) = block(
-  inset: 6pt, stroke: 0.8pt + red, width: 100%, breakable: false,
-)[#text(fill: red)[*Placeholder, evidence pending.* #body]]
-
 #align(center)[
   #text(size: 17pt, weight: "bold")[
     Answers Instead of Documents
@@ -69,8 +64,8 @@
   Working draft. It reports implemented relations, and test and proof evidence at exact source
   commits that a second internal evidence inspection re-checked. It claims no proven security,
   privacy or integrity property for any implementation, and no component has had an external
-  cryptographic review. Only one exact-answer proof checks conventional issuer signatures inside the
-  proved relation, for a single synthetic case. All timing figures are indicative development measurements.
+  cryptographic review. Only two exact-answer proofs check conventional issuer signatures inside the
+  proved relation, each for a single synthetic case. All timing figures are indicative development measurements.
 ]]
 
 #heading(level: 2, numbering: none, outlined: false)[Abstract]
@@ -89,8 +84,8 @@ public only after an actual answer release that the contract authorises, without
 statement. A bounded prototype in a zero-knowledge virtual machine has produced genuine verified
 proofs of exact `SELECT`, false `ASK`, `CONSTRUCT` and `DESCRIBE` answers over committed inputs
 whose issuer signatures were not checked in the proof. With signatures checked inside the proof,
-it has produced one verified proof, for a synthetic verifier-agreed bag `SELECT` case, with
-#headline("zkvcq.vcqg_controls") controls. Other authenticated forms, cost and a full disclosure
+it has produced two verified proofs, each for one synthetic verifier-agreed case: a bag `SELECT`,
+and a false `ASK` answering whether any payment was returned. Other authenticated forms, cost and a full disclosure
 analysis remain open. No production cryptographic audit has been performed.
 
 == Introduction <intro>
@@ -158,8 +153,9 @@ proven pre-output or abort privacy.
 We realise the exact path with a bounded SPARQL evaluator in a zero-knowledge virtual machine. It
 has produced genuine verified proofs of exact `SELECT`, false `ASK`, `CONSTRUCT` and `DESCRIBE`
 answers over committed inputs whose issuer signatures were not checked in the proof. With
-signatures checked inside the proof, it has so far produced one verified proof, for a single
-synthetic case. §#ref(<evidence>, supplement: none) states what each campaign covers. No component
+signatures checked inside the proof, it has so far produced two verified proofs, each for a single
+synthetic case under a verifier-agreed input. One of them answers the returned-payment question
+above with a false `ASK`. §#ref(<evidence>, supplement: none) states what each campaign covers. No component
 has had a production cryptographic audit.
 
 Our contributions are:
@@ -627,11 +623,11 @@ none) gives the inventories.
     [Authenticated adapter (#short-id("zkvcq.vcqa_source_commit"))],
     [Contract-bound exact request over V5, bound to the verifier's key policy],
     [Yes],
-    [One genuine verified receipt, one synthetic verifier-agreed bag `SELECT` case, #headline("zkvcq.vcqg_controls") controls; other declared cases unproved],
-    [Authenticated false `ASK`],
-    [Exact false `ASK` over authenticated input],
+    [One genuine verified receipt, one synthetic verifier-agreed bag `SELECT` case, #headline("zkvcq.vcqg_controls") controls],
+    [Authenticated adapter, payment case (#short-id("zkvcq.vcqp_source_commit"))],
+    [Exact false `ASK` over an authenticated payment credential],
     [Yes],
-    [None yet (placeholder below)],
+    [One genuine verified receipt, verifier-agreed, #headline("zkvcq.vcqp_controls") controls; not yet second-party inspected; holder-declared and other declared cases unproved],
     [Public pattern V4 (#short-id("zkvcq.pp_source_commit"))],
     [Supported `SELECT DISTINCT` rows, one fully public pattern, K1 and K2],
     [Yes, for the relation's own credentials],
@@ -644,8 +640,8 @@ none) gives the inventories.
     [n/a], [n/a], [Design only],
   ),
   caption: [
-    Evidence by campaign. Read the last column before any other claim. Only one exact receipt, for
-    a single synthetic case, checks issuer signatures inside the proof; rows are separate systems
+    Evidence by campaign. Read the last column before any other claim. Only two exact receipts, each for
+    a single synthetic case, check issuer signatures inside the proof; rows are separate systems
     whose counts are never combined; no row reaches external audit.
   ],
 ) <evidence-table>
@@ -695,22 +691,30 @@ controls attached to this receipt behaved as the frozen test asserts, each subst
 refused before the challenge was consumed (Appendix #ref(<v5-detail>, supplement: none)). The run
 was a validation, not a benchmark, and we report no timing for it.
 
-This is the only exact-answer proof in which conventional credential signatures are checked inside
-the proved relation. It
-illustrates complete bag semantics over authenticated input; it is not a repayments application.
-The same relation and adapter implement holder-declared, `ASK`, `CONSTRUCT` and row-bound cases,
-which native and direct tests exercise, but none of them has a genuine receipt, so the registry
-does not yet offer the method as available. The returned-payment question of
-§#ref(<intro>, supplement: none) needs an authenticated false `ASK`, which does not yet exist.
+At a later source, #short-id("zkvcq.vcqp_source_commit"), the same adapter produced
+#headline("zkvcq.vcqp_genuine_receipts") genuine receipt for the returned-payment question of
+§#ref(<intro>, supplement: none), declared as #raw(headline("zkvcq.vcqp_case")). The input is a
+synthetic payment-history credential listing three settled payments and signed with the public
+RFC 8032 test key, so its issuer is a stand-in, not a bank. Inside the proved relation the guest
+checked the Ed25519 signature and the issuer against the verifier's key table, and evaluated
+"was any payment from this account returned?" over the signed canonical RDF. The verified journal
+reports the answer `false` with provenance #raw(headline("zkvcq.vcqp_provenance")), matching the
+native model and the test's written expectation, and the protocol verifier accepted it. All
+#headline("zkvcq.vcqp_controls") controls attached to this receipt behaved as the test asserts.
+They include a changed query, challenge, audience, window, policy and key, a tampered or fake
+receipt, scope and anchor swaps, and a splice across guest images. The receipt is a
+#headline("zkvcq.vcqp_receipt_inner") RISC Zero receipt with development mode off, from a guest
+image rebuilt for this run (Appendix #ref(<v5-detail>, supplement: none) gives both pins). Unlike
+the bag `SELECT` run, this receipt has not yet had the second internal evidence inspection
+described in §#ref(<evidence-levels>, supplement: none). It establishes completeness only relative
+to the verifier-agreed commitment, and it checks no credential status, holder binding or validity
+period.
 
-// TODO(evidence): authenticated false-ASK receipt (V5 through the generic authenticated adapter,
-// holder-declared and verifier-agreed). Insert only after a genuine receipt and its controls are
-// frozen under research/zk-paper-evidence/ and bound in paper-evidence.json.
-#todo-evidence[
-  An authenticated false-`ASK` receipt, through the same adapter and with its controls, is the
-  evidence the returned-payment example needs. It has not been produced. No result is reported
-  here until it exists and has been inspected.
-]
+These are the only exact-answer proofs in which conventional credential signatures are checked
+inside the proved relation, and each covers one synthetic case under a verifier-agreed input. The
+same relation and adapter implement holder-declared, true `ASK`, `CONSTRUCT` and row-bound cases,
+which native and direct tests exercise, but none of them has a genuine receipt yet, so the registry
+does not yet offer the method as available.
 
 === Supported answers with public patterns <pilot-evidence>
 
@@ -872,9 +876,9 @@ issuers signed, checked completely before the verifier consumes its challenge. F
 can compute from its query and an authorised released answer may then be public, under a
 conservative rule that keeps authentication and membership as obligations. A bounded zkVM prototype
 has produced genuine exact receipts for `SELECT`, false `ASK`, `CONSTRUCT` and `DESCRIBE` without
-source authentication, and one genuine receipt, for a synthetic verifier-agreed bag `SELECT`, with
-issuer signatures checked inside the proof. An authenticated false `ASK`, the other authenticated
-forms, cost at scale, a disclosure analysis and an external audit remain to be done.
+source authentication, and two genuine receipts with issuer signatures checked inside the proof,
+for a synthetic verifier-agreed bag `SELECT` and a synthetic verifier-agreed false `ASK`.
+Holder-declared authenticated cases, the other authenticated forms, cost at scale, a disclosure analysis and an external audit remain to be done.
 
 #pagebreak(weak: true)
 #heading(level: 2, numbering: none)[References]
@@ -1251,6 +1255,24 @@ checks credential status, holder binding or a credential validity period, perfor
 Data Integrity processing, provides a JSON, JCS or JOSE-to-RDF relation, or establishes wallet or
 world completeness.
 
+*Genuine adapter receipt for the payment false `ASK`.* At source
+#short-id("zkvcq.vcqp_source_commit"), a separate run executed the same driver for
+#raw(headline("zkvcq.vcqp_case")) only (`all_defined_cases_run` =
+#raw(repr(headline("zkvcq.vcqp_all_cases_run")))). The input is a synthetic payment-history
+credential of three settled payments, signed with the RFC 8032 section 7.1 test key, whose secret
+key is public. The run produced #headline("zkvcq.vcqp_genuine_receipts") genuine receipt
+(#raw(headline("zkvcq.vcqp_receipt_inner")), #raw(headline("zkvcq.vcqp_exit_code")), `dev_mode` =
+#raw(repr(headline("zkvcq.vcqp_dev_mode")))) with #raw(headline("zkvcq.vcqp_r0vm_version")), of
+which #headline("zkvcq.vcqp_protocol_accepted") was accepted by the protocol verifier. Its journal
+reports `ASK` = #raw(repr(headline("zkvcq.vcqp_result_ask"))) with provenance
+#raw(headline("zkvcq.vcqp_provenance")). The guest was rebuilt for this run, so its pinned artifact
+(#short-id("zkvcq.vcqp_guest_sha256")) differs from the bag `SELECT` run's
+(#short-id("zkvcq.vcqg_guest_sha256")); the image-splice control presents the receipt under the
+other pin. The #headline("zkvcq.vcqp_controls") controls are the same groups as above, adapted to
+the payment fixture, and each behaved as the test asserts. The retained receipt is
+#short-id("zkvcq.vcqp_receipt_sha256"). This run's record has not had a second internal evidence
+inspection, and it carries the same authentication limits as the bag `SELECT` run.
+
 === The public-pattern relation V4 <v4>
 
 V4 is an opt-in Noir relation specialised for the first fully public BGP pattern in a bounded
@@ -1305,8 +1327,8 @@ and `CONSTRUCT`, $a$ in HolderDeclared and VerifierAgreed, source evidence `None
 `NotRequested` and a bearer holder (@adapter-table). These tuples say what was proved about
 evaluation; they say nothing about who issued the data. The generic authenticated adapter declares
 the same forms and authorities with source evidence restricted to strict, bounded canonical-RDF
-EdDSA under a verifier-owned policy. It has passed native tests and has one genuine receipt, for a
-single VerifierAgreed bag `SELECT` case. Until its remaining declared cases have genuine coverage,
+EdDSA under a verifier-owned policy. It has passed native tests and has two genuine receipts, each for a
+single VerifierAgreed case (a bag `SELECT` and a false `ASK`). Until its remaining declared cases have genuine coverage,
 its registry entry conservatively does not offer these tuples as available
 (Appendix #ref(<v5-detail>, supplement: none)). The registry is an integration design, not a new
 cryptographic primitive.

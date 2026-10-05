@@ -24,10 +24,13 @@ Branch `claude/zk-paper-narrative`, following `opus-5-5-narrative-proposal.md`
 - Possibly trim main body by roughly 500 words if the LNCS render exceeds 15 pages.
 - Resolve the TODOs below.
 
-## TODO(evidence) inserted
-- `// TODO(evidence): authenticated false-ASK receipt` in section 6.3 (`<v5-evidence>`), with a
-  visible red `#todo-evidence[...]` placeholder block; the evidence table (`<evidence-table>`)
-  has an "Authenticated false ASK: None yet" row.
+## Evidence filled
+- The authenticated false-ASK placeholder is replaced by the verifier-agreed payment receipt
+  (`zkvcq.vcqp_*`, record `research/zk-paper-evidence/authenticated-vcq-payment-ask-audit.json`,
+  from sparq-org/sparq#6651). It has not had a second internal evidence inspection; the text says so.
+- Still to add as their records land: the holder-declared payment case and the six other declared
+  authenticated cases (true/false ASK, holder-declared SELECT, CONSTRUCT under both authorities,
+  row-bound rejection).
 
 ## Other TODOs
 - `// TODO(citation)` (two places, intro and 2.4): the soundness-only interface is the
@@ -36,5 +39,3 @@ Branch `claude/zk-paper-narrative`, following `opus-5-5-narrative-proposal.md`
 ## Open questions (from the narrative)
 - Is there a realistic source of verifier-agreed anchors? If not, narrow the exactness claim.
 - Is Braun a coauthor? This decides how zkRDF is framed.
-- If no authenticated false-ASK receipt can be produced in time, lead the opening with the
-  repayments question rather than the returned-payment question.
