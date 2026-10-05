@@ -73,13 +73,10 @@ and call `validate_with_model`. CLI: `cargo run -p sparq-shacl --example validat
   sibling joins and projecting sub-SELECTs, sq-mue75) and SPARQL-based constraint
   *components* (`sh:ConstraintComponent` + `sh:parameter`/`sh:validator`, §6), pinned
   by the W3C `sparql/*` sub-suites.
-- **SHACL Advanced Features (opt-in `shacl-af`)** — a rule **inference** step
-  (`sh:rule` / `sh:values`, not part of `validate`): `sh:TripleRule`, `sh:SPARQLRule`,
-  value rules, node expressions, and `sh:expression` / `sh:nodeByExpression`;
-  `validate_with_domain` selects asserted facts or `data ∪ inferred`; its model variant reuses parsed shapes.
-  Over a dataset, `apply_rules_in_scope` / `expand_dataset` take an explicit `GraphScope`
-  (default / one named graph / explicit union) and a `Destination` for derived triples,
-  preserving every asserted named graph (gh-6614). Off ⇒ none compiles.
+- **SHACL Advanced Features (opt-in `shacl-af`)** — a rule **inference** step (`sh:rule` / `sh:values`, not part of
+  `validate`): `sh:TripleRule`, `sh:SPARQLRule`, value rules, node expressions, `sh:expression` / `sh:nodeByExpression`;
+  `validate_with_domain` (and its model variant) selects asserted facts or `data ∪ inferred`. `apply_rules_in_scope` /
+  `expand_dataset` take a `GraphScope` and a `Destination`, keeping asserted named graphs (gh-6614). Off ⇒ none compiles.
 - **Differential fuzzing** — a deterministic SplitMix64 fuzzer (`tests/diff_fuzz.rs`)
   cross-checks reports against pluggable reference engines (pySHACL, Jena SHACL, the
   Zazuko / `rdf-validate-shacl` Node engines); `#[ignore]`d, a nightly CI lane.
