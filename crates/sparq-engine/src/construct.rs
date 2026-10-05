@@ -72,7 +72,7 @@ pub fn construct_prepared_with_budget_detailed(
     match q {
         Query::Construct { template, pattern, .. } => {
             crate::exec::budget::with_query_budget(budget, semantics, || {
-                crate::exec::set_query_base(q.base_iri().map(|b| b.as_str()));
+                let _query_base = crate::exec::set_query_base(q.base_iri().map(|b| b.as_str()));
                 let result = (|| {
                     let solutions = crate::exec::eval_select(graph, pattern)?;
                     instantiate(template, &solutions, graph)
@@ -128,7 +128,7 @@ pub fn describe_prepared_with_budget_detailed(
     match q {
         Query::Describe { pattern, .. } => {
             crate::exec::budget::with_query_budget(budget, semantics, || {
-                crate::exec::set_query_base(q.base_iri().map(|b| b.as_str()));
+                let _query_base = crate::exec::set_query_base(q.base_iri().map(|b| b.as_str()));
                 let result = (|| {
                     let solutions = crate::exec::eval_select(graph, pattern)?;
                     cbd(graph, &solutions)
@@ -162,7 +162,7 @@ pub fn construct_or_describe_with_budget(
     let graph = active.as_ref().unwrap_or(graph);
     let _view_scope = crate::view_scope(&active);
     crate::exec::budget::with_query_budget(budget, semantics, || {
-        crate::exec::set_query_base(q.base_iri().map(|b| b.as_str()));
+        let _query_base = crate::exec::set_query_base(q.base_iri().map(|b| b.as_str()));
         match q {
             Query::Construct { template, pattern, .. } => {
                 let solutions = crate::exec::eval_select(graph, pattern)?;

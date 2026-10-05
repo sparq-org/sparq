@@ -454,9 +454,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Linux: fully reproduced locally + proven green in gui.yml -> BLOCKING (soft:false).
-          - { os: ubuntu-latest, label: x64-linux, soft: false }
-          - { os: ubuntu-24.04-arm, label: arm64-linux, soft: false }
+          # v0.1.4 release path: GUI installers are OPTIONAL release artefacts, so
+          # every row is soft — a GUI bundler failure can no longer block the CLI/server
+          # Release. Linux stays proven green in gui.yml; its absence is reported, not fatal.
+          - { os: ubuntu-latest, label: x64-linux, soft: true }
+          - { os: ubuntu-24.04-arm, label: arm64-linux, soft: true }
           # macOS/Windows: native bundlers documented-untested this pass -> SOFT (non-fatal).
           - { os: macos-14, label: arm64-darwin, soft: true }
           - { os: macos-15-intel, label: x64-darwin, soft: true }
@@ -803,8 +805,9 @@ jobs:
           done
           gui=( subject-hashes-gui-*.txt )
           if [ "${#gui[@]}" -eq 0 ]; then
-            echo "ERROR: no subject-hashes-gui-* list — every GUI bundle row failed to publish digests" >&2
-            exit 1
+            # every GUI row is soft: no GUI digests means no GUI assets are
+            # published either (digests are uploaded before bundles), so coverage still holds.
+            echo "::warning::no subject-hashes-gui-* list — this release ships no GUI installers"
           fi
           cat -- subject-hashes-sbom.txt subject-hashes-conformance.txt "${gui[@]}" > all.sha256
           while read -r digest name; do
@@ -981,7 +984,10 @@ jobs:
         run: |
           set -euo pipefail
           ls -1 assets > "$RUNNER_TEMP/release-asset-list.txt"
-          bash scripts/check-release-aliases.sh "$RUNNER_TEMP/release-asset-list.txt"
+          # GUI installers are optional (all gui-bundle rows are soft): a missing GUI
+          # alias is a warning; every CLI archive alias stays fail-closed.
+          RELEASE_OPTIONAL_ALIAS_PREFIXES="sparq-gui-" \
+            bash scripts/check-release-aliases.sh "$RUNNER_TEMP/release-asset-list.txt"
       # [FABLE-5] sq-vw3ax.11.3: runs AFTER alias staging, so SHA256SUMS carries the versioned
       # entries (unchanged) PLUS one appended entry per alias (same digest, alias name).
       - name: Generate SHA256SUMS

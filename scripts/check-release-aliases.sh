@@ -103,10 +103,25 @@ cli_count=$(printf '%s' "$cli_aliases" | grep -c . || true)
 echo "site-referenced alias contract ($((gui_count + cli_count)) aliases) from $CLIENT:"
 printf '%s\n%s\n' "$gui_aliases" "$cli_aliases" | sed 's/^/  - /'
 
+# RELEASE_OPTIONAL_ALIAS_PREFIXES (space-separated, e.g. "sparq-gui-") names alias
+# families whose source lane is optional (release.yml's soft GUI rows). A missing optional
+# alias warns (the site button 404s for this release) instead of blocking the whole release.
+optional_alias() {
+  local prefix
+  for prefix in ${RELEASE_OPTIONAL_ALIAS_PREFIXES:-}; do
+    case "$1" in "$prefix"*) return 0 ;; esac
+  done
+  return 1
+}
+
 missing=0
 while IFS= read -r alias; do
   [ -n "$alias" ] || continue
   if ! grep -Fxq -- "$alias" "$ASSET_LIST"; then
+    if optional_alias "$alias"; then
+      echo "::warning::optional site-referenced alias '$alias' is not in the staged asset list" >&2
+      continue
+    fi
     echo "MISSING: site-referenced alias '$alias' is not in the staged asset list" >&2
     missing=$((missing + 1))
   fi

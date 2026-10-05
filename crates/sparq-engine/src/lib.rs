@@ -1136,7 +1136,7 @@ pub fn query_prepared_with_budget_detailed(
     let graph = active.as_ref().unwrap_or(graph);
     let _view_scope = view_scope(&active);
     exec::budget::with_query_budget(budget, semantics, || {
-        exec::set_query_base(q.base_iri().map(|b| b.as_str()));
+        let _query_base = exec::set_query_base(q.base_iri().map(|b| b.as_str()));
         let result = (|| match q {
             Query::Select { pattern, .. } => exec::eval_select(graph, pattern),
             // ASK as a QueryResult: zero variables, and one (empty) row iff the pattern
@@ -1176,7 +1176,7 @@ pub fn ask_prepared_with_budget(graph: &Graph, prepared: &PreparedQuery, budget:
     let graph = active.as_ref().unwrap_or(graph);
     let _view_scope = view_scope(&active);
     exec::budget::with_query_budget(budget, semantics, || {
-        exec::set_query_base(q.base_iri().map(|b| b.as_str()));
+        let _query_base = exec::set_query_base(q.base_iri().map(|b| b.as_str()));
         match q {
             Query::Ask { pattern, .. } => exec::eval_ask(graph, pattern),
             _ => Err("ask() requires an ASK query".into()),
@@ -1214,7 +1214,7 @@ pub fn query_json_prepared_with_budget(
     let graph = active.as_ref().unwrap_or(graph);
     let _view_scope = view_scope(&active);
     exec::budget::with_query_budget(budget, semantics, || {
-        exec::set_query_base(q.base_iri().map(|b| b.as_str()));
+        let _query_base = exec::set_query_base(q.base_iri().map(|b| b.as_str()));
         match q {
             Query::Select { pattern, .. } => exec::eval_select_json(graph, pattern),
             // The SPARQL 1.1 JSON results boolean form.
@@ -1241,7 +1241,7 @@ pub fn query_json_chunks_with_budget(graph: &Graph, sparql: &str, budget: &Query
     let graph = active.as_ref().unwrap_or(graph);
     let _view_scope = view_scope(&active);
     exec::budget::with_query_budget(budget, semantics, || {
-        exec::set_query_base(q.base_iri().map(|b| b.as_str()));
+        let _query_base = exec::set_query_base(q.base_iri().map(|b| b.as_str()));
         match q {
             Query::Select { pattern, .. } => exec::eval_select_json_chunks(graph, pattern, Some(JSON_CHUNK_BYTES)),
             Query::Ask { pattern, .. } => {
@@ -1298,7 +1298,7 @@ pub fn query_json_stream_prepared_with_budget(
     let graph = active.as_ref().unwrap_or(graph);
     let _view_scope = view_scope(&active);
     exec::budget::with_query_budget(budget, semantics, || {
-        exec::set_query_base(q.base_iri().map(|b| b.as_str()));
+        let _query_base = exec::set_query_base(q.base_iri().map(|b| b.as_str()));
         match q {
             Query::Select { pattern, .. } => {
                 exec::eval_select_json_emit(graph, pattern, Some(JSON_CHUNK_BYTES), &mut sink)
@@ -1338,7 +1338,7 @@ pub fn count_prepared_with_budget(graph: &Graph, prepared: &PreparedQuery, budge
     let graph = active.as_ref().unwrap_or(graph);
     let _view_scope = view_scope(&active);
     exec::budget::with_query_budget(budget, semantics, || {
-        exec::set_query_base(q.base_iri().map(|b| b.as_str()));
+        let _query_base = exec::set_query_base(q.base_iri().map(|b| b.as_str()));
         match q {
             Query::Select { pattern, .. } => exec::count_select(graph, pattern),
             // An ASK counts its unit row: 1 when satisfiable, 0 otherwise.

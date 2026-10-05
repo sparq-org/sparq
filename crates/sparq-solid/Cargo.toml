@@ -1,5 +1,9 @@
 [package]
 name = "sparq-solid"
+# Not in the crates.io publish set (release-plz.toml). Published crates reach this crate only
+# through optional features, which scripts/publish-strip.py removes from their packaged
+# manifests; see docs/release.md "crates.io publish set".
+publish = false
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -47,6 +51,10 @@ sparq-policy = { path = "../sparq-policy", version = "0.1.3", default-features =
 # a production cutover. Path-only (no crates.io version): the `trust-graph` feature is a
 # research-only feature and is not part of sparq-solid's published feature set.
 sparq-trust = { path = "../sparq-trust", version = "0.1.3", optional = true }
+# Behind `trust-graph` only (already a transitive dep of sparq-trust, so it adds no crate to
+# that graph): gives tests/trust_graph.rs the ZK signing primitives without an unconditional
+# dev-dependency on the research estate. Path-only, like sparq-trust.
+sparq-zk = { path = "../sparq-zk", version = "0.1.3", optional = true }
 # [SONNET-4.6] sq-ysv3u (issue #2935): the TRUST-THE-ISSUER backend for ACP `acp:vc` —
 # W3C Data Integrity (`eddsa-rdfc-2022`) verification of a presented credential. OPTIONAL +
 # behind the `acp-vc` feature (OFF by default), so the default sparq-solid build carries ZERO
@@ -85,7 +93,7 @@ count-enforcement = ["odrl-bridge", "sparq-policy/count-enforcement"]
 # pattern. RESEARCH prototype, NOT a security guarantee; no privacy/unlinkability (the
 # ZK estate is externally unaudited, sq-qhy4). See the crate README + the access-control
 # SKILL for the honest scope.
-trust-graph = ["dep:sparq-trust"]
+trust-graph = ["dep:sparq-trust", "dep:sparq-zk"]
 
 # [OPUS-4.8] sq-pfae.3 (issue #940): forward `sparq-trust`'s OPT-IN `did` feature so a
 # sparq-solid integrator can bind a trust rule's issuer key from a `trust:issuerDid`
@@ -185,16 +193,11 @@ required-features = ["odrl-bridge"]
 name = "pattern_scope_bench"
 required-features = ["pattern-scope"]
 
-# [OPUS-4.8] sq-pfae PoC: the trust-graph end-to-end test (tests/trust_graph.rs, fully
-# `#![cfg(feature = "trust-graph")]`) drives the admission gate through the real
-# PodStore. These are dev-only — they do not touch the default build or publish. Scoped
-# to NON-wasm32 [OPUS-4.8 sq-7agop]: the `trust-graph` ZK estate (the arkworks stack →
-# `rand 0.8 → getrandom 0.2`) is native-only and not wasm-portable, so excluding it from
-# the wasm32 dev-graph lets `tests/wasm_materialize.rs` build under `wasm-pack test`
-# without dragging a wasm-incompatible getrandom into the test graph.
-[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-sparq-trust = { path = "../sparq-trust" }
-sparq-zk = { path = "../sparq-zk" }
+# The trust-graph end-to-end test (tests/trust_graph.rs, fully
+# `#![cfg(feature = "trust-graph")]`) imports sparq-trust and sparq-zk through the
+# `trust-graph` feature's OPTIONAL normal deps (see [dependencies]) — deliberately NOT an
+# unconditional dev-dependency, so a default `cargo test` of this core crate never compiles
+# the research ZK estate (arkworks). Run it with `--features trust-graph`.
 
 # [OPUS-4.8] sq-7agop: wasm32 build+smoke check (regression guard for the cfg-gated
 # `std::time::Instant` in `materialize_*`). `tests/wasm_materialize.rs` runs the REAL

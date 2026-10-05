@@ -14,21 +14,28 @@
 [package]
 edition = "2024"
 rust-version = "1.87"
-name = "spargebra"
+# Published to crates.io as `sparq-spargebra`: the oxigraph `spargebra` 0.4.6 parser plus
+# the patches in SPARQ-PATCHES.md (notably §8, the parser recursion-depth cap that guards
+# the unauthenticated /sparql endpoint). The library target keeps the name `spargebra`,
+# and every sparq crate depends on it as `spargebra = { package = "sparq-spargebra", .. }`,
+# so `use spargebra::..` is unchanged and published sparq crates keep the patches instead
+# of silently resolving the unpatched upstream crate.
+name = "sparq-spargebra"
 version = "0.4.6"
-authors = ["Tpt <thomas@pellissier-tanon.fr>"]
+authors = ["Tpt <thomas@pellissier-tanon.fr>", "sparq contributors"]
 build = false
 autolib = false
 autobins = false
 autoexamples = false
 autotests = false
 autobenches = false
-description = "SPARQL parser"
-documentation = "https://docs.rs/spargebra"
+description = "SPARQL parser: oxigraph's spargebra 0.4.6 with sparq's W3C-conformance and DoS-hardening patches"
+documentation = "https://docs.rs/sparq-spargebra"
 readme = "README.md"
 keywords = ["SPARQL"]
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/oxigraph/oxigraph/tree/main/lib/spargebra"
+repository = "https://github.com/sparq-org/sparq/tree/main/vendor/spargebra"
+homepage = "https://github.com/oxigraph/oxigraph/tree/main/lib/spargebra"
 resolver = "2"
 
 [package.metadata.docs.rs]

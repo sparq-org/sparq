@@ -28,7 +28,7 @@ license = "MIT"
 # [GPT-6] The root workspace requirement is exact (=0.4.6): without that pin,
 # an unlocked cold resolver can prefer a newer registry version over this fork.
 [patch.crates-io]
-spargebra = { path = "../../../vendor/spargebra" }
+spargebra = { path = "../../../vendor/spargebra-shim" }
 
 [[bin]]
 name = "sparq-xpath-differential"
