@@ -158,9 +158,10 @@ class GraphCoverage(unittest.TestCase):
 
     def test_workflow_selector_and_watchdog_cover_nested_locks(self):
         workflow = (REPO / ".github/workflows/supply-chain.yml").read_text()
-        self.assertIn("'**/Cargo.lock'", workflow)
-        self.assertIn(r"(^|/)Cargo\.lock$", workflow)
-        self.assertIn("'vendor/zk-sdk/**'", workflow)
+        # The workflow runs on every push to main and nightly (no path filter), so
+        # every nested lock is covered by the graph actions below.
+        self.assertIn("  push:\n    branches: [main]", workflow)
+        self.assertNotIn("    paths:", workflow)
         for action in ["deny-integrity", "deny-advisories", "fetch", "vet", "sbom", "sbom-paths", "patch-policy"]:
             self.assertIn(f"scripts/rust-dependency-graphs.py {action}", workflow)
         self.assertIn("verify.py --smoke", workflow)
