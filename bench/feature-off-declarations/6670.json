@@ -1,0 +1,1 @@
+{"pr":6670,"date":"2026-10-05","reason":"sparq_core::temporal::cmp_instants (always-compiled sparq-core) is now public and decides the mixed-timezone ±14h window on its endpoints"}

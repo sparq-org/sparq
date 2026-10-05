@@ -127,8 +127,28 @@ impl Timeline {
 pub fn cmp_instants(ai: f64, a_tz: bool, bi: f64, b_tz: bool) -> Option<Ordering> {
     // Same (or no) timezone: a direct compare. With MIXED presence the order is
     // only decidable outside the ±14h window; inside it the result is indeterminate.
-    if a_tz == b_tz || (ai - bi).abs() > 14.0 * 3600.0 {
-        ai.partial_cmp(&bi)
+    if a_tz == b_tz {
+        return ai.partial_cmp(&bi);
+    }
+    // Compare the floating value's window ENDPOINTS against the zoned instant rather
+    // than the rounded difference `ai - bi`: near the 14h edge the subtraction can round
+    // a strictly-outside pair onto the boundary (and so to indeterminate).
+    const W: f64 = 14.0 * 3600.0;
+    // Fast path: a pair more than a second past the edge is decided by the difference
+    // alone (its rounding error is far below a second at any representable date).
+    let d = ai - bi;
+    if d.abs() > W + 1.0 {
+        return ai.partial_cmp(&bi);
+    }
+    let (less, greater) = if a_tz {
+        (ai < bi - W, ai > bi + W)
+    } else {
+        (ai + W < bi, ai - W > bi)
+    };
+    if less {
+        Some(Ordering::Less)
+    } else if greater {
+        Some(Ordering::Greater)
     } else {
         None
     }
