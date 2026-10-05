@@ -72,7 +72,7 @@ tokens); consumer-side verification documentation.
 ## Do-not-re-propose (already in the posture — cite, don't re-add)
 
 `actions/attest-build-provenance` + buildkit `provenance: mode=max` (release.yml), cargo-auditable
-(release.yml), cargo-vet GATING (supply-chain.yml), cargo-deny sources/advisories GATING, SHA-pinned
-actions + base images, Cargo.lock + `--locked`, ci-summary required gate, CODEOWNERS +
+(release.yml), cargo-vet (supply-chain.yml, post-merge/nightly), cargo-deny sources/advisories (post-merge/nightly), SHA-pinned
+actions + base images, Cargo.lock + `--locked`, `ci-fast` required gate (core crates), CODEOWNERS +
 branch-protection doc, `.well-known/security.txt`, per-release SBOM+VEX. These are evidence, not
 new work.

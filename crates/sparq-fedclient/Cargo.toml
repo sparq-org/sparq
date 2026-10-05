@@ -54,6 +54,9 @@ fedclient = [
     # this adds NO new crate to the resolved dependency graph.
     "dep:serde_json",
     "dep:serde",
+    # #3712: the one RFC 3986 query-value encoder (source::pct_encode). Already in the tree
+    # via ureq, so no new crate on a fedclient build.
+    "dep:percent-encoding",
 ]
 # [OPUS-4.8] sq-ij5x (epic sq-dnko, FINAL phase): Phase-7 client-side ADAPTIVE re-planning.
 # OFF by default; IMPLIES `fedclient` (it is the streaming client's execution loop) AND
@@ -86,6 +89,7 @@ rustc-hash = { workspace = true, optional = true }
 # already resolved via `sparq-engine/service` (enabled by `fedclient`), so the default build
 # is unaffected and the `fedclient` tree gains no new crate. Version pinned to match.
 serde_json = { version = "1", features = ["raw_value"], optional = true }
+percent-encoding = { workspace = true, optional = true }
 # [GPT-5.6] sq-1rtc2: borrowed SRJ envelopes avoid a full serde_json::Value DOM. serde is
 # already in the feature's resolved graph through serde_json; this only makes that existing
 # dependency directly usable when `fedclient` is enabled.

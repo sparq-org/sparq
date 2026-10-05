@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# [OPUS-4.8] Orchestration automation — Phase F of research/orchestration-automation-design.md
-# (PR #374). Authored by Opus 4.8 (Fable unavailable; flag for re-review when Fable returns).
+# Orchestration automation — Phase F of research/orchestration-automation-design.md
+# (PR #374).
 #
 # refill-candidates.sh   (READ-ONLY; advisory only — NO mutation, NO dispatch)
 #
@@ -76,7 +76,7 @@ infer_surface() {
   printf '\n'
 }
 
-# [OPUS-4.8] sq-8rpq part 3: contention by UNPUSHED worktree branches (not every branch).
+# sq-8rpq part 3: contention by UNPUSHED worktree branches (not every branch).
 # wt_contention_branch <branch> <unpushed-count> : echo <branch> iff it is a CONTENTION
 # source, i.e. iff it has UNPUSHED local commits (fresh work, no PR yet). <unpushed-count>
 # is the number of commits on HEAD absent from the push target; "0" = fully pushed (or

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# [OPUS-4.8] sq-hoaj — orphan-proof EC2 harness for the MPC heavy/ceiling matrix
+# sq-hoaj — orphan-proof EC2 harness for the MPC heavy/ceiling matrix
 # (PLAN.md M6 "Network tiers", the sq-hoaj OPEN slice).
 #
 # WHAT IT RUNS. The Tier-3 (netem-shaped) sweep of the ceiling matrix on a single

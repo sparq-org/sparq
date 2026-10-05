@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-# [OPUS-4.8] Agent-wave token/cost telemetry harness (bead sq-dhss, epic sq-lhwo).
-# Authored by Opus 4.8 (Fable unavailable; flag for re-review when Fable returns).
+# Agent-wave token/cost telemetry harness (bead sq-dhss, epic sq-lhwo).
 #
 # WHY THIS EXISTS
 # --------------------------------------------------------------------------------

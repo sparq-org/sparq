@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [FABLE-5] Auto-file a DEMOTED-LANE full-form failure (bead sq-6vshe.6).
+# Auto-file a DEMOTED-LANE full-form failure (bead sq-6vshe.6).
 #
 # CONTEXT — the demotion auto-bead protocol (research/ci-structural-speedup.md §7).
 # The heavy-lane placement change (sq-6vshe.6) demotes the per-PR variant of certain
@@ -59,7 +59,7 @@ _ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
 # How much of the captured log to inline in the issue (the tail is where the crash /
 # reproducer lines are).
 _LOG_TAIL_CHARS = 4000
-# [OPUS-5] sq-c9q4r: any run of 3+ backticks in the UNTRUSTED log tail. The tail is
+# sq-c9q4r: any run of 3+ backticks in the UNTRUSTED log tail. The tail is
 # inlined inside a ``` fence in build_issue_body(), so such a run CLOSES the fence
 # early and everything after it renders as markdown in an own-repo issue.
 _FENCE_RUN_RE = re.compile(r"`{3,}")
@@ -137,7 +137,7 @@ def build_bead_record(bead_id: str, lane: str, args, now: str) -> dict:
         f"Run: {args.run_url}\n"
         f"Reproduce locally with the lane's full form (see the workflow that filed "
         f"this) and the run log inline in the linked GitHub issue. "
-        f"🤖 SPARQ agent [FABLE-5]"
+        f"🤖 SPARQ agent"
     )
     return {
         "_type": "issue",
@@ -164,12 +164,12 @@ def append_bead(jsonl_path: Path, record: dict) -> None:
 
 
 def build_issue_body(bead_id: str, lane: str, args, log_tail: str) -> str:
-    # [OPUS-5] sq-c9q4r: defuse AT the fence as well as in read_log_tail(), so the
+    # sq-c9q4r: defuse AT the fence as well as in read_log_tail(), so the
     # "untrusted text cannot escape this block" invariant holds for every caller
     # rather than only the one that read the file. Idempotent (the rewrite emits no
     # backticks), so a tail that already went through read_log_tail() is unchanged.
     tail = defuse_code_fences(log_tail) or "(no log captured — see the run's job log + any uploaded artifact)"
-    return f"""> 🤖 **SPARQ agent** — auto-filed by the demoted-lane safety net (bead sq-6vshe.6). [FABLE-5]
+    return f"""> 🤖 **SPARQ agent** — auto-filed by the demoted-lane safety net (bead sq-6vshe.6).
 
 The **full form** of a CI lane that was demoted off the per-PR critical path **failed**. The per-PR variant runs only the cheap deterministic slice, so this is a finding the per-PR run could not have caught — tracked here so the demoted lane cannot silently rot.
 
@@ -191,7 +191,7 @@ def defuse_code_fences(text: str) -> str:
     """Neutralise ``` runs so untrusted log text cannot escape the markdown code fence
     it is inlined into.
 
-    [OPUS-5] sq-c9q4r. The log tail is arbitrary bytes from a fuzz target's stdout —
+    sq-c9q4r. The log tail is arbitrary bytes from a fuzz target's stdout —
     including the failing INPUT libFuzzer echoes back — so a log containing a run of
     three-or-more backticks closes build_issue_body()'s fence early and the remainder
     renders as markdown in an issue this repo's own CI opens (own-repo markdown
@@ -310,7 +310,7 @@ def self_test() -> int:
         tail = read_log_tail(str(logf))
         assert tail.startswith("…(truncated)…") and len(tail) <= _LOG_TAIL_CHARS + 40
         assert read_log_tail(None) == "" and read_log_tail(str(Path(td) / "missing")) == ""
-        # [OPUS-5] sq-c9q4r: MARKDOWN-INJECTION guard. A log carrying a ``` run must not
+        # sq-c9q4r: MARKDOWN-INJECTION guard. A log carrying a ``` run must not
         # be able to close the issue body's fence — the tail is arbitrary fuzz-target
         # output (incl. the echoed failing input), and this filer opens an issue in THIS
         # repo. Assert on the round-trip through the real reader, not just the helper.

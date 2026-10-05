@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# [FABLE-5] bytes-per-triple.sh (sq-7d3dj.32) — deterministic bytes/triple AT SCALE, in BOTH
+# bytes-per-triple.sh (sq-7d3dj.32) — deterministic bytes/triple AT SCALE, in BOTH
 # framings the RDFox comparison needs (research/rdfox-claims-inventory.md §2.4):
 #
 #   1. IN-MEMORY  : `sparq-cli memstat` self-accounted heap B/triple, decomposed into

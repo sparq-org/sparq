@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-# [OPUS-4.8] Baseline capture for the metrics harness (bead sq-lhwo.1, epic sq-lhwo).
-# Authored by Opus 4.8 (Fable unavailable; flag for re-review when Fable returns).
+# Baseline capture for the metrics harness (bead sq-lhwo.1, epic sq-lhwo).
 #
 # Runs metrics_row.py over the last N merged PRs to establish the current-state
 # distribution for each metric -- the "before" the §5 A/B compares against. Token

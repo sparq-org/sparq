@@ -4,27 +4,27 @@
 # feature-matrix `opt-in-features` strategy by scripts/assemble-feature-matrix.py
 # (the `setup` job emits the combined matrix as JSON consumed via fromJSON). Adding a
 # leg for THIS crate edits no OTHER crate's fragment, so concurrent opt-in-feature PRs for
-# DIFFERENT crates never textually conflict (bead sq-ibrze). [OPUS-4.8]
-# SCOPE ([SONNET-4.6] issue #2384): adding/removing/renaming a leg changes the emitted
+# DIFFERENT crates never textually conflict (bead sq-ibrze).
+# SCOPE (issue #2384): adding/removing/renaming a leg changes the emitted
 # leg-name set, and THAT is a TWO-FILE change — this fragment AND
 # scripts/tests/feature-matrix-legnames.golden.txt. Every other edit here (features,
 # test, tier, tier-reason, comments) leaves the name set alone and is a SINGLE-file
 # change. See README.md in this directory.
 #
-# CONTRACT (gate-critical): each leg's emitted check-run NAME is `opt-in <name>`,
-# discovered as a REQUIRED check by the ci-summary `gate` aggregator BY NAME. Keep
-# `name` free of the whole words "advisory"/"informational" or the leg stops gating.
+# CONTRACT: each leg's emitted check-run NAME is `opt-in <name>` (pinned by the golden
+# leg-name file). Keep `name` free of the whole words "advisory"/"informational", which
+# mark a check as non-blocking.
 # Fields: name (required -> check-run name), crate (required), features (required,
 # non-empty comma list), test (bool — run `cargo test` for the leg).
 
-# [GPT-5.6] Exercise the default-OFF dual-leaf identity/desynchronisation
+# Exercise the default-OFF dual-leaf identity/desynchronisation
 # regression guard in an explicit opt-in matrix leg.
 - name: "sparq-zk (dual-leaf — identity/desync regression guard)"
   crate: "sparq-zk"
   features: "dual-leaf"
   test: true
 
-# [OPUS-4.8] sq-bevd3 (epic sq-0dksu, Phase 3): the per-method
+# sq-bevd3 (epic sq-0dksu, Phase 3): the per-method
 # security-properties ANNOTATION GRAPH + over-claim guards in sparq-zk. The
 # `secprop` module, its unit tests (the 3 guards + the drift/honesty checks),
 # and the `secprop_annotations.rs` integration suite
@@ -32,7 +32,7 @@
 # `secprop-annotations` feature, so ci.yml's default-feature lane compiles
 # them EMPTY and runs ZERO of them — the silent-skip gap (#1171) this leg
 # closes. The feature pulls `oxttl` (already a workspace dep) and, since
-# [OPUS-5] sq-3705, `sparq-secprop-vocab` — a ZERO-dependency leaf carrying
+# sq-3705, `sparq-secprop-vocab` — a ZERO-dependency leaf carrying
 # the shared `secx:` IRI constants, so it adds a `const &str` table and no
 # transitive dependency. That edge REPLACED the local IRI copies and the
 # cross-package `include_str!` of sparq-trust's vocabulary; the guards that
@@ -48,7 +48,7 @@
   features: "secprop-annotations"
   test: true
 
-# [OPUS-5] sq-wklnb: the OFF-circuit W3C VC ingest bridge. The `vc_bridge`
+# sq-wklnb: the OFF-circuit W3C VC ingest bridge. The `vc_bridge`
 # module, its in-module tests, and `tests/vc_bridge_w3c_vectors.rs`
 # (`#![cfg(feature = "vc-bridge")]` — the canonical W3C Data-Integrity vectors
 # for `eddsa-rdfc-2022` + `ecdsa-rdfc-2019`) are ALL behind the default-OFF
@@ -58,7 +58,7 @@
 # which is exactly the failure mode they exist to catch: a transposed
 # `proofConfigHash || documentHash` concatenation leaves every self-signed
 # in-module test green and only the published vectors go red.
-# [OPUS-5] sq-txg1y (issue #3234) widened what this ONE leg covers, without
+# sq-txg1y (issue #3234) widened what this ONE leg covers, without
 # changing the leg name (so `scripts/tests/feature-matrix-legnames.golden.txt` is
 # untouched): the same `vc-bridge` feature now also gates the `ecdsa-rdfc-2019`
 # P-384/SHA-384 profile and the additive `vc_bridge_json` JSON-LD envelope entry

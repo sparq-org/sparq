@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-# [OPUS-4.8] Hermetic tests for scripts/check-install-action-tool.py (bead sq-ur7o).
-# Authored by Opus 4.8 (Fable unavailable; flag for re-review when Fable returns).
+# Hermetic tests for scripts/check-install-action-tool.py (bead sq-ur7o).
 #
 # Two layers:
 #   1. The gate's PURE logic (the same fixtures as its built-in --self-test, asserted

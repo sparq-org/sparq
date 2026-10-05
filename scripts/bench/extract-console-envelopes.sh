@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# [FABLE-5] sq-tvzyi — recover result envelopes from an EC2 serial-console dump.
+# sq-tvzyi — recover result envelopes from an EC2 serial-console dump.
 #
 # 🤖 SPARQ agent. The canonical gather instance scripts cat every results envelope
 # into the console log between

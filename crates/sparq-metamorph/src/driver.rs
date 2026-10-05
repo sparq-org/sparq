@@ -316,17 +316,18 @@ pub struct RequestParts {
 /// string: unreserved characters (RFC 3986 §2.3) pass through, space becomes `+`,
 /// everything else becomes `%XX` per UTF-8 byte.
 pub fn form_urlencode(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    for byte in value.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
-                out.push(byte as char)
-            }
-            b' ' => out.push('+'),
-            _ => out.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    out
+    // The RFC 3986 unreserved keep-set, with ' ' ALSO kept so the one-pass encoder leaves it
+    // for the `+` swap below (`percent-encoding` has no native `+` mode). A literal '+' in the
+    // input is itself encoded (`%2B`), so the swap is unambiguous (#3712).
+    const FORM: &percent_encoding::AsciiSet = &percent_encoding::NON_ALPHANUMERIC
+        .remove(b'-')
+        .remove(b'.')
+        .remove(b'_')
+        .remove(b'~')
+        .remove(b' ');
+    percent_encoding::utf8_percent_encode(value, FORM)
+        .to_string()
+        .replace(' ', "+")
 }
 
 /// Append an already-encoded query-string `params` to `base_url`, using `?` when
@@ -480,6 +481,20 @@ mod tests {
         assert_eq!(form_urlencode("abc-XYZ_0.9~"), "abc-XYZ_0.9~");
         assert_eq!(form_urlencode("a b"), "a+b");
         assert_eq!(form_urlencode("?v < 5 && ?w = \"é\""), "%3Fv+%3C+5+%26%26+%3Fw+%3D+%22%C3%A9%22");
+    }
+
+    /// #3712 tripwire: every printable ASCII byte + a control + 2-/4-byte UTF-8 — exactly the
+    /// RFC 3986 unreserved set passes through, space becomes `+`, the rest is uppercase `%XX`.
+    #[test]
+    fn form_urlencode_pins_the_unreserved_set() {
+        let all: String = (0x20u8..0x7f)
+            .map(char::from)
+            .chain("\t\né😀".chars())
+            .collect();
+        assert_eq!(
+            form_urlencode(&all),
+            "+%21%22%23%24%25%26%27%28%29%2A%2B%2C-.%2F0123456789%3A%3B%3C%3D%3E%3F%40ABCDEFGHIJKLMNOPQRSTUVWXYZ%5B%5C%5D%5E_%60abcdefghijklmnopqrstuvwxyz%7B%7C%7D~%09%0A%C3%A9%F0%9F%98%80"
+        );
     }
 
     #[test]

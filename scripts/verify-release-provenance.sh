@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# [OPUS-5] issue #4571 (GX-11 residual / SL-B3-b) — CONSUMER-SIDE verification of the
+# issue #4571 (GX-11 residual / SL-B3-b) — CONSUMER-SIDE verification of the
 # isolated-trusted-builder provenance attached to a published GitHub Release.
 #
 # WHY THIS EXISTS. release.yml#provenance and release.yml#provenance-artifacts route the

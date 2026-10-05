@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# [OPUS-4.8] sq-9qz6 — wasm dependency-graph guard.
+# sq-9qz6 — wasm dependency-graph guard.
 #
 # The browser/wasm bundles must stay lean and pure-Rust: the native-only heavy deps
 # (parallelism + the compression codecs + the parallel parser crate) must NEVER
@@ -24,7 +24,7 @@
 # sparq-rsp-wasm carries NO regex (sparq-rsp + its engine/core are no-default-features), so
 # its graph is among the leanest — guarded by the same forbidden set.
 # sparq-text-wasm's `unicode-segmentation` (UAX #29 tokenizer) is likewise pure-Rust +
-# wasm-portable and NOT forbidden. [OPUS-4.8] sq-jbe6
+# wasm-portable and NOT forbidden. sq-jbe6
 #
 # Run: scripts/wasm-deps-guard.sh   (exit 0 = clean, exit 1 = a forbidden crate is present)
 set -euo pipefail

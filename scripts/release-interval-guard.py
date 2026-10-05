@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Fail-closed publish-cadence guard for the sparq release path.
 
-[OPUS-5] 🤖 SPARQ agent. Issue #1135 (maintainer, 2026-07-26): *"Before I do this; can I
+🤖 SPARQ agent. Issue #1135 (maintainer, 2026-07-26): *"Before I do this; can I
 make sure that there are protections in place to prevent publishing too regularly, I don't
 want to spam the registry."*
 
@@ -83,7 +83,7 @@ Every one of these REFUSES (exit 1) rather than publishing:
 * a publishable crate is missing from the version_group.
 
 An unknown NEVER means "go ahead". There is deliberately **no override flag**.
-[GPT-6] PR #6573 carries one maintainer-authorized exception: v0.1.3 may recover the
+PR #6573 carries one maintainer-authorized exception: v0.1.3 may recover the
 exact incomplete v0.1.2 predecessor while every public crate remains absent. The
 fixed local/remote tag evidence is re-read on both pre-tag and tag-push paths. No
 other version inherits this exception; MIN_RELEASE_INTERVAL remains 24 hours.
@@ -144,7 +144,7 @@ except ModuleNotFoundError:  # pragma: no cover - the runner ships 3.11+
 MIN_RELEASE_INTERVAL = dt.timedelta(hours=24)
 MIN_RELEASE_INTERVAL_HOURS = MIN_RELEASE_INTERVAL.total_seconds() / 3600.0
 
-# [GPT-6] Maintainer-authorized v0.1.3 recovery only (PR #6573). Pin the complete
+# Maintainer-authorized v0.1.3 recovery only (PR #6573). Pin the complete
 # observed remote v* inventory so an extra tag cannot evade the check by backdating.
 # These are evidence, not configurable options. v0.1.3 is added only on its tag path.
 V013_PREDECESSOR_AT = dt.datetime(2026, 9, 20, 22, 3, 11, tzinfo=dt.timezone.utc)
@@ -164,7 +164,7 @@ CRATES_IO_USER_AGENT = (
     "sparq-release-interval-guard (https://github.com/sparq-org/sparq; issue #1135)"
 )
 CRATES_IO_TIMEOUT = 20
-# [GPT-5.6] Thirty-seven registry reads make a one-off CDN/TLS reset likely enough to
+# Thirty-seven registry reads make a one-off CDN/TLS reset likely enough to
 # wedge a release. Retry only transient transport/status failures; remain fail-closed.
 CRATES_IO_RETRY_DELAYS = (0.5, 1.5)
 CRATES_IO_RETRYABLE_ERROR_RE = re.compile(
@@ -252,7 +252,7 @@ def publishable_crates(repo_root: Path) -> list[Crate]:
         )
     workspace_version = ((workspace.get("package") or {}) or {}).get("version")
 
-    # [GPT-5.6] Keep every member until dependency closure is validated. The old code
+    # Keep every member until dependency closure is validated. The old code
     # discarded `publish = false` members before walking dependencies, which made a
     # public -> private path edge invisible even though `cargo publish` cannot resolve it.
     all_members: dict[str, tuple[str, Path, dict, bool]] = {}
@@ -505,11 +505,16 @@ def _http_get_json(url: str) -> tuple[dict | None, str | None]:
 
 
 def crates_io_last_publish(
-    names: list[str], fetch=_http_get_json, retry_sleep=time.sleep, *, require_absent=False
+    names: list[str], fetch=_http_get_json, retry_sleep=time.sleep, *, require_absent=False,
+    exclude_version: str | None = None,
 ) -> dt.datetime | None:
     """The newest crates.io publication timestamp across `names`, or None if NONE of them
     has ever been published. Transient lookup failures receive two bounded retries; the
-    final failure (and every non-transient error) REFUSES."""
+    final failure (and every non-transient error) REFUSES.
+
+    `exclude_version` skips publications of that exact version: on the tag-push path the
+    crates of the release being cut were published moments before the tag, and counting
+    them would make every automated release refuse itself."""
     newest: dt.datetime | None = None
     for name in sorted(names):
         attempts = 0
@@ -540,6 +545,8 @@ def crates_io_last_publish(
             )
         for version in versions:
             if not isinstance(version, dict):
+                continue
+            if exclude_version is not None and version.get("num") == exclude_version:
                 continue
             stamp = parse_timestamp(str(version.get("created_at") or ""))
             if stamp is None:
@@ -795,7 +802,8 @@ def run(
             name == f"v{workspace_version}" for name, _ in tags
         ):
             crates_io_at = crates_io_last_publish(
-                [c.name for c in crates], fetch=fetch, require_absent=recovery
+                [c.name for c in crates], fetch=fetch, require_absent=recovery,
+                exclude_version=released_tag[1:] if released_tag else None,
             )
         if recovery:
             verify_v013_recovery(repo_root, tags, now, released_tag, git_runner)

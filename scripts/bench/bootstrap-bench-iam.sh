@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# [OPUS-5] sq-ffaa9 — ONE-TIME MAINTAINER bootstrap of the sparq-bench result bucket and
+# sq-ffaa9 — ONE-TIME MAINTAINER bootstrap of the sparq-bench result bucket and
 # the IAM instance profile that lets a self-terminating gather box write to it.
 #
 # 🤖 SPARQ agent. This is the [MAINTAINER credential/access] half of sq-ffaa9: it needs

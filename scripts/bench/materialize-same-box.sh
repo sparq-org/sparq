@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# [FABLE-5] sq-hmd7l.7 — same-box MATERIALIZATION (deductive-closure) comparison harness:
+# sq-hmd7l.7 — same-box MATERIALIZATION (deductive-closure) comparison harness:
 # sparq `reason` (OWL-RL / RDFS) vs Apache Jena rule reasoners vs VLog vs Nemo computing the
 # SAME closure over the SAME LUBM (ABox + TBox) N-Triples, emitting one canonical-competitor-
 # results ENVELOPE per scale (the JSON shape of scripts/bench/shacl-same-box.sh, so
@@ -51,7 +51,7 @@
 #   * VLog / Nemo: python adapters run the VALIDATED bench/reason-encodings/{vlog,nemo}/
 #     program (default per profile); if the binary is absent an honest NOT-RUN-LOCALLY row
 #     (never a fabricated number). Their closure count AGREES with sparq set-for-set.
-#     [FABLE-5 sq-hmd7l.32] their timed figure is the ENGINE'S OWN loaded-graph
+#     their timed figure is the ENGINE'S OWN loaded-graph
 #     materialization report (VLog `Runtime materialization`, Nemo's `Reasoning:` breakdown)
 #     — NOT the whole-subprocess wall, which at univ>=100 would fold the multi-GB .nt load
 #     + closure export into the competitor's time (an overstatement biased for sparq). The
@@ -365,7 +365,7 @@ envelope = {
     "canonical": canonical,
     "canonical_note": note_canonical,
     "git_commit": os.environ["GIT_COMMIT"],
-    # [FABLE-5] sq-hmd7l.32 — the suite id carries the SCALE so envelopes gathered at
+    # sq-hmd7l.32 — the suite id carries the SCALE so envelopes gathered at
     # different LUBM(univ) never fold into one ingest group (the ingest's cross-gather
     # count assertion would rightly refuse two scales' differing closure counts).
     "suite": f"materialize-competitors-lubm{os.environ['UNIV']}",

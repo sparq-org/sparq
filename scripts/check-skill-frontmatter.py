@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [OPUS-4.8] HARD gate: validate the YAML frontmatter of every Agent-Skills
+# HARD gate: validate the YAML frontmatter of every Agent-Skills
 # SKILL.md (bead sq-56im).
 #
 # WHY: GitHub renders these skills/<surface>/SKILL.md files and parses their
@@ -71,7 +71,7 @@ def check_file(path: str) -> tuple[list[str], list[str]]:
     errors: list[str] = []
     warnings: list[str] = []
     try:
-        # [OPUS-4.8] Context manager (no leaked fd). A non-UTF-8 SKILL.md must be a
+        # Context manager (no leaked fd). A non-UTF-8 SKILL.md must be a
         # per-file failure, not a script-wide crash, so catch UnicodeDecodeError too.
         with open(path, encoding="utf-8") as f:
             text = f.read()

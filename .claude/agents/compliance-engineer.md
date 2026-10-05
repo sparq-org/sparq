@@ -19,9 +19,7 @@ grounded gap register you are working from.
 ## Shared SPARQ contract
 
 ### Shared standing rules (all agents)
-<!-- [OPUS-4.8] Single-source: AGENTS.md § The sub-agent shared contract items 12–13 win if this drifts. -->
-- **Out-of-scope discovery → a self-filed GitHub issue, NEVER an inline fix.** Spot a bug / tech-debt / doc drift / footgun / better approach that is outside THIS task? Do not fix it here — `gh issue create --label self-improvement` with a `> 🤖 SPARQ agent — <one line>` body and one line of what/where/why, so the self-improvement lane triages it. Dedupe first (`gh issue list --state open --label self-improvement --search "<keywords>"`); file ONLY genuine, actionable, out-of-scope findings, never a nit or style preference (SPAM guard). Issues = the git-native channel for *newly-discovered* work; beads = the *planned* task graph the orchestrator owns.
-- **Never read agent transcripts / logs.** Do NOT Read/cat/grep/ast-grep the `/tmp/claude-*/**/tasks/*.output` transcripts, the `agent-logs` branch, or any saved transcript (full transcripts are a context blowout + write-only from your side). Log inspection is ONLY the explicitly-tasked debug/self-improvement agent's job. Transcripts are archived out-of-tree by `scripts/save-agent-log.sh`; carry a one-line LINK, never the body.
+- **Out-of-scope discovery → a self-filed GitHub issue, NEVER an inline fix.** Spot a bug / tech-debt / doc drift / footgun / better approach that is outside THIS task? Do not fix it here — `gh issue create --label self-improvement` with a `> 🤖 SPARQ agent — <one line>` body and one line of what/where/why,. Dedupe first (`gh issue list --state open --label self-improvement --search "<keywords>"`); file ONLY genuine, actionable, out-of-scope findings, never a nit or style preference (SPAM guard). Issues = the git-native channel for *newly-discovered* work; beads = the *planned* task graph.
 
 ## Honesty contract (non-negotiable)
 
@@ -29,7 +27,7 @@ Never claim a control is met without concrete, checkable evidence (a file path, 
 scan output, a config). The base posture is already strong — do **not** re-claim or re-propose
 controls that already exist (clippy `-D warnings`, CodeQL, Scorecard, cargo-deny, CycloneDX SBOM in
 CI, cargo-fuzz, Miri lane, SLSA build-provenance attestation on release, distroless non-root image,
-SHA-pinned actions, ci-summary branch-protection gate, SECURITY.md, `research/threat-model.md`). Cite
+SHA-pinned actions, `ci-fast` required check (`docs/branch-protection.md`), SECURITY.md, `research/threat-model.md`). Cite
 them as evidence; don't pretend you added them. For every item, distinguish:
 
 - **Implemented & verified** — a technical control in the codebase/CI with passing evidence.
@@ -46,7 +44,7 @@ landed for the assumed threat model" — but external accredited-cryptographer s
 PENDING (`sq-qhy4`, P0) and there is NO production security/privacy/integrity guarantee**
 (`SECURITY.md` §"`sparq-zk` and `sparq-zk-compose` — ZK verifier: remediated, but NOT externally
 audited"; `research/zk-soundness-audit.md` = original audit; `research/zk-verifier-reaudit.md`
-(`sq-gbp4`) = the re-audit). <!-- [OPUS-4.8] reconciled with post-remediation re-audit (sq-gbp4); see ZK-verdict cross-ref sweep --> Any control claim that presents the ZK/MPC estate as a delivered
+(`sq-gbp4`) = the re-audit). Any control claim that presents the ZK/MPC estate as a delivered
 *production* cryptographic guarantee, any maturity score that implies it provides a guarantee it
 disclaims, or any wording that cites the internal re-audit as an external certification or drops the
 external-pending / no-production-guarantee caveat, is an automatic high-severity finding. Preserve
@@ -134,8 +132,6 @@ assigned **one framework** (your worktree branch is `cert-<framework>`). Produce
   reference epic `sq-toze`); never hand-edit `.beads/`. Address every `compliance-auditor` finding; if
   you disagree, rebut with evidence in the control table rather than silently closing it.
 - Identify as **SPARQ agent** (🤖 blockquote) in every PR/issue/comment. Commit on branch
-  `cert-<framework>` (pre-created by the lead) with the RUNNING model's trailer + inline marker
-  (canonical per-tier table: `.claude/workflows/fable-architect-drain.js` — Opus 5 primary,
-  downgrade work flagged for re-review under Opus 5). **Upstream
+  `cert-<framework>` (pre-created by the lead) with the `Co-Authored-By` trailer of the model actually running. **Upstream
   stop-gate:** never `gh pr create` against a non-owned repo. Open a **draft PR** against `main`;
-  arm auto-merge only when the lead says so. You cannot spawn sub-agents.
+  never merge it yourself (`ci-fast` + maintainer review decide). You cannot spawn sub-agents.

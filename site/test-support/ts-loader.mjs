@@ -15,15 +15,10 @@ import ts from 'typescript';
 // not exist on disk. Mapping `.js` → `.ts` (only when the `.ts` is present, so real `.js`
 // files still resolve normally) lets the unit tests import that package's source unchanged.
 // Pure test-support; it changes nothing the bundler / `tsc` see.
-// The site imports the shared client by its `@sparq/client` alias, which only tsconfig
-// `paths` and the next.config webpack alias define; the site's package.json does not list
-// it. Map the bare specifier to the same source entry so `node --test` can import modules
-// that use runtime values (not just types) from it.
-const SPARQ_CLIENT_ENTRY = new URL('../../packages/sparq-client/src/index.ts', import.meta.url).href;
-
 export async function resolve(specifier, context, next) {
+  // #5114 — the tsconfig `paths` / webpack alias for the shared client, mirrored for node --test.
   if (specifier === '@sparq/client') {
-    return next(SPARQ_CLIENT_ENTRY, context);
+    return next(new URL('../../packages/sparq-client/src/index.ts', import.meta.url).href, context);
   }
   if (specifier.endsWith('.js') && (specifier.startsWith('./') || specifier.startsWith('../'))) {
     try {

@@ -42,7 +42,7 @@ capped at the maturity of sparq's *enabling hooks*, not the (absent) governed ou
 | 1 | Governance & Accountability | 1.1 Data control compliance is established | **3** | SECURITY.md, threat model, certification estate, CODEOWNERS — strong for the *engine*; org-level data-ownership is the operator's. |
 | 1 | Governance & Accountability | 1.2 Ownership is established for migrated & cloud data | **2** | sparq has no concept of business-data owner; named-graph provenance is the only hook. Operator-owned. |
 | 1 | Governance & Accountability | 1.3 Sourcing & consumption are governed & supported | **3** | Per-graph load, VoID/Service-Description introspection, federation (`SERVICE`) with a documented outbound boundary (B4). |
-| 2 | Cataloguing & Classification | 2.1 Data catalogues are implemented, used & interoperable | **4** | VoID + SPARQL Service-Description endpoints (#219), `sparq-introspect` effective-schema mining — a genuine, tested machine-readable catalogue surface. Still **opt-in / default-OFF** (behind the `federation-descriptors` cargo feature; `GET /.well-known/void` returns `404` in a stock build), but it is now **enforced, gated and regression-covered**: the merged `feature-matrix.yml` lane (#244, bead **sq-kzfi**) **builds + tests + clippies** `federation-descriptors` on every PR/merge as a required `ci-summary`-discovered check, so a regression in the catalogue module breaks the merge. That is the level-4 condition ("enforced, gated, with regression coverage"). |
+| 2 | Cataloguing & Classification | 2.1 Data catalogues are implemented, used & interoperable | **3** | VoID + SPARQL Service-Description endpoints (#219), `sparq-introspect` effective-schema mining — a genuine, tested machine-readable catalogue surface. Still **opt-in / default-OFF** (behind the `federation-descriptors` cargo feature; `GET /.well-known/void` returns `404` in a stock build), and the `feature-matrix.yml` lane (#244, bead **sq-kzfi**) **builds + tests + clippies** `federation-descriptors` — but nightly only since the lean-CI change (no PR trigger, `ci-summary` aggregator deleted), so a regression is detected post-merge rather than breaking the merge. Re-scored 4 → 3: the level-4 "gated" condition no longer holds. |
 | 2 | Cataloguing & Classification | 2.2 Data classifications are defined & used | **3** | SHACL (100% W3C core suite) + RDFS/OWL/N3 reasoning let an operator *declare & validate* classification; sparq does not impose a sensitivity taxonomy (operator-owned). |
 | 3 | Accessibility & Usage | 3.1 Data entitlements are managed, enforced & tracked | **3** | `sparq-solid` WAC/ACP fail-closed per-session enforcement + an optional constant-time bearer-token write gate; ODRL usage-control is roadmap only. |
 | 3 | Accessibility & Usage | 3.2 Data access is tracked, with audit trails | **2** | Prometheus request metrics + WAL of mutations exist; there is no per-subject/per-query access **audit log** with identity. Operator must front-log. |
@@ -68,15 +68,15 @@ the governed outcome. **No key control is rated above its real evidence.**
 | Component | Avg maturity | Verdict |
 |---|---|---|
 | 1 — Governance & Accountability | ~2.7 | Engine governance strong; data-ownership/sourcing is operator-accountable. |
-| 2 — Cataloguing & Classification | ~3.5 | VoID/SD catalogue + SHACL classification hooks are real; the catalogue (2.1) is now **CI-gated** (`feature-matrix.yml` builds+tests+clippies `federation-descriptors`, #244 / bead `sq-kzfi`) → level 4, lifting the component to 3.5 (2.1 = 4, 2.2 = 3). |
+| 2 — Cataloguing & Classification | ~3.0 | VoID/SD catalogue + SHACL classification hooks are real; the catalogue (2.1) is regression-tested **nightly** (`feature-matrix.yml`, #244 / bead `sq-kzfi`) but no longer merge-gated → level 3 (2.1 = 3, 2.2 = 3). |
 | 3 — Accessibility & Usage | ~2.5 | Access *control* is real (WAC/ACP, token); access *audit* and ODRL usage-control are gaps. |
 | 4 — Protection & Privacy | ~2.7 | Security is **excellent (4)**; privacy/crypto-protection is **deliberately low (2)** — ZK/MPC remediated but NOT externally audited (no production guarantee), encryption is operator-deployment. |
 | 5 — Data Lifecycle | ~3.0 | Solid lifecycle *mechanism* (UPDATE/WAL/retention); lifecycle *policy* is operator-owned. |
 | 6 — Technical Architecture | ~3.0 | **Engine architecture is a strength (4)**; lineage capture is the weak axis (2). |
 
 **Overall honest posture:** sparq is **strongest where it is an engine** (technical architecture and
-security controls — 4s; the cataloguing surface (2.1) is now a CI-gated **4** since the
-`federation-descriptors` feature is built/tested/clippied on every PR — #244) and **deliberately weak where the capability is a
+security controls — 4s; the cataloguing surface (2.1) is a **3** — the
+`federation-descriptors` feature is built/tested/clippied nightly, not on every PR — #244) and **deliberately weak where the capability is a
 governance *decision* an operator must make** (ownership, classification taxonomy, retention
 policy, residency — 2s). The single most important honesty statement: **the ZK/MPC estate is
 documented as remediated but NOT externally audited — no production cryptographic guarantee**

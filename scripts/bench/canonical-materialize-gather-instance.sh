@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# [FABLE-5] sq-hmd7l.32 — INSTANCE-side canonical MATERIALIZATION (+ HDT decode) gather.
+# sq-hmd7l.32 — INSTANCE-side canonical MATERIALIZATION (+ HDT decode) gather.
 #
 # 🤖 SPARQ agent. Runs ON the dedicated quiet EC2 box (launched by
 # scripts/bench/canonical-materialize-bench.sh) from a cloned sparq checkout, as root.
@@ -35,7 +35,7 @@
 #   HDT_LUBM_UNIV=1     LUBM scale converted to HDT for the decode comparison
 set -uo pipefail   # NOT -e: one failed engine/build must never kill the gather
 
-# [FABLE-5] sq-hmd7l.32 — DEFINE HOME/USER/LOGNAME BEFORE ANYTHING ELSE. This script is
+# sq-hmd7l.32 — DEFINE HOME/USER/LOGNAME BEFORE ANYTHING ELSE. This script is
 # started by the launcher's user-data as `setsid nohup env LUBM_UNIVS=... bash <this>` —
 # cloud-init's root scripts_user context has NO HOME/USER/LOGNAME exported, and under
 # `set -u` the FIRST bare `$HOME` (the rustup PATH line) aborted the whole gather with
@@ -51,7 +51,7 @@ export HOME
 export CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
 export RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
 
-# [FABLE-5] sq-hmd7l.32 — MIRROR ALL OUTPUT TO THE SERIAL CONSOLE. On a self-terminating
+# sq-hmd7l.32 — MIRROR ALL OUTPUT TO THE SERIAL CONSOLE. On a self-terminating
 # gather box the ONLY zero-dependency telemetry channel is `aws ec2 get-console-output`
 # (SSH can break under a saturated build box; cloud-init's own console buffer stops when
 # scripts_user returns). Tee every step + child-process line to /dev/console so progress
@@ -79,7 +79,7 @@ NEMO_TAG="${NEMO_TAG:-v0.9.1}"                                           # knows
 
 step() { echo "[STEP $(date -u +%Y-%m-%dT%H:%M:%SZ)] $*" | tee -a /root/GATHER_STEP >&2; }
 
-# [OPUS-5] sq-ffaa9 — durable result egress. bench_egress_push is a successful no-op
+# sq-ffaa9 — durable result egress. bench_egress_push is a successful no-op
 # unless the launcher passed BENCH_RESULTS_S3_URI in, so this changes nothing on a run
 # without the instance profile attached.
 . "$HERE/bench-result-egress.sh"
@@ -191,7 +191,7 @@ done
 
 # ---- 5. the HDT decode gather (same box, afterwards — sq-hmd7l.33) --------------------
 if [ "$HDT" = "1" ]; then
-  # [SONNET-4.6] sq-45zbg — build a scale-representative archive with the same
+  # sq-45zbg — build a scale-representative archive with the same
   # hdt-cpp image used for decode. gen.sh is deterministic for seed 0; combining
   # ABox + TBox gives the gather a self-contained LUBM corpus.
   step "generate LUBM($HDT_LUBM_UNIV) HDT archive"

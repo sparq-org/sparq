@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""[GPT-6] Refuse a release whose tag, checkout, and package versions disagree."""
+"""Refuse a release whose tag, checkout, and package versions disagree."""
 
 from __future__ import annotations
 
@@ -81,7 +81,7 @@ def validate(repo: Path, tag: str, ref: str, commit: str, npm_manifests: list[st
         "version" not in project and "version" in project.get("dynamic", [])
     ):
         raise SourceMismatch(f"PyPI project version does not match {tag}")
-    # [GPT-6] Installer filenames alone must not disguise stale desktop metadata.
+    # Installer filenames alone must not disguise stale desktop metadata.
     desktop = tomllib.loads((repo / "gui/src-tauri/Cargo.toml").read_text(encoding="utf-8"))
     if desktop["package"].get("version") != version:
         raise SourceMismatch(f"gui/src-tauri/Cargo.toml version does not match {tag}")

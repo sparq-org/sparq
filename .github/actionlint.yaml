@@ -1,0 +1,5 @@
+# actionlint config (used by .github/workflows/actionlint.yml and local runs).
+self-hosted-runner:
+  # GitHub-hosted Intel macOS image; older actionlint releases do not know the label.
+  labels:
+    - macos-15-intel

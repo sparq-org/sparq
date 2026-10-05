@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-[OPUS-5] sq-v3nel-v3: DERIVE a feature-OFF wasm-bundle declaration instead of asserting one.
+sq-v3nel-v3: DERIVE a feature-OFF wasm-bundle declaration instead of asserting one.
 
 The `artifact-exact-equality (wasm bundle feature-OFF)` leg
 (`.github/workflows/vectorized-feature-off.yml`, leg 2) compares the feature-OFF
@@ -580,7 +580,7 @@ def declaration_json(pr: int, verdict: Verdict, date: str | None = None) -> dict
         "pr": pr,
         "date": date or datetime.date.today().isoformat(),
         "reason": (
-            f"[OPUS-5] #{pr}: DERIVED declaration (scripts/feature_off_autodeclare.py). The "
+            f"#{pr}: DERIVED declaration (scripts/feature_off_autodeclare.py). The "
             f"feature-OFF bundle moved {ev.get('differing_bytes')} of "
             f"{ev.get('head_bundle_bytes')} bytes at a size delta of "
             f"{ev.get('size_delta_bytes'):+d}, and the drift was proved to carry no compiled "

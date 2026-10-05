@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [FABLE-5] sq-7d3dj.34 — canonical same-box competitor envelope emitter (the committed,
+# sq-7d3dj.34 — canonical same-box competitor envelope emitter (the committed,
 # extended version of the 2026-07-07 ad-hoc emitter that produced
 # bench/canonical-competitor-results/2026-07-07/). Assembles ONE envelope per suite from
 # the per-engine TSVs + a meta.json the bash orchestrator wrote (engine versions/modes,

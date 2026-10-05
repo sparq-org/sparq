@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
-# [OPUS-4.8] sq-tmyw: assert every package URL in a generated CycloneDX SBOM is the
-# canonical, host-independent cargo form. Authored by Opus 4.8 (Fable unavailable;
-# flag for re-review when Fable returns).
+# sq-tmyw: assert every package URL in a generated CycloneDX SBOM is the
+# canonical, host-independent cargo form.
 #
 # WHY: cargo-cyclonedx 0.5.9 decorates workspace / path-dependency purls with the CI
 # runner's filesystem layout — `?download_url=file://<abs-path>` and, on the root
