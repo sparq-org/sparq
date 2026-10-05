@@ -5394,26 +5394,29 @@ fn eval_graph_pattern_inner(graph: &Graph, local: &mut LocalVocab, p: &GraphPatt
             Ok(b)
         }
         GraphPattern::Join { left, right } => {
-            let l = eval_graph_pattern(graph, local, left)?;
-            // Bind-join pushdown: if the RIGHT side is a SERVICE and the left has
-            // already bound its join variables, push those bindings to the remote as a
-            // VALUES block instead of materialising the whole remote relation. Join is
+            // Bind-join pushdown: if one side is a SERVICE and the other has already
+            // bound its join variables, push those bindings to the remote as a VALUES
+            // block instead of materialising the whole remote relation. Join is
             // symmetric, so try either side as the SERVICE. [OPUS-4.8] (sq-sjkj)
+            //
+            // SERVICE on the left (and not on the right): evaluate the right FIRST and
+            // the SERVICE at most once — evaluating it eagerly and again on a declined
+            // pushdown fetched the endpoint (or ran a local handler) twice (#4438).
             #[cfg(feature = "service")]
+            if matches!(left.as_ref(), GraphPattern::Service { .. })
+                && !matches!(right.as_ref(), GraphPattern::Service { .. })
             {
-                if let Some(r) = try_bound_join_service(graph, local, &l, right)? {
-                    return Ok(join_bindings(l, r));
+                let r = eval_graph_pattern(graph, local, right)?;
+                if let Some(sl) = try_bound_join_service(graph, local, &r, left)? {
+                    return Ok(join_bindings(r, sl));
                 }
-                // Symmetric: SERVICE on the left, bindings produced by the right.
-                if matches!(left.as_ref(), GraphPattern::Service { .. }) {
-                    let r = eval_graph_pattern(graph, local, right)?;
-                    if let Some(sl) = try_bound_join_service(graph, local, &r, left)? {
-                        return Ok(join_bindings(r, sl));
-                    }
-                    // Fall through with the already-evaluated right; recompute left verbatim.
-                    let l2 = eval_graph_pattern(graph, local, left)?;
-                    return Ok(join_bindings(l2, r));
-                }
+                let l = eval_graph_pattern(graph, local, left)?;
+                return Ok(join_bindings(l, r));
+            }
+            let l = eval_graph_pattern(graph, local, left)?;
+            #[cfg(feature = "service")]
+            if let Some(r) = try_bound_join_service(graph, local, &l, right)? {
+                return Ok(join_bindings(l, r));
             }
             // Sideways information passing (SIP): when the already-evaluated `l` is
             // SMALL, evaluate the big `right` child CORRELATED on it — seeding scans
