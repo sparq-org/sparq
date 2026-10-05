@@ -1794,20 +1794,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "spargebra"
-version = "0.4.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "46715eb957d1fe960cbbc0b713da8f78e2cb19df315b48fb09c9467a1c84f656"
-dependencies = [
- "oxilangtag",
- "oxiri",
- "oxrdf 0.3.3",
- "peg 0.8.6",
- "rand 0.9.4",
- "thiserror 2.0.18",
-]
-
-[[package]]
 name = "sparq-canon"
 version = "0.1.4"
 dependencies = [
@@ -1847,8 +1833,8 @@ dependencies = [
  "sha1",
  "sha2 0.11.0",
  "smallvec",
- "spargebra",
  "sparq-core",
+ "sparq-spargebra",
  "sparq-substrate",
  "uuid",
 ]
@@ -1940,9 +1926,9 @@ dependencies = [
  "oxttl 0.2.3",
  "regex",
  "rustc-hash",
- "spargebra",
  "sparq-core",
  "sparq-engine",
+ "sparq-spargebra",
 ]
 
 [[package]]
@@ -1951,10 +1937,22 @@ version = "0.1.4"
 dependencies = [
  "oxrdf 0.3.3",
  "rustc-hash",
- "spargebra",
  "sparq-core",
  "sparq-engine",
  "sparq-reason",
+ "sparq-spargebra",
+]
+
+[[package]]
+name = "sparq-spargebra"
+version = "0.4.6"
+dependencies = [
+ "oxilangtag",
+ "oxiri",
+ "oxrdf 0.3.3",
+ "peg 0.8.6",
+ "rand 0.9.4",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -1972,7 +1970,7 @@ dependencies = [
 name = "sparq-terse"
 version = "0.1.4"
 dependencies = [
- "spargebra",
+ "sparq-spargebra",
 ]
 
 [[package]]

@@ -6,7 +6,7 @@
 // WHY THESE LIVE HERE (and are framework-free). The demo's parse step runs the real wasm
 // Store (no mocks); but the *gzip ingest* path is plain Web-platform code: gzip is the one
 // codec the browser decompresses natively (zstd reaches the LAZY-loaded decoder through
-// `js/src/decompress.ts`; bzip2 is native-only — see the page's honest caveat), so
+// `@sparq/client`; bzip2 is native-only — see the page's honest caveat), so
 // the gzip round-trip demo is `gunzip(bytes)` -> `Store.load(text, fmt)`.
 // Keeping the codec round-trip + the sample catalogue here (no React, no wasm) lets them
 // unit-test directly under `node --test` (the Web Streams API is in Node ≥ 18).

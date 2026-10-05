@@ -1,19 +1,18 @@
-// [FABLE-5] sq-rvgr2.2 — zkSPARQL: Zero-Knowledge Query Proofs over SPARQL.
+// [OPUS-4.8] sq-vvu9d — zkSPARQL: Zero-Knowledge Query Proofs over SPARQL.
 //
-// Authored STRICTLY from the prose estate-recon digest (research/specs/zksparql-estate-recon.md
-// on the docs/fable-program-recon-records branch); no crate sources were read while drafting or
-// revising. Code-level details the digest does not pin are flagged inline as Editor's notes and
-// enumerated in section 2.3; transcribing them is tracked as bead sq-rvgr2.7 — the
-// implementation remains the source of truth for those details until then.
+// RESTART FROM THE CODEBASE (maintainer directive, 2026-07-04). This draft was re-authored
+// from what is ACTUALLY in the sparq repository — the `sparq-zk` / `sparq-zk-compose` crates,
+// the Noir circuits under `zk/`, the vendored security-properties ontologies under
+// crates/sparq-trust/ontologies/zkp-sparql/ and crates/sparq-policy/ontologies/, and the
+// code-synced SKILL.md / SECURITY.md surfaces. The pre-existing zksparql.org site and the
+// earlier ISWC submission texts are DEPRECATED and were NOT used as a source; where those
+// authors' PUBLISHED prior art is cited (the `sec-prop` security-properties vocabulary,
+// ISWC 2025) it is cited as external related work, not inherited.
 //
-// REVISION 2 (review round 1, PR #1333): re-scoped as an architecture overview with an
-// explicitly enumerated normative kernel (section 2); added a threat model (section 5), a
-// normative fragment semantics (section 7.2), related work + full provenance citations
-// (section 3, references), a manifest member table + worked example (section 8), an
-// unambiguous audit-gate mapping (section 10.4); dropped RFC-2119 force from the
-// reverse-engineered public-input layout (section 8.4); corrected the per-obligation
-// forge-test overclaim. Bibliographic entries were verified against public sources
-// (zksparql.org, CEUR-WS Vol-4085, Springer/ACM indexes) on 2026-07-01.
+// Every candidate-normative clause names the code that realises it (crate + item), so a
+// reviewer can check the text against the implementation. Details that exist in code but are
+// pinned to a specific proving toolchain (the bb public-input byte layout) are marked
+// descriptive / at-risk, not normative.
 //
 // REVISION 3 (sq-gum8.5, submission support): hardened the related-work section into
 // subsections (3.1-3.5) covering PoneglyphDB, ZKGraph, VeriDKG, zk-creds/Crescent and ZKLP,
@@ -26,11 +25,21 @@
 // bench/zk-compose/. New bibliographic entries carry the provenance caveat noted at the head
 // of the References section. NO number of any kind was added to this document.
 //
-// HONESTY: the entire zkSPARQL estate is research-grade and NOT externally audited (open
-// external-audit gate sq-qhy4). This draft states that plainly and repeatedly; it must never be
-// edited into claiming a settled production guarantee while that gate is open.
-// (Provenance: dispatched as Claude Fable 5; exact model marker reconciled post-hoc by the
-// orchestrator from the transcript.)
+// HONESTY: the entire zkSPARQL estate is a research scaffold and is NOT externally audited
+// (open external-audit gate sq-qhy4). An internal, single-model re-audit found the binding
+// layer "sound as landed for the threat model the prior audit assumed", but that is explicitly
+// NOT a production guarantee and does not replace external sign-off (SECURITY.md). This draft
+// states that plainly and repeatedly; it must never be edited into claiming a settled
+// production guarantee while sq-qhy4 is open. (Provenance: dispatched as Claude Opus 4.8 while
+// Fable was unavailable; flagged for ZK re-review.)
+//
+// MERGED-IN WORK: the candidate-normative section-7 fragment-extension amendment (sq-3kd2g.5,
+// PR #3571, commit ce73abbd) landed on main against the PRE-restart base. Its content — the
+// construct-disposition table, the bounded property-path semantics and its `path_reach`
+// obligations, the phase-3 expression fragment with its EBV/error lane, and the extended
+// algebra grammar/evaluation — is carried forward here on top of the code-grounded rewrite.
+// The rewrite's stratified implemented-today grammar is retained as the implemented tier; the
+// amendment's productions sit in an explicitly phase-gated extension tier.
 
 #import "_lib/spec.typ": spec-head, sotd, intro-section, references, dfn, note, cite
 
@@ -43,20 +52,18 @@
 
 #intro-section("abstract", "Abstract")[
   zkSPARQL is a proposal for proving, in zero knowledge, that the answer to a SPARQL query is
-  correct with respect to one or more committed RDF graphs, without revealing the graphs
-  themselves. This document describes the interfaces realised by the sparq reference
-  implementation — the committed data model (RDF Dataset Canonicalization with Poseidon2
-  commitments over the BN254 scalar field, and issuer attestation signatures over Baby
-  Jubjub); the supported SPARQL fragment, given a normative algebraic definition, and its
-  circuit family; the #dfn[proof manifest] interchange object; the verifier-nonce
-  challenge–response; the verifier's fail-closed obligation set; the external trust anchors a
-  relying party supplies; and the layered security-properties vocabulary with its ODRL
-  admissibility profile — against an explicit threat model (section 5). The document is
-  primarily an informative architecture overview: only the normative kernel enumerated in
-  section 2 is candidate-normative, and the security-load-bearing encodings still pinned only
-  by the implementation are named there as blocking transcription work. Parts that do not yet
-  exist — a registered media type, a JSON-LD context, and a wire protocol — are named as
-  explicit proposals. The entire scheme is research-grade: it has not been externally audited,
+  correct against one or more committed RDF graphs, without revealing them. This document
+  describes the interfaces realised by the sparq reference
+  implementation, read directly from its source: the committed data model (RDF Dataset
+  Canonicalization with a Poseidon2 sponge commitment over the BN254 scalar field, and issuer
+  attestation signatures over the Baby Jubjub curve); the supported SPARQL fragment, its
+  circuit family, and a normative algebraic definition of the fragment; the #dfn[proof
+  manifest] interchange object, whose member schema is transcribed here from the Rust type;
+  the verifier-nonce challenge–response; the verifier's fail-closed obligation set and its four
+  audit gates; the external trust anchors a relying party supplies; and the layered
+  security-properties vocabulary with its ODRL admissibility profile. Parts that do not yet
+  exist — a registered media type, a JSON-LD context, and a wire protocol — are marked as
+  proposals. The entire scheme is research-grade: it has not been externally audited,
   and no production guarantee is claimed (see the Security and Privacy Considerations,
   section 17).
 ]
@@ -65,10 +72,14 @@
 
 #intro-section("audit-status", "Implementation and audit status")[
   A reference implementation of everything marked *implemented* below exists in the sparq
-  repository #cite("SPARQ") as two opt-in, unpublished crates, with an adversarial ("forge")
-  test suite. However, the implementation has *not* been reviewed by an external
-  cryptographer: the external audit gate (tracked in-repo as *sq-qhy4*) is open. Until it
-  closes, soundness and attestation are *not production-ready*; every positive security
+  repository #cite("SPARQ") as two opt-in, unpublished crates — `sparq-zk` (commitment and
+  attestation) and `sparq-zk-compose` (circuit family, manifest, verifier) — together with an
+  adversarial ("forge") test suite. However, the implementation has *not* been reviewed by an
+  external cryptographer: the external audit gate (tracked in-repo as *sq-qhy4*, P0) is open.
+  An internal, single-model re-audit found the verifier's binding layer *sound as landed for
+  the threat model its prior audit assumed*, but that finding is #strong[not] a production
+  guarantee, was produced by an LLM agent, and does not replace external sign-off. Until
+  sq-qhy4 closes, soundness and attestation are *not production-ready*; every positive security
   property of this scheme is at most a *claim*, and a passing verification is not a guarantee
   that the proven SPARQL statement holds against an adversarial prover. This draft never
   asserts otherwise, and section 12.3 makes the corresponding over-claim rule normative for
@@ -85,7 +96,7 @@ extends that interaction from "show the data" to "prove a query over the data": 
 #dfn[issuer] has committed to and signed, and produces a #dfn[proof manifest] — a bundle of
 zero-knowledge sub-proofs plus bindings — that a #dfn[verifier] checks without seeing the
 underlying graphs. Example uses include proving that a credential attribute satisfies a
-threshold FILTER, that a value was not revoked at an authoritative snapshot, or that two
+threshold `FILTER`, that a value was not revoked at an authoritative snapshot, or that two
 hidden credentials agree on a join key.
 
 The flow is challenge–response:
@@ -96,75 +107,70 @@ The flow is challenge–response:
 + The verifier checks the manifest against its own #dfn[trust anchors] (trusted issuer keys,
   an authoritative revocation snapshot, a holder registry, and its nonce store), enforcing a
   fixed, fail-closed obligation set (section 10).
-+ Optionally, a policy engine decides whether the *method* used is admissible for the purpose
-  at hand, by reasoning over the security-properties vocabulary (sections 12 and 13).
++ Optionally, a policy engine decides whether the *method* used is admissible for the purpose,
+  by reasoning over the security-properties vocabulary (sections 12 and 13).
 
-This document describes the interfaces of that pipeline as they exist in the sparq reference
-implementation, so they can be reviewed, critiqued, and cited. Section 2 states precisely how
-much of the text is normatively fixed — and how much is not. Where the implementation leaves
-an interface unspecified (transport, media type, JSON-LD form), this document proposes one
-and labels it a proposal. It is an Unofficial Proposal Draft; see the Status of This
-Document.
+This document describes the interfaces of that pipeline as realised in the sparq reference
+implementation, so they can be reviewed, critiqued, and cited. It is an Unofficial Proposal
+Draft; see the Status of This Document.
 
 = Document scope and maturity
 
 == What this document is — and is not
 
 This document is an *architecture and interface overview* of the zkSPARQL query-proof
-pipeline, published in specification form so the design can be reviewed and cited. It is
-#strong[not] yet a specification from which an independent party could build an interoperable
-— let alone provably sound — prover or verifier: several security-load-bearing definitions  // privacy-claims-allow: explicit anti-overclaim — the draft is NOT a spec from which a provably-sound verifier could be built; negated usage, not a settled soundness claim (sq-qhy4)
-are still pinned only by the reference implementation (section 2.3). A reader who needs a
-conformance target should read section 2.2 for the exact clauses this draft does fix, and
-section 4.3 for what may — and may not — be claimed against it.
+pipeline, transcribed from the reference implementation and published in specification form so
+the design can be reviewed and cited. It is #strong[not] a specification from which an
+independent party could build a provably-sound prover or verifier — soundness rests on the  // privacy-claims-allow: explicit anti-overclaim — negated usage ("NOT a spec from which a provably-sound verifier could be built"), not a settled soundness claim (sq-qhy4)
+Noir circuits and the proving backend, neither of which is externally audited (section 17.1),
+and several security-load-bearing encodings are pinned to a specific proving toolchain
+(section 8.4). A reader needing a conformance target should read section 2.2 for the exact
+clauses this draft fixes normatively, and section 4.3 for what may — and may not — be claimed
+against it.
 
 == The normative kernel
 
 Only the following clauses of this document are candidate-normative, and the RFC-2119
 requirement keywords of section 4.1 are confined to them. Each is stable by design intent and
-implementable from this text alone:
+implementable from this text together with the cited source:
 
-+ the committed-data-model algorithm identities — RDFC-1.0 canonicalisation and the
-  per-graph Poseidon2/BN254 commitment (section 6.1) — and the cryptosuite resolution rule
-  (section 6.2);
++ the committed-data-model algorithm identities — RDFC-1.0 canonicalisation, the term/leaf
+  encoding, and the per-graph Poseidon2/BN254 sponge commitment (section 6.1) — and the
+  cryptosuite resolution rule (section 6.3);
 + the fragment boundary and its algebraic semantics (sections 7.1–7.2), including the ban on
   representing a disclosed-base entailment re-check as a zero-knowledge proof (section 7.4);
-+ the manifest type identifier (section 8.1);
++ the manifest type identifier and the trust-status of each declared member (sections 8.1–8.2);
 + the verifier-nonce discipline (section 9);
 + the verifier's fail-closed discipline: fail closed on any check that cannot be completed
-  (section 4.3), the prefilter is not verification (section 10.1), a self-declared circuit
-  identifier is never sufficient (sections 7.3 and 10.2), and first-failure rejection with no
-  partial results and no warning downgrades (section 10.5);
+  (section 4.3), the prefilter is not verification (section 10.2), a self-declared circuit
+  identifier is never sufficient (sections 7.3 and 10.3), and first-failure rejection with no
+  partial results and no warning downgrades (section 10.6);
 + the externality of every trust anchor, including the key-set subset rule (section 11);
 + the vocabulary scope and over-claim rules (sections 12.2–12.3), the provenance-only reading
-  of `zk:sourceCryptosuite` (section 15), the relying-party audit-status obligations
-  (section 17.1), and the deployment advice of sections 17.2 and 17.5;
+  of `zk:sourceCryptosuite` (section 15), and the relying-party audit-status obligations and
+  deployment cautions (sections 17.1–17.2 and 17.5–17.6);
 + the ODRL admissibility profile rules (section 13).
 
-Everything else in this document — in particular the whole of sections 8.3–8.5 and the
-obligation glosses of section 10 — is *descriptive* of the reference implementation and
-carries no conformance force.
+Everything else — in particular the public-input byte layout of section 8.4 and the
+one-line obligation glosses of section 10 — is *descriptive* of the reference implementation
+and carries no conformance force. The implementation remains the source of truth for the
+exact clause of each obligation.
 
-== Deferred normative cores
+== Toolchain-pinned and unaudited cores
 
-The following definitions are security-load-bearing but are #strong[not] defined in this
-document; the reference implementation remains their only source of truth. Until a subsequent
-draft transcribes them, interoperable or independently verifiable implementation of the
-manifest format and verifier is *not possible from this text*:
+The following are security-load-bearing but rest on artefacts this text does not, and cannot,
+fix normatively:
 
-+ the exact leaf encoding of canonical triples into field elements and the hashing
-  arrangement above the leaves (section 6.1);
-+ the complete `ProofManifest` member schema and the manifest canonicalisation algorithm
-  (sections 8.1–8.2);
-+ the exact condition of the Q6 blank-node guard (section 10.2) — its semantic minimum is
-  given in section 7.2;
-+ the precise clause of each of the twelve `bind_*` obligations, including the superset
-  direction enforced by `bind_attributions` (section 10.3);
-+ a public-input byte layout specified independently of the pinned proving toolchain
-  (section 8.4).
++ the exact in-circuit constraint relation of each circuit of section 7.3 — realised in the
+  Noir sources under `zk/` and proved with an external backend, neither externally audited;
++ the public-input byte layout of section 8.4, which is *empirically pinned* to one
+  Barretenberg release and is therefore descriptive, not normative;
++ the manifest hash, because the canonicalisation the reference implementation applies before
+  hashing (`ProofManifest::canonicalize`) is an implementation detail this draft records but
+  does not standardise (section 8.1).
 
-Transcribing these five cores is tracked in-repo as bead *sq-rvgr2.7* and blocks any
-candidate-normative successor to this draft.
+Until these are respecified toolchain-independently and audited, a second implementation cannot
+be guaranteed byte-interoperable, and no production soundness may be claimed.
 
 = Related work
 
@@ -305,49 +311,45 @@ descriptive.
 - A #dfn[trust anchor] is an input the verifier obtains out of band from the relying party —
   never from the manifest (section 11).
 - A #dfn[holder] is the party that controls the credentials a proof draws on; a holder may
-  be disclosed ("clear") or hidden behind a proof-of-knowledge tier (section 10.3).
+  be disclosed ("clear") or hidden behind a proof-of-knowledge tier (section 10.4).
 
-== Conformance classes
+== Conformance and the fail-closed rule
 
-This document names three conformance classes, of which only one is fully definable today:
-
-+ an #dfn[admissibility policy engine], which evaluates whether an annotated proof method
-  satisfies an ODRL policy (sections 12–13). This class is fully definable from this
-  document, and conformance to it may be claimed.
-+ a #dfn[zkSPARQL verifier] (*provisional*), which checks proof manifests (sections 9–11).
-  The kernel clauses of section 2.2 are *necessary* conditions on a verifier, and a verifier
-  #strong[MUST] fail closed on any check it cannot complete — but they are #strong[not]
-  sufficient: the exact clauses of the section-10 obligations are not transcribed in this
-  draft (section 2.3), so *full verifier conformance is not yet definable, and no
-  implementation may claim it against this document*.
-+ a #dfn[zkSPARQL prover] (*provisional*), which produces proof manifests (sections 6–9);
-  the same caveat applies via the untranscribed manifest schema (section 2.3).
+A #dfn[zkSPARQL verifier] checks proof manifests (sections 9–11); a #dfn[zkSPARQL prover]
+produces them (sections 6–9); an #dfn[admissibility policy engine] evaluates whether an
+annotated method satisfies an ODRL policy (sections 12–13). Over-arching every verifier
+clause: a verifier #strong[MUST] fail closed — it #strong[MUST] reject the whole manifest on
+any check it cannot complete, and #strong[MUST NOT] return a partial or best-effort result.
+Because the exact clause of each obligation (section 10) lives in the implementation, this
+draft states verifier obligations as *necessary* conditions; full verifier conformance is
+defined against the reference implementation until a successor draft transcribes every clause.
 
 #note[
-  Until the deferred cores of section 2.3 are transcribed, the only claimable conformance is
-  (a) kernel-clause conformance and (b) policy-engine conformance. This is a deliberate
-  re-scoping: an earlier revision of this draft implied a full verifier class whose
-  obligations were only informatively glossed, which was circular.
+  This document couples its normative force to the code deliberately. Every candidate-normative
+  clause names the crate item that realises it, so "conformance to this draft" means "agrees
+  with the cited reference behaviour". A future revision may lift individual clauses to
+  implementation-independent normativity once they are audited.
 ]
 
 = Threat model and security goals
 
 This section defines the adversary model against which the mechanisms of sections 6–11 are
-the mitigation, and what each claimed security property *means* for this scheme. It is
-placed before the mechanisms deliberately: every obligation in section 10 exists to counter a
-capability listed here. The properties themselves are *claims* — none is audited
+the mitigation, and what each claimed security property *means* for this scheme. It is placed
+before the mechanisms deliberately: every obligation in section 10 exists to counter a
+capability listed here. The properties themselves are *claims* — none is externally audited
 (section 17.1).
 
 == Parties and trust relationships
 
-- The #dfn[issuer] holds a signing key and attests committed graphs (section 6.2). The
+- The #dfn[issuer] holds a signing key and attests committed graphs (section 6.3). The
   verifier trusts an issuer's *key* exactly insofar as the relying party placed it in the
   external key set K (section 11). Whether the issuer's attested *content* is true in the
   world is out of cryptographic scope: attestation transfers trust, it does not create it.
 - The #dfn[holder] / #dfn[prover] controls the credentials and produces manifests. The
   verifier extends it *no* integrity trust: everything the prover sends is adversarial input
-  until checked. Conversely the prover extends the verifier no privacy trust: the scheme's
-  hiding goals exist precisely because the verifier is assumed curious.
+  until checked — including the manifest's own declared `key_set`, `query`, and
+  `status_snapshots` (section 8.2). Conversely the prover extends the verifier no privacy
+  trust: the scheme's hiding goals exist because the verifier is assumed curious.
 - The #dfn[verifier] acts for a #dfn[relying party], which supplies every trust anchor
   (section 11). The verifier is trusted by the relying party to enforce the full obligation
   set; a verifier that skips checks voids all guarantees silently, which is why the
@@ -368,7 +370,7 @@ capability listed here. The properties themselves are *claims* — none is audit
   the public inputs (hiding break), or to link two presentations by the same holder
   (unlinkability break — tracked as a vocabulary dimension, section 12.1, not a settled
   property).
-+ *Colluding holder and issuer.* Can mint attestations for any content they like. The scheme
++ *Colluding holder and issuer.* Can mint attestations for arbitrary content. The scheme
   does not defend the relying party against attested-but-false real-world content
   (garbage-in); it defends only the binding between what was attested and what is proven.
   Collusion confers no capability against *other* holders' privacy or other issuers' keys.
@@ -394,20 +396,19 @@ but not externally audited (gate sq-qhy4, section 17.1).
   [Soundness], [If the verifier accepts a manifest under trust anchors (K, snapshot,
     registry, nonce), then the claimed statement holds — in the sense of section 7.2 — over
     graphs whose commitments are attested by keys in K.], [The full obligation set and audit
-    gates (section 10).], [Claim (unaudited); the hidden-holder tiers are explicitly *not*
+    gates (section 10).], [Claim (unaudited); the hidden-holder tiers are explicitly *not yet*
     sound (section 17.2).],
   [Binding], [A commitment identifies at most one canonical graph; the prover cannot open it
     to different data — the standard binding notion for commitment schemes
-    #cite("PEDERSEN91").], [Poseidon2/BN254 commitment over the RDFC-1.0 canonical form
-    (section 6.1).], [Claim (unaudited); fails against a quantum adversary
-    (section 17.3).],
+    #cite("PEDERSEN91").], [Poseidon2/BN254 sponge commitment over the RDFC-1.0 canonical form
+    (section 6.1).], [Claim (unaudited); fails against a quantum adversary (section 17.3).],
   [Hiding / zero-knowledge], [The manifest reveals nothing about the committed graphs beyond
     the proven statement, the public inputs, and the leakage dimensions declared in
-    section 12.], [ZK proof system (Noir/Barretenberg, section 7.3); commitment hiding.],
-    [Claim (unaudited); leakage dimensions are tracked, not bounded (section 17.4).],
+    section 12.], [ZK proof system (Noir circuits, backend proving; section 7.3); commitment
+    hiding.], [Claim (unaudited); leakage dimensions are tracked, not bounded (section 17.4).],
   [Replay resistance], [An accepting manifest is bound to a single-use verifier nonce and
     cannot be accepted twice, nor transplanted to another request.], [Nonce discipline
-    (section 9); audit gate 4 (section 10.4).], [Claim (unaudited); degraded by a
+    (section 9); audit gate 4 (section 10.5).], [Claim (unaudited); degraded by a
     non-durable nonce store (section 17.5).],
 )
 
@@ -416,51 +417,101 @@ but not externally audited (gate sq-qhy4, section 17.1).
 Issuer content veracity (see above); side channels beyond the declared leakage dimensions
 (timing is not modelled); denial of service; transport security (until section 14 is
 realised); the quantum adversary (settled negative); and availability. The known deviations —
-hidden-holder tiers, the dual-leaf lane — are catalogued in section 17.2 rather than silently
-excluded here.
+the hidden-holder tiers, the optional dual-leaf value lane — are catalogued in section 17.2
+rather than silently excluded here.
 
 = Committed data model
 
-== Graph canonicalisation and commitment
+== Canonicalisation, term encoding, and the graph commitment
 
-Each source RDF graph is canonicalised and then committed:
+Each source RDF graph is canonicalised and then committed. Read from `sparq-zk` (`encode` and
+`commit` modules):
 
 + The graph #strong[MUST] be canonicalised with RDF Dataset Canonicalization (RDFC-1.0)
   #cite("RDF-CANON"), so that commitment values are independent of blank-node labelling and
-  triple order.
-+ The commitment #strong[MUST] be computed with the Poseidon2 permutation #cite("POSEIDON2")
-  over the scalar field of the BN254 pairing-friendly curve (also known as alt-bn128)
-  #cite("BN06"), per graph — one commitment per source graph.
+  triple order. Leaf order is the canonical N-Quads (code-point-sorted) order.
++ Each canonical term #strong[MUST] be encoded to one field element as
+  $"Enc"_t("term") = h_2("type_code", h_s("value"))$. Here $h_n$ denotes the Poseidon2 sponge
+  hash of an $n$-element input over the BN254 scalar field #cite("POSEIDON2") #cite("BN06") —
+  a fixed-width $t = 4$ permutation used at rate 3, with the capacity initialised to
+  $n dot 2^64$ (the noir-lang/poseidon `Poseidon2::hash`) — so $h_2$ and $h_3$ are
+  length-domain-separated by construction; $h_s$ is a Blake3 hash folded into a field element,
+  and `type_code` is `1` for an IRI, `2`
+  for a literal, and `3` for a blank node. For an IRI, $h_s$ ranges over the IRI string; for a
+  literal, over its canonical N-Triples token (lexical form, language tag, and datatype); for a
+  blank node, the encoding is $h_2("blank_code", h_2("salt"_G, "blake3"("canonical_label")))$,
+  so blank-node identity is salted per graph (closing the cross-graph blank-node correlation
+  channel of section 7.2).
++ Each canonical *triple* #strong[MUST] be encoded to one *leaf*
+  $"leaf" = h_3("Enc"_t(s), "Enc"_t(p), "Enc"_t(o))$ — a single Poseidon2 sponge hash of the
+  three term encodings.
++ The graph commitment `C(G)` #strong[MUST] be a single Poseidon2 sponge over the
+  leaf sequence in canonical order — the same $h_n$ construction defined above, with $n$ the
+  leaf count, so its length-bearing capacity gives domain
+  separation per leaf count — one commitment per source graph. This is a sequential sponge, not
+  a Merkle tree (a Merkle arrangement for very large graphs is a deferred deliverable).
 
 #note[
-  Editor's note — the exact leaf encoding of canonical triples into field elements, and the
-  hashing arrangement above the leaves, are pinned by the implementation and are not
-  respecified here; they are deferred core 1 of section 2.3 (transcription tracked as
-  sq-rvgr2.7). The implementation also carries an optional "dual-leaf" value lane whose
-  invariants are an accepted, documented downgrade; it is opt-in and unaudited (see
-  section 17.2).
+  Editor's note — the encoding above is the default `string-canonical` method
+  (`zk:poseidon2-rdfc10-v1`, section 6.2). The exact field-folding of a Blake3 digest and the
+  Poseidon2 round parameters are pinned by the `sparq-zk` `poseidon2` and `encode` modules;
+  this section fixes the structure (type-code layering, per-graph salt for blank nodes, the
+  three-term leaf, the sponge over canonical-order leaves), which is what a reviewer needs to
+  check the commitment is order- and label-independent.
 ]
+
+== Commitment methods (configuration axis)
+
+The committed-graph *method* — which leaf shape a graph was committed under, and therefore
+which circuit family may verify it — is a closed, fail-closed configuration enum
+(`sparq-zk` `commit::CommitmentMethod`). The methods are `string-canonical`
+(`zk:poseidon2-rdfc10-v1`, the default and back-compatibility anchor), `dual-leaf`
+(`zk:poseidon2-dualleaf-v1`, opt-in), and `value-only` (`zk:poseidon2-valuehook-v1`, an
+off-by-default research/benchmark dial that is #strong[never] a production default).
+`from_scheme_iri` returns nothing for an unknown IRI (no default). The `dual-leaf` and
+`value-only` leaf encodings are only partly built and carry a documented value↔lexical
+downgrade (INV-VL / gap CR-G8, section 17.2); they are opt-in and unaudited.
 
 == Issuer attestation signatures
 
-An issuer attests a committed graph by signing its commitment:
+An issuer attests a committed graph by signing its commitment (`sparq-zk` `sig` module):
 
 + The attestation signature scheme is a Schnorr signature #cite("SCHNORR91") over the Baby
   Jubjub curve #cite("EIP2494") with a Poseidon2-derived challenge, identified by the
-  cryptosuite IRI `https://sparq.dev/ns/zk#poseidon2-schnorr-v1`.
+  cryptosuite IRI `https://sparq.dev/ns/zk#poseidon2-schnorr-v1`
+  (`SignatureScheme::POSEIDON2_SCHNORR_V1_IRI`). The signed message binds the commitment and,
+  as progressively bound variants, the per-graph salt, the status reference, and a holder
+  binding.
 + A verifier #strong[MUST] reject an attestation whose cryptosuite identifier it cannot
-  resolve. There is #strong[no] default cryptosuite: an unresolved suite is a hard failure,
-  not a fallback (fail-closed).
+  resolve. There is #strong[no] default cryptosuite: `from_cryptosuite_iri` returns nothing
+  for an unknown IRI, so an unresolved suite is a hard failure, not a fallback (fail-closed).
 
 = Query fragment and circuit family
 
 == The supported SPARQL fragment
 
 This subsection is candidate-normative (section 2.2). The fragment is the monotone,
-federation-free subset below. "IN (today)" means implemented by the reference verifier;
-"IN (phase N)" means designed but #strong[not yet implemented]; `DEFERRED` is admissible
-only after its stated re-entry condition; and `OUT` is excluded. These labels are part of
-the fragment boundary, not an implementation roadmap that a manifest may anticipate.
+federation-free subset tabulated below. "IN (today)" means implemented by the reference
+verifier; "IN (phase N)" means designed but #strong[not yet implemented]; `DEFERRED` is
+admissible only after its stated re-entry condition; and `OUT` is excluded. These labels are
+part of the fragment boundary, not an implementation roadmap that a manifest may anticipate.
+
+What "IN (today)" denotes concretely — the fragment realised by the `sparq-zk-compose`
+`build` module — is deliberately small and bucketed:
+
+- basic graph pattern (BGP) scans over committed graphs, with per-graph commitment recompute,
+  row soundness, and scan completeness proved in-circuit;
+- value `FILTER` constraints, bucketed by datatype lane: non-negative integer (`filter_int`),
+  the integer-valued `xsd:double` fragment (`filter_f64`), signed integer
+  (`filter_signed_int`), fixed-point `xsd:decimal` (`filter_decimal`), and, behind the
+  off-by-default `dual-leaf` feature, the value-dictionary lanes (`filter_value_dl*`); the
+  general fractional/scientific `xsd:double` filter is deferred. Only the non-negative
+  integer lane is wired into full query verification today: the verifier's filter-edge
+  check accepts `FilterInt` sub-proofs only, so a manifest using any other lane fails
+  verification (`UnboundFilter`, or `EdgeKindMismatch` for value-dictionary edges). The
+  other lanes have circuits and builders but #strong[await query-binding integration];
+- a single-prover equality `JOIN` across hidden credentials (`join_eq`), where the join term
+  stays private.
 
 #table(
   columns: (1.2fr, 1fr, 3.8fr),
@@ -472,7 +523,7 @@ the fragment boundary, not an implementation roadmap that a manifest may anticip
   [`DESCRIBE`], [OUT], [Its result is implementation-defined.],
   [BGP], [IN (today)], [Scan circuits check row membership and per-scan completeness.],
   [`Join`], [IN (today)], [Hidden equality join, retaining the cross-graph blank-node exclusion below.],
-  [`FILTER`], [IN (today: four numeric lanes); IN (phases 2–3: section 7.2 expression fragment)], [Monotone under SPARQL error-as-unsatisfied semantics.],
+  [`FILTER`], [IN (today: four numeric lanes, plus the opt-in `dual-leaf` value-dictionary lanes); IN (phases 2–3: section 7.2 expression fragment)], [Monotone under SPARQL error-as-unsatisfied semantics.],
   [`UNION`], [IN (phase 2)], [Set union is monotone. Each disclosed solution identifies its branch; the verifier re-derives that branch from the query.],
   [`OPTIONAL` / `LeftJoin`], [OUT], [An unbound optional side asserts that no compatible extension exists, a non-monotone closed-world claim.],
   [`MINUS`], [OUT], [Closed-world set difference is non-monotone.],
@@ -505,7 +556,7 @@ This subsection is candidate-normative (section 2.2): it defines the fragment by
 onto the SPARQL algebra of Pérez, Arenas and Gutiérrez #cite("PAG09"), as adopted by the
 SPARQL 1.1 recommendation #cite("SPARQL11-QUERY"), over the RDF 1.1 graph model
 #cite("RDF11-CONCEPTS") under simple entailment #cite("RDF11-MT"). It is the semantic anchor
-for the correctness obligation `bind_query_correctness` (section 10.3).
+for the correctness obligation `bind_query_correctness` (section 10.4).
 
 *Property-path extension (candidate-normative; phases 1–2).* The following dispositions
 are designed extensions and remain unavailable until their named phase is implemented:
@@ -611,33 +662,44 @@ graph, fixed by its RDFC-1.0 canonical form.
 domain dom(μ). Two mappings μ1 and μ2 are *compatible* when μ1(v) = μ2(v) for every variable
 v in dom(μ1) ∩ dom(μ2); their union μ1 ∪ μ2 is then itself a mapping.
 
-*Grammar.* A fragment pattern P over the committed graphs G1, …, Gn is generated by:
+*Grammar.* A fragment pattern P over the committed graphs G1, …, Gn is generated by the
+stratified grammar:
 
 ```
-P ::= BGP | Filter(C, P) | Join(P1, P2) | Project(W, P)
-    | Union(P1, P2) | Values(R) | Extend(v, E, P)
-    | Path(s, path, o)
+# implemented today (stratified, matching the realised circuit family)
+S ::= BGP | Filter(C, S)
+P ::= S | Join(S1, S2) | Project(W, P)
+
+# candidate-normative extension, admitted per phase (section 7.1)
+P ::= … | Union(P1, P2) | Values(R) | Extend(v, E, P) | Path(s, path, o)
 ```
 
-subject to: the first line is the currently implemented grammar; the second line is the
+subject to: the first block is the currently implemented grammar; the second block is the
 candidate-normative extension and is admitted only as its corresponding phase becomes
 implemented. A `BGP` (a finite set of triple patterns over terms and variables) is evaluated
 against *exactly one* committed graph; `C` is a value constraint drawn from the
 datatype-bucketed comparison forms of section 7.1; and `Join` is the equality join of
-section 7.1, whose two sub-patterns are evaluated over *distinct* committed graphs and share
-at least one variable. `R` is a public `VALUES` row set, `E` is an expression from the table
-above, `W` is a projection list, and `path` is an admitted path form with public bound k
-where required.
+section 7.1, whose two sub-patterns S1 and S2 are evaluated over *distinct* committed graphs
+and share at least one variable. The stratification of the implemented block is deliberate and
+matches the realised circuit family: join nesting (`Join` over a `Join` result) and filters
+over join results are *outside* the fragment — every `FILTER` binds to a single scan's slot via
+a binding edge, and each equality join spans exactly two scans. A manifest #strong[MAY] carry
+several `Join(Si, Sj)` obligations over pairwise-distinct scan pairs (the `join_edges` vector).
+`Project` is membership-indifferent (section 7.1) and imposes no circuit obligation. In the
+extension block, `R` is a public `VALUES` row set, `E` is an expression from the table above,
+`W` is a projection list, and `path` is an admitted path form with public bound k where
+required; the extension productions relax the stratification only for the phases that
+implement them.
 
 *Evaluation.* The evaluation eval(P) is a set of solution mappings:
 
 - eval(BGP over G) = the set of mappings μ with dom(μ) = vars(BGP) such that replacing each
   variable v in BGP by μ(v) yields a subgraph of G;
-- eval(Filter(C, P)) = the set of μ in eval(P) such that μ satisfies C under the SPARQL 1.1
+- eval(Filter(C, S)) = the set of μ in eval(S) such that μ satisfies C under the SPARQL 1.1
   operator semantics (section 17 of #cite("SPARQL11-QUERY")), with expression errors treated
   as *not satisfied*;
-- eval(Join(P1, P2)) = the set of unions μ1 ∪ μ2 where μ1 is in eval(P1), μ2 is in eval(P2),
-  and μ1 and μ2 are compatible.
+- eval(Join(S1, S2)) = the set of unions μ1 ∪ μ2 where μ1 is in eval(S1), μ2 is in eval(S2),
+  and μ1 and μ2 are compatible;
 - eval(Union(P1, P2)) = eval(P1) ∪ eval(P2), with the witnessed branch disclosed;
 - eval(Values(R)) is the public set of mappings encoded by R, where `UNDEF` omits that
   variable from the row mapping;
@@ -650,12 +712,13 @@ where required.
 *Blank nodes across graphs.* Blank-node identity is scoped to a single graph
 #cite("RDF11-CONCEPTS"), and per-graph canonicalisation (section 6.1) does not — and cannot —
 align blank-node labels *across* committed graphs. Cross-graph equality of blank nodes is
-therefore semantically meaningless in this fragment: a `Join` solution in which a shared
-variable is bound to a blank node in more than one committed graph is *excluded from
-eval(Join(P1, P2))*. This exclusion is the semantic minimum that the implementation's Q6
-guard enforces (section 10.2).
+therefore semantically meaningless in this fragment: a union μ1 ∪ μ2 in which some variable
+v ∈ dom(μ1) ∩ dom(μ2) is bound to a blank node is *excluded from eval(Join(S1, S2))* — since
+S1 and S2 range over distinct committed graphs, such a binding would assert a cross-graph
+blank-node identity. This exclusion is the semantic minimum that the implementation's "Q6"
+guard (`verify::recheck`, section 10.3) enforces.
 
-*The correctness property.* The target property of `bind_query_correctness` (section 10.3)
+*The correctness property.* The target property of `bind_query_correctness` (section 10.4)
 is *result membership*: a manifest that discloses a solution mapping μ (or claims that a
 solution exists) for a fragment pattern P over committed graphs G1, …, Gn is correct if and
 only if μ is a member of eval(P) — respectively eval(P) is non-empty — as defined above.
@@ -663,286 +726,338 @@ only if μ is a member of eval(P) — respectively eval(P) is non-empty — as d
 #note[
   Editor's note — three boundaries of this definition are deliberate. (1) It is a *set*
   semantics; whether the implementation preserves duplicate-solution multiplicities (the bag
-  semantics of #cite("PAG09")) is not pinned by this draft's grounding material;
-  transcription is tracked as bead sq-rvgr2.7. (2) Projection (`SELECT` variable lists) is
-  transcribed above as restriction of each solution mapping to the selected variables; this
-  does not claim bag semantics or result completeness. (3) Result *completeness* — that no
-  solutions were omitted — is #strong[not] claimed by `bind_query_correctness` as glossed here;
-  whether any obligation claims it is not pinned, and is likewise tracked as bead sq-rvgr2.7.
-  None of these boundaries weakens the membership property, but all three
-  must be settled before a candidate-normative successor.
+  semantics of #cite("PAG09")) is scoped out here. (2) Projection (`SELECT` variable lists) is
+  transcribed above as restriction of each solution mapping to the selected variables, which is
+  membership-indifferent: it claims neither bag semantics nor result completeness. (3) Result
+  *completeness* — that no solutions were omitted — is proved for the in-circuit BGP scan but
+  #strong[not] for the whole pattern, and is #strong[not] claimed by `bind_query_correctness`
+  as glossed here. None of these boundaries weakens the membership property, but all three must
+  be settled before an implementation-independent, candidate-normative successor; the remaining
+  transcription work is tracked as bead sq-rvgr2.7.
 ]
 
 == The circuit family
 
-Each sub-proof is generated against exactly one circuit of a fixed, named family, each
-realising one operator instance of the fragment of section 7.2 (or one auxiliary statement:
-revocation, issuer-set membership, holder binding). Circuits are authored in Noir
-#cite("NOIR") and proved with the Barretenberg backend (see section 16 on toolchain pinning).
-The family is:
+Each sub-proof is generated against exactly one circuit of a fixed, named family
+(`sparq-zk-compose` `manifest::CircuitId`), each realising one operator instance of the
+fragment (or one auxiliary statement: revocation, issuer-set membership, holder binding). The
+circuits are authored in Noir #cite("NOIR") across three source estates under `zk/` — an
+in-tree IEEE-754 library (`zk/ieee754`; canonical here, with a published face maintained at
+`sparq-org/noir_IEEE754`), an XPath 2.0 function library (`zk/xpath`), and the
+compiled per-property family workspace (`zk/compose`, one compiled binary per shape bucket) —
+and proved with the Barretenberg backend (see section 16 on toolchain pinning). The family
+(with the fixed shape parameters each variant carries) is:
 
 #table(
   columns: 2,
   align: (left, left),
   table.header[Circuit identifier][Statement proved (descriptive gloss)],
-  [`Scan`], [A BGP scan matches against a committed graph.],
-  [`FilterInt`], [An integer-lane FILTER constraint holds.],
-  [`FilterF64`], [An `xsd:double`-lane FILTER constraint holds.],
-  [`FilterSignedInt`], [A signed-integer-lane FILTER constraint holds.],
-  [`FilterDecimal`], [An `xsd:decimal`-lane FILTER constraint holds.],
-  [`FilterValueDl`], [A value-dictionary-lane FILTER constraint holds.],
-  [`RevokeUnset`], [A revocation bit is unset in a committed status snapshot.],
-  [`HiddenIssuer`], [The issuer of a hidden credential lies in an attested set.],
+  [`Scan { k, n, r }`], [A BGP scan over `k` committed graph(s) matches; `n`, `r` are the
+    compiled slot/row capacity buckets (in-circuit commitment recompute + scan completeness).],
+  [`FilterInt { d }`], [A non-negative integer-lane `FILTER` holds; `d` is the digit bucket.],
+  [`FilterF64 { d }`], [An integer-valued `xsd:double`-lane `FILTER` holds.],
+  [`FilterSignedInt { md }`], [A signed-integer-lane `FILTER` holds.],
+  [`FilterDecimal { id, fd }`], [A fixed-point `xsd:decimal`-lane `FILTER` holds.],
+  [`FilterValueDl` / `FilterValueDlF64` / `FilterValueDlDecimal`], [Value-dictionary-lane
+    `FILTER` for integer / `xsd:double` / `xsd:decimal` (opt-in `dual-leaf`; section 17.2).],
+  [`RevokeUnset { depth }`], [The revocation bit at a hidden index is unset in a committed
+    status snapshot of the given Merkle depth.],
+  [`HiddenIssuer { depth }`], [A committed graph was signed by *some* key in an attested key
+    set, without disclosing which issuer.],
   [`HolderPok`], [Holder proof-of-knowledge (hidden-holder tier; see section 17.2).],
-  [`HolderSet`], [Holder set membership (hidden-holder tier; see section 17.2).],
-  [`JoinEq`], [Two hidden credentials agree on an equality join key.],
+  [`HolderSet { depth }`], [Holder set membership (hidden-holder tier; see section 17.2).],
+  [`JoinEq { n_a, n_b }`], [Two hidden credentials agree on an equality join key without
+    disclosing it.],
 )
 
-The circuit identifier bound into a manifest is re-derived by the verifier (section 10.2); a
-manifest #strong[MUST NOT] be accepted on the strength of its self-declared identifier alone.
-
-#note[
-  Editor's note — the exact in-circuit statement of each circuit (its public-input schedule
-  beyond field 0 and its constraint relation) is pinned by the implementation; the glosses
-  above are descriptive; per-circuit statements are transcribed under bead sq-rvgr2.7.
-]
+The prover derives the compiled shape bucket from the data; the verifier *re-derives* the
+circuit identifier from the statement each sub-proof is bound to (section 10.3), and a manifest
+#strong[MUST NOT] be accepted on its self-declared identifier alone. An
+out-of-bucket shape is a clean rejection, never a silently unprovable member.
 
 == Entailment regimes
 
-Only *simple entailment* is proved in zero knowledge. A manifest #strong[MAY] declare RDFS/OWL
-derivation steps, but these are re-checked by the verifier against *disclosed* bases
-(obligation `bind_entailment`, section 10.3) — they are not proven in-circuit, and the
-derivation bases are revealed to the verifier. An in-circuit closure proof is explicitly
-deferred. A prover #strong[MUST NOT] represent a disclosed-base re-check as a zero-knowledge
-entailment proof.
+Only *simple entailment* is proved in zero knowledge (`manifest::EntailmentRegime::Simple`;
+`Rdfs`/`Owl` are placeholders). A manifest #strong[MAY] declare `Rdfs`/`Owl` derivation steps
+(`derivation_steps`), but these are re-checked by the verifier against *disclosed* bases
+(`bind_entailment`, section 10.4): every step must be a well-formed, regime-admitted rule
+instance whose antecedents are grounded in an earlier step or a disclosed scan row. A
+non-`Simple` regime with no grounded steps is rejected (fail-closed). The derivation bases are
+revealed to the verifier; the in-circuit closure proof is deferred. A prover #strong[MUST NOT]
+represent a disclosed-base re-check as a zero-knowledge entailment proof.
 
 = The proof manifest
 
 == Typing and canonical serialisation
 
-A proof manifest is a JSON object. Its type member #strong[MUST] be the value
-`urn:sparq:zk:ProofManifest`.
+A proof manifest is a JSON object (`sparq-zk-compose` `manifest::ProofManifest`,
+`to_json`/`from_json` via serde). Its `type` member #strong[MUST] be the value
+`urn:sparq:zk:ProofManifest` (the field defaults to this constant when absent).
 
 Every hash of a manifest — for nonce binding, deduplication, or audit — is defined over the
-manifest's *canonical serialised form*, and the reference implementation canonicalises before
-hashing. This draft, however, does #strong[not] define the canonicalisation algorithm: it is
-deferred core 2 of section 2.3. Consequently two independent implementations cannot yet be
-expected to agree on a manifest hash, no RFC-2119 requirement is attached to canonicalisation
-here, and manifest-hash interoperability is expressly *not* offered by this draft. Defining
-the canonical form is blocking transcription work (sq-rvgr2.7).
+manifest's *canonical serialised form* (`ProofManifest::canonicalize`, which sorts the
+self-contained `binding_edges` and `join_edges` into their derived total order before
+serialising). This draft records that the reference implementation canonicalises before hashing,
+but does #strong[not] standardise the
+canonicalisation algorithm; two independent implementations cannot yet be expected to agree on
+a manifest hash, and manifest-hash interoperability is expressly *not* offered by this draft
+(section 2.3).
 
 == Member schema
 
-The member schema below records what this draft pins, and — explicitly — what it does not.
-Rows marked "not transcribed" name member *groups* known to exist in the implementation whose
-names and shapes are deferred (section 2.3); an implementer cannot round-trip a real manifest
-from this table alone.
+The following members are transcribed from the `ProofManifest` Rust struct. The *trust status*
+column is candidate-normative: it records whether each member is a trust anchor, a mere
+narrowing claim, or informational — the load-bearing distinction the codex #1 soundness fix
+codified (section 11).
 
 #table(
   columns: 3,
   align: (left, left, left),
-  table.header[Member][Content][Status in this draft],
-  [`type`], [The string `urn:sparq:zk:ProofManifest`.], [Pinned (normative kernel,
-    section 8.1).],
-  [`key_set`], [The prover's list of issuer verification keys. Accepted only as a *subset*
-    of the external trust anchor K (section 11).], [Semantics pinned; the exact key encoding
-    is not transcribed.],
-  [`sub_proofs`], [Array of sub-proof objects.], [Presence pinned.],
-  [sub-proof `circuit`], [One identifier from the family of section 7.3.], [Identifier set
-    pinned; re-derived by the verifier, never trusted (section 10.2).],
-  [sub-proof `proof_hex`], [Hex-encoded blob; layout in section 8.3.], [Partially pinned
-    (descriptive).],
-  [binding members; attribution set; entailment declarations; revocation references;
-    holder-binding material], [The inputs consumed by the obligations of section 10.3.],
-    [*Not transcribed* — deferred core 2 (section 2.3, sq-rvgr2.7).],
+  table.header[Member][Content][Trust status],
+  [`type`], [The string `urn:sparq:zk:ProofManifest`.], [Schema marker.],
+  [`query`], [The SPARQL query text the proof attests a result for.], [*Re-parsed, never
+    trusted*: the verifier re-parses it (`verify::recheck`).],
+  [`issuers`], [`did:key` references for the committed graphs.], [Informational provenance
+    only.],
+  [`key_set`], [The prover's declared issuer verification keys (hex Baby-JubJub points).],
+    [*Narrowing claim only*: accepted only as a *subset* of the external anchor K
+    (section 11); never the trust anchor (codex #1).],
+  [`commitment_attestations`], [One issuer attestation per distinct scan commitment.],
+    [Checked against the external K (audit gate 3).],
+  [`attributions`], [Per-pattern graph-attribution sets. The indices are *scan-local*:
+    `attributions[pattern]` indexes the answering scan's own `commitments` vector, and the
+    verifier maps them to committed-graph *identity* (`global_attributions`) before deriving
+    cross-graph obligations.], [Fed to the Q6 cross-graph blank-node-join guard; enforced as a
+    superset by `bind_attributions`.],
+  [`join_obligations`], [Declared non-blank-node join obligations `(variable, i, j)`.],
+    [Manifest side of the join gate.],
+  [`entailment_regime`], [`Simple` \| `Rdfs` \| `Owl`.], [Enforced by `bind_entailment`.],
+  [`derivation_steps`], [Inference steps justifying derived triples (empty for `Simple`).],
+    [Re-checked against disclosed, grounded bases (section 7.4).],
+  [`binding`], [The binding mode — `Challenge { challenge }` (the v1 default), or
+    `HolderPop { challenge, holder, pop, cryptosuite }` (clear-key holder
+    proof-of-possession, checked by `bind_holder_pop`); both carry the verifier nonce as
+    `challenge`.],
+    [Bound to the verifier's own nonce (section 9).],
+  [`revocation`], [Optional status reference `(status_list, index, version)`.],
+    [Issuer-bound; a status-bound credential with this omitted is *rejected* (`bind_revocation`,
+    section 10.4).],
+  [`status_snapshots`], [Disclosed status-list bitstrings.], [*Prover copy is a tripwire
+    only*; the bit decision reads the relying party's authoritative snapshot (section 11).],
+  [`sub_proofs`], [Array of sub-proof objects (`{ inputs, proof_hex }`).], [Each verified
+    against a recomputed key + reconstructed inputs (section 10.5).],
+  [`binding_edges`], [Binding-consistency edges between sub-proofs.], [Enforce operand
+    identity across sub-proofs (scan row/slot == consuming filter operand).],
+  [`join_edges` / `hidden_revocation` / `hidden_issuer_attestations` / `holder_pok_proofs` /
+    `holder_set_proofs`], [Optional privacy-upgrade layers (hidden join / hidden-index
+    revocation / hidden issuer / hidden-key holder proof-of-possession / hidden-holder set).],
+    [Additive; the clear-path checks always run (section 17.2).],
 )
+
+Three JSON value-level conventions apply throughout (descriptive, from the implementation).
+Every field element (`FieldHex` — commitments, term encodings, the challenge) is rendered as a
+`0x`-prefixed, 64-nibble, lowercase big-endian hexadecimal string. Pattern indices follow the
+order in which the BGP triple patterns appear in the re-parsed query text
+(`attributions[i]` describes the query's i-th pattern). In a binding edge, `from_slot` selects
+the operand column of a disclosed scan row as `0` = subject, `1` = predicate, `2` = object.
 
 == Sub-proof encoding
 
-Each sub-proof is carried as a single hex-encoded blob with the layout
-`len | proof | len | public-inputs | vk` — a length-prefixed proof, a length-prefixed
-public-input segment, and the verification key.
+Each sub-proof carries its statement in `inputs` (a typed `ProofInputs` variant matching the
+circuit) and its proof in `proof_hex`: a single hex-encoded blob produced by `sparq-zk-compose`
+`verifier::encode_artifacts` with the layout
 
-#note[
-  Editor's note — the width and endianness of the two length prefixes are not pinned by this
-  draft's grounding material; transcription is tracked as bead sq-rvgr2.7.
-]
+```
+proof_hex = hex( LP(proof) ‖ LP(public_inputs) ‖ vk )
+LP(x)     = ( len(x) as u32, big-endian, 4 bytes ) ‖ x
+```
+
+— a 4-byte big-endian length-prefixed proof, a 4-byte big-endian length-prefixed public-input
+segment, and the verification key as the trailing remainder (not length-prefixed). The
+verification key carried here is the prover's and is #strong[never] trusted: the verifier
+recomputes the canonical key (audit gate 2, section 10.5).
 
 == Public-input encoding (descriptive; at-risk)
 
 This subsection is *descriptive and at-risk*; it deliberately attaches no RFC-2119
-requirement (see the note below for why). With the pinned toolchain of section 16, the
-observed encoding of a sub-proof's public-input segment is:
+requirement. With the pinned toolchain of section 16, the encoding of a sub-proof's
+public-input segment (which `verifier::reconstruct_public_inputs` byte-compares against, audit
+gate 1) is:
 
 - each public-input field element is encoded as exactly 32 bytes, big-endian;
-- structs and arrays are flattened in row-major order;
+- structs and arrays are flattened in row-major order (declaration order of the circuit's
+  `main`);
 - booleans encode as `0` or `1`; `u32`/`u64` values encode as their integer value;
-- the segment carries no header and no per-element length prefix.
+- the segment carries no header and no per-element length prefix;
+- public-input field 0 is the verifier nonce (section 9).
 
 #note[
   This byte layout is *empirically pinned* to a specific Barretenberg release
-  (`bb 5.0.0-nightly.20260324`, driven as a subprocess alongside `nargo 1.0.0-beta.21`); it
-  was determined by observation, not derived from a backend specification, and it is not
-  guaranteed stable across `bb` releases. A reverse-engineered, toolchain-fragile layout is
-  not a conformance requirement, so this draft states it descriptively. A MUST-level layout
-  will be introduced only once it is specified independently of the `bb` toolchain — deferred
-  core 5 (section 2.3, sq-rvgr2.7); until then, interoperability across backend versions is
-  not promised (section 16).
+  (`bb 5.0.0-nightly.20260324`, driven as a subprocess alongside `nargo 1.0.0-beta.21`, bb
+  target `noir-recursive`); it was determined by observation against real `bb` output, not
+  derived from a backend specification, and it is not guaranteed stable across `bb` releases. A
+  reverse-engineered, toolchain-fragile layout is not a conformance requirement, so this draft
+  states it descriptively. A MUST-level layout will be introduced only once it is specified
+  independently of the `bb` toolchain (section 2.3); until then, interoperability across
+  backend versions is not promised (section 16).
 ]
 
 == Worked example (illustrative)
 
-The example below is *illustrative only*: it is complete member-for-member against the
-schema of section 8.2, but the elided hex (`…`) is not real proof material, the key encoding
-is unpinned, and the members marked "not transcribed" in section 8.2 are absent. It is *not*
-a test vector and cannot be verified; portable conformance fixtures are open future work
+The example below is *illustrative only*: the elided hex (`…`) is not real proof material,
+the scan's trailing zero-padded rows (up to `r`) are elided, and the optional
+privacy-upgrade members are absent. The member names and serde tagging shapes (`"circuit"`,
+`"kind"`, `"mode"`) mirror the implementation's serialisation exactly. It is *not* a test
+vector and cannot be verified; portable conformance fixtures are open future work
 (section 16).
 
 ```json
 {
   "type": "urn:sparq:zk:ProofManifest",
-  "key_set": [
-    "1c0aa5b7…e977"
+  "query": "SELECT ?s ?o WHERE { ?s <http://ex/age> ?o FILTER(?o >= 18) }",
+  "issuers": ["did:key:zIssuer"],
+  "key_set": ["1c0aa5b7…e977"],
+  "commitment_attestations": [
+    { "commitment": "0x2f1e…", "issuer_public_key": "1c0aa5b7…e977",
+      "signature": "…", "cryptosuite": "https://sparq.dev/ns/zk#poseidon2-schnorr-v1" }
   ],
+  "attributions": [[0]],
+  "entailment_regime": "simple",
+  "binding": { "mode": "challenge", "challenge": "0x00…2a" },
   "sub_proofs": [
-    {
-      "circuit": "Scan",
-      "proof_hex": "…"
-    }
-  ]
+    { "inputs": { "circuit": "scan",
+        "id": { "kind": "scan", "k": 1, "n": 16, "r": 4 },
+        "commitments": ["0x2f1e…"],
+        "pattern_is_const": [false, true, false],
+        "pattern_const_enc": ["0x00…00", "0x17c4…", "0x00…00"],
+        "rows": [["0x08a1…", "0x17c4…", "0x2b9d…"], …],
+        "row_count": 1,
+        "attribution": [true] },
+      "proof_hex": "…" },
+    { "inputs": { "circuit": "filter_int",
+        "id": { "kind": "filter_int", "d": 2 },
+        "operand_enc": "0x2b9d…",
+        "op": "ge", "bound": 18, "expected": true },
+      "proof_hex": "…" }
+  ],
+  "binding_edges": [{ "from_proof": 0, "from_row": 0, "from_slot": 2, "to_proof": 1 }]
 }
 ```
 
-Decoding the single sub-proof's `proof_hex` blob per section 8.3, with the public-input
-segment spelled out for its first — and only pinned — field:
-
-#table(
-  columns: 3,
-  align: (left, left, left),
-  table.header[Segment][Illustrative content][Meaning],
-  [length prefix], [(width not pinned — section 8.3)], [Length of the proof segment.],
-  [proof], [`…` (elided)], [The zero-knowledge proof for the `Scan` circuit.],
-  [length prefix], [(width not pinned)], [Length of the public-input segment — here 64
-    bytes: two field elements.],
-  [public-input field 0 (bytes 0–31)],
-    [`00000000000000000000000000000000` `000000000000000000000000075bcd15` (one 32-byte
-    value, wrapped)], [*The verifier nonce* (section 9): a 32-byte big-endian BN254 scalar —
-    illustratively the field element 123456789. A real nonce is a fresh random field
-    element.],
-  [public-input field 1 (bytes 32–63)], [`2f1e…` (elided)], [Illustrative only — e.g. a
-    graph commitment. The per-circuit public-input schedule beyond field 0 is not pinned by
-    this draft (section 7.3 note).],
-  [verification key], [`…` (elided)], [Carried in the blob but *never trusted*: the verifier
-    recomputes it from the canonical circuit (audit gate 2, section 10.4).],
-)
-
 = Challenge–response: the verifier nonce
 
-The proof request is a nonce challenge:
+The proof request is a nonce challenge (`sparq-zk-compose` `verifier::VerifierNonce`,
+`SeenNonces`):
 
 + The verifier #strong[MUST] mint a fresh #dfn[verifier nonce] — a BN254 scalar field
   element, exchanged in hexadecimal form — and deliver it to the prover *before* proving
   begins. Nonces #strong[MUST NOT] be reused across requests.
 + The prover #strong[MUST] commit the nonce as *public-input field 0 of every sub-proof* in
-  the manifest.
-+ The verifier #strong[MUST] record the nonce as used (single-use) *before* running the
-  cryptographic checks of section 10.4, so that a manifest that fails late cannot be replayed
-  against the same nonce.
+  the manifest, and carry it in `binding` — as the `challenge` member of either binding mode,
+  `Challenge` or `HolderPop` (section 8.2).
++ The verifier #strong[MUST] record the nonce as used (single-use, `SeenNonces::record_fresh`)
+  *before* running the cryptographic checks of section 10.5, so that a manifest that fails late
+  cannot be replayed against the same nonce.
 + If a manifest binds a nonce other than the one issued for the request, the verifier
-  #strong[MUST] reject with a nonce-binding mismatch *and* #strong[MUST] still burn the
-  issued nonce.
+  #strong[MUST] reject with a nonce-binding mismatch (`NonceBindingMismatch`) *and*
+  #strong[MUST] still burn the issued nonce — once the nonce is recorded, no subsequent
+  rejection is a free retry (rejections raised by the structural prefilter or the entailment
+  re-check, which run before the nonce is recorded, do not consume it). The nonce (not
+  the manifest's declared `binding`) is fed as public-input field 0 during reconstruction, so a
+  proof committed under any other challenge fails the byte-compare of audit gate 1.
 
 How the nonce is delivered and how the manifest is submitted is out of band and currently
 unspecified; section 14 proposes a transport binding.
 
 = Verification
 
-Sections 10.2–10.4 describe the reference verifier's obligation set — the candidate checklist
-a future normative revision will require of every verifier once the exact clauses are
-transcribed (section 2.3). The fail-closed discipline of sections 10.1 and 10.5 is
-kernel-normative now (section 2.2).
+== Overview
+
+The reference verifier exposes the full-binding entry point `verifier::verify_manifest`, which
+takes the manifest, the circuit prover, a work directory, and the relying party's trust anchors
+— the trusted `KeySet`, the `RevocationPolicy`, the `HolderRegistry`, the
+`HolderBindingPolicy`, the entailment policy, the fresh `VerifierNonce`, and the `SeenNonces`
+store — and returns `Result<(), CheckError>`. Sections 10.2–10.5 describe its obligation set;
+the fail-closed discipline of sections 10.2 and 10.6 is kernel-normative (section 2.2). Failure
+yields a `CheckError` variant pinpointing the failed gate.
 
 == Entry points
 
 The reference verifier exposes two entry points:
 
-+ a *structural prefilter* covering stages 1–2 (shape and consistency checks), which is
-  #strong[not] sufficient on its own and #strong[MUST NOT] be treated as verification; and
-+ *full verification*, which runs the prefilter, the structural re-checks of section 10.2,
-  the binding obligations of section 10.3, and the cryptographic checks of section 10.4, in a
-  fail-closed pipeline.
++ a *structural prefilter* (`prefilter_manifest_structure`) covering shape and consistency
+  checks, which is #strong[not] sufficient on its own — it runs no backend, binds nothing to a
+  proof, and enforces no freshness — and #strong[MUST NOT] be treated as verification; and
++ *full verification* (`verify_manifest`), which runs the prefilter (whose stages include the
+  structural re-checks of section 10.3), the binding obligations of section 10.4, and the
+  cryptographic checks of section 10.5, in a fail-closed pipeline.
 
-Only full verification confers the (unaudited — section 17.1) checking this document
-describes.
+Only full verification performs the (unaudited — section 17.1) checking this document describes.
 
 == Structural re-checks
 
-Full verification re-checks, independently of the prefilter:
+Full verification performs the following structural re-checks as the first, mandatory stage of
+its pipeline — they are stages of `prefilter_manifest_structure`, so they also run when the
+prefilter is invoked alone. The blank-node guard and the attribution-arity check live in
+`sparq-zk` (`verify::recheck`); the circuit-identifier re-derivation and the
+strictly-increasing commitment ordering live in `sparq-zk-compose`
+(`prefilter_manifest_structure` itself):
 
-- the *blank-node guard*: cross-graph joins on blank nodes are rejected (the "Q6" guard),
-  enforcing the semantic exclusion of section 7.2 against a malicious prover (section 5.2);
+- the *blank-node guard* (the "Q6" guard): a cross-graph join on a blank node is rejected,
+  enforcing the semantic exclusion of section 7.2 against a malicious prover — keyed on
+  committed-graph identity, not the scan-local index, so a genuine cross-scan join over two
+  distinct committed graphs must declare its non-blank-node `join_obligations`;
 - *attribution arity*: the attribution structure is well-formed;
-- *circuit-identifier re-derivation*: the circuit identifier each sub-proof claims is
-  re-derived from the statement it is bound to, and the two must agree;
+- *circuit-identifier re-derivation*: the identifier each sub-proof claims is re-derived from
+  the statement it is bound to, and the two must agree;
 - *strictly-increasing commitment ordering*: the manifest's graph commitments are strictly
   increasing, giving a canonical order and excluding duplicates.
 
-#note[
-  Editor's note — the exact condition of the Q6 guard (deferred core 3, section 2.3) and the
-  precise well-formedness clause of the attribution-arity check are pinned by the
-  implementation; transcription is tracked as bead sq-rvgr2.7. Section 7.2 states the semantic minimum
-  the Q6 guard enforces.
-]
-
 == Binding obligations
 
-The reference verifier enforces all twelve binding obligations below; each is fail-closed.
-The obligation *set* is covered by the adversarial ("forge") test suite of the reference
-implementation — this draft does not assert a per-obligation test inventory (section 16).
-The one-line glosses are descriptive: the implementation remains the source of truth for each
-obligation's exact clause until sq-rvgr2.7 transcribes them (section 2.3), after which a
-subsequent draft will require the full set of every conforming verifier.
+The reference verifier enforces the twelve binding obligations below (`sparq-zk-compose`
+`verifier::bind_*`); each is fail-closed. The obligation *set* is covered by the adversarial
+("forge") test suite of the reference implementation. The one-line glosses are descriptive:
+the implementation remains the source of truth for each obligation's exact clause (section 2.2).
 
 #table(
   columns: 2,
   align: (left, left),
   table.header[Obligation][Descriptive gloss],
-  [`bind_query_correctness`], [The proven circuit statements correspond to the claimed SPARQL
-    query; the target property is result membership under the fragment semantics of
-    section 7.2.],
-  [`bind_attributions`], [The disclosed attribution set satisfies the superset rule binding
-    result rows to source graphs.],
+  [`bind_query_correctness`], [Every query BGP pattern has a scan binding its constant slots,
+    and every `FILTER` has a slot-bound, true-verdict filter sub-proof reachable via a binding
+    edge; target property is result membership under section 7.2.],
+  [`bind_attributions`], [`manifest.attributions[pattern]` is a *superset* of each answering
+    scan's proof-bound in-circuit attribution bits (closes the attribution-collapse forge).],
   [`bind_issuer_attestations`], [Every issuer key used is a member of the *external* trusted
-    key set K (section 11) — never merely of the manifest's own key list. This obligation
-    *is* audit gate 3 (section 10.4).],
-  [`bind_revocation`], [Revocation sub-proofs are bound to the authoritative status-list
-    snapshot supplied by the relying party.],
-  [`bind_joins`], [Join sub-proofs are bound to the participating graph commitments and
-    variable slots.],
+    key set K (section 11) — never merely of the manifest's own key list — and its Schnorr
+    signature over the commitment verifies. This obligation *is* audit gate 3 (section 10.5).],
+  [`bind_revocation`], [The disclosed status reference is issuer-bound, and the liveness bit is
+    read from the relying party's *authoritative* snapshot (never the prover's), within the
+    freshness window.],
+  [`bind_joins`], [Each `JoinEdge`'s `join_eq` proof binds its public commitments byte-for-byte
+    to the two scans' graph commitments, and its slots to the query-derived slots.],
   [`bind_entailment`], [The declared entailment regime is honoured and derivation steps are
-    re-checked against disclosed bases (section 7.4).],
-  [`bind_holder_pop`], [Holder proof-of-possession is bound to the manifest.],
-  [`bind_holder_binding`], [The clear (disclosed) holder is bound per the holder-binding
-    policy and registry.],
-  [`bind_hidden_revocation`], [Revocation checking for hidden credentials.],
-  [`bind_hidden_issuer_attestations`], [Issuer attestation checking for hidden credentials.],
-  [`bind_holder_pok`], [Hidden-holder proof-of-knowledge tier — explicitly *not yet sound*;
+    re-checked against disclosed, grounded bases (section 7.4).],
+  [`bind_holder_pop`], [Holder proof-of-possession (clear-key tier) is a valid Schnorr over the
+    challenge, the holder is in the external `HolderRegistry`, and (under `require_binding`) the
+    presented key matches the issuer-attested holder digest.],
+  [`bind_holder_binding`], [The clear (disclosed) holder key's digest equals the attestation's
+    `holder_pk_digest`, and the disclosed key matches the presented key.],
+  [`bind_hidden_revocation`], [Hidden-index revocation: the proof's public Merkle root equals
+    the root derived from the relying party's authoritative snapshot.],
+  [`bind_hidden_issuer_attestations`], [Hidden issuer: the proof's public key-set root equals
+    the root derived from the authoritative external K, without disclosing which issuer.],
+  [`bind_holder_pok`], [Hidden-holder proof-of-knowledge tier — explicitly *not yet* sound;
     opt-in only (section 17.2).],
-  [`bind_holder_set`], [Hidden-holder set-membership tier — explicitly *not yet sound*;
+  [`bind_holder_set`], [Hidden-holder set-membership tier — explicitly *not yet* sound;
     opt-in only (section 17.2).],
 )
-
-#note[
-  Editor's note — the precise clause of each obligation, including the superset *direction*
-  enforced by `bind_attributions`, is deferred core 4 of section 2.3; transcription is tracked
-  as bead sq-rvgr2.7.
-]
 
 == Cryptographic checks and the four audit gates
 
 The scheme defines exactly four #dfn[audit gates] — the cross-cutting binding checks whose
-failure would each void soundness on its own. Their definitions, and the checks that enforce
-them, map one-to-one:
+failure would each void soundness on its own:
 
 #table(
   columns: 3,
@@ -950,103 +1065,108 @@ them, map one-to-one:
   table.header[Audit gate][Definition][Enforced by],
   [1 — public-input reconstruction], [The verifier independently reconstructs the expected
     public-input bytes of every sub-proof — with the verifier nonce at field 0 — and compares
-    them byte-for-byte against the manifest's public-input segment; any difference rejects.],
-    [The public-input reconstruction step of this section.],
+    them byte-for-byte against the manifest's segment; any difference rejects.],
+    [`reconstruct_public_inputs` (`PublicInputMismatch`).],
   [2 — canonical verification key], [The verification key of every sub-proof is recomputed
-    from the canonical circuit; a manifest-supplied key is never trusted as-is.],
-    [The key-recomputation step of this section.],
+    from the canonical circuit named by the re-derived `CircuitId`; the prover's key is never
+    trusted.], [`canonical_vk` recomputation.],
   [3 — issuer signature and key set], [Every issuer key used is bound to the external key
     set K, and the issuer's signature over the graph commitment verifies.],
-    [`bind_issuer_attestations` (section 10.3), per scan.],
+    [`bind_issuer_attestations` (section 10.4), per scan.],
   [4 — nonce single-use and binding], [The verifier nonce is fresh, single-use, recorded
     before the cryptographic checks, and burnt on mismatch.], [The nonce discipline of
-    section 9.],
+    section 9 (`SeenNonces`, `NonceBindingMismatch`).],
 )
 
 In addition to the four audit gates, each sub-proof is verified by the proving backend
 against the recomputed key and reconstructed inputs (*backend proof verification*). This
 check carries no audit-gate number: the audit gates are the binding checks layered *around*
-backend verification, and backend verification is meaningless without gates 1 and 2 pinning
-what is being verified.
-
-After the obligations of section 10.3, full verification runs, fail-closed and in order:
-public-input reconstruction (gate 1); canonical-key recomputation (gate 2); backend proof
-verification of every sub-proof — with nonce single-use recorded *before* these checks and
-nonce binding enforced as specified in section 9 (gate 4). Gate 3 is enforced earlier, per
-scan, by `bind_issuer_attestations`.
+backend verification, which is meaningless without gates 1 and 2 pinning what is verified.
+Full verification runs, fail-closed and in order: nonce single-use recorded and binding checked
+(gate 4); then, per sub-proof, gate 1; gate 2; backend proof verification. Gate 3 is enforced
+per scan by `bind_issuer_attestations`.
 
 == Fail-closed error handling
 
-Every failure mode maps to an explicit variant of a closed error taxonomy (roughly seventy
-variants in the reference implementation). A conforming verifier #strong[MUST] reject the
-whole manifest on the *first* failed check, #strong[MUST NOT] return partial results, and
-#strong[MUST NOT] downgrade any error to a warning.
+Every failure mode maps to an explicit variant of a closed error taxonomy
+(`verifier::CheckError`, on the order of eighty variants). A conforming verifier
+#strong[MUST] reject the whole manifest on the *first* failed check, #strong[MUST NOT] return
+partial results, and #strong[MUST NOT] downgrade any error to a warning.
 
 = External trust anchors
 
-All trust roots are inputs from the relying party. A conforming verifier #strong[MUST]
-obtain each of the following out of band and #strong[MUST NOT] accept any of them from the
-manifest:
+All trust anchors are inputs from the relying party, passed to `verify_manifest`. A conforming
+verifier #strong[MUST] obtain each of the following out of band and #strong[MUST NOT] accept
+any of them from the manifest:
 
-+ the *trusted issuer key set K* — the manifest #strong[MAY] carry its own key list, but it
-  is accepted only if it is a *subset* of K;
-+ the *authoritative status-list snapshot* governing revocation, per the relying party's
-  revocation policy;
-+ the *holder registry* and *holder-binding policy*;
-+ the *fresh verifier nonce* of section 9;
-+ the *seen-nonce store* enforcing single use — this store #strong[SHOULD] be durable across
-  verifier restarts (the reference implementation provides both a durable file-backed store
-  and an in-memory store; the in-memory store forgets burned nonces on restart).
++ the *trusted issuer key set K* (`KeySet`) — the manifest #strong[MAY] carry its own
+  `key_set`, but it is accepted only if it is a *subset* of K; an empty K trusts no issuer, so
+  any scan carrying commitments is rejected;
++ the *authoritative status-list snapshot* governing revocation (`RevocationPolicy`,
+  `StatusListSnapshot`) — the prover's `status_snapshots` copy is only a tamper tripwire;
++ the *holder registry* and *holder-binding policy* (`HolderRegistry`, `HolderBindingPolicy`);
++ the *fresh verifier nonce* of section 9 (`VerifierNonce`);
++ the *seen-nonce store* enforcing single use (`SeenNonces`) — this store #strong[SHOULD] be
+  durable across verifier restarts (the reference implementation provides a durable file-backed
+  store `FileSeenNonces` (flock + fsync, single-host) and a test-only `InMemorySeenNonces` that
+  forgets burned nonces on restart).
 
 #note[
   The subset rule for K is codified from experience: an earlier revision that trusted the
-  manifest's own key list was a review-identified soundness hole. Externalising every trust
-  anchor is what closed it.
+  manifest's own key list was a review-identified soundness hole (the "codex #1" fix, recorded
+  in the `key_set` doc comment). Externalising every trust anchor is what closed it.
 ]
 
 = Security-properties vocabulary
 
 zkSPARQL methods are *annotated* with machine-readable security properties so that policy
-engines can reason about them (section 13). The vocabulary is layered.
+engines can reason about them (section 13). The vocabulary is layered and vendored into the
+repository.
 
 == Base vocabulary
 
 The base vocabulary is the vendored `sec-prop` ontology, namespace
-`https://w3id.org/zkp-sparql/sec-prop#`, defining eight property dimensions:
-`UnlinkabilityStrength`, `UnlinkabilityScope`, `PostQuantumForgery`, `PostQuantumSnooping`,
+`https://w3id.org/zkp-sparql/sec-prop#`, whose eight base security-property classes are
+`Unlinkability`, `SourceCredentialDisclosure`, `PostQuantumForgery`, `PostQuantumSnooping`,
 `SignatureTypeLeakage`, `ProofSizeLeakage`, `CircuitAudit`, and `ValidityPeriodLeakage`
-#cite("SEC-PROP"). The `sec-prop` vocabulary is prior work of this document's editor and
-collaborators (Wright, Shadbolt, Zhao, Zhao, Braun #cite("SEC-PROP")): sections 12 and 13 of
-this document derive from that work, which is vendored into the sparq repository under MIT
-with its provenance record.
+#cite("SEC-PROP"). The `sec-prop` vocabulary is prior published work of this document's editor
+and collaborators (Wright, Shadbolt, Zhao, Zhao, Braun #cite("SEC-PROP")); sections 12 and 13
+derive from it, and it is vendored into sparq under MIT with its provenance record (co-authored
+for the ISWC 2025 work, MIT-licensed by the 2026-06-21 decision).
 
 #note[
-  Editor's note — the `w3id.org/zkp-sparql/` identifiers were minted as placeholders while
-  the source repository was private. Before this draft advances, the permanent-identifier
-  redirect must be confirmed live and stable.
+  Editor's note — the `w3id.org/zkp-sparql/` identifiers were minted as placeholders while the
+  source repository was private. Before this draft advances, the permanent-identifier redirect
+  must be confirmed live and stable.
 ]
 
 == The secx extension
 
-The sparq extension vocabulary (`secx`) adds the dimensions `ZeroKnowledgeType`, `Soundness`,
-`Completeness`, `Hiding`, `Binding`, `Anonymity`, `Setup`, `Interactivity`,
-`SelectiveDisclosure`, and `SingleUse`, plus four orthogonal axes:
+The sparq extension (`secx`, declared in `secprop-ext.ttl` under the *same*
+`https://w3id.org/zkp-sparql/sec-prop#` namespace — the `secx`/`sec-prop` distinction is
+prose-only, and the extension `owl:imports` the base, it does not fork it) adds the orthogonal
+proof-system dimensions `ZeroKnowledgeType`, `Soundness`, `Completeness`, `Hiding`, `Binding`,
+`Anonymity`, `Setup`, `Interactivity`, `SelectiveDisclosure`, and `SingleUse`, plus four
+orthogonal axes:
 
-- `AssuranceLevel`, ordered `Proven` > `Claimed` > `Conjectured`;
-- `AuditStatus`, including the value `ExternalSignOffPending`;
-- `Assumption` (e.g. the multi-party trust assumptions referenced by composed systems);
-- `PropertyScope`, distinguishing `QueryProofLayer` from `SourceLayerOnly`.
+- `AssuranceLevel`, ordered `Proven` > `Claimed` > `Conjectured` (the sparq ZK default is
+  `Claimed`);
+- `AuditStatus`, ordered `ExternallyAudited` > `InternallyReviewed` > `Unreviewed`, plus the
+  distinguished value `ExternalSignOffPending` (the live sq-qhy4 state);
+- `Assumption` (e.g. `IssuerHonesty` — carried by the dual-leaf lane — `DiscreteLog`,
+  `RandomOracle`, `HonestMajority`, `SemiHonest`);
+- `PropertyScope`, distinguishing `QueryProofLayer` (default) from `SourceLayerOnly`.
 
 A property that holds at the source layer only #strong[MUST NOT] be used to satisfy a
 query-proof-layer constraint: source-layer facts do not transfer to the query-proof layer.
 
 The dimension names shadow the security goals of section 5.3 deliberately: an annotation is a
-machine-readable *claim* about a goal, and the assurance axis records how settled the claim
-is.
+machine-readable *claim* about a goal, and the assurance axis records how settled the claim is.
 
 == The over-claim rule
 
-While the external audit gate (sq-qhy4) is open:
+While the external audit gate (sq-qhy4) is open (`sparq-zk` `secprop` module, behind the
+`secprop-annotations` feature):
 
 + No sparq zkSPARQL method #strong[MAY] be annotated `secx:Proven` for any *positive* privacy
   or soundness property; such properties are at most `secx:Claimed` with
@@ -1055,34 +1175,42 @@ While the external audit gate (sq-qhy4) is open:
   — #strong[MAY] carry `Proven`.
 
 The reference implementation enforces this rule mechanically with three machine-checkable
-guards over the annotation graph: an over-claim guard, a source-layer-transfer guard, and a
-completeness guard.
+guards over the annotation graph (`ontologies/secprop-methods.ttl`):
+`audit_overclaim_violations` (no `Proven` on a positive property while the gate is open),
+`completeness_violations` (every production-selectable method is annotated), and
+`source_layer_transfer_violations` (a `SourceLayerOnly` property never satisfies a query-proof
+constraint).
 
 = Policy-controlled admissibility
 
-Relying parties express *which* proof methods they accept as ODRL 2.2 policies
-#cite("ODRL22") over the vocabulary of section 12:
+Relying parties express *which* proof methods they accept as ODRL 2.2 policies #cite("ODRL22")
+over the vocabulary of section 12, using the sparq security-property profile
+(`odrl-secprop-profile.ttl`, `sparq-policy`; profile IRI
+`https://sparq.dev/ns/odrl-secprop-profile#`, which declares fifteen `secx:requires…`
+leftOperands; reduced by `sparq-trust` `admissibility` / `admit`):
 
-+ A policy using any `secx:requires` left-operand #strong[MUST] assert
-  `odrl:profile` `https://sparq.dev/ns/odrl-secprop-profile#`.
++ A policy using any `secx:requires…` left-operand #strong[MUST] assert
+  `odrl:profile <https://sparq.dev/ns/odrl-secprop-profile#>`.
 + Each such left-operand carries exactly one `secx:overDimension` fact identifying the
   property dimension it constrains.
 + Only the operator `odrl:gteq` is given a reduction; a constraint using any other operator
   #strong[MUST] be treated as *unsatisfied* — which denies.
 + A method is admissible only if it satisfies *every* constraint of the policy
   (default-deny).
-+ In the fail-closed pre-check gate, the outcomes are Admitted, Denied, and ReductionError —
-  and a reduction error #strong[MUST] be treated as a denial.
++ In the fail-closed pre-check gate (`admit_with_precheck`), the outcomes are `Admitted`,
+  `Denied`, `UnknownMethod`, `MalformedConstraint`, and `ReductionError` — and a reduction
+  error or a malformed constraint #strong[MUST] be treated as a denial.
 
 Base admission additionally checks the issuer's Schnorr signature over the RDFC-1.0
-commitment, a SHACL #cite("SHACL") scope constraint, a reserved-predicate guard, and — for
-clear holders — a WebID holder binding.
+commitment, a SHACL #cite("SHACL") statement-type scope constraint, a reserved-predicate guard,
+and — for clear holders — a WebID holder binding (the credential subject equals the session
+agent).
 
 #note[
   A consequence worth stating plainly: a policy requiring
   `requiresAssurance odrl:gteq secx:Proven` on a positive property mechanically denies *every*
-  current sparq zkSPARQL method while the external audit (sq-qhy4) is open. That is by design
-  — it is the honest default for high-assurance relying parties.
+  current sparq zkSPARQL method while the external audit (sq-qhy4) is open. That is by design —
+  it is the honest default for high-assurance relying parties.
 ]
 
 = Transport, media type, and interchange
@@ -1094,9 +1222,9 @@ manifest submission are out of band.
 == Media type (proposal)
 
 A registered media type is proposed for the proof manifest — candidate
-`application/vc+zksparql+json`, with a `+ld` variant once a JSON-LD context exists — and a
-companion type for the nonce challenge. Until registration, implementations exchanging
-manifests over HTTP have no content-type contract at all.
+`application/zksparql+json`, with an `application/zksparql+ld+json` variant once a JSON-LD
+context exists — and a companion type for the nonce challenge. Until registration,
+implementations exchanging manifests over HTTP have no content-type contract.
 
 == JSON-LD context (proposal)
 
@@ -1107,21 +1235,22 @@ processors. No such context exists today; the manifest does not currently round-
 == Wire protocol (proposal)
 
 A challenge–response HTTP binding is proposed: an endpoint issuing single-use nonces and an
-endpoint accepting manifest submissions bound to them. A live-service and asynchronous-proving
-posture has been *designed only* (no server endpoint, job model, or async proving exists in
-the implementation); any binding written here would be speculative and is deferred to a
-subsequent draft.
+endpoint accepting manifest submissions bound to them. No server endpoint, job model, or
+asynchronous proving exists in the implementation, so any binding written here would be
+speculative and is deferred to a subsequent draft.
 
 = Relationship to W3C Verifiable Credentials
 
 This section is informative.
 
 - A *VC cryptosuite bridge* — off-circuit Data-Integrity verification of `eddsa-rdfc-2022`
-  and `ecdsa-rdfc-2019` (P-256) source credentials #cite("VC-DI") at ingest — is implemented
-  but *unmerged* at the time of writing (it exists only on a feature branch, as an opt-in
-  feature). Any claim of VC ingest must be caveated accordingly.
-- The P-384 profile of `ecdsa-rdfc-2019` is *not* implemented and fails closed as an
-  unsupported key curve.
+  and `ecdsa-rdfc-2019` (P-256) source credentials #cite("VC-DI") at ingest — is designed as
+  an opt-in `vc-bridge` feature but is *not merged to the main line* at the time of writing
+  (it lives on a feature branch and plugs into the `IssuerSignatureScheme` seam). Any claim of
+  VC ingest must be caveated accordingly.
+- In that bridge design, the P-384 profile of `ecdsa-rdfc-2019` is *not* implemented and
+  fails closed as an unsupported key curve; like the bridge itself, this behaviour is not on
+  the main line — on main there is no VC-ingest path at all.
 - Ingest of `bbs-2023` / `ecdsa-sd-2023` selective-disclosure credentials is an explicitly
   *deferred* seam: there is no in-repo BBS verifier.
 - In-circuit re-verification of the source credential's proof is deliberately *out of scope*:
@@ -1137,16 +1266,18 @@ Two conformance gaps are open:
 
 + *No portable test vectors.* An adversarial forge-test suite exists covering the manifest
   format and the verifier obligation set, but it is internal to the Rust implementation, and
-  this draft does not assert an itemised forge test per individual obligation of
-  section 10.3 (its grounding material records the suite collectively). A conformance suite
-  of portable fixtures (manifests that must verify, and mutated manifests that must fail with
-  a specific error class) is required future work.
+  the cryptographic-chain forge tests and real `bb` prove/verify cases are `#[ignore]`d in
+  default CI (they require the nargo/bb toolchain). A conformance suite of portable fixtures
+  (manifests that must verify, and mutated manifests that must fail with a specific error
+  class) is required future work.
 + *Toolchain pinning.* The circuit family is pinned to an external toolchain
-  (`nargo 1.0.0-beta.21`, `bb 5.0.0-nightly.20260324`) driven by subprocess, and the
-  public-input byte layout of section 8.4 is empirically determined and therefore
-  descriptive, not normative. Until the layout is specified toolchain-independently
-  (section 2.3), cross-version interoperability is out of reach and even reference-level
-  compatibility can only be claimed against the pinned toolchain.
+  (`nargo 1.0.0-beta.21`, `bb 5.0.0-nightly.20260324`, bb target `noir-recursive`, with the
+  in-circuit Poseidon fixed to the `noir-lang/poseidon` `v0.3.0` tag) driven by subprocess, and
+  the public-input byte layout of section 8.4 is empirically determined and therefore
+  descriptive, not normative. A toolchain change could silently shift the serialisation with no
+  failing test. Until the layout is specified toolchain-independently (section 2.3),
+  cross-version interoperability is out of reach and even reference-level compatibility can
+  only be claimed against the pinned toolchain.
 
 == Reproducible constraint counts
 
@@ -1183,7 +1314,10 @@ records the honest status of those goals and the known deviations.
 == Audit status
 
 The entire zkSPARQL estate is research-grade and has *not* been externally audited; the
-external cryptographer audit is an open gate (sq-qhy4). Accordingly:
+external cryptographer audit is an open gate (sq-qhy4). An internal, single-model re-audit
+found the verifier's binding layer *sound as landed for the threat model its prior audit
+assumed*, but that finding was produced by an LLM agent, rests partly on code-reading rather
+than on tests running in CI, and does #strong[not] replace external sign-off. Accordingly:
 
 + A relying party #strong[MUST NOT] treat a passing verification as a settled guarantee that
   the proven SPARQL statement holds against an adversarial prover.
@@ -1195,45 +1329,54 @@ external cryptographer audit is an open gate (sq-qhy4). Accordingly:
 == Known-unsound and downgraded components
 
 - The hidden-holder tiers (`bind_holder_pok`, `bind_holder_set`) are explicitly labelled *not
-  yet sound* in the implementation and its documentation; remediation is tracked internally.
-  They are opt-in only, and verifiers #strong[SHOULD] leave them disabled unless the residual
-  risk is understood and accepted.
-- The optional dual-leaf value lane carries an accepted, documented invariant downgrade and
-  is likewise unaudited; it is opt-in.
-- Only simple entailment is proved in zero knowledge; RDFS/OWL derivations are disclosed-base
-  re-checks (section 7.4), which both weakens the zero-knowledge property for the disclosed
-  bases and limits the entailment coverage.
+  yet* sound in the implementation and its documentation; remediation is tracked internally
+  (epic sq-1s2). They are opt-in only, and verifiers #strong[SHOULD] leave them disabled
+  unless the residual risk is understood and accepted.
+- The optional dual-leaf value lane carries an accepted, documented value↔lexical invariant
+  downgrade (INV-VL, gap CR-G8, #769): value–lexical agreement on the value-`FILTER` lane
+  rests on trusted-issuer honesty (recorded as a `secx:IssuerHonesty` assumption) and is not
+  machine-enforced. It is opt-in, partial, and unaudited.
+- Only simple entailment is proved in zero knowledge; `Rdfs`/`Owl` derivations are
+  disclosed-base re-checks (section 7.4), which reveal the derivation bases to the verifier
+  and limit entailment coverage.
 
 == Post-quantum posture
 
-The post-quantum posture is a *settled negative*. All issuer signature suites in scope
-(Schnorr over Baby Jubjub, EdDSA, BBS+) rest on discrete-log hardness and fall to a
-Shor-capable adversary; commitment binding likewise breaks under a cryptographically relevant
-quantum computer, so *retrospective* soundness of previously accepted proofs fails as well.
-The vocabulary records this honestly as negative `PostQuantumForgery` / `PostQuantumSnooping`
-facts — these negatives are among the few annotations permitted to carry `Proven`
-(section 12.3).
+The post-quantum posture is a *settled negative*. The issuer signature suite in scope
+(Schnorr over Baby Jubjub) and the related credential suites (EdDSA, BBS+) rest on
+discrete-log hardness and fall to a Shor-capable adversary; commitment binding likewise breaks
+under a cryptographically relevant quantum computer, so *retrospective* soundness of previously
+accepted proofs fails as well. The vocabulary records this honestly as negative
+`PostQuantumForgery` / `PostQuantumSnooping` facts — these negatives are among the few
+annotations permitted to carry `Proven` (section 12.3). The scheme makes *no* FIPS or CMVP
+claim; it is deliberately built on ZK-friendly, non-FIPS-approved primitives (BN254,
+Poseidon2, Baby Jubjub), and the signing path is not constant-time (a documented residual).
 
 == Leakage and unlinkability
 
 `SignatureTypeLeakage`, `ProofSizeLeakage`, `ValidityPeriodLeakage`, and the unlinkability
 dimensions are tracked as vocabulary dimensions so that policies can constrain them; their
-values for sparq methods are at most `Claimed` and are *not* settled guarantees. Verifiers and
-relying parties should assume that proof size, timing, and suite choice may leak information
-about the underlying credentials until an audit says otherwise.
+values for sparq methods are at most `Claimed` and are *not* settled guarantees. By default,
+issuer attestation is checked in the clear (revealing which issuer signed) and a clear-path
+`revocation.index` is disclosed (a linkability channel) unless the hidden-issuer / hidden-index
+circuits are enabled. Verifiers and relying parties should assume that proof size, timing, and
+suite choice may leak information about the underlying credentials until an audit says
+otherwise.
 
 == Replay and nonce hygiene
 
 Replay resistance rests entirely on the nonce discipline of section 9: single-use recording
 *before* the cryptographic checks, burn-on-mismatch, and a durable seen-nonce store. A
-verifier using a non-durable store forgets burned nonces on restart and #strong[SHOULD NOT]
-be exposed where replay across restarts matters.
+verifier using a non-durable store (`InMemorySeenNonces`) forgets burned nonces on restart and
+#strong[SHOULD NOT] be exposed where replay across restarts matters; a multi-host deployment
+#strong[SHOULD] back `SeenNonces` with a database uniqueness / compare-and-set store.
 
 == Admissibility reasons over annotations, not cryptography
 
 The admissibility engine of section 13 reasons over *declared annotations*, not over the
 cryptography itself. An "Admitted" outcome means the method's declared properties satisfy the
-policy — it is not, and must not be presented as, an independent cryptographic finding.
+policy — it is not, and #strong[MUST NOT] be presented as, an independent cryptographic
+finding.
 
 = References
 
@@ -1286,12 +1429,11 @@ policy — it is not, and must not be presented as, an independent cryptographic
   ("SHACL", [Knublauch, H.; Kontokostas, D. (eds). #emph[Shapes Constraint Language (SHACL)].
     W3C Recommendation, 20 July 2017. https://www.w3.org/TR/shacl/.]),
   ("SEC-PROP", [Wright, J.; Shadbolt, N.; Zhao, Jun; Zhao, Rui; Braun, C. #emph[Zero-Knowledge
-    Proof of Correct SPARQL Evaluation over Verifiable Credentials]. Paper in submission at
-    the time of writing (https://zksparql.org/); vocabulary source repository
+    Proof of Correct SPARQL Evaluation over Verifiable Credentials]. Prior work of this
+    document's editor and collaborators; vocabulary source repository
     https://github.com/jeswr/sparql-zkp-ontologies, namespace `https://w3id.org/zkp-sparql/`.
     The `sec-prop` sub-vocabulary is vendored, with the sparq `secx` extension, in the sparq
-    repository (MIT). Prior work of this document's editor — declared for citation integrity;
-    sections 12–13 of this document derive from it.]),
+    repository (MIT). Declared for citation integrity; sections 12–13 derive from it.]),
   ("WRIGHT-DC25", [Wright, J. #emph[Towards Provable Provenance and Privacy-Preserving Queries  // privacy-claims-allow: prior-work reference title (Wright, ISWC 2025 DC), not a sparq claim
     in Decentralised Data Architectures]. ISWC 2025 Companion Volume (Doctoral Consortium),
     CEUR-WS Vol-4085, paper 19, Nara, Japan, November 2025.

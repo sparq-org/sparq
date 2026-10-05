@@ -1262,20 +1262,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "spargebra"
-version = "0.4.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "46715eb957d1fe960cbbc0b713da8f78e2cb19df315b48fb09c9467a1c84f656"
-dependencies = [
- "oxilangtag",
- "oxiri",
- "oxrdf",
- "peg",
- "rand",
- "thiserror 2.0.18",
-]
-
-[[package]]
 name = "sparq-conformance"
 version = "0.1.4"
 dependencies = [
@@ -1285,12 +1271,12 @@ dependencies = [
  "quick-xml 0.41.0",
  "rustc-hash",
  "serde_json",
- "spargebra",
  "sparq-conformance-floors",
  "sparq-core",
  "sparq-engine",
  "sparq-reason",
  "sparq-server",
+ "sparq-spargebra",
  "tokio",
 ]
 
@@ -1325,10 +1311,10 @@ dependencies = [
  "sha1 0.11.0",
  "sha2",
  "smallvec",
- "spargebra",
  "sparq-core",
  "sparq-engine-serialize",
  "sparq-engine-service",
+ "sparq-spargebra",
  "sparq-substrate",
  "uuid",
 ]
@@ -1378,9 +1364,9 @@ dependencies = [
  "arc-swap",
  "oxrdf",
  "rustc-hash",
- "spargebra",
  "sparq-core",
  "sparq-engine",
+ "sparq-spargebra",
 ]
 
 [[package]]
@@ -1398,15 +1384,27 @@ dependencies = [
  "oxrdfxml",
  "oxttl",
  "serde_json",
- "spargebra",
  "sparq-core",
  "sparq-engine",
  "sparq-serve",
+ "sparq-spargebra",
  "tokio",
  "tower",
  "tower-http",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "sparq-spargebra"
+version = "0.4.6"
+dependencies = [
+ "oxilangtag",
+ "oxiri",
+ "oxrdf",
+ "peg",
+ "rand",
+ "thiserror 1.0.69",
 ]
 
 [[package]]

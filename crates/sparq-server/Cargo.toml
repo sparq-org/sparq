@@ -596,14 +596,11 @@ sparq-http3 = { path = "../sparq-http3", version = "0.1.4", optional = true, fea
 mimalloc = "0.1"
 
 [dev-dependencies]
-# [SONNET-4.6] (sq-pfae.17) Trust/ZK test helpers for the admission-path integration tests
-# (tests/solid_authz_trust.rs): construct valid Schnorr-signed credentials, verify the
-# happy-path GRANT and injection-gate DENY. These are dev-only — the production path is
-# behind the `solid-authz-trust` feature, which already enables sparq-trust/sparq-zk as
-# optional deps; the dev-dep is unconditional so the test binary can import the helpers
-# regardless of which feature set the dev ran (tests are #[cfg(feature="solid-authz-trust")]).
-sparq-trust = { path = "../sparq-trust", version = "0.1.4", features = ["cert-graph"] }
-sparq-zk = { path = "../sparq-zk", version = "0.1.4" }
+# NOTE: no sparq-trust / sparq-zk dev-dependency. The admission-path integration test
+# (tests/solid_authz_trust.rs) is wholly `#![cfg(feature = "solid-authz-trust")]`, and that
+# feature already enables both as (optional) normal deps, which test targets can import.
+# An unconditional dev-dep would drag the research ZK estate (arkworks) into every default
+# `cargo test` of this core crate. Run it with `--features solid-authz-trust`.
 oxrdf = { workspace = true }
 oxttl = { workspace = true }
 # [OPUS-4.8] Reference SPARQL-results parser (oxigraph's) for the serializer oracle

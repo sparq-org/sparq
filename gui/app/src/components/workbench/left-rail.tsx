@@ -4,17 +4,28 @@
 // research/gui-design.md §A.2):
 //   (1) workspace switcher — ●saved/○unsaved (the persistent-workspace model is sq-atb0; this
 //       foundation shows the default workspace; the picker is a later-phase stub);
-//   (2) datasets tree of the LIVE store — default + named graphs with per-graph counts, plus an
-//       Imports subgroup placeholder + "+ Import" entry point (the real import drawer is
-//       sq-ixc3.13);
+//   (2) datasets tree of the LIVE store — default + named graphs with per-graph counts, plus the
+//       Imports subgroup (each WorkspaceSourceMeta with its format + recorded bytes, and RE-FETCH
+//       on a URL source) and the "+ Import" entry point onto the Import drawer (sq-ixc3.13);
 //   (3) TOOLS list — each a VERB opened as a tab with an honesty-tier dot (NOT a page).
 
 import * as React from "react";
-import { ChevronRight, Plus, Database, FolderTree, FileUp, Link2 } from "lucide-react";
+import {
+  ChevronRight,
+  Plus,
+  Database,
+  FolderTree,
+  FileUp,
+  Link2,
+  Loader2,
+  RefreshCw,
+} from "lucide-react";
+import type { WorkspaceSourceMeta } from "@sparq/client";
 
-import { cn } from "@/lib/utils";
+import { cn, formatBytes } from "@/lib/utils";
 import { useEngine } from "@/lib/engine-context";
 import { useWorkspace } from "@/lib/workspace-context";
+import { importUrlDocument } from "@/lib/import-url";
 import { useImportDrawer } from "@/components/workbench/import-drawer";
 import { ExportDataMenu } from "@/components/workbench/store-export";
 import { TIER_META, type ToolDef } from "@/data/tools";
@@ -36,11 +47,51 @@ function shortenGraph(iri: string | null): string {
 }
 
 function DatasetsTree() {
-  const { graphs, status } = useEngine();
+  const { graphs, status, importRdf, snapshotStore, refreshDiskUsage } = useEngine();
   // [OPUS-4.8] sq-ixc3.13 — the live Imports subgroup (WorkspaceSourceMeta) + the working
   // "+ Import" entry point that opens the Import drawer.
-  const { sources } = useWorkspace();
+  const { sources, recordImport } = useWorkspace();
   const { setOpen } = useImportDrawer();
+
+  // [OPUS-5] sq-ixc3.13 — RE-FETCH state, keyed by the source URL (only one runs at a time).
+  const [refetching, setRefetching] = React.useState<string | null>(null);
+  const [refetchError, setRefetchError] = React.useState<{ url: string; message: string } | null>(
+    null,
+  );
+
+  /**
+   * [OPUS-5] sq-ixc3.13 — pull a recorded `url` source again, through the SAME ingest path the
+   * Import drawer's URL tab uses (fetch + decompress + format auto-detect + named-graph-preserving
+   * load), then re-record it and re-snapshot the workspace.
+   *
+   * Mode is `add`, deliberately: `replace` would wipe every OTHER source out of the store. Because
+   * the store is a set of quads, re-fetching unchanged data is a no-op and new/changed triples
+   * merge in — but triples DELETED at the source are NOT removed. That is stated in the tooltip
+   * rather than papered over.
+   */
+  const onRefetch = React.useCallback(
+    async (source: WorkspaceSourceMeta) => {
+      const url = source.url;
+      if (!url) return;
+      setRefetching(url);
+      setRefetchError(null);
+      try {
+        const outcome = await importUrlDocument(
+          url,
+          { mode: "add", preserveGraphs: true },
+          { importRdf },
+        );
+        await recordImport(outcome.source, snapshotStore());
+        refreshDiskUsage();
+      } catch (err) {
+        setRefetchError({ url, message: err instanceof Error ? err.message : String(err) });
+      } finally {
+        setRefetching(null);
+      }
+    },
+    [importRdf, recordImport, snapshotStore, refreshDiskUsage],
+  );
+
   return (
     <div className="px-1 pb-2">
       {status.kind !== "ready" ? (
@@ -68,7 +119,9 @@ function DatasetsTree() {
       )}
 
       {/* [OPUS-4.8] sq-ixc3.13 — the Imports subgroup: the active workspace's WorkspaceSourceMeta
-          list (local files + re-fetchable URL sources), most recent first. */}
+          list (local files + re-fetchable URL sources), most recent first.
+          [OPUS-5] sq-ixc3.13 — each row now carries the recorded byte size, and a URL source
+          carries the RE-FETCH action the design record (§A.2) specifies. */}
       {sources.length > 0 && (
         <div className="mt-2">
           <h3 className="px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
@@ -78,25 +131,16 @@ function DatasetsTree() {
             {[...sources]
               .sort((a, b) => b.importedAt - a.importedAt)
               .map((s) => (
-                <li
-                  key={`${s.kind}-${s.label}-${s.importedAt}`}
-                  className="flex items-center gap-1.5 rounded px-2 py-1 text-xs hover:bg-sidebar-accent/40"
-                  title={
-                    s.kind === "url" && s.url
-                      ? `${s.url} · ${s.format}`
-                      : `${s.label} · ${s.format} (re-hydrated from the workspace snapshot)`
+                <SourceRow
+                  key={`${s.kind}-${s.url ?? s.label}-${s.importedAt}`}
+                  source={s}
+                  busy={s.url !== undefined && refetching === s.url}
+                  disabled={refetching !== null}
+                  error={
+                    s.url !== undefined && refetchError?.url === s.url ? refetchError.message : null
                   }
-                >
-                  {s.kind === "url" ? (
-                    <Link2 className="size-3 shrink-0 text-muted-foreground" />
-                  ) : (
-                    <FileUp className="size-3 shrink-0 text-muted-foreground" />
-                  )}
-                  <span className="min-w-0 flex-1 truncate">{s.label}</span>
-                  <span className="tabular text-[10px] uppercase text-muted-foreground">
-                    {s.format}
-                  </span>
-                </li>
+                  onRefetch={onRefetch}
+                />
               ))}
           </ul>
         </div>
@@ -118,6 +162,81 @@ function DatasetsTree() {
           cold/empty). */}
       <ExportDataMenu />
     </div>
+  );
+}
+
+/**
+ * [OPUS-5] sq-ixc3.13 — one row of the Imports subgroup: the source label, its parsed format +
+ * recorded byte size, and — for a `url` source — the RE-FETCH action.
+ *
+ * A `local` source has NO re-fetch button, and says so: the browser cannot silently re-read a
+ * previously chosen disk file across sessions, so it re-hydrates from the workspace snapshot only
+ * (the honest limitation `WorkspaceSourceMeta` documents).
+ */
+function SourceRow({
+  source,
+  busy,
+  disabled,
+  error,
+  onRefetch,
+}: {
+  source: WorkspaceSourceMeta;
+  /** This row's own re-fetch is in flight. */
+  busy: boolean;
+  /** Some row's re-fetch is in flight — every button is inert while one runs. */
+  disabled: boolean;
+  /** The message from this row's last failed re-fetch, or `null`. */
+  error: string | null;
+  onRefetch: (source: WorkspaceSourceMeta) => void;
+}) {
+  const refetchable = source.kind === "url" && source.url !== undefined;
+  return (
+    <li
+      data-import-source={source.url ?? source.label}
+      className="rounded px-2 py-1 text-xs hover:bg-sidebar-accent/40"
+    >
+      <div className="flex items-center gap-1.5">
+        {source.kind === "url" ? (
+          <Link2 className="size-3 shrink-0 text-muted-foreground" />
+        ) : (
+          <FileUp className="size-3 shrink-0 text-muted-foreground" />
+        )}
+        <span
+          className="min-w-0 flex-1 truncate"
+          title={
+            refetchable
+              ? `${source.url} · ${source.format} — re-fetch merges the current document into the store (deletions at the source are not removed)`
+              : `${source.label} · ${source.format} (re-hydrated from the workspace snapshot — a local file cannot be re-read without picking it again)`
+          }
+        >
+          {source.label}
+        </span>
+        {refetchable && (
+          <button
+            data-refetch-source={source.url}
+            onClick={() => onRefetch(source)}
+            disabled={disabled}
+            aria-label={`Re-fetch ${source.label}`}
+            className="shrink-0 text-muted-foreground hover:text-foreground disabled:opacity-40"
+          >
+            {busy ? (
+              <Loader2 className="size-3 animate-spin" />
+            ) : (
+              <RefreshCw className="size-3" />
+            )}
+          </button>
+        )}
+      </div>
+      <div className="pl-[18px] text-[10px] text-muted-foreground">
+        <span className="uppercase">{source.format}</span>
+        {source.bytes !== undefined && <> · {formatBytes(source.bytes)}</>}
+      </div>
+      {error && (
+        <p role="status" data-refetch-error className="pl-[18px] text-[10px] text-destructive">
+          Re-fetch failed: {error}
+        </p>
+      )}
+    </li>
   );
 }
 

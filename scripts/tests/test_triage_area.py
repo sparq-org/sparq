@@ -177,8 +177,8 @@ NEUTRAL_TITLE = "Recurring chore: worktree disk-hygiene sweep"
 class TestTriageAreaDiagnostics(unittest.TestCase):
     """[GPT-6 Astra] #6468: real routing and the global prewrite failure boundary."""
 
-    DIAGNOSTIC = "triage-area aborts the classification pass on missing area:sparq-wrapper-gen label"
-    GENERATOR = "sparq-wrapper-gen: give the SHACL object-model generator an entry point (build script / CLI)"
+    DIAGNOSTIC = "triage-area aborts the classification pass on missing area:sparq-reason-el label"
+    GENERATOR = "sparq-reason-el: give the EL reasoner an entry point (build script / CLI)"
 
     @staticmethod
     def issue(number, title, *labels, body=""):
@@ -214,8 +214,8 @@ class TestTriageAreaDiagnostics(unittest.TestCase):
         self.assertTrue(evidence(self.DIAGNOSTIC).startswith("T1 triage-area:"))
         for title in ("triage-area.py: identify missing labels", "triage-area"):
             self.assertEqual(areas(title), ["ci"])
-        self.assertEqual(areas(self.GENERATOR), ["sparq-wrapper-gen"])
-        self.assertEqual(areas("sparq-wrapper: improve generated bindings"), ["sparq-wrapper"])
+        self.assertEqual(areas(self.GENERATOR), ["sparq-reason-el"])
+        self.assertEqual(areas("sparq-reason: improve generated bindings"), ["sparq-reason"])
         row = TA.plan([self.issue(6468, self.DIAGNOSTIC, "area:ci")], CRATES)[0]
         self.assertEqual(row[1:], ([], "SKIP already carries an area: label"))
 
@@ -242,7 +242,7 @@ class TestTriageAreaDiagnostics(unittest.TestCase):
             code, calls, out, err, sleeps = self.run_main(issues, {"area:ci"}, *args, apply=apply)
             self.assertEqual((code, calls, out, sleeps), (2, [], "", 0))
             self.assertEqual(self.records(err), [{
-                "number": 5016, "label": "area:sparq-wrapper-gen",
+                "number": 5016, "label": "area:sparq-reason-el",
                 "evidence": "T2 bd-to-issues.derive_areas (title scope/crate token)"}])
             self.assertIn("absent from the fetched area-label set (1 area labels", err)
             self.assertIn("the fetch may be incomplete", err)
@@ -262,7 +262,7 @@ class TestTriageAreaDiagnostics(unittest.TestCase):
              "evidence": "T0 author-declared crate_or_surface/crates field"},
             {"number": 19, "label": "area:sparq-engine",
              "evidence": "T0 author-declared crate_or_surface/crates field"},
-            {"number": 5016, "label": "area:sparq-wrapper-gen",
+            {"number": 5016, "label": "area:sparq-reason-el",
              "evidence": "T2 bd-to-issues.derive_areas (title scope/crate token)"}])
         self.assertEqual(result, self.run_main(list(reversed(issues)), {"area:ci"}))
 
@@ -288,18 +288,18 @@ class TestTriageAreaDiagnostics(unittest.TestCase):
                   self.issue(1, self.DIAGNOSTIC),
                   self.issue(6468, self.DIAGNOSTIC, "area:ci")]
         code, calls, _out, err, sleeps = self.run_main(
-            issues, {"area:ci", "area:sparq-wrapper-gen"})
+            issues, {"area:ci", "area:sparq-reason-el"})
         self.assertEqual((code, err, sleeps), (0, "", 1))
         self.assertEqual([c[2] for c in calls], ["1", "5016"])
         self.assertIn("area:ci", calls[0])
         self.assertNotIn("--remove-label", calls[0])
         self.assertEqual(calls[1][-4:], ["--remove-label", TA.PARK_LABEL,
-                                         "--add-label", "area:sparq-wrapper-gen"])
+                                         "--add-label", "area:sparq-reason-el"])
 
     def test_unrelated_unknown_still_blocks_after_generator_provisioning(self):
         issues = [self.issue(1, self.GENERATOR),
                   self.issue(19, NEUTRAL_TITLE, body="crate: sparq-core")]
-        code, calls, out, err, sleeps = self.run_main(issues, {"area:sparq-wrapper-gen"})
+        code, calls, out, err, sleeps = self.run_main(issues, {"area:sparq-reason-el"})
         self.assertEqual((code, calls, out, sleeps), (2, [], "", 0))
         self.assertEqual(self.records(err), [{
             "number": 19, "label": "area:sparq-core",

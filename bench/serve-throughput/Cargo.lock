@@ -1027,18 +1027,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "spargebra"
-version = "0.4.6"
-dependencies = [
- "oxilangtag",
- "oxiri",
- "oxrdf",
- "peg",
- "rand",
- "thiserror",
-]
-
-[[package]]
 name = "sparq-core"
 version = "0.1.4"
 dependencies = [
@@ -1065,9 +1053,9 @@ dependencies = [
  "sha1 0.11.0",
  "sha2",
  "smallvec",
- "spargebra",
  "sparq-core",
  "sparq-engine-serialize",
+ "sparq-spargebra",
  "sparq-substrate",
  "uuid",
 ]
@@ -1092,9 +1080,9 @@ dependencies = [
  "arc-swap",
  "oxrdf",
  "rustc-hash",
- "spargebra",
  "sparq-core",
  "sparq-engine",
+ "sparq-spargebra",
 ]
 
 [[package]]
@@ -1104,6 +1092,7 @@ dependencies = [
  "axum",
  "flate2",
  "futures-util",
+ "http-body",
  "hyper",
  "hyper-util",
  "mimalloc",
@@ -1111,10 +1100,10 @@ dependencies = [
  "oxrdfxml",
  "oxttl",
  "serde_json",
- "spargebra",
  "sparq-core",
  "sparq-engine",
  "sparq-serve",
+ "sparq-spargebra",
  "tokio",
  "tower",
  "tower-http",
@@ -1123,9 +1112,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "sparq-spargebra"
+version = "0.4.6"
+dependencies = [
+ "oxilangtag",
+ "oxiri",
+ "oxrdf",
+ "peg",
+ "rand",
+ "thiserror",
+]
+
+[[package]]
 name = "sparq-substrate"
 version = "0.1.4"
 dependencies = [
+ "hashbrown",
  "oxrdf",
  "rustc-hash",
  "smallvec",
@@ -1464,3 +1466,7 @@ name = "zmij"
 version = "1.0.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b8848ee67ecc8aedbaf3e4122217aff892639231befc6a1b58d29fff4c2cabaa"
+
+[[patch.unused]]
+name = "spargebra"
+version = "0.4.6"
