@@ -2573,6 +2573,86 @@
       "source": "research/zk-paper-evidence/authenticated-vcq-genuine-select-bag-row-bound-audit.json /rejection/code",
       "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-select-bag-row-bound-audit.json", "pointer": "/rejection/code" },
       "note": "[zkp-14.6] Typed rejection: the released result exceeds the contract's row bound; rejected before the original challenge is consumed."
+    },
+    "zkvcq.vcqph_source_commit": {
+      "value": "ff83bcfbee57d7db90f8f406a5e09574f81e5a91",
+      "unit": "git-commit",
+      "environment": "canonical",
+      "kind": "source-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, payment false-ASK holder-declared genuine run)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-payment-ask-holder-declared-audit.json /source",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-payment-ask-holder-declared-audit.json", "pointer": "/source" },
+      "note": "[zkp-14.6] Source of the holder-declared payment false-ASK run."
+    },
+    "zkvcq.vcqph_case": {
+      "value": "ask-false-payment-holder-declared",
+      "unit": "declared-case",
+      "environment": "canonical",
+      "kind": "case-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, payment false-ASK holder-declared genuine run)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-payment-ask-holder-declared-audit.json /case",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-payment-ask-holder-declared-audit.json", "pointer": "/case" },
+      "note": "[zkp-14.6] Declared case: ASK 'was any payment returned?' over a holder-declared input."
+    },
+    "zkvcq.vcqph_genuine_receipts": {
+      "value": 1,
+      "unit": "genuine-receipts",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, payment false-ASK holder-declared genuine run)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-payment-ask-holder-declared-audit.json /genuine_receipts",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-payment-ask-holder-declared-audit.json", "pointer": "/genuine_receipts" },
+      "note": "[zkp-14.6] Genuine receipt. Not second-party inspected."
+    },
+    "zkvcq.vcqph_protocol_accepted": {
+      "value": 1,
+      "unit": "protocol-accepted-receipts",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, payment false-ASK holder-declared genuine run)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-payment-ask-holder-declared-audit.json /protocol_accepted_receipts",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-payment-ask-holder-declared-audit.json", "pointer": "/protocol_accepted_receipts" },
+      "note": "[zkp-14.6] Receipts accepted by the protocol verifier."
+    },
+    "zkvcq.vcqph_provenance": {
+      "value": "HolderSelectedAuthenticated",
+      "unit": "result-provenance",
+      "environment": "canonical",
+      "kind": "result",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, payment false-ASK holder-declared genuine run)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-payment-ask-holder-declared-audit.json /actual_provenance",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-payment-ask-holder-declared-audit.json", "pointer": "/actual_provenance" },
+      "note": "[zkp-14.6] Result provenance in the verified journal."
+    },
+    "zkvcq.vcqph_result_ask": {
+      "value": false,
+      "unit": "boolean-result",
+      "environment": "canonical",
+      "kind": "result",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, payment false-ASK holder-declared genuine run)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-payment-ask-holder-declared-audit.json /actual_result/Ask",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-payment-ask-holder-declared-audit.json", "pointer": "/actual_result/Ask" },
+      "note": "[zkp-14.6] ASK result in the verified journal (expected false)."
+    },
+    "zkvcq.vcqph_controls": {
+      "value": 26,
+      "unit": "controls",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, payment false-ASK holder-declared genuine run)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-payment-ask-holder-declared-audit.json /control_count",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-payment-ask-holder-declared-audit.json", "pointer": "/control_count" },
+      "note": "[zkp-14.6] Controls attached (no anchor controls under a holder-declared input)."
+    },
+    "zkvcq.vcqph_guest_sha256": {
+      "value": "7b68dc0656abfe3a825b116e9a94df3e971dc5979deefe7ab616e8cd5e1b482e",
+      "unit": "sha256",
+      "environment": "canonical",
+      "kind": "artifact-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, payment false-ASK holder-declared genuine run)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-payment-ask-holder-declared-audit.json /receipt/artifact_sha256",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-payment-ask-holder-declared-audit.json", "pointer": "/receipt/artifact_sha256" },
+      "note": "[zkp-14.6] Guest artifact pinned for this run."
     }
   }
 }
