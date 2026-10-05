@@ -203,27 +203,9 @@ type Subst<'a> = dyn Fn(&Variable) -> Option<Term> + 'a;
 /// Fresh-blank-node state for ONE solution row: per SPARQL, every blank node in an INSERT
 /// template is instantiated FRESH per solution (same label, same row → same fresh node;
 /// different rows — and different operations in one request — get DIFFERENT nodes, hence
-/// the process-wide counter).
+/// a random id per node).
 struct FreshBnodes {
     map: FxHashMap<String, Term>,
-}
-
-static FRESH_BNODE_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-
-/// A random per-process prefix for fresh labels. A bare counter restarts at 0 in every
-/// process, so `_:fb0` minted now could be a node already in a store (persisted by an
-/// earlier process, or loaded from a document that used that label) and would merge with it.
-fn fresh_bnode_prefix() -> &'static str {
-    static PREFIX: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-    PREFIX.get_or_init(|| {
-        use std::hash::{BuildHasher, Hasher};
-        let mut h = std::collections::hash_map::RandomState::new().build_hasher();
-        if let Ok(d) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
-            h.write_u128(d.as_nanos());
-        }
-        h.write_u32(std::process::id());
-        format!("fb{:016x}x", h.finish())
-    })
 }
 
 impl FreshBnodes {
@@ -231,8 +213,11 @@ impl FreshBnodes {
         if let Some(t) = self.map.get(label) {
             return t.clone();
         }
-        let n = FRESH_BNODE_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let t = Term::BlankNode(BlankNode::new_unchecked(format!("{}{n}", fresh_bnode_prefix())));
+        // A random 128-bit id (oxrdf's own fresh node), never a per-process counter: a counter
+        // restarts at 0, so its `_:fb0` could already be in a store (persisted by an earlier
+        // process, or loaded from a document using that label) and would merge with it. The
+        // RNG works on wasm too (the browser `getrandom` backend is already configured).
+        let t = Term::BlankNode(BlankNode::default());
         self.map.insert(label.to_string(), t.clone());
         t
     }

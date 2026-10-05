@@ -2605,6 +2605,32 @@ mod tests {
         assert!(whole.ends_with("]}}"));
     }
 
+    /// A cancellation raised by the sink after its first chunk stops a large parallel
+    /// stream: no later chunk and no `]}}`, so the aborted body never looks complete.
+    #[test]
+    fn cancel_from_the_first_chunk_stops_a_parallel_select_json_stream() {
+        use std::fmt::Write as _;
+        use std::ops::ControlFlow;
+        use std::sync::{atomic::{AtomicBool, Ordering}, Arc};
+        let mut nt = String::new();
+        for i in 0..60_000 {
+            writeln!(nt, "<http://ex/s{i}> <http://ex/p> \"v{i}\" .").unwrap();
+        }
+        let graph = Graph::load_str(&nt, "ntriples").unwrap();
+        let flag = Arc::new(AtomicBool::new(false));
+        let budget = QueryBudget::cancelled_by(flag.clone());
+        let (mut body, mut chunks) = (String::new(), 0);
+        let result = query_json_stream_with_budget(&graph, "SELECT ?s ?o WHERE { ?s <http://ex/p> ?o }", &budget, |c| {
+            chunks += 1;
+            body.push_str(&c);
+            flag.store(true, Ordering::Relaxed);
+            ControlFlow::Continue(())
+        });
+        assert_eq!(result.unwrap_err(), "query budget exceeded (cancelled)");
+        assert_eq!(chunks, 1, "chunks kept flowing after cancellation");
+        assert!(!body.ends_with("]}}"), "a cancelled stream was closed");
+    }
+
     // [GPT-6] Refusal precedes any output, including empty-result headers, on both
     // the scan fast path and the general evaluator. Cancellation works on wasm too.
     #[test]

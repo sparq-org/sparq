@@ -2900,7 +2900,8 @@ fn single_pattern_scan_json_emit(
             // deadline-only budget, the now-past wall clock: sets the sticky flag the
             // caller's `budget::check(0)` converts into the budget error (a chunk skipped
             // above means the deadline is globally past, so this fires deterministically).
-            let over = budget::exhausted(frags.iter().map(|(n, _)| n).sum());
+            let total: usize = frags.iter().map(|(n, _)| n).sum();
+            budget::exhausted(total);
             // Accumulate into `pending` and hand a chunk to `emit` at each flush boundary
             // (byte-identical concatenation to the old `emit_chunk` Vec layout — only the
             // chunk *boundaries* differ, and the concat is what the byte-identity contract
@@ -2916,16 +2917,21 @@ fn single_pattern_scan_json_emit(
                 }
                 wrote = true;
                 pending.push_str(&f);
-                if flush.is_some_and(|n| pending.len() >= n)
-                    && emit(std::mem::take(&mut pending)).is_break()
-                {
-                    return Some(());
+                if flush.is_some_and(|n| pending.len() >= n) {
+                    if emit(std::mem::take(&mut pending)).is_break() {
+                        return Some(());
+                    }
+                    // A cancellation (possibly set by the sink itself) or a deadline that
+                    // passed while emitting stops the stream here, rechecked per chunk.
+                    if budget::exhausted(total) {
+                        return Some(());
+                    }
                 }
             }
             // Never close the document over a result the budget cut short (#4239): the
             // caller reports the abort, and a sink that saw `]}}` would hold a complete-
-            // looking but truncated body.
-            if !over {
+            // looking but truncated body. Rechecked here, not cached from before emission.
+            if !budget::exhausted(total) {
                 pending.push_str("]}}");
             }
             if !pending.is_empty() {
@@ -2949,7 +2955,9 @@ fn single_pattern_scan_json_emit(
         }
         written += 1;
         write_row(row, &mut s);
-        if flush.is_some_and(|n| s.len() >= n) && emit(std::mem::take(&mut s)).is_break() {
+        if flush.is_some_and(|n| s.len() >= n)
+            && (emit(std::mem::take(&mut s)).is_break() || budget::exhausted(written))
+        {
             return Some(());
         }
     }
