@@ -133,14 +133,20 @@ fn is_value_lane(member: &str) -> bool {
     member.starts_with(VALUE_LANE_PREFIX)
 }
 
+/// Kept in lockstep with `RESULT_PREFIXES` in `bb_gates_matrix.py`.
+///
+/// [OPUS-5.5] zkp-15.1 adds the version-4 public-pattern members.
+fn is_successful_result(member: &str) -> bool {
+    ["result_v1_", "result_v2_", "result_v3_", "result_v4_"]
+        .iter()
+        .any(|prefix| member.starts_with(prefix))
+}
+
 /// The design §3.1 legality rule (mirrors `dispatch::resolve_circuit`): value-lane
 /// members are legal only for value-handle methods; string-lane members are
 /// illegal for `value-only`.
 fn expect_legal(method_key: &str, member: &str) -> bool {
-    if member.starts_with("result_v1_")
-        || member.starts_with("result_v2_")
-        || member.starts_with("result_v3_")
-    {
+    if is_successful_result(member) {
         // [GPT-6] The additive result relation authenticates whole string-canonical
         // graphs; it cannot reuse a dual-leaf graph's lexical handle as its root.
         method_key == "string-canonical"
@@ -513,13 +519,22 @@ fn successful_result_members_only_admit_string_canonical_commitments() {
     let members: Vec<_> = matrix
         .matrix
         .iter()
-        .filter(|(member, _)| {
-            member.starts_with("result_v1_")
-                || member.starts_with("result_v2_")
-                || member.starts_with("result_v3_")
-        })
+        .filter(|(member, _)| is_successful_result(member))
         .collect();
-    assert_eq!(members.len(), 30);
+    // [OPUS-5.5] zkp-15.1: 30 v1-v3 buckets plus exactly the two measured v4 buckets.
+    assert_eq!(members.len(), 32);
+    let v4: Vec<&str> = members
+        .iter()
+        .map(|(member, _)| member.as_str())
+        .filter(|member| member.starts_with("result_v4_"))
+        .collect();
+    assert_eq!(
+        v4,
+        [
+            "result_v4_k1_n16_p3_r4_f0_d10",
+            "result_v4_k2_n16_p3_r4_f0_d10"
+        ]
+    );
     for (_, row) in members {
         assert!(row.configs["string-canonical"].legal);
         assert!(!row.configs["dual-leaf"].legal);

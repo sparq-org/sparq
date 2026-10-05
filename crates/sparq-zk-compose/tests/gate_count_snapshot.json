@@ -79,7 +79,10 @@
     "result_v3_k2_n16_p3_r4_f0_s0_d20": 60667,
     "result_v3_k2_n16_p3_r4_f2_s64_d10": 463150,
     "result_v3_k2_n16_p3_r4_f2_s64_d17": 464246,
-    "result_v3_k2_n16_p3_r4_f2_s64_d20": 464716
+    "result_v3_k2_n16_p3_r4_f2_s64_d20": 464716,
+    "result_v4_k1_n16_p3_r4_f0_d10": 31209,
+    "result_v4_k2_n16_p3_r4_f0_d10": 58022
   },
-  "_comment_gpt6_result": "[GPT-6] Additive successful-result members measured on darwin arm64 with pinned nargo beta.21 and bb 5.0.0-nightly.20260324, 2026-09-09. F=0 excludes all private integer predicate circuitry; F=2 retains lexical-to-value binding. These are circuit measurements, not externally audited security or end-to-end performance evidence."
+  "_comment_gpt6_result": "[GPT-6] Additive successful-result members measured on darwin arm64 with pinned nargo beta.21 and bb 5.0.0-nightly.20260324, 2026-09-09. F=0 excludes all private integer predicate circuitry; F=2 retains lexical-to-value binding. These are circuit measurements, not externally audited security or end-to-end performance evidence.",
+  "_comment_opus55_result_public": "[OPUS-5.5] beadzkp-15.1: the two version-4 public-pattern members result_v4_k{1,2}_n16_p3_r4_f0_d10 were MEASURED with `bb gates -s ultra_honk` at source 14d426bde6557ffc3621f50fd34133f8d278aea9 on a Linux x86_64 EC2 work box (NON-canonical) with the pinned nargo 1.0.0-beta.21 / bb 5.0.0-nightly.20260324, observed 2026-09-26. Exact ACIR, ABI, artifact and gate-log hashes, tool executable hashes and Noir source hashes are in bench/zk-compose/result_public_gates.json and cross-checked by bench/zk-compose/scripts/verify_result_evidence.py. The same run re-measured every result_v1/v2/v3 and filter_int_d1..d4 member equal to its existing baseline, so no existing value changed. Static circuit size only: not a runtime, soundness or external-audit claim; the verifier remains NOT-yet-sound pending external audit (sq-qhy4)."
 }

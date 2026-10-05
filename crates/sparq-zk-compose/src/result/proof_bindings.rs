@@ -169,15 +169,142 @@ fn attack_witness(toml: &str, kind: &str) -> Fallible<String> {
     replace(toml, name, &value)
 }
 
+// [OPUS-5.5] beadzkp-15.1.1: the only members the explicit version-four
+// backend may count. A legacy or signed preparation is an error, never a pass.
+const PUBLIC_PATTERN_PACKAGES: [&str; 2] = [
+    "result_v4_k1_n16_p3_r4_f0_d10",
+    "result_v4_k2_n16_p3_r4_f0_d10",
+];
+
+// Private fields that carry the original signed support. A false binding may
+// change only public statement fields and the private `values` row.
+const SIGNED_SUPPORT_FIELDS: [&str; 8] = [
+    "counts",
+    "salts",
+    "enc",
+    "signatures",
+    "selected_graphs",
+    "selected_leaves",
+    "selected_types",
+    "selected_hashes",
+];
+
+fn require_public_pattern(prepared: &PreparedResult) -> Fallible<Value> {
+    if prepared.presentation.version != PUBLIC_PATTERN_VERSION
+        || !PUBLIC_PATTERN_PACKAGES.contains(&prepared.package)
+    {
+        return Err("public-pattern backend fell back from its version-four contract".into());
+    }
+    Ok(json!({"version": PUBLIC_PATTERN_VERSION, "package": prepared.package}))
+}
+
+fn contract_for(
+    public_pattern: bool,
+    profile: NumericProfile,
+    anchor: &PreparedResult,
+) -> NumericContract {
+    match (public_pattern, profile) {
+        (true, _) => NumericContract::PublicPattern,
+        (false, NumericProfile::Unsigned) => {
+            NumericContract::Unsigned(anchor.presentation.integer_capacity)
+        }
+        (false, NumericProfile::Signed) => NumericContract::Signed,
+    }
+}
+
+// Version four never reads pattern zero's typed openings. Changing them is a
+// no-op for that relation, so it must not be counted as a rejected attack.
+fn unused_opening_changed(honest: &str, candidate: &str) -> Fallible<bool> {
+    for name in ["selected_types", "selected_hashes"] {
+        let (a, b) = (
+            witness_field(honest, name)?,
+            witness_field(candidate, name)?,
+        );
+        let rows = a.as_array().ok_or("opening rows")?;
+        if b.as_array().ok_or("opening rows")?.len() != rows.len() {
+            return Ok(true);
+        }
+        if (0..rows.len()).any(|r| a[r][0] != b[r][0]) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+// Positive control: a type tag outside IRI/literal and a nonzero hash would
+// fail any generic opening check that actually read pattern zero.
+fn unused_opening_witness(toml: &str) -> Fallible<String> {
+    let mut types = witness_field(toml, "selected_types")?;
+    let mut hashes = witness_field(toml, "selected_hashes")?;
+    types[0][0][0] = json!(3);
+    hashes[0][0][0] = json!(field_to_hex(&Fr::from(1u64)));
+    replace(
+        &replace(toml, "selected_types", &types)?,
+        "selected_hashes",
+        &hashes,
+    )
+}
+
+// Bypass the planner: submit contradictory public rows (and, for version four,
+// the verifier-derived public triple table) plus matching private values with
+// the anchor's original signed graph and membership paths.
+fn false_binding_witness(
+    anchor: &PreparedResult,
+    rows: &[BTreeMap<String, Term>],
+    contract: NumericContract,
+    policy: &ResultPolicy,
+    nonce: &VerifierNonce,
+) -> Fallible<String> {
+    let mut forged = anchor.presentation.clone();
+    forged.rows = rows
+        .iter()
+        .map(|r| {
+            r.iter()
+                .map(|(v, t)| Ok((v.clone(), disclosed(t)?)))
+                .collect::<Result<_, ResultError>>()
+        })
+        .collect::<Result<_, _>>()?;
+    let statement = public_statement_for((&forged).into(), contract, policy, nonce)?;
+    let mut malicious = anchor.toml.clone();
+    for (name, value) in &statement.fields {
+        malicious = replace(&malicious, name, value)?;
+    }
+    let mut values = witness_field(&malicious, "values")?;
+    for (i, name) in statement.vars.iter().enumerate() {
+        values[0][i] = json!(field_to_hex(&field(
+            rows[0].get(name).ok_or("public binding incomplete")?
+        )?));
+    }
+    malicious = replace(&malicious, "values", &values)?;
+    for name in SIGNED_SUPPORT_FIELDS {
+        if witness_field(&malicious, name)? != witness_field(&anchor.toml, name)? {
+            return Err("false binding altered the original signed support".into());
+        }
+    }
+    if matches!(contract, NumericContract::PublicPattern) {
+        let (_, derived) = statement
+            .fields
+            .iter()
+            .find(|(name, _)| *name == "public_triples")
+            .ok_or("version-four statement omits public_triples")?;
+        if witness_field(&malicious, "public_triples")? != *derived {
+            return Err("false binding did not carry the reconstructed public triples".into());
+        }
+    }
+    Ok(malicious)
+}
+
 fn run(job: &Value, output: &Path) -> Fallible<Value> {
     if job["schema"] != "sparq.proof-binding-job.v1"
         || !matches!(job["operation"].as_str(), Some("binding" | "attack"))
     {
         return Err("Noir corpus schema/operation rejected".into());
     }
-    let profile = match job["backend"].as_str() {
-        Some("noir_unsigned") => NumericProfile::Unsigned,
-        Some("noir_signed") => NumericProfile::Signed,
+    // [OPUS-5.5] beadzkp-15.1.1: version four is an explicit backend only.
+    let (profile, public_pattern) = match job["backend"].as_str() {
+        Some("noir_unsigned") => (NumericProfile::Unsigned, false),
+        Some("noir_signed") => (NumericProfile::Signed, false),
+        Some("noir_public_pattern") => (NumericProfile::Unsigned, true),
         _ => return Err("Noir backend unavailable".into()),
     };
     let tier = job["tier"].as_str().ok_or("tier")?;
@@ -192,15 +319,14 @@ fn run(job: &Value, output: &Path) -> Fallible<Value> {
     bytes.extend_from_slice(job["id"].as_str().ok_or("job id")?.as_bytes());
     let nonce = VerifierNonce::from_field(field_from_hash_bytes(blake3::hash(&bytes).as_bytes()));
     let options = ResultOptions::default();
-    let prepared = prepare_result_numeric(
-        query,
-        &credentials,
-        &rows,
-        &policy,
-        &nonce,
-        options,
-        profile,
-    );
+    let prepare = |rows: &[BTreeMap<String, Term>]| {
+        if public_pattern {
+            prepare_result_public_pattern(query, &credentials, rows, &policy, &nonce, options)
+        } else {
+            prepare_result_numeric(query, &credentials, rows, &policy, &nonce, options, profile)
+        }
+    };
+    let prepared = prepare(rows.as_slice());
     let mut outcome = json!({"schema":"sparq.proof-binding-outcome.v1","job_id":job["id"],
         "case_sha256":job["case_sha256"],"backend":job["backend"],"tier":tier,
         "observed":"rejected","stage":"support","proof_count":0,"verified_count":0,
@@ -214,6 +340,14 @@ fn run(job: &Value, output: &Path) -> Fallible<Value> {
         Err(ResultError::Rejected(reason)) => {
             outcome["error_class"] = json!(reason);
             if tier == "native" {
+                // An empty signed graph is not the same evidence as refused support.
+                if public_pattern {
+                    outcome["rejection_scope"] = json!(if credentials.is_empty() {
+                        "empty_graph"
+                    } else {
+                        "native_support"
+                    });
+                }
                 return Ok(outcome);
             }
             let anchor_rows = mapping(
@@ -228,15 +362,10 @@ fn run(job: &Value, output: &Path) -> Fallible<Value> {
                 );
                 return Ok(outcome);
             }
-            let anchor = prepare_result_numeric(
-                query,
-                &credentials,
-                &anchor_rows,
-                &policy,
-                &nonce,
-                options,
-                profile,
-            )?;
+            let anchor = prepare(anchor_rows.as_slice())?;
+            if public_pattern {
+                outcome["contract"] = require_public_pattern(&anchor)?;
+            }
             // Establish that this exact package and driver can solve an honest
             // witness before any negative result is attributed to constraints.
             driver.private_package_witness(
@@ -244,39 +373,8 @@ fn run(job: &Value, output: &Path) -> Fallible<Value> {
                 &anchor.toml,
                 "binding_positive_control",
             )?;
-            let mut forged = anchor.presentation.clone();
-            forged.rows = rows
-                .iter()
-                .map(|r| {
-                    r.iter()
-                        .map(|(v, t)| Ok((v.clone(), disclosed(t)?)))
-                        .collect::<Result<_, ResultError>>()
-                })
-                .collect::<Result<_, _>>()?;
-            let contract = match profile {
-                NumericProfile::Unsigned => {
-                    NumericContract::Unsigned(anchor.presentation.integer_capacity)
-                }
-                NumericProfile::Signed => NumericContract::Signed,
-            };
-            let statement = public_statement_for((&forged).into(), contract, &policy, &nonce)?;
-            let mut malicious = anchor.toml.clone();
-            for (name, value) in &statement.fields {
-                malicious = replace(&malicious, name, value)?;
-            }
-            let values = malicious
-                .lines()
-                .find_map(|line| line.strip_prefix("values = "))
-                .ok_or("private values")?;
-            let mut values: Value = serde_json::from_str(values)?;
-            for (i, name) in statement.vars.iter().enumerate() {
-                values[0][i] = json!(field_to_hex(&field(
-                    rows[0].get(name).ok_or("public binding incomplete")?
-                )?));
-            }
-            malicious = replace(&malicious, "values", &values)?;
-            // Bypass the planner: submit the contradictory public rows and
-            // private values with the original signed graph and membership paths.
+            let contract = contract_for(public_pattern, profile, &anchor);
+            let malicious = false_binding_witness(&anchor, &rows, contract, &policy, &nonce)?;
             let rejected =
                 driver.private_package_witness(anchor.package, &malicious, "binding_false_witness");
             let class = unsatisfied(
@@ -288,26 +386,42 @@ fn run(job: &Value, output: &Path) -> Fallible<Value> {
             fs::write(output.join("malicious-input.toml"), &malicious)?;
             outcome["stage"] = json!("constraint");
             outcome["error_class"] = json!(class);
-            outcome["controls"] = json!([{"kind":"honest_constraint_positive","executed":true},
-                {"kind":"planner_bypassed_false_binding","executed":true}]);
+            let mut controls = vec![
+                json!({"kind":"honest_constraint_positive","executed":true}),
+                json!({"kind":"planner_bypassed_false_binding","executed":true}),
+            ];
+            if public_pattern {
+                controls.push(json!({"kind":"public_triples_reconstructed","executed":true}));
+            }
+            outcome["controls"] = json!(controls);
             return Ok(outcome);
         }
         Err(error) => return Err(error.into()),
     };
+    if public_pattern {
+        outcome["contract"] = require_public_pattern(&prepared)?;
+    }
     if job["operation"] == "attack" {
         if tier == "native" || job["expected_accept"] != false {
             return Err(
                 "malicious witness requires constraint/real tier and rejection expectation".into(),
             );
         }
+        let malicious = attack_witness(
+            &prepared.toml,
+            job["attack"]["kind"].as_str().ok_or("attack kind")?,
+        )?;
+        if public_pattern && unused_opening_changed(&prepared.toml, &malicious)? {
+            return Err(
+                "attack mutates the unused version-four pattern-zero opening; \
+                 classify it as an unused-opening positive control, not an attack"
+                    .into(),
+            );
+        }
         driver.private_package_witness(
             prepared.package,
             &prepared.toml,
             "attack_positive_control",
-        )?;
-        let malicious = attack_witness(
-            &prepared.toml,
-            job["attack"]["kind"].as_str().ok_or("attack kind")?,
         )?;
         let result =
             driver.private_package_witness(prepared.package, &malicious, "attack_negative_control");
@@ -319,8 +433,14 @@ fn run(job: &Value, output: &Path) -> Fallible<Value> {
         )?);
         fs::write(output.join("malicious-input.toml"), malicious)?;
         outcome["stage"] = json!("constraint");
-        outcome["controls"] = json!([{"kind":"honest_constraint_positive","executed":true},
-            {"kind":job["attack"]["kind"],"planner_bypassed":true,"executed":true}]);
+        let mut controls = vec![
+            json!({"kind":"honest_constraint_positive","executed":true}),
+            json!({"kind":job["attack"]["kind"],"planner_bypassed":true,"executed":true}),
+        ];
+        if public_pattern {
+            controls.push(json!({"kind":"pattern_zero_opening_untouched","executed":true}));
+        }
+        outcome["controls"] = json!(controls);
         return Ok(outcome);
     }
     outcome["observed"] = json!("accepted");
@@ -328,9 +448,20 @@ fn run(job: &Value, output: &Path) -> Fallible<Value> {
         outcome["stage"] = json!("native");
         return Ok(outcome);
     }
+    // Legacy backends keep their previous (empty) prefix of controls.
+    let mut controls = Vec::new();
+    if public_pattern {
+        let unused = unused_opening_witness(&prepared.toml)?;
+        if !unused_opening_changed(&prepared.toml, &unused)? {
+            return Err("unused-opening positive control is a no-op".into());
+        }
+        driver.private_package_witness(prepared.package, &unused, "unused_opening_positive")?;
+        controls.push(json!({"kind":"unused_pattern_zero_opening_positive","executed":true}));
+    }
     if tier == "constraint" {
         driver.private_package_witness(prepared.package, &prepared.toml, "binding_valid")?;
         outcome["stage"] = json!("constraint");
+        outcome["controls"] = json!(controls);
         return Ok(outcome);
     }
     // Use the real driver directly, then independently reconstruct the verifier
@@ -374,9 +505,9 @@ fn run(job: &Value, output: &Path) -> Fallible<Value> {
     if !matches!(replay,Err(ResultError::Rejected(ref s)) if s == "challenge already consumed") {
         return Err("replay error class differs".into());
     }
-    let mut controls = vec![
+    controls.push(
         json!({"kind":"nonce_replay","error_class":"challenge already consumed","executed":true}),
-    ];
+    );
     for kind in [
         "fabricated_row",
         "omitted_row",
@@ -426,6 +557,23 @@ fn run(job: &Value, output: &Path) -> Fallible<Value> {
                 "genuine artifact control {kind} did not return a typed verifier rejection"
             )
             .into());
+        };
+        controls.push(json!({"kind":kind,"error_class":reason,"executed":true,
+            "stage":if reason == "cryptographic proof rejected" {"cryptographic_verifier"} else {"verifier_admission"}}));
+    }
+    // A genuine version-four proof relabeled as another version must reject:
+    // version one derives the legacy member and omits public_triples.
+    let version_controls: &[(&str, u32)] = if public_pattern {
+        &[("legacy_version_one", 1), ("version_three", 3)]
+    } else {
+        &[]
+    };
+    for &(kind, version) in version_controls {
+        let mut altered = presentation.clone();
+        altered.version = version;
+        let rejected = verify(query, &altered, &policy, &nonce, &InMemorySeenNonces::new());
+        let Err(ResultError::Rejected(reason)) = rejected else {
+            return Err(format!("version control {kind} did not return a typed rejection").into());
         };
         controls.push(json!({"kind":kind,"error_class":reason,"executed":true,
             "stage":if reason == "cryptographic proof rejected" {"cryptographic_verifier"} else {"verifier_admission"}}));
@@ -485,5 +633,220 @@ fn run_job() -> Fallible<()> {
         .write(true)
         .open(output.join("outcome.json"))?;
     file.write_all(&serde_json::to_vec_pretty(&result)?)?;
+    Ok(())
+}
+
+// [OPUS-5.5] beadzkp-15.1.1: native adapter tests. They execute no Noir and
+// establish no proof; constraint and real cells run only in the CI campaign.
+const SCAN: &str = "SELECT DISTINCT ?s ?o WHERE { ?s <urn:p> ?o }";
+const JOIN: &str = "SELECT DISTINCT ?s ?m ?o WHERE { ?s <urn:p> ?m . ?m <urn:p> ?o }";
+// Mirrors corpus.py NOIR_ATTACKS; the Python plan pins the same ten kinds.
+const NOIR_ATTACKS: [&str; 10] = [
+    "selected_padding",
+    "leaf_out_of_range",
+    "credential_out_of_range",
+    "empty_signed_graph",
+    "length_mismatch",
+    "activate_padding_row",
+    "deactivate_real_row",
+    "inactive_public_nonzero",
+    "valid_looking_padding",
+    "duplicate_support_preimage",
+];
+
+fn cycle() -> Value {
+    json!([
+        ["<urn:a>", "<urn:p>", "<urn:b>"],
+        ["<urn:b>", "<urn:p>", "<urn:a>"]
+    ])
+}
+
+fn native_job(backend: &str, query: &str, triples: Value, vars: Value, row: Value) -> Value {
+    json!({"schema":"sparq.proof-binding-job.v1","operation":"binding","id":"native-unit",
+        "case_sha256":"native-unit","backend":backend,"tier":"native","query":query,
+        "triples":triples,"variables":vars,"rows":[row]})
+}
+
+fn native(job: &Value) -> Fallible<Value> {
+    // The native tier never writes artifacts; a missing directory proves it.
+    run(job, Path::new("/nonexistent-native-tier-output"))
+}
+
+fn prepared_for(
+    job: &Value,
+    public_pattern: bool,
+    profile: NumericProfile,
+) -> Fallible<PreparedResult> {
+    let (credentials, policy) = fixture(job)?;
+    let vars = job["variables"].as_array().ok_or("variables")?;
+    let rows = mapping(vars, job["rows"].as_array().ok_or("rows")?)?;
+    let nonce = VerifierNonce::from_field(Fr::from(7u64));
+    let query = job["query"].as_str().ok_or("query")?;
+    let options = ResultOptions::default();
+    Ok(if public_pattern {
+        prepare_result_public_pattern(query, &credentials, &rows, &policy, &nonce, options)?
+    } else {
+        prepare_result_numeric(
+            query,
+            &credentials,
+            &rows,
+            &policy,
+            &nonce,
+            options,
+            profile,
+        )?
+    })
+}
+
+#[test]
+fn public_pattern_native_valid_bindings_dispatch_v4_only() -> Fallible<()> {
+    for (query, vars, row) in [
+        (SCAN, json!(["s", "o"]), json!(["<urn:a>", "<urn:b>"])),
+        (
+            JOIN,
+            json!(["s", "m", "o"]),
+            json!(["<urn:a>", "<urn:b>", "<urn:a>"]),
+        ),
+    ] {
+        let job = native_job(
+            "noir_public_pattern",
+            query,
+            cycle(),
+            vars.clone(),
+            row.clone(),
+        );
+        let outcome = native(&job)?;
+        assert_eq!(outcome["observed"], "accepted");
+        assert_eq!(outcome["stage"], "native");
+        assert_eq!(
+            outcome["contract"],
+            json!({"version": 4, "package": "result_v4_k1_n16_p3_r4_f0_d10"})
+        );
+        // Existing backends keep their outcome shape and legacy dispatch.
+        let legacy = native(&native_job("noir_unsigned", query, cycle(), vars, row))?;
+        assert_eq!(legacy["observed"], "accepted");
+        assert!(legacy.get("contract").is_none());
+    }
+    Ok(())
+}
+
+#[test]
+fn public_pattern_native_rejections_separate_empty_graph_from_support() -> Fallible<()> {
+    let absent = native_job(
+        "noir_public_pattern",
+        SCAN,
+        cycle(),
+        json!(["s", "o"]),
+        json!(["<urn:a>", "<urn:missing>"]),
+    );
+    let outcome = native(&absent)?;
+    assert_eq!(outcome["observed"], "rejected");
+    assert_eq!(outcome["stage"], "support");
+    assert_eq!(outcome["rejection_scope"], "native_support");
+    assert!(outcome["error_class"].is_string());
+    assert!(outcome.get("contract").is_none());
+    let empty = native_job(
+        "noir_public_pattern",
+        SCAN,
+        json!([]),
+        json!(["s", "o"]),
+        json!(["<urn:a>", "<urn:b>"]),
+    );
+    let outcome = native(&empty)?;
+    assert_eq!(outcome["observed"], "rejected");
+    assert_eq!(outcome["rejection_scope"], "empty_graph");
+    let mut unknown = empty.clone();
+    unknown["backend"] = json!("noir_public_pattern_v1");
+    assert!(native(&unknown).is_err());
+    Ok(())
+}
+
+#[test]
+fn public_pattern_guard_refuses_legacy_and_signed_preparations() -> Fallible<()> {
+    let job = native_job(
+        "noir_public_pattern",
+        SCAN,
+        cycle(),
+        json!(["s", "o"]),
+        json!(["<urn:a>", "<urn:b>"]),
+    );
+    let v4 = prepared_for(&job, true, NumericProfile::Unsigned)?;
+    assert_eq!(
+        require_public_pattern(&v4)?["version"],
+        PUBLIC_PATTERN_VERSION
+    );
+    for profile in [NumericProfile::Unsigned, NumericProfile::Signed] {
+        let legacy = prepared_for(&job, false, profile)?;
+        assert!(require_public_pattern(&legacy).is_err());
+    }
+    Ok(())
+}
+
+#[test]
+fn public_pattern_attack_inventory_leaves_unused_opening_untouched() -> Fallible<()> {
+    let job = native_job(
+        "noir_public_pattern",
+        JOIN,
+        cycle(),
+        json!(["s", "m", "o"]),
+        json!(["<urn:a>", "<urn:b>", "<urn:a>"]),
+    );
+    let prepared = prepared_for(&job, true, NumericProfile::Unsigned)?;
+    let zero = json!(field_to_hex(&Fr::from(0u64)));
+    assert_eq!(
+        witness_field(&prepared.toml, "selected_types")?[0][0],
+        json!([0, 0, 0])
+    );
+    assert_eq!(
+        witness_field(&prepared.toml, "selected_hashes")?[0][0],
+        json!([zero.clone(), zero.clone(), zero])
+    );
+    for kind in NOIR_ATTACKS {
+        let malicious = attack_witness(&prepared.toml, kind)?;
+        assert_ne!(malicious, prepared.toml, "{kind} is a no-op");
+        assert!(
+            !unused_opening_changed(&prepared.toml, &malicious)?,
+            "{kind}"
+        );
+    }
+    let unused = unused_opening_witness(&prepared.toml)?;
+    assert!(unused_opening_changed(&prepared.toml, &unused)?);
+    Ok(())
+}
+
+#[test]
+fn public_pattern_false_binding_reconstructs_v4_statement() -> Fallible<()> {
+    let job = native_job(
+        "noir_public_pattern",
+        SCAN,
+        cycle(),
+        json!(["s", "o"]),
+        json!(["<urn:a>", "<urn:b>"]),
+    );
+    let anchor = prepared_for(&job, true, NumericProfile::Unsigned)?;
+    let (_, policy) = fixture(&job)?;
+    let nonce = VerifierNonce::from_field(Fr::from(7u64));
+    let forged = mapping(
+        job["variables"].as_array().ok_or("variables")?,
+        &[json!(["<urn:a>", "<urn:missing>"])],
+    )?;
+    let contract = contract_for(true, NumericProfile::Unsigned, &anchor);
+    let malicious = false_binding_witness(&anchor, &forged, contract, &policy, &nonce)?;
+    let table = witness_field(&malicious, "public_triples")?;
+    assert_ne!(table, witness_field(&anchor.toml, "public_triples")?);
+    assert_eq!(table[0][2], json!(field_to_hex(&field(&forged[0]["o"])?)));
+    assert_eq!(
+        witness_field(&malicious, "version")?,
+        json!(PUBLIC_PATTERN_VERSION)
+    );
+    // Wrong-version controls: a legacy contract cannot adopt the V4 statement,
+    // and relabeling it as version one derives the legacy member without a table.
+    let legacy = contract_for(false, NumericProfile::Unsigned, &anchor);
+    assert!(false_binding_witness(&anchor, &forged, legacy, &policy, &nonce).is_err());
+    let mut relabeled = anchor.presentation.clone();
+    relabeled.version = 1;
+    let statement = public_statement(&relabeled, &policy, &nonce)?;
+    assert_eq!(statement.package, "result_v1_k1_n16_p3_r4_f0");
+    assert!(statement.fields.iter().all(|(n, _)| *n != "public_triples"));
     Ok(())
 }

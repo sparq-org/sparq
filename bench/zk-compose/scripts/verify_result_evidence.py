@@ -18,11 +18,35 @@ EVIDENCE = ROOT / "bench/zk-compose/result_v1_compatibility.json"
 CAPACITY = ROOT / "bench/zk-compose/result_capacity_gates.json"
 SIGNED = ROOT / "bench/zk-compose/result_signed_gates.json"
 SNAPSHOT = ROOT / "bench/zk-compose/gate_counts_latest.json"
+PUBLIC = ROOT / "bench/zk-compose/result_public_gates.json"
+REGRESSION = ROOT / "crates/sparq-zk-compose/tests/gate_count_snapshot.json"
 MEMBERS = {f"result_v1_k{k}_n16_p3_r4_f{f}" for k in (1, 2) for f in (0, 2)}
+PUBLIC_MEMBERS = {f"result_v4_k{k}_n16_p3_r4_f0_d10" for k in (1, 2)}
 
 
 def digest(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def is_hex(value: object, length: int = 64) -> bool:
+    return isinstance(value, str) and len(value) == length and all(c in "0123456789abcdef" for c in value)
+
+
+def check_measured_source(source: object) -> None:
+    """[OPUS-5.5] Require exact, explicitly non-canonical candidate provenance."""
+    if not isinstance(source, dict):
+        raise ValueError("measured source provenance is missing")
+    if not all(is_hex(source.get(field), 40) for field in ("source_commit", "source_tree")):
+        raise ValueError("measured source commit or tree is not a full object id")
+    hashes = source.get("tool_executable_sha256")
+    if not isinstance(hashes, dict) or set(hashes) != {"nargo", "bb"} or not all(
+        is_hex(value) for value in hashes.values()
+    ):
+        raise ValueError("measured tool executable hashes are incomplete or invalid")
+    if not all(is_hex(source.get(field)) for field in ("job_sha256", "independent_handoff_sha256")):
+        raise ValueError("measured job or handoff hash is invalid")
+    if source.get("canonical") is not False:
+        raise ValueError("work-box measurements must stay labelled non-canonical")
 
 
 def check(data: dict, root: Path) -> None:
@@ -41,6 +65,7 @@ def check(data: dict, root: Path) -> None:
                 raise ValueError(f"{member}: {flag} does not establish identity")
             if len(base[field]) != 64 or any(c not in "0123456789abcdef" for c in base[field]):
                 raise ValueError(f"{member}: invalid {field}")
+    check_measured_source(data.get("measured_source"))
     expected = {
         str(p.relative_to(root)) for p in (root / "zk/compose").rglob("*.nr")
         if "target" not in p.relative_to(root).parts
@@ -56,7 +81,8 @@ def check(data: dict, root: Path) -> None:
 
 
 def check_capacity(capacity: dict, data: dict, snapshot: dict) -> None:
-    if capacity["source_files"] != data["source_files"] or capacity["comparison_base"] != BASE:
+    if (capacity["source_files"] != data["source_files"] or capacity["comparison_base"] != BASE
+            or capacity.get("measured_source") != data["measured_source"]):
         raise ValueError("capacity evidence does not identify the same measured source")
     for tool in ("nargo", "bb"):
         if capacity[f"{tool}_version"] != data["tool_versions"][tool]:
@@ -80,7 +106,8 @@ def check_capacity(capacity: dict, data: dict, snapshot: dict) -> None:
 
 def check_signed(signed: dict, data: dict, snapshot: dict) -> None:
     """[GPT-6] Bind the fixed signed-capacity measurement inventory to its source."""
-    if signed["source_files"] != data["source_files"] or signed["tool_versions"] != data["tool_versions"]:
+    if (signed["source_files"] != data["source_files"] or signed["tool_versions"] != data["tool_versions"]
+            or signed.get("measured_source") != data["measured_source"]):
         raise ValueError("signed evidence source or toolchain differs from compatibility evidence")
     expected = {
         f"result_v3_k{k}_n16_p3_r4_f{f}_s{64 if f else 0}_d{depth}"
@@ -99,7 +126,43 @@ def check_signed(signed: dict, data: dict, snapshot: dict) -> None:
                 raise ValueError(f"{name}: invalid signed {field}")
 
 
-def self_test(data: dict, capacity: dict, signed: dict, snapshot: dict) -> None:
+def legacy_acir(capacity: dict, signed: dict) -> set[str]:
+    return {r["acir_bytecode_sha256"] for r in (*capacity["members"].values(), *signed["members"].values())}
+
+
+def check_public(public: dict, data: dict, snapshot: dict, regression: dict, legacy: set[str]) -> None:
+    """[OPUS-5.5] Bind the version-4 static measurements to the same source and tools."""
+    if (public["source_files"] != data["source_files"] or public["tool_versions"] != data["tool_versions"]
+            or public.get("measured_source") != data["measured_source"]):
+        raise ValueError("public-pattern evidence source, toolchain or provenance differs")
+    if set(public["members"]) != PUBLIC_MEMBERS or {
+        name for name in snapshot["benchmarks"] if name.startswith("result_v4_")
+    } != PUBLIC_MEMBERS or {
+        name for name in regression["members"] if name.startswith("result_v4_")
+    } != PUBLIC_MEMBERS:
+        raise ValueError("public-pattern measurement or snapshot member inventory mismatch")
+    required = {"zk/compose/compose_core/src/result_public.nr"} | {
+        f"zk/compose/{name}/src/main.nr" for name in PUBLIC_MEMBERS
+    }
+    if not required <= set(public["source_files"]):
+        raise ValueError("public-pattern sources are absent from the measured inventory")
+    seen: set[str] = set()
+    for name, record in public["members"].items():
+        size = record["circuit_size"]
+        if (type(size) is not int or size <= 0 or size != snapshot["benchmarks"][name]["circuit_size"]
+                or size != regression["members"][name]):
+            raise ValueError(f"{name}: public-pattern gate count differs from the snapshots")
+        for field in ("acir_bytecode_sha256", "abi_sha256", "artifact_sha256", "gate_log_sha256"):
+            if not is_hex(record[field]):
+                raise ValueError(f"{name}: invalid public-pattern {field}")
+        # A version-4 circuit has its own public ABI, so its ACIR cannot repeat another member's.
+        if record["acir_bytecode_sha256"] in legacy | seen:
+            raise ValueError(f"{name}: public-pattern ACIR hash duplicates another member")
+        seen.add(record["acir_bytecode_sha256"])
+
+
+def self_test(data: dict, capacity: dict, signed: dict, snapshot: dict,
+              public: dict, regression: dict) -> None:
     member = sorted(MEMBERS)[0]
     variants = []
     changed = copy.deepcopy(data)
@@ -120,6 +183,15 @@ def self_test(data: dict, capacity: dict, signed: dict, snapshot: dict) -> None:
     changed = copy.deepcopy(data)
     changed["comparison_base"] = "0" * 40
     variants.append(changed)
+    # [OPUS-5.5] Candidate provenance: relabelled canonical, truncated commit, bad tool hash.
+    for path, value in ((("canonical",), True), (("source_commit",), "14d426bd"),
+                        (("tool_executable_sha256", "bb"), "invalid")):
+        changed = copy.deepcopy(data)
+        target = changed["measured_source"]
+        for key in path[:-1]:
+            target = target[key]
+        target[path[-1]] = value
+        variants.append(changed)
     for index, changed in enumerate(variants):
         try:
             check(changed, ROOT)
@@ -135,6 +207,9 @@ def self_test(data: dict, capacity: dict, signed: dict, snapshot: dict) -> None:
     capacity_variants.append(changed)
     changed = copy.deepcopy(capacity)
     changed["members"][member]["acir_bytecode_sha256"] = "0" * 64
+    capacity_variants.append(changed)
+    changed = copy.deepcopy(capacity)
+    changed["measured_source"]["observed_at_utc"] = "2026-09-12T20:44:49.380619+00:00"
     capacity_variants.append(changed)
     for index, changed in enumerate(capacity_variants):
         try:
@@ -157,13 +232,59 @@ def self_test(data: dict, capacity: dict, signed: dict, snapshot: dict) -> None:
     changed = copy.deepcopy(signed)
     changed["members"][member]["abi_sha256"] = "invalid"
     signed_variants.append(changed)
+    changed = copy.deepcopy(signed)
+    changed["measured_source"]["platform"] = "canonical CI"
+    signed_variants.append(changed)
     for index, changed in enumerate(signed_variants):
         try:
             check_signed(changed, data, snapshot)
         except ValueError:
             continue
         raise AssertionError(f"corrupted signed evidence variant {index} was accepted")
-    print(f"Result evidence: {len(variants) + len(capacity_variants) + len(signed_variants)} corruption controls rejected")
+    # [OPUS-5.5] Version-4 record corruptions; each tuple is (public, gate JSON, regression snapshot).
+    legacy = legacy_acir(capacity, signed)
+    member = sorted(PUBLIC_MEMBERS)[0]
+    public_variants = []
+    for field, value in (("source_files", {}), ("tool_versions", {})):
+        changed = copy.deepcopy(public)
+        changed[field] = value
+        public_variants.append((changed, snapshot, regression))
+    changed = copy.deepcopy(public)
+    changed["measured_source"]["tool_executable_sha256"]["nargo"] = "0" * 64
+    public_variants.append((changed, snapshot, regression))
+    changed = copy.deepcopy(public)
+    del changed["members"][member]
+    public_variants.append((changed, snapshot, regression))
+    changed = copy.deepcopy(public)
+    changed["members"]["result_v4_k3_n16_p3_r4_f0_d10"] = changed["members"][member]
+    public_variants.append((changed, snapshot, regression))
+    changed = copy.deepcopy(public)
+    changed["members"][member]["circuit_size"] += 1
+    public_variants.append((changed, snapshot, regression))
+    for field, value in (("acir_bytecode_sha256", "invalid"), ("abi_sha256", "0" * 63),
+                         ("artifact_sha256", "A" * 64), ("gate_log_sha256", None),
+                         ("acir_bytecode_sha256", sorted(legacy)[0])):
+        changed = copy.deepcopy(public)
+        changed["members"][member][field] = value
+        public_variants.append((changed, snapshot, regression))
+    changed = copy.deepcopy(public)
+    other = sorted(PUBLIC_MEMBERS)[1]
+    changed["members"][other]["acir_bytecode_sha256"] = changed["members"][member]["acir_bytecode_sha256"]
+    public_variants.append((changed, snapshot, regression))
+    changed = copy.deepcopy(snapshot)
+    del changed["benchmarks"][member]
+    public_variants.append((public, changed, regression))
+    changed = copy.deepcopy(regression)
+    changed["members"][member] += 1
+    public_variants.append((public, snapshot, changed))
+    for index, (changed, gates, baseline) in enumerate(public_variants):
+        try:
+            check_public(changed, data, gates, baseline, legacy)
+        except ValueError:
+            continue
+        raise AssertionError(f"corrupted public-pattern evidence variant {index} was accepted")
+    total = len(variants) + len(capacity_variants) + len(signed_variants) + len(public_variants)
+    print(f"Result evidence: {total} corruption controls rejected")
 
 
 def run(command: list[str], cwd: Path, timeout: int = 600) -> str:
@@ -207,12 +328,15 @@ def main() -> None:
     capacity = json.loads(CAPACITY.read_text())
     signed = json.loads(SIGNED.read_text())
     snapshot = json.loads(SNAPSHOT.read_text())
+    public = json.loads(PUBLIC.read_text())
+    regression = json.loads(REGRESSION.read_text())
     check(data, ROOT)
     check_capacity(capacity, data, snapshot)
     check_signed(signed, data, snapshot)
+    check_public(public, data, snapshot, regression, legacy_acir(capacity, signed))
     print("Result evidence: inventory, lengths, identities, gate counts and source hashes match")
     if args.self_test:
-        self_test(data, capacity, signed, snapshot)
+        self_test(data, capacity, signed, snapshot, public, regression)
     if args.baseline_root:
         rebuild_baseline(data, args.baseline_root)
 

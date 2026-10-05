@@ -400,8 +400,14 @@ jobs:
 
       # [GPT-6] The additive result contract is default-off, so it needs explicit
       # feature coverage: real private-witness rejection, ZK proofs and ABI anchors.
+      # [OPUS-5.5] beadzkp-15.1: the ignored public-pattern proof test fails closed
+      # without a NEW absolute evidence directory outside the checkout. runner.temp
+      # is the existing per-job parent; the test itself creates the unique leaf.
       - name: Run selected-result private-witness and verifier tests (real bb)
+        id: selected-result
         if: steps.changes.outputs.zk == 'true'
+        env:
+          SPARQ_PUBLIC_PATTERN_EVIDENCE: ${{ runner.temp }}/public-pattern-evidence-${{ github.run_id }}-${{ github.run_attempt }}
         run: |
           cargo test -p sparq-zk-compose --features successful-results --lib result:: -- --include-ignored --test-threads=1 --skip result::proof_bindings::run_job
           python3 bench/zk-compose/campaigns/test_campaign.py
@@ -411,3 +417,16 @@ jobs:
           nargo test --package sparq_zk_compose_core result::
           nargo test --package sparq_zk_compose_core result_integer::
           nargo test --package sparq_zk_compose_core result_signed_integer::
+          nargo test --package sparq_zk_compose_core result_public::
+
+      # [OPUS-5.5] beadzkp-15.1: evidence files are written only after every assertion
+      # passes, so a failed step may leave the directory empty or absent; missing
+      # files are an error whenever the step succeeded.
+      - name: Retain public-pattern proof evidence including failed runs
+        if: always() && steps.changes.outputs.zk == 'true' && steps.selected-result.outcome != 'skipped'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: public-pattern-evidence-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/public-pattern-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: ${{ steps.selected-result.outcome == 'success' && 'error' || 'warn' }}
+          retention-days: 30

@@ -103,6 +103,23 @@ TOOL = "bb gates -s ultra_honk"
 #   result     — integrated support for released mappings, without result completeness
 # ---------------------------------------------------------------------------------------
 FAMILIES: list[dict] = [
+    # [OPUS-5.5] zkp-15.1: the regex pins the exact measured profile (K1/K2, N16, P3, R4,
+    # F0, D10) rather than a parameter shape, so an unmeasured version-4 bucket fails
+    # classify() instead of joining this family unreviewed.
+    {
+        "key": "result_v4",
+        "pattern": r"result_v4_k(?P<k>[12])_n(?P<n>16)_p(?P<p>3)_r(?P<r>4)_f(?P<f>0)_d(?P<d>10)",
+        "params": ["k", "n", "p", "r", "f", "d"],
+        "layer": "result",
+        "role": "Version 4 support for released SELECT DISTINCT mappings. The first BGP "
+        "pattern whose slots are all constants or projected variables is moved to index "
+        "zero and checked against a public triple table the verifier reconstructs from "
+        "its query and the released rows, instead of private typed openings. Issuer "
+        "authentication, credential status (tree depth d), leaf membership and the "
+        "remaining patterns' private typed and shared-variable joins stay in-circuit. "
+        "f=0 only: no private FILTER. Compiled only for k in {1, 2}, n=16, p=3, r=4, "
+        "d=10. Does not establish result completeness or holder identity.",
+    },
     # [GPT-6] Keep the selected-result contract separate from complete-scan members.
     {
         "key": "result_v3",
@@ -601,7 +618,7 @@ def render_markdown(pack: dict) -> str:
     )
     add(
         "- **No third-party figure is reproduced.** See "
-        "[Related work](#related-work-cited-never-re-measured)."
+        "[Related work](#related-work--cited-never-re-measured)."
     )
     add("")
     tc = pack["toolchain"]

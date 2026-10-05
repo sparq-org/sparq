@@ -1,7 +1,12 @@
 // [GPT-6] Synthetic, NONcanonical stage-13 experiment; not external security assurance.
 //! Run with a strict experiment JSON and a new output directory. No real wallet input.
+#[path = "../src/toolchain.rs"]
+mod toolchain;
 #[path = "result_experiment/workloads.rs"]
 mod workloads;
+// [OPUS-5.5] beadzkp-15.1.1: separately versioned schema-3 v1/v4 ablation mode.
+#[path = "result_experiment/public_pattern.rs"]
+mod public_pattern;
 
 use oxrdf::{Literal, NamedNode, Term, Triple};
 use serde::{Deserialize, Serialize};
@@ -15,9 +20,9 @@ use sparq_zk_compose::{
     driver::CircuitProver,
     manifest::{DisclosedTerm, StatusListSnapshot},
     result::{
-        PrivateIntegerCapacity, ResultCredential, ResultError, ResultOptions, ResultPolicy,
-        ResultPresentation, ResultWork, WitnessSelection, prepare_result_with_options,
-        verify_result,
+        PreparedResult, PrivateIntegerCapacity, ResultCredential, ResultError, ResultOptions,
+        ResultPolicy, ResultPresentation, ResultWork, WitnessSelection,
+        prepare_result_with_options, verify_result,
     },
     verifier::{InMemorySeenNonces, VerifierNonce},
 };
@@ -27,7 +32,7 @@ use std::{
     fs,
     io::Read,
     path::{Path, PathBuf},
-    process::{Command, ExitCode},
+    process::{Command, ExitCode, Output},
     time::Instant,
 };
 
@@ -35,6 +40,9 @@ type Fallible<T> = Result<T, Box<dyn Error>>;
 const QUERY: &str =
     "SELECT DISTINCT ?name WHERE { ?s <urn:name> ?name . ?s <urn:age> ?age . FILTER(?age >= 18) }";
 const MAX_MANIFEST_BYTES: u64 = 1024 * 1024;
+/// Synthetic challenge for the both-sides challenge-substitution control; sample
+/// nonces must never equal it (schema-2 manifests already reject it).
+const TAMPER_NONCE: u64 = 999_999;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -210,24 +218,34 @@ fn work(w: &ResultWork) -> Value {
         "witness_uses":w.witness_uses,"public_predicates":w.public_predicates,"private_predicates":w.private_predicates,
         "signature_checks":w.signature_checks,"optimization":w.optimization.map(|v|format!("{v:?}"))})
 }
-fn command(tool: &str, args: &[&str], cwd: &Path) -> Fallible<String> {
-    let out = Command::new(tool).args(args).current_dir(cwd).output()?;
+fn successful_stdout(tool: &str, out: Output) -> Fallible<Vec<u8>> {
     if !out.status.success() {
         return Err(format!("{tool} failed: {}", String::from_utf8_lossy(&out.stderr)).into());
     }
-    Ok(String::from_utf8(out.stdout)?.trim().to_owned())
+    Ok(out.stdout)
 }
-fn pinned_version(tool: &str, output: &str, expected: &str) -> bool {
-    match tool {
-        "nargo" => output
-            .lines()
-            .next()
-            .is_some_and(|line| line == format!("nargo version = {expected}")),
-        "bb" => output.trim() == expected,
-        _ => false,
+fn command(tool: &str, args: &[&str], cwd: &Path) -> Fallible<String> {
+    let out = Command::new(tool).args(args).current_dir(cwd).output()?;
+    Ok(String::from_utf8(successful_stdout(tool, out)?)?
+        .trim()
+        .to_owned())
+}
+// [OPUS-5.5] Checks raw, untrimmed stdout: generic trimming would rescue leading blanks.
+fn pinned_version(tool: &str, out: Output) -> Fallible<String> {
+    let stdout = successful_stdout(tool, out)?;
+    let version = String::from_utf8(stdout).map_err(|e| {
+        format!(
+            "{tool} --version output is not UTF-8: {:?}",
+            String::from_utf8_lossy(e.as_bytes())
+        )
+    })?;
+    // Shared exact field matcher; a later diagnostic cannot rescue a near match.
+    if !toolchain::pinned_version_output(tool, version.as_bytes()) {
+        return Err(format!("unsupported {tool} version: {version:?}").into());
     }
+    Ok(version)
 }
-fn tool_identity(tool: &str, expected: &str, root: &Path) -> Fallible<Value> {
+fn tool_identity(tool: &str, root: &Path) -> Fallible<Value> {
     // This driver is Unix-only. Match executable lookup before hashing the same file.
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
@@ -246,17 +264,15 @@ fn tool_identity(tool: &str, expected: &str, root: &Path) -> Fallible<Value> {
         })
         .ok_or("executable tool not found on PATH or unsupported platform")?
         .canonicalize()?;
-    let version = command(
-        found.to_str().ok_or("non-UTF-8 tool path")?,
-        &["--version"],
-        root,
-    )?;
-    // Match the tool's actual version field; a later diagnostic cannot rescue a near match.
-    if !pinned_version(tool, &version, expected) {
-        return Err(format!("unsupported {tool} version: {version}").into());
-    }
+    // Run and hash the same resolved file; record the exact validated stdout.
+    let out = Command::new(&found)
+        .arg("--version")
+        .current_dir(root)
+        .output()?;
+    let version = pinned_version(tool, out)?;
     Ok(json!({"version_output":version,"binary_blake3":hash(&fs::read(found)?)}))
 }
+
 fn source_identity(root: &Path) -> Fallible<Value> {
     let head = command("git", &["rev-parse", "HEAD"], root)?;
     let status = command(
@@ -299,16 +315,33 @@ fn rejection(
         Ok(_) => Err("tampered presentation was accepted".into()),
     }
 }
+// [OPUS-5.5] beadzkp-15.1.1: one measured relation, so every adapter mode shares
+// the same prove/verify/replay/tamper/artifact pipeline instead of copying it.
+/// One proof relation under measurement, with its exact request and wire version.
+struct Relation<'a> {
+    /// Exact relying-party query bytes shared by prover and verifier.
+    query: &'a str,
+    /// A changed request, used only by the requested-query tamper control.
+    altered_query: String,
+    /// Public statement version this relation must emit.
+    version: u32,
+    /// Optional control relabeling the proof as another relation version.
+    relabel_version: Option<u32>,
+    /// Preparation entry point under test, bound to its fixture and prover options.
+    prepare: &'a dyn Fn(&VerifierNonce) -> Result<PreparedResult, ResultError>,
+}
+
 fn controls(
     p: &ResultPresentation,
     fixture: &Fixture,
     nonce: &VerifierNonce,
     prover: &CircuitProver,
     out: &Path,
+    rel: &Relation<'_>,
 ) -> Fallible<Value> {
     let verify = |p: &ResultPresentation, n: &VerifierNonce| {
         verify_result(
-            QUERY,
+            rel.query,
             p,
             &fixture.policy,
             n,
@@ -331,12 +364,12 @@ fn controls(
     );
     let rows = rejection(verify(&rows, nonce), "cryptographic proof rejected")?;
     // Change BOTH sides of the challenge, so a host equality guard cannot satisfy this control.
-    let n = VerifierNonce::from_field(Fr::from(999999u64));
+    let n = VerifierNonce::from_field(Fr::from(TAMPER_NONCE));
     let mut challenge = p.clone();
     challenge.challenge = n.as_field_hex();
     let challenge = rejection(verify(&challenge, &n), "cryptographic proof rejected")?;
     let mut query = p.clone();
-    query.query = QUERY.replace(">= 18", ">= 19");
+    query.query = rel.altered_query.clone();
     let query = rejection(
         verify(&query, nonce),
         "query differs from relying-party request",
@@ -345,7 +378,7 @@ fn controls(
     policy.snapshots[0].bits.fill(255);
     let status = rejection(
         verify_result(
-            QUERY,
+            rel.query,
             p,
             &policy,
             nonce,
@@ -355,9 +388,15 @@ fn controls(
         ),
         "cryptographic proof rejected",
     )?;
-    Ok(
-        json!({"proof_bytes":proof,"released_term":rows,"challenge_both_sides":challenge,"requested_query":query,"accepted_status_snapshot":status}),
-    )
+    let mut checks = json!({"proof_bytes":proof,"released_term":rows,"challenge_both_sides":challenge,"requested_query":query,"accepted_status_snapshot":status});
+    if let Some(version) = rel.relabel_version {
+        // The verifier must select the other package and key, never reuse this proof.
+        let mut relabeled = p.clone();
+        relabeled.version = version;
+        checks["version_relabel"] =
+            rejection(verify(&relabeled, nonce), "cryptographic proof rejected")?;
+    }
+    Ok(checks)
 }
 fn run_one(
     planner: Planner,
@@ -368,7 +407,6 @@ fn run_one(
     controls_required: bool,
     record: &mut Value,
 ) -> Fallible<()> {
-    let nonce = VerifierNonce::from_field(Fr::from(nonce_id));
     let options = ResultOptions {
         witness_selection: match planner {
             Planner::FirstSuccess => WitnessSelection::FirstSuccess,
@@ -376,16 +414,41 @@ fn run_one(
         },
         ..ResultOptions::default()
     };
-    let prepared = stage(record, "prepare_api", || {
-        Ok(prepare_result_with_options(
-            QUERY,
-            &f.credentials,
-            &f.rows,
-            &f.policy,
-            &nonce,
-            options,
-        )?)
-    })?;
+    let relation = Relation {
+        query: QUERY,
+        altered_query: QUERY.replace(">= 18", ">= 19"),
+        version: 1,
+        relabel_version: None,
+        prepare: &|nonce: &VerifierNonce| {
+            prepare_result_with_options(QUERY, &f.credentials, &f.rows, &f.policy, nonce, options)
+        },
+    };
+    run_relation(
+        &relation,
+        f,
+        nonce_id,
+        prover,
+        out,
+        controls_required,
+        record,
+    )?;
+    Ok(())
+}
+
+/// Prepares, proves, verifies and replays one relation, retaining its artifacts.
+///
+/// Returns the accepted presentation after replay and optional tamper controls.
+fn run_relation(
+    rel: &Relation<'_>,
+    f: &Fixture,
+    nonce_id: u64,
+    prover: &CircuitProver,
+    out: &Path,
+    controls_required: bool,
+    record: &mut Value,
+) -> Fallible<ResultPresentation> {
+    let nonce = VerifierNonce::from_field(Fr::from(nonce_id));
+    let prepared = stage(record, "prepare_api", || Ok((rel.prepare)(&nonce)?))?;
     record["work"] = work(prepared.work());
     let p = driver_stage(record, "prove_api_inclusive", prover, || {
         Ok(prepared.prove(prover, out, "experiment")?)
@@ -402,7 +465,7 @@ fn run_one(
             "bb_prove_and_write_vk",
         ],
     )?;
-    if p.version != 1 || p.integer_capacity != PrivateIntegerCapacity::TwoDigits {
+    if p.version != rel.version || p.integer_capacity != PrivateIntegerCapacity::TwoDigits {
         return Err("result numeric contract/capacity drift".into());
     }
     if p.proof.is_empty() {
@@ -411,7 +474,7 @@ fn run_one(
     let seen = InMemorySeenNonces::new();
     let verified = driver_stage(record, "verify_api_inclusive", prover, || {
         Ok(verify_result(
-            QUERY, &p, &f.policy, &nonce, &seen, prover, out,
+            rel.query, &p, &f.policy, &nonce, &seen, prover, out,
         )?)
     })?;
     require_driver_inventory(
@@ -425,7 +488,7 @@ fn run_one(
             "bb_verify",
         ],
     )?;
-    if verified.rows != f.rows || verified.query != QUERY {
+    if verified.rows != f.rows || verified.query != rel.query {
         return Err("accepted result/contract drift".into());
     }
     let replay = driver_stage(
@@ -434,7 +497,7 @@ fn run_one(
         prover,
         || {
             rejection(
-                verify_result(QUERY, &p, &f.policy, &nonce, &seen, prover, out),
+                verify_result(rel.query, &p, &f.policy, &nonce, &seen, prover, out),
                 "challenge already consumed",
             )
         },
@@ -459,11 +522,11 @@ fn run_one(
             record,
             "tamper_controls_excluded_from_timings",
             prover,
-            || controls(&p, f, &nonce, prover, out),
+            || controls(&p, f, &nonce, prover, out, rel),
         )?;
     }
     record["status"] = json!("success");
-    Ok(())
+    Ok(p)
 }
 
 // [GPT-6] Preserve measurements on failures too. Driver events are nested inside
@@ -505,7 +568,34 @@ fn require_driver_inventory(record: &Value, scope: &str, expected: &[&str]) -> F
     }
     Ok(())
 }
-fn read_manifest(path: &Path) -> Fallible<Experiment> {
+/// A validated manifest for one of the separately versioned adapter modes.
+enum Manifest {
+    /// Schema 1 fixed or schema 2 generated planner comparison.
+    Planner(Experiment),
+    /// Schema 3 paired baseline-v1 versus public-pattern-v4 ablation.
+    PublicPattern(public_pattern::Ablation),
+}
+
+/// Reads only the version selector; the selected strict schema then parses all bytes.
+#[derive(Deserialize)]
+struct SchemaProbe {
+    schema_version: u32,
+}
+
+// [OPUS-5.5] beadzkp-15.1.1: both schemas still parse the original bytes strictly,
+// so duplicate or unknown keys cannot survive an intermediate `Value` round trip.
+fn parse_manifest(bytes: &[u8]) -> Fallible<Manifest> {
+    let probe: SchemaProbe = serde_json::from_slice(bytes)?;
+    if probe.schema_version == public_pattern::SCHEMA_VERSION {
+        let exp: public_pattern::Ablation = serde_json::from_slice(bytes)?;
+        exp.validate()?;
+        return Ok(Manifest::PublicPattern(exp));
+    }
+    let exp: Experiment = serde_json::from_slice(bytes)?;
+    exp.validate()?;
+    Ok(Manifest::Planner(exp))
+}
+fn read_manifest(path: &Path) -> Fallible<Manifest> {
     let mut bytes = Vec::new();
     fs::File::open(path)?
         .take(MAX_MANIFEST_BYTES + 1)
@@ -513,23 +603,51 @@ fn read_manifest(path: &Path) -> Fallible<Experiment> {
     if bytes.len() as u64 > MAX_MANIFEST_BYTES {
         return Err("manifest exceeds byte limit".into());
     }
-    let exp: Experiment = serde_json::from_slice(&bytes)?;
-    exp.validate()?;
-    Ok(exp)
+    parse_manifest(&bytes)
 }
-fn execute(exp: &Experiment, out: &Path) -> Fallible<bool> {
+
+/// Records clean source provenance, then creates a new output directory outside it.
+fn open_output(out: &Path) -> Fallible<(PathBuf, Value)> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
         .canonicalize()?;
     let source = source_identity(&root)?;
+    require_outside_source(&root, out)?;
+    fs::create_dir(out)?; // Refuse overwriting or merging prior measurements.
+    Ok((root, source))
+}
+fn require_outside_source(root: &Path, out: &Path) -> Fallible<()> {
     let parent = out
         .parent()
         .ok_or("output needs a parent directory")?
         .canonicalize()?;
-    if parent.starts_with(&root) {
+    if parent.starts_with(root) {
         return Err("output must be outside the source checkout".into());
     }
-    fs::create_dir(out)?; // Refuse overwriting or merging prior measurements.
+    Ok(())
+}
+fn record_tools(report: &mut Value, root: &Path) -> Fallible<()> {
+    for (tool, _) in toolchain::PINNED_TOOLS {
+        report["backend"][tool] = tool_identity(tool, root)?;
+    }
+    Ok(())
+}
+fn error_class(e: &(dyn Error + 'static)) -> &'static str {
+    match e.downcast_ref::<ResultError>() {
+        Some(ResultError::SearchExhausted) => "search_exhausted",
+        Some(ResultError::Rejected(_)) => "relation_rejected",
+        Some(ResultError::Driver(_)) => "backend_error",
+        None => "adapter_error",
+    }
+}
+const TIMING_CONTRACT: &str = "driver events are measured child spans of inclusive API timers, not additive extra stages; uninstrumented host I/O/setup remains in inclusive timers";
+fn unavailable_stages() -> Value {
+    json!({
+        "backend_prove_excluding_key_seconds":{"value":null,"reason":"bb prove --write_vk is measured as one subprocess; internal proof/key split unavailable"},
+        "peak_rss_bytes":{"value":null,"reason":"host/subprocess RSS not instrumented"}})
+}
+fn execute(exp: &Experiment, out: &Path) -> Fallible<bool> {
+    let (root, source) = open_output(out)?;
     let mut report = json!({"schema_version":2,"canonical":false,"status":"failure","experiment":exp,"source":source,
         "backend":{"name":"barretenberg","target":"noir-recursive","zk_mode_requested":true},
         "signature_suites_unavailable":["BBS+","ECDSA","EdDSA"],
@@ -537,13 +655,10 @@ fn execute(exp: &Experiment, out: &Path) -> Fallible<bool> {
             "warmup_definition":"completed full prepare/prove/verify runs per planner; no OS cold-cache assertion",
             "nargo_internal_cache_hit":{"value":null,"reason":"Nargo does not expose reliable per-invocation cache-hit telemetry"},
             "nonce_convention":"distinct deterministic test nonce per attempted run; excluded only from semantic equivalence digest and retained in each transcript"},
-        "timing_contract":"driver events are measured child spans of inclusive API timers, not additive extra stages; uninstrumented host I/O/setup remains in inclusive timers",
-        "runs":[],"unavailable_stages":{
-            "backend_prove_excluding_key_seconds":{"value":null,"reason":"bb prove --write_vk is measured as one subprocess; internal proof/key split unavailable"},
-            "peak_rss_bytes":{"value":null,"reason":"host/subprocess RSS not instrumented"}}});
+        "timing_contract":TIMING_CONTRACT,
+        "runs":[],"unavailable_stages":unavailable_stages()});
     let outcome = (|| -> Fallible<()> {
-        report["backend"]["nargo"] = tool_identity("nargo", "1.0.0-beta.21", &root)?;
-        report["backend"]["bb"] = tool_identity("bb", "5.0.0-nightly.20260324", &root)?;
+        record_tools(&mut report, &root)?;
         let start = Instant::now();
         let f = match &exp.wallet {
             Some(wallet) => authenticate(wallet.triples()?)?,
@@ -578,12 +693,7 @@ fn execute(exp: &Experiment, out: &Path) -> Fallible<bool> {
                 );
                 if let Err(ref e) = result {
                     r["error"] = json!(e.to_string());
-                    r["error_class"] = json!(match e.downcast_ref::<ResultError>() {
-                        Some(ResultError::SearchExhausted) => "search_exhausted",
-                        Some(ResultError::Rejected(_)) => "relation_rejected",
-                        Some(ResultError::Driver(_)) => "backend_error",
-                        None => "adapter_error",
-                    });
+                    r["error_class"] = json!(error_class(e.as_ref()));
                 }
                 report["runs"].as_array_mut().ok_or("run array")?.push(r);
                 result?;
@@ -614,10 +724,11 @@ fn main() -> ExitCode {
         if args.len() != 2 {
             return Err("usage: result_experiment <experiment.json> <new-output-directory>".into());
         }
-        execute(
-            &read_manifest(Path::new(&args[0]))?,
-            &PathBuf::from(&args[1]),
-        )
+        let out = PathBuf::from(&args[1]);
+        match read_manifest(Path::new(&args[0]))? {
+            Manifest::Planner(exp) => execute(&exp, &out),
+            Manifest::PublicPattern(exp) => public_pattern::execute(&exp, &out),
+        }
     })();
     match result {
         Ok(true) => ExitCode::SUCCESS,
@@ -642,26 +753,6 @@ mod tests {
         assert!(require_driver_inventory(&record, "verify", &["bb_verify"]).is_err());
         record["stages"]["verify"]["driver"]["events"] = json!([]);
         assert!(require_driver_inventory(&record, "verify", &["bb_verify"]).is_err());
-    }
-    #[test]
-    fn version_fields_reject_near_matches_and_diagnostic_rescue() {
-        let n = "1.0.0-beta.21";
-        let b = "5.0.0-nightly.20260324";
-        assert!(pinned_version(
-            "nargo",
-            &format!("nargo version = {n}\nnoirc version = {n}+hash"),
-            n
-        ));
-        assert!(pinned_version("bb", b, b));
-        for suffix in ["0", "-other", "+other"] {
-            assert!(!pinned_version("bb", &format!("{b}{suffix}"), b));
-            assert!(!pinned_version(
-                "nargo",
-                &format!("nargo version = {n}{suffix}\n{n}"),
-                n
-            ));
-        }
-        assert!(!pinned_version("bb", &format!("bad\n{b}"), b));
     }
     fn config() -> Experiment {
         serde_json::from_str(include_str!(
@@ -776,5 +867,50 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    // [OPUS-5.5] Synthetic `Output`s exercise the adapter boundary without spawning tools.
+    #[cfg(unix)]
+    #[test]
+    fn tool_versions_are_checked_on_raw_successful_stdout() {
+        use std::os::unix::process::ExitStatusExt;
+        use std::process::ExitStatus;
+        let out = |code: i32, stdout: &[u8]| Output {
+            status: ExitStatus::from_raw(code << 8),
+            stdout: stdout.to_vec(),
+            stderr: b"diagnostic".to_vec(),
+        };
+        let [(_, n), (_, b)] = toolchain::PINNED_TOOLS;
+        let nargo = format!("nargo version = {n}\nnoirc version = {n}+0123\n");
+        assert_eq!(
+            pinned_version("nargo", out(0, nargo.as_bytes())).unwrap(),
+            nargo
+        );
+        // `bb` trimming is part of the matcher contract; the report keeps raw stdout.
+        let bb = format!(" {b}\n");
+        assert_eq!(pinned_version("bb", out(0, bb.as_bytes())).unwrap(), bb);
+        for prefix in ["\n", " ", "\r\n", "\t", "\n \n"] {
+            let padded = format!("{prefix}{nargo}");
+            // The generic trimmed `command` path would have normalized this into acceptance.
+            assert!(toolchain::pinned_version_output(
+                "nargo",
+                padded.trim().as_bytes()
+            ));
+            assert!(
+                pinned_version("nargo", out(0, padded.as_bytes())).is_err(),
+                "{padded:?}"
+            );
+        }
+        for (tool, stdout) in [("nargo", &nargo), ("bb", &bb)] {
+            let failed = pinned_version(tool, out(1, stdout.as_bytes())).unwrap_err();
+            assert!(
+                failed.to_string().contains("failed: diagnostic"),
+                "{failed}"
+            );
+            let mut malformed = stdout.clone().into_bytes();
+            malformed.push(0xff);
+            let malformed = pinned_version(tool, out(0, &malformed)).unwrap_err();
+            assert!(malformed.to_string().contains("not UTF-8"), "{malformed}");
+        }
     }
 }

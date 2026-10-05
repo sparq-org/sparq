@@ -71,3 +71,8 @@ pub mod result_integer;
 
 // [GPT-6] Separate signed-i64 lexical binding; unsigned result members are unchanged.
 pub mod result_signed_integer;
+
+// [OPUS-5.5] beadzkp-15.1: opt-in version-four relation that checks one
+// query-public pattern against a verifier-derived triple table. Research-grade,
+// NOT externally audited; gate/runtime effect unmeasured (EC2 snapshot pending).
+pub mod result_public;

@@ -139,3 +139,6 @@ pub use verifier::HolderRegistry;
 // [GPT-6] Versioned authenticated-result experiment, off by default.
 #[cfg(feature = "successful-results")]
 pub mod result;
+// [OPUS-5.5] beadzkp-13.5: private exact pinned-toolchain version matcher.
+#[cfg(feature = "successful-results")]
+mod toolchain;

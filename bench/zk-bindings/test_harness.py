@@ -93,6 +93,92 @@ class CorpusTests(unittest.TestCase):
             self.assertEqual(sum(j["operation"] == "attack" for j in jobs), 10)
         self.assertEqual(full["classifications"], [])
 
+    def test_public_pattern_backend_reuses_unchanged_finite_domain(self):
+        # [OPUS-5.5] beadzkp-15.1.1: V4 cells mirror, never replace, legacy cells.
+        legacy = plan(finite_proof_universe(), ["noir_unsigned", "noir_signed"], "real")
+        both = plan(finite_proof_universe(), ["noir_unsigned", "noir_signed", "noir_public_pattern"], "real")
+        for backend in ("noir_unsigned", "noir_signed"):
+            self.assertEqual(both["totals"][backend], legacy["totals"][backend])
+        self.assertEqual([j for j in both["jobs"] if j["backend"] != "noir_public_pattern"], legacy["jobs"])
+        v4 = [j for j in both["jobs"] if j["backend"] == "noir_public_pattern"]
+        self.assertEqual(len(v4), 46)
+        self.assertEqual(sum(j["expected_accept"] for j in v4), 4)
+        self.assertEqual(sum(j["operation"] == "binding" and not j["expected_accept"] for j in v4), 32)
+        self.assertEqual(sorted(j["attack"]["kind"] for j in v4 if j["operation"] == "attack"),
+                         sorted(corpus.NOIR_ATTACKS))
+        strip = lambda j: {k:v for k, v in j.items() if k not in ("backend", "id")}
+        unsigned = [j for j in both["jobs"] if j["backend"] == "noir_unsigned"]
+        self.assertEqual([strip(j) for j in v4], [strip(j) for j in unsigned])
+        self.assertEqual(len({j["id"] for j in both["jobs"]}), len(both["jobs"]))
+        native = plan(exhaustive(), ["noir_public_pattern"], "native")["totals"]["noir_public_pattern"]
+        self.assertEqual((native["configured_jobs"], native["positive_bindings_or_results"]), (576, 72))
+        empty = plan([tiny_case(0, t) for t in ("scan", "join")], ["noir_public_pattern"], "native")
+        self.assertEqual(len(empty["jobs"]), 9 + 27)
+        self.assertFalse(any(j["expected_accept"] for j in empty["jobs"]))
+        self.assertEqual(plan([tiny_case(6, "join")], ["noir_public_pattern"], "native")["classifications"], [])
+
+    def test_public_pattern_outcomes_refuse_fallback_and_api_only_negatives(self):
+        manifest = plan(finite_proof_universe(), ["noir_public_pattern"], "real")
+        positive = next(j for j in manifest["jobs"] if j["expected_accept"])
+        absent = next(j for j in manifest["jobs"] if j["operation"] == "binding" and not j["expected_accept"])
+        attack = next(j for j in manifest["jobs"] if j["operation"] == "attack")
+        contract = {"version":4, "package":"result_v4_k1_n16_p3_r4_f0_d10"}
+        def base(job, **extra):
+            return {"schema":"sparq.proof-binding-outcome.v1", "job_id":job["id"],
+                    "case_sha256":job["case_sha256"], "backend":job["backend"], "tier":job["tier"],
+                    "proof_count":0, "verified_count":0, "artifacts":[], "contract":contract} | extra
+        def controls(*kinds):
+            return [{"kind":k, "executed":True} for k in kinds]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)
+            (path / "proof").write_bytes(b"test-only verifier-boundary fixture, not a real proof")
+            from run import file_hash
+            artifacts = [{"path":"proof", "sha256":file_hash(path / "proof")}]
+            good = base(positive, observed="accepted", stage="proof_verifier", proof_count=1,
+                        verified_count=1, error_class=None, artifacts=artifacts,
+                        controls=controls("unused_pattern_zero_opening_positive", "nonce_replay",
+                                          "legacy_version_one", "version_three"))
+            check_outcome(positive, good, path)
+            for name, bad in [
+                ("legacy fallback", good | {"contract":{"version":1, "package":"result_v1_k1_n16_p3_r4_f0"}}),
+                ("signed fallback", good | {"contract":contract | {"package":"result_s1"}}),
+                ("missing contract", {k:v for k, v in good.items() if k != "contract"}),
+                ("no version control", good | {"controls":good["controls"][:2]}),
+                ("unexecuted control", good | {"controls":good["controls"][:3] + [{"kind":"version_three", "executed":False}]}),
+                ("duplicate control", good | {"controls":good["controls"] + good["controls"][:1]}),
+            ]:
+                with self.subTest(name), self.assertRaises(ValueError):
+                    check_outcome(positive, bad, path)
+            negative = base(absent, observed="rejected", stage="constraint", error_class="nargo_unsatisfied_relation",
+                            controls=controls("honest_constraint_positive", "planner_bypassed_false_binding",
+                                              "public_triples_reconstructed"))
+            check_outcome(absent, negative, path)
+            for name, bad in [
+                ("API refusal only", negative | {"stage":"support"}),
+                ("no reconstructed table", negative | {"controls":negative["controls"][:2]}),
+                ("native scope", negative | {"rejection_scope":"native_support"}),
+            ]:
+                with self.subTest(name), self.assertRaises(ValueError):
+                    check_outcome(absent, bad, path)
+            hit = base(attack, observed="rejected", stage="constraint", error_class="nargo_unsatisfied_relation",
+                       controls=controls("honest_constraint_positive", attack["attack"]["kind"],
+                                         "pattern_zero_opening_untouched"))
+            check_outcome(attack, hit, path)
+            with self.assertRaisesRegex(ValueError, "unused_opening|pattern_zero"):
+                check_outcome(attack, hit | {"controls":hit["controls"][:2]}, path)
+            for mask, scope in ((0, "empty_graph"), (6, "native_support")):
+                job = next(j for j in plan([tiny_case(mask, "scan")], ["noir_public_pattern"], "native")["jobs"]
+                           if not j["expected_accept"])
+                refusal = {k:v for k, v in base(job, observed="rejected", stage="support", error_class="refused",
+                                                controls=[], rejection_scope=scope).items() if k != "contract"}
+                check_outcome(job, refusal, path)
+                other = "native_support" if scope == "empty_graph" else "empty_graph"
+                for name, bad in [("swapped scope", refusal | {"rejection_scope":other}),
+                                  ("missing scope", {k:v for k, v in refusal.items() if k != "rejection_scope"}),
+                                  ("refusal claims contract", refusal | {"contract":contract})]:
+                    with self.subTest(name, mask=mask), self.assertRaises(ValueError):
+                        check_outcome(job, bad, path)
+
     def test_exhaustive_denominator_and_all_bindings(self):
         cases = exhaustive()
         self.assertEqual(len(cases), 16 * 7)

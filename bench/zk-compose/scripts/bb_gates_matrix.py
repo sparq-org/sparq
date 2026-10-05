@@ -38,6 +38,8 @@
 #   * [GPT-6] Successful-result result_v1_*, result_v2_*, and result_v3_* members admit string-canonical
 #     graphs only. Their complete-root authentication does not use the legacy
 #     lexical-handle dispatch rule or admit dual-leaf/value-only commitments.
+#     [OPUS-5.5] zkp-15.1: the version-4 public-pattern members (result_v4_*)
+#     follow the same rule; any other `result_` member fails generation.
 #   * STRING-LANE members (all remaining members — scan, join, path, revoke, issuer,
 #     holder, and the blake3-token `filter_*` FILTER lanes) read the
 #     string-canonical / lexical leaf, so they are LEGAL against `string-canonical`
@@ -145,6 +147,11 @@ VALUE_LANE_PREFIX = "filter_value_dl_"
 # op, so only IllegalPair arises among the committed members.
 REASON_ILLEGAL_PAIR = "IllegalPair"
 
+# [OPUS-5.5] zkp-15.1: successful-result versions admitted against string-canonical
+# only. Another `result_` member must not fall through to the string-lane rule,
+# which would silently admit it for dual-leaf.
+RESULT_PREFIXES = ("result_v1_", "result_v2_", "result_v3_", "result_v4_")
+
 
 def lane_of(member: str) -> str:
     return "value" if member.startswith(VALUE_LANE_PREFIX) else "string"
@@ -152,10 +159,15 @@ def lane_of(member: str) -> str:
 
 def legality(method_key: str, lane: str, member: str = "") -> dict:
     """Admit the result contract or mirror the legacy lane dispatch rule."""
-    if member.startswith(("result_v1_", "result_v2_", "result_v3_")):
+    if member.startswith(RESULT_PREFIXES):
         # [GPT-6] Additive successful-result relation uses complete signed
         # string-canonical graphs; lexical-handle reuse is not its contract.
         legal = method_key == "string-canonical"
+    elif member.startswith("result_"):
+        raise ValueError(
+            f"successful-result member {member!r} has no legality rule — add its "
+            "version to RESULT_PREFIXES only once its commitment contract is reviewed"
+        )
     elif lane == "value":
         # value-lane: legal only where a value handle was committed.
         legal = method_key in ("dual-leaf", "value-only")

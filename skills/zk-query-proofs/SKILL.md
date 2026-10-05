@@ -358,7 +358,11 @@ depth 10/17/20 from all freshness-accepted snapshots.
 Public predicates run in the verifier and select the member without numeric
 circuitry. Roots/salts/status indices and intermediate encodings are private;
 issuer slots/capacities/result size remain public. See the [successful-result contract](references/successful-results.md)
-for exact scope. Research-stage, not externally
+for exact scope. [OPUS-5.5] Before proving or verifying, it requires the exact
+pinned version field (`nargo version = 1.0.0-beta.21` as the first line; trimmed
+`bb` output `5.0.0-nightly.20260324`); substrings, diagnostics and non-UTF-8
+output are rejected. This is a pin guard, not binary attestation (no hash check).
+Research-stage, not externally
 audited: no complete-answer, absence, wallet-size or holder-identity guarantee.
 
 [GPT-6] `planner::plan_disclosure_admitted` additionally accepts a predicate
@@ -465,6 +469,60 @@ preserved under the pinned toolchain and checked against independent baseline
 keys in the toolchain suite. Expanded v2 tiny and predicate-free profiles have
 representative genuine-proof checks in addition to wrapper execution coverage;
 see the successful-result reference for evidence and scope.
+
+[OPUS-5.5] Opt-in `result::prepare_result_public_pattern` (unchanged
+`ResultOptions`) emits version 4 (`PUBLIC_PATTERN_VERSION`): the first
+all-constant-or-projected pattern is checked against a verifier-derived public
+triple table instead of private typed openings. `verify_result` recognizes it;
+default dispatch is unchanged. The pattern moves to index zero identically in
+prover and verifier, and the `public_triples` table is appended last to the
+`result_v4_k{1,2}_n16_p3_r4_f0_d10` public ABI. Signatures, hidden roots, salts,
+status references, policy paths and leaf membership stay in-circuit. Remaining
+patterns keep the generic typed and shared-variable checks. The verifier
+rebuilds the pattern, table, package and byte order from its query, released rows,
+issuer-slot count and policy. Public subjects and predicates must be IRIs, and
+objects must be IRIs or literals. Dispatch never uses the witness choice or count.
+Only F0 (no FILTER on a hidden variable), status depth 10 and K1/K2 are
+supported; no public pattern or any other profile rejects without fallback. It
+proves support for the selected rows only, not completeness. Research-grade, not
+externally audited; no runtime saving is claimed.
+[OPUS-5.5] Checked-in static evidence for both members, from one independent
+non-canonical Linux x86_64 work-box run at source `14d426bd`: `bb gates` circuit
+sizes in the [gate snapshot](../../crates/sparq-zk-compose/tests/gate_count_snapshot.json),
+plus ACIR, ABI and source-bound tool provenance in
+[`result_public_gates.json`](../../bench/zk-compose/result_public_gates.json).
+`bench/zk-compose/scripts/verify_result_evidence.py` checks these records
+against the snapshots and the shared Noir source inventory. The refreshed legacy
+inventories stay value-identical, and legacy keys are compared byte-for-byte by
+test with no key files retained. Static counts are not a runtime or security
+audit. In that run the ignored toolchain tests
+`result_real_public_pattern_k1_k2_proofs_and_verifier_controls` (one genuine K1
+and one K2 proof, each with typed verifier-rejection controls) and
+`result_relation_public_pattern_rejects_tampered_retained_witnesses` passed. Their
+proof outputs are not retained in the repository (that run's evidence bundle has
+SHA-256 `a1944e1c49692b360155fc725ad8800b33ebe7a5ef09de8afdfd68ae63b81fbb`), so
+future CI replays are still required.
+[OPUS-5.5] The [binding corpus](../../bench/zk-bindings/README.md) registers an
+explicit `noir_public_pattern` backend over its existing finite domain; it never
+substitutes version 1 or signed members. A separate non-canonical EC2 run at
+corpus source `2e0f4a9dba47d537835b4745c66147f097c68e43` executed all 576 native cells (72 accepted, 468 support
+refusals, 36 empty-graph refusals) and all 46 real cells (4 genuine K1 proofs,
+32 absent-binding and 10 private-witness-attack constraint failures). That run is
+distinct from the `14d426bd` measurements above, is not a hosted CI run, and makes
+no gate, runtime or security claim; see the corpus README for its controls and hashes.
+
+[OPUS-5.5] The `result_experiment` example also accepts a separately versioned
+schema-3 manifest for a paired `baseline_v1` versus `public_pattern_v4` ablation
+over K1 and K2 synthetic wallets. Both arms use one eligible query, the same
+released rows, signed inputs, policy and realized issuer-slot count, and one
+acceptance digest per profile. Relation version, package and proof stay
+separately visible, and transcripts are not claimed byte-identical. The legacy
+selected-support query is not version-four eligible and stays unchanged. The
+adapter reports raw per-sample timings only. No schema-3 manifest file is
+committed; the
+[experiment instructions](../../bench/zk-compose/experiments/README.md) carry an
+inline sample to save outside the checkout, plus the round options, schedule,
+controls and limits. No measured outcome is recorded in this skill.
 
 [GPT-6] `result::signed` exposes separately versioned canonical signed-integer
 preparation and verification, with a fixed capacity and no public sign/length
