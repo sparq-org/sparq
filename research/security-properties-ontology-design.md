@@ -955,7 +955,7 @@ The N3 admissibility rules (`strongerThan`-closure, `atLeast`, `overDimension`,
    single-source benefit without publishing the repo. The vendored copy lives at
    `crates/sparq-trust/ontologies/zkp-sparql/`; this design **binds hard** against
    those IRIs.
-2. **Assurance default → tracked as issue [#1001](https://github.com/jeswr/sparq/issues/1001).**
+2. **Assurance default → tracked as issue [#1001](https://github.com/sparq-org/sparq/issues/1001).**
    Should the *shipped default* admissibility policy require `assurance gteq Proven`
    (admit nothing from the unaudited estate — maximally conservative, but admits
    nothing) or `gteq Claimed` (admit on an explicitly-unaudited basis with the decision
@@ -963,7 +963,7 @@ The N3 admissibility rules (`strongerThan`-closure, `atLeast`, `overDimension`,
    #1001** (the SPARQ agent's recommendation there is **default `Claimed`**, promoting
    to `Proven` only after the external audit `sq-qhy4` or a real formal proof). The
    vocab extension (`sq-5oru9`) is **blocked** on this answer.
-3. **DPV alignment depth → tracked as issue [#1002](https://github.com/jeswr/sparq/issues/1002).**
+3. **DPV alignment depth → tracked as issue [#1002](https://github.com/sparq-org/sparq/issues/1002).**
    The survey confirmed DPV core (not `dpv-tech`) is the sole reusable crypto-method
    vocabulary, but it stops at applied techniques
    (`dpv:ZeroKnowledgeAuthentication`, `dpv:PostQuantumCryptography`) and has no per-proof

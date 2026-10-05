@@ -4,7 +4,7 @@
 `manifest.json` + `fixture.nq` here are a **pinned copy** of the upstream conformance suite
 for the *Access-Controlled SPARQL Query over a Solid Pod* Editor's Draft. `sparq` runs them
 via `crates/sparq-solid/tests/conformance_solid_sparql_query.rs` and passes every case
-(the standing "contribute spec tests and pass all of them" directive on `jeswr/sparq#1546`).
+(the standing "contribute spec tests and pass all of them" directive on `sparq-org/sparq#1546`).
 
 | Field | Value |
 |-------|-------|

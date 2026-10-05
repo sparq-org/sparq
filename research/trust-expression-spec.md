@@ -3,7 +3,7 @@
 <!-- [OPUS-4.8] sq-5reoy (#1599): the `zk/xpath` tree was externalized to the `sparq-org/noir_XPath` (v0.2.0) face repo; its `KNOWN_FAILING` discipline (referenced below) now lives in that repo's CI. Any `zk/xpath/…` path below is a HISTORICAL in-tree reference. -->
 
 Status: **design-for-review decomposition record** (epic `sq-6syab`, issue
-[#1592](https://github.com/jeswr/sparq/issues/1592)). This record frames the
+[#1592](https://github.com/sparq-org/sparq/issues/1592)). This record frames the
 maintainer's trust-expression directive against the built estate, makes the
 architecture choices the child beads need, and cuts the program into disjoint
 fragments. Nothing here is shipped; the specification itself, the vocabulary

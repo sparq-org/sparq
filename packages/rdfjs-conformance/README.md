@@ -45,17 +45,17 @@ await runDatasetTests({
 node --test "test/*.test.mjs"
 ```
 
-Run the same suites against the sparq WASM engine (`@jeswr/sparq`) — anything
+Run the same suites against the sparq WASM engine (`@sparq-org/sparq`) — anything
 that exposes an RDF/JS `DataFactory` / `DatasetCore` works the same way:
 
 ```js
-import { DataFactory, Store } from '@jeswr/sparq';
+import { DataFactory, Store } from '@sparq-org/sparq';
 import { runAll } from '@rdfjs-test/conformance';
 
 await runAll({
   factory: DataFactory,
   datasetFactory: (quads) => new Store(quads ? [...quads] : undefined),
-  label: '@jeswr/sparq',
+  label: '@sparq-org/sparq',
 });
 ```
 

@@ -41,6 +41,8 @@ on:
       - "crates/sparq-*-wasm/**"
       - "package.json"
       - "package-lock.json"
+      - "site/package.json"
+      - "gui/app/package.json"
       - ".github/workflows/js.yml"
   push:
     branches: [main]
@@ -123,16 +125,39 @@ jobs:
       # `js/` member. The cross-language Solid differential oracle (test/solid-differential
       # .test.mjs, PR #922) imports n3 / @solid/acl-check / @solidlab/policy-engine / rdflib,
       # which are declared as ROOT devDependencies (deliberately NOT in js/package.json — the
-      # js-sbom lane derives the published @jeswr/sparq SBOM from js/package.json's deps, so
+      # js-sbom lane derives the published @sparq-org/sparq SBOM from js/package.json's deps, so
       # putting test-only deps there would pollute the runtime SBOM, sq-f04e/#887). A member-
-      # scoped `npm ci` (working-directory: js) installs ONLY @jeswr/sparq's own closure and
+      # scoped `npm ci` (working-directory: js) installs ONLY @sparq-org/sparq's own closure and
       # NOT the root workspace devDeps, so those imports were ERR_MODULE_NOT_FOUND -> red `js`
       # gate. A root install hoists them into the workspace node_modules where the test (and
       # the `js`-member build) both resolve them. js/package.json is untouched, so the
       # published-client SBOM stays clean (runtime tree = {fzstd} only).
       - name: Install npm dependencies (full workspace, from repo root)
         working-directory: .
-        run: npm ci
+        run: |
+          npm ci
+          npm ls next --workspace=site --workspace=gui/app
+          node <<'NODE'
+          // [GPT-6 ASTRA] Exercise the installed native dependency, including libvips.
+          const assert = require('node:assert/strict');
+          const sharp = require('sharp');
+          const installed = sharp.versions.sharp;
+          const locked = require('./package-lock.json').packages['node_modules/sharp'].version;
+          console.log(JSON.stringify({ sharp: installed, versions: sharp.versions }));
+          assert.equal(installed, locked, 'installed sharp must match the committed lock');
+          (async () => {
+            const { data, info } = await sharp({
+              create: { width: 1, height: 1, channels: 4, background: '#000000' }
+            }).png().toBuffer({ resolveWithObject: true });
+            assert.equal(info.format, 'png');
+            assert.equal(info.width, 1);
+            assert.equal(info.height, 1);
+            assert.ok(data.length > 8, 'generated PNG must be nonempty');
+            assert.deepEqual(data.subarray(0, 8), Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+            console.log(`sharp native PNG smoke: ${data.length} bytes`);
+          })().catch(error => { console.error(error); process.exitCode = 1; });
+          NODE
+          git diff --exit-code -- package-lock.json gui/app/package.json site/package.json
 
       - name: Build (wasm-pack + tsc)
         run: npm run build
@@ -144,7 +169,7 @@ jobs:
       # (packages/rdfjs-conformance, a candidate rdfjs/ contribution). Typecheck it and run its
       # OWN parity suites — they drive the harness against N3.js + @rdfjs/dataset to prove it is
       # implementation-agnostic. The `js` test step above already runs the harness against
-      # @jeswr/sparq (js/test/rdfjs-conformance.test.mjs). Run from the repo root so the
+      # @sparq-org/sparq (js/test/rdfjs-conformance.test.mjs). Run from the repo root so the
       # workspace-linked harness + its devDeps resolve.
       - name: RDF/JS conformance harness (typecheck + N3 parity)
         working-directory: packages/rdfjs-conformance
@@ -163,7 +188,7 @@ jobs:
           npm test
           npm run check:package
 
-      # [OPUS-4.8] sq-6xasp.11 (epic sq-6xasp): the @jeswr/solid-server package — a local-dev
+      # [OPUS-4.8] sq-6xasp.11 (epic sq-6xasp): the @sparq-org/solid-server package — a local-dev
       # Solid/LDP pod backed by the sparq-lws wasm handler. Build the wasm bundle
       # (crates/sparq-lws-wasm, matched by the `crates/sparq-*-wasm/**` paths filter above) with
       # the same wasm-pack installed earlier in this job, then run the package's node:test suite

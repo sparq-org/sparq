@@ -60,7 +60,7 @@ for (const f of runtimeFiles) {
 // [OPUS-4.8] sq-0po6 — also sync the tier-b "W-reason" bundle that drives
 // /surface/inference (crates/sparq-reason-wasm, built with `--features explain` by
 // `js/`'s `build:reason-wasm`). Its wasm-pack output stays in the crate's own pkg/
-// (it is NOT part of the published @jeswr/sparq package), so we copy it from there
+// (it is NOT part of the published @sparq-org/sparq package), so we copy it from there
 // into public/wasm/reason/. This bundle is OPTIONAL: if it has not been built (e.g. a
 // quick `next dev` that skips it), we WARN and skip rather than fail — the inference
 // page surfaces a clear "bundle failed to load" state at runtime in that case.
@@ -100,7 +100,7 @@ try {
 // [OPUS-4.8] sq-11zy — also sync the tier-b "W-rsp" bundle that drives
 // /surface/streaming-rsp (crates/sparq-rsp-wasm, the windowed RSP-QL stream processor,
 // built by `js/`'s `build:rsp-wasm`). Like W-reason, its wasm-pack output stays in the
-// crate's own pkg/ (it is NOT part of the published @jeswr/sparq package), so we copy it
+// crate's own pkg/ (it is NOT part of the published @sparq-org/sparq package), so we copy it
 // into public/wasm/rsp/. OPTIONAL: a quick `next dev` that skips the build WARNs and
 // skips rather than failing — the streaming page then surfaces a clear load-failure state.
 const rspSrc = join(here, "..", "..", "crates", "sparq-rsp-wasm", "pkg");
@@ -139,7 +139,7 @@ try {
 // [OPUS-4.8] sq-xoxu — also sync the tier-b "W-text" bundle that drives
 // /surface/full-text (crates/sparq-text-wasm, the BM25 inverted index + `text:` magic
 // predicates, built by `js/`'s `build:text-wasm`). Like W-reason / W-rsp, its wasm-pack
-// output stays in the crate's own pkg/ (it is NOT part of the published @jeswr/sparq
+// output stays in the crate's own pkg/ (it is NOT part of the published @sparq-org/sparq
 // package), so we copy it into public/wasm/text/. OPTIONAL: a quick `next dev` that skips
 // the build WARNs and skips rather than failing — the full-text page then surfaces a clear
 // load-failure state.

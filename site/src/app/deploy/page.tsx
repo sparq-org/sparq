@@ -324,7 +324,7 @@ export default function DeployPage() {
           <CopyCommand
             label="Local-only npm host"
             command={[
-              "npx @jeswr/solid-server --port 3000 \\",
+              "npx @sparq-org/solid-server --port 3000 \\",
               "  --base-url http://127.0.0.1:3000 \\",
               "  --owner-webid https://id.example/alice#me",
             ].join("\n")}

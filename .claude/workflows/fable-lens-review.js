@@ -178,7 +178,7 @@ if (!LENS) {
 }
 
 function reconPrompt() {
-  return 'Enumerate the TARGETS of the "' + LENS + '" review lens across `jeswr/sparq`' + (SCOPE ? ' (scope: ' + SCOPE + ')' : '') + '. ' +
+  return 'Enumerate the TARGETS of the "' + LENS + '" review lens across `sparq-org/sparq`' + (SCOPE ? ' (scope: ' + SCOPE + ')' : '') + '. ' +
     'FINDINGS ONLY — do NOT open a PR and do NOT git-checkout the shared tree (Explore-style). Use Read/Grep/Glob (and ast-grep for code SHAPE questions). ' +
     'A "target" is a concrete site this lens must inspect — e.g. for privacy-claims: every unqualified ZK/MPC/privacy assertion + the check-privacy-claims allowlist; for unsafe-sites: every `unsafe` block + its justification register entry; for perf-honesty: every perf number/claim in markdown + its evidence source; for coverage-ratchet: each crate near its line floor + its thin public wrappers. ' +
     'Return {lens:"' + LENS + '", targets:[{ref:"file:anchor or crate", kind, note}]}. Keep it complete but tight.'
@@ -202,7 +202,7 @@ function adjudicatePrompt(tables) {
 }
 
 function fileBeadsPrompt(beads) {
-  return 'File these Fable-adjudicated follow-up beads for `jeswr/sparq` (review lens "' + LENS + '"): ' + JSON.stringify(beads) + '. ' +
+  return 'File these Fable-adjudicated follow-up beads for `sparq-org/sparq` (review lens "' + LENS + '"): ' + JSON.stringify(beads) + '. ' +
     'For each, run `export PATH=$PATH:/home/ubuntu/.local/bin && cd /home/ubuntu/sparq && bd create` with the title, a body carrying the rationale + the 🤖 SPARQ-agent self-id + a `' + FILE_MARKER + ' via fable-lens-review` provenance note (the concrete marker for this stage, per AGENTS.md rule 5 Model-provenance), the surface as a label/tag, and the priority if given. Do NOT edit `.beads/` files by hand and do NOT open a code PR — `bd create` only (the orchestrator re-exports afterward). Skip a bead only if an obvious duplicate already exists (say so in `failed`). ' +
     'Return {created:[{id,title}], failed:[{title,error}]}.'
 }

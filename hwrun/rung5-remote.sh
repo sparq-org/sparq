@@ -83,7 +83,7 @@ DL_PID=$!
 command -v cargo >/dev/null 2>&1 || \
   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal >/dev/null 2>&1
 . "$HOME/.cargo/env"
-git clone -q https://github.com/jeswr/sparq.git "$HOME/sparq" && cd "$HOME/sparq" && git checkout -q "$SHA"
+git clone -q https://github.com/sparq-org/sparq.git "$HOME/sparq" && cd "$HOME/sparq" && git checkout -q "$SHA"
 # [OPUS-4.8 sq-3l43] Record the resolved commit so the dict-bucket result is attributable
 # to a specific engine revision (the original ~200 s figure was at ef86e66, PRE-consolidation).
 git rev-parse HEAD | tee "$R/engine-sha.txt"

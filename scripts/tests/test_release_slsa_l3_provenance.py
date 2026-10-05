@@ -22,8 +22,9 @@
 #     the repo-wide SHA-pin convention is deliberately NOT applied here;
 #   * the ONLY thing crossing the boundary is `base64-subjects`, THREADED from a digest-collecting
 #     job's output — never recomputed inside the trusted builder from build artifacts;
-#   * the trusted-builder job holds `id-token: write` (its own signing identity) but NOT
-#     `contents: write` (it is not the uploader — the `release` job is);
+#   * the trusted-builder job holds `id-token: write` (its own signing identity) and the
+#     `contents: write` permission ceiling required by the upstream reusable workflow. Its nested
+#     uploader is still skipped by `upload-assets: false`; the `release` job remains the uploader;
 #   * the digest-collecting job neither builds nor signs;
 #   * and the whole thing is FAIL-CLOSED: `release` `needs:` both provenance jobs, and attaches
 #     both signed bundles to the Release before SHA256SUMS is computed over them.
@@ -97,9 +98,9 @@ IN_BAND_CONTAINER_PROVENANCE = "provenance: mode=max"
 SUBJECTS_EXPR = "${{ needs.package.outputs.hashes }}"
 ARTIFACT_SUBJECTS_EXPR = "${{ needs.artifact-subjects.outputs.hashes }}"
 DIST_SUBJECTS_EXPR = "${{ needs.build.outputs.binary-hashes }}"
-PROVENANCE_ARTIFACT_EXPR = "${{ needs.provenance.outputs.provenance-download-name }}"
+PROVENANCE_ARTIFACT_EXPR = "name: ${{ needs.provenance.outputs.provenance-name }}"
 ARTIFACTS_PROVENANCE_EXPR = (
-    "${{ needs.provenance-artifacts.outputs.provenance-download-name }}"
+    "name: ${{ needs.provenance-artifacts.outputs.provenance-name }}"
 )
 HASHES_OUTPUT_VALUE = "${{ jobs.hashes.outputs.hashes }}"
 BINARY_HASHES_OUTPUT_VALUE = "${{ jobs.binary-hashes.outputs.hashes }}"
@@ -271,10 +272,10 @@ def check_trusted_builder(
         bad.append(f"{where} needs `id-token: write` to mint its own signing identity")
     if "read" not in scalar_all(body, "actions"):
         bad.append(f"{where} needs `actions: read` to record the workflow entry point")
-    if "write" in scalar_all(body, "contents"):
+    if "write" not in scalar_all(body, "contents"):
         bad.append(
-            f"{where} must NOT hold `contents: write` — it is not the uploader "
-            "(`upload-assets: false`)"
+            f"{where} needs the upstream reusable workflow's `contents: write` permission "
+            "ceiling even though its uploader is skipped (`upload-assets: false`)"
         )
     if scalar(body, "upload-assets") != "false":
         bad.append(
@@ -445,6 +446,20 @@ def check(release_text: str, matrix_text: str, dist_text: str) -> list[str]:
                 f"the docs claim L3 coverage; found: {sorted(rel_needs)!r}"
             )
     sums = index_of(rel, SHA256SUMS_CMD)
+    # [GPT-5] An empty name makes download-artifact fetch the entire run. v0.1.3 reached
+    # SHA256SUMS with every artifact directory because both output keys were misspelled.
+    guard = step_block(rel, "Validate signed provenance artifact names")
+    if guard is None:
+        bad.append("the `release` job must reject missing or unexpected provenance names")
+    else:
+        for expected in (
+            "ARCHIVE_PROVENANCE: ${{ needs.provenance.outputs.provenance-name }}",
+            "ARTIFACT_PROVENANCE: ${{ needs.provenance-artifacts.outputs.provenance-name }}",
+            '"$ARCHIVE_PROVENANCE" != "sparq-cli-${VERSION}.intoto.jsonl"',
+            '"$ARTIFACT_PROVENANCE" != "sparq-artifacts-${VERSION}.intoto.jsonl"',
+        ):
+            if not any(expected in line for line in guard):
+                bad.append(f"the provenance-name guard must check {expected}")
     for label, expr in (
         ("archives", PROVENANCE_ARTIFACT_EXPR),
         ("non-archive artifacts", ARTIFACTS_PROVENANCE_EXPR),
@@ -782,11 +797,12 @@ MUTATIONS = {
         "base64-subjects: ${{ needs.package.outputs.hashes }}",
         "base64-subjects: ${{ steps.hash.outputs.hashes }}",
     ),
-    # M5 — privilege creep: the trusted builder gains repo write.
-    "trusted builder granted contents: write": _sub(
+    # M5 — removing the upstream reusable workflow's declared permission ceiling makes GitHub
+    # reject the caller at startup, even though upload-assets=false skips the uploader job.
+    "trusted builder permission ceiling reduced below upstream requirement": _sub(
         "release",
-        "contents: read # `upload-assets: false`",
-        "contents: write # `upload-assets: false`",
+        "      contents: write\n    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0",
+        "      contents: read\n    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0",
     ),
     # M6 — the digest hand-off is severed; the builder would attest nothing.
     "build-matrix drops the hashes output": _sub(
@@ -815,7 +831,7 @@ MUTATIONS = {
     # M8 — the release stops attaching the signed bundle at all.
     "signed provenance never attached to the release": _sub(
         "release",
-        "name: ${{ needs.provenance.outputs.provenance-download-name }}",
+        PROVENANCE_ARTIFACT_EXPR,
         "name: sbom-vex",
     ),
     # ---- #4570: the same regressions, one per newly-isolated lane. ----
@@ -871,8 +887,25 @@ MUTATIONS = {
     # MA8 — the second signed bundle never reaches the Release.
     "artifact provenance never attached to the release": _sub(
         "release",
-        "name: ${{ needs.provenance-artifacts.outputs.provenance-download-name }}",
+        ARTIFACTS_PROVENANCE_EXPR,
         "name: sbom-vex",
+    ),
+    # [GPT-5] v0.1.3's real failure: `provenance-download-name` is not an output of the pinned
+    # generator, so the action received no name and downloaded every artifact in the run.
+    "archive provenance uses nonexistent output": _sub(
+        "release",
+        PROVENANCE_ARTIFACT_EXPR,
+        "name: ${{ needs.provenance.outputs.provenance-download-name }}",
+    ),
+    "artifact provenance uses nonexistent output": _sub(
+        "release",
+        ARTIFACTS_PROVENANCE_EXPR,
+        "name: ${{ needs.provenance-artifacts.outputs.provenance-download-name }}",
+    ),
+    "release no longer guards provenance names": _sub(
+        "release",
+        "- name: Validate signed provenance artifact names",
+        "- name: Ignore signed provenance artifact names",
     ),
     # MA9 — dist.yml's binaries revert to in-band-only provenance.
     "dist subjects no longer threaded from the build matrix": _sub(

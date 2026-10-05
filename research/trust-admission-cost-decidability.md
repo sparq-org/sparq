@@ -2,8 +2,8 @@
 
 Status: **design-for-review analysis record** for `sq-pfae.9` / P8 of the decomposition in
 [`research/solid-trust-graph-authz-design.md`](solid-trust-graph-authz-design.md) §6.1
-(epic `sq-pfae`, issue [#940](https://github.com/jeswr/sparq/issues/940); this record is
-issue [#3281](https://github.com/jeswr/sparq/issues/3281)). P8's brief is three things:
+(epic `sq-pfae`, issue [#940](https://github.com/sparq-org/sparq/issues/940); this record is
+issue [#3281](https://github.com/sparq-org/sparq/issues/3281)). P8's brief is three things:
 **bound admission-rule evaluation cost**, **confirm every seeding direction is
 one-side-bound**, and supply the **formal complexity bound the design record explicitly
 does not prove** (§7.1 C′: *"No formal complexity bound is proven here"*).

@@ -1,4 +1,4 @@
-<!-- [OPUS-4.8] sq-inzv: full-template README — the published @jeswr/sparq browser/WASM bundle. -->
+<!-- [OPUS-4.8] sq-inzv: full-template README — the published @sparq-org/sparq browser/WASM bundle. -->
 # sparq-wasm
 
 The sparq parser + triplestore + SPARQL engine compiled to WebAssembly for the
@@ -8,7 +8,7 @@ with a minimal bundle (no rayon, no serde; results are serialised by hand to
 SPARQL 1.1 JSON).
 
 > Distributed via npm, not crates.io (`publish = false`). It is the source of the
-> published npm `@jeswr/sparq` bundle, packaged via `wasm-pack`, not a Rust library
+> published npm `@sparq-org/sparq` bundle, packaged via `wasm-pack`, not a Rust library
 > dependency.
 
 ## 🚀 Quickstart
