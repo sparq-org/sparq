@@ -55,6 +55,7 @@ pub fn construct_prepared_with_budget(
     let active = crate::active_dataset(graph, q);
     let graph = active.as_ref().unwrap_or(graph);
     let _view_scope = crate::view_scope(&active);
+    let _query_base = crate::exec::set_query_base(q.base_iri().map(|b| b.as_str()));
     match q {
         Query::Construct { template, pattern, .. } => {
             crate::exec::budget::with_budget(budget, || {
@@ -92,6 +93,7 @@ pub fn describe_prepared_with_budget(
     let active = crate::active_dataset(graph, q);
     let graph = active.as_ref().unwrap_or(graph);
     let _view_scope = crate::view_scope(&active);
+    let _query_base = crate::exec::set_query_base(q.base_iri().map(|b| b.as_str()));
     match q {
         Query::Describe { pattern, .. } => {
             crate::exec::budget::with_budget(budget, || {
