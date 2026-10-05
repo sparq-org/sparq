@@ -313,6 +313,8 @@ pub struct Inner<S: Store> {
     pub notify: notify::Notifier,
     /// Fetches identity documents, OpenID provider metadata and JWKS.
     pub http: reqwest::Client,
+    /// Serializes conditional writes per resource (see [`resources::IriLocks`]).
+    pub locks: resources::IriLocks,
 }
 
 impl<S: Store> std::ops::Deref for LwsState<S> {
@@ -351,6 +353,7 @@ impl<S: Store + 'static> LwsState<S> {
                 access,
                 notify,
                 http,
+                locks: Default::default(),
             }),
         })
     }
