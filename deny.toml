@@ -132,6 +132,22 @@ exceptions = [
   #     import pre-flight, sq-gg0qq.1) behind the opt-in `redis-replay` feature of the
   #     incoming crates. Scoped per-crate so the broad allowlist stays as-is. [FABLE-5]
   { crate = "xxhash-rust@0.8.16", allow = ["BSL-1.0"] },
+  # [GPT-6] Exact native dependency license proposals; individual archive/VCS evidence retained.
+  { crate = "cranelift-bforest@0.110.2", allow = ["Apache-2.0 WITH LLVM-exception"] },
+  { crate = "cranelift-bitset@0.110.3", allow = ["Apache-2.0 WITH LLVM-exception"] },
+  { crate = "cranelift-codegen@0.110.2", allow = ["Apache-2.0 WITH LLVM-exception"] },
+  { crate = "cranelift-codegen-meta@0.110.3", allow = ["Apache-2.0 WITH LLVM-exception"] },
+  { crate = "cranelift-codegen-shared@0.110.3", allow = ["Apache-2.0 WITH LLVM-exception"] },
+  { crate = "cranelift-control@0.110.3", allow = ["Apache-2.0 WITH LLVM-exception"] },
+  { crate = "cranelift-entity@0.110.2", allow = ["Apache-2.0 WITH LLVM-exception"] },
+  { crate = "cranelift-frontend@0.110.2", allow = ["Apache-2.0 WITH LLVM-exception"] },
+  { crate = "cranelift-isle@0.110.2", allow = ["Apache-2.0 WITH LLVM-exception"] },
+  { crate = "regalloc2@0.9.3", allow = ["Apache-2.0 WITH LLVM-exception"] },
+  { crate = "target-lexicon@0.12.16", allow = ["Apache-2.0 WITH LLVM-exception"] },
+  { crate = "enum-iterator@0.7.0", allow = ["0BSD"] },
+  { crate = "enum-iterator-derive@0.7.0", allow = ["0BSD"] },
+  { crate = "xxhash-rust@0.8.18", allow = ["BSL-1.0"] },
+
 ]
 
 [bans]

@@ -22,7 +22,10 @@
 # register/complete at staggered times — instead of repeatedly re-waiting a long
 # unchanged-name window per late arrival (the thrash @jeswr saw after the test job was
 # split into shards). A stable-empty set passes (e.g. a docs-only change that triggers
-# no other workflow). [OPUS-4.8]
+# no other workflow) outside merge-authorizing events. [GPT-6] On PR and
+# merge_group, exact-evaluator and native-composition jobs must each finish
+# success; absent/skipped jobs fail closed. Their internal input selectors skip
+# heavy work only after an explicit irrelevant diff. [OPUS-4.8]
 #
 # STILL-SETTLING SET ROBUSTNESS (bead sq-ipkku). [OPUS-4.8] The settle is re-armed
 # ONLY by genuinely-new PENDING work (`pending > 0`), NOT by a check-run that arrives

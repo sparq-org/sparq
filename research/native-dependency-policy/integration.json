@@ -1,0 +1,148 @@
+{
+  "author_model": "GPT-6",
+  "base": "cae927e44e62a84cbbf35d9722ea74d20e2aee3c",
+  "tls_source": "6317c88015e186a0d8106de4f69525aacbc33c54",
+  "tls_local_commit": "cef74b148768dccf286ba517e9d21515e06491f2",
+  "reviewed_sdk_policy_source": "2a67f00d60627100709304036d0a0a93c75a6d61",
+  "proposal_manifest_sha256": "cf94872d361f4f4e8300e9bcb3cfb161edeb0db62b246c8c5cd795796c0dee2e",
+  "policy_sha256": {
+    "deny.toml": "06d409859028061cc42498e5d03774575ef40f13e6fffa88d5434e1f1789bfae",
+    "supply-chain/config.toml": "f44faa6fcb54606bf4242d64a595c37958ab34033a3762e1b3fc91f5c9b2d5a0",
+    "supply-chain/audits.toml": "6ca257a1acb2313beb8706600bb82409cea84826c3390c9ade00800cb48275e6",
+    "supply-chain/imports.lock": "3bfb97a524d7ff005f50f5ab305e1a4654ddf7db5cd589eeeb5f90b354ac95e8"
+  },
+  "existing_values_superseded": [
+    {
+      "path": "deny.toml/advisories/ignore",
+      "kind": "removed_array_values",
+      "before": [
+        {
+          "id": "RUSTSEC-2025-0141",
+          "reason": "bincode 1.3.3 is permanently unmaintained, but the advisory reports no vulnerability and the release is considered complete by its former maintainers. It is pulled transitively by qwt 0.4.0 through hdt 0.7.3; sparq does not deserialize untrusted bincode input. Remove when hdt/qwt replaces bincode (tracked in the worker follow-up)."
+        }
+      ],
+      "new_values": [
+        {
+          "id": "RUSTSEC-2025-0141",
+          "reason": "bincode 1.3.3 is permanently unmaintained; this informational advisory reports no vulnerability or patched version. The existing maintenance-only exception covers qwt 0.4.0 through hdt 0.7.3 and the detached evaluator host through risc0-zkvm 3.0.6/client. SDK RPC and prover asset paths use bincode, so this is not a code-unreachability claim. Remove when all affected HDT and SDK dependency paths replace it (zkp-10.8.1)."
+        }
+      ]
+    }
+  ],
+  "superseded_value_scope": "Only RUSTSEC-2025-0141 explanatory reason; exact reviewed2a text. Ignore identifiers and enforcement unchanged. Original text retained here, not duplicated as active policy.",
+  "historical_sdk_evidence": {
+    "source": "2a67f00d60627100709304036d0a0a93c75a6d61",
+    "files": {
+      "research/zk-dependency-backlog/README.md": "df553898e3ee58128b7966aaed75424a2cc3cec8ec4a4f2e1ee220ce2278b4ee",
+      "research/zk-dependency-backlog/accepted-6f7/build-and-procedural-macro.toml": "acded2b969fbb3f9881b2cc6a8acc2bc7e9798bd5cbc97ee3539898b09a09df0",
+      "research/zk-dependency-backlog/accepted-6f7/cryptographic-and-large-integer.toml": "8dbde99a5fbfedc31130b441633ed3153feada2e93df6d09dcbb5b2e1af01a4a",
+      "research/zk-dependency-backlog/accepted-6f7/input-verification.json": "a19b1e708d00efdc4decf9deb294c0b45af675e501d1b85c3f12abcc473645ad",
+      "research/zk-dependency-backlog/accepted-6f7/memory-collections-and-concurrency.toml": "ffa6b3ca96f7e15680f529ebb1263bdc273d5941f1901360d81a1dd4a535fdc1",
+      "research/zk-dependency-backlog/accepted-6f7/other-utilities.toml": "05ab151e305f33e1cacad2d9080e5dddf244e6f8a8afa96f8156de6645e6b792",
+      "research/zk-dependency-backlog/accepted-6f7/parsing-serialization-and-time.toml": "7622d67b6b2f23bac1636f0873503afb45138d61bfb2d639d7573eae48cce06c",
+      "research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json": "299a83b9a1cb3f445e233a88094d31663f91173e0bb71e1aca072204820c6f00",
+      "research/zk-dependency-backlog/accepted-6f7/platform-and-ffi.toml": "73de85704eae8cf449055cd5b403c51896bcf88e93d2ad90a5419b8050b9a0af",
+      "research/zk-dependency-backlog/accepted-6f7/proposal-manifest.json": "46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9",
+      "research/zk-dependency-backlog/accepted-6f7/randomness.toml": "bebbef3793382c679337b228dc00a0d9f29aec78deeee3daf2c85d65cb0ee458",
+      "research/zk-dependency-backlog/accepted-6f7/recorded-artifacts.json": "f51e289b4cde14ebe7e2909519b733c8995a1b98be0e76b6b3a94ed579d63efc",
+      "research/zk-dependency-backlog/accepted-6f7/review-final.txt": "c448c0c0108905c248f1f39e441aa3eae5d09033d0fa154961764a6f81edd30d",
+      "research/zk-dependency-backlog/accepted-6f7/sdk-and-tooling.toml": "c56f5f398760d54710ed1222627963dadf01424380a0d96bc59dd5a4e93ad010",
+      "research/zk-dependency-backlog/import-reconciliation/23-coverage-chains.json": "eeabf9eeba596314ba042309bea46c39dfd0494ee6e59db1579071d8d5982393",
+      "research/zk-dependency-backlog/import-reconciliation/SOURCES.json": "2cd333becd9edaa109517ab003bfbc57a5634b0f74ce0973ba1f233f9cbf7e75",
+      "research/zk-dependency-backlog/import-reconciliation/additions.json": "5ad39ad917210a20c9fd9cf59f5f8f9dc1ad6c4794c860fb76539941dc1ee73d",
+      "research/zk-dependency-backlog/import-reconciliation/record-reconciliation.json": "9744ffb34ae275da5e16175650f5bb1443f2aa711e2d6f29e1380be00efcea86",
+      "research/zk-dependency-backlog/reviewed-deltas/eight-fable/android_system_properties.patch": "19c29793e7a7c6bd6b8b06adb59895e96b919275a43d5aaafbc8fc13fc68cf07",
+      "research/zk-dependency-backlog/reviewed-deltas/eight-fable/arrayvec.patch": "a9bdc70908fb303fff455ec12badc6030c5af1170d49df144a2c813f6849cd54",
+      "research/zk-dependency-backlog/reviewed-deltas/eight-fable/either.patch": "ea52a13b8c415fa9dbdfbe90295de083417bd6d408be982aaf7f1272cb908ef4",
+      "research/zk-dependency-backlog/reviewed-deltas/eight-fable/num-integer.patch": "2b10d159e5ce80bf220a92836e6fd6129e32fd4d8bdd11c6b78ebdba3b21c1d3",
+      "research/zk-dependency-backlog/reviewed-deltas/eight-fable/proc-macro2.patch": "2210f56efce3d325fba061e309bcfc6343c493239d7fdb2d59fbda9c1d9435b8",
+      "research/zk-dependency-backlog/reviewed-deltas/eight-fable/review-final.txt": "9c977005339864b802d48d0a36000f27520de6bd7eabac590f2d8ab7fdb18a9f",
+      "research/zk-dependency-backlog/reviewed-deltas/eight-fable/review-outcome.json": "da84acc39f87d858de033d525aefefa209e15dfbd78e21cdd905bd8a9e2d3c47",
+      "research/zk-dependency-backlog/reviewed-deltas/eight-fable/rustversion.patch": "8239f0ecd20f25bc7384f331173d341862a3c4219b90531737cffa1be75d1299",
+      "research/zk-dependency-backlog/reviewed-deltas/eight-fable/serde.patch": "80e45cc372bc98f09c460a02100694d74c78325f7f1bb937f7be44fefb3fff90",
+      "research/zk-dependency-backlog/reviewed-deltas/eight-fable/smallvec.patch": "08502e40447fa2ef39a7d2c491c66d384801ace6d11d730a1f35b8dd9842bc00",
+      "research/zk-dependency-backlog/reviewed-deltas/eight-fable/source-manifest.json": "f48a233cb50e735417af3aaf5ff62d8e9fd97e96c594713094845edeb505129c",
+      "research/zk-dependency-backlog/reviewed-deltas/recorded-reviews.json": "09da4555123af0cbd9b5a297b22b89b5a3a22b24c08d7d7d1cad0b53ab32f540",
+      "research/zk-dependency-backlog/reviewed-deltas/serde-gpt6/review-final.txt": "6e0674d7476ede4b6325a4a9320fe9fd1b9f7ab445103bccc1b9799fc5899d8b",
+      "research/zk-dependency-backlog/reviewed-deltas/serde-gpt6/review-outcome.json": "6915ef2b02a978140d981e5a8b258263f3fbc206412c395a220b4064ac582888",
+      "research/zk-dependency-backlog/reviewed-deltas/serde-gpt6/serde_core.patch": "efea1423554f85f6fcb30cef4e3907dfc1611cdcfde592e74d96ee61d0589988",
+      "research/zk-dependency-backlog/reviewed-deltas/serde-gpt6/serde_derive.patch": "c217e6d5fd5b25dc6ab1e9097ec6676a6f504a1f7765e6cbf9f0702f33e234c4",
+      "research/zk-dependency-backlog/reviewed-deltas/serde-gpt6/source-manifest.json": "a955a84e030fccaf881e1f4d52a35511333501487ac0e07c45fe9d92bbe38516",
+      "research/zk-dependency-backlog/validation.json": "86f4693ce21a839ed36491e1ae6cf580c1afbae016e4082739e42a3c2ec56857"
+    },
+    "scope": "Copied byte-identically to preserve references for inherited policy; historical SDK evidence does not attest this native graph."
+  },
+  "new_native_exemptions": 0,
+  "new_source_audits": 0,
+  "new_trust_sources": 0,
+  "native_manifest_sha256": "808391a79fbac5556e56ad016700eb1cb6428b5709c1861d221d6800191c09f3",
+  "native_lock_sha256": "67d4fc7ad7f2a52d75aec3e963f372f93dc901a646922954376322fb529d3f02",
+  "status": "Uncommitted source-frozen candidate pending independent integration review; candidate metadata checks recorded in validation.json; not merge-ready.",
+  "bincode_companion": {
+    "source_commit": "a816cf6b0e3bf7ed700f749a08240da3e22a552b",
+    "paths": [
+      "supply-chain/vex.cdx.json",
+      "scripts/check-vex-deny-drift.py"
+    ],
+    "changed_semantics": "Remove unsupported not_affected/code_not_reachable analysis only for bincode; preserve sibling vulnerability entries and ignore ID set. Drift checker executable code unchanged (comment correction only).",
+    "documentation_link_adjustment": "The original SDK document is absent from this branch; link the same scoped explanation in research/native-dependency-policy/README.md instead.",
+    "old_bincode": {
+      "id": "RUSTSEC-2025-0141",
+      "source": {
+        "name": "RustSec",
+        "url": "https://rustsec.org/advisories/RUSTSEC-2025-0141"
+      },
+      "ratings": [
+        {
+          "source": {
+            "name": "RustSec"
+          },
+          "severity": "none"
+        }
+      ],
+      "description": "bincode 1.3.3 is permanently unmaintained. This is an informational maintenance-status advisory with no reported vulnerability, CVE, or known exploit.",
+      "detail": "[SONNET-4.6] hdt 0.7.3 pulls bincode 1.3.3 transitively through qwt 0.4.0. No maintained bincode release is available on that dependency path.",
+      "analysis": {
+        "state": "not_affected",
+        "justification": "code_not_reachable",
+        "response": [
+          "will_not_fix"
+        ],
+        "detail": "The advisory concerns maintenance status rather than vulnerable behavior. sparq does not deserialize attacker-controlled bincode data; bincode is an internal qwt serialization dependency below the opt-in HDT surface. Remove this statement and the matching deny.toml ignore together when hdt/qwt replaces bincode."
+      },
+      "affects": [
+        {
+          "ref": "pkg:cargo/sparq"
+        }
+      ]
+    },
+    "new_bincode": {
+      "id": "RUSTSEC-2025-0141",
+      "source": {
+        "name": "RustSec",
+        "url": "https://rustsec.org/advisories/RUSTSEC-2025-0141"
+      },
+      "ratings": [
+        {
+          "source": {
+            "name": "RustSec"
+          },
+          "severity": "none"
+        }
+      ],
+      "description": "bincode 1.3.3 is permanently unmaintained. This is an informational maintenance-status advisory with no reported vulnerability, CVE, or known exploit.",
+      "detail": "[GPT-6] The existing maintenance-only exception covers bincode 1.3.3 through qwt 0.4.0/hdt 0.7.3 and the detached evaluator host through risc0-zkvm 3.0.6/client. The guest graph omits bincode. Sparq uses ExternalProver, whose ordinary proof response is protobuf; other SDK RPC and prover asset/storage paths use bincode. No general code-unreachability or exploitability verdict is established here. Remove this statement and the matching deny.toml ignore when all affected HDT and SDK paths replace bincode (zkp-10.8.1); see research/native-dependency-policy/README.md for scope.",
+      "affects": [
+        {
+          "ref": "pkg:cargo/sparq"
+        }
+      ]
+    }
+  },
+  "source_review": {
+    "policy_proposal_gpt6_sha256": "347f83d489d89cf249e0fb9c12d9ff9eb98cf63ef45ce16a2149b507e9783e24",
+    "tls_gpt6_sha256": "43ae4663c7c0dd75bf455a4cfb71533efabbb2bacb5d482b5b3c94f67bc569df",
+    "scope": "Prior bounded source reviews only; not approval of this assembled candidate. No external Claude verdict for the private proposal."
+  },
+  "native_sources_unchanged_from_base": true
+}

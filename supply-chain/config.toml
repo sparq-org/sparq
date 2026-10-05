@@ -43,6 +43,9 @@ audit-as-crates-io = true
 [policy.spargebra]
 audit-as-crates-io = true
 
+[policy.wasmer-derive]
+audit-as-crates-io = true
+
 [[exemptions.aead]]
 version = "0.5.2"
 criteria = "safe-to-deploy"

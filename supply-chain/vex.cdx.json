@@ -90,7 +90,7 @@
         }
       ],
       "description": "bincode 1.3.3 is permanently unmaintained. This is an informational maintenance-status advisory with no reported vulnerability, CVE, or known exploit.",
-      "detail": "[GPT-6] The existing maintenance-only exception covers bincode 1.3.3 through qwt 0.4.0/hdt 0.7.3 and the detached evaluator host through risc0-zkvm 3.0.6/client. The guest graph omits bincode. Sparq uses ExternalProver, whose ordinary proof response is protobuf; other SDK RPC and prover asset/storage paths use bincode. No general code-unreachability or exploitability verdict is established here. Remove this statement and the matching deny.toml ignore when all affected HDT and SDK paths replace bincode (zkp-10.8.1); see research/zk-dependency-gates.md for scope.",
+      "detail": "[GPT-6] The existing maintenance-only exception covers bincode 1.3.3 through qwt 0.4.0/hdt 0.7.3 and the detached evaluator host through risc0-zkvm 3.0.6/client. The guest graph omits bincode. Sparq uses ExternalProver, whose ordinary proof response is protobuf; other SDK RPC and prover asset/storage paths use bincode. No general code-unreachability or exploitability verdict is established here. Remove this statement and the matching deny.toml ignore when all affected HDT and SDK paths replace bincode (zkp-10.8.1); see research/native-dependency-policy/README.md for scope.",
       "affects": [
         {
           "ref": "pkg:cargo/sparq"

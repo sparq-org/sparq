@@ -1,0 +1,57 @@
+{
+  "base_commit": "d34b709ea9c8140c66fd67305c02d79b4cc283a5",
+  "base_lock_sha256": "67d4fc7ad7f2a52d75aec3e963f372f93dc901a646922954376322fb529d3f02",
+  "candidate_lock_sha256": "abc67b836619ca5bfa96c1a5228ea763a5b3bbf2596d3846ea7a6b7449cce73d",
+  "removed_registry_packages": [
+    {
+      "name": "proc-macro-error-attr2",
+      "version": "2.0.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "checksum": "96de42df36bb9bba5542fe9f1a054b8cc87e172759a1868aa05c1f3acc89dfc5",
+      "dependencies": [
+        "proc-macro2",
+        "quote"
+      ]
+    },
+    {
+      "name": "proc-macro-error2",
+      "version": "2.0.1",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "checksum": "11ec05c52be0a07b08061f7dd003e7d7092e0472bc731b4af7bb1ef876109802",
+      "dependencies": [
+        "proc-macro-error-attr2",
+        "proc-macro2",
+        "quote",
+        "syn 2.0.119"
+      ]
+    }
+  ],
+  "changed_packages": [
+    {
+      "before": {
+        "name": "wasmer-derive",
+        "version": "6.1.0",
+        "source": "registry+https://github.com/rust-lang/crates.io-index",
+        "checksum": "c546f3380840cd63fdcc390f04cd19002f2dfa19b4691b77ecbd27642bd93452",
+        "dependencies": [
+          "proc-macro-error2",
+          "proc-macro2",
+          "quote",
+          "syn 1.0.109"
+        ]
+      },
+      "after": {
+        "name": "wasmer-derive",
+        "version": "6.1.0",
+        "dependencies": [
+          "proc-macro2",
+          "quote",
+          "syn 1.0.109"
+        ]
+      }
+    }
+  ],
+  "added_packages": [],
+  "source_only": true,
+  "cargo_locked_validation": "pending remote"
+}

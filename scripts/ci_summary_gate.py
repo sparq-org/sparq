@@ -20,8 +20,8 @@
 #     the MIN_POLLS startup floor, and only after SETTLE_POLLS consecutive quiet
 #     polls. Verdict: only DECLARED-advisory checks (see §ADVISORY MUST BE DECLARED)
 #     are EXCLUDED; a gating check passes iff its conclusion is success/skipped/
-#     neutral. PR/merge_group additionally require the exact-evaluator job to
-#     finish success; an empty stable set passes only outside those events.
+#     neutral. PR/merge_group additionally require the exact-evaluator and
+#     native-composition jobs to finish success; an empty stable set passes only outside those events.
 #
 # ADVISORY MUST BE DECLARED, NOT INFERRED FROM A NAME (#3773). [OPUS-5] Until
 # 2026-07-25 this gate dropped a whole check-run from the gating set whenever its
@@ -1546,20 +1546,29 @@ def _draft_recheck(tier_ctx: TierContext | None, summary_path: str = "") -> int:
     return 0
 
 
-# [GPT-6] This always-created workflow job is mandatory on merge-authorizing
-# events. Its successful internal diff selector may skip heavy steps, but the
+# [GPT-6] These always-created workflow jobs are mandatory on merge-authorizing
+# events. Successful internal diff selectors may skip heavy steps, but each
 # job itself must finish SUCCESS; absence/skip is not proof of irrelevance.
 EXACT_EVALUATOR_CHECK = "real exact-dataset guest and proof"
+NATIVE_COMPOSITION_CHECK = "native credential and circuit composition"
 
 
-def exact_evaluator_status(runs: list[dict], tier_ctx: TierContext | None) -> str:
+def required_proof_status(runs: list[dict], tier_ctx: TierContext | None, name: str) -> str:
     """Status on the authoritative current-head sibling set from the resolver."""
     if not tier_ctx or tier_ctx.event_name not in {"pull_request", "merge_group"}:
         return "n/a"
-    checks = [r for r in runs if r.get("name") == EXACT_EVALUATOR_CHECK]
+    checks = [r for r in runs if r.get("name") == name]
     if not checks or any(r.get("status") != "completed" for r in checks):
         return "pending"
     return "ok" if all(r.get("conclusion") == "success" for r in checks) else "failed"
+
+
+def exact_evaluator_status(runs: list[dict], tier_ctx: TierContext | None) -> str:
+    return required_proof_status(runs, tier_ctx, EXACT_EVALUATOR_CHECK)
+
+
+def native_composition_status(runs: list[dict], tier_ctx: TierContext | None) -> str:
+    return required_proof_status(runs, tier_ctx, NATIVE_COMPOSITION_CHECK)
 
 
 def render_verdict(runs: list[dict], summary_path: str = "", tier_ctx: TierContext | None = None) -> int:
@@ -1579,10 +1588,10 @@ def render_verdict(runs: list[dict], summary_path: str = "", tier_ctx: TierConte
     Without a TierContext (isolated tests), the draft-tier and mandatory
     evaluator rules do not apply. main() always supplies its trigger context.
 
-    EXACT EVALUATOR PRESENCE ([GPT-6]): pull_request and merge_group must
-    contain a completed-success `real exact-dataset guest and proof` job,
+    PROOF WORKFLOW PRESENCE ([GPT-6]): pull_request and merge_group must
+    contain completed-success exact-evaluator and native-composition jobs,
     including when every other sibling is green or the observed set is empty.
-    Its internal successful diff selection may skip heavy steps; a skipped job
+    Their internal successful diff selections may skip heavy steps; a skipped job
     cannot satisfy this requirement.
 
     SELECTION SEMANTICS ([FABLE-5] sq-fmx4u.3, design §5.3): a `skipped`
@@ -1662,17 +1671,19 @@ def render_verdict(runs: list[dict], summary_path: str = "", tier_ctx: TierConte
             )
             print("::error::ci-summary failed — the feature-matrix reporter verdict is missing (fail-closed).")
         return 1
-    exact = exact_evaluator_status(runs, tier_ctx)
-    if exact not in {"n/a", "ok"}:
-        _emit(
-            f"### ci-summary: FAILED — mandatory `{EXACT_EVALUATOR_CHECK}` "
-            f"is {exact} on this head. Pull requests and merge groups require "
-            "its completed SUCCESS verdict; an absent, skipped, cancelled or "
-            "failed job cannot establish that evaluator checks were satisfied.",
-            summary_path,
-        )
-        print("::error::ci-summary failed — exact evaluator success is required (fail-closed).")
-        return 1
+    for name, label in ((EXACT_EVALUATOR_CHECK, "exact evaluator"),
+                        (NATIVE_COMPOSITION_CHECK, "native composition")):
+        state = required_proof_status(runs, tier_ctx, name)
+        if state not in {"n/a", "ok"}:
+            _emit(
+                f"### ci-summary: FAILED — mandatory `{name}` is {state} on this head. "
+                "Pull requests and merge groups require its completed SUCCESS verdict; "
+                "an absent, skipped, cancelled or failed job cannot establish that "
+                "proof checks or their irrelevant-diff classification were satisfied.",
+                summary_path,
+            )
+            print(f"::error::ci-summary failed — {label} success is required (fail-closed).")
+            return 1
     total = len(runs)
     if total == 0:
         if _draft_recheck(tier_ctx, summary_path) != 0:
@@ -1958,10 +1969,11 @@ def run_gate(cfg: Config, fetch_runs, fetch_queue_depth, sleep_fn=time.sleep,
         report_state = fm_report_status(runs)
         awaiting_report = report_state == "pending"
         awaiting_exact = exact_evaluator_status(runs, tier_ctx) == "pending"
+        awaiting_native = native_composition_status(runs, tier_ctx) == "pending"
         completed_hist.append(total - pending)
         # Settle is a POST-TERMINAL window re-armed ONLY by pending work (sq-ipkku):
         # already-terminal injections must not starve convergence.
-        stable = 0 if (pending or awaiting_full or awaiting_report or awaiting_exact) else stable + 1
+        stable = 0 if (pending or awaiting_full or awaiting_report or awaiting_exact or awaiting_native) else stable + 1
         names = sorted({r.get("name", "") for r in runs})
         changed = " (name set changed)" if prev_names is not None and names != prev_names else ""
         prev_names = names
@@ -1969,6 +1981,7 @@ def run_gate(cfg: Config, fetch_runs, fetch_queue_depth, sleep_fn=time.sleep,
         extra += ", awaiting the full-tier re-run (draft-tier selection present)" if awaiting_full else ""
         extra += ", awaiting the feature-matrix reporter verdict" if awaiting_report else ""
         extra += ", awaiting the mandatory exact evaluator verdict" if awaiting_exact else ""
+        extra += ", awaiting the mandatory native composition verdict" if awaiting_native else ""
         print(
             f"attempt {attempt}: {total} check-run(s), {pending} running, "
             f"all-terminal stable for {stable}/{cfg.settle_polls} poll(s){changed}{extra}",
@@ -1990,6 +2003,7 @@ def run_gate(cfg: Config, fetch_runs, fetch_queue_depth, sleep_fn=time.sleep,
             (awaiting_report or (report_state == "ok" and stable < cfg.settle_polls))
             and not awaiting_full
             and not awaiting_exact
+            and not awaiting_native
             and non_reporter_pending == 0
             and cfg.reporter_grace_polls > 0
         )
@@ -2147,7 +2161,7 @@ def run_gate(cfg: Config, fetch_runs, fetch_queue_depth, sleep_fn=time.sleep,
         if (
             reporter_grace_started
             and attempt > cfg.max_total_polls
-            and (non_reporter_pending > 0 or awaiting_full or awaiting_exact)
+            and (non_reporter_pending > 0 or awaiting_full or awaiting_exact or awaiting_native)
         ):
             _emit(
                 "::notice::ci-summary reporter-only grace stopped because ordinary "
@@ -2229,7 +2243,7 @@ def run_gate(cfg: Config, fetch_runs, fetch_queue_depth, sleep_fn=time.sleep,
     # unresolved current report takes the existing reporter failure belt. A report
     # that first became green on the final grace poll also cannot bypass the normal
     # settle window merely because the bounded tail ended.
-    if reporter_grace_started and non_reporter_pending == 0 and not awaiting_full and not awaiting_exact:
+    if reporter_grace_started and non_reporter_pending == 0 and not awaiting_full and not awaiting_exact and not awaiting_native:
         report_state = fm_report_status(runs)
         if report_state == "pending":
             print(
