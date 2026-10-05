@@ -25,7 +25,7 @@ use oxrdf::{BlankNode, NamedOrBlankNode, Term, Triple, Variable};
 use rustc_hash::{FxHashMap, FxHashSet};
 use sparq_core::Graph;
 use spargebra::term::{NamedNodePattern, TermPattern, TriplePattern};
-use spargebra::{Query, SparqlParser};
+use spargebra::Query;
 
 use crate::{PreparedQuery, QueryBudget, QueryResult};
 
@@ -118,23 +118,17 @@ pub fn construct_or_describe_with_budget(
     sparql: &str,
     budget: &QueryBudget,
 ) -> Result<Vec<Triple>, String> {
-    let q = SparqlParser::new().parse_query(sparql).map_err(|e| e.to_string())?;
-    let active = crate::active_dataset(graph, &q);
-    let graph = active.as_ref().unwrap_or(graph);
-    let _view_scope = crate::view_scope(&active);
-    crate::exec::budget::with_budget(budget, || {
-        match q {
-            Query::Construct { template, pattern, .. } => {
-                let solutions = crate::exec::eval_select(graph, &pattern)?;
-                Ok(instantiate(&template, &solutions))
-            }
-            Query::Describe { pattern, .. } => {
-                let solutions = crate::exec::eval_select(graph, &pattern)?;
-                cbd(graph, &solutions)
-            }
-            _ => Err("construct_or_describe() requires a CONSTRUCT or DESCRIBE query".to_string()),
-        }
-    })
+    // Parse through `PreparedQuery` like every other entry point, so the graph-valued forms
+    // see the same `algebra-rewrite` pass (when that feature is on) as SELECT / ASK and
+    // EXPLAIN — EXPLAIN of a CONSTRUCT no longer shows a plan the executor does not run
+    // (#4748). The pass only rewrites the WHERE pattern and is bag-equivalent on its
+    // solutions (bindings included), so the instantiated template is unchanged.
+    let prepared = PreparedQuery::parse(sparql)?;
+    match prepared.query() {
+        Query::Construct { .. } => construct_prepared_with_budget(graph, &prepared, budget),
+        Query::Describe { .. } => describe_prepared_with_budget(graph, &prepared, budget),
+        _ => Err("construct_or_describe() requires a CONSTRUCT or DESCRIBE query".to_string()),
+    }
 }
 
 /// Executes a CONSTRUCT *or* DESCRIBE query and serialises the resulting graph as
@@ -543,5 +537,32 @@ mod tests {
         let g = Graph::load_str(data, "turtle").unwrap();
         let ts = describe(&g, "DESCRIBE <http://ex/a>").unwrap();
         assert_eq!(ts.len(), 3);
+    }
+}
+
+/// #4748 — `construct_or_describe` (the CLI / server / wheel / MCP graph-valued entry
+/// point) parses through `PreparedQuery`, so with `algebra-rewrite` on it runs the same
+/// rewritten algebra as `construct` / `describe` and EXPLAIN, with identical output.
+#[cfg(all(test, feature = "algebra-rewrite"))]
+mod rewrite_seam_tests {
+    use super::*;
+
+    #[test]
+    fn construct_or_describe_matches_the_prepared_entry_points_under_the_rewrite() {
+        let g = Graph::load_str(
+            "@prefix ex: <http://ex/> . ex:a ex:p ex:b . ex:c ex:p ex:d . ex:a ex:q ex:e .",
+            "turtle",
+        )
+        .unwrap();
+        // Equality substitution (an IRI FILTER) and the !bound anti-join both fire here.
+        let c = "PREFIX ex: <http://ex/> CONSTRUCT { ?s ex:r ?o } WHERE { ?s ex:p ?o FILTER(?s = ex:a) }";
+        let n = "PREFIX ex: <http://ex/> CONSTRUCT { ?s ex:r ?o } WHERE { ?s ex:p ?o OPTIONAL { ?s ex:q ?z } FILTER(!bound(?z)) }";
+        let d = "PREFIX ex: <http://ex/> DESCRIBE ?s WHERE { ?s ex:p ?o FILTER(?s = ex:c) }";
+        for q in [c, n] {
+            assert_eq!(construct_or_describe(&g, q).unwrap(), construct(&g, q).unwrap(), "{q}");
+        }
+        assert_eq!(construct_or_describe(&g, d).unwrap(), describe(&g, d).unwrap());
+        assert_eq!(construct_or_describe(&g, c).unwrap().len(), 1);
+        assert_eq!(construct_or_describe(&g, n).unwrap().len(), 1);
     }
 }
