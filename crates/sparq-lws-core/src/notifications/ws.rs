@@ -176,12 +176,25 @@ impl<S: Store> NotifyState<S> {
             AccessMode::Read
         };
         let wac = WacAuthorizer::with_cache(&self.ldp.store, &self.base_url, &self.ldp.acl_cache);
-        match wac.authorize(topic, required, Some(web_id), origin).await {
-            Ok(Decision::Allow(_)) => None,
-            Ok(Decision::Forbidden | Decision::Unauthenticated) => Some(topic_denied()),
+        let allowed = match wac.authorize(topic, required, Some(web_id), origin).await {
+            Ok(Decision::Allow(_)) => true,
+            Ok(Decision::Forbidden | Decision::Unauthenticated) => false,
             // A backend fault resolving the ACL chain must never read as a grant.
-            Err(_) => Some(authorization_unavailable()),
-        }
+            Err(_) => return Some(authorization_unavailable()),
+        };
+        // Compose the opt-in ODRL gate exactly as the LDP read path does (deny-overrides,
+        // permit-extends only for a plain Read), so watching a resource is never allowed where a
+        // GET of it is refused.
+        #[cfg(all(feature = "odrl-authz", not(target_arch = "wasm32")))]
+        let allowed = match self.ldp.odrl_gate.as_deref() {
+            None => allowed,
+            Some(gate) => match gate.decide_read(topic, Some(web_id)) {
+                crate::authz::odrl::OdrlVerdict::NotApplicable => allowed,
+                crate::authz::odrl::OdrlVerdict::Deny => false,
+                crate::authz::odrl::OdrlVerdict::Permit => allowed || required == AccessMode::Read,
+            },
+        };
+        (!allowed).then(topic_denied)
     }
 
     /// The absolute subscription-service URL (the POST target).
@@ -371,7 +384,7 @@ pub struct ReceiveQuery {
 /// to the WS extractor's success. By deferring the `Result`, we reject an absent/invalid/expired/
 /// wrong-topic token with 401 regardless of the upgrade headers, and only surface the WS rejection
 /// after the token has validated.
-pub async fn receive_handler<S: Store>(
+pub async fn receive_handler<S: Store + 'static>(
     State(state): State<Arc<NotifyState<S>>>,
     Query(q): Query<ReceiveQuery>,
     headers: HeaderMap,
@@ -417,8 +430,8 @@ pub async fn receive_handler<S: Store>(
         Err(rej) => return rej.into_response(),
     };
     // Only AFTER the token validates do we upgrade + register a subscriber.
-    let hub = state.hub.clone();
-    ws.on_upgrade(move |socket| stream_notifications(socket, hub, topic))
+    let origin = request_origin(&headers).map(str::to_string);
+    ws.on_upgrade(move |socket| stream_notifications(socket, state, topic, web_id, origin))
 }
 
 /// The per-connection task: register a subscriber, forward every notification to the socket, and
@@ -428,8 +441,18 @@ pub async fn receive_handler<S: Store>(
 /// socket message. Inbound frames from the client are drained (a WebSocketChannel2023 receive socket
 /// is server→client only; we read solely to observe a Close / a transport error so we can tear down
 /// promptly and not leak the subscription).
-async fn stream_notifications(mut socket: WebSocket, hub: NotificationHub, topic: String) {
-    let mut rx = hub.subscribe(&topic).await;
+///
+/// Revocation: the WAC (and ODRL) gate is re-run before every frame, so a subscriber whose read
+/// access is revoked while the socket is open is disconnected (close code 1008, policy violation)
+/// before the next notification reaches it. The ACL cache keeps this check cheap.
+async fn stream_notifications<S: Store + 'static>(
+    mut socket: WebSocket,
+    state: Arc<NotifyState<S>>,
+    topic: String,
+    web_id: String,
+    origin: Option<String>,
+) {
+    let mut rx = state.hub.subscribe(&topic).await;
 
     loop {
         tokio::select! {
@@ -437,6 +460,19 @@ async fn stream_notifications(mut socket: WebSocket, hub: NotificationHub, topic
             received = rx.recv() => {
                 match received {
                     Ok(body) => {
+                        if state
+                            .deny_unless_may_read(&topic, &web_id, origin.as_deref())
+                            .await
+                            .is_some()
+                        {
+                            let _ = socket
+                                .send(Message::Close(Some(axum::extract::ws::CloseFrame {
+                                    code: 1008, // policy violation: read access was revoked
+                                    reason: "access to the topic was revoked".into(),
+                                })))
+                                .await;
+                            break;
+                        }
                         if socket.send(Message::text(body.to_string())).await.is_err() {
                             break; // the client went away mid-send
                         }
@@ -843,13 +879,69 @@ mod tests {
 
         // The token itself is still structurally valid...
         assert!(s.hub.validate_receive_token(&token, topic).await);
-        // ...but the WAC re-check the receive handler runs now denies Bob.
-        let denial = s.deny_unless_may_read(topic, BOB, None).await;
+        // ...but the receive handler itself re-runs the WAC check and now refuses Bob. Driving the
+        // real route (no upgrade headers) means the handler's own gate must answer: without it the
+        // request would fall through to the WebSocket extractor's rejection instead of 403.
+        use tower::ServiceExt;
+        let app = axum::Router::new()
+            .route(RECEIVE_PATH, axum::routing::get(receive_handler))
+            .with_state(s.clone());
+        let uri = format!(
+            "{RECEIVE_PATH}?topic={}&token={}",
+            encode_query_value(topic),
+            encode_query_value(&token)
+        );
+        let resp = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri(uri)
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
         assert_eq!(
-            denial.map(|r| r.status()),
-            Some(StatusCode::FORBIDDEN),
+            resp.status(),
+            StatusCode::FORBIDDEN,
             "a revoked grant must not be replayable through a still-unexpired receive token"
         );
+    }
+
+    /// With the opt-in ODRL gate attached, an ODRL deny overrides a WAC grant on the notification
+    /// gate exactly as it does on GET, so a reader refused by policy cannot watch the resource.
+    #[cfg(all(feature = "odrl-authz", not(target_arch = "wasm32")))]
+    #[tokio::test]
+    async fn odrl_deny_overrides_wac_grant_on_the_notification_gate() {
+        use crate::authz::odrl::{OdrlGate, OdrlVerdict};
+        use crate::store::Store;
+        struct DenyAll;
+        impl OdrlGate for DenyAll {
+            fn decide_read(&self, _: &str, _: Option<&str>) -> OdrlVerdict {
+                OdrlVerdict::Deny
+            }
+        }
+        let store = CompositeStore::new(InMemorySparqClient::new(), InMemoryBlobStore::new());
+        store
+            .write(
+                &format!("{BASE}/.acl"),
+                Bytes::from(format!(
+                    r#"@prefix acl: <http://www.w3.org/ns/auth/acl#>.
+<#owner> a acl:Authorization; acl:agent <{ALICE}>; acl:accessTo <{BASE}/>;
+         acl:default <{BASE}/>; acl:mode acl:Read, acl:Write, acl:Control."#
+                )),
+                "text/turtle",
+            )
+            .await
+            .expect("seed root acl");
+        // WAC alone grants Alice Read (see `subscribe_handler_accepts_authenticated_...`); the
+        // attached gate must still refuse her.
+        let mut ldp = LdpState::new(store, BASE);
+        ldp.odrl_gate = Some(Arc::new(DenyAll));
+        let state = Arc::new(NotifyState::new(Arc::new(ldp)));
+        let denial = state
+            .deny_unless_may_read("https://pod.example/a", ALICE, None)
+            .await;
+        assert_eq!(denial.map(|r| r.status()), Some(StatusCode::FORBIDDEN));
     }
 
     /// The token's WebID binding is what the receive-side WAC check reads — it must come back

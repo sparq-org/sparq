@@ -44,7 +44,8 @@
 //! and then RE-RUNS the same WAC check for the WebID the token is bound to
 //! ([`NotificationHub::authorize_receive_token`]). Re-checking at connect time keeps the two gates in
 //! lock-step and means a grant REVOKED after subscribe cannot be replayed for the remainder of the
-//! token's TTL.
+//! token's TTL. The same check runs again before every frame on an open socket, which is closed
+//! (1008) as soon as the subscriber loses read access.
 //!
 //! **Existence non-disclosure** (`research/lws-design-records.md` §6): neither gate probes the topic
 //! resource itself — the decision comes ONLY from the ACL-resolution chain — so a denial is the same

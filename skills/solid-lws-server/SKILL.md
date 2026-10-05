@@ -106,8 +106,11 @@ A group grant is per-requester, so it never appears in the `public=` audience of
 WAC also covers notification subscriptions: a `POST` to the
 `WebSocketChannel2023` subscription service needs `acl:Read` on the topic
 (`acl:Control` when the topic is an `.acl`), and the WebSocket receive endpoint
-re-checks that same mode for the subscriber when the socket connects — so a
-revoked grant is not replayable through an already-issued `receiveFrom` URL.
+re-checks that same mode for the subscriber when the socket connects and again
+before every notification it sends — so a revoked grant is not replayable through
+an already-issued `receiveFrom` URL, and an open socket is closed (code 1008) once
+its subscriber loses read access. With the `odrl-authz` gate attached, its deny
+applies here exactly as it does to `GET`.
 Lacking the mode returns `403`, whether or not the topic exists.
 
 ## Serve provider WebIDs off the pod (optional)
