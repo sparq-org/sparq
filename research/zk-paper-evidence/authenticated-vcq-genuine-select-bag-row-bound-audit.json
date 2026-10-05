@@ -1,0 +1,312 @@
+{
+  "schema": "sparq.independent-genuine-evidence-audit.v1",
+  "at": "2026-10-05T18:08:50.630652+00:00",
+  "source": "335a59ad072c0dcb7ac6d29327b0a34b9c34578c",
+  "source_note": "Branch claude/zk-authrdf-genuine-receipts at 335a59ad = codex/zk-vcq-authenticated-rdf (0c845ce9, PR #6594) plus one branch-scoped workflow file. Both guests were exported in the CI job from that tree; the V5 artifact hash (4fdc0dc4...) differs from the earlier c35f5e4b and from the container-built 7b68dc06 because the build path differs; it is identical across all six jobs.",
+  "proof_job_sha256": "1427e44f7e0562c14fed3d30cc3fb5ce1e2fb8b7947dbfd6f7f490572277cb35",
+  "completed_at": "2026-10-05T17:46:17+00:00",
+  "outcome": "pass",
+  "scope": "One public W3C eddsa-rdfc-2022 vector; generic VCQ authenticated V5 bag SELECT whose request allows one released row; the genuine receipt must be rejected by the protocol row bound. No other declared case, benchmark or external security certification.",
+  "genuine_receipts": 1,
+  "protocol_accepted_receipts": 0,
+  "protocol_rejected_genuine_receipts": {
+    "released_row_bound": 1
+  },
+  "case": "select-bag-row-bound",
+  "all_defined_cases_run": false,
+  "query": "SELECT ?name WHERE { ?c <https://schema.org/name> ?name VALUES ?copy { 1 2 } }",
+  "contract": "SelectBag",
+  "authority": "VerifierAgreedAnchor",
+  "dataset": "w3c-alumni",
+  "fixture": {
+    "agreed_anchor": "02604c43301375dcbbe4c185e8fe93936739fc4050aa1899acbf9947eb4437f0",
+    "document_sha256": "517744132ae165a5349155bef0bb0cf2258fff99dfe1dbd914b938d775a36017",
+    "proof_config_sha256": "bea7b7acfbad0126b135104024a5f1733e705108f42d59668b05c0c50004c6b0",
+    "salt": "a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+    "source": "W3C vc-di-eddsa REC 2025-05-15, eddsa-rdfc-2022 examples 7, 9, 10, 12, 13, 15"
+  },
+  "verifier_policy": {
+    "authorization": [
+      {
+        "issuer": "https://vc.example/issuers/5678",
+        "public_key": [
+          176,
+          13,
+          141,
+          147,
+          142,
+          127,
+          119,
+          61,
+          81,
+          86,
+          90,
+          173,
+          54,
+          166,
+          35,
+          245,
+          52,
+          79,
+          127,
+          93,
+          25,
+          96,
+          249,
+          207,
+          62,
+          142,
+          18,
+          98,
+          14,
+          162,
+          129,
+          15
+        ],
+        "verification_method": "did:key:z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2#z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2"
+      }
+    ],
+    "cryptosuite": "EddsaRdfc2022",
+    "evaluation": {
+      "canonicalization": {
+        "max_hndq_calls": 64,
+        "max_input_bytes": 1048576,
+        "max_output_bytes": 1048576,
+        "max_permutation_steps": 1048576,
+        "max_quads": 32768
+      },
+      "dataset": {
+        "max_dataset_bytes": 65536,
+        "max_named_graphs": 16,
+        "max_rows": 4096,
+        "max_triples": 256
+      },
+      "describe": "OutgoingBlankNodeClosure"
+    },
+    "mapping": "ScopedCanonicalUnion"
+  },
+  "descriptor_sha256": "fa75e611dd214dc53c90b6f26920be117a33bece9ef15744a5dce28a36d1cf0b",
+  "parameter_digest": "85d92c3758bef356526378f317c80b38abb4d4db5a3d9a5d4dc8cb54500d92a0",
+  "policy_digest": "aafc0325aec51e28da77071500661fe094d08726abe1443f4c0e435947deb8e6",
+  "expected_result": {
+    "Select": {
+      "order": "Bag",
+      "rows": [
+        [
+          "\"Alumni Credential\""
+        ],
+        [
+          "\"Alumni Credential\""
+        ]
+      ],
+      "variables": [
+        "name"
+      ]
+    }
+  },
+  "actual_result": {
+    "Select": {
+      "order": "Bag",
+      "rows": [
+        [
+          "\"Alumni Credential\""
+        ],
+        [
+          "\"Alumni Credential\""
+        ]
+      ],
+      "variables": [
+        "name"
+      ]
+    }
+  },
+  "actual_provenance": "VerifierAgreedAuthenticated",
+  "actual_dataset_commitment": [
+    2,
+    96,
+    76,
+    67,
+    48,
+    19,
+    117,
+    220,
+    187,
+    228,
+    193,
+    133,
+    232,
+    254,
+    147,
+    147,
+    103,
+    57,
+    252,
+    64,
+    80,
+    170,
+    24,
+    153,
+    172,
+    191,
+    153,
+    71,
+    235,
+    68,
+    55,
+    240
+  ],
+  "receipt": {
+    "inner": "Succinct",
+    "seal_words": 55667,
+    "seal_bytes": 222668,
+    "exit_code": "Halted(0)",
+    "dev_mode": false,
+    "receipt_sha256": "e2a721b75608dfd1f94e1dc2164e0c44373649eeeb6255f9b852fa09f56e7f30",
+    "journal_sha256": "7cd36d965f7c50565ab260f7549470ab0d9a853d3471356c48d1b08d001f40f1",
+    "request_sha256": "3058fcda08c29a5ec6074c141b7c71986bae38cd8eac417b4796b75ffdc14538",
+    "presentation_file": {
+      "bytes": 584367,
+      "sha256": "c04ebc5320397f93a563c6d4430a10b12b530e44af2e91542eac952018a9c730"
+    },
+    "vcq_transport": {
+      "bytes": 1753501,
+      "sha256": "c3ab591e7a84064cead52f802b39065ffcc1027bd4501a556726344fe1da96e0"
+    },
+    "pin": {
+      "image_id": [
+        2264828262,
+        3957631839,
+        1921429972,
+        2249314555,
+        1743949710,
+        4283693754,
+        446327326,
+        384867536
+      ],
+      "sha256": [
+        79,
+        220,
+        13,
+        196,
+        1,
+        224,
+        158,
+        48,
+        109,
+        248,
+        236,
+        249,
+        200,
+        210,
+        10,
+        77,
+        69,
+        17,
+        104,
+        77,
+        41,
+        89,
+        74,
+        17,
+        230,
+        14,
+        27,
+        157,
+        55,
+        46,
+        235,
+        105
+      ]
+    },
+    "artifact_sha256": "4fdc0dc401e09e306df8ecf9c8d20a4d4511684d29594a11e60e1b9d372eeb69",
+    "pin_file_sha256": "200d788351bdcaa0f7aad15cb04fabdfb679a0a362819b5db586f59ada58e9f7",
+    "verification": "The driver completed SDK verification with dev mode disabled under the accepted V5 pin, compared the journal with the native model and the hand-written expectation, and ran the generic protocol checks. This record re-reads the retained files; it launched no extra verification process."
+  },
+  "control_count": 0,
+  "controls": [],
+  "rejection": {
+    "class": "Capacity",
+    "code": "CapacityExceeded(Backend { name: \"vcq-released-rows\", requested: 2, ceiling: 1 })",
+    "original_challenge_store_calls": 0,
+    "phase": "Verify",
+    "underlying_v5_verified_with_test_nonces": true
+  },
+  "challenge_store_scope": "In-memory test doubles only, not production durability/concurrency certification.",
+  "exact_cross_image_pin": {
+    "image_id": [
+      4194659102,
+      4071703700,
+      1996754120,
+      3432096220,
+      2038009768,
+      3730967108,
+      3468773622,
+      1025862938
+    ],
+    "sha256": [
+      250,
+      223,
+      117,
+      29,
+      140,
+      185,
+      19,
+      150,
+      171,
+      215,
+      4,
+      122,
+      74,
+      19,
+      135,
+      54,
+      70,
+      94,
+      70,
+      52,
+      21,
+      228,
+      14,
+      116,
+      35,
+      19,
+      12,
+      1,
+      197,
+      181,
+      189,
+      42
+    ]
+  },
+  "executable": {
+    "note": "Built in the job by cargo test --locked from the source above; executable hash not retained by the workflow."
+  },
+  "r0vm": {
+    "version": "risc0-r0vm 3.0.6",
+    "install": "official v3.0.6 release asset cargo-risczero-x86_64-unknown-linux-gnu.tgz, SHA-256 615d961bfb81d318db5071d7548389c850e324ac7f421c075176daf26082a60a checked before extraction (same asset as the container run, whose r0vm SHA-256 is 751b9b18...)"
+  },
+  "summary_sha256": "c8237d518e9dad1e0d7d91314e054e48c592d4c15490539dd64c9933c62d8203",
+  "metadata_sha256": "24c0356a2f8b95d36f6d779a1417704cba5ffb0e5f94bd52343fa3a81c194b47",
+  "record_sha256": "03032676fd5592e6bd0d6479bc116185c9cce815aaf39ddf1023450b84df0d60",
+  "log_sha256": "72431bf3fb2db2cbbb194c7d7b111fb0364c73129ce381f8708058667e9206de",
+  "artifact_archive": {
+    "path": "GitHub Actions run 37340835239 artifact authrdf-genuine-select-bag-row-bound-335a59ad072c0dcb7ac6d29327b0a34b9c34578c; transported unmodified on branch claude/zk-genuine-evidence-raw at 45565d90 under evidence-transport/authrdf-ci-37340835239/authrdf-genuine-select-bag-row-bound-335a59ad072c0dcb7ac6d29327b0a34b9c34578c",
+    "workflow": ".github/workflows/zk-authrdf-genuine.yml",
+    "run": "https://github.com/sparq-org/sparq/actions/runs/37340835239"
+  },
+  "resource_scope": {
+    "host": "GitHub-hosted ubuntu-latest runner",
+    "driver_wall_seconds": 4491.61,
+    "prove_step_started": "2026-10-05T16:31:25Z",
+    "prove_step_completed": "2026-10-05T17:46:17Z",
+    "observed_memory_peak_bytes": null,
+    "limits": "Runner size not recorded by the job. Wall time covers the whole driver (one proof, verification and controls) and is noncanonical; it is not a performance comparison. Peak memory was not captured."
+  },
+  "limitations": [
+    "Public synthetic W3C test vector only; one declared case per record; all_defined_cases_run is false.",
+    "The receipt is genuine and verifies under the V5 pin with test nonces; the protocol rejects it before consuming the original challenge. It is evidence of the row-bound rejection, not of an accepted answer.",
+    "No credential status, holder binding, validity-period check, JSON-LD processing or wallet/world completeness established.",
+    "No independent second-party audit of this run and no external cryptographic review.",
+    "No guest cycle metric was emitted by this proof driver."
+  ]
+}

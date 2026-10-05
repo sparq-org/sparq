@@ -28,9 +28,10 @@ Branch `claude/zk-paper-narrative`, following `opus-5-5-narrative-proposal.md`
 - The authenticated false-ASK placeholder is replaced by the verifier-agreed payment receipt
   (`zkvcq.vcqp_*`, record `research/zk-paper-evidence/authenticated-vcq-payment-ask-audit.json`,
   from sparq-org/sparq#6651). It has not had a second internal evidence inspection; the text says so.
-- Still to add as their records land: the holder-declared payment case and the six other declared
-  authenticated cases (true/false ASK, holder-declared SELECT, CONSTRUCT under both authorities,
-  row-bound rejection).
+- The six CI declared cases (`zkvcq.ci_*`, records `authenticated-vcq-genuine-<case>-audit.json`
+  from #6651, CI run 37340835239) are reported in section 6.3 and Appendix B, including why there
+  are three guest pins. Not second-party inspected; the text says so.
+- Still to add when its record lands: the holder-declared payment case.
 
 ## Other TODOs
 - `// TODO(citation)` (two places, intro and 2.4): the soundness-only interface is the

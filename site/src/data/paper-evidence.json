@@ -2123,6 +2123,456 @@
       "source": "research/zk-paper-evidence/authenticated-vcq-payment-ask-audit.json /r0vm/version",
       "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-payment-ask-audit.json", "pointer": "/r0vm/version" },
       "note": "[zkp-14.6] Prover/verifier binary version."
+    },
+    "zkvcq.ci_source_commit": {
+      "value": "335a59ad072c0dcb7ac6d29327b0a34b9c34578c",
+      "unit": "git-commit",
+      "environment": "canonical",
+      "kind": "source-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-true-verifier-agreed-audit.json /source",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-true-verifier-agreed-audit.json", "pointer": "/source" },
+      "note": "[zkp-14.6] Source of the CI genuine run covering six declared authenticated cases (branch claude/zk-authrdf-genuine-receipts). Separate from the bag SELECT and payment runs; counts never added."
+    },
+    "zkvcq.ci_guest_sha256": {
+      "value": "4fdc0dc401e09e306df8ecf9c8d20a4d4511684d29594a11e60e1b9d372eeb69",
+      "unit": "sha256",
+      "environment": "canonical",
+      "kind": "artifact-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-true-verifier-agreed-audit.json /receipt/artifact_sha256",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-true-verifier-agreed-audit.json", "pointer": "/receipt/artifact_sha256" },
+      "note": "[zkp-14.6] V5 guest artifact pinned for all six CI jobs (identical across jobs). Differs from the other runs' pins because the artifact hash depends on the build path."
+    },
+    "zkvcq.ci_r0vm_version": {
+      "value": "risc0-r0vm 3.0.6",
+      "unit": "tool-version",
+      "environment": "canonical",
+      "kind": "toolchain-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-true-verifier-agreed-audit.json /r0vm/version",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-true-verifier-agreed-audit.json", "pointer": "/r0vm/version" },
+      "note": "[zkp-14.6] Prover/verifier binary version."
+    },
+    "zkvcq.ci_asktva_case": {
+      "value": "ask-true-verifier-agreed",
+      "unit": "declared-case",
+      "environment": "canonical",
+      "kind": "case-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-true-verifier-agreed-audit.json /case",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-true-verifier-agreed-audit.json", "pointer": "/case" },
+      "note": "[zkp-14.6] Declared case ask-true-verifier-agreed."
+    },
+    "zkvcq.ci_asktva_genuine_receipts": {
+      "value": 1,
+      "unit": "genuine-receipts",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-true-verifier-agreed-audit.json /genuine_receipts",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-true-verifier-agreed-audit.json", "pointer": "/genuine_receipts" },
+      "note": "[zkp-14.6] Genuine receipt (development mode disabled). Not second-party inspected."
+    },
+    "zkvcq.ci_asktva_protocol_accepted": {
+      "value": 1,
+      "unit": "protocol-accepted-receipts",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-true-verifier-agreed-audit.json /protocol_accepted_receipts",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-true-verifier-agreed-audit.json", "pointer": "/protocol_accepted_receipts" },
+      "note": "[zkp-14.6] Receipts accepted by the protocol verifier."
+    },
+    "zkvcq.ci_asktva_dev_mode": {
+      "value": false,
+      "unit": "boolean-audit-check",
+      "environment": "canonical",
+      "kind": "audited-flag",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-true-verifier-agreed-audit.json /receipt/dev_mode",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-true-verifier-agreed-audit.json", "pointer": "/receipt/dev_mode" },
+      "note": "[zkp-14.6] Development mode flag."
+    },
+    "zkvcq.ci_asktva_exit_code": {
+      "value": "Halted(0)",
+      "unit": "guest-exit-code",
+      "environment": "canonical",
+      "kind": "artifact-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-true-verifier-agreed-audit.json /receipt/exit_code",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-true-verifier-agreed-audit.json", "pointer": "/receipt/exit_code" },
+      "note": "[zkp-14.6] Guest exit code."
+    },
+    "zkvcq.ci_asktva_provenance": {
+      "value": "VerifierAgreedAuthenticated",
+      "unit": "result-provenance",
+      "environment": "canonical",
+      "kind": "result",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-true-verifier-agreed-audit.json /actual_provenance",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-true-verifier-agreed-audit.json", "pointer": "/actual_provenance" },
+      "note": "[zkp-14.6] Result provenance in the verified journal."
+    },
+    "zkvcq.ci_asktva_controls": {
+      "value": 28,
+      "unit": "controls",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-true-verifier-agreed-audit.json /control_count",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-true-verifier-agreed-audit.json", "pointer": "/control_count" },
+      "note": "[zkp-14.6] Controls attached to this receipt (28 under a verifier-agreed anchor, 26 when holder-declared: the two anchor controls do not apply)."
+    },
+    "zkvcq.ci_askfhd_case": {
+      "value": "ask-false-holder-declared",
+      "unit": "declared-case",
+      "environment": "canonical",
+      "kind": "case-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-false-holder-declared-audit.json /case",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-false-holder-declared-audit.json", "pointer": "/case" },
+      "note": "[zkp-14.6] Declared case ask-false-holder-declared."
+    },
+    "zkvcq.ci_askfhd_genuine_receipts": {
+      "value": 1,
+      "unit": "genuine-receipts",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-false-holder-declared-audit.json /genuine_receipts",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-false-holder-declared-audit.json", "pointer": "/genuine_receipts" },
+      "note": "[zkp-14.6] Genuine receipt (development mode disabled). Not second-party inspected."
+    },
+    "zkvcq.ci_askfhd_protocol_accepted": {
+      "value": 1,
+      "unit": "protocol-accepted-receipts",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-false-holder-declared-audit.json /protocol_accepted_receipts",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-false-holder-declared-audit.json", "pointer": "/protocol_accepted_receipts" },
+      "note": "[zkp-14.6] Receipts accepted by the protocol verifier."
+    },
+    "zkvcq.ci_askfhd_dev_mode": {
+      "value": false,
+      "unit": "boolean-audit-check",
+      "environment": "canonical",
+      "kind": "audited-flag",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-false-holder-declared-audit.json /receipt/dev_mode",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-false-holder-declared-audit.json", "pointer": "/receipt/dev_mode" },
+      "note": "[zkp-14.6] Development mode flag."
+    },
+    "zkvcq.ci_askfhd_exit_code": {
+      "value": "Halted(0)",
+      "unit": "guest-exit-code",
+      "environment": "canonical",
+      "kind": "artifact-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-false-holder-declared-audit.json /receipt/exit_code",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-false-holder-declared-audit.json", "pointer": "/receipt/exit_code" },
+      "note": "[zkp-14.6] Guest exit code."
+    },
+    "zkvcq.ci_askfhd_provenance": {
+      "value": "HolderSelectedAuthenticated",
+      "unit": "result-provenance",
+      "environment": "canonical",
+      "kind": "result",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-false-holder-declared-audit.json /actual_provenance",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-false-holder-declared-audit.json", "pointer": "/actual_provenance" },
+      "note": "[zkp-14.6] Result provenance in the verified journal."
+    },
+    "zkvcq.ci_askfhd_controls": {
+      "value": 26,
+      "unit": "controls",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-false-holder-declared-audit.json /control_count",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-false-holder-declared-audit.json", "pointer": "/control_count" },
+      "note": "[zkp-14.6] Controls attached to this receipt (28 under a verifier-agreed anchor, 26 when holder-declared: the two anchor controls do not apply)."
+    },
+    "zkvcq.ci_selhd_case": {
+      "value": "select-bag-holder-declared",
+      "unit": "declared-case",
+      "environment": "canonical",
+      "kind": "case-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-select-bag-holder-declared-audit.json /case",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-select-bag-holder-declared-audit.json", "pointer": "/case" },
+      "note": "[zkp-14.6] Declared case select-bag-holder-declared."
+    },
+    "zkvcq.ci_selhd_genuine_receipts": {
+      "value": 1,
+      "unit": "genuine-receipts",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-select-bag-holder-declared-audit.json /genuine_receipts",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-select-bag-holder-declared-audit.json", "pointer": "/genuine_receipts" },
+      "note": "[zkp-14.6] Genuine receipt (development mode disabled). Not second-party inspected."
+    },
+    "zkvcq.ci_selhd_protocol_accepted": {
+      "value": 1,
+      "unit": "protocol-accepted-receipts",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-select-bag-holder-declared-audit.json /protocol_accepted_receipts",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-select-bag-holder-declared-audit.json", "pointer": "/protocol_accepted_receipts" },
+      "note": "[zkp-14.6] Receipts accepted by the protocol verifier."
+    },
+    "zkvcq.ci_selhd_dev_mode": {
+      "value": false,
+      "unit": "boolean-audit-check",
+      "environment": "canonical",
+      "kind": "audited-flag",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-select-bag-holder-declared-audit.json /receipt/dev_mode",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-select-bag-holder-declared-audit.json", "pointer": "/receipt/dev_mode" },
+      "note": "[zkp-14.6] Development mode flag."
+    },
+    "zkvcq.ci_selhd_exit_code": {
+      "value": "Halted(0)",
+      "unit": "guest-exit-code",
+      "environment": "canonical",
+      "kind": "artifact-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-select-bag-holder-declared-audit.json /receipt/exit_code",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-select-bag-holder-declared-audit.json", "pointer": "/receipt/exit_code" },
+      "note": "[zkp-14.6] Guest exit code."
+    },
+    "zkvcq.ci_selhd_provenance": {
+      "value": "HolderSelectedAuthenticated",
+      "unit": "result-provenance",
+      "environment": "canonical",
+      "kind": "result",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-select-bag-holder-declared-audit.json /actual_provenance",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-select-bag-holder-declared-audit.json", "pointer": "/actual_provenance" },
+      "note": "[zkp-14.6] Result provenance in the verified journal."
+    },
+    "zkvcq.ci_selhd_controls": {
+      "value": 26,
+      "unit": "controls",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-select-bag-holder-declared-audit.json /control_count",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-select-bag-holder-declared-audit.json", "pointer": "/control_count" },
+      "note": "[zkp-14.6] Controls attached to this receipt (28 under a verifier-agreed anchor, 26 when holder-declared: the two anchor controls do not apply)."
+    },
+    "zkvcq.ci_conva_case": {
+      "value": "construct-verifier-agreed",
+      "unit": "declared-case",
+      "environment": "canonical",
+      "kind": "case-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-construct-verifier-agreed-audit.json /case",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-construct-verifier-agreed-audit.json", "pointer": "/case" },
+      "note": "[zkp-14.6] Declared case construct-verifier-agreed."
+    },
+    "zkvcq.ci_conva_genuine_receipts": {
+      "value": 1,
+      "unit": "genuine-receipts",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-construct-verifier-agreed-audit.json /genuine_receipts",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-construct-verifier-agreed-audit.json", "pointer": "/genuine_receipts" },
+      "note": "[zkp-14.6] Genuine receipt (development mode disabled). Not second-party inspected."
+    },
+    "zkvcq.ci_conva_protocol_accepted": {
+      "value": 1,
+      "unit": "protocol-accepted-receipts",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-construct-verifier-agreed-audit.json /protocol_accepted_receipts",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-construct-verifier-agreed-audit.json", "pointer": "/protocol_accepted_receipts" },
+      "note": "[zkp-14.6] Receipts accepted by the protocol verifier."
+    },
+    "zkvcq.ci_conva_dev_mode": {
+      "value": false,
+      "unit": "boolean-audit-check",
+      "environment": "canonical",
+      "kind": "audited-flag",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-construct-verifier-agreed-audit.json /receipt/dev_mode",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-construct-verifier-agreed-audit.json", "pointer": "/receipt/dev_mode" },
+      "note": "[zkp-14.6] Development mode flag."
+    },
+    "zkvcq.ci_conva_exit_code": {
+      "value": "Halted(0)",
+      "unit": "guest-exit-code",
+      "environment": "canonical",
+      "kind": "artifact-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-construct-verifier-agreed-audit.json /receipt/exit_code",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-construct-verifier-agreed-audit.json", "pointer": "/receipt/exit_code" },
+      "note": "[zkp-14.6] Guest exit code."
+    },
+    "zkvcq.ci_conva_provenance": {
+      "value": "VerifierAgreedAuthenticated",
+      "unit": "result-provenance",
+      "environment": "canonical",
+      "kind": "result",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-construct-verifier-agreed-audit.json /actual_provenance",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-construct-verifier-agreed-audit.json", "pointer": "/actual_provenance" },
+      "note": "[zkp-14.6] Result provenance in the verified journal."
+    },
+    "zkvcq.ci_conva_controls": {
+      "value": 28,
+      "unit": "controls",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-construct-verifier-agreed-audit.json /control_count",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-construct-verifier-agreed-audit.json", "pointer": "/control_count" },
+      "note": "[zkp-14.6] Controls attached to this receipt (28 under a verifier-agreed anchor, 26 when holder-declared: the two anchor controls do not apply)."
+    },
+    "zkvcq.ci_conhd_case": {
+      "value": "construct-holder-declared",
+      "unit": "declared-case",
+      "environment": "canonical",
+      "kind": "case-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-construct-holder-declared-audit.json /case",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-construct-holder-declared-audit.json", "pointer": "/case" },
+      "note": "[zkp-14.6] Declared case construct-holder-declared."
+    },
+    "zkvcq.ci_conhd_genuine_receipts": {
+      "value": 1,
+      "unit": "genuine-receipts",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-construct-holder-declared-audit.json /genuine_receipts",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-construct-holder-declared-audit.json", "pointer": "/genuine_receipts" },
+      "note": "[zkp-14.6] Genuine receipt (development mode disabled). Not second-party inspected."
+    },
+    "zkvcq.ci_conhd_protocol_accepted": {
+      "value": 1,
+      "unit": "protocol-accepted-receipts",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-construct-holder-declared-audit.json /protocol_accepted_receipts",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-construct-holder-declared-audit.json", "pointer": "/protocol_accepted_receipts" },
+      "note": "[zkp-14.6] Receipts accepted by the protocol verifier."
+    },
+    "zkvcq.ci_conhd_dev_mode": {
+      "value": false,
+      "unit": "boolean-audit-check",
+      "environment": "canonical",
+      "kind": "audited-flag",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-construct-holder-declared-audit.json /receipt/dev_mode",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-construct-holder-declared-audit.json", "pointer": "/receipt/dev_mode" },
+      "note": "[zkp-14.6] Development mode flag."
+    },
+    "zkvcq.ci_conhd_exit_code": {
+      "value": "Halted(0)",
+      "unit": "guest-exit-code",
+      "environment": "canonical",
+      "kind": "artifact-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-construct-holder-declared-audit.json /receipt/exit_code",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-construct-holder-declared-audit.json", "pointer": "/receipt/exit_code" },
+      "note": "[zkp-14.6] Guest exit code."
+    },
+    "zkvcq.ci_conhd_provenance": {
+      "value": "HolderSelectedAuthenticated",
+      "unit": "result-provenance",
+      "environment": "canonical",
+      "kind": "result",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-construct-holder-declared-audit.json /actual_provenance",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-construct-holder-declared-audit.json", "pointer": "/actual_provenance" },
+      "note": "[zkp-14.6] Result provenance in the verified journal."
+    },
+    "zkvcq.ci_conhd_controls": {
+      "value": 26,
+      "unit": "controls",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-construct-holder-declared-audit.json /control_count",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-construct-holder-declared-audit.json", "pointer": "/control_count" },
+      "note": "[zkp-14.6] Controls attached to this receipt (28 under a verifier-agreed anchor, 26 when holder-declared: the two anchor controls do not apply)."
+    },
+    "zkvcq.ci_rowb_case": {
+      "value": "select-bag-row-bound",
+      "unit": "declared-case",
+      "environment": "canonical",
+      "kind": "case-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-select-bag-row-bound-audit.json /case",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-select-bag-row-bound-audit.json", "pointer": "/case" },
+      "note": "[zkp-14.6] Declared case select-bag-row-bound."
+    },
+    "zkvcq.ci_rowb_genuine_receipts": {
+      "value": 1,
+      "unit": "genuine-receipts",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-select-bag-row-bound-audit.json /genuine_receipts",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-select-bag-row-bound-audit.json", "pointer": "/genuine_receipts" },
+      "note": "[zkp-14.6] Genuine receipt (development mode disabled). Not second-party inspected."
+    },
+    "zkvcq.ci_rowb_protocol_accepted": {
+      "value": 0,
+      "unit": "protocol-accepted-receipts",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-select-bag-row-bound-audit.json /protocol_accepted_receipts",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-select-bag-row-bound-audit.json", "pointer": "/protocol_accepted_receipts" },
+      "note": "[zkp-14.6] Receipts accepted by the protocol verifier."
+    },
+    "zkvcq.ci_rowb_dev_mode": {
+      "value": false,
+      "unit": "boolean-audit-check",
+      "environment": "canonical",
+      "kind": "audited-flag",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-select-bag-row-bound-audit.json /receipt/dev_mode",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-select-bag-row-bound-audit.json", "pointer": "/receipt/dev_mode" },
+      "note": "[zkp-14.6] Development mode flag."
+    },
+    "zkvcq.ci_rowb_exit_code": {
+      "value": "Halted(0)",
+      "unit": "guest-exit-code",
+      "environment": "canonical",
+      "kind": "artifact-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-select-bag-row-bound-audit.json /receipt/exit_code",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-select-bag-row-bound-audit.json", "pointer": "/receipt/exit_code" },
+      "note": "[zkp-14.6] Guest exit code."
+    },
+    "zkvcq.ci_rowb_provenance": {
+      "value": "VerifierAgreedAuthenticated",
+      "unit": "result-provenance",
+      "environment": "canonical",
+      "kind": "result",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-select-bag-row-bound-audit.json /actual_provenance",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-select-bag-row-bound-audit.json", "pointer": "/actual_provenance" },
+      "note": "[zkp-14.6] Result provenance in the verified journal."
+    },
+    "zkvcq.ci_rowb_rejection": {
+      "value": "CapacityExceeded(Backend { name: \"vcq-released-rows\", requested: 2, ceiling: 1 })",
+      "unit": "rejection-code",
+      "environment": "canonical",
+      "kind": "result",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-select-bag-row-bound-audit.json /rejection/code",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-select-bag-row-bound-audit.json", "pointer": "/rejection/code" },
+      "note": "[zkp-14.6] Typed rejection: the released result exceeds the contract's row bound; rejected before the original challenge is consumed."
     }
   }
 }

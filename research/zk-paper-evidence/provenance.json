@@ -50,6 +50,30 @@
     "authenticated-vcq-payment-ask-audit.json": {
       "source": "sparq-org/sparq branch claude/zk-paper-evidence-records commit 0dcb779c58c9bd89ee9357764e12b06c3d05e9af",
       "sha256": "516ff8ffce297ca633ba7a41449751aa3cf76fe4a5eebbad6caa4d560181b11c"
+    },
+    "authenticated-vcq-genuine-ask-true-verifier-agreed-audit.json": {
+      "source": "sparq-org/sparq branch claude/zk-paper-evidence-records commit a194e024 (from CI run 37340835239)",
+      "sha256": "97f370eedda3da9c438088c1b97eebd4dec43c8b6147074b382ccbcac460058b"
+    },
+    "authenticated-vcq-genuine-ask-false-holder-declared-audit.json": {
+      "source": "sparq-org/sparq branch claude/zk-paper-evidence-records commit a194e024 (from CI run 37340835239)",
+      "sha256": "b0ba57bbdc7d24e42a1ff7174c6ad1a752c0216ae8eaa0622e499707b78e1a5b"
+    },
+    "authenticated-vcq-genuine-select-bag-holder-declared-audit.json": {
+      "source": "sparq-org/sparq branch claude/zk-paper-evidence-records commit a194e024 (from CI run 37340835239)",
+      "sha256": "03c492e7b918839eb1a61a9d3f2b60eb26839505190d21311e8c8097cdecf93e"
+    },
+    "authenticated-vcq-genuine-construct-verifier-agreed-audit.json": {
+      "source": "sparq-org/sparq branch claude/zk-paper-evidence-records commit a194e024 (from CI run 37340835239)",
+      "sha256": "4ce74131b0fa0a078dfb202448c70a2fab2cacf9528241af1ee583903dbdebe3"
+    },
+    "authenticated-vcq-genuine-construct-holder-declared-audit.json": {
+      "source": "sparq-org/sparq branch claude/zk-paper-evidence-records commit a194e024 (from CI run 37340835239)",
+      "sha256": "e7e8b938ddfccfe1bc85023818cd226a21679d77667642cc0e92810b73718630"
+    },
+    "authenticated-vcq-genuine-select-bag-row-bound-audit.json": {
+      "source": "sparq-org/sparq branch claude/zk-paper-evidence-records commit a194e024 (from CI run 37340835239)",
+      "sha256": "7f0ec01938cfb07b24aceb1d0e15dffb5a78cca8d2650a1b847a58d615b7e4be"
     }
   }
 }
