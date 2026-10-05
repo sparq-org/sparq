@@ -12,7 +12,7 @@
 //      `DecompressionStream` and parse the decoded text → triple count. Plus
 //      ([FABLE-5] sq-4ssz1 / #1046) a real compressed-file upload: pick a `.gz` /
 //      `.zip` / `.zst` archive and it is decompressed in-tab (gzip/zip natively; zstd
-//      through the shared `js/src/decompress.ts` path, whose `fzstd` import loads only
+//      through `@sparq/client`'s shared decompressor, whose `fzstd` import loads only
 //      when a zstd payload is actually decoded) and parsed by the engine.
 //      bzip2 remains native-only (no small JS decoder — see the page's honest caveat).
 
@@ -47,11 +47,10 @@ import {
 } from "@/lib/data-formats";
 // [FABLE-5] sq-4ssz1 — the shared archive decompressor (gzip/zip native; zstd lazy).
 import {
-  sniffArchive,
-  archiveCodecFromName,
+  archiveCodecForFile,
+  bytesToRdf,
   type ArchiveCodec,
-} from "@/lib/dataset-archive";
-import { bytesToRdf } from "@/lib/rdf-import";
+} from "@/lib/rdf-import";
 // [OPUS-4.8] sq-8uew — Turtle/TriG/N-Triples/N-Quads syntax-highlighting input editor.
 import { RdfEditor } from "@/components/rdf-editor";
 // [OPUS-4.8] sq-ixc3.1 — JSON-LD syntax-highlighting input editor (the remaining picker format).
@@ -98,7 +97,7 @@ type ArchiveState =
     }
   | { kind: "error"; message: string };
 
-// The archive extensions the upload decode accepts (mirrors lib/dataset-archive.ts).
+// The archive extensions the upload decode accepts (mirrors lib/rdf-import.ts).
 const ARCHIVE_ACCEPT = ".gz,.gzip,.zip,.zst,.zstd";
 
 export function DataFormatsDemo() {
@@ -190,13 +189,13 @@ export function DataFormatsDemo() {
   // [FABLE-5] sq-4ssz1 (#1046) — decode a REAL compressed archive picked from disk:
   // sniff the codec (magic number first, filename as fallback), decompress in-tab via
   // the shared `bytesToRdf` pipeline (gzip/zip natively; picking a `.zst` reaches
-  // js/src/decompress.ts and triggers the FIRST fetch of its lazy fzstd chunk),
+  // @sparq/client's decompressor and triggers the FIRST fetch of its lazy fzstd chunk),
   // guess the RDF format from the inner name, and parse with the wasm engine.
   const runArchive = React.useCallback(async (file: File) => {
     setArchive({ kind: "running" });
     try {
       const bytes = new Uint8Array(await file.arrayBuffer());
-      const codec = sniffArchive(bytes) ?? archiveCodecFromName(file.name);
+      const codec = archiveCodecForFile(bytes, file.name);
       if (!codec) {
         throw new Error(
           `"${file.name}" is not a recognised compressed archive — expected gzip (.gz), zip (.zip), or zstd (.zst).`,

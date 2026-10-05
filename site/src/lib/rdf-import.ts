@@ -2,15 +2,29 @@
 // Read compressed sources as bytes, decode their container before UTF-8, then select the
 // RDF syntax from the inner name. Keeping this framework-free makes both invocation paths
 // unit-testable without mounting the former /try workbench.
+//
+// #5114 — decoding is `@sparq/client`'s `decompressDatasetBytes` (the one browser
+// decompressor the GUI also uses); this module only applies the site's import policy.
 
 import {
-  archiveCodecFromContentType,
-  archiveCodecFromName,
-  decompressArchive,
-  sniffArchive,
-  UNSUPPORTED_ARCHIVE_ERROR,
-} from "./dataset-archive";
+  datasetCodecFromContentType,
+  datasetCodecFromName,
+  decompressDatasetBytes,
+  sniffDatasetCodec,
+  type DatasetCompressionCodec,
+} from "@sparq/client";
 import { formatFromContentType, guessFormat } from "./repl-dataset";
+
+/** The archive codecs the site imports. bzip2 is recognised but deliberately not offered. */
+export type ArchiveCodec = Exclude<DatasetCompressionCodec, "bzip2">;
+
+/** Stable error used when bytes do not name one of the site's import codecs. */
+export const UNSUPPORTED_ARCHIVE_ERROR =
+  "Unrecognised compressed payload: expected a gzip (.gz), zip (.zip), or zstd (.zst) magic number.";
+
+const siteCodec = (
+  codec: DatasetCompressionCodec | undefined,
+): ArchiveCodec | undefined => (codec === "bzip2" ? undefined : codec);
 
 export interface BytesToRdfOptions {
   /** An explicit format picker value; `__auto__` keeps automatic detection enabled. */
@@ -26,30 +40,11 @@ export interface RdfSource {
   format: string;
 }
 
-function isBzip2Source(
-  bytes: Uint8Array,
-  sourceName: string,
-  contentType: string | null | undefined,
-): boolean {
-  const mime = contentType?.split(";")[0].trim().toLowerCase();
-  const path = sourceName.split(/[?#]/)[0].toLowerCase();
-  const named = /\.(?:bz2|bzip2|tbz|tbz2)$/.test(path);
-  const served = mime === "application/x-bzip2" || mime === "application/bzip2";
-  const magic =
-    bytes.length >= 4 &&
-    bytes[0] === 0x42 &&
-    bytes[1] === 0x5a &&
-    bytes[2] === 0x68 &&
-    bytes[3] >= 0x31 &&
-    bytes[3] <= 0x39;
-  return named || served || magic;
-}
-
 /**
  * Turns uploaded/fetched bytes into RDF source text and its engine format. Archive detection
  * follows the existing URL contract (container Content-Type, source suffix, then magic bytes),
  * while plain RDF prefers its served media type over the source suffix. gzip/zip stay on the
- * browser-native archive path; zstd reaches the shared lazy decoder in `js/src/decompress.ts`.
+ * browser-native archive path; zstd lazy-loads its decoder inside `@sparq/client`.
  */
 export async function bytesToRdf(
   bytes: Uint8Array,
@@ -61,26 +56,27 @@ export async function bytesToRdf(
     explicitFormat && explicitFormat !== "__auto__"
       ? explicitFormat
       : undefined;
-  const archiveCodec =
-    archiveCodecFromContentType(contentType ?? null) ??
-    archiveCodecFromName(sourceName) ??
-    sniffArchive(bytes);
+  const signals = [
+    datasetCodecFromContentType(contentType),
+    datasetCodecFromName(sourceName),
+    sniffDatasetCodec(bytes),
+  ];
+  const archiveCodec = signals.map(siteCodec).find((codec) => codec);
 
-  // bzip2 is deliberately not a browser import codec. Detect its established signals so a URL
-  // response cannot fall through to UTF-8 and reach the RDF parser as corrupted text; preserve
-  // the archive helper's existing unsupported-format error instead of adding a decoder.
-  if (!archiveCodec && isBzip2Source(bytes, sourceName, contentType)) {
+  // bzip2 is deliberately not a site import codec. Reject its established signals so a URL
+  // response cannot fall through to UTF-8 and reach the RDF parser as corrupted text.
+  if (!archiveCodec && signals.includes("bzip2")) {
     throw new Error(UNSUPPORTED_ARCHIVE_ERROR);
   }
 
   if (archiveCodec) {
-    const { text, innerName } = await decompressArchive(
+    const { bytes: decoded, innerName } = await decompressDatasetBytes(
       bytes,
       sourceName,
       archiveCodec,
     );
     return {
-      text,
+      text: new TextDecoder().decode(decoded),
       format: selectedFormat ?? guessFormat(innerName ?? sourceName),
     };
   }
@@ -92,4 +88,12 @@ export async function bytesToRdf(
       formatFromContentType(contentType ?? null) ??
       guessFormat(sourceName),
   };
+}
+
+/** The site import codec a picked file announces (magic first, then name), or `undefined`. */
+export function archiveCodecForFile(
+  bytes: Uint8Array,
+  name: string,
+): ArchiveCodec | undefined {
+  return siteCodec(sniffDatasetCodec(bytes)) ?? siteCodec(datasetCodecFromName(name));
 }
