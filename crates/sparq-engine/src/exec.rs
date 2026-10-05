@@ -10179,7 +10179,7 @@ fn try_theta_antijoin(
 
     // ---- SIP-seed anti-join (small correlation cardinality / literal keys) ----
     let mut fired = false;
-    for key in &order {
+    'groups: for key in &order {
         let members = &groups[key];
         let ri0 = members[0];
 
@@ -10247,8 +10247,11 @@ fn try_theta_antijoin(
         let all_cands: Vec<usize> = (0..b_prime.rows.len()).collect();
         for &ri in members {
             let lrow = &left_b.rows[ri];
+            // Stop the whole SIP strategy, not just this correlation group, so it ends
+            // exactly like the hash strategy: no further seeded `B'` is evaluated and the
+            // caller's operator-exit check raises the budget error (#4158).
             if budget::exhausted(result_rows.len()) {
-                break;
+                break 'groups;
             }
             let matched = antijoin_row_matches(
                 graph, local, lrow, &b_prime, &all_cands, &shared, &out_src, &tmp_vars, &checks,
