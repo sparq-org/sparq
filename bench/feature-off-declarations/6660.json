@@ -1,5 +1,5 @@
 {
-  "pr": 5983,
+  "pr": 6660,
   "date": "2026-10-05",
   "reason": "Adds `try_topk_orderby_indexed` to the always-compiled ORDER BY ... LIMIT path in crates/sparq-engine/src/exec.rs: an indexed top-k walk for a narrow star-BGP shape that declines to the existing evaluator for anything else (an active budget, repeated variables, multi-valued probes, oversized leading ties). The function is outside every `#[cfg(feature = ...)]` block and compiles into the feature-OFF sparq-wasm bundle, so its bytes move by design. The new `txn` retry helper and `PreparedGraphApplier` sit behind the default-OFF `txn` and `params` features and add no default-build code. No dependency is added and there is no `unsafe`. Bundle SIZE remains governed separately by the metrics.wasm_bundle_bytes floor ratchet in bench.yml."
 }
