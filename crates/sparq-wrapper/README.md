@@ -75,10 +75,19 @@ hatch.
   by N-Triples form), and that keeps each literal's datatype, language tag, and
   base direction. This proposal follows rdfjs/wrapper open PR #23 and is not
   landed upstream. <!-- [SONNET-4.6] sq-1rg2q.11 -->
-- The reserved `proposed-graph-scope-events`, `proposed-async-node`, and
-  `proposed-async-events` seams are default-off placeholders. Their APIs are
-  intentionally empty until the corresponding proposal work lands.
-  <!-- [SONNET-4.6] sq-1rg2q.1 -->
+- `proposed-async-node` adds `proposed::async_node`: `required` / `optional` /
+  `many` mapped reads over an `AsyncNode` (singular reads stop after the second
+  streamed value) and the write-through `AsyncLiveSet`. This proposal follows
+  rdfjs/wrapper draft PR #98. <!-- [FABLE-5] sq-1rg2q.9 -->
+- `proposed-async-events` adds `proposed::async_events::AsyncObservableStore`,
+  whose effective mutations await every listener in subscription order before
+  resolving. This proposal follows rdfjs/wrapper draft PR #99.
+  <!-- [FABLE-5] sq-1rg2q.10 -->
+- `proposed-graph-scope-events` adds
+  `proposed::graph_scope_events::ObservableDataset`, whose listeners see a
+  graph scope's projected union change: add at the first in-scope copy, delete
+  at the last. This proposal follows rdfjs/wrapper draft PR #96.
+  <!-- [FABLE-5] sq-1rg2q.7 -->
 - All crate features are off by default, and the dependency on `sparq-core`
   disables its default features to keep this capability isolated.
 

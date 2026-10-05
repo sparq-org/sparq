@@ -1,6 +1,6 @@
 ---
 name: rdf-wrapper
-description: "Traverse sparq RDF graphs as native Rust objects with the opt-in sparq-wrapper crate: bind a focus Term to an owned or borrowed Store, follow outgoing/incoming NamedNode predicates with iterators, unwrap values, convert typed literals to str/i64/bool, mutate owned stores, and optionally use the unlanded distinct-result, typed-cardinality, literal-codec, typed-focus, and effective-change observation proposals. Use when Rust code should work with focus objects instead of raw triples or dictionary IDs; SHACL-to-Rust code generation is a later surface."
+description: "Traverse sparq RDF graphs as native Rust objects with the opt-in sparq-wrapper crate: bind a focus Term to an owned or borrowed Store, follow outgoing/incoming NamedNode predicates with iterators, unwrap values, convert typed literals to str/i64/bool, mutate owned stores, and optionally use the unlanded distinct-result, typed-cardinality, literal-codec, typed-focus, effective-change observation, async store/node/event, and graph-scope (plus projected event) proposals. Use when Rust code should work with focus objects instead of raw triples or dictionary IDs; SHACL-to-Rust code generation is a later surface."
 ---
 
 # Use sparq-wrapper
@@ -81,13 +81,13 @@ sparq-wrapper = { version = "0.1", features = [
 ] }
 ```
 
-The async events, async node, and graph-scope events features currently
-expose reserved, empty modules; enabling them adds no API.
-Every other proposal feature is implemented. `proposed-distinct` is exposed as
+Every proposal feature is implemented. `proposed-distinct` is exposed as
 inherent `Dataset` methods in the crate root rather than through a `proposed::`
-module. See the
-[per-feature proposal status pages](references/README.md) for the
-implemented and reserved feature inventory. <!-- [SONNET-4.6] sq-1rg2q.1 -->
+module. The async node and async events features imply `proposed-async-store`;
+graph-scope events implies `proposed-graph-scope`; the event features reuse
+`proposed-observe`'s `ChangeEvent` / `SubscriptionId`. See the
+[per-feature proposal status pages](references/README.md) for the feature
+inventory. <!-- [FABLE-5] sq-1rg2q.7/.9/.10 -->
 
 `proposed-async-store` adds `sparq_wrapper::proposed::async_store` — the
 wrapper shape over a store whose reads are not synchronous (an HTTP endpoint, a
@@ -120,6 +120,47 @@ subject is rejected before the backend is asked to do anything) and return the
 backend future, so the call site reads `store.add(s, p, o)?.await?`.
 <!-- [SONNET-4.6] sq-1rg2q.8 -->
 
+`proposed-async-node` adds `sparq_wrapper::proposed::async_node`, the async
+counterpart of the mapped cardinality reads (rdfjs/wrapper draft PR #98).
+`required(&node, &p, map).await` and `optional(...)` pull at most two streamed
+values — a second value already proves the violation, so the rest of a remote
+result set is dropped, and `CardinalityError::found` is then the lower bound
+`2`. `many` maps every streamed value. Mappers receive an `AsyncNode`, so term
+identity stays synchronous and the mapped node can keep traversing.
+`live_set(&store, focus, p, decode, encode)` returns an `AsyncLiveSet` whose
+`values` / `contains` / `insert` / `remove` await the backend on every call;
+`insert` / `remove` return `true` only for an effective change (presence check
+then write, not atomic against other writers). Errors are `AsyncMapError`
+(`Store`, `Cardinality`, `Conversion`). <!-- [FABLE-5] sq-1rg2q.9 -->
+
+`proposed-async-events` adds `proposed::async_events::AsyncObservableStore`
+(rdfjs/wrapper draft PR #99). `subscribe(|event| async move { .. })` registers
+a listener returning a future; an effective `add` / `delete` awaits each
+listener in subscription order and resolves only after the last one finishes.
+Duplicate adds and absent deletes perform no write and notify nobody. Writes
+made through `store()` or the backend bypass listeners. Listener futures are
+not `Send`, matching the executor-free async surface.
+<!-- [FABLE-5] sq-1rg2q.10 -->
+
+```rust
+# async fn demo<B: sparq_wrapper::proposed::async_store::AsyncStoreBackend>(backend: B)
+#     -> Result<(), Box<dyn std::error::Error>> {
+use oxrdf::NamedNode;
+use sparq_wrapper::proposed::async_events::AsyncObservableStore;
+
+let mut store = AsyncObservableStore::new(backend);
+store.subscribe(|event| async move {
+    println!("{:?} {}", event.kind, event.object); // awaited before add resolves
+});
+let alice = NamedNode::new("http://example.org/alice")?;
+let knows = NamedNode::new("http://example.org/knows")?;
+let bob = NamedNode::new("http://example.org/bob")?;
+assert!(store.add(alice.clone(), knows.clone(), bob.clone()).await?);
+assert!(!store.add(alice, knows, bob).await?); // duplicate: no listener runs
+# Ok(())
+# }
+```
+
 `proposed-graph-scope` adds a read-many/write-one `GraphScope` based on
 rdfjs/wrapper draft PR #95. Its reads are the deduplicated projection of
 exactly the named graphs supplied to `GraphScope::new`; call
@@ -147,6 +188,40 @@ let scope = GraphScope::new(&mut graph, [g1.clone(), g2], g1);
 let alice = scope.node(alice);
 assert_eq!(alice.out(&tag).len(), 1); // duplicate triple projected once
 alice.insert(tag, Literal::new_simple_literal("rust"))?; // writes only g1
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+`GraphScope::projection()` returns the scope's read `Projection` (also built
+directly with `Projection::new(graphs).with_default_graph()`).
+`proposed-graph-scope-events` adds
+`proposed::graph_scope_events::ObservableDataset` (rdfjs/wrapper draft PR #96):
+it owns a dataset, mutates quads with `insert(graph, s, p, o)` /
+`remove(graph, s, p, o)` (`None` is the default graph), and
+`subscribe(projection, |event, projection, committed| ..)` reports the
+projected union change — an add only for the first in-scope copy of a triple,
+a delete only for the last, nothing for graphs outside the projection.
+Removing from an absent named graph is a no-op that does not create it.
+<!-- [FABLE-5] sq-1rg2q.7 -->
+
+```rust
+use oxrdf::{Literal, NamedNode, Term};
+use sparq_wrapper::proposed::graph_scope::Projection;
+use sparq_wrapper::proposed::graph_scope_events::ObservableDataset;
+
+let g1 = Term::NamedNode(NamedNode::new("http://example.org/g1")?);
+let g2 = Term::NamedNode(NamedNode::new("http://example.org/g2")?);
+let alice = NamedNode::new("http://example.org/alice")?;
+let tag = NamedNode::new("http://example.org/tag")?;
+let rdf = Literal::new_simple_literal("rdf");
+
+let mut dataset = ObservableDataset::new();
+dataset.subscribe(Projection::new([g1.clone(), g2.clone()]), |event, _, _| {
+    println!("{:?}", event.kind); // fires once on the add, once on the delete
+});
+dataset.insert(Some(&g1), alice.clone(), tag.clone(), rdf.clone())?; // Add
+dataset.insert(Some(&g2), alice.clone(), tag.clone(), rdf.clone())?; // silent
+dataset.remove(Some(&g1), alice.clone(), tag.clone(), rdf.clone())?; // silent
+dataset.remove(Some(&g2), alice, tag, rdf)?; // Delete
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 

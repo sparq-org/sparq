@@ -27,18 +27,83 @@ use std::fmt;
 /// so a later node mutation never overlaps a borrow of the underlying graph.
 pub struct GraphScope<'graph> {
     graph: RefCell<&'graph mut Graph>,
-    readable_named_graphs: Vec<Term>,
-    read_default_graph: bool,
+    projection: Projection,
     write_graph: Term,
 }
 
 impl fmt::Debug for GraphScope<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("GraphScope")
-            .field("readable_named_graphs", &self.readable_named_graphs)
-            .field("read_default_graph", &self.read_default_graph)
+            .field("projection", &self.projection)
             .field("write_graph", &self.write_graph)
             .finish_non_exhaustive()
+    }
+}
+
+/// The exact set of graphs a [`GraphScope`] reads, independent of any dataset.
+///
+/// Repeated graph names are kept once, in first-seen order. The default graph
+/// is excluded unless [`with_default_graph`](Self::with_default_graph) is called.
+// [FABLE-5] sq-1rg2q.7: shared by scoped reads and projected change events.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Projection {
+    readable_named_graphs: Vec<Term>,
+    read_default_graph: bool,
+}
+
+impl Projection {
+    /// Creates a projection over exactly the supplied named graphs.
+    pub fn new<I, G>(readable_named_graphs: I) -> Self
+    where
+        I: IntoIterator<Item = G>,
+        G: Into<Term>,
+    {
+        let mut seen = HashSet::new();
+        let readable_named_graphs = readable_named_graphs
+            .into_iter()
+            .map(Into::into)
+            .filter(|name| seen.insert(name.clone()))
+            .collect();
+        Self {
+            readable_named_graphs,
+            read_default_graph: false,
+        }
+    }
+
+    /// Includes the dataset's default graph in the projection.
+    pub fn with_default_graph(mut self) -> Self {
+        self.read_default_graph = true;
+        self
+    }
+
+    /// Returns the readable named-graph terms in traversal order.
+    pub fn readable_named_graphs(&self) -> &[Term] {
+        &self.readable_named_graphs
+    }
+
+    /// Returns whether the default graph is part of the projection.
+    pub fn reads_default_graph(&self) -> bool {
+        self.read_default_graph
+    }
+
+    /// Returns whether `graph_name` (`None` for the default graph) is projected.
+    pub fn includes(&self, graph_name: Option<&Term>) -> bool {
+        match graph_name {
+            None => self.read_default_graph,
+            Some(name) => self.readable_named_graphs.contains(name),
+        }
+    }
+
+    /// The projected graphs that exist in `dataset`, default graph first.
+    pub(crate) fn graphs<'d>(&'d self, dataset: &'d Graph) -> impl Iterator<Item = &'d Graph> {
+        self.read_default_graph
+            .then_some(dataset)
+            .into_iter()
+            .chain(
+                self.readable_named_graphs
+                    .iter()
+                    .filter_map(|name| dataset.named_graph(name)),
+            )
     }
 }
 
@@ -58,34 +123,32 @@ impl<'graph> GraphScope<'graph> {
         I: IntoIterator<Item = G>,
         G: Into<Term>,
     {
-        let mut seen = HashSet::new();
-        let readable_named_graphs = readable_named_graphs
-            .into_iter()
-            .map(Into::into)
-            .filter(|name| seen.insert(name.clone()))
-            .collect();
         Self {
             graph: RefCell::new(graph),
-            readable_named_graphs,
-            read_default_graph: false,
+            projection: Projection::new(readable_named_graphs),
             write_graph: write_graph.into(),
         }
     }
 
     /// Includes the dataset's default graph in the readable projection.
     pub fn with_default_graph(mut self) -> Self {
-        self.read_default_graph = true;
+        self.projection = self.projection.with_default_graph();
         self
+    }
+
+    /// Returns the configured read projection.
+    pub fn projection(&self) -> &Projection {
+        &self.projection
     }
 
     /// Returns the configured readable named-graph terms in traversal order.
     pub fn readable_named_graphs(&self) -> &[Term] {
-        &self.readable_named_graphs
+        self.projection.readable_named_graphs()
     }
 
     /// Returns whether the default graph is part of the readable projection.
     pub fn reads_default_graph(&self) -> bool {
-        self.read_default_graph
+        self.projection.reads_default_graph()
     }
 
     /// Returns the sole named-graph term targeted by writes and deletes.
@@ -153,14 +216,8 @@ impl<'graph> GraphScope<'graph> {
         let dataset = &**dataset;
         let mut seen = HashSet::new();
         let mut terms = Vec::new();
-
-        if self.read_default_graph {
-            append_traversal(dataset, focus, predicate, direction, &mut seen, &mut terms);
-        }
-        for name in &self.readable_named_graphs {
-            if let Some(graph) = dataset.named_graph(name) {
-                append_traversal(graph, focus, predicate, direction, &mut seen, &mut terms);
-            }
+        for graph in self.projection.graphs(dataset) {
+            append_traversal(graph, focus, predicate, direction, &mut seen, &mut terms);
         }
         terms
     }
