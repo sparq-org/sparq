@@ -193,7 +193,7 @@ pub fn explain_plan(graph: &Graph, sparql: &str) -> Result<PlanNode, String> {
     let active = crate::active_dataset(graph, &q);
     let graph = active.as_ref().unwrap_or(graph);
     let _view_scope = crate::view_scope(&active);
-    exec::set_query_base(q.base_iri().map(|b| b.as_str()));
+    let _query_base = exec::set_query_base(q.base_iri().map(|b| b.as_str()));
     let pattern = query_pattern(&q);
     Ok(plan_from_pattern(graph, pattern))
 }
@@ -212,7 +212,7 @@ pub fn explain_plan_analyze_with_budget(graph: &Graph, sparql: &str, budget: &Qu
     let active = crate::active_dataset(graph, &q);
     let graph = active.as_ref().unwrap_or(graph);
     let _view_scope = crate::view_scope(&active);
-    exec::set_query_base(q.base_iri().map(|b| b.as_str()));
+    let _query_base = exec::set_query_base(q.base_iri().map(|b| b.as_str()));
     if !matches!(q, Query::Select { .. } | Query::Ask { .. }) {
         return Err("EXPLAIN ANALYZE supports SELECT and ASK queries only (use explain_plan for CONSTRUCT/DESCRIBE)".into());
     }
