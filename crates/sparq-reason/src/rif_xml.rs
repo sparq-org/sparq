@@ -389,7 +389,60 @@ impl XmlNode {
 // XML tree builder
 // ---------------------------------------------------------------------------
 
+/// The RIF namespace IRI every RIF/XML `<Document>` root must be in.
+const RIF_NS: &str = "http://www.w3.org/2007/rif#";
+
+/// Maximum element nesting depth accepted by [`parse_xml_tree`].
+///
+/// The tree builder itself is iterative, but the interpretation that follows
+/// (`parse_condition` ↔ `parse_formula_child`, `expand_body`, the alpha-renaming
+/// passes, and the recursive `Drop` of the tree / `BodyCond`) recurses once per
+/// nesting level, so an adversarial document of deeply nested `<And>`/`<Or>`/
+/// `<Exists>` would overflow the stack and abort the process. Conformant RIF-Core
+/// documents nest a few dozen levels at most; anything deeper is refused
+/// fail-closed with [`ImportError::MalformedXml`]. #3359.
+const MAX_XML_DEPTH: usize = 256;
+
+/// Fail closed unless the ROOT element is in the RIF namespace: a bare
+/// `<Document>` with no namespace, or one in a foreign namespace, is not RIF/XML
+/// and must not be interpreted as such (its local names would otherwise be read
+/// with RIF semantics). Handles both the default-namespace form
+/// (`<Document xmlns="…rif#">`) and a prefixed root (`<rif:Document
+/// xmlns:rif="…rif#">`). #3360.
+fn check_root_namespace(e: &quick_xml::events::BytesStart<'_>) -> Result<(), ImportError> {
+    let qname = e.name();
+    let decl_key: Vec<u8> = match qname.prefix() {
+        Some(p) => [b"xmlns:".as_slice(), p.as_ref()].concat(),
+        None => b"xmlns".to_vec(),
+    };
+    let mut ns: Option<String> = None;
+    for a in e.attributes() {
+        let a = a.map_err(|err| ImportError::MalformedXml(format!("{}", err)))?;
+        if a.key.as_ref() == decl_key.as_slice() {
+            let raw = std::str::from_utf8(&a.value)
+                .map_err(|err| ImportError::MalformedXml(format!("{}", err)))?;
+            let val = quick_xml::escape::unescape(raw)
+                .map_err(|err| ImportError::MalformedXml(format!("{}", err)))?;
+            ns = Some(val.into_owned());
+        }
+    }
+    match ns.as_deref() {
+        Some(RIF_NS) => Ok(()),
+        Some(other) => Err(ImportError::MalformedXml(format!(
+            "root element is in namespace <{}>, not the RIF namespace <{}>",
+            other, RIF_NS
+        ))),
+        None => Err(ImportError::MalformedXml(format!(
+            "root element declares no namespace; RIF/XML requires the RIF namespace <{}>",
+            RIF_NS
+        ))),
+    }
+}
+
 /// Parse `xml_bytes` into a tree of `XmlNode`s.
+///
+/// The root element must be in the RIF namespace ([`check_root_namespace`]) and
+/// element nesting is capped at [`MAX_XML_DEPTH`]; both fail closed.
 ///
 /// # Whitespace handling
 ///
@@ -406,12 +459,24 @@ fn parse_xml_tree(xml_bytes: &[u8]) -> Result<XmlNode, ImportError> {
     loop {
         match reader.read_event().map_err(|e| ImportError::MalformedXml(format!("{}", e)))? {
             Event::Start(e) => {
+                if stack.is_empty() {
+                    check_root_namespace(&e)?;
+                }
+                if stack.len() >= MAX_XML_DEPTH {
+                    return Err(ImportError::MalformedXml(format!(
+                        "element nesting exceeds the maximum depth of {}",
+                        MAX_XML_DEPTH
+                    )));
+                }
                 let local = local_name_str(e.local_name().as_ref());
                 let attrs = read_attrs(&e)?;
                 stack.push(XmlNode { tag: local, text: String::new(), attrs, children: Vec::new() });
             }
             Event::Empty(e) => {
                 // Self-closing element — push and immediately pop.
+                if stack.is_empty() {
+                    check_root_namespace(&e)?;
+                }
                 let local = local_name_str(e.local_name().as_ref());
                 let attrs = read_attrs(&e)?;
                 let node = XmlNode { tag: local, text: String::new(), attrs, children: Vec::new() };
@@ -1932,6 +1997,115 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #3359 — a hostile document of deeply nested `<And>` must be REFUSED
+    /// (`MalformedXml`), not overflow the stack and abort the process. Run on the
+    /// default test-thread stack.
+    #[test]
+    fn deeply_nested_and_is_refused_not_stack_overflow() {
+        let depth = 200_000;
+        let mut xml = String::from(
+            "<Document xmlns=\"http://www.w3.org/2007/rif#\"><payload><Group><sentence>\
+             <Implies><if>",
+        );
+        for _ in 0..depth {
+            xml.push_str("<And><formula>");
+        }
+        for _ in 0..depth {
+            xml.push_str("</formula></And>");
+        }
+        xml.push_str("</if><then/></Implies></sentence></Group></payload></Document>");
+        match import(xml.as_bytes()) {
+            Err(ImportError::MalformedXml(msg)) => {
+                assert!(msg.contains("maximum depth"), "unexpected message: {msg}")
+            }
+            other => panic!("expected a depth refusal, got {other:?}"),
+        }
+    }
+
+    /// The same guard covers `<Or>` and `<Exists>` (and self-closing leaves).
+    #[test]
+    fn deeply_nested_or_exists_is_refused() {
+        for (open, close) in [
+            ("<Or><formula>", "</formula></Or>"),
+            (
+                "<Exists><declare><Var>z</Var></declare><formula>",
+                "</formula></Exists>",
+            ),
+        ] {
+            let depth = 100_000;
+            let mut xml = String::from(
+                "<Document xmlns=\"http://www.w3.org/2007/rif#\"><payload><Group><sentence>\
+                 <Implies><if>",
+            );
+            for _ in 0..depth {
+                xml.push_str(open);
+            }
+            xml.push_str("<Atom/>");
+            for _ in 0..depth {
+                xml.push_str(close);
+            }
+            xml.push_str("</if><then/></Implies></sentence></Group></payload></Document>");
+            let res = import(xml.as_bytes());
+            assert!(
+                matches!(res, Err(ImportError::MalformedXml(ref m)) if m.contains("maximum depth")),
+                "{open}: deep nesting must be refused"
+            );
+        }
+    }
+
+    /// A nested body just under the cap (~250 element levels) still imports — and
+    /// does not itself overflow the default test-thread stack in a debug build.
+    #[test]
+    fn near_cap_nested_and_still_imports() {
+        let depth = 120;
+        let mut xml = String::from(
+            "<Document xmlns=\"http://www.w3.org/2007/rif#\"><payload><Group><sentence>\
+             <Forall><declare><Var>x</Var></declare><formula><Implies><if>",
+        );
+        for _ in 0..depth {
+            xml.push_str("<And><formula>");
+        }
+        xml.push_str(
+            "<Atom><op><Const type=\"http://www.w3.org/2007/rif#iri\">http://ex/p</Const></op>\
+             <args ordered=\"yes\"><Var>x</Var></args></Atom>",
+        );
+        for _ in 0..depth {
+            xml.push_str("</formula></And>");
+        }
+        xml.push_str(
+            "</if><then><Atom><op><Const type=\"http://www.w3.org/2007/rif#iri\">http://ex/q</Const></op>\
+             <args ordered=\"yes\"><Var>x</Var></args></Atom></then></Implies></formula></Forall>\
+             </sentence></Group></payload></Document>",
+        );
+        import(xml.as_bytes()).expect("a body just under the depth cap must import");
+    }
+
+    /// #3360 — a `<Document>` root with no namespace, or a foreign one, is not
+    /// RIF/XML and is refused fail-closed.
+    #[test]
+    fn non_rif_namespace_root_is_refused() {
+        for xml in [
+            "<Document><payload><Group></Group></payload></Document>",
+            "<Document xmlns=\"http://example.org/not-rif#\"><payload><Group></Group></payload></Document>",
+            "<x:Document xmlns:x=\"http://example.org/not-rif#\" xmlns=\"http://www.w3.org/2007/rif#\"><payload><Group></Group></payload></x:Document>",
+            "<Document xmlns=\"http://example.org/not-rif#\"/>",
+        ] {
+            let res = import(xml.as_bytes());
+            assert!(
+                matches!(res, Err(ImportError::MalformedXml(ref m)) if m.contains("namespace")),
+                "a non-RIF-namespace root must be refused: {xml}"
+            );
+        }
+    }
+
+    /// A prefixed root bound to the RIF namespace is accepted.
+    #[test]
+    fn prefixed_rif_namespace_root_is_accepted() {
+        let xml = "<rif:Document xmlns:rif=\"http://www.w3.org/2007/rif#\">\
+                   <rif:payload><rif:Group></rif:Group></rif:payload></rif:Document>";
+        import(xml.as_bytes()).expect("a prefixed RIF-namespace root must import");
+    }
 
     // ---- XML fixtures -------------------------------------------------------
 

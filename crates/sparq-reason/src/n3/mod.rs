@@ -3279,6 +3279,12 @@ fn datetime_part(s: &str, f: Func) -> Option<i64> {
             };
             let m: i64 = dp.next().and_then(|x| x.parse().ok()).unwrap_or(1);
             let d: i64 = dp.next().and_then(|x| x.parse().ok()).unwrap_or(1);
+            // An impossible calendar date (2026-02-29, month 13, day 0) declines —
+            // binds nothing — rather than rolling over in the raw Hinnant formula,
+            // matching XSD and `sparq_policy`'s `parse_instant`. #3804.
+            if !(1..=days_in_month(y, m)?).contains(&d) {
+                return None;
+            }
             let days = days_from_civil(y, m, d);
             if matches!(f, Func::DayOfWeek) {
                 return Some((days + 4).rem_euclid(7)); // 1970-01-01 = Thursday
@@ -3312,7 +3318,22 @@ fn datetime_part(s: &str, f: Func) -> Option<i64> {
     }
 }
 
+/// Number of days in month `m` (1-12) of proleptic-Gregorian year `y`; `None` for an
+/// out-of-range month. #3804.
+fn days_in_month(y: i64, m: i64) -> Option<i64> {
+    let leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+    Some(match m {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if leap => 29,
+        2 => 28,
+        _ => return None,
+    })
+}
+
 /// Days since 1970-01-01 of the civil date y-m-d (Howard Hinnant's algorithm).
+/// Callers validate the date first (see [`days_in_month`]); the formula itself
+/// silently rolls an impossible date over.
 fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
     let y = if m <= 2 { y - 1 } else { y };
     let era = if y >= 0 { y } else { y - 399 } / 400;
@@ -4554,6 +4575,49 @@ mod tests {
         let epoch = d.intern_lit("1970-01-01T00:00:00Z", xsd_str, None);
         assert!(s.contains(&[id(&d, "http://ex/r"), id(&d, "http://ex/dt"), epoch]),
             "reverse time:inSeconds 0 = 1970-01-01T00:00:00Z");
+    }
+
+    /// #3804 — `time:inSeconds` / `time:dayOfWeek` must DECLINE (bind nothing) on an
+    /// impossible calendar date instead of silently rolling it over (2026-02-29 used
+    /// to become 2026-03-01), matching XSD and `sparq_policy`'s `parse_instant`. A real
+    /// leap day (2024-02-29) still binds.
+    #[test]
+    fn time_in_seconds_declines_impossible_calendar_dates() {
+        let src = r#"
+            @prefix : <http://ex/> .
+            @prefix time: <http://www.w3.org/2000/10/swap/time#> .
+            @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+            :bad1 :when "2026-02-29T00:00:00Z"^^xsd:dateTime .
+            :bad2 :when "2026-04-31T00:00:00Z"^^xsd:dateTime .
+            :bad3 :when "2026-13-01T00:00:00Z"^^xsd:dateTime .
+            :bad4 :when "2026-01-00T00:00:00Z"^^xsd:dateTime .
+            :bad5 :when "1900-02-29T00:00:00Z"^^xsd:dateTime .
+            :ok1 :when "2024-02-29T00:00:00Z"^^xsd:dateTime .
+            :ok2 :when "2000-02-29T00:00:00Z"^^xsd:dateTime .
+            { ?x :when ?d . ?d time:inSeconds ?secs } => { ?x :secs ?secs } .
+            { ?x :when ?d . ?d time:dayOfWeek ?dow } => { ?x :dow ?dow } .
+        "#;
+        let (d, s) = closure(src);
+        let secs = id(&d, "http://ex/secs");
+        let dow = id(&d, "http://ex/dow");
+        for bad in ["bad1", "bad2", "bad3", "bad4", "bad5"] {
+            let e = id(&d, &format!("http://ex/{bad}"));
+            assert!(
+                !s.iter().any(|t| t[0] == e && (t[1] == secs || t[1] == dow)),
+                "{bad}: an impossible calendar date must not bind time:inSeconds/dayOfWeek"
+            );
+        }
+        for ok in ["ok1", "ok2"] {
+            let e = id(&d, &format!("http://ex/{ok}"));
+            assert!(
+                s.iter().any(|t| t[0] == e && t[1] == secs),
+                "{ok}: leap day must bind"
+            );
+            assert!(
+                s.iter().any(|t| t[0] == e && t[1] == dow),
+                "{ok}: leap day must bind"
+            );
+        }
     }
 
     /// `time:timeZone` — extracts the explicit ±hh:mm timezone offset from a dateTime.
