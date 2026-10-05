@@ -172,14 +172,14 @@ version = "1.5.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.aws-lc-rs]]
-version = "1.17.1"
+version = "1.18.1"
 criteria = "safe-to-deploy"
-notes = "solid-server-rs import pre-flight (sq-gg0qq.1): the house FIPS-capable rustls crypto backend of the incoming server (HKDF/HMAC primitives, process-wide provider). AWS-maintained, formally-verified core (AWS-LC). [FABLE-5]"
+notes = "Exact-version continuation of the existing solid-server-rs trust decision for the house FIPS-capable rustls crypto backend. The 1.17.1 -> 1.18.1 Rust delta was reviewed for new unsafe and ambient-capability surfaces; it adds bounded FFI wrappers and API work while retaining AWS-LC as the cryptographic implementation. The coupled aws-lc-sys update remains explicitly accepted under the AWS-maintained vendored-core policy. Required by the rustls 0.23.45 security remediation for RUSTSEC-2026-0285. [GPT-6 Astra]"
 
 [[exemptions.aws-lc-sys]]
-version = "0.42.0"
+version = "0.45.0"
 criteria = "safe-to-deploy"
-notes = "solid-server-rs import pre-flight (sq-gg0qq.1): -sys crate for aws-lc-rs — vendors + compiles the AWS-LC C/asm source at build time via cc/cmake (build-time code execution, same class as libmimalloc-sys already in tree). AWS-maintained. [FABLE-5]"
+notes = "Exact-version continuation of the existing solid-server-rs trust decision for the aws-lc-rs -sys crate. This update vendors AWS-LC commit 02561621ffa4cf17c0c4f70bc11a82df36b42ae9 and retains the established cc/cmake build-time execution model; the large upstream C/asm delta is not represented as a local full audit and is explicitly accepted under the existing AWS-maintained vendored-core policy. Required by aws-lc-rs 1.18.1 for the rustls 0.23.45 security remediation. [GPT-6 Astra]"
 
 [[exemptions.axum]]
 version = "0.8.9"
@@ -1468,8 +1468,9 @@ version = "1.1.4"
 criteria = "safe-to-run"
 
 [[exemptions.rustls]]
-version = "0.23.40"
+version = "0.23.45"
 criteria = "safe-to-deploy"
+notes = "Exact-version security update for RUSTSEC-2026-0285. Reviewed the 0.23.40 -> 0.23.45 Rust delta: handshake encryption-level enforcement and related protocol-hardening changes, no added unsafe blocks, and no new filesystem, process, or network ambient capabilities beyond rustls' existing TLS behavior. [GPT-6 Astra]"
 
 [[exemptions.rustls-native-certs]]
 version = "0.8.4"
@@ -1488,8 +1489,9 @@ version = "0.1.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.rustls-webpki]]
-version = "0.103.13"
+version = "0.103.15"
 criteria = "safe-to-deploy"
+notes = "Exact-version companion update for rustls 0.23.45. Reviewed the small 0.103.13 -> 0.103.15 Rust delta: AWS-LC signature-algorithm exposure and CRL iteration cleanup, with no added unsafe blocks or ambient capabilities. [GPT-6 Astra]"
 
 [[exemptions.rusty-fork]]
 version = "0.3.1"

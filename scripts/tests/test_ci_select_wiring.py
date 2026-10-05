@@ -686,6 +686,17 @@ class TestPhase2LaneScoping(unittest.TestCase):
                          "already gated the PR head + re-runs on push-to-main; the noisy timing suite "
                          "moved to the nightly EC2 lane — keeping it on merge_group only dragged the queue)")
 
+    def test_dashboard_publisher_suite_is_enforced(self):
+        # [GPT-6-ASTRA] An unlisted/disabled test would leave publication races ungated.
+        job = _load(REPO_ROOT / ".github/workflows/docs-quality.yml")["jobs"]["quick-gates"]
+        command = "python3 scripts/tests/test_bench_dashboard_publish.py"
+        steps = [step for step in job["steps"] if command in str(step.get("run", ""))]
+        self.assertEqual(len(steps), 1)
+        self.assertEqual(steps[0]["run"], command)
+        self.assertNotIn("if", steps[0])
+        self.assertFalse(steps[0].get("continue-on-error", False))
+        self.assertNotIn("if", job)
+
     def test_bench_history_lane_scoping(self):
         # CRITICAL (design §6.1 continuity, criterion (d)): the auto-ratchet + history +
         # dashboard WRITES must stay on the push-to-main path and NOT fire on the
@@ -1777,12 +1788,22 @@ class TestDraftTierWiring(unittest.TestCase):
             self.assertIn(key, env, f"gate step must export {key}")
         self.assertIn("github.event.pull_request.draft", str(env["PR_DRAFT"]))
 
-    def test_bench_concurrency_cancels_only_pull_request(self):
+    def test_bench_concurrency_coalesces_pr_and_push_only(self):
         conc = self.bench.get("concurrency", {})
+        self.assertEqual(
+            str(conc.get("group")),
+            "bench-${{ github.ref }}-${{ "
+            "(!contains(fromJSON('[\"pull_request\",\"push\"]'), github.event_name) || "
+            "(github.event_name == 'pull_request' && "
+            "contains(fromJSON('[\"labeled\",\"unlabeled\"]'), "
+            "github.event.action))) && github.run_id || 'shared' }}",
+            "only explicitly allowlisted PR/main-push runs may share a ref group; "
+            "label-only and every unknown/future event need isolated per-run groups",
+        )
         self.assertEqual(str(conc.get("cancel-in-progress")),
-                         "${{ github.event_name == 'pull_request' }}",
-                         "bench must cancel superseded PR runs but never a "
-                         "push/schedule run (history integrity)")
+                         "${{ contains(fromJSON('[\"pull_request\",\"push\"]'), github.event_name) }}",
+                         "only explicitly allowlisted PR/main-push runs may cancel; "
+                         "nightly/manual and every unknown/future event must not")
 
     def test_js_has_per_pr_concurrency(self):
         conc = self.js.get("concurrency", {})

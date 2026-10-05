@@ -365,18 +365,19 @@ fn eval(
     let active = crate::active_dataset(graph, query);
     let graph = active.as_ref().unwrap_or(graph);
     let _view_scope = crate::view_scope(&active);
-    let _guard = exec::budget::install(budget);
-    exec::set_query_base(query.base_iri().map(|b| b.as_str()));
-    match query {
-        Query::Select { pattern, .. } => exec::eval_select(graph, pattern),
-        Query::Ask { pattern, .. } => Ok(QueryResult {
-            vars: Vec::new(),
-            rows: if exec::eval_ask(graph, pattern)? {
-                vec![Vec::new()]
-            } else {
-                Vec::new()
-            },
-        }),
-        _ => Err("result cache only stores SELECT and ASK queries".into()),
-    }
+    exec::budget::with_budget(budget, || {
+        exec::set_query_base(query.base_iri().map(|b| b.as_str()));
+        match query {
+            Query::Select { pattern, .. } => exec::eval_select(graph, pattern),
+            Query::Ask { pattern, .. } => Ok(QueryResult {
+                vars: Vec::new(),
+                rows: if exec::eval_ask(graph, pattern)? {
+                    vec![Vec::new()]
+                } else {
+                    Vec::new()
+                },
+            }),
+            _ => Err("result cache only stores SELECT and ASK queries".into()),
+        }
+    })
 }
