@@ -1,0 +1,231 @@
+{
+  "all_defined_cases_run": false,
+  "cases": [
+    {
+      "artifact_sha256": "4fdc0dc401e09e306df8ecf9c8d20a4d4511684d29594a11e60e1b9d372eeb69",
+      "case": "select-bag-row-bound",
+      "details": {
+        "authority": "VerifierAgreedAnchor",
+        "challenge": "eb3d1e1342050c290f6fef0cdeba68de2f06e63541cf267c717879473854f79e",
+        "contract": "SelectBag",
+        "controls_create_proofs": false,
+        "expected": {
+          "Select": {
+            "order": "Bag",
+            "rows": [
+              [
+                "\"Alumni Credential\""
+              ],
+              [
+                "\"Alumni Credential\""
+              ]
+            ],
+            "variables": [
+              "name"
+            ]
+          }
+        },
+        "files": {
+          "descriptor.local-struct-v1.bin": {
+            "bytes": 329,
+            "sha256": "fa75e611dd214dc53c90b6f26920be117a33bece9ef15744a5dce28a36d1cf0b"
+          },
+          "expected-result.json": {
+            "bytes": 197,
+            "sha256": "6b586c7cc71fd0ff59906eeb2dd5019e39201442ba2a41a8a8c68bbc78be14c1"
+          },
+          "stored-request.local-struct-v1.bin": {
+            "bytes": 970,
+            "sha256": "7fa97972193ce9a4d273058d6941dfee7d7967ed2c3578fe93b40abfd49ef78e"
+          },
+          "vcq-presentation.json": {
+            "bytes": 1753501,
+            "sha256": "c3ab591e7a84064cead52f802b39065ffcc1027bd4501a556726344fe1da96e0"
+          }
+        },
+        "outcome": {
+          "journal": {
+            "dataset_commitment": [
+              2,
+              96,
+              76,
+              67,
+              48,
+              19,
+              117,
+              220,
+              187,
+              228,
+              193,
+              133,
+              232,
+              254,
+              147,
+              147,
+              103,
+              57,
+              252,
+              64,
+              80,
+              170,
+              24,
+              153,
+              172,
+              191,
+              153,
+              71,
+              235,
+              68,
+              55,
+              240
+            ],
+            "provenance": "VerifierAgreedAuthenticated",
+            "request_digest": [
+              61,
+              132,
+              249,
+              196,
+              239,
+              34,
+              246,
+              200,
+              228,
+              212,
+              203,
+              134,
+              162,
+              219,
+              175,
+              5,
+              219,
+              249,
+              198,
+              147,
+              52,
+              67,
+              55,
+              156,
+              198,
+              54,
+              129,
+              74,
+              153,
+              4,
+              29,
+              252
+            ],
+            "result": {
+              "Select": {
+                "order": "Bag",
+                "rows": [
+                  [
+                    "\"Alumni Credential\""
+                  ],
+                  [
+                    "\"Alumni Credential\""
+                  ]
+                ],
+                "variables": [
+                  "name"
+                ]
+              }
+            },
+            "version": 5
+          },
+          "protocol_accepted": false,
+          "rejection": {
+            "class": "Capacity",
+            "code": "CapacityExceeded(Backend { name: \"vcq-released-rows\", requested: 2, ceiling: 1 })",
+            "original_challenge_store_calls": 0,
+            "phase": "Verify",
+            "underlying_v5_verified_with_test_nonces": true
+          },
+          "status": {
+            "dev_mode": false,
+            "exit_code": "Halted(0)",
+            "inner": "Succinct",
+            "journal_sha256": "7cd36d965f7c50565ab260f7549470ab0d9a853d3471356c48d1b08d001f40f1",
+            "seal_words": 55667
+          }
+        },
+        "query": "SELECT ?name WHERE { ?c <https://schema.org/name> ?name VALUES ?copy { 1 2 } }",
+        "released_rows": 1
+      },
+      "fixture": "published W3C vc-di-eddsa eddsa-rdfc-2022 vector; public data only",
+      "guest": "sparq-authrdf-guest",
+      "journal_sha256": "7cd36d965f7c50565ab260f7549470ab0d9a853d3471356c48d1b08d001f40f1",
+      "pin": {
+        "image_id": [
+          2264828262,
+          3957631839,
+          1921429972,
+          2249314555,
+          1743949710,
+          4283693754,
+          446327326,
+          384867536
+        ],
+        "sha256": [
+          79,
+          220,
+          13,
+          196,
+          1,
+          224,
+          158,
+          48,
+          109,
+          248,
+          236,
+          249,
+          200,
+          210,
+          10,
+          77,
+          69,
+          17,
+          104,
+          77,
+          41,
+          89,
+          74,
+          17,
+          230,
+          14,
+          27,
+          157,
+          55,
+          46,
+          235,
+          105
+        ]
+      },
+      "receipt_sha256": "e2a721b75608dfd1f94e1dc2164e0c44373649eeeb6255f9b852fa09f56e7f30",
+      "request_sha256": "3058fcda08c29a5ec6074c141b7c71986bae38cd8eac417b4796b75ffdc14538",
+      "schema": "sparq.authrdf-receipt-evidence.v1"
+    }
+  ],
+  "challenge_stores": "in-memory test doubles only; not durable, not production stores",
+  "completed_cases": [
+    "select-bag-row-bound"
+  ],
+  "controls_create_proofs": false,
+  "controls_on_existing_receipts": 0,
+  "declared_cases": [
+    "select-bag-row-bound"
+  ],
+  "genuine_receipts": 1,
+  "guest": "sparq-authrdf-guest",
+  "job_sha256": "1427e44f7e0562c14fed3d30cc3fb5ce1e2fb8b7947dbfd6f7f490572277cb35",
+  "metadata": {
+    "bytes": 5481,
+    "sha256": "24c0356a2f8b95d36f6d779a1417704cba5ffb0e5f94bd52343fa3a81c194b47"
+  },
+  "protocol_accepted_receipts": 0,
+  "protocol_rejected_genuine_receipts": {
+    "released_row_bound": 1
+  },
+  "registry_adapter_availability": "not tested; this test reads no registry entry",
+  "schema": "sparq.vcq-authrdf-genuine-proof.test-summary.v1",
+  "scope": "published W3C vector only; experimental, not externally audited; no credential status, holder binding, JSON-LD processing, or wallet or world completeness is established; no benchmark"
+}

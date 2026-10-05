@@ -1,0 +1,349 @@
+{
+  "all_defined_cases_run": false,
+  "cases": [
+    {
+      "artifact_sha256": "4fdc0dc401e09e306df8ecf9c8d20a4d4511684d29594a11e60e1b9d372eeb69",
+      "case": "ask-true-verifier-agreed",
+      "details": {
+        "authority": "VerifierAgreedAnchor",
+        "challenge": "92474ebc6a54240692cd5dffd864adc266f622f7c16115841f2f945aef005ed5",
+        "contract": "AskBoolean",
+        "controls_create_proofs": false,
+        "expected": {
+          "Ask": true
+        },
+        "files": {
+          "descriptor.local-struct-v1.bin": {
+            "bytes": 329,
+            "sha256": "fa75e611dd214dc53c90b6f26920be117a33bece9ef15744a5dce28a36d1cf0b"
+          },
+          "expected-result.json": {
+            "bytes": 17,
+            "sha256": "11776d9cfee23596a0bb7f8f2151891b314cfb32d44d15ed3191b6ecfaf7a601"
+          },
+          "stored-request.local-struct-v1.bin": {
+            "bytes": 981,
+            "sha256": "d3c4580f1d595d0352e87e3ce20759ecec03f2f99377a82ba712b14110460488"
+          },
+          "vcq-presentation.json": {
+            "bytes": 1752034,
+            "sha256": "4d981319eabda1ec31c041317445b2d9252cdc469c52a21a18dee3cae8586623"
+          }
+        },
+        "outcome": {
+          "controls": [
+            {
+              "class": "Invalid",
+              "code": "Backend(\"vcq-proof-rejected\")",
+              "control": "changed_query_same_form"
+            },
+            {
+              "class": "Invalid",
+              "code": "Backend(\"vcq-proof-rejected\")",
+              "control": "wrong_challenge"
+            },
+            {
+              "class": "Invalid",
+              "code": "Backend(\"vcq-proof-rejected\")",
+              "control": "changed_stored_audience_matching_supplied"
+            },
+            {
+              "class": "Invalid",
+              "code": "Backend(\"vcq-proof-rejected\")",
+              "control": "changed_window_containing_now"
+            },
+            {
+              "class": "Invalid",
+              "code": "Backend(\"vcq-audience-mismatch\")",
+              "control": "wrong_verifier_audience"
+            },
+            {
+              "class": "Invalid",
+              "code": "Backend(\"vcq-request-expired\")",
+              "control": "expired"
+            },
+            {
+              "class": "Invalid",
+              "code": "Backend(\"vcq-request-not-yet-valid\")",
+              "control": "not_yet_valid"
+            },
+            {
+              "class": "Invalid",
+              "code": "Backend(\"vcq-descriptor-digest-mismatch\")",
+              "control": "wrong_descriptor_digest"
+            },
+            {
+              "class": "Invalid",
+              "code": "Backend(\"vcq-proof-rejected\")",
+              "control": "altered_journal_result"
+            },
+            {
+              "class": "Invalid",
+              "code": "Backend(\"vcq-proof-rejected\")",
+              "control": "flipped_journal_byte"
+            },
+            {
+              "class": "Invalid",
+              "code": "Backend(\"vcq-proof-rejected\")",
+              "control": "fake_receipt"
+            },
+            {
+              "class": "Invalid",
+              "code": "Backend(\"vcq-proof-rejected\")",
+              "control": "scope_substitution_agreed_to_holder"
+            },
+            {
+              "class": "Invalid",
+              "code": "Backend(\"vcq-proof-rejected\")",
+              "control": "wrong_agreed_anchor"
+            },
+            {
+              "class": "Invalid",
+              "code": "Backend(\"vcq-proof-rejected\")",
+              "control": "anchor_under_other_salt"
+            },
+            {
+              "class": "Invalid",
+              "code": "Backend(\"vcq-descriptor-digest-mismatch\")",
+              "control": "policy_other_key_descriptor_digest"
+            },
+            {
+              "class": "Invalid",
+              "code": "Backend(\"vcq-proof-rejected\")",
+              "control": "policy_other_key_spliced"
+            },
+            {
+              "class": "Invalid",
+              "code": "Backend(\"vcq-descriptor-digest-mismatch\")",
+              "control": "policy_other_issuer_descriptor_digest"
+            },
+            {
+              "class": "Invalid",
+              "code": "Backend(\"vcq-proof-rejected\")",
+              "control": "policy_other_issuer_spliced"
+            },
+            {
+              "class": "Invalid",
+              "code": "Backend(\"vcq-descriptor-digest-mismatch\")",
+              "control": "policy_other_method_descriptor_digest"
+            },
+            {
+              "class": "Invalid",
+              "code": "Backend(\"vcq-proof-rejected\")",
+              "control": "policy_other_method_spliced"
+            },
+            {
+              "class": "Invalid",
+              "code": "Backend(\"vcq-descriptor-digest-mismatch\")",
+              "control": "policy_table_widened_descriptor_digest"
+            },
+            {
+              "class": "Invalid",
+              "code": "Backend(\"vcq-proof-rejected\")",
+              "control": "policy_table_widened_spliced"
+            },
+            {
+              "class": "Invalid",
+              "code": "Backend(\"vcq-descriptor-digest-mismatch\")",
+              "control": "policy_rows_tightened_descriptor_digest"
+            },
+            {
+              "class": "Invalid",
+              "code": "Backend(\"vcq-proof-rejected\")",
+              "control": "policy_rows_tightened_spliced"
+            },
+            {
+              "class": "Invalid",
+              "code": "Backend(\"vcq-proof-rejected\")",
+              "control": "cross_image_exact_guest_spliced"
+            },
+            {
+              "code": "ChallengeReplayed",
+              "control": "replay_same_store",
+              "store_calls": 2
+            },
+            {
+              "class": "Infrastructure",
+              "code": "ChallengeStoreFailure(\"test-broken\")",
+              "control": "broken_store",
+              "store_calls": 1
+            },
+            {
+              "accepted": 1,
+              "control": "concurrent_verifications",
+              "replayed": 1,
+              "store_calls": 2
+            }
+          ],
+          "journal": {
+            "dataset_commitment": [
+              2,
+              96,
+              76,
+              67,
+              48,
+              19,
+              117,
+              220,
+              187,
+              228,
+              193,
+              133,
+              232,
+              254,
+              147,
+              147,
+              103,
+              57,
+              252,
+              64,
+              80,
+              170,
+              24,
+              153,
+              172,
+              191,
+              153,
+              71,
+              235,
+              68,
+              55,
+              240
+            ],
+            "provenance": "VerifierAgreedAuthenticated",
+            "request_digest": [
+              207,
+              65,
+              201,
+              193,
+              204,
+              78,
+              88,
+              65,
+              24,
+              90,
+              49,
+              164,
+              94,
+              128,
+              218,
+              2,
+              130,
+              178,
+              251,
+              51,
+              122,
+              241,
+              219,
+              64,
+              173,
+              114,
+              55,
+              142,
+              54,
+              241,
+              10,
+              65
+            ],
+            "result": {
+              "Ask": true
+            },
+            "version": 5
+          },
+          "protocol_accepted": true,
+          "scope": {
+            "anchor_established": true,
+            "completeness": "relative to the verifier-agreed commitment or to the holder's selection only",
+            "holder": "BearerAccepted (holder binding NotEstablished)",
+            "source_evidence": "IssuerAuthenticated (suite, mapping, linking and query by the V5 relation)",
+            "status": "NotRequested (NotEstablished)"
+          },
+          "status": {
+            "dev_mode": false,
+            "exit_code": "Halted(0)",
+            "inner": "Succinct",
+            "journal_sha256": "6b7d970f1bca064aa62feaaa0f5a40286e74f52400025ed707c3350d1c6aba16",
+            "seal_words": 55667
+          }
+        },
+        "query": "ASK { ?c <https://www.w3.org/2018/credentials#issuer> <https://vc.example/issuers/5678> }",
+        "released_rows": 4
+      },
+      "fixture": "published W3C vc-di-eddsa eddsa-rdfc-2022 vector; public data only",
+      "guest": "sparq-authrdf-guest",
+      "journal_sha256": "6b7d970f1bca064aa62feaaa0f5a40286e74f52400025ed707c3350d1c6aba16",
+      "pin": {
+        "image_id": [
+          2264828262,
+          3957631839,
+          1921429972,
+          2249314555,
+          1743949710,
+          4283693754,
+          446327326,
+          384867536
+        ],
+        "sha256": [
+          79,
+          220,
+          13,
+          196,
+          1,
+          224,
+          158,
+          48,
+          109,
+          248,
+          236,
+          249,
+          200,
+          210,
+          10,
+          77,
+          69,
+          17,
+          104,
+          77,
+          41,
+          89,
+          74,
+          17,
+          230,
+          14,
+          27,
+          157,
+          55,
+          46,
+          235,
+          105
+        ]
+      },
+      "receipt_sha256": "90f3171823c1db0ee8e54380cbaa8a166778cfacf07e6b2ded616658516f0c70",
+      "request_sha256": "49cabef827b7303c77c4eb4703e5fe85b438b6894838565d2e1d30cee52df7ab",
+      "schema": "sparq.authrdf-receipt-evidence.v1"
+    }
+  ],
+  "challenge_stores": "in-memory test doubles only; not durable, not production stores",
+  "completed_cases": [
+    "ask-true-verifier-agreed"
+  ],
+  "controls_create_proofs": false,
+  "controls_on_existing_receipts": 28,
+  "declared_cases": [
+    "ask-true-verifier-agreed"
+  ],
+  "genuine_receipts": 1,
+  "guest": "sparq-authrdf-guest",
+  "job_sha256": "6ad43a70dd0564beda174d4881192b8eb9ca78a1492d8bd8df7930b9e56434af",
+  "metadata": {
+    "bytes": 5231,
+    "sha256": "4a7506ab9dee03ca6a9ba9477b84e3ce1d5465033fad6cce187d7bb65de05fe1"
+  },
+  "protocol_accepted_receipts": 1,
+  "protocol_rejected_genuine_receipts": {
+    "released_row_bound": 0
+  },
+  "registry_adapter_availability": "not tested; this test reads no registry entry",
+  "schema": "sparq.vcq-authrdf-genuine-proof.test-summary.v1",
+  "scope": "published W3C vector only; experimental, not externally audited; no credential status, holder binding, JSON-LD processing, or wallet or world completeness is established; no benchmark"
+}

@@ -1,0 +1,99 @@
+{
+  "version": 5,
+  "query": "SELECT ?name WHERE { ?c <https://schema.org/name> ?name VALUES ?copy { 1 2 } }",
+  "authority": "HolderDeclared",
+  "policy": {
+    "evaluation": {
+      "dataset": {
+        "max_dataset_bytes": 65536,
+        "max_triples": 256,
+        "max_rows": 4096,
+        "max_named_graphs": 16
+      },
+      "canonicalization": {
+        "max_quads": 32768,
+        "max_input_bytes": 1048576,
+        "max_output_bytes": 1048576,
+        "max_hndq_calls": 64,
+        "max_permutation_steps": 1048576
+      },
+      "describe": "OutgoingBlankNodeClosure"
+    },
+    "authorization": [
+      {
+        "issuer": "https://vc.example/issuers/5678",
+        "verification_method": "did:key:z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2#z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2",
+        "public_key": [
+          176,
+          13,
+          141,
+          147,
+          142,
+          127,
+          119,
+          61,
+          81,
+          86,
+          90,
+          173,
+          54,
+          166,
+          35,
+          245,
+          52,
+          79,
+          127,
+          93,
+          25,
+          96,
+          249,
+          207,
+          62,
+          142,
+          18,
+          98,
+          14,
+          162,
+          129,
+          15
+        ]
+      }
+    ],
+    "cryptosuite": "EddsaRdfc2022",
+    "mapping": "ScopedCanonicalUnion"
+  },
+  "nonce": [
+    46,
+    203,
+    90,
+    43,
+    209,
+    206,
+    183,
+    64,
+    114,
+    247,
+    52,
+    74,
+    174,
+    116,
+    234,
+    165,
+    24,
+    225,
+    7,
+    52,
+    146,
+    247,
+    183,
+    68,
+    119,
+    207,
+    174,
+    39,
+    98,
+    131,
+    53,
+    79
+  ]
+}

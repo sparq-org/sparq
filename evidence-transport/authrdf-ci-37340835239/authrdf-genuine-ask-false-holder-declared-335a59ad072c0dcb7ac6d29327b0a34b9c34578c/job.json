@@ -1,0 +1,12 @@
+{
+  "schema": "sparq.vcq-authrdf-genuine-proof.test-job.v1",
+  "guest": "/home/runner/work/_temp/authrdf-artifact/guest.bin",
+  "pin": "/home/runner/work/_temp/authrdf-artifact/pin.json",
+  "exact_guest": "/home/runner/work/_temp/exact-artifact/guest.bin",
+  "exact_pin": "/home/runner/work/_temp/exact-artifact/pin.json",
+  "cases": [
+    "ask-false-holder-declared"
+  ],
+  "challenge_seed32": "f60413a5d8311295d8ccf82f8a01a6569ac1f59257e07017be490f6659bd73dc",
+  "new_output_directory": "/home/runner/work/_temp/evidence/ask-false-holder-declared"
+}

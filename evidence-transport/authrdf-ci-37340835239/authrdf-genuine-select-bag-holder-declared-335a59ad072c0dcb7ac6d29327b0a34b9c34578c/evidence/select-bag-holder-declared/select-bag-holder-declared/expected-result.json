@@ -1,0 +1,16 @@
+{
+  "Select": {
+    "variables": [
+      "name"
+    ],
+    "order": "Bag",
+    "rows": [
+      [
+        "\"Alumni Credential\""
+      ],
+      [
+        "\"Alumni Credential\""
+      ]
+    ]
+  }
+}

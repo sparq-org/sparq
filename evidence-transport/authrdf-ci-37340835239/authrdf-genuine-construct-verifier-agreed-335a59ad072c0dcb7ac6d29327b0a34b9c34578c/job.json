@@ -1,0 +1,12 @@
+{
+  "schema": "sparq.vcq-authrdf-genuine-proof.test-job.v1",
+  "guest": "/home/runner/work/_temp/authrdf-artifact/guest.bin",
+  "pin": "/home/runner/work/_temp/authrdf-artifact/pin.json",
+  "exact_guest": "/home/runner/work/_temp/exact-artifact/guest.bin",
+  "exact_pin": "/home/runner/work/_temp/exact-artifact/pin.json",
+  "cases": [
+    "construct-verifier-agreed"
+  ],
+  "challenge_seed32": "1816ccfbdf027edc9b65c62333850a61ffc377c5d3b8a77c7c4c3150c1f1f0ab",
+  "new_output_directory": "/home/runner/work/_temp/evidence/construct-verifier-agreed"
+}

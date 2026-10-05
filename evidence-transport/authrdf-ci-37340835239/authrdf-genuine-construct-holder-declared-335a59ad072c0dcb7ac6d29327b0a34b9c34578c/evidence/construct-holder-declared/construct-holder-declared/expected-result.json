@@ -1,0 +1,5 @@
+{
+  "Graph": {
+    "ntriples": "<did:example:abcdefgh> <http://ex/alumniOf> \"The School of Examples\" .\n"
+  }
+}

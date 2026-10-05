@@ -1,0 +1,365 @@
+{
+  "all_defined_cases_run": false,
+  "cases": [
+    {
+      "artifact_sha256": "4fdc0dc401e09e306df8ecf9c8d20a4d4511684d29594a11e60e1b9d372eeb69",
+      "case": "select-bag-holder-declared",
+      "details": {
+        "authority": "HolderDeclared",
+        "challenge": "828e4238e9bc701726b98b52cf05380dab813ac27ae1ff2d539bb0bd5295e06a",
+        "contract": "SelectBag",
+        "controls_create_proofs": false,
+        "expected": {
+          "Select": {
+            "order": "Bag",
+            "rows": [
+              [
+                "\"Alumni Credential\""
+              ],
+              [
+                "\"Alumni Credential\""
+              ]
+            ],
+            "variables": [
+              "name"
+            ]
+          }
+        },
+        "files": {
+          "descriptor.local-struct-v1.bin": {
+            "bytes": 329,
+            "sha256": "fa75e611dd214dc53c90b6f26920be117a33bece9ef15744a5dce28a36d1cf0b"
+          },
+          "expected-result.json": {
+            "bytes": 197,
+            "sha256": "6b586c7cc71fd0ff59906eeb2dd5019e39201442ba2a41a8a8c68bbc78be14c1"
+          },
+          "stored-request.local-struct-v1.bin": {
+            "bytes": 938,
+            "sha256": "5bdf9ef0c58a3cee331607063b7ee6d06365799b48d315c5814008ba1f65933d"
+          },
+          "vcq-presentation.json": {
+            "bytes": 1752898,
+            "sha256": "918c313238ade9459773b81aab67ac85a220cbdaaabd66ba2e8bdb6a762b28c0"
+          }
+        },
+        "outcome": {
+          "controls": [
+            {
+              "class": "Invalid",
+              "code": "Backend(\"vcq-proof-rejected\")",
+              "control": "changed_query_same_form"
+            },
+            {
+              "class": "Invalid",
+              "code": "Backend(\"vcq-proof-rejected\")",
+              "control": "wrong_challenge"
+            },
+            {
+              "class": "Invalid",
+              "code": "Backend(\"vcq-proof-rejected\")",
+              "control": "changed_stored_audience_matching_supplied"
+            },
+            {
+              "class": "Invalid",
+              "code": "Backend(\"vcq-proof-rejected\")",
+              "control": "changed_window_containing_now"
+            },
+            {
+              "class": "Invalid",
+              "code": "Backend(\"vcq-audience-mismatch\")",
+              "control": "wrong_verifier_audience"
+            },
+            {
+              "class": "Invalid",
+              "code": "Backend(\"vcq-request-expired\")",
+              "control": "expired"
+            },
+            {
+              "class": "Invalid",
+              "code": "Backend(\"vcq-request-not-yet-valid\")",
+              "control": "not_yet_valid"
+            },
+            {
+              "class": "Invalid",
+              "code": "Backend(\"vcq-descriptor-digest-mismatch\")",
+              "control": "wrong_descriptor_digest"
+            },
+            {
+              "class": "Invalid",
+              "code": "Backend(\"vcq-proof-rejected\")",
+              "control": "altered_journal_result"
+            },
+            {
+              "class": "Invalid",
+              "code": "Backend(\"vcq-proof-rejected\")",
+              "control": "flipped_journal_byte"
+            },
+            {
+              "class": "Invalid",
+              "code": "Backend(\"vcq-proof-rejected\")",
+              "control": "fake_receipt"
+            },
+            {
+              "class": "Invalid",
+              "code": "Backend(\"vcq-proof-rejected\")",
+              "control": "scope_substitution_holder_to_agreed"
+            },
+            {
+              "class": "Invalid",
+              "code": "Backend(\"vcq-descriptor-digest-mismatch\")",
+              "control": "policy_other_key_descriptor_digest"
+            },
+            {
+              "class": "Invalid",
+              "code": "Backend(\"vcq-proof-rejected\")",
+              "control": "policy_other_key_spliced"
+            },
+            {
+              "class": "Invalid",
+              "code": "Backend(\"vcq-descriptor-digest-mismatch\")",
+              "control": "policy_other_issuer_descriptor_digest"
+            },
+            {
+              "class": "Invalid",
+              "code": "Backend(\"vcq-proof-rejected\")",
+              "control": "policy_other_issuer_spliced"
+            },
+            {
+              "class": "Invalid",
+              "code": "Backend(\"vcq-descriptor-digest-mismatch\")",
+              "control": "policy_other_method_descriptor_digest"
+            },
+            {
+              "class": "Invalid",
+              "code": "Backend(\"vcq-proof-rejected\")",
+              "control": "policy_other_method_spliced"
+            },
+            {
+              "class": "Invalid",
+              "code": "Backend(\"vcq-descriptor-digest-mismatch\")",
+              "control": "policy_table_widened_descriptor_digest"
+            },
+            {
+              "class": "Invalid",
+              "code": "Backend(\"vcq-proof-rejected\")",
+              "control": "policy_table_widened_spliced"
+            },
+            {
+              "class": "Invalid",
+              "code": "Backend(\"vcq-descriptor-digest-mismatch\")",
+              "control": "policy_rows_tightened_descriptor_digest"
+            },
+            {
+              "class": "Invalid",
+              "code": "Backend(\"vcq-proof-rejected\")",
+              "control": "policy_rows_tightened_spliced"
+            },
+            {
+              "class": "Invalid",
+              "code": "Backend(\"vcq-proof-rejected\")",
+              "control": "cross_image_exact_guest_spliced"
+            },
+            {
+              "code": "ChallengeReplayed",
+              "control": "replay_same_store",
+              "store_calls": 2
+            },
+            {
+              "class": "Infrastructure",
+              "code": "ChallengeStoreFailure(\"test-broken\")",
+              "control": "broken_store",
+              "store_calls": 1
+            },
+            {
+              "accepted": 1,
+              "control": "concurrent_verifications",
+              "replayed": 1,
+              "store_calls": 2
+            }
+          ],
+          "journal": {
+            "dataset_commitment": [
+              2,
+              96,
+              76,
+              67,
+              48,
+              19,
+              117,
+              220,
+              187,
+              228,
+              193,
+              133,
+              232,
+              254,
+              147,
+              147,
+              103,
+              57,
+              252,
+              64,
+              80,
+              170,
+              24,
+              153,
+              172,
+              191,
+              153,
+              71,
+              235,
+              68,
+              55,
+              240
+            ],
+            "provenance": "HolderSelectedAuthenticated",
+            "request_digest": [
+              226,
+              102,
+              15,
+              118,
+              149,
+              97,
+              221,
+              51,
+              48,
+              174,
+              69,
+              58,
+              85,
+              64,
+              113,
+              163,
+              114,
+              58,
+              220,
+              26,
+              237,
+              110,
+              174,
+              13,
+              180,
+              92,
+              120,
+              234,
+              220,
+              135,
+              170,
+              63
+            ],
+            "result": {
+              "Select": {
+                "order": "Bag",
+                "rows": [
+                  [
+                    "\"Alumni Credential\""
+                  ],
+                  [
+                    "\"Alumni Credential\""
+                  ]
+                ],
+                "variables": [
+                  "name"
+                ]
+              }
+            },
+            "version": 5
+          },
+          "protocol_accepted": true,
+          "scope": {
+            "anchor_established": false,
+            "completeness": "relative to the verifier-agreed commitment or to the holder's selection only",
+            "holder": "BearerAccepted (holder binding NotEstablished)",
+            "source_evidence": "IssuerAuthenticated (suite, mapping, linking and query by the V5 relation)",
+            "status": "NotRequested (NotEstablished)"
+          },
+          "status": {
+            "dev_mode": false,
+            "exit_code": "Halted(0)",
+            "inner": "Succinct",
+            "journal_sha256": "cb43c55e12305e4be7f589db8519062d1b5ca941db4d0f1ceda1241a81c353c3",
+            "seal_words": 55667
+          }
+        },
+        "query": "SELECT ?name WHERE { ?c <https://schema.org/name> ?name VALUES ?copy { 1 2 } }",
+        "released_rows": 4
+      },
+      "fixture": "published W3C vc-di-eddsa eddsa-rdfc-2022 vector; public data only",
+      "guest": "sparq-authrdf-guest",
+      "journal_sha256": "cb43c55e12305e4be7f589db8519062d1b5ca941db4d0f1ceda1241a81c353c3",
+      "pin": {
+        "image_id": [
+          2264828262,
+          3957631839,
+          1921429972,
+          2249314555,
+          1743949710,
+          4283693754,
+          446327326,
+          384867536
+        ],
+        "sha256": [
+          79,
+          220,
+          13,
+          196,
+          1,
+          224,
+          158,
+          48,
+          109,
+          248,
+          236,
+          249,
+          200,
+          210,
+          10,
+          77,
+          69,
+          17,
+          104,
+          77,
+          41,
+          89,
+          74,
+          17,
+          230,
+          14,
+          27,
+          157,
+          55,
+          46,
+          235,
+          105
+        ]
+      },
+      "receipt_sha256": "8d4ae7d2790e645b11862c3f537ba1456f805bdd76fd98a2b28d9db862c2f39c",
+      "request_sha256": "a68c452e21fe409868cf7212cef6b5f2e24a83837814513009a56f9a878eabc2",
+      "schema": "sparq.authrdf-receipt-evidence.v1"
+    }
+  ],
+  "challenge_stores": "in-memory test doubles only; not durable, not production stores",
+  "completed_cases": [
+    "select-bag-holder-declared"
+  ],
+  "controls_create_proofs": false,
+  "controls_on_existing_receipts": 26,
+  "declared_cases": [
+    "select-bag-holder-declared"
+  ],
+  "genuine_receipts": 1,
+  "guest": "sparq-authrdf-guest",
+  "job_sha256": "695f22f9218bc6fcbc6b50b8bb6525dfe7541adbb46d49f8eeaa3140a4ce3bd4",
+  "metadata": {
+    "bytes": 5493,
+    "sha256": "e9b36c0d200a93ba71aea8793cbf55efac87eefd7adbc3edbc8d934346c2eb5f"
+  },
+  "protocol_accepted_receipts": 1,
+  "protocol_rejected_genuine_receipts": {
+    "released_row_bound": 0
+  },
+  "registry_adapter_availability": "not tested; this test reads no registry entry",
+  "schema": "sparq.vcq-authrdf-genuine-proof.test-summary.v1",
+  "scope": "published W3C vector only; experimental, not externally audited; no credential status, holder binding, JSON-LD processing, or wallet or world completeness is established; no benchmark"
+}

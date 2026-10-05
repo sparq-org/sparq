@@ -1,0 +1,13 @@
+[1m[92m    Finished[0m `test` profile [unoptimized] target(s) in 0.15s
+[1m[92m     Running[0m tests/vcq_authenticated_genuine.rs (zk/sparql-evaluator/target/debug/deps/vcq_authenticated_genuine-e307178e06ab2489)
+
+running 1 test
+test genuine_vcq_authrdf_receipts_verify_declared_cases_and_reject_controls has been running for over 60 seconds
+vcq authrdf genuine: evidence directory /home/runner/work/_temp/evidence/select-bag-holder-declared
+vcq authrdf genuine: declared cases ["select-bag-holder-declared"]
+vcq authrdf genuine: select-bag-holder-declared proof starts
+vcq authrdf genuine: select-bag-holder-declared verified
+test genuine_vcq_authrdf_receipts_verify_declared_cases_and_reject_controls ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 4519.33s
+

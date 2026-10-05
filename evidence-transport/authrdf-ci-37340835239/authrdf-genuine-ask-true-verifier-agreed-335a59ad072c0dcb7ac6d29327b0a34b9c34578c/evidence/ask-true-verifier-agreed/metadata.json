@@ -1,0 +1,219 @@
+{
+  "accepted_guest": {
+    "image_id": [
+      2264828262,
+      3957631839,
+      1921429972,
+      2249314555,
+      1743949710,
+      4283693754,
+      446327326,
+      384867536
+    ],
+    "package": "sparq-authrdf-guest",
+    "pin": {
+      "image_id": [
+        2264828262,
+        3957631839,
+        1921429972,
+        2249314555,
+        1743949710,
+        4283693754,
+        446327326,
+        384867536
+      ],
+      "sha256": [
+        79,
+        220,
+        13,
+        196,
+        1,
+        224,
+        158,
+        48,
+        109,
+        248,
+        236,
+        249,
+        200,
+        210,
+        10,
+        77,
+        69,
+        17,
+        104,
+        77,
+        41,
+        89,
+        74,
+        17,
+        230,
+        14,
+        27,
+        157,
+        55,
+        46,
+        235,
+        105
+      ]
+    },
+    "relation_version": 5
+  },
+  "all_defined_cases_declared": false,
+  "challenge_derivation": "SHA-256(domain || seed || u64-be label length || case label)",
+  "challenge_seed32": "40f2f288cc824dfe573ac4eea9879b2fb3431abb11db81d3ac8cf0648979e5a1",
+  "challenge_stores": "in-memory test doubles only; not durable, not production stores",
+  "declared_cases": [
+    "ask-true-verifier-agreed"
+  ],
+  "descriptor_sha256": "fa75e611dd214dc53c90b6f26920be117a33bece9ef15744a5dce28a36d1cf0b",
+  "exact_guest": {
+    "package": "sparq-exact-guest",
+    "pin": {
+      "image_id": [
+        4194659102,
+        4071703700,
+        1996754120,
+        3432096220,
+        2038009768,
+        3730967108,
+        3468773622,
+        1025862938
+      ],
+      "sha256": [
+        250,
+        223,
+        117,
+        29,
+        140,
+        185,
+        19,
+        150,
+        171,
+        215,
+        4,
+        122,
+        74,
+        19,
+        135,
+        54,
+        70,
+        94,
+        70,
+        52,
+        21,
+        228,
+        14,
+        116,
+        35,
+        19,
+        12,
+        1,
+        197,
+        181,
+        189,
+        42
+      ]
+    },
+    "use": "cross-image control only"
+  },
+  "fixture": {
+    "agreed_anchor": "02604c43301375dcbbe4c185e8fe93936739fc4050aa1899acbf9947eb4437f0",
+    "document_sha256": "517744132ae165a5349155bef0bb0cf2258fff99dfe1dbd914b938d775a36017",
+    "expected": {
+      "ask-true-verifier-agreed": {
+        "Ask": true
+      }
+    },
+    "expected_source": "hand-defined from the published document and checked against its statements; also compared with the native model",
+    "proof_config_sha256": "bea7b7acfbad0126b135104024a5f1733e705108f42d59668b05c0c50004c6b0",
+    "salt": "a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+    "source": "W3C vc-di-eddsa REC 2025-05-15, eddsa-rdfc-2022 examples 7, 9, 10, 12, 13, 15"
+  },
+  "inputs": {
+    "exact_guest_sha256": "fadf751d8cb91396abd7047a4a138736465e463415e40e7423130c01c5b5bd2a",
+    "exact_pin_sha256": "7d4e14e2d258a198439339d8cbc2a52d6218c838f5b972a75f1480a6faa666f1",
+    "guest_sha256": "4fdc0dc401e09e306df8ecf9c8d20a4d4511684d29594a11e60e1b9d372eeb69",
+    "pin_sha256": "200d788351bdcaa0f7aad15cb04fabdfb679a0a362819b5db586f59ada58e9f7"
+  },
+  "job_sha256": "6ad43a70dd0564beda174d4881192b8eb9ca78a1492d8bd8df7930b9e56434af",
+  "parameter_digest": "85d92c3758bef356526378f317c80b38abb4d4db5a3d9a5d4dc8cb54500d92a0",
+  "policy_digest": "aafc0325aec51e28da77071500661fe094d08726abe1443f4c0e435947deb8e6",
+  "r0vm": "/home/runner/work/_temp/sparq-risc0-3.0.6/bin/r0vm",
+  "replaced_policies": [
+    "policy_other_key",
+    "policy_other_issuer",
+    "policy_other_method",
+    "policy_table_widened",
+    "policy_rows_tightened"
+  ],
+  "schema": "sparq.vcq-authrdf-genuine-proof.test-metadata.v1",
+  "status": "started; not a success record",
+  "verifier": {
+    "audience": "urn:example:sparq-vcq-authrdf-genuine-test:verifier",
+    "clock": "fixed synthetic, not ambient",
+    "not_after": 1800000600,
+    "not_before": 1800000000,
+    "now": 1800000100
+  },
+  "verifier_policy": {
+    "authorization": [
+      {
+        "issuer": "https://vc.example/issuers/5678",
+        "public_key": [
+          176,
+          13,
+          141,
+          147,
+          142,
+          127,
+          119,
+          61,
+          81,
+          86,
+          90,
+          173,
+          54,
+          166,
+          35,
+          245,
+          52,
+          79,
+          127,
+          93,
+          25,
+          96,
+          249,
+          207,
+          62,
+          142,
+          18,
+          98,
+          14,
+          162,
+          129,
+          15
+        ],
+        "verification_method": "did:key:z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2#z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2"
+      }
+    ],
+    "cryptosuite": "EddsaRdfc2022",
+    "evaluation": {
+      "canonicalization": {
+        "max_hndq_calls": 64,
+        "max_input_bytes": 1048576,
+        "max_output_bytes": 1048576,
+        "max_permutation_steps": 1048576,
+        "max_quads": 32768
+      },
+      "dataset": {
+        "max_dataset_bytes": 65536,
+        "max_named_graphs": 16,
+        "max_rows": 4096,
+        "max_triples": 256
+      },
+      "describe": "OutgoingBlankNodeClosure"
+    },
+    "mapping": "ScopedCanonicalUnion"
+  }
+}

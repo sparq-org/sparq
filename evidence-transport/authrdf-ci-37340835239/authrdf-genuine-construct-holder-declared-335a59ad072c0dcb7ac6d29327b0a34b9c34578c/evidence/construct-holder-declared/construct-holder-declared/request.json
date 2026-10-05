@@ -1,0 +1,99 @@
+{
+  "version": 5,
+  "query": "CONSTRUCT { ?s <http://ex/alumniOf> ?o } WHERE { ?s <https://www.w3.org/ns/credentials/examples#alumniOf> ?o }",
+  "authority": "HolderDeclared",
+  "policy": {
+    "evaluation": {
+      "dataset": {
+        "max_dataset_bytes": 65536,
+        "max_triples": 256,
+        "max_rows": 4096,
+        "max_named_graphs": 16
+      },
+      "canonicalization": {
+        "max_quads": 32768,
+        "max_input_bytes": 1048576,
+        "max_output_bytes": 1048576,
+        "max_hndq_calls": 64,
+        "max_permutation_steps": 1048576
+      },
+      "describe": "OutgoingBlankNodeClosure"
+    },
+    "authorization": [
+      {
+        "issuer": "https://vc.example/issuers/5678",
+        "verification_method": "did:key:z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2#z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2",
+        "public_key": [
+          176,
+          13,
+          141,
+          147,
+          142,
+          127,
+          119,
+          61,
+          81,
+          86,
+          90,
+          173,
+          54,
+          166,
+          35,
+          245,
+          52,
+          79,
+          127,
+          93,
+          25,
+          96,
+          249,
+          207,
+          62,
+          142,
+          18,
+          98,
+          14,
+          162,
+          129,
+          15
+        ]
+      }
+    ],
+    "cryptosuite": "EddsaRdfc2022",
+    "mapping": "ScopedCanonicalUnion"
+  },
+  "nonce": [
+    253,
+    192,
+    56,
+    224,
+    17,
+    16,
+    104,
+    134,
+    103,
+    217,
+    24,
+    248,
+    61,
+    76,
+    106,
+    178,
+    66,
+    112,
+    13,
+    119,
+    153,
+    102,
+    35,
+    193,
+    158,
+    174,
+    93,
+    13,
+    238,
+    230,
+    214,
+    140
+  ]
+}
