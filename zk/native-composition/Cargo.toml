@@ -1,0 +1,23 @@
+# [GPT-6] Isolated research executable; no dependencies enter Sparq's workspace.
+[package]
+name = "sparq-native-composition-spike"
+version = "0.0.0"
+edition = "2021"
+publish = false
+license = "MIT"
+description = "Research spike for signed-message and residual-predicate composition"
+
+[workspace]
+
+[dependencies]
+ark-bls12-381 = "=0.4.0"
+ark-serialize = "=0.4.2"
+ark-std = "=0.4.0"
+bbs_plus = "=0.25.0"
+blake2 = "=0.10.6"
+legogroth16 = "=0.18.0"
+proof_system = "=0.34.0"
+serde_json = "=1.0.149"
+
+[lints.rust]
+unsafe_code = "forbid"

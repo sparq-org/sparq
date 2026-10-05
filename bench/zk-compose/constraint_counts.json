@@ -23,6 +23,12 @@
     "nargo_at_last_measurement": "nargo version = 1.0.0-beta.21"
   },
   "layers": {
+    "result": {
+      "families": [
+        "result_v1"
+      ],
+      "members": 4
+    },
     "query": {
       "families": [
         "scan",
@@ -49,6 +55,136 @@
     }
   },
   "families": {
+    "result_v1": {
+      "layer": "result",
+      "role": "Support for released SELECT DISTINCT mappings: issuer authentication, credential status, selected triple membership, BGP joins and residual private integer FILTERs. Capacity parameters: k credentials, n triples per credential, p patterns, r released rows, f private FILTERs per row. Does not establish result completeness or holder identity.",
+      "parameters": [
+        "k",
+        "n",
+        "p",
+        "r",
+        "f"
+      ],
+      "members": [
+        {
+          "member": "result_v1_k1_n16_p3_r4_f0",
+          "params": {
+            "k": 1,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 0
+          },
+          "circuit_size": 32288
+        },
+        {
+          "member": "result_v1_k1_n16_p3_r4_f2",
+          "params": {
+            "k": 1,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2
+          },
+          "circuit_size": 68963
+        },
+        {
+          "member": "result_v1_k2_n16_p3_r4_f0",
+          "params": {
+            "k": 2,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 0
+          },
+          "circuit_size": 59101
+        },
+        {
+          "member": "result_v1_k2_n16_p3_r4_f2",
+          "params": {
+            "k": 2,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2
+          },
+          "circuit_size": 95775
+        }
+      ],
+      "min_circuit_size": 32288,
+      "max_circuit_size": 95775,
+      "scaling": [
+        {
+          "parameter": "f",
+          "from_member": "result_v1_k1_n16_p3_r4_f0",
+          "from_value": 0,
+          "from_circuit_size": 32288,
+          "to_member": "result_v1_k1_n16_p3_r4_f2",
+          "to_value": 2,
+          "to_circuit_size": 68963,
+          "delta_gates": 36675,
+          "ratio": 2.1359,
+          "held_fixed": {
+            "k": 1,
+            "n": 16,
+            "p": 3,
+            "r": 4
+          }
+        },
+        {
+          "parameter": "f",
+          "from_member": "result_v1_k2_n16_p3_r4_f0",
+          "from_value": 0,
+          "from_circuit_size": 59101,
+          "to_member": "result_v1_k2_n16_p3_r4_f2",
+          "to_value": 2,
+          "to_circuit_size": 95775,
+          "delta_gates": 36674,
+          "ratio": 1.6205,
+          "held_fixed": {
+            "k": 2,
+            "n": 16,
+            "p": 3,
+            "r": 4
+          }
+        },
+        {
+          "parameter": "k",
+          "from_member": "result_v1_k1_n16_p3_r4_f0",
+          "from_value": 1,
+          "from_circuit_size": 32288,
+          "to_member": "result_v1_k2_n16_p3_r4_f0",
+          "to_value": 2,
+          "to_circuit_size": 59101,
+          "delta_gates": 26813,
+          "ratio": 1.8304,
+          "held_fixed": {
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 0
+          }
+        },
+        {
+          "parameter": "k",
+          "from_member": "result_v1_k1_n16_p3_r4_f2",
+          "from_value": 1,
+          "from_circuit_size": 68963,
+          "to_member": "result_v1_k2_n16_p3_r4_f2",
+          "to_value": 2,
+          "to_circuit_size": 95775,
+          "delta_gates": 26812,
+          "ratio": 1.3888,
+          "held_fixed": {
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2
+          }
+        }
+      ],
+      "invariances": []
+    },
     "scan": {
       "layer": "query",
       "role": "BGP row membership + per-scan completeness over k committed graphs, n slot bucket, r disclosed-row bucket.",
@@ -1100,10 +1236,10 @@
     ]
   },
   "summary": {
-    "families": 14,
-    "members": 37,
-    "snapshot_members": 37,
-    "scaling_pairs": 33,
+    "families": 15,
+    "members": 41,
+    "snapshot_members": 41,
+    "scaling_pairs": 37,
     "invariance_facts": 3
   }
 }
