@@ -7,10 +7,12 @@
 //! Convention this runner assumes (the suite's own runner contract): each test
 //! is ONE `.n3` document; running a reasoner over it must derive the triple
 //! `:test :is true` (any IRI whose local name is `test`, predicate local name
-//! `is`, object the boolean `true`). A closure that derives `:test :is false`,
-//! derives neither, errors, or exceeds the timeout is a FAIL. The suite is
-//! FETCHED at run time (never vendored); `.github/workflows/notation3tests.yml`
-//! fetches it and runs `sparq-notation3tests`.
+//! `is`, object the boolean `true` in any valid `xsd:boolean` spelling, i.e.
+//! `true` or `"1"^^xsd:boolean`). A closure that derives `:test :is false`
+//! (`false` or `"0"^^xsd:boolean`), derives neither, errors, or exceeds the
+//! timeout is a FAIL. The suite is FETCHED at run time (never vendored);
+//! `.github/workflows/notation3tests.yml` fetches it and runs
+//! `sparq-notation3tests`.
 //!
 //! This module is pure logic (discovery, verdict, report) so it can be pinned
 //! by hand-written cases in the suite's format without the suite present; the
@@ -83,8 +85,18 @@ fn local_name(iri: &str) -> &str {
     iri.rsplit(['#', '/', ':']).next().unwrap_or(iri)
 }
 
-fn is_boolean(t: &Term, value: &str) -> bool {
-    matches!(t, Term::Lit(lex, dt, None) if dt == XSD_BOOLEAN && lex == value)
+/// The value of an `xsd:boolean` literal, by any of its four valid lexical
+/// forms (`true`/`1`, `false`/`0`; whitespace collapsed). `None` for anything
+/// else, including an invalid `xsd:boolean` spelling.
+fn boolean_value(t: &Term) -> Option<bool> {
+    match t {
+        Term::Lit(lex, dt, None) if dt == XSD_BOOLEAN => match lex.trim() {
+            "true" | "1" => Some(true),
+            "false" | "0" => Some(false),
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 /// Decide the verdict from a closure's facts.
@@ -97,8 +109,11 @@ pub fn verdict_from_facts(facts: &[[Term; 3]]) -> Verdict {
         if local_name(s) != "test" || local_name(p) != "is" {
             continue;
         }
-        t |= is_boolean(o, "true");
-        f |= is_boolean(o, "false");
+        match boolean_value(o) {
+            Some(true) => t = true,
+            Some(false) => f = true,
+            None => {}
+        }
     }
     match (t, f) {
         (_, true) => Verdict::False,
@@ -115,9 +130,24 @@ fn file_iri(path: &Path) -> String {
 
 /// Run sparq's N3 reasoner over one test document. `log:semantics` /
 /// `log:content` may read `file://` documents, but only inside `suite_root`
-/// (strictly offline; nothing outside the fetched suite is readable).
+/// (strictly offline; nothing outside the fetched suite is readable). The
+/// test document itself is held to the same rule: it is canonicalized (which
+/// resolves symlinks) and refused, without being read, unless it lies inside
+/// the canonical `suite_root`.
 pub fn run_one(path: &Path, suite_root: &Path) -> Verdict {
-    let src = match std::fs::read_to_string(path) {
+    let (Ok(canon), Ok(root)) = (
+        std::fs::canonicalize(path),
+        std::fs::canonicalize(suite_root),
+    ) else {
+        return Verdict::Error(format!("cannot resolve {}", path.display()));
+    };
+    if !canon.starts_with(&root) {
+        return Verdict::Error(format!(
+            "refusing {}: resolves outside the suite root",
+            path.display()
+        ));
+    }
+    let src = match std::fs::read_to_string(&canon) {
         Ok(s) => s,
         Err(e) => return Verdict::Error(format!("read {}: {e}", path.display())),
     };
@@ -143,7 +173,9 @@ pub fn run_source(src: &str, base: &str, suite_root: &Path) -> Verdict {
 }
 
 /// Every `.n3` test under the suite: `<root>/test-cases` when it exists,
-/// otherwise `<root>` itself; recursive, sorted, hidden dirs skipped.
+/// otherwise `<root>` itself; recursive, sorted, hidden dirs skipped. Symlinks
+/// (to files or directories) are never followed or returned, so a fetched
+/// suite cannot point the runner at files outside it.
 pub fn discover(root: &Path) -> Vec<PathBuf> {
     let base = root.join("test-cases");
     let base = if base.is_dir() {
@@ -166,9 +198,13 @@ pub fn discover(root: &Path) -> Vec<PathBuf> {
             if hidden {
                 continue;
             }
-            if p.is_dir() {
+            // `DirEntry::file_type` does not follow symlinks.
+            let Ok(ft) = e.file_type() else {
+                continue;
+            };
+            if ft.is_dir() {
                 stack.push(p);
-            } else if p.extension().is_some_and(|x| x == "n3") {
+            } else if ft.is_file() && p.extension().is_some_and(|x| x == "n3") {
                 out.push(p);
             }
         }
@@ -354,6 +390,65 @@ mod tests {
         assert_eq!(
             run_source(&doc(&dir.join("outside.n3")), &base, &suite),
             Verdict::NoVerdict
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn numeric_boolean_spellings_are_read_by_value() {
+        let p = "@prefix : <urn:example:>.\n@prefix xsd: <http://www.w3.org/2001/XMLSchema#>.\n";
+        let one = format!("{p}:test :is \"1\"^^xsd:boolean.\n");
+        assert_eq!(run(&one), Verdict::Pass);
+        let zero = format!("{p}:test :is \"0\"^^xsd:boolean.\n");
+        assert_eq!(run(&zero), Verdict::False);
+        let true_and_zero = format!("{p}:test :is true, \"0\"^^xsd:boolean.\n");
+        assert_eq!(run(&true_and_zero), Verdict::False);
+        let one_and_false = format!("{p}:test :is \"1\"^^xsd:boolean, false.\n");
+        assert_eq!(run(&one_and_false), Verdict::False);
+        let invalid = format!("{p}:test :is \"yes\"^^xsd:boolean.\n");
+        assert_eq!(run(&invalid), Verdict::NoVerdict);
+    }
+
+    /// A symlink planted in a fetched suite must not make the runner read a
+    /// file outside the suite root.
+    #[cfg(unix)]
+    #[test]
+    fn symlinks_cannot_escape_the_suite() {
+        use std::os::unix::fs::symlink;
+        let dir = std::env::temp_dir().join(format!("n3t-symlink-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("suite/test-cases")).unwrap();
+        std::fs::create_dir_all(dir.join("private")).unwrap();
+        let secret = "@prefix : <urn:example:>.\n:test :is true.\n";
+        std::fs::write(dir.join("private/secret.n3"), secret).unwrap();
+        std::fs::write(dir.join("suite/test-cases/ok.n3"), secret).unwrap();
+        symlink(
+            dir.join("private/secret.n3"),
+            dir.join("suite/test-cases/leak.n3"),
+        )
+        .unwrap();
+        symlink(dir.join("private"), dir.join("suite/test-cases/linkdir")).unwrap();
+        let suite = dir.join("suite");
+        let found: Vec<String> = discover(&suite)
+            .iter()
+            .map(|p| p.strip_prefix(&suite).unwrap().display().to_string())
+            .collect();
+        assert_eq!(found, ["test-cases/ok.n3"]);
+        // Independently of discovery, run_one refuses an input that resolves
+        // outside the suite root, and does not echo its content.
+        let v = run_one(&suite.join("test-cases/leak.n3"), &suite);
+        assert!(
+            matches!(&v, Verdict::Error(e) if e.contains("outside")),
+            "{v:?}"
+        );
+        let v = run_one(&dir.join("private/secret.n3"), &suite);
+        assert!(
+            matches!(&v, Verdict::Error(e) if e.contains("outside")),
+            "{v:?}"
+        );
+        assert_eq!(
+            run_one(&suite.join("test-cases/ok.n3"), &suite),
+            Verdict::Pass
         );
         std::fs::remove_dir_all(&dir).unwrap();
     }
