@@ -1399,7 +1399,7 @@ impl Graph {
     /// [`insert_triple`](Self::insert_triple) / [`apply_delta`](Self::apply_delta), or load into it
     /// via the `apply_delta_nquads` / `apply_delta` paths. This is an IN-MEMORY graph (no directory
     /// association, so `apply_delta` is overlay-only — there is no write-ahead log); use
-    /// [`open`](Self::open) for a durable directory-backed graph. Also reachable as
+    /// `open` for a durable directory-backed graph. Also reachable as
     /// [`Graph::default()`](Default::default).
     #[inline]
     pub fn new() -> Graph {
@@ -2945,7 +2945,7 @@ impl Graph {
     /// DELETE/INSERT application order) — through the store's DELTA-OVERLAY: O(batch)
     /// work instead of the O(n) full rebuild. New terms are interned APPEND-ONLY (the
     /// dictionary grows; existing ids never change), so readers of existing ids are
-    /// unaffected. For a directory-backed graph (opened via [`open`](Self::open)) the
+    /// unaffected. For a directory-backed graph (opened via `open`) the
     /// batch is appended to the write-ahead log and fsync'd BEFORE it is applied, so a
     /// crash replays it on the next open. Fold the overlay back into the immutable base
     /// periodically with [`compact`](Self::compact).
@@ -2970,7 +2970,7 @@ impl Graph {
     /// `INSERT DATA { … }` SPARQL string for what is conceptually one append. The term is interned
     /// APPEND-ONLY and applied through the same delta-overlay path as `apply_delta`, so it inherits
     /// the identical semantics: set-valued (re-inserting an existing triple is a no-op), O(1) work,
-    /// and — for a directory-backed graph (opened via [`open`](Self::open)) — WAL-logged + fsync'd
+    /// and — for a directory-backed graph (opened via `open`) — WAL-logged + fsync'd
     /// before it is applied. To add several triples at once, prefer one
     /// [`apply_delta`](Self::apply_delta) batch over a loop of single inserts (one WAL append).
     ///
@@ -3008,7 +3008,7 @@ impl Graph {
     /// against the CURRENT graph state (so CLEAR/DROP have already been expanded to concrete
     /// retraction records by the caller). One `write_all` + one `sync_data()` makes the body
     /// durable as a unit BEFORE it is materialised across the per-graph WALs; if a crash interrupts
-    /// materialisation, [`open`](Self::open) redoes this frame idempotently. A NO-OP (returns `Ok`)
+    /// materialisation, `open` redoes this frame idempotently. A NO-OP (returns `Ok`)
     /// for an IN-MEMORY graph (no journal) and for an empty record set, so the in-memory live
     /// update path is byte-for-byte unchanged.
     pub fn commit_txn(&mut self, records: &[(bool, Option<Term>, [Term; 3])]) -> Result<(), String> {
@@ -3102,7 +3102,7 @@ impl Graph {
     /// `named.drop-new` → `named`), and only THEN is the shrunk manifest written (the manifest
     /// rewrite is itself atomic+dir-fsync'd via `write_named_manifest`). An interrupted swap
     /// is completed/rolled back deterministically by `recover_named_drop` on the next
-    /// [`open`](Self::open). Surviving sub-graphs are re-opened from their new directories so
+    /// `open`. Surviving sub-graphs are re-opened from their new directories so
     /// each re-acquires a correctly-indexed per-graph WAL.
     ///
     /// Returns `true` if a matching named graph existed (and was removed), `false` if absent —
@@ -3349,7 +3349,7 @@ impl Graph {
     /// [OPUS-4.8] (sq-7cxr, gh-44) Returns the index of the named sub-graph called `name`,
     /// CREATING it if absent. The created sub-graph is DURABLE (its own `dir/named/<i>/` +
     /// per-graph WAL + manifest entry) whenever this parent graph is itself directory-backed
-    /// (opened via [`open`](Self::open)); for an in-memory parent it is a plain in-memory
+    /// (opened via `open`); for an in-memory parent it is a plain in-memory
     /// sub-graph (`wal: None`), byte-identical to the previous `named.push((name, empty()))`
     /// behaviour. This is the durability seam the SPARQL-Update path needs: a `GRAPH <g> { … }`
     /// INSERT that first touches a brand-new named graph on a persisted server must give that
