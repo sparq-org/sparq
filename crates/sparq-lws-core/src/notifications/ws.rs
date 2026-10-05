@@ -189,6 +189,15 @@ impl<S: Store> NotifyState<S> {
         format!("{}{SUBSCRIPTION_PATH}", self.base_url.trim_end_matches('/'))
     }
 
+    /// Whether `topic` names a resource on this storage: it must sit under the storage root
+    /// (`<base>/`), the same root the WAC walk terminates at.
+    fn is_on_this_storage(&self, topic: &str) -> bool {
+        let base = self.base_url.trim_end_matches('/');
+        topic
+            .strip_prefix(base)
+            .is_some_and(|rest| rest.starts_with('/'))
+    }
+
     /// The `receiveFrom` WebSocket URL for a topic, carrying the minted receive `token`. The base
     /// URL's scheme is mapped http→ws / https→wss (WebSocketChannel2023 §receiveFrom — the receive
     /// endpoint is a WebSocket URL). The token authorizes the WS upgrade for this topic (a browser
@@ -281,6 +290,18 @@ pub async fn subscribe_handler<S: Store>(
         Some(t) if !t.is_empty() => t,
         _ => return (StatusCode::BAD_REQUEST, "missing topic").into_response(),
     };
+    // The topic must be a resource on THIS storage. The WAC walk derives its ancestor chain from the
+    // IRI string and always ends at this pod's root, so an off-pod IRI (`https://elsewhere/x`) would
+    // otherwise inherit the root ACL's `acl:default` grant. Nothing is ever emitted for such a topic,
+    // so refuse it up front. This depends only on the request body and the server's own base URL, so
+    // it discloses nothing about any resource.
+    if !state.is_on_this_storage(topic) {
+        return (
+            StatusCode::BAD_REQUEST,
+            "topic is not a resource on this storage",
+        )
+            .into_response();
+    }
 
     // Per-resource WAC: this authenticated WebID must be able to READ the topic. A denial returns
     // before anything is minted or registered.
@@ -709,9 +730,34 @@ mod tests {
         );
         // The topic has no channel either — a denied subscribe registers nothing.
         assert_eq!(
-            s.hub.subscriber_count("https://pod.example/alice/secret").await,
+            s.hub
+                .subscriber_count("https://pod.example/alice/secret")
+                .await,
             0
         );
+    }
+
+    /// An off-pod topic is refused before WAC runs: the ancestor walk always ends at this pod's
+    /// root, so without this check the root ACL's `acl:default` would grant Read on a foreign IRI.
+    #[tokio::test]
+    async fn subscribe_handler_rejects_off_pod_topic() {
+        let s = state_owned_by(ALICE).await;
+        for topic in [
+            "https://elsewhere.example/a",
+            "https://pod.example.evil/a",
+            "https://pod.exampleX/a",
+        ] {
+            let resp = subscribe_handler(
+                State(s.clone()),
+                Extension(web_id_token(ALICE)),
+                HeaderMap::new(),
+                Json(subscribe_to(topic)),
+            )
+            .await;
+            assert_eq!(resp.status(), StatusCode::BAD_REQUEST, "{topic}");
+        }
+        // The pod's own root is on this storage.
+        assert!(s.is_on_this_storage("https://pod.example/"));
     }
 
     /// Fail-closed: with NO ACL anywhere, even an authenticated caller is denied (WAC grants nothing
