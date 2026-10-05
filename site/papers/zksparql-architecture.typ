@@ -316,8 +316,8 @@ its stored contract before it accepts and consumes its challenge.
 
 #[
 #show figure: set block(breakable: false)
-#figure(
-  grid(
+// The paged grid is ignored by Typst's HTML export, so HTML gets an equivalent term list.
+#let arch-paged = grid(
     columns: (1fr, auto, 1.7fr, auto, 1.2fr),
     gutter: 5pt,
     align: horizon,
@@ -349,9 +349,23 @@ its stored contract before it accepts and consumes its challenge.
       *Verifier* \
       *Outside the proof:* check method, contract, session, receipt, journal against its stored
       request, anchor ($c = k$ if verifier-agreed) and bounds; then consume the challenge; then
-      release $r$.
+      accept $r$.
     ],
-  ),
+  )
+#let arch-html = [
+    #set align(left)
+    / Issuers: Sign credentials, for example EdDSA over RDFC-1.0 canonical N-Quads. Optionally vouch
+      for an input commitment (anchor $k$).
+    / Holder: Receives contract $C$ from the verifier. Inside the proof: (1) check each signature
+      against the verifier's key table; (2) build the dataset from exactly the signed canonical
+      bytes; (3) evaluate $q$ under the contract's scope and bounds; (4) output result $r$,
+      commitment $c$ and request binding.
+    / Verifier: Outside the proof: check method, contract, session, receipt, journal against its
+      stored request, anchor ($c = k$ if verifier-agreed) and bounds; then consume the challenge;
+      then accept $r$.
+  ]
+#figure(
+  context if target() == "html" { arch-html } else { arch-paged },
   caption: [
     One proof per presentation. The contract travels from verifier to holder; the proof and
     result travel back. Authentication, the queried data, evaluation and the request binding are
@@ -407,13 +421,14 @@ obligations: a signed claim about `ex:alice` does not authenticate the presenter
 === Outside the proof: check everything, then consume the challenge <validation>
 
 A presentation must be checked completely before its challenge is consumed, and the result must be
-released only after consumption. The verifier (i) resolves the method in its registry and compares
+accepted, that is handed to the verifier's application as a verified answer, only after
+consumption. The verifier (i) resolves the method in its registry and compares
 descriptor digests; (ii) checks that the contract is one it accepts; (iii) checks audience and
 validity window against its stored request; (iv) verifies the receipt against the pinned image,
 refusing development mode; (v) compares the journal's request binding, authority, anchor and scope
 with its stored request, and the claimed result with the journal's result; (vi) checks the result
 against the bounds; (vii) atomically consumes the challenge, failing closed if its store fails; and
-(viii) releases the result. The verifier does not know the answer in advance, so it compares the
+(viii) accepts the result. The verifier does not know the answer in advance, so it compares the
 claimed result with the journal, not with its request. Checking before consuming stops a malformed
 presentation from burning a legitimate challenge, and atomic consumption stops two concurrent
 verifications from both succeeding. The prototype adapters implement these checks, and their
@@ -523,7 +538,10 @@ design argument about the relation, not about any implementation's constraints.
 Eligibility says which facts _could_ be public. It does not say _when_. Being computable from the
 query and an answer does not by itself permit disclosure before that answer has been released. We
 therefore propose a release condition as a design requirement for any method that applies the
-rule.
+rule. Two events must be kept apart. _Release_ is the holder disclosing the answer to the verifier,
+as the contract authorises. _Acceptance_ is the verifier's decision, after the checks of
+§#ref(<validation>, supplement: none), to treat that answer as verified. Release precedes and does
+not depend on acceptance: the verifier cannot validate a proof of an answer it has not received.
 
 An answer-derived value may be public only after an actual release of the answer it is derived
 from, made as the contract authorises. A contract's permission to release later is not itself a
@@ -535,6 +553,15 @@ release already permitted. Facts that are independently public, or separately au
 their own allowance. Where the contract permits partial release, its explicit partial-release and
 abort policy defines which partial-release observables are permitted. We assume neither that
 delivery is atomic nor that proof acceptance alone constitutes or guarantees release.
+
+In the single-message flow of §#ref(<validation>, supplement: none) the holder releases the answer
+and sends the proof in the same presentation, so the answer-derived public inputs travel with,
+not ahead of, the answer they derive from, and the verifier then validates, consumes and accepts
+in that order. There is no ordering cycle. What the condition forbids is sending answer-derived
+proof data in an earlier round than the answer, or publishing it to anyone other than the verifier
+before the answer has been released to that party. A verifier that rejects the presentation has
+still received the released answer; rejection withdraws its trust in the answer, not the
+disclosure.
 
 These are proposed design requirements, not implemented or demonstrated gates, and they do not
 establish pre-output or abort privacy. In the implemented public-pattern relation the pattern's
@@ -807,8 +834,9 @@ saving; presentation size, memory, cold start and larger scales are unmeasured.
 The evidence does not show conformance to SPARQL: the engine's own W3C conformance floor
 (#headline("conformance.sparql_floor") passing assertions) measures the production engine, not the
 bounded proved evaluator, whose coverage is only the tests and receipts above. It does not show
-issuer authentication for any exact form other than the one synthetic bag `SELECT`, nor any
-JSON-signed suite or JSON-to-RDF mapping. It does not show credential status, holder binding or
+issuer authentication over any realistic credential: every authenticated exact receipt, for bag
+`SELECT`, `ASK` and `CONSTRUCT`, is over a single synthetic credential signed with a published test
+key. Nor does it show any JSON-signed suite or JSON-to-RDF mapping. It does not show credential status, holder binding or
 validity-period checks for any exact path. It says nothing about cost at realistic scale, and
 nothing externally audited.
 
@@ -889,8 +917,10 @@ The design arguments are informal and conditional; no part is mechanised, and th
 is not shown to meet them. All proof evidence is internal to the project and has not been
 externally audited. Tests and controls show that specific checks exist and fire; they cannot rule
 out untested substitutions. The bounded evaluator is covered by a test suite, not by conformance.
-The authenticated evidence is one receipt for one synthetic fixture, produced once as a validation.
-Guest-artifact identity is recorded only for a fixed build path and toolchain. The disclosure
+The authenticated evidence is one receipt per declared case, each over a single synthetic
+credential, produced once per case as a validation, and only the first such run has had a second
+internal evidence inspection. Guest-artifact identity depends on the build path, so the three
+authenticated runs carry three pins, each recorded only for its own path and toolchain. The disclosure
 account of §#ref(<leakage>, supplement: none) is a list of open concerns, not an analysis, and the
 release condition of §#ref(<release>, supplement: none) is a proposed requirement, not an
 implemented gate.
@@ -1038,10 +1068,12 @@ and (v).
 === Method <evidence-method>
 
 All new-path evidence comes from frozen JSON snapshots under `research/zk-paper-evidence/`, each
-listed with its SHA-256 digest in `provenance.json`. Each snapshot summarises a second internal
+listed with its SHA-256 digest in `provenance.json`. Every snapshot except those of the payment
+and CI authenticated runs (§#ref(<v5-evidence>, supplement: none)) summarises a second internal
 evidence inspection of a completed run (source trees re-hashed against the stated commit,
-artifacts and receipts re-hashed, recorded outcomes compared) rather than a new execution, and none
-is an external security review. Every number in this paper is read from `paper-evidence.json`
+artifacts and receipts re-hashed, recorded outcomes compared) rather than a new execution. The
+payment and CI snapshots are the runs' own audit records and have had no such inspection. None is
+an external security review. Every number in this paper is read from `paper-evidence.json`
 records whose values are machine-checked against those snapshots by JSON pointer. The inspections
 did not re-run cryptographic verification locally; genuine-receipt verification and refusal of
 development mode are exercised by the source-bound tests whose outcomes the snapshots record.
