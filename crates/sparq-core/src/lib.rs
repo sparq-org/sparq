@@ -89,6 +89,10 @@ pub struct Graph {
     /// dictionary. Interior-mutable so a shared `&Graph` can populate it; never observable in
     /// results (pure correctness gate).
     high_precision_decimal: std::sync::atomic::AtomicU8,
+    /// The `xsd:float` twin of `high_precision_decimal` (same `0`/`1`/`2` encoding, same
+    /// reset rule): whether the graph holds any `xsd:float` literal. Filled lazily by
+    /// [`has_float_literal`](Self::has_float_literal).
+    float_literal: std::sync::atomic::AtomicU8,
     /// Named graphs (each a self-contained `Graph`), keyed by their name term. Empty for the
     /// usual single-default-graph load; populated by [`load_dataset`](Self::load_dataset) from
     /// N-Quads / TriG so the engine can evaluate `GRAPH <iri> { … }` / `GRAPH ?g { … }`.
@@ -338,10 +342,13 @@ impl NumData {
             NumData::Owned(v) => v,
             #[cfg(feature = "mmap")]
             NumData::Mapped(m, _) => {
-                let n = m.len() / std::mem::size_of::<f64>();
-                // SAFETY: numerics.bin is a whole number of f64; the mmap base is
-                // page-aligned (>= the 8-byte f64 alignment).
-                unsafe { std::slice::from_raw_parts(m.as_ptr().cast::<f64>(), n) }
+                // `Graph::open` maps only a file that is the 8-byte `NUMERICS_MAGIC` header
+                // followed by a whole number of f64 (it recomputes anything else).
+                let body = &m[NUMERICS_MAGIC.len()..];
+                let n = body.len() / std::mem::size_of::<f64>();
+                // SAFETY: `body` is a whole number of f64 starting 8 bytes past the
+                // page-aligned mmap base, so it is 8-byte (f64) aligned.
+                unsafe { std::slice::from_raw_parts(body.as_ptr().cast::<f64>(), n) }
             }
             NumData::Sparse(_) => unreachable!("as_slice on a sparse numeric cache"),
             NumData::Forked { .. } => unreachable!("as_slice on a forked numeric cache"),
@@ -1710,6 +1717,7 @@ impl Graph {
             numerics,
             temporals,
             high_precision_decimal: std::sync::atomic::AtomicU8::new(0),
+            float_literal: std::sync::atomic::AtomicU8::new(0),
             named: Vec::new(),
             graph_prefix_index: std::sync::Mutex::new(None),
             #[cfg(feature = "mmap")]
@@ -1747,6 +1755,7 @@ impl Graph {
             temporals: self.temporals.into_sparse_if_worthwhile(),
             // sq-lr2ii: re-encoding keeps the same values; recompute the guard lazily.
             high_precision_decimal: std::sync::atomic::AtomicU8::new(0),
+            float_literal: std::sync::atomic::AtomicU8::new(0),
             named: self.named,
             graph_prefix_index: std::sync::Mutex::new(None),
             #[cfg(feature = "mmap")]
@@ -1934,10 +1943,21 @@ impl Graph {
             }
         };
         let np = dir.join("numerics.bin");
+        // Map the cache only when it carries the CURRENT semantics marker and covers the
+        // dictionary. Anything else — absent, stale-sized, or an unversioned cache written
+        // before the marker existed (which valued an `xsd:float` lexical at the nearest f64,
+        // not its f32 value) — is recomputed from the dictionary.
         let numerics = match std::fs::File::open(&np) {
-            Ok(f) if f.metadata()?.len() as usize == dict.len() * std::mem::size_of::<f64>() => {
+            Ok(f) if f.metadata()?.len() as usize
+                == NUMERICS_MAGIC.len() + dict.len() * std::mem::size_of::<f64>() =>
+            {
                 // SAFETY: the file is owned by this graph for its lifetime and not mutated.
-                NumData::Mapped(unsafe { memmap2::Mmap::map(&f)? }, rustc_hash::FxHashMap::default())
+                let m = unsafe { memmap2::Mmap::map(&f)? };
+                if m[..NUMERICS_MAGIC.len()] == NUMERICS_MAGIC {
+                    NumData::Mapped(m, rustc_hash::FxHashMap::default())
+                } else {
+                    NumData::Owned(numerics_of(&dict))
+                }
             }
             _ => NumData::Owned(numerics_of(&dict)),
         };
@@ -1961,6 +1981,7 @@ impl Graph {
             numerics,
             temporals,
             high_precision_decimal: std::sync::atomic::AtomicU8::new(0),
+            float_literal: std::sync::atomic::AtomicU8::new(0),
             named,
             graph_prefix_index: std::sync::Mutex::new(None),
             wal: None,
@@ -2774,6 +2795,30 @@ impl Graph {
         }
     }
 
+    /// `true` if the graph holds any `xsd:float` literal. The engine's f64 sargable-FILTER
+    /// fast path compares a scanned value against the constant as two `f64`s, but XPath
+    /// compares an `xs:float` against an integer/decimal constant in the FLOAT tier (the
+    /// constant rounded to `f32`): `"0.1"^^xsd:float = 0.1` is true although the two `f64`
+    /// images differ. The engine consults this to decline that fast path for a constant the
+    /// float tier would round (one not exactly an `f32`). Memoised and reset exactly like
+    /// [`has_high_precision_decimal`](Self::has_high_precision_decimal).
+    pub fn has_float_literal(&self) -> bool {
+        use std::sync::atomic::Ordering::Relaxed;
+        match self.float_literal.load(Relaxed) {
+            2 => true,
+            1 => false,
+            _ => {
+                let found = (1..=self.dict.len() as Id).any(|id| {
+                    self.numerics.lookup(id).is_some()
+                        && matches!(self.dict.term_parts(id),
+                            dict::TermParts::Lit { datatype, lang: None, .. } if datatype == xsd::FLOAT.as_str())
+                });
+                self.float_literal.store(if found { 2 } else { 1 }, Relaxed);
+                found
+            }
+        }
+    }
+
     pub fn len(&self) -> usize {
         self.store.len()
     }
@@ -2910,6 +2955,7 @@ impl Graph {
             temporals: self.temporals.fork(),
             // sq-lr2ii: the fork shares the same values; recompute the guard lazily.
             high_precision_decimal: std::sync::atomic::AtomicU8::new(0),
+            float_literal: std::sync::atomic::AtomicU8::new(0),
             named: self.named.iter().map(|(name, g)| (name.clone(), g.fork())).collect(),
             // A fork is a fresh logical copy; rebuild the prefix index lazily on first use.
             graph_prefix_index: std::sync::Mutex::new(None),
@@ -3411,12 +3457,14 @@ impl Graph {
         // Equal lengths therefore preserve every term/numeric value read by the memo.
         // Any future path changing existing terms or cached values must invalidate it.
         if self.dict.len() != old_len {
-            let _ = self.high_precision_decimal.compare_exchange(
-                1,
-                0,
-                std::sync::atomic::Ordering::Relaxed,
-                std::sync::atomic::Ordering::Relaxed,
-            );
+            for memo in [&self.high_precision_decimal, &self.float_literal] {
+                let _ = memo.compare_exchange(
+                    1,
+                    0,
+                    std::sync::atomic::Ordering::Relaxed,
+                    std::sync::atomic::Ordering::Relaxed,
+                );
+            }
         }
         self.store.apply_delta(&ins_ids, &del_ids);
     }
@@ -4318,16 +4366,28 @@ fn numerics_of(dict: &Dict) -> Vec<f64> {
     }
 }
 
-/// Writes the numeric-value cache to disk (raw little-endian f64) so it can be
-/// memory-mapped on open instead of recomputed.
+/// The 8-byte header of `numerics.bin`, naming the cache's VALUE semantics. Bump it whenever
+/// the f64 a lexical caches to changes, so [`Graph::open`] recomputes an older cache instead
+/// of mapping stale values. `SPQNUM02`: an `xsd:float` lexical caches its `f32` value (#3825);
+/// the unversioned layout before it (raw f64, no header) cached the nearest `f64`. An 8-byte
+/// header keeps the f64 body 8-byte aligned in the page-aligned mapping.
+#[cfg_attr(not(feature = "mmap"), allow(dead_code))]
+pub(crate) const NUMERICS_MAGIC: [u8; 8] = *b"SPQNUM02";
+
+/// Writes the numeric-value cache to disk (the [`NUMERICS_MAGIC`] header, then raw f64) so it
+/// can be memory-mapped on open instead of recomputed.
 #[cfg(feature = "mmap")]
 fn write_numerics(path: &std::path::Path, nums: &[f64]) -> std::io::Result<()> {
+    use std::io::Write;
     // SAFETY: reinterpret the contiguous f64 cache as bytes for writing.
     let bytes = unsafe { std::slice::from_raw_parts(nums.as_ptr().cast::<u8>(), std::mem::size_of_val(nums)) };
-    std::fs::write(path, bytes)
+    let mut w = std::io::BufWriter::new(std::fs::File::create(path)?);
+    w.write_all(&NUMERICS_MAGIC)?;
+    w.write_all(bytes)?;
+    w.flush()
 }
 
-/// [OPUS-4.8] (sq-7ph8) STREAM-writes the dense `numerics.bin` (`n` little-endian f64, the
+/// [OPUS-4.8] (sq-7ph8) STREAM-writes the dense `numerics.bin` (the header, `n` f64, the
 /// same layout [`write_numerics`] emits and [`Graph::open`] mmaps) DIRECTLY from the cache,
 /// in fixed-size blocks, without first materialising a whole-dictionary dense `Vec<f64>`.
 ///
@@ -4341,6 +4401,7 @@ fn write_numerics(path: &std::path::Path, nums: &[f64]) -> std::io::Result<()> {
 fn stream_write_numerics(path: &std::path::Path, n: usize, num: &NumData) -> std::io::Result<()> {
     use std::io::Write;
     let mut w = std::io::BufWriter::new(std::fs::File::create(path)?);
+    w.write_all(&NUMERICS_MAGIC)?;
     const BLOCK: usize = 1 << 16; // ids per flush (512 KiB of f64)
     let mut buf: Vec<f64> = Vec::with_capacity(BLOCK.min(n));
     let flush = |w: &mut std::io::BufWriter<std::fs::File>, buf: &mut Vec<f64>| -> std::io::Result<()> {
@@ -8251,6 +8312,48 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
+    /// #3825 — a `numerics.bin` written before the [`NUMERICS_MAGIC`] header existed (raw f64,
+    /// no header) cached an `xsd:float` lexical at its NEAREST f64. `open` must recompute such a
+    /// cache, not map it, so the float keeps its `f32` value across the upgrade; a cache saved
+    /// with the current header is still mapped.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn open_recomputes_an_unversioned_numerics_cache() {
+        let ttl = "<http://ex/a> <http://ex/f> \"0.1\"^^<http://www.w3.org/2001/XMLSchema#float> .\n\
+                   <http://ex/a> <http://ex/d> \"2.5\"^^<http://www.w3.org/2001/XMLSchema#decimal> .\n";
+        let lit = |v: &str, dt: &str| {
+            Term::Literal(Literal::new_typed_literal(v, NamedNode::new_unchecked(format!("http://www.w3.org/2001/XMLSchema#{dt}"))))
+        };
+        let g = Graph::load_str(ttl, "turtle").unwrap();
+        let (fid, did) = (g.id_of(&lit("0.1", "float")).unwrap(), g.id_of(&lit("2.5", "decimal")).unwrap());
+        let dir = std::env::temp_dir().join(format!("sparq_unversioned_numerics_{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        g.save(&dir).unwrap();
+        assert!(matches!(Graph::open(&dir).unwrap().numerics, NumData::Mapped(..)), "a current cache is mapped");
+
+        // Rewrite numerics.bin exactly as the pre-header layout stored it: `n` native f64, the
+        // float valued at the nearest f64 of its lexical (`0.1`, not `0.1f32`).
+        let old: Vec<u8> = (1..=g.dict.len() as Id)
+            .map(|id| if id == fid { 0.1f64 } else { g.numeric_value(id).unwrap_or(f64::NAN) })
+            .flat_map(f64::to_ne_bytes)
+            .collect();
+        std::fs::write(dir.join("numerics.bin"), old).unwrap();
+
+        let g2 = Graph::open(&dir).unwrap();
+        assert_eq!(g2.numeric_value(fid), Some(f64::from(0.1f32)), "stale float value mapped from an old cache");
+        assert_eq!(g2.numeric_value(did), Some(2.5));
+        // Saving the reopened graph writes the current, mappable format.
+        let dir2 = dir.with_extension("resaved");
+        std::fs::remove_dir_all(&dir2).ok();
+        g2.save(&dir2).unwrap();
+        let g3 = Graph::open(&dir2).unwrap();
+        assert!(matches!(g3.numerics, NumData::Mapped(..)));
+        assert_eq!(g3.numeric_value(fid), Some(f64::from(0.1f32)));
+        drop((g2, g3));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::remove_dir_all(&dir2).ok();
+    }
+
     /// [OPUS-4.8] (gh-1122) `insert_triple` / `remove_triple` against a DIRECTORY-BACKED graph
     /// flow through the SAME durable `apply_delta` path as a batch: each is WAL-logged + fsync'd,
     /// so a crash-style reopen (no save/compact in between) recovers the insert and honours the
@@ -10797,7 +10900,7 @@ mod tests {
         // `n` LE f64 numerics; then `n` LE f64 temporal instants followed by `n` flag bytes.
         let reference = |dict: &Dict| -> (Vec<u8>, Vec<u8>) {
             let n = dict.len();
-            let mut num = Vec::new();
+            let mut num = NUMERICS_MAGIC.to_vec();
             let mut inst = Vec::new();
             let mut flags = Vec::new();
             for id in 1..=n as Id {
@@ -10836,7 +10939,7 @@ mod tests {
                 let got_num = std::fs::read(dir.join("numerics.bin")).unwrap();
                 let got_temp = std::fs::read(dir.join("temporals.bin")).unwrap();
                 let n = g.dict.len();
-                assert_eq!(got_num.len(), n * 8, "numerics.bin size (sparse={sparse} compressed={compressed})");
+                assert_eq!(got_num.len(), 8 + n * 8, "numerics.bin size (sparse={sparse} compressed={compressed})");
                 assert_eq!(got_temp.len(), n * 9, "temporals.bin size (sparse={sparse} compressed={compressed})");
                 assert_eq!(got_num, want_num, "streamed numerics != dense (sparse={sparse} compressed={compressed})");
                 assert_eq!(got_temp, want_temp, "streamed temporals != dense (sparse={sparse} compressed={compressed})");

@@ -6507,7 +6507,8 @@ fn inline_pass_values(cmp: ScanCmp) -> Option<(u32, u32)> {
 /// fall back to the exact general evaluator instead. Temporal pushdown is unaffected, and a
 /// graph with no f64-inexact decimal keeps the numeric fast path.
 fn extract_sargable(graph: &Graph, e: &Expression) -> Option<(Variable, ScanCmp)> {
-    fn lit_num(e: &Expression) -> Option<f64> {
+    // (threshold, whether the float tier could round it) — see the decline below.
+    fn lit_num(e: &Expression) -> Option<(f64, bool)> {
         match e {
             Expression::Literal(l) if is_numeric_dt(l) => {
                 // [FABLE-5] sq-6b1lj: datatype-aware/trimmed constant (`numeric_cache_f64`).
@@ -6521,10 +6522,19 @@ fn extract_sargable(graph: &Graph, e: &Expression) -> Option<(Variable, ScanCmp)
                 // large integers or high-precision decimals) makes the sargable f64 scan
                 // unsafe; decline so the filter takes the exact general comparison path.
                 if sig_digits(l.value()) > 15 {
-                    None
-                } else {
-                    Some(v)
+                    return None;
                 }
+                // XPath compares an `xs:float` against a non-double operand in the FLOAT tier,
+                // which the untyped f64 cache cannot reproduce (`"0.1"^^xsd:float = 0.1` is
+                // true; their f64 images differ). A FLOAT constant is never pushed down (any
+                // integer/decimal row would need f32 promotion); an integer/decimal constant
+                // is unsafe only if it is not exactly an `f32`, and only against a float row.
+                // A double constant promotes every row to double: the f64 compare is exact.
+                let dt = l.datatype();
+                if dt == xsd::FLOAT {
+                    return None;
+                }
+                Some((v, dt != xsd::DOUBLE && f64::from(v as f32) != v))
             }
             _ => None,
         }
@@ -6564,12 +6574,13 @@ fn extract_sargable(graph: &Graph, e: &Expression) -> Option<(Variable, ScanCmp)
     };
     for (var, konst, op) in [(l, r, on_left), (r, l, on_right)] {
         let Some(v) = var_of(var) else { continue };
-        if let Some(c) = lit_num(konst) {
+        if let Some((c, float_tier_rounds)) = lit_num(konst) {
             // sq-lr2ii: decline the f64 numeric fast path when the graph holds an f64-inexact
             // decimal — the scan's per-row f64 compare could be wrong for it. A numeric
             // constant is never also a temporal one, so declining here yields `None` for this
             // orientation; the exact general evaluator handles the residual FILTER correctly.
-            if !graph.has_high_precision_decimal() {
+            // Likewise when a float row would compare against an `f32`-rounded constant.
+            if !graph.has_high_precision_decimal() && !(float_tier_rounds && graph.has_float_literal()) {
                 return Some((v, num_cmp(op, c)));
             }
             continue;
@@ -11271,13 +11282,34 @@ fn minmax_temporal(
 }
 
 /// Value comparison of two typed numerics: exact when both are int/decimal, f64 otherwise.
+///
+/// XPath `op:numeric-*` promotion via [`Num::cmp_relational`]: an `xs:float` against an
+/// integer/decimal compares in the FLOAT tier (`"0.1"^^xsd:float = 0.1` is true), not as two
+/// `f64`s.
 fn num_compare(a: Num, c: Num) -> Option<Ordering> {
-    if let (Some(x), Some(y)) = (a.to_dec(), c.to_dec()) {
-        if let Some(o) = x.cmp(y) {
-            return Some(o);
-        }
+    a.cmp_relational(c)
+}
+
+/// Whether two DISTINCT cached `f64` operand values could still compare EQUAL under XPath
+/// promotion to `xs:float`. The numeric caches are untyped, but `"0.1"^^xsd:float` caches its
+/// `f32` value (0.100000001490116…) while `0.1` caches 0.1: unequal as `f64`, equal once the
+/// decimal is promoted to float. `f32` rounding is monotonic, so promotion can only turn an
+/// `f64` inequality into a tie, never flip an order — and only when both values round to the
+/// same `f32`. A cached decimal's `f64` may sit one rounding away from its exact value, so
+/// adjacent `f32`s count too. The fast paths decide every other unequal pair by `f64` and send
+/// this rare one to the typed evaluator.
+#[inline]
+fn f32_promotion_may_tie(x: f64, y: f64) -> bool {
+    #[inline]
+    fn key(f: f32) -> i64 {
+        let b = f.to_bits() as i32;
+        i64::from(if b < 0 { -(b & i32::MAX) } else { b })
     }
-    a.f64().partial_cmp(&c.f64())
+    if x.is_nan() || y.is_nan() {
+        return false;
+    }
+    let (a, b) = (x as f32, y as f32);
+    a == b || key(a).abs_diff(key(b)) <= 1
 }
 
 fn dedup_values(vals: &mut Vec<Value>) {
@@ -13686,7 +13718,10 @@ fn cmp_expr(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], a: &Exp
                 }
             }
         }
-        return Ok(Value::Bool(x.partial_cmp(&y).map(&f).unwrap_or(false)));
+        // An unequal pair that `xs:float` promotion could tie takes the typed path below.
+        if x == y || !f32_promotion_may_tie(x, y) {
+            return Ok(Value::Bool(x.partial_cmp(&y).map(&f).unwrap_or(false)));
+        }
     }
     // Fast path: both sides temporal -> compare cached/parsed timeline values, no term
     // materialised. `None` from `cmp_t` is exactly the strict path's type-error cases
@@ -13725,7 +13760,10 @@ fn equal_expr(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], a: &E
                 }
             }
         }
-        return Ok(Value::Bool(x == y));
+        // An unequal pair that `xs:float` promotion could tie takes the typed path below.
+        if x == y || !f32_promotion_may_tie(x, y) {
+            return Ok(Value::Bool(x == y));
+        }
     }
     // Fast path: both temporal. Same-family operands decide by timeline (`None` =
     // the indeterminate mixed-timezone window -> type error); dateTime and date are
@@ -14599,7 +14637,10 @@ fn cmp_compiled(
                 }
             }
         }
-        return Ok(Value::Bool(x.partial_cmp(&y).map(&f).unwrap_or(false)));
+        // An unequal pair that `xs:float` promotion could tie takes the typed path below.
+        if x == y || !f32_promotion_may_tie(x, y) {
+            return Ok(Value::Bool(x.partial_cmp(&y).map(&f).unwrap_or(false)));
+        }
     }
     if let (Some(ta), Some(tb)) =
         (eval_compiled_temporal(graph, local, row, a), eval_compiled_temporal(graph, local, row, c))
@@ -14697,7 +14738,10 @@ fn equal_compiled(
                 }
             }
         }
-        return Ok(Value::Bool(x == y));
+        // An unequal pair that `xs:float` promotion could tie takes the typed path below.
+        if x == y || !f32_promotion_may_tie(x, y) {
+            return Ok(Value::Bool(x == y));
+        }
     }
     if let (Some(ta), Some(tb)) =
         (eval_compiled_temporal(graph, local, row, a), eval_compiled_temporal(graph, local, row, c))
