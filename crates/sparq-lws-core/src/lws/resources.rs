@@ -1106,38 +1106,28 @@ async fn create<S: Store + 'static>(
     // The new member's metadata is written before its content, replacing whatever an earlier
     // resource at the IRI left behind (a delete whose metadata removal failed): content never
     // exists under metadata that is not its own. When the content cannot be created the metadata
-    // is removed again; one left behind describes nothing, and the next create replaces it. The
-    // writes run in a task of their own that holds the locks, so a client that goes away cannot
-    // stop them half way.
-    let created = {
-        let (state, parent, child, meta) = (
-            state.clone(),
-            parent.to_string(),
-            child.clone(),
-            meta.clone(),
-        );
-        tokio::spawn(async move {
-            let _locks = (parent_guard, _child_guards);
-            state.put_resource_meta(&child, &meta).await?;
-            match state
-                .store
-                .create_in_container(&parent, &child, body, &content_type)
-                .await
-            {
-                Ok(m) => Ok(m),
-                Err(e) => {
-                    let _ = state.store.delete(&meta_key(&child), None).await;
-                    Err(e)
-                }
-            }
-        })
+    // is removed again; one left behind describes nothing, and the next create replaces it.
+    //
+    // This order is also what makes the create safe to cancel without a task of its own (whose
+    // scheduling would sit inside the container's critical section, which every create in the
+    // container serializes on): a request dropped after the metadata write leaves metadata that
+    // describes nothing, and the content write is the last step.
+    if let Err(e) = state.put_resource_meta(&child, &meta).await {
+        return store_error(e);
+    }
+    let created = match state
+        .store
+        .create_in_container(parent, &child, body, &content_type)
         .await
+    {
+        Ok(m) => m,
+        Err(e) => {
+            let _ = state.store.delete(&meta_key(&child), None).await;
+            return store_error(e);
+        }
     };
-    let created = match created {
-        Ok(Ok(m)) => m,
-        Ok(Err(e)) => return store_error(e),
-        Err(e) => return store_error(ServerError::Storage(format!("the create failed: {e}"))),
-    };
+    drop(parent_guard);
+    drop(_child_guards);
     touch_container(state, parent).await;
     state
         .notify
@@ -4308,6 +4298,64 @@ mod tests {
         assert!(!st.store.exists(&x).await.unwrap());
         // One that succeeds replaces it: the new content is the owner's, not Bob's.
         assert_eq!(post(owner.clone()).await.status(), StatusCode::CREATED);
+        assert_eq!(st.resource_meta(&x).await.creator, owner.subject);
+        let r = handle(&st, &req(Method::GET, &px, &[], ""), &bob).await;
+        assert_eq!(r.status(), StatusCode::FORBIDDEN);
+    }
+
+    /// Benchmark finding: a create ran its writes in a task of its own, whose scheduling sat
+    /// inside the container's critical section. Inline, a client that goes away mid-create drops
+    /// the writes; the metadata-first order keeps that safe: the stale metadata is already gone,
+    /// no content exists, the locks are free, and the next create at the IRI is whole.
+    #[tokio::test]
+    async fn a_cancelled_create_leaves_nothing_behind() {
+        use super::super::test_store::{request as req, FlakyStore};
+        use std::sync::atomic::Ordering;
+        use std::time::Duration;
+        let mut cfg = super::super::LwsConfig::new("http://localhost:3000");
+        cfg.owner = Some("https://owner.example/#me".into());
+        let store = FlakyStore::new();
+        let st = LwsState::new(store.clone(), cfg).await.expect("state");
+        let (owner, bob) = (
+            agent("https://owner.example/#me"),
+            agent("https://bob.example/#me"),
+        );
+        let base = st.cfg.absolute("");
+        let x = format!("{}x", st.cfg.storage());
+        let px = x.strip_prefix(base.as_str()).unwrap().to_string();
+        let post = |who: Agent| {
+            let st = st.clone();
+            async move {
+                let h = [("slug", "x"), ("content-type", "text/plain")];
+                create(
+                    &st,
+                    &req(Method::POST, "/", &h, "owner's"),
+                    &who,
+                    &st.cfg.storage(),
+                )
+                .await
+            }
+        };
+        // Bob's metadata outlives his resource (its removal failed).
+        assert_eq!(post(owner.clone()).await.status(), StatusCode::CREATED);
+        let mut meta = st.resource_meta(&x).await;
+        meta.creator = bob.subject.clone();
+        st.put_resource_meta(&x, &meta).await.unwrap();
+        st.store.delete(&x, Some(&st.cfg.storage())).await.unwrap();
+        assert_eq!(st.resource_meta(&x).await.creator, bob.subject);
+        // A create whose content write stalls, and whose client goes away.
+        store.hang_create.store(true, Ordering::SeqCst);
+        let cancelled = tokio::time::timeout(Duration::from_millis(50), post(owner.clone())).await;
+        assert!(cancelled.is_err());
+        store.hang_create.store(false, Ordering::SeqCst);
+        assert!(!st.store.exists(&x).await.unwrap());
+        assert_eq!(st.resource_meta(&x).await.creator, owner.subject);
+        // The container is not left locked: the next create goes through, whole and the owner's.
+        let r = tokio::time::timeout(Duration::from_secs(5), post(owner.clone()))
+            .await
+            .expect("the container stayed locked");
+        assert_eq!(r.status(), StatusCode::CREATED);
+        assert_eq!(hdr(&r, "location"), x);
         assert_eq!(st.resource_meta(&x).await.creator, owner.subject);
         let r = handle(&st, &req(Method::GET, &px, &[], ""), &bob).await;
         assert_eq!(r.status(), StatusCode::FORBIDDEN);

@@ -1081,6 +1081,8 @@ pub(crate) mod test_store {
         pub write_budget: Arc<std::sync::Mutex<Option<usize>>>,
         /// `exists` fails with a backend error.
         pub fail_exists: Arc<AtomicBool>,
+        /// `create_in_container` never completes, as on a stalled backend.
+        pub hang_create: Arc<AtomicBool>,
         /// `exists` reports this IRI absent, as if it was checked just before the IRI appeared.
         pub hide: Arc<std::sync::Mutex<Option<String>>>,
     }
@@ -1094,6 +1096,7 @@ pub(crate) mod test_store {
                 )),
                 fail_delete: Arc::new(AtomicBool::new(false)),
                 fail_exists: Arc::new(AtomicBool::new(false)),
+                hang_create: Arc::new(AtomicBool::new(false)),
                 fail_delete_of: Default::default(),
                 fail_write_of: Default::default(),
                 write_budget: Default::default(),
@@ -1142,6 +1145,9 @@ pub(crate) mod test_store {
             body: Bytes,
             ct: &str,
         ) -> ServerResult<ResourceMeta> {
+            if self.hang_create.load(Ordering::SeqCst) {
+                std::future::pending::<()>().await;
+            }
             self.inner
                 .create_in_container(container, child, body, ct)
                 .await
