@@ -1135,7 +1135,7 @@ impl HttpFragmentTransport {
 /// spaces, newlines in a brTPF block) round-trips through the URL back to the same term. The
 /// server's TPF `hydra:next` builder uses the SAME `percent-encoding` set, so the link the
 /// transport builds is read identically server-side; the discovery ASK probe shares this one
-/// definition too (#3712). [OPUS-4.8]
+/// definition too (#3712).
 pub(crate) fn pct_encode(value: &str) -> String {
     const UNRESERVED: &percent_encoding::AsciiSet = &percent_encoding::NON_ALPHANUMERIC
         .remove(b'-')
