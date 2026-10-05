@@ -167,11 +167,21 @@ fn escape_string(value: &str, out: &mut String) {
 }
 
 /// True if `s` is a valid Turtle `PN_LOCAL` body that needs no escaping — a
-/// conservative ASCII subset (`A–Z a–z 0–9 _ -`, and interior `.`) so the compaction
-/// is always *correct*; anything outside it falls back to a full `<IRI>`. Empty is
-/// allowed (`prefix:` with an empty local name is valid Turtle).
+/// conservative ASCII subset (`A–Z a–z 0–9 _`, plus `-` and `.` after the first char,
+/// with no trailing `.`) so the compaction is always *correct*; anything outside it
+/// falls back to a shorter prefix or a full `<IRI>`. Empty is allowed (`prefix:` with an
+/// empty local name is valid Turtle).
+///
+/// Grammar: `PN_LOCAL ::= (PN_CHARS_U | ':' | [0-9] | PLX) ((PN_CHARS | '.' | ':' | PLX)*
+/// (PN_CHARS | ':' | PLX))?`, so `-` (a `PN_CHARS` but not `PN_CHARS_U`) and `.` may not
+/// start a local name, and `.` may not end one.
 fn is_simple_pn_local(s: &str) -> bool {
     let bytes = s.as_bytes();
+    if let Some(&first) = bytes.first() {
+        if first == b'-' || first == b'.' {
+            return false;
+        }
+    }
     for (i, &b) in bytes.iter().enumerate() {
         let ok = b.is_ascii_alphanumeric()
             || b == b'_'
@@ -2903,6 +2913,72 @@ ex:bob
         assert!(is_simple_pn_local(""));
         assert!(!is_simple_pn_local("has space"));
         assert!(!is_simple_pn_local("q?x=1"));
+    }
+
+    #[test]
+    fn pn_local_rejects_leading_hyphen_and_dot() {
+        // Turtle PN_LOCAL: the first char is PN_CHARS_U | ':' | [0-9] | PLX, so an
+        // unescaped leading '-' or '.' is invalid.
+        assert!(!is_simple_pn_local("-foo"));
+        assert!(!is_simple_pn_local(".foo"));
+        assert!(!is_simple_pn_local("-"));
+        assert!(!is_simple_pn_local("."));
+        assert!(is_simple_pn_local("0foo"));
+        assert!(is_simple_pn_local("_foo"));
+        assert!(is_simple_pn_local("f-o.o"));
+    }
+
+    /// Overlapping namespaces where the LONGEST match leaves a local part starting with
+    /// '-' or '.': every Turtle/TriG writer must fall back to a shorter prefix whose local
+    /// part is valid (or the full IRI), so the output parses back to the same graph.
+    #[test]
+    fn overlapping_namespaces_round_trip() {
+        let data = r#"
+            <http://ex/ns-foo> <http://ex/nsp> <http://ex/ns.bar> .
+            <http://ex/ns-foo> <http://ex/nsq> <http://ex/ns-> .
+            <http://ex/ns.x> <http://ex/nsp> <http://ex/nsok> .
+            GRAPH <http://ex/ns-g> { <http://ex/ns-foo> <http://ex/nsp> <http://ex/ns.> . }
+        "#;
+        let ds = Graph::load_dataset(data, "trig").unwrap();
+        let ttl_src = r#"
+            <http://ex/ns-foo> <http://ex/nsp> <http://ex/ns.bar> .
+            <http://ex/ns-foo> <http://ex/nsq> <http://ex/ns-> .
+            <http://ex/ns.x> <http://ex/nsp> <http://ex/nsok> .
+            <http://ex/ns-foo> <http://ex/nsp> <http://ex/ns.> .
+        "#;
+        let g = Graph::load_str(ttl_src, "turtle").unwrap();
+        // `a` (longer) shadows `z` (shorter) for every IRI above; and a lone overlapping
+        // namespace with no shorter fallback must give a full IRI.
+        let overlap = prefixes_from_pairs([("a", "http://ex/ns"), ("z", "http://ex/")]);
+        let only_long = prefixes_from_pairs([("a", "http://ex/ns")]);
+        let pretty = PrettyOptions::default();
+        for prefixes in [&overlap, &only_long] {
+            let outs = [
+                ("id writer", graph_to_turtle_with(&g, prefixes)),
+                ("generic turtle", generic_turtle(&g, prefixes)),
+                ("pretty turtle", graph_to_turtle_pretty_with(&g, prefixes, &pretty)),
+            ];
+            for (name, ttl) in outs {
+                assert!(!ttl.contains(":-") && !ttl.contains(":."), "{name}\n{ttl}");
+                let back = Graph::load_str(&ttl, "turtle")
+                    .unwrap_or_else(|e| panic!("{name} output does not parse: {e}\n{ttl}"));
+                assert_eq!(nt_sorted(&g), nt_sorted(&back), "{name} round-trip\n{ttl}");
+            }
+            // The shorter namespace still compacts when a longer one is invalid.
+            if prefixes == &overlap {
+                assert!(graph_to_turtle_with(&g, prefixes).contains("z:ns-foo"));
+            }
+            let trigs = [
+                ("trig", graph_to_trig_with(&ds, prefixes)),
+                ("pretty trig", graph_to_trig_pretty_with(&ds, prefixes, &pretty)),
+            ];
+            for (name, tg) in trigs {
+                assert!(!tg.contains(":-") && !tg.contains(":."), "{name}\n{tg}");
+                let back = Graph::load_dataset(&tg, "trig")
+                    .unwrap_or_else(|e| panic!("{name} output does not parse: {e}\n{tg}"));
+                assert_dataset_iso(&ds, &back, &tg);
+            }
+        }
     }
 
     #[test]
