@@ -52,6 +52,8 @@ pub struct SubscriptionId(u64);
 pub enum ObserveError {
     /// RDF literals cannot occupy the subject position.
     LiteralSubject,
+    /// A named graph can only be named by an IRI or a blank node.
+    InvalidGraphName(Term),
     /// The backing graph rejected the mutation.
     Graph(String),
 }
@@ -60,6 +62,7 @@ impl fmt::Display for ObserveError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::LiteralSubject => f.write_str("RDF literals cannot be triple subjects"),
+            Self::InvalidGraphName(name) => write!(f, "{name} cannot name a graph"),
             Self::Graph(message) => write!(f, "graph mutation failed: {message}"),
         }
     }

@@ -113,7 +113,9 @@ impl<'graph> GraphScope<'graph> {
     /// The default graph is initially excluded. Call
     /// [`with_default_graph`](Self::with_default_graph) to include it in the
     /// read projection. The `write_graph` does not need to be readable and is
-    /// created on the first insert or remove when it does not yet exist.
+    /// created on the first insert or remove when it does not yet exist. It
+    /// must be an IRI or a blank node; with any other term every insert and
+    /// remove fails with [`GraphScopeError::InvalidGraphName`].
     pub fn new<I, G>(
         graph: &'graph mut Graph,
         readable_named_graphs: I,
@@ -196,6 +198,9 @@ impl<'graph> GraphScope<'graph> {
     ) -> Result<(), GraphScopeError> {
         if subject.is_literal() {
             return Err(GraphScopeError::LiteralSubject);
+        }
+        if !is_graph_name(&self.write_graph) {
+            return Err(GraphScopeError::InvalidGraphName(self.write_graph.clone()));
         }
 
         let mut dataset = self.graph.borrow_mut();
@@ -358,6 +363,8 @@ impl ExactSizeIterator for Values<'_, '_> {}
 pub enum GraphScopeError {
     /// RDF literals cannot occupy the subject position.
     LiteralSubject,
+    /// A named graph can only be named by an IRI or a blank node.
+    InvalidGraphName(Term),
     /// The backing named graph rejected the mutation.
     Graph(String),
 }
@@ -366,12 +373,22 @@ impl fmt::Display for GraphScopeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::LiteralSubject => f.write_str("RDF literals cannot be triple subjects"),
+            Self::InvalidGraphName(name) => write!(f, "{name} cannot name a graph"),
             Self::Graph(message) => write!(f, "graph mutation failed: {message}"),
         }
     }
 }
 
 impl std::error::Error for GraphScopeError {}
+
+/// Whether `name` may name a graph: an IRI or a blank node, never a literal
+/// or a triple term.
+///
+/// Checked before any write creates a named graph, because a graph created
+/// under any other term cannot be persisted and reopened.
+pub(crate) fn is_graph_name(name: &Term) -> bool {
+    matches!(name, Term::NamedNode(_) | Term::BlankNode(_))
+}
 
 #[derive(Clone, Copy)]
 enum Direction {

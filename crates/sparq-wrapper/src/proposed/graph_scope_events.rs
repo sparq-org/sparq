@@ -11,7 +11,7 @@
 
 // sq-1rg2q.7: union-boundary events over the observe.rs machinery.
 
-use super::graph_scope::Projection;
+use super::graph_scope::{is_graph_name, Projection};
 use super::observe::{
     apply, contains, ChangeEvent, ChangeKind, ObserveError, Subscribers, SubscriptionId,
 };
@@ -22,7 +22,9 @@ type Dispatch = dyn FnMut(Option<&Term>, &ChangeEvent, &Graph);
 
 /// An owned dataset with projected effective-change subscriptions.
 ///
-/// Mutations name their target graph (`None` is the default graph). Each
+/// Mutations name their target graph (`None` is the default graph); a named
+/// graph must be an IRI or a blank node, and any other name is rejected with
+/// [`ObserveError::InvalidGraphName`] before a graph is created. Each
 /// subscription carries its own [`Projection`]; listeners run in subscription
 /// order after the mutation is committed and receive the committed dataset.
 pub struct ObservableDataset {
@@ -134,6 +136,9 @@ impl ObservableDataset {
     ) -> Result<bool, ObserveError> {
         if subject.is_literal() {
             return Err(ObserveError::LiteralSubject);
+        }
+        if let Some(name) = graph_name.filter(|name| !is_graph_name(name)) {
+            return Err(ObserveError::InvalidGraphName(name.clone()));
         }
         let target = match graph_name {
             None => &mut self.dataset,

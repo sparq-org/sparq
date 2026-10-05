@@ -204,12 +204,7 @@ where
         Encode: Fn(&T) -> Result<Term, E>,
     {
         let term = self.encode(value)?;
-        let node = self.node();
-        if node.has(self.predicate.clone(), term.clone())?.await? {
-            return Ok(false);
-        }
-        node.add(self.predicate.clone(), term)?.await?;
-        Ok(true)
+        Ok(self.node().add(self.predicate.clone(), term)?.await?)
     }
 
     /// Removes the encoded RDF term and reports whether the set changed.
@@ -218,12 +213,7 @@ where
         Encode: Fn(&T) -> Result<Term, E>,
     {
         let term = self.encode(value)?;
-        let node = self.node();
-        if !node.has(self.predicate.clone(), term.clone())?.await? {
-            return Ok(false);
-        }
-        node.delete(self.predicate.clone(), term)?.await?;
-        Ok(true)
+        Ok(self.node().delete(self.predicate.clone(), term)?.await?)
     }
 
     fn node(&self) -> AsyncNode<'s, B> {

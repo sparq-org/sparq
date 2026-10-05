@@ -188,3 +188,62 @@ fn rejected_mutations_notify_nobody() {
     assert!(log.borrow().is_empty());
     assert!(Rc::ptr_eq(&store.into_store().into_backend().state, &state));
 }
+
+/// Two wrappers over one shared backend. `first` checks presence and suspends
+/// on its write; `second` makes the same change in between, so `first`'s
+/// write changes nothing and must neither report a change nor notify.
+fn shared_backend_race(kind: ChangeKind) -> (Poll<Result<bool, AsyncStoreError>>, usize) {
+    let state = Rc::new(FakeState::default());
+    if kind == ChangeKind::Delete {
+        state
+            .triples
+            .borrow_mut()
+            .push((term("alice"), iri("knows"), term("bob")));
+    }
+    let backend = || FakeStore {
+        state: Rc::clone(&state),
+        delay: 2,
+    };
+    let (mut first, mut second) = (
+        AsyncObservableStore::new(backend()),
+        AsyncObservableStore::new(backend()),
+    );
+    let notified = Rc::new(Cell::new(0));
+    let counter = Rc::clone(&notified);
+    first.subscribe(move |_| {
+        counter.set(counter.get() + 1);
+        std::future::ready(())
+    });
+
+    let signal = Arc::new(TestWaker::default());
+    let waker = Waker::from(Arc::clone(&signal));
+    let mut cx = Context::from_waker(&waker);
+    type Mutation<'a> = std::pin::Pin<Box<dyn Future<Output = Result<bool, AsyncStoreError>> + 'a>>;
+    let mut pending: Mutation<'_> = match kind {
+        ChangeKind::Add => Box::pin(first.add(iri("alice"), iri("knows"), term("bob"))),
+        ChangeKind::Delete => Box::pin(first.delete(iri("alice"), iri("knows"), term("bob"))),
+    };
+    // Suspend `first` inside its write, past any presence check it makes.
+    while state.writes_issued.get() == 0 {
+        assert!(pending.as_mut().poll(&mut cx).is_pending());
+    }
+    let raced = match kind {
+        ChangeKind::Add => block_on(second.add(iri("alice"), iri("knows"), term("bob"))),
+        ChangeKind::Delete => block_on(second.delete(iri("alice"), iri("knows"), term("bob"))),
+    };
+    assert_eq!(raced, Ok(true));
+    let outcome = drive(std::pin::Pin::new(&mut pending), &signal);
+    drop(pending);
+    (outcome, notified.get())
+}
+
+#[test]
+fn a_write_another_wrapper_already_made_is_not_reported_or_notified() {
+    for kind in [ChangeKind::Add, ChangeKind::Delete] {
+        assert_eq!(
+            shared_backend_race(kind),
+            (Poll::Ready(Ok(false)), 0),
+            "{kind:?} raced on a shared backend"
+        );
+    }
+}

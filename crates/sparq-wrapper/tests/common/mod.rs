@@ -83,6 +83,8 @@ pub struct FakeState {
     pub fail_reads: Cell<bool>,
     /// One lifecycle token per traversal handed out, in construction order.
     pub traversals: RefCell<Vec<Rc<Cell<Traversal>>>>,
+    /// Write operations (`add` / `delete`) handed out, in construction order.
+    pub writes_issued: Cell<usize>,
 }
 
 /// The backend-side lifecycle of one traversal — the token a contract-honouring
@@ -246,9 +248,9 @@ impl FakeStore {
 
 impl AsyncStoreBackend for FakeStore {
     type Stream = FakeStream;
-    type Add = FakeOp<()>;
+    type Add = FakeOp<bool>;
     type Has = FakeOp<bool>;
-    type Delete = FakeOp<()>;
+    type Delete = FakeOp<bool>;
 
     fn objects(&self, subject: Term, predicate: NamedNode) -> Self::Stream {
         self.stream(Pattern::Objects(subject, predicate))
@@ -259,14 +261,20 @@ impl AsyncStoreBackend for FakeStore {
     }
 
     fn add(&self, subject: Term, predicate: NamedNode, object: Term) -> Self::Add {
+        self.state
+            .writes_issued
+            .set(self.state.writes_issued.get() + 1);
+        // Check-and-insert happens in one step on the final poll, like an
+        // atomic backend write.
         self.op(move |state| {
-            if !state.contains(&subject, &predicate, &object) {
+            let absent = !state.contains(&subject, &predicate, &object);
+            if absent {
                 state
                     .triples
                     .borrow_mut()
                     .push((subject, predicate, object));
             }
-            Ok(())
+            Ok(absent)
         })
     }
 
@@ -275,12 +283,14 @@ impl AsyncStoreBackend for FakeStore {
     }
 
     fn delete(&self, subject: Term, predicate: NamedNode, object: Term) -> Self::Delete {
+        self.state
+            .writes_issued
+            .set(self.state.writes_issued.get() + 1);
         self.op(move |state| {
-            state
-                .triples
-                .borrow_mut()
-                .retain(|(s, p, o)| !(s == &subject && p == &predicate && o == &object));
-            Ok(())
+            let mut triples = state.triples.borrow_mut();
+            let before = triples.len();
+            triples.retain(|(s, p, o)| !(s == &subject && p == &predicate && o == &object));
+            Ok(triples.len() != before)
         })
     }
 }

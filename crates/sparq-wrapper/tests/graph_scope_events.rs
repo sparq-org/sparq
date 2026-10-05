@@ -148,3 +148,23 @@ fn absent_graphs_are_not_created_and_literal_subjects_are_rejected() {
     assert!(seen.borrow().is_empty());
     assert!(dataset.into_graph().named.is_empty());
 }
+
+#[test]
+fn literal_graph_names_are_rejected_before_a_graph_is_created() {
+    let mut dataset = ObservableDataset::new();
+    let seen = record(&mut dataset, Projection::new([graph_term("g1")]));
+    let literal_name = Term::Literal(Literal::new_simple_literal("g"));
+    let value = Literal::new_simple_literal("v");
+
+    let rejected = Err(ObserveError::InvalidGraphName(literal_name.clone()));
+    assert_eq!(
+        dataset.insert(Some(&literal_name), iri("alice"), iri("tag"), value.clone()),
+        rejected
+    );
+    assert_eq!(
+        dataset.remove(Some(&literal_name), iri("alice"), iri("tag"), value),
+        rejected
+    );
+    assert!(dataset.graph().named.is_empty());
+    assert!(seen.borrow().is_empty());
+}

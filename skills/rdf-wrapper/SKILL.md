@@ -117,7 +117,9 @@ async ecosystem forwards to its own stream in one line. A `!Unpin` backend
 stream should be exposed as `Pin<Box<S>>`, which implements `TermStream`.
 `add`/`has`/`delete` validate the subject position synchronously (a literal
 subject is rejected before the backend is asked to do anything) and return the
-backend future, so the call site reads `store.add(s, p, o)?.await?`.
+backend future, so the call site reads `store.add(s, p, o)?.await?`. `add` /
+`delete` resolve to whether that write changed the store; a backend must decide
+this atomically with the write, not from an earlier `has`.
 <!-- [SONNET-4.6] sq-1rg2q.8 -->
 
 `proposed-async-node` adds `sparq_wrapper::proposed::async_node`, the async
@@ -129,15 +131,17 @@ result set is dropped, and `CardinalityError::found` is then the lower bound
 identity stays synchronous and the mapped node can keep traversing.
 `live_set(&store, focus, p, decode, encode)` returns an `AsyncLiveSet` whose
 `values` / `contains` / `insert` / `remove` await the backend on every call;
-`insert` / `remove` return `true` only for an effective change (presence check
-then write, not atomic against other writers). Errors are `AsyncMapError`
+`insert` / `remove` return `true` only for an effective change, as reported by
+the backend's atomic write, so the result holds against other writers. Errors are `AsyncMapError`
 (`Store`, `Cardinality`, `Conversion`). <!-- sq-1rg2q.9 -->
 
 `proposed-async-events` adds `proposed::async_events::AsyncObservableStore`
 (rdfjs/wrapper draft PR #99). `subscribe(|event| async move { .. })` registers
 a listener returning a future; an effective `add` / `delete` awaits each
 listener in subscription order and resolves only after the last one finishes.
-Duplicate adds and absent deletes perform no write and notify nobody. Writes
+The change report comes from the backend write itself, so duplicate adds and
+absent deletes notify nobody even when other wrappers or clients share the
+backend and win a race to the same change. Writes
 made through `store()` or the backend bypass listeners. Listener futures are
 not `Send`, matching the executor-free async surface.
 <!-- sq-1rg2q.10 -->
@@ -167,7 +171,9 @@ exactly the named graphs supplied to `GraphScope::new`; call
 `with_default_graph()` to include the default graph explicitly. Scoped nodes
 retain the projection for chained `out`/`in` traversal, while node- or
 scope-level `insert`/`remove` operations affect only the configured named write
-graph and leave copies elsewhere untouched. <!-- [GPT-5.6] sq-1rg2q.6 -->
+graph and leave copies elsewhere untouched. The write graph must be an IRI or a
+blank node; otherwise writes fail with `GraphScopeError::InvalidGraphName`
+before any graph is created. <!-- sq-1rg2q.6 -->
 
 ```rust
 use oxrdf::{Literal, NamedNode, Term};
@@ -200,7 +206,9 @@ it owns a dataset, mutates quads with `insert(graph, s, p, o)` /
 `subscribe(projection, |event, projection, committed| ..)` reports the
 projected union change — an add only for the first in-scope copy of a triple,
 a delete only for the last, nothing for graphs outside the projection.
-Removing from an absent named graph is a no-op that does not create it.
+Removing from an absent named graph is a no-op that does not create it. A
+named graph must be an IRI or a blank node; any other name fails with
+`ObserveError::InvalidGraphName` before a graph is created.
 <!-- sq-1rg2q.7 -->
 
 ```rust

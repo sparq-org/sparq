@@ -3,10 +3,16 @@
 //! [`AsyncObservableStore`] is the asynchronous sibling of
 //! [`ObservableStore`](super::observe::ObservableStore), following the
 //! still-unlanded rdfjs/wrapper async events proposal in draft PR #99. A
-//! mutation future first checks presence, then performs the backend write,
-//! then awaits each listener's future in subscription order; it resolves only
-//! after the last listener has finished. A duplicate add or an absent delete
-//! performs no write and notifies nobody.
+//! mutation future performs the backend write, which reports whether it
+//! changed the store, and only for a change awaits each listener's future in
+//! subscription order; it resolves only after the last listener has finished.
+//! A duplicate add or an absent delete notifies nobody.
+//!
+//! The change report comes from the backend write itself (see
+//! [`AsyncStoreBackend`]), not from a separate presence check, so the
+//! effective-change guarantee also holds when several wrappers or other
+//! clients share one backend: of two racing identical writes, only the one
+//! that changed the store reports `true` and notifies.
 //!
 //! Listener futures are boxed without a `Send` bound, matching the crate's
 //! executor-free, single-threaded async surface.
@@ -110,17 +116,13 @@ impl<B: AsyncStoreBackend> AsyncObservableStore<B> {
         predicate: NamedNode,
         object: Term,
     ) -> Result<bool, AsyncStoreError> {
-        let store = &self.store;
-        let present = store
-            .has(subject.clone(), predicate.clone(), object.clone())?
-            .await?;
-        if !kind.is_effective(present) {
-            return Ok(false);
-        }
         let (s, p, o) = (subject.clone(), predicate.clone(), object.clone());
-        match kind {
-            ChangeKind::Add => store.add(s, p, o)?.await?,
-            ChangeKind::Delete => store.delete(s, p, o)?.await?,
+        let changed = match kind {
+            ChangeKind::Add => self.store.add(s, p, o)?.await?,
+            ChangeKind::Delete => self.store.delete(s, p, o)?.await?,
+        };
+        if !changed {
+            return Ok(false);
         }
 
         let event = ChangeEvent {

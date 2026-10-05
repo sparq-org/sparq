@@ -183,3 +183,52 @@ fn backend_and_subject_errors_surface_as_store_errors() {
         "RDF literals cannot be triple subjects"
     );
 }
+
+#[test]
+fn live_set_reports_only_the_change_its_own_write_made() {
+    use std::future::Future;
+    use std::pin::pin;
+    use std::rc::Rc;
+    use std::sync::Arc;
+    use std::task::{Context, Waker};
+
+    let (state, store) = delayed_store(2);
+    let other = AsyncStore::new(FakeStore {
+        state: Rc::clone(&state),
+        delay: 0,
+    });
+    let tag = iri("tag");
+    let tags = live_set(
+        &store,
+        iri("alice"),
+        tag.clone(),
+        |node: AsyncNode<'_, FakeStore>| Ok::<_, ()>(node.into_term()),
+        |value: &Term| Ok::<_, ()>(value.clone()),
+    );
+    let waker = Waker::from(Arc::new(common::TestWaker::default()));
+    let mut cx = Context::from_waker(&waker);
+
+    for inserting in [true, false] {
+        let rdf = literal("rdf");
+        let mut pending = pin!(async {
+            if inserting {
+                tags.insert(&rdf).await
+            } else {
+                tags.remove(&rdf).await
+            }
+        });
+        // Suspend inside the live set's own write, then let another client of
+        // the same backend make the identical change first.
+        let issued = state.writes_issued.get();
+        while state.writes_issued.get() == issued {
+            assert!(pending.as_mut().poll(&mut cx).is_pending());
+        }
+        let raced = if inserting {
+            other.add(iri("alice"), tag.clone(), rdf.clone())
+        } else {
+            other.delete(iri("alice"), tag.clone(), rdf.clone())
+        };
+        assert_eq!(block_on(raced.unwrap()), Ok(true));
+        assert_eq!(block_on(pending), Ok(false), "inserting: {inserting}");
+    }
+}

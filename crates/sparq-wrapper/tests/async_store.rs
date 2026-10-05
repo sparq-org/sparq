@@ -146,12 +146,18 @@ fn async_add_has_delete_round_trip() {
     )
     .unwrap());
 
-    block_on(
+    assert!(block_on(
         store
             .add(alice.clone(), knows.clone(), bob.clone())
             .unwrap(),
     )
-    .unwrap();
+    .unwrap());
+    assert!(!block_on(
+        store
+            .add(alice.clone(), knows.clone(), bob.clone())
+            .unwrap(),
+    )
+    .unwrap());
     assert!(block_on(
         store
             .has(alice.clone(), knows.clone(), bob.clone())
@@ -160,12 +166,18 @@ fn async_add_has_delete_round_trip() {
     .unwrap());
     assert_eq!(state.triples.borrow().len(), 1);
 
-    block_on(
+    assert!(block_on(
         store
             .delete(alice.clone(), knows.clone(), bob.clone())
             .unwrap(),
     )
-    .unwrap();
+    .unwrap());
+    assert!(!block_on(
+        store
+            .delete(alice.clone(), knows.clone(), bob.clone())
+            .unwrap(),
+    )
+    .unwrap());
     assert!(!block_on(store.has(alice, knows, bob).unwrap()).unwrap());
     assert!(state.triples.borrow().is_empty());
 }
