@@ -77,6 +77,7 @@ def _load(name: str, filename: str):
 
 
 gate = _load("check_install_action_tool", "check-install-action-tool.py")
+run_parser = _load("check_advisory_registry", "check-advisory-registry.py")
 
 
 def _code_lines(text: str) -> list[str]:
@@ -202,16 +203,39 @@ class JsLaneWasmPackInstall(unittest.TestCase):
             "— a second rate-limit-flake source (sq-khm3f).",
         )
 
-    def test_install_precedes_npm_ci(self):
-        """(4) `prepare` runs on `npm ci` and needs wasm-pack already on PATH."""
+    def _assert_install_precedes_root_npm_ci(self, text: str):
+        # [GPT-6 ASTRA] Inspect step commands, including literal run blocks. A prose
+        # mention or a command in a different working directory is not the install.
+        steps = gate.split_steps(text)
         install_at = [
-            i for i, ln in enumerate(self.code) if WASM_PACK_ACTION in ln
+            i for i, block in enumerate(steps)
+            if (gate._step_uses(block) or (None,))[0] == WASM_PACK_ACTION
         ]
-        npm_ci_at = [
-            i
-            for i, ln in enumerate(self.code)
-            if re.match(r"^\s*run:\s*npm ci\s*$", ln)
-        ]
+        npm_ci_at = []
+        for i, block in enumerate(steps):
+            direct = [
+                line.strip() for line in block
+                if gate._indent(line) == gate._indent(block[0]) + 2
+            ]
+            run_values = [line.split(":", 1)[1].strip() for line in direct
+                          if line.startswith("run:")]
+            # The shared extractor reads physical lines; folded YAML can join
+            # commands. Accept the inline/literal forms whose ordering we inspect.
+            if len(run_values) != 1 or run_values[0].startswith(">"):
+                continue
+            commands = run_parser.extract_run_commands("\n".join(block))
+            if len(commands) != 1:
+                continue
+            lines = [line.strip() for line in commands[0].splitlines() if line.strip()]
+            if not lines or lines[0] != "npm ci":
+                continue
+            # The job defaults to js/. Require the existing explicit root override,
+            # not an unrelated nested key or a later `cd` after npm has already run.
+            cwd = [
+                line for line in direct if line.startswith("working-directory:")
+            ]
+            self.assertEqual(cwd, ["working-directory: ."])
+            npm_ci_at.append(i)
         self.assertEqual(len(install_at), 1, "one wasm-pack install step expected")
         self.assertTrue(npm_ci_at, "js.yml must still run the root `npm ci`")
         self.assertLess(
@@ -221,6 +245,56 @@ class JsLaneWasmPackInstall(unittest.TestCase):
             "lifecycle (sq-bkag) runs on `npm ci` and compiles the wasm engine with "
             "wasm-pack from PATH.",
         )
+
+    def test_install_precedes_npm_ci(self):
+        """(4) `prepare` runs on `npm ci` and needs wasm-pack already on PATH."""
+        self._assert_install_precedes_root_npm_ci(self.text)
+
+    def test_root_install_inline_and_block_forms(self):
+        for run in (
+            "run: npm ci",
+            "run: |\n          # install first\n          npm ci\n          npm ls next",
+        ):
+            with self.subTest(run=run):
+                self._assert_install_precedes_root_npm_ci(self._install_fixture(run))
+
+    def test_root_install_missing_or_wrong_command_is_rejected(self):
+        for run in (
+            "run: echo skipped",
+            "run: |\n          # npm ci\n          echo skipped",
+            "run: npm install",
+            'run: echo "npm ci"',
+            "run: >\n          npm ci\n          npm ls next",
+        ):
+            with self.subTest(run=run), self.assertRaises(AssertionError):
+                self._assert_install_precedes_root_npm_ci(self._install_fixture(run))
+
+    def test_root_install_wrong_or_missing_directory_is_rejected(self):
+        text = self._install_fixture("run: npm ci")
+        for replacement in (
+            "working-directory: js", "env:\n          working-directory: .", "",
+        ):
+            with self.subTest(replacement=replacement), self.assertRaises(AssertionError):
+                self._assert_install_precedes_root_npm_ci(
+                    text.replace("working-directory: .", replacement)
+                )
+
+    def test_npm_ci_before_wasm_pack_is_rejected(self):
+        text = self._install_fixture("run: npm ci")
+        blocks = gate.split_steps(text)
+        with self.assertRaises(AssertionError):
+            self._assert_install_precedes_root_npm_ci("\n".join(blocks[1] + blocks[0]))
+
+    @staticmethod
+    def _install_fixture(run: str) -> str:
+        return f"""jobs:
+  js:
+    steps:
+      - uses: {WASM_PACK_ACTION}@0d096b08b4e5a7de8c28de67e11e945404e9eefa
+      - name: Install npm dependencies
+        working-directory: .
+        {run}
+"""
 
 
 def _step_version(block: list[str]) -> str:
