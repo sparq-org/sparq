@@ -11755,10 +11755,13 @@ fn order_bindings(
                 return Ok(sort_cell_val(Value::Term(term)));
             }
         }
-        Ok(match eval_compiled_numeric(graph, local, row, e) {
-            Some(n) => sort_cell_val(Value::Num(Num::Double(n))),
-            None => sort_cell_val(eval_compiled(graph, local, b, row, e)?),
-        })
+        // A computed key (arithmetic, a BIND-computed local value, any other expression)
+        // keeps its EXACT value: an `f64` fast path here collapsed integers beyond 2^53 and
+        // high-precision decimals into one tie, kept their input order, and turned an
+        // integer/decimal division by zero (a type error, so an unbound key) into infinity.
+        // The exact `Value` is ordered by `compare_values`, which already rechecks numeric
+        // ties exactly — the same order `cmp_expr` and MIN/MAX give (#3198).
+        Ok(sort_cell_val(eval_compiled(graph, local, b, row, e)?))
     };
     // The sort key (vector of (descending, SortCell)) for one row.
     let key_of = |row: &Row| -> Result<Vec<(bool, SortCell)>, String> {
