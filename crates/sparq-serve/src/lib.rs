@@ -18,7 +18,7 @@ mod applier;
 /// policy]; the formal freeze is **pending maintainer ratification on #1248** (see the module
 /// docs), not unilaterally frozen here. Thin re-exports only; no new behaviour.
 ///
-/// [API stability policy]: https://github.com/jeswr/sparq/blob/main/docs/api-stability.md
+/// [API stability policy]: https://github.com/sparq-org/sparq/blob/main/docs/api-stability.md
 pub mod embed;
 /// [OPUS-4.8] (sq-o5bi) ONLINE consistent-snapshot backup + restore for the serving store
 /// — export an already-immutable pinned [`Generation`] to a single self-describing artifact

@@ -57,7 +57,7 @@ cargo run --release -p sparq-cli -- query data.ttl turtle 'SELECT * WHERE { ?s ?
   opt-in-by-default principle. It stays toggleable: `--no-default-features --features mmap,mimalloc,dict-spill`
   drops the `oxjsonld` parser (and a `jsonld` input then errors, exit 2). What is default-on now:
   JSON-LD **parse + serialise + full 1.1 Compaction/Framing**; full conneg-conformance ratcheting
-  is on the [sq-oy1f](https://github.com/jeswr/sparq/issues/757) roadmap.
+  is on the [sq-oy1f](https://github.com/sparq-org/sparq/issues/757) roadmap.
 - **`--reason <rdfs|owl-rl|n3>`** — opt-in forward-chaining materialization before query.
 - **`--reason datalog:<rules.dlog>`** *(opt-in `datalog`; [SONNET-4.6] sq-p4zci)* — run a **stratified Datalog** program
   over the parsed triples, then query the closure: negation as failure + `AGGREGATE`/`FILTER`, which monotone RDFS/OWL-RL

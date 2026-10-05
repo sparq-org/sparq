@@ -34,7 +34,7 @@ audited** (external cryptographer sign-off pending, bead `sq-qhy4`).
 ## 1. What actually ships (verified inventory)
 
 Five wasm crates exist. `sparq-wasm` is the main store+engine bundle published
-as `@jeswr/sparq` (built by `js/package.json` `build:wasm{,:lean}`:
+as `@sparq-org/sparq` (built by `js/package.json` `build:wasm{,:lean}`:
 `wasm-pack build --target web --profile release-wasm`, features
 `shacl,jsonld,serialize-rdf,scs,canon` on the published build, none on the lean
 one). `sparq-reason-wasm`, `sparq-rsp-wasm`, `sparq-shacl-wasm`,

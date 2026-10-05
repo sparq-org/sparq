@@ -22,28 +22,32 @@ jobs:
       REPO: ${{ github.repository }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      # [OPUS-5] #5425: self-test FIRST, so a regression in the promotion predicate or in the
+      # quarantine fetch reds this run before it can write a label. The same self-test also runs
+      # at PR time in docs-quality.yml (a cron-only self-test validates the default-branch copy
+      # long after the change merged).
+      - name: Self-test promotion predicate + quarantine fetch
+        run: python3 scripts/promote.py --self-test
       - name: Poll quarantined issues for maintainer approval
         run: |
           python3 - <<'PY'
-          import json, os, subprocess, datetime, sys
+          import json, os, subprocess, sys
           sys.path.insert(0, "scripts")
-          from promote import should_promote
+          from promote import epoch, fetch_quarantined, should_promote
           from triage import triage
           REPO = os.environ["REPO"]
 
           def gh(*a):
               return subprocess.run(["gh", *a], capture_output=True, text=True)
 
-          def epoch(ts):
-              return int(datetime.datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()) if ts else 0
-
           def perm(user):
               r = gh("api", f"repos/{REPO}/collaborators/{user}/permission", "--jq", ".permission")
               return r.stdout.strip() if r.returncode == 0 else "none"
 
-          issues = json.loads(gh("issue", "list", "-R", REPO, "--label", "trust:untrusted",
-                                 "--state", "open", "--limit", "200",
-                                 "--json", "number,updatedAt,labels").stdout or "[]")
+          # `gh issue list --limit 200` SILENTLY truncated this queue: past 200 the OLDEST
+          # quarantined issues were never polled and stayed quarantined forever (#5425).
+          issues = fetch_quarantined(REPO)
+          print(f"polling {len(issues)} quarantined issue(s)")
           for it in issues:
               n = it["number"]
               rx = json.loads(gh("api", f"repos/{REPO}/issues/{n}/reactions").stdout or "[]")

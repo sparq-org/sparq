@@ -277,7 +277,7 @@ the GUI shares from:
   HTTP) link the engine library crates (`sparq-core`, `sparq-engine`, …) directly, with
   `rayon` threads, `mmap`, and `save`/`open` persistence on natively.
 - **WASM**: `crates/sparq-wasm` (`crate-type = ["cdylib","rlib"]`, `wasm-bindgen 0.2`),
-  built by `js/`'s `wasm-pack build --target web` into the npm package `@jeswr/sparq`.
+  built by `js/`'s `wasm-pack build --target web` into the npm package `@sparq-org/sparq`.
   The site default bundle is built `--features shacl,jsonld` (`js/package.json:37`). Four
   satellite WASM bundles exist (`crates/sparq-{reason,rsp,text,shacl}-wasm`) and prove the
   "one feature, one bundle" pattern.
@@ -705,7 +705,7 @@ e. **Drag-drop / import Verifiable Credentials and query over them (`sq-3p0z`, #
 
 ```text
 packages/sparq-client/   # SHIPPED shared TS pkg: the ONE WasmStore type + loaders + endpoint client
-js/                      # @jeswr/sparq — npm wrapper; consumes @sparq/client
+js/                      # @sparq-org/sparq — npm wrapper; consumes @sparq/client
 site/                    # Next.js site — consumes @sparq/client
 gui/                     # SHIPPED Tauri 2 scaffold: frontend consumes @sparq/client;
                          #   gui/src-tauri/ is the Rust shell linking sparq-engine; gui/e2e/ is the e2e pkg
@@ -802,7 +802,7 @@ matrix rather than inventing a pipeline:
 
 - **Foundation exists**: the workspace is single-version —
   `[workspace.package] version = "0.1.0"` (`Cargo.toml:18`), and `crates/sparq-wasm`
-  uses `version.workspace = true`. `@jeswr/sparq` (`js/package.json`) and the site are also
+  uses `version.workspace = true`. `@sparq-org/sparq` (`js/package.json`) and the site are also
   at `0.1.0`. Lockstep is the current de-facto model.
 - **Proposed policy**: the `gui/src-tauri` crate inherits the workspace version via
   `version.workspace = true` (exactly like `sparq-wasm`), and the GUI's `package.json`

@@ -97,7 +97,7 @@ grep -nE 'provenance:|sbom:|attest-build-provenance' .github/workflows/release.y
 #  release.yml: archives + SBOM also actions/attest-build-provenance (SLSA)
 ```
 
-The pushed `ghcr.io/jeswr/sparq-server` carries max-mode SLSA provenance + an embedded SBOM,
+The pushed `ghcr.io/sparq-org/sparq-server` carries max-mode SLSA provenance + an embedded SBOM,
 verifiable with `gh attestation verify` / cosign. → D-4.5.
 
 ## E-7 — Image boots + serves (the existing smoke gate; NOT a CVE scan)

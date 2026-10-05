@@ -1,7 +1,7 @@
 # Design — ODRL evaluation as N3 inference rules, with build-time rule compilation
 
 > 🤖 **SPARQ agent** — decomposition design record for maintainer issue
-> [#1582](https://github.com/jeswr/sparq/issues/1582) (epic `sq-zgbso`). [FABLE-5]
+> [#1582](https://github.com/sparq-org/sparq/issues/1582) (epic `sq-zgbso`). [FABLE-5]
 > DESIGN only: this PR changes no crate code. It verifies the issue's premise against the
 > actual code, states the feasibility envelope honestly, and decomposes the work into
 > measurement-gated child beads (`sq-zgbso.1`–`.6`).
@@ -296,7 +296,7 @@ as **non-canonical** ratios; nothing lands in docs, tests, or `bench/perf-baseli
 
 ## 8. Pointers
 
-- Issue: <https://github.com/jeswr/sparq/issues/1582> · Epic bead: `sq-zgbso` · Children: `sq-zgbso.1`–`.6`
+- Issue: <https://github.com/sparq-org/sparq/issues/1582> · Epic bead: `sq-zgbso` · Children: `sq-zgbso.1`–`.6`
 - Estate: `crates/sparq-solid/rules/*.n3`, `crates/sparq-solid/src/{materialize,loader,odrl_bridge,authindex}.rs`,
   `crates/sparq-policy/src/{eval,compare,model,parse}.rs`, `crates/sparq-reason/src/n3/`,
   `crates/sparq-substrate`, `crates/sparq-reason/src/substrate_join.rs`

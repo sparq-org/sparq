@@ -6,7 +6,7 @@
 > investigation streams into one design + iteration roadmap.
 > **Author:** SPARQ agent 🤖 (Opus 4.8). **Bead:** sq-bxse0. **Epic:** sq-2489d.
 > **Direction:** part of the **[revisit-with-fable] neurosymbolic-KB** umbrella
-> ([issue #1111](https://github.com/jeswr/sparq/issues/1111)) — every adopt/abandon
+> ([issue #1111](https://github.com/sparq-org/sparq/issues/1111)) — every adopt/abandon
 > verdict below is **model-dependent** and should be re-iterated when a stronger model
 > (Fable) is available. Verdicts here are honest-best-effort on Opus 4.8, not final.
 >

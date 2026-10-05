@@ -145,11 +145,11 @@ image), not flagged as a gap today.
 - **`sparq-cli` per-tier archives** — `tar.gz` (non-Windows) / `zip` (Windows), each
   containing the binary + `README.md` + `LICENSE` (now present at repo root) + `CHANGELOG.md`.
 - **`SHA256SUMS`** over every archive, plus a GitHub Release with auto-notes.
-- **`ghcr.io/jeswr/sparq-server` container** (`{X.Y.Z, X.Y, latest}`), smoke-tested +
+- **`ghcr.io/sparq-org/sparq-server` container** (`{X.Y.Z, X.Y, latest}`), smoke-tested +
   Trivy-scanned before push, with max-mode SLSA provenance + embedded SBOM. **This is the
   only place the `sparq-server` binary ships.**
 - **CycloneDX SBOM per binary + JS/npm SBOM + VEX**, SLSA-attested.
-- Out-of-band via `publish.yml`: crates.io libraries, npm `@jeswr/sparq` (WASM), PyPI
+- Out-of-band via `publish.yml`: crates.io libraries, npm `@sparq-org/sparq` (WASM), PyPI
   `sparq-rdf` wheels (Section 5).
 
 ### 3c. What is NOT produced — gaps and their classification
@@ -187,7 +187,7 @@ different things:
 
 - **A bound library artifact (feasible, small-to-moderate, no credentials to *build*).**
   The engine already compiles to `wasm32-unknown-unknown` and is wrapped as a `cdylib` for
-  JS (`crates/sparq-wasm` → npm `@jeswr/sparq`) and Python (`crates/sparq-py` → PyPI
+  JS (`crates/sparq-wasm` → npm `@sparq-org/sparq`) and Python (`crates/sparq-py` → PyPI
   `sparq-rdf` via pyo3/maturin). Native Android (`.so` + JNI/Kotlin via cargo-ndk) and iOS
   (`.xcframework` + Swift) bindings are the **same cdylib recipe** pointed at a mobile
   triple — feasible, but **absent today**. Two caveats: (i) iOS forbids dynamically
@@ -215,10 +215,10 @@ artifact requires the GUI epic.*
 |---|---|---|
 | `sparq-cli` per-tier archives (all 10 tiers) | shipping (`release.yml`) | feasible-now |
 | `SHA256SUMS` + GitHub Release + auto-notes | shipping | feasible-now |
-| `ghcr.io/jeswr/sparq-server` container | shipping | feasible-now |
+| `ghcr.io/sparq-org/sparq-server` container | shipping | feasible-now |
 | CycloneDX SBOM (Rust + JS) + VEX, SLSA-attested | shipping | feasible-now |
 | crates.io libraries | shipping (`publish.yml`) | feasible-now (needs crates.io login secret) |
-| npm `@jeswr/sparq` (WASM) w/ Sigstore provenance | shipping (`publish.yml`) | feasible-now (needs `NPM_TOKEN`) |
+| npm `@sparq-org/sparq` (WASM) w/ Sigstore provenance | shipping (`publish.yml`) | feasible-now (needs `NPM_TOKEN`) |
 | PyPI `sparq-rdf` wheels w/ PEP-740 attestations | shipping (`publish.yml`) | feasible-now (needs PyPI Trusted-Publisher registration) |
 | `sparq-server` native binary archive | **missing** | feasible-now gap |
 | `.deb` / `.rpm` / `.msi` / `.dmg` installers | absent | aspirational |

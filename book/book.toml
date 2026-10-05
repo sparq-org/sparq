@@ -32,7 +32,7 @@ create-missing = false
 # The canonical README.md / SKILL.md keep REPO-RELATIVE per-surface guide links
 # (required by the lychee internal-links gate); when those are {{#include}}d into a
 # chapter, mdBook would resolve them against the page mount and 404 under Pages. This
-# preprocessor rewrites such links to https://github.com/jeswr/sparq/blob/main/... so
+# preprocessor rewrites such links to https://github.com/sparq-org/sparq/blob/main/... so
 # the single-sourced content renders correctly under the mdBook mount. The command is
 # resolved relative to the dir `mdbook` runs in (the repo root: `mdbook build book`).
 # Run after the built-in `links` preprocessor so it sees the post-{{#include}} text.
@@ -55,7 +55,7 @@ after = ["links"]
 # render to; scripts/check-guide-publish-wiring.py gates that the two cannot drift apart.
 site-url = "/guide/"
 # git-repository links are absolute, so they keep working regardless of mount point.
-git-repository-url = "https://github.com/jeswr/sparq"
-edit-url-template = "https://github.com/jeswr/sparq/edit/main/book/{path}"
+git-repository-url = "https://github.com/sparq-org/sparq"
+edit-url-template = "https://github.com/sparq-org/sparq/edit/main/book/{path}"
 default-theme = "rust"
 preferred-dark-theme = "ayu"

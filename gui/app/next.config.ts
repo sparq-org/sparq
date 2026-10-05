@@ -35,7 +35,7 @@ const nextConfig: NextConfig = {
   trailingSlash: true,
   // Static export cannot run the Next.js image optimiser.
   images: { unoptimized: true },
-  // The @jeswr/sparq wrapper ships ESM with `.js` import specifiers that resolve to `.ts`/`.tsx`
+  // The @sparq-org/sparq wrapper ships ESM with `.js` import specifiers that resolve to `.ts`/`.tsx`
   // sources; mirror the site's webpack alias so the bundler follows them.
   webpack: (config) => {
     config.resolve.extensionAlias = {

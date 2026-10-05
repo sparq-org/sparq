@@ -22,6 +22,32 @@
 //! A `NotFound` reading an ACL is the COMMON case (most resources inherit) → "no own ACL, keep
 //! walking". Any OTHER store error (a transient backend failure) PROPAGATES — it must never be
 //! silently treated as "no ACL" (that would fail OPEN by skipping a real ACL).
+//!
+//! ## `acl:agentGroup` membership
+//! A rule may name a group instead of an agent. Because the pure matcher in [`super::acl`] does no
+//! I/O, this authorizer resolves membership first and hands the VERIFIED groups to the matcher:
+//! after the effective ACL is resolved, [`super::acl::agent_group_iris`] names the groups that could
+//! still change the outcome; each group's document (the group IRI minus its fragment) is read
+//! THROUGH the same [`Store`] seam and tested for `<group> vcard:hasMember <webid>`. Everything
+//! about the path is fail-closed and it can only ever WIDEN a grant on a positive, resolved
+//! membership:
+//!  - an ACL naming no applicable group does ZERO extra I/O — the decision is bit-for-bit the
+//!    pre-group one, so ordinary requests are untouched;
+//!  - an anonymous requester is never resolved (a `vcard:hasMember` can only name a WebID);
+//!  - a MISSING group document, a malformed one (it parses to an empty triple set, exactly as a
+//!    malformed ACL does), or one that simply does not list the requester ⇒ no membership;
+//!  - a group document on ANOTHER origin is left UNRESOLVED rather than fetched — this engine reads
+//!    only through the `Store` (the pod's own resources) and performs no request-driven outbound
+//!    HTTP, so a remote group grants nothing;
+//!  - at most [`MAX_GROUP_DOCUMENTS`] distinct documents are read per decision;
+//!  - the group document is read with SERVER authority (no nested WAC decision), exactly as the
+//!    `.acl` itself is. That is not a read primitive handed to the requester: the ACL author — who
+//!    holds `acl:Control` — chooses both the document and the group IRI, no document content is
+//!    returned, and the only fact that can reach the decision is whether that document says
+//!    `<group> vcard:hasMember <the requester's own WebID>`;
+//!  - any OTHER store error PROPAGATES, exactly as for an ACL read — a transient backend failure
+//!    must not be silently read as "not a member" (it is not evidence either way), so the request
+//!    fails rather than quietly deciding on an incomplete membership picture.
 
 use std::collections::BTreeSet;
 
@@ -30,7 +56,10 @@ use crate::error::ServerError;
 use crate::ldp::content::{classify, parse_to_triples, RdfFormat};
 use crate::store::Store;
 
-use super::acl::{modes_for, satisfies, AclScope, Requester};
+use super::acl::{
+    agent_group_iris, group_document_iri, group_has_member, modes_for, satisfies, AclScope,
+    Requester,
+};
 use super::mode::{is_acl_resource, AccessMode, ACL_SUFFIX};
 use super::wac_allow::EffectivePermissions;
 
@@ -103,7 +132,29 @@ impl ResolvedAcl {
             None => BTreeSet::new(),
         }
     }
+
+    /// The `acl:agentGroup` IRIs this resolution's applicable rules name for `requester` — the groups
+    /// whose documents must be read before matching (see [`agent_group_iris`]). Empty for an
+    /// unresolved ACL, an anonymous requester, or — the common case — an ACL naming no group, in
+    /// which case the caller does no group I/O at all.
+    fn agent_group_iris(&self, requester: &Requester<'_>) -> Vec<String> {
+        match &self.parsed {
+            Some((triples, base, scope)) => agent_group_iris(triples, base, requester, *scope)
+                .into_iter()
+                .map(str::to_owned)
+                .collect(),
+            None => Vec::new(),
+        }
+    }
 }
+
+/// The maximum number of DISTINCT group documents ONE authorization decision will read while
+/// resolving `acl:agentGroup` membership.
+///
+/// An `.acl` is written by the resource owner, so without a cap an ACL naming hundreds of groups
+/// would turn a single request into that many store reads. Groups beyond the cap are left
+/// UNRESOLVED, so they never match — the cap can only ever withhold a grant, never create one.
+pub const MAX_GROUP_DOCUMENTS: usize = 16;
 
 /// The Web Access Control authorizer over a [`Store`] and the server base URL.
 ///
@@ -161,8 +212,7 @@ impl<'a, S: Store> WacAuthorizer<'a, S> {
         origin: Option<&str>,
     ) -> Result<Decision, ServerError> {
         let protected = self.protected_resource(target);
-        let requester = Requester { web_id, origin };
-        let granted = self.effective_modes(&protected, &requester).await?;
+        let granted = self.effective_modes(&protected, web_id, origin).await?;
 
         if satisfies(&granted, required) {
             return Ok(Decision::Allow(granted));
@@ -206,9 +256,9 @@ impl<'a, S: Store> WacAuthorizer<'a, S> {
         let resolved = self
             .resolve_effective_acl_planned(candidates, plan_acls)
             .await?;
-        // From here the logic is byte-identical to `authorize` (the same modes_for + satisfies +
-        // 401/403 split over the same `ResolvedAcl` shape).
-        let granted = resolved.modes_for(&Requester { web_id, origin });
+        // From here the logic is byte-identical to `authorize` (the same modes_with_groups +
+        // satisfies + 401/403 split over the same `ResolvedAcl` shape).
+        let granted = self.modes_with_groups(&resolved, web_id, origin).await?;
         if satisfies(&granted, required) {
             return Ok(Decision::Allow(granted));
         }
@@ -264,8 +314,10 @@ impl<'a, S: Store> WacAuthorizer<'a, S> {
         // re-walks/re-reads/re-parses the same `.acl` for its public set (the roborev finding).
         let resolved = self.resolve_effective_acl(&protected).await?;
 
-        // 1) The requester's modes — the gate input AND the `WAC-Allow` `user` audience.
-        let user = resolved.modes_for(&Requester { web_id, origin });
+        // 1) The requester's modes — the gate input AND the `WAC-Allow` `user` audience. Any
+        //    `acl:agentGroup` membership the resolved rules need is resolved here (and ONLY when
+        //    such a rule exists — see `modes_with_groups`).
+        let user = self.modes_with_groups(&resolved, web_id, origin).await?;
 
         // 2) The access decision — identical to `authorize`: a permitted read requires the resolved
         //    set to `satisfy` the required mode; a denial is 401 (anonymous) / 403 (authenticated).
@@ -281,13 +333,15 @@ impl<'a, S: Store> WacAuthorizer<'a, S> {
         //    requester (it IS the public — no extra evaluation); else a second rule-match (NOT a
         //    second walk/read/parse) against the origin-scoped public requester — identical RESULT to
         //    `effective_permissions`, preserving `acl:origin` semantics, at the cost of only the pure
-        //    `modes_for` over the already-parsed triples.
+        //    `modes_for` over the already-parsed triples. Still no group I/O: the public has no
+        //    WebID, so no `acl:agentGroup` rule can name it (`groups` stays empty — fail-closed).
         let public = if web_id.is_none() {
             user.clone()
         } else {
             resolved.modes_for(&Requester {
                 web_id: None,
                 origin,
+                groups: &[],
             })
         };
         Ok(ReadDecision::Allow(EffectivePermissions { user, public }))
@@ -364,8 +418,8 @@ impl<'a, S: Store> WacAuthorizer<'a, S> {
             .await?;
 
         // From here the logic is byte-identical to `authorize_read` (the same steps 1–3 over the
-        // same `ResolvedAcl` shape).
-        let user = resolved.modes_for(&Requester { web_id, origin });
+        // same `ResolvedAcl` shape), including the `acl:agentGroup` resolution.
+        let user = self.modes_with_groups(&resolved, web_id, origin).await?;
         if !satisfies(&user, required) {
             return Ok(if web_id.is_none() {
                 ReadDecision::Unauthenticated
@@ -379,6 +433,7 @@ impl<'a, S: Store> WacAuthorizer<'a, S> {
             resolved.modes_for(&Requester {
                 web_id: None,
                 origin,
+                groups: &[],
             })
         };
         Ok(ReadDecision::Allow(EffectivePermissions { user, public }))
@@ -512,10 +567,7 @@ impl<'a, S: Store> WacAuthorizer<'a, S> {
 
         let user = match user_modes {
             Some(m) => m,
-            None => {
-                self.effective_modes(&protected, &Requester { web_id, origin })
-                    .await?
-            }
+            None => self.effective_modes(&protected, web_id, origin).await?,
         };
         // The public set: for an anonymous requester it EQUALS user (an anonymous requester IS the
         // public); for an authenticated requester it is resolved independently against the public —
@@ -530,14 +582,7 @@ impl<'a, S: Store> WacAuthorizer<'a, S> {
         let public = if web_id.is_none() {
             user.clone()
         } else {
-            self.effective_modes(
-                &protected,
-                &Requester {
-                    web_id: None,
-                    origin,
-                },
-            )
-            .await?
+            self.effective_modes(&protected, None, origin).await?
         };
         Ok(EffectivePermissions { user, public })
     }
@@ -547,17 +592,113 @@ impl<'a, S: Store> WacAuthorizer<'a, S> {
     /// (fail-closed).
     ///
     /// Implemented as resolve-once ([`resolve_effective_acl`](Self::resolve_effective_acl)) + evaluate
-    /// the requester ([`ResolvedAcl::modes_for`]) — so a caller that needs SEVERAL audiences over the
-    /// same resource (e.g. the read path's `user` + `public`) can resolve once and evaluate many.
+    /// the requester ([`modes_with_groups`](Self::modes_with_groups)) — so a caller that needs SEVERAL
+    /// audiences over the same resource (e.g. the read path's `user` + `public`) can resolve once and
+    /// evaluate many.
     async fn effective_modes(
         &self,
         resource: &str,
-        requester: &Requester<'_>,
+        web_id: Option<&str>,
+        origin: Option<&str>,
     ) -> Result<BTreeSet<AccessMode>, ServerError> {
-        Ok(self
-            .resolve_effective_acl(resource)
-            .await?
-            .modes_for(requester))
+        let resolved = self.resolve_effective_acl(resource).await?;
+        self.modes_with_groups(&resolved, web_id, origin).await
+    }
+
+    /// The modes an ALREADY-RESOLVED ACL grants the requester, first resolving any `acl:agentGroup`
+    /// membership those rules need ([`resolve_group_memberships`](Self::resolve_group_memberships)).
+    ///
+    /// This is the ONLY place a group grant can enter a decision, and it is a strict extension of the
+    /// pure [`ResolvedAcl::modes_for`]: when no applicable rule names a group — the overwhelmingly
+    /// common case — the resolved membership set is empty, no I/O happens, and the result is
+    /// bit-for-bit what the pre-group matcher returned.
+    async fn modes_with_groups(
+        &self,
+        resolved: &ResolvedAcl,
+        web_id: Option<&str>,
+        origin: Option<&str>,
+    ) -> Result<BTreeSet<AccessMode>, ServerError> {
+        let groups = self
+            .resolve_group_memberships(resolved, web_id, origin)
+            .await?;
+        Ok(resolved.modes_for(&Requester {
+            web_id,
+            origin,
+            groups: &groups,
+        }))
+    }
+
+    /// Resolve which of the `acl:agentGroup`s named by the resolved ACL actually list this requester
+    /// as a member — the I/O half of group matching (the pure half is [`group_has_member`]).
+    ///
+    /// Each referenced group's DOCUMENT (the group IRI minus its fragment) is read ONCE through the
+    /// [`Store`] and every group in it tested, so several groups sharing a document cost one read.
+    /// Returns the group IRIs whose membership was POSITIVELY established; everything else is
+    /// fail-closed:
+    ///  - anonymous requester, or no applicable group ⇒ empty, with NO store access at all;
+    ///  - a group document on another origin ⇒ skipped unresolved (no outbound fetch — the `Store`
+    ///    holds this pod's resources, and authorization performs no request-driven egress);
+    ///  - beyond [`MAX_GROUP_DOCUMENTS`] distinct documents ⇒ skipped unresolved;
+    ///  - an ABSENT document ⇒ no membership (it cannot vouch for anyone);
+    ///  - a MALFORMED document ⇒ an empty triple set via [`parse_acl_body`](Self::parse_acl_body) ⇒
+    ///    no membership, the same present-but-granting-nothing posture a malformed ACL gets;
+    ///  - any OTHER store error PROPAGATES — a transient backend failure is not evidence of
+    ///    non-membership, so the request fails rather than deciding on an incomplete picture.
+    async fn resolve_group_memberships(
+        &self,
+        resolved: &ResolvedAcl,
+        web_id: Option<&str>,
+        origin: Option<&str>,
+    ) -> Result<Vec<String>, ServerError> {
+        // Only a WebID can be a `vcard:hasMember`, so the public/anonymous audience never resolves.
+        let Some(web_id) = web_id else {
+            return Ok(Vec::new());
+        };
+        let referenced = resolved.agent_group_iris(&Requester {
+            web_id: Some(web_id),
+            origin,
+            groups: &[],
+        });
+        if referenced.is_empty() {
+            // The hot path: no applicable rule names a group ⇒ zero extra I/O, decision unchanged.
+            return Ok(Vec::new());
+        }
+
+        // De-duplicate to DOCUMENTS (several groups may live in one) and apply the read cap.
+        let mut documents: Vec<&str> = Vec::new();
+        for group in &referenced {
+            let doc = group_document_iri(group);
+            if !documents.contains(&doc) && documents.len() < MAX_GROUP_DOCUMENTS {
+                documents.push(doc);
+            }
+        }
+
+        let mut members: Vec<String> = Vec::new();
+        for doc in documents {
+            if !self.is_local(doc) {
+                continue;
+            }
+            let Some(triples) = self.read_and_parse_acl(doc).await? else {
+                continue;
+            };
+            for group in &referenced {
+                if group_document_iri(group) == doc
+                    && !members.contains(group)
+                    && group_has_member(&triples, group, web_id)
+                {
+                    members.push(group.clone());
+                }
+            }
+        }
+        Ok(members)
+    }
+
+    /// Whether an IRI names a resource inside THIS server's storage — the only thing the [`Store`]
+    /// can read. Group resolution uses it to leave a remote group document unresolved instead of
+    /// fetching it, so an authorization decision never triggers outbound HTTP.
+    fn is_local(&self, iri: &str) -> bool {
+        let root = format!("{}/", self.base_url.trim_end_matches('/'));
+        iri.starts_with(&root)
     }
 
     /// Resolve the EFFECTIVE ACL governing `resource` ONCE — the expensive part (the child→root walk,
@@ -649,8 +790,11 @@ impl<'a, S: Store> WacAuthorizer<'a, S> {
         Ok(Some(triples))
     }
 
-    /// The uncached read+parse of an ACL: ONE `store.read` (get_meta + blob.get) + the `oxttl` parse —
-    /// the exact pre-cache path, used when no cache is attached.
+    /// The uncached read+parse of an RDF control document: ONE `store.read` (get_meta + blob.get) +
+    /// the `oxttl` parse — the exact pre-cache path, used when no cache is attached, and also the
+    /// read for an `acl:agentGroup` group document (which wants exactly this contract: absent ⇒
+    /// `Ok(None)`, malformed ⇒ empty triples, any other store error propagates; the parsed-ACL cache
+    /// is deliberately not involved, so a group read can never evict or serve an ACL entry).
     async fn read_and_parse_acl(
         &self,
         acl: &str,
@@ -1400,6 +1544,248 @@ mod tests {
         assert_read_matches_old_path(&wac, acl, AccessMode::Control, Some(ALICE), None).await;
         assert_read_matches_old_path(&wac, acl, AccessMode::Control, Some(BOB), None).await;
         assert_read_matches_old_path(&wac, acl, AccessMode::Control, None, None).await;
+    }
+
+    // --- acl:agentGroup: membership resolved through the Store -------------------------------
+
+    const GROUP_DOC: &str = "https://pod.example/groups/team";
+    const TEAM: &str = "https://pod.example/groups/team#g";
+    const GROUP_RES: &str = "https://pod.example/alice/team/data";
+    const GROUP_ACL: &str = "https://pod.example/alice/team/data.acl";
+
+    /// An `.acl` granting Read on [`GROUP_RES`] to the members of `group` (and to nobody else).
+    fn group_grant_acl(group: &str) -> String {
+        format!(
+            r#"@prefix acl: <http://www.w3.org/ns/auth/acl#>.
+            <#g> a acl:Authorization;
+                 acl:agentGroup <{group}>;
+                 acl:accessTo <{GROUP_RES}>;
+                 acl:mode acl:Read."#
+        )
+    }
+
+    /// A store whose `.acl` grants Read to [`TEAM`]; the group document is written by the caller so
+    /// each test controls whether — and how — membership resolves.
+    async fn group_store() -> TestStore {
+        let s = store();
+        put_acl(&s, GROUP_ACL, &group_grant_acl(TEAM)).await;
+        s
+    }
+
+    async fn put_group_doc(s: &TestStore, iri: &str, body: &str) {
+        s.write(iri, Bytes::from(body.to_string()), "text/turtle")
+            .await
+            .expect("write group document");
+    }
+
+    /// The headline guard: a WebID named ONLY through `acl:agentGroup` is granted once the group
+    /// document — read through the `Store` — lists it, and a non-member still is not.
+    #[tokio::test]
+    async fn agent_group_grants_a_member_named_in_the_group_document() {
+        let s = group_store().await;
+        put_group_doc(
+            &s,
+            GROUP_DOC,
+            &format!(
+                r#"@prefix vcard: <http://www.w3.org/2006/vcard/ns#>.
+                <{TEAM}> vcard:hasMember <{BOB}>."#
+            ),
+        )
+        .await;
+        let wac = WacAuthorizer::new(&s, BASE);
+
+        assert!(
+            matches!(
+                wac.authorize(GROUP_RES, AccessMode::Read, Some(BOB), None)
+                    .await
+                    .unwrap(),
+                Decision::Allow(_)
+            ),
+            "Bob is a vcard:hasMember of the granted group, so the agentGroup rule must grant him"
+        );
+        // A WebID the group document does not list gets nothing.
+        assert_eq!(
+            wac.authorize(GROUP_RES, AccessMode::Read, Some(ALICE), None)
+                .await
+                .unwrap(),
+            Decision::Forbidden
+        );
+        // The rule grants Read only — Write is still denied to the member.
+        assert_eq!(
+            wac.authorize(GROUP_RES, AccessMode::Write, Some(BOB), None)
+                .await
+                .unwrap(),
+            Decision::Forbidden
+        );
+        // And an anonymous requester can never be a member.
+        assert_eq!(
+            wac.authorize(GROUP_RES, AccessMode::Read, None, None)
+                .await
+                .unwrap(),
+            Decision::Unauthenticated
+        );
+    }
+
+    /// Every way the group document can fail to vouch for the requester denies (fail-closed): it is
+    /// ABSENT, it is MALFORMED, or it names the member under a DIFFERENT group in the same document.
+    #[tokio::test]
+    async fn agent_group_unresolvable_document_fails_closed() {
+        // 1. No group document at all.
+        let s = group_store().await;
+        let wac = WacAuthorizer::new(&s, BASE);
+        assert_eq!(
+            wac.authorize(GROUP_RES, AccessMode::Read, Some(BOB), None)
+                .await
+                .unwrap(),
+            Decision::Forbidden,
+            "a missing group document cannot vouch for anyone"
+        );
+
+        // 2. A malformed group document parses to an empty triple set — present, granting nothing.
+        let s = group_store().await;
+        put_group_doc(&s, GROUP_DOC, "this is not turtle <<<").await;
+        assert_eq!(
+            WacAuthorizer::new(&s, BASE)
+                .authorize(GROUP_RES, AccessMode::Read, Some(BOB), None)
+                .await
+                .unwrap(),
+            Decision::Forbidden,
+            "a malformed group document must not confer membership"
+        );
+
+        // 3. Bob is a member of a DIFFERENT group that happens to share the document — matching is on
+        //    the full group IRI, so the fragment must keep the memberships apart.
+        let s = group_store().await;
+        put_group_doc(
+            &s,
+            GROUP_DOC,
+            &format!(
+                r#"@prefix vcard: <http://www.w3.org/2006/vcard/ns#>.
+                <{GROUP_DOC}#other> vcard:hasMember <{BOB}>."#
+            ),
+        )
+        .await;
+        assert_eq!(
+            WacAuthorizer::new(&s, BASE)
+                .authorize(GROUP_RES, AccessMode::Read, Some(BOB), None)
+                .await
+                .unwrap(),
+            Decision::Forbidden,
+            "membership of a sibling group in the same document must not grant"
+        );
+    }
+
+    /// A group document on ANOTHER origin is left unresolved rather than fetched: authorization reads
+    /// only through the `Store`, so it performs no request-driven outbound HTTP and a remote group
+    /// grants nothing. The identically-named LOCAL group does grant — proving the denial is the
+    /// remoteness check, not a broken group path.
+    #[tokio::test]
+    async fn agent_group_remote_document_is_not_resolved_fail_closed() {
+        const REMOTE_TEAM: &str = "https://other.example/groups/team#g";
+        let s = store();
+        put_acl(&s, GROUP_ACL, &group_grant_acl(REMOTE_TEAM)).await;
+        // Even if a document at that IRI somehow existed in this store, it is outside the server's
+        // base URL, so group resolution must skip it.
+        put_group_doc(
+            &s,
+            "https://other.example/groups/team",
+            &format!(
+                r#"@prefix vcard: <http://www.w3.org/2006/vcard/ns#>.
+                <{REMOTE_TEAM}> vcard:hasMember <{BOB}>."#
+            ),
+        )
+        .await;
+        assert_eq!(
+            WacAuthorizer::new(&s, BASE)
+                .authorize(GROUP_RES, AccessMode::Read, Some(BOB), None)
+                .await
+                .unwrap(),
+            Decision::Forbidden,
+            "a group document outside this server's storage must be left unresolved"
+        );
+
+        // Control: the same shape with a LOCAL group IRI does grant.
+        let s = group_store().await;
+        put_group_doc(
+            &s,
+            GROUP_DOC,
+            &format!(
+                r#"@prefix vcard: <http://www.w3.org/2006/vcard/ns#>.
+                <{TEAM}> vcard:hasMember <{BOB}>."#
+            ),
+        )
+        .await;
+        assert!(matches!(
+            WacAuthorizer::new(&s, BASE)
+                .authorize(GROUP_RES, AccessMode::Read, Some(BOB), None)
+                .await
+                .unwrap(),
+            Decision::Allow(_)
+        ));
+    }
+
+    /// A group grant belongs to the `user` audience ONLY: the public has no WebID, so it can never be
+    /// a `vcard:hasMember`, and `WAC-Allow`'s `public=` must not advertise a group-derived mode.
+    #[tokio::test]
+    async fn agent_group_grant_never_reaches_the_public_audience() {
+        let s = group_store().await;
+        put_group_doc(
+            &s,
+            GROUP_DOC,
+            &format!(
+                r#"@prefix vcard: <http://www.w3.org/2006/vcard/ns#>.
+                <{TEAM}> vcard:hasMember <{BOB}>."#
+            ),
+        )
+        .await;
+        let wac = WacAuthorizer::new(&s, BASE);
+        let ReadDecision::Allow(perms) = wac
+            .authorize_read(GROUP_RES, AccessMode::Read, Some(BOB), None)
+            .await
+            .unwrap()
+        else {
+            panic!("the member must be allowed to read");
+        };
+        assert!(perms.user.contains(&AccessMode::Read));
+        assert!(
+            perms.public.is_empty(),
+            "a group grant must never be advertised as public"
+        );
+    }
+
+    /// Group resolution must not diverge between the sequential walk and the read-plan path — the
+    /// same equivalence the rest of the WAC matrix asserts, over the member / non-member / no-document
+    /// cases and both read paths.
+    #[tokio::test]
+    async fn agent_group_planned_paths_match_the_sequential_walk() {
+        for with_doc in [false, true] {
+            let s = group_store().await;
+            if with_doc {
+                put_group_doc(
+                    &s,
+                    GROUP_DOC,
+                    &format!(
+                        r#"@prefix vcard: <http://www.w3.org/2006/vcard/ns#>.
+                        <{TEAM}> vcard:hasMember <{BOB}>."#
+                    ),
+                )
+                .await;
+            }
+            let wac = WacAuthorizer::new(&s, BASE);
+            for who in [Some(BOB), Some(ALICE), None] {
+                assert_planned_matches_sequential(&wac, &s, GROUP_RES, AccessMode::Read, who, None)
+                    .await;
+                assert_planned_authorize_matches_sequential(
+                    &wac,
+                    &s,
+                    GROUP_RES,
+                    AccessMode::Read,
+                    who,
+                    None,
+                )
+                .await;
+            }
+        }
     }
 
     // --- Opt #3: the ETag-keyed parsed-ACL cache is decision-equivalent to the cold resolve ---------

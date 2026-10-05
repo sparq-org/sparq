@@ -73,7 +73,7 @@ network services), A.8.22 (segregation of networks), A.8.23 (web filtering).
   `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'`,
   `X-Content-Type-Options: nosniff`, and `X-Frame-Options: DENY`, stamped by the `harden()`
   `map_response` layer.
-- The published container image (`ghcr.io/jeswr/sparq-server`) sets `SPARQ_ALLOW_REMOTE=1`
+- The published container image (`ghcr.io/sparq-org/sparq-server`) sets `SPARQ_ALLOW_REMOTE=1`
   because a port-mapped `0.0.0.0` bind is needed for Docker — so **running the container is
   the operator's explicit choice to publish a surface, and that surface has NO auth by
   default** (see §2).

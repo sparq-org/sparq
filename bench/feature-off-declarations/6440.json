@@ -1,0 +1,75 @@
+{
+  "pr": 6440,
+  "date": "2026-09-07",
+  "reason": "[GPT-6] Canonical predicate-statistics serialization changes only the mmap-gated writer and test code. The added source lines move an unchanged indexing/unwrap statement and its embedded panic locations. An independently reviewed, same-host artifact comparison below identifies exactly two changed data bytes as line 1056 becoming 1065, at unchanged columns 29 and 39. Actual disassembly passes the corresponding records into non-returning bounds-check and Option::unwrap panic paths; every non-data section, including executable code, is byte-identical. This is an artifact-specific manual review of the retained aarch64 build pair, not the generic four-word-pattern heuristic or an automated derivation. The unavailable CI x86_64 binaries are a separate two-byte observation. No claim is made for all toolchains or for identical panic diagnostic line numbers. The byte comparator and wasm_bundle_bytes size ratchet remain unchanged.",
+  "derived": false,
+  "evidence": {
+    "base_source": "f2e8aadd485190a8e82cdc8cd1c0fd0020130cee",
+    "head_source": "42147886f0e25ddc35958e40d04cbf1619e9c133",
+    "toolchain": {
+      "rustc": "1.97.1 (8bab26f4f 2026-07-14)",
+      "cargo": "1.97.1 (c980f4866 2026-06-30)",
+      "host": "aarch64-unknown-linux-gnu",
+      "target": "wasm32-unknown-unknown",
+      "disassembler": "WABT wasm-objdump 1.0.34"
+    },
+    "command": [
+      "cargo", "build", "--locked", "--profile", "release-wasm",
+      "-p", "sparq-wasm", "--target", "wasm32-unknown-unknown"
+    ],
+    "base_artifact": {
+      "bytes": 1560249,
+      "sha256": "379badd83e5a8da56bc4932131f4b94c4b7f2fb9b816faa02bbdf7b8700a46bd",
+      "job_log_sha256": "8f6164b14e2fcfc96fb5a2200b10c6723a6813200fb424cd05850f8b7915f66b"
+    },
+    "head_artifact": {
+      "bytes": 1560249,
+      "sha256": "ea74f386f4a13b4bdd6978bcd59e5cf2200603c94d5c6c4e0894c80719f8d0ff",
+      "job_log_sha256": "94cbc43077ed317ceedde37d26609da4f6e3bd2c469618f0e34c52b5a7e3141f"
+    },
+    "size_delta_bytes": 0,
+    "differing_bytes": 2,
+    "non_data_sections_byte_identical": true,
+    "source_path": "crates/sparq-core/src/store.rs",
+    "source_expression": "let v = pattern[order[k]].unwrap();",
+    "source_occurrence_binding": "Unchanged occurrence mapped through the exact base-to-head Git diff hunks; repeated source text alone was not used as evidence.",
+    "changed_locations": [
+      {
+        "file_offset": 1497240,
+        "record_file_offset": 1497232,
+        "record_memory_address": 1080580,
+        "base_byte": 32,
+        "head_byte": 41,
+        "base_line_u32_le": 1056,
+        "head_line_u32_le": 1065,
+        "unchanged_column": 29,
+        "callsite_review": "Function 1795 passes bounds values 3,3 and record address 1080580 to function 2396, followed by unreachable. Function 2396 formats the decoded index-out-of-bounds message and forwards its third argument unchanged to common panic handler 2384."
+      },
+      {
+        "file_offset": 1497256,
+        "record_file_offset": 1497248,
+        "record_memory_address": 1080596,
+        "base_byte": 32,
+        "head_byte": 41,
+        "base_line_u32_le": 1056,
+        "head_line_u32_le": 1065,
+        "unchanged_column": 39,
+        "callsite_review": "Functions 1795 and 1827 pass record address 1080596 to function 2434, followed by unreachable. Function 2434 supplies the exact 43-byte message called `Option::unwrap()` on a `None` value and forwards this record through function 2365 to common panic handler 2384."
+      }
+    ],
+    "manual_review": "Independent review checked receipt and artifact hashes, exact diff occurrence mapping, decoded location/message memory, function signatures, and disassembled callsite/callee bytes against the retained binary. Pattern matches remained candidate-only until that review.",
+    "manual_evidence_record_sha256": "1319343e37f0def6feb2677323c3ac58676b572d9b3cfd06cfc6312e8bdba9eb",
+    "disassembly_sha256": "ad0ee424e15ba2706156a9861003efc20912e17bdac411fa6795f1bc7ef7f06d",
+    "ci_observation": {
+      "run_id": 34073702442,
+      "job_id": 101595685443,
+      "host": "x86_64-unknown-linux-gnu",
+      "base_bytes": 1560241,
+      "head_bytes": 1560241,
+      "differing_bytes": 2,
+      "raw_binaries_inspected": false,
+      "log_sha256": "7180fc8374d8caf94f7386d850b5e5c313c514d5ee244f3ce7d7fc08445fd94f",
+      "autodeclare_outcome": "neutral-build-failed: blanking the added loop opening left an unexpected closing delimiter; no automated proof was obtained."
+    }
+  }
+}

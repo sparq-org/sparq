@@ -34,7 +34,7 @@
 //!     a third, independent family driving the Zazuko `shacl-engine` (default) or
 //!     `rdf-validate-shacl` validator (selected by `SHACL_DIFF_NODE_ENGINE`) over an
 //!     RDF-JS dataset. Being JS over RDF-JS it is also the on-ramp for diffing
-//!     sparq's OWN `@jeswr/sparq` WASM SHACL (a future JS-vs-JS lane).
+//!     sparq's OWN `@sparq-org/sparq` WASM SHACL (a future JS-vs-JS lane).
 //!
 //! Each reference is another `RefEngine` over the same report-cli contract; adding
 //! one is just a `resolve_*` returning that struct.
