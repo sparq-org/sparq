@@ -1231,8 +1231,16 @@ fn cmd_reason(args: &[String]) {
         return;
     }
     let g = load_with_reasoning(path, format, profile);
-    println!("{} triples after {profile} reasoning", g.len());
-    if let Some(out) = args.get(5) {
+    let out = args.get(5);
+    // With an output path the closure is the data product (and may itself be stdout, e.g.
+    // `/dev/stdout`), so the summary is a diagnostic on stderr; without one the count is
+    // the command's only result and stays on stdout (#6466).
+    if out.is_some() {
+        eprintln!("{} triples after {profile} reasoning", g.len());
+    } else {
+        println!("{} triples after {profile} reasoning", g.len());
+    }
+    if let Some(out) = out {
         use std::io::Write;
         let mut w = std::io::BufWriter::new(std::fs::File::create(out).unwrap_or_else(|e| {
             eprintln!("create {out}: {e}");

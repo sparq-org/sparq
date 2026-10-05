@@ -80,11 +80,11 @@ fn reason_datalog_writes_the_stratified_closure() {
     let out = dir.join("closure.nt");
     let profile = format!("datalog:{}", s(&rules));
 
-    let (code, stdout, stderr) = run3(&["reason", s(&data), "ntriples", &profile, s(&out)]);
+    let (code, _stdout, stderr) = run3(&["reason", s(&data), "ntriples", &profile, s(&out)]);
     assert_eq!(code, 0, "stderr: {stderr}");
     // The stratification report: 3 rules across 3 strata (deg < Hub < Leaf).
     assert!(stderr.contains("3 rule(s) in 3 stratum/strata"), "stderr: {stderr}");
-    assert!(stdout.contains("triples after"), "stdout: {stdout}");
+    assert!(stderr.contains("triples after"), "stderr: {stderr}");
 
     let closure = std::fs::read_to_string(&out).expect("read closure");
     // Aggregation: `a` has three edges.
