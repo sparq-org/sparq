@@ -51,10 +51,10 @@ let map = sparq_canon::issued_identifiers(&[q]).unwrap();  // issuer map
 ### ⚠️ Opt-in NON-STANDARD RDF 1.2 triple-term profile (`rdf12-triple-terms`)
 
 **OFF by default; NOT W3C RDFC-1.0.** RDFC-1.0 is defined for RDF 1.1 only and
-has no notion of triple terms; their canonicalization is **unsettled upstream**
-([w3c/rdf-star-wg#114](https://github.com/w3c/rdf-star-wg/issues/114)). With the
-feature OFF the crate is **byte-identical** to before — the standard paths still
-return `CanonError::TripleTerm` on triple terms and the W3C suite still passes.
+has no notion of triple terms. W3C has published no RDF-1.2 dataset
+canonicalization specification. With the feature OFF the crate is
+**byte-identical** to before — the standard paths still return
+`CanonError::TripleTerm` on triple terms and the W3C suite still passes.
 
 Enabling `rdf12-triple-terms` adds a **separate, clearly non-standard v2** profile
 that natively re-implements the RDFC-1.0 algorithm over oxrdf 0.3 and **descends

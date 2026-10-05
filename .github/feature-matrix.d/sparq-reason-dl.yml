@@ -6,6 +6,11 @@
 # DirectChecker consistency/entailment path rather than compiling those tests empty.
 # This leg (dispatch WITHOUT dispatch_ql) also keeps the deferred QL arm
 # (`QlConsistencyPending` + its test) executing in CI. [FABLE-5] sq-fj8lj
+# SCOPE ([SONNET-4.6] issue #2384): adding/removing/renaming a leg changes the emitted
+# leg-name set, and THAT is a TWO-FILE change — this fragment AND
+# scripts/tests/feature-matrix-legnames.golden.txt. Every other edit here (features,
+# test, tier, tier-reason, comments) leaves the name set alone and is a SINGLE-file
+# change. See README.md in this directory.
 - name: "sparq-reason-dl (dl_transitive — ALCHS transitive-role tableau)"
   crate: "sparq-reason-dl"
   features: "dispatch,dl_transitive"

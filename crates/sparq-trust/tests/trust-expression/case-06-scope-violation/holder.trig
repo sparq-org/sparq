@@ -1,6 +1,6 @@
 # Design §6 case 6 — SCOPE VIOLATION. A certified issuer that over-issued. The
 # eIDAS 2 certification is impeccable — valid at t, status-covered at t — but its
-# `trustx:scope` is `foaf:age` ONLY. The issuer nevertheless attested a `foaf:name`
+# `trustx:certificationScope` is `foaf:age` ONLY. The issuer nevertheless attested a `foaf:name`
 # statement, which the framework never certified it to issue.
 #
 # Both bundles are present, both attributed to the same certified issuer, both
@@ -30,7 +30,7 @@
 <urn:cert:qtsp> a trustx:Certification ;
     trustx:certifies      <did:web:qtsp.example> ;
     trustx:underFramework trustx:eIDAS2 ;
-    trustx:scope          foaf:age ;
+    trustx:certificationScope foaf:age ;
     trustx:validFrom      "2026-01-01T00:00:00Z"^^xsd:dateTime ;
     trustx:validUntil     "2027-01-01T00:00:00Z"^^xsd:dateTime ;
     trustx:coveredBy      <urn:status:cert> .

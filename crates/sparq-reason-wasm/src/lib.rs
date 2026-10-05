@@ -29,9 +29,6 @@ use wasm_bindgen::prelude::*;
 #[cfg(feature = "explain")]
 mod explain;
 
-// [FABLE-5] sq-ohnj1 — the eye-js `--query` compat translator (pure, native-tested).
-mod n3query;
-
 /// A CONSTRUCT that copies the whole default graph, used to serialise a closure to
 /// N-Triples via the engine's tested CONSTRUCT path (no hand-rolled term serialiser here).
 const ECHO_CONSTRUCT: &str = "CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o }";
@@ -76,29 +73,20 @@ fn n3_new_ntriples(n3: &str) -> Result<String, String> {
     sparq_engine::construct_ntriples(&graph, ECHO_CONSTRUCT)
 }
 
-/// [FABLE-5] sq-ohnj1 — the eye-js `--query` filter: materialise the deductive closure of
-/// `data`, then evaluate the N3 query rule(s) as SPARQL `CONSTRUCT`s over that closure and
-/// return the (deduplicated) instantiated conclusions as N-Triples. FAIL-CLOSED on any query
-/// the BGP path cannot faithfully express (see the `n3query` module). Native (returns a `String` error)
-/// so the native unit tests drive it end to end.
+/// [FABLE-5] sq-ohnj1, [OPUS-5] sq-xqchl.1 — the eye-js `--query` filter: materialise the
+/// deductive closure of `data`, then return every instantiated conclusion of the N3 query
+/// rule(s) over that closure as N-Triples.
+///
+/// Delegates to `sparq_reason::reason_n3_query`, which evaluates the query premise with the
+/// reasoner's OWN matcher, so the full premise language — builtins, quoted `{ … }` formulae,
+/// first-class `( … )` lists — is available (GH #3144). The previous compat path translated the
+/// premise into a SPARQL `CONSTRUCT` BGP and rejected all three fail-closed. Native (returns a
+/// `String` error) so the native unit tests drive it end to end.
 fn n3_query_ntriples(data: &str, query: &str) -> Result<String, String> {
     let mut dict = sparq_core::dict::Dict::default();
-    let closure = sparq_reason::reason_n3(&mut dict, data)?;
-    let graph = Graph::from_parts(dict, closure);
-    let constructs = n3query::n3_query_to_constructs(query)?;
-    // Deduplicate result lines across multiple query rules (a single-rule query never dups).
-    let mut seen = std::collections::HashSet::new();
-    let mut out = String::new();
-    for c in &constructs {
-        let nt = sparq_engine::construct_ntriples(&graph, c)?;
-        for line in nt.lines() {
-            if !line.is_empty() && seen.insert(line.to_string()) {
-                out.push_str(line);
-                out.push('\n');
-            }
-        }
-    }
-    Ok(out)
+    let answers = sparq_reason::reason_n3_query(&mut dict, data, query)?;
+    let graph = Graph::from_parts(dict, answers);
+    sparq_engine::construct_ntriples(&graph, ECHO_CONSTRUCT)
 }
 
 /// The minimal in-tab reasoning entry point: forward-chaining materialization of an RDF
@@ -198,12 +186,13 @@ impl Reasoner {
         n3_new_ntriples(n3).map_err(|e| JsError::new(&e))
     }
 
-    /// [FABLE-5] sq-ohnj1 — the eye-js `--query` filter: materialise the closure of `data`,
-    /// then return every instantiated conclusion of the N3 query rule(s) over that closure as
-    /// N-Triples (a `CONSTRUCT { conclusion } WHERE { premise }` per rule). Backs
-    /// `n3reasoner(data, query)` in the `@sparq-org/eyereasoner-compat` package. FAIL-CLOSED on
-    /// builtins / formulae / lists in the query (see the package README). A thin shim over
-    /// `n3_query_ntriples`.
+    /// [FABLE-5] sq-ohnj1, [OPUS-5] sq-xqchl.1 — the eye-js `--query` filter: materialise the
+    /// closure of `data`, then return every instantiated conclusion of the N3 query rule(s) over
+    /// that closure as N-Triples. Backs `n3reasoner(data, query)` in the
+    /// `@sparq-org/eyereasoner-compat` package. The query premise is evaluated by the reasoner's
+    /// own matcher, so builtins / quoted `{ … }` formulae / first-class `( … )` lists all work
+    /// (GH #3144); an UNIMPLEMENTED builtin simply does not fire, exactly as in a document rule.
+    /// A thin shim over `n3_query_ntriples`.
     #[wasm_bindgen(js_name = reasonN3Query)]
     pub fn reason_n3_query(data: &str, query: &str) -> Result<String, JsError> {
         n3_query_ntriples(data, query).map_err(|e| JsError::new(&e))
@@ -389,13 +378,38 @@ mod tests {
         assert!(!nt.contains("subClassOf"), "non-matching axiom excluded: {nt}");
     }
 
-    /// A query using an unsupported builtin fails closed (an error, never a wrong answer).
+    /// [OPUS-5] sq-xqchl.1 (GH #3144) — a builtin in the query premise is EVALUATED (it used to
+    /// fail closed, because the SPARQL-BGP compat path could not evaluate one). The builtin must
+    /// FILTER: matching `math:greaterThan` as data would answer for `:b` as well.
     #[test]
-    fn n3_query_builtin_fails_closed() {
-        let data = "@prefix : <http://ex/>. :a :age 21 .";
+    fn n3_query_evaluates_a_premise_builtin() {
+        let data = "@prefix : <http://ex/>. :a :age 21 . :b :age 12 .";
         let query = r#"@prefix math: <http://www.w3.org/2000/10/swap/math#>.
 @prefix : <http://ex/>.
-{ ?x :age ?a. ?a math:greaterThan 18 } => { ?x a :Adult }."#;
-        assert!(n3_query_ntriples(data, query).is_err());
+{ ?x :age ?n. ?n math:greaterThan 18 } => { ?x a :Adult }."#;
+        let nt = n3_query_ntriples(data, query).expect("builtin query filter");
+        assert!(nt.contains("<http://ex/a> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://ex/Adult> ."), "{nt}");
+        assert!(!nt.contains("<http://ex/b>"), ":b is 12 — the builtin must filter it out: {nt}");
+    }
+
+    /// A first-class `( … )` list in the query premise (also previously fail-closed): the
+    /// `list:member` generator iterates the list VALUE the data holds.
+    #[test]
+    fn n3_query_matches_a_first_class_list() {
+        let data = "@prefix : <http://ex/>. :alice :children (:bob :carol) .";
+        let query = r#"@prefix list: <http://www.w3.org/2000/10/swap/list#>.
+@prefix : <http://ex/>.
+{ ?p :children ?l. ?l list:member ?c } => { ?c :parent ?p }."#;
+        let nt = n3_query_ntriples(data, query).expect("list query filter");
+        assert!(nt.contains("<http://ex/bob> <http://ex/parent> <http://ex/alice> ."), "{nt}");
+        assert!(nt.contains("<http://ex/carol> <http://ex/parent> <http://ex/alice> ."), "{nt}");
+    }
+
+    /// A query document with no forward rule still fails LOUDLY (an empty answer would read
+    /// like "the query matched nothing").
+    #[test]
+    fn n3_query_without_a_forward_rule_is_an_error() {
+        let doc = "@prefix : <http://ex/>. :a :p :b .";
+        assert!(n3_query_ntriples(doc, doc).is_err());
     }
 }

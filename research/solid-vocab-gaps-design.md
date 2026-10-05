@@ -12,7 +12,7 @@ covers the four still-open vocabulary gaps after the near-term ones landed
 | Gap | Spec | Today | This note's verdict |
 |---|---|---|---|
 | `acl:accessToClass` | WAC (extension) | missing | **research-open — breaches §2.4** |
-| `acp:vc` | ACP | missing | **research-open — needs VC verification machinery (ZK/VC estate)** |
+| `acp:vc` | ACP | **implemented** (sq-ysv3u — see §2 *Outcome*) | *(was: research-open — needs VC verification machinery)* — the plaintext/trust-the-issuer principal shipped once `sparq-vc` pinned the verifier interface; ZK still gated on `sq-qhy4` |
 | custom ACP mode IRIs | ACP | partial (4 fixed modes) | **near-term feasible — bounded refactor of the auth-view predicate space** |
 | nested `acl:agentGroup` / `vcard:hasMember` chains | WAC | partial (one hop) | **near-term feasible — but a deliberate spec-conformance decision precedes it** |
 
@@ -30,10 +30,12 @@ sees **only access-control inputs** — `.acl`/`.acr` graphs, `acl:agentGroup` g
 (fragment stripped → graph name), and loader-synthesized structural facts. **Pod content graphs
 are deliberately excluded** (design doc §2.4): otherwise any agent who can write a document could
 embed `acl:`/`solidx:` triples and grant themselves access. Two of the four gaps
-(`acl:accessToClass`, `acp:vc`) are research-open *precisely because a sound implementation has to
+(`acl:accessToClass`, `acp:vc`) were research-open *precisely because a sound implementation has to
 read something the boundary currently walls off* — typed pod content, or an externally-issued
 credential — and doing that without re-opening the smuggling surface is a design problem, not a
-vocab addition.
+vocab addition. `acp:vc` has since been implemented on exactly that basis: the credential is
+verified OUTSIDE the boundary and enters as a caller-asserted trusted fact, never as content
+(§2 *Outcome*).
 
 ---
 
@@ -188,6 +190,43 @@ it consumes a verified `(agent, client, issuer)` triple today. The plaintext-cla
 bounded extension of the existing candidate model; the ZK/selective-disclosure version is a
 genuine ZK-estate composition and strictly downstream. **Do not implement until (a) the VC-estate
 verifier interface is pinned and (b) PSS confirms the claim-matching expressivity it needs.**
+
+### Outcome — implemented [SONNET-4.6] sq-ysv3u (issue #2935)
+
+Precondition (a) was met: `sparq-vc` (sq-ylbrq, issue #908) pinned the verifier interface —
+W3C Data Integrity `eddsa-rdfc-2022` over RDFC-1.0 with `did:key`/`did:web` resolution. The
+shipped implementation follows the sketch above with **one deliberate simplification**, and
+one correction the analysis above did not anticipate:
+
+- **The verified-claim principal is a trusted FACT, not a minted principal.** Rather than
+  minting a fourth `urn:sparq:` principal dimension (which would multiply the candidate
+  product, open question 2), the caller asserts `(agent WebID, requirement IRI)` holdings
+  through a `VerifiedCredentials` map — the exact analogue of `AccessProvenance` — and the
+  loader synthesizes `<agent> solidx:holdsVc <requirement>`. The rules then INTERSECT the
+  matcher's `acp:agent` accept-set with the holders of its `acp:vc` requirements (the
+  `rawAgentP`/`acceptsAgentP` split in `rules/acp-a.n3`). There is **no fourth principal
+  dimension**: the candidate product stays `(agent, client, issuer)` and `Session` is
+  unchanged, so the ≤12 per-session grant lookups open question 2 worried about do not grow
+  at all. The residual cost is narrower and stays inside the agent dimension: each holder of
+  a matcher's requirement becomes one additional candidate *agent* for that policy, exactly
+  as a concrete `acp:agent` WebID already does. A policy with no `acp:vc` is unaffected.
+- **Claim-matching expressivity (open question 1) is resolved by scoping, not by (b).** The
+  `acp:vc` object is an opaque **requirement IRI** matched by exact equality; the rules never
+  interpret claim values, so the range/threshold problem does not arise inside the reasoner.
+  Deciding *whether a credential satisfies a requirement* is the verifier's job, where a
+  `VcRequirement` states issuer + credential type + exact-match claims. PSS confirmation was
+  therefore not a blocker for the graph half — a richer requirement language is an additive
+  change to the verifier alone.
+- **Revocation/freshness (open question 3) is NOT solved.** A holding lasts until the caller
+  re-materializes. This is documented, not fixed.
+- **The gap was not merely missing — it was FAIL-OPEN.** `acp:vc` was an *unrecognized*
+  attribute, so a matcher carrying it satisfied the "no `acp:agent` ⇒ agent-unconstrained"
+  rule and accepted `auth:Public`: a credential-gated policy granted **everyone, anonymous
+  included**. The wrong-direction error for a security oracle. Correcting that is
+  unconditional (no feature flag), and is the load-bearing half of the change.
+- **ZK stays downstream, as this record says it should.** Only the trust-the-issuer backend
+  is wired (opt-in `acp-vc` feature). A zero-knowledge / selective-disclosure backend remains
+  gated on the ZK estate's external accredited-cryptographer audit (`sq-qhy4`).
 
 ---
 
@@ -344,7 +383,7 @@ over-granting direction, and (2) **bound the transitive expansion to loaded grou
 | Gap | Verdict | Hard prerequisite before any implementation |
 |---|---|---|
 | `acl:accessToClass` | research-open, lowest priority | a PSS need **and** a commitment to supply class membership as a *trusted* `solidx:ofClass` fact (option B); else stay out-of-scope (A). Reading content (C) is **rejected**. |
-| `acp:vc` | research-open, large, cross-estate | the VC-estate verifier interface pinned + verify-in-PSS / match-in-rules split; plaintext-claim principal first, ZK selective-disclosure strictly downstream |
+| `acp:vc` | **DONE** ([SONNET-4.6] sq-ysv3u) — was: research-open, large, cross-estate | prerequisites met: `sparq-vc` pinned the verifier interface, and the verify-outside / match-in-rules split shipped as a trusted `VerifiedCredentials` channel + exact-IRI requirement matching. ZK selective-disclosure remains downstream (`sq-qhy4`). See §2 *Outcome*. |
 | custom ACP mode IRIs | near-term feasible (no soundness barrier) | a real deployment defining a custom mode + the G2 public-API/`SKILL.md` migration (`Mode` enum → IRI newtype, generic grant rules) |
 | nested `acl:agentGroup` chains | near-term feasible as a closure | (1) confirm recursive expansion is CSS/ESS reference behaviour (don't over-grant); (2) bound expansion to loaded group docs (`solidx:isLoadedGroupDoc` guard) |
 

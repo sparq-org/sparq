@@ -44,9 +44,9 @@
 # narrows on a green run; it does not close. Do not upgrade the wording beyond that.
 #
 # Usage:
-#   scripts/verify-release-provenance.sh --tag v0.1.1 [--repo jeswr/sparq] [--dir <assets>]
+#   scripts/verify-release-provenance.sh --tag v0.1.1 [--repo sparq-org/sparq] [--dir <assets>]
 #     --tag   the released version string; also the version stamped into the bundle names
-#     --repo  owner/name (default: jeswr/sparq) — becomes `--source-uri github.com/<repo>`
+#     --repo  owner/name (default: sparq-org/sparq) — becomes `--source-uri github.com/<repo>`
 #     --dir   a directory of ALREADY-downloaded release assets. Omitted => the assets are
 #             fetched with `gh release download` into a temp dir.
 #
@@ -54,7 +54,7 @@
 # Self-tested by scripts/tests/test_verify_release_provenance.sh (docs-quality.yml).
 set -euo pipefail
 
-REPO="jeswr/sparq"
+REPO="sparq-org/sparq"
 TAG=""
 ASSET_DIR=""
 

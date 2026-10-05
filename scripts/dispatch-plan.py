@@ -113,6 +113,37 @@ DegeneratePartitionRoots = _ready.DegeneratePartitionRoots
 INERT_FIELD = _ready.INERT_FIELD
 MACHINE_PARK_PR_LABEL = _ready.MACHINE_PARK_PR_LABEL
 is_provably_inert = _ready.is_provably_inert
+# [OPUS-5] sparq#4929 — THE NON-RESERVING CROSS-CUTTING PARTITIONS, ON THE SAME MODULE.
+#
+# sparq#4928 made `ci`/`docs` non-reserving for OCCUPANCY in this repo's readiness engine
+# (`ready-issues.py::NON_RESERVING_PARTITIONS`, with its measured basis and its fail-safe stated
+# there once). Per sparq#4929 — again a statement about the PRIVATE registry, which nothing here
+# can check — that is the PLAN leg only. The registry has a second, independent occupancy leg
+# (`dispatch-claim.py::busy_packages_of_pulls`, applied at `filter_busy_area_items` on assemble
+# and again at `revalidate_items_against_live_pulls` at CLAIM time) that derives a busy-area union
+# from open worker PRs and has no cross-cutting exemption. Unless it mirrors the declaration, the
+# rows PLAN now offers are re-deferred one layer down and the widening is nominal.
+#
+# THE SAME ARGUMENT AS #4365 ONE BLOCK UP, so the same shape of answer: the exemption is offered
+# as a CALLABLE off the module `load_dispatch` already loads, not as a rule to re-type into
+# `dispatch.yml`. A second, hand-written copy of `{"ci", "docs"}` over there is free to drift from
+# this one, and two legs disagreeing about one partition is precisely what #4929 reports — the
+# drift class sparq#4819 documents.
+#
+# WHAT IS DELIBERATELY *NOT* EXPORTED: the raw `NON_RESERVING_PARTITIONS` frozenset. A caller that
+# reads the declaration directly gets the UNVALIDATED value and silently loses the fail-safe —
+# `non_reserving_partitions()` is what voids the whole declaration on a single bad entry (and can
+# never return the global/degenerate root, which would exempt everything). `reserves_partition`
+# is the predicate to prefer: it answers on the PARTITION PATH, so a key that resolves INTO `ci`
+# (the live `ci-fragments`) is exempt together with it, which an exact-string `key in {...}` mirror
+# gets wrong — see the `[sparq#4929]` self-test rows.
+#
+# HONESTLY SCOPED, as with #4365: this is the sparq half and it is NOT the fix. Exporting a name
+# the registry does not yet call changes nothing, and nothing in this repository can observe
+# whether `busy_packages_of_pulls` has started calling it. The before/after the issue asks for is
+# measurable only in the registry, where the `ledger` provenance half is readable.
+non_reserving_partitions = _ready.non_reserving_partitions
+reserves_partition = _ready.reserves_partition
 
 try:
     import tomllib
@@ -458,6 +489,61 @@ def _self_test():
          ("sparq-engine", "sparq-engine-exec"),
          ("sparq-server", "sparq-server-http"),
          ("upstream", "upstream-noir")])
+
+    # --- #4929: the CROSS-CUTTING EXEMPTION offered to `busy_packages_of_pulls` ------------------
+    # THE THIRD OCCURRENCE OF THE SAME SHAPE. #4928 made `ci`/`docs` non-reserving on the PLAN leg
+    # (`ready-issues.py`, whose own suite pins it end-to-end through `compute_ready`). #4929 reports
+    # that the registry's CLAIM/assemble leg (`dispatch-claim.py::busy_packages_of_pulls`) keeps its
+    # own busy-area union with no exemption, so the two extra rows PLAN offers are re-deferred one
+    # layer down and the widening is nominal. As with #4819 and #4365 the answer is a CALLABLE off
+    # the module `load_dispatch` already loads, not a set to re-type into the registry's source.
+    #
+    # Same honest scope as #4365: these rows assert the sparq half. They cannot observe the
+    # registry, and passing them does NOT mean `busy_packages_of_pulls` has been changed.
+    _exempt = _registry_contract()["non_reserving_partitions"]
+
+    # (h) THE NAMES, as loaded — an absent export is the silent-degrade state, not an error.
+    chk("[sparq#4929] dispatch-plan exports the exemption the registry's CLAIM leg must call",
+        sorted(n for n in _exempt["required_attributes"] if not hasattr(_mod, n)), [])
+
+    # (i) THE DECLARED SET, through the VALIDATED accessor — the raw constant is deliberately not
+    # exported, so this is also the assertion that the validated path is the only reachable one.
+    chk("[sparq#4929] ...and the validated declaration matches the pinned set",
+        sorted(_mod.non_reserving_partitions()), sorted(_exempt["declared"]["partitions"]))
+
+    # (j) THE PREDICATE, through THIS module. One comparison over the whole fixture, so a dropped
+    # row is as red as a changed verdict. `deps` and the crate areas are in here as the SAFETY
+    # half: #4929 asks explicitly that they stay reserving on both legs.
+    chk("[sparq#4929] ...and reproduces registry-contract.toml's reserving fixture",
+        {k: _mod.reserves_partition(k) for k in _exempt["parity_fixture"]},
+        dict(_exempt["parity_fixture"]))
+
+    # (k) ...and it is NOT `key in {"ci", "docs"}` — the reason to call the predicate rather than
+    # copy the set. `ci-fragments` is a live key that resolves INTO the `ci` partition, so a
+    # per-string mirror would keep reserving a partition `ci` itself does not. This row goes EMPTY
+    # if `reserves_partition` is ever flattened to exact-string membership.
+    _string_mirror = {k for k in _exempt["parity_fixture"]
+                      if k in set(_exempt["declared"]["partitions"])}
+    chk("[sparq#4929] ...and disagrees with exact-string membership on the containment keys",
+        sorted(k for k in _exempt["parity_fixture"]
+               if _mod.reserves_partition(k) != (k not in _string_mirror)),
+        ["ci-fragments"])
+
+    # (l) THE FAIL-SAFE, both directions, INJECTED rather than monkey-patched: malformed degrades
+    # to fully RESERVING (today's behaviour), a well-formed declaration is honoured. Without the
+    # second half a validator that voided everything would pass the first half perfectly.
+    #
+    # `None` is NOT in this list and must not be: through the parameter it is the SENTINEL meaning
+    # "use the repository's own declaration", so it returns `{ci, docs}` — asserted as such by row
+    # (i). A declaration that is literally `None` is the monkey-patched case and is covered by
+    # `ready-issues.py --self-test`, which owns the constant. Writing it here instead reds this row
+    # for the wrong reason, which is how it was first written.
+    chk("[sparq#4929] ...and a malformed declaration degrades to RESERVING, never the reverse",
+        sorted({bool(_mod.non_reserving_partitions(bad)) for bad in (
+            "ci", 7, {"ci": True}, {"ci", 7}, ["ci", ""], ("ci", None), {_ready.GLOBAL})}),
+        [False])
+    chk("[sparq#4929] ...and a well-formed one is honoured (the fail-safe is not vacuous)",
+        sorted(_mod.non_reserving_partitions({"ci"})), ["ci"])
 
     print("dispatch-plan self-test", "PASSED" if ok else "FAILED")
     return 0 if ok else 1

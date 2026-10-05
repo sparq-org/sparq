@@ -141,6 +141,17 @@ fn check_error_display_covers_query_correctness_reasons() {
         &CheckError::PatternScanUndeclared { proof: 3 },
         &["pattern_scans", "3"],
     );
+    // [OPUS-5] #5240: within-pattern repeated-variable slot equality.
+    assert_display_carries(
+        &CheckError::RepeatedSlotMismatch {
+            pattern: 0,
+            proof: 1,
+            row: 2,
+            variable: "v".into(),
+            slots: (0, 2),
+        },
+        &["v", "pattern", "row"],
+    );
 }
 
 #[test]

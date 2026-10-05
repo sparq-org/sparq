@@ -15,6 +15,12 @@ pub mod conformance;
 // so it mirrors `wac_allow`'s always-present public-API placement (#1154).
 mod decide;
 pub mod fixture;
+// [SONNET-4.6] sq-ysv3u: the TRUSTED verified-credential channel behind ACP `acp:vc` — the
+// exact analogue of `provenance` below, carrying "which credential requirements has this
+// agent been VERIFIED to satisfy". Always compiled: the channel itself adds no dependency,
+// and the `acp:vc` fail-closed matcher semantics it feeds are unconditional. Only the
+// `sparq-vc`-backed verification that populates it is behind the opt-in `acp-vc` feature.
+mod credentials;
 mod loader;
 mod materialize;
 // [OPUS-4.8] sq-3jtd.5: TRUSTED per-resource creator/owner provenance — the channel by
@@ -62,8 +68,17 @@ pub use decide::{is_control_document_name, AclScope, AclStatus, EffectiveAcl, Wa
 // /report vocabulary is the shared `conformance::{Decision, Expect, ScenarioReport}`).
 pub use wac_conformance::{AclBuilder, AuthBuilder, WacScenario};
 pub use fixture::{acp_fixture, wac_fixture};
-pub use materialize::{materialize_acp, materialize_acp_with, materialize_wac, MaterializeStats};
+pub use materialize::{
+    materialize_acp, materialize_acp_with, materialize_acp_with_credentials, materialize_wac,
+    MaterializeStats,
+};
 pub use provenance::AccessProvenance;
+// [SONNET-4.6] sq-ysv3u: the ACP `acp:vc` trusted verified-credential channel. Always
+// compiled (it adds no dependency); the `acp-vc` feature adds the sparq-vc-backed
+// trust-the-issuer verification that populates it.
+pub use credentials::VerifiedCredentials;
+#[cfg(feature = "acp-vc")]
+pub use credentials::{VcAdmitError, VcRequirement};
 #[cfg(feature = "odrl-bridge")]
 pub use odrl_bridge::{
     action_to_mode, materialize_permission, materialize_permission_conditional, materialize_policy,
@@ -93,7 +108,7 @@ pub use write_through::AclWriteOutcome;
 use oxrdf::{NamedNode, Term};
 use rustc_hash::FxHashMap;
 use sparq_core::Graph;
-use sparq_engine::{DatasetView, DefaultGraphMode, FxHashSet, QueryResult};
+use sparq_engine::{DatasetView, DefaultGraphMode, FxHashSet, QueryBudget, QueryResult};
 use std::sync::{Arc, OnceLock};
 
 /// The reserved named graph holding the materialized authorization view.
@@ -228,6 +243,18 @@ pub struct PodStore {
     // more stale than `auth` itself, so it introduces no fail-open window. (sq-b7k7u's
     // incremental reindex + sq-cnuqd's shared `&self` session cache compose on this seam.)
     acl_index: OnceLock<decide::AclIndex>,
+    // [SONNET-4.6] issue #55: the set of graphs the current access-control documents
+    // reference via `acl:agentGroup` — the WAC group-membership INPUTS of the auth view.
+    // The write path consults it to decide whether a permitted update touched an auth-view
+    // input and must re-materialize; unlike `.acl`/`.acr` a group document has no naming
+    // convention, so reference is the only sound recognizer.
+    //
+    // Same `OnceLock` discipline (and the same invalidation argument) as `acl_index`: it is
+    // a pure function of the current graph, built lazily on the first update of a
+    // generation and dropped in `reindex` — the ONE seam that also rebuilds `auth`. So it
+    // can never be more stale than the auth view it guards, and a read-only workload never
+    // pays for it.
+    group_docs: OnceLock<FxHashSet<String>>,
     // [OPUS-4.8] sq-3jtd.6: the cache key ([`SessionKey`]) spans all three session
     // dimensions — agent, client, AND issuer — so two sessions differing only by issuer
     // (e.g. the same WebID vouched for by a trusted vs an untrusted IdP) never collide on
@@ -407,6 +434,7 @@ impl PodStore {
             auth: Arc::new(AuthIndex::default()),
             epoch: 0,
             acl_index: OnceLock::new(), // [OPUS-4.8] sq-j8qtt: built lazily on first decide
+            group_docs: OnceLock::new(), // [SONNET-4.6] #55: built lazily on first update
             cache: session_cache::SessionCache::new(), // [FABLE-5] sq-cnuqd: bounded + sharded
             #[cfg(feature = "odrl-bridge")]
             bridge_ledger: odrl_bridge::BridgeLedger::new(),
@@ -523,7 +551,69 @@ impl PodStore {
         &mut self,
         provenance: &AccessProvenance,
     ) -> Result<MaterializeStats, String> {
-        self.materialize_acp_with_scoped(provenance, ReindexScope::Full)
+        self.materialize_acp_with_credentials(provenance, &VerifiedCredentials::new())
+    }
+
+    /// (Re-)materialize the ACP auth view using TRUSTED creator/owner facts AND TRUSTED
+    /// verified-credential holdings, resolving `acp:vc` matchers ([SONNET-4.6] sq-ysv3u).
+    ///
+    /// `acp:vc` gates a matcher on the requesting agent holding a Verifiable Credential that
+    /// satisfies a stated requirement. sparq-solid never verifies a credential itself — the
+    /// caller (a Solid server, or the opt-in `acp-vc` backend's
+    /// `VerifiedCredentials::admit_data_integrity` — a code span rather than an intra-doc link,
+    /// since that method exists only under that feature) verifies the presentation and records
+    /// the resulting `(agent, requirement IRI)` holdings in `credentials`, which is the
+    /// **trusted channel** for them: exactly like `provenance`, these facts are asserted by
+    /// the caller and are **never** read from pod or `.acr` content, so an agent cannot
+    /// self-grant by writing a forged holding into a document they control (design doc §2.4).
+    ///
+    /// `materialize_acp_with(&prov)` is exactly
+    /// `materialize_acp_with_credentials(&prov, &VerifiedCredentials::new())` — with no
+    /// credential supplied, **every** `acp:vc` matcher rejects every candidate (fail-closed).
+    ///
+    /// # Errors
+    ///
+    /// As [`PodStore::materialize_acp_with`], plus an `Err` if a credential holder's WebID
+    /// collides with the reserved principal encoding.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use sparq_solid::{AccessProvenance, Mode, PodStore, Session, VerifiedCredentials};
+    ///
+    /// // A policy on /clinic/ grants Read only to holders of an "over 18" credential.
+    /// let acp = "http://www.w3.org/ns/solid/acp#";
+    /// let req = "https://issuer.ex/req#OverEighteen";
+    /// let nquads = format!(
+    ///     "<https://pod.ex/clinic/d0.ttl#it> <https://ex.dev/ns#k> \"v\" <https://pod.ex/clinic/d0.ttl> .\n\
+    ///      <https://pod.ex/clinic/.acr> <{acp}memberAccessControl> <https://pod.ex/clinic/.acr#c> <https://pod.ex/clinic/.acr> .\n\
+    ///      <https://pod.ex/clinic/.acr#c> <{acp}apply> <https://pod.ex/clinic/.acr#pol> <https://pod.ex/clinic/.acr> .\n\
+    ///      <https://pod.ex/clinic/.acr#pol> <{acp}allow> <http://www.w3.org/ns/auth/acl#Read> <https://pod.ex/clinic/.acr> .\n\
+    ///      <https://pod.ex/clinic/.acr#pol> <{acp}allOf> <https://pod.ex/clinic/.acr#m> <https://pod.ex/clinic/.acr> .\n\
+    ///      <https://pod.ex/clinic/.acr#m> <{acp}vc> <{req}> <https://pod.ex/clinic/.acr> .\n");
+    /// let mut store = PodStore::new(sparq_core::Graph::load_dataset(&nquads, "nquads")?);
+    ///
+    /// // With no credential presented the policy grants NOBODY — not even anonymously.
+    /// store.materialize_acp()?;
+    /// let anon = Session::default();
+    /// let alice = Session { agent: Some("https://alice.ex/card#me"), client: None, issuer: None, now: None };
+    /// assert_eq!(store.accessible(&anon, Mode::Read).len(), 0);
+    /// assert_eq!(store.accessible(&alice, Mode::Read).len(), 0);
+    ///
+    /// // The caller verified alice's credential and asserts the holding.
+    /// let mut creds = VerifiedCredentials::new();
+    /// creds.hold("https://alice.ex/card#me", req);
+    /// store.materialize_acp_with_credentials(&AccessProvenance::new(), &creds)?;
+    /// assert_eq!(store.accessible(&alice, Mode::Read).len(), 1); // d0
+    /// assert_eq!(store.accessible(&anon, Mode::Read).len(), 0);  // still nothing
+    /// # Ok::<(), String>(())
+    /// ```
+    pub fn materialize_acp_with_credentials(
+        &mut self,
+        provenance: &AccessProvenance,
+        credentials: &VerifiedCredentials,
+    ) -> Result<MaterializeStats, String> {
+        self.materialize_acp_with_scoped(provenance, credentials, ReindexScope::Full)
     }
 
     /// [`PodStore::materialize_acp_with`] invalidating the session cache only at `scope` — the
@@ -532,9 +622,10 @@ impl PodStore {
     fn materialize_acp_with_scoped(
         &mut self,
         provenance: &AccessProvenance,
+        credentials: &VerifiedCredentials,
         scope: ReindexScope,
     ) -> Result<MaterializeStats, String> {
-        let stats = materialize_acp_with(&mut self.graph, provenance)?;
+        let stats = materialize_acp_with_credentials(&mut self.graph, provenance, credentials)?;
         self.reconcile_bridged_after_static();
         self.reindex_with(scope);
         Ok(stats)
@@ -598,6 +689,19 @@ impl PodStore {
         // the auth rebuild. `take` empties the cell; the next `decide`/`resolve_acl` rebuilds
         // from the just-re-materialized graph.
         self.acl_index.take();
+        // [SONNET-4.6] issue #55: same lock-step for the referenced-group-document set — an
+        // `.acl` write that starts (or stops) referencing a group document is reflected on
+        // the next update's re-materialization decision.
+        self.group_docs.take();
+    }
+
+    /// The graphs the current access-control documents reference via `acl:agentGroup`,
+    /// built lazily on the first update of a generation and reused across it
+    /// ([SONNET-4.6] issue #55). `reindex` empties the cell, so this can never outlive an
+    /// ACL change. See [`loader::referenced_group_docs`] for why it is an
+    /// over-approximation and why that is the safe direction.
+    fn group_docs(&self) -> &FxHashSet<String> {
+        self.group_docs.get_or_init(|| loader::referenced_group_docs(&self.graph))
     }
 
     /// The persistent structural ACL index for the current generation, built lazily on the
@@ -726,7 +830,7 @@ impl PodStore {
     /// **API tier-1 (proposed-stable).** Part of the proposed semver-stable per-resource
     /// decision surface (with `decide_batch` / [`PodStore::resolve_acl`] /
     /// [`PodStore::wac_allow`]); the freeze is pending maintainer ratification — see the
-    /// [API stability policy](https://github.com/jeswr/sparq/blob/main/docs/api-stability.md).
+    /// [API stability policy](https://github.com/sparq-org/sparq/blob/main/docs/api-stability.md).
     ///
     /// This is the point-query an LDP resource server asks per request, NOT graph
     /// filtering. Where [`PodStore::query_as`] / [`PodStore::accessible`] return the *set*
@@ -742,8 +846,11 @@ impl PodStore {
     /// # Fail-closed (FR-6, sq-snopa.2 — never fail OPEN)
     ///
     /// Every uncertainty path denies. The typed [`WacDecision::status`] lets a server map
-    /// the deny to the right HTTP code — **401/403** for a definitive deny
-    /// ([`AclStatus::Resolved`] without the mode, or [`AclStatus::NoAcl`]); a **retryable
+    /// the deny to the right HTTP code — **403** for a definitive deny
+    /// ([`AclStatus::Resolved`] without the mode, or [`AclStatus::NoAcl`]), except that an
+    /// LDP resource server owes an *anonymous* requester the Solid-required **401**
+    /// challenge and must add that lane from its own authentication state, which this crate
+    /// does not carry (a known limitation — see [`AclStatus`]); a **retryable
     /// 503** for an operational one ([`AclStatus::Unloaded`] — the view was never
     /// materialized; [`AclStatus::Transient`] — e.g. a malformed resource IRI) — but the
     /// `allow == false` is already correct regardless of the status. See [`AclStatus`].
@@ -1101,10 +1208,12 @@ impl PodStore {
     ///   (never permissive), at the cost of denying some updates a per-solution check
     ///   might allow.
     ///
-    /// On a permitted update that touched an `.acl`/`.acr`/group document — any static
-    /// control-doc write, any precisely-resolved variable-graph update (its targets could
-    /// include a group document, which has no naming convention), or any graph-wildcard
-    /// update — the auth view is **re-materialized** automatically (WAC by default; pass
+    /// On a permitted update that touched an `.acl`/`.acr`/group document — a static
+    /// control-doc write, a static write to a graph the current access-control documents
+    /// reference via `acl:agentGroup` (a **group document**, which has no naming
+    /// convention and so is recognized by that reference), any precisely-resolved
+    /// variable-graph update, or any graph-wildcard update — the auth view is
+    /// **re-materialized** automatically (WAC by default; pass
     /// [`PodStore::update_as_acp`] for ACP pods), so a changed rule takes effect on the
     /// next call.
     ///
@@ -1140,22 +1249,102 @@ impl PodStore {
     /// # Ok::<(), String>(())
     /// ```
     pub fn update_as(&mut self, s: &Session, sparql: &str) -> Result<(), String> {
-        self.update_inner(s, sparql, false)
+        self.update_inner(s, sparql, false, &QueryBudget::unlimited())
     }
 
     /// [`PodStore::update_as`] for **ACP** pods: identical write-access enforcement, but
     /// a permitted control-doc/group write re-materializes the ACP view
     /// ([`PodStore::materialize_acp`]) instead of the WAC one. [OPUS-4.8] sq-xor3.
     pub fn update_as_acp(&mut self, s: &Session, sparql: &str) -> Result<(), String> {
-        self.update_inner(s, sparql, true)
+        self.update_inner(s, sparql, true, &QueryBudget::unlimited())
     }
 
-    fn update_inner(&mut self, s: &Session, sparql: &str, acp: bool) -> Result<(), String> {
+    /// [`PodStore::update_as`] under a cooperative [`QueryBudget`] — the write-path twin of
+    /// the budgeted read entry points, for a caller that must bound *every* evaluation it
+    /// issues (an agent tool surface, an HTTP handler). [FABLE-5] sq-yhlf0.
+    ///
+    /// The budget covers BOTH evaluations an update can perform:
+    ///
+    /// - the authorization check's `GRAPH ?var` binding SELECT (see the precise-resolution
+    ///   note on [`PodStore::update_as`]) — an exhausted budget there is a **deny**, and
+    ///   nothing is mutated;
+    /// - the apply's `DELETE`/`INSERT … WHERE` evaluation, via
+    ///   [`sparq_engine::update_in_place_with_budget`].
+    ///
+    /// The remaining operations never consult the budget, and — importantly — capping the
+    /// accepted update text does **not** bound all of them, because their cost is set by the
+    /// operand, not by the request:
+    ///
+    /// - `INSERT`/`DELETE DATA` carry their triples INLINE, so a request-size cap *does*
+    ///   bound them; `CREATE` is a single empty-graph entry.
+    /// - `CLEAR`/`DROP` name data that already exists, so a few bytes of text (`CLEAR ALL`)
+    ///   costs whatever the targeted graphs hold. Their bound here is **authorization, not
+    ///   size**: `CLEAR`/`DROP NAMED`/`ALL` escalates to the all-graphs wildcard, so it
+    ///   proceeds only for a session holding write on every store graph, and a targeted
+    ///   `CLEAR GRAPH <g>` only for one holding write on `g`.
+    /// - `LOAD` reads and parses a file whose size is independent of the SPARQL text. It is
+    ///   refused outright unless the embedder installs an allowlisted base directory
+    ///   ([`sparq_engine::with_load_base`]); leaving it uninstalled — the default — is the
+    ///   bound.
+    ///
+    /// So a caller that needs a hard ceiling on *those* must impose it itself: a request-size
+    /// cap for the inline-DATA forms, leaving LOAD disabled (or separately capping the files
+    /// it can reach), and for `CLEAR`/`DROP` either a store-size limit of its own or
+    /// refusing the operations. Authorization is unchanged — a budget can only turn a
+    /// permitted update into an error, never a denied one into a write.
+    ///
+    /// Failure semantics are otherwise exactly [`PodStore::update_as`]'s, including its
+    /// engine-inherited **non-atomicity on error**: a budget that trips part-way through a
+    /// multi-operation (`;`-separated) request leaves the earlier operations' prefix
+    /// applied. A single operation's WHERE is fully evaluated before any of its delta is
+    /// applied, so the common case — one over-budget `DELETE/INSERT … WHERE` — mutates
+    /// nothing. A caller needing all-or-nothing request semantics should wrap this in its
+    /// own fork/commit, exactly as it must around [`PodStore::update_as`].
+    ///
+    /// An unlimited budget is byte-for-byte [`PodStore::update_as`].
+    ///
+    /// # Errors
+    ///
+    /// [`PodStore::update_as`]'s errors, plus the engine's cooperative-budget abort
+    /// (`"query budget exceeded (timeout|max-rows|max-bytes|cancelled)"`) from either
+    /// evaluation above.
+    pub fn update_as_with_budget(
+        &mut self,
+        s: &Session,
+        sparql: &str,
+        budget: &QueryBudget,
+    ) -> Result<(), String> {
+        self.update_inner(s, sparql, false, budget)
+    }
+
+    /// [`PodStore::update_as_with_budget`] for **ACP** pods — the budgeted twin of
+    /// [`PodStore::update_as_acp`] (a permitted control-doc/group write re-materializes the
+    /// ACP view instead of the WAC one). [FABLE-5] sq-yhlf0.
+    ///
+    /// # Errors
+    ///
+    /// As [`PodStore::update_as_with_budget`].
+    pub fn update_as_acp_with_budget(
+        &mut self,
+        s: &Session,
+        sparql: &str,
+        budget: &QueryBudget,
+    ) -> Result<(), String> {
+        self.update_inner(s, sparql, true, budget)
+    }
+
+    fn update_inner(
+        &mut self,
+        s: &Session,
+        sparql: &str,
+        acp: bool,
+        budget: &QueryBudget,
+    ) -> Result<(), String> {
         // Authorize against the CURRENT auth view before mutating anything (fail-closed).
         let auth = Arc::clone(&self.auth);
-        let permit = update::check(&self.graph, &auth, s, sparql)?;
-        // Authorized: apply through the engine's in-place delta path.
-        sparq_engine::update_in_place(&mut self.graph, sparql)?;
+        let permit = update::check(&self.graph, &auth, s, sparql, self.group_docs(), budget)?;
+        // Authorized: apply through the engine's in-place delta path, under the same budget.
+        sparq_engine::update_in_place_with_budget(&mut self.graph, sparql, budget)?;
         // A change to the access-control rules invalidates the auth view.
         if permit.rematerialize {
             if acp {

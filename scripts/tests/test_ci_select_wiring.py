@@ -62,6 +62,7 @@ OWNERSHIP_TOML = REPO_ROOT / "ci" / "path-ownership.toml"  # [OPUS-4.8] sq-fmx4u
 # [OPUS-4.8] path-aware CI audit: the merge_group changed-files gates.
 CONTAINER_SCAN_YML = REPO_ROOT / ".github" / "workflows" / "container-scan.yml"
 SUPPLY_CHAIN_YML = REPO_ROOT / ".github" / "workflows" / "supply-chain.yml"
+CODEQL_YML = REPO_ROOT / ".github" / "workflows" / "codeql.yml"  # [OPUS-5] sq-g25hr
 
 FAIL_CLOSED_DISJUNCT = "needs.select.outputs.mode != 'selected'"
 NEEDLE_RE = re.compile(
@@ -685,6 +686,17 @@ class TestPhase2LaneScoping(unittest.TestCase):
                          "already gated the PR head + re-runs on push-to-main; the noisy timing suite "
                          "moved to the nightly EC2 lane — keeping it on merge_group only dragged the queue)")
 
+    def test_dashboard_publisher_suite_is_enforced(self):
+        # [GPT-6-ASTRA] An unlisted/disabled test would leave publication races ungated.
+        job = _load(REPO_ROOT / ".github/workflows/docs-quality.yml")["jobs"]["quick-gates"]
+        command = "python3 scripts/tests/test_bench_dashboard_publish.py"
+        steps = [step for step in job["steps"] if command in str(step.get("run", ""))]
+        self.assertEqual(len(steps), 1)
+        self.assertEqual(steps[0]["run"], command)
+        self.assertNotIn("if", steps[0])
+        self.assertFalse(steps[0].get("continue-on-error", False))
+        self.assertNotIn("if", job)
+
     def test_bench_history_lane_scoping(self):
         # CRITICAL (design §6.1 continuity, criterion (d)): the auto-ratchet + history +
         # dashboard WRITES must stay on the push-to-main path and NOT fire on the
@@ -1224,7 +1236,9 @@ class TestCoverageMergeGroupDemotion(unittest.TestCase):
       * the measure legs SKIP on merge_group;
       * they still RUN on a non-draft PR head (the PRIMARY gate) and on push-to-main —
         the push leg is the sq-6vshe.14 EXEMPTION: if a future push-run skip lands and
-        does not exempt coverage, this test REDs;
+        does not exempt coverage, this test REDs, whether it narrows the legs' EVENT
+        envelope or (the shape §3.1 actually specifies) adds a `queue-validated` pre-job
+        upstream of them;
       * the fast no-compile FLOOR gates (`coverage-floors`) STILL RUN on merge_group, so a
         batch can never LOWER a committed floor (the "floor is never silently lowered"
         half of the invariant);
@@ -1244,6 +1258,19 @@ class TestCoverageMergeGroupDemotion(unittest.TestCase):
 
     # The measure legs whose instrumented run left the queue.
     DEMOTED_JOBS = ("coverage-measure", "coverage-engine-run")
+
+    # [OPUS-5] issue #5149: the upstream jobs each demoted leg may depend on — FROZEN,
+    # because "one more upstream job" is exactly the shape a push-run skip takes. See
+    # test_measure_legs_take_no_new_upstream_gate for why the event assertions cannot
+    # catch that shape on their own. Widen this ONLY with the exemption decided.
+    ALLOWED_UPSTREAM = {
+        "coverage-measure": {"changes", "coverage-floors", "select"},
+        "coverage-engine-run": {"changes", "coverage-floors", "select"},
+        "coverage-engine-merge": {"coverage-engine-run"},
+    }
+
+    # `needs.<job-id>.…` references inside a job-level `if:`.
+    _NEEDS_REF_RE = re.compile(r"needs\.([A-Za-z0-9_-]+)\.")
 
     def _runs(self, job_id, *, event="pull_request", draft=False, mode="full",
               affected="[]", rust_changed="true"):
@@ -1270,11 +1297,13 @@ class TestCoverageMergeGroupDemotion(unittest.TestCase):
         surviving: the PR head is the primary gate, and push-to-main is what catches the
         batch-stacking case (two PRs individually >= floor merging to < floor).
 
-        The `push` half is also the sq-6vshe.14 COORDINATION PIN: that lever skips
-        queue-validated re-validation on push to main, and coverage must be EXEMPT from it
-        (post-merge, off the queue's critical path). If it lands without the exemption,
-        this assertion REDs instead of the ratchet silently losing its last enforcement
-        point."""
+        The `push` half is the EVENT-dimension half of the sq-6vshe.14 COORDINATION PIN:
+        that lever skips queue-validated re-validation on push to main, and coverage must
+        be EXEMPT from it (post-merge, off the queue's critical path). This assertion REDs
+        if the exemption is dropped by narrowing the legs' EVENT envelope; the other shape
+        the lever can take — a new upstream gate job — is caught by
+        `test_measure_legs_take_no_new_upstream_gate` below, which is the assertion that
+        actually fires for the design in §3.1."""
         for job_id in self.DEMOTED_JOBS:
             self.assertTrue(
                 self._runs(job_id, event="pull_request", draft=False),
@@ -1286,6 +1315,47 @@ class TestCoverageMergeGroupDemotion(unittest.TestCase):
                 f"ci.yml:{job_id} must still MEASURE on push-to-main — it is the "
                 f"post-merge enforcement point the demotion depends on, and is EXEMPT "
                 f"from the sq-6vshe.14 push-run skip",
+            )
+
+    def test_measure_legs_take_no_new_upstream_gate(self):
+        """[OPUS-5] issue #5149 — the sq-6vshe.14 coordination pin, STRUCTURAL half.
+
+        `sq-6vshe.14` is specified (`research/ci-mergequeue-speedup-2026-07.md` §3.1) as a
+        cheap `push`-event pre-job (`queue-validated`) whose output makes pure-validation
+        legs skip on a SHA the queue already validated. Wired onto a coverage leg, that
+        shape is INVISIBLE to the event assertions above, in BOTH of its variants:
+
+          * as an `if:` conjunct — an absent context path evaluates to null exactly as on
+            GitHub, so a fresh `needs.queue-validated.outputs.skip != 'true'` is TRUE
+            under those synthetic payloads and the leg still LOOKS like it runs on push;
+          * as a `needs:` entry ALONE, with no `if:` change at all — a `push`-event
+            pre-job is itself conditional, and a skip propagates through `needs:` unless
+            the dependent uses a status function, which none of these legs does.
+
+        Either variant silently removes the post-merge measurement the sq-6vshe.17
+        demotion rests on. So the upstream set is FROZEN: whoever lands the lever REDs
+        here, on the leg, with the exemption in front of them as a decision — which is the
+        whole point of pinning it rather than discovering it."""
+        for job_id, allowed in self.ALLOWED_UPSTREAM.items():
+            job = self.ci["jobs"][job_id]
+            needs = job.get("needs", [])
+            needs = [needs] if isinstance(needs, str) else list(needs)
+            self.assertEqual(
+                set(needs), allowed,
+                f"ci.yml:{job_id}: its `needs:` is now {sorted(needs)}, not "
+                f"{sorted(allowed)}. A conditional upstream job SKIPS this leg with it "
+                f"(no status function here), and this leg is the post-merge coverage "
+                f"enforcement point. If this is the sq-6vshe.14 push-run skip: EXEMPT — "
+                f"keep it out of the skip, then update ALLOWED_UPSTREAM deliberately.",
+            )
+            new_refs = set(self._NEEDS_REF_RE.findall(str(job.get("if", "")))) - allowed
+            self.assertEqual(
+                new_refs, set(),
+                f"ci.yml:{job_id}: its `if:` now gates on {sorted(new_refs)} — a NEW "
+                f"upstream guard on a demoted coverage leg. Same rule: the push-to-main "
+                f"measurement is what the sq-6vshe.17 demotion trades against, so it is "
+                f"EXEMPT from the sq-6vshe.14 skip (and from any successor lever). Exempt "
+                f"the leg, then update ALLOWED_UPSTREAM deliberately.",
             )
 
     def test_engine_merge_skips_when_its_partitions_are_demoted(self):
@@ -1718,12 +1788,22 @@ class TestDraftTierWiring(unittest.TestCase):
             self.assertIn(key, env, f"gate step must export {key}")
         self.assertIn("github.event.pull_request.draft", str(env["PR_DRAFT"]))
 
-    def test_bench_concurrency_cancels_only_pull_request(self):
+    def test_bench_concurrency_coalesces_pr_and_push_only(self):
         conc = self.bench.get("concurrency", {})
+        self.assertEqual(
+            str(conc.get("group")),
+            "bench-${{ github.ref }}-${{ "
+            "(!contains(fromJSON('[\"pull_request\",\"push\"]'), github.event_name) || "
+            "(github.event_name == 'pull_request' && "
+            "contains(fromJSON('[\"labeled\",\"unlabeled\"]'), "
+            "github.event.action))) && github.run_id || 'shared' }}",
+            "only explicitly allowlisted PR/main-push runs may share a ref group; "
+            "label-only and every unknown/future event need isolated per-run groups",
+        )
         self.assertEqual(str(conc.get("cancel-in-progress")),
-                         "${{ github.event_name == 'pull_request' }}",
-                         "bench must cancel superseded PR runs but never a "
-                         "push/schedule run (history integrity)")
+                         "${{ contains(fromJSON('[\"pull_request\",\"push\"]'), github.event_name) }}",
+                         "only explicitly allowlisted PR/main-push runs may cancel; "
+                         "nightly/manual and every unknown/future event must not")
 
     def test_js_has_per_pr_concurrency(self):
         conc = self.js.get("concurrency", {})
@@ -2142,29 +2222,40 @@ class TestSupplyChainMergeGroupGate(unittest.TestCase):
 
 class TestMergeGroupChangeClassGate(unittest.TestCase):
     """[FABLE-5] merge-group change-class gate (extends #3420/#3421 to the
-    rust_changed layer): the ci.yml + feature-matrix.yml `changes` decide steps
-    classify the queued batch's diff via `scripts/ci_select.py --classify-only`
-    instead of hard-forcing rust_changed=true on merge_group, so a docs-only/
-    orchestration-only batch skips the rust_changed-only lanes (lint / msrv /
-    geiger / docker-smoke / coverage-floors; feature-matrix setup / check-tier /
-    fedclient-boundary) with ATTRIBUTED skips. Pins the SHAPE:
+    rust_changed layer): the ci.yml + feature-matrix.yml + codeql.yml `changes`
+    decide steps classify the queued batch's diff via `scripts/ci_select.py
+    --classify-only` instead of hard-forcing rust_changed=true on merge_group, so a
+    provably-inert batch skips the rust_changed-only lanes (lint / msrv / geiger /
+    docker-smoke / coverage-floors; feature-matrix setup / check-tier /
+    fedclient-boundary; the CodeQL rust analysis) with ATTRIBUTED skips. Pins the
+    SHAPE:
       * the merge_group branch exists and is FAIL-SAFE (defaults true, the #3421
         fetch guard, `|| cls=engine` on the classifier invocation);
       * classification is DELEGATED to scripts/ci_select.py (single source of
         truth) — no duplicated grep path list in the step;
-      * the skip-class set is EXACTLY {docs-only, orchestration-only}, spelled
-        with the classifier module's own tokens (engine/mixed/unknown => full);
+      * the skip-class set is EXACTLY ci_select.py `_INERT_CLASSES`, spelled with
+        the classifier module's own tokens (engine/mixed/unknown => full);
       * ci.yml's docker_changed is class-gated the same way;
       * fuzz.yml needs no such layer (its heavy jobs are select-gated and
         ci-select passes the merge_group SHA pair) and bench.yml has no
         merge_group trigger at all (pinned elsewhere) — this layer must NOT
-        creep into them as a redundant/conflicting second gate."""
+        creep into them as a redundant/conflicting second gate.
+
+    [OPUS-5] sq-g25hr added codeql.yml to the gated set (the ~20-40min CodeQL
+    analysis was the longest merge_group pole for a zero-Rust batch) and widened
+    `_INERT_CLASSES` with `deploy-only` + `inert-mixed`.
+
+    [OPUS-5] #5249 widened it once more with `map-safe` — an ownership-map
+    `safe = true` verdict, which the CLOSURE layer already honoured (empty affected
+    set) while the CLASS layer still said `engine`, so a site-only batch ran the full
+    Rust matrix + CodeQL despite the two layers looking at the same diff."""
 
     @classmethod
     def setUpClass(cls):
         cls.ci = _load(CI_YML)
         cls.fm = _load(FM_YML)
         cls.fuzz = _load(FUZZ_YML)
+        cls.codeql = _load(CODEQL_YML)
         cls.select_mod = _ci_select_module()
 
     def _decide(self, wf, wf_name):
@@ -2174,8 +2265,11 @@ class TestMergeGroupChangeClassGate(unittest.TestCase):
         self.fail(f"{wf_name} missing the `Decide rust_changed` step")
 
     def _both(self):
+        # Every workflow whose merge_group batch is class-gated. (Name kept for the
+        # existing call sites; sq-g25hr made it three.)
         return (("ci.yml", self._decide(self.ci, "ci.yml")),
-                ("feature-matrix.yml", self._decide(self.fm, "feature-matrix.yml")))
+                ("feature-matrix.yml", self._decide(self.fm, "feature-matrix.yml")),
+                ("codeql.yml", self._decide(self.codeql, "codeql.yml")))
 
     def test_merge_group_branch_present_and_fail_safe(self):
         for wf_name, step in self._both():
@@ -2228,23 +2322,51 @@ class TestMergeGroupChangeClassGate(unittest.TestCase):
                              f"{wf_name}: the merge_group branch must NOT re-encode the "
                              "class path sets as a grep — no duplicated path lists")
 
-    def test_skip_class_set_is_exactly_docs_and_orchestration(self):
-        # The case-arm must skip on EXACTLY the two proven-inert classes, spelled
-        # with the classifier module's own tokens; the wildcard arm must force the
-        # full run (engine/mixed/any unknown token => rust=true).
-        docs = self.select_mod._CLASS_DOCS
-        orch = self.select_mod._CLASS_ORCHESTRATION
-        self.assertEqual((docs, orch), ("docs-only", "orchestration-only"),
-                         "classifier tokens drifted — update the workflow case-arms in "
-                         "lock-step (they match on these literal strings)")
+    def test_skip_class_set_is_exactly_the_inert_classes(self):
+        # The case-arm must skip on EXACTLY the proven-inert classes, spelled with
+        # the classifier module's own tokens; the wildcard arm must force the full
+        # run (engine/mixed/any unknown token => rust=true).
+        inert = self.select_mod._INERT_CLASSES
+        self.assertEqual(
+            inert,
+            ("orchestration-only", "docs-only", "deploy-only", "map-safe", "inert-mixed"),
+            "classifier tokens drifted — update the workflow case-arms in lock-step "
+            "(they match on these literal strings)")
+        # The arm is spelled docs-first for readability; assert on the SET so a
+        # re-ordering of _INERT_CLASSES is not a spurious failure, and on the exact
+        # arm text so an extra/renamed token cannot sneak in.
         for wf_name, step in self._both():
             run = str(step.get("run", ""))
-            self.assertIn(f"{docs}|{orch}) rust=false", run,
-                          f"{wf_name}: the skip case-arm must cover exactly {docs}|{orch}")
+            arms = re.findall(r"^\s*([a-z|-]+)\) rust=false", run, re.MULTILINE)
+            self.assertEqual(
+                len(arms), 1,
+                f"{wf_name}: expected exactly one skip case-arm, found {arms}")
+            self.assertEqual(
+                set(arms[0].split("|")), set(inert),
+                f"{wf_name}: the skip case-arm {arms[0]!r} must cover exactly the "
+                f"classifier's inert classes {inert}")
             self.assertIn("*) rust=true", run,
                           f"{wf_name}: the wildcard arm must force the full run")
-            self.assertNotIn("mixed) rust=false", run, wf_name)
-            self.assertNotIn("engine) rust=false", run, wf_name)
+            # `mixed` (engine + something inert) and `engine` must NEVER skip — this
+            # is the "a code change cannot be mislabelled as docs-only" obligation.
+            self.assertNotIn("mixed", arms[0].replace("inert-mixed", ""), wf_name)
+            self.assertNotIn("engine", arms[0], wf_name)
+
+    def test_codeql_merge_group_is_class_gated_not_force_true(self):
+        # [OPUS-5] sq-g25hr: the regression this bead fixes — codeql.yml used to
+        # hard-force rust_changed=true on merge_group, paying the full ~20-40min
+        # analysis for a zero-Rust batch. push/schedule MUST still force true.
+        step = self._decide(self.codeql, "codeql.yml")
+        run = str(step.get("run", ""))
+        self.assertIn('"${EVENT_NAME}" = "merge_group"', run,
+                      "codeql.yml: merge_group must be class-gated, not lumped into "
+                      "the force-true else-branch")
+        self.assertIn('echo "rust_changed=true" >> "$GITHUB_OUTPUT"', run,
+                      "codeql.yml: the off-PR/off-merge_group else-branch must still "
+                      "force the full analysis (push-to-main + the weekly schedule)")
+        analyze_if = str(self.codeql["jobs"]["analyze"].get("if", ""))
+        self.assertIn("needs.changes.outputs.rust_changed == 'true'", analyze_if,
+                      "codeql.yml: the analyze job must gate on the changes output")
 
     def test_ci_docker_changed_is_class_gated_with_rust(self):
         run = str(self._decide(self.ci, "ci.yml").get("run", ""))

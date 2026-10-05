@@ -105,11 +105,11 @@ use sparq_core::Graph;
 
 use crate::did::Did;
 use crate::framework_vocab::{
-    TRUSTX_ANY_SERVICE_SCOPE, TRUSTX_CERTIFICATION, TRUSTX_CERTIFIES, TRUSTX_COVERED_BY,
-    TRUSTX_METHOD_POLICY, TRUSTX_QUESTION, TRUSTX_REQUIRES_SCOPE_CONFORMANCE,
-    TRUSTX_REQUIRES_VALID_STATUS_AT, TRUSTX_SCOPE, TRUSTX_STATUS_ATTESTATION,
-    TRUSTX_TRUSTS_FRAMEWORK, TRUSTX_TRUSTS_ISSUER, TRUSTX_TRUST_REQUIREMENTS,
-    TRUSTX_UNDER_FRAMEWORK, TRUSTX_VALID_FROM, TRUSTX_VALID_UNTIL,
+    TRUSTX_ANY_SERVICE_SCOPE, TRUSTX_CERTIFICATION, TRUSTX_CERTIFICATION_SCOPE, TRUSTX_CERTIFIES,
+    TRUSTX_COVERED_BY, TRUSTX_METHOD_POLICY, TRUSTX_QUESTION, TRUSTX_REQUIRES_SCOPE_CONFORMANCE,
+    TRUSTX_REQUIRES_VALID_STATUS_AT, TRUSTX_STATUS_ATTESTATION, TRUSTX_TRUSTS_FRAMEWORK,
+    TRUSTX_TRUSTS_ISSUER, TRUSTX_TRUST_REQUIREMENTS, TRUSTX_UNDER_FRAMEWORK, TRUSTX_VALID_FROM,
+    TRUSTX_VALID_UNTIL,
 };
 use crate::status_list::LiveStatus;
 
@@ -812,7 +812,13 @@ fn admissibility_body(
             if req.requires_scope_conformance {
                 c.push_str(&format!(
                     "{}{{ ?__tx_cert{} <{}> <{}> }} UNION {{ ?__tx_cert{} <{}> {} }}\n",
-                    ind, i, TRUSTX_SCOPE, TRUSTX_ANY_SERVICE_SCOPE, i, TRUSTX_SCOPE, p.predicate
+                    ind,
+                    i,
+                    TRUSTX_CERTIFICATION_SCOPE,
+                    TRUSTX_ANY_SERVICE_SCOPE,
+                    i,
+                    TRUSTX_CERTIFICATION_SCOPE,
+                    p.predicate
                 ));
             }
             Some(c)
@@ -1397,7 +1403,7 @@ mod tests {
         d.push_str(&format!("<urn:cert1> <{}> <{}> .\n", TRUSTX_UNDER_FRAMEWORK, TRUSTX_EIDAS2));
         d.push_str(&format!("<urn:cert1> <{}> {} .\n", TRUSTX_VALID_FROM, dtlit(cert_from)));
         d.push_str(&format!("<urn:cert1> <{}> {} .\n", TRUSTX_VALID_UNTIL, dtlit(cert_until)));
-        d.push_str(&format!("<urn:cert1> <{}> <{}> .\n", TRUSTX_SCOPE, scope));
+        d.push_str(&format!("<urn:cert1> <{}> <{}> .\n", TRUSTX_CERTIFICATION_SCOPE, scope));
         if with_cert_status {
             d.push_str(&status_lines(
                 "urn:cert1",
@@ -1725,7 +1731,7 @@ mod tests {
         // Scope conformance: AnyServiceScope OR the statement's own predicate.
         assert!(q.contains(TRUSTX_ANY_SERVICE_SCOPE), "service-level scope arm: {}", q);
         assert!(
-            q.contains(&format!("<{}> <{}>", TRUSTX_SCOPE, FOAF_AGE)),
+            q.contains(&format!("<{}> <{}>", TRUSTX_CERTIFICATION_SCOPE, FOAF_AGE)),
             "predicate-scope arm: {}",
             q
         );

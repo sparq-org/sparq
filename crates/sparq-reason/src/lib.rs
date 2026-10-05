@@ -64,8 +64,9 @@ pub use incremental::{
     MaterializedGraph, MaterializedN3Graph, MaterializedOwlGraph, N3Mode, OwlMode,
 };
 pub use n3::{
-    reason_n3, reason_n3_pass_all, reason_n3_proof, reason_n3_stratified, reason_n3_terms,
-    N3Closure, ProofStep, RuleKind, RuleVars, StratifiedN3Closure,
+    reason_n3, reason_n3_pass_all, reason_n3_proof, reason_n3_query, reason_n3_query_terms,
+    reason_n3_stratified, reason_n3_terms, N3Closure, ProofStep, RuleKind, RuleVars,
+    StratifiedN3Closure,
 };
 pub use owl::{inconsistencies, materialize_owl_rl};
 #[cfg(feature = "quoted-triples")]

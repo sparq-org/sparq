@@ -94,6 +94,13 @@ pub fn reason_n3_terms_with_resolver(src, base, resolver: Option<&Resolver>) -> 
 // nothing further). Closure statements are sorted (deterministic), then rules in document
 // order — full <…> IRIs, no @prefix reconstruction, so NOT byte-identical to EYE's writer.
 pub fn reason_n3_pass_all(src: &str, vars: RuleVars) -> Result<String, String>;
+// EYE --query: every INSTANTIATED conclusion of the query document's forward rules over the
+// deductive closure of `data` — a PROJECTION, so a conclusion already in the closure is still
+// an answer (unlike --pass-only-new). The premise uses the chainer's own matcher, so builtins,
+// quoted `{ … }` formulae and `( … )` lists all work. The query document's FACTS are not loaded
+// as data; its `<=` rules ARE available to the premise. No forward rule => error, not "".
+pub fn reason_n3_query(dict: &mut Dict, data: &str, query: &str) -> Result<Vec<[Id;3]>, String>;
+pub fn reason_n3_query_terms(data: &str, query: &str) -> Result<Vec<[Term;3]>, String>; // term-level
 pub enum RuleVars { N3, VarIris }  // `?x` (re-parses as the same rule, so re-running is a
     // fixpoint) | SWAP `var:` IRIs (`--pass-all-ground`: no `?x` survives in a RULE, at any
     // depth — quoted `{ … }` formulae included — but the rule is then constants; the grounded
@@ -706,9 +713,11 @@ boundary:
   (`sq-xqchl.2`) — but it is not yet exposed as a `sparq-reason-wasm` entry point, so the
   package has nothing to call. Wiring the binding + the two `switch` arms is the remaining
   step; until it lands the modes fail loudly rather than return a different result set.
-- **Query filter.** `n3reasoner(data, query)` maps the EYE `--query` rule to a SPARQL `CONSTRUCT`
-  over the materialised closure (`Reasoner.reasonN3Query`). Query rules using **builtins /
-  `{ … }` formulae / `( … )` lists fail closed** (a clear error, never a wrong answer).
+- **Query filter.** `n3reasoner(data, query)` evaluates the EYE `--query` rule over the
+  materialised closure (`Reasoner.reasonN3Query` → `reason_n3_query`). The premise runs through
+  the reasoner's OWN matcher, so **builtins, `{ … }` formulae and `( … )` lists all work** in a
+  query rule (`sq-xqchl.1`); the earlier SPARQL-`CONSTRUCT` translation could evaluate none of
+  them and rejected them fail-closed.
 - **Builtins.** Only this crate's `math:`/`string:`/`list:`/`time:`/`log:` subset is available
   (EYE's full library is larger); an unsupported builtin simply does not fire.
 - **SWIPL surface.** `SwiplEye` / `loadEyeImage` / `runQuery` / `EYE_PVM` / `linguareasoner` etc.

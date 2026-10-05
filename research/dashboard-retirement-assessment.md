@@ -8,6 +8,12 @@
 > retire now — retire-after-gap-closure.** The in-site view is a strict subset of the
 > standalone dashboard, and the standalone dashboard is the *live published* GitHub Pages
 > artifact. Deleting it today would both lose capability and break the served dashboard.
+> **Post-record status:** The separate sq-iigf Pages source-mode cutover is complete
+> on the repo side: the producer workflow exists. The Pages service setting is reported
+> as flipped but is not verified here; see the linked runbook's Provenance section.
+> The in-site trend and scaling chart gaps below have since closed (sq-hsyg), but the
+> retirement cutover remains open: `bench.yml` still publishes the standalone dashboard
+> to `benchmark-data`, and `pages.yml` overlays that tree into the site export.
 
 ## What each surface is
 

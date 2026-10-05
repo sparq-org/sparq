@@ -3,8 +3,13 @@
 # One self-contained leg mapping per opt-in feature(group). Assembled into the
 # feature-matrix `opt-in-features` strategy by scripts/assemble-feature-matrix.py
 # (the `setup` job emits the combined matrix as JSON consumed via fromJSON). Adding a
-# leg for THIS crate edits only THIS file, so concurrent opt-in-feature PRs for
+# leg for THIS crate edits no OTHER crate's fragment, so concurrent opt-in-feature PRs for
 # DIFFERENT crates never textually conflict (bead sq-ibrze). [OPUS-4.8]
+# SCOPE ([SONNET-4.6] issue #2384): adding/removing/renaming a leg changes the emitted
+# leg-name set, and THAT is a TWO-FILE change — this fragment AND
+# scripts/tests/feature-matrix-legnames.golden.txt. Every other edit here (features,
+# test, tier, tier-reason, comments) leaves the name set alone and is a SINGLE-file
+# change. See README.md in this directory.
 #
 # CONTRACT (gate-critical): each leg's emitted check-run NAME is `opt-in <name>`,
 # discovered as a REQUIRED check by the ci-summary `gate` aggregator BY NAME. Keep
@@ -48,16 +53,22 @@
   test: true
 
 # [OPUS-4.8] sq-5oru9 (epic sq-0dksu): the sparq sec-prop: EXTENSION vocab.
-# The `secprop` module (Rust constants) + the `secprop_ttl.rs` integration
-# suite (`#![cfg(feature = "secprop-vocab")]`) + the `secprop::tests` unit
-# tests are ALL behind the default-OFF `secprop-vocab` feature, so ci.yml's
-# default-feature `nextest archive` compiles them EMPTY and runs ZERO of
-# them — the silent-skip gap (#1171) this leg closes. The feature is
-# dependency-free (`const &str` data + a TTL drift test, strictly additive),
-# so this leg is cheap and reaches every secprop-vocab test. Verified
-# locally: `cargo test -p sparq-trust --features secprop-vocab` runs the 5
-# `secprop::tests` unit drift-checks + the 3 `secprop_ttl.rs` integration
-# tests; `clippy --all-targets -D warnings` is clean in every state.
+# The `secprop` module + its `secprop::tests` unit test are behind the
+# default-OFF `secprop-vocab` feature, so ci.yml's default-feature `nextest
+# archive` compiles them EMPTY and runs ZERO of them — the silent-skip gap
+# (#1171) this leg closes.
+#
+# [OPUS-5] sq-3705 moved the vocabulary itself OUT of this crate: the IRI
+# constants, `secprop-ext.ttl` and the drift tests (5 unit + 4 integration)
+# now live in the ZERO-dependency `sparq-secprop-vocab` leaf, which has NO
+# features — so ITS tests run in the ordinary default `cargo test` lane and
+# need no matrix leg. What is left here is a re-export shim, so this leg is
+# now cheap in the strongest sense. It is still REQUIRED: the shim, the
+# `dep:sparq-secprop-vocab` edge the feature turns on, and the guard that the
+# re-export really is the leaf's data are all compiled out by default.
+# Verified locally: `cargo test -p sparq-trust --features secprop-vocab`
+# runs 1 `secprop::tests` unit test (the crate total is 26 in this state);
+# `clippy --all-targets -D warnings` is clean in every state.
 - name: "sparq-trust (secprop-vocab)"
   crate: "sparq-trust"
   features: "secprop-vocab"

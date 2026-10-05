@@ -190,8 +190,30 @@ jobs:
       - name: Dependabot ecosystem-coverage check — GATING
         run: python3 scripts/tests/test_dependabot_coverage.py
 
+      # ---- npm advisory-disposition record vs the live lock (#3767) — GATING ----
+      # [OPUS-5] Dependabot keeps concluding `security_update_not_possible` on the npm
+      # graph: a patched `brace-expansion` / `postcss` exists, but the reachable update
+      # path cannot land it, so no PR is opened and the alert stays open. The honest
+      # response is NOT a `dependabot.yml` ignore (that would suppress the future patch
+      # notification too) — it is the written disposition in
+      # supply-chain/npm-advisories.md plus this TRIPWIRE, which asserts that record
+      # against package-lock.json + the root `overrides`: instance-path set equality per
+      # package, the recorded version, and the thing that pins it. A RED here is normally
+      # the GOOD news (the graph moved, most likely because a patch became reachable);
+      # the response is to update/close the record, never to relax the check. It cannot
+      # detect advisories — it has no feed and no network — so Dependabot remains the npm
+      # surveillance surface; this only keeps the DISPOSITION from going quietly stale.
+      # Pure-stdlib Python (json/re/pathlib on the runner's 3.12), consistent with this
+      # job's other checks; unconditional because its inputs are checked-in files, not
+      # the Rust dependency graph. Self-test first, so a regression in the check itself
+      # is caught.
+      - name: npm advisory-record self-test
+        run: python3 scripts/tests/test_check_npm_advisory_record.py
+      - name: npm advisory-record drift check — GATING
+        run: python3 scripts/check-npm-advisory-record.py
+
       # ---- JS/npm CycloneDX SBOMs (published WASM + shared browser clients) ----
-      # [OPUS-4.8] sq-toze.27 / [GPT-5.6] sq-epbw4: SBOM both `@jeswr/sparq` and the
+      # [OPUS-4.8] sq-toze.27 / [GPT-5.6] sq-epbw4: SBOM both `@sparq-org/sparq` and the
       # `@sparq/client` code bundled into the site/GUI artifacts. Each gets a strict runtime
       # tree and a full build tree, schema-validated as CycloneDX 1.5 and uploaded together.
       # The generator derives transient member locks from the committed root lock without
@@ -247,7 +269,7 @@ jobs:
           rustup default stable
           rustup show active-toolchain
       - name: Install cargo-deny + cargo-vet + cargo-cyclonedx
-        uses: taiki-e/install-action@41049aa56687c35e0afa74eed4f09cec4f9afabf # v2.85.2
+        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
         with:
           tool: cargo-deny,cargo-vet@0.10.2,cargo-cyclonedx
 

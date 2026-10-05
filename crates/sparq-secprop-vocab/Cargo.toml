@@ -1,0 +1,52 @@
+# [OPUS-5] sq-3705 — the SHARED `sec-prop:` vocabulary crate.
+#
+# A dependency-free LEAF. It exists because the same `secx:`/`sec-prop:` IRI
+# strings were declared in THREE crates and no crate sat below all three:
+# `sparq-trust` (the declared owner) DEPENDS ON `sparq-zk`, so `sparq-zk` could
+# not import from it (a cycle), and `sparq-policy` could not either without
+# dragging sparq-zk + sparq-canon + sparq-shacl + sparq-reason into its lean
+# graph. The copies were pinned to the canonical Turtle with cross-package
+# `include_str!("../../sparq-trust/…")` reads — which also broke `cargo package`
+# file inclusion for `sparq-zk`.
+#
+# This crate owns the constants, the canonical `ontologies/secprop-ext.ttl`, and
+# the single TTL<->constant drift test. It has ZERO `[dependencies]`, so all
+# three consumers take the edge without a cycle and without growing their
+# SHIPPING dependency graph — the Turtle parser the drift tests need is a
+# `[dev-dependencies]` edge only.
+#
+# Lean by construction: plain `const &str` data, so there is nothing to
+# feature-gate here. Each consumer keeps its own default-OFF gate
+# (`sparq-trust/secprop-vocab`, `sparq-policy/secprop-leftoperands`,
+# `sparq-zk/secprop-annotations`) and takes this crate as an OPTIONAL dependency
+# behind it, so every lean default build is byte-unchanged.
+[package]
+name = "sparq-secprop-vocab"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Shared sec-prop:/secx: security-property IRI constants and canonical vocabulary"
+readme = "README.md"
+# Research-stage vocabulary for an externally UNAUDITED ZK estate (sq-qhy4): it
+# RECORDS security-property claims + their epistemic basis and asserts none of
+# them. [GPT-5.6] Published as the dependency-free leaf shared by its consumers.
+
+# [OPUS-5] docs.rs: build with all features + the `docsrs` cfg.
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+# INTENTIONALLY EMPTY — this is the leaf. Adding a dependency here re-creates the
+# cycle problem it was extracted to solve.
+[dependencies]
+
+[dev-dependencies]
+# Drift tests only: parse `ontologies/secprop-ext.ttl` and check the declared
+# subjects against the constants. Test-only, so consumers never link these.
+oxttl.workspace = true
+oxrdf.workspace = true

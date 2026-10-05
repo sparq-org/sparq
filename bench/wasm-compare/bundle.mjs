@@ -12,7 +12,7 @@
 //     recorded in the envelope.
 //   - sparq: the shipped js/wasm/sparq_wasm_bg.wasm (the `js/ build:wasm`
 //     wasm-pack output, full feature set — the `--features` list in
-//     js/package.json `build:wasm` is authoritative — @jeswr/sparq is not yet
+//     js/package.json `build:wasm` is authoritative — @sparq-org/sparq is not yet
 //     published to npm, so the pin is the repo
 //     commit + the wasm-pack/binaryen versions recorded in the envelope).
 //     The pre-bindgen artifact is separately hard-gated by scripts/ci-bench.sh
@@ -115,7 +115,7 @@ const envelope = {
     "artifacts, not equalized feature matrices.",
   run_utc: new Date().toISOString(),
   git_commit: git.status === 0 ? git.stdout.trim() : null,
-  sparq_source: `local shipped bundle (js/ build:wasm; @jeswr/sparq not yet on npm); wasm-pack ${
+  sparq_source: `local shipped bundle (js/ build:wasm; @sparq-org/sparq not yet on npm); wasm-pack ${
     wasmPack.status === 0 ? wasmPack.stdout.trim() : "unknown"
   }`,
   oxigraph_source: `npm:oxigraph@${PIN} (tarball sha256 ${tarballSha})`,

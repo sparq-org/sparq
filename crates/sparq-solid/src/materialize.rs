@@ -17,7 +17,7 @@
 //! triple set on the WAC/ACP fixtures.
 
 use crate::loader::{assemble_input_ids, strip_reserved_graphs, System};
-use crate::{AccessProvenance, AUTH_GRAPH, AUTH_NS};
+use crate::{AccessProvenance, VerifiedCredentials, AUTH_GRAPH, AUTH_NS};
 use oxrdf::{NamedNode, Term};
 use rustc_hash::FxHashSet;
 use sparq_core::dict::Dict;
@@ -154,7 +154,7 @@ pub fn materialize_wac(graph: &mut Graph) -> Result<MaterializeStats, String> {
     let rules = wac_rules()?;
     let mut dict = Dict::new();
     // WAC has no creator/owner vocabulary; provenance is ignored (the loader skips it).
-    let facts = assemble_input_ids(&mut dict, graph, System::Wac, &AccessProvenance::new())?;
+    let facts = assemble_input_ids(&mut dict, graph, System::Wac, &AccessProvenance::new(), &VerifiedCredentials::new())?;
     let closure = eval(&mut dict, &facts, rules);
     strip_reserved_graphs(graph);
     let mut stats = install_auth_view(graph, &dict, &closure);
@@ -227,12 +227,39 @@ pub fn materialize_acp_with(
     graph: &mut Graph,
     provenance: &AccessProvenance,
 ) -> Result<MaterializeStats, String> {
+    materialize_acp_with_credentials(graph, provenance, &VerifiedCredentials::new())
+}
+
+/// Materialize the ACP auth view from the `.acr` graphs PLUS the TRUSTED creator/owner facts
+/// in `provenance` AND the TRUSTED verified-credential holdings in `credentials`, resolving
+/// `acp:vc` matchers ([SONNET-4.6] sq-ysv3u).
+///
+/// The free-function form of [`crate::PodStore::materialize_acp_with_credentials`], and the
+/// credential twin of [`materialize_acp_with`]: the loader additionally synthesizes
+/// `<webid> solidx:holdsVc <requirement>` facts from `credentials` — the trusted channel for
+/// "which `acp:vc` requirements this agent has been VERIFIED to satisfy". Those facts are
+/// **never** read from pod or `.acr` content (design doc §2.4), so an agent cannot self-grant
+/// by writing a forged holding into a document they control.
+///
+/// `materialize_acp_with(graph, prov)` is exactly
+/// `materialize_acp_with_credentials(graph, prov, &VerifiedCredentials::new())` — with no
+/// credential supplied, no `acp:vc` matcher ever grants (fail-closed).
+///
+/// # Errors
+///
+/// As [`materialize_acp_with`], and additionally if a credential holder's WebID collides with
+/// the reserved principal encoding.
+pub fn materialize_acp_with_credentials(
+    graph: &mut Graph,
+    provenance: &AccessProvenance,
+    credentials: &VerifiedCredentials,
+) -> Result<MaterializeStats, String> {
     #[cfg(not(target_arch = "wasm32"))]
     let t0 = Instant::now();
     // Fallible work first, mutation last — see [`materialize_wac`].
     let rules = acp_rules()?;
     let mut dict = Dict::new();
-    let facts = assemble_input_ids(&mut dict, graph, System::Acp, provenance)?;
+    let facts = assemble_input_ids(&mut dict, graph, System::Acp, provenance, credentials)?;
     // Chain the three strata entirely at the id level, in ONE dictionary: each stratum's
     // closure is the next one's fact set, so a negated predicate is complete before the
     // stratum that negates it runs (design doc §3.5) and nothing round-trips through text.
@@ -327,7 +354,7 @@ mod tests {
     /// The WAC auth view as the TEXT engine derives it (the pre-sq-zgbso.4 pipeline).
     fn wac_text(graph: &mut Graph) -> Result<MaterializeStats, String> {
         strip_reserved_graphs(graph);
-        let input = assemble_input(graph, System::Wac, &AccessProvenance::new())?;
+        let input = assemble_input(graph, System::Wac, &AccessProvenance::new(), &VerifiedCredentials::new())?;
         let src = format!("{}\n{}\n{}", input, COMMON_RULES, WAC_RULES);
         let mut dict = Dict::new();
         let closure = reason_n3(&mut dict, &src)?;
@@ -335,9 +362,13 @@ mod tests {
     }
 
     /// The ACP auth view as the TEXT engine derives it (the pre-sq-zgbso.4 pipeline).
-    fn acp_text(graph: &mut Graph, provenance: &AccessProvenance) -> Result<MaterializeStats, String> {
+    fn acp_text(
+        graph: &mut Graph,
+        provenance: &AccessProvenance,
+        credentials: &VerifiedCredentials,
+    ) -> Result<MaterializeStats, String> {
         strip_reserved_graphs(graph);
-        let input = assemble_input(graph, System::Acp, provenance)?;
+        let input = assemble_input(graph, System::Acp, provenance, credentials)?;
         let accepts = format!("{}\n{}\n{}", input, COMMON_RULES, ACP_A);
         let mut dict = Dict::new();
         let closure = reason_n3_stratified(&mut dict, &[&accepts, ACP_B, ACP_C])?;
@@ -389,7 +420,7 @@ mod tests {
         let mut a = Graph::load_dataset(&src, "nquads").expect("fixture loads");
         let mut b = Graph::load_dataset(&src, "nquads").expect("fixture loads");
         let prov = AccessProvenance::new();
-        acp_text(&mut a, &prov).expect("text ACP");
+        acp_text(&mut a, &prov, &VerifiedCredentials::new()).expect("text ACP");
         let stats = materialize_acp_with(&mut b, &prov).expect("compiled ACP");
         assert_same(&auth_view(&a), &auth_view(&b), "ACP");
         assert_eq!(stats.strata_facts.len(), 3, "ACP runs three strata");
@@ -410,7 +441,7 @@ mod tests {
         }
         let mut a = Graph::load_dataset(&src, "nquads").expect("fixture loads");
         let mut b = Graph::load_dataset(&src, "nquads").expect("fixture loads");
-        acp_text(&mut a, &prov).expect("text ACP");
+        acp_text(&mut a, &prov, &VerifiedCredentials::new()).expect("text ACP");
         materialize_acp_with(&mut b, &prov).expect("compiled ACP");
         assert_same(&auth_view(&a), &auth_view(&b), "ACP + provenance");
     }
@@ -428,13 +459,15 @@ mod tests {
             let prov = AccessProvenance::new();
 
             let mut dict = Dict::new();
-            let ids = assemble_input_ids(&mut dict, &graph, system, &prov).expect("id facts");
+            let ids = assemble_input_ids(&mut dict, &graph, system, &prov, &VerifiedCredentials::new())
+                .expect("id facts");
             let direct: BTreeSet<String> = ids
                 .iter()
                 .map(|t| format!("{} {} {}", dict.term(t[0]), dict.term(t[1]), dict.term(t[2])))
                 .collect();
 
-            let text = assemble_input(&graph, system, &prov).expect("text facts");
+            let text = assemble_input(&graph, system, &prov, &VerifiedCredentials::new())
+                .expect("text facts");
             let mut tdict = Dict::new();
             let parsed = sparq_reason::n3::compiled::intern_facts(&mut tdict, &text)
                 .expect("the text entry re-parses");

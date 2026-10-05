@@ -36,19 +36,38 @@
 //!
 //! # Honest scope boundary (load-bearing)
 //! - **In scope:** the off-circuit DI verification for the *whole-credential*
-//!   `rdfc` suites `eddsa-rdfc-2022` (Ed25519) + `ecdsa-rdfc-2019` (ECDSA P-256),
-//!   then re-commit + record provenance.
+//!   `rdfc` suites `eddsa-rdfc-2022` (Ed25519) + `ecdsa-rdfc-2019` (ECDSA, **both**
+//!   published profiles — P-256/SHA-256 and P-384/SHA-384), then re-commit +
+//!   record provenance.
 //! - **NOT in scope:** `bbs-2023` / `ecdsa-sd-2023` selective disclosure (the
-//!   natural per-leaf match, but a real BBS verifier is not in-repo — deferred
-//!   seam, design §5.3); **in-circuit** VC-proof verification (explicitly
-//!   excluded — would be an overclaim); a full **JSON-LD processor** (this bridge
-//!   operates over the credential's RDF graph — its canonical N-Quads — which is
-//!   the form the DI suites hash; producing that RDF from a JSON-LD document is
-//!   `oxjsonld`'s job, a separate ingest step). The host **does not fetch** the
-//!   issuer key from a `did:`/URL — the caller supplies the resolved key bytes.
-//! - **P-384 ECDSA** (`ecdsa-rdfc-2019` with a P-384 key, SHA-384 profile) is
-//!   rejected ([`VcBridgeError::UnsupportedKeyCurve`]); only the P-256 / SHA-256
-//!   profile is implemented. (Follow-up seam.)
+//!   natural per-leaf match, but a real BBS verifier is not in-repo). Those suites
+//!   are still rejected by every function in THIS module; they are handled by the
+//!   DELEGATING seam [`crate::vc_bridge_sd`] (sq-u5y1f, design §5.3), which asserts
+//!   no selective-disclosure soundness of its own. Also NOT in scope: **in-circuit**
+//!   VC-proof verification (explicitly excluded — would be an overclaim). The host
+//!   **does not fetch** the issuer key from a `did:`/URL — the caller supplies the
+//!   resolved key bytes.
+//! - **This module is RDF-native**: it operates over the credential's RDF graph —
+//!   its canonical N-Quads, the form the DI suites hash. Turning a JSON-LD VC
+//!   document into that RDF is the ADDITIVE, layered-on-top job of
+//!   [`crate::vc_bridge_json`] (sq-txg1y); nothing here parses JSON.
+//!
+//! # The two `ecdsa-rdfc-2019` curve profiles (sq-txg1y) [OPUS-5]
+//! W3C *Data Integrity ECDSA Cryptosuites v1.0* gives the **one** cryptosuite
+//! token `ecdsa-rdfc-2019` **two** profiles, selected by the issuer key's curve —
+//! and the hash changes with it (§3.1 *ECDSA Algorithms*):
+//!
+//! | issuer key | DI hash | `hashData` width | signature |
+//! | --- | --- | --- | --- |
+//! | P-256 (SEC1 33B/65B) | SHA-256 | 32+32 = 64 B | 64 B `r‖s` |
+//! | P-384 (SEC1 49B/97B) | SHA-384 | 48+48 = 96 B | 96 B `r‖s` |
+//!
+//! Because the token does not name the curve, the profile is resolved from the
+//! **key** ([`EcdsaProfile::from_sec1_key`]) BEFORE the hash is taken — a P-384
+//! key hashed under SHA-256 would produce a `hashData` no conforming issuer ever
+//! signed, so the two must not be mixed. A key length matching neither profile is
+//! [`VcBridgeError::MalformedPublicKey`]; a length matching a curve OUTSIDE the
+//! suite's two profiles (P-521) is [`VcBridgeError::UnsupportedKeyCurve`].
 //!
 //! # Soundness posture
 //! NOT externally audited (sq-qhy4). This module asserts **no** in-circuit or
@@ -63,19 +82,70 @@ use crate::commit::{commit_triples, CommitError, GraphCommitment};
 use crate::field::Fr;
 use crate::registry::RegistryEntry;
 use oxrdf::{NamedNode, Triple};
-use sha2::{Digest, Sha256};
+use sha2::{Digest, Sha256, Sha384};
 
-/// The W3C Data-Integrity cryptosuites this bridge verifies off-circuit. Only the
-/// whole-credential `rdfc` suites are in scope (design §5.4); the
-/// selective-disclosure suites (`bbs-2023`, `ecdsa-sd-2023`) are a deferred seam.
+/// The W3C Data-Integrity cryptosuites this bridge verifies off-circuit **itself**.
+/// Only the whole-credential `rdfc` suites are in scope (design §5.4); the
+/// selective-disclosure suites (`bbs-2023`, `ecdsa-sd-2023`) are delegated to a
+/// host verifier through [`crate::vc_bridge_sd::SdCryptosuite`] — a deliberately
+/// separate type, so "sparq verified this" and "a host verifier verified this"
+/// cannot be confused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VcCryptosuite {
     /// `eddsa-rdfc-2022` — Ed25519 over the RDFC10 canonical credential, SHA-256
     /// hash (W3C *Data Integrity EdDSA Cryptosuites v1.0*).
     EddsaRdfc2022,
-    /// `ecdsa-rdfc-2019` — ECDSA P-256 over the RDFC10 canonical credential,
-    /// SHA-256 hash (W3C *Data Integrity ECDSA Cryptosuites v1.0*, P-256 profile).
+    /// `ecdsa-rdfc-2019` — ECDSA over the RDFC10 canonical credential (W3C *Data
+    /// Integrity ECDSA Cryptosuites v1.0*). The **curve profile is not part of the
+    /// token**: a P-256 key selects SHA-256 and a P-384 key selects SHA-384, and
+    /// the bridge resolves which from the issuer key ([`EcdsaProfile`]).
     EcdsaRdfc2019,
+}
+
+/// The curve profile an [`VcCryptosuite::EcdsaRdfc2019`] proof was created under,
+/// resolved from the issuer key because the cryptosuite token does not name it
+/// (sq-txg1y). W3C *Data Integrity ECDSA Cryptosuites v1.0* §3.1 publishes exactly
+/// these two; the DI hash function changes with the curve, so this MUST be settled
+/// before `hashData` is derived.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EcdsaProfile {
+    /// P-256 keys: SHA-256 DI hash, 64-byte `hashData`, 64-byte `r‖s` signature.
+    P256,
+    /// P-384 keys: SHA-384 DI hash, 96-byte `hashData`, 96-byte `r‖s` signature.
+    P384,
+}
+
+impl EcdsaProfile {
+    /// Resolve the profile from the SEC1 encoding of the issuer verification key.
+    ///
+    /// SEC1 point encodings are curve-length-determined, so the byte length alone
+    /// identifies the curve: compressed is `1 + ⌈log256 p⌉`, uncompressed is
+    /// `1 + 2⌈log256 p⌉`. Fail-closed and total —
+    ///
+    /// | length | outcome |
+    /// | --- | --- |
+    /// | 33, 65 | [`EcdsaProfile::P256`] |
+    /// | 49, 97 | [`EcdsaProfile::P384`] |
+    /// | 67, 133 | [`VcBridgeError::UnsupportedKeyCurve`] (P-521 — a real curve, but not one of the suite's two profiles) |
+    /// | anything else | [`VcBridgeError::MalformedPublicKey`] |
+    ///
+    /// Length is a *necessary* condition, not a sufficient one: it selects which
+    /// curve's parser runs, and that parser then rejects a point that is not on
+    /// the curve. A `secp256k1` key is indistinguishable from P-256 **by length**
+    /// and is caught one step later, when `p256`'s `from_sec1_bytes` finds the
+    /// point off the P-256 curve.
+    pub fn from_sec1_key(pk_bytes: &[u8]) -> Result<EcdsaProfile, VcBridgeError> {
+        match pk_bytes.len() {
+            33 | 65 => Ok(EcdsaProfile::P256),
+            49 | 97 => Ok(EcdsaProfile::P384),
+            // P-521 SEC1 (compressed 67B / uncompressed 133B). vc-di-ecdsa
+            // publishes no P-521 profile, so this is a KNOWN curve that is
+            // deliberately out of scope — reported as such rather than as
+            // "malformed", which would misdescribe well-formed bytes.
+            67 | 133 => Err(VcBridgeError::UnsupportedKeyCurve),
+            _ => Err(VcBridgeError::MalformedPublicKey),
+        }
+    }
 }
 
 impl VcCryptosuite {
@@ -89,7 +159,10 @@ impl VcCryptosuite {
     }
 
     /// Parse a W3C cryptosuite token. Fail-closed: an unknown / out-of-scope suite
-    /// (incl. `bbs-2023`, `ecdsa-sd-2023`) returns `None`, never a default.
+    /// returns `None`, never a default. The selective-disclosure tokens
+    /// (`bbs-2023`, `ecdsa-sd-2023`) are out of scope HERE and stay so — they
+    /// resolve only through [`crate::vc_bridge_sd::SdCryptosuite::from_token`], so
+    /// an SD credential can never reach this module's Ed25519/ECDSA paths.
     pub fn from_token(token: &str) -> Option<Self> {
         match token {
             "eddsa-rdfc-2022" => Some(VcCryptosuite::EddsaRdfc2022),
@@ -107,8 +180,12 @@ pub enum VcBridgeError {
     /// The `proof.cryptosuite` token is unknown or out of the bridge's scope
     /// (e.g. `bbs-2023`). Carries the offending token.
     UnsupportedCryptosuite(String),
-    /// The issuer public key is for a curve this bridge does not implement (e.g.
-    /// a P-384 ECDSA key — only the P-256 / SHA-256 profile is in scope).
+    /// The issuer public key is for a **known** elliptic curve that
+    /// `ecdsa-rdfc-2019` publishes no profile for — currently only P-521 (SEC1
+    /// 67B/133B). Both profiles the suite *does* define, P-256/SHA-256 and
+    /// P-384/SHA-384, are implemented (sq-txg1y); bytes matching neither any
+    /// profile nor a recognised out-of-scope curve are
+    /// [`VcBridgeError::MalformedPublicKey`], not this.
     UnsupportedKeyCurve,
     /// The issuer public-key bytes do not parse as a valid key for the suite.
     MalformedPublicKey,
@@ -121,6 +198,33 @@ pub enum VcBridgeError {
     Commit(CommitError),
     /// The credential graph is empty (nothing to commit).
     EmptyCredential,
+    /// [OPUS-5] sq-txg1y — the JSON envelope layer ([`crate::vc_bridge_json`])
+    /// could not decompose the document into a DI-secured VC: bad JSON, a missing
+    /// or non-object `proof`, a proof set/chain, a missing `cryptosuite` /
+    /// `verificationMethod` / `proofValue`, or a `proofValue` that is not a
+    /// decodable `z` (base58-btc) multibase. Carries the specific reason.
+    MalformedVcJson(String),
+    /// [OPUS-5] sq-txg1y — expanding the JSON-LD document to RDF failed. The
+    /// commonest cause by far is a remote `@context` the caller did not supply:
+    /// the bridge performs NO network access, so an unlisted context URL is
+    /// refused (by name, in this message) rather than fetched.
+    JsonLdExpansion(String),
+    /// [OPUS-5] sq-u5y1f — a **selective-disclosure** suite (`bbs-2023` /
+    /// `ecdsa-sd-2023`) was presented to [`crate::vc_bridge_sd`] but no host
+    /// verifier able to check it was supplied (none at all, or one whose
+    /// [`crate::vc_bridge_sd::SelectiveDisclosureVerifier::supports`] said no).
+    /// sparq implements NO selective-disclosure verifier, so this is the DEFAULT
+    /// outcome for those suites. Carries the offending token.
+    SelectiveDisclosureUnavailable(String),
+    /// [OPUS-5] sq-u5y1f — the host-supplied selective-disclosure verifier
+    /// REJECTED the derived proof. Carries that verifier's verbatim reason; the
+    /// decision is the host's, not sparq's (which is why it is a distinct variant
+    /// from [`VcBridgeError::VerificationFailed`], the in-repo `rdfc` outcome).
+    SelectiveDisclosureRejected(String),
+    /// [OPUS-5] sq-txg1y — the JSON-LD expansion produced quads outside the
+    /// default graph. Refused rather than flattened, because flattening would
+    /// change the canonical N-Quads the Data-Integrity hash covers.
+    NamedGraphUnsupported,
 }
 
 impl std::fmt::Display for VcBridgeError {
@@ -133,7 +237,7 @@ impl std::fmt::Display for VcBridgeError {
             VcBridgeError::UnsupportedKeyCurve => {
                 write!(
                     f,
-                    "unsupported issuer key curve (only Ed25519 / ECDSA-P256 are in scope)"
+                    "unsupported issuer key curve (in scope: Ed25519, ECDSA P-256, ECDSA P-384)"
                 )
             }
             VcBridgeError::MalformedPublicKey => write!(f, "malformed issuer public key"),
@@ -143,6 +247,28 @@ impl std::fmt::Display for VcBridgeError {
             }
             VcBridgeError::Commit(e) => write!(f, "re-commit failed: {}", e),
             VcBridgeError::EmptyCredential => write!(f, "credential graph is empty"),
+            VcBridgeError::MalformedVcJson(why) => {
+                write!(f, "malformed VC JSON envelope: {}", why)
+            }
+            VcBridgeError::JsonLdExpansion(why) => {
+                write!(f, "JSON-LD expansion to RDF failed: {}", why)
+            }
+            VcBridgeError::SelectiveDisclosureUnavailable(t) => write!(
+                f,
+                "no selective-disclosure verifier available for cryptosuite {}; sparq implements \
+                 none and delegates it (supply one via SelectiveDisclosureVerifier)",
+                t
+            ),
+            VcBridgeError::SelectiveDisclosureRejected(why) => write!(
+                f,
+                "the host selective-disclosure verifier rejected the derived proof: {}",
+                why
+            ),
+            VcBridgeError::NamedGraphUnsupported => write!(
+                f,
+                "the VC expanded to quads outside the default graph; the bridge hashes a \
+                 single default graph and will not flatten a named one"
+            ),
         }
     }
 }
@@ -167,23 +293,67 @@ fn hash_data(proof_config_canonical: &[u8], credential_canonical: &[u8]) -> [u8;
     out
 }
 
-/// Build the signed **hashData** from the credential + proof-config **triples**:
-/// RDFC10-canonicalise each (the DI suites canonicalise before hashing), then
-/// `proofConfigHash || documentHash`. This is the off-circuit transform every
-/// supported suite shares — the suites differ only in the SIGNATURE check over
-/// this 64-byte hashData.
-pub fn hash_data_from_triples(
+/// The SHA-384 twin of [`hash_data`] — the `ecdsa-rdfc-2019` **P-384** profile
+/// (sq-txg1y). Identical construction, wider digest:
+/// `SHA-384(proofConfig) || SHA-384(document)`, 96 bytes.
+fn hash_data_384(proof_config_canonical: &[u8], credential_canonical: &[u8]) -> [u8; 96] {
+    let proof_hash = Sha384::digest(proof_config_canonical);
+    let doc_hash = Sha384::digest(credential_canonical);
+    let mut out = [0u8; 96];
+    out[..48].copy_from_slice(&proof_hash);
+    out[48..].copy_from_slice(&doc_hash);
+    out
+}
+
+/// RDFC10-canonicalise the credential + proof-config triples and return their
+/// canonical N-Quads as `(proof_config, credential)` — the two byte strings the DI
+/// hashing step digests, in the order it concatenates them. Shared by both the
+/// SHA-256 and SHA-384 `hashData` derivations so the canonicalization step (and
+/// its fail-closed error mapping) exists exactly once.
+///
+/// `pub(crate)` so the selective-disclosure seam ([`crate::vc_bridge_sd`]) can
+/// offer the SAME canonicalization to a host verifier — the SD suites canonicalise
+/// identically, and two RDFC10 implementations disagreeing would silently change
+/// the bytes a proof covers.
+pub(crate) fn canonical_nquads(
     credential: &[Triple],
     proof_config: &[Triple],
-) -> Result<[u8; 64], VcBridgeError> {
+) -> Result<(String, String), VcBridgeError> {
     let cred_canon = crate::canon::canonicalize_triples(credential)
         .map_err(|e| VcBridgeError::Commit(CommitError::Canon(e)))?;
     let proof_canon = crate::canon::canonicalize_triples(proof_config)
         .map_err(|e| VcBridgeError::Commit(CommitError::Canon(e)))?;
-    Ok(hash_data(
-        proof_canon.to_nquads().as_bytes(),
-        cred_canon.to_nquads().as_bytes(),
-    ))
+    Ok((proof_canon.to_nquads(), cred_canon.to_nquads()))
+}
+
+/// Build the signed **hashData** from the credential + proof-config **triples**:
+/// RDFC10-canonicalise each (the DI suites canonicalise before hashing), then
+/// `proofConfigHash || documentHash`. This is the **SHA-256** derivation, shared by
+/// `eddsa-rdfc-2022` and the `ecdsa-rdfc-2019` **P-256** profile — the suites
+/// differ only in the SIGNATURE check over this 64-byte hashData.
+///
+/// The `ecdsa-rdfc-2019` **P-384** profile hashes with SHA-384 instead — see
+/// [`hash_data_from_triples_sha384`]. Feeding a P-384 proof the 64-byte hashData
+/// from here cannot verify (the issuer signed 96 different bytes), which is why
+/// [`verify_source_proof`] resolves the curve profile before choosing.
+pub fn hash_data_from_triples(
+    credential: &[Triple],
+    proof_config: &[Triple],
+) -> Result<[u8; 64], VcBridgeError> {
+    let (proof_nq, cred_nq) = canonical_nquads(credential, proof_config)?;
+    Ok(hash_data(proof_nq.as_bytes(), cred_nq.as_bytes()))
+}
+
+/// The **SHA-384** twin of [`hash_data_from_triples`] — the `ecdsa-rdfc-2019`
+/// **P-384** profile's 96-byte `hashData` (`SHA-384(proofConfig) ||
+/// SHA-384(document)`, W3C vc-di-ecdsa §3.1 / §A.3). Same canonicalization, same
+/// proof-config-first concatenation order; only the digest widens. [OPUS-5] sq-txg1y.
+pub fn hash_data_from_triples_sha384(
+    credential: &[Triple],
+    proof_config: &[Triple],
+) -> Result<[u8; 96], VcBridgeError> {
+    let (proof_nq, cred_nq) = canonical_nquads(credential, proof_config)?;
+    Ok(hash_data_384(proof_nq.as_bytes(), cred_nq.as_bytes()))
 }
 
 /// Verify an Ed25519 (`eddsa-rdfc-2022`) signature over `hash_data`. Fail-closed:
@@ -219,15 +389,33 @@ fn verify_ecdsa_p256(
     hash_data: &[u8],
 ) -> Result<(), VcBridgeError> {
     use p256::ecdsa::{signature::Verifier, Signature, VerifyingKey};
-    // A P-384 key (SEC1 compressed 49B / uncompressed 97B) is the well-known
-    // OUT-OF-SCOPE curve for the `ecdsa-rdfc-2019` SHA-384 profile — distinguish it
-    // from genuinely malformed bytes so the caller gets the honest reason.
-    if pk_bytes.len() == 49 || pk_bytes.len() == 97 {
-        return Err(VcBridgeError::UnsupportedKeyCurve);
-    }
     let vk =
         VerifyingKey::from_sec1_bytes(pk_bytes).map_err(|_| VcBridgeError::MalformedPublicKey)?;
     // Fixed-width `(r || s)` 64-byte signature (the DI ECDSA proofValue form).
+    let sig = Signature::from_slice(sig_bytes).map_err(|_| VcBridgeError::MalformedSignature)?;
+    vk.verify(hash_data, &sig)
+        .map_err(|_| VcBridgeError::VerificationFailed)
+}
+
+/// Verify an ECDSA-P384 (`ecdsa-rdfc-2019`, **P-384 / SHA-384** profile — W3C
+/// vc-di-ecdsa §A.3) signature over the 96-byte `hash_data`. Fail-closed: an SEC1
+/// public key (compressed 49B or uncompressed 97B) and a 96-byte fixed-width
+/// `(r,s)` signature are required. PUBLIC data only. [OPUS-5] sq-txg1y.
+///
+/// NOTE (the profile's whole point): `p384`'s `Verifier::verify` digests the raw
+/// message with **SHA-384** before the curve operation, matching the suite's
+/// "hash the hashData" step for this profile — exactly as the P-256 path above
+/// digests with SHA-256. The `hash_data` handed in must therefore be the SHA-384
+/// concatenation ([`hash_data_from_triples_sha384`]), not the SHA-256 one.
+fn verify_ecdsa_p384(
+    pk_bytes: &[u8],
+    sig_bytes: &[u8],
+    hash_data: &[u8],
+) -> Result<(), VcBridgeError> {
+    use p384::ecdsa::{signature::Verifier, Signature, VerifyingKey};
+    let vk =
+        VerifyingKey::from_sec1_bytes(pk_bytes).map_err(|_| VcBridgeError::MalformedPublicKey)?;
+    // Fixed-width `(r || s)` 96-byte signature (the DI ECDSA proofValue form).
     let sig = Signature::from_slice(sig_bytes).map_err(|_| VcBridgeError::MalformedSignature)?;
     vk.verify(hash_data, &sig)
         .map_err(|_| VcBridgeError::VerificationFailed)
@@ -244,9 +432,16 @@ fn verify_ecdsa_p256(
 ///   options the suite canonicalises).
 /// - `suite` — the W3C cryptosuite.
 /// - `issuer_pk` — the resolved issuer verification key bytes (Ed25519 32B; ECDSA
-///   P-256 SEC1). The host does NOT dereference a `did:`/URL — supply the bytes.
+///   SEC1 — P-256 33B/65B or P-384 49B/97B). The host does NOT dereference a
+///   `did:`/URL — supply the bytes.
 /// - `signature` — the proof's signature bytes (`proofValue`, decoded to raw
-///   bytes: Ed25519 64B; ECDSA-P256 64B fixed-width).
+///   bytes: Ed25519 64B; ECDSA-P256 64B, ECDSA-P384 96B, both fixed-width `r‖s`).
+///
+/// For `ecdsa-rdfc-2019` the **curve profile is resolved from `issuer_pk` first**
+/// ([`EcdsaProfile::from_sec1_key`]), because the DI hash depends on it: P-256
+/// hashes with SHA-256 (64-byte `hashData`), P-384 with SHA-384 (96-byte). Only
+/// then is the matching `hashData` derived — deriving it before the profile is
+/// known would hand a P-384 proof the wrong bytes and fail every valid signature.
 ///
 /// Fail-closed: returns `Err` on any malformed input or a non-verifying proof;
 /// `Ok(())` ONLY on a cryptographically valid DI proof. Asserts no in-circuit /
@@ -258,10 +453,24 @@ pub fn verify_source_proof(
     issuer_pk: &[u8],
     signature: &[u8],
 ) -> Result<(), VcBridgeError> {
-    let hd = hash_data_from_triples(credential, proof_config)?;
     match suite {
-        VcCryptosuite::EddsaRdfc2022 => verify_eddsa(issuer_pk, signature, &hd),
-        VcCryptosuite::EcdsaRdfc2019 => verify_ecdsa_p256(issuer_pk, signature, &hd),
+        VcCryptosuite::EddsaRdfc2022 => {
+            let hd = hash_data_from_triples(credential, proof_config)?;
+            verify_eddsa(issuer_pk, signature, &hd)
+        }
+        // Resolve the curve profile BEFORE hashing — see the module docs' profile
+        // table. A rejected key never reaches the (comparatively expensive)
+        // canonicalization step either, which is a happy side effect, not the point.
+        VcCryptosuite::EcdsaRdfc2019 => match EcdsaProfile::from_sec1_key(issuer_pk)? {
+            EcdsaProfile::P256 => {
+                let hd = hash_data_from_triples(credential, proof_config)?;
+                verify_ecdsa_p256(issuer_pk, signature, &hd)
+            }
+            EcdsaProfile::P384 => {
+                let hd = hash_data_from_triples_sha384(credential, proof_config)?;
+                verify_ecdsa_p384(issuer_pk, signature, &hd)
+            }
+        },
     }
 }
 
@@ -663,18 +872,180 @@ mod tests {
         ));
     }
 
+    // --- ECDSA P-384 (ecdsa-rdfc-2019, SHA-384 profile): the REAL verify path ----
+    // [OPUS-5] sq-txg1y.
+
     #[test]
-    fn ecdsa_p384_key_size_is_unsupported_curve() {
+    fn ecdsa_p384_real_proof_verifies_and_ingests() {
+        use p384::ecdsa::{signature::Signer, Signature, SigningKey};
         let cred = credential();
         let cfg = proof_config(VcCryptosuite::EcdsaRdfc2019);
-        // A P-384 SEC1 compressed key is 49 bytes — known curve, out of scope.
+        // The P-384 profile signs the SHA-384 hashData, NOT the SHA-256 one.
+        let hd = hash_data_from_triples_sha384(&cred, &cfg).unwrap();
+        assert_eq!(hd.len(), 96, "P-384 hashData is 48+48 bytes");
+
+        let sk = SigningKey::from_slice(&[9u8; 48]).unwrap();
+        let vk = sk.verifying_key();
+        let sig: Signature = sk.sign(&hd);
+        assert_eq!(sig.to_bytes().len(), 96, "P-384 r||s is 48+48 bytes");
+        // SEC1 compressed public-key bytes (the DI ECDSA verification-key form).
+        let pk_sec1 = vk.to_encoded_point(true).as_bytes().to_vec();
+        assert_eq!(pk_sec1.len(), 49);
+
+        verify_source_proof(
+            &cred,
+            &cfg,
+            VcCryptosuite::EcdsaRdfc2019,
+            &pk_sec1,
+            &sig.to_bytes(),
+        )
+        .expect("genuine P-384 ecdsa-rdfc-2019 proof must verify");
+
+        let ing = ingest_verified_vc(
+            NamedNode::new("https://dmv.example/vc/lic-7").unwrap(),
+            &cred,
+            &cfg,
+            VcCryptosuite::EcdsaRdfc2019,
+            &pk_sec1,
+            &sig.to_bytes(),
+            salt_from_bytes(&[4u8; 32]),
+        )
+        .expect("verified P-384 VC must ingest");
+        // The provenance token is the SAME for both curve profiles — the curve is
+        // not part of the W3C cryptosuite identifier.
+        assert_eq!(
+            ing.registry_entry().source_cryptosuite.as_deref(),
+            Some("ecdsa-rdfc-2019")
+        );
+    }
+
+    /// The load-bearing mutation for the profile split: a P-384 key signing the
+    /// **SHA-256** `hashData` must NOT verify. If the dispatch ever hashed P-384
+    /// proofs with SHA-256, this would go green and
+    /// `ecdsa_p384_real_proof_verifies_and_ingests` would go red — so the pair
+    /// pins the profile to the curve in both directions.
+    #[test]
+    fn ecdsa_p384_rejects_the_sha256_hash_data() {
+        use p384::ecdsa::{signature::Signer, Signature, SigningKey};
+        let cred = credential();
+        let cfg = proof_config(VcCryptosuite::EcdsaRdfc2019);
+        let wrong_hd = hash_data_from_triples(&cred, &cfg).unwrap(); // SHA-256, 64B
+        let sk = SigningKey::from_slice(&[9u8; 48]).unwrap();
+        let sig: Signature = sk.sign(&wrong_hd);
         assert!(matches!(
             verify_source_proof(
                 &cred,
                 &cfg,
                 VcCryptosuite::EcdsaRdfc2019,
-                &[0x02u8; 49],
+                sk.verifying_key().to_encoded_point(true).as_bytes(),
+                &sig.to_bytes(),
+            ),
+            Err(VcBridgeError::VerificationFailed)
+        ));
+    }
+
+    #[test]
+    fn ecdsa_p384_tampered_fails_closed() {
+        use p384::ecdsa::{signature::Signer, Signature, SigningKey};
+        let cred = credential();
+        let cfg = proof_config(VcCryptosuite::EcdsaRdfc2019);
+        let hd = hash_data_from_triples_sha384(&cred, &cfg).unwrap();
+        let sk = SigningKey::from_slice(&[9u8; 48]).unwrap();
+        let sig: Signature = sk.sign(&hd);
+
+        let mut tampered = credential();
+        tampered.truncate(1); // drop a triple -> different canonical form
+        assert!(matches!(
+            verify_source_proof(
+                &tampered,
+                &cfg,
+                VcCryptosuite::EcdsaRdfc2019,
+                sk.verifying_key().to_encoded_point(true).as_bytes(),
+                &sig.to_bytes(),
+            ),
+            Err(VcBridgeError::VerificationFailed)
+        ));
+        // A P-256-width (64B) signature under a P-384 key is a length mismatch.
+        assert!(matches!(
+            verify_source_proof(
+                &cred,
+                &cfg,
+                VcCryptosuite::EcdsaRdfc2019,
+                sk.verifying_key().to_encoded_point(true).as_bytes(),
                 &[0u8; 64],
+            ),
+            Err(VcBridgeError::MalformedSignature)
+        ));
+    }
+
+    /// The two profiles produce DIFFERENT `hashData` for the same documents — a
+    /// 64-byte SHA-256 concatenation and a 96-byte SHA-384 one — so a
+    /// SHA-256-derived prefix can never coincide with the SHA-384 derivation.
+    #[test]
+    fn sha256_and_sha384_hash_data_differ() {
+        let cred = credential();
+        let cfg = proof_config(VcCryptosuite::EcdsaRdfc2019);
+        let hd256 = hash_data_from_triples(&cred, &cfg).unwrap();
+        let hd384 = hash_data_from_triples_sha384(&cred, &cfg).unwrap();
+        assert_ne!(&hd384[..64], &hd256[..], "profiles must not collide");
+        // Same construction, wider digest: the proof-config half comes FIRST in
+        // both, so a transposed SHA-384 concatenation would fail here.
+        let cfg_nquads = crate::canon::canonicalize_triples(&cfg).unwrap().to_nquads();
+        let cfg_hash = Sha384::digest(cfg_nquads.as_bytes());
+        assert_eq!(&hd384[..48], &cfg_hash[..]);
+    }
+
+    #[test]
+    fn ecdsa_profile_resolution_is_fail_closed() {
+        // Length alone decides which curve's parser runs (the parser then rejects
+        // an off-curve point), so this is a pure length classification.
+        let key_of = |len: usize| vec![0u8; len];
+        // The two published profiles, compressed and uncompressed.
+        for len in [33usize, 65] {
+            assert_eq!(
+                EcdsaProfile::from_sec1_key(&key_of(len)).unwrap(),
+                EcdsaProfile::P256
+            );
+        }
+        for len in [49usize, 97] {
+            assert_eq!(
+                EcdsaProfile::from_sec1_key(&key_of(len)).unwrap(),
+                EcdsaProfile::P384
+            );
+        }
+        // P-521: a real curve, but vc-di-ecdsa publishes no profile for it.
+        for len in [67usize, 133] {
+            assert!(matches!(
+                EcdsaProfile::from_sec1_key(&key_of(len)),
+                Err(VcBridgeError::UnsupportedKeyCurve)
+            ));
+        }
+        // Everything else is malformed, not "some other curve".
+        for len in [0usize, 1, 32, 34, 48, 64, 96, 200] {
+            assert!(
+                matches!(
+                    EcdsaProfile::from_sec1_key(&key_of(len)),
+                    Err(VcBridgeError::MalformedPublicKey)
+                ),
+                "{}-byte key must be MalformedPublicKey",
+                len
+            );
+        }
+    }
+
+    /// A P-521-length key reaches the caller as the honest "known curve, out of
+    /// scope" reason rather than "malformed" — and never touches the signature.
+    #[test]
+    fn ecdsa_p521_key_size_is_unsupported_curve() {
+        let cred = credential();
+        let cfg = proof_config(VcCryptosuite::EcdsaRdfc2019);
+        assert!(matches!(
+            verify_source_proof(
+                &cred,
+                &cfg,
+                VcCryptosuite::EcdsaRdfc2019,
+                &[0x02u8; 67],
+                &[0u8; 132],
             ),
             Err(VcBridgeError::UnsupportedKeyCurve)
         ));

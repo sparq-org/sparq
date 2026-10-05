@@ -1,6 +1,19 @@
 #!/usr/bin/env python3
-# [OPUS-5] sq-t099c — anti-drift guard binding the COMMITTED inference conformance
-# report to the ci.yml extractor that gates it and to the central scoreboard floor.
+# [OPUS-5] sq-t099c + sq-1d528 (issue #3171) — anti-drift guard binding the COMMITTED
+# inference conformance report to the ci.yml extractor that gates it, to the ratchet
+# ci.yml ADVERTISES in its job name, and to the central scoreboard floor.
+#
+# MERGE NOTE: two beads landed this gate independently and are unified here.
+#   • sq-t099c contributed C1–C6 — the emitter/ci.yml/report/registry bindings and the
+#     hermetic mutation table that proves each one has teeth.
+#   • sq-1d528 (#3171) contributed C7 — the ci.yml JOB NAME advertisement — plus the
+#     stale-vs-ahead direction split in C5's remediation text.
+# One earlier sq-1d528 behaviour is deliberately NOT carried over: it matched the
+# report heading loosely (`## Overall (all …)`, either spelling) to tolerate a
+# hand-annotated `## Overall (all suites)` heading in the committed artefact. C2 below
+# is the stricter binding — the committed heading must be exactly what the emitter
+# writes — and the tracked report now carries that exact heading, so the tolerance is
+# both unnecessary and, per the #1425 finding, the very drift worth failing on.
 #
 # WHY THIS GATE EXISTS — the gap `tests/scoreboard_floors.rs` does NOT cover:
 #   `scoreboard_floors.rs` guards floor `const`s against the central registry
@@ -15,7 +28,8 @@
 #        divergence / <K> out-of-scope` line.
 #     2. `.github/workflows/ci.yml` job `inference-conformance` — greps for that
 #        heading TEXTUALLY (`grep -qE '^## Overall \(all inference suites\)'`, then
-#        `grep -A2 … | grep -E '\*\*[0-9]+ pass /'`) and compares against `RATCHET=`.
+#        `grep -A2 … | grep -E '\*\*[0-9]+ pass /'`), compares against `RATCHET=`, and
+#        ADVERTISES that same number in its job `name:`.
 #     3. `crates/sparq-conformance/src/scoreboard.rs` (mirrored byte-for-byte into
 #        `bench/conformance-scoreboard.generated.json`) — the CENTRAL `ratchet_floor`
 #        and the doc-comment floor list that names each `RATCHET=` literal.
@@ -31,6 +45,12 @@
 #   unnoticed because CI REGENERATES the report before parsing it, so the freshly
 #   written file always matched and the tracked one was never parsed by anything. The
 #   drift is invisible by construction: no run reads the artefact readers do.
+#
+#   THE #1428-CLASS FAILURE, the same silence from the other end (sq-pbz04.1.3): the
+#   tracked report sat a full suite behind the enforced snapshot — a 1637-era report
+#   while CI enforced a much higher floor — with every gate green. A stale committed
+#   report is a published-honesty problem: it is what a reader (and
+#   research/inference-completeness-audit.md) takes as the current conformance state.
 #
 #   The same silence hides a count/floor split — a regenerated-and-committed report
 #   whose totals no longer equal the floor the registry publishes, or a `RATCHET=`
@@ -56,16 +76,28 @@
 #       literal in its `ci_job` equals the registry's `ratchet_floor`.
 #   C5  the committed report's pass+divergence equals the inference `ratchet_floor`
 #       (the registry documents this floor as "the count parsed from the report's
-#       Overall line", so equality is the contract, not `>=`).
+#       Overall line", so equality is the contract, not `>=`). EQUALITY in BOTH
+#       directions on purpose: below the floor means the committed report is STALE
+#       (#1428); above it means conformance improved but the ratchet was never
+#       raised, so CI still guards a number the engine has already beaten and a
+#       regression back to the old level would pass. The ratchet itself may still
+#       only ever RISE — that direction is the scoreboard's own rule; this gate only
+#       pins the copies together.
 #   C6  scoreboard.rs's doc-comment floor list covers every binary-runner suite and
 #       its numbers agree with both the registry row and the ci.yml literal.
+#   C7  for every binary-runner suite, the job-level `name: … (ratchet >= <n>
+#       pass+divergence)` ci.yml ADVERTISES equals that same floor. The job name is
+#       the number a reader sees on the checks list and in branch protection, so an
+#       advertisement that outruns (or lags) the enforced `RATCHET=` is a published
+#       claim CI is not making.
 #
 # NOT CHECKED — deliberately: we never regenerate the report (that needs the pinned
 #   upstream suites + a release build) and never byte-compare it against a fresh run.
 #   The committed artefact legitimately LAGS between regeneration commits; what must
 #   never drift is its heading, its parseability, and its headline number vs the floor.
 #
-# EXIT: 0 when every binding holds; 1 with a per-offence message otherwise.
+# EXIT: 0 when every binding holds; 1 with a per-offence message otherwise. A missing
+# or unparseable input is an offence too — fail-closed, never a silent pass.
 # `--self-test` runs the hermetic mutation table (baseline PASS + one mutation per
 # check, each of which MUST go red) in a temp dir; it never writes into the repo.
 
@@ -112,6 +144,12 @@ COUNT_LINE_RE = re.compile(
     r"^\*\*(\d+) pass / (\d+) fail / (\d+) documented divergence / (\d+) out-of-scope"
 )
 RATCHET_RE = re.compile(r"^\s*RATCHET=(\d+)\s*$", re.M)
+# The ratchet a job ADVERTISES in its own `name:` — `name: Inference conformance
+# (ratchet >= 1967 pass+divergence)`. Anchored on a JOB-level key: a step's
+# `- name:` carries the leading dash and so cannot match.
+JOB_NAME_RATCHET_RE = re.compile(
+    r"^[ \t]*name:[^\n]*\(ratchet >= (\d+) pass\+divergence\)[ \t]*$", re.M
+)
 # `/// * inference 1967 — `ci.yml` job `inference-conformance` (`RATCHET=1967`).`
 DOC_FLOOR_RE = re.compile(
     r"^\s*///\s*\*\s*(?P<name>\S+)\s+(?P<floor>\d+)\s+\S+\s+`ci\.yml`\s+job\s+"
@@ -378,6 +416,7 @@ def check(root: Path, bound: list[str] | None = None) -> list[str]:
             counts = tuple(int(g) for g in match.groups())  # type: ignore[assignment]
 
     # C4 — ci.yml `RATCHET=` literal == the central registry floor.
+    # C7 — and the ratchet the job ADVERTISES in its own `name:` == that same floor.
     for suite in suites:
         job_id = suite.get("ci_job", "")
         floor = suite.get("ratchet_floor")
@@ -406,6 +445,28 @@ def check(root: Path, bound: list[str] | None = None) -> list[str]:
         elif bound is not None:
             bound.append(f"ci.yml job `{job_id}` RATCHET={floor} == registry floor")
 
+        advertised = [int(n) for n in JOB_NAME_RATCHET_RE.findall(block)]
+        if len(advertised) != 1:
+            offences.append(
+                f"{CI_WORKFLOW} job `{job_id}`: expected exactly one job-level "
+                f"`name: … (ratchet >= <n> pass+divergence)`, found {len(advertised)} "
+                f"({advertised}). The job name is the number a reader sees on the "
+                "checks list and in branch protection, so it must state the floor it "
+                "enforces."
+            )
+        elif advertised[0] != floor:
+            offences.append(
+                f"job-name drift: {CI_WORKFLOW} job `{job_id}` advertises "
+                f"`ratchet >= {advertised[0]}` in its name but the central registry "
+                f"publishes ratchet_floor={floor}. The checks list would publish a "
+                "claim CI is not making; update the name with the floor."
+            )
+        elif bound is not None:
+            bound.append(
+                f"ci.yml job `{job_id}` name advertises `ratchet >= {floor}` "
+                "== registry floor"
+            )
+
     # C5 — the committed report's headline number == the inference floor.
     if counts is not None and inference is not None:
         total = counts[0] + counts[2]
@@ -416,14 +477,25 @@ def check(root: Path, bound: list[str] | None = None) -> list[str]:
                 f"under heading `{heading}`"
             )
         if total != floor:
+            direction = (
+                "the committed report is STALE (behind the floor) — it predates the "
+                "enforced snapshot (#1428). Re-run `scripts/fetch-inference-suites.sh` "
+                "then `cargo run --release -p sparq-conformance --bin "
+                "sparq-inference-conformance` and commit the regenerated report"
+                if isinstance(floor, int) and total < floor
+                else "the report is AHEAD of the floor — conformance improved but the "
+                "ratchet was never raised, so CI still guards a number the engine has "
+                "already beaten and a regression back to the old level would pass"
+            )
             offences.append(
                 f"count drift: {REPORT} publishes {counts[0]} pass + {counts[2]} "
                 f"documented divergence = {total}, but the central registry "
                 f"publishes ratchet_floor={floor}. The registry documents this floor "
                 "as the count parsed from the report's Overall line, so the two must "
-                "be equal: after regenerating the report, raise the floor in "
-                f"{SCOREBOARD_RS}, regenerate {SCOREBOARD_JSON}, and update "
-                f"`RATCHET=` in {CI_WORKFLOW}."
+                f"be equal: {direction}. Whichever way it moved, keep the four copies "
+                f"together — the floor in {SCOREBOARD_RS}, its regenerated mirror "
+                f"{SCOREBOARD_JSON}, and `RATCHET=` + the job `name:` in "
+                f"{CI_WORKFLOW}."
             )
 
     # C6 — scoreboard.rs's doc-comment floor list agrees with rows and ci.yml.
@@ -461,6 +533,7 @@ on:
     branches: [main]
 jobs:
   conformance:
+    name: W3C SPARQL conformance (ratchet >= 11 pass+divergence)
     runs-on: ubuntu-latest
     steps:
       - name: Enforce ratchet
@@ -468,6 +541,7 @@ jobs:
           RATCHET=11
           if ! grep -qE '^## Overall' conformance-report.md; then exit 1; fi
   inference-conformance:
+    name: Inference conformance (ratchet >= 7 pass+divergence)
     runs-on: ubuntu-latest
     steps:
       - name: Enforce ratchet
@@ -573,6 +647,12 @@ _MUTATIONS = [
         "**6 pass / 0 fail / 2 documented",
     ),
     (
+        "C5 report totals fall BEHIND the floor (the stale-artefact #1428 bug)",
+        REPORT,
+        "**5 pass / 0 fail / 2 documented",
+        "**4 pass / 0 fail / 2 documented",
+    ),
+    (
         "C4 ci.yml RATCHET literal raised without the registry",
         CI_WORKFLOW,
         "RATCHET=7",
@@ -583,6 +663,24 @@ _MUTATIONS = [
         SCOREBOARD_JSON,
         '"ratchet_floor": 7',
         '"ratchet_floor": 9',
+    ),
+    (
+        "C7 job name advertises a ratchet the registry no longer publishes",
+        CI_WORKFLOW,
+        "name: Inference conformance (ratchet >= 7 pass+divergence)",
+        "name: Inference conformance (ratchet >= 6 pass+divergence)",
+    ),
+    (
+        "C7 job name drops its ratchet advertisement entirely",
+        CI_WORKFLOW,
+        "    name: Inference conformance (ratchet >= 7 pass+divergence)\n",
+        "    name: Inference conformance\n",
+    ),
+    (
+        "C7 the SPARQL job's name drifts from its own floor",
+        CI_WORKFLOW,
+        "name: W3C SPARQL conformance (ratchet >= 11 pass+divergence)",
+        "name: W3C SPARQL conformance (ratchet >= 10 pass+divergence)",
     ),
     (
         "C1/C2 emitter heading renamed without ci.yml or the report",
@@ -695,8 +793,8 @@ def self_test() -> int:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         description="Fail if the committed inference conformance report, the ci.yml "
-        "ratchet extractor and the central scoreboard floor have drifted apart "
-        "(bead sq-t099c)."
+        "ratchet extractor + job name, and the central scoreboard floor have drifted "
+        "apart (beads sq-t099c + sq-1d528 / issue #3171)."
     )
     ap.add_argument("--root", default=str(REPO_ROOT), help="repo root (default: this repo).")
     ap.add_argument("--self-test", action="store_true", help="run the hermetic mutation table and exit.")
@@ -711,7 +809,8 @@ def main(argv: list[str] | None = None) -> int:
         print(
             "inference report/scoreboard drift gate: PASS — the committed report's "
             "heading and headline count are in lock-step with the emitter, ci.yml's "
-            "ratchet extractor and the central scoreboard floor. Bindings verified:"
+            "ratchet extractor + advertised job name, and the central scoreboard "
+            "floor. Bindings verified:"
         )
         for line in bound:
             print(f"    - {line}")
@@ -722,7 +821,7 @@ def main(argv: list[str] | None = None) -> int:
         "The committed inference conformance report, the ci.yml ratchet step and the\n"
         "central conformance registry must agree. CI regenerates the report before\n"
         "parsing it, so drift in the TRACKED artefact is invisible to every other\n"
-        "check — that is why this gate exists (bead sq-t099c). Offences:\n"
+        "check — that is why this gate exists (beads sq-t099c + sq-1d528). Offences:\n"
     )
     for off in offences:
         print(f"    - {off}")

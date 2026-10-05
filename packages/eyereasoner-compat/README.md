@@ -90,16 +90,20 @@ This build is browser-only; in Node, use the ESM entry (`import { n3reasoner } f
 
   The `…_plus_rules` modes echo the *rules* into the output; sparq's chainer consumes rules and
   emits only ground triples, so they fail loudly rather than return a different result set.
-- **Query filter.** A query `{ premise } => { conclusion }` becomes a SPARQL `CONSTRUCT` over the
-  closure (EYE `--query` semantics). Combining an explicit `output` with a query throws, as in
-  eye-js. Query rules using **builtins / quoted formulae / lists fail closed** (a clear error,
-  never a silently wrong answer) — tracked for a follow-up.
+- **Query filter.** A query `{ premise } => { conclusion }` is evaluated over the deductive
+  closure of the data (EYE `--query` semantics): every instantiated conclusion is an answer,
+  including one already present in the closure. The premise runs through the reasoner's own
+  matcher, so **builtins, quoted `{ … }` formulae and first-class `( … )` lists all work** in a
+  query rule, exactly as in a document rule. Combining an explicit `output` with a query throws,
+  as in eye-js. The query document's own *facts* are not loaded as data; a query document with
+  no forward rule is an error rather than an empty answer.
 - **Builtins coverage (honest).** sparq's N3 engine supports a subset of EYE's library:
   `math:` (`sum`, `difference`, `product`, `quotient`, `greaterThan`, `lessThan`, `equalTo`, …),
   `string:` (`concatenation`, `contains`, `startsWith`, `endsWith`, `matches`, `replace`, …),
   `list:` (`member`, `append`, `memberCount`, `first`, `last`, …), `time:` and `log:` core.
-  EYE's **full** builtin library is larger; a rule using an unsupported builtin simply does not
-  fire (and in a *query* rule it fails closed). See `skills/inference/SKILL.md`.
+  EYE's **full** builtin library is larger; a rule using an unimplemented builtin simply does not
+  fire — in a *query* rule too, so such a query answers nothing rather than answering wrongly.
+  See `skills/inference/SKILL.md`.
 - **SWIPL/EYE-image surface → migration stubs.** `SwiplEye`, `loadEyeImage`, `loadImage`,
   `runQuery`, `buildQuery`, `qaQuery`, `query`, `queryOnce`, `executeBasicEyeQuery`,
   `linguareasoner`, `EYE_PVM` are re-exported so imports compile, but **throw** a clear

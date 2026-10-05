@@ -58,7 +58,7 @@ assert_eq!(map.get("x").map(String::as_str), Some("c14n0"));
 When you already hold serialized RDF — e.g. across a language boundary — skip the
 oxrdf term plumbing: `canonicalize_nquads(&str) -> Result<String, _>` parses an
 N-Quads document and returns its canonical N-Quads (`parse_nquads` exposes the parse
-alone). This is the seam the `@jeswr/sparq` RDF/JS `Dataset` uses for
+alone). This is the seam the `@sparq-org/sparq` RDF/JS `Dataset` uses for
 isomorphism-aware `toCanonical` / `equals` / `contains`, surfaced over wasm as the
 `canonicalizeNQuads(nquads)` binding behind `sparq-wasm`'s opt-in `canon` feature.
 
@@ -142,10 +142,10 @@ crate grew — keep a wildcard arm) and has five variants:
 ## ⚠️ Opt-in NON-STANDARD RDF 1.2 triple-term profile
 
 **OFF by default; NOT W3C RDFC-1.0.** RDFC-1.0 is an RDF-1.1-only spec with no
-notion of triple terms; their canonicalization is **unsettled upstream**
-([w3c/rdf-star-wg#114](https://github.com/w3c/rdf-star-wg/issues/114)). With the
-feature OFF, behaviour is byte-identical to the standard surface (triple terms
-still raise `CanonError::TripleTerm`; the W3C suite still passes).
+notion of triple terms. W3C has published no RDF-1.2 dataset canonicalization
+specification. With the feature OFF, behaviour is byte-identical to the standard
+surface (triple terms still raise `CanonError::TripleTerm`; the W3C suite still
+passes).
 
 Enable the cargo feature to opt in to a **separate, clearly non-standard** v2
 profile. It natively re-implements the RDFC-1.0 algorithm over oxrdf 0.3 and
@@ -327,7 +327,7 @@ parity (sq-5i1d [OPUS-4.8]) and a constrained ground-triple-term
 (error-on-nested-bnode) `*_ground_terms` wrapper family for the common
 credential/VC case (sq-iaxd [FABLE-5]). The `canonicalize_nquads` / `parse_nquads` text seam
 and the `sparq-wasm` opt-in `canon` feature (`canonicalizeNQuads` binding for the
-`@jeswr/sparq` RDF/JS `Dataset`) are sq-1dd5t [OPUS-4.8]; that wasm consumer pulls
+`@sparq-org/sparq` RDF/JS `Dataset`) are sq-1dd5t [OPUS-4.8]; that wasm consumer pulls
 `sparq-canon` with `default-features = false` (the crate now disables
 `sparq-core`'s default `parallel` and re-enables it via its own default `parallel`
 feature, so native builds are byte-identical and the wasm build drops rayon).

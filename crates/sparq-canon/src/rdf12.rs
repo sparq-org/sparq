@@ -2,15 +2,14 @@
 //!
 //! **⚠️ NON-STANDARD. This is NOT W3C RDFC-1.0.** [RDFC-1.0] is defined for the
 //! RDF-1.1 data model only; it has **no** notion of RDF-1.2 triple terms
-//! (`<<( s p o )>>` as an object), and the consequences of triple terms for
-//! canonicalization are **unsettled upstream** (see [w3c/rdf-star-wg#114]). The
-//! profile here is sparq's own opt-in extension. The standard
+//! (`<<( s p o )>>` as an object). W3C has published no RDF-1.2 dataset
+//! canonicalization specification, so the profile here is sparq's own opt-in
+//! extension. The standard
 //! [`crate::canonicalize`] / [`crate::canonicalize_triples`] paths, and the W3C
 //! `rdf-canon` test suite, keep meaning **exactly** what they mean today: they
 //! still fail closed with [`CanonError::TripleTerm`] on any triple-term input.
 //!
 //! [RDFC-1.0]: https://www.w3.org/TR/rdf-canon/
-//! [w3c/rdf-star-wg#114]: https://github.com/w3c/rdf-star-wg/issues/114
 //!
 //! ## What it does
 //!
@@ -36,6 +35,21 @@
 //! **object** position; a nested blank node is, positionally, part of the
 //! **object** of the top-level quad that contains the triple term, and is
 //! gossiped with the object position marker `o` against that quad's predicate.
+//!
+//! That is an **upstream** invariant, not a choice made here, and every part of
+//! the descent depends on it *silently*. If a future oxrdf revision admitted a
+//! triple term in subject position, the code below would keep compiling and
+//! start producing a **wrong canonical form**: `relabel_subject` and
+//! `relabel_subject_canonical` would clone the subject through unchanged,
+//! leaving blank nodes nested under it with their *input* labels;
+//! `collect_bnodes_subject` would not enrol them, so they would never be
+//! gossiped or issued a `c14nN`; and `triple_term_depth`'s object-only chain
+//! walk would under-count, weakening the stack-overflow bound. So every
+//! subject-position handler routes through `subject_bnode` or
+//! `subject_nesting_depth`, whose matches are **exhaustive on purpose** (no
+//! `_` arm): a new subject variant upstream makes this module fail to COMPILE,
+//! at exactly the sites that must then be extended, instead of failing
+//! silently. [OPUS-5] sq-tx21.
 //!
 //! ## Boundary
 //!
@@ -83,6 +97,13 @@
 //! serializer versions and asserts the token edge cases byte-exactly, so any
 //! such change fails loudly with re-verification instructions.
 //!
+//! Status checked 2026-08-01 (issue #3455): W3C rdf12-n-quads is a **Working
+//! Draft** (23 July 2026) and has never been published past Working Draft, so
+//! the "once final" wording above is current, not stale. The byte-exact
+//! expectations were compared against that draft's grammar and all match it;
+//! the rule-by-rule comparison table, and the two notes it surfaced to carry
+//! forward to the REC re-check, are recorded in the test file's module docs.
+//!
 //! [OPUS-4.8] sq-hslb — full non-standard RDF-1.2 triple-term canon profile;
 //! sq-5i1d — `*_with::<D: Digest>` hash-profile parity (SHA-384).
 //! Fable unavailable; flag for re-review when Fable returns.
@@ -100,6 +121,50 @@ use std::collections::BTreeMap;
 const DEFAULT_HNDQ_CALL_LIMIT: usize = 4000;
 
 // ---------------------------------------------------------------------------
+// Subject-position tripwires ([OPUS-5] sq-tx21). Every read of a triple's
+// subject in this module goes through one of these two functions, and both
+// match EXHAUSTIVELY over `NamedOrBlankNode` — deliberately WITHOUT a `_` arm,
+// even though a catch-all would be shorter. That is the point: the descent's
+// correctness rests on the upstream fact that a subject cannot itself be a
+// triple term (see the module docs), and a catch-all would absorb a new
+// upstream variant into "not a blank node / contributes no nesting", which is
+// exactly the wrong answer. Kept exhaustive, a future oxrdf revision that
+// admits a subject-position triple term turns that silent miscanonicalization
+// into a compile error here.
+// ---------------------------------------------------------------------------
+
+/// The blank node occupying `subject`, or `None` if it is an IRI.
+///
+/// **Tripwire — see the [module docs](self) and the section comment above.** If
+/// this stops compiling because `NamedOrBlankNode` gained a triple-term
+/// variant, the fix is not to add a `_` arm: it is to extend the descent to
+/// subject-position triple terms — enrol nested blank nodes in
+/// `collect_bnodes_subject`, relabel through them in [`relabel_subject`] and
+/// [`relabel_subject_canonical`], and gossip them with the `s` position marker
+/// (RDFC-1.0 §4.7) — and to add the matching isomorphism tests.
+fn subject_bnode(subject: &NamedOrBlankNode) -> Option<&BlankNode> {
+    match subject {
+        NamedOrBlankNode::NamedNode(_) => None,
+        NamedOrBlankNode::BlankNode(b) => Some(b),
+    }
+}
+
+/// The triple-term nesting depth contributed by a **subject**: zero for every
+/// subject kind oxrdf 0.3 admits, which is what makes [`triple_term_depth`]'s
+/// single-chain walk down the object position a correct depth measure rather
+/// than an under-count of a tree.
+///
+/// **Tripwire**, on the same terms as [`subject_bnode`]: if a subject can nest,
+/// the depth of a triple term becomes `1 + max(subject_depth, object_depth)`
+/// and the loop in [`triple_term_depth`] must become a (still iterative) tree
+/// walk before the stack-overflow bound means anything again.
+fn subject_nesting_depth(subject: &NamedOrBlankNode) -> usize {
+    match subject {
+        NamedOrBlankNode::NamedNode(_) | NamedOrBlankNode::BlankNode(_) => 0,
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Public entry points (the v2, non-standard profile).
 // ---------------------------------------------------------------------------
 
@@ -111,8 +176,8 @@ const DEFAULT_HNDQ_CALL_LIMIT: usize = 4000;
 /// [`crate::canonicalize`]. With triple terms it additionally relabels blank
 /// nodes nested inside triple-term objects via the HNDQ descent.
 ///
-/// This is **not** W3C RDFC-1.0 (RDF-1.2 canonicalization is unsettled
-/// upstream); see the [module docs](self).
+/// This is **not** W3C RDFC-1.0; W3C has published no RDF-1.2 dataset
+/// canonicalization specification. See the [module docs](self).
 pub fn canonicalize_rdf12(dataset: &[Quad]) -> Result<String, CanonError> {
     canonicalize_rdf12_with::<Sha256>(dataset)
 }
@@ -366,7 +431,7 @@ fn term_has_nested_bnode(term: &Term) -> bool {
 fn triple_contains_bnode(t: &Triple) -> bool {
     let mut cur = t;
     loop {
-        if matches!(cur.subject, NamedOrBlankNode::BlankNode(_)) {
+        if subject_bnode(&cur.subject).is_some() {
             return true;
         }
         match &cur.object {
@@ -394,7 +459,11 @@ fn triple_term_depth(term: &Term) -> usize {
     let mut depth = 0usize;
     let mut cur = term;
     while let Term::Triple(t) = cur {
-        depth += 1;
+        // The subject term of `t` contributes nothing to the nesting depth —
+        // `subject_nesting_depth` is what pins that (and what breaks the build
+        // if it ever stops being true; [OPUS-5] sq-tx21), so accumulating down
+        // the object chain alone measures the whole term.
+        depth += 1 + subject_nesting_depth(&t.subject);
         cur = &t.object;
     }
     depth
@@ -777,7 +846,7 @@ fn push_unique(labels: &mut Vec<String>, label: &str) {
 }
 
 fn collect_bnodes_subject(subject: &NamedOrBlankNode, out: &mut Vec<String>) {
-    if let NamedOrBlankNode::BlankNode(b) = subject {
+    if let Some(b) = subject_bnode(subject) {
         push_unique(out, b.as_str());
     }
 }
@@ -806,11 +875,9 @@ fn relabel_quad_first_degree(quad: &Quad, reference: &str) -> Quad {
 }
 
 fn relabel_subject(subject: &NamedOrBlankNode, reference: &str) -> NamedOrBlankNode {
-    match subject {
-        NamedOrBlankNode::BlankNode(b) => {
-            NamedOrBlankNode::BlankNode(special_label(b.as_str(), reference))
-        }
-        other => other.clone(),
+    match subject_bnode(subject) {
+        Some(b) => NamedOrBlankNode::BlankNode(special_label(b.as_str(), reference)),
+        None => subject.clone(),
     }
 }
 
@@ -912,11 +979,9 @@ fn relabel_subject_canonical(
     subject: &NamedOrBlankNode,
     issued: &std::collections::HashMap<String, String>,
 ) -> NamedOrBlankNode {
-    match subject {
-        NamedOrBlankNode::BlankNode(b) => {
-            NamedOrBlankNode::BlankNode(issued_label(b.as_str(), issued))
-        }
-        other => other.clone(),
+    match subject_bnode(subject) {
+        Some(b) => NamedOrBlankNode::BlankNode(issued_label(b.as_str(), issued)),
+        None => subject.clone(),
     }
 }
 
@@ -1111,6 +1176,78 @@ mod private_tests {
         let mut out: Vec<String> = Vec::new();
         collect_bnodes_subject(&NamedOrBlankNode::NamedNode(iri("http://ex/s")), &mut out);
         assert!(out.is_empty());
+    }
+
+    // ---- subject_bnode / subject_nesting_depth (sq-tx21 tripwires) ----
+
+    /// `subject_bnode` must hand back the blank node itself, not merely report
+    /// that one is present — every caller relabels or enrols by its label, so
+    /// returning the wrong node (or `None`) silently drops it from the descent.
+    #[test]
+    fn subject_bnode_yields_the_blank_node() {
+        let subject = NamedOrBlankNode::BlankNode(bn("mysubj"));
+        assert_eq!(
+            subject_bnode(&subject).map(|b| b.as_str()),
+            Some("mysubj"),
+            "a blank-node subject must be returned by label"
+        );
+    }
+
+    /// An IRI subject carries no blank node. Kills a swap of the two arms.
+    #[test]
+    fn subject_bnode_is_none_for_iri() {
+        let subject = NamedOrBlankNode::NamedNode(iri("http://ex/s"));
+        assert!(
+            subject_bnode(&subject).is_none(),
+            "an IRI subject must yield no blank node"
+        );
+    }
+
+    /// A subject contributes ZERO nesting depth, for both kinds oxrdf 0.3
+    /// admits. This is the assumption [`triple_term_depth`]'s object-only chain
+    /// walk — and therefore the `MAX_TRIPLE_TERM_DEPTH` stack-overflow bound —
+    /// rests on; a non-zero answer here would inflate every depth measurement
+    /// and reject legal input.
+    #[test]
+    fn subject_nesting_depth_is_zero_for_both_subject_kinds() {
+        assert_eq!(
+            subject_nesting_depth(&NamedOrBlankNode::NamedNode(iri("http://ex/s"))),
+            0,
+            "an IRI subject nests nothing"
+        );
+        assert_eq!(
+            subject_nesting_depth(&NamedOrBlankNode::BlankNode(bn("s"))),
+            0,
+            "a blank-node subject nests nothing"
+        );
+    }
+
+    /// The end-to-end consequence of the two tripwires: a blank node sitting in
+    /// the SUBJECT of a triple term is enrolled and relabelled exactly like one
+    /// in its object. (What sq-tx21 tracks is the *other* case — a triple term
+    /// nested in subject position — which oxrdf 0.3 cannot express at all.)
+    #[test]
+    fn blank_node_in_triple_term_subject_is_relabelled() {
+        let tt = Term::Triple(Box::new(Triple::new(
+            NamedOrBlankNode::BlankNode(bn("inner")),
+            iri("http://ex/p"),
+            Term::NamedNode(iri("http://ex/o")),
+        )));
+        let quad = oxrdf::Quad::new(
+            NamedOrBlankNode::NamedNode(iri("http://ex/s")),
+            iri("http://ex/says"),
+            tt,
+            GraphName::DefaultGraph,
+        );
+        let doc = canonicalize_rdf12(&[quad]).unwrap();
+        assert!(
+            doc.contains("_:c14n0"),
+            "subject bnode of a triple term must receive a canonical label: {doc:?}"
+        );
+        assert!(
+            !doc.contains("_:inner"),
+            "the input label must not survive canonicalization: {doc:?}"
+        );
     }
 
     // ---- HndqCallCounter ----

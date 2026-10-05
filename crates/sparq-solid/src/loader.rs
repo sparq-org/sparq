@@ -24,7 +24,7 @@
 //! group-document triple whose predicate is in `solidx:` space — the analogue of the
 //! `urn:sparq:` reserved-principal guard ([`validate_principal_iri`]).
 
-use crate::{AccessProvenance, SOLIDX_NS};
+use crate::{AccessProvenance, VerifiedCredentials, SOLIDX_NS};
 use oxrdf::{Literal, NamedNode, Term};
 use rustc_hash::FxHashSet;
 use sparq_core::dict::{Dict, Id};
@@ -163,18 +163,24 @@ fn xsd_true() -> Term {
 }
 
 /// Assemble the full fact set: structural facts + the access-control graphs +
-/// (ACP only) the TRUSTED per-resource creator/owner facts from `provenance`.
-/// Errors if any agent/client/origin/creator/owner value collides with the reserved
-/// principal encoding (see [`validate_principal_iri`]).
+/// (ACP only) the TRUSTED per-resource creator/owner facts from `provenance` and the
+/// TRUSTED verified-credential holdings from `credentials`.
+/// Errors if any agent/client/origin/creator/owner/credential-holder value collides with
+/// the reserved principal encoding (see [`validate_principal_iri`]).
 ///
 /// [OPUS-4.8] sq-3jtd.5: `provenance` is the trusted channel for `acp:CreatorAgent` /
 /// `acp:OwnerAgent`. Its `<r> solidx:creator|owner <webid>` facts are synthesized HERE,
 /// from the caller-supplied map ONLY — never read from the resource graphs (design doc
 /// §2.4). For WAC (no creator/owner vocabulary) `provenance` is ignored.
+///
+/// [SONNET-4.6] sq-ysv3u: `credentials` is the exactly analogous trusted channel for ACP
+/// `acp:vc`. Its `<webid> solidx:holdsVc <requirement>` facts are synthesized HERE and
+/// nowhere else. WAC has no credential vocabulary, so `credentials` is ignored for it.
 pub(crate) fn assemble_facts(
     graph: &Graph,
     system: System,
     provenance: &AccessProvenance,
+    credentials: &VerifiedCredentials,
 ) -> Result<Vec<[Term; 3]>, String> {
     let mut out: Vec<[Term; 3]> = Vec::new();
     let suffix = if system == System::Wac { ACL_SUFFIX } else { ACR_SUFFIX };
@@ -301,6 +307,17 @@ pub(crate) fn assemble_facts(
                 out.push([named(resource), named(&format!("{SOLIDX_NS}owner")), named(o)]);
             }
         }
+        // [SONNET-4.6] sq-ysv3u: TRUSTED `acp:vc` holdings (ACP only), on exactly the same
+        // footing as the creator/owner facts above — emitted ONLY from the caller-supplied
+        // map, never from pod or `.acr` content (design doc §2.4; the solidx: guard at the
+        // top of this pass drops any forged `holdsVc` smuggled into a control document).
+        // A holder becomes a candidate agent, so its WebID goes through the SAME
+        // reserved-encoding validation and is marked isWebId.
+        for (agent, requirement) in credentials.iter() {
+            validate_principal_iri(agent)?;
+            webids.insert(agent.to_owned());
+            out.push([named(agent), named(&format!("{SOLIDX_NS}holdsVc")), named(requirement)]);
+        }
     }
     for a in &webids {
         out.push([named(a), is_webid.clone(), xsd_true()]);
@@ -319,8 +336,9 @@ pub(crate) fn assemble_input_ids(
     graph: &Graph,
     system: System,
     provenance: &AccessProvenance,
+    credentials: &VerifiedCredentials,
 ) -> Result<Vec<[Id; 3]>, String> {
-    let facts = assemble_facts(graph, system, provenance)?;
+    let facts = assemble_facts(graph, system, provenance, credentials)?;
     Ok(facts
         .iter()
         .map(|t| [dict.intern(&t[0]), dict.intern(&t[1]), dict.intern(&t[2])])
@@ -340,14 +358,66 @@ pub(crate) fn assemble_input(
     graph: &Graph,
     system: System,
     provenance: &AccessProvenance,
+    credentials: &VerifiedCredentials,
 ) -> Result<String, String> {
     use std::fmt::Write;
-    let facts = assemble_facts(graph, system, provenance)?;
+    let facts = assemble_facts(graph, system, provenance, credentials)?;
     let mut out = String::new();
     for t in &facts {
         let _ = writeln!(out, "{} {} {} .", t[0], t[1], t[2]);
     }
     Ok(out)
+}
+
+/// The group DOCUMENT an `acl:agentGroup` value names: the group IRI without its
+/// fragment (`https://pod.ex/groups#team` → `https://pod.ex/groups`). Single source of
+/// truth for the mapping — [`collect_agents`] uses it to decide which named graphs the
+/// materializer merges in, and [`referenced_group_docs`] uses it to tell the write path
+/// which graphs are auth-view inputs.
+fn group_doc_of(group_iri: &str) -> &str {
+    group_iri.split('#').next().unwrap_or(group_iri)
+}
+
+/// Every graph IRI referenced as an `acl:agentGroup` group document by an access-control
+/// document currently in `graph` — the WAC group-membership INPUTS of the auth view.
+///
+/// The write path ([`crate::update`]) needs this because a group document, unlike an
+/// `.acl`/`.acr`, has no naming convention: nothing about the IRI `https://pod.ex/groups`
+/// says a write to it changes who may read what. Without the referenced set, a write that
+/// adds or removes a `vcard:hasMember` triple leaves the materialized auth view stale
+/// (design record research/solid-pod-scoped-materializer-design.md §2.2 case A).
+///
+/// Deliberately an OVER-approximation, never an under-one:
+/// - it is the set of REFERENCED documents, not of present graphs, so a write that
+///   CREATES a not-yet-existing group document still triggers re-materialization;
+/// - it scans `.acl` **and** `.acr` control documents. `acl:agentGroup` is WAC-only
+///   vocabulary (the ACP materializer ignores it), so an occurrence inside an `.acr` can
+///   at worst cost one redundant re-materialization — it can never miss one.
+///
+/// Reserved-space (`urn:sparq:`) values are excluded on both sides, mirroring the
+/// assembly pass: the materializer never reads a reserved-space graph as a group
+/// document, so a write to one cannot change the auth view either.
+pub(crate) fn referenced_group_docs(graph: &Graph) -> FxHashSet<String> {
+    let mut docs: FxHashSet<String> = FxHashSet::default();
+    for (name, sub) in graph.named.iter() {
+        let Some(iri) = graph_iri(name) else { continue };
+        if iri.starts_with(RESERVED_PREFIX)
+            || !(iri.ends_with(ACL_SUFFIX) || iri.ends_with(ACR_SUFFIX))
+        {
+            continue;
+        }
+        for t in graph_triples(sub) {
+            let (Term::NamedNode(p), Term::NamedNode(o)) = (&t[1], &t[2]) else { continue };
+            if p.as_str() != ACL_AGENT_GROUP {
+                continue;
+            }
+            let doc = group_doc_of(o.as_str());
+            if !doc.starts_with(RESERVED_PREFIX) {
+                docs.insert(doc.to_owned());
+            }
+        }
+    }
+    docs
 }
 
 /// Concrete agents + group documents mentioned by an access-control triple; every
@@ -371,9 +441,7 @@ fn collect_agents(
             principal_iris.insert(o.as_str().to_owned());
         }
         ACL_AGENT_GROUP => {
-            // the group document = the group IRI without its fragment
-            let doc = o.as_str().split('#').next().unwrap_or(o.as_str());
-            groups.insert(doc.to_owned());
+            groups.insert(group_doc_of(o.as_str()).to_owned());
         }
         _ => {}
     }

@@ -4,7 +4,7 @@ description: "Pod-side certification-edge trust-graph admission with the opt-in 
 license: MIT
 metadata:
   version: "0.1.0"
-  homepage: https://github.com/jeswr/sparq
+  homepage: https://github.com/sparq-org/sparq
 ---
 
 # sparq trust-graph — certification-edge admission (pod-side closure)
@@ -130,7 +130,11 @@ Field-by-field, each is a **ceiling** the closure can only narrow, never widen:
 - `trust:scope` — the resource ceiling. A certification narrows WHO and WHAT-TYPE, never
   widens WHERE: the derived rule inherits the anchor's resource scope **unchanged**.
 - `trust:freshWithin` (`xsd:duration`) — the staleness ceiling: the derived rule's
-  freshness is `min(anchor.fresh_within, certification window remaining)`.
+  freshness is `min(anchor.fresh_within, certification window remaining)`. The lexical
+  value must be an **exact** day/time duration — `PnDTnHnMnS` (`P30D`, `PT12H`,
+  `P1DT2H3M4S`). The nominal `P1Y` / `P6M` designators have no exact seconds value
+  without an anchor instant, so they are **rejected fail-closed** (the whole policy is
+  refused) rather than approximated; write `P365D` if that is what you mean.
 
 The equivalent claim-level relational form (`trust:trustsSourceFor`) desugars to the same
 `Vec<TrustRule>` — see `skills/access-control/SKILL.md` for both authoring forms.
@@ -150,7 +154,7 @@ DIATF-register entry IS one such edge. The vocabulary (namespace `trustx:` — t
 <urn:example:cert-1> a trustx:Certification ;
   trustx:certifies      <https://issuer.example/dvs> ;      # the vouched-for issuer
   trustx:underFramework <https://gov.example/framework> ;   # the trustx:Framework
-  trustx:scope          trustx:AnyServiceScope ;            # or a SHACL shape / rulebook IRI
+  trustx:certificationScope trustx:AnyServiceScope ;        # or a SHACL shape / rulebook IRI
   trustx:validFrom      "2026-01-01T00:00:00Z"^^xsd:dateTime ;
   trustx:validUntil     "2027-01-01T00:00:00Z"^^xsd:dateTime .
 ```
@@ -256,7 +260,7 @@ Behind the default-OFF **`framework-vocab`** feature. The `trustx:` namespace (s
   (framework-certified issuers), `trustx:requiresScopeConformance` (issuer certification
   scope check), `trustx:requiresValidStatusAt` (positive status window instant),
   `trustx:methodPolicy` (OPTIONAL ODRL reference).
-- **Certification and scope** (`trustx:Certification`, `trustx:scope`) — an issuer being
+- **Certification and scope** (`trustx:Certification`, `trustx:certificationScope`) — an issuer being
   *certified under* a framework (`trustx:underFramework`), for a *scope* ranging from
   service-level (`trustx:AnyServiceScope`, the honest DIATF granularity) down to a
   predicate set / SHACL shape (reusing `trust:forShape`). Validity window via

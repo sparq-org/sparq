@@ -90,3 +90,52 @@ required_attributes = [
 # `scripts/ready-issues.py::partition_path` and in
 # `test_readiness_visibility.py::test_single_segment_unknown_key_keeps_its_own_partition`, and is
 # deliberately NOT restated here so there is one place to correct when it is re-measured.
+
+[non_reserving_partitions]
+# [OPUS-5] sparq#4929 — the CROSS-CUTTING EXEMPTION, offered to the registry's SECOND occupancy leg.
+#
+# sparq#4928 made `ci`/`docs` non-reserving for occupancy in `scripts/ready-issues.py` — the PLAN
+# leg. sparq#4929 reports that the registry's `dispatch-claim.py::busy_packages_of_pulls` (applied
+# at `filter_busy_area_items` on assemble, and again at `revalidate_items_against_live_pulls` at
+# CLAIM time) derives its own busy-area union from open worker PRs with NO exemption, so the rows
+# PLAN now offers are re-deferred one layer down. Two legs disagreeing about one partition is the
+# drift class sparq#4819 documents.
+#
+# So the declaration is pinned here as DATA and exported as a CALLABLE, exactly as #4365's
+# resolver is: `dispatch.yml` already `load_dispatch`es `scripts/dispatch-plan.py`, so
+# `planner.reserves_partition(key)` gets the rule, the measured basis and the fail-safe from one
+# implementation. A registry leg that instead re-types `{"ci", "docs"}` into its own source would
+# make the declaration a SECOND copy, free to drift from this one — and two legs disagreeing about
+# one partition is the defect sparq#4929 reports, not a fix for it.
+#
+# NOTHING HERE OBSERVES THE REGISTRY. These rows assert the sparq half; passing them does not mean
+# `busy_packages_of_pulls` has changed, and the before/after sparq#4929 asks for is measurable only
+# in the registry, where the `ledger` provenance half is readable.
+required_attributes = [
+    "non_reserving_partitions",
+    "reserves_partition",
+]
+
+[non_reserving_partitions.declared]
+# THE VALIDATED SET — `planner.non_reserving_partitions()`, not the raw `NON_RESERVING_PARTITIONS`
+# constant, which is deliberately NOT exported: reading the declaration directly skips the
+# validation that voids it on a single bad entry and keeps the global/degenerate root out of it.
+# `deps` is absent BY MEASUREMENT, not by omission — every live `deps` holder pair collides on
+# `Cargo.lock`, so it and the crate areas stay reserving on both legs (sparq#4929 asks for exactly
+# that). The measured basis lives once, on `scripts/ready-issues.py::NON_RESERVING_PARTITIONS`.
+partitions = ["ci", "docs"]
+
+[non_reserving_partitions.parity_fixture]
+# key -> does an OCCUPANT declaring it RESERVE its partition? (`planner.reserves_partition(key)`)
+#
+# Every row covers a distinct rule, and the two `*-fragments`/sub-crate rows are the ones an
+# exact-string mirror (`key in {"ci", "docs"}`) gets WRONG in opposite directions — which is why
+# the predicate, and not the set, is the thing to call.
+"ci" = false                      # declared exempt
+"docs" = false                    # declared exempt
+"ci-fragments" = false            # resolves INTO the `ci` partition -> exempt WITH it
+"deps" = true                     # single-segment, own partition, measured colliding -> reserves
+"sparq-core" = true               # crate area -> reserves
+"sparq-core-store" = true         # region of a reserving crate -> reserves
+"__global__" = true               # the containing root can NEVER be exempted...
+"" = true                         # ...nor can a degenerate key, which resolves to it

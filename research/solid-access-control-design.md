@@ -491,10 +491,12 @@ WebID EQUALS the resource's creator/owner is supported (the agent satisfies both
 the grant stays resource-scoped — the creator of `R1` is still never granted `R2`), and the
 case where the concrete WebID is a DIFFERENT fixed agent grants nobody — correct-by-soundness
 (the two matchers demand the agent be both the creator and a distinct fixed WebID, an
-unsatisfiable conjunction), not a missing feature. Documented bound: only `acp:vc` /
-`acl:accessToClass` / custom modes remain out of scope (below).
-Not covered (documented gaps, §7): `acp:vc`, `acl:accessToClass`, custom ACP modes
-(design supports any mode IRI; prototype maps the 4 standard ones).
+unsatisfiable conjunction), not a missing feature. Documented bound: only `acl:accessToClass` /
+custom modes remain out of scope (below); `acp:vc` shipped in [SONNET-4.6] sq-ysv3u.
+Not covered (documented gaps, §7): `acl:accessToClass`, custom ACP modes
+(design supports any mode IRI; prototype maps the 4 standard ones). `acp:vc` IS now covered
+(sq-ysv3u): exact-IRI requirement matching against the trusted `VerifiedCredentials` channel,
+fail-closed with none supplied; see research/solid-vocab-gaps-design.md §2 *Outcome*.
 
 ## 4. L3 — the `sparq-solid` crate
 

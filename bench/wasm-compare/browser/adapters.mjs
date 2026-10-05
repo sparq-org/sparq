@@ -34,7 +34,7 @@ function missing(library, pkgs, err) {
   };
 }
 
-/** sparq — the shipped @jeswr/sparq web bundle, run under Node. */
+/** sparq — the shipped @sparq-org/sparq web bundle, run under Node. */
 async function sparqAdapter() {
   const gluePath = path.join(REPO, "js", "wasm", "sparq_wasm.js");
   let glue;

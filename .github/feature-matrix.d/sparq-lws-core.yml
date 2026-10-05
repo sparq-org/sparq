@@ -3,7 +3,12 @@
 #
 # One self-contained leg mapping per opt-in feature. Assembled into the feature-matrix
 # `opt-in-features` strategy by scripts/assemble-feature-matrix.py; adding a leg for
-# THIS crate edits only THIS file (bead sq-ibrze).
+# THIS crate edits no OTHER crate's fragment (bead sq-ibrze).
+# SCOPE ([SONNET-4.6] issue #2384): adding/removing/renaming a leg changes the emitted
+# leg-name set, and THAT is a TWO-FILE change — this fragment AND
+# scripts/tests/feature-matrix-legnames.golden.txt. Every other edit here (features,
+# test, tier, tier-reason, comments) leaves the name set alone and is a SINGLE-file
+# change. See README.md in this directory.
 #
 # CONTRACT (gate-critical): each leg's emitted check-run NAME is `opt-in <name>`,
 # discovered as a REQUIRED check by the ci-summary `gate` aggregator BY NAME. Keep

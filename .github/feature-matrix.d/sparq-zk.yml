@@ -3,8 +3,13 @@
 # One self-contained leg mapping per opt-in feature(group). Assembled into the
 # feature-matrix `opt-in-features` strategy by scripts/assemble-feature-matrix.py
 # (the `setup` job emits the combined matrix as JSON consumed via fromJSON). Adding a
-# leg for THIS crate edits only THIS file, so concurrent opt-in-feature PRs for
+# leg for THIS crate edits no OTHER crate's fragment, so concurrent opt-in-feature PRs for
 # DIFFERENT crates never textually conflict (bead sq-ibrze). [OPUS-4.8]
+# SCOPE ([SONNET-4.6] issue #2384): adding/removing/renaming a leg changes the emitted
+# leg-name set, and THAT is a TWO-FILE change — this fragment AND
+# scripts/tests/feature-matrix-legnames.golden.txt. Every other edit here (features,
+# test, tier, tier-reason, comments) leaves the name set alone and is a SINGLE-file
+# change. See README.md in this directory.
 #
 # CONTRACT (gate-critical): each leg's emitted check-run NAME is `opt-in <name>`,
 # discovered as a REQUIRED check by the ci-summary `gate` aggregator BY NAME. Keep
@@ -26,10 +31,18 @@
 # (`#![cfg(feature = "secprop-annotations")]`) are ALL behind the default-OFF
 # `secprop-annotations` feature, so ci.yml's default-feature lane compiles
 # them EMPTY and runs ZERO of them — the silent-skip gap (#1171) this leg
-# closes. The feature pulls only `oxttl` (already a workspace dep). Verified
-# locally: `cargo test -p sparq-zk --features secprop-annotations` runs the
-# 11 `secprop::tests` + the `secprop_annotations.rs` integration tests, and
-# `clippy --all-targets -D warnings` is clean in every state.
+# closes. The feature pulls `oxttl` (already a workspace dep) and, since
+# [OPUS-5] sq-3705, `sparq-secprop-vocab` — a ZERO-dependency leaf carrying
+# the shared `secx:` IRI constants, so it adds a `const &str` table and no
+# transitive dependency. That edge REPLACED the local IRI copies and the
+# cross-package `include_str!` of sparq-trust's vocabulary; the guards that
+# keep them from coming back (`module_declares_no_local_sec_prop_iri_literal`,
+# `keyed_terms_come_from_the_canonical_vocabulary`) and the relocated
+# annotation-graph dimension guard `methods_ttl_dims_are_canonical_vocabulary`
+# are all in this leg. Verified locally: `cargo test -p sparq-zk --features
+# secprop-annotations` runs 15 `secprop::tests` + the 2
+# `secprop_annotations.rs` integration tests, and `clippy --all-targets -D
+# warnings` is clean in every state.
 - name: "sparq-zk (secprop-annotations — per-method annotation graph + over-claim guards)"
   crate: "sparq-zk"
   features: "secprop-annotations"
@@ -45,9 +58,19 @@
 # which is exactly the failure mode they exist to catch: a transposed
 # `proofConfigHash || documentHash` concatenation leaves every self-signed
 # in-module test green and only the published vectors go red.
-# The feature pulls ed25519-dalek/p256/sha2 (verify primitives only — no JSON-LD
-# processor). Off-circuit, ingest-time host verification; asserts no in-circuit
-# or query-soundness property and is NOT externally audited (sq-qhy4).
+# [OPUS-5] sq-txg1y (issue #3234) widened what this ONE leg covers, without
+# changing the leg name (so `scripts/tests/feature-matrix-legnames.golden.txt` is
+# untouched): the same `vc-bridge` feature now also gates the `ecdsa-rdfc-2019`
+# P-384/SHA-384 profile and the additive `vc_bridge_json` JSON-LD envelope entry
+# point + its in-module tests. Both would otherwise be compiled-empty by the
+# default-feature lane, i.e. the same silent-skip gap. The vendored P-384 W3C
+# vector rides the same `vc_bridge_w3c_vectors.rs` suite.
+# The feature pulls ed25519-dalek/p256/p384/sha2 (verify primitives) plus
+# serde_json/oxjsonld/bs58 (the envelope layer: JSON split, JSON-LD -> RDF
+# expansion against a caller-supplied context allowlist, `z` multibase decode).
+# NO network: `oxjsonld` is driven with a caller-supplied allowlist and no
+# fallback loader. Off-circuit, ingest-time host verification; asserts no
+# in-circuit or query-soundness property and is NOT externally audited (sq-qhy4).
 - name: "sparq-zk (vc-bridge — W3C Data-Integrity ingest bridge + canonical interop vectors)"
   crate: "sparq-zk"
   features: "vc-bridge"

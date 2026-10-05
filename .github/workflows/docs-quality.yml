@@ -27,13 +27,15 @@
 #
 #   HARD gates (FAIL the build; picked up by the ci-summary aggregator):
 #     • markdownlint  — structural markdown defects over the user-facing + governance
-#                       doc surface (root docs, skills/, docs/, crates/, and — as of
-#                       sq-rqyo — research/ + zk/). Tuned to the repo's house style via
-#                       .markdownlint-cli2.jsonc.
+#                       doc surface (root docs, skills/, docs/, crates/, metrics/, the
+#                       book/ mdBook sources — added by issue #5020 — and, as of
+#                       sq-rqyo, research/ + zk/). Tuned to the repo's house style via
+#                       .markdownlint-cli2.jsonc, which carries the authoritative globs.
 #     • typos         — high-confidence spelling errors in those same docs (markdown
 #                       only), with a domain allowlist in _typos.toml.
-#     • internal-links — lychee --offline over those docs: every relative link AND
-#                       heading-anchor (#fragment) must resolve. Deterministic (no net).
+#     • internal-links — lychee --offline over those docs (incl. book/, issue #5020): every
+#                       relative link AND heading-anchor (#fragment) must resolve.
+#                       Deterministic (no net).
 #     • privacy-claims — greps the OUTWARD claim surface for unqualified ZK/MPC
 #                       privacy/soundness claims (the empirical-honesty mandate; the v1
 #                       ZK verifier is pending external audit + sparq-mpc is semi-honest
@@ -72,6 +74,20 @@
 #                       READMEs. Deterministic (line-count/grep), no network; carries a
 #                       hermetic --self-test step. The exact string `readme-template (template)`
 #                       is deliberately pinned as the step name (de-facto REQUIRED gate).
+#     • inference-report-drift — the committed inference-conformance-report.md must state
+#                       the SAME `pass + documented divergence` total as the conformance
+#                       scoreboard's `ratchet_floor`, as ci.yml's enforced `RATCHET=` and as
+#                       the ratchet ci.yml ADVERTISES in its job `name:`; and its heading +
+#                       totals must stay parseable by ci.yml's own `grep -A2` extractor, in
+#                       the spelling inference/report.rs emits (scripts/check-inference-
+#                       report-drift.py; sq-t099c + sq-1d528 / issue #3171, one gate).
+#                       Equality both ways: a lower total means the tracked report is stale
+#                       (the #1428 finding — it had drifted a whole suite behind), a higher
+#                       one means the ratchet was never raised with the improvement; a
+#                       heading/window mismatch is the #1425 finding, where the artefact
+#                       readers cite could not be parsed by the gate guarding it. Runs
+#                       here, not in the Rust-gated inference-conformance job, because the
+#                       drift lands in PRs that never run that job. Deterministic, no build.
 #     • ci-scripts     — the CI-helper self-tests + workflow lints bucket (absorbed whole;
 #                       it was already the in-file precedent for step-bucket consolidation).
 #
@@ -178,18 +194,19 @@ jobs:
         # Consumers here: skill-frontmatter + the ci-scripts selection-wiring inspection.
         run: pip install --require-hashes -r .github/requirements/docs-quality.txt
       - name: Install typos
-        uses: taiki-e/install-action@41049aa56687c35e0afa74eed4f09cec4f9afabf # v2.85.2
+        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
         with:
           tool: typos@1.47.2
       - name: Install lychee (for the site-links self-test)
-        uses: taiki-e/install-action@41049aa56687c35e0afa74eed4f09cec4f9afabf # v2.85.2
+        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
         with:
           tool: lychee@0.23.0
 
       # ---- former job: markdownlint (docs) ----
       - name: markdownlint (docs)
         # npx pins the exact cli2 version; the config (.markdownlint-cli2.jsonc) carries
-        # the tuned ruleset AND the HARD-scope globs (root docs + skills/ + docs/ + crates/).
+        # the tuned ruleset AND the authoritative HARD-scope globs (do not re-enumerate
+        # them here — the copy that used to live on this line had gone stale).
         run: npx --yes markdownlint-cli2@0.18.1
 
       # ---- former job: typos (docs) ----
@@ -225,12 +242,18 @@ jobs:
         with:
           # --offline → no network (deterministic); --include-fragments validates
           # #heading anchors. fail=true makes broken internal links a HARD failure.
+          # [OPUS-5] issue #5020: './book/**/*.md' added — the mdBook sources were in
+          # NEITHER this list nor the markdownlint HARD globs, so a broken intra-book
+          # ./*.md link shipped unchecked. No exclusion is needed for the pages'
+          # `{{#include ../../README.md:anchor}}` / `{{#rustdoc_include}}` directives:
+          # they are not markdown link syntax, so lychee's extractor never emits them
+          # as URIs (verified locally against lychee 0.23.0, the pinned version).
           args: >-
             --offline
             --include-fragments
             --no-progress
             README.md AGENTS.md ASSURANCE.md CONTRIBUTING.md SECURITY.md CHANGELOG.md CLAUDE.md
-            './skills/**/*.md' './docs/**/*.md' './crates/**/*.md'
+            './skills/**/*.md' './docs/**/*.md' './crates/**/*.md' './book/**/*.md'
           fail: true
           # Don't post a tracking issue (read-only token; gating is enough).
           jobSummary: true
@@ -383,6 +406,55 @@ jobs:
       - name: preflight — checker tests + worker-brief block consistency — GATING
         run: python3 scripts/tests/test_preflight.py
 
+      # ---- inference-conformance report drift (sq-t099c + sq-1d528 / issue #3171) ----
+      # [OPUS-5] Two beads landed this gate independently; the script unifies them and
+      # is wired in ONCE here. The inference ratchet number lives in four places and
+      # only one is machine-regenerated: the scoreboard export's `ratchet_floor`
+      # (source of truth), ci.yml's `RATCHET=` + the job `name:` that advertises it,
+      # and the COMMITTED inference-conformance-report.md. CI enforces the floor
+      # against the report it regenerates in-job and then throws that copy away as an
+      # artifact — nothing compared it to the copy in git.
+      #
+      # Both silent-drift classes are covered:
+      #   • sq-pbz04.1.3 (#1428) found the tracked report a full suite BEHIND the
+      #     enforced snapshot with every gate green. A stale committed report is a
+      #     published-honesty problem: it is what a reader (and
+      #     research/inference-completeness-audit.md) takes as the current state.
+      #   • #1425 found the emitter writing "## Overall (all inference suites)" while
+      #     the committed report said "## Overall (all suites)" with a hand-added
+      #     paragraph wedged between heading and totals — so ci.yml's own
+      #     `grep -A2 <heading>` could not parse the artefact readers cite.
+      #
+      # So the gate binds the emitter (inference/report.rs), ci.yml's two greps +
+      # `RATCHET=` literal + advertised job name, scoreboard.rs + its generated mirror
+      # (including the doc-comment floor list), and the tracked report. Report
+      # `pass + documented divergence` == scoreboard floor == ci.yml RATCHET ==
+      # advertised job-name ratchet, EQUALITY in both directions (below = stale
+      # report; above = an improvement whose ratchet was never raised, leaving CI
+      # guarding a number the engine already beat). It never regenerates the report
+      # (that needs the pinned suites + a release build), so a legitimately-lagging
+      # artefact is fine; only a heading/count contradiction is red. It lives HERE
+      # rather than in the inference-conformance job because that job is Rust-gated +
+      # selection-gated — the drift lands in a PR that never runs it. GATING:
+      # deterministic (text/JSON parse), in-repo, no cargo build, no network, so it
+      # costs the shared runner milliseconds. The --self-test mutation table proves
+      # each check has teeth.
+      - name: Self-test inference report drift gate (both directions + mutation table)
+        run: python3 scripts/check-inference-report-drift.py --self-test
+      - name: "Enforce inference report ↔ ci.yml ratchet/job-name ↔ central scoreboard floor agree — GATING"
+        run: python3 scripts/check-inference-report-drift.py
+
+      # [OPUS-5] #5021: hermetic self-test of the mdBook link-fixup preprocessor
+      # (scripts/mdbook-rewrite-links.py) — which repo-relative link targets get rewritten
+      # to the mount-portable blob URL and which are left alone. It runs HERE, on every PR,
+      # rather than only in docs.yml, because docs.yml fires on a hand-maintained path
+      # filter AND a preprocessor regression is SILENT: mdBook exits 0 and simply emits a
+      # link that 404s under the book mount. The lowercase-root-doc case is the defect #5021
+      # reports; narrowing `_ROOT_MD` back to `[A-Z]` reds exactly that case here.
+      # Hermetic: no network, no files, no subprocess (same pattern as the lints above).
+      - name: Self-test mdbook-rewrite-links.py (which link targets get rewritten)
+        run: python3 scripts/mdbook-rewrite-links.py --self-test
+
       - name: Demo deployment manifests
         run: |
           bash deploy/demo/check.sh
@@ -403,6 +475,16 @@ jobs:
         run: shellcheck scripts/ci-free-disk.sh scripts/tests/test_ci_free_disk.sh
       - name: Self-test ci-free-disk.sh (set -u safety + existence guards + #462 fold)
         run: bash scripts/tests/test_ci_free_disk.sh
+      # [OPUS-5] sq-c9q4r: the vacuous-replay guard for fuzz.yml's per-PR corpus-replay
+      # leg. That leg is BLOCKING, and `-runs=0` over an empty corpus exits 0 — so a
+      # future fuzz target added without committed seeds would report green having
+      # executed nothing. This guard is what makes that RED, so its own hermetic
+      # self-test (empty/absent dirs fatal; one seed in either dir passes; randomized
+      # mode exempt) runs HERE on every PR rather than only when the fuzz lane fires.
+      - name: shellcheck ci-fuzz-replay-guard.sh
+        run: shellcheck scripts/ci-fuzz-replay-guard.sh
+      - name: Self-test ci-fuzz-replay-guard.sh (empty corpus is fatal in replay mode)
+        run: bash scripts/ci-fuzz-replay-guard.sh --self-test
       # [OPUS-4.8] sq-4vo9m: the per-tick disk guard (df-check + merged-worktree prune +
       # gated main-target reclaim) that stops the autonomous loop from filling the work box
       # to ENOSPC. Validated HERE (hermetic: the harness PATH-shadows df/pgrep and sandboxes
@@ -537,11 +619,21 @@ jobs:
       # Both suites are hermetic (stdlib only, no gh/network):
       # the script's own rule self-test, plus the independent safety tests
       # (fail-closed / no unpark-without-an-area / no invented label / the three
-      # rule orderings that were measured wrong on the live backlog).
+      # rule orderings that were measured wrong on the live backlog / — since
+      # #5003 — the candidate fetch's REACH and its no-silent-truncation guards,
+      # which are fail-QUIET defects a live cron cannot surface on its own).
       - name: Self-test triage-area.py (needs:area classifier — fail-closed + no-drift)
         run: |
           python3 scripts/triage-area.py --self-test
           python3 scripts/tests/test_triage_area.py
+      # [OPUS-5] #5425: scripts/promote.py is the fourth member of that family — it decides
+      # whether third-party content leaves QUARANTINE, so a regression here is a security
+      # regression, not a labelling one. Its own cron (promote-on-approval.yml) self-tests only
+      # the default-branch copy every 10 minutes, i.e. after the change has merged; this PR-time
+      # gate reds the offending PR instead. Hermetic (stdlib only, no gh/network: the reaction
+      # fixtures are pure, and the quarantine fetch runs against an injected gh stub).
+      - name: Self-test promote.py (trust-promotion predicate + quarantine fetch)
+        run: python3 scripts/promote.py --self-test
       # [FABLE-5] #3759 / registry#563 item 4: the transient-tolerant gh READ retry
       # helper (scripts/gh_retry.py — bounded, transient-5xx-only, fail-closed
       # read-allow-list so mutations/arm calls can never be wrapped) and the two arm
@@ -577,6 +669,8 @@ jobs:
           python3 scripts/release_pr_guard.py --self-test
           python3 scripts/release-interval-guard.py --self-test
           python3 scripts/tests/test_release_publish_guard.py
+          python3 scripts/tests/test_release_source.py
+          python3 scripts/tests/test_release_gui_staging.py
       # [OPUS-4.8] sq-ur7o: every SHA-pinned `taiki-e/install-action` step MUST carry an
       # explicit `with: tool:`. install-action picks the tool from its @<tool> git ref; the
       # code-scanning=0 SHA-pin policy DROPS that selector, so without `with: tool:` the
@@ -637,26 +731,40 @@ jobs:
         run: python3 scripts/check-dashboard-publish-wiring.py --self-test
       - name: "Enforce every served bench/dashboard asset is wired into the Pages publisher — GATING"
         run: python3 scripts/check-dashboard-publish-wiring.py
-      # [OPUS-5] sq-t099c: the drift class tests/scoreboard_floors.rs does NOT cover. That
-      # guard binds crate-test floor `const`s to the central registry; the two BINARY-runner
-      # suites' floors are hand-typed `RATCHET=<n>` shell literals in ci.yml, and the number
-      # compared against the inference one is grepped out of a report by heading text. So the
-      # emitter (inference/report.rs), ci.yml's grep, scoreboard.rs + its generated mirror, and
-      # the INTENTIONALLY-tracked inference-conformance-report.md all have to agree — and
-      # nothing checked that they did. Observed live on main: the emitter writes
-      # "## Overall (all inference suites)" while the committed report said "## Overall (all
-      # suites)" with a hand-added paragraph wedged between heading and totals, so ci.yml's own
-      # `grep -A2 <heading>` could not parse the artefact readers cite. It stayed silent because
-      # CI REGENERATES the report before parsing it — the tracked file is read by nothing. This
-      # gate binds heading, bucket spelling, grep-window parseability, both `RATCHET=` literals
-      # and the doc-comment floor list to the registry. It never regenerates the report (that
-      # needs the pinned suites + a release build), so a legitimately-lagging artefact is fine;
-      # only a heading/count contradiction is red. GATING: deterministic, in-repo, no network,
-      # stdlib-only. Mutation table in --self-test proves each check has teeth.
-      - name: Self-test inference report/scoreboard drift gate (mutation table)
-        run: python3 scripts/check-inference-report-drift.py --self-test
-      - name: "Enforce inference report ↔ ci.yml ratchet ↔ central scoreboard floor agree — GATING"
-        run: python3 scripts/check-inference-report-drift.py
+      # [GPT-6-ASTRA] Exercise the actual publisher shell with file-only Git races.
+      - name: Test bounded dashboard publication recovery (local Git)
+        run: python3 scripts/tests/test_bench_dashboard_publish.py
+      # [OPUS-5] issue #5022: the SAME silent-drop class for the mdBook guide. GitHub Pages has
+      # one deploy slot, so the guide has no workflow of its own — docs.yml VALIDATES it on PRs
+      # and pages.yml BUILDS + OVERLAYS it into the single Pages artifact at out/guide/. Three
+      # things must hold for that to work and each fails silently: both lanes must build through
+      # the shared scripts/build-guide.sh (where the mdBook#1094 "[ERROR]" teeth live) with the
+      # SAME pinned mdbook (otherwise the validated guide is not the published one), and
+      # book.toml's `site-url` must equal the overlay sub-path (mdBook bakes it into the guide's
+      # 404.html as `<base href=…>`, which GitHub Pages serves for /guide/<typo>). pages.yml
+      # asserts its own artifact, but its build job is gated to the publish refs (main /
+      # benchmark-data), so it only speaks after the change has landed; this runs on every PR.
+      # GATING: deterministic, in-repo, no network, no mdbook, no build.
+      # The self-test's mutation table proves each check has teeth.
+      - name: Self-test guide publish-wiring gate (mutation table)
+        run: python3 scripts/check-guide-publish-wiring.py --self-test
+      - name: "Enforce the mdBook guide is wired to publish at /guide/ — GATING"
+        run: python3 scripts/check-guide-publish-wiring.py
+      # [OPUS-5] issue #5022: scripts/build-guide.sh is the shared mdBook builder for BOTH the
+      # validate lane (docs.yml) and the publish lane (pages.yml). Its only non-obvious job is
+      # the teeth — mdBook exits 0 on a broken {{#include}}/anchor (rust-lang/mdBook#1094) and
+      # only says so as an "[ERROR]" log line — and the guide is entirely {{#include}} wrappers
+      # around canonical README/SKILL.md anchors, now PUBLISHED. So the self-test drives the
+      # script against a stub mdbook and pins both directions (clean build passes; exit-0-with-
+      # [ERROR] fails), plus the non-zero-exit-through-`tee` and empty-render cases.
+      - name: shellcheck build-guide.sh + its self-test
+        run: shellcheck scripts/build-guide.sh scripts/tests/test_build_guide.sh
+      - name: Self-test build-guide.sh (broken-include teeth; stub mdbook)
+        run: bash scripts/tests/test_build_guide.sh
+      # [OPUS-5] sq-t099c's inference report/scoreboard drift gate was wired in here and
+      # sq-1d528's (#3171) a few steps above; the two scripts are now ONE gate, invoked
+      # once at the earlier site (search "inference-conformance report drift"). Running
+      # the same script twice in this job bought nothing but runner seconds.
       # [OPUS-4.8] sq-d8or: the built-docs-site link gate (scripts/check-site-links.sh) is
       # invoked on the publish path in pages.yml (after `next build`), where the static export
       # exists. Its remap of the /sparq GitHub-Pages base path + its TEETH (a broken internal
@@ -878,12 +986,37 @@ jobs:
       # content-parity contract. Hermetic + stdlib-only (no PyYAML needed).
       - name: Merge-queue cache/artifact posture (save-if + archive diet — sq-6vshe.15)
         run: python3 scripts/tests/test_mergequeue_cache_posture.py
+      # [OPUS-5] issue #5165 — the LANE INVENTORY half of the same problem. The
+      # `merge_group` trigger set and the prose in docs/branch-protection.md
+      # §Merge-queue subset that describes it are unrelated files, so the list drifted
+      # silently: SIX workflows have left the queue (five under the 2026-07-18
+      # directive, bench.yml earlier under sq-6vshe.6) but the doc-of-record's list
+      # named only three, while research/ci-mergequeue-speedup-2026-07.md §2.1 still
+      # listed all six as gate legs — and three lanes that gate there today appeared in
+      # neither. That list is what the sq-6vshe speedup levers are sized off. Hermetic +
+      # stdlib-only; reuses the cache-posture suite's on:-block parser so the two can
+      # never disagree about what "triggers on merge_group" means.
+      - name: Merge-queue lane inventory (docs match the workflow triggers — issue 5165)
+        run: python3 scripts/tests/test_mergequeue_lane_inventory.py
+      # [OPUS-5] #4935: the gating inference-conformance lane used to re-download the
+      # OWL 2 corpus from web.archive.org over http:// on EVERY run, so a transient
+      # outage there concluded `failure` with nothing measured and ejected an unrelated
+      # PR from the merge queue. It is now restored from an Actions cache. Same
+      # invisible-regression shape as the posture test above — drop the restore step and
+      # CI stays green while silently re-coupling to a third party's uptime. This runs
+      # the REAL bash `fetch_pinned_file` against a stub curl to prove the offline-on-hit
+      # property, pins the ci.yml wiring, and pins that the ratchet was NOT weakened.
+      - name: Inference corpus cache posture (offline-on-hit + ratchet intact — #4935)
+        run: python3 scripts/tests/test_inference_corpus_cache.py
       # [OPUS-5] sq-khm3f: same invisible-regression shape as the posture test above.
       # The gating `js` lane installs wasm-pack as a PREBUILT, SHA-pinned, exactly-
       # versioned binary; reverting to `cargo install wasm-pack` would keep the lane
       # green on a good day while re-exposing it to a transient crates.io blip
       # (which red-gated PR #1131). Hermetic + stdlib-only (no PyYAML needed).
-      - name: js lane wasm-pack install posture (prebuilt + pinned — sq-khm3f)
+      # [OPUS-5] #5771: it also pins that every lane installing wasm-pack through that
+      # action asks for the SAME version — ci.yml's `wasm` job (which RUNS the headless
+      # suites) had drifted two minors behind js.yml (which BUILDS the artifact).
+      - name: wasm-pack install posture (prebuilt + pinned + one version — sq-khm3f, #5771)
         run: python3 scripts/tests/test_js_wasm_pack_install.py
       # [OPUS-4.8] sq-va7at: the nightly selection-bug ALARM
       # (scripts/ci_selection_alarm.py, .github/workflows/selection-alarm.yml,
@@ -939,6 +1072,37 @@ jobs:
       # leave CI.
       - name: Self-test the CI execution-latency alarm (3 choke modes + YAML seam)
         run: python3 scripts/tests/test_ci_execution_latency_alarm.py
+      # [OPUS-5] issue #6349 — HOSTED-RUNNER RESERVATION for the scheduled safety lanes.
+      # miri.yml (24 shards + a doctest job) and kani.yml (per-suite proofs) used to admit
+      # their WHOLE matrices at once, and their jobs are long-lived by construction, so a
+      # nightly burst parked most of the account's standard-runner admissions while current
+      # PR-head checks queued waiting for a runner. Both strategies now declare a bounded
+      # `max-parallel`; this suite reads BOTH workflow files and reds if either cap
+      # disappears, if one lane's footprint outgrows its per-lane ceiling, or if the
+      # COMBINED footprint eats into the majority of the allowance reserved for PR and
+      # merge-group checks. It also pins what the cap must not be paid for with —
+      # `fail-fast: false`, the full shard partition, and no PR-head trigger. Hermetic
+      # fixtures + a mutation pass over the REAL parsed workflows, so a rule that stopped
+      # detecting anything reds here rather than going quietly green. Needs PyYAML
+      # (installed in the shared setup above).
+      - name: Hosted-runner reservation for the miri/kani nightly lanes (issue 6349)
+        run: python3 scripts/tests/test_nightly_runner_reservation.py
+      # [GPT-6 Astra] #6436: exercise the actual nightly admission helper and
+      # mutation evidence producer offline, including green skipped follow-ups.
+      - name: Heavy nightly completion freshness (issue 6436)
+        run: python3 scripts/tests/test_ci_nightly_freshness.py
+      # [OPUS-5] sq-6vshe.7 phase 4: the HEAVY-set DRIFT alarm
+      # (scripts/heavy_set_alarm.py, .github/workflows/heavy-set-alarm.yml). Hermetic
+      # (no cargo, no gh, no network) and stdlib-only. Runs the script's own fixture
+      # suite — the UNDECLARED/MISSING/DEMOTED classification, the heavy-floor boundary
+      # and the demotion hysteresis band, libtest-json-plus parsing (binary-id
+      # stripping, slowest-attempt-wins across retries), and BOTH empty-measurement
+      # fail-louds, of which the second is the one that matters: test events carrying no
+      # `exec_time` must RED, because a detector that scores every test at 0s would
+      # report a confident all-clear forever. It also drives the drift → issue-body path
+      # so a finding cannot be raised and then dropped before it is rendered.
+      - name: Self-test the HEAVY-set drift alarm (drift classes + empty-measurement fail-loud)
+        run: python3 scripts/heavy_set_alarm.py --self-test
       # [SONNET-4.6] sq-1cb6l: the 5 remaining hermetic test suites found by the
       # #1670 audit, wired here alongside the other ci-scripts self-tests.
       #

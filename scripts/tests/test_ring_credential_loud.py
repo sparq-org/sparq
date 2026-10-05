@@ -47,12 +47,14 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import stat
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import yaml
 
@@ -74,6 +76,38 @@ RING_JOBS = {
 # A name deliberately NOT in the registry, for the anti-vacuity control.
 UNDECLARED_LANE = "some undeclared lane that must gate"
 
+# Commands the extracted `run:` scripts invoke that the harness does NOT stub, so they
+# must be real on PATH. `gh` is deliberately absent from this list — it IS stubbed.
+#
+# WHY THIS IS CHECKED RATHER THAN ASSUMED (#5853). The suite EXECUTES the real scripts,
+# so it inherits their runtime dependencies, and an assumed dependency is the same shape
+# of defect this file exists to pin. fast-fix-ring.yml's eligibility chain reads the
+# resolved PR's live state through `jq`; with `jq` off PATH every `$(jq ...)` expands to
+# the empty string, the head_repo comparison mismatches, and the script `exit 0`s at the
+# "fork / cross-repo collision" branch BEFORE the credential guard is ever reached. Both
+# credential-state tests then red and blame the WORKFLOW ("the control is a no-op in
+# BOTH states") for an absence in the ENVIRONMENT — a false accusation that cost a full
+# issue round-trip. Fail on the real cause, by name, instead.
+#
+# NOT a skipTest: a suite that reports green while its checks are disabled by missing
+# configuration is precisely the failure mode #4966 is about, and skipping here would
+# also let a CI runner image that dropped `jq` silently stop pinning the guards.
+_UNSTUBBED_SCRIPT_TOOLS = ("jq",)
+
+
+def _require_script_tools() -> None:
+    missing = [t for t in _UNSTUBBED_SCRIPT_TOOLS if shutil.which(t) is None]
+    if missing:
+        raise AssertionError(
+            f"{', '.join(missing)}: not on PATH. This suite EXECUTES the real `run:` "
+            f"scripts of the ring jobs, and they invoke these commands directly (only "
+            f"`gh` is stubbed). Without them a script takes an early-exit branch and the "
+            f"credential assertions would be measuring this environment rather than the "
+            f"workflow — so this is NOT a #4966 regression. Install them (e.g. "
+            f"`apt-get install -y jq`) and re-run. CI runs this suite on `ubuntu-latest` "
+            f"(.github/workflows/docs-quality.yml), whose image preinstalls them."
+        )
+
 
 def _ring_step(workflow_file: str, job_id: str) -> dict:
     """The single `run:` step of a ring job, read STRUCTURALLY from the live YAML."""
@@ -87,6 +121,8 @@ class _Harness:
     """Executes an extracted `run:` script with a stubbed `gh` on PATH."""
 
     def __init__(self, tmp: Path):
+        # First, before any assertion can misattribute a missing tool to the workflow.
+        _require_script_tools()
         self.tmp = tmp
         self.dispatch_log = tmp / "dispatch.log"
         self.summary = tmp / "step-summary.md"
@@ -303,6 +339,37 @@ class TestTheNewFailureCannotGate(unittest.TestCase):
             gate.render_verdict(runs), 1,
             "a real gating leg's failure was forgiven — the gate was weakened",
         )
+
+
+class TestTheHarnessRefusesToMeasureTheEnvironment(unittest.TestCase):
+    """#5853. The harness's OWN precondition, pinned. Delete the
+    `_require_script_tools()` call from `_Harness.__init__` and this class REDs — without
+    it a box missing `jq` silently rewrites the two credential-state tests into a false
+    accusation against fast-fix-ring.yml."""
+
+    def test_a_missing_script_tool_fails_by_name(self):
+        with mock.patch.object(shutil, "which", return_value=None):
+            with tempfile.TemporaryDirectory() as d:
+                with self.assertRaises(AssertionError) as caught:
+                    _Harness(Path(d))
+        message = str(caught.exception)
+        for token in ("jq", "PATH"):
+            self.assertIn(
+                token, message,
+                "the precondition must NAME the missing tool and where it is missing "
+                "from, or the reader re-diagnoses this as a workflow regression",
+            )
+
+    def test_every_declared_tool_is_really_called_by_a_ring_script(self):
+        """The other direction: an over-broad declaration would fail boxes over a tool
+        the scripts no longer use."""
+        scripts = "\n".join(_ring_step(wf, job_id)["run"] for wf, job_id in RING_JOBS.values())
+        for tool in _UNSTUBBED_SCRIPT_TOOLS:
+            with self.subTest(tool=tool):
+                self.assertIn(
+                    f"{tool} ", scripts,
+                    f"{tool!r} is required by the harness but no ring script invokes it",
+                )
 
 
 class TestSuiteIsWiredIntoCI(unittest.TestCase):

@@ -44,9 +44,45 @@
 # (its area is the maintainer's/author's, not ours). `needs:area` is removed ONLY
 # in the same call that adds >=1 real `area:` label, so the two never drift.
 #
+# REACH: EVERY AREA-LESS OPEN ISSUE, NOT JUST THE PARKED ONES (#5003). This used to
+# fetch `--label needs:area`, i.e. only the issues `triage.py` / `bd-to-issues.py`
+# had parked. But the park is one SOURCE of area-less issues, not the class: an
+# issue the event triager never ran on carries no `status:*` label and no park at
+# all, and is just as area-less and just as undispatchable. #3816 measured 832 open
+# issues with no `area:` label against a park population an order of magnitude
+# smaller. A label query cannot return the class the sweep exists to rescue — the
+# same structural hole `retriage.py::_fetch_candidates` was widened to close — so
+# the queue is now ONE unlabelled open-issue snapshot filtered by the absence of an
+# `area:` label. Widening the REACH does not widen what is WRITTEN: `classify()` is
+# still fail-closed, and an issue that was never parked can only ever GAIN `area:`
+# labels — `apply_row(unpark=...)` never removes a park it did not have.
+#
+# BOUNDED WRITE VOLUME PER RUN (#5448). Widening the REACH (#5003) did not widen what
+# is written per ISSUE, but it did widen how much is written per RUN: each classified
+# issue costs exactly one `gh issue edit`, and #3816 counted 832 area-less open issues,
+# so the first `--apply` ticks after the widening could issue several hundred mutating
+# requests in a few minutes. GitHub's SECONDARY rate limits on content-mutating REST
+# requests — documented as roughly 80/minute and 500/hour for the authenticated actor,
+# with the explicit guidance to wait at least one second between them — sit right in that
+# range. Two documented limits, so two mechanisms (see WRITE_PACE_SECONDS /
+# MAX_WRITES_PER_RUN): the pace keeps the per-MINUTE rate down, the budget keeps the
+# per-HOUR spend down. Note what this is arithmetic on: #3816's issue COUNT and GitHub's
+# published limits, not an observed 403. It is sized to keep the lane clear of the limit,
+# not derived from a measured failure.
+#
+# THE CAP IS NEVER SILENT. A budget that quietly dropped the tail would break the one
+# property this lane exists for — that its residue is a number a maintainer sees. Every
+# deferred issue is printed as a `DEFERRED` line, counted in the tally line, and carried
+# into the run summary by .github/workflows/triage-area.yml, and it is reported SEPARATELY
+# from the `LEFT` residue because the two mean opposite things: LEFT needs a human or a new
+# rule, DEFERRED needs nothing at all and is written by the next tick.
+#
 #   python3 scripts/triage-area.py --self-test    # offline rule unit tests
 #   python3 scripts/triage-area.py                # dry run: full proposed mapping
-#   python3 scripts/triage-area.py --apply        # apply (add area:*, drop needs:area)
+#   python3 scripts/triage-area.py --apply        # apply (add area:*; drop needs:area
+#                                                 #  only where it was actually set)
+#   python3 scripts/triage-area.py --apply --max-writes 400 --write-pace 0.5
+#                                                 # deliberate hand-run with a wider budget
 #
 # Maintainer authorisation for the automated pass: sparq-org/sparq#1135 (2026-07-26).
 #
@@ -64,12 +100,46 @@ import os
 import re
 import subprocess
 import sys
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 REPO = os.environ.get("SPARQ_REPO", "sparq-org/sparq")
 PARK_LABEL = "needs:area"
+
+# --- the write budget (#5448) ---------------------------------------------------
+# GitHub's documented SECONDARY rate limits for content-mutating REST requests, per
+# token. Recorded as named constants rather than inlined so the arithmetic below is
+# checkable — scripts/tests/test_triage_area.py::TestWriteBudget asserts the two
+# defaults stay under them.
+SECONDARY_WRITES_PER_MINUTE = 80
+SECONDARY_WRITES_PER_HOUR = 500
+
+# How often .github/workflows/triage-area.yml fires (`cron: '25,55 * * * *'`). The
+# per-run budget is the per-hour allowance divided across the ticks in an hour, so
+# this constant and that cron must agree — the test parses the workflow and pins it.
+TICKS_PER_HOUR = 2
+
+# Seconds between two `gh issue edit` calls. GitHub's own guidance for the
+# content-mutating secondary limit is to wait at least one second between requests;
+# 1.0s also caps this lane at 60 writes/minute against the ~80/minute limit, which is
+# the headroom that matters because the runner shares its token with the repo's other
+# write lanes. Not a retry and not a backoff: the sweep never approaches the limit
+# rather than recovering from it.
+WRITE_PACE_SECONDS = 1.0
+
+# Mutating requests one `--apply` tick may spend. 150 x 2 ticks = 300/hour, i.e. 60%
+# of the documented ~500/hour allowance, leaving the rest for retriage.yml and the
+# other scheduled lanes that mutate issues with the same token. The residue that does
+# not fit is DEFERRED and REPORTED, never dropped: the queue is sorted by issue number
+# and every write removes an issue from it (it now carries an `area:` label), so a
+# backlog larger than one budget drains monotonically over consecutive ticks — the same
+# resume-on-the-next-tick property that already covers a timed-out run.
+MAX_WRITES_PER_RUN = 150
+
+# Indirection so the hermetic tests can assert the pacing without sleeping through it.
+_sleep = time.sleep
 
 # --- T1: the rule table ---------------------------------------------------------
 # (rule_id, scope, regex, areas, evidence).  `scope` is "title" or "text"
@@ -80,6 +150,9 @@ PARK_LABEL = "needs:area"
 RULES = [
     # -- workflow lanes that merely *mention* another surface ---------------------
     # These must precede the surface rules they name, else the named surface wins.
+    # [GPT-6 Astra] #6468: a classifier diagnostic can name the crate it misroutes.
+    ("triage-area", "title", r"^triage-area(?:\.py)?(?:\s|:|$)",
+     ["ci"], "scripts/triage-area.py and its workflow"),
     ("zk-toolchain-lane", "title", r"into the zk-toolchain\.yml lane",
      ["ci"], "adds a step to .github/workflows/zk-toolchain.yml"),
 
@@ -266,7 +339,7 @@ RULES = [
 
     # -- javascript / wasm client -----------------------------------------------
     ("js", "text",
-     r"js/src/|js/package\.json|@jeswr/sparq|rdf/js conformance|\bjs gate\b",
+     r"js/src/|js/package\.json|@sparq-org/sparq|rdf/js conformance|\bjs gate\b",
      ["js"], "the js/ RDF-JS client"),
 
     # -- website + desktop GUI ---------------------------------------------------
@@ -426,17 +499,76 @@ def live_area_labels():
     return {d["name"] for d in data if d["name"].startswith("area:")}
 
 
-def parked_issues():
-    """LIST API, fully paginated — `gh search` reads a lagging index and has caused
-    three wrong conclusions in this repo."""
-    return json.loads(_gh(["issue", "list", "--repo", REPO, "--label", PARK_LABEL,
-                           "--state", "open", "--limit", "1000",
-                           "--json", "number,title,body,labels"]))
+FETCH_CEILING = 10000
+
+
+def label_names(issue):
+    """The label names on a `gh`/REST issue payload. Both shapes spell a label as
+    `{"name": ...}`, so one reader serves the snapshot fetch and the plan."""
+    return {lb.get("name") for lb in (issue.get("labels") or []) if isinstance(lb, dict)}
+
+
+def open_issues(ceiling=FETCH_CEILING):
+    """Every OPEN issue, via REAL cursor pagination.
+
+    [OPUS-5] (#5003) This was `gh issue list --limit 1000`, which SILENTLY
+    TRUNCATES: the CLI stops at the limit and reports nothing — no warning, no
+    non-zero exit. On a half-hourly cron a silently-dropped tail is never noticed,
+    and this is a work-queue sweep, so a dropped issue is not classified late, it is
+    never classified on any tick. `gh api --paginate` follows the Link headers to
+    exhaustion instead; the explicit ceiling still fails CLOSED on a runaway
+    snapshot rather than half-reporting (same shape as `retriage.py::_fetch_label`
+    and `ready-issues.py::_fetch`).
+
+    `gh search` is deliberately not used: it reads a lagging index and has caused
+    three wrong conclusions in this repo.
+
+    The issues endpoint returns PRs too; they are dropped here (a PR carries no
+    dispatch partition, and labelling one would be pure noise on the board)."""
+    pages = json.loads(_gh(["api", "--paginate", "--slurp",
+                            f"repos/{REPO}/issues?state=open&per_page=100"]) or "[]")
+    rows = [i for page in pages if isinstance(page, list) for i in page
+            if isinstance(i, dict) and "pull_request" not in i]
+    if len(rows) >= ceiling:
+        raise SystemExit(
+            f"triage-area: fetched {len(rows)} open issues >= ceiling {ceiling} — the "
+            "snapshot looks runaway (fail-closed). Raise the ceiling deliberately.")
+    return rows
+
+
+def candidate_issues():
+    """Every OPEN issue carrying NO `area:` label — parked `needs:area` or not.
+
+    [OPUS-5] THE REACH DEFECT (#5003). This used to be a `--label needs:area` query.
+    That returns the issues `triage.py` / `bd-to-issues.py` PARKED, but the park is
+    one source of area-less issues, not the class: an issue the event triager never
+    ran on carries no `status:*` label and no park either, and is equally area-less
+    and equally undispatchable: `ready-issues.py::packages_of` resolves a label-set
+    with no `area:` to the `GLOBAL` partition, whose `()` path is a prefix of every
+    other, so it serializes against everything. #3816 counted 832 open issues with
+    no `area:` against a park an order of magnitude smaller.
+
+    A label query is structurally unable to return the class defined by a MISSING
+    label — the same hole `retriage.py::_fetch_candidates` was widened to close, and
+    for the same reason: an issue that is never FETCHED is never tested.
+
+    Reach is not permission. Every gate below is unchanged — `classify()` still
+    fail-closes to no label, `live_area_labels()` still rejects an invented one, and
+    `apply_row(unpark=...)` still refuses to remove a park the issue never had. The
+    only new write this widening can produce is an `area:` label on an area-less
+    issue, which is exactly what the tool is for."""
+    return [it for it in open_issues()
+            if not any((n or "").startswith("area:") for n in label_names(it))]
 
 
 def plan(issues, crates):
     """The proposed mapping. Deterministic, and a no-op for an issue that already
-    carries an area (idempotence: re-running never re-decides settled work)."""
+    carries an area (idempotence: re-running never re-decides settled work).
+
+    The already-has-an-area check is also `candidate_issues()`'s fetch filter. Kept
+    here as the second line of defence: `plan()` is the only caller of `classify()`,
+    so a future fetch that widens again cannot silently start re-deciding work a
+    maintainer already settled."""
     rows = []
     for it in sorted(issues, key=lambda i: i["number"]):
         names = [lb["name"] for lb in it.get("labels", [])]
@@ -448,10 +580,17 @@ def plan(issues, crates):
     return rows
 
 
-def apply_row(number, add):
-    """Add the area labels AND drop the park in ONE call. They must not drift: an
-    issue with an area but still parked stays undispatchable, and a cleared park
-    with no area silently reserves the serializing __global__ partition.
+def apply_row(number, add, unpark=True):
+    """Add the area labels AND — when the issue is actually parked — drop the park,
+    in ONE call. They must not drift: an issue with an area but still parked stays
+    undispatchable, and a cleared park with no area silently reserves the
+    serializing __global__ partition.
+
+    `unpark=False` is the never-parked half of the widened reach (#5003). Since the
+    queue is every AREA-LESS open issue rather than every PARKED one, most rows now
+    carry no `needs:area` at all. Such an issue must only ever GAIN `area:` labels:
+    emitting `--remove-label needs:area` for it would be a write the sweep has no
+    business making, and it would report a park-clearing it did not perform.
 
     FAIL CLOSED on an empty `add`. `main()` already filters unclassified rows out
     before it gets here, but that filter is one edit away from the apply loop and
@@ -459,12 +598,16 @@ def apply_row(number, add):
     triaged, `retriage.py` promotes it, and it then reserves the serializing
     `__global__` partition — which collapses the dispatch frontier to a single
     worker. The invariant therefore lives in the ONLY function that can emit the
-    unpark, not in the caller that happens to protect it today."""
+    unpark, not in the caller that happens to protect it today. It is asserted for
+    BOTH values of `unpark`: with no areas there is nothing legitimate to write
+    either way."""
     if not add:
         raise ValueError(
             f"refusing a bare unpark of #{number}: `{PARK_LABEL}` may only be "
             "removed in the same call that adds >=1 area: label")
-    args = ["issue", "edit", str(number), "--repo", REPO, "--remove-label", PARK_LABEL]
+    args = ["issue", "edit", str(number), "--repo", REPO]
+    if unpark:
+        args += ["--remove-label", PARK_LABEL]
     for a in add:
         args += ["--add-label", a]
     _gh(args)
@@ -561,48 +704,116 @@ def self_test():
     return 1 if f else 0
 
 
+def _positive_int(text):
+    value = int(text)
+    if value < 1:
+        raise argparse.ArgumentTypeError(
+            "the per-run write budget must be >= 1 — there is no unlimited mode "
+            "(#5448: an unbounded tick is what trips GitHub's secondary write limit)")
+    return value
+
+
+def _non_negative_float(text):
+    value = float(text)
+    if value < 0:
+        raise argparse.ArgumentTypeError("the write pace must be >= 0 seconds")
+    return value
+
+
 def main():
     ap = argparse.ArgumentParser(description="Classify the needs:area backlog.")
     ap.add_argument("--apply", action="store_true", help="write labels (default: dry run)")
     ap.add_argument("--self-test", action="store_true", help="offline rule unit tests")
     ap.add_argument("--json", action="store_true", help="emit the plan as JSON")
+    ap.add_argument("--max-writes", type=_positive_int, default=MAX_WRITES_PER_RUN,
+                    metavar="N",
+                    help=f"mutating `gh issue edit` calls this run may spend "
+                         f"(default {MAX_WRITES_PER_RUN}); the rest are reported as "
+                         "DEFERRED and written by the next tick")
+    ap.add_argument("--write-pace", type=_non_negative_float, default=WRITE_PACE_SECONDS,
+                    metavar="SECONDS",
+                    help=f"seconds to wait between two writes (default "
+                         f"{WRITE_PACE_SECONDS})")
     a = ap.parse_args()
     if a.self_test:
         return self_test()
 
     crates = crate_names()
     known = live_area_labels()
-    rows = plan(parked_issues(), crates)
+    rows = plan(candidate_issues(), crates)
 
     unknown = sorted({lb for _, add, _ in rows for lb in add} - known)
     if unknown:
-        print(f"ERROR: rule table produced labels that do not exist: {unknown}", file=sys.stderr)
-        print("Fix the rule table — do NOT create the label.", file=sys.stderr)
+        print(f"ERROR: classification produced labels absent from the fetched area-label set "
+              f"({len(known)} area labels; the fetch may be incomplete): {unknown}",
+              file=sys.stderr)
+        # [GPT-6 Astra] Bind each missing label to its row and classification tier.
+        # JSON escapes newlines/control characters; no issue body is logged. Keep
+        # this whole-plan check before the write budget and every apply/unpark.
+        for it, add, why in rows:
+            for label in sorted(set(add).intersection(unknown)):
+                print("UNKNOWN_AREA " + json.dumps(
+                    {"number": it["number"], "label": label, "evidence": why},
+                    sort_keys=True), file=sys.stderr)
+        print("Do not create a label based on this failure. First verify each name with "
+              "GET /repos/{owner}/{repo}/labels/{url-encoded-name}. Review incomplete "
+              "enumeration or wrong routing separately; label provisioning for a verified "
+              "existing crate requires a separate reviewed maintenance action. "
+              "This classifier never creates labels.", file=sys.stderr)
         return 2
-
-    if a.json:
-        print(json.dumps([{"number": it["number"], "title": it["title"],
-                           "areas": add, "evidence": why} for it, add, why in rows], indent=1))
-        return 0
 
     classified = [r for r in rows if r[1]]
     left = [r for r in rows if not r[1] and not r[2].startswith("SKIP")]
+    # The per-run write budget (#5448). The split is a deterministic PREFIX of the
+    # issue-number-ordered plan, in BOTH modes: a dry run must show the maintainer the
+    # same deferral the next `--apply` tick will make, or the budget is invisible until
+    # it bites. Every write drops its issue out of `candidate_issues()`, so the deferred
+    # tail is strictly smaller on the next tick.
+    writable, deferred = classified[:a.max_writes], classified[a.max_writes:]
+
+    if a.json:
+        deferred_numbers = {it["number"] for it, _, _ in deferred}
+        print(json.dumps([{"number": it["number"], "title": it["title"],
+                           "areas": add, "evidence": why,
+                           "deferred": it["number"] in deferred_numbers}
+                          for it, add, why in rows], indent=1))
+        return 0
+
     for it, add, why in rows:
         if not add:
             continue
-        print(f"#{it['number']:<5} {','.join(a[5:] for a in add):<40} {why}")
+        print(f"#{it['number']:<5} {','.join(lb[5:] for lb in add):<40} {why}")
         print(f"       {it['title'][:150]}")
-    print(f"\n-- {len(classified)} classified, {len(left)} left parked "
-          f"(no confident evidence), {len(rows)} scanned")
+    print(f"\n-- {len(classified)} classified ({len(writable)} writable this run, "
+          f"{len(deferred)} deferred to the next tick by the {a.max_writes}/run write "
+          f"budget), {len(left)} left unattributed (no confident evidence), "
+          f"{len(rows)} scanned")
     for it, _, _ in left:
         print(f"   LEFT #{it['number']} {it['title'][:120]}")
+    # Reported SEPARATELY from LEFT and never merged into it: a DEFERRED issue is fully
+    # classified and needs no human, it just did not fit this tick's write budget.
+    for it, add, _ in deferred:
+        print(f"   DEFERRED #{it['number']} {','.join(lb[5:] for lb in add)} "
+              f"{it['title'][:120]}")
 
     if not a.apply:
         print("\n(dry run — re-run with --apply to write labels)")
         return 0
-    for it, add, _ in classified:
-        apply_row(it["number"], add)
-        print(f"applied #{it['number']} {','.join(add)}")
+    for index, (it, add, _) in enumerate(writable):
+        # Pace the mutating calls under GitHub's per-minute secondary limit. Between
+        # writes only — a lane with one write must not pay a second for nothing.
+        if index and a.write_pace:
+            _sleep(a.write_pace)
+        # The unpark is decided PER ISSUE from its own labels: the queue is now every
+        # area-less open issue, so most rows were never parked and must gain only areas.
+        parked = PARK_LABEL in label_names(it)
+        apply_row(it["number"], add, unpark=parked)
+        print(f"applied #{it['number']} {','.join(add)}"
+              f"{' -' + PARK_LABEL if parked else ''}")
+    if deferred:
+        print(f"\ndeferred {len(deferred)} classified issue(s) to the next tick — the "
+              f"{a.max_writes}/run budget keeps this lane under GitHub's secondary write "
+              "limit; they are listed above and nothing about them is lost.")
     return 0
 
 

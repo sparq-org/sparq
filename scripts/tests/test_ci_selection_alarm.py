@@ -409,7 +409,7 @@ class TestSuspectListBound(unittest.TestCase):
         _title, body = A.render_issue(
             _crate_finding(_suspects(644, {"sparq-fedplan"})), "1", "a" * 40, None)
         self.assertIn("Ordering is landing recency, newest first", body)
-        self.assertIn("last GREEN nightly is far behind HEAD", body)
+        self.assertIn("last VERIFIED nightly backstop is far behind HEAD", body)
         self.assertIn("--dry-run", body)  # the full set stays reproducible
 
     def test_render_suspects_never_drops_rows_on_a_nonsense_cap(self):
@@ -568,29 +568,61 @@ def _jobs_tsv(jobs: list[tuple[str, str]]) -> str:
     return "".join(f"{name}\t{conclusion}\n" for name, conclusion in jobs)
 
 
+# [OPUS-5] #5025 — the job census of the run that BOUNDS the window in the stubs
+# below. Deliberately a `cancelled`-AGGREGATE run whose full-matrix shards all
+# succeeded: that is the population the old `?status=success` bound query could not
+# see at all, and it is why the window grew to 28 days.
+BOUNDING_RUN_ID = "29000000001"
+BOUNDING_RUN_CREATED_AT = "2026-07-27T03:17:00Z"
+BOUNDING_RUN_JOBS: list[tuple[str, str]] = [
+    ("test (load-aware shard bulk 1/3)", "success"),
+    ("test (load-aware shard bulk 2/3)", "success"),
+    ("test (load-aware shard heavy-diskann)", "success"),
+    ("nightly selection backstop (full-matrix guard)", "success"),
+    # …the advisory lane that hits its ceiling and drags the RUN to `cancelled`:
+    ("mutation ratchet (cargo-mutants, advisory) (sparq-engine, 1/24, 360)", "cancelled"),
+]
+
+
 class _StubRun:
     """Stands in for ci_selection_alarm._run so the REAL gh/git call sites execute.
 
     Dispatches on the actual argv the script builds, so a change to those call sites
-    surfaces here as an unstubbed-command error rather than a silent pass."""
+    surfaces here as an unstubbed-command error rather than a silent pass.
+
+    `base_sha` is the head SHA of the run that BOUNDS the window: given one, the
+    stubbed runs API returns a single completed scheduled run carrying
+    BOUNDING_RUN_JOBS; given None it returns no runs at all (cold start)."""
 
     def __init__(self, jobs: list[tuple[str, str]], base_sha: str | None,
                  commits: list[tuple[str, int | None]],
-                 diffs: dict[str, list[str]], run_conclusion: str = ""):
+                 diffs: dict[str, list[str]], run_conclusion: str = "",
+                 scheduled_runs: list[tuple[str, str, str, str]] | None = None,
+                 run_jobs: dict[str, list[tuple[str, str]]] | None = None):
         self.jobs, self.base_sha = jobs, base_sha
         self.commits, self.diffs = commits, diffs
         self.run_conclusion = run_conclusion
+        self.scheduled_runs = (
+            scheduled_runs if scheduled_runs is not None
+            else ([(BOUNDING_RUN_ID, base_sha, "cancelled", BOUNDING_RUN_CREATED_AT)]
+                  if base_sha else [])
+        )
+        self.run_jobs = run_jobs if run_jobs is not None else {
+            BOUNDING_RUN_ID: BOUNDING_RUN_JOBS
+        }
         self.calls: list[list[str]] = []
 
     def __call__(self, cmd, cwd=None, check=True):  # noqa: ANN001 — mirrors _run
         self.calls.append(list(cmd))
         joined = " ".join(cmd)
+        if cmd[0] == "gh" and "status=completed" in joined:
+            return "".join("\t".join(r) + "\n" for r in self.scheduled_runs)
         if cmd[0] == "gh" and "/jobs" in joined:
-            return _jobs_tsv(self.jobs)
+            m = re.search(r"actions/runs/(\d+)/jobs", joined)
+            run_id = m.group(1) if m else ""
+            return _jobs_tsv(self.run_jobs.get(run_id, self.jobs))
         if cmd[0] == "gh" and any(re.search(r"actions/runs/\d+$", c) for c in cmd):
             return self.run_conclusion + "\n"
-        if cmd[0] == "gh" and "status=success" in joined:
-            return (self.base_sha or "") + "\n"
         if cmd[:2] == ["git", "log"]:
             return "".join(f"{sha}\x00subject (#{pr})\n" for sha, pr in self.commits)
         if cmd[:2] == ["git", "diff"]:
@@ -751,6 +783,273 @@ class TestQuietOnACleanCancelledRun(unittest.TestCase):
                         f"a {conclusion or 'conclusion-unknown'}-concluded run with no "
                         f"failed job must fail LOUD, not exit 0",
                     )
+
+
+# --------------------------------------------------------------------------- #
+# #5025 — WHAT BOUNDS THE CORRELATION WINDOW
+# --------------------------------------------------------------------------- #
+#
+# The alarm's window is (bound, HEAD]. Until #5025 the bound was the head_sha of the
+# most recent run-level `success` — the last place the alarm trusted the aggregate
+# #4965 proved lossy. MEASURED: 35 `cancelled` / 7 `success` / 3 `failure` over 45
+# nightlies, last `success` 2026-07-01, so the window was 28 days of `main` and the
+# first real firing carried 644 suspects. The bound is now computed over each run's
+# JOB list (classify_run).
+#
+# The pair of properties below is the whole point, and either alone is satisfiable by
+# a broken implementation:
+#   * ACCEPT a `cancelled`-aggregate run whose full-matrix shards all passed — without
+#     this the bound never moves and #5025 is unfixed;
+#   * REJECT a run that merely did not FAIL — a run whose shards were all cancelled or
+#     skipped verified nothing, and accepting it would move the base FORWARD past
+#     commits no backstop re-ran, silently SHRINKING the suspect set. That is the
+#     "do not suppress the alarm" prohibition wearing the opposite sign, and it is why
+#     classify_run needs a positive coverage term that "no job failed" does not give.
+
+def _health_meta_dir(tmp: str) -> Path:
+    meta_f = Path(tmp) / "meta.json"
+    meta_f.write_text(json.dumps(_metadata_with(["sparq-core", "sparq-geo"])))
+    return meta_f
+
+
+def _classify(jobs, run_id="1", head_sha="d" * 40, conclusion="cancelled",
+              created_at="2026-07-30T03:17:00Z"):
+    return A.classify_run(run_id, head_sha, conclusion, created_at, jobs)
+
+
+class TestWindowBoundIsJobLevel(unittest.TestCase):
+    """classify_run — the predicate itself, over job lists shaped like the real ones."""
+
+    def test_cancelled_aggregate_run_with_green_shards_bounds_the_window(self):
+        """THE #5025 FIX. Every full-matrix shard succeeded; the RUN still aggregated to
+        `cancelled` because the advisory mutation-ratchet leg hit its ceiling. The old
+        bound query (`?status=success&per_page=1`) could not see this run at all, which
+        is exactly how the window reached 28 days."""
+        health = _classify(BOUNDING_RUN_JOBS)
+        self.assertTrue(
+            health.bounds,
+            "a run whose every test shard passed must bound the window whatever "
+            f"GitHub aggregated it to: {health.reason}",
+        )
+        self.assertEqual(health.conclusion, "cancelled",
+                         "the fixture must keep the lossy aggregate, or it proves nothing")
+        self.assertEqual(health.failed_jobs, ())
+        self.assertEqual(health.shard_count, 3)
+
+    def test_a_genuinely_failed_job_disqualifies_the_run_and_is_named(self):
+        health = _classify(
+            BOUNDING_RUN_JOBS + [("opt-in sparq-core (mmap)", "failure")]
+        )
+        self.assertFalse(health.bounds, "a run with a genuine failure is not a backstop")
+        self.assertEqual(health.failed_jobs, ("opt-in sparq-core (mmap)",))
+        self.assertIn("opt-in sparq-core (mmap)", health.reason)
+
+    def test_a_run_whose_shards_were_all_cancelled_cannot_bound(self):
+        """ANTI-SUPPRESSION. Nothing FAILED here — every shard was cancelled at the
+        timeout ceiling — so the predicate #5025 sketches ('no job concluded
+        failure/timed_out') would accept it and move the base forward past commits that
+        were never re-run, hiding every suspect before it."""
+        cancelled = [(n, "cancelled" if n.startswith("test (") else c)
+                     for n, c in BOUNDING_RUN_JOBS]
+        self.assertNotIn("failure", {c for _, c in cancelled},
+                         "fixture must contain NO failure — that is the whole point")
+        health = _classify(cancelled)
+        self.assertFalse(
+            health.bounds,
+            "a run that verified nothing must not be treated as a verified backstop",
+        )
+        self.assertIn("did not conclude", health.reason)
+        self.assertEqual(len(health.unverified_shards), 3,
+                         "every shard must be recorded as unverified, for the report")
+
+    def test_a_skipped_shard_is_not_a_verified_shard(self):
+        skipped = [(n, "skipped" if n == "test (load-aware shard bulk 2/3)" else c)
+                   for n, c in BOUNDING_RUN_JOBS]
+        self.assertFalse(_classify(skipped).bounds,
+                         "a skipped lane was not re-run, so it witnesses nothing")
+
+    def test_a_run_with_no_shard_at_all_cannot_bound(self):
+        health = _classify([("detect rust changes", "success"),
+                            ("nightly-gate", "success")])
+        self.assertFalse(health.bounds)
+        self.assertIn("no full-matrix test shard", health.reason)
+
+    def test_the_known_positive_nightly_does_not_bound_the_window(self):
+        """Run 30333511110 carried four genuine failures; it is the run the alarm
+        CORRELATES, and it must never also be the run that bounds the window."""
+        health = _classify(KNOWN_POSITIVE_JOBS, run_id=KNOWN_POSITIVE_RUN_ID,
+                           conclusion=KNOWN_POSITIVE_RUN_CONCLUSION)
+        self.assertFalse(health.bounds)
+        self.assertEqual(len(health.failed_jobs), 4)
+
+
+class TestFindWindowBoundScan(unittest.TestCase):
+    """find_window_bound — newest-first, stops at the first qualifying run, and always
+    hands back everything it examined so the health report can state the rejections."""
+
+    RED = [("test (load-aware shard bulk 1/3)", "failure")]
+
+    def _stub(self, runs, run_jobs):
+        mod = _load_module()
+        mod._run = _StubRun([], None, [], {}, scheduled_runs=runs, run_jobs=run_jobs)
+        return mod, mod._run
+
+    def test_returns_the_newest_qualifying_run_and_stops_scanning(self):
+        runs = [("30000000003", "c" * 40, "cancelled", "2026-07-30T03:17:00Z"),
+                ("30000000002", "b" * 40, "cancelled", "2026-07-29T03:17:00Z"),
+                ("30000000001", "a" * 40, "success", "2026-07-28T03:17:00Z")]
+        mod, stub = self._stub(runs, {"30000000003": self.RED,
+                                      "30000000002": BOUNDING_RUN_JOBS,
+                                      "30000000001": BOUNDING_RUN_JOBS})
+        bound, scanned = mod.find_window_bound("o/r", "ci.yml", "schedule", 30)
+        self.assertIsNotNone(bound)
+        self.assertEqual(bound.head_sha, "b" * 40, "must take the NEWEST qualifying run")
+        self.assertEqual([h.run_id for h in scanned], ["30000000003", "30000000002"],
+                         "the scan must stop at the first qualifying run")
+        self.assertNotIn(
+            "30000000001", " ".join(" ".join(c) for c in stub.calls),
+            "runs older than the bound must not cost a job-list API call",
+        )
+
+    def test_returns_none_and_every_examined_run_when_none_qualify(self):
+        runs = [("30000000003", "c" * 40, "cancelled", "2026-07-30T03:17:00Z"),
+                ("30000000002", "b" * 40, "failure", "2026-07-29T03:17:00Z")]
+        mod, _ = self._stub(runs, {"30000000003": self.RED, "30000000002": self.RED})
+        bound, scanned = mod.find_window_bound("o/r", "ci.yml", "schedule", 30)
+        self.assertIsNone(bound)
+        self.assertEqual(len(scanned), 2, "a rejected run must still be reported")
+
+    def test_the_scan_does_not_filter_the_run_list_by_the_lossy_aggregate(self):
+        """`?status=success` in the runs query IS the #5025 bug: it discards the
+        cancelled-aggregate runs whose shards all passed before anything can look at
+        their jobs."""
+        mod, stub = self._stub([], {})
+        mod.find_window_bound("o/r", "ci.yml", "schedule", 30)
+        query = " ".join(" ".join(c) for c in stub.calls)
+        self.assertIn("status=completed", query)
+        self.assertNotIn("status=success", query)
+
+
+class TestStaleBackstopIsReportedNotShrunk(unittest.TestCase):
+    """#5025's ⚠️: a long window is a TRUE report of a stale backstop. When nothing
+    verified the matrix the window must not quietly become the 25h cold-start
+    fallback — that would under-report suspects, which is the same lie as suppressing
+    the alarm."""
+
+    JOBS = [("opt-in sparq-core (mmap)", "failure")]
+
+    def _run_main(self, mod, tmp, stub):
+        mod._run = stub
+        meta_f = _health_meta_dir(tmp)
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = mod.main([
+                "--run-id", "1", "--head-sha", "e" * 40,
+                "--run-conclusion", "failure", "--repo", "o/r", "--repo-root", tmp,
+                "--metadata-file", str(meta_f), "--dry-run",
+            ])
+        return rc, buf.getvalue()
+
+    def _git_log_call(self, stub) -> list[str]:
+        return next(c for c in stub.calls if c[:2] == ["git", "log"])
+
+    def test_a_verified_bound_makes_the_window_a_commit_RANGE(self):
+        mod = _load_module()
+        stub = _StubRun(self.JOBS, "9" * 40, [("a" * 40, 7)],
+                        {"a" * 40: ["crates/sparq-geo/src/lib.rs"]})
+        with tempfile.TemporaryDirectory() as d:
+            rc, out = self._run_main(mod, d, stub)
+        self.assertEqual(rc, 0, out)
+        self.assertIn(f"{'9' * 40}..{'e' * 40}", self._git_log_call(stub),
+                      "a verified bound must produce a (bound, HEAD] commit range")
+
+    def test_no_verified_run_gives_a_HORIZON_window_and_a_loud_warning(self):
+        mod = _load_module()
+        red = [("test (load-aware shard bulk 1/3)", "failure")]
+        stub = _StubRun(
+            self.JOBS, None, [("a" * 40, 7)],
+            {"a" * 40: ["crates/sparq-geo/src/lib.rs"]},
+            scheduled_runs=[("30000000003", "c" * 40, "cancelled", "2026-07-30T03:17:00Z"),
+                            ("30000000002", "b" * 40, "cancelled", "2026-07-02T03:17:00Z")],
+            run_jobs={"30000000003": red, "30000000002": red},
+        )
+        with tempfile.TemporaryDirectory() as d:
+            rc, out = self._run_main(mod, d, stub)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("--since=2026-07-02T03:17:00Z", self._git_log_call(stub),
+                      "the window must reach back to the OLDEST run examined, not to "
+                      "the 25h cold-start fallback")
+        self.assertIn("::warning::", out)
+        self.assertIn("backstop is STALE", out)
+        self.assertIn("HORIZON-bounded", out,
+                      "the report must say the window is not coverage-bounded")
+
+    def test_a_true_cold_start_still_uses_the_lookback_fallback(self):
+        mod = _load_module()
+        stub = _StubRun(self.JOBS, None, [("a" * 40, 7)],
+                        {"a" * 40: ["crates/sparq-geo/src/lib.rs"]},
+                        scheduled_runs=[], run_jobs={})
+        with tempfile.TemporaryDirectory() as d:
+            rc, out = self._run_main(mod, d, stub)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("--since=25 hours ago", self._git_log_call(stub))
+        self.assertIn("cold-start", out)
+
+
+class TestNightlyHealthReport(unittest.TestCase):
+    """#5025 acceptance item 1 — 'is the full matrix actually green, and if not which
+    jobs are persistently red?' — answered on every firing, and on demand."""
+
+    def _scanned(self):
+        red = "mutation ratchet (cargo-mutants, advisory) (sparq-reason, 1/3)"
+        flake = "test (load-aware shard heavy-diskann)"
+        return [
+            _classify([("x", "failure"), (red, "failure")], run_id="3"),
+            _classify([(red, "failure"), (flake, "failure")], run_id="2"),
+            _classify(BOUNDING_RUN_JOBS, run_id="1"),
+        ]
+
+    def test_persistently_red_separates_the_repeat_offender_from_the_one_off(self):
+        counts = dict(A.persistently_red_jobs(self._scanned()))
+        self.assertEqual(
+            counts,
+            {"mutation ratchet (cargo-mutants, advisory) (sparq-reason, 1/3)": 2},
+            "only the job red in >=2 examined runs is persistent; a single failure is "
+            "a one-off and calling it persistent would misdirect the fix",
+        )
+
+    def test_the_report_names_the_bound_the_rejections_and_the_persistent_red(self):
+        scanned = self._scanned()
+        report = A.render_nightly_health(scanned, scanned[-1])
+        self.assertIn("Window bound", report)
+        self.assertIn("`1`", report, "the bounding run id must be named")
+        self.assertIn("Persistently red", report)
+        self.assertIn("×2", report, "the repeat count must be stated, not just a label")
+        for health in scanned:
+            self.assertIn(health.reason, report,
+                          "every examined run's verdict must be stated")
+
+    def test_the_report_says_so_when_nothing_verified_the_matrix(self):
+        scanned = self._scanned()[:2]
+        report = A.render_nightly_health(scanned, None)
+        self.assertIn("NO examined run verified the full matrix", report)
+        self.assertIn("STALE", report)
+
+    def test_nightly_health_cli_reports_without_correlating_or_filing(self):
+        mod = _load_module()
+        stub = _StubRun([], "9" * 40, [], {})
+        mod._run = stub
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = mod.main(["--nightly-health", "--repo", "o/r"])
+        out = buf.getvalue()
+        self.assertEqual(rc, 0, out)
+        self.assertIn("nightly backstop health", out)
+        self.assertNotIn("WOULD file", out)
+        self.assertFalse(
+            [c for c in stub.calls if c[:2] == ["git", "log"]],
+            "--nightly-health must not replay the window; it only reports",
+        )
 
 
 # --- the workflow `if:` seam ------------------------------------------------- #

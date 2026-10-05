@@ -17,6 +17,11 @@
 # `opt-in <name>`, discovered as a REQUIRED check by the ci-summary `gate` aggregator BY NAME
 # and pinned in scripts/tests/feature-matrix-legnames.golden.txt. Keep `name` free of the whole
 # words "advisory"/"informational" or the leg stops gating.
+# SCOPE ([SONNET-4.6] issue #2384): adding/removing/renaming a leg changes the emitted
+# leg-name set, and THAT is a TWO-FILE change — this fragment AND
+# scripts/tests/feature-matrix-legnames.golden.txt. Every other edit here (features,
+# test, tier, tier-reason, comments) leaves the name set alone and is a SINGLE-file
+# change. See README.md in this directory.
 
 # The whole SERVICE client is behind `service`; `cargo test -p sparq-engine-service --features
 # service` runs the moved SRJ/SRX parse, streaming-equivalence, egress-policy, bound-join and

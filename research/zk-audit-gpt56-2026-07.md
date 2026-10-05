@@ -230,6 +230,60 @@ until a human accredited cryptographer signs off; that engagement is still recom
   the four well-formedness rejections is pinned. Both non-narrowing witnesses were mutation-checked:
   making `bind_query_correctness` read `pattern_scans` turns them red. NOT externally audited
   (sq-qhy4).
+
+  **Sibling finding raised while fixing L-1 — WITHIN-pattern repeated variable (#5240).
+  CONFIRMED reachable, then fixed.** L-1 is about one variable at two slots across two PATTERNS.
+  The question it raised is the degenerate case: one variable at two slots of ONE pattern,
+  `{ ?v <p> ?v }`. SPARQL matches a BGP pattern under a single substitution, so such a pattern
+  constrains the two disclosed columns to be EQUAL — and nothing enforced that.
+  `scan_matches_pattern` compares only per-slot const-ness and the constant encodings (both slots
+  are variables, so any `(?, <p>, ?)` scan matches); the scan circuit binds only the CONSTANT slots
+  to `pattern_const_enc`, so the in-circuit statement is silent; and every shared-variable gate
+  works CROSS-pattern and is structurally blind to the repeat —
+  `sparq_zk::verify::cross_graph_join_obligations` (the disclosed path, via `recheck`) iterates
+  pattern PAIRS `i < j` over per-pattern variable SETS, where a repeated variable collapses to one
+  element and `i == j` is never considered, and `bind_joins` (the hidden path) likewise requires the
+  shared variable to sit in two DISTINCT patterns (`pj != pi`). That combination — the cross-pattern
+  and cross-scan analogues both covered, the within-pattern one not — is what made it look like a
+  gap rather than a deliberate omission.
+
+  Confirmed by the same method as L-1. A fully-attested, revocation-fresh manifest whose single scan
+  discloses the row `(alice, knows, bob)` was presented under `SELECT ?v WHERE { ?v <knows> ?v }`;
+  `prefilter_manifest_structure` returned **`Ok([])`**, so a relying party would read a solution
+  binding `?v` to two DIFFERENT terms at once — a disclosed row that does not satisfy the pattern it
+  is disclosed under. Unlike L-1 this needs no numeric-type coincidence to be a useful wrong answer:
+  both slots hold ordinary IRIs, so the accepted row is a plain false "these are the same entity"
+  claim (self-loop / same-as / reflexive-relation queries are exactly where `{ ?v <p> ?v }` is
+  written).
+
+  The fix is `verifier::bind_repeated_pattern_slots`, run as stage 2b′ of
+  `prefilter_manifest_structure_impl` immediately after `bind_query_correctness` (placed after so the
+  existing gates' already-pinned error precedence is unchanged). For each query BGP pattern it groups
+  the pattern's variable slots by NAME, and for each variable at more than one slot demands, for
+  EVERY active disclosed row of EVERY scan that matches the pattern by constants, that those slots
+  carry equal values — compared on canonical big-endian field bytes (`field_hex_eq`), so hex
+  spelling/padding differences do not spuriously diverge and a malformed row hex fails CLOSED.
+  Rejection is `CheckError::RepeatedSlotMismatch { pattern, proof, row, variable, slots }`. It
+  inherits the sq-q9r5e discipline in both directions: per-ROW (the disclosed result IS the scans'
+  rows, so one bad row makes the pattern unproven for the disclosed set) and over EVERY
+  constant-MATCHING scan rather than the prover's `pattern_scans` declaration — so a query mixing a
+  repeated-variable pattern with a distinct-variable pattern at the same constant layout
+  (`{ ?v <p> ?v . ?a <p> ?b }`) is over-demanded and REJECTED fail-closed, the same trade L-1 made.
+  Queries whose patterns carry no repeated variable (the ordinary case, incl. every other test in the
+  suite) are unaffected.
+
+  The `extended-fragment` regime did NOT have this gap and needs no new gate: `bind_fragment_scans`
+  binds each variable slot of the selected row either to the disclosed solution (projected vars, via
+  `mu`) or to a per-branch existential-coherence map, both keyed by variable NAME across slots, so a
+  repeated variable's two slots are compared there by construction.
+
+  Witnesses (`crates/sparq-zk-compose/tests/e2e.rs`):
+  `repeated_pattern_var_rejects_a_row_whose_slots_disagree` (the forge — RED before the gate, with
+  the pre-fix `Ok([])` recorded above), `repeated_pattern_var_accepts_a_genuine_self_loop_row`
+  (positive control: `(alice, knows, alice)` still verifies) and
+  `distinct_pattern_vars_are_unaffected_by_the_repeated_slot_gate` (scope control). Mutation-checked
+  BOTH ways: making the equality vacuous reds the forge, and inverting it reds the positive control.
+  Research-grade, NOT externally audited (sq-qhy4).
 - **M-1 / L-2** are already covered by **CR-G8 / sq-j506** and **CR-G9** respectively — no new bead
   (the auditor should weigh gating `DualLeafV1` out of production until sq-j506 is audited).
 

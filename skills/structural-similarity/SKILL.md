@@ -4,7 +4,7 @@ description: "Training-free structural entity similarity over a sparq RDF graph 
 license: MIT
 metadata:
   version: "0.1.0"
-  homepage: https://github.com/jeswr/sparq
+  homepage: https://github.com/sparq-org/sparq
 ---
 
 # sparq-sim — structural entity similarity

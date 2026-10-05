@@ -59,6 +59,10 @@ _ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
 # How much of the captured log to inline in the issue (the tail is where the crash /
 # reproducer lines are).
 _LOG_TAIL_CHARS = 4000
+# [OPUS-5] sq-c9q4r: any run of 3+ backticks in the UNTRUSTED log tail. The tail is
+# inlined inside a ``` fence in build_issue_body(), so such a run CLOSES the fence
+# early and everything after it renders as markdown in an own-repo issue.
+_FENCE_RUN_RE = re.compile(r"`{3,}")
 
 
 def log(msg: str) -> None:
@@ -160,7 +164,11 @@ def append_bead(jsonl_path: Path, record: dict) -> None:
 
 
 def build_issue_body(bead_id: str, lane: str, args, log_tail: str) -> str:
-    tail = log_tail or "(no log captured — see the run's job log + any uploaded artifact)"
+    # [OPUS-5] sq-c9q4r: defuse AT the fence as well as in read_log_tail(), so the
+    # "untrusted text cannot escape this block" invariant holds for every caller
+    # rather than only the one that read the file. Idempotent (the rewrite emits no
+    # backticks), so a tail that already went through read_log_tail() is unchanged.
+    tail = defuse_code_fences(log_tail) or "(no log captured — see the run's job log + any uploaded artifact)"
     return f"""> 🤖 **SPARQ agent** — auto-filed by the demoted-lane safety net (bead sq-6vshe.6). [FABLE-5]
 
 The **full form** of a CI lane that was demoted off the per-PR critical path **failed**. The per-PR variant runs only the cheap deterministic slice, so this is a finding the per-PR run could not have caught — tracked here so the demoted lane cannot silently rot.
@@ -179,16 +187,33 @@ The **full form** of a CI lane that was demoted off the per-PR critical path **f
 """
 
 
+def defuse_code_fences(text: str) -> str:
+    """Neutralise ``` runs so untrusted log text cannot escape the markdown code fence
+    it is inlined into.
+
+    [OPUS-5] sq-c9q4r. The log tail is arbitrary bytes from a fuzz target's stdout —
+    including the failing INPUT libFuzzer echoes back — so a log containing a run of
+    three-or-more backticks closes build_issue_body()'s fence early and the remainder
+    renders as markdown in an issue this repo's own CI opens (own-repo markdown
+    injection; the same shape as the differential filer's inline repro block).
+    Each such run is rewritten to the same number of apostrophes: ASCII, no invisible
+    characters, visually near-identical, and impossible to read as a fence. A 3+
+    backtick run carries no diagnostic meaning in a crash log, so nothing is lost.
+    """
+    return _FENCE_RUN_RE.sub(lambda m: "'" * len(m.group(0)), text)
+
+
 def read_log_tail(path: str | None) -> str:
+    """Tail of the captured run log, fence-defused (it is inlined into a ``` block)."""
     if not path:
         return ""
     p = Path(path)
     if not p.exists():
         return ""
     text = p.read_text(encoding="utf-8", errors="replace")
-    if len(text) <= _LOG_TAIL_CHARS:
-        return text
-    return "…(truncated)…\n" + text[-_LOG_TAIL_CHARS:]
+    if len(text) > _LOG_TAIL_CHARS:
+        text = "…(truncated)…\n" + text[-_LOG_TAIL_CHARS:]
+    return defuse_code_fences(text)
 
 
 def gh(*argv: str) -> str:
@@ -285,6 +310,26 @@ def self_test() -> int:
         tail = read_log_tail(str(logf))
         assert tail.startswith("…(truncated)…") and len(tail) <= _LOG_TAIL_CHARS + 40
         assert read_log_tail(None) == "" and read_log_tail(str(Path(td) / "missing")) == ""
+        # [OPUS-5] sq-c9q4r: MARKDOWN-INJECTION guard. A log carrying a ``` run must not
+        # be able to close the issue body's fence — the tail is arbitrary fuzz-target
+        # output (incl. the echoed failing input), and this filer opens an issue in THIS
+        # repo. Assert on the round-trip through the real reader, not just the helper.
+        hostile = "PANIC\n```\n## injected heading\n[x](https://evil.invalid)\n````\n"
+        hostile_log = Path(td) / "hostile.log"
+        hostile_log.write_text(hostile, encoding="utf-8")
+        hostile_tail = read_log_tail(str(hostile_log))
+        assert "```" not in hostile_tail, hostile_tail
+        # Runs are neutralised in place, not deleted — length + surrounding text survive.
+        assert "'''" in hostile_tail and "''''" in hostile_tail and "PANIC" in hostile_tail
+        assert "## injected heading" in hostile_tail
+        # The assembled body then contains EXACTLY the two fences it opens/closes itself.
+        hostile_body = build_issue_body(b1, "fuzz-randomized", A, hostile_tail)
+        assert hostile_body.count("```") == 2, hostile_body.count("```")
+        # ...and defusing at the fence covers a caller that never went through the reader.
+        assert build_issue_body(b1, "fuzz-randomized", A, hostile).count("```") == 2
+        # A single/double backtick is NOT a fence and must be left alone (no over-strip).
+        assert defuse_code_fences("a `b` c ``d``") == "a `b` c ``d``"
+        assert defuse_code_fences(defuse_code_fences(hostile)) == defuse_code_fences(hostile)
     log("self-test OK")
     return 0
 

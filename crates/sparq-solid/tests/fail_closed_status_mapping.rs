@@ -1,18 +1,27 @@
 //! [FABLE-5] sq-6tgxp — the FR-6 fail-closed load/error contract as a **table oracle**
-//! over [`AclStatus`] + [`AclStatus::is_retryable`], locking the 401-vs-403-vs-503 split
-//! a Solid resource server (epic sq-gg0qq) must honour when mapping a [`WacDecision`] to
-//! an HTTP status:
+//! over [`AclStatus`] + [`AclStatus::is_retryable`], locking the 403-vs-503 split a Solid
+//! resource server (epic sq-gg0qq) must honour when mapping a [`WacDecision`] to an HTTP
+//! status:
 //!
-//! | decision                                             | HTTP  |
-//! |------------------------------------------------------|-------|
-//! | `allow == true` (necessarily `Resolved`)             | `200` |
-//! | retryable deny (`Unloaded` / `Transient`)            | `503` |
-//! | definitive deny, **anonymous** requester             | `401` |
-//! | definitive deny, authenticated (`Resolved` / `NoAcl`)| `403` |
+//! | decision                                              | HTTP  |
+//! |-------------------------------------------------------|-------|
+//! | `allow == true` (necessarily `Resolved`)              | `200` |
+//! | retryable deny (`Unloaded` / `Transient`)             | `503` |
+//! | definitive deny (`Resolved` / `NoAcl`), ANY requester | `403` |
+//!
+//! sq-qonip: `http_status` below is a test-local **model** of that split, and it takes no
+//! authentication state — because [`AclStatus`] carries none, which is what this suite can
+//! honestly pin. `sparq-solid` is downstream of no HTTP crate, so nothing here observes the
+//! shipped shell: `sparq-server`'s `solid_authz::deny_status_code` is pinned by its OWN unit
+//! tests (`deny_status_code_maps_definitive_vs_retryable`,
+//! `shipped_mapper_gives_anonymous_definitive_denies_the_same_403`), which is where a
+//! server-side drift would be caught. Note the shipped 403-for-anonymous is a known
+//! non-conformance on an LDP resource-serving path, documented on `AclStatus`; this suite
+//! locks the *library* contract underneath it, not that HTTP choice.
 //!
 //! Invariants pinned here (all fail-closed, per `decide.rs` FR-6 / sq-snopa.2):
 //! - `is_retryable()` holds **exactly** for `{Unloaded, Transient}` and NOT for
-//!   `{Resolved, NoAcl}` — retryable statuses map to a distinct 503-class, never 40x.
+//!   `{Resolved, NoAcl}` — retryable statuses map to a distinct 503-class, never 403.
 //! - A retryable status **never** surfaces as `allow == true`.
 //! - `acl_link_header()` is `Some` **iff** `governing_acl` is `Some` — including
 //!   `Unloaded`, where the ACL is discovered even though the view is unmaterialized.
@@ -60,22 +69,21 @@ fn materialized_store(nquads: &str) -> PodStore {
     store
 }
 
-/// The FR-6 status-mapping oracle a resource server applies to a [`WacDecision`]: the
-/// single source of truth for the 200/401/403/503 split this suite locks. `authenticated`
-/// is the server's authentication state for the requester (`Session::agent.is_some()`).
-fn http_status(d: &WacDecision, authenticated: bool) -> u16 {
+/// A test-local **model** of the FR-6 status mapping a resource server applies to a
+/// [`WacDecision`] — the 200/403/503 split this suite locks.
+///
+/// sq-qonip: it is NOT the shipped mapper and nothing here calls one; it takes no
+/// authentication state because [`AclStatus`] supplies none, which is the invariant this
+/// file actually pins. `sparq-server`'s `deny_status_code` is tested in `sparq-server`.
+fn http_status(d: &WacDecision) -> u16 {
     if d.allow {
         200
     } else if d.status.is_retryable() {
         // Unloaded / Transient: operational, not a permission outcome — retryable class.
         503
-    } else if authenticated {
-        // Resolved-deny / NoAcl for an authenticated principal: definitive forbidden.
-        403
     } else {
-        // Definitive deny for an ANONYMOUS requester: authentication might succeed —
-        // the client should obtain a token and retry.
-        401
+        // Resolved-deny / NoAcl: a definitive, authoritative forbidden, for every requester.
+        403
     }
 }
 
@@ -119,7 +127,6 @@ fn status_to_http_table() {
     struct Row {
         name: &'static str,
         decision: WacDecision,
-        authenticated: bool,
         expect_allow: bool,
         expect_status: AclStatus,
         expect_http: u16,
@@ -129,7 +136,6 @@ fn status_to_http_table() {
         Row {
             name: "authoritative allow (alice holds Read)",
             decision: materialized.decide(&alice(), RESOURCE, Mode::Read),
-            authenticated: true,
             expect_allow: true,
             expect_status: AclStatus::Resolved,
             expect_http: 200,
@@ -137,39 +143,34 @@ fn status_to_http_table() {
         Row {
             name: "authoritative deny: authenticated principal lacks the mode",
             decision: materialized.decide(&alice(), RESOURCE, Mode::Write),
-            authenticated: true,
             expect_allow: false,
             expect_status: AclStatus::Resolved,
             expect_http: 403,
         },
         Row {
-            name: "anonymous over a resource requiring auth: obtain a token",
+            name: "anonymous over a resource requiring auth: definitive deny",
             decision: materialized.decide(&anonymous(), RESOURCE, Mode::Read),
-            authenticated: false,
             expect_allow: false,
             expect_status: AclStatus::Resolved,
-            expect_http: 401,
+            expect_http: 403,
         },
         Row {
             name: "no discoverable ACL, authenticated: definitive deny",
             decision: no_acl_store.decide(&alice(), "https://pod.ex/d", Mode::Read),
-            authenticated: true,
             expect_allow: false,
             expect_status: AclStatus::NoAcl,
             expect_http: 403,
         },
         Row {
-            name: "no discoverable ACL, anonymous: auth might yet succeed",
+            name: "no discoverable ACL, anonymous: definitive deny",
             decision: no_acl_store.decide(&anonymous(), "https://pod.ex/d", Mode::Read),
-            authenticated: false,
             expect_allow: false,
             expect_status: AclStatus::NoAcl,
-            expect_http: 401,
+            expect_http: 403,
         },
         Row {
             name: "ACL discovered but view unmaterialized: retryable",
             decision: unloaded_store.decide(&alice(), RESOURCE, Mode::Read),
-            authenticated: true,
             expect_allow: false,
             expect_status: AclStatus::Unloaded,
             expect_http: 503,
@@ -177,7 +178,6 @@ fn status_to_http_table() {
         Row {
             name: "malformed resource IRI: typed transient error, retryable",
             decision: materialized.decide(&alice(), "not a valid iri", Mode::Read),
-            authenticated: true,
             expect_allow: false,
             expect_status: AclStatus::Transient,
             expect_http: 503,
@@ -189,7 +189,7 @@ fn status_to_http_table() {
         assert_eq!(d.allow, row.expect_allow, "[{}] allow", row.name);
         assert_eq!(d.status, row.expect_status, "[{}] status", row.name);
         assert_eq!(
-            http_status(d, row.authenticated),
+            http_status(d),
             row.expect_http,
             "[{}] HTTP mapping",
             row.name
@@ -220,6 +220,63 @@ fn status_to_http_table() {
             row.name
         );
     }
+}
+
+/// sq-qonip — the **library** invariant underneath the HTTP split: a definitive deny to an
+/// anonymous requester is indistinguishable, in everything [`AclStatus`] exposes, from the
+/// authenticated one. Same `status`, same retryability, so any mapper reading only a
+/// [`WacDecision`] necessarily emits the same code for both.
+///
+/// That is what makes the shipped shell's uniform 403 a *consequence* rather than a choice —
+/// and it is why an LDP resource server owing an anonymous requester Solid's 401 challenge
+/// must source the authentication state itself (a known non-conformance if it does not; see
+/// the `AclStatus` docs). This test does not observe any HTTP mapper: `http_status` is the
+/// local model, and `sparq-server`'s real one is pinned by its own unit tests.
+#[test]
+fn anonymous_definitive_deny_is_indistinguishable_from_authenticated() {
+    let materialized = materialized_store(POD_WITH_ROOT_ACL);
+    let no_acl_store = materialized_store(POD_WITHOUT_ACL);
+
+    // The two definitive-deny statuses, reached by an ANONYMOUS requester.
+    let anon_resolved = materialized.decide(&anonymous(), RESOURCE, Mode::Read);
+    let anon_no_acl = no_acl_store.decide(&anonymous(), "https://pod.ex/d", Mode::Read);
+    // Their AUTHENTICATED counterparts: alice holds Read but not Write, and the ACL-less
+    // pod denies her too.
+    let auth_resolved = materialized.decide(&alice(), RESOURCE, Mode::Write);
+    let auth_no_acl = no_acl_store.decide(&alice(), "https://pod.ex/d", Mode::Read);
+
+    for (name, d) in [
+        ("Resolved, anonymous", &anon_resolved),
+        ("NoAcl, anonymous", &anon_no_acl),
+    ] {
+        assert!(!d.allow, "[{}] fail-closed", name);
+        assert!(
+            !d.status.is_retryable(),
+            "[{}] a definitive deny, not the retryable 503 class",
+            name
+        );
+        assert_eq!(
+            http_status(d),
+            403,
+            "[{}] a definitive deny under the local model of the mapping",
+            name
+        );
+    }
+
+    // The authenticated counterparts are IDENTICAL in everything the decision exposes, so
+    // no mapper reading only a `WacDecision` can tell the two apart.
+    assert_eq!(anon_resolved.status, auth_resolved.status);
+    assert_eq!(
+        http_status(&anon_resolved),
+        http_status(&auth_resolved),
+        "Resolved deny: anonymous and authenticated share one code"
+    );
+    assert_eq!(anon_no_acl.status, auth_no_acl.status);
+    assert_eq!(
+        http_status(&anon_no_acl),
+        http_status(&auth_no_acl),
+        "NoAcl deny: anonymous and authenticated share one code"
+    );
 }
 
 /// `Unloaded` still discovers + advertises the governing ACL (decide.rs FR-5/FR-6): the

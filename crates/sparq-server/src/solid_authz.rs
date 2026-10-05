@@ -2207,6 +2207,63 @@ mod tests {
         assert_eq!(deny_status_code(dw.status), StatusCode::FORBIDDEN);
     }
 
+    /// sq-qonip — the SHIPPED mapper's anonymous lane: a definitive deny to a requester who
+    /// presented no WebID goes through [`deny_status_code`] to a **403**, identical to the
+    /// authenticated deny, for both definitive statuses (`Resolved`-without-the-mode and
+    /// `NoAcl`). [`deny_status_code`] takes only an [`AclStatus`], so it *cannot* branch on
+    /// authentication — this pins that consequence on the real function rather than on a
+    /// re-implementation of it.
+    ///
+    /// This is correct for `POST /authz/decide` (it reports a decision; the caller's own
+    /// authentication is gated separately, with a 401 + `WWW-Authenticate`). It is a **known
+    /// non-conformance** for any LDP resource-serving path reusing this mapper: Solid
+    /// requires a 401 challenge when a request lacks the credentials a protected resource
+    /// needs. Documented on `sparq_solid::AclStatus`; see the follow-up for the 401 lane.
+    #[test]
+    fn shipped_mapper_gives_anonymous_definitive_denies_the_same_403() {
+        let store = wac_store();
+        let alice = Session {
+            agent: Some("https://alice.ex/card#me"),
+            ..Session::default()
+        };
+
+        // `Resolved` deny: the ACL governs `notes/n1`, but grants an anonymous requester
+        // nothing. Alice's counterpart is her missing Write.
+        let anon_resolved = store.decide(&Session::default(), "https://pod.ex/notes/n1", Mode::Read);
+        let auth_resolved = store.decide(&alice, "https://pod.ex/notes/n1", Mode::Write);
+        // `NoAcl`: a pod with no discoverable access-control document anywhere up the chain.
+        let no_acl_store = {
+            let mut s = PodStore::new(
+                sparq_core::Graph::load_dataset(
+                    r#"<https://pod.ex/d#it> <https://ex.dev/ns#t> "x" <https://pod.ex/d> ."#,
+                    "nquads",
+                )
+                .unwrap(),
+            );
+            s.materialize_wac().unwrap();
+            s
+        };
+        let anon_no_acl = no_acl_store.decide(&Session::default(), "https://pod.ex/d", Mode::Read);
+        let auth_no_acl = no_acl_store.decide(&alice, "https://pod.ex/d", Mode::Read);
+
+        assert_eq!(anon_resolved.status, AclStatus::Resolved);
+        assert_eq!(anon_no_acl.status, AclStatus::NoAcl);
+        for (name, d) in [
+            ("Resolved, anonymous", &anon_resolved),
+            ("NoAcl, anonymous", &anon_no_acl),
+            ("Resolved, authenticated", &auth_resolved),
+            ("NoAcl, authenticated", &auth_no_acl),
+        ] {
+            assert!(!d.allow, "[{}] fail-closed", name);
+            assert_eq!(
+                deny_status_code(d.status),
+                StatusCode::FORBIDDEN,
+                "[{}] the shipped mapper emits a definitive 403, never a 401 or a 503",
+                name
+            );
+        }
+    }
+
     // ── [SONNET-4.6] sq-snopa.8 — the stateful (`"source":"server"`) lane ──
 
     /// The default is the historical stateless lane: no `"source"` => `Body`, dataset required.

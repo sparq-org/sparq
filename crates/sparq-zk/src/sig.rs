@@ -43,35 +43,46 @@
 //! candidate can ship as parallel options for the paper's per-signature
 //! performance + security table. v1 ships `poseidon2-schnorr-v1` only.
 //!
-//! ## Constant-time posture (CR-G5 / sq-8jv7) [OPUS-4.8]
-//! Honest statement, do NOT over-read: **this signing path is NOT asserted
-//! constant-time.** The Baby-JubJub scalar multiplication `R = G·k` and the
-//! scalar arithmetic `s = k + e·sk` are done with `arkworks`
-//! (`ark-ed-on-bn254` / `ark-ff`), which makes **no default constant-time
-//! guarantee** and which sparq does not (and cannot, without replacing the
-//! curve implementation) assert is constant-time. A co-located attacker
-//! observing signing could in principle obtain a timing/cache signal
-//! correlated with the secret key `sk` or the nonce `k`. This is the
-//! **irreducible arkworks residual** recorded in
-//! `compliance/cryptoreview/side-channel-analysis.md` §2.2 / §6 and gap
-//! **CR-G5**; closing it needs a constant-time scalar-mul (a curve/dep swap),
-//! tracked as a follow-up bead.
+//! ## Constant-time posture (CR-G5 / sq-8jv7 / sq-j3b9) [OPUS-5]
+//! Honest statement, do NOT over-read: **this signing path is still NOT
+//! asserted constant-time.** What has changed, in two steps, is how much of the
+//! secret-dependent *shape* lives in code sparq owns.
 //!
-//! What sq-8jv7 *did* change is the secret-dependent control flow **in code we
-//! own**: `derive_nonce`'s degenerate-`k` guard is now branchless (always
-//! computes the re-fold candidate and `subtle`-selects it), so our own emitted
-//! control flow is data-independent of the secret nonce. We do **not** claim
-//! this makes signing constant-time — the arkworks residual dominates.
+//! * **sq-8jv7** made `derive_nonce`'s degenerate-`k` guard branchless (always
+//!   computes the re-fold candidate and `subtle`-selects it), so the nonce
+//!   derivation emits no secret-dependent control flow.
+//! * **sq-j3b9** replaced the secret-scalar multiplications — `pk = sk·G` in
+//!   [`SecretKey::public_key`] and `R = G·k` in [`sign_deterministic`] — with
+//!   `crate::ct::mul_ct`, a fixed-width double-and-ALWAYS-add ladder whose trip
+//!   count and per-iteration work do not vary with the scalar. The `arkworks`
+//!   generic `Group::mul_bigint` these replace branched on every secret scalar
+//!   bit (`if b { res += self }`) *and* short-circuited leading zeros, i.e. it
+//!   carried the textbook square-and-multiply side channel. The ladder is
+//!   value-identical (differential test in `crate::ct`), so no signature, key,
+//!   or wire format changes.
+//!
+//! **What remains open (the part sq-j3b9 did NOT close).** Every operation
+//! above still bottoms out in `arkworks` (`ark-ed-on-bn254` / `ark-ff`) field
+//! arithmetic, which makes **no default constant-time guarantee** and which
+//! sparq does not — and cannot, without replacing the field/curve
+//! implementation — assert is constant-time. The scalar arithmetic
+//! `s = k + e·sk` is likewise untouched `arkworks` (though, unlike a scalar
+//! multiplication, it is a fixed two-operation sequence with no loop and no
+//! branch, so it carries no square-and-multiply structure). This is the
+//! residual recorded in `compliance/cryptoreview/side-channel-analysis.md`
+//! §2.2 / §6 and gap **CR-G5**; closing it is the curve/dep swap sq-j3b9
+//! scoped as its ceiling and deliberately did not take. **No instrumented
+//! `dudect`/`ctgrind` measurement has been run** — this is a source-level shape
+//! argument, and a clean reading is not a timing-channel proof.
 //!
 //! **Why the residual is rated LOW (placement, not primitives):** the secret
 //! key is used **only at ISSUANCE** (signing), which v1 places in a trusted
 //! issuance environment; the relying party only ever calls [`verify`], which
-//! is over **public** data (commitment + public key) and carries no secret.
-//! This becomes load-bearing only if signing ever moves to an exposed /
-//! online surface (e.g. the deferred in-circuit hidden-key upgrade), at which
-//! point a constant-time scalar-mul is required. The crate remains
-//! **research-grade and externally unaudited** (CR-G1, `sq-qhy4`); a clean
-//! source-level reading is not a timing-channel proof.
+//! is over **public** data (commitment + public key) and carries no secret —
+//! and which therefore deliberately keeps the faster variable-time `arkworks`
+//! multiplication. The rating is unchanged by sq-j3b9: hardening the shape of
+//! the ladder does not upgrade the *claim*. The crate remains **research-grade
+//! and externally unaudited** (CR-G1, `sq-qhy4`).
 
 use crate::field::Fr;
 use crate::poseidon2;
@@ -402,9 +413,13 @@ pub struct Signature {
 
 impl SecretKey {
     /// Derive the public key `pk = sk·G`.
+    // [OPUS-5] sq-j3b9: `sk` is the long-term secret, so the multiplication goes
+    // through the scalar-independent ladder (`crate::ct::mul_ct`) rather than
+    // arkworks' `if bit { add }` double-and-add. Value-identical; see `crate::ct`
+    // for the bounded claim (this is NOT "constant-time signing").
     pub fn public_key(&self) -> PublicKey {
         let g = EdwardsProjective::generator();
-        PublicKey((g * self.0).into_affine())
+        PublicKey(crate::ct::mul_ct(&g, &self.0).into_affine())
     }
 
     /// A deterministic secret key from a `u64` seed — issuance-tooling / test
@@ -482,8 +497,15 @@ impl SecretKey {
     ///
     /// Purely additive — it does not change [`Self::sign_commitment_with_status`]
     /// or any existing signature; bearer credentials remain valid. The verifier-side
-    /// fail-closed enforcement is deferred to T3 (sq-z8s7).
+    /// fail-closed enforcement has LANDED (T3/sq-z8s7): given the disclosed holder
+    /// key, `sparq_zk_compose::verifier::bind_holder_pop` recovers this signed
+    /// `holder_pk_digest` from the credential's attestation and rejects a presenter
+    /// whose key digest disagrees (`HolderKeyMismatch`); a relying party opting in
+    /// with `HolderBindingPolicy::require_binding()` additionally rejects a bearer
+    /// credential (`HolderBindingMissing`). Research-grade, NOT externally audited
+    /// (sq-qhy4) — no soundness or privacy property is claimed as achieved.
     // [OPUS-4.8] sq-y464 (HolderPoP T1): holder-bound issuance.
+    // [OPUS-5] sq-sg37 (HolderPoP T8): deferral note retired — T3/sq-z8s7 landed.
     pub fn sign_commitment_with_holder(
         &self,
         commitment: &Fr,
@@ -528,9 +550,11 @@ fn derive_nonce(sk: &SecretKey, m: &Fr) -> JjScalar {
     // when `k == 0`, so the control flow our code emits is data-independent of
     // the secret nonce. (The `k == 0` event is itself negligibly rare — ~2^-251
     // for a 251-bit scalar field — so this is defence-in-depth, not a measured
-    // leak; the irreducible residual is the arkworks scalar mul `G·k` /
-    // `e·sk.0`, which sparq does NOT assert constant-time — see the module
-    // CONSTANT-TIME POSTURE note and `compliance/cryptoreview/side-channel-analysis.md` §2.2.)
+    // leak. [OPUS-5] sq-j3b9 has since moved the scalar mul `G·k` onto the
+    // fixed-width `crate::ct::mul_ct` ladder; the remaining residual is the
+    // arkworks scalar arithmetic `e·sk.0` and the underlying field ops, which
+    // sparq does NOT assert constant-time — see the module CONSTANT-TIME POSTURE
+    // note and `compliance/cryptoreview/side-channel-analysis.md` §2.2.)
     let k2_base: Fr = poseidon2::hash(&[Fr::from(SIG_DOMAIN_NONCE), k_base, *m]);
     let k2 = JjScalar::from_be_bytes_mod_order(&k2_base.into_bigint().to_bytes_be());
     // Constant-time "is k zero?" over the canonical little-endian scalar bytes,
@@ -553,18 +577,22 @@ fn derive_nonce(sk: &SecretKey, m: &Fr) -> JjScalar {
 /// only ever calls [`verify`]. Equivalent in shape to `sign` but with the
 /// nonce pinned, so it is replay-stable and seed-reuse-proof.
 //
-// # Constant-time posture (CR-G5 / sq-8jv7) [OPUS-4.8]
-// NOT asserted constant-time. The scalar mul `G·k` and the scalar arithmetic
-// `k + e·sk.0` use arkworks ops sparq does not assert are constant-time (the
-// irreducible residual — see the module CONSTANT-TIME POSTURE note). Our own
-// secret-dependent control flow ([`derive_nonce`]'s `k == 0` guard) is
-// branchless; the residual is the dependency's, and is LOW today by
-// issuance-side placement.
+// # Constant-time posture (CR-G5 / sq-8jv7 / sq-j3b9) [OPUS-5]
+// Still NOT asserted constant-time. The secret-dependent SHAPE is now sparq's:
+// [`derive_nonce`]'s `k == 0` guard is branchless (sq-8jv7) and `G·k` goes
+// through the fixed-width `crate::ct::mul_ct` ladder rather than arkworks'
+// bit-branching double-and-add (sq-j3b9). The scalar arithmetic `k + e·sk.0`
+// and every underlying field operation remain arkworks ops sparq does not
+// assert are constant-time — the residual (see the module CONSTANT-TIME POSTURE
+// note), LOW today by issuance-side placement.
 // [OPUS-4.8] audit #3 codex #4.
 pub fn sign_deterministic(sk: &SecretKey, m: &Fr) -> Signature {
     let g = EdwardsProjective::generator();
     let k = derive_nonce(sk, m);
-    let r_pt = (g * k).into_affine();
+    // [OPUS-5] sq-j3b9: `k` is the secret nonce — recovering even a few of its
+    // bits over several signatures recovers `sk` — so `R = G·k` goes through the
+    // scalar-independent ladder, not arkworks' bit-branching double-and-add.
+    let r_pt = crate::ct::mul_ct(&g, &k).into_affine();
     let pk = sk.public_key().0;
     let e = challenge(&r_pt, &pk, m);
     let s = k + e * sk.0;
@@ -765,18 +793,25 @@ pub fn status_ref_commit_digest(list_id: &Fr, index_commitment: &Fr, version: u6
 /// version open. Domain-separated and binding under the Poseidon2
 /// collision/hiding assumption.
 ///
-/// # Future in-circuit use (sq-6qe, see `research/zk-statuslist-hide-iri-version.md`)
-/// The deferred fully-hidden circuit recomputes this commitment IN-CIRCUIT from
-/// the SAME private `(list_id, version)` it (a) proves member of the relying
-/// party's accepted `(list, version, status_list_root)` set and (b) freshness-checks
-/// (`version >= public min_version`), exposing it so the verifier byte-matches it
-/// against the ISSUER-SIGNED value — exactly the cross-binding discipline
-/// [`status_index_commitment`] uses for the index. So `list_id` and `version` are
-/// disclosed in NEITHER the signed object NOR any clear field, yet the proof is
-/// bound to a list/version the issuer attested and the relying party accepts.
+/// # In-circuit use today (sq-kndw, see `research/zk-statuslist-hide-iri-version.md`)
+/// The COMPILED fully-hidden member `revoke_hidden_ref_d10_a4` recomputes this
+/// commitment IN-CIRCUIT from the SAME private `(list_id, version)` it (a) proves
+/// member of the relying party's accepted `(list, version, status_list_root)` set
+/// and (b) freshness-checks (`version >= public min_version`), exposing it as a
+/// PUBLIC input so the verifier byte-matches it against the ISSUER-SIGNED value —
+/// exactly the cross-binding discipline [`status_index_commitment`] uses for the
+/// index. So `list_id` and `version` are disclosed in NEITHER the signed object NOR
+/// any clear field, yet the proof is bound to a list/version the issuer attested and
+/// the relying party accepts. The relying-party side is the
+/// `sparq_zk_compose::verifier` `bind_fully_hidden_revocation` stage (run by
+/// `verify_manifest`), which derives the accepted-set root and the epoch floor from
+/// its OWN curated snapshots and rebuilds the public inputs from them, so the prover
+/// chooses neither anchor. Research-grade, NOT externally audited (sq-qhy4) — no
+/// soundness or privacy property is claimed as achieved.
 ///
 /// Maps to a Noir `Poseidon2::hash([DOMAIN, list_id, version, ref_blinding], 4)`.
 // [OPUS-4.8] sq-6qe: hiding (list, version) reference commitment.
+// [OPUS-5] sq-kndw: deferral note retired — the fully-hidden member is compiled.
 pub fn status_ref_commitment(list_id: &Fr, version: u64, ref_blinding: &Fr) -> Fr {
     const SIG_DOMAIN_STATUS_REF_COMMITMENT: u64 = 0x5a4b_5349_475f_5243; // "ZKSIG_RC"
     poseidon2::hash(&[
@@ -798,16 +833,23 @@ pub fn status_ref_commitment(list_id: &Fr, version: u64, ref_blinding: &Fr) -> F
 /// three disclosure modes is possible.
 ///
 /// `ref_commitment` is [`status_ref_commitment`]`(list_id, version, ref_blinding)`
-/// and `index_commitment` is [`status_index_commitment`]`(index, blinding)`. The
-/// verifier (in the deferred sq-6qe path) recomputes this digest from the disclosed
-/// commitments to check the issuer signature; the fully-hidden revocation proof
-/// then cross-binds BOTH commitments in-circuit (the proven-unset index to
-/// `index_commitment`, and the membership-resolved `(list, version)` to
-/// `ref_commitment`), so the disclosure floor is "some accepted (list, version) in
-/// the RP's committed set, version >= public min_version, my hidden index unset".
+/// and `index_commitment` is [`status_index_commitment`]`(index, blinding)`. On the
+/// fully-hidden path (sq-kndw, landed) the verifier recomputes this digest from the
+/// disclosed commitments to check the issuer signature; the compiled
+/// `revoke_hidden_ref_d10_a4` proof then cross-binds BOTH commitments in-circuit (the
+/// proven-unset index to `index_commitment`, and the membership-resolved
+/// `(list, version)` to `ref_commitment`), so the disclosure floor is "some accepted
+/// (list, version) in the RP's committed set, version >= public min_version, my
+/// hidden index unset". That check is the `sparq_zk_compose::verifier`
+/// `bind_fully_hidden_revocation` stage, which also enforces single-use of the
+/// `(ref_commitment, index_commitment)` pair — the pair is stable per ISSUANCE, so
+/// the issuer must re-blind and RE-SIGN per presentation or the pair itself becomes a
+/// cross-presentation linkage handle. Research-grade, NOT externally audited
+/// (sq-qhy4) — no soundness or privacy property is claimed as achieved.
 ///
 /// Maps to a Noir `Poseidon2::hash([DOMAIN, ref_commitment, index_commitment], 3)`.
 // [OPUS-4.8] sq-6qe: fully-committed (list+version+index hidden) status-reference digest.
+// [OPUS-5] sq-kndw: deferral note retired — the fully-hidden path is landed.
 pub fn status_ref_fully_committed_digest(ref_commitment: &Fr, index_commitment: &Fr) -> Fr {
     const SIG_DOMAIN_STATUS_REF_FULL_COMMIT: u64 = 0x5a4b_5349_475f_4643; // "ZKSIG_FC"
     poseidon2::hash(&[
@@ -934,12 +976,15 @@ impl std::error::Error for HolderKeyError {}
 /// confused with the issuer key-set Merkle leaf computed over the same coordinates.
 ///
 /// # Mirrors the in-circuit digest (single source of truth)
-/// The B2 in-circuit holder PoK (deferred — T3/sq-z8s7) recomputes the SAME
+/// The B2 in-circuit holder PoK has LANDED (circuit T5/sq-xqfg, verifier
+/// T6/sq-i1dt): `zk/compose/compose_core/src/holder.nr`'s `holder_key_digest`,
+/// driven by the `holder_pok` member, recomputes the SAME
 /// `Poseidon2([ZKSIG_HK, hpk.x, hpk.y])` from a PRIVATE `hpk` and asserts it equals
 /// the PUBLIC `holder_pk_digest` the verifier folded into the issuer-signed message
 /// (design §2.B/B2). So this host helper and that gadget must agree bit-for-bit; a
 /// drift could not make a wrong holder key verify (the established
-/// issuer/verifier/circuit single-source discipline).
+/// issuer/verifier/circuit single-source discipline). Build the prover-side inputs
+/// with [`in_circuit_holder_witness`].
 ///
 /// # Identity key (fail-closed)
 /// The identity point has no affine coordinates and is not a valid binding key
@@ -984,21 +1029,34 @@ pub fn holder_key_digest(hpk: &PublicKey) -> Result<Fr, HolderKeyError> {
 /// holder key is bound BY THE ISSUER AT MINT — a presenter cannot substitute its
 /// own key without invalidating the issuer signature.
 ///
-/// # Purely additive — back-compatible (this bead, T1, is signed-message-only)
+/// # Purely additive — back-compatible
 /// This adds a NEW message shape; it does not change [`commitment_message_with_status`]
 /// or any existing signature. A credential issued without holder binding (signed
 /// over the audit-#12 status message) remains a valid bearer credential — its
-/// signature still verifies under [`verify`] over that older message. The
-/// fail-CLOSED enforcement (a verifier REQUIRING the holder-bound message when a
-/// `holder` binding is disclosed, and rejecting a bearer credential where one is
-/// expected) is the VERIFIER's job and is deferred to T3 (sq-z8s7); the manifest
-/// wiring is T2 (sq-h8rg). T1 only adds the signed-message + digest primitives.
+/// signature still verifies under [`verify`] over that older message. Credentials
+/// minted before holder binding existed carry no attested digest, so the verifier
+/// treats them as BEARER — accepted on the sq-cwq registry + nonce-PoP path under
+/// the back-compatible default policy, rejected outright once the relying party
+/// opts into `HolderBindingPolicy::require_binding()`. Re-issuance is the migration
+/// path; an absent binding is never read as a satisfied one.
 ///
-/// Issuer and verifier (and the deferred B2 circuit) all recompute this message
-/// identically from the disclosed `(C(G), salt, status_ref, holder_pk_digest)`, so
-/// a drift cannot make a wrong holder binding verify (single source of truth,
-/// matching the audit-#12 message family).
+/// # End-to-end today (the enforcement side, for orientation)
+/// The fail-CLOSED enforcement this message enables now exists in
+/// `sparq-zk-compose`: `manifest::AttestedHolderBinding` carries the attested
+/// digest (T2/sq-h8rg), `verifier::bind_holder_pop` cross-checks a DISCLOSED holder
+/// key against it (B1, T3/sq-z8s7 — `HolderKeyMismatch` / `HolderBindingMissing`
+/// under `HolderBindingPolicy::require_binding()`), and `verifier::bind_holder_pok`
+/// binds an in-circuit `holder_pok` proof to the same digest so the key stays
+/// HIDDEN (B2, T5/sq-xqfg + T6/sq-i1dt, opt in with
+/// `HolderBindingPolicy::require_in_circuit_pok()`). Research-grade, NOT externally
+/// audited (sq-qhy4) — no soundness or privacy property is claimed as achieved.
+///
+/// Issuer, verifier, and the B2 circuit all recompute this message identically from
+/// the disclosed `(C(G), salt, status_ref, holder_pk_digest)`, so a drift cannot
+/// make a wrong holder binding verify (single source of truth, matching the
+/// audit-#12 message family).
 // [OPUS-4.8] sq-y464 (HolderPoP T1): holder-bound commitment message (new ZKSIG_C4 tag).
+// [OPUS-5] sq-sg37 (HolderPoP T8): T2/T3/T5/T6 deferral notes retired — all landed.
 const SIG_DOMAIN_COMMITMENT_HOLDER: u64 = 0x5a4b_5349_475f_4334; // "ZKSIG_C4"
 pub fn commitment_message_with_holder(
     commitment: &Fr,
@@ -1025,14 +1083,18 @@ pub fn commitment_message_with_holder(
 /// the PoP is bound to the relying party's fresh challenge).
 ///
 /// # Scope (honest)
-/// This binds possession of the holder KEY to the verifier's challenge. It does
-/// NOT, on its own, bind that key to a SPECIFIC credential — that requires an
-/// issuer-attested holder binding (the issuer signing the holder key into the
-/// credential), which is a documented deferral (see
-/// `sparq_zk_compose::verifier::bind_holder_pop`). The relying party anchors the
-/// holder key in an EXTERNAL holder registry (mirroring the issuer key-set `K`),
-/// so an absent/untrusted/forged PoP fails closed.
+/// This message binds possession of the holder KEY to the verifier's challenge. It
+/// does NOT, on its own, bind that key to a SPECIFIC credential — that is the job of
+/// the issuer-attested holder binding ([`commitment_message_with_holder`] /
+/// [`SecretKey::sign_commitment_with_holder`], sq-y464), which is no longer a
+/// deferral: `sparq_zk_compose::verifier::bind_holder_pop` runs BOTH checks, so the
+/// combined `HolderPop` gate proves "possession, freshly, of the key THIS issuer
+/// bound to THIS credential" and rejects trusted holder A presenting trusted holder
+/// B's credential. The relying party still anchors the holder key in an EXTERNAL
+/// holder registry (mirroring the issuer key-set `K`), so an absent/untrusted/forged
+/// PoP fails closed.
 // [OPUS-4.8] sq-cwq: holder proof-of-possession message (challenge-bound).
+// [OPUS-5] sq-sg37 (HolderPoP T8): deferral note retired — the binding is enforced.
 pub fn holder_pop_message(challenge: &Fr) -> Fr {
     const SIG_DOMAIN_HOLDER_POP: u64 = 0x5a4b_5349_475f_4850; // "ZKSIG_HP"
     poseidon2::hash(&[Fr::from(SIG_DOMAIN_HOLDER_POP), *challenge])
@@ -1071,6 +1133,11 @@ pub(crate) fn sign<R: ark_std::rand::RngCore + ark_std::rand::CryptoRng>(
 ) -> Signature {
     let g = EdwardsProjective::generator();
     let k = JjScalar::rand(rng);
+    // [OPUS-5] sq-j3b9: this test-only signer deliberately KEEPS the arkworks
+    // multiplication. `sk.public_key()` below now goes through the ladder, so
+    // every `sign` → `verify` test in this module cross-checks a ladder-derived
+    // public key against an arkworks-derived `R` — an independent-path check the
+    // suite would lose if both sides used the same implementation.
     let r_pt = (g * k).into_affine();
     let pk = sk.public_key().0;
     let e = challenge(&r_pt, &pk, m);
@@ -1429,6 +1496,40 @@ mod tests {
         // Cross-check against the scalar value equality (the prior-`==` semantics).
         assert_eq!(eq_same, sk_a.0 == sk_a2.0);
         assert_eq!(eq_diff, sk_a.0 == sk_b.0);
+    }
+
+    // [OPUS-5] sq-j3b9: routing the two SECRET-scalar multiplications through the
+    // fixed-width `crate::ct::mul_ct` ladder must be a pure timing-shape change —
+    // every derived key and every signature has to be BYTE-IDENTICAL to what the
+    // arkworks variable-time multiplication produced. This pins both halves
+    // against the reference implementation directly (the `crate::ct` differential
+    // covers the ladder in isolation; this covers the call sites), so a drift
+    // that silently re-keyed an issuer or invalidated already-issued credentials
+    // fails here.
+    #[test]
+    fn ct_ladder_call_sites_are_value_identical_to_arkworks() {
+        let g = EdwardsProjective::generator();
+        for seed in [0u64, 1, 7, 4242] {
+            let (sk, pk) = keypair(seed);
+            // pk = sk·G must match the arkworks reference exactly.
+            assert_eq!(
+                pk.0,
+                (g * sk.0).into_affine(),
+                "ladder-derived public key must equal the arkworks reference"
+            );
+
+            // R = G·k must match too, for the real deterministic nonce.
+            let m = commitment_message(&Fr::from(seed));
+            let sig = sign_deterministic(&sk, &m);
+            let k = derive_nonce(&sk, &m);
+            assert_eq!(
+                sig.r,
+                (g * k).into_affine(),
+                "ladder-derived nonce commitment must equal the arkworks reference"
+            );
+            // ...and the signature the ladder produced still verifies.
+            assert!(verify(&pk, &m, &sig), "ladder-signed message must verify");
+        }
     }
 
     // [OPUS-4.8] sq-u8a8: compile + behaviour check that `SecretKey` implements

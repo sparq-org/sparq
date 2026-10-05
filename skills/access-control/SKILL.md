@@ -4,7 +4,7 @@ description: "Graph-level Solid-style access control over a sparq RDF dataset wi
 license: MIT
 metadata:
   version: "0.1.0"
-  homepage: https://github.com/jeswr/sparq
+  homepage: https://github.com/sparq-org/sparq
 ---
 
 # sparq-solid — graph-level WAC/ACP access control
@@ -106,6 +106,35 @@ Materialize the authorization view from the access-control documents, then enfor
   granted `R2`) and composes with the matcher's own `acp:client`/`acp:issuer` constraints.
   `materialize_acp()` is `materialize_acp_with(&AccessProvenance::new())` — no provenance ⇒
   no `CreatorAgent`/`OwnerAgent` grant (fail-closed).
+- `store.materialize_acp_with_credentials(&AccessProvenance, &VerifiedCredentials)` —
+  ([SONNET-4.6] sq-ysv3u, issue #2935) the same, ALSO resolving **`acp:vc`** matchers.
+  `VerifiedCredentials::hold(agent_webid, requirement_iri)` asserts that the TRUSTED caller
+  has **already verified** a credential proving `agent` satisfies the requirement; the loader
+  synthesizes `<agent> solidx:holdsVc <requirement>` from THAT map only, so the same `solidx:`
+  reserved-predicate guard blocks a forged holding in an `.acr`. Requirements are matched by
+  **exact IRI** (structured claim comparison such as `age >= 18` is deliberately not
+  interpreted in the rules — the requirement IRI names the whole predicate and the verifier
+  decides). Within one matcher, `acp:vc` values are disjunctive and combine **conjunctively**
+  with `acp:agent`/`acp:client`/`acp:issuer`. `materialize_acp_with(&prov)` is
+  `materialize_acp_with_credentials(&prov, &VerifiedCredentials::new())` — no credential ⇒
+  **no `acp:vc` matcher accepts anybody** (fail-closed; and note this corrected an over-grant:
+  before sq-ysv3u `acp:vc` was an unrecognized attribute, so such a matcher looked
+  agent-unconstrained and granted `auth:Public`, i.e. everyone including anonymous).
+  Opt-in `acp-vc` feature — the **trust-the-issuer** backend that populates the map:
+  `VcRequirement::new(requirement, issuer_did, credential_type).with_claim(pred, obj)` plus
+  `VerifiedCredentials::admit_data_integrity(credential_triples, proof, resolver, reqs)`,
+  which verifies a W3C Data Integrity `eddsa-rdfc-2022` proof via `sparq-vc` and records the
+  requirements the credential satisfies for its `credentialSubject` — refused
+  (`VcAdmitError::AmbiguousSubject`, nothing recorded) unless the graph names exactly ONE
+  distinct subject, since the proof binds to the RDFC-1.0 CANONICAL form and a two-subject
+  credential would otherwise bind its holding to whichever subject was presented first.
+  **Honest scope:**
+  authenticity + integrity + non-repudiation ONLY — it reveals the whole credential to the
+  verifier and makes **no** privacy, unlinkability, zero-knowledge or selective-disclosure
+  claim; revocation and expiry are not checked (a holding lasts until re-materialization).
+  The zero-knowledge backend (prove an attribute without revealing the credential) is NOT
+  wired: it needs the ZK estate, whose external accredited-cryptographer audit is PENDING
+  (`sq-qhy4`).
 - `store.query_as(&Session, Mode, sparql)` → `QueryResult` (`.rows`);
   `store.query_json_as(...)` → JSON string; `store.ask_as(...)` → `bool`. These evaluate
   through the engine's **zero-copy `DatasetView`** filtered to the session's authorized
@@ -160,6 +189,26 @@ Materialize the authorization view from the access-control documents, then enfor
 - `store.update_as(&Session, sparql)` / `store.update_as_acp(...)` — **write-path
   gating**: check every graph an update could mutate *before* applying, and
   auto-re-materialize on `.acl`/`.acr` writes.
+- `store.update_as_with_budget(&Session, sparql, &QueryBudget)` /
+  `store.update_as_acp_with_budget(...)` — the same write path under a cooperative
+  `QueryBudget`, for a caller obliged to bound **every SPARQL evaluation** it issues (an
+  agent tool surface, an HTTP handler). [FABLE-5] sq-yhlf0. The budget reaches both places an
+  update evaluates SPARQL — the authorization check's `GRAPH ?var` binding SELECT (an
+  exhausted budget there is a **deny**, nothing mutated) and the apply's
+  `DELETE`/`INSERT … WHERE`. It does **not** bound the remaining operations, and a
+  request-size cap does not cover all of them: `INSERT`/`DELETE DATA` carry their triples
+  inline (a text cap *does* bound those; `CREATE` adds one empty-graph entry), but
+  `CLEAR`/`DROP` cost whatever
+  the targeted graphs already hold — their bound is authorization, since `NAMED`/`ALL`
+  escalates to the all-graphs wildcard and a targeted `CLEAR GRAPH <g>` needs write on `g` —
+  and `LOAD` reads a file whose size is independent of the update text (refused entirely
+  unless an allowlisted base is installed via `sparq_engine::with_load_base`). A caller
+  wanting a hard ceiling on those must add it itself. A budget can only add a failure mode,
+  never widen authorization; an unlimited budget is byte-for-byte `update_as`. Failure
+  semantics are `update_as`'s, including its engine-inherited **non-atomicity on error**
+  across a `;`-separated multi-operation request (a single operation's WHERE is fully
+  evaluated before any of its delta lands, so the common over-budget case mutates
+  nothing).
 - `store.put_acl(acl_iri, content, format) -> AclWriteOutcome` /
   `store.delete_acl(acl_iri)` (+ `…_acp` variants) — **authoritative ACL write-through**
   ([OPUS-4.8] issue #992 FR-3, sq-snopa.5): the LDP `PUT`/`DELETE /resource.acl` STORAGE
@@ -267,7 +316,12 @@ Materialize the authorization view from the access-control documents, then enfor
   is, never a verdict, so it is safe to emit on a deny.
 - `AclStatus` — the **typed fail-closed load/error contract** (FR-6, sq-snopa.2): a server
   maps `Resolved` (authoritative — `allow` is the real verdict; a deny is **403**), `NoAcl`
-  (no governing ACL anywhere up the chain — definitive **403/401**), `Unloaded` (a governing
+  (no governing ACL anywhere up the chain — definitive **403**; `AclStatus` carries no
+  authentication state, so the shipped `solid-authz` shell emits that 403 for anonymous
+  requesters too. On an LDP resource-serving path that is a **known non-conformance**, not a
+  permitted stricter choice: Solid requires **401** + `WWW-Authenticate` when a request lacks
+  the credentials a protected resource needs, so a resource server must add that lane from
+  its own authentication state), `Unloaded` (a governing
   ACL exists but `materialize_*` was never run — a **retryable 503**), and `Transient`
   (a typed transient error, e.g. a malformed resource IRI — a **retryable 503**).
   `AclStatus::is_retryable()` separates the 503s from the definitive denies. **It never
@@ -282,7 +336,7 @@ Materialize the authorization view from the access-control documents, then enfor
   inheritance can never disagree; `None` ⇒ un-protected ⇒ fail closed. Feeds `decide`'s
   `governing_acl`/`scope`, which `WacDecision::acl_link_header()` turns into the FR-5
   `Link: rel="acl"` surface (above). **Honest scope:** Phase-1 implements
-  the WAC `accessTo` + container-`default` subset of [issue #992](https://github.com/jeswr/sparq/issues/992)
+  the WAC `accessTo` + container-`default` subset of [issue #992](https://github.com/sparq-org/sparq/issues/992)
   (FR-1/6/7) — the per-resource decision + fail-closed contract + ACL walk. The **HTTP shell**
   over this library surface (FR-4, sq-snopa.6) has LANDED as `sparq-server`'s opt-in
   `solid-authz` feature — `POST /authz/decide`+`/wac-allow`+`/query`, a fail-closed thin wrapper
@@ -481,7 +535,10 @@ discovery; neither is itself a conformance-tested HTTP layer.
   dimension. [OPUS-4.8] sq-3jtd.5: matchers may also use `acp:agent acp:CreatorAgent` /
   `acp:OwnerAgent` — the context agent must be the resource's creator / owner, resolved
   against the TRUSTED per-resource provenance supplied via `materialize_acp_with` (above),
-  resource-scoped and fail-closed.
+  resource-scoped and fail-closed. [SONNET-4.6] sq-ysv3u: matchers may also constrain on
+  **`acp:vc`** — the context agent must hold a verified credential satisfying the named
+  requirement, resolved against the TRUSTED holdings supplied via
+  `materialize_acp_with_credentials` (above), and fail-closed with none supplied.
 - Principal lattice — three independent dimensions (agent, client, issuer):
   `Public ⊒ Authenticated ⊒ concrete-WebID`, `AnyClient ⊒ concrete-client`, and
   ([OPUS-4.8] sq-3jtd.6) `AnyIssuer ⊒ concrete-issuer`. A session expands to the agent
@@ -658,8 +715,11 @@ SAME `Vec<TrustRule>` the gate consumes:
 - **Claim-level relational** (`trust:trustsSourceFor`, the foundational primitive, design §2.3.1)
   — a `trust:Source` node carries `trust:trustsSourceFor <shape-or-predicate>` directly, alongside
   its shared key + `trust:scope` + `trust:freshWithin`; EACH `trustsSourceFor` statement is one
-  rule. This is the compact *per-(source, statement-type)* form that **replaces ACP's type-only,
-  unimplemented `acp:vc` matcher** with claim-level trust. The object is a `sh:NodeShape` node
+  rule. This is the compact *per-(source, statement-type)* form that offers claim-level trust in
+  place of ACP's type-only `acp:vc` matcher. (`acp:vc` itself is now implemented — [SONNET-4.6]
+  sq-ysv3u, above — as exact-IRI requirement matching over the trusted `VerifiedCredentials`
+  channel; this trust-graph form differs in reasoning over a credential's *claims* directly.)
+  The object is a `sh:NodeShape` node
   (carried like `forShape`) or a predicate IRI (desugared like `forPredicate`); a blank-node source
   is rejected fail-closed. It composes with the opt-in `did` key binding (`trust:issuerDid` on the
   source node). Every soundness side-condition (checked signature, type-scope, holder binding,
@@ -683,8 +743,8 @@ public surface is `sparq_trust::{vocab, policy, admit, wire, delegation}` (+ the
 `delegation_prov` / `did` / `store` / `secprop` / `framework_vocab` modules) — see
 [`crates/sparq-trust/README.md`](../../crates/sparq-trust/README.md) and the design record
 `research/solid-trust-graph-authz-design.md` §6.0 (tracked in
-[issue #940](https://github.com/jeswr/sparq/issues/940); landing via design PR
-<https://github.com/jeswr/sparq/pull/951>).
+[issue #940](https://github.com/sparq-org/sparq/issues/940); landing via design PR
+<https://github.com/sparq-org/sparq/pull/951>).
 
 **Trust-document storage / authoring model** (the **opt-in `store` feature**, `sq-pfae.5`,
 design §3.2). `sparq_trust::store::TrustStore` decides *where* trust rules live and *which
@@ -824,10 +884,29 @@ single-use) plus the machine-reasonable **assurance / audit-status axis** that t
 `crates/sparq-trust/ontologies/zkp-sparql/`) lacks — **under the same
 `https://w3id.org/zkp-sparql/sec-prop#` namespace** (extend, do not fork; design
 `research/security-properties-ontology-design.md` §4.1). It is **data + Rust constants only** (a
-`const &str` registry + the canonical [`secprop-ext.ttl`](../../crates/sparq-trust/ontologies/zkp-sparql/secprop-ext.ttl),
+`const &str` registry + the canonical [`secprop-ext.ttl`](../../crates/sparq-secprop-vocab/ontologies/secprop-ext.ttl),
 pinned together by a drift test) — it is **not** an ODRL profile or a per-method annotation graph
-(those are the downstream Phase 3/4 beads `sq-bevd3`/`sq-uor3g`). The Phase 2 **N3 admissibility
+(those are the downstream Phase 3/4 beads `sq-bevd3`/`sq-uor3g`). Since
+[#3705](https://github.com/sparq-org/sparq/issues/3705) the registry, the Turtle and that one drift
+test live in the **dependency-free `sparq-secprop-vocab` leaf crate**, and `sparq_trust::secprop`
+re-exports it — so the import path above is unchanged, and `sparq_policy::secprop`'s `DIM_*` and
+`sparq_zk::secprop`'s `secx:` terms are now aliases of the SAME constants rather than three copies
+kept in step by cross-package `include_str!` reads. The Phase 2 **N3 admissibility
 reasoner** over this vocabulary now ships — see below.
+
+The registry also names the three **vendored** (not minted) dimension IRIs the estate uses as
+`secx:property` values — `SEC_PROP_POST_QUANTUM_FORGERY`, `SEC_PROP_POST_QUANTUM_SNOOPING`,
+`SEC_PROP_SIGNATURE_TYPE_LEAKAGE` (paper §7.7 #3/#4/#5) — which are members of `ALL_SECPROP_IRIS`
+and are re-asserted in `secprop-ext.ttl` as `sec-prop:SecurityProperty` subjects with the vendored
+IRI, label and type verbatim (issue #3441). That re-assertion adds **no** type the vendored source
+lacks — in particular they are **not** typed `owl:ObjectProperty` as the *minted* `secx:` dimensions
+are — so the extension still mints and refines nothing on his terms (extend, do not fork). Their
+purpose is to make the file self-contained for the `secx:property` range and to let the
+dimension-IRI drift guards (`sq-mgxz8`) check subject presence directly. Since #3705 those guards
+are ordinary crate-edge checks against `sparq_secprop_vocab::ALL_SECPROP_IRIS` — in
+`sparq_policy::secprop` for the ODRL profile's dimensions, and in `sparq_zk::secprop` for the
+annotation graph's — so neither reads another package's files, and the `VENDORED_SEC_PROP_DIMS`
+exemption list #3441 made redundant is retired.
 
 The **assurance axis is the honesty mechanism**: `Proven ⊐ Claimed ⊐ Conjectured`, one axis
 orthogonal to every property. The **default** assurance for a sparq-asserted ZK property is

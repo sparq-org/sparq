@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # [OPUS-4.8] sq-pl1p — hermetic regression self-test guarding the js-sbom lane against EXTERNAL
-# (registry) devDependencies added to a PUBLISHED workspace member (e.g. js/ = @jeswr/sparq).
+# (registry) devDependencies added to a PUBLISHED workspace member (e.g. js/ = @sparq-org/sparq).
 # Authored by Opus 4.8 (Fable unavailable; flag for re-review when Fable returns).
 #
 # WHY (the exact break this pins): gen-js-sbom.sh DERIVES a standalone per-member lock out of the

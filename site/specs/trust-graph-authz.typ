@@ -193,7 +193,7 @@ A certification edge attests, under the certifier's signature, that an issuer is
 [] a trustx:Certification ;
    trustx:certifies      <https://gov.example/issuer> ;
    trustx:underFramework <https://eidas.example/trusted-list> ;
-   trustx:scope          trustx:AnyServiceScope ;
+   trustx:certificationScope trustx:AnyServiceScope ;
    trustx:validFrom      "2026-01-01T00:00:00Z"^^xsd:dateTime ;
    trustx:validUntil     "2027-01-01T00:00:00Z"^^xsd:dateTime .
 ```
@@ -210,7 +210,7 @@ An edge carries, and its signature #strong[MUST] bind, all of the following (sec
     rule authorises this issuer.],
   [Certified issuer's key], [—], [The verification key the derived rule binds. Signed into
     the edge so a captured edge cannot be re-presented under a substituted key.],
-  [Scope], [`trustx:scope`], [What the issuer is certified to issue: either
+  [Scope], [`trustx:certificationScope`], [What the issuer is certified to issue: either
     `trustx:AnyServiceScope` (service-level: no statement-type narrowing of its own) or a
     statement-type shape.],
   [Validity window], [`trustx:validFrom` / `trustx:validUntil`], [Inclusive time window.

@@ -2,13 +2,13 @@
 //
 // SCOPE: this HARD gate covers the user-facing + governance doc surface — the
 // top-level governance docs, the `skills/` usage tree (the source of truth for using
-// sparq), `docs/`, every crate README/doc, AND (as of sq-rqyo) the `research/` design
-// records + the `zk/` research scaffolds, whose ~97-violation cosmetic backlog (mostly
-// missing code-fence languages) has been cleared. The only carve-out is third-party
-// `vendor/` trees (any `**/vendor` subtree) and the vendored ontologies, kept in
-// `ignores` below. `bench/` markdown
-// is still out of HARD scope and is checked ADVISORY-only (whole-repo) so any new
-// backlog there stays visible.
+// sparq), `docs/`, every crate README/doc, the `book/` mdBook sources (issue #5020),
+// AND (as of sq-rqyo) the `research/` design records + the `zk/` research scaffolds,
+// whose ~97-violation cosmetic backlog (mostly missing code-fence languages) has been
+// cleared. The only carve-out is third-party `vendor/` trees (any `**/vendor` subtree)
+// and the vendored ontologies, kept in `ignores` below. `bench/` markdown is still out
+// of HARD scope and is checked ADVISORY-only (whole-repo) so any new backlog there
+// stays visible.
 //
 // RULESET: markdownlint defaults, MINUS the rules that fight this repo's deliberate
 // house style (long unwrapped lines, bare/autolink URLs, inline HTML for the logo +
@@ -41,7 +41,7 @@
     "MD031": false, // blanks around fenced code
     "MD032": false  // blanks around lists
   },
-  // HARD-gate scope: governance docs + skills/ + docs/ + crates/ + research/ + zk/.
+  // HARD-gate scope: governance docs + skills/ + docs/ + crates/ + research/ + zk/ + book/.
   "globs": [
     "*.md",
     "skills/**/*.md",
@@ -49,6 +49,14 @@
     "crates/**/*.md",
     "research/**/*.md",
     "zk/**/*.md",
+    // [OPUS-5] issue #5020: the mdBook sources. They were outside this HARD glob AND
+    // outside the lychee internal-links file list, while the terminology gate's
+    // `docs-markdown` surface already covered book/ — an accidental hole, not a
+    // carve-out, so a structural defect authored in book/src/ was caught by neither.
+    // The pages' mdBook `{{#include}}` / `{{#rustdoc_include}}` directives are inert
+    // here: markdownlint sees them as ordinary text (the `{{#rustdoc_include}}` one
+    // sits inside a fenced block), so no rule exemption is needed.
+    "book/**/*.md",
     // [OPUS-4.8] sq-lhwo.1: the metrics-harness README. Added to the HARD
     // markdownlint (structural) glob. NOT added to the lychee internal-links scope
     // yet: it links forward to research/agent-effectiveness-program.md +

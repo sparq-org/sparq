@@ -42,16 +42,22 @@
 //! [`DistributedRandomness::shared_nonzero_mask`] is documented semi-honest-only
 //! until it lands.
 //!
-//! ## Status — seam only, no fake crypto
+//! ## Status — no fake crypto
 //!
-//! The ONLY implementor here is [`ShamirDealer`], which reports
+//! The only implementor *in this module* is [`ShamirDealer`], which reports
 //! [`RandomnessModel::TrustedDealerSim`] (`deployable() == false`).
-//! The dealer-less implementors ([`RandomnessModel::Prss`] /
-//! [`RandomnessModel::HonestMajorityCoinToss`]) are follow-on beads behind this
-//! same trait — no dealer-less crypto is implemented in this module, and NO
-//! variant is `deployable()` today: the model is a self-reported description,
-//! so deployment acceptance stays fail-closed until a validated dealer-less
-//! implementation lands.
+//! [`crate::prss::PrssRandomness`] is the first dealer-less GENERATOR behind the
+//! trait ([`RandomnessModel::Prss`], sq-yyro follow-on): its
+//! `Σ_A PRF(k_A, ctr)·f_A` online generation is real and non-interactive, but its
+//! replicated-seed SETUP is a simulated one-time trusted setup, its `r ≠ 0` check
+//! is a simulation artefact, and it refuses `vss_own_input` — read that module's
+//! docs before relying on any of it. [`RandomnessModel::HonestMajorityCoinToss`]
+//! and dealer-less VSS remain follow-on beads.
+//!
+//! **NO variant is `deployable()` today.** The model is a self-reported
+//! description, so deployment acceptance stays fail-closed until a validated
+//! dealer-less implementation lands behind an acceptance boundary tied to the
+//! construction (design record §5 item 5) — a label is never the evidence.
 
 use crate::field::Fp;
 use crate::partial::MpcError;
@@ -70,12 +76,14 @@ pub enum RandomnessModel {
     /// [`ShamirDealer`] draws every mask from the CSPRNG and therefore *knows*
     /// it. Honest for testing / the in-process protocol simulation, but **NOT
     /// deployable** to a real federation (there is no trusted dealer). This is
-    /// the only variant that ships today.
+    /// what every production call site still draws through today.
     TrustedDealerSim,
     /// **PRSS** — replicated-PRF pseudo-random secret sharing (eprint 2021/1223,
     /// IETF draft-thomson-ppm-prss). Non-interactive (0 online rounds) after a
     /// one-time replicated-seed setup; the primary choice for **small `n`**
-    /// (the four-flatmates target). Dealer-less. Follow-on bead — not built.
+    /// (the four-flatmates target). Dealer-less. Implemented by
+    /// [`crate::prss::PrssRandomness`] — the *generator* is real, its seed setup
+    /// is a simulated one-time trusted setup, and it is still not `deployable()`.
     Prss,
     /// **Distributed coin-toss** — commit-open (or VSS-summed) joint randomness.
     /// Interactive (≥1 round per batch) but needs no combinatorial setup, so it
@@ -132,10 +140,12 @@ impl RandomnessModel {
 /// well-formed degree-`t` sharing of the stated value. The security guarantees a
 /// federation actually cares about (that *no `≤ t` parties know* a mask; that an
 /// input sharing is *VSS-verified* against a malicious holder) are **not** part of
-/// any method's contract, because the sole implementor today ([`ShamirDealer`], a
-/// simulation) does not satisfy them — a generic caller must never infer them from
-/// the trait. Those guarantees are capabilities of a **validated dealer-less
-/// implementation**, none of which ships yet.
+/// any method's contract, because no implementor satisfies them both:
+/// [`ShamirDealer`] is a simulation whose dealer knows every mask, and
+/// [`crate::prss::PrssRandomness`] generates masks dealer-lessly but on a
+/// *simulated* seed setup and refuses `vss_own_input` outright. A generic caller
+/// must never infer those guarantees from the trait — they are capabilities of a
+/// **validated dealer-less implementation**, none of which ships yet.
 /// [`randomness_model`](Self::randomness_model) is an honest *description* of the
 /// regime, and [`require_deployable`](Self::require_deployable) is the fail-closed
 /// refusal gate — today it refuses EVERY source (see its docs), and wiring it

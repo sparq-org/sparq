@@ -14,6 +14,7 @@
 //! contracting, not single-node evaluation).
 //! [OPUS-4.8]
 
+use std::collections::BTreeSet;
 use std::fmt;
 
 /// The ODRL namespace IRI prefix (`odrl:`).
@@ -41,6 +42,26 @@ pub struct Policy {
     /// policy that has a detected conflict, or an unknown value) is *refused* rather than
     /// silently mis-applied — see [`crate::conflict_admissibility`].
     pub conflict: Option<ConflictStrategy>,
+    /// The IRIs this policy document identifies as an **`odrl:PartyCollection`** —
+    /// collection IDENTITY, carried independently of any member list. [SONNET-4.6]
+    /// sq-rf9uv.
+    ///
+    /// Populated by [`crate::parse_policy`] from the policy graph itself: every subject
+    /// asserted `a odrl:PartyCollection`, plus every object of an `odrl:partOf` edge the
+    /// document states (writing `<alice> odrl:partOf <lab>` identifies `<lab>` as a
+    /// collection whether or not the type triple is also present). Empty for a
+    /// hand-built [`Policy`].
+    ///
+    /// **Why it is separate from membership.** Membership evidence lives on the
+    /// [`Request`](crate::Request), is per-request and possibly partial, so "this head
+    /// has at least one known member" is a lower bound on collection-ness, never a test
+    /// for it. A consumer that must fail CLOSED on collection-valued input — the
+    /// sparq-solid ODRL→ACP bridge, which freezes a rule into an identity-matched ACP
+    /// head that cannot re-check membership — needs the identity regardless of whether
+    /// this particular request happened to supply an edge. Reading collection-ness off
+    /// the member list instead lets a zero-edge collection be frozen as a plain party
+    /// IRI, and every member then escapes the frozen deny (fail-OPEN).
+    pub party_collections: BTreeSet<String>,
 }
 
 /// The ODRL `odrl:conflict` conflict-resolution strategy (an `odrl:ConflictTerm`)

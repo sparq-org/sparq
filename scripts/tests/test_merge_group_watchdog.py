@@ -499,7 +499,11 @@ class TestDequeueRouting(unittest.TestCase):
         self.assertEqual(self.route(now=NOW + timedelta(hours=7)).route, mgw.ROUTE_DEMOTE)
 
     def test_other_reasons_keep_todays_behaviour(self):
-        for reason in ("CI_FAILURE", "MERGE_CONFLICT", "QUEUE_CLEARED", "ROLL_BACK",
+        # QUEUE_CLEARED / ROLL_BACK deliberately left OUT — sq-fnr85 gave them their own
+        # arm, and TestQueueLevelDropRouting below owns them. Everything here is either
+        # a genuine statement about the diff (CI_FAILURE, MERGE_CONFLICT) or a reason
+        # with no preserve arm at all.
+        for reason in ("CI_FAILURE", "MERGE_CONFLICT",
                        "BRANCH_PROTECTIONS", "ALREADY_MERGED"):
             self.assertEqual(self.route(reason=reason).route, mgw.ROUTE_DEMOTE, reason)
 
@@ -526,6 +530,302 @@ class TestDequeueRouting(unittest.TestCase):
         self.assertEqual(self.route(reason=" ci_timeout ").route, mgw.ROUTE_PRESERVE)
         self.assertEqual(self.route(reason="").route, mgw.ROUTE_DEMOTE)
         self.assertEqual(self.route(reason=None).route, mgw.ROUTE_DEMOTE)
+
+
+class TestQueueLevelDropRouting(unittest.TestCase):
+    """sq-fnr85 arm (c): the queue removed a healthy entry for a queue-level reason.
+
+    The reported shape is an entry that leaves the queue after its group CI went green,
+    with no merge and the arm cleared. Before this arm the ONLY route for it was
+    `demote`, so an untouched, freshly-reviewed diff lost `review:pass`, needed a manual
+    re-arm and paid a full CI re-run — the same machine-manufactured re-review #4652
+    fixed for zero-dispatch.
+
+    Every test here supplies NO marker, because this population genuinely has none: the
+    watchdog records observations only for the zero-suite groups it rescues.
+    """
+
+    GRANTED = NOW - timedelta(hours=2)
+
+    def verdict(self, *, attempts: int = 1, **overrides) -> "mgw.VerdictState":
+        fields = dict(
+            review_pass_at=self.GRANTED,
+            head_moved_at=NOW - timedelta(hours=3),
+            last_enqueued_at=NOW - timedelta(hours=1),
+            enqueued_at=tuple(
+                self.GRANTED + timedelta(minutes=n + 1) for n in range(attempts)
+            ),
+        )
+        fields.update(overrides)
+        return mgw.VerdictState(**fields)
+
+    def route(self, **overrides) -> "mgw.Route":
+        kwargs = dict(
+            reason="ROLL_BACK",
+            pr_number=99900001,
+            markers=(),
+            verdict=self.verdict(),
+            live_suites=lambda _sha: 8,  # the group DID run; this is not zero-dispatch
+            now=NOW + timedelta(minutes=40),
+        )
+        kwargs.update(overrides)
+        return mgw.classify_dequeue_route(**kwargs)
+
+    def test_a_queue_level_drop_preserves_the_verdict_and_re_arms(self):
+        for reason in sorted(mgw.GREEN_DROP_REASONS):
+            result = self.route(reason=reason)
+            self.assertEqual(result.route, mgw.ROUTE_PRESERVE, reason)
+            # Re-arming is the whole point: the drop cleared the arm, and without
+            # `reenqueue` the PR would sit reviewed-but-unarmed until a sweep noticed.
+            self.assertTrue(result.reenqueue, reason)
+
+    def test_it_needs_no_marker(self):
+        # THE headline claim. Arm (a) and arm (b) both refuse without a marker, and the
+        # marker guard used to sit ahead of every arm — so this route was unreachable
+        # for the entire population it exists to serve.
+        self.assertEqual(self.route(markers=()).route, mgw.ROUTE_PRESERVE)
+
+    def test_a_green_group_is_preserved_not_demoted(self):
+        # The exact sq-fnr85 report: the group ran, reported, and went green, and the
+        # entry was dropped anyway. A non-zero suite count must not push this into the
+        # zero-dispatch arm's "the checks genuinely ran" demote.
+        result = self.route(live_suites=lambda _sha: 8)
+        self.assertEqual(result.route, mgw.ROUTE_PRESERVE)
+        self.assertNotIn("check-suite(s)", result.detail)
+
+    def test_reasons_that_ARE_about_the_diff_are_untouched(self):
+        # THE CONTROL. A failing or conflicting PR must still lose its verdict; if this
+        # arm swallowed those, it would arm broken code straight back into the queue.
+        for reason in ("CI_FAILURE", "MERGE_CONFLICT"):
+            self.assertEqual(self.route(reason=reason).route, mgw.ROUTE_DEMOTE, reason)
+
+    def test_a_human_withdrawal_is_still_a_withdrawal(self):
+        # MANUAL/UNKNOWN are excluded ON PURPOSE: they conflate "a reviewer withdrew
+        # this" with "infrastructure moved it", and only a fresh watchdog marker (arm a)
+        # can separate them. With no marker, MANUAL must demote — otherwise this arm
+        # would silently undo every manual dequeue in the repo.
+        for reason in ("MANUAL", "UNKNOWN"):
+            self.assertEqual(self.route(reason=reason).route, mgw.ROUTE_DEMOTE, reason)
+
+    def test_the_tree_precondition_binds_this_arm_too(self):
+        # A verdict describes a TREE. Preserving it across a queue-level drop is only
+        # legitimate while the head has not moved since the grant.
+        moved = self.verdict(head_moved_at=NOW - timedelta(minutes=1))
+        result = self.route(verdict=moved)
+        self.assertEqual(result.route, mgw.ROUTE_DEMOTE)
+        self.assertIn("the head moved", result.detail)
+
+    def test_a_revoked_verdict_is_not_restored_by_a_queue_level_drop(self):
+        revoked = self.verdict(verdict_revoked_at=NOW - timedelta(minutes=1))
+        result = self.route(verdict=revoked)
+        self.assertEqual(result.route, mgw.ROUTE_DEMOTE)
+        self.assertIn("REVOKED", result.detail)
+
+    def test_no_verdict_means_nothing_to_preserve(self):
+        self.assertEqual(
+            self.route(verdict=self.verdict(review_pass_at=None)).route, mgw.ROUTE_DEMOTE
+        )
+
+    def test_an_unreadable_timeline_demotes(self):
+        unreadable = self.verdict(readable=False)
+        result = self.route(verdict=unreadable)
+        self.assertEqual(result.route, mgw.ROUTE_DEMOTE)
+        self.assertIn("timeline could not be read", result.detail)
+
+    def test_the_requeue_budget_is_enforced(self):
+        budget = mgw.DEFAULT_MAX_PRESERVED_REQUEUES
+        self.assertEqual(
+            self.route(verdict=self.verdict(attempts=budget - 1)).route,
+            mgw.ROUTE_PRESERVE,
+        )
+        spent = self.route(verdict=self.verdict(attempts=budget))
+        self.assertEqual(spent.route, mgw.ROUTE_DEMOTE)
+        self.assertIn("already ridden", spent.detail)
+        # ...and it stays spent past the boundary rather than wrapping.
+        self.assertEqual(
+            self.route(verdict=self.verdict(attempts=budget + 5)).route, mgw.ROUTE_DEMOTE
+        )
+
+    def test_the_budget_is_bounded_and_finite(self):
+        # A budget of 0 makes the arm dead code; an unbounded one makes it a retry loop.
+        self.assertGreater(mgw.DEFAULT_MAX_PRESERVED_REQUEUES, 0)
+        self.assertLessEqual(mgw.DEFAULT_MAX_PRESERVED_REQUEUES, 10)
+
+    def test_only_attempts_on_THIS_tree_count_against_the_budget(self):
+        # Attempts made before the current grant belong to a verdict that is already
+        # gone; counting them would spend the budget of a tree that never queued.
+        old = self.verdict(
+            enqueued_at=(
+                self.GRANTED - timedelta(hours=3),
+                self.GRANTED - timedelta(hours=2),
+                self.GRANTED - timedelta(hours=1),
+                self.GRANTED + timedelta(minutes=1),
+            )
+        )
+        self.assertEqual(self.route(verdict=old).route, mgw.ROUTE_PRESERVE)
+
+    def test_an_uncountable_budget_is_not_a_spent_one_but_still_refuses(self):
+        # Fail-safe: with no readable enqueue history the budget cannot be evaluated,
+        # so the arm declines rather than assuming "zero attempts so far".
+        blind = self.verdict(enqueued_at=())
+        result = self.route(verdict=blind)
+        self.assertEqual(result.route, mgw.ROUTE_DEMOTE)
+        self.assertIn("budget cannot be evaluated", result.detail)
+
+    def test_a_drop_with_no_enqueue_event_at_all_demotes(self):
+        result = self.route(verdict=self.verdict(last_enqueued_at=None))
+        self.assertEqual(result.route, mgw.ROUTE_DEMOTE)
+        self.assertIn("cannot be bound to a queue attempt", result.detail)
+
+    def test_the_reason_is_normalised_like_every_other_arm(self):
+        self.assertEqual(self.route(reason=" roll_back ").route, mgw.ROUTE_PRESERVE)
+        self.assertEqual(self.route(reason="").route, mgw.ROUTE_DEMOTE)
+        self.assertEqual(self.route(reason=None).route, mgw.ROUTE_DEMOTE)
+
+    def test_the_arm_does_not_swallow_the_zero_dispatch_arm(self):
+        # Regression guard for the ORDERING. Arm (c) runs first, so a CI_TIMEOUT must
+        # still fall through to the suite-count split rather than being absorbed here.
+        timeout = mgw.classify_dequeue_route(
+            reason="CI_TIMEOUT",
+            pr_number=99900001,
+            markers=(marker(),),
+            verdict=self.verdict(),
+            live_suites=lambda _sha: 0,
+            now=NOW + timedelta(minutes=40),
+        )
+        self.assertEqual(timeout.route, mgw.ROUTE_PRESERVE)
+        self.assertIn("check-suite", timeout.detail)
+
+
+class TestQueueLevelDropEndToEnd(unittest.TestCase):
+    """The same arm through the REAL timeline parser, not a hand-built VerdictState.
+
+    `enqueued_at` is populated by `verdict_state()`; a parser that filled only
+    `last_enqueued_at` would leave the budget permanently uncountable and make the whole
+    arm silently unreachable — green tests, dead feature.
+    """
+
+    def test_a_roll_back_preserves_end_to_end(self):
+        harness = FakeWatchdog.build(
+            suites=8,
+            comments=[],
+            timeline=[
+                {"event": "labeled", "created_at": "2026-07-27T22:50:00Z",
+                 "label": {"name": "review:pass"}},
+                {"event": "added_to_merge_queue", "created_at": "2026-07-27T22:58:53Z"},
+            ],
+        )
+        route = harness.watchdog.classify_dequeue(99900001, "ROLL_BACK")
+        self.assertEqual(route.route, mgw.ROUTE_PRESERVE)
+        self.assertTrue(route.reenqueue)
+
+    def test_the_parser_really_collects_every_enqueue_event(self):
+        harness = FakeWatchdog.build(
+            suites=8,
+            comments=[],
+            timeline=[
+                {"event": "labeled", "created_at": "2026-07-27T22:50:00Z",
+                 "label": {"name": "review:pass"}},
+                {"event": "added_to_merge_queue", "created_at": "2026-07-27T22:58:53Z"},
+                {"event": "added_to_merge_queue", "created_at": "2026-07-27T23:20:00Z"},
+                {"event": "added_to_merge_queue", "created_at": "2026-07-27T23:45:00Z"},
+            ],
+        )
+        state = harness.watchdog.verdict_state(99900001)
+        self.assertEqual(len(state.enqueued_at), 3)
+        self.assertEqual(state.last_enqueued_at, max(state.enqueued_at))
+        # Three attempts on one verdict spends the budget, so this one demotes.
+        self.assertEqual(
+            harness.watchdog.classify_dequeue(99900001, "ROLL_BACK").route,
+            mgw.ROUTE_DEMOTE,
+        )
+
+    def test_a_backdated_commit_after_the_grant_still_forfeits_the_verdict(self):
+        # THE ARM'S SHARPEST EDGE: this arm consults no watchdog marker and binds to no
+        # group head, so the tree precondition is the ONLY thing standing between a
+        # queue-level drop and `gh pr merge --auto`. A `committed` row dates itself from
+        # `committer.date`/`author.date` — metadata the pusher picks — so a commit pushed
+        # after `review:pass` (a cherry-pick, `git commit --date`, `GIT_COMMITTER_DATE`)
+        # can claim 22:40 and slip under the 22:50 grant. Where the row LANDS is not the
+        # pusher's to write, and it lands after the grant, so the verdict must fall.
+        for drop_reason in ("QUEUE_CLEARED", "ROLL_BACK"):
+            with self.subTest(reason=drop_reason):
+                harness = FakeWatchdog.build(
+                    suites=8,
+                    comments=[],
+                    timeline=[
+                        {"event": "labeled", "created_at": "2026-07-27T22:50:00Z",
+                         "label": {"name": "review:pass"}},
+                        {"event": "added_to_merge_queue",
+                         "created_at": "2026-07-27T22:58:53Z"},
+                        # Pushed LAST, dated BEFORE the grant — both stamps, so neither
+                        # the committer nor the author fallback rescues the comparison.
+                        {"event": "committed",
+                         "committer": {"date": "2026-07-27T22:40:00Z"},
+                         "author": {"date": "2026-07-27T22:40:00Z"}},
+                    ],
+                )
+                route = harness.watchdog.classify_dequeue(99900001, drop_reason)
+                self.assertEqual(route.route, mgw.ROUTE_DEMOTE)
+                self.assertIn("timeline order decides", route.detail)
+
+    def test_a_commit_with_no_readable_date_after_the_grant_forfeits_it(self):
+        # A `committed` row whose dates are missing or unparseable contributes nothing to
+        # `head_moved_at`. Before the ordering signal it therefore vanished from the
+        # check entirely — an undated head move was indistinguishable from no head move.
+        harness = FakeWatchdog.build(
+            suites=8,
+            comments=[],
+            timeline=[
+                {"event": "labeled", "created_at": "2026-07-27T22:50:00Z",
+                 "label": {"name": "review:pass"}},
+                {"event": "added_to_merge_queue", "created_at": "2026-07-27T22:58:53Z"},
+                {"event": "committed", "committer": {"date": "not-a-date"}},
+            ],
+        )
+        state = harness.watchdog.verdict_state(99900001)
+        self.assertIsNone(state.head_moved_at)
+        self.assertTrue(state.head_moved_after_grant_in_order)
+        self.assertEqual(
+            harness.watchdog.classify_dequeue(99900001, "ROLL_BACK").route,
+            mgw.ROUTE_DEMOTE,
+        )
+
+    def test_a_commit_before_the_newest_grant_keeps_the_verdict(self):
+        # The ordering signal must not fire on the re-grant shape, or every PR whose
+        # verdict was restored after a push would be demoted straight back again.
+        harness = FakeWatchdog.build(
+            suites=8,
+            comments=[],
+            timeline=[
+                {"event": "labeled", "created_at": "2026-07-27T22:20:00Z",
+                 "label": {"name": "review:pass"}},
+                {"event": "committed", "committer": {"date": "2026-07-27T22:45:00Z"}},
+                {"event": "labeled", "created_at": "2026-07-27T22:50:00Z",
+                 "label": {"name": "review:pass"}},
+                {"event": "added_to_merge_queue", "created_at": "2026-07-27T22:58:53Z"},
+            ],
+        )
+        self.assertFalse(
+            harness.watchdog.verdict_state(99900001).head_moved_after_grant_in_order
+        )
+        self.assertEqual(
+            harness.watchdog.classify_dequeue(99900001, "QUEUE_CLEARED").route,
+            mgw.ROUTE_PRESERVE,
+        )
+
+    def test_classify_still_never_mutates_on_this_arm(self):
+        harness = FakeWatchdog.build(
+            suites=8,
+            comments=[],
+            timeline=[
+                {"event": "labeled", "created_at": "2026-07-27T22:50:00Z",
+                 "label": {"name": "review:pass"}},
+                {"event": "added_to_merge_queue", "created_at": "2026-07-27T22:58:53Z"},
+            ],
+        )
+        harness.watchdog.classify_dequeue(99900001, "QUEUE_CLEARED")
+        self.assertEqual(harness.gh.mutations, [])
 
 
 class TestMarkerCodec(unittest.TestCase):

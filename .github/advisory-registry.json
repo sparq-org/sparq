@@ -22,6 +22,13 @@
    "promotion_criteria": "NEVER promotable, same reason as `review-lane blind-spot alarm` — a detector that REDs when a nightly formal lane stopped producing verdicts is reporting on the LANE's health, not on the commit under test, so it must never gate a merge. Same silent-gating defect (sq-huwr8): scheduled on main, so its check-run lands on the same head SHA the push-triggered ci-summary gate polls. Delete this entry only if the workflow is removed.",
    "registered": "2026-07-27"
   },
+  "HEAVY-set drift alarm": {
+   "workflow": "heavy-set-alarm.yml",
+   "job_id": "alarm",
+   "owner_bead": "sq-6vshe.7",
+   "promotion_criteria": "NEVER promotable, same reason as `formal-lane no-verdict alarm` — this is a DETECTOR of DRIFT between ci.yml's hand-maintained `jobs.test.env.HEAVY` filterset and the measured per-test wall-times. Every condition it REDs on is a property of the repository's accumulated test-time distribution (a test that got slow weeks ago, an atom left behind by a rename), never of the commit under test, so gating on it would block an unrelated PR on a shard-balance chore — the pressure that gets an alarm muted, which is strictly worse than no alarm because it still looks like coverage. It also REDs fail-loud (exit 2) when the detector itself breaks: HEAVY unreadable/ambiguous, an empty event stream, or test events carrying no exec_time (the case where it would otherwise report a permanent false all-clear). Declared for the same silent-gating reason as its sibling lanes (sq-huwr8): it is scheduled on main, so its check-run lands on the same head SHA the push-triggered ci-summary gate polls. No gate_script_waiver: scripts/heavy_set_alarm.py carries no gate-ish filename token and is not a gate script — it asserts nothing about the commit, only about shard balance. Delete this entry only if the workflow is removed.",
+   "registered": "2026-08-03"
+  },
   "nightly selection-bug alarm": {
    "workflow": "selection-alarm.yml",
    "job_id": "alarm",

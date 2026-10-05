@@ -40,7 +40,7 @@ FAIL-CLOSED. `arm_block_reason` blocks when it *cannot prove* the PR is not the 
 * a bot-authored PR with an unknown title blocks.
 
 Over-blocking is cheap: a wrongly-skipped PR is merged by the next sweep or by a human.
-Under-blocking publishes 17 crates to crates.io forever.
+Under-blocking publishes 37 crates to crates.io forever.
 
 Usage:
     import release_pr_guard

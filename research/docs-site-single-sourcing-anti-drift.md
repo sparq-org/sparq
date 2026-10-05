@@ -8,6 +8,11 @@
 > touch. Predecessors: sq-9jw5 (docs overhaul), sq-5fd1 (doc-lint CI),
 > sq-p26u (`include_str!` / docs.rs). Companion runbook:
 > [`docs/pages-cutover-runbook.md`](../docs/pages-cutover-runbook.md).
+> **Post-record status:** The separate sq-iigf Pages source-mode cutover is complete
+> on the repo side: the producer workflow exists. The Pages service setting is reported
+> as flipped but is not verified here; see the linked runbook's Provenance section.
+> The guide's Pages mount discussed in §8 remains open: `docs.yml` still has no deploy
+> job, and `pages.yml` still records the guide-at-root versus `/guide/` decision as open.
 
 ## 1. The requirement, restated
 
@@ -221,6 +226,12 @@ repo-relative: `scripts/mdbook-rewrite-links.py` only rewrites root-level markdo
 whose name begins with an uppercase letter, so a lowercase root-level target would
 survive the preprocessor and 404 under the guide mount. Widening that pattern is a
 one-line change in a `ci`-area file and is left to the follow-up.
+
+**Update — that follow-up has landed (issue #5021).** `_ROOT_MD` now matches root-level
+markdown of ANY case, the README link named above is back to its repo-relative form, and
+the preprocessor carries a hermetic `--self-test` (run in `docs-quality.yml`'s HARD
+quick-gates job on every PR) whose lowercase-root-doc case reds if the pattern is
+narrowed again.
 
 ## 9. Gate-coverage gaps found while writing this
 

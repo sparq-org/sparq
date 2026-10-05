@@ -178,12 +178,26 @@ jobs:
   # `scripts/ci_select.py --classify-only` — the IDENTICAL `classify_change()` path the
   # `select` pre-job runs on this event, so the two layers cannot disagree on a resolved
   # diff (no duplicated path lists; ci_select.py stays the single source of truth).
-  # Class docs-only/orchestration-only => rust_changed=false + docker_changed=false
-  # (sound: every path in the dorny `rust`/`docker` filter sets classifies `engine`, so
-  # those classes PROVE both filters would be false — same trust model as the PR-level
-  # gate, a pure function of the authoritative diff). Any OTHER class, an unresolvable
-  # SHA pair, or ANY classifier error => true/true (fail-safe = full run, cost never
-  # soundness). Gate accounting: the skipped legs report `skipped` and the required
+  # A class on ci_select.py `_INERT_CLASSES` => rust_changed=false + docker_changed=false.
+  # SOUNDNESS: an inert class means every changed path is on an AUDITED inert surface —
+  # the orchestration/deploy allowlists (whose script/workflow entries the inertness tests
+  # in scripts/tests/test_ci_select.py pin by grepping the Rust-CI workflows) or an
+  # ownership-map `safe = true` verdict (re-verified every run by scripts/ci_audit_inputs.py,
+  # which FAILS the moment a crate reads a safe-listed path). THAT is the load-bearing
+  # proof, not the dorny `rust`/`docker` filters, which are a coarser extension-level
+  # proxy: an audited-inert tree may legitimately hold a `.rs`/`Cargo.toml` those filters
+  # would flag — research/hardware/wgpu-spike (no CI lane builds it) and
+  # site/test/fixtures/policy-evaluator (built only by site-e2e.yml, a workflow this
+  # gate does not touch) — while no lane gated here compiles either. Same trust model as
+  # the PR-level gate otherwise: a pure function of the authoritative diff. Any OTHER
+  # class, an unresolvable SHA pair, or ANY classifier error => true/true (fail-safe =
+  # full run, cost never soundness).
+  # [OPUS-5] sq-g25hr widened `_INERT_CLASSES` from {docs-only, orchestration-only} to
+  # also cover `deploy-only` (deploy/** + the deploy lint workflows) and `inert-mixed`
+  # (a diff confined to inert surfaces that SPANS more than one of them — previously
+  # collapsed into `mixed` and therefore paid the full suite). Nothing about the trust
+  # model changed: the class is still computed from the authoritative queued diff, so
+  # one crates/** path taints the batch back to `mixed` => the wildcard arm => full run. Gate accounting: the skipped legs report `skipped` and the required
   # ci-summary gate attributes them to the (green, same-diff) `select` pre-job —
   # attributed skips, never missing legs (scripts/ci_summary_gate.py, sq-fmx4u.3).
   # NOT gated by-class here: vectorized-feature-off.yml stays FULL on merge groups on
@@ -287,8 +301,15 @@ jobs:
             if [ "${ok}" = "true" ]; then
               cls="$(python3 scripts/ci_select.py --classify-only --event merge_group \
                        --base "${MG_BASE_SHA}" --head "${MG_HEAD_SHA}")" || cls=engine
+              # [OPUS-5] sq-g25hr: the arm lists ci_select.py `_INERT_CLASSES` verbatim
+              # (pinned by scripts/tests/test_ci_select_wiring.py so the two cannot drift).
+              # deploy-only = deploy/** + the deploy lint workflows; inert-mixed = a diff
+              # confined to inert surfaces that SPANS more than one of them (the observed
+              # cloud-deploy batch: manifests + their READMEs + deploy-*.yml);
+              # [OPUS-5] #5249: map-safe = every path resolves to an ownership-map
+              # `safe = true` verdict (today site/** + ci/formal-verification.toml).
               case "${cls}" in
-                docs-only|orchestration-only) rust=false; docker=false ;;
+                docs-only|orchestration-only|deploy-only|map-safe|inert-mixed) rust=false; docker=false ;;
                 *) rust=true; docker=true ;;
               esac
             else
@@ -473,7 +494,7 @@ jobs:
       # item 2) lets a residual transient binary race self-heal. SHA-pinned install
       # action (a pin already vetted elsewhere in this workflow).
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@41049aa56687c35e0afa74eed4f09cec4f9afabf # v2.85.2
+        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
         with:
           tool: nextest
       # [OPUS-4.8] Build + ARCHIVE the whole workspace test set once. `--all-targets`
@@ -571,12 +592,23 @@ jobs:
     # than the prior 5×(131s build) and with the shards genuinely finishing together.
     #
     # GENERALISING (so a NEW heavy test cannot silently re-skew this): the known-heavy
-    # set is the single `HEAVY` filterset env below. When nextest's run output flags a
-    # NEW test SLOW (the `SLOW [> Ns]` markers), add `| test(=its_name)` to HEAVY and,
-    # if it is comparable to the existing heavies, give it its own matrix shard; the
+    # set is the single `HEAVY` filterset env below. To add one: `| test(=its_name)` in
+    # HEAVY and, if it is comparable to the existing heavies, its own matrix shard; the
     # bulk filter is the negation of HEAVY, so it stays correct automatically. This is
     # the pragmatic known-heavy-list + count-partition-the-rest design — deliberately
     # NOT a timing database (over-engineered for a 2-heavy tail).
+    #
+    # [OPUS-5] sq-6vshe.7 phase 4 (#5563) — WHO NOTICES. This upkeep used to depend on a
+    # human spotting a `SLOW [> Ns]` marker in a shard log, which is not a mechanism: a
+    # newly-slow test just rejoins a bulk shard and re-skews the split, and the only
+    # symptom is a slower merge queue that nobody attributes back to this env. That read
+    # is now MEASURED weekly by `.github/workflows/heavy-set-alarm.yml` +
+    # scripts/heavy_set_alarm.py, which times every test via nextest's libtest-json-plus
+    # stream and files an issue when HEAVY stops matching the measured heavy set — a test
+    # above the floor that HEAVY does not name, an atom left behind by a rename (whose
+    # shard then silently runs ZERO tests, since `test(=NAME)` is an exact match), or a
+    # declared heavy that got fast and is now wasting a shard. It is ADVISORY and reads
+    # this env; it never edits it, so the list below stays hand-owned.
     #
     # fail-fast: false so one shard's failure does not cancel the others (we want the
     # full failure picture across the suite, not just the first shard to break).
@@ -663,7 +695,7 @@ jobs:
           rustup default stable
           rustup show active-toolchain
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@41049aa56687c35e0afa74eed4f09cec4f9afabf # v2.85.2
+        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
         with:
           tool: nextest
       - name: Download nextest archive
@@ -1158,10 +1190,18 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 20
+      # [OPUS-5] #5771: this pin must stay EQUAL to the one the `js` lane
+      # (.github/workflows/js.yml) builds + packs the @sparq-org/sparq wasm artifact with.
+      # It was v0.13.1 here while js.yml pinned v0.15.0, so any wasm-pack/wasm-bindgen
+      # behaviour change between those releases was exercised only in that BUILD lane
+      # and never here — in the lane that actually RUNS the headless suites. Unified on
+      # js.yml's v0.15.0. The equality (not the value) is enforced by
+      # scripts/tests/test_js_wasm_pack_install.py::WasmPackVersionUnified, so bump
+      # BOTH lanes together or that test reds.
       - name: Install wasm-pack
         uses: jetli/wasm-pack-action@0d096b08b4e5a7de8c28de67e11e945404e9eefa # v0.4.0
         with:
-          version: v0.13.1
+          version: v0.15.0
       - name: Headless wasm tests (wasm-pack test --node)
         working-directory: crates/sparq-wasm
         run: wasm-pack test --node
@@ -2741,8 +2781,48 @@ jobs:
           # seeder argument are on the `build-archive` cache step above (the canonical
           # note); pinned by scripts/tests/test_mergequeue_cache_posture.py.
           save-if: ${{ github.ref == 'refs/heads/main' }}
+      # [OPUS-5] #4935 — AVAILABILITY DECOUPLING for the only two corpora in this
+      # GATING lane that come from a non-GitHub third party: the OWL 2 test-case
+      # export (an Internet Archive snapshot, fetched over HTTPS) and the
+      # W3C RIF WG Core_v1.22 archive. Both are FIXED, sha256-pinned exports, yet
+      # they were re-downloaded live on every run — so a bad few minutes at
+      # web.archive.org concluded this leg `failure` with nothing measured, which
+      # ci-summary correctly fail-fasts on, ejecting unrelated PRs from the merge
+      # queue (merge group e5c2e01c, 2026-07-28: six 30s connect timeouts, no
+      # assertion failed, PR #4925 ejected). Restoring them from the Actions cache
+      # makes the network a CACHE-MISS-ONLY path: fetch-inference-suites.sh
+      # short-circuits on the pinned digest (`fetch_pinned_file` / the RIF stamp),
+      # so a hit performs zero network I/O. The ratchet is untouched — a genuine
+      # regression still reds, because the corpus arriving from cache vs. network
+      # is invisible to the runner. Key hashes the fetch script, so ANY pin change
+      # busts it (over-busting on an unrelated comment edit only costs one cold
+      # fetch). Pinned by scripts/tests/test_inference_corpus_cache.py.
+      - name: Restore the pinned OWL 2 / RIF corpora
+        id: inference-corpus-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            tests/w3c/owl2
+            tests/w3c/rif-core
+          key: inference-corpus-v1-${{ runner.os }}-${{ hashFiles('scripts/fetch-inference-suites.sh') }}
       - name: Fetch inference test suites (pinned)
+        # On a cache hit this fetches only the two github.com clones (rdf-tests,
+        # N3); the OWL/RIF steps report "already present (sha256 ok)".
         run: ./scripts/fetch-inference-suites.sh
+      # Save from main-scoped runs only — repo cache-save doctrine (sq-3sbrr /
+      # sq-6vshe.15): an entry written from a PR or `gh-readonly-queue/` ref is
+      # scoped to that ref, which is deleted on merge/ejection, so it is pure
+      # unreachable churn against the shared 10 GB budget. PRs and merge groups
+      # RESTORE main's entry — which is exactly where the hit that protects the
+      # queue comes from. Skipped on a hit: cache entries are immutable.
+      - name: Save the pinned OWL 2 / RIF corpora (main-scoped runs)
+        if: github.ref == 'refs/heads/main' && steps.inference-corpus-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            tests/w3c/owl2
+            tests/w3c/rif-core
+          key: inference-corpus-v1-${{ runner.os }}-${{ hashFiles('scripts/fetch-inference-suites.sh') }}
       - name: Run inference suites
         # [OPUS-4.8] sq-shacl-flake (generalized from #1236): STEP-LEVEL transient
         # self-heal. This `cargo run` WRITES inference-conformance-report.md as a side
@@ -3255,7 +3335,7 @@ jobs:
         # [OPUS-4.8] sq-tool-pin: taiki-e/install-action picks the tool from its @<tool> ref;
         # SHA-pinning (our code-scanning=0 policy) drops that ref, so an explicit `with: tool:`
         # is MANDATORY — without it install-action installs NOTHING and `cargo llvm-cov` ENOENTs.
-        uses: taiki-e/install-action@41049aa56687c35e0afa74eed4f09cec4f9afabf # cargo-llvm-cov
+        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # cargo-llvm-cov
         with:
           tool: cargo-llvm-cov
       - name: Compute coverage cone (ENFORCE mode, sq-3dr4t) [SONNET-4.6]
@@ -3463,7 +3543,7 @@ jobs:
         # [OPUS-4.8] sq-tool-pin: explicit `with: tool:` is MANDATORY when SHA-pinning
         # install-action (the @<tool> ref is dropped by the pin). Both tools are needed:
         # llvm-cov for instrumentation, nextest for the partitioning.
-        uses: taiki-e/install-action@41049aa56687c35e0afa74eed4f09cec4f9afabf # cargo-llvm-cov
+        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # cargo-llvm-cov
         with:
           tool: cargo-llvm-cov,nextest
       - name: Fetch W3C fixtures (engine tests need them)
@@ -3531,7 +3611,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
           key: coverage-engine-run-1
       - name: Install cargo-llvm-cov + nextest
-        uses: taiki-e/install-action@41049aa56687c35e0afa74eed4f09cec4f9afabf # cargo-llvm-cov
+        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # cargo-llvm-cov
         with:
           tool: cargo-llvm-cov,nextest
       - name: Build instrumented engine objects (for `report`, no test run)
@@ -3793,12 +3873,11 @@ jobs:
           fi
 
   nightly-gate:
-    # [OPUS-4.8] Freshness gate for ALL nightly (schedule-triggered) jobs: run them
-    # only if HEAD changed since the last nightly run — so the heavy nightly tier does
-    # not re-run on an unchanged repo. Compares github.sha to the head_sha of the most
-    # recent COMPLETED schedule-triggered run of this workflow (ci.yml). A manual
-    # workflow_dispatch always passes; if the lookup fails or no prior nightly exists,
-    # we FAIL-OPEN (run) so a transient API error never silently disables the nightly.
+    # [GPT-6 Astra] #6436: skip only with verified heavy completion at this head.
+    # A green skipped follow-up is not proof. Incomplete work remains eligible on
+    # the next ordinary schedule; unreadable history blocks admission. Manual force
+    # remains explicit. No rerun API, shard retry or polling loop is introduced.
+    # The helper bounds history and job reads and never retries an API failure.
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
@@ -3807,22 +3886,14 @@ jobs:
     outputs:
       fresh: ${{ steps.gate.outputs.fresh }}
     steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts
       - id: gate
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "fresh=true" >> "$GITHUB_OUTPUT"; echo "manual dispatch — running nightly"; exit 0
-          fi
-          CUR='${{ github.sha }}'
-          PREV=$(gh api "repos/${{ github.repository }}/actions/workflows/ci.yml/runs?event=schedule&status=completed&per_page=1" \
-                   --jq '.workflow_runs[0].head_sha' 2>/dev/null || echo "")
-          echo "current HEAD=$CUR ; last nightly HEAD=${PREV:-<none>}"
-          if [ -z "$PREV" ] || [ "$PREV" != "$CUR" ]; then
-            echo "fresh=true" >> "$GITHUB_OUTPUT"; echo "new commit(s) since last nightly — running"
-          else
-            echo "fresh=false" >> "$GITHUB_OUTPUT"; echo "no new commit since last nightly ($PREV) — skipping"
-          fi
+        run: python3 scripts/ci_nightly_freshness.py
 
   coverage-nightly:
     # [OPUS-4.8] NIGHTLY heavy-coverage tier (sq-hbg7). Runs the FULL per-crate
@@ -3838,7 +3909,7 @@ jobs:
     # while the per-commit `coverage` job still gates the cheaper test-only `floor`. The
     # gate driver reads the summary's `tier` and applies nightly_floor automatically.
     # Triggered by the `schedule:` cron (or manual dispatch), and only when the
-    # nightly-gate says HEAD changed since the last nightly.
+    # nightly-gate finds no verified heavy completion at this HEAD (or manual force).
     name: coverage (nightly, full incl. heavy vectors)
     needs: nightly-gate
     if: needs.nightly-gate.outputs.fresh == 'true'
@@ -3882,7 +3953,7 @@ jobs:
         # [OPUS-4.8] sq-tool-pin: explicit `with: tool:` is MANDATORY when SHA-pinning
         # install-action — the @<tool> ref is dropped by the SHA pin, so without this the
         # tool is silently NOT installed and `cargo llvm-cov` ENOENTs (see per-commit job).
-        uses: taiki-e/install-action@41049aa56687c35e0afa74eed4f09cec4f9afabf # cargo-llvm-cov
+        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # cargo-llvm-cov
         with:
           tool: cargo-llvm-cov
       - name: Test-presence gate
@@ -4097,7 +4168,43 @@ jobs:
             timeout_minutes: 360
           - crate: sparq-vectors
             timeout_minutes: 360
+          # [SONNET-4.6] sq-qcnn.41: sparq-server QUIRK — measure it FEATURE-ON, so the ceiling
+          # it is about to be seeded with is honest. cargo-mutants generates mutants from the
+          # SOURCE (it walks `mod` items regardless of the `#[cfg]` on them), but a
+          # default-feature build never COMPILES the gated modules, so every mutant inside one
+          # is trivially "missed" — non-compiled code, NOT a test gap. Same class as the
+          # sparq-canon / sparq-prov quirks above, and the same artifact that forced this
+          # baseline to re-measure sparq-fedplan (committed 0-caught/534-survived) and
+          # sparq-fedclient (0/553). It matters MORE here than for either of those: ceilings
+          # only ever FALL (`--seed` will not raise one without `--allow-higher` + review), so
+          # an inflated FIRST seed is sticky — hence this lands BEFORE the crate is baselined.
+          # SCALE (structural counts from the tree, reproduce with grep + wc): the
+          # `#[cfg(feature = …)] mod` items the DEFAULT build leaves out are solid_authz 2647,
+          # tpf 1333, descriptors 1145, access_audit 614, streams 592, n3_patch 497,
+          # templates 373, audit 294 = 7495 of 25702 src lines (~29%), and src/http.rs carries
+          # a further 301 `cfg(feature = …)` sites naming a default-OFF feature.
+          # THE SET = the LEG-PROVEN subset: every feature named below already has a
+          # `test: true` leg in .github/feature-matrix.d/sparq-server.yml, so its suite is
+          # known-green on this runner image. That matters because cargo-mutants runs an
+          # UNMUTATED baseline first and aborts the whole sweep if it fails — a feature set
+          # nobody has ever executed could cost the crate its run.
+          # DELIBERATELY OUT, each with a reason. The ceiling therefore still carries
+          # trivially-surviving mutants from these, and must be re-tightened as they gain legs:
+          #   • shacl / backup / n3-patch — NO CI executor runs their suites (shacl + backup
+          #     are explicit entries in scripts/check-feature-test-execution.allowlist.json).
+          #     They COMPILE (the gating workspace `--all-features` clippy proves that much),
+          #     but "compiles" is not "passes", and this lane cannot risk the baseline run.
+          #   • http2 / http3 — transport plumbing (TLS / a second UDP listener) with few
+          #     mutable lines, whose socket + TLS test cost every mutant would then pay.
+          #   • zlib-ng — a flate2 backend swap; no leg, and no sparq-server code of its own.
+          #   • test-seams — a TEST seam, not product surface.
+          # COST, stated plainly: a feature-ON sweep compiles and runs strictly more per mutant
+          # than today's feature-OFF one, and this crate has no seedable run on record (the last
+          # one noted above was killed by runner shutdown). No timing is guessed here — RE-TUNE
+          # this entry from the first run that completes (raise timeout_minutes, or move it to the
+          # SUB-SHARDS idiom below), using that run's own timings as the evidence of record.
           - crate: sparq-server
+            features: audit-log,access-audit,change-stream,federation-descriptors,solid-authz,odrl-authz,solid-authz-trust,templates,tpf,brtpf,query-registry,facets,complete,service,time-travel,geo,terse,response-compression
             timeout_minutes: 360
           - crate: sparq-mpc
             timeout_minutes: 360
@@ -4265,16 +4372,18 @@ jobs:
           # note); pinned by scripts/tests/test_mergequeue_cache_posture.py.
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install cargo-mutants
-        uses: taiki-e/install-action@41049aa56687c35e0afa74eed4f09cec4f9afabf # cargo-mutants
+        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # cargo-mutants
         with:
           tool: cargo-mutants@25.3.1
       - name: Run cargo-mutants for this crate + ratchet against the baseline
         # [OPUS-4.8] sq-qcnn.11: measure exactly THIS shard's crate (--package). The static
         # exclusions (presence-gated / non-host crates) live in .cargo/mutants.toml.
-        # matrix.features carries the whole-surface features for the two DEFAULT-OFF crates
-        # (sparq-core mmap,dict-spill / sparq-substrate numeric,join,compare,rows) — passed via
-        # env (not inline ${{ }}) to keep it out of the shell-injection surface. A per-crate
-        # failure is tolerated (continue-on-error) while seeding — the gate verdict is --check.
+        # matrix.features carries the per-crate whole-surface feature set for every crate whose
+        # measured surface is DEFAULT-OFF (sparq-core, sparq-substrate, sparq-sim, sparq-canon,
+        # sparq-prov, sparq-fedplan, sparq-fedclient, sparq-server — see the QUIRK comments on
+        # each include entry) — passed via env (not inline ${{ }}) to keep it out of the
+        # shell-injection surface. A per-crate failure is tolerated (continue-on-error) while
+        # seeding — the gate verdict is --check.
         # [SONNET-4.6] sq-qcnn.28: continue-on-error:true at STEP level (in addition to job
         # level) so that a runner shutdown mid-cargo-mutants does not mark the job as failure:
         # the artifact upload (if: always()) still runs, and the job exits success even when the
@@ -4303,9 +4412,18 @@ jobs:
           feat=()
           [ -n "$FEATURES" ] && feat=(--features "$FEATURES")
           echo "::group::cargo-mutants $CRATE ${feat[*]}${SHARD:+ --shard $SHARD}"
+          # [GPT-6 Astra] Preserve advisory handling, but do not let a masked command
+          # failure become evidence for skipping later heavy work at the same head.
+          mutation_exit=0
           cargo mutants -p "$CRATE" "${feat[@]}" "${shard_args[@]}" -o "$output_dir" \
-            || echo "WARN: cargo-mutants $CRATE did not complete cleanly (advisory)"
+            || mutation_exit=$?
+          if [ "$mutation_exit" -ne 0 ]; then
+            echo "WARN: cargo-mutants $CRATE did not complete cleanly (advisory)"
+          fi
           echo "::endgroup::"
+          # [GPT-6 Astra] Counts must cover the prewritten planned mutant list.
+          # Exit 2 (missed) / 3 (mutant timeouts) can be complete advisory results.
+          python3 scripts/ci_nightly_freshness.py --mutation-complete "$mutation_exit" "$output_dir/mutants.out"
           # Run the ratchet --check on THIS crate's outcomes. --check NEVER fails on an
           # UNSEEDED crate (it reports it for the next --seed); it exits 1 only if a SEEDED
           # crate now has MORE survivors than its committed ceiling. While advisory
@@ -4321,6 +4439,13 @@ jobs:
             echo "no outcomes produced for $CRATE${SHARD:+ shard=$SHARD} — nothing to check" \
               | tee -a "$GITHUB_STEP_SUMMARY"
           fi
+      # [GPT-6 Astra] This separate step is server-visible proof: continue-on-error
+      # may green the job, but cannot manufacture a successful completion marker.
+      # A complete measurement may still fail the advisory ratchet; do not change
+      # that policy or hide its original step result. Cancellation supplies no proof.
+      - name: Nightly mutation work completed
+        if: ${{ !cancelled() && steps.run_mutants.outputs.measurement_completed == 'true' }}
+        run: echo "Mutation measurement completed; advisory ratchet verdict remains separate."
       - name: Upload mutation outcomes
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
@@ -4416,7 +4541,7 @@ jobs:
           # note); pinned by scripts/tests/test_mergequeue_cache_posture.py.
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install cargo-geiger
-        uses: taiki-e/install-action@41049aa56687c35e0afa74eed4f09cec4f9afabf # v2.85.2
+        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
         with:
           tool: cargo-geiger
         continue-on-error: true

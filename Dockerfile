@@ -83,13 +83,13 @@ RUN cargo auditable build --release --locked -p sparq-server ${CARGO_FLAGS}
 # INDEX digest (`docker buildx imagetools inspect` must list both release platforms), never
 # with a per-architecture child manifest digest — that is what would actually break amd64.
 # Tag: gcr.io/distroless/cc-debian12:nonroot
-FROM gcr.io/distroless/cc-debian12:nonroot@sha256:b0ae8e989418b458e0f25489bc3be523718938a2b70864cc0f6a00af1ddbd985
+FROM gcr.io/distroless/cc-debian12:nonroot@sha256:adcd20c7b4c988b73cbfbddb26d2eee574571e6d7c9ffea29b3821e0690efb77
 
 LABEL org.opencontainers.image.title="sparq-server" \
       org.opencontainers.image.description="W3C SPARQL 1.1 Protocol server for the sparq RDF triplestore (dictionary-encoded, six permutation indexes, parallel execution)" \
-      org.opencontainers.image.source="https://github.com/jeswr/sparq" \
+      org.opencontainers.image.source="https://github.com/sparq-org/sparq" \
       org.opencontainers.image.licenses="MIT" \
-      org.opencontainers.image.documentation="https://github.com/jeswr/sparq#readme"
+      org.opencontainers.image.documentation="https://github.com/sparq-org/sparq#readme"
 
 COPY --from=builder /build/target/release/sparq-server /usr/local/bin/sparq-server
 

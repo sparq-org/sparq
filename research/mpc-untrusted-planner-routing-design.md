@@ -2,7 +2,8 @@
 selection + a disclosed/hidden partition feed the sparq-mpc pipeline WITHOUT the
 cryptographic layer trusting the plan for soundness. Originally design-for-review (no code),
 Opus 4.8 (Fable unavailable) — re-review when Fable returns. Date: 2026-06-19. Bead sq-pwr /
-sq-0jsc. GREENLIT via issue #755; Phases 1-4 + 6 have since landed in
+sq-0jsc. GREENLIT via issue #755; Phases 1-4 + 6, and the canonicalisation half of Phase 5
+(sq-1fo4, [OPUS-5]), have since landed in
 crates/sparq-fedplan-mpc/ — see the decision log under the Status line. -->
 
 # The untrusted-planner → MPC-routing seam (federated source selection + disclosed/hidden partition)
@@ -13,7 +14,7 @@ fait accompli. Author: Opus 4.8 (Fable unavailable — flag for re-review).
 Date: 2026-06-19. Parent epics: **sq-pwr** (MPC over federated SPARQL with ZKP of correctness
 + attested-source derivation), **sq-0jsc** (MPC research track).
 
-> ## Decision log — [issue #755](https://github.com/jeswr/sparq/issues/755)
+> ## Decision log — [issue #755](https://github.com/sparq-org/sparq/issues/755)
 >
 > #755 held implementation pending a greenlight plus the two structural choices of §9.
 > Both are now **RESOLVED as recommended**, and the resolution is recorded here so this
@@ -39,10 +40,13 @@ Date: 2026-06-19. Parent epics: **sq-pwr** (MPC over federated SPARQL with ZKP o
 >
 > **Landed since** (each its own bead, all opt-in, none in the default build): Phase 1
 > `sq-2q1x`, Phase 2 `sq-fix4`, Phase 3 `sq-i1wh2`, Phase 4 `sq-pwr.2`, Phase 6 `sq-pwr.3` +
-> `sq-xkrt`.
+> `sq-xkrt`, and Phase 5 `sq-1fo4` — **its canonicalisation half ONLY** (a canonical plan
+> commitment + a fail-closed re-validation; the *soundness* half, the binding into a collaborative
+> proof, is deferred and makes no soundness claim).
 > See §8 for the per-phase status and `crates/sparq-fedplan-mpc/README.md` for the honest
-> boundary. **§9 Q3** (where the Phase-5 untrusted-plan re-validation binds) and **§9 Q4**
-> (B7 authorisation scope) remain **OPEN**.
+> boundary. **§9 Q3** (where the Phase-5 untrusted-plan re-validation binds) is now **PARTLY
+> ANSWERED** — `sq-1fo4` settled *what* is bound and confirmed no landed plumbing had to change;
+> *where* it attaches is still open. **§9 Q4** (B7 authorisation scope) remains **OPEN**.
 >
 > **The audit posture is unchanged by any of this.** Everything landed is *plumbing* —
 > source selection, a combination prune, a disclosed/hidden partition, and leakage
@@ -283,7 +287,12 @@ downstream MPC protocol.
   *eventual* collaborative proof (the gated, audit-pending step — `proof.rs` is honestly a
   `NotYetImplemented` stub) binds the result to `Eval_PAG(Q, D)` over the *actual* sources, so a
   plan that drops or mis-routes a source yields a proof that fails to verify, not a forged accept.
-  **Until that proof lands and is audited, the soundness claim is NOT met** — see §6.
+  **Until that proof lands and is audited, the soundness claim is NOT met** — see §6. `sq-1fo4` has
+  since landed the *canonicalisation* half of that generalisation (`commit_plan` /
+  `revalidate_plan`, §8 Phase 5): the plan is now reducible to one canonical public-input word, and
+  a recomputed plan is checked against it fail-closed. That word is **not yet bound into any
+  proof**, so it is a transcript-integrity check that a malicious planner passes trivially — C-A
+  stays *designed, not delivered*.
 - **C-B (leakage under an untrusted plan).** Discharged by the §4.3-pass-3 dual ratification:
   the disclosure decision belongs to the data owners and the verifier, not the planner. A
   dishonest planner can at most propose an over-disclosing route, which a holder's fail-closed
@@ -382,11 +391,12 @@ Ordered by leverage / dependency. Each is opt-in (`fedplan-mpc` feature), touche
 lean core nor the audit posture, and is differentially testable against the existing
 four-flatmates pipeline.
 
-> **Status as of 2026-07-28** (issue #755 greenlight — see the decision log at the top).
+> **Status as of 2026-08-01** (issue #755 greenlight — see the decision log at the top).
 > **LANDED:** Phases 1 (`sq-2q1x`), 2 (`sq-fix4`), 3 (`sq-i1wh2`), 4 (`sq-pwr.2`),
-> 6 (`sq-pwr.3` + `sq-xkrt`), in `crates/sparq-fedplan-mpc/`. **NOT STARTED:** Phase 5 (audit-gated on
-> `sq-qhy4` / `sq-9hrn` *and* on §9 Q3) and Phase 7 (needs the §9 Q4 decision). Per-phase
-> annotations below.
+> 6 (`sq-pwr.3` + `sq-xkrt`), in `crates/sparq-fedplan-mpc/`. **PARTLY LANDED:** Phase 5
+> (`sq-1fo4`) — its *canonicalisation* half only; the **soundness** half stays audit-gated on
+> `sq-qhy4` / `sq-9hrn` and on §9 Q3, and nothing in it may be presented as sound.
+> **NOT STARTED:** Phase 7 (needs the §9 Q4 decision). Per-phase annotations below.
 
 1. **Phase 1 — `sparq-fedplan-mpc` crate skeleton + privacy descriptor.** **[LANDED — `sq-2q1x`]** Off-by-default opt-in
    crate depending on `sparq-fedplan` + `sparq-mpc`; define `SourcePrivacyDescriptor`
@@ -404,12 +414,36 @@ four-flatmates pipeline.
    envelope; each holder's fail-closed private-column re-check; verifier-side envelope acceptance
    policy. Negative tests: a plan that tries to disclose a private term is rejected by the
    holder; an over-leaking envelope is rejected by the verifier. *(P2, depends Phase 3)*
-5. **Phase 5 — untrusted-plan soundness re-validation (gated).** **[NOT STARTED — still
-   audit-gated; see §9 Q3]** Bind the produced plan to the
+5. **Phase 5 — untrusted-plan soundness re-validation (gated).** **[CANONICALISATION HALF LANDED
+   — `sq-1fo4`, `crates/sparq-fedplan-mpc/src/binding.rs`; the SOUNDNESS HALF REMAINS BLOCKED]**
+   Bind the produced plan to the
    eventual collaborative proof so a dropped/mis-routed source yields a verification failure, not
    a forged accept. **BLOCKED** on `proof.rs` ceasing to be a stub AND the external audit
    (sq-qhy4) + collaborative coZK re-audit (sq-9hrn) — do NOT present as sound until then. *(P3,
    depends Phase 4 + the audit gates)*
+
+   **What `sq-1fo4` landed, and what it deliberately did not.** The phase splits in two, and only
+   one half depends on the gates. The *canonicalisation* half — reducing the produced plan to a
+   single canonical word a proof could later commit to — depends on nothing that is blocked, and
+   is the move `sq-34ml` already made for the M4-v1 freshness binding ("scoping + layout only,
+   still hard-gated on the ZK foundation"). So it landed: `commit_plan` folds the Phase-2
+   per-pattern source assignment, the Phase-3 disclosed/hidden route and the Phase-4 declared
+   participation set into a domain-separated `PlanCommitment` whose `plan_digest()` is a
+   `sparq_mpc::FieldWord` — the estate's public-input word — and `revalidate_plan` fails closed
+   against an independently recomputed commitment, naming the **dropped source** or **re-routed
+   operator** rather than reporting a bare digest mismatch. It binds plan *content*, not the
+   planner's enumeration order, and excludes `estimated_cardinality` (a cost estimate, not plan
+   semantics).
+
+   **This does NOT discharge C-A and is not presented as doing so.** The out-of-circuit check is a
+   *canonicality + transcript-integrity* measure and defends against nothing a **malicious**
+   planner does: the planner computes the plan *and* its commitment, so one that drops a source
+   simply commits to the plan it actually ran and the check passes. What it catches is *accidental*
+   divergence — a plan mutated between ratification and execution, a planner/verifier disagreement,
+   a truncating transport. The half that *would* discharge C-A is `bind_plan_to_proof`, which
+   carries its real signature and returns `SeamError::Deferred` naming every gate: there is no
+   collaborative proof to bind to, and sq-qhy4 / sq-9hrn are pending. **Nothing in this phase may
+   be presented as sound until that step lands and the audits clear.**
 6. **Phase 6 — FedUP-style result-aware source-combination pruning.** **[LANDED — `sq-pwr.3`
    (Rule C1) + `sq-xkrt` (Rule C2, the quotient-summary rule); the value-overlap prune remains
    deliberately DECLINED as not recall-safely expressible from the public summary — see the
@@ -438,7 +472,7 @@ four-flatmates pipeline.
 
 ## 9. Open questions for the maintainer
 
-*Q1 and Q2 were the two choices [#755](https://github.com/jeswr/sparq/issues/755) held the build
+*Q1 and Q2 were the two choices [#755](https://github.com/sparq-org/sparq/issues/755) held the build
 on; both are **RESOLVED** (full rationale + code evidence in the decision log at the top of this
 record). **Q3 and Q4 are still OPEN.***
 
@@ -463,6 +497,25 @@ record). **Q3 and Q4 are still OPEN.***
    sketched, so the question is now whether to sketch it before Phase 5 starts, and whether any
    of the landed plumbing needs to change to accommodate it. It also stays gated on `sq-qhy4` /
    `sq-9hrn` regardless of the answer.)
+
+   **Partial answer from `sq-1fo4` — the *what* is settled, the *where* is not.** Building the
+   canonicalisation half surfaced that the two sub-questions are separable. **What** must be bound
+   is now fixed and implemented: the per-pattern source assignment (a *dropped* source perturbs
+   it), the per-operator disclosed/hidden route (a *mis-routed* operator perturbs it), and the
+   declared participation set. Binding the per-pattern assignment — not merely the flat
+   participation set — turned out to be load-bearing: moving a source from one pattern to another
+   leaves the participation set identical while changing the plan's meaning entirely. **No landed
+   plumbing needed to change** to accommodate this; `commit_plan` reads the existing Phase-2/3/4
+   outputs unmodified, which is itself a useful negative result.
+
+   **Where** it attaches remains genuinely open and is the part still waiting on the proof's shape.
+   `bind_plan_to_proof`'s signature *proposes* `sparq_mpc::FederatedStatement` — its M4-v1
+   public-input layout already carries the analogous `query_digest` / `key_set_digest` words, so a
+   plan word would sit naturally beside them — but that is a proposal for the maintainer, not a
+   decision, and taking it would mean extending a byte layout `sq-34ml` deliberately pinned. **That
+   layout was NOT touched.** The maintainer's call: accept the `FederatedStatement` attachment
+   point (and schedule the layout extension), or defer the *where* to its own record once the proof
+   exists.
 4. **OPEN — B7 scope.** Is access-control-aware source skipping in-scope for this track at all,
    or does it belong with `sparq-solid` (WAC/ACP) and only *reference* this seam? (Phase 1's
    reserved `participates` field exists as the seam's placeholder and Phase 2 reads it as a bare

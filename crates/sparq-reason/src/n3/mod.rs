@@ -313,6 +313,156 @@ pub fn reason_n3_pass_all(src: &str, vars: RuleVars) -> Result<String, String> {
     Ok(out)
 }
 
+/// The EYE **`--query`** filter (`eye <data> --query <query.n3>`), at the TERM level: every
+/// INSTANTIATED conclusion `Cθ` of the query document's `{ premise } => { conclusion }` rules,
+/// for each binding `θ` satisfying the premise over the deductive closure of `data`.
+///
+/// This is a PROJECTION, not a closure step — a conclusion is emitted for every satisfying
+/// binding INCLUDING one whose instantiated conclusion is already a fact of the closure (EYE
+/// prints that answer; forward chaining would suppress it as "not new"). The query document's
+/// own FACTS are not loaded as data (EYE reads the query file as a query, not as a second data
+/// document); its backward (`<=`) rules ARE available to the premise, alongside the data
+/// document's.
+///
+/// The premise is matched by the SAME matcher the forward chainer uses, so the FULL premise
+/// language is available: builtins (`math:`/`string:`/`list:`/`log:`/`time:`, including the
+/// scoped `log:collectAllIn`/`forAllIn` and negation-as-failure forms), quoted `{ … }`
+/// formulae, first-class `( … )` lists and quoted `<< s p o >>` triples all evaluate exactly as
+/// they do in a document rule (`sq-xqchl.1`, GH #3144 — the previous compat path translated the
+/// premise to a SPARQL BGP, which cannot evaluate any of them and so rejected them).
+///
+/// Answers come back in rule-then-binding order, DEDUPLICATED. Blank nodes appearing only in a
+/// query conclusion are existentials, instantiated fresh once per distinct conclusion-relevant
+/// binding — the same quant-implies semantics [`reason_n3`] gives a document rule.
+///
+/// Errors when either document fails to parse, or when the query document has no forward rule
+/// (a fact-only or backward-only query document has nothing to project — fail loudly rather
+/// than return an empty answer that reads like "the query matched nothing").
+pub fn reason_n3_query_terms(data: &str, query: &str) -> Result<Vec<[Term; 3]>, String> {
+    let data_parsed = parser::parse(data)?;
+    let query_parsed = parser::parse(query)?;
+    if query_parsed.rules.is_empty() {
+        return Err("n3 query filter: the query document contains no `{ … } => { … }` forward \
+                    rule; only forward-rule (SELECT/CONSTRUCT-style) query documents project an \
+                    answer"
+            .to_string());
+    }
+    // Namespace for query-conclusion existentials: fresh against BOTH documents' blank labels,
+    // and (by family) disjoint from the `__sk…` labels `run_closure` mints inside the closure.
+    let sk_prefix = {
+        let mut seen = document_blank_labels(&data_parsed);
+        seen.extend(document_blank_labels(&query_parsed));
+        fresh_blank_prefix(&seen, "__qsk")
+    };
+    // Backward rules reachable from the query premise: the data document's (which the closure
+    // itself used) plus the query document's own. `run_closure` reorders backward premises for
+    // builtin readiness before building its context, so do the same for this copy.
+    let base = data_parsed.base.clone();
+    let mut backward: Vec<Rule> =
+        data_parsed.backward_rules.iter().chain(&query_parsed.backward_rules).cloned().collect();
+    for r in &mut backward {
+        r.premise = order_premise(&r.premise);
+    }
+    let (facts, _steps) = run_closure(data_parsed, None, None, StepMode::None);
+    let mut bw = BwCtx::new(&backward);
+    bw.base = base;
+
+    let mut out: Vec<[Term; 3]> = Vec::new();
+    let mut emitted: FxHashSet<[Term; 3]> = FxHashSet::default();
+    let mut sk_counter = 0usize;
+    for (ri, rule) in query_parsed.rules.iter().enumerate() {
+        let premise = order_premise(&rule.premise);
+        let (concl_blanks, concl_vars) = conclusion_existentials(&rule.conclusion);
+        let mut fired: FxHashSet<String> = FxHashSet::default();
+        for b in match_premise(&premise, &facts, &bw) {
+            let sk: Option<FxHashMap<String, String>> = if concl_blanks.is_empty() {
+                None
+            } else {
+                let key: String = concl_vars.iter().map(|v| format!("{:?};", b.get(v))).collect();
+                if !fired.insert(key) {
+                    continue; // this firing already instantiated its existentials
+                }
+                sk_counter += 1;
+                Some(
+                    concl_blanks
+                        .iter()
+                        .map(|l| (l.clone(), format!("{}{}_{}_{}", sk_prefix, ri, sk_counter, l)))
+                        .collect(),
+                )
+            };
+            for c in &rule.conclusion {
+                let c = match &sk {
+                    Some(map) => rename_blanks(c, map),
+                    None => c.clone(),
+                };
+                if let Some(g) = ground_triple(&c, &b) {
+                    if emitted.insert(g.clone()) {
+                        out.push(g);
+                    }
+                }
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// As [`reason_n3_query_terms`], but interned into `dict` — the RDF-shaped answer form
+/// [`reason_n3`] returns. First-class `( … )` list values in an answer are expanded into
+/// rdf:first/rest blank-node chains (whose structure triples are part of the returned answer),
+/// exactly as the closure entry points expand them. A generated chain cell is always a
+/// DISTINCT node from any blank the answers already carry — cell labels are minted under a
+/// prefix proven fresh against them, so a projected `_:_l1` cannot merge with a list cell.
+///
+/// Errors — additionally to [`reason_n3_query_terms`] — when an answer carries a quoted `{ … }`
+/// formula, which has no dictionary representation; use the term-level entry point for a query
+/// whose conclusion is formula-valued.
+pub fn reason_n3_query(dict: &mut Dict, data: &str, query: &str) -> Result<Vec<[Id; 3]>, String> {
+    let answers = reason_n3_query_terms(data, query)?;
+    let mut exp = ListExpander::new(&answers);
+    let (mut rows, mut structure) = exp.expand_rows(&answers);
+    rows.append(&mut structure);
+    let mut out = Vec::with_capacity(rows.len());
+    for t in &rows {
+        out.push([intern(dict, &t[0])?, intern(dict, &t[1])?, intern(dict, &t[2])?]);
+    }
+    Ok(out)
+}
+
+/// A rule conclusion's EXISTENTIALS (its blank labels — instantiated fresh once per firing) and
+/// its VARIABLES (the firing key: one instantiation per distinct conclusion-relevant binding,
+/// so a rule re-evaluated against the same bindings does not mint endless new blanks).
+///
+/// Quoted triples are transparent structure — their blanks are conclusion existentials and
+/// their variables part of the firing key — whereas a quoted `{ … }` formula is an opaque VALUE
+/// whose inner terms are formula-scoped, so it is not descended into.
+fn conclusion_existentials(conclusion: &[[Term; 3]]) -> (Vec<String>, Vec<String>) {
+    fn scan(
+        t: &Term,
+        blanks: &mut FxHashSet<String>,
+        vars: &mut std::collections::BTreeSet<String>,
+    ) {
+        match t {
+            Term::Blank(l) => {
+                blanks.insert(l.clone());
+            }
+            Term::Var(v) => {
+                vars.insert(v.clone());
+            }
+            Term::List(ms) => ms.iter().for_each(|m| scan(m, blanks, vars)),
+            Term::Triple(t) => t.iter().for_each(|m| scan(m, blanks, vars)),
+            _ => {}
+        }
+    }
+    let mut blanks = FxHashSet::default();
+    let mut vars = std::collections::BTreeSet::new();
+    for row in conclusion {
+        for t in row {
+            scan(t, &mut blanks, &mut vars);
+        }
+    }
+    (blanks.into_iter().collect(), vars.into_iter().collect())
+}
+
 /// A stratified run's result ([`reason_n3_stratified`]).
 pub struct StratifiedN3Closure {
     /// The FINAL stratum's ground closure, interned into the dictionary (the
@@ -389,21 +539,24 @@ fn fresh_carry_prefix(parsed: &parser::Parsed) -> String {
     fresh_blank_prefix(&seen, "__st")
 }
 
+/// Every blank label reachable in `t`, including nested list members, formula
+/// rows and quoted-triple components.
+fn term_blank_labels<'a>(t: &'a Term, out: &mut FxHashSet<&'a str>) {
+    match t {
+        Term::Blank(l) => {
+            out.insert(l.as_str());
+        }
+        Term::List(ms) => ms.iter().for_each(|m| term_blank_labels(m, out)),
+        Term::Formula(ts) => {
+            ts.iter().for_each(|r| r.iter().for_each(|m| term_blank_labels(m, out)));
+        }
+        Term::Triple(tr) => tr.iter().for_each(|m| term_blank_labels(m, out)),
+        _ => {}
+    }
+}
+
 /// Every blank label in a parsed document, including nested structured terms.
 fn document_blank_labels(parsed: &parser::Parsed) -> FxHashSet<&str> {
-    fn labels<'a>(t: &'a Term, out: &mut FxHashSet<&'a str>) {
-        match t {
-            Term::Blank(l) => {
-                out.insert(l.as_str());
-            }
-            Term::List(ms) => ms.iter().for_each(|m| labels(m, out)),
-            Term::Formula(ts) => {
-                ts.iter().for_each(|r| r.iter().for_each(|m| labels(m, out)));
-            }
-            Term::Triple(tr) => tr.iter().for_each(|m| labels(m, out)),
-            _ => {}
-        }
-    }
     let mut seen = FxHashSet::default();
     let rule_terms = parsed
         .rules
@@ -411,7 +564,7 @@ fn document_blank_labels(parsed: &parser::Parsed) -> FxHashSet<&str> {
         .chain(&parsed.backward_rules)
         .flat_map(|r| r.premise.iter().chain(&r.conclusion));
     for t in parsed.facts.iter().chain(rule_terms) {
-        t.iter().for_each(|m| labels(m, &mut seen));
+        t.iter().for_each(|m| term_blank_labels(m, &mut seen));
     }
     seen
 }
@@ -620,34 +773,8 @@ fn run_closure(
     // instance per firing), and the conclusion's variables (the firing key —
     // one instantiation per distinct conclusion-relevant binding, so re-runs
     // of non-monotonic rules do not mint endless new blanks).
-    let concl_meta: Vec<(Vec<String>, Vec<String>)> = rules
-        .iter()
-        .map(|r| {
-            let mut blanks: std::collections::HashSet<String> = Default::default();
-            let mut vars: std::collections::BTreeSet<String> = Default::default();
-            fn scan(t: &Term, blanks: &mut std::collections::HashSet<String>, vars: &mut std::collections::BTreeSet<String>) {
-                match t {
-                    Term::Blank(l) => {
-                        blanks.insert(l.clone());
-                    }
-                    Term::Var(v) => {
-                        vars.insert(v.clone());
-                    }
-                    Term::List(ms) => ms.iter().for_each(|m| scan(m, blanks, vars)),
-                    // Quoted triples are transparent structure: their blanks are
-                    // conclusion existentials, their vars part of the firing key.
-                    Term::Triple(t) => t.iter().for_each(|m| scan(m, blanks, vars)),
-                    _ => {}
-                }
-            }
-            for row in &r.conclusion {
-                for t in row {
-                    scan(t, &mut blanks, &mut vars);
-                }
-            }
-            (blanks.into_iter().collect(), vars.into_iter().collect())
-        })
-        .collect();
+    let concl_meta: Vec<(Vec<String>, Vec<String>)> =
+        rules.iter().map(|r| conclusion_existentials(&r.conclusion)).collect();
     let mut fired: FxHashSet<(usize, String)> = FxHashSet::default();
     let mut sk_counter = 0usize;
 
@@ -901,8 +1028,11 @@ fn intern_closure(
     // First-class list values have no dictionary representation — expand them
     // into rdf:first/rest blank-node chains (one chain per list VALUE, shared
     // across the facts that mention it).
-    let mut exp = ListExpander::default();
     let fact_rows: Vec<[Term; 3]> = facts.all.iter().cloned().collect();
+    // The same expander also expands the proof rows below, so its cell labels must be
+    // fresh against THOSE blanks too — seed it from both.
+    let step_rows = steps.iter().flat_map(|(g, _, prem)| std::iter::once(g).chain(prem));
+    let mut exp = ListExpander::new(fact_rows.iter().chain(step_rows));
     let (fact_rows, mut extra) = exp.expand_rows(&fact_rows);
     // Intern the ground closure into the dictionary.
     let mut out = Vec::with_capacity(fact_rows.len() + extra.len());
@@ -930,14 +1060,32 @@ fn intern_closure(
 /// Expands first-class `Term::List` values into rdf:first/rest blank-node
 /// chains for consumers that need pure RDF triples (the dictionary-interning
 /// entry points). One chain per distinct list value; `()` becomes `rdf:nil`.
-#[derive(Default)]
+///
+/// Cell labels are minted under a `prefix` proven fresh against every blank
+/// label reachable in the rows the expander was built for ([`ListExpander::new`]) —
+/// a generated cell can therefore never be the same RDF node as a blank the
+/// caller is already carrying (a document blank or a projected query answer
+/// literally spelled `_:_l1` would otherwise MERGE with a generated cell and
+/// emit a semantically wrong graph).
 struct ListExpander {
     heads: FxHashMap<Term, Term>,
     structure: Vec<[Term; 3]>,
     counter: usize,
+    prefix: String,
 }
 
 impl ListExpander {
+    /// An expander whose cell labels are fresh against every blank reachable in
+    /// `rows` — which must cover EVERY row this expander will be asked to
+    /// expand, since the prefix is fixed at construction.
+    fn new<'a>(rows: impl IntoIterator<Item = &'a [Term; 3]>) -> Self {
+        let mut seen = FxHashSet::default();
+        for r in rows {
+            r.iter().for_each(|t| term_blank_labels(t, &mut seen));
+        }
+        let prefix = fresh_blank_prefix(&seen, "_l");
+        Self { heads: FxHashMap::default(), structure: Vec::new(), counter: 0, prefix }
+    }
     fn expand_rows(&mut self, rows: &[[Term; 3]]) -> (Vec<[Term; 3]>, Vec<[Term; 3]>) {
         let out: Vec<[Term; 3]> = rows.iter().map(|r| self.expand_row(r)).collect();
         (out, std::mem::take(&mut self.structure))
@@ -967,7 +1115,7 @@ impl ListExpander {
         let mut tail = Term::Iri(parser::RDF_NIL.into());
         for m in members.into_iter().rev() {
             self.counter += 1;
-            let node = Term::Blank(format!("_l{}", self.counter));
+            let node = Term::Blank(format!("{}{}", self.prefix, self.counter));
             self.structure.push([node.clone(), Term::Iri(parser::RDF_FIRST.into()), m]);
             self.structure.push([node.clone(), Term::Iri(parser::RDF_REST.into()), tail]);
             tail = node;

@@ -6,11 +6,25 @@
 # conclusion, which fail-fast cancellation makes lossy (#4965) — correlate each
 # failed job's crate with the crates that
 # change-based selection (scripts/ci_select.py) SKIPPED in the PRs landed since
-# the last green nightly. Any intersection is prima-facie a selection soundness
-# bug (design §2) — scripts/ci_selection_alarm.py files a self-identified SPARQ
-# agent GitHub issue naming the offending job(s) + the suspect PRs. The
+# the last VERIFIED nightly backstop. Any intersection is prima-facie a selection
+# soundness bug (design §2) — scripts/ci_selection_alarm.py files a self-identified
+# SPARQ agent GitHub issue naming the offending job(s) + the suspect PRs. The
 # orchestrator reconciles those issues into P1 beads (we never touch `bd`/`.beads`
 # in CI — same rule as flow-on.yml).
+#
+# [OPUS-5] #5025 — "VERIFIED", not "green". The window's lower bound used to be the
+# most recent run-level `success`, the last place the alarm trusted the aggregate
+# #4965 had already shown to be lossy, and it is why the first real firing carried
+# 644 suspects: the last `success` was 28 days behind HEAD. ci.yml already sets
+# `fail-fast: false` on every matrix, so no matrix setting can repair the aggregate —
+# a job CANCELLED at its timeout ceiling (the advisory cargo-mutants sweep runs at
+# 120/360min caps) drags the whole run to `cancelled` regardless. The bound is
+# therefore computed over each scheduled run's JOB list instead
+# (ci_selection_alarm.classify_run: no genuinely-failed job, and every full-matrix
+# test shard concluded `success`), and the run's own health — which runs were
+# examined, why each was rejected, which jobs are red in more than one of them — is
+# printed to the step summary whenever there is something to correlate, and on
+# demand via `python3 scripts/ci_selection_alarm.py --nightly-health`.
 #
 # NOT A GATE (design §6.1 "fail-open"): this runs AFTER the nightly completes via
 # `workflow_run`, files issues, and blocks NO merge. That holds because this job
@@ -106,11 +120,13 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      actions: read # list the failed run's jobs + look up the last green nightly
+      actions: read # list the failed run's jobs + scan recent scheduled runs' jobs
+                    # for the window bound / health report (#5025)
       issues: write # file the alarm issue (idempotent, labelled)
     steps:
       # Full history so the per-commit selection replay (git diff <sha>^ <sha>) and
-      # the last-green-nightly window (git log base..HEAD) resolve.
+      # the window (git log <bound>..HEAD, or `--since` the oldest scheduled run
+      # examined when nothing verified the matrix) resolve.
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false

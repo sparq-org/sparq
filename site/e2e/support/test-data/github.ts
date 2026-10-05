@@ -4,7 +4,7 @@
 // unauthenticated releases fetch on /download — so this is the one external surface the
 // determinism doctrine (research/web-gui-test-program.md §1.2) fixture-routes. Everything else
 // is blocked. Owner-agnostic (`/repos/*/sparq/`) so it survives the org migration
-// (jeswr/sparq → sparq-org/sparq) without a fixture edit.
+// (sparq-org/sparq → sparq-org/sparq) without a fixture edit.
 // Import attribute (`with { type: "json" }`) is required by Node's ESM loader (Playwright runs the
 // specs under native ESM); tsc's resolveJsonModule + esbuild both honour it too.
 import releaseFixture from "./fixtures/github-release.json" with { type: "json" };

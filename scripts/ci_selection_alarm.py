@@ -28,6 +28,19 @@
 #   lossy aggregate. Admission is therefore made HERE, over the job list, by the same
 #   FAILED_CONCLUSIONS predicate the analysis uses — see STRICT_EMPTY_CONCLUSIONS.
 #
+#   [OPUS-5] #5025 — WHAT BOUNDS THE CORRELATION WINDOW. #4965 moved ADMISSION onto
+#   the job list and left the WINDOW BOUND on the same lossy run-level aggregate:
+#   the base was the head_sha of the most recent run-level `success`. That is the
+#   last place the alarm trusted the aggregate, and it is why a first real firing
+#   carried 644 suspects — the last `success` was 28 days behind HEAD while nightly
+#   after nightly aggregated to `cancelled`. The bound is now computed by
+#   `find_window_bound` over the JOB list of each recent scheduled run — see
+#   `classify_run` for the predicate and why it needs a POSITIVE coverage term that
+#   "no job failed" alone does not give. `render_nightly_health` states — whenever
+#   there is something to correlate, and on demand via `--nightly-health` — which
+#   runs were examined, why each was rejected, and which jobs are red in more than
+#   one of them.
+#
 # TWO DESIGN INVARIANTS (both load-bearing):
 #   1. FAIL-SAFE / FAIL-LOUD (opposite of ci_select.py's fail-CLOSED). An
 #      alarm-INFRASTRUCTURE error (cannot list the failed jobs, cannot load cargo
@@ -167,6 +180,31 @@ STRICT_EMPTY_CONCLUSIONS = {"failure", "timed_out", ""}
 # ci.yml shard job name (`test (load-aware shard ${{ matrix.name }})`).
 TRIAGE_LANE_RE = re.compile(r"^test \(load-aware shard ")
 
+# --- the correlation window's LOWER BOUND (#5025) ----------------------------
+# How many recent COMPLETED scheduled runs `find_window_bound` examines before it
+# gives up and reports a stale backstop. One job-list API call per run examined, so
+# this is the cost ceiling of the scan; at the nightly cadence it is ~a month of
+# backstops, which is longer than the 28-day gap that motivated #5025.
+BOUND_SCAN_RUNS = 30
+
+# A job conclusion that means the lane RAN and PASSED. Anything else — `cancelled`
+# (the 6h/timeout-minutes ceiling, or a concurrency cancel), `skipped`, `neutral`,
+# "" — means the lane was not verified BY THIS RUN, which is a different claim from
+# "the lane failed" and is why classify_run keeps the two apart.
+VERIFIED_CONCLUSION = "success"
+
+# A job that failed in at least this many of the runs examined is reported as
+# PERSISTENTLY red rather than as a one-off. 2 is the smallest number that can
+# distinguish the two at all; the report prints the count either way, so a reader
+# never has to trust the label over the number.
+PERSISTENT_RED_MIN_RUNS = 2
+
+# Per-run job names quoted inline in the health report. Run 30333511110's census is
+# 84 jobs — 31 of them cancelled — so an unbounded per-run job list would make a
+# health TABLE unreadable, the #4984 defect in a new place. The omitted COUNT is
+# always stated, so a bounded list is never a silent truncation.
+MAX_RENDERED_JOBS = 5
+
 
 class AlarmError(Exception):
     """An alarm-INFRASTRUCTURE failure. main() surfaces it LOUD (non-zero exit)."""
@@ -210,6 +248,21 @@ class Finding:
     crate: str | None  # precise: the offending crate; triage: None
     failed_jobs: list[str]  # failed job(s) implicating this mapping
     suspect_prs: list[WindowCommit]  # landed PRs whose skip-set implicates this
+
+
+@dataclass(frozen=True)
+class RunHealth:
+    """What one examined scheduled run's JOB list says about the backstop (#5025)."""
+
+    run_id: str
+    head_sha: str
+    conclusion: str  # the LOSSY run-level aggregate — reported, never trusted
+    created_at: str  # ISO-8601 from the runs API ("" if the API omitted it)
+    failed_jobs: tuple[str, ...]  # conclusion in FAILED_CONCLUSIONS
+    unverified_shards: tuple[str, ...]  # full-matrix shards that did not succeed
+    shard_count: int  # full-matrix shard jobs present at all
+    bounds: bool  # may this run bound the correlation window?
+    reason: str  # why — stated for the accepted run as well as the rejected ones
 
 
 # --------------------------------------------------------------------------- #
@@ -298,6 +351,170 @@ def correlate(
 
 
 # --------------------------------------------------------------------------- #
+# The window's lower bound, from the JOB list (#5025) — pure, hermetic-testable
+# --------------------------------------------------------------------------- #
+def _quote_jobs(names: tuple[str, ...] | list[str], cap: int = MAX_RENDERED_JOBS) -> str:
+    """`a`, `b`, +N more — bounded, never a silent truncation."""
+    shown = list(names)[:cap]
+    # `|` is escaped: these strings land in the health report's markdown TABLE, and a
+    # job name carrying a pipe would silently split the row it is describing.
+    rendered = ", ".join("`" + n.replace("|", "\\|") + "`" for n in shown)
+    omitted = len(names) - len(shown)
+    return rendered + (f", +{omitted} more" if omitted else "")
+
+
+def classify_run(
+    run_id: str,
+    head_sha: str,
+    conclusion: str,
+    created_at: str,
+    jobs: list[tuple[str, str]],
+) -> RunHealth:
+    """May this scheduled run bound the correlation window, and why (not)?
+
+    THE PREDICATE. A run bounds the window iff, over its REAL job list:
+      (a) no job concluded in FAILED_CONCLUSIONS — nothing genuinely broke; AND
+      (b) it contains at least one full-matrix test shard (TRIAGE_LANE_RE) — the
+          run actually exercised the backstop; AND
+      (c) EVERY such shard concluded `success` — every lane the per-PR selector is
+          able to narrow was re-run and passed in this run.
+
+    WHY (b)+(c) AND NOT JUST (a). #5025 proposes "a scheduled run in which no job
+    concluded failure/timed_out", and (a) alone is that. But "nothing failed" is
+    satisfied vacuously by a run that verified NOTHING — every shard `cancelled` at
+    the timeout ceiling, or `skipped` behind a freshness/path gate. Accepting such a
+    run as the bound would move the base FORWARD past commits no backstop ever
+    re-ran, which SHRINKS the suspect set and hides real suspects. That is the
+    failure mode #5025 forbids ("Do not fix this by widening the lookback or by
+    suppressing the alarm") wearing the opposite sign, so the bound needs positive
+    evidence of coverage, not merely the absence of a failure.
+
+    WHY THE RUN-LEVEL CONCLUSION IS NOT CONSULTED AT ALL. It is the lossy aggregate
+    #4965 measured: one cancelled leg makes a whole run `cancelled`, so a run whose
+    every shard passed can never reach `success` and the OLD bound
+    (`?status=success`) skipped it. It is carried on RunHealth for the report — a
+    reader comparing "GitHub says cancelled" with "every shard passed" is seeing
+    exactly the discrepancy that caused #5025 — but no branch here reads it.
+    """
+    failed = tuple(sorted({n for n, c in jobs if (c or "").strip() in FAILED_CONCLUSIONS}))
+    shards = [(n, (c or "").strip()) for n, c in jobs if TRIAGE_LANE_RE.match(n)]
+    unverified = tuple(sorted({n for n, c in shards if c != VERIFIED_CONCLUSION}))
+
+    if failed:
+        bounds, reason = False, (
+            f"{len(failed)} job(s) concluded {'/'.join(sorted(FAILED_CONCLUSIONS))}: "
+            f"{_quote_jobs(failed)}"
+        )
+    elif not shards:
+        bounds, reason = False, (
+            "no full-matrix test shard job present — this run did not exercise the "
+            "backstop, so it cannot witness that anything was re-run"
+        )
+    elif unverified:
+        bounds, reason = False, (
+            f"{len(unverified)} of {len(shards)} test shard(s) did not conclude "
+            f"`{VERIFIED_CONCLUSION}` (cancelled/skipped lanes were NOT verified): "
+            f"{_quote_jobs(unverified)}"
+        )
+    else:
+        bounds, reason = True, (
+            f"VERIFIED — all {len(shards)} full-matrix test shard(s) succeeded and no "
+            "job failed"
+        )
+    return RunHealth(
+        run_id=run_id,
+        head_sha=head_sha,
+        conclusion=(conclusion or "").strip(),
+        created_at=(created_at or "").strip(),
+        failed_jobs=failed,
+        unverified_shards=unverified,
+        shard_count=len(shards),
+        bounds=bounds,
+        reason=reason,
+    )
+
+
+def persistently_red_jobs(
+    scanned: list[RunHealth], min_runs: int = PERSISTENT_RED_MIN_RUNS
+) -> list[tuple[str, int]]:
+    """(job name, how many of the examined runs it FAILED in), most-frequent first,
+    for jobs at or above `min_runs`.
+
+    This is the discriminator #5025 asks for and that no single run can answer: "are
+    the four genuinely-failed jobs of run 30333511110 a persistent red or a flaky
+    mutation-ratchet lane?" is a question about a job's behaviour ACROSS runs."""
+    counts: dict[str, int] = {}
+    for health in scanned:
+        for job in health.failed_jobs:
+            counts[job] = counts.get(job, 0) + 1
+    return sorted(
+        ((job, n) for job, n in counts.items() if n >= min_runs),
+        key=lambda item: (-item[1], item[0]),
+    )
+
+
+def render_nightly_health(scanned: list[RunHealth], bound: RunHealth | None) -> str:
+    """The backstop's OWN health, as a markdown block for stdout + the step summary.
+
+    #5025 acceptance item 1 ("the nightly's own health is stated: is the full matrix
+    actually green, and if not, which jobs are persistently red?") is a question that
+    has to be re-answered every night, so the alarm answers it whenever it has
+    something to correlate — and on demand via `--nightly-health` — rather than it
+    being pasted into one issue body that is stale the next night."""
+    if not scanned:
+        return (
+            "### nightly backstop health\n\n"
+            "- **No completed scheduled run found at all.** Cold start, or the runs "
+            "API returned nothing — there is no backstop to bound the window with.\n"
+        )
+
+    lines = [
+        "### nightly backstop health",
+        "",
+        f"- **Examined:** {len(scanned)} most recent completed scheduled run(s), "
+        "newest first.",
+    ]
+    if bound is not None:
+        lines.append(
+            f"- **Window bound:** run `{bound.run_id}` (head `{bound.head_sha[:12]}`, "
+            f"{bound.created_at or 'date unknown'}) — {bound.reason}. GitHub "
+            f"aggregated that run to `{bound.conclusion or 'unknown'}`."
+        )
+    else:
+        lines.append(
+            f"- **NO examined run verified the full matrix.** The backstop is STALE: "
+            f"the window is horizon-bounded at the oldest run examined "
+            f"({scanned[-1].created_at or 'date unknown'}), not coverage-bounded, so "
+            f"suspects that landed before it are NOT reported. Fix the nightly — "
+            f"widening or narrowing this window would only make the report false."
+        )
+
+    persistent = persistently_red_jobs(scanned)
+    if persistent:
+        lines.append(
+            f"- **Persistently red** (failed in ≥{PERSISTENT_RED_MIN_RUNS} of "
+            f"{len(scanned)} examined): "
+            + ", ".join(f"`{job}` ×{n}" for job, n in persistent[:MAX_RENDERED_JOBS])
+            + (f", +{len(persistent) - MAX_RENDERED_JOBS} more"
+               if len(persistent) > MAX_RENDERED_JOBS else "")
+        )
+    else:
+        lines.append(
+            f"- **No job failed in ≥{PERSISTENT_RED_MIN_RUNS} of the examined runs** "
+            "— every failure seen is a one-off (flake, or a red that was fixed)."
+        )
+
+    lines += ["", "| run | date | GitHub conclusion | shards | bounds? | why |",
+              "| --- | --- | --- | --- | --- | --- |"]
+    for h in scanned:
+        lines.append(
+            f"| `{h.run_id}` | {h.created_at or '?'} | `{h.conclusion or 'unknown'}` "
+            f"| {h.shard_count} | {'yes' if h.bounds else 'no'} | {h.reason} |"
+        )
+    return "\n".join(lines) + "\n"
+
+
+# --------------------------------------------------------------------------- #
 # Issue rendering
 # --------------------------------------------------------------------------- #
 def _pr_ref(wc: WindowCommit) -> str:
@@ -356,8 +573,8 @@ def render_suspects(
             f"earlier has had more subsequent PRs re-run this crate's lanes on top of "
             f"it, so it is the less likely culprit — a prior, not an exoneration. Past "
             f"~{cap} candidates, bisect the window rather than read the list.\n"
-            f"> A suspect list this long means the last GREEN nightly is far behind "
-            f"HEAD — the window, not the bug, is what is large. The full set is "
+            f"> A suspect list this long means the last VERIFIED nightly backstop is far "
+            f"behind HEAD — the window, not the bug, is what is large. The full set is "
             f"unchanged in the correlation and reproducible with "
             f"`scripts/ci_selection_alarm.py --run-id <id> --head-sha <sha> --dry-run`."
         )
@@ -377,8 +594,8 @@ def render_issue(f: Finding, run_id: str, head_sha: str, repo: str | None) -> tu
         lead = (
             f"The nightly FULL-matrix backstop failed a job for crate "
             f"**`{f.crate}`**, and that crate was **selection-skipped** in one or "
-            f"more PRs that landed since the last green nightly. Per the skip "
-            f"invariant (research/change-based-test-selection.md §2) a test is "
+            f"more PRs that landed since the last VERIFIED nightly backstop. Per "
+            f"the skip invariant (research/change-based-test-selection.md §2) a test is "
             f"skipped only if *provably* no change could affect it — so this "
             f"intersection is prima-facie evidence the non-interference proof was "
             f"wrong for `{f.crate}`."
@@ -392,8 +609,9 @@ def render_issue(f: Finding, run_id: str, head_sha: str, repo: str | None) -> tu
             "The nightly FULL-matrix backstop failed a cross-crate/narrowed test "
             "shard whose job name does not encode the failing crate, and "
             "change-based selection NARROWED that shard (dropped some crates) in "
-            "PRs that landed since the last green nightly. The failing crate cannot "
-            "be named from the job alone — read the shard log below to identify it, "
+            "PRs that landed since the last VERIFIED nightly backstop. The failing "
+            "crate cannot be named from the job alone — read the shard log below to "
+            "identify it, "
             "then check whether it was among the skipped crates listed."
         )
 
@@ -403,7 +621,7 @@ def render_issue(f: Finding, run_id: str, head_sha: str, repo: str | None) -> tu
         f"{lead}\n\n"
         f"**Failed nightly job(s):**\n{jobs}\n\n"
         f"**Suspect landed PR(s)** — {len(f.suspect_prs)} total, selection-skipped "
-        f"since the last green nightly, newest-landed first:\n"
+        f"since the last VERIFIED nightly backstop, newest-landed first:\n"
         f"{prs}\n\n"
         f"**Nightly run:** {run_url} (head `{head_sha[:12]}`)\n\n"
         f"This is a DETECTOR signal, not a proof: a nightly failure can also be a "
@@ -444,14 +662,12 @@ def fetch_run_conclusion(run_id: str, repo: str) -> str:
     return out.strip()
 
 
-def gather_failed_jobs(run_id: str, repo: str, run_conclusion: str = "") -> list[str]:
-    """Names of the nightly run's jobs whose conclusion is a GENUINE failure (design:
-    the failed-job set to correlate). Uses `gh api --paginate` over the run's jobs.
+def fetch_run_jobs(run_id: str, repo: str) -> list[tuple[str, str]]:
+    """(job name, conclusion) for every job of `run_id`, via `gh api --paginate`.
 
-    `run_conclusion` is the RUN-level aggregate, used ONLY to decide whether an empty
-    result is anomalous — see STRICT_EMPTY_CONCLUSIONS. The per-JOB filter is
-    unchanged: cancelled siblings of a fail-fast matrix are not failures and never
-    enter the correlation."""
+    `--paginate`, never `--limit`: a nightly carries ~84 jobs and a truncated job list
+    would under-report both the failures (masking an alarm) and the shard coverage
+    (fabricating a window bound)."""
     out = _run(
         [
             "gh", "api", "--paginate",
@@ -459,13 +675,24 @@ def gather_failed_jobs(run_id: str, repo: str, run_conclusion: str = "") -> list
             "--jq", ".jobs[] | [.name, (.conclusion // \"\")] | @tsv",
         ]
     )
-    failed: list[str] = []
+    jobs: list[tuple[str, str]] = []
     for line in out.splitlines():
         if not line.strip():
             continue
         name, _, conclusion = line.partition("\t")
-        if conclusion.strip() in FAILED_CONCLUSIONS:
-            failed.append(name)
+        jobs.append((name, conclusion.strip()))
+    return jobs
+
+
+def gather_failed_jobs(run_id: str, repo: str, run_conclusion: str = "") -> list[str]:
+    """Names of the nightly run's jobs whose conclusion is a GENUINE failure (design:
+    the failed-job set to correlate).
+
+    `run_conclusion` is the RUN-level aggregate, used ONLY to decide whether an empty
+    result is anomalous — see STRICT_EMPTY_CONCLUSIONS. The per-JOB filter is
+    unchanged: cancelled siblings of a fail-fast matrix are not failures and never
+    enter the correlation."""
+    failed = [n for n, c in fetch_run_jobs(run_id, repo) if c in FAILED_CONCLUSIONS]
     # A run GitHub concluded `failure`/`timed_out` MUST contain a failed job, so an
     # empty set there is anomalous (jobs-API filter=latest re-run race, shape
     # surprise) and must be distinguished from "no correlation found" to prevent a
@@ -481,35 +708,90 @@ def gather_failed_jobs(run_id: str, repo: str, run_conclusion: str = "") -> list
     return failed
 
 
-def last_green_nightly_sha(repo: str, workflow_file: str, event: str) -> str | None:
-    """head_sha of the most recent SUCCESSFUL run of `workflow_file` for `event`
-    (the last green nightly). None if there is no prior green run."""
+def list_scheduled_runs(
+    repo: str, workflow_file: str, event: str, limit: int
+) -> list[tuple[str, str, str, str]]:
+    """(run_id, head_sha, run-level conclusion, created_at) for the most recent
+    COMPLETED `event` runs of `workflow_file`, newest first, at most `limit`.
+
+    NOTE the absent `status=success`: filtering the LIST by the run-level aggregate is
+    the #5025 bug itself. A run whose every test shard passed can still aggregate to
+    `cancelled` — one job cancelled at its timeout ceiling is enough, and ci.yml's
+    advisory cargo-mutants sweep runs at 120/360min caps — so the old query threw
+    away exactly the runs that could have bounded the window. `status=completed`
+    keeps every terminal run and lets classify_run judge it on its jobs."""
+    per_page = max(1, min(limit, 100))
     out = _run(
         [
             "gh", "api",
             f"repos/{repo}/actions/workflows/{workflow_file}/runs"
-            f"?event={event}&status=success&per_page=1",
-            "--jq", ".workflow_runs[0].head_sha // \"\"",
+            f"?event={event}&status=completed&per_page={per_page}",
+            "--jq",
+            ".workflow_runs[] | [(.id|tostring), .head_sha, (.conclusion // \"\"), "
+            "(.created_at // \"\")] | @tsv",
         ],
         check=True,
     )
-    sha = out.strip()
-    return sha or None
+    runs: list[tuple[str, str, str, str]] = []
+    for line in out.splitlines():
+        if not line.strip():
+            continue
+        parts = line.split("\t")
+        if len(parts) < 4:
+            # Fail-loud (invariant 1): a shape surprise here would silently shorten
+            # the scan, and a shortened scan reports a staler backstop than reality.
+            raise AlarmError(f"unexpected runs-API row (expected 4 fields): {line!r}")
+        runs.append(tuple(p.strip() for p in parts[:4]))  # type: ignore[arg-type]
+    return runs[:limit]
+
+
+def find_window_bound(
+    repo: str, workflow_file: str, event: str, limit: int = BOUND_SCAN_RUNS
+) -> tuple[RunHealth | None, list[RunHealth]]:
+    """Scan recent scheduled runs newest-first for one that may bound the correlation
+    window (classify_run). Returns (bound or None, every run examined).
+
+    Stops at the FIRST run that qualifies — that is the tightest honest bound, and it
+    keeps the cost at one job-list call per rejected run. Every examined run is
+    returned either way so render_nightly_health can state what was rejected and
+    why; a scan that reported only its answer could not distinguish "the backstop is
+    healthy and recent" from "the backstop has been red for a month"."""
+    if not repo:
+        raise AlarmError(
+            "--repo (or $GITHUB_REPOSITORY) required to scan the scheduled runs"
+        )
+    scanned: list[RunHealth] = []
+    for run_id, head_sha, conclusion, created_at in list_scheduled_runs(
+        repo, workflow_file, event, limit
+    ):
+        health = classify_run(
+            run_id, head_sha, conclusion, created_at, fetch_run_jobs(run_id, repo)
+        )
+        scanned.append(health)
+        if health.bounds:
+            return health, scanned
+    return None, scanned
 
 
 _PR_RE = re.compile(r"\(#(\d+)\)\s*$")
 
 
 def window_commits(
-    base_sha: str | None, head_sha: str, lookback_hours: int, repo_root: str
+    base_sha: str | None, head_sha: str, lookback_hours: int, repo_root: str,
+    since: str | None = None,
 ) -> list[tuple[str, int | None]]:
     """(sha, pr_number) for each landed commit in the window, newest first.
 
-    Window = (last-green-nightly, HEAD] when base_sha is known; otherwise a
-    time-bounded fallback (`--since`) so a cold start (no prior green nightly) is
-    handled without a spurious loud failure."""
+    Window = (last VERIFIED nightly backstop, HEAD] when base_sha is known. Otherwise
+    a time bound: `since` (the oldest scheduled run the bound scan examined — the
+    HORIZON of what we looked at, used when no examined run verified the matrix), or
+    failing that `lookback_hours` for a true cold start with no scheduled run at all.
+    Both fallbacks are disclosed by the caller; neither is ever chosen over a real
+    coverage bound, because a shorter window under-reports suspects."""
     if base_sha:
         rng = [f"{base_sha}..{head_sha}"]
+    elif since:
+        rng = [head_sha, f"--since={since}"]
     else:
         rng = [head_sha, f"--since={lookback_hours} hours ago"]
     out = _run(
@@ -634,8 +916,10 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description="Nightly change-based-selection bug alarm (design §6.1)."
     )
-    p.add_argument("--run-id", required=True, help="the failed nightly CI run id")
-    p.add_argument("--head-sha", required=True, help="the nightly run's head SHA")
+    p.add_argument("--run-id", help="the failed nightly CI run id "
+                                    "(required unless --nightly-health)")
+    p.add_argument("--head-sha", help="the nightly run's head SHA "
+                                      "(required unless --nightly-health)")
     p.add_argument("--run-conclusion", default="",
                    help="the nightly run's RUN-level conclusion. NOT an admission "
                         "filter (#4965) — it only decides whether an EMPTY "
@@ -645,17 +929,28 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     p.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY"),
                    help="owner/name (default $GITHUB_REPOSITORY)")
     p.add_argument("--event", default="schedule",
-                   help="the nightly trigger event to look up the last green run by")
+                   help="the nightly trigger event whose runs bound the window")
     p.add_argument("--workflow-file", default="ci.yml",
-                   help="workflow file whose last green run bounds the window")
+                   help="workflow file whose runs bound the window")
     p.add_argument("--lookback-hours", type=int, default=25,
-                   help="cold-start fallback window when no prior green nightly exists")
+                   help="cold-start fallback window when NO completed scheduled run "
+                        "exists at all (never used to shorten a real window)")
+    p.add_argument("--bound-scan-runs", type=int, default=BOUND_SCAN_RUNS,
+                   help="how many recent completed scheduled runs to examine for a "
+                        "window bound / for the nightly health report (#5025)")
+    p.add_argument("--nightly-health", action="store_true",
+                   help="report the backstop's own health (which recent scheduled "
+                        "runs verified the full matrix, which jobs are persistently "
+                        "red) and exit; no correlation, no issues")
     p.add_argument("--repo-root", help="repo root (default: git toplevel)")
     p.add_argument("--dry-run", action="store_true", help="print findings; no gh writes")
     # Hermetic inputs (tests / offline):
     p.add_argument("--failed-jobs-file", help="hermetic: one failed job name per line")
     p.add_argument("--metadata-file", help="hermetic: cargo metadata JSON snapshot")
-    return p.parse_args(argv)
+    args = p.parse_args(argv)
+    if not args.nightly_health and (not args.run_id or not args.head_sha):
+        p.error("--run-id and --head-sha are required unless --nightly-health is given")
+    return args
 
 
 def _resolve_repo_root(explicit: str | None) -> str:
@@ -665,6 +960,60 @@ def _resolve_repo_root(explicit: str | None) -> str:
         return _run(["git", "rev-parse", "--show-toplevel"]).strip()
     except AlarmError:
         return str(REPO_ROOT)
+
+
+def append_step_summary(text: str) -> None:
+    """Best-effort append to $GITHUB_STEP_SUMMARY (absent locally; never fatal)."""
+    summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not summary:
+        return
+    try:
+        with open(summary, "a") as fh:
+            fh.write(text if text.endswith("\n") else text + "\n")
+    except OSError:
+        pass
+
+
+def resolve_window_bound(
+    args: argparse.Namespace, repo: str
+) -> tuple[str | None, str | None]:
+    """Scan the recent scheduled runs, STATE the backstop's health, and return the
+    (base_sha, since) pair that bounds the correlation window.
+
+    Three outcomes, all disclosed — never a silent choice:
+      * a run VERIFIED the full matrix  => (its head_sha, None): a real coverage bound;
+      * runs exist, none verified       => (None, oldest examined run's created_at) and
+        a ::warning::. The backstop is stale; the window is the horizon we examined,
+        which is a TRUE report of that staleness. #5025's ⚠️ forbids the alternative
+        (shorten it and the report becomes a lie);
+      * no completed scheduled run      => (None, None) and the cold-start ::notice::,
+        the pre-existing --lookback-hours fallback.
+    """
+    if not repo:
+        raise AlarmError("--repo (or $GITHUB_REPOSITORY) required to bound the window")
+    bound, scanned = find_window_bound(
+        repo, args.workflow_file, args.event, args.bound_scan_runs
+    )
+    report = render_nightly_health(scanned, bound)
+    print(report)
+    append_step_summary(report)
+
+    if bound is not None:
+        return bound.head_sha, None
+    if scanned:
+        oldest = scanned[-1].created_at or None
+        print(
+            f"::warning::selection-alarm: none of the {len(scanned)} scheduled "
+            f"{args.workflow_file} run(s) examined verified the full matrix — the "
+            "backstop is STALE. The correlation window is HORIZON-bounded at "
+            f"{oldest or f'{args.lookback_hours}h ago'}, not coverage-bounded: "
+            "suspects that landed earlier are NOT reported, and no suspect list here "
+            "should be read as complete. Fix the nightly (see the health table above)."
+        )
+        return None, oldest
+    print("::notice::selection-alarm: no completed scheduled run found; using "
+          f"{args.lookback_hours}h cold-start fallback window")
+    return None, None
 
 
 def run_alarm(args: argparse.Namespace) -> tuple[list[Finding], list[str], str]:
@@ -724,14 +1073,14 @@ def run_alarm(args: argparse.Namespace) -> tuple[list[Finding], list[str], str]:
         map_file if os.path.exists(map_file) else None
     )
 
-    # Window of landed commits since the last green nightly (or time fallback).
-    base = None if args.failed_jobs_file else last_green_nightly_sha(
-        repo, args.workflow_file, args.event
-    )
-    if base is None and not args.failed_jobs_file:
-        print("::notice::selection-alarm: no prior green nightly found; using "
-              f"{args.lookback_hours}h cold-start fallback window")
-    commits = window_commits(base, args.head_sha, args.lookback_hours, repo_root)
+    # Window of landed commits since the last VERIFIED nightly backstop (#5025), or a
+    # disclosed time fallback. The hermetic path has no runs API to scan.
+    base: str | None = None
+    since: str | None = None
+    if not args.failed_jobs_file:
+        base, since = resolve_window_bound(args, repo)
+    commits = window_commits(base, args.head_sha, args.lookback_hours, repo_root,
+                             since=since)
     window, members, replay_errors = build_window(
         commits, meta, map_entries, ci_select, repo_root
     )
@@ -742,6 +1091,22 @@ def run_alarm(args: argparse.Namespace) -> tuple[list[Finding], list[str], str]:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
+    if args.nightly_health:
+        # REPORT-ONLY (#5025 acceptance item 1). Answers "is the full matrix actually
+        # green, and if not which jobs are persistently red?" without correlating or
+        # filing anything, so the question can be re-asked on demand instead of being
+        # answered once in an issue body that goes stale the next night.
+        try:
+            bound, scanned = find_window_bound(
+                args.repo or "", args.workflow_file, args.event, args.bound_scan_runs
+            )
+        except AlarmError as exc:
+            print(f"::error::selection-alarm infrastructure error: {exc}", file=sys.stderr)
+            return 1
+        report = render_nightly_health(scanned, bound)
+        print(report)
+        append_step_summary(report)
+        return 0
     try:
         findings, replay_errors, repo = run_alarm(args)
     except AlarmError as exc:
@@ -780,14 +1145,8 @@ def main(argv: list[str] | None = None) -> int:
             filed += 1
         if not args.dry_run:
             print(f"selection-alarm: done — {filed} filed, {skipped} already open.")
-            summary = os.environ.get("GITHUB_STEP_SUMMARY")
-            if summary:
-                try:
-                    with open(summary, "a") as fh:
-                        fh.write(f"### selection-alarm\n\n- filed: {filed}\n"
-                                 f"- skipped (already open): {skipped}\n")
-                except OSError:
-                    pass
+            append_step_summary(f"### selection-alarm\n\n- filed: {filed}\n"
+                                f"- skipped (already open): {skipped}\n")
 
     # FAIL-LOUD (invariant 1): findings we COULD compute are filed above; if any
     # landed commit could not be replayed, red the run so the gap is investigated.

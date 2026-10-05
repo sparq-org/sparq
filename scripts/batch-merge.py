@@ -110,8 +110,10 @@ PROG = "batch-merge"
 # CI recomputes the class from its real diff, so this can never skip a required check.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 try:
-    from ci_select import classify_change
+    from ci_select import _INERT_CLASSES, classify_change
 except Exception:  # defensive only; --self-test pins the working import path red/green
+    _INERT_CLASSES = ()
+
     def classify_change(_paths):
         return "engine"
 
@@ -233,15 +235,17 @@ def crate_of(pr: dict) -> str:
 def constituent_class(pr: dict) -> str:
     """Which omnibus class a constituent belongs to (issue #3433).
 
-    SLIM iff ci_select classifies its changed paths docs-only or orchestration-only
-    (the audited-inert surfaces); ENGINE otherwise — including `mixed`, `engine`, and
-    an EMPTY/unfetched file list (fail-closed: an unknown diff rides the heavy class,
-    which is exactly the pre-partition behaviour)."""
+    SLIM iff ci_select classifies its changed paths onto one of the audited-inert
+    classes (`_INERT_CLASSES` — the SAME tuple the merge-group `changes` pre-jobs
+    case on, imported rather than re-spelled so the batcher and the CI lanes can
+    never disagree about what "inert" means); ENGINE otherwise — including `mixed`,
+    `engine`, and an EMPTY/unfetched file list (fail-closed: an unknown diff rides
+    the heavy class, which is exactly the pre-partition behaviour)."""
     files = [f for f in pr.get("files", []) if f]
     if not files:
         return BATCH_CLASS_ENGINE
     return (BATCH_CLASS_SLIM
-            if classify_change(files) in ("docs-only", "orchestration-only")
+            if classify_change(files) in _INERT_CLASSES
             else BATCH_CLASS_ENGINE)
 
 
@@ -764,6 +768,14 @@ def self_test() -> int:
     check("orchestration-only diff classifies slim",
           constituent_class(_worker(1, 1, files=("orchestration/routing.toml",
                                                  "scripts/batch-merge.py"))), "slim")
+    # [OPUS-5] sq-g25hr: the two classes added with the deploy fast lane.
+    check("deploy-only diff classifies slim",
+          constituent_class(_worker(1, 1, files=("deploy/aws/sparq-server.yaml",
+                                                 ".github/workflows/deploy-lint.yml"))),
+          "slim")
+    check("inert-mixed diff classifies slim",
+          constituent_class(_worker(1, 1, files=("deploy/gcp/README.md",
+                                                 "docs/branch-protection.md"))), "slim")
     check("crate diff classifies engine",
           constituent_class(_worker(1, 1, files=("crates/sparq-core/src/lib.rs",))),
           "engine")

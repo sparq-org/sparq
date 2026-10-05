@@ -69,8 +69,10 @@ env:
   NARGO_VERSION: "1.0.0-beta.21"
   # The released face repo under verification. Pinned by TAG, never a branch — a floating
   # ref would silently change WHAT is being verified while the check stayed green.
+  # Keep in lock-step with the default in zk/xpath/scripts/run_differential_harness.sh:
+  # a green run here is evidence about THIS tag and no other.
   XPATH_GIT: "https://github.com/sparq-org/noir_XPath"
-  XPATH_TAG: "v0.2.0"
+  XPATH_TAG: "v0.3.0"
   # Pinned bootstrap source for noirup (supply-chain: see the long rationale in
   # zk-toolchain.yml — the upstream `install` helper re-fetches noirup from a moving
   # `releases/latest`, which silently defeats the pin, so the binary is taken from a

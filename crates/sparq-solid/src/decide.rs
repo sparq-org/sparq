@@ -20,7 +20,7 @@
 //! This is the authorization-**decision** surface only — it does not authenticate and makes
 //! no cryptographic claim (a `Session` is a caller-asserted claim; see the crate README).
 //!
-//! [API stability & deprecation policy]: https://github.com/jeswr/sparq/blob/main/docs/api-stability.md
+//! [API stability & deprecation policy]: https://github.com/sparq-org/sparq/blob/main/docs/api-stability.md
 //!
 //! # Security posture — fail-CLOSED, never fail-OPEN (FR-6, sq-snopa.2)
 //!
@@ -68,11 +68,34 @@ impl AclScope {
 /// The typed fail-closed load/error contract for a decision (FR-6, sq-snopa.2).
 ///
 /// Carries over the hard-won fail-OPEN lessons: it lets a resource server distinguish a
-/// *definitive* deny (map to **401/403**) from a *retryable* one (map to **503**) —
+/// *definitive* deny (map to **403**) from a *retryable* one (map to **503**) —
 /// **without ever failing open**. The [`WacDecision::allow`] flag is `false` for every
 /// status except [`AclStatus::Resolved`], and `Resolved` only ever carries the verdict
 /// the materialized auth view actually supports. A server that ignores `status` entirely
 /// still gets the correct allow/deny; `status` only refines the *HTTP code*.
+///
+/// # The uniform **403**: a known limitation, NOT a permitted stricter choice (sq-qonip)
+///
+/// `AclStatus` deliberately carries **no** authentication state — this crate takes an
+/// already-resolved [`crate::Session`] and answers a graph-set question, leaving the
+/// 401-vs-403 split to the HTTP shell (`research/sparq-solid-scope.md` § *Scope boundary —
+/// what stays in PSS no matter what*). The shipped shell (`sparq-server`'s `solid-authz`
+/// `deny_status_code`) accordingly maps every definitive deny to a **403**, whether or not
+/// the requester presented a WebID.
+///
+/// That uniform 403 is fine for its current caller, `POST /authz/decide`, which *reports* a
+/// decision rather than serving a protected resource (the API caller's own authentication is
+/// gated separately and does answer 401 + `WWW-Authenticate`). It is **not** conformant on an
+/// LDP resource-serving path: the [Solid Protocol](https://solidproject.org/TR/protocol)
+/// § *Authentication* requires a server to answer a request that lacks the credentials a
+/// protected resource needs with **401** (unless 404 is preferred for security reasons), and
+/// Solid-OIDC requires the accompanying `WWW-Authenticate` challenge so the client can start
+/// authentication. A resource server built on this crate MUST add that lane from its own
+/// authentication state; reusing `deny_status_code` unchanged there is a known
+/// non-conformance, not a stricter-but-permitted alternative.
+///
+/// Fail-closed is orthogonal and unaffected: the HTTP code only ever refines a deny that is
+/// already `allow == false`, so withholding the challenge cannot widen a deny into a grant.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AclStatus {
     /// A governing ACL was discovered and the auth view is loaded: the decision is
@@ -81,8 +104,9 @@ pub enum AclStatus {
     Resolved,
     /// No governing ACL exists anywhere up the container chain (the resource is
     /// **un-protected by any discoverable ACL**). Fail-closed ⇒ `allow == false`. A
-    /// Solid server treats this as a definitive deny — map to **403** (or **401** for an
-    /// anonymous principal that might succeed once authenticated).
+    /// Solid server treats this as a definitive deny — the shipped shell maps it to **403**
+    /// for every requester, though an LDP resource server owes an *anonymous* one the
+    /// Solid-required **401** challenge instead (see the enum docs).
     NoAcl,
     /// A governing ACL was discovered, but the authorization view is **not loaded**
     /// (`materialize_wac` / `materialize_acp` has not been run, so no verdict can be
@@ -98,10 +122,12 @@ pub enum AclStatus {
 
 impl AclStatus {
     /// Whether this status denotes a **retryable** (operational/transient) condition a
-    /// server should map to **503**, rather than a definitive permission outcome
-    /// (401/403). Convenience for the resource-server status mapping; `Unloaded` and
-    /// `Transient` are retryable, `Resolved` and `NoAcl` are definitive. Fail-closed is
-    /// orthogonal — every non-`Resolved` status still carries `allow == false`.
+    /// server should map to **503**, rather than a definitive permission outcome (the
+    /// shipped shell's **403**; see the enum docs for the **401** an LDP resource server
+    /// owes an anonymous requester instead). Convenience for the resource-server status
+    /// mapping; `Unloaded` and `Transient` are retryable, `Resolved` and `NoAcl` are
+    /// definitive. Fail-closed is orthogonal — every non-`Resolved` status still carries
+    /// `allow == false`.
     pub fn is_retryable(self) -> bool {
         matches!(self, AclStatus::Unloaded | AclStatus::Transient)
     }
@@ -133,7 +159,7 @@ pub struct EffectiveAcl {
 /// **API tier-1 (proposed-stable)** — the return type of the proposed semver-stable
 /// per-resource decision surface; see the module docs and the [API stability policy].
 ///
-/// [API stability policy]: https://github.com/jeswr/sparq/blob/main/docs/api-stability.md
+/// [API stability policy]: https://github.com/sparq-org/sparq/blob/main/docs/api-stability.md
 ///
 /// # Examples
 ///

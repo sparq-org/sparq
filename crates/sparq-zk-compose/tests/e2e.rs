@@ -2830,6 +2830,114 @@ fn filter_same_slot_in_two_patterns_needs_one_edge() {
         .expect("same-slot-in-both-patterns needs only the one gating edge");
 }
 
+// --- WITHIN-pattern repeated variable (`{ ?v <p> ?v }`) -------------------
+//
+// [OPUS-5] #5240 (follow-up raised while fixing audit L-1 / sq-q9r5e). The
+// cross-pattern analogues of "a variable used twice must bind ONE term" are
+// covered — `recheck`/`join_obligations` for the disclosed path and `bind_joins`
+// for the hidden path — but both iterate pattern PAIRS (`i < j`) over per-pattern
+// variable SETS, so a variable repeated at two slots of the SAME pattern is
+// invisible to them. `scan_matches_pattern` only compares per-slot const-ness and
+// the constant encodings, and the scan circuit binds only the CONSTANT slots to
+// `pattern_const_enc`, so nothing made a disclosed row satisfy `row[i] == row[j]`.
+//
+// The witness below was empirically confirmed reachable against
+// `prefilter_manifest_structure` (the same method used for L-1) before the gate
+// landed: the `(alice, knows, bob)` manifest was ACCEPTED under the query
+// `{ ?v <knows> ?v }`. NOT externally audited (sq-qhy4).
+
+/// A one-triple credential `<subject> <http://ex/knows> <object>` for the
+/// within-pattern slot-equality witnesses.
+fn knows_graph(subject: &str, object: &str) -> Vec<Triple> {
+    vec![Triple::new(
+        NamedOrBlankNode::NamedNode(iri(subject)),
+        iri("http://ex/knows"),
+        Term::NamedNode(iri(object)),
+    )]
+}
+
+/// The self-loop query: `?v` occupies BOTH the subject and the object slot of the
+/// single BGP pattern, so any disclosed row answering it must have
+/// `row[0] == row[2]`.
+const SELF_LOOP_QUERY: &str = "SELECT ?v WHERE { ?v <http://ex/knows> ?v }";
+
+/// Build the flat self-loop manifest over a single `<knows>` scan (no FILTER, no
+/// joins) so the only gate that can decide it is the within-pattern slot-equality
+/// check.
+fn self_loop_manifest(graph: &[Triple]) -> ProofManifest {
+    let scan = scan_inputs_for(graph, "http://ex/knows");
+    let mut m = ProofManifest {
+        fully_hidden_revocation: None,
+        r#type: "urn:sparq:zk:ProofManifest".into(),
+        query: SELF_LOOP_QUERY.into(),
+        issuers: vec![],
+        key_set: vec![],
+        commitment_attestations: vec![],
+        attributions: vec![vec![0]],
+        pattern_scans: vec![],
+        join_obligations: vec![],
+        entailment_regime: EntailmentRegime::Simple,
+        derivation_steps: vec![],
+        binding: BindingMode::Challenge { challenge: FieldHex("0x2a".into()) },
+        revocation: Some(fixture_revocation()),
+        status_snapshots: vec![fixture_snapshot(false)],
+        sub_proofs: vec![SubProof { inputs: scan, proof_hex: String::new() }],
+        binding_edges: vec![],
+        join_edges: vec![],
+        hidden_revocation: None,
+        hidden_issuer_attestations: vec![],
+        holder_pok_proofs: vec![],
+        holder_set_proofs: vec![],
+    };
+    attest_all(&mut m, &test_issuer_sk(1), salt_from_bytes(&[9u8; 32]));
+    m
+}
+
+/// #5240 FORGE: a scan row `(alice, knows, bob)` with `alice != bob` presented as
+/// answering `{ ?v <http://ex/knows> ?v }`. The relying party would read a
+/// solution binding `?v` to two DIFFERENT terms at once — a row that does not
+/// satisfy the pattern it is disclosed under => REJECT.
+///
+/// RED before the #5240 gate: `prefilter_manifest_structure` returned `Ok` (the
+/// empirical witness that made this a real gap rather than a deliberate omission).
+#[test]
+fn repeated_pattern_var_rejects_a_row_whose_slots_disagree() {
+    let m = self_loop_manifest(&knows_graph("http://ex/alice", "http://ex/bob"));
+    match prefilter_manifest_structure(&m, &trusted_k(&test_issuer_sk(1)), &fresh_policy()) {
+        Err(CheckError::RepeatedSlotMismatch {
+            pattern: 0,
+            proof: 0,
+            row: 0,
+            ref variable,
+            slots: (0, 2),
+        }) if variable == "v" => {}
+        other => panic!(
+            "#5240: a disclosed row whose two ?v slots differ must not answer \
+             {{ ?v <knows> ?v }}; expected RepeatedSlotMismatch, got {other:?}"
+        ),
+    }
+}
+
+/// #5240 positive control: the SAME shape with a genuine self-loop row
+/// `(alice, knows, alice)` must still VERIFY — the new gate must not reject an
+/// honest repeated-variable manifest.
+#[test]
+fn repeated_pattern_var_accepts_a_genuine_self_loop_row() {
+    let m = self_loop_manifest(&knows_graph("http://ex/alice", "http://ex/alice"));
+    prefilter_manifest_structure(&m, &trusted_k(&test_issuer_sk(1)), &fresh_policy())
+        .expect("a genuine self-loop row satisfies { ?v <knows> ?v }");
+}
+
+/// #5240 scope control: a pattern with NO repeated variable is untouched by the
+/// new gate — `(alice, knows, bob)` legitimately answers `{ ?s <knows> ?o }`.
+#[test]
+fn distinct_pattern_vars_are_unaffected_by_the_repeated_slot_gate() {
+    let mut m = self_loop_manifest(&knows_graph("http://ex/alice", "http://ex/bob"));
+    m.query = "SELECT ?s ?o WHERE { ?s <http://ex/knows> ?o }".into();
+    prefilter_manifest_structure(&m, &trusted_k(&test_issuer_sk(1)), &fresh_policy())
+        .expect("distinct subject/object variables impose no slot equality");
+}
+
 // --- explicit pattern→scan mapping (`manifest.pattern_scans`) -------------
 //
 // [OPUS-5] sq-q9r5e follow-up. The sq-q9r5e fix closed audit L-1 by demanding

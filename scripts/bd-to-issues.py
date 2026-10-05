@@ -3,17 +3,28 @@
 """bd-to-issues.py — one-time, idempotent migration of open bd beads into GitHub issues.
 
 DEFAULT is --dry-run: it parses `bd export`, computes the issue payloads + label mapping + the
-dependency edges, and prints a summary WITHOUT creating anything. `--apply` does the real two-pass
-(create issues, then link blocked-by dependencies) and writes the `sq-… ↔ #NN` map — held for the
-maintainer's go-ahead because it bulk-creates hundreds of issues.
+dependency edges, and prints a summary WITHOUT creating anything. `--apply` does the real
+three-pass run (create issues, then stamp the `Blocked-by:`/`Parent:` body markers, then reconcile
+labels — see apply_migration) and writes the `sq-… ↔ #NN` map — held for the maintainer's go-ahead
+because it bulk-creates hundreds of issues.
 
 Label mapping (bd -> issue):
   priority 0..4            -> priority:P{n}
   existing labels          -> passed through verbatim (area:<crate>=package, needs:*, kind:*, from:*)
   issue_type / kind:       -> role:<r> (feature/bug->impl, docs->docs, spike->research, chore->ci, ...)
   every migrated issue     -> MIGRATION_LABEL (authenticates the `<!-- bd-id:… -->` body marker)
-  dependency edges         -> `Blocked-by: #NN` body markers (resolved to native deps in --apply)
+  dependency edges         -> `Blocked-by: #NN` body markers ONLY (see NATIVE DEPENDENCIES below)
 The bead id (`sq-…`) is preserved in the issue title so existing PR-title tokens still resolve.
+
+NATIVE DEPENDENCIES — this script does NOT write them, in any mode. Every edge it emits is a
+`Blocked-by:` / `Parent:` body marker (pass 2); nothing here calls GitHub's issue-dependency or
+sub-issue API, so a migrated bd blocker edge does not appear in the native dependency UI. Dispatch
+is unaffected: `ready-issues.py::open_blocker_count` holds an issue iff EITHER channel reports an
+open blocker, so a marker-only edge still blocks. The gap is one-directional and is a VISIBILITY
+one: a maintainer reading the native graph cannot see the bd-derived edges. Mirroring the markers
+into native edges is a separate, still-undecided change (issue #4616); the only native reader
+in this file is `--verify`, which uses the count-only summary as context and never as evidence that
+a specific marker landed (see fetch_native_blockers / verify_migration).
 
 `--verify` is the read-only post-migration reconcile (see verify_migration): counts, duplicate
 bd-id mappings, and whether pass 2's dependency markers actually landed. It creates and edits
@@ -302,7 +313,7 @@ def plan(issues, edges, include_closed=False):
     return open_ids, blockers, parents
 
 
-# --- idempotent two-pass --apply (review C2) -----------------------------------------------------
+# --- idempotent multi-pass --apply (review C2) ---------------------------------------------------
 def _run(args, check=True):
     return subprocess.run(args, capture_output=True, text=True, check=check)
 

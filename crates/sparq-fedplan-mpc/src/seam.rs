@@ -5,11 +5,13 @@
 //! input/output types wired to the actual upstream crates — with **none of the privacy-bearing
 //! logic**. Phase 2 (sq-fix4) makes the **source-selection adapter** real (it lives in
 //! [`crate::selection`]). Phase 3 (sq-i1wh2) makes the **disclosed/hidden routing pass** real
-//! (it lives in [`crate::routing`]). Phase 4 stays a deferred stub here: a function with its real
-//! signature returning `Err(`[`SeamError::Deferred`]`)` naming the phase and the gate it waits on.
-//! The stub **compiles and is callable**, performs NO MPC, reveals NOTHING, and never panics (no
-//! `todo!()` / `unimplemented!()`): a caller gets an honest typed "deferred" error, not a crash
-//! and not a fabricated result.
+//! (it lives in [`crate::routing`]). Phase 4 (sq-pwr.2) makes the **leakage-envelope assembly +
+//! dual ratification** real (it lives in [`crate::envelope`]). Phase 5 (sq-1fo4) lands only its
+//! *canonicalisation* half in [`crate::binding`]; its **soundness** half stays a deferred stub: a
+//! function with its real signature returning `Err(`[`SeamError::Deferred`]`)` naming the phase
+//! and the gates it waits on. The stub **compiles and is callable**, performs NO MPC, reveals
+//! NOTHING, and never panics (no `todo!()` / `unimplemented!()`): a caller gets an honest typed
+//! "deferred" error, not a crash and not a fabricated result.
 //!
 //! The phases (from the design record's phased plan):
 //! * [`select_private_sources`](crate::select_private_sources) — Phase 2 (**implemented**, sq-fix4):
@@ -22,12 +24,17 @@
 //!   [`ratify_envelope`](crate::ratify_envelope) — Phase 4 (**implemented**, sq-pwr.2): collect
 //!   what the chosen routing reveals into a declared [`LeakageEnvelope`], then the holder
 //!   fail-closed + verifier dual ratification. See [`crate::envelope`].
+//! * [`commit_plan`](crate::commit_plan) + [`revalidate_plan`](crate::revalidate_plan) — Phase 5
+//!   (**canonicalisation half only**, sq-1fo4): a deterministic, domain-separated commitment to
+//!   the produced plan and a fail-closed re-validation of a recomputed plan against it. The
+//!   soundness half, [`bind_plan_to_proof`](crate::bind_plan_to_proof), is **deferred**. See
+//!   [`crate::binding`].
 //!
 //! NONE of these makes a soundness/privacy claim; the privacy-bearing posture is research-grade
 //! and audit-gated (sq-9hrn / sq-qhy4). See the crate `README.md` and
 //! `research/mpc-untrusted-planner-routing-design.md`.
 //!
-//! [OPUS-4.8] sq-2q1x / sq-fix4 / sq-i1wh2 / sq-pwr.2.
+//! [OPUS-4.8] sq-2q1x / sq-fix4 / sq-i1wh2 / sq-pwr.2. `[OPUS-5]` sq-1fo4.
 
 use std::collections::BTreeSet;
 
@@ -51,6 +58,10 @@ pub enum SeamPhase {
     /// Phase 6 — the result-aware source-combination prune
     /// ([`prune_source_combinations`](crate::prune_source_combinations)).
     SourceCombination,
+    /// Phase 5 — the untrusted-plan binding + soundness re-validation
+    /// ([`commit_plan`](crate::commit_plan) / [`revalidate_plan`](crate::revalidate_plan) /
+    /// the still-deferred [`bind_plan_to_proof`](crate::bind_plan_to_proof)). `[OPUS-5]` sq-1fo4.
+    PlanBinding,
 }
 
 impl SeamPhase {
@@ -61,15 +72,17 @@ impl SeamPhase {
             SeamPhase::Routing => "disclosed/hidden routing partition (Phase 3)",
             SeamPhase::LeakageEnvelope => "leakage-envelope assembly + ratification (Phase 4)",
             SeamPhase::SourceCombination => "result-aware source-combination prune (Phase 6)",
+            SeamPhase::PlanBinding => "untrusted-plan binding + soundness re-validation (Phase 5)",
         }
     }
 }
 
 /// The seam's error type. [`SeamError::Deferred`] is the honest typed channel a *deferred* phase
 /// stub returns (it carries the [`SeamPhase`] and the `gated_on` issues/audits, so a caller learns
-/// WHY the phase is unavailable rather than hitting a panic or a fabricated result). No phase is
-/// deferred today, but the variant is retained for a future gated phase (e.g. the untrusted-plan
-/// soundness re-validation, Phase 5). [`SeamError::DescriptorMismatch`] is the *real* error variant
+/// WHY the phase is unavailable rather than hitting a panic or a fabricated result). It is
+/// returned today by [`bind_plan_to_proof`](crate::bind_plan_to_proof) — Phase 5's soundness half,
+/// which stays gated on the collaborative proof plus the sq-qhy4 / sq-9hrn audits.
+/// [`SeamError::DescriptorMismatch`] is the *real* error variant
 /// — the implemented source-selection adapter (Phase 2), the routing pass (Phase 3), and the
 /// envelope assembly (Phase 4) all return it on an ambiguous / inconsistent privacy declaration or
 /// a routing/operator mismatch. (The enum is `#[non_exhaustive]` so later phases can add variants

@@ -17,7 +17,7 @@
 <urn:cert:qtsp> a trustx:Certification ;
     trustx:certifies      <did:web:qtsp.example> ;
     trustx:underFramework trustx:eIDAS2 ;
-    trustx:scope          trustx:AnyServiceScope ;
+    trustx:certificationScope trustx:AnyServiceScope ;
     trustx:validFrom      "2025-01-01T00:00:00Z"^^xsd:dateTime ;
     trustx:validUntil     "2026-06-01T00:00:00Z"^^xsd:dateTime ;
     trustx:coveredBy      <urn:status:cert> .

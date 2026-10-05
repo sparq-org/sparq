@@ -1324,6 +1324,20 @@ class TestAreaClassifierCronSeam(unittest.TestCase):
         self.assertIn("LEFT", run,
                       "the residue report must extract the classifier's LEFT lines")
 
+    def test_the_budget_deferred_writes_reach_the_run_summary_too(self):
+        # [OPUS-5] #5448. The sweep bounds its `gh issue edit` volume per run to stay
+        # under GitHub's secondary limit on content-mutating requests. That cap is only
+        # acceptable because it is REPORTED: a tick that deferred 300 issues and a tick
+        # with nothing to do look identical otherwise, which is exactly the silence
+        # #3816 added this report to end. The classifier prints `DEFERRED` lines
+        # (scripts/tests/test_triage_area.py::TestWriteBudget pins that half); this step
+        # is what carries them to a human.
+        run = self._run_blocks()
+        self.assertIn("DEFERRED", run,
+                      "the per-run write budget's deferrals never reach the run "
+                      "summary — the cap is silent, and a deferred backlog is "
+                      "indistinguishable from an empty one")
+
     def test_this_lane_never_runs_on_a_pull_request(self):
         # It holds `issues: write` and executes the checked-out tree. A `pull_request`
         # trigger would run PR-authored code with a write token; `pull_request_target`
@@ -1763,6 +1777,59 @@ class TestNonReservingCrossCuttingPartitions(unittest.TestCase):
                       "5%", "3%", "100%", "57.1%", "crate-region-parallelism.md"):
             self.assertIn(token, basis,
                           f"the measured basis for the exemption no longer states {token}")
+
+    # -- sparq#4929: THE SECOND OCCUPANCY LEG ----------------------------------------------
+    def test_the_exemption_is_offered_to_the_registry_on_both_channels(self):
+        """sparq#4929 — the CLAIM leg must be able to ASK, not to re-type `{"ci", "docs"}`.
+
+        #4928 landed the exemption on the PLAN leg (everything above). #4929 reports that the
+        registry has a SECOND occupancy leg — `dispatch-claim.py::busy_packages_of_pulls`, applied
+        at `filter_busy_area_items` on assemble and at `revalidate_items_against_live_pulls` at
+        claim time — which unions a busy-area set from open worker PRs with no exemption, so the
+        rows this engine now offers are re-deferred one layer down.
+
+        The registry reads sparq on two channels and they must not disagree, exactly as #4365's
+        fixture pins for the resolver: `dispatch.yml`'s readiness step `load_dispatch`es
+        `scripts/dispatch-plan.py` and calls the module, while a leg holding no planner can only
+        read `--dump-partitions` — a different code path (argv parsing, JSON encoding, a fresh
+        process with its own tree scan). Both are pinned to the ONE table in
+        `orchestration/registry-contract.toml`.
+
+        NOTHING HERE OBSERVES THE REGISTRY. This is the sparq half; green does not mean
+        `busy_packages_of_pulls` has changed.
+        """
+        contract = tomllib.loads(
+            (REPO_ROOT / "orchestration" / "registry-contract.toml").read_text(encoding="utf-8")
+        )["non_reserving_partitions"]
+        fixture = contract["parity_fixture"]
+        # Coverage, not just agreement: a silently dropped row would leave this green over a
+        # shrinking contract. `ci-fragments` is the single row an exact-string `key in {"ci",
+        # "docs"}` mirror gets WRONG (it resolves into `ci`), and `deps`/the crate areas are the
+        # safety half #4929 asks to keep reserving on both legs.
+        self.assertEqual(set(fixture), {"ci", "docs", "ci-fragments", "deps", "sparq-core",
+                                        "sparq-core-store", "__global__", ""})
+        self.assertEqual(sorted(contract["declared"]["partitions"]),
+                         sorted(ready.non_reserving_partitions()))
+        self.assertEqual(sorted(k for k in fixture
+                                if fixture[k] != (k not in set(contract["declared"]["partitions"]))),
+                         ["ci-fragments"],
+                         "the fixture must contain a row exact-string membership gets wrong")
+
+        # CHANNEL 1 — the in-process predicate. (The `load_dispatch`-shaped probe, which loads
+        # `dispatch-plan.py` exactly as the registry does, is `dispatch-plan.py --self-test`; this
+        # asserts the engine those exports are bound to.)
+        self.assertEqual({k: ready.reserves_partition(k) for k in fixture}, dict(fixture))
+
+        # CHANNEL 2 — the offline CLI, in a fresh process.
+        keys = sorted(k for k in fixture if k)          # argv cannot carry the degenerate key
+        out = subprocess.run(
+            [sys.executable, str(SCRIPTS / "ready-issues.py"), "--dump-partitions", *keys],
+            capture_output=True, text=True, check=True).stdout
+        dumped = json.loads(out)
+        self.assertEqual(dumped["reserves"], {k: fixture[k] for k in keys})
+        self.assertEqual(dumped["non_reserving"], sorted(contract["declared"]["partitions"]))
+        # ...and the #4365 keys the registry already reads are still there beside them.
+        self.assertEqual(dumped["resolved"]["ci-fragments"], ["ci"])
 
 
 if __name__ == "__main__":

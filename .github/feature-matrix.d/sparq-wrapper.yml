@@ -8,6 +8,11 @@
 # Implemented proposal features are default-OFF. Their code and integration tests
 # therefore need explicit feature legs instead of relying on the workspace's
 # default-feature lane. [SONNET-4.6] sq-1rg2q
+# SCOPE ([SONNET-4.6] issue #2384): adding/removing/renaming a leg changes the emitted
+# leg-name set, and THAT is a TWO-FILE change — this fragment AND
+# scripts/tests/feature-matrix-legnames.golden.txt. Every other edit here (features,
+# test, tier, tier-reason, comments) leaves the name set alone and is a SINGLE-file
+# change. See README.md in this directory.
 - name: "sparq-wrapper (proposed-async-store)"
   crate: "sparq-wrapper"
   features: "proposed-async-store"
