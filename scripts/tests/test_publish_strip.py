@@ -122,5 +122,15 @@ class PublishStripTest(unittest.TestCase):
                 self.assertNotIn(dep, published, f"{name} strips published crate {dep}")
 
 
+    def test_book_crate_table_matches_publish_set(self) -> None:
+        import re
+
+        members = strip.load_workspace(REPO_ROOT)
+        published = {n for n, (_, _, pub) in members.items() if pub}
+        page = (REPO_ROOT / "book/src/getting-started/rust-crates.md").read_text()
+        rows = set(re.findall(r"^\| \[`(sparq-[a-z0-9-]+)`\]", page, re.MULTILINE))
+        self.assertEqual(rows, published)
+
+
 if __name__ == "__main__":
     unittest.main()
