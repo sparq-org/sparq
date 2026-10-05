@@ -9,7 +9,7 @@
 //! triple appears, a delete only when the last in-scope copy disappears, and
 //! nothing for a mutation of a graph outside the projection.
 
-// [OPUS-5.5] sq-1rg2q.7: union-boundary events over the observe.rs machinery.
+// sq-1rg2q.7: union-boundary events over the observe.rs machinery.
 
 use super::graph_scope::Projection;
 use super::observe::{

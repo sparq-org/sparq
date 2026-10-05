@@ -10,7 +10,7 @@
 //! rest of a remote result set is abandoned rather than drained. The reported
 //! [`CardinalityError::found`] is then the lower bound `2`.
 
-// [OPUS-5.5] sq-1rg2q.9: async mapped reads + live sets over the async_store surface.
+// sq-1rg2q.9: async mapped reads + live sets over the async_store surface.
 
 use super::async_store::{AsyncNode, AsyncStore, AsyncStoreBackend, AsyncStoreError};
 use crate::{Cardinality, CardinalityError};

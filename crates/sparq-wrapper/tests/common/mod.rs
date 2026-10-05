@@ -1,4 +1,4 @@
-// [OPUS-5.5] sq-1rg2q.9/.10: the delayed, instrumented async backend shared by the
+// sq-1rg2q.9/.10: the delayed, instrumented async backend shared by the
 // async_store, async_node, and async_events integration tests (moved verbatim from
 // tests/async_store.rs). Each test crate uses a different subset of it.
 #![allow(dead_code)]

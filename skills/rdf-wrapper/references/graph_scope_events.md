@@ -9,4 +9,4 @@ graph scope's read `Projection` (`GraphScope::projection()` or
 the first in-scope copy of a triple, a delete only for the last, and nothing
 for graphs outside the projection; each event carries the configured
 projection. The feature implies `proposed-graph-scope` and `proposed-observe`.
-Source: rdfjs/wrapper draft PR #96. <!-- [OPUS-5.5] sq-1rg2q.7 -->
+Source: rdfjs/wrapper draft PR #96. <!-- sq-1rg2q.7 -->

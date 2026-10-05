@@ -87,7 +87,7 @@ module. The async node and async events features imply `proposed-async-store`;
 graph-scope events implies `proposed-graph-scope`; the event features reuse
 `proposed-observe`'s `ChangeEvent` / `SubscriptionId`. See the
 [per-feature proposal status pages](references/README.md) for the feature
-inventory. <!-- [OPUS-5.5] sq-1rg2q.7/.9/.10 -->
+inventory. <!-- sq-1rg2q.7/.9/.10 -->
 
 `proposed-async-store` adds `sparq_wrapper::proposed::async_store` — the
 wrapper shape over a store whose reads are not synchronous (an HTTP endpoint, a
@@ -131,7 +131,7 @@ identity stays synchronous and the mapped node can keep traversing.
 `values` / `contains` / `insert` / `remove` await the backend on every call;
 `insert` / `remove` return `true` only for an effective change (presence check
 then write, not atomic against other writers). Errors are `AsyncMapError`
-(`Store`, `Cardinality`, `Conversion`). <!-- [OPUS-5.5] sq-1rg2q.9 -->
+(`Store`, `Cardinality`, `Conversion`). <!-- sq-1rg2q.9 -->
 
 `proposed-async-events` adds `proposed::async_events::AsyncObservableStore`
 (rdfjs/wrapper draft PR #99). `subscribe(|event| async move { .. })` registers
@@ -140,7 +140,7 @@ listener in subscription order and resolves only after the last one finishes.
 Duplicate adds and absent deletes perform no write and notify nobody. Writes
 made through `store()` or the backend bypass listeners. Listener futures are
 not `Send`, matching the executor-free async surface.
-<!-- [OPUS-5.5] sq-1rg2q.10 -->
+<!-- sq-1rg2q.10 -->
 
 ```rust
 # async fn demo<B: sparq_wrapper::proposed::async_store::AsyncStoreBackend>(backend: B)
@@ -201,7 +201,7 @@ it owns a dataset, mutates quads with `insert(graph, s, p, o)` /
 projected union change — an add only for the first in-scope copy of a triple,
 a delete only for the last, nothing for graphs outside the projection.
 Removing from an absent named graph is a no-op that does not create it.
-<!-- [OPUS-5.5] sq-1rg2q.7 -->
+<!-- sq-1rg2q.7 -->
 
 ```rust
 use oxrdf::{Literal, NamedNode, Term};
