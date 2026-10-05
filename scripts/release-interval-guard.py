@@ -508,11 +508,16 @@ def _http_get_json(url: str) -> tuple[dict | None, str | None]:
 
 
 def crates_io_last_publish(
-    names: list[str], fetch=_http_get_json, retry_sleep=time.sleep, *, require_absent=False
+    names: list[str], fetch=_http_get_json, retry_sleep=time.sleep, *, require_absent=False,
+    exclude_version: str | None = None,
 ) -> dt.datetime | None:
     """The newest crates.io publication timestamp across `names`, or None if NONE of them
     has ever been published. Transient lookup failures receive two bounded retries; the
-    final failure (and every non-transient error) REFUSES."""
+    final failure (and every non-transient error) REFUSES.
+
+    `exclude_version` skips publications of that exact version: on the tag-push path the
+    crates of the release being cut were published moments before the tag, and counting
+    them would make every automated release refuse itself."""
     newest: dt.datetime | None = None
     for name in sorted(names):
         attempts = 0
@@ -543,6 +548,8 @@ def crates_io_last_publish(
             )
         for version in versions:
             if not isinstance(version, dict):
+                continue
+            if exclude_version is not None and version.get("num") == exclude_version:
                 continue
             stamp = parse_timestamp(str(version.get("created_at") or ""))
             if stamp is None:
@@ -798,7 +805,8 @@ def run(
             name == f"v{workspace_version}" for name, _ in tags
         ):
             crates_io_at = crates_io_last_publish(
-                [c.name for c in crates], fetch=fetch, require_absent=recovery
+                [c.name for c in crates], fetch=fetch, require_absent=recovery,
+                exclude_version=released_tag[1:] if released_tag else None,
             )
         if recovery:
             verify_v013_recovery(repo_root, tags, now, released_tag, git_runner)

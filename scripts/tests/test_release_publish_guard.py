@@ -1118,6 +1118,27 @@ class TestUnknownsRefuseRatherThanPublish(unittest.TestCase):
         self.assertEqual(calls, 3)
         self.assertIn("after 3 attempt(s)", str(ctx.exception))
 
+    def test_tag_path_ignores_the_release_being_cut_on_crates_io(self) -> None:
+        # publish -> tag -> release.yml: the crates of the release being cut were published
+        # minutes before the tag. They must not count as "the last release", or the
+        # downstream release refuses itself; older versions must still count.
+        now = dt.datetime(2026, 10, 20, tzinfo=dt.timezone.utc)
+        payload = {"versions": [
+            {"num": "0.1.5", "created_at": (now - dt.timedelta(minutes=5)).isoformat()},
+            {"num": "0.1.4", "created_at": (now - dt.timedelta(days=3)).isoformat()},
+        ]}
+        fetch = lambda _u: (payload, None)
+        self.assertEqual(
+            interval_guard.crates_io_last_publish(["sparq-core"], fetch=fetch),
+            now - dt.timedelta(minutes=5),
+        )
+        self.assertEqual(
+            interval_guard.crates_io_last_publish(
+                ["sparq-core"], fetch=fetch, exclude_version="0.1.5"
+            ),
+            now - dt.timedelta(days=3),
+        )
+
     def test_a_definitive_404_is_NOT_an_unknown(self) -> None:
         # The discriminating counterpart: a successful "this crate does not exist" must
         # NOT be conflated with "I could not ask", or the first release could never ship.
