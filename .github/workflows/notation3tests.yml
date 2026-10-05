@@ -4,10 +4,15 @@
 #
 # WHAT: clones the suite (fetched, never vendored), builds the
 # `sparq-notation3tests` runner (crates/sparq-conformance/src/notation3tests.rs),
-# and runs every `test-cases/**/*.n3` document through
-# `sparq_reason::n3::reason_n3_terms_with_resolver`. A test passes iff the
-# closure derives `:test :is true` (and not `:test :is false`); each test runs
-# in its own process with a timeout.
+# and runs every `tests/**/*.n3` case (the suite's case directory; HELLO.n3,
+# lib/ and extra/ are support files, not cases) through
+# `sparq_reason::n3::reason_n3_terms_with_resolver`. Each case is scored by the
+# suite's own expectation, keyed by its name: `success-*` must derive its pass
+# signal, `fail-*` (negative) must derive no verdict, `crash-*` input must be
+# rejected. Buckets follow the reference harness (pass / nonconform /
+# incomplete / crashed, plus timeout); each case runs in its own process with a
+# timeout. A missing tests/ directory exits the runner with an error, which this
+# advisory step tolerates.
 #
 # ADVISORY: this lane measures, it does not gate. The run step never fails on
 # test outcomes, and an unreachable codeberg.org records "unmeasured" in the

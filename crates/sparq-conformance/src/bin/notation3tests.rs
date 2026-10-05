@@ -10,8 +10,13 @@
 //!
 //! Each test runs in a CHILD process (this binary re-invoked with `--one`) so
 //! a non-terminating document is killed at `--timeout` instead of leaking a
-//! spinning thread. Informational: always exits 0 unless `--min-pass N` is
-//! given and fewer than N tests pass.
+//! spinning thread. Cases are the `.n3` files under `<suite>/tests/` (exit 2 if
+//! that directory is missing); each is scored by the suite's per-case
+//! expectation (`success-*` / `fail-*` / `crash-*`, see
+//! `sparq_conformance::notation3tests`) into pass / nonconform / incomplete /
+//! crashed / timeout. Informational: test outcomes never change the exit code
+//! (0) unless `--min-pass N` is given and fewer than N tests pass; a missing
+//! suite or case directory exits 2.
 #![forbid(unsafe_code)]
 
 use sparq_conformance::notation3tests::{
@@ -59,7 +64,7 @@ fn main() {
     if let Some(file) = one {
         std::panic::set_hook(Box::new(|_| {}));
         let v = std::panic::catch_unwind(|| run_one(&file, &suite))
-            .unwrap_or_else(|_| Verdict::Error("reasoner panicked".into()));
+            .unwrap_or_else(|_| Verdict::Crashed("reasoner panicked".into()));
         println!("{}", v.to_line());
         return;
     }
@@ -69,7 +74,14 @@ fn main() {
         std::process::exit(2);
     }
     let exe = std::env::current_exe().expect("current_exe");
-    let tests: Vec<PathBuf> = discover(&suite)
+    let tests = match discover(&suite) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("{e}");
+            std::process::exit(2);
+        }
+    };
+    let tests: Vec<PathBuf> = tests
         .into_iter()
         .filter(|p| {
             filter
@@ -116,7 +128,7 @@ fn run_child(exe: &Path, suite: &Path, test: &Path, timeout: Duration) -> Verdic
         .spawn()
     {
         Ok(c) => c,
-        Err(e) => return Verdict::Error(format!("spawn: {e}")),
+        Err(e) => return Verdict::Crashed(format!("spawn: {e}")),
     };
     // Drain stdout concurrently: the reasoner may log to stdout (e.g. log:trace,
     // issue #6466), and a full pipe would block the child into a false timeout.
@@ -137,7 +149,7 @@ fn run_child(exe: &Path, suite: &Path, test: &Path, timeout: Duration) -> Verdic
                 return Verdict::Timeout;
             }
             Ok(None) => std::thread::sleep(Duration::from_millis(20)),
-            Err(e) => return Verdict::Error(format!("wait: {e}")),
+            Err(e) => return Verdict::Crashed(format!("wait: {e}")),
         }
     }
     // The verdict is the child's LAST stdout line (anything before it is reasoner output).
@@ -145,6 +157,6 @@ fn run_child(exe: &Path, suite: &Path, test: &Path, timeout: Duration) -> Verdic
     let text = String::from_utf8_lossy(&out);
     match text.lines().last() {
         Some(line) => Verdict::from_line(line),
-        None => Verdict::Error("child produced no verdict (crashed?)".into()),
+        None => Verdict::Crashed("child produced no verdict".into()),
     }
 }

@@ -4,36 +4,72 @@
 //! jen3, ...), complementary to the w3c/N3 community-group manifests that
 //! `sparq-inference-conformance` already runs.
 //!
-//! Convention this runner assumes (the suite's own runner contract): each test
-//! is ONE `.n3` document; running a reasoner over it must derive the triple
-//! `:test :is true` (any IRI whose local name is `test`, predicate local name
-//! `is`, object the boolean `true` in any valid `xsd:boolean` spelling, i.e.
-//! `true` or `"1"^^xsd:boolean`). A closure that derives `:test :is false`
-//! (`false` or `"0"^^xsd:boolean`), derives neither, errors, or exceeds the
-//! timeout is a FAIL. The suite is FETCHED at run time (never vendored);
-//! `.github/workflows/notation3tests.yml` fetches it and runs
-//! `sparq-notation3tests`.
+//! **Layout.** Every case is one `.n3` document under the checkout's `tests/`
+//! directory (`tests/static/**`, `tests/generated/<ns>/<builtin>/**`). The rest
+//! of the checkout (`HELLO.n3`, `lib/`, `extra/`, reports, the JS harness) is
+//! support material, not cases; [`discover`] reads `tests/` only and errors when
+//! it is missing.
 //!
-//! This module is pure logic (discovery, verdict, report) so it can be pinned
-//! by hand-written cases in the suite's format without the suite present; the
-//! binary adds per-test process isolation for the timeout.
+//! **Expectation.** Each document names its case(s) with `:test :contains :<name>`
+//! (`:` = `http://example.org/`), and the case name's prefix carries the expected
+//! outcome — there is no separate manifest:
+//!
+//! - `success-*` — the reasoner must derive `:result :has :<name>` or
+//!   `:test :is true`. Deriving `:test :is false` is NONCONFORM; deriving none of
+//!   them is INCOMPLETE.
+//! - `fail-*` (negative) — correct behaviour derives NONE of `:result :has :<name>`,
+//!   `:test :is true`, `:test :is false`; deriving any of them is NONCONFORM. A
+//!   closure with no boolean verdict is therefore the PASS case here.
+//! - `crash-*` (file name) — the reasoner must REJECT the document (a syntax
+//!   error, or an inconsistency/fuse report). A parse or reasoning error, an empty
+//!   closure, or a closure without `:test :contains` is OK; a closure that still
+//!   reaches `:test :contains` means the bad input was accepted (NONCONFORM).
+//! - Any other case name (e.g. a misspelt prefix) is INCOMPLETE.
+//! - A document that derives no `:test :contains` at all (and is not `crash-*`)
+//!   is INCOMPLETE; a parse/reasoning error on a non-`crash-*` document is CRASHED.
+//!
+//! Source of this rule: the suite's own reference harness (`npm run test:<reasoner>`
+//! in the codeberg checkout), which reports exactly these per-case outcomes as
+//! `TOTAL [COUNT:n] OK: INCOMPLETE: NONCONFORM: CRASHED:` (the line eyeling's
+//! `test/run.js` parses). codeberg.org was not reachable when this was written, so
+//! the decision table above is taken from eyeron's Rust port of that harness,
+//! `tests/notation3_conformance.rs::run_one` in
+//! <https://github.com/eyereasoner/eyeron> (commit a355eb4), and checked against
+//! the fixtures themselves (every `success-*` document derives `:test :is true`
+//! on success; every `fail-*` / `crash-*` document derives `:test :is false` only
+//! when the invalid operation or input is accepted). Two deliberate deviations,
+//! both stricter: a `success-*` closure that derives `:test :is false` alongside
+//! the pass signal is NONCONFORM (no suite case derives both), and `xsd:boolean`
+//! verdicts are read by value (`"1"`/`"0"` as well as `true`/`false`). Timeouts
+//! (not in the reference) get their own bucket.
+//!
+//! The suite is FETCHED at run time (never vendored);
+//! `.github/workflows/notation3tests.yml` fetches it and runs
+//! `sparq-notation3tests`. This module is pure logic (discovery, verdict, report)
+//! so it can be pinned by hand-written cases in the suite's format without the
+//! suite present; the binary adds per-test process isolation for the timeout.
 
 use sparq_reason::n3::Term;
 use std::path::{Path, PathBuf};
 
 const XSD_BOOLEAN: &str = "http://www.w3.org/2001/XMLSchema#boolean";
+/// The suite's `:` namespace (`@prefix : <http://example.org/>` in every case).
+const EX: &str = "http://example.org/";
 
-/// Outcome of one test document.
+/// Outcome of one test document, in the reference harness's categories.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Verdict {
-    /// The closure derives `:test :is true` and not `:test :is false`.
+    /// OK: the case met its expectation.
     Pass,
-    /// The closure derives `:test :is false` (with or without `true`).
-    False,
-    /// The closure derives no `:test :is <boolean>` verdict at all.
-    NoVerdict,
-    /// Parse or reasoning error.
-    Error(String),
+    /// NONCONFORM: the closure contradicts the expectation (a `success-*` case
+    /// derived `:test :is false`, a `fail-*` case derived any verdict, a
+    /// `crash-*` document was accepted).
+    Nonconform,
+    /// INCOMPLETE: the closure lacks the expected signal (no `:test :contains`,
+    /// a `success-*` case without its pass signal, or an unrecognised case name).
+    Incomplete,
+    /// CRASHED: a parse or reasoning error on a document that must be accepted.
+    Crashed(String),
     /// Exceeded the per-test timeout.
     Timeout,
 }
@@ -47,24 +83,24 @@ impl Verdict {
     pub fn to_line(&self) -> String {
         match self {
             Verdict::Pass => "PASS".into(),
-            Verdict::False => "FAIL false".into(),
-            Verdict::NoVerdict => "FAIL no-verdict".into(),
+            Verdict::Nonconform => "FAIL nonconform".into(),
+            Verdict::Incomplete => "FAIL incomplete".into(),
             Verdict::Timeout => "FAIL timeout".into(),
-            Verdict::Error(e) => format!("FAIL error {}", e.replace(['\n', '\r'], " ")),
+            Verdict::Crashed(e) => format!("FAIL crashed {}", e.replace(['\n', '\r'], " ")),
         }
     }
 
-    /// Inverse of [`Verdict::to_line`] (unknown lines become an `Error`).
+    /// Inverse of [`Verdict::to_line`] (unknown lines become `Crashed`).
     pub fn from_line(line: &str) -> Verdict {
         let line = line.trim();
         match line {
             "PASS" => Verdict::Pass,
-            "FAIL false" => Verdict::False,
-            "FAIL no-verdict" => Verdict::NoVerdict,
+            "FAIL nonconform" => Verdict::Nonconform,
+            "FAIL incomplete" => Verdict::Incomplete,
             "FAIL timeout" => Verdict::Timeout,
-            _ => match line.strip_prefix("FAIL error ") {
-                Some(e) => Verdict::Error(e.to_string()),
-                None => Verdict::Error(format!("unrecognised child output: {line:?}")),
+            _ => match line.strip_prefix("FAIL crashed ") {
+                Some(e) => Verdict::Crashed(e.to_string()),
+                None => Verdict::Crashed(format!("unrecognised child output: {line:?}")),
             },
         }
     }
@@ -72,17 +108,38 @@ impl Verdict {
     fn bucket(&self) -> &'static str {
         match self {
             Verdict::Pass => "pass",
-            Verdict::False => "false",
-            Verdict::NoVerdict => "no-verdict",
-            Verdict::Error(_) => "error",
+            Verdict::Nonconform => "nonconform",
+            Verdict::Incomplete => "incomplete",
+            Verdict::Crashed(_) => "crashed",
             Verdict::Timeout => "timeout",
+        }
+    }
+
+    /// Severity for combining several cases in one document (worst wins).
+    fn rank(&self) -> u8 {
+        match self {
+            Verdict::Pass => 0,
+            Verdict::Incomplete => 1,
+            Verdict::Nonconform => 2,
+            Verdict::Timeout => 3,
+            Verdict::Crashed(_) => 4,
         }
     }
 }
 
-/// The local name of an IRI: the part after the last `#`, `/` or `:`.
+/// Report buckets, in display order.
+const BUCKETS: [&str; 5] = ["pass", "nonconform", "incomplete", "crashed", "timeout"];
+
+/// Whether a test file is a `crash-*` case: the input must be rejected.
+pub fn expects_rejection(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|n| n.starts_with("crash"))
+}
+
+/// The local name of an IRI: the part after the last `#` or `/`.
 fn local_name(iri: &str) -> &str {
-    iri.rsplit(['#', '/', ':']).next().unwrap_or(iri)
+    iri.rsplit(['#', '/']).next().unwrap_or(iri)
 }
 
 /// The value of an `xsd:boolean` literal, by any of its four valid lexical
@@ -99,27 +156,73 @@ fn boolean_value(t: &Term) -> Option<bool> {
     }
 }
 
-/// Decide the verdict from a closure's facts.
-pub fn verdict_from_facts(facts: &[[Term; 3]]) -> Verdict {
+fn is_ex(t: &Term, local: &str) -> bool {
+    matches!(t, Term::Iri(i) if i.strip_prefix(EX) == Some(local))
+}
+
+/// Decide the verdict from a closure's facts. `expect_rejection` is true for a
+/// `crash-*` document (see the module docs for the full decision table).
+pub fn verdict_from_facts(facts: &[[Term; 3]], expect_rejection: bool) -> Verdict {
+    let mut cases: Vec<&Term> = facts
+        .iter()
+        .filter(|[s, p, _]| is_ex(s, "test") && is_ex(p, "contains"))
+        .map(|[_, _, o]| o)
+        .collect();
+    cases.sort_by_key(|t| format!("{t:?}"));
+    cases.dedup();
+    if expect_rejection {
+        return if cases.is_empty() {
+            Verdict::Pass
+        } else {
+            Verdict::Nonconform
+        };
+    }
+    if cases.is_empty() {
+        return Verdict::Incomplete;
+    }
     let (mut t, mut f) = (false, false);
     for [s, p, o] in facts {
-        let (Term::Iri(s), Term::Iri(p)) = (s, p) else {
-            continue;
+        if is_ex(s, "test") && is_ex(p, "is") {
+            match boolean_value(o) {
+                Some(true) => t = true,
+                Some(false) => f = true,
+                None => {}
+            }
+        }
+    }
+    let result_has = |case: &Term| {
+        facts
+            .iter()
+            .any(|[s, p, o]| is_ex(s, "result") && is_ex(p, "has") && o == case)
+    };
+    let mut worst = Verdict::Pass;
+    for case in cases {
+        let name = match case {
+            Term::Iri(i) => local_name(i),
+            _ => "",
         };
-        if local_name(s) != "test" || local_name(p) != "is" {
-            continue;
-        }
-        match boolean_value(o) {
-            Some(true) => t = true,
-            Some(false) => f = true,
-            None => {}
+        let v = if name.starts_with("fail") {
+            if result_has(case) || t || f {
+                Verdict::Nonconform
+            } else {
+                Verdict::Pass
+            }
+        } else if name.starts_with("success") {
+            if f {
+                Verdict::Nonconform
+            } else if result_has(case) || t {
+                Verdict::Pass
+            } else {
+                Verdict::Incomplete
+            }
+        } else {
+            Verdict::Incomplete
+        };
+        if v.rank() > worst.rank() {
+            worst = v;
         }
     }
-    match (t, f) {
-        (_, true) => Verdict::False,
-        (true, false) => Verdict::Pass,
-        (false, false) => Verdict::NoVerdict,
-    }
+    worst
 }
 
 /// `file://` IRI for a local path (used as the document base). Every byte outside
@@ -163,29 +266,32 @@ fn file_iri_path(iri: &str) -> Option<PathBuf> {
 /// (strictly offline; nothing outside the fetched suite is readable). The
 /// test document itself is held to the same rule: it is canonicalized (which
 /// resolves symlinks) and refused, without being read, unless it lies inside
-/// the canonical `suite_root`.
+/// the canonical `suite_root`. Whether the document must be rejected comes
+/// from its file name ([`expects_rejection`]).
 pub fn run_one(path: &Path, suite_root: &Path) -> Verdict {
     let (Ok(canon), Ok(root)) = (
         std::fs::canonicalize(path),
         std::fs::canonicalize(suite_root),
     ) else {
-        return Verdict::Error(format!("cannot resolve {}", path.display()));
+        return Verdict::Crashed(format!("cannot resolve {}", path.display()));
     };
     if !canon.starts_with(&root) {
-        return Verdict::Error(format!(
+        return Verdict::Crashed(format!(
             "refusing {}: resolves outside the suite root",
             path.display()
         ));
     }
     let src = match std::fs::read_to_string(&canon) {
         Ok(s) => s,
-        Err(e) => return Verdict::Error(format!("read {}: {e}", path.display())),
+        Err(e) => return Verdict::Crashed(format!("read {}: {e}", path.display())),
     };
-    run_source(&src, &file_iri(path), suite_root)
+    run_source(&src, &file_iri(path), suite_root, expects_rejection(path))
 }
 
-/// As [`run_one`], over in-memory source with an explicit base IRI.
-pub fn run_source(src: &str, base: &str, suite_root: &Path) -> Verdict {
+/// As [`run_one`], over in-memory source with an explicit base IRI and
+/// expectation. With `expect_rejection` (a `crash-*` case) a parse or reasoning
+/// error is the PASS outcome; otherwise it is CRASHED.
+pub fn run_source(src: &str, base: &str, suite_root: &Path, expect_rejection: bool) -> Verdict {
     let root = std::fs::canonicalize(suite_root).unwrap_or_else(|_| suite_root.to_path_buf());
     let resolver = move |iri: &str| -> Option<String> {
         let p = std::fs::canonicalize(file_iri_path(iri)?).ok()?;
@@ -195,22 +301,26 @@ pub fn run_source(src: &str, base: &str, suite_root: &Path) -> Verdict {
         std::fs::read_to_string(p).ok()
     };
     match sparq_reason::n3::reason_n3_terms_with_resolver(src, Some(base), Some(&resolver)) {
-        Ok(c) => verdict_from_facts(&c.facts),
-        Err(e) => Verdict::Error(e),
+        Ok(c) => verdict_from_facts(&c.facts, expect_rejection),
+        Err(_) if expect_rejection => Verdict::Pass,
+        Err(e) => Verdict::Crashed(e),
     }
 }
 
-/// Every `.n3` test under the suite: `<root>/test-cases` when it exists,
-/// otherwise `<root>` itself; recursive, sorted, hidden dirs skipped. Symlinks
-/// (to files or directories) are never followed or returned, so a fetched
-/// suite cannot point the runner at files outside it.
-pub fn discover(root: &Path) -> Vec<PathBuf> {
-    let base = root.join("test-cases");
-    let base = if base.is_dir() {
-        base
-    } else {
-        root.to_path_buf()
-    };
+/// Every `.n3` case under `<root>/tests` (the suite's case directory; the rest
+/// of the checkout is support material): recursive, sorted, hidden dirs skipped.
+/// Errors when `<root>/tests` is not a directory, so a moved or renamed case
+/// directory is reported instead of silently scanning the whole checkout.
+/// Symlinks (to files or directories) are never followed or returned, so a
+/// fetched suite cannot point the runner at files outside it.
+pub fn discover(root: &Path) -> Result<Vec<PathBuf>, String> {
+    let base = root.join("tests");
+    if !base.is_dir() {
+        return Err(format!(
+            "notation3tests case directory {} not found (expected the suite checkout's tests/)",
+            base.display()
+        ));
+    }
     let mut out = Vec::new();
     let mut stack = vec![base];
     while let Some(dir) = stack.pop() {
@@ -238,7 +348,7 @@ pub fn discover(root: &Path) -> Vec<PathBuf> {
         }
     }
     out.sort();
-    out
+    Ok(out)
 }
 
 /// One row of the report.
@@ -262,10 +372,13 @@ pub fn report_markdown(rows: &[Row], suite_rev: &str) -> String {
         "- Suite: https://codeberg.org/phochste/notation3tests @ `{suite_rev}`\n"
     ));
     s.push_str("- Engine: `sparq_reason::n3::reason_n3_terms_with_resolver` (forward closure)\n");
-    s.push_str("- Pass criterion: closure derives `:test :is true` and not `:test :is false`\n\n");
+    s.push_str(
+        "- Pass criterion: the suite's per-case expectation (`success-*` derives its pass signal, \
+         `fail-*` derives no verdict, `crash-*` input is rejected); see `notation3tests.rs`\n\n",
+    );
     s.push_str(&format!("**{pass} / {total} pass ({pct:.1}%)**\n\n"));
     s.push_str("| bucket | count |\n|---|---|\n");
-    for b in ["pass", "false", "no-verdict", "error", "timeout"] {
+    for b in BUCKETS {
         let n = rows.iter().filter(|r| r.verdict.bucket() == b).count();
         s.push_str(&format!("| {b} | {n} |\n"));
     }
@@ -291,7 +404,7 @@ pub fn report_markdown(rows: &[Row], suite_rev: &str) -> String {
 /// Machine-readable summary (`{"total":..,"pass":..,"buckets":{..},"results":[..]}`).
 pub fn report_json(rows: &[Row], suite_rev: &str) -> String {
     let mut buckets = serde_json::Map::new();
-    for b in ["pass", "false", "no-verdict", "error", "timeout"] {
+    for b in BUCKETS {
         let n = rows.iter().filter(|r| r.verdict.bucket() == b).count();
         buckets.insert(b.into(), n.into());
     }
@@ -314,47 +427,158 @@ pub fn report_json(rows: &[Row], suite_rev: &str) -> String {
 mod tests {
     use super::*;
 
+    const PFX: &str = "@prefix : <http://example.org/>.\n\
+                       @prefix xsd: <http://www.w3.org/2001/XMLSchema#>.\n\
+                       @prefix math: <http://www.w3.org/2000/10/swap/math#>.\n\
+                       @prefix list: <http://www.w3.org/2000/10/swap/list#>.\n";
+
+    /// A document in the suite's shape: `premise => :result :has :<name>`,
+    /// `{} => :test :contains :<name>`, `:result :has :<name> => :test :is <on_result>`.
+    fn case(name: &str, premise: &str, on_result: &str) -> String {
+        format!(
+            "{PFX}{{ {premise} }} => {{ :result :has :{name} }}.\n\
+             {{}} => {{ :test :contains :{name} }}.\n\
+             {{ :result :has :{name} }} => {{ :test :is {on_result} }}.\n"
+        )
+    }
+
     fn run(src: &str) -> Verdict {
-        run_source(src, "file:///nonexistent/t.n3", Path::new("/nonexistent"))
+        run_source(
+            src,
+            "file:///nonexistent/t.n3",
+            Path::new("/nonexistent"),
+            false,
+        )
+    }
+
+    fn run_rejecting(src: &str) -> Verdict {
+        run_source(
+            src,
+            "file:///nonexistent/t.n3",
+            Path::new("/nonexistent"),
+            true,
+        )
+    }
+
+    fn tmp(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("n3t-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
     }
 
     #[test]
-    fn forward_rule_deriving_true_passes() {
-        let src = "@prefix : <urn:example:>.\n:a :b :c.\n{ :a :b :c } => { :test :is true }.\n";
-        assert_eq!(run(src), Verdict::Pass);
+    fn success_case_deriving_true_passes() {
+        let src = format!(
+            "{}:a :b :c.\n",
+            case("success-literal-1", ":a :b :c", "true")
+        );
+        assert_eq!(run(&src), Verdict::Pass);
     }
 
     #[test]
     fn hash_namespace_and_builtin_pass() {
-        let src = "@prefix : <http://example.org/ns#>.\n\
-                   @prefix math: <http://www.w3.org/2000/10/swap/math#>.\n\
-                   { (1 2) math:sum 3 } => { :test :is true }.\n";
-        assert_eq!(run(src), Verdict::Pass);
+        let src = case("success-literal-1", "(1 2) math:sum 3", "true");
+        assert_eq!(run(&src), Verdict::Pass);
     }
 
     #[test]
-    fn false_verdict_fails_even_alongside_true() {
-        let src = "@prefix : <urn:example:>.\n:test :is true.\n{ :test :is true } => { :test :is false }.\n";
-        assert_eq!(run(src), Verdict::False);
+    fn success_case_without_its_signal_is_incomplete() {
+        let src = case("success-literal-1", "(1 2) math:sum 4", "true");
+        assert_eq!(run(&src), Verdict::Incomplete);
     }
 
     #[test]
-    fn unmet_premise_is_no_verdict() {
-        let src = "@prefix : <urn:example:>.\n{ :a :b :c } => { :test :is true }.\n";
-        assert_eq!(run(src), Verdict::NoVerdict);
+    fn success_case_deriving_false_is_nonconform_even_alongside_true() {
+        let src = format!("{PFX}{{}} => {{ :test :contains :success-x }}.\n:test :is true.\n{{ :test :is true }} => {{ :test :is false }}.\n");
+        assert_eq!(run(&src), Verdict::Nonconform);
+    }
+
+    /// The reviewer's example: tests/generated/list/append/fail-literal-1.n3.
+    /// Correct behaviour (the invalid append does not succeed) derives no boolean
+    /// verdict at all, and that is a PASS for a `fail-*` case.
+    #[test]
+    fn negative_case_with_no_verdict_passes() {
+        let src = case("fail-literal-1", "(1 2) list:append (1 2)", "false");
+        assert_eq!(run(&src), Verdict::Pass);
+    }
+
+    #[test]
+    fn negative_case_deriving_false_or_result_is_nonconform() {
+        // The invalid operation "succeeds", so the document derives :test :is false.
+        let src = case("fail-literal-1", "(1 2) math:sum 3", "false");
+        assert_eq!(run(&src), Verdict::Nonconform);
+        // :result :has :<name> alone (no boolean) is already nonconform.
+        let src = format!(
+            "{PFX}{{ (1 2) math:sum 3 }} => {{ :result :has :fail-literal-1 }}.\n\
+             {{}} => {{ :test :contains :fail-literal-1 }}.\n"
+        );
+        assert_eq!(run(&src), Verdict::Nonconform);
+        // So is a stray :test :is true.
+        let src = format!("{PFX}{{}} => {{ :test :contains :fail-x }}.\n:test :is true.\n");
+        assert_eq!(run(&src), Verdict::Nonconform);
+    }
+
+    /// tests/static/crash-syntax-8.n3 in shape: the IRI escape is illegal, so a
+    /// conforming parser rejects the document, which is the PASS outcome.
+    #[test]
+    fn expected_parse_failure_passes_when_rejected() {
+        let src = format!(
+            "<http://bad\\u0020example.org/> a :BadExample.\n{}",
+            case("crash-syntax-8", ":subject :predicate ?X", "false")
+        );
+        assert_eq!(run_rejecting(&src), Verdict::Pass);
+        // The same parse error on a document that must be accepted is CRASHED.
+        assert!(matches!(run(&src), Verdict::Crashed(_)), "{:?}", run(&src));
+    }
+
+    #[test]
+    fn crash_case_that_is_accepted_is_nonconform() {
+        let src = format!(
+            "{PFX}{{}} => {{ :test :contains :crash-fuse-1 }}.\n{{}} => {{ :test :is false }}.\n"
+        );
+        assert_eq!(run_rejecting(&src), Verdict::Nonconform);
+    }
+
+    /// The expectation comes from the file name: `crash-*` must be rejected.
+    #[test]
+    fn run_one_reads_the_expectation_from_the_file_name() {
+        let dir = tmp("expect");
+        let bad = format!(
+            "<http://bad\\u0020example.org/> a :B.\n{}",
+            case("crash-syntax-8", ":s :p ?X", "false")
+        );
+        std::fs::write(dir.join("crash-syntax-8.n3"), &bad).unwrap();
+        std::fs::write(dir.join("success-literal-1.n3"), &bad).unwrap();
+        assert!(expects_rejection(&dir.join("crash-syntax-8.n3")));
+        assert!(!expects_rejection(&dir.join("success-literal-1.n3")));
+        assert_eq!(run_one(&dir.join("crash-syntax-8.n3"), &dir), Verdict::Pass);
+        assert!(matches!(
+            run_one(&dir.join("success-literal-1.n3"), &dir),
+            Verdict::Crashed(_)
+        ));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn missing_test_contains_or_unknown_name_is_incomplete() {
+        let src = format!("{PFX}:test :is true.\n");
+        assert_eq!(run(&src), Verdict::Incomplete);
+        let src = format!("{PFX}{{}} => {{ :test :contains :mystery-1 }}.\n:test :is true.\n");
+        assert_eq!(run(&src), Verdict::Incomplete);
     }
 
     #[test]
     fn string_true_is_not_a_boolean_verdict() {
-        let src = "@prefix : <urn:example:>.\n:test :is \"true\".\n";
-        assert_eq!(run(src), Verdict::NoVerdict);
+        let src = format!("{PFX}{{}} => {{ :test :contains :success-x }}.\n:test :is \"true\".\n");
+        assert_eq!(run(&src), Verdict::Incomplete);
     }
 
     #[test]
-    fn parse_error_is_error() {
+    fn parse_error_is_crashed() {
         assert!(matches!(
             run("@prefix : <urn:example:> .\n:a :b"),
-            Verdict::Error(_)
+            Verdict::Crashed(_)
         ));
     }
 
@@ -362,35 +586,69 @@ mod tests {
     fn verdict_line_round_trips() {
         for v in [
             Verdict::Pass,
-            Verdict::False,
-            Verdict::NoVerdict,
+            Verdict::Nonconform,
+            Verdict::Incomplete,
             Verdict::Timeout,
-            Verdict::Error("bad\nthing".into()),
+            Verdict::Crashed("bad\nthing".into()),
         ] {
             let back = Verdict::from_line(&v.to_line());
             match (&v, &back) {
-                (Verdict::Error(_), Verdict::Error(b)) => assert_eq!(b, "bad thing"),
+                (Verdict::Crashed(_), Verdict::Crashed(b)) => assert_eq!(b, "bad thing"),
                 _ => assert_eq!(v, back),
             }
         }
     }
 
+    /// The real checkout keeps support documents (HELLO.n3, lib/, extra/) beside
+    /// tests/; only tests/ holds cases.
     #[test]
-    fn discover_prefers_test_cases_dir_and_skips_hidden() {
-        let dir = std::env::temp_dir().join(format!("n3t-discover-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(dir.join("test-cases/sub")).unwrap();
-        std::fs::create_dir_all(dir.join("test-cases/.git")).unwrap();
-        std::fs::write(dir.join("outside.n3"), "").unwrap();
-        std::fs::write(dir.join("test-cases/a.n3"), "").unwrap();
-        std::fs::write(dir.join("test-cases/sub/b.n3"), "").unwrap();
-        std::fs::write(dir.join("test-cases/sub/c.ttl"), "").unwrap();
-        std::fs::write(dir.join("test-cases/.git/d.n3"), "").unwrap();
+    fn discover_reads_tests_dir_only_and_skips_hidden() {
+        let dir = tmp("discover");
+        for d in [
+            "lib",
+            "extra",
+            "tests/static/math",
+            "tests/generated/list",
+            "tests/.git",
+        ] {
+            std::fs::create_dir_all(dir.join(d)).unwrap();
+        }
+        for f in [
+            "HELLO.n3",
+            "lib/query.n3",
+            "extra/stratification-check-1.n3",
+            "tests/static/success-literal-1.n3",
+            "tests/static/math/fail-literal-1.n3",
+            "tests/generated/list/crash-x.n3",
+            "tests/static/notes.ttl",
+            "tests/.git/d.n3",
+        ] {
+            std::fs::write(dir.join(f), "").unwrap();
+        }
         let found: Vec<String> = discover(&dir)
+            .unwrap()
             .iter()
             .map(|p| p.strip_prefix(&dir).unwrap().display().to_string())
             .collect();
-        assert_eq!(found, ["test-cases/a.n3", "test-cases/sub/b.n3"]);
+        assert_eq!(
+            found,
+            [
+                "tests/generated/list/crash-x.n3",
+                "tests/static/math/fail-literal-1.n3",
+                "tests/static/success-literal-1.n3",
+            ]
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn discover_errors_when_tests_dir_is_missing() {
+        let dir = tmp("discover-missing");
+        std::fs::create_dir_all(dir.join("test-cases")).unwrap();
+        std::fs::write(dir.join("HELLO.n3"), "").unwrap();
+        std::fs::write(dir.join("test-cases/a.n3"), "").unwrap();
+        let err = discover(&dir).unwrap_err();
+        assert!(err.contains("tests") && err.contains("not found"), "{err}");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -407,22 +665,27 @@ mod tests {
         )
         .unwrap();
         let suite = dir.join("suite");
-        let src = "@prefix : <urn:example:>.\n@prefix log: <http://www.w3.org/2000/10/swap/log#>.\n\
-                   { <data.n3> log:semantics ?f. ?f log:includes { :a :b :c } } => { :test :is true }.\n";
+        let src = format!(
+            "@prefix log: <http://www.w3.org/2000/10/swap/log#>.\n{}",
+            case(
+                "success-semantics-1",
+                "<data.n3> log:semantics ?f. ?f log:includes { <urn:example:a> <urn:example:b> <urn:example:c> }",
+                "true"
+            )
+        );
         let base = file_iri(&suite.join("t.n3"));
         assert!(!base.contains('#') && !base.contains(' '), "{base}");
         assert_eq!(
             file_iri_path(&base).unwrap(),
             std::fs::canonicalize(&suite).unwrap().join("t.n3")
         );
-        assert_eq!(run_source(src, &base, &suite), Verdict::Pass);
+        assert_eq!(run_source(&src, &base, &suite, false), Verdict::Pass);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
     fn resolver_reads_inside_suite_only() {
-        let dir = std::env::temp_dir().join(format!("n3t-resolve-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        let dir = tmp("resolve");
         std::fs::create_dir_all(dir.join("suite")).unwrap();
         let data = "@prefix : <urn:example:>.\n:a :b :c.\n";
         std::fs::write(dir.join("suite/data.n3"), data).unwrap();
@@ -430,36 +693,53 @@ mod tests {
         let suite = dir.join("suite");
         let doc = |target: &Path| {
             format!(
-                "@prefix : <urn:example:>.\n@prefix log: <http://www.w3.org/2000/10/swap/log#>.\n\
-                 {{ <{}> log:semantics ?f. ?f log:includes {{ :a :b :c }} }} => {{ :test :is true }}.\n",
-                file_iri(target)
+                "@prefix log: <http://www.w3.org/2000/10/swap/log#>.\n{}",
+                case(
+                    "success-semantics-1",
+                    &format!(
+                        "<{}> log:semantics ?f. ?f log:includes {{ <urn:example:a> <urn:example:b> <urn:example:c> }}",
+                        file_iri(target)
+                    ),
+                    "true"
+                )
             )
         };
         let base = file_iri(&suite.join("t.n3"));
         assert_eq!(
-            run_source(&doc(&suite.join("data.n3")), &base, &suite),
+            run_source(&doc(&suite.join("data.n3")), &base, &suite, false),
             Verdict::Pass
         );
         assert_eq!(
-            run_source(&doc(&dir.join("outside.n3")), &base, &suite),
-            Verdict::NoVerdict
+            run_source(&doc(&dir.join("outside.n3")), &base, &suite, false),
+            Verdict::Incomplete
         );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
     fn numeric_boolean_spellings_are_read_by_value() {
-        let p = "@prefix : <urn:example:>.\n@prefix xsd: <http://www.w3.org/2001/XMLSchema#>.\n";
+        let p = format!("{PFX}{{}} => {{ :test :contains :success-b }}.\n");
         let one = format!("{p}:test :is \"1\"^^xsd:boolean.\n");
         assert_eq!(run(&one), Verdict::Pass);
         let zero = format!("{p}:test :is \"0\"^^xsd:boolean.\n");
-        assert_eq!(run(&zero), Verdict::False);
+        assert_eq!(run(&zero), Verdict::Nonconform);
         let true_and_zero = format!("{p}:test :is true, \"0\"^^xsd:boolean.\n");
-        assert_eq!(run(&true_and_zero), Verdict::False);
+        assert_eq!(run(&true_and_zero), Verdict::Nonconform);
         let one_and_false = format!("{p}:test :is \"1\"^^xsd:boolean, false.\n");
-        assert_eq!(run(&one_and_false), Verdict::False);
+        assert_eq!(run(&one_and_false), Verdict::Nonconform);
         let invalid = format!("{p}:test :is \"yes\"^^xsd:boolean.\n");
-        assert_eq!(run(&invalid), Verdict::NoVerdict);
+        assert_eq!(run(&invalid), Verdict::Incomplete);
+        // A negative case: "1"^^xsd:boolean is a verdict, hence nonconform; an
+        // invalid spelling is not a verdict, hence still a pass.
+        let n = format!("{PFX}{{}} => {{ :test :contains :fail-b }}.\n");
+        assert_eq!(
+            run(&format!("{n}:test :is \"1\"^^xsd:boolean.\n")),
+            Verdict::Nonconform
+        );
+        assert_eq!(
+            run(&format!("{n}:test :is \"yes\"^^xsd:boolean.\n")),
+            Verdict::Pass
+        );
     }
 
     /// A symlink planted in a fetched suite must not make the runner read a
@@ -468,41 +748,38 @@ mod tests {
     #[test]
     fn symlinks_cannot_escape_the_suite() {
         use std::os::unix::fs::symlink;
-        let dir = std::env::temp_dir().join(format!("n3t-symlink-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(dir.join("suite/test-cases")).unwrap();
+        let dir = tmp("symlink");
+        std::fs::create_dir_all(dir.join("suite/tests")).unwrap();
         std::fs::create_dir_all(dir.join("private")).unwrap();
-        let secret = "@prefix : <urn:example:>.\n:test :is true.\n";
-        std::fs::write(dir.join("private/secret.n3"), secret).unwrap();
-        std::fs::write(dir.join("suite/test-cases/ok.n3"), secret).unwrap();
+        let secret = format!("{PFX}{{}} => {{ :test :contains :success-x }}.\n:test :is true.\n");
+        std::fs::write(dir.join("private/secret.n3"), &secret).unwrap();
+        std::fs::write(dir.join("suite/tests/ok.n3"), &secret).unwrap();
         symlink(
             dir.join("private/secret.n3"),
-            dir.join("suite/test-cases/leak.n3"),
+            dir.join("suite/tests/leak.n3"),
         )
         .unwrap();
-        symlink(dir.join("private"), dir.join("suite/test-cases/linkdir")).unwrap();
+        symlink(dir.join("private"), dir.join("suite/tests/linkdir")).unwrap();
         let suite = dir.join("suite");
         let found: Vec<String> = discover(&suite)
+            .unwrap()
             .iter()
             .map(|p| p.strip_prefix(&suite).unwrap().display().to_string())
             .collect();
-        assert_eq!(found, ["test-cases/ok.n3"]);
+        assert_eq!(found, ["tests/ok.n3"]);
         // Independently of discovery, run_one refuses an input that resolves
         // outside the suite root, and does not echo its content.
-        let v = run_one(&suite.join("test-cases/leak.n3"), &suite);
+        let v = run_one(&suite.join("tests/leak.n3"), &suite);
         assert!(
-            matches!(&v, Verdict::Error(e) if e.contains("outside")),
+            matches!(&v, Verdict::Crashed(e) if e.contains("outside")),
             "{v:?}"
         );
         let v = run_one(&dir.join("private/secret.n3"), &suite);
         assert!(
-            matches!(&v, Verdict::Error(e) if e.contains("outside")),
+            matches!(&v, Verdict::Crashed(e) if e.contains("outside")),
             "{v:?}"
         );
-        assert_eq!(
-            run_one(&suite.join("test-cases/ok.n3"), &suite),
-            Verdict::Pass
-        );
+        assert_eq!(run_one(&suite.join("tests/ok.n3"), &suite), Verdict::Pass);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -515,14 +792,15 @@ mod tests {
             },
             Row {
                 test: "b.n3".into(),
-                verdict: Verdict::NoVerdict,
+                verdict: Verdict::Incomplete,
             },
         ];
         let md = report_markdown(&rows, "abc");
         assert!(md.contains("**1 / 2 pass (50.0%)**"), "{md}");
-        assert!(md.contains("| `b.n3` | FAIL no-verdict |"), "{md}");
+        assert!(md.contains("| `b.n3` | FAIL incomplete |"), "{md}");
         let js: serde_json::Value = serde_json::from_str(&report_json(&rows, "abc")).unwrap();
         assert_eq!(js["pass"], 1);
-        assert_eq!(js["buckets"]["no-verdict"], 1);
+        assert_eq!(js["buckets"]["incomplete"], 1);
+        assert_eq!(js["buckets"]["nonconform"], 0);
     }
 }
