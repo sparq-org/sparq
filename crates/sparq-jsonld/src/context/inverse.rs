@@ -22,10 +22,12 @@
 //!
 //! Spec: <https://www.w3.org/TR/json-ld11-api/#context-processing-algorithms>
 
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 
 use super::{has_keyword_form, is_keyword, ActiveContext, Direction, Override, TermDefinition};
 use super::iri::relativize_iri;
+use crate::fx::FxMap;
 use crate::json::Json;
 
 // ---------------------------------------------------------------------------
@@ -58,7 +60,22 @@ struct TypeLangMap {
 #[derive(Clone, Debug, Default)]
 pub struct InverseContext {
     /// iri → container-key → type-language map.
-    inner: BTreeMap<String, BTreeMap<String, TypeLangMap>>,
+    inner: FxMap<String, BTreeMap<String, TypeLangMap>>,
+    /// `@prefix`-flagged `(term, iri)` pairs in (length, lexicographic) term order,
+    /// precomputed for §7.1 step 5 so IRI Compaction does not re-sort them per call.
+    prefixes: Vec<(String, String)>,
+    /// keyword → its winning alias term (shortest, then lexicographic least).
+    aliases: BTreeMap<String, String>,
+    /// The default-language preferred value (`"@none"` when unset), see
+    /// `compute_default_language`.
+    default_language: String,
+}
+
+impl InverseContext {
+    /// True iff some term of the context maps to `iri`.
+    pub(crate) fn has_iri(&self, iri: &str) -> bool {
+        self.inner.contains_key(iri)
+    }
 }
 
 impl ActiveContext {
@@ -73,7 +90,7 @@ impl ActiveContext {
     /// [SONNET-4.6] (sq-90mu3)
     pub fn inverse_context(&self) -> InverseContext {
         // §4.3 step 1: initialise result.
-        let mut result: BTreeMap<String, BTreeMap<String, TypeLangMap>> = BTreeMap::new();
+        let mut result: FxMap<String, BTreeMap<String, TypeLangMap>> = FxMap::default();
 
         // §4.3 steps 2–3: default_language is the active context's default
         // language (lower-cased), optionally suffixed with "_" + direction.
@@ -100,7 +117,7 @@ impl ActiveContext {
             .collect();
         terms.sort_by(|(a, _), (b, _)| a.len().cmp(&b.len()).then(a.cmp(b)));
 
-        for (term, term_def) in terms {
+        for &(term, term_def) in &terms {
             // §4.3 step 4.1: skip terms with a null IRI mapping.
             let iri = match &term_def.iri {
                 Some(i) => i.clone(),
@@ -186,7 +203,21 @@ impl ActiveContext {
             }
         }
 
-        InverseContext { inner: result }
+        let mut prefixes = Vec::new();
+        let mut aliases: BTreeMap<String, String> = BTreeMap::new();
+        for (term, def) in &terms {
+            if let Some(iri) = def.iri.as_deref() {
+                if def.prefix {
+                    prefixes.push((term.to_string(), iri.to_string()));
+                }
+                if is_keyword(iri) {
+                    // `terms` is in winning order, so the first alias seen wins.
+                    aliases.entry(iri.to_string()).or_insert_with(|| term.to_string());
+                }
+            }
+        }
+
+        InverseContext { inner: result, prefixes, aliases, default_language }
     }
 }
 
@@ -291,22 +322,6 @@ fn is_graph_object_shape(j: &Json) -> bool {
     }
 }
 
-/// Computes the default language (lowercased, with optional `_<dir>` suffix)
-/// for use in building `preferred_values` during IRI compaction.  Returns
-/// `"@none"` when the context has no default language.
-fn compute_default_language(ctx: &ActiveContext) -> String {
-    match &ctx.default_language {
-        None => "@none".to_string(),
-        Some(lang) => {
-            let lc = lang.to_lowercase();
-            match ctx.default_base_direction {
-                Some(dir) => format!("{}_{}", lc, dir.as_str()),
-                None => lc,
-            }
-        }
-    }
-}
-
 /// **IRI Compaction** (JSON-LD 1.1 API §7.1).
 ///
 /// Compacts `iri` (or a keyword) to the shortest available representation in
@@ -342,22 +357,9 @@ pub fn compact_iri(
         return iri.to_string();
     }
 
-    // §7.1 step 2: keyword or keyword alias.
+    // §7.1 step 2: keyword or keyword alias (shortest, then lexicographic least).
     if is_keyword(iri) {
-        // Collect every term whose IRI mapping equals this keyword.
-        let mut aliases: Vec<&str> = ctx
-            .term_definitions
-            .iter()
-            .filter(|(_, def)| def.iri.as_deref() == Some(iri))
-            .map(|(t, _)| t.as_str())
-            .collect();
-        if !aliases.is_empty() {
-            // Shortest, then lexicographic least — pick the winner.
-            aliases.sort_by(|a, b| a.len().cmp(&b.len()).then(a.cmp(b)));
-            return aliases[0].to_string();
-        }
-        // No alias — return the keyword itself.
-        return iri.to_string();
+        return inverse.aliases.get(iri).cloned().unwrap_or_else(|| iri.to_string());
     }
 
     // §7.1 step 3 (spec "IRI Compaction" step 2): vocab=true AND iri appears in the
@@ -374,13 +376,13 @@ pub fn compact_iri(
     // trailing @index/@language container fallbacks plus the @vocab-vs-@id preferred-
     // value ordering and the "_<direction>" preferred-value suffix rule were missing.
     if vocab && inverse.inner.contains_key(iri) {
-        let default_language = compute_default_language(ctx);
+        let default_language = inverse.default_language.as_str();
 
         // step 2.1: containers, tried in order by Term Selection.
-        let mut containers: Vec<String> = Vec::new();
+        let mut containers: Vec<&str> = Vec::with_capacity(16);
         // steps 2.2-2.3: the sub-map selector and its preferred value.
         let mut type_language: &str = "@language";
-        let mut type_language_value: Option<String> = None; // null → "@null" below
+        let mut type_language_value: Option<Cow<'_, str>> = None; // null → "@null" below
 
         // Unwrap @preserve to its first element (framing input).
         let value = value.and_then(|v| {
@@ -402,21 +404,21 @@ pub fn compact_iri(
         // step 2.4: an indexed (non-graph) value prefers @index containers — for
         // FORWARD and REVERSE properties alike (this runs before the reverse branch).
         if has_index && !graph_object {
-            containers.push("@index".to_string());
-            containers.push("@index@set".to_string());
+            containers.push("@index");
+            containers.push("@index@set");
         }
 
         if reverse {
             // step 2.5: reverse property — the @type sub-map under "@reverse".
             type_language = "@type";
-            type_language_value = Some("@reverse".to_string());
-            containers.push("@set".to_string());
+            type_language_value = Some(Cow::Borrowed("@reverse"));
+            containers.push("@set");
         } else if list_object {
             // step 2.6: list object — derive the most specific common type or
             // language across the list items.
             let v = value.expect("list_object implies value");
             if v.get("@index").is_none() {
-                containers.push("@list".to_string());
+                containers.push("@list");
             }
             let list: &[Json] = match v.get("@list") {
                 Some(Json::Arr(a)) => a.as_slice(),
@@ -424,7 +426,7 @@ pub fn compact_iri(
             };
             let mut common_type: Option<String> = None;
             let mut common_language: Option<String> = if list.is_empty() {
-                Some(default_language.clone())
+                Some(default_language.to_string())
             } else {
                 None
             };
@@ -475,36 +477,36 @@ pub fn compact_iri(
             let common_type = common_type.unwrap_or_else(|| "@none".to_string());
             if common_type != "@none" {
                 type_language = "@type";
-                type_language_value = Some(common_type);
+                type_language_value = Some(Cow::Owned(common_type));
             } else {
-                type_language_value = Some(common_language);
+                type_language_value = Some(Cow::Owned(common_language));
             }
         } else if graph_object {
             // step 2.7: graph object — prefer the matching @graph* containers.
             let v = value.expect("graph_object implies value");
             if v.get("@index").is_some() {
-                containers.push("@graph@index".to_string());
-                containers.push("@graph@index@set".to_string());
+                containers.push("@graph@index");
+                containers.push("@graph@index@set");
             }
             if v.get("@id").is_some() {
-                containers.push("@graph@id".to_string());
-                containers.push("@graph@id@set".to_string());
+                containers.push("@graph@id");
+                containers.push("@graph@id@set");
             }
-            containers.push("@graph".to_string());
-            containers.push("@graph@set".to_string());
-            containers.push("@set".to_string());
+            containers.push("@graph");
+            containers.push("@graph@set");
+            containers.push("@set");
             if v.get("@index").is_none() {
-                containers.push("@graph@index".to_string());
-                containers.push("@graph@index@set".to_string());
+                containers.push("@graph@index");
+                containers.push("@graph@index@set");
             }
             if v.get("@id").is_none() {
-                containers.push("@graph@id".to_string());
-                containers.push("@graph@id@set".to_string());
+                containers.push("@graph@id");
+                containers.push("@graph@id@set");
             }
-            containers.push("@index".to_string());
-            containers.push("@index@set".to_string());
+            containers.push("@index");
+            containers.push("@index@set");
             type_language = "@type";
-            type_language_value = Some("@id".to_string());
+            type_language_value = Some(Cow::Borrowed("@id"));
         } else {
             // step 2.8: value objects match on language/direction/type; node
             // objects prefer @id/@type containers.
@@ -513,80 +515,86 @@ pub fn compact_iri(
                 let v = value.expect("value object");
                 if let Some(Json::Str(dir)) = v.get("@direction") {
                     if v.get("@index").is_none() {
-                        type_language_value = Some(match v.get("@language") {
+                        type_language_value = Some(Cow::Owned(match v.get("@language") {
                             Some(Json::Str(lang)) => {
                                 format!("{}_{}", lang.to_lowercase(), dir.to_lowercase())
                             }
                             _ => format!("_{}", dir.to_lowercase()),
-                        });
-                        containers.push("@language".to_string());
-                        containers.push("@language@set".to_string());
+                        }));
+                        containers.push("@language");
+                        containers.push("@language@set");
                     }
                 } else if let Some(Json::Str(lang)) = v.get("@language") {
                     if v.get("@index").is_none() {
-                        type_language_value = Some(lang.to_lowercase());
-                        containers.push("@language".to_string());
-                        containers.push("@language@set".to_string());
+                        type_language_value = Some(Cow::Owned(lang.to_lowercase()));
+                        containers.push("@language");
+                        containers.push("@language@set");
                     }
                 } else if let Some(Json::Str(t)) = v.get("@type") {
                     type_language = "@type";
-                    type_language_value = Some(t.clone());
+                    type_language_value = Some(Cow::Borrowed(t.as_str()));
                 }
             } else {
                 type_language = "@type";
-                type_language_value = Some("@id".to_string());
-                containers.push("@id".to_string());
-                containers.push("@id@set".to_string());
-                containers.push("@type".to_string());
-                containers.push("@set@type".to_string());
+                type_language_value = Some(Cow::Borrowed("@id"));
+                containers.push("@id");
+                containers.push("@id@set");
+                containers.push("@type");
+                containers.push("@set@type");
             }
-            containers.push("@set".to_string());
+            containers.push("@set");
         }
 
         // step 2.9: the no-container fallback is always tried last.
-        containers.push("@none".to_string());
+        containers.push("@none");
         // steps 2.10-2.11 (JSON-LD 1.1): an un-indexed value may still live in an
         // @index container; a lone-@value map may still live in a @language container.
         if !is_map || !has_index {
-            containers.push("@index".to_string());
-            containers.push("@index@set".to_string());
+            containers.push("@index");
+            containers.push("@index@set");
         }
+        // Only a STRING @value may live in a language map: expansion rejects any other
+        // language-map value ("invalid language map value"), so a lone native number or
+        // boolean must not be offered the @language containers.
         let lone_value_map = matches!(value, Some(Json::Obj(m)) if m.len() == 1)
-            && value.and_then(|v| v.get("@value")).is_some();
+            && matches!(value.and_then(|v| v.get("@value")), Some(Json::Str(_)));
         if lone_value_map {
-            containers.push("@language".to_string());
-            containers.push("@language@set".to_string());
+            containers.push("@language");
+            containers.push("@language@set");
         }
 
         // step 2.12: null values are stored under "@null" in the inverse context.
-        let type_language_value = type_language_value.unwrap_or_else(|| "@null".to_string());
+        let type_language_value = type_language_value.unwrap_or(Cow::Borrowed("@null"));
 
         // steps 2.13-2.16: preferred values, most specific first.
-        let mut preferred_values: Vec<String> = Vec::new();
+        let mut preferred_values: Vec<Cow<'_, str>> = Vec::with_capacity(6);
         if type_language_value == "@reverse" {
-            preferred_values.push("@reverse".to_string());
+            preferred_values.push(Cow::Borrowed("@reverse"));
         }
         let id_entry = value.and_then(|v| v.get("@id")).and_then(Json::as_str);
-        if let ("@id" | "@reverse", Some(id_iri)) = (type_language_value.as_str(), id_entry) {
+        if let ("@id" | "@reverse", Some(id_iri)) = (type_language_value.as_ref(), id_entry) {
             // Prefer @vocab-coercing terms when the nested @id round-trips through a
             // term; otherwise prefer @id-coercing terms.
-            let compacted_id = compact_iri(ctx, inverse, id_iri, None, true, false);
-            let round_trips = ctx
-                .term_definitions
-                .get(&compacted_id)
-                .map(|d| d.iri.as_deref() == Some(id_iri))
-                .unwrap_or(false);
+            // Only a term mapping to `id_iri` can round-trip, so skip the nested
+            // compaction when there is none.
+            let round_trips = inverse.has_iri(id_iri) && {
+                let compacted_id = compact_iri(ctx, inverse, id_iri, None, true, false);
+                ctx.term_definitions
+                    .get(&compacted_id)
+                    .map(|d| d.iri.as_deref() == Some(id_iri))
+                    .unwrap_or(false)
+            };
             if round_trips {
-                preferred_values.push("@vocab".to_string());
-                preferred_values.push("@id".to_string());
+                preferred_values.push(Cow::Borrowed("@vocab"));
+                preferred_values.push(Cow::Borrowed("@id"));
             } else {
-                preferred_values.push("@id".to_string());
-                preferred_values.push("@vocab".to_string());
+                preferred_values.push(Cow::Borrowed("@id"));
+                preferred_values.push(Cow::Borrowed("@vocab"));
             }
-            preferred_values.push("@none".to_string());
+            preferred_values.push(Cow::Borrowed("@none"));
         } else {
             preferred_values.push(type_language_value.clone());
-            preferred_values.push("@none".to_string());
+            preferred_values.push(Cow::Borrowed("@none"));
             // An empty list matches any term (its items constrain nothing).
             let empty_list = matches!(
                 value.and_then(|v| v.get("@list")),
@@ -596,19 +604,18 @@ pub fn compact_iri(
                 type_language = "@any";
             }
         }
-        preferred_values.push("@any".to_string());
+        preferred_values.push(Cow::Borrowed("@any"));
         // step 2.16: a "<lang>_<dir>" preferred value also tries its bare
         // "_<dir>" suffix (any-language, fixed-direction terms).
-        let suffixes: Vec<String> = preferred_values
+        let suffixes: Vec<Cow<'_, str>> = preferred_values
             .iter()
-            .filter_map(|pv| pv.find('_').map(|i| pv[i..].to_string()))
+            .filter_map(|pv| pv.find('_').map(|i| Cow::Owned(pv[i..].to_string())))
             .collect();
         preferred_values.extend(suffixes);
 
         // step 2.17: Term Selection.
-        let cs: Vec<&str> = containers.iter().map(String::as_str).collect();
-        let pvs: Vec<&str> = preferred_values.iter().map(String::as_str).collect();
-        if let Some(term) = select_term(inverse, iri, &cs, type_language, &pvs) {
+        let pvs: Vec<&str> = preferred_values.iter().map(|pv| pv.as_ref()).collect();
+        if let Some(term) = select_term(inverse, iri, &containers, type_language, &pvs) {
             return term;
         }
     }
@@ -619,14 +626,11 @@ pub fn compact_iri(
         if let Some(vocab_iri) = ctx.vocabulary_mapping.as_deref() {
             if iri.starts_with(vocab_iri) && iri.len() > vocab_iri.len() {
                 let suffix = &iri[vocab_iri.len()..];
-                // Guard: only use the suffix if it's not a term that maps
-                // somewhere else (a different IRI).
-                let conflict = ctx
-                    .term_definitions
-                    .get(suffix)
-                    .map(|d| d.iri.as_deref() != Some(iri))
-                    .unwrap_or(false);
-                if !conflict {
+                // Only a suffix with NO term definition (spec step 4.1). A defined term
+                // reaching here was rejected by Term Selection for this value (e.g. a
+                // `@type: @id` term offered a plain literal), so using it would change
+                // the value's meaning on re-expansion.
+                if !ctx.term_definitions.contains_key(suffix) {
                     return suffix.to_string();
                 }
             }
@@ -639,58 +643,33 @@ pub fn compact_iri(
     // term definition.
     let mut best_compact: Option<String> = None;
 
-    // Iterate prefix terms in (length, lexicographic) order so that the
-    // first conflict-free candidate encountered is already the tie-break
-    // winner for equal-length prefixes.
-    let mut prefix_terms: Vec<(&str, &TermDefinition)> = ctx
-        .term_definitions
-        .iter()
-        .filter(|(_, def)| def.prefix)
-        .map(|(k, v)| (k.as_str(), v))
-        .collect();
-    prefix_terms.sort_by(|(a, _), (b, _)| a.len().cmp(&b.len()).then(a.cmp(b)));
+    for (term, prefix_iri) in &inverse.prefixes {
+        // Skip a prefix that IS the target (no suffix) or does not start it; the
+        // suffix must not start with "//" (it would read as a URL authority).
+        let Some(suffix) = iri.strip_prefix(prefix_iri.as_str()) else { continue };
+        if suffix.is_empty() || suffix.starts_with("//") {
+            continue;
+        }
+        // Keep the shortest candidate, ties broken lexicographically; skip the
+        // allocation for one that is already longer than the best.
+        let len = term.len() + 1 + suffix.len();
+        if best_compact.as_ref().is_some_and(|b| len > b.len()) {
+            continue;
+        }
+        let candidate = format!("{}:{}", term, suffix);
+        if best_compact.as_ref().is_some_and(|b| len == b.len() && candidate >= *b) {
+            continue;
+        }
 
-    for (term, def) in &prefix_terms {
-        if let Some(prefix_iri) = def.iri.as_deref() {
-            // Skip if the prefix IRI IS the target (no suffix to attach).
-            if prefix_iri == iri {
-                continue;
-            }
-            // Skip if the IRI doesn't start with this prefix.
-            if !iri.starts_with(prefix_iri) {
-                continue;
-            }
-            let suffix = &iri[prefix_iri.len()..];
-            // Guard: the suffix must not start with "//" (would make it
-            // look like an authority component of a URL).
-            if suffix.starts_with("//") || suffix.is_empty() {
-                continue;
-            }
-            let candidate = format!("{}:{}", term, suffix);
-
-            // Guard: if this compact IRI already denotes a term, only use
-            // it when that term maps to the same IRI AND there is no value
-            // (a value might imply type/container constraints that break
-            // the match).
-            let ok = match ctx.term_definitions.get(&candidate) {
-                Some(d) => d.iri.as_deref() == Some(iri) && value.is_none(),
-                None => true,
-            };
-            if !ok {
-                continue;
-            }
-
-            // Keep the shortest candidate; break ties lexicographically.
-            let better = match &best_compact {
-                None => true,
-                Some(b) => {
-                    candidate.len() < b.len()
-                        || (candidate.len() == b.len() && candidate < *b)
-                }
-            };
-            if better {
-                best_compact = Some(candidate);
-            }
+        // Guard: if this compact IRI already denotes a term, only use it when that
+        // term maps to the same IRI AND there is no value (a value might imply
+        // type/container constraints that break the match).
+        let ok = match ctx.term_definitions.get(&candidate) {
+            Some(d) => d.iri.as_deref() == Some(iri) && value.is_none(),
+            None => true,
+        };
+        if ok {
+            best_compact = Some(candidate);
         }
     }
 

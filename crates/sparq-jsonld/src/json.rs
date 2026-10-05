@@ -422,21 +422,31 @@ impl Parser<'_> {
 /// and `\u00XX` for the remaining C0 controls. Everything else (including non-ASCII, which
 /// JSON permits raw in UTF-8) passes through verbatim.
 fn json_escape(s: &str, out: &mut String) {
-    for c in s.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            '\u{08}' => out.push_str("\\b"),
-            '\u{0C}' => out.push_str("\\f"),
-            c if (c as u32) < 0x20 => {
-                let _ = write!(out, "\\u{:04x}", c as u32);
-            }
-            c => out.push(c),
+    // Copy runs of bytes that need no escaping in one go; only `"`, `\\` and control
+    // characters (all ASCII, so never inside a multi-byte sequence) are rewritten.
+    let bytes = s.as_bytes();
+    let mut start = 0;
+    for (i, &b) in bytes.iter().enumerate() {
+        let esc = match b {
+            b'"' => "\\\"",
+            b'\\' => "\\\\",
+            b'\n' => "\\n",
+            b'\r' => "\\r",
+            b'\t' => "\\t",
+            0x08 => "\\b",
+            0x0C => "\\f",
+            b if b < 0x20 => "",
+            _ => continue,
+        };
+        out.push_str(&s[start..i]);
+        if esc.is_empty() {
+            let _ = write!(out, "\\u{:04x}", b);
+        } else {
+            out.push_str(esc);
         }
+        start = i + 1;
     }
+    out.push_str(&s[start..]);
 }
 
 #[cfg(test)]

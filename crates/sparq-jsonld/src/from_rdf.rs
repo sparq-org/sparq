@@ -50,8 +50,10 @@
 //! `fromRdf/0022` depends on this). Blank-node *predicates* (generalized RDF) are
 //! accepted and keyed as `_:label` properties.
 
+use std::borrow::Cow;
 use std::collections::hash_map::Entry;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
+use std::hash::Hash;
 
 use crate::error::{JsonLdError, JsonLdErrorCode};
 use crate::json::Json;
@@ -139,10 +141,10 @@ impl RdfTerm {
 
     /// The node-map identifier for a non-literal term: the IRI itself, or the
     /// `_:`-prefixed blank node label. `None` for literals.
-    fn node_id(&self) -> Option<String> {
+    fn node_id(&self) -> Option<Cow<'_, str>> {
         match self {
-            RdfTerm::Iri(i) => Some(i.clone()),
-            RdfTerm::BlankNode(b) => Some(format!("_:{}", b)),
+            RdfTerm::Iri(i) => Some(Cow::Borrowed(i)),
+            RdfTerm::BlankNode(b) => Some(Cow::Owned(format!("_:{}", b))),
             RdfTerm::Literal { .. } => None,
         }
     }
@@ -250,24 +252,26 @@ impl Node {
     }
 
     /// Append `value` under `property` unless an equal value object is already
-    /// there; returns the value's index either way.
-    fn push_value(&mut self, property: &str, value: Json) -> usize {
+    /// there. Returns the value's index, or `None` when it was already present.
+    fn push_value(&mut self, property: &str, value: Json) -> Option<usize> {
         if let Some(pos) = self.props.iter().position(|(p, _)| p == property) {
             let values = &mut self.props[pos].1;
-            if let Some(i) = values.iter().position(|v| v == &value) {
-                return i;
+            if values.contains(&value) {
+                return None;
             }
             values.push(value);
-            values.len() - 1
+            Some(values.len() - 1)
         } else {
             self.props.push((property.to_string(), vec![value]));
-            0
+            Some(0)
         }
     }
 }
 
 /// A graph's node map, keyed by node identifier (IRI or `_:label`).
-type SubjectMap = BTreeMap<String, Node>;
+type SubjectMap = FxMap<String, Node>;
+
+use crate::fx::{FxMap, FxSet};
 /// All node maps, keyed by graph (`@default` or the graph's identifier). BTreeMaps
 /// make every traversal the spec's `ordered: true` (code-point-sorted) one.
 type DatasetMap = BTreeMap<String, SubjectMap>;
@@ -301,6 +305,45 @@ enum RefState {
     Shared,
 }
 
+/// `map[key]`, inserting a default value first; the key is only allocated on insert.
+fn entry_mut<'m, V: Default, M: StrMap<V>>(map: &'m mut M, key: &str) -> &'m mut V {
+    if !map.contains_key(key) {
+        map.insert(key.to_string(), V::default());
+    }
+    map.get_mut(key).expect("inserted above")
+}
+
+/// The `String`-keyed maps [`entry_mut`] works over.
+trait StrMap<V> {
+    fn contains_key(&self, key: &str) -> bool;
+    fn insert(&mut self, key: String, value: V);
+    fn get_mut(&mut self, key: &str) -> Option<&mut V>;
+}
+
+impl<V> StrMap<V> for BTreeMap<String, V> {
+    fn contains_key(&self, key: &str) -> bool {
+        BTreeMap::contains_key(self, key)
+    }
+    fn insert(&mut self, key: String, value: V) {
+        BTreeMap::insert(self, key, value);
+    }
+    fn get_mut(&mut self, key: &str) -> Option<&mut V> {
+        BTreeMap::get_mut(self, key)
+    }
+}
+
+impl<V> StrMap<V> for FxMap<String, V> {
+    fn contains_key(&self, key: &str) -> bool {
+        HashMap::contains_key(self, key)
+    }
+    fn insert(&mut self, key: String, value: V) {
+        HashMap::insert(self, key, value);
+    }
+    fn get_mut(&mut self, key: &str) -> Option<&mut V> {
+        HashMap::get_mut(self, key)
+    }
+}
+
 /// Serialize an RDF dataset as an **expanded** JSON-LD document (JSON-LD 1.1 API
 /// §8.1, *Deserialize RDF as JSON-LD*). Returns the expanded document as a
 /// [`Json::Arr`] of node objects (named graphs nest under `@graph`).
@@ -312,20 +355,14 @@ pub fn from_rdf(dataset: &[RdfQuad], options: &FromRdfOptions) -> Result<Json, J
     // ── Phase 1 (spec steps 1–4): group by graph → subject into node maps, convert
     // objects to value objects, and record rdf:nil usages + referenced-once state. ──
     let mut graphs: DatasetMap = BTreeMap::new();
-    graphs.insert(DEFAULT_GRAPH.to_string(), SubjectMap::new());
-    let mut referenced_once: HashMap<String, RefState> = HashMap::new();
+    graphs.insert(DEFAULT_GRAPH.to_string(), SubjectMap::default());
+    let mut referenced_once: FxMap<String, RefState> = FxMap::default();
     let mut nil_usages: BTreeMap<String, Vec<Usage>> = BTreeMap::new();
     let mut compound_subjects: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    let mut seen: HashSet<&RdfQuad> = HashSet::new();
-
     for quad in dataset {
-        // An RDF dataset is a SET of quads (fromRdf/0022 depends on deduplication).
-        if !seen.insert(quad) {
-            continue;
-        }
         // Non-RDF shapes the term model permits but the data model cannot produce.
-        let graph_key = match &quad.graph {
-            None => DEFAULT_GRAPH.to_string(),
+        let graph_key: Cow<'_, str> = match &quad.graph {
+            None => Cow::Borrowed(DEFAULT_GRAPH),
             Some(g) => match g.node_id() {
                 Some(id) => id,
                 None => continue, // literal graph name: not RDF
@@ -337,38 +374,33 @@ pub fn from_rdf(dataset: &[RdfQuad], options: &FromRdfOptions) -> Result<Json, J
             continue; // literal subject/predicate: not RDF
         };
 
-        graphs.entry(graph_key.clone()).or_default();
         if graph_key != DEFAULT_GRAPH {
             // Spec step 4.4: the default graph gets a node for every graph name.
-            graphs
-                .get_mut(DEFAULT_GRAPH)
-                .expect("default graph inserted above")
-                .entry(graph_key.clone())
-                .or_default();
+            let default = graphs.get_mut(DEFAULT_GRAPH).expect("default graph inserted above");
+            entry_mut(default, &graph_key);
         }
         // Spec step 4.6.1: in compound-literal mode an rdf:direction triple marks
         // its subject as a compound-literal blank node.
         if options.rdf_direction == RdfDirection::CompoundLiteral && predicate_id == RDF_DIRECTION
         {
-            let subs = compound_subjects.entry(graph_key.clone()).or_default();
-            if !subs.contains(&subject_id) {
-                subs.push(subject_id.clone());
+            let subs = entry_mut(&mut compound_subjects, &graph_key);
+            if !subs.iter().any(|s| *s == subject_id) {
+                subs.push(subject_id.to_string());
             }
         }
 
-        let graph = graphs.get_mut(&graph_key).expect("graph inserted above");
-        graph.entry(subject_id.clone()).or_default();
+        let graph = entry_mut(&mut graphs, &graph_key);
         let object_id = quad.object.node_id();
         if let Some(oid) = &object_id {
-            graph.entry(oid.clone()).or_default();
+            entry_mut(graph, oid);
         }
+        let node = entry_mut(graph, &subject_id);
 
         // Spec step 4.6.4: rdf:type → @type (unless useRdfType).
         if predicate_id == RDF_TYPE && !options.use_rdf_type {
             if let Some(oid) = &object_id {
-                let node = graph.get_mut(&subject_id).expect("subject inserted above");
-                if !node.types.contains(oid) {
-                    node.types.push(oid.clone());
+                if !node.types.iter().any(|t| t == oid) {
+                    node.types.push(oid.to_string());
                 }
                 continue;
             }
@@ -376,22 +408,27 @@ pub fn from_rdf(dataset: &[RdfQuad], options: &FromRdfOptions) -> Result<Json, J
 
         // Spec steps 4.6.5–4.6.7: convert and append (deduplicated).
         let value = rdf_to_object(&quad.object, options)?;
-        let node = graph.get_mut(&subject_id).expect("subject inserted above");
-        let index = node.push_value(&predicate_id, value);
-        let usage = Usage {
-            graph: graph_key.clone(),
-            node: subject_id.clone(),
-            property: predicate_id.clone(),
+        // An RDF dataset is a SET of quads (fromRdf/0022): a duplicate quad converts to
+        // a value already present, and must not count as a second reference below.
+        let Some(index) = node.push_value(&predicate_id, value) else {
+            continue;
+        };
+        // The usage record is only needed for rdf:nil / blank-node objects, so it is
+        // built lazily (most quads need neither).
+        let usage = || Usage {
+            graph: graph_key.to_string(),
+            node: subject_id.to_string(),
+            property: predicate_id.to_string(),
             index,
         };
         // Spec steps 4.6.8–4.6.10: rdf:nil usages + referenced-once bookkeeping.
         match &object_id {
             Some(oid) if oid == RDF_NIL => {
-                nil_usages.entry(graph_key.clone()).or_default().push(usage);
+                entry_mut(&mut nil_usages, &graph_key).push(usage());
             }
-            Some(oid) if oid.starts_with("_:") => match referenced_once.entry(oid.clone()) {
+            Some(oid) if oid.starts_with("_:") => match referenced_once.entry(oid.to_string()) {
                 Entry::Vacant(v) => {
-                    v.insert(RefState::Once(usage));
+                    v.insert(RefState::Once(usage()));
                 }
                 Entry::Occupied(mut o) => {
                     *o.get_mut() = RefState::Shared;
@@ -404,8 +441,8 @@ pub fn from_rdf(dataset: &[RdfQuad], options: &FromRdfOptions) -> Result<Json, J
     // ── Phase 2 (spec step 6.1): compound-literal conversion. Replacements are
     // recorded per slot and applied during emission; the compound-literal blank
     // node itself is consumed (never emitted). ──
-    let mut replacements: HashMap<Slot, Json> = HashMap::new();
-    let mut consumed: HashSet<(String, String)> = HashSet::new();
+    let mut replacements: FxMap<Slot, Json> = FxMap::default();
+    let mut consumed: FxSet<(String, String)> = FxSet::default();
     for (graph_key, subjects) in &compound_subjects {
         for cl in subjects {
             // Only a compound literal referenced exactly once is convertible.
@@ -450,7 +487,7 @@ pub fn from_rdf(dataset: &[RdfQuad], options: &FromRdfOptions) -> Result<Json, J
     // its head reference, and its cells are consumed. Rendering is deferred (see the
     // module docs: this replaces the REC's shared-reference mutation, and makes the
     // conversion independent of usage processing order). ──
-    let mut chains: HashMap<Slot, Vec<Slot>> = HashMap::new();
+    let mut chains: FxMap<Slot, Vec<Slot>> = FxMap::default();
     for usages in nil_usages.values() {
         for start in usages {
             let mut node_graph = start.graph.clone();
@@ -493,28 +530,29 @@ pub fn from_rdf(dataset: &[RdfQuad], options: &FromRdfOptions) -> Result<Json, J
     }
 
     // ── Phase 4 (spec steps 7–9): emit the expanded document from the default
-    // graph, nesting each named graph under its name node's @graph. ──
+    // graph, nesting each named graph under its name node's @graph. Emitted nodes are
+    // moved out of the node maps; consumed list cells and compound literals stay put
+    // for the slot lookups that render them. ──
+    let slotted = chains
+        .keys()
+        .chain(replacements.keys())
+        .map(|(g, n, _, _)| (g.as_str(), n.as_str()))
+        .collect();
     let renderer = Renderer {
-        graphs: &graphs,
         chains: &chains,
         replacements: &replacements,
+        slotted,
     };
-    let default_graph = graphs
-        .get(DEFAULT_GRAPH)
-        .expect("default graph always present");
     let mut result: Vec<Json> = Vec::new();
-    for (subject, node) in default_graph {
-        if consumed.contains(&(DEFAULT_GRAPH.to_string(), subject.clone())) {
-            continue;
-        }
-        let mut jnode = renderer.render_node(DEFAULT_GRAPH, subject, node);
-        if let Some(graph) = graphs.get(subject) {
+    for (subject, node) in take_emitted(&mut graphs, DEFAULT_GRAPH, &consumed) {
+        let named = graphs
+            .contains_key(&subject)
+            .then(|| (subject.clone(), take_emitted(&mut graphs, &subject, &consumed)));
+        let mut jnode = renderer.render_node(&graphs, DEFAULT_GRAPH, subject, node);
+        if let Some((graph_key, named)) = named {
             let mut graph_nodes: Vec<Json> = Vec::new();
-            for (s, n) in graph {
-                if consumed.contains(&(subject.clone(), s.clone())) {
-                    continue;
-                }
-                let j = renderer.render_node(subject, s, n);
+            for (s, n) in named {
+                let j = renderer.render_node(&graphs, &graph_key, s, n);
                 if !is_only_id(&j) {
                     graph_nodes.push(j);
                 }
@@ -528,61 +566,86 @@ pub fn from_rdf(dataset: &[RdfQuad], options: &FromRdfOptions) -> Result<Json, J
     Ok(Json::Arr(result))
 }
 
+/// Removes and returns the emitted (non-consumed) nodes of `graph`, in code-point order
+/// of their ids (the emission order). An absent graph yields nothing.
+fn take_emitted(
+    graphs: &mut DatasetMap,
+    graph: &str,
+    consumed: &FxSet<(String, String)>,
+) -> Vec<(String, Node)> {
+    let Some(map) = graphs.get_mut(graph) else {
+        return Vec::new();
+    };
+    let mut entries: Vec<(String, Node)> = if consumed.is_empty() {
+        map.drain().collect()
+    } else {
+        map.extract_if(|id, _| !consumed.contains(&(graph.to_string(), id.clone())))
+            .collect()
+    };
+    entries.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+    entries
+}
+
 /// The deferred emission resolver: renders node maps to `Json`, materialising the
 /// registered `@list` chains and compound-literal replacements at their slots.
 struct Renderer<'a> {
-    graphs: &'a DatasetMap,
-    chains: &'a HashMap<Slot, Vec<Slot>>,
-    replacements: &'a HashMap<Slot, Json>,
+    chains: &'a FxMap<Slot, Vec<Slot>>,
+    replacements: &'a FxMap<Slot, Json>,
+    /// `(graph, node)` pairs owning a chain head or replacement slot; only their
+    /// values need a slot lookup.
+    slotted: FxSet<(&'a str, &'a str)>,
 }
 
 impl Renderer<'_> {
-    fn render_node(&self, graph: &str, id: &str, node: &Node) -> Json {
-        let mut members: Vec<(String, Json)> =
-            vec![("@id".to_string(), Json::Str(id.to_string()))];
+    fn render_node(&self, graphs: &DatasetMap, graph: &str, id: String, node: Node) -> Json {
+        let mut members: Vec<(String, Json)> = Vec::with_capacity(node.props.len() + 2);
+        // Slot keys are only built when a chain or replacement can match.
+        let slotted = self.slotted.contains(&(graph, id.as_str())).then(|| id.clone());
+        members.push(("@id".to_string(), Json::Str(id)));
         if !node.types.is_empty() {
             members.push((
                 "@type".to_string(),
-                Json::Arr(node.types.iter().map(|t| Json::Str(t.clone())).collect()),
+                Json::Arr(node.types.into_iter().map(Json::Str).collect()),
             ));
         }
-        for (property, values) in &node.props {
-            let rendered: Vec<Json> = values
-                .iter()
-                .enumerate()
-                .map(|(i, stored)| {
-                    self.render_value(
-                        (graph.to_string(), id.to_string(), property.clone(), i),
-                        stored,
-                    )
-                })
-                .collect();
-            members.push((property.clone(), Json::Arr(rendered)));
+        for (property, values) in node.props {
+            let rendered: Vec<Json> = match &slotted {
+                None => values,
+                Some(id) => values
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, stored)| {
+                        let slot = (graph.to_string(), id.clone(), property.clone(), i);
+                        self.render_value(graphs, slot, stored)
+                    })
+                    .collect(),
+            };
+            members.push((property, Json::Arr(rendered)));
         }
         Json::Obj(members)
     }
 
-    fn render_value(&self, slot: Slot, stored: &Json) -> Json {
+    fn render_value(&self, graphs: &DatasetMap, slot: Slot, stored: Json) -> Json {
         if let Some(items) = self.chains.get(&slot) {
-            let rendered: Vec<Json> = items.iter().map(|item| self.render_slot(item)).collect();
+            let rendered: Vec<Json> =
+                items.iter().map(|item| self.render_slot(graphs, item)).collect();
             Json::Obj(vec![("@list".to_string(), Json::Arr(rendered))])
         } else if let Some(replacement) = self.replacements.get(&slot) {
             replacement.clone()
         } else {
-            stored.clone()
+            stored
         }
     }
 
-    fn render_slot(&self, slot: &Slot) -> Json {
+    fn render_slot(&self, graphs: &DatasetMap, slot: &Slot) -> Json {
         let (graph, node, property, index) = slot;
-        let stored = self
-            .graphs
+        let stored = graphs
             .get(graph)
             .and_then(|g| g.get(node))
             .and_then(|n| n.values(property))
             .and_then(|v| v.get(*index));
         match stored {
-            Some(stored) => self.render_value(slot.clone(), stored),
+            Some(stored) => self.render_value(graphs, slot.clone(), stored.clone()),
             // Unreachable by construction: chains only reference slots whose
             // existence the well-formedness check verified. Stay total regardless.
             None => Json::Obj(Vec::new()),

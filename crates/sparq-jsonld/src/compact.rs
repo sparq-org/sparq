@@ -42,9 +42,13 @@ use crate::context::inverse::{compact_iri, InverseContext};
 use crate::context::{ActiveContext, Direction, Override};
 use crate::error::{JsonLdError, JsonLdErrorCode as E};
 use crate::expand::expand;
+use crate::fx::FxMap;
 use crate::json::Json;
 use crate::loader::DocumentLoader;
 use crate::options::{JsonLdOptions, ProcessingMode};
+use std::cell::RefCell;
+use std::rc::Rc;
+use std::sync::Arc;
 
 // ---------------------------------------------------------------------------
 // Public entry points
@@ -99,13 +103,16 @@ pub fn compact_expanded(
     } else {
         None
     };
-    let active =
-        ActiveContext::new(base).process(&ctx_value, options.base.as_deref(), loader, options)?;
-    let ctx = Ctx::new(active);
-    let env = Env { loader, options };
+    let ctx = root_ctx(&ctx_value, base, options, loader)?;
+    let ctx: &Ctx = &ctx;
+    let env = Env {
+        loader,
+        options,
+        root: ctx,
+    };
 
     // The Compaction Algorithm proper, with a null active property.
-    let compacted = compact_element(&ctx, None, expanded, &env)?;
+    let compacted = compact_element(ctx, None, expanded, &env)?;
 
     // API post-processing: [] → {}; a remaining array is wrapped under aliased @graph.
     let mut result = match compacted {
@@ -127,14 +134,123 @@ pub fn compact_expanded(
     Ok(result)
 }
 
+thread_local! {
+    /// The last self-contained root context processed on this thread, keyed by the
+    /// context value and options. Callers serialising many documents against one
+    /// context (the engine writer, the playground) skip re-processing it and rebuilding
+    /// its inverse context on every call.
+    static LAST_ROOT: RefCell<Option<(Json, JsonLdOptions, Rc<Ctx>)>> = const { RefCell::new(None) };
+}
+
+/// The processed root context for `ctx_value`, reusing [`LAST_ROOT`] when it matches.
+/// Only contexts that cannot reach the loader (no remote references, no `@import`) are
+/// cached, since a loader may resolve the same IRI differently between calls.
+fn root_ctx(
+    ctx_value: &Json,
+    base: Option<&str>,
+    options: &JsonLdOptions,
+    loader: &dyn DocumentLoader,
+) -> Result<Rc<Ctx>, JsonLdError> {
+    let cacheable = self_contained(ctx_value);
+    if cacheable {
+        let hit = LAST_ROOT.with(|last| {
+            last.borrow()
+                .as_ref()
+                .filter(|(v, o, _)| v == ctx_value && o == options)
+                .map(|(_, _, c)| Rc::clone(c))
+        });
+        if let Some(ctx) = hit {
+            return Ok(ctx);
+        }
+    }
+    let active =
+        ActiveContext::new(base).process(ctx_value, options.base.as_deref(), loader, options)?;
+    let ctx = Rc::new(Ctx::new(active));
+    if cacheable {
+        LAST_ROOT.with(|last| {
+            *last.borrow_mut() = Some((ctx_value.clone(), options.clone(), Rc::clone(&ctx)));
+        });
+    }
+    Ok(ctx)
+}
+
+/// True iff processing `context` never consults the document loader: no remote context
+/// IRI (a string context, at the top level or under any nested `@context`) and no
+/// `@import`.
+fn self_contained(context: &Json) -> bool {
+    fn local(ctx: &Json) -> bool {
+        match ctx {
+            Json::Str(_) => false,
+            Json::Arr(items) => items.iter().all(local),
+            other => nested_ok(other),
+        }
+    }
+    fn nested_ok(j: &Json) -> bool {
+        match j {
+            Json::Obj(m) => m.iter().all(|(k, v)| match k.as_str() {
+                "@import" => false,
+                "@context" => local(v),
+                _ => nested_ok(v),
+            }),
+            Json::Arr(a) => a.iter().all(nested_ok),
+            _ => true,
+        }
+    }
+    local(context)
+}
+
 // ---------------------------------------------------------------------------
 // Internal state
 // ---------------------------------------------------------------------------
 
-/// Immutable per-call environment (the loader and options), threaded through the walk.
+/// Per-call environment (the loader and options), threaded through the walk.
 struct Env<'a> {
     loader: &'a dyn DocumentLoader,
     options: &'a JsonLdOptions,
+    /// The root context, which owns the memo of derived contexts.
+    root: &'a Ctx,
+}
+
+/// Identity of a derived context: the context reverted to, or the scoped context of
+/// `term` (looked up in `lookup`) applied onto `base`.
+enum DerivedKey {
+    Revert(Arc<ActiveContext>),
+    Scoped {
+        lookup: *const Ctx,
+        base: *const Ctx,
+        term: String,
+        type_scoped: bool,
+    },
+}
+
+impl DerivedKey {
+    fn same(&self, other: &DerivedKey) -> bool {
+        match (self, other) {
+            (DerivedKey::Revert(a), DerivedKey::Revert(b)) => Arc::ptr_eq(a, b),
+            (
+                DerivedKey::Scoped { lookup, base, term, type_scoped },
+                DerivedKey::Scoped { lookup: l2, base: b2, term: t2, type_scoped: s2 },
+            ) => lookup == l2 && base == b2 && term == t2 && type_scoped == s2,
+            _ => false,
+        }
+    }
+}
+
+impl Env<'_> {
+    /// The memoised context for `key`, building it with `build` on first use.
+    fn derived(
+        &self,
+        key: DerivedKey,
+        build: impl FnOnce() -> Result<ActiveContext, JsonLdError>,
+    ) -> Result<Rc<Ctx>, JsonLdError> {
+        let derived = &self.root.derived;
+        if let Some((_, c)) = derived.borrow().iter().find(|(k, _)| k.same(&key)) {
+            return Ok(Rc::clone(c));
+        }
+        let ctx = Rc::new(Ctx::new(build()?));
+        derived.borrow_mut().push((key, Rc::clone(&ctx)));
+        Ok(ctx)
+    }
 }
 
 /// An [`ActiveContext`] paired with its (eagerly built) inverse context. The inverse is
@@ -144,17 +260,133 @@ struct Env<'a> {
 struct Ctx {
     active: ActiveContext,
     inverse: InverseContext,
+    /// Memoised IRI Compaction results: iri → (shape, vocab, reverse, result).
+    memo: RefCell<FxMap<String, Vec<MemoEntry>>>,
+    /// On the root context only: contexts derived mid-walk (step 4 reversion, step 5
+    /// property-scoped and step 9 type-scoped contexts), memoised so each distinct switch
+    /// builds its active and inverse context once rather than once per node (and, with
+    /// the root cached in [`LAST_ROOT`], once across calls). The entries own every
+    /// derived [`Ctx`] (and each reverted-to `Arc`) for the root's lifetime, so the
+    /// address keys can never be reused by another context.
+    derived: RefCell<Vec<(DerivedKey, Rc<Ctx>)>>,
 }
 
 impl Ctx {
     fn new(active: ActiveContext) -> Ctx {
         let inverse = active.inverse_context();
-        Ctx { active, inverse }
+        Ctx { active, inverse, memo: RefCell::default(), derived: RefCell::default() }
     }
 
-    /// IRI Compaction against this context (see `context::inverse`'s `compact_iri`).
+    /// IRI Compaction against this context (see `context::inverse`'s `compact_iri`),
+    /// memoised for the value shapes in [`Shape`].
     fn ciri(&self, iri: &str, value: Option<&Json>, vocab: bool, reverse: bool) -> String {
-        compact_iri(&self.active, &self.inverse, iri, value, vocab, reverse)
+        let Some(shape) = Shape::of(value, &self.inverse) else {
+            return compact_iri(&self.active, &self.inverse, iri, value, vocab, reverse);
+        };
+        let hit = |e: &&MemoEntry| e.1 == vocab && e.2 == reverse && e.0.is(&shape);
+        if let Some(entries) = self.memo.borrow().get(iri) {
+            if let Some(e) = entries.iter().find(hit) {
+                debug_assert_eq!(
+                    e.3,
+                    compact_iri(&self.active, &self.inverse, iri, value, vocab, reverse),
+                    "memoised IRI compaction diverged for {iri}"
+                );
+                return e.3.clone();
+            }
+        }
+        let result = compact_iri(&self.active, &self.inverse, iri, value, vocab, reverse);
+        let mut memo = self.memo.borrow_mut();
+        let entries = match memo.get_mut(iri) {
+            Some(entries) => entries,
+            None => memo.entry(iri.to_string()).or_default(),
+        };
+        entries.push((shape.to_owned(), vocab, reverse, result.clone()));
+        result
+    }
+}
+
+/// One memoised IRI Compaction: (value shape, vocab, reverse, result).
+type MemoEntry = (OwnedShape, bool, bool, String);
+
+/// Everything IRI Compaction reads from a `value`, for the shapes it is cheap to
+/// summarise exactly: no value, a plain value object (`@value` plus optional `@type` /
+/// `@language`), or a node object without `@index` / `@list` / `@graph` / `@preserve`
+/// whose `@id` (if any) names no term (so it cannot round-trip through one).
+#[derive(PartialEq)]
+enum Shape<'a> {
+    Bare,
+    Value { ty: Option<&'a str>, lang: Option<&'a str>, lone_str: bool },
+    Node { has_id: bool },
+}
+
+#[derive(PartialEq)]
+enum OwnedShape {
+    Bare,
+    Value { ty: Option<String>, lang: Option<String>, lone_str: bool },
+    Node { has_id: bool },
+}
+
+impl<'a> Shape<'a> {
+    fn of(value: Option<&'a Json>, inverse: &InverseContext) -> Option<Shape<'a>> {
+        let Some(value) = value else {
+            return Some(Shape::Bare);
+        };
+        let Json::Obj(members) = value else {
+            return None;
+        };
+        if let Some(v) = value.get("@value") {
+            let (mut ty, mut lang) = (None, None);
+            for (k, m) in members {
+                match (k.as_str(), m) {
+                    ("@value", _) => {}
+                    ("@type", Json::Str(t)) => ty = Some(t.as_str()),
+                    ("@language", Json::Str(l)) => lang = Some(l.as_str()),
+                    _ => return None,
+                }
+            }
+            let lone_str = members.len() == 1 && matches!(v, Json::Str(_));
+            return Some(Shape::Value { ty, lang, lone_str });
+        }
+        let mut has_id = false;
+        for (k, m) in members {
+            match k.as_str() {
+                "@index" | "@list" | "@graph" | "@preserve" | "@direction" | "@language" => {
+                    return None
+                }
+                "@id" => match m {
+                    Json::Str(id) if !inverse.has_iri(id) => has_id = true,
+                    _ => return None,
+                },
+                _ => {}
+            }
+        }
+        Some(Shape::Node { has_id })
+    }
+
+    fn to_owned(&self) -> OwnedShape {
+        match *self {
+            Shape::Bare => OwnedShape::Bare,
+            Shape::Value { ty, lang, lone_str } => OwnedShape::Value {
+                ty: ty.map(str::to_string),
+                lang: lang.map(str::to_string),
+                lone_str,
+            },
+            Shape::Node { has_id } => OwnedShape::Node { has_id },
+        }
+    }
+}
+
+impl OwnedShape {
+    fn is(&self, shape: &Shape<'_>) -> bool {
+        match (self, shape) {
+            (OwnedShape::Bare, Shape::Bare) => true,
+            (
+                OwnedShape::Value { ty, lang, lone_str },
+                Shape::Value { ty: t2, lang: l2, lone_str: s2 },
+            ) => ty.as_deref() == *t2 && lang.as_deref() == *l2 && lone_str == s2,
+            (OwnedShape::Node { has_id }, Shape::Node { has_id: h2 }) => has_id == h2,
+            _ => false,
+        }
     }
 }
 
@@ -208,7 +440,7 @@ fn compact_element(
 
     // steps 4-5: context adjustments. `owned` carries a replacement context when the
     // previous-context reversion or a property-scoped context applies.
-    let mut owned: Option<Ctx> = None;
+    let mut owned: Option<Rc<Ctx>> = None;
 
     // step 4: non-propagated (type-scoped) contexts do not apply when processing a new
     // node object — revert to the previous context unless element is a value object or
@@ -216,7 +448,9 @@ fn compact_element(
     if let Some(prev) = &ctx.active.previous_context {
         let single_id = members.len() == 1 && members[0].0 == "@id";
         if element.get("@value").is_none() && !single_id {
-            owned = Some(Ctx::new((**prev).clone()));
+            owned = Some(env.derived(DerivedKey::Revert(Arc::clone(prev)), || {
+                Ok((**prev).clone())
+            })?);
         }
     }
 
@@ -226,28 +460,29 @@ fn compact_element(
     // child node (W3C compact/c013) — while the application folds onto the (possibly
     // reverted) context from step 4, mirroring the reference implementations.
     if let Some(ap) = active_property {
-        let next = {
-            let base_active = owned.as_ref().map_or(&ctx.active, |c| &c.active);
-            match ctx.active.term_definition(ap) {
-                Some(def) if def.context().is_some() => {
-                    let local = def.context().expect("guarded above");
-                    Some(base_active.process_scoped(
+        if let Some(def) = ctx.active.term_definition(ap) {
+            if let Some(local) = def.context() {
+                let base: &Ctx = owned.as_deref().unwrap_or(ctx);
+                let key = DerivedKey::Scoped {
+                    lookup: ctx,
+                    base,
+                    term: ap.to_string(),
+                    type_scoped: false,
+                };
+                owned = Some(env.derived(key, || {
+                    base.active.process_scoped(
                         local,
                         def.base_url.as_deref(),
                         true, // override protected
                         true, // propagate
                         env.loader,
                         env.options,
-                    )?)
-                }
-                _ => None,
+                    )
+                })?);
             }
-        };
-        if let Some(next) = next {
-            owned = Some(Ctx::new(next));
         }
     }
-    let cur: &Ctx = owned.as_ref().unwrap_or(ctx);
+    let cur: &Ctx = owned.as_deref().unwrap_or(ctx);
 
     // step 6: value objects / node references — Value Compaction. Return the result when
     // it is a scalar, or unconditionally for a @json-typed term (its payload is raw JSON).
@@ -279,7 +514,7 @@ fn compact_element(
     // step 9: apply any type-scoped contexts declared on the node's (compacted) types,
     // in lexicographic order of the compacted forms, with propagate false. Lookups run
     // against the retained type-scoped context (step 1).
-    let mut owned_t: Option<Ctx> = None;
+    let mut owned_t: Option<Rc<Ctx>> = None;
     if let Some(types) = element.get("@type") {
         let mut compacted_types: Vec<String> = type_strings(types)
             .into_iter()
@@ -289,23 +524,28 @@ fn compact_element(
         for term in &compacted_types {
             if let Some(def) = type_scoped.active.term_definition(term) {
                 if let Some(local) = def.context() {
-                    let next = {
-                        let active_now = owned_t.as_ref().map_or(&cur.active, |c| &c.active);
-                        active_now.process_scoped(
+                    let base: &Ctx = owned_t.as_deref().unwrap_or(cur);
+                    let key = DerivedKey::Scoped {
+                        lookup: type_scoped,
+                        base,
+                        term: term.clone(),
+                        type_scoped: true,
+                    };
+                    owned_t = Some(env.derived(key, || {
+                        base.active.process_scoped(
                             local,
                             def.base_url.as_deref(),
                             false, // override protected
                             false, // propagate
                             env.loader,
                             env.options,
-                        )?
-                    };
-                    owned_t = Some(Ctx::new(next));
+                        )
+                    })?);
                 }
             }
         }
     }
-    let cur: &Ctx = owned_t.as_ref().unwrap_or(cur);
+    let cur: &Ctx = owned_t.as_deref().unwrap_or(cur);
 
     // steps 10-12: build the compacted node.
     let mut result = Json::obj();
@@ -435,7 +675,7 @@ fn compact_element(
         for item in items {
             // 12.8.1: the item's own term selection (container/type/language aware).
             let iap = cur.ciri(key, Some(item), true, inside_reverse);
-            let container = term_container(&cur.active, Some(&iap)).to_vec();
+            let container = term_container(&cur.active, Some(&iap));
             // 12.8.4: array-ness for this term.
             let as_array = container.iter().any(|c| c == "@set")
                 || iap == "@graph"
@@ -479,7 +719,7 @@ fn compact_element(
 
             // 12.8.7: graph objects — the four @graph container forms.
             if item_is_graph {
-                compact_graph_item(&mut result, cur, &iap, &container, item, compacted_item, as_array)?;
+                compact_graph_item(&mut result, cur, &iap, container, item, compacted_item, as_array)?;
                 continue;
             }
 
