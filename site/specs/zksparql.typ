@@ -505,7 +505,11 @@ What "IN (today)" denotes concretely — the fragment realised by the `sparq-zk-
   the integer-valued `xsd:double` fragment (`filter_f64`), signed integer
   (`filter_signed_int`), fixed-point `xsd:decimal` (`filter_decimal`), and, behind the
   off-by-default `dual-leaf` feature, the value-dictionary lanes (`filter_value_dl*`); the
-  general fractional/scientific `xsd:double` filter is deferred;
+  general fractional/scientific `xsd:double` filter is deferred. Only the non-negative
+  integer lane is wired into full query verification today: the verifier's filter-edge
+  check accepts `FilterInt` sub-proofs only, so a manifest using any other lane fails
+  verification (`UnboundFilter`, or `EdgeKindMismatch` for value-dictionary edges). The
+  other lanes have circuits and builders but #strong[await query-binding integration];
 - a single-prover equality `JOIN` across hidden credentials (`join_eq`), where the join term
   stays private.
 

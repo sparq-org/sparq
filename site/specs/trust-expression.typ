@@ -209,8 +209,12 @@ under any trust-requirements document other than the one delivered with it.
 
 #rid("TE-CON-2") #emph[Q] MUST be a SPARQL `ASK` or `SELECT` query whose `WHERE` clause is a
 basic graph pattern, optionally with `FILTER` constraints, in which every predicate is a
-constant (an IRI). Queries outside this fragment are out of scope for this revision; a holder
-receiving one MUST refuse the contract rather than answer a narrower question silently.
+constant (an IRI). A `FILTER` expression MUST NOT contain a graph-pattern expression
+(`EXISTS` or `NOT EXISTS`) at any nesting depth: such a pattern would match statements the
+trust rewrite of @sec-semantics never constrains, and `NOT EXISTS` would make answers depend
+on absence. Queries outside this fragment are out of scope for this revision; a holder or
+verifier receiving one MUST refuse the contract rather than answer a narrower question
+silently.
 
 #note[
   The fragment is the conjunctive core every SPARQL engine shares and the reference rewrite
@@ -356,7 +360,13 @@ if `validFrom` ≤ #emph[t] ≤ `validUntil` under `xsd:dateTime` ordering.
 
 #rid("TE-STAT-3") A contributing statement is #dfn[status-admissible] if and only if its
 reifier carries `trustx:coveredBy` linking it to a status attestation that covers #emph[t]
-and whose authenticity the verifier has established. A revoked credential, an expired window,
+and whose authenticity the verifier has established, #emph[and] the verifier has established
+that the link itself is authentic: the status attestation MUST identify, inside its
+authenticated content, the status entry it attests, and the credential whose authenticated
+content carries the statement MUST name that same status entry. A `coveredBy` link that is
+not bound in both directions by authenticated content MUST be treated as absent, so validity
+evidence for one credential can never be attached to another. The same binding is required
+for the `trustx:coveredBy` link of a certification (`TE-SEM-1`, mode 2). A revoked credential, an expired window,
 and a missing attestation are indistinguishable in effect: no covering attestation, no
 admissible binding.
 
@@ -567,10 +577,12 @@ as the `UNION` of the scope forms admitted by the frameworks of #emph[TR]:
 (ii)~attestation-type scope — `?r_i prov:wasDerivedFrom ?a_i . ?a_i rdf:type ?sc_i .`
 (iii)~single-predicate shape scope — `?sc_i sh:targetSubjectsOf p_i .` matching the
 `trust:forPredicate` desugaring.
-General SHACL shape scopes (beyond the single-predicate desugaring) are #strong[not]
-expressible inside #emph[Q′]; a verifier relying on one MUST additionally validate the
-statement against the shape with a SHACL processor (`TE-CERT-4`), and the conformance suite
-carries such cases as paired SPARQL + SHACL checks.
+General SHACL shape scopes (beyond the single-predicate desugaring, for example a scope
+using `sh:targetNode`) are #strong[not] expressible inside #emph[Q′] and are #strong[excluded
+from this revision]: a verifier whose trust-requirements document admits a framework that
+relies on such a scope MUST refuse the contract (`TE-SEM-5`) rather than answer it. How a
+successful general-shape validation would supply admissible bindings to the rewrite is
+future work.
 
 #rid("TE-SEM-3") The #dfn[trust-scoped answer] of a contract is, by definition: for `ASK`,
 `true` if and only if #emph[Q′] has at least one solution over #emph[R] #emph[after] the
