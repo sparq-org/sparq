@@ -102,6 +102,11 @@ jobs:
           if [ -f notation3tests-report.md ]; then
             cat notation3tests-report.md >> "$GITHUB_STEP_SUMMARY"
           fi
+          # Also surface the headline as a check-run annotation, which the REST API
+          # exposes (step summaries and artifacts are not reachable from every client).
+          if [ -f notation3tests.json ]; then
+            jq -r '"::notice title=notation3tests::\(.pass)/\(.total) pass at \(.rev // "unknown rev"); buckets \(.buckets | tojson)"' notation3tests.json
+          fi
 
       - name: Record unmeasured
         if: steps.fetch.outputs.ok != 'true'
