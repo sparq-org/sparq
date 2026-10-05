@@ -70,10 +70,12 @@ jobs:
           fi
       - name: Lint GitHub Actions workflows (findings reported, not failing)
         run: |
-          set -uo pipefail
+          # GitHub runs `run:` with `bash -e`; findings exit 1, so turn -e off around the pipe.
+          set +e -uo pipefail
           output="$RUNNER_TEMP/actionlint.txt"
           actionlint -no-color .github/workflows/*.yml 2>&1 | tee "$output"
           status=${PIPESTATUS[0]}
+          set -e
           if (( status > 1 )); then
             echo "actionlint failed to run (exit $status)" >&2
             exit "$status"
