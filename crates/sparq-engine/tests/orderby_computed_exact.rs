@@ -65,3 +65,16 @@ fn integer_division_by_zero_is_an_unbound_key_not_infinity() {
     let q = "SELECT ?s WHERE { ?s <http://ex/v> ?v } ORDER BY (1 / ?v)";
     assert_eq!(subjects(&g, q)[0], "<http://ex/b>");
 }
+
+// One ORDER BY column holding both a stored numeric (passed through IF) and a computed
+// one must still compare exactly: the stored key may not fall back to its cached f64.
+#[test]
+fn mixed_stored_and_computed_keys_order_exactly() {
+    let g = graph(&[("a", "0.100000000000000000001"), ("b", "0.100000000000000000002")]);
+    let base = "SELECT ?s WHERE { ?s <http://ex/v> ?v \
+        BIND(IF(?s = <http://ex/a>, ?v, ?v + 0.000000000000000000001) AS ?k) } ORDER BY ?k";
+    assert_eq!(subjects(&g, base), ["<http://ex/a>", "<http://ex/b>"]);
+    assert_eq!(subjects(&g, &format!("{base} LIMIT 1")), ["<http://ex/a>"]);
+    let desc = base.replace("ORDER BY ?k", "ORDER BY DESC(?k)");
+    assert_eq!(subjects(&g, &desc), ["<http://ex/b>", "<http://ex/a>"]);
+}

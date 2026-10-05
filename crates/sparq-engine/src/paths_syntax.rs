@@ -103,7 +103,7 @@ fn display_endpoint(endpoint: Option<&Endpoint>) -> String {
     match endpoint {
         None => "none".to_owned(),
         Some(Endpoint::Node(term)) => term.to_string(),
-        Some(Endpoint::Pattern { source, .. }) => format!("{{ {source} }}"),
+        Some(Endpoint::Pattern { source, variable }) => format!("{variable} {{ {source} }}"),
     }
 }
 

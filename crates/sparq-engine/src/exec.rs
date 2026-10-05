@@ -11456,11 +11456,14 @@ fn cmp_sort_cells(graph: &Graph, local: &LocalVocab, a: &SortCell, c: &SortCell)
         (SortCell::Temp { id, .. }, SortCell::Num { f, .. }) => {
             compare_values(&sort_cell_term(graph, local, *id), &Value::Num(Num::Double(*f))).unwrap_or(Ordering::Equal)
         }
-        (SortCell::Num { f, .. }, SortCell::Val { v, .. }) => {
-            compare_values(&Value::Num(Num::Double(*f)), v).unwrap_or(Ordering::Equal)
+        // A stored numeric against a computed value compares the stored term EXACTLY: its
+        // cached f64 would collapse a high-precision decimal or a big integer and misorder it
+        // against an exact computed key in the same column.
+        (SortCell::Num { id, .. }, SortCell::Val { v, .. }) => {
+            compare_values(&sort_cell_term(graph, local, *id), v).unwrap_or(Ordering::Equal)
         }
-        (SortCell::Val { v, .. }, SortCell::Num { f, .. }) => {
-            compare_values(v, &Value::Num(Num::Double(*f))).unwrap_or(Ordering::Equal)
+        (SortCell::Val { v, .. }, SortCell::Num { id, .. }) => {
+            compare_values(v, &sort_cell_term(graph, local, *id)).unwrap_or(Ordering::Equal)
         }
         // Two IRI sort cells: direct string comparison — no allocation, no term_class
         // dispatch. [SONNET-4.6] sq-7d3dj.30.2

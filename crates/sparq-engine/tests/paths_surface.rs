@@ -108,5 +108,18 @@ fn explain_renders_endpoint_restrictions() {
     )
     .unwrap();
     assert!(pattern.contains(" end=<http://ex/d> "), "{pattern}");
-    assert!(pattern.contains(" start={ ") && !pattern.contains("start=none"), "{pattern}");
+    assert!(pattern.contains(" start=?s { ") && !pattern.contains("start=none"), "{pattern}");
+    // The same pattern selecting its object instead must render differently.
+    let object = explain_paths(
+        &g,
+        "PREFIX ex: <http://ex/> PATHS SHORTEST START ?x = { ?s ex:p ?x } END ?e = ex:d VIA ex:p",
+    )
+    .unwrap();
+    let subject = explain_paths(
+        &g,
+        "PREFIX ex: <http://ex/> PATHS SHORTEST START ?s = { ?s ex:p ?x } END ?e = ex:d VIA ex:p",
+    )
+    .unwrap();
+    assert!(object.contains(" start=?x { "), "{object}");
+    assert!(subject.contains(" start=?s { "), "{subject}");
 }
