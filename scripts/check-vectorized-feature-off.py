@@ -24,7 +24,9 @@ Three legs:
                            file the base-tree directory does NOT (set difference). Different
                            PRs add different files, so git NEVER textually conflicts (the
                            old scalar change_token put every declaring PR on the SAME line).
-  --leg3                   cfg-audit: every vectorized call site in lib.rs/exec.rs is gated
+  --leg3                   cfg-audit: every vectorized call site in lib.rs, exec.rs and
+                           every child module of exec is gated; fails if exec declares a
+                           child module the audit does not scan
   --self-test              run built-in tripwires that MUST fail (guard the guards)
 
 [OPUS-4.8] sq-v3nel (2026-07-07): leg 2 was RE-DESIGNED from a static exact-equality
@@ -77,6 +79,12 @@ import tempfile
 # Constants — the source files leg 3 audits.
 # ---------------------------------------------------------------------------
 _EXEC_RS = "crates/sparq-engine/src/exec.rs"
+# exec.rs is split into child modules under exec/. Leg 3 scans every .rs file there.
+_EXEC_DIR = "crates/sparq-engine/src/exec"
+# Child modules of `exec` that live OUTSIDE exec/ because they are declared with
+# `#[path = ...]`. A new out-of-tree child must be added here, or the
+# child-module tripwire in leg 3 fails.
+_EXEC_PATH_CHILDREN = ("crates/sparq-engine/src/eqjoin.rs",)
 _LIB_RS = "crates/sparq-engine/src/lib.rs"
 _CHUNK_RS = "crates/sparq-engine/src/chunk.rs"
 
@@ -85,6 +93,12 @@ _CHUNK_RS = "crates/sparq-engine/src/chunk.rs"
 _CHUNK_IMPORT_PATTERN = re.compile(r'\bchunk::|DataChunk\b|SelVec\b|VecCmp\b|apply_filter_columnar\b')
 _MOD_CHUNK_PATTERN = re.compile(r'\b(?:mod|pub use)\s+chunk\b')
 _CFG_VECTORIZED = re.compile(r'#\[cfg\(feature\s*=\s*"vectorized"\)\]')
+# A module-level gate on a `mod x;` declaration: `#[cfg(feature = "vectorized")]` or an
+# `all(...)` that includes it. `any(...)` and `not(...)` do not gate, so they never match.
+_CFG_MODULE_VECTORIZED = re.compile(
+    r'#\[cfg\((?:all\((?:(?!any\(|not\()[^\]])*)?feature\s*=\s*"vectorized"')
+_MOD_DECL = re.compile(r'^(\s*)(?:pub(?:\([^)]*\))?\s+)?mod\s+([A-Za-z_][A-Za-z0-9_]*)\s*;')
+_PATH_ATTR = re.compile(r'#\[path\s*=\s*"([^"]+)"\]')
 
 
 # ---------------------------------------------------------------------------
@@ -348,6 +362,61 @@ def _is_inside_cfg_vectorized_block(lines: list[str], target_lineno: int) -> boo
     return False
 
 
+def _exec_audit_files(repo_root: str) -> list[str]:
+    """exec.rs, every .rs file under exec/ (recursively), and the #[path] children.
+    Repo-relative paths with `/` separators, exec.rs first."""
+    files = [_EXEC_RS]
+    exec_dir = os.path.join(repo_root, _EXEC_DIR)
+    for dirpath, dirnames, names in os.walk(exec_dir):
+        dirnames.sort()
+        for n in sorted(names):
+            if n.endswith(".rs"):
+                rel = os.path.relpath(os.path.join(dirpath, n), repo_root)
+                files.append(rel.replace(os.sep, "/"))
+    for rel in _EXEC_PATH_CHILDREN:
+        if os.path.exists(os.path.join(repo_root, rel)) and rel not in files:
+            files.append(rel)
+    return files
+
+
+def _child_module_decls(repo_root: str, rel: str, lines: list[str]):
+    """Yield (lineno, name, child_rel_or_None, gated_on_vectorized) for every
+    out-of-line `mod name;` declaration in `rel`, resolved with rustc's rules:
+    `#[path]` is relative to the declaring file's directory; otherwise the child is
+    <dir>/<stem>/<name>.rs (or <dir>/<name>.rs from a mod.rs/lib.rs), falling back to
+    .../<name>/mod.rs. An indented declaration (inside an inline `mod {}`) yields None,
+    so the caller fails closed instead of guessing."""
+    d = os.path.dirname(rel)
+    stem = os.path.splitext(os.path.basename(rel))[0]
+    base = d if stem in ("mod", "lib", "main") else f"{d}/{stem}"
+    for lineno, line in enumerate(lines, start=1):
+        if line.lstrip().startswith("//"):
+            continue
+        m = _MOD_DECL.match(line)
+        if not m:
+            continue
+        indent, name = m.group(1), m.group(2)
+        attrs: list[str] = []
+        i = lineno - 2
+        while i >= 0 and lines[i].lstrip().startswith(("#[", "//")):
+            attrs.append(lines[i])
+            i -= 1
+        is_gated = any(_CFG_MODULE_VECTORIZED.search(a) for a in attrs)
+        if indent:
+            yield lineno, name, None, is_gated
+            continue
+        path_attr = next((pm.group(1) for a in attrs for pm in [_PATH_ATTR.search(a)] if pm), None)
+        if path_attr is not None:
+            child = os.path.normpath(f"{d}/{path_attr}").replace(os.sep, "/")
+        else:
+            child = f"{base}/{name}.rs"
+            alt = f"{base}/{name}/mod.rs"
+            if (not os.path.exists(os.path.join(repo_root, child))
+                    and os.path.exists(os.path.join(repo_root, alt))):
+                child = alt
+        yield lineno, name, child, is_gated
+
+
 def check_leg3(repo_root: str = ".") -> int:
     """
     Audit that every reference to `vectorized` constructs outside chunk.rs is
@@ -356,9 +425,13 @@ def check_leg3(repo_root: str = ".") -> int:
     Checks:
     1. In lib.rs: every `mod chunk` or `pub use chunk` line has the cfg guard
        within 3 preceding lines.
-    2. In exec.rs: every line referencing vectorized call sites (chunk::, DataChunk,
-       SelVec, VecCmp, apply_filter_columnar) is inside a #[cfg(feature="vectorized")]
-       block OR has the guard within 3 preceding lines.
+    2. In exec.rs, every .rs file under exec/ and each #[path] child in
+       _EXEC_PATH_CHILDREN: every line referencing vectorized call sites (chunk::,
+       DataChunk, SelVec, VecCmp, apply_filter_columnar) is inside a
+       #[cfg(feature="vectorized")] block, has the guard within 3 preceding lines, or
+       sits in a module whose `mod` declaration is gated on `vectorized`.
+    3. Tripwire: every `mod x;` declared by exec.rs (or by a scanned child) resolves
+       to a file in that scanned set; otherwise the audit fails.
     """
     violations: list[str] = []
     findings: list[str] = []
@@ -389,36 +462,85 @@ def check_leg3(repo_root: str = ".") -> int:
                     f"       {line.rstrip()}"
                 )
 
-    # --- exec.rs: vectorized call sites ---
-    exec_rs_path = os.path.join(repo_root, _EXEC_RS)
-    try:
-        with open(exec_rs_path) as fh:
-            exec_lines = fh.readlines()
-    except FileNotFoundError:
-        print(f"[leg3] WARNING: {exec_rs_path!r} not found — skipping exec.rs check")
-        exec_lines = []
+    # --- exec.rs and every child module of `exec`: vectorized call sites ---
+    audited = _exec_audit_files(repo_root)
+    audited_set = set(audited)
+    texts: dict[str, list[str]] = {}
+    for rel in audited:
+        try:
+            with open(os.path.join(repo_root, rel)) as fh:
+                texts[rel] = fh.readlines()
+        except FileNotFoundError:
+            if rel == _EXEC_RS:
+                print(f"[leg3] WARNING: {rel!r} not found — skipping exec check")
+            texts[rel] = []
 
-    for lineno, line in enumerate(exec_lines, start=1):
-        stripped = line.lstrip()
-        # Skip comment lines (single-line)
-        if stripped.startswith("//"):
-            continue
-        # Skip the cfg attribute line itself
-        if _CFG_VECTORIZED.search(line):
-            continue
-        if _CHUNK_IMPORT_PATTERN.search(line):
-            # Accept if guarded by nearby preceding cfg OR inside a cfg block
-            if (_lines_have_cfg_guard(exec_lines, lineno, window=3) or
-                    _is_inside_cfg_vectorized_block(exec_lines, lineno)):
-                findings.append(
-                    f"[leg3] OK  {_EXEC_RS}:{lineno}: vectorized reference is cfg-guarded"
-                )
-            else:
+    # Tripwire: every `mod x;` that exec.rs (or a child) declares must resolve to a
+    # file this audit scans. Otherwise a vectorized reference could hide in an
+    # unscanned module. Files whose declaration is cfg-gated on `vectorized` (or whose
+    # ancestor's is) are gated as a whole.
+    gated: dict[str, str] = {}
+    queue = [_EXEC_RS] if texts.get(_EXEC_RS) else []
+    seen: set[str] = set(queue)
+    decl_count = 0
+    while queue:
+        parent = queue.pop(0)
+        for lineno, name, child, is_gated in _child_module_decls(repo_root, parent, texts[parent]):
+            where = f"{parent}:{lineno}"
+            decl_count += 1
+            if child is None:
                 violations.append(
-                    f"[leg3] VIOLATION: {_EXEC_RS}:{lineno}: vectorized reference "
-                    f"lacks #[cfg(feature = \"vectorized\")] guard:\n"
-                    f"       {line.rstrip()}"
-                )
+                    f"[leg3] VIOLATION: {where}: cannot resolve the file of child module "
+                    f"`{name}` (indented out-of-line `mod` declaration), so leg 3 cannot "
+                    "scan it")
+                continue
+            if child not in audited_set:
+                violations.append(
+                    f"[leg3] VIOLATION: {where}: child module `{name}` resolves to "
+                    f"{child}, which leg 3 does not scan. Move it under {_EXEC_DIR}/ or "
+                    "add it to _EXEC_PATH_CHILDREN.")
+                continue
+            if (is_gated or parent in gated) and child not in gated:
+                gated[child] = where
+            if child not in seen:
+                seen.add(child)
+                queue.append(child)
+
+    for rel in audited:
+        lines = texts[rel]
+        for lineno, line in enumerate(lines, start=1):
+            stripped = line.lstrip()
+            # Skip comment lines (single-line)
+            if stripped.startswith("//"):
+                continue
+            # Skip the cfg attribute line itself
+            if _CFG_VECTORIZED.search(line):
+                continue
+            if _CHUNK_IMPORT_PATTERN.search(line):
+                # Accept if guarded by nearby preceding cfg, inside a cfg block, or the
+                # whole file is a module gated on `vectorized`.
+                if rel in gated:
+                    findings.append(
+                        f"[leg3] OK  {rel}:{lineno}: vectorized reference is in a module "
+                        f"gated at {gated[rel]}"
+                    )
+                elif (_lines_have_cfg_guard(lines, lineno, window=3) or
+                        _is_inside_cfg_vectorized_block(lines, lineno)):
+                    findings.append(
+                        f"[leg3] OK  {rel}:{lineno}: vectorized reference is cfg-guarded"
+                    )
+                else:
+                    violations.append(
+                        f"[leg3] VIOLATION: {rel}:{lineno}: vectorized reference "
+                        f"lacks #[cfg(feature = \"vectorized\")] guard:\n"
+                        f"       {line.rstrip()}"
+                    )
+
+    print(f"[leg3] scanned {len(audited)} exec file(s): {_EXEC_RS}, "
+          f"{len(audited) - 1 - len([p for p in audited if p in _EXEC_PATH_CHILDREN])} "
+          f"under {_EXEC_DIR}/, and {', '.join(p for p in audited if p in _EXEC_PATH_CHILDREN) or 'no'} "
+          "#[path] child(ren)")
+    print(f"[leg3] checked {decl_count} child module declaration(s) against that set")
 
     for f in findings:
         print(f)
@@ -426,7 +548,8 @@ def check_leg3(repo_root: str = ".") -> int:
     if violations:
         for v in violations:
             print(v)
-        print(f"\n[leg3] FAIL — {len(violations)} ungated vectorized reference(s). "
+        print(f"\n[leg3] FAIL — {len(violations)} violation(s): ungated vectorized "
+              "reference(s) or child module(s) leg 3 does not scan. "
               "Every call site and registration of the `vectorized` feature must be "
               "inside #[cfg(feature = \"vectorized\")].")
         return 1
@@ -501,6 +624,39 @@ def _leg2_dynamic_on_bytes(base_bytes: bytes, head_bytes: bytes,
             for n in os.listdir(d):
                 os.unlink(os.path.join(d, n))
             os.rmdir(d)
+
+
+def _leg3_on_tree(files: dict[str, str]) -> int:
+    """Run check_leg3 on a synthetic repo tree of {repo-relative path: content}."""
+    root = tempfile.mkdtemp(prefix="leg3-")
+    try:
+        for rel, content in files.items():
+            full = os.path.join(root, rel)
+            os.makedirs(os.path.dirname(full), exist_ok=True)
+            with open(full, "w") as fh:
+                fh.write(content)
+        return check_leg3(repo_root=root)
+    finally:
+        for dirpath, dirnames, names in os.walk(root, topdown=False):
+            for n in names:
+                os.unlink(os.path.join(dirpath, n))
+            os.rmdir(dirpath)
+
+
+# Synthetic leg-3 trees for the tripwires (also used by scripts/tests).
+_LEG3_TREE_OK = {
+    _EXEC_RS: "mod child;\n#[cfg(feature = \"vectorized\")]\nmod vec_only;\n",
+    f"{_EXEC_DIR}/child.rs": "#[cfg(feature = \"vectorized\")]\nuse crate::chunk::DataChunk;\n",
+    f"{_EXEC_DIR}/vec_only.rs": "use crate::chunk::DataChunk;\n",
+}
+_LEG3_TREE_UNGATED_CHILD = {
+    _EXEC_RS: "mod child;\n",
+    f"{_EXEC_DIR}/child.rs": "fn f(_c: &crate::chunk::DataChunk) {}\n",
+}
+_LEG3_TREE_UNSCANNED_CHILD = {
+    _EXEC_RS: "#[path = \"elsewhere.rs\"]\nmod hidden;\n",
+    "crates/sparq-engine/src/elsewhere.rs": "fn f(_c: &crate::chunk::DataChunk) {}\n",
+}
 
 
 def run_self_test() -> int:
@@ -582,6 +738,30 @@ def run_self_test() -> int:
         print("TRIPWIRE 5 (leg2 V2): FAIL — undeclared change slipped through V2; the gate is disabled")
         all_passed = False
 
+    # ----- Tripwire 6: Leg 3 must reject an ungated reference in an exec child module -----
+    rc = _leg3_on_tree(_LEG3_TREE_UNGATED_CHILD)
+    if rc != 0:
+        print("TRIPWIRE 6 (leg3): PASS — ungated vectorized reference in exec/child.rs rejected")
+    else:
+        print("TRIPWIRE 6 (leg3): FAIL — exec child modules are not audited")
+        all_passed = False
+
+    # ----- Tripwire 7: Leg 3 must reject a child module it does not scan -----
+    rc = _leg3_on_tree(_LEG3_TREE_UNSCANNED_CHILD)
+    if rc != 0:
+        print("TRIPWIRE 7 (leg3): PASS — exec.rs child module outside the scanned set rejected")
+    else:
+        print("TRIPWIRE 7 (leg3): FAIL — an unscanned exec child module slipped through")
+        all_passed = False
+
+    # ----- Tripwire 8: Leg 3 must ACCEPT gated references and module-level gates -----
+    rc = _leg3_on_tree(_LEG3_TREE_OK)
+    if rc == 0:
+        print("TRIPWIRE 8 (leg3): PASS — item-level and module-level gates accepted")
+    else:
+        print("TRIPWIRE 8 (leg3): FAIL — gated references rejected; false positive")
+        all_passed = False
+
     if all_passed:
         print("\n[self-test] OK — all tripwires fired correctly. The guards can fail (and "
               "the dynamic leg2 accepts a declared change).")
@@ -608,7 +788,8 @@ def main() -> int:
                            "+ base/head feature-off-declaration.json (legacy scalar). Add "
                            "--declarations-dirs for mechanism V2 (per-PR files).")
     mode.add_argument("--leg3", action="store_true",
-                      help="cfg-audit of vectorized call sites in lib.rs and exec.rs")
+                      help="cfg-audit of vectorized call sites in lib.rs, exec.rs and "
+                           "exec's child modules")
     mode.add_argument("--self-test", dest="self_test", action="store_true",
                       help="run built-in tripwires (both must exit non-zero to pass)")
     parser.add_argument("--declarations-dirs", dest="declarations_dirs", nargs=2,

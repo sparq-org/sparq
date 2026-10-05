@@ -323,6 +323,43 @@ def test_leg2_no_dirs_falls_back_to_scalar() -> bool:
     return False
 
 
+def test_leg3_ungated_child_rejected() -> bool:
+    """An ungated vectorized reference in an exec/ child module must fail leg 3."""
+    if _check._leg3_on_tree(_check._LEG3_TREE_UNGATED_CHILD) != 0:
+        print("  PASS — ungated reference in exec/child.rs rejected")
+        return True
+    print("  FAIL — exec child modules are not audited")
+    return False
+
+
+def test_leg3_unscanned_child_rejected() -> bool:
+    """exec.rs declaring a child module outside the scanned set must fail leg 3."""
+    if _check._leg3_on_tree(_check._LEG3_TREE_UNSCANNED_CHILD) != 0:
+        print("  PASS — #[path] child outside the scanned set rejected")
+        return True
+    print("  FAIL — unscanned child module accepted")
+    return False
+
+
+def test_leg3_gated_tree_accepted() -> bool:
+    """Item-level and module-level `vectorized` gates both satisfy leg 3."""
+    if _check._leg3_on_tree(_check._LEG3_TREE_OK) == 0:
+        print("  PASS — gated references accepted")
+        return True
+    print("  FAIL — gated references rejected")
+    return False
+
+
+def test_leg3_real_tree_passes() -> bool:
+    """The repo's own exec tree passes leg 3."""
+    root = os.path.dirname(_SCRIPT_DIR)
+    if _check.check_leg3(repo_root=root) == 0:
+        print("  PASS — repo exec tree is clean")
+        return True
+    print("  FAIL — repo exec tree has violations")
+    return False
+
+
 # ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
@@ -344,6 +381,10 @@ def main() -> int:
         ("leg2 V2 <PR>.md declaration accepted", test_leg2_v2_md_declaration_accepted),
         ("leg2 legacy scalar accepted in transition window", test_leg2_legacy_scalar_still_accepted_in_transition),
         ("leg2 no dirs falls back to scalar path", test_leg2_no_dirs_falls_back_to_scalar),
+        ("leg3 ungated reference in exec child rejected", test_leg3_ungated_child_rejected),
+        ("leg3 unscanned exec child module rejected", test_leg3_unscanned_child_rejected),
+        ("leg3 item- and module-level gates accepted", test_leg3_gated_tree_accepted),
+        ("leg3 repo exec tree passes", test_leg3_real_tree_passes),
     ]
 
     passed = 0
