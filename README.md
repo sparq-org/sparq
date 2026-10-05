@@ -1,4 +1,6 @@
 <p align="center">
+
+[![Deploy to Railyard](https://app.railyard.run/deploy/badge)](https://app.railyard.run/deploy?repo=https://github.com/sparq-org/sparq)
   <img src="assets/logo.svg" alt="sparq" width="280">
 </p>
 
