@@ -4,16 +4,16 @@
 # feature-matrix `opt-in-features` strategy by scripts/assemble-feature-matrix.py
 # (the `setup` job emits the combined matrix as JSON consumed via fromJSON). Adding a
 # leg for THIS crate edits no OTHER crate's fragment, so concurrent opt-in-feature PRs for
-# DIFFERENT crates never textually conflict (bead sq-ibrze). [OPUS-4.8]
-# SCOPE ([SONNET-4.6] issue #2384): adding/removing/renaming a leg changes the emitted
+# DIFFERENT crates never textually conflict (bead sq-ibrze).
+# SCOPE (issue #2384): adding/removing/renaming a leg changes the emitted
 # leg-name set, and THAT is a TWO-FILE change — this fragment AND
 # scripts/tests/feature-matrix-legnames.golden.txt. Every other edit here (features,
 # test, tier, tier-reason, comments) leaves the name set alone and is a SINGLE-file
 # change. See README.md in this directory.
 #
-# CONTRACT (gate-critical): each leg's emitted check-run NAME is `opt-in <name>`,
-# discovered as a REQUIRED check by the ci-summary `gate` aggregator BY NAME. Keep
-# `name` free of the whole words "advisory"/"informational" or the leg stops gating.
+# CONTRACT: each leg's emitted check-run NAME is `opt-in <name>` (pinned by the golden
+# leg-name file). Keep `name` free of the whole words "advisory"/"informational", which
+# mark a check as non-blocking.
 # Fields: name (required -> check-run name), crate (required), features (required,
 # non-empty comma list), test (bool — run `cargo test` for the leg).
 
@@ -23,7 +23,7 @@
   features: "serialize-rdf"
   test: true
 
-# [OPUS-4.8] sq-vczh2 (epic sq-2m6zm): the `terse` subcommand (forwards the LEAN
+# sq-vczh2 (epic sq-2m6zm): the `terse` subcommand (forwards the LEAN
 # `sparq-terse` build). The `cmd_terse` / `terse_expansion_to_json` dispatch + the
 # `tests/terse_cli.rs` integration suite are `#[cfg(feature = "terse")]`, so the default CLI
 # build never compiled, clippy'd or ran them. This leg builds the subcommand, runs
@@ -36,7 +36,7 @@
   features: "terse"
   test: true
 
-# [FABLE-5] sq-8ju74: the HDT loader hook (`hdt`) + the `to-hdt` exporter (`hdt-write`,
+# sq-8ju74: the HDT loader hook (`hdt`) + the `to-hdt` exporter (`hdt-write`,
 # which implies `hdt`). Both suites were SILENT GAPS before this leg: tests/hdt_cli.rs
 # (`#[cfg(feature = "hdt")]`) and tests/hdt_write_cli.rs (`#[cfg(feature = "hdt-write")]`)
 # never ran in CI because no leg enabled the features (the workflow's old SCOPE note
@@ -50,7 +50,7 @@
   features: "hdt,hdt-write"
   test: true
 
-# [FABLE-5] sq-lsp7k.8: the `tabular` subcommand — materializing tabular→RDF import (CSV
+# sq-lsp7k.8: the `tabular` subcommand — materializing tabular→RDF import (CSV
 # direct mapping + the R2RML materializing subset over CSV logical tables). The module,
 # its inline unit tests, and tests/tabular_cli.rs (incl. the data-driven W3C-adapted R2RML
 # fixture suite under tests/fixtures/r2rml/) are all `#[cfg(feature = "tabular")]`, so the
@@ -63,14 +63,14 @@
   features: "tabular"
   test: true
 
-# [GPT-5.6] sq-lsp7k.28: the deterministic RDF triple-set `diff` subcommand and its
+# sq-lsp7k.28: the deterministic RDF triple-set `diff` subcommand and its
 # subprocess contract suite are compiled only when this default-OFF feature is enabled.
 - name: "sparq-cli (diff)"
   crate: "sparq-cli"
   features: "diff"
   test: true
 
-# [OPUS-5] sq-2ch27 (Phase E6): the OWL 2 EL classifier surface — `--reason el` on `query`,
+# sq-2ch27 (Phase E6): the OWL 2 EL classifier surface — `--reason el` on `query`,
 # `reason <f> <fmt> el`, and the `classify` subcommand (forwards `sparq-reason-el` WITH its
 # `rbox` feature, i.e. the E1+E2 capability this bead depends on). Same gap as the legs above:
 # the `classify` dispatch arm, `el_classify_parts` / `load_el_classified` / `cmd_classify`, and
@@ -86,7 +86,7 @@
   features: "el"
   test: true
 
-# [SONNET-4.6] sq-p4zci: the stratified-Datalog surface — `--reason datalog:<rules.dlog>` on
+# sq-p4zci: the stratified-Datalog surface — `--reason datalog:<rules.dlog>` on
 # `query` and `reason <f> <fmt> datalog:<rules.dlog>` (forwards `sparq-reason/datalog`). Same
 # gap as the legs above: `load_datalog` and the whole `tests/datalog_cli.rs` suite are
 # `#[cfg(feature = "datalog")]`, so the default build (and ci.yml's `--workspace --all-targets`

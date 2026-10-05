@@ -92,8 +92,8 @@ Two things that rule out a blind find-and-replace here:
   is deliberately **not** matched.
 
 Why the surface matters: this gate used to scan `*.md` only, so a banned term reached a
-merged-ready PR as a `pub` Rust type **and** a published `rdfs:comment` with a fully green
-`ci-summary / gate` (issue #3811). A term banned from public API must be checked in the
+merged-ready PR as a `pub` Rust type **and** a published `rdfs:comment` with fully
+green CI (issue #3811). A term banned from public API must be checked in the
 files that carry public API.
 
 ## Allowed exceptions

@@ -15,7 +15,7 @@ mkdir -p "$OUTPUT_DIR"
 cp "$INPUT_SVG" "$OUTPUT_DIR/$BASENAME.svg"
 
 # Detect available tool.
-# [OPUS-4.8] sparq vendoring note: the `npx --yes @aspect-build/resvg` path can DOWNLOAD and
+# sparq vendoring note: the `npx --yes @aspect-build/resvg` path can DOWNLOAD and
 # EXECUTE a remote package, so we never probe it as a tool-detection side effect (a silent
 # network/supply-chain action). It is opt-in only: set ALLOW_NPX_RESVG=1 to enable it.
 TOOL=""
@@ -56,7 +56,7 @@ for SIZE in "${SIZES[@]}"; do
       npx --yes @aspect-build/resvg "$INPUT_SVG" "$OUTPUT" --width "$SIZE"
       ;;
     sharp)
-      # [OPUS-4.8] Pass paths as argv (process.argv), NOT interpolated into the JS source:
+      # Pass paths as argv (process.argv), NOT interpolated into the JS source:
       # interpolation breaks on paths containing a quote and would allow JS injection from an
       # attacker-controlled path. Resize by width only (height auto) to preserve aspect ratio,
       # matching the other backends (which all scale by --width).

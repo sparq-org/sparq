@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [SONNET-4.6] sq-qcnn.31: Hermetic tests for check-feature-test-execution.py.
+# sq-qcnn.31: Hermetic tests for check-feature-test-execution.py.
 #
 # Covers the acceptance criteria from the bead:
 #   (a) --check GREEN on the real crates/ tree (all gated tests covered or allowlisted)

@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-# [OPUS-4.8] sq-eifd: unit tests for the bench-adapter parsers. Authored by Opus
-# 4.8 (Fable unavailable; flag for re-review when Fable returns).
+# sq-eifd: unit tests for the bench-adapter parsers.
 #
 # FIXTURE-based parser tests that DO NOT need a live engine:
 #   - shacl_report_count : parse a SHACL ValidationReport graph -> (conforms, viol)
@@ -66,7 +65,7 @@ def test_http():
     except ValueError:
         check("http.bad-doc-raises", True, True)
 
-    # [OPUS-4.8] A non-boolean "boolean" member (e.g. the string "false") is an
+    # A non-boolean "boolean" member (e.g. the string "false") is an
     # invalid SPARQL-JSON ASK result and must be rejected, not coerced via bool().
     try:
         http.parse_sparql_json('{"head":{},"boolean":"false"}')
@@ -74,7 +73,7 @@ def test_http():
     except ValueError:
         check("http.non-bool-boolean-raises", True, True)
 
-    # [FABLE-5] sq-7d3dj.34: --profile helpers (the offline-testable half).
+    # sq-7d3dj.34: --profile helpers (the offline-testable half).
     check(
         "http.split_endpoint.plain",
         http.split_endpoint("http://localhost:3030/ds/query"),
@@ -281,7 +280,7 @@ def test_shacl():
     check("shacl.report.conforming.conforms", rc["conforms"], True)
 
 
-# --- vlog / nemo self-reported-materialization parsers ([FABLE-5] sq-hmd7l.32) ----
+# --- vlog / nemo self-reported-materialization parsers (sq-hmd7l.32) ----
 # The materialize timing basis: both adapters prefer the engine's OWN loaded-graph
 # materialization figure over whole-process wall (which would include the .nt load
 # + closure export — an overstatement at LUBM(100) scale). These tests pin the parse
@@ -342,7 +341,7 @@ def test_reason_parsers():
 
 
 def test_python_bindings():
-    # [FABLE-5] sq-hmd7l.18: the cross-engine row-count agreement gate + the
+    # sq-hmd7l.18: the cross-engine row-count agreement gate + the
     # binding-overhead column (python whole-call minus sparq-cli engine-internal).
     # Stdlib-only: check_agreement takes parsed docs, no engine imports needed.
     import python_rdf_adapter as pyb

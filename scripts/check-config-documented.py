@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-# [OPUS-4.8] Gate G6 — new-config/flag→docs (bead sq-ncvq.9, epic sq-ncvq).
-# Authored by Opus 4.8 (Fable unavailable; flag for re-review when Fable returns).
+# Gate G6 — new-config/flag→docs (bead sq-ncvq.9, epic sq-ncvq).
 #
 # PROACTIVE / merge-time half of the maintenance flow-on system
 # (research/maintenance-flow-on-automation-design.md §2.1, gate G6). It is a SUBSET
@@ -10,7 +9,7 @@
 # hand-rolled arg-parser match arm (a string literal, not a `pub` symbol) slips
 # right past it — that is exactly the gap G6 closes.
 #
-# [OPUS-4.8] sq-ncvq.10 doc-sync: this gate is the "Enforced by: **G6**" cell of
+# sq-ncvq.10 doc-sync: this gate is the "Enforced by: **G6**" cell of
 # the "public config key / CLI flag / env var" row in the AGENTS.md "Post-batch
 # re-evaluation checklist" table. That table row and this docstring are the two
 # halves of the same rule — change one and update the other; the divergence is

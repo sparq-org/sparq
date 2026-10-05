@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [OPUS-4.8] sq-toze.6 (cert gap GX-5) — UNSAFE-COUNT RATCHET gate.
+# sq-toze.6 (cert gap GX-5) — UNSAFE-COUNT RATCHET gate.
 #
 # Promotes the previously-INFORMATIONAL cargo-geiger report (ci.yml `geiger`, bead
 # sq-emay — whose own comment said "Promote to a gate later only with a checked-in
@@ -166,7 +166,7 @@ def cmd_seed(path):
     counts = per_crate_counts()
     doc = {
         "_comment": [
-            "[OPUS-4.8] sq-toze.6 / cert gap GX-5 — UNSAFE-COUNT RATCHET snapshot.",
+            "sq-toze.6 / cert gap GX-5 — UNSAFE-COUNT RATCHET snapshot.",
             "One entry per first-party crate that contains `unsafe`, with the count of",
             "unsafe sites (block / fn / impl / trait / extern) the crate currently holds.",
             "scripts/unsafe-gate.py --check FAILS CI when a crate's live count RISES above",

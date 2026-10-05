@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# [OPUS-4.8] bead sq-mraf — end-to-end proof of the build-BOUNDARY honesty assertion in
-# site/scripts/build-papers.mjs. Authored by Opus 4.8 (Fable unavailable; flag for re-review
-# when Fable returns).
+# bead sq-mraf — end-to-end proof of the build-BOUNDARY honesty assertion in
+# site/scripts/build-papers.mjs.
 #
 # WHY: the data-layer runHonestyGate() validates the evidence-record envelope but never reads
 # PROSE (the .typ paper text or the human `note` fields). sq-mraf adds a build-boundary
@@ -35,7 +34,7 @@ BUILDER="${ROOT}/site/scripts/build-papers.mjs"
 PERF_GATE="${ROOT}/scripts/check-no-perf-numbers.py"
 PRIV_GATE="${ROOT}/scripts/check-privacy-claims.sh"
 SHARED="${ROOT}/scripts/honesty-phrases.json"
-# [OPUS-4.8] sq-gum8.13: build-papers.mjs now runs the fail-closed evidence-BINDING verifier
+# sq-gum8.13: build-papers.mjs now runs the fail-closed evidence-BINDING verifier
 # (scripts/verify-paper-evidence.py) at the build boundary, resolving each canonical record's
 # `binding` against its committed source. The throwaway repo must therefore mirror that too —
 # copy the verifier and seed a shrink-only allowlist that TOLERATES this test's synthetic
@@ -70,7 +69,7 @@ cp "$BUILDER"    "${REPO}/site/scripts/build-papers.mjs"
 cp "$PERF_GATE"  "${REPO}/scripts/check-no-perf-numbers.py"
 cp "$PRIV_GATE"  "${REPO}/scripts/check-privacy-claims.sh"
 cp "$SHARED"     "${REPO}/scripts/honesty-phrases.json"
-# [OPUS-4.8] sq-gum8.13: the builder now invokes this verifier at the build boundary.
+# sq-gum8.13: the builder now invokes this verifier at the build boundary.
 cp "$VERIFIER"   "${REPO}/scripts/verify-paper-evidence.py"
 
 # Minimal papers.ts the builder's regex registry parser understands (slug + source).
@@ -98,7 +97,7 @@ TYP
   "value": 0.9, "environment": "canonical", "source": "crates/x/tests/y.rs::z",
   "note": "Asserted recall floor on a 20000-vector synthetic set; machine-independent." } } }
 JSON
-  # [OPUS-4.8] sq-gum8.13: the fixture record above is canonical + UNBOUND (no `binding`), and
+  # sq-gum8.13: the fixture record above is canonical + UNBOUND (no `binding`), and
   # its `source` is a fake path that does not resolve in this throwaway repo. The build-boundary
   # evidence-BINDING verifier is fail-closed on exactly that. This record is incidental
   # scaffolding — the thing under test is the .typ PERF / evidence-note PRIVACY phrase gate, not

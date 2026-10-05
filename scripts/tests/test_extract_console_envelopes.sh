@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# [FABLE-5] Fixture tests for scripts/bench/extract-console-envelopes.sh — the
+# Fixture tests for scripts/bench/extract-console-envelopes.sh — the
 # serial-console envelope recovery channel of the canonical gathers (PR #3488
 # review round 1). The instance scripts emit `===ENVELOPE-BEGIN <name>.json===`
 # with NO space before the closing ===; a naive awk `name=$2` therefore recovered

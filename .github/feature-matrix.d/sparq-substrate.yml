@@ -3,24 +3,24 @@
 # One self-contained leg mapping per opt-in feature(group). Assembled into the
 # feature-matrix `opt-in-features` strategy by scripts/assemble-feature-matrix.py.
 # Adding a leg for THIS crate edits no OTHER crate's fragment, so concurrent opt-in-feature PRs
-# for DIFFERENT crates never textually conflict (bead sq-ibrze). [OPUS-4.8]
-# SCOPE ([SONNET-4.6] issue #2384): adding/removing/renaming a leg changes the emitted
+# for DIFFERENT crates never textually conflict (bead sq-ibrze).
+# SCOPE (issue #2384): adding/removing/renaming a leg changes the emitted
 # leg-name set, and THAT is a TWO-FILE change — this fragment AND
 # scripts/tests/feature-matrix-legnames.golden.txt. Every other edit here (features,
 # test, tier, tier-reason, comments) leaves the name set alone and is a SINGLE-file
 # change. See README.md in this directory.
 #
-# CONTRACT (gate-critical): each leg's emitted check-run NAME is `opt-in <name>`,
-# discovered as a REQUIRED check by the ci-summary `gate` aggregator BY NAME. Keep
-# `name` free of the whole words "advisory"/"informational" or the leg stops gating.
+# CONTRACT: each leg's emitted check-run NAME is `opt-in <name>` (pinned by the golden
+# leg-name file). Keep `name` free of the whole words "advisory"/"informational", which
+# mark a check as non-blocking.
 
-# [OPUS-4.8] sq-fmprw (epic sq-qonbz): the shared-eval-substrate KEYSTONE crate. Its
+# sq-fmprw (epic sq-qonbz): the shared-eval-substrate KEYSTONE crate. Its
 # entire surface lives behind DEFAULT-OFF features, so the workspace `cargo
 # {build,test,clippy} --workspace` lane (which passes NO `--features`) compiles NONE of it
 # and the feature-ON state would otherwise be UNgated. This single leg builds + tests +
 # `clippy --all-targets -D warnings` the MAXIMAL feature set so the WHOLE correctness core
 # is exercised.
-# [OPUS-4.8] sq-qcnn.3 (epic sq-qcnn): EXPANDED the feature set from `rows,numeric` to the
+# sq-qcnn.3 (epic sq-qcnn): EXPANDED the feature set from `rows,numeric` to the
 # full `rows,numeric,join,compare`. The `join` (four id-tuple join kernels — merge / hash /
 # bind / leapfrog-trie WCOJ) and `compare` (SPARQL term total order) modules have now
 # LANDED (Phases 3/4) but their unit tests were run by NOTHING: nothing in the workspace
@@ -29,7 +29,7 @@
 # here builds + tests + clippies the real join-probe + term-ordering paths (and matches the
 # `--features numeric,join,compare,rows` set the coverage + mutation ratchets measure). The
 # DEFAULT (feature-OFF) build is still covered by the workspace lane.
-# [OPUS-5] PR #3799 review: ADDED `overhead`. `src/overhead.rs` is behind
+# PR #3799 review: ADDED `overhead`. `src/overhead.rs` is behind
 # `#[cfg(feature = "overhead")]` (lib.rs) and carries its own `#[cfg(test)] mod tests` —
 # including `inline_num_binop_float_promotion_matches_substrate_bit_exactly`, the ONLY guard
 # on the hand-rolled `inline_num_binop` replica of `Num::binop`. With `overhead` absent from

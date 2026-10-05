@@ -81,8 +81,8 @@ prose:
   `cryptographically private/sound/secure`). <!-- privacy-claims-allow: documents the gate's own phrase list; sq-toze.35 -->
 - **CI wiring:** HARD gate job **`privacy-claims (ZK/MPC honesty gate)`** in
   [`.github/workflows/docs-quality.yml`](../../.github/workflows/docs-quality.yml). The job name
-  carries no `advisory`/`informational` word, so the `ci-summary` aggregator (the single required
-  branch-protection check) gates on it — an unqualified claim **fails the merge**.
+  fails on an unqualified claim on pull requests, but it is **not** a required check (only
+  `ci-fast` is; the `ci-summary` aggregator is deleted) — it reports, it does not block the merge.
 - **Allow-list mechanism (the audit trail).** The phrase set is deliberately coarse, so it also
   matches *legitimate* hedged / negative / "model"-qualified mentions (e.g. "**NOT** a sound
   verifier", "documented **NOT** cryptographically sound", "which *model* privacy-preserving"). A <!-- privacy-claims-allow: documents legitimate hedged-usage examples; sq-toze.35 -->

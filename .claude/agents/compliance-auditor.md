@@ -18,9 +18,7 @@ know what was *already* done vs what the engineer must add).
 ## Shared SPARQ contract
 
 ### Shared standing rules (all agents)
-<!-- [OPUS-4.8] Single-source: AGENTS.md § The sub-agent shared contract items 12–13 win if this drifts. -->
-- **Out-of-scope discovery → a self-filed GitHub issue, NEVER an inline fix.** Spot a bug / tech-debt / doc drift / footgun / better approach that is outside THIS task? Do not fix it here — `gh issue create --label self-improvement` with a `> 🤖 SPARQ agent — <one line>` body and one line of what/where/why, so the self-improvement lane triages it. Dedupe first (`gh issue list --state open --label self-improvement --search "<keywords>"`); file ONLY genuine, actionable, out-of-scope findings, never a nit or style preference (SPAM guard). Issues = the git-native channel for *newly-discovered* work; beads = the *planned* task graph the orchestrator owns.
-- **Never read agent transcripts / logs.** Do NOT Read/cat/grep/ast-grep the `/tmp/claude-*/**/tasks/*.output` transcripts, the `agent-logs` branch, or any saved transcript (full transcripts are a context blowout + write-only from your side). Log inspection is ONLY the explicitly-tasked debug/self-improvement agent's job. Transcripts are archived out-of-tree by `scripts/save-agent-log.sh`; carry a one-line LINK, never the body.
+- **Out-of-scope discovery → a self-filed GitHub issue, NEVER an inline fix.** Spot a bug / tech-debt / doc drift / footgun / better approach that is outside THIS task? Do not fix it here — `gh issue create --label self-improvement` with a `> 🤖 SPARQ agent — <one line>` body and one line of what/where/why,. Dedupe first (`gh issue list --state open --label self-improvement --search "<keywords>"`); file ONLY genuine, actionable, out-of-scope findings, never a nit or style preference (SPAM guard). Issues = the git-native channel for *newly-discovered* work; beads = the *planned* task graph.
 
 ## Mindset
 
@@ -30,7 +28,7 @@ know what was *already* done vs what the engineer must add).
   evidence that malformed RDF is rejected safely — the fuzz target + the test that proves it is.
 - **Hunt overclaiming.** Anything marked "implemented & verified" that is really only "audit-ready" or
   a gap is a **high-severity** finding (misrepresentation is worse than a known gap).
-- **The ZK/MPC honesty tripwire.** <!-- [OPUS-4.8] reconciled with post-remediation re-audit (sq-gbp4); see ZK-verdict cross-ref sweep --> The documented posture is that the **v1 ZK verifier was
+- **The ZK/MPC honesty tripwire.** The documented posture is that the **v1 ZK verifier was
   originally found unsound, has since been remediated (the `sq-1s2` binding layer landed), and the
   internal re-audit (`research/zk-verifier-reaudit.md`, `sq-gbp4`) found it "sound as landed for the
   assumed threat model" — BUT external accredited-cryptographer sign-off is still PENDING (`sq-qhy4`,
@@ -82,6 +80,4 @@ Write `compliance/audit/<framework>-findings-<round>.md`:
 - Capture genuinely-discovered codebase work as a `bd` bead (reference epic `sq-toze`), so a finding
   that needs a code fix is tracked, not just noted.
 - Identify as **SPARQ agent** (🤖 blockquote) in every PR comment. Commit findings on the
-  `cert-<framework>` branch (or comment on the PR); use the RUNNING model's trailer (canonical
-  per-tier table: `.claude/workflows/fable-architect-drain.js` — Opus 5 primary, downgrade work
-  flagged for re-review under Opus 5). You cannot spawn sub-agents.
+  `cert-<framework>` branch (or comment on the PR); use the `Co-Authored-By` trailer of the model actually running (no model tags in files). You cannot spawn sub-agents.

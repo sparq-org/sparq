@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [SONNET-4.6] sq-hmd7l.13 — igraph / NetworKit leg of the LDBC Graphalytics comparison.
+# sq-hmd7l.13 — igraph / NetworKit leg of the LDBC Graphalytics comparison.
 #
 # Reads a dataset in the Graphalytics on-disk format, runs ONE algorithm on the named
 # engine, and writes the result in the Graphalytics reference-output format so

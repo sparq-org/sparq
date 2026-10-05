@@ -1,6 +1,6 @@
 {
   "_comment": [
-    "[OPUS-4.8] sq-mraf (Option C) — the SINGLE shared source of truth for the ZK/MPC",
+    "sq-mraf (Option C) — the SINGLE shared source of truth for the ZK/MPC",
     "privacy/soundness FORBIDDEN-PHRASE list, consumed by BOTH honesty entry points so",
     "they cannot drift:",
     "  1. scripts/check-privacy-claims.sh   — the CI gate over the outward claim surface",

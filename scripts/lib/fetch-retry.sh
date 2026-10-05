@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# [OPUS-4.8] sq-nj0pd — shared network-retry helpers for the W3C / community
+# sq-nj0pd — shared network-retry helpers for the W3C / community
 # conformance suite-fetch scripts. Source (do NOT execute) this file:
 #
 #   . "$(dirname "$0")/lib/fetch-retry.sh"

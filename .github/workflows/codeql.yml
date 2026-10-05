@@ -1,7 +1,7 @@
 # CodeQL SAST — static security/quality analysis for the Rust workspace.
 # Resolves the OpenSSF Scorecard `SAST` alert and is the security-quality SAST gate
-# (the `analyze` job feeds the ci-summary aggregator; CodeQL findings also land in the
-# code-scanning dashboard and the Copilot/CodeQL PR review). [OPUS-4.8]
+# (CodeQL findings land in the code-scanning dashboard, which the ruleset's
+# `code_scanning` rule gates on, and in the Copilot/CodeQL PR review).
 #
 # Rust CodeQL is GA, so we analyse the `rust` language. We use CodeQL's buildless
 # extraction (`build-mode: none`): the Rust extractor reads the Cargo workspace +
@@ -11,7 +11,7 @@
 # query pack we rely on, switch this matrix entry to `build-mode: manual` + a
 # `cargo build --workspace` step (see the CodeQL Rust docs).
 #
-# [FABLE-5] sq-6vshe.6 heavy-lane placement — CodeQL PLACEMENT DECISION (measured):
+# sq-6vshe.6 heavy-lane placement — CodeQL PLACEMENT DECISION (measured):
 # KEEP per-push (per-PR) analysis; do NOT demote to merge_group + nightly.
 # The bead's decision rule is CONDITIONAL: demote CodeQL to the merge queue + nightly
 # ONLY IF it is a post-piapk wall-time POLE. It is NOT. MEASURED per-PR / merge_group
@@ -27,8 +27,8 @@
 # trace-based build (see the `build-mode: manual` note below) and wall time regresses past
 # the pole threshold, revisit the demotion — merge_group CodeQL still gates every merge, so
 # alerts-at-zero would be preserved even then. This is the maintainer security-posture
-# sign-off item (design §10.2); proceeding on the MEASURED "keep it" default per the
-# proceed-and-document rule (steer issue filed).
+# sign-off item (design §10.2); proceeding on the MEASURED "keep it" default (steer issue
+# filed).
 #
 # Third-party actions pinned by full commit SHA (supply-chain hardening); the trailing
 # `# vX.Y.Z` comment is what Dependabot follows to bump the pin.
@@ -37,16 +37,14 @@ name: codeql
 on:
   push:
     branches: [main]
-  # [FABLE-5] Draft-tier CI: default types + ready_for_review, so the un-draft
+  # Draft-tier CI: default types + ready_for_review, so the un-draft
   # moment runs the analysis the draft head skipped (the `analyze` job below is
   # guarded off draft PR heads) BEFORE the PR can reach the merge queue.
   pull_request:
     branches: [main]
     types: [opened, synchronize, reopened, ready_for_review]
-  # [OPUS-4.8] Merge queue: CodeQL surfaces a check on PRs, so it must also run on the
-  # queue's merge_group ref or the required ci-summary would wait for a sibling that
-  # never appears on that ref and time out. (Bare `merge_group` — it fires on every
-  # enqueue against the base branch.)
+  # Merge queue (if enabled): bare `merge_group` fires on every enqueue against the base
+  # branch, so the code_scanning rule sees an analysis on the queue ref too.
   merge_group:
   # Weekly cadence so the latest CodeQL query packs are re-run against an otherwise
   # quiet default branch (catches newly-published queries on unchanged code).
@@ -62,21 +60,17 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # [OPUS-4.8] path-aware CI (maintainer ask): "CodeQL doesn't even need to run if
+  # path-aware CI (maintainer ask): "CodeQL doesn't even need to run if
   # no Rust files are changed." CodeQL analyses the RUST workspace, so a PR whose
-  # diff touches NO Rust (orchestration/workflow/docs-only — e.g. routing.toml +
-  # triage.py) has nothing for CodeQL to analyse. This cheap pre-job computes
+  # diff touches NO Rust (workflow/docs/agent-config only) has nothing for CodeQL to analyse. This cheap pre-job computes
   # whether the diff touches Rust and the `analyze` job below `if:`s on it, exactly
   # mirroring ci.yml's `changes` (dorny paths-filter) mechanism.
   #
   # SOUNDNESS (identical to the draft-tier skip already in effect):
-  #   * The single REQUIRED context is `ci-summary / gate`; `CodeQL analysis (rust)`
-  #     is NOT individually required (docs/branch-protection.md §Required status
-  #     checks). When it is `skipped`, ci-summary treats a `skipped` conclusion as
-  #     NON-failing, so the gate resolves fast — the SAME behaviour as the existing
-  #     draft-head skip of this very job.
-  #   * The ruleset's `code_scanning` rule (CodeQL) is recorded as DEFENSE-IN-DEPTH
-  #     ONLY (docs/branch-protection.md §Draft-tier CI, last paragraph): a draft head
+  #   * `CodeQL analysis (rust)` is NOT a required check (docs/branch-protection.md
+  #     §Required status checks); a `skipped` conclusion blocks nothing — the SAME
+  #     behaviour as the existing draft-head skip of this very job.
+  #   * The ruleset's `code_scanning` rule (CodeQL) is DEFENSE-IN-DEPTH: a draft head
   #     already carries no PR CodeQL analysis and the rule tolerates that absence.
   #     A non-Rust PR is the same posture — there is genuinely no Rust to analyse.
   #   * SAFE-BY-DEFAULT: rust_changed is forced 'true' on every event except a
@@ -86,7 +80,7 @@ jobs:
   #     file) / the codeql wiring itself. If the diff cannot be computed, we never
   #     silently skip: off the PR/merge_group path we hard-force 'true'.
   #
-  # [OPUS-5] sq-g25hr — MERGE-GROUP CHANGE-CLASS GATE (the path-filtered fast lane).
+  # sq-g25hr — MERGE-GROUP CHANGE-CLASS GATE (the path-filtered fast lane).
   # merge_group used to hard-force rust_changed=true here, so a queued batch with ZERO
   # Rust still paid the full CodeQL analysis on every enqueue — reported in the
   # sq-g25hr bead as the longest merge_group pole of the observed cloud-deploy drain
@@ -151,7 +145,7 @@ jobs:
             echo "rust_changed=${{ steps.filter.outputs.rust }}" >> "$GITHUB_OUTPUT"
             echo "pull_request -> paths-filter says rust=${{ steps.filter.outputs.rust }}"
           elif [ "${EVENT_NAME}" = "merge_group" ]; then
-            # [OPUS-5] sq-g25hr MERGE-GROUP CHANGE-CLASS GATE (see the job header note).
+            # sq-g25hr MERGE-GROUP CHANGE-CLASS GATE (see the job header note).
             rust=true
             ok=true
             # --depth=2147483647 (git's INFINITE_DEPTH; --unshallow that is also valid
@@ -168,9 +162,8 @@ jobs:
             if [ "${ok}" = "true" ]; then
               cls="$(python3 scripts/ci_select.py --classify-only --event merge_group \
                        --base "${MG_BASE_SHA}" --head "${MG_HEAD_SHA}")" || cls=engine
-              # Lists ci_select.py `_INERT_CLASSES` verbatim (pinned by
-              # scripts/tests/test_ci_select_wiring.py so the two cannot drift).
-              # [OPUS-5] #5249: `map-safe` = every path resolves to an ownership-map
+              # Lists ci_select.py `_INERT_CLASSES` verbatim.
+              # #5249: `map-safe` = every path resolves to an ownership-map
               # `safe = true` verdict (today site/** + ci/formal-verification.toml).
               case "${cls}" in
                 docs-only|orchestration-only|deploy-only|map-safe|inert-mixed) rust=false ;;
@@ -189,7 +182,7 @@ jobs:
   analyze:
     name: CodeQL analysis (rust)
     needs: changes
-    # [FABLE-5] Draft-tier CI: SKIPPED on draft PR heads (this analysis is one of
+    # Draft-tier CI: SKIPPED on draft PR heads (this analysis is one of
     # the slowest per-push lanes and the fleet's draft review-fix churn re-ran it
     # on every push). VERIFIED before changing: CodeQL is NOT schedule/main-only —
     # it runs per-PR — but the pre-merge guarantee is preserved because the
@@ -198,9 +191,9 @@ jobs:
     # branch-protection `code_scanning` alert rule therefore still sees a CodeQL
     # analysis of the head before any merge. Fail-open off the PR path: any
     # non-pull_request event satisfies the first disjunct => RUN.
-    # [OPUS-4.8] path-aware CI: ALSO skipped when the diff touches no Rust
+    # path-aware CI: ALSO skipped when the diff touches no Rust
     # (needs.changes.outputs.rust_changed == 'false') — nothing for CodeQL to
-    # analyse. [OPUS-5] sq-g25hr: that now covers a merge_group batch whose
+    # analyse. sq-g25hr: that now covers a merge_group batch whose
     # change-class is proven inert as well as a non-Rust PR; rust_changed is still
     # forced 'true' on push-to-main + the weekly schedule, so the default branch is
     # always analysed in full (see the `changes` job header for the soundness case).
@@ -237,7 +230,7 @@ jobs:
           # security-and-quality runs the security queries plus the maintainability/
           # reliability quality queries — the SAST gate Scorecard's `SAST` check wants.
           queries: security-and-quality
-          # [OPUS-4.8] Config file adds a query-filter that excludes exactly one
+          # Config file adds a query-filter that excludes exactly one
           # redundant, note-level quality query: `rust/unused-variable`. It is NOT a
           # security query (security coverage is unchanged) and is redundant with the
           # repo's real unused-variable gate — clippy `-D warnings` in ci.yml, which

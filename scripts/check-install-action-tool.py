@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
-# [OPUS-4.8] CI lint (bead sq-ur7o): every SHA-pinned `taiki-e/install-action`
+# CI lint (bead sq-ur7o): every SHA-pinned `taiki-e/install-action`
 # step MUST carry an explicit `with: tool:` input.
-# Authored by Opus 4.8 (Fable unavailable; flag for re-review when Fable returns).
 #
 # WHY THIS GATE EXISTS — the coverage-gate regression (root-caused 2026-06-18):
 # taiki-e/install-action selects WHICH tool to install from its git-ref TAG, i.e.

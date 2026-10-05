@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# [OPUS-4.8] Recurrent maintenance — reconcile bd-OPEN beads against MERGED PRs.
-# Bead sq-13uyp. Authored by Opus 4.8 (Fable unavailable; flag for re-review when
-# Fable returns).
+# Recurrent maintenance — reconcile bd-OPEN beads against MERGED PRs.
+# Bead sq-13uyp.
 #
 # reconcile-merged-beads.sh [--dry-run | --apply] [options]
 #
@@ -140,15 +139,15 @@ self_test() {
   log "running --dry-run self-test (hermetic; no bd/gh/git calls)"
 
   # --- exact-token matching ---------------------------------------------------
-  _match   "sq-bpoey" "fix(site): broken anchors (sq-bpoey) [OPUS-4.8]"        "id in PR title (parenthesised)"
+  _match   "sq-bpoey" "fix(site): broken anchors (sq-bpoey)"        "id in PR title (parenthesised)"
   _match   "sq-bpoey" "fix/sq-bpoey-site-anchors"                              "id in head-branch name"
-  _match   "sq-bpoey" "fix(site): broken anchors (sq-bpoey) [OPUS-4.8] (#1017)" "id alongside a #PR number"
-  _match   "sq-u6nmt" "ci(feature-matrix): gate sparq-kb (sq-u6nmt) [OPUS-4.8]" "real merged-PR title token"
-  _match   "sq-ixc3.1" "feat: thing (sq-ixc3.1) [OPUS-4.8]"                    "molecule id .1 matches itself"
+  _match   "sq-bpoey" "fix(site): broken anchors (sq-bpoey) (#1017)" "id alongside a #PR number"
+  _match   "sq-u6nmt" "ci(feature-matrix): gate sparq-kb (sq-u6nmt)" "real merged-PR title token"
+  _match   "sq-ixc3.1" "feat: thing (sq-ixc3.1)"                    "molecule id .1 matches itself"
   _match   "sq-ixc3"   "feat: base thing (sq-ixc3) only"                       "base id matches itself"
 
   # --- the dotted-id FALSE-MATCH guard (the whole point) ----------------------
-  _nomatch "sq-ixc3.1"  "feat: thing (sq-ixc3.11) [OPUS-4.8]"                  ".1 must NOT match .11 (right digit)"
+  _nomatch "sq-ixc3.1"  "feat: thing (sq-ixc3.11)"                  ".1 must NOT match .11 (right digit)"
   _nomatch "sq-ixc3.1"  "feat: thing (sq-ixc3.10)"                            ".1 must NOT match .10"
   _nomatch "sq-ixc3"    "feat: molecule (sq-ixc3.4)"                          "base id must NOT match a .N molecule"
   _nomatch "sq-ixc3"    "feat: molecule (sq-ixc3.11)"                         "base id must NOT match .11"
@@ -401,7 +400,7 @@ except Exception: print("")' 2>/dev/null || true)"
     \#*) note="reconcile: fix merged via #${prn}" ;;
     *)   note="reconcile: fix merged via ${ref}" ;;
   esac
-  if bd close "$id" --reason "$note [OPUS-4.8]" >/dev/null 2>&1; then
+  if bd close "$id" --reason "$note" >/dev/null 2>&1; then
     log "  $id: CLOSED ($note)."
     n_closed=$((n_closed + 1))
   else

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Tests for the crates.io publishing protections (issues #1135, #2552).
 
-[OPUS-5] 🤖 SPARQ agent.
+🤖 SPARQ agent.
 
 WHY THIS FILE EXISTS AS A SEPARATE SUITE
 ========================================
@@ -104,7 +104,7 @@ class TestWorkspaceTagIsCreatedOnce(unittest.TestCase):
 
     def test_only_the_dependency_final_anchor_enables_git_tags(self) -> None:
         # release-plz processes every package independently. If the workspace default is
-        # enabled, all 37 packages try to create the same `v{{ version }}` tag. [GPT-5.6]
+        # enabled, all 37 packages try to create the same `v{{ version }}` tag.
         config = tomllib.loads(
             (REPO_ROOT / "release-plz.toml").read_text(encoding="utf-8")
         )
@@ -498,36 +498,12 @@ class TestReleaseCarriesTheExperimentalZkCaveat(unittest.TestCase):
             )
 
 
-class TestArmWorkflowsSelfTestTheGuard(unittest.TestCase):
-    """Both arm sweeps must run the guard's self-test before arming anything.
-
-    Their scripts come from the DEFAULT branch at cron time, so a regression in the
-    shared predicate would otherwise first be observed by arming the Release PR.
-    """
-
-    def _run_block(self, workflow_name: str, job_id: str) -> str:
-        data = yaml.safe_load(
-            (REPO_ROOT / ".github" / "workflows" / workflow_name).read_text("utf-8")
-        )
-        steps = data["jobs"][job_id]["steps"]
-        return "\n".join(str(step.get("run") or "") for step in steps)
-
-    def test_auto_arm_self_tests_the_release_guard(self) -> None:
-        self.assertIn(
-            "scripts/release_pr_guard.py --self-test",
-            self._run_block("auto-arm.yml", "arm"),
-        )
-
-    def test_rearm_sweeper_self_tests_the_release_guard(self) -> None:
-        self.assertIn(
-            "scripts/release_pr_guard.py --self-test",
-            self._run_block("rearm-sweeper.yml", "sweep"),
-        )
+class TestDocsQualityRunsTheGuardSuite(unittest.TestCase):
+    """This suite must itself be invoked by a hard job, or every assertion is dead code."""
 
     def test_docs_quality_gates_the_publishing_protections(self) -> None:
-        # This suite must itself be invoked by a GATING job, or every assertion above is
-        # dead code. docs-quality's job name contains neither "advisory" nor
-        # "informational", so ci-summary discovers it as gating.
+        # docs-quality's job name contains neither "advisory" nor "informational", so it
+        # is a hard (non-advisory) job.
         data = yaml.safe_load(
             (REPO_ROOT / ".github" / "workflows" / "docs-quality.yml").read_text("utf-8")
         )
@@ -544,24 +520,19 @@ class TestArmWorkflowsSelfTestTheGuard(unittest.TestCase):
 class TestEveryArmingPathConsultsTheGuard(unittest.TestCase):
     """The enumerated arming paths each call release_pr_guard.
 
-    Deleting the call from any one of them reds the named test here. The scripts' OWN
-    self-tests also go red (proved by mutation in the PR body) — this is the second,
-    cross-file net, so a path added later without the guard is visible.
+    Deleting the call from any one of them reds the named test here, so a path added
+    later without the guard is visible. (The automated arm sweeps were removed; the
+    `gh pr merge` PreToolUse hook is the one remaining arming path in the repo.)
     """
 
     PATHS = {
-        "auto-arm.py": "arm_block_reason",
-        "rearm-sweeper.py": "arm_block_reason",
         "check-pr-arm-base.py": "arm_block_reason",
-        "batch-merge.py": "arm_block_reason",
-        "pr-backlog.py": "arm_block_reason",
     }
 
     def test_each_arming_path_imports_and_calls_the_guard(self) -> None:
         # AST, not substring. MEASURED: the first draft of this test asserted
         # `"release_pr_guard.arm_block_reason" in text` and a mutant that reverted
-        # scripts/batch-merge.py's predicate to the old author-AND-title conjunction
-        # SURVIVED — the phrase still appeared, in the function's DOCSTRING. A prose
+        # one script's predicate to the old author-AND-title conjunction SURVIVED — the phrase still appeared, in the function's DOCSTRING. A prose
         # mention is not a call site.
         import ast
 
@@ -584,35 +555,19 @@ class TestEveryArmingPathConsultsTheGuard(unittest.TestCase):
                     "#1135 Release-PR exclusion. (A comment, docstring or import "
                     "mentioning the guard does not exclude anything.)",
                 )
-    def test_batch_merge_and_pr_backlog_catch_a_branch_only_release_pr(self) -> None:
-        """BEHAVIOURAL, not structural: the case the OLD conjunction missed.
+    def test_a_branch_only_release_pr_is_caught(self) -> None:
+        """BEHAVIOURAL: the case an author-AND-title conjunction misses.
 
-        `author == github-actions AND title startswith "chore: release"` returns False for
-        a Release PR whose title was edited or whose author identity changed, even though
-        its head branch is unmistakable. Both scripts must now catch it on the branch
-        alone. This is the assertion that killed the surviving mutant.
+        A Release PR whose title was edited or whose author identity changed is still
+        unmistakable by its head branch; the guard must catch it on the branch alone.
         """
-        batch = _load("batch_merge_under_test", "batch-merge.py")
-        backlog = _load("pr_backlog_under_test", "pr-backlog.py")
-        branch_only = {
-            "head_ref": "release-plz-main",
-            "author_login": "app/some-other-bot",
-            "title": "Bump workspace version to 0.2.0",
-        }
-        ordinary = {
-            "head_ref": "sparq-agent/issue-3801-x",
-            "author_login": "app/sparq-orchestrator",
-            "title": "fix(engine): a change",
-        }
-        for name, module in (("batch-merge", batch), ("pr-backlog", backlog)):
-            with self.subTest(script=name):
-                self.assertTrue(
-                    module.is_release_plz(branch_only),
-                    f"{name}.is_release_plz missed a Release PR identifiable by its head "
-                    "branch alone — the old author-AND-title conjunction is back.",
-                )
-                # The discriminating half: it must not swallow ordinary worker PRs.
-                self.assertFalse(module.is_release_plz(ordinary), name)
+        self.assertIsNotNone(
+            release_pr_guard.arm_block_reason(
+                head_ref="release-plz-main",
+                author_login="app/some-other-bot",
+                title="Bump workspace version to 0.2.0",
+            )
+        )
 
     def test_the_predicate_cannot_be_influenced_by_labels(self) -> None:
         # The whole point of #1135's keying decision: a label can be added by anything
@@ -828,7 +783,7 @@ class TestSettingsJsonWrapperDoesNotInvertTheGuard(unittest.TestCase):
 
 # ================================================================ THE CADENCE GUARD
 class TestV013RecoveryException(unittest.TestCase):
-    """[GPT-6] Exercise both real run() paths; every external runner is poisoned."""
+    """Exercise both real run() paths; every external runner is poisoned."""
 
     def setUp(self):
         from unittest.mock import patch
@@ -1220,7 +1175,7 @@ def _make_test_repo(
         "GIT_COMMITTER_NAME": "t",
         "GIT_COMMITTER_EMAIL": "t@e",
     }
-    # [GPT-5.6] Keep the fixture hermetic when a maintainer signs commits/tags globally.
+    # Keep the fixture hermetic when a maintainer signs commits/tags globally.
     git = lambda *a: subprocess.run(  # noqa: E731
         [
             "git",

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [FABLE-5] CI-economy grouping (maintainer directive 2026-07-18): run ONE bin-packed
+# CI-economy grouping (maintainer directive 2026-07-18): run ONE bin-packed
 # GROUP of opt-in feature-matrix legs inside a single runner job, and emit the
 # GATE-CRITICAL per-leg check-run for each leg — across a TRUSTED BOUNDARY.
 #
@@ -161,7 +161,7 @@ def run(cmd):
 
 
 def build_with_retry(crate, features):
-    # [OPUS-4.8] sq-hhxc heritage: bounded retry absorbs transient crates.io
+    # sq-hhxc heritage: bounded retry absorbs transient crates.io
     # hiccups during any residual resolution the build performs.
     for attempt in range(1, BUILD_ATTEMPTS + 1):
         rc = run([CARGO, "build", "-p", crate, "--features", features])

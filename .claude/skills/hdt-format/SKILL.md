@@ -5,7 +5,7 @@ description: The HDT (Header-Dictionary-Triples) binary RDF archive format — l
 
 # HDT — Header Dictionary Triples
 
-[OPUS-4.8] Authored for the active HDT work. Ground truth: the `sparq-hdt` crate
+Authored for the active HDT work. Ground truth: the `sparq-hdt` crate
 (`crates/sparq-hdt/src/lib.rs`, `Cargo.toml`; open work in beads — `bd list -l area:sparq-hdt`)
 and the upstream `hdt` crate (KonradHoeffner/hdt, MIT). Verify crate API against the pinned
 version before writing code.

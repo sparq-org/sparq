@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [OPUS-4.8] Issue-native orchestration: the untrusted-input safeguard.
+# Issue-native orchestration: the untrusted-input safeguard.
 """trust-gate — decide whether the automation may act on an issue/PR/comment's CONTENT.
 
 Fails CLOSED. Trust is derived from the author's REPO PERMISSION (no hard-coded logins): anyone with

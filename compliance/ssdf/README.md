@@ -31,8 +31,8 @@ deploying organization can lift into its own attestation — not a pending exter
 **In scope (the producer = sparq project):**
 - The secure-SDLC *gates* — clippy `-D warnings`, CodeQL SAST, `cargo test`/conformance
   ratchets, Miri, fuzz, the unsafe-count ratchet, cargo-deny advisories/bans/sources/
-  licenses (gating), cargo-vet, the CycloneDX SBOM + VEX, SLSA build provenance, and the
-  `ci-summary / gate` aggregator.
+  licenses and cargo-vet (post-merge/nightly, not PR-gating), the CycloneDX SBOM + VEX, SLSA
+  build provenance, and the single required `ci-fast` check (core crates).
 - The secure-coding standard (`CONTRIBUTING.md`), the threat model
   (`research/threat-model.md`), the dependency policy (`deny.toml`), and the coordinated
   vulnerability-disclosure programme (`SECURITY.md` + `.well-known/security.txt`).

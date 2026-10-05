@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-# [OPUS-4.8] sq-eifd: HTTP-SPARQL adapter KIND. Authored by Opus 4.8 (Fable
-# unavailable; flag for re-review when Fable returns).
+# sq-eifd: HTTP-SPARQL adapter KIND.
 #
 # POST a SPARQL query to an HTTP endpoint -> parse the SPARQL 1.1 Query Results
 # JSON -> count solutions / read the ASK boolean / extract a COUNT(*) value.
@@ -24,7 +23,7 @@
 # Output: `<engine>\t<count>\t<query_us>` TSV on stdout (the same 3-col contract
 # the rest of the adapters + the ci-bench hook use). Non-zero exit only on a
 # transport/parse ERROR.
-# [FABLE-5] sq-7d3dj.34: --profile mode. The plain 3-col contract above is unchanged;
+# sq-7d3dj.34: --profile mode. The plain 3-col contract above is unchanged;
 # --profile ADDITIONALLY measures TTFB (time to first response byte, i.e. status line +
 # headers received) and runs the query in BOTH connection regimes:
 #   keep-alive : one persistent http.client.HTTPConnection reused across iters (the
@@ -56,7 +55,7 @@ def parse_sparql_json(text):
     Raises ValueError on a document that is neither a SELECT nor an ASK result."""
     obj = text if isinstance(text, dict) else json.loads(text)
     if "boolean" in obj:
-        # [OPUS-4.8] Per the SPARQL 1.1 Query Results JSON rec the ASK "boolean"
+        # Per the SPARQL 1.1 Query Results JSON rec the ASK "boolean"
         # member is a JSON boolean. Reject anything else (e.g. the string "false",
         # which bool() would wrongly coerce to True) as an invalid document rather
         # than silently mis-counting it.
