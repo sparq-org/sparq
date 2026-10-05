@@ -2783,7 +2783,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       # [OPUS-5] #4935 — AVAILABILITY DECOUPLING for the only two corpora in this
       # GATING lane that come from a non-GitHub third party: the OWL 2 test-case
-      # export (an Internet Archive snapshot, fetched over plain http://) and the
+      # export (an Internet Archive snapshot, fetched over HTTPS) and the
       # W3C RIF WG Core_v1.22 archive. Both are FIXED, sha256-pinned exports, yet
       # they were re-downloaded live on every run — so a bad few minutes at
       # web.archive.org concluded this leg `failure` with nothing measured, which

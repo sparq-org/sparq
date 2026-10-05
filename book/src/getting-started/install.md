@@ -4,7 +4,12 @@ example is {{#rustdoc_include}}d from the tested examples/quickstart.rs (sq-384j
 can drift. Only one-line intros and the contributor-gate block (whose canonical prose lives in
 CONTRIBUTING.md) are written here; no prose is duplicated from the README. -->
 
-# Install & build from source
+# Install or build from source
+
+<!-- [GPT-6] Registry names, version pins, and publication caveat share the README source. -->
+{{#include ../../../README.md:release-install}}
+
+## Build from source
 
 sparq is a Rust workspace. The minimum supported Rust version (MSRV) is tracked in CI; a recent
 stable toolchain works. Build the release binaries, then query a file, build a persistent on-disk

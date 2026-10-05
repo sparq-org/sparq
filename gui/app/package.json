@@ -1,6 +1,6 @@
 {
   "name": "sparq-gui-app",
-  "version": "0.1.0",
+  "version": "0.1.3",
   "private": true,
   "description": "The sparq operational GUI frontend — a DISTINCT Next.js workbench app (NOT the marketing site) consumed by both the Tauri 2 desktop shell and a static-exported hosted 'Try the GUI live' web target. Reuses the @sparq/client wasm engine client + shared logic; renders its own operational shell (left rail · top bar · IDE tab strip · status bar), never the site's hero/Showcase/Benchmarks/About chrome.",
   "type": "module",

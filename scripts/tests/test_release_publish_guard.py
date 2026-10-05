@@ -822,6 +822,196 @@ class TestSettingsJsonWrapperDoesNotInvertTheGuard(unittest.TestCase):
 
 
 # ================================================================ THE CADENCE GUARD
+class TestV013RecoveryException(unittest.TestCase):
+    """[GPT-6] Exercise both real run() paths; every external runner is poisoned."""
+
+    def setUp(self):
+        from unittest.mock import patch
+        self.tmp = tempfile.TemporaryDirectory(prefix="sparq-v013-recovery-")
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        (self.root / "crates/a").mkdir(parents=True)
+        (self.root / "crates/b").mkdir(parents=True)
+        for name in ("a", "b"):
+            (self.root / f"crates/{name}/Cargo.toml").write_text(
+                f'[package]\nname = "{name}"\nversion.workspace = true\n')
+        (self.root / "release-plz.toml").write_text(
+            '[workspace]\npublish = false\n'
+            '[[package]]\nname = "a"\nversion_group = "sparq"\n'
+            '[[package]]\nname = "b"\nversion_group = "sparq"\n')
+        self.set_version("0.1.3")
+        self.at = dt.datetime(2026, 9, 20, 22, 3, 11, tzinfo=dt.timezone.utc)
+        self.now = self.at + dt.timedelta(hours=1)
+        self.tags = [("v0.1.2", self.at), ("v0.1.1", self.at - dt.timedelta(days=20)),
+                     ("v0.1.0", self.at - dt.timedelta(days=90)),
+                     ("v0.1.0-dev.3", self.at - dt.timedelta(days=91))]
+        self.remote = dict(interval_guard.V013_PREDECESSOR_REFS)
+        self.local = {"refs/tags/v0.1.2": "05efded769a745d5b0e8d6d076425c171732ab1d",
+                      "refs/tags/v0.1.2^{commit}": "4b37254efe502f8a0aeba36076130ed9b44853ef"}
+        self.fetch_calls = []
+        self.git_calls = []
+        self.logs = []
+        for target in ("urllib.request.urlopen", "subprocess.run"):
+            poison = patch(target, side_effect=AssertionError("real external runner reached"))
+            poison.start()
+            self.addCleanup(poison.stop)
+
+    def set_version(self, version):
+        (self.root / "Cargo.toml").write_text(
+            '[workspace]\nmembers = ["crates/a", "crates/b"]\n'
+            f'[workspace.package]\nversion = "{version}"\n')
+
+    def add_target(self):
+        self.tags.insert(0, ("v0.1.3", self.now))
+        self.local.update({"refs/tags/v0.1.3": "a" * 40,
+                           "refs/tags/v0.1.3^{commit}": "b" * 40})
+        self.remote.update({"refs/tags/v0.1.3": "a" * 40,
+                            "refs/tags/v0.1.3^{}": "b" * 40})
+
+    def git(self, root, args):
+        self.assertEqual(root, self.root)
+        self.git_calls.append(args)
+        if args == ["rev-parse", "--is-shallow-repository"]:
+            return "false\n"
+        if args[0] == "for-each-ref":
+            return "".join(f"{name}\t{stamp.isoformat()}\n" for name, stamp in self.tags)
+        if args[:2] == ["rev-parse", "--verify"]:
+            return self.local[args[2]] + "\n"
+        self.assertEqual(args, ["ls-remote", "--tags",
+                               "https://github.com/sparq-org/sparq.git", "refs/tags/v*"])
+        return "".join(f"{oid}\t{ref}\n" for ref, oid in self.remote.items())
+
+    def absent(self, url):
+        self.fetch_calls.append(url)
+        return None, None
+
+    def run_guard(self, *, released_tag=None, fetch=None, git_runner=None):
+        self.logs.clear()
+        return interval_guard.run(
+            self.root, dry_run=False, now=self.now, released_tag=released_tag,
+            git_runner=git_runner or self.git, fetch=fetch or self.absent, log=self.logs.append)
+
+    def test_exact_pre_tag_and_tag_push_admit_after_authoritative_reads(self):
+        for tag in (None, "v0.1.3"):
+            with self.subTest(tag=tag):
+                if tag:
+                    self.add_target()
+                self.fetch_calls.clear()
+                self.assertEqual(self.run_guard(released_tag=tag), 0, self.logs)
+                self.assertEqual(len(self.fetch_calls), 2)
+                self.assertTrue(any(args[0] == "ls-remote" for args in self.git_calls))
+                self.assertIn("maintainer-authorized v0.1.3 recovery", "\n".join(self.logs))
+
+    def test_all_other_versions_keep_the_full_interval(self):
+        for version in ("0.1.4", "0.1.3-dev.1", "0.2.0"):
+            self.set_version(version)
+            with self.subTest(version=version):
+                self.now = self.at + dt.timedelta(hours=23, minutes=59)
+                self.assertEqual(self.run_guard(), 1)
+                self.assertEqual(self.run_guard(released_tag=f"v{version}"), 1)
+                self.now = self.at + dt.timedelta(hours=24)
+                self.assertEqual(self.run_guard(), 0)
+                self.assertEqual(self.run_guard(released_tag=f"v{version}"), 0)
+
+    def test_altered_released_tag_refuses(self):
+        for tag in ("v0.1.2", "v0.1.4", "v0.1.3-dev.1", "latest"):
+            with self.subTest(tag=tag):
+                self.assertEqual(self.run_guard(released_tag=tag), 1)
+
+    def test_predecessor_name_or_timestamp_change_refuses(self):
+        original = list(self.tags)
+        for predecessor in (("v0.1.1", self.at),
+                            ("v0.1.2", self.at - dt.timedelta(seconds=1)),
+                            ("v0.1.2", self.at + dt.timedelta(seconds=1))):
+            with self.subTest(predecessor=predecessor):
+                self.tags = [predecessor, *original[1:]]
+                self.assertEqual(self.run_guard(), 1)
+        self.tags = original[1:]
+        self.assertEqual(self.run_guard(), 1)
+
+    def test_changed_local_and_remote_objects_or_commits_refuse(self):
+        for inventory in (self.local, self.remote):
+            for ref in list(inventory):
+                with self.subTest(ref=ref, remote=inventory is self.remote):
+                    original = inventory[ref]
+                    inventory[ref] = "c" * 40
+                    self.assertEqual(self.run_guard(), 1)
+                    inventory[ref] = original
+
+    def test_extra_tag_refuses_even_when_backdated_or_only_remote(self):
+        original = list(self.tags)
+        for stamp in (self.at - dt.timedelta(days=60), self.at + dt.timedelta(minutes=1)):
+            for local in (False, True):
+                with self.subTest(stamp=stamp, local=local):
+                    self.remote["refs/tags/v0.1.4"] = "c" * 40
+                    self.tags = original + ([("v0.1.4", stamp)] if local else [])
+                    self.assertEqual(self.run_guard(), 1)
+
+    def test_missing_or_mismatched_target_tag_refuses(self):
+        self.assertEqual(self.run_guard(released_tag="v0.1.3"), 1)
+        self.add_target()
+        self.remote["refs/tags/v0.1.3^{}"] = "c" * 40
+        self.assertEqual(self.run_guard(released_tag="v0.1.3"), 1)
+
+    def test_clock_before_predecessor_refuses(self):
+        self.now = self.at - dt.timedelta(seconds=1)
+        self.assertEqual(self.run_guard(), 1)
+
+    def test_target_future_or_backdated_timestamp_refuses(self):
+        self.add_target()
+        for stamp in (self.now + dt.timedelta(seconds=1), self.at - dt.timedelta(seconds=1)):
+            with self.subTest(stamp=stamp):
+                self.tags[0] = ("v0.1.3", stamp)
+                self.assertEqual(self.run_guard(released_tag="v0.1.3"), 1)
+
+    def test_tag_push_still_checks_registry_and_predecessor(self):
+        self.add_target()
+        self.assertEqual(self.run_guard(released_tag="v0.1.3",
+                                        fetch=lambda _url: ({"versions": []}, None)), 1)
+        self.local["refs/tags/v0.1.2"] = "c" * 40
+        self.assertEqual(self.run_guard(released_tag="v0.1.3"), 1)
+
+    def test_pre_tag_refuses_target_present_only_on_remote(self):
+        self.remote["refs/tags/v0.1.3"] = "a" * 40
+        self.assertEqual(self.run_guard(), 1)
+
+    def test_empty_or_malformed_remote_inventory_refuses(self):
+        for output in ("", "garbage\n", "a" * 40 + "\trefs/tags/v0.1.2\n"):
+            def malformed(root, args):
+                return output if args[0] == "ls-remote" else self.git(root, args)
+            with self.subTest(output=output):
+                self.assertEqual(self.run_guard(git_runner=malformed), 1)
+
+    def test_any_registry_response_other_than_definitive_absence_refuses(self):
+        for response in (({}, None), ({"versions": []}, None),
+                         ({"versions": [{"created_at": "2020-01-01T00:00:00Z"}]}, None),
+                         ({"versions": [{"num": "0.1.3", "created_at": self.now.isoformat()}]}, None),
+                         (None, "unparseable JSON body"), (None, "HTTP 403")):
+            with self.subTest(response=response):
+                self.assertEqual(self.run_guard(fetch=lambda _url: response), 1)
+        # The second crate must also be read; a partial bootstrap invalidates recovery.
+        self.assertEqual(self.run_guard(fetch=lambda url: (None, None) if url.endswith("/a")
+                                        else ({"versions": []}, None)), 1)
+
+    def test_indeterminate_git_reads_and_shallow_checkout_refuse(self):
+        def shallow(root, args):
+            return "true\n" if args == ["rev-parse", "--is-shallow-repository"] else self.git(root, args)
+        self.assertEqual(self.run_guard(git_runner=shallow), 1)
+        for operation in ("for-each-ref", "rev-parse", "ls-remote"):
+            def broken(root, args):
+                if args[0] == operation:
+                    raise interval_guard.GuardRefusal("indeterminate git fixture")
+                return self.git(root, args)
+            with self.subTest(operation=operation):
+                self.assertEqual(self.run_guard(git_runner=broken), 1)
+
+    def test_real_runners_are_poisoned(self):
+        with self.assertRaisesRegex(AssertionError, "real external runner"):
+            interval_guard._http_get_json("https://invalid.example")
+        with self.assertRaisesRegex(AssertionError, "real external runner"):
+            interval_guard._run_git(self.root, ["status"])
+
+
 class TestMinimumIntervalIsEnforced(unittest.TestCase):
     NOW = dt.datetime(2026, 7, 26, 12, 0, tzinfo=dt.timezone.utc)
 
@@ -1350,7 +1540,7 @@ class TestGuardOnARealGitRepository(unittest.TestCase):
 
 
 class TestPublishableDependencyClosure(unittest.TestCase):
-    """A registry package cannot retain workspace-only dependency edges."""
+    """A registry package cannot retain workspace-only shipped dependency edges."""
 
     def test_release_runbook_order_matches_the_live_dependency_graph(self) -> None:
         crates = interval_guard.publishable_crates(REPO_ROOT)
@@ -1415,6 +1605,138 @@ class TestPublishableDependencyClosure(unittest.TestCase):
             self.assertEqual(
                 [crate.name for crate in interval_guard.publish_order(crates)],
                 ["b", "a"],
+            )
+
+    def test_versioned_dev_dependency_enters_publish_order(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="sparq-publish-versioned-dev-") as tmp:
+            root = Path(tmp)
+            self._fixture(root, dependency_publishable=True, dependency_version="0.2.0")
+            manifest = root / "crates" / "a" / "Cargo.toml"
+            manifest.write_text(
+                manifest.read_text(encoding="utf-8").replace(
+                    "[dependencies]", "[dev-dependencies]"
+                ),
+                encoding="utf-8",
+            )
+            crates = interval_guard.publishable_crates(root)
+            self.assertEqual(
+                [crate.name for crate in interval_guard.publish_order(crates)],
+                ["b", "a"],
+            )
+
+    def test_path_only_dev_dependency_is_omitted_from_publish_order(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="sparq-publish-path-dev-") as tmp:
+            root = Path(tmp)
+            self._fixture(root, dependency_publishable=False, dependency_version=None)
+            manifest = root / "crates" / "a" / "Cargo.toml"
+            manifest.write_text(
+                manifest.read_text(encoding="utf-8").replace(
+                    "[dependencies]", "[dev-dependencies]"
+                ),
+                encoding="utf-8",
+            )
+            crates = interval_guard.publishable_crates(root)
+            self.assertEqual(
+                [crate.name for crate in interval_guard.publish_order(crates)], ["a"]
+            )
+
+    def test_empty_dev_dependency_version_refuses(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="sparq-publish-empty-dev-version-") as tmp:
+            root = Path(tmp)
+            self._fixture(root, dependency_publishable=True, dependency_version="")
+            manifest = root / "crates" / "a" / "Cargo.toml"
+            manifest.write_text(
+                manifest.read_text(encoding="utf-8").replace(
+                    "[dependencies]", "[dev-dependencies]"
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                interval_guard.GuardRefusal, "no registry version requirement"
+            ):
+                interval_guard.publishable_crates(root)
+
+    def test_versioned_dev_dependency_cycle_refuses(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="sparq-publish-dev-cycle-") as tmp:
+            root = Path(tmp)
+            self._fixture(root, dependency_publishable=True, dependency_version="0.2.0")
+            a_manifest = root / "crates" / "a" / "Cargo.toml"
+            a_manifest.write_text(
+                a_manifest.read_text(encoding="utf-8").replace(
+                    "[dependencies]", "[dev-dependencies]"
+                ),
+                encoding="utf-8",
+            )
+            (root / "crates" / "b" / "Cargo.toml").write_text(
+                '[package]\nname = "b"\nversion.workspace = true\n'
+                '[dev-dependencies]\na = { path = "../a", version = "0.2.0" }\n',
+                encoding="utf-8",
+            )
+            crates = interval_guard.publishable_crates(root)
+            with self.assertRaisesRegex(
+                interval_guard.GuardRefusal, "dependency cycle"
+            ):
+                interval_guard.publish_order(crates)
+
+    def test_path_only_dev_dependency_avoids_registry_resolution(self) -> None:
+        """Exercise Cargo's package resolver without publishing (regression for #6474)."""
+        with tempfile.TemporaryDirectory(prefix="sparq-package-dev-bootstrap-") as tmp:
+            root = Path(tmp)
+            (root / "crates" / "a" / "src").mkdir(parents=True)
+            (root / "crates" / "b" / "src").mkdir(parents=True)
+            (root / "Cargo.toml").write_text(
+                '[workspace]\nmembers = ["crates/a", "crates/b"]\nresolver = "2"\n',
+                encoding="utf-8",
+            )
+            a_manifest = root / "crates" / "a" / "Cargo.toml"
+            a_manifest.write_text(
+                '[package]\nname = "sparq-devdep-bootstrap-a-6474"\n'
+                'version = "0.1.1"\nedition = "2021"\nlicense = "MIT"\n'
+                'description = "Packaging regression fixture"\n'
+                'repository = "https://github.com/sparq-org/sparq"\n'
+                '[dev-dependencies]\n'
+                'sparq-devdep-bootstrap-b-6474 = { path = "../b", version = "0.1.1" }\n',
+                encoding="utf-8",
+            )
+            (root / "crates" / "b" / "Cargo.toml").write_text(
+                '[package]\nname = "sparq-devdep-bootstrap-b-6474"\n'
+                'version = "0.1.1"\nedition = "2021"\nlicense = "MIT"\n'
+                'description = "Packaging regression fixture dependency"\n'
+                'repository = "https://github.com/sparq-org/sparq"\n',
+                encoding="utf-8",
+            )
+            for member in ("a", "b"):
+                (root / "crates" / member / "src" / "lib.rs").write_text(
+                    "pub fn fixture() {}\n", encoding="utf-8"
+                )
+
+            versioned = subprocess.run(
+                ["cargo", "package", "--offline", "-p", "sparq-devdep-bootstrap-a-6474"],
+                cwd=root,
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            self.assertNotEqual(versioned.returncode, 0)
+            self.assertIn("sparq-devdep-bootstrap-b-6474", versioned.stderr)
+
+            a_manifest.write_text(
+                a_manifest.read_text(encoding="utf-8").replace(
+                    ', version = "0.1.1"', ""
+                ),
+                encoding="utf-8",
+            )
+            path_only = subprocess.run(
+                ["cargo", "package", "--offline", "-p", "sparq-devdep-bootstrap-a-6474"],
+                cwd=root,
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            self.assertEqual(
+                path_only.returncode,
+                0,
+                f"stdout:\n{path_only.stdout}\nstderr:\n{path_only.stderr}",
             )
 
 
