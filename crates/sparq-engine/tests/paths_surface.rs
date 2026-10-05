@@ -89,6 +89,24 @@ fn malformed_paths_are_loud() {
 fn explain_contains_typed_paths_operator() {
     assert_eq!(
         explain_paths(&diamond(), PATHS).unwrap(),
-        "Paths mode=shortest cyclic=false via=<http://ex/p> maxLength=none"
+        "Paths mode=shortest cyclic=false start=<http://ex/a> end=<http://ex/d> via=<http://ex/p> maxLength=none"
     );
+}
+
+/// #3994 — the START/END restriction is part of the rendered plan, so two plans that
+/// differ only there no longer explain identically.
+#[test]
+fn explain_renders_endpoint_restrictions() {
+    let g = diamond();
+    assert_eq!(
+        explain_paths(&g, "PATHS ALL START ?s END ?e VIA <http://ex/p> MAX LENGTH 2").unwrap(),
+        "Paths mode=all cyclic=false start=none end=none via=<http://ex/p> maxLength=2"
+    );
+    let pattern = explain_paths(
+        &g,
+        "PREFIX ex: <http://ex/> PATHS SHORTEST START ?s = { ?s ex:p ex:b } END ?e = ex:d VIA ex:p",
+    )
+    .unwrap();
+    assert!(pattern.contains(" end=<http://ex/d> "), "{pattern}");
+    assert!(pattern.contains(" start={ ") && !pattern.contains("start=none"), "{pattern}");
 }
