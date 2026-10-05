@@ -1618,6 +1618,9 @@ impl Graph {
             // shared state), forwarding the partials to the merge stage.
             let parser = scope.spawn(move || -> Result<(), String> {
                 for block in rx {
+                    if block.is_empty() {
+                        continue; // a liveness probe from a newline-free round
+                    }
                     let partials = parse_block(&block)?;
                     if ptx.send(partials).is_err() {
                         return Ok(()); // the merge stage errored and dropped the receiver
@@ -5828,9 +5831,10 @@ fn build_external_ntriples_dictspill<R: std::io::Read + Send>(
 /// sub-line carry is copied, via one reused scratch `Vec` (no per-block carry allocation),
 /// into the head of the next block's buffer. Each block buffer is a fresh zeroed allocation
 /// (`calloc`: large sizes are lazily-zeroed pages, no memset), so any `Read` works without
-/// `read_buf` support. A round with no `\n` (a line longer than a block) emits nothing and
-/// grows the same buffer in place. At EOF a final line without a trailing newline is emitted as-is. Empty blocks
-/// are never emitted. `emit` returns `false` when the downstream stage hung up (it errored
+/// `read_buf` support. A round with no `\n` (a line longer than a block) grows the same
+/// buffer in place and emits an EMPTY block as a liveness probe (consumers skip empty
+/// blocks), so a downstream hang-up still stops the read. At EOF a final line without a
+/// trailing newline is emitted as-is. `emit` returns `false` when the downstream stage hung up (it errored
 /// and dropped its receiver), which stops reading with `Ok(())`; the final EOF emit ignores
 /// it. Read errors propagate as `Err`.
 #[cfg(feature = "parallel")]
@@ -5864,6 +5868,11 @@ fn read_line_blocks<R: std::io::Read>(
         let end = carried + filled;
         // The carry holds no `\n`, so only the fresh bytes need scanning.
         let Some(nl) = buf[carried..end].iter().rposition(|&b| b == b'\n') else {
+            // Nothing to send, but probe the consumer with an empty (non-allocating) block so
+            // a downstream that errored still stops a long newline-free read.
+            if !emit(Vec::new()) {
+                return Ok(());
+            }
             carried = end;
             if buf.len() < carried + block_size {
                 buf.resize(carried + block_size, 0);
@@ -9449,7 +9458,9 @@ mod tests {
         fn run(data: &[u8], block: usize, max: usize) -> Vec<Vec<u8>> {
             let mut out = Vec::new();
             read_line_blocks(ShortReader { data, pos: 0, max }, block, |b| {
-                out.push(b);
+                if !b.is_empty() {
+                    out.push(b);
+                }
                 true
             })
             .unwrap();
@@ -9538,6 +9549,31 @@ mod tests {
         }
         let err = read_line_blocks(Failing, 64, |_| true).unwrap_err();
         assert!(err.contains("boom"), "{err}");
+        // A hang-up during a newline-free run stops the read: "!\n" then an endless line.
+        struct Endless {
+            head: &'static [u8],
+            served: usize,
+        }
+        impl std::io::Read for Endless {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                let n = buf.len().min(4096);
+                for (i, b) in buf[..n].iter_mut().enumerate() {
+                    *b = self.head.get(self.served + i).copied().unwrap_or(b'a');
+                }
+                self.served += n;
+                assert!(self.served < 1 << 20, "reader kept going after the hang-up");
+                Ok(n)
+            }
+        }
+        // The first block is accepted (sent), then the parser rejects it and hangs up, so
+        // every later emit fails; only the empty probes can observe that.
+        let mut calls = 0;
+        read_line_blocks(Endless { head: b"!\n", served: 0 }, 64, |_| {
+            calls += 1;
+            calls == 1
+        })
+        .unwrap();
+        assert_eq!(calls, 2);
     }
 
     #[test]
