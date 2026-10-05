@@ -10,13 +10,20 @@
 //!     --example turtle_vs_oxttl -- [n_elements] [iters]
 //! ```
 //!
+//! Also times the TriG writers (buffered, pretty, and — with `streaming-serialization` —
+//! streaming) over a two-graph dataset: the same corpus in the default graph and in a named
+//! graph `doc:graph`.
+//!
 //! Prints min-of-`iters` wall per writer. Timings are whatever this machine measured —
 //! NON-canonical work-box numbers, never to be transcribed into docs.
 
 use oxrdf::Triple;
 use oxttl::TurtleSerializer;
 use sparq_core::Graph;
-use sparq_engine_serialize::serialize::{default_prefixes, graph_to_turtle, graph_to_turtle_with};
+use sparq_engine_serialize::serialize::{
+    default_prefixes, graph_to_trig_pretty_with, graph_to_trig_with, graph_to_turtle,
+    graph_to_turtle_with, PrettyOptions,
+};
 use std::time::{Duration, Instant};
 
 const DOC: &str = "https://example.org/doc/readme#";
@@ -211,5 +218,42 @@ fn main() {
         ox_pre
     );
     println!("oxttl TurtleSerializer (+id decode) : {:>10.3?}", ox_full);
+
+    // TriG: the corpus in the default graph AND in the named graph `doc:graph`.
+    let doc = gen_doc(n);
+    let mut nq = doc.clone();
+    for line in doc.lines() {
+        let body = line.strip_suffix(" .").expect("N-Triples line");
+        nq.push_str(&format!("{body} <{DOC}graph> .\n"));
+    }
+    let dataset = Graph::load_dataset(&nq, "nquads").expect("dataset parses");
+    let (trig, tb) = time_min(iters, || graph_to_trig_with(&dataset, &prefixes).len());
+    println!(
+        "sparq graph_to_trig_with            : {:>10.3?}  ({tb} bytes)",
+        trig
+    );
+    #[cfg(feature = "streaming-serialization")]
+    {
+        let (st, stb) = time_min(iters, || {
+            let mut buf = Vec::with_capacity(1 << 16);
+            sparq_engine_serialize::serialize::graph_to_trig_streaming(
+                &dataset, &prefixes, &mut buf,
+            )
+            .expect("in-memory write");
+            buf.len()
+        });
+        println!(
+            "sparq graph_to_trig_streaming       : {:>10.3?}  ({stb} bytes)",
+            st
+        );
+    }
+    let pretty = PrettyOptions::default();
+    let (pt, ptb) = time_min(iters, || {
+        graph_to_trig_pretty_with(&dataset, &prefixes, &pretty).len()
+    });
+    println!(
+        "sparq graph_to_trig_pretty_with     : {:>10.3?}  ({ptb} bytes)",
+        pt
+    );
     println!("(min of {iters}; NON-canonical work-box timings)");
 }

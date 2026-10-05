@@ -278,12 +278,10 @@ impl<'a> PrefixTable<'a> {
     /// Emits the `@prefix` lines (label order) for the used entries, then a blank line;
     /// nothing at all when no prefix is used.
     fn write_header(&self, used: &[bool], out: &mut String) {
-        let mut labels: Vec<(&str, &str)> =
-            self.entries.iter().zip(used).filter(|(_, u)| **u).map(|(e, _)| *e).collect();
+        let labels = self.used_labels(used);
         if labels.is_empty() {
             return;
         }
-        labels.sort_unstable_by(|a, b| a.0.cmp(b.0));
         for (pfx, ns) in labels {
             out.push_str("@prefix ");
             out.push_str(pfx);
@@ -292,6 +290,84 @@ impl<'a> PrefixTable<'a> {
             out.push_str(" .\n");
         }
         out.push('\n');
+    }
+
+    /// The used `(label, namespace)` entries in label order.
+    fn used_labels(&self, used: &[bool]) -> Vec<(&'a str, &'a str)> {
+        let mut labels: Vec<(&str, &str)> = self
+            .entries
+            .iter()
+            .zip(used)
+            .filter(|(_, u)| **u)
+            .map(|(e, _)| *e)
+            .collect();
+        labels.sort_unstable_by(|a, b| a.0.cmp(b.0));
+        labels
+    }
+
+    /// The used-prefix set for a dataset: one flag per entry, set for every prefix that
+    /// [`note_dataset_iris`] reports as the compaction of some IRI the writer emits.
+    fn used_in(&self, graphs: &[NamedGraph<'_>], flavour: IriPositions) -> Vec<bool> {
+        let mut used = vec![false; self.entries.len()];
+        note_dataset_iris(graphs, flavour, &mut |iri: &str| self.note(iri, &mut used));
+        used
+    }
+}
+
+/// Which IRI positions a writer renders through prefix compaction — the knob that keeps a
+/// writer's used-prefix set EXACTLY the set of prefixes its body can emit.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum IriPositions {
+    /// Compact Turtle / TriG: every subject / predicate / object IRI and every literal
+    /// datatype (an implicit `xsd:string` / `rdf:langString` or an `rdf:type` predicate
+    /// rendered as `a` may over-declare — harmless, and kept for byte stability). Named
+    /// graphs with no triples are not emitted, so their names are skipped.
+    Compact,
+    /// Pretty Turtle / TriG: as [`IriPositions::Compact`] but without the `rdf:type`
+    /// predicate (always `a`) or an implicit literal datatype (never written).
+    Pretty,
+    /// Compacted JSON-LD: as [`IriPositions::Compact`], but EVERY named graph's `@id` is
+    /// emitted, empty or not.
+    JsonLd,
+}
+
+/// The single walk over every IRI a dataset writer may prefix-compact, shared by the
+/// `@prefix` header / `@context` of every writer: each emitted graph's subject, predicate
+/// and object IRIs (recursing into triple terms, including literal datatypes) AND the NAME
+/// of every emitted named graph. Collecting the used-prefix set anywhere else is how a
+/// rendered prefix ends up undeclared (a `GRAPH b:x` with only `a:` declared), so every
+/// header goes through here.
+fn note_dataset_iris(
+    graphs: &[NamedGraph<'_>],
+    flavour: IriPositions,
+    note: &mut impl FnMut(&str),
+) {
+    let pretty = flavour == IriPositions::Pretty;
+    for (name, ts) in graphs {
+        if ts.is_empty() && flavour != IriPositions::JsonLd {
+            continue;
+        }
+        if let Some(Term::NamedNode(g)) = name {
+            note(g.as_str());
+        }
+        for t in *ts {
+            note_subject_iri(&t.subject, note);
+            if !(pretty && t.predicate.as_str() == RDF_TYPE) {
+                note(t.predicate.as_str());
+            }
+            if pretty {
+                collect_pretty_iris(&t.object, note);
+            } else {
+                collect_iris(&t.object, note);
+            }
+        }
+    }
+}
+
+/// Notes a subject's IRI (blank nodes have none).
+fn note_subject_iri(subj: &NamedOrBlankNode, note: &mut impl FnMut(&str)) {
+    if let NamedOrBlankNode::NamedNode(n) = subj {
+        note(n.as_str());
     }
 }
 
@@ -383,20 +459,19 @@ pub fn write_turtle(triples: &[Triple], prefixes: &Prefixes) -> String {
 
 /// Emits the `@prefix` lines for exactly the prefixes whose namespace is the chosen
 /// compaction for at least one IRI in `triples` (so an unused prefix never clutters the
-/// header). Determined by a dry render of every IRI position.
+/// header).
 fn write_prefix_header(triples: &[Triple], prefixes: &Prefixes, out: &mut String) {
+    write_dataset_prefix_header(&[(None, triples)], prefixes, out);
+}
+
+/// The TriG form of [`write_prefix_header`]: the used-prefix set covers every graph's
+/// triples AND every emitted named graph's NAME (see [`note_dataset_iris`]). Shared by the
+/// buffered and streaming TriG writers.
+fn write_dataset_prefix_header(graphs: &[NamedGraph<'_>], prefixes: &Prefixes, out: &mut String) {
     // (#4898) One compiled-table match per IRI position (no dry render into a
-    // probe string, no `Term` clone of every subject); same used-set as before.
+    // probe string, no `Term` clone of every subject, no cloned union of the graphs).
     let table = PrefixTable::new(prefixes);
-    let mut used = vec![false; table.entries.len()];
-    let mut note = |iri: &str| table.note(iri, &mut used);
-    for t in triples {
-        if let NamedOrBlankNode::NamedNode(n) = &t.subject {
-            note(n.as_str());
-        }
-        note(t.predicate.as_str());
-        collect_iris(&t.object, &mut note);
-    }
+    let used = table.used_in(graphs, IriPositions::Compact);
     table.write_header(&used, out);
 }
 
@@ -406,7 +481,7 @@ fn collect_iris(term: &Term, note: &mut impl FnMut(&str)) {
         Term::NamedNode(n) => note(n.as_str()),
         Term::Literal(l) => note(l.datatype().as_str()),
         Term::Triple(t) => {
-            collect_iris(&Term::from(t.subject.clone()), note);
+            note_subject_iri(&t.subject, note);
             note(t.predicate.as_str());
             collect_iris(&t.object, note);
         }
@@ -644,12 +719,8 @@ pub type NamedGraph<'a> = (Option<&'a Term>, &'a [Triple]);
 /// prefix used across all graphs.
 pub fn write_trig(graphs: &[NamedGraph<'_>], prefixes: &Prefixes) -> String {
     let mut out = String::new();
-    // Header over the union of every graph's triples.
-    let all: Vec<Triple> = graphs
-        .iter()
-        .flat_map(|(_, ts)| ts.iter().cloned())
-        .collect();
-    write_prefix_header(&all, prefixes, &mut out);
+    // Header over every graph's triples and every emitted graph name.
+    write_dataset_prefix_header(graphs, prefixes, &mut out);
 
     let mut first = true;
     for (name, ts) in graphs {
@@ -707,13 +778,10 @@ pub fn write_trig_streaming<W: std::io::Write>(
     prefixes: &Prefixes,
     w: &mut W,
 ) -> std::io::Result<()> {
-    // Header over the union of every graph's triples — one pass, matching `write_trig`.
-    let all: Vec<Triple> = graphs
-        .iter()
-        .flat_map(|(_, ts)| ts.iter().cloned())
-        .collect();
+    // Header over every graph's triples and every emitted graph name — one pass, matching
+    // `write_trig`.
     let mut header = String::new();
-    write_prefix_header(&all, prefixes, &mut header);
+    write_dataset_prefix_header(graphs, prefixes, &mut header);
     w.write_all(header.as_bytes())?;
 
     let mut first = true;
@@ -1395,7 +1463,7 @@ pub fn write_turtle_pretty(triples: &[Triple], prefixes: &Prefixes, opts: &Prett
     let body = pretty_graph_body(triples, "", opts, prefixes);
     let mut sections: Vec<String> = Vec::new();
     if opts.abbreviate {
-        if let Some(header) = pretty_prefix_header(triples, prefixes, "") {
+        if let Some(header) = pretty_prefix_header(&[(None, triples)], prefixes, "") {
             sections.push(header);
         }
     }
@@ -1406,43 +1474,35 @@ pub fn write_turtle_pretty(triples: &[Triple], prefixes: &Prefixes, opts: &Prett
 }
 
 /// Builds the `@prefix` header for the pretty writers: prefix-alphabetical, listing only
-/// the prefixes whose namespace is the chosen compaction for at least one IRI in
-/// `triples`. Returns `None` when nothing compacts. `indent` prefixes each line (a TriG
-/// shared-header indent — currently always empty, kept for symmetry with the site).
-fn pretty_prefix_header(triples: &[Triple], prefixes: &Prefixes, indent: &str) -> Option<String> {
-    let mut used: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
-    let mut probe = String::new();
-    let mut note = |iri: &str| {
-        probe.clear();
-        write_iri(iri, prefixes, &mut probe);
-        if !probe.starts_with('<') {
-            if let Some((pfx, _)) = probe.split_once(':') {
-                if let Some((k, _)) = prefixes.get_key_value(pfx) {
-                    used.insert(k.as_str());
-                }
-            }
-        }
-    };
-    for t in triples {
-        collect_pretty_iris(&Term::from(t.subject.clone()), &mut note);
-        // `rdf:type` renders as `a` — never declares the rdf: prefix on its own account.
-        if t.predicate.as_str() != RDF_TYPE {
-            note(t.predicate.as_str());
-        }
-        collect_pretty_iris(&t.object, &mut note);
-    }
-    if used.is_empty() {
+/// the prefixes whose namespace is the chosen compaction for at least one IRI the pretty
+/// body renders (every graph's triples and every emitted named graph's NAME — see
+/// [`note_dataset_iris`]). Returns `None` when nothing compacts. `indent` prefixes each
+/// line (a TriG shared-header indent — currently always empty, kept for symmetry with the
+/// site).
+fn pretty_prefix_header(
+    graphs: &[NamedGraph<'_>],
+    prefixes: &Prefixes,
+    indent: &str,
+) -> Option<String> {
+    // [`PrefixTable::compact`] makes exactly [`write_iri`]'s choice, which the pretty body
+    // renders with; no probe render per IRI.
+    let table = PrefixTable::new(prefixes);
+    let used = table.used_in(graphs, IriPositions::Pretty);
+    let labels = table.used_labels(&used);
+    if labels.is_empty() {
         return None;
     }
     let mut out = String::new();
-    for (i, pfx) in used.iter().enumerate() {
+    for (i, (pfx, ns)) in labels.into_iter().enumerate() {
         if i > 0 {
             out.push('\n');
         }
-        let ns = &prefixes[*pfx];
-        let mut ns_esc = String::new();
-        escape_iri(ns, &mut ns_esc);
-        let _ = write!(out, "{}@prefix {}: {} .", indent, pfx, ns_esc);
+        out.push_str(indent);
+        out.push_str("@prefix ");
+        out.push_str(pfx);
+        out.push_str(": ");
+        escape_iri(ns, &mut out);
+        out.push_str(" .");
     }
     Some(out)
 }
@@ -1464,7 +1524,7 @@ fn collect_pretty_iris(term: &Term, note: &mut impl FnMut(&str)) {
             }
         }
         Term::Triple(t) => {
-            collect_pretty_iris(&Term::from(t.subject.clone()), note);
+            note_subject_iri(&t.subject, note);
             note(t.predicate.as_str());
             collect_pretty_iris(&t.object, note);
         }
@@ -1501,13 +1561,6 @@ pub fn write_trig_pretty(
     prefixes: &Prefixes,
     opts: &PrettyOptions,
 ) -> String {
-    // The shared header is computed over the union of every graph's triples (every IRI
-    // that appears anywhere in the dataset).
-    let all: Vec<Triple> = graphs
-        .iter()
-        .flat_map(|(_, ts)| ts.iter().cloned())
-        .collect();
-
     // Partition: default graph (name `None`) first, then named graphs sorted by their
     // N-Triples spelling.
     let mut named: Vec<&NamedGraph<'_>> = graphs.iter().filter(|(n, _)| n.is_some()).collect();
@@ -1515,7 +1568,9 @@ pub fn write_trig_pretty(
 
     let mut sections: Vec<String> = Vec::new();
     if opts.abbreviate {
-        if let Some(header) = pretty_prefix_header(&all, prefixes, "") {
+        // The shared header covers every IRI the body renders: every graph's triples AND
+        // every emitted named graph's name.
+        if let Some(header) = pretty_prefix_header(graphs, prefixes, "") {
             sections.push(header);
         }
     }
@@ -2089,7 +2144,7 @@ fn write_node_array(triples: &[Triple], prefixes: Option<&Prefixes>, out: &mut S
 /// Writes the `@context` object mapping each prefix to its namespace IRI (compacted form only).
 /// Only prefixes that actually abbreviate at least one IRI in the dataset are emitted, so the
 /// context never carries dead declarations.
-fn write_context(all: &[Triple], prefixes: &Prefixes, out: &mut String) {
+fn write_context(graphs: &[NamedGraph<'_>], prefixes: &Prefixes, out: &mut String) {
     let mut used: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
     let mut note = |iri: &str| {
         if let Some(curie) = compact_iri(iri, prefixes) {
@@ -2100,11 +2155,8 @@ fn write_context(all: &[Triple], prefixes: &Prefixes, out: &mut String) {
             }
         }
     };
-    for t in all {
-        collect_iris(&Term::from(t.subject.clone()), &mut note);
-        note(t.predicate.as_str());
-        collect_iris(&t.object, &mut note);
-    }
+    // Every graph's triples AND every named graph's `@id` (see [`note_dataset_iris`]).
+    note_dataset_iris(graphs, IriPositions::JsonLd, &mut note);
     out.push('{');
     for (i, pfx) in used.iter().enumerate() {
         if i > 0 {
@@ -2158,12 +2210,8 @@ pub fn write_jsonld(graphs: &[NamedGraph<'_>], form: JsonLdForm, prefixes: &Pref
     // sub-objects).
     out.push('{');
     if form == JsonLdForm::Compacted {
-        let all: Vec<Triple> = graphs
-            .iter()
-            .flat_map(|(_, ts)| ts.iter().cloned())
-            .collect();
         out.push_str("\"@context\":");
-        write_context(&all, prefixes, &mut out);
+        write_context(graphs, prefixes, &mut out);
         out.push(',');
     }
     out.push_str("\"@graph\":[");
@@ -2979,6 +3027,95 @@ ex:bob
                 assert_dataset_iso(&ds, &back, &tg);
             }
         }
+    }
+
+    /// A named graph's NAME is a compactable IRI position too: the `@prefix` header must
+    /// declare every prefix a `GRAPH` name is rendered with, not only the prefixes the
+    /// triples use. With `a` → `http://ex/` and `b` → `http://ex/ns`, the longest-namespace
+    /// rule renders the graph name below as `b:LongEnoughLocalPart` while every triple IRI
+    /// compacts to `a:`; a header collected from the triples alone declares only `a:`, and
+    /// the output is invalid TriG. Covers the buffered, streaming and pretty writers (the
+    /// `write_*` slice entry points and the `graph_to_*` ones), plus a graph name that is
+    /// the ONLY user of its prefix.
+    #[test]
+    fn trig_declares_prefixes_used_only_by_graph_names() {
+        let data = r#"
+            GRAPH <http://ex/nsLongEnoughLocalPart> { <http://ex/s> <http://ex/p> <http://ex/o> . }
+            GRAPH <http://other/g> { <http://ex/s> <http://ex/p> "v" . }
+            <http://ex/s> <http://ex/p> <http://ex/o> .
+        "#;
+        let ds = Graph::load_dataset(data, "trig").unwrap();
+        let overlap = prefixes_from_pairs([("a", "http://ex/"), ("b", "http://ex/ns")]);
+        let only_graph = prefixes_from_pairs([
+            ("a", "http://ex/"),
+            ("b", "http://ex/ns"),
+            ("o", "http://other/"),
+        ]);
+        let pretty = PrettyOptions::default();
+        for prefixes in [&overlap, &only_graph] {
+            let owned = dataset_graphs(&ds);
+            let view: Vec<NamedGraph<'_>> = owned
+                .iter()
+                .map(|(n, ts)| (n.as_ref(), ts.as_slice()))
+                .collect();
+            #[allow(unused_mut)]
+            let mut outs = vec![
+                (
+                    "buffered graph_to_trig_with",
+                    graph_to_trig_with(&ds, prefixes),
+                ),
+                ("buffered write_trig", write_trig(&view, prefixes)),
+                (
+                    "pretty graph_to_trig_pretty_with",
+                    graph_to_trig_pretty_with(&ds, prefixes, &pretty),
+                ),
+                (
+                    "pretty write_trig_pretty",
+                    write_trig_pretty(&view, prefixes, &pretty),
+                ),
+            ];
+            #[cfg(feature = "streaming-serialization")]
+            {
+                let mut buf = Vec::new();
+                graph_to_trig_streaming(&ds, prefixes, &mut buf).unwrap();
+                outs.push((
+                    "streaming graph_to_trig_streaming",
+                    String::from_utf8(buf).unwrap(),
+                ));
+                let mut buf = Vec::new();
+                write_trig_streaming(&view, prefixes, &mut buf).unwrap();
+                outs.push((
+                    "streaming write_trig_streaming",
+                    String::from_utf8(buf).unwrap(),
+                ));
+            }
+            for (name, tg) in outs {
+                // The longest-namespace rule is retained for the graph name.
+                assert!(tg.contains("GRAPH b:LongEnoughLocalPart"), "{name}\n{tg}");
+                let back = Graph::load_dataset(&tg, "trig")
+                    .unwrap_or_else(|e| panic!("{name} output does not parse: {e}\n{tg}"));
+                assert_dataset_iso(&ds, &back, &tg);
+            }
+        }
+    }
+
+    /// The compacted JSON-LD `@context` must likewise cover a named graph's `@id`: a CURIE
+    /// whose prefix is missing from the context re-expands to a different IRI (`o:g` read
+    /// as an absolute IRI with scheme `o`). Here `o:` is used ONLY by the graph name.
+    #[test]
+    fn jsonld_context_declares_prefixes_used_only_by_graph_names() {
+        let ds = Graph::load_dataset(
+            r#"GRAPH <http://other/g> { <http://ex/s> <http://ex/p> <http://ex/o> . }"#,
+            "trig",
+        )
+        .unwrap();
+        let prefixes = prefixes_from_pairs([("a", "http://ex/"), ("o", "http://other/")]);
+        let doc = graph_to_jsonld_with(&ds, JsonLdForm::Compacted, &prefixes);
+        assert!(doc.contains(r#""@id":"o:g""#), "{doc}");
+        assert!(
+            doc.contains(r#""o":"http://other/""#),
+            "context lacks o:\n{doc}"
+        );
     }
 
     #[test]
