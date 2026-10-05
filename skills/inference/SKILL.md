@@ -202,8 +202,9 @@ let _entailed: Vec<[sparq_core::dict::Id;3]> = doc.closure(&mut dict)?;  // mono
   vars become ordinary body vars (range-restriction validated by `Document::validate`);
   multi-slot `Frame` → per-slot conjunction (see below, sq-jsgyn). Fail-closed:
   `Import` directives, non-Core elements, unknown `External` IRIs, named-argument uniterms,
-  and malformed XML each produce a named `ImportError` variant; a root element outside the RIF
-  namespace (#3360) and element nesting deeper than 256 levels (#3359, stack-overflow guard) are
+  and malformed XML each produce a named `ImportError` variant; any element whose resolved
+  namespace is not RIF (#3360; checked per element, so a descendant `xmlns="…"` or a rebound
+  prefix cannot leave RIF, and prefixed attributes are ignored) and element nesting deeper than 256 levels (#3359, stack-overflow guard) are
   refused as `MalformedXml`. Parsing only — no new inference
   beyond the existing `rif-core` forward chainer. Unblocks sq-pbz04.5.5 (W3C RIF WG test-suite arm).
   **Positional predicate atoms** (`<Atom><op>P</op><args>…</args></Atom>`, sq-n7y15): the dominant
