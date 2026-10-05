@@ -1027,11 +1027,14 @@ impl TripleStore {
         self.overlay.as_ref().map_or(0, |ov| ov.added.len() + ov.deleted.len())
     }
 
-    /// Heap footprint of the permutation indexes in bytes (for benchmarking). Memory-
-    /// mapped permutations contribute 0 — their resident pages are OS page cache.
+    /// Heap footprint of the permutation indexes, the overlay and the planner's
+    /// per-predicate statistics map in bytes (for benchmarking). Memory-mapped
+    /// permutations contribute 0 — their resident pages are OS page cache. The stats map
+    /// is counted as capacity × (entry + 1 control byte), like `Dict`'s tables (#3115).
     pub fn heap_bytes(&self) -> usize {
         self.perms.iter().map(PermData::heap_bytes).sum::<usize>()
             + self.overlay.as_ref().map_or(0, |ov| ov.heap_bytes())
+            + self.pred_stats.capacity() * (std::mem::size_of::<(Id, PredStat)>() + 1)
     }
 
     /// Chooses the permutation whose sort order places all bound pattern
@@ -2136,6 +2139,25 @@ mod tests {
         for pat in [pat7, pat_p, pat_o, [Some(50), None, None]] {
             assert_eq!(store.scan(&pat).rows, rebuilt.scan(&pat).rows, "reverted cross-perm rows differ for {pat:?}");
         }
+    }
+
+    /// `heap_bytes` must count the planner's per-predicate statistics map (`pred_stats`),
+    /// not only the permutations + overlay (#3115). Wide-predicate corpora (Wikidata has
+    /// ~100k properties) carry MBs here; it was silently uncounted.
+    #[test]
+    fn heap_bytes_counts_pred_stats() {
+        // 1_000 distinct predicates so the stats map is non-trivially sized.
+        let triples: Vec<[Id; 3]> = (0..1_000u64).map(|p| [1, p as Id, 2]).collect();
+        let store = TripleStore::from_triples(triples);
+        assert_eq!(store.pred_stats.len(), 1_000);
+        let perms: usize = store.perms.iter().map(PermData::heap_bytes).sum();
+        let stats = store.pred_stats.capacity() * (std::mem::size_of::<(Id, PredStat)>() + 1);
+        assert!(stats > 0);
+        assert_eq!(
+            store.heap_bytes(),
+            perms + stats,
+            "heap_bytes must include pred_stats"
+        );
     }
 
     /// [SONNET-4.6 sq-7d3dj.32.1] Each built raw-mode permutation Vec must carry zero
