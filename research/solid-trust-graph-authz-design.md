@@ -38,7 +38,7 @@ evaluation algorithm pseudocode + open-problem hooks the PoC must respect, not s
 The de-dup/coverage claims are kept bounded (predicate-only direction; structural-layer only),
 NOT overclaimed. -->
 
-GitHub issue: [#940](https://github.com/jeswr/sparq/issues/940).
+GitHub issue: [#940](https://github.com/sparq-org/sparq/issues/940).
 
 ## 0. The request (verbatim)
 

@@ -42,7 +42,7 @@ gh api repos/sparq-org/sparq/pages --jq '{build_type, cname, html_url}'
 curl -sSI https://sparq.jeswr.org/ | head -1
 ```
 
-Note the repo also moved orgs: it is **`sparq-org/sparq`**, not `jeswr/sparq`. Every
+Note the repo also moved orgs: it is **`sparq-org/sparq`**, not `sparq-org/sparq`. Every
 API call and URL in the original document targeted the old owner and the old
 `github.io` host, and would misfire today.
 

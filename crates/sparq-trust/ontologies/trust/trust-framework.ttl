@@ -75,7 +75,7 @@ trust:. Framework trust is ANCHORED (the framework operator's signed artifacts),
 proven; no cryptographic soundness/privacy guarantee is asserted (sq-qhy4 open, MPC
 semi-honest). Companion: research/trust-expression-spec.md §3.4 / §7."""@en ;
   owl:imports <https://sparq.dev/ns/trust> ;
-  rdfs:seeAlso <https://github.com/jeswr/sparq/issues/1592> ;
+  rdfs:seeAlso <https://github.com/sparq-org/sparq/issues/1592> ;
   rdfs:comment "Placeholder namespace shared with trust:; a WG would rename/rehome every term."@en .
 
 # =============================================================================

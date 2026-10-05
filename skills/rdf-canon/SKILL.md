@@ -58,7 +58,7 @@ assert_eq!(map.get("x").map(String::as_str), Some("c14n0"));
 When you already hold serialized RDF — e.g. across a language boundary — skip the
 oxrdf term plumbing: `canonicalize_nquads(&str) -> Result<String, _>` parses an
 N-Quads document and returns its canonical N-Quads (`parse_nquads` exposes the parse
-alone). This is the seam the `@jeswr/sparq` RDF/JS `Dataset` uses for
+alone). This is the seam the `@sparq-org/sparq` RDF/JS `Dataset` uses for
 isomorphism-aware `toCanonical` / `equals` / `contains`, surfaced over wasm as the
 `canonicalizeNQuads(nquads)` binding behind `sparq-wasm`'s opt-in `canon` feature.
 
@@ -327,7 +327,7 @@ parity (sq-5i1d [OPUS-4.8]) and a constrained ground-triple-term
 (error-on-nested-bnode) `*_ground_terms` wrapper family for the common
 credential/VC case (sq-iaxd [FABLE-5]). The `canonicalize_nquads` / `parse_nquads` text seam
 and the `sparq-wasm` opt-in `canon` feature (`canonicalizeNQuads` binding for the
-`@jeswr/sparq` RDF/JS `Dataset`) are sq-1dd5t [OPUS-4.8]; that wasm consumer pulls
+`@sparq-org/sparq` RDF/JS `Dataset`) are sq-1dd5t [OPUS-4.8]; that wasm consumer pulls
 `sparq-canon` with `default-features = false` (the crate now disables
 `sparq-core`'s default `parallel` and re-enables it via its own default `parallel`
 feature, so native builds are byte-identical and the wasm build drops rayon).

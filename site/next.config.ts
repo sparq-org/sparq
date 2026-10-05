@@ -65,7 +65,7 @@ const nextConfig: NextConfig = {
   // indicator badge would otherwise appear in — and destabilise — every baseline. Scoped to the
   // VR run only; normal `next dev` keeps the indicators.
   ...(process.env.SPARQ_VR ? { devIndicators: false as const } : {}),
-  // The @jeswr/sparq wrapper ships ESM with `.js` import specifiers that resolve
+  // The @sparq-org/sparq wrapper ships ESM with `.js` import specifiers that resolve
   // to `.ts`/`.tsx` sources in dev; mirror solid-pod-manager's webpack alias so the
   // bundler follows them.
   webpack: (config) => {

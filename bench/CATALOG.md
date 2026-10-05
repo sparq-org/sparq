@@ -291,7 +291,7 @@ Notes on a few that need care:
 - **`wasm-compare` has a BROWSER half and a COMPETITOR half (both implemented).**
   [`bench/wasm-compare/browser/`](./wasm-compare/browser/README.md) (sq-3ul2n.1, the Tier-0
   measurement gate of the browser-WASM program `research/browser-wasm-perf-assessment-2026-07.md`)
-  drives the SHIPPED `@jeswr/sparq` bundle through headless Chromium/Firefox/WebKit (Playwright,
+  drives the SHIPPED `@sparq-org/sparq` bundle through headless Chromium/Firefox/WebKit (Playwright,
   self-contained npm dir — not a root workspace member) + a plain-Node baseline, attributing
   wall time PER PHASE (fetch/compile/instantiate + `instantiateStreaming`, N-Triples+Turtle
   load at 25k/100k/300k triples, five query shapes cold-vs-warm, CONSTRUCT serialization out,

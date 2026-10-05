@@ -22,7 +22,7 @@
 //! hook can run (debug builds, `wasm-bindgen-test`). In `panic=abort` release builds the hook
 //! fires before the abort and the message appears in the browser or Node console.
 //!
-//! The Node host (`@jeswr/solid-server`) catches the resulting `WebAssembly.RuntimeError` and
+//! The Node host (`@sparq-org/solid-server`) catches the resulting `WebAssembly.RuntimeError` and
 //! recreates the `SolidServer` before the next request, so a single trap does not permanently
 //! brick the process. See `packages/solid-server/src/index.js`.
 //!

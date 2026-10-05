@@ -19,29 +19,23 @@
 # events — release.yml has no `pull_request` trigger, so it is invisible to that aggregator).
 #
 # [OPUS-4.8] sq-gl3cf: a `v*` tag push is the canonical release; `workflow_dispatch` is the
-# developer/test path that builds + attaches the SAME assets (GUI bundles, archives, SBOM/VEX,
-# docker image) WITHOUT pushing a real `v*` tag. On dispatch, `github.ref_name` is the BRANCH the
-# dispatch ran on (NOT a version), so every place asset identity / the release tag was derived
-# from `github.ref_name` is now threaded from the `setup` job's single `version` output
-# (`inputs.tag` on dispatch, `github.ref_name` on tag push). Dispatch builds are pre-release by
-# default. There is NO double-build on tag: a single event fires exactly one trigger, and `setup`
-# resolves the version for whichever fired.
+# recovery path, run at the SAME immutable tag as its `tag` input. [GPT-6] setup refuses
+# branch dispatches, source/tag mismatches, and inconsistent manifest versions before any
+# artifact is built or published. Dispatch builds remain pre-release by default.
 name: release
 
 on:
   push:
     tags: ["v*"]
-  # [OPUS-4.8] sq-gl3cf: manual path to build + attach the release assets (incl. the UNSIGNED
-  # Tauri desktop GUI bundles) without cutting a real `v*` tag — for developer/test releases.
+  # Manual recovery retries the workflow AT the tag; it cannot pick up workflow fixes
+  # merged later. See docs/release.md §3b before retrying a deterministic failure.
   workflow_dispatch:
     inputs:
       tag:
         description: >-
-          Release tag the built assets attach to (e.g. v0.1.0-dev). MUST be a vX.Y.Z release tag —
-          the publish-cadence guard (#2552) refuses anything else, because it cannot tell which tag
-          to exclude from the interval sources. A developer/test dispatch SHOULD use a -dev /
-          pre-release suffix so it is never mistaken for a canonical release.
-          This is the single source of asset naming + the GitHub Release tag on the dispatch path.
+          Existing vX.Y.Z tag to build and attach assets to. Dispatch the workflow at this exact
+          tag (not main); its commit and manifest versions must match. A prerelease tag must
+          also match the prerelease version in the manifests. Never move a public tag to retry.
         required: true
         type: string
       prerelease:
@@ -58,9 +52,8 @@ jobs:
   # ---- 0. resolve the single version string used for asset identity + the release tag ----
   # [OPUS-4.8] sq-gl3cf: ONE source of truth for the version, consumed by EVERY job that names an
   # asset or attaches to a tag. On a `v*` tag push, `inputs.tag` is empty and `github.ref_name` is
-  # the tag (e.g. `v0.1.0`). On `workflow_dispatch`, `inputs.tag` is the developer-supplied release
-  # tag and `github.ref_name` is the BRANCH (wrong for asset identity) — so `${{ inputs.tag ||
-  # github.ref_name }}` picks the dispatch input when present and the tag otherwise. This output is
+  # the tag (e.g. `v0.1.0`). On `workflow_dispatch`, `inputs.tag` must name the same existing
+  # tag as the dispatch ref; setup verifies this before building. This output is
   # threaded into `gui-bundle`, `sbom`, `package` (via build-matrix.yml's `version` input), and
   # `release` (tag_name + body links) so BOTH triggers name assets + tag the Release identically.
   setup:
@@ -73,7 +66,9 @@ jobs:
     steps:
       - name: Resolve version
         id: v
-        run: echo "version=${{ inputs.tag || github.ref_name }}" >> "$GITHUB_OUTPUT"
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: printf 'version=%s\n' "$RELEASE_TAG" >> "$GITHUB_OUTPUT"
       # [OPUS-5] issue #2552 — THE CADENCE GUARD ON THE TAG-PUSH PATH. LOAD-BEARING.
       #
       # Maintainer, verbatim: "We need to make sure that we do not create many many
@@ -98,15 +93,10 @@ jobs:
       # PRECONDITION — on a shallow checkout the tag list is not authoritative and the
       # guard refuses rather than guessing.
       #
-      # WHY UNCONDITIONAL — including `workflow_dispatch`. A dispatch build looks like a
-      # developer/test path (pre-release, `dev-`-prefixed image tags), but the Release it
-      # creates fires `release: published`, and publish.yml's `npm` job runs on ANY
-      # `release` event. So a dispatch reaches a registry too: exempting it would leave the
-      # loophole this guard exists to close. The escape hatch the guard's no-override
-      # design reserves is a maintainer publishing BY HAND, outside CI — not dispatching a
-      # workflow that publishes for them. Consequence, by design: `inputs.tag` must be a
-      # `vX.Y.Z` release tag (a `-dev` suffix is fine); anything else refuses, because the
-      # guard cannot tell which tag to exclude from the cadence sources.
+      # WHY UNCONDITIONAL — including `workflow_dispatch`: dispatch publishes Release
+      # assets and container images too. GITHUB_TOKEN-created Releases do not trigger
+      # publish.yml; registry uploads use a separate explicit dispatch. Both workflows
+      # now require an existing tag whose version and commit match the checkout.
       #
       # DO NOT add an `if:`, do not add `continue-on-error`, do not swap `--enforce` for
       # `--dry-run`, and do not append `|| true`.
@@ -115,8 +105,13 @@ jobs:
       - name: Checkout (full history — the `v*` tag list must be authoritative)
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
+      - name: Verify immutable release source
+        env:
+          RELEASE_TAG: ${{ steps.v.outputs.version }}
+        run: python3 scripts/check-release-source.py --tag "$RELEASE_TAG"
       - name: Publish-cadence guard (fail-closed minimum release interval, #2552)
         env:
           # Via env, never string-interpolated into the shell: a tag name is attacker-
@@ -184,16 +179,18 @@ jobs:
     permissions:
       actions: read # read the workflow definition the provenance records as the entry point
       id-token: write # mint the generator's OWN signing identity (never shared with `package`)
-      contents: read # `upload-assets: false` below — the `release` job attaches the file, not this
+      # The upstream reusable workflow declares a nested release-uploader job with
+      # `contents: write`, so GitHub validates this ceiling even when `upload-assets: false`
+      # skips that job. The release job below remains the only job that actually uploads.
+      contents: write
     uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
     with:
       # The ONLY input crossing the isolation boundary: digests, computed by `package`, of the
       # bytes it uploaded. Deliberately threaded — this job must never recompute them from
       # artifacts, which would drag the build's outputs back inside the trusted builder.
       base64-subjects: ${{ needs.package.outputs.hashes }}
-      # `upload-assets: false`: the generator's own uploader attaches to `github.ref`'s release,
-      # which on a workflow_dispatch is a BRANCH (the same trap sq-gl3cf fixed everywhere else),
-      # and the `release` job below is the single place this pipeline creates the Release. We
+      # `upload-assets: false`: the `release` job below is the single place this pipeline
+      # creates the Release and attaches its complete asset set. We
       # download the provenance artifact there instead, so it lands in SHA256SUMS for free.
       upload-assets: false
       provenance-name: sparq-cli-${{ needs.setup.outputs.version }}.intoto.jsonl
@@ -207,7 +204,7 @@ jobs:
   sbom:
     name: CycloneDX SBOM + VEX
     # [OPUS-4.8] sq-gl3cf: needs the resolved version so the per-release SBOM/VEX filenames carry
-    # the dispatch tag (on dispatch the scripts' GITHUB_REF_NAME fallback is the branch).
+    # the verified release tag on either trigger.
     needs: setup
     runs-on: ubuntu-latest
     permissions:
@@ -216,6 +213,8 @@ jobs:
       attestations: write
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
       - name: Rust (preinstalled stable)
         # [FABLE-5] CI-economy (2026-07-18 directive): the ubuntu runner image
         # ships a rustup stable toolchain; the SHA-pinned action's `rustup
@@ -234,14 +233,13 @@ jobs:
         with:
           node-version: 22
       # [OPUS-4.8] sq-gl3cf: pass VERSION explicitly. gen-sbom-vex.sh honors $VERSION (falling
-      # back to GITHUB_REF_NAME), but on a workflow_dispatch GITHUB_REF_NAME is the BRANCH, so the
-      # SBOM/VEX filenames would be mis-stamped — thread the resolved version instead.
+      # back to GITHUB_REF_NAME); thread the verified version explicitly for both triggers.
       - name: Generate per-release SBOM + VEX
         env:
           VERSION: ${{ needs.setup.outputs.version }}
         run: scripts/gen-sbom-vex.sh
       # [OPUS-4.8] sq-toze.27 / [GPT-5.6] sq-epbw4: per-release CycloneDX SBOMs for
-      # `@jeswr/sparq` and the shared `@sparq/client` code bundled into browser artifacts.
+      # `@sparq-org/sparq` and the shared `@sparq/client` code bundled into browser artifacts.
       # Runtime + full build trees land in sbom/, so the attestation glob below covers all four.
       # [OPUS-4.8] sq-gl3cf: gen-js-sbom.sh ALSO reads GITHUB_REF_NAME for the version-stamped
       # filenames, so it needs the same VERSION thread for the dispatch path to name JS SBOMs right.
@@ -303,7 +301,7 @@ jobs:
   served-conformance:
     name: served-surface conformance report
     # [OPUS-4.8] sq-ro6if: needs the resolved version so the per-release report filename carries the
-    # release tag (mirrors the SBOM job's VERSION thread; on dispatch GITHUB_REF_NAME is the branch).
+    # release tag (mirrors the SBOM job's VERSION thread).
     needs: setup
     runs-on: ubuntu-latest
     permissions:
@@ -312,6 +310,8 @@ jobs:
       attestations: write
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
       - name: Rust (preinstalled stable)
         # [FABLE-5] CI-economy (2026-07-18 directive): the ubuntu runner image
         # ships a rustup stable toolchain; the SHA-pinned action's `rustup
@@ -463,6 +463,8 @@ jobs:
           - { os: windows-latest, label: win-x64, soft: true }
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
 
       # The Tauri webview + bundler system libraries are LINUX-ONLY (macOS ships WKWebView,
       # Windows ships WebView2). This is the SAME apt set gui.yml installs to build the GUI
@@ -507,7 +509,7 @@ jobs:
       # resolves `next`/`cross-env` from root .bin. This is EXACTLY the install the proven-green
       # gui.yml `gui-app` ("Install workspace dependencies") + `tauri-e2e` jobs use.
       # (`npm install`, not `npm ci`, matches gui.yml — tolerant of a not-yet-regenerated lock.)
-      # The Windows `npm install` ENOENT/EPERM (run 27890097353) was the @jeswr/sparq workspace
+      # The Windows `npm install` ENOENT/EPERM (run 27890097353) was the @sparq-org/sparq workspace
       # member's `prepare` hook (js/guardrails/prepare-build.mjs) calling `execFileSync('npm',…)`
       # WITHOUT `shell:true`, so `npm.cmd` did not resolve on Windows (`spawnSync npm ENOENT`),
       # whose crash then triggered npm's rollback `EPERM rmdir node_modules/next` cleanup warnings.
@@ -645,7 +647,8 @@ jobs:
           BUNDLE_DIR="gui/src-tauri/target/release/bundle"
           OUT="gui-bundles"
           mkdir -p "$OUT"
-          shopt -s nullglob globstar
+          # [GPT-6] macOS ships Bash 3.2. These one-directory globs need only nullglob.
+          shopt -s nullglob
 
           # matrix label -> ONE canonical arch token for the emitted asset name.
           case "${{ matrix.label }}" in
@@ -830,7 +833,7 @@ jobs:
   # THE ONE THING TO WATCH ON THE FIRST TAG: this is the first time the generator is invoked
   # TWICE in one workflow run. The two jobs are only safe to coexist because the generator names
   # its uploaded artifact from `provenance-name`, and the two names differ — the `release` job
-  # never hard-codes either, it reads each job's own `provenance-download-name` output. If a
+  # reads each job's `provenance-name` output and checks the expected distinct names. If a
   # future generator version ever used a FIXED artifact name instead, the second upload would
   # collide and this job would red (fail-closed, which is the right direction) — that is the
   # residual to check on the first `v*` tag, not something verifiable from a PR.
@@ -847,7 +850,9 @@ jobs:
     permissions:
       actions: read # read the workflow definition the provenance records as the entry point
       id-token: write # mint the generator's OWN signing identity (never shared with a build job)
-      contents: read # not the uploader; the `release` job attaches the bundle
+      # Required as a permission ceiling by the upstream reusable workflow's nested,
+      # skipped uploader job even though `upload-assets: false`; this job does not upload.
+      contents: write
     uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
     with:
       base64-subjects: ${{ needs.artifact-subjects.outputs.hashes }}
@@ -858,8 +863,7 @@ jobs:
   release:
     name: create GitHub Release
     # [OPUS-4.8] sq-gl3cf: `setup` added so the Release attaches to the resolved tag (tag_name
-    # below) on BOTH triggers — on dispatch, action-gh-release's default tag_name is `github.ref`,
-    # which is the BRANCH, so we must override it explicitly.
+    # below) on BOTH triggers; setup verifies that this is also the workflow's tag ref.
     # [OPUS-5] sq-toze.25: `provenance` is a HARD dependency, not an optional extra. If the
     # isolated trusted builder fails, no Release is cut — a release that shipped without the
     # L3 provenance while the docs claim L3 is precisely the silent overclaim the compliance
@@ -875,6 +879,24 @@ jobs:
       # assets/ dir) — the alias contract check below needs scripts/check-release-aliases.sh and
       # the /download page source it extracts the site-referenced alias set from.
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+      # [GPT-5] v0.1.3's empty `provenance-download-name` input caused download-artifact to
+      # download EVERY run artifact into assets/, then SHA256SUMS failed on their directories.
+      # The pinned generic generator exports `provenance-name`; require its expected outputs
+      # before either download so a future output-contract mismatch fails closed here.
+      - name: Validate signed provenance artifact names
+        env:
+          VERSION: ${{ needs.setup.outputs.version }}
+          ARCHIVE_PROVENANCE: ${{ needs.provenance.outputs.provenance-name }}
+          ARTIFACT_PROVENANCE: ${{ needs.provenance-artifacts.outputs.provenance-name }}
+        run: |
+          set -euo pipefail
+          if [ "$ARCHIVE_PROVENANCE" != "sparq-cli-${VERSION}.intoto.jsonl" ] ||
+             [ "$ARTIFACT_PROVENANCE" != "sparq-artifacts-${VERSION}.intoto.jsonl" ]; then
+            echo "ERROR: signed provenance artifact names are missing or unexpected" >&2
+            exit 1
+          fi
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: pkg-*
@@ -896,18 +918,18 @@ jobs:
       # signed (release.yml#provenance) so it is covered by SHA256SUMS and attached to the
       # Release. Consumers verify it with `slsa-verifier verify-artifact <archive>
       # --provenance-path <this file> --source-uri github.com/<owner>/<repo>`. The artifact name
-      # comes from the generator's own output — hard-coding it would silently 404 the day the
-      # generator changes its naming, and this download is fail-closed by default.
+      # comes from the generator's own output; the guard above fails before download if a
+      # future generator changes or omits that output.
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: ${{ needs.provenance.outputs.provenance-download-name }}
+          name: ${{ needs.provenance.outputs.provenance-name }}
           path: assets
       # [OPUS-5] #4570 (GX-11 residual): the SECOND isolated-builder bundle — the one covering the
       # GUI bundles, SBOM/VEX and served-surface conformance report. Same fail-closed download by
       # the generator's own output name, so it lands in SHA256SUMS and on the Release too.
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: ${{ needs.provenance-artifacts.outputs.provenance-download-name }}
+          name: ${{ needs.provenance-artifacts.outputs.provenance-name }}
           path: assets
       # [FABLE-5] sq-vw3ax.11.3: stage version-STABLE alias assets. The /download page's direct
       # buttons target `releases/latest/download/<alias>` (static hrefs, no API dependency), but
@@ -964,22 +986,23 @@ jobs:
       # entries (unchanged) PLUS one appended entry per alias (same digest, alias name).
       - name: Generate SHA256SUMS
         run: cd assets && sha256sum -- * > SHA256SUMS
+      - name: Reverify remote release tag immediately before creating the release
+        env:
+          RELEASE_TAG: ${{ needs.setup.outputs.version }}
+        run: python3 scripts/check-release-source.py --tag "$RELEASE_TAG" --remote-tag origin
       - name: Create release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
-          # [OPUS-4.8] sq-gl3cf: attach to the RESOLVED tag. The action defaults tag_name to
-          # `github.ref`, which on a workflow_dispatch is the branch (wrong) — pin it to the
-          # version the rest of the pipeline named assets with so dispatch + tag agree.
+          # Attach to the verified tag used to name every artifact.
           tag_name: ${{ needs.setup.outputs.version }}
-          # [OPUS-4.8] sq-gl3cf: dispatch builds are developer/test releases — mark them
+          # [OPUS-4.8] sq-gl3cf: dispatch builds are marked
           # pre-release by default (the dispatch `prerelease` input; true unless overridden). A
           # tag push has no such input, so `inputs.prerelease` is empty -> not a pre-release.
           prerelease: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease }}
           files: assets/*
           generate_release_notes: true
           # CHANGELOG.md is the curated source of truth; point readers at it. Body links use the
-          # resolved version (needs.setup.outputs.version), not github.ref_name, so dispatch
-          # builds (where github.ref_name is the branch) link to the right tag.
+          # resolved version (needs.setup.outputs.version) on both triggers.
           body: |
             See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/${{ needs.setup.outputs.version }}/CHANGELOG.md) for the curated changelog.
 
@@ -1082,6 +1105,8 @@ jobs:
       digest: ${{ steps.push.outputs.digest }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
       # [GPT-5.6] sq-fvzi6: register the arm64 binfmt emulator before Buildx so the final
       # release push can build both target platforms on this native amd64 runner.
       - name: Set up QEMU for arm64
@@ -1183,6 +1208,10 @@ jobs:
         run: |
           set -euo pipefail
           echo "image=ghcr.io/$(printf '%s' "$OWNER" | tr '[:upper:]' '[:lower:]')/sparq-server" >> "$GITHUB_OUTPUT"
+      - name: Reverify remote release tag immediately before pushing the image
+        env:
+          RELEASE_TAG: ${{ needs.setup.outputs.version }}
+        run: python3 scripts/check-release-source.py --tag "$RELEASE_TAG" --remote-tag origin
       - name: Build and push
         id: push
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
@@ -1246,7 +1275,7 @@ jobs:
   # scripts/tests/test_release_slsa_l3_provenance.py; runtime behaviour is not evidence until a
   # tag produces it. Verify a published image with (ghcr.io needs `GH_TOKEN` exported):
   #   slsa-verifier verify-image ghcr.io/<owner>/sparq-server@<digest> \
-  #     --source-uri github.com/jeswr/sparq
+  #     --source-uri github.com/sparq-org/sparq
   provenance-container:
     needs: [docker]
     permissions:

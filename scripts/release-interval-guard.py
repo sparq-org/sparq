@@ -10,7 +10,8 @@ WHAT THIS IS
 The **belt** to the Release-PR arming exclusion's braces (scripts/release_pr_guard.py).
 That exclusion stops the Release PR being merged automatically. This guard sits in the
 release path ITSELF, so even a mistaken merge — by a human, by a future automation, by a
-path nobody enumerated — cannot cut a release more often than ``MIN_RELEASE_INTERVAL``.
+path nobody enumerated — cannot cut a release more often than ``MIN_RELEASE_INTERVAL``,
+except for the fixed maintainer-authorized v0.1.3 recovery predicate below.
 
 It runs at BOTH points where a release can begin:
 
@@ -47,11 +48,15 @@ THE THREE CHECKS
    silently breaking the locked single-version model the group exists to preserve — and
    are published anyway. A mismatch is exactly the "I do not know what would be published"
    condition, so it REFUSES.
-2. **Cadence.** ``now - last_release >= MIN_RELEASE_INTERVAL``, where ``last_release`` is
+2. **Registry dependency closure.** Every normal/build path dependency, plus every
+   versioned dev-dependency shipped by a publishable crate, must itself be publishable and
+   must carry a registry version requirement. Cargo omits path-only dev-dependencies from
+   the published manifest; those intentionally do not constrain bootstrap order.
+3. **Cadence.** ``now - last_release >= MIN_RELEASE_INTERVAL``, where ``last_release`` is
    the MAXIMUM of two authoritative sources — the newest ``v*`` git tag's creation date
    and the newest crates.io publication timestamp across the publishable crates. Taking
    the max means neither source can be used to argue for a shorter wait.
-3. **Would a release even happen?** If ``v<workspace version>`` is already tagged,
+4. **Would a release even happen?** If ``v<workspace version>`` is already tagged,
    ``release-plz release`` is a no-op, so the cadence check is not applicable and the
    guard passes quietly. Without this the guard would red every ordinary push to main
    inside the interval window. This check is SKIPPED under ``--released-tag`` (there, the
@@ -72,10 +77,14 @@ Every one of these REFUSES (exit 1) rather than publishing:
   release it is being asked to permit);
 * the last release timestamp is in the FUTURE (clock skew / a bad tag date);
 * the workspace manifest cannot be read, or the publishable-crate set cannot be derived;
+* a publishable crate has an unpublished or unversioned shipped workspace dependency;
 * a publishable crate is missing from the version_group.
 
-An unknown NEVER means "go ahead". There is deliberately **no override flag** — a
-maintainer who genuinely needs to publish inside the window does it by hand, consciously.
+An unknown NEVER means "go ahead". There is deliberately **no override flag**.
+[GPT-6] PR #6573 carries one maintainer-authorized exception: v0.1.3 may recover the
+exact incomplete v0.1.2 predecessor while every public crate remains absent. The
+fixed local/remote tag evidence is re-read on both pre-tag and tag-push paths. No
+other version inherits this exception; MIN_RELEASE_INTERVAL remains 24 hours.
 
 MODES
 =====
@@ -99,6 +108,7 @@ import json
 import re
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
@@ -115,8 +125,8 @@ except ModuleNotFoundError:  # pragma: no cover - the runner ships 3.11+
 # THE ONE KNOB. 24 hours.
 #
 # WHY 24h, and not less:
-#   * One sparq release publishes EVERY crate in the version_group (17 today) as a new
-#     crates.io version, in lockstep. Two releases in a day is 34 irreversible versions.
+#   * One sparq release publishes EVERY crate in the version_group (37 today) as a new
+#     crates.io version, in lockstep. Two releases in a day is 74 irreversible versions.
 #   * sparq lands on the order of 80 commits a day. Cadence tracks Release-PR MERGES, not
 #     commits — but nothing except this guard bounds how often that PR can be merged, and
 #     the whole point of #1135 is that the maintainer does not want the registry spammed.
@@ -132,12 +142,32 @@ except ModuleNotFoundError:  # pragma: no cover - the runner ships 3.11+
 MIN_RELEASE_INTERVAL = dt.timedelta(hours=24)
 MIN_RELEASE_INTERVAL_HOURS = MIN_RELEASE_INTERVAL.total_seconds() / 3600.0
 
+# [GPT-6] Maintainer-authorized v0.1.3 recovery only (PR #6573). Pin the complete
+# observed remote v* inventory so an extra tag cannot evade the check by backdating.
+# These are evidence, not configurable options. v0.1.3 is added only on its tag path.
+V013_PREDECESSOR_AT = dt.datetime(2026, 9, 20, 22, 3, 11, tzinfo=dt.timezone.utc)
+V013_PREDECESSOR_REFS = {
+    "refs/tags/v0.1.0": "9692ce389b0b8243068fffabf278763f8c1dc280",
+    "refs/tags/v0.1.0^{}": "60f21e1dcee763668d490ba7981487f95a1e7c7d",
+    "refs/tags/v0.1.0-dev.3": "0bc4412d13da35966ce6e3acf75f4d6d06aa5767",
+    "refs/tags/v0.1.1": "9b93b277d6700e05f1c2d4ce3ee4ca1923416bc8",
+    "refs/tags/v0.1.1^{}": "1a63aa7c638bd80da55f1811d5fb97e8d014f631",
+    "refs/tags/v0.1.2": "05efded769a745d5b0e8d6d076425c171732ab1d",
+    "refs/tags/v0.1.2^{}": "4b37254efe502f8a0aeba36076130ed9b44853ef",
+}
+
 CRATES_IO_API = "https://crates.io/api/v1/crates/{name}"
 # crates.io requires a descriptive User-Agent and rejects generic ones.
 CRATES_IO_USER_AGENT = (
     "sparq-release-interval-guard (https://github.com/sparq-org/sparq; issue #1135)"
 )
 CRATES_IO_TIMEOUT = 20
+# [GPT-5.6] Thirty-seven registry reads make a one-off CDN/TLS reset likely enough to
+# wedge a release. Retry only transient transport/status failures; remain fail-closed.
+CRATES_IO_RETRY_DELAYS = (0.5, 1.5)
+CRATES_IO_RETRYABLE_ERROR_RE = re.compile(
+    r"^(?:request failed:|HTTP (?:408|425|429|5\d\d)$)"
+)
 
 VERSION_TAG_RE = re.compile(r"^v(\d+\.\d+\.\d+(?:[-+].*)?)$")
 
@@ -154,7 +184,8 @@ class Crate:
     name: str
     version: str
     path: Path
-    # Intra-workspace dependencies on OTHER publishable crates (publish order).
+    # Intra-workspace dependencies shipped to the registry (publish order). This includes
+    # versioned dev-dependencies; Cargo omits path-only dev-dependencies when publishing.
     deps: frozenset[str] = frozenset()
 
 
@@ -185,19 +216,19 @@ def _load_toml(path: Path) -> dict:
 
 
 def _dep_tables(manifest: dict):
-    """Yield every dependency table in a member manifest, including target-specific ones."""
-    for key in ("dependencies", "build-dependencies"):
+    """Yield ``(is_dev, table)`` for all dependency tables, including target-specific."""
+    for key in ("dependencies", "build-dependencies", "dev-dependencies"):
         table = manifest.get(key)
         if isinstance(table, dict):
-            yield table
+            yield key == "dev-dependencies", table
     targets = manifest.get("target")
     if isinstance(targets, dict):
         for cfg in targets.values():
             if isinstance(cfg, dict):
-                for key in ("dependencies", "build-dependencies"):
+                for key in ("dependencies", "build-dependencies", "dev-dependencies"):
                     table = cfg.get(key)
                     if isinstance(table, dict):
-                        yield table
+                        yield key == "dev-dependencies", table
 
 
 def publishable_crates(repo_root: Path) -> list[Crate]:
@@ -219,7 +250,10 @@ def publishable_crates(repo_root: Path) -> list[Crate]:
         )
     workspace_version = ((workspace.get("package") or {}) or {}).get("version")
 
-    raw: dict[str, tuple[str, Path, dict]] = {}
+    # [GPT-5.6] Keep every member until dependency closure is validated. The old code
+    # discarded `publish = false` members before walking dependencies, which made a
+    # public -> private path edge invisible even though `cargo publish` cannot resolve it.
+    all_members: dict[str, tuple[str, Path, dict, bool]] = {}
     for member in members:
         member_dir = repo_root / str(member)
         manifest = _load_toml(member_dir / "Cargo.toml")
@@ -232,8 +266,7 @@ def publishable_crates(repo_root: Path) -> list[Crate]:
         publish = package.get("publish")
         # cargo: `publish = false` or `publish = []` means never publish. Anything else
         # (absent, true, a registry list) means cargo WOULD publish it.
-        if publish is False or publish == []:
-            continue
+        is_publishable = publish is not False and publish != []
         version = package.get("version")
         if isinstance(version, dict):  # version.workspace = true
             if not version.get("workspace"):
@@ -244,7 +277,15 @@ def publishable_crates(repo_root: Path) -> list[Crate]:
                 f"{name}: no resolvable version (member nor [workspace.package]) — "
                 "refusing to publish a crate whose version is unknown"
             )
-        raw[name] = (version, member_dir, manifest)
+        if name in all_members:
+            raise GuardRefusal(f"duplicate workspace package name {name!r}")
+        all_members[name] = (version, member_dir, manifest, is_publishable)
+
+    raw = {
+        name: (version, member_dir, manifest)
+        for name, (version, member_dir, manifest, is_publishable) in all_members.items()
+        if is_publishable
+    }
 
     if not raw:
         raise GuardRefusal(
@@ -254,14 +295,35 @@ def publishable_crates(repo_root: Path) -> list[Crate]:
     crates: list[Crate] = []
     for name, (version, member_dir, manifest) in raw.items():
         deps: set[str] = set()
-        for table in _dep_tables(manifest):
+        for is_dev, table in _dep_tables(manifest):
             for dep_name, spec in table.items():
                 # `package = "x"` renames; the real crate is the `package` value.
                 real = dep_name
                 if isinstance(spec, dict) and isinstance(spec.get("package"), str):
                     real = spec["package"]
-                if real in raw and real != name:
-                    deps.add(real)
+                if not isinstance(spec, dict) or "path" not in spec:
+                    continue
+                if real not in all_members or real == name:
+                    continue
+                requirement = spec.get("version")
+                # Cargo explicitly omits path-only dev-dependencies from a published
+                # package. They remain available to workspace tests but require neither
+                # registry closure nor a position in the first-publish order.
+                if is_dev and "version" not in spec:
+                    continue
+                if not all_members[real][3]:
+                    raise GuardRefusal(
+                        f"{name}: publishable crate depends on unpublished workspace "
+                        f"crate {real!r}; publish the dependency or remove the registry "
+                        "package from the release set"
+                    )
+                if not isinstance(requirement, str) or not requirement.strip():
+                    raise GuardRefusal(
+                        f"{name}: workspace dependency {real!r} has a path but no "
+                        "registry version requirement; add `version = \"<workspace "
+                        "version>\"` before publishing"
+                    )
+                deps.add(real)
         crates.append(
             Crate(name=name, version=version, path=member_dir, deps=frozenset(deps))
         )
@@ -434,20 +496,34 @@ def _http_get_json(url: str) -> tuple[dict | None, str | None]:
 
 
 def crates_io_last_publish(
-    names: list[str], fetch=_http_get_json
+    names: list[str], fetch=_http_get_json, retry_sleep=time.sleep, *, require_absent=False
 ) -> dt.datetime | None:
     """The newest crates.io publication timestamp across `names`, or None if NONE of them
-    has ever been published. REFUSES on any indeterminate response."""
+    has ever been published. Transient lookup failures receive two bounded retries; the
+    final failure (and every non-transient error) REFUSES."""
     newest: dt.datetime | None = None
     for name in sorted(names):
-        payload, error = fetch(CRATES_IO_API.format(name=name))
-        if error is not None:
-            raise GuardRefusal(
-                f"crates.io lookup for {name!r} was indeterminate ({error}) — the last "
-                "publication time cannot be established, refusing to publish"
-            )
+        attempts = 0
+        while True:
+            attempts += 1
+            payload, error = fetch(CRATES_IO_API.format(name=name))
+            if error is None:
+                break
+            retryable = CRATES_IO_RETRYABLE_ERROR_RE.match(error) is not None
+            if not retryable or attempts > len(CRATES_IO_RETRY_DELAYS):
+                suffix = f" after {attempts} attempt(s)" if retryable else ""
+                raise GuardRefusal(
+                    f"crates.io lookup for {name!r} was indeterminate{suffix} ({error}) — "
+                    "the last publication time cannot be established, refusing to publish"
+                )
+            retry_sleep(CRATES_IO_RETRY_DELAYS[attempts - 1])
         if payload is None:
             continue  # definitive 404: never published
+        if require_absent:
+            raise GuardRefusal(
+                f"v0.1.3 recovery requires a definitive crates.io 404 for {name!r}; "
+                "an existing registry response is unexpected — refusing"
+            )
         versions = payload.get("versions")
         if not isinstance(versions, list):
             raise GuardRefusal(
@@ -468,6 +544,43 @@ def crates_io_last_publish(
 
 
 # ----------------------------------------------------------------------------- decision
+
+
+def verify_v013_recovery(
+    repo_root: Path, tags: list[tuple[str, dt.datetime]], now: dt.datetime,
+    released_tag: str | None, run_git,
+) -> None:
+    """Verify fixed recovery evidence; never replace unknowns with defaults."""
+    predecessors = [(name, when) for name, when in tags if name != released_tag]
+    expected_names = {ref.removeprefix("refs/tags/") for ref in V013_PREDECESSOR_REFS
+                      if not ref.endswith("^{}")}
+    if ({name for name, _ in predecessors} != expected_names
+            or predecessors[0] != ("v0.1.2", V013_PREDECESSOR_AT)
+            or any(when > now for _, when in tags)):
+        raise GuardRefusal("v0.1.3 recovery predecessor inventory/timestamp is not the authorized state")
+    for ref, expected in (
+        ("refs/tags/v0.1.2", V013_PREDECESSOR_REFS["refs/tags/v0.1.2"]),
+        ("refs/tags/v0.1.2^{commit}", V013_PREDECESSOR_REFS["refs/tags/v0.1.2^{}"]),
+    ):
+        if run_git(repo_root, ["rev-parse", "--verify", ref]).strip() != expected:
+            raise GuardRefusal("v0.1.3 recovery predecessor object/commit changed")
+    expected_refs = dict(V013_PREDECESSOR_REFS)
+    if released_tag == "v0.1.3":
+        if not any(name == "v0.1.3" and when >= V013_PREDECESSOR_AT for name, when in tags):
+            raise GuardRefusal("v0.1.3 tag-push recovery requires a target tag dated after its predecessor")
+        ref = "refs/tags/v0.1.3"
+        obj = run_git(repo_root, ["rev-parse", "--verify", ref]).strip()
+        commit = run_git(repo_root, ["rev-parse", "--verify", ref + "^{commit}"]).strip()
+        if not all(re.fullmatch(r"[0-9a-f]{40}", value) for value in (obj, commit)):
+            raise GuardRefusal("v0.1.3 recovery target identity is invalid")
+        expected_refs[ref] = obj
+        if obj != commit:  # annotated target tag also exposes its peeled commit
+            expected_refs[ref + "^{}"] = commit
+    remote = run_git(repo_root, ["ls-remote", "--tags",
+                               "https://github.com/sparq-org/sparq.git", "refs/tags/v*"])
+    # Exact record comparison rejects missing, changed, extra or malformed refs.
+    if sorted(remote.splitlines()) != sorted(f"{oid}\t{ref}" for ref, oid in expected_refs.items()):
+        raise GuardRefusal("v0.1.3 recovery remote tag inventory/identity changed or is indeterminate")
 
 
 def decide(
@@ -656,18 +769,27 @@ def run(
             )
 
         tags = git_release_tags(repo_root, run_git=git_runner)
+        if released_tag is not None and released_tag != f"v{workspace_version}":
+            raise GuardRefusal("released tag must match the workspace version")
         # Short-circuit the no-op push BEFORE hitting crates.io: `release-plz release`
         # does nothing when the current version is already tagged, and on this repo that
-        # is every ordinary push to main. Skipping the ~26 registry requests there keeps
+        # is every ordinary push to main. Skipping the ~37 registry requests there keeps
         # the guard cheap; the decision is identical (decide() returns the same verdict,
         # which the self-test pins).
         # On the tag-push path that short-circuit does not apply (the tag exists BECAUSE
         # the release is happening), so crates.io is always consulted there.
         crates_io_at: dt.datetime | None = None
+        recovery = workspace_version == "0.1.3" and (
+            released_tag is not None or not any(name == "v0.1.3" for name, _ in tags)
+        )
         if released_tag is not None or not any(
             name == f"v{workspace_version}" for name, _ in tags
         ):
-            crates_io_at = crates_io_last_publish([c.name for c in crates], fetch=fetch)
+            crates_io_at = crates_io_last_publish(
+                [c.name for c in crates], fetch=fetch, require_absent=recovery
+            )
+        if recovery:
+            verify_v013_recovery(repo_root, tags, now, released_tag, git_runner)
         verdict = decide(
             now=now,
             workspace_version=workspace_version,
@@ -676,6 +798,15 @@ def run(
             interval=interval,
             released_tag=released_tag,
         )
+        if recovery and not verdict.allowed:
+            # The fixed evidence above excludes future dates and registry publication;
+            # only the minimum elapsed interval can still refuse this exact target.
+            verdict = Verdict(
+                True, "maintainer-authorized v0.1.3 recovery of immutable v0.1.2 "
+                "(PR #6573); pinned tag evidence verified and every public crate absent",
+                last_tag="v0.1.2", last_release_at=V013_PREDECESSOR_AT,
+                source="v0.1.3 recovery exception",
+            )
     except GuardRefusal as refusal:
         log(f"::error title={PROGRAM} REFUSED to publish::{refusal}")
         if dry_run:
@@ -892,7 +1023,11 @@ def self_test() -> int:
 
     # ---- crates.io reader.
     try:
-        crates_io_last_publish(["sparq-core"], fetch=lambda _u: (None, "HTTP 503"))
+        crates_io_last_publish(
+            ["sparq-core"],
+            fetch=lambda _u: (None, "HTTP 503"),
+            retry_sleep=lambda _seconds: None,
+        )
     except GuardRefusal as error:
         check("an UNREACHABLE crates.io REFUSES", "indeterminate" in str(error))
     else:

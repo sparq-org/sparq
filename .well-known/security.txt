@@ -7,9 +7,9 @@
 # sparq-server is a SPARQL-protocol API and does not serve static files, so this file
 # is published from the repository root (and from any future project site at its root).
 
-Contact: https://github.com/jeswr/sparq/security/advisories/new
+Contact: https://github.com/sparq-org/sparq/security/advisories/new
 Contact: mailto:jesse@jeswr.org
 Expires: 2027-06-15T00:00:00.000Z
 Preferred-Languages: en
-Policy: https://github.com/jeswr/sparq/blob/main/SECURITY.md
-Canonical: https://raw.githubusercontent.com/jeswr/sparq/main/.well-known/security.txt
+Policy: https://github.com/sparq-org/sparq/blob/main/SECURITY.md
+Canonical: https://raw.githubusercontent.com/sparq-org/sparq/main/.well-known/security.txt

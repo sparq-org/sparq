@@ -5,7 +5,7 @@
 //! the `SchedError` display/error contract. Each asserts observable behaviour, not
 //! just that a line ran.
 
-use std::sync::Arc;
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use sparq_serve::{SchedError, Scheduler, SchedulerConfig};
@@ -39,10 +39,10 @@ fn run_blocks_and_returns_the_result() {
 fn try_take_polls_without_consuming_until_done() {
     let sched = Scheduler::<u32>::with_defaults();
     // A job that blocks until we release it, so we can observe the pending poll.
-    let gate = Arc::new(std::sync::Barrier::new(2));
-    let g2 = gate.clone();
+    // [GPT-6] Disconnect on unwind releases the worker before the scheduler joins it.
+    let (release, gate) = mpsc::channel::<()>();
     let ticket = sched.submit(1, move || {
-        g2.wait(); // hold here until the test lets it finish
+        let _ = gate.recv();
         42
     });
 
@@ -53,7 +53,7 @@ fn try_take_polls_without_consuming_until_done() {
         "still pending — ticket not consumed"
     );
 
-    gate.wait(); // release the job
+    drop(release); // release the job
 
     // Spin (bounded) for completion, then take the result.
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -88,8 +88,7 @@ fn submitted_and_completed_counters_track_jobs() {
     );
 }
 
-/// `depth` reports `(cheap_queued, heavy_queued, heavy_running)`; with a single
-/// worker and a flooded queue some jobs are observably still queued.
+/// `depth` reports queued work while every worker is occupied.
 #[test]
 fn depth_reports_queue_occupancy() {
     let sched = Scheduler::<()>::new(SchedulerConfig {
@@ -97,27 +96,45 @@ fn depth_reports_queue_occupancy() {
         heavy_concurrency: 1,
         heavy_threshold: 100,
     });
-    let gate = Arc::new(std::sync::Barrier::new(2));
-    let g = gate.clone();
-    // One cheap job parks a worker; queue several more behind it.
-    let parked = sched.submit(1, move || {
-        g.wait();
-    });
-    let _queued: Vec<_> = (0..4).map(|_| sched.submit(1, || {})).collect();
-
-    // Bounded spin until the queue depth is observable (>0 cheap queued).
-    let deadline = Instant::now() + Duration::from_secs(5);
-    loop {
-        let (cheap, heavy, _running) = sched.depth();
-        if cheap > 0 {
-            assert_eq!(heavy, 0, "no heavy jobs were submitted");
-            break;
-        }
-        assert!(Instant::now() < deadline, "queue never showed backlog");
-        std::thread::yield_now();
+    // [GPT-6] Occupy every worker so none can drain the backlog before depth().
+    // Declare the release senders after sched: on assertion failure they drop
+    // first, disconnecting the waits before Scheduler::drop joins the workers.
+    let mut releases = Vec::new();
+    let mut parked = Vec::new();
+    let (started, ready) = mpsc::channel();
+    for _ in 0..sched.workers() {
+        let (release, gate) = mpsc::channel::<()>();
+        releases.push(release);
+        let started = started.clone();
+        parked.push(sched.submit(1, move || {
+            let _ = started.send(());
+            let _ = gate.recv();
+        }));
     }
-    gate.wait(); // release the parked worker so the pool drains on drop
-    let _ = parked.wait();
+    drop(started);
+    for _ in 0..sched.workers() {
+        ready
+            .recv_timeout(Duration::from_secs(5))
+            .expect("worker never started its parked job");
+    }
+    assert_eq!(
+        sched.depth(),
+        (0, 0, 0),
+        "running cheap jobs are not queued"
+    );
+
+    let queued: Vec<_> = (0..4).map(|_| sched.submit(1, || {})).collect();
+    assert_eq!(
+        sched.depth(),
+        (4, 0, 0),
+        "all four cheap jobs remain queued"
+    );
+
+    drop(releases);
+    for ticket in parked.into_iter().chain(queued) {
+        ticket.wait().unwrap();
+    }
+    assert_eq!(sched.depth(), (0, 0, 0), "the queue drained");
 }
 
 /// `SchedError` renders distinct, non-empty human-readable messages (the
