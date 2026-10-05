@@ -52,7 +52,7 @@
 //!   their support exists (standard materialized-view semantics).
 
 use crate::owl::{Owl, XSD_HIERARCHY};
-use crate::rdfs::{close_dr, prop_orientation_closure, sweep, transitive_closure};
+use crate::rdfs::{close_dr, for_each_reachable, prop_orientation_closure, sweep, transitive_closure};
 use crate::Vocab;
 use rustc_hash::{FxHashMap, FxHashSet};
 use sparq_core::dict::{Dict, Id};
@@ -1304,8 +1304,9 @@ fn tc_pairs(pairs: &FxHashSet<(Id, Id)>) -> FxHashSet<(Id, Id)> {
     for &(s, o) in pairs {
         adj.entry(s).or_default().push(o);
     }
-    let closure = transitive_closure(&adj);
-    adj.keys().flat_map(|&src| closure[&src].iter().map(move |&n| (src, n))).collect()
+    let mut out: FxHashSet<(Id, Id)> = FxHashSet::default();
+    for_each_reachable(&adj, |src, seen| out.extend(seen.iter().map(|&n| (src, n))));
+    out
 }
 
 // ════════════════════════════════════════════════════════════════════════════════════════

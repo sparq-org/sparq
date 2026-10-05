@@ -131,9 +131,21 @@ const PAR_THRESHOLD: usize = 4096;
 /// subPropertyOf) is small relative to the data, even when deep.
 pub(crate) fn transitive_closure(direct: &FxHashMap<Id, Vec<Id>>) -> FxHashMap<Id, Vec<Id>> {
     let mut closure: FxHashMap<Id, Vec<Id>> = FxHashMap::default();
+    for_each_reachable(direct, |start, seen| {
+        closure.insert(start, seen.iter().copied().collect());
+    });
+    closure
+}
+
+/// The per-source DFS behind [`transitive_closure`]: calls `f(source, reachable)` for every
+/// key of `direct`, without materializing the closure map.
+pub(crate) fn for_each_reachable(direct: &FxHashMap<Id, Vec<Id>>, mut f: impl FnMut(Id, &FxHashSet<Id>)) {
+    let mut seen: FxHashSet<Id> = FxHashSet::default();
+    let mut stack: Vec<Id> = Vec::new();
     for (&start, succ0) in direct {
-        let mut seen: FxHashSet<Id> = FxHashSet::default();
-        let mut stack: Vec<Id> = succ0.clone();
+        seen.clear();
+        stack.clear();
+        stack.extend_from_slice(succ0);
         while let Some(n) = stack.pop() {
             if seen.insert(n) {
                 if let Some(succ) = direct.get(&n) {
@@ -141,9 +153,8 @@ pub(crate) fn transitive_closure(direct: &FxHashMap<Id, Vec<Id>>) -> FxHashMap<I
                 }
             }
         }
-        closure.insert(start, seen.into_iter().collect());
+        f(start, &seen);
     }
-    closure
 }
 
 /// For each property, the full set of typing classes implied by `dr` (its domain or range
