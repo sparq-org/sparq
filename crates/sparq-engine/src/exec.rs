@@ -15031,8 +15031,28 @@ thread_local! {
 
 /// Installs the active query's base IRI for expression evaluation (IRI()/URI()
 /// relative-reference resolution). Called by the query entry points; `None` clears it.
-pub(crate) fn set_query_base(base: Option<&str>) {
-    QUERY_BASE.with(|b| *b.borrow_mut() = base.and_then(|s| oxiri::Iri::parse(s.to_string()).ok()));
+///
+/// The returned guard restores the previous base when dropped (including on unwind), so
+/// a query run re-entrantly on the same thread — e.g. from an extension function — cannot
+/// leak its BASE (or its lack of one) into the enclosing query (#6479). Bind it to a named
+/// variable for the duration of evaluation.
+pub(crate) fn set_query_base(base: Option<&str>) -> QueryBaseGuard {
+    let new = base.and_then(|s| oxiri::Iri::parse(s.to_string()).ok());
+    QueryBaseGuard { previous: Some(QUERY_BASE.with(|b| b.replace(new))) }
+}
+
+/// Restores the enclosing query's base IRI on drop; see [`set_query_base`].
+#[must_use = "the query base is restored when the guard drops; bind it to a named variable"]
+pub(crate) struct QueryBaseGuard {
+    previous: Option<Option<oxiri::Iri<String>>>,
+}
+
+impl Drop for QueryBaseGuard {
+    fn drop(&mut self) {
+        if let Some(previous) = self.previous.take() {
+            QUERY_BASE.with(|b| *b.borrow_mut() = previous);
+        }
+    }
 }
 
 /// `IRI(str)`: absolute IRIs pass through; relative references resolve against the

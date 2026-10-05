@@ -366,7 +366,7 @@ fn eval(
     let graph = active.as_ref().unwrap_or(graph);
     let _view_scope = crate::view_scope(&active);
     exec::budget::with_budget(budget, || {
-        exec::set_query_base(query.base_iri().map(|b| b.as_str()));
+        let _query_base = exec::set_query_base(query.base_iri().map(|b| b.as_str()));
         match query {
             Query::Select { pattern, .. } => exec::eval_select(graph, pattern),
             Query::Ask { pattern, .. } => Ok(QueryResult {
