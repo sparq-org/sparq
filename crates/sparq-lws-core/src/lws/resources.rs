@@ -12,7 +12,7 @@ use bytes::Bytes;
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 
-use super::access::{format_rfc3339, Action};
+use super::access::{format_rfc3339, parse_rfc3339, Action};
 use super::notify::Event;
 use super::{
     add_link, is_uri, jose, json_response, meta_key, method_not_allowed, parse_links, problem, set,
@@ -95,13 +95,30 @@ pub async fn handle<S: Store + 'static>(
         }
     }
     match req.method {
-        Method::GET | Method::HEAD => read(state, req, &uri).await,
+        Method::GET | Method::HEAD => read(state, req, agent, &uri).await,
         Method::POST => create(state, req, agent, &uri).await,
-        Method::PUT => update(state, req, &uri).await,
+        Method::PUT => update(state, req, agent, &uri).await,
         Method::PATCH => patch(state, req, agent, &uri).await,
         Method::DELETE => delete(state, req, agent, &uri).await,
         Method::OPTIONS => options(state, &uri).await,
         _ => method_not_allowed(&allow_for(&uri, is_root)),
+    }
+}
+
+/// The permission check again, under the resource's lock, against the state the request is about
+/// to serve or change. `handle` checks before the lock is taken, and in between another writer may
+/// have changed what the decision rests on (the resource's format, its types, its creator after a
+/// delete and a re-create).
+async fn recheck<S: Store + 'static>(
+    state: &LwsState<S>,
+    action: Action,
+    uri: &str,
+    agent: &Agent,
+) -> Result<(), Response> {
+    if state.allowed(action, uri, agent).await {
+        Ok(())
+    } else {
+        Err(state.deny(agent))
     }
 }
 
@@ -423,7 +440,12 @@ fn serves_description(accept: Option<&str>) -> bool {
 
 // ---- read ----
 
-async fn read<S: Store + 'static>(state: &LwsState<S>, req: &LwsRequest, uri: &str) -> Response {
+async fn read<S: Store + 'static>(
+    state: &LwsState<S>,
+    req: &LwsRequest,
+    agent: &Agent,
+    uri: &str,
+) -> Response {
     let storage = state.cfg.storage();
     let accept = req.header(header::ACCEPT);
     if uri == storage {
@@ -450,11 +472,16 @@ async fn read<S: Store + 'static>(state: &LwsState<S>, req: &LwsRequest, uri: &s
             return resp;
         }
     }
-    let meta = match state.store.meta(uri).await {
-        Ok(Some(m)) => m,
-        Ok(None) => return problem(StatusCode::NOT_FOUND, None),
-        Err(e) => return store_error(e),
+    // The shared lock is held from the permission check through the bytes served, so what is
+    // served is the state the decision was made on: every write holds the exclusive lock.
+    let _guard = state.locks.read(uri).await;
+    let meta = match current(state, uri).await {
+        Ok(m) => m,
+        Err(r) => return r,
     };
+    if let Err(r) = recheck(state, Action::Read, uri, agent).await {
+        return r;
+    }
     if uri.ends_with('/') {
         return read_container(state, req, uri, &meta).await;
     }
@@ -680,22 +707,33 @@ async fn read_container<S: Store + 'static>(
         Err(e) => return store_error(e),
     };
     let cmeta = state.resource_meta(uri).await;
-    // The entity tag covers the whole listing (each member's own tag included), so it changes
-    // whenever a member comes, goes or changes.
+    // The entity tag covers the whole listing: every field of every member it represents (a
+    // member container's `modified` included, which moves when something is created in it, while
+    // that container's own stored tag does not), and each member's own tag.
     let mut hasher = Sha256::new();
     hasher.update(meta.etag.as_bytes());
     hasher.update(cmeta.version.as_deref().unwrap_or_default().as_bytes());
     for m in &all {
-        hasher.update(m["id"].as_str().unwrap_or_default().as_bytes());
-        hasher.update(m["etag"].as_str().unwrap_or_default().as_bytes());
+        hasher.update(serde_json::to_vec(m).unwrap_or_default());
+        hasher.update(b"\n");
     }
     let tag = jose::b64url(&hasher.finalize()[..18]);
-    let modified = to_secs(
-        cmeta
-            .modified_ms
-            .or(meta.last_modified.map(epoch_ms))
-            .unwrap_or_default(),
-    );
+    // The listing changed no earlier than any member it lists did, so its Last-Modified is the
+    // latest of the container's own and every listed member's: an If-Modified-Since never meets a
+    // 304 for a listing whose members moved on since.
+    let modified = all
+        .iter()
+        .filter_map(|m| m["modified"].as_str().and_then(parse_rfc3339))
+        .filter_map(|t| u64::try_from(t).ok())
+        .fold(
+            to_secs(
+                cmeta
+                    .modified_ms
+                    .or(meta.last_modified.map(epoch_ms))
+                    .unwrap_or_default(),
+            ),
+            u64::max,
+        );
 
     let page_size = state.cfg.page_size;
     let pages = all.len().div_ceil(page_size).max(1);
@@ -1034,6 +1072,10 @@ async fn create<S: Store + 'static>(
             break (if is_container { b } else { a }, child_guards, parent_guard);
         }
     };
+    // Under the container's lock, against the container the member goes into.
+    if let Err(r) = recheck(state, Action::Create, parent, agent).await {
+        return r;
+    }
     let content_type = if is_container {
         LWS_JSON.to_string()
     } else {
@@ -1156,24 +1198,31 @@ async fn current<S: Store + 'static>(
 /// other's locks; that deployment needs a conditional write in the store itself.
 #[derive(Default)]
 pub struct IriLocks(
-    std::sync::Mutex<std::collections::HashMap<String, std::sync::Weak<tokio::sync::Mutex<()>>>>,
+    std::sync::Mutex<std::collections::HashMap<String, std::sync::Weak<tokio::sync::RwLock<()>>>>,
 );
 
 impl IriLocks {
     /// Wait for and take the lock of `iri`. A writer that holds several locks takes them longest
     /// IRI first, ties in byte order ([`lock_order`]), so a child always before its container and
     /// never the other way, and two writers cannot deadlock.
-    pub async fn lock(&self, iri: &str) -> tokio::sync::OwnedMutexGuard<()> {
-        self.mutex(iri).lock_owned().await
+    pub async fn lock(&self, iri: &str) -> IriGuard {
+        self.mutex(iri).write_owned().await
+    }
+
+    /// Wait for and take the shared lock of `iri`: a read holds it from its permission check
+    /// through the representation it serves, so no write lands in between. Readers share it; a
+    /// reader holds no other lock, so it cannot take part in a deadlock.
+    pub async fn read(&self, iri: &str) -> tokio::sync::OwnedRwLockReadGuard<()> {
+        self.mutex(iri).read_owned().await
     }
 
     /// Take the lock of `iri` if it is free, without waiting: the one way to take a lock out of
     /// [`lock_order`], since it cannot deadlock.
-    pub fn try_lock(&self, iri: &str) -> Option<tokio::sync::OwnedMutexGuard<()>> {
-        self.mutex(iri).try_lock_owned().ok()
+    pub fn try_lock(&self, iri: &str) -> Option<IriGuard> {
+        self.mutex(iri).try_write_owned().ok()
     }
 
-    fn mutex(&self, iri: &str) -> std::sync::Arc<tokio::sync::Mutex<()>> {
+    fn mutex(&self, iri: &str) -> std::sync::Arc<tokio::sync::RwLock<()>> {
         let mut map = self.0.lock().unwrap_or_else(|e| e.into_inner());
         if map.len() > 1024 {
             map.retain(|_, w| w.strong_count() > 0);
@@ -1181,7 +1230,7 @@ impl IriLocks {
         match map.get(iri).and_then(std::sync::Weak::upgrade) {
             Some(m) => m,
             None => {
-                let m = std::sync::Arc::new(tokio::sync::Mutex::new(()));
+                let m = std::sync::Arc::new(tokio::sync::RwLock::new(()));
                 map.insert(iri.to_string(), std::sync::Arc::downgrade(&m));
                 m
             }
@@ -1195,12 +1244,20 @@ fn lock_order(a: &str, b: &str) -> std::cmp::Ordering {
     b.len().cmp(&a.len()).then_with(|| a.cmp(b))
 }
 
-async fn update<S: Store + 'static>(state: &LwsState<S>, req: &LwsRequest, uri: &str) -> Response {
+async fn update<S: Store + 'static>(
+    state: &LwsState<S>,
+    req: &LwsRequest,
+    agent: &Agent,
+    uri: &str,
+) -> Response {
     let _guard = state.locks.lock(uri).await;
     let meta = match current(state, uri).await {
         Ok(m) => m,
         Err(r) => return r,
     };
+    if let Err(r) = recheck(state, Action::Modify, uri, agent).await {
+        return r;
+    }
     if uri.ends_with('/') {
         return method_not_allowed(&allow_for(uri, uri == state.cfg.storage()));
     }
@@ -1279,6 +1336,8 @@ async fn changed<S: Store + 'static>(state: &LwsState<S>, uri: &str) {
     if let Some(parent) = parent_of(uri, &state.cfg.storage()) {
         let _guard = state.locks.lock(&parent).await;
         let mut meta = state.resource_meta(&parent).await;
+        // A member's listed fields (format, size, modified) changed, so the listing did.
+        meta.modified_ms = Some(now_ms());
         meta.version = Some(jose::random_id());
         let _ = state.put_resource_meta(&parent, &meta).await;
     }
@@ -1663,6 +1722,9 @@ async fn patch<S: Store + 'static>(
         Ok(m) => m,
         Err(r) => return r,
     };
+    if let Err(r) = recheck(state, Action::Modify, uri, agent).await {
+        return r;
+    }
     if uri.ends_with('/') {
         return method_not_allowed(&allow_for(uri, uri == state.cfg.storage()));
     }
@@ -1836,36 +1898,40 @@ async fn delete<S: Store + 'static>(
         }
     }
     // Delete on the container is not Delete on what is in it: a recursive delete removes nothing
-    // unless the agent may delete every descendant. `uri` itself was checked by `handle`.
+    // unless the agent may delete every descendant. `uri` itself is checked again too, now that
+    // its lock is held.
     for (node, _) in &doomed {
-        if node != uri && !state.allowed(Action::Delete, node, agent).await {
-            return state.deny(agent);
+        if let Err(r) = recheck(state, Action::Delete, node, agent).await {
+            return r;
         }
     }
-    // Announced before the resources go, while who may read each can still be decided. A recursive
+    // Who hears of each removal is decided before the resources go, while who may read each can
+    // still be decided; the notifications go out only for removals that happened. A recursive
     // delete removes every descendant, and each removal is a Delete of its own.
+    let mut notices = Vec::with_capacity(doomed.len());
     for (gone, origin) in doomed.iter().cloned() {
-        state
-            .notify
-            .announce(
-                state,
-                Event {
-                    kind: "Delete",
-                    is_container: gone.ends_with('/'),
-                    uri: gone,
-                    relation: origin.map(|p| ("origin", p)),
-                },
-            )
-            .await;
+        let event = Event {
+            kind: "Delete",
+            is_container: gone.ends_with('/'),
+            uri: gone,
+            relation: origin.map(|p| ("origin", p)),
+        };
+        notices.push(state.notify.prepare(state, &event).await);
     }
-    if let Err(e) = remove(state, &doomed).await {
-        return store_error(e);
+    let (removed, outcome) = remove(state, &doomed).await;
+    for pending in notices.into_iter().take(removed) {
+        state.notify.send(state, pending);
     }
     drop(guards);
-    if let Some(p) = parent {
-        touch_container(state, &p).await;
+    if removed > 0 {
+        if let Some(p) = parent {
+            touch_container(state, &p).await;
+        }
     }
-    problem(StatusCode::NO_CONTENT, None)
+    match outcome {
+        Ok(()) => problem(StatusCode::NO_CONTENT, None),
+        Err(e) => store_error(e),
+    }
 }
 
 /// `uri` and everything under it, each with the container it is in: descendants before the
@@ -1894,7 +1960,8 @@ async fn subtree<S: Store + 'static>(
     Ok(out)
 }
 
-type IriGuard = tokio::sync::OwnedMutexGuard<()>;
+/// The exclusive lock of one IRI (see [`IriLocks`]).
+pub type IriGuard = tokio::sync::OwnedRwLockWriteGuard<()>;
 
 /// Lock `uri` and everything under it, in [`lock_order`], and return the guards with the subtree
 /// (as [`subtree`] lists it) that holds while they are held. The subtree is listed, locked, and
@@ -1928,32 +1995,35 @@ async fn lock_subtree<S: Store + 'static>(
     ))
 }
 
-/// Remove the resources of a locked [`subtree`], members before their containers, with their
-/// metadata.
+/// Remove the resources of a locked [`subtree`], members before their containers, each before its
+/// metadata (which says who may act on it, so it goes only once the resource has). Stops at the
+/// first failure; returns how many of `doomed`, from the front, were removed, and the outcome.
 async fn remove<S: Store + 'static>(
     state: &LwsState<S>,
     doomed: &[(String, Option<String>)],
-) -> Result<(), ServerError> {
-    for (node, parent) in doomed {
-        if node.ends_with('/') {
-            let _ = state.store.delete(&meta_key(node), None).await;
-            if matches!(
-                state
-                    .store
-                    .delete_container_if_empty(node, parent.as_deref())
-                    .await?,
-                crate::store::DeleteOutcome::NotEmpty
-            ) {
-                return Err(ServerError::Conflict(
+) -> (usize, Result<(), ServerError>) {
+    for (i, (node, parent)) in doomed.iter().enumerate() {
+        let removed = if node.ends_with('/') {
+            match state
+                .store
+                .delete_container_if_empty(node, parent.as_deref())
+                .await
+            {
+                Ok(crate::store::DeleteOutcome::NotEmpty) => Err(ServerError::Conflict(
                     "the container gained a member while it was deleted".into(),
-                ));
+                )),
+                Ok(_) => Ok(()),
+                Err(e) => Err(e),
             }
         } else {
-            state.store.delete(node, parent.as_deref()).await?;
-            let _ = state.store.delete(&meta_key(node), None).await;
+            state.store.delete(node, parent.as_deref()).await
+        };
+        if let Err(e) = removed {
+            return (i, Err(e));
         }
+        let _ = state.store.delete(&meta_key(node), None).await;
     }
-    Ok(())
+    (doomed.len(), Ok(()))
 }
 
 // ---- linksets ----
@@ -2132,6 +2202,14 @@ async fn linkset<S: Store + 'static>(
     agent: &Agent,
     uri: &str,
 ) -> Response {
+    // The resource's lock is taken before the permission check, so the decision holds for what is
+    // served or changed: shared for a read, exclusive for a patch (from the precondition through
+    // the write).
+    let (_shared, _exclusive) = if req.method == Method::PATCH {
+        (None, Some(state.locks.lock(uri).await))
+    } else {
+        (Some(state.locks.read(uri).await), None)
+    };
     let exists = match state.store.exists(uri).await {
         Ok(e) => e,
         Err(e) => return store_error(e),
@@ -2151,12 +2229,6 @@ async fn linkset<S: Store + 'static>(
     if !state.allowed(action, uri, agent).await {
         return state.deny(agent);
     }
-    // A patch holds the resource's lock from the precondition through the write.
-    let _guard = if req.method == Method::PATCH {
-        Some(state.locks.lock(uri).await)
-    } else {
-        None
-    };
     let mut meta = state.resource_meta(uri).await;
     let document = match linkset_document(state, uri, &meta).await {
         Ok(d) => d,
@@ -3102,7 +3174,7 @@ mod tests {
         }
     }
 
-    /// Create a member of `parent` as `who`, past the Create check (only the creator matters here).
+    /// Create a member of `parent` with `who` as its creator (only the creator matters here).
     async fn create_as(
         st: &LwsState<Mem>,
         who: &Agent,
@@ -3114,9 +3186,15 @@ mod tests {
         if container {
             h.push(("link", CONTAINER_LINK));
         }
-        let r = create(st, &request("POST", "/", &h, "x"), who, parent).await;
+        // Created by the owner, then recorded as `who`'s: the create itself checks Create.
+        let owner = agent(st.cfg.owner.as_deref().expect("an owner"));
+        let r = create(st, &request("POST", "/", &h, "x"), &owner, parent).await;
         assert_eq!(r.status(), StatusCode::CREATED);
-        hdr(&r, "location")
+        let location = hdr(&r, "location");
+        let mut meta = st.resource_meta(&location).await;
+        meta.creator = who.subject.clone();
+        st.put_resource_meta(&location, &meta).await.unwrap();
+        location
     }
 
     #[tokio::test]
@@ -3438,5 +3516,247 @@ mod tests {
         assert!(!task.is_finished());
         drop(held);
         assert_eq!(task.await.unwrap(), format!("{}y", st.cfg.storage()));
+    }
+
+    /// Review finding: the permission check ran before the resource's lock was taken, so a write
+    /// that waited behind another could land on a state it was never authorized for (a delete and
+    /// a re-create by someone else, a format a policy does not allow), and a read could serve a
+    /// state other than the one it checked. Each request now checks again under the lock.
+    #[tokio::test]
+    async fn the_permission_check_holds_for_the_state_under_the_lock() {
+        let mut cfg = super::super::LwsConfig::new(BASE);
+        cfg.owner = Some("https://owner.example/#me".into());
+        let store = CompositeStore::new(InMemorySparqClient::new(), InMemoryBlobStore::new());
+        let st = LwsState::new(store, cfg).await.expect("state");
+        let bob = agent("https://bob.example/#me");
+        let root = st.cfg.storage();
+        let file = create_as(&st, &bob, &root, "bob.json", false).await;
+        let dir = create_as(&st, &bob, &root, "bobs", true).await;
+        let set_creator = |uri: String, who: &'static str| {
+            let st = st.clone();
+            async move {
+                let mut meta = st.resource_meta(&uri).await;
+                meta.creator = Some(who.to_string());
+                st.put_resource_meta(&uri, &meta).await.unwrap();
+            }
+        };
+        type Case<'a> = (&'a str, &'a str, &'a [(&'a str, &'a str)], &'a str);
+        let cases: [Case<'_>; 5] = [
+            ("GET", file.as_str(), &[], ""),
+            (
+                "PUT",
+                file.as_str(),
+                &[("content-type", "application/json")],
+                "{\"bob\": 1}",
+            ),
+            (
+                "PATCH",
+                file.as_str(),
+                &[("content-type", MERGE_PATCH)],
+                "{\"bob\": 1}",
+            ),
+            ("DELETE", file.as_str(), &[], ""),
+            (
+                "POST",
+                dir.as_str(),
+                &[("slug", "new"), ("content-type", "text/plain")],
+                "x",
+            ),
+        ];
+        for (method, uri, headers, body) in cases {
+            set_creator(uri.to_string(), "https://bob.example/#me").await;
+            // Another writer holds the lock; Bob's request passes the first check and waits.
+            let held = st.locks.lock(uri).await;
+            let task = {
+                let (st, bob) = (st.clone(), bob.clone());
+                let req = request(method, path_of(uri), headers, body);
+                tokio::spawn(async move { handle(&st, &req, &bob).await.status() })
+            };
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            assert!(!task.is_finished(), "{method} did not wait for the lock");
+            // Meanwhile the resource became the owner's (as a delete and a re-create would).
+            set_creator(uri.to_string(), "https://owner.example/#me").await;
+            drop(held);
+            assert_eq!(task.await.unwrap(), StatusCode::FORBIDDEN, "{method}");
+        }
+        assert!(st.store.exists(&file).await.unwrap());
+        assert_eq!(st.store.read(&file).await.unwrap().body, Bytes::from("x"));
+        assert!(!st.store.exists(&format!("{dir}new")).await.unwrap());
+    }
+
+    /// Review finding: a container's listing tag hashed each member container's stored tag, which
+    /// does not move when something is created inside it, so the listing that shows that
+    /// container's new `modified` kept its tag; and a member's update did not advance the
+    /// container's modified time, so If-Modified-Since met a 304 for a changed listing.
+    #[tokio::test]
+    async fn container_validators_follow_the_listed_members() {
+        let st = state().await;
+        let c = hdr(
+            &call(
+                &st,
+                "POST",
+                "/",
+                &[("slug", "c"), ("link", CONTAINER_LINK)],
+                "",
+            )
+            .await,
+            "location",
+        );
+        // Make the container's modified time old, so a change now is visible at second precision.
+        let mut meta = st.resource_meta(&c).await;
+        meta.modified_ms = Some(1_000_000);
+        st.put_resource_meta(&c, &meta).await.unwrap();
+        let root_tag = hdr(
+            &call(&st, "GET", "/", &[("accept", LWS_JSON)], "").await,
+            "etag",
+        );
+        let x = hdr(
+            &call(
+                &st,
+                "POST",
+                path_of(&c),
+                &[("slug", "x"), ("content-type", "text/plain")],
+                "1",
+            )
+            .await,
+            "location",
+        );
+        let root = call(&st, "GET", "/", &[("accept", LWS_JSON)], "").await;
+        assert_ne!(
+            hdr(&root, "etag"),
+            root_tag,
+            "the root lists c/ with a new modified"
+        );
+        // A member's update advances the container's Last-Modified.
+        let listed = call(&st, "GET", path_of(&c), &[("accept", LWS_JSON)], "").await;
+        let since = hdr(&listed, "last-modified");
+        tokio::time::sleep(Duration::from_millis(1100)).await;
+        let r = call(
+            &st,
+            "PUT",
+            path_of(&x),
+            &[("content-type", "text/plain")],
+            "22",
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        let again = call(
+            &st,
+            "GET",
+            path_of(&c),
+            &[("accept", LWS_JSON), ("if-modified-since", &since)],
+            "",
+        )
+        .await;
+        assert_eq!(again.status(), StatusCode::OK);
+        assert_ne!(hdr(&again, "last-modified"), since);
+    }
+
+    /// Review finding: Delete notifications were queued before the removal ran, so a failed
+    /// backend delete (a 500) still told subscribers the resource was gone, and a recursive delete
+    /// that stopped part way announced descendants it never touched.
+    #[tokio::test]
+    async fn deletes_are_announced_only_once_they_happen() {
+        use super::super::route;
+        use super::super::test_store::{request as req, state as flaky_state};
+        use std::sync::atomic::Ordering;
+        let (st, store) = flaky_state(100).await;
+        let base = st.cfg.absolute("");
+        let local = |u: &str| u.strip_prefix(base.as_str()).unwrap().to_string();
+        let send = |m: Method, p: &str, h: &[(&str, &str)], b: &str| {
+            let st = st.clone();
+            let r = req(m, p, h, b);
+            async move { route(&st, r).await }
+        };
+        let created = |r: Response| {
+            assert_eq!(r.status(), StatusCode::CREATED);
+            hdr(&r, "location")
+        };
+        let f = created(
+            send(
+                Method::POST,
+                "/",
+                &[("slug", "f"), ("content-type", "text/plain")],
+                "x",
+            )
+            .await,
+        );
+        let d = created(
+            send(
+                Method::POST,
+                "/",
+                &[("slug", "d"), ("link", CONTAINER_LINK)],
+                "",
+            )
+            .await,
+        );
+        let a = created(
+            send(
+                Method::POST,
+                &local(&d),
+                &[("slug", "a"), ("content-type", "text/plain")],
+                "x",
+            )
+            .await,
+        );
+        let b = created(
+            send(
+                Method::POST,
+                &local(&d),
+                &[("slug", "b"), ("content-type", "text/plain")],
+                "x",
+            )
+            .await,
+        );
+        let (inbox, got) = inbox().await;
+        let body =
+            json!({"type": "WebhookSubscription", "topic": [st.cfg.storage()], "inbox": inbox});
+        let r = send(
+            Method::POST,
+            SUBSCRIPTIONS_PATH,
+            &[("content-type", LWS_JSON)],
+            &body.to_string(),
+        )
+        .await;
+        assert!(r.status().is_success());
+        let deletes = |got: &Arc<Mutex<Vec<Value>>>| {
+            let got = got.clone();
+            async move {
+                tokio::time::sleep(Duration::from_millis(300)).await;
+                let mut gone: Vec<String> = activities(&got, 0)
+                    .await
+                    .into_iter()
+                    .filter(|(t, _)| t == "Delete")
+                    .map(|(_, u)| u)
+                    .collect();
+                gone.sort();
+                gone
+            }
+        };
+        // The backend refuses: a 500, the resource stays, and nobody hears of a delete.
+        store.fail_delete.store(true, Ordering::SeqCst);
+        let r = send(Method::DELETE, &local(&f), &[], "").await;
+        assert_eq!(r.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(st.store.exists(&f).await.unwrap());
+        assert!(deletes(&got).await.is_empty());
+        store.fail_delete.store(false, Ordering::SeqCst);
+        // A recursive delete that fails on `b`: only what was removed is announced.
+        *store.fail_delete_of.lock().unwrap() = Some(b.clone());
+        let r = send(Method::DELETE, &local(&d), &[("depth", "infinity")], "").await;
+        assert_eq!(r.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let mut really_gone = Vec::new();
+        for u in [&d, &a, &b] {
+            if !st.store.exists(u).await.unwrap() {
+                really_gone.push(u.to_string());
+            }
+        }
+        really_gone.sort();
+        assert!(st.store.exists(&b).await.unwrap() && st.store.exists(&d).await.unwrap());
+        assert_eq!(deletes(&got).await, really_gone);
+        // Once the delete succeeds, it is announced.
+        *store.fail_delete_of.lock().unwrap() = None;
+        let r = send(Method::DELETE, &local(&f), &[], "").await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        assert!(deletes(&got).await.contains(&f));
     }
 }

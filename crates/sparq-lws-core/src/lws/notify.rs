@@ -63,6 +63,14 @@ const SIGNATURE_COMPONENTS: [&str; 6] = [
     "content-digest",
 ];
 
+/// A notification addressed to one subscriber, not yet sent (see [`Notifier::prepare`]).
+#[derive(Debug, Clone)]
+pub struct Pending {
+    inbox: String,
+    activity: Value,
+    subscription: String,
+}
+
 /// A change to a storage resource, announced to the subscriptions whose topics cover it.
 #[derive(Debug, Clone)]
 pub struct Event {
@@ -244,14 +252,27 @@ impl Notifier {
     }
 
     /// Tell every subscriber whose topic covers `event.uri`, and who may read it now, that it
-    /// changed. Awaited before a delete, while who may read the resource can still be decided;
-    /// delivery itself happens in the background.
+    /// changed. Delivery itself happens in the background.
     pub async fn announce<S: Store + 'static>(&self, state: &LwsState<S>, event: Event) {
+        let pending = self.prepare(state, &event).await;
+        self.send(state, pending);
+    }
+
+    /// The notifications `event` makes, addressed but not yet sent: one per subscriber whose topic
+    /// covers `event.uri` and who may read it now. A delete prepares its notifications before the
+    /// resource goes, while who may read it can still be decided, and [`Notifier::send`]s them only
+    /// once the removal is confirmed.
+    pub async fn prepare<S: Store + 'static>(
+        &self,
+        state: &LwsState<S>,
+        event: &Event,
+    ) -> Vec<Pending> {
         let candidates: Vec<Subscription> = self
             .live()
             .into_iter()
             .filter(|s| s.covers(&event.uri))
             .collect();
+        let mut out = Vec::new();
         for sub in candidates {
             // Delivery-time authorization (section 10.3.3): a subscriber that may not read the
             // resource now hears nothing about it.
@@ -265,7 +286,19 @@ impl Notifier {
             if let Some((rel, container)) = &event.relation {
                 activity[*rel] = Value::String(container.clone());
             }
-            self.deliver(state, &sub.inbox, activity, Some(&sub.id));
+            out.push(Pending {
+                inbox: sub.inbox,
+                activity,
+                subscription: sub.id,
+            });
+        }
+        out
+    }
+
+    /// Deliver notifications [`Notifier::prepare`]d earlier.
+    pub fn send<S: Store + 'static>(&self, state: &LwsState<S>, pending: Vec<Pending>) {
+        for p in pending {
+            self.deliver(state, &p.inbox, p.activity, Some(&p.subscription));
         }
     }
 
