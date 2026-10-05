@@ -33,7 +33,7 @@
 # TUNABLES (env; all have safe defaults):
 #   VIRTUOSO_IMAGE        Docker image                 (default docker.io/openlink/virtuoso-opensource-7:latest)
 #   VIRTUOSO_HTTP_PORT    SPARQL HTTP port             (default 8890)
-#   VIRTUOSO_ISQL_PORT    isql port                    (default 1111)
+#   VIRTUOSO_ISQL_PORT    host isql port               (default 1111)
 #   VIRTUOSO_PASSWORD     dba password                 (default dba)
 #   VIRTUOSO_GRAPH        target named graph IRI       (default http://sparq.bench/graph)
 #   VIRTUOSO_PULL_TIMEOUT image-pull hard cap, s       (default 600)
@@ -128,7 +128,8 @@ docker run -d --name "$VIRTUOSO_NAME" \
   || die "failed to start Virtuoso container"
 
 # ---- 2. bounded readiness poll (isql answers once the server is up) --------------------
-isql() { docker exec "$VIRTUOSO_NAME" isql "$VIRTUOSO_ISQL_PORT" dba "$VIRTUOSO_PASSWORD" "$@"; }
+# Inside the container isql always listens on 1111; VIRTUOSO_ISQL_PORT is only the host-side mapping (#3361).
+isql() { docker exec "$VIRTUOSO_NAME" isql 1111 dba "$VIRTUOSO_PASSWORD" "$@"; }
 ready=0
 poll_n=$(( VIRTUOSO_READY_TIMEOUT / 3 )); [ "$poll_n" -ge 1 ] || poll_n=1
 for _ in $(seq 1 "$poll_n"); do
@@ -147,7 +148,7 @@ log "server ready"
 # checkpoint persists. Then verify the graph is non-empty before trusting any query.
 log "bulk-load (<= ${VIRTUOSO_LOAD_TIMEOUT}s) $CORPUS_FILE into <$VIRTUOSO_GRAPH>"
 LOAD_SQL="ld_dir('/data', '${CORPUS_FILE}', '${VIRTUOSO_GRAPH}'); rdf_loader_run(); checkpoint;"
-if ! timeout "$VIRTUOSO_LOAD_TIMEOUT" bash -c "docker exec '$VIRTUOSO_NAME' isql '$VIRTUOSO_ISQL_PORT' dba '$VIRTUOSO_PASSWORD' exec=\"$LOAD_SQL\"" >&2; then
+if ! timeout "$VIRTUOSO_LOAD_TIMEOUT" bash -c "docker exec '$VIRTUOSO_NAME' isql 1111 dba '$VIRTUOSO_PASSWORD' exec=\"$LOAD_SQL\"" >&2; then
   rc=$?
   [ "$rc" = 124 ] && die "bulk load hit the ${VIRTUOSO_LOAD_TIMEOUT}s timeout"
   die "bulk load failed (rc=$rc)"

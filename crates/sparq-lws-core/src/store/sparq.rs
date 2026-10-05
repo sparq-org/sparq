@@ -116,6 +116,30 @@ pub trait SparqClient: Send + Sync {
     /// Upsert the authoritative metadata record for a resource IRI.
     async fn put_meta(&self, iri: &str, meta: ResourceMeta) -> Result<(), SparqError>;
 
+    /// Upsert the metadata record for `iri` and return the record it REPLACED (`None` on a create).
+    ///
+    /// The composite store uses the returned record's `blob_key` to reclaim the superseded bytes
+    /// once this commit has succeeded. The DEFAULT implementation is a [`get_meta`](Self::get_meta)
+    /// followed by a [`put_meta`](Self::put_meta) — two round-trips, NOT atomic: a concurrent writer
+    /// can commit between them, in which case the returned record is that writer's predecessor and
+    /// the concurrent writer's own key is left for the reconciler. That is still safe to delete:
+    /// blob keys are minted unique per write and an index pointer never moves BACK to a key it has
+    /// left, so a key observed here is unreferenced once this commit lands. Backends that can do
+    /// both in one indivisible step (the in-memory double, the embedded engine) override this.
+    async fn replace_meta(
+        &self,
+        iri: &str,
+        meta: ResourceMeta,
+    ) -> Result<Option<ResourceMeta>, SparqError> {
+        let previous = match self.get_meta(iri).await {
+            Ok(m) => Some(m),
+            Err(SparqError::NotFound) => None,
+            Err(e) => return Err(e),
+        };
+        self.put_meta(iri, meta).await?;
+        Ok(previous)
+    }
+
     /// Whether the resource is indexed (the authoritative existence check — never an S3 HEAD).
     async fn exists(&self, iri: &str) -> Result<bool, SparqError>;
 
@@ -302,6 +326,20 @@ impl SparqClient for InMemorySparqClient {
         self.admit_resource(&guard, iri)?;
         guard.meta.insert(iri.to_string(), meta);
         Ok(())
+    }
+
+    async fn replace_meta(
+        &self,
+        iri: &str,
+        meta: ResourceMeta,
+    ) -> Result<Option<ResourceMeta>, SparqError> {
+        // One step under the single lock: the returned record is exactly the one this insert replaced.
+        let mut guard = self
+            .inner
+            .lock()
+            .map_err(|_| SparqError::Backend("poisoned".into()))?;
+        self.admit_resource(&guard, iri)?;
+        Ok(guard.meta.insert(iri.to_string(), meta))
     }
 
     async fn exists(&self, iri: &str) -> Result<bool, SparqError> {

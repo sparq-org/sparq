@@ -245,27 +245,6 @@ jobs:
         working-directory: gui/app
         run: npm run build:web   # presync check + prebuild sync-wasm (js/wasm → public/wasm), then next build → out/ (basePath /app)
 
-      # sq-d8or — anti-drift: link-check the BUILT site HTML before publish.
-      # The docs-quality `internal-links` job (sq-5fd1) lychee-checks the repo MARKDOWN;
-      # this extends that scope to the static-export HTML the Pages site actually serves —
-      # catching renamed routes / stale cross-links / dangling #anchors that markdown linting
-      # cannot see. lychee runs --offline (deterministic, no network) over site/out, remapping
-      # the /sparq GitHub-Pages base path to the export root. Runs BEFORE the dev/ overlay so
-      # it checks only THIS site's source (the overlaid benchmark dashboard is excluded by the
-      # script anyway). The remap + teeth live in a shared, self-tested script
-      # (scripts/check-site-links.sh + scripts/tests/test_check_site_links.sh, run in
-      # docs-quality's ci-scripts job) so the logic is pinned and reusable locally. A broken
-      # internal link FAILS the build → no broken deploy. lychee is installed via the same
-      # SHA-pinned taiki-e/install-action this repo already trusts (cf. docs-quality typos);
-      # 0.23.0 is the version lycheeverse/lychee-action@v2.8.0 ships, so behaviour matches the
-      # markdown gate.
-      - name: Install lychee
-        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
-        with:
-          tool: lychee@0.23.0
-      - name: Link-check the static-export HTML (lychee --offline)
-        run: bash scripts/check-site-links.sh site/out
-
       # ---- Build the mdBook guide for the /guide/ mount ----
       # issue #5022 — the guide's publish half. docs.yml validates the same guide on
       # PRs but deliberately ships no deploy job (one Pages slot, owned here); this is where it
@@ -282,6 +261,82 @@ jobs:
       # rename in README.md/SKILL.md would PUBLISH a guide full of raw include directives, green.
       - name: Build the mdBook guide
         run: bash scripts/build-guide.sh book
+
+      # ---- Overlay the mdBook guide at /guide/ ----
+      # issue #5022 — place the rendered guide (book/book) into out/guide/, mirroring
+      # the dev/bench* and /app overlays: another sub-tree of the SAME single Pages artifact, so
+      # there is still exactly ONE producer for the one Pages deploy slot.
+      #
+      # Runs BEFORE the lychee link-check so the site's own links INTO /guide/ (the app-shell
+      # Docs link) resolve against the real render; check-site-links.sh excludes guide/ as an
+      # INPUT, so the guide's own HTML is not scanned. The guide is a separate first-party render with its own link shape (mdBook resolves chapter links
+      # relatively, and the `link-fixup` preprocessor rewrites the {{#include}}d repo-relative
+      # links to absolute github.com URLs, which lychee --offline cannot resolve anyway); its
+      # broken-include gate is the [ERROR] grep in scripts/build-guide.sh, not lychee.
+      #
+      # UNLIKE the /app overlay there is NO placeholder route to replace here — the site export
+      # has no /guide route — so an out/guide that ALREADY exists means the site grew one and
+      # this step would silently clobber it. That is a hard failure, not a merge.
+      - name: Overlay mdBook guide (out/guide/)
+        working-directory: site
+        run: |
+          set -euo pipefail
+          guide_out="$GITHUB_WORKSPACE/book/book"
+          if [ ! -f "$guide_out/index.html" ]; then
+            echo "::error::mdBook render missing ($guide_out/index.html) — the guide build step did not produce book/book/"
+            exit 1
+          fi
+          if [ -e out/guide ]; then
+            echo "::error::out/guide already exists BEFORE the guide overlay — the site export now has its own /guide route, which this overlay would silently clobber. Pick a different mount or drop the site route (issue #5022)."
+            exit 1
+          fi
+          echo "Overlaying mdBook render -> out/guide/"
+          mkdir -p out/guide
+          # Plain `cp -a` (not the /app overlay's `rsync -a --delete`): that overlay mirrors
+          # ONTO a pre-existing placeholder tree and needs --delete to clear its orphans. Here
+          # the guard above has already proven out/guide did not exist, so there is nothing to
+          # delete and a copy is the whole operation.
+          cp -a "$guide_out/." out/guide/
+          # MOUNT ASSERTION: mdBook stamps book.toml's `site-url` into the guide's OWN 404.html
+          # as <base href="...">. GitHub Pages serves that directory-level 404 for /guide/<typo>,
+          # so if the baked base href ever stops matching the sub-path we overlay to, every asset
+          # on that page resolves against the wrong root. Assert the two agree here, at the point
+          # where the mount is actually chosen.
+          if grep -q '<base href="/guide/">' out/guide/404.html; then
+            echo "OK: guide 404.html carries <base href=\"/guide/\"> matching the overlay mount"
+          else
+            echo "::error::out/guide/404.html does not carry <base href=\"/guide/\"> — book.toml's [output.html] site-url has drifted from the /guide/ mount, so the guide's 404 page would 404 its own assets"
+            exit 1
+          fi
+          # NOTE (measured): a second "no raw {{#include}} survived into the HTML" scan was tried
+          # here and REMOVED — it false-positives on the guide's own legitimate prose, which
+          # discusses the single-sourcing mechanism by name (book/src comments and the README
+          # `features-core` anchor both write `{{#include}}` in running text). The broken-include
+          # guard is the `[ERROR]` log grep in scripts/build-guide.sh, which runs before this step
+          # and whose teeth are pinned in scripts/tests/test_build_guide.sh.
+          echo "OK: mdBook guide overlaid at out/guide/" >> "$GITHUB_STEP_SUMMARY"
+
+      # sq-d8or — anti-drift: link-check the BUILT site HTML before publish.
+      # The docs-quality `internal-links` job (sq-5fd1) lychee-checks the repo MARKDOWN;
+      # this extends that scope to the static-export HTML the Pages site actually serves —
+      # catching renamed routes / stale cross-links / dangling #anchors that markdown linting
+      # cannot see. lychee runs --offline (deterministic, no network) over site/out, remapping
+      # the /sparq GitHub-Pages base path to the export root. Runs BEFORE the dev/ overlay so
+      # it checks only THIS site's source (the overlaid benchmark dashboard is excluded by the
+      # script anyway). It runs AFTER the guide overlay so links into /guide/ resolve; the
+      # script skips guide/ as an input. The remap + teeth live in a shared, self-tested script
+      # (scripts/check-site-links.sh + scripts/tests/test_check_site_links.sh, run in
+      # docs-quality's ci-scripts job) so the logic is pinned and reusable locally. A broken
+      # internal link FAILS the build → no broken deploy. lychee is installed via the same
+      # SHA-pinned taiki-e/install-action this repo already trusts (cf. docs-quality typos);
+      # 0.23.0 is the version lycheeverse/lychee-action@v2.8.0 ships, so behaviour matches the
+      # markdown gate.
+      - name: Install lychee
+        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
+        with:
+          tool: lychee@0.23.0
+      - name: Link-check the static-export HTML (lychee --offline)
+        run: bash scripts/check-site-links.sh site/out
 
       # ---- Preserve the existing benchmark dashboard(s) at /dev/ ----
       # sq-zngy — fold ALL `dev/bench*` subtrees (not just dev/bench).
@@ -369,59 +424,6 @@ jobs:
             exit 1
           fi
           echo "OK: operational GUI overlaid at out/app/" >> "$GITHUB_STEP_SUMMARY"
-
-      # ---- Overlay the mdBook guide at /guide/ ----
-      # issue #5022 — place the rendered guide (book/book) into out/guide/, mirroring
-      # the dev/bench* and /app overlays: another sub-tree of the SAME single Pages artifact, so
-      # there is still exactly ONE producer for the one Pages deploy slot.
-      #
-      # Runs AFTER the lychee link-check, which checks only the SITE's own export. The guide is a
-      # separate first-party render with its own link shape (mdBook resolves chapter links
-      # relatively, and the `link-fixup` preprocessor rewrites the {{#include}}d repo-relative
-      # links to absolute github.com URLs, which lychee --offline cannot resolve anyway); its
-      # broken-include gate is the [ERROR] grep in scripts/build-guide.sh, not lychee.
-      #
-      # UNLIKE the /app overlay there is NO placeholder route to replace here — the site export
-      # has no /guide route — so an out/guide that ALREADY exists means the site grew one and
-      # this step would silently clobber it. That is a hard failure, not a merge.
-      - name: Overlay mdBook guide (out/guide/)
-        working-directory: site
-        run: |
-          set -euo pipefail
-          guide_out="$GITHUB_WORKSPACE/book/book"
-          if [ ! -f "$guide_out/index.html" ]; then
-            echo "::error::mdBook render missing ($guide_out/index.html) — the guide build step did not produce book/book/"
-            exit 1
-          fi
-          if [ -e out/guide ]; then
-            echo "::error::out/guide already exists BEFORE the guide overlay — the site export now has its own /guide route, which this overlay would silently clobber. Pick a different mount or drop the site route (issue #5022)."
-            exit 1
-          fi
-          echo "Overlaying mdBook render -> out/guide/"
-          mkdir -p out/guide
-          # Plain `cp -a` (not the /app overlay's `rsync -a --delete`): that overlay mirrors
-          # ONTO a pre-existing placeholder tree and needs --delete to clear its orphans. Here
-          # the guard above has already proven out/guide did not exist, so there is nothing to
-          # delete and a copy is the whole operation.
-          cp -a "$guide_out/." out/guide/
-          # MOUNT ASSERTION: mdBook stamps book.toml's `site-url` into the guide's OWN 404.html
-          # as <base href="...">. GitHub Pages serves that directory-level 404 for /guide/<typo>,
-          # so if the baked base href ever stops matching the sub-path we overlay to, every asset
-          # on that page resolves against the wrong root. Assert the two agree here, at the point
-          # where the mount is actually chosen.
-          if grep -q '<base href="/guide/">' out/guide/404.html; then
-            echo "OK: guide 404.html carries <base href=\"/guide/\"> matching the overlay mount"
-          else
-            echo "::error::out/guide/404.html does not carry <base href=\"/guide/\"> — book.toml's [output.html] site-url has drifted from the /guide/ mount, so the guide's 404 page would 404 its own assets"
-            exit 1
-          fi
-          # NOTE (measured): a second "no raw {{#include}} survived into the HTML" scan was tried
-          # here and REMOVED — it false-positives on the guide's own legitimate prose, which
-          # discusses the single-sourcing mechanism by name (book/src comments and the README
-          # `features-core` anchor both write `{{#include}}` in running text). The broken-include
-          # guard is the `[ERROR]` log grep in scripts/build-guide.sh, which runs before this step
-          # and whose teeth are pinned in scripts/tests/test_build_guide.sh.
-          echo "OK: mdBook guide overlaid at out/guide/" >> "$GITHUB_STEP_SUMMARY"
 
       # sq-zngy — ARTIFACT-LEVEL smoke check (NOT a live-URL check).
       # This step asserts the ASSEMBLED Pages output dir (site/out, the exact tree handed to
