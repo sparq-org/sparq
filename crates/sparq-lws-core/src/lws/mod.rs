@@ -128,7 +128,8 @@ impl LwsConfig {
 
     /// Read the `SOLID_SERVER_LWS_*` environment:
     /// - `SOLID_SERVER_LWS_OWNER`: the storage owner's agent IRI;
-    /// - `SOLID_SERVER_LWS_OPEN=1`: no authentication (development only);
+    /// - `SOLID_SERVER_LWS_OPEN=1` (or `SOLID_SERVER_OPEN_MODE=1`): no authentication (development
+    ///   only);
     /// - `SOLID_SERVER_LWS_PAGE_SIZE`: members per container page (default 100);
     /// - `SOLID_SERVER_LWS_AS_KEY_FILE`: a private P-256 JWK that signs access tokens, created
     ///   with a fresh key when the file does not exist (default: a fresh key per boot, so tokens do
@@ -149,8 +150,10 @@ impl LwsConfig {
         let flag =
             |k: &str| var(k).is_some_and(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "True"));
         cfg.owner = var("SOLID_SERVER_LWS_OWNER");
-        cfg.open = flag("SOLID_SERVER_LWS_OPEN");
-        cfg.allow_insecure_fetch = flag("SOLID_SERVER_LWS_ALLOW_INSECURE_FETCH");
+        // `SOLID_SERVER_OPEN_MODE` is the name the lws-contrib dagger-workspace sparq cell sets.
+        cfg.open = flag("SOLID_SERVER_LWS_OPEN") || flag("SOLID_SERVER_OPEN_MODE");
+        // Open mode is for local test harnesses, whose inboxes and documents are on private hosts.
+        cfg.allow_insecure_fetch = cfg.open || flag("SOLID_SERVER_LWS_ALLOW_INSECURE_FETCH");
         if let Some(n) = var("SOLID_SERVER_LWS_PAGE_SIZE") {
             cfg.page_size = n
                 .parse()

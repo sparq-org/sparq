@@ -226,7 +226,7 @@ cargo run -p sparq-lws-core
 | Variable | Meaning |
 |---|---|
 | `SOLID_SERVER_LWS_OWNER` | Agent IRI allowed every action on the storage, and the only one who may list or issue grants. |
-| `SOLID_SERVER_LWS_OPEN` | `1` disables authorization entirely. Test-suite use only. |
+| `SOLID_SERVER_LWS_OPEN` (or `SOLID_SERVER_OPEN_MODE`) | `1` disables authorization entirely and implies `SOLID_SERVER_LWS_ALLOW_INSECURE_FETCH`. Test-suite use only. |
 | `SOLID_SERVER_LWS_PAGE_SIZE` | Container and type-search page size (default 100). |
 | `SOLID_SERVER_LWS_AS_KEY_FILE`, `SOLID_SERVER_LWS_NOTIFY_KEY_FILE` | P-256 private JWKs for access tokens and webhook signatures. A missing file is created with a fresh key (mode 0600); without a file a key lives only for the process. |
 | `SOLID_SERVER_LWS_TOKEN_TTL_SECS` | Access-token lifetime (default 300). |
