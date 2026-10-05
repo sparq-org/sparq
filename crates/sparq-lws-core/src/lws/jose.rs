@@ -3,8 +3,8 @@
 //!
 //! LWS access tokens (RFC 9068) are signed ES256 by this server's authorization server. Subject
 //! tokens presented at the token endpoint are verified here too: did:key and controlled identifier
-//! credentials are ES256, OpenID Connect ID Tokens are ES256 or RS256. `alg: none` and every other
-//! algorithm are refused.
+//! credentials are ES256 (or EdDSA for an Ed25519 key), OpenID Connect ID Tokens are ES256 or
+//! RS256. `alg: none` and every other algorithm are refused.
 
 use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use base64::Engine;
@@ -254,8 +254,23 @@ impl Jws {
         match (alg, jwk.get("kty").and_then(Value::as_str)) {
             ("ES256", Some("EC")) => ec_public_from_jwk(jwk).is_some_and(|k| self.verify_es256(&k)),
             ("RS256", Some("RSA")) => self.verify_rs256(jwk),
+            ("EdDSA" | "Ed25519", Some("OKP")) => {
+                jwk.get("crv").and_then(Value::as_str) == Some("Ed25519")
+                    && jwk.get("x").and_then(Value::as_str).and_then(b64url_decode).is_some_and(|x| self.verify_ed25519(&x))
+            }
             _ => false,
         }
+    }
+
+    /// Verify an EdDSA (Ed25519) signature with a raw 32-byte public key. Fails for any other
+    /// `alg`.
+    pub fn verify_ed25519(&self, key: &[u8]) -> bool {
+        if !matches!(self.alg(), Some("EdDSA" | "Ed25519")) || key.len() != 32 || self.signature.len() != 64 {
+            return false;
+        }
+        aws_lc_rs::signature::UnparsedPublicKey::new(&aws_lc_rs::signature::ED25519, key)
+            .verify(self.signing_input.as_bytes(), &self.signature)
+            .is_ok()
     }
 
     fn verify_rs256(&self, jwk: &Value) -> bool {
