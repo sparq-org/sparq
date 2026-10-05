@@ -127,7 +127,7 @@ class TestWorkspaceTagIsCreatedOnce(unittest.TestCase):
 class TestCrateAttestationPackagingFailsClosed(unittest.TestCase):
     """A missing `.crate` must stop provenance generation, not merely warn."""
 
-    def test_packaging_collects_failures_and_refuses_incomplete_output(self) -> None:
+    def test_packaging_strips_then_refuses_incomplete_output(self) -> None:
         workflow = yaml.safe_load(PUBLISH_WORKFLOW.read_text(encoding="utf-8"))
         steps = workflow["jobs"]["crates"]["steps"]
         matches = [step for step in steps if step.get("name") == "Package publishable crates"]
@@ -138,9 +138,14 @@ class TestCrateAttestationPackagingFailsClosed(unittest.TestCase):
         run = step["run"]
         self.assertIn("cargo metadata --no-deps --format-version 1", run)
         self.assertIn("select(.publish != [])", run)
-        self.assertIn("failures=()", run)
-        self.assertIn('failures+=("$pkg")', run)
-        self.assertIn('if [ "${#failures[@]}" -ne 0 ]; then', run)
+        # One `cargo package --workspace` under `set -e`: any crate failing to package
+        # stops the step before attestation.
+        self.assertIn("set -euo pipefail", run)
+        self.assertIn("python3 scripts/publish-strip.py --with-vendored", run)
+        self.assertIn("cargo package --workspace --no-verify --allow-dirty", run)
+        self.assertLess(
+            run.index("scripts/publish-strip.py"), run.index("cargo package --workspace")
+        )
         self.assertIn('if [ "$packaged" -ne "$expected" ]; then', run)
         self.assertGreaterEqual(run.count("exit 1"), 2)
 
@@ -1546,11 +1551,14 @@ class TestPublishableDependencyClosure(unittest.TestCase):
         crates = interval_guard.publishable_crates(REPO_ROOT)
         expected = [crate.name for crate in interval_guard.publish_order(crates)]
         documented = re.findall(
-            r"^cargo publish -p ([A-Za-z0-9_-]+)$",
+            r"^cargo publish --allow-dirty -p ([A-Za-z0-9_-]+)$",
             (REPO_ROOT / "docs" / "release.md").read_text(encoding="utf-8"),
             flags=re.MULTILINE,
         )
-        self.assertEqual(documented, expected)
+        # The vendored parser fork is published first and outside the version group, so
+        # the guard (workspace members only) does not derive it.
+        self.assertEqual(documented[:1], ["sparq-spargebra"])
+        self.assertEqual(documented[1:], expected)
 
     @staticmethod
     def _fixture(

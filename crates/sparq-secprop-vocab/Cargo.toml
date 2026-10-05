@@ -22,6 +22,10 @@
 # behind it, so every lean default build is byte-unchanged.
 [package]
 name = "sparq-secprop-vocab"
+# Not in the crates.io publish set (release-plz.toml). Published crates reach this crate only
+# through optional features, which scripts/publish-strip.py removes from their packaged
+# manifests; see docs/release.md "crates.io publish set".
+publish = false
 version.workspace = true
 edition.workspace = true
 license.workspace = true
