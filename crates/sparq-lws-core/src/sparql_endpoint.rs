@@ -23,7 +23,7 @@ use crate::authz::{is_acl_resource, AccessMode, ReadDecision, WacAuthorizer};
 use crate::error::ServerError;
 use crate::ldp::content::{classify, parse_to_triples};
 use crate::ldp::handler::LdpState;
-use crate::store::Store;
+use crate::store::{Store, READ_RACE_RETRIES};
 
 /// Solid SPARQL Query's reserved opt-in for the authorized union default graph.
 const UNION_DEFAULT_GRAPH_IRI: &str = "http://www.w3.org/ns/solid/sparql#union-default-graph";
@@ -289,7 +289,7 @@ async fn assemble_authorized_dataset<S: Store>(
     let wac = WacAuthorizer::with_cache(&state.store, state.base_url(), &state.acl_cache);
     let mut nquads = String::new();
     let mut graph_names = Vec::new();
-    for (scope, resource) in candidates.into_iter().enumerate() {
+    'candidates: for (scope, resource) in candidates.into_iter().enumerate() {
         let required = if is_acl_resource(&resource) {
             AccessMode::Control
         } else {
@@ -300,47 +300,74 @@ async fn assemble_authorized_dataset<S: Store>(
             .iter()
             .map(|candidate| candidate.acl.clone())
             .collect::<Vec<_>>();
-        let Ok(plan) = state.store.read_plan(&resource, &acl_iris).await else {
-            continue;
-        };
-        let decision = wac
-            .authorize_read_planned(
-                required,
-                token.web_id.as_deref(),
-                origin,
-                &acl_candidates,
-                &plan.acls,
-            )
-            .await;
-        let admitted = matches!(decision, Ok(ReadDecision::Allow(_)));
-        // [SONNET-4.6] sq-elg47: compose the opt-in ODRL gate per candidate graph — a Deny
-        // excludes the graph from the authorized dataset even under a static WAC grant
-        // (deny-overrides); a Permit admits a Read-required graph WAC alone would exclude
-        // (permit-extends; never the Control-gated `.acl` auxiliaries). Compiled out entirely
-        // when the `odrl-authz` feature is off; an unattached gate changes nothing.
-        #[cfg(all(feature = "odrl-authz", not(target_arch = "wasm32")))]
-        let admitted = match state.odrl_gate.as_deref() {
-            Some(gate) => {
-                use crate::authz::odrl::OdrlVerdict;
-                match gate.decide_read(&resource, token.web_id.as_deref()) {
-                    OdrlVerdict::Deny => false,
-                    OdrlVerdict::Permit if required == AccessMode::Read => true,
-                    OdrlVerdict::Permit | OdrlVerdict::NotApplicable => admitted,
+        let mut restarts = 0;
+        let (format, body) = 'attempt: loop {
+            let Ok(plan) = state.store.read_plan(&resource, &acl_iris).await else {
+                continue 'candidates;
+            };
+            let decision = wac
+                .authorize_read_planned(
+                    required,
+                    token.web_id.as_deref(),
+                    origin,
+                    &acl_candidates,
+                    &plan.acls,
+                )
+                .await;
+            // A governing ACL rewritten (and its bytes reclaimed) under the walk surfaces as
+            // `ResourceChanged`. That is NOT a denial: treating it as one would silently drop a
+            // readable graph from a successful answer (wrong counts, false ASK). Restart this
+            // candidate's plan + authorization like the body path below; 503 once exhausted.
+            let decision = match decision {
+                Err(ServerError::ResourceChanged) if restarts < READ_RACE_RETRIES => {
+                    restarts += 1;
+                    continue 'attempt;
                 }
+                Err(ServerError::ResourceChanged) => return Err(ServerError::ResourceChanged),
+                other => other,
+            };
+            let admitted = matches!(decision, Ok(ReadDecision::Allow(_)));
+            // [SONNET-4.6] sq-elg47: compose the opt-in ODRL gate per candidate graph — a Deny
+            // excludes the graph from the authorized dataset even under a static WAC grant
+            // (deny-overrides); a Permit admits a Read-required graph WAC alone would exclude
+            // (permit-extends; never the Control-gated `.acl` auxiliaries). Compiled out entirely
+            // when the `odrl-authz` feature is off; an unattached gate changes nothing.
+            #[cfg(all(feature = "odrl-authz", not(target_arch = "wasm32")))]
+            let admitted = match state.odrl_gate.as_deref() {
+                Some(gate) => {
+                    use crate::authz::odrl::OdrlVerdict;
+                    match gate.decide_read(&resource, token.web_id.as_deref()) {
+                        OdrlVerdict::Deny => false,
+                        OdrlVerdict::Permit if required == AccessMode::Read => true,
+                        OdrlVerdict::Permit | OdrlVerdict::NotApplicable => admitted,
+                    }
+                }
+                None => admitted,
+            };
+            if !admitted {
+                continue 'candidates;
             }
-            None => admitted,
-        };
-        if !admitted {
-            continue;
-        }
-        let Some(meta) = plan.target else {
-            continue;
-        };
-        let Ok(format) = classify(Some(&meta.content_type)) else {
-            continue;
-        };
-        let Ok(body) = state.store.read_at(&resource, &meta).await else {
-            continue;
+            let Some(meta) = plan.target else {
+                continue 'candidates;
+            };
+            // RDF eligibility from the authorized metadata BEFORE any byte fetch: a readable
+            // non-RDF body (image, video, …) is never fetched only to be discarded.
+            let Ok(format) = classify(Some(&meta.content_type)) else {
+                continue 'candidates;
+            };
+            // `read_at` serves ONLY the version this attempt authorized (so `format` describes
+            // exactly these bytes). If a concurrent rewrite reclaimed it, restart this candidate's
+            // plan + authorization: the newer version may carry a different ACL.
+            match state.store.read_at(&resource, &meta).await {
+                Ok(body) => break (format, body),
+                Err(ServerError::ResourceChanged) if restarts < READ_RACE_RETRIES => {
+                    restarts += 1;
+                }
+                // Still racing after the bounded restarts: fail the query (503 + Retry-After)
+                // rather than silently answer over a dataset missing an authorized graph.
+                Err(ServerError::ResourceChanged) => return Err(ServerError::ResourceChanged),
+                Err(_) => continue 'candidates,
+            }
         };
         let Ok(triples) = parse_to_triples(format, &body, &resource) else {
             continue;
