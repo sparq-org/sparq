@@ -146,3 +146,24 @@ fn original_dialect_controls_apply_to_both_versioned_admission_and_execution() {
         }
     }
 }
+
+#[test]
+fn rec2013_language_tagged_strings_use_length_based_ebv() {
+    // SPARQL 1.1 §17.2.2: plain literals, language-tagged ones included, have
+    // length-based EBV; the proof dialects pin that REC rule.
+    for (literal, value) in [("\"yes\"@en", "1"), ("\"\"@en", "2")] {
+        let query = format!("SELECT (IF({literal}, 1, 2) AS ?v) {{}}");
+        let expected = serde_json::json!({"Select": {"variables": ["v"], "order": "Bag",
+            "rows": [[format!("\"{value}\"^^<http://www.w3.org/2001/XMLSchema#integer>")]]}});
+        for agreed in [false, true] {
+            let (w2, w3) = inputs(&query, "", agreed);
+            assert_eq!(serde_json::to_value(v2::evaluate_detailed(&w2).unwrap().result).unwrap(), expected, "{literal}");
+            assert_eq!(serde_json::to_value(v3::evaluate_detailed(&w3).unwrap().result).unwrap(), expected, "{literal}");
+        }
+        let ask = format!("ASK {{ FILTER({literal}) }}");
+        let (w2, w3) = inputs(&ask, "", true);
+        let boolean = serde_json::json!({"Ask": value == "1"});
+        assert_eq!(serde_json::to_value(v2::evaluate_detailed(&w2).unwrap().result).unwrap(), boolean, "{literal}");
+        assert_eq!(serde_json::to_value(v3::evaluate_detailed(&w3).unwrap().result).unwrap(), boolean, "{literal}");
+    }
+}

@@ -13994,9 +13994,12 @@ fn ebv(v: &Value, semantics: crate::EbvSemantics) -> Option<bool> {
         Value::Unbound | Value::Error => None,
         Value::Term(Term::Literal(l)) => {
             if l.language().is_some() {
-                // rdf:langString / rdf:dirLangString is NOT xsd:string: its EBV is a
-                // type error per SPARQL (1.2 `expression/not-not` pins this down).
-                return None;
+                // SPARQL 1.1 §17.2.2 gives every plain literal, language-tagged ones
+                // included, a length-based EBV. The 1.2 draft makes rdf:langString /
+                // rdf:dirLangString a type error (`expression/not-not` pins this down);
+                // directional strings postdate the Recommendation, so they error in both.
+                return (semantics == crate::EbvSemantics::Rec2013 && l.direction().is_none())
+                    .then(|| !l.value().is_empty());
             }
             let dt = l.datatype().as_str();
             if dt == xsd::BOOLEAN.as_str() {
@@ -20743,10 +20746,14 @@ mod effective_boolean_unit {
     }
 
     #[test]
-    fn ebv_lang_tagged_literal_is_none_type_error() {
-        // rdf:langString is NOT xsd:string: its EBV is a type error.
+    fn ebv_lang_tagged_literal_follows_the_dialect() {
+        // SPARQL 1.1 (REC 2013): plain literals, language-tagged ones included, use length.
+        // The 1.2 draft: rdf:langString is NOT xsd:string, so its EBV is a type error.
         let t = Value::Term(Term::Literal(Literal::new_language_tagged_literal_unchecked("hello", "en")));
-        assert_eq!(ebv(&t, crate::EbvSemantics::Rec2013), None, "lang-tagged literal EBV is type error → None");
+        let empty = Value::Term(Term::Literal(Literal::new_language_tagged_literal_unchecked("", "en")));
+        assert_eq!(ebv(&t, crate::EbvSemantics::Rec2013), Some(true));
+        assert_eq!(ebv(&empty, crate::EbvSemantics::Rec2013), Some(false));
+        assert_eq!(ebv(&t, crate::EbvSemantics::Draft20260912), None, "lang-tagged literal EBV is type error → None");
     }
 
     #[test]

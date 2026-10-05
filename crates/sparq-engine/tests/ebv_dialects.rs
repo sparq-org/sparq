@@ -499,3 +499,23 @@ fn rayon_filter_and_bind_use_the_captured_rule() {
             }]));
     }
 }
+
+#[test]
+fn language_tagged_strings_use_length_under_rec_2013_and_error_under_the_draft() {
+    let graph = Graph::load_str("", "ntriples").unwrap();
+    for (literal, rec) in [("\"yes\"@en", true), ("\"\"@en", false)] {
+        let ask = |semantics| {
+            sparq_engine::ask_with_budget(&graph, &format!("{PREFIX}ASK {{ FILTER({literal}) }}"), &budget(semantics))
+                .unwrap()
+        };
+        assert_eq!(ask(EbvSemantics::Rec2013), rec, "{literal}");
+        assert!(!ask(EbvSemantics::Draft20260912), "{literal}");
+        let query = format!("SELECT (IF({literal}, 1, 2) AS ?v) {{}}");
+        assert_eq!(
+            result(&graph, &query, EbvSemantics::Rec2013),
+            vec![vec![Some(Literal::from(if rec { 1 } else { 2 }).into())]],
+            "{literal}"
+        );
+        assert_eq!(result(&graph, &query, EbvSemantics::Draft20260912), vec![vec![None]], "{literal}");
+    }
+}
