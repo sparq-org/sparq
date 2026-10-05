@@ -51,7 +51,8 @@
 //! * Deleting a derived-only triple is a no-op: entailed facts cannot be retracted while
 //!   their support exists (standard materialized-view semantics).
 
-use crate::rdfs::{close_dr, sweep, transitive_closure};
+use crate::owl::{Owl, XSD_HIERARCHY};
+use crate::rdfs::{close_dr, prop_orientation_closure, sweep, transitive_closure};
 use crate::Vocab;
 use rustc_hash::{FxHashMap, FxHashSet};
 use sparq_core::dict::{Dict, Id};
@@ -382,35 +383,15 @@ impl MaterializedGraph {
 // (regression test `prop_expand_keeps_domain_range_only_properties`); `emit_std` below does
 // the same via the identity orientation, so the differential tests hold.
 
-/// OWL vocabulary ids for the incremental OWL-RL graph, interned once at construction
-/// (mirrors the private `owl::Owl` — owned by the owl.rs thread, so duplicated additively).
+/// OWL vocabulary ids for the incremental OWL-RL graph, interned once at construction: the
+/// batch engine's [`Owl`] vocabulary plus the ids only the incremental graph needs.
 struct OwlIds {
-    same_as: Id,
-    inverse_of: Id,
-    symmetric: Id,
-    transitive: Id,
-    equiv_prop: Id,
-    equiv_class: Id,
-    functional: Id,
-    inv_functional: Id,
-    property_chain: Id,
-    on_property: Id,
-    some_values: Id,
-    all_values: Id,
-    has_value: Id,
-    intersection: Id,
-    union: Id,
-    has_key: Id,
-    max_cardinality: Id,
-    max_qual_card: Id,
-    on_class: Id,
-    one_of: Id,
+    o: Owl,
     different_from: Id,
-    thing: Id,
     nothing: Id,
     owl_class: Id,
-    /// XSD numeric-tower edges `(sub, sup)`, topologically ordered subs-before-sups
-    /// (mirrors `owl::XSD_HIERARCHY`).
+    /// XSD numeric-tower edges `(sub, sup)` from [`XSD_HIERARCHY`], topologically ordered
+    /// subs-before-sups.
     xsd: Vec<(Id, Id)>,
     /// Occurrence-guarded ids: `owl:Thing`, `owl:Nothing`, every XSD tower datatype. A delta
     /// triple mentioning one of these can change the batch `pre_monotone` facts → rebuild.
@@ -426,46 +407,11 @@ struct OwlIds {
 
 impl OwlIds {
     fn intern(dict: &mut Dict) -> OwlIds {
-        let mut o = |frag: &str| dict.intern_iri(&format!("{OWL_NS}{frag}"));
-        let same_as = o("sameAs");
-        let inverse_of = o("inverseOf");
-        let symmetric = o("SymmetricProperty");
-        let transitive = o("TransitiveProperty");
-        let equiv_prop = o("equivalentProperty");
-        let equiv_class = o("equivalentClass");
-        let functional = o("FunctionalProperty");
-        let inv_functional = o("InverseFunctionalProperty");
-        let property_chain = o("propertyChainAxiom");
-        let on_property = o("onProperty");
-        let some_values = o("someValuesFrom");
-        let all_values = o("allValuesFrom");
-        let has_value = o("hasValue");
-        let intersection = o("intersectionOf");
-        let union = o("unionOf");
-        let has_key = o("hasKey");
-        let max_cardinality = o("maxCardinality");
-        let max_qual_card = o("maxQualifiedCardinality");
-        let on_class = o("onClass");
-        let one_of = o("oneOf");
-        let different_from = o("differentFrom");
-        let thing = o("Thing");
-        let nothing = o("Nothing");
-        let owl_class = o("Class");
-        const XSD_HIERARCHY: &[(&str, &str)] = &[
-            ("byte", "short"),
-            ("short", "int"),
-            ("int", "long"),
-            ("long", "integer"),
-            ("integer", "decimal"),
-            ("unsignedByte", "unsignedShort"),
-            ("unsignedShort", "unsignedInt"),
-            ("unsignedInt", "unsignedLong"),
-            ("unsignedLong", "nonNegativeInteger"),
-            ("nonNegativeInteger", "integer"),
-            ("positiveInteger", "nonNegativeInteger"),
-            ("negativeInteger", "nonPositiveInteger"),
-            ("nonPositiveInteger", "integer"),
-        ];
+        let o = Owl::intern(dict);
+        let mut i = |frag: &str| dict.intern_iri(&format!("{OWL_NS}{frag}"));
+        let different_from = i("differentFrom");
+        let nothing = i("Nothing");
+        let owl_class = i("Class");
         let xsd: Vec<(Id, Id)> = XSD_HIERARCHY
             .iter()
             .map(|&(a, b)| {
@@ -473,31 +419,11 @@ impl OwlIds {
             })
             .collect();
         let mut special: FxHashSet<Id> = xsd.iter().flat_map(|&(a, b)| [a, b]).collect();
-        special.insert(thing);
+        special.insert(o.thing);
         special.insert(nothing);
         OwlIds {
-            same_as,
-            inverse_of,
-            symmetric,
-            transitive,
-            equiv_prop,
-            equiv_class,
-            functional,
-            inv_functional,
-            property_chain,
-            on_property,
-            some_values,
-            all_values,
-            has_value,
-            intersection,
-            union,
-            has_key,
-            max_cardinality,
-            max_qual_card,
-            on_class,
-            one_of,
+            o,
             different_from,
-            thing,
             nothing,
             owl_class,
             xsd,
@@ -644,27 +570,27 @@ impl MaterializedOwlGraph {
             v.sub_prop,
             v.domain,
             v.range,
-            ow.equiv_class,
-            ow.equiv_prop,
-            ow.inverse_of,
-            ow.same_as,
-            ow.property_chain,
-            ow.on_property,
-            ow.some_values,
-            ow.all_values,
-            ow.has_value,
-            ow.intersection,
-            ow.union,
-            ow.has_key,
-            ow.max_cardinality,
-            ow.max_qual_card,
-            ow.on_class,
-            ow.one_of,
+            ow.o.equiv_class,
+            ow.o.equiv_prop,
+            ow.o.inverse_of,
+            ow.o.same_as,
+            ow.o.property_chain,
+            ow.o.on_property,
+            ow.o.some_values,
+            ow.o.all_values,
+            ow.o.has_value,
+            ow.o.intersection,
+            ow.o.union,
+            ow.o.has_key,
+            ow.o.max_cardinality,
+            ow.o.max_qual_card,
+            ow.o.on_class,
+            ow.o.one_of,
         ]
         .into_iter()
         .collect();
         let axiom_types: FxHashSet<Id> =
-            [ow.symmetric, ow.transitive, ow.functional, ow.inv_functional].into_iter().collect();
+            [ow.o.symmetric, ow.o.transitive, ow.o.functional, ow.o.inv_functional].into_iter().collect();
         MaterializedOwlGraph {
             v,
             ow,
@@ -732,19 +658,19 @@ impl MaterializedOwlGraph {
         let mut equiv_prop: Vec<(Id, Id)> = Vec::new();
         let mut fallback = false;
         let fallback_preds: FxHashSet<Id> = [
-            ow.same_as,
-            ow.property_chain,
-            ow.on_property,
-            ow.some_values,
-            ow.all_values,
-            ow.has_value,
-            ow.intersection,
-            ow.union,
-            ow.has_key,
-            ow.max_cardinality,
-            ow.max_qual_card,
-            ow.on_class,
-            ow.one_of,
+            ow.o.same_as,
+            ow.o.property_chain,
+            ow.o.on_property,
+            ow.o.some_values,
+            ow.o.all_values,
+            ow.o.has_value,
+            ow.o.intersection,
+            ow.o.union,
+            ow.o.has_key,
+            ow.o.max_cardinality,
+            ow.o.max_qual_card,
+            ow.o.on_class,
+            ow.o.one_of,
         ]
         .into_iter()
         .collect();
@@ -758,19 +684,19 @@ impl MaterializedOwlGraph {
                 dom.entry(s).or_default().push(o);
             } else if p == v.range {
                 rng.entry(s).or_default().push(o);
-            } else if p == ow.inverse_of {
+            } else if p == ow.o.inverse_of {
                 inverse.entry(s).or_default().push(o);
                 inverse.entry(o).or_default().push(s);
-            } else if p == ow.equiv_class {
+            } else if p == ow.o.equiv_class {
                 equiv_class.push((s, o));
-            } else if p == ow.equiv_prop {
+            } else if p == ow.o.equiv_prop {
                 equiv_prop.push((s, o));
             } else if p == v.ty {
-                if o == ow.symmetric {
+                if o == ow.o.symmetric {
                     symmetric.insert(s);
-                } else if o == ow.transitive {
+                } else if o == ow.o.transitive {
                     transitive.insert(s);
-                } else if o == ow.functional || o == ow.inv_functional {
+                } else if o == ow.o.functional || o == ow.o.inv_functional {
                     fallback = true;
                 }
             }
@@ -803,9 +729,9 @@ impl MaterializedOwlGraph {
                 v.sub_prop,
                 v.domain,
                 v.range,
-                ow.equiv_class,
-                ow.equiv_prop,
-                ow.inverse_of,
+                ow.o.equiv_class,
+                ow.o.equiv_prop,
+                ow.o.inverse_of,
                 ow.different_from,
             ];
             let in_prop_graph = |id: Id| {
@@ -821,7 +747,7 @@ impl MaterializedOwlGraph {
             if reserved.iter().any(|&id| in_prop_graph(id)) {
                 fallback = true;
             }
-            let axioms = [ow.symmetric, ow.transitive, ow.functional, ow.inv_functional];
+            let axioms = [ow.o.symmetric, ow.o.transitive, ow.o.functional, ow.o.inv_functional];
             let in_class_graph = |id: Id| {
                 sc.contains_key(&id)
                     || sc.values().any(|ds| ds.contains(&id))
@@ -850,7 +776,7 @@ impl MaterializedOwlGraph {
 
         // ---- 3. pre_monotone facts (occurrence-guarded; mirror owl::pre_monotone) ----
         let mut pre_facts: Vec<[Id; 3]> = Vec::new();
-        for &id in [ow.thing, ow.nothing].iter() {
+        for &id in [ow.o.thing, ow.nothing].iter() {
             if occurring_special.contains(&id) {
                 pre_facts.push([id, v.ty, ow.owl_class]);
             }
@@ -925,7 +851,7 @@ impl MaterializedOwlGraph {
 
         // ---- 6. Property-orientation closure (mirrors rdfs::build_prop_expand) ----
         self.px_active = fixpoint_mode || !inverse.is_empty() || !symmetric.is_empty();
-        self.px = build_px(&self.sp_closure, &inverse, &symmetric);
+        self.px = prop_orientation_closure(&self.sp_closure, &inverse, &symmetric);
 
         // ---- 7. Transitive layer (fixpoint mode) ----
         self.inflow.clear();
@@ -1007,7 +933,7 @@ impl MaterializedOwlGraph {
             self.schema_facts.extend(cs.iter().map(|&c| [p, v.range, c]));
         }
         // post_equivalences (scm-eqc2/eqp2): mutual subsumption ⊢ equivalence, both ways.
-        for (rel, eq) in [(&self.sc_closure, ow.equiv_class), (&self.sp_closure, ow.equiv_prop)] {
+        for (rel, eq) in [(&self.sc_closure, ow.o.equiv_class), (&self.sp_closure, ow.o.equiv_prop)] {
             for (&a, bs) in rel {
                 for &b in bs {
                     if a != b && rel.get(&b).is_some_and(|r| r.contains(&a)) {
@@ -1371,79 +1297,15 @@ fn px_entries(px: &FxHashMap<Id, Vec<(Id, bool)>>, q: Id) -> &[(Id, bool)] {
     }
 }
 
-/// The property-orientation closure: BFS over `(property, orientation)` through subPropertyOf
-/// (same orientation; equivalentProperty pre-folded), inverseOf (flip) and SymmetricProperty
-/// (flip, same property). Mirrors `rdfs::build_prop_expand` exactly — including its `all_props`
-/// domain; px-absent properties take the identity fall-through in `emit_std` (see the px
-/// fall-through note) — so emissions match the batch engine.
-fn build_px(
-    sp_closure: &FxHashMap<Id, Vec<Id>>,
-    inverse: &FxHashMap<Id, Vec<Id>>,
-    symmetric: &FxHashSet<Id>,
-) -> FxHashMap<Id, Vec<(Id, bool)>> {
-    let mut all_props: FxHashSet<Id> = sp_closure
-        .keys()
-        .chain(inverse.keys())
-        .chain(symmetric.iter())
-        .copied()
-        .collect();
-    for sup in sp_closure.values() {
-        all_props.extend(sup.iter().copied());
-    }
-    for inv in inverse.values() {
-        all_props.extend(inv.iter().copied());
-    }
-    let mut map: FxHashMap<Id, Vec<(Id, bool)>> = FxHashMap::default();
-    for &p in &all_props {
-        let mut seen: FxHashSet<(Id, bool)> = FxHashSet::default();
-        let mut stack: Vec<(Id, bool)> = vec![(p, false)];
-        while let Some((q, or)) = stack.pop() {
-            if !seen.insert((q, or)) {
-                continue;
-            }
-            if let Some(sups) = sp_closure.get(&q) {
-                for &r in sups {
-                    if !seen.contains(&(r, or)) {
-                        stack.push((r, or));
-                    }
-                }
-            }
-            if let Some(invs) = inverse.get(&q) {
-                for &r in invs {
-                    if !seen.contains(&(r, !or)) {
-                        stack.push((r, !or));
-                    }
-                }
-            }
-            if symmetric.contains(&q) && !seen.contains(&(q, !or)) {
-                stack.push((q, !or));
-            }
-        }
-        map.insert(p, seen.into_iter().collect());
-    }
-    map
-}
-
-/// Transitive closure of a set of `(from, to)` pairs (BFS per distinct source).
+/// Transitive closure of a set of `(from, to)` pairs: [`transitive_closure`] over the
+/// adjacency, flattened back to pairs in adjacency-key order.
 fn tc_pairs(pairs: &FxHashSet<(Id, Id)>) -> FxHashSet<(Id, Id)> {
     let mut adj: FxHashMap<Id, Vec<Id>> = FxHashMap::default();
     for &(s, o) in pairs {
         adj.entry(s).or_default().push(o);
     }
-    let mut out: FxHashSet<(Id, Id)> = FxHashSet::default();
-    for &src in adj.keys() {
-        let mut seen: FxHashSet<Id> = FxHashSet::default();
-        let mut stack: Vec<Id> = adj[&src].clone();
-        while let Some(n) = stack.pop() {
-            if seen.insert(n) {
-                if let Some(succ) = adj.get(&n) {
-                    stack.extend(succ.iter().copied());
-                }
-            }
-        }
-        out.extend(seen.into_iter().map(|n| (src, n)));
-    }
-    out
+    let closure = transitive_closure(&adj);
+    adj.keys().flat_map(|&src| closure[&src].iter().map(move |&n| (src, n))).collect()
 }
 
 // ════════════════════════════════════════════════════════════════════════════════════════
