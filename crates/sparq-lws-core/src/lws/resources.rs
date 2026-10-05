@@ -884,11 +884,13 @@ fn sanitize_slug(slug: Option<&str>) -> Option<String> {
         .trim_start_matches('.')
         .trim_end_matches('/')
         .to_string();
+    // Truncated first, so the reserved suffix is checked on the name that is used: a longer Slug
+    // can end in it only once cut (`aaa….metax`).
+    clean.truncate(120);
     if clean.to_ascii_lowercase().ends_with(META_SUFFIX) {
         clean.truncate(clean.len() - META_SUFFIX.len());
         clean.push_str("-meta");
     }
-    clean.truncate(120);
     (!clean.is_empty() && clean.chars().any(|c| c.is_ascii_alphanumeric())).then_some(clean)
 }
 
@@ -1244,6 +1246,48 @@ fn lock_order(a: &str, b: &str) -> std::cmp::Ordering {
     b.len().cmp(&a.len()).then_with(|| a.cmp(b))
 }
 
+/// The metadata stored beside `uri`: `None` when there is none, an error when the store fails
+/// (unlike [`LwsState::resource_meta`], which reads a failure as "none").
+async fn stored_meta<S: Store + 'static>(
+    state: &LwsState<S>,
+    uri: &str,
+) -> Result<Option<ResourceMeta>, ServerError> {
+    match state.store.read(&meta_key(uri)).await {
+        Ok(r) => Ok(Some(serde_json::from_slice(&r.body).unwrap_or_default())),
+        Err(ServerError::NotFound) => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
+/// Write new content for `uri` and, with `meta` = `(new, old)`, its new metadata, so that a failure
+/// never leaves the new content under the old metadata (which carries the types and creator
+/// authorization rests on). The metadata goes first: when it cannot be written nothing changed;
+/// when the content then cannot be written, the old metadata is put back. Run under the
+/// resource's lock, so no reader sees the step in between.
+async fn write_with_meta<S: Store + 'static>(
+    state: &LwsState<S>,
+    uri: &str,
+    body: Bytes,
+    content_type: &str,
+    meta: Option<(&ResourceMeta, Option<&ResourceMeta>)>,
+) -> Result<crate::store::sparq::ResourceMeta, ServerError> {
+    if let Some((new, _)) = meta {
+        state.put_resource_meta(uri, new).await?;
+    }
+    match state.store.write(uri, body, content_type).await {
+        Ok(m) => Ok(m),
+        Err(e) => {
+            if let Some((_, old)) = meta {
+                let _ = match old {
+                    Some(old) => state.put_resource_meta(uri, old).await,
+                    None => state.store.delete(&meta_key(uri), None).await,
+                };
+            }
+            Err(e)
+        }
+    }
+}
+
 async fn update<S: Store + 'static>(
     state: &LwsState<S>,
     req: &LwsRequest,
@@ -1282,16 +1326,12 @@ async fn update<S: Store + 'static>(
     } else {
         Vec::new()
     };
-    let written = match state
-        .store
-        .write(uri, req.body.clone(), &content_type)
-        .await
-    {
+    let set_linkset = prefers_set_linkset(req);
+    let old_rmeta = match stored_meta(state, uri).await {
         Ok(m) => m,
         Err(e) => return store_error(e),
     };
-    let set_linkset = prefers_set_linkset(req);
-    let mut rmeta = state.resource_meta(uri).await;
+    let mut rmeta = old_rmeta.clone().unwrap_or_default();
     // "LWS servers MUST handle PUT and PATCH requests on resource URIs as modifications to the
     // resource content only, with no default impact on the associated linkset resource." The
     // types the content states are derived from the content, so they follow it; the types and
@@ -1316,7 +1356,18 @@ async fn update<S: Store + 'static>(
         }
     }
     rmeta.types = types;
-    let _ = state.put_resource_meta(uri, &rmeta).await;
+    let written = match write_with_meta(
+        state,
+        uri,
+        req.body.clone(),
+        &content_type,
+        Some((&rmeta, old_rmeta.as_ref())),
+    )
+    .await
+    {
+        Ok(m) => m,
+        Err(e) => return store_error(e),
+    };
     changed(state, uri).await;
     let mut resp = StatusCode::NO_CONTENT.into_response();
     set(resp.headers_mut(), header::ETAG, &quoted(&written.etag));
@@ -1572,7 +1623,7 @@ pub fn json_patch(target: &Value, ops: &Value, budget: usize) -> Result<Value, P
                 pointer_add(&mut doc, &path, v).ok_or(Failed)?;
             }
             "test" => {
-                if doc.pointer(&path).ok_or(Failed)? != &op["value"] {
+                if !json_equal(doc.pointer(&path).ok_or(Failed)?, &op["value"]) {
                     return Err(Failed);
                 }
             }
@@ -1580,6 +1631,42 @@ pub fn json_patch(target: &Value, ops: &Value, budget: usize) -> Result<Value, P
         }
     }
     Ok(doc)
+}
+
+/// RFC 6902 section 4.6 equality: numbers are equal when their values are (`1` and `1.0`), strings
+/// and literals when they are identical, arrays element by element, objects member by member
+/// whatever their order. Integers compare exactly (two distinct large integers never meet through
+/// a float), and an integer equals a float only when the float is exactly that integer.
+fn json_equal(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Number(x), Value::Number(y)) => numbers_equal(x, y),
+        (Value::Array(x), Value::Array(y)) => {
+            x.len() == y.len() && x.iter().zip(y).all(|(x, y)| json_equal(x, y))
+        }
+        (Value::Object(x), Value::Object(y)) => {
+            x.len() == y.len()
+                && x.iter()
+                    .all(|(k, v)| y.get(k).is_some_and(|w| json_equal(v, w)))
+        }
+        _ => a == b,
+    }
+}
+
+fn numbers_equal(x: &serde_json::Number, y: &serde_json::Number) -> bool {
+    let int = |n: &serde_json::Number| {
+        n.as_i64()
+            .map(i128::from)
+            .or_else(|| n.as_u64().map(i128::from))
+    };
+    // An integral, finite float within range, as the integer it is exactly.
+    let integral =
+        |f: f64| (f.is_finite() && f.fract() == 0.0 && f.abs() < 1e38).then_some(f as i128);
+    match (int(x), int(y)) {
+        (Some(i), Some(j)) => i == j,
+        (Some(i), None) => y.as_f64().and_then(integral) == Some(i),
+        (None, Some(j)) => x.as_f64().and_then(integral) == Some(j),
+        (None, None) => x.as_f64().is_some_and(|f| y.as_f64() == Some(f)),
+    }
 }
 
 fn split_pointer(path: &str) -> Option<(String, String)> {
@@ -1776,24 +1863,16 @@ async fn patch<S: Store + 'static>(
     } else {
         JSON.to_string()
     };
-    let written = match state
-        .store
-        .write(
-            uri,
-            Bytes::from(serde_json::to_vec(&patched).unwrap_or_default()),
-            &ct,
-        )
-        .await
-    {
-        Ok(m) => m,
-        Err(e) => return store_error(e),
-    };
     // The linkset is left alone unless Prefer: set-linkset asks for the Link headers to update it
     // too, partially (update-resource).
     let set_linkset = prefers_set_linkset(req);
-    if set_linkset {
+    let metas = if set_linkset {
+        let old = match stored_meta(state, uri).await {
+            Ok(m) => m,
+            Err(e) => return store_error(e),
+        };
         let (link_types, links) = link_declared(req, uri);
-        let mut rmeta = state.resource_meta(uri).await;
+        let mut rmeta = old.clone().unwrap_or_default();
         for t in link_types {
             if !rmeta.types.contains(&t) {
                 rmeta.types.push(t);
@@ -1809,8 +1888,22 @@ async fn patch<S: Store + 'static>(
         rmeta.links = links_of(&user, uri);
         rmeta.linkset = Some(user);
         rmeta.linkset_etag = None;
-        let _ = state.put_resource_meta(uri, &rmeta).await;
-    }
+        Some((rmeta, old))
+    } else {
+        None
+    };
+    let written = match write_with_meta(
+        state,
+        uri,
+        Bytes::from(serde_json::to_vec(&patched).unwrap_or_default()),
+        &ct,
+        metas.as_ref().map(|(new, old)| (new, old.as_ref())),
+    )
+    .await
+    {
+        Ok(m) => m,
+        Err(e) => return store_error(e),
+    };
     changed(state, uri).await;
     let mut resp = StatusCode::NO_CONTENT.into_response();
     set(resp.headers_mut(), header::ETAG, &quoted(&written.etag));
@@ -3758,5 +3851,143 @@ mod tests {
         let r = send(Method::DELETE, &local(&f), &[], "").await;
         assert_eq!(r.status(), StatusCode::NO_CONTENT);
         assert!(deletes(&got).await.contains(&f));
+    }
+
+    /// Review finding: PUT and PATCH committed the content and discarded a failure to write the
+    /// metadata, answering 204, so a `Prefer: set-linkset` that dropped a type a grant rests on
+    /// could fail silently and leave the new content under the old types. A failure now answers
+    /// 500 and leaves content and metadata as they were.
+    #[tokio::test]
+    async fn a_failed_metadata_write_leaves_the_resource_as_it_was() {
+        use super::super::route;
+        use super::super::test_store::{request as req, state as flaky_state};
+        let (st, store) = flaky_state(100).await;
+        let base = st.cfg.absolute("");
+        let public = "<https://e.example/Public>; rel=\"type\"";
+        let r = route(
+            &st,
+            req(
+                Method::POST,
+                "/",
+                &[
+                    ("slug", "doc.json"),
+                    ("content-type", "application/json"),
+                    ("link", public),
+                ],
+                "{\"v\": 0}",
+            ),
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let uri = hdr(&r, "location");
+        let p = uri.strip_prefix(base.as_str()).unwrap().to_string();
+        let types = |st: LwsState<super::super::test_store::FlakyStore>, uri: String| async move {
+            st.resource_meta(&uri).await.types
+        };
+        let before = types(st.clone(), uri.clone()).await;
+        assert!(before.contains(&"https://e.example/Public".to_string()));
+        let attempts = [
+            (Method::PUT, "application/json", "{\"v\": 1}"),
+            (Method::PATCH, MERGE_PATCH, "{\"v\": 1}"),
+        ];
+        // The metadata write fails, then the content write does: either way nothing changes.
+        for failing in [meta_key(&uri), uri.clone()] {
+            *store.fail_write_of.lock().unwrap() = Some(failing.clone());
+            for (method, ct, body) in attempts.clone() {
+                let r = route(
+                    &st,
+                    req(
+                        method.clone(),
+                        &p,
+                        &[("content-type", ct), ("prefer", "set-linkset")],
+                        body,
+                    ),
+                )
+                .await;
+                assert_eq!(
+                    r.status(),
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "{method} {failing}"
+                );
+                assert_eq!(
+                    st.store.read(&uri).await.unwrap().body,
+                    Bytes::from("{\"v\": 0}")
+                );
+                assert_eq!(
+                    types(st.clone(), uri.clone()).await,
+                    before,
+                    "{method} {failing}"
+                );
+            }
+        }
+        *store.fail_write_of.lock().unwrap() = None;
+        let r = route(
+            &st,
+            req(
+                Method::PUT,
+                &p,
+                &[
+                    ("content-type", "application/json"),
+                    ("prefer", "set-linkset"),
+                ],
+                "{\"v\": 1}",
+            ),
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        assert!(!types(st.clone(), uri.clone())
+            .await
+            .contains(&"https://e.example/Public".to_string()));
+    }
+
+    /// Review finding: `test` compared with `Value` equality, so `1` and `1.0` differed; RFC 6902
+    /// section 4.6 compares numbers by value.
+    #[test]
+    fn json_patch_test_compares_numbers_by_value() {
+        let doc = json!({"n": 1, "f": 1.5, "big": u64::MAX, "a": [1, {"x": 2}], "o": {"p": 10, "q": [0]}});
+        let test = |path: &str, value: Value| {
+            json_patch(
+                &doc,
+                &json!([{"op": "test", "path": path, "value": value}]),
+                PATCH_BUDGET,
+            )
+            .is_ok()
+        };
+        assert!(test("/n", json!(1.0)));
+        assert!(test("/f", json!(1.5)));
+        assert!(test("/a", json!([1.0, {"x": 2.0}])));
+        assert!(test("/o", json!({"q": [0.0], "p": 1e1})));
+        assert!(test("/big", json!(u64::MAX)));
+        assert!(!test("/n", json!(1.5)));
+        assert!(!test("/n", json!("1")));
+        assert!(!test("/big", json!(u64::MAX - 1)));
+        // Distinct large integers never meet through a float.
+        let near = json!({"n": 9_007_199_254_740_993_i64});
+        let t = |v: Value| {
+            json_patch(
+                &near,
+                &json!([{"op": "test", "path": "/n", "value": v}]),
+                PATCH_BUDGET,
+            )
+            .is_ok()
+        };
+        assert!(!t(json!(9_007_199_254_740_992_i64)));
+        assert!(!t(json!(9_007_199_254_740_992.0)));
+        assert!(t(json!(9_007_199_254_740_993_i64)));
+    }
+
+    /// Review finding: the reserved `.meta` suffix was checked before the Slug was cut to its
+    /// length limit, so a long Slug could end in `.meta` once cut and name an unreachable resource.
+    #[test]
+    fn a_cut_slug_never_ends_in_the_reserved_suffix() {
+        let slug = format!("{}.metax", "a".repeat(115));
+        let name = sanitize_slug(Some(&slug)).unwrap();
+        assert!(name.len() <= 120);
+        assert!(!name.to_ascii_lowercase().ends_with(META_SUFFIX), "{name}");
+        let upper = format!("{}.METAx", "a".repeat(115));
+        assert!(!sanitize_slug(Some(&upper))
+            .unwrap()
+            .to_ascii_lowercase()
+            .ends_with(META_SUFFIX));
     }
 }

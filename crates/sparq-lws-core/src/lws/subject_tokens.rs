@@ -171,16 +171,28 @@ impl MultikeyPublic {
     }
 }
 
+/// The longest base58btc multikey [`decode_multikey`] considers, in characters: well past the 48 of
+/// the largest supported key (a compressed P-256 point with its 2-byte multicodec prefix).
+pub const MAX_MULTIKEY_CHARS: usize = 128;
+
 /// Decode a multibase base58btc (`z…`) multikey: P-256 (multicodec `0x1200`, the compressed SEC1
 /// point) or Ed25519 (multicodec `0xed`, the raw 32-byte key).
+///
+/// The supported keys are at most 35 bytes (48 base58 characters), so a longer value is refused
+/// before it is decoded (base58 decoding is quadratic in the input), and the decode goes into a
+/// fixed buffer that a longer value overflows.
 pub fn decode_multikey(multibase: &str) -> Result<MultikeyPublic, String> {
     let b58 = multibase
         .strip_prefix('z')
         .ok_or("not a base58btc multibase value")?;
-    let bytes = bs58::decode(b58)
-        .into_vec()
-        .map_err(|_| "not valid base58btc")?;
-    match bytes.as_slice() {
+    if b58.len() > MAX_MULTIKEY_CHARS {
+        return Err("the multikey is longer than any supported key".into());
+    }
+    let mut buf = [0u8; 64];
+    let len = bs58::decode(b58)
+        .onto(&mut buf)
+        .map_err(|_| "not valid base58btc, or longer than any supported key")?;
+    match &buf[..len] {
         [0x80, 0x24, point @ ..] if point.len() == 33 && matches!(point[0], 2 | 3) => {
             jose::ec_public_from_sec1(point)
                 .map(MultikeyPublic::P256)
@@ -1055,6 +1067,16 @@ mod tests {
         ));
         assert!(did_key_public("did:key:zQ3s").is_err());
         assert!(did_key_public("did:web:example.org").is_err());
+        // Review finding: an oversized multikey was base58-decoded in full (quadratic) before any
+        // length check. It is refused up front, and a value under the cap that decodes past the
+        // largest key overflows the fixed buffer instead of growing one.
+        let huge = format!("did:key:z{}", "2".repeat(100_000));
+        let started = std::time::Instant::now();
+        let err = did_key_public(&huge).unwrap_err();
+        assert!(err.contains("longer"), "{err}");
+        assert!(started.elapsed() < std::time::Duration::from_millis(100));
+        let long = format!("z{}", "2".repeat(MAX_MULTIKEY_CHARS));
+        assert!(decode_multikey(&long).unwrap_err().contains("longer"));
         assert!(did_key_kid_matches(
             did,
             Some("z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK")

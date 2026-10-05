@@ -216,11 +216,21 @@ fn acceptable(accept: Option<&str>) -> bool {
     })
 }
 
-/// Every resource the agent may read now, with its types (full IRIs), by URI.
+/// What a search sees of one readable resource: its types (full IRIs) and the metadata its
+/// relations come from, both from the snapshot its permission check was made on.
+struct Seen {
+    types: Vec<String>,
+    meta: ResourceMeta,
+}
+
+/// Every resource the agent may read now, with what a search sees of it, by URI. Each resource's
+/// shared lock is held from its permission check through the read of its metadata, so the types
+/// and relations collected are those of the state the check allowed (a delete and a re-create by
+/// someone else cannot slip in between); the lock is released before the next resource.
 async fn readable<S: Store + 'static>(
     state: &LwsState<S>,
     agent: &Agent,
-) -> BTreeMap<String, Vec<String>> {
+) -> BTreeMap<String, Seen> {
     let mut out = BTreeMap::new();
     let mut stack = vec![state.cfg.storage()];
     let mut seen = BTreeSet::new();
@@ -239,6 +249,7 @@ async fn readable<S: Store + 'static>(
                 }
             }
         }
+        let _guard = state.locks.read(&uri).await;
         if !state.allowed(Action::Read, &uri, agent).await {
             continue;
         }
@@ -251,12 +262,12 @@ async fn readable<S: Store + 'static>(
                 "DataResource"
             }
         )];
-        for t in meta.types {
-            if !types.contains(&t) {
-                types.push(t);
+        for t in &meta.types {
+            if !types.contains(t) {
+                types.push(t.clone());
             }
         }
-        out.insert(uri, types);
+        out.insert(uri, Seen { types, meta });
     }
     out
 }
@@ -358,12 +369,11 @@ pub async fn handle<S: Store + 'static>(
     let mut content_location = None;
     let doc = if search {
         let mut items = Vec::new();
-        for (uri, types) in &resources {
+        for (uri, Seen { types, meta }) in &resources {
             let mut matched = all_groups(&filter.types, |v| types.iter().any(|t| t == v));
             if matched && !filter.relations.is_empty() {
-                let meta = state.resource_meta(uri).await;
                 matched = filter.relations.iter().all(|(rel, groups)| {
-                    let targets = relation_targets(uri, &meta, rel);
+                    let targets = relation_targets(uri, meta, rel);
                     all_groups(groups, |v| targets.contains(v))
                 });
             }
@@ -419,7 +429,7 @@ pub async fn handle<S: Store + 'static>(
         // The TypeIndex is paged like a container (section 6.1): opaque `?page=N` links in Link
         // headers, first and last always, prev and next where there is one; a page that does not
         // exist (any more) is 404.
-        let types: BTreeSet<&String> = resources.values().flatten().collect();
+        let types: BTreeSet<&String> = resources.values().flat_map(|s| &s.types).collect();
         let total = types.len();
         let size = state.cfg.page_size.max(1);
         let pages = total.div_ceil(size).max(1);
@@ -512,6 +522,62 @@ mod tests {
         assert_ne!(other["items"], doc["items"]);
         let gone = handle(&state, &get("?page=3"), &Agent::anonymous()).await;
         assert_eq!(gone.status(), StatusCode::NOT_FOUND);
+    }
+
+    /// Review finding: the type search checked a resource's permission and then read its
+    /// metadata (and, for relations, read it again) without its lock, so a delete and a re-create
+    /// in between leaked the replacement's private types. The check and the reads now hold the
+    /// resource's shared lock, and relations come from the same snapshot.
+    #[tokio::test]
+    async fn the_type_index_reads_each_resource_under_its_lock() {
+        use super::super::test_store::{self, FlakyStore};
+        let mut cfg = super::super::LwsConfig::new("http://localhost:3000");
+        cfg.owner = Some("https://owner.example/#me".into());
+        let state = LwsState::new(FlakyStore::new(), cfg).await.unwrap();
+        let root = state.cfg.storage();
+        let uri = format!("{root}bobs");
+        state
+            .store
+            .create_in_container(&root, &uri, "x".into(), "text/plain")
+            .await
+            .unwrap();
+        let set_meta = |creator: &str, ty: &str| {
+            let (state, uri) = (state.clone(), uri.clone());
+            let (creator, ty) = (creator.to_string(), ty.to_string());
+            async move {
+                let mut meta = state.resource_meta(&uri).await;
+                meta.creator = Some(creator);
+                meta.types = vec![ty];
+                state.put_resource_meta(&uri, &meta).await.unwrap();
+            }
+        };
+        set_meta("https://bob.example/#me", "https://e.example/Public").await;
+        let bob = Agent {
+            subject: Some("https://bob.example/#me".into()),
+            client: None,
+        };
+        let held = state.locks.lock(&uri).await;
+        let task = {
+            let (state, bob) = (state.clone(), bob.clone());
+            tokio::spawn(async move {
+                let get = test_store::request(Method::GET, TYPE_INDEX_PATH, &[], "");
+                test_store::body_json(handle(&state, &get, &bob).await).await
+            })
+        };
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert!(!task.is_finished(), "the index did not wait for the lock");
+        // Deleted and re-created by the owner, with a private type.
+        set_meta("https://owner.example/#me", "https://e.example/Secret").await;
+        drop(held);
+        let doc = task.await.unwrap();
+        let ids: Vec<&str> = doc["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|i| i["id"].as_str())
+            .collect();
+        assert!(!ids.contains(&"https://e.example/Secret"), "{ids:?}");
+        assert!(!ids.contains(&"https://e.example/Public"), "{ids:?}");
     }
 
     #[test]

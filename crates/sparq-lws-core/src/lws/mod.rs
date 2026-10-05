@@ -999,6 +999,8 @@ pub(crate) mod test_store {
         pub fail_delete: Arc<AtomicBool>,
         /// `delete` of this IRI alone fails with a backend error.
         pub fail_delete_of: Arc<std::sync::Mutex<Option<String>>>,
+        /// `write` of this IRI alone fails with a backend error.
+        pub fail_write_of: Arc<std::sync::Mutex<Option<String>>>,
         /// `exists` fails with a backend error.
         pub fail_exists: Arc<AtomicBool>,
         /// `exists` reports this IRI absent, as if it was checked just before the IRI appeared.
@@ -1015,6 +1017,7 @@ pub(crate) mod test_store {
                 fail_delete: Arc::new(AtomicBool::new(false)),
                 fail_exists: Arc::new(AtomicBool::new(false)),
                 fail_delete_of: Default::default(),
+                fail_write_of: Default::default(),
                 hide: Default::default(),
             }
         }
@@ -1038,6 +1041,9 @@ pub(crate) mod test_store {
             self.inner.exists(iri).await
         }
         async fn write(&self, iri: &str, body: Bytes, ct: &str) -> ServerResult<ResourceMeta> {
+            if self.fail_write_of.lock().unwrap().as_deref() == Some(iri) {
+                return Err(ServerError::Storage("disk on fire".into()));
+            }
             self.inner.write(iri, body, ct).await
         }
         async fn create_in_container(
