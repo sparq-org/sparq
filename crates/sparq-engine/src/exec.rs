@@ -12,7 +12,7 @@ use oxrdf::{BlankNode, Literal, NamedOrBlankNode, Term, Variable};
 use rustc_hash::FxHashMap;
 use sparq_core::dict::{self, Id, NO_ID};
 use sparq_core::store::Pattern as IdPattern;
-use sparq_core::temporal::{ExactTemporal, ExactTimeline, Timeline};
+use sparq_core::temporal::{ExactTemporal, ExactTimeline, Temporal};
 use sparq_core::Graph;
 // [OPUS-4.8] sq-ev41x (epic sq-qonbz): the id-level numeric value tower (`Num` / `Dec` /
 // `ArithOp` / `RoundMode` and the XSD lexical helpers) now lives in the `sparq-substrate`
@@ -5005,13 +5005,11 @@ fn count_single_filtered(
             .iter()
             .filter(|row| graph.numeric_value(scan.to_spo(row)[pos]).is_some_and(|x| cmp.test(x)))
             .count(),
-        [(pos, ScanCmp::Temp(op, t))] => scan
+        [(pos, ScanCmp::Temp(op, t, approx))] => scan
             .rows
             .iter()
             .filter(|row| {
-                temporal_of_id(graph, scan.to_spo(row)[pos])
-                    .and_then(|v| ExactTemporal::compare(v, t))
-                    .is_some_and(|o| op.eval(o))
+                temporal_cmp_of_id(graph, scan.to_spo(row)[pos], t, approx).is_some_and(|o| op.eval(o))
             })
             .count(),
         _ => scan
@@ -6617,7 +6615,9 @@ pub(crate) enum ScanCmp<'a> {
     /// (dateTime vs date) or non-temporal operand is a FILTER type error — the row is
     /// excluded, which `false` reproduces exactly. (For `=`, cross-family is "known
     /// different" rather than an error — also excluded, also `false`.)
-    Temp(CmpOp, ExactTemporal<'a>),
+    /// The cached approximate key of the constant (when it has one) only lets
+    /// [`temporal_cmp_of_id`] skip the exact key for rows far from the constant.
+    Temp(CmpOp, ExactTemporal<'a>, Option<Temporal>),
 }
 
 impl ScanCmp<'_> {
@@ -6625,7 +6625,7 @@ impl ScanCmp<'_> {
     pub(crate) fn render(&self) -> String {
         match *self {
             ScanCmp::Num(c) => c.render(),
-            ScanCmp::Temp(op, t) => format!("{} exact temporal {:?}", op.render(), t.timeline),
+            ScanCmp::Temp(op, t, _) => format!("{} exact temporal {:?}", op.render(), t.timeline),
         }
     }
 
@@ -6635,9 +6635,7 @@ impl ScanCmp<'_> {
     fn test_id(&self, graph: &Graph, id: Id) -> bool {
         match *self {
             ScanCmp::Num(c) => graph.numeric_value(id).is_some_and(|x| c.test(x)),
-            ScanCmp::Temp(op, t) => {
-                temporal_of_id(graph, id).and_then(|v| ExactTemporal::compare(v, t)).is_some_and(|o| op.eval(o))
-            }
+            ScanCmp::Temp(op, t, approx) => temporal_cmp_of_id(graph, id, t, approx).is_some_and(|o| op.eval(o)),
         }
     }
 }
@@ -6750,7 +6748,11 @@ fn extract_sargable<'a>(graph: &Graph, e: &'a Expression) -> Option<(Variable, S
             continue;
         }
         if let Some(t) = lit_temp(konst) {
-            return Some((v, ScanCmp::Temp(op, t)));
+            let approx = match konst {
+                Expression::Literal(l) => Temporal::of_lit(l.value(), l.datatype().as_str()),
+                _ => None,
+            };
+            return Some((v, ScanCmp::Temp(op, t, approx)));
         }
     }
     None
@@ -13816,6 +13818,65 @@ fn temporal_of_id(graph: &Graph, id: Id) -> Option<ExactTemporal<'_>> {
     graph.exact_temporal_value(id)
 }
 
+/// Compares a stored temporal id with an exact constant, skipping the exact key when
+/// the cached f64 instants alone decide the order.
+///
+/// The cached instant of a value is within a few ulps (plus a sub-femtosecond
+/// fraction error) of its exact instant, so a cached difference beyond `margin`
+/// (and beyond the fourteen-hour window for mixed timezone presence) has the sign
+/// of the exact difference. Everything closer, every capacity-checked evaluation
+/// and every id without a cached value takes the exact comparison.
+#[inline]
+fn temporal_cmp_of_id(graph: &Graph, id: Id, exact: ExactTemporal<'_>, approx: Option<Temporal>) -> Option<std::cmp::Ordering> {
+    if let Some(c) = approx {
+        if !budget::temporal_capacity_active() {
+            if let Some(v) = graph.temporal_value(id) {
+                if v.kind != c.kind {
+                    return None;
+                }
+                if let Some(order) = approx_temporal_order(v, c) {
+                    return Some(order);
+                }
+            }
+        }
+    }
+    temporal_of_id(graph, id).and_then(|v| ExactTemporal::compare(v, exact))
+}
+
+/// The order of two same-family cached temporals when their f64 instants alone
+/// decide it (see [`temporal_cmp_of_id`]); `None` means "use the exact keys".
+#[inline]
+fn approx_temporal_order(v: Temporal, c: Temporal) -> Option<std::cmp::Ordering> {
+    let d = v.instant - c.instant;
+    let margin = 1.0 + 8.0 * f64::EPSILON * (v.instant.abs() + c.instant.abs());
+    let band = if v.has_tz == c.has_tz { 0.0 } else { 14.0 * 3600.0 };
+    if d > band + margin {
+        Some(std::cmp::Ordering::Greater)
+    } else if d < -(band + margin) {
+        Some(std::cmp::Ordering::Less)
+    } else {
+        None
+    }
+}
+
+/// The cached approximate temporal of a graph-term variable or a constant, for
+/// [`approx_temporal_order`] only. `None` (including under an active temporal
+/// capacity budget) sends the caller to the exact path.
+fn eval_approx_temporal(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], e: &Expression) -> Option<Temporal> {
+    if budget::temporal_capacity_active() {
+        return None;
+    }
+    match e {
+        Expression::Variable(v) if local.correlation.contains_key(v) => None,
+        Expression::Variable(v) => {
+            let id = row[b.col(v)?];
+            if id == NO_ID || is_local(id) { None } else { graph.temporal_value(id) }
+        }
+        Expression::Literal(l) if l.language().is_none() => Temporal::of_lit(l.value(), l.datatype().as_str()),
+        _ => None,
+    }
+}
+
 /// The lexical form of an expression IF it is an exact-valued numeric operand (an
 /// integer subtype or xsd:decimal — NOT float/double). Used to re-check comparisons that
 /// the f64 fast path collapsed (integers > 2^53, high-precision decimals). Only reached
@@ -13911,6 +13972,21 @@ fn eval_compiled_temporal<'a>(graph: &'a Graph, local: &'a LocalVocab, row: &[Id
             }
         }
         Literal(l) => temporal_of_lit(l),
+        _ => None,
+    }
+}
+
+/// Mirrors [`eval_approx_temporal`] on a pre-compiled expression.
+fn eval_compiled_approx_temporal(graph: &Graph, row: &[Id], e: &CompiledExpr) -> Option<Temporal> {
+    if budget::temporal_capacity_active() {
+        return None;
+    }
+    match e {
+        CompiledExpr::Var(col) => {
+            let id = row[(*col)?];
+            if id == NO_ID || is_local(id) { None } else { graph.temporal_value(id) }
+        }
+        CompiledExpr::Literal(l) if l.language().is_none() => Temporal::of_lit(l.value(), l.datatype().as_str()),
         _ => None,
     }
 }
@@ -14104,6 +14180,15 @@ fn cmp_expr(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], a: &Exp
             }
         }
         return Ok(Value::Bool(x.partial_cmp(&y).map(&f).unwrap_or(false)));
+    }
+    // Cached f64 instants decide same-family pairs that are far apart; anything
+    // closer falls through to the exact keys below.
+    if let (Some(va), Some(vb)) = (eval_approx_temporal(graph, local, b, row, a), eval_approx_temporal(graph, local, b, row, c)) {
+        if va.kind == vb.kind {
+            if let Some(o) = approx_temporal_order(va, vb) {
+                return Ok(Value::Bool(f(o)));
+            }
+        }
     }
     // Fast path: both sides temporal -> compare exact borrowed timeline values, no term
     // materialised. `None` from `cmp_t` is exactly the strict path's type-error cases
@@ -15067,6 +15152,16 @@ fn cmp_compiled(
         }
         return Ok(Value::Bool(x.partial_cmp(&y).map(&f).unwrap_or(false)));
     }
+    // Mirrors `cmp_expr`: cached instants decide far-apart same-family pairs.
+    if let (Some(va), Some(vb)) =
+        (eval_compiled_approx_temporal(graph, row, a), eval_compiled_approx_temporal(graph, row, c))
+    {
+        if va.kind == vb.kind {
+            if let Some(o) = approx_temporal_order(va, vb) {
+                return Ok(Value::Bool(f(o)));
+            }
+        }
+    }
     if let (Some(ta), Some(tb)) =
         (eval_compiled_temporal(graph, local, row, a), eval_compiled_temporal(graph, local, row, c))
     {
@@ -15857,7 +15952,14 @@ fn datetime_field(v: &Value, idx: usize) -> Value {
     let s = match v {
         Value::Term(Term::Literal(l))
             if l.datatype() == xsd::DATE_TIME || l.datatype() == xsd::DATE_TIME_STAMP => {
-                if temporal_of_lit(l).is_none() { return Value::Error; }
+                // `parse_datetime` below validates the lexical; this adds only the checks
+                // `temporal_of_lit` makes beyond it, without a second full parse.
+                if budget::check_temporal(l.value(), l.datatype().as_str()).is_err()
+                    || (l.datatype() == xsd::DATE_TIME_STAMP
+                        && !l.value().split_once('T').is_some_and(|(_, time)| time.contains(['Z', '+', '-'])))
+                {
+                    return Value::Error;
+                }
                 l.value()
             },
         _ => return Value::Error,
@@ -15900,7 +16002,7 @@ fn datetime_field(v: &Value, idx: usize) -> Value {
 fn parse_datetime(s: &str) -> Option<[f64; 6]> {
     // One validation boundary also serves the graph's temporal cache and
     // comparison fast paths. Component extraction below preserves local time.
-    Timeline::parse_datetime(s)?;
+    ExactTimeline::parse_datetime(s)?;
     let (date, time) = s.split_once('T')?;
     let neg = date.starts_with('-');
     let mut d = date.strip_prefix('-').unwrap_or(date).split('-');

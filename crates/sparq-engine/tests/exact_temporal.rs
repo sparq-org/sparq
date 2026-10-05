@@ -175,3 +175,75 @@ fn year_zero_stored_filter_cannot_become_false_ask_or_zero_count() {
         );
     }
 }
+
+// The scan pushdown and the general comparison may decide far-apart rows from
+// cached f64 instants; both must agree with the exact comparison on every row, including near-ties,
+// sub-nanosecond fractions, the fourteen-hour mixed-timezone window and both
+// dateTime and date families.
+#[test]
+fn pushed_down_temporal_filters_match_the_exact_comparison() {
+    let constants = [
+        "\"2000-01-01T00:00:00Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime>",
+        "\"2000-01-01T00:00:00\"^^<http://www.w3.org/2001/XMLSchema#dateTime>",
+        "\"2000-01-01T00:00:00.000000000000000000001+05:00\"^^<http://www.w3.org/2001/XMLSchema#dateTime>",
+        "\"2000-01-01\"^^<http://www.w3.org/2001/XMLSchema#date>",
+        "\"-0044-03-15T12:00:00Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime>",
+    ];
+    let mut data = String::new();
+    let mut n = 0;
+    let mut add = |lexical: String, datatype: &str| {
+        data.push_str(&format!(
+            "<http://ex/s{n}> <http://ex/d> \"{lexical}\"^^<http://www.w3.org/2001/XMLSchema#{datatype}> .\n"
+        ));
+        n += 1;
+    };
+    for base in ["1999-12-31T", "2000-01-01T", "2000-01-02T", "1999-12-31T09:", "2000-01-01T14:"] {
+        for time in ["00:00:00", "13:59:59", "14:00:00", "14:00:01", "23:59:59", "09:59:59.999999999999"] {
+            let time = if base.ends_with(':') { &time[3..] } else { time };
+            for zone in ["", "Z", "+14:00", "-14:00", "+05:00"] {
+                add(format!("{base}{time}{zone}"), "dateTime");
+            }
+        }
+    }
+    for fraction in ["", ".0", ".000000000000000000001", ".999999999999999999999", ".5"] {
+        for second in ["59", "00", "01"] {
+            add(format!("1999-12-31T23:59:{second}{fraction}Z"), "dateTime");
+            add(format!("2000-01-01T00:00:{second}{fraction}"), "dateTime");
+        }
+    }
+    for day in ["1999-12-31", "2000-01-01", "2000-01-02", "-0044-03-15", "-0044-03-16"] {
+        for zone in ["", "Z", "+14:00", "-14:00"] {
+            add(format!("{day}{zone}"), "date");
+        }
+    }
+    let graph = Graph::load_str(&data, "ntriples").unwrap();
+    let mut selected = 0;
+    for constant in constants {
+        for op in [">", ">=", "<", "<=", "="] {
+            let pushed = format!("SELECT ?s WHERE {{ ?s <http://ex/d> ?d FILTER(?d {op} {constant}) }} ORDER BY ?s");
+            // COALESCE keeps the comparison out of the scan, on the exact general path.
+            let general = format!(
+                "SELECT ?s WHERE {{ ?s <http://ex/d> ?d FILTER(COALESCE(?d {op} {constant}, false)) }} ORDER BY ?s"
+            );
+            assert!(
+                sparq_engine::explain(&graph, &pushed).unwrap().contains("pushed into scan"),
+                "the first form must exercise the scan pushdown"
+            );
+            // An active temporal capacity budget disables every cached-instant
+            // shortcut, so this is the exact reference.
+            let exact = sparq_engine::QueryBudget {
+                temporal_year_range: Some((-100_000, 100_000)),
+                ..sparq_engine::QueryBudget::unlimited()
+            };
+            let reference = sparq_engine::query_with_budget(&graph, &general, &exact).unwrap().rows;
+            selected += reference.len();
+            let conjunct = format!(
+                "SELECT ?s WHERE {{ ?s <http://ex/d> ?d FILTER((?d {op} {constant}) && BOUND(?d)) }} ORDER BY ?s"
+            );
+            for text in [&pushed, &general, &conjunct] {
+                assert_eq!(sparq_engine::query(&graph, text).unwrap().rows, reference, "{op} {constant}: {text}");
+            }
+        }
+    }
+    assert!(selected > 0, "the corpus must exercise the comparisons");
+}
