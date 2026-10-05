@@ -6,7 +6,7 @@
 //! exact by construction (bit-pattern total-order comparison, not float math on
 //! the device), so it is asserted exactly too — including NaN/±inf/-0.0 edges.
 
-use sparq_gpu::{cpu, Gpu, GroupKeyOutOfRange, EMPTY_KEY, MAX_GROUPS};
+use sparq_gpu::{cpu, Gpu, GpuError, GroupKeyOutOfRange, EMPTY_KEY, MAX_GROUPS};
 
 /// Deterministic xorshift64* stream (same generator the wgpu spike used).
 struct Rng(u64);
@@ -63,7 +63,7 @@ fn filter_u32_matches_cpu() {
     ] {
         let expect = cpu::filter_count_u32(&col, lo, hi);
         assert_eq!(
-            gpu.filter_count_u32(&resident, lo, hi),
+            gpu.filter_count_u32(&resident, lo, hi).unwrap(),
             expect,
             "lo={lo} hi={hi}"
         );
@@ -111,7 +111,11 @@ fn filter_f64_matches_cpu_including_ieee_edges() {
         5e-324,
     ] {
         let expect = cpu::filter_count_f64_gt(&col, t);
-        assert_eq!(gpu.filter_count_f64_gt(&resident, t), expect, "t={t}");
+        assert_eq!(
+            gpu.filter_count_f64_gt(&resident, t).unwrap(),
+            expect,
+            "t={t}"
+        );
     }
 }
 
@@ -144,7 +148,7 @@ fn hash_probe_matches_cpu() {
     let probe_col = gpu.upload_u32(&probe);
 
     let expect = cpu::hash_probe(&slots, &probe);
-    assert_eq!(gpu.hash_probe(&table, &probe_col), expect);
+    assert_eq!(gpu.hash_probe(&table, &probe_col).unwrap(), expect);
 }
 
 #[test]
@@ -188,7 +192,7 @@ fn group_aggregate_rejects_out_of_range_keys_like_cpu() {
         let vals_col = gpu.upload_u32(&vals);
         assert_eq!(
             gpu.group_aggregate(&keys_col, &vals_col, groups),
-            Err(GroupKeyOutOfRange),
+            Err(GpuError::GroupKeyOutOfRange),
             "gpu, bad key {bad}"
         );
         assert_eq!(
@@ -249,7 +253,7 @@ fn differential_sweep_all_kernels() {
                 let b = rng.u32();
                 let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
                 assert_eq!(
-                    gpu.filter_count_u32(&resident, lo, hi),
+                    gpu.filter_count_u32(&resident, lo, hi).unwrap(),
                     cpu::filter_count_u32(&col, lo, hi),
                     "filter_u32 n={n} lo={lo} hi={hi}"
                 );
@@ -265,7 +269,7 @@ fn differential_sweep_all_kernels() {
             for _ in 0..4 {
                 let t = (rng.u32() as f64 - (u32::MAX / 2) as f64) / 1e3;
                 assert_eq!(
-                    gpu.filter_count_f64_gt(&resident, t),
+                    gpu.filter_count_f64_gt(&resident, t).unwrap(),
                     cpu::filter_count_f64_gt(&col, t),
                     "filter_f64 n={n} t={t}"
                 );
@@ -293,7 +297,7 @@ fn differential_sweep_all_kernels() {
             let table = gpu.upload_table(&slots);
             let probe_col = gpu.upload_u32(&probe);
             assert_eq!(
-                gpu.hash_probe(&table, &probe_col),
+                gpu.hash_probe(&table, &probe_col).unwrap(),
                 cpu::hash_probe(&slots, &probe),
                 "hash_probe n={n}"
             );
@@ -308,7 +312,7 @@ fn differential_sweep_all_kernels() {
             let vals_col = gpu.upload_u32(&vals);
             assert_eq!(
                 gpu.group_aggregate(&keys_col, &vals_col, groups),
-                cpu::group_aggregate(&keys, &vals, groups),
+                cpu::group_aggregate(&keys, &vals, groups).map_err(GpuError::from),
                 "group_aggregate n={n} groups={groups}"
             );
         }

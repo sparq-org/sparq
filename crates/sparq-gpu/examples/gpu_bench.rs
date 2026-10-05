@@ -36,6 +36,9 @@ impl Rng {
 }
 
 const PAR_CHUNK: usize = 64 * 1024;
+/// A kernel call only fails if the device stalls past `sparq_gpu::POLL_TIMEOUT`;
+/// the panic then unwinds safely (a stalled `Gpu` leaks rather than waits on drop).
+const GPU_OK: &str = "GPU kernel stalled past POLL_TIMEOUT";
 
 /// A named benchmark leg returning a checksum (asserted equal across legs).
 type Variant<'a> = (&'a str, Box<dyn FnMut() -> u64 + 'a>);
@@ -122,7 +125,7 @@ fn main() {
         let col: Vec<u32> = (0..n).map(|_| rng.u32()).collect();
         let (lo, hi) = (0u32, u32::MAX / 8);
         let resident = gpu.upload_u32(&col);
-        let _ = gpu.filter_count_u32(&resident, lo, hi); // warm pipeline/caches
+        let _ = gpu.filter_count_u32(&resident, lo, hi).expect(GPU_OK); // warm pipeline/caches
 
         let mut variants: Vec<Variant> = vec![
             ("cpu1", Box::new(|| cpu::filter_count_u32(&col, lo, hi))),
@@ -136,13 +139,13 @@ fn main() {
             ),
             (
                 "gpu resident",
-                Box::new(|| gpu.filter_count_u32(&resident, lo, hi)),
+                Box::new(|| gpu.filter_count_u32(&resident, lo, hi).expect(GPU_OK)),
             ),
             (
                 "gpu e2e",
                 Box::new(|| {
                     gpu.write_u32(&resident, &col);
-                    gpu.filter_count_u32(&resident, lo, hi)
+                    gpu.filter_count_u32(&resident, lo, hi).expect(GPU_OK)
                 }),
             ),
         ];
@@ -163,7 +166,7 @@ fn main() {
         let col: Vec<f64> = (0..n).map(|_| rng.u32() as f64 / 1e3).collect();
         let t = u32::MAX as f64 / 1e3 * 0.875;
         let resident = gpu.upload_f64(&col);
-        let _ = gpu.filter_count_f64_gt(&resident, t);
+        let _ = gpu.filter_count_f64_gt(&resident, t).expect(GPU_OK);
 
         let mut variants: Vec<Variant> = vec![
             ("cpu1", Box::new(|| cpu::filter_count_f64_gt(&col, t))),
@@ -177,13 +180,13 @@ fn main() {
             ),
             (
                 "gpu resident",
-                Box::new(|| gpu.filter_count_f64_gt(&resident, t)),
+                Box::new(|| gpu.filter_count_f64_gt(&resident, t).expect(GPU_OK)),
             ),
             (
                 "gpu e2e",
                 Box::new(|| {
                     gpu.write_f64(&resident, &col);
-                    gpu.filter_count_f64_gt(&resident, t)
+                    gpu.filter_count_f64_gt(&resident, t).expect(GPU_OK)
                 }),
             ),
         ];
@@ -212,7 +215,7 @@ fn main() {
         let slots = cpu::build_hash_table(&build_keys, &payloads);
         let table = gpu.upload_table(&slots);
         let probe_col = gpu.upload_u32(&probe);
-        let _ = gpu.hash_probe(&table, &probe_col);
+        let _ = gpu.hash_probe(&table, &probe_col).expect(GPU_OK);
 
         let mut variants: Vec<Variant> = vec![
             (
@@ -235,7 +238,7 @@ fn main() {
             (
                 "gpu resident",
                 Box::new(|| {
-                    let (m, s) = gpu.hash_probe(&table, &probe_col);
+                    let (m, s) = gpu.hash_probe(&table, &probe_col).expect(GPU_OK);
                     m.wrapping_add(s)
                 }),
             ),
@@ -244,7 +247,7 @@ fn main() {
                 Box::new(|| {
                     gpu.write_table(&table, &slots);
                     gpu.write_u32(&probe_col, &probe);
-                    let (m, s) = gpu.hash_probe(&table, &probe_col);
+                    let (m, s) = gpu.hash_probe(&table, &probe_col).expect(GPU_OK);
                     m.wrapping_add(s)
                 }),
             ),

@@ -45,9 +45,10 @@ pub const EMPTY_KEY: u32 = u32::MAX;
 pub const MAX_GROUPS: u32 = 512;
 
 /// Upper bound on how long [`Gpu`] waits for one kernel submission before
-/// giving up (panicking) instead of blocking the host thread forever. Every
-/// kernel is O(n) with bounded per-element work, so a healthy device finishes
-/// far inside this; hitting it means a wedged device. GitHub #4603.
+/// giving up with [`GpuError::Stalled`] instead of blocking the host thread
+/// forever. Every kernel is O(n) with bounded per-element work, so a healthy
+/// device finishes far inside this; hitting it means a wedged device.
+/// GitHub #4603.
 pub const POLL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// A GROUP BY key was `>= groups` (the documented `keys[i] < groups`
@@ -65,6 +66,47 @@ impl std::fmt::Display for GroupKeyOutOfRange {
 }
 
 impl std::error::Error for GroupKeyOutOfRange {}
+
+/// Why a [`Gpu`] kernel call failed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GpuError {
+    /// The device did not finish a submission within [`POLL_TIMEOUT`] (or the
+    /// poll itself failed). The [`Gpu`] is now permanently stalled: every later
+    /// kernel call returns this error without touching the device, and dropping
+    /// the [`Gpu`] leaks its device and queue instead of waiting on them (see
+    /// the `Drop` impl). Recreate a [`Gpu`] to retry.
+    Stalled,
+    /// See [`GroupKeyOutOfRange`] (only [`Gpu::group_aggregate`]).
+    GroupKeyOutOfRange,
+}
+
+impl std::fmt::Display for GpuError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            GpuError::Stalled => write!(
+                f,
+                "GPU device stalled: a submission did not complete within {POLL_TIMEOUT:?}"
+            ),
+            GpuError::GroupKeyOutOfRange => GroupKeyOutOfRange.fmt(f),
+        }
+    }
+}
+
+impl std::error::Error for GpuError {}
+
+impl From<GroupKeyOutOfRange> for GpuError {
+    fn from(_: GroupKeyOutOfRange) -> Self {
+        GpuError::GroupKeyOutOfRange
+    }
+}
+
+/// Keeps `handle`'s shared resource alive for the rest of the process by
+/// forgetting one extra strong reference to it, so its destructor never runs.
+/// Used on wgpu's `Device`/`Queue` (both `Arc`-backed `Clone` handles) once a
+/// submission has timed out — see `impl Drop for Gpu`.
+fn leak_handle<T: Clone>(handle: &T) {
+    std::mem::forget(handle.clone());
+}
 
 /// Validates a host-built open-addressing table before it reaches the device:
 /// the slot count must be a non-zero power of two (the kernel masks with
@@ -100,7 +142,31 @@ pub fn hash32(mut x: u32) -> u32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{check_table, hash32, EMPTY_KEY};
+    use super::{check_table, hash32, leak_handle, GpuError, GroupKeyOutOfRange, EMPTY_KEY};
+
+    #[test]
+    fn leak_handle_keeps_the_shared_resource_alive() {
+        let handle = std::rc::Rc::new(());
+        let weak = std::rc::Rc::downgrade(&handle);
+        leak_handle(&handle);
+        drop(handle);
+        // The destructor of the shared value never runs: a stalled wgpu queue is
+        // never torn down (and so never waited on).
+        assert!(weak.upgrade().is_some());
+    }
+
+    #[test]
+    fn gpu_error_display_and_from() {
+        assert_eq!(
+            GpuError::from(GroupKeyOutOfRange),
+            GpuError::GroupKeyOutOfRange
+        );
+        assert_eq!(
+            GpuError::GroupKeyOutOfRange.to_string(),
+            GroupKeyOutOfRange.to_string()
+        );
+        assert!(GpuError::Stalled.to_string().contains("stalled"));
+    }
 
     #[test]
     fn check_table_accepts_a_built_table() {
@@ -418,6 +484,24 @@ pub struct Gpu {
     filter_f64: wgpu::ComputePipeline,
     hash_probe: wgpu::ComputePipeline,
     group_agg: wgpu::ComputePipeline,
+    /// Set once a submission fails to complete within [`POLL_TIMEOUT`].
+    stalled: std::sync::atomic::AtomicBool,
+}
+
+/// GitHub #4603: a timed-out submission may still be pending on the device,
+/// and wgpu-core 30's `Drop for Queue` calls the HAL's `wait_for_idle()` with
+/// no timeout — so a plain drop of a stalled [`Gpu`] (including during panic
+/// unwinding) would block forever on the very submission we gave up on. Once
+/// stalled, we deliberately leak the device and queue instead: their
+/// destructors never run, and the driver reclaims them at process exit. A
+/// healthy [`Gpu`] drops normally.
+impl Drop for Gpu {
+    fn drop(&mut self) {
+        if self.stalled.load(std::sync::atomic::Ordering::Acquire) {
+            leak_handle(&self.queue);
+            leak_handle(&self.device);
+        }
+    }
 }
 
 impl Gpu {
@@ -483,6 +567,7 @@ impl Gpu {
             queue,
             info,
             max_storage_bytes,
+            stalled: std::sync::atomic::AtomicBool::new(false),
         })
     }
 
@@ -551,7 +636,7 @@ impl Gpu {
     // -- kernels --
 
     /// Counts elements with `lo <= v < hi` in a resident u32 column.
-    pub fn filter_count_u32(&self, col: &ColU32, lo: u32, hi: u32) -> u64 {
+    pub fn filter_count_u32(&self, col: &ColU32, lo: u32, hi: u32) -> Result<u64, GpuError> {
         let r = self.run(
             &self.filter_u32,
             &[col.buf.as_entire_binding()],
@@ -563,15 +648,15 @@ impl Gpu {
             },
             col.len,
             1,
-        );
-        u64::from(r[0])
+        )?;
+        Ok(u64::from(r[0]))
     }
 
     /// Counts elements with `v > t` (NaN-excluding, IEEE semantics, exact) in a
     /// resident f64 column.
-    pub fn filter_count_f64_gt(&self, col: &ColF64, t: f64) -> u64 {
+    pub fn filter_count_f64_gt(&self, col: &ColF64, t: f64) -> Result<u64, GpuError> {
         if t.is_nan() {
-            return 0; // v > NaN is false for every v; no dispatch needed
+            return Ok(0); // v > NaN is false for every v; no dispatch needed
         }
         let key = f64_order_key(if t == 0.0 { 0.0 } else { t }); // canonicalise -0.0
         let r = self.run(
@@ -585,15 +670,15 @@ impl Gpu {
             },
             col.len,
             1,
-        );
-        u64::from(r[0])
+        )?;
+        Ok(u64::from(r[0]))
     }
 
     /// Probes every id in `probe` against the resident `table`; returns
     /// (number of matches, exact u64 sum of matched payloads). Both are exact
     /// u64s on the device (lo/carry/hi atomic emulation) — duplicate build keys
     /// can push a high-fanout join past u32::MAX matches.
-    pub fn hash_probe(&self, table: &HashTable, probe: &ColU32) -> (u64, u64) {
+    pub fn hash_probe(&self, table: &HashTable, probe: &ColU32) -> Result<(u64, u64), GpuError> {
         let r = self.run(
             &self.hash_probe,
             &[table.buf.as_entire_binding(), probe.buf.as_entire_binding()],
@@ -605,22 +690,22 @@ impl Gpu {
             },
             probe.len,
             4,
-        );
-        (
+        )?;
+        Ok((
             (u64::from(r[1]) << 32) | u64::from(r[0]),
             (u64::from(r[3]) << 32) | u64::from(r[2]),
-        )
+        ))
     }
 
     /// COUNT + SUM GROUP BY over resident columns. `groups <= MAX_GROUPS`.
-    /// Returns `(count, sum)` per group, or [`GroupKeyOutOfRange`] if any
-    /// `keys[i] >= groups` (detected on the device, no host scan).
+    /// Returns `(count, sum)` per group, or [`GpuError::GroupKeyOutOfRange`] if
+    /// any `keys[i] >= groups` (detected on the device, no host scan).
     pub fn group_aggregate(
         &self,
         keys: &ColU32,
         vals: &ColU32,
         groups: u32,
-    ) -> Result<Vec<(u64, u64)>, GroupKeyOutOfRange> {
+    ) -> Result<Vec<(u64, u64)>, GpuError> {
         assert!(
             (1..=MAX_GROUPS).contains(&groups),
             "groups must be in 1..={MAX_GROUPS}"
@@ -637,10 +722,10 @@ impl Gpu {
             },
             keys.len,
             3 * groups as usize + 1,
-        );
+        )?;
         let g = groups as usize;
         if r[3 * g] != 0 {
-            return Err(GroupKeyOutOfRange);
+            return Err(GpuError::GroupKeyOutOfRange);
         }
         Ok((0..g)
             .map(|i| {
@@ -654,6 +739,8 @@ impl Gpu {
     /// Shared dispatch path: binds `inputs` at 0.., a zero-initialised result
     /// buffer of `result_words` u32s next, the uniform params last; dispatches a
     /// 2D-tiled grid covering `n` elements; reads the result back synchronously.
+    /// Fails with [`GpuError::Stalled`] (and marks `self` stalled) if the
+    /// submission does not complete within [`POLL_TIMEOUT`].
     fn run(
         &self,
         pipeline: &wgpu::ComputePipeline,
@@ -661,8 +748,12 @@ impl Gpu {
         params: Params,
         n: u32,
         result_words: usize,
-    ) -> Vec<u32> {
+    ) -> Result<Vec<u32>, GpuError> {
+        use std::sync::atomic::Ordering;
         use wgpu::util::DeviceExt;
+        if self.stalled.load(Ordering::Acquire) {
+            return Err(GpuError::Stalled);
+        }
         let result_bytes = (result_words * 4) as u64;
         // Freshly created buffers are zero-initialised per the WebGPU spec.
         let result = self.device.create_buffer(&wgpu::BufferDescriptor {
@@ -739,14 +830,21 @@ impl Gpu {
         // instead of `BufferView` directly — unwrap because a mapping error here is
         // a GPU protocol violation (we waited for the map to succeed above).
         // GitHub #4603: wait for this submission with a bound ([`POLL_TIMEOUT`])
-        // rather than `wait_indefinitely()`, so a wedged device fails loudly
-        // instead of hanging the host thread.
-        self.device
+        // rather than `wait_indefinitely()`, so a wedged device fails instead of
+        // hanging the host thread. The failure is a returned error, not a panic:
+        // we mark `self` stalled first so neither the caller's eventual drop nor
+        // a panic unwind runs wgpu's unbounded queue-idle wait (see `Drop`).
+        if self
+            .device
             .poll(wgpu::PollType::Wait {
                 submission_index: Some(submission),
                 timeout: Some(POLL_TIMEOUT),
             })
-            .expect("device poll failed or timed out");
+            .is_err()
+        {
+            self.stalled.store(true, Ordering::Release);
+            return Err(GpuError::Stalled);
+        }
         rx.recv()
             .expect("map_async callback dropped")
             .expect("readback map failed");
@@ -754,7 +852,7 @@ impl Gpu {
             bytemuck::cast_slice(&slice.get_mapped_range().expect("get_mapped_range failed"))
                 .to_vec();
         readback.unmap();
-        out
+        Ok(out)
     }
 }
 
