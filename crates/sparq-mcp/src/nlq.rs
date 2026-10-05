@@ -18,7 +18,7 @@
 //! `both_tools_accept_an_ungrounded_predicate`. Both tools derive their config from one
 //! shared base, and [`run_nl_query_with`] honours `check_dictionary` exactly as
 //! [`sparq_nlq::Nlq::ask`] does, so turning it on cannot make the tools diverge
-//! (GitHub #4833). [OPUS-5]
+//! (GitHub #4833).
 //!
 //! This is the second of the two complementary grounding tools chosen on the 2026-06-23
 //! design call (`shapes` is the no-LLM structured one): instead of handing the client a
