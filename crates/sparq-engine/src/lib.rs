@@ -2581,6 +2581,30 @@ mod tests {
         assert!(e.contains("query budget exceeded (max-rows)"), "got: {e}");
     }
 
+    /// #4239 — a row cap that trips on the streaming scan fast path must not close the
+    /// JSON document: the sink never receives the `]}}` terminator of a truncated result.
+    #[test]
+    fn budget_tripped_select_json_stream_leaves_the_document_unclosed() {
+        use std::ops::ControlFlow;
+        let b = QueryBudget { max_rows: Some(1), ..QueryBudget::unlimited() };
+        let mut body = String::new();
+        let e = query_json_stream_with_budget(&g(), "SELECT * WHERE { ?s ?p ?o }", &b, |c| {
+            body.push_str(&c);
+            ControlFlow::Continue(())
+        })
+        .unwrap_err();
+        assert!(e.contains("query budget exceeded (max-rows)"), "got: {e}");
+        assert!(!body.ends_with("]}}"), "truncated stream was closed: {body}");
+        // Under the cap, the same query streams a complete document.
+        let mut whole = String::new();
+        query_json_stream_with_budget(&g(), "SELECT * WHERE { ?s ?p ?o }", &QueryBudget::unlimited(), |c| {
+            whole.push_str(&c);
+            ControlFlow::Continue(())
+        })
+        .unwrap();
+        assert!(whole.ends_with("]}}"));
+    }
+
     // [GPT-6] Refusal precedes any output, including empty-result headers, on both
     // the scan fast path and the general evaluator. Cancellation works on wasm too.
     #[test]

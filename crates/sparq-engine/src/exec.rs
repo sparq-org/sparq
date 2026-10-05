@@ -2900,7 +2900,7 @@ fn single_pattern_scan_json_emit(
             // deadline-only budget, the now-past wall clock: sets the sticky flag the
             // caller's `budget::check(0)` converts into the budget error (a chunk skipped
             // above means the deadline is globally past, so this fires deterministically).
-            let _ = budget::exhausted(frags.iter().map(|(n, _)| n).sum());
+            let over = budget::exhausted(frags.iter().map(|(n, _)| n).sum());
             // Accumulate into `pending` and hand a chunk to `emit` at each flush boundary
             // (byte-identical concatenation to the old `emit_chunk` Vec layout — only the
             // chunk *boundaries* differ, and the concat is what the byte-identity contract
@@ -2922,8 +2922,15 @@ fn single_pattern_scan_json_emit(
                     return Some(());
                 }
             }
-            pending.push_str("]}}");
-            let _ = emit(pending);
+            // Never close the document over a result the budget cut short (#4239): the
+            // caller reports the abort, and a sink that saw `]}}` would hold a complete-
+            // looking but truncated body.
+            if !over {
+                pending.push_str("]}}");
+            }
+            if !pending.is_empty() {
+                let _ = emit(pending);
+            }
             return Some(());
         }
     }
@@ -2946,9 +2953,14 @@ fn single_pattern_scan_json_emit(
             return Some(());
         }
     }
-    let _ = budget::exhausted(written); // final row-count gate (sticky)
-    s.push_str("]}}");
-    let _ = emit(s);
+    // Final row-count gate (sticky). An exhausted budget leaves the document unclosed
+    // (#4239), as above.
+    if !budget::exhausted(written) {
+        s.push_str("]}}");
+    }
+    if !s.is_empty() {
+        let _ = emit(s);
+    }
     Some(())
 }
 
