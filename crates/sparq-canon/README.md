@@ -38,13 +38,10 @@ let map = sparq_canon::issued_identifiers(&[q]).unwrap();  // issuer map
   return a `CanonicalGraph` (sorted canonical N-Quads lines + re-parsed canonical
   triples) — what the ZK per-graph commitment pipeline consumes
   (`leaf_index = line index`).
-- **Fail-closed on poison graphs** — RDFC-1.0's pathological blow-ups hit the
-  HNDQ call-limit guard and surface as `CanonError::Canonicalization`; RDF 1.2
-  triple terms are outside the standard data model, so the standard paths fail
-  closed with `CanonError::TripleTerm` unless `rdf12-triple-terms` is enabled.
-  RDF 1.2 directional-language literals (`"…"@en--ltr`) are likewise outside
-  RDFC-1.0, so the standard paths fail closed with
-  `CanonError::DirectionalLiteral`; the `rdf12-triple-terms` profile handles them.
+- **Fail-closed on poison graphs** — RDFC-1.0's pathological blow-ups hit the HNDQ call-limit guard
+  (`CanonError::Canonicalization`). RDF 1.2 triple terms and directional literals (`"…"@en--ltr`) are outside
+  RDFC-1.0: the standard paths fail closed with `CanonError::TripleTerm` / `CanonError::DirectionalLiteral`
+  unless the `rdf12-triple-terms` profile is enabled.
 - **W3C-conformant** — validated against the official [rdf-canon test suite]
   (eval + issued-map + negative cases, SHA-256 and SHA-384) through this crate's
   own public API (`tests/rdf_canon_suite.rs`).
