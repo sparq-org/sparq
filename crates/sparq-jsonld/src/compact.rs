@@ -930,7 +930,12 @@ fn add_to_container_map(
         // compacted under the term's scoped context, which may alias @id differently and
         // reuse this alias for data; so the item is compacted again without its @id.
         if let Some(Json::Str(id)) = item.get("@id") {
-            map_key = Some(cur.ciri(id, None, false, false));
+            // The key must expand back to the id; a compacted form that reads as an
+            // alias (e.g. of @none) or another IRI keeps the full id instead.
+            let key = cur.ciri(id, None, false, false);
+            let round_trips = cur.active.expand_iri(&key, true, false).as_deref() == Some(id)
+                && cur.active.expand_iri(&key, false, true).as_deref() != Some("@none");
+            map_key = Some(if round_trips { key } else { id.clone() });
             let mut rest = item.clone();
             take_entry(&mut rest, "@id");
             compacted_item = compact_element(cur, Some(iap), &rest, env)?;

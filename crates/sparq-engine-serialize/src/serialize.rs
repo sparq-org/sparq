@@ -4021,6 +4021,16 @@ ex:bob
         );
     }
 
+    // An `@id` map key that would read back as an `@none` alias keeps the full IRI.
+    #[test]
+    fn compact_id_map_key_never_reads_as_none() {
+        let g0 = Graph::load_str(r#"<http://ex/a> <http://ex/p> <http://ex/none> ."#, "turtle").unwrap();
+        assert_compact_iso(
+            &g0,
+            r#"{"@base":"http://ex/","none":"@none","p":{"@id":"http://ex/p","@container":"@id"}}"#,
+        );
+    }
+
     // A predicate whose @vocab suffix has a colon keeps its full IRI.
     #[test]
     fn compact_keeps_colon_suffix_iris() {
