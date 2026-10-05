@@ -78,3 +78,15 @@ fn mixed_stored_and_computed_keys_order_exactly() {
     let desc = base.replace("ORDER BY ?k", "ORDER BY DESC(?k)");
     assert_eq!(subjects(&g, &desc), ["<http://ex/b>", "<http://ex/a>"]);
 }
+
+// Two computed decimals whose two-rounding f64 images were in REVERSE order: the smaller
+// value's image came out above the larger's, so the exact tie recheck never ran.
+#[test]
+fn computed_decimals_whose_f64_images_crossed_order_by_value() {
+    let g = Graph::load_str("", "turtle").unwrap();
+    let base = "SELECT ?v WHERE { VALUES ?v { 0.947 0.9469999999999999999999 } }";
+    let small = subjects(&g, &format!("{base} ORDER BY (?v + 0) LIMIT 1"));
+    assert!(small[0].contains("0.9469999999999999999999"), "{small:?}");
+    let large = subjects(&g, &format!("{base} ORDER BY DESC(?v + 0) LIMIT 1"));
+    assert!(!large[0].contains("0.94699"), "{large:?}");
+}
