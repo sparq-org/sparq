@@ -414,28 +414,29 @@ async fn ensure_container<S: Store>(store: &S, iri: &str) -> Result<(), String> 
     Ok(())
 }
 
-/// Whether `agent` may perform `action` on the resource at `uri`.
+/// Whether `agent` may perform `action` on the resource at `uri`; an error when the metadata the
+/// decision rests on cannot be read.
 pub async fn allowed<S: Store + 'static>(
     state: &LwsState<S>,
     action: Action,
     uri: &str,
     agent: &Agent,
-) -> bool {
+) -> Result<bool, crate::error::ServerError> {
     if state.cfg.open {
-        return true;
+        return Ok(true);
     }
     let subject = agent.subject.as_deref();
     if subject.is_some() && subject == state.cfg.owner.as_deref() {
-        return true;
+        return Ok(true);
     }
-    let meta = state.resource_meta(uri).await;
+    let meta = state.resource_meta(uri).await?;
     if subject.is_some() && subject == meta.creator.as_deref() {
-        return true;
+        return Ok(true);
     }
     // Content and metadata may not match (a write failed part way): fail closed for every
     // grant, whose constraints rest on the types and format.
     if meta.pending {
-        return false;
+        return Ok(false);
     }
     let candidates: Vec<Policy> = state
         .access
@@ -444,19 +445,13 @@ pub async fn allowed<S: Store + 'static>(
         .filter(|p| p.applies(subject, action, uri))
         .collect();
     if candidates.is_empty() {
-        return false;
+        return Ok(false);
     }
     let is_container = uri.ends_with('/');
     let format = if is_container {
         Some(LWS_JSON.to_string())
     } else {
-        state
-            .store
-            .meta(uri)
-            .await
-            .ok()
-            .flatten()
-            .map(|m| m.content_type)
+        state.store.meta(uri).await?.map(|m| m.content_type)
     };
     let mut types = vec![format!(
         "{LWS_NS}{}",
@@ -472,9 +467,9 @@ pub async fn allowed<S: Store + 'static>(
         format: format.as_deref(),
         types: &types,
     };
-    candidates
+    Ok(candidates
         .iter()
-        .any(|p| p.constraints.iter().all(|c| c.satisfied(&ctx)))
+        .any(|p| p.constraints.iter().all(|c| c.satisfied(&ctx))))
 }
 
 /// The AccessPolicy entries of `access` in a document scoped to `storage`, or `None` when they are

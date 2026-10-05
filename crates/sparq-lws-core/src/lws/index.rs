@@ -212,14 +212,15 @@ struct Seen {
     meta: ResourceMeta,
 }
 
-/// Every resource the agent may read now, with what a search sees of it, by URI. Each resource's
+/// Every resource the agent may read now, with what a search sees of it, by URI; an error when the
+/// metadata of one cannot be read. Each resource's
 /// shared lock is held from its permission check through the read of its metadata, so the types
 /// and relations collected are those of the state the check allowed (a delete and a re-create by
 /// someone else cannot slip in between); the lock is released before the next resource.
 async fn readable<S: Store + 'static>(
     state: &LwsState<S>,
     agent: &Agent,
-) -> BTreeMap<String, Seen> {
+) -> Result<BTreeMap<String, Seen>, crate::error::ServerError> {
     let mut out = BTreeMap::new();
     let mut stack = vec![state.cfg.storage()];
     let mut seen = BTreeSet::new();
@@ -239,10 +240,10 @@ async fn readable<S: Store + 'static>(
             }
         }
         let _guard = state.locks.read(&uri).await;
-        if !state.allowed(Action::Read, &uri, agent).await {
+        if !state.check(Action::Read, &uri, agent).await? {
             continue;
         }
-        let meta = state.resource_meta(&uri).await;
+        let meta = state.resource_meta(&uri).await?;
         let mut types = vec![format!(
             "{LWS_NS}{}",
             if is_container {
@@ -258,7 +259,7 @@ async fn readable<S: Store + 'static>(
         }
         out.insert(uri, Seen { types, meta });
     }
-    out
+    Ok(out)
 }
 
 pub async fn handle<S: Store + 'static>(
@@ -351,7 +352,12 @@ pub async fn handle<S: Store + 'static>(
         return problem(StatusCode::NOT_ACCEPTABLE, None);
     };
     let media_type = media_type.as_str();
-    let resources = readable(state, agent).await;
+    let resources = match readable(state, agent).await {
+        Ok(r) => r,
+        Err(e) => {
+            return problem(StatusCode::INTERNAL_SERVER_ERROR, Some(&e.to_string()));
+        }
+    };
     let mut links = Vec::new();
     let mut content_location = None;
     let doc = if search {
@@ -532,7 +538,7 @@ mod tests {
             let (state, uri) = (state.clone(), uri.clone());
             let (creator, ty) = (creator.to_string(), ty.to_string());
             async move {
-                let mut meta = state.resource_meta(&uri).await;
+                let mut meta = state.resource_meta(&uri).await.unwrap();
                 meta.creator = Some(creator);
                 meta.types = vec![ty];
                 state.put_resource_meta(&uri, &meta).await.unwrap();

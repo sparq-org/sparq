@@ -279,6 +279,17 @@ impl Notifier {
             .collect()
     }
 
+    /// Whether the subscription `id` still stands: not cancelled (deleted, or deactivated after
+    /// failed deliveries) and not expired.
+    fn is_live(&self, id: &str) -> bool {
+        let now = jose::now_secs();
+        self.subs
+            .read()
+            .expect("lock")
+            .get(id)
+            .is_some_and(|s| !s.expired(now))
+    }
+
     /// Remove a subscription from the store, then from memory. A store failure leaves it in place
     /// (a cancelled subscription whose stored copy survived would come back at the next boot) and
     /// is returned.
@@ -396,7 +407,14 @@ impl Notifier {
             let Ok(_worker) = workers.acquire_owned().await else {
                 return;
             };
-            let status = attempt_delivery(&state, &target, &body, &keyid).await;
+            // Waiting for the permits (and between retries) can take a while; the subscription is
+            // checked again before every attempt, and work for one that went meanwhile is
+            // discarded.
+            let Some(status) =
+                attempt_delivery(&state, &target, &body, &keyid, subscription.as_deref()).await
+            else {
+                return;
+            };
             let Some(id) = subscription else { return };
             let notifier = &state.notify;
             if status.is_some_and(|s| s.is_success()) {
@@ -452,15 +470,21 @@ impl Notifier {
 }
 
 /// POST `body` to `target` up to [`DELIVERY_ATTEMPTS`] times, re-signing each time; the last
-/// status, or `None` when the inbox could not be reached at all.
+/// status, or `Some(None)` when the inbox could not be reached at all. `None` when the
+/// `subscription` the delivery is for was cancelled or expired before an attempt: nothing more is
+/// sent for it.
 async fn attempt_delivery<S: Store + 'static>(
     state: &LwsState<S>,
     target: &url::Url,
     body: &Bytes,
     keyid: &str,
-) -> Option<StatusCode> {
+    subscription: Option<&str>,
+) -> Option<Option<StatusCode>> {
     let mut last = None;
     for attempt in 1..=DELIVERY_ATTEMPTS {
+        if subscription.is_some_and(|id| !state.notify.is_live(id)) {
+            return None;
+        }
         let signed = sign(&state.cfg.notify_key, target, body, keyid, jose::now_secs());
         let result = state
             .notify
@@ -480,7 +504,7 @@ async fn attempt_delivery<S: Store + 'static>(
         }
         tokio::time::sleep(RETRY_DELAY).await;
     }
-    last
+    Some(last)
 }
 
 /// The Notification envelope around one activity (section 10.2): the LWS and Activity Streams
@@ -1073,6 +1097,80 @@ mod tests {
             .notify
             .deliver(&state, &inbox, json!({"type": ["Update"]}), None);
         assert_eq!(state.notify.dropped(), 16);
+    }
+
+    /// Review finding: a delivery waiting for its inbox's turn or a worker, and a retry, never
+    /// looked at the subscription again, so one cancelled (or expired) meanwhile still heard of
+    /// the change.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn cancelled_subscriptions_hear_nothing_more() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let total = Arc::new(AtomicUsize::new(0));
+        let app = {
+            let total = total.clone();
+            axum::Router::new().route(
+                "/inbox",
+                axum::routing::post(move || {
+                    let total = total.clone();
+                    async move {
+                        total.fetch_add(1, Ordering::SeqCst);
+                        tokio::time::sleep(Duration::from_millis(300)).await;
+                        StatusCode::SERVICE_UNAVAILABLE
+                    }
+                }),
+            )
+        };
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.ok() });
+        let mut cfg = LwsConfig::new("http://localhost:3000");
+        cfg.open = true;
+        cfg.allow_insecure_fetch = true;
+        cfg.delivery = DeliveryLimits {
+            queue: 8,
+            workers: 4,
+            per_inbox: 1,
+        };
+        let state = LwsState::new(test_store::FlakyStore::new(), cfg)
+            .await
+            .unwrap();
+        let inbox = format!("http://{addr}/inbox");
+        for id in ["gone", "expired"] {
+            subscribe_root(&state, id).await;
+            // The first is in flight (and will fail, so it would be retried); the second waits
+            // for the inbox's turn.
+            for _ in 0..2 {
+                let activity = json!({"type": ["Update"]});
+                state.notify.deliver(&state, &inbox, activity, Some(id));
+            }
+            for _ in 0..100 {
+                if total.load(Ordering::SeqCst) == 1 {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            assert_eq!(total.load(Ordering::SeqCst), 1, "{id}");
+            if id == "gone" {
+                let path = format!("{SUBSCRIPTIONS_PATH}{id}");
+                let delete = test_store::request(Method::DELETE, &path, &[], "");
+                let resp = handle(&state, &delete, &Agent::anonymous()).await;
+                assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+            } else {
+                let mut subs = state.notify.subs.write().unwrap();
+                subs.get_mut(id).unwrap().expires_at = Some(jose::now_secs() - 1);
+            }
+            // Past the retry delay: neither the retry nor the queued delivery was sent.
+            tokio::time::sleep(RETRY_DELAY + Duration::from_millis(700)).await;
+            assert_eq!(total.load(Ordering::SeqCst), 1, "{id}");
+            for _ in 0..100 {
+                if state.notify.admitted.load(Ordering::SeqCst) == 0 {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            assert_eq!(state.notify.admitted.load(Ordering::SeqCst), 0, "{id}");
+            total.store(0, Ordering::SeqCst);
+        }
     }
 
     #[tokio::test]

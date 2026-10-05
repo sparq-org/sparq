@@ -538,24 +538,47 @@ impl<S: Store + 'static> LwsState<S> {
     }
 
     /// Whether `agent` may perform `action` on the resource at `uri` (see [`access::allowed`]).
+    /// Metadata that cannot be read (a backend failure, or stored metadata that does not parse)
+    /// denies: the decision rests on it. A handler that can answer with an error uses
+    /// [`LwsState::check`] instead.
     pub async fn allowed(&self, action: access::Action, uri: &str, agent: &Agent) -> bool {
+        access::allowed(self, action, uri, agent)
+            .await
+            .unwrap_or(false)
+    }
+
+    /// As [`LwsState::allowed`], with metadata that cannot be read an error rather than a denial.
+    pub async fn check(
+        &self,
+        action: access::Action,
+        uri: &str,
+        agent: &Agent,
+    ) -> Result<bool, crate::error::ServerError> {
         access::allowed(self, action, uri, agent).await
     }
 
-    /// The LWS metadata stored beside `iri`, or the default when there is none.
-    pub async fn resource_meta(&self, iri: &str) -> ResourceMeta {
+    /// The LWS metadata stored beside `iri`, or the default when there is none. Stored metadata
+    /// that does not parse is an error, never the default: that would quietly drop the creator,
+    /// the types and the links it records.
+    pub async fn resource_meta(
+        &self,
+        iri: &str,
+    ) -> Result<ResourceMeta, crate::error::ServerError> {
         match self.store.read(&meta_key(iri)).await {
-            Ok(r) => serde_json::from_slice(&r.body).unwrap_or_default(),
-            Err(_) => ResourceMeta::default(),
+            Ok(r) => parse_meta(iri, &r.body),
+            Err(crate::error::ServerError::NotFound) => Ok(ResourceMeta::default()),
+            Err(e) => Err(e),
         }
     }
 
+    /// Store `meta` beside `iri`. What is written is checked to read back first (see
+    /// [`encode_meta`]), so metadata that could not be read again is never stored.
     pub async fn put_resource_meta(
         &self,
         iri: &str,
         meta: &ResourceMeta,
     ) -> Result<(), crate::error::ServerError> {
-        let body = serde_json::to_vec(meta).unwrap_or_default();
+        let body = encode_meta(meta)?;
         self.store
             .write(&meta_key(iri), Bytes::from(body), JSON)
             .await
@@ -647,6 +670,26 @@ impl LwsRequest {
             })
             .filter(|v| !v.is_empty())
     }
+}
+
+/// Stored metadata of `iri`, parsed; metadata that does not parse is an error.
+pub(crate) fn parse_meta(
+    iri: &str,
+    body: &[u8],
+) -> Result<ResourceMeta, crate::error::ServerError> {
+    serde_json::from_slice(body).map_err(|e| {
+        crate::error::ServerError::Storage(format!("the metadata of {iri} is malformed: {e}"))
+    })
+}
+
+/// `meta` serialized, once it is known to parse again: JSON that nests deeper than the parser
+/// accepts (a linkset extension nested to its limit, one level deeper once inside the metadata)
+/// serializes fine but never reads back.
+pub(crate) fn encode_meta(meta: &ResourceMeta) -> Result<Vec<u8>, crate::error::ServerError> {
+    let body = serde_json::to_vec(meta)
+        .map_err(|e| crate::error::ServerError::Storage(format!("metadata: {e}")))?;
+    parse_meta("the resource", &body)?;
+    Ok(body)
 }
 
 /// Build the LWS router over `store`.
@@ -1081,6 +1124,10 @@ pub(crate) mod test_store {
         pub write_budget: Arc<std::sync::Mutex<Option<usize>>>,
         /// `exists` fails with a backend error.
         pub fail_exists: Arc<AtomicBool>,
+        /// `exists` of this IRI alone fails with a backend error.
+        pub fail_exists_of: Arc<std::sync::Mutex<Option<String>>>,
+        /// `exists` reports every IRI that starts with this present.
+        pub occupied: Arc<std::sync::Mutex<Option<String>>>,
         /// `create_in_container` never completes, as on a stalled backend.
         pub hang_create: Arc<AtomicBool>,
         /// `exists` reports this IRI absent, as if it was checked just before the IRI appeared.
@@ -1097,6 +1144,8 @@ pub(crate) mod test_store {
                 fail_delete: Arc::new(AtomicBool::new(false)),
                 fail_exists: Arc::new(AtomicBool::new(false)),
                 hang_create: Arc::new(AtomicBool::new(false)),
+                fail_exists_of: Default::default(),
+                occupied: Default::default(),
                 fail_delete_of: Default::default(),
                 fail_write_of: Default::default(),
                 write_budget: Default::default(),
@@ -1121,8 +1170,16 @@ pub(crate) mod test_store {
             if self.fail_exists.load(Ordering::SeqCst) {
                 return Err(ServerError::Storage("disk on fire".into()));
             }
+            if self.fail_exists_of.lock().unwrap().as_deref() == Some(iri) {
+                return Err(ServerError::Storage("disk on fire".into()));
+            }
             if self.hide.lock().unwrap().as_deref() == Some(iri) {
                 return Ok(false);
+            }
+            if let Some(p) = self.occupied.lock().unwrap().as_deref() {
+                if iri.starts_with(p) {
+                    return Ok(true);
+                }
             }
             self.inner.exists(iri).await
         }

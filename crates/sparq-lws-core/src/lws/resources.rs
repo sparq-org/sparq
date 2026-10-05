@@ -90,8 +90,10 @@ pub async fn handle<S: Store + 'static>(
             // check.
             return problem(StatusCode::NOT_FOUND, None);
         }
-        if !state.allowed(action, &uri, agent).await {
-            return state.deny(agent);
+        match state.check(action, &uri, agent).await {
+            Ok(true) => {}
+            Ok(false) => return state.deny(agent),
+            Err(e) => return store_error(e),
         }
     }
     match req.method {
@@ -115,10 +117,10 @@ async fn recheck<S: Store + 'static>(
     uri: &str,
     agent: &Agent,
 ) -> Result<(), Response> {
-    if state.allowed(action, uri, agent).await {
-        Ok(())
-    } else {
-        Err(state.deny(agent))
+    match state.check(action, uri, agent).await {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(state.deny(agent)),
+        Err(e) => Err(store_error(e)),
     }
 }
 
@@ -300,7 +302,10 @@ fn resource_links<S: Store>(
 /// Record that a container's membership or a member changed.
 async fn touch_container<S: Store + 'static>(state: &LwsState<S>, container: &str) {
     let _guard = state.locks.lock(container).await;
-    let mut meta = state.resource_meta(container).await;
+    // Metadata that cannot be read is left as it is, not replaced by a default.
+    let Ok(mut meta) = state.resource_meta(container).await else {
+        return;
+    };
     meta.modified_ms = Some(now_ms());
     meta.version = Some(jose::random_id());
     let _ = state.put_resource_meta(container, &meta).await;
@@ -485,7 +490,10 @@ async fn read<S: Store + 'static>(
     if uri.ends_with('/') {
         return read_container(state, req, uri, &meta).await;
     }
-    let types = state.resource_meta(uri).await.types;
+    let types = match state.resource_meta(uri).await {
+        Ok(m) => m.types,
+        Err(e) => return store_error(e),
+    };
     let etag = quoted(&meta.etag);
     let modified = meta.last_modified.map(|t| to_secs(epoch_ms(t)));
     let mut resp = match evaluate(&req.headers, Some(&etag), modified, true) {
@@ -661,7 +669,7 @@ async fn members<S: Store + 'static>(
         item.insert("id".into(), Value::String(child.clone()));
         if child.ends_with('/') {
             item.insert("type".into(), Value::String("Container".into()));
-            let cmeta = state.resource_meta(&child).await;
+            let cmeta = state.resource_meta(&child).await?;
             let modified = cmeta
                 .modified_ms
                 .or(meta.last_modified.map(epoch_ms))
@@ -706,7 +714,10 @@ async fn read_container<S: Store + 'static>(
         Ok(m) => m,
         Err(e) => return store_error(e),
     };
-    let cmeta = state.resource_meta(uri).await;
+    let cmeta = match state.resource_meta(uri).await {
+        Ok(m) => m,
+        Err(e) => return store_error(e),
+    };
     // The entity tag covers the whole listing: every field of every member it represents (a
     // member container's `modified` included, which moves when something is created in it, while
     // that container's own stored tag does not), and each member's own tag.
@@ -1155,7 +1166,9 @@ async fn create<S: Store + 'static>(
 }
 
 /// A member name in `parent` that is free (neither `name` nor `name/` exists): `base_name`, else
-/// `base_name-2`, `-3`, ... and past 50 a random suffix. Run under the container's lock.
+/// `base_name-2`, `-3`, ... and past [`NUMBERED_NAMES`] a random suffix, [`RANDOM_NAMES`] times,
+/// then a 409. A reserved name ([`RESERVED_ROOT_NAMES`]) is never free. Run under the container's
+/// lock.
 async fn free_name<S: Store + 'static>(
     state: &LwsState<S>,
     parent: &str,
@@ -1166,24 +1179,42 @@ async fn free_name<S: Store + 'static>(
         Ok(false) => return Err(problem(StatusCode::NOT_FOUND, None)),
         Err(e) => return Err(store_error(e)),
     }
+    // The probes are bounded: the container's lock is held throughout, so a search that never
+    // ends would hold every create in the container. A backend failure is an error, not a name
+    // that is taken.
+    let at_root = parent == state.cfg.storage();
     let mut name = base_name.to_string();
-    let mut n = 1;
-    loop {
+    for n in 2..=(NUMBERED_NAMES + RANDOM_NAMES + 1) {
         let a = format!("{parent}{name}");
         let b = format!("{parent}{name}/");
-        let taken = state.store.exists(&a).await.unwrap_or(true)
-            || state.store.exists(&b).await.unwrap_or(true);
+        let taken = (at_root && RESERVED_ROOT_NAMES.contains(&name.as_str()))
+            || state.store.exists(&a).await.map_err(store_error)?
+            || state.store.exists(&b).await.map_err(store_error)?;
         if !taken {
             return Ok(name);
         }
-        n += 1;
-        name = if n > 50 {
+        name = if n > NUMBERED_NAMES {
             format!("{base_name}-{}", jose::random_id())
         } else {
             format!("{base_name}-{n}")
         };
     }
+    Err(problem(
+        StatusCode::CONFLICT,
+        Some("no free name was found for the new member"),
+    ))
 }
+
+/// How many numbered names (`name-2` …) a create tries after the one asked for.
+const NUMBERED_NAMES: usize = 50;
+/// How many random suffixes it then tries before it gives up.
+const RANDOM_NAMES: usize = 8;
+
+/// Names a member of the root container cannot have: the server answers those paths itself (the
+/// liveness and readiness probes, mounted ahead of the resources), so a resource there could
+/// never be read. Everything else the server mounts at the root is under `/.well-known/` or
+/// `/.lws/`, which no member name can begin with (a name never starts with a dot).
+const RESERVED_ROOT_NAMES: [&str; 2] = ["livez", "readyz"];
 
 // ---- update ----
 
@@ -1258,14 +1289,14 @@ fn lock_order(a: &str, b: &str) -> std::cmp::Ordering {
     b.len().cmp(&a.len()).then_with(|| a.cmp(b))
 }
 
-/// The metadata stored beside `uri`: `None` when there is none, an error when the store fails
-/// (unlike [`LwsState::resource_meta`], which reads a failure as "none").
+/// The metadata stored beside `uri`: `None` when there is none, an error when the store fails or
+/// what is stored does not parse.
 async fn stored_meta<S: Store + 'static>(
     state: &LwsState<S>,
     uri: &str,
 ) -> Result<Option<ResourceMeta>, ServerError> {
     match state.store.read(&meta_key(uri)).await {
-        Ok(r) => Ok(Some(serde_json::from_slice(&r.body).unwrap_or_default())),
+        Ok(r) => super::parse_meta(uri, &r.body).map(Some),
         Err(ServerError::NotFound) => Ok(None),
         Err(e) => Err(e),
     }
@@ -1442,11 +1473,13 @@ async fn update<S: Store + 'static>(
 async fn changed<S: Store + 'static>(state: &LwsState<S>, uri: &str) {
     if let Some(parent) = parent_of(uri, &state.cfg.storage()) {
         let _guard = state.locks.lock(&parent).await;
-        let mut meta = state.resource_meta(&parent).await;
-        // A member's listed fields (format, size, modified) changed, so the listing did.
-        meta.modified_ms = Some(now_ms());
-        meta.version = Some(jose::random_id());
-        let _ = state.put_resource_meta(&parent, &meta).await;
+        // A member's listed fields (format, size, modified) changed, so the listing did. Metadata
+        // that cannot be read is left as it is, not replaced by a default.
+        if let Ok(mut meta) = state.resource_meta(&parent).await {
+            meta.modified_ms = Some(now_ms());
+            meta.version = Some(jose::random_id());
+            let _ = state.put_resource_meta(&parent, &meta).await;
+        }
     }
     state
         .notify
@@ -1848,8 +1881,8 @@ async fn patch_read_check<S: Store + 'static>(
     uri: &str,
     agent: &Agent,
 ) -> Result<(), Response> {
-    if patch.reads_content() && !state.allowed(Action::Read, uri, agent).await {
-        return Err(state.deny(agent));
+    if patch.reads_content() {
+        return recheck(state, Action::Read, uri, agent).await;
     }
     Ok(())
 }
@@ -2396,10 +2429,13 @@ async fn linkset<S: Store + 'static>(
     } else {
         Action::Modify
     };
-    if !state.allowed(action, uri, agent).await {
-        return state.deny(agent);
+    if let Err(r) = recheck(state, action, uri, agent).await {
+        return r;
     }
-    let mut meta = state.resource_meta(uri).await;
+    let mut meta = match state.resource_meta(uri).await {
+        Ok(m) => m,
+        Err(e) => return store_error(e),
+    };
     let document = match linkset_document(state, uri, &meta).await {
         Ok(d) => d,
         Err(e) => return store_error(e),
@@ -2453,6 +2489,15 @@ async fn linkset<S: Store + 'static>(
             meta.links = links_of(&user, uri);
             meta.linkset = Some(user);
             meta.linkset_etag = None;
+            // The linkset is checked whole, as it will be stored: inside the metadata it nests a
+            // level deeper than in the patched document, and metadata that does not read back
+            // would be lost.
+            if super::encode_meta(&meta).is_err() {
+                return problem(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    Some("the linkset nests too deeply to be stored"),
+                );
+            }
             if let Err(e) = state.put_resource_meta(uri, &meta).await {
                 return store_error(e);
             }
@@ -2923,7 +2968,7 @@ mod tests {
         assert_eq!(e["describedby"][0]["href"], "https://ex.org/schema");
         assert!(e.get("license").is_none());
         // The links the type index matches follow the document: the license is gone from both.
-        let m = st.resource_meta(&uri).await;
+        let m = st.resource_meta(&uri).await.unwrap();
         assert!(!m.links.contains_key("license"), "{:?}", m.links);
         assert_eq!(
             m.links["describedby"],
@@ -2981,7 +3026,7 @@ mod tests {
         .await;
         assert_eq!(r.status(), StatusCode::NO_CONTENT);
         assert!(r.headers().get("preference-applied").is_none());
-        let m = st.resource_meta(&uri).await;
+        let m = st.resource_meta(&uri).await.unwrap();
         assert_eq!(
             m.types,
             vec![
@@ -3005,7 +3050,7 @@ mod tests {
         )
         .await;
         assert_eq!(hdr(&r, "preference-applied"), "set-linkset");
-        let m = st.resource_meta(&uri).await;
+        let m = st.resource_meta(&uri).await.unwrap();
         assert_eq!(
             m.types,
             vec![
@@ -3047,6 +3092,7 @@ mod tests {
         assert_eq!(
             st.resource_meta(&uri)
                 .await
+                .unwrap()
                 .links
                 .keys()
                 .collect::<Vec<_>>(),
@@ -3066,7 +3112,7 @@ mod tests {
         )
         .await;
         assert_eq!(r.status(), StatusCode::NO_CONTENT);
-        let m = st.resource_meta(&uri).await;
+        let m = st.resource_meta(&uri).await.unwrap();
         assert_eq!(
             m.links.keys().collect::<Vec<_>>(),
             vec!["author", "license"]
@@ -3367,7 +3413,7 @@ mod tests {
         let r = create(st, &request("POST", "/", &h, "x"), &owner, parent).await;
         assert_eq!(r.status(), StatusCode::CREATED);
         let location = hdr(&r, "location");
-        let mut meta = st.resource_meta(&location).await;
+        let mut meta = st.resource_meta(&location).await.unwrap();
         meta.creator = who.subject.clone();
         st.put_resource_meta(&location, &meta).await.unwrap();
         location
@@ -3679,6 +3725,7 @@ mod tests {
         assert!(st
             .resource_meta(&x)
             .await
+            .unwrap()
             .types
             .contains(&"https://e.example/T".to_string()));
         // A container holds its spellings' locks as well: a held `y/` delays a POST of `y`.
@@ -3711,7 +3758,7 @@ mod tests {
         let set_creator = |uri: String, who: &'static str| {
             let st = st.clone();
             async move {
-                let mut meta = st.resource_meta(&uri).await;
+                let mut meta = st.resource_meta(&uri).await.unwrap();
                 meta.creator = Some(who.to_string());
                 st.put_resource_meta(&uri, &meta).await.unwrap();
             }
@@ -3779,7 +3826,7 @@ mod tests {
             "location",
         );
         // Make the container's modified time old, so a change now is visible at second precision.
-        let mut meta = st.resource_meta(&c).await;
+        let mut meta = st.resource_meta(&c).await.unwrap();
         meta.modified_ms = Some(1_000_000);
         st.put_resource_meta(&c, &meta).await.unwrap();
         let root_tag = hdr(
@@ -3965,7 +4012,7 @@ mod tests {
         let uri = hdr(&r, "location");
         let p = uri.strip_prefix(base.as_str()).unwrap().to_string();
         let types = |st: LwsState<super::super::test_store::FlakyStore>, uri: String| async move {
-            st.resource_meta(&uri).await.types
+            st.resource_meta(&uri).await.unwrap().types
         };
         let before = types(st.clone(), uri.clone()).await;
         assert!(before.contains(&"https://e.example/Public".to_string()));
@@ -4182,7 +4229,7 @@ mod tests {
             handle(&st, &put(&secret), &owner).await.status(),
             StatusCode::NO_CONTENT
         );
-        assert!(!st.resource_meta(&secret).await.pending);
+        assert!(!st.resource_meta(&secret).await.unwrap().pending);
         assert_eq!(
             handle(&st, &get(&secret), &stranger).await.status(),
             StatusCode::OK
@@ -4282,7 +4329,7 @@ mod tests {
         };
         // Bob's resource; its delete cannot remove the metadata: a 500, not a quiet 204.
         assert_eq!(post(owner.clone()).await.status(), StatusCode::CREATED);
-        let mut meta = st.resource_meta(&x).await;
+        let mut meta = st.resource_meta(&x).await.unwrap();
         meta.creator = bob.subject.clone();
         st.put_resource_meta(&x, &meta).await.unwrap();
         *store.fail_delete_of.lock().unwrap() = Some(meta_key(&x));
@@ -4290,7 +4337,7 @@ mod tests {
         assert_eq!(r.status(), StatusCode::INTERNAL_SERVER_ERROR);
         *store.fail_delete_of.lock().unwrap() = None;
         assert!(!st.store.exists(&x).await.unwrap());
-        assert_eq!(st.resource_meta(&x).await.creator, bob.subject);
+        assert_eq!(st.resource_meta(&x).await.unwrap().creator, bob.subject);
         // A create at the IRI whose metadata write fails creates nothing under Bob's metadata.
         *store.fail_write_of.lock().unwrap() = Some(meta_key(&x));
         assert!(post(owner.clone()).await.status().is_server_error());
@@ -4298,7 +4345,7 @@ mod tests {
         assert!(!st.store.exists(&x).await.unwrap());
         // One that succeeds replaces it: the new content is the owner's, not Bob's.
         assert_eq!(post(owner.clone()).await.status(), StatusCode::CREATED);
-        assert_eq!(st.resource_meta(&x).await.creator, owner.subject);
+        assert_eq!(st.resource_meta(&x).await.unwrap().creator, owner.subject);
         let r = handle(&st, &req(Method::GET, &px, &[], ""), &bob).await;
         assert_eq!(r.status(), StatusCode::FORBIDDEN);
     }
@@ -4338,27 +4385,181 @@ mod tests {
         };
         // Bob's metadata outlives his resource (its removal failed).
         assert_eq!(post(owner.clone()).await.status(), StatusCode::CREATED);
-        let mut meta = st.resource_meta(&x).await;
+        let mut meta = st.resource_meta(&x).await.unwrap();
         meta.creator = bob.subject.clone();
         st.put_resource_meta(&x, &meta).await.unwrap();
         st.store.delete(&x, Some(&st.cfg.storage())).await.unwrap();
-        assert_eq!(st.resource_meta(&x).await.creator, bob.subject);
+        assert_eq!(st.resource_meta(&x).await.unwrap().creator, bob.subject);
         // A create whose content write stalls, and whose client goes away.
         store.hang_create.store(true, Ordering::SeqCst);
         let cancelled = tokio::time::timeout(Duration::from_millis(50), post(owner.clone())).await;
         assert!(cancelled.is_err());
         store.hang_create.store(false, Ordering::SeqCst);
         assert!(!st.store.exists(&x).await.unwrap());
-        assert_eq!(st.resource_meta(&x).await.creator, owner.subject);
+        assert_eq!(st.resource_meta(&x).await.unwrap().creator, owner.subject);
         // The container is not left locked: the next create goes through, whole and the owner's.
         let r = tokio::time::timeout(Duration::from_secs(5), post(owner.clone()))
             .await
             .expect("the container stayed locked");
         assert_eq!(r.status(), StatusCode::CREATED);
         assert_eq!(hdr(&r, "location"), x);
-        assert_eq!(st.resource_meta(&x).await.creator, owner.subject);
+        assert_eq!(st.resource_meta(&x).await.unwrap().creator, owner.subject);
         let r = handle(&st, &req(Method::GET, &px, &[], ""), &bob).await;
         assert_eq!(r.status(), StatusCode::FORBIDDEN);
+    }
+
+    /// Review finding: a linkset nested to the parser's limit validated, but stored inside the
+    /// metadata it nested one level deeper, so the metadata never read back and every later read
+    /// took the defaults (no creator, no types, no links).
+    #[tokio::test]
+    async fn a_linkset_too_deep_to_store_is_refused() {
+        let st = state().await;
+        let uri = post(&st, "deep.txt", "text/plain", "x", &[]).await;
+        let mut meta = st.resource_meta(&uri).await.unwrap();
+        meta.creator = Some("https://bob.example/#me".into());
+        meta.types = vec!["https://e.example/T".into()];
+        st.put_resource_meta(&uri, &meta).await.unwrap();
+        let p = format!("{}{META_SUFFIX}", path_of(&uri));
+        // The deepest patch the request parser accepts.
+        let body = |depth: usize| {
+            format!(
+                r#"{{"linkset":[{{"anchor":"{uri}","https://e.example/rel":[{{"href":"x","ext":{}1{}}}]}}]}}"#,
+                "[".repeat(depth),
+                "]".repeat(depth)
+            )
+        };
+        let depth = (1..200)
+            .take_while(|d| serde_json::from_str::<Value>(&body(*d)).is_ok())
+            .last()
+            .unwrap();
+        let r = call(
+            &st,
+            "PATCH",
+            &p,
+            &[("content-type", MERGE_PATCH)],
+            &body(depth),
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let kept = st.resource_meta(&uri).await.unwrap();
+        assert_eq!(kept.creator, meta.creator);
+        assert_eq!(kept.types, meta.types);
+        // One that fits as stored is taken, and reads back.
+        let r = call(&st, "PATCH", &p, &[("content-type", MERGE_PATCH)], &body(8)).await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        assert_eq!(st.resource_meta(&uri).await.unwrap().creator, meta.creator);
+    }
+
+    /// Review finding: stored metadata that did not parse was read as the defaults.
+    #[tokio::test]
+    async fn malformed_stored_metadata_is_an_error() {
+        let st = state().await;
+        let uri = post(&st, "m.txt", "text/plain", "x", &[]).await;
+        st.store
+            .write(
+                &meta_key(&uri),
+                Bytes::from("{not json"),
+                "application/json",
+            )
+            .await
+            .unwrap();
+        assert!(st.resource_meta(&uri).await.is_err());
+        for p in [
+            path_of(&uri).to_string(),
+            format!("{}{META_SUFFIX}", path_of(&uri)),
+        ] {
+            let r = call(&st, "GET", &p, &[], "").await;
+            assert_eq!(r.status(), StatusCode::INTERNAL_SERVER_ERROR, "{p}");
+        }
+        // A permission check that rests on it denies (or fails), never grants on the defaults.
+        let closed = state_with(false).await;
+        let uri = closed.cfg.absolute("/c.txt");
+        closed
+            .store
+            .write(&uri, Bytes::from("x"), "text/plain")
+            .await
+            .unwrap();
+        closed
+            .store
+            .write(
+                &meta_key(&uri),
+                Bytes::from("{not json"),
+                "application/json",
+            )
+            .await
+            .unwrap();
+        let bob = agent("https://bob.example/#me");
+        assert!(closed.check(Action::Read, &uri, &bob).await.is_err());
+        assert!(!closed.allowed(Action::Read, &uri, &bob).await);
+    }
+
+    /// Review finding: the name search read a backend failure as "name taken" and tried the next
+    /// name, without end, under the container's lock.
+    #[tokio::test]
+    async fn the_name_search_is_bounded_and_fails_on_errors() {
+        use super::super::route;
+        use super::super::test_store::{request as req, state as flaky_state};
+        use std::time::Duration;
+        let (st, store) = flaky_state(100).await;
+        let root = st.cfg.storage();
+        let post = |slug: &'static str| {
+            let st = st.clone();
+            async move {
+                let h = [("slug", slug), ("content-type", "text/plain")];
+                route(&st, req(Method::POST, "/", &h, "x")).await
+            }
+        };
+        *store.fail_exists_of.lock().unwrap() = Some(format!("{root}x"));
+        let r = post("x").await;
+        assert_eq!(r.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        *store.fail_exists_of.lock().unwrap() = None;
+        assert!(!st.store.exists(&format!("{root}x-2")).await.unwrap());
+        // Every name taken: a 409 once the tries run out, not a search that never ends.
+        *store.occupied.lock().unwrap() = Some(format!("{root}y"));
+        let r = tokio::time::timeout(Duration::from_secs(10), post("y"))
+            .await
+            .expect("the name search did not end");
+        assert_eq!(r.status(), StatusCode::CONFLICT);
+        *store.occupied.lock().unwrap() = None;
+        // The container's lock was given back.
+        let r = tokio::time::timeout(Duration::from_secs(5), post("y"))
+            .await
+            .expect("the container stayed locked");
+        assert_eq!(r.status(), StatusCode::CREATED);
+    }
+
+    /// Review finding: a POST to the root with Slug `livez` or `readyz` created a resource the
+    /// health probes, answered ahead of the resources, hide.
+    #[tokio::test]
+    async fn health_probe_names_are_reserved_at_the_root() {
+        let st = state().await;
+        for name in ["livez", "readyz"] {
+            let uri = post(&st, name, "text/plain", "x", &[]).await;
+            assert_eq!(uri, format!("{BASE}/{name}-2"));
+            let r = call(&st, "GET", path_of(&uri), &[], "").await;
+            assert_eq!(body_of(r).await, Bytes::from("x"));
+        }
+        // Below the root the paths are not the probes', so the names are free there.
+        let c = post(
+            &st,
+            "c",
+            "text/plain",
+            "",
+            &[(
+                "link",
+                "<https://www.w3.org/ns/lws#Container>; rel=\"type\"",
+            )],
+        )
+        .await;
+        let r = call(
+            &st,
+            "POST",
+            path_of(&c),
+            &[("slug", "livez"), ("content-type", "text/plain")],
+            "x",
+        )
+        .await;
+        assert_eq!(hdr(&r, "location"), format!("{c}livez"));
     }
 
     /// Review finding: a PUT that could not read the old Turtle content took it to state no
@@ -4388,6 +4589,7 @@ mod tests {
         assert!(st
             .resource_meta(&uri)
             .await
+            .unwrap()
             .types
             .contains(&"https://e.example/Old".to_string()));
         *store.fail_read_of.lock().unwrap() = Some(uri.clone());
@@ -4416,7 +4618,7 @@ mod tests {
         )
         .await;
         assert_eq!(r.status(), StatusCode::NO_CONTENT);
-        let types = st.resource_meta(&uri).await.types;
+        let types = st.resource_meta(&uri).await.unwrap().types;
         assert!(
             !types.contains(&"https://e.example/Old".to_string()),
             "{types:?}"
