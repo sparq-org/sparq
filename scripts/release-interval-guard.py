@@ -48,9 +48,11 @@ THE THREE CHECKS
    silently breaking the locked single-version model the group exists to preserve — and
    are published anyway. A mismatch is exactly the "I do not know what would be published"
    condition, so it REFUSES.
-2. **Registry dependency closure.** Every normal/build path dependency, plus every
-   versioned dev-dependency shipped by a publishable crate, must itself be publishable and
-   must carry a registry version requirement. Cargo omits path-only dev-dependencies from
+2. **Registry dependency closure.** Every non-optional normal/build path dependency, plus
+   every versioned dev-dependency shipped by a publishable crate, must itself be publishable
+   and must carry a registry version requirement. An optional or dev edge to a ``publish =
+   false`` crate is allowed: ``scripts/publish-strip.py`` removes it (and, for an optional
+   one, the features that need it) from the packaged manifest. Cargo omits path-only dev-dependencies from
    the published manifest; those intentionally do not constrain bootstrap order.
 3. **Cadence.** ``now - last_release >= MIN_RELEASE_INTERVAL``, where ``last_release`` is
    the MAXIMUM of two authoritative sources — the newest ``v*`` git tag's creation date
@@ -312,6 +314,13 @@ def publishable_crates(repo_root: Path) -> list[Crate]:
                 if is_dev and "version" not in spec:
                     continue
                 if not all_members[real][3]:
+                    # A dev-dependency or an OPTIONAL normal/build edge to an unpublished
+                    # crate is removed (optional ones with every feature that needs them)
+                    # by scripts/publish-strip.py before anything is packaged, so it
+                    # neither ships nor orders the publish. The strip script itself
+                    # refuses anything it cannot remove soundly.
+                    if is_dev or (isinstance(spec, dict) and spec.get("optional")):
+                        continue
                     raise GuardRefusal(
                         f"{name}: publishable crate depends on unpublished workspace "
                         f"crate {real!r}; publish the dependency or remove the registry "

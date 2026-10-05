@@ -55,10 +55,10 @@ export const SPECS: Spec[] = [
     title: "zkSPARQL: Zero-Knowledge Query Proofs over SPARQL",
     shortName: "zksparql",
     status: "unofficial",
-    date: "2026-07-01",
+    date: "2026-07-25",
     editors: "Jesse Wright · the sparq project",
     blurb:
-      "Proving SPARQL query answers over committed RDF graphs in zero knowledge — an explicit threat model, the committed data model, a scoped query fragment and circuit family, the ProofManifest format, and the fail-closed verifier obligations and audit gates. Research-grade and NOT externally audited (sq-qhy4).",
+      "Proving SPARQL query answers over committed RDF graphs in zero knowledge, transcribed from the sparq codebase — an explicit threat model, the committed data model (RDFC-1.0 + Poseidon2/BN254 sponge, Schnorr/Baby-Jubjub attestation), a scoped query fragment and circuit family with a per-construct disposition table plus phase-gated property-path and expression extensions, the ProofManifest member schema, and the fail-closed verifier obligations and four audit gates. Research-grade and NOT externally audited (sq-qhy4).",
   },
   {
     slug: "mpc-sparql",
@@ -117,6 +117,18 @@ export const SPECS: Spec[] = [
     editors: "Jesse Wright · the sparq project",
     blurb:
       "A greenfield, implementation-ready proposal for named-graph-aware replicated RDF datasets: dotted add-wins observed-remove state, mandatory origin skolemisation, evaluate-at-origin SPARQL Update compilation, a canonical out-of-band delta journal, precisely scoped dataset convergence, and separate replica, delta-relay, and origin-evaluator conformance classes.",
+  },
+  {
+    slug: "trust-expression",
+    source: "trust-expression.typ",
+    title:
+      "Trust Expression: A Verifier-Holder Contract for Framework-Anchored Attestation Queries",
+    shortName: "trust-expression",
+    status: "unofficial",
+    date: "2026-07-06",
+    editors: "Jesse Wright · the sparq project",
+    blurb:
+      "The minimal verifier-holder contract for trust-framework-anchored questions — one SPARQL query, one RDF trust-requirements document, one nonce — with two trust modes (enumerated issuers; framework-certified issuers with certification-scope conformance, e.g. eIDAS 2.0 / UK DIATF), non-revocation and certification as positive time-windowed attestations (OWA-monotone, fail-closed), a normative RDF 1.2 reifier response encoding with a fixed named-graph mapping, and a reference rewrite into plain SPARQL that doubles as the conformance oracle. Framework trust bottoms out in a trust anchor, not cryptography; the ZK realisation is research-grade and NOT externally audited (sq-qhy4).",
   },
 ];
 
