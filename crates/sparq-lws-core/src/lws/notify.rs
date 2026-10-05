@@ -22,12 +22,12 @@
 //! subscriber and the storage owner may read and cancel them; to anyone else they do not exist.
 
 use std::collections::{BTreeMap, HashMap};
-use std::net::{IpAddr, SocketAddr};
+use std::net::IpAddr;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
 use axum::http::{header, Method, StatusCode};
-use axum::response::Response;
+use axum::response::{IntoResponse, Response};
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -35,9 +35,11 @@ use sha2::{Digest, Sha256};
 
 use super::access::{format_rfc3339, parse_rfc3339, Action};
 use super::{
-    add_link, jose, json_is_uri, method_not_allowed, problem, set, Agent, LwsConfig, LwsRequest,
-    LwsState, AS_CONTEXT, LWS_CONTEXT, LWS_JSON, LWS_NS, SUBSCRIPTIONS_PATH,
+    etag_of, jose, json_is_uri, method_not_allowed, none_match, problem, service_links,
+    service_linkset, service_listing, set, Agent, LwsConfig, LwsRequest, LwsState, AS_CONTEXT,
+    LWS_CONTEXT, LWS_JSON, LWS_NS, META_SUFFIX, SUBSCRIPTIONS_PATH,
 };
+use crate::error::ServerError;
 use crate::store::Store;
 
 /// The one subscription type this NotificationService offers.
@@ -142,7 +144,7 @@ impl Notifier {
             .no_proxy();
         if !cfg.allow_insecure_fetch {
             builder = builder
-                .dns_resolver(Arc::new(PublicOnlyResolver))
+                .dns_resolver(Arc::new(super::PublicOnlyResolver))
                 .https_only(true);
         }
         let client = builder
@@ -217,19 +219,28 @@ impl Notifier {
             .collect()
     }
 
-    /// Remove a subscription from memory and the store.
-    async fn remove<S: Store + 'static>(&self, state: &LwsState<S>, id: &str) -> bool {
-        let removed = self.subs.write().expect("lock").remove(id).is_some();
-        self.failures.lock().expect("lock").remove(id);
-        if removed {
-            *self.etag.write().expect("lock") = new_etag();
-            let container = state.cfg.absolute(SUBSCRIPTIONS_PATH);
-            let _ = state
-                .store
-                .delete(&format!("{container}{id}"), Some(&container))
-                .await;
+    /// Remove a subscription from the store, then from memory. A store failure leaves it in place
+    /// (a cancelled subscription whose stored copy survived would come back at the next boot) and
+    /// is returned.
+    async fn remove<S: Store + 'static>(
+        &self,
+        state: &LwsState<S>,
+        id: &str,
+    ) -> Result<(), String> {
+        let container = state.cfg.absolute(SUBSCRIPTIONS_PATH);
+        match state
+            .store
+            .delete(&format!("{container}{id}"), Some(&container))
+            .await
+        {
+            Ok(_) | Err(ServerError::NotFound) => {}
+            Err(e) => return Err(e.to_string()),
         }
-        removed
+        if self.subs.write().expect("lock").remove(id).is_some() {
+            *self.etag.write().expect("lock") = new_etag();
+        }
+        self.failures.lock().expect("lock").remove(id);
+        Ok(())
     }
 
     /// Tell every subscriber whose topic covers `event.uri`, and who may read it now, that it
@@ -290,7 +301,9 @@ impl Notifier {
                 *n
             };
             if status == Some(StatusCode::GONE) || failures >= MAX_DELIVERY_FAILURES {
-                notifier.remove(&state, &id).await;
+                // A store failure keeps the subscription (and its failure count), so the next
+                // failed delivery tries to deactivate it again.
+                let _ = notifier.remove(&state, &id).await;
             }
         });
     }
@@ -500,26 +513,6 @@ pub fn is_public(ip: IpAddr) -> bool {
     }
 }
 
-/// Resolves names to their public addresses only, so a delivery cannot be pointed at the
-/// server's own network by a name that resolves there.
-struct PublicOnlyResolver;
-
-impl reqwest::dns::Resolve for PublicOnlyResolver {
-    fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
-        let host = name.as_str().to_string();
-        Box::pin(async move {
-            let addrs: Vec<SocketAddr> = tokio::net::lookup_host((host.as_str(), 0))
-                .await?
-                .filter(|a| is_public(a.ip()))
-                .collect();
-            if addrs.is_empty() {
-                return Err(format!("{host} has no public address").into());
-            }
-            Ok(Box::new(addrs.into_iter()) as reqwest::dns::Addrs)
-        })
-    }
-}
-
 // ---- the NotificationService ----
 
 /// Everything under `/.lws/subscriptions/`: the subscription listing and creation, and each
@@ -529,15 +522,28 @@ pub async fn handle<S: Store + 'static>(
     req: &LwsRequest,
     agent: &Agent,
 ) -> Response {
-    let id = &req.path[SUBSCRIPTIONS_PATH.len()..];
+    let mut id = &req.path[SUBSCRIPTIONS_PATH.len()..];
+    // `{container}.meta` and `{member}.meta` are the (read-only) linksets the container and its
+    // members link to.
+    let linkset = id.ends_with(META_SUFFIX);
+    if linkset {
+        id = &id[..id.len() - META_SUFFIX.len()];
+    }
     let owner = state.cfg.open || (agent.subject.is_some() && agent.subject == state.cfg.owner);
     if id.is_empty() {
+        if linkset {
+            return if state.needs_auth(agent) {
+                state.challenge(None)
+            } else {
+                service_linkset(&state.cfg, req, &state.cfg.absolute(SUBSCRIPTIONS_PATH))
+            };
+        }
         return match req.method {
             Method::GET | Method::HEAD => {
                 if state.needs_auth(agent) {
                     return state.challenge(None);
                 }
-                listing(state, agent, owner)
+                listing(state, req, agent, owner)
             }
             Method::POST => {
                 if state.needs_auth(agent) {
@@ -560,27 +566,37 @@ pub async fn handle<S: Store + 'static>(
             problem(StatusCode::NOT_FOUND, None)
         };
     };
+    if linkset {
+        let iri = state.cfg.absolute(&format!("{SUBSCRIPTIONS_PATH}{id}"));
+        return service_linkset(&state.cfg, req, &iri);
+    }
     match req.method {
         Method::GET | Method::HEAD => {
-            let mut resp = super::json_response(StatusCode::OK, LWS_JSON, &document(state, &sub));
-            add_link(
+            let doc = document(state, &sub);
+            let iri = state.cfg.absolute(&format!("{SUBSCRIPTIONS_PATH}{id}"));
+            // A subscription never changes once made, so its document is its entity tag.
+            let etag = etag_of([doc.to_string().as_str()]);
+            let mut resp = if none_match(req, &etag) {
+                StatusCode::NOT_MODIFIED.into_response()
+            } else {
+                super::json_response(StatusCode::OK, LWS_JSON, &doc)
+            };
+            set(resp.headers_mut(), header::ETAG, &etag);
+            service_links(
+                &state.cfg,
                 resp.headers_mut(),
+                &iri,
                 &state.cfg.absolute(SUBSCRIPTIONS_PATH),
-                "up",
-                None,
-            );
-            add_link(
-                resp.headers_mut(),
-                &state.cfg.storage(),
-                &format!("{LWS_NS}storage"),
-                None,
             );
             resp
         }
-        Method::DELETE => {
-            state.notify.remove(state, id).await;
-            problem(StatusCode::NO_CONTENT, None)
-        }
+        Method::DELETE => match state.notify.remove(state, id).await {
+            Ok(()) => problem(StatusCode::NO_CONTENT, None),
+            Err(e) => problem(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Some(&format!("cannot cancel the subscription: {e}")),
+            ),
+        },
         _ => method_not_allowed("GET, HEAD, DELETE"),
     }
 }
@@ -605,8 +621,14 @@ fn document<S: Store>(state: &LwsState<S>, sub: &Subscription) -> Value {
     doc
 }
 
-/// The subscriber's live subscriptions (every one for the owner) as an LWS container.
-fn listing<S: Store + 'static>(state: &LwsState<S>, agent: &Agent, owner: bool) -> Response {
+/// The subscriber's live subscriptions (every one for the owner) as an LWS container: negotiated,
+/// paged and tagged like any other container (webhook "Subscription Management").
+fn listing<S: Store + 'static>(
+    state: &LwsState<S>,
+    req: &LwsRequest,
+    agent: &Agent,
+    owner: bool,
+) -> Response {
     let base = state.cfg.absolute(SUBSCRIPTIONS_PATH);
     let items: Vec<Value> = state
         .notify
@@ -615,31 +637,10 @@ fn listing<S: Store + 'static>(state: &LwsState<S>, agent: &Agent, owner: bool) 
         .filter(|s| owner || (agent.subject.is_some() && agent.subject == s.subscriber))
         .map(|s| json!({"id": format!("{base}{}", s.id), "type": "DataResource", "format": LWS_JSON}))
         .collect();
-    let body = json!({
-        "@context": LWS_CONTEXT,
-        "id": base,
-        "type": "Container",
-        "totalItems": items.len(),
-        "items": items,
-    });
-    let mut resp = super::json_response(StatusCode::OK, LWS_JSON, &body);
-    set(
-        resp.headers_mut(),
-        header::ETAG,
-        &state.notify.etag.read().expect("lock"),
-    );
-    add_link(
-        resp.headers_mut(),
-        &format!("{LWS_NS}Container"),
-        "type",
-        None,
-    );
-    add_link(
-        resp.headers_mut(),
-        &state.cfg.storage(),
-        &format!("{LWS_NS}storage"),
-        None,
-    );
+    let version = state.notify.etag.read().expect("lock").clone();
+    let mut resp = service_listing(&state.cfg, req, &base, items, &version);
+    // Each subscriber sees only its own subscriptions.
+    set(resp.headers_mut(), header::VARY, "Accept, Authorization");
     resp
 }
 
@@ -762,12 +763,7 @@ async fn subscribe<S: Store + 'static>(
     *state.notify.etag.write().expect("lock") = new_etag();
     let mut resp = super::json_response(StatusCode::CREATED, LWS_JSON, &doc);
     set(resp.headers_mut(), header::LOCATION, &iri);
-    add_link(
-        resp.headers_mut(),
-        &state.cfg.storage(),
-        &format!("{LWS_NS}storage"),
-        None,
-    );
+    service_links(&state.cfg, resp.headers_mut(), &iri, &container);
     resp
 }
 
@@ -776,6 +772,118 @@ mod tests {
     use super::*;
     use p256::ecdsa::signature::Verifier;
     use p256::ecdsa::{Signature, VerifyingKey};
+
+    use super::super::test_store;
+
+    /// A subscription to the storage root, put straight into the state and the store.
+    async fn subscribe_root(state: &LwsState<test_store::FlakyStore>, id: &str) -> String {
+        let container = state.cfg.absolute(SUBSCRIPTIONS_PATH);
+        let sub = Subscription {
+            id: id.into(),
+            subscriber: None,
+            client: None,
+            topics: vec![state.cfg.storage()],
+            inbox: "https://inbox.example/".into(),
+            expires: None,
+            expires_at: None,
+        };
+        let iri = format!("{container}{id}");
+        state
+            .store
+            .create_in_container(
+                &container,
+                &iri,
+                Bytes::from(serde_json::to_vec(&sub).unwrap()),
+                LWS_JSON,
+            )
+            .await
+            .unwrap();
+        state.notify.subs.write().unwrap().insert(id.into(), sub);
+        *state.notify.etag.write().unwrap() = new_etag();
+        format!("{SUBSCRIPTIONS_PATH}{id}")
+    }
+
+    #[tokio::test]
+    async fn subscription_listing_and_get() {
+        let (state, _) = test_store::state(2).await;
+        for id in ["a", "b", "c"] {
+            subscribe_root(&state, id).await;
+        }
+        let anon = Agent::anonymous();
+        let get = |path: &str, headers: &[(&str, &str)]| {
+            test_store::request(Method::GET, path, headers, "")
+        };
+        let list = handle(&state, &get(SUBSCRIPTIONS_PATH, &[]), &anon).await;
+        assert_eq!(list.status(), StatusCode::OK);
+        assert!(list.headers().contains_key(header::ETAG));
+        assert!(list.headers()[header::VARY]
+            .to_str()
+            .unwrap()
+            .contains("Accept"));
+        assert_eq!(test_store::links(&list, "next").len(), 1);
+        assert_eq!(
+            test_store::links(&list, "type"),
+            vec![format!("{LWS_NS}Container")]
+        );
+        assert_eq!(test_store::body_json(list).await["totalItems"], 3);
+        let page2 = handle(
+            &state,
+            &get(&format!("{SUBSCRIPTIONS_PATH}?page=2"), &[]),
+            &anon,
+        )
+        .await;
+        assert_eq!(
+            test_store::body_json(page2).await["items"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        let refused = handle(
+            &state,
+            &get(SUBSCRIPTIONS_PATH, &[("accept", "text/turtle")]),
+            &anon,
+        )
+        .await;
+        assert_eq!(refused.status(), StatusCode::NOT_ACCEPTABLE);
+        // One subscription: an entity tag that revalidates.
+        let one = handle(&state, &get(&format!("{SUBSCRIPTIONS_PATH}a"), &[]), &anon).await;
+        assert_eq!(one.status(), StatusCode::OK);
+        let etag = one.headers()[header::ETAG].to_str().unwrap().to_string();
+        assert_eq!(
+            test_store::links(&one, "up"),
+            vec![state.cfg.absolute(SUBSCRIPTIONS_PATH)]
+        );
+        let again = handle(
+            &state,
+            &get(
+                &format!("{SUBSCRIPTIONS_PATH}a"),
+                &[("if-none-match", &etag)],
+            ),
+            &anon,
+        )
+        .await;
+        assert_eq!(again.status(), StatusCode::NOT_MODIFIED);
+    }
+
+    #[tokio::test]
+    async fn a_failed_cancellation_keeps_the_subscription() {
+        use std::sync::atomic::Ordering;
+        let (state, store) = test_store::state(100).await;
+        let path = subscribe_root(&state, "s1").await;
+        let delete = test_store::request(Method::DELETE, &path, &[], "");
+        store.fail_delete.store(true, Ordering::SeqCst);
+        let resp = handle(&state, &delete, &Agent::anonymous()).await;
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(state.notify.get("s1").is_some());
+        let iri = state.cfg.absolute(&path);
+        assert!(state.store.exists(&iri).await.unwrap());
+        store.fail_delete.store(false, Ordering::SeqCst);
+        let resp = handle(&state, &delete, &Agent::anonymous()).await;
+        assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+        assert!(state.notify.get("s1").is_none());
+        assert!(!state.store.exists(&iri).await.unwrap());
+    }
 
     #[test]
     fn topic_coverage() {

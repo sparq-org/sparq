@@ -22,8 +22,9 @@ use serde_json::{json, Map, Value};
 
 use super::access::Action;
 use super::{
-    is_uri, jose, json_response, method_not_allowed, problem, set, Agent, LwsRequest, LwsState,
-    ResourceMeta, LD_JSON, LWS_CONTEXT, LWS_JSON, LWS_NS, META_SUFFIX, TYPE_SEARCH_PATH,
+    add_page_links, is_uri, jose, json_response, method_not_allowed, problem, requested_page, set,
+    Agent, LwsRequest, LwsState, ResourceMeta, LD_JSON, LWS_CONTEXT, LWS_JSON, LWS_NS, META_SUFFIX,
+    TYPE_INDEX_PATH, TYPE_SEARCH_PATH,
 };
 use crate::store::Store;
 
@@ -394,6 +395,9 @@ pub async fn handle<S: Store + 'static>(
             jose::b64url(&filter_bytes)
         );
         links.push(format!("<{base}1>; rel=\"first\""));
+        if page > 1 {
+            links.push(format!("<{base}{}>; rel=\"prev\"", page - 1));
+        }
         if !page_link {
             // RFC 10008 lets a QUERY response name a resource representing its results; one that
             // is exposed must be authorization-filtered on every access and not reused across
@@ -404,6 +408,7 @@ pub async fn handle<S: Store + 'static>(
         if page < pages {
             links.push(format!("<{base}{}>; rel=\"next\"", page + 1));
         }
+        links.push(format!("<{base}{pages}>; rel=\"last\""));
         let shown: Vec<Value> = items
             .into_iter()
             .skip((page - 1) * size)
@@ -411,9 +416,25 @@ pub async fn handle<S: Store + 'static>(
             .collect();
         json!({"@context": LWS_CONTEXT, "type": "ContainerPage", "totalItems": total, "items": shown})
     } else {
+        // The TypeIndex is paged like a container (section 6.1): opaque `?page=N` links in Link
+        // headers, first and last always, prev and next where there is one; a page that does not
+        // exist (any more) is 404.
         let types: BTreeSet<&String> = resources.values().flatten().collect();
-        let items: Vec<Value> = types.into_iter().map(|t| json!({"id": t})).collect();
-        json!({"@context": LWS_CONTEXT, "type": "TypeIndex", "totalItems": items.len(), "items": items})
+        let total = types.len();
+        let size = state.cfg.page_size.max(1);
+        let pages = total.div_ceil(size).max(1);
+        let Some(page) = requested_page(req, pages) else {
+            return problem(StatusCode::NOT_FOUND, None);
+        };
+        let index = state.cfg.absolute(TYPE_INDEX_PATH);
+        links.extend(page_links(&index, page, pages));
+        let items: Vec<Value> = types
+            .into_iter()
+            .skip((page - 1) * size)
+            .take(size)
+            .map(|t| json!({"id": t}))
+            .collect();
+        json!({"@context": LWS_CONTEXT, "type": "TypeIndex", "totalItems": total, "items": items})
     };
     let mut resp = json_response(StatusCode::OK, media_type, &doc);
     let h = resp.headers_mut();
@@ -431,12 +452,66 @@ pub async fn handle<S: Store + 'static>(
     resp
 }
 
+/// The Link header values of page `page` of `pages` at `base?page=N`.
+fn page_links(base: &str, page: usize, pages: usize) -> Vec<String> {
+    let mut headers = header::HeaderMap::new();
+    add_page_links(&mut headers, base, page, pages);
+    headers
+        .get_all(header::LINK)
+        .iter()
+        .filter_map(|v| v.to_str().ok().map(str::to_string))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn parse(s: &str) -> Result<Filter, FilterError> {
         parse_filter(s.as_bytes())
+    }
+
+    #[tokio::test]
+    async fn the_type_index_is_paged() {
+        use super::super::test_store;
+        let (state, _) = test_store::state(1).await;
+        let root = state.cfg.storage();
+        state
+            .store
+            .create_in_container(&root, &format!("{root}a"), "x".into(), "text/plain")
+            .await
+            .unwrap();
+        let get =
+            |q: &str| test_store::request(Method::GET, &format!("{TYPE_INDEX_PATH}{q}"), &[], "");
+        let index = state.cfg.absolute(TYPE_INDEX_PATH);
+        let first = handle(&state, &get(""), &Agent::anonymous()).await;
+        assert_eq!(first.status(), StatusCode::OK);
+        assert_eq!(
+            test_store::links(&first, "first"),
+            vec![format!("{index}?page=1")]
+        );
+        assert_eq!(
+            test_store::links(&first, "next"),
+            vec![format!("{index}?page=2")]
+        );
+        assert_eq!(
+            test_store::links(&first, "last"),
+            vec![format!("{index}?page=2")]
+        );
+        assert!(test_store::links(&first, "prev").is_empty());
+        let doc = test_store::body_json(first).await;
+        assert_eq!(doc["totalItems"], 2);
+        assert_eq!(doc["items"].as_array().unwrap().len(), 1);
+        let second = handle(&state, &get("?page=2"), &Agent::anonymous()).await;
+        assert_eq!(
+            test_store::links(&second, "prev"),
+            vec![format!("{index}?page=1")]
+        );
+        assert!(test_store::links(&second, "next").is_empty());
+        let other = test_store::body_json(second).await;
+        assert_ne!(other["items"], doc["items"]);
+        let gone = handle(&state, &get("?page=3"), &Agent::anonymous()).await;
+        assert_eq!(gone.status(), StatusCode::NOT_FOUND);
     }
 
     #[test]

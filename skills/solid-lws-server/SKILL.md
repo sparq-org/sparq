@@ -229,6 +229,7 @@ cargo run -p sparq-lws-core
 | `SOLID_SERVER_LWS_OPEN` (or `SOLID_SERVER_OPEN_MODE`) | `1` disables authorization entirely and implies `SOLID_SERVER_LWS_ALLOW_INSECURE_FETCH`. Test-suite use only. |
 | `SOLID_SERVER_LWS_PAGE_SIZE` | Container and type-search page size (default 100). |
 | `SOLID_SERVER_LWS_AS_KEY_FILE`, `SOLID_SERVER_LWS_NOTIFY_KEY_FILE` | P-256 private JWKs for access tokens and webhook signatures. A missing file is created with a fresh key (mode 0600); without a file a key lives only for the process. |
+| `SOLID_SERVER_LWS_AS_PREVIOUS_KEY_FILE` | Key rotation: the P-256 JWK (public or private; only the public part is used) the access-token key replaced. It must exist and carry a `kid` different from the current key's. It is published in the JWKS, and tokens whose `kid` names it still validate until they expire. To rotate, move the old key file here and point `SOLID_SERVER_LWS_AS_KEY_FILE` at a new path; drop this variable once the token lifetime has passed. |
 | `SOLID_SERVER_LWS_TOKEN_TTL_SECS` | Access-token lifetime (default 300). |
 | `SOLID_SERVER_LWS_ALLOW_INSECURE_FETCH` | `1` lets the server fetch and deliver to `http:`, loopback and private addresses (CID documents, OIDC issuers, webhook inboxes). Test-suite use only. |
 | `SOLID_SERVER_LWS_SAML_IDPS_FILE` | JSON map of SAML IdP entity id to signing certificate; enables the SAML subject-token suite. |
@@ -246,10 +247,21 @@ What the server exposes, all discoverable from the storage description
   Storage requests take `Authorization: Bearer <access token>`; a missing or bad token
   gets `401` with `WWW-Authenticate: Bearer as_uri="…", realm="…"`.
 - **Access grants and requests** (Access Profile) under `/.lws/grants/` and
-  `/.lws/requests/`. Grants are ODRL-style policies with client, format, type, purpose
-  and dateTime constraints; the owner and a resource's creator are always allowed.
+  `/.lws/requests/`. Documents need an `@context` that includes
+  `https://www.w3.org/ns/lws/v1` (otherwise `400`). Grants are ODRL-style policies with
+  client, format, type, purpose and dateTime constraints. A target's `type` is
+  `DataResource`, `Container` or `StorageResource`, and its values name single resources,
+  not their members. A policy with no `target` covers every resource of the grant's
+  `storage`. A `purpose` constraint never holds, because the draft does not say how a
+  request states its purpose. The owner and a resource's creator are always allowed. A
+  new request notifies the owner's inbox when the owner's JSON(-LD) identity document
+  names one. A new grant notifies the inboxes of the requests made by or for its
+  assignees, as well as its own `inbox`.
 - **Webhook notifications** under `/.lws/subscriptions/`, signed per RFC 9421 with the
   key in the storage description's `verificationMethod`.
+- The grant, request and subscription services are containers: their listings are
+  negotiated (`lws+json`, `ld+json` or `json`), paged at the page size, and carry an ETag
+  and `up`/`type`/`linkset` links. The linksets are read-only.
 - **Type index** (`GET /.lws/types/index`) and **type search** (`QUERY /.lws/types/search`
   with an `application/lws-query+json` filter), both scoped to what the caller may read.
 
