@@ -1,6 +1,9 @@
 //! Storage resources: the storage description, containers, data resources and their linksets
 //! (LWS 1.0 core sections 6 to 9 and 12).
 
+// Handlers return the finished error response as the `Err` of their helpers.
+#![allow(clippy::result_large_err)]
+
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axum::http::{header, HeaderMap, Method, StatusCode};
@@ -1014,11 +1017,8 @@ fn remove<'a, S: Store + 'static>(
                 remove(state, child.as_str(), Some(uri)).await?;
             }
             let _ = state.store.delete(&meta_key(uri), None).await;
-            match state.store.delete_container_if_empty(uri, parent).await? {
-                crate::store::DeleteOutcome::NotEmpty => {
-                    return Err(ServerError::Conflict("the container gained a member while it was deleted".into()))
-                }
-                _ => {}
+            if matches!(state.store.delete_container_if_empty(uri, parent).await?, crate::store::DeleteOutcome::NotEmpty) {
+                return Err(ServerError::Conflict("the container gained a member while it was deleted".into()));
             }
         } else {
             state.store.delete(uri, parent).await?;
@@ -1154,7 +1154,7 @@ mod tests {
     fn slugs() {
         assert_eq!(sanitize_slug(Some("shoppinglist.txt")).as_deref(), Some("shoppinglist.txt"));
         assert_eq!(sanitize_slug(Some("../etc")).as_deref(), Some("-etc"));
-        assert_eq!(sanitize_slug(Some(".meta")), Some("-meta".into()).filter(|_| false).or(sanitize_slug(Some(".meta"))));
+        assert!(!sanitize_slug(Some(".meta")).is_some_and(|s| s.ends_with(".meta")));
         assert!(!sanitize_slug(Some("x.meta")).unwrap().ends_with(".meta"));
         assert_eq!(sanitize_slug(Some("...")), None);
         assert_eq!(sanitize_slug(None), None);

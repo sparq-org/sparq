@@ -401,7 +401,10 @@ impl LwsRequest {
 /// Build the LWS router over `store`.
 pub async fn router<S: Store + 'static>(store: S, cfg: LwsConfig) -> Result<Router, String> {
     let state = LwsState::new(store, cfg).await?;
-    Ok(Router::new().fallback(dispatch::<S>).with_state(state))
+    Ok(Router::new()
+        .fallback(dispatch::<S>)
+        .with_state(state)
+        .layer(axum::middleware::from_fn(crate::ldp::cors::cors_middleware)))
 }
 
 async fn dispatch<S: Store + 'static>(State(state): State<LwsState<S>>, req: Request) -> Response {
@@ -432,6 +435,10 @@ async fn dispatch<S: Store + 'static>(State(state): State<LwsState<S>>, req: Req
 
 async fn route<S: Store + 'static>(state: &LwsState<S>, req: LwsRequest) -> Response {
     let path = req.path.as_str();
+    // Unauthenticated liveness and readiness probes, as the Solid surface serves them.
+    if matches!(path, "/livez" | "/readyz") && matches!(req.method, Method::GET | Method::HEAD) {
+        return (StatusCode::OK, "ok").into_response();
+    }
     if matches!(path, AS_METADATA_PATH | AS_METADATA_OAUTH_PATH | AS_JWKS_PATH | AS_TOKEN_PATH) {
         return authz_server::handle(state, &req).await;
     }

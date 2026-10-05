@@ -67,11 +67,18 @@ impl EcKey {
     /// A key from a private P-256 JWK (`kty EC`, `crv P-256`, with `d`). The JWK's `kid` is kept;
     /// without one the RFC 7638 thumbprint is used.
     pub fn from_jwk(jwk: &str) -> Result<Self, String> {
-        let secret = SecretKey::from_jwk_str(jwk).map_err(|e| format!("not a private P-256 JWK: {e}"))?;
-        let kid = serde_json::from_str::<Value>(jwk)
-            .ok()
-            .and_then(|v| v.get("kid").and_then(Value::as_str).map(str::to_string))
-            .unwrap_or_else(|| thumbprint(&public_jwk_of(&secret.public_key())));
+        let v: Value = serde_json::from_str(jwk).map_err(|e| format!("not JSON: {e}"))?;
+        let public = ec_public_from_jwk(&v).ok_or("not a P-256 JWK")?;
+        let d = v.get("d").and_then(Value::as_str).and_then(b64url_decode).ok_or("no private key (d)")?;
+        let secret = SecretKey::from_slice(&d).map_err(|_| "invalid private key (d)")?;
+        if secret.public_key() != public {
+            return Err("the private key (d) does not match x and y".into());
+        }
+        let kid = v
+            .get("kid")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .unwrap_or_else(|| thumbprint(&public_jwk_of(&public)));
         Ok(Self { secret, kid })
     }
 
