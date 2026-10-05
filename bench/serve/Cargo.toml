@@ -15,7 +15,7 @@ publish = false
 # engine's behaviour (and build) depends on it, so this detached project must apply
 # the same patch.
 [patch.crates-io]
-spargebra = { path = "../../vendor/spargebra", package = "sparq-spargebra" }
+spargebra = { path = "../../vendor/spargebra-shim" }
 
 [dependencies]
 sparq-core = { path = "../../crates/sparq-core" }

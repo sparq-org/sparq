@@ -19,7 +19,7 @@ publish = false
 # sparq-core's build depends on the same graph, so this detached project must
 # apply the same patch.
 [patch.crates-io]
-spargebra = { path = "../../vendor/spargebra", package = "sparq-spargebra" }
+spargebra = { path = "../../vendor/spargebra-shim" }
 
 [dependencies]
 # The dictionary under measurement lives in sparq-core; the production ingest

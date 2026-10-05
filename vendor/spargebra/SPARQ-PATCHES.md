@@ -22,8 +22,8 @@ dependency is `spargebra = { package = "sparq-spargebra", version = "0.4.6", pat
 friends in the bench/differential harnesses) reach it through the unpublished re-export shim
 `vendor/spargebra-shim`, which the root `[patch.crates-io]` points at. The fork is versioned
 independently of the workspace: bump its version for any change here and publish it by hand
-(docs/release.md §4) before the release that needs it. The bench/* and zk/xpath manifests
-depend on it with `package = "sparq-spargebra"`.
+(docs/release.md §4) before the release that needs it. The detached bench/* and zk/xpath
+workspaces point their own `[patch.crates-io] spargebra` at the same shim.
 
 ## Upstream release watch (bead `sq-98w7z.8`)
 

@@ -1588,3 +1588,7 @@ dependencies = [
  "cc",
  "pkg-config",
 ]
+
+[[patch.unused]]
+name = "spargebra"
+version = "0.4.6"
