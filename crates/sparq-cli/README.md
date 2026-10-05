@@ -39,16 +39,12 @@ cargo run --release -p sparq-cli -- query data.ttl turtle 'SELECT * WHERE { ?s ?
   `min_micros`, min-of-iters) to `<path>` as a machine-readable JSON document (the
   structured-benchmark-catalog shape); the STDOUT TSV is unchanged. Measured numbers are
   whatever the running host reports and are non-canonical — never commit them.
-- **`dump <file> <in-fmt> <out-fmt>`** — re-serialize a loaded
-  document to stdout in the writer matrix: `turtle[-pretty]` / `trig[-pretty]` / `nquads` /
-  `ntriples` / `jsonld[-expanded|-flattened|-compacted]` / `jsonld-pretty…`. `jsonld-compact[-pretty]`
-  runs the **full W3C JSON-LD 1.1 Compaction** against a caller `@context` passed with
-  `--context <ctx.jsonld>` (richer than the prefix-only `jsonld-compacted`). The writer matrix is
-  the `serialize-rdf` feature, pulled into the **default build by the default-on `jsonld` feature**.
-  <!-- [FABLE-5] sq-0kq6k --> With the opt-in **`streaming-serialization`** feature, the `turtle`
-  and `trig` out-formats write straight to stdout through the engine's streaming writers instead of
-  first rendering the whole document into one `String` — byte-identical output without that
-  render buffer, and a broken pipe (`dump … | head`) exits quietly instead of panicking.
+- **`dump <file> <in-fmt> <out-fmt>`** — re-serialize to stdout: `turtle[-pretty]` / `trig[-pretty]` /
+  `nquads` / `ntriples` / `jsonld[-expanded|-flattened|-compacted]` / `jsonld-pretty…`; `jsonld-compact[-pretty]`
+  runs full W3C JSON-LD 1.1 Compaction against `--context <ctx.jsonld>`. The matrix is the `serialize-rdf`
+  feature (default-on via `jsonld`). <!-- [FABLE-5] sq-0kq6k --> Opt-in **`streaming-serialization`** streams
+  `turtle`/`trig` straight to stdout (byte-identical, no whole-document `String`); a broken pipe
+  (`dump … | head`) exits quietly instead of panicking.
 - **`to-hdt <file> <in-fmt> <out.hdt[.gz|.zst|.bz2]>`** *(opt-in `hdt-write` feature, which
   implies `hdt`; [FABLE-5] sq-8ju74)* — export a loaded document (any ingestible format, HDT
   itself included) as a standard-layout **HDT v1.0 archive** via `sparq-hdt`'s direct in-memory
