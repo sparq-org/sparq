@@ -11,9 +11,11 @@
 //! is the document's root, and the signature covers all of it.
 //!
 //! Then, as the reference authorization server checks: `Conditions` with `NotBefore` and
-//! `NotOnOrAfter` around now, an `Audience` naming this authorization server, and a
-//! `Subject/NameID`, which is the LWS subject. The client is the `SubjectConfirmationData`
-//! `Recipient`, which is required. Both must be URIs.
+//! `NotOnOrAfter` around now, every `AudienceRestriction` naming this authorization server and no
+//! condition this server cannot evaluate, and a `Subject/NameID`, which is the LWS subject. Every
+//! `SubjectConfirmation` must be bearer (holder-of-key and sender-vouches need a proof this
+//! endpoint does not take), with an unexpired `SubjectConfirmationData` whose `Recipient`, which
+//! is required, is the client. Subject and client must be URIs.
 //!
 //! The XML is parsed with quick-xml into a small tree; a DOCTYPE (and so any entity but the
 //! predefined ones) or a processing instruction is refused, and exclusive XML canonicalization
@@ -89,16 +91,7 @@ pub fn verify_at(cfg: &LwsConfig, token: &str, now: i64) -> Result<Verified, Str
     if time("NotBefore")? > now + SKEW_SECS || time("NotOnOrAfter")? <= now - SKEW_SECS {
         return Err("the assertion is outside its validity period".into());
     }
-    let mut audiences = Vec::new();
-    conditions.descendants(SAML_NS, "Audience", &mut audiences);
-    let us = cfg.issuer();
-    if !audiences
-        .iter()
-        .map(|a| a.text())
-        .any(|a| a.trim() == us || a.trim().strip_suffix('/') == Some(us))
-    {
-        return Err("the assertion's audience does not include this authorization server".into());
-    }
+    check_conditions(conditions, cfg.issuer())?;
     let subject = root
         .child(SAML_NS, "Subject")
         .ok_or("the assertion names no subject")?;
@@ -113,29 +106,116 @@ pub fn verify_at(cfg: &LwsConfig, token: &str, now: i64) -> Result<Verified, Str
     if !is_uri(&name_id) {
         return Err("the assertion's NameID is not a URI".into());
     }
-    let mut data = Vec::new();
-    subject.descendants(SAML_NS, "SubjectConfirmationData", &mut data);
-    if let Some(limit) = data.first().and_then(|d| d.attr("NotOnOrAfter")) {
+    let client = bearer_recipient(subject, now)?;
+    Ok(Verified {
+        subject: name_id,
+        client,
+    })
+}
+
+/// SAML 2.0 core 2.4.1.1: the bearer confirmation method, the one an assertion presented by
+/// whoever holds it may use. Holder-of-key needs proof of a key and sender-vouches an
+/// authenticated attesting party; this endpoint has neither, so an assertion confirmed that way
+/// is refused rather than accepted without its proof.
+const BEARER: &str = "urn:oasis:names:tc:SAML:2.0:cm:bearer";
+
+/// Check the assertion's `Conditions` beyond its validity period (SAML 2.0 core 2.5.1):
+/// - each `AudienceRestriction` is evaluated on its own, and every one of them must name this
+///   authorization server ("the assertion is addressed to [...] each AudienceRestriction" — the
+///   restrictions are ANDed, the audiences within one ORed);
+/// - `ProxyRestriction` limits the assertions a relying party may issue on the strength of this
+///   one; this server issues access tokens, never assertions, so it is satisfied and ignored;
+/// - `OneTimeUse` is refused: honouring it needs a replay cache of assertions this server does not
+///   keep, and an assertion whose issuer asked for single use must not be accepted repeatedly;
+/// - any other condition (a `Condition` extension, or anything this server does not know) is
+///   refused, since a relying party that cannot evaluate a condition must treat the assertion as
+///   indeterminate (core 2.5.1.1), never as valid.
+fn check_conditions(conditions: &Element, us: &str) -> Result<(), String> {
+    let mut restrictions = 0;
+    for condition in conditions.elements() {
+        if condition.is(SAML_NS, "AudienceRestriction") {
+            restrictions += 1;
+            let named = condition
+                .elements()
+                .filter(|a| a.is(SAML_NS, "Audience"))
+                .map(|a| a.text())
+                .any(|a| a.trim() == us || a.trim().strip_suffix('/') == Some(us));
+            if !named {
+                return Err(
+                    "an AudienceRestriction of the assertion does not include this authorization server"
+                        .into(),
+                );
+            }
+        } else if condition.is(SAML_NS, "ProxyRestriction") {
+            continue;
+        } else if condition.is(SAML_NS, "OneTimeUse") {
+            return Err("the assertion is OneTimeUse, which this server cannot honour".into());
+        } else {
+            return Err(format!(
+                "the assertion has a condition this server does not understand: {}",
+                condition.qname()
+            ));
+        }
+    }
+    if restrictions == 0 {
+        return Err("the assertion's audience does not include this authorization server".into());
+    }
+    Ok(())
+}
+
+/// The client an assertion was issued to: the `Recipient` of its bearer subject confirmation.
+///
+/// Every `SubjectConfirmation` must use the bearer method (holder-of-key, sender-vouches and
+/// anything else are refused, not skipped), and there must be at least one. Each must carry
+/// `SubjectConfirmationData` with a `NotOnOrAfter` in the future, a `NotBefore` (if any) in the
+/// past, and a `Recipient` that is a URI: the LWS client identifier ("The SAML token MUST use the
+/// Recipient parameter within a saml:SubjectConfirmationData assertion for the LWS client
+/// identifier"). When several confirmations are present they must all name the same client.
+fn bearer_recipient(subject: &Element, now: i64) -> Result<String, String> {
+    let mut client: Option<String> = None;
+    for confirmation in subject
+        .elements()
+        .filter(|e| e.is(SAML_NS, "SubjectConfirmation"))
+    {
+        if confirmation.attr("Method") != Some(BEARER) {
+            return Err(format!(
+                "the assertion's subject confirmation method {} is not accepted; only bearer is",
+                confirmation.attr("Method").unwrap_or("(none)")
+            ));
+        }
+        let data = confirmation
+            .child(SAML_NS, "SubjectConfirmationData")
+            .ok_or("the bearer subject confirmation has no SubjectConfirmationData")?;
+        let limit = data
+            .attr("NotOnOrAfter")
+            .ok_or("the bearer subject confirmation has no NotOnOrAfter")?;
         if parse_datetime(limit).is_none_or(|t| t <= now - SKEW_SECS) {
             return Err("the subject confirmation has expired".into());
         }
+        if let Some(start) = data.attr("NotBefore") {
+            if parse_datetime(start).is_none_or(|t| t > now + SKEW_SECS) {
+                return Err("the subject confirmation is not yet valid".into());
+            }
+        }
+        // Without a Recipient the client is unknown.
+        let recipient = data
+            .attr("Recipient")
+            .map(str::trim)
+            .filter(|r| !r.is_empty())
+            .ok_or("the assertion's SubjectConfirmationData names no Recipient (the client)")?;
+        if !is_uri(recipient) {
+            return Err("the assertion's Recipient is not a URI".into());
+        }
+        match &client {
+            Some(c) if c != recipient => {
+                return Err(
+                    "the assertion's subject confirmations name different Recipients".into(),
+                )
+            }
+            _ => client = Some(recipient.to_string()),
+        }
     }
-    let recipient = data
-        .first()
-        .and_then(|d| d.attr("Recipient"))
-        .map(str::trim)
-        .filter(|r| !r.is_empty());
-    // "The SAML token MUST use the Recipient parameter within a saml:SubjectConfirmationData
-    // assertion for the LWS client identifier": without one the client is unknown.
-    let client = recipient
-        .ok_or("the assertion's SubjectConfirmationData names no Recipient (the client)")?;
-    if !is_uri(client) {
-        return Err("the assertion's Recipient is not a URI".into());
-    }
-    Ok(Verified {
-        subject: name_id,
-        client: client.to_string(),
-    })
+    client.ok_or_else(|| "the assertion has no bearer SubjectConfirmation".into())
 }
 
 // ---------------------------------------------------------------- signature
@@ -522,15 +602,6 @@ impl Element {
     /// The first child element `{ns}local`.
     fn child(&self, ns: &str, local: &str) -> Option<&Element> {
         self.elements().find(|e| e.is(ns, local))
-    }
-
-    fn descendants<'a>(&'a self, ns: &str, local: &str, out: &mut Vec<&'a Element>) {
-        for e in self.elements() {
-            if e.is(ns, local) {
-                out.push(e);
-            }
-            e.descendants(ns, local, out);
-        }
     }
 
     /// How many elements in this subtree carry an `ID`, `Id` or `AssertionID` of `id`.
@@ -945,31 +1016,54 @@ mod tests {
             .map(|r| format!(" Recipient=\"{r}\""))
             .unwrap_or_default();
         let now = jose::now_secs();
-        let instant = |t: i64| {
-            let days = t.div_euclid(86_400);
-            let secs = t.rem_euclid(86_400);
-            // civil from days (Hinnant)
-            let z = days + 719_468;
-            let era = z.div_euclid(146_097);
-            let doe = z - era * 146_097;
-            let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-            let y = yoe + era * 400;
-            let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-            let mp = (5 * doy + 2) / 153;
-            let d = doy - (153 * mp + 2) / 5 + 1;
-            let m = if mp < 10 { mp + 3 } else { mp - 9 };
-            let y = if m <= 2 { y + 1 } else { y };
-            format!(
-                "{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z",
-                secs / 3600,
-                secs % 3600 / 60,
-                secs % 60
-            )
-        };
+        let confirmation = format!(
+            "<saml:SubjectConfirmation Method=\"{BEARER}\"><saml:SubjectConfirmationData NotOnOrAfter=\"{}\"{recipient}/></saml:SubjectConfirmation>",
+            instant(now + 300)
+        );
+        let restriction = format!(
+            "<saml:AudienceRestriction><saml:Audience>{audience}</saml:Audience></saml:AudienceRestriction>"
+        );
+        signed_custom(key, issuer, name_id, &confirmation, &restriction, tamper)
+    }
+
+    /// An xsd:dateTime for `t` (Unix seconds).
+    fn instant(t: i64) -> String {
+        let days = t.div_euclid(86_400);
+        let secs = t.rem_euclid(86_400);
+        // civil from days (Hinnant)
+        let z = days + 719_468;
+        let era = z.div_euclid(146_097);
+        let doe = z - era * 146_097;
+        let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+        let y = yoe + era * 400;
+        let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+        let mp = (5 * doy + 2) / 153;
+        let d = doy - (153 * mp + 2) / 5 + 1;
+        let m = if mp < 10 { mp + 3 } else { mp - 9 };
+        let y = if m <= 2 { y + 1 } else { y };
+        format!(
+            "{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z",
+            secs / 3600,
+            secs % 3600 / 60,
+            secs % 60
+        )
+    }
+
+    /// A signed assertion with the given `SubjectConfirmation` elements and `Conditions`
+    /// children (the conditions valid for five minutes from now).
+    fn signed_custom(
+        key: &jose::EcKey,
+        issuer: &str,
+        name_id: &str,
+        confirmations: &str,
+        conditions: &str,
+        tamper: bool,
+    ) -> String {
+        let now = jose::now_secs();
         let id = "_abc123";
         let body = |name: &str| {
             format!(
-                "<saml:Issuer>{issuer}</saml:Issuer>{{SIG}}<saml:Subject><saml:NameID Format=\"urn:oasis:names:tc:SAML:2.0:nameid-format:persistent\">{name}</saml:NameID><saml:SubjectConfirmation Method=\"urn:oasis:names:tc:SAML:2.0:cm:bearer\"><saml:SubjectConfirmationData NotOnOrAfter=\"{exp}\"{recipient}/></saml:SubjectConfirmation></saml:Subject><saml:Conditions NotBefore=\"{nb}\" NotOnOrAfter=\"{exp}\"><saml:AudienceRestriction><saml:Audience>{audience}</saml:Audience></saml:AudienceRestriction></saml:Conditions>",
+                "<saml:Issuer>{issuer}</saml:Issuer>{{SIG}}<saml:Subject><saml:NameID Format=\"urn:oasis:names:tc:SAML:2.0:nameid-format:persistent\">{name}</saml:NameID>{confirmations}</saml:Subject><saml:Conditions NotBefore=\"{nb}\" NotOnOrAfter=\"{exp}\">{conditions}</saml:Conditions>",
                 exp = instant(now + 300),
                 nb = instant(now)
             )
@@ -1066,6 +1160,163 @@ mod tests {
         // A Recipient that is not a URI.
         let bad = signed_assertion_to(&key, idp, cfg.issuer(), alice, Some("client"), false);
         assert!(verify(&cfg, &bad).unwrap_err().contains("Recipient"));
+    }
+
+    fn saml_cfg() -> (LwsConfig, jose::EcKey, &'static str) {
+        let mut cfg = LwsConfig::new("http://localhost:3000");
+        let key = jose::EcKey::generate("idp");
+        let idp = "https://idp.example/";
+        cfg.saml_idps
+            .insert(idp.into(), key.public_jwk().to_string());
+        (cfg, key, idp)
+    }
+
+    fn confirmation(method: &str, data: &str) -> String {
+        format!("<saml:SubjectConfirmation Method=\"{method}\">{data}</saml:SubjectConfirmation>")
+    }
+
+    fn confirmation_data(attrs: &str) -> String {
+        format!("<saml:SubjectConfirmationData{attrs}/>")
+    }
+
+    #[test]
+    fn only_bearer_subject_confirmations_are_accepted() {
+        let (cfg, key, idp) = saml_cfg();
+        let alice = "https://alice.example/#me";
+        let now = jose::now_secs();
+        let exp = instant(now + 300);
+        let ours = format!(
+            "<saml:AudienceRestriction><saml:Audience>{}</saml:Audience></saml:AudienceRestriction>",
+            cfg.issuer()
+        );
+        let good = confirmation_data(&format!(
+            " NotOnOrAfter=\"{exp}\" Recipient=\"https://client.example/\""
+        ));
+        let verify_with = |confirmations: &str| {
+            verify(
+                &cfg,
+                &signed_custom(&key, idp, alice, confirmations, &ours, false),
+            )
+        };
+        assert_eq!(
+            verify_with(&confirmation(BEARER, &good)).unwrap().client,
+            "https://client.example/"
+        );
+        // Holder-of-key and sender-vouches carry no proof here: refused, alone or beside a bearer.
+        for method in [
+            "urn:oasis:names:tc:SAML:2.0:cm:holder-of-key",
+            "urn:oasis:names:tc:SAML:2.0:cm:sender-vouches",
+        ] {
+            let err = verify_with(&confirmation(method, &good)).unwrap_err();
+            assert!(err.contains("not accepted"), "{err}");
+            let both = format!(
+                "{}{}",
+                confirmation(BEARER, &good),
+                confirmation(method, &good)
+            );
+            assert!(verify_with(&both).is_err());
+        }
+        // No confirmation, or one without a method.
+        assert!(verify_with("").unwrap_err().contains("no bearer"));
+        assert!(verify_with(
+            "<saml:SubjectConfirmation><saml:SubjectConfirmationData/></saml:SubjectConfirmation>"
+        )
+        .is_err());
+        // Bearer without data, without NotOnOrAfter, expired, or not yet valid.
+        assert!(verify_with(&confirmation(BEARER, "")).is_err());
+        let no_limit = confirmation_data(" Recipient=\"https://client.example/\"");
+        assert!(verify_with(&confirmation(BEARER, &no_limit))
+            .unwrap_err()
+            .contains("NotOnOrAfter"));
+        let expired = confirmation_data(&format!(
+            " NotOnOrAfter=\"{}\" Recipient=\"https://client.example/\"",
+            instant(now - 3600)
+        ));
+        assert!(verify_with(&confirmation(BEARER, &expired))
+            .unwrap_err()
+            .contains("expired"));
+        let early = confirmation_data(&format!(
+            " NotBefore=\"{}\" NotOnOrAfter=\"{exp}\" Recipient=\"https://client.example/\"",
+            instant(now + 3600)
+        ));
+        assert!(verify_with(&confirmation(BEARER, &early)).is_err());
+        // Two bearer confirmations naming different clients.
+        let other = confirmation_data(&format!(
+            " NotOnOrAfter=\"{exp}\" Recipient=\"https://other.example/\""
+        ));
+        let two = format!(
+            "{}{}",
+            confirmation(BEARER, &good),
+            confirmation(BEARER, &other)
+        );
+        assert!(verify_with(&two).unwrap_err().contains("different"));
+    }
+
+    #[test]
+    fn every_audience_restriction_must_name_this_server() {
+        let (cfg, key, idp) = saml_cfg();
+        let alice = "https://alice.example/#me";
+        let now = jose::now_secs();
+        let bearer = confirmation(
+            BEARER,
+            &confirmation_data(&format!(
+                " NotOnOrAfter=\"{}\" Recipient=\"https://client.example/\"",
+                instant(now + 300)
+            )),
+        );
+        let restriction = |audiences: &[&str]| {
+            let inner: String = audiences
+                .iter()
+                .map(|a| format!("<saml:Audience>{a}</saml:Audience>"))
+                .collect();
+            format!("<saml:AudienceRestriction>{inner}</saml:AudienceRestriction>")
+        };
+        let us = cfg.issuer().to_string();
+        let verify_with = |conditions: &str| {
+            verify(
+                &cfg,
+                &signed_custom(&key, idp, alice, &bearer, conditions, false),
+            )
+        };
+        // One restriction listing several audiences, ours among them: accepted.
+        assert!(verify_with(&restriction(&["https://other.example", &us])).is_ok());
+        // Two restrictions, both naming us: accepted.
+        let both = format!("{}{}", restriction(&[&us]), restriction(&[&us, "x:y"]));
+        assert!(verify_with(&both).is_ok());
+        // Two restrictions, one of which does not name us: the assertion is not for us.
+        let split = format!(
+            "{}{}",
+            restriction(&[&us]),
+            restriction(&["https://other.example"])
+        );
+        assert!(verify_with(&split)
+            .unwrap_err()
+            .contains("AudienceRestriction"));
+        // An Audience nested deeper than a direct AudienceRestriction does not count.
+        let nested = format!(
+            "{}<saml:ProxyRestriction><saml:Audience>{us}</saml:Audience></saml:ProxyRestriction>",
+            restriction(&["https://other.example"])
+        );
+        assert!(verify_with(&nested).is_err());
+        // No restriction at all.
+        assert!(verify_with("").is_err());
+        // ProxyRestriction is ignored; OneTimeUse and unknown conditions are refused.
+        let proxy = format!(
+            "{}<saml:ProxyRestriction Count=\"0\"/>",
+            restriction(&[&us])
+        );
+        assert!(verify_with(&proxy).is_ok());
+        let once = format!("{}<saml:OneTimeUse/>", restriction(&[&us]));
+        assert!(verify_with(&once).unwrap_err().contains("OneTimeUse"));
+        let unknown = format!(
+            "{}<saml:Condition xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:type=\"x:Custom\"/>",
+            restriction(&[&us])
+        );
+        assert!(verify_with(&unknown)
+            .unwrap_err()
+            .contains("does not understand"));
+        let foreign = format!("{}<x:Whatever xmlns:x=\"urn:x\"/>", restriction(&[&us]));
+        assert!(verify_with(&foreign).is_err());
     }
 
     #[test]

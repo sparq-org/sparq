@@ -80,7 +80,9 @@ use solid_oidc_verifier::replay::{InMemoryReplayStore, ReplayStore};
 use solid_oidc_verifier::verifier::Verifier;
 use solid_oidc_verifier::webid::{BidirectionalMode, NetworkWebIdResolver};
 use sparq_lws_core::acl_cache::{AclCache, DEFAULT_ACL_CACHE_CAPACITY};
-use sparq_lws_core::app::{build_router_with_overload, AppState, OverloadConfig};
+use sparq_lws_core::app::{
+    build_router_with_overload, with_overload_layers, AppState, OverloadConfig,
+};
 use sparq_lws_core::auth::AuthContext;
 use sparq_lws_core::auth_cache::{
     ProofPolicy, SharedReplay, VerifiedTokenCache, DEFAULT_CACHE_CAPACITY,
@@ -1139,15 +1141,21 @@ where
     // Linked Web Storage (`SOLID_SERVER_PROTOCOL=lws`): the LWS 1.0 surface replaces the Solid
     // router on the same store. Its own `SOLID_SERVER_LWS_*` settings configure it.
     if std::env::var(ENV_PROTOCOL).is_ok_and(|v| v.trim().eq_ignore_ascii_case("lws")) {
-        let cfg = sparq_lws_core::lws::LwsConfig::from_env(base_url)?;
+        let mut cfg = sparq_lws_core::lws::LwsConfig::from_env(base_url)?;
+        // One body ceiling for both surfaces: the LWS dispatcher reads the body itself, so it is
+        // handed the configured limit rather than relying on the `DefaultBodyLimit` layer.
+        cfg.max_body = overload_config.body_limit_bytes;
         eprintln!(
             "  PROTOCOL: Linked Web Storage — storage {} owner {} {}",
             cfg.storage(),
             cfg.owner.as_deref().unwrap_or("(none)"),
             if cfg.open { "OPEN MODE (no authentication, DEV ONLY)" } else { "" }
         );
-        let _ = (issuer, jwks_cache_ttl, auth, overload_config, identity);
-        return Ok(sparq_lws_core::lws::router(store, cfg).await?);
+        let _ = (issuer, jwks_cache_ttl, auth, identity);
+        // The same overload stack the Solid router carries: the per-IP rate limiter, admission
+        // control, the request timeout and the body ceiling, with /livez and /readyz outside it.
+        let lws = sparq_lws_core::lws::router(store, cfg).await?;
+        return Ok(with_overload_layers(lws, overload_config));
     }
     // Dev/conformance seeding (gated): write the test users' WebID profiles + the container tree the
     // Solid CTH dereferences to bootstrap. Done BEFORE the store is moved into the LDP state; a seeding

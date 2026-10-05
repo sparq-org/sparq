@@ -178,7 +178,18 @@ where
     R: ReplayStore + Send + Sync + 'static,
     S: Store + 'static,
 {
-    let mut app = build_app_routes(state);
+    with_overload_layers(build_app_routes(state), overload)
+}
+
+/// Wrap application routes in the overload stack — body ceiling, request timeout, admission
+/// control, and the pre-crypto per-IP rate limiter, in that order from the inside out — and merge
+/// the health routes OUTSIDE it. Shared by the Solid router ([`build_router_with_overload`]) and the
+/// Linked Web Storage router, so both protocol surfaces carry the same DoS protections.
+///
+/// The body-limit layer sets the `DefaultBodyLimit` that axum's extractors read; a handler that
+/// reads the body itself (the LWS dispatcher) must apply `overload.body_limit_bytes` on its own.
+pub fn with_overload_layers(app: Router, overload: OverloadConfig) -> Router {
+    let mut app = app;
 
     // INNERMOST (app routes): the explicit, configurable request-body ceiling (a body over the limit ⇒
     // 413). It only sets the `DefaultBodyLimit` request extension the body extractor reads, so its

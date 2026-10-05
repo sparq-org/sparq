@@ -89,7 +89,7 @@ pub async fn handle<S: Store + 'static>(
         Method::POST => create(state, req, agent, &uri).await,
         Method::PUT => update(state, req, &uri).await,
         Method::PATCH => patch(state, req, agent, &uri).await,
-        Method::DELETE => delete(state, req, &uri).await,
+        Method::DELETE => delete(state, req, agent, &uri).await,
         Method::OPTIONS => options(state, &uri).await,
         _ => method_not_allowed(&allow_for(&uri, is_root)),
     }
@@ -971,6 +971,17 @@ async fn create<S: Store + 'static>(
         });
     let base_name = sanitize_slug(req.header("slug"))
         .unwrap_or_else(|| jose::random_id().to_ascii_lowercase().replace('_', "-"));
+    // The container's lock is held from the choice of a free name through the create and the new
+    // member's creator metadata: the store's create replaces whatever is at the IRI, so two POSTs
+    // with one Slug must never both find the name free. Every create in a container, and a
+    // recursive delete of it, takes this lock, so under it a name found free stays free. It is
+    // released before the container's own metadata is touched (which takes the lock again).
+    let parent_guard = state.locks.lock(parent).await;
+    match state.store.exists(parent).await {
+        Ok(true) => {}
+        Ok(false) => return problem(StatusCode::NOT_FOUND, None),
+        Err(e) => return store_error(e),
+    }
     let mut name = base_name.clone();
     let mut n = 1;
     loop {
@@ -1029,6 +1040,7 @@ async fn create<S: Store + 'static>(
     if let Err(e) = state.put_resource_meta(&child, &meta).await {
         return store_error(e);
     }
+    drop(parent_guard);
     touch_container(state, parent).await;
     state
         .notify
@@ -1073,6 +1085,10 @@ async fn current<S: Store + 'static>(
 /// the write, and an If-Match can never pass against a state another writer is replacing. Metadata
 /// read-modify-writes of a container (membership touches) take the container's lock too.
 ///
+/// A create takes its container's lock across the choice of a free name and the create, and a
+/// recursive delete takes the lock of every resource it removes (see [`lock_subtree`]), so neither
+/// can interleave with the other or with a conditional write.
+///
 /// Limit: the locks live in this process. Several server processes over one store do not see each
 /// other's locks; that deployment needs a conditional write in the store itself.
 #[derive(Default)]
@@ -1081,8 +1097,9 @@ pub struct IriLocks(
 );
 
 impl IriLocks {
-    /// Wait for and take the lock of `iri`. Locks are taken child before parent, never the other
-    /// way, so two writers cannot deadlock.
+    /// Wait for and take the lock of `iri`. A writer that holds several locks takes them longest
+    /// IRI first, ties in byte order ([`lock_order`]), so a child always before its container and
+    /// never the other way, and two writers cannot deadlock.
     pub async fn lock(&self, iri: &str) -> tokio::sync::OwnedMutexGuard<()> {
         let mutex = {
             let mut map = self.0.lock().unwrap_or_else(|e| e.into_inner());
@@ -1100,6 +1117,12 @@ impl IriLocks {
         };
         mutex.lock_owned().await
     }
+}
+
+/// The order in which a writer holding several IRI locks takes them: longest first, so a member
+/// before the container that holds it (a member's IRI extends its container's), then byte order.
+fn lock_order(a: &str, b: &str) -> std::cmp::Ordering {
+    b.len().cmp(&a.len()).then_with(|| a.cmp(b))
 }
 
 async fn update<S: Store + 'static>(state: &LwsState<S>, req: &LwsRequest, uri: &str) -> Response {
@@ -1624,16 +1647,31 @@ async fn patch<S: Store + 'static>(
 
 // ---- delete ----
 
-async fn delete<S: Store + 'static>(state: &LwsState<S>, req: &LwsRequest, uri: &str) -> Response {
+async fn delete<S: Store + 'static>(
+    state: &LwsState<S>,
+    req: &LwsRequest,
+    agent: &Agent,
+    uri: &str,
+) -> Response {
     let storage = state.cfg.storage();
-    let _guard = state.locks.lock(uri).await;
+    if let Err(r) = current(state, uri).await {
+        return r;
+    }
+    if uri == storage {
+        return method_not_allowed(&allow_for(uri, true));
+    }
+    let parent = parent_of(uri, &storage);
+    // Every resource the delete may remove is locked before anything is decided, so the
+    // precondition, the permission check of each descendant and the removal see one state: no
+    // member can be created in, written to, or deleted from the subtree in between.
+    let (guards, doomed) = match lock_subtree(state, uri, parent.clone()).await {
+        Ok(locked) => locked,
+        Err(e) => return store_error(e),
+    };
     let meta = match current(state, uri).await {
         Ok(m) => m,
         Err(r) => return r,
     };
-    if uri == storage {
-        return method_not_allowed(&allow_for(uri, true));
-    }
     let etag = if uri.ends_with('/') {
         None
     } else {
@@ -1672,26 +1710,24 @@ async fn delete<S: Store + 'static>(state: &LwsState<S>, req: &LwsRequest, uri: 
     ) {
         return problem(StatusCode::PRECONDITION_FAILED, None);
     }
-    if uri.ends_with('/') {
-        let has_members = match state.store.list_children(uri).await {
-            Ok(c) => !c.is_empty(),
-            Err(e) => return store_error(e),
-        };
+    if uri.ends_with('/') && doomed.len() > 1 {
         let infinity = req
             .header("depth")
             .is_some_and(|d| d.trim().eq_ignore_ascii_case("infinity"));
-        if has_members && !infinity {
+        if !infinity {
             return problem(StatusCode::CONFLICT, Some("the container is not empty; send Depth: infinity to delete it and everything in it"));
         }
     }
-    let parent = parent_of(uri, &storage);
+    // Delete on the container is not Delete on what is in it: a recursive delete removes nothing
+    // unless the agent may delete every descendant. `uri` itself was checked by `handle`.
+    for (node, _) in &doomed {
+        if node != uri && !state.allowed(Action::Delete, node, agent).await {
+            return state.deny(agent);
+        }
+    }
     // Announced before the resources go, while who may read each can still be decided. A recursive
     // delete removes every descendant, and each removal is a Delete of its own.
-    let doomed = match subtree(state, uri, parent.clone()).await {
-        Ok(d) => d,
-        Err(e) => return store_error(e),
-    };
-    for (gone, origin) in doomed {
+    for (gone, origin) in doomed.iter().cloned() {
         state
             .notify
             .announce(
@@ -1705,9 +1741,10 @@ async fn delete<S: Store + 'static>(state: &LwsState<S>, req: &LwsRequest, uri: 
             )
             .await;
     }
-    if let Err(e) = remove(state, uri, parent.as_deref()).await {
+    if let Err(e) = remove(state, &doomed).await {
         return store_error(e);
     }
+    drop(guards);
     if let Some(p) = parent {
         touch_container(state, &p).await;
     }
@@ -1740,20 +1777,54 @@ async fn subtree<S: Store + 'static>(
     Ok(out)
 }
 
-/// Remove a resource and, for a container, everything in it, with their metadata.
-fn remove<'a, S: Store + 'static>(
-    state: &'a LwsState<S>,
-    uri: &'a str,
-    parent: Option<&'a str>,
-) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), ServerError>> + Send + 'a>> {
-    Box::pin(async move {
-        if uri.ends_with('/') {
-            for child in state.store.list_children(uri).await? {
-                remove(state, child.as_str(), Some(uri)).await?;
-            }
-            let _ = state.store.delete(&meta_key(uri), None).await;
+type IriGuard = tokio::sync::OwnedMutexGuard<()>;
+
+/// Lock `uri` and everything under it, in [`lock_order`], and return the guards with the subtree
+/// (as [`subtree`] lists it) that holds while they are held. The subtree is listed, locked, and
+/// listed again; when a member arrived or left in between, the locks are released and it starts
+/// over. A create takes its container's lock, so once every container is locked no member can
+/// arrive.
+async fn lock_subtree<S: Store + 'static>(
+    state: &LwsState<S>,
+    uri: &str,
+    parent: Option<String>,
+) -> Result<(Vec<IriGuard>, Vec<(String, Option<String>)>), ServerError> {
+    let sorted = |tree: &[(String, Option<String>)]| {
+        let mut iris: Vec<String> = tree.iter().map(|(n, _)| n.clone()).collect();
+        iris.sort_by(|a, b| lock_order(a, b));
+        iris.dedup();
+        iris
+    };
+    for _ in 0..8 {
+        let before = sorted(&subtree(state, uri, parent.clone()).await?);
+        let mut guards = Vec::with_capacity(before.len());
+        for iri in &before {
+            guards.push(state.locks.lock(iri).await);
+        }
+        let after = subtree(state, uri, parent.clone()).await?;
+        if sorted(&after) == before {
+            return Ok((guards, after));
+        }
+    }
+    Err(ServerError::Conflict(
+        "the container kept changing while it was being deleted".into(),
+    ))
+}
+
+/// Remove the resources of a locked [`subtree`], members before their containers, with their
+/// metadata.
+async fn remove<S: Store + 'static>(
+    state: &LwsState<S>,
+    doomed: &[(String, Option<String>)],
+) -> Result<(), ServerError> {
+    for (node, parent) in doomed {
+        if node.ends_with('/') {
+            let _ = state.store.delete(&meta_key(node), None).await;
             if matches!(
-                state.store.delete_container_if_empty(uri, parent).await?,
+                state
+                    .store
+                    .delete_container_if_empty(node, parent.as_deref())
+                    .await?,
                 crate::store::DeleteOutcome::NotEmpty
             ) {
                 return Err(ServerError::Conflict(
@@ -1761,11 +1832,11 @@ fn remove<'a, S: Store + 'static>(
                 ));
             }
         } else {
-            state.store.delete(uri, parent).await?;
-            let _ = state.store.delete(&meta_key(uri), None).await;
+            state.store.delete(node, parent.as_deref()).await?;
+            let _ = state.store.delete(&meta_key(node), None).await;
         }
-        Ok(())
-    })
+    }
+    Ok(())
 }
 
 // ---- linksets ----
@@ -2900,5 +2971,177 @@ mod tests {
             .collect();
         want.sort();
         assert_eq!(seen, want);
+    }
+
+    const CONTAINER_LINK: &str = "<https://www.w3.org/ns/lws#Container>; rel=\"type\"";
+
+    fn agent(subject: &str) -> Agent {
+        Agent {
+            subject: Some(subject.to_string()),
+            client: None,
+        }
+    }
+
+    /// Create a member of `parent` as `who`, past the Create check (only the creator matters here).
+    async fn create_as(
+        st: &LwsState<Mem>,
+        who: &Agent,
+        parent: &str,
+        slug: &str,
+        container: bool,
+    ) -> String {
+        let mut h = vec![("slug", slug), ("content-type", "text/plain")];
+        if container {
+            h.push(("link", CONTAINER_LINK));
+        }
+        let r = create(st, &request("POST", "/", &h, "x"), who, parent).await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        hdr(&r, "location")
+    }
+
+    #[tokio::test]
+    async fn recursive_delete_needs_delete_on_every_descendant() {
+        let mut cfg = super::super::LwsConfig::new(BASE);
+        cfg.owner = Some("https://owner.example/#me".into());
+        let store = CompositeStore::new(InMemorySparqClient::new(), InMemoryBlobStore::new());
+        let st = LwsState::new(store, cfg).await.expect("state");
+        let (alice, bob) = (
+            agent("https://alice.example/#me"),
+            agent("https://bob.example/#me"),
+        );
+        let owner = agent("https://owner.example/#me");
+        let root = st.cfg.storage();
+        // Alice made /shared/ and has a file and a container in it; Bob has a file deeper down.
+        let shared = create_as(&st, &alice, &root, "shared", true).await;
+        let mine = create_as(&st, &alice, &shared, "mine.txt", false).await;
+        let sub = create_as(&st, &alice, &shared, "sub", true).await;
+        let theirs = create_as(&st, &bob, &sub, "bob.txt", false).await;
+        let delete_as = |who: Agent, uri: String| {
+            let st = st.clone();
+            async move {
+                let req = request("DELETE", path_of(&uri), &[("depth", "infinity")], "");
+                handle(&st, &req, &who).await
+            }
+        };
+        // Alice may delete /shared/ itself, but not Bob's file in it: 403, and nothing goes.
+        let r = delete_as(alice.clone(), shared.clone()).await;
+        assert_eq!(r.status(), StatusCode::FORBIDDEN);
+        for uri in [&shared, &mine, &sub, &theirs] {
+            assert!(st.store.exists(uri).await.unwrap(), "{uri} survived");
+        }
+        // Nor the inner container that holds it.
+        let r = delete_as(alice.clone(), sub.clone()).await;
+        assert_eq!(r.status(), StatusCode::FORBIDDEN);
+        assert!(st.store.exists(&theirs).await.unwrap());
+        // Her own file alone she may delete; the owner may delete everything.
+        let r = delete_as(alice.clone(), mine.clone()).await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        let r = delete_as(owner, shared.clone()).await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        for uri in [&shared, &sub, &theirs] {
+            assert!(!st.store.exists(uri).await.unwrap(), "{uri} is gone");
+        }
+    }
+
+    #[tokio::test]
+    async fn recursive_delete_holds_the_subtree_locks() {
+        let st = state().await;
+        let c = hdr(
+            &call(
+                &st,
+                "POST",
+                "/",
+                &[("slug", "d"), ("link", CONTAINER_LINK)],
+                "",
+            )
+            .await,
+            "location",
+        );
+        let leaf = post(&st, "f", "text/plain", "x", &[]).await;
+        let inner = hdr(
+            &call(
+                &st,
+                "POST",
+                path_of(&c),
+                &[("slug", "g"), ("content-type", "text/plain")],
+                "x",
+            )
+            .await,
+            "location",
+        );
+        // While a writer holds a descendant's lock, the delete waits for it.
+        let held = st.locks.lock(&inner).await;
+        let task = {
+            let st = st.clone();
+            let c = c.clone();
+            tokio::spawn(async move {
+                call(&st, "DELETE", path_of(&c), &[("depth", "infinity")], "")
+                    .await
+                    .status()
+            })
+        };
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(!task.is_finished());
+        assert!(st.store.exists(&inner).await.unwrap());
+        drop(held);
+        assert_eq!(task.await.unwrap(), StatusCode::NO_CONTENT);
+        assert!(!st.store.exists(&inner).await.unwrap());
+        assert!(st.store.exists(&leaf).await.unwrap());
+        // The lock order puts a member before its container.
+        assert_eq!(lock_order(&inner, &c), std::cmp::Ordering::Less);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn concurrent_posts_with_one_slug_never_share_a_resource() {
+        let st = state().await;
+        let tasks: Vec<_> = (0..16)
+            .map(|i| {
+                let st = st.clone();
+                tokio::spawn(async move {
+                    let r = call(
+                        &st,
+                        "POST",
+                        "/",
+                        &[("slug", "same"), ("content-type", "text/plain")],
+                        &format!("body {i}"),
+                    )
+                    .await;
+                    assert_eq!(r.status(), StatusCode::CREATED);
+                    (i, hdr(&r, "location"))
+                })
+            })
+            .collect();
+        let mut seen = std::collections::BTreeSet::new();
+        for t in tasks {
+            let (i, location) = t.await.unwrap();
+            assert!(
+                seen.insert(location.clone()),
+                "{location} was created twice"
+            );
+            let body = body_of(call(&st, "GET", path_of(&location), &[], "").await).await;
+            assert_eq!(body, Bytes::from(format!("body {i}")));
+        }
+    }
+
+    #[tokio::test]
+    async fn create_holds_the_container_lock() {
+        let st = state().await;
+        let root = st.cfg.storage();
+        let held = st.locks.lock(&root).await;
+        let task = {
+            let st = st.clone();
+            tokio::spawn(async move { post(&st, "x", "text/plain", "x", &[]).await })
+        };
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(!task.is_finished());
+        drop(held);
+        let first = task.await.unwrap();
+        // The name is taken now, so the next create with the Slug gets a fresh one.
+        let second = post(&st, "x", "text/plain", "y", &[]).await;
+        assert_ne!(first, second);
+        assert_eq!(
+            body_of(call(&st, "GET", path_of(&first), &[], "").await).await,
+            Bytes::from("x")
+        );
     }
 }

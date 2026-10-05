@@ -81,9 +81,6 @@ pub const AS_TOKEN_PATH: &str = "/.well-known/lws/token";
 /// a resource whose name ends with it.
 pub const META_SUFFIX: &str = ".meta";
 
-/// Largest request body the LWS surface reads.
-const MAX_BODY: usize = 64 * 1024 * 1024;
-
 /// Boot configuration (see [`LwsConfig::from_env`]).
 #[derive(Debug, Clone)]
 pub struct LwsConfig {
@@ -111,6 +108,10 @@ pub struct LwsConfig {
     /// SAML identity providers trusted by the authorization server: entity id to PEM certificate
     /// or public key. Empty means the SAML suite is not offered.
     pub saml_idps: BTreeMap<String, String>,
+    /// Largest request body read, in bytes; a larger one is refused with 413 before it is
+    /// buffered further. The server-wide ceiling (`SOLID_SERVER_MAX_BODY_BYTES`, see
+    /// [`crate::body_limit`]), the same one the Solid surface enforces.
+    pub max_body: usize,
 }
 
 impl LwsConfig {
@@ -127,6 +128,7 @@ impl LwsConfig {
             token_ttl_secs: 300,
             allow_insecure_fetch: false,
             saml_idps: BTreeMap::new(),
+            max_body: crate::body_limit::DEFAULT_MAX_BODY_BYTES,
         }
     }
 
@@ -145,9 +147,11 @@ impl LwsConfig {
     /// - `SOLID_SERVER_LWS_TOKEN_TTL_SECS`: access token lifetime (default 300);
     /// - `SOLID_SERVER_LWS_ALLOW_INSECURE_FETCH=1`: allow `http:` and private-address fetches
     ///   (development and conformance only);
-    /// - `SOLID_SERVER_LWS_SAML_IDPS_FILE`: a JSON object of trusted SAML IdP entity ids to PEM.
+    /// - `SOLID_SERVER_LWS_SAML_IDPS_FILE`: a JSON object of trusted SAML IdP entity ids to PEM;
+    /// - `SOLID_SERVER_MAX_BODY_BYTES`: the request body ceiling shared with the Solid surface.
     pub fn from_env(base_url: &str) -> Result<Self, String> {
         let mut cfg = Self::new(base_url);
+        cfg.max_body = crate::body_limit::max_body_bytes_from_env();
         let var = |k: &str| {
             std::env::var(k)
                 .ok()
@@ -550,7 +554,7 @@ pub async fn router<S: Store + 'static>(store: S, cfg: LwsConfig) -> Result<Rout
 
 async fn dispatch<S: Store + 'static>(State(state): State<LwsState<S>>, req: Request) -> Response {
     let (parts, body) = req.into_parts();
-    let body = match axum::body::to_bytes(body, MAX_BODY).await {
+    let body = match axum::body::to_bytes(body, state.cfg.max_body).await {
         Ok(b) => b,
         Err(_) => return problem(StatusCode::PAYLOAD_TOO_LARGE, None),
     };
@@ -1079,6 +1083,92 @@ pub(crate) mod test_store {
 mod tests {
     use super::*;
     use test_store::{body_json, links, request};
+
+    async fn http(app: &Router, method: &str, path: &str, body: &'static str) -> StatusCode {
+        use tower::ServiceExt;
+        let mut req = Request::builder()
+            .method(method)
+            .uri(path)
+            .header("slug", "f")
+            .header("content-type", "text/plain")
+            .body(Body::from(body))
+            .unwrap();
+        let peer: std::net::SocketAddr = "203.0.113.7:4000".parse().unwrap();
+        req.extensions_mut()
+            .insert(axum::extract::ConnectInfo(peer));
+        app.clone().oneshot(req).await.unwrap().status()
+    }
+
+    async fn open_router(max_body: usize) -> Router {
+        let mut cfg = LwsConfig::new("http://h");
+        cfg.open = true;
+        cfg.max_body = max_body;
+        let store = crate::store::CompositeStore::new(
+            crate::store::InMemorySparqClient::new(),
+            crate::store::InMemoryBlobStore::new(),
+        );
+        router(store, cfg).await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn the_body_ceiling_is_the_configured_one() {
+        let app = open_router(16).await;
+        assert_eq!(
+            http(&app, "POST", "/", "0123456789abcdefg").await,
+            StatusCode::PAYLOAD_TOO_LARGE
+        );
+        assert_eq!(
+            http(&app, "POST", "/", "0123456789abcdef").await,
+            StatusCode::CREATED
+        );
+        assert_eq!(
+            LwsConfig::new("http://h").max_body,
+            crate::body_limit::DEFAULT_MAX_BODY_BYTES
+        );
+    }
+
+    #[tokio::test]
+    async fn the_overload_layers_wrap_the_lws_router() {
+        use crate::app::{with_overload_layers, OverloadConfig};
+        // Admission control: at capacity, a request is shed with 503; the probes are not.
+        let admission = crate::overload::AdmissionControl::new(1);
+        let mut overload = OverloadConfig::new(1, Some(std::time::Duration::from_secs(5)));
+        overload.admission = admission.clone();
+        let app = with_overload_layers(open_router(1024).await, overload);
+        let permit = admission.try_admit_for_test().unwrap();
+        assert_eq!(
+            http(&app, "GET", "/", "").await,
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        assert_eq!(http(&app, "GET", "/livez", "").await, StatusCode::OK);
+        assert_eq!(http(&app, "GET", "/readyz", "").await, StatusCode::OK);
+        drop(permit);
+        assert_eq!(http(&app, "GET", "/", "").await, StatusCode::OK);
+        // The per-IP rate limiter: past the burst, 429; the probes are not limited.
+        let mut overload = OverloadConfig::new(100, None);
+        overload.rate_limiter = Some(crate::rate_limit::RateLimiter::new(
+            0.0001, 1.0, 0, false, false,
+        ));
+        let app = with_overload_layers(open_router(1024).await, overload);
+        assert_eq!(http(&app, "GET", "/", "").await, StatusCode::OK);
+        assert_eq!(
+            http(&app, "GET", "/", "").await,
+            StatusCode::TOO_MANY_REQUESTS
+        );
+        assert_eq!(http(&app, "GET", "/livez", "").await, StatusCode::OK);
+        // The request timeout: a request that does not finish in time is a 504.
+        let mut overload = OverloadConfig::new(100, Some(std::time::Duration::from_millis(1)));
+        overload.rate_limiter = None;
+        let slow = Router::new().fallback(|| async {
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            StatusCode::OK
+        });
+        let app = with_overload_layers(slow, overload);
+        assert_eq!(
+            http(&app, "GET", "/", "").await,
+            StatusCode::GATEWAY_TIMEOUT
+        );
+    }
 
     #[test]
     fn container_negotiation() {
