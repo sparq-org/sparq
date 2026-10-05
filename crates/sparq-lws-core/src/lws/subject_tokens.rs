@@ -20,15 +20,16 @@
 //!
 //! Documents are fetched with the server's HTTP client. Unless `allow_insecure_fetch` is set, only
 //! `https:` URLs are fetched, and never from loopback, private, link-local or otherwise non-global
-//! addresses (checked on the host name's resolved addresses before the request and on the final URL
-//! after redirects).
+//! addresses: every redirect hop is checked before it is requested (the client follows none
+//! itself), the client's resolver hands out public addresses only, so the connection goes where
+//! the check looked, and no proxy is used.
 
 use std::net::IpAddr;
 
 use serde_json::Value;
 
 use super::jose::{self, Jws};
-use super::{has_type, LwsConfig, LWS_NS};
+use super::{has_type, is_uri, LwsConfig, LWS_NS};
 
 pub const JWT_TOKEN_TYPE: &str = "urn:ietf:params:oauth:token-type:jwt";
 pub const ID_TOKEN_TYPE: &str = "urn:ietf:params:oauth:token-type:id_token";
@@ -424,6 +425,19 @@ pub fn parse_datetime(s: &str) -> Option<i64> {
 
 // ---------------------------------------------------------------- OpenID Connect
 
+/// The client an ID Token was issued to: its `azp`, which becomes the access token's `client_id`
+/// and so MUST be a URI (core section 5.2.3).
+pub fn id_token_client(jws: &Jws) -> Result<String, String> {
+    let azp = jws
+        .claim_str("azp")
+        .filter(|s| !s.is_empty())
+        .ok_or("the ID Token names no azp, so the client it was issued to is unknown")?;
+    if !is_uri(azp) {
+        return Err("the ID Token's azp is not a URI".into());
+    }
+    Ok(azp.to_string())
+}
+
 async fn oidc(cfg: &LwsConfig, http: &reqwest::Client, jws: &Jws) -> Result<Verified, String> {
     let issuer = jws
         .claim_str("iss")
@@ -439,11 +453,7 @@ async fn oidc(cfg: &LwsConfig, http: &reqwest::Client, jws: &Jws) -> Result<Veri
         Some(w) if !is_http_url(sub) && is_http_url(w) => w.to_string(),
         _ => sub.to_string(),
     };
-    let azp = jws
-        .claim_str("azp")
-        .filter(|s| !s.is_empty())
-        .ok_or("the ID Token names no azp, so the client it was issued to is unknown")?
-        .to_string();
+    let azp = id_token_client(jws)?;
     check_times(jws, jose::now_secs())?;
     if !is_http_url(&subject) || !is_http_url(&issuer) {
         return Err("the subject and issuer of an ID Token must be http(s) URLs".into());
@@ -763,7 +773,21 @@ async fn check_url(cfg: &LwsConfig, raw: &str) -> Result<url::Url, String> {
     Ok(u)
 }
 
+/// Redirects a fetch follows, each hop checked against the fetch policy before it is requested.
+pub const MAX_REDIRECTS: usize = 3;
+
+/// Where a redirect from `from` with `location` goes, resolved against `from`.
+pub fn redirect_target(from: &url::Url, location: Option<&str>) -> Result<url::Url, String> {
+    let location = location.ok_or_else(|| format!("{from} redirects without a Location"))?;
+    from.join(location)
+        .map_err(|_| format!("{from} redirects to an invalid location"))
+}
+
 /// GET `url` under the fetch policy: a 200 answer's media type and body (at most 1 MiB).
+///
+/// `http` must be built by [`super::fetch_client`]: it follows no redirects itself, so each hop is
+/// checked (scheme, host and resolved addresses) before it is requested, and its resolver only
+/// connects to public addresses, so a name cannot be re-pointed between check and connect.
 pub async fn fetch(
     cfg: &LwsConfig,
     http: &reqwest::Client,
@@ -772,16 +796,30 @@ pub async fn fetch(
 ) -> Result<(String, Vec<u8>), String> {
     let mut u = check_url(cfg, url).await?;
     u.set_fragment(None);
-    let mut resp = http
-        .get(u.clone())
-        .header(reqwest::header::ACCEPT, accept)
-        .send()
-        .await
-        .map_err(|e| format!("cannot dereference {url}: {}", e.without_url()))?;
-    if resp.url() != &u {
-        // Redirected: the final location must satisfy the policy too.
-        check_url(cfg, resp.url().as_str()).await?;
-    }
+    let mut hops = 0;
+    let mut resp = loop {
+        let resp = http
+            .get(u.clone())
+            .header(reqwest::header::ACCEPT, accept)
+            .send()
+            .await
+            .map_err(|e| format!("cannot dereference {url}: {}", e.without_url()))?;
+        if !resp.status().is_redirection() {
+            break resp;
+        }
+        hops += 1;
+        if hops > MAX_REDIRECTS {
+            return Err(format!("{url} redirects too many times"));
+        }
+        let next = redirect_target(
+            &u,
+            resp.headers()
+                .get(reqwest::header::LOCATION)
+                .and_then(|v| v.to_str().ok()),
+        )?;
+        u = check_url(cfg, next.as_str()).await?;
+        u.set_fragment(None);
+    };
     if resp.status() != reqwest::StatusCode::OK {
         return Err(format!("GET {url} answered {}", resp.status().as_u16()));
     }
@@ -840,6 +878,125 @@ mod tests {
     fn claims(did: &str, cfg: &LwsConfig) -> Value {
         let now = jose::now_secs();
         json!({"sub": did, "iss": did, "client_id": did, "aud": [cfg.issuer()], "iat": now, "exp": now + 300})
+    }
+
+    #[test]
+    fn id_token_azp_must_be_a_uri() {
+        let key = jose::EcKey::generate("x");
+        let with = |azp: Value| sign(&key, "x", json!({"azp": azp}));
+        assert_eq!(
+            id_token_client(&with(json!("https://app.example/id"))).unwrap(),
+            "https://app.example/id"
+        );
+        assert!(id_token_client(&with(json!("my-app"))).is_err());
+        assert!(id_token_client(&with(json!(""))).is_err());
+        assert!(id_token_client(&sign(&key, "x", json!({}))).is_err());
+    }
+
+    #[test]
+    fn redirect_hops_resolve_against_the_current_url() {
+        let from = url::Url::parse("https://id.example/a/b").unwrap();
+        assert_eq!(
+            redirect_target(&from, Some("/c")).unwrap().as_str(),
+            "https://id.example/c"
+        );
+        assert_eq!(
+            redirect_target(&from, Some("http://127.0.0.1/x"))
+                .unwrap()
+                .as_str(),
+            "http://127.0.0.1/x"
+        );
+        assert!(redirect_target(&from, None).is_err());
+        // Each hop then faces the policy: a redirect into loopback is refused before it is
+        // requested.
+        let cfg = cfg();
+        assert!(check_url_static(&cfg, "http://127.0.0.1/x").is_err());
+        assert!(check_url_static(&cfg, "https://127.0.0.1/x").is_err());
+        assert!(check_url_static(&cfg, "https://[::1]/x").is_err());
+    }
+
+    /// A redirect to a loopback address is never requested: the fetch client follows no
+    /// redirect, and the hop fails the policy check before any request goes out.
+    #[tokio::test]
+    async fn fetch_refuses_a_redirect_into_loopback() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        // The internal target: counts the requests that reach it.
+        let internal = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let internal_addr = internal.local_addr().unwrap();
+        let hits = Arc::new(AtomicUsize::new(0));
+        let h = Arc::clone(&hits);
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = internal.accept().await {
+                h.fetch_add(1, Ordering::SeqCst);
+                let mut buf = [0u8; 1024];
+                let _ = sock.read(&mut buf).await;
+                let _ = sock
+                    .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\n{}")
+                    .await;
+            }
+        });
+        // The "attacker's" server redirects there.
+        let outer = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let outer_addr = outer.local_addr().unwrap();
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = outer.accept().await {
+                let mut buf = [0u8; 1024];
+                let _ = sock.read(&mut buf).await;
+                let resp = format!(
+                    "HTTP/1.1 302 Found\r\nlocation: http://{internal_addr}/secret\r\ncontent-length: 0\r\n\r\n"
+                );
+                let _ = sock.write_all(resp.as_bytes()).await;
+            }
+        });
+        // The first hop is let through (as the insecure escape hatch would), but the policy is the
+        // secure one for every hop after: model that by checking the redirect against a secure
+        // configuration with the client the insecure one builds.
+        let mut insecure = cfg();
+        insecure.allow_insecure_fetch = true;
+        let client = super::super::fetch_client(&insecure).unwrap();
+        let resp = client
+            .get(format!("http://{outer_addr}/me"))
+            .send()
+            .await
+            .unwrap();
+        // The client does not follow the redirect itself.
+        assert_eq!(resp.status().as_u16(), 302);
+        let next = redirect_target(
+            &url::Url::parse(&format!("http://{outer_addr}/me")).unwrap(),
+            resp.headers()
+                .get(reqwest::header::LOCATION)
+                .and_then(|v| v.to_str().ok()),
+        )
+        .unwrap();
+        assert!(check_url(&cfg(), next.as_str()).await.is_err());
+        assert_eq!(hits.load(Ordering::SeqCst), 0);
+        // And a secure fetch of a non-https or loopback URL never leaves the process.
+        assert!(
+            fetch(&cfg(), &client, &format!("http://{outer_addr}/me"), "*/*")
+                .await
+                .is_err()
+        );
+        assert_eq!(hits.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn the_resolver_keeps_public_addresses_only() {
+        let addrs: Vec<std::net::SocketAddr> = [
+            "127.0.0.1:443",
+            "10.0.0.1:443",
+            "169.254.169.254:80",
+            "[::1]:443",
+            "93.184.216.34:443",
+        ]
+        .iter()
+        .map(|a| a.parse().unwrap())
+        .collect();
+        assert_eq!(
+            super::super::public_addrs(addrs),
+            vec!["93.184.216.34:443".parse::<std::net::SocketAddr>().unwrap()]
+        );
     }
 
     #[test]

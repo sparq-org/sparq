@@ -3,8 +3,11 @@
 //! The storage owner may do anything; the agent that created a resource may do anything with it;
 //! anyone else what an access grant gives them. A grant's policies name an assignee (an agent, or
 //! `foaf:Agent` for everyone), actions (`read`, `modify`, `create`, `delete`), the resources they
-//! cover (not recursively: `create` on a container lets the assignee add members to it) and ODRL
-//! constraints that must all hold.
+//! cover and ODRL constraints that must all hold. A target names resources through a matcher type
+//! (`DataResource`, `Container` or `StorageResource`) and values, not recursively (the draft gives
+//! target values no containment semantics; `create` on a container lets the assignee add members
+//! to it); a policy without a target (it is OPTIONAL) covers every resource of the grant's
+//! `storage`.
 //!
 //! The access grant service and the access request service are LWS containers at
 //! [`GRANTS_PATH`](super::GRANTS_PATH) and [`REQUESTS_PATH`](super::REQUESTS_PATH). Only the owner
@@ -12,19 +15,20 @@
 //! withdraw what it asked. Both are stored through the [`Store`], so they survive a restart on a
 //! durable backend, and kept in memory for authorization.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::RwLock;
 
 use axum::http::{header, Method, StatusCode};
-use axum::response::Response;
+use axum::response::{IntoResponse, Response};
 use bytes::Bytes;
 use serde_json::{json, Value};
 
 use super::{
-    add_link, has_type, is_uri, jose, json_is_uri, method_not_allowed, problem, set, Agent,
-    LwsConfig, LwsRequest, LwsState, FOAF_AGENT, GRANTS_PATH, LWS_CONTEXT, LWS_JSON, LWS_NS,
-    REQUESTS_PATH,
+    has_lws_context, has_type, is_uri, jose, json_is_uri, method_not_allowed, none_match, problem,
+    service_links, service_linkset, service_listing, set, subject_tokens, Agent, LwsConfig,
+    LwsRequest, LwsState, FOAF_AGENT, GRANTS_PATH, LWS_JSON, LWS_NS, META_SUFFIX, REQUESTS_PATH,
 };
+use crate::error::ServerError;
 use crate::store::Store;
 
 /// What a request does to a resource.
@@ -197,12 +201,58 @@ pub fn format_rfc3339(secs: i64) -> String {
     )
 }
 
+/// What kind of resource a target matcher matches (Access Profile, Targets).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TargetKind {
+    /// `lws:DataResource`: data resources only.
+    DataResource,
+    /// `lws:Container`: containers only.
+    Container,
+    /// `lws:StorageResource`: any storage resource.
+    StorageResource,
+}
+
+impl TargetKind {
+    /// The matcher a target `type` names, as a term or in the LWS namespace; `None` for one this
+    /// server does not support (and so cannot enforce).
+    fn parse(v: &Value) -> Option<Self> {
+        let s = v.as_str()?;
+        Some(match s.strip_prefix(LWS_NS).unwrap_or(s) {
+            "DataResource" => TargetKind::DataResource,
+            "Container" => TargetKind::Container,
+            "StorageResource" => TargetKind::StorageResource,
+            _ => return None,
+        })
+    }
+
+    fn matches(self, uri: &str) -> bool {
+        match self {
+            TargetKind::DataResource => !uri.ends_with('/'),
+            TargetKind::Container => uri.ends_with('/'),
+            TargetKind::StorageResource => true,
+        }
+    }
+}
+
+/// A policy's target: a matcher and the resources it names. The draft defines no containment
+/// semantics for target values, so a value names that resource alone, not its members (`create` on
+/// a container is what lets an assignee add members to it).
+#[derive(Debug, Clone)]
+pub struct Target {
+    pub kind: TargetKind,
+    pub values: Vec<String>,
+}
+
 /// One AccessPolicy of a grant.
 #[derive(Debug, Clone)]
 pub struct Policy {
     pub actions: Vec<Action>,
     pub assignee: String,
-    pub targets: Vec<String>,
+    /// `None` when the policy names no target (the property is OPTIONAL): it then covers every
+    /// resource of the storage the grant is scoped to.
+    pub target: Option<Target>,
+    /// The grant's `storage`: the scope of an untargeted policy.
+    pub storage: String,
     pub constraints: Vec<Constraint>,
 }
 
@@ -210,7 +260,21 @@ impl Policy {
     fn applies(&self, subject: Option<&str>, action: Action, uri: &str) -> bool {
         (self.assignee == FOAF_AGENT || Some(self.assignee.as_str()) == subject)
             && self.actions.contains(&action)
-            && self.targets.iter().any(|t| t == uri)
+            && self.covers(uri)
+    }
+
+    /// Whether the policy's target covers `uri`.
+    pub fn covers(&self, uri: &str) -> bool {
+        match &self.target {
+            Some(t) => t.kind.matches(uri) && t.values.iter().any(|v| v == uri),
+            None => {
+                let scope = self.storage.trim_end_matches('/');
+                !scope.is_empty()
+                    && uri
+                        .strip_prefix(scope)
+                        .is_some_and(|rest| rest.starts_with('/'))
+            }
+        }
     }
 }
 
@@ -270,8 +334,13 @@ impl AccessStore {
                     .get("author")
                     .and_then(Value::as_str)
                     .map(str::to_string);
+                let storage = document
+                    .get("storage")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
                 let policies = if grants {
-                    policies(document.get("access").unwrap_or(&Value::Null)).unwrap_or_default()
+                    policies(document.get("access").unwrap_or(&Value::Null), storage)
+                        .unwrap_or_default()
                 } else {
                     Vec::new()
                 };
@@ -385,18 +454,36 @@ pub async fn allowed<S: Store + 'static>(
         .any(|p| p.constraints.iter().all(|c| c.satisfied(&ctx)))
 }
 
-/// The AccessPolicy entries of `access`, or `None` when they are malformed.
-pub fn policies(access: &Value) -> Option<Vec<Policy>> {
+/// The AccessPolicy entries of `access` in a document scoped to `storage`, or `None` when they are
+/// malformed.
+pub fn policies(access: &Value, storage: &str) -> Option<Vec<Policy>> {
     let list = access.as_array().filter(|a| !a.is_empty())?;
     let mut out = Vec::new();
     for p in list {
-        // type is REQUIRED and MUST include AccessPolicy; target, when given, MUST be an object.
+        // type is REQUIRED and MUST include AccessPolicy.
         if !has_type(p.get("type").unwrap_or(&Value::Null), "AccessPolicy") {
             return None;
         }
-        if p.get("target").is_some_and(|t| !t.is_object()) {
-            return None;
-        }
+        // target is OPTIONAL; when given it is an object with a supported matcher type and one or
+        // more value strings.
+        let target = match p.get("target") {
+            None => None,
+            Some(t) => {
+                let kind = TargetKind::parse(t.get("type")?)?;
+                let values: Vec<String> = match t.get("value")? {
+                    Value::Array(a) => a
+                        .iter()
+                        .map(|v| v.as_str().map(str::to_string))
+                        .collect::<Option<_>>()?,
+                    Value::String(s) => vec![s.clone()],
+                    _ => return None,
+                };
+                if values.is_empty() {
+                    return None;
+                }
+                Some(Target { kind, values })
+            }
+        };
         let constraints = match p.get("constraint") {
             None => Vec::new(),
             Some(Value::Array(cs)) => {
@@ -438,26 +525,32 @@ pub fn policies(access: &Value) -> Option<Vec<Policy>> {
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_string();
-        let targets: Vec<String> = match p.get("target").and_then(|t| t.get("value")) {
-            Some(Value::Array(a)) => a
-                .iter()
-                .filter_map(Value::as_str)
-                .map(str::to_string)
-                .collect(),
-            Some(Value::String(s)) => vec![s.clone()],
-            _ => Vec::new(),
-        };
-        if actions.is_empty() || assignee.is_empty() || targets.is_empty() {
+        if actions.is_empty() || assignee.is_empty() {
             return None;
         }
         out.push(Policy {
             actions,
             assignee,
-            targets,
+            target,
+            storage: storage.to_string(),
             constraints,
         });
     }
     Some(out)
+}
+
+/// The assignees an access document's policies name.
+fn assignees(document: &Value) -> Vec<String> {
+    document
+        .get("access")
+        .and_then(Value::as_array)
+        .map(|ps| {
+            ps.iter()
+                .filter_map(|p| p.get("assignee").and_then(Value::as_str))
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// The access grant service and the access request service.
@@ -468,15 +561,29 @@ pub async fn handle<S: Store + 'static>(
 ) -> Response {
     let grants = req.path.starts_with(GRANTS_PATH);
     let base = if grants { GRANTS_PATH } else { REQUESTS_PATH };
-    let id = &req.path[base.len()..];
+    let container = state.cfg.absolute(base);
+    let mut id = &req.path[base.len()..];
+    // `{container}.meta` and `{member}.meta` are the (read-only) linksets the container and its
+    // members link to.
+    let linkset = id.ends_with(META_SUFFIX);
+    if linkset {
+        id = &id[..id.len() - META_SUFFIX.len()];
+    }
     let owner = state.cfg.open || (agent.subject.is_some() && agent.subject == state.cfg.owner);
     if id.is_empty() {
+        if linkset {
+            return if owner {
+                service_linkset(&state.cfg, req, &container)
+            } else {
+                state.deny(agent)
+            };
+        }
         return match req.method {
             Method::GET | Method::HEAD => {
                 if !owner {
                     return state.deny(agent);
                 }
-                listing(state, grants)
+                listing(state, req, grants)
             }
             Method::POST => {
                 if !state.cfg.open && (agent.subject.is_none() || (grants && !owner)) {
@@ -505,25 +612,35 @@ pub async fn handle<S: Store + 'static>(
     if !mine {
         return state.deny(agent);
     }
+    let iri = format!("{container}{id}");
+    if linkset {
+        return service_linkset(&state.cfg, req, &iri);
+    }
     match req.method {
         Method::GET | Method::HEAD => {
+            if none_match(req, &record.etag) {
+                let mut resp = StatusCode::NOT_MODIFIED.into_response();
+                set(resp.headers_mut(), header::ETAG, &record.etag);
+                service_links(&state.cfg, resp.headers_mut(), &iri, &container);
+                return resp;
+            }
             let mut resp = super::json_response(StatusCode::OK, LWS_JSON, &record.document);
             set(resp.headers_mut(), header::ETAG, &record.etag);
-            add_link(resp.headers_mut(), &state.cfg.absolute(base), "up", None);
-            add_link(
-                resp.headers_mut(),
-                &state.cfg.storage(),
-                &format!("{LWS_NS}storage"),
-                None,
-            );
+            service_links(&state.cfg, resp.headers_mut(), &iri, &container);
             resp
         }
         Method::DELETE => {
-            let iri = state.cfg.absolute(&format!("{base}{id}"));
-            let _ = state
-                .store
-                .delete(&iri, Some(&state.cfg.absolute(base)))
-                .await;
+            // A revocation is durable before it is reported: a grant whose stored copy survives
+            // would be reloaded, and so reinstated, at the next boot.
+            match state.store.delete(&iri, Some(&container)).await {
+                Ok(_) | Err(ServerError::NotFound) => {}
+                Err(e) => {
+                    return problem(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Some(&format!("cannot delete {iri}: {e}")),
+                    )
+                }
+            }
             state.access.map(grants).write().expect("lock").remove(id);
             state.access.bump(grants);
             problem(StatusCode::NO_CONTENT, None)
@@ -532,7 +649,7 @@ pub async fn handle<S: Store + 'static>(
     }
 }
 
-fn listing<S: Store + 'static>(state: &LwsState<S>, grants: bool) -> Response {
+fn listing<S: Store + 'static>(state: &LwsState<S>, req: &LwsRequest, grants: bool) -> Response {
     let base = if grants { GRANTS_PATH } else { REQUESTS_PATH };
     let items: Vec<Value> = state
         .access
@@ -542,15 +659,7 @@ fn listing<S: Store + 'static>(state: &LwsState<S>, grants: bool) -> Response {
         .keys()
         .map(|id| json!({"id": state.cfg.absolute(&format!("{base}{id}")), "type": "DataResource", "format": LWS_JSON}))
         .collect();
-    let body = json!({
-        "@context": LWS_CONTEXT,
-        "id": state.cfg.absolute(base),
-        "type": "Container",
-        "totalItems": items.len(),
-        "items": items,
-    });
-    let mut resp = super::json_response(StatusCode::OK, LWS_JSON, &body);
-    let etag = (if grants {
+    let version = (if grants {
         &state.access.grants_etag
     } else {
         &state.access.requests_etag
@@ -558,20 +667,7 @@ fn listing<S: Store + 'static>(state: &LwsState<S>, grants: bool) -> Response {
     .read()
     .expect("lock")
     .clone();
-    set(resp.headers_mut(), header::ETAG, &etag);
-    add_link(
-        resp.headers_mut(),
-        &format!("{LWS_NS}Container"),
-        "type",
-        None,
-    );
-    add_link(
-        resp.headers_mut(),
-        &state.cfg.storage(),
-        &format!("{LWS_NS}storage"),
-        None,
-    );
-    resp
+    service_listing(&state.cfg, req, &state.cfg.absolute(base), items, &version)
 }
 
 async fn create<S: Store + 'static>(
@@ -588,39 +684,46 @@ async fn create<S: Store + 'static>(
     } else {
         "AccessRequest"
     };
-    // The access data model: type, storage and access are REQUIRED, and an inbox, when given, MUST
-    // be a URI. A document that breaks them is refused rather than stored.
+    // The JSON-LD serialization MUST carry an @context that includes the LWS context.
+    if !has_lws_context(body.get("@context")) {
+        return problem(
+            StatusCode::BAD_REQUEST,
+            Some("an access document's @context must include https://www.w3.org/ns/lws/v1"),
+        );
+    }
+    // The access data model: type, storage and access are REQUIRED, and storage and an inbox, when
+    // given, MUST be URIs. A document that breaks them is refused rather than stored.
     let valid = body.is_object()
         && has_type(body.get("type").unwrap_or(&Value::Null), wanted)
-        && body.get("storage").is_some_and(Value::is_string)
+        && body.get("storage").is_some_and(json_is_uri)
         && body.get("inbox").is_none_or(json_is_uri);
+    let storage = body
+        .get("storage")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
     let Some(parsed) = valid
-        .then(|| policies(body.get("access").unwrap_or(&Value::Null)))
+        .then(|| policies(body.get("access").unwrap_or(&Value::Null), storage))
         .flatten()
     else {
         return problem(StatusCode::BAD_REQUEST, Some("not a valid access document"));
     };
     let id = jose::random_id();
     let base = if grants { GRANTS_PATH } else { REQUESTS_PATH };
-    let iri = state.cfg.absolute(&format!("{base}{id}"));
+    let container = state.cfg.absolute(base);
+    let iri = format!("{container}{id}");
     let mut document = body.clone();
     document["id"] = Value::String(iri.clone());
     let stored = json!({"document": document, "author": agent.subject});
     if let Err(e) = state
         .store
-        .create_in_container(
-            &state.cfg.absolute(base),
-            &iri,
-            Bytes::from(stored.to_string()),
-            LWS_JSON,
-        )
+        .create_in_container(&container, &iri, Bytes::from(stored.to_string()), LWS_JSON)
         .await
     {
         return problem(StatusCode::INTERNAL_SERVER_ERROR, Some(&e.to_string()));
     }
     let record = Record {
         id: id.clone(),
-        document,
+        document: document.clone(),
         policies: if grants { parsed } else { Vec::new() },
         author: agent.subject.clone(),
         etag: new_etag(),
@@ -632,23 +735,116 @@ async fn create<S: Store + 'static>(
         .expect("lock")
         .insert(id, record);
     state.access.bump(grants);
+    let activity = json!({"type": ["Create"], "object": {"id": iri, "type": [wanted]}});
     // "When an inbox property is present on an access request or access grant, the server SHOULD
     // deliver notifications to that endpoint" (section 11.6).
-    if let Some(inbox) = body
+    let mut inboxes: BTreeSet<String> = body
         .get("inbox")
         .and_then(Value::as_str)
         .filter(|i| is_uri(i))
-    {
-        let activity = json!({"type": ["Create"], "object": {"id": iri, "type": [wanted]}});
-        state.notify.deliver(state, inbox, activity, None);
+        .map(str::to_string)
+        .into_iter()
+        .collect();
+    if grants {
+        // "When a new access grant is created, the requesting agent SHOULD be notified at the inbox
+        // specified in the associated access request." The draft gives a grant no link to its
+        // request, so the associated requests are those by or for an agent the grant names.
+        inboxes.extend(requester_inboxes(state, &document));
+    } else {
+        // "When a new access request is submitted, the storage controller SHOULD be notified": at
+        // the inbox the owner's identity document names, looked up in the background.
+        let state = state.clone();
+        let activity = activity.clone();
+        tokio::spawn(async move {
+            if let Some(inbox) = owner_inbox(&state).await {
+                state.notify.deliver(&state, &inbox, activity, None);
+            }
+        });
+    }
+    for inbox in inboxes {
+        state.notify.deliver(state, &inbox, activity.clone(), None);
     }
     let mut resp = problem(StatusCode::CREATED, None);
     set(resp.headers_mut(), header::LOCATION, &iri);
+    service_links(&state.cfg, resp.headers_mut(), &iri, &container);
     resp
+}
+
+/// The inboxes of the access requests associated with `grant`: those made by, or asking for, an
+/// agent one of its policies is assigned to (public grants name no requester).
+fn requester_inboxes<S: Store + 'static>(state: &LwsState<S>, grant: &Value) -> BTreeSet<String> {
+    let grantees: BTreeSet<String> = assignees(grant)
+        .into_iter()
+        .filter(|a| a != FOAF_AGENT)
+        .collect();
+    state
+        .access
+        .requests
+        .read()
+        .expect("lock")
+        .values()
+        .filter(|r| {
+            r.author.as_ref().is_some_and(|a| grantees.contains(a))
+                || assignees(&r.document).iter().any(|a| grantees.contains(a))
+        })
+        .filter_map(|r| r.document.get("inbox").and_then(Value::as_str))
+        .filter(|i| is_uri(i))
+        .map(str::to_string)
+        .collect()
+}
+
+/// The storage controller's inbox: the `inbox` (or `ldp:inbox`) its identity document names.
+/// Only an http(s) owner with a JSON(-LD) document has a discoverable one; a did:key owner, a
+/// Turtle-only profile or an unreachable document has none, and the notification is skipped.
+async fn owner_inbox<S: Store + 'static>(state: &LwsState<S>) -> Option<String> {
+    let owner = state.cfg.owner.as_deref()?;
+    if !(owner.starts_with("https://") || owner.starts_with("http://")) {
+        return None;
+    }
+    let (_, body) = subject_tokens::fetch(
+        &state.cfg,
+        &state.http,
+        owner,
+        "application/ld+json, application/json;q=0.9",
+    )
+    .await
+    .ok()?;
+    let doc: Value = serde_json::from_slice(&body).ok()?;
+    inbox_of(&doc, owner)
+}
+
+/// The inbox a JSON(-LD) identity document names for `subject`: on the top-level node, or on the
+/// `@graph` node whose id is the subject.
+pub fn inbox_of(doc: &Value, subject: &str) -> Option<String> {
+    let node_inbox = |n: &Value| {
+        ["inbox", "ldp:inbox", "http://www.w3.org/ns/ldp#inbox"]
+            .iter()
+            .find_map(|k| match n.get(*k)? {
+                Value::String(s) => Some(s.clone()),
+                Value::Object(o) => o
+                    .get("id")
+                    .or_else(|| o.get("@id"))
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+                _ => None,
+            })
+            .filter(|i| is_uri(i))
+    };
+    node_inbox(doc).or_else(|| {
+        doc.get("@graph")?
+            .as_array()?
+            .iter()
+            .filter(|n| {
+                n.get("id").or_else(|| n.get("@id")).and_then(Value::as_str) == Some(subject)
+            })
+            .find_map(node_inbox)
+    })
 }
 
 #[cfg(test)]
 mod tests {
+    use super::super::test_store;
+    use super::super::LD_JSON;
     use super::*;
 
     #[test]
@@ -667,17 +863,314 @@ mod tests {
         assert_eq!(parse_rfc3339("yesterday"), None);
     }
 
+    const S: &str = "https://s/";
+
     #[test]
     fn policies_validate() {
         let ok = json!([{"type": "AccessPolicy", "action": ["read"], "assignee": FOAF_AGENT,
-                         "target": {"value": ["https://s/x"]}}]);
-        assert_eq!(policies(&ok).unwrap().len(), 1);
-        let bad_action = json!([{"type": "AccessPolicy", "action": ["fly"], "assignee": "a", "target": {"value": "x"}}]);
-        assert!(policies(&bad_action).is_none());
-        let bad_constraint = json!([{"type": "AccessPolicy", "action": "read", "assignee": "a", "target": {"value": "x"},
+                         "target": {"type": "StorageResource", "value": ["https://s/x"]}}]);
+        assert_eq!(policies(&ok, S).unwrap().len(), 1);
+        let bad_action = json!([{"type": "AccessPolicy", "action": ["fly"], "assignee": "a",
+                                 "target": {"type": "StorageResource", "value": "x"}}]);
+        assert!(policies(&bad_action, S).is_none());
+        let bad_constraint = json!([{"type": "AccessPolicy", "action": "read", "assignee": "a",
+                                     "target": {"type": "StorageResource", "value": "x"},
                                      "constraint": [{"leftOperand": "colour", "operator": "eq", "rightOperand": "red"}]}]);
-        assert!(policies(&bad_constraint).is_none());
-        assert!(policies(&json!([])).is_none());
+        assert!(policies(&bad_constraint, S).is_none());
+        assert!(policies(&json!([]), S).is_none());
+        // A target needs a supported matcher type and one or more value strings.
+        for target in [
+            json!({"value": ["https://s/x"]}),
+            json!({"type": "Folder", "value": ["https://s/x"]}),
+            json!({"type": "Container", "value": []}),
+            json!({"type": "Container", "value": [1]}),
+            json!({"type": "Container"}),
+            json!("https://s/x"),
+        ] {
+            let p = json!([{"type": "AccessPolicy", "action": "read", "assignee": "a", "target": target}]);
+            assert!(policies(&p, S).is_none(), "{p}");
+        }
+    }
+
+    fn policy(target: Option<Value>) -> Policy {
+        let mut p = json!({"type": ["AccessPolicy"], "action": ["read"], "assignee": "https://a/"});
+        if let Some(t) = target {
+            p["target"] = t;
+        }
+        policies(&json!([p]), S).unwrap().remove(0)
+    }
+
+    #[test]
+    fn an_untargeted_policy_covers_the_whole_storage() {
+        let p = policy(None);
+        assert!(p.target.is_none());
+        for uri in [
+            "https://s/",
+            "https://s/a",
+            "https://s/a/b/",
+            "https://s/a/b/c.txt",
+        ] {
+            assert!(p.covers(uri), "{uri}");
+        }
+        // ...and nothing outside the storage it is scoped to.
+        assert!(!p.covers("https://other/a"));
+        assert!(!p.covers("https://s.evil/a"));
+        assert!(p.applies(Some("https://a/"), Action::Read, "https://s/a"));
+        assert!(!p.applies(Some("https://a/"), Action::Modify, "https://s/a"));
+        // A grant scoped to another storage grants nothing here.
+        let elsewhere = policies(
+            &json!([{"type": "AccessPolicy", "action": "read", "assignee": "https://a/"}]),
+            "https://other/",
+        )
+        .unwrap()
+        .remove(0);
+        assert!(!elsewhere.covers("https://s/a"));
+    }
+
+    #[test]
+    fn target_type_matchers() {
+        let values = json!(["https://s/c/", "https://s/c/d"]);
+        let data = policy(Some(json!({"type": "DataResource", "value": values})));
+        assert!(data.covers("https://s/c/d"));
+        assert!(!data.covers("https://s/c/"));
+        let container = policy(Some(
+            json!({"type": format!("{LWS_NS}Container"), "value": values}),
+        ));
+        assert!(container.covers("https://s/c/"));
+        assert!(!container.covers("https://s/c/d"));
+        let any = policy(Some(json!({"type": "StorageResource", "value": values})));
+        assert!(any.covers("https://s/c/") && any.covers("https://s/c/d"));
+        // Values name resources, not their members: no recursion.
+        assert!(!any.covers("https://s/c/e"));
+        assert!(!any.covers("https://s/other"));
+    }
+
+    #[test]
+    fn identity_document_inboxes() {
+        let me = "https://alice.example/profile#me";
+        assert_eq!(
+            inbox_of(
+                &json!({"id": me, "inbox": "https://alice.example/inbox/"}),
+                me
+            )
+            .as_deref(),
+            Some("https://alice.example/inbox/")
+        );
+        assert_eq!(
+            inbox_of(&json!({"ldp:inbox": {"@id": "https://a/i/"}}), me).as_deref(),
+            Some("https://a/i/")
+        );
+        let graph = json!({"@graph": [
+            {"@id": "https://alice.example/profile", "inbox": "https://wrong/"},
+            {"@id": me, "http://www.w3.org/ns/ldp#inbox": {"@id": "https://a/i/"}}
+        ]});
+        assert_eq!(inbox_of(&graph, me).as_deref(), Some("https://a/i/"));
+        assert_eq!(inbox_of(&json!({"inbox": "relative/"}), me), None);
+        assert_eq!(inbox_of(&json!({"name": "Alice"}), me), None);
+    }
+
+    fn access_doc(kind: &str, assignee: &str, inbox: Option<&str>) -> String {
+        let mut d = json!({
+            "@context": ["https://www.w3.org/ns/lws/v1"],
+            "type": [kind],
+            "storage": "http://localhost:3000/",
+            "access": [{"type": ["AccessPolicy"], "action": ["read"], "assignee": assignee}],
+        });
+        if let Some(i) = inbox {
+            d["inbox"] = json!(i);
+        }
+        d.to_string()
+    }
+
+    #[tokio::test]
+    async fn access_documents_need_the_lws_context() {
+        let (state, _) = test_store::state(100).await;
+        let post = |body: String| {
+            test_store::request(
+                Method::POST,
+                GRANTS_PATH,
+                &[("content-type", LWS_JSON)],
+                &body,
+            )
+        };
+        let agent = Agent::anonymous();
+        let ok = access_doc("AccessGrant", "https://a/", None);
+        let resp = handle(&state, &post(ok.clone()), &agent).await;
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let mut no_ctx: Value = serde_json::from_str(&ok).unwrap();
+        no_ctx.as_object_mut().unwrap().remove("@context");
+        let resp = handle(&state, &post(no_ctx.to_string()), &agent).await;
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        no_ctx["@context"] = json!(["https://www.w3.org/ns/odrl.jsonld"]);
+        let resp = handle(&state, &post(no_ctx.to_string()), &agent).await;
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn created_grants_link_up_type_and_linkset() {
+        let (state, _) = test_store::state(100).await;
+        let req = test_store::request(
+            Method::POST,
+            GRANTS_PATH,
+            &[],
+            &access_doc("AccessGrant", "https://a/", None),
+        );
+        let resp = handle(&state, &req, &Agent::anonymous()).await;
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let location = resp.headers()[header::LOCATION]
+            .to_str()
+            .unwrap()
+            .to_string();
+        let container = state.cfg.absolute(GRANTS_PATH);
+        assert_eq!(test_store::links(&resp, "up"), vec![container.clone()]);
+        assert_eq!(
+            test_store::links(&resp, "type"),
+            vec![format!("{LWS_NS}DataResource")]
+        );
+        let linkset = test_store::links(&resp, "linkset");
+        assert_eq!(linkset, vec![format!("{location}{META_SUFFIX}")]);
+        // The linkset and the container's both resolve.
+        let path = linkset[0].strip_prefix(&state.cfg.base_url).unwrap();
+        let ls = handle(
+            &state,
+            &test_store::request(Method::GET, path, &[], ""),
+            &Agent::anonymous(),
+        )
+        .await;
+        assert_eq!(ls.status(), StatusCode::OK);
+        assert_eq!(
+            test_store::body_json(ls).await["linkset"][0]["anchor"],
+            location
+        );
+        let cls = handle(
+            &state,
+            &test_store::request(Method::GET, &format!("{GRANTS_PATH}{META_SUFFIX}"), &[], ""),
+            &Agent::anonymous(),
+        )
+        .await;
+        assert_eq!(cls.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn grant_listing_is_a_paged_container() {
+        let (state, _) = test_store::state(2).await;
+        for i in 0..3 {
+            let req = test_store::request(
+                Method::POST,
+                GRANTS_PATH,
+                &[],
+                &access_doc("AccessGrant", &format!("https://a/{i}"), None),
+            );
+            assert_eq!(
+                handle(&state, &req, &Agent::anonymous()).await.status(),
+                StatusCode::CREATED
+            );
+        }
+        let get = |q: &str, accept: &str| {
+            test_store::request(
+                Method::GET,
+                &format!("{GRANTS_PATH}{q}"),
+                &[("accept", accept)],
+                "",
+            )
+        };
+        let first = handle(&state, &get("", "application/ld+json"), &Agent::anonymous()).await;
+        assert_eq!(first.status(), StatusCode::OK);
+        assert_eq!(first.headers()[header::CONTENT_TYPE], LD_JSON);
+        assert!(first.headers().contains_key(header::ETAG));
+        assert_eq!(test_store::links(&first, "next").len(), 1);
+        let doc = test_store::body_json(first).await;
+        assert_eq!(doc["totalItems"], 3);
+        assert_eq!(doc["items"].as_array().unwrap().len(), 2);
+        let second = handle(&state, &get("?page=2", "*/*"), &Agent::anonymous()).await;
+        assert_eq!(test_store::links(&second, "prev").len(), 1);
+        let bad = handle(&state, &get("", "text/html"), &Agent::anonymous()).await;
+        assert_eq!(bad.status(), StatusCode::NOT_ACCEPTABLE);
+    }
+
+    #[tokio::test]
+    async fn a_failed_revocation_keeps_the_grant() {
+        use std::sync::atomic::Ordering;
+        let (state, store) = test_store::state(100).await;
+        let req = test_store::request(
+            Method::POST,
+            GRANTS_PATH,
+            &[],
+            &access_doc("AccessGrant", "https://a/", None),
+        );
+        let resp = handle(&state, &req, &Agent::anonymous()).await;
+        let location = resp.headers()[header::LOCATION]
+            .to_str()
+            .unwrap()
+            .to_string();
+        let path = location
+            .strip_prefix(&state.cfg.base_url)
+            .unwrap()
+            .to_string();
+        let delete = test_store::request(Method::DELETE, &path, &[], "");
+        store.fail_delete.store(true, Ordering::SeqCst);
+        let resp = handle(&state, &delete, &Agent::anonymous()).await;
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        // Still enforced, still stored.
+        assert_eq!(state.access.grant_policies().len(), 1);
+        assert!(state.store.exists(&location).await.unwrap());
+        store.fail_delete.store(false, Ordering::SeqCst);
+        let resp = handle(&state, &delete, &Agent::anonymous()).await;
+        assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+        assert!(state.access.grant_policies().is_empty());
+        assert!(!state.store.exists(&location).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn grants_reach_the_inboxes_of_their_requests() {
+        let (state, _) = test_store::state(100).await;
+        let alice = Agent {
+            subject: Some("https://alice.example/#me".into()),
+            client: None,
+        };
+        for (assignee, inbox) in [
+            ("https://alice.example/#me", "https://alice.example/inbox/"),
+            ("https://bob.example/#me", "https://bob.example/inbox/"),
+        ] {
+            let req = test_store::request(
+                Method::POST,
+                REQUESTS_PATH,
+                &[],
+                &access_doc("AccessRequest", assignee, Some(inbox)),
+            );
+            assert_eq!(
+                handle(&state, &req, &alice).await.status(),
+                StatusCode::CREATED
+            );
+        }
+        let grant: Value =
+            serde_json::from_str(&access_doc("AccessGrant", "https://bob.example/#me", None))
+                .unwrap();
+        // Bob's request asked for Bob; Alice's request was made by Alice, for Alice.
+        assert_eq!(
+            requester_inboxes(&state, &grant)
+                .into_iter()
+                .collect::<Vec<_>>(),
+            vec!["https://bob.example/inbox/".to_string()]
+        );
+        let alice_grant: Value = serde_json::from_str(&access_doc(
+            "AccessGrant",
+            "https://alice.example/#me",
+            None,
+        ))
+        .unwrap();
+        // Alice authored both requests, so both are hers to hear about.
+        assert_eq!(requester_inboxes(&state, &alice_grant).len(), 2);
+        // A public grant names no requester.
+        let public: Value =
+            serde_json::from_str(&access_doc("AccessGrant", FOAF_AGENT, None)).unwrap();
+        assert!(requester_inboxes(&state, &public).is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_owner_without_an_identity_document_has_no_inbox() {
+        let (state, _) = test_store::state(100).await;
+        assert_eq!(owner_inbox(&state).await, None);
     }
 
     #[test]

@@ -13,7 +13,7 @@
 //! Then, as the reference authorization server checks: `Conditions` with `NotBefore` and
 //! `NotOnOrAfter` around now, an `Audience` naming this authorization server, and a
 //! `Subject/NameID`, which is the LWS subject. The client is the `SubjectConfirmationData`
-//! `Recipient` (the issuer when there is none).
+//! `Recipient`, which is required. Both must be URIs.
 //!
 //! The XML is parsed with quick-xml into a small tree; a DOCTYPE (and so any entity but the
 //! predefined ones) or a processing instruction is refused, and exclusive XML canonicalization
@@ -29,7 +29,7 @@ use sha2::Digest;
 
 use super::jose;
 use super::subject_tokens::{parse_datetime, Verified, SKEW_SECS};
-use super::LwsConfig;
+use super::{is_uri, LwsConfig};
 
 pub const SAML_NS: &str = "urn:oasis:names:tc:SAML:2.0:assertion";
 pub const DS_NS: &str = "http://www.w3.org/2000/09/xmldsig#";
@@ -109,6 +109,10 @@ pub fn verify_at(cfg: &LwsConfig, token: &str, now: i64) -> Result<Verified, Str
     if name_id.is_empty() {
         return Err("the assertion names no subject".into());
     }
+    // The NameID is the LWS subject, which an access token's sub carries: it MUST be a URI.
+    if !is_uri(&name_id) {
+        return Err("the assertion's NameID is not a URI".into());
+    }
     let mut data = Vec::new();
     subject.descendants(SAML_NS, "SubjectConfirmationData", &mut data);
     if let Some(limit) = data.first().and_then(|d| d.attr("NotOnOrAfter")) {
@@ -121,10 +125,16 @@ pub fn verify_at(cfg: &LwsConfig, token: &str, now: i64) -> Result<Verified, Str
         .and_then(|d| d.attr("Recipient"))
         .map(str::trim)
         .filter(|r| !r.is_empty());
-    let client = recipient.unwrap_or(&issuer).to_string();
+    // "The SAML token MUST use the Recipient parameter within a saml:SubjectConfirmationData
+    // assertion for the LWS client identifier": without one the client is unknown.
+    let client = recipient
+        .ok_or("the assertion's SubjectConfirmationData names no Recipient (the client)")?;
+    if !is_uri(client) {
+        return Err("the assertion's Recipient is not a URI".into());
+    }
     Ok(Verified {
         subject: name_id,
-        client,
+        client: client.to_string(),
     })
 }
 
@@ -912,6 +922,28 @@ mod tests {
         name_id: &str,
         tamper: bool,
     ) -> String {
+        signed_assertion_to(
+            key,
+            issuer,
+            audience,
+            name_id,
+            Some("https://client.example/"),
+            tamper,
+        )
+    }
+
+    /// [`signed_assertion`] with a chosen `Recipient` (none when `None`).
+    fn signed_assertion_to(
+        key: &jose::EcKey,
+        issuer: &str,
+        audience: &str,
+        name_id: &str,
+        recipient: Option<&str>,
+        tamper: bool,
+    ) -> String {
+        let recipient = recipient
+            .map(|r| format!(" Recipient=\"{r}\""))
+            .unwrap_or_default();
         let now = jose::now_secs();
         let instant = |t: i64| {
             let days = t.div_euclid(86_400);
@@ -937,7 +969,7 @@ mod tests {
         let id = "_abc123";
         let body = |name: &str| {
             format!(
-                "<saml:Issuer>{issuer}</saml:Issuer>{{SIG}}<saml:Subject><saml:NameID Format=\"urn:oasis:names:tc:SAML:2.0:nameid-format:persistent\">{name}</saml:NameID><saml:SubjectConfirmation Method=\"urn:oasis:names:tc:SAML:2.0:cm:bearer\"><saml:SubjectConfirmationData NotOnOrAfter=\"{exp}\" Recipient=\"https://client.example/\"/></saml:SubjectConfirmation></saml:Subject><saml:Conditions NotBefore=\"{nb}\" NotOnOrAfter=\"{exp}\"><saml:AudienceRestriction><saml:Audience>{audience}</saml:Audience></saml:AudienceRestriction></saml:Conditions>",
+                "<saml:Issuer>{issuer}</saml:Issuer>{{SIG}}<saml:Subject><saml:NameID Format=\"urn:oasis:names:tc:SAML:2.0:nameid-format:persistent\">{name}</saml:NameID><saml:SubjectConfirmation Method=\"urn:oasis:names:tc:SAML:2.0:cm:bearer\"><saml:SubjectConfirmationData NotOnOrAfter=\"{exp}\"{recipient}/></saml:SubjectConfirmation></saml:Subject><saml:Conditions NotBefore=\"{nb}\" NotOnOrAfter=\"{exp}\"><saml:AudienceRestriction><saml:Audience>{audience}</saml:Audience></saml:AudienceRestriction></saml:Conditions>",
                 exp = instant(now + 300),
                 nb = instant(now)
             )
@@ -1012,6 +1044,28 @@ mod tests {
         .is_err());
         // Expired.
         assert!(verify_at(&cfg, &ok, jose::now_secs() + 3600).is_err());
+    }
+
+    #[test]
+    fn subject_and_recipient_must_be_uris() {
+        let mut cfg = LwsConfig::new("http://localhost:3000");
+        let key = jose::EcKey::generate("idp");
+        let idp = "https://idp.example/";
+        cfg.saml_idps
+            .insert(idp.into(), key.public_jwk().to_string());
+        let alice = "https://alice.example/#me";
+        // A NameID that is not a URI.
+        let err = verify(
+            &cfg,
+            &signed_assertion(&key, idp, cfg.issuer(), "alice", false),
+        );
+        assert!(err.unwrap_err().contains("NameID"));
+        // No Recipient: refused, not replaced by the issuer.
+        let none = signed_assertion_to(&key, idp, cfg.issuer(), alice, None, false);
+        assert!(verify(&cfg, &none).unwrap_err().contains("Recipient"));
+        // A Recipient that is not a URI.
+        let bad = signed_assertion_to(&key, idp, cfg.issuer(), alice, Some("client"), false);
+        assert!(verify(&cfg, &bad).unwrap_err().contains("Recipient"));
     }
 
     #[test]

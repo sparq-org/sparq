@@ -10,8 +10,8 @@ use serde_json::{json, Value};
 use super::subject_tokens;
 pub use super::subject_tokens::{ID_TOKEN_TYPE, JWT_TOKEN_TYPE};
 use super::{
-    json_response, method_not_allowed, saml, set, tokens, LwsRequest, LwsState, AS_JWKS_PATH,
-    AS_TOKEN_PATH, JSON,
+    is_uri, json_response, method_not_allowed, saml, set, tokens, LwsRequest, LwsState,
+    AS_JWKS_PATH, AS_TOKEN_PATH, JSON,
 };
 use crate::store::Store;
 
@@ -33,12 +33,22 @@ pub async fn handle<S: Store + 'static>(state: &LwsState<S>, req: &LwsRequest) -
         let mut r = json_response(
             StatusCode::OK,
             "application/jwk-set+json",
-            &json!({"keys": [state.cfg.as_key.public_jwk()]}),
+            &jwks(&state.cfg),
         );
         set(r.headers_mut(), header::CACHE_CONTROL, "max-age=300");
         return r;
     }
     json_response(StatusCode::OK, JSON, &metadata(state))
+}
+
+/// The JWKS: the current signing key and, during a rotation, the previous one.
+pub fn jwks(cfg: &super::LwsConfig) -> Value {
+    let keys: Vec<Value> = cfg
+        .as_verify_keys()
+        .iter()
+        .map(super::jose::VerifyKey::public_jwk)
+        .collect();
+    json!({ "keys": keys })
 }
 
 /// RFC 8414 metadata. Token exchange is listed among the grant types because the RFC 8414 default
@@ -110,10 +120,17 @@ async fn token<S: Store + 'static>(state: &LwsState<S>, req: &LwsRequest) -> Res
             )
         }
     };
+    // The access token's sub and client_id MUST be URIs (section 5.2.3).
+    if !is_uri(&verified.subject) || !is_uri(&verified.client) {
+        return oauth_error(
+            "invalid_request",
+            "invalid subject token: the subject and the client must be URIs",
+        );
+    }
     let token = tokens::mint(
         &state.cfg,
         &verified.subject,
-        Some(&verified.client),
+        &verified.client,
         &form.resource,
     );
     let body = json!({

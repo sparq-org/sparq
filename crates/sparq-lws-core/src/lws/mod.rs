@@ -97,6 +97,9 @@ pub struct LwsConfig {
     pub page_size: usize,
     /// Signs the access tokens the authorization server issues.
     pub as_key: jose::EcKey,
+    /// The authorization server's previous signing key, after a rotation: published in the JWKS,
+    /// and tokens it signed (named by its `kid`) still validate until they expire.
+    pub as_previous_key: Option<jose::VerifyKey>,
     /// Signs webhook notification deliveries; published in the storage description.
     pub notify_key: jose::EcKey,
     /// Lifetime of issued access tokens, in seconds.
@@ -119,6 +122,7 @@ impl LwsConfig {
             open: false,
             page_size: 100,
             as_key: jose::EcKey::generate("lws-as-1"),
+            as_previous_key: None,
             notify_key: jose::EcKey::generate("notify-key"),
             token_ttl_secs: 300,
             allow_insecure_fetch: false,
@@ -134,6 +138,9 @@ impl LwsConfig {
     /// - `SOLID_SERVER_LWS_AS_KEY_FILE`: a private P-256 JWK that signs access tokens, created
     ///   with a fresh key when the file does not exist (default: a fresh key per boot, so tokens do
     ///   not survive a restart);
+    /// - `SOLID_SERVER_LWS_AS_PREVIOUS_KEY_FILE`: the signing key the AS key replaced (a public
+    ///   or private P-256 JWK, with a `kid` that differs from the current key's), kept for
+    ///   validation and the JWKS during a rotation;
     /// - `SOLID_SERVER_LWS_NOTIFY_KEY_FILE`: the same for the key that signs notifications;
     /// - `SOLID_SERVER_LWS_TOKEN_TTL_SECS`: access token lifetime (default 300);
     /// - `SOLID_SERVER_LWS_ALLOW_INSECURE_FETCH=1`: allow `http:` and private-address fetches
@@ -196,6 +203,18 @@ impl LwsConfig {
         if let Some(k) = key("SOLID_SERVER_LWS_AS_KEY_FILE", "lws-as-1")? {
             cfg.as_key = k;
         }
+        if let Some(jwk) = read("SOLID_SERVER_LWS_AS_PREVIOUS_KEY_FILE")? {
+            let previous = jose::VerifyKey::from_jwk(&jwk)
+                .map_err(|e| format!("SOLID_SERVER_LWS_AS_PREVIOUS_KEY_FILE: {e}"))?;
+            if previous.kid() == cfg.as_key.kid() {
+                return Err(
+                    "SOLID_SERVER_LWS_AS_PREVIOUS_KEY_FILE: its kid is the current key's; give the \
+                     rotated keys distinct kids"
+                        .into(),
+                );
+            }
+            cfg.as_previous_key = Some(previous);
+        }
         if let Some(k) = key("SOLID_SERVER_LWS_NOTIFY_KEY_FILE", "notify-key")? {
             cfg.notify_key = k;
         }
@@ -221,10 +240,64 @@ impl LwsConfig {
         self.storage()
     }
 
+    /// The keys access tokens verify against: the current signing key, then the previous one.
+    pub fn as_verify_keys(&self) -> Vec<jose::VerifyKey> {
+        std::iter::once(jose::VerifyKey::from(&self.as_key))
+            .chain(self.as_previous_key.clone())
+            .collect()
+    }
+
     /// The absolute URI of a server path.
     pub fn absolute(&self, path: &str) -> String {
         format!("{}{}", self.base_url, path)
     }
+}
+
+/// The client the authorization server fetches identity documents, OpenID provider metadata and
+/// JWKS with (see [`subject_tokens::fetch`]): no automatic redirects (each hop is checked before it
+/// is requested), no proxy, and, unless `allow_insecure_fetch` is set, `https:` only through a
+/// resolver that hands out public addresses alone, so the connection goes to an address that
+/// passed the check (no DNS rebinding between check and connect).
+pub fn fetch_client(cfg: &LwsConfig) -> Result<reqwest::Client, String> {
+    let mut builder = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .connect_timeout(std::time::Duration::from_secs(5))
+        .redirect(reqwest::redirect::Policy::none())
+        .no_proxy();
+    if !cfg.allow_insecure_fetch {
+        builder = builder
+            .dns_resolver(Arc::new(PublicOnlyResolver))
+            .https_only(true);
+    }
+    builder.build().map_err(|e| format!("http client: {e}"))
+}
+
+/// Resolves names to their public addresses only (see [`subject_tokens::is_forbidden_ip`]), so an
+/// outbound request (a fetch or a notification delivery) cannot be pointed at the server's own
+/// network by a name that resolves there.
+pub struct PublicOnlyResolver;
+
+impl reqwest::dns::Resolve for PublicOnlyResolver {
+    fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+        let host = name.as_str().to_string();
+        Box::pin(async move {
+            let addrs = public_addrs(tokio::net::lookup_host((host.as_str(), 0)).await?);
+            if addrs.is_empty() {
+                return Err(format!("{host} has no public address").into());
+            }
+            Ok(Box::new(addrs.into_iter()) as reqwest::dns::Addrs)
+        })
+    }
+}
+
+/// The public addresses among `addrs`.
+pub fn public_addrs(
+    addrs: impl IntoIterator<Item = std::net::SocketAddr>,
+) -> Vec<std::net::SocketAddr> {
+    addrs
+        .into_iter()
+        .filter(|a| !subject_tokens::is_forbidden_ip(a.ip()))
+        .collect()
 }
 
 /// Write a private key file readable by its owner only.
@@ -328,11 +401,7 @@ impl<S: Store + 'static> LwsState<S> {
     /// Build the state: ensure the storage root and the service containers exist, and load the
     /// stored access grants, requests and subscriptions.
     pub async fn new(store: S, cfg: LwsConfig) -> Result<Self, String> {
-        let http = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(10))
-            .redirect(reqwest::redirect::Policy::limited(3))
-            .build()
-            .map_err(|e| format!("http client: {e}"))?;
+        let http = fetch_client(&cfg)?;
         let root = cfg.storage();
         if !store
             .exists(&root)
@@ -591,6 +660,219 @@ pub fn add_link(headers: &mut HeaderMap, target: &str, rel: &str, media_type: Op
     }
 }
 
+// ---- service containers ----
+//
+// The access grant, access request and subscription services are LWS containers (access requests
+// section 11.5, webhook "Subscription Management"), held in memory rather than in the store. These
+// helpers give their listings what [`resources`] gives a stored container: content negotiation,
+// paging, an entity tag and the container links.
+
+/// One media range of an Accept header: essence, q and profile.
+fn accept_ranges(accept: &str) -> Vec<(String, f32, Option<String>)> {
+    accept
+        .split(',')
+        .filter_map(|part| {
+            let mut pieces = part.split(';');
+            let essence = pieces.next()?.trim().to_ascii_lowercase();
+            if essence.is_empty() {
+                return None;
+            }
+            let (mut q, mut profile) = (1.0, None);
+            for p in pieces {
+                if let Some((k, v)) = p.split_once('=') {
+                    let (k, v) = (k.trim().to_ascii_lowercase(), v.trim().trim_matches('"'));
+                    if k == "q" {
+                        q = v.parse().unwrap_or(0.0);
+                    } else if k == "profile" {
+                        profile = Some(v.to_string());
+                    }
+                }
+            }
+            Some((essence, q, profile))
+        })
+        .collect()
+}
+
+/// The container media type for `accept`: `application/lws+json`, `application/ld+json` (lws+json
+/// when it names the LWS profile) or `application/json`, the earlier winning ties; lws+json when
+/// there is no Accept; `None` when none of them is acceptable.
+pub fn negotiate_container(accept: Option<&str>) -> Option<&'static str> {
+    const OFFERED: [&str; 3] = [LWS_JSON, LD_JSON, JSON];
+    let Some(accept) = accept.filter(|a| !a.trim().is_empty()) else {
+        return Some(LWS_JSON);
+    };
+    let ranges = accept_ranges(accept);
+    if ranges
+        .iter()
+        .any(|(e, q, p)| e == LD_JSON && p.as_deref() == Some(LWS_CONTEXT) && *q > 0.0)
+    {
+        return Some(LWS_JSON);
+    }
+    let mut best: Option<(f32, usize)> = None;
+    for (i, offer) in OFFERED.iter().enumerate() {
+        // The most specific range that matches the offer decides its q.
+        let mut q_for: Option<(f32, u8)> = None;
+        for (essence, q, _) in &ranges {
+            let spec = if essence == offer {
+                3
+            } else if essence == "application/*" {
+                2
+            } else if essence == "*/*" {
+                1
+            } else {
+                0
+            };
+            if spec > 0 && q_for.is_none_or(|(_, s)| spec > s) {
+                q_for = Some((*q, spec));
+            }
+        }
+        if let Some((q, _)) = q_for.filter(|(q, _)| *q > 0.0) {
+            if best.is_none_or(|(bq, _)| q > bq) {
+                best = Some((q, i));
+            }
+        }
+    }
+    best.map(|(_, i)| OFFERED[i])
+}
+
+/// The page a request asks for (`?page=`, 1 when absent), or `None` when it is not one of `pages`.
+pub fn requested_page(req: &LwsRequest, pages: usize) -> Option<usize> {
+    let page = match req.query_param("page") {
+        None => 1,
+        Some(p) => p.parse::<usize>().ok()?,
+    };
+    (1..=pages).contains(&page).then_some(page)
+}
+
+/// Append the paging links of page `page` of `pages` at `base?page=N`: first (always), prev and
+/// next where there is one, and last.
+pub fn add_page_links(headers: &mut HeaderMap, base: &str, page: usize, pages: usize) {
+    let page_uri = |n: usize| format!("{base}?page={n}");
+    add_link(headers, &page_uri(1), "first", None);
+    if page > 1 {
+        add_link(headers, &page_uri(page - 1), "prev", None);
+    }
+    if page < pages {
+        add_link(headers, &page_uri(page + 1), "next", None);
+    }
+    add_link(headers, &page_uri(pages), "last", None);
+}
+
+/// The links a service container or one of its members carries: `up` (the service container for
+/// a member; the storage root for the container itself, since `/.lws/` is no resource), the
+/// storage, its LWS type and its linkset.
+pub fn service_links(cfg: &LwsConfig, headers: &mut HeaderMap, uri: &str, up: &str) {
+    add_link(headers, up, "up", None);
+    add_link(headers, &cfg.storage(), &format!("{LWS_NS}storage"), None);
+    let ty = if uri.ends_with('/') {
+        "Container"
+    } else {
+        "DataResource"
+    };
+    add_link(headers, &format!("{LWS_NS}{ty}"), "type", None);
+    add_link(headers, &meta_key(uri), "linkset", Some(LINKSET_JSON));
+}
+
+/// Whether `If-None-Match` names `etag` (weak comparison) or is `*`.
+pub fn none_match(req: &LwsRequest, etag: &str) -> bool {
+    let header = req.header_all(header::IF_NONE_MATCH);
+    let bare = |t: &str| t.trim().trim_start_matches("W/").to_string();
+    header
+        .split(',')
+        .any(|t| t.trim() == "*" || (!t.trim().is_empty() && bare(t) == bare(etag)))
+}
+
+/// A strong entity tag over `parts`.
+pub fn etag_of<'a>(parts: impl IntoIterator<Item = &'a str>) -> String {
+    use sha2::Digest;
+    let mut h = sha2::Sha256::new();
+    for p in parts {
+        h.update(p.as_bytes());
+        h.update([0]);
+    }
+    format!("\"{}\"", jose::b64url(&h.finalize()[..18]))
+}
+
+/// GET or HEAD on a service container at `uri` holding `items` (each with an `id`, sorted):
+/// negotiated (406 when nothing offered is acceptable), paged at `cfg.page_size` (404 for a page
+/// that does not exist), with an entity tag over `version`, the page and its members (304 when
+/// `If-None-Match` names it), `Vary: Accept` and the container links.
+pub fn service_listing(
+    cfg: &LwsConfig,
+    req: &LwsRequest,
+    uri: &str,
+    items: Vec<Value>,
+    version: &str,
+) -> Response {
+    let Some(media_type) = negotiate_container(req.header(header::ACCEPT)) else {
+        return problem(StatusCode::NOT_ACCEPTABLE, None);
+    };
+    let size = cfg.page_size.max(1);
+    let pages = items.len().div_ceil(size).max(1);
+    let Some(page) = requested_page(req, pages) else {
+        return problem(StatusCode::NOT_FOUND, None);
+    };
+    let total = items.len();
+    let shown: Vec<Value> = items
+        .into_iter()
+        .skip((page - 1) * size)
+        .take(size)
+        .collect();
+    let page_tag = page.to_string();
+    let etag = etag_of(
+        [version, page_tag.as_str()]
+            .into_iter()
+            .chain(shown.iter().filter_map(|i| i["id"].as_str())),
+    );
+    let mut resp = if none_match(req, &etag) {
+        StatusCode::NOT_MODIFIED.into_response()
+    } else {
+        let body = json!({
+            "@context": LWS_CONTEXT,
+            "id": uri,
+            "type": "Container",
+            "totalItems": total,
+            "items": shown,
+        });
+        json_response(StatusCode::OK, media_type, &body)
+    };
+    let h = resp.headers_mut();
+    set(h, header::ETAG, &etag);
+    set(h, header::VARY, "Accept");
+    service_links(cfg, h, uri, &cfg.storage());
+    if pages > 1 {
+        add_page_links(h, uri, page, pages);
+    }
+    resp
+}
+
+/// The read-only linkset of a service container or member at `anchor`: it has no user-managed
+/// links.
+pub fn service_linkset(cfg: &LwsConfig, req: &LwsRequest, anchor: &str) -> Response {
+    if !matches!(req.method, Method::GET | Method::HEAD) {
+        return method_not_allowed("GET, HEAD");
+    }
+    let doc = json!({"linkset": [{"anchor": anchor}]});
+    let mut resp = json_response(StatusCode::OK, LINKSET_JSON, &doc);
+    set(resp.headers_mut(), header::ETAG, &etag_of([anchor]));
+    add_link(
+        resp.headers_mut(),
+        &cfg.storage(),
+        &format!("{LWS_NS}storage"),
+        None,
+    );
+    resp
+}
+
+/// Whether a JSON-LD `@context` (a string or an ordered set) includes the LWS context.
+pub fn has_lws_context(v: Option<&Value>) -> bool {
+    match v {
+        Some(Value::String(s)) => s == LWS_CONTEXT,
+        Some(Value::Array(a)) => a.iter().any(|c| c.as_str() == Some(LWS_CONTEXT)),
+        _ => false,
+    }
+}
+
 /// Whether `v` is an absolute URI: a scheme, a colon, and something after it.
 pub fn is_uri(v: &str) -> bool {
     let Some((scheme, rest)) = v.split_once(':') else {
@@ -659,9 +941,256 @@ pub fn parse_links(value: &str) -> Vec<(String, BTreeMap<String, String>)> {
     out
 }
 
+/// A store for unit tests: the in-memory store, with deletes that fail on demand.
+#[cfg(test)]
+pub(crate) mod test_store {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    use async_trait::async_trait;
+    use bytes::Bytes;
+
+    use crate::error::{ServerError, ServerResult};
+    use crate::store::sparq::{DeleteOutcome, ResourceMeta};
+    use crate::store::{
+        CompositeStore, InMemoryBlobStore, InMemorySparqClient, Resource, Store, ValidatedChildIri,
+    };
+
+    #[derive(Clone)]
+    pub struct FlakyStore {
+        inner: Arc<CompositeStore<InMemorySparqClient, InMemoryBlobStore>>,
+        pub fail_delete: Arc<AtomicBool>,
+    }
+
+    impl FlakyStore {
+        pub fn new() -> Self {
+            Self {
+                inner: Arc::new(CompositeStore::new(
+                    InMemorySparqClient::default(),
+                    InMemoryBlobStore::default(),
+                )),
+                fail_delete: Arc::new(AtomicBool::new(false)),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl Store for FlakyStore {
+        async fn read(&self, iri: &str) -> ServerResult<Resource> {
+            self.inner.read(iri).await
+        }
+        async fn meta(&self, iri: &str) -> ServerResult<Option<ResourceMeta>> {
+            self.inner.meta(iri).await
+        }
+        async fn exists(&self, iri: &str) -> ServerResult<bool> {
+            self.inner.exists(iri).await
+        }
+        async fn write(&self, iri: &str, body: Bytes, ct: &str) -> ServerResult<ResourceMeta> {
+            self.inner.write(iri, body, ct).await
+        }
+        async fn create_in_container(
+            &self,
+            container: &str,
+            child: &str,
+            body: Bytes,
+            ct: &str,
+        ) -> ServerResult<ResourceMeta> {
+            self.inner
+                .create_in_container(container, child, body, ct)
+                .await
+        }
+        async fn delete(&self, iri: &str, parent: Option<&str>) -> ServerResult<()> {
+            if self.fail_delete.load(Ordering::SeqCst) {
+                return Err(ServerError::Storage("disk on fire".into()));
+            }
+            self.inner.delete(iri, parent).await
+        }
+        async fn delete_container_if_empty(
+            &self,
+            iri: &str,
+            parent: Option<&str>,
+        ) -> ServerResult<DeleteOutcome> {
+            self.inner.delete_container_if_empty(iri, parent).await
+        }
+        async fn list_children(&self, container: &str) -> ServerResult<Vec<ValidatedChildIri>> {
+            self.inner.list_children(container).await
+        }
+    }
+
+    /// A request to `path` (with an optional query) carrying `headers` and `body`.
+    pub fn request(
+        method: axum::http::Method,
+        path: &str,
+        headers: &[(&str, &str)],
+        body: &str,
+    ) -> super::LwsRequest {
+        let (path, query) = match path.split_once('?') {
+            Some((p, q)) => (p.to_string(), Some(q.to_string())),
+            None => (path.to_string(), None),
+        };
+        let mut map = axum::http::HeaderMap::new();
+        for (k, v) in headers {
+            map.append(
+                axum::http::HeaderName::from_bytes(k.as_bytes()).unwrap(),
+                axum::http::HeaderValue::from_str(v).unwrap(),
+            );
+        }
+        super::LwsRequest {
+            method,
+            path,
+            query,
+            headers: map,
+            body: Bytes::from(body.to_string()),
+        }
+    }
+
+    /// An open-mode state over a [`FlakyStore`].
+    pub async fn state(page_size: usize) -> (super::LwsState<FlakyStore>, FlakyStore) {
+        let store = FlakyStore::new();
+        let mut cfg = super::LwsConfig::new("http://localhost:3000");
+        cfg.open = true;
+        cfg.allow_insecure_fetch = true;
+        cfg.page_size = page_size;
+        let state = super::LwsState::new(store.clone(), cfg).await.unwrap();
+        (state, store)
+    }
+
+    /// The `Link` targets of `resp` with relation `rel`.
+    pub fn links(resp: &axum::response::Response, rel: &str) -> Vec<String> {
+        resp.headers()
+            .get_all(axum::http::header::LINK)
+            .iter()
+            .filter_map(|v| v.to_str().ok())
+            .flat_map(super::parse_links)
+            .filter(|(_, p)| p.get("rel").map(String::as_str) == Some(rel))
+            .map(|(t, _)| t)
+            .collect()
+    }
+
+    pub async fn body_json(resp: axum::response::Response) -> serde_json::Value {
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use test_store::{body_json, links, request};
+
+    #[test]
+    fn container_negotiation() {
+        assert_eq!(negotiate_container(None), Some(LWS_JSON));
+        assert_eq!(negotiate_container(Some("application/json")), Some(JSON));
+        assert_eq!(
+            negotiate_container(Some("application/ld+json")),
+            Some(LD_JSON)
+        );
+        assert_eq!(
+            negotiate_container(Some(
+                "application/ld+json; profile=\"https://www.w3.org/ns/lws/v1\""
+            )),
+            Some(LWS_JSON)
+        );
+        assert_eq!(negotiate_container(Some("*/*")), Some(LWS_JSON));
+        assert_eq!(
+            negotiate_container(Some("application/json, application/lws+json;q=0.5")),
+            Some(JSON)
+        );
+        assert_eq!(negotiate_container(Some("text/turtle")), None);
+        assert_eq!(negotiate_container(Some("application/json;q=0")), None);
+    }
+
+    #[test]
+    fn lws_context_check() {
+        assert!(has_lws_context(Some(&json!([LWS_CONTEXT]))));
+        assert!(has_lws_context(Some(&json!(["https://x/", LWS_CONTEXT]))));
+        assert!(has_lws_context(Some(&json!(LWS_CONTEXT))));
+        assert!(!has_lws_context(Some(&json!(["https://x/"]))));
+        assert!(!has_lws_context(None));
+    }
+
+    #[tokio::test]
+    async fn service_listings_page_negotiate_and_tag() {
+        let cfg = LwsConfig::new("http://h");
+        let uri = cfg.absolute(GRANTS_PATH);
+        let items: Vec<Value> = (0..5)
+            .map(|i| json!({"id": format!("{uri}{i}"), "type": "DataResource"}))
+            .collect();
+        let mut cfg = cfg;
+        cfg.page_size = 2;
+        let cfg = cfg;
+        let get = |q: &str, h: &[(&str, &str)]| {
+            service_listing(
+                &cfg,
+                &request(Method::GET, &format!("{GRANTS_PATH}{q}"), h, ""),
+                &uri,
+                items.clone(),
+                "v1",
+            )
+        };
+        let first = get("", &[]);
+        assert_eq!(first.status(), StatusCode::OK);
+        assert_eq!(first.headers()[header::CONTENT_TYPE], LWS_JSON);
+        assert_eq!(first.headers()[header::VARY], "Accept");
+        assert_eq!(links(&first, "type"), vec![format!("{LWS_NS}Container")]);
+        assert_eq!(links(&first, "up"), vec![cfg.storage()]);
+        assert_eq!(links(&first, "linkset"), vec![meta_key(&uri)]);
+        assert_eq!(links(&first, "first"), vec![format!("{uri}?page=1")]);
+        assert_eq!(links(&first, "next"), vec![format!("{uri}?page=2")]);
+        assert_eq!(links(&first, "last"), vec![format!("{uri}?page=3")]);
+        assert!(links(&first, "prev").is_empty());
+        let etag = first.headers()[header::ETAG].to_str().unwrap().to_string();
+        let doc = body_json(first).await;
+        assert_eq!(doc["totalItems"], 5);
+        assert_eq!(doc["items"].as_array().unwrap().len(), 2);
+
+        let last = get("?page=3", &[("accept", "application/json")]);
+        assert_eq!(last.headers()[header::CONTENT_TYPE], JSON);
+        assert_eq!(links(&last, "prev"), vec![format!("{uri}?page=2")]);
+        assert!(links(&last, "next").is_empty());
+        assert_ne!(last.headers()[header::ETAG].to_str().unwrap(), etag);
+        assert_eq!(body_json(last).await["items"].as_array().unwrap().len(), 1);
+
+        assert_eq!(get("?page=4", &[]).status(), StatusCode::NOT_FOUND);
+        assert_eq!(get("?page=0", &[]).status(), StatusCode::NOT_FOUND);
+        assert_eq!(
+            get("", &[("accept", "text/turtle")]).status(),
+            StatusCode::NOT_ACCEPTABLE
+        );
+        assert_eq!(
+            get("", &[("if-none-match", &etag)]).status(),
+            StatusCode::NOT_MODIFIED
+        );
+        // A one-page listing carries no paging links.
+        let mut roomy = cfg.clone();
+        roomy.page_size = 10;
+        let one = service_listing(
+            &roomy,
+            &request(Method::GET, GRANTS_PATH, &[], ""),
+            &uri,
+            items.clone(),
+            "v1",
+        );
+        assert!(links(&one, "first").is_empty());
+    }
+
+    #[test]
+    fn the_jwks_publishes_the_previous_key() {
+        let old = jose::EcKey::generate("old");
+        let mut cfg = LwsConfig::new("http://h");
+        cfg.as_previous_key =
+            Some(jose::VerifyKey::from_jwk(&old.public_jwk().to_string()).unwrap());
+        let kids: Vec<String> = authz_server::jwks(&cfg)["keys"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|k| k["kid"].as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(kids, vec!["lws-as-1".to_string(), "old".to_string()]);
+    }
 
     #[test]
     fn links_parse_with_quoted_commas() {

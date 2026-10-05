@@ -140,6 +140,62 @@ impl EcKey {
     }
 }
 
+/// A P-256 public key with a key id: a key access tokens may still verify against after the
+/// authorization server's signing key has been rotated (LWS 1.0 core section 5.2.4: storage servers
+/// MUST support key rotation).
+#[derive(Debug, Clone, PartialEq)]
+pub struct VerifyKey {
+    kid: String,
+    key: PublicKey,
+}
+
+impl VerifyKey {
+    /// A key from a public or private P-256 JWK; only its public part is kept. The JWK's `kid` is
+    /// kept; without one the RFC 7638 thumbprint is used.
+    pub fn from_jwk(jwk: &str) -> Result<Self, String> {
+        let v: Value = serde_json::from_str(jwk).map_err(|e| format!("not JSON: {e}"))?;
+        if v.get("d").is_some() {
+            let private = EcKey::from_jwk(jwk)?;
+            return Ok(Self::from(&private));
+        }
+        let key = ec_public_from_jwk(&v).ok_or("not a P-256 JWK")?;
+        let kid = v
+            .get("kid")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .unwrap_or_else(|| thumbprint(&public_jwk_of(&key)));
+        Ok(Self { kid, key })
+    }
+
+    pub fn kid(&self) -> &str {
+        &self.kid
+    }
+
+    pub fn public_key(&self) -> PublicKey {
+        self.key
+    }
+
+    /// The public JWK, with `kid`, `alg` and `use`.
+    pub fn public_jwk(&self) -> Value {
+        let mut jwk = public_jwk_of(&self.key);
+        if let Some(map) = jwk.as_object_mut() {
+            map.insert("kid".into(), Value::String(self.kid.clone()));
+            map.insert("alg".into(), Value::String("ES256".into()));
+            map.insert("use".into(), Value::String("sig".into()));
+        }
+        jwk
+    }
+}
+
+impl From<&EcKey> for VerifyKey {
+    fn from(k: &EcKey) -> Self {
+        Self {
+            kid: k.kid.clone(),
+            key: k.public_key(),
+        }
+    }
+}
+
 /// The public JWK of a P-256 key, without `kid`.
 pub fn public_jwk_of(key: &PublicKey) -> Value {
     let point = key.to_encoded_point(false);
@@ -364,6 +420,18 @@ mod tests {
         let again = EcKey::from_jwk(&key.private_jwk().to_string()).unwrap();
         assert_eq!(again.kid(), "abc");
         assert_eq!(again.public_jwk(), key.public_jwk());
+    }
+
+    #[test]
+    fn verify_keys_from_public_or_private_jwks() {
+        let k = EcKey::generate("old");
+        let from_private = VerifyKey::from_jwk(&k.private_jwk().to_string()).unwrap();
+        let from_public = VerifyKey::from_jwk(&k.public_jwk().to_string()).unwrap();
+        assert_eq!(from_private, from_public);
+        assert_eq!(from_public.kid(), "old");
+        assert_eq!(from_public.public_jwk(), k.public_jwk());
+        assert!(from_public.public_jwk().get("d").is_none());
+        assert!(VerifyKey::from_jwk("{}").is_err());
     }
 
     #[test]
