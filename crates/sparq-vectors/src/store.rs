@@ -149,7 +149,7 @@ mod big_endian_read_tests {
         bytes
     }
 
-    // [GPT-5.6] (sq-i7w) Mutation witness: the fixture's dense words deliberately use the byte
+    // (sq-i7w) Mutation witness: the fixture's dense words deliberately use the byte
     // order opposite to this test host, while every structural field stays canonical LE. Removing
     // or breaking the forced production swap makes both `get` and `iter` return the wrong floats.
     #[test]
@@ -677,7 +677,7 @@ impl VectorStore {
                 ));
             }
         }
-        // [GPT-5.6] (sq-i7w) Validation above deliberately reads the canonical LE header,
+        // (sq-i7w) Validation above deliberately reads the canonical LE header,
         // provenance/metadata, and index before this conversion. A BE host cannot cast the LE f32
         // payload directly, so copy the complete backing to aligned owned storage and reverse only
         // the dense words. Structural bytes remain LE and all later explicit from_le_bytes reads are
