@@ -304,7 +304,8 @@ After the staging fix merges, the operator should:
 
 1. Leave v0.1.2 and its existing container images/provenance untouched. Do not rerun
    run 35540471918 or dispatch its release workflow as a way to load this fix.
-2. Prepare a separate release version PR for the next unused version (normally 0.1.3),
+2. Prepare a separate release version PR for the next unused version (this became 0.1.4,
+   because v0.1.3 is also an immutable, failed tag and must not be reused),
    following §§1–2 for manifests, lockfiles, changelog and release notes. Explain that
    v0.1.2 had container publication but no complete GitHub Release. Check registry state
    and the release interval again; do not assume any version is available.
