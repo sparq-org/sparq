@@ -1,10 +1,10 @@
 //! [FABLE-5] sq-sqtk2.1 (epic sq-sqtk2; research/mechanized-proof-program.md §3.1 property
 //! A-2, §5 bead 1) — EXHAUSTIVELY TESTED (bounded domain): container-default ACL
 //! discovery. Kani string costs make a symbolic-IRI proof of the nearest-ancestor
-//! SELECTION intractable (the walk's TERMINATION lemma is Kani-proved in
-//! `src/decide.rs::kani_proofs::parent_iri_strictly_shortens`), so this test enumerates a
-//! finite resource/control-doc domain COMPLETELY and checks `PodStore::resolve_acl`
-//! against an independent reference on every single case.
+//! SELECTION intractable, and no Kani proof of the walk (selection or termination) exists
+//! yet (pending, sq-sqtk2.7), so this test enumerates a finite resource/control-doc domain
+//! COMPLETELY and checks `PodStore::resolve_acl` against an independent reference on every
+//! single case. It is a bounded test, not a proof.
 //!
 //! THE DOMAIN (complete, and pinned by an explicit case count so a generator bug cannot
 //! silently shrink it): every container and every document under `https://pod.ex/` whose
