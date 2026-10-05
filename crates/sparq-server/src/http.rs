@@ -4339,8 +4339,10 @@ async fn tpf_endpoint(
     let fmt = negotiate_tpf(headers.get(header::ACCEPT).and_then(|v| v.to_str().ok()));
     // [OPUS-4.8] sq-oy1f.1: route through the shared graph serialiser so the JSON-LD arm is
     // covered uniformly (and the match stays exhaustive when the `jsonld` feature is on).
-    let body = serialise_graph_triples(&triples, fmt);
-    text_response(StatusCode::OK, fmt.content_type(), body, head_only)
+    match serialise_graph_triples(&triples, fmt) {
+        Ok(body) => text_response(StatusCode::OK, fmt.content_type(), body, head_only),
+        Err(e) => execution_error(&e),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -6707,8 +6709,10 @@ async fn run_query_pinned(
                     sparq_engine::construct_or_describe_with_budget(gen.snapshot(), &query, &budget)
                 }) {
                     Ok(triples) => {
-                        let body = serialise_graph_triples(&triples, gfmt);
-                        text_response(StatusCode::OK, gfmt.content_type(), body, head_only)
+                        match serialise_graph_triples(&triples, gfmt) {
+                            Ok(body) => text_response(StatusCode::OK, gfmt.content_type(), body, head_only),
+                            Err(e) => execution_error(&e),
+                        }
                     }
                     // CONSTRUCT/DESCRIBE used `make_budget(_, true)` → max_results applied.
                     Err(e) => engine_error_response(&e, &cfg, true),
@@ -7458,16 +7462,6 @@ impl ChunkSink {
             .map_err(|_| std::io::Error::other("client disconnected"))
     }
 
-    /// Hands over every WHOLE chunk currently buffered, keeping the trailing remainder.
-    fn drain_full_chunks(&mut self) -> std::io::Result<()> {
-        while self.buf.len() >= GRAPH_STREAM_CHUNK_BYTES {
-            let rest = self.buf.split_off(GRAPH_STREAM_CHUNK_BYTES);
-            let chunk = std::mem::replace(&mut self.buf, rest);
-            self.send(chunk)?;
-        }
-        Ok(())
-    }
-
     /// Hands over the trailing partial chunk. Consumes the sink so the sender is dropped
     /// afterwards, which is what closes the response stream.
     fn finish(mut self) -> std::io::Result<()> {
@@ -7480,9 +7474,20 @@ impl ChunkSink {
 }
 
 impl std::io::Write for ChunkSink {
+    /// Fills the fixed-size buffer and hands it over each time it is full. A large write is
+    /// sliced straight into chunk-sized buffers, so nothing is re-copied and no chunk keeps
+    /// an oversized allocation alive.
     fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
-        self.buf.extend_from_slice(data);
-        self.drain_full_chunks()?;
+        let mut rest = data;
+        while !rest.is_empty() {
+            let take = (GRAPH_STREAM_CHUNK_BYTES - self.buf.len()).min(rest.len());
+            self.buf.extend_from_slice(&rest[..take]);
+            rest = &rest[take..];
+            if self.buf.len() == GRAPH_STREAM_CHUNK_BYTES {
+                let chunk = std::mem::replace(&mut self.buf, Vec::with_capacity(GRAPH_STREAM_CHUNK_BYTES));
+                self.send(chunk)?;
+            }
+        }
         Ok(data.len())
     }
 
@@ -7507,7 +7512,9 @@ impl std::io::Write for ChunkSink {
 /// materialises the whole `Vec<Triple>` BEFORE serialisation begins, so every budget / deadline
 /// / evaluation failure is known before a single byte is rendered. A refusal is therefore
 /// always a clean `413`/`503`/`500` — a graph result can never be truncated mid-stream the way
-/// a streamed SELECT can. The `Some(Err(_))` arm below is defensive, not reachable today.
+/// a streamed SELECT can, with one exception: a writer that refuses the graph (RDF/XML cannot
+/// encode some predicates) reports an error after rendering began. Held in the first chunk it
+/// becomes an error status; after the stream started it aborts the chunked body.
 async fn stream_graph_result(
     gen: PinnedGen,
     runnable: String,
@@ -7534,11 +7541,20 @@ async fn stream_graph_result(
                     let _ = tx.blocking_send(Err(e));
                 }
                 Ok(triples) => {
-                    let mut sink = ChunkSink::new(tx);
-                    // The only error the writers can raise here is the sink's own "client
-                    // disconnected"; in that case abandon the remaining chunks too.
-                    if serialise_graph_triples_to(&triples, gfmt, &mut sink).is_ok() {
-                        let _ = sink.finish();
+                    let mut sink = ChunkSink::new(tx.clone());
+                    match serialise_graph_triples_to(&triples, gfmt, &mut sink) {
+                        Ok(()) => {
+                            let _ = sink.finish();
+                        }
+                        // A writer can refuse a legal graph (RDF/XML cannot encode some
+                        // predicates). Report it instead of closing the channel, so the
+                        // response is an error status (nothing sent yet, or one chunk held)
+                        // or an aborted chunked body, never a 200 with a truncated document.
+                        // After a client disconnect this send fails too, which is harmless.
+                        Err(e) => {
+                            drop(sink);
+                            let _ = tx.blocking_send(Err(format!("serialising the graph result: {e}")));
+                        }
                     }
                 }
             }
@@ -7568,7 +7584,7 @@ async fn stream_graph_result(
                 .body(axum::body::Body::from(first))
                 .unwrap()
         }
-        // Defensive: the worker never reports an error after a chunk (see the doc above).
+        // A serialisation failure after the first chunk, which was held back: still an error.
         Some(Err(e)) => engine_error_response(&e, config, true),
         Some(Ok(second)) => {
             let mut prefix: std::collections::VecDeque<Result<Bytes, String>> =
@@ -7649,6 +7665,22 @@ mod chunk_sink_tests {
             "every non-final chunk must be exactly the threshold"
         );
         assert_eq!(chunks.concat(), payload, "the chunks must reassemble to the exact document");
+    }
+
+    #[test]
+    fn one_large_write_is_sliced_into_exact_chunks_without_oversized_buffers() {
+        let (mut s, rx) = sink();
+        let payload: Vec<u8> = (0..GRAPH_STREAM_CHUNK_BYTES * 3 + 5).map(|i| (i % 251) as u8).collect();
+        s.write_all(&payload).unwrap();
+        s.finish().unwrap();
+        let mut chunks = Vec::new();
+        let mut rx = rx;
+        while let Ok(Ok(b)) = rx.try_recv() {
+            chunks.push(b);
+        }
+        assert_eq!(chunks.len(), 4);
+        assert!(chunks[..3].iter().all(|c| c.len() == GRAPH_STREAM_CHUNK_BYTES));
+        assert_eq!(chunks.concat(), payload);
     }
 
     #[test]
@@ -8725,12 +8757,10 @@ async fn serialise_graph(
     let cfg = config.clone();
     let task = tokio::task::spawn_blocking(move || {
         match graph_dump_triples(gen.snapshot(), &graph, &budget) {
-            Ok(triples) => text_response(
-                StatusCode::OK,
-                &ct,
-                serialise_graph_triples(&triples, gfmt),
-                head_only,
-            ),
+            Ok(triples) => match serialise_graph_triples(&triples, gfmt) {
+                Ok(body) => text_response(StatusCode::OK, &ct, body, head_only),
+                Err(e) => execution_error(&e),
+            },
             // GSP-read used `make_budget(_, false)` → max_results did NOT apply.
             Err(e) => engine_error_response(&e, &cfg, false),
         }
@@ -8745,11 +8775,13 @@ async fn serialise_graph(
 ///
 /// [FABLE-5] sq-0kq6k: implemented BY [`serialise_graph_triples_to`] over an in-memory buffer,
 /// so the buffered response body and the streamed one are the same bytes by construction.
-fn serialise_graph_triples(triples: &[oxrdf::Triple], gfmt: GraphFormat) -> String {
+///
+/// The in-memory writer cannot fail, but the serialiser can refuse the graph (RDF/XML cannot
+/// encode some predicates); that is an `Err`, never a truncated document.
+fn serialise_graph_triples(triples: &[oxrdf::Triple], gfmt: GraphFormat) -> Result<String, String> {
     let mut out: Vec<u8> = Vec::with_capacity(triples.len() * 64);
-    // An in-memory writer cannot fail.
-    let _ = serialise_graph_triples_to(triples, gfmt, &mut out);
-    String::from_utf8(out).unwrap_or_default()
+    serialise_graph_triples_to(triples, gfmt, &mut out).map_err(|e| format!("serialising the graph result: {e}"))?;
+    String::from_utf8(out).map_err(|e| format!("serialising the graph result: {e}"))
 }
 
 /// [FABLE-5] sq-0kq6k: the sink-shaped twin of [`serialise_graph_triples`] — renders the graph

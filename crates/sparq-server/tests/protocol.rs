@@ -1341,3 +1341,60 @@ async fn gsp_put_turtle_get_rdfxml_cross_format() {
     assert_eq!(triples.len(), 1, "cross-format round-trip lost the triple: {body}");
     assert_eq!(triples[0].object.to_string(), "<http://ex/o>");
 }
+
+/// A graph result the RDF/XML writer refuses part-way through (`rdf:about` cannot be a
+/// predicate in RDF/XML) must not come back as a `200` with a truncated document.
+fn rdfxml_refusal(fill_bytes: usize) -> (String, &'static str) {
+    let ttl = format!("<http://ex/a> <http://ex/fill> \"{}\" .\n", "x".repeat(fill_bytes));
+    let q = "CONSTRUCT { <http://ex/a> <http://ex/fill> ?f . \
+        <http://ex/a> <http://www.w3.org/1999/02/22-rdf-syntax-ns#about> \"bad\" } \
+        WHERE { <http://ex/a> <http://ex/fill> ?f }";
+    (ttl, q)
+}
+
+#[tokio::test]
+async fn rdfxml_refusal_after_one_chunk_is_an_error_status() {
+    let (ttl, q) = rdfxml_refusal(70 * 1024);
+    let base = spawn_over(&ttl).await;
+    let resp = client()
+        .get(format!("{base}/sparql"))
+        .header("accept", "application/rdf+xml")
+        .query(&[("query", q)])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 500, "a refused serialisation must not answer 200");
+}
+
+#[tokio::test]
+async fn rdfxml_refusal_mid_stream_aborts_the_body() {
+    let (ttl, q) = rdfxml_refusal(300 * 1024);
+    let base = spawn_over(&ttl).await;
+    let sent = client()
+        .get(format!("{base}/sparql"))
+        .header("accept", "application/rdf+xml")
+        .query(&[("query", q)])
+        .send()
+        .await;
+    // The stream had started, so the connection is aborted: either before the client sees
+    // the head (hyper had not flushed it yet) or mid-body. It must never end cleanly.
+    let clean = match sent {
+        Ok(resp) => resp.bytes().await.is_ok(),
+        Err(_) => false,
+    };
+    assert!(!clean, "a refused serialisation must abort the chunked body");
+}
+
+/// The buffered GSP read reports the same refusal instead of a truncated document.
+#[tokio::test]
+async fn rdfxml_refusal_on_a_buffered_read_is_an_error_status() {
+    let ttl = "<http://ex/a> <http://www.w3.org/1999/02/22-rdf-syntax-ns#about> \"bad\" .\n";
+    let base = spawn_over(ttl).await;
+    let resp = client()
+        .get(format!("{base}/sparql/graph?default"))
+        .header("accept", "application/rdf+xml")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 500);
+}

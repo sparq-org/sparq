@@ -167,7 +167,8 @@ peak_rss_kib() {
 timed_request() {
   local method_flag="$1"
   # shellcheck disable=SC2086 # $method_flag is an intentional word-split flag slot
-  curl -sS -o /dev/null $method_flag \
+  # -f: an HTTP error (a 413 refusal, say) fails the run instead of being timed as a result.
+  curl -fsS -o /dev/null $method_flag \
     -H "Accept: $CS_ACCEPT" \
     --data-urlencode "query=$QUERY" \
     -G "http://127.0.0.1:$CS_PORT/sparql" \
@@ -180,10 +181,28 @@ median() { sort -n | awk '{v[NR]=$1} END {if (NR==0) {print "n/a"} else if (NR%2
 echo "[construct-stream] === correctness gates ==="
 start_server
 
-HEAD_LEN="$(curl -sS --head -H "Accept: $CS_ACCEPT" --data-urlencode "query=$QUERY" \
-  -G "http://127.0.0.1:$CS_PORT/sparql" | awk 'BEGIN{IGNORECASE=1} /^content-length:/ {gsub(/\r/,""); print $2}')"
-GET_LEN="$(curl -sS -o "$WORK/body.out" -H "Accept: $CS_ACCEPT" --data-urlencode "query=$QUERY" \
-  -G "http://127.0.0.1:$CS_PORT/sparql" -w '%{size_download}')"
+# -f on both: an HTTP error status (a 413 refusal returns the same JSON to HEAD and GET) must
+# fail the gate, not pass the length comparison.
+HEAD_OUT="$(curl -fsS --head -H "Accept: $CS_ACCEPT" --data-urlencode "query=$QUERY" \
+  -G "http://127.0.0.1:$CS_PORT/sparql")" || {
+  echo "[construct-stream] GATE RED: the buffered HEAD did not succeed" >&2
+  exit 4
+}
+HEAD_LEN="$(printf '%s\n' "$HEAD_OUT" | awk 'BEGIN{IGNORECASE=1} /^content-length:/ {gsub(/\r/,""); print $2}')"
+GET_W="$(curl -fsS -o "$WORK/body.out" -H "Accept: $CS_ACCEPT" --data-urlencode "query=$QUERY" \
+  -G "http://127.0.0.1:$CS_PORT/sparql" -w '%{size_download} %{content_type}')" || {
+  echo "[construct-stream] GATE RED: the streamed GET did not succeed" >&2
+  exit 4
+}
+GET_LEN="${GET_W%% *}"
+GET_CT="${GET_W#* }"
+case "$GET_CT" in
+  "$CS_ACCEPT"*) ;;
+  *)
+    echo "[construct-stream] GATE RED: asked for $CS_ACCEPT, got Content-Type '$GET_CT'" >&2
+    exit 4
+    ;;
+esac
 
 if [ -z "$HEAD_LEN" ]; then
   echo "[construct-stream] GATE RED: the buffered HEAD advertised no Content-Length" >&2
