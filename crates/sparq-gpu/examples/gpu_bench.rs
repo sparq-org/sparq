@@ -263,12 +263,15 @@ fn main() {
             continue;
         }
         const G: u32 = 256;
+        const KEYS_IN_RANGE: &str = "keys are generated `% G`";
         let mut rng = Rng(0x0F0F_F0F0_1337_4242);
         let keys: Vec<u32> = (0..n).map(|_| rng.u32() % G).collect();
         let vals: Vec<u32> = (0..n).map(|_| rng.u32()).collect();
         let keys_col = gpu.upload_u32(&keys);
         let vals_col = gpu.upload_u32(&vals);
-        let _ = gpu.group_aggregate(&keys_col, &vals_col, G);
+        let _ = gpu
+            .group_aggregate(&keys_col, &vals_col, G)
+            .expect(KEYS_IN_RANGE);
 
         let fold = |rows: Vec<(u64, u64)>| -> u64 {
             rows.iter().fold(0u64, |acc, (c, s)| {
@@ -286,7 +289,7 @@ fn main() {
         let mut variants: Vec<Variant> = vec![
             (
                 "cpu1",
-                Box::new(|| fold(cpu::group_aggregate(&keys, &vals, G))),
+                Box::new(|| fold(cpu::group_aggregate(&keys, &vals, G).expect(KEYS_IN_RANGE))),
             ),
             (
                 "cpuN",
@@ -294,21 +297,29 @@ fn main() {
                     let rows = keys
                         .par_chunks(PAR_CHUNK)
                         .zip(vals.par_chunks(PAR_CHUNK))
-                        .map(|(k, v)| cpu::group_aggregate(k, v, G))
+                        .map(|(k, v)| cpu::group_aggregate(k, v, G).expect(KEYS_IN_RANGE))
                         .reduce(|| vec![(0, 0); G as usize], merge);
                     fold(rows)
                 }),
             ),
             (
                 "gpu resident",
-                Box::new(|| fold(gpu.group_aggregate(&keys_col, &vals_col, G))),
+                Box::new(|| {
+                    fold(
+                        gpu.group_aggregate(&keys_col, &vals_col, G)
+                            .expect(KEYS_IN_RANGE),
+                    )
+                }),
             ),
             (
                 "gpu e2e",
                 Box::new(|| {
                     gpu.write_u32(&keys_col, &keys);
                     gpu.write_u32(&vals_col, &vals);
-                    fold(gpu.group_aggregate(&keys_col, &vals_col, G))
+                    fold(
+                        gpu.group_aggregate(&keys_col, &vals_col, G)
+                            .expect(KEYS_IN_RANGE),
+                    )
                 }),
             ),
         ];

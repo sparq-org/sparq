@@ -6,7 +6,7 @@
 //! exact by construction (bit-pattern total-order comparison, not float math on
 //! the device), so it is asserted exactly too — including NaN/±inf/-0.0 edges.
 
-use sparq_gpu::{cpu, Gpu, EMPTY_KEY, MAX_GROUPS};
+use sparq_gpu::{cpu, Gpu, GroupKeyOutOfRange, EMPTY_KEY, MAX_GROUPS};
 
 /// Deterministic xorshift64* stream (same generator the wgpu spike used).
 struct Rng(u64);
@@ -161,12 +161,55 @@ fn group_aggregate_matches_cpu() {
         let keys_col = gpu.upload_u32(&keys);
         let vals_col = gpu.upload_u32(&vals);
 
-        let expect = cpu::group_aggregate(&keys, &vals, groups);
-        let got = gpu.group_aggregate(&keys_col, &vals_col, groups);
+        let expect = cpu::group_aggregate(&keys, &vals, groups).unwrap();
+        let got = gpu.group_aggregate(&keys_col, &vals_col, groups).unwrap();
         assert_eq!(got, expect, "groups={groups}");
         let total: u64 = got.iter().map(|(c, _)| c).sum();
         assert_eq!(total, N as u64, "every row lands in exactly one group");
     }
+}
+
+/// GitHub #4603: an out-of-range GROUP BY key must be rejected identically by
+/// the GPU and the CPU oracle — never silently dropped on the GPU. Covers a key
+/// in `groups..MAX_GROUPS` (lands in a workgroup slot that is never flushed) and
+/// one `>= MAX_GROUPS` (past the shared-memory array), at a row deep inside a
+/// multi-workgroup dispatch.
+#[test]
+fn group_aggregate_rejects_out_of_range_keys_like_cpu() {
+    let Some(gpu) = gpu_or_skip("group_aggregate_out_of_range") else {
+        return;
+    };
+    let groups = 7u32;
+    for bad in [groups, MAX_GROUPS - 1, MAX_GROUPS, u32::MAX] {
+        let mut keys: Vec<u32> = (0..10_000u32).map(|i| i % groups).collect();
+        keys[5_000] = bad;
+        let vals = vec![1u32; keys.len()];
+        let keys_col = gpu.upload_u32(&keys);
+        let vals_col = gpu.upload_u32(&vals);
+        assert_eq!(
+            gpu.group_aggregate(&keys_col, &vals_col, groups),
+            Err(GroupKeyOutOfRange),
+            "gpu, bad key {bad}"
+        );
+        assert_eq!(
+            cpu::group_aggregate(&keys, &vals, groups),
+            Err(GroupKeyOutOfRange),
+            "cpu, bad key {bad}"
+        );
+    }
+}
+
+/// GitHub #4603: `upload_table` rejects a table with no EMPTY_KEY slot (in
+/// release builds too) instead of handing the probe walk a table it could
+/// never leave.
+#[test]
+fn upload_table_rejects_a_full_table() {
+    let Some(gpu) = gpu_or_skip("upload_table_full") else {
+        return;
+    };
+    let full = [[1u32, 0], [2, 0], [3, 0], [4, 0]];
+    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| gpu.upload_table(&full)));
+    assert!(r.is_err(), "a full table must be rejected");
 }
 
 /// [OPUS-4.8] sq-goay: randomized differential oracle.

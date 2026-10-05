@@ -44,6 +44,48 @@ pub const EMPTY_KEY: u32 = u32::MAX;
 /// under WebGPU's 16 KiB minimum guarantee).
 pub const MAX_GROUPS: u32 = 512;
 
+/// Upper bound on how long [`Gpu`] waits for one kernel submission before
+/// giving up (panicking) instead of blocking the host thread forever. Every
+/// kernel is O(n) with bounded per-element work, so a healthy device finishes
+/// far inside this; hitting it means a wedged device. GitHub #4603.
+pub const POLL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// A GROUP BY key was `>= groups` (the documented `keys[i] < groups`
+/// precondition was violated). Returned by both [`Gpu::group_aggregate`] and
+/// the CPU oracle [`cpu::group_aggregate`], so the two sides agree on malformed
+/// input instead of the GPU silently dropping the row while the CPU panics.
+/// GitHub #4603.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GroupKeyOutOfRange;
+
+impl std::fmt::Display for GroupKeyOutOfRange {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("GROUP BY key out of range: every key must be < groups")
+    }
+}
+
+impl std::error::Error for GroupKeyOutOfRange {}
+
+/// Validates a host-built open-addressing table before it reaches the device:
+/// the slot count must be a non-zero power of two (the kernel masks with
+/// `len - 1`) and at least one slot must be `EMPTY_KEY`, so every probe walk has
+/// a terminating sentinel. Panics otherwise. GitHub #4603.
+fn check_table(slots: &[[u32; 2]]) {
+    assert!(
+        slots.len().is_power_of_two(),
+        "hash table slot count must be a non-zero power of two, got {}",
+        slots.len()
+    );
+    assert!(
+        u32::try_from(slots.len()).is_ok(),
+        "hash table slot count must fit in u32"
+    );
+    assert!(
+        slots.iter().any(|s| s[0] == EMPTY_KEY),
+        "hash table must contain at least one EMPTY_KEY slot (load factor < 1)"
+    );
+}
+
 /// The 32-bit mixer used by both the CPU reference and the WGSL kernel (they
 /// must agree bit-for-bit so both sides walk identical probe sequences).
 #[inline]
@@ -58,7 +100,30 @@ pub fn hash32(mut x: u32) -> u32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{hash32, EMPTY_KEY};
+    use super::{check_table, hash32, EMPTY_KEY};
+
+    #[test]
+    fn check_table_accepts_a_built_table() {
+        check_table(&crate::cpu::build_hash_table(&[1, 2, 3], &[4, 5, 6]));
+    }
+
+    #[test]
+    #[should_panic(expected = "EMPTY_KEY slot")]
+    fn check_table_rejects_a_full_table() {
+        check_table(&[[1, 0], [2, 0], [3, 0], [4, 0]]);
+    }
+
+    #[test]
+    #[should_panic(expected = "power of two")]
+    fn check_table_rejects_a_non_power_of_two_table() {
+        check_table(&[[EMPTY_KEY, 0], [EMPTY_KEY, 0], [EMPTY_KEY, 0]]);
+    }
+
+    #[test]
+    #[should_panic(expected = "power of two")]
+    fn check_table_rejects_an_empty_table() {
+        check_table(&[]);
+    }
 
     // [GPT-5.6] sq-pz5rf: Exercise the mixer directly, including values around
     // the hash-table sentinel and a bounded sample of the full u32 domain.
@@ -199,7 +264,12 @@ fn main(@builtin(local_invocation_id) lid: vec3<u32>,
     if (i < params.n) {
         let k = probe[i];
         var slot = hash32(k) & params.mask;
+        // Bounded walk: at most mask + 1 slots (every slot once), so a table
+        // with no EMPTY_KEY slot cannot spin forever (GitHub #4603).
+        var steps = 0u;
         loop {
+            if (steps > params.mask) { break; }
+            steps += 1u;
             let e = table[slot];
             if (e.x == 0xFFFFFFFFu) { break; }
             if (e.x == k) {
@@ -231,7 +301,9 @@ fn main(@builtin(local_invocation_id) lid: vec3<u32>,
 }
 "#;
 
-/// COUNT + SUM GROUP BY: keys must already be in [0, g), g <= MAX_GROUPS.
+/// COUNT + SUM GROUP BY: keys must already be in [0, g), g <= MAX_GROUPS. A key
+/// `>= g` is not accumulated; it sets the out-of-range flag word `out[3g]`, which
+/// the host turns into [`GroupKeyOutOfRange`] (GitHub #4603).
 /// Two-level atomics: every thread accumulates into workgroup-shared per-group
 /// counters (the compute-dense part), then each workgroup flushes its g partial
 /// rows to global atomics once. u64 sums via the same lo/carry/hi emulation.
@@ -240,7 +312,7 @@ const MAX_G: u32 = 512u;
 struct Params { n: u32, g: u32, _p0: u32, _p1: u32 };
 @group(0) @binding(0) var<storage, read>       keys: array<u32>;
 @group(0) @binding(1) var<storage, read>       vals: array<u32>;
-@group(0) @binding(2) var<storage, read_write> out:  array<atomic<u32>>; // [count;g][sum_lo;g][sum_hi;g]
+@group(0) @binding(2) var<storage, read_write> out:  array<atomic<u32>>; // [count;g][sum_lo;g][sum_hi;g][oob_flag]
 @group(0) @binding(3) var<uniform>             params: Params;
 
 var<workgroup> s_cnt: array<atomic<u32>, MAX_G>;
@@ -263,9 +335,13 @@ fn main(@builtin(local_invocation_id) lid: vec3<u32>,
     if (i < params.n) {
         let k = keys[i];
         let v = vals[i];
-        atomicAdd(&s_cnt[k], 1u);
-        let old = atomicAdd(&s_lo[k], v);
-        if (old + v < old) { atomicAdd(&s_hi[k], 1u); }
+        if (k < params.g) {
+            atomicAdd(&s_cnt[k], 1u);
+            let old = atomicAdd(&s_lo[k], v);
+            if (old + v < old) { atomicAdd(&s_hi[k], 1u); }
+        } else {
+            atomicOr(&out[3u * params.g], 1u);
+        }
     }
     workgroupBarrier();
     g = lid.x;
@@ -427,8 +503,12 @@ impl Gpu {
     }
 
     /// Uploads a host-built open-addressing table (see [`cpu::build_hash_table`]).
+    ///
+    /// # Panics
+    /// If the slot count is not a non-zero power of two, or no slot is
+    /// `EMPTY_KEY` (a full table would give the probe walk no sentinel).
     pub fn upload_table(&self, slots: &[[u32; 2]]) -> HashTable {
-        debug_assert!(slots.len().is_power_of_two());
+        check_table(slots);
         HashTable {
             buf: self.storage_buffer(bytemuck::cast_slice(slots)),
             mask: (slots.len() - 1) as u32,
@@ -451,6 +531,9 @@ impl Gpu {
 
     pub fn write_table(&self, table: &HashTable, slots: &[[u32; 2]]) {
         assert_eq!(table.mask as usize + 1, slots.len());
+        // No `check_table` scan here: this is the timed host->device refill in the
+        // e2e benchmark legs, and an extra O(n) host pass would skew them. A full
+        // table written here still cannot hang — the probe walk is bounded.
         self.queue
             .write_buffer(&table.buf, 0, bytemuck::cast_slice(slots));
     }
@@ -529,9 +612,15 @@ impl Gpu {
         )
     }
 
-    /// COUNT + SUM GROUP BY over resident columns. `keys[i]` must be `< groups`
-    /// and `groups <= MAX_GROUPS`. Returns `(count, sum)` per group.
-    pub fn group_aggregate(&self, keys: &ColU32, vals: &ColU32, groups: u32) -> Vec<(u64, u64)> {
+    /// COUNT + SUM GROUP BY over resident columns. `groups <= MAX_GROUPS`.
+    /// Returns `(count, sum)` per group, or [`GroupKeyOutOfRange`] if any
+    /// `keys[i] >= groups` (detected on the device, no host scan).
+    pub fn group_aggregate(
+        &self,
+        keys: &ColU32,
+        vals: &ColU32,
+        groups: u32,
+    ) -> Result<Vec<(u64, u64)>, GroupKeyOutOfRange> {
         assert!(
             (1..=MAX_GROUPS).contains(&groups),
             "groups must be in 1..={MAX_GROUPS}"
@@ -547,16 +636,19 @@ impl Gpu {
                 d: 0,
             },
             keys.len,
-            3 * groups as usize,
+            3 * groups as usize + 1,
         );
         let g = groups as usize;
-        (0..g)
+        if r[3 * g] != 0 {
+            return Err(GroupKeyOutOfRange);
+        }
+        Ok((0..g)
             .map(|i| {
                 let count = u64::from(r[i]);
                 let sum = (u64::from(r[2 * g + i]) << 32) | u64::from(r[g + i]);
                 (count, sum)
             })
-            .collect()
+            .collect())
     }
 
     /// Shared dispatch path: binds `inputs` at 0.., a zero-initialised result
@@ -633,7 +725,7 @@ impl Gpu {
             cp.dispatch_workgroups(gx, gy, 1);
         }
         enc.copy_buffer_to_buffer(&result, 0, &readback, 0, result_bytes);
-        self.queue.submit(Some(enc.finish()));
+        let submission = self.queue.submit(Some(enc.finish()));
 
         let slice = readback.slice(..);
         let (tx, rx) = std::sync::mpsc::channel();
@@ -646,9 +738,15 @@ impl Gpu {
         // wgpu 30: `get_mapped_range()` now returns `Result<BufferView, MapRangeError>`
         // instead of `BufferView` directly — unwrap because a mapping error here is
         // a GPU protocol violation (we waited for the map to succeed above).
+        // GitHub #4603: wait for this submission with a bound ([`POLL_TIMEOUT`])
+        // rather than `wait_indefinitely()`, so a wedged device fails loudly
+        // instead of hanging the host thread.
         self.device
-            .poll(wgpu::PollType::wait_indefinitely())
-            .expect("device poll failed");
+            .poll(wgpu::PollType::Wait {
+                submission_index: Some(submission),
+                timeout: Some(POLL_TIMEOUT),
+            })
+            .expect("device poll failed or timed out");
         rx.recv()
             .expect("map_async callback dropped")
             .expect("readback map failed");

@@ -15,7 +15,10 @@
 //! default config both tools build, because it false-positives on a legitimately-empty
 //! answer. So an ungrounded predicate/class IRI is accepted by BOTH — `ask` executes it to
 //! zero rows, `nl_query` hands it back — and that parity is pinned by
-//! `both_tools_accept_an_ungrounded_predicate`. [OPUS-5]
+//! `both_tools_accept_an_ungrounded_predicate`. Both tools derive their config from one
+//! shared base, and [`run_nl_query_with`] honours `check_dictionary` exactly as
+//! [`sparq_nlq::Nlq::ask`] does, so turning it on cannot make the tools diverge
+//! (GitHub #4833). [OPUS-5]
 //!
 //! This is the second of the two complementary grounding tools chosen on the 2026-06-23
 //! design call (`shapes` is the no-LLM structured one): instead of handing the client a
@@ -146,7 +149,21 @@ pub fn nl_query(graph: &Graph, question: &str) -> Result<String, String> {
 /// fails at runtime (or matches nothing) is returned as-is. That is the honest trade the
 /// tool advertises: cheaper and reviewable, but only *syntactically* validated.
 pub fn run_nl_query(graph: &Graph, question: &str, llm: Box<dyn Llm>) -> Result<String, String> {
-    let config = NlqConfig::default();
+    run_nl_query_with(graph, question, base_config(), llm)
+}
+
+/// [`run_nl_query`] under an explicit [`NlqConfig`] — the config seam that keeps the two
+/// tools from drifting (GitHub #4833). It applies the same pre-execution checks
+/// [`sparq_nlq::Nlq::ask`] does under the same config, in the same order: the question
+/// guard, the `spargebra` parse, the forbidden-construct refusal, and — when
+/// `config.check_dictionary` is on — the dictionary-grounding repair
+/// ([`sparq_nlq::constrain::unknown_terms`]). Only execution is skipped.
+pub fn run_nl_query_with(
+    graph: &Graph,
+    question: &str,
+    config: NlqConfig,
+    llm: Box<dyn Llm>,
+) -> Result<String, String> {
     // `Nlq` owns its `Llm` and does not lend it out, so build the grounding and repair
     // prompts through a prompt-only instance (neither `prompt_for` nor `repair_prompt_for`
     // calls the model) and drive the caller's model directly. Constructing it runs the one
@@ -170,11 +187,21 @@ pub fn run_nl_query(graph: &Graph, question: &str, llm: Box<dyn Llm>) -> Result<
                 Err(e) => (Some(q), e.to_string()),
                 Ok(parsed) => {
                     let forbidden = sparq_nlq::guard::forbidden_constructs(&parsed, &config.guard);
-                    if forbidden.is_empty() {
-                        return Ok(render_translation(question, &q, round));
+                    if !forbidden.is_empty() {
+                        let msg = sparq_nlq::guard::forbidden_repair_message(&forbidden);
+                        (Some(q), msg)
+                    } else {
+                        let unknowns = if config.check_dictionary {
+                            sparq_nlq::constrain::unknown_terms(graph, &parsed)
+                        } else {
+                            Vec::new()
+                        };
+                        if unknowns.is_empty() {
+                            return Ok(render_translation(question, &q, round));
+                        }
+                        let msg = sparq_nlq::constrain::dictionary_repair_message(&unknowns);
+                        (Some(q), msg)
                     }
-                    let msg = sparq_nlq::guard::forbidden_repair_message(&forbidden);
-                    (Some(q), msg)
                 }
             },
         };
@@ -247,7 +274,7 @@ pub fn run_ask(
 fn config_from_budget(budget: &QueryBudget) -> NlqConfig {
     let mut config = NlqConfig {
         max_rows: budget.max_rows,
-        ..NlqConfig::default()
+        ..base_config()
     };
     // Translate the budget's absolute deadline into a per-query duration (the loop builds
     // a fresh deadline at execution time). Use the remaining time; fall back to the
@@ -261,6 +288,13 @@ fn config_from_budget(budget: &QueryBudget) -> NlqConfig {
         }
     }
     config
+}
+
+/// The single [`NlqConfig`] both tools start from: `ask` layers the server budget on top
+/// ([`config_from_budget`]) and `nl_query` uses it as-is, so a change to the pre-execution
+/// checks (e.g. turning `check_dictionary` on) reaches both tools at once. GitHub #4833.
+fn base_config() -> NlqConfig {
+    NlqConfig::default()
 }
 
 /// Render the answer as a structured JSON object: the executed SPARQL, the result rows
@@ -549,6 +583,47 @@ ex:bob   rdf:type ex:Person ; ex:name "Bob" .
         let v: Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["sparql"], UNGROUNDED);
         assert_eq!(v["repairs"], 0);
+    }
+
+    /// GitHub #4833: with `check_dictionary` on, `nl_query` must apply the same
+    /// dictionary-grounding repair `Nlq::ask` does under the same config — an ungrounded
+    /// predicate is fed back as a repair signal and, when the model repairs it, the
+    /// grounded query is returned. Both tools must reject the never-repaired case.
+    #[test]
+    fn nl_query_honours_check_dictionary_like_ask() {
+        const UNGROUNDED: &str = "PREFIX ex: <http://ex/> SELECT ?s WHERE { ?s ex:nosuch ?o }";
+        let config = NlqConfig {
+            check_dictionary: true,
+            max_repair_rounds: 1,
+            ..base_config()
+        };
+        let g = graph();
+
+        // A model that only ever emits the ungrounded query: both tools reject it.
+        let stuck = || Box::new(FnLlm(|_| Ok(format!("```sparql\n{}\n```", UNGROUNDED))));
+        let ask_err = sparq_nlq::Nlq::with_config(&g, stuck(), config.clone())
+            .ask("anything")
+            .expect_err("ask repairs then rejects an ungrounded predicate");
+        assert!(ask_err.to_string().contains("nosuch"), "{ask_err}");
+        let err = run_nl_query_with(&g, "anything", config.clone(), stuck())
+            .expect_err("nl_query must reject what ask rejects under the same config");
+        assert!(err.contains("nosuch"), "{err}");
+
+        // A model that repairs on the dictionary signal: the grounded query comes back.
+        let repairing = Box::new(FnLlm(|prompt| {
+            // Only the repair prompt names the ungrounded IRI.
+            let q = if prompt.contains("http://ex/nosuch") {
+                COUNT_QUERY
+            } else {
+                UNGROUNDED
+            };
+            Ok(format!("```sparql\n{}\n```", q))
+        }));
+        let out = run_nl_query_with(&g, "anything", config, repairing)
+            .expect("the repaired, grounded query is returned");
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["sparql"], COUNT_QUERY);
+        assert_eq!(v["repairs"], 1);
     }
 
     #[test]

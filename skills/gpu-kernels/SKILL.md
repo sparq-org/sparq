@@ -58,14 +58,17 @@ let col = gpu.upload_u32(&[1u32, 5, 9, 3, 7]);
 let n = gpu.filter_count_u32(&col, 4, 8);          // -> 2  (5 and 7)
 
 // Hash-join probe against a resident open-addressing table.
-let table = gpu.upload_table(&[[42, 100], [7, 200]]);   // [key, payload]
+// Build it on the host with `cpu::build_hash_table` (load factor <= 0.5): `upload_table`
+// panics on a table that is not a power of two or has no EMPTY_KEY slot.
+let slots = sparq_gpu::cpu::build_hash_table(&[42, 7], &[100, 200]); // keys, payloads
+let table = gpu.upload_table(&slots);
 let probe = gpu.upload_u32(&[42u32, 7, 7, 1]);
 let (matches, payload_sum) = gpu.hash_probe(&table, &probe);
 
 // GROUP BY COUNT+SUM (keys pre-densified to 0..groups, groups ≤ MAX_GROUPS = 512).
 let keys = gpu.upload_u32(&[0u32, 1, 0, 1, 1]);
 let vals = gpu.upload_u32(&[10u32, 20, 30, 40, 50]);
-let per_group = gpu.group_aggregate(&keys, &vals, 2);   // Vec<(count, sum)>
+let per_group = gpu.group_aggregate(&keys, &vals, 2)?;  // Vec<(count, sum)>
 let _ = (n, matches, payload_sum, per_group);
 ```
 
@@ -82,9 +85,13 @@ let _ = (n, matches, payload_sum, per_group);
     trick): **exact, NaN-correct, no float math on the device** for comparisons.
   - `hash_probe(&table, &probe) -> (u64, u64)` — `(matches, payload_sum)` against a
     resident linear-probing table (load ≤ 0.5; u64 sum via 32-bit atomic carry).
-  - `group_aggregate(&keys, &vals, groups) -> Vec<(u64, u64)>` — `(count, sum)` per
-    group with two-level (workgroup-shared → global) atomics.
-- Constants / introspection: `EMPTY_KEY` (`u32::MAX`), `MAX_GROUPS` (`512`),
+  - `group_aggregate(&keys, &vals, groups) -> Result<Vec<(u64, u64)>, GroupKeyOutOfRange>`
+    — `(count, sum)` per group with two-level (workgroup-shared → global) atomics. A key
+    `>= groups` is flagged on the device and returned as `GroupKeyOutOfRange`; the CPU
+    oracle `cpu::group_aggregate` returns the same error (it no longer panics).
+- The probe walk is bounded at one pass over the table, and each submission is waited on
+  for at most `POLL_TIMEOUT` (60 s, then a panic) rather than indefinitely.
+- Constants / introspection: `EMPTY_KEY` (`u32::MAX`), `MAX_GROUPS` (`512`), `POLL_TIMEOUT`,
   `Gpu::max_storage_bytes` (the `max_storage_buffer_binding_size` cap on resident column
   size).
 
