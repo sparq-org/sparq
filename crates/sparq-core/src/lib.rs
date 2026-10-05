@@ -758,10 +758,25 @@ fn numeric_datatype_wellformed(v: &str, datatype: &str) -> bool {
 pub(crate) fn cached_numeric_f64(value: &str, datatype: &str) -> f64 {
     let v = value.trim();
     if numeric_datatype_wellformed(v, datatype) {
-        parse_xsd_f64(v).unwrap_or(f64::NAN)
+        numeric_lexical_f64(v, datatype).unwrap_or(f64::NAN)
     } else {
         f64::NAN
     }
+}
+
+/// The `f64` image of a numeric lexical's VALUE (`v` already trimmed and accepted): the
+/// nearest `f64` to the lexical, except for `xsd:float`, whose value is the `f32` nearest
+/// the lexical, widened exactly (XPath compares an `xs:float` by promoting THAT value). The
+/// nearest `f64` skips the `f32` rounding, so `"4611686293305294849"^^xsd:float` compared
+/// unequal to its own value `"4611686568183201792"^^xsd:double` (#3825). Rust's decimal
+/// parser is correctly rounded at both widths, so this is one rounding of the true value.
+pub fn numeric_lexical_f64(v: &str, datatype: &str) -> Option<f64> {
+    let wide = parse_xsd_f64(v)?;
+    if datatype == xsd::FLOAT.as_str() && wide.is_finite() {
+        // Overflow saturates to ±INF, which is the xs:float value of such a lexical.
+        return v.parse::<f32>().ok().map(f64::from);
+    }
+    Some(wide)
 }
 
 /// The numeric-value CACHE's acceptance of a literal `(value, datatype)`: `Some(f64)` iff the

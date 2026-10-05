@@ -13109,7 +13109,9 @@ fn ebv(v: &Value) -> Option<bool> {
                 // [OPUS-4.8] sq-rkzhr: XSD acceptance set (via `parse_xsd_f64`) — a
                 // numeric-typed literal with an ill-formed lexical is a type error (`None`),
                 // matching `as_num` rather than silently swallowing Rust-only spellings.
-                parse_xsd_f64(l.value()).map(|n| n != 0.0 && !n.is_nan())
+                // Valued per datatype (#3825): a tiny `xsd:float` lexical whose `f32` value is
+                // zero is false, even though its nearest `f64` is not zero.
+                sparq_core::numeric_lexical_f64(l.value(), dt).map(|n| n != 0.0 && !n.is_nan())
             } else if dt == xsd::STRING.as_str() {
                 Some(!l.value().is_empty())
             } else {
@@ -13987,7 +13989,7 @@ fn is_numeric_dt(l: &Literal) -> bool {
 #[inline]
 fn numeric_cache_f64(l: &Literal) -> Option<f64> {
     if is_numeric_dt(l) && Num::of_literal(l).is_some() {
-        parse_xsd_f64(l.value().trim())
+        sparq_core::numeric_lexical_f64(l.value().trim(), l.datatype().as_str())
     } else {
         None
     }
