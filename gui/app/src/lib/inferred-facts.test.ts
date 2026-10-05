@@ -208,3 +208,24 @@ test("literal base direction is a key component on both paths", () => {
   const p: SparqlTerm = { type: "uri", value: "http://ex/p" };
   assert.equal(tripleKeyOfBindings(a, p, dirLit), ltr);
 });
+
+test("a directional literal inside a triple term round-trips through termToNT", () => {
+  const a: SparqlTerm = { type: "uri", value: "http://ex/a" };
+  const p: SparqlTerm = { type: "uri", value: "http://ex/p" };
+  const tt = (dir: string | undefined): SparqlTerm => ({
+    type: "triple",
+    value: {
+      subject: a,
+      predicate: p,
+      object: { type: "literal", value: "hi", "xml:lang": "en", "its:dir": dir },
+    },
+  });
+  for (const t of [tt("ltr"), tt("rtl"), tt(undefined)]) {
+    const line: string = `${termToNT(a)} ${termToNT(p)} ${termToNT(t)} .`;
+    assert.equal(keyOfLine(line), tripleKeyOfBindings(a, p, t));
+  }
+  // The snapshot keeps the direction, so terms differing only by it stay distinct.
+  assert.equal(termToNT(tt("ltr")), '<<( <http://ex/a> <http://ex/p> "hi"@en--ltr )>>');
+  assert.notEqual(termToNT(tt("ltr")), termToNT(tt("rtl")));
+  assert.notEqual(termToNT(tt("ltr")), termToNT(tt(undefined)));
+});

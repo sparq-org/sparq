@@ -161,8 +161,7 @@ export function keyOfSparqlTerm(t: SparqlTerm): string {
     );
   }
   // SPARQL 1.2 results carry the base direction as a separate `its:dir` field.
-  const dir = (t as { "its:dir"?: string })["its:dir"];
-  return literalKey(t.value, t["xml:lang"], dir, t.datatype);
+  return literalKey(t.value, t["xml:lang"], t["its:dir"], t.datatype);
 }
 
 /** Canonical key of a whole triple from three SPARQL-JSON terms. */

@@ -101,12 +101,25 @@ export interface WasmModule {
 // SPARQL 1.1 JSON + SHACL report shapes (for rendering).
 // ---------------------------------------------------------------------------
 
-/** An IRI, blank node or literal in SPARQL-JSON form (`value` is the decoded lexical form). */
+/**
+ * An IRI, blank node or literal in SPARQL-JSON form (`value` is the decoded lexical form).
+ * A literal with an RDF 1.2 base direction carries the bare tag in `xml:lang` and the
+ * direction (`ltr` / `rtl`) in `its:dir`, as SPARQL 1.2 Query Results JSON does.
+ */
 export interface SparqlAtomicTerm {
   type: "uri" | "literal" | "bnode";
   value: string;
   datatype?: string;
   "xml:lang"?: string;
+  "its:dir"?: string;
+}
+
+/** A literal's language suffix with its base direction: `en`, or `en--ltr` for `its:dir`. */
+function langTag(t: SparqlAtomicTerm): string | undefined {
+  const lang = t["xml:lang"];
+  if (!lang) return undefined;
+  const dir = t["its:dir"];
+  return dir ? `${lang}--${dir}` : lang;
 }
 
 /**
@@ -120,6 +133,7 @@ export interface SparqlTripleTerm {
   value: { subject: SparqlTerm; predicate: SparqlTerm; object: SparqlTerm };
   datatype?: undefined;
   "xml:lang"?: undefined;
+  "its:dir"?: undefined;
 }
 
 /** One SPARQL-JSON term: an IRI / blank node / literal, or an RDF 1.2 triple term. */
@@ -155,7 +169,8 @@ function escapeNTriplesString(value: string): string {
  * triple term as `<<( s p o )>>`. The single shared term writer: every N-Triples/N-Quads
  * snapshot built from SPARQL-JSON bindings should route through this so a new term kind
  * cannot be silently dropped by one writer. A literal's lexical form is escaped the way the
- * engine's own serialiser does (backslash, double-quote, LF, CR); `xsd:string` is implicit.
+ * engine's own serialiser does (backslash, double-quote, LF, CR); `xsd:string` is implicit;
+ * an RDF 1.2 base direction (`its:dir`) is kept as `@lang--dir`.
  */
 export function termToNTriples(t: SparqlTerm): string {
   switch (t.type) {
@@ -169,7 +184,7 @@ export function termToNTriples(t: SparqlTerm): string {
     }
     case "literal": {
       const quoted = `"${escapeNTriplesString(t.value)}"`;
-      const lang = t["xml:lang"];
+      const lang = langTag(t);
       if (lang) return `${quoted}@${lang}`;
       if (t.datatype && t.datatype !== XSD_STRING_IRI) return `${quoted}^^<${t.datatype}>`;
       return quoted;
@@ -973,7 +988,8 @@ export function formatTerm(t: SparqlTerm | undefined): string {
     const { subject, predicate, object } = t.value;
     return `<<( ${formatTerm(subject)} ${formatTerm(predicate)} ${formatTerm(object)} )>>`;
   }
-  if (t["xml:lang"]) return `"${t.value}"@${t["xml:lang"]}`;
+  const lang = langTag(t);
+  if (lang) return `"${t.value}"@${lang}`;
   if (t.datatype && t.datatype !== "http://www.w3.org/2001/XMLSchema#string") {
     const short = t.datatype.replace("http://www.w3.org/2001/XMLSchema#", "xsd:");
     return `"${t.value}"^^${short}`;

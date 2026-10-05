@@ -39,6 +39,8 @@ function termKey(term: SparqlTerm): string {
     term.value,
     term.type === "literal" ? (term.datatype ?? "") : "",
     term.type === "literal" ? (term["xml:lang"] ?? "") : "",
+    // RDF 1.2 base direction is part of the literal's identity.
+    term.type === "literal" ? (term["its:dir"] ?? "") : "",
   ]);
 }
 
