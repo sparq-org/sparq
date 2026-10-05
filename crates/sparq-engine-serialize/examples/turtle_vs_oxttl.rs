@@ -1,4 +1,4 @@
-//! [OPUS-5.5] (#4898) Same-box Turtle writer comparison: `graph_to_turtle_with` vs
+//! (#4898) Same-box Turtle writer comparison: `graph_to_turtle_with` vs
 //! oxttl's `TurtleSerializer` (the Turtle writer behind Oxigraph 0.5's `RdfSerializer`)
 //! over a deterministic, DOCUMENT-SHAPED synthetic graph — the shape a Markdown-derived
 //! document graph has (headings / paragraphs / list items, each with a string literal of

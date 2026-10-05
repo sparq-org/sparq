@@ -122,7 +122,7 @@ where
 /// passes through verbatim, matching oxrdf's own IRI rendering.
 fn escape_iri(iri: &str, out: &mut String) {
     out.push('<');
-    // [OPUS-5.5] (#4898) Every escaped character is ASCII, so scan BYTES and copy the
+    // (#4898) Every escaped character is ASCII, so scan BYTES and copy the
     // unescaped runs in bulk (a byte index of an ASCII byte is always a char boundary).
     // Byte-identical to the former per-`char` loop.
     let mut start = 0;
@@ -147,7 +147,7 @@ fn escape_iri(iri: &str, out: &mut String) {
 /// emitted verbatim. This matches oxrdf's canonical N-Triples literal escaping, so a
 /// re-parse is exact.
 fn escape_string(value: &str, out: &mut String) {
-    // [OPUS-5.5] (#4898) Byte scan + bulk copy of the unescaped runs (the four escaped
+    // (#4898) Byte scan + bulk copy of the unescaped runs (the four escaped
     // characters are ASCII, so every split point is a char boundary). Byte-identical to the
     // former per-`char` push loop; matters on long document-text literals.
     let mut start = 0;
@@ -196,7 +196,7 @@ fn write_iri(iri: &str, prefixes: &Prefixes, out: &mut String) {
     // Longest-namespace-first so `…#` beats `…` etc.; deterministic on ties via the
     // prefix name (BTreeMap iteration order).
     //
-    // [OPUS-5.5] (#4898) The tie-break used to compare the best match's LOCAL part length
+    // (#4898) The tie-break used to compare the best match's LOCAL part length
     // against the candidate's NAMESPACE length, so it neither kept the longest namespace
     // nor broke equal-length ties by label order as documented. It now tracks the best
     // namespace length; `PrefixTable::compact` (the Turtle hot path) makes the same choice.
@@ -218,7 +218,7 @@ fn write_iri(iri: &str, prefixes: &Prefixes, out: &mut String) {
     }
 }
 
-/// [OPUS-5.5] (#4898) A [`Prefixes`] map compiled ONCE per document for the Turtle hot
+/// (#4898) A [`Prefixes`] map compiled ONCE per document for the Turtle hot
 /// path: entries ordered longest-namespace-first (a stable sort, so equal-length namespaces
 /// keep the `BTreeMap` label order). The first entry whose namespace is a proper prefix of
 /// an IRI with a [simple](is_simple_pn_local) local part is therefore EXACTLY the choice
@@ -295,7 +295,7 @@ fn write_literal(lit: &oxrdf::Literal, prefixes: &Prefixes, out: &mut String) {
     if let Some(lang) = lit.language() {
         out.push('@');
         out.push_str(lang);
-        // [OPUS-5.5] (#4898) RDF 1.2 base direction (`@ar--rtl`): previously dropped,
+        // (#4898) RDF 1.2 base direction (`@ar--rtl`): previously dropped,
         // so a directional literal re-parsed as a plain language-tagged one.
         if let Some(dir) = lit.direction() {
             let _ = write!(out, "--{dir}");
@@ -375,7 +375,7 @@ pub fn write_turtle(triples: &[Triple], prefixes: &Prefixes) -> String {
 /// compaction for at least one IRI in `triples` (so an unused prefix never clutters the
 /// header). Determined by a dry render of every IRI position.
 fn write_prefix_header(triples: &[Triple], prefixes: &Prefixes, out: &mut String) {
-    // [OPUS-5.5] (#4898) One compiled-table match per IRI position (no dry render into a
+    // (#4898) One compiled-table match per IRI position (no dry render into a
     // probe string, no `Term` clone of every subject); same used-set as before.
     let table = PrefixTable::new(prefixes);
     let mut used = vec![false; table.entries.len()];
@@ -812,7 +812,7 @@ pub fn graph_to_turtle_with(graph: &Graph, prefixes: &Prefixes) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-5.5] (#4898) Id-level Turtle writer for the `graph_to_turtle` family.
+// (#4898) Id-level Turtle writer for the `graph_to_turtle` family.
 //
 // The generic path (`write_turtle(&graph_triples(g), …)`) first decodes EVERY triple into
 // owned `oxrdf` terms (three `String` allocations per row, plus the literal's datatype),
@@ -1346,7 +1346,7 @@ fn write_term_full(term: &Term, out: &mut String) {
             if let Some(lang) = l.language() {
                 out.push('@');
                 out.push_str(lang);
-                // [OPUS-5.5] (#4898) RDF 1.2 base direction (`@ar--rtl`): previously dropped,
+                // (#4898) RDF 1.2 base direction (`@ar--rtl`): previously dropped,
                 // so a directional literal re-parsed as a plain language-tagged one.
                 if let Some(dir) = l.direction() {
                     let _ = write!(out, "--{dir}");
@@ -2538,7 +2538,7 @@ mod tests {
         );
     }
 
-    // ---- [OPUS-5.5] (#4898) Id-level graph_to_turtle == generic write_turtle. ----
+    // ---- (#4898) Id-level graph_to_turtle == generic write_turtle. ----
 
     /// A corpus exercising every term kind the id-level writer special-cases: inline and
     /// non-inline integers, plain / typed / custom-datatype / language / directional
@@ -5425,7 +5425,7 @@ ex:bob
     // exact byte values (non-vacuous) and exercises the REAL writer path.
     // =======================================================================
 
-    /// write_iri longest-namespace rule. [OPUS-5.5] (#4898): this test used to pin a
+    /// write_iri longest-namespace rule. (#4898): this test used to pin a
     /// tie-break that compared the best match's LOCAL length against the next NAMESPACE
     /// length (keeping `a:longlocal`); the documented rule — and `PrefixTable::compact` —
     /// is longest namespace wins, equal-length namespaces broken by label order.

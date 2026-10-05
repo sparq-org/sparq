@@ -46,7 +46,7 @@ oxrdf.workspace = true
 # crate; the writer re-exports it. OPTIONAL + pulled in ONLY by `serialize-rdf`, so an
 # empty (feature-off) build never compiles it — preserving the writer's dep-free contract.
 sparq-jsonld = { path = "../sparq-jsonld", version = "0.1.3", optional = true, default-features = false }
-# [OPUS-5.5] (#4898) Fx hashing for the id-level Turtle writer's per-id render caches.
+# (#4898) Fx hashing for the id-level Turtle writer's per-id render caches.
 # OPTIONAL + pulled in ONLY by `serialize-rdf` (feature-off stays dependency-free); already
 # in the tree via sparq-core.
 rustc-hash = { workspace = true, optional = true }
@@ -63,7 +63,7 @@ sparq-core = { path = "../sparq-core", version = "0.1.3", features = ["jsonld"] 
 serde_json = "1"
 # [GPT-5.6] (sq-wruhj) Property generators for writer/parser round-trip tests only.
 proptest = "1"
-# [OPUS-5.5] (#4898) The `turtle_vs_oxttl` example compares `graph_to_turtle` with oxttl's
+# (#4898) The `turtle_vs_oxttl` example compares `graph_to_turtle` with oxttl's
 # TurtleSerializer (the writer behind Oxigraph 0.5's RdfSerializer). DEV-only; oxttl is
 # already in the tree via sparq-core's parser.
 oxttl.workspace = true
@@ -76,7 +76,7 @@ oxttl.workspace = true
 name = "serialize_bench"
 required-features = ["serialize-rdf", "streaming-serialization"]
 
-# [OPUS-5.5] (#4898) Same-box Turtle writer comparison vs oxttl on a document-shaped graph.
+# (#4898) Same-box Turtle writer comparison vs oxttl on a document-shaped graph.
 [[example]]
 name = "turtle_vs_oxttl"
 required-features = ["serialize-rdf"]
