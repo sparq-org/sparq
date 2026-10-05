@@ -2,13 +2,11 @@
 # Runs the existing ignored driver `vcq_authenticated_genuine` with an explicit
 # single-case job. Each job exports both guests from this commit, proves one
 # case, and uploads the driver's evidence directory (summary.json last).
-# Push-triggered on this branch only; it is not a required check.
+# Manual dispatch only (each case is a multi-hour CPU proof); not a required check.
 name: zk-authrdf-genuine
 
 on:
   workflow_dispatch:
-  push:
-    branches: [claude/zk-payment-false-ask]
 
 permissions:
   contents: read
@@ -26,9 +24,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # The six W3C-vector cases ran from claude/zk-authrdf-genuine-receipts
-        # at the parent commit; this branch adds only the payment cases.
         case:
+          - select-bag-verifier-agreed
+          - ask-true-verifier-agreed
+          - ask-false-holder-declared
+          - construct-verifier-agreed
+          - construct-holder-declared
+          - select-bag-holder-declared
+          - select-bag-row-bound
           - ask-false-payment-verifier-agreed
           - ask-false-payment-holder-declared
     steps:
