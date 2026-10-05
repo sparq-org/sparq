@@ -630,7 +630,13 @@ pub fn compact_iri(
                 // reaching here was rejected by Term Selection for this value (e.g. a
                 // `@type: @id` term offered a plain literal), so using it would change
                 // the value's meaning on re-expansion.
-                if !ctx.term_definitions.contains_key(suffix) {
+                // A suffix with a colon would re-expand as an absolute or compact IRI,
+                // and one starting with `@` as a keyword, so neither maps back here
+                // (the spec's step 4 doesn't check; the full IRI is returned below).
+                if !ctx.term_definitions.contains_key(suffix)
+                    && !suffix.contains(':')
+                    && !suffix.starts_with('@')
+                {
                     return suffix.to_string();
                 }
             }
@@ -990,6 +996,17 @@ mod tests {
             false,
         );
         assert_eq!(dc_result, "dc11:title");
+    }
+
+    /// A vocab-relative suffix containing a colon or starting with `@` would not
+    /// re-expand to the same IRI, so the full IRI is kept.
+    #[test]
+    fn compact_iri_vocab_suffix_must_round_trip() {
+        let ac = ctx_of(r#"{"@vocab": "http://example.org/vocab/"}"#);
+        let inv = ac.inverse_context();
+        for iri in ["http://example.org/vocab/a:b", "http://example.org/vocab/@id"] {
+            assert_eq!(compact_iri(&ac, &inv, iri, None, true, false), iri);
+        }
     }
 
     /// Vocab-relative suffix: when `@vocab` is a prefix of the IRI and the

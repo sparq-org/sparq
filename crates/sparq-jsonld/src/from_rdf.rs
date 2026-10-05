@@ -17,10 +17,12 @@
 //! * **`rdf:List` reconstruction** — well-formed `rdf:first`/`rdf:rest`/`rdf:nil`
 //!   chains collapse into `@list` arrays (including nested lists); chains that are
 //!   not well-formed (a cell referenced more than once, or carrying extra properties)
-//!   stay as plain node objects, exactly per spec. One liberty: a cell referenced from
-//!   a *different* graph also stays put. The REC's walk follows the global
-//!   referenced-once map across graphs, which would move the cell's triples into the
-//!   referencing graph; the W3C suite has no such case.
+//!   stay as plain node objects, exactly per spec. Liberties that keep the dataset
+//!   intact where the W3C suite has no case: a cell referenced from a *different*
+//!   graph stays put (the REC's walk follows the global referenced-once map across
+//!   graphs, moving the cell's triples into the referencing graph), and so does a
+//!   cell that also names a graph or is the object of `rdf:type` (the REC does not
+//!   count those uses, so collapsing the cell would lose them).
 //! * **`useNativeTypes` / `useRdfType`** — native JSON scalar coercion for
 //!   `xsd:boolean`/`xsd:integer`/`xsd:double` (invalid or non-finite lexical forms
 //!   honestly stay typed strings), and `rdf:type`-as-property instead of `@type`.
@@ -316,6 +318,16 @@ enum RefState {
     Shared,
 }
 
+/// Marks blank node `id` as shared, so it is never consumed as a list cell or compound
+/// literal. The REC's referenced-once bookkeeping only counts object positions outside
+/// `rdf:type`, so a cell that also names a graph or serves as a type would be consumed
+/// and that use lost; the W3C suite has no such case.
+fn mark_shared(referenced_once: &mut FxMap<String, RefState>, id: &str) {
+    if id.starts_with("_:") && !matches!(referenced_once.get(id), Some(RefState::Shared)) {
+        referenced_once.insert(id.to_string(), RefState::Shared);
+    }
+}
+
 /// `map[key]`, inserting a default value first; the key is only allocated on insert.
 fn entry_mut<'m, V: Default, M: StrMap<V>>(map: &'m mut M, key: &str) -> &'m mut V {
     if !map.contains_key(key) {
@@ -389,6 +401,9 @@ pub fn from_rdf(dataset: &[RdfQuad], options: &FromRdfOptions) -> Result<Json, J
             // Spec step 4.4: the default graph gets a node for every graph name.
             let default = graphs.get_mut(DEFAULT_GRAPH).expect("default graph inserted above");
             entry_mut(default, &graph_key);
+            // A blank node naming a graph is never a list cell or compound literal:
+            // consuming it would drop the graph (see `mark_shared`).
+            mark_shared(&mut referenced_once, &graph_key);
         }
         // Spec step 4.6.1: in compound-literal mode an rdf:direction triple marks
         // its subject as a compound-literal blank node.
@@ -413,6 +428,8 @@ pub fn from_rdf(dataset: &[RdfQuad], options: &FromRdfOptions) -> Result<Json, J
                 if !node.types.iter().any(|t| t == oid) {
                     node.types.push(oid.to_string());
                 }
+                // A blank node used as a type is referenced from here too.
+                mark_shared(&mut referenced_once, oid);
                 continue;
             }
         }

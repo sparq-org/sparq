@@ -3896,6 +3896,60 @@ ex:bob
         assert_compact_count_iso(&g0, r#"{"@vocab":"http://ex/"}"#);
     }
 
+    // A list cell that also names a graph, or is used as a type, keeps that use.
+    #[test]
+    fn compact_keeps_list_cells_used_elsewhere() {
+        for trig in [
+            r#"@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+               <http://ex/s> <http://ex/p> _:l . _:l rdf:first "a" ; rdf:rest rdf:nil .
+               _:l { <http://ex/x> <http://ex/q> "b" . }"#,
+            r#"@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+               <http://ex/s> <http://ex/p> _:l . _:l rdf:first "a" ; rdf:rest rdf:nil .
+               <http://ex/x> a _:l ."#,
+        ] {
+            let g0 = Graph::load_dataset(trig, "trig").unwrap();
+            let (doc, g1) = compact_then_reload(&g0, r#"{"@vocab":"http://ex/"}"#);
+            assert_eq!(graph_counts(&g0), graph_counts(&g1), "{doc}");
+            // The cell is one node in both uses: as many distinct blank nodes come back.
+            let blanks = |g: &Graph| {
+                let mut v: Vec<String> = g
+                    .named
+                    .iter()
+                    .map(|(n, _)| n.to_string())
+                    .chain(nt_sorted(g).into_iter().flat_map(|t| {
+                        t.split(' ').map(str::to_string).collect::<Vec<_>>()
+                    }))
+                    .filter(|t| t.starts_with("_:"))
+                    .collect();
+                v.sort();
+                v.dedup();
+                v.len()
+            };
+            assert_eq!(blanks(&g0), blanks(&g1), "{doc}");
+        }
+    }
+
+    // rdf:JSON literals keep their exact lexical form, including arrays, which a
+    // `@type: @json` term would otherwise merge with multiple values.
+    #[test]
+    fn compact_keeps_json_literals_lexically() {
+        let g0 = Graph::load_str(
+            r#"@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+               <http://ex/s> <http://ex/p> "[]"^^rdf:JSON , "[1]"^^rdf:JSON , "{ \"a\": 1 }"^^rdf:JSON ."#,
+            "turtle",
+        )
+        .unwrap();
+        assert_compact_iso(&g0, r#"{"p":{"@id":"http://ex/p","@type":"@json"}}"#);
+        assert_compact_iso(&g0, r#"{"p":{"@id":"http://ex/p","@type":"@json","@container":"@set"}}"#);
+    }
+
+    // A predicate whose @vocab suffix has a colon keeps its full IRI.
+    #[test]
+    fn compact_keeps_colon_suffix_iris() {
+        let g0 = Graph::load_str(r#"<http://ex/s> <http://ex/a:b> "v" ."#, "turtle").unwrap();
+        assert_compact_iso(&g0, r#"{"@vocab":"http://ex/"}"#);
+    }
+
     // A malformed rdf:JSON literal is admissible RDF; the writers keep it as a typed
     // string instead of panicking.
     #[test]

@@ -283,7 +283,7 @@ impl Ctx {
     /// more than [`MEMO_CAP`] IRIs. The root outlives the call in [`LAST_ROOT`] and node
     /// ids differ per document, so without this the memos would keep every IRI ever
     /// compacted on the thread; within one call they stay unbounded, which keeps large
-    /// documents fast.
+    /// documents fast. Each IRI holds at most [`MEMO_SHAPES`] value shapes.
     fn trim_memos(&self) {
         let derived = self.derived.borrow();
         for memo in std::iter::once(&self.memo).chain(derived.iter().map(|(_, c)| &c.memo)) {
@@ -316,13 +316,19 @@ impl Ctx {
             Some(entries) => entries,
             None => memo.entry(iri.to_string()).or_default(),
         };
-        entries.push((shape.to_owned(), vocab, reverse, result.clone()));
+        // Shapes vary with datatypes and language tags, so they are capped per IRI too.
+        if entries.len() < MEMO_SHAPES {
+            entries.push((shape.to_owned(), vocab, reverse, result.clone()));
+        }
         result
     }
 }
 
 /// Most distinct IRIs a [`Ctx`] keeps memoised between calls (see [`Ctx::trim_memos`]).
 const MEMO_CAP: usize = 4096;
+
+/// Most value shapes memoised per IRI.
+const MEMO_SHAPES: usize = 8;
 
 /// One memoised IRI Compaction: (value shape, vocab, reverse, result).
 type MemoEntry = (OwnedShape, bool, bool, String);
@@ -1215,5 +1221,27 @@ mod tests {
         }
         let len = LAST_ROOT.with(|last| last.borrow().as_ref().map(|(_, _, c)| c.memo.borrow().len()));
         assert!(len.is_some_and(|n| n <= MEMO_CAP), "memo size {len:?}");
+    }
+
+    // Language tags and datatypes make value shapes unbounded under one IRI, so the
+    // shapes memoised per IRI are capped too.
+    #[test]
+    fn memo_shapes_per_iri_are_bounded() {
+        let ctx = Json::parse(r#"{"@vocab":"http://ex/","@language":"en"}"#).unwrap();
+        let opts = JsonLdOptions::default();
+        for i in 0..4 * MEMO_SHAPES {
+            let doc = Json::parse(&format!(
+                r#"[{{"@id":"http://ex/s","http://ex/p":[{{"@value":"v","@language":"en-x-{i:08}"}}]}}]"#
+            ))
+            .unwrap();
+            compact_expanded(&doc, &ctx, &opts, &NoopLoader).unwrap();
+        }
+        let shapes = LAST_ROOT.with(|last| {
+            let last = last.borrow();
+            let (_, _, c) = last.as_ref().unwrap();
+            let memo = c.memo.borrow();
+            memo.get("http://ex/p").map(Vec::len)
+        });
+        assert!(shapes.is_some_and(|n| n <= MEMO_SHAPES), "shapes {shapes:?}");
     }
 }

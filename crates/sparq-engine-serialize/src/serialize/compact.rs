@@ -88,19 +88,18 @@ fn native_scalars(v: &mut Json) {
 
 /// The lossless expanded fromRdf document for `graphs`.
 ///
-/// Typed list cells stay explicit nodes, so their `rdf:type rdf:List` triple survives.
-/// A malformed `rdf:JSON` literal is admissible RDF but fails the 1.1 `@json` decoding,
-/// so such a dataset is converted in 1.0 mode instead, where every `rdf:JSON` literal
-/// stays a typed string.
+/// Converted in 1.0 mode so every `rdf:JSON` literal stays a typed string with its
+/// exact lexical form: 1.1 `@json` decoding would normalise (or, for malformed JSON,
+/// reject) it, and a `@json` array payload cannot be told apart from multiple values
+/// once compacted. Typed list cells stay explicit nodes, so their `rdf:type rdf:List`
+/// triple survives.
 fn expanded(graphs: &[NamedGraph<'_>]) -> Json {
-    let quads = rdf_quads(graphs);
     let mut options = FromRdfOptions::default();
+    options.processing_mode = ProcessingMode::JsonLd10;
     options.keep_typed_list_cells = true;
-    let mut doc = from_rdf(&quads, &options).unwrap_or_else(|_| {
-        options.processing_mode = ProcessingMode::JsonLd10;
-        // With @json decoding and compound literals both off, no term can fail.
-        from_rdf(&quads, &options).expect("1.0-mode fromRdf of RDF terms is total")
-    });
+    // With @json decoding and compound literals both off, no term can fail.
+    let mut doc =
+        from_rdf(&rdf_quads(graphs), &options).expect("1.0-mode fromRdf of RDF terms is total");
     native_scalars(&mut doc);
     doc
 }
