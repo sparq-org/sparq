@@ -3388,19 +3388,24 @@ mod tests {
     /// Intentional, documented difference kept by #3526: SHACL orders xsd:date against
     /// xsd:dateTime on one timeline (a date is its midnight), whereas the engine's
     /// `Temporal::cmp_t` treats them as disjoint families (`None`).
-    /// Just past the 14h edge with fractional seconds: the difference of the two instants
-    /// rounds to exactly 14h, so the window must be decided on its endpoints.
+    /// The 14h window is decided on whole microseconds, so neither the rounded
+    /// difference nor rounded endpoints can move a pair across the edge.
     #[test]
     fn date_time_window_edge_survives_rounding() {
         let lit = |v: &str| {
             Literal::new_typed_literal(v, oxrdf::NamedNode::new(xsd("dateTime")).unwrap())
         };
-        let (floating, zoned) = (
-            lit("1969-12-31T14:16:40"),
-            lit("1970-01-01T04:16:40.000000000002Z"),
-        );
+        // Exactly 14h apart with a shared fraction: indeterminate in both orders.
+        let (floating, zoned) = (lit("1969-12-31T14:16:40.1"), lit("1970-01-01T04:16:40.1Z"));
+        assert_eq!(cmp_literals(&floating, &zoned), None);
+        assert_eq!(cmp_literals(&zoned, &floating), None);
+        // One microsecond past the edge: determinate in both orders.
+        let (floating, zoned) = (lit("1969-12-31T14:16:40"), lit("1970-01-01T04:16:40.000001Z"));
         assert_eq!(cmp_literals(&floating, &zoned), Some(Ordering::Less));
         assert_eq!(cmp_literals(&zoned, &floating), Some(Ordering::Greater));
+        let (floating, zoned) = (lit("2024-03-16T03:00:00.000001"), lit("2024-03-15T13:00:00Z"));
+        assert_eq!(cmp_literals(&floating, &zoned), Some(Ordering::Greater));
+        assert_eq!(cmp_literals(&zoned, &floating), Some(Ordering::Less));
     }
 
     #[test]

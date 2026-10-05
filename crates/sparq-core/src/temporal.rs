@@ -119,35 +119,42 @@ impl Timeline {
 
 /// The XPath dateTime/date comparison on precomputed instants: direct when both
 /// or neither operand carries a timezone; with MIXED presence only decidable
-/// outside the ±14h window (inside it — including exactly 14h — indeterminate -> `None`).
+/// outside the ±14h window (inside it — including exactly 14h — indeterminate -> `None`),
+/// decided at microsecond resolution.
 /// Public so every XSD-ordering consumer (the engine via [`Timeline`]/[`Temporal`],
 /// sparq-shacl's `sh:lessThan`/range comparisons on its own instants) shares this ONE
 /// window rule (#3526).
 #[inline]
 pub fn cmp_instants(ai: f64, a_tz: bool, bi: f64, b_tz: bool) -> Option<Ordering> {
-    // Same (or no) timezone: a direct compare. With MIXED presence the order is
-    // only decidable outside the ±14h window; inside it the result is indeterminate.
-    if a_tz == b_tz {
-        return ai.partial_cmp(&bi);
-    }
-    // Compare the floating value's window ENDPOINTS against the zoned instant rather
-    // than the rounded difference `ai - bi`: near the 14h edge the subtraction can round
-    // a strictly-outside pair onto the boundary (and so to indeterminate).
+    // Same (or no) timezone: a direct compare. With MIXED presence the order is only
+    // decidable strictly outside the ±14h window. A pair more than a millisecond from
+    // the edge is decided by the difference alone (its rounding error is far below
+    // that at any realistic date), so the common case stays a single compare.
     const W: f64 = 14.0 * 3600.0;
-    // Fast path: a pair more than a second past the edge is decided by the difference
-    // alone (its rounding error is far below a second at any representable date).
-    let d = ai - bi;
-    if d.abs() > W + 1.0 {
+    let d = (ai - bi).abs();
+    if a_tz == b_tz || d > W + 1e-3 {
         return ai.partial_cmp(&bi);
     }
-    let (less, greater) = if a_tz {
-        (ai < bi - W, ai > bi + W)
-    } else {
-        (ai + W < bi, ai - W > bi)
-    };
-    if less {
+    if d < W - 1e-3 || d.is_nan() {
+        return None;
+    }
+    window_edge(ai, bi)
+}
+
+/// Mixed-presence pair within a millisecond of the 14h edge: decide on whole
+/// MICROSECONDS. An f64 instant cannot carry finer precision for present-day dates
+/// anyway (its ulp near 2024 is ~0.24µs), and both the rounded difference and the
+/// rounded endpoints `ai ± W` can put a pair on the wrong side of the edge at
+/// sub-microsecond scale (#3526). Kept out of line so the common path stays small.
+#[cold]
+#[inline(never)]
+fn window_edge(ai: f64, bi: f64) -> Option<Ordering> {
+    const W_MICROS: i64 = 14 * 3600 * 1_000_000;
+    let micros = |x: f64| (x * 1e6).round() as i64;
+    let dm = micros(ai) - micros(bi);
+    if dm < -W_MICROS {
         Some(Ordering::Less)
-    } else if greater {
+    } else if dm > W_MICROS {
         Some(Ordering::Greater)
     } else {
         None
@@ -299,6 +306,14 @@ mod tests {
         // Outside the window the order is decidable.
         let far = dt("2024-03-17T13:00:00");
         assert_eq!(Temporal::cmp_t(zoned, far), Some(Less));
+        // Exactly 14h apart with a shared fraction stays indeterminate (the rounded
+        // endpoints once made it `Less`); one microsecond past the edge decides.
+        let (f, z) = (dt("1969-12-31T14:16:40.1"), dt("1970-01-01T04:16:40.1Z"));
+        assert_eq!(Temporal::cmp_t(f, z), None);
+        assert_eq!(Temporal::cmp_t(z, f), None);
+        let (f, z) = (dt("1969-12-31T14:16:40"), dt("1970-01-01T04:16:40.000001Z"));
+        assert_eq!(Temporal::cmp_t(f, z), Some(Less));
+        assert_eq!(Temporal::cmp_t(z, f), Some(Greater));
     }
 
     #[test]
