@@ -27,7 +27,7 @@ const LINKSET_ALLOW: &str = "GET, HEAD, PATCH";
 /// Relations that are server-managed or protocol-level: never taken from a client's Link header
 /// as user-managed metadata.
 const STRUCTURAL_RELATIONS: &[&str] = &[
-    "type", "up", "linkset", "acl", "first", "prev", "next", "last", "self", "describes", "describedby",
+    "type", "up", "linkset", "acl", "first", "prev", "next", "last", "self", "describes",
     "storagedescription", "https://www.w3.org/ns/lws#storage",
 ];
 
