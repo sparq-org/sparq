@@ -9,12 +9,15 @@
 # (#789 / sq-v286.3: the version_group over the 37 publishable crates that keeps the
 # locked single-version model):
 #
-#   1. release-pr  — on every push to main, release-plz reads the conventional-commit
+#   1. release-pr  — in normal post-bootstrap operation, on every push to main,
+#                    release-plz reads the conventional-commit
 #                    history (+ cargo-semver-checks API-break detection), computes the
 #                    next single workspace version, and opens/UPDATES one "Release-PR"
 #                    that bumps the version across the version_group + rewrites
 #                    CHANGELOG.md (git-cliff) + updates Cargo.lock. Nothing is released
-#                    yet — a human reviews + merges that PR.
+#                    yet — a human must also align the npm manifests/lock records, then
+#                    reviews + merges that PR. During the first registry bootstrap this
+#                    calculation is skipped entirely; use the manual recovery version PR.
 #
 #   2. release     — when the Release-PR MERGES, its version-bump commit lands on main;
 #                    this push re-runs the workflow and `release-plz release` detects the
@@ -142,7 +145,30 @@ jobs:
           # Do not leave the default GITHUB_TOKEN in the local git config; release-plz uses
           # its own `token:` input for forge operations (release-plz docs recommendation).
           persist-credentials: false
+      # [GPT-6] release-plz update packages a temporary graph even with git_only=true;
+      # before the first registry bootstrap that cannot resolve the unpublished engine.
+      # Keep manual cross-ecosystem version PRs + the independent tag job through the
+      # bootstrap. After the crates.io/OIDC flip, a generated Cargo Release-PR is still
+      # incomplete until its npm manifest + shared-lock records are aligned.
+      - name: Check first-bootstrap mode
+        id: bootstrap
+        run: |
+          python3 - <<'PY'
+          import os
+          import tomllib
+          from pathlib import Path
+          workspace = tomllib.loads(Path("release-plz.toml").read_text())["workspace"]
+          git_only, publish = workspace["git_only"], workspace["publish"]
+          if type(git_only) is not bool or type(publish) is not bool:
+              raise SystemExit("release-plz bootstrap flags must be booleans")
+          bootstrap = git_only and not publish
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(f"ready={str(not bootstrap).lower()}\n")
+          if bootstrap:
+              print("First registry bootstrap is pending: use a manual version PR; automatic release-pr is skipped.")
+          PY
       - name: Rust (preinstalled stable)
+        if: steps.bootstrap.outputs.ready == 'true'
         # [FABLE-5] CI-economy (2026-07-18 directive): the ubuntu runner image
         # ships a rustup stable toolchain; the SHA-pinned action's `rustup
         # toolchain install stable` re-downloads the whole toolchain whenever
@@ -161,11 +187,13 @@ jobs:
       # behavior is unchanged; only the invocation is now wrapped and captured. The unchanged
       # `release` job below still uses the pinned release-plz/action (no containment needed there).
       - name: Install release-plz + cargo-semver-checks (pinned)
+        if: steps.bootstrap.outputs.ready == 'true'
         uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
         with:
           tool: release-plz@0.3.160,cargo-semver-checks@0.48
       - name: Run release-plz release-pr (output captured for failure classification)
         id: releasepr
+        if: steps.bootstrap.outputs.ready == 'true'
         # continue-on-error so the containment step below can classify the failure from the
         # captured log: the KNOWN 403 (Actions PR-creation setting disabled) is tolerated with a
         # ::warning; anything else re-fails the job. See the job-level comment.

@@ -186,7 +186,8 @@ directive, under sq-6vshe.6). This is a **decision, not a defect**.
      2026-08-01; the same pass corrected research/ci-mergequeue-speedup-2026-07.md §2.1. -->
 
 The lanes that DO trigger on `merge_group` today are: `ci-summary.yml` (the gate itself),
-`ci.yml`, `feature-matrix.yml`, `vectorized-feature-off.yml`, `docs-quality.yml`,
+`ci-fast.yml` (the proposed fast replacement for the gate — not required until the ruleset
+is switched to its `ci-fast` check), `ci.yml`, `feature-matrix.yml`, `vectorized-feature-off.yml`, `docs-quality.yml`,
 `flow-on-gates.yml`, `routing-self-tests.yml` and `pr-area-label.yml` — plus
 `codeql.yml`, whose trigger set lists `merge_group` but which is operationally disabled
 per the note above and so produces no check-run there.
@@ -436,9 +437,17 @@ as **defense-in-depth only**, never the load-bearing mechanism. Do not weaken
 rule 1 on the strength of it.
 
 **Operational notes.** `pull_request`-event CI runs are cancel-superseded per PR
-(`concurrency` groups; `bench.yml` now cancels superseded **PR** runs only — its
-push/schedule runs still never cancel, protecting the benchmark history — and
-`js.yml` gained the standard per-PR group). `merge_group` runs are never cancelled
+(`concurrency` groups; `bench.yml` coalesces superseded **PR and main-push** runs,
+while label events, schedule and manual runs use isolated per-run groups;
+`js.yml` gained the standard per-PR group). <!-- [GPT-6-ASTRA] #6080 -->
+Bench schedule/manual runs are not cancelled by these groups. Schedule verifies
+without publishing; the existing manual-main publishing policy is unchanged.
+Isolation does not serialize those writers or guarantee a measurement for every
+main commit. The dashboard publisher retries a non-fast-forward rejection only
+when a fetch proves that its previous tip is an ancestor of the changed remote tip.
+It rebuilds the same asset-only commit without replacing concurrent history, with
+bounded attempts; permanent or unclassified push failures stop immediately.
+`merge_group` runs are never cancelled
 by these groups. **No required-check name changed** — the ruleset still requires
 exactly `ci-summary / gate`, and every full-tier run still emits exactly that
 context; a draft-tier run emits the additional, deliberately **non-required**

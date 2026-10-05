@@ -1,0 +1,6 @@
+{
+  "pr": 4350,
+  "bead": "sq-7d3dj.7",
+  "date": "2026-09-06",
+  "reason": "[GPT-6-ASTRA] #4350 intentionally changes always-compiled sparq-engine::exec::bind_join. Matching sorted_by metadata plus an allocation-free nondecreasing-Id verification select contiguous runs over one identity index vector; other inputs retain the existing FxHashMap<Id, Vec<usize>> grouping. Stale metadata falls back instead of splitting repeated keys into multiple scans or redundant zk accumulation. A monomorphic borrowed/owned slice adapter shares the scan, filter, budget and zk-trace body; the output sorted_by contract is unchanged. sparq-wasm consumes this code in its default feature-OFF build. Same-path release-wasm builds with pinned Rust 1.97.1 against main ee13884b16ed26f4c1c583e70a116bbd9934c34d measured 1558996 -> 1560265 bytes (+1269, +0.0814%). This is intended default-path code, not a leak from a default-OFF feature. The independent wasm_bundle_bytes ratchet remains unchanged (floor 1587594, threshold 0.02), and the measured head is below its floor. Bound scans remain once per distinct join value; no batching or reduced scan-count claim is made."
+}

@@ -669,6 +669,8 @@ jobs:
           python3 scripts/release_pr_guard.py --self-test
           python3 scripts/release-interval-guard.py --self-test
           python3 scripts/tests/test_release_publish_guard.py
+          python3 scripts/tests/test_release_source.py
+          python3 scripts/tests/test_release_gui_staging.py
       # [OPUS-4.8] sq-ur7o: every SHA-pinned `taiki-e/install-action` step MUST carry an
       # explicit `with: tool:`. install-action picks the tool from its @<tool> git ref; the
       # code-scanning=0 SHA-pin policy DROPS that selector, so without `with: tool:` the
@@ -729,6 +731,9 @@ jobs:
         run: python3 scripts/check-dashboard-publish-wiring.py --self-test
       - name: "Enforce every served bench/dashboard asset is wired into the Pages publisher — GATING"
         run: python3 scripts/check-dashboard-publish-wiring.py
+      # [GPT-6-ASTRA] Exercise the actual publisher shell with file-only Git races.
+      - name: Test bounded dashboard publication recovery (local Git)
+        run: python3 scripts/tests/test_bench_dashboard_publish.py
       # [OPUS-5] issue #5022: the SAME silent-drop class for the mdBook guide. GitHub Pages has
       # one deploy slot, so the guide has no workflow of its own — docs.yml VALIDATES it on PRs
       # and pages.yml BUILDS + OVERLAYS it into the single Pages artifact at out/guide/. Three
@@ -1067,6 +1072,25 @@ jobs:
       # leave CI.
       - name: Self-test the CI execution-latency alarm (3 choke modes + YAML seam)
         run: python3 scripts/tests/test_ci_execution_latency_alarm.py
+      # [OPUS-5] issue #6349 — HOSTED-RUNNER RESERVATION for the scheduled safety lanes.
+      # miri.yml (24 shards + a doctest job) and kani.yml (per-suite proofs) used to admit
+      # their WHOLE matrices at once, and their jobs are long-lived by construction, so a
+      # nightly burst parked most of the account's standard-runner admissions while current
+      # PR-head checks queued waiting for a runner. Both strategies now declare a bounded
+      # `max-parallel`; this suite reads BOTH workflow files and reds if either cap
+      # disappears, if one lane's footprint outgrows its per-lane ceiling, or if the
+      # COMBINED footprint eats into the majority of the allowance reserved for PR and
+      # merge-group checks. It also pins what the cap must not be paid for with —
+      # `fail-fast: false`, the full shard partition, and no PR-head trigger. Hermetic
+      # fixtures + a mutation pass over the REAL parsed workflows, so a rule that stopped
+      # detecting anything reds here rather than going quietly green. Needs PyYAML
+      # (installed in the shared setup above).
+      - name: Hosted-runner reservation for the miri/kani nightly lanes (issue 6349)
+        run: python3 scripts/tests/test_nightly_runner_reservation.py
+      # [GPT-6 Astra] #6436: exercise the actual nightly admission helper and
+      # mutation evidence producer offline, including green skipped follow-ups.
+      - name: Heavy nightly completion freshness (issue 6436)
+        run: python3 scripts/tests/test_ci_nightly_freshness.py
       # [OPUS-5] sq-6vshe.7 phase 4: the HEAVY-set DRIFT alarm
       # (scripts/heavy_set_alarm.py, .github/workflows/heavy-set-alarm.yml). Hermetic
       # (no cargo, no gh, no network) and stdlib-only. Runs the script's own fixture

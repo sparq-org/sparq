@@ -136,7 +136,12 @@ face repos and REMOVED from this repo. Ground truth from
   for the `xsd:double` FILTER lanes. Pinned as a Nargo git dependency.
 - **`noir_XPath`** = `sparq-org/noir_XPath` — the XPath 2.0 F&O library. **`zk/compose` does NOT
   consume `noir_XPath`** (it is not in the compose dependency chain); it is a separate face repo
-  with its own CI and releases. Latest release at authoring time: **v0.3.0**.
+  with its own CI and releases. Latest release at authoring time: **v0.3.0**. A read-only
+  completeness audit of that face repo at `v0.3.0` — the qt3-derived `test_packages/`
+  REAL/STUB partition, and the disposition of the two pre-externalization beads `sq-t9d` /
+  `sq-t9v` — is recorded in
+  [`noir-xpath-phase0-and-streams-audit.md`](noir-xpath-phase0-and-streams-audit.md). It is
+  a *coverage* audit and makes no soundness claim.
 
 > **Honesty note on versions (a small correction to the brief).** The brief cited
 > "v0.3.0 / v0.11.0". Reconciled against ground truth: **v0.3.0 is `noir-lang/poseidon`** (the
