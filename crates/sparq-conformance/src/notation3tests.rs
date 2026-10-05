@@ -122,10 +122,40 @@ pub fn verdict_from_facts(facts: &[[Term; 3]]) -> Verdict {
     }
 }
 
-/// `file://` IRI for a local path (used as the document base).
+/// `file://` IRI for a local path (used as the document base). Every byte outside
+/// the RFC 3986 unreserved set (and `/`) is percent-encoded, so a `#`, `?`, `%` or
+/// space in the checkout path cannot turn into a fragment, query or escape.
 fn file_iri(path: &Path) -> String {
     let abs = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-    format!("file://{}", abs.display())
+    let mut iri = String::from("file://");
+    for &b in abs.to_string_lossy().as_bytes() {
+        if b.is_ascii_alphanumeric() || matches!(b, b'/' | b'-' | b'.' | b'_' | b'~') {
+            iri.push(b as char);
+        } else {
+            iri.push_str(&format!("%{b:02X}"));
+        }
+    }
+    iri
+}
+
+/// The filesystem path a `file://` IRI denotes: query and fragment dropped, then
+/// percent-decoded. `None` for a malformed escape or a non-UTF-8 result.
+fn file_iri_path(iri: &str) -> Option<PathBuf> {
+    let p = iri.strip_prefix("file://")?;
+    let p = p.split(['#', '?']).next().unwrap_or(p).as_bytes();
+    let mut out = Vec::with_capacity(p.len());
+    let mut i = 0;
+    while i < p.len() {
+        if p[i] == b'%' {
+            let hex = std::str::from_utf8(p.get(i + 1..i + 3)?).ok()?;
+            out.push(u8::from_str_radix(hex, 16).ok()?);
+            i += 3;
+        } else {
+            out.push(p[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8(out).ok().map(PathBuf::from)
 }
 
 /// Run sparq's N3 reasoner over one test document. `log:semantics` /
@@ -158,9 +188,7 @@ pub fn run_one(path: &Path, suite_root: &Path) -> Verdict {
 pub fn run_source(src: &str, base: &str, suite_root: &Path) -> Verdict {
     let root = std::fs::canonicalize(suite_root).unwrap_or_else(|_| suite_root.to_path_buf());
     let resolver = move |iri: &str| -> Option<String> {
-        let p = iri.strip_prefix("file://")?;
-        let p = p.split(['#', '?']).next().unwrap_or(p);
-        let p = std::fs::canonicalize(p).ok()?;
+        let p = std::fs::canonicalize(file_iri_path(iri)?).ok()?;
         if !p.starts_with(&root) {
             return None;
         }
@@ -363,6 +391,31 @@ mod tests {
             .map(|p| p.strip_prefix(&dir).unwrap().display().to_string())
             .collect();
         assert_eq!(found, ["test-cases/a.n3", "test-cases/sub/b.n3"]);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A checkout path with `#`, `%` and a space still resolves documents inside the
+    /// suite: the base IRI is percent-encoded and the resolver decodes it.
+    #[test]
+    fn checkout_path_with_reserved_characters_resolves() {
+        let dir = std::env::temp_dir().join(format!("n3t-iri#1 %41-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("suite")).unwrap();
+        std::fs::write(
+            dir.join("suite/data.n3"),
+            "@prefix : <urn:example:>.\n:a :b :c.\n",
+        )
+        .unwrap();
+        let suite = dir.join("suite");
+        let src = "@prefix : <urn:example:>.\n@prefix log: <http://www.w3.org/2000/10/swap/log#>.\n\
+                   { <data.n3> log:semantics ?f. ?f log:includes { :a :b :c } } => { :test :is true }.\n";
+        let base = file_iri(&suite.join("t.n3"));
+        assert!(!base.contains('#') && !base.contains(' '), "{base}");
+        assert_eq!(
+            file_iri_path(&base).unwrap(),
+            std::fs::canonicalize(&suite).unwrap().join("t.n3")
+        );
+        assert_eq!(run_source(src, &base, &suite), Verdict::Pass);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
