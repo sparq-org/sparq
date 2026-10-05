@@ -27,7 +27,7 @@ Everything is behind **default-off** features — opt into exactly the slice you
 
 ```toml
 [dependencies]
-sparq-substrate = { version = "0.1.3", features = ["rows", "numeric", "join", "compare"] }
+sparq-substrate = { git = "https://github.com/sparq-org/sparq", tag = "v0.1.4", features = ["rows", "numeric", "join", "compare"] }
 ```
 
 ```rust,ignore
