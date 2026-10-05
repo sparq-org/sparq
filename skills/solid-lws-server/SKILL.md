@@ -208,6 +208,55 @@ direction. Protocol `default-graph-uri` and `named-graph-uri` parameters may
 select from that authorized dataset; they cannot make an unreadable resource
 visible.
 
+## Run the LWS 1.0 protocol (`SOLID_SERVER_PROTOCOL=lws`)
+
+Set `SOLID_SERVER_PROTOCOL=lws` to serve the W3C Linked Web Storage 1.0 protocol
+(tracking `w3c/lws-protocol` main) instead of the Solid/LDP surface. The mode is
+self-contained in `src/lws/`: its own authorization server, access grants,
+notifications and type index, over the same `Store` backend.
+
+```bash
+SOLID_SERVER_PROTOCOL=lws \
+SOLID_SERVER_LWS_OWNER=https://alice.example/profile#me \
+SOLID_SERVER_LWS_AS_KEY_FILE=./as-key.json \
+SOLID_SERVER_LWS_NOTIFY_KEY_FILE=./notify-key.json \
+cargo run -p sparq-lws-core
+```
+
+| Variable | Meaning |
+|---|---|
+| `SOLID_SERVER_LWS_OWNER` | Agent IRI allowed every action on the storage, and the only one who may list or issue grants. |
+| `SOLID_SERVER_LWS_OPEN` | `1` disables authorization entirely. Test-suite use only. |
+| `SOLID_SERVER_LWS_PAGE_SIZE` | Container and type-search page size (default 100). |
+| `SOLID_SERVER_LWS_AS_KEY_FILE`, `SOLID_SERVER_LWS_NOTIFY_KEY_FILE` | P-256 private JWKs for access tokens and webhook signatures. A missing file is created with a fresh key (mode 0600); without a file a key lives only for the process. |
+| `SOLID_SERVER_LWS_TOKEN_TTL_SECS` | Access-token lifetime (default 300). |
+| `SOLID_SERVER_LWS_ALLOW_INSECURE_FETCH` | `1` lets the server fetch and deliver to `http:`, loopback and private addresses (CID documents, OIDC issuers, webhook inboxes). Test-suite use only. |
+| `SOLID_SERVER_LWS_SAML_IDPS_FILE` | JSON map of SAML IdP entity id to signing certificate; enables the SAML subject-token suite. |
+
+What the server exposes, all discoverable from the storage description
+(`GET /` with `Accept: application/lws+cid`):
+
+- **Storage**: `application/lws+json` containers with paging links, data resources with
+  conditional requests and single byte ranges, `POST` with `Slug`, `PUT`, `PATCH`
+  (`application/merge-patch+json` or `application/json-patch+json`), `DELETE` (with
+  `Depth: infinity` for non-empty containers), and RFC 9264 linksets at `{resource}.meta`.
+  Errors are `application/problem+json`.
+- **Authorization server**: metadata at `/.well-known/lws-configuration`, keys at
+  `/.well-known/lws/jwks`, and RFC 8693 token exchange at `/.well-known/lws/token`.
+  Storage requests take `Authorization: Bearer <access token>`; a missing or bad token
+  gets `401` with `WWW-Authenticate: Bearer as_uri="…", realm="…"`.
+- **Access grants and requests** (Access Profile) under `/.lws/grants/` and
+  `/.lws/requests/`. Grants are ODRL-style policies with client, format, type, purpose
+  and dateTime constraints; the owner and a resource's creator are always allowed.
+- **Webhook notifications** under `/.lws/subscriptions/`, signed per RFC 9421 with the
+  key in the storage description's `verificationMethod`.
+- **Type index** (`GET /.lws/types/index`) and **type search** (`QUERY /.lws/types/search`
+  with an `application/lws-query+json` filter), both scoped to what the caller may read.
+
+Conformance runs against the public suites; the scripts and the CI floor live in
+`crates/sparq-lws-core/conformance/lws/` (`touchstone.sh <module>`, `lws-net.sh`,
+`floor.json`) and run in `.github/workflows/lws-conformance.yml`.
+
 ## Follow the normative specs, not this server
 
 Several behaviours here implement an external specification, and **the spec is the
