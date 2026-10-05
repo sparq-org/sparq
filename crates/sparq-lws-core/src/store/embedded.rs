@@ -300,41 +300,44 @@ fn var_col(result: &sparq_engine::QueryResult, name: &str) -> Option<usize> {
     result.vars.iter().position(|v| v.as_str() == name)
 }
 
+/// Decode a `select_meta` result into a [`ResourceMeta`]; no row ⇒ [`SparqError::NotFound`].
+fn meta_from_result(result: &sparq_engine::QueryResult) -> Result<ResourceMeta, SparqError> {
+    // No row ⇒ the resource is not indexed (fail-closed: never invent metadata).
+    let row = result.rows.first().ok_or(SparqError::NotFound)?;
+    let ct_col = var_col(result, "ct")
+        .ok_or_else(|| SparqError::Backend("fatal: meta result missing ?ct column".into()))?;
+    let bk_col = var_col(result, "bk")
+        .ok_or_else(|| SparqError::Backend("fatal: meta result missing ?bk column".into()))?;
+    let et_col = var_col(result, "etag")
+        .ok_or_else(|| SparqError::Backend("fatal: meta result missing ?etag column".into()))?;
+    let content_type = term_value(row.get(ct_col).and_then(|c| c.as_ref()))
+        .ok_or_else(|| SparqError::Backend("fatal: meta row missing contentType".into()))?;
+    let blob_key = term_value(row.get(bk_col).and_then(|c| c.as_ref()))
+        .ok_or_else(|| SparqError::Backend("fatal: meta row missing blobKey".into()))?;
+    let etag = term_value(row.get(et_col).and_then(|c| c.as_ref()))
+        .ok_or_else(|| SparqError::Backend("fatal: meta row missing etag".into()))?;
+    // `?mod` (`pss:modified`) is OPTIONAL — the column may be absent or unbound. Absent /
+    // unbound / unparseable ⇒ `None` (fail OPEN — never a spurious 304).
+    let last_modified = var_col(result, "mod")
+        .and_then(|col| term_value(row.get(col).and_then(|c| c.as_ref())))
+        .and_then(|s| timestamp::from_xsd_datetime(&s));
+    Ok(ResourceMeta {
+        content_type,
+        blob_key,
+        etag,
+        last_modified,
+    })
+}
+
 #[async_trait]
 impl SparqClient for EmbeddedSparqClient {
     async fn get_meta(&self, iri: &str) -> Result<ResourceMeta, SparqError> {
         // SAME query as the HTTP/in-mem paths — the injection-safe `select_meta` builder VERBATIM.
         let q = sparql::select_meta(iri)?;
         self.dispatch(move |graph| {
-            let result = sparq_engine::query(graph, &q).map_err(|e| engine_err("select_meta", e))?;
-            // No row ⇒ the resource is not indexed (fail-closed: never invent metadata).
-            let row = result.rows.first().ok_or(SparqError::NotFound)?;
-            let ct_col = var_col(&result, "ct").ok_or_else(|| {
-                SparqError::Backend("fatal: meta result missing ?ct column".into())
-            })?;
-            let bk_col = var_col(&result, "bk").ok_or_else(|| {
-                SparqError::Backend("fatal: meta result missing ?bk column".into())
-            })?;
-            let et_col = var_col(&result, "etag").ok_or_else(|| {
-                SparqError::Backend("fatal: meta result missing ?etag column".into())
-            })?;
-            let content_type = term_value(row.get(ct_col).and_then(|c| c.as_ref()))
-                .ok_or_else(|| SparqError::Backend("fatal: meta row missing contentType".into()))?;
-            let blob_key = term_value(row.get(bk_col).and_then(|c| c.as_ref()))
-                .ok_or_else(|| SparqError::Backend("fatal: meta row missing blobKey".into()))?;
-            let etag = term_value(row.get(et_col).and_then(|c| c.as_ref()))
-                .ok_or_else(|| SparqError::Backend("fatal: meta row missing etag".into()))?;
-            // `?mod` (`pss:modified`) is OPTIONAL — the column may be absent or unbound. Absent /
-            // unbound / unparseable ⇒ `None` (fail OPEN — never a spurious 304).
-            let last_modified = var_col(&result, "mod")
-                .and_then(|col| term_value(row.get(col).and_then(|c| c.as_ref())))
-                .and_then(|s| timestamp::from_xsd_datetime(&s));
-            Ok(ResourceMeta {
-                content_type,
-                blob_key,
-                etag,
-                last_modified,
-            })
+            let result =
+                sparq_engine::query(graph, &q).map_err(|e| engine_err("select_meta", e))?;
+            meta_from_result(&result)
         })
         .await
     }
@@ -354,6 +357,37 @@ impl SparqClient for EmbeddedSparqClient {
         )?;
         self.dispatch(move |graph| {
             sparq_engine::update_in_place_atomic(graph, &u).map_err(|e| engine_err("put_meta", e))
+        })
+        .await
+    }
+
+    async fn replace_meta(
+        &self,
+        iri: &str,
+        meta: ResourceMeta,
+    ) -> Result<Option<ResourceMeta>, SparqError> {
+        // The read of the previous record and the upsert run in ONE actor job, so no other index
+        // operation can interleave: the returned record is exactly the one this update replaced.
+        let q = sparql::select_meta(iri)?;
+        let modified = meta.last_modified.and_then(timestamp::to_xsd_datetime);
+        let u = sparql::update_put_meta(
+            iri,
+            &meta.content_type,
+            &meta.blob_key,
+            &meta.etag,
+            modified.as_deref(),
+        )?;
+        self.dispatch(move |graph| {
+            let result =
+                sparq_engine::query(graph, &q).map_err(|e| engine_err("select_meta", e))?;
+            let previous = match meta_from_result(&result) {
+                Ok(m) => Some(m),
+                Err(SparqError::NotFound) => None,
+                Err(e) => return Err(e),
+            };
+            sparq_engine::update_in_place_atomic(graph, &u)
+                .map_err(|e| engine_err("put_meta", e))?;
+            Ok(previous)
         })
         .await
     }

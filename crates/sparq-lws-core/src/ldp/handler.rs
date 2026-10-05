@@ -57,7 +57,7 @@ use crate::ldp::target::{parse_target, LdpTarget};
 use crate::notifications::ws::link_headers;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::notifications::{ActivityType, NotificationHub};
-use crate::store::{DeleteOutcome, Resource, ResourceMeta, Store};
+use crate::store::{DeleteOutcome, ResourceMeta, Store};
 
 /// LDP/RDF vocabulary IRIs used to synthesise a container's `ldp:contains` representation.
 const RDF_TYPE_IRI: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
@@ -838,8 +838,9 @@ pub(crate) async fn serve_read<S: Store>(
     // The BYTES are fetched only now — after the Allow (no speculative byte fetch, design
     // invariant 5) — through the plan's held metadata (`read_at`, §3.3): the unique-per-write blob
     // key names an immutable object, so these are exactly the bytes that metadata committed with.
-    let body = state.store.read_at(&target.iri, &meta).await?;
-    let resource = Resource { body, meta };
+    // If a concurrent rewrite reclaimed that blob, `read_at` returns the CURRENT version; every
+    // validator below is therefore taken from `resource.meta`, never from the plan's `meta`.
+    let resource = state.store.read_at(&target.iri, &meta).await?;
 
     let accept = header_str(req_headers, header::ACCEPT);
     // Compute the response validator (ETag) that a 200 would carry FIRST, so a 304 short-circuit uses

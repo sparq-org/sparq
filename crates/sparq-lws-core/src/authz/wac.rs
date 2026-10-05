@@ -538,12 +538,13 @@ impl<'a, S: Store> WacAuthorizer<'a, S> {
         // Miss: fetch the bytes through the just-probed metadata (read_at — no duplicate get_meta).
         // A concurrent DELETE between the probe and the fetch surfaces as NotFound ⇒ vanished
         // (keep walking); any other store error propagates (fail-closed) — matching `read_acl`.
-        let body = match self.store.read_at(acl, &meta).await {
-            Ok(b) => b,
+        // The returned resource carries the metadata its bytes were read through (a concurrent
+        // rewrite can move it past the probe), so the cache is keyed by THAT etag.
+        let resource = match self.store.read_at(acl, &meta).await {
+            Ok(r) => r,
             Err(ServerError::NotFound) => return Ok(None),
             Err(e) => return Err(e),
         };
-        let resource = crate::store::Resource { body, meta };
         let triples = Self::parse_acl_body(&resource, acl);
         cache.insert(acl, &resource.meta.etag, triples.clone(), now);
         Ok(Some(triples))

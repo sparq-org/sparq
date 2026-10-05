@@ -169,15 +169,11 @@ pub trait Store: Send + Sync {
     /// delete and be orphaned under a deleted container (the TOCTOU the separate `list_children` +
     /// `delete` had), NOR (b) a concurrent POST can recreate the child under the parent in a window
     /// between the graph delete and a separate parent-edge detach and then be orphaned by that stale
-    /// detach. The container's own bytes are NOT deleted inline: after the atomic index delete they are
-    /// ORPHANED (no index row references them) and GC'd by the reconciler's orphaned-bytes sweep. We
-    /// leave the bytes to the reconciler rather than delete them inline because the blob store is a
-    /// separate system (its `delete` is unconditional). Since the composite store now mints UNIQUE
-    /// blob keys per write (`CompositeStore::mint_blob_key`), a concurrent same-IRI recreate gets a
-    /// DIFFERENT key, so an inline delete of THIS container's key could no longer clobber a recreate's
-    /// bytes — but leaving them to the reconciler keeps the path uniform and side-effect-free (the sweep
-    /// only GCs bytes with NO index row). Transient orphan until a sweep runs — space only, never an
-    /// observable inconsistency. Returns:
+    /// detach. Once that index delete has committed, the container's own bytes are reclaimed inline,
+    /// best effort (see [`CompositeStore`]'s `delete_container_if_empty`): blob keys are minted UNIQUE
+    /// per write, so a concurrent same-IRI recreate writes under a DIFFERENT key and the inline delete
+    /// can never clobber it. If that blob delete fails, the bytes stay as an orphan for the
+    /// reconciler's sweep — space only, never an observable inconsistency. Returns:
     /// - [`DeleteOutcome::Deleted`] — it existed, was empty, and is gone;
     /// - [`DeleteOutcome::NotEmpty`] — it existed with members; NOTHING was deleted (⇒ 409);
     /// - [`DeleteOutcome::NotFound`] — it did not exist (⇒ 404).
@@ -224,20 +220,31 @@ pub trait Store: Send + Sync {
         })
     }
 
-    /// Fetch a resource's bytes through ALREADY-HELD authoritative metadata (from THIS request's
-    /// [`read_plan`](Store::read_plan) round) — the §3.3 `read_at`: no second `get_meta`. Safe
-    /// because blob keys are minted UNIQUE PER WRITE (`CompositeStore::mint_blob_key`): the key
-    /// names an immutable object, so bytes fetched through a held pointer are exactly the bytes
-    /// that pointer committed with — never a torn read of a newer write.
+    /// Fetch a resource through ALREADY-HELD authoritative metadata (from THIS request's
+    /// [`read_plan`](Store::read_plan) round) — the §3.3 `read_at`: no second `get_meta` on the
+    /// common path. Blob keys are minted UNIQUE PER WRITE (`CompositeStore::mint_blob_key`), so
+    /// bytes fetched through a held pointer are exactly the bytes that pointer committed with.
+    ///
+    /// The held pointer can go stale: a concurrent rewrite or delete commits, and the store then
+    /// reclaims the superseded blob. The returned [`Resource`] therefore carries the metadata the
+    /// bytes were actually read through — `meta` itself on the common path, or a re-read current
+    /// record after such a race — and callers MUST take validators (ETag, Last-Modified, content
+    /// type) from it, never from the `meta` they passed in. A resource deleted in that window is
+    /// [`ServerError::NotFound`].
     ///
     /// The DEFAULT implementation re-reads via [`read`](Store::read) (metadata + bytes — the
     /// pre-read-2 cost and semantics), so non-composite [`Store`] impls (test doubles) behave
     /// exactly as before; [`CompositeStore`] overrides it with the direct blob fetch.
-    async fn read_at(&self, iri: &str, meta: &ResourceMeta) -> ServerResult<Bytes> {
+    async fn read_at(&self, iri: &str, meta: &ResourceMeta) -> ServerResult<Resource> {
         let _ = meta;
-        Ok(self.read(iri).await?.body)
+        self.read(iri).await
     }
 }
+
+/// How many times a read re-reads the metadata after finding its blob reclaimed by a concurrent
+/// rewrite/delete (see `CompositeStore::read_through`). Each retry needs ANOTHER commit to land in
+/// the window between its metadata read and its blob fetch, so a small bound suffices.
+const READ_RACE_RETRIES: usize = 3;
 
 /// The default [`Store`]: SPARQ (authoritative metadata) + a blob store (backup bytes), with a
 /// [`BodyCache`] (read-4 — `backend-read-path.md` §3.4) in front of the blob byte-fetch.
@@ -270,22 +277,72 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
 
     /// Fetch a resource's bytes through its AUTHORITATIVE metadata: body-cache first (keyed by this
     /// request's `(blob_key, etag)` — read-4), then the blob store on a miss (inserting the fetched
-    /// bytes so the next same-version read hits). The error mapping is exactly the pre-cache
-    /// `blob.get` mapping, so a MISS is byte- and error-identical to the uncached path; a HIT skips
-    /// only the blob round-trip (blob-gets/op 1 → 0), never a decision — authorization has already
-    /// run upstream of every caller (see [`body_cache`]'s no-bypass argument).
-    async fn fetch_body(&self, meta: &ResourceMeta) -> ServerResult<Bytes> {
+    /// bytes so the next same-version read hits). A HIT skips only the blob round-trip (blob-gets/op
+    /// 1 → 0), never a decision — authorization has already run upstream of every caller (see
+    /// [`body_cache`]'s no-bypass argument). `Ok(None)` means the blob is absent — see
+    /// [`read_through`](Self::read_through) for why that is usually a benign race.
+    async fn try_fetch_body(&self, meta: &ResourceMeta) -> ServerResult<Option<Bytes>> {
         if let Some(body) = self.body_cache.get(&meta.blob_key, &meta.etag) {
-            return Ok(body);
+            return Ok(Some(body));
         }
-        let body = self.blob.get(&meta.blob_key).await.map_err(|e| match e {
-            // The index says it exists but bytes are missing: a reconciler-class inconsistency.
-            BlobError::NotFound => ServerError::Storage("byte/index inconsistency".into()),
-            BlobError::QuotaExceeded => ServerError::InsufficientStorage,
-            BlobError::Backend(msg) => ServerError::Storage(msg),
-        })?;
+        let body = match self.blob.get(&meta.blob_key).await {
+            Ok(body) => body,
+            Err(BlobError::NotFound) => return Ok(None),
+            Err(BlobError::QuotaExceeded) => return Err(ServerError::InsufficientStorage),
+            Err(BlobError::Backend(msg)) => return Err(ServerError::Storage(msg)),
+        };
         self.body_cache.insert(&meta.blob_key, &meta.etag, &body);
-        Ok(body)
+        Ok(Some(body))
+    }
+
+    /// Resolve `iri`'s bytes starting from a just-read metadata row, tolerating the reclaim race.
+    ///
+    /// A rewrite or delete reclaims the superseded blob right after its index commit. A reader that
+    /// read the metadata just BEFORE that commit can therefore find its blob gone. That is not an
+    /// inconsistency: the index has moved on. So on a missing blob this re-reads the metadata and
+    /// retries through the CURRENT pointer, at most [`READ_RACE_RETRIES`] times, and returns the
+    /// metadata the bytes were actually read through so the caller's validators match the body. A
+    /// resource deleted meanwhile is [`ServerError::NotFound`]. A blob missing under a pointer the
+    /// index STILL holds (the re-read returns the same key) is a genuine byte/index inconsistency.
+    async fn read_through(&self, iri: &str, mut meta: ResourceMeta) -> ServerResult<Resource> {
+        let mut retries = 0;
+        loop {
+            if let Some(body) = self.try_fetch_body(&meta).await? {
+                return Ok(Resource { body, meta });
+            }
+            if retries == READ_RACE_RETRIES {
+                return Err(ServerError::Storage(
+                    "byte/index inconsistency (blob kept moving under concurrent writes)".into(),
+                ));
+            }
+            retries += 1;
+            let current = self.get_meta_mapped(iri).await?;
+            if current.blob_key == meta.blob_key {
+                // The index still points at the missing blob: not a race, a real inconsistency.
+                return Err(ServerError::Storage("byte/index inconsistency".into()));
+            }
+            meta = current;
+        }
+    }
+
+    /// [`SparqClient::get_meta`] with the read path's error mapping (absent ⇒ [`ServerError::NotFound`]).
+    async fn get_meta_mapped(&self, iri: &str) -> ServerResult<ResourceMeta> {
+        self.sparq.get_meta(iri).await.map_err(|e| match e {
+            SparqError::NotFound => ServerError::NotFound,
+            SparqError::QuotaExceeded => ServerError::InsufficientStorage,
+            SparqError::Backend(e) => ServerError::Storage(e),
+        })
+    }
+
+    /// Reclaim a blob the index no longer references, best effort.
+    ///
+    /// Called only AFTER the index commit that dropped the reference has succeeded, so a crash before
+    /// this point leaves an unreferenced orphan (the reconciler's job), never an index row pointing at
+    /// missing bytes. Safe against concurrent writers because keys are minted unique per write and an
+    /// index pointer never moves back to a key it has left. A failed delete is ignored: the bytes stay
+    /// as an orphan for the reconciler, exactly as before this inline reclaim existed.
+    async fn reclaim_blob(&self, key: &str) {
+        let _ = self.blob.delete(key).await;
     }
 
     /// Mint a fresh, **unique-per-write** opaque blob-store key for an IRI.
@@ -306,8 +363,9 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
     /// - **Two concurrent writes to the same IRI get DIFFERENT keys** — they write to disjoint blob
     ///   objects and can never collide or interleave. The "latest committed" winner is decided solely by
     ///   which write's index `put_meta` commits last (SPARQ is authoritative); whichever metadata pointer
-    ///   wins, a read resolves through it to that write's own bytes. The other write's bytes become an
-    ///   unreferenced orphan, reclaimed by the reconciler — never a clobber of live bytes.
+    ///   wins, a read resolves through it to that write's own bytes. The superseded key is reclaimed
+    ///   inline after the index commit (best effort; a concurrent loser's key the reclaim cannot see
+    ///   stays as an orphan for the reconciler) — never a clobber of live bytes.
     /// - **A delete's inline blob delete can no longer race a recreate.** A recreate mints a brand-new
     ///   key, so deleting the OLD key's bytes can never touch the recreate's bytes. (The collision the
     ///   `generation`-CAS existed to catch simply cannot arise once keys are never reused.)
@@ -405,14 +463,10 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
         // Authoritative existence + metadata FIRST (SPARQ), then fetch the bytes it points at —
         // through the read-4 body cache, keyed by THIS lookup's authoritative `(blob_key, etag)`
         // (a hit is exactly the bytes this metadata committed with; a miss is the pre-cache path).
-        let meta = match self.sparq.get_meta(iri).await {
-            Ok(m) => m,
-            Err(SparqError::NotFound) => return Err(ServerError::NotFound),
-            Err(SparqError::QuotaExceeded) => return Err(ServerError::InsufficientStorage),
-            Err(SparqError::Backend(e)) => return Err(ServerError::Storage(e)),
-        };
-        let body = self.fetch_body(&meta).await?;
-        Ok(Resource { body, meta })
+        // If a concurrent rewrite/delete reclaims the blob between the two reads, `read_through`
+        // re-reads the metadata and returns the current version (validators matching its bytes).
+        let meta = self.get_meta_mapped(iri).await?;
+        self.read_through(iri, meta).await
     }
 
     async fn meta(&self, iri: &str) -> ServerResult<Option<ResourceMeta>> {
@@ -443,9 +497,10 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
         // The blob key is minted UNIQUE PER WRITE (`mint_blob_key`): a concurrent same-IRI write gets a
         // DIFFERENT key and so writes a disjoint object — no collision/interleave on a shared key. The
         // "latest committed" winner is whichever write's `put_meta` commits last (SPARQ authoritative);
-        // a read then resolves through that winner's pointer to ITS bytes, and the loser's bytes become
-        // an unreferenced orphan the reconciler GCs (never a clobber of the live bytes). A re-write of
-        // an existing resource likewise lands on a NEW key, leaving the previous key orphaned for GC.
+        // a read then resolves through that winner's pointer to ITS bytes (never a clobber of the live
+        // bytes). A re-write of an existing resource likewise lands on a NEW key; the key it replaced is
+        // reclaimed inline AFTER the index commit below (best effort — on failure, or for a concurrent
+        // loser's key this commit never observed, the bytes stay as an orphan for the reconciler).
         //
         // Minting FAILS CLOSED if the OS RNG is unavailable (rather than minting a weak, possibly-colliding
         // key) — the write errors instead, so the no-two-writes-share-a-key invariant holds even then.
@@ -463,13 +518,19 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
             // bumps it, so a later conditional GET correctly re-serves the changed representation.
             last_modified: Some(crate::clock::now()),
         };
-        self.sparq
-            .put_meta(iri, meta.clone())
+        let previous = self
+            .sparq
+            .replace_meta(iri, meta.clone())
             .await
             .map_err(|e| match e {
                 SparqError::QuotaExceeded => ServerError::InsufficientStorage,
                 other => ServerError::Storage(format!("{other}")),
             })?;
+        // The index now points at `blob_key`; the superseded body is unreferenced. Reclaim it so
+        // sustained rewrites cannot fill the blob store with dead versions.
+        if let Some(old) = previous.filter(|old| old.blob_key != meta.blob_key) {
+            self.reclaim_blob(&old.blob_key).await;
+        }
         Ok(meta)
     }
 
@@ -486,7 +547,10 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
         // without backing metadata — so the POST path needs NO removal-based compensation and a
         // concurrent same-IRI creator can never observe or tear down a half-built containment. A
         // missing container ⇒ 404; the bytes written above are then orphaned and GC'd by the
-        // reconciler (M2-next) — the same crash-consistency model `write` documents.
+        // reconciler — the same crash-consistency model `write` documents. (The handler only takes
+        // this path for an absent child; a concurrent same-IRI create that wins the race overwrites
+        // this record, and the key it replaced is left for the reconciler, as `create_child` does not
+        // report the record it replaced.)
         //
         // The child's blob key is minted UNIQUE PER WRITE (`mint_blob_key`), so a concurrent same-IRI
         // create writes a disjoint object and cannot collide with this one on a shared key. Minting FAILS
@@ -528,8 +592,9 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
         };
         // Detach from the parent's containment first, then drop the index record, then the bytes.
         // Index-before-bytes keeps the invariant "if it's indexed, its bytes exist" — a crash after
-        // the index delete leaves orphaned bytes (the reconciler GCs them — M2-next), never an index
-        // row pointing at missing bytes.
+        // the index delete leaves orphaned bytes (the reconciler GCs them), never an index row
+        // pointing at missing bytes. The byte delete is best effort: the resource is already gone
+        // from the index, so a failed blob delete must not fail the request; it stays an orphan.
         if let Some(p) = parent {
             self.sparq
                 .remove_child(p, iri)
@@ -541,10 +606,7 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
             .await
             .map_err(|e| ServerError::Storage(format!("{e}")))?;
         if let Some(key) = blob_key {
-            self.blob
-                .delete(&key)
-                .await
-                .map_err(|e| ServerError::Storage(format!("{e}")))?;
+            self.reclaim_blob(&key).await;
         }
         Ok(())
     }
@@ -560,25 +622,31 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
         // graph is gone but the parent still `ldp:contains` it — a window a concurrent recreate could
         // exploit to be orphaned by a stale detach.
         //
-        // reconciler: the container's bytes are NOT deleted inline here. After the atomic index delete,
-        // the bytes become ORPHANED (no index row references them) and are GC'd by the reconciler's
-        // orphaned-bytes sweep. We leave the bytes to the reconciler rather than delete them inline: the
-        // blob store is a SEPARATE system (object store) whose `delete` is unconditional. With the
-        // UNIQUE-PER-WRITE keys the composite store now mints (`mint_blob_key`), a concurrent same-IRI
-        // recreate writes its bytes under a DIFFERENT key, so an inline delete of THIS container's key
-        // could no longer clobber a recreate's bytes even if we did it (the root-cause race is closed) —
-        // but deleting NO bytes here keeps the path uniform with `write`/`create_in_container`'s
-        // orphan-then-GC model and side-effect-free. The trade-off is a transient orphan until a sweep
-        // runs: benign (disk space only, never an observable inconsistency), and it IS the documented
-        // architecture (SPARQ authoritative; blob store durable bytes; reconciler GCs orphans —
-        // `decisions`/the spike crash-consistency model).
+        // Bytes: the container's blob key is read from the index FIRST, and its bytes are reclaimed
+        // inline only AFTER the atomic index delete has committed (best effort — a failed delete, or a
+        // crash in between, leaves an orphan for the reconciler's sweep, never an index row pointing at
+        // missing bytes). The blob store's `delete` is unconditional, but keys are UNIQUE PER WRITE
+        // (`mint_blob_key`): a concurrent same-IRI rewrite or recreate between the lookup and the index
+        // delete writes under a DIFFERENT key, so this can never clobber live bytes — at worst that
+        // other key is the orphan the reconciler collects.
+        let blob_key = match self.sparq.get_meta(iri).await {
+            Ok(m) => Some(m.blob_key),
+            Err(SparqError::NotFound) => None,
+            Err(SparqError::QuotaExceeded) => return Err(ServerError::InsufficientStorage),
+            Err(SparqError::Backend(e)) => return Err(ServerError::Storage(e)),
+        };
         let outcome = self
             .sparq
             .delete_meta_if_empty(iri, parent)
             .await
             .map_err(|e| ServerError::Storage(format!("{e}")))?;
-        // NotEmpty / NotFound: nothing was deleted. Deleted: the record AND the parent edge are gone
-        // atomically (above); the now-orphaned bytes are the reconciler's responsibility (see above).
+        // NotEmpty / NotFound: nothing was deleted, so the bytes stay. Deleted: the record AND the parent
+        // edge are gone atomically (above), so the bytes are unreferenced — reclaim them now.
+        if outcome == DeleteOutcome::Deleted {
+            if let Some(key) = blob_key {
+                self.reclaim_blob(&key).await;
+            }
+        }
         Ok(outcome)
     }
 
@@ -596,15 +664,14 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
             })
     }
 
-    async fn read_at(&self, iri: &str, meta: &ResourceMeta) -> ServerResult<Bytes> {
-        // The §3.3 direct byte fetch through the held pointer — NO second `get_meta` — now through
-        // the read-4 body cache: the held `(blob_key, etag)` came from THIS request's authoritative
-        // read-plan round, so a hit is exactly the bytes that metadata committed with (the unique-
-        // per-write blob key names an immutable object). A miss pays the same blob fetch (and the
-        // same error mapping) as before. `iri` is not needed here (the pointer is authoritative);
-        // it is part of the trait signature so the default (re-read) impl can exist for doubles.
-        let _ = iri;
-        self.fetch_body(meta).await
+    async fn read_at(&self, iri: &str, meta: &ResourceMeta) -> ServerResult<Resource> {
+        // The §3.3 direct byte fetch through the held pointer — NO second `get_meta` on the common
+        // path — through the read-4 body cache: the held `(blob_key, etag)` came from THIS request's
+        // authoritative read-plan round, so a hit is exactly the bytes that metadata committed with
+        // (the unique-per-write blob key names an immutable object). If a concurrent rewrite/delete
+        // reclaimed that blob after the plan was read, `read_through` re-reads the metadata for `iri`
+        // and returns the current version with ITS metadata.
+        self.read_through(iri, meta.clone()).await
     }
 
     async fn list_children(&self, container: &str) -> ServerResult<Vec<ValidatedChildIri>> {

@@ -335,13 +335,15 @@ async fn assemble_authorized_dataset<S: Store>(
         let Some(meta) = plan.target else {
             continue;
         };
-        let Ok(format) = classify(Some(&meta.content_type)) else {
+        // Classify by the metadata the bytes were actually read through: a concurrent rewrite can
+        // move the record past the plan (see `Store::read_at`).
+        let Ok(current) = state.store.read_at(&resource, &meta).await else {
             continue;
         };
-        let Ok(body) = state.store.read_at(&resource, &meta).await else {
+        let Ok(format) = classify(Some(&current.meta.content_type)) else {
             continue;
         };
-        let Ok(triples) = parse_to_triples(format, &body, &resource) else {
+        let Ok(triples) = parse_to_triples(format, &current.body, &resource) else {
             continue;
         };
         let Ok(graph_name) = NamedNode::new(resource) else {

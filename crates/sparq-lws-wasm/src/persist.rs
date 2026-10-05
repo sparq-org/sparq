@@ -520,7 +520,7 @@ mod wasm_store {
             self.inner.read_plan(target, acl_candidates).await
         }
 
-        async fn read_at(&self, iri: &str, meta: &ResourceMeta) -> ServerResult<Bytes> {
+        async fn read_at(&self, iri: &str, meta: &ResourceMeta) -> ServerResult<Resource> {
             self.inner.read_at(iri, meta).await
         }
     }

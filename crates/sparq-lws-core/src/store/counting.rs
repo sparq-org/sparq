@@ -308,6 +308,19 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
         self.inner.put_meta(iri, meta).await
     }
 
+    async fn replace_meta(
+        &self,
+        iri: &str,
+        meta: ResourceMeta,
+    ) -> Result<Option<ResourceMeta>, SparqError> {
+        let _g = self.counters.op_guard();
+        // The live client has no atomic replace: it pays the trait default's metadata SELECT plus
+        // the upsert UPDATE. Forwarded to `inner` so a wrapped atomic override still answers.
+        self.counters.count_queries(1);
+        self.counters.count_update();
+        self.inner.replace_meta(iri, meta).await
+    }
+
     async fn exists(&self, iri: &str) -> Result<bool, SparqError> {
         let _g = self.counters.op_guard();
         self.counters.count_queries(1);
