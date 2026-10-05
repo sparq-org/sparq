@@ -210,13 +210,29 @@ struct FreshBnodes {
 
 static FRESH_BNODE_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
+/// A random per-process prefix for fresh labels. A bare counter restarts at 0 in every
+/// process, so `_:fb0` minted now could be a node already in a store (persisted by an
+/// earlier process, or loaded from a document that used that label) and would merge with it.
+fn fresh_bnode_prefix() -> &'static str {
+    static PREFIX: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    PREFIX.get_or_init(|| {
+        use std::hash::{BuildHasher, Hasher};
+        let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+        if let Ok(d) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+            h.write_u128(d.as_nanos());
+        }
+        h.write_u32(std::process::id());
+        format!("fb{:016x}x", h.finish())
+    })
+}
+
 impl FreshBnodes {
     fn get(&mut self, label: &str) -> Term {
         if let Some(t) = self.map.get(label) {
             return t.clone();
         }
         let n = FRESH_BNODE_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let t = Term::BlankNode(BlankNode::new_unchecked(format!("fb{n}")));
+        let t = Term::BlankNode(BlankNode::new_unchecked(format!("{}{n}", fresh_bnode_prefix())));
         self.map.insert(label.to_string(), t.clone());
         t
     }
@@ -1693,6 +1709,24 @@ mod tests {
         assert_eq!(crate::count(&g2, blank_subjects).unwrap(), 4, "in-place LOAD conflated blank nodes");
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Fresh labels must not collide with labels a store already holds, such as the
+    /// `_:fbN` an earlier process minted before its counter restarted at 0.
+    #[test]
+    fn fresh_blank_nodes_avoid_labels_already_stored() {
+        use std::fmt::Write;
+        let mut src = String::new();
+        for n in 0..4096 {
+            writeln!(src, "_:fb{n} <http://ex/p> <http://ex/existing> .").unwrap();
+        }
+        let blank_subjects = "SELECT DISTINCT ?s WHERE { ?s ?p ?o . FILTER(isBlank(?s)) }";
+        let req = "INSERT DATA { _:b0 <http://ex/p> <http://ex/new> . }";
+        let g = update(&Graph::load_str(&src, "ntriples").unwrap(), req).unwrap();
+        assert_eq!(crate::count(&g, blank_subjects).unwrap(), 4097, "INSERT DATA reused a stored blank node");
+        let mut g2 = Graph::load_str(&src, "ntriples").unwrap();
+        update_in_place(&mut g2, req).unwrap();
+        assert_eq!(crate::count(&g2, blank_subjects).unwrap(), 4097, "in-place INSERT DATA reused a stored blank node");
     }
 }
 
