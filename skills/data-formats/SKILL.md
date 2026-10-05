@@ -456,7 +456,7 @@ expanded `@id`. The compaction is **lossless** — every coercion is invertible 
 `@context`, so a JSON-LD-to-RDF round-trip reconstructs the original dataset (list cells typed
 `rdf:List`, referenced from another graph, naming a graph or used as a type stay explicit nodes;
 `rdf:JSON` literals stay typed strings with their exact lexical form; a predicate whose `@vocab`
-suffix holds a `:` keeps its full IRI). *Scope:* this is the fromRdf-then-compact (serialise) path — sparq always
+suffix holds a `:` keeps its full IRI; an empty named graph is kept as `{"@id":…,"@graph":[]}`). *Scope:* this is the fromRdf-then-compact (serialise) path — sparq always
 emits RDF, so the input is a `Graph`, not an arbitrary remote document. Scoped and type-scoped
 contexts, `@propagate` and `@protected` follow the W3C algorithm; a remote `@context` or `@import` is
 never fetched, so such a context yields the lossless expanded document instead (JSON-LD

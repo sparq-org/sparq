@@ -3943,6 +3943,36 @@ ex:bob
         assert_compact_iso(&g0, r#"{"p":{"@id":"http://ex/p","@type":"@json","@container":"@set"}}"#);
     }
 
+    // An empty named graph keeps its name in the compacted output (the JSON-LD reader
+    // drops empty graphs on reload, so the document itself is checked).
+    #[test]
+    fn compact_keeps_empty_named_graphs() {
+        let mut g0 = Graph::load_str(r#"<http://ex/s> <http://ex/p> "v" ."#, "turtle").unwrap();
+        g0.ensure_named(&oxrdf::NamedNode::new("http://ex/g").unwrap().into()).unwrap();
+        let (doc, g1) = compact_then_reload(&g0, "{}");
+        assert_eq!(nt_sorted(&g0), nt_sorted(&g1), "{doc}");
+        assert!(doc.contains(r#"{"@id":"http://ex/g","@graph":[]}"#), "{doc}");
+    }
+
+    // An `@id` map whose scoped context re-aliases `@id`, and reuses the outer alias for
+    // a data property, keeps that property.
+    #[test]
+    fn frame_id_map_under_scoped_alias_keeps_data() {
+        let g0 = Graph::load_str(
+            r#"<http://ex/a> <http://ex/p> <http://ex/b> . <http://ex/b> <http://ex/data> "kept" ."#,
+            "turtle",
+        )
+        .unwrap();
+        let frame = parse_context_json(
+            r#"{"@context":{"id":"@id","p":{"@id":"http://ex/p","@container":"@id",
+                "@context":{"id":"http://ex/data","identifier":"@id"}}},"@id":"http://ex/a"}"#,
+        )
+        .unwrap();
+        let framed = graph_to_jsonld_framed(&g0, &frame);
+        let g1 = Graph::load_dataset(&framed, "jsonld").expect("framed output parses");
+        assert_eq!(nt_sorted(&g0), nt_sorted(&g1), "{framed}");
+    }
+
     // A predicate whose @vocab suffix has a colon keeps its full IRI.
     #[test]
     fn compact_keeps_colon_suffix_iris() {

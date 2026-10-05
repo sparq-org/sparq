@@ -101,7 +101,35 @@ fn expanded(graphs: &[NamedGraph<'_>]) -> Json {
     let mut doc =
         from_rdf(&rdf_quads(graphs), &options).expect("1.0-mode fromRdf of RDF terms is total");
     native_scalars(&mut doc);
+    add_empty_graphs(&mut doc, graphs);
     doc
+}
+
+/// Adds `{"@id": g, "@graph": []}` for each named graph without triples, which the
+/// quads alone cannot carry, keeping the nodes in fromRdf's `@id` order.
+fn add_empty_graphs(doc: &mut Json, graphs: &[NamedGraph<'_>]) {
+    let Json::Arr(nodes) = doc else { return };
+    for (name, triples) in graphs {
+        let id = match name {
+            Some(Term::NamedNode(n)) if triples.is_empty() => n.as_str().to_string(),
+            Some(Term::BlankNode(b)) if triples.is_empty() => format!("_:{}", b.as_str()),
+            _ => continue,
+        };
+        let pos = nodes.binary_search_by(|n| n.get("@id").and_then(Json::as_str).unwrap_or("").cmp(&id));
+        match pos {
+            Ok(i) => {
+                if nodes[i].get("@graph").is_none() {
+                    nodes[i].set("@graph", Json::Arr(Vec::new()));
+                }
+            }
+            Err(i) => {
+                let mut node = Json::obj();
+                node.set("@id", Json::Str(id));
+                node.set("@graph", Json::Arr(Vec::new()));
+                nodes.insert(i, node);
+            }
+        }
+    }
 }
 
 fn render(doc: &Json) -> String {

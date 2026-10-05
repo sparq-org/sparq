@@ -908,9 +908,16 @@ fn add_to_container_map(
             }
         }
     } else if kind == "@id" {
-        // 12.8.9.7: id maps key on the compacted item's @id alias entry (removed).
-        map_key = take_entry(&mut compacted_item, &container_key)
-            .and_then(|v| v.as_str().map(str::to_string));
+        // 12.8.9.7: id maps key on the item's @id, which the map entry no longer repeats.
+        // The spec takes the entry named by this context's @id alias, but the item was
+        // compacted under the term's scoped context, which may alias @id differently and
+        // reuse this alias for data; so the item is compacted again without its @id.
+        if let Some(Json::Str(id)) = item.get("@id") {
+            map_key = Some(cur.ciri(id, None, false, false));
+            let mut rest = item.clone();
+            take_entry(&mut rest, "@id");
+            compacted_item = compact_element(cur, Some(iap), &rest, env)?;
+        }
     } else if kind == "@type" {
         // 12.8.9.8: type maps key on the first compacted type; remaining types stay.
         if let Some(taken) = take_entry(&mut compacted_item, &container_key) {
