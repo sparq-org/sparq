@@ -1648,6 +1648,166 @@ class TestSelectionSemantics(unittest.TestCase):
         self.assertFalse(g.is_advisory(SELECT_NAME))
 
 
+class TestRateLimitFailClosed(unittest.TestCase):
+    """[GPT-6-ASTRA] Explicit gh refusals stop every API path, without network.
+
+    Counts are gh api invocations, not hidden HTTP requests within --paginate.
+    Fixtures are jq-projected stdout plus realistic gh error diagnostics; no
+    response headers or numerical remaining quota are claimed.
+    """
+
+    @staticmethod
+    def _proc(rows=(), error="", stdout=None):
+        import subprocess
+        return subprocess.CompletedProcess(
+            ["gh", "api"], 1 if error else 0,
+            stdout="\n".join(json.dumps(r) for r in rows) if stdout is None else stdout,
+            stderr=error,
+        )
+
+    @classmethod
+    def _limited(cls):
+        return cls._proc(error="gh: API rate limit exceeded for 192.0.2.1. (HTTP 403)\n")
+
+    @staticmethod
+    def _drive(responses, fetch=None, depth=None, tier_ctx=None):
+        from unittest.mock import patch
+        # Repeat the final response so a weakened stop is an assertion failure,
+        # never mock exhaustion that aborts the remaining test population.
+        seen = []
+        def gh(argv, **_kw):
+            seen.append(argv)
+            return responses[min(len(seen) - 1, len(responses) - 1)]
+        out = io.StringIO()
+        with patch("subprocess.run", side_effect=gh), redirect_stdout(out):
+            try:
+                code = g.run_gate(
+                    tiny_cfg(reporter_grace_polls=4),
+                    fetch or g.make_fetch_check_runs("o/r", "head"),
+                    depth or (lambda: 0), sleep_fn=lambda _s: None, tier_ctx=tier_ctx,
+                )
+            except RuntimeError as exc:
+                # A leaked fatal exception is also a contract failure, asserted
+                # by callers; it must not truncate a calibrated control run.
+                code = None
+                print(f"unexpected escaping runtime error: {exc}")
+        return code, out.getvalue(), seen
+
+    def test_explicit_primary_secondary_429_and_json_error_signals(self):
+        from unittest.mock import patch
+        cases = (
+            self._limited(),
+            self._proc(error="gh: You have exceeded a secondary rate limit. (HTTP 403)\n"),
+            self._proc(error="gh: Too Many Requests (HTTP 429)\n"),
+            self._proc(error="HTTP 429: request refused (https://api.github.com/repos/o/r)\n"),
+            self._proc(error="gh: Too Many Requests\n"),
+            self._proc(error="gh: Forbidden (HTTP 403)\n",
+                       stdout=json.dumps({"message": "API rate limit exceeded for user ID 7."})),
+        )
+        for response in cases:
+            with self.subTest(stderr=response.stderr):
+                with patch("subprocess.run", return_value=response) as api:
+                    with self.assertRaises(RuntimeError) as raised:
+                        g._gh_json_lines(["repos/o/r/commits/head/check-runs"])
+                self.assertIsInstance(raised.exception, g.RateLimitError)
+                self.assertEqual(api.call_count, 1)
+                code, out, calls = self._drive(
+                    [self._proc([_grp("222"), GREEN])] * 7 + [response])
+                self.assertEqual(code, 1, out)
+                self.assertEqual(len(calls), 8)
+                self.assertNotIn("cap fetch recovery", out)
+                self.assertNotIn("PASSED", out)
+
+    def test_headerless_generic_failures_and_success_payload_do_not_prove_exhaustion(self):
+        from unittest.mock import patch
+        for error in ("gh: Bad credentials (HTTP 401)",
+                      "gh: Resource not accessible by integration (HTTP 403)",
+                      "gh: Internal Server Error (HTTP 500)"):
+            with self.subTest(error=error), patch("subprocess.run", return_value=self._proc(error=error)):
+                with self.assertRaises(RuntimeError) as raised:
+                    g._gh_json_lines(["repos/o/r"])
+                self.assertIsInstance(raised.exception, g.FetchError)
+                self.assertNotIsInstance(raised.exception, g.RateLimitError)
+        row = R("API rate limit exceeded")  # successful data is not a refusal
+        with patch("subprocess.run", return_value=self._proc([row])):
+            self.assertEqual(g._gh_json_lines(["repos/o/r"]), [row])
+
+    def test_known_limit_before_at_and_after_cap_stops_at_that_invocation(self):
+        waiting = [_grp("222"), GREEN]
+        current = [*waiting, _rep("222")]
+        for fault_at in (1, 8, 9):
+            with self.subTest(fault_at=fault_at):
+                responses = [self._proc(waiting)] * (fault_at - 1)
+                code, out, calls = self._drive(responses + [self._limited(), self._proc(current)])
+                self.assertEqual(code, 1, out)
+                self.assertEqual(len(calls), fault_at)
+                self.assertIn("no further polling or recovery", out)
+                self.assertNotIn("cap fetch recovery", out)
+                self.assertNotIn("PASSED", out)
+
+    def test_generic_transient_http_error_still_recovers_at_cap(self):
+        waiting = [_grp("222"), GREEN]
+        current = [*waiting, _rep("222")]
+        responses = [self._proc(waiting)] * 7
+        responses += [self._proc(error="gh: Bad Gateway (HTTP 502)"), self._proc(current)]
+        code, out, calls = self._drive(responses)
+        self.assertEqual(code, 0, out)
+        self.assertEqual(len(calls), 10)
+        self.assertIn("cap fetch recovery", out)
+
+    def test_resolver_list_self_and_jobs_refusals_stop_later_calls_in_same_poll(self):
+        own = W(999, 99, name="ci-summary", status="in_progress", conclusion=None)
+        work = [W(101, 7), W(102, 8)]
+        prefix = [self._proc([]), self._proc([own, *work]), self._proc([own])]
+        expected = ["repos/o/r/commits/head/check-runs",
+                    "repos/o/r/actions/runs?head_sha=head&per_page=100",
+                    "repos/o/r/actions/runs/999",
+                    "repos/o/r/actions/runs/101/jobs?filter=latest&per_page=100"]
+        for fault_at in (1, 2, 3, 4):
+            with self.subTest(fault_at=fault_at):
+                code, out, calls = self._drive(
+                    prefix[:fault_at - 1] + [self._limited()],
+                    fetch=g.make_fetch_runs("o/r", "head", "999"),
+                )
+                self.assertEqual(code, 1, out)
+                self.assertEqual([argv[2] for argv in calls], expected[:fault_at])
+                self.assertIn("no further polling or recovery", out)
+
+    def test_redispatch_refusal_prevents_second_post_or_job_fetch(self):
+        own = W(999, 99, name="ci-summary", status="in_progress", conclusion=None)
+        cancelled = [W(101, 7, conclusion="cancelled"), W(102, 8, conclusion="cancelled")]
+        responses = [self._proc([]), self._proc([own, *cancelled]), self._proc([own]), self._limited()]
+        code, out, calls = self._drive(responses, fetch=g.make_fetch_runs("o/r", "head", "999"))
+        self.assertEqual(code, 1, out)
+        self.assertEqual(len(calls), 4)
+        self.assertEqual(calls[-1], ["gh", "api", "--method", "POST", "repos/o/r/actions/runs/101/rerun"])
+        self.assertIn("no further polling or recovery", out)
+
+    def test_draft_finalization_and_full_hold_do_not_retry_known_limit(self):
+        cases = (("draft", [GREEN], 2), ("full", [R(SELECT_DRAFT)], 4))
+        for tier, rows, expected_polls in cases:
+            with self.subTest(tier=tier):
+                fetch = scripted([rows])
+                ctx = g.TierContext(run_tier=tier, event_name="pull_request",
+                                    fetch_pr_draft=g.make_fetch_pr_draft("o/r", "7"))
+                code, out, calls = self._drive([self._limited()], fetch=fetch, tier_ctx=ctx)
+                self.assertEqual(code, 1, out)
+                self.assertEqual(calls, [["gh", "api", "repos/o/r/pulls/7", "--jq", ".draft"]])
+                self.assertEqual(fetch.state["calls"], expected_polls)
+                self.assertIn("no further polling or recovery", out)
+                self.assertNotIn("PASSED", out)
+
+    def test_queue_rate_limit_is_not_swallowed_into_liveness_extension(self):
+        fetch = scripted([[GREEN, IN_PROGRESS]])
+        code, out, calls = self._drive([self._limited()], fetch=fetch,
+                                      depth=g.make_fetch_queue_depth("o/r"))
+        self.assertEqual(code, 1, out)
+        self.assertEqual(fetch.state["calls"], 4)
+        self.assertEqual(len(calls), 1)
+        self.assertIn("no further polling or recovery", out)
+        self.assertNotIn("Extending the wait", out)
+
+
 # [SONNET-4.6] Robustness-hardening tests (sq-90cv4 follow-up: Copilot gaps).
 # Covers:
 #   (a) _gh_json_lines converts subprocess raises (FileNotFoundError, TimeoutExpired)
@@ -2994,6 +3154,122 @@ class TestFeatureMatrixReporterPostCapGrace(unittest.TestCase):
         self.assertEqual(calls, cfg.max_total_polls + cfg.reporter_grace_polls)
         self.assertIn("reporter verdict never landed", out)
         self.assertNotIn("PASSED", out)
+
+
+    # [GPT-6-ASTRA] #6437: failed cap observations may consume the existing
+    # reporter-only tail, never buy extra ordinary work or assume a verdict.
+    def test_cap_fetch_error_and_neighboring_controls_have_exact_counts(self):
+        cfg = tiny_cfg(reporter_grace_polls=4)
+        waiting = [_grp("222"), GREEN]
+        current = [_grp("222"), _rep("222"), GREEN]
+        cases = (
+            ("healthy", [waiting] * 8 + [current, current]),
+            ("cap error", [waiting] * 7 + [g.FetchError("cap"), current, current]),
+            ("pre-cap error", [waiting] * 6 + [g.FetchError("pre-cap"), waiting, current, current]),
+        )
+        for name, polls in cases:
+            with self.subTest(case=name):
+                code, out, calls = self._drive(cfg, polls)
+                self.assertEqual(code, 0, out)
+                self.assertEqual(calls, 10)
+                self.assertIn("PASSED", out)
+                self.assertEqual(out.count("cap fetch recovery"), int(name == "cap error"))
+
+    def test_cap_fetch_error_requires_last_observed_reporter_only_eligibility(self):
+        waiting = [_grp("222"), GREEN]
+        cases = (
+            ("ordinary work", [*waiting, PENDING], None, 4),
+            ("full-tier hold", [*waiting, R(SELECT_DRAFT)],
+             draft_ctx(lambda: False, run_tier="full"), 4),
+            ("failed report", [*waiting, _rep("222", conclusion="failure")], None, 4),
+            ("grace disabled", waiting, None, 0),
+        )
+        for name, last_observation, tier_ctx, grace in cases:
+            with self.subTest(case=name):
+                cfg = tiny_cfg(reporter_grace_polls=grace)
+                polls = [waiting] * 6 + [last_observation, g.FetchError("cap")]
+                code, out, calls = self._drive(cfg, polls, depth=20, tier_ctx=tier_ctx)
+                self.assertEqual(code, 1, out)
+                self.assertEqual(calls, 8)
+                self.assertNotIn("cap fetch recovery", out)
+                self.assertNotIn("PASSED", out)
+
+    def test_cap_fetch_error_preserves_normal_successful_observation_settle(self):
+        waiting = [_grp("222"), GREEN]
+        current = [*waiting, _rep("222")]
+        polls = [waiting] * 6 + [current, g.FetchError("cap"), current]
+        code, out, calls = self._drive(tiny_cfg(), polls)
+        self.assertEqual(code, 0, out)
+        self.assertEqual(calls, 9)
+        self.assertIn("all-terminal stable for 2/2", out)
+        self.assertIn("cap fetch recovery", out)
+
+    def test_cap_recovery_keeps_the_consecutive_fetch_failure_limit(self):
+        waiting = [_grp("222"), GREEN]
+        for failure_limit, calls_expected in ((3, 10), (1, 8)):
+            with self.subTest(limit=failure_limit):
+                cfg = tiny_cfg(reporter_grace_polls=4,
+                               max_consec_fetch_failures=failure_limit)
+                code, out, calls = self._drive(
+                    cfg, [waiting] * 7 + [g.FetchError("still down")])
+                self.assertEqual(code, 1, out)
+                self.assertEqual(calls, calls_expected)
+                self.assertIn(f"{failure_limit} consecutive check-run fetch failures", out)
+                self.assertNotIn("PASSED", out)
+
+    def test_cap_recovery_errors_consume_the_fixed_tail_without_rearming(self):
+        cfg = tiny_cfg(reporter_grace_polls=4)
+        waiting = [_grp("222"), GREEN]
+        polls = [waiting] * 7 + [g.FetchError("cap"), waiting,
+                                g.FetchError("tail"), waiting, g.FetchError("last")]
+        code, out, calls = self._drive(cfg, polls)
+        self.assertEqual(code, 1, out)
+        self.assertEqual(calls, 12)
+        self.assertEqual(out.count("cap fetch recovery"), 1)
+        self.assertIn("bounded reporter-only grace exhausted", out)
+        self.assertNotIn("PASSED", out)
+
+    def test_cap_recovery_fresh_ordinary_work_or_full_hold_stops_immediately(self):
+        waiting = [_grp("222"), GREEN]
+        cases = (
+            ("ordinary work", [*waiting, PENDING], None),
+            ("full-tier hold", [*waiting, R(SELECT_DRAFT)],
+             draft_ctx(lambda: False, run_tier="full")),
+        )
+        for name, fresh, tier_ctx in cases:
+            with self.subTest(case=name):
+                polls = [waiting] * 7 + [g.FetchError("cap"), fresh]
+                code, out, calls = self._drive(tiny_cfg(), polls, tier_ctx=tier_ctx)
+                self.assertEqual(code, 1, out)
+                self.assertEqual(calls, 9)
+                self.assertIn("reporter-only grace stopped", out)
+                self.assertNotIn("PASSED", out)
+
+    def test_cap_recovery_never_accepts_stale_or_non_success_reporters(self):
+        waiting = [_grp("222"), GREEN]
+        cases = (("stale", _rep("111"), 12),
+                 ("failed", _rep("222", conclusion="failure"), 10),
+                 ("action required", _rep("222", conclusion="action_required"), 10))
+        for name, report, expected_calls in cases:
+            with self.subTest(case=name):
+                polls = [waiting] * 7 + [g.FetchError("cap"), [*waiting, report]]
+                code, out, calls = self._drive(tiny_cfg(reporter_grace_polls=4), polls)
+                self.assertEqual(code, 1, out)
+                self.assertEqual(calls, expected_calls)
+                self.assertNotIn("PASSED", out)
+
+    def test_cap_recovery_final_success_still_requires_normal_settle(self):
+        waiting = [_grp("222"), GREEN]
+        for grace in (1, 4):
+            with self.subTest(grace=grace):
+                cfg = tiny_cfg(reporter_grace_polls=grace)
+                polls = [waiting] * 7 + [g.FetchError("cap")]
+                polls += [waiting] * (grace - 1) + [[*waiting, _rep("222")]]
+                code, out, calls = self._drive(cfg, polls)
+                self.assertEqual(code, 1, out)
+                self.assertEqual(calls, 8 + grace)
+                self.assertIn("reached only 1/2 poll(s)", out)
+                self.assertNotIn("PASSED", out)
 
 
 class TestFeatureMatrixReporterCorrelation(unittest.TestCase):

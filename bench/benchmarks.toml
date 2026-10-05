@@ -1992,6 +1992,21 @@ status      = "ok"
 # (competitor CSV-import comparisons belong to the sq-hmd7l comparative program).
 featured    = false
 
+# [GPT-6 Astra] Bounded local diagnostic for deletion projection caching (#4246).
+[[benchmark]]
+id = "overlay-count-diagnostic"
+name = "Overlay bound-range counting, cold and warm"
+category = "query"
+measures = "whole SELECT and bound scan latency, requested allocations, store heap, cumulative process RSS"
+invoke = "cargo run --locked --offline --release --manifest-path bench/overlay-count/Cargo.toml"
+source = "bench/overlay-count/; crates/sparq-core/src/store.rs"
+dataset = "deterministic generated subjects with four predicates; fixed deletion curve and insert-only control"
+quiet_box_sensitive = true
+pinning = "exact source/harness/binary hashes; fixed dimensions and sampling in README"
+records_to = "stdout JSON lines"
+status = "diagnostic"
+featured = false
+
 # [GPT-5.6] sq-vwnzh — correctness-gated Arrow/tabular export interop panel.
 [[benchmark]]
 id          = "arrow-interop"

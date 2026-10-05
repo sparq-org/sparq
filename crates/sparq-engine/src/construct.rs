@@ -57,9 +57,10 @@ pub fn construct_prepared_with_budget(
     let _view_scope = crate::view_scope(&active);
     match q {
         Query::Construct { template, pattern, .. } => {
-            let _guard = crate::exec::budget::install(budget);
-            let solutions = crate::exec::eval_select(graph, pattern)?;
-            Ok(instantiate(template, &solutions))
+            crate::exec::budget::with_budget(budget, || {
+                let solutions = crate::exec::eval_select(graph, pattern)?;
+                Ok(instantiate(template, &solutions))
+            })
         }
         _ => Err("construct() requires a CONSTRUCT query".into()),
     }
@@ -93,9 +94,10 @@ pub fn describe_prepared_with_budget(
     let _view_scope = crate::view_scope(&active);
     match q {
         Query::Describe { pattern, .. } => {
-            let _guard = crate::exec::budget::install(budget);
-            let solutions = crate::exec::eval_select(graph, pattern)?;
-            cbd(graph, &solutions)
+            crate::exec::budget::with_budget(budget, || {
+                let solutions = crate::exec::eval_select(graph, pattern)?;
+                cbd(graph, &solutions)
+            })
         }
         _ => Err("describe() requires a DESCRIBE query".into()),
     }
@@ -120,18 +122,19 @@ pub fn construct_or_describe_with_budget(
     let active = crate::active_dataset(graph, &q);
     let graph = active.as_ref().unwrap_or(graph);
     let _view_scope = crate::view_scope(&active);
-    let _guard = crate::exec::budget::install(budget);
-    match q {
-        Query::Construct { template, pattern, .. } => {
-            let solutions = crate::exec::eval_select(graph, &pattern)?;
-            Ok(instantiate(&template, &solutions))
+    crate::exec::budget::with_budget(budget, || {
+        match q {
+            Query::Construct { template, pattern, .. } => {
+                let solutions = crate::exec::eval_select(graph, &pattern)?;
+                Ok(instantiate(&template, &solutions))
+            }
+            Query::Describe { pattern, .. } => {
+                let solutions = crate::exec::eval_select(graph, &pattern)?;
+                cbd(graph, &solutions)
+            }
+            _ => Err("construct_or_describe() requires a CONSTRUCT or DESCRIBE query".to_string()),
         }
-        Query::Describe { pattern, .. } => {
-            let solutions = crate::exec::eval_select(graph, &pattern)?;
-            cbd(graph, &solutions)
-        }
-        _ => Err("construct_or_describe() requires a CONSTRUCT or DESCRIBE query".to_string()),
-    }
+    })
 }
 
 /// Executes a CONSTRUCT *or* DESCRIBE query and serialises the resulting graph as

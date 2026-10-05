@@ -28,14 +28,14 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 # `version` alongside `path`: cargo uses the path locally and the version on crates.io.
-sparq-core = { path = "../sparq-core", version = "0.1.1", default-features = false }
-sparq-engine = { path = "../sparq-engine", version = "0.1.1", default-features = false }
+sparq-core = { path = "../sparq-core", version = "0.1.3", default-features = false }
+sparq-engine = { path = "../sparq-engine", version = "0.1.3", default-features = false }
 oxrdf.workspace = true
 # OPTIONAL — `secprop-leftoperands` feature only (sq-3705). The shared `secx:` IRI
 # constants, single-sourced in a ZERO-dependency leaf so this crate's `DIM_*` are the
 # SAME strings `sparq-trust` and `sparq-zk` use without any of them depending on each
 # other. It has no dependencies of its own, so the lean graph above is unchanged.
-sparq-secprop-vocab = { path = "../sparq-secprop-vocab", version = "0.1.1", optional = true }
+sparq-secprop-vocab = { path = "../sparq-secprop-vocab", version = "0.1.3", optional = true }
 
 [features]
 # [OPUS-4.8] sq-zi5w: STATEFUL `odrl:count` constraint enforcement — a usage-counter
