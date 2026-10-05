@@ -1,0 +1,27 @@
+# Unpublished shim: a package named `spargebra` 0.4.6 that re-exports the vendored fork
+# (`sparq-spargebra`). The root `[patch.crates-io]` points at it so third-party crates in
+# the graph that depend on upstream `spargebra` (oxigraph/spareval/sparopt, used by the
+# bench + differential harnesses) resolve to the same patched parser and the same types.
+# Cargo matches a patch by package name, so the fork itself cannot be the patch target
+# now that it is published under its own name.
+[workspace]
+
+[package]
+name = "spargebra"
+version = "0.4.6"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[features]
+default = []
+sep-0002 = ["fork/sep-0002"]
+sep-0006 = ["fork/sep-0006"]
+sparql-12 = ["fork/sparql-12"]
+standard-unicode-escaping = ["fork/standard-unicode-escaping"]
+
+[dependencies]
+fork = { package = "sparq-spargebra", path = "../spargebra" }

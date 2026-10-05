@@ -12,6 +12,19 @@ custom-aggregate fix, and a vendor extension); §10 is explicitly *not* an
 upstream candidate. Retiring this tree therefore takes more than an upstream
 release — see the release watch below.
 
+## Published as `sparq-spargebra`
+
+Published sparq crates must keep these patches (§8 is a security control, §10 is load-bearing
+for `sparq-engine`), and a `[patch]` section never reaches crates.io consumers. So this tree
+is published as **`sparq-spargebra`** (library name still `spargebra`), and the workspace
+dependency is `spargebra = { package = "sparq-spargebra", version = "0.4.6", path =
+"vendor/spargebra", .. }`. Third-party crates that name upstream `spargebra` (oxigraph and
+friends in the bench/differential harnesses) reach it through the unpublished re-export shim
+`vendor/spargebra-shim`, which the root `[patch.crates-io]` points at. The fork is versioned
+independently of the workspace: bump its version for any change here and publish it by hand
+(docs/release.md §4) before the release that needs it. The bench/* and zk/xpath manifests
+depend on it with `package = "sparq-spargebra"`.
+
 ## Upstream release watch (bead `sq-98w7z.8`)
 
 Re-check with **`python3 scripts/check-spargebra-release.py`** (exit `0` = still
@@ -22,6 +35,7 @@ time the bead is picked up.
 |---|---|---|---|
 | 2026-06-11 | 0.4.6 | fixes on main, unreleased (`dabda10`, `c29be03`) | blocked — keep tree |
 | 2026-07-27 | **0.4.6** (unchanged) | `lib/spargebra` = `0.5.0-dev` | blocked — keep tree, re-deferred |
+| 2026-10-05 | **0.4.7** | not re-checked | keep tree: §7–§10 are sparq-local, so the fork ships as `sparq-spargebra`; rebasing onto 0.4.7 is a follow-up |
 
 **2026-07-27 check.** No release above 0.4.6 exists. Evidence: the crates.io
 sparse index tops out at `0.4.6` (every higher entry is a pre-release of an

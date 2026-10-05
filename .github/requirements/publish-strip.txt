@@ -1,0 +1,5 @@
+# Hash-pinned dependency for scripts/publish-strip.py (format-preserving TOML edits of the
+# packaged manifests). Installed with `pip install --require-hashes -r` so Scorecard's
+# PinnedDependenciesID holds: a `==` pin alone still trusts whatever PyPI serves.
+tomlkit==0.13.3 \
+    --hash=sha256:c89c649d79ee40629a9fda55f8ace8c6a1b42deb912b2a8fd8d942ddadb606b0

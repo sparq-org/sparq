@@ -18,7 +18,7 @@ publish = false
 # sparq-zk's graph depends on it, so this detached project applies the same
 # patch.
 [patch.crates-io]
-spargebra = { path = "../../../vendor/spargebra" }
+spargebra = { path = "../../../vendor/spargebra", package = "sparq-spargebra" }
 
 [dependencies]
 sparq-zk = { path = "../../../crates/sparq-zk" }

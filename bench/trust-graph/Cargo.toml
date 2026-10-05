@@ -33,7 +33,7 @@ publish = false
 # sparq-trust's dep graph (sparq-shacl / sparq-zk) resolves the same crate, so this
 # detached project must apply the same patch (same as bench/parse + bench/zk).
 [patch.crates-io]
-spargebra = { path = "../../vendor/spargebra" }
+spargebra = { path = "../../vendor/spargebra", package = "sparq-spargebra" }
 
 [dependencies]
 # The closure under measurement: `derive_effective_rules` behind the default-OFF
