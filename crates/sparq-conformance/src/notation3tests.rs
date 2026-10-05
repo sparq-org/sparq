@@ -72,9 +72,10 @@ pub enum Verdict {
     Crashed(String),
     /// Exceeded the per-test timeout.
     Timeout,
-    /// Not met, and the document asked `log:content` / `log:semantics` for an
-    /// external resource the offline runner cannot serve (the IRI is kept). A
-    /// harness limitation, reported apart from engine failures.
+    /// Unmeasured: the document asked `log:content` / `log:semantics` for an
+    /// external resource the offline runner cannot serve (the IRI is kept), and
+    /// its outcome is not established without it (anything but a positive
+    /// pass). A harness limitation, reported apart from engine failures.
     Unavailable(String),
 }
 
@@ -183,6 +184,15 @@ fn is_ex(t: &Term, local: &str) -> bool {
 
 /// Decide the verdict from a closure's facts. `expect_rejection` is true for a
 /// `crash-*` document (see the module docs for the full decision table).
+/// Whether the closure announces any negative (`fail-*`) case.
+fn has_negative_case(facts: &[[Term; 3]]) -> bool {
+    facts.iter().any(|[s, p, o]| {
+        is_ex(s, "test")
+            && is_ex(p, "contains")
+            && matches!(o, Term::Iri(i) if local_name(i).starts_with("fail"))
+    })
+}
+
 pub fn verdict_from_facts(facts: &[[Term; 3]], expect_rejection: bool) -> Verdict {
     let mut cases: Vec<&Term> = facts
         .iter()
@@ -356,16 +366,23 @@ pub fn run_source(src: &str, base: &str, suite_root: &Path, expect_rejection: bo
         }
         std::fs::read_to_string(resolve_in_suite(iri, &root)?).ok()
     };
-    let verdict =
+    let (verdict, positive_pass) =
         match sparq_reason::n3::reason_n3_terms_with_resolver(src, Some(base), Some(&resolver)) {
-            Ok(c) => verdict_from_facts(&c.facts, expect_rejection),
-            Err(_) if expect_rejection => Verdict::Pass,
-            Err(e) => Verdict::Crashed(e),
+            Ok(c) => {
+                let v = verdict_from_facts(&c.facts, expect_rejection);
+                let positive = v.is_pass() && !expect_rejection && !has_negative_case(&c.facts);
+                (v, positive)
+            }
+            Err(_) if expect_rejection => (Verdict::Pass, false),
+            Err(e) => (Verdict::Crashed(e), false),
         };
+    // A pass that rests on something *not* being derived (a `fail-*` or
+    // `crash-*` case) is not established when a lookup was refused: the missing
+    // resource alone can explain it. Only a derived pass signal stands.
     let unavailable = unavailable.borrow_mut().take();
-    match (verdict, unavailable) {
-        (v, Some(iri)) if !v.is_pass() => Verdict::Unavailable(iri),
-        (v, _) => v,
+    match unavailable {
+        Some(iri) if !positive_pass => Verdict::Unavailable(iri),
+        _ => verdict,
     }
 }
 
@@ -832,8 +849,9 @@ mod tests {
     }
 
     /// A case that needs an external resource the offline runner cannot serve
-    /// is reported as unavailable, apart from engine failures; one that passes
-    /// anyway stays a pass.
+    /// is reported as unavailable, apart from engine failures. A negative case
+    /// "passes" by deriving nothing, which the missing resource alone explains,
+    /// so it is unavailable too; only a derived pass signal stands.
     #[test]
     fn external_resources_are_reported_unavailable() {
         let ext = "https://example.net/data.n3";
@@ -853,7 +871,15 @@ mod tests {
             "@prefix log: <http://www.w3.org/2000/10/swap/log#>.\n{}",
             case("fail-ext-1", &format!("<{ext}> log:semantics ?f"), "false")
         );
-        assert_eq!(run(&tolerant), Verdict::Pass);
+        assert_eq!(run(&tolerant), Verdict::Unavailable(ext.into()));
+        let rejecting =
+            format!("{PFX}{{ <{ext}> <http://www.w3.org/2000/10/swap/log#semantics> ?f }} => {{ :a :b :c }}.\n");
+        assert_eq!(run_rejecting(&rejecting), Verdict::Unavailable(ext.into()));
+        let positive = format!(
+            "@prefix log: <http://www.w3.org/2000/10/swap/log#>.\n{}{{ <{ext}> log:semantics ?f }} => {{ :other :x :y }}.\n",
+            case("success-ext-2", ":a :b :c", "true")
+        ) + ":a :b :c.\n";
+        assert_eq!(run(&positive), Verdict::Pass);
         let rows = [Row {
             test: "t".into(),
             verdict: v,
