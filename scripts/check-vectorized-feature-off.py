@@ -93,12 +93,15 @@ _CHUNK_RS = "crates/sparq-engine/src/chunk.rs"
 _CHUNK_IMPORT_PATTERN = re.compile(r'\bchunk::|DataChunk\b|SelVec\b|VecCmp\b|apply_filter_columnar\b')
 _MOD_CHUNK_PATTERN = re.compile(r'\b(?:mod|pub use)\s+chunk\b')
 _CFG_VECTORIZED = re.compile(r'#\[cfg\(feature\s*=\s*"vectorized"\)\]')
-# A module-level gate on a `mod x;` declaration: `#[cfg(feature = "vectorized")]` or an
-# `all(...)` that includes it. `any(...)` and `not(...)` do not gate, so they never match.
-_CFG_MODULE_VECTORIZED = re.compile(
-    r'#\[cfg\((?:all\((?:(?!any\(|not\()[^\]])*)?feature\s*=\s*"vectorized"')
-_MOD_DECL = re.compile(r'^(\s*)(?:pub(?:\([^)]*\))?\s+)?mod\s+([A-Za-z_][A-Za-z0-9_]*)\s*;')
-_PATH_ATTR = re.compile(r'#\[path\s*=\s*"([^"]+)"\]')
+# Out-of-line module declaration, after any same-line attributes are removed.
+_MOD_DECL = re.compile(
+    r'^(?:pub(?:\s*\([^)]*\))?\s+)?mod\s+([A-Za-z_][A-Za-z0-9_]*)\s*;')
+# Anything that looks like an out-of-line `mod x;`, used to fail closed on a
+# declaration the parser above does not understand.
+_MOD_DECL_LOOSE = re.compile(r'\bmod\s+[A-Za-z_][A-Za-z0-9_]*\s*;')
+_PATH_ATTR = re.compile(r'^#\s*\[\s*path\s*=\s*"([^"]+)"\s*\]$')
+_CFG_ATTR = re.compile(r'^#\s*\[\s*cfg\s*\((.*)\)\s*\]$', re.S)
+_CFG_TOKEN = re.compile(r'\s*(?:([A-Za-z_][A-Za-z0-9_]*)|("(?:[^"\\]|\\.)*")|([(),=]))')
 
 
 # ---------------------------------------------------------------------------
@@ -379,33 +382,158 @@ def _exec_audit_files(repo_root: str) -> list[str]:
     return files
 
 
+def _split_leading_attrs(text: str) -> tuple[list[str], str]:
+    """Split `#[..] #[..] rest` into (["#[..]", "#[..]"], "rest"). Brackets inside
+    string literals are skipped. An unterminated attribute returns ([], text)."""
+    attrs: list[str] = []
+    rest = text.lstrip()
+    while rest.startswith("#"):
+        j = 1
+        while j < len(rest) and rest[j].isspace():
+            j += 1
+        if j >= len(rest) or rest[j] != "[":
+            break
+        depth, k, in_str = 0, j, False
+        while k < len(rest):
+            ch = rest[k]
+            if in_str:
+                if ch == "\\":
+                    k += 1
+                elif ch == '"':
+                    in_str = False
+            elif ch == '"':
+                in_str = True
+            elif ch == "[":
+                depth += 1
+            elif ch == "]":
+                depth -= 1
+                if depth == 0:
+                    break
+            k += 1
+        if depth != 0:
+            return [], text
+        attrs.append(rest[:k + 1])
+        rest = rest[k + 1:].lstrip()
+    return attrs, rest
+
+
+def _parse_cfg(pred: str):
+    """Parse a cfg predicate into a tree: ("all"|"any", [..]), ("not", x),
+    ("kv", key, value) or ("flag", name). Returns None on a syntax error."""
+    toks: list[str] = []
+    pos = 0
+    pred = pred.strip()
+    while pos < len(pred):
+        m = _CFG_TOKEN.match(pred, pos)
+        if not m or m.end() == pos:
+            return None
+        toks.append(m.group(1) or m.group(2) or m.group(3))
+        pos = m.end()
+        while pos < len(pred) and pred[pos].isspace():
+            pos += 1
+    i = 0
+
+    def node():
+        nonlocal i
+        if i >= len(toks) or not re.match(r"[A-Za-z_]", toks[i]):
+            raise ValueError
+        name = toks[i]
+        i += 1
+        if i < len(toks) and toks[i] == "(":
+            if name not in ("all", "any", "not"):
+                raise ValueError
+            i += 1
+            kids = []
+            while i < len(toks) and toks[i] != ")":
+                kids.append(node())
+                if i < len(toks) and toks[i] == ",":
+                    i += 1
+                elif i < len(toks) and toks[i] != ")":
+                    raise ValueError
+            if i >= len(toks):
+                raise ValueError
+            i += 1
+            if name == "not":
+                if len(kids) != 1:
+                    raise ValueError
+                return ("not", kids[0])
+            return (name, kids)
+        if i < len(toks) and toks[i] == "=":
+            i += 1
+            if i >= len(toks) or not toks[i].startswith('"'):
+                raise ValueError
+            val = toks[i][1:-1]
+            i += 1
+            return ("kv", name, val)
+        return ("flag", name)
+
+    try:
+        tree = node()
+    except ValueError:
+        return None
+    return tree if i == len(toks) else None
+
+
+def _cfg_requires_vectorized(tree) -> bool:
+    """True only if every configuration satisfying `tree` has feature "vectorized".
+    Conservative: anything under `not(...)` counts as not requiring it."""
+    if tree is None:
+        return False
+    kind = tree[0]
+    if kind == "kv":
+        return tree[1] == "feature" and tree[2] == "vectorized"
+    if kind == "all":
+        return any(_cfg_requires_vectorized(t) for t in tree[1])
+    if kind == "any":
+        return bool(tree[1]) and all(_cfg_requires_vectorized(t) for t in tree[1])
+    return False
+
+
+def _attr_gates_vectorized(attr: str) -> bool:
+    """True if `attr` is a `#[cfg(...)]` whose predicate requires `vectorized`."""
+    m = _CFG_ATTR.match(attr.strip())
+    return bool(m) and _cfg_requires_vectorized(_parse_cfg(m.group(1)))
+
+
 def _child_module_decls(repo_root: str, rel: str, lines: list[str]):
-    """Yield (lineno, name, child_rel_or_None, gated_on_vectorized) for every
+    """Yield (lineno, name, child_rel_or_None, gated_on_vectorized, problem) for every
     out-of-line `mod name;` declaration in `rel`, resolved with rustc's rules:
     `#[path]` is relative to the declaring file's directory; otherwise the child is
     <dir>/<stem>/<name>.rs (or <dir>/<name>.rs from a mod.rs/lib.rs), falling back to
-    .../<name>/mod.rs. An indented declaration (inside an inline `mod {}`) yields None,
-    so the caller fails closed instead of guessing."""
+    .../<name>/mod.rs. Attributes may sit on preceding lines or on the same line.
+    When the declaration cannot be resolved (it is indented inside an inline
+    `mod {}`, it does not parse, or the file does not exist) child is None and
+    `problem` says why, so the caller fails closed instead of guessing."""
     d = os.path.dirname(rel)
     stem = os.path.splitext(os.path.basename(rel))[0]
     base = d if stem in ("mod", "lib", "main") else f"{d}/{stem}"
     for lineno, line in enumerate(lines, start=1):
-        if line.lstrip().startswith("//"):
+        code = line.split("//", 1)[0] if not line.lstrip().startswith("//") else ""
+        if not _MOD_DECL_LOOSE.search(code):
             continue
-        m = _MOD_DECL.match(line)
+        same_line_attrs, rest = _split_leading_attrs(code)
+        m = _MOD_DECL.match(rest)
         if not m:
+            yield lineno, "?", None, False, (
+                "unparseable out-of-line `mod` declaration: " + line.strip())
             continue
-        indent, name = m.group(1), m.group(2)
-        attrs: list[str] = []
+        name = m.group(1)
+        attrs: list[str] = list(same_line_attrs)
         i = lineno - 2
-        while i >= 0 and lines[i].lstrip().startswith(("#[", "//")):
-            attrs.append(lines[i])
+        while i >= 0 and lines[i].lstrip().startswith(("#", "//")):
+            if not lines[i].lstrip().startswith("//"):
+                more, tail = _split_leading_attrs(lines[i])
+                if tail.strip():
+                    break
+                attrs.extend(more)
             i -= 1
-        is_gated = any(_CFG_MODULE_VECTORIZED.search(a) for a in attrs)
-        if indent:
-            yield lineno, name, None, is_gated
+        is_gated = any(_attr_gates_vectorized(a) for a in attrs)
+        if line[:len(line) - len(line.lstrip())]:
+            yield lineno, name, None, is_gated, (
+                "indented out-of-line `mod` declaration (inside an inline module)")
             continue
-        path_attr = next((pm.group(1) for a in attrs for pm in [_PATH_ATTR.search(a)] if pm), None)
+        path_attr = next((pm.group(1) for a in attrs
+                          for pm in [_PATH_ATTR.match(a.strip())] if pm), None)
         if path_attr is not None:
             child = os.path.normpath(f"{d}/{path_attr}").replace(os.sep, "/")
         else:
@@ -414,7 +542,10 @@ def _child_module_decls(repo_root: str, rel: str, lines: list[str]):
             if (not os.path.exists(os.path.join(repo_root, child))
                     and os.path.exists(os.path.join(repo_root, alt))):
                 child = alt
-        yield lineno, name, child, is_gated
+        if not os.path.exists(os.path.join(repo_root, child)):
+            yield lineno, name, None, is_gated, f"resolved file {child} does not exist"
+            continue
+        yield lineno, name, child, is_gated, None
 
 
 def check_leg3(repo_root: str = ".") -> int:
@@ -485,14 +616,14 @@ def check_leg3(repo_root: str = ".") -> int:
     decl_count = 0
     while queue:
         parent = queue.pop(0)
-        for lineno, name, child, is_gated in _child_module_decls(repo_root, parent, texts[parent]):
+        for lineno, name, child, is_gated, problem in _child_module_decls(
+                repo_root, parent, texts[parent]):
             where = f"{parent}:{lineno}"
             decl_count += 1
             if child is None:
                 violations.append(
                     f"[leg3] VIOLATION: {where}: cannot resolve the file of child module "
-                    f"`{name}` (indented out-of-line `mod` declaration), so leg 3 cannot "
-                    "scan it")
+                    f"`{name}` ({problem}), so leg 3 cannot scan it")
                 continue
             if child not in audited_set:
                 violations.append(
@@ -657,6 +788,47 @@ _LEG3_TREE_UNSCANNED_CHILD = {
     _EXEC_RS: "#[path = \"elsewhere.rs\"]\nmod hidden;\n",
     "crates/sparq-engine/src/elsewhere.rs": "fn f(_c: &crate::chunk::DataChunk) {}\n",
 }
+_LEG3_UNGATED = "fn f(_c: &crate::chunk::DataChunk) {}\n"
+
+
+def _leg3_tree_outside(decl: str) -> dict[str, str]:
+    """exec.rs holds `decl`; an ungated reference sits in src/elsewhere.rs."""
+    return {_EXEC_RS: decl, "crates/sparq-engine/src/elsewhere.rs": _LEG3_UNGATED}
+
+
+def _leg3_tree_child(decl: str) -> dict[str, str]:
+    """exec.rs holds `decl`; an ungated reference sits in exec/child.rs."""
+    return {_EXEC_RS: decl, f"{_EXEC_DIR}/child.rs": _LEG3_UNGATED}
+
+
+# `#[path]` on the SAME line as `mod`, in several spellings: each must be resolved
+# (and so rejected as an unscanned child), not skipped.
+_LEG3_TREES_SAME_LINE_ATTR = [
+    _leg3_tree_outside('#[path = "elsewhere.rs"] mod hidden;\n'),
+    _leg3_tree_outside('#[path="elsewhere.rs"]mod hidden;\n'),
+    _leg3_tree_outside('#[cfg(test)]  #[path = "elsewhere.rs"]   pub(crate) mod hidden ;\n'),
+    _leg3_tree_outside('#[allow(dead_code)] # [ path = "elsewhere.rs" ] pub mod hidden;\n'),
+    _leg3_tree_outside('#[cfg(test)]\n#[allow(unused)] #[path = "elsewhere.rs"] pub(super) mod hidden;\n'),
+]
+# cfg predicates that do NOT require `vectorized`: the module is not gated, so its
+# ungated reference must be rejected.
+_LEG3_TREES_NON_GATING_CFG = [
+    _leg3_tree_child('#[cfg(all(not (feature = "vectorized")))]\nmod child;\n'),
+    _leg3_tree_child('#[cfg(all(not(feature="vectorized")))] mod child;\n'),
+    _leg3_tree_child('#[cfg( not( feature = "vectorized" ) )]\nmod child;\n'),
+    _leg3_tree_child('#[cfg(any(feature = "vectorized", test))]\nmod child;\n'),
+    _leg3_tree_child('#[cfg(all(test, not(all(feature = "vectorized"))))]\nmod child;\n'),
+    _leg3_tree_child('#[cfg(feature = "vectorized-lite")]\nmod child;\n'),
+]
+# A `mod x;` whose file cannot be resolved must fail closed.
+_LEG3_TREE_UNRESOLVABLE = {_EXEC_RS: "mod nothere;\n"}
+# cfg predicates that DO require `vectorized`, in several spellings: accepted.
+_LEG3_TREES_GATING_CFG = [
+    _leg3_tree_child('#[cfg(all(test, feature = "vectorized"))]\nmod child;\n'),
+    _leg3_tree_child('#[cfg( feature  =  "vectorized" )] pub(crate) mod child;\n'),
+    _leg3_tree_child('#[cfg(any(feature="vectorized", all(feature="vectorized", test)))]\n'
+                     '#[allow(dead_code)]\nmod child;\n'),
+]
 
 
 def run_self_test() -> int:
@@ -760,6 +932,41 @@ def run_self_test() -> int:
         print("TRIPWIRE 8 (leg3): PASS — item-level and module-level gates accepted")
     else:
         print("TRIPWIRE 8 (leg3): FAIL — gated references rejected; false positive")
+        all_passed = False
+
+    # ----- Tripwire 9: Leg 3 must resolve `#[path]` written on the same line as `mod` -----
+    missed = [i for i, t in enumerate(_LEG3_TREES_SAME_LINE_ATTR) if _leg3_on_tree(t) == 0]
+    if not missed:
+        print("TRIPWIRE 9 (leg3): PASS — same-line #[path] declarations resolved and rejected "
+              f"({len(_LEG3_TREES_SAME_LINE_ATTR)} spellings)")
+    else:
+        print(f"TRIPWIRE 9 (leg3): FAIL — same-line #[path] declaration(s) {missed} skipped")
+        all_passed = False
+
+    # ----- Tripwire 10: a cfg that does not require `vectorized` must not gate a module -----
+    missed = [i for i, t in enumerate(_LEG3_TREES_NON_GATING_CFG) if _leg3_on_tree(t) == 0]
+    if not missed:
+        print("TRIPWIRE 10 (leg3): PASS — not(...)/any(...)/other-feature cfgs do not gate "
+              f"({len(_LEG3_TREES_NON_GATING_CFG)} spellings)")
+    else:
+        print(f"TRIPWIRE 10 (leg3): FAIL — non-gating cfg(s) {missed} accepted as gates")
+        all_passed = False
+
+    # ----- Tripwire 11: an unresolvable `mod x;` must fail closed -----
+    rc = _leg3_on_tree(_LEG3_TREE_UNRESOLVABLE)
+    if rc != 0:
+        print("TRIPWIRE 11 (leg3): PASS — unresolvable child module rejected")
+    else:
+        print("TRIPWIRE 11 (leg3): FAIL — unresolvable child module accepted")
+        all_passed = False
+
+    # ----- Tripwire 12: cfgs that require `vectorized` are accepted in any spelling -----
+    wrong = [i for i, t in enumerate(_LEG3_TREES_GATING_CFG) if _leg3_on_tree(t) != 0]
+    if not wrong:
+        print("TRIPWIRE 12 (leg3): PASS — gating cfgs accepted "
+              f"({len(_LEG3_TREES_GATING_CFG)} spellings)")
+    else:
+        print(f"TRIPWIRE 12 (leg3): FAIL — gating cfg(s) {wrong} rejected; false positive")
         all_passed = False
 
     if all_passed:
