@@ -409,8 +409,20 @@ keep advertising the `Content-Length` a `GET` would have carried.
 
 Unlike the SELECT stream, the status is **never** committed early: the engine materialises the
 whole result graph before serialisation starts, so a budget / deadline / evaluation failure is
-always known before the first byte and is always a clean `413` / `503` / `500`. A graph result
-cannot be truncated mid-stream the way a streamed SELECT can.
+always known before the first byte and is always a clean `413` / `503` / `500`. Two things can
+still stop a graph body that has started streaming, and both **abort the chunked body** (no
+terminating chunk) rather than end it as if complete: the RDF/XML writer refusing a predicate it
+cannot encode (e.g. `rdf:about`), and a client that stops reading past the read deadline.
+
+**Stalled readers are bounded.** A streamed body (SELECT JSON or CONSTRUCT / DESCRIBE) hands
+chunks to a small bounded channel. A client that stops reading without disconnecting makes the
+worker wait, but only until `query_timeout` + the 2 s grace (or a `DELETE /queries/{id}` cancel);
+then the worker gives up and frees its blocking thread and the result it holds. Each streaming
+worker also holds one of `max_concurrent` streaming slots until it exits, so a pile-up of slow
+readers is shed with `429` instead of exhausting the blocking pool.
+
+The buffered library writers `sparq_server::graph::triples_to_{ntriples,turtle,rdfxml}` return
+`Result<String, String>`: a writer refusal is an `Err`, never a truncated document.
 
 Honest scope: this is a **TTFB and allocation** change, not a measured peak-RSS win. Peak
 process RSS on a large CONSTRUCT is dominated by materialising the result `Vec<Triple>` (and the

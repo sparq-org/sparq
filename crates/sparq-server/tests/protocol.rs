@@ -399,8 +399,8 @@ fn expected_graph_body(ttl: &str, query: &str, fmt: &str) -> String {
     let graph = Graph::load_str(ttl, "turtle").unwrap();
     let triples = sparq_engine::construct_or_describe(&graph, query).unwrap();
     match fmt {
-        "turtle" => sparq_server::graph::triples_to_turtle(&triples),
-        _ => sparq_server::graph::triples_to_ntriples(&triples),
+        "turtle" => sparq_server::graph::triples_to_turtle(&triples).unwrap(),
+        _ => sparq_server::graph::triples_to_ntriples(&triples).unwrap(),
     }
 }
 

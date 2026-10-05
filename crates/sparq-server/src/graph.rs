@@ -79,7 +79,7 @@ pub fn write_ntriples_to<W: std::io::Write>(triples: &[Triple], w: &mut W) -> st
 /// `triples_to_ntriples` (one `s p o .` line per triple, `oxrdf` Display term syntax); kept
 /// here so this module is the single graph-serialisation seam the format dispatch routes
 /// through.
-pub fn triples_to_ntriples(triples: &[Triple]) -> String {
+pub fn triples_to_ntriples(triples: &[Triple]) -> Result<String, String> {
     buffer(triples.len() * 64, |w| write_ntriples_to(triples, w))
 }
 
@@ -114,7 +114,7 @@ pub fn write_turtle_to<W: std::io::Write>(triples: &[Triple], w: &mut W) -> std:
 /// Serialises an RDF graph as **prefix-compacting Turtle**: registers [`COMMON_PREFIXES`] so
 /// IRIs under those namespaces render as `prefix:local`, the rest in full. Output is
 /// guaranteed well-formed Turtle (it goes through `oxttl`'s `TurtleSerializer`).
-pub fn triples_to_turtle(triples: &[Triple]) -> String {
+pub fn triples_to_turtle(triples: &[Triple]) -> Result<String, String> {
     buffer(triples.len() * 64, |w| write_turtle_to(triples, w))
 }
 
@@ -136,8 +136,12 @@ pub fn write_rdfxml_to<W: std::io::Write>(triples: &[Triple], w: &mut W) -> std:
 
 /// Serialises an RDF graph as **RDF/XML** (`application/rdf+xml`) with [`COMMON_PREFIXES`]
 /// registered as XML namespaces for readable QNames. Output goes through `oxrdfxml`'s
-/// `RdfXmlSerializer`, so it is guaranteed well-formed RDF/XML.
-pub fn triples_to_rdfxml(triples: &[Triple]) -> String {
+/// `RdfXmlSerializer`, so it is well-formed RDF/XML.
+///
+/// RDF/XML cannot encode every legal graph: a predicate it reserves (`rdf:about`, `rdf:ID`,
+/// …) or one with no valid XML QName split is refused. That refusal is an `Err`, never a
+/// partial document — the half-written XML is discarded rather than returned unterminated.
+pub fn triples_to_rdfxml(triples: &[Triple]) -> Result<String, String> {
     buffer(triples.len() * 64, |w| write_rdfxml_to(triples, w))
 }
 
@@ -187,14 +191,14 @@ pub fn write_jsonld_to<W: std::io::Write>(triples: &[Triple], w: &mut W) -> std:
 /// `triples_to_*` wrapper, so buffered output is byte-identical to streamed output by
 /// construction.
 ///
-/// Writing to a `Vec<u8>` is infallible, so the `io::Error` arm is genuinely unreachable; if
-/// one ever surfaced (a serialiser-internal invariant) we keep whatever bytes were written
-/// rather than panic in a request handler. The oxigraph writers emit valid UTF-8 (Turtle /
-/// RDF/XML are UTF-8 here), so the final conversion is lossless.
-fn buffer(hint: usize, render: impl FnOnce(&mut Vec<u8>) -> std::io::Result<()>) -> String {
+/// A writer error is returned, not swallowed: over a `Vec<u8>` the only error left is the
+/// serialiser refusing a triple (RDF/XML cannot encode some predicates), and the bytes written
+/// before it are an unterminated prefix of the document, so they are dropped. The oxigraph
+/// writers emit UTF-8, so the final conversion is lossless.
+fn buffer(hint: usize, render: impl FnOnce(&mut Vec<u8>) -> std::io::Result<()>) -> Result<String, String> {
     let mut out = Vec::with_capacity(hint);
-    let _ = render(&mut out);
-    String::from_utf8(out).unwrap_or_default()
+    render(&mut out).map_err(|e| format!("serialising the graph: {e}"))?;
+    String::from_utf8(out).map_err(|e| format!("serialising the graph: {e}"))
 }
 
 /// Parses an **RDF/XML** document into a triple list (the GSP write-body reader for
@@ -247,14 +251,14 @@ mod tests {
 
     #[test]
     fn ntriples_is_one_line_per_triple() {
-        let nt = triples_to_ntriples(&sample());
+        let nt = triples_to_ntriples(&sample()).unwrap();
         assert_eq!(nt.lines().count(), 4);
         assert!(nt.contains("<http://ex/alice> <http://xmlns.com/foaf/0.1/age> \"30\"^^<http://www.w3.org/2001/XMLSchema#integer> ."));
     }
 
     #[test]
     fn turtle_compacts_common_prefixes() {
-        let ttl = triples_to_turtle(&sample());
+        let ttl = triples_to_turtle(&sample()).unwrap();
         // The header declares the registered prefixes…
         assert!(ttl.contains("@prefix foaf: <http://xmlns.com/foaf/0.1/>"), "missing foaf prefix decl: {ttl}");
         // …and the body uses the compact form rather than the full IRI.
@@ -265,7 +269,7 @@ mod tests {
 
     #[test]
     fn rdfxml_is_wellformed_and_roundtrips() {
-        let xml = triples_to_rdfxml(&sample());
+        let xml = triples_to_rdfxml(&sample()).unwrap();
         assert!(xml.contains("<?xml"), "missing XML declaration: {xml}");
         assert!(xml.contains("rdf:RDF"), "missing rdf:RDF root: {xml}");
         // Re-parse our own RDF/XML output: the graph must come back identical (4 triples).
@@ -302,7 +306,7 @@ mod tests {
 </rdf:RDF>"#;
         let triples = parse_rdfxml(doc.as_bytes(), None).unwrap();
         assert_eq!(triples.len(), 1);
-        let ttl = triples_to_turtle(&triples);
+        let ttl = triples_to_turtle(&triples).unwrap();
         let g = sparq_core::Graph::load_str(&ttl, "turtle").unwrap();
         assert_eq!(g.len(), 1);
     }
