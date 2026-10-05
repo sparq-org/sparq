@@ -14,8 +14,8 @@ use sparq_lws_core::app::{build_router, AppState};
 use sparq_lws_core::auth::AuthContext;
 use sparq_lws_core::ldp::handler::LdpState;
 use sparq_lws_core::store::{
-    BlobEntry, BlobError, BlobStore, BodyCache, CompositeStore, InMemoryBlobStore,
-    InMemorySparqClient, Store,
+    BlobEntry, BlobError, BlobStore, BodyCache, CompositeStore, DeleteOutcome, InMemoryBlobStore,
+    InMemorySparqClient, ResourceMeta, SparqClient, SparqError, Store,
 };
 use tower::ServiceExt;
 
@@ -483,4 +483,176 @@ async fn query_never_fetches_readable_non_rdf_bodies() {
         !gets.contains(&image.blob_key),
         "a readable non-RDF body must not be fetched by a SPARQL query (gets: {gets:?})"
     );
+}
+
+/// A [`SparqClient`] that, once `churn` is set, answers every `get_meta` of `churn_iri` with a
+/// brand-new version whose blob does not exist — exactly what a reader observes while that resource
+/// is rewritten (and its previous bytes reclaimed) during every one of its byte fetches.
+struct ChurningSparq {
+    inner: InMemorySparqClient,
+    churn_iri: &'static str,
+    churn: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    version: std::sync::atomic::AtomicU64,
+}
+
+#[async_trait::async_trait]
+impl SparqClient for ChurningSparq {
+    async fn get_meta(&self, iri: &str) -> Result<ResourceMeta, SparqError> {
+        let mut meta = self.inner.get_meta(iri).await?;
+        if iri == self.churn_iri && self.churn.load(std::sync::atomic::Ordering::SeqCst) {
+            let n = self
+                .version
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            meta.blob_key = format!("churned-{n}");
+            meta.etag = format!("\"churned-{n}\"");
+        }
+        Ok(meta)
+    }
+    async fn put_meta(&self, iri: &str, meta: ResourceMeta) -> Result<(), SparqError> {
+        self.inner.put_meta(iri, meta).await
+    }
+    async fn replace_meta(
+        &self,
+        iri: &str,
+        meta: ResourceMeta,
+    ) -> Result<Option<ResourceMeta>, SparqError> {
+        self.inner.replace_meta(iri, meta).await
+    }
+    async fn exists(&self, iri: &str) -> Result<bool, SparqError> {
+        self.inner.exists(iri).await
+    }
+    async fn delete_meta(&self, iri: &str) -> Result<(), SparqError> {
+        self.inner.delete_meta(iri).await
+    }
+    async fn delete_meta_if_empty(
+        &self,
+        iri: &str,
+        parent: Option<&str>,
+    ) -> Result<DeleteOutcome, SparqError> {
+        self.inner.delete_meta_if_empty(iri, parent).await
+    }
+    async fn create_child(
+        &self,
+        container: &str,
+        child: &str,
+        meta: ResourceMeta,
+    ) -> Result<(), SparqError> {
+        self.inner.create_child(container, child, meta).await
+    }
+    async fn remove_child(&self, container: &str, child: &str) -> Result<(), SparqError> {
+        self.inner.remove_child(container, child).await
+    }
+    async fn list_children(&self, container: &str) -> Result<Vec<String>, SparqError> {
+        self.inner.list_children(container).await
+    }
+    async fn referenced_blob_keys(&self) -> Result<std::collections::HashSet<String>, SparqError> {
+        self.inner.referenced_blob_keys().await
+    }
+}
+
+#[tokio::test]
+async fn a_governing_acl_that_keeps_changing_fails_the_query_instead_of_dropping_graphs() {
+    // If the governing ACL is rewritten under every authorization attempt, the walk surfaces
+    // `ResourceChanged`. That must never be read as a denial (a readable graph silently missing from
+    // a 200 answer — wrong counts, false ASK): the bounded restarts run out and the query is a 503.
+    const ROOT_ACL: &str = "https://pod.example/.acl";
+    let churn = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let store = CompositeStore::with_body_cache(
+        ChurningSparq {
+            inner: InMemorySparqClient::new(),
+            churn_iri: ROOT_ACL,
+            churn: std::sync::Arc::clone(&churn),
+            version: std::sync::atomic::AtomicU64::new(0),
+        },
+        InMemoryBlobStore::new(),
+        BodyCache::disabled(),
+    );
+    store
+        .write(ROOT, Bytes::new(), "text/turtle")
+        .await
+        .expect("seed root container");
+    store
+        .write(
+            ROOT_ACL,
+            Bytes::from(format!(
+                r#"@prefix acl: <http://www.w3.org/ns/auth/acl#>.
+<#owner> a acl:Authorization; acl:agent <{WEBID}>;
+  acl:accessTo <{ROOT}>; acl:default <{ROOT}>;
+  acl:mode acl:Read, acl:Write, acl:Control."#
+            )),
+            "text/turtle",
+        )
+        .await
+        .expect("seed ACL");
+    store
+        .create_in_container(
+            ROOT,
+            "https://pod.example/a",
+            Bytes::from_static(b"<urn:a> <urn:p> \"visible\" ."),
+            "text/turtle",
+        )
+        .await
+        .expect("seed RDF resource");
+
+    let issuer_key = KeyKit::generate();
+    let client_key = KeyKit::generate();
+    let config = VerifierConfig::new(vec![ISSUER.to_owned()], BASE_URL);
+    let replay = InMemoryReplayStore::with_window(config.replay_ttl());
+    let verifier = Verifier::new(config, jwks_provider(&issuer_key), replay).unwrap();
+    let app = build_router(AppState::new(
+        AuthContext::new(verifier, BASE_URL),
+        LdpState::new(store, BASE_URL),
+    ));
+    let query = |app: axum::Router| {
+        let access = mint_access_token(&issuer_key, &client_key.thumbprint);
+        let proof = mint_dpop_proof(&client_key, "POST", &format!("{BASE_URL}/sparql"), &access);
+        async move {
+            app.oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/sparql")
+                    .header("authorization", format!("DPoP {access}"))
+                    .header("dpop", proof)
+                    .header("content-type", "application/sparql-query")
+                    .body(Body::from(
+                        "SELECT ?g WHERE { GRAPH ?g { ?s <urn:p> ?o } }".to_owned(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+        }
+    };
+
+    // Stable ACL: the owner sees the graph.
+    let rows = json(query(app.clone()).await).await;
+    assert_eq!(binding_values(&rows, "g"), ["https://pod.example/a"]);
+
+    // ACL churning under every attempt: a retryable 503, never a 200 missing the graph.
+    churn.store(true, std::sync::atomic::Ordering::SeqCst);
+    let response = query(app.clone()).await;
+    assert_eq!(
+        response.status(),
+        StatusCode::SERVICE_UNAVAILABLE,
+        "an ACL race must fail the query, not silently exclude a readable graph"
+    );
+    assert!(response.headers().contains_key("retry-after"));
+
+    // LDP GET under the same churn: the error propagates out of authorization (never a 401/403
+    // denial), `serve_read`'s bounded restart runs out, and the read is the same retryable 503.
+    let access = mint_access_token(&issuer_key, &client_key.thumbprint);
+    let proof = mint_dpop_proof(&client_key, "GET", &format!("{BASE_URL}/a"), &access);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/a")
+                .header("authorization", format!("DPoP {access}"))
+                .header("dpop", proof)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
 }

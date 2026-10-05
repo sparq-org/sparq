@@ -300,7 +300,7 @@ async fn assemble_authorized_dataset<S: Store>(
             .map(|candidate| candidate.acl.clone())
             .collect::<Vec<_>>();
         let mut restarts = 0;
-        let (format, body) = loop {
+        let (format, body) = 'attempt: loop {
             let Ok(plan) = state.store.read_plan(&resource, &acl_iris).await else {
                 continue 'candidates;
             };
@@ -313,6 +313,18 @@ async fn assemble_authorized_dataset<S: Store>(
                     &plan.acls,
                 )
                 .await;
+            // A governing ACL rewritten (and its bytes reclaimed) under the walk surfaces as
+            // `ResourceChanged`. That is NOT a denial: treating it as one would silently drop a
+            // readable graph from a successful answer (wrong counts, false ASK). Restart this
+            // candidate's plan + authorization like the body path below; 503 once exhausted.
+            let decision = match decision {
+                Err(ServerError::ResourceChanged) if restarts < READ_RACE_RETRIES => {
+                    restarts += 1;
+                    continue 'attempt;
+                }
+                Err(ServerError::ResourceChanged) => return Err(ServerError::ResourceChanged),
+                other => other,
+            };
             let admitted = matches!(decision, Ok(ReadDecision::Allow(_)));
             // [SONNET-4.6] sq-elg47: compose the opt-in ODRL gate per candidate graph — a Deny
             // excludes the graph from the authorized dataset even under a static WAC grant
