@@ -82,7 +82,7 @@ Notes on a few that need care:
   (unlike the `bench/serve` spikes) — see
   [`bench/serve-throughput/README.md`](./serve-throughput/README.md). It stands up the
   REAL in-process `sparq_server::serve` stack on a loopback port and reports
-  {req/s, p50/p99 ms, peak RSS} for a small SELECT + an ASK at concurrency 1/8/32. req/s
+  {req/s, p50/p99 ms, peak RSS} for a small SELECT + an ASK at concurrency 1, 8 and 32. Throughput
   + latency are wall-clock sensitive → **NON-CANONICAL on a shared box**; canonical
   numbers come only from a quiet EC2 runner, and it is deliberately NOT wired into
   `scripts/ci-bench.sh` / `scripts/perf-gate.py` (req/s is a trend/EC2 metric). It is the
