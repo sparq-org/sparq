@@ -186,7 +186,8 @@ directive, under sq-6vshe.6). This is a **decision, not a defect**.
      2026-08-01; the same pass corrected research/ci-mergequeue-speedup-2026-07.md §2.1. -->
 
 The lanes that DO trigger on `merge_group` today are: `ci-summary.yml` (the gate itself),
-`ci.yml`, `feature-matrix.yml`, `vectorized-feature-off.yml`, `docs-quality.yml`,
+`ci-fast.yml` (the proposed fast replacement for the gate — not required until the ruleset
+is switched to its `ci-fast` check), `ci.yml`, `feature-matrix.yml`, `vectorized-feature-off.yml`, `docs-quality.yml`,
 `flow-on-gates.yml`, `routing-self-tests.yml` and `pr-area-label.yml` — plus
 `codeql.yml`, whose trigger set lists `merge_group` but which is operationally disabled
 per the note above and so produces no check-run there.
