@@ -464,7 +464,7 @@ def _sanitize(text, *, code: bool = False) -> str:
         s = s.replace("`", "'").replace("|", "\\|")
         return f"`{s}`"
     s = s.replace("\\", "\\\\").replace("|", "\\|").replace("`", "\\`")
-    return s.replace("@", "@")
+    return s.replace("@", "@<!-- -->")
 
 
 def _md_cell(text) -> str:
@@ -948,7 +948,7 @@ def self_test() -> int:
         assert "us\\|\\`u" in erow, erow                   # plain cell: | and ` escaped
         assert "\\`boom\\`" in erow, erow                  # note ` cannot open a code span
         assert "@someone" not in ebody                     # mention split by an HTML comment
-        assert "@someone" in ebody
+        assert "@<!-- -->someone" in ebody
 
         # defense-in-depth HTML layer: GitHub renders raw HTML in issue
         # bodies, so a raw-HTML table breakout in ANY interpolated field must render with
