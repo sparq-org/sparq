@@ -2,7 +2,7 @@
 #![cfg(feature = "numeric")]
 
 use oxrdf::{Literal, NamedNode};
-use sparq_core::{numeric_cache_value, numeric_literal_valid};
+use sparq_core::{exact_numeric_literal_valid, numeric_cache_value, numeric_literal_valid};
 use sparq_substrate::numeric::Num;
 
 #[test]
@@ -88,6 +88,11 @@ fn numeric_facets_and_lexicals_agree_across_cache_and_arithmetic() {
             .is_some(),
             valid,
             "arithmetic {text:?}^^{suffix}"
+        );
+        assert_eq!(
+            exact_numeric_literal_valid(text, &datatype),
+            valid && !matches!(suffix, "double" | "float"),
+            "exact {text:?}^^{suffix}"
         );
     }
 }

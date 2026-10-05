@@ -13252,7 +13252,8 @@ enum CompiledExpr {
     /// `BOUND(?v)`: `Some(c)` → `row[c] != NO_ID`; `None` → always `false`.
     BoundCol(Option<usize>),
     NamedNode(oxrdf::NamedNode),
-    Literal(Literal),
+    /// A constant; the flag caches whether it is a valid exact-numeric lexical.
+    Literal(Literal, bool),
     And(Box<Self>, Box<Self>),
     Or(Box<Self>, Box<Self>),
     Not(Box<Self>),
@@ -13360,9 +13361,14 @@ fn idfast_rewrite(e: &mut CompiledExpr, nonlit_cols: &FxHashSet<usize>) {
         | C::CapturedBound
         | C::BoundCol(_)
         | C::NamedNode(_)
-        | C::Literal(_)
+        | C::Literal(..)
         | C::Exists(_) => {}
     }
+}
+
+/// A compiled constant with its exact-numeric validity checked once, not per row.
+fn compiled_literal(l: &Literal) -> CompiledExpr {
+    CompiledExpr::Literal(l.clone(), exact_lexical_of_literal(l).is_some())
 }
 
 /// Walk `e` once, resolving all `Variable`/`Bound` nodes to column indices. [OPUS-4.8] sq-7d3dj.4.
@@ -13371,14 +13377,14 @@ fn compile_expr(e: &Expression, b: &Bindings, local: &LocalVocab) -> CompiledExp
     match e {
         Variable(v) => match local.correlation.get(v) {
             Some(Term::NamedNode(n)) => CompiledExpr::NamedNode(n.clone()),
-            Some(Term::Literal(l)) => CompiledExpr::Literal(l.clone()),
+            Some(Term::Literal(l)) => compiled_literal(l),
             Some(term) => CompiledExpr::Captured(term.clone()),
             None => CompiledExpr::Var(b.col(v)),
         },
         Bound(v) if local.correlation.contains_key(v) => CompiledExpr::CapturedBound,
         Bound(v) => CompiledExpr::BoundCol(b.col(v)),
         NamedNode(n) => CompiledExpr::NamedNode(n.clone()),
-        Literal(l) => CompiledExpr::Literal(l.clone()),
+        Literal(l) => compiled_literal(l),
         And(a, d) => CompiledExpr::And(Box::new(compile_expr(a, b, local)), Box::new(compile_expr(d, b, local))),
         Or(a, d) => CompiledExpr::Or(Box::new(compile_expr(a, b, local)), Box::new(compile_expr(d, b, local))),
         Not(a) => CompiledExpr::Not(Box::new(compile_expr(a, b, local))),
@@ -13840,6 +13846,13 @@ fn temporal_cmp_of_id(graph: &Graph, id: Id, exact: ExactTemporal<'_>, approx: O
             }
         }
     }
+    exact_temporal_cmp_of_id(graph, id, exact)
+}
+
+/// The exact fallback of [`temporal_cmp_of_id`], kept out of line so the cached
+/// fast path stays small enough to inline into scans.
+#[inline(never)]
+fn exact_temporal_cmp_of_id(graph: &Graph, id: Id, exact: ExactTemporal<'_>) -> Option<std::cmp::Ordering> {
     temporal_of_id(graph, id).and_then(|v| ExactTemporal::compare(v, exact))
 }
 
@@ -13910,10 +13923,7 @@ fn eval_exact_lexical(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id
 
 // [GPT-6] Every exact lexical shortcut validates the original RDF datatype first.
 fn exact_lexical_of_literal(l: &Literal) -> Option<&str> {
-    let datatype = l.datatype();
-    (l.language().is_none()
-        && (sparq_core::is_integer_datatype(datatype.as_str()) || datatype == xsd::DECIMAL)
-        && sparq_core::numeric_literal_valid(l.value(), datatype.as_str()))
+    (l.language().is_none() && sparq_core::exact_numeric_literal_valid(l.value(), l.datatype().as_str()))
         .then_some(l.value())
 }
 
@@ -13939,7 +13949,7 @@ fn eval_compiled_numeric(graph: &Graph, local: &LocalVocab, row: &[Id], e: &Comp
             if id == NO_ID { None } else if is_local(id) { local.numeric(id) } else { graph.numeric_value(id) }
         }
         // [FABLE-5] sq-6b1lj: datatype-aware, verbatim-validated constant, matching `eval_numeric`.
-        Literal(l) => numeric_cache_f64(l),
+        Literal(l, _) => numeric_cache_f64(l),
         Add(a, d) => Some(eval_compiled_numeric(graph, local, row, a)? + eval_compiled_numeric(graph, local, row, d)?),
         Subtract(a, d) => {
             Some(eval_compiled_numeric(graph, local, row, a)? - eval_compiled_numeric(graph, local, row, d)?)
@@ -13971,7 +13981,7 @@ fn eval_compiled_temporal<'a>(graph: &'a Graph, local: &'a LocalVocab, row: &[Id
                 temporal_of_id(graph, id)
             }
         }
-        Literal(l) => temporal_of_lit(l),
+        Literal(l, _) => temporal_of_lit(l),
         _ => None,
     }
 }
@@ -13986,7 +13996,7 @@ fn eval_compiled_approx_temporal(graph: &Graph, row: &[Id], e: &CompiledExpr) ->
             let id = row[(*col)?];
             if id == NO_ID || is_local(id) { None } else { graph.temporal_value(id) }
         }
-        CompiledExpr::Literal(l) if l.language().is_none() => Temporal::of_lit(l.value(), l.datatype().as_str()),
+        CompiledExpr::Literal(l, _) if l.language().is_none() => Temporal::of_lit(l.value(), l.datatype().as_str()),
         _ => None,
     }
 }
@@ -14006,7 +14016,7 @@ fn eval_compiled_dec(graph: &Graph, local: &LocalVocab, row: &[Id], e: &Compiled
                 Dec::parse(&graph.exact_numeric_lexical(id)?)
             }
         }
-        Literal(l) => Dec::parse(exact_lexical_of_literal(l)?),
+        Literal(l, exact) => if *exact { Dec::parse(l.value()) } else { None },
         Add(a, d) => eval_compiled_dec(graph, local, row, a)?.checked_add(eval_compiled_dec(graph, local, row, d)?),
         Subtract(a, d) => {
             eval_compiled_dec(graph, local, row, a)?.checked_sub(eval_compiled_dec(graph, local, row, d)?)
@@ -14038,7 +14048,7 @@ fn eval_compiled_exact_lexical(graph: &Graph, local: &LocalVocab, row: &[Id], e:
                 graph.exact_numeric_lexical(id)
             }
         }
-        Literal(l) => exact_lexical_of_literal(l).map(str::to_owned),
+        Literal(l, exact) => exact.then(|| l.value().to_owned()),
         UnaryPlus(a) => eval_compiled_exact_lexical(graph, local, row, a),
         UnaryMinus(a) => eval_compiled_exact_lexical(graph, local, row, a).map(|s| match s.strip_prefix('-') {
             Some(r) => r.to_string(),
@@ -15318,7 +15328,7 @@ fn eval_compiled(
         CapturedBound => Ok(Value::Bool(true)),
         BoundCol(col) => Ok(Value::Bool(col.map(|c| row[c] != NO_ID).unwrap_or(false))),
         NamedNode(n) => Ok(Value::Term(Term::NamedNode(n.clone()))),
-        Literal(l) => {
+        Literal(l, _) => {
             budget::check_temporal(l.value(), l.datatype().as_str())?;
             Ok(Value::Term(Term::Literal(l.clone())))
         },

@@ -788,6 +788,16 @@ impl Num {
     pub fn of_parts(value: &str, datatype: &str) -> Option<Num> {
         use oxrdf::vocab::xsd;
         let v = value;
+        // The two common datatypes first: i64's parser accepts exactly an optional
+        // sign and ASCII digits, and `parse_lexical` validates decimal digits once
+        // whitespace (outside the lexical space) is ruled out.
+        if datatype == xsd::INTEGER.as_str() {
+            if let Ok(i) = v.parse::<i64>() {
+                return Some(Num::Int(i));
+            }
+        } else if datatype == xsd::DECIMAL.as_str() {
+            return if v.trim().len() == v.len() { Dec::parse_lexical(v).map(Num::Dec) } else { None };
+        }
         if !sparq_core::numeric_literal_valid(v, datatype) {
             return None;
         }

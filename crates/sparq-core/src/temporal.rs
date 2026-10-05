@@ -238,6 +238,15 @@ pub fn parse_civil_date(date: &str) -> Option<i64> {
     if p.next().is_some() || !(1..=max_day).contains(&d) {
         return None;
     }
+    // Years of realistic magnitude cannot overflow i64 day arithmetic.
+    if y.unsigned_abs() < 1 << 40 {
+        let y = if m <= 2 { y - 1 } else { y };
+        let era = y.div_euclid(400);
+        let yoe = y - era * 400;
+        let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d - 1;
+        let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+        return Some(era * 146_097 + doe - 719_468);
+    }
     // Widen before calendar arithmetic; reject an unrepresentable cache value.
     let (y, m, d) = (i128::from(y), i128::from(m), i128::from(d));
     let y = if m <= 2 { y - 1 } else { y };

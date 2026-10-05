@@ -758,8 +758,25 @@ fn numeric_datatype_wellformed(v: &str, datatype: &str) -> bool {
 /// assert!(!numeric_literal_valid("5.0", "http://www.w3.org/2001/XMLSchema#integer"));
 /// ```
 // Numeric facets retain XSD 1.1 unsigned lexical signs; temporal version rules are separate.
+/// `true` iff `value` is a valid exact-numeric (integer-family or `xsd:decimal`)
+/// lexical for `datatype`. Checks the two common datatypes before the subtype list.
+#[inline]
+pub fn exact_numeric_literal_valid(value: &str, datatype: &str) -> bool {
+    if datatype == xsd::INTEGER.as_str() {
+        let body = match value.as_bytes().first() {
+            Some(b'+' | b'-') => &value[1..],
+            _ => value,
+        };
+        return !body.is_empty() && body.bytes().all(|b| b.is_ascii_digit());
+    }
+    (datatype == xsd::DECIMAL.as_str() || is_integer_datatype(datatype)) && numeric_literal_valid(value, datatype)
+}
+
 pub fn numeric_literal_valid(value: &str, datatype: &str) -> bool {
-    let body = value.strip_prefix(['+', '-']).unwrap_or(value);
+    let body = match value.as_bytes().first() {
+        Some(b'+' | b'-') => &value[1..],
+        _ => value,
+    };
     if is_integer_datatype(datatype) {
         if body.is_empty() || !body.bytes().all(|b| b.is_ascii_digit()) {
             return false;
@@ -782,9 +799,16 @@ pub fn numeric_literal_valid(value: &str, datatype: &str) -> bool {
         return datatype == xsd::UNSIGNED_BYTE.as_str() && u8::try_from(n).is_ok();
     }
     if datatype == xsd::DECIMAL.as_str() {
-        let (whole, fraction) = body.split_once('.').unwrap_or((body, ""));
-        return !(whole.is_empty() && fraction.is_empty())
-            && whole.bytes().chain(fraction.bytes()).all(|b| b.is_ascii_digit());
+        // At most one '.', and at least one digit on either side of it.
+        let (mut dots, mut digits) = (0, 0);
+        for b in body.bytes() {
+            match b {
+                b'.' => dots += 1,
+                b'0'..=b'9' => digits += 1,
+                _ => return false,
+            }
+        }
+        return dots <= 1 && digits > 0;
     }
     (datatype == xsd::FLOAT.as_str() || datatype == xsd::DOUBLE.as_str())
         && parse_xsd_f64(value).is_some()
@@ -2798,8 +2822,7 @@ impl Graph {
         }
         match self.dict.term_parts(id) {
             dict::TermParts::Lit { value, datatype, lang: None }
-                if (is_integer_datatype(datatype) || datatype == xsd::DECIMAL.as_str())
-                    && numeric_literal_valid(value, datatype) =>
+                if exact_numeric_literal_valid(value, datatype) =>
             {
                 Some(value.to_string())
             }

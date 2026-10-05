@@ -108,3 +108,19 @@ fn public_calendar_parsers_reject_malformed_and_overflowing_inputs() {
         1
     );
 }
+
+#[test]
+fn civil_day_numbers_stay_contiguous_across_the_wide_arithmetic_boundary() {
+    let date = |y: i64, m: u32, d: u32| {
+        let sign = if y < 0 { "-" } else { "" };
+        sparq_core::temporal::parse_civil_date(&format!("{sign}{:04}-{m:02}-{d:02}", y.unsigned_abs())).unwrap()
+    };
+    assert_eq!(date(1970, 1, 1), 0);
+    let edge = 1_i64 << 40;
+    for y in [1, 1969, 1999, 2000, 2023, 2024, edge - 3, edge - 2, edge - 1, edge, edge + 1, -(edge + 1), -edge, -(edge - 1), -(edge - 2), -401, -2] {
+        // The day count applies the proleptic leap rule to the signed year itself.
+        let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
+        assert_eq!(date(y + 1, 1, 1) - date(y, 1, 1), if leap { 366 } else { 365 }, "year {y}");
+        assert_eq!(date(y, 3, 1) - date(y, 2, 28), if leap { 2 } else { 1 }, "year {y}");
+    }
+}
