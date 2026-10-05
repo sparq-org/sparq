@@ -106,6 +106,13 @@ run that produced the result or candidate. So key work is bounded by work the
 `hndq_call_limit` budget already meters, and the patches add no unmetered
 amplification.
 
+## Mirror in the native RDF 1.2 path
+
+`crates/sparq-canon/src/rdf12.rs` (feature `rdf12-triple-terms`) re-implements this
+algorithm over oxrdf 0.3. It must give the same bytes as this module on input without
+triple terms, so it carries the same §1 and §2 tie-breaks, with matching keys. Its
+key also rewrites blank nodes nested inside triple terms. Change both together.
+
 ## Residual and tests
 
 Ties whose keys are also equal keep their input order. That happens when the
@@ -116,7 +123,9 @@ RDFC-1.0 conformance, and the W3C suite results are byte-identical.
 
 `crates/sparq-canon/tests/bnode_relabel_regression.rs` checks:
 - the §1 pair and all 24 relabelings of its four-node label pool;
-- the §2 b2/b3 swap and all 720 relabelings of its six-node label pool.
+- the §2 b2/b3 swap and all 720 relabelings of its six-node label pool;
+- with `rdf12-triple-terms`, that `canonicalize_rdf12` matches the standard path on
+  every relabeling of both datasets.
 
 The following stay green:
 - the W3C rdf-canon suite (`rdf_canon_suite.rs`)

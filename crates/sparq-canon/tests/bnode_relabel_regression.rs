@@ -146,3 +146,41 @@ fn equal_hndq_paths_all_label_permutations_agree() {
         }
     }
 }
+
+/// The native RDF 1.2 path (`canonicalize_rdf12`) must give the same bytes as the
+/// standard path on triple-term-free input, including every relabeling of both
+/// regression datasets, so it needs the same tie-breaks.
+#[cfg(feature = "rdf12-triple-terms")]
+#[test]
+fn rdf12_path_agrees_with_standard_path_on_tie_cases() {
+    use sparq_canon::canonicalize_rdf12;
+
+    fn permutations(n: usize) -> Vec<Vec<usize>> {
+        if n == 0 {
+            return vec![Vec::new()];
+        }
+        let mut out = Vec::new();
+        for p in permutations(n - 1) {
+            for at in 0..=p.len() {
+                let mut q = p.clone();
+                q.insert(at, n - 1);
+                out.push(q);
+            }
+        }
+        out
+    }
+
+    for (text, labels) in [(ORIGINAL, &LABELS[..]), (EXTENDED, &EXTENDED_LABELS[..])] {
+        let reference = canonicalize_nquads(text).unwrap();
+        for perm in permutations(labels.len()) {
+            let relabeled = relabel(text, labels, &perm);
+            let quads = parse_nquads(&relabeled).unwrap();
+            assert_eq!(
+                canonicalize_rdf12(&quads).unwrap(),
+                reference,
+                "rdf12 path disagrees with the standard path for relabeling {perm:?}:\n{relabeled}"
+            );
+            assert_eq!(canonicalize_quads(&quads).unwrap(), reference);
+        }
+    }
+}
