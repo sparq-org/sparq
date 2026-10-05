@@ -13088,11 +13088,12 @@ fn compile_expr(e: &Expression, b: &Bindings) -> CompiledExpr {
     }
 }
 
-/// Whether a compiled expression contains an arithmetic sub-expression (`+ - *`). [OPUS-4.8] sq-7d3dj.4.
+/// Whether a compiled expression contains an arithmetic sub-expression (`+ - * /`). Mirrors
+/// [`expr_has_arith`]. [OPUS-4.8] sq-7d3dj.4.
 fn compiled_expr_has_arith(e: &CompiledExpr) -> bool {
     use CompiledExpr::*;
     match e {
-        Add(..) | Subtract(..) | Multiply(..) => true,
+        Add(..) | Subtract(..) | Multiply(..) | Divide(..) => true,
         UnaryPlus(a) | UnaryMinus(a) => compiled_expr_has_arith(a),
         _ => false,
     }
@@ -13644,14 +13645,16 @@ fn sig_digits(s: &str) -> usize {
     }
 }
 
-/// `true` if the expression performs arithmetic (`+ - *` / unary sign), so a comparison
-/// over it must be evaluated EXACTLY rather than via f64 — the only case where f64 can
-/// produce a wrong ordering for integer/decimal data (value comparison is monotonic;
-/// arithmetic introduces flippable rounding error).
+/// `true` if the expression performs arithmetic (`+ - * /`, possibly under a unary sign), so a
+/// comparison over it must not use the untyped f64 fast path: integer/decimal arithmetic is
+/// decided exactly, and float/double arithmetic in its promoted tier by the typed evaluator
+/// (value comparison is monotonic; arithmetic introduces rounding the tier determines). The
+/// unary sign alone is exact in every tier, and numeric functions are not evaluated by the
+/// fast path at all.
 fn expr_has_arith(e: &Expression) -> bool {
     use Expression::*;
     match e {
-        Add(..) | Subtract(..) | Multiply(..) => true,
+        Add(..) | Subtract(..) | Multiply(..) | Divide(..) => true,
         UnaryPlus(a) | UnaryMinus(a) => expr_has_arith(a),
         _ => false,
     }

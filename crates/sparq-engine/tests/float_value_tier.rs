@@ -222,6 +222,50 @@ fn integer_and_decimal_operands_are_promoted_before_float_arithmetic() {
     );
 }
 
+// `"1.00000001"^^xsd:float` is 1.0f32; float division by 3 gives 0.33333334f32
+// (0.3333333432674408 as a double), not the double quotient 0.3333333333333333.
+const THIRD_F32: &str = "0.3333333432674408e0";
+const THIRD_F64: &str = "0.3333333333333333e0";
+
+#[test]
+fn float_division_rounds_in_the_float_tier() {
+    let f = format!("\"1.00000001\"^^<{XSD}float>");
+    let three = format!("\"3\"^^<{XSD}float>");
+    check_filter_and_bind(
+        &promo_graph(),
+        &[
+            (format!("{f} / 3 = {THIRD_F64}"), false),
+            (format!("{f} / 3 != {THIRD_F64}"), true),
+            (format!("{f} / 3 = {THIRD_F32}"), true),
+            (format!("{f} / 3 > {THIRD_F64}"), true),
+            (format!("{f} / 3 <= {THIRD_F64}"), false),
+            (format!("{THIRD_F64} < {f} / 3"), true),
+            // An integer dividend is promoted to float before the division.
+            (format!("1 / {three} = {THIRD_F64}"), false),
+            (format!("1 / {three} = {THIRD_F32}"), true),
+            // A unary sign over the quotient keeps the float value.
+            (format!("-({f} / 3) = -{THIRD_F64}"), false),
+            (format!("-({f} / 3) < -{THIRD_F64}"), true),
+        ],
+    );
+}
+
+#[test]
+fn stored_float_division_rounds_in_the_float_tier() {
+    let nt = format!("<http://ex/a> <http://ex/one> \"1.00000001\"^^<{XSD}float> .\n");
+    let g = Graph::load_str(&nt, "turtle").unwrap();
+    for (filter, want) in [
+        (format!("?v / 3 = {THIRD_F64}"), false),
+        (format!("?v / 3 = {THIRD_F32}"), true),
+        (format!("?v / 3 > {THIRD_F64}"), true),
+    ] {
+        let q = format!("ASK {{ ?s <http://ex/one> ?v FILTER({filter}) }}");
+        assert_eq!(ask(&g, &q), want, "{q}");
+        let q = format!("SELECT ?b WHERE {{ ?s <http://ex/one> ?v BIND(({filter}) AS ?b) }}");
+        assert_eq!(bool_of(&g, &q), want, "{q}");
+    }
+}
+
 #[test]
 fn stored_float_arithmetic_rounds_in_the_float_tier() {
     let g = promo_graph();
