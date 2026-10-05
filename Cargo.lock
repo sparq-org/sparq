@@ -5093,7 +5093,9 @@ name = "sparq-engine-serialize"
 version = "0.1.3"
 dependencies = [
  "oxrdf 0.3.3",
+ "oxttl 0.2.3",
  "proptest",
+ "rustc-hash 2.1.3",
  "serde_json",
  "sparq-core",
  "sparq-jsonld",

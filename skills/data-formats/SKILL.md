@@ -354,7 +354,8 @@ Lower-level entry points take `&[oxrdf::Triple]` (e.g. CONSTRUCT output) directl
 ordered `(prefix, iri)` pair list (e.g. a query's parsed `PREFIX` lines or a `[[prefix, iri], …]`
 array). The `graph_to_*_with` convenience wrappers (`graph_to_turtle_with`, `graph_to_trig_with`,
 `graph_to_jsonld_with`, and the pretty `*_with`) take that same map, so the whole-graph path can
-also serialise under an explicit prefix policy. Only prefixes actually used are emitted (the
+also serialise under an explicit prefix policy. When several prefixes match an IRI, the longest
+namespace wins (equal lengths: first label in map order). Only prefixes actually used are emitted (the
 Turtle/TriG header, or the JSON-LD compacted `@context`). Round-trip (parse → serialize → re-parse) is isomorphic
 for every form. **JSON-LD specifics:** `xsd:string`/`rdf:langString` stay implicit
 (`@value` + optional `@language`); every other datatype is preserved as `@type`; canonical
@@ -366,7 +367,9 @@ a list cell referenced more than once, carrying an extra predicate, cyclic, or n
 by `rdf:nil` — is left as ordinary `rdf:first`/`rdf:rest` triples, so the round-trip stays
 lossless either way (the empty list `()` stays an `rdf:nil` reference, never `@list`).
 
-**Comparative throughput** for the writer matrix is measured by `bench/serialize/run.sh`
+A same-box Turtle-only comparison against oxttl's `TurtleSerializer` (Oxigraph 0.5's writer)
+on a document-shaped graph is `cargo run --release -p sparq-engine-serialize --features
+serialize-rdf --example turtle_vs_oxttl` (#4898). **Comparative throughput** for the writer matrix is measured by `bench/serialize/run.sh`
 (registered `serialize-bench`, [FABLE-5] sq-hmd7l.14): sparq's buffered/streaming/pretty
 regimes in-process, plus a cross-engine pipeline panel vs serd/rapper/Jena riot/oxrdfio —
 every emitted document round-trip-gated (re-parse == source store) before its timing row

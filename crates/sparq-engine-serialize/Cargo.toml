@@ -31,7 +31,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 # inside sparq-engine (`#[cfg(feature = "serialize-rdf")] pub mod serialize;`). When off
 # (the default), the crate compiles EMPTY and pulls in ZERO dependencies (`sparq-jsonld`
 # is optional and only enters via this feature) — the byte-identical feature-off contract.
-serialize-rdf = ["dep:sparq-jsonld"]
+serialize-rdf = ["dep:sparq-jsonld", "dep:rustc-hash"]
 # Streaming Turtle / TriG serialisation (the `#[cfg(feature = "streaming-serialization")]`
 # sites in serialize.rs). IMPLIES `serialize-rdf` (it reuses the shared writer helpers),
 # exactly like the original sparq-engine feature.
@@ -46,6 +46,10 @@ oxrdf.workspace = true
 # crate; the writer re-exports it. OPTIONAL + pulled in ONLY by `serialize-rdf`, so an
 # empty (feature-off) build never compiles it — preserving the writer's dep-free contract.
 sparq-jsonld = { path = "../sparq-jsonld", version = "0.1.3", optional = true, default-features = false }
+# [OPUS-5.5] (#4898) Fx hashing for the id-level Turtle writer's per-id render caches.
+# OPTIONAL + pulled in ONLY by `serialize-rdf` (feature-off stays dependency-free); already
+# in the tree via sparq-core.
+rustc-hash = { workspace = true, optional = true }
 
 [dev-dependencies]
 # The round-trip / isomorphism tests parse the emitted document back to RDF, so they need
@@ -59,6 +63,10 @@ sparq-core = { path = "../sparq-core", version = "0.1.3", features = ["jsonld"] 
 serde_json = "1"
 # [GPT-5.6] (sq-wruhj) Property generators for writer/parser round-trip tests only.
 proptest = "1"
+# [OPUS-5.5] (#4898) The `turtle_vs_oxttl` example compares `graph_to_turtle` with oxttl's
+# TurtleSerializer (the writer behind Oxigraph 0.5's RdfSerializer). DEV-only; oxttl is
+# already in the tree via sparq-core's parser.
+oxttl.workspace = true
 
 # [FABLE-5] (sq-hmd7l.14) The bench/serialize/ comparative-harness runner. Gated on the
 # writer features it exercises, so the default (feature-off) build never compiles it —
@@ -67,3 +75,8 @@ proptest = "1"
 [[example]]
 name = "serialize_bench"
 required-features = ["serialize-rdf", "streaming-serialization"]
+
+# [OPUS-5.5] (#4898) Same-box Turtle writer comparison vs oxttl on a document-shaped graph.
+[[example]]
+name = "turtle_vs_oxttl"
+required-features = ["serialize-rdf"]
