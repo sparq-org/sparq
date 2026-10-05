@@ -49,8 +49,6 @@ let _neighbours = nearest_term_exact(&store, &graph, &some_term, 10);
   `&[f32]`; corrupt files rejected up front. `StreamingWriter` builds stores bigger than RAM in
   O(1) memory, byte-identical to the in-RAM builder. **Compiles on wasm32** (sq-98c): memmap2 is
   target-gated out; `open_from_bytes` (`.spqv` and `.spqg` alike) is the filesystem-less read path.
-  `.spqv` is canonical little-endian; big-endian readers validate it, then swap only the dense f32
-  region into aligned owned storage. `.spqv` writers and `.spqg` still reject big-endian hosts.
 - **Exact vs approximate search** — `nearest_exact` (answer-exact ground truth) and the
   persistent on-disk `DiskAnnIndex` in the default build; the in-RAM HNSW `VectorIndex`
   behind the **opt-in `approx-ann`** feature, the **only** third-party-ANN dependency
