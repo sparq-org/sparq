@@ -1,6 +1,6 @@
 ---
 name: shacl-validation
-description: "Validate RDF data against SHACL shapes with the sparq engine: SHACL Core constraints (class, datatype incl. the SHACL-1.2 disjunctive list form, cardinality, ranges, paths, logical, node/property, qualified, closed incl. sh:ByTypes, in/hasValue, the SHACL-1.2 list constraints sh:memberShape / sh:uniqueMembers / sh:min+maxListLength / sh:uniqueValuesFor, and the SHACL-1.2 value constraints sh:subsetOf / sh:someValue / sh:singleLine / sh:rootClass with path-valued sh:equals/disjoint/lessThan comparands and severity-threshold sh:conforms), SHACL-SPARQL sh:sparql constraints (§5.2), and custom SPARQL-based constraint components (sh:ConstraintComponent, §6) — then read the conformance/violations validation report as N-Triples, deterministic JSON, W3C report-vocabulary Turtle, or human text. Also runs opt-in SHACL Advanced Features (SHACL-AF) rules — sh:rule (sh:TripleRule + sh:SPARQLRule) — to INFER triples (feature `shacl-af`), and assembles the shapes graph itself — sh:shapesGraph discovery + transitive owl:imports closure via a caller-supplied loader (feature `imports`). Use when an agent needs to check whether a sparq_core::Graph conforms to shapes, run shape validation, produce a SHACL validation report, assemble a shapes graph from sh:shapesGraph/owl:imports references, or apply SHACL rules to infer/expand a graph in Rust."
+description: "Validate RDF data against SHACL shapes with the sparq engine: SHACL Core constraints (class, datatype incl. the SHACL-1.2 disjunctive list form, cardinality, ranges, paths, logical, node/property, qualified, closed incl. sh:ByTypes, in/hasValue, the SHACL-1.2 list constraints sh:memberShape / sh:uniqueMembers / sh:min+maxListLength / sh:uniqueValuesFor, and the SHACL-1.2 value constraints sh:subsetOf / sh:someValue / sh:singleLine / sh:rootClass with path-valued sh:equals/disjoint/lessThan comparands and severity-threshold sh:conforms), SHACL-SPARQL sh:sparql constraints (§5.2), and custom SPARQL-based constraint components (sh:ConstraintComponent, §6) — then read the conformance/violations validation report as N-Triples, deterministic JSON, W3C report-vocabulary Turtle, or human text. Also runs opt-in SHACL Advanced Features (SHACL-AF) rules — sh:rule (sh:TripleRule + sh:SPARQLRule) — to INFER triples (feature `shacl-af`), and assembles the shapes graph itself — sh:shapesGraph discovery + transitive owl:imports closure via a caller-supplied loader (feature `imports`). Use when an agent needs to check whether a sparq_core::Graph conforms to shapes, run shape validation, produce a SHACL validation report, assemble a shapes graph from sh:shapesGraph/owl:imports references, or apply SHACL rules to infer/expand a graph (or a dataset over explicit named-graph scopes) in Rust."
 ---
 
 # sparq-shacl-validation
@@ -555,8 +555,41 @@ node-shape terms; `v` violates when it does NOT conform to one of them. A consta
 IRI expression is the `sh:node` special case; an expression result naming no parsed
 shape is skipped (lenient).
 
+**Explicit graph scopes + dataset-preserving expansion (gh-6614, a capability
+addition — not a conformance fix).** `apply_rules` / `expand` see the DEFAULT graph
+only and `expand` drops named graphs (unchanged). For a dataset (`Graph` with named
+graphs, e.g. from `Graph::load_dataset(.., "nquads")`) choose the input scope and the
+derived-triple destination explicitly:
+
+```rust
+use sparq_shacl::{apply_rules_in_scope, expand_dataset, Destination, GraphScope};
+let g = |s: &str| oxrdf::Term::NamedNode(oxrdf::NamedNode::new(s).unwrap());
+// Scope: GraphScope::Default | Named(name) | Union { default: bool, named: Vec<Term> }
+let scope = GraphScope::Union { default: false, named: vec![g("urn:ex:g1"), g("urn:ex:g2")] };
+let inf = apply_rules_in_scope(&data, &shapes, &scope);           // -> Inference
+let dest = oxrdf::NamedOrBlankNode::NamedNode(oxrdf::NamedNode::new("urn:ex:derived").unwrap());
+let out = expand_dataset(&data, &shapes, &scope, &Destination::Named(dest)); // IRI or blank node only
+// out.dataset: Graph (ALL asserted graphs preserved, derived triples in the destination)
+// out.inference: Inference (triples / iterations / capped — diagnostics are not hidden)
+```
+
+Semantics: the selected graphs are merged into the working default graph that
+targets, paths, `sh:condition`, node expressions and SPARQL rules evaluate against
+(cross-graph joins work); the selected NAMED graphs are also the only ones a
+`sh:SPARQLRule` body reaches via `GRAPH <g>` / `GRAPH ?g` — an unselected graph is
+indistinguishable from an absent one, and `FROM` / `FROM NAMED` cannot widen that.
+Nothing is unioned implicitly (`Union { default: true, .. }` is the only way to add
+the default graph to a union); an absent graph name is the empty graph. Inferred
+triples feed later passes through the working scope regardless of `Destination`.
+Materialization dedups against what the destination already asserts (an identical
+triple in another graph is kept there); a `Destination::Named` graph the dataset
+lacks is appended. The input is never mutated. `GraphScope::Default` ≡ `apply_rules`.
+
 API: `apply_rules(data, shapes)`, `apply_rules_with_model(data, shapes, &model)`
 (amortise shape parsing), `expand(data, shapes) -> Graph`,
+`apply_rules_in_scope(data, shapes, &GraphScope)` /
+`apply_rules_in_scope_with_model(data, shapes, &model, &GraphScope)`,
+`expand_dataset(data, shapes, &GraphScope, &Destination) -> DatasetExpansion`,
 `validate_with_domain(data, shapes, FactDomain)` and
 `validate_with_domain_and_model(data, shapes, &model, FactDomain)` (choose asserted
 facts or the data-plus-inferred closure for validation), the node-expression
@@ -598,7 +631,8 @@ SHACL-spec-correct conforms/violations).
 - **SHACL-AF rules (`sh:rule`) are OPT-IN behind the `shacl-af` cargo feature.**
   With the feature off, the base validation path carries zero rule code/parse cost
   and the `apply_rules` / `apply_rules_with_model` / `expand` / `Inference` /
-  `FactDomain` / `validate_with_domain*` symbols are absent. SHACL-AF rules are an
+  `apply_rules_in_scope*` / `expand_dataset` / `GraphScope` / `Destination` /
+  `DatasetExpansion` / `FactDomain` / `validate_with_domain*` symbols are absent. SHACL-AF rules are an
   INFERENCE step (they produce triples), not part of the existing `validate(..)`
   path. Use `FactDomain::AssertedPlusInferred` when constraints should see the rule
   closure without expanding manually.
