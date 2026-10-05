@@ -131,3 +131,80 @@ test("entailed facts retain one exact, explainable N-Triples line per added trip
   ]);
   assert.deepEqual(inferredFactsMatchingKeys(closure, entailed.keys), entailed.facts);
 });
+
+test("an asserted triple term matches the reasoner's closure spelling (escaped tab)", () => {
+  // The shared JS writer emits a raw TAB inside a literal; the Rust closure writer emits `\t`.
+  // Both spell the SAME asserted fact, so it must never be reported as inferred.
+  const a: SparqlTerm = { type: "uri", value: "http://ex/a" };
+  const p: SparqlTerm = { type: "uri", value: "http://ex/p" };
+  const r: SparqlTerm = { type: "uri", value: "http://ex/r" };
+  const tabbed: SparqlTerm = { type: "literal", value: "x\ty" };
+  const quoted: SparqlTerm = {
+    type: "triple",
+    value: { subject: a, predicate: p, object: tabbed },
+  };
+  const snapshot = `${termToNT(r)} ${termToNT(p)} ${termToNT(quoted)} .`;
+  assert.ok(snapshot.includes("x\ty"), "JS writer keeps the raw tab");
+  const closure = '<http://ex/r> <http://ex/p> <<( <http://ex/a> <http://ex/p> "x\\ty" )>> .';
+
+  const base = tripleKeysOfNTriples(snapshot);
+  const entailed = entailedFactsFromClosure(closure, base);
+  assert.equal(entailed.keys.size, 0, "asserted triple-term fact is not inferred");
+  assert.deepEqual(entailed.facts, []);
+  // The SPARQL binding key must match the closure key too.
+  assert.equal(tripleKeyOfBindings(r, p, quoted), keyOfLine(closure));
+});
+
+test("triple-term keys are built from decoded components, not spelling", () => {
+  const plain = keyOfLine('<http://ex/r> <http://ex/p> <<( <http://ex/a> <http://ex/p> "v" )>> .');
+  // Explicit ^^xsd:string, extra whitespace and a \u escape spell the same triple term.
+  assert.equal(
+    keyOfLine(
+      '<http://ex/r> <http://ex/p> <<(  <http://ex/a>   <http://ex/p> "\\u0076"^^<http://www.w3.org/2001/XMLSchema#string>  )>> .',
+    ),
+    plain,
+  );
+  // Nested triple terms canonicalise recursively.
+  const nestedA = keyOfLine(
+    '<http://ex/r> <http://ex/p> <<( <http://ex/a> <http://ex/p> <<( <http://ex/a> <http://ex/p> "x\\ty" )>> )>> .',
+  );
+  const a: SparqlTerm = { type: "uri", value: "http://ex/a" };
+  const p: SparqlTerm = { type: "uri", value: "http://ex/p" };
+  const inner: SparqlTerm = {
+    type: "triple",
+    value: {
+      subject: a,
+      predicate: p,
+      object: { type: "literal", value: "x\ty" },
+    },
+  };
+  const outer: SparqlTerm = {
+    type: "triple",
+    value: { subject: a, predicate: p, object: inner },
+  };
+  assert.equal(tripleKeyOfBindings({ type: "uri", value: "http://ex/r" }, p, outer), nestedA);
+  // Different components still differ.
+  assert.notEqual(
+    keyOfLine('<http://ex/r> <http://ex/p> <<( <http://ex/a> <http://ex/p> "w" )>> .'),
+    plain,
+  );
+  assert.notEqual(
+    keyOfLine('<http://ex/r> <http://ex/p> <<( <http://ex/a> <http://ex/p> "v"@en )>> .'),
+    plain,
+  );
+});
+
+test("literal base direction is a key component on both paths", () => {
+  const ltr = keyOfLine('<http://ex/a> <http://ex/p> "hi"@en--ltr .');
+  assert.notEqual(ltr, keyOfLine('<http://ex/a> <http://ex/p> "hi"@en .'));
+  assert.notEqual(ltr, keyOfLine('<http://ex/a> <http://ex/p> "hi"@en--rtl .'));
+  const dirLit = {
+    type: "literal",
+    value: "hi",
+    "xml:lang": "en",
+    "its:dir": "ltr",
+  } as SparqlTerm;
+  const a: SparqlTerm = { type: "uri", value: "http://ex/a" };
+  const p: SparqlTerm = { type: "uri", value: "http://ex/p" };
+  assert.equal(tripleKeyOfBindings(a, p, dirLit), ltr);
+});

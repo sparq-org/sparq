@@ -9,9 +9,8 @@
 // writers disagree on an escape or on `^^xsd:string` suppression — so every source is
 // reduced to ONE canonical, decoded triple key here, and the entailed set is a `Set` of
 // those keys. Membership is therefore exact: an affordance can never appear on a fact the
-// closure does not actually add (false positives are structurally impossible; a term shape
-// this file cannot canonicalise — RDF-star triple terms — falls back to its verbatim `nt`
-// on both sides, which only ever errs towards NO affordance).
+// closure does not actually add (false positives are structurally impossible). RDF 1.2
+// triple terms are keyed recursively from their decoded components, never from their text.
 
 import { parseNTriples, termToNTriples, type RdfTerm, type SparqlTerm } from "@sparq/client";
 
@@ -108,6 +107,31 @@ export function unescapeNT(s: string): string {
   return out;
 }
 
+/**
+ * Key of a decoded literal: lexical form, then either `@lang[--dir]` (lang lower-cased, the
+ * RDF 1.2 base direction kept as its own component) or the datatype (`xsd:string` implicit).
+ */
+function literalKey(
+  value: string,
+  lang: string | undefined,
+  dir: string | undefined,
+  datatype: string | undefined,
+): string {
+  if (lang) {
+    // An N-Triples `@en--ltr` tag carries the direction inline; split it off.
+    const cut = lang.indexOf("--");
+    const tag = cut < 0 ? lang : lang.slice(0, cut);
+    const direction = dir ?? (cut < 0 ? undefined : lang.slice(cut + 2));
+    return `L${SEP}${value}${SEP}@${tag.toLowerCase()}${direction ? `--${direction}` : ""}`;
+  }
+  return `L${SEP}${value}${SEP}${datatype ?? XSD_STRING}`;
+}
+
+/** Key of an RDF 1.2 triple term from its three component keys (JSON keeps it injective). */
+function tripleTermKey(s: string, p: string, o: string): string {
+  return `T${SEP}${JSON.stringify([s, p, o])}`;
+}
+
 /** Canonical key of a parsed (verbatim-escaped) `RdfTerm` from {@link parseNTriples}. */
 export function keyOfRdfTerm(t: RdfTerm): string {
   switch (t.kind) {
@@ -115,15 +139,12 @@ export function keyOfRdfTerm(t: RdfTerm): string {
       return `I${SEP}${unescapeNT(t.value)}`;
     case "bnode":
       return `B${SEP}${t.label}`;
-    case "literal": {
-      const value = unescapeNT(t.value);
-      if (t.lang) return `L${SEP}${value}${SEP}@${t.lang.toLowerCase()}`;
-      return `L${SEP}${value}${SEP}${t.datatype ?? XSD_STRING}`;
-    }
+    case "literal":
+      return literalKey(unescapeNT(t.value), t.lang, undefined, t.datatype);
     case "triple":
-      // RDF-star triple term: no decoded canonical form here — verbatim `nt` on both sides
-      // (errs only towards "not marked inferred", never a false affordance).
-      return `T${SEP}${t.nt}`;
+      // RDF 1.2 triple term: keyed recursively from its decoded components, never from its
+      // serialised `nt` (writers disagree on escapes such as a raw TAB vs `\t`).
+      return tripleTermKey(keyOfRdfTerm(t.s), keyOfRdfTerm(t.p), keyOfRdfTerm(t.o));
   }
 }
 
@@ -131,11 +152,17 @@ export function keyOfRdfTerm(t: RdfTerm): string {
 export function keyOfSparqlTerm(t: SparqlTerm): string {
   if (t.type === "uri") return `I${SEP}${t.value}`;
   if (t.type === "bnode") return `B${SEP}${t.value}`;
-  // RDF 1.2 triple term: its N-Triples form, mirroring keyOfRdfTerm's verbatim `nt` fallback.
-  if (t.type === "triple") return `T${SEP}${termToNTriples(t)}`;
-  const lang = t["xml:lang"];
-  if (lang) return `L${SEP}${t.value}${SEP}@${lang.toLowerCase()}`;
-  return `L${SEP}${t.value}${SEP}${t.datatype ?? XSD_STRING}`;
+  if (t.type === "triple") {
+    const { subject, predicate, object } = t.value;
+    return tripleTermKey(
+      keyOfSparqlTerm(subject),
+      keyOfSparqlTerm(predicate),
+      keyOfSparqlTerm(object),
+    );
+  }
+  // SPARQL 1.2 results carry the base direction as a separate `its:dir` field.
+  const dir = (t as { "its:dir"?: string })["its:dir"];
+  return literalKey(t.value, t["xml:lang"], dir, t.datatype);
 }
 
 /** Canonical key of a whole triple from three SPARQL-JSON terms. */
