@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [FABLE-5] Miri-shard verdict classifier (formal-lanes fix). 🤖 SPARQ agent.
+# Miri-shard verdict classifier (formal-lanes fix). 🤖 SPARQ agent.
 #
 # WHY: the nightly `miri.yml` UB lane runs `cargo miri nextest run` sharded over
 # sparq-core. Its purpose is to DETECT UNDEFINED BEHAVIOUR (aliasing / provenance /
@@ -229,7 +229,7 @@ def _self_test() -> int:
             fh.write(json.dumps({"type": "test", "event": "ok", "name": "a::x"}) + "\n")
         ck(main(["--shard", "Z", "--events", good]) == 0, "a real pass via main => exit 0")
 
-    # 7. [GPT-5.6] The workflow must keep every partition label and command in sync. This is the
+    # 7. The workflow must keep every partition label and command in sync. This is the
     # regression witness for sq-hytab: reverting the 24-way split to the 12-way layout that
     # exhausted the job backstop makes this check fail before the nightly lane is trusted.
     workflow = (Path(__file__).resolve().parents[1] / ".github/workflows/miri.yml").read_text(

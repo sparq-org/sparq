@@ -4,20 +4,20 @@
 # feature-matrix `opt-in-features` strategy by scripts/assemble-feature-matrix.py
 # (the `setup` job emits the combined matrix as JSON consumed via fromJSON). Adding a
 # leg for THIS crate edits no OTHER crate's fragment, so concurrent opt-in-feature PRs for
-# DIFFERENT crates never textually conflict (bead sq-ibrze). [OPUS-4.8]
-# SCOPE ([SONNET-4.6] issue #2384): adding/removing/renaming a leg changes the emitted
+# DIFFERENT crates never textually conflict (bead sq-ibrze).
+# SCOPE (issue #2384): adding/removing/renaming a leg changes the emitted
 # leg-name set, and THAT is a TWO-FILE change — this fragment AND
 # scripts/tests/feature-matrix-legnames.golden.txt. Every other edit here (features,
 # test, tier, tier-reason, comments) leaves the name set alone and is a SINGLE-file
 # change. See README.md in this directory.
 #
-# CONTRACT (gate-critical): each leg's emitted check-run NAME is `opt-in <name>`,
-# discovered as a REQUIRED check by the ci-summary `gate` aggregator BY NAME. Keep
-# `name` free of the whole words "advisory"/"informational" or the leg stops gating.
+# CONTRACT: each leg's emitted check-run NAME is `opt-in <name>` (pinned by the golden
+# leg-name file). Keep `name` free of the whole words "advisory"/"informational", which
+# mark a check as non-blocking.
 # Fields: name (required -> check-run name), crate (required), features (required,
 # non-empty comma list), test (bool — run `cargo test` for the leg).
 
-# [OPUS-4.8] sq-b4fns (gh-906): the DURABLE, REPLAYABLE change-data-capture stream
+# sq-b4fns (gh-906): the DURABLE, REPLAYABLE change-data-capture stream
 # (Neptune-Streams shape). The whole `change_stream` module + its `change_stream::tests`
 # unit suite (the load-bearing `replay_from_offset_after_restart_is_exact`,
 # segment-roll/recover, torn-tail recovery, and the fail-closed corruption/discontinuity
@@ -40,7 +40,7 @@
   features: "change-stream"
   test: true
 
-# [OPUS-5] sq-l6zks (gh-3216): the EXTERNAL-BROKER sink seam over that durable log — the
+# sq-l6zks (gh-3216): the EXTERNAL-BROKER sink seam over that durable log — the
 # `ChangeSink` trait, the JSON broker-message encoding, the resumable `BrokerRelay` pump (durable
 # delivered-through watermark) and the in-tree std-only `NatsSink`. The whole `change_sink` module
 # and its `change_sink::tests` unit suite are behind the default-OFF `change-sink` feature, so the

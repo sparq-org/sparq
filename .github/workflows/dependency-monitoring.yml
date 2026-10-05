@@ -6,7 +6,7 @@
 # Distinct from supply-chain.yml's `audit` job: that gates PRs/pushes; this is a
 # scheduled watchdog that turns findings into an actionable, deduplicated issue.
 #
-# Third-party actions pinned by full commit SHA. [OPUS-4.8]
+# Third-party actions pinned by full commit SHA.
 name: dependency-monitoring
 
 on:
@@ -32,7 +32,7 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Rust (preinstalled stable)
-        # [FABLE-5] CI-economy (2026-07-18 directive): the ubuntu runner image
+        # CI-economy (2026-07-18 directive): the ubuntu runner image
         # ships a rustup stable toolchain; the SHA-pinned action's `rustup
         # toolchain install stable` re-downloads the whole toolchain whenever
         # the image lags the newest release. Use the preinstalled one —

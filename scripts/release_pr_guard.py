@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Shared, fail-closed identification of the release-plz **Release PR**.
 
-[OPUS-5] 🤖 SPARQ agent. Issue #1135 (maintainer, 2026-07-26): *"Before I do this; can I
+🤖 SPARQ agent. Issue #1135 (maintainer, 2026-07-26): *"Before I do this; can I
 make sure that there are protections in place to prevent publishing too regularly, I don't
 want to spam the registry."*
 

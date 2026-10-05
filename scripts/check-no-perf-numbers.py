@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [OPUS-4.8] No-hard-coded-performance-numbers check for markdown (bead sq-5fd1).
+# No-hard-coded-performance-numbers check for markdown (bead sq-5fd1).
 #
 # AGENTS.md house rule: benchmark figures MUST NOT be baked into markdown — they
 # drift, and the single source of truth is the generated perf dashboard + the bench
@@ -99,12 +99,12 @@ SCAN_GLOBS = ["*.md", "*.typ"]
 # result-shaped numerics only, leave free-typed setup counts — dataset sizes / dimensions /
 # k — alone, for author ergonomics). It catches only the COARSE perf-number class; subtle
 # semantic overclaims remain Stage-5 human review. `str.startswith` accepts a tuple, so a
-# path matches if it lives under ANY listed prefix. [OPUS-4.8] sq-rvgr2.5 added site/specs/.
+# path matches if it lives under ANY listed prefix. sq-rvgr2.5 added site/specs/.
 TYPST_SCAN_PREFIXES = ("site/papers/", "site/specs/")
 
 
 def is_typst_paper(path: str) -> bool:
-    # [OPUS-4.8] sq-rvgr2.5: "paper" is historical — this is any scanned `.typ`, i.e. one
+    # sq-rvgr2.5: "paper" is historical — this is any scanned `.typ`, i.e. one
     # under the paper-factory OR the /specs spec-factory tree (TYPST_SCAN_PREFIXES).
     return path.endswith(".typ") and path.startswith(TYPST_SCAN_PREFIXES)
 
@@ -127,7 +127,7 @@ def is_exempt_path(path: str) -> bool:
 
 
 class FileReadError(Exception):
-    """[OPUS-4.8] Raised when a scanned file cannot be read/decoded.
+    """Raised when a scanned file cannot be read/decoded.
 
     Surfaced rather than swallowed: silently skipping an unreadable file would hide
     any perf-number violations inside it and make --enforce non-deterministic.
@@ -141,7 +141,7 @@ def scan_file(path: str) -> list[tuple[int, str, str]]:
         with open(path, encoding="utf-8") as fh:
             for lineno, raw in enumerate(fh, 1):
                 line = raw.rstrip("\n")
-                # [OPUS-4.8] Strip leading blockquote markers (`>` + spaces, possibly
+                # Strip leading blockquote markers (`>` + spaces, possibly
                 # nested e.g. `> > `) BEFORE the fence test, so blockquoted code fences
                 # (`> ```lang`, as in docs/upstream-proposals.md) are recognised — else
                 # perf-number lines inside them would be mis-scanned as prose.
@@ -161,14 +161,14 @@ def scan_file(path: str) -> list[tuple[int, str, str]]:
                         findings.append((lineno, label, m.group(0).strip()))
                         break  # one finding per line is enough to flag it
     except (OSError, UnicodeDecodeError) as e:
-        # [OPUS-4.8] Don't swallow the error: surface it so the caller can warn and,
+        # Don't swallow the error: surface it so the caller can warn and,
         # in --enforce mode, fail (a skipped file could hide real violations).
         raise FileReadError(f"{path}: could not read: {e}") from e
     return findings
 
 
 # --- Typst (.typ) paper scan ------------------------------------------------------
-# [OPUS-4.8] bead sq-mkza. The paper-factory rule is: RESULT numbers flow through the
+# bead sq-mkza. The paper-factory rule is: RESULT numbers flow through the
 # Typst data accessor (`paper-evidence.json` → `#headline(key)` / `#ev(key)` /
 # `#provenance(key)`), so the PDF and the in-site HTML cannot disagree and a number
 # auto-updates with the evidence. A result-shaped figure typed DIRECTLY into prose
@@ -260,7 +260,7 @@ def scan_typst_file(path: str) -> list[tuple[int, str, str]]:
 
 
 # --- paper-evidence.json prose scan ----------------------------------------------
-# [OPUS-4.8] bead sq-4hga. The paper-factory evidence file carries human PROSE in its `note`
+# bead sq-4hga. The paper-factory evidence file carries human PROSE in its `note`
 # (and the top-level `_comment`) free-text fields, which surface inline in a published paper
 # via the `provenance()` helper. A result-shaped perf number typed into a record `note` (e.g.
 # "…runs at 12× faster on WatDiv…") would bypass the canonical accessor discipline exactly
@@ -280,7 +280,7 @@ EVIDENCE_PATH = "site/src/data/paper-evidence.json"
 # Only these string fields are PROSE; every other string (and all numbers) is structured data.
 EVIDENCE_PROSE_FIELDS = frozenset({"note", "_comment"})
 
-# [OPUS-5] sparq-org/sparq#4145. PUBLISHED prose that does not live in a `*.md`/`*.typ` file.
+# sparq-org/sparq#4145. PUBLISHED prose that does not live in a `*.md`/`*.typ` file.
 # `orchestration/start-here.toml` is the curated source of the maintainer front door (#1135):
 # every line of `ask`/`what`/`process`/`flight` in it is rendered VERBATIM into an issue body by
 # scripts/render-start-here.py, so it is exactly the surface this gate exists for — and it sat
@@ -355,7 +355,7 @@ def main() -> int:
         help="exit non-zero if any finding remains (use once a scope is clean to ratchet it HARD)",
     )
     ap.add_argument(
-        # [OPUS-5] #4145: print the RESOLVED default scan list and exit. Emitted from the same
+        # #4145: print the RESOLVED default scan list and exit. Emitted from the same
         # `files` variable the scan loop below consumes, so a coverage test cannot pass against
         # a gate that has stopped scanning the file (which is the whole point of asking it).
         "--list-scanned", action="store_true",
@@ -370,13 +370,13 @@ def main() -> int:
     args = ap.parse_args()
 
     files = args.paths or [p for p in tracked_sources() if not is_exempt_path(p)]
-    # [OPUS-4.8] bead sq-4hga: in default (whole-tree) mode, also scan the paper-evidence
+    # bead sq-4hga: in default (whole-tree) mode, also scan the paper-evidence
     # prose fields. Added explicitly because the file is *.json (not in SCAN_GLOBS) and its
     # scan is field-aware, not line-shaped. An explicit-paths invocation that names the file
     # gets the same field-aware dispatch below.
     if not args.paths and os.path.exists(EVIDENCE_PATH) and EVIDENCE_PATH not in files:
         files = [*files, EVIDENCE_PATH]
-    # [OPUS-5] #4145: published prose outside SCAN_GLOBS — see EXTRA_SCAN_PATHS.
+    # #4145: published prose outside SCAN_GLOBS — see EXTRA_SCAN_PATHS.
     if not args.paths:
         files = [*files, *(p for p in EXTRA_SCAN_PATHS
                            if os.path.exists(p) and p not in files)]
@@ -389,13 +389,13 @@ def main() -> int:
         return 0
 
     total = 0
-    read_errors = 0  # [OPUS-4.8] unreadable files — never silently skipped
+    read_errors = 0  # unreadable files — never silently skipped
     summary_lines: list[str] = []
     for path in sorted(files):
         if not args.paths and is_exempt_path(path):
             continue
         try:
-            # [OPUS-4.8] sq-mkza: `.typ` paper sources use the accessor-aware,
+            # sq-mkza: `.typ` paper sources use the accessor-aware,
             # result-shaped-only scan; sq-4hga: the evidence JSON uses the field-aware
             # prose scan; everything else uses the markdown scan.
             if path.endswith("paper-evidence.json"):
@@ -405,7 +405,7 @@ def main() -> int:
             else:
                 file_findings = scan_file(path)
         except FileReadError as e:
-            # [OPUS-4.8] Warn on stderr always; in --enforce/non-advisory mode this
+            # Warn on stderr always; in --enforce/non-advisory mode this
             # also counts as a failure below so a hidden file can't pass silently.
             read_errors += 1
             print(f"::warning::{e}", file=sys.stderr)
@@ -437,7 +437,7 @@ def main() -> int:
 
     print(f"\nno-perf-numbers: {total} finding(s) across {len(files)} scanned file(s)"
           f"{f'; {read_errors} unreadable file(s)' if read_errors else ''}.")
-    # [OPUS-4.8] --advisory always exits 0 (reports only). In --enforce/non-advisory
+    # --advisory always exits 0 (reports only). In --enforce/non-advisory
     # mode, BOTH perf-number findings AND unreadable files are failures — a file we
     # couldn't scan might be hiding a violation, so it must not pass silently.
     if args.enforce and not args.advisory and (total or read_errors):

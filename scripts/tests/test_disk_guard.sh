@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
-# [OPUS-4.8] Hermetic self-tests for scripts/disk-guard.sh (bead sq-4vo9m —
+# Hermetic self-tests for scripts/disk-guard.sh (bead sq-4vo9m —
 # the per-tick disk guard: df-check + merged-worktree prune + gated main-target
-# reclaim). Authored by Opus 4.8 (Fable unavailable; flag for re-review when Fable
-# returns).
+# reclaim).
 #
 # WHY: the guard's correctness rests on a few load-bearing invariants that a future
 # refactor must not silently break, so we pin them with a hermetic harness (the

@@ -1,6 +1,6 @@
 # Post-publication verification of the isolated-trusted-builder provenance (issue #4571).
 #
-# [OPUS-5] GX-11 residual / SL-B3-b. `release.yml#provenance` and `release.yml#provenance-artifacts`
+# GX-11 residual / SL-B3-b. `release.yml#provenance` and `release.yml#provenance-artifacts`
 # route the released artifacts' provenance through `slsa-github-generator`'s trusted reusable
 # builder, and `scripts/tests/test_release_slsa_l3_provenance.py` pins that WIRING on every PR.
 # Wiring is not evidence: release.yml is tag/dispatch-triggered, so until a release is actually
@@ -30,8 +30,7 @@
 # the caller (or reverting to trigger-only) reds on every PR.
 #
 # GATE INTERACTION: NONE. There is no `pull_request` / `merge_group` trigger, so this workflow
-# never registers a check-run on a PR and the required `ci-summary / gate` aggregator never sees
-# it. It therefore needs no `.github/advisory-registry.json` entry (that registry governs
+# never registers a check-run on a PR. It therefore needs no `.github/advisory-registry.json` entry (that registry governs
 # PR-visible check names only).
 #
 # SCOPE NOTE: a Release published by hand (not by release.yml) carries no isolated-builder bundle

@@ -1,74 +1,54 @@
-# [OPUS-4.8] sq-pntvh.8 — M4 feature-OFF perf-neutrality CI proof gate.
+# vectorized-feature-off — proves the `vectorized` feature is compile-time ABSENT from the
+# default build and that the default (feature-OFF) wasm bundle is byte-deterministic.
 #
-# [FABLE-5] sq-6vshe.20 (design: research/ci-runner-consolidation-2026-07.md §4.5):
-# CONSOLIDATED from 4 jobs to 2. The seconds-cheap `changes` + `feature-resolution` +
-# `cfg-audit` jobs fold into ONE fail-fast gating job (`quick-gates`) with the path
-# filter as a leading in-job step and the former legs behind step-`if:` guards on its
-# `rust_changed` output. The heavy `artifact-exact-equality` job stays STANDALONE
-# (two full release-wasm builds + Swatinem cache) but drops `needs: changes` in
-# favour of its OWN leading in-job path-filter step — the long pole starts a few
-# seconds earlier on Rust PRs and never waits behind the short job. Cost accepted:
-# on doc-only PRs it now claims a runner for the ~7s filter step where it was
-# previously job-`if:`-skipped for free (repo traffic is Rust-dominated; see §5 of
-# the design record). Gate-contract safety: both job names stay free of
-# advisory/informational tokens, so the required ci-summary `gate` reds if either
-# fails; a doc-only PR's skipped STEPS leave the jobs concluding SUCCESS —
-# non-failing to the aggregator exactly as the formerly skipped JOBS were.
+#   Leg 1 (feature resolution): cargo metadata check that `vectorized` is absent from the
+#     resolved default workspace feature set and the wasm profile (no build).
+#   Leg 2 (artifact-exact-equality): base-tree vs head-tree feature-OFF wasm, byte-for-byte
+#     (see the job comment below).
+#   Leg 3 (cfg-audit): every `vectorized` module registration and evaluator call site in
+#     crates/sparq-engine/src/lib.rs and exec.rs sits under `#[cfg(feature = "vectorized")]`.
 #
-# Three-leg gate proving the `vectorized` feature-OFF build is compile-time absent
-# and artifact-deterministic:
+# This does NOT prove runtime performance neutrality.
 #
-#   Leg 1 (feature-resolution guard): cargo metadata check that `vectorized` is absent
-#     from the resolved default workspace feature set and the wasm profile — catches the
-#     feature-unification trap before any build.
-#
-#   Leg 2 (artifact-exact-equality, DYNAMIC byte-identity — [OPUS-4.8] sq-v3nel 2026-07-07):
-#     builds the feature-OFF wasm bundle TWICE in one run — base (target-branch/merge-base)
-#     tree vs head (PR/merged) tree — and compares BYTE-FOR-BYTE. No static pin, so NO
-#     merge-order dependence (replaces the retired feature_off_exact exact-byte pin, which
-#     was order-dependent and could not converge under a busy queue). Identical bytes => pass;
-#     differing bytes => pass only if DECLARED. DECLARATION (mechanism V2, sq-v3nel-v2): a PR
-#     adds its OWN file bench/feature-off-declarations/<PR-number>.json — the gate is satisfied
-#     by a set difference on that directory (head has a file base does not), so declaring PRs
-#     never textually CONFLICT (the old shared scalar change_token line did — #1720/#1718 went
-#     DIRTY behind #1726). The legacy scalar change_token is retired but still accepted during a
-#     transition window. The SIZE of an accepted change is governed SEPARATELY, unchanged, by
-#     the wasm_bundle_bytes floor ratchet (±2%) in bench.yml.
-#
-#   Leg 3 (cfg-audit): script asserting every `vectorized` module registration and
-#     evaluator call site in crates/sparq-engine/src/lib.rs and exec.rs is under
-#     `#[cfg(feature = "vectorized")]`.
-#
-# Honest scope:
-#   - Legs 1 and 3 prove COMPILE-TIME ABSENCE of the vectorized feature in the default build.
-#   - Leg 2 proves ARTIFACT BYTE-DETERMINISM (head feature-OFF bundle identical to the base
-#     tree's, or an explicitly declared change). Any accidental vectorized/default-path code
-#     would change the bundle bytes vs the base tree and, undeclared, fails the leg.
-#   - This does NOT prove runtime performance neutrality — that is EC2-gated.
-#
-# Gate integration:
-#   - Job names do NOT contain "advisory" or "informational", so the ci-summary aggregator
-#     (ci-summary.yml) treats them as required checks automatically.
-#   - The ci-summary aggregator picks up these jobs without any edit to ci-summary.yml.
+# WHEN: push-to-main (each merge is compared with its parent) and manual dispatch. It does
+# not run on pull requests: the only required PR check is ci-fast
+# (docs/branch-protection.md). To check a branch before merging, dispatch it on that ref
+# with `base_sha` set to its merge-base.
 
 name: vectorized-feature-off
 
 on:
   push:
     branches: [main]
-  # [FABLE-5] Draft-tier CI: default types + ready_for_review (the un-draft moment
-  # must re-run the wasm-equality leg a draft head may have scoped out) +
-  # labeled/unlabeled (the `ci-full` label toggle must re-evaluate the draft-tier
-  # scope decision in the artifact-exact-equality decide step below).
-  pull_request:
-    types: [opened, synchronize, reopened, labeled, unlabeled, ready_for_review]
-  merge_group:
+    paths:
+      - "**/*.rs"
+      - "**/Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain*"
+      - ".github/workflows/vectorized-feature-off.yml"
+      - "scripts/check-vectorized-feature-off.py"
+      - "scripts/tests/test_vectorized_feature_off.py"
+      - "scripts/feature_off_autodeclare.py"
+      - "scripts/tests/test_feature_off_autodeclare.py"
+      - "bench/perf-baseline.json"
+      - "bench/feature-off-declaration.json"
+      - "bench/feature-off-declarations/**"
+  workflow_dispatch:
+    inputs:
+      base_sha:
+        description: "Base commit for the leg-2 byte comparison (default: HEAD^)"
+        required: false
+        default: ""
+      pr_number:
+        description: "PR number to name a derived feature-OFF declaration (optional)"
+        required: false
+        default: ""
 
 permissions:
   contents: read
 
 concurrency:
-  group: vectorized-feature-off-${{ github.workflow }}-${{ github.ref }}
+  group: vectorized-feature-off-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -76,156 +56,53 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
-  # ---------------------------------------------------------------------------
-  # Quick gates: in-job path filter + Leg 1 (feature-resolution) + Leg 3 (cfg-audit).
-  # [FABLE-5] sq-6vshe.20: formerly three separate runner claims. The path filter
-  # detects whether Rust changed so a doc-only PR can skip the substantive steps
-  # while the ci-summary gate still resolves SUCCESS (a skipped step is non-failing,
-  # exactly as the formerly `if:`-skipped jobs were). SAFE-BY-DEFAULT: rust_changed
-  # is forced 'true' on every event except `pull_request`, so push/merge_group runs
-  # ALWAYS execute the full gate — only purely non-Rust PR diffs skip.
-  # ---------------------------------------------------------------------------
+  # Legs 1 + 3: seconds-cheap static checks.
   quick-gates:
-    name: vectorized-feature-off quick-gates (changes + feature-resolution + cfg-audit)
+    name: vectorized-feature-off quick-gates (feature-resolution + cfg-audit)
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      # dorny/paths-filter lists the PR's changed files via the API.
-      pull-requests: read
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-
-      # ---- former job: detect rust changes (vectorized-feature-off) ----
-      - uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
-        id: filter
-        if: github.event_name == 'pull_request'
-        with:
-          filters: |
-            rust:
-              - '**/*.rs'
-              - '**/Cargo.toml'
-              - 'Cargo.lock'
-              - 'rust-toolchain*'
-              - '.github/workflows/vectorized-feature-off.yml'
-              - 'scripts/check-vectorized-feature-off.py'
-              - 'scripts/tests/test_vectorized_feature_off.py'
-              - 'scripts/feature_off_autodeclare.py'
-              - 'scripts/tests/test_feature_off_autodeclare.py'
-              - 'bench/perf-baseline.json'
-              - 'bench/feature-off-declaration.json'
-              - 'bench/feature-off-declarations/**'
-      - name: Decide rust_changed (safe-by-default off the PR path)
-        id: changes
-        run: |
-          set -euo pipefail
-          if [ "${{ github.event_name }}" != "pull_request" ]; then
-            echo "rust_changed=true" >> "$GITHUB_OUTPUT"
-            echo "event=${{ github.event_name }} -> forcing rust_changed=true (full gate)"
-          else
-            echo "rust_changed=${{ steps.filter.outputs.rust }}" >> "$GITHUB_OUTPUT"
-            echo "pull_request -> paths-filter says rust=${{ steps.filter.outputs.rust }}"
-          fi
-
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-
-      # ---- former job: feature-resolution (vectorized OFF guard) ----
-      # Leg 1: checks cargo metadata (no build required) that `vectorized` is absent
-      # from the resolved default feature set of sparq-engine and sparq-wasm.
+      # The runner image ships a rustup stable toolchain; `cargo metadata` needs no build.
       - name: Rust (preinstalled stable)
-        if: steps.changes.outputs.rust_changed == 'true'
-        # [FABLE-5] CI-economy (2026-07-18 directive): the ubuntu runner image
-        # ships a rustup stable toolchain; the SHA-pinned action's `rustup
-        # toolchain install stable` re-downloads the whole toolchain whenever
-        # the image lags the newest release. Use the preinstalled one —
-        # `rustup default`/`component add` never trigger a toolchain download.
         run: |
           rustup default stable
           rustup show active-toolchain
       - name: Dump cargo metadata (default features, no build)
-        if: steps.changes.outputs.rust_changed == 'true'
         run: cargo metadata --format-version 1 > metadata.json
-
       - name: Leg 1 — vectorized absent from resolved default features
-        if: steps.changes.outputs.rust_changed == 'true'
         run: python3 scripts/check-vectorized-feature-off.py --leg1 metadata.json
-
+      # Tripwires that MUST exit non-zero; a broken guard fails this step.
       - name: Tripwire self-test (leg 1 guard can fail)
-        # The self-test runs tripwires that MUST exit non-zero; if the guard is broken,
-        # the self-test itself exits non-zero and fails this step. Fast: no build.
-        if: steps.changes.outputs.rust_changed == 'true'
         run: |
           python3 scripts/check-vectorized-feature-off.py --self-test
           echo "Tripwires verified — guards correctly reject bad synthetic fixtures"
-
-      # ---- former job: cfg-audit (vectorized call-site gates) ----
-      # Leg 3: grep-only — no Rust toolchain needed. Asserts every `mod chunk`,
-      # `pub use chunk`, and every DataChunk/SelVec/VecCmp/chunk:: reference in
-      # lib.rs and exec.rs is inside a `#[cfg(feature = "vectorized")]` guard.
       - name: Leg 3 — cfg-audit of vectorized registrations and call sites
-        if: steps.changes.outputs.rust_changed == 'true'
         run: |
           python3 scripts/check-vectorized-feature-off.py --leg3 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
           python3 scripts/check-vectorized-feature-off.py --leg3
         env:
-          # Ensure the script resolves paths relative to the repo root (cwd = repo root).
           PYTHONPATH: "."
 
-      - name: Write invariant summary
-        # `always()` preserved from the former standalone job; the rust_changed guard
-        # mirrors that job's `if:` (it only ever ran when Rust changed).
-        if: always() && steps.changes.outputs.rust_changed == 'true'
-        run: |
-          {
-            echo "### Leg 3 — cfg-audit invariant"
-            echo ""
-            echo "Every \`mod chunk\`, \`pub use chunk\`, \`DataChunk\`, \`SelVec\`, \`VecCmp\`,"
-            echo "and \`chunk::\` reference in \`crates/sparq-engine/src/lib.rs\` and \`exec.rs\`"
-            echo "must be wrapped in \`#[cfg(feature = \"vectorized\")]\`. This ensures that a"
-            echo "default-features build compiles zero vectorized code, providing compile-time"
-            echo "absence as a structural invariant independent of the artifact-size check (leg 2)."
-          } >> "$GITHUB_STEP_SUMMARY"
-
   # ---------------------------------------------------------------------------
-  # Job 2: artifact-exact-equality (wasm bundle feature-OFF) — DYNAMIC byte-identity
-  # [OPUS-4.8] sq-v3nel (2026-07-07): RE-DESIGNED from a static exact-byte pin to a
-  # same-run base-vs-head comparison. Builds the feature-OFF wasm bundle TWICE in ONE run —
-  # once from the BASE (target-branch / merge-base) tree and once from the HEAD (PR/merged)
-  # tree — and compares them BYTE-FOR-BYTE. Identical toolchain + run => deterministic,
-  # with NO static pin, so NO merge-order dependence (the old feature_off_exact pin was
-  # order-dependent and could not converge under a busy queue — armed PRs cycled BLOCKED
-  # while serial re-pin commits chased a moving target; see bench/perf-baseline.json
-  # _comment retirement entry).
-  #
-  # A PR that does NOT touch always-compiled code => identical bytes => auto-pass. A PR that
-  # DOES must DECLARE it (mechanism V2: add bench/feature-off-declarations/<PR-number>.json —
-  # conflict-free per-PR file, sq-v3nel-v2), else this leg FAILS. The SIZE of an accepted
-  # change is governed SEPARATELY, unchanged, by the wasm_bundle_bytes floor ratchet (±2%
-  # band) in bench.yml.
-  #
-  # Honest scope: proves compile-time ABSENCE via artifact byte-determinism. Does NOT prove
-  # runtime perf neutrality (EC2-gated). Job NAME is preserved: the only required check is
-  # ci-summary's `gate`; this job is picked up by the aggregator by name (no advisory/
-  # informational token), so it still gates. Build-cost: on a cache MISS this leg does one
-  # EXTRA wasm build (base tree); the base build is CACHED keyed by base SHA, so PRs sharing
-  # a base main tip pay it once and subsequent runs are ~single-build cost.
-  #
-  # [FABLE-5] sq-6vshe.20: kept STANDALONE (the heavy long pole must not serialize
-  # behind the quick gates), but `needs: changes` is replaced by an OWN leading in-job
-  # path-filter step — the build starts a few seconds earlier on Rust PRs and a doc-only
-  # PR skips every substantive step (job still concludes SUCCESS — non-failing to the
-  # aggregator, as the former job-`if:` skip was).
+  # Leg 2: build the feature-OFF wasm bundle from the BASE tree (HEAD^ on push, or the
+  # `base_sha` dispatch input) and from HEAD, and compare BYTE-FOR-BYTE. Identical bytes
+  # pass; differing bytes pass only if DECLARED by a per-PR file
+  # bench/feature-off-declarations/<PR-number>.json (conflict-free, one file per PR).
+  # scripts/feature_off_autodeclare.py derives that declaration (the advisory step below,
+  # or locally) when a diff only moves panic-location line numbers. The SIZE of an accepted change is governed
+  # separately by the wasm_bundle_bytes floor ratchet in bench.yml. The base build is
+  # cached by base SHA.
   # ---------------------------------------------------------------------------
   artifact-exact-equality:
     name: artifact-exact-equality (wasm bundle feature-OFF)
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      # dorny/paths-filter lists the PR's changed files via the API.
-      pull-requests: read
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -234,123 +111,36 @@ jobs:
           # checkout-able for the base-tree build.
           fetch-depth: 0
 
-      # ---- in-job path filter (formerly the shared `changes` job) ----
-      - uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
-        id: filter
-        if: github.event_name == 'pull_request'
-        with:
-          filters: |
-            rust:
-              - '**/*.rs'
-              - '**/Cargo.toml'
-              - 'Cargo.lock'
-              - 'rust-toolchain*'
-              - '.github/workflows/vectorized-feature-off.yml'
-              - 'scripts/check-vectorized-feature-off.py'
-              - 'scripts/tests/test_vectorized_feature_off.py'
-              - 'scripts/feature_off_autodeclare.py'
-              - 'scripts/tests/test_feature_off_autodeclare.py'
-              - 'bench/perf-baseline.json'
-              - 'bench/feature-off-declaration.json'
-              - 'bench/feature-off-declarations/**'
-      - name: Decide rust_changed (safe-by-default off the PR path)
-        id: changes
-        # [FABLE-5] Draft-tier CI (docs/branch-protection.md §Draft-tier CI): on a
-        # DRAFT PR head this heavy wasm double-build runs ONLY when the diff can
-        # affect the feature-OFF sparq-wasm bundle bytes. Path prefixes cannot
-        # decide that (a sparq-core edit changes the bundle), so the step invokes
-        # the SAME selector the select pre-jobs use (scripts/ci_select.py — stdlib
-        # + the preinstalled cargo; checkout above is fetch-depth 0, so the
-        # base...head merge-base resolves) and keeps the leg iff `sparq-wasm` is in
-        # the affected reverse-dependency closure. FAIL-CLOSED on every edge: a
-        # non-draft PR, the ci-full label, mode != selected (incl. every selector
-        # error — ci_select.py exits 0 with mode=full on ANY internal failure), or
-        # an unparsable output all leave rust_changed as the paths-filter verdict
-        # (RUN). Done in-step rather than a `needs: select` job so the non-draft
-        # long pole keeps its early start (sq-6vshe.20). The un-draft moment
-        # re-runs this leg at full tier (ready_for_review in `types` above); a
-        # draft-tier gate result can never admit a PR to the merge queue
-        # (scripts/ci_summary_gate.py).
-        env:
-          IS_DRAFT_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft == true }}
-          CI_FULL_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'ci-full') }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          CARGO_NET_RETRY: "10"
-        run: |
-          set -euo pipefail
-          if [ "${{ github.event_name }}" != "pull_request" ]; then
-            echo "rust_changed=true" >> "$GITHUB_OUTPUT"
-            echo "event=${{ github.event_name }} -> forcing rust_changed=true (full gate)"
-          else
-            rust_changed="${{ steps.filter.outputs.rust }}"
-            if [ "$rust_changed" = "true" ] && [ "$IS_DRAFT_PR" = "true" ] && [ "$CI_FULL_LABEL" != "true" ]; then
-              # Draft-tier scope: keep the leg iff sparq-wasm is in the affected
-              # closure. Any failure of this block leaves rust_changed=true (RUN).
-              sel_out="$(mktemp)"
-              if python3 scripts/ci_select.py --event pull_request \
-                   --base "$BASE_SHA" --head "$HEAD_SHA" \
-                   --output-file "$sel_out" --summary-file /dev/null >/dev/null 2>&1; then
-                mode="$(sed -n 's/^mode=//p' "$sel_out" | tail -n1)"
-                affected="$(sed -n 's/^affected=//p' "$sel_out" | tail -n1)"
-                if [ "$mode" = "selected" ]; then
-                  case "$affected" in
-                    *'"sparq-wasm"'*)
-                      echo "draft-tier scope: sparq-wasm IS in the affected closure -> leg runs" ;;
-                    *)
-                      rust_changed="false"
-                      echo "draft-tier scope: sparq-wasm NOT in the affected closure -> leg" \
-                           "skipped on this DRAFT head (full form re-runs at ready_for_review" \
-                           "+ merge_group; the gate refuses draft-tier admission)" ;;
-                  esac
-                else
-                  echo "draft-tier scope: selector mode='${mode:-<empty>}' (not 'selected') -> fail-closed, leg runs"
-                fi
-              else
-                echo "draft-tier scope: selector invocation failed -> fail-closed, leg runs"
-              fi
-            fi
-            echo "rust_changed=$rust_changed" >> "$GITHUB_OUTPUT"
-            echo "pull_request -> paths-filter says rust=${{ steps.filter.outputs.rust }}, final rust_changed=$rust_changed (draft=${IS_DRAFT_PR})"
-          fi
-
-      # ---- the heavy leg (unchanged, behind the rust_changed step-if) ----
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        if: steps.changes.outputs.rust_changed == 'true'
         with:
           python-version: "3.12"
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
-        if: steps.changes.outputs.rust_changed == 'true'
         with:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        if: steps.changes.outputs.rust_changed == 'true'
         with:
           shared-key: vectorized-feature-off-wasm
-          # [SONNET-4.6] sq-6vshe.15 lever 2 — CACHE-SAVE DISCIPLINE: restore always,
-          # save on push-to-main only. Full rationale on ci.yml's `build-archive` job;
-          # this lane gates on `merge_group` too, so its queue-ref saves were equally
-          # unrestorable. Pinned by scripts/tests/test_mergequeue_cache_posture.py.
+          # Restore always, save on push-to-main only.
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Resolve base SHA (per event)
+      - name: Resolve base SHA
         id: base
-        if: steps.changes.outputs.rust_changed == 'true'
+        env:
+          INPUT_BASE: ${{ inputs.base_sha }}
         run: |
           set -euo pipefail
-          case "${{ github.event_name }}" in
-            pull_request) BASE="${{ github.event.pull_request.base.sha }}" ;;
-            merge_group)  BASE="${{ github.event.merge_group.base_sha }}" ;;
-            *)            BASE="$(git rev-parse HEAD^ 2>/dev/null || echo '')" ;;
-          esac
+          BASE="${INPUT_BASE:-}"
+          if [ -z "$BASE" ]; then
+            BASE="$(git rev-parse HEAD^ 2>/dev/null || echo '')"
+          fi
           echo "base_sha=$BASE" >> "$GITHUB_OUTPUT"
           echo "Resolved base SHA: '$BASE' (event=${{ github.event_name }})"
 
       # Cache the BASE-tree feature-OFF wasm + its declaration file, keyed by base SHA.
-      # Many concurrent PRs share the same base main tip, so this amortises the extra build.
+      # A re-run on the same base reuses it instead of rebuilding.
       - name: Restore cached base-tree wasm
         id: base-cache
-        if: steps.changes.outputs.rust_changed == 'true' && steps.base.outputs.base_sha != ''
+        if: steps.base.outputs.base_sha != ''
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: base-wasm
@@ -358,7 +148,7 @@ jobs:
 
       # Second checkout of the base tree (only on cache miss and when a base SHA exists).
       - name: Checkout base tree
-        if: steps.changes.outputs.rust_changed == 'true' && steps.base.outputs.base_sha != '' && steps.base-cache.outputs.cache-hit != 'true'
+        if: steps.base.outputs.base_sha != '' && steps.base-cache.outputs.cache-hit != 'true'
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ steps.base.outputs.base_sha }}
@@ -366,7 +156,7 @@ jobs:
           persist-credentials: false
 
       - name: Build BASE-tree feature-OFF wasm (cache miss only)
-        if: steps.changes.outputs.rust_changed == 'true' && steps.base.outputs.base_sha != '' && steps.base-cache.outputs.cache-hit != 'true'
+        if: steps.base.outputs.base_sha != '' && steps.base-cache.outputs.cache-hit != 'true'
         # Build WITHOUT --features vectorized using the base tree's OWN release-wasm profile
         # and a separate target dir so it never clobbers the head build cache.
         run: |
@@ -398,7 +188,6 @@ jobs:
           echo "Base-tree feature-OFF wasm: $(wc -c < base-wasm/base.wasm) bytes"
 
       - name: Build HEAD-tree feature-OFF wasm
-        if: steps.changes.outputs.rust_changed == 'true'
         # Builds WITHOUT --features vectorized — default features only. The release-wasm
         # profile is size-optimised (opt-level z for cold parse crates, strip symbols).
         run: |
@@ -414,7 +203,6 @@ jobs:
 
       - name: Leg 2 — dynamic byte-identity (base tree vs head tree)
         id: leg2
-        if: steps.changes.outputs.rust_changed == 'true'
         # If no base SHA could be resolved (e.g. a rootless first commit), there is nothing
         # to compare against — pass with a note. Otherwise run the dynamic comparison.
         run: |
@@ -433,61 +221,42 @@ jobs:
             --declarations-dirs base-wasm/base-declarations bench/feature-off-declarations \
             2>&1 | tee -a "$GITHUB_STEP_SUMMARY"; exit "${PIPESTATUS[0]}"
 
-      # -----------------------------------------------------------------------
-      # [OPUS-5] sq-v3nel-v3: DERIVE the declaration when leg 2 reds.
-      #
-      # Leg 2 also fires on a diff that changes NO compiled code: `core::panic::Location`
-      # records embed the LINE NUMBER of every panicking call site, so inserting a comment
-      # block or an off-by-default `#[cfg(feature = ...)]` item MOVES BYTES in the bundle
-      # without adding or removing a single instruction. MEASURED on this repo: 34 pure
-      # comment lines inserted into crates/sparq-core/src/compress.rs => 3 differing bytes
-      # at a size delta of 0. Every such PR currently reds and waits for a hand-written
-      # declaration.
-      #
-      # This step decides that case from the COMPILER rather than from a tolerance: it
-      # rebuilds the head tree with every added line BLANKED (line count preserved, so line
-      # positions are unchanged) and requires the result to be BYTE-IDENTICAL to the head
-      # bundle; when the diff removes lines it runs the same proof on the base side. Only
-      # then does it print the declaration to commit. Anything it cannot prove — real code
-      # added or removed, a manifest change that alters the default build, an unclassifiable
-      # path — is REFUSED with a named reason.
-      #
-      # ADVISORY BY CONSTRUCTION, and deliberately so:
-      #   * It does NOT make the leg pass. Leg 2's own result above is untouched, so a bug
-      #     in the derivation cannot admit an undeclared bundle change — the failure mode of
-      #     an auto-passing gate is exactly the rubber stamp this whole leg exists to
-      #     prevent. The declaration still has to be COMMITTED, so it stays inside the
-      #     reviewed diff, as mechanism V2 requires.
-      #   * It needs no write-scoped token and no permission change: the job keeps
-      #     `contents: read`.
-      # `continue-on-error` keeps a refusal (its normal outcome, exit 2) from adding a
-      # second red to a job leg 2 has already failed; the step's own status stays visible.
+      # sq-v3nel-v3: DERIVE the declaration when leg 2 reds. `core::panic::Location` records
+      # embed the LINE NUMBER of every panicking call site, so a comment block or an
+      # off-by-default `#[cfg(feature = ...)]` item MOVES BYTES without changing an
+      # instruction. This step rebuilds the head tree with every added line BLANKED (line
+      # count preserved) and requires a byte-identical result (and the same on the base side
+      # for removed lines); only then does it print the declaration to commit. Anything it
+      # cannot prove is REFUSED with a named reason.
+      # ADVISORY BY CONSTRUCTION: it does NOT make leg 2 pass (the declaration still has to be
+      # committed in a reviewed change), it needs no write token, and `continue-on-error`
+      # keeps a refusal (exit 2) from adding a second red. The PR number comes from the
+      # `pr_number` dispatch input or the squash-merge subject's trailing `(#N)`.
       - name: Derive the feature-OFF declaration (advisory — leg 2's result is unchanged)
-        if: always() && steps.changes.outputs.rust_changed == 'true'
-          && steps.leg2.outcome == 'failure' && github.event_name == 'pull_request'
+        if: always() && steps.leg2.outcome == 'failure'
         continue-on-error: true
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_SHA: ${{ steps.base.outputs.base_sha }}
+          HEAD_SHA: ${{ github.sha }}
+          INPUT_PR: ${{ inputs.pr_number }}
+          HEAD_MSG: ${{ github.event.head_commit.message }}
         run: |
           set -uo pipefail
+          PR_NUMBER="${INPUT_PR:-}"
+          if [ -z "$PR_NUMBER" ]; then
+            PR_NUMBER="$(printf '%s\n' "$HEAD_MSG" | head -n 1 | grep -oE '\(#[0-9]+\)$' | tr -dc '0-9' || true)"
+          fi
           python3 scripts/feature_off_autodeclare.py \
-            --repo . --base-sha "$BASE_SHA" --head-sha "$HEAD_SHA" --pr "$PR_NUMBER" \
+            --repo . --base-sha "$BASE_SHA" --head-sha "$HEAD_SHA" --pr "${PR_NUMBER:-0}" \
             --base-wasm base-wasm/base.wasm --head-wasm head.wasm --report-only
 
       - name: Tripwire self-test (leg 2 comparator can fail)
-        if: steps.changes.outputs.rust_changed == 'true'
         # The test file runs the leg2 tripwires; exit non-zero means a tripwire did not fire.
         run: python3 scripts/tests/test_vectorized_feature_off.py
 
       - name: Tripwire self-test (the declaration derivation can refuse)
-        # `always()` is load-bearing. Without it this step inherits the implicit
-        # `success()`, so it would run ONLY on PRs where leg 2 is already GREEN — i.e.
-        # never on the population the derivation exists to serve, which is exactly the
-        # PRs where leg 2 FAILED. The mutation matrix must run on the failing population
-        # or it is guarding an empty set.
-        if: always() && steps.changes.outputs.rust_changed == 'true'
+        # always(): the derivation suite must also run when leg 2 failed.
+        if: always()
         # Runs the derivation's own suite INCLUDING the mutation matrix, so a change that
         # stops the derivation refusing a semantic drift fails here rather than silently
         # auto-declaring one.

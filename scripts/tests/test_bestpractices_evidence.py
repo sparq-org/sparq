@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-# [OPUS-4.8] sq-toze.5 (gap GX-4): hermetic tests for scripts/check-bestpractices-evidence.py.
-# Authored by Opus 4.8 (Fable unavailable; flag for re-review when Fable returns).
+# sq-toze.5 (gap GX-4): hermetic tests for scripts/check-bestpractices-evidence.py.
 #
 # Hermetic w.r.t. git/network: drives the pure evaluate() against in-tmpdir fixtures (no
 # subprocess, no live git). A final test runs the checker against the REAL committed

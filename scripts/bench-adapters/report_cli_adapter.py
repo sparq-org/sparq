@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-# [OPUS-4.8] sq-eifd: REPORT-CLI adapter KIND. Authored by Opus 4.8 (Fable
-# unavailable; flag for re-review when Fable returns).
+# sq-eifd: REPORT-CLI adapter KIND.
 #
 # Covers any external SHACL engine exposed as a file-in / validation-report-out
 # CLI — structurally identical to the existing EYE adapter (binary, file->file).
@@ -41,7 +40,7 @@ import sys
 import tempfile
 import time
 
-# [OPUS-4.8] Default per-invocation wall-clock cap so a hung/interactive external
+# Default per-invocation wall-clock cap so a hung/interactive external
 # CLI cannot hang the whole long-running gather indefinitely. Overridable per
 # engine via the recipe's "timeout_s".
 DEFAULT_TIMEOUT_S = 600

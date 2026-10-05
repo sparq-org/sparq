@@ -1,0 +1,5 @@
+{
+  "pr": 6583,
+  "date": "2026-09-26",
+  "reason": "[GPT-5] Intentional release metadata change: inherited workspace package identities and local lock records advance from 0.1.3 to 0.1.4. Default features and external dependencies are unchanged. Version metadata may change feature-OFF WASM bytes; the hosted byte comparison and separate size ratchet remain required, with no local byte-size claim."
+}

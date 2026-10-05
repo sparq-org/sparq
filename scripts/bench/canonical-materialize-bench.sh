@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# [FABLE-5] sq-hmd7l.32 — CANONICAL materialization-benchmark EC2 launcher (committed).
+# sq-hmd7l.32 — CANONICAL materialization-benchmark EC2 launcher (committed).
 #
 # 🤖 SPARQ agent. Sibling of scripts/bench/canonical-competitor-bench.sh (same
 # orphan-proof pattern — that header documents the rails); this one launches ONE
@@ -18,7 +18,7 @@
 #   * REFUSES to touch the protected prod/dev instances.
 #   * results are ALSO cat'd to the console log by the instance script, so
 #     `aws ec2 get-console-output` recovers the envelopes even with no SSH pull.
-#   * [OPUS-5] sq-ffaa9: with BENCH_IAM_PROFILE + BENCH_RESULTS_S3 exported the box also
+#   * sq-ffaa9: with BENCH_IAM_PROFILE + BENCH_RESULTS_S3 exported the box also
 #     uploads every envelope to a run-scoped S3 prefix (durable even when the AMI's serial
 #     console yields nothing, the AL2023/Nitro failure mode). Opt-in; inert without them.
 #
@@ -58,7 +58,7 @@ die() { printf '[canonical-materialize] ERROR: %s\n' "$*" >&2; exit 1; }
 command -v aws >/dev/null || die "aws CLI not found"
 mkdir -p "$RESULTS_LOCAL"
 
-# [OPUS-5] sq-ffaa9 — optional durable S3 egress (BENCH_IAM_PROFILE + BENCH_RESULTS_S3).
+# sq-ffaa9 — optional durable S3 egress (BENCH_IAM_PROFILE + BENCH_RESULTS_S3).
 # Inert unless BOTH are exported; half-configured fails fast here rather than after a
 # multi-hour gather. See scripts/bench/bootstrap-bench-iam.sh (one-time maintainer setup).
 . "$SCRIPT_DIR/bench-result-egress.sh"
@@ -209,7 +209,7 @@ while :; do
   [ "$STATE" = "terminated" ] && { log "instance terminated before sentinel — results may be partial"; break; }
 done
 
-# [OPUS-5] sq-ffaa9 — durable channel FIRST when configured: the box uploaded each
+# sq-ffaa9 — durable channel FIRST when configured: the box uploaded each
 # envelope to the run-scoped S3 prefix as it was produced, so this survives both a dead
 # SSH path AND an AMI whose serial console returns nothing usable (the AL2023/Nitro case
 # that left the x86_64 DiskANN gather unrecoverable). No-op when egress is off.

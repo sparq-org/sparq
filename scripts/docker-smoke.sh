@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# [OPUS-4.8] sq-n6rv — sparq-server container smoke test.
+# sq-n6rv — sparq-server container smoke test.
 #
 # WHY: the released ghcr.io image is the only surface where a `docker run` that exits
 # immediately ships silently. sq-n6rv was exactly that: after the fail-closed bind posture

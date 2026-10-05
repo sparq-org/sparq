@@ -2182,16 +2182,12 @@ fn lex(t: &Term) -> Option<&str> {
 /// assert_eq!(encode_for_uri("café"), "caf%C3%A9");        // UTF-8 bytes, uppercase hex
 /// ```
 pub fn encode_for_uri(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for b in s.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
-                out.push(b as char);
-            }
-            _ => out.push_str(&format!("%{b:02X}")),
-        }
-    }
-    out
+    const UNRESERVED: &percent_encoding::AsciiSet = &percent_encoding::NON_ALPHANUMERIC
+        .remove(b'-')
+        .remove(b'.')
+        .remove(b'_')
+        .remove(b'~');
+    percent_encoding::utf8_percent_encode(s, UNRESERVED).to_string()
 }
 
 /// The numeric value of a literal term (for `math:` builtins).
@@ -3271,48 +3267,105 @@ fn datetime_part(s: &str, f: Func) -> Option<i64> {
             part.split('.').next().unwrap_or(part).parse().ok()
         }
         Func::DayOfWeek | Func::InSeconds => {
-            // Missing components default (cwm: "2002" = 2002-01-01T00:00:00).
-            let mut dp = date.trim_start_matches('-').split('-');
-            let y: i64 = {
-                let y = dp.next()?.parse::<i64>().ok()?;
-                if neg { -y } else { y }
-            };
-            let m: i64 = dp.next().and_then(|x| x.parse().ok()).unwrap_or(1);
-            let d: i64 = dp.next().and_then(|x| x.parse().ok()).unwrap_or(1);
-            let days = days_from_civil(y, m, d);
+            let (days, secs) = epoch_parts(s)?;
             if matches!(f, Func::DayOfWeek) {
                 return Some((days + 4).rem_euclid(7)); // 1970-01-01 = Thursday
             }
-            let t = time.split(['+', 'Z']).next().unwrap_or(time);
-            let t = match t.rfind('-') {
-                Some(i) => &t[..i], // a '-' inside the TIME part starts a tz offset
-                None => t,
-            };
-            let mut tp = t.split(':');
-            let hh: i64 = tp.next().and_then(|x| x.parse().ok()).unwrap_or(0);
-            let mi: i64 = tp.next().and_then(|x| x.parse().ok()).unwrap_or(0);
-            let ss: i64 = tp
-                .next()
-                .and_then(|x| x.split('.').next().unwrap_or(x).parse().ok())
-                .unwrap_or(0);
-            // Explicit ±hh:mm offset shifts back to UTC; Z/absent = UTC.
-            let mut offset = 0i64;
-            if let Some(tpart) = s.split_once('T').map(|(_, t)| t) {
-                if let Some(i) = tpart.find(['+', '-']) {
-                    let sign = if tpart.as_bytes()[i] == b'-' { -1 } else { 1 };
-                    let mut op = tpart[i + 1..].split(':');
-                    let oh: i64 = op.next().and_then(|x| x.parse().ok()).unwrap_or(0);
-                    let om: i64 = op.next().and_then(|x| x.parse().ok()).unwrap_or(0);
-                    offset = sign * (oh * 3600 + om * 60);
-                }
-            }
-            Some(days * 86400 + hh * 3600 + mi * 60 + ss - offset)
+            days.checked_mul(86400)?.checked_add(secs)
         }
         _ => None,
     }
 }
 
+/// Split a `[-]YYYY[-MM[-DD]][Thh[:mm[:ss[.sss]]]][Z|±hh:mm]` lexical form into
+/// (days since 1970-01-01, seconds-of-day shifted to UTC) for `time:dayOfWeek` /
+/// `time:inSeconds`. Only genuinely ABSENT components take the cwm defaults
+/// ("2002" = 2002-01-01T00:00:00Z); a SUPPLIED field that does not parse, is out
+/// of range, or names an impossible calendar date declines (`None`) — it must never
+/// fall back to a default and so bind a different, valid instant. The timezone
+/// suffix is separated first (on a date as well as a dateTime) so it is never read
+/// as part of a calendar or clock field. #3804.
+fn epoch_parts(s: &str) -> Option<(i64, i64)> {
+    fn field(x: &str, range: std::ops::RangeInclusive<i64>) -> Option<i64> {
+        if x.is_empty() || !x.bytes().all(|b| b.is_ascii_digit()) {
+            return None;
+        }
+        let v: i64 = x.parse().ok()?;
+        range.contains(&v).then_some(v)
+    }
+    // Timezone suffix: `Z`, or `±hh:mm` at the very end (the `-` of a date body is
+    // followed by more than `hh:mm`, so the fixed-width tail is unambiguous).
+    let (body, offset) = if let Some(b) = s.strip_suffix('Z') {
+        (b, 0)
+    } else if s.len() >= 6
+        && s.is_char_boundary(s.len() - 6)
+        && matches!(s.as_bytes()[s.len() - 6], b'+' | b'-')
+        && s.as_bytes()[s.len() - 3] == b':'
+    {
+        let (b, tz) = s.split_at(s.len() - 6);
+        let sign = if tz.starts_with('-') { -1 } else { 1 };
+        let oh = field(&tz[1..3], 0..=14)?;
+        let om = field(&tz[4..6], 0..=59)?;
+        (b, sign * (oh * 3600 + om * 60))
+    } else {
+        (s, 0)
+    };
+    let (date, time) = match body.split_once('T') {
+        Some((d, t)) => (d, Some(t)),
+        None => (body, None),
+    };
+    let (neg, date) = match date.strip_prefix('-') {
+        Some(d) => (true, d),
+        None => (false, date),
+    };
+    let mut dp = date.split('-');
+    // Bound the year so the day/second arithmetic below cannot overflow i64.
+    let y = field(dp.next()?, 0..=999_999_999)?;
+    let y = if neg { -y } else { y };
+    let m = dp.next().map(|x| field(x, 1..=12)).unwrap_or(Some(1))?;
+    let d = dp.next().map(|x| field(x, 1..=31)).unwrap_or(Some(1))?;
+    if dp.next().is_some() || d > days_in_month(y, m)? {
+        return None;
+    }
+    let mut tod = 0i64;
+    if let Some(t) = time {
+        let mut tp = t.split(':');
+        let hh = field(tp.next()?, 0..=24)?;
+        let mi = tp.next().map(|x| field(x, 0..=59)).unwrap_or(Some(0))?;
+        let ss = match tp.next() {
+            None => 0,
+            Some(x) => {
+                let (whole, frac) = x.split_once('.').unwrap_or((x, "0"));
+                if frac.is_empty() || !frac.bytes().all(|b| b.is_ascii_digit()) {
+                    return None;
+                }
+                field(whole, 0..=59)?
+            }
+        };
+        if tp.next().is_some() || (hh == 24 && (mi, ss) != (0, 0)) {
+            return None;
+        }
+        tod = hh * 3600 + mi * 60 + ss;
+    }
+    Some((days_from_civil(y, m, d), tod - offset))
+}
+
+/// Number of days in month `m` (1-12) of proleptic-Gregorian year `y`; `None` for an
+/// out-of-range month. #3804.
+fn days_in_month(y: i64, m: i64) -> Option<i64> {
+    let leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+    Some(match m {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if leap => 29,
+        2 => 28,
+        _ => return None,
+    })
+}
+
 /// Days since 1970-01-01 of the civil date y-m-d (Howard Hinnant's algorithm).
+/// Callers validate the date first (see [`days_in_month`]); the formula itself
+/// silently rolls an impossible date over.
 fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
     let y = if m <= 2 { y - 1 } else { y };
     let era = if y >= 0 { y } else { y - 399 } / 400;
@@ -3894,6 +3947,20 @@ mod tests {
         let up = d.intern_lit("HELLO WÖRLD", xs, None);
         assert!(s.contains(&[id(&d, "http://ex/a"), id(&d, "http://ex/lower"), lo]), "string:lowerCase");
         assert!(s.contains(&[id(&d, "http://ex/a"), id(&d, "http://ex/upper"), up]), "string:upperCase");
+    }
+
+    /// #3712 tripwire: every printable ASCII byte + a control + 2-/4-byte UTF-8 — exactly the
+    /// RFC 3986 unreserved set passes through; the rest is uppercase `%XX` per UTF-8 byte.
+    #[test]
+    fn encode_for_uri_pins_the_unreserved_set() {
+        let all: String = (0x20u8..0x7f)
+            .map(char::from)
+            .chain("\t\né😀".chars())
+            .collect();
+        assert_eq!(
+            encode_for_uri(&all),
+            "%20%21%22%23%24%25%26%27%28%29%2A%2B%2C-.%2F0123456789%3A%3B%3C%3D%3E%3F%40ABCDEFGHIJKLMNOPQRSTUVWXYZ%5B%5C%5D%5E_%60abcdefghijklmnopqrstuvwxyz%7B%7C%7D~%09%0A%C3%A9%F0%9F%98%80"
+        );
     }
 
     #[test]
@@ -4554,6 +4621,100 @@ mod tests {
         let epoch = d.intern_lit("1970-01-01T00:00:00Z", xsd_str, None);
         assert!(s.contains(&[id(&d, "http://ex/r"), id(&d, "http://ex/dt"), epoch]),
             "reverse time:inSeconds 0 = 1970-01-01T00:00:00Z");
+    }
+
+    /// #3804 — `time:inSeconds` / `time:dayOfWeek` must DECLINE (bind nothing) on an
+    /// impossible calendar date instead of silently rolling it over (2026-02-29 used
+    /// to become 2026-03-01), matching XSD and `sparq_policy`'s `parse_instant`. A real
+    /// leap day (2024-02-29) still binds.
+    #[test]
+    fn time_in_seconds_declines_impossible_calendar_dates() {
+        let src = r#"
+            @prefix : <http://ex/> .
+            @prefix time: <http://www.w3.org/2000/10/swap/time#> .
+            @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+            :bad1 :when "2026-02-29T00:00:00Z"^^xsd:dateTime .
+            :bad2 :when "2026-04-31T00:00:00Z"^^xsd:dateTime .
+            :bad3 :when "2026-13-01T00:00:00Z"^^xsd:dateTime .
+            :bad4 :when "2026-01-00T00:00:00Z"^^xsd:dateTime .
+            :bad5 :when "1900-02-29T00:00:00Z"^^xsd:dateTime .
+            :ok1 :when "2024-02-29T00:00:00Z"^^xsd:dateTime .
+            :ok2 :when "2000-02-29T00:00:00Z"^^xsd:dateTime .
+            { ?x :when ?d . ?d time:inSeconds ?secs } => { ?x :secs ?secs } .
+            { ?x :when ?d . ?d time:dayOfWeek ?dow } => { ?x :dow ?dow } .
+        "#;
+        let (d, s) = closure(src);
+        let secs = id(&d, "http://ex/secs");
+        let dow = id(&d, "http://ex/dow");
+        for bad in ["bad1", "bad2", "bad3", "bad4", "bad5"] {
+            let e = id(&d, &format!("http://ex/{bad}"));
+            assert!(
+                !s.iter().any(|t| t[0] == e && (t[1] == secs || t[1] == dow)),
+                "{bad}: an impossible calendar date must not bind time:inSeconds/dayOfWeek"
+            );
+        }
+        for ok in ["ok1", "ok2"] {
+            let e = id(&d, &format!("http://ex/{ok}"));
+            assert!(
+                s.iter().any(|t| t[0] == e && t[1] == secs),
+                "{ok}: leap day must bind"
+            );
+            assert!(
+                s.iter().any(|t| t[0] == e && t[1] == dow),
+                "{ok}: leap day must bind"
+            );
+        }
+    }
+
+    /// A supplied-but-unparsable date field must decline, not fall back to the
+    /// cwm default for an ABSENT component: `"2026-02-29Z"^^xsd:date` used to
+    /// read its day `29Z` as a parse failure → day 1 (a valid Feb 1), and an
+    /// overflowing day did the same. A date's timezone suffix is separated before
+    /// the calendar fields are parsed, so valid zoned dates still bind correctly.
+    #[test]
+    fn time_builtins_decline_unparsable_supplied_date_fields() {
+        let src = r#"
+            @prefix : <http://ex/> .
+            @prefix time: <http://www.w3.org/2000/10/swap/time#> .
+            @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+            :bad1 :when "2026-02-29Z"^^xsd:date .
+            :bad2 :when "2026-02-9223372036854775808T00:00:00Z"^^xsd:dateTime .
+            :bad3 :when "2026-02-29+05:00"^^xsd:date .
+            :bad4 :when "2026-0x-01T00:00:00Z"^^xsd:dateTime .
+            :bad5 :when "2026-03-01Tab:00:00Z"^^xsd:dateTime .
+            :bad6 :when "9223372036854775807-01-01T00:00:00Z"^^xsd:dateTime .
+            :ok1 :when "2026-03-15Z"^^xsd:date .
+            :ok2 :when "2026-03-15-05:00"^^xsd:date .
+            :ok3 :when "2026-03-15"^^xsd:date .
+            :ok4 :when "2026"^^xsd:gYear .
+            { ?x :when ?d . ?d time:inSeconds ?secs } => { ?x :secs ?secs } .
+            { ?x :when ?d . ?d time:dayOfWeek ?dow } => { ?x :dow ?dow } .
+        "#;
+        let (mut d, s) = closure(src);
+        let secs = id(&d, "http://ex/secs");
+        let dow = id(&d, "http://ex/dow");
+        for bad in ["bad1", "bad2", "bad3", "bad4", "bad5", "bad6"] {
+            let e = id(&d, &format!("http://ex/{bad}"));
+            assert!(
+                !s.iter().any(|t| t[0] == e && (t[1] == secs || t[1] == dow)),
+                "{bad}: an unparsable supplied date field must not bind time builtins"
+            );
+        }
+        let int = "http://www.w3.org/2001/XMLSchema#integer";
+        for (ok, want) in [
+            ("ok1", "1773532800"), // 2026-03-15T00:00:00Z
+            ("ok3", "1773532800"),
+            ("ok2", "1773550800"), // midnight at -05:00 is 05:00Z
+            ("ok4", "1767225600"), // bare year: ABSENT month/day default to 01-01
+        ] {
+            let e = id(&d, &format!("http://ex/{ok}"));
+            let lit = d.intern_lit(want, int, None);
+            assert!(s.contains(&[e, secs, lit]), "{ok}: time:inSeconds must be {want}");
+        }
+        for ok in ["ok1", "ok2", "ok3"] {
+            let e = id(&d, &format!("http://ex/{ok}"));
+            assert!(s.iter().any(|t| t[0] == e && t[1] == dow), "{ok}: must bind dayOfWeek");
+        }
     }
 
     /// `time:timeZone` — extracts the explicit ±hh:mm timezone offset from a dateTime.

@@ -5,8 +5,7 @@
 # Decision ledger (ADR-style)
 
 > 🤖 SPARQ agent record. This is the durable home for design/judgment calls made under
-> the **[`proceed-and-document`](../../.claude/skills/proceed-and-document/SKILL.md)**
-> standing rule — the maintainer's greenlight was not required, the call was made and
+> the former **`proceed-and-document`** standing rule (retired with the autonomous fleet) — the maintainer's greenlight was not required, the call was made and
 > shipped, and a short GitHub "steer" issue tracked it for post-hoc review. Those issues
 > were consolidated here and closed; this table is now the record. Each row is a decision
 > that is **reflected in merged code/docs** (evidence linked). Status is `adopted` unless a

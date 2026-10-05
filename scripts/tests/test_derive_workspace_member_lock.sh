@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# [OPUS-4.8] sq-f04e — hermetic regression self-test for
+# sq-f04e — hermetic regression self-test for
 # scripts/derive-workspace-member-lock.mjs, specifically its WORKSPACE-LINK (`link: true`)
-# handling. Authored by Opus 4.8 (Fable unavailable; flag for re-review when Fable returns).
+# handling.
 #
 # WHY: gen-js-sbom.sh DERIVES a standalone per-member lock out of the repo-root
 # package-lock.json, then runs cyclonedx-npm, which shells out to

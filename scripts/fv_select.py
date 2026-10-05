@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [FABLE-5] Change-coupled formal-verification selector (bead sq-63ups). 🤖 SPARQ agent.
+# Change-coupled formal-verification selector (bead sq-63ups). 🤖 SPARQ agent.
 #
 # WHAT: given a PR / merge-group diff, decide which Kani proof suites from
 # ci/formal-verification.toml must run ON THIS PR as gating checks. A suite is

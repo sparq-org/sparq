@@ -1,4 +1,4 @@
-# [OPUS-4.8] ast-grep rule (harness copy): find every `impl <Trait> for <T>` for the
+# ast-grep rule (harness copy): find every `impl <Trait> for <T>` for the
 # list-stratum A/B tasks, regardless of trait-path qualification. Mirrors
 # .claude/skills/ast-grep/rules/impl-of-trait.yml (the SKILL's home copy). The harness
 # keeps a self-contained copy so a measurement run does not depend on the skill tree.

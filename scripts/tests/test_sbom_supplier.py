@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-# [OPUS-4.8] sq-toze.26 (GS-1 / NTIA N1): hermetic tests for scripts/check-sbom-supplier.py.
-# Authored by Opus 4.8 (Fable unavailable; flag for re-review when Fable returns).
+# sq-toze.26 (GS-1 / NTIA N1): hermetic tests for scripts/check-sbom-supplier.py.
 #
 # Hermetic w.r.t. git/network: imports the check module and drives its pure evaluate() +
 # the file parser against in-tmpdir fixtures. NO subprocess, NO live git. A final test
@@ -28,7 +27,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
-# [OPUS-4.8] sq-90ew: `cargo cyclonedx` internally runs `cargo metadata`, whose crates.io
+# sq-90ew: `cargo cyclonedx` internally runs `cargo metadata`, whose crates.io
 # fetch is TRANSIENTLY flaky on hosted runners (observed `curl ... [16] Error in the HTTP2
 # framing layer` -> non-zero exit at ~9-12s). PR #750 wrapped the cyclonedx invocation in the
 # WORKFLOW STEPS, but this live-SBOM self-test runs its OWN `cargo cyclonedx` (it executes
@@ -161,7 +160,7 @@ class TestLiveWorkspaceSBOM(unittest.TestCase):
             self.skipTest("cargo-cyclonedx / jq not available")
         normalize = REPO_ROOT / "scripts" / "sbom-normalize.jq"
         with tempfile.TemporaryDirectory() as d:
-            # [OPUS-4.8] sq-90ew: GENERATION only, with the transient-flake retry. The GS-1
+            # sq-90ew: GENERATION only, with the transient-flake retry. The GS-1
             # supplier assertion below runs ONCE on the produced files (NOT retried).
             _generate_workspace_sbom()
             try:

@@ -176,7 +176,8 @@
 
 use crate::rif::{Atom, Builtin, Document, RifError, Rule, Term};
 use quick_xml::events::Event;
-use quick_xml::Reader;
+use quick_xml::name::ResolveResult;
+use quick_xml::reader::NsReader;
 use std::collections::{BTreeSet, HashMap};
 
 // ---------------------------------------------------------------------------
@@ -389,7 +390,72 @@ impl XmlNode {
 // XML tree builder
 // ---------------------------------------------------------------------------
 
+/// The RIF namespace IRI every RIF/XML `<Document>` root must be in.
+const RIF_NS: &str = "http://www.w3.org/2007/rif#";
+
+/// Maximum element nesting depth accepted by [`parse_xml_tree`].
+///
+/// The tree builder itself is iterative, but the interpretation that follows
+/// (`parse_condition` ↔ `parse_formula_child`, `expand_body`, the alpha-renaming
+/// passes, and the recursive `Drop` of the tree / `BodyCond`) recurses once per
+/// nesting level, so an adversarial document of deeply nested `<And>`/`<Or>`/
+/// `<Exists>` would overflow the stack and abort the process. Conformant RIF-Core
+/// documents nest a few dozen levels at most; anything deeper is refused
+/// fail-closed with [`ImportError::MalformedXml`]. #3359.
+const MAX_XML_DEPTH: usize = 256;
+
+/// Fail closed unless an element resolves to the RIF namespace. Every element is
+/// checked, not just the root: a descendant that re-declares a foreign default
+/// namespace (`<payload xmlns="urn:foreign">`), undeclares it (`xmlns=""`) or
+/// rebinds the RIF prefix (`<rif:Group xmlns:rif="urn:foreign">`) leaves RIF, and
+/// its local names must not be interpreted with RIF semantics. Resolution (scoping,
+/// inheritance, rebinding) is quick-xml's `NsReader`. #3360.
+///
+/// quick-xml returns the declared namespace value raw, without expanding character
+/// or predefined entity references, so `xmlns="http://www.w3.org/2007/rif&#35;"`
+/// arrives as the literal `rif&#35;`. The value is unescaped with quick-xml's own
+/// `unescape` before comparison (an attribute value's normalized form is what names
+/// the namespace); a value that is not UTF-8 or does not unescape is refused.
+fn check_rif_namespace(ns: &ResolveResult<'_>, local: &str) -> Result<(), ImportError> {
+    match ns {
+        ResolveResult::Bound(n) => {
+            let raw = std::str::from_utf8(n.as_ref()).map_err(|_| {
+                ImportError::MalformedXml(format!(
+                    "element <{}> has a namespace that is not valid UTF-8",
+                    local
+                ))
+            })?;
+            let resolved = quick_xml::escape::unescape(raw).map_err(|e| {
+                ImportError::MalformedXml(format!(
+                    "element <{}> has an undecodable namespace <{}>: {}",
+                    local, raw, e
+                ))
+            })?;
+            if resolved == RIF_NS {
+                Ok(())
+            } else {
+                Err(ImportError::MalformedXml(format!(
+                    "element <{}> is in namespace <{}>, not the RIF namespace <{}>",
+                    local, resolved, RIF_NS
+                )))
+            }
+        }
+        ResolveResult::Unbound => Err(ImportError::MalformedXml(format!(
+            "element <{}> is in no namespace; RIF/XML requires the RIF namespace <{}>",
+            local, RIF_NS
+        ))),
+        ResolveResult::Unknown(p) => Err(ImportError::MalformedXml(format!(
+            "element <{}> uses undeclared namespace prefix `{}`",
+            local,
+            String::from_utf8_lossy(p)
+        ))),
+    }
+}
+
 /// Parse `xml_bytes` into a tree of `XmlNode`s.
+///
+/// Every element must resolve to the RIF namespace ([`check_rif_namespace`]) and
+/// element nesting is capped at [`MAX_XML_DEPTH`]; both fail closed.
 ///
 /// # Whitespace handling
 ///
@@ -397,22 +463,33 @@ impl XmlNode {
 /// is semantically significant. Per-type trimming is applied in `parse_term`
 /// based on the XSD whitespace facet of each datatype.
 fn parse_xml_tree(xml_bytes: &[u8]) -> Result<XmlNode, ImportError> {
-    let mut reader = Reader::from_reader(xml_bytes);
+    let mut reader = NsReader::from_reader(xml_bytes);
     // Do NOT set trim_text(true): whitespace in xsd:string Consts is preserved.
     // parse_term applies per-type trimming (IRI/numeric → trim; string → preserve).
 
     let mut stack: Vec<XmlNode> = Vec::new();
 
     loop {
-        match reader.read_event().map_err(|e| ImportError::MalformedXml(format!("{}", e)))? {
+        let (ns, event) = reader
+            .read_resolved_event()
+            .map_err(|e| ImportError::MalformedXml(format!("{}", e)))?;
+        match event {
             Event::Start(e) => {
                 let local = local_name_str(e.local_name().as_ref());
+                check_rif_namespace(&ns, &local)?;
+                if stack.len() >= MAX_XML_DEPTH {
+                    return Err(ImportError::MalformedXml(format!(
+                        "element nesting exceeds the maximum depth of {}",
+                        MAX_XML_DEPTH
+                    )));
+                }
                 let attrs = read_attrs(&e)?;
                 stack.push(XmlNode { tag: local, text: String::new(), attrs, children: Vec::new() });
             }
             Event::Empty(e) => {
                 // Self-closing element — push and immediately pop.
                 let local = local_name_str(e.local_name().as_ref());
+                check_rif_namespace(&ns, &local)?;
                 let attrs = read_attrs(&e)?;
                 let node = XmlNode { tag: local, text: String::new(), attrs, children: Vec::new() };
                 if let Some(parent) = stack.last_mut() {
@@ -519,6 +596,12 @@ fn read_attrs(e: &quick_xml::events::BytesStart<'_>) -> Result<Vec<(String, Stri
     let mut out = Vec::new();
     for a in e.attributes() {
         let a = a.map_err(|err| ImportError::MalformedXml(format!("{}", err)))?;
+        // RIF/XML attributes (`type`, `ordered`, ...) are unqualified. A prefixed
+        // attribute (`x:type`) is in some other namespace and a namespace
+        // declaration is not content, so neither may be read by its local name.
+        if a.key.prefix().is_some() || a.key.as_ref() == b"xmlns" {
+            continue;
+        }
         let key = local_name_str(a.key.local_name().as_ref());
         // Unescape the attribute value so that e.g. `type="http://ex/?a=1&amp;b=2"`
         // produces `"http://ex/?a=1&b=2"` rather than the literal `"&amp;"` text.
@@ -1932,6 +2015,216 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #3359 — a hostile document of deeply nested `<And>` must be REFUSED
+    /// (`MalformedXml`), not overflow the stack and abort the process. Run on the
+    /// default test-thread stack.
+    #[test]
+    fn deeply_nested_and_is_refused_not_stack_overflow() {
+        let depth = 200_000;
+        let mut xml = String::from(
+            "<Document xmlns=\"http://www.w3.org/2007/rif#\"><payload><Group><sentence>\
+             <Implies><if>",
+        );
+        for _ in 0..depth {
+            xml.push_str("<And><formula>");
+        }
+        for _ in 0..depth {
+            xml.push_str("</formula></And>");
+        }
+        xml.push_str("</if><then/></Implies></sentence></Group></payload></Document>");
+        match import(xml.as_bytes()) {
+            Err(ImportError::MalformedXml(msg)) => {
+                assert!(msg.contains("maximum depth"), "unexpected message: {msg}")
+            }
+            other => panic!("expected a depth refusal, got {other:?}"),
+        }
+    }
+
+    /// The same guard covers `<Or>` and `<Exists>` (and self-closing leaves).
+    #[test]
+    fn deeply_nested_or_exists_is_refused() {
+        for (open, close) in [
+            ("<Or><formula>", "</formula></Or>"),
+            (
+                "<Exists><declare><Var>z</Var></declare><formula>",
+                "</formula></Exists>",
+            ),
+        ] {
+            let depth = 100_000;
+            let mut xml = String::from(
+                "<Document xmlns=\"http://www.w3.org/2007/rif#\"><payload><Group><sentence>\
+                 <Implies><if>",
+            );
+            for _ in 0..depth {
+                xml.push_str(open);
+            }
+            xml.push_str("<Atom/>");
+            for _ in 0..depth {
+                xml.push_str(close);
+            }
+            xml.push_str("</if><then/></Implies></sentence></Group></payload></Document>");
+            let res = import(xml.as_bytes());
+            assert!(
+                matches!(res, Err(ImportError::MalformedXml(ref m)) if m.contains("maximum depth")),
+                "{open}: deep nesting must be refused"
+            );
+        }
+    }
+
+    /// A nested body just under the cap (~250 element levels) still imports — and
+    /// does not itself overflow the default test-thread stack in a debug build.
+    #[test]
+    fn near_cap_nested_and_still_imports() {
+        let depth = 120;
+        let mut xml = String::from(
+            "<Document xmlns=\"http://www.w3.org/2007/rif#\"><payload><Group><sentence>\
+             <Forall><declare><Var>x</Var></declare><formula><Implies><if>",
+        );
+        for _ in 0..depth {
+            xml.push_str("<And><formula>");
+        }
+        xml.push_str(
+            "<Atom><op><Const type=\"http://www.w3.org/2007/rif#iri\">http://ex/p</Const></op>\
+             <args ordered=\"yes\"><Var>x</Var></args></Atom>",
+        );
+        for _ in 0..depth {
+            xml.push_str("</formula></And>");
+        }
+        xml.push_str(
+            "</if><then><Atom><op><Const type=\"http://www.w3.org/2007/rif#iri\">http://ex/q</Const></op>\
+             <args ordered=\"yes\"><Var>x</Var></args></Atom></then></Implies></formula></Forall>\
+             </sentence></Group></payload></Document>",
+        );
+        import(xml.as_bytes()).expect("a body just under the depth cap must import");
+    }
+
+    /// #3360 — a `<Document>` root with no namespace, or a foreign one, is not
+    /// RIF/XML and is refused fail-closed.
+    #[test]
+    fn non_rif_namespace_root_is_refused() {
+        for xml in [
+            "<Document><payload><Group></Group></payload></Document>",
+            "<Document xmlns=\"http://example.org/not-rif#\"><payload><Group></Group></payload></Document>",
+            "<x:Document xmlns:x=\"http://example.org/not-rif#\" xmlns=\"http://www.w3.org/2007/rif#\"><payload><Group></Group></payload></x:Document>",
+            "<Document xmlns=\"http://example.org/not-rif#\"/>",
+        ] {
+            let res = import(xml.as_bytes());
+            assert!(
+                matches!(res, Err(ImportError::MalformedXml(ref m)) if m.contains("namespace")),
+                "a non-RIF-namespace root must be refused: {xml}"
+            );
+        }
+    }
+
+    /// A prefixed root bound to the RIF namespace is accepted.
+    #[test]
+    fn prefixed_rif_namespace_root_is_accepted() {
+        let xml = "<rif:Document xmlns:rif=\"http://www.w3.org/2007/rif#\">\
+                   <rif:payload><rif:Group></rif:Group></rif:payload></rif:Document>";
+        import(xml.as_bytes()).expect("a prefixed RIF-namespace root must import");
+    }
+
+    /// quick-xml hands back namespace declaration values without expanding character
+    /// or predefined entity references, so an escaped spelling of the RIF namespace
+    /// must be unescaped before comparison (XML namespace normalization).
+    #[test]
+    fn escaped_rif_namespace_declarations_are_accepted() {
+        for xml in [
+            "<Document xmlns=\"http://www.w3.org/2007/rif&#35;\"><payload><Group/></payload></Document>",
+            "<Document xmlns=\"http://www.w3.org/2007/rif&#x23;\"><payload><Group/></payload></Document>",
+            "<rif:Document xmlns:rif=\"http&#58;//www.w3.org/2007/rif&#35;\">\
+             <rif:payload><rif:Group/></rif:payload></rif:Document>",
+            "<Document xmlns=\"http://www.w3.org/2007/rif#\">\
+             <payload xmlns=\"http://www.w3.org/2007/rif&#35;\"><Group/></payload></Document>",
+        ] {
+            import(xml.as_bytes()).unwrap_or_else(|e| panic!("escaped RIF namespace must import: {xml}: {e:?}"));
+        }
+    }
+
+    /// An escape that decodes to a namespace other than RIF is still refused, as is
+    /// an escape that does not decode at all.
+    #[test]
+    fn escaped_foreign_namespace_declarations_are_refused() {
+        assert_namespace_refused(
+            "<Document xmlns=\"http://www.w3.org/2007/rif&#36;\"><payload><Group/></payload></Document>",
+            "an escape decoding to `rif$` is not the RIF namespace",
+        );
+        assert_namespace_refused(
+            "<rif:Document xmlns:rif=\"http://www.w3.org/2007/rif#&#35;\">\
+             <rif:payload><rif:Group/></rif:payload></rif:Document>",
+            "an escape decoding to `rif##` is not the RIF namespace",
+        );
+        assert_namespace_refused(
+            "<Document xmlns=\"http://www.w3.org/2007/rif#\">\
+             <payload xmlns=\"http://www.w3.org/2007/rif&amp;\"><Group/></payload></Document>",
+            "a predefined entity decoding to `rif&` is not the RIF namespace",
+        );
+        assert!(
+            import(b"<Document xmlns=\"http://www.w3.org/2007/rif&bogus;\"><payload><Group/></payload></Document>")
+                .is_err(),
+            "an undecodable escape in a namespace must be refused"
+        );
+    }
+
+    fn assert_namespace_refused(xml: &str, why: &str) {
+        let res = import(xml.as_bytes());
+        assert!(
+            matches!(res, Err(ImportError::MalformedXml(ref m)) if m.contains("namespace")),
+            "{why}: got {res:?}"
+        );
+    }
+
+    /// A descendant that re-declares a FOREIGN default namespace takes its whole
+    /// subtree out of RIF; those elements must not be read as RIF syntax even
+    /// though the root is in the RIF namespace.
+    #[test]
+    fn foreign_default_namespace_on_descendant_is_refused() {
+        let base = std::str::from_utf8(MINIMAL_RULE_XML).unwrap();
+        assert!(import(base.as_bytes()).is_ok(), "control document must import");
+        for (from, to) in [
+            ("<payload>", "<payload xmlns=\"urn:foreign\">"),
+            ("<Group>", "<Group xmlns=\"urn:foreign\">"),
+            ("<then>", "<then xmlns=\"urn:foreign\">"),
+        ] {
+            assert_namespace_refused(
+                &base.replacen(from, to, 1),
+                &format!("foreign default namespace via {to} must be refused"),
+            );
+        }
+        // Undeclaring the default namespace (xmlns="") also leaves RIF.
+        assert_namespace_refused(
+            &base.replacen("<Group>", "<Group xmlns=\"\">", 1),
+            "an undeclared default namespace must be refused",
+        );
+    }
+
+    /// A RIF prefix rebound to a foreign namespace below the root must be refused;
+    /// rebinding to the RIF namespace itself (or another prefix bound to RIF) is fine.
+    #[test]
+    fn rebound_prefix_on_descendant_is_refused() {
+        let rebound = "<rif:Document xmlns:rif=\"http://www.w3.org/2007/rif#\">\
+                       <rif:payload><rif:Group xmlns:rif=\"urn:foreign\"></rif:Group>\
+                       </rif:payload></rif:Document>";
+        assert_namespace_refused(rebound, "a rebound rif: prefix must be refused");
+        let unbound_prefix = "<rif:Document xmlns:rif=\"http://www.w3.org/2007/rif#\">\
+                              <x:payload></x:payload></rif:Document>";
+        assert!(import(unbound_prefix.as_bytes()).is_err(), "an undeclared prefix must be refused");
+        let rebound_to_rif = "<rif:Document xmlns:rif=\"http://www.w3.org/2007/rif#\">\
+                              <r:payload xmlns:r=\"http://www.w3.org/2007/rif#\">\
+                              <Group xmlns=\"http://www.w3.org/2007/rif#\"></Group>\
+                              </r:payload></rif:Document>";
+        import(rebound_to_rif.as_bytes()).expect("any binding that resolves to RIF imports");
+    }
+
+    /// The full finding: a foreign `<payload>` subtree carrying a rule must not
+    /// produce any rule (and hence no conclusions).
+    #[test]
+    fn foreign_namespace_subtree_produces_no_rules() {
+        let base = std::str::from_utf8(MINIMAL_RULE_XML).unwrap();
+        let xml = base.replacen("<payload>", "<payload xmlns=\"urn:foreign\">", 1);
+        assert!(import(xml.as_bytes()).is_err());
+    }
 
     // ---- XML fixtures -------------------------------------------------------
 

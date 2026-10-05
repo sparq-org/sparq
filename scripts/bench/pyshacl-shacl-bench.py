@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [FABLE-5] sq-7d3dj.33 — in-process pySHACL driver for the same-box SHACL
+# sq-7d3dj.33 — in-process pySHACL driver for the same-box SHACL
 # comparison harness (scripts/bench/shacl-same-box.sh).
 #
 # WHY IN-PROCESS (not the `pyshacl` CLI via report_cli_adapter.py): the CLI's

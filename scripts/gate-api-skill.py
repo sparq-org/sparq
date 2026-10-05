@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-# [OPUS-4.8] Gate G2 — public-api→skill (bead sq-ncvq.5, epic sq-ncvq).
-# Authored by Opus 4.8 (Fable unavailable; flag for re-review when Fable returns).
+# Gate G2 — public-api→skill (bead sq-ncvq.5, epic sq-ncvq).
 #
 # PROACTIVE / merge-time half of the maintenance flow-on system
 # (research/maintenance-flow-on-automation-design.md §2.1, gate G2). Complements
@@ -8,7 +7,7 @@
 # "sync SKILL.md" follow-on ISSUE after merge; THIS gate BLOCKS the PR before it
 # merges so the docs never drift in the first place.
 #
-# [OPUS-4.8] sq-ncvq.10 doc-sync: this gate is the "Enforced by: **G2**" cell of
+# sq-ncvq.10 doc-sync: this gate is the "Enforced by: **G2**" cell of
 # the "public API" row in the AGENTS.md "Post-batch re-evaluation checklist" table
 # (alongside the reactive `flow-on:changed-public-feature-docs` rule). That table
 # row and this docstring are the two halves of the same rule — change one and
@@ -25,7 +24,7 @@
 # (`pub fn`/`pub struct`/`pub enum`/`pub trait`/`pub const`/`pub type`/
 # `pub mod`/`pub use`).
 #
-# [OPUS-4.8] WHY a `pub`-signature diff and not "any src change" — false-positive
+# WHY a `pub`-signature diff and not "any src change" — false-positive
 # remediation (bead flow-on,ci; blocked #250, mis-fired #244):
 #   * #250 added only `// SAFETY:` comments + `#![warn(...)]` lint attributes to
 #     several crates' src, including the BINDING crates sparq-cli / sparq-bench.
@@ -86,7 +85,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
-# [OPUS-4.8] The `pub `-item multiset-diff logic now lives in ONE shared module
+# The `pub `-item multiset-diff logic now lives in ONE shared module
 # (scripts/pub_api_diff.py) so the reactive flow-on engine
 # (scripts/flow-on.py, rule `changed-public-feature-docs`) reuses the EXACT same
 # net-public-API-change test this gate uses — the two can no longer drift
@@ -103,7 +102,7 @@ def _load_pub_api_diff():
 
 _pad = _load_pub_api_diff()
 
-# [OPUS-4.8] Binding / entry-point crates (sparq-cli/server/py/wasm). HISTORICALLY
+# Binding / entry-point crates (sparq-cli/server/py/wasm). HISTORICALLY
 # any src/** change here was a public-surface change; that blanket rule
 # false-positived on comment/lint-attribute-only edits (blocked #250). The gate now
 # applies the SAME `pub `-signature heuristic to EVERY published crate's src/**,
@@ -176,7 +175,7 @@ def crate_is_published(crate: str) -> bool:
     return re.search(r"^\s*publish\s*=\s*false\b", text, re.MULTILINE) is None
 
 
-# [OPUS-4.8] The PUBLIC-ITEM signature pattern + the diff scanner now live in the
+# The PUBLIC-ITEM signature pattern + the diff scanner now live in the
 # shared scripts/pub_api_diff.py (so flow-on.py reuses the identical test). These
 # module-level aliases preserve the historical `_PUB_ITEM_RE` / `_scan_pub_diff`
 # names this gate (and test_gates.py) reference.
@@ -209,7 +208,7 @@ def pub_diff_lines(path: str, base: str) -> tuple[list[str], list[str]]:
 def pub_api_changed(path: str, base: str) -> bool:
     """True iff `path`'s diff NET-changes a `pub `-exported item signature.
 
-    [OPUS-4.8] A pure RELOCATION — the same signature added once and removed once
+    A pure RELOCATION — the same signature added once and removed once
     (net-zero) — is NOT a public-API change (mis-fired G2 on #244, which moved
     `pub fn n3_proof_tree` within a file). We compare added vs removed signatures
     as MULTISETS and only report a change when they differ: a genuinely NEW or
@@ -227,7 +226,7 @@ def public_surface_changes(
 ) -> list[str]:
     """Return the changed paths that constitute a public-surface change.
 
-    [OPUS-4.8] A path is in scope iff it is under a PUBLISHED crate's `src/**`
+    A path is in scope iff it is under a PUBLISHED crate's `src/**`
     (the `_CRATE_SRC_RE` filter — a non-`crates/*/src/**` path, e.g. a CI workflow
     or a test, never reaches the `pub` check, so a CI-only PR always passes) AND
     its diff NET-changes a `pub `-exported item (pub_api_changed). The binding

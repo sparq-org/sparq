@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [OPUS-4.8] Hermetic tests for scripts/check-skill-frontmatter.py (bead sq-tstv).
+# Hermetic tests for scripts/check-skill-frontmatter.py (bead sq-tstv).
 #
 # Locks in the two things sq-tstv changed:
 #   1. The default glob now covers BOTH skills/**/SKILL.md AND .claude/agents/*.md,

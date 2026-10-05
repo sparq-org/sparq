@@ -1,4 +1,4 @@
-# [OPUS-4.8] sq-ymr2e.11 — NIGHTLY full-sweep lane (advisory-only, NEVER gates the merge queue).
+# sq-ymr2e.11 — NIGHTLY full-sweep lane (advisory-only, NEVER gates the merge queue).
 #
 # Design of record: research/web-gui-test-program.md §6.2. The per-PR lanes (site-e2e.yml /
 # site-visual.yml / gui.yml) are deliberately SCOPED for speed — chromium-only functional +
@@ -13,19 +13,13 @@
 #   • tauri-driver GUI smoke — the real-IPC launch/round-trip smoke; its permanent home if the
 #     stabilization bead (sq-var9) ever demotes it from the per-PR gui.yml lane.
 #
-# WHY IT CANNOT GATE ci-summary. The `ci-summary / gate` aggregator polls the sibling
-# check-runs of a PR head / merge_group ref / push-to-main commit. THIS workflow triggers ONLY
-# on `schedule` + `workflow_dispatch`, so it never produces a check-run on any commit the gate
-# evaluates — it is structurally non-gating. As belt-and-suspenders (in case a trigger is ever
-# added), every routed job NAME carries the whole-word `advisory` token, which the aggregator
-# excludes because each is DECLARED in .github/advisory-registry.json (#3773). Two independent
-# guarantees, both honest.
+# NON-BLOCKING BY CONSTRUCTION. This workflow triggers only on `schedule` + `workflow_dispatch`,
+# so it never produces a check-run on a PR (the only required check is `ci-fast`). Every job
+# NAME also carries the whole-word `advisory` token and is DECLARED in
+# .github/advisory-registry.json.
 #
-# FAILURE ROUTING. A nightly that opened one alert per failing TEST would drown the tracker and
-# stop being believed (§6.2: "alert fatigue is how nightlies die"). Instead the `route-failures`
-# job maintains EXACTLY ONE consolidated GitHub issue per failing CATEGORY, via
-# scripts/nightly/route_sweep_failures.py (find-or-refresh while red, auto-close on recovery),
-# always self-identified as a 🤖 SPARQ agent.
+# FAILURE REPORTING. A failing category shows as a red job in the nightly run (and its artifacts);
+# nothing files issues automatically — read the nightly runs.
 #
 # HONEST COVERAGE NOTES (validate/extend on first CI runs; tracked as follow-ups, not silently):
 #   • The full-inventory AXE scan (sq-izpab) is now implemented in e2e/nightly/ and activated by
@@ -35,7 +29,7 @@
 #     and runs via the container-pinned `npm run vr` path below. Its baselines ARE committed under
 #     site/e2e/visual/baselines/ (seeded #1783, refreshed #1801) — the earlier "the first nightly
 #     run will mint them" note here was both stale and never operationally true: Playwright writes
-#     a MISSING snapshot but still fails the run, and nothing in CI commits it back. [SONNET-4.6]
+#     a MISSING snapshot but still fails the run, and nothing in CI commits it back.
 #     sq-hfd82: because this sweep runs only NIGHTLY (the per-PR site-visual lane matches
 #     key-layouts.spec.ts only), full-surface drift from ordinary site changes is invisible until
 #     the nightly, so it accumulates and the lane reads as permanently red. Recovery is the
@@ -59,19 +53,15 @@ on:
         options: [smoke, full]
         default: smoke
       force_fail_categories:
-        description: "Comma-separated categories to FORCE-FAIL for routing validation (a11y,visual,cross-browser,tauri) or 'none'"
+        description: "Comma-separated categories to FORCE-FAIL (a11y,visual,cross-browser,tauri) to validate failure reporting, or 'none'"
         type: string
         default: "none"
-      route_failures:
-        description: "Open/refresh consolidated issues on failure. Set false for a safe scratch-branch demo (routing runs dry, files nothing)."
-        type: boolean
-        default: true
       refresh_visual_baselines:
-        description: "Re-MINT every visual baseline inside the pinned container and upload them as an artifact for review (requires mode=full). Comparison is skipped and routing is forced OFF."
+        description: "Re-MINT every visual baseline inside the pinned container and upload them as an artifact for review (requires mode=full). Comparison is skipped."
         type: boolean
         default: false
 
-# Least-privilege default: read-only. Only the routing job elevates to issues: write.
+# Least-privilege: read-only.
 permissions:
   contents: read
 
@@ -83,14 +73,13 @@ concurrency:
 
 jobs:
   # Resolve the effective run config once. `schedule` carries no inputs, so it hard-codes the
-  # full/route path; `workflow_dispatch` honours the dispatch inputs (with defaults).
+  # full path; `workflow_dispatch` honours the dispatch inputs (with defaults).
   config:
     name: resolve nightly run config (advisory)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
       mode: ${{ steps.cfg.outputs.mode }}
-      route: ${{ steps.cfg.outputs.route }}
       force_fail: ${{ steps.cfg.outputs.force_fail }}
       vr_refresh: ${{ steps.cfg.outputs.vr_refresh }}
     steps:
@@ -98,7 +87,6 @@ jobs:
         env:
           EVENT: ${{ github.event_name }}
           IN_MODE: ${{ inputs.mode }}
-          IN_ROUTE: ${{ inputs.route_failures }}
           IN_FORCE: ${{ inputs.force_fail_categories }}
           IN_VR_REFRESH: ${{ inputs.refresh_visual_baselines }}
         run: |
@@ -106,34 +94,27 @@ jobs:
           if [ "$EVENT" = "schedule" ]; then
             {
               echo "mode=full"
-              echo "route=true"
               echo "force_fail=none"
               echo "vr_refresh=false"
             } >> "$GITHUB_OUTPUT"
-            echo "scheduled nightly → mode=full route=true vr_refresh=false"
+            echo "scheduled nightly → mode=full vr_refresh=false"
           else
             MODE="${IN_MODE:-smoke}"
-            ROUTE="${IN_ROUTE:-true}"
             VR_REFRESH="${IN_VR_REFRESH:-false}"
-            # [SONNET-4.6] sq-hfd82 — the baseline-refresh dispatch. It needs the full-mode
-            # prerequisites (wasm bundle + the pinned container), and it must NOT route: a
-            # refresh run trivially "succeeds", and route_sweep_failures.py auto-closes the
-            # consolidated visual issue on recovery — which would close the red BEFORE the
-            # regenerated baselines have been reviewed and committed.
+            # sq-hfd82 — the baseline-refresh dispatch needs the full-mode prerequisites
+            # (wasm bundle + the pinned container).
             if [ "$VR_REFRESH" = "true" ]; then
               if [ "$MODE" != "full" ]; then
                 echo "::error::refresh_visual_baselines=true requires mode=full (it needs the wasm build + container steps)."
                 exit 1
               fi
-              ROUTE=false
             fi
             {
               echo "mode=${MODE}"
-              echo "route=${ROUTE}"
               echo "force_fail=${IN_FORCE:-none}"
               echo "vr_refresh=${VR_REFRESH}"
             } >> "$GITHUB_OUTPUT"
-            echo "manual dispatch → mode=${MODE} route=${ROUTE} force_fail=${IN_FORCE:-none} vr_refresh=${VR_REFRESH}"
+            echo "manual dispatch → mode=${MODE} force_fail=${IN_FORCE:-none} vr_refresh=${VR_REFRESH}"
           fi
 
   # ── Category 1: a11y / full-surface sweep (chromium) ─────────────────────────────────────
@@ -184,7 +165,7 @@ jobs:
       # FULL mode: the real suite. Build the FULL-featured wasm bundle (shacl,jsonld,…) — NOT the
       # lean one — because the a11y-sweep runs the WHOLE site e2e suite (`npm run test:e2e`), which
       # includes the SHACL-validator specs (e2e/shacl-validator.spec.ts, e2e/shacl-rerun-
-      # regression.spec.ts). [FABLE-5] sq-0rbfn: those specs `test.skip` only when the wasm FILE is
+      # regression.spec.ts). sq-0rbfn: those specs `test.skip` only when the wasm FILE is
       # absent — a presence check, not a feature check. The lean bundle omits the `shacl` feature,
       # so `sparqShaclValidate` is undefined at runtime → the validator can't run → the report
       # never renders → the specs fail (this was the a11y-sweep red, issue #1738). The full bundle
@@ -198,9 +179,12 @@ jobs:
         if: needs.config.outputs.mode == 'full'
         with:
           targets: wasm32-unknown-unknown
+      # Prebuilt, SHA-pinned, exactly-versioned wasm-pack (sq-khm3f, #5776).
       - name: Install wasm-pack
         if: needs.config.outputs.mode == 'full'
-        run: cargo install wasm-pack --locked
+        uses: jetli/wasm-pack-action@0d096b08b4e5a7de8c28de67e11e945404e9eefa # v0.4.0
+        with:
+          version: v0.15.0
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         if: needs.config.outputs.mode == 'full'
         with:
@@ -240,7 +224,7 @@ jobs:
           npm run build-papers
       - name: Full site e2e + a11y sweep (headless chromium, incl. nightly full-inventory AXE)
         if: needs.config.outputs.mode == 'full'
-        # [SONNET-4.6] sq-izpab — SPARQ_NIGHTLY_A11Y=1 activates the `nightly-a11y` Playwright
+        # sq-izpab — SPARQ_NIGHTLY_A11Y=1 activates the `nightly-a11y` Playwright
         # project (defined in playwright.config.ts only under this flag), which runs the full-
         # inventory AXE sweep from e2e/nightly/. The per-PR `chromium` project (always active)
         # ignores e2e/nightly/ — both projects run in this one npm run test:e2e invocation.
@@ -308,9 +292,12 @@ jobs:
         if: needs.config.outputs.mode == 'full'
         with:
           targets: wasm32-unknown-unknown
+      # Prebuilt, SHA-pinned, exactly-versioned wasm-pack (sq-khm3f, #5776).
       - name: Install wasm-pack
         if: needs.config.outputs.mode == 'full'
-        run: cargo install wasm-pack --locked
+        uses: jetli/wasm-pack-action@0d096b08b4e5a7de8c28de67e11e945404e9eefa # v0.4.0
+        with:
+          version: v0.15.0
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         if: needs.config.outputs.mode == 'full'
         with:
@@ -329,7 +316,7 @@ jobs:
       - name: Determinism grep gate (no waitForTimeout calls)
         if: needs.config.outputs.mode == 'full'
         run: npm run test:e2e:grep-gate
-      # [SONNET-4.6] sq-ledny — SPARQ_NIGHTLY_VR=1 is forwarded into the container by vr.sh
+      # sq-ledny — SPARQ_NIGHTLY_VR=1 is forwarded into the container by vr.sh
       # so the visual-desktop/visual-mobile testMatch expands to ALL e2e/visual/**/*.spec.ts
       # (including full-surface.spec.ts). Without this flag, vr.sh only runs key-layouts.spec.ts
       # (the per-PR subset) and the full-surface captures are skipped.
@@ -339,7 +326,7 @@ jobs:
           SPARQ_NIGHTLY_VR: "1"
         run: npm run vr
 
-      # [SONNET-4.6] sq-hfd82 — the RE-BASELINE path (workflow_dispatch only).
+      # sq-hfd82 — the RE-BASELINE path (workflow_dispatch only).
       #
       # The committed baselines are Linux-container-only by policy (e2e/visual/README.md), so
       # they can be minted ONLY inside the digest-pinned image. That left the lane with no
@@ -425,9 +412,12 @@ jobs:
         if: needs.config.outputs.mode == 'full'
         with:
           targets: wasm32-unknown-unknown
+      # Prebuilt, SHA-pinned, exactly-versioned wasm-pack (sq-khm3f, #5776).
       - name: Install wasm-pack
         if: needs.config.outputs.mode == 'full'
-        run: cargo install wasm-pack --locked
+        uses: jetli/wasm-pack-action@0d096b08b4e5a7de8c28de67e11e945404e9eefa # v0.4.0
+        with:
+          version: v0.15.0
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         if: needs.config.outputs.mode == 'full'
         with:
@@ -540,9 +530,12 @@ jobs:
             ~/.cargo/git
             gui/src-tauri/target
           key: gui-e2e-${{ runner.os }}-${{ hashFiles('gui/src-tauri/Cargo.lock', 'Cargo.lock') }}
+      # Prebuilt, SHA-pinned, exactly-versioned wasm-pack (sq-khm3f, #5776).
       - name: Install wasm-pack
         if: needs.config.outputs.mode == 'full'
-        run: cargo install wasm-pack --locked
+        uses: jetli/wasm-pack-action@0d096b08b4e5a7de8c28de67e11e945404e9eefa # v0.4.0
+        with:
+          version: v0.15.0
       - name: Build the WASM bundle (shacl,jsonld; the in-tab engine)
         if: needs.config.outputs.mode == 'full'
         working-directory: js
@@ -628,43 +621,3 @@ jobs:
           echo "macOS  → WKWebView via safaridriver (Tauri macos webview); Windows → WebView2 via msedgedriver."
           echo "This row is advisory (continue-on-error) and is NOT routed to a consolidated issue"
           echo "until the per-platform driver session is proven. Bead: harden per-platform tauri matrix."
-
-  # ── Consolidated failure routing ─────────────────────────────────────────────────────────
-  # Reads each ROUTED category job's result and maintains one consolidated issue per FAILING
-  # category (create / refresh / auto-close-on-recovery). Runs always(), so it reports even when
-  # a category failed. `tauri-smoke-other-os` is intentionally excluded (advisory probe).
-  route-failures:
-    name: route consolidated failures (advisory)
-    needs: [config, a11y-sweep, visual-sweep, cross-browser, tauri-smoke]
-    if: always()
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-      issues: write
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          sparse-checkout: scripts/nightly/route_sweep_failures.py
-          sparse-checkout-cone-mode: false
-      - name: Route category results to consolidated issues
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          A11Y: ${{ needs.a11y-sweep.result }}
-          VISUAL: ${{ needs.visual-sweep.result }}
-          XBROWSER: ${{ needs.cross-browser.result }}
-          TAURI: ${{ needs.tauri-smoke.result }}
-          ROUTE: ${{ needs.config.outputs.route }}
-        run: |
-          set -euo pipefail
-          echo "category results: a11y=$A11Y visual=$VISUAL cross-browser=$XBROWSER tauri=$TAURI (route=$ROUTE)"
-          args=(--repo "$REPO" --run-url "$RUN_URL"
-                --result "a11y=$A11Y" --result "visual=$VISUAL"
-                --result "cross-browser=$XBROWSER" --result "tauri=$TAURI")
-          if [ "$ROUTE" != "true" ]; then
-            args+=(--dry-run)
-            echo "route_failures=false → routing runs DRY (no issues filed)"
-          fi
-          python3 scripts/nightly/route_sweep_failures.py "${args[@]}"

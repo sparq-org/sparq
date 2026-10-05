@@ -1,5 +1,4 @@
 # xpath-differential — PROOF M1 differential oracle for noir_XPath (sq-3x7dl.14.2).
-# [SONNET-4.6]
 #
 # WHY A SEPARATE LANE (and not a job inside zk-toolchain.yml): that workflow's paths
 # filter drives the ~60-minute `forge-suite`, and its `merge_group` detect step
@@ -35,8 +34,7 @@ on:
     - cron: "41 5 * * *"
   workflow_dispatch:
   pull_request:
-    # [FABLE-5] Draft-tier CI: + ready_for_review so the un-draft moment re-runs this
-    # gate-feeding lane (docs/branch-protection.md §Draft-tier CI).
+    # + ready_for_review so the un-draft moment re-runs this lane.
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - "zk/xpath/**"
@@ -89,7 +87,7 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Rust (preinstalled stable)
-        # [FABLE-5] CI-economy: the runner image ships a rustup toolchain; `rustup default`
+        # CI-economy: the runner image ships a rustup toolchain; `rustup default`
         # never triggers a toolchain download (and rust-toolchain.toml outranks it anyway).
         run: |
           rustup default stable
@@ -102,6 +100,9 @@ jobs:
           key: xpath-differential
           workspaces: |
             zk/xpath/differential
+          # sq-3sbrr save-if discipline: SAVE only from main; a branch-scoped save is
+          # unreachable from main and only churns the shared 10 GB Actions-cache budget.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       # CHEAP HALF FIRST — no Noir toolchain needed. Runs the harness's own unit tests
       # (the F&O references, the self-expiring oracle-divergence guards, the

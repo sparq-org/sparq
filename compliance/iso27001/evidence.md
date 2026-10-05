@@ -110,7 +110,7 @@ under A.8.24 (signing of artifacts) — **NOT** the ZK/MPC estate.
 sed -n '1,40p' docs/branch-protection.md
 ```
 → doc-of-record for the `main` ruleset: PR-only (no direct push, incl. admins), required
-review via `CODEOWNERS`, required `ci-summary` aggregate check. The ruleset itself is
+review via `CODEOWNERS`, required `ci-fast` check. The ruleset itself is
 configured **out-of-repo** on GitHub (org act — this is why A.5.3/A.8.4 enforcement is
 AUDIT-READY at the *certificate* level even though the gate is technically live).
 

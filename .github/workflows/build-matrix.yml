@@ -1,4 +1,4 @@
-# [OPUS-4.8] sq-v286.2: the SINGLE source of truth for the hardware-tiered sparq native-binary
+# sq-v286.2: the SINGLE source of truth for the hardware-tiered sparq native-binary
 # build matrix. Reusable workflow (`workflow_call`) invoked by release.yml (versioned archives +
 # SHA256SUMS) and dist.yml (bare per-tier binaries for the fat-package launcher). Before this,
 # release.yml#package and dist.yml#build carried two hand-synced copies of the same 10-tier
@@ -6,7 +6,7 @@
 # (research/release-ci-design.md §5 "Reuse, do not duplicate" and §6 sequencing item 2:
 # "Unify the duplicated build matrix via workflow_call").
 #
-# [OPUS-4.8] sq-v286.6: this matrix ships BOTH native binaries per tier — `sparq-cli` AND
+# sq-v286.6: this matrix ships BOTH native binaries per tier — `sparq-cli` AND
 # `sparq-server` — closing the release-CI design record's §3c / §4 gap ("sparq-server native
 # binary archive — a real gap … ships ONLY as a container today … add a second `-p sparq-server`
 # build; feasible-now") and §6 sequencing item 6. sparq-server carries no sys/C/platform dep that
@@ -38,7 +38,7 @@ on:
         description: "Artifact shape: 'archive' (versioned tar.gz/zip + docs, for release.yml) or 'binary' (bare per-tier binary, for dist.yml)."
         required: true
         type: string
-      # [OPUS-4.8] sq-gl3cf: the version token used in the `archive`-mode PKG name. Threaded from
+      # sq-gl3cf: the version token used in the `archive`-mode PKG name. Threaded from
       # release.yml's `setup` job so a workflow_dispatch release names archives by the dispatch tag
       # (on dispatch, this workflow's own `github.ref_name` is the BRANCH, which would mis-name
       # every archive). Empty default => callers that pass nothing (dist.yml) fall back to
@@ -49,13 +49,13 @@ on:
         required: false
         type: string
         default: ""
-    # [OPUS-5] sq-toze.25 (GX-11): the `archive`-mode subjects blob for the ISOLATED
+    # sq-toze.25 (GX-11): the `archive`-mode subjects blob for the ISOLATED
     # trusted-builder provenance job in release.yml. The build matrix NEVER signs this — it only
     # publishes the digests of the bytes it uploaded; the signing happens in a separate,
     # user-unreachable job (see release.yml#provenance). Empty on `binary` mode (the `hashes`
     # job below is skipped), which is what dist.yml expects — it consumes no outputs.
     #
-    # [OPUS-5] #4570 (GX-11 residual): `binary` mode now has the SAME hand-off, so dist.yml can
+    # #4570 (GX-11 residual): `binary` mode now has the SAME hand-off, so dist.yml can
     # run its own isolated trusted builder over the tiered binaries. Deliberately a SECOND,
     # mode-disjoint output + collector rather than one shared collector: the archive lane's shape
     # is the L3 contract `scripts/tests/test_release_slsa_l3_provenance.py` pins mutation-by-
@@ -149,7 +149,7 @@ jobs:
           [ "${{ matrix.tier }}" = "arm64-linux" ] && FLAGS="$FLAGS -Ctarget-feature=+lse"
           # `cargo auditable build` is a drop-in for `cargo build` that embeds the dep
           # manifest into the binary (GX-7); `--locked` pins the materials (Cargo.lock).
-          # [OPUS-4.8] sq-v286.6: build BOTH shipped binaries with the SAME tier flags so the
+          # sq-v286.6: build BOTH shipped binaries with the SAME tier flags so the
           # microarch tier + cargo-auditable posture cover sparq-server identically to sparq-cli.
           # sparq-server's binary target has `required-features = ["server"]`, which is in its
           # `default` set, so a plain `-p sparq-server` build produces the binary (no extra
@@ -159,11 +159,11 @@ jobs:
           RUSTFLAGS="$FLAGS" cargo auditable build --release --locked -p sparq-server --target ${{ matrix.target }}
 
       # ---- archive mode (release.yml): versioned tar.gz/zip + README + LICENSE + CHANGELOG ----
-      # [OPUS-4.8] sq-v286.6: the per-tier archive now carries BOTH binaries (sparq-cli +
+      # sq-v286.6: the per-tier archive now carries BOTH binaries (sparq-cli +
       # sparq-server). The archive name is unchanged (`sparq-cli-<ver>-<tier>`) to keep the
       # release SHA256SUMS / asset naming consistent — release.yml downloads `pkg-*` wholesale
       # and sums every file, so it is agnostic to the archive's internal contents.
-      # [OPUS-4.8] sq-gl3cf: the `<ver>` token is the threaded `version` input when the caller
+      # sq-gl3cf: the `<ver>` token is the threaded `version` input when the caller
       # supplies it (release.yml's resolved version, correct on dispatch), else GITHUB_REF_NAME
       # (unchanged behavior for callers that pass nothing).
       - name: Package (binaries + README + LICENSE + CHANGELOG)
@@ -198,7 +198,7 @@ jobs:
           subject-path: |
             pkg/*.tar.gz
             pkg/*.zip
-      # [OPUS-5] sq-toze.25 (GX-11): publish THIS tier's archive digest(s) as data — nothing
+      # sq-toze.25 (GX-11): publish THIS tier's archive digest(s) as data — nothing
       # more. The isolated trusted builder (release.yml#provenance) turns these subjects into
       # signed provenance in a job that runs no user build step and holds the signing identity
       # this job never sees. Emitting a digest is not signing it: a compromised build step here
@@ -247,7 +247,7 @@ jobs:
           if-no-files-found: error
 
       # ---- binary mode (dist.yml): bare per-tier binaries for the launcher fat-package ----
-      # [OPUS-4.8] sq-v286.6: stage BOTH bare binaries per tier. Both are uploaded under the
+      # sq-v286.6: stage BOTH bare binaries per tier. Both are uploaded under the
       # existing `sparq-cli-<tier>` artifact name (dist.yml's launcher selects by tier); the
       # attestation covers both.
       - name: Stage dist binaries
@@ -267,7 +267,7 @@ jobs:
           subject-path: |
             dist/sparq-cli-${{ matrix.tier }}${{ matrix.ext }}
             dist/sparq-server-${{ matrix.tier }}${{ matrix.ext }}
-      # [OPUS-5] #4570 (GX-11 residual): the `binary`-mode twin of the archive digest step above.
+      # #4570 (GX-11 residual): the `binary`-mode twin of the archive digest step above.
       # Publishes THIS tier's binary digests as data; dist.yml#provenance turns them into signed
       # provenance in a job that runs no step of ours and holds a signing identity this job never
       # sees. Same PORTABILITY caveat as the archive step — the two Darwin rows ship BSD `shasum`
@@ -310,7 +310,7 @@ jobs:
             dist/sparq-server-${{ matrix.tier }}${{ matrix.ext }}
 
   # ---- collect the per-tier archive digests into ONE `base64-subjects` blob ----
-  # [OPUS-5] sq-toze.25 (GX-11). WHY A SEPARATE JOB: a matrix job cannot carry a per-row job
+  # sq-toze.25 (GX-11). WHY A SEPARATE JOB: a matrix job cannot carry a per-row job
   # output (every row writes the same `outputs.*` key and the last writer wins), so the ten
   # tiers hand their digests over as `archive-hashes-<tier>` artifacts and this job concatenates
   # them. It runs NO build step — it downloads text, validates its shape, and base64-encodes it.
@@ -372,7 +372,7 @@ jobs:
           echo "hashes=$(base64 -w0 all.sha256)" >> "$GITHUB_OUTPUT"
 
   # ---- collect the per-tier dist-binary digests into ONE `base64-subjects` blob ----
-  # [OPUS-5] #4570 (GX-11 residual): the `binary`-mode twin of `hashes` above, feeding
+  # #4570 (GX-11 residual): the `binary`-mode twin of `hashes` above, feeding
   # dist.yml#provenance. Same three properties that make the archive lane an L3 hand-off and not
   # theatre: it BUILDS nothing, it holds NO signing identity (`contents: read` only, no
   # `id-token`), and it validates the blob FAIL-CLOSED — an empty or malformed subjects list

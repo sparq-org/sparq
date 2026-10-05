@@ -4,22 +4,22 @@
 # feature-matrix `opt-in-features` strategy by scripts/assemble-feature-matrix.py
 # (the `setup` job emits the combined matrix as JSON consumed via fromJSON). Adding a
 # leg for THIS crate edits no OTHER crate's fragment, so concurrent opt-in-feature PRs for
-# DIFFERENT crates never textually conflict (bead sq-ibrze). [OPUS-4.8]
-# SCOPE ([SONNET-4.6] issue #2384): adding/removing/renaming a leg changes the emitted
+# DIFFERENT crates never textually conflict (bead sq-ibrze).
+# SCOPE (issue #2384): adding/removing/renaming a leg changes the emitted
 # leg-name set, and THAT is a TWO-FILE change — this fragment AND
 # scripts/tests/feature-matrix-legnames.golden.txt. Every other edit here (features,
 # test, tier, tier-reason, comments) leaves the name set alone and is a SINGLE-file
 # change. See README.md in this directory.
 #
-# CONTRACT (gate-critical): each leg's emitted check-run NAME is `opt-in <name>`,
-# discovered as a REQUIRED check by the ci-summary `gate` aggregator BY NAME. Keep
-# `name` free of the whole words "advisory"/"informational" or the leg stops gating.
+# CONTRACT: each leg's emitted check-run NAME is `opt-in <name>` (pinned by the golden
+# leg-name file). Keep `name` free of the whole words "advisory"/"informational", which
+# mark a check as non-blocking.
 # Fields: name (required -> check-run name), crate (required), features (required,
 # non-empty comma list), test (bool — run `cargo test` for the leg).
 
 # sparq-engine: CS-table star-join planner, zk-trace seam, and SPARQL 1.1 federated
 # SERVICE (tests use loopback only — no net).
-# [OPUS-4.8] (sq-6vshe.4) The `serialize-rdf` + `streaming-serialization` legs MOVED to
+# (sq-6vshe.4) The `serialize-rdf` + `streaming-serialization` legs MOVED to
 # .github/feature-matrix.d/sparq-engine-serialize.yml with the RDF writer matrix they exercise
 # (seam 1 of the facade split) — a `sparq-engine --features serialize-rdf` leg would now run
 # ZERO writer tests, so the tests are re-targeted to their new crate there.
@@ -28,7 +28,7 @@
   features: "cs-planner"
   test: true
 
-# [SONNET-4.6] sq-dzbg2: persistent planner statistics are entirely behind the
+# sq-dzbg2: persistent planner statistics are entirely behind the
 # default-OFF `persistent-stats` feature, including the catalog round-trip,
 # corruption-rejection, deterministic-encoding, and query-equivalence tests in
 # `stats::tests`. The default workspace test archive therefore compiles this module
@@ -44,14 +44,14 @@
   features: "zk"
   test: true
 
-# [GPT-6] Entropy-free parser intermediates and result-local CONSTRUCT nodes.
+# Entropy-free parser intermediates and result-local CONSTRUCT nodes.
 # This runs the feature-gated identity, collision and output-budget regressions.
 - name: "sparq-engine (deterministic-blank-nodes)"
   crate: "sparq-engine"
   features: "deterministic-blank-nodes"
   test: true
 
-# [FABLE-5] sq-7d3dj.32.2.7: runs the SPQCPRM2 format-migration cross-version storage
+# sq-7d3dj.32.2.7: runs the SPQCPRM2 format-migration cross-version storage
 # differentials (v2_saved_store_is_query_equivalent_to_v1 / cross_version_resave_round_trips_
 # losslessly) through the real save_compressed → open → query path in V2 emit mode. `spqcprm2`
 # forwards to sparq-core/spqcprm2 (which implies mmap), so the store/open paths compile.
@@ -60,7 +60,7 @@
   features: "spqcprm2"
   test: true
 
-# [OPUS-4.8] (sq-6vshe.4) Seam A2: the `service` MODULE + its in-src unit tests moved to the
+# (sq-6vshe.4) Seam A2: the `service` MODULE + its in-src unit tests moved to the
 # internal sparq-engine-service sub-crate (see .github/feature-matrix.d/sparq-engine-service.yml).
 # This engine leg STAYS (unlike the serialize legs, which fully moved) because it still runs the
 # END-TO-END integration tests that exercise `exec::eval_service` through the facade —
@@ -72,7 +72,7 @@
   features: "service"
   test: true
 
-# [OPUS-5] sq-lsp7k.2.2: LOCAL rows-returning SERVICE handlers. The whole
+# sq-lsp7k.2.2: LOCAL rows-returning SERVICE handlers. The whole
 # `service_local` module, the executor's local intercept + the `service_local` in-src
 # unit tests and tests/federation_features/service_local.rs are behind the default-OFF
 # `service-local` feature, so ci.yml's feature-less `nextest archive` compiles them
@@ -94,7 +94,7 @@
   features: "service,service-local"
   test: true
 
-# [OPUS-4.8] sq-vya1: SPARQL window functions + the custom-aggregate registry.
+# sq-vya1: SPARQL window functions + the custom-aggregate registry.
 # The `window` module, the `AggregateFunction::Custom` eval arm and their 8 in-src
 # tests (`window::tests::*` + `aggregate::tests::custom_*`/`unregistered_*`) are all
 # `#[cfg(feature = "window-functions")]`, so the default build (and ci.yml's archive)
@@ -107,7 +107,7 @@
   features: "window-functions"
   test: true
 
-# [OPUS-4.8] sq-it1x: opt-in MVCC / ACID transaction isolation. The whole `txn`
+# sq-it1x: opt-in MVCC / ACID transaction isolation. The whole `txn`
 # module (`src/txn.rs`, gated `pub mod txn` in lib.rs) and its in-src unit tests
 # (`txn::tests::*`, 3) plus the whole-file `tests/mvcc_txn.rs` suite (13;
 # `#![cfg(feature = "txn")]`) are all `#[cfg(feature = "txn")]`, so the default
@@ -124,7 +124,7 @@
   features: "txn"
   test: true
 
-# [OPUS-4.8] sq-bif.12: vectorized (columnar / vector-at-a-time) primitives. The
+# sq-bif.12: vectorized (columnar / vector-at-a-time) primitives. The
 # `chunk` module (`pub mod chunk` + the `DataChunk`/`VecCmp`/`SelVec` re-exports),
 # its 9 in-src unit tests AND the new end-to-end differential suite
 # (`tests/vectorized_exec_differential.rs`, `#![cfg(feature = "vectorized")]`,
@@ -142,7 +142,7 @@
   features: "vectorized"
   test: true
 
-# [OPUS-4.8] sq-bif.12: the materialised-view / query-result cache. The `cache`
+# sq-bif.12: the materialised-view / query-result cache. The `cache`
 # module + the `ResultCache`/`CacheStats`/`is_cacheable` re-exports and the whole
 # `tests/result_cache.rs` suite (`#![cfg(feature = "result-cache")]`, incl. the new
 # INSERT/DELETE/UPDATE/CLEAR write-invalidation tests) are all
@@ -156,7 +156,7 @@
   features: "result-cache"
   test: true
 
-# [OPUS-4.8] sq-xj29q: the Oxigraph-shaped per-solution accessor on QueryResult.
+# sq-xj29q: the Oxigraph-shaped per-solution accessor on QueryResult.
 # `pub mod solution` (the zero-copy `QuerySolution`/`QuerySolutionIter`/
 # `QuerySolutionBindings`/`VarIndex` views over the columnar `rows`) is
 # `#[cfg(feature = "query-solution")]` in lib.rs, so its in-module `#[cfg(test)]
@@ -177,7 +177,7 @@
   features: "query-solution"
   test: true
 
-# [OPUS-4.8] sq-rp3um: parameterized prepared queries — safe value binding to
+# sq-rp3um: parameterized prepared queries — safe value binding to
 # prevent SPARQL injection (#901). The whole `params` module (`pub mod params`:
 # `PreparedQuery::bind`, `PreparedUpdate`, the `params::value::*` term ctors and
 # the 16 in-src unit tests `params::tests::*` — incl. the load-bearing #901
@@ -196,7 +196,7 @@
   features: "params"
   test: true
 
-# [OPUS-4.8] sq-u4lgr (#902): structured EXPLAIN — the typed `PlanNode` plan tree,
+# sq-u4lgr (#902): structured EXPLAIN — the typed `PlanNode` plan tree,
 # its hand-written JSON projection, per-operator q-error, and the bounded
 # `SlowQueryRing`. The whole `explain_json` module (`pub mod explain_json` + the
 # `PlanNode`/`SlowQuery`/`SlowQueryRing` re-exports), the trace node's `est` field,
@@ -216,7 +216,7 @@
   features: "explain-json"
   test: true
 
-# [OPUS-4.8] sq-gr8mb (survey §A3): exact-bitmap semi-join reducer on dense u32 ids.
+# sq-gr8mb (survey §A3): exact-bitmap semi-join reducer on dense u32 ids.
 # The `semijoin` module (`src/semijoin.rs`, `pub(crate) mod semijoin` in lib.rs — the
 # `KeyFilter` membership filter) + its 6 in-src unit tests (`semijoin::tests::*`) AND the
 # `scan_to_bindings` prefilter parameter + its construction in `eval_bgp_binary` are ALL
@@ -236,7 +236,7 @@
   features: "semijoin-bitmap"
   test: true
 
-# [OPUS-4.8] sq-5zf8i (survey §A4): Yannakakis bottom-up full-semijoin PREPASS for acyclic
+# sq-5zf8i (survey §A4): Yannakakis bottom-up full-semijoin PREPASS for acyclic
 # BGPs. The prepass driver (`eval_bgp_yannakakis` + `semijoin_reduce` + the `SjRelation`
 # materialised relation + the `YANNAKAKIS_MIN_REL` cost-gate in `exec.rs`) and the pure
 # join-tree builder (`semijoin::build_join_tree` + `TreeNode`, with its 5 in-src tests) plus
@@ -257,7 +257,7 @@
   features: "yannakakis"
   test: true
 
-# [FABLE-5] sq-7d3dj.30.14 (#1787): the `cluster-materialize` opt-in planner path gates ALL
+# sq-7d3dj.30.14 (#1787): the `cluster-materialize` opt-in planner path gates ALL
 # of its code (`src/cluster.rs`, the `eval_bgp_binary` hook + `eval_bgp_cluster` in exec.rs)
 # and its tests — 6 in-src `cluster::tests` unit tests + the whole-file result-equivalence
 # suite `tests/cluster_materialize_differential.rs` (which drives the REAL `eval_bgp_cluster`
@@ -278,7 +278,7 @@
 # `certain_vars_group_excludes_aggregate_output` + the anti-join decline tests) and the
 # whole-file e2e result-equivalence suite `tests/rewrite_pass.rs` behind
 # `#[cfg(feature = "algebra-rewrite")]` — without this leg they run ZERO times in CI
-# (ci.yml's --all-features lanes are clippy/rustdoc only). Reviewer-required leg (Fable
+# (ci.yml's --all-features lanes are clippy/rustdoc only). Reviewer-required leg (review
 # verdict on #1735): the regression witness for a previously-caught unsoundness must sit
 # in a gate, not a one-time local run. No new dep (`algebra-rewrite = []`), feature-OFF
 # path byte-identical (cfg-split PreparedQuery::parse).
@@ -287,7 +287,7 @@
   features: "algebra-rewrite"
   test: true
 
-# [OPUS-4.8] sq-iywur: opt-in DPccp dynamic-programming join-order enumerator. The whole
+# sq-iywur: opt-in DPccp dynamic-programming join-order enumerator. The whole
 # `dp` module (`src/dp.rs`, `pub mod dp` in lib.rs — the DPccp csg-cmp-pair enumerator, the
 # `with_dp_planner`/`with_dp_planner_budget` per-thread install, `QueryGraph`/`JoinTree`)
 # with its 7 in-src unit tests (`dp::tests::*`, incl. the 4000-random-graph brute-force
@@ -307,7 +307,7 @@
   features: "dp-planner"
   test: true
 
-# [FABLE-5] sq-7d3dj.30.7: the `value-join` opt-in equality-FILTER → value-join
+# sq-7d3dj.30.7: the `value-join` opt-in equality-FILTER → value-join
 # pass gates ALL of its tests behind `#[cfg(feature = "value-join")]` — the in-src
 # differential suite (`exec::eqjoin::tests`: per-term-class kill-switch
 # differentials incl. the sq-lr2ii high-precision-decimal witness, decline witnesses
@@ -322,7 +322,7 @@
   features: "value-join"
   test: true
 
-# [FABLE-5] sq-7d3dj.30.11 (#1785): the `id-filter-fastpath` opt-in id-level `=`/`!=`
+# sq-7d3dj.30.11 (#1785): the `id-filter-fastpath` opt-in id-level `=`/`!=`
 # FILTER fast path gates ALL 19 of its tests behind
 # `#[cfg(all(test, feature = "id-filter-fastpath"))]` — the `idfast_unit` module in
 # exec.rs (the load-bearing differential suite that pairs EVERY id kind — IRIs, bnodes,
@@ -344,7 +344,7 @@
   features: "id-filter-fastpath"
   test: true
 
-# [OPUS-4.8] sq-7d3dj.30.20: the `antijoin-static-decline` opt-in fix gates ALL of its code
+# sq-7d3dj.30.20: the `antijoin-static-decline` opt-in fix gates ALL of its code
 # (the static early-decline gate + `cond_has_seedable_correlation` in exec.rs and the
 # `EARLY_DECLINED`/`record_early_decline`/`early_declined` test-stat surface) behind
 # `#[cfg(feature = "antijoin-static-decline")]`, so the default build (and ci.yml's
@@ -365,7 +365,7 @@
   features: "antijoin-static-decline"
   test: true
 
-# [FABLE-5] sq-lsp7k.10: named parameterized SPARQL templates — the shared definition +
+# sq-lsp7k.10: named parameterized SPARQL templates — the shared definition +
 # typed-JSON-binding layer (`templates` module: `Template::new/from_json/to_json/bind_json`,
 # `ParamType`, `Bound::{is_update,is_graph_form,render}`) behind the server's `/templates`
 # REST surface and the MCP `template_invoke` tool. `templates = ["params", "dep:serde_json"]`
@@ -379,7 +379,7 @@
   features: "templates"
   test: true
 
-# [FABLE-5] (sq-lsp7k.3.1, PR #2007): programmatic full-path enumeration over one
+# (sq-lsp7k.3.1, PR #2007): programmatic full-path enumeration over one
 # predicate (`paths` module: `enumerate_paths`, `PathSpec`, `PathMode`, `PathSolution`).
 # `paths = []` — dependency-free, OFF by default; the whole module (`pub mod paths` in
 # lib.rs) and the whole-file suite `tests/paths_core.rs` (`#![cfg(feature = "paths")]`)
@@ -393,7 +393,7 @@
   features: "paths"
   test: true
 
-# [GPT-5.6] sq-lk3aw.4: exact-certified spatial FILTER pushdown is default-OFF,
+# sq-lk3aw.4: exact-certified spatial FILTER pushdown is default-OFF,
 # and tests/spatial_exact_pushdown.rs is compiled only with this feature.
 - name: "sparq-engine (spatial-exact-pushdown)"
   crate: "sparq-engine"
