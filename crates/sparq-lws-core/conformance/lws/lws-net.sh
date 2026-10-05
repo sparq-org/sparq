@@ -46,4 +46,10 @@ for _ in $(seq 1 100); do
   sleep 0.2
 done
 cd "$LWS_NET"
-Suite__BaseUri="http://localhost:$PORT/" dotnet test Suite/Test
+status=0
+Suite__BaseUri="http://localhost:$PORT/" dotnet test Suite/Test \
+  --logger "trx;LogFileName=lws-net.trx" --results-directory "$OUT" || status=$?
+# One line with the counts, as a CI annotation when running in GitHub Actions.
+counts=$(grep -o '<Counters [^>]*>' "$OUT/lws-net.trx" 2>/dev/null | head -1 || true)
+echo "${GITHUB_ACTIONS:+::notice title=lws-net::}lws-net ${counts:-no results}"
+exit $status
