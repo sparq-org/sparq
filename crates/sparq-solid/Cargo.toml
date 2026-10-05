@@ -50,7 +50,7 @@ sparq-trust = { path = "../sparq-trust", version = "0.1.3", optional = true }
 # Behind `trust-graph` only (already a transitive dep of sparq-trust, so it adds no crate to
 # that graph): gives tests/trust_graph.rs the ZK signing primitives without an unconditional
 # dev-dependency on the research estate. Path-only, like sparq-trust.
-sparq-zk = { path = "../sparq-zk", optional = true }
+sparq-zk = { path = "../sparq-zk", version = "0.1.3", optional = true }
 # [SONNET-4.6] sq-ysv3u (issue #2935): the TRUST-THE-ISSUER backend for ACP `acp:vc` —
 # W3C Data Integrity (`eddsa-rdfc-2022`) verification of a presented credential. OPTIONAL +
 # behind the `acp-vc` feature (OFF by default), so the default sparq-solid build carries ZERO
