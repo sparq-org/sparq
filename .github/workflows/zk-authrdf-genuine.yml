@@ -1,0 +1,113 @@
+# [OPUS-5.5] zkp-14.6: genuine V5 adapter receipts, one declared case per job.
+# Runs the existing ignored driver `vcq_authenticated_genuine` with an explicit
+# single-case job. Each job exports both guests from this commit, proves one
+# case, and uploads the driver's evidence directory (summary.json last).
+# Push-triggered on this branch only; it is not a required check.
+name: zk-authrdf-genuine
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/zk-authrdf-genuine-receipts]
+    paths:
+      - .github/workflows/zk-authrdf-genuine.yml
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_TARGET_DIR: ${{ github.workspace }}/zk/sparql-evaluator/target
+  RISC0_BUILD_LOCKED: 1
+
+jobs:
+  genuine:
+    name: genuine ${{ matrix.case }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      matrix:
+        case:
+          - ask-false-holder-declared
+          - ask-true-verifier-agreed
+          - select-bag-holder-declared
+          - construct-verifier-agreed
+          - construct-holder-declared
+          - select-bag-row-bound
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install checksum-pinned RISC Zero binaries and guest Rust
+        run: |
+          set -euo pipefail
+          tool_root="$RUNNER_TEMP/sparq-risc0-3.0.6"
+          mkdir -p "$tool_root/bin" "$tool_root/home/toolchains/v1.97.0-rust-x86_64-unknown-linux-gnu"
+          curl --fail --location --retry 3 https://github.com/risc0/risc0/releases/download/v3.0.6/cargo-risczero-x86_64-unknown-linux-gnu.tgz -o "$tool_root/cli.tgz"
+          curl --fail --location --retry 3 https://github.com/risc0/rust/releases/download/r0.1.97.0/rust-toolchain-x86_64-unknown-linux-gnu.tar.gz -o "$tool_root/rust.tar.gz"
+          echo "615d961bfb81d318db5071d7548389c850e324ac7f421c075176daf26082a60a  $tool_root/cli.tgz" | sha256sum --check --strict
+          echo "100b597d605b706bec94e1d32bfaaf5851df8d75173f986d4b56a3e90916be53  $tool_root/rust.tar.gz" | sha256sum --check --strict
+          tar -xzf "$tool_root/cli.tgz" -C "$tool_root/bin"
+          tar -xzf "$tool_root/rust.tar.gz" -C "$tool_root/home/toolchains/v1.97.0-rust-x86_64-unknown-linux-gnu"
+          printf '[default_versions]\nrust = "1.97.0"\n' > "$tool_root/home/settings.toml"
+          "$tool_root/bin/r0vm" --version
+          echo "$tool_root/bin" >> "$GITHUB_PATH"
+          echo "RISC0_HOME=$tool_root/home" >> "$GITHUB_ENV"
+          echo "RISC0_SERVER_PATH=$tool_root/bin/r0vm" >> "$GITHUB_ENV"
+
+      - name: Export the exact and V5 guests from this commit
+        run: |
+          set -euo pipefail
+          m=zk/sparql-evaluator/Cargo.toml
+          cargo run --locked --manifest-path "$m" -p sparq-proved-evaluator --example export_guest -- "$RUNNER_TEMP/exact-artifact"
+          cargo run --locked --manifest-path "$m" -p sparq-proved-evaluator --features authenticated-rdf --example export_authrdf_guest -- "$RUNNER_TEMP/authrdf-artifact"
+          ls -la "$RUNNER_TEMP/exact-artifact" "$RUNNER_TEMP/authrdf-artifact"
+          cat "$RUNNER_TEMP/exact-artifact/pin.json" "$RUNNER_TEMP/authrdf-artifact/pin.json"
+
+      - name: Build the genuine driver
+        run: cargo test --locked --no-run --manifest-path zk/sparql-evaluator/Cargo.toml -p sparq-proved-evaluator --features vcq-authenticated --test vcq_authenticated_genuine
+
+      - name: Prove the declared case
+        env:
+          CASE: ${{ matrix.case }}
+        run: |
+          set -euo pipefail
+          seed=$(printf 'sparq-authrdf-genuine:%s:%s' "$GITHUB_SHA" "$CASE" | sha256sum | cut -d' ' -f1)
+          python3 - "$RUNNER_TEMP" "$CASE" "$seed" > "$RUNNER_TEMP/job.json" <<'PY'
+          import json, sys, os
+          tmp, case, seed = sys.argv[1:]
+          def files(d):
+              names = sorted(os.listdir(d))
+              pin = [n for n in names if n == "pin.json"][0]
+              guest = [n for n in names if n != "pin.json"][0]
+              return os.path.join(d, guest), os.path.join(d, pin)
+          g, p = files(os.path.join(tmp, "authrdf-artifact"))
+          eg, ep = files(os.path.join(tmp, "exact-artifact"))
+          print(json.dumps({
+              "schema": "sparq.vcq-authrdf-genuine-proof.test-job.v1",
+              "guest": g, "pin": p, "exact_guest": eg, "exact_pin": ep,
+              "cases": [case], "challenge_seed32": seed,
+              "new_output_directory": os.path.join(tmp, "evidence", case),
+          }, indent=2))
+          PY
+          cat "$RUNNER_TEMP/job.json"
+          mkdir -p "$RUNNER_TEMP/evidence"
+          SPARQ_VCQ_AUTHRDF_PROOF_JOB="$RUNNER_TEMP/job.json" \
+            cargo test --locked --manifest-path zk/sparql-evaluator/Cargo.toml -p sparq-proved-evaluator \
+            --features vcq-authenticated --test vcq_authenticated_genuine -- --ignored --exact \
+            genuine_vcq_authrdf_receipts_verify_declared_cases_and_reject_controls --nocapture 2>&1 | tee "$RUNNER_TEMP/evidence/run-$CASE.log"
+
+      - name: Upload evidence, including partial evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: authrdf-genuine-${{ matrix.case }}-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/evidence
+            ${{ runner.temp }}/job.json
+            ${{ runner.temp }}/authrdf-artifact
+            ${{ runner.temp }}/exact-artifact
+          if-no-files-found: error
+          retention-days: 90
