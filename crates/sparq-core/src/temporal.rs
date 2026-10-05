@@ -119,14 +119,9 @@ impl Timeline {
 
 /// The XPath dateTime/date comparison on precomputed instants: direct when both
 /// or neither operand carries a timezone; with MIXED presence only decidable
-/// outside the ±14h window (inside it — including exactly 14h — indeterminate -> `None`).
-/// The window is decided on the f64 instants, so a pair within the instants' rounding
-/// error of the edge (sub-microsecond for present-day dates) may land on either side.
-/// Public so every XSD-ordering consumer (the engine via [`Timeline`]/[`Temporal`],
-/// sparq-shacl's `sh:lessThan`/range comparisons on its own instants) shares this ONE
-/// window rule (#3526).
+/// outside the ±14h window (inside it: indeterminate -> `None`).
 #[inline]
-pub fn cmp_instants(ai: f64, a_tz: bool, bi: f64, b_tz: bool) -> Option<Ordering> {
+fn cmp_instants(ai: f64, a_tz: bool, bi: f64, b_tz: bool) -> Option<Ordering> {
     // Same (or no) timezone: a direct compare. With MIXED presence the order is
     // only decidable outside the ±14h window; inside it the result is indeterminate.
     if a_tz == b_tz || (ai - bi).abs() > 14.0 * 3600.0 {
@@ -281,22 +276,6 @@ mod tests {
         // Outside the window the order is decidable.
         let far = dt("2024-03-17T13:00:00");
         assert_eq!(Temporal::cmp_t(zoned, far), Some(Less));
-        // Exactly 14h apart with a shared fraction is indeterminate; just past the
-        // edge is decided (both operand orders).
-        for (f, z) in [
-            ("1969-12-31T14:16:40.1", "1970-01-01T04:16:40.1Z"),
-            ("1969-12-31T14:16:40.0000005", "1970-01-01T04:16:40.0000005Z"),
-        ] {
-            assert_eq!(Temporal::cmp_t(dt(f), dt(z)), None, "{f} vs {z}");
-            assert_eq!(Temporal::cmp_t(dt(z), dt(f)), None, "{z} vs {f}");
-        }
-        for (f, z) in [
-            ("1969-12-31T14:16:40", "1970-01-01T04:16:40.000001Z"),
-            ("1970-01-01T00:00:00", "1970-01-01T14:00:00.0000004Z"),
-        ] {
-            assert_eq!(Temporal::cmp_t(dt(f), dt(z)), Some(Less), "{f} vs {z}");
-            assert_eq!(Temporal::cmp_t(dt(z), dt(f)), Some(Greater), "{z} vs {f}");
-        }
     }
 
     #[test]

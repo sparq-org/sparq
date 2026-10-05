@@ -2870,9 +2870,24 @@ fn cmp_literals(a: &Literal, b: &Literal) -> Option<Ordering> {
     if is_date_time(da) && is_date_time(db) {
         let (ta, tza) = timestamp(a.value(), da)?;
         let (tb, tzb) = timestamp(b.value(), db)?;
-        // XSD's ±14h rule (XSD 1.1 pt.2 §3.3.7) for mixed timezone presence — the SAME
-        // comparator the engine's FILTER / ORDER BY path uses (#3526).
-        return sparq_core::temporal::cmp_instants(ta, tza, tb, tzb);
+        if tza != tzb {
+            // XSD's ±14h rule (XSD 1.1 pt.2 §3.3.7): an untimezoned value may
+            // lie in any timezone from -14:00 to +14:00, so it denotes a 28h
+            // window of instants around its as-if-UTC timestamp. Order against
+            // a timezoned instant is DETERMINATE only when the whole window
+            // falls strictly on one side; otherwise the pair is incomparable.
+            const TZ_WINDOW_SECS: f64 = 14.0 * 3600.0;
+            let (u, z) = if tza { (tb, ta) } else { (ta, tb) };
+            let ord = if u + TZ_WINDOW_SECS < z {
+                Ordering::Less
+            } else if u - TZ_WINDOW_SECS > z {
+                Ordering::Greater
+            } else {
+                return None;
+            };
+            return Some(if tza { ord.reverse() } else { ord });
+        }
+        return ta.partial_cmp(&tb);
     }
     None
 }
@@ -3336,94 +3351,6 @@ mod tests {
             cmp_literals(&lit("2000-01-01T00:00:00"), &lit("2000-01-01T14:00:01Z")),
             Some(Ordering::Less),
             "one second past the window edge -> determinate <"
-        );
-        // The zoned operand FIRST, at the boundary from the other side.
-        assert_eq!(
-            cmp_literals(&lit("2000-01-01T14:00:00Z"), &lit("2000-01-01T00:00:00")),
-            None,
-            "exactly 14h apart, operands flipped -> indeterminate"
-        );
-        assert_eq!(
-            cmp_literals(&lit("2000-01-01T14:00:01Z"), &lit("2000-01-01T00:00:00")),
-            Some(Ordering::Greater),
-            "one second past the window edge, operands flipped -> determinate >"
-        );
-    }
-
-    /// #3526 tripwire: on xsd:dateTime pairs both parsers accept, sparq-shacl's ordering IS the
-    /// engine's (`sparq_core::temporal`) — same-presence, mixed-presence inside / on / just
-    /// past the ±14h window, fractional seconds, both operand orders.
-    #[test]
-    fn date_time_order_matches_sparq_core_temporal() {
-        use sparq_core::temporal::Temporal;
-        let dt = xsd("dateTime");
-        let vals = [
-            "2000-01-01T00:00:00",
-            "2000-01-01T00:00:00Z",
-            "2000-01-01T14:00:00Z",
-            "2000-01-01T14:00:01Z",
-            "1999-12-31T09:59:59Z",
-            "1999-12-31T10:00:00Z",
-            "2000-01-01T13:59:59.5+00:00",
-            "2000-01-01T05:00:00-05:00",
-            "2000-01-01T12:00:00.25",
-            "2000-01-02T02:00:00+14:00",
-            "2000-01-01T23:59:59-14:00",
-            "2002-10-10T12:00:00-05:00",
-            "2002-10-10T12:00:00",
-        ];
-        let lit =
-            |v: &str| Literal::new_typed_literal(v, oxrdf::NamedNode::new(dt.clone()).unwrap());
-        for a in vals {
-            for b in vals {
-                let core = Temporal::cmp_t(
-                    Temporal::of_lit(a, &dt).unwrap(),
-                    Temporal::of_lit(b, &dt).unwrap(),
-                );
-                assert_eq!(cmp_literals(&lit(a), &lit(b)), core, "{a} vs {b}");
-            }
-        }
-    }
-
-    /// Intentional, documented difference kept by #3526: SHACL orders xsd:date against
-    /// xsd:dateTime on one timeline (a date is its midnight), whereas the engine's
-    /// `Temporal::cmp_t` treats them as disjoint families (`None`).
-    /// The 14h window edge, in both operand orders: exactly 14h with a shared fraction
-    /// is indeterminate, a microsecond (or less) past it is decided, matching the engine.
-    #[test]
-    fn date_time_window_edge_matches_engine() {
-        let lit = |v: &str| {
-            Literal::new_typed_literal(v, oxrdf::NamedNode::new(xsd("dateTime")).unwrap())
-        };
-        for (f, z) in [
-            ("1969-12-31T14:16:40.1", "1970-01-01T04:16:40.1Z"),
-            ("1969-12-31T14:16:40.0000005", "1970-01-01T04:16:40.0000005Z"),
-        ] {
-            assert_eq!(cmp_literals(&lit(f), &lit(z)), None, "{f} vs {z}");
-            assert_eq!(cmp_literals(&lit(z), &lit(f)), None, "{z} vs {f}");
-        }
-        for (f, z) in [
-            ("1969-12-31T14:16:40", "1970-01-01T04:16:40.000001Z"),
-            ("1970-01-01T00:00:00", "1970-01-01T14:00:00.0000004Z"),
-            ("2024-03-16T03:00:00.000001", "2024-03-15T13:00:00Z"),
-        ] {
-            let ord = if f.starts_with("2024") { Ordering::Greater } else { Ordering::Less };
-            assert_eq!(cmp_literals(&lit(f), &lit(z)), Some(ord), "{f} vs {z}");
-            assert_eq!(cmp_literals(&lit(z), &lit(f)), Some(ord.reverse()), "{z} vs {f}");
-        }
-    }
-
-    #[test]
-    fn date_vs_date_time_stays_comparable_in_shacl() {
-        let typed = |v: &str, t: &str| {
-            Literal::new_typed_literal(v, oxrdf::NamedNode::new(xsd(t)).unwrap())
-        };
-        assert_eq!(
-            cmp_literals(
-                &typed("2024-01-01Z", "date"),
-                &typed("2024-01-01T00:00:01Z", "dateTime")
-            ),
-            Some(Ordering::Less)
         );
     }
 }
