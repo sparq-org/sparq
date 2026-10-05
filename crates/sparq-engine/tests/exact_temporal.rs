@@ -270,3 +270,16 @@ fn datetime_accessors_read_validated_components() {
         assert_eq!(actual, expected, "{lexical}");
     }
 }
+
+#[test]
+fn stored_identical_operands_still_meet_the_temporal_year_range() {
+    let graph = Graph::load_str(
+        "<http://ex/s> <http://ex/p> \"1000000001-01-01T00:00:00Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> .",
+        "ntriples",
+    )
+    .unwrap();
+    for query in ["SELECT ?x { ?s ?p ?x FILTER(?x = ?x) }", "ASK { ?s ?p ?x FILTER(?x = ?x) }"] {
+        let error = sparq_engine::query_with_budget(&graph, query, &bounded()).unwrap_err();
+        assert!(error.contains("query evaluation capacity exceeded (temporal-year)"), "{query}: {error}");
+    }
+}

@@ -15779,10 +15779,13 @@ fn equal_compiled(
     // single-id terms and BOTH bound (an unbound `NO_ID` column would be a type error, not
     // equal). UNEQUAL ids fall through to the exact path unchanged — crucially, unequal ids of
     // value-equal literals (`"1"^^integer` = `"1.0"^^decimal`, sq-lr2ii) must NOT be decided here.
+    // An active temporal year range must still see both operands, so it takes the exact path.
     #[cfg(feature = "id-filter-fastpath")]
-    if let (Some(ida), Some(idc)) = (operand_single_id(graph, row, a), operand_single_id(graph, row, c)) {
-        if ida != NO_ID && ida == idc {
-            return Ok(Value::Bool(true));
+    if !budget::temporal_capacity_active() {
+        if let (Some(ida), Some(idc)) = (operand_single_id(graph, row, a), operand_single_id(graph, row, c)) {
+            if ida != NO_ID && ida == idc {
+                return Ok(Value::Bool(true));
+            }
         }
     }
     if compiled_expr_has_arith(a) || compiled_expr_has_arith(c) {

@@ -22,6 +22,8 @@ sep-0002 = ["fork/sep-0002"]
 sep-0006 = ["fork/sep-0006"]
 sparql-12 = ["fork/sparql-12"]
 standard-unicode-escaping = ["fork/standard-unicode-escaping"]
+sparq-deterministic-paths = ["fork/sparq-deterministic-paths"]
+sparq-deterministic-blank-nodes = ["fork/sparq-deterministic-blank-nodes"]
 
 [dependencies]
 fork = { package = "sparq-spargebra", path = "../spargebra" }

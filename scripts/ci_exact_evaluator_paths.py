@@ -18,24 +18,13 @@ EXACT_FILES = {
     "scripts/tests/test_ci_exact_evaluator_paths.py",
     "crates/sparq-conformance/examples/proof_corpus.rs",
 }
-# [OPUS-5.5] The registry-parser job also compiles or scans these migrated
-# `parse_versioned_*` callers (and the engine's test-only introspection
-# dependency). They are a superset addition: they do not trigger the proof job.
-REGISTRY_PARSER_PREFIXES = (
-    "crates/sparq-text/", "crates/sparq-shacl/", "crates/sparq-introspect/", "crates/sparq-vectors/",
-    "crates/sparq-server/", "crates/sparq-solid/", "crates/sparq-py/", "crates/sparq-lws-core/",
-)
-REGISTRY_PARSER_FILES = {"scripts/check_registry_parser.py", "scripts/tests/test_registry_parser.py"}
-SCOPES = ("exact-evaluator", "registry-parser")
+SCOPES = ("exact-evaluator",)
 
 
 def relevant_path(path: str, scope: str = "exact-evaluator") -> bool:
     if scope not in SCOPES:
         raise ValueError(f"unknown selection scope: {scope!r}")
-    if path.startswith(EXACT_PREFIXES) or path in EXACT_FILES:
-        return True
-    return scope == "registry-parser" and (
-        path.startswith(REGISTRY_PARSER_PREFIXES) or path in REGISTRY_PARSER_FILES)
+    return path.startswith(EXACT_PREFIXES) or path in EXACT_FILES
 
 
 def requires_execution(event: str, base: str, head: str, scope: str = "exact-evaluator") -> bool:

@@ -24,7 +24,7 @@ ark-crypto-primitives = { path = "../../vendor/zk-sdk/ark-crypto-primitives-0.5.
 risc0-build = { path = "../../vendor/zk-sdk/risc0-build-3.0.6" }
 rzup = { path = "../../vendor/zk-sdk/rzup-0.5.2" }
 ark-relations = { path = "../../vendor/zk-sdk/ark-relations-0.5.1" }
-spargebra = { path = "../../vendor/spargebra" }
+spargebra = { path = "../../vendor/spargebra-shim" }
 
 [profile.dev]
 debug = 0

@@ -292,8 +292,7 @@ This helper is `support/authenticated_rdf_evidence.rs`; the existing
 ## Repository gates
 
 The V5 guest workspace and its lock are registered in the dependency gates
-(`scripts/rust-dependency-graphs.py`, a fourth graph), the registry-parser
-source-lock check (`scripts/check_registry_parser.py`) and SBOM supplier
+(`scripts/rust-dependency-graphs.py`, a fourth graph) and SBOM supplier
 classification (`scripts/sbom-normalize.jq`). The exact-evaluator campaign
 (`scripts/ci_exact_evaluator_evidence.py`) rebuilds the V5 guest's local
 packages in its own target. It exports and later re-confirms the V5 artifact in

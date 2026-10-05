@@ -1,12 +1,10 @@
 //! [OPUS-5.5] Differential: the stable-parser adapter versus the vendored fork.
 //!
 //! The vendored `spargebra` fork retains VERSION labels itself. This target is
-//! the only permitted caller of those fork-only methods
-//! (`scripts/check_registry_parser.py scan` enforces it); production code uses
+//! the only caller of those fork-only methods; production code uses
 //! `sparq_engine::parse_versioned_{query,update}`, which also compiles against
-//! upstream `spargebra` 0.4.6. The gate runs this target in both upstream
-//! escaping modes: plainly and with
-//! `--features spargebra/standard-unicode-escaping`.
+//! upstream `spargebra` 0.4.6. Run it plainly and with
+//! `--features spargebra/standard-unicode-escaping` to cover both escaping modes.
 
 #[path = "parser_versions/cases.rs"]
 mod cases;

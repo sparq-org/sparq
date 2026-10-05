@@ -23,10 +23,10 @@ license = "MIT"
 # workspace (which does not list this crate as a member).
 [workspace]
 
-# The root workspace patches spargebra with the vendored W3C-conformance fork; the
-# engine's parser depends on it, so this detached project applies the same patch.
-# [GPT-6] The root workspace requirement is exact (=0.4.6): without that pin,
-# an unlocked cold resolver can prefer a newer registry version over this fork.
+# The engine's parser is the vendored W3C-conformance fork (published as
+# sparq-spargebra). Registry-named `spargebra` dependents in this detached project
+# reach the same fork through the upstream-named shim, so a cold resolver cannot
+# prefer a newer registry parser.
 [patch.crates-io]
 spargebra = { path = "../../../vendor/spargebra-shim" }
 

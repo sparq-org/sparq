@@ -19,7 +19,7 @@ risc0-zkos-v1compat = { path = "../../../../vendor/zk-sdk/risc0-zkos-v1compat-2.
 ark-crypto-primitives = { path = "../../../../vendor/zk-sdk/ark-crypto-primitives-0.5.0" }
 # [GPT-6] Exact upstream archives with narrowly recorded dependency/feature patches.
 ark-relations = { path = "../../../../vendor/zk-sdk/ark-relations-0.5.1" }
-spargebra = { path = "../../../../vendor/spargebra" }
+spargebra = { path = "../../../../vendor/spargebra-shim" }
 
 [profile.release]
 debug = 0

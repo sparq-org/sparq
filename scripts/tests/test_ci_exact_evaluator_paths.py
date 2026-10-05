@@ -21,13 +21,6 @@ EXACT_INPUTS = ["zk/sparql-evaluator/fixtures/case.json", "crates/sparq-engine/s
                 "scripts/tests/test_ci_exact_evaluator_evidence.py", "vendor/zk-sdk/risc0-build/src/lib.rs",
                 "bench/zk-bindings/exact_ci.py", "bench/zk-bindings/corpus.py",
                 "bench/zk-bindings/exact-originals.json", "crates/sparq-conformance/examples/proof_corpus.rs"]
-# [OPUS-5.5] Registry-parser additions: gate files and migrated caller crates.
-REGISTRY_ONLY_INPUTS = ["scripts/check_registry_parser.py", "scripts/tests/test_registry_parser.py",
-                        "crates/sparq-text/src/rewrite.rs", "crates/sparq-shacl/src/sparql.rs",
-                        "crates/sparq-shacl/Cargo.toml", "crates/sparq-vectors/src/rewrite.rs",
-                        "crates/sparq-server/src/exec.rs", "crates/sparq-solid/src/rewrite.rs",
-                        "crates/sparq-py/src/lib.rs", "crates/sparq-lws-core/src/sparql_endpoint.rs",
-                        "crates/sparq-introspect/Cargo.toml"]
 
 
 def completed(stdout=b""):
@@ -42,39 +35,11 @@ class ExactEvaluatorSelection(unittest.TestCase):
         self.assertNotIn("    paths:", workflow)
         self.assertIn("Require explicit classification output", workflow)
         self.assertIn("python3 scripts/ci_exact_evaluator_paths.py", workflow)
-        self.assertIn("python3 scripts/ci_exact_evaluator_paths.py --scope registry-parser", workflow)
         self.assertIn("python3 scripts/ci_exact_evaluator_evidence.py", workflow)
 
     def test_every_execution_input_is_relevant(self):
         for path in EXACT_INPUTS:
             self.assertTrue(selector.relevant_path(path), path)
-            # [OPUS-5.5] The registry gate reruns whenever the proof job would.
-            self.assertTrue(selector.relevant_path(path, "registry-parser"), path)
-
-    def test_registry_scope_adds_gate_files_and_caller_crates_only(self):
-        for path in REGISTRY_ONLY_INPUTS:
-            self.assertTrue(selector.relevant_path(path, "registry-parser"), path)
-            # Caller-crate edits alone must not start the 120-minute proof job.
-            self.assertFalse(selector.relevant_path(path), path)
-        for path in ["docs/design.md", "crates/sparq-geo/src/lib.rs", "skills/sparql-query/SKILL.md",
-                     "crates/sparq-textual/src/lib.rs", "scripts/check_registry_parser.py.orig"]:
-            self.assertFalse(selector.relevant_path(path, "registry-parser"), path)
-
-    def test_caller_change_selects_the_registry_gate_but_not_the_proof(self):
-        for scope, expected in [("registry-parser", True), ("exact-evaluator", False)]:
-            with patch.object(selector.subprocess, "run", side_effect=[
-                completed(), completed(b"crates/sparq-server/src/exec.rs\0docs/notes.md\0"),
-            ]):
-                self.assertEqual(selector.requires_execution("pull_request", BASE, HEAD, scope), expected)
-
-    def test_registry_scope_keeps_fail_closed_selection(self):
-        with patch.object(selector.subprocess, "run", side_effect=[completed(), completed(b"docs/design.md")]):
-            self.assertTrue(selector.requires_execution("merge_group", BASE, HEAD, "registry-parser"))
-        with patch.object(selector.subprocess, "run", side_effect=OSError()):
-            self.assertTrue(selector.requires_execution("push", BASE, HEAD, "registry-parser"))
-        with patch.object(selector.subprocess, "run") as run:
-            self.assertTrue(selector.requires_execution("workflow_dispatch", "", "", "registry-parser"))
-            run.assert_not_called()
 
     def test_unknown_scope_is_an_error_not_a_skip(self):
         # An empty diff never consults relevant_path, so the scope is checked first.

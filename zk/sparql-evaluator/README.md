@@ -349,8 +349,8 @@ passed the native host and job-parsing tests, a feature Clippy pass and direct
 guest execution, which observed each guest rejecting the other's input and
 created no receipt. The one low-level genuine job attempted there timed out
 before completing a proof; the only genuine V5 receipt, for one case, came later
-through the vcq adapter (see below). The dependency, SBOM,
-registry-parser and exact-evaluator campaign gates register its workspace and
+through the vcq adapter (see below). The dependency, SBOM
+and exact-evaluator campaign gates register its workspace and
 lock and fail closed without that lock; no completed campaign run with the V5
 steps is recorded, and the campaign creates no V5 receipt. The ignored
 genuine-proof driver `host/tests/authenticated_rdf_genuine.rs` proves only the
