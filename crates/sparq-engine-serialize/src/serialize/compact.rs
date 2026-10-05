@@ -26,7 +26,7 @@ use oxrdf::{NamedOrBlankNode, Term, Triple};
 use sparq_jsonld::from_rdf::{from_rdf, FromRdfOptions, RdfQuad, RdfTerm};
 use sparq_jsonld::frame::{frame, FrameOptions};
 use sparq_jsonld::compact::compact_expanded;
-use sparq_jsonld::{JsonLdOptions, NoopLoader};
+use sparq_jsonld::{JsonLdOptions, NoopLoader, ProcessingMode};
 
 pub use sparq_jsonld::{ActiveContext, Json};
 
@@ -87,9 +87,20 @@ fn native_scalars(v: &mut Json) {
 }
 
 /// The lossless expanded fromRdf document for `graphs`.
+///
+/// Typed list cells stay explicit nodes, so their `rdf:type rdf:List` triple survives.
+/// A malformed `rdf:JSON` literal is admissible RDF but fails the 1.1 `@json` decoding,
+/// so such a dataset is converted in 1.0 mode instead, where every `rdf:JSON` literal
+/// stays a typed string.
 fn expanded(graphs: &[NamedGraph<'_>]) -> Json {
-    let mut doc = from_rdf(&rdf_quads(graphs), &FromRdfOptions::default())
-        .expect("a dataset of well-formed RDF terms always converts");
+    let quads = rdf_quads(graphs);
+    let mut options = FromRdfOptions::default();
+    options.keep_typed_list_cells = true;
+    let mut doc = from_rdf(&quads, &options).unwrap_or_else(|_| {
+        options.processing_mode = ProcessingMode::JsonLd10;
+        // With @json decoding and compound literals both off, no term can fail.
+        from_rdf(&quads, &options).expect("1.0-mode fromRdf of RDF terms is total")
+    });
     native_scalars(&mut doc);
     doc
 }

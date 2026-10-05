@@ -112,7 +112,9 @@ pub fn compact_expanded(
     };
 
     // The Compaction Algorithm proper, with a null active property.
-    let compacted = compact_element(ctx, None, expanded, &env)?;
+    let compacted = compact_element(ctx, None, expanded, &env);
+    ctx.trim_memos();
+    let compacted = compacted?;
 
     // API post-processing: [] → {}; a remaining array is wrapped under aliased @graph.
     let mut result = match compacted {
@@ -277,6 +279,20 @@ impl Ctx {
         Ctx { active, inverse, memo: RefCell::default(), derived: RefCell::default() }
     }
 
+    /// Clears this root's IRI memos (its own and its derived contexts') once they hold
+    /// more than [`MEMO_CAP`] IRIs. The root outlives the call in [`LAST_ROOT`] and node
+    /// ids differ per document, so without this the memos would keep every IRI ever
+    /// compacted on the thread; within one call they stay unbounded, which keeps large
+    /// documents fast.
+    fn trim_memos(&self) {
+        let derived = self.derived.borrow();
+        for memo in std::iter::once(&self.memo).chain(derived.iter().map(|(_, c)| &c.memo)) {
+            if memo.borrow().len() > MEMO_CAP {
+                memo.borrow_mut().clear();
+            }
+        }
+    }
+
     /// IRI Compaction against this context (see `context::inverse`'s `compact_iri`),
     /// memoised for the value shapes in [`Shape`].
     fn ciri(&self, iri: &str, value: Option<&Json>, vocab: bool, reverse: bool) -> String {
@@ -304,6 +320,9 @@ impl Ctx {
         result
     }
 }
+
+/// Most distinct IRIs a [`Ctx`] keeps memoised between calls (see [`Ctx::trim_memos`]).
+const MEMO_CAP: usize = 4096;
 
 /// One memoised IRI Compaction: (value shape, vocab, reverse, result).
 type MemoEntry = (OwnedShape, bool, bool, String);
@@ -1173,5 +1192,28 @@ fn context_is_empty(ctx: &Json) -> bool {
         Json::Obj(m) => m.is_empty(),
         Json::Arr(a) => a.is_empty(),
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::NoopLoader;
+
+    // The cached root context outlives each call, so its IRI memo must stay bounded
+    // however many distinct node ids pass through it.
+    #[test]
+    fn cached_root_memo_is_bounded() {
+        let ctx = Json::parse(r#"{"@vocab":"http://ex/"}"#).unwrap();
+        let opts = JsonLdOptions::default();
+        for batch in 0..3 {
+            let nodes: Vec<String> = (0..MEMO_CAP)
+                .map(|i| format!(r#"{{"@id":"http://ex/n{batch}-{i}","http://ex/p":[{{"@value":"v"}}]}}"#))
+                .collect();
+            let doc = Json::parse(&format!("[{}]", nodes.join(","))).unwrap();
+            compact_expanded(&doc, &ctx, &opts, &NoopLoader).unwrap();
+        }
+        let len = LAST_ROOT.with(|last| last.borrow().as_ref().map(|(_, _, c)| c.memo.borrow().len()));
+        assert!(len.is_some_and(|n| n <= MEMO_CAP), "memo size {len:?}");
     }
 }

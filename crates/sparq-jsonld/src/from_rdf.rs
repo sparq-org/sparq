@@ -16,8 +16,11 @@
 //!   a malformed literal raises the spec's `invalid JSON literal` error code.
 //! * **`rdf:List` reconstruction** — well-formed `rdf:first`/`rdf:rest`/`rdf:nil`
 //!   chains collapse into `@list` arrays (including nested lists); chains that are
-//!   not well-formed (a cell referenced more than once — e.g. shared across graphs —
-//!   or carrying extra properties) stay as plain node objects, exactly per spec.
+//!   not well-formed (a cell referenced more than once, or carrying extra properties)
+//!   stay as plain node objects, exactly per spec. One liberty: a cell referenced from
+//!   a *different* graph also stays put. The REC's walk follows the global
+//!   referenced-once map across graphs, which would move the cell's triples into the
+//!   referencing graph; the W3C suite has no such case.
 //! * **`useNativeTypes` / `useRdfType`** — native JSON scalar coercion for
 //!   `xsd:boolean`/`xsd:integer`/`xsd:double` (invalid or non-finite lexical forms
 //!   honestly stay typed strings), and `rdf:type`-as-property instead of `@type`.
@@ -207,6 +210,12 @@ pub struct FromRdfOptions {
     /// subjects sorted lexicographically), which satisfies `ordered: true` and is a
     /// permitted ordering when the flag is off; the field is carried for API parity.
     pub ordered: bool,
+    /// Keep list cells that carry an explicit `rdf:type rdf:List` as plain node objects
+    /// instead of collapsing them into `@list` (default `false`, the REC's behaviour).
+    /// The REC's collapse drops the type triple, since list-to-RDF conversion recreates
+    /// only `rdf:first`/`rdf:rest`; a writer that must round-trip to the same dataset
+    /// sets this.
+    pub keep_typed_list_cells: bool,
 }
 
 impl Default for FromRdfOptions {
@@ -217,6 +226,7 @@ impl Default for FromRdfOptions {
             use_native_types: false,
             use_rdf_type: false,
             ordered: false,
+            keep_typed_list_cells: false,
         }
     }
 }
@@ -231,6 +241,7 @@ impl FromRdfOptions {
             use_native_types: false,
             use_rdf_type: false,
             ordered: options.ordered,
+            keep_typed_list_cells: false,
         }
     }
 }
@@ -503,7 +514,12 @@ pub fn from_rdf(dataset: &[RdfQuad], options: &FromRdfOptions) -> Result<Json, J
                 let Some(RefState::Once(next)) = referenced_once.get(&node_id) else {
                     break;
                 };
-                if !is_well_formed_list_node(&graphs, &node_graph, &node_id) {
+                // A cell referenced from another graph stays put: collapsing it would
+                // move its triples into the referencing graph.
+                if next.graph != node_graph {
+                    break;
+                }
+                if !is_well_formed_list_node(&graphs, &node_graph, &node_id, options) {
                     break;
                 }
                 items.push((node_graph.clone(), node_id.clone(), RDF_FIRST.to_string(), 0));
@@ -846,12 +862,21 @@ fn first_item_value<'a>(node: &'a Node, property: &str) -> Option<&'a Json> {
 }
 
 /// The spec's list-node well-formedness: only `@id` + single-valued `rdf:first` +
-/// single-valued `rdf:rest` (and optionally `@type` = exactly `[rdf:List]`).
-fn is_well_formed_list_node(graphs: &DatasetMap, graph: &str, id: &str) -> bool {
+/// single-valued `rdf:rest` (and optionally `@type` = exactly `[rdf:List]`, unless
+/// [`FromRdfOptions::keep_typed_list_cells`]).
+fn is_well_formed_list_node(
+    graphs: &DatasetMap,
+    graph: &str,
+    id: &str,
+    options: &FromRdfOptions,
+) -> bool {
     let Some(node) = graphs.get(graph).and_then(|g| g.get(id)) else {
         return false;
     };
-    if !(node.types.is_empty() || (node.types.len() == 1 && node.types[0] == RDF_LIST)) {
+    let typed_ok = node.types.len() == 1
+        && node.types[0] == RDF_LIST
+        && !options.keep_typed_list_cells;
+    if !(node.types.is_empty() || typed_ok) {
         return false;
     }
     if node.props.len() != 2 {

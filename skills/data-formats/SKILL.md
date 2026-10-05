@@ -450,11 +450,15 @@ with a compact IRI on read-back, sq-oy1f.11; a plain **literal** value under a `
 term moves to a non-coerced key so it does not read back as a node IRI, sq-oy1f.13). Build the
 context with `parse_context_json(r#"{…}"#)` (a string → `JsonLdValue`, returns `None` if not a JSON
 object) or construct the `JsonLdValue` directly; the parsed `ActiveContext` drives compaction. The
-output is a `{"@context":…,"@graph":[…]}` document and the compaction is **lossless** — every
-coercion is invertible against the same `@context`, so a JSON-LD-to-RDF round-trip reconstructs the
-original triples. *Scope:* this is the fromRdf-then-compact (serialise) path — sparq always emits
-RDF, so the input is a `Graph`, not an arbitrary remote document; scoped/typed contexts,
-`@propagate`, remote `@context` fetching, `@import`, `@protected` are out of scope (JSON-LD
+output is the W3C Compaction Algorithm's document: `@context` merged into the single top-level node,
+or `@context` plus a `@graph` array when there are several, with nodes in code-point order of their
+expanded `@id`. The compaction is **lossless** — every coercion is invertible against the same
+`@context`, so a JSON-LD-to-RDF round-trip reconstructs the original dataset (list cells typed
+`rdf:List` or referenced from another graph stay explicit nodes, and a malformed `rdf:JSON` literal
+stays a typed string). *Scope:* this is the fromRdf-then-compact (serialise) path — sparq always
+emits RDF, so the input is a `Graph`, not an arbitrary remote document. Scoped and type-scoped
+contexts, `@propagate` and `@protected` follow the W3C algorithm; a remote `@context` or `@import` is
+never fetched, so such a context yields the lossless expanded document instead (JSON-LD
 **Framing** is its own recipe below, sq-oy1f.17). *Strict third-party faithfulness:* the compaction
 round-trip is verified both against sparq's own JSON-LD→RDF reader **and** differentially against the
 **pyld** W3C reference processor (`expand`/`toRdf`) for the `@reverse`, language-map, `@type:@id`,
@@ -544,8 +548,9 @@ JSON-LD crate ships framing). It implements:
   default/null. **List framing** keeps the `{"@list":…}` wrapper, framing each element.
 
 Output is a `{"@context":…,"@graph":[…]}` document, collapsing to the bare framed node merged with
-`@context` for a single matched root (the `omitGraph` default). Each named graph in the dataset is
-framed against the same pattern (wrapped `{"@id":<graph>,"@graph":[…]}`). The framed shape is
+`@context` for a single matched root (the `omitGraph` default). Nodes in named graphs are matched
+against the frame together with the default graph (the W3C merged node map), so a matched node is
+emitted bare, without a graph wrapper. The framed shape is
 **differential-tested byte-for-byte against the pyld reference processor's `frame`** across the
 flag matrix (sq-oy1f.17), and **ratcheted against the official `w3c/json-ld-framing` suite**
 (sq-oy1f.19; see the conformance bullet below) — each `jld:FrameTest` expanded input is framed and

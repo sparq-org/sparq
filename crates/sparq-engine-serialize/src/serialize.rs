@@ -3859,6 +3859,60 @@ ex:bob
         );
     }
 
+    /// Per-graph triple counts, keyed by graph name (`""` for the default graph).
+    fn graph_counts(g: &Graph) -> Vec<(String, usize)> {
+        let mut v = vec![(String::new(), g.iter_ids().count())];
+        v.extend(g.named.iter().map(|(n, ng)| (n.to_string(), ng.iter_ids().count())));
+        v.retain(|(_, c)| *c > 0);
+        v.sort();
+        v
+    }
+
+    // A list whose head reference sits in another graph must not be collapsed into that
+    // graph: its cells' triples would move with it.
+    #[test]
+    fn compact_keeps_list_cells_in_their_own_graph() {
+        let g0 = Graph::load_dataset(
+            r#"@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+               <http://ex/g1> { <http://ex/s> <http://ex/p> _:l . }
+               <http://ex/g2> { _:l rdf:first "a" ; rdf:rest rdf:nil . }"#,
+            "trig",
+        )
+        .unwrap();
+        let (doc, g1) = compact_then_reload(&g0, r#"{"@vocab":"http://ex/"}"#);
+        assert_eq!(graph_counts(&g0), graph_counts(&g1), "{doc}");
+    }
+
+    // An explicitly typed list cell keeps its `rdf:type rdf:List` triple.
+    #[test]
+    fn compact_keeps_typed_list_cells() {
+        let g0 = Graph::load_str(
+            r#"@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+               <http://ex/s> <http://ex/p> _:l .
+               _:l a rdf:List ; rdf:first "a" ; rdf:rest rdf:nil ."#,
+            "turtle",
+        )
+        .unwrap();
+        assert_compact_count_iso(&g0, r#"{"@vocab":"http://ex/"}"#);
+    }
+
+    // A malformed rdf:JSON literal is admissible RDF; the writers keep it as a typed
+    // string instead of panicking.
+    #[test]
+    fn compact_and_frame_keep_malformed_json_literals() {
+        let g0 = Graph::load_str(
+            r#"<http://ex/s> <http://ex/p> "not JSON"^^<http://www.w3.org/1999/02/22-rdf-syntax-ns#JSON> ;
+                  <http://ex/q> "{\"a\":1}"^^<http://www.w3.org/1999/02/22-rdf-syntax-ns#JSON> ."#,
+            "turtle",
+        )
+        .unwrap();
+        assert_compact_iso(&g0, r#"{"@vocab":"http://ex/"}"#);
+        let frame = parse_context_json(r#"{"@context":{"@vocab":"http://ex/"}}"#).unwrap();
+        let framed = graph_to_jsonld_framed(&g0, &frame);
+        let g1 = Graph::load_dataset(&framed, "jsonld").expect("framed output parses");
+        assert_eq!(nt_sorted(&g0), nt_sorted(&g1), "{framed}");
+    }
+
     #[test]
     fn compact_term_definitions_and_vocab() {
         let g = Graph::load_str(
