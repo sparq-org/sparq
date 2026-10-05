@@ -370,6 +370,13 @@ internal patterns while rejecting source blank nodes. Normal parser builds keep
 the upstream allocator. The detached evaluator enables this feature explicitly;
 its internal algebra is for execution, not a portable SPARQL text serialization.
 
+The opt-in `sparq-deterministic-blank-nodes` feature (enabled by sparq-engine's
+`deterministic-blank-nodes`) replaces random labels for anonymous nodes (`[]`,
+collection cells, reifiers, template nodes) with a monotonic counter behind a
+per-parse prefix, `sparqanon` extended with `x` until it occurs nowhere in the
+(unescaped) parser input. No written label can then begin with it, and the labels
+stay valid `BLANK_NODE_LABEL`s, so algebra serialized back to SPARQL reparses.
+
 ## 12. Preserve query VERSION metadata without changing the algebra enum
 
 [GPT-6] `SparqlParser::parse_query_with_versions` returns the existing query

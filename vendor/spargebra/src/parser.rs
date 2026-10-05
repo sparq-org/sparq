@@ -131,6 +131,8 @@ impl SparqlParser {
         );
         #[cfg(feature = "standard-unicode-escaping")]
         let query = unescape_unicode_codepoints(query);
+        #[cfg(feature = "sparq-deterministic-blank-nodes")]
+        let _anonymous_prefix = AnonymousPrefixGuard::install(&query);
         match parser::QueryUnit(&query, &mut state) {
             Ok(query) => Ok((query, state.versions)),
             // [OPUS-4.8] Prefer the clear depth-limit error over the raw PEG
@@ -165,6 +167,8 @@ impl SparqlParser {
         );
         #[cfg(feature = "standard-unicode-escaping")]
         let update = unescape_unicode_codepoints(update);
+        #[cfg(feature = "sparq-deterministic-blank-nodes")]
+        let _anonymous_prefix = AnonymousPrefixGuard::install(&update);
         let operations = match parser::UpdateInit(&update, &mut state) {
             Ok(operations) => operations,
             // [OPUS-4.8] See parse_query: prefer the depth-limit error (sq-v5dg).
@@ -1226,10 +1230,44 @@ fn property_path_middle() -> BlankNode {
 }
 
 // [GPT-6] Anonymous query/list/template nodes have no externally meaningful
-// label. The opt-in guest namespace cannot collide with a source blank label.
+// label. The opt-in deterministic labels cannot collide with a source blank label.
 #[cfg(not(feature = "sparq-deterministic-blank-nodes"))]
 fn anonymous_blank_node() -> BlankNode {
     BlankNode::default()
+}
+
+#[cfg(feature = "sparq-deterministic-blank-nodes")]
+std::thread_local! {
+    static ANONYMOUS_PREFIX: std::cell::RefCell<String> = std::cell::RefCell::new(String::from("sparqanon"));
+}
+
+/// Installs the anonymous-node label prefix for one parse and restores the
+/// enclosing parse's prefix on drop.
+#[cfg(feature = "sparq-deterministic-blank-nodes")]
+struct AnonymousPrefixGuard(Option<String>);
+
+#[cfg(feature = "sparq-deterministic-blank-nodes")]
+impl AnonymousPrefixGuard {
+    /// Every user-written blank label is spelled out in the (unescaped) parser
+    /// input, so a prefix that does not occur anywhere in it cannot begin one.
+    /// The generated labels stay valid `BLANK_NODE_LABEL`s, so algebra
+    /// serialization round-trips.
+    fn install(text: &str) -> Self {
+        let mut prefix = String::from("sparqanon");
+        while text.contains(prefix.as_str()) {
+            prefix.push('x');
+        }
+        Self(Some(ANONYMOUS_PREFIX.with(|p| p.replace(prefix))))
+    }
+}
+
+#[cfg(feature = "sparq-deterministic-blank-nodes")]
+impl Drop for AnonymousPrefixGuard {
+    fn drop(&mut self) {
+        if let Some(previous) = self.0.take() {
+            ANONYMOUS_PREFIX.with(|p| *p.borrow_mut() = previous);
+        }
+    }
 }
 
 #[cfg(feature = "sparq-deterministic-blank-nodes")]
@@ -1238,7 +1276,7 @@ fn anonymous_blank_node() -> BlankNode {
     static NEXT: AtomicUsize = AtomicUsize::new(0);
     let id = NEXT.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_add(1))
         .expect("synthetic anonymous-node namespace exhausted");
-    BlankNode::new_unchecked(format!("#sparq-anon#{id}"))
+    ANONYMOUS_PREFIX.with(|p| BlankNode::new_unchecked(format!("{}{id}", p.borrow())))
 }
 
 #[cfg(not(target_os = "zkvm"))]

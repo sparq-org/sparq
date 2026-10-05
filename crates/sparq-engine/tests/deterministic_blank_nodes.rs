@@ -118,3 +118,25 @@ fn template_nodes_avoid_blank_nodes_computed_by_extension_functions() {
         "a template node must not reuse a computed blank node"
     );
 }
+
+#[test]
+fn anonymous_query_nodes_serialize_as_valid_labels_distinct_from_written_ones() {
+    let text = "SELECT ?o WHERE { [] <urn:p> ?o . _:sparqanon0 <urn:q> ?o . ( ?o ) <urn:r> _:sparqanonx1 }";
+    let parsed = spargebra::SparqlParser::new().parse_query(text).unwrap();
+    let serialized = parsed.to_string();
+    let reparsed = spargebra::SparqlParser::new()
+        .parse_query(&serialized)
+        .unwrap_or_else(|e| panic!("{serialized}: {e}"));
+    let labels = |s: &str| {
+        s.split("_:")
+            .skip(1)
+            .map(|rest| rest.split(|c: char| !(c.is_alphanumeric() || c == '_')).next().unwrap().to_owned())
+            .collect::<BTreeSet<_>>()
+    };
+    let written = BTreeSet::from(["sparqanon0".to_owned(), "sparqanonx1".to_owned()]);
+    let all = labels(&serialized);
+    assert!(written.is_subset(&all), "{serialized}");
+    // `[]`, the list cell and its rest pointer each get a label of their own.
+    assert!(all.len() >= written.len() + 2, "{serialized}");
+    assert_eq!(reparsed.to_string(), serialized);
+}
