@@ -1,8 +1,1040 @@
-//! SAML 2.0 subject tokens (`lws10-authn-saml`).
+//! SAML 2.0 subject tokens (`lws10-authn-saml`): a `saml:Assertion`, base64url-encoded (RFC 8693
+//! section 3), from an identity provider this server trusts out of band
+//! (`SOLID_SERVER_LWS_SAML_IDPS_FILE`: entity id to a PEM certificate, PEM public key, or public
+//! JWK).
+//!
+//! The assertion must carry an enveloped XML-DSig signature, the direct child of the assertion,
+//! whose one reference is the assertion itself (`#` + its `ID`, which no other element shares), with
+//! only the enveloped-signature and exclusive canonicalization transforms, a SHA-2 digest, and an
+//! `rsa-sha256` or `ecdsa-sha256` signature under the issuer's configured key. Anything else is
+//! refused rather than interpreted, which keeps signature wrapping out: the assertion that is read
+//! is the document's root, and the signature covers all of it.
+//!
+//! Then, as the reference authorization server checks: `Conditions` with `NotBefore` and
+//! `NotOnOrAfter` around now, an `Audience` naming this authorization server, and a
+//! `Subject/NameID`, which is the LWS subject. The client is the `SubjectConfirmationData`
+//! `Recipient` (the issuer when there is none).
+//!
+//! The XML is parsed with quick-xml into a small tree; a DOCTYPE (and so any entity but the
+//! predefined ones) or a processing instruction is refused, and exclusive XML canonicalization
+//! 1.0 (without comments, with an optional `InclusiveNamespaces PrefixList`) is implemented here.
 
-use super::subject_tokens::Verified;
+use std::collections::BTreeMap;
+
+use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
+use base64::Engine;
+use quick_xml::events::{BytesStart, Event};
+use serde_json::Value;
+use sha2::Digest;
+
+use super::jose;
+use super::subject_tokens::{parse_datetime, Verified, SKEW_SECS};
 use super::LwsConfig;
 
-pub fn verify(_cfg: &LwsConfig, _token: &str) -> Result<Verified, String> {
-    Err("SAML assertions are not supported yet".into())
+pub const SAML_NS: &str = "urn:oasis:names:tc:SAML:2.0:assertion";
+pub const DS_NS: &str = "http://www.w3.org/2000/09/xmldsig#";
+const EXC_C14N: &str = "http://www.w3.org/2001/10/xml-exc-c14n#";
+const ENVELOPED: &str = "http://www.w3.org/2000/09/xmldsig#enveloped-signature";
+const RSA_SHA256: &str = "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256";
+const ECDSA_SHA256: &str = "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha256";
+const XML_NS: &str = "http://www.w3.org/XML/1998/namespace";
+
+/// Largest decoded assertion accepted.
+const MAX_ASSERTION: usize = 256 * 1024;
+/// Deepest element nesting accepted.
+const MAX_DEPTH: usize = 64;
+
+/// Verify a base64url-encoded SAML 2.0 assertion for an exchange at this authorization server.
+pub fn verify(cfg: &LwsConfig, token: &str) -> Result<Verified, String> {
+    verify_at(cfg, token, jose::now_secs())
+}
+
+pub fn verify_at(cfg: &LwsConfig, token: &str, now: i64) -> Result<Verified, String> {
+    let compact: String = token.chars().filter(|c| !c.is_ascii_whitespace()).collect();
+    let bytes = URL_SAFE_NO_PAD
+        .decode(compact.trim_end_matches('='))
+        .or_else(|_| STANDARD.decode(&compact))
+        .map_err(|_| "the subject token is not a base64url-encoded XML document")?;
+    if bytes.len() > MAX_ASSERTION {
+        return Err("the assertion is too large".into());
+    }
+    let xml = std::str::from_utf8(&bytes).map_err(|_| "the assertion is not UTF-8")?;
+    let root = parse(xml)?;
+    if !root.is(SAML_NS, "Assertion") {
+        return Err("the subject token is not a saml:Assertion".into());
+    }
+    if root.attr("Version") != Some("2.0") {
+        return Err("the assertion is not SAML 2.0".into());
+    }
+    let issuer = root
+        .child(SAML_NS, "Issuer")
+        .map(|e| e.text().trim().to_string())
+        .ok_or("the assertion names no Issuer")?;
+    let trusted = cfg.saml_idps.get(&issuer).ok_or_else(|| {
+        format!("the assertion's issuer {issuer} is not a trusted identity provider")
+    })?;
+    let key = TrustKey::parse(trusted)
+        .map_err(|e| format!("the configured key of {issuer} is unusable: {e}"))?;
+    verify_signature(&root, &key)?;
+
+    let conditions = root
+        .child(SAML_NS, "Conditions")
+        .ok_or("the assertion has no Conditions")?;
+    let time = |name: &str| -> Result<i64, String> {
+        conditions
+            .attr(name)
+            .and_then(parse_datetime)
+            .ok_or_else(|| format!("Conditions {name} is missing or not an xsd:dateTime"))
+    };
+    if time("NotBefore")? > now + SKEW_SECS || time("NotOnOrAfter")? <= now - SKEW_SECS {
+        return Err("the assertion is outside its validity period".into());
+    }
+    let mut audiences = Vec::new();
+    conditions.descendants(SAML_NS, "Audience", &mut audiences);
+    let us = cfg.issuer();
+    if !audiences
+        .iter()
+        .map(|a| a.text())
+        .any(|a| a.trim() == us || a.trim().strip_suffix('/') == Some(us))
+    {
+        return Err("the assertion's audience does not include this authorization server".into());
+    }
+    let subject = root
+        .child(SAML_NS, "Subject")
+        .ok_or("the assertion names no subject")?;
+    let name_id = subject
+        .child(SAML_NS, "NameID")
+        .map(|e| e.text().trim().to_string())
+        .unwrap_or_default();
+    if name_id.is_empty() {
+        return Err("the assertion names no subject".into());
+    }
+    let mut data = Vec::new();
+    subject.descendants(SAML_NS, "SubjectConfirmationData", &mut data);
+    if let Some(limit) = data.first().and_then(|d| d.attr("NotOnOrAfter")) {
+        if parse_datetime(limit).is_none_or(|t| t <= now - SKEW_SECS) {
+            return Err("the subject confirmation has expired".into());
+        }
+    }
+    let recipient = data
+        .first()
+        .and_then(|d| d.attr("Recipient"))
+        .map(str::trim)
+        .filter(|r| !r.is_empty());
+    let client = recipient.unwrap_or(&issuer).to_string();
+    Ok(Verified {
+        subject: name_id,
+        client,
+    })
+}
+
+// ---------------------------------------------------------------- signature
+
+fn verify_signature(root: &Element, key: &TrustKey) -> Result<(), String> {
+    let signatures: Vec<&Element> = root
+        .elements()
+        .filter(|e| e.is(DS_NS, "Signature"))
+        .collect();
+    let signature = match signatures.as_slice() {
+        [] => return Err("the assertion is not signed".into()),
+        [one] => *one,
+        _ => return Err("the assertion carries more than one signature".into()),
+    };
+    let id = root
+        .attr("ID")
+        .filter(|i| !i.is_empty())
+        .ok_or("the assertion has no ID")?;
+    let mut same_id = 0;
+    root.count_ids(id, &mut same_id);
+    if same_id != 1 {
+        return Err("the assertion's ID is not unique in the document".into());
+    }
+    let signed_info = signature
+        .child(DS_NS, "SignedInfo")
+        .ok_or("the signature has no SignedInfo")?;
+    let c14n = signed_info
+        .child(DS_NS, "CanonicalizationMethod")
+        .ok_or("SignedInfo names no CanonicalizationMethod")?;
+    if c14n.attr("Algorithm") != Some(EXC_C14N) {
+        return Err("SignedInfo is not canonicalized with exclusive XML canonicalization".into());
+    }
+    let method = signed_info
+        .child(DS_NS, "SignatureMethod")
+        .and_then(|m| m.attr("Algorithm"))
+        .ok_or("SignedInfo names no SignatureMethod")?;
+    let references: Vec<&Element> = signed_info
+        .elements()
+        .filter(|e| e.is(DS_NS, "Reference"))
+        .collect();
+    let [reference] = references.as_slice() else {
+        return Err("the signature must have exactly one reference".into());
+    };
+    if reference.attr("URI") != Some(format!("#{id}").as_str()) {
+        return Err("the signature does not reference the assertion".into());
+    }
+    let mut enveloped = false;
+    let mut exclusive = None;
+    if let Some(transforms) = reference.child(DS_NS, "Transforms") {
+        for t in transforms.elements() {
+            match (t.is(DS_NS, "Transform"), t.attr("Algorithm")) {
+                (true, Some(ENVELOPED)) if !enveloped && exclusive.is_none() => enveloped = true,
+                (true, Some(EXC_C14N)) if exclusive.is_none() => {
+                    exclusive = Some(inclusive_prefixes(t))
+                }
+                _ => return Err("the reference has a transform this server does not accept".into()),
+            }
+        }
+    }
+    let (true, Some(prefixes)) = (enveloped, exclusive) else {
+        return Err("the reference must apply the enveloped-signature and exclusive canonicalization transforms".into());
+    };
+    let digest_alg = reference
+        .child(DS_NS, "DigestMethod")
+        .and_then(|d| d.attr("Algorithm"))
+        .ok_or("the reference names no DigestMethod")?;
+    let expected = reference
+        .child(DS_NS, "DigestValue")
+        .map(|d| d.text())
+        .ok_or("the reference has no DigestValue")?;
+    let expected = b64_decode(&expected).ok_or("the DigestValue is not base64")?;
+    let mut canonical = String::new();
+    canonicalize(
+        root,
+        Some(signature as *const Element),
+        &prefixes,
+        &BTreeMap::new(),
+        &mut canonical,
+    )?;
+    let actual: Vec<u8> = match digest_alg {
+        "http://www.w3.org/2001/04/xmlenc#sha256" => {
+            sha2::Sha256::digest(canonical.as_bytes()).to_vec()
+        }
+        "http://www.w3.org/2001/04/xmldsig-more#sha384" => {
+            sha2::Sha384::digest(canonical.as_bytes()).to_vec()
+        }
+        "http://www.w3.org/2001/04/xmlenc#sha512" => {
+            sha2::Sha512::digest(canonical.as_bytes()).to_vec()
+        }
+        other => return Err(format!("unsupported digest {other}")),
+    };
+    if actual != expected {
+        return Err("the assertion's digest does not match: it was altered after signing".into());
+    }
+    let mut signed = String::new();
+    canonicalize(
+        signed_info,
+        None,
+        &inclusive_prefixes(c14n),
+        &BTreeMap::new(),
+        &mut signed,
+    )?;
+    let value = signature
+        .child(DS_NS, "SignatureValue")
+        .map(|v| v.text())
+        .ok_or("the signature has no SignatureValue")?;
+    let value = b64_decode(&value).ok_or("the SignatureValue is not base64")?;
+    if !key.verify(method, signed.as_bytes(), &value)? {
+        return Err("the assertion's signature does not verify".into());
+    }
+    Ok(())
+}
+
+fn b64_decode(s: &str) -> Option<Vec<u8>> {
+    let compact: String = s.chars().filter(|c| !c.is_ascii_whitespace()).collect();
+    STANDARD.decode(compact).ok()
+}
+
+/// The `InclusiveNamespaces PrefixList` of an exclusive canonicalization method or transform.
+fn inclusive_prefixes(method: &Element) -> Vec<String> {
+    method
+        .elements()
+        .find(|e| e.is(EXC_C14N, "InclusiveNamespaces"))
+        .and_then(|e| e.attr("PrefixList"))
+        .map(|l| {
+            l.split_ascii_whitespace()
+                .map(|p| {
+                    if p == "#default" {
+                        String::new()
+                    } else {
+                        p.to_string()
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// A trusted identity provider's signing key.
+#[derive(Debug, Clone)]
+pub enum TrustKey {
+    Rsa { n: Vec<u8>, e: Vec<u8> },
+    P256(p256::PublicKey),
+}
+
+impl TrustKey {
+    /// From a PEM certificate, a PEM public key (SPKI or PKCS#1 RSA), or a public JWK.
+    pub fn parse(config: &str) -> Result<Self, String> {
+        let config = config.trim();
+        if config.starts_with('{') {
+            let jwk: Value = serde_json::from_str(config).map_err(|_| "not a JWK")?;
+            return match jwk.get("kty").and_then(Value::as_str) {
+                Some("RSA") => {
+                    let get = |k: &str| {
+                        jwk.get(k)
+                            .and_then(Value::as_str)
+                            .and_then(jose::b64url_decode)
+                            .ok_or("an RSA JWK needs n and e")
+                    };
+                    Ok(TrustKey::Rsa {
+                        n: get("n")?,
+                        e: get("e")?,
+                    })
+                }
+                Some("EC") => jose::ec_public_from_jwk(&jwk)
+                    .map(TrustKey::P256)
+                    .ok_or_else(|| "not a P-256 JWK".into()),
+                _ => Err("unsupported JWK key type".into()),
+            };
+        }
+        let (label, der) = pem(config).ok_or("not PEM")?;
+        match label.as_str() {
+            "CERTIFICATE" => spki_key(certificate_spki(&der).ok_or("not an X.509 certificate")?),
+            "PUBLIC KEY" => spki_key(&der),
+            "RSA PUBLIC KEY" => rsa_public_key(&der),
+            other => Err(format!("unsupported PEM {other}")),
+        }
+    }
+
+    fn verify(&self, method: &str, message: &[u8], signature: &[u8]) -> Result<bool, String> {
+        match (method, self) {
+            (RSA_SHA256, TrustKey::Rsa { n, e }) => {
+                let key = aws_lc_rs::signature::RsaPublicKeyComponents {
+                    n: n.as_slice(),
+                    e: e.as_slice(),
+                };
+                Ok(key
+                    .verify(
+                        &aws_lc_rs::signature::RSA_PKCS1_2048_8192_SHA256,
+                        message,
+                        signature,
+                    )
+                    .is_ok())
+            }
+            (ECDSA_SHA256, TrustKey::P256(k)) => {
+                use p256::ecdsa::signature::Verifier;
+                let Ok(sig) = p256::ecdsa::Signature::from_slice(signature) else {
+                    return Ok(false);
+                };
+                Ok(p256::ecdsa::VerifyingKey::from(k)
+                    .verify(message, &sig)
+                    .is_ok())
+            }
+            (m, _) => Err(format!(
+                "signature method {m} does not fit the identity provider's key"
+            )),
+        }
+    }
+}
+
+/// The label and DER of the first PEM block.
+fn pem(text: &str) -> Option<(String, Vec<u8>)> {
+    let start = text.find("-----BEGIN ")?;
+    let rest = &text[start + 11..];
+    let label_end = rest.find("-----")?;
+    let label = rest[..label_end].to_string();
+    let body_start = label_end + 5;
+    let end = rest.find(&format!("-----END {label}-----"))?;
+    let body: String = rest[body_start..end]
+        .chars()
+        .filter(|c| !c.is_ascii_whitespace())
+        .collect();
+    Some((label, STANDARD.decode(body).ok()?))
+}
+
+/// One DER TLV: tag, contents, and what follows.
+fn der(input: &[u8]) -> Option<(u8, &[u8], &[u8])> {
+    let (&tag, rest) = input.split_first()?;
+    let (&first, rest) = rest.split_first()?;
+    let (len, rest) = if first < 0x80 {
+        (first as usize, rest)
+    } else {
+        let n = (first & 0x7f) as usize;
+        if n == 0 || n > 4 || rest.len() < n {
+            return None;
+        }
+        (
+            rest[..n]
+                .iter()
+                .fold(0usize, |acc, b| (acc << 8) | *b as usize),
+            &rest[n..],
+        )
+    };
+    if rest.len() < len {
+        return None;
+    }
+    Some((tag, &rest[..len], &rest[len..]))
+}
+
+/// The SubjectPublicKeyInfo of an X.509 certificate.
+fn certificate_spki(cert: &[u8]) -> Option<&[u8]> {
+    let (0x30, cert, _) = der(cert)? else {
+        return None;
+    };
+    let (0x30, tbs, _) = der(cert)? else {
+        return None;
+    };
+    let mut rest = tbs;
+    let (tag, _, after) = der(rest)?;
+    if tag == 0xa0 {
+        rest = after; // explicit version
+    }
+    // serial, signature algorithm, issuer, validity, subject
+    for _ in 0..5 {
+        rest = der(rest)?.2;
+    }
+    let (0x30, _, after) = der(rest)? else {
+        return None;
+    };
+    Some(&rest[..rest.len() - after.len()])
+}
+
+const RSA_OID: &[u8] = &[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01];
+const EC_OID: &[u8] = &[0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01];
+const P256_OID: &[u8] = &[0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07];
+
+fn spki_key(spki: &[u8]) -> Result<TrustKey, String> {
+    let bad = || "not a SubjectPublicKeyInfo".to_string();
+    let (0x30, body, _) = der(spki).ok_or_else(bad)? else {
+        return Err(bad());
+    };
+    let (0x30, alg, rest) = der(body).ok_or_else(bad)? else {
+        return Err(bad());
+    };
+    let (0x06, oid, params) = der(alg).ok_or_else(bad)? else {
+        return Err(bad());
+    };
+    let (0x03, bits, _) = der(rest).ok_or_else(bad)? else {
+        return Err(bad());
+    };
+    let key = bits.strip_prefix(&[0u8]).ok_or_else(bad)?;
+    if oid == RSA_OID {
+        rsa_public_key(key)
+    } else if oid == EC_OID {
+        match der(params) {
+            Some((0x06, curve, _)) if curve == P256_OID => jose::ec_public_from_sec1(key)
+                .map(TrustKey::P256)
+                .ok_or_else(|| "not a P-256 point".into()),
+            _ => Err("only P-256 EC keys are supported".into()),
+        }
+    } else {
+        Err("only RSA and P-256 keys are supported".into())
+    }
+}
+
+fn rsa_public_key(pkcs1: &[u8]) -> Result<TrustKey, String> {
+    let bad = || "not an RSA public key".to_string();
+    let (0x30, body, _) = der(pkcs1).ok_or_else(bad)? else {
+        return Err(bad());
+    };
+    let (0x02, n, rest) = der(body).ok_or_else(bad)? else {
+        return Err(bad());
+    };
+    let (0x02, e, _) = der(rest).ok_or_else(bad)? else {
+        return Err(bad());
+    };
+    let strip = |v: &[u8]| {
+        let i = v.iter().position(|b| *b != 0).unwrap_or(v.len());
+        v[i..].to_vec()
+    };
+    Ok(TrustKey::Rsa {
+        n: strip(n),
+        e: strip(e),
+    })
+}
+
+// ---------------------------------------------------------------- XML tree
+
+/// An element: its qualified name, resolved namespace, attributes, the namespaces in scope, and
+/// children.
+#[derive(Debug, Clone)]
+pub struct Element {
+    prefix: String,
+    local: String,
+    ns: String,
+    attrs: Vec<Attr>,
+    /// Every namespace in scope here, prefix (`""` for the default) to URI; `""` URI undeclares.
+    scope: BTreeMap<String, String>,
+    children: Vec<Node>,
+}
+
+#[derive(Debug, Clone)]
+struct Attr {
+    prefix: String,
+    local: String,
+    ns: String,
+    value: String,
+}
+
+#[derive(Debug, Clone)]
+enum Node {
+    Element(Element),
+    Text(String),
+}
+
+impl Element {
+    fn is(&self, ns: &str, local: &str) -> bool {
+        self.ns == ns && self.local == local
+    }
+
+    fn qname(&self) -> String {
+        if self.prefix.is_empty() {
+            self.local.clone()
+        } else {
+            format!("{}:{}", self.prefix, self.local)
+        }
+    }
+
+    /// An unqualified attribute's value.
+    fn attr(&self, local: &str) -> Option<&str> {
+        self.attrs
+            .iter()
+            .find(|a| a.ns.is_empty() && a.local == local)
+            .map(|a| a.value.as_str())
+    }
+
+    fn elements(&self) -> impl Iterator<Item = &Element> {
+        self.children.iter().filter_map(|c| match c {
+            Node::Element(e) => Some(e),
+            Node::Text(_) => None,
+        })
+    }
+
+    /// The first child element `{ns}local`.
+    fn child(&self, ns: &str, local: &str) -> Option<&Element> {
+        self.elements().find(|e| e.is(ns, local))
+    }
+
+    fn descendants<'a>(&'a self, ns: &str, local: &str, out: &mut Vec<&'a Element>) {
+        for e in self.elements() {
+            if e.is(ns, local) {
+                out.push(e);
+            }
+            e.descendants(ns, local, out);
+        }
+    }
+
+    /// How many elements in this subtree carry an `ID`, `Id` or `AssertionID` of `id`.
+    fn count_ids(&self, id: &str, count: &mut usize) {
+        if self.attrs.iter().any(|a| {
+            a.ns.is_empty()
+                && matches!(a.local.as_str(), "ID" | "Id" | "AssertionID")
+                && a.value == id
+        }) {
+            *count += 1;
+        }
+        for e in self.elements() {
+            e.count_ids(id, count);
+        }
+    }
+
+    /// The concatenated text content.
+    fn text(&self) -> String {
+        let mut s = String::new();
+        self.collect_text(&mut s);
+        s
+    }
+
+    fn collect_text(&self, out: &mut String) {
+        for c in &self.children {
+            match c {
+                Node::Text(t) => out.push_str(t),
+                Node::Element(e) => e.collect_text(out),
+            }
+        }
+    }
+}
+
+/// Resolve XML character and predefined entity references; normalize line ends. In an attribute
+/// value, literal whitespace becomes a space (XML 1.0 section 3.3.3).
+fn unescape(raw: &str, attribute: bool) -> Result<String, String> {
+    let raw = raw.replace("\r\n", "\n").replace('\r', "\n");
+    let mut out = String::with_capacity(raw.len());
+    let mut rest = raw.as_str();
+    while let Some(i) = rest.find(['&', '\t', '\n']) {
+        let (before, after) = rest.split_at(i);
+        out.push_str(before);
+        if !after.starts_with('&') {
+            out.push(if attribute {
+                ' '
+            } else {
+                after.chars().next().unwrap_or(' ')
+            });
+            rest = &after[1..];
+            continue;
+        }
+        let end = after.find(';').ok_or("an unterminated reference")?;
+        let name = &after[1..end];
+        match name {
+            "lt" => out.push('<'),
+            "gt" => out.push('>'),
+            "amp" => out.push('&'),
+            "quot" => out.push('"'),
+            "apos" => out.push('\''),
+            n if n.starts_with("#x") => out.push(
+                u32::from_str_radix(&n[2..], 16)
+                    .ok()
+                    .and_then(char::from_u32)
+                    .ok_or("a bad character reference")?,
+            ),
+            n if n.starts_with('#') => out.push(
+                n[1..]
+                    .parse::<u32>()
+                    .ok()
+                    .and_then(char::from_u32)
+                    .ok_or("a bad character reference")?,
+            ),
+            _ => return Err(format!("the entity &{name}; is not allowed")),
+        }
+        rest = &after[end + 1..];
+    }
+    out.push_str(rest);
+    Ok(out)
+}
+
+fn split_qname(q: &str) -> (String, String) {
+    match q.split_once(':') {
+        Some((p, l)) => (p.to_string(), l.to_string()),
+        None => (String::new(), q.to_string()),
+    }
+}
+
+fn start_element(
+    e: &BytesStart<'_>,
+    parent_scope: &BTreeMap<String, String>,
+) -> Result<Element, String> {
+    let qname = std::str::from_utf8(e.name().as_ref())
+        .map_err(|_| "a non-UTF-8 name")?
+        .to_string();
+    let mut scope = parent_scope.clone();
+    let mut raw_attrs = Vec::new();
+    for a in e.attributes() {
+        let a = a.map_err(|e| format!("malformed attribute: {e}"))?;
+        let key = std::str::from_utf8(a.key.as_ref())
+            .map_err(|_| "a non-UTF-8 attribute name")?
+            .to_string();
+        let raw = std::str::from_utf8(&a.value).map_err(|_| "a non-UTF-8 attribute value")?;
+        let value = unescape(raw, true)?;
+        if key == "xmlns" {
+            scope.insert(String::new(), value);
+        } else if let Some(p) = key.strip_prefix("xmlns:") {
+            if value.is_empty() {
+                return Err("a prefixed namespace cannot be undeclared in XML 1.0".into());
+            }
+            scope.insert(p.to_string(), value);
+        } else {
+            raw_attrs.push((key, value));
+        }
+    }
+    let (prefix, local) = split_qname(&qname);
+    let ns = if prefix == "xml" {
+        XML_NS.to_string()
+    } else if prefix.is_empty() {
+        scope.get("").cloned().unwrap_or_default()
+    } else {
+        scope
+            .get(&prefix)
+            .cloned()
+            .filter(|u| !u.is_empty() || prefix.is_empty())
+            .ok_or_else(|| format!("unbound prefix {prefix}"))?
+    };
+    let mut attrs = Vec::new();
+    for (key, value) in raw_attrs {
+        let (p, l) = split_qname(&key);
+        let ans = if p.is_empty() {
+            String::new()
+        } else if p == "xml" {
+            XML_NS.to_string()
+        } else {
+            scope
+                .get(&p)
+                .cloned()
+                .filter(|u| !u.is_empty())
+                .ok_or_else(|| format!("unbound prefix {p}"))?
+        };
+        if attrs.iter().any(|x: &Attr| x.ns == ans && x.local == l) {
+            return Err("a repeated attribute".into());
+        }
+        attrs.push(Attr {
+            prefix: p,
+            local: l,
+            ns: ans,
+            value,
+        });
+    }
+    Ok(Element {
+        prefix,
+        local,
+        ns,
+        attrs,
+        scope,
+        children: Vec::new(),
+    })
+}
+
+/// Parse a document into its root element. Comments are dropped; a DOCTYPE, a processing
+/// instruction, or anything after the root is refused.
+pub fn parse(xml: &str) -> Result<Element, String> {
+    let mut reader = quick_xml::Reader::from_str(xml);
+    reader.config_mut().trim_text(false);
+    reader.config_mut().check_end_names = true;
+    let mut stack: Vec<Element> = Vec::new();
+    let mut root: Option<Element> = None;
+    let empty = BTreeMap::new();
+    loop {
+        let event = reader
+            .read_event()
+            .map_err(|e| format!("not well-formed XML: {e}"))?;
+        match event {
+            Event::Start(e) | Event::Empty(e) if root.is_some() => {
+                let _ = e;
+                return Err("content after the root element".into());
+            }
+            Event::Start(e) => {
+                if stack.len() >= MAX_DEPTH {
+                    return Err("the XML nests too deeply".into());
+                }
+                let el = start_element(&e, stack.last().map(|p| &p.scope).unwrap_or(&empty))?;
+                stack.push(el);
+            }
+            Event::Empty(e) => {
+                let el = start_element(&e, stack.last().map(|p| &p.scope).unwrap_or(&empty))?;
+                match stack.last_mut() {
+                    Some(p) => p.children.push(Node::Element(el)),
+                    None => root = Some(el),
+                }
+            }
+            Event::End(_) => {
+                let el = stack.pop().ok_or("an unmatched end tag")?;
+                match stack.last_mut() {
+                    Some(p) => p.children.push(Node::Element(el)),
+                    None => root = Some(el),
+                }
+            }
+            Event::Text(t) => {
+                let raw = std::str::from_utf8(t.as_ref()).map_err(|_| "non-UTF-8 text")?;
+                match stack.last_mut() {
+                    Some(p) => p.children.push(Node::Text(unescape(raw, false)?)),
+                    None if raw.trim().is_empty() => {}
+                    None => return Err("text outside the root element".into()),
+                }
+            }
+            Event::CData(t) => {
+                let raw = std::str::from_utf8(t.as_ref()).map_err(|_| "non-UTF-8 text")?;
+                let p = stack.last_mut().ok_or("text outside the root element")?;
+                p.children
+                    .push(Node::Text(raw.replace("\r\n", "\n").replace('\r', "\n")));
+            }
+            Event::Comment(_) | Event::Decl(_) => {}
+            Event::DocType(_) => return Err("a DOCTYPE is not allowed".into()),
+            Event::PI(_) => return Err("processing instructions are not allowed".into()),
+            Event::Eof => break,
+        }
+    }
+    if !stack.is_empty() {
+        return Err("an unclosed element".into());
+    }
+    root.ok_or_else(|| "no root element".into())
+}
+
+// ---------------------------------------------------------------- exclusive canonicalization
+
+fn escape_text(s: &str, out: &mut String) {
+    for c in s.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '\r' => out.push_str("&#xD;"),
+            c => out.push(c),
+        }
+    }
+}
+
+fn escape_attr(s: &str, out: &mut String) {
+    for c in s.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '"' => out.push_str("&quot;"),
+            '\t' => out.push_str("&#x9;"),
+            '\n' => out.push_str("&#xA;"),
+            '\r' => out.push_str("&#xD;"),
+            c => out.push(c),
+        }
+    }
+}
+
+/// Exclusive XML Canonicalization 1.0 (without comments) of the subtree at `el`, leaving out the
+/// element `exclude` (the enveloped signature). `rendered` holds the namespace declarations the
+/// output ancestors rendered; `inclusive` the `InclusiveNamespaces` prefixes (`""` is the default
+/// namespace), which are rendered like inclusive canonicalization does.
+pub fn canonicalize(
+    el: &Element,
+    exclude: Option<*const Element>,
+    inclusive: &[String],
+    rendered: &BTreeMap<String, String>,
+    out: &mut String,
+) -> Result<(), String> {
+    if exclude == Some(el as *const Element) {
+        return Ok(());
+    }
+    // Namespaces this element visibly utilizes, plus the inclusive ones in scope.
+    let mut wanted: Vec<String> = vec![el.prefix.clone()];
+    for a in &el.attrs {
+        if !a.prefix.is_empty() && a.prefix != "xml" {
+            wanted.push(a.prefix.clone());
+        }
+    }
+    for p in inclusive {
+        if el.scope.get(p).is_some_and(|u| !u.is_empty()) {
+            wanted.push(p.clone());
+        }
+    }
+    wanted.sort();
+    wanted.dedup();
+    let mut now_rendered = rendered.clone();
+    let mut decls = Vec::new();
+    for p in wanted {
+        if p == "xml" {
+            continue;
+        }
+        let uri = el.scope.get(&p).cloned().unwrap_or_default();
+        if p.is_empty() {
+            let before = rendered.get("").map(String::as_str).unwrap_or("");
+            if uri != before {
+                decls.push((p.clone(), uri.clone()));
+                now_rendered.insert(p, uri);
+            }
+        } else if rendered.get(&p) != Some(&uri) {
+            if uri.is_empty() {
+                return Err(format!("unbound prefix {p}"));
+            }
+            decls.push((p.clone(), uri.clone()));
+            now_rendered.insert(p, uri);
+        }
+    }
+    let qname = el.qname();
+    out.push('<');
+    out.push_str(&qname);
+    for (p, uri) in &decls {
+        if p.is_empty() {
+            out.push_str(" xmlns=\"");
+        } else {
+            out.push_str(" xmlns:");
+            out.push_str(p);
+            out.push_str("=\"");
+        }
+        escape_attr(uri, out);
+        out.push('"');
+    }
+    let mut attrs: Vec<&Attr> = el.attrs.iter().collect();
+    attrs.sort_by(|a, b| (a.ns.as_str(), a.local.as_str()).cmp(&(b.ns.as_str(), b.local.as_str())));
+    for a in attrs {
+        out.push(' ');
+        if !a.prefix.is_empty() {
+            out.push_str(&a.prefix);
+            out.push(':');
+        }
+        out.push_str(&a.local);
+        out.push_str("=\"");
+        escape_attr(&a.value, out);
+        out.push('"');
+    }
+    out.push('>');
+    for c in &el.children {
+        match c {
+            Node::Text(t) => escape_text(t, out),
+            Node::Element(e) => canonicalize(e, exclude, inclusive, &now_rendered, out)?,
+        }
+    }
+    out.push_str("</");
+    out.push_str(&qname);
+    out.push('>');
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn c14n(xml: &str) -> String {
+        let root = parse(xml).unwrap();
+        let mut out = String::new();
+        canonicalize(&root, None, &[], &BTreeMap::new(), &mut out).unwrap();
+        out
+    }
+
+    #[test]
+    fn exclusive_c14n_basics() {
+        // Empty elements expand, attributes sort by namespace then name, unused namespaces drop,
+        // and redundant declarations are not repeated.
+        assert_eq!(
+            c14n(
+                r#"<a:r xmlns:a="urn:a" xmlns:b="urn:b" z="1" b:y="2" a="3"><a:c xmlns:a="urn:a"/><d xmlns="urn:d">x &amp; &#x41;</d></a:r>"#
+            ),
+            r#"<a:r xmlns:a="urn:a" xmlns:b="urn:b" a="3" z="1" b:y="2"><a:c></a:c><d xmlns="urn:d">x &amp; A</d></a:r>"#
+        );
+        assert_eq!(
+            c14n("<r xmlns:u=\"urn:u\" v=\"a\tb\">\r\n&gt;</r>"),
+            "<r v=\"a b\">\n&gt;</r>"
+        );
+        assert_eq!(
+            c14n(r#"<r xmlns="urn:x"><s xmlns=""/></r>"#),
+            r#"<r xmlns="urn:x"><s xmlns=""></s></r>"#
+        );
+    }
+
+    #[test]
+    fn hostile_xml_is_refused() {
+        assert!(parse(r#"<!DOCTYPE r [<!ENTITY x "y">]><r>&x;</r>"#).is_err());
+        assert!(parse("<r><?pi x?></r>").is_err());
+        assert!(parse("<r>&unknown;</r>").is_err());
+        assert!(parse("<r></r><s/>").is_err());
+        assert!(parse("<p:r/>").is_err());
+    }
+
+    /// Build and sign an assertion the way the Touchstone identity provider does, with an
+    /// ecdsa-sha256 key.
+    fn signed_assertion(
+        key: &jose::EcKey,
+        issuer: &str,
+        audience: &str,
+        name_id: &str,
+        tamper: bool,
+    ) -> String {
+        let now = jose::now_secs();
+        let instant = |t: i64| {
+            let days = t.div_euclid(86_400);
+            let secs = t.rem_euclid(86_400);
+            // civil from days (Hinnant)
+            let z = days + 719_468;
+            let era = z.div_euclid(146_097);
+            let doe = z - era * 146_097;
+            let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+            let y = yoe + era * 400;
+            let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+            let mp = (5 * doy + 2) / 153;
+            let d = doy - (153 * mp + 2) / 5 + 1;
+            let m = if mp < 10 { mp + 3 } else { mp - 9 };
+            let y = if m <= 2 { y + 1 } else { y };
+            format!(
+                "{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z",
+                secs / 3600,
+                secs % 3600 / 60,
+                secs % 60
+            )
+        };
+        let id = "_abc123";
+        let body = |name: &str| {
+            format!(
+                "<saml:Issuer>{issuer}</saml:Issuer>{{SIG}}<saml:Subject><saml:NameID Format=\"urn:oasis:names:tc:SAML:2.0:nameid-format:persistent\">{name}</saml:NameID><saml:SubjectConfirmation Method=\"urn:oasis:names:tc:SAML:2.0:cm:bearer\"><saml:SubjectConfirmationData NotOnOrAfter=\"{exp}\" Recipient=\"https://client.example/\"/></saml:SubjectConfirmation></saml:Subject><saml:Conditions NotBefore=\"{nb}\" NotOnOrAfter=\"{exp}\"><saml:AudienceRestriction><saml:Audience>{audience}</saml:Audience></saml:AudienceRestriction></saml:Conditions>",
+                exp = instant(now + 300),
+                nb = instant(now)
+            )
+        };
+        let open = format!("<saml:Assertion xmlns:saml=\"{SAML_NS}\" ID=\"{id}\" IssueInstant=\"{}\" Version=\"2.0\">", instant(now));
+        let unsigned = format!(
+            "{open}{}</saml:Assertion>",
+            body(name_id).replace("{SIG}", "")
+        );
+        let digest = STANDARD.encode(sha2::Sha256::digest(c14n(&unsigned).as_bytes()));
+        let signed_info = format!(
+            "<ds:SignedInfo><ds:CanonicalizationMethod Algorithm=\"{EXC_C14N}\"/><ds:SignatureMethod Algorithm=\"{ECDSA_SHA256}\"/><ds:Reference URI=\"#{id}\"><ds:Transforms><ds:Transform Algorithm=\"{ENVELOPED}\"/><ds:Transform Algorithm=\"{EXC_C14N}\"/></ds:Transforms><ds:DigestMethod Algorithm=\"http://www.w3.org/2001/04/xmlenc#sha256\"/><ds:DigestValue>{digest}</ds:DigestValue></ds:Reference></ds:SignedInfo>"
+        );
+        // SignedInfo canonicalizes with the ds namespace declared on it.
+        let si_c14n = c14n(&signed_info.replacen(
+            "<ds:SignedInfo>",
+            &format!("<ds:SignedInfo xmlns:ds=\"{DS_NS}\">"),
+            1,
+        ));
+        let sig = STANDARD.encode(key.sign(si_c14n.as_bytes()));
+        let signature = format!("<ds:Signature xmlns:ds=\"{DS_NS}\">{signed_info}<ds:SignatureValue>{sig}</ds:SignatureValue></ds:Signature>");
+        let final_name = if tamper {
+            format!("{name_id}#altered")
+        } else {
+            name_id.to_string()
+        };
+        let xml = format!(
+            "{open}{}</saml:Assertion>",
+            body(&final_name).replace("{SIG}", &signature)
+        );
+        URL_SAFE_NO_PAD.encode(xml)
+    }
+
+    #[test]
+    fn signed_assertions_verify() {
+        let mut cfg = LwsConfig::new("http://localhost:3000");
+        let key = jose::EcKey::generate("idp");
+        let idp = "https://idp.example/";
+        cfg.saml_idps
+            .insert(idp.into(), key.public_jwk().to_string());
+        let ok = signed_assertion(&key, idp, cfg.issuer(), "https://alice.example/#me", false);
+        let v = verify(&cfg, &ok).unwrap();
+        assert_eq!(v.subject, "https://alice.example/#me");
+        assert_eq!(v.client, "https://client.example/");
+        // Altered after signing, foreign audience, untrusted issuer, wrong key.
+        assert!(verify(
+            &cfg,
+            &signed_assertion(&key, idp, cfg.issuer(), "https://alice.example/#me", true)
+        )
+        .is_err());
+        assert!(verify(
+            &cfg,
+            &signed_assertion(
+                &key,
+                idp,
+                "https://other.example",
+                "https://alice.example/#me",
+                false
+            )
+        )
+        .is_err());
+        assert!(verify(
+            &cfg,
+            &signed_assertion(&key, "https://rogue.example/", cfg.issuer(), "a", false)
+        )
+        .is_err());
+        let other = jose::EcKey::generate("x");
+        assert!(verify(
+            &cfg,
+            &signed_assertion(&other, idp, cfg.issuer(), "a", false)
+        )
+        .is_err());
+        // Expired.
+        assert!(verify_at(&cfg, &ok, jose::now_secs() + 3600).is_err());
+    }
+
+    #[test]
+    fn trust_keys_parse() {
+        let key = jose::EcKey::generate("k");
+        assert!(matches!(
+            TrustKey::parse(&key.public_jwk().to_string()).unwrap(),
+            TrustKey::P256(_)
+        ));
+        // A P-256 SubjectPublicKeyInfo.
+        let point =
+            p256::elliptic_curve::sec1::ToEncodedPoint::to_encoded_point(&key.public_key(), false);
+        let mut spki = vec![0x30, 0x59, 0x30, 0x13, 0x06, 0x07];
+        spki.extend_from_slice(EC_OID);
+        spki.extend_from_slice(&[0x06, 0x08]);
+        spki.extend_from_slice(P256_OID);
+        spki.extend_from_slice(&[0x03, 0x42, 0x00]);
+        spki.extend_from_slice(point.as_bytes());
+        let pem = format!(
+            "-----BEGIN PUBLIC KEY-----\n{}\n-----END PUBLIC KEY-----\n",
+            STANDARD.encode(&spki)
+        );
+        assert!(matches!(TrustKey::parse(&pem).unwrap(), TrustKey::P256(_)));
+        assert!(TrustKey::parse("garbage").is_err());
+    }
 }
