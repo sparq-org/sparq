@@ -40,3 +40,16 @@ Branch `claude/zk-paper-narrative`, following `opus-5-5-narrative-proposal.md`
 ## Open questions (from the narrative)
 - Is there a realistic source of verifier-agreed anchors? If not, narrow the exactness claim.
 - Is Braun a coauthor? This decides how zkRDF is framed.
+
+## Length and cut plan
+- Rendered at A4/11pt (Typst 0.15.0): main body about 15 pages, about 8,000 words; whole PDF 27 pages.
+  Estimated 18 to 20 LNCS pages, against last year's 15-page limit (ESWC 2027 limit not yet published).
+- Planned cuts, in order, to be confirmed against the real limit:
+  1. Section 6 (evidence): keep the evidence table and one paragraph per campaign; move run detail,
+     pins and control lists to the appendix or the website.
+  2. Section 5 (revealing less): shorten the counterexamples to a table and tighten the release
+     condition to its definition plus one example.
+  3. Section 4 (architecture): trim the contract-field prose that repeats Appendix A.
+  4. Background and related work: merge overlapping zkRDF and earlier-interface material.
+- Check whether ESWC allows an appendix or supplementary material; if not, the appendix moves to the
+  site page and an archived artifact.
