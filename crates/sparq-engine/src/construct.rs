@@ -210,7 +210,7 @@ pub fn triples_to_ntriples(triples: &[Triple]) -> String {
 /// deduplicating the output (set semantics, first-production order).
 fn instantiate(template: &[TriplePattern], solutions: &QueryResult, graph: &Graph) -> Result<Vec<Triple>, String> {
     #[cfg(feature = "deterministic-blank-nodes")]
-    let namespace = template_namespace(graph);
+    let namespace = template_namespace(graph, solutions);
     #[cfg(not(feature = "deterministic-blank-nodes"))]
     let _ = graph;
     let cols: FxHashMap<&Variable, usize> =
@@ -226,7 +226,8 @@ fn instantiate(template: &[TriplePattern], solutions: &QueryResult, graph: &Grap
         // Blank nodes in the template are scoped to one solution: the same label
         // maps to one fresh node within a row, different nodes across rows.
         // [GPT-6] The optional deterministic namespace is chosen against all
-        // blank nodes in the active dataset, not only projected WHERE bindings.
+        // blank nodes in the active dataset and in the solution terms (an
+        // extension function can compute a blank node the dataset never held).
         #[cfg(not(feature = "deterministic-blank-nodes"))]
         let mut row_bnodes: TemplateNodes<'_> = FxHashMap::default();
         #[cfg(feature = "deterministic-blank-nodes")]
@@ -324,7 +325,7 @@ fn fresh<'a>(label: &'a str, row_bnodes: &mut TemplateNodes<'a>) -> BlankNode {
 }
 
 #[cfg(feature = "deterministic-blank-nodes")]
-fn template_namespace(graph: &Graph) -> String {
+fn template_namespace(graph: &Graph, solutions: &QueryResult) -> String {
     let mut labels = FxHashSet::default();
     for (name, _) in &graph.named {
         if let Term::BlankNode(node) = name {
@@ -335,20 +336,11 @@ fn template_namespace(graph: &Graph) -> String {
         let scan = graph.store.scan(&[None, None, None]);
         for row in scan.rows.iter() {
             let [subject, _, object] = scan.to_spo(row);
-            let mut terms = vec![graph.dict.term(subject), graph.dict.term(object)];
-            while let Some(term) = terms.pop() {
-                match term {
-                    Term::BlankNode(node) => { labels.insert(node.as_str().to_owned()); }
-                    Term::Triple(triple) => {
-                        if let NamedOrBlankNode::BlankNode(node) = triple.subject {
-                            labels.insert(node.as_str().to_owned());
-                        }
-                        terms.push(triple.object);
-                    }
-                    _ => {}
-                }
-            }
+            blank_labels(vec![graph.dict.term(subject), graph.dict.term(object)], &mut labels);
         }
+    }
+    for row in &solutions.rows {
+        blank_labels(row.iter().flatten().cloned().collect(), &mut labels);
     }
     // These prefixes are disjoint. N source labels occupy at most N prefixes,
     // so examining N+1 candidates finds an unused namespace without randomness.
@@ -359,6 +351,23 @@ fn template_namespace(graph: &Graph) -> String {
         }
     }
     unreachable!("N labels cannot occupy N+1 disjoint namespaces")
+}
+
+/// Adds every blank-node label in `terms`, including inside triple terms.
+#[cfg(feature = "deterministic-blank-nodes")]
+fn blank_labels(mut terms: Vec<Term>, labels: &mut FxHashSet<String>) {
+    while let Some(term) = terms.pop() {
+        match term {
+            Term::BlankNode(node) => { labels.insert(node.as_str().to_owned()); }
+            Term::Triple(triple) => {
+                if let NamedOrBlankNode::BlankNode(node) = triple.subject {
+                    labels.insert(node.as_str().to_owned());
+                }
+                terms.push(triple.object);
+            }
+            _ => {}
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

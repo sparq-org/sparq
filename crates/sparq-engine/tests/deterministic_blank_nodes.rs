@@ -96,3 +96,25 @@ fn generated_graph_budget_rejects_without_returning_a_partial_graph() {
     assert!(construct_with_budget(&graph, query, &budget).is_err());
     assert_eq!(construct(&graph, query).unwrap().len(), 2);
 }
+
+#[test]
+fn template_nodes_avoid_blank_nodes_computed_by_extension_functions() {
+    let graph = Graph::load_str("", "ntriples").unwrap();
+    let mut functions = sparq_engine::FunctionRegistry::new();
+    functions.register("urn:node", |_| {
+        Ok(Term::BlankNode(oxrdf::BlankNode::new_unchecked("tc0_0_0")))
+    });
+    let result = sparq_engine::with_functions(&functions, || {
+        construct(
+            &graph,
+            "CONSTRUCT { _:fresh <urn:p> ?x } WHERE { BIND(<urn:node>() AS ?x) }",
+        )
+    })
+    .unwrap();
+    assert_eq!(result.len(), 1);
+    assert_ne!(
+        Term::from(result[0].subject.clone()),
+        result[0].object,
+        "a template node must not reuse a computed blank node"
+    );
+}
