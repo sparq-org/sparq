@@ -254,3 +254,168 @@ impl Nonces for CountingNonces {
         Ok(self.seen.insert(nonce))
     }
 }
+
+// [OPUS-5.5] zkp-14.6: synthetic payment-history credential for the false-ASK example.
+// Signed with the RFC 8032 section 7.1 TEST 1 key, whose secret key is public;
+// the fixture is public test data, never a deployment credential.
+
+/// Synthetic issuer of the payment-history credential.
+pub const PAYMENT_ISSUER: &str = "https://bank.example/issuers/1";
+/// `did:key` of [`RFC8032_TEST1_PUBLIC_KEY`], in the published vector's `#`-fragment form.
+pub const PAYMENT_VM: &str = "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw";
+/// Canonical RDFC-1.0 N-Quads of the unsecured document; no blank nodes.
+pub const PAYMENT_DOCUMENT: &str = concat!(
+    r#"<did:example:abcdefgh> <https://bank.example/vocab#payment> <https://bank.example/payments/2026-06> ."#, "\n",
+    r#"<did:example:abcdefgh> <https://bank.example/vocab#payment> <https://bank.example/payments/2026-07> ."#, "\n",
+    r#"<did:example:abcdefgh> <https://bank.example/vocab#payment> <https://bank.example/payments/2026-08> ."#, "\n",
+    r#"<https://bank.example/payments/2026-06> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://bank.example/vocab#Payment> ."#, "\n",
+    r#"<https://bank.example/payments/2026-06> <https://bank.example/vocab#amount> "1250.00"^^<http://www.w3.org/2001/XMLSchema#decimal> ."#, "\n",
+    r#"<https://bank.example/payments/2026-06> <https://bank.example/vocab#paymentStatus> <https://bank.example/vocab#Settled> ."#, "\n",
+    r#"<https://bank.example/payments/2026-07> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://bank.example/vocab#Payment> ."#, "\n",
+    r#"<https://bank.example/payments/2026-07> <https://bank.example/vocab#amount> "1250.00"^^<http://www.w3.org/2001/XMLSchema#decimal> ."#, "\n",
+    r#"<https://bank.example/payments/2026-07> <https://bank.example/vocab#paymentStatus> <https://bank.example/vocab#Settled> ."#, "\n",
+    r#"<https://bank.example/payments/2026-08> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://bank.example/vocab#Payment> ."#, "\n",
+    r#"<https://bank.example/payments/2026-08> <https://bank.example/vocab#amount> "1310.50"^^<http://www.w3.org/2001/XMLSchema#decimal> ."#, "\n",
+    r#"<https://bank.example/payments/2026-08> <https://bank.example/vocab#paymentStatus> <https://bank.example/vocab#Settled> ."#, "\n",
+    r#"<urn:uuid:7d1c2b4e-6f0a-4c39-9a51-2b8e3f4d5a60> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://bank.example/vocab#PaymentHistoryCredential> ."#, "\n",
+    r#"<urn:uuid:7d1c2b4e-6f0a-4c39-9a51-2b8e3f4d5a60> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://www.w3.org/2018/credentials#VerifiableCredential> ."#, "\n",
+    r#"<urn:uuid:7d1c2b4e-6f0a-4c39-9a51-2b8e3f4d5a60> <https://www.w3.org/2018/credentials#credentialSubject> <did:example:abcdefgh> ."#, "\n",
+    r#"<urn:uuid:7d1c2b4e-6f0a-4c39-9a51-2b8e3f4d5a60> <https://www.w3.org/2018/credentials#issuer> <https://bank.example/issuers/1> ."#, "\n",
+    r#"<urn:uuid:7d1c2b4e-6f0a-4c39-9a51-2b8e3f4d5a60> <https://www.w3.org/2018/credentials#validFrom> "2026-09-01T00:00:00Z"^^<http://www.w3.org/2001/XMLSchema#dateTime> ."#, "\n",
+);
+/// Canonical RDFC-1.0 N-Quads of the proof configuration, without `proofValue`.
+pub const PAYMENT_PROOF: &str = concat!(
+    r#"_:c14n0 <http://purl.org/dc/terms/created> "2026-09-01T00:00:00Z"^^<http://www.w3.org/2001/XMLSchema#dateTime> ."#, "\n",
+    r#"_:c14n0 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/security#DataIntegrityProof> ."#, "\n",
+    r#"_:c14n0 <https://w3id.org/security#cryptosuite> "eddsa-rdfc-2022"^^<https://w3id.org/security#cryptosuiteString> ."#, "\n",
+    r#"_:c14n0 <https://w3id.org/security#proofPurpose> <https://w3id.org/security#assertionMethod> ."#, "\n",
+    r#"_:c14n0 <https://w3id.org/security#verificationMethod> <did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw> ."#, "\n",
+);
+pub const PAYMENT_DOCUMENT_SHA256: &str = "c9b4d8917d6fa0802e762e80a5bc38c987436f322aec3bd50d391c6ca7bf91c5";
+pub const PAYMENT_PROOF_SHA256: &str = "b76ec93a8c2f2121288bc717aaad5ffc5fda6e657f80aa18dcd3a1190386127c";
+/// Ed25519 over `SHA-256(PAYMENT_PROOF) || SHA-256(PAYMENT_DOCUMENT)`.
+pub const PAYMENT_SIGNATURE: &str = "0091a31ff65b96f9ec4fde510c5cc083691182e7fd3743b3b8a19dc0209523341e7534a4aee5fa29136407dcc6d8d6d9d09cfece61b0d70eeaad8701e2899405";
+
+/// "Was any payment returned?" False: every payment in the credential is settled.
+pub const ASK_PAYMENT_RETURNED: &str = "ASK { ?p a <https://bank.example/vocab#Payment> ; \
+     <https://bank.example/vocab#paymentStatus> <https://bank.example/vocab#Returned> }";
+/// The same shape for settled payments; true. Used as the changed-query control.
+pub const ASK_PAYMENT_SETTLED: &str = "ASK { ?p a <https://bank.example/vocab#Payment> ; \
+     <https://bank.example/vocab#paymentStatus> <https://bank.example/vocab#Settled> }";
+
+/// Hand-written check of the synthetic payment fixture, mirroring
+/// [`check_published_vector`]: hashes, issuer, method key and the ASK facts.
+/// The signature itself is checked by the native model in each driver run.
+pub fn check_payment_fixture() {
+    assert_eq!(hex_string(&Sha256::digest(PAYMENT_DOCUMENT)), PAYMENT_DOCUMENT_SHA256);
+    assert_eq!(hex_string(&Sha256::digest(PAYMENT_PROOF)), PAYMENT_PROOF_SHA256);
+    let issuer = only_line(PAYMENT_DOCUMENT, "<https://www.w3.org/2018/credentials#issuer>");
+    assert!(issuer.ends_with(&format!(" <{PAYMENT_ISSUER}> .")), "{issuer}");
+    let method = only_line(PAYMENT_PROOF, "<https://w3id.org/security#verificationMethod>");
+    assert!(method.ends_with(&format!(" <{PAYMENT_VM}> .")), "{method}");
+    let multibase = PAYMENT_VM
+        .strip_prefix("did:key:z")
+        .and_then(|rest| rest.split('#').next())
+        .expect("did:key method");
+    let mut multikey = vec![0xed_u8, 0x01];
+    multikey.extend_from_slice(&hex::<32>(RFC8032_TEST1_PUBLIC_KEY));
+    assert_eq!(base58btc(multibase), multikey);
+    // ASK false: no payment status other than Settled is stated anywhere.
+    let statuses: Vec<&str> = PAYMENT_DOCUMENT
+        .lines()
+        .filter(|line| line.contains("<https://bank.example/vocab#paymentStatus>"))
+        .collect();
+    assert_eq!(statuses.len(), 3);
+    assert!(statuses.iter().all(|line| line.ends_with(" <https://bank.example/vocab#Settled> .")));
+    assert!(!PAYMENT_DOCUMENT.contains("Returned") && !PAYMENT_PROOF.contains("Returned"));
+}
+
+/// The signed fixture a genuine-driver case evaluates; one per job.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Dataset {
+    /// The published W3C `eddsa-rdfc-2022` alumni vector.
+    W3cAlumni,
+    /// The synthetic payment-history credential signed with the RFC 8032 TEST 1 key.
+    PaymentHistory,
+}
+
+impl Dataset {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::W3cAlumni => "w3c-alumni",
+            Self::PaymentHistory => "payment-history",
+        }
+    }
+
+    pub fn check(self) {
+        match self {
+            Self::W3cAlumni => check_published_vector(),
+            Self::PaymentHistory => check_payment_fixture(),
+        }
+    }
+
+    /// The verifier's own one-entry table for this fixture's issuer and method.
+    pub fn policy(self) -> Policy {
+        match self {
+            Self::W3cAlumni => policy(),
+            Self::PaymentHistory => Policy::new(vec![authorized(
+                PAYMENT_ISSUER,
+                PAYMENT_VM,
+                RFC8032_TEST1_PUBLIC_KEY,
+            )]),
+        }
+    }
+
+    /// The fixture's own public key, hex.
+    pub fn public_key(self) -> &'static str {
+        match self {
+            Self::W3cAlumni => W3C_PUBLIC_KEY,
+            Self::PaymentHistory => RFC8032_TEST1_PUBLIC_KEY,
+        }
+    }
+
+    /// Another valid public key that does not sign this fixture.
+    pub fn other_public_key(self) -> &'static str {
+        match self {
+            Self::W3cAlumni => RFC8032_TEST1_PUBLIC_KEY,
+            Self::PaymentHistory => W3C_PUBLIC_KEY,
+        }
+    }
+
+    pub fn credential(self) -> SignedCredential {
+        match self {
+            Self::W3cAlumni => credential(),
+            Self::PaymentHistory => SignedCredential {
+                document: PAYMENT_DOCUMENT.into(),
+                proof_config: PAYMENT_PROOF.into(),
+                signature: hex::<64>(PAYMENT_SIGNATURE).to_vec(),
+            },
+        }
+    }
+
+    pub fn credentials(self, salt: [u8; 32]) -> PrivateCredentials {
+        credentials(vec![self.credential()], salt)
+    }
+
+    /// The verifier's anchor, from its own independently obtained copy and salt.
+    pub fn anchor(self, salt: [u8; 32]) -> [u8; 32] {
+        auth::dataset_commitment(&self.credentials(salt), &self.policy())
+            .expect("fixture authenticates")
+    }
+
+    /// Source description and the signed inputs' hashes, for evidence metadata.
+    pub fn source(self) -> (&'static str, &'static str, &'static str) {
+        match self {
+            Self::W3cAlumni => (
+                "W3C vc-di-eddsa REC 2025-05-15, eddsa-rdfc-2022 examples 7, 9, 10, 12, 13, 15",
+                W3C_DOCUMENT_SHA256,
+                W3C_PROOF_SHA256,
+            ),
+            Self::PaymentHistory => (
+                "synthetic payment-history credential, eddsa-rdfc-2022 profile, signed with the public RFC 8032 section 7.1 TEST 1 key",
+                PAYMENT_DOCUMENT_SHA256,
+                PAYMENT_PROOF_SHA256,
+            ),
+        }
+    }
+}

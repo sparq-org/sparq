@@ -8,9 +8,7 @@ name: zk-authrdf-genuine
 on:
   workflow_dispatch:
   push:
-    branches: [claude/zk-authrdf-genuine-receipts]
-    paths:
-      - .github/workflows/zk-authrdf-genuine.yml
+    branches: [claude/zk-authrdf-genuine-receipts, claude/zk-payment-false-ask]
 
 permissions:
   contents: read
@@ -29,6 +27,8 @@ jobs:
       fail-fast: false
       matrix:
         case:
+          - ask-false-payment-verifier-agreed
+          - ask-false-payment-holder-declared
           - ask-false-holder-declared
           - ask-true-verifier-agreed
           - select-bag-holder-declared

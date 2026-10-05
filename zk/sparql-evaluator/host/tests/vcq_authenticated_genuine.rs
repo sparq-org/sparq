@@ -26,7 +26,7 @@ mod evidence;
 mod fixture;
 
 use evidence::{Evidence, GUEST_PACKAGE, hex, pretty, read_input, sha256};
-use fixture::{CountingNonces, Expect};
+use fixture::{CountingNonces, Dataset, Expect};
 use risc0_zkvm::{ExitCode, InnerReceipt};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
@@ -108,13 +108,18 @@ struct Case {
     expect: Expect,
     /// False only for the row-bound case, which the protocol must reject.
     accepted: bool,
+    /// The signed fixture this case evaluates.
+    dataset: Dataset,
 }
 
 const AGREED: ScopeAuthority = ScopeAuthority::VerifierAgreedAnchor;
 const HOLDER: ScopeAuthority = ScopeAuthority::HolderDeclared;
+const W3C: Dataset = Dataset::W3cAlumni;
+const PAYMENT: Dataset = Dataset::PaymentHistory;
 
-/// Three contracts x two authorities (ASK covers both values), plus the row bound.
-static CASES: [Case; 7] = [
+/// Three contracts x two authorities (ASK covers both values), the row bound,
+/// and the payment false-ASK example under both authorities.
+static CASES: [Case; 9] = [
     Case {
         id: "select-bag-verifier-agreed",
         contract: ResultContract::SelectBag,
@@ -125,6 +130,7 @@ static CASES: [Case; 7] = [
         released_rows: 4,
         expect: Expect::Bag,
         accepted: true,
+        dataset: W3C,
     },
     Case {
         id: "select-bag-holder-declared",
@@ -136,6 +142,7 @@ static CASES: [Case; 7] = [
         released_rows: 4,
         expect: Expect::Bag,
         accepted: true,
+        dataset: W3C,
     },
     Case {
         id: "ask-true-verifier-agreed",
@@ -147,6 +154,7 @@ static CASES: [Case; 7] = [
         released_rows: 4,
         expect: Expect::Ask(true),
         accepted: true,
+        dataset: W3C,
     },
     Case {
         id: "ask-false-holder-declared",
@@ -158,6 +166,7 @@ static CASES: [Case; 7] = [
         released_rows: 4,
         expect: Expect::Ask(false),
         accepted: true,
+        dataset: W3C,
     },
     Case {
         id: "construct-verifier-agreed",
@@ -169,6 +178,7 @@ static CASES: [Case; 7] = [
         released_rows: 4,
         expect: Expect::Graph,
         accepted: true,
+        dataset: W3C,
     },
     Case {
         id: "construct-holder-declared",
@@ -180,6 +190,7 @@ static CASES: [Case; 7] = [
         released_rows: 4,
         expect: Expect::Graph,
         accepted: true,
+        dataset: W3C,
     },
     Case {
         id: "select-bag-row-bound",
@@ -191,6 +202,31 @@ static CASES: [Case; 7] = [
         released_rows: 1,
         expect: Expect::Bag,
         accepted: false,
+        dataset: W3C,
+    },
+    Case {
+        id: "ask-false-payment-verifier-agreed",
+        contract: ResultContract::AskBoolean,
+        form: QueryForm::Ask,
+        authority: AGREED,
+        query: fixture::ASK_PAYMENT_RETURNED,
+        changed_query: fixture::ASK_PAYMENT_SETTLED,
+        released_rows: 4,
+        expect: Expect::Ask(false),
+        accepted: true,
+        dataset: PAYMENT,
+    },
+    Case {
+        id: "ask-false-payment-holder-declared",
+        contract: ResultContract::AskBoolean,
+        form: QueryForm::Ask,
+        authority: HOLDER,
+        query: fixture::ASK_PAYMENT_RETURNED,
+        changed_query: fixture::ASK_PAYMENT_SETTLED,
+        released_rows: 4,
+        expect: Expect::Ask(false),
+        accepted: true,
+        dataset: PAYMENT,
     },
 ];
 
@@ -255,8 +291,8 @@ fn challenge_for(seed: &[u8; 32], label: &str) -> [u8; 32] {
 }
 
 /// Verifier-owned policy substitutions; each builds its own valid descriptor.
-fn replaced_policies() -> Vec<(&'static str, Policy)> {
-    let base = fixture::policy();
+fn replaced_policies(dataset: Dataset) -> Vec<(&'static str, Policy)> {
+    let base = dataset.policy();
     let edit = |change: &dyn Fn(&mut Policy)| {
         let mut policy = base.clone();
         change(&mut policy);
@@ -266,7 +302,7 @@ fn replaced_policies() -> Vec<(&'static str, Policy)> {
         (
             "policy_other_key",
             edit(&|p| {
-                p.authorization[0].public_key = fixture::hex(fixture::RFC8032_TEST1_PUBLIC_KEY);
+                p.authorization[0].public_key = fixture::hex(dataset.other_public_key());
             }),
         ),
         (
@@ -283,7 +319,7 @@ fn replaced_policies() -> Vec<(&'static str, Policy)> {
                 p.authorization.push(fixture::authorized(
                     fixture::OTHER_ISSUER,
                     fixture::OTHER_VM,
-                    fixture::W3C_PUBLIC_KEY,
+                    dataset.public_key(),
                 ));
             }),
         ),
@@ -302,8 +338,8 @@ fn backend(code: &'static str) -> ErrorCode {
     ErrorCode::Backend(code)
 }
 
-fn credentials() -> auth::PrivateCredentials {
-    fixture::credentials(vec![fixture::credential()], fixture::SALT)
+fn credentials(dataset: Dataset) -> auth::PrivateCredentials {
+    dataset.credentials(fixture::SALT)
 }
 
 /// In-memory test double with a call counter; never a production store.
@@ -449,10 +485,26 @@ struct Setup {
     r0vm: PathBuf,
     pin: ArtifactPin,
     exact_pin: ArtifactPin,
-    verifier: Verifier,
+    /// One verifier context per dataset the declared cases use, in first-use order.
+    contexts: Vec<Context>,
     evidence: Evidence,
-    /// The verifier's anchor over its own copy of the published credential.
+}
+
+/// The verifier's adapters and anchor for one signed fixture.
+struct Context {
+    dataset: Dataset,
+    verifier: Verifier,
+    /// The verifier's anchor over its own copy of the fixture credential.
     anchor: [u8; 32],
+}
+
+impl Setup {
+    fn at(&self, case: &Case) -> &Context {
+        self.contexts
+            .iter()
+            .find(|context| context.dataset == case.dataset)
+            .expect("a context for every declared case's dataset")
+    }
 }
 
 fn load_pin(path: &Path) -> (ArtifactPin, Vec<u8>) {
@@ -496,30 +548,48 @@ impl Setup {
         assert_ne!(pin.image_id, exact_pin.image_id, "V5 and exact image IDs must differ");
         let guest_bytes = read_input(&job.guest, MAX_GUEST_BYTES).expect("V5 guest artifact");
         let exact_bytes = read_input(&job.exact_guest, MAX_GUEST_BYTES).expect("exact guest");
-        let method = Risc0AuthenticatedRdfV5::new(&pin, accept(&guest_bytes, &pin), fixture::policy())
-            .expect("adapter from the approved V5 pin")
-            .with_r0vm(r0vm.clone());
-        let replaced = replaced_policies()
+        let mut datasets: Vec<Dataset> = Vec::new();
+        for case in &cases {
+            if !datasets.contains(&case.dataset) {
+                datasets.push(case.dataset);
+            }
+        }
+        let contexts = datasets
             .into_iter()
-            .map(|(name, policy)| {
-                let adapter = Risc0AuthenticatedRdfV5::new(&pin, accept(&guest_bytes, &pin), policy)
-                    .expect("adapter under a substituted verifier policy");
-                (name, adapter)
+            .map(|dataset| {
+                let method =
+                    Risc0AuthenticatedRdfV5::new(&pin, accept(&guest_bytes, &pin), dataset.policy())
+                        .expect("adapter from the approved V5 pin")
+                        .with_r0vm(r0vm.clone());
+                let replaced = replaced_policies(dataset)
+                    .into_iter()
+                    .map(|(name, policy)| {
+                        let adapter =
+                            Risc0AuthenticatedRdfV5::new(&pin, accept(&guest_bytes, &pin), policy)
+                                .expect("adapter under a substituted verifier policy");
+                        (name, adapter)
+                    })
+                    .collect();
+                let cross_image = Risc0AuthenticatedRdfV5::new(
+                    &exact_pin,
+                    accept(&exact_bytes, &exact_pin),
+                    dataset.policy(),
+                )
+                .expect("adapter pinned to the exact guest");
+                let verifier = Verifier {
+                    descriptor: method.descriptor().clone(),
+                    method,
+                    checker: accept(&guest_bytes, &pin),
+                    replaced,
+                    cross_image,
+                };
+                Context {
+                    dataset,
+                    verifier,
+                    anchor: dataset.anchor(fixture::SALT),
+                }
             })
             .collect();
-        let cross_image = Risc0AuthenticatedRdfV5::new(
-            &exact_pin,
-            accept(&exact_bytes, &exact_pin),
-            fixture::policy(),
-        )
-        .expect("adapter pinned to the exact guest");
-        let verifier = Verifier {
-            descriptor: method.descriptor().clone(),
-            method,
-            checker: accept(&guest_bytes, &pin),
-            replaced,
-            cross_image,
-        };
         let inputs = json!({
             "pin_sha256": sha256(&pin_bytes),
             "guest_sha256": sha256(&guest_bytes),
@@ -537,9 +607,8 @@ impl Setup {
             r0vm,
             pin,
             exact_pin,
-            verifier,
+            contexts,
             evidence,
-            anchor: fixture::anchor(fixture::SALT),
         }
     }
 }
@@ -581,7 +650,7 @@ struct Proved {
 
 /// Prepares and proves one case, retaining public material before any verification.
 fn prove_and_retain(s: &Setup, case: &Case, spec: &Spec) -> Proved {
-    let v = &s.verifier;
+    let v = &s.at(case).verifier;
     let request = spec.stored(&v.descriptor);
     let admission = v
         .method
@@ -592,13 +661,13 @@ fn prove_and_retain(s: &Setup, case: &Case, spec: &Spec) -> Proved {
     // Native model only, to compare with the verified journal; never a proof.
     let native = auth::evaluate(&auth::Witness {
         request: expected.clone(),
-        dataset: credentials(),
+        dataset: credentials(case.dataset),
     })
     .expect("native oracle");
     assert_eq!(native.result, case.expect.result(), "{}: hand-defined result", case.id);
     let witness = v
         .method
-        .prepare(&request, &admission, credentials())
+        .prepare(&request, &admission, credentials(case.dataset))
         .expect("prepared witness");
     s.evidence.start(case.id, &expected);
     eprintln!("vcq authrdf genuine: {} proof starts", case.id);
@@ -646,7 +715,8 @@ fn check_claim(
     proved: &Proved,
     journal: &auth::Journal,
 ) {
-    let v = &s.verifier;
+    let v = &s.at(case).verifier;
+    let anchor = s.at(case).anchor;
     let agreed = case.authority == AGREED;
     let output = claim.result();
     assert_eq!(output.result, released(case.expect), "{}: hand-defined result", case.id);
@@ -660,7 +730,7 @@ fn check_claim(
     // Both authorities evaluate the same credential and salt.
     assert_eq!(
         (output.dataset_commitment, journal.dataset_commitment),
-        (s.anchor, s.anchor)
+        (anchor, anchor)
     );
     let request_digest = auth::request_digest(&proved.expected).expect("V5 request digest");
     assert_eq!(
@@ -678,7 +748,7 @@ fn check_claim(
         &proved.receipt.receipt.journal.bytes,
     );
     assert_eq!(claim.statement_digest().as_bytes(), &statement);
-    let anchor = agreed.then(|| Digest32::new(s.anchor).expect("nonzero anchor"));
+    let anchor = agreed.then(|| Digest32::new(anchor).expect("nonzero anchor"));
     assert_eq!(
         *claim.scope(),
         ClaimScope {
@@ -746,7 +816,8 @@ fn binding_controls(
     proved: &Proved,
     journal: &auth::Journal,
 ) -> Vec<Value> {
-    let v = &s.verifier;
+    let v = &s.at(case).verifier;
+    let own_anchor = s.at(case).anchor;
     // Fresh store: an accepted control would succeed here, never fail as replay.
     let untouched = Store::default();
     let mut passed = Vec::new();
@@ -822,18 +893,18 @@ fn binding_controls(
         "scope_substitution_agreed_to_holder"
     } else {
         scope.authority = AGREED;
-        scope.anchor = Some(s.anchor);
+        scope.anchor = Some(own_anchor);
         "scope_substitution_holder_to_agreed"
     };
     expect(name, at(own, &scope, AUDIENCE, NOW, presentation), rejected);
     if case.authority == AGREED {
         let mut anchor = original.clone();
-        let mut wrong = s.anchor;
+        let mut wrong = own_anchor;
         wrong[0] ^= 1;
         anchor.anchor = Some(wrong);
         expect("wrong_agreed_anchor", at(own, &anchor, AUDIENCE, NOW, presentation), rejected);
         let mut resalted = original.clone();
-        resalted.anchor = Some(fixture::anchor(fixture::OTHER_SALT));
+        resalted.anchor = Some(case.dataset.anchor(fixture::OTHER_SALT));
         expect("anchor_under_other_salt", at(own, &resalted, AUDIENCE, NOW, presentation), rejected);
     }
 
@@ -873,7 +944,7 @@ fn challenge_controls(
     presentation: &VcqPresentation,
     used: &Store,
 ) -> Vec<Value> {
-    let own = &s.verifier.method;
+    let own = &s.at(case).verifier.method;
     let replay = verify_with(own, spec, AUDIENCE, NOW, presentation, used)
         .expect_err("second verification on the same store");
     assert_eq!(
@@ -936,10 +1007,10 @@ fn challenge_controls(
 /// A protocol-accepted case: one verification, claim checks, then controls.
 fn accepted_details(s: &Setup, case: &Case, spec: &Spec, proved: &Proved) -> Value {
     let store = Store::default();
-    let claim = verify_with(&s.verifier.method, spec, AUDIENCE, NOW, &proved.presentation, &store)
+    let claim = verify_with(&s.at(case).verifier.method, spec, AUDIENCE, NOW, &proved.presentation, &store)
         .unwrap_or_else(|error| panic!("{}: adapter verification: {error:?}", case.id));
     assert_eq!(store.calls(), 1, "{}: original challenge consumed once", case.id);
-    let journal = underlying(&s.verifier, &proved.receipt, &proved.expected);
+    let journal = underlying(&s.at(case).verifier, &proved.receipt, &proved.expected);
     let status = genuine_status(&proved.receipt);
     assert_eq!(journal, proved.native, "{}: guest vs native model", case.id);
     check_claim(s, case, spec, &claim, proved, &journal);
@@ -964,7 +1035,7 @@ fn accepted_details(s: &Setup, case: &Case, spec: &Spec, proved: &Proved) -> Val
 /// The row-bound case: a genuine receipt the protocol must reject before consumption.
 fn row_bound_details(s: &Setup, case: &Case, spec: &Spec, proved: &Proved) -> Value {
     let store = Store::default();
-    let error = verify_with(&s.verifier.method, spec, AUDIENCE, NOW, &proved.presentation, &store)
+    let error = verify_with(&s.at(case).verifier.method, spec, AUDIENCE, NOW, &proved.presentation, &store)
         .expect_err("the protocol row bound rejects the genuine receipt");
     let bound = ErrorCode::CapacityExceeded(CapacityBound::Backend {
         name: "vcq-released-rows",
@@ -979,12 +1050,12 @@ fn row_bound_details(s: &Setup, case: &Case, spec: &Spec, proved: &Proved) -> Va
     );
     assert_eq!(store.calls(), 0, "rejected before the original challenge is consumed");
     // Establish cryptographic acceptance separately, with test nonces only.
-    let journal = underlying(&s.verifier, &proved.receipt, &proved.expected);
+    let journal = underlying(&s.at(case).verifier, &proved.receipt, &proved.expected);
     let status = genuine_status(&proved.receipt);
     assert_eq!(journal, proved.native, "{}: guest vs native model", case.id);
     assert_eq!(journal.result, case.expect.result(), "hand-defined duplicate bag");
     assert_eq!(journal.provenance, Provenance::VerifierAgreedAuthenticated);
-    assert_eq!(journal.dataset_commitment, s.anchor);
+    assert_eq!(journal.dataset_commitment, s.at(case).anchor);
     json!({
         "protocol_accepted": false,
         "journal": journal,
@@ -1000,7 +1071,7 @@ fn row_bound_details(s: &Setup, case: &Case, spec: &Spec, proved: &Proved) -> Va
 }
 
 fn run_case(s: &Setup, case: &Case) -> Value {
-    let spec = Spec::original(case, &s.seed, s.anchor);
+    let spec = Spec::original(case, &s.seed, s.at(case).anchor);
     let proved = prove_and_retain(s, case, &spec);
     let outcome = if case.accepted {
         accepted_details(s, case, &spec, &proved)
@@ -1008,6 +1079,7 @@ fn run_case(s: &Setup, case: &Case) -> Value {
         row_bound_details(s, case, &spec, &proved)
     };
     let details = json!({
+        "dataset": case.dataset.name(),
         "contract": format!("{:?}", case.contract),
         "authority": format!("{:?}", case.authority),
         "query": case.query,
@@ -1025,6 +1097,7 @@ fn run_case(s: &Setup, case: &Case) -> Value {
 #[ignore = "genuine proofs: needs SPARQ_VCQ_AUTHRDF_PROOF_JOB, a real RISC0_SERVER_PATH and approved guests and pins"]
 fn genuine_vcq_authrdf_receipts_verify_declared_cases_and_reject_controls() {
     fixture::check_published_vector();
+    fixture::check_payment_fixture();
     let s = Setup::load();
     eprintln!("vcq authrdf genuine: evidence directory {}", s.evidence.root().display());
     let declared: Vec<&str> = s.cases.iter().map(|case| case.id).collect();
@@ -1034,7 +1107,30 @@ fn genuine_vcq_authrdf_receipts_verify_declared_cases_and_reject_controls() {
         .iter()
         .map(|case| (case.id.to_owned(), json!(case.expect.result())))
         .collect();
-    let policy = s.verifier.method.policy();
+    let verifiers: Vec<Value> = s
+        .contexts
+        .iter()
+        .map(|context| {
+            let v = &context.verifier;
+            let policy = v.method.policy();
+            let (source, document, proof) = context.dataset.source();
+            json!({
+                "dataset": context.dataset.name(),
+                "descriptor_sha256": hex(&vcq::descriptor_digest(&v.descriptor)),
+                "parameter_digest": hex(&vcq5::parameter_digest(policy).expect("valid policy")),
+                "policy_digest": hex(&vcq5::policy_digest(policy).expect("valid policy")),
+                "verifier_policy": policy,
+                "replaced_policies": v.replaced.iter().map(|(name, _)| *name).collect::<Vec<_>>(),
+                "fixture": {
+                    "source": source,
+                    "document_sha256": document,
+                    "proof_config_sha256": proof,
+                    "salt": hex(&fixture::SALT),
+                    "agreed_anchor": hex(&context.anchor),
+                },
+            })
+        })
+        .collect();
     let metadata = pretty(&json!({
         "schema": METADATA_SCHEMA,
         "status": "started; not a success record",
@@ -1044,32 +1140,21 @@ fn genuine_vcq_authrdf_receipts_verify_declared_cases_and_reject_controls() {
             "package": GUEST_PACKAGE,
             "relation_version": auth::VERSION,
             "pin": s.pin,
-            "image_id": s.verifier.checker.image_id(),
+            "image_id": s.contexts[0].verifier.checker.image_id(),
         },
         "exact_guest": {
             "package": EXACT_GUEST_PACKAGE,
             "use": "cross-image control only",
             "pin": s.exact_pin,
         },
-        "descriptor_sha256": hex(&vcq::descriptor_digest(&s.verifier.descriptor)),
-        "parameter_digest": hex(&vcq5::parameter_digest(policy).expect("valid policy")),
-        "policy_digest": hex(&vcq5::policy_digest(policy).expect("valid policy")),
-        "verifier_policy": policy,
-        "replaced_policies": s.verifier.replaced.iter().map(|(name, _)| *name).collect::<Vec<_>>(),
+        "verifiers": verifiers,
         "r0vm": s.r0vm,
         "challenge_seed32": s.seed_text,
         "challenge_derivation": "SHA-256(domain || seed || u64-be label length || case label)",
         "declared_cases": declared,
         "all_defined_cases_declared": declared.len() == CASES.len(),
-        "fixture": {
-            "source": "W3C vc-di-eddsa REC 2025-05-15, eddsa-rdfc-2022 examples 7, 9, 10, 12, 13, 15",
-            "document_sha256": fixture::W3C_DOCUMENT_SHA256,
-            "proof_config_sha256": fixture::W3C_PROOF_SHA256,
-            "salt": hex(&fixture::SALT),
-            "agreed_anchor": hex(&s.anchor),
-            "expected": expected,
-            "expected_source": "hand-defined from the published document and checked against its statements; also compared with the native model",
-        },
+        "expected": expected,
+        "expected_source": "hand-defined from each fixture document and checked against its statements; also compared with the native model",
         "verifier": { "audience": AUDIENCE, "not_before": NOT_BEFORE, "not_after": NOT_AFTER, "now": NOW, "clock": "fixed synthetic, not ambient" },
         "challenge_stores": STORES,
     }));
@@ -1115,7 +1200,7 @@ fn genuine_vcq_authrdf_receipts_verify_declared_cases_and_reject_controls() {
         "cases": records,
         "challenge_stores": STORES,
         "registry_adapter_availability": "not tested; this test reads no registry entry",
-        "scope": "published W3C vector only; experimental, not externally audited; no credential status, holder binding, JSON-LD processing, or wallet or world completeness is established; no benchmark",
+        "scope": "published W3C vector and one synthetic payment-history credential only; experimental, not externally audited; no credential status, holder binding, JSON-LD processing, or wallet or world completeness is established; no benchmark",
     });
     s.evidence.write("summary.json", &pretty(&summary));
 }
@@ -1156,7 +1241,7 @@ fn genuine_job_rejects_unknown_fields_and_invalid_seeds() {
         .flat_map(|case| [case.id.to_owned(), format!("{}/wrong-challenge", case.id)])
         .map(|label| challenge_for(&seed, &label))
         .collect();
-    assert_eq!(challenges.len(), 14, "distinct original and wrong challenges");
+    assert_eq!(challenges.len(), 18, "distinct original and wrong challenges");
 }
 
 fn ids(list: &[&str]) -> Vec<String> {
@@ -1174,7 +1259,7 @@ fn selected(declared: &[&str]) -> Vec<&'static str> {
 #[test]
 fn genuine_job_case_selection_is_bounded_known_and_distinct() {
     let all: Vec<&str> = CASES.iter().map(|case| case.id).collect();
-    // Complete coverage only by listing all seven.
+    // Complete coverage only by listing all nine.
     assert_eq!(selected(&all), all);
     let mut reversed = all.clone();
     reversed.reverse();
@@ -1185,11 +1270,11 @@ fn genuine_job_case_selection_is_bounded_known_and_distinct() {
     let subset = ["construct-holder-declared", "select-bag-row-bound"];
     assert_eq!(selected(&subset), subset, "a subset selects nothing else");
 
-    let mut eight = all.clone();
-    eight.push(all[0]);
+    let mut ten = all.clone();
+    ten.push(all[0]);
     let rejected: [(Vec<&str>, &str); 6] = [
-        (vec![], "cases must list 1 to 7 case IDs, not 0"),
-        (eight, "cases must list 1 to 7 case IDs, not 8"),
+        (vec![], "cases must list 1 to 9 case IDs, not 0"),
+        (ten, "cases must list 1 to 9 case IDs, not 10"),
         (vec![all[0], all[0]], "duplicate case `select-bag-verifier-agreed`"),
         (vec![all[6], all[2], all[6]], "duplicate case `select-bag-row-bound`"),
         (vec!["select-bag"], "unknown case `select-bag`"),
@@ -1213,11 +1298,60 @@ fn substituted_verifier_policies_are_valid_and_distinct() {
     // Native only: each substitute must itself be a valid verifier policy, so a
     // genuine-run rejection comes from the binding, not from policy validation.
     let mut digests = BTreeSet::new();
-    assert!(digests.insert(vcq5::parameter_digest(&fixture::policy()).unwrap()));
-    for (name, policy) in replaced_policies() {
-        let digest = vcq5::parameter_digest(&policy)
-            .unwrap_or_else(|error| panic!("{name}: {error:?}"));
-        assert!(digests.insert(digest), "{name}: parameter digest unchanged");
+    for dataset in [W3C, PAYMENT] {
+        assert!(digests.insert(vcq5::parameter_digest(&dataset.policy()).unwrap()));
+        for (name, policy) in replaced_policies(dataset) {
+            let digest = vcq5::parameter_digest(&policy)
+                .unwrap_or_else(|error| panic!("{name}: {error:?}"));
+            assert!(digests.insert(digest), "{name}: parameter digest unchanged");
+        }
     }
-    assert_eq!(digests.len(), 6);
+    assert_eq!(digests.len(), 12);
+}
+
+#[test]
+fn payment_fixture_answers_the_false_ask_natively_under_both_authorities() {
+    // Native model only, never a proof: the synthetic credential authenticates
+    // under its own one-key policy, "was any payment returned?" is false and the
+    // settled-payment control is true, under both authorities.
+    fixture::check_payment_fixture();
+    let policy = PAYMENT.policy();
+    let anchor = PAYMENT.anchor(fixture::SALT);
+    for authority in [
+        sparq_proved_evaluator_model::DatasetAuthority::HolderDeclared,
+        sparq_proved_evaluator_model::DatasetAuthority::VerifierAgreed { commitment: anchor },
+    ] {
+        for (query, answer) in [
+            (fixture::ASK_PAYMENT_RETURNED, false),
+            (fixture::ASK_PAYMENT_SETTLED, true),
+        ] {
+            let journal = auth::evaluate(&auth::Witness {
+                request: auth::Request {
+                    version: auth::VERSION,
+                    query: query.into(),
+                    authority: authority.clone(),
+                    policy: policy.clone(),
+                    nonce: [7; 32],
+                },
+                dataset: PAYMENT.credentials(fixture::SALT),
+            })
+            .unwrap_or_else(|error| panic!("{query}: {error:?}"));
+            assert_eq!(journal.result, v3::CanonicalResult::Ask(answer), "{query}");
+            assert_eq!(journal.dataset_commitment, anchor);
+        }
+    }
+    // The published key does not authenticate the payment credential.
+    let mut wrong = policy;
+    wrong.authorization[0].public_key = fixture::hex(fixture::W3C_PUBLIC_KEY);
+    let rejected = auth::evaluate(&auth::Witness {
+        request: auth::Request {
+            version: auth::VERSION,
+            query: fixture::ASK_PAYMENT_RETURNED.into(),
+            authority: sparq_proved_evaluator_model::DatasetAuthority::HolderDeclared,
+            policy: wrong,
+            nonce: [7; 32],
+        },
+        dataset: PAYMENT.credentials(fixture::SALT),
+    });
+    assert!(rejected.is_err(), "a wrong key must not authenticate the credential");
 }
