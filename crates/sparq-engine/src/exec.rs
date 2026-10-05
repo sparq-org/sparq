@@ -13697,7 +13697,8 @@ fn cmp_expr(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], a: &Exp
     // EXACT path: integer/decimal arithmetic (`+ - *`) must not round through f64, which
     // can flip an ordering (`0.1 + 0.2` < `0.3` in f64). Only attempted when arithmetic is
     // present (the common, arithmetic-free comparison keeps the f64 fast path below).
-    if expr_has_arith(a) || expr_has_arith(c) {
+    let arith = expr_has_arith(a) || expr_has_arith(c);
+    if arith {
         if let (Some(da), Some(db)) = (eval_dec(graph, local, b, row, a), eval_dec(graph, local, b, row, c)) {
             if let Some(o) = da.cmp(db) {
                 return Ok(Value::Bool(f(o)));
@@ -13707,7 +13708,12 @@ fn cmp_expr(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], a: &Exp
     // Fast path: both sides numeric -> compare f64 directly, no term materialised.
     // Reaching here means BOTH operands are numeric, so a `None` partial_cmp is a
     // NaN value (op:numeric ordering of NaN is false) — NOT a cross-type error.
-    if let (Some(x), Some(y)) = (eval_numeric(graph, local, b, row, a), eval_numeric(graph, local, b, row, c)) {
+    // The f64 fast path below evaluates arithmetic UNTYPED (always in f64), but XPath evaluates
+    // it in the promoted tier: `"16777217"^^xsd:float + 1` is a FLOAT and rounds to 16777216.
+    // Arithmetic the exact path above did not decide (a float/double operand) takes the typed
+    // evaluator instead.
+    let fast = if arith { None } else { eval_numeric(graph, local, b, row, a).zip(eval_numeric(graph, local, b, row, c)) };
+    if let Some((x, y)) = fast {
         // f64 rounding is monotonic — it only ever COLLAPSES distinct values to equal,
         // never flips an ordering. So re-check exactly ONLY when f64 says equal (catches
         // integers > 2^53 and high-precision decimals that share an f64).
@@ -13742,7 +13748,8 @@ fn cmp_expr(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], a: &Exp
 /// SPARQL `=` (and, negated, `!=`). See [`values_equal`].
 fn equal_expr(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], a: &Expression, c: &Expression) -> Result<Value, String> {
     // EXACT integer/decimal arithmetic equality (see `cmp_expr`) — `0.1 + 0.2 = 0.3`.
-    if expr_has_arith(a) || expr_has_arith(c) {
+    let arith = expr_has_arith(a) || expr_has_arith(c);
+    if arith {
         if let (Some(da), Some(db)) = (eval_dec(graph, local, b, row, a), eval_dec(graph, local, b, row, c)) {
             if let Some(o) = da.cmp(db) {
                 return Ok(Value::Bool(o == Ordering::Equal));
@@ -13750,7 +13757,12 @@ fn equal_expr(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], a: &E
         }
     }
     // Fast path: both numeric (NaN == NaN is false, matching op:numeric-equal).
-    if let (Some(x), Some(y)) = (eval_numeric(graph, local, b, row, a), eval_numeric(graph, local, b, row, c)) {
+    // The f64 fast path below evaluates arithmetic UNTYPED (always in f64), but XPath evaluates
+    // it in the promoted tier: `"16777217"^^xsd:float + 1` is a FLOAT and rounds to 16777216.
+    // Arithmetic the exact path above did not decide (a float/double operand) takes the typed
+    // evaluator instead.
+    let fast = if arith { None } else { eval_numeric(graph, local, b, row, a).zip(eval_numeric(graph, local, b, row, c)) };
+    if let Some((x, y)) = fast {
         // Re-check exactly when f64 says equal (see `cmp_expr`): distinct integers > 2^53
         // or high-precision decimals can share an f64 and must not be reported equal.
         if x == y {
@@ -14615,7 +14627,8 @@ fn cmp_compiled(
     c: &CompiledExpr,
     f: impl Fn(Ordering) -> bool,
 ) -> Result<Value, String> {
-    if compiled_expr_has_arith(a) || compiled_expr_has_arith(c) {
+    let arith = compiled_expr_has_arith(a) || compiled_expr_has_arith(c);
+    if arith {
         if let (Some(da), Some(db)) =
             (eval_compiled_dec(graph, local, row, a), eval_compiled_dec(graph, local, row, c))
         {
@@ -14624,9 +14637,16 @@ fn cmp_compiled(
             }
         }
     }
-    if let (Some(x), Some(y)) =
-        (eval_compiled_numeric(graph, local, row, a), eval_compiled_numeric(graph, local, row, c))
-    {
+    // The f64 fast path below evaluates arithmetic UNTYPED (always in f64), but XPath evaluates
+    // it in the promoted tier: `"16777217"^^xsd:float + 1` is a FLOAT and rounds to 16777216.
+    // Arithmetic the exact path above did not decide (a float/double operand) takes the typed
+    // evaluator instead.
+    let fast = if arith {
+        None
+    } else {
+        eval_compiled_numeric(graph, local, row, a).zip(eval_compiled_numeric(graph, local, row, c))
+    };
+    if let Some((x, y)) = fast {
         if x == y {
             if let (Some(la), Some(lb)) = (
                 eval_compiled_exact_lexical(graph, local, row, a),
@@ -14716,7 +14736,8 @@ fn equal_compiled(
             return Ok(Value::Bool(true));
         }
     }
-    if compiled_expr_has_arith(a) || compiled_expr_has_arith(c) {
+    let arith = compiled_expr_has_arith(a) || compiled_expr_has_arith(c);
+    if arith {
         if let (Some(da), Some(db)) =
             (eval_compiled_dec(graph, local, row, a), eval_compiled_dec(graph, local, row, c))
         {
@@ -14725,9 +14746,16 @@ fn equal_compiled(
             }
         }
     }
-    if let (Some(x), Some(y)) =
-        (eval_compiled_numeric(graph, local, row, a), eval_compiled_numeric(graph, local, row, c))
-    {
+    // The f64 fast path below evaluates arithmetic UNTYPED (always in f64), but XPath evaluates
+    // it in the promoted tier: `"16777217"^^xsd:float + 1` is a FLOAT and rounds to 16777216.
+    // Arithmetic the exact path above did not decide (a float/double operand) takes the typed
+    // evaluator instead.
+    let fast = if arith {
+        None
+    } else {
+        eval_compiled_numeric(graph, local, row, a).zip(eval_compiled_numeric(graph, local, row, c))
+    };
+    if let Some((x, y)) = fast {
         if x == y {
             if let (Some(la), Some(lb)) = (
                 eval_compiled_exact_lexical(graph, local, row, a),

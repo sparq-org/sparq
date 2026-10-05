@@ -143,6 +143,96 @@ fn sargable_float_filters_compare_in_the_float_tier() {
     }
 }
 
+// ── Arithmetic in a comparison is evaluated in its promoted tier ────────────────────────
+// `"16777217"^^xsd:float` is 16777216.0f32; `+ 1` is FLOAT arithmetic, so the sum rounds back
+// to 16777216, which is not the double 16777217. Untyped f64 arithmetic gives 16777217.
+
+fn bool_of(g: &Graph, q: &str) -> bool {
+    let r = query(g, q).unwrap();
+    let t = r.rows[0][0].as_ref().expect("bound").to_string();
+    t.starts_with("\"true\"")
+}
+
+fn bigf() -> String {
+    format!("\"16777217\"^^<{XSD}float>")
+}
+
+/// Asserts each `(expr, want)` both as a FILTER and as a BIND-ed value.
+fn check_filter_and_bind(g: &Graph, cases: &[(String, bool)]) {
+    for (expr, want) in cases {
+        assert_eq!(ask(g, &format!("ASK {{ FILTER({expr}) }}")), *want, "FILTER {expr}");
+        assert_eq!(bool_of(g, &format!("SELECT ?b WHERE {{ BIND(({expr}) AS ?b) }}")), *want, "BIND {expr}");
+    }
+}
+
+#[test]
+fn float_arithmetic_equality_rounds_in_the_float_tier() {
+    let f = bigf();
+    check_filter_and_bind(
+        &promo_graph(),
+        &[
+            (format!("{f} + 1 = 16777217e0"), false),
+            (format!("{f} + 1 != 16777217e0"), true),
+            (format!("{f} + 1 = 16777216e0"), true),
+        ],
+    );
+}
+
+#[test]
+fn float_arithmetic_filter_agrees_with_a_bound_sum() {
+    let g = promo_graph();
+    let f = bigf();
+    // The sum built by BIND (typed result construction) is the float 16777216.
+    assert!(!ask(&g, &format!("ASK {{ BIND({f} + 1 AS ?s) FILTER(?s = 16777217e0) }}")));
+    assert!(ask(&g, &format!("ASK {{ BIND({f} + 1 AS ?s) FILTER(?s = 16777216e0) }}")));
+    // The inline FILTER form must give the same answers.
+    assert!(!ask(&g, &format!("ASK {{ FILTER({f} + 1 = 16777217e0) }}")));
+    assert!(ask(&g, &format!("ASK {{ FILTER({f} + 1 = 16777216e0) }}")));
+}
+
+#[test]
+fn float_arithmetic_ordering_rounds_in_the_float_tier() {
+    let f = bigf();
+    check_filter_and_bind(
+        &promo_graph(),
+        &[
+            (format!("{f} + 1 < 16777217e0"), true),
+            (format!("{f} + 1 <= 16777217e0"), true),
+            (format!("{f} + 1 > 16777217e0"), false),
+            (format!("{f} + 1 >= 16777217e0"), false),
+            (format!("16777217e0 > {f} + 1"), true),
+        ],
+    );
+}
+
+#[test]
+fn integer_and_decimal_operands_are_promoted_before_float_arithmetic() {
+    let two = format!("\"2\"^^<{XSD}float>");
+    let half = format!("\"0.5\"^^<{XSD}float>");
+    check_filter_and_bind(
+        &promo_graph(),
+        &[
+            // 16777215 + 2 = 16777217, which rounds to 16777216 in the float tier.
+            (format!("16777215 + {two} = 16777217e0"), false),
+            (format!("16777215 + {two} = 16777216e0"), true),
+            // 16777216.5 promotes to 16777216.0f32 first; adding 0.5 rounds back to it.
+            (format!("16777216.5 + {half} = 16777216e0"), true),
+            (format!("16777216.5 + {half} > 16777216e0"), false),
+        ],
+    );
+}
+
+#[test]
+fn stored_float_arithmetic_rounds_in_the_float_tier() {
+    let g = promo_graph();
+    for (filter, want) in [("?v + 1 = 16777217e0", false), ("?v + 1 < 16777217e0", true), ("?v + 1 = 16777216e0", true)] {
+        let q = format!("ASK {{ ?s <http://ex/bigf> ?v FILTER({filter}) }}");
+        assert_eq!(ask(&g, &q), want, "{q}");
+        let q = format!("SELECT ?b WHERE {{ ?s <http://ex/bigf> ?v BIND(({filter}) AS ?b) }}");
+        assert_eq!(bool_of(&g, &q), want, "{q}");
+    }
+}
+
 /// A store saved while `numerics.bin` had no semantics header valued the float at its nearest
 /// f64 (`0.1`). After the upgrade, the reopened store must value it as its f32.
 #[test]
