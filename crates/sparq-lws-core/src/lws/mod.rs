@@ -31,6 +31,8 @@ pub mod index;
 pub mod jose;
 pub mod notify;
 pub mod resources;
+pub mod saml;
+pub mod subject_tokens;
 pub mod tokens;
 
 use std::collections::BTreeMap;
