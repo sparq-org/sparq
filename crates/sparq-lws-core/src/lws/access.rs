@@ -128,10 +128,12 @@ impl Constraint {
 }
 
 /// An RFC 3339 / xsd:dateTime instant, as seconds since the epoch.
+///
+/// Parsed over bytes with every field checked to be ASCII digits before it is read, so malformed
+/// (including non-ASCII) input is `None`, never a slice-on-a-char-boundary panic.
 pub fn parse_rfc3339(s: &str) -> Option<i64> {
     // YYYY-MM-DDTHH:MM:SS[.frac](Z|±HH:MM)
-    let s = s.trim();
-    let b = s.as_bytes();
+    let b = s.trim().as_bytes();
     if b.len() < 20
         || b[4] != b'-'
         || b[7] != b'-'
@@ -141,25 +143,30 @@ pub fn parse_rfc3339(s: &str) -> Option<i64> {
     {
         return None;
     }
-    let num = |r: std::ops::Range<usize>| s.get(r)?.parse::<i64>().ok();
     let (y, mo, d, h, mi, sec) = (
-        num(0..4)?,
-        num(5..7)?,
-        num(8..10)?,
-        num(11..13)?,
-        num(14..16)?,
-        num(17..19)?,
+        ascii_num(b, 0, 4)?,
+        ascii_num(b, 5, 2)?,
+        ascii_num(b, 8, 2)?,
+        ascii_num(b, 11, 2)?,
+        ascii_num(b, 14, 2)?,
+        ascii_num(b, 17, 2)?,
     );
-    let mut rest = &s[19..];
-    if let Some(frac) = rest.strip_prefix('.') {
-        let digits = frac.bytes().take_while(u8::is_ascii_digit).count();
+    let mut rest = &b[19..];
+    if let Some(frac) = rest.strip_prefix(b".") {
+        let digits = frac.iter().take_while(|c| c.is_ascii_digit()).count();
+        if digits == 0 {
+            return None;
+        }
         rest = &frac[digits..];
     }
     let offset = match rest {
-        "Z" | "z" => 0,
-        o if o.len() == 6 && (o.starts_with('+') || o.starts_with('-')) => {
-            let sign = if o.starts_with('-') { -1 } else { 1 };
-            sign * (o[1..3].parse::<i64>().ok()? * 3600 + o[4..6].parse::<i64>().ok()? * 60)
+        b"Z" | b"z" => 0,
+        [sign @ (b'+' | b'-'), _, _, b':', _, _] => {
+            let (oh, om) = (ascii_num(rest, 1, 2)?, ascii_num(rest, 4, 2)?);
+            if oh > 23 || om > 59 {
+                return None;
+            }
+            (if *sign == b'-' { -1 } else { 1 }) * (oh * 3600 + om * 60)
         }
         _ => return None,
     };
@@ -178,6 +185,17 @@ pub fn parse_rfc3339(s: &str) -> Option<i64> {
     let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
     let days = era * 146_097 + doe - 719_468;
     Some(days * 86_400 + h * 3600 + mi * 60 + sec - offset)
+}
+
+/// The `len` bytes at `b[at..]` as a number, if they exist and are all ASCII digits.
+pub(crate) fn ascii_num(b: &[u8], at: usize, len: usize) -> Option<i64> {
+    let digits = b.get(at..at.checked_add(len)?)?;
+    if digits.is_empty() || !digits.iter().all(u8::is_ascii_digit) {
+        return None;
+    }
+    digits.iter().try_fold(0i64, |n, d| {
+        n.checked_mul(10)?.checked_add(i64::from(d - b'0'))
+    })
 }
 
 /// An RFC 3339 UTC timestamp for `secs` since the epoch.
@@ -861,6 +879,31 @@ mod tests {
             parse_rfc3339("2026-10-05T16:20:08Z")
         );
         assert_eq!(parse_rfc3339("yesterday"), None);
+    }
+
+    /// Review finding: a non-ASCII byte in the timezone used to reach `o[1..3]` and panic on a
+    /// UTF-8 char boundary. Every malformed shape is now `None`.
+    #[test]
+    fn rfc3339_rejects_malformed_without_panicking() {
+        for bad in [
+            "2026-10-05T00:00:00+0\u{e9}00",
+            "2026-10-05T00:00:00+\u{e9}:00",
+            "2026-10-05T00:00:00\u{e9}0:00",
+            "2026-10-05T00:00:00.\u{e9}Z",
+            "2026-10-05T00:00:00.Z",
+            "2026-10-05T00:00:00+0a:00",
+            "2026-10-05T00:00:00+05-00",
+            "2026-10-05T00:00:00+24:00",
+            "+026-10-05T00:00:00Z",
+            "2026-1\u{e9}5T00:00:00Z",
+            "2026-10-05T00:00:\u{e9}Z",
+        ] {
+            assert_eq!(parse_rfc3339(bad), None, "{bad:?}");
+        }
+        assert_eq!(
+            parse_rfc3339("2026-10-05T05:30:00+05:30"),
+            parse_rfc3339("2026-10-05T00:00:00Z")
+        );
     }
 
     const S: &str = "https://s/";

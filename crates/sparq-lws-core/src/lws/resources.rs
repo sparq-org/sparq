@@ -75,12 +75,22 @@ pub async fn handle<S: Store + 'static>(
             Method::DELETE => Action::Delete,
             _ => Action::Modify,
         };
-        let exists = state.store.exists(&uri).await.unwrap_or(false);
+        // A backend failure is a 500, never "absent": absence skips the permission check.
+        let exists = match state.store.exists(&uri).await {
+            Ok(e) => e,
+            Err(e) => return store_error(e),
+        };
         if !exists {
             if state.needs_auth(agent) {
                 return state.challenge(None);
             }
-        } else if !state.allowed(action, &uri, agent).await {
+            // Nothing was authorized, so nothing is served or changed: every method on a missing
+            // target is a 404, and answering it here (rather than in the handler) means a resource
+            // that appears after this check is never read or written without its permission
+            // check.
+            return problem(StatusCode::NOT_FOUND, None);
+        }
+        if !state.allowed(action, &uri, agent).await {
             return state.deny(agent);
         }
     }
@@ -106,8 +116,10 @@ fn allow_for(uri: &str, is_root: bool) -> String {
 }
 
 async fn options<S: Store + 'static>(state: &LwsState<S>, uri: &str) -> Response {
-    if !state.store.exists(uri).await.unwrap_or(false) {
-        return problem(StatusCode::NOT_FOUND, None);
+    match state.store.exists(uri).await {
+        Ok(true) => {}
+        Ok(false) => return problem(StatusCode::NOT_FOUND, None),
+        Err(e) => return store_error(e),
     }
     let mut resp = StatusCode::NO_CONTENT.into_response();
     set(
@@ -974,35 +986,53 @@ async fn create<S: Store + 'static>(
     // The container's lock is held from the choice of a free name through the create and the new
     // member's creator metadata: the store's create replaces whatever is at the IRI, so two POSTs
     // with one Slug must never both find the name free. Every create in a container, and a
-    // recursive delete of it, takes this lock, so under it a name found free stays free. It is
-    // released before the container's own metadata is touched (which takes the lock again).
-    let parent_guard = state.locks.lock(parent).await;
-    match state.store.exists(parent).await {
-        Ok(true) => {}
-        Ok(false) => return problem(StatusCode::NOT_FOUND, None),
-        Err(e) => return store_error(e),
-    }
-    let mut name = base_name.clone();
-    let mut n = 1;
-    loop {
-        let a = format!("{parent}{name}");
-        let b = format!("{parent}{name}/");
-        let taken = state.store.exists(&a).await.unwrap_or(true)
-            || state.store.exists(&b).await.unwrap_or(true);
-        if !taken {
-            break;
+    // recursive delete of it, takes this lock, so under it a name found free stays free.
+    //
+    // The new member's own lock (both of its spellings, `name` and `name/`) is held too: a DELETE
+    // holds the doomed resource's lock across the removal of its content and then its metadata,
+    // and a create that slipped in between would have its fresh metadata removed. Locks are taken
+    // member before container ([`lock_order`]), so under the container's lock the member's are
+    // only tried. When one is busy (a DELETE or a write of that IRI is in flight), the container's
+    // lock is released, the member's and then the container's are waited for in order, and the
+    // name is checked again; when it was taken meanwhile, the choice starts over.
+    //
+    // Both are released before the container's own metadata is touched (which takes its lock
+    // again).
+    let spellings = |name: &str| (format!("{parent}{name}/"), format!("{parent}{name}"));
+    let mut attempt = 0;
+    let (child, _child_guards, parent_guard) = loop {
+        attempt += 1;
+        if attempt > 16 {
+            return problem(
+                StatusCode::CONFLICT,
+                Some("the container kept changing while a member was being created"),
+            );
         }
-        n += 1;
-        name = if n > 50 {
-            format!("{base_name}-{}", jose::random_id())
-        } else {
-            format!("{base_name}-{n}")
+        let parent_guard = state.locks.lock(parent).await;
+        let name = match free_name(state, parent, &base_name).await {
+            Ok(name) => name,
+            Err(r) => return r,
         };
-    }
-    let child = if is_container {
-        format!("{parent}{name}/")
-    } else {
-        format!("{parent}{name}")
+        // `name/` is longer than `name`, so each pair below is in lock order.
+        let (b, a) = spellings(&name);
+        if let (Some(gb), Some(ga)) = (state.locks.try_lock(&b), state.locks.try_lock(&a)) {
+            break (if is_container { b } else { a }, (gb, ga), parent_guard);
+        }
+        drop(parent_guard);
+        let child_guards = (state.locks.lock(&b).await, state.locks.lock(&a).await);
+        let parent_guard = state.locks.lock(parent).await;
+        match state.store.exists(parent).await {
+            Ok(true) => {}
+            Ok(false) => return problem(StatusCode::NOT_FOUND, None),
+            Err(e) => return store_error(e),
+        }
+        let taken = match (state.store.exists(&a).await, state.store.exists(&b).await) {
+            (Ok(x), Ok(y)) => x || y,
+            (Err(e), _) | (_, Err(e)) => return store_error(e),
+        };
+        if !taken {
+            break (if is_container { b } else { a }, child_guards, parent_guard);
+        }
     };
     let content_type = if is_container {
         LWS_JSON.to_string()
@@ -1041,6 +1071,7 @@ async fn create<S: Store + 'static>(
         return store_error(e);
     }
     drop(parent_guard);
+    drop(_child_guards);
     touch_container(state, parent).await;
     state
         .notify
@@ -1067,6 +1098,37 @@ async fn create<S: Store + 'static>(
     resp
 }
 
+/// A member name in `parent` that is free (neither `name` nor `name/` exists): `base_name`, else
+/// `base_name-2`, `-3`, ... and past 50 a random suffix. Run under the container's lock.
+async fn free_name<S: Store + 'static>(
+    state: &LwsState<S>,
+    parent: &str,
+    base_name: &str,
+) -> Result<String, Response> {
+    match state.store.exists(parent).await {
+        Ok(true) => {}
+        Ok(false) => return Err(problem(StatusCode::NOT_FOUND, None)),
+        Err(e) => return Err(store_error(e)),
+    }
+    let mut name = base_name.to_string();
+    let mut n = 1;
+    loop {
+        let a = format!("{parent}{name}");
+        let b = format!("{parent}{name}/");
+        let taken = state.store.exists(&a).await.unwrap_or(true)
+            || state.store.exists(&b).await.unwrap_or(true);
+        if !taken {
+            return Ok(name);
+        }
+        n += 1;
+        name = if n > 50 {
+            format!("{base_name}-{}", jose::random_id())
+        } else {
+            format!("{base_name}-{n}")
+        };
+    }
+}
+
 // ---- update ----
 
 async fn current<S: Store + 'static>(
@@ -1085,8 +1147,9 @@ async fn current<S: Store + 'static>(
 /// the write, and an If-Match can never pass against a state another writer is replacing. Metadata
 /// read-modify-writes of a container (membership touches) take the container's lock too.
 ///
-/// A create takes its container's lock across the choice of a free name and the create, and a
-/// recursive delete takes the lock of every resource it removes (see [`lock_subtree`]), so neither
+/// A create takes its container's lock across the choice of a free name and the create, and the
+/// new member's lock across its content and metadata (as a delete holds it across their removal),
+/// and a recursive delete takes the lock of every resource it removes (see [`lock_subtree`]), so neither
 /// can interleave with the other or with a conditional write.
 ///
 /// Limit: the locks live in this process. Several server processes over one store do not see each
@@ -1101,21 +1164,28 @@ impl IriLocks {
     /// IRI first, ties in byte order ([`lock_order`]), so a child always before its container and
     /// never the other way, and two writers cannot deadlock.
     pub async fn lock(&self, iri: &str) -> tokio::sync::OwnedMutexGuard<()> {
-        let mutex = {
-            let mut map = self.0.lock().unwrap_or_else(|e| e.into_inner());
-            if map.len() > 1024 {
-                map.retain(|_, w| w.strong_count() > 0);
+        self.mutex(iri).lock_owned().await
+    }
+
+    /// Take the lock of `iri` if it is free, without waiting: the one way to take a lock out of
+    /// [`lock_order`], since it cannot deadlock.
+    pub fn try_lock(&self, iri: &str) -> Option<tokio::sync::OwnedMutexGuard<()>> {
+        self.mutex(iri).try_lock_owned().ok()
+    }
+
+    fn mutex(&self, iri: &str) -> std::sync::Arc<tokio::sync::Mutex<()>> {
+        let mut map = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        if map.len() > 1024 {
+            map.retain(|_, w| w.strong_count() > 0);
+        }
+        match map.get(iri).and_then(std::sync::Weak::upgrade) {
+            Some(m) => m,
+            None => {
+                let m = std::sync::Arc::new(tokio::sync::Mutex::new(()));
+                map.insert(iri.to_string(), std::sync::Arc::downgrade(&m));
+                m
             }
-            match map.get(iri).and_then(std::sync::Weak::upgrade) {
-                Some(m) => m,
-                None => {
-                    let m = std::sync::Arc::new(tokio::sync::Mutex::new(()));
-                    map.insert(iri.to_string(), std::sync::Arc::downgrade(&m));
-                    m
-                }
-            }
-        };
-        mutex.lock_owned().await
+        }
     }
 }
 
@@ -1253,6 +1323,36 @@ pub fn merge_patch(target: &Value, patch: &Value) -> Value {
 /// `copy` doubles what it copies, so without a bound a few dozen operations exhaust memory.
 pub const PATCH_BUDGET: usize = 64 * 1024 * 1024;
 
+/// How deeply a patched document may nest, in arrays and objects: the deepest document
+/// `serde_json` parses back (its recursion limit). The parser bounds every document a request
+/// carries, but JSON Patch builds new ones: each `move` or `copy` may nest an existing value under
+/// another, so without this bound a patch could build a document deep enough to overflow the stack
+/// when it is serialized, compared, cloned or dropped. (A merge patch needs no check: it places
+/// each of its values where it sits in the patch, so the result nests no deeper than the target or
+/// the patch, both parsed.)
+pub const MAX_JSON_DEPTH: usize = 127;
+
+/// How deeply `v` nests arrays and objects: 0 for a scalar, 1 for `[]` or `{}`. Iterative, so it is
+/// safe on a value of any depth.
+fn json_depth(v: &Value) -> usize {
+    let mut deepest = 0;
+    let mut stack = vec![(v, 0usize)];
+    while let Some((v, d)) = stack.pop() {
+        match v {
+            Value::Array(a) => {
+                deepest = deepest.max(d + 1);
+                stack.extend(a.iter().map(|c| (c, d + 1)));
+            }
+            Value::Object(m) => {
+                deepest = deepest.max(d + 1);
+                stack.extend(m.values().map(|c| (c, d + 1)));
+            }
+            _ => {}
+        }
+    }
+    deepest
+}
+
 /// Why a JSON Patch was not applied.
 #[derive(Debug, PartialEq)]
 pub enum PatchError {
@@ -1264,6 +1364,8 @@ pub enum PatchError {
     Failed,
     /// The result would outgrow [`PATCH_BUDGET`].
     TooLarge,
+    /// The result would nest deeper than [`MAX_JSON_DEPTH`] (422).
+    TooDeep,
 }
 
 /// Check that `ops` is an RFC 6902 patch document, without applying it.
@@ -1355,6 +1457,13 @@ pub fn json_patch(target: &Value, ops: &Value, budget: usize) -> Result<Value, P
                 _ => 0,
             }
         };
+        // A value placed at `path` sits under one container per pointer segment.
+        let fits = |v: &Value| {
+            if path.matches('/').count() + json_depth(v) > MAX_JSON_DEPTH {
+                return Err(PatchError::TooDeep);
+            }
+            Ok(())
+        };
         let grow = |size: &mut usize, by: usize, minus: usize| {
             let next = size.saturating_sub(minus).saturating_add(by);
             if next > budget {
@@ -1366,6 +1475,7 @@ pub fn json_patch(target: &Value, ops: &Value, budget: usize) -> Result<Value, P
         match op["op"].as_str().unwrap_or_default() {
             "add" => {
                 let v = &op["value"];
+                fits(v)?;
                 let minus = replaced(&doc);
                 grow(&mut size, json_size(v), minus)?;
                 pointer_add(&mut doc, &path, v.clone()).ok_or(Failed)?;
@@ -1376,6 +1486,7 @@ pub fn json_patch(target: &Value, ops: &Value, budget: usize) -> Result<Value, P
             }
             "replace" => {
                 let v = &op["value"];
+                fits(v)?;
                 let old = doc.pointer(&path).ok_or(Failed)?;
                 let minus = json_size(old);
                 grow(&mut size, json_size(v), minus)?;
@@ -1388,11 +1499,13 @@ pub fn json_patch(target: &Value, ops: &Value, budget: usize) -> Result<Value, P
                     return Err(Failed);
                 }
                 let v = pointer_remove(&mut doc, &from).ok_or(Failed)?;
+                fits(&v)?;
                 pointer_add(&mut doc, &path, v).ok_or(Failed)?;
             }
             "copy" => {
                 let from = str_of(op, "from");
                 let source = doc.pointer(&from).ok_or(Failed)?;
+                fits(source)?;
                 let added = json_size(source);
                 let minus = replaced(&doc);
                 grow(&mut size, added, minus)?;
@@ -1515,6 +1628,10 @@ impl Patch {
                 PatchError::TooLarge => problem(
                     StatusCode::PAYLOAD_TOO_LARGE,
                     Some("the patched document would be too large"),
+                ),
+                PatchError::TooDeep => problem(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    Some("the patched document would nest too deeply"),
                 ),
             }),
         }
@@ -2015,7 +2132,10 @@ async fn linkset<S: Store + 'static>(
     agent: &Agent,
     uri: &str,
 ) -> Response {
-    let exists = state.store.exists(uri).await.unwrap_or(false);
+    let exists = match state.store.exists(uri).await {
+        Ok(e) => e,
+        Err(e) => return store_error(e),
+    };
     if !exists {
         return if state.needs_auth(agent) {
             state.challenge(None)
@@ -3143,5 +3263,180 @@ mod tests {
             body_of(call(&st, "GET", path_of(&first), &[], "").await).await,
             Bytes::from("x")
         );
+    }
+
+    /// Review finding: a target found absent let an authenticated caller through unchecked, so a
+    /// resource that appeared before the handler ran was served (or changed) without its
+    /// permission check, and a backend error counted as absent.
+    #[tokio::test]
+    async fn a_resource_that_appears_after_the_check_is_not_served_unchecked() {
+        use super::super::test_store::FlakyStore;
+        use std::sync::atomic::Ordering;
+        let store = FlakyStore::new();
+        let mut cfg = super::super::LwsConfig::new(BASE);
+        cfg.owner = Some("https://owner.example/#me".into());
+        let st = LwsState::new(store.clone(), cfg).await.expect("state");
+        let owner = agent("https://owner.example/#me");
+        let bob = agent("https://bob.example/#me");
+        let h = [
+            ("slug", "secret.json"),
+            ("content-type", "application/json"),
+        ];
+        let r = create(
+            &st,
+            &request("POST", "/", &h, "{\"pin\": 1234}"),
+            &owner,
+            &st.cfg.storage(),
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let secret = hdr(&r, "location");
+        let p = path_of(&secret);
+        let get = request("GET", p, &[], "");
+        assert_eq!(
+            handle(&st, &get, &bob).await.status(),
+            StatusCode::FORBIDDEN
+        );
+        // The existence check runs while the resource is "not there yet".
+        *store.hide.lock().unwrap() = Some(secret.clone());
+        for (method, ct, body) in [
+            ("GET", "", ""),
+            ("HEAD", "", ""),
+            ("PUT", "application/json", "{}"),
+            ("PATCH", MERGE_PATCH, "{\"pin\": null}"),
+            ("DELETE", "", ""),
+        ] {
+            let r = handle(
+                &st,
+                &request(method, p, &[("content-type", ct)], body),
+                &bob,
+            )
+            .await;
+            assert_eq!(r.status(), StatusCode::NOT_FOUND, "{method}");
+        }
+        *store.hide.lock().unwrap() = None;
+        let r = handle(&st, &get, &owner).await;
+        assert_eq!(body_of(r).await, Bytes::from("{\"pin\": 1234}"));
+        // A backend failure is a 500, not an absent resource.
+        store.fail_exists.store(true, Ordering::SeqCst);
+        let r = handle(&st, &get, &bob).await;
+        assert_eq!(r.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let linkset = request("GET", &format!("{p}{META_SUFFIX}"), &[], "");
+        let r = handle(&st, &linkset, &bob).await;
+        assert_eq!(r.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    /// `doc` with its `/d` wrapped in `n` more objects, by add and move alone.
+    fn nesting_ops(n: usize) -> Value {
+        let mut ops = Vec::new();
+        for _ in 0..n {
+            ops.push(json!({"op": "add", "path": "/w", "value": {}}));
+            ops.push(json!({"op": "move", "from": "/d", "path": "/w/d"}));
+            ops.push(json!({"op": "move", "from": "/w", "path": "/d"}));
+        }
+        Value::Array(ops)
+    }
+
+    /// Review finding: add and move can nest a document without bound (each op is small, so the
+    /// size budget never trips), deep enough to overflow the stack when it is serialized, cloned
+    /// or dropped.
+    #[tokio::test]
+    async fn json_patch_bounds_the_nesting_depth() {
+        let doc = json!({"d": 0});
+        // The root object and 126 wrappers: the deepest document serde_json parses back.
+        let ok = json_patch(&doc, &nesting_ops(MAX_JSON_DEPTH - 1), PATCH_BUDGET).unwrap();
+        assert_eq!(json_depth(&ok), MAX_JSON_DEPTH);
+        let text = serde_json::to_string(&ok).unwrap();
+        assert!(serde_json::from_str::<Value>(&text).is_ok());
+        assert_eq!(
+            json_patch(&doc, &nesting_ops(MAX_JSON_DEPTH), PATCH_BUDGET),
+            Err(PatchError::TooDeep)
+        );
+        // Far past the bound: refused, not a stack overflow.
+        assert_eq!(
+            json_patch(&doc, &nesting_ops(100_000), PATCH_BUDGET),
+            Err(PatchError::TooDeep)
+        );
+        // A copy into itself doubles the depth; add places a deep value under a deep path.
+        let deep = (0..100).fold(json!(0), |v, _| json!({ "d": v }));
+        let into = format!("/a{}", "/d".repeat(50));
+        let copy = json!([{"op": "copy", "from": "/a", "path": into}]);
+        assert_eq!(
+            json_patch(&json!({ "a": deep.clone() }), &copy, PATCH_BUDGET),
+            Err(PatchError::TooDeep)
+        );
+        let path = format!("/a{}", "/d".repeat(99));
+        // 1 + 99 segments + a 30-deep value: over the bound, though each part alone parses.
+        let value = (0..30).fold(json!(1), |v, _| json!([v]));
+        let add = json!([{"op": "add", "path": path, "value": value}]);
+        assert_eq!(
+            json_patch(&json!({ "a": deep }), &add, PATCH_BUDGET),
+            Err(PatchError::TooDeep)
+        );
+        // Over HTTP: 422, and the resource is untouched.
+        let st = state().await;
+        let uri = post(&st, "deep.json", "application/json", "{\"d\": 0}", &[]).await;
+        let r = call(
+            &st,
+            "PATCH",
+            path_of(&uri),
+            &[("content-type", JSON_PATCH)],
+            &nesting_ops(MAX_JSON_DEPTH).to_string(),
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let body = body_of(call(&st, "GET", path_of(&uri), &[], "").await).await;
+        assert_eq!(body, Bytes::from("{\"d\": 0}"));
+    }
+
+    /// Review finding: a POST locked only the container, while a DELETE of a data resource holds
+    /// the resource's own lock from removing its content to removing its metadata. A POST with
+    /// the same Slug in between recreated the IRI, and the DELETE then removed the new resource's
+    /// metadata. The create now waits for the member's lock.
+    #[tokio::test]
+    async fn create_waits_for_a_delete_of_the_same_name() {
+        let st = state().await;
+        let x = format!("{}x", st.cfg.storage());
+        // A DELETE of `x` is mid-flight: its content is gone, its lock still held.
+        let held = st.locks.lock(&x).await;
+        let task = {
+            let st = st.clone();
+            tokio::spawn(async move {
+                post(
+                    &st,
+                    "x",
+                    "text/plain",
+                    "new",
+                    &[("link", "<https://e.example/T>; rel=\"type\"")],
+                )
+                .await
+            })
+        };
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(
+            !task.is_finished(),
+            "the create did not wait for the member's lock"
+        );
+        // The delete removes the (old) metadata and releases the lock.
+        let _ = st.store.delete(&meta_key(&x), None).await;
+        drop(held);
+        assert_eq!(task.await.unwrap(), x);
+        // The new resource keeps its metadata.
+        assert!(st
+            .resource_meta(&x)
+            .await
+            .types
+            .contains(&"https://e.example/T".to_string()));
+        // A container holds its spellings' locks as well: a held `y/` delays a POST of `y`.
+        let y = format!("{}y/", st.cfg.storage());
+        let held = st.locks.lock(&y).await;
+        let task = {
+            let st = st.clone();
+            tokio::spawn(async move { post(&st, "y", "text/plain", "y", &[]).await })
+        };
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(!task.is_finished());
+        drop(held);
+        assert_eq!(task.await.unwrap(), format!("{}y", st.cfg.storage()));
     }
 }

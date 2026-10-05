@@ -183,7 +183,7 @@ mod tests {
         assert!(validate(&rotated, &issued_before).is_err());
         // A token naming the previous kid but signed by another key fails.
         let mut forged_cfg = old.clone();
-        forged_cfg.as_key = jose::EcKey::generate("lws-as-1");
+        forged_cfg.as_key = jose::EcKey::generate(old.as_key.kid());
         let forged = mint(&forged_cfg, ALICE, APP, &old.realm());
         let mut with_previous = rotated.clone();
         with_previous.as_previous_key = Some(jose::VerifyKey::from(&old.as_key));

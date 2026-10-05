@@ -866,6 +866,29 @@ mod tests {
         assert_eq!(again.status(), StatusCode::NOT_MODIFIED);
     }
 
+    /// Review finding: a non-ASCII byte in `expires`' timezone panicked the parser (and, with
+    /// panic=abort, the server); it is a 400 like any other bad datetime.
+    #[tokio::test]
+    async fn a_malformed_expires_is_a_400_not_a_panic() {
+        let (state, _) = test_store::state(100).await;
+        for expires in ["2026-10-05T00:00:00+0\u{e9}00", "2099-01-01T00:00:00+0a:00"] {
+            let body = json!({
+                "type": WEBHOOK,
+                "topic": [state.cfg.storage()],
+                "inbox": "https://inbox.example/in",
+                "expires": expires,
+            });
+            let req = test_store::request(
+                Method::POST,
+                SUBSCRIPTIONS_PATH,
+                &[("content-type", LWS_JSON)],
+                &body.to_string(),
+            );
+            let r = handle(&state, &req, &Agent::anonymous()).await;
+            assert_eq!(r.status(), StatusCode::BAD_REQUEST, "{expires:?}");
+        }
+    }
+
     #[tokio::test]
     async fn a_failed_cancellation_keeps_the_subscription() {
         use std::sync::atomic::Ordering;

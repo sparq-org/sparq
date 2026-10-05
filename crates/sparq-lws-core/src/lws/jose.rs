@@ -69,6 +69,25 @@ impl EcKey {
         }
     }
 
+    /// A new random key whose `kid` is its RFC 7638 thumbprint, so every generated key has its own
+    /// (two keys published side by side, as across a rotation, never share one).
+    pub fn generate_thumbprinted() -> Self {
+        let mut key = Self::generate("");
+        key.kid = key.thumbprint();
+        key
+    }
+
+    /// This key with `kid` in place of its own.
+    pub fn with_kid(mut self, kid: impl Into<String>) -> Self {
+        self.kid = kid.into();
+        self
+    }
+
+    /// The RFC 7638 thumbprint of the public key.
+    pub fn thumbprint(&self) -> String {
+        thumbprint(&public_jwk_of(&self.public_key()))
+    }
+
     /// A key from a private P-256 JWK (`kty EC`, `crv P-256`, with `d`). The JWK's `kid` is kept;
     /// without one the RFC 7638 thumbprint is used.
     pub fn from_jwk(jwk: &str) -> Result<Self, String> {

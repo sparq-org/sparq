@@ -386,20 +386,32 @@ pub fn cid_method_key(
 pub fn parse_datetime(s: &str) -> Option<i64> {
     let s = s.trim();
     let (date, rest) = s.split_once(['T', 't'])?;
+    // Every field must be ASCII digits of a bounded width (so no sign, no overflow on huge years,
+    // and nothing for the arithmetic below to wrap on).
+    let field = |f: &str, min: usize, max: usize| -> Option<i64> {
+        if f.len() < min || f.len() > max || !f.bytes().all(|c| c.is_ascii_digit()) {
+            return None;
+        }
+        f.parse().ok()
+    };
     let mut d = date.splitn(3, '-');
-    let (y, mo, da): (i64, i64, i64) = (
-        d.next()?.parse().ok()?,
-        d.next()?.parse().ok()?,
-        d.next()?.parse().ok()?,
+    let (y, mo, da) = (
+        field(d.next()?, 4, 4)?,
+        field(d.next()?, 2, 2)?,
+        field(d.next()?, 2, 2)?,
     );
     let zone_at = rest.find(['Z', 'z', '+', '-']).unwrap_or(rest.len());
     let (time, zone) = rest.split_at(zone_at);
-    let time = time.split('.').next()?;
+    let mut time = time.splitn(2, '.');
+    let (time, frac) = (time.next()?, time.next());
+    if frac.is_some_and(|f| f.is_empty() || !f.bytes().all(|c| c.is_ascii_digit())) {
+        return None;
+    }
     let mut t = time.splitn(3, ':');
-    let (h, mi, se): (i64, i64, i64) = (
-        t.next()?.parse().ok()?,
-        t.next()?.parse().ok()?,
-        t.next()?.parse().ok()?,
+    let (h, mi, se) = (
+        field(t.next()?, 2, 2)?,
+        field(t.next()?, 2, 2)?,
+        field(t.next()?, 2, 2)?,
     );
     if !(1..=12).contains(&mo) || !(1..=31).contains(&da) || h > 24 || mi > 59 || se > 60 {
         return None;
@@ -407,9 +419,17 @@ pub fn parse_datetime(s: &str) -> Option<i64> {
     let offset = match zone {
         "" | "Z" | "z" => 0,
         z => {
-            let sign = if z.starts_with('-') { -1 } else { 1 };
-            let (oh, om) = z[1..].split_once(':')?;
-            sign * (oh.parse::<i64>().ok()? * 3600 + om.parse::<i64>().ok()? * 60)
+            let sign = match z.as_bytes().first() {
+                Some(b'-') => -1,
+                Some(b'+') => 1,
+                _ => return None,
+            };
+            let (oh, om) = z.get(1..)?.split_once(':')?;
+            let (oh, om) = (field(oh, 2, 2)?, field(om, 2, 2)?);
+            if oh > 23 || om > 59 {
+                return None;
+            }
+            sign * (oh * 3600 + om * 60)
         }
     };
     // Days from the civil date (Howard Hinnant's algorithm).
@@ -1163,6 +1183,18 @@ mod tests {
             Some(951_868_800)
         );
         assert_eq!(parse_datetime("yesterday"), None);
+        // Malformed (non-ASCII, signed, oversized) fields are `None`, never a panic or overflow.
+        for bad in [
+            "2000-03-01T00:00:00+0\u{e9}:00",
+            "2000-03-01T00:00:00Zjunk",
+            "2000-03-01T00:00:00.Z",
+            "2000-+3-01T00:00:00Z",
+            "99999999999999999999-03-01T00:00:00Z",
+            "9223372036854775807-03-01T00:00:00Z",
+            "2000-03-01T00:00:00+05",
+        ] {
+            assert_eq!(parse_datetime(bad), None, "{bad:?}");
+        }
     }
 
     #[test]

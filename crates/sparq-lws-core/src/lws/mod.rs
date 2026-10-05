@@ -122,7 +122,7 @@ impl LwsConfig {
             owner: None,
             open: false,
             page_size: 100,
-            as_key: jose::EcKey::generate("lws-as-1"),
+            as_key: jose::EcKey::generate_thumbprinted(),
             as_previous_key: None,
             notify_key: jose::EcKey::generate("notify-key"),
             token_ttl_secs: 300,
@@ -189,37 +189,26 @@ impl LwsConfig {
         };
         // A key file that does not exist yet is created with a fresh key, so a deployment keeps its
         // keys across restarts by naming a path once.
-        let key = |k: &str, kid: &str| -> Result<Option<jose::EcKey>, String> {
-            let Some(path) = var(k) else { return Ok(None) };
-            match std::fs::read_to_string(&path) {
-                Ok(jwk) => jose::EcKey::from_jwk(&jwk)
+        let key = |k: &str, kid: Option<&str>| -> Result<Option<jose::EcKey>, String> {
+            match var(k) {
+                Some(path) => key_file(&path, kid)
                     .map(Some)
                     .map_err(|e| format!("{k}: {e}")),
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                    let fresh = jose::EcKey::generate(kid);
-                    write_private(&path, &fresh.private_jwk().to_string())
-                        .map_err(|e| format!("{k}: cannot write {path}: {e}"))?;
-                    Ok(Some(fresh))
-                }
-                Err(e) => Err(format!("{k}: cannot read {path}: {e}")),
+                None => Ok(None),
             }
         };
-        if let Some(k) = key("SOLID_SERVER_LWS_AS_KEY_FILE", "lws-as-1")? {
+        // A generated access-token key's kid is its thumbprint, so the fresh key of a rotation
+        // never collides with the one it replaced.
+        if let Some(k) = key("SOLID_SERVER_LWS_AS_KEY_FILE", None)? {
             cfg.as_key = k;
         }
         if let Some(jwk) = read("SOLID_SERVER_LWS_AS_PREVIOUS_KEY_FILE")? {
-            let previous = jose::VerifyKey::from_jwk(&jwk)
+            let (current, previous) = rotated_as_keys(cfg.as_key.clone(), &jwk)
                 .map_err(|e| format!("SOLID_SERVER_LWS_AS_PREVIOUS_KEY_FILE: {e}"))?;
-            if previous.kid() == cfg.as_key.kid() {
-                return Err(
-                    "SOLID_SERVER_LWS_AS_PREVIOUS_KEY_FILE: its kid is the current key's; give the \
-                     rotated keys distinct kids"
-                        .into(),
-                );
-            }
+            cfg.as_key = current;
             cfg.as_previous_key = Some(previous);
         }
-        if let Some(k) = key("SOLID_SERVER_LWS_NOTIFY_KEY_FILE", "notify-key")? {
+        if let Some(k) = key("SOLID_SERVER_LWS_NOTIFY_KEY_FILE", Some("notify-key"))? {
             cfg.notify_key = k;
         }
         if let Some(idps) = read("SOLID_SERVER_LWS_SAML_IDPS_FILE")? {
@@ -302,6 +291,50 @@ pub fn public_addrs(
         .into_iter()
         .filter(|a| !subject_tokens::is_forbidden_ip(a.ip()))
         .collect()
+}
+
+/// The private key in the JWK file at `path`; when there is no file yet, a fresh key written there,
+/// its kid `kid` or, without one, its thumbprint.
+fn key_file(path: &str, kid: Option<&str>) -> Result<jose::EcKey, String> {
+    match std::fs::read_to_string(path) {
+        Ok(jwk) => jose::EcKey::from_jwk(&jwk),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            let fresh = match kid {
+                Some(kid) => jose::EcKey::generate(kid),
+                None => jose::EcKey::generate_thumbprinted(),
+            };
+            write_private(path, &fresh.private_jwk().to_string())
+                .map_err(|e| format!("cannot write {path}: {e}"))?;
+            Ok(fresh)
+        }
+        Err(e) => Err(format!("cannot read {path}: {e}")),
+    }
+}
+
+/// The access-token signing key and the key it replaced (the JWK `previous_jwk`), with distinct
+/// kids. Both were generated with the one fixed kid `lws-as-1` before generated keys were named by
+/// their thumbprints, so a rotation of such keys can meet two keys with one kid: the current key
+/// then goes by its thumbprint, and the previous key keeps the kid the tokens it signed name, so
+/// they verify until they expire. The same key named as both is refused, as is a previous key whose
+/// kid is the current key's thumbprint (no kid then tells the two apart).
+fn rotated_as_keys(
+    current: jose::EcKey,
+    previous_jwk: &str,
+) -> Result<(jose::EcKey, jose::VerifyKey), String> {
+    let previous = jose::VerifyKey::from_jwk(previous_jwk)?;
+    if previous.public_key() == current.public_key() {
+        return Err("it is the current key; rotate to a new key".into());
+    }
+    let current = if previous.kid() == current.kid() {
+        let thumbprint = current.thumbprint();
+        current.with_kid(thumbprint)
+    } else {
+        current
+    };
+    if previous.kid() == current.kid() {
+        return Err("its kid is the current key's; give the rotated keys distinct kids".into());
+    }
+    Ok((current, previous))
 }
 
 /// Write a private key file readable by its owner only.
@@ -964,6 +997,10 @@ pub(crate) mod test_store {
     pub struct FlakyStore {
         inner: Arc<CompositeStore<InMemorySparqClient, InMemoryBlobStore>>,
         pub fail_delete: Arc<AtomicBool>,
+        /// `exists` fails with a backend error.
+        pub fail_exists: Arc<AtomicBool>,
+        /// `exists` reports this IRI absent, as if it was checked just before the IRI appeared.
+        pub hide: Arc<std::sync::Mutex<Option<String>>>,
     }
 
     impl FlakyStore {
@@ -974,6 +1011,8 @@ pub(crate) mod test_store {
                     InMemoryBlobStore::default(),
                 )),
                 fail_delete: Arc::new(AtomicBool::new(false)),
+                fail_exists: Arc::new(AtomicBool::new(false)),
+                hide: Default::default(),
             }
         }
     }
@@ -987,6 +1026,12 @@ pub(crate) mod test_store {
             self.inner.meta(iri).await
         }
         async fn exists(&self, iri: &str) -> ServerResult<bool> {
+            if self.fail_exists.load(Ordering::SeqCst) {
+                return Err(ServerError::Storage("disk on fire".into()));
+            }
+            if self.hide.lock().unwrap().as_deref() == Some(iri) {
+                return Ok(false);
+            }
             self.inner.exists(iri).await
         }
         async fn write(&self, iri: &str, body: Bytes, ct: &str) -> ServerResult<ResourceMeta> {
@@ -1279,7 +1324,45 @@ mod tests {
             .iter()
             .map(|k| k["kid"].as_str().unwrap().to_string())
             .collect();
-        assert_eq!(kids, vec!["lws-as-1".to_string(), "old".to_string()]);
+        assert_eq!(kids, vec![cfg.as_key.kid().to_string(), "old".to_string()]);
+    }
+
+    /// Review finding: every generated access-token key was `lws-as-1`, so the documented rotation
+    /// (the old file as the previous key, a fresh file as the current one) met two keys with one
+    /// kid and refused to start.
+    #[test]
+    fn rotating_generated_keys_gives_distinct_kids() {
+        let dir = std::env::temp_dir().join(format!("lws-keys-{}", jose::random_id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = |n: &str| dir.join(n).to_string_lossy().into_owned();
+        let old = key_file(&path("as.jwk"), None).unwrap();
+        assert_eq!(old.kid(), old.thumbprint());
+        // Restarting keeps the key and its kid.
+        assert_eq!(key_file(&path("as.jwk"), None).unwrap().kid(), old.kid());
+        // Rotate: the old file becomes the previous key, a new path the current one.
+        std::fs::rename(path("as.jwk"), path("as-previous.jwk")).unwrap();
+        let new = key_file(&path("as-new.jwk"), None).unwrap();
+        assert_ne!(new.kid(), old.kid());
+        let previous = std::fs::read_to_string(path("as-previous.jwk")).unwrap();
+        let (current, prev) = rotated_as_keys(new.clone(), &previous).unwrap();
+        assert_eq!(current.kid(), new.kid());
+        assert_eq!(prev.kid(), old.kid());
+        std::fs::remove_dir_all(&dir).unwrap();
+
+        // Two keys generated before, both `lws-as-1`: the current one goes by its thumbprint and
+        // the previous one keeps the kid its tokens name.
+        let legacy_old = jose::EcKey::generate("lws-as-1");
+        let legacy_new = jose::EcKey::generate("lws-as-1");
+        let (current, prev) =
+            rotated_as_keys(legacy_new.clone(), &legacy_old.private_jwk().to_string()).unwrap();
+        assert_eq!(current.kid(), legacy_new.thumbprint());
+        assert_eq!(prev.kid(), "lws-as-1");
+        // The same key as both is still refused, as is a previous key claiming the current
+        // key's thumbprint.
+        assert!(rotated_as_keys(legacy_new.clone(), &legacy_new.public_jwk().to_string()).is_err());
+        let fresh = jose::EcKey::generate_thumbprinted();
+        let squatter = jose::EcKey::generate(fresh.kid());
+        assert!(rotated_as_keys(fresh, &squatter.public_jwk().to_string()).is_err());
     }
 
     #[test]
