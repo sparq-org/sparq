@@ -3570,6 +3570,11 @@ fn try_topk_orderby_indexed(
     if patterns.iter().any(has_intra_triple_repeated_var) {
         return Ok(None);
     }
+    // `prepare_pattern` resolves a triple term as a ground term, so a variable nested
+    // inside one would error instead of matching; decline and let the evaluator run it.
+    if patterns.iter().any(has_quoted_triple_term) {
+        return Ok(None);
+    }
     // Out of scope for this first cut: blank nodes are treated as synthetic
     // variables by `prepare_pattern` (`bnode_var`) but not necessarily by
     // `collect_vars`'s header-construction — decline rather than risk a header

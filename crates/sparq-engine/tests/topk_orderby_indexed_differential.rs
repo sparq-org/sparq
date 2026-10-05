@@ -623,3 +623,15 @@ fn fast_path_actually_engages_not_just_correct() {
     assert_eq!(!explained.contains("BGP [binary GOO]"), supported,
                "indexed engagement must match the built permutations:\n{explained}");
 }
+
+// A probe whose object is a triple term with nested variables must decline, not
+// resolve the triple term as ground and error.
+#[test]
+fn variable_bearing_triple_term_probe_declines() {
+    let ttl = "<urn:s> <urn:p> 1 ; <urn:q> <<( <urn:a> <urn:r> 2 )>> .";
+    let graph = Graph::load_str(ttl, "turtle").unwrap();
+    let text = "SELECT ?s ?x WHERE { ?s <urn:p> ?p ; <urn:q> <<( ?x <urn:r> ?y )>> } ORDER BY ?p";
+    let full = query(&graph, text).unwrap();
+    assert_eq!(full.rows.len(), 1);
+    assert_eq!(query(&graph, &format!("{text} LIMIT 1")).unwrap().rows, full.rows);
+}
