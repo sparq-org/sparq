@@ -69,8 +69,8 @@
   Working draft. It reports implemented relations, and test and proof evidence at exact source
   commits that a second internal evidence inspection re-checked. It claims no proven security,
   privacy or integrity property for any implementation, and no component has had an external
-  cryptographic review. Only one proof checks issuer signatures inside the proved relation, for a
-  single synthetic case. All timing figures are indicative development measurements.
+  cryptographic review. Only one exact-answer proof checks conventional issuer signatures inside the
+  proved relation, for a single synthetic case. All timing figures are indicative development measurements.
 ]]
 
 #heading(level: 2, numbering: none, outlined: false)[Abstract]
@@ -271,7 +271,8 @@ data. Monotonicity does not protect exact claims: that a repayment appears exact
 count is two, that no payment was returned, or that a payment is the latest. Which guarantee a
 verifier needs therefore depends on how it will use the answer, not only on the shape of the
 query. A lender who only needs to know that some repayment of at least a given amount exists can
-accept a supported answer to the repayments query; a lender who sums them cannot. We offer the
+accept a supported answer to the `DISTINCT` form of the repayments query; a lender who sums them
+cannot. We offer the
 supported mode only for positive patterns with set (`DISTINCT`) results, where additional records
 cannot invalidate a row, and we require the exact mode whenever the verifier relies on a
 multiplicity, an absence, an aggregate, a negation or an ordering.
@@ -357,7 +358,7 @@ its stored contract before it accepts and consumes its challenge.
     One proof per presentation. The contract travels from verifier to holder; the proof and
     result travel back. Authentication, the queried data, evaluation and the request binding are
     inside the proof; acceptance policy, the anchor and challenge consumption are outside it. Only
-    one prototype receipt so far has step 1 inside the proof (§#ref(<v5-evidence>, supplement:
+    one exact-answer receipt so far has step 1 inside the proof (§#ref(<v5-evidence>, supplement:
     none)).
   ],
 ) <fig-architecture>
@@ -694,7 +695,8 @@ controls attached to this receipt behaved as the frozen test asserts, each subst
 refused before the challenge was consumed (Appendix #ref(<v5-detail>, supplement: none)). The run
 was a validation, not a benchmark, and we report no timing for it.
 
-This is the only proof in which issuer signatures are checked inside the proved relation. It
+This is the only exact-answer proof in which conventional credential signatures are checked inside
+the proved relation. It
 illustrates complete bag semantics over authenticated input; it is not a repayments application.
 The same relation and adapter implement holder-declared, `ASK`, `CONSTRUCT` and row-bound cases,
 which native and direct tests exercise, but none of them has a genuine receipt, so the registry
