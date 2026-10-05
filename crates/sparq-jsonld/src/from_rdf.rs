@@ -21,8 +21,9 @@
 //!   intact where the W3C suite has no case: a cell referenced from a *different*
 //!   graph stays put (the REC's walk follows the global referenced-once map across
 //!   graphs, moving the cell's triples into the referencing graph), and so does a
-//!   cell that also names a graph or is the object of `rdf:type` (the REC does not
-//!   count those uses, so collapsing the cell would lose them).
+//!   cell that also names a graph, is the object of `rdf:type`, or appears in more
+//!   than one graph (the REC does not count those uses, so collapsing the cell would
+//!   lose or split them).
 //! * **`useNativeTypes` / `useRdfType`** — native JSON scalar coercion for
 //!   `xsd:boolean`/`xsd:integer`/`xsd:double` (invalid or non-finite lexical forms
 //!   honestly stay typed strings), and `rdf:type`-as-property instead of `@type`.
@@ -463,6 +464,24 @@ pub fn from_rdf(dataset: &[RdfQuad], options: &FromRdfOptions) -> Result<Json, J
                 }
             },
             _ => {}
+        }
+    }
+
+    // A blank node with a node entry in more than one graph is one node across those
+    // graphs, so collapsing it in one would split it (see `mark_shared`).
+    if graphs.len() > 1 {
+        let mut first_graph: FxMap<&str, &str> = FxMap::default();
+        let mut spanning: Vec<String> = Vec::new();
+        for (graph_key, subjects) in &graphs {
+            for id in subjects.keys().filter(|id| id.starts_with("_:")) {
+                let seen = *first_graph.entry(id).or_insert(graph_key);
+                if seen != graph_key.as_str() {
+                    spanning.push(id.clone());
+                }
+            }
+        }
+        for id in spanning {
+            mark_shared(&mut referenced_once, &id);
         }
     }
 

@@ -124,6 +124,14 @@ pub fn compact_expanded(
             obj.set(&ctx.ciri("@graph", None, true, false), Json::Arr(items));
             obj
         }
+        // A root context with `@propagate: false` applies to the top-level node it is
+        // embedded in, but the node was compacted under the reverted context, so a lone
+        // node keeps the @graph envelope that puts it one level below the context.
+        Json::Obj(members) if ctx.active.previous_context.is_some() && !members.is_empty() => {
+            let mut obj = Json::obj();
+            obj.set(&ctx.ciri("@graph", None, true, false), Json::Arr(vec![Json::Obj(members)]));
+            obj
+        }
         other => other,
     };
 
@@ -463,50 +471,7 @@ fn compact_element(
         return Ok(element.clone());
     };
 
-    // steps 4-5: context adjustments. `owned` carries a replacement context when the
-    // previous-context reversion or a property-scoped context applies.
-    let mut owned: Option<Rc<Ctx>> = None;
-
-    // step 4: non-propagated (type-scoped) contexts do not apply when processing a new
-    // node object — revert to the previous context unless element is a value object or
-    // a lone node reference.
-    if let Some(prev) = &ctx.active.previous_context {
-        let single_id = members.len() == 1 && members[0].0 == "@id";
-        if element.get("@value").is_none() && !single_id {
-            owned = Some(env.derived(DerivedKey::Revert(Arc::clone(prev)), || {
-                Ok((**prev).clone())
-            })?);
-        }
-    }
-
-    // step 5: apply the active property's property-scoped context, if any. The term
-    // LOOKUP runs against the INCOMING (pre-reversion) context — a term defined by the
-    // parent's type-scoped context still carries its property-scoped context into the
-    // child node (W3C compact/c013) — while the application folds onto the (possibly
-    // reverted) context from step 4, mirroring the reference implementations.
-    if let Some(ap) = active_property {
-        if let Some(def) = ctx.active.term_definition(ap) {
-            if let Some(local) = def.context() {
-                let base: &Ctx = owned.as_deref().unwrap_or(ctx);
-                let key = DerivedKey::Scoped {
-                    lookup: ctx,
-                    base,
-                    term: ap.to_string(),
-                    type_scoped: false,
-                };
-                owned = Some(env.derived(key, || {
-                    base.active.process_scoped(
-                        local,
-                        def.base_url.as_deref(),
-                        true, // override protected
-                        true, // propagate
-                        env.loader,
-                        env.options,
-                    )
-                })?);
-            }
-        }
-    }
+    let owned = node_ctx(ctx, active_property, element, env)?;
     let cur: &Ctx = owned.as_deref().unwrap_or(ctx);
 
     // step 6: value objects / node references — Value Compaction. Return the result when
@@ -849,6 +814,60 @@ fn compact_graph_item(
     Ok(())
 }
 
+/// Steps 4–5: the context a node object `element` under `active_property` is compacted
+/// in, when it differs from `ctx` (previous-context reversion or a property-scoped
+/// context).
+fn node_ctx(
+    ctx: &Ctx,
+    active_property: Option<&str>,
+    element: &Json,
+    env: &Env,
+) -> Result<Option<Rc<Ctx>>, JsonLdError> {
+    let mut owned: Option<Rc<Ctx>> = None;
+
+    // step 4: non-propagated (type-scoped) contexts do not apply when processing a new
+    // node object — revert to the previous context unless element is a value object or
+    // a lone node reference.
+    if let Some(prev) = &ctx.active.previous_context {
+        let single_id = matches!(element, Json::Obj(m) if m.len() == 1 && m[0].0 == "@id");
+        if element.get("@value").is_none() && !single_id {
+            owned = Some(env.derived(DerivedKey::Revert(Arc::clone(prev)), || {
+                Ok((**prev).clone())
+            })?);
+        }
+    }
+
+    // step 5: apply the active property's property-scoped context, if any. The term
+    // LOOKUP runs against the INCOMING (pre-reversion) context — a term defined by the
+    // parent's type-scoped context still carries its property-scoped context into the
+    // child node (W3C compact/c013) — while the application folds onto the (possibly
+    // reverted) context from step 4, mirroring the reference implementations.
+    if let Some(ap) = active_property {
+        if let Some(def) = ctx.active.term_definition(ap) {
+            if let Some(local) = def.context() {
+                let base: &Ctx = owned.as_deref().unwrap_or(ctx);
+                let key = DerivedKey::Scoped {
+                    lookup: ctx,
+                    base,
+                    term: ap.to_string(),
+                    type_scoped: false,
+                };
+                owned = Some(env.derived(key, || {
+                    base.active.process_scoped(
+                        local,
+                        def.base_url.as_deref(),
+                        true, // override protected
+                        true, // propagate
+                        env.loader,
+                        env.options,
+                    )
+                })?);
+            }
+        }
+    }
+    Ok(owned)
+}
+
 /// Step 12.8.9 — add one compacted item into a `@language` / `@index` / `@id` / `@type`
 /// container map under its map key.
 #[allow(clippy::too_many_arguments)]
@@ -862,8 +881,6 @@ fn add_to_container_map(
     as_array: bool,
     env: &Env,
 ) -> Result<(), JsonLdError> {
-    // 12.8.9.2: the container key (the alias of the container keyword).
-    let mut container_key = cur.ciri(kind, None, true, false);
     // 12.8.9.3: a property-valued index uses the term's index mapping instead of @index.
     let index_key = cur
         .active
@@ -889,7 +906,7 @@ fn add_to_container_map(
     } else if kind == "@index" {
         // 12.8.9.6: property-valued index maps — the key is the first value of the
         // (compacted) index property; remaining values stay on the property.
-        container_key = cur.ciri(&index_key, None, true, false);
+        let container_key = cur.ciri(&index_key, None, true, false);
         if let Some(taken) = take_entry(&mut compacted_item, &container_key) {
             let mut vals = match taken {
                 Json::Arr(a) => a,
@@ -919,7 +936,12 @@ fn add_to_container_map(
             compacted_item = compact_element(cur, Some(iap), &rest, env)?;
         }
     } else if kind == "@type" {
-        // 12.8.9.8: type maps key on the first compacted type; remaining types stay.
+        // 12.8.9.8: type maps key on the first compacted type; remaining types stay. The
+        // spec names the entry by this context's @type alias, but the item was compacted
+        // under the term's scoped context, which may alias @type differently and reuse
+        // this alias for data, so the alias is taken from that context.
+        let item_ctx = node_ctx(cur, Some(iap), item, env)?;
+        let container_key = item_ctx.as_deref().unwrap_or(cur).ciri("@type", None, true, false);
         if let Some(taken) = take_entry(&mut compacted_item, &container_key) {
             let mut vals = match taken {
                 Json::Arr(a) => a,

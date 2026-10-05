@@ -3859,6 +3859,18 @@ ex:bob
         );
     }
 
+    /// Distinct blank nodes across the dataset (graph names and every graph's terms).
+    fn blank_count(g: &Graph) -> usize {
+        let mut v: Vec<String> = g.named.iter().map(|(n, _)| n.to_string()).collect();
+        for graph in std::iter::once(g).chain(g.named.iter().map(|(_, ng)| ng)) {
+            v.extend(nt_sorted(graph).iter().flat_map(|t| t.split(' ').map(str::to_string)));
+        }
+        v.retain(|t| t.starts_with("_:"));
+        v.sort();
+        v.dedup();
+        v.len()
+    }
+
     /// Per-graph triple counts, keyed by graph name (`""` for the default graph).
     fn graph_counts(g: &Graph) -> Vec<(String, usize)> {
         let mut v = vec![(String::new(), g.iter_ids().count())];
@@ -3911,21 +3923,7 @@ ex:bob
             let (doc, g1) = compact_then_reload(&g0, r#"{"@vocab":"http://ex/"}"#);
             assert_eq!(graph_counts(&g0), graph_counts(&g1), "{doc}");
             // The cell is one node in both uses: as many distinct blank nodes come back.
-            let blanks = |g: &Graph| {
-                let mut v: Vec<String> = g
-                    .named
-                    .iter()
-                    .map(|(n, _)| n.to_string())
-                    .chain(nt_sorted(g).into_iter().flat_map(|t| {
-                        t.split(' ').map(str::to_string).collect::<Vec<_>>()
-                    }))
-                    .filter(|t| t.starts_with("_:"))
-                    .collect();
-                v.sort();
-                v.dedup();
-                v.len()
-            };
-            assert_eq!(blanks(&g0), blanks(&g1), "{doc}");
+            assert_eq!(blank_count(&g0), blank_count(&g1), "{doc}");
         }
     }
 
@@ -3971,6 +3969,56 @@ ex:bob
         let framed = graph_to_jsonld_framed(&g0, &frame);
         let g1 = Graph::load_dataset(&framed, "jsonld").expect("framed output parses");
         assert_eq!(nt_sorted(&g0), nt_sorted(&g1), "{framed}");
+    }
+
+    // A list cell that is also a subject in another graph stays one node.
+    #[test]
+    fn compact_keeps_cells_spanning_graphs() {
+        let g0 = Graph::load_dataset(
+            r#"@prefix ex: <http://ex/> .
+               @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+               ex:s ex:p _:h .
+               _:h rdf:first "A" ; rdf:rest _:t ; ex:extra "x" .
+               _:t rdf:first "B" ; rdf:rest rdf:nil .
+               ex:g { _:t ex:q "Y" . }"#,
+            "trig",
+        )
+        .unwrap();
+        let (doc, g1) = compact_then_reload(&g0, r#"{"@vocab":"http://ex/"}"#);
+        assert_eq!(graph_counts(&g0), graph_counts(&g1), "{doc}");
+        assert_eq!(blank_count(&g0), blank_count(&g1), "{doc}");
+    }
+
+    // A root context with `@propagate: false` still applies to a lone top-level node.
+    #[test]
+    fn compact_keeps_non_propagated_root_context_semantics() {
+        let g0 = Graph::load_str(r#"<http://ex/s> <http://ex/p> "x" ."#, "turtle").unwrap();
+        assert_compact_iso(&g0, r#"{"@propagate":false,"@language":"en"}"#);
+    }
+
+    // A `@type` map whose scoped context re-aliases `@type`, and reuses the outer alias
+    // for a data property, keeps that property and adds no type.
+    #[test]
+    fn frame_type_map_under_scoped_alias_keeps_data() {
+        let g0 = Graph::load_str(
+            r#"<http://ex/a> <http://ex/p> <http://ex/b> .
+               <http://ex/b> a <http://ex/T> ; <http://ex/data> "kept" ."#,
+            "turtle",
+        )
+        .unwrap();
+        let frame = parse_context_json(
+            r#"{"@context":{"type":"@type","p":{"@id":"http://ex/p","@container":"@type",
+                "@context":{"type":"http://ex/data","kind":"@type"}}},"@id":"http://ex/a"}"#,
+        )
+        .unwrap();
+        let framed = graph_to_jsonld_framed(&g0, &frame);
+        // Under `p`'s scoped context `type` is ex:data; the map key carries the type.
+        // (oxjsonld's streaming reader rejects type maps whose entries start with @id,
+        // so the shape is pinned instead of reloaded.)
+        assert!(
+            framed.contains(r#""p":{"http://ex/T":{"@id":"http://ex/b","type":"kept"}}"#),
+            "{framed}"
+        );
     }
 
     // A predicate whose @vocab suffix has a colon keeps its full IRI.
