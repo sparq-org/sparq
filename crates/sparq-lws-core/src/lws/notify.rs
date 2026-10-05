@@ -23,7 +23,8 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::net::IpAddr;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, RwLock, Weak};
 use std::time::Duration;
 
 use axum::http::{header, Method, StatusCode};
@@ -51,6 +52,43 @@ const DELIVERY_ATTEMPTS: u32 = 3;
 const RETRY_DELAY: Duration = Duration::from_secs(1);
 /// Consecutive failed deliveries before a subscription is deactivated.
 const MAX_DELIVERY_FAILURES: u32 = 5;
+
+/// Bounds on outgoing webhook deliveries, so many subscriptions times many changes cannot exhaust
+/// sockets or memory.
+///
+/// A delivery is admitted while fewer than `queue` are waiting or in flight; past that it is
+/// dropped (and logged), which counts toward no subscription's failures. At most `workers` are in
+/// flight at once, and at most `per_inbox` to any one inbox origin (scheme, host and port, so
+/// many paths on one host share a limit). A delivery waits for its inbox's turn before it takes a
+/// worker, so a slow inbox holds back only its own deliveries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DeliveryLimits {
+    /// Deliveries waiting or in flight (`SOLID_SERVER_LWS_DELIVERY_QUEUE`, default 1024).
+    pub queue: usize,
+    /// Deliveries in flight (`SOLID_SERVER_LWS_DELIVERY_WORKERS`, default 16).
+    pub workers: usize,
+    /// Deliveries in flight to one inbox origin (`SOLID_SERVER_LWS_DELIVERY_PER_INBOX`, default 2).
+    pub per_inbox: usize,
+}
+
+impl Default for DeliveryLimits {
+    fn default() -> Self {
+        Self {
+            queue: 1024,
+            workers: 16,
+            per_inbox: 2,
+        }
+    }
+}
+
+/// One admitted delivery: its place in the queue, given back when it is dropped.
+struct Admitted(Arc<AtomicUsize>);
+
+impl Drop for Admitted {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
 
 /// The components every delivery signature covers (lws10-notifications-webhook, "Signature
 /// Requirements").
@@ -136,6 +174,15 @@ pub struct Notifier {
     /// The delivery client: no redirects, no proxy, and (unless insecure fetches are allowed) a
     /// resolver that refuses non-public addresses.
     client: reqwest::Client,
+    limits: DeliveryLimits,
+    /// Deliveries admitted and not yet finished.
+    admitted: Arc<AtomicUsize>,
+    /// Deliveries dropped because the queue was full.
+    dropped: AtomicU64,
+    /// The worker pool: one permit per delivery in flight.
+    workers: Arc<tokio::sync::Semaphore>,
+    /// Per inbox origin, its own limit (dropped once no delivery holds it).
+    inboxes: Mutex<HashMap<String, Weak<tokio::sync::Semaphore>>>,
 }
 
 fn new_etag() -> String {
@@ -202,6 +249,11 @@ impl Notifier {
             failures: Mutex::new(HashMap::new()),
             etag: RwLock::new(new_etag()),
             client,
+            limits: cfg.delivery,
+            admitted: Arc::new(AtomicUsize::new(0)),
+            dropped: AtomicU64::new(0),
+            workers: Arc::new(tokio::sync::Semaphore::new(cfg.delivery.workers.max(1))),
+            inboxes: Mutex::new(HashMap::new()),
         })
     }
 
@@ -315,11 +367,35 @@ impl Notifier {
         let Some(target) = inbox_url(inbox, state.cfg.allow_insecure_fetch) else {
             return;
         };
+        let Some(admitted) = self.admit() else {
+            let dropped = self.dropped.fetch_add(1, Ordering::SeqCst) + 1;
+            // Logged at the first drop and then at each power of two, so a flood cannot flood the
+            // log too.
+            if dropped.is_power_of_two() {
+                eprintln!(
+                    "lws: webhook delivery queue full ({} waiting or in flight); dropped a \
+                     notification to {target} ({dropped} dropped so far)",
+                    self.limits.queue
+                );
+            }
+            return;
+        };
+        let inbox_slot = self.inbox_slot(&target);
+        let workers = self.workers.clone();
         let body = Bytes::from(envelope(&state.cfg.storage(), activity).to_string());
         let keyid = format!("{}#{}", state.cfg.storage(), state.cfg.notify_key.kid());
         let state = state.clone();
         let subscription = subscription.map(str::to_string);
         tokio::spawn(async move {
+            let _admitted = admitted;
+            // The inbox's turn first, then a worker: a delivery waiting on a busy inbox holds no
+            // worker.
+            let Ok(_inbox) = inbox_slot.acquire_owned().await else {
+                return;
+            };
+            let Ok(_worker) = workers.acquire_owned().await else {
+                return;
+            };
             let status = attempt_delivery(&state, &target, &body, &keyid).await;
             let Some(id) = subscription else { return };
             let notifier = &state.notify;
@@ -339,6 +415,39 @@ impl Notifier {
                 let _ = notifier.remove(&state, &id).await;
             }
         });
+    }
+}
+
+impl Notifier {
+    /// A place in the delivery queue, or `None` when it is full.
+    fn admit(&self) -> Option<Admitted> {
+        let limit = self.limits.queue;
+        self.admitted
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
+                (n < limit).then_some(n + 1)
+            })
+            .ok()
+            .map(|_| Admitted(self.admitted.clone()))
+    }
+
+    /// The limit shared by every delivery to `target`'s origin.
+    fn inbox_slot(&self, target: &url::Url) -> Arc<tokio::sync::Semaphore> {
+        let origin = target.origin().ascii_serialization();
+        let mut map = self.inboxes.lock().expect("lock");
+        if map.len() > 1024 {
+            map.retain(|_, w| w.strong_count() > 0);
+        }
+        if let Some(s) = map.get(&origin).and_then(Weak::upgrade) {
+            return s;
+        }
+        let s = Arc::new(tokio::sync::Semaphore::new(self.limits.per_inbox.max(1)));
+        map.insert(origin, Arc::downgrade(&s));
+        s
+    }
+
+    /// Deliveries dropped because the queue was full.
+    pub fn dropped(&self) -> u64 {
+        self.dropped.load(Ordering::SeqCst)
     }
 }
 
@@ -920,6 +1029,76 @@ mod tests {
             let r = handle(&state, &req, &Agent::anonymous()).await;
             assert_eq!(r.status(), StatusCode::BAD_REQUEST, "{expires:?}");
         }
+    }
+
+    /// Review finding: every delivery was its own unbounded task. Deliveries are now admitted to
+    /// a bounded queue (the rest dropped and counted), run on a fixed worker pool, and limited
+    /// per inbox origin.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn deliveries_are_bounded() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let (now, peak, total) = (
+            Arc::new(AtomicUsize::new(0)),
+            Arc::new(AtomicUsize::new(0)),
+            Arc::new(AtomicUsize::new(0)),
+        );
+        let app = {
+            let (now, peak, total) = (now.clone(), peak.clone(), total.clone());
+            axum::Router::new().route(
+                "/inbox",
+                axum::routing::post(move || {
+                    let (now, peak, total) = (now.clone(), peak.clone(), total.clone());
+                    async move {
+                        let n = now.fetch_add(1, Ordering::SeqCst) + 1;
+                        peak.fetch_max(n, Ordering::SeqCst);
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                        now.fetch_sub(1, Ordering::SeqCst);
+                        total.fetch_add(1, Ordering::SeqCst);
+                        StatusCode::NO_CONTENT
+                    }
+                }),
+            )
+        };
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.ok() });
+        let mut cfg = LwsConfig::new("http://localhost:3000");
+        cfg.open = true;
+        cfg.allow_insecure_fetch = true;
+        cfg.delivery = DeliveryLimits {
+            queue: 4,
+            workers: 8,
+            per_inbox: 2,
+        };
+        let state = LwsState::new(test_store::FlakyStore::new(), cfg)
+            .await
+            .unwrap();
+        let inbox = format!("http://{addr}/inbox");
+        for _ in 0..20 {
+            state
+                .notify
+                .deliver(&state, &inbox, json!({"type": ["Update"]}), None);
+        }
+        assert_eq!(state.notify.dropped(), 16);
+        for _ in 0..100 {
+            if total.load(Ordering::SeqCst) >= 4 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert_eq!(total.load(Ordering::SeqCst), 4);
+        assert!(peak.load(Ordering::SeqCst) <= 2, "{peak:?}");
+        // Places are given back: once the queue drains, deliveries are admitted again.
+        for _ in 0..100 {
+            if state.notify.admitted.load(Ordering::SeqCst) == 0 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        state
+            .notify
+            .deliver(&state, &inbox, json!({"type": ["Update"]}), None);
+        assert_eq!(state.notify.dropped(), 16);
     }
 
     #[tokio::test]

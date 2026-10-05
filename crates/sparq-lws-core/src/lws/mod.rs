@@ -112,6 +112,8 @@ pub struct LwsConfig {
     /// buffered further. The server-wide ceiling (`SOLID_SERVER_MAX_BODY_BYTES`, see
     /// [`crate::body_limit`]), the same one the Solid surface enforces.
     pub max_body: usize,
+    /// Bounds on outgoing webhook deliveries (see [`notify::DeliveryLimits`]).
+    pub delivery: notify::DeliveryLimits,
 }
 
 impl LwsConfig {
@@ -129,6 +131,7 @@ impl LwsConfig {
             allow_insecure_fetch: false,
             saml_idps: BTreeMap::new(),
             max_body: crate::body_limit::DEFAULT_MAX_BODY_BYTES,
+            delivery: notify::DeliveryLimits::default(),
         }
     }
 
@@ -137,6 +140,9 @@ impl LwsConfig {
     /// - `SOLID_SERVER_LWS_OPEN=1` (or `SOLID_SERVER_OPEN_MODE=1`): no authentication (development
     ///   only);
     /// - `SOLID_SERVER_LWS_PAGE_SIZE`: members per container page (default 100);
+    /// - `SOLID_SERVER_LWS_DELIVERY_QUEUE`, `SOLID_SERVER_LWS_DELIVERY_WORKERS`,
+    ///   `SOLID_SERVER_LWS_DELIVERY_PER_INBOX`: webhook delivery bounds (see
+    ///   [`notify::DeliveryLimits`]);
     /// - `SOLID_SERVER_LWS_AS_KEY_FILE`: a private P-256 JWK that signs access tokens, created
     ///   with a fresh key when the file does not exist (default: a fresh key per boot, so tokens do
     ///   not survive a restart);
@@ -172,6 +178,25 @@ impl LwsConfig {
                 .filter(|n| *n > 0)
                 .ok_or("SOLID_SERVER_LWS_PAGE_SIZE must be a positive integer")?;
         }
+        let positive = |k: &str, into: &mut usize| -> Result<(), String> {
+            if let Some(n) = var(k) {
+                *into = n
+                    .parse()
+                    .ok()
+                    .filter(|n| *n > 0)
+                    .ok_or(format!("{k} must be a positive integer"))?;
+            }
+            Ok(())
+        };
+        positive("SOLID_SERVER_LWS_DELIVERY_QUEUE", &mut cfg.delivery.queue)?;
+        positive(
+            "SOLID_SERVER_LWS_DELIVERY_WORKERS",
+            &mut cfg.delivery.workers,
+        )?;
+        positive(
+            "SOLID_SERVER_LWS_DELIVERY_PER_INBOX",
+            &mut cfg.delivery.per_inbox,
+        )?;
         if let Some(n) = var("SOLID_SERVER_LWS_TOKEN_TTL_SECS") {
             cfg.token_ttl_secs = n
                 .parse()
@@ -393,6 +418,12 @@ pub struct ResourceMeta {
     /// For a container: changes whenever its membership or a member changes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
+    /// A write of the resource's content and metadata is under way, or failed part way: the
+    /// content may not be the one this metadata describes, so only the owner and the creator
+    /// (whose access rests on neither) may act on it until a write completes (see
+    /// `resources::write_with_meta`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub pending: bool,
 }
 
 /// The store key of a resource's LWS metadata, which is also its linkset's URI (the draft's own
@@ -1001,6 +1032,9 @@ pub(crate) mod test_store {
         pub fail_delete_of: Arc<std::sync::Mutex<Option<String>>>,
         /// `write` of this IRI alone fails with a backend error.
         pub fail_write_of: Arc<std::sync::Mutex<Option<String>>>,
+        /// When set, how many more writes succeed; every write past them fails, as in a store
+        /// with a bounded number of blob slots.
+        pub write_budget: Arc<std::sync::Mutex<Option<usize>>>,
         /// `exists` fails with a backend error.
         pub fail_exists: Arc<AtomicBool>,
         /// `exists` reports this IRI absent, as if it was checked just before the IRI appeared.
@@ -1018,6 +1052,7 @@ pub(crate) mod test_store {
                 fail_exists: Arc::new(AtomicBool::new(false)),
                 fail_delete_of: Default::default(),
                 fail_write_of: Default::default(),
+                write_budget: Default::default(),
                 hide: Default::default(),
             }
         }
@@ -1043,6 +1078,12 @@ pub(crate) mod test_store {
         async fn write(&self, iri: &str, body: Bytes, ct: &str) -> ServerResult<ResourceMeta> {
             if self.fail_write_of.lock().unwrap().as_deref() == Some(iri) {
                 return Err(ServerError::Storage("disk on fire".into()));
+            }
+            if let Some(left) = self.write_budget.lock().unwrap().as_mut() {
+                if *left == 0 {
+                    return Err(ServerError::InsufficientStorage);
+                }
+                *left -= 1;
             }
             self.inner.write(iri, body, ct).await
         }

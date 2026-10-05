@@ -1259,32 +1259,73 @@ async fn stored_meta<S: Store + 'static>(
     }
 }
 
-/// Write new content for `uri` and, with `meta` = `(new, old)`, its new metadata, so that a failure
-/// never leaves the new content under the old metadata (which carries the types and creator
-/// authorization rests on). The metadata goes first: when it cannot be written nothing changed;
-/// when the content then cannot be written, the old metadata is put back. Run under the
-/// resource's lock, so no reader sees the step in between.
+/// Write new content for `uri` and, with `meta` = `(new, old)`, its new metadata, such that a
+/// failure (or the request being dropped) never leaves content visible under metadata that does
+/// not describe it: the types (and the creator) in the metadata are what grants rest on, so new
+/// content under old types, or old content under new ones, could reach readers neither state
+/// admits.
+///
+/// - Metadata unchanged: one content write, which lands whole or not at all.
+/// - Metadata changed: three writes. The old metadata marked `pending` first (when that fails,
+///   nothing changed); then the content; then the new metadata, which clears the mark. When the
+///   content write fails the old metadata is put back. Whenever a step after the first fails,
+///   rollback included, the `pending` mark stays and the resource fails closed: only its owner
+///   and creator may act on it (see [`access::allowed`](super::access::allowed)) until a write
+///   completes.
+///
+/// The writes run in a task of their own that holds the resource's lock (`guard`, handed back
+/// when they are done), so a client that goes away mid-way cancels neither the writes nor the
+/// rollback, and nobody sees the steps in between.
 async fn write_with_meta<S: Store + 'static>(
     state: &LwsState<S>,
+    guard: IriGuard,
     uri: &str,
     body: Bytes,
     content_type: &str,
-    meta: Option<(&ResourceMeta, Option<&ResourceMeta>)>,
-) -> Result<crate::store::sparq::ResourceMeta, ServerError> {
-    if let Some((new, _)) = meta {
-        state.put_resource_meta(uri, new).await?;
-    }
-    match state.store.write(uri, body, content_type).await {
-        Ok(m) => Ok(m),
-        Err(e) => {
-            if let Some((_, old)) = meta {
-                let _ = match old {
-                    Some(old) => state.put_resource_meta(uri, old).await,
-                    None => state.store.delete(&meta_key(uri), None).await,
-                };
-            }
-            Err(e)
+    meta: Option<(ResourceMeta, Option<ResourceMeta>)>,
+) -> (
+    Result<crate::store::sparq::ResourceMeta, ServerError>,
+    Option<IriGuard>,
+) {
+    let changed = meta
+        .map(|(mut new, old)| {
+            new.pending = false;
+            (new, old)
+        })
+        .filter(|(new, old)| old.clone().unwrap_or_default() != *new);
+    let Some((new, old)) = changed else {
+        let written = state.store.write(uri, body, content_type).await;
+        return (written, Some(guard));
+    };
+    let (state, uri, content_type) = (state.clone(), uri.to_string(), content_type.to_string());
+    let task = tokio::spawn(async move {
+        let outcome = async {
+            let mut closed = old.clone().unwrap_or_default();
+            closed.pending = true;
+            state.put_resource_meta(&uri, &closed).await?;
+            let written = match state.store.write(&uri, body, &content_type).await {
+                Ok(m) => m,
+                Err(e) => {
+                    // A failed rollback leaves the mark: fail closed.
+                    let _ = match &old {
+                        Some(old) => state.put_resource_meta(&uri, old).await,
+                        None => state.store.delete(&meta_key(&uri), None).await,
+                    };
+                    return Err(e);
+                }
+            };
+            state.put_resource_meta(&uri, &new).await?;
+            Ok(written)
         }
+        .await;
+        (outcome, guard)
+    });
+    match task.await {
+        Ok((outcome, guard)) => (outcome, Some(guard)),
+        Err(e) => (
+            Err(ServerError::Storage(format!("the write failed: {e}"))),
+            None,
+        ),
     }
 }
 
@@ -1294,7 +1335,7 @@ async fn update<S: Store + 'static>(
     agent: &Agent,
     uri: &str,
 ) -> Response {
-    let _guard = state.locks.lock(uri).await;
+    let guard = state.locks.lock(uri).await;
     let meta = match current(state, uri).await {
         Ok(m) => m,
         Err(r) => return r,
@@ -1356,15 +1397,16 @@ async fn update<S: Store + 'static>(
         }
     }
     rmeta.types = types;
-    let written = match write_with_meta(
+    let (written, _guard) = write_with_meta(
         state,
+        guard,
         uri,
         req.body.clone(),
         &content_type,
-        Some((&rmeta, old_rmeta.as_ref())),
+        Some((rmeta, old_rmeta)),
     )
-    .await
-    {
+    .await;
+    let written = match written {
         Ok(m) => m,
         Err(e) => return store_error(e),
     };
@@ -1804,7 +1846,7 @@ async fn patch<S: Store + 'static>(
     agent: &Agent,
     uri: &str,
 ) -> Response {
-    let _guard = state.locks.lock(uri).await;
+    let guard = state.locks.lock(uri).await;
     let meta = match current(state, uri).await {
         Ok(m) => m,
         Err(r) => return r,
@@ -1892,15 +1934,16 @@ async fn patch<S: Store + 'static>(
     } else {
         None
     };
-    let written = match write_with_meta(
+    let (written, _guard) = write_with_meta(
         state,
+        guard,
         uri,
         Bytes::from(serde_json::to_vec(&patched).unwrap_or_default()),
         &ct,
-        metas.as_ref().map(|(new, old)| (new, old.as_ref())),
+        metas,
     )
-    .await
-    {
+    .await;
+    let written = match written {
         Ok(m) => m,
         Err(e) => return store_error(e),
     };
@@ -1944,13 +1987,22 @@ async fn delete<S: Store + 'static>(
         Ok(m) => m,
         Err(r) => return r,
     };
-    let etag = if uri.ends_with('/') {
-        None
-    } else {
-        Some(quoted(&meta.etag))
-    };
-    if req.headers.contains_key(header::IF_MATCH) && uri.ends_with('/') {
-        // A container's tag is its listing's; compute it the way a read does.
+    // The validators the preconditions are evaluated against (RFC 9110 section 13): a data
+    // resource's own; a container's are its listing's, computed the way a read computes them,
+    // under the subtree locks, whenever the request is conditional at all.
+    let conditional = [
+        header::IF_MATCH,
+        header::IF_NONE_MATCH,
+        header::IF_UNMODIFIED_SINCE,
+    ]
+    .iter()
+    .any(|h| req.headers.contains_key(h));
+    let (etag, modified) = if !uri.ends_with('/') {
+        (
+            Some(quoted(&meta.etag)),
+            meta.last_modified.map(|t| to_secs(epoch_ms(t))),
+        )
+    } else if conditional {
         let listing = read_container(
             state,
             &LwsRequest {
@@ -1964,22 +2016,26 @@ async fn delete<S: Store + 'static>(
             &meta,
         )
         .await;
-        let tag = listing
-            .headers()
-            .get(header::ETAG)
-            .and_then(|v| v.to_str().ok())
-            .map(str::to_string);
-        if let Precondition::Failed | Precondition::NotModified =
-            evaluate(&req.headers, tag.as_deref(), None, false)
-        {
-            return problem(StatusCode::PRECONDITION_FAILED, None);
+        if !listing.status().is_success() {
+            return listing;
         }
-    } else if let Precondition::Failed | Precondition::NotModified = evaluate(
-        &req.headers,
-        etag.as_deref(),
-        meta.last_modified.map(|t| to_secs(epoch_ms(t))),
-        false,
-    ) {
+        let h = |n: header::HeaderName| {
+            listing
+                .headers()
+                .get(n)
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_string)
+        };
+        (
+            h(header::ETAG),
+            parse_http_date(h(header::LAST_MODIFIED).as_deref()),
+        )
+    } else {
+        (None, None)
+    };
+    if let Precondition::Failed | Precondition::NotModified =
+        evaluate(&req.headers, etag.as_deref(), modified, false)
+    {
         return problem(StatusCode::PRECONDITION_FAILED, None);
     }
     if uri.ends_with('/') && doomed.len() > 1 {
@@ -3989,5 +4045,181 @@ mod tests {
             .unwrap()
             .to_ascii_lowercase()
             .ends_with(META_SUFFIX));
+    }
+
+    /// Review finding: the metadata was written before the content and a failed rollback was
+    /// ignored. With one write left in a bounded store, a `Prefer: set-linkset` adding a type a
+    /// public grant covers landed its metadata, the content write and the rollback both failed,
+    /// and the old private content became public. Now the resource fails closed instead.
+    #[tokio::test]
+    async fn a_write_that_fails_part_way_fails_closed() {
+        use super::super::test_store::{request as req, FlakyStore};
+        use super::super::FOAF_AGENT;
+        let mut cfg = super::super::LwsConfig::new("http://localhost:3000");
+        cfg.owner = Some("https://owner.example/#me".into());
+        let store = FlakyStore::new();
+        let st = LwsState::new(store.clone(), cfg).await.expect("state");
+        let owner = agent("https://owner.example/#me");
+        let stranger = agent("https://stranger.example/#me");
+        let public = "https://e.example/Public";
+        // Everyone may read what has the public type.
+        let grant = json!({
+            "@context": ["https://www.w3.org/ns/lws/v1"],
+            "type": ["AccessGrant"],
+            "storage": st.cfg.storage(),
+            "access": [{"type": ["AccessPolicy"], "action": ["read"], "assignee": FOAF_AGENT,
+                "constraint": [{"leftOperand": "type", "operator": "eq", "rightOperand": public}]}],
+        });
+        let r = super::super::access::handle(
+            &st,
+            &req(
+                Method::POST,
+                GRANTS_PATH,
+                &[("content-type", LWS_JSON)],
+                &grant.to_string(),
+            ),
+            &owner,
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let base = st.cfg.absolute("");
+        let make = |slug: &'static str| {
+            let st = st.clone();
+            let owner = owner.clone();
+            async move {
+                let h = [("slug", slug), ("content-type", "text/plain")];
+                let r = create(
+                    &st,
+                    &req(Method::POST, "/", &h, "private"),
+                    &owner,
+                    &st.cfg.storage(),
+                )
+                .await;
+                assert_eq!(r.status(), StatusCode::CREATED);
+                hdr(&r, "location")
+            }
+        };
+        let link = format!("<{public}>; rel=\"type\"");
+        let put = |uri: &str| {
+            req(
+                Method::PUT,
+                uri.strip_prefix(base.as_str()).unwrap(),
+                &[
+                    ("content-type", "text/plain"),
+                    ("prefer", "set-linkset"),
+                    ("link", &link),
+                ],
+                "now public",
+            )
+        };
+        let get = |uri: &str| {
+            req(
+                Method::GET,
+                uri.strip_prefix(base.as_str()).unwrap(),
+                &[],
+                "",
+            )
+        };
+        // The control: once the write lands, the stranger reads the new content.
+        let open = make("open.txt").await;
+        assert_eq!(
+            handle(&st, &get(&open), &stranger).await.status(),
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            handle(&st, &put(&open), &owner).await.status(),
+            StatusCode::NO_CONTENT
+        );
+        let r = handle(&st, &get(&open), &stranger).await;
+        assert_eq!(r.status(), StatusCode::OK);
+        assert_eq!(body_of(r).await, Bytes::from("now public"));
+        // One write left: the first metadata write lands, the content write and the rollback fail.
+        let secret = make("secret.txt").await;
+        *store.write_budget.lock().unwrap() = Some(1);
+        let r = handle(&st, &put(&secret), &owner).await;
+        assert!(r.status().is_server_error(), "{}", r.status());
+        *store.write_budget.lock().unwrap() = None;
+        assert_eq!(
+            st.store.read(&secret).await.unwrap().body,
+            Bytes::from("private")
+        );
+        // Whatever the metadata now says, the old content is not public.
+        let r = handle(&st, &get(&secret), &stranger).await;
+        assert_eq!(r.status(), StatusCode::FORBIDDEN);
+        // The owner still may, and a completed write clears the mark.
+        assert_eq!(
+            handle(&st, &get(&secret), &owner).await.status(),
+            StatusCode::OK
+        );
+        assert_eq!(
+            handle(&st, &put(&secret), &owner).await.status(),
+            StatusCode::NO_CONTENT
+        );
+        assert!(!st.resource_meta(&secret).await.pending);
+        assert_eq!(
+            handle(&st, &get(&secret), &stranger).await.status(),
+            StatusCode::OK
+        );
+    }
+
+    /// Review finding: a conditional DELETE of a container computed the listing's tag only for
+    /// If-Match; If-Unmodified-Since used the stored body's time and `If-None-Match: *` let the
+    /// delete of an existing container through.
+    #[tokio::test]
+    async fn conditional_container_deletes_use_the_listing_validators() {
+        let st = state().await;
+        let c = hdr(
+            &call(
+                &st,
+                "POST",
+                "/",
+                &[("slug", "c"), ("link", CONTAINER_LINK)],
+                "",
+            )
+            .await,
+            "location",
+        );
+        let created = http_date(to_secs(now_ms()));
+        tokio::time::sleep(Duration::from_millis(1100)).await;
+        let r = call(
+            &st,
+            "POST",
+            path_of(&c),
+            &[("slug", "m"), ("content-type", "text/plain")],
+            "x",
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let p = path_of(&c);
+        let del = |h: &[(&str, &str)]| {
+            let mut h = h.to_vec();
+            h.push(("depth", "infinity"));
+            super::super::route(&st, request("DELETE", p, &h, ""))
+        };
+        assert_eq!(
+            del(&[("if-none-match", "*")]).await.status(),
+            StatusCode::PRECONDITION_FAILED
+        );
+        // The listing changed after `created` (a member arrived), though the stored body did not.
+        assert_eq!(
+            del(&[("if-unmodified-since", &created)]).await.status(),
+            StatusCode::PRECONDITION_FAILED
+        );
+        let listing = call(&st, "GET", p, &[("accept", LWS_JSON)], "").await;
+        let (tag, modified) = (hdr(&listing, "etag"), hdr(&listing, "last-modified"));
+        assert_eq!(
+            del(&[("if-none-match", &tag)]).await.status(),
+            StatusCode::PRECONDITION_FAILED
+        );
+        assert_eq!(
+            del(&[("if-match", "\"other\"")]).await.status(),
+            StatusCode::PRECONDITION_FAILED
+        );
+        assert_eq!(
+            del(&[("if-match", &tag), ("if-unmodified-since", &modified)])
+                .await
+                .status(),
+            StatusCode::NO_CONTENT
+        );
     }
 }

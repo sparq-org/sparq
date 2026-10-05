@@ -432,6 +432,11 @@ pub async fn allowed<S: Store + 'static>(
     if subject.is_some() && subject == meta.creator.as_deref() {
         return true;
     }
+    // Content and metadata may not match (a write failed part way): fail closed for every
+    // grant, whose constraints rest on the types and format.
+    if meta.pending {
+        return false;
+    }
     let candidates: Vec<Policy> = state
         .access
         .grant_policies()
