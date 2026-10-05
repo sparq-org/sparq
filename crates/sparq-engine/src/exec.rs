@@ -16001,39 +16001,41 @@ fn datetime_field(v: &Value, idx: usize) -> Value {
 /// the local time per SPARQL); seconds keeps any fractional part.
 fn parse_datetime(s: &str) -> Option<[f64; 6]> {
     // One validation boundary also serves the graph's temporal cache and
-    // comparison fast paths. Component extraction below preserves local time.
+    // comparison fast paths. Component extraction below preserves local time
+    // and reads fixed-width digits the validator has already checked.
     ExactTimeline::parse_datetime(s)?;
     let (date, time) = s.split_once('T')?;
     let neg = date.starts_with('-');
-    let mut d = date.strip_prefix('-').unwrap_or(date).split('-');
-    let year_lex = d.next()?;
-    let year: f64 = year_lex.parse().ok()?;
-    let mut year = if neg { -year } else { year };
-    let mut month: f64 = d.next()?.parse().ok()?;
-    let mut day: f64 = d.next()?.parse().ok()?;
+    let date = date.strip_prefix('-').unwrap_or(date);
+    let (year_lex, month_day) = date.split_at(date.len().checked_sub(6)?);
+    let two = |b: &[u8]| i64::from(b[0] - b'0') * 10 + i64::from(b[1] - b'0');
+    let (md, tb) = (month_day.as_bytes(), time.as_bytes());
+    let mut year: i64 = year_lex.parse().ok()?;
+    if neg {
+        year = -year;
+    }
+    let (mut month, mut day) = (two(&md[1..3]), two(&md[4..6]));
+    let (mut hours, minutes) = (two(&tb[0..2]), two(&tb[3..5]));
     // Strip the timezone (Z, or +hh:mm / -hh:mm after the seconds — the time part itself has no '-').
-    let time = if let Some(i) = time.find(['Z', '+', '-']) { &time[..i] } else { time };
-    let mut t = time.split(':');
-    let mut hours: f64 = t.next()?.parse().ok()?;
-    let minutes: f64 = t.next()?.parse().ok()?;
-    let seconds: f64 = t.next()?.parse().ok()?;
+    let seconds_lex = &time[6..time.find(['Z', '+', '-']).unwrap_or(time.len())];
+    let seconds: f64 = seconds_lex.parse().ok()?;
     // XPath component extraction uses the value: 24:00 is next-day midnight.
     // Reuse the shared calendar validator for month length and leap years.
-    if hours == 24.0 {
-        hours = 0.0;
-        day += 1.0;
-        let next_date = format!("{}{}-{:02}-{:02}", if neg { "-" } else { "" }, year_lex, month as u32, day as u32);
+    if hours == 24 {
+        hours = 0;
+        day += 1;
+        let next_date = format!("{}{}-{:02}-{:02}", if neg { "-" } else { "" }, year_lex, month, day);
         if sparq_core::temporal::parse_civil_date(&next_date).is_none() {
-            day = 1.0;
-            month += 1.0;
-            if month == 13.0 {
-                month = 1.0;
-                year += 1.0;
-                if year == 0.0 { year = 1.0; } // XSD 1.0 has no year zero.
+            day = 1;
+            month += 1;
+            if month == 13 {
+                month = 1;
+                year += 1;
+                if year == 0 { year = 1; } // XSD 1.0 has no year zero.
             }
         }
     }
-    Some([year, month, day, hours, minutes, seconds])
+    Some([year as f64, month as f64, day as f64, hours as f64, minutes as f64, seconds])
 }
 
 fn value_str(v: &Value) -> Option<String> {

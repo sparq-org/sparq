@@ -247,3 +247,26 @@ fn pushed_down_temporal_filters_match_the_exact_comparison() {
     }
     assert!(selected > 0, "the corpus must exercise the comparisons");
 }
+
+#[test]
+fn datetime_accessors_read_validated_components() {
+    let graph = Graph::load_str("", "ntriples").unwrap();
+    for (lexical, expected) in [
+        ("-0044-03-15T12:30:05.250+01:00", ["-44", "3", "15", "12", "30", "5.250"]),
+        ("2023-12-31T24:00:00Z", ["2024", "1", "1", "0", "0", "0"]),
+        ("123456-02-28T07:08:09", ["123456", "2", "28", "7", "8", "9"]),
+    ] {
+        let query = format!(
+            "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (YEAR(?d) AS ?y) (MONTH(?d) AS ?mo) (DAY(?d) AS ?da) (HOURS(?d) AS ?h) (MINUTES(?d) AS ?mi) (SECONDS(?d) AS ?s) {{ BIND(\"{lexical}\"^^xsd:dateTime AS ?d) }}"
+        );
+        let result = sparq_engine::query(&graph, &query).unwrap();
+        let actual: Vec<String> = result.rows[0]
+            .iter()
+            .map(|term| match term.as_ref().unwrap() {
+                oxrdf::Term::Literal(literal) => literal.value().to_string(),
+                other => other.to_string(),
+            })
+            .collect();
+        assert_eq!(actual, expected, "{lexical}");
+    }
+}
