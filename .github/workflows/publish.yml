@@ -398,19 +398,20 @@ jobs:
         run: |
           rustup default stable
           rustup show active-toolchain
-      # Package every publishable crate (publish = false crates are skipped by the loop).
-      # --no-verify avoids a full from-scratch compile of every crate on the runner; the bytes
-      # are identical to `cargo publish`'s upload (publish runs verify itself). We package each
-      # publishable crate individually so every failure is reported before the job fails closed.
+      # Package the crates.io publish set exactly as `cargo publish` would upload it:
+      # scripts/publish-strip.py first removes the research-only optional feature edges
+      # (and makes the vendored `sparq-spargebra` fork a member, so the set resolves before
+      # anything exists on crates.io); then one `cargo package --workspace` packages every
+      # publishable member in dependency order against a local overlay of the others.
+      # --no-verify skips the rebuild-from-tarball (publish runs verify itself); the bytes are
+      # identical to `cargo publish`'s upload. --allow-dirty because the strip edits manifests.
       - name: Package publishable crates
         run: |
           set -euo pipefail
-          mkdir -p crate-pkgs
-          packaged=0
-          failures=()
+          python3 -m pip install --quiet --require-hashes -r .github/requirements/publish-strip.txt
+          python3 scripts/publish-strip.py --with-vendored
           # Ask Cargo which workspace packages are publishable. In metadata,
-          # `publish = false` is represented as an empty registry list; parsing TOML
-          # with grep would drift on whitespace or alternate valid syntax. [GPT-5.6]
+          # `publish = false` is represented as an empty registry list. [GPT-5.6]
           mapfile -t packages < <(
             cargo metadata --no-deps --format-version 1 |
               jq -r '.packages[] | select(.publish != []) | .name' |
@@ -421,25 +422,13 @@ jobs:
             echo "::error::Cargo metadata reported no publishable crates"
             exit 1
           fi
+          cargo package --workspace --no-verify --allow-dirty
+          mkdir -p crate-pkgs
           for pkg in "${packages[@]}"; do
-            echo "::group::cargo package -p $pkg"
-            # --no-verify: skip the rebuild-from-extracted-tarball check (CI already builds/tests
-            # the workspace); --allow-dirty is unnecessary on a clean checkout. [GPT-5.6]
-            # Continue through the set to expose every bad package, then fail if any is missing.
-            if cargo package -p "$pkg" --no-verify --locked 2>&1; then
-              find target/package -maxdepth 1 -name "${pkg}-*.crate" -exec cp {} crate-pkgs/ \;
-              packaged=$((packaged + 1))
-            else
-              echo "::error::cargo package failed for $pkg"
-              failures+=("$pkg")
-            fi
-            echo "::endgroup::"
+            find target/package -maxdepth 1 -name "${pkg}-[0-9]*.crate" -exec cp {} crate-pkgs/ \;
           done
-          echo "Packaged crates:"; ls -l crate-pkgs/ || true
-          if [ "${#failures[@]}" -ne 0 ]; then
-            echo "::error::${#failures[@]} of ${expected} publishable crates failed to package: ${failures[*]}"
-            exit 1
-          fi
+          echo "Packaged crates:"; ls -l crate-pkgs/
+          packaged=$(find crate-pkgs -name '*.crate' | wc -l)
           if [ "$packaged" -ne "$expected" ]; then
             echo "::error::packaged count ${packaged} does not match expected count ${expected}"
             exit 1
